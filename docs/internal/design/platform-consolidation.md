@@ -1,11 +1,37 @@
 # Platform consolidation: a product-agnostic engine + DSL-bundle products
 
-**Status:** proposed — gated on spike [#2473](https://github.com/znasllc-io/memql/issues/2473) · **Epic:** [#2472](https://github.com/znasllc-io/memql/issues/2472) · **Issue:** [#2474](https://github.com/znasllc-io/memql/issues/2474)
+**Status:** accepted — validated by spike [#2473](https://github.com/znasllc-io/memql/issues/2473) (2026-07-08) · **Epic:** [#2472](https://github.com/znasllc-io/memql/issues/2472) · **Issue:** [#2474](https://github.com/znasllc-io/memql/issues/2474)
 
 This ADR records the target architecture the owner decided on 2026-07-08 to
-collapse the per-product complexity of the memQL ecosystem. It is **proposed**:
-the load-bearing assumption (runtime DSL delivery on the AI nodes) is validated
-by spike #2473 before this flips to *accepted* or drives a revision.
+collapse the per-product complexity of the memQL ecosystem. The load-bearing
+assumption — that a mesh node with **no compiled-in product DSL**, loading it at
+boot from `MEMQL_DSL_PATH`, routes and runs a turn identically to a
+statically-linked node — was **validated by spike #2473** on the live local
+cluster (single-node and 2-replica), so this is now **accepted**. See the spike
+for the go/no-go note, the runtime-mount mechanism, and the pure-DSL vs
+needs-product-Go boundary mapped against the reference product's constructs.
+
+### Spike outcome (what the platform work must carry forward)
+
+- **Runtime delivery reuses the existing `dsl.RegisterTree` overlay** — the plain
+  engine loaded the full reference-product bundle from a runtime volume with zero
+  skipped constructs, and a bad bundle fails loud under the strict-boot gate. The
+  only new code is a boot hook that mounts each `MEMQL_DSL_PATH/<domain>` via
+  `RegisterTree(os.DirFS(...))` *before the first `dsl.Tree()` walk*. Today the
+  `component/memql/dslfs` `MEMQL_DSL_PATH` override is per-construct-type and is
+  **not** wired into the real load path (`unified_loader.go` walks `dsl.Tree()`);
+  the engine-platform step must add the per-domain boot mount.
+- **The AI critical path invokes zero product-Go executors.** Its one pack
+  dependency is the agent-reply *prompt DSL* (pure-DSL, core provider), which
+  runtime delivery supplies. Every product-Go integration the product DSL
+  references (chat / daily-space / avatar / training) is **call-time only** and
+  off the basic route+turn path — clean "absorb into the engine" work (Decision 2),
+  no blocker.
+- **Guardrail:** an unregistered `integration.*` executor is silent at load and
+  invisible to strict-boot; it errors only at call time. A *partial* Go absorption
+  will boot green and fail on the un-absorbed tool. The platform must either absorb
+  all referenced integrations or add a boot completeness check mapping every
+  mounted-pack `@executor("integration.*")` to a registered integration.
 
 ## Context — what feels too complicated today
 
@@ -129,9 +155,9 @@ product-neutral).
 
 ## Migration sequence (gated on the spike)
 
-1. **Spike (#2473):** prove runtime DSL on the AI nodes (single-node + 2-replica);
-   document the pure-DSL vs needs-product-Go boundary against the reference product's
-   constructs. **Gates the rest.**
+1. **Spike (#2473): DONE — validated 2026-07-08.** Runtime DSL proved on the AI
+   nodes (single-node + 2-replica); the pure-DSL vs needs-product-Go boundary is
+   documented against the reference product's constructs. Gated the rest; gate open.
 2. **Engine platform:** ship every node type as a product-agnostic image (re-add
    `bff`); wire the init-container/bundle mechanism into `deploy/k8s/base`; make
    the mesh load runtime DSL, fail-loud on a bad bundle.
