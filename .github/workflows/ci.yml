@@ -122,7 +122,7 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
-          go-version: '1.26.4'
+          go-version: '1.26.5'
           cache: true
 
       # --- pure-Go lanes (go bucket) -- build first to warm the cache ---
@@ -226,7 +226,7 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
-          go-version: '1.26.4'
+          go-version: '1.26.5'
           cache: true
       - name: install libopus + soxr dev headers
         run: |
@@ -272,7 +272,7 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
-          go-version: '1.26.4'
+          go-version: '1.26.5'
           cache: true
       - name: go build -tags ${{ matrix.tag }}
         run: go build -tags ${{ matrix.tag }} ./...
@@ -338,7 +338,7 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
-          go-version: '1.26.4'
+          go-version: '1.26.5'
           cache: true
       # Create the extensions the migrations expect (mirrors docker/init-db.sql,
       # which a service container can't mount). The suite migrates the rest.
@@ -393,7 +393,7 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
-          go-version: '1.26.4'
+          go-version: '1.26.5'
           cache: true
       # Create the extensions the migrations expect (mirrors docker/init-db.sql,
       # which a service container can't mount). The suite migrates the rest.
