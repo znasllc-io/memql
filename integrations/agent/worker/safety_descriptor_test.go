@@ -87,7 +87,7 @@ func TestBuildSafetyDescriptor_HTTPFetch(t *testing.T) {
 func TestBuildSafetyDescriptor_ComputerUseV2Actions(t *testing.T) {
 	// The v2 workerComputer additions (cockpit #166) have no typed
 	// safety payload, so they ride the default branch like the
-	// pre-existing gui input actions: embodied surface, verbatim
+	// pre-existing computer-use input actions: embodied surface, verbatim
 	// action name, args preserved for the recorder.
 	cases := []struct {
 		action string
@@ -102,7 +102,7 @@ func TestBuildSafetyDescriptor_ComputerUseV2Actions(t *testing.T) {
 	}
 	for _, tc := range cases {
 		req := Request{Tool: "workerComputer", Action: tc.action, Args: tc.args}
-		got := buildSafetyDescriptor(req, "full", "GUI")
+		got := buildSafetyDescriptor(req, "full", "COMPUTERUSE")
 		if got.Surface != safety.SurfaceComputerUseEmbodied {
 			t.Errorf("%s: surface=%q, want embodied", tc.action, got.Surface)
 		}
@@ -132,7 +132,7 @@ func TestComputerUseV2Actions_RuleLayerEscalates(t *testing.T) {
 		req := Request{Tool: "workerComputer", Action: action, Args: map[string]any{
 			"key": "shift", "x": 1, "y": 2,
 		}}
-		desc := buildSafetyDescriptor(req, "full", "GUI")
+		desc := buildSafetyDescriptor(req, "full", "COMPUTERUSE")
 		_, err := rc.Classify(context.Background(), desc)
 		if !errors.Is(err, safety.ErrNoClassifierOpinion) {
 			t.Errorf("%s: expected rule-layer escalation, got err=%v", action, err)

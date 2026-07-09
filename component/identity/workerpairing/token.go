@@ -1,7 +1,7 @@
 // Package workerpairing implements short-lived pairing codes for
 // the computer-use enrollment flow. The product's Settings -> Computer
 // Use card mints a code (XXXX-XXXX, 8 chars from Crockford's Base32)
-// and the user pastes it into `memql-cockpit-gui worker pair <code>`
+// and the user pastes it into `memql-cockpit-computeruse worker pair <code>`
 // on their machine. The cockpit redeems the code via a gRPC stream
 // authenticated with `Authorization: Pair <code>`, and gets back a
 // plain `mql_wkr_<...>` worker token + cluster URL.

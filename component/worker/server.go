@@ -19,11 +19,11 @@ import (
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 )
 
-// CapabilityHeadless and CapabilityGUI are the two predefined
-// capability names. HEADLESS is mandatory; GUI is optional.
+// CapabilityHeadless and CapabilityComputerUse are the two predefined
+// capability names. HEADLESS is mandatory; COMPUTERUSE is optional.
 const (
-	CapabilityHeadless = "HEADLESS"
-	CapabilityGUI      = "GUI"
+	CapabilityHeadless    = "HEADLESS"
+	CapabilityComputerUse = "COMPUTERUSE"
 )
 
 // server implements memqlv1.WorkerServiceServer. It owns the
@@ -535,9 +535,9 @@ func (s *streamSession) send(msg *memqlv1.WorkerServerMessage) error {
 // -----------------------------------------------------------------------------
 
 // validateRegister checks the Register payload and decodes the
-// optional structured capability descriptor. The HEADLESS/GUI
+// optional structured capability descriptor. The HEADLESS/COMPUTERUSE
 // capability-string contract is unchanged: HEADLESS is mandatory,
-// GUI is the only other admitted string, and scope checks keep
+// COMPUTERUSE is the only other admitted string, and scope checks keep
 // keying off those two names. The descriptor is additive metadata.
 func validateRegister(r *memqlv1.Register) (*CapabilityDescriptor, error) {
 	caps := r.GetCapabilities()
@@ -549,7 +549,7 @@ func validateRegister(r *memqlv1.Register) (*CapabilityDescriptor, error) {
 		if c == CapabilityHeadless {
 			hasHeadless = true
 		}
-		if c != CapabilityHeadless && c != CapabilityGUI {
+		if c != CapabilityHeadless && c != CapabilityComputerUse {
 			return nil, fmt.Errorf("register: unknown capability %q", c)
 		}
 	}

@@ -18,7 +18,7 @@ import (
 // (memql#1330).
 func TestHandleListWorkers_IncludesCapabilityDescriptor(t *testing.T) {
 	desc, err := workerservice.ParseCapabilityDescriptor(
-		`{"platform":"darwin","displayServer":"quartz","guiAvailable":true,"actions":["screenshot","mouse_click"],"schemaVersion":1}`)
+		`{"platform":"darwin","displayServer":"quartz","computerUseAvailable":true,"actions":["screenshot","mouse_click"],"schemaVersion":1}`)
 	if err != nil {
 		t.Fatalf("parse descriptor: %v", err)
 	}
@@ -27,8 +27,8 @@ func TestHandleListWorkers_IncludesCapabilityDescriptor(t *testing.T) {
 	registry.Add(&workerservice.Worker{
 		RegistrationId:       "reg-new",
 		OwnerUserId:          "user-1",
-		Name:                 "gui-build",
-		Capabilities:         []string{workerservice.CapabilityHeadless, workerservice.CapabilityGUI},
+		Name:                 "computeruse-build",
+		Capabilities:         []string{workerservice.CapabilityHeadless, workerservice.CapabilityComputerUse},
 		CapabilityDescriptor: desc,
 	})
 	registry.Add(&workerservice.Worker{
@@ -63,7 +63,7 @@ func TestHandleListWorkers_IncludesCapabilityDescriptor(t *testing.T) {
 	if !ok {
 		t.Fatalf("reg-new missing capabilityDescriptor: %v", byId["reg-new"])
 	}
-	if withDesc["displayServer"] != "quartz" || withDesc["guiAvailable"] != true {
+	if withDesc["displayServer"] != "quartz" || withDesc["computerUseAvailable"] != true {
 		t.Fatalf("unexpected descriptor payload: %v", withDesc)
 	}
 	if withDesc["schemaVersion"] != float64(1) {

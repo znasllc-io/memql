@@ -226,7 +226,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		},
 		{
 			Name:        "dispatchComputer",
-			Description: "Dispatch a workerComputer.<action> call to the caller's GUI-capable worker.",
+			Description: "Dispatch a workerComputer.<action> call to the caller's computer-use-capable worker.",
 			Handler:     i.handleDispatchComputer,
 			ArgsSchema: map[string]string{
 				"action":        "string (required) -- one of capabilities / wait / screenshot / cursor_position / mouse_move / mouse_click / mouse_down / mouse_up / mouse_drag / mouse_scroll / key_type / key_combo / key_hold / display_info / window_list / window_focus",

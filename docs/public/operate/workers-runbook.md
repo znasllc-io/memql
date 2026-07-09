@@ -20,7 +20,7 @@ truth now that the implementation plan has shipped end-to-end.
 A worker is the **user's own machine** running
 `memql-cockpit worker run`. It connects to a memQL cluster via
 `WorkerService.Stream` (gRPC bidi), advertises its capabilities
-(HEADLESS, optionally GUI), and accepts dispatched tool calls
+(HEADLESS, optionally COMPUTERUSE), and accepts dispatched tool calls
 (`workerHost.*`, `workerComputer.*`) from agents acting in
 sessions owned by the same user.
 
@@ -40,19 +40,19 @@ curl -fsSL https://app.example.com/admin/workers/install/install-mac.sh | \
   bash -s -- \
     --token mql_wkr_xxxxxxxxxxxx \
     --cluster https://app.example.com \
-    --gui
+    --computeruse
 ```
 
 The install script:
 
 1. Downloads the appropriate binary
-   (`memql-cockpit-darwin-arm64` or `memql-cockpit-gui-darwin-arm64`).
+   (`memql-cockpit-darwin-arm64` or `memql-cockpit-computeruse-darwin-arm64`).
 2. Writes `~/.memql/worker.yaml` with the token + cluster URL.
 3. Drops a LaunchAgent at
    `~/Library/LaunchAgents/com.znasllc.memql-cockpit-worker.plist`
    and `launchctl load`s it.
 
-The first time you run the GUI variant, macOS will prompt for
+The first time you run the computer-use variant, macOS will prompt for
 **Accessibility** and **Screen Recording** permissions (System
 Settings → Privacy & Security). Approve both, then re-run the
 service:
@@ -67,7 +67,7 @@ opens System Settings to the right pane, and verifies per-binary
 TCC status, run:
 
 ```bash
-./bin/memql-cockpit-gui worker setup
+./bin/memql-cockpit-computeruse worker setup
 ```
 
 The setup flow is a single-panel TUI built on the same
@@ -84,13 +84,13 @@ curl -fsSL https://app.example.com/admin/workers/install/install-linux.sh | \
   bash -s -- \
     --token mql_wkr_xxxxxxxxxxxx \
     --cluster https://app.example.com \
-    --gui
+    --computeruse
 ```
 
 The install script writes a user-systemd unit at
 `~/.config/systemd/user/memql-cockpit-worker.service` and starts
 it. On Wayland the worker registers HEADLESS only; X11 sessions
-get GUI as well.
+get COMPUTERUSE as well.
 
 ---
 
@@ -108,12 +108,12 @@ labels:
   has-blender: true   # operator-defined for label-based routing
 concurrency:
   HEADLESS: 8
-  GUI: 1
+  COMPUTERUSE: 1
 state_dir: ~/.memql/state
 log_level: info
 capabilities:
   - HEADLESS
-  - GUI
+  - COMPUTERUSE
 ```
 
 `~/.memql/policy.yaml` (optional) controls allow/deny for shell,
@@ -261,7 +261,7 @@ restarting the worker — the next reconnect refreshes
 | `denied_by_policy: shell allow list: <cmd>` | Cmd not on policy allowlist                      | Add to `~/.memql/policy.yaml` shell.allow + SIGHUP      |
 | `denied_by_scope`                        | Action exceeds the agent's standing or plan scope    | Either approve elevation on the plan card OR widen the agentAuthorization row |
 | `kill_switch_engaged`                    | User flipped `computerUseEnabled` to false          | Re-enable from the floating widget; resume plans       |
-| `gui_unavailable`                        | Worker is the headless build                         | Reinstall with `--gui`                                  |
+| `computeruse_unavailable`                        | Worker is the headless build                         | Reinstall with `--computeruse`                          |
 | `unsupported_on_platform`                | `window_list` / `window_focus` on a platform without WindowServer hooks | Use macOS or X11 Linux; tracked as known gap below |
 | Process killed mid-exec on Linux         | `RLIMIT_AS` (memory) or `RLIMIT_CPU` cap reached     | Bump `policy.shell.max_memory_mb` / `max_cpu_seconds`   |
 
@@ -300,7 +300,7 @@ All seven phases shipped:
 - [x] Phase 1 — Concepts + WorkerService gRPC foundation
 - [x] Phase 2 — Cockpit `worker` subcommand
 - [x] Phase 3 — Headless tool dispatch + policy engine
-- [x] Phase 4 — GUI build variant + RobotGo-backed `workerComputer.*`
+- [x] Phase 4 — computer-use build variant + RobotGo-backed `workerComputer.*`
 - [x] Phase 5 — Frontend integration (WorkersListPanel + AddWorkerModal + kill-switch widget)
 - [x] Phase 6 — Install scripts + service templates
 - [x] Phase 7 — Hardening:
@@ -310,7 +310,7 @@ All seven phases shipped:
     `MemqlService.Stream`; the AddWorkerModal calls these directly,
     so the plain token never lives outside the gRPC reply).
   - macOS TCC + Linux X11 pre-flight wizard
-    (`memql-cockpit-gui worker setup`).
+    (`memql-cockpit-computeruse worker setup`).
   - Prometheus metrics on `127.0.0.1:9100/metrics`.
   - Per-call rlimits (`RLIMIT_CPU`, `RLIMIT_AS`, `RLIMIT_NOFILE`)
     and optional setuid drop via

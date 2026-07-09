@@ -24,7 +24,7 @@ package memql
 // The two computer-use slugs replaced a single legacy `computer-use`
 // slug on 2026-05-17. Splitting by mode lets the headless slice be
 // served by the workbench backend without dragging the embodied
-// (GUI-only) tools along. Authorization (scope grants, kill switch,
+// (computer-use-only) tools along. Authorization (scope grants, kill switch,
 // knowledge domain) is still unified under the "computer use"
 // concept because both modes act on the user's machine. workbench-use
 // is a sibling, not a child -- it's the safer default for headless
@@ -48,7 +48,7 @@ var workerCrossCuttingNames = []string{
 // to agents that hold `computer-use-headless`: shell / fs / http
 // on the user's machine, plus the cross-cutting trio. Future
 // sandbox capability will parallel this one (same headless verbs,
-// different backend); the embodied slug is the GUI-only sibling.
+// different backend); the embodied slug is the computer-use-only sibling.
 //
 // Keep in sync with the workerHost + canvasPublish tool definitions.
 var WorkerHeadlessCapabilityNames = append(

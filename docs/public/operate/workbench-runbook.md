@@ -28,7 +28,7 @@ Three execution surfaces, in preference order:
    needs a shell or filesystem. Linux, sandboxed, per-Plan.
 3. **Computer-use** -- the user's actual machine. Reserved for
    tasks the workbench cannot do: macOS-only tooling (Xcode,
-   AppleScript), GUI control / screenshots / mouse + keyboard,
+   AppleScript), computer-use control / screenshots / mouse + keyboard,
    files already on the user's computer.
 
 Computer-use has two slugs (`computer_use_headless` and
@@ -113,7 +113,7 @@ chunks in `integrations/knowledge/seed.go`) instruct the agent to:
 
 - Reach for the workbench FIRST for any headless task.
 - Reach for computer-use ONLY when the workbench cannot do the
-  job (macOS-only tools, GUI control, user-local files).
+  job (macOS-only tools, computer-use control, user-local files).
 - Surface a "workbench can't do this -- needs computer use"
   message via `respondToUser` when it hits a Linux/macOS or
   sandbox/host limitation rather than silently retrying.

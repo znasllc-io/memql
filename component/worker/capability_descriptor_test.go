@@ -12,7 +12,7 @@ import (
 
 // validDescriptorJSON mirrors exactly what the cockpit's
 // ComputeCapabilities emits (memql-cockpit#169).
-const validDescriptorJSON = `{"platform":"darwin","displayServer":"quartz","guiAvailable":true,"actions":["screenshot","mouse_move","mouse_click","key_type"],"schemaVersion":1}`
+const validDescriptorJSON = `{"platform":"darwin","displayServer":"quartz","computerUseAvailable":true,"actions":["screenshot","mouse_move","mouse_click","key_type"],"schemaVersion":1}`
 
 func registerMsg(caps []string, descriptorJSON string) *memqlv1.Register {
 	return &memqlv1.Register{
@@ -28,7 +28,7 @@ func TestValidateRegister(t *testing.T) {
 		tooManyActions[i] = "action_" + strings.Repeat("x", 3) + string(rune('a'+i%26)) + string(rune('a'+i/26))
 	}
 	tooManyJSON, _ := json.Marshal(map[string]any{
-		"platform": "linux", "displayServer": "x11", "guiAvailable": true,
+		"platform": "linux", "displayServer": "x11", "computerUseAvailable": true,
 		"actions": tooManyActions, "schemaVersion": 1,
 	})
 
@@ -42,37 +42,37 @@ func TestValidateRegister(t *testing.T) {
 		// Forward compatibility: old-style registrations (no
 		// descriptor) keep working exactly as before.
 		{name: "headless only no descriptor", caps: []string{"HEADLESS"}},
-		{name: "headless plus gui no descriptor", caps: []string{"HEADLESS", "GUI"}},
+		{name: "headless plus computeruse no descriptor", caps: []string{"HEADLESS", "COMPUTERUSE"}},
 		{name: "no capabilities rejected", caps: nil, wantErr: "at least one capability"},
 		{name: "unknown capability string rejected", caps: []string{"HEADLESS", "computer:screenshot"}, wantErr: "unknown capability"},
-		{name: "gui without headless rejected", caps: []string{"GUI"}, wantErr: "HEADLESS capability is mandatory"},
+		{name: "computeruse without headless rejected", caps: []string{"COMPUTERUSE"}, wantErr: "HEADLESS capability is mandatory"},
 
 		// Structured descriptor admission.
-		{name: "valid descriptor accepted", caps: []string{"HEADLESS", "GUI"}, descriptorJSON: validDescriptorJSON, wantDescriptor: true},
+		{name: "valid descriptor accepted", caps: []string{"HEADLESS", "COMPUTERUSE"}, descriptorJSON: validDescriptorJSON, wantDescriptor: true},
 		{name: "valid headless descriptor accepted", caps: []string{"HEADLESS"},
-			descriptorJSON: `{"platform":"linux","displayServer":"none","guiAvailable":false,"actions":[],"schemaVersion":1}`,
+			descriptorJSON: `{"platform":"linux","displayServer":"none","computerUseAvailable":false,"actions":[],"schemaVersion":1}`,
 			wantDescriptor: true},
 		{name: "unknown extra json fields tolerated", caps: []string{"HEADLESS"},
-			descriptorJSON: `{"platform":"linux","displayServer":"none","guiAvailable":false,"actions":[],"schemaVersion":1,"futureField":"ok"}`,
+			descriptorJSON: `{"platform":"linux","displayServer":"none","computerUseAvailable":false,"actions":[],"schemaVersion":1,"futureField":"ok"}`,
 			wantDescriptor: true},
 		{name: "garbage json rejected", caps: []string{"HEADLESS"}, descriptorJSON: `{not json`, wantErr: "invalid JSON"},
 		{name: "wrong schema version rejected", caps: []string{"HEADLESS"},
-			descriptorJSON: `{"platform":"darwin","displayServer":"quartz","guiAvailable":true,"actions":[],"schemaVersion":2}`,
+			descriptorJSON: `{"platform":"darwin","displayServer":"quartz","computerUseAvailable":true,"actions":[],"schemaVersion":2}`,
 			wantErr:        "unsupported schemaVersion"},
 		{name: "missing schema version rejected", caps: []string{"HEADLESS"},
-			descriptorJSON: `{"platform":"darwin","displayServer":"quartz","guiAvailable":true,"actions":[]}`,
+			descriptorJSON: `{"platform":"darwin","displayServer":"quartz","computerUseAvailable":true,"actions":[]}`,
 			wantErr:        "unsupported schemaVersion"},
 		{name: "unknown display server rejected", caps: []string{"HEADLESS"},
-			descriptorJSON: `{"platform":"darwin","displayServer":"mir","guiAvailable":true,"actions":[],"schemaVersion":1}`,
+			descriptorJSON: `{"platform":"darwin","displayServer":"mir","computerUseAvailable":true,"actions":[],"schemaVersion":1}`,
 			wantErr:        "unknown displayServer"},
 		{name: "empty platform rejected", caps: []string{"HEADLESS"},
-			descriptorJSON: `{"platform":"","displayServer":"none","guiAvailable":false,"actions":[],"schemaVersion":1}`,
+			descriptorJSON: `{"platform":"","displayServer":"none","computerUseAvailable":false,"actions":[],"schemaVersion":1}`,
 			wantErr:        "invalid platform"},
 		{name: "action with whitespace rejected", caps: []string{"HEADLESS"},
-			descriptorJSON: `{"platform":"darwin","displayServer":"quartz","guiAvailable":true,"actions":["mouse move"],"schemaVersion":1}`,
+			descriptorJSON: `{"platform":"darwin","displayServer":"quartz","computerUseAvailable":true,"actions":["mouse move"],"schemaVersion":1}`,
 			wantErr:        "invalid action name"},
 		{name: "duplicate action rejected", caps: []string{"HEADLESS"},
-			descriptorJSON: `{"platform":"darwin","displayServer":"quartz","guiAvailable":true,"actions":["screenshot","screenshot"],"schemaVersion":1}`,
+			descriptorJSON: `{"platform":"darwin","displayServer":"quartz","computerUseAvailable":true,"actions":["screenshot","screenshot"],"schemaVersion":1}`,
 			wantErr:        "duplicate action"},
 		{name: "too many actions rejected", caps: []string{"HEADLESS"}, descriptorJSON: string(tooManyJSON), wantErr: "exceeds cap"},
 		{name: "oversized raw json rejected", caps: []string{"HEADLESS"},
@@ -110,7 +110,7 @@ func TestParseCapabilityDescriptor_RoundTripAndNullActions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	if desc.Platform != "darwin" || desc.DisplayServer != "quartz" || !desc.GUIAvailable {
+	if desc.Platform != "darwin" || desc.DisplayServer != "quartz" || !desc.ComputerUseAvailable {
 		t.Fatalf("unexpected descriptor: %+v", desc)
 	}
 	if len(desc.Actions) != 4 || desc.Actions[0] != "screenshot" {
@@ -119,7 +119,7 @@ func TestParseCapabilityDescriptor_RoundTripAndNullActions(t *testing.T) {
 
 	// Absent actions normalize to an empty (non-nil) slice so the
 	// downstream JSON shape is stable ("actions": [] never null).
-	noActions, err := ParseCapabilityDescriptor(`{"platform":"linux","displayServer":"none","guiAvailable":false,"schemaVersion":1}`)
+	noActions, err := ParseCapabilityDescriptor(`{"platform":"linux","displayServer":"none","computerUseAvailable":false,"schemaVersion":1}`)
 	if err != nil {
 		t.Fatalf("parse without actions: %v", err)
 	}
@@ -134,7 +134,7 @@ func TestParseCapabilityDescriptor_RoundTripAndNullActions(t *testing.T) {
 		t.Fatalf("round trip returned nil")
 	}
 	if back.Platform != desc.Platform || back.DisplayServer != desc.DisplayServer ||
-		back.GUIAvailable != desc.GUIAvailable || back.SchemaVersion != desc.SchemaVersion ||
+		back.ComputerUseAvailable != desc.ComputerUseAvailable || back.SchemaVersion != desc.SchemaVersion ||
 		len(back.Actions) != len(desc.Actions) {
 		t.Fatalf("round trip mismatch: %+v vs %+v", back, desc)
 	}
@@ -162,7 +162,7 @@ func TestRegistryCarriesCapabilityDescriptor(t *testing.T) {
 		RegistrationId:       "reg-1",
 		OwnerUserId:          "user-1",
 		Name:                 "mbp",
-		Capabilities:         []string{CapabilityHeadless, CapabilityGUI},
+		Capabilities:         []string{CapabilityHeadless, CapabilityComputerUse},
 		CapabilityDescriptor: desc,
 	})
 	r.Add(&Worker{
@@ -194,13 +194,13 @@ func TestDecodeRegistrationCapabilityDescriptor(t *testing.T) {
 		"ownerUserId":  "user-1",
 		"identityId":   "ident-1",
 		"name":         "mbp",
-		"capabilities": []any{"HEADLESS", "GUI"},
+		"capabilities": []any{"HEADLESS", "COMPUTERUSE"},
 		"capabilityDescriptor": map[string]any{
-			"platform":      "darwin",
-			"displayServer": "quartz",
-			"guiAvailable":  true,
-			"actions":       []any{"screenshot", "key_type"},
-			"schemaVersion": 1,
+			"platform":             "darwin",
+			"displayServer":        "quartz",
+			"computerUseAvailable": true,
+			"actions":              []any{"screenshot", "key_type"},
+			"schemaVersion":        1,
 		},
 	})
 	if err != nil {
