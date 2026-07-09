@@ -100,13 +100,16 @@ psql postgres://memql:memql_dev@localhost:5432/memql -c "SELECT version();"
 
 ## What's running?
 
-There is no nginx front door and no `*.local.znas.io` subdomains in the
-k3d world -- each service is reached with its own port-forward:
+The local front door is the k3s-bundled **traefik** (not nginx), terminating
+TLS on 443 with the mkcert `*.local.znas.io` wildcard and routing by hostname --
+`identity.local.znas.io` and `cockpit.local.znas.io`, exactly like the cloud
+ingress ([environment parity](../operate/environment-parity.md)). Other
+services are reached with a debugging port-forward:
 
 | Service | Port-forward | Notes |
 |---------|--------------|-------|
 | **Identity service** | `svc/identity 8085:8085` | Magic-link auth, OAuth, JWKS, /admin, /pair/* |
-| **BFF (client edge)** | `svc/bff 50051:50051` | gRPC/WS for the Cockpit / SDKs / product clients |
+| **BFF (raw gRPC, debug)** | `svc/bff 50051:50051` | low-level gRPC access; the Cockpit connects via the `cockpit.local.znas.io` front door, not this |
 | **MCP head** | `svc/mcp 50051:50051` | the MCP-protocol node (on demand) |
 | **PostgreSQL** | `svc/postgres 5432:5432` | `make db` opens a psql shell |
 
@@ -212,8 +215,10 @@ node architecture.
 
 The Cockpit ships from its own repo,
 [`github.com/znasllc-io/memql-cockpit`](https://github.com/znasllc-io/memql-cockpit);
-build and product docs live there. It connects to this cluster over
-gRPC (locally via the `bff` port-forward, `svc/bff 50051:50051`).
+build and product docs live there. It connects to this cluster the same way
+it connects to staging/prod -- gRPC over `https://cockpit.local.znas.io` (the
+traefik front door + mkcert `*.local.znas.io` wildcard), no port-forward. See
+[environment parity](../operate/environment-parity.md).
 
 ---
 
