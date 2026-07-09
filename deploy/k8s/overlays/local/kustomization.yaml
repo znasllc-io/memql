@@ -387,6 +387,27 @@ patches:
   # not directly supported, so we use a strategic-merge patch as inline YAML.
   # The env entries below use the strategic merge key (env.name) to replace
   # the matching named entry without touching the rest of the env array.
+  # bff is the mesh ROOT: it VERIFIES the leaf nodes' node-tokens, so it MUST
+  # expect the local issuer or every leaf's NodeService/Stream is rejected
+  # ("invalid issuer") and the mesh never forms. (bff lives in the engine-bff
+  # component, but a name-targeted patch still reaches it.)
+  - target:
+      kind: Deployment
+      name: bff
+    patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: bff
+        namespace: memql
+      spec:
+        template:
+          spec:
+            containers:
+              - name: bff
+                env:
+                  - name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER
+                    value: "https://identity.local.znas.io"
   - target:
       kind: Deployment
       name: cognition
