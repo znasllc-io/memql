@@ -100,8 +100,11 @@ psql postgres://memql:memql_dev@localhost:5432/memql -c "SELECT version();"
 
 ## What's running?
 
-There is no nginx front door and no `*.local.znas.io` subdomains in the
-k3d world -- each service is reached with its own port-forward:
+The local front door is the k3s-bundled **traefik** (not nginx), terminating
+TLS on 443 with the mkcert `*.local.znas.io` wildcard and routing by hostname --
+`identity.local.znas.io` and `cockpit.local.znas.io`, exactly like the cloud
+ingress ([environment parity](../operate/environment-parity.md)). Other
+services are reached with a debugging port-forward:
 
 | Service | Port-forward | Notes |
 |---------|--------------|-------|
