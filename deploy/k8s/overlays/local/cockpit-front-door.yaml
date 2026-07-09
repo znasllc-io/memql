@@ -1,0 +1,36 @@
+# Local cockpit front door -- mirrors the cloud cockpit ingress topology so the
+# Cockpit connects to https://cockpit.local.znas.io EXACTLY as it connects to
+# https://cockpit.<staging-domain>: no ports, no port-forward. The k3s-bundled
+# traefik terminates TLS on 443 with the operator's browser-trusted wildcard
+# (local-znas-tls, seeded by seed-secrets.sh) and routes by hostname to the
+# product-neutral bff gRPC edge.
+#
+# The bff serves PLAINTEXT gRPC on :50051, so traefik forwards HTTP/2 cleartext
+# (h2c) end-to-end -- the local analog of the cloud nginx
+# `backend-protocol: GRPC`. The h2c serversscheme is a SERVICE-level traefik
+# annotation patched onto the bff Service in kustomization.yaml (local only;
+# cloud fronts the bff with nginx). Only the ingress-controller annotation +
+# the cert/DNS source differ per env -- the topology + the Cockpit dial path are
+# identical.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: cockpit-front-door
+  namespace: memql
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+spec:
+  tls:
+    - hosts: ["cockpit.local.znas.io"]
+      secretName: local-znas-tls
+  rules:
+    - host: cockpit.local.znas.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: bff
+                port:
+                  number: 50051
