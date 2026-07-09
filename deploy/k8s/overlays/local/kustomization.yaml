@@ -531,3 +531,6 @@ images:
   - name: acrmemql.azurecr.io/memql-mcp
     newName: memql-mcp
     newTag: local
+
+components:
+  - ../../components/engine-bff

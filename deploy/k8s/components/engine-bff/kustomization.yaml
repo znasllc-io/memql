@@ -1,0 +1,12 @@
+# engine-bff -- the product-neutral BFF node as an OPT-IN component.
+#
+# The BFF is the mesh root + the gRPC/WS client edge (the Cockpit connects
+# here). It lives in a component, NOT the base, because a PRODUCT cluster
+# brings its OWN bff (e.g. bff-<product> + its DSL bundle) and must not collide
+# with a base-shipped `bff` Deployment. ENGINE-ONLY overlays (local, and any
+# engine-only staging/prod) opt in via `components: [../../components/engine-bff]`;
+# product overlays simply omit it. Platform consolidation #2472 / Decision 5.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+resources:
+  - bff.yaml
