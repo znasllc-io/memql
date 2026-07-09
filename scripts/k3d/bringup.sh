@@ -24,7 +24,12 @@
 #                        import` them so pods can start instead of sitting in
 #                        ImagePullBackOff (local images are tag `local`,
 #                        imagePullPolicy IfNotPresent).
-#   5. wait healthy   -- block until every Deployment reports Available, then
+#   5. migrate        -- run the one-shot `memql-migrate` Job (the SAME Job the
+#                        cloud deploy runs) and wait for it, so the schema is
+#                        present before the mesh is declared healthy -- instead
+#                        of racing identity's boot-migration fallback against a
+#                        not-yet-ready Postgres (which could leave an empty DB).
+#   6. wait healthy   -- block until every Deployment reports Available, then
 #                        print the status summary.
 #
 # Idempotent: running it twice back-to-back yields the same healthy state
@@ -88,10 +93,11 @@ CARRIER_NODES=""
 CARRIER_CONTEXT=""
 HEALTHY=false
 
-# Step labels, set in main() once --clean is known (5 steps clean, 4 fresh).
+# Step labels, set in main() once --clean is known (6 steps clean, 5 fresh).
 STEP_UP=""
 STEP_WAIT=""
 STEP_DEV=""
+STEP_MIGRATE=""
 STEP_HEALTHY=""
 
 # How long to wait for ArgoCD to create the app Deployments after `up`, and
@@ -121,7 +127,7 @@ function section() {
 #=============================================================================
 
 function nuke() {
-    section "bringup 1/5: tearing down cluster '${CLUSTER_NAME}' (clean slate, purge)"
+    section "bringup 1/6: tearing down cluster '${CLUSTER_NAME}' (clean slate, purge)"
     bash "${SCRIPT_DIR}/down.sh" --cluster="${CLUSTER_NAME}" --purge >&2
 }
 
@@ -197,6 +203,32 @@ function rebuild_images() {
 # STEP 5 -- WAIT FOR THE MESH TO BE HEALTHY
 #=============================================================================
 
+function run_migration() {
+    section "bringup ${STEP_MIGRATE}: running the one-shot DB migration (memql-migrate Job)"
+    local migrate_yaml="${SCRIPT_DIR}/../../deploy/k8s/base/migrate-job.yaml"
+    if [[ ! -f "${migrate_yaml}" ]]; then
+        warn "migrate-job.yaml not found (${migrate_yaml}); relying on identity boot-migration"
+        return 0
+    fi
+    info "waiting for postgres to be ready..."
+    kubectl -n "${NAMESPACE}" rollout status deploy/postgres --timeout=150s >&2 2>/dev/null \
+        || warn "postgres not yet Available; the migrate Job will retry against it"
+    kubectl -n "${NAMESPACE}" delete job memql-migrate --ignore-not-found >/dev/null 2>&1 || true
+    # The SAME migrate Job the cloud deploy runs (`make deploy`), but with the
+    # locally-imported identity image -- so `make up` migrates the schema up
+    # front (env parity) instead of relying on identity's racy boot-migration
+    # fallback (which lost to a not-yet-ready postgres and left an empty DB).
+    perl -pe 's{image: acrmemql\.azurecr\.io/memql-identity:\S+}{image: memql-identity:local\n          imagePullPolicy: Never}' \
+        "${migrate_yaml}" | kubectl -n "${NAMESPACE}" apply -f - >/dev/null
+    info "waiting for the migration to complete..."
+    if kubectl -n "${NAMESPACE}" wait --for=condition=complete --timeout=240s job/memql-migrate >/dev/null 2>&1; then
+        info "DB migration complete (schema present)."
+    else
+        error "migrate Job did not complete. Inspect: kubectl logs -n ${NAMESPACE} job/memql-migrate"
+        return 1
+    fi
+}
+
 function wait_for_healthy() {
     section "bringup ${STEP_HEALTHY}: waiting for the mesh to become Available"
 
@@ -251,10 +283,10 @@ function main() {
 
     if [[ -n "$CLEAN" ]]; then
         info "memQL local bring-up (clean slate)"
-        STEP_UP="2/5"; STEP_WAIT="3/5"; STEP_DEV="4/5"; STEP_HEALTHY="5/5"
+        STEP_UP="2/6"; STEP_WAIT="3/6"; STEP_DEV="4/6"; STEP_MIGRATE="5/6"; STEP_HEALTHY="6/6"
     else
         info "memQL local bring-up (fresh)"
-        STEP_UP="1/4"; STEP_WAIT="2/4"; STEP_DEV="3/4"; STEP_HEALTHY="4/4"
+        STEP_UP="1/5"; STEP_WAIT="2/5"; STEP_DEV="3/5"; STEP_MIGRATE="4/5"; STEP_HEALTHY="5/5"
     fi
     info "Cluster:   ${CLUSTER_NAME}"
     info "Namespace: ${NAMESPACE}"
@@ -265,6 +297,7 @@ function main() {
     bringup
     wait_for_deployments_created
     rebuild_images
+    run_migration
     wait_for_healthy
 
     cap_changed
