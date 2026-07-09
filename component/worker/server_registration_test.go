@@ -126,7 +126,7 @@ func TestUpsertRegistration_NewWorkerCreates(t *testing.T) {
 	store := &fakeRegistrationStore{}
 	row := runUpsert(t, store, &memqlv1.Register{
 		Name:                     "mbp",
-		Capabilities:             []string{CapabilityHeadless, CapabilityGUI},
+		Capabilities:             []string{CapabilityHeadless, CapabilityComputerUse},
 		CapabilityDescriptorJson: validDescriptorJSON,
 	})
 	if len(store.created) != 1 || len(store.refreshed) != 0 {
@@ -142,13 +142,13 @@ func TestUpsertRegistration_NewWorkerCreates(t *testing.T) {
 // capabilities list and a different descriptor must persist BOTH on
 // the existing row, not just bump lastSeenAt.
 func TestUpsertRegistration_RefreshesChangedCapabilitiesAndDescriptor(t *testing.T) {
-	oldDesc := mustDescriptor(t, `{"platform":"darwin","displayServer":"quartz","guiAvailable":true,"actions":["screenshot"],"schemaVersion":1}`)
+	oldDesc := mustDescriptor(t, `{"platform":"darwin","displayServer":"quartz","computerUseAvailable":true,"actions":["screenshot"],"schemaVersion":1}`)
 	store := &fakeRegistrationStore{existing: existingRow(oldDesc)}
 
-	newDescJSON := `{"platform":"darwin","displayServer":"quartz","guiAvailable":true,"actions":["screenshot","mouse_move","key_type"],"schemaVersion":1}`
+	newDescJSON := `{"platform":"darwin","displayServer":"quartz","computerUseAvailable":true,"actions":["screenshot","mouse_move","key_type"],"schemaVersion":1}`
 	row := runUpsert(t, store, &memqlv1.Register{
 		Name:                     "mbp",
-		Capabilities:             []string{CapabilityHeadless, CapabilityGUI},
+		Capabilities:             []string{CapabilityHeadless, CapabilityComputerUse},
 		CapabilityDescriptorJson: newDescJSON,
 		Version:                  "0.9.0",
 	})
@@ -187,7 +187,7 @@ func TestUpsertRegistration_DescriptorAddedWhereThereWasNone(t *testing.T) {
 	store := &fakeRegistrationStore{existing: existingRow(nil)}
 	runUpsert(t, store, &memqlv1.Register{
 		Name:                     "mbp",
-		Capabilities:             []string{CapabilityHeadless, CapabilityGUI},
+		Capabilities:             []string{CapabilityHeadless, CapabilityComputerUse},
 		CapabilityDescriptorJson: validDescriptorJSON,
 	})
 	if len(store.refreshed) != 1 {
@@ -289,10 +289,10 @@ func TestEngineStoreRefreshRegistration_WireShape(t *testing.T) {
 	row := RegistrationRow{
 		ID:                   "reg-1",
 		Name:                 "mbp",
-		Capabilities:         []string{CapabilityHeadless, CapabilityGUI},
+		Capabilities:         []string{CapabilityHeadless, CapabilityComputerUse},
 		CapabilityDescriptor: desc,
 		Version:              "0.9.0",
-		BuildTag:             "gui",
+		BuildTag:             "computeruse",
 		LastSeenAt:           time.Date(2026, 6, 11, 12, 0, 0, 0, time.UTC),
 		LastConnectedFromIP:  "10.0.0.1:1234",
 	}
@@ -308,7 +308,7 @@ func TestEngineStoreRefreshRegistration_WireShape(t *testing.T) {
 		`"registrationId":"reg-1"`,
 		`"displayServer":"quartz"`,
 		`"version":"0.9.0"`,
-		`"buildTag":"gui"`,
+		`"buildTag":"computeruse"`,
 	} {
 		if !strings.Contains(q, want) {
 			t.Fatalf("query missing %q:\n%s", want, q)

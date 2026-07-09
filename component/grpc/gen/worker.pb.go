@@ -367,29 +367,29 @@ type Register struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Name  string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	// Capabilities advertised. "HEADLESS" must always be present;
-	// "GUI" is an optional addition declared only by cockpit-gui builds
-	// with TCC / X11 confirmed available.
+	// "COMPUTERUSE" is an optional addition declared only by
+	// memql-cockpit-computeruse builds with TCC / X11 confirmed available.
 	Capabilities []string          `protobuf:"bytes,2,rep,name=capabilities,proto3" json:"capabilities,omitempty"`
 	Labels       map[string]string `protobuf:"bytes,3,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	// Per-capability concurrency caps. e.g. {"HEADLESS": 8, "GUI": 1}.
+	// Per-capability concurrency caps. e.g. {"HEADLESS": 8, "COMPUTERUSE": 1}.
 	Concurrency map[string]uint32 `protobuf:"bytes,4,rep,name=concurrency,proto3" json:"concurrency,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
 	Platform    *PlatformInfo     `protobuf:"bytes,5,opt,name=platform,proto3" json:"platform,omitempty"`
 	Permissions *PermissionStatus `protobuf:"bytes,6,opt,name=permissions,proto3" json:"permissions,omitempty"`
 	Version     string            `protobuf:"bytes,7,opt,name=version,proto3" json:"version,omitempty"`
-	// build_tag = "gui" or "nogui".
+	// build_tag = "computeruse" or "headless".
 	BuildTag string `protobuf:"bytes,8,opt,name=build_tag,json=buildTag,proto3" json:"build_tag,omitempty"`
 	// Optional structured capability self-description, serialized as
 	// JSON (memql#1330 / memql-cockpit#162). Shape (schemaVersion 1):
 	//
 	//	{"platform": "<GOOS>",
 	//	 "displayServer": "quartz"|"x11"|"wayland"|"none",
-	//	 "guiAvailable": bool,
+	//	 "computerUseAvailable": bool,
 	//	 "actions": ["<workerComputer action name>", ...],
 	//	 "schemaVersion": 1}
 	//
 	// Validated server-side (size cap, schemaVersion, displayServer
 	// enum, action-name pattern -- see component/worker). Workers that
-	// omit it register exactly as before; HEADLESS/GUI capability
+	// omit it register exactly as before; HEADLESS/COMPUTERUSE capability
 	// strings keep their scope-check semantics unchanged.
 	CapabilityDescriptorJson string `protobuf:"bytes,9,opt,name=capability_descriptor_json,json=capabilityDescriptorJson,proto3" json:"capability_descriptor_json,omitempty"`
 	unknownFields            protoimpl.UnknownFields

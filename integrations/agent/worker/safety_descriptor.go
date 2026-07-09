@@ -33,7 +33,7 @@ import (
 // the default branch: the action name passes through verbatim and
 // the args are preserved for the recorder. The rule layer has no
 // opinion on them (ErrNoClassifierOpinion), so the classifier
-// escalates -- identical to how the pre-existing gui input actions
+// escalates -- identical to how the pre-existing computer-use input actions
 // classify.
 func buildSafetyDescriptor(req Request, effectiveScope, capability string) safety.ActionDescriptor {
 	caller := safety.CallerContext{

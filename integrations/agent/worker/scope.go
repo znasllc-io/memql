@@ -74,27 +74,27 @@ func workerHostScope(action string) ScopeRequirement {
 func workerComputerScope(action string) ScopeRequirement {
 	switch action {
 	case "capabilities", "wait":
-		// Observe-tier, but gated on HEADLESS rather than GUI.
+		// Observe-tier, but gated on HEADLESS rather than COMPUTERUSE.
 		// `capabilities` is pure introspection and `wait` is a no-op
-		// timer; the cockpit serves both in its headless AND gui
-		// builds (cockpit #162 / #177). HEADLESS is mandatory on
-		// every registration (GUI workers advertise it too), so
-		// requiring CapabilityHeadless admits every worker. Requiring
-		// CapabilityGUI here would make PickWorker skip a
-		// headless-only worker and wrongly return
+		// timer; the cockpit serves both in its headless AND
+		// computer-use builds (cockpit #162 / #177). HEADLESS is
+		// mandatory on every registration (COMPUTERUSE workers
+		// advertise it too), so requiring CapabilityHeadless admits
+		// every worker. Requiring CapabilityComputerUse here would make
+		// PickWorker skip a headless-only worker and wrongly return
 		// no_worker_available for an introspection / timing call the
 		// worker can actually serve.
 		return ScopeRequirement{Capability: workerservice.CapabilityHeadless, Scope: "observe"}
 	case "screenshot", "cursor_position", "display_info", "window_list":
-		return ScopeRequirement{Capability: workerservice.CapabilityGUI, Scope: "observe"}
+		return ScopeRequirement{Capability: workerservice.CapabilityComputerUse, Scope: "observe"}
 	case "mouse_move", "mouse_click", "mouse_drag", "mouse_scroll",
 		"mouse_down", "mouse_up", "key_type", "key_combo", "key_hold",
 		"window_focus":
 		// Required scope is full -- the legacy `interact` tier was
 		// retired (see scopeRank). Drives + shell are the two
 		// machine-touching surfaces; we don't ask the user to
-		// distinguish "GUI control without shell" anymore.
-		return ScopeRequirement{Capability: workerservice.CapabilityGUI, Scope: "full"}
+		// distinguish "input-driving without shell" anymore.
+		return ScopeRequirement{Capability: workerservice.CapabilityComputerUse, Scope: "full"}
 	}
 	return ScopeRequirement{}
 }

@@ -818,14 +818,14 @@ the agent used no trained sources, citations is an empty array.
 
 The "workers" feature lets agents drive the user's own machine
 via a tool surface: shell exec, filesystem, HTTP fetch, and (under
-the GUI build) mouse + keyboard + screenshot. All seven phases of
+the computer-use build) mouse + keyboard + screenshot. All seven phases of
 the implementation plan have shipped (see
 [docs/public/operate/workers-runbook.md](docs/public/operate/workers-runbook.md)); the plan
 document itself is gone per the no-stale-docs convention.
 
 The legacy umbrella slug `computer_use` was split into two
 mode-specific slugs on 2026-05-17 so the headless slice (shell /
-fs / http on the user's machine) and the embodied slice (GUI on
+fs / http on the user's machine) and the embodied slice (computer-use on
 the user's machine) can be granted independently. Authorization
 (scope grants, kill switch, knowledge domain) stays unified --
 both modes act on the user's machine, so the consent is one
@@ -840,7 +840,7 @@ work is the Workbench, documented in the next section.
   - `computer_use_embodied` -- expands to `workerComputer` + the
     same cross-cutting trio. Mouse / keyboard / screenshot on the
     user's machine.
-- **Tools:** `workerHost` (HEADLESS) and `workerComputer` (GUI),
+- **Tools:** `workerHost` (HEADLESS) and `workerComputer` (COMPUTERUSE),
   both discriminated-union tools under the `dsl/worker/` namespace.
 - **Gateway:** `WorkerService.Stream` gRPC service on the agent
   node. Auth via worker-specific tokens
@@ -856,9 +856,9 @@ work is the Workbench, documented in the next section.
   directly so plaintext never lives outside the gRPC reply.
 - **Worker side:** `memql-cockpit worker run` is a separate run
   mode of the Cockpit binary, built from the `memql-cockpit` repo
-  (`make cockpit` / `make cockpit-gui`). The GUI build wraps RobotGo
+  (`make cockpit` / `make cockpit-computeruse`). The computer-use build wraps RobotGo
   for screenshot + mouse + keyboard. macOS TCC / Linux X11 pre-flight
-  via `memql-cockpit-gui worker setup`.
+  via `memql-cockpit-computeruse worker setup`.
 - **Per-user routing:** every worker is owned by exactly one
   v1:identity:user; agents in that user's sessions are the only
   callers admitted by the registry.
@@ -894,7 +894,7 @@ working directory in the cluster; the agent drives it, the user
 does not see it as a filesystem they can browse, and nothing on
 the user's machine is touched. Computer-use (the user's machine)
 is the FALLBACK for headless work the workbench cannot do
-(macOS-only tooling, GUI control, files already on the user's
+(macOS-only tooling, computer-use control, files already on the user's
 computer).
 
 See [docs/public/operate/workbench-runbook.md](docs/public/operate/workbench-runbook.md) for the

@@ -6,7 +6,7 @@
 @enabled
 @executor("integration.agentworker.dispatchComputer")
 @args(profile="object")
-@description("Dispatch a workerComputer.<action> call to the user's GUI-capable worker.")
+@description("Dispatch a workerComputer.<action> call to the user's computer-use-capable worker.")
 builtin agentworkerDispatchComputer {
   action         string  @required
   args           object

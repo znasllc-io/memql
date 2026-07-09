@@ -78,7 +78,7 @@ type Payload struct {
 	// scope tool-specific allow/deny rules.
 	ToolName string
 	// Args is a free-form map for fields that don't fit the typed
-	// slots above (GUI coordinates, screenshot region, etc.).
+	// slots above (computer-use coordinates, screenshot region, etc.).
 	// Treated as untrusted, redacted before recording.
 	Args map[string]any
 }

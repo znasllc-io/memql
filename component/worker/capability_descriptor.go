@@ -17,11 +17,11 @@ import (
 // field: this struct serialized as JSON. Unknown JSON fields are
 // tolerated (additive evolution does not bump schemaVersion).
 type CapabilityDescriptor struct {
-	Platform      string   `json:"platform"`
-	DisplayServer string   `json:"displayServer"`
-	GUIAvailable  bool     `json:"guiAvailable"`
-	Actions       []string `json:"actions"`
-	SchemaVersion int      `json:"schemaVersion"`
+	Platform             string   `json:"platform"`
+	DisplayServer        string   `json:"displayServer"`
+	ComputerUseAvailable bool     `json:"computerUseAvailable"`
+	Actions              []string `json:"actions"`
+	SchemaVersion        int      `json:"schemaVersion"`
 }
 
 const (
@@ -108,11 +108,11 @@ func (d *CapabilityDescriptor) AsMap() map[string]any {
 		actions = append(actions, a)
 	}
 	return map[string]any{
-		"platform":      d.Platform,
-		"displayServer": d.DisplayServer,
-		"guiAvailable":  d.GUIAvailable,
-		"actions":       actions,
-		"schemaVersion": d.SchemaVersion,
+		"platform":             d.Platform,
+		"displayServer":        d.DisplayServer,
+		"computerUseAvailable": d.ComputerUseAvailable,
+		"actions":              actions,
+		"schemaVersion":        d.SchemaVersion,
 	}
 }
 

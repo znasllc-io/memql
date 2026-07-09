@@ -15,7 +15,7 @@ import (
 // in dispatch.
 func TestActionRequiredScope_Table(t *testing.T) {
 	headless := workerservice.CapabilityHeadless
-	gui := workerservice.CapabilityGUI
+	computerUse := workerservice.CapabilityComputerUse
 
 	cases := []struct {
 		tool   string
@@ -32,31 +32,31 @@ func TestActionRequiredScope_Table(t *testing.T) {
 
 		// --- workerComputer introspection / timing (cockpit #162 /
 		// #177): served by BOTH cockpit builds, so they gate on
-		// HEADLESS (mandatory on every registration) -- requiring GUI
-		// would make PickWorker refuse a headless-only worker that
+		// HEADLESS (mandatory on every registration) -- requiring
+		// COMPUTERUSE would make PickWorker refuse a headless-only worker that
 		// can actually answer.
 		{"workerComputer", "capabilities", ScopeRequirement{Capability: headless, Scope: "observe"}},
 		{"workerComputer", "wait", ScopeRequirement{Capability: headless, Scope: "observe"}},
 
 		// --- workerComputer read-only observation (unchanged) ---
-		{"workerComputer", "screenshot", ScopeRequirement{Capability: gui, Scope: "observe"}},
-		{"workerComputer", "cursor_position", ScopeRequirement{Capability: gui, Scope: "observe"}},
-		{"workerComputer", "display_info", ScopeRequirement{Capability: gui, Scope: "observe"}},
-		{"workerComputer", "window_list", ScopeRequirement{Capability: gui, Scope: "observe"}},
+		{"workerComputer", "screenshot", ScopeRequirement{Capability: computerUse, Scope: "observe"}},
+		{"workerComputer", "cursor_position", ScopeRequirement{Capability: computerUse, Scope: "observe"}},
+		{"workerComputer", "display_info", ScopeRequirement{Capability: computerUse, Scope: "observe"}},
+		{"workerComputer", "window_list", ScopeRequirement{Capability: computerUse, Scope: "observe"}},
 
 		// --- workerComputer input actions: full tier (the interact
 		// tier is retired). Pre-existing set unchanged...
-		{"workerComputer", "mouse_move", ScopeRequirement{Capability: gui, Scope: "full"}},
-		{"workerComputer", "mouse_click", ScopeRequirement{Capability: gui, Scope: "full"}},
-		{"workerComputer", "mouse_drag", ScopeRequirement{Capability: gui, Scope: "full"}},
-		{"workerComputer", "mouse_scroll", ScopeRequirement{Capability: gui, Scope: "full"}},
-		{"workerComputer", "key_type", ScopeRequirement{Capability: gui, Scope: "full"}},
-		{"workerComputer", "key_combo", ScopeRequirement{Capability: gui, Scope: "full"}},
-		{"workerComputer", "window_focus", ScopeRequirement{Capability: gui, Scope: "full"}},
+		{"workerComputer", "mouse_move", ScopeRequirement{Capability: computerUse, Scope: "full"}},
+		{"workerComputer", "mouse_click", ScopeRequirement{Capability: computerUse, Scope: "full"}},
+		{"workerComputer", "mouse_drag", ScopeRequirement{Capability: computerUse, Scope: "full"}},
+		{"workerComputer", "mouse_scroll", ScopeRequirement{Capability: computerUse, Scope: "full"}},
+		{"workerComputer", "key_type", ScopeRequirement{Capability: computerUse, Scope: "full"}},
+		{"workerComputer", "key_combo", ScopeRequirement{Capability: computerUse, Scope: "full"}},
+		{"workerComputer", "window_focus", ScopeRequirement{Capability: computerUse, Scope: "full"}},
 		// ...plus the computer-use v2 additions (cockpit #166).
-		{"workerComputer", "mouse_down", ScopeRequirement{Capability: gui, Scope: "full"}},
-		{"workerComputer", "mouse_up", ScopeRequirement{Capability: gui, Scope: "full"}},
-		{"workerComputer", "key_hold", ScopeRequirement{Capability: gui, Scope: "full"}},
+		{"workerComputer", "mouse_down", ScopeRequirement{Capability: computerUse, Scope: "full"}},
+		{"workerComputer", "mouse_up", ScopeRequirement{Capability: computerUse, Scope: "full"}},
+		{"workerComputer", "key_hold", ScopeRequirement{Capability: computerUse, Scope: "full"}},
 
 		// --- unknown actions / tools resolve to the zero value so
 		// preDispatchCheck denies them as unknown_action ---

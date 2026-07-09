@@ -57,27 +57,27 @@ message WorkerServerMessage {
 message Register {
   string name = 1;
   // Capabilities advertised. "HEADLESS" must always be present;
-  // "GUI" is an optional addition declared only by cockpit-gui builds
-  // with TCC / X11 confirmed available.
+  // "COMPUTERUSE" is an optional addition declared only by
+  // memql-cockpit-computeruse builds with TCC / X11 confirmed available.
   repeated string capabilities = 2;
   map<string, string> labels = 3;
-  // Per-capability concurrency caps. e.g. {"HEADLESS": 8, "GUI": 1}.
+  // Per-capability concurrency caps. e.g. {"HEADLESS": 8, "COMPUTERUSE": 1}.
   map<string, uint32> concurrency = 4;
   PlatformInfo platform = 5;
   PermissionStatus permissions = 6;
   string version = 7;
-  // build_tag = "gui" or "nogui".
+  // build_tag = "computeruse" or "headless".
   string build_tag = 8;
   // Optional structured capability self-description, serialized as
   // JSON (memql#1330 / memql-cockpit#162). Shape (schemaVersion 1):
   //   {"platform": "<GOOS>",
   //    "displayServer": "quartz"|"x11"|"wayland"|"none",
-  //    "guiAvailable": bool,
+  //    "computerUseAvailable": bool,
   //    "actions": ["<workerComputer action name>", ...],
   //    "schemaVersion": 1}
   // Validated server-side (size cap, schemaVersion, displayServer
   // enum, action-name pattern -- see component/worker). Workers that
-  // omit it register exactly as before; HEADLESS/GUI capability
+  // omit it register exactly as before; HEADLESS/COMPUTERUSE capability
   // strings keep their scope-check semantics unchanged.
   string capability_descriptor_json = 9;
 }
