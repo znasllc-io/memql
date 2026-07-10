@@ -36,6 +36,17 @@ type Dispatcher struct {
 	unexpectedCh chan struct{}                               // closed only on stream error
 	sendMu       sync.Mutex                                  // serializes writes to the stream
 
+	// recvErr captures the terminal stream.Recv() error (guarded by
+	// recvErrMu). Set once by Run() when the stream dies for a reason
+	// other than an intentional Stop(); read by SendAndWait so a caller
+	// blocked on a correlated reply gets the REAL cause (e.g. an
+	// Unauthenticated status when the server rejects a no-token stream)
+	// instead of a generic "stream closed" -- otherwise the auth
+	// rejection is masked and callers like the cockpit reachability probe
+	// misclassify a reachable-but-needs-auth server as down.
+	recvErrMu sync.Mutex
+	recvErr   error
+
 	// clientTools holds the registered inbound ClientToolCall
 	// handler (memql#174). One handler at a time -- callers route
 	// per-tool inside their handler body. nil-handler envelopes are
@@ -102,6 +113,11 @@ func (d *Dispatcher) Run() {
 				return // Clean shutdown
 			default:
 			}
+			// Record the real terminal error BEFORE closing pending
+			// channels, so a SendAndWait caller unblocking on the closed
+			// channel can surface it (happens-before: this write precedes
+			// close(ch), which precedes the receiver observing !ok).
+			d.setRecvErr(err)
 			if d.logger != nil {
 				d.logger.Warn("gRPC stream receive error", "error", err)
 			}
@@ -213,12 +229,34 @@ func (d *Dispatcher) SendAndWait(ctx context.Context, msg *memqlv1.MemqlClientMe
 	select {
 	case resp, ok := <-ch:
 		if !ok {
+			// Surface the real terminal cause (e.g. Unauthenticated /
+			// authentication required) so callers can classify it, rather
+			// than a generic message that hides an auth rejection.
+			if re := d.RecvErr(); re != nil {
+				return nil, fmt.Errorf("stream closed: %w", re)
+			}
 			return nil, fmt.Errorf("stream closed while waiting for response")
 		}
 		return resp, nil
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
+}
+
+// setRecvErr records the terminal stream.Recv() error. Called once by
+// Run() on an unexpected stream death.
+func (d *Dispatcher) setRecvErr(err error) {
+	d.recvErrMu.Lock()
+	d.recvErr = err
+	d.recvErrMu.Unlock()
+}
+
+// RecvErr returns the terminal stream error captured by Run(), or nil if
+// the stream was closed intentionally (Stop) or is still live.
+func (d *Dispatcher) RecvErr() error {
+	d.recvErrMu.Lock()
+	defer d.recvErrMu.Unlock()
+	return d.recvErr
 }
 
 // ErrRotateAuthRejected is returned by RotateAuth when the server
