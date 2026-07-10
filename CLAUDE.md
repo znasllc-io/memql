@@ -998,6 +998,18 @@ headers. They never see the private key.
 [docs/public/operate/auth/identity-service.md](docs/public/operate/auth/identity-service.md) for
 the operator-side narrative.
 
+**Authentication is ON by default in every environment** (local, staging,
+prod alike -- env parity). The master toggle is `MEMQL_IDENTITY_ENABLED`:
+on verifier-consuming nodes it defaults to `true` (auth enforced) and is set
+explicitly `false` ONLY to disable auth for troubleshooting -- the node then
+skips the verifier and admits every stream as a synthetic `local-dev` cluster
+owner (see `component/grpc/local_dev_stream_interceptor.go`), with a loud
+boot-time SECURITY warning and the `memql_auth_enabled` gauge pinned to 0. The
+toggle is a config value present everywhere, never an architecture branch;
+**never set it false in staging/production.** Disabling auth is the toggle, NOT
+blanking `MEMQL_IDENTITY_VERIFIER_BASE_URL` (an empty verifier URL fatals the
+node).
+
 See [docs/public/operate/auth/](docs/public/operate/auth/):
 - [access-model.md](docs/public/operate/auth/access-model.md) -- enforcement
   layers and role spectrum.

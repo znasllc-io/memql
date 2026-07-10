@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/znasllc-io/memql/component/config"
 	"github.com/znasllc-io/memql/component/genesis"
 	"github.com/znasllc-io/memql/component/identity/verifier"
 	"github.com/znasllc-io/memql/component/metrics"
@@ -89,6 +90,23 @@ func (a *App) configAndAuth() {
 		a.Logger.Info("identity binary: per-node verifier intentionally disabled (identity is the JWKS authority)")
 		return
 	}
+
+	// Master auth toggle (MEMQL_IDENTITY_ENABLED, default true). On a
+	// verifier-consuming node an explicit false DISABLES authentication for
+	// troubleshooting: skip the verifier entirely and let transportBase
+	// install the local-dev no-auth admit path (every request is treated as
+	// the cluster owner). Loud + metered by design -- this must NEVER be set
+	// in staging/production. The verifier URL stays configured (so fail-fast
+	// env validation still passes); the toggle, not a blanked URL, is the
+	// off switch.
+	if !config.IdentityAuthEnabled() {
+		a.authDisabled = true
+		metrics.SetAuthEnabled(false)
+		a.Logger.Warn("SECURITY: authentication DISABLED on this node (MEMQL_IDENTITY_ENABLED=false) -- running local-dev no-auth identity; EVERY request is treated as cluster owner with no credential. Troubleshooting only; never enable in staging/production.")
+		return
+	}
+	metrics.SetAuthEnabled(true)
+
 	verifierCfg, err := verifier.LoadConfigFromEnv()
 	if err != nil {
 		a.fatal("failed to load identity verifier configuration", "error", err)

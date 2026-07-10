@@ -80,7 +80,7 @@ spec:
             - { name: MEMQL_IDENTITY_VERIFIER_AUDIENCE, value: "memql" }
             # Deployment-specific placeholder; a product overlay patches the real host.
             - { name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER, value: "https://identity.staging.example.com" }
-            - { name: MEMQL_IDENTITY_ENABLED, value: "false" }
+            - { name: MEMQL_IDENTITY_ENABLED, value: "true" }
             - { name: MEMQL_HTTP_TLS_CA_FILE, value: "/etc/memql/cacerts/ca.crt" }
             - { name: SSL_CERT_DIR, value: "/etc/ssl/certs:/etc/memql/cacerts" }
             - { name: SERVER_ALLOWED_ORIGINS, value: "*" }

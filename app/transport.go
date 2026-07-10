@@ -109,6 +109,19 @@ func (a *App) transportBase() {
 		// handler responds with error="verifier_unconfigured" and
 		// the cockpit falls back to reconnect-with-fresh-token.
 		a.grpcServer.SetVerifier(a.identityVerifier)
+	} else if a.authDisabled {
+		// Auth DISABLED for troubleshooting (MEMQL_IDENTITY_ENABLED=false
+		// on a verifier-consuming node). Every stream is admitted as a
+		// synthetic local-dev cluster owner (see
+		// component/grpc/local_dev_stream_interceptor.go). The operator
+		// credential path is layered on top so operator tooling still
+		// works. NEVER reached in staging/production -- the master toggle
+		// defaults on and the boot-time SECURITY warning fires when it is
+		// not. No verifier => no in-stream rotation, no HTTP auth middleware.
+		localDev := memqlgrpc.NewLocalDevStreamInterceptor(a.Logger)
+		operatorChecked := memqlgrpc.NewOperatorAwareStreamInterceptor(localDev, a.Logger)
+		recovered := memqlgrpc.NewPanicRecoveryStreamInterceptor(operatorChecked, a.Logger)
+		a.grpcServer.SetStreamInterceptor(recovered)
 	} else {
 		// verifierRequired=false branch (identity binary). Operator
 		// is the only admit path; everything else is rejected.

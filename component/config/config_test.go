@@ -92,3 +92,24 @@ func TestEnvBool(t *testing.T) {
 		})
 	}
 }
+
+func TestIdentityAuthEnabled(t *testing.T) {
+	cases := map[string]bool{
+		"":      true, // unset => secure default (auth enforced)
+		"true":  true,
+		"1":     true,
+		"yes":   true,
+		"TRUE":  true,
+		"false": false,
+		"0":     false,
+		"no":    false,
+		"off":   false,
+		"False": false,
+	}
+	for val, want := range cases {
+		t.Setenv("MEMQL_IDENTITY_ENABLED", val)
+		if got := IdentityAuthEnabled(); got != want {
+			t.Errorf("IdentityAuthEnabled() with %q = %v, want %v", val, got, want)
+		}
+	}
+}

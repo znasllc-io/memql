@@ -87,12 +87,14 @@ func loadFromEnv() *busv1.ConfigSnapshot {
 		// STT
 		SttProvider: envStr("MEMQL_STT_PROVIDER"),
 
-		// Auth — MEMQL_IDENTITY_VERIFIER_BASE_URL gates whether bff/voice/etc.
-		// run with auth or fall through to the dev no-auth identity.
-		// The Jumpcloud* fields on ConfigSnapshot are inert; they
-		// remain in the generated proto for backwards-compat with old
-		// snapshots and are not populated.
-		AuthEnabled:       envStr("MEMQL_IDENTITY_VERIFIER_BASE_URL") != "",
+		// Auth — enforced when a verifier is configured
+		// (MEMQL_IDENTITY_VERIFIER_BASE_URL) AND the master toggle
+		// MEMQL_IDENTITY_ENABLED is on (the default). Setting
+		// MEMQL_IDENTITY_ENABLED=false disables auth for troubleshooting
+		// (see IdentityAuthEnabled + app/configAndAuth). The Jumpcloud*
+		// fields on ConfigSnapshot are inert; they remain in the generated
+		// proto for backwards-compat with old snapshots and are not populated.
+		AuthEnabled:       envStr("MEMQL_IDENTITY_VERIFIER_BASE_URL") != "" && IdentityAuthEnabled(),
 		DelegationEnabled: envBool("MEMQL_DELEGATION_ENABLED"),
 
 		// Polyphon
@@ -152,6 +154,27 @@ func envFloat(key string, def float64) float64 {
 // envStr reads and trims an environment variable.
 func envStr(key string) string {
 	return strings.TrimSpace(os.Getenv(key))
+}
+
+// IdentityAuthEnabled reports the master authentication toggle
+// (MEMQL_IDENTITY_ENABLED) for verifier-consuming nodes (bff / voice /
+// cognition / agent / planner / workbench / mcp). It defaults TRUE:
+// authentication is ENFORCED unless explicitly disabled. Setting it to a
+// falsy value turns auth OFF for troubleshooting — the node then runs the
+// local-dev no-auth identity (see component/grpc/local_dev_stream_interceptor.go).
+// Recognized off values (case-insensitive): false, 0, no, off. Any other
+// value, including unset, means enabled (secure default).
+//
+// This is a MASTER toggle, present in every environment; only its value
+// varies (never the architecture). It must NEVER be set false in
+// staging/production.
+func IdentityAuthEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("MEMQL_IDENTITY_ENABLED"))) {
+	case "false", "0", "no", "off":
+		return false
+	default:
+		return true
+	}
 }
 
 // envBool reads an environment variable as a boolean.
