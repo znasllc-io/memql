@@ -93,6 +93,13 @@ var (
 		Name:      "keyset_fingerprint",
 		Help:      "Stable numeric fingerprint (top 52 bits of sha256 over the sorted kid set) of the JWKS this process serves/trusts. Cross-replica disagreement (max != min over identity replicas) signals JWKS incoherence.",
 	})
+
+	authEnabled = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: namespace,
+		Subsystem: "auth",
+		Name:      "enabled",
+		Help:      "1 when authentication is enforced on this node, 0 when disabled via MEMQL_IDENTITY_ENABLED=false (troubleshooting only -- never staging/prod). Alert on any 0.",
+	})
 )
 
 func init() {
@@ -102,12 +109,27 @@ func init() {
 		authRejectsTotal,
 		jwksKeysetKeys,
 		jwksKeysetFingerprint,
+		authEnabled,
 	)
 	// Explicit zero so the series exists before the first keyset is
 	// observed; an alert on a missing series is harder to reason about
 	// than one on a stable 0.
 	jwksKeysetFingerprint.Set(0)
 	jwksKeysetKeys.Set(0)
+	// Auth is enforced by default; app/configAndAuth pins this to 0 when
+	// the master toggle disables auth for troubleshooting.
+	authEnabled.Set(1)
+}
+
+// SetAuthEnabled records whether authentication is enforced on this node.
+// Called once at boot: 1 in the normal (verifier) path, 0 when
+// MEMQL_IDENTITY_ENABLED=false selects the local-dev no-auth path.
+func SetAuthEnabled(enabled bool) {
+	if enabled {
+		authEnabled.Set(1)
+		return
+	}
+	authEnabled.Set(0)
 }
 
 // Registry returns the process-wide Prometheus registry. Exposed for

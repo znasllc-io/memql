@@ -62,6 +62,11 @@ type App struct {
 	httpArgs         []server.ServerArg
 	middlewares      []server.MiddlewareFunc
 	identityVerifier *verifier.Verifier
+	// authDisabled is set on a verifier-consuming node when the master
+	// auth toggle MEMQL_IDENTITY_ENABLED is explicitly false
+	// (troubleshooting only). It selects the local-dev no-auth admit
+	// path in transportBase instead of the verifier chain.
+	authDisabled bool
 
 	// Phase 2: database
 	db       *memoryNodesDatabase.MemoryNodesDatabase

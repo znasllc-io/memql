@@ -330,7 +330,7 @@ For the identity binary (`-tags identity`):
 
 | Variable                                  | Default                  | Purpose                                                                                                              |
 |-------------------------------------------|--------------------------|----------------------------------------------------------------------------------------------------------------------|
-| `MEMQL_IDENTITY_ENABLED`                        | `false`                  | Master toggle for the identity binary itself.                                                                        |
+| `MEMQL_IDENTITY_ENABLED`                        | `false`                  | On the **identity binary**: serve-auth toggle (default off; must be `true` for identity to serve). On **every other node** it is the master auth-enforcement toggle instead -- see the next table. |
 | `MEMQL_IDENTITY_BASE_URL`                       | none                     | Public origin (used as JWT `iss` and in email links).                                                                |
 | `MEMQL_IDENTITY_JWT_AUDIENCE`                   | `memql`                  | Value placed in the JWT `aud` claim.                                                                                 |
 | `MEMQL_IDENTITY_ALLOW_EPHEMERAL_KEY`            | `false`                  | Opt into per-pod ephemeral file keys (no `MEMQL_IDENTITY_SIGNING_KEY_B64`). Single-node / dev only -- with >=2 replicas it allows JWKS divergence. The fail-fast guard (#1515) requires this to boot a non-localhost deployment that has no shared seed. |
@@ -342,7 +342,8 @@ For every other binary (bff/voice/cognition/agent/planner):
 
 | Variable                                       | Default | Purpose                                                                                                                              |
 |------------------------------------------------|---------|--------------------------------------------------------------------------------------------------------------------------------------|
-| `MEMQL_IDENTITY_VERIFIER_BASE_URL`                   | empty   | Public origin of the identity service. Empty -> dev no-auth identity (`local-dev@memql.local`) with SECURITY warnings in the logs.   |
+| `MEMQL_IDENTITY_ENABLED`                            | `true`  | **Master auth toggle.** `true`/unset -> authentication is ENFORCED (the verifier below is required). Set explicitly `false`/`0`/`no`/`off` to DISABLE auth for troubleshooting: the node skips the verifier and admits every stream as a synthetic local-dev cluster owner (`local-dev@memql.local`), emitting a loud boot-time SECURITY warning and pinning the `memql_auth_enabled` gauge to 0. Present in every environment; **never set false in staging/production.** |
+| `MEMQL_IDENTITY_VERIFIER_BASE_URL`                   | empty   | Public origin of the identity service. Required when auth is enabled (the default). Blanking it FATALS a verifier-consuming node -- to run without auth use `MEMQL_IDENTITY_ENABLED=false`, not an empty URL. |
 | `MEMQL_IDENTITY_VERIFIER_AUDIENCE`                   | `memql` | Value compared against the JWT `aud` claim.                                                                                          |
 | `MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER`            | `BASE`  | Override for JWT `iss`. Defaults to `MEMQL_IDENTITY_VERIFIER_BASE_URL`.                                                                    |
 | `MEMQL_IDENTITY_VERIFIER_JWKS_REFRESH_SECONDS`       | `300`   | Background JWKS refresh cadence.                                                                                                     |
