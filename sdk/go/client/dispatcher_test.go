@@ -8,14 +8,17 @@ import (
 	"time"
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 )
 
 // mockStream implements the minimal MemqlService_StreamClient interface for testing.
 type mockStream struct {
-	sendCh chan *memqlv1.MemqlClientMessage
-	recvCh chan *memqlv1.MemqlServerMessage
-	closed bool
+	sendCh  chan *memqlv1.MemqlClientMessage
+	recvCh  chan *memqlv1.MemqlServerMessage
+	closed  bool
+	recvErr error // terminal error returned by Recv when recvCh closes (nil => context.Canceled)
 }
 
 func newMockStream() *mockStream {
@@ -33,6 +36,9 @@ func (m *mockStream) Send(msg *memqlv1.MemqlClientMessage) error {
 func (m *mockStream) Recv() (*memqlv1.MemqlServerMessage, error) {
 	msg, ok := <-m.recvCh
 	if !ok {
+		if m.recvErr != nil {
+			return nil, m.recvErr
+		}
 		return nil, context.Canceled
 	}
 	return msg, nil
@@ -354,5 +360,53 @@ func TestDispatcherClosesEventChOnStop(t *testing.T) {
 	case <-rangeDone:
 	case <-time.After(2 * time.Second):
 		t.Fatal("range over Events() did not terminate after Stop() -- eventCh leaked")
+	}
+}
+
+// TestSendAndWait_SurfacesTerminalStatus proves the dispatcher propagates
+// the real terminal stream error (e.g. an Unauthenticated status when the
+// server rejects a no-token stream) instead of masking it as a generic
+// "stream closed" -- so callers like the cockpit reachability probe can
+// tell a reachable-but-needs-auth server from a truly-down one.
+func TestSendAndWait_SurfacesTerminalStatus(t *testing.T) {
+	stream := newMockStream()
+	stream.recvErr = status.Error(codes.Unauthenticated, "authentication required")
+	d := NewDispatcher(stream, nil)
+	go d.Run()
+
+	errCh := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_, err := d.SendAndWait(ctx, &memqlv1.MemqlClientMessage{
+			MessageId: "hello-1",
+			Payload:   &memqlv1.MemqlClientMessage_ClientHello{ClientHello: &memqlv1.ClientHello{ClientId: "t"}},
+		})
+		errCh <- err
+	}()
+
+	// Wait until SendAndWait has actually sent (=> its pending channel is
+	// registered), then kill the stream with the terminal status.
+	select {
+	case <-stream.sendCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("SendAndWait never sent the message")
+	}
+	close(stream.recvCh) // Run's Recv now returns recvErr
+
+	select {
+	case err := <-errCh:
+		if err == nil {
+			t.Fatal("expected an error, got nil")
+		}
+		low := strings.ToLower(err.Error())
+		if !strings.Contains(low, "unauthenticated") && !strings.Contains(low, "authentication required") {
+			t.Fatalf("terminal auth status must survive in the message; got: %v", err)
+		}
+		if s, ok := status.FromError(errors.Unwrap(err)); !ok || s.Code() != codes.Unauthenticated {
+			t.Fatalf("expected the wrapped error to unwrap to an Unauthenticated gRPC status; got ok=%v err=%v", ok, err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("SendAndWait did not return after the stream died")
 	}
 }
