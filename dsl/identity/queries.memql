@@ -1344,6 +1344,65 @@ query identity workerTokensForUser {
   shape    identityFull
 }
 
+// ---- queries/v1/identity/badgeByKeyHash.memql ----
+
+// badgeByKeyHash - Hot-path badge lookup for the grant exchange
+// =============================================================
+//
+// Hot-path query for POST /auth/badge/grant (memql#2513): hash the
+// presented badge/device id, look up the matching badge identity
+// row, mint a short-lived class="badge" grant token for its owner.
+//
+// Returns rows even when active=false so the grant handler can
+// stamp a precise audit reason ("badge revoked") rather than a
+// generic "not found".
+//
+// Arguments:
+//   keyHash (string, required) - SHA-256 hex digest of the badge id
+//
+// Returns:
+//   Zero or one identity row in identityFull shape.
+
+@enabled
+@description("Hot-path badge lookup by keyHash for the operator grant exchange. Returns active + inactive rows.")
+@unbounded("badge identity by unique credential keyHash -- bounded to a single row")
+query identity badgeByKeyHash {
+  args {
+    keyHash  string  @required
+  }
+  filter  identityIsBadge && credentials.keyHash==args.keyHash
+  shape   identityFull
+}
+
+// ---- queries/v1/identity/badgesForUser.memql ----
+
+// badgesForUser
+// =============
+//
+// Lists every badge identity owned by the user. Backs the badge
+// management surface (who registered what badge, when) without
+// exposing the keyHash as a credential.
+//
+// Arguments:
+//   userId (string, required) - v1:identity:user.id
+
+@enabled
+// `@public` marks this query as intentionally not caller-scoped.
+// Same auth shape as workerTokensForUser above (web-layer
+// authentication; userId is the authenticated subject). Tightening
+// tracked under #54.
+@public
+@description("List badge identities owned by a user. Projects identitySummary (id / userId / label / active) -- NEVER credentials, so the badge keyHash (a low-entropy physical id's hash) is never exposed on this public surface.")
+query identity badgesForUser {
+  args {
+    userId  string  @required
+  }
+  filter  identityIsBadge && userId==args.userId
+  sort     "createdAt", "desc"
+  paginate 50
+  shape    identitySummary
+}
+
 // ---- queries/v1/identity/nodeTokenIdentityByBinding.memql ----
 
 // nodeTokenIdentityByBinding

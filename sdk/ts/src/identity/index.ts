@@ -27,3 +27,10 @@ export {
   type CreateWorkerTokenResult,
   type RevokeWorkerTokenResult,
 } from "./workerToken.js";
+export {
+  createBadge,
+  revokeBadge,
+  type CreateBadgeArgs,
+  type CreateBadgeResult,
+  type RevokeBadgeResult,
+} from "./badge.js";

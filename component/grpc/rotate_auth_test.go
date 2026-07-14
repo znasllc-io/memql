@@ -13,6 +13,7 @@ package memql
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -97,6 +98,18 @@ func newRotateAuthFixture(t *testing.T) (
 	issue func(user, email, role string) string,
 	v *verifier.Verifier,
 ) {
+	issue, _, v = newRotateAuthFixtureWithBadge(t)
+	return issue, v
+}
+
+// newRotateAuthFixtureWithBadge is newRotateAuthFixture plus a badge
+// grant issuer, so tests can prove a rotated-in class="badge" token
+// arms the expiry gate end to end (memql#2513).
+func newRotateAuthFixtureWithBadge(t *testing.T) (
+	issue func(user, email, role string) string,
+	issueBadge func(operator, roleCeiling string, ttl time.Duration) string,
+	v *verifier.Verifier,
+) {
 	t.Helper()
 	srv := httptest.NewServer(http.NewServeMux())
 	t.Cleanup(srv.Close)
@@ -151,7 +164,18 @@ func newRotateAuthFixture(t *testing.T) (
 		}
 		return tok
 	}
-	return issue, v
+	issueBadge = func(operator, roleCeiling string, ttl time.Duration) string {
+		tok, _, err := iss.IssueBadgeGrantToken(identity.BadgeGrantIssueInput{
+			UserId:      operator,
+			RoleCeiling: roleCeiling,
+			TTLOverride: ttl,
+		}, time.Now().UTC())
+		if err != nil {
+			t.Fatalf("IssueBadgeGrantToken: %v", err)
+		}
+		return tok
+	}
+	return issue, issueBadge, v
 }
 
 // newSessionForRotate builds a streamSession wired to the supplied
@@ -307,5 +331,64 @@ func TestRotateAuth_InvalidJWTKeepsOldIdentity(t *testing.T) {
 	}
 	if sess.identity.Subject != "v1:identity:user:before-rotate" {
 		t.Errorf("identity changed on reject; subject is now %q", sess.identity.Subject)
+	}
+}
+
+// TestRotateAuth_BadgeGrantArmsExpiryGate proves the full memql#2513
+// path through the real verifier: a kiosk stream (user-class) rotates
+// in a class="badge" grant, the badge expiry gate arms from the
+// verified claims (NOT the lazy stream-open stamp), and once the grant
+// expires ordinary work is rejected with badge_grant_expired while
+// RotateAuth stays admitted so the client can rotate back.
+func TestRotateAuth_BadgeGrantArmsExpiryGate(t *testing.T) {
+	_, issueBadge, v := newRotateAuthFixtureWithBadge(t)
+	svc := &service{verifier: v, logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	sess, cs := newSessionForRotate(svc)
+
+	// A ~1s grant so the test observes both the live and expired states
+	// without sleeping long.
+	grant := issueBadge("v1:identity:user:operator-9", "writer", 1200*time.Millisecond)
+	if err := sess.handleRotateAuth(
+		&memqlv1.MemqlClientMessage{MessageId: "rot-badge"},
+		&memqlv1.RotateAuthMsg{AccessToken: grant},
+	); err != nil {
+		t.Fatalf("handleRotateAuth: %v", err)
+	}
+	if res := cs.lastSent().GetRotateAuthResult(); res == nil || !res.GetOk() {
+		t.Fatalf("badge rotate should succeed; got %+v", res)
+	}
+	if sess.identity.Subject != "v1:identity:user:operator-9" {
+		t.Fatalf("identity not swapped to operator; got %q", sess.identity.Subject)
+	}
+
+	q := &memqlv1.MemqlClientMessage{
+		MessageId: "q-live",
+		Payload: &memqlv1.MemqlClientMessage_ExecuteQuery{
+			ExecuteQuery: &memqlv1.ExecuteQueryMsg{RequestId: "q-live", Query: "concept==v1:demo"},
+		},
+	}
+	// While live, the gate admits work (it fails later for lack of an
+	// engine, but NOT with the gate's typed rejection).
+	if v := sess.badgeGate(q); v != badgeGateAllow {
+		t.Fatalf("live badge grant should allow ordinary work; gate verdict=%v", v)
+	}
+
+	// After expiry the gate rejects work but still admits RotateAuth.
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if sess.badgeGate(q) == badgeGateExpired {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if v := sess.badgeGate(q); v != badgeGateExpired {
+		t.Fatalf("expired badge grant should reject work; gate verdict=%v", v)
+	}
+	rotateBack := &memqlv1.MemqlClientMessage{
+		MessageId: "rot-back",
+		Payload:   &memqlv1.MemqlClientMessage_RotateAuth{RotateAuth: &memqlv1.RotateAuthMsg{}},
+	}
+	if v := sess.badgeGate(rotateBack); v != badgeGateAllow {
+		t.Fatalf("RotateAuth must stay admitted on an expired grant so the client can recover; verdict=%v", v)
 	}
 }

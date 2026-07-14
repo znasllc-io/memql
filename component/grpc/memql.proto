@@ -278,6 +278,16 @@ message MemqlClientMessage {
     // rows to retired (so a restart never re-hydrates them), and broadcast the
     // live cross-node removal. OWNER-only, same gate as durable_promote_bundle.
     DurableDemoteBundleMsg durable_demote_bundle = 82;
+
+    // Badge registration lifecycle (memql#2513): register / revoke a
+    // shared-terminal operator badge (identityType="badge" on
+    // v1:identity:identity). The GRANT exchange itself lives on the
+    // identity HTTP surface (POST /auth/badge/grant) next to magic-link
+    // / OAuth / pairing, because minting requires the identity node's
+    // signing keys -- same split the worker-token family documents
+    // above.
+    CreateBadgeMsg create_badge = 83;
+    RevokeBadgeMsg revoke_badge = 84;
   }
 }
 
@@ -410,6 +420,10 @@ message MemqlServerMessage {
     DurablePromoteBundleResult durable_promote_bundle_result = 118;
     // Durable-demote reply (see DurableDemoteBundleMsg, memql#2163).
     DurableDemoteBundleResult durable_demote_bundle_result = 119;
+
+    // Badge registration lifecycle results (memql#2513).
+    CreateBadgeResult create_badge_result = 120;
+    RevokeBadgeResult revoke_badge_result = 121;
   }
 }
 
@@ -2008,6 +2022,50 @@ message RevokeWorkerTokenMsg {
 }
 
 message RevokeWorkerTokenResult {
+  string request_id = 1;
+  bool success = 2;
+  string error_code = 3;
+  string error_message = 4;
+}
+
+// CreateBadgeMsg registers a shared-terminal operator badge
+// (memql#2513): maps a physical badge/device identifier to a
+// v1:identity:user so the identity service's POST /auth/badge/grant
+// exchange can mint short-lived operator grant tokens for it. Only
+// the SHA-256 hash of badge_id is persisted.
+message CreateBadgeMsg {
+  string request_id = 1;
+  // Plaintext badge/device identifier from the registration tap /
+  // scan. Hashed server-side; never persisted or echoed back.
+  string badge_id = 2;
+  // Human label for the badge ("Alice -- floor badge").
+  string label = 3;
+  // Optional owner override. Empty = caller's identity. Admin
+  // surfaces pass an explicit owner_user_id to register badges for
+  // other operators (the common shared-terminal flow).
+  string owner_user_id = 4;
+}
+
+message CreateBadgeResult {
+  string request_id = 1;
+  bool success = 2;
+  // Identity row id (v1:identity:identity).
+  string identity_id = 3;
+  // Resolved owner user id.
+  string owner_user_id = 4;
+  string error_code = 5;
+  string error_message = 6;
+}
+
+// RevokeBadgeMsg soft-revokes a badge identity row (active=false).
+// Future grant exchanges are blocked immediately; outstanding
+// short-TTL grant tokens expire on their own.
+message RevokeBadgeMsg {
+  string request_id = 1;
+  string identity_id = 2;
+}
+
+message RevokeBadgeResult {
   string request_id = 1;
   bool success = 2;
   string error_code = 3;

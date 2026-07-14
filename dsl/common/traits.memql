@@ -344,6 +344,21 @@ trait identityIsNodeToken {
   return identityType=="node_token"
 }
 
+// ---- identityIsBadge ----
+//
+// Concept-targeted trait for v1:identity:identity rows whose
+// identityType field is "badge". Badges are registered operator
+// credentials for shared terminals (memql#2513): the identity
+// service's POST /auth/badge/grant exchange looks rows up by
+// credentials.keyHash to mint a short-lived class="badge" grant
+// token for the owning user.
+
+@enabled
+@description("Matches v1:identity:identity rows with identityType=='badge'.")
+trait identityIsBadge {
+  return identityType=="badge"
+}
+
 // ---- isDeletionScheduled ----
 //
 // Matches records that carry a non-empty deletionScheduledAt field.

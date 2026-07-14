@@ -2392,6 +2392,52 @@ func CreateAvatarPersonaBuild(args CreateAvatarPersonaArgs) string {
 	return b.String()
 }
 
+// CreateBadgeIdentity -- Register a badge identity (shared-terminal operator credential). Stores only the SHA-256 hex hash of the badge/device id.
+//
+// Bound concept: v1:identity:identity (machine-readable: BoundConcepts["createBadgeIdentity"] in generated_concepts.go).
+type CreateBadgeIdentityArgs struct {
+	IdentityId   string
+	UserId       string
+	Label        string
+	KeyHash      string
+	RegisteredBy string
+}
+
+// CreateBadgeIdentity calls the engine mutation createBadgeIdentity.
+func (qc *QueryClient) CreateBadgeIdentity(ctx context.Context, args CreateBadgeIdentityArgs) (*Result, error) {
+	call := CreateBadgeIdentityBuild(args)
+	return qc.executeNamed(ctx, "createBadgeIdentity", call)
+}
+
+func CreateBadgeIdentityBuild(args CreateBadgeIdentityArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation createBadgeIdentity(")
+	b.WriteString("identityId: ")
+	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("userId: ")
+	b.WriteString(fmt.Sprintf("%q", args.UserId))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("label: ")
+	b.WriteString(fmt.Sprintf("%q", args.Label))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("keyHash: ")
+	b.WriteString(fmt.Sprintf("%q", args.KeyHash))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("registeredBy: ")
+	b.WriteString(fmt.Sprintf("%q", args.RegisteredBy))
+	b.WriteString(")")
+	return b.String()
+}
+
 // CreateCalendarEvent -- Create a native calendar event owned by the authenticated caller. ownerUserId is stamped from actor.userId (caller-scoped write); createdAt + createdBy are engine-stamped row intrinsics (NOT payload fields -- declaring them is rejected as reserved, memql#1673); source defaults to 'native'. The reactive harness's reminder triggers pick the row up via upcomingEvents. Pass `eventId` to control the id (idempotent re-create), else the engine assigns one.
 //
 // Bound concept: v1:calendar:calendarEvent (machine-readable: BoundConcepts["createCalendarEvent"] in generated_concepts.go).
@@ -9050,6 +9096,28 @@ func RevokeAuthSessionBuild(args RevokeAuthSessionArgs) string {
 	return b.String()
 }
 
+// RevokeBadgeIdentity -- Revoke (deactivate) a badge identity row. Future grant exchanges are blocked immediately; outstanding short-TTL grant tokens expire on their own.
+//
+// Bound concept: v1:identity:identity (machine-readable: BoundConcepts["revokeBadgeIdentity"] in generated_concepts.go).
+type RevokeBadgeIdentityArgs struct {
+	IdentityId string
+}
+
+// RevokeBadgeIdentity calls the engine mutation revokeBadgeIdentity.
+func (qc *QueryClient) RevokeBadgeIdentity(ctx context.Context, args RevokeBadgeIdentityArgs) (*Result, error) {
+	call := RevokeBadgeIdentityBuild(args)
+	return qc.executeNamed(ctx, "revokeBadgeIdentity", call)
+}
+
+func RevokeBadgeIdentityBuild(args RevokeBadgeIdentityArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation revokeBadgeIdentity(")
+	b.WriteString("identityId: ")
+	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // RevokeDelegation -- Revoke a delegation: authoritatively flips active=false and stamps revokedAt/revokedBySubject regardless of caller input. Read-merges the persisted row so every other field is preserved (memql#1729).
 //
 // Bound concept: v1:identity:delegation (machine-readable: BoundConcepts["revokeDelegation"] in generated_concepts.go).
@@ -10600,6 +10668,34 @@ func ToggleComputerUseEnabledBuild(args ToggleComputerUseEnabledArgs) string {
 	}
 	b.WriteString("enabled: ")
 	b.WriteString(fmt.Sprintf("%v", args.Enabled))
+	b.WriteString(")")
+	return b.String()
+}
+
+// TouchBadgeLastUsed -- Stamp credentials.lastUsedAt on a badge identity after a successful grant exchange. Best-effort; the grant succeeds even when this write fails.
+//
+// Bound concept: v1:identity:identity (machine-readable: BoundConcepts["touchBadgeLastUsed"] in generated_concepts.go).
+type TouchBadgeLastUsedArgs struct {
+	IdentityId  string
+	Credentials map[string]any
+}
+
+// TouchBadgeLastUsed calls the engine mutation touchBadgeLastUsed.
+func (qc *QueryClient) TouchBadgeLastUsed(ctx context.Context, args TouchBadgeLastUsedArgs) (*Result, error) {
+	call := TouchBadgeLastUsedBuild(args)
+	return qc.executeNamed(ctx, "touchBadgeLastUsed", call)
+}
+
+func TouchBadgeLastUsedBuild(args TouchBadgeLastUsedArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation touchBadgeLastUsed(")
+	b.WriteString("identityId: ")
+	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("credentials: ")
+	b.WriteString(renderMemQLValue(args.Credentials))
 	b.WriteString(")")
 	return b.String()
 }
