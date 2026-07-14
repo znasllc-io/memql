@@ -20,8 +20,9 @@ type MiddlewareOptions struct {
 
 // HTTPMiddleware wraps an HTTP handler with bearer-token verification.
 // Public paths bypass; everything else requires a valid bearer token
-// (header, cookie, or `?token=` query for WebSocket upgrades that
-// can't set custom headers).
+// (Authorization header; the bearer Sec-WebSocket-Protocol entry for
+// browser WebSocket upgrades, #2511; the memql_auth cookie; or the
+// deprecated `?bearer_token=` / `?token=` query params).
 func HTTPMiddleware(v *Verifier, opts MiddlewareOptions) func(http.Handler) http.Handler {
 	if v == nil {
 		return func(next http.Handler) http.Handler {
@@ -90,13 +91,22 @@ func extractTokenHTTP(r *http.Request) (string, string, error) {
 			return tok, "header", nil
 		}
 	}
+	// Browsers can't set headers on the WebSocket upgrade; the SDK carries
+	// the bearer JWT as the second Sec-WebSocket-Protocol entry
+	// (`new WebSocket(url, ["bearer", token])`, #2511). Beats the cookie:
+	// an explicit dial credential wins over an ambient (possibly stale)
+	// browser session cookie.
+	if scheme, cred := auth.WebSocketSubprotocolCredential(r); scheme == auth.WSCredentialSchemeBearer && cred != "" {
+		return cred, "ws-subprotocol", nil
+	}
 	if c, err := r.Cookie(authCookieName); err == nil && c != nil && strings.TrimSpace(c.Value) != "" {
 		return strings.TrimSpace(c.Value), "cookie", nil
 	}
 	if r.URL != nil {
-		// Browsers can't set headers on the WebSocket upgrade, so the
-		// SDK piggybacks the bearer JWT as ?bearer_token=. ?token= is
-		// kept as a legacy alias.
+		// DEPRECATED (#2511): query-param token carry predates the
+		// subprotocol channel and leaks the credential into request-line
+		// access logs. Kept working until downstream clients migrate
+		// (memql-project#16); ?token= is the older legacy alias.
 		if v := strings.TrimSpace(r.URL.Query().Get("bearer_token")); v != "" {
 			return v, "query", nil
 		}

@@ -134,6 +134,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		CompressionMode: websocket.CompressionDisabled,
 		OriginPatterns:  []string{"*"},
+		// Negotiate the credential-scheme subprotocol back to browser
+		// clients dialing new WebSocket(url, ["bearer"|"guest", token])
+		// (#2511); the credential itself is consumed by the verifier HTTP
+		// middleware before this handler runs. Legacy query-param dials
+		// offer no subprotocol and negotiate none, unchanged.
+		Subprotocols: auth.WSNegotiableSubprotocols(),
 	})
 	if err != nil {
 		h.logger.Error("audio websocket accept failed", "error", err)

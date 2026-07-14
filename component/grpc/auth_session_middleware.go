@@ -34,6 +34,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/znasllc-io/memql/component/auth"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 )
 
@@ -144,9 +145,11 @@ func NewSessionRevocationStreamInterceptor(base grpc.StreamServerInterceptor, en
 }
 
 // extractBearerTokenHTTP walks the same fallback chain as the
-// verifier HTTP middleware: Authorization header, then auth cookie,
-// then `?token=` query parameter (used by browser WebSocket
-// upgrades, which can't set custom headers).
+// verifier HTTP middleware: Authorization header, then the bearer
+// Sec-WebSocket-Protocol entry (browser WS upgrades, #2511), then
+// auth cookie, then the deprecated `?bearer_token=` / `?token=`
+// query parameters. The order MUST match the verifier's so the
+// revocation check hashes the same token the verifier validated.
 func extractBearerTokenHTTP(r *http.Request) string {
 	if r == nil {
 		return ""
@@ -157,14 +160,17 @@ func extractBearerTokenHTTP(r *http.Request) string {
 			return strings.TrimSpace(parts[1])
 		}
 	}
+	if scheme, cred := auth.WebSocketSubprotocolCredential(r); scheme == auth.WSCredentialSchemeBearer && cred != "" {
+		return cred
+	}
 	if cookie, err := r.Cookie(authCookieName); err == nil && cookie != nil {
 		if v := strings.TrimSpace(cookie.Value); v != "" {
 			return v
 		}
 	}
 	if r.URL != nil {
-		// SDK sends the bearer JWT as ?bearer_token= on the WS upgrade
-		// (browsers can't set headers); ?token= kept as a legacy alias.
+		// DEPRECATED (#2511): kept until downstream clients migrate to
+		// the subprotocol carry (memql-project#16).
 		if v := strings.TrimSpace(r.URL.Query().Get("bearer_token")); v != "" {
 			return v
 		}

@@ -19,7 +19,8 @@ import (
 //
 // Auth rides the shared verifier HTTP middleware: the handler reads the
 // identity off the request context (populated from the Authorization
-// header or the ?bearer_token= query the SDK sends on the upgrade), so
+// header or the bearer WebSocket subprotocol the SDK sends on the upgrade,
+// with the deprecated ?bearer_token= query still accepted), so
 // no token extraction lives here.
 //
 // No-op when no STT provider was selected (e.g. missing provider keys),

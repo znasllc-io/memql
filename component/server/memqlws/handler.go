@@ -133,6 +133,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		CompressionMode: websocket.CompressionDisabled,
 		OriginPatterns:  originPatterns,
+		// Negotiate the credential-scheme subprotocol back to browser
+		// clients dialing new WebSocket(url, ["bearer"|"guest", token])
+		// (#2511) -- browsers abort the handshake unless the 101 echoes
+		// one of their offered entries. Legacy query-param dials offer no
+		// subprotocol and negotiate none, unchanged.
+		Subprotocols: auth.WSNegotiableSubprotocols(),
 	})
 	if err != nil {
 		h.logError("websocket accept failed", err)
@@ -753,20 +759,35 @@ func metadataFromRequest(r *http.Request) metadata.MD {
 		return md
 	}
 	// Check Authorization header first
-	if auth := strings.TrimSpace(r.Header.Get("Authorization")); auth != "" {
-		md.Append("authorization", auth)
-	} else if bearer := strings.TrimSpace(r.URL.Query().Get("bearer_token")); bearer != "" {
-		// Browsers can't set custom headers during the WebSocket upgrade,
-		// so the SDK piggybacks the bearer JWT as ?bearer_token=.
+	if header := strings.TrimSpace(r.Header.Get("Authorization")); header != "" {
+		md.Append("authorization", header)
+		return md
+	}
+	// Browser clients carry the credential as the second
+	// Sec-WebSocket-Protocol entry (["bearer"|"guest", token], #2511) --
+	// the header channel that stays out of request-line access logs.
+	if scheme, cred := auth.WebSocketSubprotocolCredential(r); cred != "" {
+		switch scheme {
+		case auth.WSCredentialSchemeBearer:
+			md.Append("authorization", "Bearer "+cred)
+			return md
+		case auth.WSCredentialSchemeGuest:
+			// The guest-aware stream interceptor validates the invitation
+			// token against the invitation store.
+			md.Append("authorization", "Guest "+cred)
+			return md
+		}
+	}
+	// DEPRECATED (#2511): query-param token carry, kept until downstream
+	// clients migrate to the subprotocol channel (memql-project#16).
+	if bearer := strings.TrimSpace(r.URL.Query().Get("bearer_token")); bearer != "" {
 		md.Append("authorization", "Bearer "+bearer)
 	} else if token := strings.TrimSpace(r.URL.Query().Get("token")); token != "" {
 		// Legacy alias for ?bearer_token=.
 		md.Append("authorization", "Bearer "+token)
 	} else if guest := strings.TrimSpace(r.URL.Query().Get("guest_token")); guest != "" {
 		// Guest invite flow: browsers opening /join/<token> send the
-		// invitation token as ?guest_token=<token> since WebSocket
-		// upgrades can't carry custom headers. The guest-aware stream
-		// interceptor validates it against the invitation store.
+		// invitation token as ?guest_token=<token>.
 		md.Append("authorization", "Guest "+guest)
 	}
 	return md

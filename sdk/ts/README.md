@@ -60,10 +60,15 @@ const conn = await Connection.dial({
 // conn.close() : void
 ```
 
-Authentication is stamped onto the WebSocket URL (browsers cannot set
-headers on the upgrade): `auth.bearer` -> `bearer_token`,
-`auth.guestToken` -> `guest_token`, `auth.workerToken` ->
-`worker_token`. Pass `onTokenExpired` to refresh without redialing.
+Authentication travels as WebSocket subprotocols (browsers cannot set
+headers on the upgrade, and query params would leak the credential into
+access logs): `auth.bearer` dials with `["bearer", token]`,
+`auth.guestToken` with `["guest", token]` -- the server negotiates the
+scheme entry back on the 101. `auth.workerToken` still stamps
+`worker_token` onto the URL until the worker surface migrates. Custom
+`webSocketFactory` implementations MUST forward the `protocols`
+argument to their WebSocket constructor. Pass `onTokenExpired` to
+refresh without redialing.
 
 ### Subscriptions
 
@@ -136,9 +141,9 @@ All five accept `{ signal }` for cancellation and throw on
 mints a short-lived LiveKit room token for joining a space's voice
 room. `dialAudio` opens a SEPARATE WebSocket to `/memql/audio` for
 the older streaming-STT + streaming-TTS protocol used by the
-product SPA. The audio client stamps the same `bearer_token` /
-`guest_token` / `worker_token` query string on the URL the main
-Connection uses.
+product SPA. The audio client carries auth the
+same way the main Connection does: bearer / guest via WebSocket
+subprotocols, worker tokens on the query string.
 
 ```ts
 import { polyphonRoomToken, dialAudio } from "@znasllc-io/memql-sdk-core/realtime";

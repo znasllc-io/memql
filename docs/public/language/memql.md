@@ -233,7 +233,7 @@ tree, err := memEngine.Execute(ctx, `
 
 ### WebSocket Stream
 
-Browser clients connect to `/memql/ws`, which upgrades to a long-lived WebSocket and forwards frames to the `MemqlService.Stream` gRPC method. Auth cookies/JWTs are reused automatically because the upgrade happens after the standard middleware stack.
+Browser clients connect to `/memql/ws`, which upgrades to a long-lived WebSocket and forwards frames to the `MemqlService.Stream` gRPC method. Bearer and guest credentials travel as WebSocket subprotocols (`new WebSocket(url, ["bearer", jwt])` -- the `Sec-WebSocket-Protocol` header, which stays out of request-line access logs); the `memql_auth` cookie is honored automatically, and the older `?bearer_token=` / `?token=` / `?guest_token=` query params remain accepted but are deprecated.
 
 Frames are JSON encodings of the existing protobuf envelopes. A typical request/response pair looks like:
 
