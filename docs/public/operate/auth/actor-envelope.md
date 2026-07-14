@@ -69,7 +69,7 @@ caller authenticated, but the underlying behavior differs:
 | **user (magic-link)** | JWT verified against JWKS | user's id | user's role | the `magic_link` identity | full stream |
 | **user (PAT)** | API key bearer | owner's id | owner's role | the `api_key` identity | full stream |
 | **worker token** | `Authorization: Worker mql_wkr_<token>` | registering user's id | `system` | the `worker_token` identity | only `WorkerService.Stream`; everything else 401 |
-| **guest invite** | `Authorization: Guest <token>` or `?guest_token=<token>` on WS | empty | `guest` | empty | only the explicitly-scoped reads on the invitation |
+| **guest invite** | `Authorization: Guest <token>`, the `guest` WebSocket subprotocol pair (`new WebSocket(url, ["guest", token])`), or the deprecated `?guest_token=<token>` on WS | empty | `guest` | empty | only the explicitly-scoped reads on the invitation |
 | **system** | `systemActorContext(ctx)` -- internal-only | empty | `system` | empty | seed materializer, automations -- never reachable from a network request |
 
 The auth interceptor (`component/grpc/auth_session_middleware.go`)

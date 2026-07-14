@@ -4,9 +4,11 @@
 // is still used by the the product SPA for the per-space "speak to
 // add an utterance" affordance and for live agent TTS playback.
 //
-// Auth: same `bearer_token` / `guest_token` / `worker_token` query
-// string the main Connection uses. Browsers can't set custom
-// headers on the WebSocket upgrade so the stamping is identical.
+// Auth: same handshake carry the main Connection uses -- bearer and
+// guest credentials travel as WebSocket subprotocols
+// (["bearer"|"guest", token], #2511) so they stay out of the URL;
+// worker tokens remain on the query string until the worker surface
+// migrates.
 //
 // Wire shape (mirrors component/server/audiows/messages.go):
 //
@@ -33,6 +35,7 @@
 //                               cancelled?, error? }
 
 import { newShortId } from "../client/id.js";
+import { wsAuthSubprotocols } from "../client/wsauth.js";
 
 export interface AudioConnectionAuth {
   bearer?: string;
@@ -46,7 +49,9 @@ export interface DialAudioOptions {
   // pattern (".../memql/ws") swapped for ".../memql/audio".
   endpoint: string;
   auth?: AudioConnectionAuth;
-  webSocketFactory?: (url: string) => WebSocket;
+  // `protocols` carries the auth subprotocol pair (#2511); custom
+  // factories MUST forward it to their WebSocket constructor.
+  webSocketFactory?: (url: string, protocols?: string[]) => WebSocket;
   logger?: Pick<Console, "warn" | "info" | "error"> | null;
   // Override the open-handshake timeout (default 5_000 ms).
   handshakeTimeoutMs?: number;
@@ -208,7 +213,7 @@ export class AudioClient {
   static async dial(opts: DialAudioOptions): Promise<AudioClient> {
     const url = resolveAudioEndpoint(opts.endpoint, opts.auth);
     const factory = opts.webSocketFactory ?? defaultWebSocketFactory;
-    const socket = factory(url);
+    const socket = factory(url, wsAuthSubprotocols(opts.auth));
     await waitForOpen(socket, opts.handshakeTimeoutMs ?? DEFAULT_HANDSHAKE_TIMEOUT_MS);
     return new AudioClient(socket, opts);
   }
@@ -545,13 +550,13 @@ export class AudioClient {
 
 // ---------- helpers ----------
 
-function defaultWebSocketFactory(url: string): WebSocket {
+function defaultWebSocketFactory(url: string, protocols?: string[]): WebSocket {
   if (typeof WebSocket === "undefined") {
     throw new Error(
       "memql sdk: no global WebSocket available -- pass webSocketFactory or run in a browser / Node 22+",
     );
   }
-  return new WebSocket(url);
+  return new WebSocket(url, protocols);
 }
 
 function waitForOpen(socket: WebSocket, timeoutMs: number): Promise<void> {
@@ -598,9 +603,9 @@ function waitForOpen(socket: WebSocket, timeoutMs: number): Promise<void> {
   });
 }
 
-// resolveAudioEndpoint mirrors Connection.resolveEndpoint -- same
-// query-string auth (browsers can't set Authorization on the
-// upgrade).
+// resolveAudioEndpoint mirrors Connection.resolveEndpoint -- bearer and
+// guest credentials travel as WebSocket subprotocols (#2511); only the
+// worker token remains on the query string.
 function resolveAudioEndpoint(endpoint: string, auth: AudioConnectionAuth | undefined): string {
   let url: URL;
   if (/^wss?:\/\//i.test(endpoint)) {
@@ -612,9 +617,7 @@ function resolveAudioEndpoint(endpoint: string, auth: AudioConnectionAuth | unde
   } else {
     throw new Error(`AudioClient: cannot resolve relative endpoint ${endpoint} without a window.location`);
   }
-  if (auth?.guestToken) url.searchParams.set("guest_token", auth.guestToken);
   if (auth?.workerToken) url.searchParams.set("worker_token", auth.workerToken);
-  if (auth?.bearer) url.searchParams.set("bearer_token", auth.bearer);
   return url.toString();
 }
 

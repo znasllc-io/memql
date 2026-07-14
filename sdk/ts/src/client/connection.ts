@@ -9,6 +9,7 @@
 // document origin when run in a browser.
 
 import { Dispatcher, type DispatcherOptions } from "./dispatcher.js";
+import { wsAuthSubprotocols } from "./wsauth.js";
 import { QueryClient } from "./query.js";
 import { SubscriptionManager } from "./subscriptions.js";
 import { newShortId } from "./id.js";
@@ -45,7 +46,10 @@ export interface ConnectOptions {
   sdkVersion?: string;
   // WebSocket factory override. The default uses globalThis.WebSocket.
   // Exposed for tests + Node consumers that ship their own ws impl.
-  webSocketFactory?: (url: string) => WebSocket;
+  // `protocols` carries the auth subprotocol pair (["bearer"|"guest",
+  // token], #2511); a factory MUST forward it to its WebSocket
+  // constructor or authenticated dials will fail.
+  webSocketFactory?: (url: string, protocols?: string[]) => WebSocket;
   logger?: DispatcherOptions["logger"];
   // Override the handshake timeout (default 5_000 ms).
   handshakeTimeoutMs?: number;
@@ -85,7 +89,7 @@ export class Connection {
   static async dial(opts: ConnectOptions): Promise<Connection> {
     const url = resolveEndpoint(opts.endpoint, opts.auth);
     const factory = opts.webSocketFactory ?? defaultWebSocketFactory;
-    const socket = factory(url);
+    const socket = factory(url, wsAuthSubprotocols(opts.auth));
     await waitForOpen(socket);
     const conn = new Connection(socket, opts);
     try {
@@ -284,13 +288,13 @@ function base64UrlDecode(segment: string): string {
   throw new Error("memql sdk: no base64 decoder available (need atob or Buffer)");
 }
 
-function defaultWebSocketFactory(url: string): WebSocket {
+function defaultWebSocketFactory(url: string, protocols?: string[]): WebSocket {
   if (typeof WebSocket === "undefined") {
     throw new Error(
       "memql sdk: no global WebSocket available -- pass webSocketFactory or run in a browser / Node 22+",
     );
   }
-  return new WebSocket(url);
+  return new WebSocket(url, protocols);
 }
 
 function waitForOpen(socket: WebSocket): Promise<void> {
@@ -319,12 +323,10 @@ function waitForOpen(socket: WebSocket): Promise<void> {
   });
 }
 
-// resolveEndpoint stamps the auth credential onto the URL. Browsers
-// can't send custom headers on the WebSocket upgrade, so guest tokens
-// go on the query string (matching the server-side
-// `?guest_token=<token>` accepted path in component/grpc/...) and
-// bearer JWTs piggyback as the `bearer_token` query string. The
-// gRPC interceptor admits both forms.
+// resolveEndpoint resolves the dial URL. Bearer and guest credentials
+// travel as WebSocket subprotocols (#2511, see wsauth.ts), NOT on the
+// query string -- the URL stays free of live tokens. Worker tokens
+// remain on the query string until the worker surface migrates.
 function resolveEndpoint(endpoint: string, auth: ConnectionAuth | undefined): string {
   let url: URL;
   if (/^wss?:\/\//i.test(endpoint)) {
@@ -336,8 +338,6 @@ function resolveEndpoint(endpoint: string, auth: ConnectionAuth | undefined): st
   } else {
     throw new Error(`memql sdk: cannot resolve relative endpoint ${endpoint} without a window.location`);
   }
-  if (auth?.guestToken) url.searchParams.set("guest_token", auth.guestToken);
   if (auth?.workerToken) url.searchParams.set("worker_token", auth.workerToken);
-  if (auth?.bearer) url.searchParams.set("bearer_token", auth.bearer);
   return url.toString();
 }

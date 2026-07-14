@@ -245,25 +245,34 @@ class FakeWebSocket {
 let activeSocket: FakeWebSocket | null = null;
 (globalThis as unknown as { WebSocket: typeof FakeWebSocket }).WebSocket = FakeWebSocket;
 
-async function dialTestAudio(): Promise<{ client: AudioClient; socket: FakeWebSocket }> {
+async function dialTestAudio(): Promise<{
+  client: AudioClient;
+  socket: FakeWebSocket;
+  protocols: string[] | undefined;
+}> {
   // Use a factory we control so we can grab the socket reference.
   let socket: FakeWebSocket | null = null;
+  let protocols: string[] | undefined;
   const client = await dialAudio({
     endpoint: "wss://test.local/memql/audio",
     auth: { bearer: "test-bearer" },
-    webSocketFactory: (url) => {
+    webSocketFactory: (url, protos) => {
       socket = new FakeWebSocket(url);
+      protocols = protos;
       activeSocket = socket;
       return socket as unknown as WebSocket;
     },
   });
   if (!socket) throw new Error("dialTestAudio: no socket captured");
-  return { client, socket };
+  return { client, socket, protocols };
 }
 
-test("AudioClient.dial -- stamps auth on URL", async () => {
-  const { client, socket } = await dialTestAudio();
-  assert.ok(socket.url.includes("bearer_token=test-bearer"), `url=${socket.url}`);
+test("AudioClient.dial -- bearer travels as subprotocol, never on the URL", async () => {
+  const { client, socket, protocols } = await dialTestAudio();
+  // #2511: the credential rides Sec-WebSocket-Protocol, and the URL stays
+  // free of live tokens.
+  assert.deepEqual(protocols, ["bearer", "test-bearer"]);
+  assert.ok(!socket.url.includes("test-bearer"), `url leaks the bearer: ${socket.url}`);
   assert.ok(socket.url.startsWith("wss://test.local/memql/audio"));
   client.close();
 });
