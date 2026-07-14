@@ -45,7 +45,14 @@ the executor can drive it and record its result without scraping human prose.
    default from an env var (`cap_param name "${ENV:-fallback}"`), so env
    feeds the default slot rather than being a separate tier. The executor
    prefers stdin JSON; humans prefer flags/env. There are no
-   positional arguments.
+   positional arguments. The `cap_spec_param` declarations ARE the accepted
+   flag surface: a flag not declared by the script (and not one of the meta
+   flags `--help` / `--print-spec` / `--params-stdin`) is rejected with
+   exit 2 + a failure envelope, so a typoed flag can never silently fall
+   through to a default (#2508). Stdin params are buffered **once**, in the
+   parent shell, at `cap_parse_flags` (or `cap_init` under the
+   `CAP_PARAMS_STDIN` env opt-in) -- a multi-key JSON object resolves every
+   key, regardless of how many `cap_param` reads follow (#2508).
 
 5. **Structured result out.** On **stdout**, the script emits **exactly one**
    JSON envelope (its result) and **nothing else**. All human-readable logging
@@ -157,9 +164,9 @@ Key helpers (full reference in the file header):
 | helper                          | purpose                                                   |
 |---------------------------------|-----------------------------------------------------------|
 | `cap_init <id> <summary>`       | declare the capability + install the result-guarantee trap |
-| `cap_spec_param <n> <d>`        | document a param for `--print-spec` / `--help`            |
+| `cap_spec_param <n> <d>`        | declare a param: the accepted flag surface + `--print-spec` / `--help` |
 | `cap_handle_meta "$@"`          | handle `--help` / `--print-spec` and exit                 |
-| `cap_parse_flags "$@"`          | parse `--k=v` / `--k` into `CAP_ARG_*`; reject unknowns    |
+| `cap_parse_flags "$@"`          | parse `--k=v` / `--k` into `CAP_ARG_*`; undeclared flags exit 2; buffers stdin params once |
 | `cap_param <name> [default]`    | resolve a param (flag > stdin JSON > default)             |
 | `cap_flag <name>`               | the parsed `--name` flag value                            |
 | `cap_require <name> <value>`    | fail (exit 2) when a required param is empty              |
@@ -218,7 +225,11 @@ source `capability.sh`):
 - contains **no interactive prompt** (`read -p` / `read -rp` / `select`);
 - answers `--print-spec` with a valid descriptor whose `capability` matches
   `cap_init`;
-- runs cleanly with stdin closed (no blocking).
+- runs cleanly with stdin closed (no blocking);
+- rejects an undeclared flag with exit 2 + a failure envelope whose
+  `error.code` is 2 (#2508);
+- resolves every key of a multi-key stdin-JSON params object -- stdin is
+  buffered once in the parent shell, never re-read per `cap_param` (#2508).
 
 New capability scripts are picked up automatically. A script that is *not* a
 capability backend (a pure status reporter, a dev convenience) need not adopt
