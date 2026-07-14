@@ -2,6 +2,15 @@
 // runs at startup, on demand against a .memql file or a whole DSL
 // root. Sibling tool to memqlfmt and memqlmigrate.
 //
+// Beyond parse + legacy-import validation, the lint pass verifies
+// referential integrity against the loaded tree (#2509): Form B
+// `use ns.module.{ sym }` imports must resolve (module file AND every
+// imported symbol), signature-bound concepts must exist, and
+// insert/update blocks may only write fields their concept declares.
+// Imports into namespaces absent from the linted root (e.g. engine
+// domains, when linting a product bundle standalone) are treated as
+// external and skipped.
+//
 // Usage:
 //
 //	memqllint [flags] [path]
@@ -124,7 +133,21 @@ func run(args []string) int {
 	root := os.DirFS(rootDir)
 	tree, loadErr := dslimports.Load(root)
 
-	report := buildReport(tree, loadErr, target)
+	// Referential-integrity passes (#2509): Form B use-decl module +
+	// symbol resolution, signature-concept existence, insert/update
+	// fields vs concept schemas, unused Form B imports, plus the
+	// legacy dotted-attribute symbol refs. The first three mirror what
+	// boot would reject; the unused-import lane is deliberately
+	// stricter than boot (see the lane-4 note in dslimports/integrity.go).
+	// Together they make the standalone lint lane trustworthy for
+	// no-Go product bundles.
+	var integrityErrs []error
+	if tree != nil {
+		integrityErrs = append(integrityErrs, tree.VerifyReferentialIntegrity()...)
+		integrityErrs = append(integrityErrs, tree.VerifyAllSymbolReferences()...)
+	}
+
+	report := buildReport(tree, loadErr, integrityErrs, target)
 	report.Root = rootDir
 
 	if jsonOut {
@@ -150,7 +173,7 @@ type Diagnostic struct {
 	Message string `json:"message"`
 }
 
-func buildReport(tree *dslimports.Tree, loadErr error, target string) *Report {
+func buildReport(tree *dslimports.Tree, loadErr error, integrityErrs []error, target string) *Report {
 	r := &Report{}
 	if tree != nil {
 		r.Files = len(tree.Files)
@@ -161,8 +184,10 @@ func buildReport(tree *dslimports.Tree, loadErr error, target string) *Report {
 			r.Order = tree.Order
 		}
 	}
-	if loadErr != nil {
-		for _, d := range flattenDiagnostics(loadErr) {
+	diags := flattenDiagnostics(loadErr)
+	diags = append(diags, integrityErrs...)
+	if len(diags) > 0 {
+		for _, d := range diags {
 			if target != "" && !errorMentionsFile(d, target) {
 				// Single-file mode: skip diagnostics about other
 				// files in the tree.

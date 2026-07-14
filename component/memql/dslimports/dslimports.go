@@ -54,6 +54,13 @@ type Tree struct {
 	// Order is the topo-sorted load order (Graph.Topo() result),
 	// memoized at load time so callers don't recompute.
 	Order []string
+
+	// ImportsOnly marks files whose AST is the imports-only fallback
+	// projection (comment-only files, or content the generic parser
+	// cannot see) -- their Definitions are empty by construction, so
+	// referential-integrity passes must not treat a symbol's absence
+	// from them as an error.
+	ImportsOnly map[string]bool
 }
 
 // Load walks `root`, parses every `.memql` file, resolves imports,
@@ -70,9 +77,10 @@ type Tree struct {
 // into runtime registries when err != nil.
 func Load(root fs.FS) (*Tree, error) {
 	tree := &Tree{
-		Root:    root,
-		Files:   make(map[string]*languageAst.File),
-		Aliases: make(map[string]dslfs.FileImports),
+		Root:        root,
+		Files:       make(map[string]*languageAst.File),
+		Aliases:     make(map[string]dslfs.FileImports),
+		ImportsOnly: make(map[string]bool),
 	}
 
 	paths, err := dslfs.WalkMemqlFiles(root)
@@ -143,6 +151,7 @@ func Load(root fs.FS) (*Tree, error) {
 			}
 			importsOnly.Path = p
 			tree.Files[p] = importsOnly
+			tree.ImportsOnly[p] = true
 			raws := make([]dslfs.RawImport, 0, len(importsOnly.Imports))
 			for _, imp := range importsOnly.Imports {
 				raws = append(raws, dslfs.RawImport{Path: imp.Path, Alias: imp.Alias})
