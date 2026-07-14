@@ -141,6 +141,21 @@ export interface RevokeWorkerTokenPayload {
   identityId: string;
 }
 
+// Badge registration lifecycle (memql#2513). The GRANT exchange is
+// identity-HTTP (POST /auth/badge/grant), not a stream message; these
+// register / revoke the badge credential itself.
+export interface CreateBadgePayload {
+  requestId: string;
+  badgeId: string; // plaintext identifier; hashed server-side, never persisted
+  label: string;
+  ownerUserId?: string; // admin-only override; empty = caller
+}
+
+export interface RevokeBadgePayload {
+  requestId: string;
+  identityId: string;
+}
+
 // Polyphon -- LiveKit room token request. The room name + LiveKit
 // URL come back in the reply so the consumer can hand them to the
 // LiveKit client SDK without a separate config call.
@@ -256,6 +271,8 @@ type ClientPayload =
   | { revokeAllSessions: RevokeAllSessionsPayload }
   | { createWorkerToken: CreateWorkerTokenPayload }
   | { revokeWorkerToken: RevokeWorkerTokenPayload }
+  | { createBadge: CreateBadgePayload }
+  | { revokeBadge: RevokeBadgePayload }
   | { polyphonRoomToken: PolyphonRoomTokenPayload }
   | { listTools: ListToolsPayload }
   | { callTool: CallToolPayload }
@@ -472,6 +489,22 @@ export interface RevokeWorkerTokenResultPayload {
   errorMessage?: string;
 }
 
+export interface CreateBadgeResultPayload {
+  requestId: string;
+  success?: boolean;
+  identityId?: string;
+  ownerUserId?: string;
+  errorCode?: string;
+  errorMessage?: string;
+}
+
+export interface RevokeBadgeResultPayload {
+  requestId: string;
+  success?: boolean;
+  errorCode?: string;
+  errorMessage?: string;
+}
+
 // expiresAt is int64 unix seconds -- protojson encodes int64 as
 // either string or number depending on the runtime. We accept both.
 export interface PolyphonRoomTokenResultPayload {
@@ -597,6 +630,8 @@ type ServerPayload =
   | { revokeAllSessionsResult: RevokeAllSessionsResultPayload }
   | { createWorkerTokenResult: CreateWorkerTokenResultPayload }
   | { revokeWorkerTokenResult: RevokeWorkerTokenResultPayload }
+  | { createBadgeResult: CreateBadgeResultPayload }
+  | { revokeBadgeResult: RevokeBadgeResultPayload }
   | { polyphonRoomTokenResult: PolyphonRoomTokenResultPayload }
   | { listToolsResult: ListToolsResultPayload }
   | { callToolResult: CallToolResultPayload }
@@ -630,6 +665,8 @@ export function readServerPayload(msg: ServerMessage):
   | { kind: "revokeAllSessionsResult"; value: RevokeAllSessionsResultPayload }
   | { kind: "createWorkerTokenResult"; value: CreateWorkerTokenResultPayload }
   | { kind: "revokeWorkerTokenResult"; value: RevokeWorkerTokenResultPayload }
+  | { kind: "createBadgeResult"; value: CreateBadgeResultPayload }
+  | { kind: "revokeBadgeResult"; value: RevokeBadgeResultPayload }
   | { kind: "polyphonRoomTokenResult"; value: PolyphonRoomTokenResultPayload }
   | { kind: "listToolsResult"; value: ListToolsResultPayload }
   | { kind: "callToolResult"; value: CallToolResultPayload }
@@ -691,6 +728,10 @@ export function readServerPayload(msg: ServerMessage):
     return { kind: "createWorkerTokenResult", value: m.createWorkerTokenResult as CreateWorkerTokenResultPayload };
   if (m.revokeWorkerTokenResult)
     return { kind: "revokeWorkerTokenResult", value: m.revokeWorkerTokenResult as RevokeWorkerTokenResultPayload };
+  if (m.createBadgeResult)
+    return { kind: "createBadgeResult", value: m.createBadgeResult as CreateBadgeResultPayload };
+  if (m.revokeBadgeResult)
+    return { kind: "revokeBadgeResult", value: m.revokeBadgeResult as RevokeBadgeResultPayload };
   if (m.polyphonRoomTokenResult)
     return {
       kind: "polyphonRoomTokenResult",

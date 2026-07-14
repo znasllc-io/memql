@@ -1524,6 +1524,93 @@ mutate identity revokeWorkerTokenIdentity {
   }
 }
 
+// ---- mutations/v1/identity/createBadgeIdentity.memql ----
+
+// createBadgeIdentity
+// ===================
+//
+// Creates a v1:identity:identity row of identityType="badge" -- a
+// registered operator badge/device for shared-terminal attribution
+// (memql#2513). Stores only the SHA-256 hex hash of the badge id;
+// the plaintext id lives on the physical card/device.
+//
+// Badges are NOT bearer sessions: presenting the badge id alone
+// authenticates nothing. The grant exchange additionally requires an
+// already-authenticated terminal bearer, and the resulting grant
+// token is short-lived and role-ceiling-clamped.
+
+@enabled
+@description("Register a badge identity (shared-terminal operator credential). Stores only the SHA-256 hex hash of the badge/device id.")
+mutate identity createBadgeIdentity {
+  args {
+    identityId    string  @required
+    userId        string  @required
+    label         string  @required
+    keyHash       string  @required
+    registeredBy  string  @required
+  }
+  insert {
+    id: args.identityId
+    args.userId
+    identityType: "badge"
+    credentials: {
+        keyHash: args.keyHash,
+        registeredBy: args.registeredBy,
+        lastUsedAt: ""
+      }
+    args.label
+    usableByAgents: false
+    active: true
+  }
+}
+
+// ---- mutations/v1/identity/revokeBadgeIdentity.memql ----
+
+// revokeBadgeIdentity
+// ===================
+//
+// Soft-revokes a badge identity row by flipping active=false. The
+// grant exchange consults the active flag on every attempt, so
+// revocation blocks all FUTURE grants immediately; outstanding
+// grant tokens (short TTL -- default 10 min, capped at 1 h) die at
+// their exp -- the same revoke-by-expiry tradeoff service-account
+// tokens document.
+
+@enabled
+@description("Revoke (deactivate) a badge identity row. Future grant exchanges are blocked immediately; outstanding short-TTL grant tokens expire on their own.")
+mutate identity revokeBadgeIdentity {
+  args {
+    identityId  string  @required
+  }
+  update {
+    id: args.identityId
+    active: false
+  }
+}
+
+// ---- mutations/v1/identity/touchBadgeLastUsed.memql ----
+
+// touchBadgeLastUsed
+// ==================
+//
+// Best-effort lastUsedAt stamp after a successful grant exchange.
+// Merges the credentials object wholesale (partial nested updates
+// are not supported), so the handler passes the full credentials
+// map with only lastUsedAt changed.
+
+@enabled
+@description("Stamp credentials.lastUsedAt on a badge identity after a successful grant exchange. Best-effort; the grant succeeds even when this write fails.")
+mutate identity touchBadgeLastUsed {
+  args {
+    identityId   string  @required
+    credentials  object  @required
+  }
+  update {
+    id: args.identityId
+    args.credentials
+  }
+}
+
 // ---- mutations/v1/identity/rotateAuthSession.memql ----
 
 // rotateAuthSession

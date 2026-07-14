@@ -99,6 +99,18 @@ const (
 	// fresh; no refresh path.
 	DefaultServiceAccountTokenTTLSeconds = 60 * 60 // 1 hour
 
+	// DefaultBadgeGrantTTLSeconds is the lifetime of issued
+	// class="badge" shared-terminal operator grants (memql#2513).
+	// Deliberately the shortest-lived credential in the system: it
+	// covers one operator window at a kiosk, renewal is an instant
+	// re-tap, and there is no refresh path. The per-envelope expiry
+	// gate on the stream stops an expired grant mid-stream, so this
+	// TTL is the whole containment story for a walked-away-from
+	// terminal. Override per grant via the ttlSeconds request field
+	// (capped at 1 hour) or the MEMQL_IDENTITY_BADGE_GRANT_TTL_SECONDS
+	// env default.
+	DefaultBadgeGrantTTLSeconds = 600 // 10 min
+
 	// DefaultMagicLinkTTLSeconds is how long a magic-link is valid.
 	DefaultMagicLinkTTLSeconds = 600 // 10 min
 

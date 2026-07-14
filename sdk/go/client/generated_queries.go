@@ -1225,6 +1225,50 @@ func AwaitingFeedbackPlansPastTimeoutBuild(args AwaitingFeedbackPlansPastTimeout
 	return "query awaitingFeedbackPlansPastTimeout()"
 }
 
+// BadgeByKeyHash -- Hot-path badge lookup by keyHash for the operator grant exchange. Returns active + inactive rows.
+//
+// Bound concept: v1:identity:identity (machine-readable: BoundConcepts["badgeByKeyHash"] in generated_concepts.go).
+type BadgeByKeyHashArgs struct {
+	KeyHash string
+}
+
+// BadgeByKeyHash calls the engine query badgeByKeyHash.
+func (qc *QueryClient) BadgeByKeyHash(ctx context.Context, args BadgeByKeyHashArgs) (*Result, error) {
+	call := BadgeByKeyHashBuild(args)
+	return qc.executeNamed(ctx, "badgeByKeyHash", call)
+}
+
+func BadgeByKeyHashBuild(args BadgeByKeyHashArgs) string {
+	var b strings.Builder
+	b.WriteString("query badgeByKeyHash(")
+	b.WriteString("keyHash: ")
+	b.WriteString(fmt.Sprintf("%q", args.KeyHash))
+	b.WriteString(")")
+	return b.String()
+}
+
+// BadgesForUser -- List badge identities owned by a user. Projects identitySummary (id / userId / label / active) -- NEVER credentials, so the badge keyHash (a low-entropy physical id's hash) is never exposed on this public surface.
+//
+// Bound concept: v1:identity:identity (machine-readable: BoundConcepts["badgesForUser"] in generated_concepts.go).
+type BadgesForUserArgs struct {
+	UserId string
+}
+
+// BadgesForUser calls the engine query badgesForUser.
+func (qc *QueryClient) BadgesForUser(ctx context.Context, args BadgesForUserArgs) (*Result, error) {
+	call := BadgesForUserBuild(args)
+	return qc.executeNamed(ctx, "badgesForUser", call)
+}
+
+func BadgesForUserBuild(args BadgesForUserArgs) string {
+	var b strings.Builder
+	b.WriteString("query badgesForUser(")
+	b.WriteString("userId: ")
+	b.WriteString(fmt.Sprintf("%q", args.UserId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // CalendarEventById -- Get a single calendar event by node id. Self-scoped: the ownerUserId==actor.userId predicate guarantees a caller can only fetch their own events. Backs the calendar tool's update/delete pre-read and the event detail view.
 //
 // Bound concept: v1:calendar:calendarEvent (machine-readable: BoundConcepts["calendarEventById"] in generated_concepts.go).

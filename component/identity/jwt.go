@@ -74,6 +74,13 @@ type AccessTokenClaims struct {
 	// Cross-checked against NodeHello.NodeType the same way as
 	// NodeId. Empty for any other class.
 	NodeType string `json:"node_type,omitempty"`
+	// RoleCeiling caps the effective role a class="badge" grant token
+	// resolves to (memql#2513). Stamped at grant time from the
+	// terminal's own role; the identity resolver clamps the operator's
+	// row-resolved role to at most this value (auth.RoleAtMost), so a
+	// privileged operator badging into a low-privilege kiosk never
+	// elevates the stream. Empty for every other class.
+	RoleCeiling string `json:"role_ceiling,omitempty"`
 
 	jwt.RegisteredClaims
 }
@@ -105,6 +112,18 @@ const (
 	// gate (AnalysisTemplate) uses for its authenticated query; PATs stay the
 	// human-CLI credential.
 	ClassServiceAccount = "service_account"
+	// ClassBadge marks a short-lived shared-terminal operator grant
+	// (memql#2513): a registered badge/device id presented at an
+	// already-authenticated terminal exchanges (POST /auth/badge/grant)
+	// into this token so writes during the operator's window carry
+	// their identity. sub = the OPERATOR's v1:identity:user id; the
+	// role_ceiling claim (stamped from the terminal's own role at grant
+	// time) caps the resolved AccessContext role so badging in never
+	// elevates the terminal's privileges; the per-envelope expiry gate
+	// on streamSession stops an expired grant from continuing to act as
+	// the operator mid-stream. NOT named "operator" -- that scheme is
+	// taken by the MEMQL_MASTER_KEY Authorization: Operator path.
+	ClassBadge = "badge"
 )
 
 // JWTIssuer mints access tokens. Wraps a KeyManager for signing-key
@@ -508,6 +527,78 @@ func (j *JWTIssuer) IssueServiceAccountAccessToken(in ServiceAccountIssueInput, 
 	signed, err := tok.SignedString(mat.Private)
 	if err != nil {
 		return "", time.Time{}, fmt.Errorf("identity: sign service-account access token: %w", err)
+	}
+	return signed, expiresAt, nil
+}
+
+// BadgeGrantIssueInput is the per-call payload for
+// IssueBadgeGrantToken (memql#2513): the short-lived shared-terminal
+// operator grant minted by POST /auth/badge/grant.
+type BadgeGrantIssueInput struct {
+	// UserId is the OPERATOR's v1:identity:user id (the badge row's
+	// owner). Becomes the JWT sub, and therefore actor.userId for
+	// every write during the operator's window.
+	UserId string
+	// RoleCeiling is the terminal's own role at grant time. The
+	// identity resolver clamps the operator's row-resolved role to at
+	// most this value, so the grant is attribution-grade: it never
+	// elevates the terminal's privileges. Required.
+	RoleCeiling string
+	// BadgeIdentityId is the v1:identity:identity row id of the badge
+	// that authorized this grant, stamped onto the NodeId claim slot
+	// for audit attribution (the same slot-reuse convention the
+	// voice-agent + service-account paths follow).
+	BadgeIdentityId string
+	// TTLOverride is the per-call lifetime. Zero falls back to
+	// DefaultBadgeGrantTTLSeconds (short by design -- the grant covers
+	// one operator window, renewed by instant re-tap).
+	TTLOverride time.Duration
+}
+
+// IssueBadgeGrantToken mints a class="badge" JWT for a shared-terminal
+// operator window (memql#2513). Verifies on every node via the
+// standard JWKS path -- no DB lookup -- so bff/gRPC/WS all resolve
+// actor.userId to the operator with zero engine changes. There is no
+// refresh path: renewal is a fresh badge tap.
+func (j *JWTIssuer) IssueBadgeGrantToken(in BadgeGrantIssueInput, now time.Time) (string, time.Time, error) {
+	if strings.TrimSpace(in.UserId) == "" {
+		return "", time.Time{}, errors.New("identity: BadgeGrantIssueInput.UserId required")
+	}
+	if strings.TrimSpace(in.RoleCeiling) == "" {
+		return "", time.Time{}, errors.New("identity: BadgeGrantIssueInput.RoleCeiling required")
+	}
+	mat := j.keys.Current()
+	if mat == nil {
+		return "", time.Time{}, errors.New("identity: no current signing key (was KeyManager.Load() called?)")
+	}
+	ttl := in.TTLOverride
+	if ttl <= 0 {
+		ttl = time.Duration(DefaultBadgeGrantTTLSeconds) * time.Second
+	}
+	expiresAt := now.Add(ttl)
+	jti, err := newJTI()
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("identity: generate jti: %w", err)
+	}
+	claims := AccessTokenClaims{
+		Class:       ClassBadge,
+		NodeId:      strings.TrimSpace(in.BadgeIdentityId),
+		RoleCeiling: strings.TrimSpace(in.RoleCeiling),
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    j.issuer,
+			Subject:   strings.TrimSpace(in.UserId),
+			Audience:  jwt.ClaimStrings{j.audience},
+			IssuedAt:  jwt.NewNumericDate(now),
+			NotBefore: jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(expiresAt),
+			ID:        jti,
+		},
+	}
+	tok := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)
+	tok.Header["kid"] = mat.KID
+	signed, err := tok.SignedString(mat.Private)
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("identity: sign badge grant token: %w", err)
 	}
 	return signed, expiresAt, nil
 }

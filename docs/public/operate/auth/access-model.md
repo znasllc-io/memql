@@ -259,6 +259,9 @@ binary) provides a UI for it.
 
 - [user-provisioning.md](user-provisioning.md) -- registration modes,
   invitations, magic-link flow.
+- [badge-operator-grant.md](badge-operator-grant.md) -- shared-terminal
+  operator attribution: registered badges exchange into short-lived,
+  role-ceiling-clamped class="badge" grants (memql#2513).
 - [identity-service.md](identity-service.md) -- operator-side
   narrative.
 - [docs/public/language/authoring-rules.md](../../language/authoring-rules.md)

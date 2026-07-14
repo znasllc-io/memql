@@ -629,6 +629,19 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 			return nil, meta, err
 		}
 	}
+	// Identity credential-row actor-scope guard (memql#2513): a
+	// v1:identity:identity row of a machine-credential identityType
+	// (badge / worker_token / node_token / voice_agent_token /
+	// service_account) may only be written by a system actor -- its
+	// dedicated mint handler / CLI / bootstrap path. Blocks a user
+	// actor from forging a credential row over the raw ExecuteQuery
+	// mutation surface (per-row authz can't see the args.userId-bound
+	// owner). See identity_credential_actor_validation.go.
+	if conceptMeta.Name == conceptIdentityIdentity {
+		if err := e.validateIdentityCredentialActorScope(ctx, payload, actor); err != nil {
+			return nil, meta, err
+		}
+	}
 	// Self-healing base-tier immutability guard (memql#2140): a tier=base
 	// v1:healing:healedOverride is the authored/embedded deploy spine and may
 	// only be materialized by a system actor (the SeedMaterializer). Any

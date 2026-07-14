@@ -26,6 +26,7 @@ import (
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/events"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	identitycomp "github.com/znasllc-io/memql/component/identity"
 	"github.com/znasllc-io/memql/component/identity/verifier"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/memql/sense"
@@ -793,6 +794,18 @@ type streamSession struct {
 	access       *auth.AccessContext
 	accessLoaded bool
 
+	// Badge expiry gate (memql#2513). For class="badge" shared-
+	// terminal operator grants, badgeExpiresAt carries the current
+	// credential's exp; the per-envelope gate in handleMessage rejects
+	// work after that instant so an expired grant cannot keep acting
+	// as the operator mid-stream (rotation is durable and nothing else
+	// un-rotates at exp -- session revocation is stream-open-only by
+	// design). Zero for every other credential class. Guarded by
+	// accessMu; stamped lazily from the stream claims on first use and
+	// re-stamped by every successful RotateAuth.
+	badgeExpiresAt time.Time
+	badgeStamped   bool
+
 	// uiAskUserRejectCount counts consecutive uiAskUser calls rejected
 	// by validateClientToolArgs for missing-options on this session.
 	// After the budget is spent we stop rejecting and soft-fallback
@@ -1024,6 +1037,146 @@ func (s *streamSession) ensureAccess(ctx context.Context) *auth.AccessContext {
 	return s.access
 }
 
+// badgeGateAllows reports whether this envelope may proceed under the
+// badge expiry gate (memql#2513). Cheap in-memory check -- no DB hit:
+// non-badge sessions pass unconditionally; badge sessions pass until
+// the grant token's exp, after which only the control frames a client
+// needs to recover (rotate back to the terminal bearer, cancel, hello,
+// ack, unsubscribe) are admitted. The credential's (class, exp) is
+// stamped lazily from the stream-open claims and re-stamped by every
+// successful RotateAuth.
+// badgeGateVerdict classifies an envelope under the badge gate.
+type badgeGateVerdict int
+
+const (
+	badgeGateAllow badgeGateVerdict = iota
+	badgeGateExpired
+	badgeGateRestricted
+)
+
+func (s *streamSession) badgeGate(envelope *memqlv1.MemqlClientMessage) badgeGateVerdict {
+	switch envelope.GetPayload().(type) {
+	case *memqlv1.MemqlClientMessage_ClientHello,
+		*memqlv1.MemqlClientMessage_Ack,
+		*memqlv1.MemqlClientMessage_CancelRequest,
+		*memqlv1.MemqlClientMessage_Unsubscribe,
+		*memqlv1.MemqlClientMessage_RotateAuth:
+		return badgeGateAllow
+	}
+
+	s.accessMu.Lock()
+	if !s.badgeStamped {
+		s.badgeStamped = true
+		claims, _ := auth.ClaimsFromContext(s.stream.Context())
+		s.badgeExpiresAt = badgeExpiryFromClaims(claims)
+	}
+	active := !s.badgeExpiresAt.IsZero()
+	expiresAt := s.badgeExpiresAt
+	s.accessMu.Unlock()
+
+	if !active {
+		return badgeGateAllow
+	}
+	if !time.Now().Before(expiresAt) {
+		return badgeGateExpired
+	}
+	// A live badge grant is attribution-grade, not a full user session:
+	// pin it away from credential/session/admin management so a
+	// walked-away kiosk can never mint the operator a DURABLE
+	// credential (worker token, badge, invite) or revoke sessions --
+	// anything it could create would outlive the grant's own TTL
+	// containment. Mirrors the surface-pinning the machine classes get
+	// at stream-open, applied here because badge identities arrive
+	// mid-stream via RotateAuth where interceptors cannot see them.
+	switch envelope.GetPayload().(type) {
+	case *memqlv1.MemqlClientMessage_CreateWorkerToken,
+		*memqlv1.MemqlClientMessage_RevokeWorkerToken,
+		*memqlv1.MemqlClientMessage_CreateBadge,
+		*memqlv1.MemqlClientMessage_RevokeBadge,
+		*memqlv1.MemqlClientMessage_RevokeCurrentSession,
+		*memqlv1.MemqlClientMessage_RevokeAllSessions,
+		*memqlv1.MemqlClientMessage_SendGuestInvite,
+		*memqlv1.MemqlClientMessage_CancelGuestInvite,
+		*memqlv1.MemqlClientMessage_ResendGuestInviteEmail,
+		*memqlv1.MemqlClientMessage_DurablePromoteBundle,
+		*memqlv1.MemqlClientMessage_DurableDemoteBundle,
+		*memqlv1.MemqlClientMessage_NodeMaintenance:
+		return badgeGateRestricted
+	}
+	return badgeGateAllow
+}
+
+// badgeGateAllows is the boolean view of badgeGate, used by tests.
+func (s *streamSession) badgeGateAllows(envelope *memqlv1.MemqlClientMessage) bool {
+	return s.badgeGate(envelope) == badgeGateAllow
+}
+
+// badgePayloadRequestId pulls the inner request_id off the payloads the
+// badge gate can reject, so the correlated QueryError carries the
+// caller's request_id (not just the envelope messageId). Stream-keyed
+// SDK dispatchers route by request_id; without it, a gate rejection of
+// an AiChat/AiTranscribeStream turn never reaches the waiting listener.
+// Empty for payloads that carry no request_id.
+func badgePayloadRequestId(envelope *memqlv1.MemqlClientMessage) string {
+	switch p := envelope.GetPayload().(type) {
+	case *memqlv1.MemqlClientMessage_ExecuteQuery:
+		return p.ExecuteQuery.GetRequestId()
+	case *memqlv1.MemqlClientMessage_AiChat:
+		return p.AiChat.GetRequestId()
+	case *memqlv1.MemqlClientMessage_AiSpeech:
+		return p.AiSpeech.GetRequestId()
+	case *memqlv1.MemqlClientMessage_AiTranscribe:
+		return p.AiTranscribe.GetRequestId()
+	case *memqlv1.MemqlClientMessage_AiTranscribeStreamStart:
+		return p.AiTranscribeStreamStart.GetRequestId()
+	case *memqlv1.MemqlClientMessage_AiTranscribeStreamChunk:
+		return p.AiTranscribeStreamChunk.GetRequestId()
+	case *memqlv1.MemqlClientMessage_AiTranscribeStreamEnd:
+		return p.AiTranscribeStreamEnd.GetRequestId()
+	case *memqlv1.MemqlClientMessage_AiSuggest:
+		return p.AiSuggest.GetRequestId()
+	case *memqlv1.MemqlClientMessage_CallTool:
+		return p.CallTool.GetRequestId()
+	}
+	return ""
+}
+
+// badgeExpiryFromClaims returns the token exp for class="badge"
+// claims, and the zero time for every other class (or when exp is
+// missing/unreadable -- the verifier already enforced exp at
+// stream-open, so absence here only disables the mid-stream gate).
+func badgeExpiryFromClaims(claims map[string]any) time.Time {
+	if claims == nil {
+		return time.Time{}
+	}
+	class, _ := claims["class"].(string)
+	if class != "badge" {
+		return time.Time{}
+	}
+	switch exp := claims["exp"].(type) {
+	case float64:
+		return time.Unix(int64(exp), 0)
+	case int64:
+		return time.Unix(exp, 0)
+	case json.Number:
+		if v, err := exp.Int64(); err == nil {
+			return time.Unix(v, 0)
+		}
+	}
+	return time.Time{}
+}
+
+// stampBadgeExpiry records the rotated-in credential's (class, exp)
+// for the badge gate. Caller holds accessMu.
+func (s *streamSession) stampBadgeExpiryLocked(class string, expiresAt time.Time) {
+	s.badgeStamped = true
+	if class == identitycomp.ClassBadge {
+		s.badgeExpiresAt = expiresAt
+		return
+	}
+	s.badgeExpiresAt = time.Time{}
+}
+
 // handleRotateAuth swaps the bearer on a live stream. Re-verifies the
 // presented token through the same verifier the interceptor uses at
 // stream-open, then -- on success -- replaces the session's identity
@@ -1127,6 +1280,11 @@ func (s *streamSession) handleRotateAuth(envelope *memqlv1.MemqlClientMessage, m
 	prevSubject := s.identity.Subject
 	s.identity = newIdentity
 
+	// Re-stamp the badge expiry gate for the rotated-in credential
+	// (memql#2513): a badge grant arms the gate at its exp; any other
+	// class disarms it.
+	s.stampBadgeExpiryLocked(vc.Class, vc.ExpiresAt)
+
 	if s.logger != nil {
 		s.logger.Info("rotate_auth: identity swapped",
 			"previousSubject", prevSubject,
@@ -1138,6 +1296,25 @@ func (s *streamSession) handleRotateAuth(envelope *memqlv1.MemqlClientMessage, m
 func (s *streamSession) handleMessage(envelope *memqlv1.MemqlClientMessage) error {
 	if envelope == nil {
 		return nil
+	}
+
+	switch s.badgeGate(envelope) {
+	case badgeGateExpired:
+		// The operator grant this stream rotated in has expired: the
+		// operator walked away (or the kiosk missed the re-tap). Reject
+		// work until the client rotates back to the terminal bearer or
+		// re-taps for a fresh grant. Control frames (hello / ack /
+		// cancel / unsubscribe / rotateAuth) still pass so recovery is
+		// always possible. Preserve the payload's inner request_id so
+		// stream-keyed clients (AiChat stream, AiTranscribeStream*)
+		// route the rejection to the waiting turn instead of hanging.
+		return s.sendQueryError(badgePayloadRequestId(envelope), envelope.GetMessageId(), codes.Unauthenticated,
+			"badge_grant_expired: the operator grant has expired; rotate back to the terminal bearer or present a fresh badge grant")
+	case badgeGateRestricted:
+		// Live grant, restricted surface: credential/session/admin
+		// management stays with real user sessions.
+		return s.sendQueryError(badgePayloadRequestId(envelope), envelope.GetMessageId(), codes.PermissionDenied,
+			"badge_grant_restricted: operator grants cannot manage credentials, sessions, or cluster state; use a full user session")
 	}
 
 	payload := envelope.GetPayload()
@@ -1259,6 +1436,12 @@ func (s *streamSession) handleMessage(envelope *memqlv1.MemqlClientMessage) erro
 		return s.handleCreateWorkerToken(envelope, payload.CreateWorkerToken)
 	case *memqlv1.MemqlClientMessage_RevokeWorkerToken:
 		return s.handleRevokeWorkerToken(envelope, payload.RevokeWorkerToken)
+	// Badge registration lifecycle (memql#2513); the grant exchange
+	// itself lives on the identity HTTP surface. See badge_handlers.go.
+	case *memqlv1.MemqlClientMessage_CreateBadge:
+		return s.handleCreateBadge(envelope, payload.CreateBadge)
+	case *memqlv1.MemqlClientMessage_RevokeBadge:
+		return s.handleRevokeBadge(envelope, payload.RevokeBadge)
 	// Realtime voice + video (Initiative C). The Go voice-agent
 	// (integrations/voice/agent) speaks these messages while authenticated
 	// as a service account. See voice_agent_handlers.go.

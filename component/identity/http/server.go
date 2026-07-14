@@ -12,6 +12,7 @@
 //	POST /auth/logout      -- revoke current session
 //	POST /pair/codes       -- mint a worker-pairing code (Bearer auth)
 //	POST /pair/redeem      -- redeem a code for a worker token (Pair auth)
+//	POST /auth/badge/grant -- exchange a registered badge id for a short-lived operator grant (Bearer auth; memql#2513)
 //
 // /.well-known/jwks.json is mounted by component/identity.Service
 // directly (Phase 1 wiring); Server only owns the auth flow.
@@ -23,6 +24,7 @@ import (
 	"encoding/hex"
 	"log/slog"
 	"net/http"
+	"sync"
 
 	"github.com/znasllc-io/memql/component/identity"
 	"github.com/znasllc-io/memql/component/identity/abuse"
@@ -62,6 +64,14 @@ type Server struct {
 	// default; a row missing the field entirely behaves the same).
 	// See identity.LiveTokenSettings for the contract.
 	LiveTokenSettings func(ctx context.Context) identity.LiveTokenSettings
+
+	// badgeGrantLimiter is the per-IP token bucket for the badge
+	// operator-grant exchange (memql#2513), lazily built per-Server on
+	// first use. Server-scoped rather than a package global so each
+	// Server (and each test) gets its own bucket map + captures its own
+	// logger, matching the anti-abuse pattern above.
+	badgeGrantLimiter     *abuse.IPRateLimiter
+	badgeGrantLimiterOnce sync.Once
 }
 
 // effectiveTokenSettings returns the live TTL + cookie settings for
@@ -163,6 +173,13 @@ func (s *Server) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("OPTIONS /pair/codes", wrap(s.cors(s.handleOptions)))
 	mux.HandleFunc("POST /pair/redeem", wrap(s.cors(s.handlePairRedeem)))
 	mux.HandleFunc("OPTIONS /pair/redeem", wrap(s.cors(s.handleOptions)))
+
+	// Shared-terminal operator grant exchange (memql#2513): an
+	// authenticated terminal bearer + a registered badge id mint a
+	// short-lived class="badge" JWT for the badge's owner. HTTPS-
+	// required + per-IP rate-limited inside the handler.
+	mux.HandleFunc("POST /auth/badge/grant", wrap(s.cors(s.handleBadgeGrant)))
+	mux.HandleFunc("OPTIONS /auth/badge/grant", wrap(s.cors(s.handleOptions)))
 
 	// Node bootstrap -- self-mint a class="node" JWT for cluster
 	// binaries (bff / agent / cognition / planner / voice) that

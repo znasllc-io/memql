@@ -78,8 +78,28 @@ func (r *IdentityResolver) LoadFromClaims(ctx context.Context, claims map[string
 	return &AccessContext{
 		UserId:       userId,
 		PrimaryEmail: stringField(userRow, "primaryEmail"),
-		Role:         Role(stringField(userRow, "role")),
+		Role:         applyBadgeRoleCeiling(claims, Role(stringField(userRow, "role"))),
 	}, nil
+}
+
+// applyBadgeRoleCeiling clamps the resolved role for class="badge"
+// shared-terminal operator grants (memql#2513). The grant token's
+// role_ceiling claim carries the TERMINAL's role at grant time; the
+// operator's effective role is at most that ceiling, so a privileged
+// operator badging into a low-privilege kiosk never elevates the
+// stream. Every other class passes through unchanged.
+func applyBadgeRoleCeiling(claims map[string]any, resolved Role) Role {
+	if stringClaim(claims, "class") != "badge" {
+		return resolved
+	}
+	ceiling := Role(strings.ToLower(stringClaim(claims, "role_ceiling")))
+	if !IsValidRole(ceiling) {
+		// A badge grant without a usable ceiling is clamped to the
+		// least-privileged role rather than trusted at row level --
+		// fail closed on a malformed grant.
+		ceiling = RoleReader
+	}
+	return RoleAtMost(resolved, ceiling)
 }
 
 // FallbackFromClaims returns a best-effort AccessContext derived
@@ -97,7 +117,7 @@ func FallbackFromClaims(claims map[string]any) *AccessContext {
 	return &AccessContext{
 		UserId:       subject,
 		PrimaryEmail: email,
-		Role:         role,
+		Role:         applyBadgeRoleCeiling(claims, role),
 	}
 }
 
