@@ -22,6 +22,7 @@ package lib
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -283,12 +284,14 @@ func TestCapParamPrecedence(t *testing.T) {
 
 	// Harness sources the library and prints the resolved value of `foo` so the
 	// test can assert precedence. It never calls cap_ok, so the EXIT trap stays
-	// quiet on a clean (exit 0) run.
+	// quiet on a clean (exit 0) run. `foo` must be declared via cap_spec_param
+	// -- cap_parse_flags rejects undeclared flags (exit 2, #2508).
 	harness := filepath.Join(t.TempDir(), "capparam_harness.sh")
 	body := "#!/usr/bin/env bash\n" +
 		"set -euo pipefail\n" +
 		"source \"" + lib + "\"\n" +
 		"cap_init \"test.capParamPrecedence\" \"cap_param precedence harness\"\n" +
+		"cap_spec_param \"foo\" \"precedence probe param\"\n" +
 		"cap_parse_flags \"$@\"\n" +
 		"printf 'RESULT=%s\\n' \"$(cap_param foo defval)\"\n"
 	if err := os.WriteFile(harness, []byte(body), 0o755); err != nil {
@@ -359,4 +362,215 @@ func parseResult(out string) string {
 		}
 	}
 	return ""
+}
+
+// envelope is the capability result envelope (the contract's result schema).
+type envelope struct {
+	OK         bool            `json:"ok"`
+	Capability string          `json:"capability"`
+	Changed    bool            `json:"changed"`
+	Result     json.RawMessage `json:"result"`
+	Error      *struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+// exitCode extracts the process exit code from an exec error (-1 if unknown).
+func exitCode(err error) int {
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		return ee.ExitCode()
+	}
+	return -1
+}
+
+// TestCapabilityScriptsRejectUnknownFlags runs EVERY capability script with a
+// flag no script declares and asserts the contract's documented behavior
+// (znasllc-io/memql#2508): exit 2 plus a failure envelope whose error.code is
+// 2. Before the fix, cap_parse_flags silently accepted any --name / --name=v,
+// so a typoed flag fell through to its default -- dangerous for capability
+// scripts whose params gate destructive behavior. The rejection fires inside
+// cap_parse_flags, before any script work runs, so this is side-effect-free.
+func TestCapabilityScriptsRejectUnknownFlags(t *testing.T) {
+	for _, s := range capabilityScripts(t) {
+		s := s
+		t.Run(rel(t, s), func(t *testing.T) {
+			cmd := exec.Command("bash", s, "--zz-undeclared-conformance-probe=1")
+			cmd.Stdin = nil // closed stdin
+			var buf bytes.Buffer
+			cmd.Stdout = &buf
+			cmd.Stderr = &buf
+			done := make(chan error, 1)
+			if err := cmd.Start(); err != nil {
+				t.Fatalf("start: %v", err)
+			}
+			go func() { done <- cmd.Wait() }()
+			var runErr error
+			select {
+			case runErr = <-done:
+			case <-time.After(30 * time.Second):
+				_ = cmd.Process.Kill()
+				t.Fatalf("script blocked > 30s on an unknown flag")
+			}
+			out := buf.String()
+			if runErr == nil {
+				t.Fatalf("unknown flag accepted (exit 0) -- cap_parse_flags must reject "+
+					"undeclared flags with exit 2 (contract, #2508). Output:\n%s", out)
+			}
+			if code := exitCode(runErr); code != 2 {
+				t.Errorf("unknown flag exited %d, want 2 (bad invocation). Output:\n%s", code, out)
+			}
+			line := lastJSONLine(out)
+			if line == "" {
+				t.Fatalf("no JSON failure envelope emitted for the unknown flag. Output:\n%s", out)
+			}
+			var env envelope
+			if err := json.Unmarshal([]byte(line), &env); err != nil {
+				t.Fatalf("failure envelope is not valid JSON: %v\nline: %s", err, line)
+			}
+			if env.OK {
+				t.Errorf("envelope ok=true for a rejected flag; want ok=false")
+			}
+			if env.Error == nil || env.Error.Code != 2 {
+				t.Errorf("envelope error.code != 2 for a rejected flag; envelope: %s", line)
+			}
+		})
+	}
+}
+
+// TestCapParseFlagsUnknownFlagSemantics locks the library-level rejection
+// semantics (#2508): declared flags and the built-in meta flags parse; any
+// undeclared flag -- bare or --k=v form -- fails with exit 2 and a failure
+// envelope naming the flag.
+func TestCapParseFlagsUnknownFlagSemantics(t *testing.T) {
+	root := repoRoot(t)
+	lib := filepath.Join(root, "scripts", "lib", "capability.sh")
+
+	harness := filepath.Join(t.TempDir(), "unknownflag_harness.sh")
+	body := "#!/usr/bin/env bash\n" +
+		"set -euo pipefail\n" +
+		"source \"" + lib + "\"\n" +
+		"cap_init \"test.unknownFlag\" \"unknown-flag rejection harness\"\n" +
+		"cap_spec_param \"declared\" \"a declared param\"\n" +
+		"cap_parse_flags \"$@\"\n" +
+		"printf 'RESULT=%s\\n' \"$(cap_param declared defval)\"\n"
+	if err := os.WriteFile(harness, []byte(body), 0o755); err != nil {
+		t.Fatalf("write harness: %v", err)
+	}
+
+	cases := []struct {
+		name     string
+		args     []string
+		wantExit int    // 0 = success expected
+		wantVal  string // asserted only on success
+	}{
+		{name: "declared flag parses", args: []string{"--declared=x"}, wantExit: 0, wantVal: "x"},
+		{name: "declared bare flag parses", args: []string{"--declared"}, wantExit: 0, wantVal: "1"},
+		{name: "meta params-stdin needs no declaration", args: []string{"--params-stdin"}, wantExit: 0, wantVal: "defval"},
+		{name: "undeclared k=v flag exits 2", args: []string{"--produkt=x"}, wantExit: 2},
+		{name: "undeclared bare flag exits 2", args: []string{"--produkt"}, wantExit: 2},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := exec.Command("bash", append([]string{harness}, tc.args...)...)
+			cmd.Stdin = nil
+			out, err := cmd.CombinedOutput()
+			if tc.wantExit == 0 {
+				if err != nil {
+					t.Fatalf("harness failed: %v\noutput:\n%s", err, out)
+				}
+				if got := parseResult(string(out)); got != tc.wantVal {
+					t.Errorf("resolved %q, want %q\noutput:\n%s", got, tc.wantVal, out)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("expected exit %d, got success\noutput:\n%s", tc.wantExit, out)
+			}
+			if code := exitCode(err); code != tc.wantExit {
+				t.Errorf("exit %d, want %d\noutput:\n%s", code, tc.wantExit, out)
+			}
+			line := lastJSONLine(string(out))
+			var env envelope
+			if line == "" || json.Unmarshal([]byte(line), &env) != nil {
+				t.Fatalf("no valid failure envelope\noutput:\n%s", out)
+			}
+			if env.OK || env.Error == nil || env.Error.Code != 2 {
+				t.Errorf("envelope should carry ok=false error.code=2; got: %s", line)
+			}
+			if !strings.Contains(env.Error.Message, "--produkt") {
+				t.Errorf("error message should name the rejected flag; got: %s", env.Error.Message)
+			}
+		})
+	}
+}
+
+// TestCapParamStdinMultiParam is the regression test for the stdin drain bug
+// (znasllc-io/memql#2508, second defect): each "$(cap_param ...)" subshell used
+// to re-read stdin, and the first read drained it, so a two-param stdin JSON
+// object like {"product":...,"product-org":...} resolved only its first-read
+// key. The fix buffers stdin ONCE in the parent shell (cap_init on the env
+// opt-in; cap_parse_flags on --params-stdin), so every subshell inherits the
+// same captured JSON. This harness mirrors the original repro, including a
+// dashed param name.
+func TestCapParamStdinMultiParam(t *testing.T) {
+	root := repoRoot(t)
+	lib := filepath.Join(root, "scripts", "lib", "capability.sh")
+
+	harness := filepath.Join(t.TempDir(), "stdinmulti_harness.sh")
+	body := "#!/usr/bin/env bash\n" +
+		"set -euo pipefail\n" +
+		"source \"" + lib + "\"\n" +
+		"cap_init \"test.stdinMulti\" \"multi-param stdin harness\"\n" +
+		"cap_spec_param \"product\" \"first param\"\n" +
+		"cap_spec_param \"product-org\" \"second param (dashed)\"\n" +
+		"cap_spec_param \"absent\" \"third param, not in the JSON\"\n" +
+		"cap_parse_flags \"$@\"\n" +
+		"printf 'PRODUCT=%s\\n' \"$(cap_param product)\"\n" +
+		"printf 'ORG=%s\\n' \"$(cap_param product-org)\"\n" +
+		"printf 'ABSENT=%s\\n' \"$(cap_param absent fallback)\"\n"
+	if err := os.WriteFile(harness, []byte(body), 0o755); err != nil {
+		t.Fatalf("write harness: %v", err)
+	}
+
+	run := func(t *testing.T, args []string, extraEnv []string) map[string]string {
+		t.Helper()
+		cmd := exec.Command("bash", append([]string{harness}, args...)...)
+		cmd.Env = append(os.Environ(), extraEnv...)
+		cmd.Stdin = strings.NewReader(`{"product":"demo","product-org":"demo-org"}`)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("harness failed: %v\noutput:\n%s", err, out)
+		}
+		got := map[string]string{}
+		for _, l := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
+			if k, v, ok := strings.Cut(strings.TrimSpace(l), "="); ok {
+				got[k] = v
+			}
+		}
+		return got
+	}
+
+	assert := func(t *testing.T, got map[string]string) {
+		t.Helper()
+		if got["PRODUCT"] != "demo" {
+			t.Errorf("product resolved %q, want %q", got["PRODUCT"], "demo")
+		}
+		if got["ORG"] != "demo-org" {
+			t.Errorf("product-org resolved %q, want %q -- the stdin buffer was "+
+				"drained by the first cap_param read (#2508)", got["ORG"], "demo-org")
+		}
+		if got["ABSENT"] != "fallback" {
+			t.Errorf("absent param resolved %q, want default %q", got["ABSENT"], "fallback")
+		}
+	}
+
+	t.Run("flag opt-in --params-stdin", func(t *testing.T) {
+		assert(t, run(t, []string{"--params-stdin"}, nil))
+	})
+	t.Run("env opt-in CAP_PARAMS_STDIN=1", func(t *testing.T) {
+		assert(t, run(t, nil, []string{"CAP_PARAMS_STDIN=1"}))
+	})
 }

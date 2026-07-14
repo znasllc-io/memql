@@ -28,9 +28,10 @@
 #
 #   function main() {
 #     cap_handle_meta "$@"          # --help / --print-spec short-circuit
+#     cap_parse_flags "$@"          # --name=value / --name into CAP_ARG_*; undeclared flags exit 2
 #     local cluster purge
 #     cluster="$(cap_param cluster "${MEMQL_K3D_CLUSTER:-memql}")"
-#     purge="$(cap_flag purge "$@")"
+#     purge="$(cap_flag purge)"
 #     ...
 #     cap_result_set    cluster "$cluster"
 #     cap_result_set_raw deleted true
@@ -66,15 +67,23 @@ _CAP_STDIN_READ=0
 #=============================================================================
 
 # cap_init <capability-id> <summary>
-# Declares the capability and installs the result-guarantee EXIT trap.
+# Declares the capability and installs the result-guarantee EXIT trap. When
+# the CAP_PARAMS_STDIN env opt-in is set, stdin params are buffered here, in
+# the PARENT shell, so later "$(cap_param ...)" subshells all read the same
+# captured JSON instead of each draining stdin (#2508).
 function cap_init() {
     _CAP_NAME="${1:?cap_init requires a capability id}"
     _CAP_SUMMARY="${2:-}"
+    if [[ -n "${CAP_PARAMS_STDIN:-}" ]]; then
+        _cap_load_stdin
+    fi
     trap '_cap_on_exit' EXIT
 }
 
 # cap_spec_param <name> <description>
-# Documents a parameter for --print-spec / --help. Purely declarative.
+# Declares a parameter: it appears in --print-spec / --help AND forms the
+# accepted flag surface -- cap_parse_flags rejects any --flag not declared
+# here (exit 2, #2508), so the spec cannot drift from what the script accepts.
 # NOTE (#2378): there is NO env tier -- cap_param resolves flag > stdin JSON >
 # default only, per the capability-script contract ("no decisions inside"; a
 # script passes an env-resolved value as the DEFAULT if it wants one). The
@@ -202,6 +211,13 @@ function _cap_on_exit() {
 # `--params-stdin` flag or CAP_PARAMS_STDIN=1) so a capability never blocks on
 # an inherited-but-idle stdin. The action executor passes --params-stdin when
 # it pipes a JSON params object; humans normally use flags/env and never do.
+#
+# The capture MUST happen in the parent shell: cap_init (env opt-in) and
+# cap_parse_flags (--params-stdin flag) both call this eagerly so that every
+# subsequent "$(cap_param ...)" subshell inherits the one buffered
+# _CAP_STDIN_JSON. Relying on the lazy call inside cap_param alone breaks
+# multi-param stdin resolution -- each $() subshell would re-run the capture
+# against an already-drained stdin (#2508).
 function _cap_load_stdin() {
     [[ "$_CAP_STDIN_READ" == "1" ]] && return
     _CAP_STDIN_READ=1
@@ -245,9 +261,42 @@ function _cap_json_field() {
         | head -1 | sed -E "s/\"${key}\"[[:space:]]*:[[:space:]]*//; s/^\"//; s/\"$//"
 }
 
+# _cap_param_declared <name> -- 0 when <name> was declared via cap_spec_param
+# or is one of the built-in meta flags (help / print-spec / params-stdin).
+function _cap_param_declared() {
+    local name="$1" entry
+    case "$name" in
+        help|print-spec|params-stdin) return 0 ;;
+    esac
+    for entry in "${_CAP_SPEC_PARAMS[@]:-}"; do
+        [[ -z "$entry" ]] && continue
+        if [[ "${entry%%|*}" == "$name" ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+# _cap_declared_params_list -- "--a, --b, ..." of the declared params, for the
+# unknown-flag error message.
+function _cap_declared_params_list() {
+    local entry out=""
+    for entry in "${_CAP_SPEC_PARAMS[@]:-}"; do
+        [[ -z "$entry" ]] && continue
+        [[ -n "$out" ]] && out+=", "
+        out+="--${entry%%|*}"
+    done
+    printf '%s' "${out:-<none>}"
+}
+
 # cap_parse_flags "$@" -- parses --name=value and --name (bare -> "1") into
 # CAP_ARG_<NAME> globals. --help / --print-spec are handled by cap_handle_meta.
-# Unknown flags are rejected (exit 2) to keep the param surface honest.
+# Unknown flags are rejected (exit 2) to keep the param surface honest: a flag
+# is known only when the script declared it via cap_spec_param (or it is one
+# of the meta flags), so a typo like --produkt=x can never silently fall
+# through to a default (#2508). After parsing, stdin params (if opted in) are
+# buffered once, here in the parent shell, so multi-param stdin resolution
+# works across "$(cap_param ...)" subshells (#2508).
 function cap_parse_flags() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -255,17 +304,24 @@ function cap_parse_flags() {
             --*=*)
                 local kv="${1#--}" name value upper
                 name="${kv%%=*}"; value="${kv#*=}"
+                if ! _cap_param_declared "$name"; then
+                    cap_fail 2 "unknown flag: --${name} (declared params: $(_cap_declared_params_list))"
+                fi
                 upper="$(printf '%s' "$name" | tr '[:lower:]-' '[:upper:]_')"
                 printf -v "CAP_ARG_${upper}" '%s' "$value"
                 shift ;;
             --*)
                 local name="${1#--}" upper
+                if ! _cap_param_declared "$name"; then
+                    cap_fail 2 "unknown flag: --${name} (declared params: $(_cap_declared_params_list))"
+                fi
                 upper="$(printf '%s' "$name" | tr '[:lower:]-' '[:upper:]_')"
                 printf -v "CAP_ARG_${upper}" '%s' "1"
                 shift ;;
             *) cap_fail 2 "unexpected positional argument: $1" ;;
         esac
     done
+    _cap_load_stdin
 }
 
 # cap_flag <name> -- returns the parsed flag value (or "" if unset). Requires
