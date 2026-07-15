@@ -1,0 +1,41 @@
+name: dispatch-engine-images-on-release
+
+# Structural gap closed by #2519: release 0.12.1 was cut but
+# build-engine-images (workflow_dispatch-only) was never run for it, so the
+# release silently had no images in ACR.
+#
+# This workflow fires on every published release and re-dispatches
+# build-engine-images with the release tag as the version. It deliberately
+# does NOT build images itself: the Azure OIDC federated credential subject is
+# `repo:znasllc-io/memql:ref:refs/heads/main`, and a release-event run executes
+# on the tag ref, so azure/login would fail here. workflow_dispatch runs on the
+# default branch, which preserves the OIDC subject -- the same reason the build
+# workflow is dispatch-shaped in the first place.
+#
+# GITHUB_TOKEN can create workflow_dispatch events (it is one of the two
+# documented exceptions to the no-recursive-triggering rule), so no PAT is
+# needed. Manual dispatch of build-engine-images remains available for
+# backfills and re-pushes (allow_overwrite).
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch:
+    name: dispatch build-engine-images ${{ github.event.release.tag_name }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch build-engine-images for the release tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          echo "Dispatching build-engine-images for version ${TAG}"
+          gh workflow run build-engine-images.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            -f version="$TAG"
