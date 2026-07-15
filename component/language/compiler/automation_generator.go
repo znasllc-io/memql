@@ -1423,6 +1423,26 @@ func (c *Compiler) expressionToString(expr parser.ExpressionNode) string {
 		}
 		return fmt.Sprintf("%s.%s(%s)", c.expressionToString(e.Receiver), e.Method, strings.Join(args, ", "))
 
+	case *parser.LambdaExpr:
+		// Arrow lambda carried by a collection-method chain (#2302), e.g. the
+		// `m => m.active` in `return rows.where(m => m.active).count()` or the
+		// `g => {worker: g.key, acc: ...}` projection body (#2542 item 3). A
+		// lambda-carrying chain in TERMINAL RETURN position reaches this
+		// reconstruction path (the compiler serializes the return expression
+		// per node), where the absent case emitted `<<unsupported expression
+		// *ast.LambdaExpr>>` and the automation failed at runtime even though
+		// memqllint passed. Emit the re-parseable arrow form so the runtime
+		// re-parse (EvaluateCollectionChainString) rebuilds the same chain: a
+		// single param stays bare (`m => ...`), multiple params take the
+		// parenthesised list (`(acc, x) => ...`). The body round-trips through
+		// expressionToString / valueToString (object-literal projection bodies
+		// included).
+		body := c.expressionToString(e.Body)
+		if len(e.Params) == 1 {
+			return fmt.Sprintf("%s => %s", e.Params[0], body)
+		}
+		return fmt.Sprintf("(%s) => %s", strings.Join(e.Params, ", "), body)
+
 	default:
 		// SAFETY: emitting `%T` here puts the Go type name (e.g.
 		// `*parser.CanonicalIdExpr`) into the generated code as a

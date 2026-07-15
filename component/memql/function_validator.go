@@ -644,6 +644,29 @@ func (v *functionValidator) expandExpressionWithArgs(expr ExpressionNode, args m
 		if IsDateBuiltin(node.Name) {
 			return node, nil
 		}
+		// cond(predicate, then, else) (#2542 item 2) also has no DSL body -- it
+		// is evaluated in-memory (evalCollScalar / the plan-root branch). Its
+		// positional operands may be collection chains whose `args.X` receiver
+		// must fold to a concrete collection, so recurse through
+		// expandExpressionWithArgs per operand (substituteArgRefValue above only
+		// substitutes a top-level arg ref, not a chain receiver), then keep it a
+		// cond call for the evaluator. Without this the call is looked up as a
+		// user function and fails "function not found".
+		if node.Name == "cond" {
+			expanded := make(map[string]any, len(node.Args))
+			for k, val := range node.Args {
+				if en, ok := val.(ExpressionNode); ok {
+					ev, err := v.expandExpressionWithArgs(en, args)
+					if err != nil {
+						return nil, err
+					}
+					expanded[k] = ev
+					continue
+				}
+				expanded[k] = val
+			}
+			return &FunctionCallExpression{Name: node.Name, Args: expanded}, nil
+		}
 		// Resolve, validate, and expand the function with its arguments
 		return v.expandFunctionCall(node)
 

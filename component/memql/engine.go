@@ -615,7 +615,12 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 	// short-circuits the builtin call -- to a *FunctionCallExpression naming
 	// a date builtin at plan.Root. Evaluated in-memory and wrapped as the
 	// function's return value, like the ArithmeticExpression branch above.
-	if callExpr, ok := plan.Root.(*FunctionCallExpression); ok && IsDateBuiltin(callExpr.Name) {
+	//
+	// The same plan-root branch also serves a single-return `return cond(...)`
+	// (#2542 item 2): expandExpressionWithArgs short-circuits the cond call and
+	// folds its branch operands, so a cond wrapping a collection chain resolves
+	// in-memory here.
+	if callExpr, ok := plan.Root.(*FunctionCallExpression); ok && (IsDateBuiltin(callExpr.Name) || callExpr.Name == "cond") {
 		val, err := evalCollScalar(callExpr, nil, nil)
 		if err != nil {
 			return nil, err
