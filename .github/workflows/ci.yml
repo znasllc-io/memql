@@ -365,6 +365,12 @@ jobs:
   # remaining DB-gated suites so that whole class of test can't rot unseen
   # again. Keep this list in sync with the packages that carry `*_db_test.go`
   # files (component/memql, component/automations/steps, examples/referencepack).
+  # These per-package binaries run as PARALLEL processes against this ONE shared
+  # DB, so each such package must migrate the schema through a TestMain that
+  # calls dbtest.EnsureSchema (a cross-process advisory lock serializes it);
+  # otherwise the suites race on a half-created schema and fail with
+  # `relation "MemoryNodes" does not exist` (memql#2551). A new db-gated package
+  # needs both an entry above AND that TestMain.
   db-tests:
     name: db-tests
     needs: changes
