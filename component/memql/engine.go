@@ -609,6 +609,23 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 		return result, nil
 	}
 
+	// Top-level expression-led comparison (#2542 item 5 residual): a Logic
+	// whose body is a single `return (args.a - args.b) > 0` resolves -- after
+	// expandExpressionWithArgs folds the operand ArgRefExpressions into
+	// concrete literals -- to a *BinaryComparisonExpression at plan.Root. The
+	// computed boolean IS the result; evaluate it in-memory and wrap it as the
+	// function's return value, like the ArithmeticExpression branch above.
+	if cmpExpr, ok := plan.Root.(*BinaryComparisonExpression); ok {
+		val, err := evalCollScalar(cmpExpr, nil, nil)
+		if err != nil {
+			return nil, err
+		}
+		result := newExecuteResult(nil)
+		result.setOutput(val)
+		e.emitQueryExecutedEvent(startTime, result, false)
+		return result, nil
+	}
+
 	// Top-level date/duration builtin (#2541): a Logic whose body is a single
 	// `return addDuration(args.start, "P1D")` resolves -- after
 	// expandExpressionWithArgs folds the operand ArgRefExpressions and

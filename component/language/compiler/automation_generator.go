@@ -880,8 +880,16 @@ func (c *Compiler) compileStep(step *parser.StepDef) (map[string]any, error) {
 	case parser.StepTypeQuery:
 		if cfg, ok := step.Config.(*parser.QueryStepConfig); ok {
 			query := c.expressionToString(cfg.Query)
-			// Convert event.xxx references to $event.xxx for evaluator
-			query = convertEventReferences(query)
+			// Convert event.xxx references to $event.xxx for evaluator, and
+			// the `arg("path")` shape expressionToString emits for ArgRefExpr
+			// back to $args.path. The latter matters for an arithmetic step
+			// RHS (#2542 GAP 2) whose operand is an `args.X` reference: the
+			// LogicRunner re-parses this string (normalizeReparseSource strips
+			// the `$`), so `net := args.gross - args.fee` resolves its operands
+			// exactly as the terminal-return path (line ~501) already does.
+			// It is a no-op for a verbatim collection-chain Raw source, which
+			// carries no `arg("...")` token.
+			query = convertArgReferences(convertEventReferences(query))
 			output["query"] = map[string]any{
 				"query": query,
 			}
@@ -1346,6 +1354,17 @@ func (c *Compiler) expressionToString(expr parser.ExpressionNode) string {
 		// automation failed at runtime even though memqllint passed.
 		return fmt.Sprintf("(%s %s %s)",
 			c.expressionToString(e.Left), e.Op, c.expressionToString(e.Right))
+
+	case *parser.BinaryComparisonExpr:
+		// Expression-led comparison (#2542 item 5 residual): re-emit the
+		// operator form, fully parenthesized so the re-parse rebuilds exactly
+		// this tree regardless of precedence. Like ArithmeticExpr this is an
+		// in-memory-only node; the runtime evaluates it via evalCollScalar (a
+		// lambda body / logic terminal return), never in SQL. Without this
+		// case a logic return of a bare expression-led comparison serialized
+		// to `<<unsupported expression *ast.BinaryComparisonExpr>>`.
+		return fmt.Sprintf("(%s %s %s)",
+			c.expressionToString(e.Left), string(e.Operator), c.expressionToString(e.Right))
 
 	// Date/duration builtins (#2541): canonical re-parseable call forms.
 	// The logic runner's local evaluator and the automations condition

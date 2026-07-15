@@ -258,6 +258,25 @@ var logicOnlyExprCases = []conformanceCase{
 		expr: `(daysBetween("2026-07-01", "2026-07-15") / 7)`,
 		want: 2,
 	},
+	// wave-2 (#2542 GAP 2): arithmetic step-RHS operand vocabulary. An
+	// intermediate `x := <arith>` step routes through the SAME local evaluator
+	// a terminal return uses (tryEvaluateArithmeticLocally); these rows pin the
+	// step-RHS operand forms -- a bound step operand and a multi-step
+	// subtraction -- at the conformance altitude, logic-time only.
+	{
+		name:  "arith_step_rhs_multiply", // wave-2
+		setup: seedStep("base", 21, "success"),
+		expr:  `(base * 2)`,
+		want:  42,
+	},
+	{
+		name: "arith_step_rhs_subtract", // wave-2
+		setup: seedSteps(
+			seedStep("gross", 100, "success"),
+			seedStep("fee", 30, "success")),
+		expr: `(gross - fee)`,
+		want: 70,
+	},
 }
 
 // TestStepMethodAccessors_CapitalizedRetired pins Story 5 (ADR §2.2 / #2303):

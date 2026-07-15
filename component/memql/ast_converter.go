@@ -106,6 +106,8 @@ func (c *ASTConverter) ConvertExpression(expr languageParser.ExpressionNode) (Ex
 		return c.convertComparisonExpr(node)
 	case *languageParser.ArithmeticExpr:
 		return c.convertArithmeticExpr(node)
+	case *languageParser.BinaryComparisonExpr:
+		return c.convertBinaryComparisonExpr(node)
 	case *languageParser.RelationshipExpr:
 		return c.convertRelationshipExpr(node)
 	case *languageParser.SortExpr:
@@ -295,6 +297,34 @@ func (c *ASTConverter) convertArithmeticExpr(expr *languageParser.ArithmeticExpr
 		return nil, fmt.Errorf("convert arithmetic right: %w", err)
 	}
 	return &ArithmeticExpression{Op: expr.Op, Left: left, Right: right}, nil
+}
+
+// convertBinaryComparisonExpr converts a parser BinaryComparisonExpr (the
+// expression-led comparison, #2542 item 5 residual) to the engine
+// BinaryComparisonExpression. Like arithmetic it is IN-MEMORY only: admitted
+// ONLY under WithCollectionMethods (logic bodies / collection lambdas). Specs
+// and query filters use the default converter and get a scope error, so an
+// expression-led comparison never leaks into SQL compilation.
+func (c *ASTConverter) convertBinaryComparisonExpr(expr *languageParser.BinaryComparisonExpr) (ExpressionNode, error) {
+	if expr == nil {
+		return nil, nil
+	}
+	if !c.allowCollectionMethods {
+		return nil, fmt.Errorf("expression-led comparisons (an arithmetic or literal left side, e.g. `a - 10 > 0` / `0 < a`) are only available in logic / collection lambdas (in-memory), not in specs or query filters (#2542)")
+	}
+	left, err := c.ConvertExpression(expr.Left)
+	if err != nil {
+		return nil, fmt.Errorf("convert comparison left: %w", err)
+	}
+	right, err := c.ConvertExpression(expr.Right)
+	if err != nil {
+		return nil, fmt.Errorf("convert comparison right: %w", err)
+	}
+	return &BinaryComparisonExpression{
+		Left:     left,
+		Operator: convertComparisonOperator(expr.Operator),
+		Right:    right,
+	}, nil
 }
 
 // convertLogicalExpr converts languageParser.LogicalExpr to memql.LogicalExpression.

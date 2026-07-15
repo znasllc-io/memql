@@ -60,6 +60,21 @@ type DotAccessExpression struct {
 
 func (*DotAccessExpression) isExpressionNode() {}
 
+// BinaryComparisonExpression is the engine-side EXPRESSION-LED comparison
+// (#2542 item 5 residual): both operands are expression nodes, unlike the
+// Field-led ComparisonExpression (a field reference vs a literal/arg value).
+// It is produced by the converter from the parser's BinaryComparisonExpr
+// (`r.count - 10 > 0`, `0 < r.count`) and gated like the rest of the
+// collection-method surface -- admitted only under WithCollectionMethods and
+// evaluated IN-MEMORY (evalCollScalar), never compiled to SQL.
+type BinaryComparisonExpression struct {
+	Left     ExpressionNode
+	Operator ComparisonOperator
+	Right    ExpressionNode
+}
+
+func (*BinaryComparisonExpression) isExpressionNode() {}
+
 // collectionMethodNames is the closed set of collection operators (ADR
 // §2.2). Kept in sync with the parser-side collectionMethods set.
 var collectionMethodNames = map[string]bool{
@@ -244,6 +259,8 @@ func evalCollScalar(expr ExpressionNode, args map[string]any, locals map[string]
 		return nil, fmt.Errorf("unsupported expression %T inside a collection lambda", expr)
 	case *ComparisonExpression:
 		return evalCollComparison(node, args, locals)
+	case *BinaryComparisonExpression:
+		return evalCollBinaryComparison(node, args, locals)
 	case *LogicalExpression:
 		return evalCollLogical(node, args, locals)
 	case *ArithmeticExpression:
@@ -334,6 +351,39 @@ func evalCollComparison(node *ComparisonExpression, args, locals map[string]any)
 		return runtimeCompareValues(lhs, rhs) <= 0, nil
 	default:
 		return nil, fmt.Errorf("operator %q is not supported inside a collection lambda", node.Operator)
+	}
+}
+
+// evalCollBinaryComparison evaluates an EXPRESSION-LED comparison (#2542 item
+// 5 residual): both sides are arbitrary expressions (arithmetic, a literal, a
+// bound field, a call result). Evaluate each side through the collection
+// subset, then apply the ordering/equality operator via the same
+// runtimeCompareValues the Field-led path uses -- so `r.count - 10 > 0` and
+// `0 < r.count` compare with identical numeric semantics.
+func evalCollBinaryComparison(node *BinaryComparisonExpression, args, locals map[string]any) (any, error) {
+	lhs, err := evalCollScalar(node.Left, args, locals)
+	if err != nil {
+		return nil, err
+	}
+	rhs, err := evalCollScalar(node.Right, args, locals)
+	if err != nil {
+		return nil, err
+	}
+	switch node.Operator {
+	case OpEq:
+		return runtimeCompareValues(lhs, rhs) == 0, nil
+	case OpNe:
+		return runtimeCompareValues(lhs, rhs) != 0, nil
+	case OpGt:
+		return runtimeCompareValues(lhs, rhs) > 0, nil
+	case OpGe:
+		return runtimeCompareValues(lhs, rhs) >= 0, nil
+	case OpLt:
+		return runtimeCompareValues(lhs, rhs) < 0, nil
+	case OpLe:
+		return runtimeCompareValues(lhs, rhs) <= 0, nil
+	default:
+		return nil, fmt.Errorf("operator %q is not supported in an expression-led comparison", node.Operator)
 	}
 }
 

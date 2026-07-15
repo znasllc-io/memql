@@ -195,6 +195,27 @@ func (r *LogicRunner) RunLogic(ctx context.Context, fnName string, body *languag
 				continue
 			}
 		}
+		// Binary arithmetic RHS (#2542 GAP 2): an intermediate `delta := a * 2`
+		// step serialized to the parenthesized operator form. Evaluate it
+		// against the local Evaluator -- the same route the terminal return
+		// takes (#2542 item 1) -- and bind the numeric result so later steps and
+		// the `_return` read it. Routed AFTER the collection-chain attempt so a
+		// chain whose value feeds arithmetic keeps its own path.
+		if step.Type == StepTypeQuery && step.Query != nil {
+			if val, handled, err := tryEvaluateArithmeticLocally(step.Query.Query, evaluator); err != nil {
+				return nil, fmt.Errorf("logic %q step %q: %w", fnName, step.ID, err)
+			} else if handled {
+				now := time.Now()
+				evaluator.SetStepResult(step.ID, &StepResult{
+					StepId:      step.ID,
+					Status:      "success",
+					StartedAt:   now,
+					CompletedAt: now,
+					Result:      val,
+				})
+				continue
+			}
+		}
 		if err := r.runOneStep(ctx, step, stepCtx, evaluator); err != nil {
 			return nil, fmt.Errorf("logic %q step %q: %w", fnName, step.ID, err)
 		}
