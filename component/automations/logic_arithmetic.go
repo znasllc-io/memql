@@ -180,7 +180,18 @@ func evalLogicArithOperand(node languageParser.ExpressionNode, evaluator *Evalua
 			var ok bool
 			src, ok = reconstructMethodCallSource(n)
 			if !ok {
-				return nil, fmt.Errorf("method call with arguments is not supported as an arithmetic operand in a logic body")
+				// A collection chain carrying method arguments / a lambda
+				// (`args.rows.count(r => r.active)`) as an arithmetic /
+				// comparison operand: the closed operand walker resolves only
+				// no-arg step-method accessors (`rows.count()`), so a
+				// lambda-carrying aggregate operand of a MULTI-STEP logic
+				// terminal return (`return chain.count(m => ...) > 0`) lands
+				// here. The single-return engine path evaluates this shape
+				// (evalCollScalar); in a multi-step body, wrap the comparison in
+				// cond -- `return cond(chain.count(m => ...) > 0, thenValue,
+				// elseValue)` (the predicate evaluates through the condition
+				// evaluator) -- or bind the aggregate to a step first (#2542).
+				return nil, fmt.Errorf("a collection-chain aggregate with method arguments (`.count(m => ...)`) is not supported as an arithmetic/comparison operand in a multi-step logic body; wrap the comparison in cond(predicate, thenValue, elseValue), or make this a single-return logic")
 			}
 		}
 		val, handled, err := EvaluateLocalExpr(src, evaluator)

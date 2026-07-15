@@ -7078,6 +7078,20 @@ func (p *Parser) parseContainsFunction() (ExpressionNode, error) {
 // cond EXECUTED (load-time lowering never runs this path, so the deploy-pack
 // lifecycle logics carried the latent break). Connectives (&& / || / !) stay
 // rejected here: nest cond() or put the compound condition on an `if` step.
+//
+// An IDENTIFIER-led comparison (`x > 10`, `x == "a"`) is already folded into a
+// Field-led ComparisonExpr one level down, in parsePrimary ->
+// parseIdentifierExpression, and returns here with NO pending operator. Only a
+// comparison whose LHS is NON-identifier-led -- the headline being a
+// collection-chain aggregate (`cond(args.rows.count(r => r.active) > 0, ...)`,
+// #2542 item 2), or a literal / call result -- reaches the switch below with
+// the operator still pending. The relational cases emit the expression-led
+// BinaryComparisonExpr that the compiler serializer, the cond-predicate
+// condition evaluator, and the engine single-return evalCollScalar already
+// handle (#2559/#2560); they are purely additive (these operators previously
+// always errored here -- cond three-arg / arg-list reject). The `==`/`!=` cases
+// keep their established EqExpr/NotExpr shape for the non-identifier LHS forms
+// that already relied on them.
 func (p *Parser) parseExpressionArg() (ExpressionNode, error) {
 	left, err := p.parsePrimary()
 	if err != nil {
@@ -7099,6 +7113,14 @@ func (p *Parser) parseExpressionArg() (ExpressionNode, error) {
 				return nil, rerr
 			}
 			return &NotExpr{Target: &EqExpr{Left: left, Right: right}}, nil
+		case "<", "<=", ">", ">=":
+			op := ComparisonOperator(p.current.Literal)
+			p.advance()
+			right, rerr := p.parsePrimary()
+			if rerr != nil {
+				return nil, rerr
+			}
+			return &BinaryComparisonExpr{Left: left, Operator: op, Right: right}, nil
 		case "&&", "||":
 			return nil, newParseErrorf(&p.current, "expression args accept a single comparison, not connectives -- nest cond() or move the compound condition to an `if` step (#2407)")
 		}

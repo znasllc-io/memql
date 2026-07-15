@@ -730,11 +730,18 @@ func evaluateCondLocally(condRaw, thenRaw, elseRaw string, evaluator *Evaluator)
 
 // evaluateCondPredicate resolves a cond predicate to a boolean. A genuine
 // collection chain (`active.any()`, `rows.where(r => r.vip).any()`) evaluates
-// through the in-memory collection surface and its truthiness is the gate; a
-// comparison whose operand is a chain (`active.count() > 0`) or a step
-// reference is NOT a genuine chain (the accessor overlaps a step method) and
-// routes to the condition evaluator, which resolves both operands. Bare
-// boolean literals short-circuit.
+// through the in-memory collection surface and its truthiness is the gate. A
+// comparison whose operand is a collection-chain aggregate or a step-method
+// accessor (`active.count() > 0`, `args.rows.count(r => r.active) >= 2`, #2542
+// item 2) is resolved through the collection/step-aware local evaluator, then
+// the operator applies via the shared memql.EvaluateComparison. This is the
+// path the parseExpressionArg relational-comparison extension (wave 3) enables:
+// without it the predicate falls through to EvaluateCondition, whose operand
+// resolver (EvaluateFilterValue) does NOT evaluate an aggregate -- it leaves the
+// raw `active.count()` text and the ordering degrades to a spurious
+// lexicographic compare (any letter-led string > "1"), so the gate was
+// constant-true. A scalar comparison (`r > 50`), compound (`a; b`), `exists()`,
+// or bare boolean literal keeps the EvaluateCondition path.
 func evaluateCondPredicate(raw string, evaluator *Evaluator) (bool, error) {
 	raw = strings.TrimSpace(raw)
 	switch raw {
@@ -742,6 +749,11 @@ func evaluateCondPredicate(raw string, evaluator *Evaluator) (bool, error) {
 		return false, nil
 	case "true":
 		return true, nil
+	}
+	if val, handled, err := tryEvaluateChainComparison(raw, evaluator); err != nil {
+		return false, err
+	} else if handled {
+		return val, nil
 	}
 	if isGenuineCollectionChain(raw) {
 		if val, handled, err := tryEvaluateCollectionChainLocally(raw, evaluator); err != nil {
@@ -751,6 +763,124 @@ func evaluateCondPredicate(raw string, evaluator *Evaluator) (bool, error) {
 		}
 	}
 	return evaluator.EvaluateCondition(raw)
+}
+
+// tryEvaluateChainComparison evaluates a single atomic comparison whose left or
+// right operand is a collection-chain aggregate / step-method accessor
+// (`active.count() > 0`, `args.rows.count(r => r.active) >= 2`), which
+// EvaluateCondition mis-resolves (its EvaluateFilterValue operand resolver
+// leaves the aggregate text un-evaluated). Each operand resolves through the
+// collection/step-aware local evaluator; the operator applies via the shared
+// memql.EvaluateComparison (the same six-operator semantics the engine
+// single-return path uses).
+//
+// Returns (result, true, nil) when raw is such a comparison, (false, false, nil)
+// when it is not (a scalar / compound / non-aggregate comparison -- the caller
+// falls through to EvaluateCondition), and (false, false, err) on a hard
+// resolution error. A compound predicate (a top-level `;`/`,` connective the
+// compiler emits for `&&`/`||`) is left to EvaluateCondition's split machinery.
+func tryEvaluateChainComparison(raw string, evaluator *Evaluator) (bool, bool, error) {
+	// The compiler wraps an expression-led BinaryComparisonExpr predicate in a
+	// redundant outer paren pair (`(active.count() > 1)`); strip it so the
+	// comparison operator is at split depth 0, matching EvaluateCondition's own
+	// stripRedundantOuterParens step.
+	raw = stripRedundantOuterParens(strings.TrimSpace(raw))
+	if len(splitConditionParts(raw, ';')) > 1 || len(splitConditionParts(raw, ',')) > 1 {
+		return false, false, nil
+	}
+	leftSrc, op, rightSrc, ok := splitTopLevelComparison(raw)
+	if !ok {
+		return false, false, nil
+	}
+	if !memql.LooksLikeCollectionChain(leftSrc) && !memql.LooksLikeCollectionChain(rightSrc) {
+		return false, false, nil
+	}
+	lval, err := resolveCondComparisonOperand(leftSrc, evaluator)
+	if err != nil {
+		return false, false, err
+	}
+	rval, err := resolveCondComparisonOperand(rightSrc, evaluator)
+	if err != nil {
+		return false, false, err
+	}
+	res, err := memql.EvaluateComparison(memql.ComparisonOperator(op), lval, rval)
+	if err != nil {
+		return false, false, err
+	}
+	return isTruthy(res), true, nil
+}
+
+// resolveCondComparisonOperand resolves one operand of a cond-predicate
+// comparison. A collection-chain aggregate / step-method accessor resolves
+// through the local expression evaluator (unwrapped to its scalar value); a
+// scalar / literal / path operand resolves through EvaluateFilterValue (the
+// same resolver EvaluateCondition uses), so a literal `1` or a quoted string
+// keeps its established resolution.
+func resolveCondComparisonOperand(src string, evaluator *Evaluator) (any, error) {
+	src = strings.TrimSpace(src)
+	if memql.LooksLikeCollectionChain(src) {
+		if val, handled, err := EvaluateLocalExpr(src, evaluator); err != nil {
+			return nil, err
+		} else if handled {
+			return UnwrapStepResult(val), nil
+		}
+	}
+	return evaluator.EvaluateFilterValue(src)
+}
+
+// splitTopLevelComparison splits raw at its first top-level comparison operator
+// (== != < <= > >=), respecting parens / brackets / braces and quoted strings so
+// a nested lambda arrow (`m => m.active`, always inside method-call parens) or a
+// quoted operator is not mistaken for the split point. Two-char operators bind
+// before single-char. Returns ok=false when there is no top-level comparison
+// operator.
+func splitTopLevelComparison(raw string) (left, op, right string, ok bool) {
+	depth := 0
+	inStr := false
+	var quote byte
+	for i := 0; i < len(raw); i++ {
+		c := raw[i]
+		if inStr {
+			if c == '\\' && i+1 < len(raw) {
+				i++
+				continue
+			}
+			if c == quote {
+				inStr = false
+			}
+			continue
+		}
+		switch c {
+		case '"', '\'':
+			inStr = true
+			quote = c
+		case '(', '[', '{':
+			depth++
+		case ')', ']', '}':
+			if depth > 0 {
+				depth--
+			}
+		case '=', '!', '<', '>':
+			if depth != 0 {
+				continue
+			}
+			// The `=>` lambda arrow only appears inside method-call parens
+			// (depth > 0), but guard anyway so a stray depth-0 `=>` never
+			// splits as `>`.
+			if c == '>' && i > 0 && raw[i-1] == '=' {
+				continue
+			}
+			if i+1 < len(raw) && raw[i+1] == '=' {
+				return strings.TrimSpace(raw[:i]), string(c) + "=", strings.TrimSpace(raw[i+2:]), true
+			}
+			if c == '<' || c == '>' {
+				return strings.TrimSpace(raw[:i]), string(c), strings.TrimSpace(raw[i+1:]), true
+			}
+			// A lone `=` (arrow half) or `!` (negation, handled by
+			// EvaluateCondition) at depth 0 is not a split point.
+		}
+	}
+	return "", "", "", false
 }
 
 // reconstructPositionalBuiltinCall rebuilds the source call string for a

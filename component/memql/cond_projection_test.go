@@ -78,26 +78,47 @@ func TestEvalCollCond_ChainPredicateAndBranches(t *testing.T) {
 	}
 }
 
-// TestCondComparisonOverChain_ParseGap pins the boundary between this wave
-// (item-2 EVALUATOR depth) and the concurrent comparison-grammar wave (item-2
-// PARSE depth). A cond whose predicate is a comparison over a collection-chain
-// aggregate (`cond(x.count() > 0, ...)`) is the item-2 headline shape, but the
-// langparser cond-arg grammar (parseCondFunction -> parseExpressionArg) stops
-// at the `>` and reports a three-argument error -- the same
-// non-identifier-led-comparison grammar gap PR #2555 pinned. The evaluator side
-// is READY (evaluateCondPredicate routes the serialized comparison string
-// through the condition evaluator; the bare-chain and step-scalar predicate
-// cases above and the projection cases all evaluate), so when the
-// comparison-grammar wave lands this parse, the end-to-end shape works with no
-// further evaluator change. Flip this assertion to expect success then.
-func TestCondComparisonOverChain_ParseGap(t *testing.T) {
-	_, err := parser.ParseExpression(`cond(args.members.count(m => m.active) > 0, "some", "none")`)
-	if err == nil {
-		t.Fatalf("expected a parse error for a comparison-over-chain cond predicate " +
-			"(the comparison-grammar wave owns this parse); update this pin when it lands")
+// TestCondComparisonOverChain_ParsesAndEvaluates is the FLIP of the wave-2 pin
+// TestCondComparisonOverChain_ParseGap (#2542 item-2 headline). A cond whose
+// predicate is a comparison over a collection-chain aggregate
+// (`cond(x.count(...) > 0, ...)`) previously stopped at the `>` in the
+// langparser cond-arg grammar (parseCondFunction -> parseExpressionArg) with a
+// three-argument error. Wave 3 extends parseExpressionArg to consume ONE
+// relational comparison, emitting the expression-led BinaryComparisonExpr the
+// evaluator was already ready for (evaluateCondPredicate -> the condition
+// evaluator / evalCollScalar). This pins the now-working parse AND end-to-end
+// evaluation through the engine single-return evaluator.
+func TestCondComparisonOverChain_ParsesAndEvaluates(t *testing.T) {
+	src := `cond(args.members.count(m => m.active) > 0, "some", "none")`
+	pexpr, err := parser.ParseExpression(src)
+	if err != nil {
+		t.Fatalf("parse %q: unexpected error now that the cond-arg grammar consumes a relational comparison: %v", src, err)
 	}
-	if !strings.Contains(err.Error(), "cond() requires three arguments") {
-		t.Errorf("error = %q, want the cond three-argument grammar error", err.Error())
+	cond, ok := pexpr.(*parser.CondExpr)
+	if !ok {
+		t.Fatalf("parsed %q to %T, want *parser.CondExpr", src, pexpr)
+	}
+	if _, ok := cond.Condition.(*parser.BinaryComparisonExpr); !ok {
+		t.Errorf("cond predicate parsed to %T, want *parser.BinaryComparisonExpr (expression-led comparison)", cond.Condition)
+	}
+
+	// End-to-end through the engine single-return evaluator: two active members
+	// -> predicate true -> the "some" branch.
+	got, evErr := evalLogicExpr(t, src, sampleMembers())
+	if evErr != nil {
+		t.Fatalf("eval %q: %v", src, evErr)
+	}
+	if got != "some" {
+		t.Errorf("eval %q = %#v, want \"some\"", src, got)
+	}
+
+	// Predicate false -> the else branch.
+	none, evErr := evalLogicExpr(t, `cond(args.members.count(m => m.active) > 5, "some", "none")`, sampleMembers())
+	if evErr != nil {
+		t.Fatalf("eval false-predicate cond: %v", evErr)
+	}
+	if none != "none" {
+		t.Errorf("false-predicate cond = %#v, want \"none\"", none)
 	}
 }
 

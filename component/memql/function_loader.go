@@ -380,6 +380,16 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 		return nil, err
 	}
 
+	// Arithmetic-operand parity (#2542): reject the unparenthesized-comparison
+	// trap (`a - b > 0` -> `a - (b > 0)`) across the WHOLE logic body, including
+	// intermediate `:=` steps the loader otherwise stashes un-converted. The
+	// terminal-return position is already covered by convertArithmeticExpr; this
+	// extends the same clear rejection to every step so it fires through the
+	// lint/boot-parity pass, not just at RunLogic.
+	if err := validateLogicArithmeticOperands(funcDef); err != nil {
+		return nil, err
+	}
+
 	// Validate the function name matches the file-derived function name.
 	if funcDef.Name != "" && funcDef.Name != expectedName {
 		return nil, fmt.Errorf("function name %q does not match expected name %q", funcDef.Name, expectedName)
