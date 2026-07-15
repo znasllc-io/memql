@@ -786,6 +786,16 @@ func (v *functionValidator) expandExpressionWithArgs(expr ExpressionNode, args m
 		}
 		return &LambdaExpression{Params: append([]string(nil), node.Params...), Body: body}, nil
 
+	case *DotAccessExpression:
+		// #2542 item 4: fold an `args.X` object into a concrete literal so a
+		// `return args.rows.first().createdAt` body evaluates over the
+		// caller's collection; the field segment is static.
+		object, err := v.expandExpressionWithArgs(node.Object, args)
+		if err != nil {
+			return nil, err
+		}
+		return &DotAccessExpression{Object: object, Field: node.Field}, nil
+
 	case *ArithmeticExpression:
 		// #2316: fold any `args.X` operand into a concrete literal (lambda
 		// param references pass through unchanged for per-element binding).

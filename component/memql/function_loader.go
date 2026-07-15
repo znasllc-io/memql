@@ -1109,6 +1109,8 @@ func collectFunctionRefsRecursive(expr ExpressionNode, refs *[]string) {
 		for _, a := range node.Args {
 			collectFunctionRefsRecursive(a, refs)
 		}
+	case *DotAccessExpression:
+		collectFunctionRefsRecursive(node.Object, refs)
 	case *LambdaExpression:
 		collectFunctionRefsRecursive(node.Body, refs)
 	case *ArithmeticExpression:
@@ -1150,6 +1152,8 @@ func walkForImpureLambda(expr ExpressionNode, functions map[string]*Function) er
 				return err
 			}
 		}
+	case *DotAccessExpression:
+		return walkForImpureLambda(node.Object, functions)
 	case *LambdaExpression:
 		if bad := findImpureCall(node.Body, functions); bad != "" {
 			return fmt.Errorf("lambda body must be pure: mutation/action %q is not allowed inside a collection lambda (ADR §2.2)", bad)
@@ -1199,6 +1203,8 @@ func findImpureCall(expr ExpressionNode, functions map[string]*Function) string 
 			}
 		}
 		return ""
+	case *DotAccessExpression:
+		return findImpureCall(node.Object, functions)
 	case *LambdaExpression:
 		return findImpureCall(node.Body, functions)
 	case *ArithmeticExpression:

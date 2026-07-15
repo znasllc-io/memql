@@ -572,6 +572,25 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 		return result, nil
 	}
 
+	// Top-level dot access (#2542 item 4): a Logic whose body is a single
+	// `return args.rows.first().createdAt` resolves -- after the receiver's
+	// ArgRefExpression folds to a concrete collection literal -- to a
+	// *DotAccessExpression at plan.Root. Evaluated in-memory (the object is
+	// a call result, never a SQL-compilable filter) and wrapped as the
+	// function's return value, like the CollectionMethodExpression branch
+	// above. An empty collection's .first() yields nil, so the field access
+	// returns a clean nil rather than erroring.
+	if dotExpr, ok := plan.Root.(*DotAccessExpression); ok {
+		val, err := evalCollScalar(dotExpr, nil, nil)
+		if err != nil {
+			return nil, err
+		}
+		result := newExecuteResult(nil)
+		result.setOutput(val)
+		e.emitQueryExecutedEvent(startTime, result, false)
+		return result, nil
+	}
+
 	// Top-level arithmetic (#2316): a Logic whose body is a single
 	// `return args.a + args.b` resolves -- after expandExpressionWithArgs
 	// folds the operand ArgRefExpressions into concrete literals -- to a
