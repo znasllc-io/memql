@@ -2,6 +2,7 @@ package http
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -12,7 +13,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/identity"
+	memqlengine "github.com/znasllc-io/memql/component/memql"
 )
 
 // newBootstrapTestServer assembles a Server with the bits
@@ -322,4 +325,56 @@ func TestHandleNodeBootstrap_EmptyTokenClassDefaultsToNode(t *testing.T) {
 	claims, err := s.Issuer.VerifyAccessToken(resp.PlainToken, time.Now().UTC().Add(time.Minute))
 	require.NoError(t, err)
 	assert.Equal(t, identity.ClassNode, claims.Class)
+}
+
+// captureActorEngine is a fake identity.Store engine that records the
+// actor of the ctx handed to the node_token persist mutation. It lets the
+// node-bootstrap wiring test assert the persist runs under a system actor
+// WITHOUT a database -- the memql#2513 credential guard only admits a
+// machine-credential write from a system actor, and before memql#2549 the
+// persist ran under the SystemActorMiddleware role="owner" session actor
+// (which the guard rejects, looping every mesh node).
+type captureActorEngine struct {
+	createActor string
+	createSeen  bool
+}
+
+func (e *captureActorEngine) Execute(ctx context.Context, query string) (*memqlengine.ExecuteResult, error) {
+	if strings.Contains(query, "createNodeTokenIdentity") {
+		e.createActor = auth.ActorFromContext(ctx)
+		e.createSeen = true
+	}
+	// Empty result: the binding lookup reads it as "no existing row" (so
+	// the handler takes the create leg); the create call ignores it.
+	return &memqlengine.ExecuteResult{}, nil
+}
+
+// TestHandleNodeBootstrap_PersistUsesSystemActor is the memql#2549
+// regression guard for the wiring in node_bootstrap.go: when the handler
+// persists the node_token audit row, it must hand the Store a system
+// actor so the memql#2513 credential guard admits the write. A real Store
+// is wired over a capturing engine; the handler runs without
+// SystemActorMiddleware (mirroring a direct handler drive), so the persist
+// context is whatever the handler stamps -- which must be the system
+// credential actor, not the empty/owner request actor.
+func TestHandleNodeBootstrap_PersistUsesSystemActor(t *testing.T) {
+	const secret = "dev-bootstrap-secret-for-tests"
+	s := newBootstrapTestServer(t, secret)
+	eng := &captureActorEngine{}
+	s.Store = &identity.Store{Engine: eng}
+
+	body, err := json.Marshal(NodeBootstrapRequest{
+		NodeId:   "v1:cluster:node:bff-local",
+		NodeType: "bff",
+	})
+	require.NoError(t, err)
+
+	rec := driveBootstrapRequest(t, s, secret, string(body))
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+
+	require.True(t, eng.createSeen, "the handler must persist the node_token row via createNodeTokenIdentity")
+	require.True(t, strings.HasPrefix(eng.createActor, "system:"),
+		"node_token persist must run under a system actor the memql#2513 guard accepts; got actor %q", eng.createActor)
+	require.Equal(t, identity.SystemCredentialActorSubject, eng.createActor,
+		"persist must run under the dedicated system credential actor (memql#2549)")
 }

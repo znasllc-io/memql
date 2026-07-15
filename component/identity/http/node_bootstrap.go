@@ -340,13 +340,23 @@ func (s *Server) mintNodeBootstrapToken(w http.ResponseWriter, r *http.Request, 
 		const bootstrapMintedBy = "system:node-bootstrap"
 		const bootstrapUserId = "system:node-bootstrap"
 
+		// The node_token row is a machine credential, so its write is
+		// gated by the memql#2513 credential-actor guard: only a system
+		// actor may write it. The bootstrap request authenticates with
+		// the shared Bootstrap secret and carries no JWT, so
+		// SystemActorMiddleware stamps the role="owner" session actor --
+		// which the guard rejects. Stamp the dedicated system credential
+		// actor here (overriding that owner actor) so both the first-time
+		// create and the repeat-bootstrap stamp legs pass. memql#2549.
+		persistCtx := identity.ContextWithSystemCredentialActor(ctx)
+
 		var persistErr error
 		if existing == nil {
-			persistErr = s.Store.CreateNodeTokenIdentity(ctx,
+			persistErr = s.Store.CreateNodeTokenIdentity(persistCtx,
 				identityId, bootstrapUserId, nodeId, nodeType, keyHash,
 				bootstrapMintedBy, expiresAtStr, bootstrappedAt, bootstrappedFrom)
 		} else {
-			persistErr = s.Store.StampNodeTokenBootstrap(ctx,
+			persistErr = s.Store.StampNodeTokenBootstrap(persistCtx,
 				identityId, bootstrapUserId, nodeId, nodeType, keyHash,
 				bootstrapMintedBy, expiresAtStr, bootstrappedAt, bootstrappedFrom)
 		}

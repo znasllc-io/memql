@@ -242,8 +242,16 @@ func (s *Server) handlePairRedeem(w http.ResponseWriter, r *http.Request) {
 	pairStore := &workerpairing.Store{Engine: s.Store.Engine, Logger: s.Logger}
 	tokenStore := &workertoken.Store{Engine: s.Store.Engine, Logger: s.Logger}
 	// SystemActorMiddleware ran before us via Mount(), so the context
-	// already carries the synthetic actor downstream mutations need.
+	// already carries the synthetic actor the workerPairingCode mutations
+	// need.
 	ctx := r.Context()
+	// The worker_token row is a machine credential, so its write is gated
+	// by the memql#2513 credential-actor guard: only a system actor may
+	// write it. The middleware's role="owner" session actor is rejected,
+	// so the tokenStore create/revoke below run under the dedicated
+	// system credential actor. The pair code redeemed here is the
+	// caller's authorization. memql#2549.
+	credCtx := identity.ContextWithSystemCredentialActor(ctx)
 
 	row, err := pairStore.LookupByHash(ctx, hash)
 	if err != nil {
@@ -294,7 +302,7 @@ func (s *Server) handlePairRedeem(w http.ResponseWriter, r *http.Request) {
 		workerName = "paired-" + suffix(row.ID, 6)
 	}
 
-	if err := tokenStore.Create(ctx, identityId, row.OwnerUserId, workerName, tokenHash, row.OwnerUserId, time.Time{}); err != nil {
+	if err := tokenStore.Create(credCtx, identityId, row.OwnerUserId, workerName, tokenHash, row.OwnerUserId, time.Time{}); err != nil {
 		s.logErr("pair: token row create failed", err)
 		s.writeRedeemError(w, http.StatusInternalServerError, "persist_failed", "token row: "+err.Error())
 		return
@@ -305,7 +313,7 @@ func (s *Server) handlePairRedeem(w http.ResponseWriter, r *http.Request) {
 		// Token row already landed; redeem-stamp failure means the
 		// code can be redeemed twice if we're unlucky. Best-effort
 		// soft-revoke the freshly-minted token to fail closed.
-		_ = tokenStore.Revoke(ctx, canonicalIdentityId)
+		_ = tokenStore.Revoke(credCtx, canonicalIdentityId)
 		s.logErr("pair: redeem stamp failed", err)
 		s.writeRedeemError(w, http.StatusInternalServerError, "persist_failed", "redeem stamp: "+err.Error())
 		return

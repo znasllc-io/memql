@@ -32,6 +32,57 @@ func ContextWithSystemActor(ctx context.Context) context.Context {
 	return ctx
 }
 
+// SystemCredentialActorSubject is the synthetic actor attributed to
+// machine-credential v1:identity:identity writes (badge / worker_token /
+// node_token / voice_agent_token / service_account). It carries
+// role="system" and a "system:"-prefixed subject so it satisfies the
+// memql#2513 credential-actor guard (component/memql
+// identity_credential_actor_validation.go's validateIdentityCredentialActorScope
+// -> isSystemActor), which admits a machine-credential row write ONLY
+// from a system actor.
+//
+// Distinct from SystemActorSubject on purpose. That actor
+// ("system:identity-svc", role="owner", email="system@identity.memql.local")
+// stands in for the eventual human owner on the deliberately-
+// unauthenticated session-bootstrap surface (magic-link, oauth token
+// exchange, first-run clusterSettings). Two properties keep it OUT of
+// isSystemActor: role="owner" (not "system") and an email claim that
+// ActorFromToken prefers over the subject (so the derived actor is
+// "system@identity.memql.local", which lacks the "system:" prefix).
+// Credential MINT/REVOKE is a different operation -- the caller is
+// authorized at the edge (bootstrap secret / pair code / admin role /
+// CLI exec) and the engine write runs as this dedicated system actor.
+// memql#2549.
+const SystemCredentialActorSubject = "system:identity-credential"
+
+// ContextWithSystemCredentialActor forces the system credential actor
+// onto ctx, OVERRIDING any actor already present. Unlike
+// ContextWithSystemActor (idempotent -- it leaves an existing actor
+// alone), the machine-credential write paths run under contexts that
+// already carry a NON-system actor: the SystemActorMiddleware owner
+// stamp on the /node/bootstrap + /pair/redeem HTTP surface, or the
+// logged-in operator on the /admin/tokens revoke surface. That actor is
+// exactly what the memql#2513 guard rejects, so it must be replaced, not
+// preserved.
+//
+// This supplies only the engine-write attribution; it does NOT authorize
+// anything. Callers MUST have authorized the operation before invoking
+// it (bootstrap secret compare, pair-code redeem, requireAdmin, CLI
+// exec). No email claim is stamped so the derived actor is the
+// "system:"-prefixed subject rather than an email -- both the role and
+// the actor-prefix arms of isSystemActor hold. memql#2549.
+func ContextWithSystemCredentialActor(ctx context.Context) context.Context {
+	claims := map[string]any{
+		"sub":  SystemCredentialActorSubject,
+		"role": "system",
+		"name": "Identity Credential Service",
+	}
+	token := auth.BuildTokenInfo(claims)
+	ctx = auth.ContextWithClaims(ctx, claims)
+	ctx = auth.ContextWithToken(ctx, token)
+	return ctx
+}
+
 // SystemActorSubject is the synthetic actor stamped onto identity-
 // side requests that have no other authenticated user. Identity's
 // HTTP surface includes a deliberately-unauthenticated entry-point
