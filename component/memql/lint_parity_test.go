@@ -228,6 +228,66 @@ mutate widget createWidget {
 	}
 }
 
+// TestLintParity_ShapeBarePayloadFieldIsClean covers the unifiedShapeLoader
+// parse-time checks and pins the removed-payload-prefix rule: a concept with a
+// field literally named "payload", projected by BARE name in a shape, must
+// mount clean. The check fires only on the removed `payload.<prop>` prefix
+// (with the dot), not on a dotless bare field named "payload". Lint and the
+// loader share the one convertShapeDecl code path, so they stay in lockstep.
+func TestLintParity_ShapeBarePayloadFieldIsClean(t *testing.T) {
+	root := fstest.MapFS{
+		"lintpayload/concepts.memql": {Data: []byte(`@version("1.0.0")
+@namespace("lintpayload")
+@description("A record carrying a field literally named payload.")
+concept record {
+  payload  string  @required  @description("A field literally named payload.")
+  label    string  @description("Another field.")
+}
+`)},
+		"lintpayload/shapes.memql": {Data: []byte(`use lintpayload.concepts.{ record }
+
+@description("Projects the field literally named payload by bare name.")
+shape record recordView {
+  row.id
+  payload
+  label
+}
+`)},
+	}
+	diags := lint(t, root)
+	if len(diags) != 0 {
+		t.Fatalf("a shape projecting a bare field named payload must mount clean; got: %+v", diags)
+	}
+}
+
+// TestLintParity_ShapeRemovedPayloadPrefixRejected is the negative control for
+// the fix above: the genuine removed form -- an explicit `payload.<prop>`
+// prefix -- is still rejected by the shape loader, so the fix did not
+// over-relax the rule.
+func TestLintParity_ShapeRemovedPayloadPrefixRejected(t *testing.T) {
+	root := fstest.MapFS{
+		"lintpayloadbad/concepts.memql": {Data: []byte(`@version("1.0.0")
+@namespace("lintpayloadbad")
+@description("A record.")
+concept record {
+  label  string  @required  @description("A field.")
+}
+`)},
+		"lintpayloadbad/shapes.memql": {Data: []byte(`use lintpayloadbad.concepts.{ record }
+
+@description("Uses the removed payload. prefix form.")
+shape record recordBad {
+  row.id
+  payload.label
+}
+`)},
+	}
+	diags := lint(t, root)
+	if !diagsContain(diags, "removed `payload.` prefix") {
+		t.Fatalf("expected the removed payload-prefix form to still be rejected; got: %+v", diags)
+	}
+}
+
 // TestLintParity_EngineOwnTreeIsClean guards the healthy path (epic
 // acceptance item 5): with no overlay mounted, LintUnifiedTree over the
 // embedded core tree returns zero diagnostics -- the same invariant
