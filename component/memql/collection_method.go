@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -230,6 +231,17 @@ func evalCollScalar(expr ExpressionNode, args map[string]any, locals map[string]
 		// `m.profile.age`). The first dotted segment names a bound lambda
 		// param; the remainder walks into the element.
 		return resolveLambdaPath(node.Name, locals), nil
+	case *FunctionCallExpression:
+		// Date/duration builtins (#2541) -- the converter emits them as
+		// positional FunctionCallExpressions (like coalesce/cond/concat).
+		// They appear here as a lambda comparison value or an arithmetic
+		// operand of a logic terminal return (engine.go's plan-root branch
+		// routes through evalCollScalar). Any other call name keeps the
+		// unsupported error below.
+		if IsDateBuiltin(node.Name) {
+			return evalCollDateBuiltin(node, args, locals)
+		}
+		return nil, fmt.Errorf("unsupported expression %T inside a collection lambda", expr)
 	case *ComparisonExpression:
 		return evalCollComparison(node, args, locals)
 	case *LogicalExpression:
@@ -251,6 +263,31 @@ func evalCollScalar(expr ExpressionNode, args map[string]any, locals map[string]
 	default:
 		return nil, fmt.Errorf("unsupported expression %T inside a collection lambda", expr)
 	}
+}
+
+// evalCollDateBuiltin resolves each positional operand of a date/duration
+// builtin call (#2541) through the collection-lambda subset, then dispatches
+// the shared name-keyed evaluator. Operands are positional ("0", "1", ...);
+// a substituted caller arg arrives as a raw Go value and passes through
+// verbatim.
+func evalCollDateBuiltin(node *FunctionCallExpression, args, locals map[string]any) (any, error) {
+	vals := make([]any, len(node.Args))
+	for i := range vals {
+		raw, ok := node.Args[strconv.Itoa(i)]
+		if !ok {
+			return nil, fmt.Errorf("%s() is missing positional arg %d", node.Name, i)
+		}
+		if expr, isExpr := raw.(ExpressionNode); isExpr {
+			v, err := evalCollScalar(expr, args, locals)
+			if err != nil {
+				return nil, fmt.Errorf("%s() arg %d: %w", node.Name, i, err)
+			}
+			vals[i] = v
+			continue
+		}
+		vals[i] = raw
+	}
+	return EvaluateDateBuiltin(node.Name, vals)
 }
 
 // resolveLiteralValue unwraps the engine literal wrapper, resolving the

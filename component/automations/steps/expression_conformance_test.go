@@ -178,6 +178,86 @@ var localExprCases = []conformanceCase{
 		expr:  `coalesce(rows.first().id, "")`,
 		want:  "v1:x:1",
 	},
+	// Date/duration builtins (#2541): both entry points dispatch through the
+	// shared name-keyed evaluator (memql.EvaluateDateBuiltin), so an
+	// addDuration/daysBetween/year/... computes the same value as a mutation
+	// step ARG and as a logic step VALUE / terminal return.
+	{
+		name: "date_addDuration_literals",
+		expr: `addDuration("2026-01-01T00:00:00Z", "P1D")`,
+		want: "2026-01-02T00:00:00Z",
+	},
+	{
+		name: "date_daysBetween_literals",
+		expr: `daysBetween("2026-01-01", "2026-01-11")`,
+		want: 10,
+	},
+	{
+		name: "date_year_literal",
+		expr: `year("2026-07-14T09:30:00Z")`,
+		want: 2026,
+	},
+	{
+		name: "date_month_literal",
+		expr: `month("2026-07-14T09:30:00Z")`,
+		want: 7,
+	},
+	{
+		name: "date_dayOfMonth_literal",
+		expr: `dayOfMonth("2026-07-14T09:30:00Z")`,
+		want: 14,
+	},
+	{
+		// A bare step reference as a date-builtin operand: the step's raw
+		// string result feeds the date parser on both paths.
+		name:  "date_year_of_step_result",
+		setup: seedStep("startedAt", "2026-07-14T09:30:00Z", "success"),
+		expr:  `year(startedAt)`,
+		want:  2026,
+	},
+	{
+		name:  "date_addDuration_over_step_result",
+		setup: seedStep("startedAt", "2026-03-10", "success"),
+		expr:  `addDuration(startedAt, "P1D")`,
+		want:  "2026-03-11T00:00:00Z",
+	},
+}
+
+// logicOnlyExprCases: positions supported ONLY at logic time. Infix binary
+// arithmetic (#2542 item 1) is deliberately NOT parsed out of arg-time
+// strings -- a `/` or `-` inside an arg-time string is data (URLs, slugs,
+// dates), never division, and the explicit add()/sub() builtins already
+// cover arg-time arithmetic. TestArithmetic_ArgTimeStaysLiteral pins that
+// boundary.
+var logicOnlyExprCases = []conformanceCase{
+	{
+		name: "arith_step_division",
+		setup: seedSteps(
+			seedStep("revenue", 100, "success"),
+			seedStep("orders", 4, "success")),
+		expr: `(revenue / orders)`,
+		want: 25,
+	},
+	{
+		name: "arith_precedence_grouping",
+		setup: seedSteps(
+			seedStep("good", 9, "success"),
+			seedStep("total", 10, "success")),
+		expr: `((good * 100) / total)`,
+		want: 90,
+	},
+	{
+		name:  "arith_step_method_operand",
+		setup: seedStep("rows", nodeResult("v1:x:1", nil), "success"),
+		expr:  `(rows.count() * 2)`,
+		want:  2,
+	},
+	{
+		// A date builtin nested as an arithmetic operand (#2541+#2542).
+		name: "arith_date_builtin_operand",
+		expr: `(daysBetween("2026-07-01", "2026-07-15") / 7)`,
+		want: 2,
+	},
 }
 
 // TestStepMethodAccessors_CapitalizedRetired pins Story 5 (ADR §2.2 / #2303):
@@ -254,6 +334,31 @@ func TestExpressionEvaluators_Conformance(t *testing.T) {
 		{"argTime", argTime},
 		{"logicLocal", logicLocal},
 	})
+
+	run(t, logicOnlyExprCases, []struct {
+		name string
+		fn   func(*automations.Evaluator, string) (any, error)
+	}{
+		{"logicLocal", logicLocal},
+	})
+}
+
+// TestArithmetic_ArgTimeStaysLiteral pins the logic-only boundary of infix
+// arithmetic (#2542 item 1): the ARG-TIME resolver must NOT reinterpret an
+// operator-shaped string as arithmetic -- an arg string containing `/` is
+// data. It resolves to the raw literal text, exactly its pre-#2542
+// behaviour.
+func TestArithmetic_ArgTimeStaysLiteral(t *testing.T) {
+	seed := seedSteps(
+		seedStep("revenue", 100, "success"),
+		seedStep("orders", 4, "success"))
+	got, err := argTime(seededEvaluator(seed), "revenue / orders")
+	if err != nil {
+		t.Fatalf("argTime(revenue / orders): unexpected error: %v", err)
+	}
+	if got != "revenue / orders" {
+		t.Fatalf("argTime(revenue / orders) = %#v, want the raw literal (infix arithmetic is logic-time only, #2542)", got)
+	}
 }
 
 // conformanceEqual compares results structurally enough for the matrix: two

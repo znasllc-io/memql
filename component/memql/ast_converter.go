@@ -199,6 +199,30 @@ func (c *ASTConverter) ConvertExpression(expr languageParser.ExpressionNode) (Ex
 	case *languageParser.TrimExpr:
 		return c.convertPositionalBuiltin("trim",
 			[]languageParser.ExpressionNode{node.Target})
+	// Date/duration builtins (#2541). Like arithmetic (#2316) they are
+	// IN-MEMORY only: admitted solely under WithCollectionMethods (logic
+	// bodies / collection lambdas) and rejected in specs and query filters
+	// at load -- there is no SQL pushdown for them. The converted form is
+	// the positional FunctionCallExpression the runtime dispatches by name
+	// (EvaluateDateBuiltin), mirroring coalesce/cond/concat above.
+	case *languageParser.AddDurationExpr:
+		return c.convertDateBuiltin("addDuration", node.Timestamp, node.Duration)
+	case *languageParser.DaysBetweenExpr:
+		return c.convertDateBuiltin("daysBetween", node.Date1, node.Date2)
+	case *languageParser.SubtractTimestampsExpr:
+		return c.convertDateBuiltin("subtractTimestamps", node.T1, node.T2)
+	case *languageParser.YearExpr:
+		return c.convertDateBuiltin("year", node.Target)
+	case *languageParser.QuarterExpr:
+		return c.convertDateBuiltin("quarter", node.Target)
+	case *languageParser.MonthExpr:
+		return c.convertDateBuiltin("month", node.Target)
+	case *languageParser.DayOfMonthExpr:
+		return c.convertDateBuiltin("dayOfMonth", node.Target)
+	case *languageParser.IsAnniversaryExpr:
+		return c.convertDateBuiltin("isAnniversary", node.StartDate, node.CheckDate)
+	case *languageParser.IsFirstDayOfQuarterExpr:
+		return c.convertDateBuiltin("isFirstDayOfQuarter", node.Target)
 	case *languageParser.NilExpr:
 		// `nil` literal in a Logic body (e.g. `return ctx.x != nil ?
 		// ctx.x : default`). Represented as an engine LiteralValueNode
@@ -219,6 +243,17 @@ func (c *ASTConverter) ConvertExpression(expr languageParser.ExpressionNode) (Ex
 	default:
 		return nil, fmt.Errorf("unsupported parser expression type: %T", expr)
 	}
+}
+
+// convertDateBuiltin admits a date/duration builtin (#2541) under the same
+// in-memory-only scope gate as arithmetic (#2316): logic bodies / collection
+// lambdas convert it to the positional FunctionCallExpression form; specs and
+// query filters (the default converter) reject it at load.
+func (c *ASTConverter) convertDateBuiltin(name string, args ...languageParser.ExpressionNode) (*FunctionCallExpression, error) {
+	if !c.allowCollectionMethods {
+		return nil, fmt.Errorf("%s() is only available in logic bodies / collection lambdas (in-memory), not in specs or query filters (#2541)", name)
+	}
+	return c.convertPositionalBuiltin(name, args)
 }
 
 // convertPositionalBuiltin wraps a list of positionally-indexed

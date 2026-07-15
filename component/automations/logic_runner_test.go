@@ -1075,3 +1075,362 @@ logic logicSeedWelcomeCurriculum {
 		}
 	}
 }
+
+// TestLogicRunner_RunLogic_TerminalReturnArithmetic pins #2542 item 1
+// END-TO-END: a multi-step logic whose terminal return is binary arithmetic
+// over prior step results --
+//
+//	logic aov {
+//	  body {
+//	    r := coalesce(args.revenue, 0)
+//	    o := coalesce(args.orders, 1)
+//	    return r / o
+//	  }
+//	}
+//
+// must LOAD (the serializer emits the parenthesized operator form instead of
+// `<<unsupported expression *ast.ArithmeticExpr>>`) AND EVALUATE (the
+// LogicRunner's arithmetic branch resolves both step operands locally and
+// applies the #2316 numeric rules). Nothing reaches the step registry: the
+// coalesce steps and the return all resolve locally.
+func TestLogicRunner_RunLogic_TerminalReturnArithmetic(t *testing.T) {
+	src := `@enabled
+@description("aov-style terminal-return arithmetic (#2542)")
+logic aov {
+  args {
+    revenue int @required
+    orders int @required
+  }
+  body {
+    r := coalesce(args.revenue, 0)
+    o := coalesce(args.orders, 1)
+    return r / o
+  }
+}
+`
+	body := parseLogicBody(t, src)
+	registry := &recordingStepRegistry{}
+	r := NewLogicRunner(&memql.MemQLEngine{}, registry, nil)
+
+	out, err := r.RunLogic(context.Background(), "aov", body, map[string]any{
+		"revenue": 100,
+		"orders":  4,
+	})
+	if err != nil {
+		t.Fatalf("RunLogic returned error (#2542 terminal-return arithmetic must evaluate): %v", err)
+	}
+	if !numericEquals(out, 25) {
+		t.Errorf("RunLogic return = %#v (%T), want 25 (100 / 4)", out, out)
+	}
+	if len(registry.dispatched) != 0 {
+		t.Errorf("dispatched steps = %v, want none (coalesce + arithmetic resolve locally)", registry.dispatched)
+	}
+}
+
+// Division by zero must surface as a clean logic error naming the failure,
+// never a panic and never a silent nil return.
+func TestLogicRunner_RunLogic_TerminalReturnArithmetic_DivisionByZero(t *testing.T) {
+	src := `@enabled
+@description("division by zero surfaces cleanly")
+logic ratio {
+  args {
+    a int @required
+    b int @required
+  }
+  body {
+    x := coalesce(args.a, 0)
+    y := coalesce(args.b, 0)
+    return x / y
+  }
+}
+`
+	body := parseLogicBody(t, src)
+	r := NewLogicRunner(&memql.MemQLEngine{}, &recordingStepRegistry{}, nil)
+
+	_, err := r.RunLogic(context.Background(), "ratio", body, map[string]any{"a": 10, "b": 0})
+	if err == nil {
+		t.Fatalf("RunLogic succeeded on x / 0; want a division-by-zero error")
+	}
+	if !strings.Contains(err.Error(), "division by zero") {
+		t.Errorf("error = %q, want it to name division by zero", err.Error())
+	}
+}
+
+// Modulo requires integer operands: a float operand must surface the #2316
+// integer-operands error, not compute a bogus value.
+func TestLogicRunner_RunLogic_TerminalReturnArithmetic_FloatModulo(t *testing.T) {
+	src := `@enabled
+@description("float modulo surfaces cleanly")
+logic remainder {
+  args {
+    a float @required
+    b int @required
+  }
+  body {
+    x := coalesce(args.a, 0)
+    y := coalesce(args.b, 1)
+    return x % y
+  }
+}
+`
+	body := parseLogicBody(t, src)
+	r := NewLogicRunner(&memql.MemQLEngine{}, &recordingStepRegistry{}, nil)
+
+	_, err := r.RunLogic(context.Background(), "remainder", body, map[string]any{"a": 10.5, "b": 3})
+	if err == nil {
+		t.Fatalf("RunLogic succeeded on float %% int; want an integer-operands error")
+	}
+	if !strings.Contains(err.Error(), "integer operands") {
+		t.Errorf("error = %q, want the integer-operands modulo error", err.Error())
+	}
+}
+
+// TestLogicRunner_RunLogic_DateBuiltinStepValueAndReturn pins #2541
+// END-TO-END: date builtins bound as step VALUES (`delta := daysBetween(...)`,
+// `y := year(...)`) and read back through the terminal return. This is the
+// day-delta half of the issue's minimal date surface (streak logic: "is today
+// exactly one day after the last").
+func TestLogicRunner_RunLogic_DateBuiltinStepValueAndReturn(t *testing.T) {
+	src := `@enabled
+@description("day-delta between two datetimes (#2541)")
+logic streakDelta {
+  args {
+    prev string @required
+    curr string @required
+  }
+  body {
+    delta := daysBetween(args.prev, args.curr)
+    return delta
+  }
+}
+`
+	body := parseLogicBody(t, src)
+	registry := &recordingStepRegistry{}
+	r := NewLogicRunner(&memql.MemQLEngine{}, registry, nil)
+
+	out, err := r.RunLogic(context.Background(), "streakDelta", body, map[string]any{
+		"prev": "2026-07-13T22:00:00Z",
+		"curr": "2026-07-14T22:00:00Z",
+	})
+	if err != nil {
+		t.Fatalf("RunLogic returned error (#2541 date-builtin step value must evaluate): %v", err)
+	}
+	if !numericEquals(out, 1) {
+		t.Errorf("RunLogic return = %#v (%T), want 1 (one day apart)", out, out)
+	}
+	if len(registry.dispatched) != 0 {
+		t.Errorf("dispatched steps = %v, want none (the date builtin resolves locally)", registry.dispatched)
+	}
+}
+
+// Date-component extraction as step values (year / month / dayOfMonth -- the
+// primitives a calendar-day boundary is built from), recombined through
+// multi-operand terminal-return arithmetic over the three step bindings.
+func TestLogicRunner_RunLogic_DateComponentsStepValues(t *testing.T) {
+	src := `@enabled
+@description("date components as step values (#2541)")
+logic dayParts {
+  args {
+    ts string @required
+  }
+  body {
+    y := year(args.ts)
+    m := month(args.ts)
+    d := dayOfMonth(args.ts)
+    return y * 10000 + m * 100 + d
+  }
+}
+`
+	body := parseLogicBody(t, src)
+	r := NewLogicRunner(&memql.MemQLEngine{}, &recordingStepRegistry{}, nil)
+
+	out, err := r.RunLogic(context.Background(), "dayParts", body, map[string]any{
+		"ts": "2026-07-14T09:30:00Z",
+	})
+	if err != nil {
+		t.Fatalf("RunLogic returned error: %v", err)
+	}
+	if !numericEquals(out, 20260714) {
+		t.Errorf("RunLogic return = %#v (%T), want 20260714 (y*10000 + m*100 + d)", out, out)
+	}
+}
+
+// A date builtin in the TERMINAL RETURN position, over a prior step result.
+func TestLogicRunner_RunLogic_DateBuiltinTerminalReturn(t *testing.T) {
+	src := `@enabled
+@description("addDuration in terminal return (#2541)")
+logic boundary {
+  args {
+    start string @required
+  }
+  body {
+    seed := coalesce(args.start, "")
+    return addDuration(seed, "P1D")
+  }
+}
+`
+	body := parseLogicBody(t, src)
+	r := NewLogicRunner(&memql.MemQLEngine{}, &recordingStepRegistry{}, nil)
+
+	out, err := r.RunLogic(context.Background(), "boundary", body, map[string]any{
+		"start": "2026-03-10",
+	})
+	if err != nil {
+		t.Fatalf("RunLogic returned error (#2541 date builtin in terminal return must evaluate): %v", err)
+	}
+	if out != "2026-03-11T00:00:00Z" {
+		t.Errorf("RunLogic return = %#v, want 2026-03-11T00:00:00Z", out)
+	}
+}
+
+// A date builtin nested INSIDE terminal-return arithmetic:
+// `return daysBetween(a, b) / 7` (weeks between two dates). Exercises the
+// arithmetic operand walker's date-builtin dispatch.
+func TestLogicRunner_RunLogic_DateBuiltinInsideArithmeticReturn(t *testing.T) {
+	src := `@enabled
+@description("daysBetween inside terminal-return arithmetic (#2541/#2542)")
+logic weeksBetween {
+  args {
+    a string @required
+    b string @required
+  }
+  body {
+    seed := coalesce(args.a, "")
+    return daysBetween(args.a, args.b) / 7
+  }
+}
+`
+	body := parseLogicBody(t, src)
+	r := NewLogicRunner(&memql.MemQLEngine{}, &recordingStepRegistry{}, nil)
+
+	out, err := r.RunLogic(context.Background(), "weeksBetween", body, map[string]any{
+		"a": "2026-07-01",
+		"b": "2026-07-15",
+	})
+	if err != nil {
+		t.Fatalf("RunLogic returned error: %v", err)
+	}
+	if !numericEquals(out, 2) {
+		t.Errorf("RunLogic return = %#v (%T), want 2 (14 days / 7)", out, out)
+	}
+}
+
+// TestLogicRunner_RunLogic_CalendarDayWindowCondition pins the #2541
+// calendar-day window END-TO-END: a conditional step gated on the TRUE
+// midnight boundary (year+month+dayOfMonth equality against a reference
+// timestamp), not a rolling-24h approximation. The prior-day-same-time case
+// is the discriminator: a rolling window would fire it, a calendar-day gate
+// must not.
+func TestLogicRunner_RunLogic_CalendarDayWindowCondition(t *testing.T) {
+	src := `@enabled
+@description("orders-since-midnight day gate (#2541)")
+logic dayGate {
+  args {
+    createdAt string @required
+    today string @required
+  }
+  body {
+    marker := if year(args.createdAt) == year(args.today) && month(args.createdAt) == month(args.today) && dayOfMonth(args.createdAt) == dayOfMonth(args.today) {
+      recordSameDay( note: "same-day" )
+    }
+    return 1
+  }
+}
+`
+	cases := []struct {
+		name      string
+		createdAt string
+		wantFires bool
+	}{
+		{"after_midnight_today_fires", "2026-07-14T00:30:00Z", true},
+		{"late_today_fires", "2026-07-14T23:59:00Z", true},
+		{"yesterday_same_time_does_not_fire", "2026-07-13T09:00:00Z", false},
+		{"same_day_of_month_prior_month_does_not_fire", "2026-06-14T09:00:00Z", false},
+		{"same_date_prior_year_does_not_fire", "2025-07-14T09:00:00Z", false},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			body := parseLogicBody(t, src)
+			registry := &recordingStepRegistry{}
+			r := NewLogicRunner(&memql.MemQLEngine{}, registry, nil)
+
+			_, err := r.RunLogic(context.Background(), "dayGate", body, map[string]any{
+				"createdAt": tc.createdAt,
+				"today":     "2026-07-14T09:00:00Z",
+			})
+			if err != nil {
+				t.Fatalf("RunLogic returned error: %v", err)
+			}
+			fired := false
+			for _, id := range registry.dispatched {
+				if id == "marker" {
+					fired = true
+				}
+			}
+			if fired != tc.wantFires {
+				t.Errorf("marker fired = %v for createdAt=%s, want %v (calendar-day gate, #2541)",
+					fired, tc.createdAt, tc.wantFires)
+			}
+		})
+	}
+}
+
+// TestLogicRunner_CompileRoundTrip_ArithmeticAndDateBuiltins pins the
+// serializer half of #2541/#2542: the compiled `_return` string carries
+// re-parseable source, never the `<<unsupported expression %T>>` marker.
+func TestLogicRunner_CompileRoundTrip_ArithmeticAndDateBuiltins(t *testing.T) {
+	cases := []struct {
+		name       string
+		ret        string
+		wantReturn string
+	}{
+		{"arithmetic", "return r / o", "(r / o)"},
+		{"nested_arithmetic", "return (r * 100) / o", "((r * 100) / o)"},
+		{"addDuration", `return addDuration(r, "P1D")`, `addDuration(r, "P1D")`},
+		{"daysBetween_args", "return daysBetween(args.a, args.b)", "daysBetween($args.a, $args.b)"},
+		{"year_now", "return year(now)", "year(timestamp())"},
+		{"date_in_arithmetic", "return daysBetween(args.a, args.b) / 7", "(daysBetween($args.a, $args.b) / 7)"},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			src := `@enabled
+@description("round-trip probe")
+logic probe {
+  args {
+    a string @required
+    b string @required
+  }
+  body {
+    r := coalesce(args.a, "")
+    o := coalesce(args.b, "")
+    ` + tc.ret + `
+  }
+}
+`
+			body := parseLogicBody(t, src)
+			r := NewLogicRunner(nil, nil, nil)
+			auto, err := r.compileBodyToAutomation("probe", body)
+			if err != nil {
+				t.Fatalf("compileBodyToAutomation: %v", err)
+			}
+			var ret *Step
+			for _, s := range auto.Steps {
+				if s != nil && s.ID == "_return" {
+					ret = s
+				}
+			}
+			if ret == nil || ret.Query == nil {
+				t.Fatalf("no _return step in compiled automation")
+			}
+			got := strings.TrimSpace(ret.Query.Query)
+			if strings.Contains(got, "<<unsupported") {
+				t.Fatalf("_return = %q still carries the unsupported-expression marker", got)
+			}
+			if got != tc.wantReturn {
+				t.Errorf("_return = %q, want %q", got, tc.wantReturn)
+			}
+		})
+	}
+}

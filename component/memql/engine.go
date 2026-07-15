@@ -609,6 +609,23 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 		return result, nil
 	}
 
+	// Top-level date/duration builtin (#2541): a Logic whose body is a single
+	// `return addDuration(args.start, "P1D")` resolves -- after
+	// expandExpressionWithArgs folds the operand ArgRefExpressions and
+	// short-circuits the builtin call -- to a *FunctionCallExpression naming
+	// a date builtin at plan.Root. Evaluated in-memory and wrapped as the
+	// function's return value, like the ArithmeticExpression branch above.
+	if callExpr, ok := plan.Root.(*FunctionCallExpression); ok && IsDateBuiltin(callExpr.Name) {
+		val, err := evalCollScalar(callExpr, nil, nil)
+		if err != nil {
+			return nil, err
+		}
+		result := newExecuteResult(nil)
+		result.setOutput(val)
+		e.emitQueryExecutedEvent(startTime, result, false)
+		return result, nil
+	}
+
 	if plan.Root == nil {
 		return nil, fmt.Errorf("query must include at least one filter or relationship expression")
 	}

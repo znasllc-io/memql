@@ -2617,6 +2617,37 @@ func expressionToFunctionCall(e ExpressionNode) (*FunctionCallExpr, bool) {
 		return &FunctionCallExpr{Name: "trim", Args: map[string]any{"0": t.Target}}, true
 	case *TimestampExpr:
 		return &FunctionCallExpr{Name: "timestamp", Args: map[string]any{}}, true
+	// Date/duration builtins (#2541) -- admitted at step-RHS position so a
+	// logic body can bind one as a step value (`delta := daysBetween(args.a,
+	// args.b)`). The logic runner evaluates the reconstructed positional
+	// call locally (tryEvaluateBuiltinLocally), the same route coalesce
+	// takes.
+	case *AddDurationExpr:
+		return &FunctionCallExpr{Name: "addDuration", Args: map[string]any{
+			"0": t.Timestamp, "1": t.Duration,
+		}}, true
+	case *DaysBetweenExpr:
+		return &FunctionCallExpr{Name: "daysBetween", Args: map[string]any{
+			"0": t.Date1, "1": t.Date2,
+		}}, true
+	case *SubtractTimestampsExpr:
+		return &FunctionCallExpr{Name: "subtractTimestamps", Args: map[string]any{
+			"0": t.T1, "1": t.T2,
+		}}, true
+	case *YearExpr:
+		return &FunctionCallExpr{Name: "year", Args: map[string]any{"0": t.Target}}, true
+	case *QuarterExpr:
+		return &FunctionCallExpr{Name: "quarter", Args: map[string]any{"0": t.Target}}, true
+	case *MonthExpr:
+		return &FunctionCallExpr{Name: "month", Args: map[string]any{"0": t.Target}}, true
+	case *DayOfMonthExpr:
+		return &FunctionCallExpr{Name: "dayOfMonth", Args: map[string]any{"0": t.Target}}, true
+	case *IsAnniversaryExpr:
+		return &FunctionCallExpr{Name: "isAnniversary", Args: map[string]any{
+			"0": t.StartDate, "1": t.CheckDate,
+		}}, true
+	case *IsFirstDayOfQuarterExpr:
+		return &FunctionCallExpr{Name: "isFirstDayOfQuarter", Args: map[string]any{"0": t.Target}}, true
 	default:
 		return nil, false
 	}
