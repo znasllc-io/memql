@@ -863,9 +863,62 @@ func (c *ASTConverter) convertLiteralExpr(expr *languageParser.LiteralExpr) (*Li
 		return nil, nil
 	}
 
+	// Collection-method projection object/array literals (#2542 item 3): a
+	// `select(g => {worker: g.key, acc: g.good.count() / g.items.count()})`
+	// body parses to a LiteralExpr whose map values are parser ExpressionNodes
+	// (the collection-context object grammar, parser.parseObject). Convert
+	// those nested nodes to engine nodes so evalCollScalar can evaluate each
+	// projection value against the per-element lambda scope; a scalar value
+	// (string / number / bool) passes through unchanged. Only under
+	// WithCollectionMethods -- specs / query filters never carry a projection
+	// literal, and the gate keeps the arithmetic/method-chain surface
+	// in-memory only.
+	if c.allowCollectionMethods {
+		converted, err := c.convertLiteralContainer(expr.Value)
+		if err != nil {
+			return nil, err
+		}
+		return &LiteralValueNode{Value: converted}, nil
+	}
+
 	return &LiteralValueNode{
 		Value: expr.Value,
 	}, nil
+}
+
+// convertLiteralContainer recursively converts the parser ExpressionNode
+// values nested inside an object / array literal to engine ExpressionNodes,
+// leaving plain scalars untouched. A top-level ExpressionNode (a value that is
+// itself an expression) is converted directly. Used only in the
+// collection-method projection path (convertLiteralExpr under
+// WithCollectionMethods).
+func (c *ASTConverter) convertLiteralContainer(v any) (any, error) {
+	switch val := v.(type) {
+	case languageParser.ExpressionNode:
+		return c.ConvertExpression(val)
+	case map[string]any:
+		out := make(map[string]any, len(val))
+		for k, item := range val {
+			conv, err := c.convertLiteralContainer(item)
+			if err != nil {
+				return nil, fmt.Errorf("convert projection value %q: %w", k, err)
+			}
+			out[k] = conv
+		}
+		return out, nil
+	case []any:
+		out := make([]any, len(val))
+		for i, item := range val {
+			conv, err := c.convertLiteralContainer(item)
+			if err != nil {
+				return nil, fmt.Errorf("convert projection element %d: %w", i, err)
+			}
+			out[i] = conv
+		}
+		return out, nil
+	default:
+		return v, nil
+	}
 }
 
 // convertErrorRefExpr converts languageParser.ErrorRefExpr to memql.ErrorRefExpression.

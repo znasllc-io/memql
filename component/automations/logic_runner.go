@@ -618,6 +618,27 @@ func tryEvaluateBuiltinLocally(expr string, evaluator *Evaluator) (any, bool, er
 			return nil, false, err
 		}
 		return val, true, nil
+	case name == "cond":
+		// cond(predicate, thenValue, elseValue) over a collection chain
+		// (#2542 item 2). The predicate and either branch may be a collection
+		// chain / comparison / step reference, so evaluate them through the
+		// local surface rather than round-tripping through engine.Execute
+		// (which fails: "cond" is not a registered function, and the
+		// FunctionExecutor serializes its positional args in an unparseable
+		// named form). Reached both as a terminal `return cond(...)` and as a
+		// `x := cond(...)` step value (reconstructPositionalBuiltinCall).
+		rawArgs, err := splitTopLevelArgs(inner)
+		if err != nil {
+			return nil, false, fmt.Errorf("parse %s args: %w", name, err)
+		}
+		if len(rawArgs) != 3 {
+			return nil, false, fmt.Errorf("cond() requires three arguments: cond(predicate, thenValue, elseValue)")
+		}
+		val, err := evaluateCondLocally(rawArgs[0], rawArgs[1], rawArgs[2], evaluator)
+		if err != nil {
+			return nil, false, err
+		}
+		return val, true, nil
 	case memql.IsDateBuiltin(name):
 		// Date/duration builtins (#2541): operands resolve through the
 		// evaluator's operand path (quoted literals, $-paths, step refs,
@@ -647,10 +668,57 @@ func isPositionalBuiltinName(name string) bool {
 		return true
 	}
 	switch name {
-	case "coalesce":
+	case "coalesce", "cond":
 		return true
 	}
 	return false
+}
+
+// evaluateCondLocally evaluates a cond(predicate, then, else) builtin in a
+// logic body (#2542 item 2). The predicate resolves to a boolean; the chosen
+// branch value then resolves through the shared logic-time leaf path, so a
+// branch that is itself a collection chain / arithmetic / object literal /
+// step reference / literal evaluates in-memory.
+func evaluateCondLocally(condRaw, thenRaw, elseRaw string, evaluator *Evaluator) (any, error) {
+	condVal, err := evaluateCondPredicate(condRaw, evaluator)
+	if err != nil {
+		return nil, err
+	}
+	chosen := elseRaw
+	if condVal {
+		chosen = thenRaw
+	}
+	// resolveObjectLiteralValue is the shared value resolver: it recurses into
+	// a nested object literal, then routes through EvaluateLocalExpr (literals,
+	// collection chains, arithmetic, builtins incl. a nested cond) and finally
+	// a step / path reference. A quoted-string branch (`"has"`) resolves to its
+	// unquoted value via the literal leg.
+	return resolveObjectLiteralValue(strings.TrimSpace(chosen), evaluator)
+}
+
+// evaluateCondPredicate resolves a cond predicate to a boolean. A genuine
+// collection chain (`active.any()`, `rows.where(r => r.vip).any()`) evaluates
+// through the in-memory collection surface and its truthiness is the gate; a
+// comparison whose operand is a chain (`active.count() > 0`) or a step
+// reference is NOT a genuine chain (the accessor overlaps a step method) and
+// routes to the condition evaluator, which resolves both operands. Bare
+// boolean literals short-circuit.
+func evaluateCondPredicate(raw string, evaluator *Evaluator) (bool, error) {
+	raw = strings.TrimSpace(raw)
+	switch raw {
+	case "", "false":
+		return false, nil
+	case "true":
+		return true, nil
+	}
+	if isGenuineCollectionChain(raw) {
+		if val, handled, err := tryEvaluateCollectionChainLocally(raw, evaluator); err != nil {
+			return false, err
+		} else if handled {
+			return isTruthy(val), nil
+		}
+	}
+	return evaluator.EvaluateCondition(raw)
 }
 
 // reconstructPositionalBuiltinCall rebuilds the source call string for a

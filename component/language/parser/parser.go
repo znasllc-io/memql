@@ -6292,6 +6292,32 @@ func (p *Parser) parseObject() (map[string]any, error) {
 			return nil, newParseErrorf(&p.current, "expected ':' or '=' after object key, got %q", p.current.Literal)
 		}
 
+		// Collection-method projection context (#2542 item 3): when this
+		// object literal is a `select(g => {...})` lambda body, parse each
+		// value as a FULL expression so a per-group ratio
+		// (`g.good.count() / g.items.count()`) and a bare scope path
+		// (`g.key`) become evaluable ExpressionNodes resolved against the
+		// lambda scope -- the JSON-value grammar (parseValue) stops at the
+		// first arithmetic operator (`expected '}', got "/"`) and stores a
+		// path as an opaque raw string. Gated on the collection-arg flag
+		// (suppressCommaOr, set only while parsing a Story 4 collection
+		// method's arguments) so arg-time / spec / shape object literals keep
+		// the literal JSON-value grammar -- infix arithmetic stays out of
+		// those positions, preserving the #2316 in-memory-only containment.
+		if p.suppressCommaOr {
+			expr, err := p.parseExpression()
+			if err != nil {
+				return nil, err
+			}
+			obj[key] = expr
+			if p.check(TokenComma) {
+				p.advance()
+			} else {
+				break
+			}
+			continue
+		}
+
 		// Value -- support ?? coalescing inside object literals
 		val, err := p.parseValue()
 		if err != nil {

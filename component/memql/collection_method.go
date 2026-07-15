@@ -220,7 +220,12 @@ func evalCollScalar(expr ExpressionNode, args map[string]any, locals map[string]
 	case *LambdaExpression:
 		return nil, fmt.Errorf("a lambda cannot be evaluated outside a collection method")
 	case *LiteralValueNode:
-		return resolveLiteralValue(node.Value), nil
+		// A projection object / array literal (#2542 item 3) carries engine
+		// ExpressionNode values (`{worker: g.key, acc: (g.a.count() /
+		// g.b.count())}`); evaluate each against the current lambda scope so
+		// the projection yields resolved per-element values, not the AST. A
+		// plain scalar literal falls through to resolveLiteralValue unchanged.
+		return evalCollLiteralValue(node.Value, args, locals)
 	case *ArgRefExpression:
 		if val, ok := getNestedValue(args, node.Path); ok {
 			return val, nil
@@ -240,6 +245,15 @@ func evalCollScalar(expr ExpressionNode, args map[string]any, locals map[string]
 		// unsupported error below.
 		if IsDateBuiltin(node.Name) {
 			return evalCollDateBuiltin(node, args, locals)
+		}
+		if node.Name == "cond" {
+			// cond(predicate, thenValue, elseValue) (#2542 item 2): the
+			// converter emits a positional FunctionCallExpression. Evaluate the
+			// predicate to a truthy value, then the chosen branch -- so a cond
+			// nested in a lambda / projection (`select(g => cond(g.items.any(),
+			// g.key, "none"))`) and a single-return `return cond(...)` both
+			// drive their chain operands through this evaluator.
+			return evalCollCond(node, args, locals)
 		}
 		return nil, fmt.Errorf("unsupported expression %T inside a collection lambda", expr)
 	case *ComparisonExpression:
@@ -288,6 +302,78 @@ func evalCollDateBuiltin(node *FunctionCallExpression, args, locals map[string]a
 		vals[i] = raw
 	}
 	return EvaluateDateBuiltin(node.Name, vals)
+}
+
+// evalCollLiteralValue evaluates a literal value that may be a projection
+// container (#2542 item 3). An engine ExpressionNode value evaluates against
+// the current lambda scope; a map / array recurses per entry; any other scalar
+// resolves through resolveLiteralValue. This backs a `select(g => {...})`
+// object-literal projection whose values are per-group expressions.
+func evalCollLiteralValue(v any, args, locals map[string]any) (any, error) {
+	switch val := v.(type) {
+	case ExpressionNode:
+		return evalCollScalar(val, args, locals)
+	case map[string]any:
+		out := make(map[string]any, len(val))
+		for k, item := range val {
+			ev, err := evalCollLiteralValue(item, args, locals)
+			if err != nil {
+				return nil, fmt.Errorf("projection value %q: %w", k, err)
+			}
+			out[k] = ev
+		}
+		return out, nil
+	case []any:
+		out := make([]any, len(val))
+		for i, item := range val {
+			ev, err := evalCollLiteralValue(item, args, locals)
+			if err != nil {
+				return nil, fmt.Errorf("projection element %d: %w", i, err)
+			}
+			out[i] = ev
+		}
+		return out, nil
+	default:
+		return resolveLiteralValue(v), nil
+	}
+}
+
+// evalCollCond evaluates a positional cond(predicate, then, else) builtin
+// (#2542 item 2) inside the collection-lambda subset. Each positional operand
+// is an ExpressionNode ("0","1","2"); the predicate is evaluated for
+// truthiness, then only the chosen branch is evaluated (short-circuit).
+func evalCollCond(node *FunctionCallExpression, args, locals map[string]any) (any, error) {
+	if len(node.Args) != 3 {
+		return nil, fmt.Errorf("cond() requires three arguments: cond(predicate, thenValue, elseValue)")
+	}
+	operand := func(i int) (ExpressionNode, error) {
+		raw, ok := node.Args[strconv.Itoa(i)]
+		if !ok {
+			return nil, fmt.Errorf("cond() is missing positional arg %d", i)
+		}
+		expr, ok := raw.(ExpressionNode)
+		if !ok {
+			return nil, fmt.Errorf("cond() arg %d is not an expression (%T)", i, raw)
+		}
+		return expr, nil
+	}
+	condExpr, err := operand(0)
+	if err != nil {
+		return nil, err
+	}
+	condVal, err := evalCollScalar(condExpr, args, locals)
+	if err != nil {
+		return nil, fmt.Errorf("cond() predicate: %w", err)
+	}
+	branch := 2
+	if isTruthy(condVal) {
+		branch = 1
+	}
+	chosen, err := operand(branch)
+	if err != nil {
+		return nil, err
+	}
+	return evalCollScalar(chosen, args, locals)
 }
 
 // resolveLiteralValue unwraps the engine literal wrapper, resolving the
