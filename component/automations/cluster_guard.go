@@ -2,6 +2,7 @@ package automations
 
 import (
 	"context"
+	"database/sql"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -112,8 +113,33 @@ func NewClusterExecutionGuard(dbGetter func() *bun.DB, logger Logger) *ClusterEx
 
 // Claim returns true when THIS node should execute the automation (it won the
 // claim, or the guard is degraded and fails open) and false when another
-// replica already claimed it (a prevented cross-replica duplicate).
+// replica already claimed it (a prevented cross-replica duplicate). The claim
+// row is permanent within the prune retention: once won, no peer can re-take
+// it until the retention sweep deletes it. This is what event-triggered
+// automations and planner plan-execution need -- exactly-once, never re-run.
 func (g *ClusterExecutionGuard) Claim(ctx context.Context, automationName, dedupKey string) bool {
+	return g.ClaimWithTTL(ctx, automationName, dedupKey, 0)
+}
+
+// ClaimWithTTL is Claim with an optional attempt-scoped lease. It is the
+// opt-in variant (memql#2548): the default Claim path (ttl <= 0) is unchanged,
+// so automation/planner callers keep exactly-once-within-retention semantics.
+//
+// With ttl > 0 a claim whose claimed_at is older than ttl is RE-WINNABLE: a
+// peer takes it over (a fresh insert and a takeover of a stale row both count
+// as "won"), while a claim still within its ttl is honoured (the peer loses,
+// exactly as before). This bounds the outbound-delivery claim/stamp wedge: a
+// replica that dies after claiming an attempt but before stamping a terminal
+// status leaves the row pending with a persisted claim; without a lease every
+// peer re-claims-and-loses that key until the 1h retention prune elapses. The
+// lease is the claim row's own age, so it needs no extra state.
+//
+// The ttl must exceed the longest time a LIVE claimant holds the claim (one
+// delivery attempt) or a slow-but-alive node is stolen from, double-running
+// the attempt; the outbound worker sets it well above its per-request HTTP
+// timeout. Delivery is already at-least-once, so a rare re-take under an
+// extreme stall re-delivers rather than corrupts.
+func (g *ClusterExecutionGuard) ClaimWithTTL(ctx context.Context, automationName, dedupKey string, ttl time.Duration) bool {
 	db := g.dbGetter()
 	if db == nil || db.DB == nil {
 		g.errors.Add(1)
@@ -127,11 +153,28 @@ func (g *ClusterExecutionGuard) Claim(ctx context.Context, automationName, dedup
 		return true // fail-open (bounded): never drop legitimate work
 	}
 
-	res, err := db.DB.ExecContext(ctx,
-		`INSERT INTO automation_execution_claims (automation_name, dedup_key, claimed_by)
-		 VALUES ($1, $2, $3)
-		 ON CONFLICT (automation_name, dedup_key) DO NOTHING`,
-		automationName, dedupKey, g.nodeId)
+	var res sql.Result
+	var err error
+	if ttl > 0 {
+		// Attempt-scoped lease: on conflict, take the claim over only if the
+		// existing one is older than ttl. RowsAffected is 1 for a fresh insert
+		// OR a stale-claim takeover (both "won"), and 0 when a peer still holds
+		// a fresh claim (lost). Postgres serialises concurrent upserts on the
+		// conflicting row, so at most one peer wins a takeover.
+		res, err = db.DB.ExecContext(ctx,
+			`INSERT INTO automation_execution_claims (automation_name, dedup_key, claimed_by)
+			 VALUES ($1, $2, $3)
+			 ON CONFLICT (automation_name, dedup_key)
+			 DO UPDATE SET claimed_by = EXCLUDED.claimed_by, claimed_at = now()
+			 WHERE automation_execution_claims.claimed_at < now() - make_interval(secs => $4)`,
+			automationName, dedupKey, g.nodeId, ttl.Seconds())
+	} else {
+		res, err = db.DB.ExecContext(ctx,
+			`INSERT INTO automation_execution_claims (automation_name, dedup_key, claimed_by)
+			 VALUES ($1, $2, $3)
+			 ON CONFLICT (automation_name, dedup_key) DO NOTHING`,
+			automationName, dedupKey, g.nodeId)
+	}
 	if err != nil {
 		g.errors.Add(1)
 		if !g.allowUnguarded() {

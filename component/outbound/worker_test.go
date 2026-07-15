@@ -88,16 +88,52 @@ func (t *fakeTransport) count() int {
 }
 
 type fakeClaimer struct {
-	mu     sync.Mutex
-	deny   bool
-	claims []string
+	mu      sync.Mutex
+	deny    bool
+	claims  []string
+	lastTTL time.Duration
 }
 
-func (c *fakeClaimer) Claim(_ context.Context, name, dedupKey string) bool {
+func (c *fakeClaimer) ClaimWithTTL(_ context.Context, name, dedupKey string, ttl time.Duration) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.claims = append(c.claims, name+"/"+dedupKey)
+	c.lastTTL = ttl
 	return !c.deny
+}
+
+// leaseClaimer models the automation_execution_claims ledger under an
+// attempt-scoped lease (memql#2548): a claim is honoured until it is older
+// than ttl, after which a peer re-wins it. A shared instance stands in for
+// the cross-replica DB ledger, and a mutable clock stands in for wall time,
+// so the dead-claimant recovery can be exercised deterministically with the
+// worker's fakes (no Postgres).
+type leaseClaimer struct {
+	mu    sync.Mutex
+	held  map[string]time.Time // key -> claimed_at
+	clock time.Time
+}
+
+func newLeaseClaimer(start time.Time) *leaseClaimer {
+	return &leaseClaimer{held: map[string]time.Time{}, clock: start}
+}
+
+func (c *leaseClaimer) advance(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.clock = c.clock.Add(d)
+}
+
+func (c *leaseClaimer) ClaimWithTTL(_ context.Context, name, dedupKey string, ttl time.Duration) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	key := name + "/" + dedupKey
+	at, held := c.held[key]
+	if !held || (ttl > 0 && c.clock.Sub(at) >= ttl) {
+		c.held[key] = c.clock // fresh insert or stale-claim takeover
+		return true
+	}
+	return false // a live claim still holds the key
 }
 
 func pendingRow(id string) map[string]any {
@@ -121,6 +157,7 @@ func newTestWorker(eng *fakeEngine, transport Transport, claimer ExecutionClaime
 		WebhookAllowlist: []string{"https://hooks.internal.example/"},
 		MaxPayloadBytes:  1024,
 		HTTPTimeout:      time.Second,
+		ClaimTTL:         5 * time.Minute,
 	}
 	return w
 }
@@ -374,6 +411,69 @@ func TestConfiguredNodeStampsFailedOnTargetMiss(t *testing.T) {
 	}
 }
 
+// TestClaimCarriesAttemptScopedTTL pins the memql#2548 wiring: the worker
+// claims through the attempt-scoped-lease variant, passing cfg.ClaimTTL so a
+// claim orphaned by a dead claimant expires rather than wedging the row until
+// the guard's 1h retention prune.
+func TestClaimCarriesAttemptScopedTTL(t *testing.T) {
+	eng := &fakeEngine{pending: []map[string]any{pendingRow("v1:platform:outboundRequest:r1")}}
+	claimer := &fakeClaimer{}
+	w := newTestWorker(eng, &fakeTransport{}, claimer)
+	w.cfg.ClaimTTL = 90 * time.Second
+
+	w.drainOnce(context.Background())
+
+	if claimer.lastTTL != 90*time.Second {
+		t.Fatalf("worker must claim with the configured attempt-scoped TTL, got %v", claimer.lastTTL)
+	}
+}
+
+// TestDeadClaimantRowRecoveredAfterLeaseExpiry is the memql#2548 regression:
+// a replica wins the claim for (row, attempt 0) and dies before stamping any
+// status, leaving the row pending with a persisted claim. Before the lease,
+// every peer re-claimed-and-lost that key until the guard's 1h retention
+// prune, wedging the row. With the attempt-scoped lease the persisted claim
+// expires after cfg.ClaimTTL, so the next drain pass on a peer re-claims the
+// same attempt and delivers the still-pending row.
+func TestDeadClaimantRowRecoveredAfterLeaseExpiry(t *testing.T) {
+	ledger := newLeaseClaimer(time.Unix(1000, 0))
+
+	// A dead claimant: it won (row, attempt 0) but stamped nothing. Model it
+	// by occupying the claim in the shared ledger without touching the engine
+	// row, which therefore stays pending.
+	if !ledger.ClaimWithTTL(context.Background(), "outboundDelivery", "v1:platform:outboundRequest:r1:0", 5*time.Minute) {
+		t.Fatal("precondition: the dead claimant must win the initial claim")
+	}
+
+	// A peer drains while the claim is still within its lease: it re-claims,
+	// loses, and leaves the row pending -- the pre-fix wedge window.
+	eng := &fakeEngine{pending: []map[string]any{pendingRow("v1:platform:outboundRequest:r1")}}
+	tr := &fakeTransport{}
+	w := newTestWorker(eng, tr, ledger)
+	w.cfg.ClaimTTL = 5 * time.Minute
+
+	w.drainOnce(context.Background())
+	if tr.count() != 0 {
+		t.Fatal("within the lease the peer must lose the claim and not deliver")
+	}
+	if len(eng.stamped()) != 0 {
+		t.Fatalf("within the lease the row must stay pending (no stamp), got %v", eng.stamped())
+	}
+
+	// The lease elapses (the dead claimant never returns). The next drain pass
+	// re-wins the orphaned claim and recovers the row.
+	ledger.advance(6 * time.Minute)
+	w.drainOnce(context.Background())
+
+	if tr.count() != 1 {
+		t.Fatalf("after the lease expires the peer must re-claim and deliver, got %d deliveries", tr.count())
+	}
+	stamps := eng.stamped()
+	if len(stamps) != 2 || !strings.Contains(stamps[0], `status: "sending"`) || !strings.Contains(stamps[1], `status: "sent"`) {
+		t.Fatalf("recovery must stamp sending then sent, got %v", stamps)
+	}
+}
+
 // --- allowlist matchers ---------------------------------------------------------
 
 func TestEmailAllowed(t *testing.T) {
@@ -529,5 +629,15 @@ func TestSplitAllowlist(t *testing.T) {
 	want := fmt.Sprintf("%v", []string{"example.com", "ops.example.org"})
 	if fmt.Sprintf("%v", got) != want {
 		t.Fatalf("splitAllowlist = %v, want %v", got, want)
+	}
+}
+
+func TestClaimTTLConfigDefaultsAndOverrides(t *testing.T) {
+	if got := LoadConfig().ClaimTTL; got != defaultClaimTTLSeconds*time.Second {
+		t.Fatalf("default ClaimTTL = %v, want %v", got, defaultClaimTTLSeconds*time.Second)
+	}
+	t.Setenv("MEMQL_OUTBOUND_CLAIM_TTL_SECONDS", "45")
+	if got := LoadConfig().ClaimTTL; got != 45*time.Second {
+		t.Fatalf("overridden ClaimTTL = %v, want 45s", got)
 	}
 }

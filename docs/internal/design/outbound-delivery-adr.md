@@ -123,6 +123,12 @@ sending  --permanent failure or attempts >= max--> failed (lastError)
 - Retryable: transport timeouts, connection errors, HTTP 408/429/5xx.
   Permanent: other 4xx, allowlist rejection, payload-cap rejection,
   malformed target, medium not configured.
+- Crash recovery: a replica that dies mid-transition (claim won, no terminal
+  stamp) leaves the row `pending`. The per-attempt claim lease
+  (`MEMQL_OUTBOUND_CLAIM_TTL_SECONDS`) makes the orphaned claim re-winnable, so
+  a peer re-claims the same attempt and completes the transition on a later
+  drain rather than the row wedging until the guard retention prune
+  (memql#2548, consequences below).
 
 ### 4.2 At-least-once + dedup pass-through
 
@@ -172,6 +178,7 @@ engine does not enforce staging-time uniqueness in v1.
 | `MEMQL_OUTBOUND_WEBHOOK_ALLOWLIST` | empty (disabled) | comma-separated URL prefixes |
 | `MEMQL_OUTBOUND_MAX_PAYLOAD_BYTES` | `262144` | staging payload cap |
 | `MEMQL_OUTBOUND_HTTP_TIMEOUT_SECONDS` | `10` | webhook client timeout |
+| `MEMQL_OUTBOUND_CLAIM_TTL_SECONDS` | `300` | attempt-scoped claim lease: how long a won claim blocks peers before a dead claimant's key is re-winnable (memql#2548). Must exceed one delivery attempt's duration |
 
 ## 5. Concrete sketch
 
@@ -216,15 +223,26 @@ startup delay are env config resolved at construction; tests call
   pre-claim egress gate (memql#2540) trades that against the worse failure
   it prevents -- an unconfigured node claiming and killing a row a
   configured peer could deliver.
-- **Known gap (not yet closed): claim/stamp wedge.** The claim is keyed per
-  (row, attempts) and persists in `automation_execution_claims` until the
-  guard prune TTL (retention, default 1h). A replica that dies AFTER
-  claiming an attempt but BEFORE stamping `sending`/`sent`/`failed` leaves
-  the row `pending` while peers re-claim-and-lose the persisted key, so the
-  row is wedged until the TTL elapses. Closing it (a claim TTL scoped to the
-  attempt, or stamping `sending` in the same tx as the claim plus a
-  `sending` reaper) touches the shared `ClusterExecutionGuard` semantics and
-  is deferred to a follow-up (tracked on memql#2540).
+- **Claim/stamp wedge closed by an attempt-scoped claim lease (memql#2548).**
+  The claim is keyed per (row, attempts) and persists in
+  `automation_execution_claims` until the guard prune retention (default 1h).
+  A replica that dies AFTER claiming an attempt but BEFORE stamping
+  `sending`/`sent`/`failed` leaves the row `pending`; without a lease every
+  peer re-claims-and-loses the persisted key, wedging the row until retention
+  elapses. The worker now claims through the guard's opt-in
+  `ClaimWithTTL(name, key, ttl)` variant with an attempt-scoped lease
+  (`MEMQL_OUTBOUND_CLAIM_TTL_SECONDS`, default 300s): a claim whose
+  `claimed_at` is older than the lease is re-winnable (a fresh insert and a
+  stale-claim takeover both count as "won"; Postgres serialises the takeover
+  so exactly one peer wins), so a peer recovers the orphaned row on the next
+  drain instead of waiting out retention. The lease sits far above the
+  longest a live claimant holds a claim (one delivery attempt, bounded by the
+  HTTP timeout), so a slow-but-alive node is not stolen from; the rare re-take
+  under an extreme stall re-delivers, consistent with the at-least-once
+  contract. The lease is OPT-IN: the default `Claim` path (ttl == 0) is
+  byte-for-byte unchanged, so event-triggered automations and planner
+  plan-execution keep exactly-once-within-retention (regression-covered in
+  `cluster_guard_db_test.go`).
 - At-least-once means receivers may see duplicates after a crash;
   `dedupeKey` pass-through is the mitigation, matching the mesh substrate's
   dedup-by-id stance.

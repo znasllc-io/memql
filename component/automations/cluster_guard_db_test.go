@@ -80,6 +80,84 @@ func TestClusterGuard_DBDedup(t *testing.T) {
 	assert.Equal(t, int64(0), g.ClaimErrors())
 }
 
+// TestClusterGuard_DBClaimWithTTLRewinsStaleClaim is the memql#2548 guard
+// half: ClaimWithTTL(ttl>0) honours a claim within its lease but lets a peer
+// re-win one whose claimed_at is older than the ttl. This is what lets the
+// outbound worker recover a row orphaned by a replica that died between
+// claiming an attempt and stamping its terminal status.
+func TestClusterGuard_DBClaimWithTTLRewinsStaleClaim(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+
+	automation := fmt.Sprintf("test_ttl_%d", time.Now().UnixNano())
+	key := "row-r1:0"
+	t.Cleanup(func() {
+		_, _ = db.DB.ExecContext(context.Background(),
+			`DELETE FROM automation_execution_claims WHERE automation_name = $1`, automation)
+	})
+
+	g := NewClusterExecutionGuard(func() *bun.DB { return db }, nil)
+	ctx := context.Background()
+	ttl := 5 * time.Minute
+
+	// The original claimant wins.
+	assert.True(t, g.ClaimWithTTL(ctx, automation, key, ttl), "first claim wins")
+	// A peer re-claiming within the lease loses (the claim is still fresh).
+	assert.False(t, g.ClaimWithTTL(ctx, automation, key, ttl), "a claim within its lease is honoured")
+
+	// Age the claim past the lease (the claimant died, never stamped).
+	_, err := db.DB.ExecContext(ctx,
+		`UPDATE automation_execution_claims SET claimed_at = now() - interval '10 minutes'
+		 WHERE automation_name = $1 AND dedup_key = $2`, automation, key)
+	require.NoError(t, err)
+
+	// A peer now re-wins the orphaned claim -- the row can be recovered.
+	assert.True(t, g.ClaimWithTTL(ctx, automation, key, ttl), "a claim past its lease is re-winnable")
+
+	// The claimed_by must now be this node (the takeover actually ran).
+	var claimedBy string
+	require.NoError(t, db.DB.QueryRowContext(ctx,
+		`SELECT claimed_by FROM automation_execution_claims WHERE automation_name = $1 AND dedup_key = $2`,
+		automation, key).Scan(&claimedBy))
+	assert.Equal(t, g.nodeId, claimedBy, "the stale claim must be taken over by the re-winning node")
+}
+
+// TestClusterGuard_DBClaimNoTTLNeverRewins is the automation-execution
+// regression for memql#2548: the default Claim path (ttl == 0) must NEVER let
+// a claim be re-taken, no matter how old -- event-triggered automations and
+// planner plan-execution depend on exactly-once within the retention window.
+// Proves the shared guard's existing behavior is unchanged by the opt-in
+// lease.
+func TestClusterGuard_DBClaimNoTTLNeverRewins(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+
+	automation := fmt.Sprintf("test_nottl_%d", time.Now().UnixNano())
+	key := "head-shared-event"
+	t.Cleanup(func() {
+		_, _ = db.DB.ExecContext(context.Background(),
+			`DELETE FROM automation_execution_claims WHERE automation_name = $1`, automation)
+	})
+
+	g := NewClusterExecutionGuard(func() *bun.DB { return db }, nil)
+	ctx := context.Background()
+
+	assert.True(t, g.Claim(ctx, automation, key), "first claim wins")
+	// Age the claim far past any conceivable lease; the no-TTL path still
+	// refuses to re-take it (only the retention prune ever removes it).
+	_, err := db.DB.ExecContext(ctx,
+		`UPDATE automation_execution_claims SET claimed_at = now() - interval '10 hours'
+		 WHERE automation_name = $1 AND dedup_key = $2`, automation, key)
+	require.NoError(t, err)
+	assert.False(t, g.Claim(ctx, automation, key), "the no-TTL claim is never re-winnable (exactly-once preserved)")
+
+	var claimedBy string
+	require.NoError(t, db.DB.QueryRowContext(ctx,
+		`SELECT claimed_by FROM automation_execution_claims WHERE automation_name = $1 AND dedup_key = $2`,
+		automation, key).Scan(&claimedBy))
+	assert.Equal(t, g.nodeId, claimedBy, "the original claim row is untouched by the losing re-claim")
+}
+
 // TestClusterGuard_DBPrune verifies the retention sweep deletes stale claim
 // rows so the table stays small.
 func TestClusterGuard_DBPrune(t *testing.T) {
