@@ -13,6 +13,7 @@ import (
 	"github.com/znasllc-io/memql/component/memql"
 	nodeMetadata "github.com/znasllc-io/memql/component/metadata"
 	"github.com/znasllc-io/memql/component/observe"
+	"github.com/znasllc-io/memql/component/outbound"
 	"github.com/znasllc-io/memql/component/router"
 )
 
@@ -137,6 +138,25 @@ func (a *App) engineAndBus() {
 	// Stash for the planner integration's plan-execution claim (memql#1363):
 	// the same guard instance gates approved-plan dispatch across replicas.
 	a.clusterGuard = clusterGuard
+
+	// memql#2521: the outbound-delivery worker drains
+	// v1:platform:outboundRequest rows products stage from pure DSL and
+	// delivers them (email via the engine email integration, webhook via
+	// HTTPS POST). Deny-by-default: without a MEMQL_OUTBOUND_*_ALLOWLIST
+	// the worker refuses that medium's rows loudly, so an unconfigured
+	// node never egresses. The cluster guard keys each (row, attempt) so
+	// multi-replica deployments deliver once.
+	outboundWorker := outbound.NewWorker(
+		&OutboundEngineAdapter{Engine: a.engine},
+		clusterGuard,
+		a.eventBus,
+		map[string]outbound.Transport{
+			"email":   outbound.NewEmailTransport(a.engine, a.Logger),
+			"webhook": outbound.NewWebhookTransport(),
+		},
+		a.Logger,
+	)
+	a.Dependencies = append(a.Dependencies, outboundWorker)
 
 	a.automationScheduler, err = automations.NewScheduler(automations.SchedulerOptions{
 		Logger:              nil,

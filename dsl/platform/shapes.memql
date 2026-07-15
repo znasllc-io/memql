@@ -3,7 +3,7 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use platform.concepts.{ missingCapability, partitionVariable }
+use platform.concepts.{ missingCapability, outboundRequest, partitionVariable }
 
 @row
 @description("Comprehensive policy-trace projection for v1:platform:policyTrace rows. Backs the policyTracesForPolicy debug query and any operator surface that lists recent policy evaluations.")
@@ -49,4 +49,24 @@ shape missingCapability missingCapabilityFull {
   status
   resolution
   exampleGoals
+}
+
+// ---- shapes/v1/platform/outboundRequestFull.memql ----
+
+@row
+@description("Full outbound-request projection (memql#2521). Backs the worker's drain scan and any operator/product surface auditing delivery state.")
+shape outboundRequest outboundRequestFull {
+  row.id
+  medium
+  target
+  subject
+  body
+  status
+  attempts
+  lastError
+  nextAttemptAt
+  sentAt
+  dedupeKey
+  requestedBy
+  row.createdAt
 }

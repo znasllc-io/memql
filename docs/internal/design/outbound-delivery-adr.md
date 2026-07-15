@@ -145,7 +145,7 @@ engine does not enforce staging-time uniqueness in v1.
   explicitly lists). A row whose target misses the allowlist -- or whose
   medium has no allowlist at all -- fails fast with an explicit
   `lastError`; nothing waits silently in `pending`.
-- **Payload cap.** Rows above `MEMQL_OUTBOUND_MAX_PAYLOAD_BYTES`
+- **Payload cap.** Rows whose body exceeds `MEMQL_OUTBOUND_MAX_PAYLOAD_BYTES`
   (default 262144) fail permanently.
 
 ### 4.4 Configuration (env, `MEMQL_OUTBOUND_*`)
@@ -170,7 +170,9 @@ concept outboundRequest {
   medium        enum("email","webhook") @required
   target        string @required          // recipient address or webhook URL
   subject       string                    // email subject; ignored for webhook
-  payload       string @required          // email body / webhook JSON body
+  body          string @required          // email body / webhook JSON body
+                                          // (named body, not payload: shape
+                                          // paths reserve the payload prefix)
   status        enum("pending","sending","sent","retrying","failed") @default("pending")
   attempts      int @default("0")
   lastError     string                    // truncated to 4KB

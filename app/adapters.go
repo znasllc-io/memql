@@ -259,3 +259,19 @@ func ConvertExecuteResultToMap(result *memql.ExecuteResult) map[string]any {
 
 	return response
 }
+
+// OutboundEngineAdapter wraps MemQLEngine to satisfy outbound.Engine
+// (memql#2521). Same shape as CognitionEngineAdapter's Execute seam:
+// the worker wants (any, error) so its tests can fake flat row
+// envelopes; MaterializeRows unwraps either form.
+type OutboundEngineAdapter struct {
+	Engine *memql.MemQLEngine
+}
+
+func (a *OutboundEngineAdapter) Execute(ctx context.Context, query string) (any, error) {
+	result, err := a.Engine.Execute(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}

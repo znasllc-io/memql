@@ -3,7 +3,7 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use platform.concepts.{ globalVariable, missingCapability }
+use platform.concepts.{ globalVariable, missingCapability, outboundRequest }
 
 @enabled
 @description("Recent persisted policy traces for the named policy, most-recent first.")
@@ -183,4 +183,18 @@ query missingCapability missingCapabilityByKindAndName {
   }
   filter  kind==args.kind && capability==args.capability
   shape   missingCapabilityFull
+}
+
+// ---- queries/v1/platform/outboundRequestsByStatus.memql ----
+
+@enabled
+@description("Outbound requests in a given delivery status, oldest first (memql#2521). The outbound worker drains 'pending' and 'retrying' through this; operators and products use it to audit delivery state. Bounded first page: the worker drains batches per poll, so a burst larger than one page simply takes extra polls.")
+query outboundRequest outboundRequestsByStatus {
+  args {
+    status  string  @required
+  }
+  filter  status==args.status
+  sort     "createdAt", "asc"
+  paginate 50
+  shape   outboundRequestFull
 }
