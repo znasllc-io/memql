@@ -12,21 +12,18 @@ package steps
 // literal, and inside a row collection -- and stays comparable as a number
 // through the full logic path (never bool).
 //
-// What actually fails is the GRAMMAR: the langparser parses comparisons
-// only identifier-led (parseIdentifierExpression), so a comparison whose
-// LHS is arithmetic (`r.count - 10 > 0`) -- or any non-identifier-led
-// comparison (`0 < r.count`) -- cannot parse inside a lambda. The additive
-// level (parser.go parseAdditive, #2316) returns to logicalAnd with the
-// `>` token unconsumed and the method-arg list errors with `expected ')',
-// got ">"`. Fixing that requires a comparison precedence level over
-// parseAdditive plus an expression-led comparison AST (ast.ComparisonExpr
-// is Field-led) and matching converter/evaluator work -- deferred to the
-// #2542 grammar wave. TestLambdaArithmeticUnderComparison_ParseGap pins the
-// CURRENT rejection so the wave that closes the gap flips one assertion.
+// The remaining facet was a GRAMMAR gap, now CLOSED (#2542 item 5 residual):
+// the langparser used to parse comparisons only identifier-led
+// (parseIdentifierExpression), so a comparison whose LHS is arithmetic
+// (`r.count - 10 > 0`) -- or any non-identifier-led comparison
+// (`0 < r.count`) -- could not parse inside a lambda. A comparison precedence
+// level above parseAdditive (parser.parseComparisonLevel) now produces an
+// expression-led BinaryComparisonExpr, converted + evaluated in-memory
+// wherever collection lambdas run. TestLambdaArithmeticUnderComparison_ParsesAndEvaluates
+// asserts the now-working parse shape and the in-memory evaluation.
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	"github.com/znasllc-io/memql/component/automations"
@@ -174,38 +171,111 @@ logic logicCounterProbe {
 	}
 }
 
-// TestLambdaArithmeticUnderComparison_ParseGap pins the REMAINING facet of
-// memql#2542 item 5: `x - 10` under a comparison inside a lambda does not
-// parse. This is a grammar gap, not a round-trip defect -- pure-arithmetic
-// lambda bodies parse fine (first case), while ANY comparison that is not
-// identifier-led is rejected before the arg list closes. When the #2542
-// grammar wave adds a comparison precedence level, the rejected cases here
-// flip to parse successes and this test must be updated alongside.
-func TestLambdaArithmeticUnderComparison_ParseGap(t *testing.T) {
-	parses := []string{
+// TestLambdaArithmeticUnderComparison_ParsesAndEvaluates is the FLIP of the
+// wave-1 pin TestLambdaArithmeticUnderComparison_ParseGap: the #2542 item-5
+// grammar gap is closed. An expression-led comparison inside a lambda --
+// arithmetic LHS (`r.count - 10 > 0`), parenthesised arithmetic LHS, or a
+// literal-led comparison (`0 < r.count - 10`) -- now parses to a
+// BinaryComparisonExpr and evaluates in-memory. The pure-arithmetic and
+// identifier-led lambda bodies that already parsed keep working.
+func TestLambdaArithmeticUnderComparison_ParsesAndEvaluates(t *testing.T) {
+	// Previously-supported lambda shapes still parse.
+	stillParses := []string{
 		`args.rows.select(r => r.count - 10)`,
 		`args.rows.select(r => r.count * 100 / 2)`,
 		`args.rows.where(r => r.count > 10)`,
 	}
-	for _, src := range parses {
+	for _, src := range stillParses {
 		if _, err := langparser.ParseExpression(src); err != nil {
-			t.Errorf("expected %q to parse (supported lambda shape); got: %v", src, err)
+			t.Errorf("expected %q to still parse; got: %v", src, err)
 		}
 	}
 
-	rejected := []string{
+	// The wave-1 rejected forms now parse inside the lambda's where() arg list.
+	nowParses := []string{
 		`args.rows.where(r => r.count - 10 > 0)`,   // arithmetic LHS
 		`args.rows.where(r => (r.count - 10) > 0)`, // parenthesised arithmetic LHS
 		`args.rows.where(r => 0 < r.count - 10)`,   // literal-led comparison
 	}
-	for _, src := range rejected {
-		_, err := langparser.ParseExpression(src)
-		if err == nil {
-			t.Errorf("%q parsed -- the #2542 item-5 grammar gap has been closed; update this test to assert the parsed shape and the in-memory evaluation instead", src)
-			continue
+	for _, src := range nowParses {
+		if _, err := langparser.ParseExpression(src); err != nil {
+			t.Errorf("expected %q to parse (the #2542 item-5 grammar gap is closed); got: %v", src, err)
 		}
-		if !strings.Contains(err.Error(), "expected ')'") {
-			t.Errorf("%q: expected the arg-list rejection (`expected ')'`); got: %v", src, err)
+	}
+
+	// Parse shape: an expression-led comparison is a *BinaryComparisonExpr with
+	// full-expression operands, distinct from the Field-led *ComparisonExpr an
+	// identifier-led comparison produces.
+	shapeCases := []struct {
+		src      string
+		wantOp   langparser.ComparisonOperator
+		leftKind string // "arith" | "literal"
+	}{
+		{`r.count - 10 > 0`, langparser.OpGt, "arith"},
+		{`(r.count - 10) > 0`, langparser.OpGt, "arith"},
+		{`0 < r.count - 10`, langparser.OpLt, "literal"},
+	}
+	for _, sc := range shapeCases {
+		parsed, err := langparser.ParseExpression(sc.src)
+		if err != nil {
+			t.Fatalf("ParseExpression(%q): %v", sc.src, err)
 		}
+		cmp, ok := parsed.(*langparser.BinaryComparisonExpr)
+		if !ok {
+			t.Fatalf("%q parsed to %T, want *BinaryComparisonExpr", sc.src, parsed)
+		}
+		if cmp.Operator != sc.wantOp {
+			t.Errorf("%q operator = %q, want %q", sc.src, cmp.Operator, sc.wantOp)
+		}
+		switch sc.leftKind {
+		case "arith":
+			if _, ok := cmp.Left.(*langparser.ArithmeticExpr); !ok {
+				t.Errorf("%q left = %T, want *ArithmeticExpr", sc.src, cmp.Left)
+			}
+		case "literal":
+			if _, ok := cmp.Left.(*langparser.LiteralExpr); !ok {
+				t.Errorf("%q left = %T, want *LiteralExpr", sc.src, cmp.Left)
+			}
+		}
+	}
+
+	// Identifier-led comparisons keep their Field-led *ComparisonExpr shape --
+	// the new level is a no-op passthrough for them (back-compat).
+	idLed, err := langparser.ParseExpression(`r.count > 10`)
+	if err != nil {
+		t.Fatalf("ParseExpression(r.count > 10): %v", err)
+	}
+	if _, ok := idLed.(*langparser.ComparisonExpr); !ok {
+		t.Errorf("identifier-led `r.count > 10` = %T, want *ComparisonExpr (unchanged shape)", idLed)
+	}
+
+	// In-memory evaluation: a where() lambda with an arithmetic-LHS comparison
+	// keeps exactly the rows whose count exceeds 10 (count - 10 > 0).
+	logicSrc := `@enabled
+@description("memql#2542 item 5 residual: expression-led comparison in a lambda")
+logic logicArithCmpProbe {
+  args {
+    rows []object @required
+  }
+  body {
+    big := args.rows.where(r => r.count - 10 > 0)
+    return big.count()
+  }
+}
+`
+	body := parseLogicBodyForSteps(t, logicSrc)
+	runner := automations.NewLogicRunner(&memql.MemQLEngine{}, &nullStepRegistry{}, nil)
+	out, err := runner.RunLogic(context.Background(), "logicArithCmpProbe", body, map[string]any{
+		"rows": []any{
+			map[string]any{"count": int64(3)},
+			map[string]any{"count": int64(30)},
+			map[string]any{"count": int64(11)},
+		},
+	})
+	if err != nil {
+		t.Fatalf("RunLogic with arithmetic-LHS comparison lambda: %v", err)
+	}
+	if !intEquals(out, 2) {
+		t.Errorf("where(r => r.count - 10 > 0) kept %#v rows, want 2 (count 30 and 11)", out)
 	}
 }

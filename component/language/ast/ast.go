@@ -146,6 +146,30 @@ type ArithmeticExpr struct {
 func (*ArithmeticExpr) node()           {}
 func (*ArithmeticExpr) expressionNode() {}
 
+// BinaryComparisonExpr is an EXPRESSION-LED comparison (#2542 item 5
+// residual): both operands are full expressions rather than the bare
+// field-vs-value shape ComparisonExpr models. It is produced by the
+// comparison precedence level (parser.parseComparisonLevel) when a
+// comparison's left side is NOT a bare identifier -- an arithmetic
+// expression (`r.count - 10 > 0`), a literal (`0 < r.count`), a
+// parenthesised group, or a call result. Identifier-led comparisons keep
+// their Field-led ComparisonExpr shape (consumed one level down in
+// parseIdentifierExpression), so this node is purely additive.
+//
+// Only the six symbol comparison operators appear here (== != < <= > >=);
+// the membership operators (in / has / not in) are identifier-led only.
+// Like ArithmeticExpr it is evaluated IN-MEMORY only -- the engine AST
+// converter admits it under WithCollectionMethods (logic bodies /
+// collection lambdas) and rejects it in specs / query filters.
+type BinaryComparisonExpr struct {
+	Left     ExpressionNode
+	Operator ComparisonOperator
+	Right    ExpressionNode
+}
+
+func (*BinaryComparisonExpr) node()           {}
+func (*BinaryComparisonExpr) expressionNode() {}
+
 // RelationshipExpr wraps a nested expression within a relationship function invocation.
 type RelationshipExpr struct {
 	Function RelationshipFunction

@@ -1116,6 +1116,9 @@ func collectFunctionRefsRecursive(expr ExpressionNode, refs *[]string) {
 	case *ArithmeticExpression:
 		collectFunctionRefsRecursive(node.Left, refs)
 		collectFunctionRefsRecursive(node.Right, refs)
+	case *BinaryComparisonExpression:
+		collectFunctionRefsRecursive(node.Left, refs)
+		collectFunctionRefsRecursive(node.Right, refs)
 	}
 }
 
@@ -1164,6 +1167,14 @@ func walkForImpureLambda(expr ExpressionNode, functions map[string]*Function) er
 			return err
 		}
 		return walkForImpureLambda(node.Right, functions)
+	case *BinaryComparisonExpression:
+		// An expression-led comparison operand can itself carry a collection
+		// chain with a lambda (`rows.any(r => mutate()) == true`); traverse
+		// both sides so the purity check reaches a nested lambda.
+		if err := walkForImpureLambda(node.Left, functions); err != nil {
+			return err
+		}
+		return walkForImpureLambda(node.Right, functions)
 	case *CountExpression:
 		return walkForImpureLambda(node.Target, functions)
 	case *ShapeExpression:
@@ -1208,6 +1219,11 @@ func findImpureCall(expr ExpressionNode, functions map[string]*Function) string 
 	case *LambdaExpression:
 		return findImpureCall(node.Body, functions)
 	case *ArithmeticExpression:
+		if bad := findImpureCall(node.Left, functions); bad != "" {
+			return bad
+		}
+		return findImpureCall(node.Right, functions)
+	case *BinaryComparisonExpression:
 		if bad := findImpureCall(node.Left, functions); bad != "" {
 			return bad
 		}

@@ -90,6 +90,12 @@ func cloneExpressionNode(expr ExpressionNode) ExpressionNode {
 			Left:  cloneExpressionNode(node.Left),
 			Right: cloneExpressionNode(node.Right),
 		}
+	case *BinaryComparisonExpression:
+		return &BinaryComparisonExpression{
+			Left:     cloneExpressionNode(node.Left),
+			Operator: node.Operator,
+			Right:    cloneExpressionNode(node.Right),
+		}
 	case *RelationshipExpression:
 		return &RelationshipExpression{
 			Function: node.Function,

@@ -30,6 +30,7 @@ type (
 	LogicalExpr             = ast.LogicalExpr
 	ComparisonExpr          = ast.ComparisonExpr
 	ArithmeticExpr          = ast.ArithmeticExpr
+	BinaryComparisonExpr    = ast.BinaryComparisonExpr
 	RelationshipExpr        = ast.RelationshipExpr
 	SortExpr                = ast.SortExpr
 	PaginateExpr            = ast.PaginateExpr

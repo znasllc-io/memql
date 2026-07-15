@@ -841,6 +841,21 @@ func (v *functionValidator) expandExpressionWithArgs(expr ExpressionNode, args m
 		}
 		return &ArithmeticExpression{Op: node.Op, Left: left, Right: right}, nil
 
+	case *BinaryComparisonExpression:
+		// #2542 item 5 residual: fold any `args.X` operand of an
+		// expression-led comparison into a concrete literal (lambda param
+		// references pass through unchanged for per-element binding), exactly
+		// like ArithmeticExpression above.
+		left, err := v.expandExpressionWithArgs(node.Left, args)
+		if err != nil {
+			return nil, err
+		}
+		right, err := v.expandExpressionWithArgs(node.Right, args)
+		if err != nil {
+			return nil, err
+		}
+		return &BinaryComparisonExpression{Left: left, Operator: node.Operator, Right: right}, nil
+
 	case *ConditionalFilterExpression:
 		// Process conditional filter: check if the arg is present AND
 		// non-nil. A present-but-nil value is treated as absent: tool

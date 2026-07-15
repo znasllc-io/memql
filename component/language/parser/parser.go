@@ -1560,6 +1560,15 @@ func (p *Parser) parseGoStyleStep() (*StepDef, error) {
 					}, nil
 				}
 			}
+			// Arithmetic-expression step RHS whose FIRST operand is a call
+			// (#2542 GAP 2): `weeks := daysBetween(a, b) / 7`,
+			// `doubled := count() * 2`. The whole RHS parsed to an
+			// ArithmeticExpr, not a call, so expressionToFunctionCall declined
+			// it -- emit an arithmetic step (same shape as a leading-operand
+			// arithmetic RHS below).
+			if arith, isArith := expr.(*ArithmeticExpr); isArith {
+				return arithmeticStepDef(names[0], retryCount, arith), nil
+			}
 			return nil, newParseErrorf(&p.current,
 				"step RHS must be a function call or builtin; got %T. "+
 					"Wrap raw values in a helper or use 'query { }' / 'mutation { }' blocks.",
@@ -1574,6 +1583,37 @@ func (p *Parser) parseGoStyleStep() (*StepDef, error) {
 				Args: call.Args,
 			},
 		}, nil
+	}
+
+	// Arithmetic-expression step RHS (#2542 GAP 2): an intermediate step whose
+	// RHS is an in-memory arithmetic expression -- `delta := a * 2`,
+	// `net := gross - fee`, `weeks := span / 7`. This is neither a function
+	// call (the bareCallRHS branch above missed it) nor an inline step block
+	// (the step-type switch below). Speculatively parse the RHS as an
+	// expression and keep it ONLY when the top node is arithmetic; on a parse
+	// error or a non-arithmetic node, rewind so the step-type switch reports
+	// its usual error for a genuinely unknown RHS. The gate fires only on an
+	// arithmetic-leading token, so a step-type keyword (`query {` /
+	// `mutation {`) is never speculatively parsed. The emitted step carries
+	// the parsed ArithmeticExpr; the compiler serializes the operator form and
+	// the LogicRunner re-parses + evaluates it against the local Evaluator
+	// (tryEvaluateArithmeticLocally), the exact route a terminal-return
+	// arithmetic takes (#2542 item 1) -- so the operand vocabulary is at parity
+	// by construction.
+	if p.rhsLooksArithmetic() {
+		savePos, saveCur := p.pos, p.current
+		saveDeferred := len(p.deferredErrors)
+		expr, err := p.parseExpression()
+		if err == nil {
+			if arith, ok := expr.(*ArithmeticExpr); ok {
+				return arithmeticStepDef(names[0], retryCount, arith), nil
+			}
+		}
+		// Not arithmetic (or a parse error): rewind fully so the step-type
+		// switch below sees the exact same tokens it would have without the
+		// speculative attempt.
+		p.pos, p.current = savePos, saveCur
+		p.deferredErrors = p.deferredErrors[:saveDeferred]
 	}
 
 	// Check for step type (inline blocks are rejected in favor of function-call syntax)
@@ -1644,6 +1684,46 @@ func (p *Parser) parseGoStyleStep() (*StepDef, error) {
 		RetryCount: retryCount,
 		Config:     config,
 	}, nil
+}
+
+// arithmeticStepDef wraps an arithmetic expression parsed at step-RHS position
+// (#2542 GAP 2) as a query-typed step. The compiler serializes the operator
+// form (expressionToString's ArithmeticExpr case) and the LogicRunner
+// re-parses + evaluates it against the local Evaluator
+// (tryEvaluateArithmeticLocally) -- the same node, serializer, and runtime
+// evaluator a terminal-return arithmetic uses (#2542 item 1), so the operand
+// vocabulary is at parity by construction.
+func arithmeticStepDef(name string, retryCount int, arith *ArithmeticExpr) *StepDef {
+	return &StepDef{
+		ID:         name,
+		Type:       StepTypeQuery,
+		RetryCount: retryCount,
+		Config:     &QueryStepConfig{Query: arith},
+	}
+}
+
+// rhsLooksArithmetic reports whether the current position begins an arithmetic
+// expression at step-RHS position (#2542 GAP 2): a number, a parenthesised
+// group, a unary minus, or an identifier immediately followed by a binary
+// arithmetic operator. It deliberately excludes an identifier followed by `(`
+// (a function call, handled by the bareCallRHS branch) and a step-type keyword
+// followed by `{` / `if` (an inline block, handled by the step-type switch), so
+// the speculative parse never intercepts a non-arithmetic RHS shape.
+func (p *Parser) rhsLooksArithmetic() bool {
+	switch {
+	case p.check(TokenNumber):
+		return true
+	case p.check(TokenParenOpen):
+		return true
+	case p.check(TokenOperator) && p.current.Literal == "-":
+		return true
+	case p.check(TokenIdentifier):
+		next := p.peekAhead(1)
+		return next.Type == TokenOperator &&
+			(isAdditiveOperatorLiteral(next.Literal) || isMultiplicativeOperatorLiteral(next.Literal))
+	default:
+		return false
+	}
 }
 
 // parseConceptDecl parses a concept declaration:
@@ -4588,7 +4668,7 @@ func (p *Parser) parseNullCoalesce() (ExpressionNode, error) {
 
 // parseLogicalAnd parses semicolon-separated or &&-separated (AND) expressions.
 func (p *Parser) parseLogicalAnd() (ExpressionNode, error) {
-	left, err := p.parseAdditive()
+	left, err := p.parseComparisonLevel()
 	if err != nil {
 		return nil, err
 	}
@@ -4598,7 +4678,7 @@ func (p *Parser) parseLogicalAnd() (ExpressionNode, error) {
 
 	for p.check(TokenSemicolon) || p.check(TokenAmpAmp) {
 		p.advance()
-		right, err := p.parseAdditive()
+		right, err := p.parseComparisonLevel()
 		if err != nil {
 			return nil, err
 		}
@@ -4612,6 +4692,48 @@ func (p *Parser) parseLogicalAnd() (ExpressionNode, error) {
 		}
 	}
 
+	return left, nil
+}
+
+// parseComparisonLevel parses an EXPRESSION-LED comparison (#2542 item 5
+// residual): a comparison whose left side is a full arithmetic / primary
+// expression rather than a bare identifier. It sits between the logical
+// (&&/||) levels and the additive arithmetic level, so `r.count - 10 > 0`
+// parses as `(r.count - 10) > 0` and `0 < r.count` parses literal-led.
+//
+// Identifier-led comparisons (`m.count > 10`) are still consumed one level
+// down, in parseIdentifierExpression, which produces the Field-led
+// ComparisonExpr and leaves NO trailing operator; this level is therefore a
+// no-op passthrough for them and their AST shape is byte-identical to before.
+// Only a comparison whose LHS is NON-identifier-led -- arithmetic, a literal,
+// a parenthesised group, or a call result -- reaches here with the operator
+// still pending, and becomes a BinaryComparisonExpr. Every such form
+// previously failed to parse (the operator was left unconsumed and the
+// enclosing arg list / statement rejected it), so this is purely additive.
+//
+// Non-associative: at most one comparison operator is consumed (`a < b < c`
+// is not a chained comparison), matching Go and the additive/multiplicative
+// levels' left operand.
+func (p *Parser) parseComparisonLevel() (ExpressionNode, error) {
+	left, err := p.parseAdditive()
+	if err != nil {
+		return nil, err
+	}
+	if left == nil {
+		return nil, nil
+	}
+	if p.check(TokenOperator) && isComparisonOperatorLiteral(p.current.Literal) {
+		op := ComparisonOperator(p.current.Literal)
+		p.advance()
+		right, err := p.parseAdditive()
+		if err != nil {
+			return nil, err
+		}
+		if right == nil {
+			return nil, newParseErrorf(&p.current, "expected an expression after %q", string(op))
+		}
+		return &BinaryComparisonExpr{Left: left, Operator: op, Right: right}, nil
+	}
 	return left, nil
 }
 
