@@ -100,12 +100,23 @@ func (t *EmailTransport) resolveSender() email.Sender {
 // at-least-once redelivery (ADR 4.2).
 type WebhookTransport struct {
 	Client *http.Client
+	// Allowlist is the deploy-owned URL prefix set (normalized). The
+	// request URL is REBUILT as matched-prefix + remainder, so the
+	// scheme and host always come from configuration, never from the
+	// staged row -- the row can only extend the path/query under an
+	// allowlisted origin (SSRF containment, ADR 4.3; the worker's
+	// admit() is the fail-fast policy gate, this is defense in depth).
+	Allowlist []string
 }
 
 // NewWebhookTransport constructs the webhook transport with the
-// deploy-configured request timeout.
+// deploy-configured request timeout and allowlist.
 func NewWebhookTransport() *WebhookTransport {
-	return &WebhookTransport{Client: &http.Client{Timeout: LoadConfig().HTTPTimeout}}
+	cfg := LoadConfig()
+	return &WebhookTransport{
+		Client:    &http.Client{Timeout: cfg.HTTPTimeout},
+		Allowlist: cfg.WebhookAllowlist,
+	}
 }
 
 // Deliver POSTs the payload. 2xx is success; 408/429/5xx and transport
@@ -114,7 +125,11 @@ func (t *WebhookTransport) Deliver(ctx context.Context, req Request) error {
 	if t == nil || t.Client == nil {
 		return errors.New("webhook transport: client not wired")
 	}
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, req.Target, strings.NewReader(req.Payload))
+	prefix, remainder, ok := matchWebhookPrefix(req.Target, t.Allowlist)
+	if !ok {
+		return Permanent(fmt.Errorf("webhook: target not in allowlist"))
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, prefix+remainder, strings.NewReader(req.Payload))
 	if err != nil {
 		return Permanent(fmt.Errorf("webhook: build request: %w", err))
 	}

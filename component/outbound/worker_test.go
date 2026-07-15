@@ -342,6 +342,27 @@ func TestEmailAllowed(t *testing.T) {
 	}
 }
 
+func TestWebhookAllowedRejectsUserinfoTrick(t *testing.T) {
+	// "https://host" without a closing slash would prefix-match
+	// "https://host@evil.example/x" whose REAL host is evil.example.
+	// normalizeWebhookPrefixes closes the authority so it cannot.
+	prefixes := normalizeWebhookPrefixes([]string{"https://hooks.internal.example"})
+	if webhookAllowed("https://hooks.internal.example@evil.example/x", prefixes) {
+		t.Fatal("userinfo trick must not pass the allowlist")
+	}
+	if !webhookAllowed("https://hooks.internal.example/notify", prefixes) {
+		t.Fatal("normalized prefix must still admit real paths under the host")
+	}
+}
+
+func TestWebhookTransportRefusesUnlistedTarget(t *testing.T) {
+	tr := &WebhookTransport{Client: &http.Client{}, Allowlist: []string{"https://hooks.internal.example/"}}
+	err := tr.Deliver(context.Background(), Request{Target: "https://evil.example.net/x", Payload: "{}"})
+	if err == nil || !IsPermanent(err) {
+		t.Fatalf("unlisted target must fail permanently in the transport, got %v", err)
+	}
+}
+
 func TestWebhookAllowed(t *testing.T) {
 	prefixes := []string{"https://hooks.internal.example/", "http://sim.cluster.local:7306/"}
 	for target, want := range map[string]bool{
@@ -399,7 +420,7 @@ func TestWebhookTransportPostsPayloadAndHeaders(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tr := &WebhookTransport{Client: srv.Client()}
+	tr := &WebhookTransport{Client: srv.Client(), Allowlist: normalizeWebhookPrefixes([]string{srv.URL})}
 	err := tr.Deliver(context.Background(), Request{
 		ID:        "v1:platform:outboundRequest:r1",
 		Medium:    "webhook",
@@ -434,8 +455,8 @@ func TestWebhookTransportClassifiesStatuses(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) {
 			rw.WriteHeader(status)
 		}))
-		tr := &WebhookTransport{Client: srv.Client()}
-		err := tr.Deliver(context.Background(), Request{Target: srv.URL, Payload: "{}"})
+		tr := &WebhookTransport{Client: srv.Client(), Allowlist: normalizeWebhookPrefixes([]string{srv.URL})}
+		err := tr.Deliver(context.Background(), Request{Target: srv.URL + "/", Payload: "{}"})
 		srv.Close()
 		if err == nil {
 			t.Fatalf("status %d must be an error", status)

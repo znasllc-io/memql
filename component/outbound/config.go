@@ -90,9 +90,26 @@ func LoadConfig() Config {
 		cfg.EmailAllowlist = splitAllowlist(s, true)
 	}
 	if s, ok := reader.String("WEBHOOK_ALLOWLIST"); ok {
-		cfg.WebhookAllowlist = splitAllowlist(s, false)
+		cfg.WebhookAllowlist = normalizeWebhookPrefixes(splitAllowlist(s, false))
 	}
 	return cfg
+}
+
+// normalizeWebhookPrefixes guarantees every allowlist entry contains a
+// path separator after the authority ("https://host" -> "https://host/").
+// Without it, prefix matching alone admits userinfo tricks: the target
+// "https://host@evil.example/x" starts with the prefix "https://host"
+// but its real host is evil.example. With the trailing slash the
+// authority is closed and a matched target can only extend the path.
+func normalizeWebhookPrefixes(prefixes []string) []string {
+	out := make([]string, 0, len(prefixes))
+	for _, p := range prefixes {
+		if idx := strings.Index(p, "://"); idx >= 0 && !strings.Contains(p[idx+3:], "/") {
+			p += "/"
+		}
+		out = append(out, p)
+	}
+	return out
 }
 
 // splitAllowlist parses a comma-separated allowlist env value. Entries
@@ -131,21 +148,31 @@ func emailAllowed(target string, domains []string) bool {
 	return false
 }
 
-// webhookAllowed reports whether a target URL matches the prefix
-// allowlist. HTTPS is required unless the matching prefix itself is an
-// explicit http:// entry (cluster-internal hosts the operator opted in,
-// ADR 4.3). An empty allowlist admits nothing (medium disabled).
-func webhookAllowed(target string, prefixes []string) bool {
+// matchWebhookPrefix returns the allowlist prefix the target matches
+// (and the remainder after it), applying the scheme policy: HTTPS is
+// required unless the matching prefix itself is an explicit http://
+// entry (cluster-internal hosts the operator opted in, ADR 4.3). An
+// empty allowlist matches nothing (medium disabled). Prefixes are
+// normalized to close the authority (normalizeWebhookPrefixes), so the
+// remainder can only extend the path/query -- the transport rebuilds
+// the request URL as prefix + remainder, keeping the host
+// config-owned.
+func matchWebhookPrefix(target string, prefixes []string) (prefix, remainder string, ok bool) {
 	for _, p := range prefixes {
 		if !strings.HasPrefix(target, p) {
 			continue
 		}
-		if strings.HasPrefix(strings.ToLower(target), "https://") {
-			return true
-		}
-		if strings.HasPrefix(strings.ToLower(p), "http://") {
-			return true
+		if strings.HasPrefix(strings.ToLower(target), "https://") ||
+			strings.HasPrefix(strings.ToLower(p), "http://") {
+			return p, strings.TrimPrefix(target, p), true
 		}
 	}
-	return false
+	return "", "", false
+}
+
+// webhookAllowed reports whether a target URL matches the prefix
+// allowlist (see matchWebhookPrefix).
+func webhookAllowed(target string, prefixes []string) bool {
+	_, _, ok := matchWebhookPrefix(target, prefixes)
+	return ok
 }
