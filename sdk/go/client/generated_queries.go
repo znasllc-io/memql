@@ -2812,6 +2812,28 @@ func OAuthClientByClientIdBuild(args OAuthClientByClientIdArgs) string {
 	return b.String()
 }
 
+// OutboundRequestsByStatus -- Outbound requests in a given delivery status, oldest first (memql#2521). The outbound worker drains 'pending' and 'retrying' through this; operators and products use it to audit delivery state. Bounded first page: the worker drains batches per poll, so a burst larger than one page simply takes extra polls.
+//
+// Bound concept: v1:platform:outboundRequest (machine-readable: BoundConcepts["outboundRequestsByStatus"] in generated_concepts.go).
+type OutboundRequestsByStatusArgs struct {
+	Status string
+}
+
+// OutboundRequestsByStatus calls the engine query outboundRequestsByStatus.
+func (qc *QueryClient) OutboundRequestsByStatus(ctx context.Context, args OutboundRequestsByStatusArgs) (*Result, error) {
+	call := OutboundRequestsByStatusBuild(args)
+	return qc.executeNamed(ctx, "outboundRequestsByStatus", call)
+}
+
+func OutboundRequestsByStatusBuild(args OutboundRequestsByStatusArgs) string {
+	var b strings.Builder
+	b.WriteString("query outboundRequestsByStatus(")
+	b.WriteString("status: ")
+	b.WriteString(fmt.Sprintf("%q", args.Status))
+	b.WriteString(")")
+	return b.String()
+}
+
 // OverrideById -- Fetch a single healed override by id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard, so a caller can never read another user's override even with its id. Used by the validation flow (E4.5) to confirm the row before capturing the next version.
 //
 // Bound concept: v1:healing:healedOverride (machine-readable: BoundConcepts["overrideById"] in generated_concepts.go).
