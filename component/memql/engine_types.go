@@ -459,6 +459,16 @@ type MutationNode struct {
 	// annotation; always empty otherwise. See memql#2240.
 	AppendFields []string
 
+	// CreateOnlyFields names payload fields an insert-kind (create-or-upsert)
+	// mutation writes ONLY on create. When the target id already exists,
+	// executeWrite drops them from the delta before the read-merge so the
+	// stored value is preserved instead of clobbered -- making a
+	// deterministic-id re-stage idempotent for lifecycle fields another
+	// writer owns after creation. Populated from a mutation's @createOnly
+	// annotation; always empty for raw insert()/update() query strings and
+	// unannotated mutations. See fylo#63.
+	CreateOnlyFields []string
+
 	// ScrubPii is set from a mutation's @scrubPii annotation: when true,
 	// executeUpdate enumerates every @pii-annotated field on the bound
 	// concept (Concept.PIIFields()) and zeroes it after the partial

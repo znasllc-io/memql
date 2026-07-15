@@ -35,7 +35,12 @@ stageOutboundRequest(
 ```
 
 - `requestId` is caller-supplied; derive it with `hash(concat(...))`
-  for staging-time idempotency.
+  for staging-time idempotency. A re-stage onto an existing `requestId`
+  re-targets the same row and refreshes the deliverable content
+  (`target`/`subject`/`body`/`dedupeKey`), but PRESERVES the worker-owned
+  delivery lifecycle: `status`/`attempts` are `@createOnly`, so a re-stage
+  of a row the worker already moved to `sending`/`sent`/`failed`/`retrying`
+  does NOT reset it to `pending` and trigger a redelivery (fylo#63).
 - `medium` is `"email"` or `"webhook"`. For email, `target` is the
   recipient address and `subject` applies; for webhook, `target` is an
   absolute URL and `body` is POSTed as JSON.

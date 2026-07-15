@@ -276,9 +276,23 @@ mutate missingCapability updateMissingCapabilityStatus {
 // the row and stamps status transitions back. Callers derive requestId
 // deterministically (hash(concat(...))) when they want staging-time
 // idempotency.
+//
+// @createOnly("status", "attempts") makes that idempotency correct
+// (fylo#63): status + attempts are the delivery-lifecycle fields the
+// outbound worker OWNS after creation (via updateOutboundRequestStatus).
+// This mutation seeds them at birth, but a re-stage onto an existing
+// requestId (e.g. a product automation that re-fires while its trigger
+// row is still at the same stage) must NOT reset a row the worker has
+// already moved to sending/sent/failed/retrying -- that would rewind
+// delivery state and redeliver. @createOnly drops status/attempts from
+// the delta on the read-merge path, so a re-stage preserves them while
+// still refreshing the deliverable content (target/subject/body/dedupeKey).
+// The other worker-owned fields (lastError/nextAttemptAt/sentAt) are not
+// written here at all, so the read-merge already preserves them.
 
 @enabled
-@description("Stage an outbound delivery (memql#2521): insert a v1:platform:outboundRequest row with status='pending' for the engine outbound worker to drain. Credentials are never part of the row; targets must satisfy the deployment's per-medium allowlist or the worker fails the row fast.")
+@createOnly("status", "attempts")
+@description("Stage an outbound delivery (memql#2521): insert a v1:platform:outboundRequest row with status='pending' for the engine outbound worker to drain. Credentials are never part of the row; targets must satisfy the deployment's per-medium allowlist or the worker fails the row fast. Idempotent by requestId: a re-stage onto an existing row preserves the worker-owned status/attempts (@createOnly, fylo#63) rather than resetting delivery state.")
 mutate outboundRequest stageOutboundRequest {
   args {
     requestId    string  @required

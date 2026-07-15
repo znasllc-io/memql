@@ -70,6 +70,14 @@ type FunctionMutationTemplate struct {
 	// load time in function_loader.go). See memql#1339.
 	MergeFields []string
 
+	// CreateOnlyFields carries the mutation's @createOnly("a", "b")
+	// annotation: payload fields written ONLY on create. When the target
+	// id already exists, executeWrite drops them from the delta before the
+	// read-merge so the stored value is preserved. Only valid on
+	// insert-kind mutations (enforced at load time in function_loader.go).
+	// See fylo#63.
+	CreateOnlyFields []string
+
 	// ScrubPii carries the mutation's @scrubPii annotation: when set,
 	// the update executor enumerates every @pii-annotated field on the
 	// bound concept and zeroes it after the partial payload merges,
@@ -206,16 +214,17 @@ func (e *MemQLEngine) renderMutationTemplate(ctx context.Context, tmpl *Function
 	}
 
 	return MutationNode{
-		Kind:         kind,
-		Concept:      concept,
-		ID:           strings.TrimSpace(id),
-		PayloadRaw:   string(payloadJSON),
-		CreatedAt:    createdAtRef,
-		ParentRef:    parentRef,
-		AliasOfRef:   aliasRef,
-		MergeFields:  tmpl.MergeFields,
-		AppendFields: tmpl.AppendFields,
-		ScrubPii:     tmpl.ScrubPii,
+		Kind:             kind,
+		Concept:          concept,
+		ID:               strings.TrimSpace(id),
+		PayloadRaw:       string(payloadJSON),
+		CreatedAt:        createdAtRef,
+		ParentRef:        parentRef,
+		AliasOfRef:       aliasRef,
+		MergeFields:      tmpl.MergeFields,
+		AppendFields:     tmpl.AppendFields,
+		CreateOnlyFields: tmpl.CreateOnlyFields,
+		ScrubPii:         tmpl.ScrubPii,
 	}, nil
 }
 
@@ -1305,6 +1314,43 @@ func mutationAppendFields(funcDef *languageParser.FunctionDef, kind ast.Mutation
 	}
 	if len(fields) > 0 && kind != ast.MutationKindUpdate {
 		return nil, fmt.Errorf("@appendFields is only valid on update mutations (insert writes the full payload; there is nothing stored to append to)")
+	}
+	return fields, nil
+}
+
+// mutationCreateOnlyFields extracts the @createOnly("a", "b") annotation
+// from a mutation definition into the field-name list executeWrite drops
+// from the delta when the target id already exists (memql#1709 read-merge),
+// so those fields keep their stored value on a re-stage instead of being
+// clobbered. The inverse of @mergeFields/@appendFields: it is only
+// meaningful on insert-kind (create-or-upsert) mutations -- an update()
+// always targets an existing row, so a create-only field would ALWAYS be
+// dropped and could never be written, a silent footgun. Its presence on an
+// update mutation is therefore a load-time error. See fylo#63.
+func mutationCreateOnlyFields(funcDef *languageParser.FunctionDef, kind ast.MutationKind) ([]string, error) {
+	var fields []string
+	for _, attr := range funcDef.Attributes {
+		if attr == nil || attr.Name != languageParser.AttrCreateOnly {
+			continue
+		}
+		switch v := attr.Value.(type) {
+		case string:
+			if s := strings.TrimSpace(v); s != "" {
+				fields = append(fields, s)
+			}
+		case []string:
+			for _, raw := range v {
+				if s := strings.TrimSpace(raw); s != "" {
+					fields = append(fields, s)
+				}
+			}
+		}
+		if len(fields) == 0 {
+			return nil, fmt.Errorf(`@createOnly requires at least one field name, e.g. @createOnly("status", "attempts")`)
+		}
+	}
+	if len(fields) > 0 && kind == ast.MutationKindUpdate {
+		return nil, fmt.Errorf("@createOnly is only valid on insert mutations (an update always targets an existing row, so a create-only field could never be written)")
 	}
 	return fields, nil
 }

@@ -44,6 +44,7 @@ construct-specific (see the end of this document) or rejected.
 | `@idempotent` | No | Yes | No | Safe to retry without side effects |
 | `@mergeFields("a", "b")` | No | Yes | No | Deep-merge the named object payload fields on update instead of replacing them |
 | `@appendFields("a", "b")` | No | Yes | No | Append the named array payload fields' elements to the stored array on update instead of replacing them |
+| `@createOnly("a", "b")` | No | Yes | No | Write the named payload fields only on create; preserve the stored value on an insert (upsert) onto an existing id |
 | **Auditing** |
 | `@audit` | No | Yes | Yes | Log all executions for audit trail |
 | **Triggers (Automation Only)** |
@@ -220,6 +221,24 @@ element yields a duplicate).
 ```memql
 @appendFields("attachmentIds")
 mutation request attachToRequest { ... }
+```
+
+#### `@createOnly("...")`
+Opts an insert-kind (create-or-upsert) mutation into per-field create-only
+semantics: the named payload fields are written ONLY when the mutation
+creates the row. When the target id already exists, they are dropped from
+the delta before the engine read-merge (memql#1709), so the stored value is
+preserved instead of clobbered. This makes a deterministic-id re-stage
+genuinely idempotent for lifecycle fields another writer owns after
+creation -- e.g. `stageOutboundRequest` seeds `status`/`attempts` at birth
+but must not reset a row the outbound worker has since moved to
+sending/sent/failed (fylo#63). The inverse of `@mergeFields`/`@appendFields`:
+only valid on insert-kind mutations (an update always targets an existing
+row, so a create-only field could never be written).
+
+```memql
+@createOnly("status", "attempts")
+mutation outboundRequest stageOutboundRequest { ... }
 ```
 
 ---

@@ -265,6 +265,24 @@ func toAppendSlice(v any) []any {
 	}
 }
 
+// dropCreateOnlyFields removes each @createOnly-named field from the partial
+// (delta) payload. It runs only on the read-merge path (an existing prior
+// row), BEFORE appendPayloadFields/mergePayloadFields, so the stored value
+// for those fields survives the merge untouched -- the create-only contract
+// (fylo#63). On a genuine create there is no prior row and this is never
+// called, so the delta's create-only fields (e.g. status="pending",
+// attempts=0) are written as-is. A nil/empty createOnlyFields (every
+// unannotated mutation) is a no-op.
+func dropCreateOnlyFields(partial map[string]any, createOnlyFields []string) {
+	for _, f := range createOnlyFields {
+		f = strings.TrimSpace(f)
+		if f == "" {
+			continue
+		}
+		delete(partial, f)
+	}
+}
+
 func mergePayloadFields(prior, partial map[string]any, mergeFields []string) {
 	mergeSet := make(map[string]struct{}, len(mergeFields))
 	for _, f := range mergeFields {
@@ -469,6 +487,14 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 			// blast-radius validation guard only gates the valid false->true
 			// ACCEPT transition, not a re-write of an already-accepted override.
 			meta.priorHealingValid = boolFromAny(priorPayload["valid"])
+			// @createOnly fields are written on create only (fylo#63): drop
+			// them from the delta BEFORE the merge so the stored value wins.
+			// A deterministic-id re-stage of a row another writer owns after
+			// creation (e.g. stageOutboundRequest onto a row the outbound
+			// worker moved to sent) then preserves that lifecycle state
+			// instead of resetting it. Empty for every unannotated mutation,
+			// so this is a no-op on the whole existing tree.
+			dropCreateOnlyFields(payload, mutation.CreateOnlyFields)
 			appendPayloadFields(priorPayload, payload, mutation.AppendFields)
 			mergePayloadFields(priorPayload, payload, mutation.MergeFields)
 			payload = priorPayload
