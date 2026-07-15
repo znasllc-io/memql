@@ -133,13 +133,18 @@ func shapeDeclToShapeDefinition(decl *languageParser.ShapeDecl, origin string) (
 	for _, path := range decl.Paths {
 		// Bare payload access (epic #2292): the concept is bound by the
 		// signature, so a payload property is written by BARE name. The
-		// explicit `payload.X` (and legacy `row.payload.X`) author form is
-		// rejected with a migration hint. `row.X` / `actor.X` are unchanged.
-		if path == "payload" || strings.HasPrefix(path, "payload.") || strings.HasPrefix(path, "row.payload.") || strings.HasPrefix(path, "row.payload") {
+		// explicit `payload.<prop>` (and legacy `row.payload.<prop>`) author
+		// form is rejected with a migration hint. `row.X` / `actor.X` are
+		// unchanged. The check fires ONLY on the removed prefix -- i.e. a
+		// `payload.` segment WITH the trailing dot -- so a concept field
+		// literally named `payload`, projected by bare name, is a normal
+		// projection and is NOT rejected (the dotless bare name carries no
+		// prefix to remove).
+		if strings.HasPrefix(path, "payload.") || strings.HasPrefix(path, "row.payload.") {
 			bare := path
 			bare = strings.TrimPrefix(bare, "row.")
 			bare = strings.TrimPrefix(bare, "payload.")
-			if bare == "" || bare == "payload" {
+			if bare == "" {
 				bare = "<property>"
 			}
 			return nil, fmt.Errorf("%s: shape %q body path %q uses the removed `payload.` prefix -- write the payload property by bare name (%q); the concept is bound by the signature", origin, decl.Name, path, bare)

@@ -11,6 +11,15 @@
 // domains, when linting a product bundle standalone) are treated as
 // external and skipped.
 //
+// In directory mode it additionally runs an engine-parity pass (#2520):
+// the linted root is mounted as an overlay on the embedded core tree and
+// the engine's own init-time validation (MemQLEngine.Init) runs over the
+// merged tree, so a pack that lints clean here also MOUNTS clean at boot.
+// This catches the init-only validation classes dslimports does not model
+// -- non-canonical @relationship types, declared-but-unused mutation args,
+// CQS / dependency-tree violations, and every other unified-loader
+// parse/register skip.
+//
 // Usage:
 //
 //	memqllint [flags] [path]
@@ -52,6 +61,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/memql/dslimports"
 )
 
@@ -145,6 +155,30 @@ func run(args []string) int {
 	if tree != nil {
 		integrityErrs = append(integrityErrs, tree.VerifyReferentialIntegrity()...)
 		integrityErrs = append(integrityErrs, tree.VerifyAllSymbolReferences()...)
+	}
+
+	// Engine-parity pass (#2520): dslimports models parse + import-graph
+	// integrity, but the engine runs a second validation tier at boot that a
+	// pack passing dslimports can still trip -- non-canonical @relationship
+	// types, declared-but-unused mutation args, CQS / dependency-tree
+	// violations, per-kind uniqueness, and every other unified-loader
+	// parse/register skip. LintUnifiedTree mounts the linted root as an
+	// overlay on the embedded core tree and runs the engine's own Init over
+	// it, so a pack that lints clean here also MOUNTS clean at boot. Directory
+	// mode only: single-file mode keeps its file-scoped report, and the root
+	// there is a namespace directory rather than a DSL root of domains.
+	if target == "" {
+		parityDiags, perr := memql.LintUnifiedTree(nil, root)
+		if perr != nil {
+			integrityErrs = append(integrityErrs, fmt.Errorf("engine-parity lint: %w", perr))
+		}
+		for _, d := range parityDiags {
+			if d.File != "" {
+				integrityErrs = append(integrityErrs, fmt.Errorf("%s: %s", d.File, d.Message))
+			} else {
+				integrityErrs = append(integrityErrs, fmt.Errorf("%s", d.Message))
+			}
+		}
 	}
 
 	report := buildReport(tree, loadErr, integrityErrs, target)
