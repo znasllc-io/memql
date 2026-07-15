@@ -5,6 +5,13 @@
 // the per-product SDK package, which re-exports this core.
 
 export { Connection, type ConnectOptions, type ConnectionAuth } from "./connection.js";
+export {
+  uploadAttachment,
+  type AttachmentUploadSource,
+  type UploadAttachmentParams,
+  type AttachmentFile,
+  type AttachmentRef,
+} from "./attachments.js";
 export { Dispatcher, type DispatcherOptions } from "./dispatcher.js";
 export { QueryClient, type QueryCallOptions } from "./query.js";
 export {

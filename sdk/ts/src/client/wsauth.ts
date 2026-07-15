@@ -11,10 +11,14 @@
 
 /** The subprotocol pair for a dial, or undefined when the connection is
  * unauthenticated (or worker-token based, which stays on the query string
- * until the worker surface migrates). */
+ * until the worker surface migrates). Returns undefined when `legacyUrlToken`
+ * is set: that opt-in falls back to the deprecated query-param carry
+ * (`?bearer_token=` / `?guest_token=`, stamped in connection.ts), so the
+ * credential must NOT also ride the subprotocol channel. */
 export function wsAuthSubprotocols(
-  auth: { bearer?: string; guestToken?: string } | undefined,
+  auth: { bearer?: string; guestToken?: string; legacyUrlToken?: boolean } | undefined,
 ): string[] | undefined {
+  if (auth?.legacyUrlToken) return undefined;
   if (auth?.bearer) return ["bearer", auth.bearer];
   if (auth?.guestToken) return ["guest", auth.guestToken];
   return undefined;

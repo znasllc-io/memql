@@ -62,7 +62,12 @@ async function completeHello(socket: FakeWebSocket): Promise<void> {
   throw new Error("completeHello: clientHello never arrived");
 }
 
-async function dialWith(auth: { bearer?: string; guestToken?: string; workerToken?: string }): Promise<{
+async function dialWith(auth: {
+  bearer?: string;
+  guestToken?: string;
+  workerToken?: string;
+  legacyUrlToken?: boolean;
+}): Promise<{
   conn: Connection;
   socket: FakeWebSocket;
   protocols: string[] | undefined;
@@ -108,6 +113,52 @@ test("Connection.dial -- no auth offers no subprotocols", async () => {
   const { conn, protocols } = await dialWith({});
   try {
     assert.equal(protocols, undefined);
+  } finally {
+    conn.close();
+  }
+});
+
+// -----------------------------------------------------------------------
+// Legacy transport opt-in (#2524): bearer/guest fall back to the deprecated
+// query-param carry and the subprotocol channel is NOT used.
+// -----------------------------------------------------------------------
+
+test("Connection.dial -- legacyUrlToken stamps bearer on the URL, offers no subprotocol (#2524)", async () => {
+  const { conn, socket, protocols } = await dialWith({
+    bearer: "legacy-bearer-jwt",
+    legacyUrlToken: true,
+  });
+  try {
+    // No subprotocol offered -- the credential does NOT ride the header channel.
+    assert.equal(protocols, undefined);
+    // It rides the deprecated query param instead.
+    const url = new URL(socket.url);
+    assert.equal(url.searchParams.get("bearer_token"), "legacy-bearer-jwt");
+  } finally {
+    conn.close();
+  }
+});
+
+test("Connection.dial -- legacyUrlToken stamps guest token as guest_token (#2524)", async () => {
+  const { conn, socket, protocols } = await dialWith({
+    guestToken: "legacy-invite",
+    legacyUrlToken: true,
+  });
+  try {
+    assert.equal(protocols, undefined);
+    const url = new URL(socket.url);
+    assert.equal(url.searchParams.get("guest_token"), "legacy-invite");
+  } finally {
+    conn.close();
+  }
+});
+
+test("Connection.dial -- default (no legacy flag) keeps bearer off the URL", async () => {
+  const { conn, socket, protocols } = await dialWith({ bearer: "modern-jwt" });
+  try {
+    assert.deepEqual(protocols, ["bearer", "modern-jwt"]);
+    const url = new URL(socket.url);
+    assert.equal(url.searchParams.get("bearer_token"), null);
   } finally {
     conn.close();
   }

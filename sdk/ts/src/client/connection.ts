@@ -10,6 +10,11 @@
 
 import { Dispatcher, type DispatcherOptions } from "./dispatcher.js";
 import { wsAuthSubprotocols } from "./wsauth.js";
+import {
+  uploadAttachment,
+  type AttachmentRef,
+  type UploadAttachmentParams,
+} from "./attachments.js";
 import { QueryClient } from "./query.js";
 import { SubscriptionManager } from "./subscriptions.js";
 import { newShortId } from "./id.js";
@@ -32,6 +37,15 @@ export interface ConnectionAuth {
   // timer + rotateAuth round-trip (#1110); consumers no longer reimplement
   // it. Guest/worker tokens don't carry an exp and are never auto-rotated.
   onTokenExpired?: () => Promise<string | null>;
+  // Legacy transport opt-in (#2524). When true, `bearer` / `guestToken` are
+  // stamped onto the dial URL as the deprecated `?bearer_token=` /
+  // `?guest_token=` query params instead of riding the WebSocket subprotocol
+  // channel. The credential then leaks into ingress/proxy access logs, so this
+  // is ONLY for talking to an older front door that doesn't negotiate the
+  // subprotocol scheme; default (unset/false) is subprotocol carry. In-place
+  // auto-rotation is unaffected -- it is driven by the auth source, not the
+  // transport, so it works under either carry.
+  legacyUrlToken?: boolean;
 }
 
 export interface ConnectOptions {
@@ -69,6 +83,10 @@ export class Connection {
   private readonly socket: WebSocket;
   private readonly logger: DispatcherOptions["logger"];
   private readonly auth: ConnectionAuth | undefined;
+  // The endpoint this connection dialed. Retained so HTTP helpers
+  // (uploadAttachment, #2523) can derive the front-door origin the same way
+  // resolveEndpoint derives the WebSocket URL.
+  private readonly endpoint: string;
   private closed = false;
   // Auto-rotation (#1110): the SDK decodes the bearer's exp and rotates
   // in place shortly before TTL so a steady-state stream is never torn
@@ -81,6 +99,10 @@ export class Connection {
     this.socket = socket;
     this.logger = opts.logger ?? null;
     this.auth = opts.auth;
+    this.endpoint = opts.endpoint;
+    // Seed the current bearer so HTTP helpers and rotation share one source of
+    // truth; rotateAuth advances it on every successful swap.
+    this.currentBearer = opts.auth?.bearer;
     this.dispatcher = new Dispatcher({ socket, logger: this.logger });
     this.query = new QueryClient(this.dispatcher);
     this.subscriptions = new SubscriptionManager(this.dispatcher);
@@ -116,7 +138,41 @@ export class Connection {
     if (payload?.kind !== "rotateAuthResult") {
       throw new Error("rotateAuth: server reply missing rotateAuthResult payload");
     }
-    return payload.value.ok === true;
+    const ok = payload.value.ok === true;
+    // Advance the current bearer on success so any subsequent HTTP helper
+    // (uploadAttachment, #2523) sends the rotated token -- both the SDK's
+    // auto-rotation timer and a consumer's manual rotateAuth flow through here.
+    if (ok) this.currentBearer = trimmed;
+    return ok;
+  }
+
+  // uploadAttachment POSTs a file to the space's attachment endpoint on this
+  // connection's front door, authenticated with the connection's CURRENT
+  // bearer (post-rotation), and returns the created attachment reference
+  // (memql#2523). Only bearer-authenticated connections can upload; a
+  // guest/worker connection has no bearer and this rejects.
+  async uploadAttachment(params: UploadAttachmentParams): Promise<AttachmentRef> {
+    return uploadAttachment(
+      {
+        authToken: () => this.currentBearer,
+        attachmentBaseUrl: () => this.attachmentBaseUrl(),
+      },
+      params,
+    );
+  }
+
+  // attachmentBaseUrl derives the HTTP(S) base of the front door from the
+  // dialed WebSocket endpoint (wss -> https, ws -> http), resolving a relative
+  // endpoint against the document origin exactly like resolveEndpoint. The
+  // bridge's `/memql/ws` suffix is stripped so any deployment base-path prefix
+  // (sanitizeBaseURLFromEnv registers `/{prefix}/memql/ws` and
+  // `/{prefix}/spaces/...` together) is preserved for the attachments path;
+  // with no prefix this is just the origin.
+  private attachmentBaseUrl(): string {
+    const wsUrl = resolveWsUrl(this.endpoint);
+    const httpProto = wsUrl.protocol === "wss:" ? "https:" : "http:";
+    const prefix = wsUrl.pathname.replace(/\/memql\/ws\/?$/, "").replace(/\/+$/, "");
+    return `${httpProto}//${wsUrl.host}${prefix}`;
   }
 
   // startAutoRotate arms the in-place re-auth timer (#1110). No-op unless a
@@ -323,20 +379,31 @@ function waitForOpen(socket: WebSocket): Promise<void> {
   });
 }
 
-// resolveEndpoint resolves the dial URL. Bearer and guest credentials
-// travel as WebSocket subprotocols (#2511, see wsauth.ts), NOT on the
-// query string -- the URL stays free of live tokens. Worker tokens
-// remain on the query string until the worker surface migrates.
-function resolveEndpoint(endpoint: string, auth: ConnectionAuth | undefined): string {
-  let url: URL;
-  if (/^wss?:\/\//i.test(endpoint)) {
-    url = new URL(endpoint);
-  } else if (typeof globalThis.location !== "undefined") {
+// resolveWsUrl parses the dial endpoint into a URL WITHOUT stamping any
+// credential. An absolute wss:// / ws:// endpoint is taken verbatim; a
+// relative path resolves against the current document origin in a browser.
+// Shared by the WS dial and the HTTP attachment-origin derivation (#2523).
+function resolveWsUrl(endpoint: string): URL {
+  if (/^wss?:\/\//i.test(endpoint)) return new URL(endpoint);
+  if (typeof globalThis.location !== "undefined") {
     const loc = globalThis.location;
     const proto = loc.protocol === "https:" ? "wss:" : "ws:";
-    url = new URL(endpoint, `${proto}//${loc.host}`);
-  } else {
-    throw new Error(`memql sdk: cannot resolve relative endpoint ${endpoint} without a window.location`);
+    return new URL(endpoint, `${proto}//${loc.host}`);
+  }
+  throw new Error(`memql sdk: cannot resolve relative endpoint ${endpoint} without a window.location`);
+}
+
+// resolveEndpoint resolves the dial URL. By default bearer and guest
+// credentials travel as WebSocket subprotocols (#2511, see wsauth.ts), NOT on
+// the query string -- the URL stays free of live tokens. The `legacyUrlToken`
+// opt-in (#2524) restores the deprecated `?bearer_token=` / `?guest_token=`
+// carry for older front doors that don't negotiate the subprotocol scheme.
+// Worker tokens remain on the query string until the worker surface migrates.
+function resolveEndpoint(endpoint: string, auth: ConnectionAuth | undefined): string {
+  const url = resolveWsUrl(endpoint);
+  if (auth?.legacyUrlToken) {
+    if (auth.bearer) url.searchParams.set("bearer_token", auth.bearer);
+    else if (auth.guestToken) url.searchParams.set("guest_token", auth.guestToken);
   }
   if (auth?.workerToken) url.searchParams.set("worker_token", auth.workerToken);
   return url.toString();
