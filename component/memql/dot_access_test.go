@@ -169,10 +169,65 @@ func TestEvaluateCollectionChainString_TrailingField(t *testing.T) {
 	}
 }
 
+// TestConvertDotAccessExpr_RejectsCallResultObject pins the load-time gate
+// on the DotAccess OBJECT. The parser wraps EVERY call form in DotAccessExpr
+// (consumePostCallDotAccess fires after plain function calls and
+// kind-prefixed mutation calls too), but evaluation only walks a field off
+// a collection accessor/method chain (evalCollScalar's DotAccess case). A
+// plain call-result object must keep failing at LOAD -- as main did with
+// "unsupported parser expression type" -- instead of loading green and
+// dying at call time with a misleading lambda error or a silent nil.
+func TestConvertDotAccessExpr_RejectsCallResultObject(t *testing.T) {
+	for _, src := range []string{
+		`getUser(id: args.id).name`,            // plain function (query) call result
+		`mutation createThing(id: args.id).id`, // kind-prefixed mutation call result
+	} {
+		pexpr, err := parser.ParseExpression(src)
+		if err != nil {
+			t.Fatalf("parse %q: %v", src, err)
+		}
+		_, cerr := NewASTConverter(WithCollectionMethods()).ConvertExpression(pexpr)
+		if cerr == nil {
+			t.Fatalf("convert %q succeeded; a field access on a plain call result must be rejected at load", src)
+		}
+		if !strings.Contains(cerr.Error(), "collection accessor/method chain") {
+			t.Errorf("convert %q error = %q; want the call-result object rejection", src, cerr.Error())
+		}
+	}
+}
+
 func dotAccessLoadRegistry() memoryNodes.Registry {
 	return newMemoryRegistry(map[string]*memoryNodes.Concept{
 		"v1:common:thing": {Name: "v1:common:thing"},
 	})
+}
+
+// TestLogicDotAccess_CallResultObjectRejectedAtLoad is the loader-altitude
+// twin of the converter gate: a single-statement logic body plucking a field
+// off a plain query-function call result must fail tryParseNewFunctionSyntax
+// (load), not defer to a runtime failure inside engine.executeWith.
+func TestLogicDotAccess_CallResultObjectRejectedAtLoad(t *testing.T) {
+	src := strings.Join([]string{
+		"@enabled",
+		"@useQuery(getUser)",
+		"@description(\"call-result field access must fail at load\")",
+		"logic logicCallResultPluck {",
+		"  args {",
+		"    id string @required",
+		"  }",
+		"  body {",
+		"    return getUser( id: args.id ).name",
+		"  }",
+		"}",
+	}, "\n")
+
+	_, err := tryParseNewFunctionSyntax("logicCallResultPluck", "logic", src, "common.logic.memql", dotAccessLoadRegistry())
+	if err == nil {
+		t.Fatalf("load must reject a field access on a plain function-call result")
+	}
+	if !strings.Contains(err.Error(), "collection accessor/method chain") {
+		t.Errorf("load error = %q; want the call-result object rejection", err.Error())
+	}
 }
 
 // TestLogicDotAccessLoads is the exact #2542 item 4 load-rejection repro at

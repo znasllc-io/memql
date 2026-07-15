@@ -502,12 +502,36 @@ func tryEvaluateReturnLocally(expr string, evaluator *Evaluator) (any, bool, err
 	// nil .first() (empty result) through the field walk as a clean nil.
 	if normalized := normalizeStepMethodCalls(expr); normalized != expr &&
 		!strings.ContainsAny(normalized, "()[]{}\"', \t\n") {
-		if firstDot := strings.Index(normalized, "."); firstDot > 0 && evaluator.HasStep(normalized[:firstDot]) {
-			val, err := evaluator.EvaluateStepReference(normalized)
-			if err != nil {
-				return nil, false, err
+		if firstDot := strings.Index(normalized, "."); firstDot > 0 {
+			if evaluator.HasStep(normalized[:firstDot]) {
+				val, err := evaluator.EvaluateStepReference(normalized)
+				if err != nil {
+					return nil, false, err
+				}
+				return val, true, nil
 			}
-			return val, true, nil
+			// Custom-var root (`args.rows.first().createdAt`; the compiler
+			// emits the `$`-prefixed spelling for an args-rooted return, so
+			// accept both). resolvePath has no accessor cases outside the
+			// `steps.` root -- `.first` on a raw array is not navigable --
+			// so route the ORIGINAL call form through the shared chain
+			// evaluator, which resolves the base via resolveCollectionBase
+			// (the `$`-path for custom roots) and applies the accessor plus
+			// the trailing field walk in-memory. Steps stay first in
+			// precedence (checked above), mirroring resolveCollectionBaseRaw.
+			if root := strings.TrimPrefix(normalized[:firstDot], "$"); isCustomVarRoot(root) && !evaluator.HasStep(root) {
+				val, isChain, err := memql.EvaluateCollectionChainString(
+					strings.TrimPrefix(expr, "$"),
+					evaluator.resolveCollectionBase,
+					evaluator.collectionLambdaArgs(),
+				)
+				if isChain {
+					if err != nil {
+						return nil, false, err
+					}
+					return val, true, nil
+				}
+			}
 		}
 	}
 

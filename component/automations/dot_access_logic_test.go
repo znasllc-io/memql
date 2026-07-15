@@ -126,6 +126,50 @@ func TestLogicRunner_RunLogic_DotAccessAfterChain(t *testing.T) {
 	}
 }
 
+// TestLogicRunner_RunLogic_ArgsRootedDotAccess pins the ARGS-rooted sibling
+// of the step pluck in a MULTI-STEP body: `q := query(...); return
+// args.rows.first().createdAt`. The compiler emits the `_return` step as
+// the $-prefixed string `$args.rows.first().createdAt`; it must resolve
+// locally against the seeded caller args (via the chain evaluator's $-path
+// base resolution), never dispatch into engine.Execute as an unparseable
+// query. Only the query step may reach the registry.
+func TestLogicRunner_RunLogic_ArgsRootedDotAccess(t *testing.T) {
+	src := `@enabled
+@useQuery(queryThing)
+@description("pluck a scalar field off a caller-arg collection (#2542 item 4)")
+logic logicPluckArgField {
+  args {
+    id string @required
+    rows object @required
+  }
+  body {
+    q := queryThing( id: args.id )
+    return args.rows.first().createdAt
+  }
+}
+`
+	body := parseLogicBody(t, src)
+	registry := &bundleStepRegistry{nodes: []any{}}
+	r := NewLogicRunner(&memql.MemQLEngine{}, registry, nil)
+
+	out, err := r.RunLogic(context.Background(), "logicPluckArgField", body, map[string]any{
+		"id": "x",
+		"rows": []any{
+			map[string]any{"id": "r1", "createdAt": "2026-01-01T00:00:00Z"},
+			map[string]any{"id": "r2", "createdAt": "2026-02-02T00:00:00Z"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("RunLogic returned error (args-rooted .first().field must resolve locally): %v", err)
+	}
+	if out != "2026-01-01T00:00:00Z" {
+		t.Errorf("RunLogic return = %#v, want the first arg row's createdAt", out)
+	}
+	if len(registry.dispatched) != 1 || registry.dispatched[0] != "q" {
+		t.Errorf("dispatched steps = %v, want exactly [q] (the return must resolve locally)", registry.dispatched)
+	}
+}
+
 // TestTryEvaluateReturnLocally_DotAccessAfterAccessor pins the local
 // resolver branch directly, table-driven across the accessor + field
 // shapes and the guards (unknown step, genuine chain) that must keep
@@ -144,6 +188,13 @@ func TestTryEvaluateReturnLocally_DotAccessAfterAccessor(t *testing.T) {
 			Status: "success",
 			Result: map[string]any{"Bundle": map[string]any{"nodes": []any{}}},
 		})
+		e.SetCustom("args", map[string]any{
+			"members": []any{
+				map[string]any{"id": "m1", "joinedAt": "2025-05-05T00:00:00Z", "payload": map[string]any{"name": "mia"}},
+				map[string]any{"id": "m2", "joinedAt": "2025-06-06T00:00:00Z", "payload": map[string]any{"name": "moe"}},
+			},
+			"empty": []any{},
+		})
 		return e
 	}
 
@@ -156,6 +207,15 @@ func TestTryEvaluateReturnLocally_DotAccessAfterAccessor(t *testing.T) {
 		{"last then field", "rows.last().id", "b"},
 		{"first then nested field", "rows.first().payload.name", "alice"},
 		{"empty result first then field", "none.first().createdAt", nil},
+		// Args-rooted siblings: the object is a caller-arg collection, not a
+		// bound step, so resolution routes through the chain evaluator with
+		// the base resolved via the $-path. The compiler emits args-rooted
+		// returns in the $-prefixed spelling, so both spellings must resolve.
+		{"args root first then field", "args.members.first().joinedAt", "2025-05-05T00:00:00Z"},
+		{"args root last then field", "args.members.last().id", "m2"},
+		{"args root first then nested field", "args.members.first().payload.name", "mia"},
+		{"args root compiled $-spelling", "$args.members.first().joinedAt", "2025-05-05T00:00:00Z"},
+		{"args root empty then field", "args.empty.first().joinedAt", nil},
 	}
 	for _, tc := range handledCases {
 		t.Run(tc.name, func(t *testing.T) {
