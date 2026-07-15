@@ -142,9 +142,21 @@ engine does not enforce staging-time uniqueness in v1.
   per-deployment allowlist. `email`: case-insensitive recipient domain
   suffix list. `webhook`: URL prefix list, `https://` required (plain
   `http://` tolerated only for cluster-internal hosts the operator
-  explicitly lists). A row whose target misses the allowlist -- or whose
-  medium has no allowlist at all -- fails fast with an explicit
-  `lastError`; nothing waits silently in `pending`.
+  explicitly lists). A row whose target misses an allowlist a node IS
+  configured for fails fast with an explicit `lastError` -- loud, never a
+  silent backlog.
+- **Per-node egress gate is pre-claim (memql#2540).** The worker is
+  registered on every engine node, but the allowlist env is set only on the
+  node types that own egress. The "is this medium enabled here" check
+  (allowlist present for the row's medium) runs BEFORE the cluster-guard
+  claim: a node with no allowlist for the medium SKIPS the row (no claim, no
+  stamp, leaves it `pending`), so only configured nodes contend for the
+  claim and the guard elects one that can actually deliver. Target-allowlist
+  and payload-cap checks stay POST-claim so a configured node still fails a
+  genuinely bad row loudly. Trade-off: a medium configured on NO node leaves
+  its rows `pending` rather than failing loud; the operator resolves it by
+  setting the allowlist. An unknown medium (no allowlist concept) falls
+  through to the post-claim gate and one node stamps it `failed`.
 - **Payload cap.** Rows whose body exceeds `MEMQL_OUTBOUND_MAX_PAYLOAD_BYTES`
   (default 262144) fail permanently.
 
@@ -184,9 +196,10 @@ concept outboundRequest {
 ```
 
 Worker skeleton: `Worker.drainOnce(ctx)` selects `pending` + due
-`retrying` rows via `engine.Execute`, and per row: guard-claim
-`outbound:<id>:<attempts>` -> validate (allowlist, cap) -> stamp `sending`
--> `transport.Deliver(row)` -> stamp terminal/retry state. The transport is
+`retrying` rows via `engine.Execute`, and per row: per-node egress gate
+(is the medium's allowlist present on THIS node? if not, skip -- memql#2540)
+-> guard-claim `outbound:<id>:<attempts>` -> admit (target allowlist, cap)
+-> stamp `sending` -> `transport.Deliver(row)` -> stamp terminal/retry state. The transport is
 an injected interface (`fakeTransport` in tests); the poll ticker and
 startup delay are env config resolved at construction; tests call
 `drainOnce` directly (cron-leader / drain-hook test precedent).
@@ -197,8 +210,21 @@ startup delay are env config resolved at construction; tests call
   automations can chain on `status` transitions (e.g. escalate on
   `failed`).
 - Operators must set allowlists per deployment before anything egresses;
-  the default posture is inert. Misconfiguration is loud (rows fail with
-  explicit errors) rather than a silent backlog.
+  the default posture is inert. A target that misses an allowlist a node is
+  configured for is loud (the row fails with an explicit error). A medium
+  configured on NO node is the one silent case (rows stay `pending`): the
+  pre-claim egress gate (memql#2540) trades that against the worse failure
+  it prevents -- an unconfigured node claiming and killing a row a
+  configured peer could deliver.
+- **Known gap (not yet closed): claim/stamp wedge.** The claim is keyed per
+  (row, attempts) and persists in `automation_execution_claims` until the
+  guard prune TTL (retention, default 1h). A replica that dies AFTER
+  claiming an attempt but BEFORE stamping `sending`/`sent`/`failed` leaves
+  the row `pending` while peers re-claim-and-lose the persisted key, so the
+  row is wedged until the TTL elapses. Closing it (a claim TTL scoped to the
+  attempt, or stamping `sending` in the same tx as the claim plus a
+  `sending` reaper) touches the shared `ClusterExecutionGuard` semantics and
+  is deferred to a follow-up (tracked on memql#2540).
 - At-least-once means receivers may see duplicates after a crash;
   `dedupeKey` pass-through is the mitigation, matching the mesh substrate's
   dedup-by-id stance.

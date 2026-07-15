@@ -252,20 +252,30 @@ func TestAllowlistMissStampsFailedWithoutDelivering(t *testing.T) {
 	}
 }
 
-func TestDisabledMediumFailsFast(t *testing.T) {
+// TestUnconfiguredNodeSkipsRowLeavesPending pins the memql#2540 fix: the
+// worker runs on every node, but a node with no allowlist for the row's
+// medium is NOT this row's egress owner. It must skip the row entirely --
+// no claim, no stamp, no delivery -- leaving it pending so a configured
+// peer can win the claim and deliver. Before the fix such a node claimed
+// (row, attempt 0), failed the empty-allowlist admit, and stamped the row
+// failed out from under the configured peer.
+func TestUnconfiguredNodeSkipsRowLeavesPending(t *testing.T) {
 	eng := &fakeEngine{pending: []map[string]any{pendingRow("v1:platform:outboundRequest:r1")}}
 	tr := &fakeTransport{}
-	w := newTestWorker(eng, tr, nil)
-	w.cfg.WebhookAllowlist = nil // medium disabled by deployment config
+	claimer := &fakeClaimer{}
+	w := newTestWorker(eng, tr, claimer)
+	w.cfg.WebhookAllowlist = nil // this node carries no webhook allowlist
 
 	w.drainOnce(context.Background())
 
 	if tr.count() != 0 {
-		t.Fatal("a disabled medium must never reach the transport")
+		t.Fatal("an unconfigured node must never reach the transport")
 	}
-	last := eng.stamped()[len(eng.stamped())-1]
-	if !strings.Contains(last, `status: "failed"`) || !strings.Contains(last, "disabled by deployment config") {
-		t.Fatalf("disabled medium must fail loud, got %q", last)
+	if len(claimer.claims) != 0 {
+		t.Fatalf("an unconfigured node must not claim the row (leaves it for a configured peer), got %v", claimer.claims)
+	}
+	if len(eng.stamped()) != 0 {
+		t.Fatalf("an unconfigured node must not stamp the row (leaves it pending), got %v", eng.stamped())
 	}
 }
 
@@ -316,6 +326,51 @@ func TestClaimKeyedPerAttempt(t *testing.T) {
 	want := "outboundDelivery/v1:platform:outboundRequest:r1:2"
 	if len(claimer.claims) != 1 || claimer.claims[0] != want {
 		t.Fatalf("claim must be keyed per (row, attempts): want %q got %v", want, claimer.claims)
+	}
+}
+
+// TestConfiguredNodeClaimsAndDelivers is the memql#2540 counterpart to the
+// unconfigured-skip case: a node WITH the medium's allowlist is the egress
+// owner. It must pass the pre-claim gate, claim the row, and deliver.
+func TestConfiguredNodeClaimsAndDelivers(t *testing.T) {
+	eng := &fakeEngine{pending: []map[string]any{pendingRow("v1:platform:outboundRequest:r1")}}
+	tr := &fakeTransport{}
+	claimer := &fakeClaimer{}
+	w := newTestWorker(eng, tr, claimer) // newTestWorker sets a webhook allowlist
+
+	w.drainOnce(context.Background())
+
+	if len(claimer.claims) != 1 {
+		t.Fatalf("a configured node must claim the row, got %v", claimer.claims)
+	}
+	if tr.count() != 1 {
+		t.Fatalf("a configured node must deliver the row, got %d deliveries", tr.count())
+	}
+}
+
+// TestConfiguredNodeStampsFailedOnTargetMiss confirms the target-allowlist
+// check stays POST-claim (memql#2540): a node configured for the medium but
+// handed a row whose target is outside the allowlist claims the row and
+// fails it loudly, rather than skipping it silently.
+func TestConfiguredNodeStampsFailedOnTargetMiss(t *testing.T) {
+	row := pendingRow("v1:platform:outboundRequest:r1")
+	row["target"] = "https://evil.example.net/exfil"
+	eng := &fakeEngine{pending: []map[string]any{row}}
+	tr := &fakeTransport{}
+	claimer := &fakeClaimer{}
+	w := newTestWorker(eng, tr, claimer) // configured for webhook
+
+	w.drainOnce(context.Background())
+
+	if len(claimer.claims) != 1 {
+		t.Fatalf("a configured node must claim before failing a bad target, got %v", claimer.claims)
+	}
+	if tr.count() != 0 {
+		t.Fatal("a target-allowlist miss must never reach the transport")
+	}
+	last := eng.stamped()[len(eng.stamped())-1]
+	if !strings.Contains(last, `status: "failed"`) || !strings.Contains(last, "allowlist") {
+		t.Fatalf("target miss must fail loud post-claim, got %q", last)
 	}
 }
 

@@ -230,6 +230,17 @@ func (w *Worker) processRow(ctx context.Context, row map[string]any, scanStatus 
 			return
 		}
 	}
+	// Per-node egress gate BEFORE the claim (memql#2540). The worker runs
+	// on every node, but the per-medium allowlist is per-deployment env on
+	// specific node types. A node not configured for the row's medium must
+	// leave the row pending -- no claim, no stamp -- so it cannot win the
+	// claim race and stamp failed a row a configured peer could deliver.
+	// Only configured nodes contend; the guard elects one that can actually
+	// deliver. Target-allowlist and payload-cap checks stay POST-claim (in
+	// admit) so a configured node still fails a genuinely bad row loudly.
+	if !w.mediumEnabledHere(req.Medium) {
+		return
+	}
 	// Cross-replica claim BEFORE any side effect. Keyed per (row,
 	// attempts) so the winning replica of THIS attempt is unique, while
 	// a later retry (attempts incremented) claims fresh.
@@ -264,6 +275,29 @@ func (w *Worker) processRow(ctx context.Context, row map[string]any, scanStatus 
 		req.ID, attempts, truncateError(err), next.Format(time.RFC3339)))
 	w.logger.Warn("outbound worker: delivery failed; will retry",
 		"id", req.ID, "medium", req.Medium, "attempts", attempts, "nextAttemptAt", next.Format(time.RFC3339), "error", err)
+}
+
+// mediumEnabledHere reports whether THIS node is configured to egress the
+// row's medium: a non-empty per-deployment allowlist for it. This is the
+// pre-claim gate (memql#2540): the worker is registered on every node, but
+// the allowlist env (MEMQL_OUTBOUND_*_ALLOWLIST) is set only on the node
+// types that own egress. A node with no allowlist for the medium skips the
+// row entirely (leaves it pending), so it never wins the claim and stamps
+// failed a row a configured peer could deliver. Trade-off: a medium
+// configured on NO node leaves its rows pending rather than failing loud;
+// the operator resolves it by setting the allowlist (docs:
+// operate/outbound-delivery.md). An unknown medium is enabled nowhere and
+// so cannot be config-fixed; it falls through to the post-claim admit gate,
+// where exactly one node stamps it failed loudly.
+func (w *Worker) mediumEnabledHere(medium string) bool {
+	switch medium {
+	case "email":
+		return len(w.cfg.EmailAllowlist) > 0
+	case "webhook":
+		return len(w.cfg.WebhookAllowlist) > 0
+	default:
+		return true
+	}
 }
 
 // admit applies the deploy-layer policy (ADR 4.3): known medium with a
