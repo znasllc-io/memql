@@ -56,6 +56,7 @@ const conn = await Connection.dial({
 // conn.subscriptions : SubscriptionManager  (subscribe(pattern, handler) -> unsubscribe)
 // conn.dispatcher    : Dispatcher           (low-level multiplexed stream)
 // conn.rotateAuth(jwt)                       (swap the bearer on a live stream)
+// conn.uploadAttachment({ partitionId, file, fileName, contentType })
 // conn.done() : Promise<void>               (resolves on stream close)
 // conn.close() : void
 ```
@@ -69,6 +70,14 @@ scheme entry back on the 101. `auth.workerToken` still stamps
 `webSocketFactory` implementations MUST forward the `protocols`
 argument to their WebSocket constructor. Pass `onTokenExpired` to
 refresh without redialing.
+
+For an older front door that does not negotiate the subprotocol scheme,
+`auth.legacyUrlToken: true` opts back into the deprecated query-param
+carry (`?bearer_token=` / `?guest_token=`). This leaks the credential
+into request-line logs -- avoid it unless the target predates the
+subprotocol channel. In-place rotation is driven by the auth source
+(`onTokenExpired`), not the transport, so it works identically under
+either carry.
 
 ### Subscriptions
 
@@ -91,6 +100,31 @@ const final = await pushToTalk(conn.dispatcher, audioStream, {
   onPartial: (p) => renderPartial(p.text),
 });
 ```
+
+### Space attachments
+
+`uploadAttachment` uploads a file to a space over the front door's
+`POST /spaces/{partitionId}/attachments` endpoint (multipart, `file`
+field) and returns the created attachment reference. It is the one HTTP
+(non-WebSocket) helper in the core; everything else rides the stream.
+
+It is auth-consistent with the dialed connection: it targets the same
+origin the WebSocket dialed and sends the connection's CURRENT bearer,
+so an upload issued after an in-place rotation carries the rotated
+token. Only bearer-authenticated connections can upload.
+
+```ts
+const ref = await conn.uploadAttachment({
+  partitionId: "spc-1",
+  file: fileBlob,            // Blob | Uint8Array | ArrayBuffer
+  fileName: "report.pdf",
+  contentType: "application/pdf", // used when `file` is not a typed Blob
+});
+// ref.id is the new attachment id; ref.raw is the untouched server JSON.
+```
+
+The standalone `uploadAttachment(source, params)` is also exported for
+callers that hold a bearer + origin without a live `Connection`.
 
 ### AI (chat / speech / transcribe / suggest)
 
