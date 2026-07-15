@@ -492,6 +492,25 @@ func tryEvaluateReturnLocally(expr string, evaluator *Evaluator) (any, bool, err
 		return nil, true, nil
 	}
 
+	// Step-accessor call followed by a field path (#2542 item 4):
+	// `rows.first().createdAt`. The engine's expression parser would look
+	// the dotted name up as a function, so normalise the accessor call to
+	// the dotted form (`rows.first.createdAt`) resolvePath already
+	// navigates -- the same rewrite evaluateScalarArg applies to coalesce
+	// args. Gated on a bound step so genuine chains (`.where(...)`) and
+	// non-step paths keep their existing routes; resolvePath propagates a
+	// nil .first() (empty result) through the field walk as a clean nil.
+	if normalized := normalizeStepMethodCalls(expr); normalized != expr &&
+		!strings.ContainsAny(normalized, "()[]{}\"', \t\n") {
+		if firstDot := strings.Index(normalized, "."); firstDot > 0 && evaluator.HasStep(normalized[:firstDot]) {
+			val, err := evaluator.EvaluateStepReference(normalized)
+			if err != nil {
+				return nil, false, err
+			}
+			return val, true, nil
+		}
+	}
+
 	// Step-method call: `stepName.method()`.
 	inner := strings.TrimSuffix(expr, "()")
 	if inner == expr {

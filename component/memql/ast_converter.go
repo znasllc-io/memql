@@ -126,6 +126,8 @@ func (c *ASTConverter) ConvertExpression(expr languageParser.ExpressionNode) (Ex
 		return c.convertFunctionCallExpr(node)
 	case *languageParser.MethodCallExpr:
 		return c.convertMethodCallExpr(node)
+	case *languageParser.DotAccessExpr:
+		return c.convertDotAccessExpr(node)
 	case *languageParser.LambdaExpr:
 		return c.convertLambdaExpr(node)
 	case *languageParser.BuiltinFunctionExpr:
@@ -686,6 +688,26 @@ func (c *ASTConverter) convertMethodCallExpr(expr *languageParser.MethodCallExpr
 		Method:   expr.Method,
 		Args:     args,
 	}, nil
+}
+
+// convertDotAccessExpr converts a parser DotAccessExpr (#2542 item 4) --
+// a field access on a call result, e.g. `rows.first().createdAt` -- to the
+// engine DotAccessExpression. The parser only builds DotAccessExpr after a
+// call form (consumePostCallDotAccess), so the object is an in-memory
+// value; the node is gated like the collection-method surface and never
+// pushed into spec / query-filter (SQL) compilation.
+func (c *ASTConverter) convertDotAccessExpr(expr *languageParser.DotAccessExpr) (ExpressionNode, error) {
+	if expr == nil {
+		return nil, nil
+	}
+	if !c.allowCollectionMethods {
+		return nil, fmt.Errorf("field access on a call result (.first().field) is only available in logic bodies or automation forEach (in-memory), not in specs or query filters (#2542)")
+	}
+	object, err := c.ConvertExpression(expr.Object)
+	if err != nil {
+		return nil, fmt.Errorf("convert dot-access object: %w", err)
+	}
+	return &DotAccessExpression{Object: object, Field: expr.Field}, nil
 }
 
 // convertLambdaExpr converts a parser LambdaExpr to the engine

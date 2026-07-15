@@ -205,6 +205,11 @@ func cloneExpressionNode(expr ExpressionNode) ExpressionNode {
 			Params: append([]string(nil), node.Params...),
 			Body:   cloneExpressionNode(node.Body),
 		}
+	case *DotAccessExpression:
+		return &DotAccessExpression{
+			Object: cloneExpressionNode(node.Object),
+			Field:  node.Field,
+		}
 	case *CallerRefExpression:
 		return &CallerRefExpression{}
 	case *ErrorRefExpression:

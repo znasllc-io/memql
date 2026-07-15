@@ -115,6 +115,7 @@ func allExpressionNodeImplementers() map[string]ExpressionNode {
 		"CallerRefExpression":         &CallerRefExpression{},
 		"ConditionalFilterExpression": &ConditionalFilterExpression{ArgPath: "x"},
 		"LiteralValueNode":            &LiteralValueNode{Value: 1},
+		"DotAccessExpression":         &DotAccessExpression{Object: &LiteralValueNode{Value: map[string]any{"x": 1}}, Field: "x"},
 	}
 }
 

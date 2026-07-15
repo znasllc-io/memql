@@ -46,6 +46,19 @@ type LambdaExpression struct {
 
 func (*LambdaExpression) isExpressionNode() {}
 
+// DotAccessExpression is the engine-side node for a field access on a call
+// result (#2542 item 4): `<object>.<field>`, e.g. `rows.first().createdAt`.
+// The parser only produces the corresponding DotAccessExpr after a call
+// form (consumePostCallDotAccess), so the object is always an in-memory
+// value -- the node is gated like the collection-method surface and never
+// reaches SQL compilation.
+type DotAccessExpression struct {
+	Object ExpressionNode
+	Field  string
+}
+
+func (*DotAccessExpression) isExpressionNode() {}
+
 // collectionMethodNames is the closed set of collection operators (ADR
 // §2.2). Kept in sync with the parser-side collectionMethods set.
 var collectionMethodNames = map[string]bool{
@@ -105,14 +118,34 @@ func EvaluateCollectionChainString(src string, resolveBase func(basePath string)
 	if perr != nil {
 		return nil, false, nil
 	}
-	if _, ok := pexpr.(*parser.MethodCallExpr); !ok {
+	// A trailing field pluck (`<chain>.first().createdAt`, #2542 item 4)
+	// parses as DotAccessExpr layers around the MethodCallExpr chain; peel
+	// them for the chain check only -- the full expression (dot accesses
+	// included) is what gets evaluated below.
+	inner := pexpr
+	for {
+		dot, ok := inner.(*parser.DotAccessExpr)
+		if !ok {
+			break
+		}
+		inner = dot.Object
+	}
+	if _, ok := inner.(*parser.MethodCallExpr); !ok {
 		return nil, false, nil
 	}
 	engineExpr, cerr := NewASTConverter(WithCollectionMethods()).ConvertExpression(pexpr)
 	if cerr != nil {
 		return nil, true, cerr
 	}
-	chain, ok := engineExpr.(*CollectionMethodExpression)
+	root := engineExpr
+	for {
+		dot, ok := root.(*DotAccessExpression)
+		if !ok {
+			break
+		}
+		root = dot.Object
+	}
+	chain, ok := root.(*CollectionMethodExpression)
 	if !ok {
 		return nil, false, nil
 	}
@@ -130,7 +163,7 @@ func EvaluateCollectionChainString(src string, resolveBase func(basePath string)
 	}
 	substituteChainBase(chain, &LiteralValueNode{Value: resolved})
 
-	val, eerr := evaluateCollectionMethodExpression(chain, args)
+	val, eerr := evalCollScalar(engineExpr, args, nil)
 	if eerr != nil {
 		return nil, true, eerr
 	}
@@ -203,6 +236,18 @@ func evalCollScalar(expr ExpressionNode, args map[string]any, locals map[string]
 		return evalCollLogical(node, args, locals)
 	case *ArithmeticExpression:
 		return evalCollArithmetic(node, args, locals)
+	case *DotAccessExpression:
+		// Field access on a call result (#2542 item 4): evaluate the
+		// object, then walk one field segment. A nil object (e.g. an
+		// empty collection's .first()) or a missing/non-map field yields
+		// nil -- the same absent-value semantics walkValuePath applies
+		// everywhere else, so `coalesce(rows.first().x, "d")` patterns
+		// keep working.
+		obj, err := evalCollScalar(node.Object, args, locals)
+		if err != nil {
+			return nil, err
+		}
+		return walkValuePath(obj, []string{node.Field}), nil
 	default:
 		return nil, fmt.Errorf("unsupported expression %T inside a collection lambda", expr)
 	}
