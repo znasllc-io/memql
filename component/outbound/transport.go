@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 
 	memqlengine "github.com/znasllc-io/memql/component/memql"
@@ -129,7 +130,22 @@ func (t *WebhookTransport) Deliver(ctx context.Context, req Request) error {
 	if !ok {
 		return Permanent(fmt.Errorf("webhook: target not in allowlist"))
 	}
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, prefix+remainder, strings.NewReader(req.Payload))
+	// Build the request URL from the PARSED trusted prefix: scheme and
+	// host come from deployment config; the row-controlled remainder is
+	// assigned only to the path/query fields, so it cannot steer the
+	// request off the allowlisted origin.
+	base, err := url.Parse(prefix)
+	if err != nil {
+		return Permanent(fmt.Errorf("webhook: allowlist prefix unparseable: %w", err))
+	}
+	dest := *base
+	if i := strings.IndexByte(remainder, '?'); i >= 0 {
+		dest.Path = base.Path + remainder[:i]
+		dest.RawQuery = remainder[i+1:]
+	} else {
+		dest.Path = base.Path + remainder
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, dest.String(), strings.NewReader(req.Payload))
 	if err != nil {
 		return Permanent(fmt.Errorf("webhook: build request: %w", err))
 	}
