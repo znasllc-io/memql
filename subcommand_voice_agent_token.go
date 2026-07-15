@@ -175,15 +175,17 @@ func runVoiceAgentTokenMint(args []string) int {
 	expiresAt := now.Add(resolvedTTL).Format(time.RFC3339Nano)
 
 	store := &identity.Store{Engine: application.Engine(), Logger: logger}
-	// Stamp the system actor onto the context so the per-row authz
-	// gate the engine added (memql#347 era) accepts the write. The
-	// CLI mint subcommand is unauthenticated by design -- the
-	// operator is `docker exec`ing the binary -- so we use the same
-	// synthetic actor identity's own bootstrap path uses for non-
-	// HTTP entry points. Without this, store.CreateIdentityVoiceAgentToken
-	// rejects with "no actor found in context" and the bearer never
-	// gets minted. memql#353.
-	ctx := identity.ContextWithSystemActor(context.Background())
+	// Stamp the system credential actor onto the context so the write
+	// passes the engine's per-row authz gate (memql#347 era) AND the
+	// memql#2513 credential-actor guard, which admits a machine-credential
+	// row (voice_agent_token) write ONLY from a system actor. The plain
+	// ContextWithSystemActor stamps role="owner", which the #2513 guard
+	// rejects; ContextWithSystemCredentialActor stamps role="system". The
+	// CLI mint subcommand is unauthenticated by design -- the operator is
+	// `docker exec`ing the binary. Without an actor,
+	// store.CreateIdentityVoiceAgentToken rejects with "no actor found in
+	// context" and the bearer never gets minted. memql#353, memql#2549.
+	ctx := identity.ContextWithSystemCredentialActor(context.Background())
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	if err := store.CreateIdentityVoiceAgentToken(

@@ -223,7 +223,14 @@ func (s *AdminServer) handleNodeTokensRevoke(w http.ResponseWriter, r *http.Requ
 		http.Redirect(w, r, "/admin/tokens?flash=Node+token+not+found&flash_kind=error", http.StatusSeeOther)
 		return
 	}
-	if err := s.nodeTokenAdapter.Revoke(r.Context(), id); err != nil {
+	// The node_token row is a machine credential, so its write is gated
+	// by the memql#2513 credential-actor guard: only a system actor may
+	// write it (the revoke read-merges the row, so identityType="node_token"
+	// is present in the guard-visible payload). requireAdmin authorized the
+	// operator above; the engine write runs under the system credential
+	// actor, and the admin's identity is recorded in the audit event below.
+	// memql#2549.
+	if err := s.nodeTokenAdapter.Revoke(identity.ContextWithSystemCredentialActor(r.Context()), id); err != nil {
 		s.Logger.Warn("admin: revoke node token failed", "error", err, "id", id)
 		http.Redirect(w, r, "/admin/tokens?flash=Revoke+failed&flash_kind=error", http.StatusSeeOther)
 		return

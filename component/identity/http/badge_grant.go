@@ -212,8 +212,13 @@ func (s *Server) handleBadgeGrant(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Best-effort bookkeeping; the grant stands even when this write
-	// fails.
-	if err := store.TouchLastUsed(ctx, row, now); err != nil && s.Logger != nil {
+	// fails. The badge row is a machine credential, so the touch is
+	// gated by the memql#2513 credential-actor guard: only a system
+	// actor may write it. This handler runs under the terminal operator's
+	// bearer (a non-system actor the guard rejects), so stamp the system
+	// credential actor for the touch. The terminal bearer + badge id
+	// validated above are the authorization. memql#2549.
+	if err := store.TouchLastUsed(identity.ContextWithSystemCredentialActor(ctx), row, now); err != nil && s.Logger != nil {
 		s.Logger.Warn("badge grant: lastUsedAt touch failed", "badge", row.ID, "error", err)
 	}
 
