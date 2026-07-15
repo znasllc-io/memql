@@ -1156,6 +1156,17 @@ func (c *Compiler) expressionToString(expr parser.ExpressionNode) string {
 			// with AST pointers (`map[k:0x...]`), which the engine then rejects --
 			// the #2274 object-literal-return bug.
 			return c.valueToString(v)
+		case float64:
+			// Preserve float-ness across the re-parse boundary: a whole
+			// float literal here (e.g. the `* 1.0` operand of a projection
+			// fractional ratio) renders as `1` under %v, then re-parses as
+			// int64 and collapses `* 1.0` to integer division (#2542). Emit
+			// a decimal marker for the whole-number case; non-whole floats
+			// already carry a `.` under %v.
+			if float64(int(v)) == v {
+				return fmt.Sprintf("%d.0", int(v))
+			}
+			return fmt.Sprintf("%v", v)
 		default:
 			return fmt.Sprintf("%v", v)
 		}
@@ -2039,7 +2050,13 @@ func (c *Compiler) valueToString(v any) string {
 		return fmt.Sprintf("%q", val)
 	case float64:
 		if float64(int(val)) == val {
-			return fmt.Sprintf("%d", int(val))
+			// Keep an explicit decimal marker so a whole-valued float
+			// (1.0, 100.0) round-trips as a FLOAT literal across the
+			// serialize/re-parse boundary. Rendering it as `1` makes
+			// ParseNumericLiteral decode int64 on re-parse, silently
+			// switching arithmetic to integer division -- the #2542
+			// `... * 1.0` fractional-ratio idiom collapsing to `... * 1`.
+			return fmt.Sprintf("%d.0", int(val))
 		}
 		return fmt.Sprintf("%f", val)
 	case bool:

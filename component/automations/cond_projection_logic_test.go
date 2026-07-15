@@ -230,10 +230,9 @@ logic projCount {
 // integer-arithmetic projection ratio -- it round-trips cleanly through the
 // compile/re-parse boundary (all operands stay integers, so no float-literal
 // precision is lost) and is exactly the repeat-rate / first-pass-yield percent
-// shape the issue calls out. A true fractional (float) ratio via a float
-// operand is exercised at the single-statement / memql altitude
-// (memql.TestEvalCollProjection_ObjectLiteralValues), where the whole-number
-// float literal is not collapsed to an int by the value serializer.
+// shape the issue calls out. The true fractional (float) ratio via a `* 1.0`
+// operand is pinned END-TO-END through the same boundary by
+// TestRunLogic_GroupByProjection_FloatRatio below.
 func TestRunLogic_GroupByProjection_ArithmeticRatioPercent(t *testing.T) {
 	src := `@enabled
 @description("per-group accuracy percent in a projection (#2542 item 3)")
@@ -263,6 +262,49 @@ logic accuracy {
 	w2 := rows[1].(map[string]any)
 	if !numericEquals(w2["pct"], 100) {
 		t.Errorf("w2 pct = %#v, want 100 (1 good * 100 / 1)", w2["pct"])
+	}
+}
+
+// TestRunLogic_GroupByProjection_FloatRatio pins the FRACTIONAL (float) ratio
+// idiom -- `good / (total * 1.0)` -- END-TO-END through the compile/serialize/
+// re-parse boundary. The `* 1.0` operand is a whole-valued float64 literal; the
+// serializer must keep its decimal marker (`* 1.0`, not `* 1`), else it
+// re-parses as int64 and the division silently collapses to INTEGER division,
+// yielding 0 instead of ~0.6667 -- the memqllint-green/runtime-wrong class #2542
+// eliminates. Regression guard for the float-literal serialization fix.
+func TestRunLogic_GroupByProjection_FloatRatio(t *testing.T) {
+	src := `@enabled
+@description("per-group fractional accuracy ratio via a float operand (#2542 item 3)")
+logic accuracyRatio {
+  args {
+    scans []object @required
+  }
+  body {
+    rows := args.scans.where(s => s.done)
+    return rows.groupBy(s => s.worker).select(g => {worker: g.key, acc: g.items.where(i => i.good).count() / (g.items.count() * 1.0)})
+  }
+}
+`
+	out, _ := runProjectionLogic(t, src, "accuracyRatio", map[string]any{
+		"scans": []any{
+			map[string]any{"worker": "w1", "done": true, "good": true},
+			map[string]any{"worker": "w1", "done": true, "good": false},
+			map[string]any{"worker": "w1", "done": true, "good": true},
+			map[string]any{"worker": "w2", "done": true, "good": true},
+		},
+	})
+	rows := out.([]any)
+	w1 := rows[0].(map[string]any)
+	acc, ok := w1["acc"].(float64)
+	if !ok {
+		t.Fatalf("w1 acc = %#v (%T), want float64 (integer division would yield int 0)", w1["acc"], w1["acc"])
+	}
+	if acc < 0.6666 || acc > 0.6667 {
+		t.Errorf("w1 acc = %v, want ~0.6667 (2 good / (3 total * 1.0))", acc)
+	}
+	w2 := rows[1].(map[string]any)
+	if acc2, ok := w2["acc"].(float64); !ok || acc2 != 1.0 {
+		t.Errorf("w2 acc = %#v, want 1.0 (1 good / (1 total * 1.0))", w2["acc"])
 	}
 }
 
