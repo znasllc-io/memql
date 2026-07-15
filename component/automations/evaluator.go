@@ -791,25 +791,26 @@ func (e *Evaluator) EvaluateFilterValue(expr string) (any, error) {
 	// `addDuration(...) < timestamp()` could not resolve its right operand
 	// (#2256).
 	if expr == "timestamp()" {
-		if v, ok := e.custom["timestamp"]; ok {
-			return v, nil
-		}
-		return time.Now().UTC().Format(time.RFC3339), nil
+		return e.evaluationClock(), nil
 	}
 
-	// Builtin calls usable as comparison operands (#2256): concat / coalesce /
-	// addDuration. Before this they fell through to the literal-string fallback
-	// at the bottom of this function, and a date-arithmetic expression then
-	// toNumber()'d to 0 -- making every retention/deletion date-window gate
-	// constant-false (#2254). An unrecognised call name falls through unchanged.
+	// Builtin calls usable as comparison operands (#2256): concat / coalesce
+	// plus the full date/duration builtin set (#2541: addDuration,
+	// daysBetween, subtractTimestamps, year, quarter, month, dayOfMonth,
+	// isAnniversary, isFirstDayOfQuarter). Before this they fell through to
+	// the literal-string fallback at the bottom of this function, and a
+	// date-arithmetic expression then toNumber()'d to 0 -- making every
+	// retention/deletion date-window gate constant-false (#2254), and a
+	// calendar-day gate like `year(item.createdAt) == year(timestamp())`
+	// constant-false too. An unrecognised call name falls through unchanged.
 	if name, builtinArgs, ok := matchBuiltinCall(expr); ok {
-		switch name {
-		case "concat":
+		switch {
+		case name == "concat":
 			return e.evaluateConcatArgs(builtinArgs)
-		case "coalesce":
+		case name == "coalesce":
 			return e.evaluateBareCoalesce(builtinArgs)
-		case "addDuration":
-			return e.evaluateAddDurationCall(builtinArgs)
+		case memql.IsDateBuiltin(name):
+			return e.evaluateDateBuiltinCall(name, builtinArgs)
 		}
 	}
 
@@ -994,38 +995,69 @@ func (e *Evaluator) coalesceBareArg(raw string) (any, bool) {
 	return val, true
 }
 
-// evaluateAddDurationCall evaluates addDuration(timestamp, isoDuration): it
-// resolves both operands, parses the timestamp (RFC3339 / date-only) and the
-// ISO-8601 duration through the shared memql parsers, and returns the shifted
-// timestamp as an RFC3339 string -- the form a `< timestamp()` window
-// comparison then reads as a real date instead of 0 (#2254).
-func (e *Evaluator) evaluateAddDurationCall(argsRaw string) (any, error) {
+// evaluateDateBuiltinCall evaluates one date/duration builtin call (#2256
+// addDuration, generalised to the full set by #2541): each operand is
+// resolved through evaluateDateOperand, then the shared name-keyed evaluator
+// (memql.EvaluateDateBuiltin) applies the builtin -- the same implementations
+// the mutation-template path runs, so a `daysBetween(...)` computes
+// identically in a condition operand, a logic step value, and an insert arg.
+func (e *Evaluator) evaluateDateBuiltinCall(name, argsRaw string) (any, error) {
 	args, err := splitCoalesceArgs(argsRaw)
 	if err != nil {
 		return nil, err
 	}
-	if len(args) != 2 {
-		return nil, fmt.Errorf("addDuration() expects 2 args, got %d", len(args))
+	vals := make([]any, len(args))
+	for i, raw := range args {
+		v, err := e.evaluateDateOperand(raw)
+		if err != nil {
+			return nil, fmt.Errorf("%s() arg %d: %w", name, i, err)
+		}
+		vals[i] = v
 	}
-	tsVal, err := e.evaluateOperand(args[0])
+	return memql.EvaluateDateBuiltin(name, vals)
+}
+
+// evaluateDateOperand resolves a single date-builtin argument. The bare
+// reserved identifier `now` resolves to the evaluation clock -- the compiler
+// leaves `now` verbatim inside condition strings and raw arg text, so without
+// this it would reach the date parsers as the literal text "now". Everything
+// else routes through evaluateOperand (quoted literals, paths, timestamp(),
+// nested builtin calls).
+func (e *Evaluator) evaluateDateOperand(raw string) (any, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "now" {
+		return e.evaluationClock(), nil
+	}
+	return e.evaluateOperand(raw)
+}
+
+// evaluationClock returns the per-run clock: the executor / logic-runner
+// seeds a stable "timestamp" custom value per pass so every comparison reads
+// a single clock; unseeded evaluators fall back to the current UTC time.
+func (e *Evaluator) evaluationClock() any {
+	if v, ok := e.custom["timestamp"]; ok {
+		return v
+	}
+	return time.Now().UTC().Format(time.RFC3339)
+}
+
+// TryEvaluateDateBuiltin evaluates expr when it is a single top-level
+// date/duration builtin call (#2541). Returns (value, true, nil) on success,
+// (nil, false, nil) when expr is not a date-builtin call (the caller keeps
+// its normal resolution), and (nil, false, err) on an evaluation error.
+// Exported for the arg-time resolver (steps.MutationExecutor.evaluateValue)
+// so mutation/function step args evaluate the same builtin set the
+// logic-time path does.
+func (e *Evaluator) TryEvaluateDateBuiltin(expr string) (any, bool, error) {
+	name, argsRaw, ok := matchBuiltinCall(expr)
+	if !ok || !memql.IsDateBuiltin(name) {
+		return nil, false, nil
+	}
+	val, err := e.evaluateDateBuiltinCall(name, argsRaw)
 	if err != nil {
-		return nil, fmt.Errorf("addDuration() timestamp arg: %w", err)
+		return nil, false, err
 	}
-	durVal, err := e.evaluateOperand(args[1])
-	if err != nil {
-		return nil, fmt.Errorf("addDuration() duration arg: %w", err)
-	}
-	tsStr := FormatValue(tsVal)
-	t, err := memql.ParseFlexibleTimestamp(tsStr)
-	if err != nil {
-		return nil, fmt.Errorf("addDuration() invalid timestamp %q: %w", tsStr, err)
-	}
-	durStr := FormatValue(durVal)
-	d, err := memql.ParseISO8601Duration(durStr)
-	if err != nil {
-		return nil, fmt.Errorf("addDuration() invalid duration %q: %w", durStr, err)
-	}
-	return t.Add(d).Format(time.RFC3339), nil
+	return val, true, nil
 }
 
 // coalesceFromArgs runs the shared coalesce selection over already-split args:

@@ -239,6 +239,15 @@ func (e *MutationExecutor) evaluateValue(evaluator *automations.Evaluator, value
 			}
 			return resolveChainedPath(result, chainedPath)
 		}
+		// Date/duration builtins (#2541): addDuration, daysBetween, year,
+		// month, dayOfMonth and friends evaluate through the shared
+		// evaluator dispatch so a mutation/function step arg computes the
+		// same value the logic-time path does (the conformance matrix pins
+		// the two entry points together). A non-date call name falls
+		// through to the handlers below unchanged.
+		if val, handled, err := evaluator.TryEvaluateDateBuiltin(v); handled || err != nil {
+			return val, err
+		}
 		// Handle concat() function
 		if strings.HasPrefix(v, "concat(") {
 			return e.evaluateConcat(evaluator, v)

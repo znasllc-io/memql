@@ -51,6 +51,16 @@ func runtimeToInt64(v any) (int64, bool) {
 	}
 }
 
+// EvaluateArithmetic applies one binary arithmetic operator to two resolved
+// operand values under the #2316 numeric rules (int op int -> int64, any
+// float -> float64; div/mod by zero and float `%` are errors). Exported so
+// the automations logic runner evaluates a re-parsed terminal-return
+// arithmetic expression (#2542 item 1) with exactly the engine's semantics
+// instead of re-implementing them.
+func EvaluateArithmetic(op string, lhs, rhs any) (any, error) {
+	return evalArithmetic(op, lhs, rhs)
+}
+
 // evalArithmetic computes `lhs <op> rhs` under the #2316 numeric rules.
 func evalArithmetic(op string, lhs, rhs any) (any, error) {
 	if li, lok := runtimeToInt64(lhs); lok {

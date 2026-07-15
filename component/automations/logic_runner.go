@@ -298,6 +298,14 @@ func EvaluateLocalExpr(expr string, evaluator *Evaluator) (any, bool, error) {
 	if val, handled, err := tryEvaluateCollectionChainLocally(expr, evaluator); err != nil || handled {
 		return val, handled, err
 	}
+	// Binary arithmetic (#2542 item 1): a terminal `return a / b` serialized
+	// to the parenthesized operator form. Routed AFTER the collection-chain
+	// attempt so a pure chain keeps its path (an arithmetic expression whose
+	// operand is a chain re-parses to a top-level ArithmeticExpr, which the
+	// chain evaluator already declines).
+	if val, handled, err := tryEvaluateArithmeticLocally(expr, evaluator); err != nil || handled {
+		return val, handled, err
+	}
 	return tryEvaluateBuiltinLocally(expr, evaluator)
 }
 
@@ -556,13 +564,25 @@ func tryEvaluateBuiltinLocally(expr string, evaluator *Evaluator) (any, bool, er
 		return nil, false, nil
 	}
 	inner := expr[open+1 : len(expr)-1]
-	rawArgs, err := splitTopLevelArgs(inner)
-	if err != nil {
-		return nil, false, fmt.Errorf("parse %s args: %w", name, err)
-	}
-	switch name {
-	case "coalesce":
+	switch {
+	case name == "coalesce":
+		rawArgs, err := splitTopLevelArgs(inner)
+		if err != nil {
+			return nil, false, fmt.Errorf("parse %s args: %w", name, err)
+		}
 		val, err := evaluateCoalesceArgs(rawArgs, evaluator)
+		if err != nil {
+			return nil, false, err
+		}
+		return val, true, nil
+	case memql.IsDateBuiltin(name):
+		// Date/duration builtins (#2541): operands resolve through the
+		// evaluator's operand path (quoted literals, $-paths, step refs,
+		// timestamp()/now, nested builtins), then the shared name-keyed
+		// evaluator applies the builtin. An evaluation failure is a hard
+		// logic error, not a fall-through -- the engine has no fallback
+		// for these calls.
+		val, err := evaluator.evaluateDateBuiltinCall(name, inner)
 		if err != nil {
 			return nil, false, err
 		}
@@ -575,12 +595,14 @@ func tryEvaluateBuiltinLocally(expr string, evaluator *Evaluator) (any, bool, er
 }
 
 // isPositionalBuiltinName reports whether name is a helper builtin
-// the logic runner evaluates locally. Today only `coalesce` is on
-// this list (the only helper that appears outside mutation arg
-// blocks across the live DSL tree); extending the set is a matter
+// the logic runner evaluates locally: `coalesce` (#362) plus the
+// date/duration builtin set (#2541). Extending the set is a matter
 // of adding a name here and a case in tryEvaluateBuiltinLocally's
 // switch.
 func isPositionalBuiltinName(name string) bool {
+	if memql.IsDateBuiltin(name) {
+		return true
+	}
 	switch name {
 	case "coalesce":
 		return true

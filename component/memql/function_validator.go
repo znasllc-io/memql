@@ -635,6 +635,15 @@ func (v *functionValidator) expandExpressionWithArgs(expr ExpressionNode, args m
 				Args: substituted,
 			}
 		}
+		// Date/duration builtins (#2541) have no DSL body to expand -- they
+		// are evaluated in-memory at execution time (evalCollScalar / the
+		// engine's plan-root branch), like the other converter-normalised
+		// typed builtins. Without this short-circuit a logic terminal return
+		// such as `return addDuration(args.start, "P1D")` would be looked up
+		// as a user function and fail "function not found".
+		if IsDateBuiltin(node.Name) {
+			return node, nil
+		}
 		// Resolve, validate, and expand the function with its arguments
 		return v.expandFunctionCall(node)
 

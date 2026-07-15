@@ -489,3 +489,62 @@ logic logicSample {
 	// runner-side test for grep-ability.
 	_ = body
 }
+
+// TestConvertExpressionHandlesDateBuiltins pins the #2541 converter surface:
+// the typed date/duration builtin nodes convert to positional
+// FunctionCallExpressions under the logic converter (WithCollectionMethods)
+// -- exactly like coalesce/cond/concat -- and are REJECTED by the default
+// converter (specs / query filters), preserving the in-memory-only rule the
+// arithmetic gate (#2316) established. Before this, a logic body ending in
+// `return addDuration(...)` failed to LOAD with "unsupported parser
+// expression type: *ast.AddDurationExpr".
+func TestConvertExpressionHandlesDateBuiltins(t *testing.T) {
+	cases := []struct {
+		src  string
+		name string
+		args int
+	}{
+		{`addDuration("2026-01-01T00:00:00Z", "P1D")`, "addDuration", 2},
+		{`daysBetween("2026-01-01", "2026-01-11")`, "daysBetween", 2},
+		{`subtractTimestamps("2026-01-02T00:00:00Z", "2026-01-01T00:00:00Z")`, "subtractTimestamps", 2},
+		{`year("2026-07-14")`, "year", 1},
+		{`quarter("2026-07-14")`, "quarter", 1},
+		{`month("2026-07-14")`, "month", 1},
+		{`dayOfMonth("2026-07-14")`, "dayOfMonth", 1},
+		{`isAnniversary("2024-07-14", "2026-07-14")`, "isAnniversary", 2},
+		{`isFirstDayOfQuarter("2026-07-01")`, "isFirstDayOfQuarter", 1},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			pexpr, err := languageParser.ParseExpression(tc.src)
+			if err != nil {
+				t.Fatalf("parse %q: %v", tc.src, err)
+			}
+
+			// Logic converter admits the builtin.
+			converted, err := NewASTConverter(WithCollectionMethods()).ConvertExpression(pexpr)
+			if err != nil {
+				t.Fatalf("logic converter rejected %q: %v", tc.src, err)
+			}
+			call, ok := converted.(*FunctionCallExpression)
+			if !ok {
+				t.Fatalf("converted %q = %T, want *FunctionCallExpression", tc.src, converted)
+			}
+			if call.Name != tc.name {
+				t.Errorf("call.Name = %q, want %q", call.Name, tc.name)
+			}
+			if len(call.Args) != tc.args {
+				t.Errorf("len(call.Args) = %d, want %d", len(call.Args), tc.args)
+			}
+
+			// Default converter (specs / query filters) rejects it at load
+			// with the in-memory scope error -- no SQL pushdown (#2541).
+			if _, err := NewASTConverter().ConvertExpression(pexpr); err == nil {
+				t.Fatalf("default converter accepted %q; date builtins must stay in-memory only", tc.src)
+			} else if !strings.Contains(err.Error(), "#2541") {
+				t.Errorf("default-converter error = %q, want the #2541 scope message", err.Error())
+			}
+		})
+	}
+}

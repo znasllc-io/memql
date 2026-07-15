@@ -1337,6 +1337,51 @@ func (c *Compiler) expressionToString(expr parser.ExpressionNode) string {
 			c.expressionToString(e.Target),
 			c.expressionToString(e.Substring))
 
+	case *parser.ArithmeticExpr:
+		// Binary arithmetic (#2316/#2542): re-emit the operator form,
+		// fully parenthesized so the re-parse rebuilds exactly this tree
+		// regardless of operator precedence. Without this case a logic
+		// terminal return like `return revenue / orders` serialized to
+		// `<<unsupported expression *ast.ArithmeticExpr>>` and the
+		// automation failed at runtime even though memqllint passed.
+		return fmt.Sprintf("(%s %s %s)",
+			c.expressionToString(e.Left), e.Op, c.expressionToString(e.Right))
+
+	// Date/duration builtins (#2541): canonical re-parseable call forms.
+	// The logic runner's local evaluator and the automations condition
+	// evaluator dispatch these by name (memql.EvaluateDateBuiltin), so the
+	// emitted source must keep the builtin's spelling exactly.
+	case *parser.AddDurationExpr:
+		return fmt.Sprintf("addDuration(%s, %s)",
+			c.expressionToString(e.Timestamp), c.expressionToString(e.Duration))
+
+	case *parser.DaysBetweenExpr:
+		return fmt.Sprintf("daysBetween(%s, %s)",
+			c.expressionToString(e.Date1), c.expressionToString(e.Date2))
+
+	case *parser.SubtractTimestampsExpr:
+		return fmt.Sprintf("subtractTimestamps(%s, %s)",
+			c.expressionToString(e.T1), c.expressionToString(e.T2))
+
+	case *parser.YearExpr:
+		return fmt.Sprintf("year(%s)", c.expressionToString(e.Target))
+
+	case *parser.QuarterExpr:
+		return fmt.Sprintf("quarter(%s)", c.expressionToString(e.Target))
+
+	case *parser.MonthExpr:
+		return fmt.Sprintf("month(%s)", c.expressionToString(e.Target))
+
+	case *parser.DayOfMonthExpr:
+		return fmt.Sprintf("dayOfMonth(%s)", c.expressionToString(e.Target))
+
+	case *parser.IsAnniversaryExpr:
+		return fmt.Sprintf("isAnniversary(%s, %s)",
+			c.expressionToString(e.StartDate), c.expressionToString(e.CheckDate))
+
+	case *parser.IsFirstDayOfQuarterExpr:
+		return fmt.Sprintf("isFirstDayOfQuarter(%s)", c.expressionToString(e.Target))
+
 	case *parser.NotExpr:
 		return fmt.Sprintf("not(%s)", c.expressionToString(e.Target))
 
