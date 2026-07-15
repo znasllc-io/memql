@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/znasllc-io/memql/component/language/parser"
@@ -107,9 +108,26 @@ var rewriteConstructNameRe = regexp.MustCompile(`"([A-Za-z_][A-Za-z0-9_]*)"`)
 // constructHeaderRe locates a top-level construct header for a given name so
 // a lowering error can point at the authored declaration instead of line 1.
 // The concept-binding identifier (query <Concept> <name>) is optional.
-var constructHeaderRe = regexp.MustCompile(
-	`(?m)^[ \t]*(?:query|mutation|mutate|logic|automation|shape|spec|trait|seed|builtin|prompt|provider|tool|policy|concept|action|capability)[ \t]+(?:[A-Za-z_][A-Za-z0-9_]*[ \t]+)?`,
-)
+//
+// The keyword alternation is sourced from dslspec (constructKeywords) rather
+// than hand-listed, so a construct a future grammar epic adds is anchored
+// automatically. `use` is excluded: it is an unnamed file-top import, not a
+// named construct declaration this regex looks for.
+var constructHeaderRe = buildConstructHeaderRe()
+
+func buildConstructHeaderRe() *regexp.Regexp {
+	kws := make([]string, 0, len(constructKeywords))
+	for kw := range constructKeywords {
+		if kw == "use" {
+			continue
+		}
+		kws = append(kws, regexp.QuoteMeta(kw))
+	}
+	sort.Strings(kws) // deterministic alternation
+	return regexp.MustCompile(
+		`(?m)^[ \t]*(?:` + strings.Join(kws, "|") + `)[ \t]+(?:[A-Za-z_][A-Za-z0-9_]*[ \t]+)?`,
+	)
+}
 
 // rewriteErrorDiagnostic turns a lowering failure (which has no position)
 // into a diagnostic anchored on the named construct in the authored source.
