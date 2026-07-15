@@ -101,8 +101,8 @@ function check_argocd() {
 "NAME:.metadata.name,\
 SYNC:.status.sync.status,\
 HEALTH:.status.health.status,\
-REVISION:.status.sync.revision" 2>/dev/null >&2 || \
-        kubectl get application "${APP_NAME}" -n argocd 2>/dev/null >&2
+REVISION:.status.sync.revision" >&2 2>/dev/null || \
+        kubectl get application "${APP_NAME}" -n argocd >&2 2>/dev/null
     else
         {
             echo "  STATUS: ${APP_NAME} Application not found."
@@ -125,7 +125,7 @@ function check_pods() {
 
     kubectl get pods -n "${NAMESPACE}" \
         -o wide \
-        --sort-by=.metadata.name 2>/dev/null >&2 || echo "  (no pods found)" >&2
+        --sort-by=.metadata.name >&2 2>/dev/null || echo "  (no pods found)" >&2
 }
 
 #=============================================================================
