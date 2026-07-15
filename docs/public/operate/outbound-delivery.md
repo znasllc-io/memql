@@ -70,9 +70,23 @@ admits targets** -- an unconfigured deployment never egresses. Set the
 Email transport selection and credentials come from the existing email
 integration (`MEMQL_EMAIL_*`: Microsoft Graph, SMTP, or the dev log
 sender) -- the same source the identity magic-link sender uses. A row
-whose medium has no allowlist, whose target misses it, or whose body
-exceeds the cap fails **fast and loud** (`status="failed"` with an
-explicit `lastError`); nothing waits silently in `pending`.
+whose target misses an allowlist a node is configured for, or whose body
+exceeds the cap, fails **fast and loud** (`status="failed"` with an
+explicit `lastError`) on that node.
+
+### The medium must be configured on some node
+
+The worker runs on every node, but each node only owns egress for the
+media it carries an allowlist for. A node with **no** allowlist for a
+row's medium leaves the row `pending` and skips it, so a peer that does
+carry the allowlist can pick it up (memql#2540). The consequence: if a
+medium is configured on **no** node at all, its rows sit in `pending`
+rather than failing loud. The fix is operator-side -- set the medium's
+allowlist (`MEMQL_OUTBOUND_EMAIL_ALLOWLIST` /
+`MEMQL_OUTBOUND_WEBHOOK_ALLOWLIST`) on the node type that should own that
+egress. Audit with `outboundRequestsByStatus(status: "pending")`: rows
+lingering there past the poll interval mean no node is configured for
+their medium.
 
 ## Delivery semantics
 
