@@ -30,3 +30,11 @@ updates:
     labels:
       - "dependencies"
       - "github-actions"
+    groups:
+      # codeql.yml pins init/autobuild/analyze to ONE SHA; a per-step bump
+      # always fails the required Analyze (go) gate with a config/runtime
+      # version mismatch (#2545), so the sub-actions must arrive as a single
+      # lockstep PR. See #2553.
+      codeql-action:
+        patterns:
+          - "github/codeql-action/*"
