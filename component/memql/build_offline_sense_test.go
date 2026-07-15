@@ -1,0 +1,124 @@
+package memql
+
+// build_offline_sense_test.go proves BuildOfflineSense turns a workspace of
+// .memql files into a live Sense service with no database and no network, and
+// that its use of process-global DSL registration state is safe to repeat --
+// the invariant the offline LSP depends on when it rebuilds on every edit.
+
+import (
+	"testing"
+	"testing/fstest"
+
+	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
+)
+
+// gadgetOverlay is a minimal, well-formed product overlay: one concept in a
+// non-core namespace. Its assembled id is v1:gadgets:gadget (only the major
+// version enters the prefix).
+var gadgetOverlay = fstest.MapFS{
+	"gadgets/concepts.memql": {Data: []byte(`@version("1.0.0")
+@namespace("gadgets")
+@description("A gadget for offline-sense overlay testing.")
+concept gadget {
+  label  string  @required  @description("Gadget label.")
+}
+`)},
+}
+
+const gadgetConceptID = "v1:gadgets:gadget"
+
+// TestBuildOfflineSense_EmbeddedTreeBuildsNonEmptyRegistry is the core
+// acceptance: over the embedded dsl/ tree with a nil DB, the build produces a
+// non-empty registry (concepts, functions, shapes) and a usable service.
+func TestBuildOfflineSense_EmbeddedTreeBuildsNonEmptyRegistry(t *testing.T) {
+	adapter, err := buildOfflineSenseAdapter(nil, nil)
+	if err != nil {
+		t.Fatalf("buildOfflineSenseAdapter over embedded tree: %v", err)
+	}
+
+	concepts := adapter.ConceptNames()
+	functions := adapter.FunctionNames()
+	shapes := adapter.ShapeNames()
+	if len(concepts) == 0 {
+		t.Error("expected a non-empty concept registry, got 0 concepts")
+	}
+	if len(functions) == 0 {
+		t.Error("expected a non-empty function registry, got 0 functions")
+	}
+	if len(shapes) == 0 {
+		t.Error("expected a non-empty shape registry, got 0 shapes")
+	}
+
+	// A well-known core concept resolves -- proves the registry is really the
+	// embedded tree, not merely non-empty.
+	if _, ok := adapter.ConceptGet("v1:identity:user"); !ok {
+		t.Errorf("expected core concept v1:identity:user to be present; concept count=%d", len(concepts))
+	}
+
+	// The public entry point returns a usable service.
+	svc, err := BuildOfflineSense(nil)
+	if err != nil {
+		t.Fatalf("BuildOfflineSense over embedded tree: %v", err)
+	}
+	if svc == nil {
+		t.Fatal("BuildOfflineSense returned a nil service")
+	}
+	if toks := svc.Tokenize("concept gadget { label string }"); len(toks) == 0 {
+		t.Error("expected Tokenize to return tokens from the built service")
+	}
+}
+
+// TestBuildOfflineSense_RepeatedCallsSafe proves repeated in-process builds are
+// safe and deterministic -- no growth or drift in the built registry across
+// calls (the additive global registry does not leak between builds).
+func TestBuildOfflineSense_RepeatedCallsSafe(t *testing.T) {
+	first, err := buildOfflineSenseAdapter(nil, nil)
+	if err != nil {
+		t.Fatalf("first build: %v", err)
+	}
+	second, err := buildOfflineSenseAdapter(nil, nil)
+	if err != nil {
+		t.Fatalf("second build: %v", err)
+	}
+
+	if a, b := len(first.ConceptNames()), len(second.ConceptNames()); a == 0 || a != b {
+		t.Errorf("concept count not stable across builds: first=%d second=%d", a, b)
+	}
+	if a, b := len(first.FunctionNames()), len(second.FunctionNames()); a == 0 || a != b {
+		t.Errorf("function count not stable across builds: first=%d second=%d", a, b)
+	}
+	if a, b := len(first.ShapeNames()), len(second.ShapeNames()); a == 0 || a != b {
+		t.Errorf("shape count not stable across builds: first=%d second=%d", a, b)
+	}
+}
+
+// TestBuildOfflineSense_OverlayVisibleToServiceButRestoredGlobally proves the
+// two halves of the global-state contract at once: a workspace overlay concept
+// is visible to the built service (Init bound the engine to the merged-registry
+// clone), yet the process-global concept registry is restored to its
+// embedded-only baseline before the call returns (no leak into a later build).
+func TestBuildOfflineSense_OverlayVisibleToServiceButRestoredGlobally(t *testing.T) {
+	adapter, err := buildOfflineSenseAdapter(nil, gadgetOverlay)
+	if err != nil {
+		t.Fatalf("build over gadget overlay: %v", err)
+	}
+
+	// Visible to the built service.
+	if _, ok := adapter.ConceptGet(gadgetConceptID); !ok {
+		t.Errorf("overlay concept %s not visible to the built Sense service", gadgetConceptID)
+	}
+
+	// Not leaked into the process-global registry.
+	if _, err := concept.Get(gadgetConceptID); err == nil {
+		t.Errorf("overlay concept %s leaked into the global registry (should have been restored)", gadgetConceptID)
+	}
+
+	// A subsequent embedded-only build must not see the overlay either.
+	embedded, err := buildOfflineSenseAdapter(nil, nil)
+	if err != nil {
+		t.Fatalf("embedded build after overlay build: %v", err)
+	}
+	if _, ok := embedded.ConceptGet(gadgetConceptID); ok {
+		t.Errorf("overlay concept %s leaked into a subsequent embedded-only build", gadgetConceptID)
+	}
+}
