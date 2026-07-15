@@ -10552,7 +10552,7 @@ func SoftDeleteWorkerInvocationBuild(args SoftDeleteWorkerInvocationArgs) string
 	return b.String()
 }
 
-// StageOutboundRequest -- Stage an outbound delivery (memql#2521): insert a v1:platform:outboundRequest row with status='pending' for the engine outbound worker to drain. Credentials are never part of the row; targets must satisfy the deployment's per-medium allowlist or the worker fails the row fast.
+// StageOutboundRequest -- Stage an outbound delivery (memql#2521): insert a v1:platform:outboundRequest row with status='pending' for the engine outbound worker to drain. Credentials are never part of the row; targets must satisfy the deployment's per-medium allowlist or the worker fails the row fast. Idempotent by requestId: a re-stage onto an existing row preserves the worker-owned status/attempts (@createOnly, fylo#63) rather than resetting delivery state.
 //
 // Bound concept: v1:platform:outboundRequest (machine-readable: BoundConcepts["stageOutboundRequest"] in generated_concepts.go).
 type StageOutboundRequestArgs struct {

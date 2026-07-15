@@ -33,7 +33,7 @@ var ByReceiver = map[string][]string{
 	},
 	"Mutation": {
 		"description", "enabled", "disabled", "internal", "actor", "public",
-		"mergeFields", "appendFields", "scrubPii", "mcp",
+		"mergeFields", "appendFields", "createOnly", "scrubPii", "mcp",
 	},
 	"Logic": {
 		"description", "enabled", "disabled", "eventField",
@@ -92,6 +92,7 @@ var Docs = map[string]string{
 	"actor":        "On a mutation: resolves auth-context (`actor.X`) fields. On a shape: kind marker -- projects the auth-context envelope (actor.userId / role / ...).",
 	"mergeFields":  "On an update mutation: deep-merge the named object-typed payload fields into the stored object instead of replacing them wholesale, so sibling keys survive a single-key write. Format: @mergeFields(\"preferences\").",
 	"appendFields": "On an update mutation: append the named array-typed payload fields' elements to the stored array instead of replacing it wholesale, so a single-writer mutation can accumulate list items (e.g. attach one id). Format: @appendFields(\"attachmentIds\").",
+	"createOnly":   "On an insert (create-or-upsert) mutation: write the named payload fields ONLY when creating the row. If the target id already exists, the fields are dropped from the delta before the engine read-merge, so the stored value is preserved rather than clobbered -- making a deterministic-id re-stage idempotent for lifecycle fields another writer owns after creation (e.g. stageOutboundRequest seeds status but must not reset a row the outbound worker moved to sent). The inverse of @mergeFields/@appendFields: only valid on insert-kind mutations. Format: @createOnly(\"status\", \"attempts\"). See fylo#63.",
 	"scrubPii":     "On an update mutation (the hard-delete / data-deletion path): after the partial payload merges, zero EVERY field the bound concept marks @pii. The field set is derived from the schema, so a newly-annotated PII field is scrubbed automatically with no change to the mutation. Bare flag, no arguments. See memql#1711.",
 	// Automation.
 	"trigger": "Event trigger for automations. Format: @trigger(event=\"graph.node.created.*.v1:ns:concept\") or @trigger(schedule=\"0 0 * * * *\").",
