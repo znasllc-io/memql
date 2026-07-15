@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/automations"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // FunctionExecutor invokes MemQL functions.
@@ -248,6 +249,38 @@ func renderMemQLValue(value any) string {
 		return "false"
 	case float64, float32, int, int32, int64, uint, uint32, uint64:
 		return fmt.Sprintf("%v", v)
+	case time.Time:
+		// A live time.Time (a row's createdAt off the DB model) must reach
+		// the re-parse as a QUOTED RFC3339 string. Falling through to the
+		// reflect tail produced Go's default format ("2006-01-02 15:04:05
+		// -0700 MST"), which the langparser rejects with `expected '}', got
+		// "-07"` -- crashing any automation that passes a query-result
+		// collection with a datetime field into a logic arg (memql#2543).
+		// UTC keeps the rendered form canonical; both re-parse consumers
+		// (parseDate in the runtime evaluator, time.Parse(RFC3339) in the
+		// filter executor) accept it.
+		return strconv.Quote(v.UTC().Format(time.RFC3339))
+	case *time.Time:
+		if v == nil {
+			return "null"
+		}
+		return strconv.Quote(v.UTC().Format(time.RFC3339))
+	case *timestamppb.Timestamp:
+		// The proto twin of the time.Time case: a shape-projected row
+		// carries createdAt as *timestamppb.Timestamp (see
+		// component/memql/shape_template.go buildNodeProjection). The
+		// reflect tail rendered it as proto text ("seconds:175... nanos:...")
+		// -- the same #2543 crash one representation over.
+		if v == nil {
+			return "null"
+		}
+		return strconv.Quote(v.AsTime().UTC().Format(time.RFC3339))
+	case time.Duration:
+		// %v yields "1h30m0s", which the langparser lexes as a malformed
+		// token. Rendered as a quoted string: there is no MemQL duration
+		// literal, and a string is at least inert data the receiving side
+		// can pass to the ISO8601 helpers or ignore.
+		return strconv.Quote(v.String())
 	case []string:
 		// Common typed-slice case the type-switch above doesn't catch.
 		// Falling through to default produces Go's `[a b c]` format
