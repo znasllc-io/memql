@@ -35,6 +35,17 @@ const (
 
 	// defaultHTTPTimeoutSeconds bounds a single webhook POST.
 	defaultHTTPTimeoutSeconds = 10
+
+	// defaultClaimTTLSeconds is the attempt-scoped lease on the
+	// cross-replica claim (memql#2548). A claim orphaned by a replica that
+	// died between winning it and stamping a terminal status becomes
+	// re-winnable after this many seconds, so a peer recovers the row
+	// instead of it wedging until the guard's 1h retention prune. It must
+	// sit well above the longest a LIVE claimant holds a claim -- one
+	// delivery attempt, bounded by the HTTP timeout -- so a slow-but-alive
+	// node is not stolen from; 5 minutes gives ~30x margin over the default
+	// 10s webhook timeout while cutting the wedge from 1h to minutes.
+	defaultClaimTTLSeconds = 300
 )
 
 // Config is the worker's tunable policy, resolved from env once at
@@ -50,6 +61,7 @@ type Config struct {
 	WebhookAllowlist []string // URL prefixes; https required unless the prefix itself is http://
 	MaxPayloadBytes  int
 	HTTPTimeout      time.Duration
+	ClaimTTL         time.Duration // attempt-scoped lease on the cross-replica claim (memql#2548)
 }
 
 // LoadConfig resolves the worker policy from the MEMQL_OUTBOUND_* env
@@ -57,7 +69,8 @@ type Config struct {
 // MEMQL_OUTBOUND_ENABLED, MEMQL_OUTBOUND_POLL_SECONDS,
 // MEMQL_OUTBOUND_STARTUP_DELAY_SECONDS, MEMQL_OUTBOUND_MAX_ATTEMPTS,
 // MEMQL_OUTBOUND_MAX_PAYLOAD_BYTES, MEMQL_OUTBOUND_HTTP_TIMEOUT_SECONDS,
-// MEMQL_OUTBOUND_EMAIL_ALLOWLIST, MEMQL_OUTBOUND_WEBHOOK_ALLOWLIST.
+// MEMQL_OUTBOUND_CLAIM_TTL_SECONDS, MEMQL_OUTBOUND_EMAIL_ALLOWLIST,
+// MEMQL_OUTBOUND_WEBHOOK_ALLOWLIST.
 func LoadConfig() Config {
 	reader := env.NewEnvReader("MEMQL_OUTBOUND")
 	cfg := Config{
@@ -67,6 +80,7 @@ func LoadConfig() Config {
 		MaxAttempts:     defaultMaxAttempts,
 		MaxPayloadBytes: defaultMaxPayloadBytes,
 		HTTPTimeout:     defaultHTTPTimeoutSeconds * time.Second,
+		ClaimTTL:        defaultClaimTTLSeconds * time.Second,
 	}
 	if b, err := reader.OptionalBool("ENABLED"); err == nil && b != nil {
 		cfg.Enabled = *b
@@ -85,6 +99,9 @@ func LoadConfig() Config {
 	}
 	if ptr, err := reader.OptionalInt("HTTP_TIMEOUT_SECONDS"); err == nil && ptr != nil && *ptr > 0 {
 		cfg.HTTPTimeout = time.Duration(*ptr) * time.Second
+	}
+	if ptr, err := reader.OptionalInt("CLAIM_TTL_SECONDS"); err == nil && ptr != nil && *ptr > 0 {
+		cfg.ClaimTTL = time.Duration(*ptr) * time.Second
 	}
 	if s, ok := reader.String("EMAIL_ALLOWLIST"); ok {
 		cfg.EmailAllowlist = splitAllowlist(s, true)

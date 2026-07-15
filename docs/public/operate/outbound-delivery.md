@@ -66,6 +66,7 @@ admits targets** -- an unconfigured deployment never egresses. Set the
 | `MEMQL_OUTBOUND_MAX_ATTEMPTS` | `5` | attempts before `failed` |
 | `MEMQL_OUTBOUND_MAX_PAYLOAD_BYTES` | `262144` | body cap at drain time |
 | `MEMQL_OUTBOUND_HTTP_TIMEOUT_SECONDS` | `10` | webhook request timeout |
+| `MEMQL_OUTBOUND_CLAIM_TTL_SECONDS` | `300` | how long a won cross-replica claim blocks peers before a dead claimant's claim is re-winnable (crash recovery); keep it comfortably above `HTTP_TIMEOUT_SECONDS` |
 
 Email transport selection and credentials come from the existing email
 integration (`MEMQL_EMAIL_*`: Microsoft Graph, SMTP, or the dev log
@@ -96,7 +97,16 @@ their medium.
   `X-Memql-Dedupe-Key`) so external systems can deduplicate.
 - **Single-runner per attempt.** Multi-replica deployments claim each
   (row, attempt) through the automation cluster guard ledger; exactly
-  one replica delivers a given attempt.
+  one replica delivers a given attempt while its claim is live.
+- **Crash recovery (no wedge).** If the replica that won a claim dies
+  before stamping a terminal status, the row would otherwise sit `pending`
+  with a persisted claim no peer can re-win until the guard's retention
+  prune (1h). The claim carries a per-attempt lease
+  (`MEMQL_OUTBOUND_CLAIM_TTL_SECONDS`, default 5m): once the orphaned claim
+  ages past it, a peer re-claims the same attempt and recovers the row on
+  the next drain. Set the lease above `MEMQL_OUTBOUND_HTTP_TIMEOUT_SECONDS`
+  so a slow-but-alive delivery is never re-claimed underneath itself; a
+  re-take under an extreme stall simply redelivers (at-least-once).
 - **Bounded retries.** Retryable failures (timeouts, connect errors,
   HTTP 408/429/5xx) back off exponentially (30s base, x4, 1h cap,
   jittered) up to `MEMQL_OUTBOUND_MAX_ATTEMPTS`; other 4xx and policy

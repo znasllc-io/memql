@@ -23,7 +23,10 @@ const (
 	// deliveryClaimName is the cross-replica claim namespace: rows land
 	// in the same automation_execution_claims ledger the automation
 	// cluster guard uses. Keyed per (row id, attempts) so a retry is a
-	// fresh claim but two replicas never run the same attempt.
+	// fresh claim but two live replicas never run the same attempt. The
+	// claim carries an attempt-scoped lease (Config.ClaimTTL, memql#2548):
+	// a claim orphaned by a dead claimant expires after the TTL so a peer
+	// can re-claim and recover the row.
 	deliveryClaimName = "outboundDelivery"
 
 	// systemOutboundActor stamps engine roundtrips from this worker
@@ -50,9 +53,14 @@ type Engine interface {
 
 // ExecutionClaimer is the cross-replica claim gate (the automations
 // ClusterExecutionGuard satisfies it). Nil leaves single-replica
-// deployments unguarded-but-correct: the poll is the only driver.
+// deployments unguarded-but-correct: the poll is the only driver. The
+// worker uses the attempt-scoped-lease variant (ClaimWithTTL, memql#2548)
+// so a claim orphaned by a replica that died before stamping becomes
+// re-winnable after cfg.ClaimTTL, instead of wedging the row until the
+// guard's 1h retention prune. Automation/planner callers keep the
+// permanent-within-retention Claim; only this worker opts into the lease.
 type ExecutionClaimer interface {
-	Claim(ctx context.Context, name, dedupKey string) bool
+	ClaimWithTTL(ctx context.Context, name, dedupKey string, ttl time.Duration) bool
 }
 
 // Worker drains v1:platform:outboundRequest rows and delivers them
@@ -60,7 +68,10 @@ type ExecutionClaimer interface {
 // wakes the drain immediately on the replica that executed the staging
 // mutation. Safety net: the poll picks up cross-replica rows, due
 // retries, and dropped events. The ClusterExecutionGuard claim keeps
-// delivery at-least-once but single-runner per (row, attempt).
+// delivery at-least-once but single-runner per (row, attempt) for the life
+// of the claim's attempt-scoped lease (Config.ClaimTTL); past it a claim
+// orphaned by a dead claimant is re-winnable so the row is never wedged
+// (memql#2548).
 type Worker struct {
 	engine     Engine
 	claimer    ExecutionClaimer
@@ -243,9 +254,14 @@ func (w *Worker) processRow(ctx context.Context, row map[string]any, scanStatus 
 	}
 	// Cross-replica claim BEFORE any side effect. Keyed per (row,
 	// attempts) so the winning replica of THIS attempt is unique, while
-	// a later retry (attempts incremented) claims fresh.
+	// a later retry (attempts incremented) claims fresh. The claim carries
+	// an attempt-scoped lease (cfg.ClaimTTL, memql#2548): if this replica
+	// dies after winning the claim but before stamping a terminal status,
+	// the row stays pending and the persisted claim expires after the TTL
+	// so a peer re-claims and recovers it -- rather than every peer
+	// re-claiming-and-losing the key until the guard's 1h retention prune.
 	if w.claimer != nil {
-		if !w.claimer.Claim(ctx, deliveryClaimName, fmt.Sprintf("%s:%d", req.ID, req.Attempts)) {
+		if !w.claimer.ClaimWithTTL(ctx, deliveryClaimName, fmt.Sprintf("%s:%d", req.ID, req.Attempts), w.cfg.ClaimTTL) {
 			return
 		}
 	}

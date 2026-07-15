@@ -393,6 +393,13 @@ variables:
     default: "10"
     description: "Per-request timeout for the outbound webhook transport."
 
+  - name: MEMQL_OUTBOUND_CLAIM_TTL_SECONDS
+    component: outbound
+    scope: node
+    optional: true
+    default: "300"
+    description: "Attempt-scoped lease on the cross-replica delivery claim: how long a won claim blocks peers before a dead claimant's key is re-winnable, so a crash between claim and terminal stamp recovers instead of wedging the row until the guard retention prune. Keep it above MEMQL_OUTBOUND_HTTP_TIMEOUT_SECONDS."
+
   # --- engine ---
 
   - name: MEMQL_AUTHORING_CAPTURE_ENABLED
