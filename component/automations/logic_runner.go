@@ -327,6 +327,17 @@ func EvaluateLocalExpr(expr string, evaluator *Evaluator) (any, bool, error) {
 	if val, handled, err := tryEvaluateArithmeticLocally(expr, evaluator); err != nil || handled {
 		return val, handled, err
 	}
+	// Expression-led comparison (#2542 item 5): a terminal `return (a - b) > 0`
+	// serialized to the parenthesized operator form re-parses to a top-level
+	// BinaryComparisonExpr. Routed AFTER the arithmetic attempt (which declines
+	// a comparison node) so the two are mutually exclusive: arithmetic matches
+	// only *ArithmeticExpr, this matches only *BinaryComparisonExpr. Without it
+	// the leading `(` defeats the builtin path and the return falls through to
+	// the step registry, where the engine rejects BinaryComparisonExpression
+	// with the `only available in logic` scope error.
+	if val, handled, err := tryEvaluateComparisonLocally(expr, evaluator); err != nil || handled {
+		return val, handled, err
+	}
 	return tryEvaluateBuiltinLocally(expr, evaluator)
 }
 

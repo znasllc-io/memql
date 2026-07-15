@@ -1185,6 +1185,108 @@ logic remainder {
 	}
 }
 
+// TestLogicRunner_RunLogic_TerminalReturnComparison pins #2542 item 5
+// END-TO-END for the MULTI-STEP path: a logic whose terminal return is an
+// expression-led comparison over a computed intermediate --
+//
+//	logic isProfitable {
+//	  body {
+//	    delta := args.revenue - args.cost
+//	    return delta - 5 > 0
+//	  }
+//	}
+//
+// must EVALUATE to the boolean (the LogicRunner's comparison branch resolves
+// both operands locally and applies the ordering operator) rather than falling
+// through to the step registry -- where the engine rejects a
+// BinaryComparisonExpression with the `only available in logic` scope error.
+// Nothing reaches the registry: the arithmetic step and the comparison return
+// both resolve locally. The engine single-return path already handles the
+// single-return boolean shape (engine.go plan-root branch); this is its
+// multi-step counterpart.
+func TestLogicRunner_RunLogic_TerminalReturnComparison(t *testing.T) {
+	src := `@enabled
+@description("expression-led comparison terminal return (#2542 item 5)")
+logic isProfitable {
+  args {
+    revenue int @required
+    cost int @required
+  }
+  body {
+    delta := args.revenue - args.cost
+    return delta - 5 > 0
+  }
+}
+`
+	body := parseLogicBody(t, src)
+
+	cases := []struct {
+		name    string
+		revenue int
+		cost    int
+		want    bool
+	}{
+		{"positive", 20, 3, true},   // 20-3=17; 17-5=12; 12 > 0 -> true
+		{"negative", 20, 18, false}, // 20-18=2; 2-5=-3; -3 > 0 -> false
+		{"boundary", 20, 15, false}, // 20-15=5; 5-5=0; 0 > 0 -> false
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			registry := &recordingStepRegistry{}
+			r := NewLogicRunner(&memql.MemQLEngine{}, registry, nil)
+			out, err := r.RunLogic(context.Background(), "isProfitable", body, map[string]any{
+				"revenue": tc.revenue,
+				"cost":    tc.cost,
+			})
+			if err != nil {
+				t.Fatalf("RunLogic (#2542 comparison terminal return must evaluate): %v", err)
+			}
+			if out != tc.want {
+				t.Errorf("RunLogic return = %#v (%T), want %v", out, out, tc.want)
+			}
+			if len(registry.dispatched) != 0 {
+				t.Errorf("dispatched steps = %v, want none (arithmetic step + comparison return resolve locally)", registry.dispatched)
+			}
+		})
+	}
+}
+
+// TestLogicRunner_RunLogic_TerminalReturnComparison_LiteralLed pins the
+// literal-led shape (`0 < delta`) -- the other half of the expression-led
+// comparison grammar (parser's non-identifier-led left side). It must evaluate
+// through the same LogicRunner comparison branch, never dispatch to the
+// registry.
+func TestLogicRunner_RunLogic_TerminalReturnComparison_LiteralLed(t *testing.T) {
+	src := `@enabled
+@description("literal-led comparison terminal return (#2542 item 5)")
+logic hasSurplus {
+  args {
+    revenue int @required
+    cost int @required
+  }
+  body {
+    delta := args.revenue - args.cost
+    return 0 < delta
+  }
+}
+`
+	body := parseLogicBody(t, src)
+	registry := &recordingStepRegistry{}
+	r := NewLogicRunner(&memql.MemQLEngine{}, registry, nil)
+
+	out, err := r.RunLogic(context.Background(), "hasSurplus", body, map[string]any{"revenue": 10, "cost": 4})
+	if err != nil {
+		t.Fatalf("RunLogic (literal-led comparison must evaluate): %v", err)
+	}
+	if out != true {
+		t.Errorf("RunLogic return = %#v (%T), want true (0 < 6)", out, out)
+	}
+	if len(registry.dispatched) != 0 {
+		t.Errorf("dispatched steps = %v, want none", registry.dispatched)
+	}
+}
+
 // TestLogicRunner_RunLogic_DateBuiltinStepValueAndReturn pins #2541
 // END-TO-END: date builtins bound as step VALUES (`delta := daysBetween(...)`,
 // `y := year(...)`) and read back through the terminal return. This is the
