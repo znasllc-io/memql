@@ -469,6 +469,62 @@ arg-resolution-time handling.
 
 ---
 
+## 11c. Logic-body expression grammar: what works in each position (#2542)
+
+**Rule.** A logic body evaluates value-expressions IN-MEMORY, and the
+supported grammar differs by POSITION. memqllint (parse + boot-parity
+Init) accepts a superset of what the runtime evaluates, so the table
+below is authoritative: anything marked "no" is either a lint/boot
+rejection or an unsupported shape -- use the working idiom in the last
+column instead. `int / int` is integer division (#2316); use a float
+operand (`* 1.0`, or the `good * 100 / total` percent idiom) for a
+fractional ratio. Division / modulo by zero is a clean logic error, not
+a panic.
+
+The five value positions:
+
+- **return** -- the terminal `return <expr>`.
+- **step RHS** -- an intermediate `x := <expr>`.
+- **cond pred** -- the predicate of `cond(predicate, then, else)` (and
+  the `if <condition>` step condition).
+- **cond branch** -- the `then` / `else` VALUE of a `cond(...)`.
+- **projection / lambda** -- an object-literal value or lambda body
+  inside a collection chain (`select(g => { k: <expr> })`,
+  `where(m => <expr>)`).
+
+| Form | return | step RHS | cond pred | cond branch | projection / lambda | Working idiom / note |
+|---|---|---|---|---|---|---|
+| Arithmetic `a / b`, `a * 100 / c`, `a - b` | yes | yes | -- | yes | yes | Integer division truncates; use a float operand for a ratio. |
+| Collection chain `rows.where(m => ...).count()` | yes | yes | yes (bare boolean chain) | yes | yes | `.first().field` DotAccess and `.sum/min/max/avg/count(lambda)` included. |
+| Date builtins `daysBetween(...)`, `year(...)`, `addDuration(...)` | yes | yes | -- | yes | yes | #2541. |
+| `cond(...)` (nested) | yes | yes | -- | yes | yes | Connectives (`&&`/`||`) are NOT allowed inside a cond arg -- nest cond or use an `if` step. |
+| Comparison, **expression-led** `(a - b) > 0`, `0 < count`, `rows.count() >= 1` | yes | no (parse-rejected) | yes | no | yes (lambda body) | The LHS must be non-identifier-led: parenthesize the arithmetic / lead with a literal / end in a call. |
+| Comparison **over a chain aggregate** `rows.count(m => ...) > 0` | single-return only | no | yes | no | yes (lambda body) | As a cond PREDICATE this is the #2542 item-2 headline. As a bare multi-step `return`, wrap it: `return cond(rows.count(m => ...) > 0, thenV, elseV)`. |
+| Comparison, **scalar / identifier-led** `x > 10`, `role == "admin"` | boolean-condition return only | no (parse-rejected) | yes | no | yes (lambda body) | Fine as a cond/`if` predicate and inside a boolean-condition return (`a.empty() && x == "b"`). A BARE `return x == 5` is mis-routed to a store query -- write it expression-led `(x) == 5` / literal-led `5 == x`, or `return cond(x == 5, true, false)`. |
+| Arithmetic over a comparison `a - b > 0` | REJECTED | REJECTED | REJECTED | REJECTED | REJECTED | The unparenthesized-comparison trap: `a - b > 0` parses as `a - (b > 0)`. Lint/boot rejects it -- parenthesize `(a - b) > 0`. |
+
+**Notes.**
+
+- **The `a - b > 0` trap is a lint/boot error (#2542).** A trailing bare
+  identifier operand folds the comparison into the arithmetic
+  (`a - (b > 0)`), so the arithmetic operand is a boolean -- never valid.
+  `convertArithmeticExpr` + `validateLogicArithmeticOperands` reject it at
+  load with the parenthesise fix; the lint/boot-parity pass surfaces it.
+- **Identifier-led comparison as a scalar VALUE is mis-routed.** The
+  engine has no scalar plan-root branch for a Field-led comparison
+  (`args.n == 5`), so it is executed as a store query and returns the
+  wrong value. Always write a value-position comparison expression-led
+  (parenthesise the left operand, or lead with the literal) or wrap it in
+  `cond(...)`. This is why a comparison is a first-class `cond` PREDICATE
+  but not a `cond` BRANCH value.
+- **cond predicates** accept a bare boolean chain (`x.any()`), a scalar
+  comparison (`r > 50`), an equality (`role == "x"`), and a comparison
+  over a chain aggregate (`x.count(m => ...) > 0`, wave 3). The predicate
+  aggregate is resolved through the in-memory collection evaluator, not a
+  lexicographic string compare.
+
+---
+
 ## 12. `partition` is a reserved payload field -- use `partitionName`
 
 **Rule.** `partition` is one of the engine's reserved payload-level

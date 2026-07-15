@@ -288,6 +288,22 @@ func (c *ASTConverter) convertArithmeticExpr(expr *languageParser.ArithmeticExpr
 	if !c.allowCollectionMethods {
 		return nil, fmt.Errorf("arithmetic operators (+ - * / %%) are only available in logic / collection lambdas (in-memory), not in specs or query filters (#2316)")
 	}
+	// An arithmetic operand that is itself a comparison is the
+	// unparenthesized-comparison trap (#2542): `a - b > 0` parses as
+	// `a - (b > 0)` because a trailing identifier operand folds the `> 0`
+	// into a Field-led ComparisonExpr one level down (the pinned
+	// TrailingIdentifierQuirk). A boolean can never be an arithmetic
+	// operand, so this shape is always an author mistake -- reject it at
+	// conversion time (LINT + boot, via LintUnifiedTree's Init pass) with
+	// the parenthesised fix, instead of letting it reach evalCollScalar and
+	// fail with an opaque `right operand of "-" is not numeric (bool)` /
+	// `expression *ast.ComparisonExpr is not supported as an arithmetic
+	// operand` runtime error.
+	if operand := comparisonOperandOf(expr); operand != "" {
+		return nil, fmt.Errorf(
+			"arithmetic operand is a comparison (%s): `a %s b > 0` parses as `a %s (b > 0)` because the trailing identifier folds the comparison into the arithmetic; parenthesize the arithmetic sub-expression, e.g. `(a %s b) > 0` (#2542)",
+			operand, expr.Op, expr.Op, expr.Op)
+	}
 	left, err := c.ConvertExpression(expr.Left)
 	if err != nil {
 		return nil, fmt.Errorf("convert arithmetic left: %w", err)
@@ -297,6 +313,41 @@ func (c *ASTConverter) convertArithmeticExpr(expr *languageParser.ArithmeticExpr
 		return nil, fmt.Errorf("convert arithmetic right: %w", err)
 	}
 	return &ArithmeticExpression{Op: expr.Op, Left: left, Right: right}, nil
+}
+
+// comparisonOperandOf reports the side ("left"/"right") of an arithmetic
+// expression whose operand is a boolean-valued comparison node -- the
+// unparenthesized-comparison trap (#2542). Returns "" when both operands are
+// legitimate arithmetic operands.
+func comparisonOperandOf(expr *languageParser.ArithmeticExpr) string {
+	if isComparisonNode(expr.Left) {
+		return "left"
+	}
+	if isComparisonNode(expr.Right) {
+		return "right"
+	}
+	return ""
+}
+
+// isComparisonNode reports whether a parser expression node is boolean-valued
+// (a comparison / membership / logical connective). Such a node can never be a
+// valid arithmetic operand (#2542) and is never a valid cond branch VALUE.
+func isComparisonNode(node languageParser.ExpressionNode) bool {
+	switch node.(type) {
+	case *languageParser.ComparisonExpr,
+		*languageParser.BinaryComparisonExpr,
+		*languageParser.EqExpr,
+		*languageParser.LtExpr,
+		*languageParser.GtExpr,
+		*languageParser.LteExpr,
+		*languageParser.GteExpr,
+		*languageParser.NotExpr,
+		*languageParser.AndExpr,
+		*languageParser.OrExpr,
+		*languageParser.LogicalExpr:
+		return true
+	}
+	return false
 }
 
 // convertBinaryComparisonExpr converts a parser BinaryComparisonExpr (the

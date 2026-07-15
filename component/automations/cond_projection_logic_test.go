@@ -136,13 +136,90 @@ logic condScalar {
 	}
 }
 
-// TestEvaluateLocalExpr_CondComparisonOverChainString proves the EVALUATOR is
-// ready for the item-2 headline shape -- a cond whose predicate is a comparison
-// over a collection-chain aggregate -- once fed the serialized string form. The
-// AUTHORING parse of this shape is blocked by the langparser cond-arg grammar
-// (pinned by memql.TestCondComparisonOverChain_ParseGap; owned by the
-// comparison-grammar wave), so this drives EvaluateLocalExpr directly with the
-// string the compiler will emit when that parse lands.
+// TestRunLogic_CondComparisonOverChain_TerminalReturn is the #2542 item-2
+// headline through the REAL source path (parse -> compile/serialize -> re-parse
+// -> RunLogic): a cond whose predicate is a comparison over a collection-chain
+// aggregate. Wave 3's parseExpressionArg relational-comparison extension makes
+// the predicate parse; the compiler serializes the CondExpr with its
+// BinaryComparisonExpr predicate, and evaluateCondPredicate routes the
+// serialized comparison string through the condition evaluator. Resolves
+// locally -- no step dispatch.
+func TestRunLogic_CondComparisonOverChain_TerminalReturn(t *testing.T) {
+	src := `@enabled
+@description("cond over a comparison of a collection-chain aggregate (#2542 item 2)")
+logic condChainCmp {
+  args {
+    members []object @required
+  }
+  body {
+    active := args.members.where(m => m.active)
+    return cond(active.count() > 1, "many", "few")
+  }
+}
+`
+	members := map[string]any{"members": []any{
+		map[string]any{"name": "a", "active": true},
+		map[string]any{"name": "b", "active": false},
+		map[string]any{"name": "c", "active": true},
+	}}
+	out, dispatched := runProjectionLogic(t, src, "condChainCmp", members)
+	if out != "many" {
+		t.Errorf("return = %#v, want \"many\" (2 active > 1)", out)
+	}
+	if len(dispatched) != 0 {
+		t.Errorf("dispatched = %v, want none (cond comparison-over-chain resolves locally)", dispatched)
+	}
+
+	// Predicate false -> else branch.
+	fewMembers := map[string]any{"members": []any{
+		map[string]any{"name": "a", "active": true},
+		map[string]any{"name": "b", "active": false},
+	}}
+	if out, _ := runProjectionLogic(t, src, "condChainCmp", fewMembers); out != "few" {
+		t.Errorf("return = %#v, want \"few\" (1 active, not > 1)", out)
+	}
+}
+
+// The comparison-over-chain cond predicate also works as a STEP value (bound to
+// an intermediate `:=` step, then returned) -- reached through
+// reconstructPositionalBuiltinCall rather than the terminal-return path.
+func TestRunLogic_CondComparisonOverChain_StepValue(t *testing.T) {
+	src := `@enabled
+@description("cond comparison-over-chain as a step value (#2542 item 2)")
+logic condChainCmpStep {
+  args {
+    members []object @required
+  }
+  body {
+    active := args.members.where(m => m.active)
+    label := cond(active.count() >= 2, "quorum", "short")
+    return label
+  }
+}
+`
+	members := map[string]any{"members": []any{
+		map[string]any{"name": "a", "active": true},
+		map[string]any{"name": "b", "active": true},
+		map[string]any{"name": "c", "active": false},
+	}}
+	out, dispatched := runProjectionLogic(t, src, "condChainCmpStep", members)
+	if out != "quorum" {
+		t.Errorf("return = %#v, want \"quorum\" (2 active >= 2)", out)
+	}
+	if len(dispatched) != 0 {
+		t.Errorf("dispatched = %v, want none (cond step resolves locally)", dispatched)
+	}
+}
+
+// TestEvaluateLocalExpr_CondComparisonOverChainString drives the item-2
+// headline shape -- a cond whose predicate is a comparison over a
+// collection-chain aggregate -- at the EvaluateLocalExpr altitude with the
+// serialized string form the compiler emits. Wave 3 landed the AUTHORING parse
+// (parseExpressionArg now consumes ONE relational comparison; the wave-2 pin
+// memql.TestCondComparisonOverChain_ParseGap was flipped to
+// TestCondComparisonOverChain_ParsesAndEvaluates), so the end-to-end source
+// path is exercised by TestRunLogic_CondComparisonOverChain_TerminalReturn
+// below; this unit test keeps the direct string-form coverage.
 func TestEvaluateLocalExpr_CondComparisonOverChainString(t *testing.T) {
 	eval := NewEvaluator()
 	eval.SetStepResult("rows", &StepResult{StepId: "rows", Status: "success", Result: []any{
@@ -159,6 +236,22 @@ func TestEvaluateLocalExpr_CondComparisonOverChainString(t *testing.T) {
 	}
 	if !numericEquals(out, 3) {
 		t.Errorf("out = %#v, want 3 (predicate true -> rows.count())", out)
+	}
+
+	// FALSE case: the aggregate must be RESOLVED, not left as raw text -- 2
+	// active is NOT > 5, so the else branch (0) is chosen. This pins the fix for
+	// the spurious-lexicographic bug: EvaluateFilterValue left `rows.where(...)`
+	// un-evaluated so the ordering degraded to `"rows..." > "5"` (letter-led
+	// string, constant-true), which would have wrongly returned rows.count().
+	falseOut, handled, err := EvaluateLocalExpr(`cond(rows.where(r => r.active).count() > 5, rows.count(), 0)`, eval)
+	if err != nil {
+		t.Fatalf("EvaluateLocalExpr false case: %v", err)
+	}
+	if !handled {
+		t.Fatalf("false chain-comparison predicate was not handled locally")
+	}
+	if !numericEquals(falseOut, 0) {
+		t.Errorf("false predicate out = %#v, want 0 (2 active is not > 5 -> else branch)", falseOut)
 	}
 }
 

@@ -174,6 +174,73 @@ logic decideThing {
 	}
 }
 
+// TestLintParity_LogicArithmeticOverComparison is a validator class for the
+// #2542 unparenthesized-comparison arithmetic trap: a logic body with
+// `return a - b > 0` parses (and Init converts arithmetic), but the boolean
+// operand only surfaces at evalCollScalar -- so memqllint accepted it while the
+// runtime failed with an opaque non-numeric-operand error. The converter's
+// convertArithmeticExpr (plus validateLogicArithmeticOperands for intermediate
+// steps) rejects it at load with the parenthesise-the-arithmetic guidance;
+// LintUnifiedTree surfaces that through the real Init.
+func TestLintParity_LogicArithmeticOverComparison(t *testing.T) {
+	root := fstest.MapFS{
+		"lintarith/concepts.memql": {Data: []byte(`@version("1.0.0")
+@namespace("lintarith")
+@description("A marker concept so the domain carries a concept.")
+concept marker {
+  label  string  @required  @description("Marker label.")
+}
+`)},
+		"lintarith/logic.memql": {Data: []byte(`@enabled
+@description("Returns an unparenthesized arithmetic-then-comparison (#2542 trap).")
+logic ratioGate {
+  args {
+    a  int  @required
+    b  int  @required
+  }
+  body {
+    return args.a - args.b > 0
+  }
+}
+`)},
+	}
+	diags := lint(t, root)
+	if !diagsContain(diags, "comparison") || !diagsContain(diags, "(a - b) > 0") {
+		t.Fatalf("expected an arithmetic-over-comparison diagnostic with the parenthesise fix; got: %+v", diags)
+	}
+}
+
+// TestLintParity_LogicParenthesizedComparisonIsClean is the positive control:
+// the parenthesized working idiom `(a - b) > 0` mounts clean -- the validator
+// fires only on the trap shape, not on legitimate expression-led comparisons.
+func TestLintParity_LogicParenthesizedComparisonIsClean(t *testing.T) {
+	root := fstest.MapFS{
+		"lintarithok/concepts.memql": {Data: []byte(`@version("1.0.0")
+@namespace("lintarithok")
+@description("A marker concept so the domain carries a concept.")
+concept marker {
+  label  string  @required  @description("Marker label.")
+}
+`)},
+		"lintarithok/logic.memql": {Data: []byte(`@enabled
+@description("Returns the parenthesized working idiom.")
+logic ratioGateOK {
+  args {
+    a  int  @required
+    b  int  @required
+  }
+  body {
+    return (args.a - args.b) > 0
+  }
+}
+`)},
+	}
+	diags := lint(t, root)
+	if len(diags) != 0 {
+		t.Fatalf("the parenthesized working idiom must mount clean; got: %+v", diags)
+	}
+}
+
 // TestLintParity_DuplicateConstruct is a fourth validator class, and the one
 // that exercises the report's Duplicates lane (distinct from the Skipped lane
 // the declared-usage witness hits): two mutations with the same name land in
