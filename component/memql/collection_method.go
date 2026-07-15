@@ -198,12 +198,6 @@ func evalCollScalar(expr ExpressionNode, args map[string]any, locals map[string]
 		// `m.profile.age`). The first dotted segment names a bound lambda
 		// param; the remainder walks into the element.
 		return resolveLambdaPath(node.Name, locals), nil
-	case *ComparisonExpression:
-		return evalCollComparison(node, args, locals)
-	case *LogicalExpression:
-		return evalCollLogical(node, args, locals)
-	case *ArithmeticExpression:
-		return evalCollArithmetic(node, args, locals)
 	case *FunctionCallExpression:
 		// Date/duration builtins (#2541) -- the converter emits them as
 		// positional FunctionCallExpressions (like coalesce/cond/concat).
@@ -215,6 +209,12 @@ func evalCollScalar(expr ExpressionNode, args map[string]any, locals map[string]
 			return evalCollDateBuiltin(node, args, locals)
 		}
 		return nil, fmt.Errorf("unsupported expression %T inside a collection lambda", expr)
+	case *ComparisonExpression:
+		return evalCollComparison(node, args, locals)
+	case *LogicalExpression:
+		return evalCollLogical(node, args, locals)
+	case *ArithmeticExpression:
+		return evalCollArithmetic(node, args, locals)
 	default:
 		return nil, fmt.Errorf("unsupported expression %T inside a collection lambda", expr)
 	}
