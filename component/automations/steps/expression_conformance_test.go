@@ -258,25 +258,6 @@ var logicOnlyExprCases = []conformanceCase{
 		expr: `(daysBetween("2026-07-01", "2026-07-15") / 7)`,
 		want: 2,
 	},
-	// wave-2 (#2542 GAP 2): arithmetic step-RHS operand vocabulary. An
-	// intermediate `x := <arith>` step routes through the SAME local evaluator
-	// a terminal return uses (tryEvaluateArithmeticLocally); these rows pin the
-	// step-RHS operand forms -- a bound step operand and a multi-step
-	// subtraction -- at the conformance altitude, logic-time only.
-	{
-		name:  "arith_step_rhs_multiply", // wave-2
-		setup: seedStep("base", 21, "success"),
-		expr:  `(base * 2)`,
-		want:  42,
-	},
-	{
-		name: "arith_step_rhs_subtract", // wave-2
-		setup: seedSteps(
-			seedStep("gross", 100, "success"),
-			seedStep("fee", 30, "success")),
-		expr: `(gross - fee)`,
-		want: 70,
-	},
 }
 
 // TestStepMethodAccessors_CapitalizedRetired pins Story 5 (ADR §2.2 / #2303):
@@ -360,6 +341,17 @@ func TestExpressionEvaluators_Conformance(t *testing.T) {
 	}{
 		{"logicLocal", logicLocal},
 	})
+
+	// wave-2 (#2542 GAP 2): arithmetic step-RHS operand vocabulary, logic-time
+	// only. Kept in a separate table (declared at the end of the file) so this
+	// wave's rows never share an insertion anchor with the concurrent wave-2
+	// projection/cond rows appended to logicOnlyExprCases above.
+	run(t, wave2StepArithmeticCases, []struct {
+		name string
+		fn   func(*automations.Evaluator, string) (any, error)
+	}{
+		{"logicLocal", logicLocal},
+	})
 }
 
 // TestArithmetic_ArgTimeStaysLiteral pins the logic-only boundary of infix
@@ -401,4 +393,30 @@ func firstNodeID(r *memqlengine.ExecuteResult) string {
 		return ""
 	}
 	return r.Bundle.Nodes[0].Id
+}
+
+// wave2StepArithmeticCases pins the #2542 GAP 2 arithmetic step-RHS operand
+// vocabulary at the conformance altitude. An intermediate `x := <arith>` step
+// routes through the SAME local evaluator a terminal return uses
+// (tryEvaluateArithmeticLocally), so these rows -- a bound step operand and a
+// multi-step subtraction -- must evaluate identically through logicLocal.
+// Logic-time only; the arg-time resolver never parses infix arithmetic out of a
+// string (TestArithmetic_ArgTimeStaysLiteral). Declared here at end-of-file so
+// this wave's conformance rows never collide with the concurrent wave-2 rows
+// appended inside logicOnlyExprCases.
+var wave2StepArithmeticCases = []conformanceCase{
+	{
+		name:  "arith_step_rhs_multiply",
+		setup: seedStep("base", 21, "success"),
+		expr:  `(base * 2)`,
+		want:  42,
+	},
+	{
+		name: "arith_step_rhs_subtract",
+		setup: seedSteps(
+			seedStep("gross", 100, "success"),
+			seedStep("fee", 30, "success")),
+		expr: `(gross - fee)`,
+		want: 70,
+	},
 }
