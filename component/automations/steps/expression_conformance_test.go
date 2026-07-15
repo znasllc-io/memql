@@ -258,6 +258,40 @@ var logicOnlyExprCases = []conformanceCase{
 		expr: `(daysBetween("2026-07-01", "2026-07-15") / 7)`,
 		want: 2,
 	},
+	// Expression-led comparisons (#2542 item 5): a terminal return whose
+	// top-level node is a binary comparison over an arithmetic / literal /
+	// step operand. Serialized in the parenthesized operator form the compiler
+	// emits; EvaluateLocalExpr resolves the operands locally and applies the
+	// operator via the shared memql.EvaluateComparison. Logic-time only -- the
+	// engine rejects a BinaryComparisonExpression in any non-logic scope.
+	{
+		name: "cmp_arithmetic_led_true",
+		setup: seedSteps(
+			seedStep("revenue", 100, "success"),
+			seedStep("cost", 40, "success")),
+		expr: `((revenue - cost) > 0)`,
+		want: true,
+	},
+	{
+		name: "cmp_arithmetic_led_false",
+		setup: seedSteps(
+			seedStep("revenue", 30, "success"),
+			seedStep("cost", 40, "success")),
+		expr: `((revenue - cost) > 0)`,
+		want: false,
+	},
+	{
+		name:  "cmp_literal_led",
+		setup: seedStep("count", 3, "success"),
+		expr:  `(0 < count)`,
+		want:  true,
+	},
+	{
+		name:  "cmp_step_method_operand",
+		setup: seedStep("rows", nodeResult("v1:x:1", nil), "success"),
+		expr:  `(rows.count() >= 1)`,
+		want:  true,
+	},
 }
 
 // TestStepMethodAccessors_CapitalizedRetired pins Story 5 (ADR §2.2 / #2303):

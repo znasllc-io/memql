@@ -8,8 +8,10 @@ import (
 	"github.com/znasllc-io/memql/component/memql"
 )
 
-// logic_arithmetic.go evaluates binary arithmetic (#2316 / #2542 item 1) at
-// LOGIC time, in-memory, against the local Evaluator. A logic terminal return
+// logic_arithmetic.go evaluates binary arithmetic (#2316 / #2542 item 1) and
+// expression-led binary comparisons (#2542 item 5) at LOGIC time, in-memory,
+// against the local Evaluator -- both share the re-parse + operand-walker
+// machinery here. A logic terminal return
 // like `return revenue / orders` crosses the compile/re-parse boundary as the
 // parenthesized operator form the compiler serializer emits (`(revenue /
 // orders)`); the engine cannot evaluate it (the operand step bindings live
@@ -42,6 +44,53 @@ func tryEvaluateArithmeticLocally(expr string, evaluator *Evaluator) (any, bool,
 		return nil, false, nil
 	}
 	val, err := evalLogicArithOperand(arith, evaluator)
+	if err != nil {
+		return nil, false, err
+	}
+	return val, true, nil
+}
+
+// tryEvaluateComparisonLocally short-circuits a logic-body terminal-return
+// expression whose TOP-LEVEL node is an expression-led binary comparison
+// (`(args.a - args.b) > 0`, `delta - 5 > 0`) -- the serialized shape the
+// compiler emits for a multi-step logic whose return is a predicate over
+// computed intermediates. Each operand resolves through the same closed operand
+// walker the arithmetic path uses (evalLogicArithOperand), then the shared
+// memql.EvaluateComparison applies the operator with the engine's ordering
+// semantics -- the multi-step LogicRunner counterpart to the engine
+// single-return BinaryComparisonExpression plan-root branch (#2542 item 5).
+// Only the multi-step shape reaches here; a single-return boolean logic routes
+// through the engine directly, never through RunLogic.
+//
+// Returns (value, true, nil) when the expression is an expression-led
+// comparison that evaluated cleanly, (nil, false, nil) when it is anything else
+// (the caller falls through to its normal path), and (nil, false, err) on a hard
+// evaluation error (an unresolvable operand).
+func tryEvaluateComparisonLocally(expr string, evaluator *Evaluator) (any, bool, error) {
+	expr = strings.TrimSpace(expr)
+	// Cheap gate: no comparison operator characters, no comparison. Correctness
+	// does not depend on this -- a false positive just attempts a parse whose
+	// top-level node is not a BinaryComparisonExpr and falls through.
+	if !strings.ContainsAny(expr, "<>=!") {
+		return nil, false, nil
+	}
+	parsed, err := languageParser.ParseExpression(normalizeReparseSource(expr))
+	if err != nil {
+		return nil, false, nil
+	}
+	cmp, ok := parsed.(*languageParser.BinaryComparisonExpr)
+	if !ok {
+		return nil, false, nil
+	}
+	lhs, err := evalLogicArithOperand(cmp.Left, evaluator)
+	if err != nil {
+		return nil, false, err
+	}
+	rhs, err := evalLogicArithOperand(cmp.Right, evaluator)
+	if err != nil {
+		return nil, false, err
+	}
+	val, err := memql.EvaluateComparison(memql.ComparisonOperator(cmp.Operator), lhs, rhs)
 	if err != nil {
 		return nil, false, err
 	}

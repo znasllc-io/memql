@@ -455,7 +455,20 @@ func evalCollBinaryComparison(node *BinaryComparisonExpression, args, locals map
 	if err != nil {
 		return nil, err
 	}
-	switch node.Operator {
+	return EvaluateComparison(node.Operator, lhs, rhs)
+}
+
+// EvaluateComparison applies one of the six symbol comparison operators
+// (== != < <= > >=) to two resolved operand values via runtimeCompareValues --
+// the same numeric/string ordering the Field-led comparison path uses. Exported
+// so the automations logic runner evaluates a re-parsed expression-led terminal
+// return (`return (args.a - args.b) > 0`, #2542) with exactly the engine's
+// semantics instead of re-implementing them -- the multi-step counterpart to the
+// engine single-return BinaryComparisonExpression plan-root branch. The
+// membership / nil operators are identifier-led only and never reach an
+// expression-led comparison, so they surface here as a named error.
+func EvaluateComparison(op ComparisonOperator, lhs, rhs any) (any, error) {
+	switch op {
 	case OpEq:
 		return runtimeCompareValues(lhs, rhs) == 0, nil
 	case OpNe:
@@ -469,7 +482,7 @@ func evalCollBinaryComparison(node *BinaryComparisonExpression, args, locals map
 	case OpLe:
 		return runtimeCompareValues(lhs, rhs) <= 0, nil
 	default:
-		return nil, fmt.Errorf("operator %q is not supported in an expression-led comparison", node.Operator)
+		return nil, fmt.Errorf("operator %q is not supported in an expression-led comparison", op)
 	}
 }
 
