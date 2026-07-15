@@ -10552,6 +10552,70 @@ func SoftDeleteWorkerInvocationBuild(args SoftDeleteWorkerInvocationArgs) string
 	return b.String()
 }
 
+// StageOutboundRequest -- Stage an outbound delivery (memql#2521): insert a v1:platform:outboundRequest row with status='pending' for the engine outbound worker to drain. Credentials are never part of the row; targets must satisfy the deployment's per-medium allowlist or the worker fails the row fast.
+//
+// Bound concept: v1:platform:outboundRequest (machine-readable: BoundConcepts["stageOutboundRequest"] in generated_concepts.go).
+type StageOutboundRequestArgs struct {
+	RequestId   string
+	Medium      string
+	Target      string
+	Subject     string
+	Body        string
+	DedupeKey   string
+	RequestedBy string
+}
+
+// StageOutboundRequest calls the engine mutation stageOutboundRequest.
+func (qc *QueryClient) StageOutboundRequest(ctx context.Context, args StageOutboundRequestArgs) (*Result, error) {
+	call := StageOutboundRequestBuild(args)
+	return qc.executeNamed(ctx, "stageOutboundRequest", call)
+}
+
+func StageOutboundRequestBuild(args StageOutboundRequestArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation stageOutboundRequest(")
+	b.WriteString("requestId: ")
+	b.WriteString(fmt.Sprintf("%q", args.RequestId))
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("medium: ")
+	b.WriteString(fmt.Sprintf("%q", args.Medium))
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("target: ")
+	b.WriteString(fmt.Sprintf("%q", args.Target))
+	if args.Subject != "" {
+		if b.Len() > 30 {
+			b.WriteString(", ")
+		}
+		b.WriteString("subject: ")
+		b.WriteString(fmt.Sprintf("%q", args.Subject))
+	}
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("body: ")
+	b.WriteString(fmt.Sprintf("%q", args.Body))
+	if args.DedupeKey != "" {
+		if b.Len() > 30 {
+			b.WriteString(", ")
+		}
+		b.WriteString("dedupeKey: ")
+		b.WriteString(fmt.Sprintf("%q", args.DedupeKey))
+	}
+	if args.RequestedBy != "" {
+		if b.Len() > 30 {
+			b.WriteString(", ")
+		}
+		b.WriteString("requestedBy: ")
+		b.WriteString(fmt.Sprintf("%q", args.RequestedBy))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // StampNodeTokenBootstrap -- Update audit fields on a node_token identity row when the bootstrap handler issues a fresh JWT for it. memql#343. Read-merges the existing row and deep-merges credentials (@mergeFields) so only the rotating keyHash + bootstrappedAt/bootstrappedFrom change; nodeId/nodeType/mintedBy/expiresAt/lastConnectAt inherit from the persisted row instead of being re-supplied or wiped (memql#1628).
 //
 // Bound concept: v1:identity:identity (machine-readable: BoundConcepts["stampNodeTokenBootstrap"] in generated_concepts.go).
@@ -11421,6 +11485,66 @@ func UpdateNumberStatusBuild(args UpdateNumberStatusArgs) string {
 	}
 	b.WriteString("status: ")
 	b.WriteString(fmt.Sprintf("%q", args.Status))
+	b.WriteString(")")
+	return b.String()
+}
+
+// UpdateOutboundRequestStatus -- Stamp a delivery-state transition on a v1:platform:outboundRequest row (memql#2521). Called by the engine outbound worker (sending/sent/retrying/failed + attempt metadata); operators may set status='pending' to requeue a failed row.
+//
+// Bound concept: v1:platform:outboundRequest (machine-readable: BoundConcepts["updateOutboundRequestStatus"] in generated_concepts.go).
+type UpdateOutboundRequestStatusArgs struct {
+	RequestId     string
+	Status        string
+	Attempts      int
+	LastError     string
+	NextAttemptAt string
+	SentAt        string
+}
+
+// UpdateOutboundRequestStatus calls the engine mutation updateOutboundRequestStatus.
+func (qc *QueryClient) UpdateOutboundRequestStatus(ctx context.Context, args UpdateOutboundRequestStatusArgs) (*Result, error) {
+	call := UpdateOutboundRequestStatusBuild(args)
+	return qc.executeNamed(ctx, "updateOutboundRequestStatus", call)
+}
+
+func UpdateOutboundRequestStatusBuild(args UpdateOutboundRequestStatusArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation updateOutboundRequestStatus(")
+	b.WriteString("requestId: ")
+	b.WriteString(fmt.Sprintf("%q", args.RequestId))
+	if b.Len() > 37 {
+		b.WriteString(", ")
+	}
+	b.WriteString("status: ")
+	b.WriteString(fmt.Sprintf("%q", args.Status))
+	if args.Attempts != 0 {
+		if b.Len() > 37 {
+			b.WriteString(", ")
+		}
+		b.WriteString("attempts: ")
+		b.WriteString(fmt.Sprintf("%v", args.Attempts))
+	}
+	if args.LastError != "" {
+		if b.Len() > 37 {
+			b.WriteString(", ")
+		}
+		b.WriteString("lastError: ")
+		b.WriteString(fmt.Sprintf("%q", args.LastError))
+	}
+	if args.NextAttemptAt != "" {
+		if b.Len() > 37 {
+			b.WriteString(", ")
+		}
+		b.WriteString("nextAttemptAt: ")
+		b.WriteString(fmt.Sprintf("%q", args.NextAttemptAt))
+	}
+	if args.SentAt != "" {
+		if b.Len() > 37 {
+			b.WriteString(", ")
+		}
+		b.WriteString("sentAt: ")
+		b.WriteString(fmt.Sprintf("%q", args.SentAt))
+	}
 	b.WriteString(")")
 	return b.String()
 }

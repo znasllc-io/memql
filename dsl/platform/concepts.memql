@@ -115,3 +115,22 @@ concept missingCapability {
   @relationship(type="interactsWith", field="requestedFromPlanId", target=plan, direction="outgoing")
   @relationship(type="interactsWith", field="requestedByAgentId", target=agent, direction="outgoing")
 }
+
+// ---- concepts/v1/platform/outboundRequest/concept.memql ----
+
+@version("1.0.0")
+@namespace("platform")
+@description("A staged outbound delivery (memql#2521): the durable outbox row a product automation or logic body creates when it decides something must leave the cluster (an email, a webhook call). The engine-owned outbound worker drains pending/retrying rows, performs the delivery through the deploy-configured transport (per-medium allowlists, credentials from env/globalSecret -- NEVER from this row), and stamps the status transitions back, so delivery state is ordinary graph state products can query and react to. See docs/internal/design/outbound-delivery-adr.md.")
+concept outboundRequest {
+  medium        enum("email", "webhook") @required @description("Delivery transport. 'email' delivers via the engine email integration (Graph/SMTP/log per deployment). 'webhook' POSTs the payload as JSON to the target URL.")
+  target        string  @required @description("Where to deliver: a recipient email address for medium='email', an absolute URL for medium='webhook'. Must match the deployment's per-medium allowlist or the row fails fast.")
+  subject       string  @description("Email subject line. Ignored for medium='webhook'.")
+  body          string  @required @description("What to deliver: the email text body, or the JSON body POSTed to a webhook. Capped by MEMQL_OUTBOUND_MAX_PAYLOAD_BYTES at drain time. Never secret material. (Named body, not payload: shape paths reserve the payload prefix.)")
+  status        enum("pending", "sending", "sent", "retrying", "failed") @default("pending") @description("Delivery lifecycle. 'pending' = staged, awaiting the worker. 'sending' = a replica claimed it and is delivering. 'sent' = transport accepted it (sentAt stamped). 'retrying' = a retryable failure; eligible again at nextAttemptAt. 'failed' = permanent failure or attempts exhausted (see lastError).")
+  attempts      int     @default("0") @description("Delivery attempts made so far. Incremented on each failure; bounded by MEMQL_OUTBOUND_MAX_ATTEMPTS.")
+  lastError     string  @description("Most recent delivery error, truncated to 4KB. Empty on success.")
+  nextAttemptAt datetime @description("When a 'retrying' row becomes eligible again (bounded exponential backoff with jitter). Compared Go-side by the worker.")
+  sentAt        datetime @description("When the transport accepted the delivery.")
+  dedupeKey     string  @description("Optional caller idempotency key, passed through to the receiver (webhook: X-Memql-Dedupe-Key header) so external systems can deduplicate at-least-once redelivery.")
+  requestedBy   string  @description("Provenance: which product automation/logic staged this row. Free-form; surfaces in delivery audit queries.")
+}

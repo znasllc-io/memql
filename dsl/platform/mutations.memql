@@ -3,7 +3,7 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use platform.concepts.{ globalSecret, globalVariable, missingCapability, partitionSecret, partitionVariable }
+use platform.concepts.{ globalSecret, globalVariable, missingCapability, outboundRequest, partitionSecret, partitionVariable }
 
 // ---- mutations/v1/platform/insertPolicyTrace.memql ----
 
@@ -262,5 +262,73 @@ mutate missingCapability updateMissingCapabilityStatus {
     id: args.missingId
     args.status
     args.resolution
+  }
+}
+
+// ---- mutations/v1/platform/stageOutboundRequest.memql ----
+
+// stageOutboundRequest
+// ====================
+//
+// The zero-Go staging surface for outbound delivery (memql#2521): a
+// product automation/logic body calls this to durably request that
+// something leave the cluster. The engine-owned outbound worker drains
+// the row and stamps status transitions back. Callers derive requestId
+// deterministically (hash(concat(...))) when they want staging-time
+// idempotency.
+
+@enabled
+@description("Stage an outbound delivery (memql#2521): insert a v1:platform:outboundRequest row with status='pending' for the engine outbound worker to drain. Credentials are never part of the row; targets must satisfy the deployment's per-medium allowlist or the worker fails the row fast.")
+mutate outboundRequest stageOutboundRequest {
+  args {
+    requestId    string  @required
+    medium       string  @required
+    target       string  @required
+    subject      string
+    body         string  @required
+    dedupeKey    string
+    requestedBy  string
+  }
+  insert {
+    id: args.requestId
+    args.medium
+    args.target
+    args.subject
+    args.body
+    args.dedupeKey
+    args.requestedBy
+    status: "pending"
+    attempts: 0
+  }
+}
+
+// ---- mutations/v1/platform/updateOutboundRequestStatus.memql ----
+
+// updateOutboundRequestStatus
+// ===========================
+//
+// Worker-side status stamping for outbound delivery (memql#2521). The
+// outbound worker is the intended caller; the mutation is not scoped to
+// it (an operator can requeue a failed row by setting status='pending')
+// but products should treat delivery state as read-only.
+
+@enabled
+@description("Stamp a delivery-state transition on a v1:platform:outboundRequest row (memql#2521). Called by the engine outbound worker (sending/sent/retrying/failed + attempt metadata); operators may set status='pending' to requeue a failed row.")
+mutate outboundRequest updateOutboundRequestStatus {
+  args {
+    requestId      string  @required
+    status         string  @required
+    attempts       int
+    lastError      string
+    nextAttemptAt  string
+    sentAt         string
+  }
+  update {
+    id: args.requestId
+    args.status
+    args.attempts
+    args.lastError
+    args.nextAttemptAt
+    args.sentAt
   }
 }
