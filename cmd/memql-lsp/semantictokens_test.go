@@ -110,3 +110,25 @@ func TestSemanticTokenLegendConsistency(t *testing.T) {
 		}
 	}
 }
+
+// TestEncodeSemanticTokens_HeaderCommentSurvives is the end-to-end regression
+// net for memql#2585: pre-fix, sense.Tokenize returned a leading /* header */
+// block comment AFTER a later // line comment, and encodeSemanticTokens
+// silently dropped it on the backwards deltaLine. With Tokenize now globally
+// sorted, both comment tokens must encode.
+func TestEncodeSemanticTokens_HeaderCommentSurvives(t *testing.T) {
+	src := "/* header */\nconcept X {\n  a int // trailing\n}\n"
+	tokens := sense.New(nil).Tokenize(src)
+	data := encodeSemanticTokens(src, tokens)
+
+	const commentLegendIndex = 6 // semanticTokenTypes["comment"]
+	comments := 0
+	for i := 0; i+4 < len(data); i += 5 {
+		if data[i+3] == commentLegendIndex {
+			comments++
+		}
+	}
+	if comments != 2 {
+		t.Fatalf("want 2 encoded comment tokens (header + trailing), got %d (data=%v)", comments, data)
+	}
+}
