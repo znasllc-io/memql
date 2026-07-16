@@ -254,3 +254,74 @@ func TestPruneStaleClusterNodes_CompilesToDecideThenForEachWrite(t *testing.T) {
 		t.Fatalf("forEach body must be a single updateNodeHealth write; got %+v", prune.ForEach.Do)
 	}
 }
+
+// TestBootstrapCluster_LogicReturnResolvesCreate is the regression net for
+// memql#2579. It evaluates the EXACT terminal return authored in
+// dsl/cluster/logic.memql --
+//
+//	return existing.empty() && args.event.payload.node.type == "bff"
+//
+// -- through the logic-time local surface (EvaluateLocalExpr). On main this
+// FAILS: the top-level `&&` matches no single-node local evaluator, so it falls
+// through to engine.Execute whose default converter rejects the `existing.empty()`
+// collection-method operand with the ADR 2.2 gate ("convert logical left:
+// collection methods ... not allowed in specs or query filters"). With the
+// local logical evaluator wired in, it resolves to the correct `create` boolean.
+// (The sibling TestBootstrapCluster_GateSemantics only exercises the automation
+// `if steps.decide.result == true` given a decide result; it never evaluates the
+// logic body that PRODUCES that boolean.)
+func TestBootstrapCluster_LogicReturnResolvesCreate(t *testing.T) {
+	const ret = `existing.empty() && args.event.payload.node.type == "bff"`
+
+	mkEval := func(clusterExists bool, nodeType string) *Evaluator {
+		e := NewEvaluator()
+		nodes := []any{}
+		if clusterExists {
+			nodes = []any{map[string]any{"id": "v1:cluster:cluster:development"}}
+		}
+		e.SetStepResult("existing", &StepResult{
+			StepId: "existing",
+			Status: "success",
+			Result: map[string]any{"Bundle": map[string]any{"nodes": nodes}},
+		})
+		e.SetCustom("args", map[string]any{
+			"event": map[string]any{
+				"payload": map[string]any{
+					"node": map[string]any{"type": nodeType},
+				},
+			},
+		})
+		return e
+	}
+
+	cases := []struct {
+		name          string
+		clusterExists bool
+		nodeType      string
+		want          bool
+	}{
+		{"no cluster + bff -> create", false, "bff", true},
+		{"cluster exists + bff -> skip", true, "bff", false},
+		{"no cluster + agent -> skip", false, "agent", false},
+		{"cluster exists + agent -> skip", true, "agent", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e := mkEval(tc.clusterExists, tc.nodeType)
+			val, handled, err := EvaluateLocalExpr(ret, e)
+			if err != nil {
+				t.Fatalf("EvaluateLocalExpr error (pre-fix this hit the ADR 2.2 gate): %v", err)
+			}
+			if !handled {
+				t.Fatalf("expected handled=true: the local logical evaluator must claim a top-level && return")
+			}
+			got, ok := val.(bool)
+			if !ok {
+				t.Fatalf("expected bool result (locks the create boolean sense), got %T (%#v)", val, val)
+			}
+			if got != tc.want {
+				t.Errorf("create = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
