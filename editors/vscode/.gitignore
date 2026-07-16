@@ -1,0 +1,10 @@
+node_modules/
+out/
+*.vsix
+.vscode-test/
+
+# The repo-root .gitignore ignores package.json / package-lock.json (this is a
+# Go repo); re-include the VS Code extension's manifest + lockfile, which must
+# be tracked.
+!package.json
+!package-lock.json

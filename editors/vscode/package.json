@@ -1,0 +1,104 @@
+{
+  "name": "memql",
+  "displayName": "MemQL",
+  "description": "Language support for MemQL (.memql): syntax highlighting, diagnostics, completion, hover, and signature help, powered by the offline memql-lsp language server.",
+  "version": "0.1.0",
+  "publisher": "znasllc",
+  "license": "SEE LICENSE IN LICENSE",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onLanguage:memql"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "memql",
+        "aliases": [
+          "MemQL",
+          "memql"
+        ],
+        "extensions": [
+          ".memql"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "memql",
+        "scopeName": "source.memql",
+        "path": "./syntaxes/memql.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "title": "MemQL",
+      "properties": {
+        "memql.lsp.serverPath": {
+          "type": "string",
+          "default": "",
+          "description": "Absolute path to the memql-lsp binary. When empty, the extension uses the bundled platform binary if present, otherwise 'memql-lsp' on PATH."
+        },
+        "memql.lsp.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "Trace the communication between VS Code and the memql-lsp server."
+        }
+      }
+    },
+    "semanticTokenScopes": [
+      {
+        "language": "memql",
+        "scopes": {
+          "keyword": [
+            "keyword.control.memql"
+          ],
+          "variable": [
+            "variable.other.memql"
+          ],
+          "string": [
+            "string.quoted.double.memql"
+          ],
+          "number": [
+            "constant.numeric.memql"
+          ],
+          "operator": [
+            "keyword.operator.memql"
+          ],
+          "decorator": [
+            "storage.modifier.memql"
+          ],
+          "comment": [
+            "comment.line.memql"
+          ],
+          "type": [
+            "entity.name.type.memql"
+          ]
+        }
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.4.0"
+  }
+}
