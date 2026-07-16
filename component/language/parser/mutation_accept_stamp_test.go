@@ -231,6 +231,51 @@ func TestNormaliseMutation_AcceptStamp_NestedRejectsStrayFields(t *testing.T) {
 	}
 }
 
+func TestNormaliseMutation_AcceptStamp_RejectsSplitAcrossBoundary(t *testing.T) {
+	// accept/stamp must sit on ONE side of the write block. Splitting them --
+	// one nested, the other at the top level -- must not silently drop the
+	// outer block: the desugar only ever reads the nested region, so an
+	// unnoticed outer `accept` yields a write with an EMPTY payload (an update
+	// that writes nothing), which is the worst possible failure mode.
+	cases := map[string]string{
+		"accept nested, stamp outside": `mutate space createSpace {
+  args {
+    id   string @required
+    name string @required
+  }
+  insert { accept { name } }
+  stamp { id: args.id }
+}`,
+		"stamp nested, accept outside": `mutate space createSpace {
+  args {
+    id   string @required
+    name string @required
+  }
+  insert { stamp { id: args.id } }
+  accept { name }
+}`,
+		"update, stamp nested, accept outside": `mutate conversation setConversationInsight {
+  args {
+    conversationId string @required
+    summary        string @required
+  }
+  update { stamp { id: args.conversationId } }
+  accept { summary }
+}`,
+	}
+	for name, src := range cases {
+		t.Run(name, func(t *testing.T) {
+			out, err := NormaliseMutationSource(src)
+			if err == nil {
+				t.Fatalf("expected an error: accept/stamp split across the write-block boundary; got %q", out)
+			}
+			if !strings.Contains(err.Error(), "cannot mix") {
+				t.Fatalf("error should explain the exclusion; got %q", err.Error())
+			}
+		})
+	}
+}
+
 func TestNormaliseMutation_AcceptStamp_UpdateRequiresMatchingArg(t *testing.T) {
 	// The accept auto-bind guard must fire on the update path too.
 	src := `mutate conversation setConversationInsight {

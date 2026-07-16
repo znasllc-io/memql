@@ -820,6 +820,30 @@ func parseStructMutationBody(body string) (*structMutationBody, error) {
 		return nil, err
 	}
 
+	// When a write block exists, accept/stamp belong INSIDE it. Anything left
+	// outside is invisible to the desugar below, which reads `region` alone --
+	// so it must be rejected, never dropped. This has to run BEFORE the
+	// desugar branch and independently of what the region itself holds: the
+	// split case (one block nested, the other outside) otherwise desugars from
+	// the nested half and silently discards the outer one, whose worst form is
+	// a nested `stamp` plus an outer `accept` emitting a write with an EMPTY
+	// payload -- an update that writes nothing.
+	if nested {
+		writeHeader := regexp.MustCompile(`(^|[\n\r])[ \t]*` + writeKind + `[ \t]*\{`)
+		outside := stripBraceBlock(body, writeHeader)
+		_, strayAccept, aerr := extractBraceBlock(outside, acceptBlockHeader, "accept")
+		if aerr != nil {
+			return nil, aerr
+		}
+		_, strayStamp, serr := extractBraceBlock(outside, stampBlockHeader, "stamp")
+		if serr != nil {
+			return nil, serr
+		}
+		if strayAccept || strayStamp {
+			return nil, fmt.Errorf("mutation body cannot mix the accept/stamp form with an explicit `%s { ... }` block -- nest `accept`/`stamp` inside the write block, or drop the block", writeKind)
+		}
+	}
+
 	if hasAccept || hasStamp {
 		// A nested write block may carry NOTHING but accept/stamp: the
 		// desugar rebuilds the body from those two blocks alone, so a stray
@@ -857,14 +881,8 @@ func parseStructMutationBody(body string) (*structMutationBody, error) {
 
 	if nested {
 		// An explicit write block with no accept/stamp inside: the legacy
-		// form, unchanged. Guard against accept/stamp sitting OUTSIDE it,
-		// where the desugar would never see them (#2035's exclusion rule --
-		// now with nesting as the way to combine them).
-		_, strayAccept, _ := extractBraceBlock(body, acceptBlockHeader, "accept")
-		_, strayStamp, _ := extractBraceBlock(body, stampBlockHeader, "stamp")
-		if strayAccept || strayStamp {
-			return nil, fmt.Errorf("mutation body cannot mix the accept/stamp form with an explicit `%s { ... }` block -- nest `accept`/`stamp` inside the write block, or drop the block", writeKind)
-		}
+		// form, unchanged. The stray guard above has already rejected any
+		// accept/stamp sitting outside it.
 		out.writeKind = writeKind
 		out.writeBody = region
 		out.writeTarget = writeTarget
