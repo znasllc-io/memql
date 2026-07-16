@@ -14,6 +14,12 @@
   "activationEvents": [
     "onLanguage:memql"
   ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true,
+      "description": "The server only parses .memql files (no code execution) and resolves its binary from user settings / bundle / PATH, never from workspace settings."
+    }
+  },
   "main": "./out/extension.js",
   "contributes": {
     "languages": [
@@ -42,7 +48,8 @@
         "memql.lsp.serverPath": {
           "type": "string",
           "default": "",
-          "description": "Absolute path to the memql-lsp binary. When empty, the extension uses the bundled platform binary if present, otherwise 'memql-lsp' on PATH."
+          "scope": "machine",
+          "description": "Absolute path to the memql-lsp binary. When empty, the extension uses the bundled platform binary if present, otherwise 'memql-lsp' on PATH. For security this is a machine/user-scoped setting only -- it is deliberately not configurable per workspace, so an untrusted folder cannot redirect the extension to an arbitrary executable."
         },
         "memql.lsp.trace.server": {
           "type": "string",

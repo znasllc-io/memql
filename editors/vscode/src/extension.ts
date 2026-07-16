@@ -49,12 +49,19 @@ export function deactivate(): Thenable<void> | undefined {
 }
 
 // resolveServerPath picks the memql-lsp binary in priority order:
-//   1. the memql.lsp.serverPath setting (if non-empty),
+//   1. the memql.lsp.serverPath USER setting (if non-empty),
 //   2. a bundled platform binary at bin/<platform>-<arch>/memql-lsp,
 //   3. 'memql-lsp' resolved from PATH.
+//
+// SECURITY: serverPath is read only from the USER (global) settings, never from
+// workspace-scoped settings. A workspace-scoped value comes from a
+// `.vscode/settings.json` inside the opened folder, which an attacker controls;
+// honoring it would let a malicious repo point the extension at an arbitrary
+// executable and run it (arbitrary code execution). The bundled binary and the
+// PATH fallback are not workspace-controlled.
 function resolveServerPath(context: ExtensionContext): string | undefined {
-  const configured = workspace.getConfiguration('memql.lsp').get<string>('serverPath');
-  if (configured && configured.trim() !== '') {
+  const configured = workspace.getConfiguration('memql.lsp').inspect<string>('serverPath')?.globalValue;
+  if (typeof configured === 'string' && configured.trim() !== '') {
     return configured;
   }
 
