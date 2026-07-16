@@ -65,6 +65,19 @@ workbench:
 mcp:
 	$(GO) build $(GOFLAGS) -tags mcp -o $(BIN_DIR)/memql-mcp .
 
+.PHONY: memql-lsp vscode-grammar vscode-package
+## Build the memql-lsp binary (offline VS Code language server)
+memql-lsp:
+	$(GO) build $(GOFLAGS) -o $(BIN_DIR)/memql-lsp ./cmd/memql-lsp
+
+## Regenerate the VS Code TextMate grammar from dslspec (run on GrammarVersion bump)
+vscode-grammar: memql-lsp
+	$(BIN_DIR)/memql-lsp gen-grammar editors/vscode/syntaxes/memql.tmLanguage.json
+
+## Package the VS Code extension into a .vsix (bundles the darwin-arm64 binary)
+vscode-package:
+	bash scripts/vscode/package.sh
+
 ## Generate Go from .templ files for the identity web app.
 ## Uses `go run` so contributors don't need templ on their PATH.
 identity-templ:
