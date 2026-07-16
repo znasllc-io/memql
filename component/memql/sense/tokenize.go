@@ -1,6 +1,7 @@
 package sense
 
 import (
+	"sort"
 	"strings"
 
 	"github.com/znasllc-io/memql/component/language/parser"
@@ -155,6 +156,17 @@ func extractComments(source string) []Token {
 	for i := 0; i < len(source)-1; i++ {
 		if source[i] == '/' && source[i+1] == '*' {
 			startPos := positionFromOffset(source, i)
+			// Skip a `/*` that sits inside a string literal (e.g. the value
+			// "/* not */") -- it belongs to the lexer's string token, not a
+			// real comment. Emitting one here would mint a spurious comment
+			// token overlapping the string token, which LSP disallows. Reuse
+			// the line-based isInsideString heuristic (as the // scan above
+			// already does): startPos.Column-1 is the 0-indexed offset of `/*`
+			// within its line.
+			if l := startPos.Line - 1; l >= 0 && l < len(lines) &&
+				isInsideString(lines[l], startPos.Column-1) {
+				continue
+			}
 			end := strings.Index(source[i+2:], "*/")
 			if end < 0 {
 				end = len(source) - i - 2
@@ -175,6 +187,16 @@ func extractComments(source string) []Token {
 			i = endIdx - 1 // skip past the comment
 		}
 	}
+
+	// mergeTokens (Tokenize Phase 4) merges two sorted lists, but line
+	// comments are collected in line order and block comments afterwards in
+	// source order, so the combined slice is not globally sorted by
+	// (line, col). Sort here so every consumer -- the LSP delta-encoder (which
+	// silently drops a token on a backwards delta), the Cockpit gRPC path, and
+	// the lexer-error fallback -- receives a monotonic, mergeable stream.
+	sort.SliceStable(tokens, func(a, b int) bool {
+		return tokenBefore(tokens[a], tokens[b])
+	})
 
 	return tokens
 }

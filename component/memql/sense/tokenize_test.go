@@ -253,3 +253,67 @@ func TestTokenize_InvocationKindPrefixesAreKeywords(t *testing.T) {
 		}
 	}
 }
+
+// TestTokenize_HeaderBlockCommentSortedBeforeLineComment is the regression net
+// for memql#2585: extractComments appended block comments after line comments,
+// so a leading /* header */ landed AFTER a later // line comment. Tokenize
+// output must be globally sorted by (line, col), so the header block comment
+// precedes the trailing line comment and no consumer (notably the LSP delta
+// encoder) drops it on a backwards delta.
+func TestTokenize_HeaderBlockCommentSortedBeforeLineComment(t *testing.T) {
+	src := "/* header */\nconcept X {\n  a int // trailing\n}\n"
+	svc := &Service{}
+	tokens := svc.Tokenize(src)
+
+	// Globally sorted by (line, col): no token starts before its predecessor.
+	for i := 1; i < len(tokens); i++ {
+		if tokenBefore(tokens[i], tokens[i-1]) {
+			t.Fatalf("tokens not globally sorted at %d: %+v came before %+v",
+				i, tokens[i].Range.Start, tokens[i-1].Range.Start)
+		}
+	}
+
+	// Both comment tokens survive, header (line 1) before trailing (line 3).
+	var comments []Token
+	for _, tk := range tokens {
+		if tk.Type == "comment" {
+			comments = append(comments, tk)
+		}
+	}
+	if len(comments) != 2 {
+		t.Fatalf("want 2 comment tokens (header + trailing), got %d: %+v", len(comments), comments)
+	}
+	if comments[0].Range.Start.Line != 1 {
+		t.Errorf("first comment should be the line-1 header, got line %d (%q)",
+			comments[0].Range.Start.Line, comments[0].Literal)
+	}
+	if comments[1].Range.Start.Line != 3 {
+		t.Errorf("second comment should be the line-3 trailing comment, got line %d (%q)",
+			comments[1].Range.Start.Line, comments[1].Literal)
+	}
+}
+
+// TestTokenize_NoCommentInsideStringLiteral is the regression net for the
+// second memql#2585 defect: a `/*` inside a string literal minted a spurious
+// comment token overlapping the lexer's string token (LSP disallows overlaps).
+func TestTokenize_NoCommentInsideStringLiteral(t *testing.T) {
+	src := "concept X {\n  a string = \"/* not */\"\n}\n"
+	svc := &Service{}
+	tokens := svc.Tokenize(src)
+
+	for _, tk := range tokens {
+		if tk.Type == "comment" {
+			t.Fatalf("no comment token expected (the /* is inside a string), got %+v", tk)
+		}
+	}
+	// No overlap: on any single line, each token starts at or after the
+	// previous token's end column.
+	for i := 1; i < len(tokens); i++ {
+		prev, cur := tokens[i-1], tokens[i]
+		if cur.Range.Start.Line == prev.Range.End.Line &&
+			cur.Range.Start.Column < prev.Range.End.Column {
+			t.Errorf("overlapping tokens: %+v (%q) overlaps %+v (%q)",
+				cur.Range, cur.Literal, prev.Range, prev.Literal)
+		}
+	}
+}
