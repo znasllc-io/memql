@@ -28,9 +28,17 @@ type FunctionInfo struct {
 	Name        string
 	Description string
 	Kind        string // "query", "mutation", "automation", "spec", "tool", "builtin", "prompt", "provider", "shape"
-	ArgsDoc     string // serialized arg assertions or description
+	ArgsDoc     string // leading documentation comment block
+	Args        []ArgInfo // declared args from the function's `args { ... }` block
 	Enabled     bool
 	Deprecated  string
+}
+
+// ArgInfo is one declared argument of a function, projected for signature help.
+type ArgInfo struct {
+	Name     string
+	Type     string // "string", "number", "bool", "object", "array", "any"
+	Required bool
 }
 
 // ConceptInfo is a lightweight projection of a concept definition.

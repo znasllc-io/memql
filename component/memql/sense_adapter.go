@@ -37,9 +37,31 @@ func (a *SenseAdapter) FunctionGet(name string) (*sense.FunctionInfo, bool) {
 		Description: fn.Description,
 		Kind:        fn.FunctionKind,
 		ArgsDoc:     fn.UsageDoc,
+		Args:        senseArgsFromSchema(fn.ArgsSchema),
 		Enabled:     fn.Enabled,
 		Deprecated:  fn.Deprecated,
 	}, true
+}
+
+// senseArgsFromSchema projects a function's parsed `args { ... }` schema into
+// the flat arg list Sense needs for signature help. nil schema (builtins, or a
+// function with no args block) yields nil.
+func senseArgsFromSchema(schema *ArgsSchemaConfig) []sense.ArgInfo {
+	if schema == nil {
+		return nil
+	}
+	args := make([]sense.ArgInfo, 0, len(schema.Fields))
+	for _, f := range schema.Fields {
+		if f == nil {
+			continue
+		}
+		args = append(args, sense.ArgInfo{
+			Name:     f.Name,
+			Type:     f.Type,
+			Required: !f.Optional,
+		})
+	}
+	return args
 }
 
 func (a *SenseAdapter) ConceptNames() []string {
@@ -101,9 +123,14 @@ func (a *SenseAdapter) PromptNames() []string {
 	if a.engine.prompts == nil {
 		return nil
 	}
-	// PromptRegistry doesn't have Names(), iterate via known prompts.
-	// For now return nil -- prompts are loaded dynamically.
-	return nil
+	prompts := a.engine.prompts.List()
+	names := make([]string, 0, len(prompts))
+	for _, p := range prompts {
+		if p != nil && p.Name != "" {
+			names = append(names, p.Name)
+		}
+	}
+	return names
 }
 
 func (a *SenseAdapter) PromptGet(name string) (*sense.PromptInfo, bool) {

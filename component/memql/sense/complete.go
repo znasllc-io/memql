@@ -4,6 +4,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/znasllc-io/memql/component/language/annotations"
 )
 
 // Complete returns completion suggestions at a cursor position.
@@ -95,35 +97,34 @@ func (s *Service) completeAnnotation(ctx CursorContext) []CompletionItem {
 	return items
 }
 
-// completeAnnotationArgs returns completions for annotation arguments.
+// completeAnnotationArgs returns completions for annotation arguments. The
+// keyword-argument suggestions (@trigger(event=...), @handler(type=...), ...)
+// are sourced from the annotations registry (SoT) rather than a hand-maintained
+// switch, so a newly-modeled annotation argument surfaces here automatically.
 func (s *Service) completeAnnotationArgs(ctx CursorContext) []CompletionItem {
 	var items []CompletionItem
 
-	switch ctx.AnnotationName {
-	case "trigger":
-		items = append(items,
-			CompletionItem{Label: "event", Kind: "field", Detail: "string", Documentation: "Event pattern to trigger on.", InsertText: "event=", SortPriority: 1},
-			CompletionItem{Label: "schedule", Kind: "field", Detail: "string", Documentation: "Cron schedule.", InsertText: "schedule=", SortPriority: 2},
-		)
-	case "cache":
-		items = append(items,
-			CompletionItem{Label: "ttl", Kind: "field", Detail: "int", Documentation: "Cache TTL in seconds.", InsertText: "ttl=", SortPriority: 1},
-		)
-	case "handler":
-		items = append(items,
-			CompletionItem{Label: "type", Kind: "field", Detail: "string", Documentation: "Handler type: query, webhook, or function.", InsertText: "type=", SortPriority: 1},
-			CompletionItem{Label: "query", Kind: "field", Detail: "string", Documentation: "MemQL query expression.", InsertText: "query=", SortPriority: 2},
-		)
-	case "defaultProvider":
-		// Suggest provider names.
-		if s.registries != nil {
-			for _, name := range s.registries.ProviderNames() {
-				if strings.HasPrefix(name, ctx.Prefix) {
-					items = append(items, CompletionItem{
-						Label: name, Kind: "provider", Detail: "provider",
-						InsertText: "\"" + name + "\"", SortPriority: 1,
-					})
-				}
+	// Keyword-argument annotations: suggest each accepted keyword from the
+	// registry.
+	for i, spec := range annotations.KeywordArgsFor(ctx.AnnotationName) {
+		if ctx.Prefix != "" && !strings.HasPrefix(spec.Name, ctx.Prefix) {
+			continue
+		}
+		items = append(items, CompletionItem{
+			Label: spec.Name, Kind: "field", Detail: spec.Type,
+			Documentation: spec.Doc, InsertText: spec.Name + "=",
+			SortPriority: i + 1,
+		})
+	}
+
+	// Value annotations that suggest a value set rather than keyword pairs.
+	if ctx.AnnotationName == "defaultProvider" && s.registries != nil {
+		for _, name := range s.registries.ProviderNames() {
+			if strings.HasPrefix(name, ctx.Prefix) {
+				items = append(items, CompletionItem{
+					Label: name, Kind: "provider", Detail: "provider",
+					InsertText: "\"" + name + "\"", SortPriority: 1,
+				})
 			}
 		}
 	}

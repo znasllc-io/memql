@@ -42,7 +42,12 @@ func (s *Service) Tokenize(source string) []Token {
 	return tokens
 }
 
-// mapTokenType maps a parser token to a semantic token.
+// mapTokenType maps a parser token to a semantic token. Keyword coloring is
+// SoT-driven: reserved words (use, in, if, return, ...) color via the lexer's
+// TokenKeyword* set, and lowercase construct keywords color via constructKeywords
+// (projected from dslspec). The retired-operator audit item ("import"/"has"
+// coloring) no longer applies -- imports are `use` (colored) and `has` was
+// removed with the single `in` membership operator.
 func mapTokenType(pt parser.Token) Token {
 	var tokenType string
 	switch pt.Type {

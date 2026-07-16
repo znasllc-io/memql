@@ -160,3 +160,52 @@ func Set(receiver string) map[string]bool {
 	}
 	return out
 }
+
+// ArgSpec is one keyword argument an annotation accepts inside @name(...).
+type ArgSpec struct {
+	Name string // keyword-arg name, e.g. "event"
+	Type string // "string", "int", ...
+	Doc  string // one-line completion/hover doc
+}
+
+// KeywordArgs maps an annotation name to the keyword arguments its
+// parenthesized form accepts, i.e. @name(arg=value, ...). It is the source of
+// truth for the editor's completion inside an annotation's argument list, so
+// the Sense surface no longer hand-maintains its own copy. Only annotations
+// whose form is a set of key=value pairs appear here; single-value annotations
+// (@description("..."), @model("...")) and flag annotations (@enabled) do not.
+// Every key must be an annotation the ByReceiver/Docs surface knows (guarded by
+// a test in component/memql/sense).
+var KeywordArgs = map[string][]ArgSpec{
+	"trigger": {
+		{Name: "event", Type: "string", Doc: "Event pattern, e.g. \"graph.node.created.*.v1:ns:concept\"."},
+		{Name: "schedule", Type: "string", Doc: "Cron schedule, e.g. \"0 0 * * * *\"."},
+		{Name: "concept", Type: "string", Doc: "Concept id the triggering event targets."},
+		{Name: "partition", Type: "string", Doc: "Partition selector, e.g. \"*\" for all partitions. Required while the event topic carries a partition segment (#56 phase 8)."},
+	},
+	"handler": {
+		{Name: "type", Type: "string", Doc: "Handler type: \"query\", \"function\", or \"webhook\"."},
+		{Name: "query", Type: "string", Doc: "MemQL query expression (with type=\"query\")."},
+		{Name: "name", Type: "string", Doc: "Function name (with type=\"function\")."},
+	},
+	"cache": {
+		{Name: "ttl", Type: "string", Doc: "Cache TTL in whole seconds, e.g. ttl=\"300\"."},
+	},
+	"rateLimit": {
+		{Name: "maxCalls", Type: "int", Doc: "Maximum calls allowed per period."},
+		{Name: "periodSeconds", Type: "int", Doc: "Rate-limit window in seconds."},
+	},
+	"relationship": {
+		{Name: "type", Type: "string", Doc: "Relationship type: parent, alias, equals, contains, ..."},
+		{Name: "field", Type: "string", Doc: "Local field holding the foreign key."},
+		{Name: "target", Type: "string", Doc: "Target concept id, e.g. \"v1:ns:concept\"."},
+		{Name: "direction", Type: "string", Doc: "\"outgoing\" or \"incoming\"."},
+	},
+}
+
+// KeywordArgsFor returns the keyword arguments an annotation accepts inside its
+// @name(...) form, or nil when it takes none (or takes a single value rather
+// than keyword pairs).
+func KeywordArgsFor(name string) []ArgSpec {
+	return KeywordArgs[name]
+}
