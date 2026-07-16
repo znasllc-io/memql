@@ -19,10 +19,11 @@ const lsName = "memql-lsp"
 // at initialize, rebuilt as the workspace changes -- WP4). It serves push
 // diagnostics and semantic tokens from Sense.
 type server struct {
-	root string
-	log  commonlog.Logger
-	docs *documentStore
-	diag *diagnosticsDebouncer
+	root    string
+	log     commonlog.Logger
+	docs    *documentStore
+	diag    *diagnosticsDebouncer
+	rebuild *rebuildDebouncer
 
 	mu    sync.RWMutex
 	sense *sense.Service
@@ -30,11 +31,25 @@ type server struct {
 
 func newServer(root string, log commonlog.Logger) *server {
 	return &server{
-		root: root,
-		log:  log,
-		docs: newDocumentStore(),
-		diag: newDiagnosticsDebouncer(diagnosticsDebounce),
+		root:    root,
+		log:     log,
+		docs:    newDocumentStore(),
+		diag:    newDiagnosticsDebouncer(diagnosticsDebounce),
+		rebuild: newRebuildDebouncer(rebuildDebounce),
 	}
+}
+
+// scheduleRebuild debounces an offline-Sense rebuild after a save / watched-file
+// change so a concept or shape added in one file becomes visible to
+// completion/hover in the others. After the swap it republishes diagnostics for
+// every open document against the new registry.
+func (s *server) scheduleRebuild(notify glsp.NotifyFunc) {
+	s.rebuild.schedule(func() {
+		s.buildSense()
+		for _, uri := range s.docs.uris() {
+			s.publishDiagnostics(notify, uri)
+		}
+	})
 }
 
 // getSense returns the current Sense service (nil before initialize).
@@ -77,6 +92,10 @@ func (s *server) handler() *protocol.Handler {
 		TextDocumentDidSave:            s.didSave,
 		TextDocumentDidClose:           s.didClose,
 		TextDocumentSemanticTokensFull: s.semanticTokensFull,
+		TextDocumentCompletion:         s.completion,
+		TextDocumentHover:              s.hover,
+		TextDocumentSignatureHelp:      s.signatureHelp,
+		WorkspaceDidChangeWatchedFiles: s.didChangeWatchedFiles,
 	}
 }
 
@@ -102,6 +121,13 @@ func (s *server) initialize(_ *glsp.Context, _ *protocol.InitializeParams) (any,
 			},
 			Full: &fullTokens,
 		},
+		CompletionProvider: &protocol.CompletionOptions{
+			TriggerCharacters: completionTriggerChars,
+		},
+		HoverProvider: true,
+		SignatureHelpProvider: &protocol.SignatureHelpOptions{
+			TriggerCharacters: signatureHelpTriggerChars,
+		},
 	}
 	s.log.Infof("initialize: workspace root=%s", s.root)
 	return protocol.InitializeResult{
@@ -116,6 +142,7 @@ func (s *server) initialized(_ *glsp.Context, _ *protocol.InitializedParams) err
 
 func (s *server) shutdown(_ *glsp.Context) error {
 	s.diag.stopAll()
+	s.rebuild.stop()
 	return nil
 }
 
@@ -145,6 +172,14 @@ func (s *server) didChange(ctx *glsp.Context, params *protocol.DidChangeTextDocu
 
 func (s *server) didSave(ctx *glsp.Context, params *protocol.DidSaveTextDocumentParams) error {
 	s.publishDiagnostics(ctx.Notify, params.TextDocument.URI)
+	// A save may have added/edited a concept or shape; rebuild the registry so
+	// it becomes visible to completion/hover in other files.
+	s.scheduleRebuild(ctx.Notify)
+	return nil
+}
+
+func (s *server) didChangeWatchedFiles(ctx *glsp.Context, _ *protocol.DidChangeWatchedFilesParams) error {
+	s.scheduleRebuild(ctx.Notify)
 	return nil
 }
 

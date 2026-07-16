@@ -15,6 +15,10 @@ import (
 // recompute, so a burst of keystrokes yields one Diagnose pass, not one per key.
 const diagnosticsDebounce = 300 * time.Millisecond
 
+// rebuildDebounce is the quiet period after the last save / watched-file change
+// before the offline Sense registry rebuilds (an expensive full re-load).
+const rebuildDebounce = 300 * time.Millisecond
+
 // publishDiagnostics runs Sense's Diagnose over the document's current buffer and
 // pushes the mapped diagnostics to the client. A closed/unknown document, or a
 // nil Sense service, publishes an empty set (which also clears stale squiggles).
@@ -107,5 +111,34 @@ func (d *diagnosticsDebouncer) stopAll() {
 	for uri, t := range d.timers {
 		t.Stop()
 		delete(d.timers, uri)
+	}
+}
+
+// rebuildDebouncer coalesces workspace-wide Sense rebuilds behind a single
+// timer (the rebuild is not per-document).
+type rebuildDebouncer struct {
+	mu    sync.Mutex
+	timer *time.Timer
+	delay time.Duration
+}
+
+func newRebuildDebouncer(delay time.Duration) *rebuildDebouncer {
+	return &rebuildDebouncer{delay: delay}
+}
+
+func (r *rebuildDebouncer) schedule(fn func()) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.timer != nil {
+		r.timer.Stop()
+	}
+	r.timer = time.AfterFunc(r.delay, fn)
+}
+
+func (r *rebuildDebouncer) stop() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.timer != nil {
+		r.timer.Stop()
 	}
 }
