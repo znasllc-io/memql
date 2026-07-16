@@ -114,3 +114,137 @@ func TestNormaliseMutation_Accept_RejectsMixWithInsert(t *testing.T) {
 		t.Fatalf("error should explain the mutual exclusion; got %q", err.Error())
 	}
 }
+
+// --- nested form (memql#2592) -------------------------------------------------
+//
+// The bare form above spells no write kind and means insert (#2035). Nesting
+// accept/stamp INSIDE a write block spells the kind where it has always been
+// spelled, which is what lets an `update` adopt the sugar. Before #2592 the
+// rewriter pinned writeKind = "insert" unconditionally, so an update could not
+// use accept/stamp at all -- and a nested attempt tripped the mix guard.
+
+func TestNormaliseMutation_AcceptStamp_UpdateForm(t *testing.T) {
+	src := `mutate conversation setConversationInsight {
+  args {
+    conversationId string @required
+    summary        string @required
+    sentiment      string @required
+  }
+  update {
+    accept { summary, sentiment }
+    stamp  { id: args.conversationId }
+  }
+}`
+	out, err := NormaliseMutationSource(src)
+	if err != nil {
+		t.Fatalf("accept/stamp nested under update should rewrite cleanly, got: %v", err)
+	}
+	// The load-bearing assertion: the emitted write kind is update, not insert.
+	if !strings.Contains(out, "return update(") {
+		t.Fatalf("expected an update write; got %q", out)
+	}
+	if strings.Contains(out, "return insert(") {
+		t.Fatalf("update form must not emit an insert; got %q", out)
+	}
+	if !strings.Contains(out, "id=args.conversationId") {
+		t.Fatalf("stamped id should hoist to the positional id=; got %q", out)
+	}
+	for _, want := range []string{"summary: args.summary", "sentiment: args.sentiment"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected auto-bound %q in payload; got %q", want, out)
+		}
+	}
+}
+
+func TestNormaliseMutation_AcceptStamp_InsertFormNested(t *testing.T) {
+	src := `mutate space createSpace {
+  args {
+    id   string @required
+    name string @required
+  }
+  insert {
+    accept { name }
+    stamp  { id: args.id }
+  }
+}`
+	out, err := NormaliseMutationSource(src)
+	if err != nil {
+		t.Fatalf("accept/stamp nested under insert should rewrite cleanly, got: %v", err)
+	}
+	if !strings.Contains(out, "return insert(") {
+		t.Fatalf("expected an insert write; got %q", out)
+	}
+	if !strings.Contains(out, "id=args.id") || !strings.Contains(out, "name: args.name") {
+		t.Fatalf("expected hoisted id and auto-bound name; got %q", out)
+	}
+}
+
+func TestNormaliseMutation_AcceptStamp_BareFormStillInserts(t *testing.T) {
+	// Regression: the #2035 bare form spells no kind and must keep meaning
+	// insert. #2592 must not silently retarget it.
+	src := `mutate space createSpace {
+  args { id string @required }
+  accept { id }
+}`
+	out, err := NormaliseMutationSource(src)
+	if err != nil {
+		t.Fatalf("bare accept form should still rewrite cleanly, got: %v", err)
+	}
+	if !strings.Contains(out, "return insert(") {
+		t.Fatalf("bare accept/stamp form must still mean insert; got %q", out)
+	}
+}
+
+func TestNormaliseMutation_AcceptStamp_UpdateRequiresId(t *testing.T) {
+	src := `mutate conversation setConversationInsight {
+  args { summary string @required }
+  update {
+    accept { summary }
+  }
+}`
+	_, err := NormaliseMutationSource(src)
+	if err == nil {
+		t.Fatal("expected an error: an update needs an id: line to identify the row")
+	}
+	if !strings.Contains(err.Error(), "id") {
+		t.Fatalf("error should name the missing id; got %q", err.Error())
+	}
+}
+
+func TestNormaliseMutation_AcceptStamp_NestedRejectsStrayFields(t *testing.T) {
+	// A stray `key: value` beside a nested accept/stamp would be silently
+	// dropped by the desugar, so it is rejected rather than lost.
+	src := `mutate message notify {
+  args { conversationId string @required, text string @required }
+  insert {
+    accept { conversationId, text }
+    stamp  { id: args.conversationId }
+    who: "agent"
+  }
+}`
+	_, err := NormaliseMutationSource(src)
+	if err == nil {
+		t.Fatal("expected an error: a stray field beside nested accept/stamp would be dropped")
+	}
+	if !strings.Contains(err.Error(), "who") {
+		t.Fatalf("error should name the stray field; got %q", err.Error())
+	}
+}
+
+func TestNormaliseMutation_AcceptStamp_UpdateRequiresMatchingArg(t *testing.T) {
+	// The accept auto-bind guard must fire on the update path too.
+	src := `mutate conversation setConversationInsight {
+  args { conversationId string @required }
+  update {
+    accept { summary }
+    stamp  { id: args.conversationId }
+  }
+}`
+	_, err := NormaliseMutationSource(src)
+	if err == nil {
+		t.Fatal("expected an error: accepted `summary` has no matching arg")
+	}
+	if !strings.Contains(err.Error(), "no matching arg") {
+		t.Fatalf("error should explain the missing arg; got %q", err.Error())
+	}
+}

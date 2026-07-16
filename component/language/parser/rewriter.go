@@ -778,28 +778,57 @@ func parseStructMutationBody(body string) (*structMutationBody, error) {
 	if err != nil {
 		return nil, err
 	}
+	if hasInsert && hasUpdate {
+		return nil, fmt.Errorf("mutation body cannot mix an `insert { ... }` and an `update { ... }` block")
+	}
 
-	// C5 (memql#2035): the accept/stamp form. `accept { f1, f2 }` lists
-	// the public concept fields the mutation accepts from its caller;
+	// C5 (memql#2035) + #2592: the accept/stamp form. `accept { f1, f2 }`
+	// lists the public concept fields the mutation accepts from its caller;
 	// each auto-binds to its same-named arg (`f1` -> `f1: args.f1`).
-	// `stamp { k: v, ... }` carries the server-set fields. The two
-	// desugar into a synthetic `insert { ... }` body, so everything
-	// downstream (id hoist, payload translation, the load-time concept
-	// gate) is unchanged. The whether-a-field-is-actually-public check
-	// is concept-aware and happens at load time (function_loader);
-	// here we only desugar + validate the auto-bind has a matching arg.
-	acceptRaw, hasAccept, err := extractBraceBlock(body, acceptBlockHeader, "accept")
+	// `stamp { k: v, ... }` carries the server-set fields. The two desugar
+	// into a synthetic write body, so everything downstream (id hoist,
+	// payload translation, the load-time concept gate) is unchanged. The
+	// whether-a-field-is-actually-public check is concept-aware and happens
+	// at load time (function_loader); here we only desugar + validate the
+	// auto-bind has a matching arg.
+	//
+	// Two spellings, differing only in where the WRITE KIND comes from:
+	//
+	//   bare (#2035)    accept/stamp at the top level. Spells no kind, so
+	//                   it means insert -- the original C5 semantics.
+	//   nested (#2592)  accept/stamp inside an `insert`/`update` block. The
+	//                   kind is spelled where it has always been spelled,
+	//                   which is what lets an update adopt the sugar.
+	//
+	// Nesting is what keeps the kind honest: there is no input where the
+	// author names a write kind and the emitted write is a different one.
+	region, writeKind, writeTarget := body, "insert", ""
+	nested := false
+	switch {
+	case hasInsert:
+		region, writeKind, writeTarget, nested = insertRaw, "insert", insertName, true
+	case hasUpdate:
+		region, writeKind, writeTarget, nested = updateRaw, "update", updateName, true
+	}
+
+	acceptRaw, hasAccept, err := extractBraceBlock(region, acceptBlockHeader, "accept")
 	if err != nil {
 		return nil, err
 	}
-	stampRaw, hasStamp, err := extractBraceBlock(body, stampBlockHeader, "stamp")
+	stampRaw, hasStamp, err := extractBraceBlock(region, stampBlockHeader, "stamp")
 	if err != nil {
 		return nil, err
 	}
 
 	if hasAccept || hasStamp {
-		if hasInsert || hasUpdate {
-			return nil, fmt.Errorf("mutation body cannot mix the accept/stamp form with an explicit `insert { ... }` / `update { ... }` block -- pick one")
+		// A nested write block may carry NOTHING but accept/stamp: the
+		// desugar rebuilds the body from those two blocks alone, so a stray
+		// `key: value` left beside them would be silently dropped.
+		if nested {
+			residue := stripBraceBlock(stripBraceBlock(region, acceptBlockHeader), stampBlockHeader)
+			if stray := firstMeaningfulLine(residue); stray != "" {
+				return nil, fmt.Errorf("`%s { ... }` carries %q beside a nested `accept`/`stamp` block -- move server-set fields into `stamp { ... }` (a field left here would be dropped)", writeKind, stray)
+			}
 		}
 		argNames := argNamesFromArgsText(out.argsText)
 		var lines []string
@@ -820,26 +849,58 @@ func parseStructMutationBody(body string) (*structMutationBody, error) {
 				lines = append(lines, stampRaw)
 			}
 		}
-		out.writeKind = "insert"
+		out.writeKind = writeKind
 		out.writeBody = strings.Join(lines, "\n")
+		out.writeTarget = writeTarget
 		return out, nil
 	}
 
-	switch {
-	case hasInsert && hasUpdate:
-		return nil, fmt.Errorf("mutation body cannot mix an `insert { ... }` and an `update { ... }` block")
-	case hasInsert:
-		out.writeKind = "insert"
-		out.writeBody = insertRaw
-		out.writeTarget = insertName
-	case hasUpdate:
-		out.writeKind = "update"
-		out.writeBody = updateRaw
-		out.writeTarget = updateName
-	default:
-		return nil, fmt.Errorf("mutation body must contain exactly one `insert { ... }` or `update { ... }` block (or the `accept { ... }` / `stamp { ... }` form)")
+	if nested {
+		// An explicit write block with no accept/stamp inside: the legacy
+		// form, unchanged. Guard against accept/stamp sitting OUTSIDE it,
+		// where the desugar would never see them (#2035's exclusion rule --
+		// now with nesting as the way to combine them).
+		_, strayAccept, _ := extractBraceBlock(body, acceptBlockHeader, "accept")
+		_, strayStamp, _ := extractBraceBlock(body, stampBlockHeader, "stamp")
+		if strayAccept || strayStamp {
+			return nil, fmt.Errorf("mutation body cannot mix the accept/stamp form with an explicit `%s { ... }` block -- nest `accept`/`stamp` inside the write block, or drop the block", writeKind)
+		}
+		out.writeKind = writeKind
+		out.writeBody = region
+		out.writeTarget = writeTarget
+		return out, nil
 	}
-	return out, nil
+
+	return nil, fmt.Errorf("mutation body must contain exactly one `insert { ... }` or `update { ... }` block (or the `accept { ... }` / `stamp { ... }` form)")
+}
+
+// stripBraceBlock removes the whole `<header> { ... }` span matched by re.
+// Absent (or unbalanced) -> returned unchanged. Used to check what is left
+// in a write block once its nested accept/stamp blocks are accounted for.
+func stripBraceBlock(body string, re *regexp.Regexp) string {
+	loc := re.FindStringIndex(body)
+	if loc == nil {
+		return body
+	}
+	open := loc[0] + strings.Index(body[loc[0]:loc[1]], "{")
+	closeIdx := findMatchingCloseBrace(body, open)
+	if closeIdx < 0 {
+		return body
+	}
+	return body[:loc[0]] + body[closeIdx+1:]
+}
+
+// firstMeaningfulLine returns the first line of s that is neither blank nor
+// a `//` comment, or "" when there is none.
+func firstMeaningfulLine(s string) string {
+	for _, ln := range strings.Split(s, "\n") {
+		ln = strings.TrimSpace(ln)
+		if ln == "" || strings.HasPrefix(ln, "//") {
+			continue
+		}
+		return ln
+	}
+	return ""
 }
 
 // idFieldMatcher matches `id: <expr>` lines inside insert/update bodies.
