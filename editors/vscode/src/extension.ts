@@ -41,7 +41,14 @@ export function activate(context: ExtensionContext): void {
   };
 
   client = new LanguageClient('memql', 'MemQL Language Server', serverOptions, clientOptions);
-  client.start();
+  // start() is async; surface a start failure instead of leaving an unhandled
+  // rejection (the LanguageClient shows its own UI too, but this makes the
+  // failure explicit and actionable).
+  void client.start().catch((err) => {
+    window.showErrorMessage(
+      `MemQL: language server failed to start: ${err instanceof Error ? err.message : String(err)}`
+    );
+  });
 }
 
 export function deactivate(): Thenable<void> | undefined {
@@ -72,8 +79,30 @@ function resolveServerPath(context: ExtensionContext): string | undefined {
     return bundled;
   }
 
-  // Fall back to PATH resolution by the OS when the process is spawned.
-  return binaryName();
+  // Fall back to a binary on PATH. Resolve it here (rather than returning the
+  // bare name for the OS to resolve at spawn) so an unresolvable binary yields
+  // undefined -- that lets the caller's friendly "not found" message fire
+  // instead of surfacing a raw ENOENT from the spawned process.
+  return resolveOnPath(binaryName());
+}
+
+// resolveOnPath returns the absolute path to an executable `name` found on the
+// PATH, or undefined if it is not on any PATH entry.
+function resolveOnPath(name: string): string | undefined {
+  const dirs = (process.env.PATH ?? '').split(path.delimiter);
+  for (const dir of dirs) {
+    if (dir === '') {
+      continue;
+    }
+    const candidate = path.join(dir, name);
+    try {
+      fs.accessSync(candidate, fs.constants.X_OK); // X_OK degrades to existence on Windows
+      return candidate;
+    } catch {
+      // Not on this PATH entry; keep looking.
+    }
+  }
+  return undefined;
 }
 
 function binaryName(): string {
