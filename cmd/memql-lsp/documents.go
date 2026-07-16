@@ -42,6 +42,17 @@ func (s *documentStore) get(uri protocol.DocumentUri) (string, bool) {
 	return text, ok
 }
 
+// uris returns the URIs of every open document.
+func (s *documentStore) uris() []protocol.DocumentUri {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]protocol.DocumentUri, 0, len(s.docs))
+	for uri := range s.docs {
+		out = append(out, uri)
+	}
+	return out
+}
+
 // applyChanges folds a didChange notification's content changes into the stored
 // buffer in order, returning the new full text. A whole-document change replaces
 // the buffer; a ranged change splices its text over the range's byte span.
