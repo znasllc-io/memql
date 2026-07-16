@@ -1,0 +1,103 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "MemQL",
+  "scopeName": "source.memql",
+  "comment": "Generated from dslspec by 'memql-lsp gen-grammar'. Do not edit by hand. GrammarVersion: 2026.07-event-payload-args",
+  "patterns": [
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#strings"
+    },
+    {
+      "include": "#annotations"
+    },
+    {
+      "include": "#concept-ids"
+    },
+    {
+      "include": "#numbers"
+    },
+    {
+      "include": "#construct-keywords"
+    },
+    {
+      "include": "#control-keywords"
+    },
+    {
+      "include": "#import-keywords"
+    },
+    {
+      "include": "#reserved-words"
+    },
+    {
+      "include": "#operators-word"
+    },
+    {
+      "include": "#operators-symbol"
+    }
+  ],
+  "repository": {
+    "annotations": {
+      "name": "storage.modifier.memql",
+      "match": "@\\w+"
+    },
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.memql",
+          "match": "//.*$"
+        },
+        {
+          "name": "comment.block.memql",
+          "begin": "/\\*",
+          "end": "\\*/"
+        }
+      ]
+    },
+    "concept-ids": {
+      "name": "entity.name.type.memql",
+      "match": "\\bv?\\d+:[\\w:]+"
+    },
+    "construct-keywords": {
+      "name": "storage.type.memql",
+      "match": "\\b(?:action|automation|builtin|capability|concept|logic|mutate|policy|prompt|provider|query|seed|shape|spec|tool|trait|use)\\b"
+    },
+    "control-keywords": {
+      "name": "keyword.control.memql",
+      "match": "\\b(?:args|auth|body|else|filter|for|if|in|include|insert|params|range|return|shape|update|when)\\b"
+    },
+    "import-keywords": {
+      "name": "keyword.control.import.memql",
+      "match": "\\b(?:use)\\b"
+    },
+    "numbers": {
+      "name": "constant.numeric.memql",
+      "match": "\\b\\d+(?:\\.\\d+)?\\b"
+    },
+    "operators-symbol": {
+      "name": "keyword.operator.memql",
+      "match": "(?:!=|\u0026\u0026|\u003c=|==|\u003e=|\\|\\||!|\u003c|\u003e)"
+    },
+    "operators-word": {
+      "name": "keyword.operator.word.memql",
+      "match": "\\b(?:in)\\b"
+    },
+    "reserved-words": {
+      "name": "variable.language.memql",
+      "match": "\\b(?:actor|args|config|now|partition|payload|trace)\\b"
+    },
+    "strings": {
+      "name": "string.quoted.double.memql",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "name": "constant.character.escape.memql",
+          "match": "\\\\."
+        }
+      ]
+    }
+  }
+}
