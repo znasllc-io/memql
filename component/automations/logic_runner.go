@@ -338,6 +338,16 @@ func EvaluateLocalExpr(expr string, evaluator *Evaluator) (any, bool, error) {
 	if val, handled, err := tryEvaluateComparisonLocally(expr, evaluator); err != nil || handled {
 		return val, handled, err
 	}
+	// Top-level boolean connective (`&&` / `||`, with optional `!` groups) whose
+	// operand is a collection-/step-method chain (#2579): a terminal
+	// `return existing.empty() && args.X == "y"`. No single-node local evaluator
+	// above matches this shape, so without it the return falls through to
+	// engine.Execute, whose default (no-collection-methods) converter trips the
+	// ADR 2.2 gate on the chain operand. Routed after the arithmetic/comparison
+	// attempts so only a genuine boolean connective lands here.
+	if val, handled, err := tryEvaluateLogicalLocally(expr, evaluator); err != nil || handled {
+		return val, handled, err
+	}
 	return tryEvaluateBuiltinLocally(expr, evaluator)
 }
 
