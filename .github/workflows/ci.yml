@@ -58,6 +58,7 @@ jobs:
       sdkts: ${{ steps.filter.outputs.sdkts }}
       voice: ${{ steps.filter.outputs.voice }}
       proto: ${{ steps.filter.outputs.proto }}
+      vscode: ${{ steps.filter.outputs.vscode }}
       ci: ${{ steps.filter.outputs.ci }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -98,6 +99,12 @@ jobs:
               - 'component/grpc/gen/**'
               - 'component/node/gen/**'
               - 'scripts/dev/proto-gen.sh'
+            # The VS Code extension + the offline LSP binary it bundles + the
+            # packaging script.
+            vscode:
+              - 'editors/vscode/**'
+              - 'cmd/memql-lsp/**'
+              - 'scripts/vscode/**'
 
   # Consolidated CGO-free Go lane. One job, one warm GOCACHE, every
   # CGO-free Go check run in sequence. The job runs when `go` OR `dsl`
@@ -418,6 +425,31 @@ jobs:
       - name: db-gated suites (seeded test DB)
         run: go test -count=1 -timeout=300s ./component/memql/... ./component/automations/steps/... ./examples/referencepack/...
 
+  # VS Code extension lane: guard the checked-in grammar against dslspec drift,
+  # then build the offline LSP binary (darwin-arm64, the standardized dev
+  # target), compile the TypeScript client, and package the VSIX. The Go server
+  # tests run in go-checks (go test ./...); this lane proves the extension
+  # compiles and packages with its bundled binary. Gates on the vscode bucket
+  # (editors/vscode, cmd/memql-lsp, scripts/vscode); push + merge_group run it.
+  vscode-extension:
+    name: vscode-extension
+    needs: changes
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.vscode == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.26.5'
+          cache: true
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v4
+        with:
+          node-version: '20'
+      - name: grammar drift check (checked-in grammar matches dslspec)
+        run: go test -count=1 ./cmd/memql-lsp/internal/grammar/...
+      - name: package extension (build binary + compile + vsce package)
+        run: bash scripts/vscode/package.sh --out="$RUNNER_TEMP/memql.vsix"
+
   # Aggregator -- the SINGLE required status check for branch protection.
   # It always runs (even when every lane is path-skipped) and fails only if
   # a lane it depends on actually failed or was cancelled; a `skipped` lane
@@ -434,6 +466,7 @@ jobs:
       - sdk-ts-typecheck
       - conformance
       - db-tests
+      - vscode-extension
     runs-on: ubuntu-latest
     steps:
       - name: verify required lanes succeeded or were skipped

@@ -13,8 +13,18 @@ MemQL Sense is the language-intelligence service for `.memql` files:
 tokenize (syntax highlighting), complete (context-aware
 autocompletion), diagnose (errors and warnings), hover (symbol info),
 and signature help. It is what colors and assists the source you read
-in the Cockpit [Editor](../cockpit/editor.md), and the same service any
-future editor integration drives.
+in the Cockpit [Editor](../cockpit/editor.md).
+
+Sense has **two consumers** today, both driving the same brain:
+
+1. The Cockpit [Editor](../cockpit/editor.md), over gRPC
+   (`MemqlService.Stream`).
+2. The **VS Code extension** (see [MemQL in VS Code](./vscode.md)), over an
+   offline language server (`cmd/memql-lsp`) that embeds this package and reads
+   `.memql` from disk with no cluster and no auth.
+
+Adding VS Code changed no wire contract -- it is a new delivery mechanism on
+top of the existing Sense package, not a fork of the brain.
 
 This document covers two things and how they relate:
 
