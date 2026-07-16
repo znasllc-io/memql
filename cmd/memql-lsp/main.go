@@ -4,16 +4,18 @@
 // editing (highlighting, diagnostics, completion, hover, signature help) in
 // VS Code, powered by the same MemQL Sense brain the Cockpit uses.
 //
-// This is the WP2 skeleton: LSP lifecycle, incremental text sync, and the
-// LSP<->Sense position layer. No language features are wired yet -- WP3 adds
-// diagnostics + semantic tokens, WP4 adds completion + hover + signature help.
-//
 // Flags:
 //
 //	--root <dir>   workspace root (default: current working directory)
 //	--stdio        communicate over stdin/stdout (default; the only transport)
 //	--log <path>   write logs to this file; empty logs to stderr, NEVER stdout
 //	               (stdout is the JSON-RPC channel)
+//
+// Subcommands:
+//
+//	gen-grammar <out.json>   generate the TextMate grammar from dslspec and write
+//	                         it to <out.json> (regenerate on every GrammarVersion
+//	                         bump); see internal/grammar.
 package main
 
 import (
@@ -31,6 +33,11 @@ func main() {
 }
 
 func run(args []string) int {
+	// Subcommands are dispatched before the server flag set.
+	if len(args) > 0 && args[0] == "gen-grammar" {
+		return runGenGrammar(args[1:])
+	}
+
 	fs := flag.NewFlagSet(lsName, flag.ContinueOnError)
 	var (
 		root    = fs.String("root", "", "workspace root directory (default: current working directory)")
