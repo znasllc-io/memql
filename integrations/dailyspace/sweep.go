@@ -44,6 +44,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 )
@@ -362,13 +363,29 @@ func intFromPrefs(prefs map[string]any, key string) int {
 	case int:
 		return v
 	case int64:
-		return int(v)
+		return clampInt64(v)
 	case float64:
+		if v > math.MaxInt || v < math.MinInt {
+			return 0
+		}
 		return int(v)
 	case json.Number:
 		if n, err := v.Int64(); err == nil {
-			return int(n)
+			return clampInt64(n)
 		}
 	}
 	return 0
+}
+
+// clampInt64 narrows an int64 to int, returning 0 when the value does not
+// fit the platform int. On a 64-bit build (int is int64) the guard never
+// fires and this is int(v); it protects the 32-bit narrowing flagged by
+// go/incorrect-integer-conversion. Preference values are small counts, so
+// an out-of-range value is nonsense and the zero default -- which callers
+// already treat as "unset" via their `> 0` guards -- is the safe reading.
+func clampInt64(v int64) int {
+	if v > math.MaxInt || v < math.MinInt {
+		return 0
+	}
+	return int(v)
 }

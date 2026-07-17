@@ -40,6 +40,19 @@ type Message struct {
 	HTMLBody string
 }
 
+// headerUnsafe reports whether v carries a character that would let a
+// caller break out of a single email header line and inject additional
+// headers or recipients (RFC 5322 header / SMTP injection): CR, LF, NUL,
+// or any other C0 control except tab. To and Subject are written into
+// headers verbatim, so both must pass this before a Send. Bodies are
+// exempt -- they live after the header/body boundary and legitimately
+// contain newlines.
+func headerUnsafe(v string) bool {
+	return strings.IndexFunc(v, func(r rune) bool {
+		return r == '\r' || r == '\n' || r == 0x00 || (r < 0x20 && r != '\t')
+	}) >= 0
+}
+
 // Validate reports missing or obviously malformed fields.
 func (m Message) Validate() error {
 	if strings.TrimSpace(m.To) == "" {
@@ -48,8 +61,14 @@ func (m Message) Validate() error {
 	if !strings.Contains(m.To, "@") {
 		return fmt.Errorf("email: To %q is not a valid address", m.To)
 	}
+	if headerUnsafe(m.To) {
+		return errors.New("email: To contains illegal control characters (header injection)")
+	}
 	if strings.TrimSpace(m.Subject) == "" {
 		return errors.New("email: Subject is required")
+	}
+	if headerUnsafe(m.Subject) {
+		return errors.New("email: Subject contains illegal control characters (header injection)")
 	}
 	if strings.TrimSpace(m.TextBody) == "" {
 		return errors.New("email: TextBody is required")
@@ -93,10 +112,21 @@ func (s *SMTPSender) Send(ctx context.Context, msg Message) error {
 		fromHeader = fmt.Sprintf("%s <%s>", s.cfg.FromName, from)
 	}
 
+	// Header injection barrier at the wire-format boundary: no header value
+	// reaches the SMTP payload without passing headerUnsafe. msg.Validate()
+	// already rejects an unsafe To/Subject up front; this re-checks every
+	// header value (including the config-derived From) at the point it is
+	// serialized, so the sink is safe by construction regardless of how the
+	// message was built.
+	var headerErr error
 	var body strings.Builder
 	boundary := fmt.Sprintf("memql-email-%d", time.Now().UnixNano())
 	writeHeaders := func(h map[string]string) {
 		for k, v := range h {
+			if headerUnsafe(v) {
+				headerErr = fmt.Errorf("email: header %q contains illegal control characters (header injection)", k)
+				return
+			}
 			body.WriteString(k)
 			body.WriteString(": ")
 			body.WriteString(v)
@@ -134,6 +164,9 @@ func (s *SMTPSender) Send(ctx context.Context, msg Message) error {
 		body.WriteString("\r\n--")
 		body.WriteString(boundary)
 		body.WriteString("--\r\n")
+	}
+	if headerErr != nil {
+		return headerErr
 	}
 
 	addr := s.cfg.Host + ":" + s.cfg.Port
