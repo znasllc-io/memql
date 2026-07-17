@@ -223,6 +223,13 @@ var acceptBlockHeader = regexp.MustCompile(`(^|[\n\r])[ \t]*accept[ \t]*\{`)
 // (createdAt / createdBy / status).
 var stampBlockHeader = regexp.MustCompile(`(^|[\n\r])[ \t]*stamp[ \t]*\{`)
 
+// sameLineBlockHeader matches an `accept`/`stamp` block header that follows
+// another block's closing brace on the SAME line -- `} stamp {`. Those headers
+// anchor on a newline, so such a block is invisible to a raw scan; rewriting
+// the match to put it on its own line restores the anchor. See its use in
+// parseStructMutationBody for why both readers must agree on what exists.
+var sameLineBlockHeader = regexp.MustCompile(`\}[ \t]*(accept|stamp)[ \t]*\{`)
+
 // extractBraceBlock pulls the inner text of the first `<header> { ... }`
 // block matched by re. Returns ("", false, nil) when absent.
 func extractBraceBlock(body string, re *regexp.Regexp, keyword string) (string, bool, error) {
@@ -811,11 +818,28 @@ func parseStructMutationBody(body string) (*structMutationBody, error) {
 		region, writeKind, writeTarget, nested = updateRaw, "update", updateName, true
 	}
 
-	acceptRaw, hasAccept, err := extractBraceBlock(region, acceptBlockHeader, "accept")
+	// Re-anchor a block written on the SAME line as the one before it.
+	//
+	// The block headers anchor on a newline (or start of text), so in
+	// `accept { name } stamp { status: "active" }` the stamp -- preceded by
+	// `} ` -- has no anchor and is invisible to the scan. Left alone that is a
+	// silent field loss AND a disagreement between the two readers below: the
+	// desugar would take accept and drop stamp, while the residue guard (which
+	// strips accept first, incidentally re-anchoring stamp, then strips that
+	// too) would see an empty residue and pass the body as clean. Splitting the
+	// blocks onto their own lines up front makes both readers see the same two
+	// blocks by construction, which is the property worth having here -- the
+	// guard can only protect what the desugar actually read.
+	//
+	// `region` itself is left untouched: the legacy path below writes it out
+	// verbatim as the write body.
+	scanRegion := sameLineBlockHeader.ReplaceAllString(region, "}\n$1 {")
+
+	acceptRaw, hasAccept, err := extractBraceBlock(scanRegion, acceptBlockHeader, "accept")
 	if err != nil {
 		return nil, err
 	}
-	stampRaw, hasStamp, err := extractBraceBlock(region, stampBlockHeader, "stamp")
+	stampRaw, hasStamp, err := extractBraceBlock(scanRegion, stampBlockHeader, "stamp")
 	if err != nil {
 		return nil, err
 	}
@@ -849,7 +873,10 @@ func parseStructMutationBody(body string) (*structMutationBody, error) {
 		// desugar rebuilds the body from those two blocks alone, so a stray
 		// `key: value` left beside them would be silently dropped.
 		if nested {
-			residue := stripBraceBlock(stripBraceBlock(region, acceptBlockHeader), stampBlockHeader)
+			// Read the same normalised view the desugar read, so the two agree
+			// on which blocks exist and the guard cannot strip a block the
+			// desugar never saw.
+			residue := stripBraceBlock(stripBraceBlock(scanRegion, acceptBlockHeader), stampBlockHeader)
 			if stray := firstMeaningfulLine(residue); stray != "" {
 				return nil, fmt.Errorf("`%s { ... }` carries %q beside a nested `accept`/`stamp` block -- move server-set fields into `stamp { ... }` (a field left here would be dropped)", writeKind, stray)
 			}

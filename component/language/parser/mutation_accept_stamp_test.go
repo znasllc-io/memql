@@ -231,6 +231,57 @@ func TestNormaliseMutation_AcceptStamp_NestedRejectsStrayFields(t *testing.T) {
 	}
 }
 
+func TestNormaliseMutation_AcceptStamp_SameLineBlocksBothApply(t *testing.T) {
+	// A block header anchors on a newline, so a second block written on the
+	// SAME line as the first carries no anchor of its own. Both blocks must
+	// still be seen: the failure mode is the desugar taking `accept` and
+	// silently dropping `stamp` -- and the residue guard, which strips accept
+	// first and thereby re-anchors stamp, stripping it too and reporting a
+	// clean body. Guard and desugar must never disagree about what exists.
+	for _, src := range []string{
+		// nested form
+		`mutate widget createWidget {
+  args {
+    name string @required
+  }
+  insert {
+    accept { name } stamp { status: "active", createdBy: actor.userId }
+  }
+}`,
+		// bare form
+		`mutate widget createWidget {
+  args {
+    name string @required
+  }
+  accept { name } stamp { status: "active", createdBy: actor.userId }
+}`,
+		// stamp written first
+		`mutate widget createWidget {
+  args {
+    name string @required
+  }
+  insert {
+    stamp { status: "active", createdBy: actor.userId } accept { name }
+  }
+}`,
+	} {
+		out, err := NormaliseMutationSource(src)
+		if err != nil {
+			t.Fatalf("same-line accept/stamp should rewrite cleanly, got: %v\nsrc:\n%s", err, src)
+		}
+		// The accepted field must bind...
+		if !strings.Contains(out, "name: args.name") {
+			t.Fatalf("accepted field dropped; got %q\nsrc:\n%s", out, src)
+		}
+		// ...and the stamp block must NOT be silently discarded.
+		for _, want := range []string{`status: "active"`, "createdBy: actor.userId"} {
+			if !strings.Contains(out, want) {
+				t.Fatalf("stamp field %q silently dropped; got %q\nsrc:\n%s", want, out, src)
+			}
+		}
+	}
+}
+
 func TestNormaliseMutation_AcceptStamp_RejectsSplitAcrossBoundary(t *testing.T) {
 	// accept/stamp must sit on ONE side of the write block. Splitting them --
 	// one nested, the other at the top level -- must not silently drop the
