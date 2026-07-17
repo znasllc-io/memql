@@ -68,23 +68,46 @@ func TestMessageValidate_AllowsNewlinesInBodies(t *testing.T) {
 	}
 }
 
-// stubHeaderSink lets us drive SMTPSender.Send far enough to assemble the
-// header block without a live relay: Send validates and builds the body,
-// then aborts at ctx cancellation before dialing. A cancelled context
-// returns the ctx error; a header-injection payload returns earlier, at
-// validation -- so we distinguish the two by error identity.
-func TestSMTPSend_RejectsInjectionBeforeDial(t *testing.T) {
+// TestSMTPSend_ValidateRejectsInjection covers the first barrier layer:
+// SMTPSender.Send calls Message.Validate() first, so an unsafe To short-
+// circuits before any header is assembled and never dials.
+func TestSMTPSend_ValidateRejectsInjection(t *testing.T) {
 	s := NewSMTPSender(SMTPConfig{Host: "localhost", Port: "25", FromAddr: "no-reply@example.com"}, nil)
-	m := Message{
+	err := s.Send(context.Background(), Message{
 		To:       "guest@example.com\r\nBcc: victim@example.com",
 		Subject:  "Welcome",
 		TextBody: "hello",
-	}
-	err := s.Send(context.Background(), m)
+	})
 	if err == nil {
 		t.Fatal("SMTPSender.Send delivered a header-injection message")
 	}
 	if !strings.Contains(err.Error(), "header injection") {
 		t.Fatalf("expected a header-injection rejection, got: %v", err)
+	}
+}
+
+// TestSMTPSend_ClosureGuardsConfigFrom covers the SECOND barrier layer, the
+// writeHeaders closure. The From header is built from SMTPConfig (FromName +
+// FromAddr), which Message.Validate() does not inspect -- so a CR/LF planted
+// in FromName reaches header assembly with a clean To/Subject. The closure
+// must reject it before smtp.SendMail. This is the only test that exercises
+// the closure (the Validate cases short-circuit before it runs).
+func TestSMTPSend_ClosureGuardsConfigFrom(t *testing.T) {
+	s := NewSMTPSender(SMTPConfig{
+		Host:     "localhost",
+		Port:     "25",
+		FromAddr: "no-reply@example.com",
+		FromName: "Acme\r\nBcc: victim@example.com",
+	}, nil)
+	err := s.Send(context.Background(), Message{
+		To:       "guest@example.com",
+		Subject:  "Welcome",
+		TextBody: "hello",
+	})
+	if err == nil {
+		t.Fatal("SMTPSender.Send delivered a message with an injected From header")
+	}
+	if !strings.Contains(err.Error(), "header injection") {
+		t.Fatalf("expected a header-injection rejection from the closure, got: %v", err)
 	}
 }

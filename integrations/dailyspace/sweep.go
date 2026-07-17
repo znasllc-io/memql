@@ -365,7 +365,11 @@ func intFromPrefs(prefs map[string]any, key string) int {
 	case int64:
 		return clampInt64(v)
 	case float64:
-		if v > math.MaxInt || v < math.MinInt {
+		// Guard the float -> int narrowing. float64(math.MaxInt) rounds UP to
+		// 2^63 on a 64-bit build, so a strict `> math.MaxInt` would let exactly
+		// 2^63 slip through to a saturating int(v); reject at the boundary (and
+		// NaN) instead. A preference count out of int range is nonsense anyway.
+		if math.IsNaN(v) || v >= math.MaxInt || v <= math.MinInt {
 			return 0
 		}
 		return int(v)
