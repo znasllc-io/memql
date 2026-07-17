@@ -894,7 +894,16 @@ func parseStructMutationBody(body string) (*structMutationBody, error) {
 
 // stripBraceBlock removes the whole `<header> { ... }` span matched by re.
 // Absent (or unbalanced) -> returned unchanged. Used to check what is left
-// in a write block once its nested accept/stamp blocks are accounted for.
+// once a block is accounted for: the nested accept/stamp inside a write
+// block, or the write block itself inside the mutation body.
+//
+// The span is replaced by a NEWLINE rather than deleted. Every block header
+// here is newline-anchored (`(^|[\n\r])[ \t]*<kw>[ \t]*{`) and re's match
+// starts AT that newline, so splicing the two sides together directly would
+// join the preceding line to whatever followed the closing brace -- stripping
+// the anchor from anything sitting on the block's own line and hiding it from
+// every later scan. `update { ... } accept { x }` on one line is the case that
+// matters: the trailing accept must stay visible to the stray guard.
 func stripBraceBlock(body string, re *regexp.Regexp) string {
 	loc := re.FindStringIndex(body)
 	if loc == nil {
@@ -905,7 +914,7 @@ func stripBraceBlock(body string, re *regexp.Regexp) string {
 	if closeIdx < 0 {
 		return body
 	}
-	return body[:loc[0]] + body[closeIdx+1:]
+	return body[:loc[0]] + "\n" + body[closeIdx+1:]
 }
 
 // firstMeaningfulLine returns the first line of s that is neither blank nor

@@ -262,6 +262,23 @@ func TestNormaliseMutation_AcceptStamp_RejectsSplitAcrossBoundary(t *testing.T) 
   update { stamp { id: args.conversationId } }
   accept { summary }
 }`,
+		// Same-line placement: the stray sits on the write block's own line, so
+		// it carries no leading newline for the block headers to anchor on.
+		// The excision must not consume that anchor either.
+		"update, accept outside on the same line": `mutate conversation setConversationInsight {
+  args {
+    conversationId string @required
+    summary        string @required
+  }
+  update { stamp { id: args.conversationId } } accept { summary }
+}`,
+		"insert, accept outside on the same line": `mutate space createSpace {
+  args {
+    id   string @required
+    name string @required
+  }
+  insert { stamp { id: args.id } } accept { name }
+}`,
 	}
 	for name, src := range cases {
 		t.Run(name, func(t *testing.T) {
