@@ -21,14 +21,19 @@ on:
   release:
     types: [published]
 
+# Default the whole workflow to read-only; the one job that needs to create a
+# workflow_dispatch event narrows UP to actions:write locally, so the elevated
+# token is never granted at the top level (Scorecard Token-Permissions #415).
 permissions:
-  actions: write
   contents: read
 
 jobs:
   dispatch:
     name: dispatch build-engine-images ${{ github.event.release.tag_name }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write # gh workflow run creates a workflow_dispatch event
     steps:
       - name: Dispatch build-engine-images for the release tag
         env:
