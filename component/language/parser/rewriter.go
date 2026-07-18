@@ -979,6 +979,9 @@ func parseStructMutationBody(body string) (*structMutationBody, error) {
 		}
 		for i := range wblocks {
 			b := &wblocks[i]
+			if b.named != "" {
+				return nil, fmt.Errorf("`%s { ... }` has a `%s %s { ... }` block -- accept/stamp take no name", writeKind, b.keyword, b.named)
+			}
 			switch b.keyword {
 			case "accept":
 				if nestAccept != nil {
