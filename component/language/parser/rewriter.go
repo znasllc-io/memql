@@ -71,6 +71,195 @@ func findMatchingCloseBrace(s string, openIdx int) int {
 	return -1
 }
 
+// skipStringLiteral returns the index of the closing quote of the string
+// literal that starts at s[i] (which must be `"` or a backtick). A double-
+// quoted literal honours `\` escapes; a backtick literal is raw. An
+// unterminated literal returns len(s)-1 so the caller advances to EOF.
+func skipStringLiteral(s string, i int) int {
+	q := s[i]
+	for j := i + 1; j < len(s); j++ {
+		if q == '"' && s[j] == '\\' {
+			j++ // skip the escaped byte
+			continue
+		}
+		if s[j] == q {
+			return j
+		}
+	}
+	return len(s) - 1
+}
+
+// matchBraceStrAware is findMatchingCloseBrace made string-aware: braces inside
+// a "..." or `...` literal are not counted. It expects a COMMENT-BLANKED view
+// (BlankComments), so comment braces are already spaces. Together they let a
+// stamp value like `id: "a}b"` or a `// }` comment sit inside a block without
+// throwing off the framing.
+func matchBraceStrAware(s string, openIdx int) int {
+	if openIdx < 0 || openIdx >= len(s) || s[openIdx] != '{' {
+		return -1
+	}
+	depth := 0
+	for i := openIdx; i < len(s); i++ {
+		switch s[i] {
+		case '"', '`':
+			i = skipStringLiteral(s, i)
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+// matchBraceInBody finds the `}` matching the `{` at openIdx in a RAW body
+// (comments and strings intact), string- and comment-aware. BlankComments is
+// offset-preserving, so the returned index still indexes `body`. The inner
+// block extractors (args / logic body / automation step) use this so a `}`
+// inside a string value or comment does not truncate the block, keeping them
+// consistent with the outer frame (rewriteEachBlock) and scanMutationBlocks.
+func matchBraceInBody(body string, openIdx int) int {
+	return matchBraceStrAware(BlankComments(body), openIdx)
+}
+
+// mutBodyBlock is a top-level `<keyword> { ... }` block located by
+// scanMutationBlocks. `inner` is the raw content between the braces (comments
+// and strings intact -- taken from the original body, not the blanked view).
+type mutBodyBlock struct {
+	keyword string // the identifier before `{` (args/insert/update/accept/stamp/...)
+	named   string // a second header identifier if present (the retired `insert Concept {` form)
+	inner   string
+}
+
+// scanMutationBlocks is the SINGLE source of block framing for a mutation body
+// (or a write block's inner). It walks a comment-blanked, string- and paren-
+// aware view once and returns, in source order:
+//
+//   - blocks: every top-level `<keyword> { ... }` (or `<keyword> <name> { ... }`)
+//   - hasFields: whether any depth-0 `key: value` FIELD content exists (which is
+//     a legacy write body when inside insert/update, or a stray at the mutation
+//     top level)
+//   - fieldSample: the first such field line, for error messages
+//
+// Because every reader (write-kind detection, nested accept/stamp, stray
+// guards) consumes THIS result rather than re-matching the text with its own
+// regex, they can never disagree about which blocks exist -- which is what
+// retires the same-line / boundary-anchoring class of bugs (a block is found
+// identically whether it sits on its own line, shares a line with another
+// block's `}`, or contains a brace inside a string literal). A `{` in value
+// position (after a `:` or inside `(...)`) is an object literal, matched and
+// skipped, never mistaken for a block.
+func scanMutationBlocks(body string) (blocks []mutBodyBlock, hasFields bool, fieldSample string, err error) {
+	blanked := BlankComments(body)
+	n := len(blanked)
+	var idents []string
+	identStart := -1
+	inValue := false
+	parenDepth := 0
+	isIdent := func(c byte) bool {
+		return c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+	}
+	endIdent := func(at int) {
+		if identStart >= 0 {
+			idents = append(idents, blanked[identStart:at])
+			identStart = -1
+		}
+	}
+	lineOf := func(at int) string {
+		start := at
+		for start > 0 && blanked[start-1] != '\n' {
+			start--
+		}
+		end := at
+		for end < n && blanked[end] != '\n' {
+			end++
+		}
+		return strings.TrimSpace(body[start:end])
+	}
+	for i := 0; i < n; {
+		c := blanked[i]
+		switch {
+		case c == '"' || c == '`':
+			endIdent(i)
+			i = skipStringLiteral(blanked, i) + 1
+		case c == ' ' || c == '\t':
+			endIdent(i)
+			i++
+		case c == '\n' || c == '\r':
+			endIdent(i)
+			if parenDepth == 0 {
+				inValue = false
+				idents = nil
+			}
+			i++
+		case c == '(':
+			endIdent(i)
+			parenDepth++
+			i++
+		case c == ')':
+			endIdent(i)
+			if parenDepth > 0 {
+				parenDepth--
+			}
+			i++
+		case c == ',':
+			endIdent(i)
+			if parenDepth == 0 {
+				inValue = false
+				idents = nil
+			}
+			i++
+		case c == ':':
+			endIdent(i)
+			if parenDepth == 0 {
+				inValue = true
+				if !hasFields {
+					hasFields = true
+					fieldSample = lineOf(i)
+				}
+			}
+			i++
+		case c == '{':
+			endIdent(i)
+			closeIdx := matchBraceStrAware(blanked, i)
+			if closeIdx < 0 {
+				return nil, false, "", fmt.Errorf("mutation body: `{` has no matching `}`")
+			}
+			if inValue || parenDepth > 0 {
+				// Object-literal value (`field: { ... }`), not a block.
+				i = closeIdx + 1
+			} else {
+				switch len(idents) {
+				case 1:
+					blocks = append(blocks, mutBodyBlock{keyword: idents[0], inner: body[i+1 : closeIdx]})
+				case 2:
+					blocks = append(blocks, mutBodyBlock{keyword: idents[0], named: idents[1], inner: body[i+1 : closeIdx]})
+				case 0:
+					return nil, false, "", fmt.Errorf("mutation body: `{ ... }` block with no keyword")
+				default:
+					return nil, false, "", fmt.Errorf("mutation body: block header `%s ...` has too many words", idents[0])
+				}
+				i = closeIdx + 1
+			}
+			idents = nil
+			inValue = false
+		case isIdent(c):
+			if identStart < 0 {
+				identStart = i
+			}
+			i++
+		default:
+			// Value punctuation (`.`, `=`, `-`, digits are idents already, etc.).
+			endIdent(i)
+			i++
+		}
+	}
+	return blocks, hasFields, fieldSample, nil
+}
+
 // rewriteEachBlock walks every struct-form construct in `source`
 // matching `header`, calls `emit` on each, and splices the result
 // back in place. Processes matches in reverse so byte offsets stay
@@ -105,7 +294,12 @@ func rewriteEachBlock(
 		h := matches[i]
 
 		openIdx := h[1] - 1
-		closeIdx := findMatchingCloseBrace(out, openIdx)
+		// Match the construct's closing brace on the comment-blanked, string-
+		// aware view (offsets map 1:1 to `out` for this not-yet-spliced region,
+		// since matches are processed in reverse). This keeps a `}` inside a
+		// string value or a `// }` comment from ending the construct early --
+		// findMatchingCloseBrace was brace-only and truncated such bodies.
+		closeIdx := matchBraceStrAware(scan, openIdx)
 		if closeIdx < 0 {
 			return "", fmt.Errorf("%s: missing closing brace", kindLabel)
 		}
@@ -202,41 +396,18 @@ func extractArgsBlock(body string) (string, error) {
 	}
 	openOffset := strings.LastIndex(body[loc[0]:loc[1]], "{")
 	open := loc[0] + openOffset
-	close := findMatchingCloseBrace(body, open)
+	close := matchBraceInBody(body, open)
 	if close < 0 {
 		return "", fmt.Errorf("`args { ... }` block missing closing brace")
 	}
 	return body[open+1 : close], nil
 }
 
-// acceptBlockHeader matches the C5 (memql#2035) `accept { ... }` block
-// -- a comma/newline-separated list of public concept field NAMES a
-// mutation accepts from its caller. Each name auto-binds to the
-// same-named arg (`name` -> `name: args.name`), dropping the
-// `insert { id: args.id, name: args.name, ... }` boilerplate.
-var acceptBlockHeader = regexp.MustCompile(`(^|[\n\r])[ \t]*accept[ \t]*\{`)
-
-// stampBlockHeader matches the C5 `stamp { ... }` block -- the
-// server-set fields (key: value lines, same syntax as insert) the
-// mutation writes from server context (now / actor.X / literals),
-// NOT from caller args. Typically the concept's @serverSet fields
-// (createdAt / createdBy / status).
-var stampBlockHeader = regexp.MustCompile(`(^|[\n\r])[ \t]*stamp[ \t]*\{`)
-
-// extractBraceBlock pulls the inner text of the first `<header> { ... }`
-// block matched by re. Returns ("", false, nil) when absent.
-func extractBraceBlock(body string, re *regexp.Regexp, keyword string) (string, bool, error) {
-	loc := re.FindStringIndex(body)
-	if loc == nil {
-		return "", false, nil
-	}
-	open := loc[0] + strings.Index(body[loc[0]:loc[1]], "{")
-	close := findMatchingCloseBrace(body, open)
-	if close < 0 {
-		return "", false, fmt.Errorf("`%s { ... }` block missing closing brace", keyword)
-	}
-	return body[open+1 : close], true, nil
-}
+// The C5 (memql#2035) accept/stamp blocks -- `accept { f1, f2 }` (public field
+// names auto-binding to same-named args) and `stamp { k: v }` (server-set
+// fields) -- are located by scanMutationBlocks, the single comment/string-aware
+// framing scan, rather than by per-reader regexes (which kept disagreeing about
+// same-line and boundary-adjacent blocks).
 
 // acceptFieldName matches a single bare identifier (a field name) in an
 // `accept { ... }` list.
@@ -554,7 +725,7 @@ func parseStructQueryBody(body string) (*structQueryBody, error) {
 	if loc := argsBlockHeader.FindStringIndex(body); loc != nil {
 		openOffset := strings.LastIndex(body[loc[0]:loc[1]], "{")
 		open := loc[0] + openOffset
-		close := findMatchingCloseBrace(body, open)
+		close := matchBraceInBody(body, open)
 		if close < 0 {
 			return nil, fmt.Errorf("`args { ... }` block missing closing brace")
 		}
@@ -733,113 +904,161 @@ func parseStructMutationBody(body string) (*structMutationBody, error) {
 	}
 	out.argsText = argsText
 
-	// Scan a write block. The canonical form is bare `<keyword> { ... }`
-	// (#986) -- the write target is the concept bound by the mutation's
-	// `mutation <Concept> <name>` signature, so restating it in the body
-	// is redundant. The named form `<keyword> <conceptName> { ... }` is
-	// still accepted transitionally (the name is validated against the
-	// signature); its tree-wide migration to the bare form + hard
-	// rejection is the codemod child #988.
-	scanWrite := func(keyword string) (name, raw string, found bool, err error) {
-		// Named form `<keyword> <conceptName> { ... }` is retired (#988) --
-		// the write target comes from the `mutation <Concept> <name>`
-		// signature, so restating it in the body is rejected.
-		named := regexp.MustCompile(`(^|[\n\r])[ \t]*` + keyword + `[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
-		if loc := named.FindStringSubmatchIndex(body); loc != nil {
-			return "", "", false, fmt.Errorf("`%s %s { ... }` is retired -- drop the restated concept and write the bare `%s { ... }` (the target comes from the `mutation <Concept> <name>` signature)", keyword, body[loc[4]:loc[5]], keyword)
-		}
-		// Bare form (canonical): `<keyword> { ... }`. Target derived from
-		// the signature; name is left empty to signal "derive".
-		bare := regexp.MustCompile(`(^|[\n\r])[ \t]*` + keyword + `[ \t]*\{`)
-		locs := bare.FindAllStringIndex(body, -1)
-		// One write per mutation (authoring-rules rule 1). A second block of
-		// the same keyword was previously first-match-ignored (memql#2395
-		// HOLE 3) -- reject it at the rewriter so lint + load both catch it.
-		if len(locs) > 1 {
-			return "", "", false, fmt.Errorf("mutation body must contain exactly one `%s { ... }` block -- found %d (one write per mutation, authoring-rules rule 1)", keyword, len(locs))
-		}
-		if len(locs) == 1 {
-			loc := locs[0]
-			open := loc[0] + strings.Index(body[loc[0]:loc[1]], "{")
-			close := findMatchingCloseBrace(body, open)
-			if close < 0 {
-				return "", "", false, fmt.Errorf("`%s { ... }` block missing closing brace", keyword)
-			}
-			return "", body[open+1 : close], true, nil
-		}
-		return "", "", false, nil
-	}
-
-	insertName, insertRaw, hasInsert, err := scanWrite("insert")
-	if err != nil {
-		return nil, err
-	}
-	updateName, updateRaw, hasUpdate, err := scanWrite("update")
+	// Single-source the block framing (scanMutationBlocks): every decision
+	// below reads THIS one comment/string-aware scan, so no two readers can
+	// disagree about which blocks exist -- the property that retires the
+	// same-line / boundary-anchoring class of bugs the regex approach kept
+	// reintroducing.
+	blocks, topFields, topFieldSample, err := scanMutationBlocks(body)
 	if err != nil {
 		return nil, err
 	}
 
-	// C5 (memql#2035): the accept/stamp form. `accept { f1, f2 }` lists
-	// the public concept fields the mutation accepts from its caller;
+	// C5 (memql#2035) + #2592: the accept/stamp form. `accept { f1, f2 }`
+	// lists the public concept fields the mutation accepts from its caller;
 	// each auto-binds to its same-named arg (`f1` -> `f1: args.f1`).
-	// `stamp { k: v, ... }` carries the server-set fields. The two
-	// desugar into a synthetic `insert { ... }` body, so everything
-	// downstream (id hoist, payload translation, the load-time concept
-	// gate) is unchanged. The whether-a-field-is-actually-public check
-	// is concept-aware and happens at load time (function_loader);
-	// here we only desugar + validate the auto-bind has a matching arg.
-	acceptRaw, hasAccept, err := extractBraceBlock(body, acceptBlockHeader, "accept")
-	if err != nil {
-		return nil, err
+	// `stamp { k: v, ... }` carries the server-set fields. Two spellings,
+	// differing only in where the WRITE KIND comes from:
+	//
+	//   bare (#2035)    accept/stamp at the top level -> spells no kind, means
+	//                   insert (the original C5 semantics).
+	//   nested (#2592)  accept/stamp inside an `insert`/`update` block -> the
+	//                   kind is spelled by the enclosing block, which is what
+	//                   lets an update adopt the sugar. There is no input where
+	//                   the author names a write kind and a different one is
+	//                   emitted.
+	var writeKind, writeInner string
+	writeCount := 0
+	var topAccept, topStamp *mutBodyBlock
+	for i := range blocks {
+		b := &blocks[i]
+		if b.named != "" {
+			// The named form `<kind> <Concept> { ... }` is retired (#988): the
+			// write target comes from the `mutate <Concept> <name>` signature.
+			return nil, fmt.Errorf("`%s %s { ... }` is retired -- drop the restated concept and write the bare `%s { ... }` (the target comes from the `mutate <Concept> <name>` signature)", b.keyword, b.named, b.keyword)
+		}
+		switch b.keyword {
+		case "args":
+			// argsText already extracted above.
+		case "insert", "update":
+			writeCount++
+			if writeCount > 1 {
+				return nil, fmt.Errorf("mutation body must contain exactly one write block -- one write per mutation (authoring-rules rule 1)")
+			}
+			writeKind, writeInner = b.keyword, b.inner
+		case "accept":
+			if topAccept != nil {
+				return nil, fmt.Errorf("mutation body has more than one top-level `accept { ... }` block")
+			}
+			topAccept = b
+		case "stamp":
+			if topStamp != nil {
+				return nil, fmt.Errorf("mutation body has more than one top-level `stamp { ... }` block")
+			}
+			topStamp = b
+		default:
+			return nil, fmt.Errorf("mutation body: unexpected `%s { ... }` block", b.keyword)
+		}
 	}
-	stampRaw, hasStamp, err := extractBraceBlock(body, stampBlockHeader, "stamp")
-	if err != nil {
-		return nil, err
+	haveWrite := writeCount == 1
+
+	// The mutation top level is blocks only. A bare `key: value` there would be
+	// silently dropped by any desugar (and the legacy write form keeps its
+	// fields INSIDE the insert/update block), so it is always an error.
+	if topFields {
+		return nil, fmt.Errorf("mutation body: unexpected field %q at the top level -- put write fields inside the `insert`/`update` block (or a `stamp { ... }` block)", topFieldSample)
 	}
 
-	if hasAccept || hasStamp {
-		if hasInsert || hasUpdate {
-			return nil, fmt.Errorf("mutation body cannot mix the accept/stamp form with an explicit `insert { ... }` / `update { ... }` block -- pick one")
+	// Nested accept/stamp live inside the write block; scan its inner with the
+	// same single source.
+	var nestAccept, nestStamp *mutBodyBlock
+	if haveWrite {
+		wblocks, wFields, wFieldSample, werr := scanMutationBlocks(writeInner)
+		if werr != nil {
+			return nil, werr
 		}
+		for i := range wblocks {
+			b := &wblocks[i]
+			if b.named != "" {
+				return nil, fmt.Errorf("`%s { ... }` has a `%s %s { ... }` block -- accept/stamp take no name", writeKind, b.keyword, b.named)
+			}
+			switch b.keyword {
+			case "accept":
+				if nestAccept != nil {
+					return nil, fmt.Errorf("`%s { ... }` has more than one nested `accept { ... }` block", writeKind)
+				}
+				nestAccept = b
+			case "stamp":
+				if nestStamp != nil {
+					return nil, fmt.Errorf("`%s { ... }` has more than one nested `stamp { ... }` block", writeKind)
+				}
+				nestStamp = b
+			default:
+				return nil, fmt.Errorf("`%s { ... }` may not contain a nested `%s { ... }` block", writeKind, b.keyword)
+			}
+		}
+		// A write block mixing accept/stamp with loose fields would drop those
+		// fields on desugar (the body is rebuilt from the blocks alone).
+		if (nestAccept != nil || nestStamp != nil) && wFields {
+			return nil, fmt.Errorf("`%s { ... }` carries the field %q beside a nested `accept`/`stamp` block -- move server-set fields into `stamp { ... }` (a field left here would be dropped)", writeKind, wFieldSample)
+		}
+	}
+
+	hasNested := nestAccept != nil || nestStamp != nil
+	hasTop := topAccept != nil || topStamp != nil
+
+	switch {
+	case hasTop && hasNested:
+		// accept/stamp split across the write-block boundary -- one inside, one
+		// outside. The desugar reads only the nested pair, so the outer block
+		// would be silently dropped (worst case: an empty payload).
+		return nil, fmt.Errorf("mutation body cannot mix a top-level `accept`/`stamp` with a nested one -- put both inside the `%s { ... }` block", writeKind)
+	case hasTop && haveWrite && !hasNested:
+		// bare accept/stamp sitting BESIDE an explicit write block.
+		return nil, fmt.Errorf("mutation body cannot mix the accept/stamp form with an explicit `%s { ... }` block -- nest `accept`/`stamp` inside the write block, or drop the block", writeKind)
+	}
+
+	// Resolve the accept/stamp blocks in play and the write kind they emit.
+	acceptBlk, stampBlk := topAccept, topStamp
+	if hasNested {
+		acceptBlk, stampBlk = nestAccept, nestStamp // writeKind stays the enclosing block's
+	} else if hasTop {
+		writeKind = "insert" // bare form spells no kind -> insert (#2035)
+	}
+
+	if acceptBlk != nil || stampBlk != nil {
 		argNames := argNamesFromArgsText(out.argsText)
 		var lines []string
-		if hasAccept {
-			names, perr := parseAcceptNames(acceptRaw)
+		if acceptBlk != nil {
+			names, perr := parseAcceptNames(acceptBlk.inner)
 			if perr != nil {
 				return nil, perr
 			}
-			for _, n := range names {
-				if !argNames[n] {
-					return nil, fmt.Errorf("accept field %q has no matching arg -- declare `%s <type>` in the `args { ... }` block so it can auto-bind to `args.%s`", n, n, n)
+			for _, nm := range names {
+				if !argNames[nm] {
+					return nil, fmt.Errorf("accept field %q has no matching arg -- declare `%s <type>` in the `args { ... }` block so it can auto-bind to `args.%s`", nm, nm, nm)
 				}
-				lines = append(lines, n+": args."+n)
+				lines = append(lines, nm+": args."+nm)
 			}
 		}
-		if hasStamp {
-			if strings.TrimSpace(stampRaw) != "" {
-				lines = append(lines, stampRaw)
+		if stampBlk != nil {
+			if s := strings.TrimSpace(stampBlk.inner); s != "" {
+				lines = append(lines, s)
 			}
 		}
-		out.writeKind = "insert"
+		out.writeKind = writeKind
 		out.writeBody = strings.Join(lines, "\n")
 		return out, nil
 	}
 
-	switch {
-	case hasInsert && hasUpdate:
-		return nil, fmt.Errorf("mutation body cannot mix an `insert { ... }` and an `update { ... }` block")
-	case hasInsert:
-		out.writeKind = "insert"
-		out.writeBody = insertRaw
-		out.writeTarget = insertName
-	case hasUpdate:
-		out.writeKind = "update"
-		out.writeBody = updateRaw
-		out.writeTarget = updateName
-	default:
-		return nil, fmt.Errorf("mutation body must contain exactly one `insert { ... }` or `update { ... }` block (or the `accept { ... }` / `stamp { ... }` form)")
+	// No accept/stamp -> the legacy explicit write form, body used verbatim.
+	if haveWrite {
+		out.writeKind = writeKind
+		out.writeBody = writeInner
+		return out, nil
 	}
-	return out, nil
+
+	return nil, fmt.Errorf("mutation body must contain exactly one `insert { ... }` or `update { ... }` block (or the `accept { ... }` / `stamp { ... }` form)")
 }
 
 // idFieldMatcher matches `id: <expr>` lines inside insert/update bodies.
@@ -892,6 +1111,15 @@ func splitInsertFields(raw string) ([]string, error) {
 	for i < len(raw) {
 		c := raw[i]
 		switch c {
+		case '"', '`':
+			// Copy a string literal verbatim: a `//`, `,`, `}` or brace inside
+			// it must never be read as a comment, separator, or nesting -- e.g.
+			// `source: "https://cdn/x"` must not truncate at the `//` and drop
+			// the fields after it.
+			end := skipStringLiteral(raw, i)
+			cur.WriteString(raw[i : end+1])
+			i = end + 1
+			continue
 		case '{', '[', '(':
 			depth++
 			cur.WriteByte(c)
@@ -966,7 +1194,7 @@ func emitLogic(name, _conceptId, body, _preamble string) (string, error) {
 	}
 	openOffset := strings.LastIndex(body[loc[0]:loc[1]], "{")
 	open := loc[0] + openOffset
-	close := findMatchingCloseBrace(body, open)
+	close := matchBraceInBody(body, open)
 	if close < 0 {
 		return "", fmt.Errorf("`body { ... }` block missing closing brace")
 	}
@@ -1210,7 +1438,7 @@ func parseAutomationSteps(body string) ([]automationStep, error) {
 		}
 		stepName := nameMatch[1]
 		openIdx := stepHeaderEnd - 1
-		closeIdx := findMatchingCloseBrace(body, openIdx)
+		closeIdx := matchBraceInBody(body, openIdx)
 		if closeIdx < 0 {
 			return nil, fmt.Errorf("step %q: missing closing brace", stepName)
 		}
