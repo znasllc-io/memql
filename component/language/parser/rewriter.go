@@ -284,7 +284,12 @@ func rewriteEachBlock(
 		h := matches[i]
 
 		openIdx := h[1] - 1
-		closeIdx := findMatchingCloseBrace(out, openIdx)
+		// Match the construct's closing brace on the comment-blanked, string-
+		// aware view (offsets map 1:1 to `out` for this not-yet-spliced region,
+		// since matches are processed in reverse). This keeps a `}` inside a
+		// string value or a `// }` comment from ending the construct early --
+		// findMatchingCloseBrace was brace-only and truncated such bodies.
+		closeIdx := matchBraceStrAware(scan, openIdx)
 		if closeIdx < 0 {
 			return "", fmt.Errorf("%s: missing closing brace", kindLabel)
 		}
@@ -1093,6 +1098,15 @@ func splitInsertFields(raw string) ([]string, error) {
 	for i < len(raw) {
 		c := raw[i]
 		switch c {
+		case '"', '`':
+			// Copy a string literal verbatim: a `//`, `,`, `}` or brace inside
+			// it must never be read as a comment, separator, or nesting -- e.g.
+			// `source: "https://cdn/x"` must not truncate at the `//` and drop
+			// the fields after it.
+			end := skipStringLiteral(raw, i)
+			cur.WriteString(raw[i : end+1])
+			i = end + 1
+			continue
 		case '{', '[', '(':
 			depth++
 			cur.WriteByte(c)

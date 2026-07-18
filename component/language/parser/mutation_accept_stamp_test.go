@@ -389,8 +389,10 @@ func TestNormaliseMutation_AcceptStamp_StrayOnArgsCloseLine(t *testing.T) {
 }
 
 func TestNormaliseMutation_AcceptStamp_BraceInStampStringLiteral(t *testing.T) {
-	// A `}` inside a stamp value string must not be mistaken for the block's
-	// closing brace -- the string-aware scan handles it.
+	// The brace is UNBALANCED inside the string (a single `}`): a brace-only
+	// scanner nets it against a real `}` and truncates the construct. Only a
+	// string-aware frame -- both the outer construct frame (rewriteEachBlock)
+	// AND the inner scan -- survives this.
 	src := `mutate widget createWidget {
   args {
     id   string @required
@@ -398,16 +400,40 @@ func TestNormaliseMutation_AcceptStamp_BraceInStampStringLiteral(t *testing.T) {
   }
   insert {
     accept { name }
-    stamp  { id: args.id, note: "a } b { c" }
+    stamp  { id: args.id, note: "a } b" }
   }
 }`
 	out, err := NormaliseMutationSource(src)
 	if err != nil {
-		t.Fatalf("brace inside a stamp string literal broke framing: %v", err)
+		t.Fatalf("unbalanced brace inside a stamp string literal broke framing: %v", err)
 	}
-	for _, want := range []string{"name: args.name", `note: "a } b { c"`, "id=args.id", "return insert("} {
+	for _, want := range []string{"name: args.name", `note: "a } b"`, "id=args.id", "return insert("} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("expected %q in output; got %q", want, out)
+		}
+	}
+}
+
+func TestNormaliseMutation_AcceptStamp_SlashSlashInStringValue(t *testing.T) {
+	// A `//` inside a value string (a URL) must not be read as a line comment
+	// that truncates the line and drops the fields after it.
+	src := `mutate widget createWidget {
+  args {
+    id     string @required
+    name   string @required
+  }
+  insert {
+    accept { name }
+    stamp  { source: "https://cdn.example.com/x", id: args.id }
+  }
+}`
+	out, err := NormaliseMutationSource(src)
+	if err != nil {
+		t.Fatalf("`//` inside a string value broke the body: %v", err)
+	}
+	for _, want := range []string{"name: args.name", `source: "https://cdn.example.com/x"`, "id=args.id"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected %q to survive (no truncation at `//`); got %q", want, out)
 		}
 	}
 }
