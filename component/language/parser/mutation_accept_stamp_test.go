@@ -361,3 +361,114 @@ func TestNormaliseMutation_AcceptStamp_UpdateRequiresMatchingArg(t *testing.T) {
 		t.Fatalf("error should explain the missing arg; got %q", err.Error())
 	}
 }
+
+// --- framing robustness (the single-source scanMutationBlocks refactor) -------
+//
+// These pin the whole whack-a-mole class the newline-anchored regexes kept
+// reintroducing: a block must be found identically no matter where it sits, and
+// braces/keywords inside strings or comments must never throw off the framing.
+
+func TestNormaliseMutation_AcceptStamp_StrayOnArgsCloseLine(t *testing.T) {
+	// Round 4: a top-level `accept` sharing the args block's closing-brace line,
+	// beside a nested write. The regex approach never anchored this and emitted
+	// a silent no-op; it must be rejected as a mix.
+	src := `mutate space createSpace {
+  args {
+    id   string @required
+    name string @required
+  } accept { name }
+  update { accept { id } }
+}`
+	_, err := NormaliseMutationSource(src)
+	if err == nil {
+		t.Fatal("expected an error: top-level accept beside a nested write (mix)")
+	}
+	if !strings.Contains(err.Error(), "cannot mix") {
+		t.Fatalf("error should explain the mix; got %q", err.Error())
+	}
+}
+
+func TestNormaliseMutation_AcceptStamp_BraceInStampStringLiteral(t *testing.T) {
+	// A `}` inside a stamp value string must not be mistaken for the block's
+	// closing brace -- the string-aware scan handles it.
+	src := `mutate widget createWidget {
+  args {
+    id   string @required
+    name string @required
+  }
+  insert {
+    accept { name }
+    stamp  { id: args.id, note: "a } b { c" }
+  }
+}`
+	out, err := NormaliseMutationSource(src)
+	if err != nil {
+		t.Fatalf("brace inside a stamp string literal broke framing: %v", err)
+	}
+	for _, want := range []string{"name: args.name", `note: "a } b { c"`, "id=args.id", "return insert("} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected %q in output; got %q", want, out)
+		}
+	}
+}
+
+func TestNormaliseMutation_AcceptStamp_BraceInComment(t *testing.T) {
+	// A `}` or block keyword inside a comment must not affect framing.
+	src := `mutate widget createWidget {
+  args {
+    id   string @required
+    name string @required
+  }
+  insert {
+    // a stray } and a fake stamp { here, both in a comment
+    accept { name }
+    stamp  { id: args.id }
+  }
+}`
+	out, err := NormaliseMutationSource(src)
+	if err != nil {
+		t.Fatalf("comment braces/keywords broke framing: %v", err)
+	}
+	if !strings.Contains(out, "name: args.name") || !strings.Contains(out, "id=args.id") {
+		t.Fatalf("expected the real accept/stamp fields; got %q", out)
+	}
+}
+
+func TestNormaliseMutation_LegacyObjectLiteralValue(t *testing.T) {
+	// A legacy insert body whose value is an object literal must NOT be
+	// mistaken for a nested block, and must pass through verbatim.
+	src := `mutate widget createWidget {
+  args {
+    id   string @required
+    meta object @required
+  }
+  insert {
+    id: args.id
+    meta: { nested: "v", n: 1 }
+  }
+}`
+	out, err := NormaliseMutationSource(src)
+	if err != nil {
+		t.Fatalf("object-literal value broke the legacy path: %v", err)
+	}
+	if !strings.Contains(out, "return insert(") || !strings.Contains(out, `meta: { nested: "v", n: 1 }`) {
+		t.Fatalf("legacy object-literal body should pass through; got %q", out)
+	}
+}
+
+func TestNormaliseMutation_AcceptStamp_RejectsTopLevelStrayBareForm(t *testing.T) {
+	// #2594: the bare form silently dropped a stray field beside the blocks.
+	src := `mutate message notify {
+  args { conversationId string @required, text string @required }
+  accept { conversationId, text }
+  stamp  { who: "agent" }
+  suggested: false
+}`
+	_, err := NormaliseMutationSource(src)
+	if err == nil {
+		t.Fatal("expected an error: a top-level stray field beside bare accept/stamp")
+	}
+	if !strings.Contains(err.Error(), "suggested") {
+		t.Fatalf("error should name the stray field; got %q", err.Error())
+	}
+}
