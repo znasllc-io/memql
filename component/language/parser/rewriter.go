@@ -115,6 +115,16 @@ func matchBraceStrAware(s string, openIdx int) int {
 	return -1
 }
 
+// matchBraceInBody finds the `}` matching the `{` at openIdx in a RAW body
+// (comments and strings intact), string- and comment-aware. BlankComments is
+// offset-preserving, so the returned index still indexes `body`. The inner
+// block extractors (args / logic body / automation step) use this so a `}`
+// inside a string value or comment does not truncate the block, keeping them
+// consistent with the outer frame (rewriteEachBlock) and scanMutationBlocks.
+func matchBraceInBody(body string, openIdx int) int {
+	return matchBraceStrAware(BlankComments(body), openIdx)
+}
+
 // mutBodyBlock is a top-level `<keyword> { ... }` block located by
 // scanMutationBlocks. `inner` is the raw content between the braces (comments
 // and strings intact -- taken from the original body, not the blanked view).
@@ -386,7 +396,7 @@ func extractArgsBlock(body string) (string, error) {
 	}
 	openOffset := strings.LastIndex(body[loc[0]:loc[1]], "{")
 	open := loc[0] + openOffset
-	close := findMatchingCloseBrace(body, open)
+	close := matchBraceInBody(body, open)
 	if close < 0 {
 		return "", fmt.Errorf("`args { ... }` block missing closing brace")
 	}
@@ -715,7 +725,7 @@ func parseStructQueryBody(body string) (*structQueryBody, error) {
 	if loc := argsBlockHeader.FindStringIndex(body); loc != nil {
 		openOffset := strings.LastIndex(body[loc[0]:loc[1]], "{")
 		open := loc[0] + openOffset
-		close := findMatchingCloseBrace(body, open)
+		close := matchBraceInBody(body, open)
 		if close < 0 {
 			return nil, fmt.Errorf("`args { ... }` block missing closing brace")
 		}
@@ -1181,7 +1191,7 @@ func emitLogic(name, _conceptId, body, _preamble string) (string, error) {
 	}
 	openOffset := strings.LastIndex(body[loc[0]:loc[1]], "{")
 	open := loc[0] + openOffset
-	close := findMatchingCloseBrace(body, open)
+	close := matchBraceInBody(body, open)
 	if close < 0 {
 		return "", fmt.Errorf("`body { ... }` block missing closing brace")
 	}
@@ -1425,7 +1435,7 @@ func parseAutomationSteps(body string) ([]automationStep, error) {
 		}
 		stepName := nameMatch[1]
 		openIdx := stepHeaderEnd - 1
-		closeIdx := findMatchingCloseBrace(body, openIdx)
+		closeIdx := matchBraceInBody(body, openIdx)
 		if closeIdx < 0 {
 			return nil, fmt.Errorf("step %q: missing closing brace", stepName)
 		}

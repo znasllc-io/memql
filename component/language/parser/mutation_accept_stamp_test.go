@@ -498,3 +498,45 @@ func TestNormaliseMutation_AcceptStamp_RejectsTopLevelStrayBareForm(t *testing.T
 		t.Fatalf("error should name the stray field; got %q", err.Error())
 	}
 }
+
+// --- inner-block string awareness (round-2 review: args / body / step) --------
+
+func TestNormaliseMutation_ArgsDefaultStringWithBrace(t *testing.T) {
+	// A `}` inside an args `@default("...")` string must not truncate the args
+	// block. The outer/mutation scans are string-aware; the args extractor must
+	// agree with them (else it frames a different, corrupt block).
+	src := `mutate widget createWidget {
+  args {
+    id  string @required
+    tpl string @default("a}b")
+  }
+  insert {
+    id: args.id
+    tpl: args.tpl
+  }
+}`
+	out, err := NormaliseMutationSource(src)
+	if err != nil {
+		t.Fatalf("`}` in an args @default string broke the args block: %v", err)
+	}
+	if !strings.Contains(out, `tpl string @default("a}b")`) {
+		t.Fatalf("args @default string should survive intact; got %q", out)
+	}
+}
+
+func TestNormaliseLogic_BodyReturnsStringWithBrace(t *testing.T) {
+	// A `}` inside a string returned from a logic body must not truncate the
+	// body block (string-aware inner framing).
+	src := `logic mk {
+  body {
+    return "a}b"
+  }
+}`
+	out, err := NormaliseLogicSource(src)
+	if err != nil {
+		t.Fatalf("`}` in a logic body return string broke the body block: %v", err)
+	}
+	if !strings.Contains(out, `return "a}b"`) {
+		t.Fatalf("logic body should keep the full return string; got %q", out)
+	}
+}
