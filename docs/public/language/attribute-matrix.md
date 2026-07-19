@@ -86,7 +86,11 @@ but never binds (its name stays reserved against authored promotion).
 A `@disabled` capability (#2607) drops out of both the authored-import
 crossref and the actions capability catalog: `use capabilities....`
 imports stop resolving it and an action referencing it is rejected at
-load with `capability "name" is @disabled`.
+load with `capability "name" is @disabled`. A disabled capability must
+still reconcile against the Go vocabulary -- `@disabled` is not a
+validation bypass, so a decl parked ahead of its unshipped Go verb is
+a hard load error; the `_disabled/` directory convention is the tool
+for parking DSL ahead of Go.
 
 ```memql
 @disabled
