@@ -367,6 +367,13 @@ func (v *functionValidator) expandFunctionCall(call *FunctionCallExpression) (Ex
 	if strings.EqualFold(strings.TrimSpace(fn.FunctionKind), "mutation") {
 		return nil, fmt.Errorf("function %q is a mutation and cannot be used inside query expressions", key)
 	}
+	// #2605: @disabled gates execution on every function kind. Mutations and
+	// logic reject in the engine call paths (engine.go); queries expand here,
+	// so this is their execution gate -- without it a @disabled query is
+	// hidden from discovery/MCP yet still callable directly.
+	if !fn.Enabled {
+		return nil, fmt.Errorf("function %q is disabled", key)
+	}
 
 	// Validate arguments against schema. Normalise positional
 	// object-literal wrapping first: the language parser produces
