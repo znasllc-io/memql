@@ -18,20 +18,33 @@ import (
 //
 // Like the product-neutrality gate, this polices GIT-TRACKED files only
 // and sweeps the whole repo: a pre-ruling claim anywhere is a regression.
+// FALSE-POSITIVE ESCAPE HATCH: this gate polices lifecycle claims about
+// DSL CONSTRUCTS. If a legitimate sentence about an unrelated feature flag
+// trips it (e.g. "X is disabled by default" about a config toggle), reword
+// the sentence -- "off by default" / "opt-in" carry the same meaning
+// without the construct-lifecycle shape -- rather than weakening the
+// patterns. Bare "logic" is deliberately absent from the kind list ("the
+// retry logic is disabled by default" is ordinary English); drift about
+// logic constructs still matches via "logic functions" or "functions".
 func TestLifecycleDocsMatchRuling(t *testing.T) {
-	kinds := `(functions?|automations?|queries|mutations?|logic|tools?|builtins?|prompts?|seeds?|specs?|traits?|providers?|capabilit(y|ies)|actions?|definitions?|constructs?)`
+	kinds := `(functions?|automations?|queries|mutations?|logic functions?|tools?|builtins?|prompts?|seeds?|specs?|traits?|providers?|capabilit(y|ies)|actions?|definitions?|constructs?)`
 	banned := []*regexp.Regexp{
 		// "<kind> is/are ... disabled by default"
 		regexp.MustCompile(`(?i)` + kinds + `\s+(are|is)[^.\n]{0,30}disabled by default`),
+		// "<kind> must be explicitly enabled"
+		regexp.MustCompile(`(?i)` + kinds + `\s+must be explicitly enabled`),
 		// "@enabled ... to activate / to register / required / to run".
 		// Backslash excluded from the gap so escaped newlines inside Go
-		// string fixtures do not bridge lines.
-		regexp.MustCompile(`(?i)@enabled` + "`?" + `[^.\n\\]{0,60}(to activate|to register|required)`),
-		// "must use / flip to / add @enabled" and "required ... @enabled"
+		// string fixtures do not bridge lines; "@" excluded so an
+		// annotation LIST ("@enabled, ..., @requiresConfirmation") is not
+		// mistaken for prose about @enabled being required.
+		regexp.MustCompile(`(?i)@enabled` + "`?" + `[^.\n\\@]{0,60}(to activate|to register|requir(e|es|ed))`),
+		// "must use / flip to / add @enabled" and "require(s|d) ... @enabled"
 		regexp.MustCompile(`(?i)(must use|flip to|switch to)\s+` + "`?" + `@enabled`),
-		regexp.MustCompile(`(?i)required[^.\n\\]{0,30}` + "`?" + `@enabled`),
+		regexp.MustCompile(`(?i)requir(e|es|ed)[^.\n\\]{0,30}` + "`?" + `@enabled`),
 		// the matrix/table row shapes reviews kept finding
-		regexp.MustCompile(`required (to use it|for it to run)`),
+		regexp.MustCompile(`(?i)required (to use it|for it to run)`),
+		regexp.MustCompile(`(?i)(default:\s*disabled|enabled state \| \*\*disabled)`),
 		regexp.MustCompile(`all registered user-defined functions`),
 	}
 

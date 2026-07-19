@@ -846,10 +846,9 @@ const (
 	// CANONICAL SEMANTICS of @enabled / @disabled (applies to every
 	// construct that accepts them -- functions/builtins/automations/
 	// actions/tools/prompts/specs/traits/seeds/providers/capabilities;
-	// the gates
-	// landed per kind in #2604-#2608; see the per-decl "lifecycle
-	// (engine-side flags)" notes on BuiltinDecl / PromptDecl /
-	// ProviderDecl):
+	// the gates landed per kind in #2604-#2608; see the per-decl
+	// "lifecycle (engine-side flags)" notes on BuiltinDecl /
+	// PromptDecl / ProviderDecl):
 	//
 	//	@disabled means the construct is NOT loaded/active at runtime
 	//	right now. It does NOT mean the construct is deprecated,
