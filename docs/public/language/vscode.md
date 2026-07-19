@@ -27,7 +27,12 @@ Sense package; it forks no brain and changes no wire contract.
   VS Code  (editors/vscode, TypeScript)
     - vscode-languageclient  -- spawns -->  memql-lsp (stdio)
     - memql.tmLanguage.json  (baseline offline highlighting, generated)
-    - language-configuration.json (comments / brackets)
+    - language-configuration.json (comments / brackets / brace
+      expansion + indentation via onEnterRules + indentationRules --
+      no longer reliant on the built-in bracket heuristic, and firing
+      even when the `{` carries trailing text; VS Code gates
+      onEnterRules at editor.autoIndent "advanced"+ and
+      indentationRules at "full", the default)
                    |  LSP over stdio (JSON-RPC)
                    v
   cmd/memql-lsp  (Go binary)
