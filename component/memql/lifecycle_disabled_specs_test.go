@@ -141,3 +141,22 @@ capability integration.probe.liveVerb {
 		t.Error("enabled peer capability missing from the declared set")
 	}
 }
+
+// G3 from the #2642 review: a query referencing a @disabled spec must say
+// so, not report "function not found" -- the reservation makes the
+// distinction possible; this pins that the validator consumes it.
+func TestExpandFunctionCall_DisabledSpecSaysDisabled(t *testing.T) {
+	specs := newSpecRegistry()
+	specs.MarkDisabled("retiredGate")
+
+	plan := &QueryPlan{
+		Root: &FunctionCallExpression{Name: "retiredGate", Args: map[string]any{}},
+	}
+	err := resolvePlanFunctions(plan, newFunctionRegistry(), specs)
+	if err == nil {
+		t.Fatal("referencing a disabled spec must error")
+	}
+	if got := err.Error(); got != `spec "retiredGate" is disabled` {
+		t.Errorf("want the disabled-spec diagnostic, got %q", got)
+	}
+}

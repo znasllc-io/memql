@@ -66,6 +66,9 @@ func (r *SpecRegistry) MarkDisabled(name string) {
 		return
 	}
 	r.disabledMu.Lock()
+	if r.disabled == nil {
+		r.disabled = make(map[string]bool)
+	}
 	r.disabled[name] = true
 	r.disabledMu.Unlock()
 }
