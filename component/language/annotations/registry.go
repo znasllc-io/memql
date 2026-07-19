@@ -62,6 +62,7 @@ var ByReceiver = map[string][]string{
 		"description", "enabled", "disabled", "defaultProvider", "templateFile",
 	},
 	"Provider": {
+		"enabled", "disabled",
 		"description", "type", "model", "modality", "default", "base", "extends",
 	},
 	"Shape": {
@@ -83,7 +84,7 @@ var ByReceiver = map[string][]string{
 // TestEveryAnnotationHasDoc in component/memql/sense).
 var Docs = map[string]string{
 	// Lifecycle / shared.
-	"enabled":      "Enable this definition. Functions are disabled by default.",
+	"enabled":      "Accepted explicit no-op: definitions are enabled by default. Use @disabled to deactivate.",
 	"disabled":     "Disable this definition.",
 	"description":  "Human-readable description of this definition.",
 	"eventField":   "On an event-triggered logic: declare the allowed top-level event payload fields (e.g. @eventField(\"partitionId\", \"siParticipantId\")). Opt-in field-level validation -- every event.payload.<field> reference in the body is checked against this set at load time, rejecting typos / fields the (possibly synthetic, handler-assembled) triggering event cannot carry (memql#1743). Bare names or payload.-prefixed paths both normalize to the head segment.",

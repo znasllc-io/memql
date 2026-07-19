@@ -29,8 +29,8 @@
 // =============================================================================
 //
 //   @description("text")   Human-readable description.
-//   @enabled               Marks the trait as active.
-//   @disabled              Parsed but never registered.
+//   @enabled               Accepted no-op: traits are enabled by default.
+//   @disabled              Parsed but never registered (#2607).
 //
 // @shape / @row / @actor / @useConcept(...) and the rest of the retired
 // @use* family are all rejected on a trait (a trait binds nothing).
@@ -146,8 +146,9 @@ trait isSeedRow {
 //   7. Lifecycle: @enabled and @disabled
 // =============================================================================
 //
-//   - @enabled  = register the trait so other constructs can reference it.
-//   - @disabled = parse the trait but skip registration.
+//   - absent or @enabled = registered (enabled is the default; the
+//     annotation is an accepted no-op).
+//   - @disabled = parse the trait but skip registration (#2607).
 
 @enabled
 @description("Live, registered.")
@@ -156,7 +157,7 @@ trait liveExample {
 }
 
 @disabled
-@description("Parsed but skipped at registration. Flip to @enabled to activate.")
+@description("Parsed but skipped at registration. Remove @disabled to re-enable.")
 trait parkedExample {
   return active == true
 }

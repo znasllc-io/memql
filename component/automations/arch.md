@@ -389,7 +389,7 @@ type Automation struct {
     Steps       []*Step          // Ordered operations
     OnComplete  *Step            // Success hook (optional)
     OnError     *Step            // Failure hook (optional)
-    Enabled     *bool            // Active flag (default: false - use @enabled)
+    Enabled     *bool            // Active flag (default: true since #2604; @disabled clears it)
     Async       bool             // Run asynchronously (from @async)
     Origin      string           // Source file path
 }
@@ -537,7 +537,7 @@ automation bootstrapUser() {
 | Category | Attribute | Arguments | Description |
 |----------|-----------|-----------|-------------|
 | **Lifecycle** |
-| | `@enabled` | none | Activates the automation (required for it to run) |
+| | `@enabled` | none | Accepted no-op; automations are enabled by default (#2604) |
 | | `@disabled` | none | Explicitly disables the automation |
 | | `@deprecated` | `"message"` (optional) | Marks as deprecated |
 | | `@version` | `"v1"` | Version tag |
@@ -559,7 +559,7 @@ automation bootstrapUser() {
 | | `@schedule` | `cron="..."` | Cron-based schedule |
 | | `@async` | none | Runs asynchronously when triggered |
 
-**Note:** Automations are **disabled by default**. You must explicitly add `@enabled` to activate them.
+**Note:** Automations are **enabled by default** (#2604, the uniform lifecycle ruling); `@enabled` is an accepted no-op and `@disabled` is the off-switch.
 
 See also: `/docs/attribute-matrix.md` for the full attribute reference across all function types.
 
