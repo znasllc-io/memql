@@ -4811,6 +4811,22 @@ func isMultiplicativeOperatorLiteral(lit string) bool {
 	return lit == "*" || lit == "/" || lit == "%"
 }
 
+// checkArgTerminatingOperator reports whether a pending operator should
+// terminate an args./ctx. reference's ArgRef early-return. Under the
+// ??-operand fold suppression (#2611 round 3, finding C) a pending
+// COMPARISON operator belongs to the level above -- the reference is a bare
+// coalesce arm and must still resolve as an ArgRef, or the final arm of
+// `args.a ?? args.def == "x"` silently degrades to a payload path.
+func (p *Parser) checkArgTerminatingOperator() bool {
+	if !p.check(TokenOperator) {
+		return false
+	}
+	if p.suppressComparisonFold && isComparisonOperatorLiteral(p.current.Literal) {
+		return false
+	}
+	return true
+}
+
 // atArithmeticOperator reports whether the current token is one of the
 // binary arithmetic operators (#2316).
 func (p *Parser) atArithmeticOperator() bool {
@@ -5339,7 +5355,7 @@ func (p *Parser) parseIdentifierExpression() (ExpressionNode, error) {
 	// caller arg instead of leaking through as a bare identifier.
 	if strings.HasPrefix(name, "args.") {
 		argPath := strings.TrimPrefix(name, "args.")
-		if argPath != "" && !p.check(TokenOperator) && !p.check(TokenKeywordIn) && !p.check(TokenKeywordHas) && !p.check(TokenKeywordNot) {
+		if argPath != "" && !p.checkArgTerminatingOperator() && !p.check(TokenKeywordIn) && !p.check(TokenKeywordHas) && !p.check(TokenKeywordNot) {
 			return &ArgRefExpr{Path: argPath}, nil
 		}
 		// `args.X` immediately followed by an arithmetic operator (#2316) is
@@ -5358,7 +5374,7 @@ func (p *Parser) parseIdentifierExpression() (ExpressionNode, error) {
 				return &ArgRefExpr{Path: argPath}, nil
 			}
 		}
-		if argPath != "" && !p.check(TokenOperator) && !p.check(TokenKeywordIn) && !p.check(TokenKeywordHas) && !p.check(TokenKeywordNot) {
+		if argPath != "" && !p.checkArgTerminatingOperator() && !p.check(TokenKeywordIn) && !p.check(TokenKeywordHas) && !p.check(TokenKeywordNot) {
 			switch argPath {
 			case "input", "output", "actor", "partition", "now", "config", "error", "trace":
 				// Reserved envelope fields -- leave for downstream

@@ -41,6 +41,13 @@ func TestNullCoalesce_LowersIdenticallyToCoalesceSpelling(t *testing.T) {
 	// that exact node and emission on the value side too.
 	cmpRows := [][2]string{
 		{`payload.a==payload.b??payload.c`, `payload.a==coalesce(payload.b, payload.c)`},
+		// args-valued arms take a DIFFERENT branch in
+		// parseIdentifierExpression (the ArgRef early-return); payload rows
+		// cannot exercise it -- round-3 review finding C.
+		{`args.stage??args.def=="active"`, `coalesce(args.stage, args.def)=="active"`},
+		{`args.a??args.b??args.c=="x"`, `coalesce(args.a, args.b, args.c)=="x"`},
+		{`ctx.stage??ctx.def=="active"`, `coalesce(ctx.stage, ctx.def)=="active"`},
+		{`args.n>args.m??0`, `args.n>coalesce(args.m, 0)`},
 		{`payload.a=="b"??"c"`, `payload.a==coalesce("b", "c")`},
 		{`payload.n>payload.m??0`, `payload.n>coalesce(payload.m, 0)`},
 		{`payload.a!=payload.b??"z"`, `payload.a!=coalesce(payload.b, "z")`},

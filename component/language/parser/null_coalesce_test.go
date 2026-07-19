@@ -171,6 +171,9 @@ func TestNullCoalesce_SwiftTightForIdentifierOperands(t *testing.T) {
 	}
 	rows := []row{
 		{`payload.stage??payload.def=="active"`, "cmp", "left"},
+		// args-valued arms exercise the ArgRef early-return branch
+		// (round-3 finding C); payload rows cannot reach it.
+		{`args.stage??args.def=="active"`, "cmp", "left"},
 		{`payload.a==payload.b??payload.c`, "cmp", "right"},
 		{`payload.a=="b"??"c"`, "cmp", "right"},
 		{`payload.n>payload.m??0`, "cmp", "right"},
