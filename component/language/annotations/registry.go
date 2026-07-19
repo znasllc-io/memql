@@ -62,6 +62,7 @@ var ByReceiver = map[string][]string{
 		"description", "enabled", "disabled", "defaultProvider", "templateFile",
 	},
 	"Provider": {
+		"enabled", "disabled",
 		"description", "type", "model", "modality", "default", "base", "extends",
 	},
 	"Shape": {

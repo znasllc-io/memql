@@ -148,7 +148,7 @@ parser's allow-list (search `allowedXAnnotations` in
 | Annotation | Where it applies |
 |------------|------------------|
 | `@description("...")` | Every construct. |
-| `@enabled` / `@disabled` | Lifecycle on queries / mutations / logic / automations / traits / tools / builtins / prompts / providers / specs / seeds. `@disabled` means "not loaded right now", not "deprecated" -- that axis is `@deprecated`. `@disabled` on a `@base` provider propagates to every child that `@extends` it. |
+| `@enabled` / `@disabled` | Lifecycle on queries / mutations / logic / automations / traits / tools / builtins / prompts / providers / specs / seeds. Enabled is the default on every kind (#2604-#2608); `@enabled` is an accepted no-op. `@disabled` means "not loaded right now", not "deprecated" -- that axis is `@deprecated`. `@disabled` on a `@base` provider propagates to every child that `@extends` it. |
 | `@deprecated("hint")` | Functions, automations, tools, builtins. |
 | `@internal` | Functions; hides from AI tool surfaces + external docs. |
 

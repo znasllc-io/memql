@@ -845,7 +845,8 @@ const (
 	//
 	// CANONICAL SEMANTICS of @enabled / @disabled (applies to every
 	// construct that accepts them -- functions/builtins/automations/
-	// tools/prompts/specs/traits/seeds/providers/capabilities; the gates
+	// actions/tools/prompts/specs/traits/seeds/providers/capabilities;
+	// the gates
 	// landed per kind in #2604-#2608; see the per-decl "lifecycle
 	// (engine-side flags)" notes on BuiltinDecl / PromptDecl /
 	// ProviderDecl):

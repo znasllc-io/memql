@@ -108,8 +108,9 @@ type Function struct {
 	// Type identifies the function kind: "builtin" for system functions, empty for user-defined.
 	Type string
 
-	// FunctionKind identifies if this is a query, mutation, automation, or
-	// builtin function ("builtin" stamped by the converter since #2608).
+	// FunctionKind identifies if this is a query, mutation, logic,
+	// automation, or builtin function ("builtin" stamped by the converter
+	// since #2608).
 	// Empty string or "query" for query functions.
 	FunctionKind string
 

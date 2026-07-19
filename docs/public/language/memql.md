@@ -1278,7 +1278,7 @@ Example response for an invalid payload (missing required field):
 
 ### `functions()`
 
-Returns a minimal list of all registered functions -- queries, mutations, logic, and builtins alike, with `kind` as the discriminator (builtins joined the listing when their lifecycle flag became honest, #2608). Designed for agent discovery with minimal payload size:
+Returns a minimal list of every enabled registered function -- queries, mutations, logic, automations, and builtins alike, with `kind` as the discriminator (builtins joined the listing when their lifecycle flag became honest, #2608). Designed for agent discovery with minimal payload size:
 
 ```json
 {

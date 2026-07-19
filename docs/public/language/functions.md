@@ -466,7 +466,7 @@ authored/deterministic deploy spine but are never themselves LLM-healed.
 
 | Attribute | Arguments | Description |
 |-----------|-----------|-------------|
-| `@enabled` / `@disabled` | none | Lifecycle switch (disabled constructs stay in the tree, are not loaded) |
+| `@enabled` / `@disabled` | none | Lifecycle: enabled by default, `@enabled` an accepted no-op; `@disabled` constructs stay in the tree, are not loaded |
 | `@trigger` | `event="..."`, `concept="..."`, `partition="*"` | Event-based trigger; lifecycle events like `system.startup` / `system.shutdown` take `event` only |
 | `@trigger` | `schedule="..."` | Six-field cron schedule |
 | `@filter` | `(<predicate>)` | Event-payload predicate gating the trigger, e.g. `@filter(active==true)` |
@@ -616,7 +616,7 @@ provider anthropic {
 | `@extends` | Inherits `auth` and `@type` from a named base provider |
 | `@base` | Marks a vendor-level base provider definition |
 | `@default` | Marks this provider as the fallback for callers that do not pick one explicitly |
-| `@enabled` / `@disabled` | Lifecycle. `@disabled` skips registration entirely (no auth resolution attempted); `@disabled` on a `@base` propagates to every child that `@extends` it. |
+| `@enabled` / `@disabled` | Lifecycle: enabled by default, `@enabled` an accepted no-op. `@disabled` skips registration entirely (no auth resolution attempted); `@disabled` on a `@base` propagates to every child that `@extends` it. |
 
 ### Blocks
 
