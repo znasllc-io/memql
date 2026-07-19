@@ -58,8 +58,10 @@ func promptDeclToPromptDecl(decl *languageParser.PromptDecl, origin string) (*pr
 
 	for _, attr := range decl.Attributes {
 		switch attr.Name {
-		case "enabled", "disabled":
-			// Lifecycle flags read elsewhere; no converter effect.
+		case "enabled":
+			// Accepted no-op: enabled is the default (lifecycle ruling, #2606).
+		case "disabled":
+			out.disabled = true
 		case "description":
 			val, ok := attr.Value.(string)
 			if !ok {

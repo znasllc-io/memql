@@ -63,9 +63,10 @@ func (p *Parser) parseSeedDecl(attrs []*ast.Attribute) (*ast.SeedDecl, error) {
 			continue
 		}
 		switch attr.Name {
-		case "enabled", "disabled":
-			// Tolerated for parity with other primitives; no semantic
-			// effect on seed decls.
+		case "enabled":
+			// Accepted no-op: enabled is the default (lifecycle ruling, #2606).
+		case "disabled":
+			decl.Disabled = true
 		case "description":
 			decl.Description = attrStringValue(attr)
 		case "namespace":

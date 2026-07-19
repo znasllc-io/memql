@@ -1869,6 +1869,7 @@ type ToolDecl struct {
 	AllowedRoles         []string // @allowedRoles("assistant", ...) -- empty = no restriction
 	Scopes               []string // @scopes("operator", ...) -- caller must hold a superset
 	MCPExposed           bool     // @mcp flag -- opt this tool into the curated MCP connector surface (memql#1596)
+	Disabled             bool     // @disabled flag -- the loader skips registration (#2606)
 
 	// Fields populates the tool's input schema.
 	Fields []ToolFieldDecl
@@ -1975,6 +1976,7 @@ type SeedDecl struct {
 	Version          string     // @version
 	Scope            string     // @scope: "global" | "perUser" (empty -> loader applies default)
 	TemplateFile     string     // @templateFile path (optional)
+	Disabled         bool       // @disabled -- the loader skips registration (#2606)
 	Body             *SeedBlock // root body block (always non-nil)
 	Path             string     // source path, for errors/diagnostics
 }

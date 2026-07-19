@@ -46,10 +46,10 @@ func (p *Parser) parseToolDecl(attrs []*ast.Attribute) (*ast.ToolDecl, error) {
 			continue
 		}
 		switch attr.Name {
-		case "enabled", "disabled":
-			// Currently no-op: tools are enabled by default; @disabled
-			// isn't honoured by the registry. Kept tolerated for
-			// authoring convenience.
+		case "enabled":
+			// Accepted no-op: enabled is the default (lifecycle ruling, #2606).
+		case "disabled":
+			decl.Disabled = true
 		case "description":
 			decl.Description = attrStringValue(attr)
 		case "destructive":
