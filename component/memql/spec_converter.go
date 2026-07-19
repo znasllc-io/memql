@@ -35,6 +35,7 @@ import (
 	"strings"
 
 	"github.com/znasllc-io/memql/component/language/annotations"
+	"github.com/znasllc-io/memql/component/language/ast"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
 
@@ -85,23 +86,15 @@ func specDeclToSpec(decl *languageParser.SpecDecl, origin string) (*Spec, error)
 				return nil, fmt.Errorf("%s: @description expects a string value", origin)
 			}
 			description = val
-		case "enabled":
+		case ast.AttrEnabled:
 			// Accepted no-op: enabled is the default (lifecycle ruling, #2607).
-		case "disabled":
+		case ast.AttrDisabled:
 			disabled = true
 		}
 	}
 
 	if err := validateSpecName(decl.Name); err != nil {
 		return nil, err
-	}
-
-	// A @disabled spec/trait is skipped at load (nil, nil is the
-	// baseloader's intentional-skip contract): never registered, no
-	// binding resolution, and the _reference sheets' long-standing claim
-	// that @disabled skips trait registration becomes true (#2607).
-	if disabled {
-		return nil, nil
 	}
 
 	if decl.Body == nil {
@@ -134,6 +127,16 @@ func specDeclToSpec(decl *languageParser.SpecDecl, origin string) (*Spec, error)
 	// concept registries needed to resolve BoundName, rewrite the bare
 	// field references to their underlying access form, and pick the eval
 	// strategy. Kind is left empty here and finalized there.
+	// A @disabled spec/trait is skipped at load (nil, nil is the
+	// baseloader's intentional-skip contract): never registered, no
+	// binding resolution, and the _reference sheets' long-standing claim
+	// that @disabled skips trait registration becomes true (#2607). The
+	// gate sits AFTER body validation deliberately -- a disabled spec must
+	// still be semantically valid, or re-enabling it later bricks boot.
+	if disabled {
+		return nil, nil
+	}
+
 	return &Spec{
 		Name:        decl.Name,
 		Description: description,

@@ -50,6 +50,37 @@ spec actorEnvelope liveProbeSpec {
 	if !registry.Has("liveProbeSpec") {
 		t.Error("enabled peer spec did not register")
 	}
+	// The disabled name stays reserved: promotion guards refuse it and
+	// diagnostics can distinguish disabled from never-declared.
+	if !registry.IsDisabled("retiredProbeSpec") {
+		t.Error("@disabled spec name not reserved; an authored spec could be promoted over the retired core name")
+	}
+	if registry.IsDisabled("liveProbeSpec") {
+		t.Error("enabled spec wrongly marked disabled")
+	}
+}
+
+// The gate must sit AFTER body validation: a @disabled spec with a broken
+// body must still be rejected, or disabling ships the breakage green and
+// re-enabling bricks boot.
+func TestLoadUnifiedSpecs_DisabledSpecStillValidated(t *testing.T) {
+	overlay := fstest.MapFS{"specs.memql": {Data: []byte(`@disabled
+spec actorEnvelope brokenRetiredSpec {
+  return 42
+}
+`)}}
+	const domain = "lifecycledisabledspecinvalid"
+	memqldsl.RegisterTree(domain, overlay)
+	t.Cleanup(func() { memqldsl.UnregisterTree(domain) })
+
+	registry := newSpecRegistry()
+	rep := newLoadReport()
+	if _, err := LoadUnifiedSpecs(lifecycleDiscardLogger(), registry, rep); err != nil {
+		t.Fatalf("LoadUnifiedSpecs: %v", err)
+	}
+	if !rep.HasProblems() {
+		t.Error("a @disabled spec with a non-boolean body must still fail validation (parse-phase skip), or re-enabling it later bricks boot")
+	}
 }
 
 func TestLoadUnifiedSpecs_DisabledTraitSkipped(t *testing.T) {

@@ -1622,6 +1622,23 @@ type CapabilityDecl struct {
 
 func (*CapabilityDecl) node() {}
 
+// IsDisabled reports whether the capability decl carries @disabled.
+// @enabled is an accepted no-op per the lifecycle ruling (#2607). Shared by
+// every capability walk (component/memql's name loader and
+// component/actions' catalog) so the validation and dispatch sets cannot
+// diverge on lifecycle.
+func (d *CapabilityDecl) IsDisabled() bool {
+	if d == nil {
+		return false
+	}
+	for _, attr := range d.Attributes {
+		if attr != nil && attr.Name == AttrDisabled {
+			return true
+		}
+	}
+	return false
+}
+
 // PromptField is a single field declaration inside a PromptDecl
 // body. Mirrors BuiltinField (memql#318) so the per-construct
 // playbook for langparser-native struct declarations stays uniform.

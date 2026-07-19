@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/znasllc-io/memql/component/memql/baseregistry"
 )
@@ -36,9 +37,16 @@ const (
 	SpecKindContext SpecKind = "context"
 )
 
-// SpecRegistry stores globally registered specifications.
+// SpecRegistry stores globally registered specifications, plus the names
+// the unified loader skipped as @disabled. A disabled name stays OCCUPIED:
+// specs are authorization predicates, and without the reservation an
+// authored spec could be promoted over a deliberately-retired core spec
+// name (the ToolRegistry resurrection precedent, #2606/#2607).
 type SpecRegistry struct {
 	*baseregistry.Registry[Spec]
+
+	disabledMu sync.RWMutex
+	disabled   map[string]bool
 }
 
 func newSpecRegistry() *SpecRegistry {
@@ -46,7 +54,27 @@ func newSpecRegistry() *SpecRegistry {
 		Registry: baseregistry.New[Spec]("spec",
 			func(s *Spec) *Spec { return s.clone() },
 			validateSpecName),
+		disabled: make(map[string]bool),
 	}
+}
+
+// MarkDisabled records a spec/trait name skipped as @disabled at load,
+// keeping the name occupied for promotion guards and diagnostics.
+func (r *SpecRegistry) MarkDisabled(name string) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return
+	}
+	r.disabledMu.Lock()
+	r.disabled[name] = true
+	r.disabledMu.Unlock()
+}
+
+// IsDisabled reports whether the name was skipped as @disabled at load.
+func (r *SpecRegistry) IsDisabled(name string) bool {
+	r.disabledMu.RLock()
+	defer r.disabledMu.RUnlock()
+	return r.disabled[strings.TrimSpace(name)]
 }
 
 // add inserts a spec into the registry. Errors when the name is

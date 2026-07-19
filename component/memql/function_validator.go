@@ -351,6 +351,11 @@ func (v *functionValidator) expandFunctionCall(call *FunctionCallExpression) (Ex
 
 	fn, ok := v.functions[key]
 	if !ok || fn == nil {
+		// A @disabled spec keeps its name reserved -- say so rather than
+		// "not found" (#2607).
+		if v.specs != nil && v.specs.IsDisabled(key) {
+			return nil, fmt.Errorf("spec %q is disabled", key)
+		}
 		// Specs are invoked with the same call syntax but cannot accept args.
 		if v.specs != nil && v.specs.Has(key) {
 			if len(call.Args) > 0 {
