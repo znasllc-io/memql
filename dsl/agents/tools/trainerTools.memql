@@ -23,7 +23,6 @@
 //   markChunkSuperseded-> markChunkSuperseded (refresh-mode deprecation)
 //   embedChunk         -> builtin embedChunk         (integration.knowledge.embedChunk; real embed-and-store, #645)
 
-@enabled
 @handler(type="function", name="webSearch")
 @allowedRoles("specialist")
 @executionTime("medium")
@@ -33,7 +32,6 @@ tool webSearch {
   num_results  integer  @default("5") @description("Max results to return. Default 5.")
 }
 
-@enabled
 @handler(type="function", name="fetchUrl")
 @allowedRoles("specialist")
 @executionTime("medium")
@@ -42,7 +40,6 @@ tool fetchUrl {
   url  string  @required @description("The absolute URL to fetch (http/https). Must be a real, consultable source -- its URL becomes the chunk's sourceRef.")
 }
 
-@enabled
 @handler(type="function", name="writeKnowledgeChunk")
 @allowedRoles("specialist")
 @executionTime("fast")
@@ -57,7 +54,6 @@ tool writeKnowledgeChunk {
   sourceTopic  string   @description("The narrow topic this chunk covers. Groups all chunks from one training run together in the Knowledge panel.")
 }
 
-@enabled
 @handler(type="function", name="markChunkSuperseded")
 @allowedRoles("specialist")
 @executionTime("fast")
@@ -68,7 +64,6 @@ tool markChunkSuperseded {
   reason        string  @description("Why it's outdated, e.g. 'superseded by 2026 figures', 'source page removed'.")
 }
 
-@enabled
 @handler(type="function", name="embedChunk")
 @allowedRoles("specialist")
 @executionTime("fast")

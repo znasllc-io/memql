@@ -5,7 +5,6 @@
 
 use data.concepts.{ policy, record }
 
-@enabled
 @description("Synthetically check a data record, updating check count and validation state")
 mutate record checkRecord {
   args {
@@ -47,7 +46,6 @@ mutate record checkRecord {
 //   })
 //
 
-@enabled
 @description("Human confirm a data record, updating confirm count and validation state")
 mutate record confirmRecord {
   args {
@@ -101,7 +99,6 @@ mutate record confirmRecord {
 //   })
 //
 
-@enabled
 @description("Create a data record in draft validation state awaiting check and confirmation")
 mutate record createRecord {
   args {
@@ -175,7 +172,6 @@ mutate record createRecord {
 //   })
 //
 
-@enabled
 @description("Create a single data record from a batch import in draft validation state (called once per record)")
 mutate record createRecordBatch {
   args {
@@ -227,7 +223,6 @@ mutate record createRecordBatch {
 //   deleteRecord({ recordId: "record-uuid", partitionId: "space-456" })
 //
 
-@enabled
 @description("Soft-delete a data record (sets active=false)")
 mutate record deleteRecord {
   args {
@@ -268,7 +263,6 @@ mutate record deleteRecord {
 //   })
 //
 
-@enabled
 @description("Revert a data record to a previous validation state with counter reset")
 mutate record revertRecord {
   args {
@@ -313,7 +307,6 @@ mutate record revertRecord {
 //   })
 //
 
-@enabled
 @description("Create or update a validation policy for a record type")
 mutate policy setPolicy {
   args {
@@ -364,7 +357,6 @@ mutate policy setPolicy {
 //   })
 //
 
-@enabled
 @description("Update a data record (resets validation state to draft)")
 mutate record updateRecord {
   args {

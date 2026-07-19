@@ -16,7 +16,6 @@ logic releaseWorkspaceOnPlanTerminal {
   }
 }
 
-@enabled
 @description("PURE terminal-status decision table for v1:planner:plan (#2370): returns true when the status is one of the terminal set (succeeded / failed / cancelled), false otherwise. THE single owner of that vocabulary -- the releaseWorkspaceOnPlanTerminal automation gates its release + teardown steps on this scalar instead of restating the ||-chain inline (v1:planner:plan has 9 statuses; inline copies drift).")
 logic planIsTerminal {
   args {

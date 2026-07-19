@@ -11,7 +11,6 @@
 
 use calendar.concepts.{ calendarEvent }
 
-@enabled
 @description("Create a native calendar event owned by the authenticated caller. ownerUserId is stamped from actor.userId (caller-scoped write); createdAt + createdBy are engine-stamped row intrinsics (NOT payload fields -- declaring them is rejected as reserved, memql#1673); source defaults to 'native'. The reactive harness's reminder triggers pick the row up via upcomingEvents. Pass `eventId` to control the id (idempotent re-create), else the engine assigns one.")
 mutate calendarEvent createCalendarEvent {
   args {
@@ -39,7 +38,6 @@ mutate calendarEvent createCalendarEvent {
   }
 }
 
-@enabled
 @description("Partial update of a calendarEvent. Only the fields passed in `payload` change; everything else inherits from the prior row. Backs editing an event (reschedule, rename, change location / notes / recurrence). The calendar tool reads the row via the owner-scoped calendarEventById before calling this, so cross-user edits are impossible.")
 mutate calendarEvent updateCalendarEvent {
   args {
@@ -52,7 +50,6 @@ mutate calendarEvent updateCalendarEvent {
   }
 }
 
-@enabled
 @description("Soft-delete a calendarEvent by stamping deleted=true. The time-series row survives for history + so a future external-sync reconciler can propagate the deletion upstream; queries hide it via isNotDeleted. The calendar tool reads the row via the owner-scoped calendarEventById before calling this, so a caller can only delete their own events.")
 mutate calendarEvent deleteCalendarEvent {
   args {

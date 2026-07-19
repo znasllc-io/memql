@@ -41,7 +41,6 @@ use deployment.concepts.{ deployment, deploymentNodeSpec }
 // "pending" and environment to "development" so the enum columns always
 // receive a member of their value set; the plain string fields coalesce
 // to "" when the caller omits them.
-@enabled
 @description("Create a v1:cluster:deployment record at deploy start (status defaults to pending). Uses deploymentId as the concept id so status transitions append to one timeline. #1872.")
 mutate deployment createDeployment {
   args {
@@ -90,7 +89,6 @@ mutate deployment createDeployment {
 //
 // Admin action: gated to owner/admin in Go (deploycontrol.authorize);
 // DSL mirror spec("requiresOwnerOrAdmin").
-@enabled
 @description("Transition a v1:cluster:deployment's status (pending -> in_progress -> succeeded|failed; succeeded -> superseded; any -> rolled_back). Read-merge update: only status + updatedAt change, deploy metadata inherits. #1872.")
 mutate deployment updateDeploymentStatus {
   args {
@@ -121,7 +119,6 @@ mutate deployment updateDeploymentStatus {
 // Admin action: the deploy pack gates the write path; the DSL mirror
 // is spec("requiresOwnerOrAdmin") on the cut-version/rollback effects
 // (Epic 2.6). Additive: no existing overlay or query is affected.
-@enabled
 @description("Create a v1:cluster:deploymentNodeSpec row for a (deploymentId, nodeType) pair. Uses concat(deploymentId, ':', nodeType) as the concept id so re-pins append to one timeline. Engine-as-spine: empty version resolves against the deployment engine version. Epic 2 / #2094.")
 mutate deploymentNodeSpec createDeploymentNodeSpec {
   args {
@@ -154,7 +151,6 @@ mutate deploymentNodeSpec createDeploymentNodeSpec {
 //
 // The caller passes deploymentId + nodeType (NOT the composite id) so
 // the mutation re-derives the same concept id the create used.
-@enabled
 @description("Re-pin a v1:cluster:deploymentNodeSpec's version / replicas / imageDigest by (deploymentId, nodeType). Read-merge update: deploymentId + nodeType inherit, only the spec fields + updatedAt change. Append under the same composite concept id. Epic 2 / #2094.")
 mutate deploymentNodeSpec updateDeploymentNodeSpec {
   args {

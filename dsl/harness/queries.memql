@@ -58,7 +58,6 @@
 // happened" raises wRec / lowers halfLife; a research agent wanting
 // "everything relevant ever" raises wSem and widens/omits the window.
 
-@enabled
 @sdk
 @executor("integration.harnessRecall.recall")
 @args(profile="object", additionalProperties="true")
@@ -102,7 +101,6 @@ builtin recall {
 // audit trail rather than expressed as a filter clause (builtins carry
 // owner-scope in Go).
 
-@enabled
 @sdk
 @executor("integration.harnessTrace.trace")
 @args(profile="object")

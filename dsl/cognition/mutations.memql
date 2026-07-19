@@ -7,7 +7,6 @@ use cognition.concepts.{ audioOverride, chunk, request, response, participant, p
 use agents.concepts.{ agent }
 use identity.concepts.{ user, authSession }
 
-@enabled
 @description("Add the caller's agent to a space's roster. forUserId is server-stamped; per-user-per-space 3-cap and agent-ownership are enforced by the engine guard.")
 mutate participant addAgentToSpace {
   args {
@@ -133,7 +132,6 @@ mutate participant addAgentToSpace {
 // insert does.
 //
 
-@enabled
 @description("Create a greeting utterance for an AI participant joining a space")
 mutate utterance createGreetingUtterance {
   args {
@@ -163,7 +161,6 @@ mutate utterance createGreetingUtterance {
 //
 // Creates (or re-creates) a v1:cognition:session record for a participant in a space.
 
-@enabled
 @description("Create a session record for a participant in a space.")
 mutate session createSessionForParticipant {
   args {
@@ -244,7 +241,6 @@ mutate session createSessionForParticipant {
 // tool bridge, and answer by inserting a
 // v1:cognition:client:tool:response with the same callId.
 
-@enabled
 @description("Emit a client-tool request envelope for cross-node relay to a browser stream.")
 mutate request emitClientToolRequest {
   args {
@@ -281,7 +277,6 @@ mutate request emitClientToolRequest {
 // ClientToolResult MemqlClientMessage and forwards it to the agent
 // node via AiForwardRequest so the parked tool-loop waiter unblocks.
 
-@enabled
 @description("Emit a client-tool response envelope fulfilling a pending clientToolRequest.")
 mutate response emitClientToolResponse {
   args {
@@ -311,7 +306,6 @@ mutate response emitClientToolResponse {
 // emits a graph.node.created.v1:cognition:text:chunk event, which the frontend
 // subscribes to for real-time streaming text display.
 
-@enabled
 @description("Emit a streaming text chunk during AI response generation.")
 mutate chunk emitTextChunk {
   args {
@@ -362,7 +356,6 @@ mutate chunk emitTextChunk {
 // why A2's (#2441) egress bare-ification of space-id payload fields
 // keys on an explicit field-name set, not on relationship metadata.
 
-@enabled
 @description("Join a space as a human participant.")
 mutate participant joinSpaceAsHuman {
   args {
@@ -415,7 +408,6 @@ mutate participant joinSpaceAsHuman {
 // computes the same string can keep using checkExistingGA's lookup
 // without re-encoding via hash().
 
-@enabled
 @description("Join a space as an AI participant. Uses canonicalized deterministic ID.")
 mutate participant joinSpaceAsAI {
   args {
@@ -458,7 +450,6 @@ mutate participant joinSpaceAsAI {
 // Inserts a new version of a participant record with the provided payload.
 // The caller is responsible for passing the full updated payload (e.g., status="left", leftAt=now).
 
-@enabled
 @description("Insert a new version of a participant record (typically used to mark the participant as left).")
 mutate participant leaveSpace {
   args {
@@ -494,7 +485,6 @@ mutate participant leaveSpace {
 //      (e.g., space-deletion), not by the user clicking remove in
 //      the roster.
 
-@enabled
 @description("Remove the caller's agent from a space (status='left'). The engine guard enforces caller-owns-agent and rejects removal of the pinned owner GA.")
 mutate participant removeAgentFromSpace {
   args {
@@ -571,7 +561,6 @@ mutate participant removeAgentFromSpace {
 // - createdAt can be provided (RFC3339) or defaults to now
 // - If action.idempotencyKey is provided, a deterministic utterance ID is derived for safe retries
 
-@enabled
 @description("Create an action utterance in a space.")
 mutate utterance sendActionUtterance {
   args {
@@ -625,7 +614,6 @@ mutate utterance sendActionUtterance {
 // This write path is intended for realtime transcript persistence and supports
 // deterministic IDs when idempotencyKey is provided.
 
-@enabled
 @description("Create a transcript-only realtime voice utterance in a space.")
 mutate utterance sendRealtimeTranscriptUtterance {
   args {
@@ -689,7 +677,6 @@ mutate utterance sendRealtimeTranscriptUtterance {
 //
 // Inserts a new speech utterance into a space conversation.
 
-@enabled
 @description("Create a speech utterance in a space.")
 mutate utterance sendSpeechUtterance {
   args {
@@ -733,7 +720,6 @@ mutate utterance sendSpeechUtterance {
 //
 // Inserts a new text utterance into a space conversation.
 
-@enabled
 @description("Create a text utterance in a space.")
 mutate utterance sendTextUtterance {
   args {
@@ -783,7 +769,6 @@ mutate utterance sendTextUtterance {
 // active=false on this row collapses to the agent default without
 // destroying history.
 
-@enabled
 @description("Set the per-session audio control mode for an agent in a space.")
 mutate audioOverride setAgentAudioOverride {
   args {
@@ -839,7 +824,6 @@ mutate audioOverride setAgentAudioOverride {
 // active=false on this row collapses to the agent default without
 // destroying history.
 
-@enabled
 @description("Set the per-session video control mode for an agent in a space.")
 mutate videoOverride setAgentVideoOverride {
   args {
@@ -878,7 +862,6 @@ mutate videoOverride setAgentVideoOverride {
 // requires participantId/partitionId that an auth session never carries
 // (memql#1639).
 
-@enabled
 @description("Update an auth-session record (typically a heartbeat to bump lastActivityAt). Read-merges the existing row (update()): only the fields in `payload` change; the @required discriminators (subject, tokenHash, source, expiresAt) and every other omitted field inherit from the persisted row instead of having to be re-supplied (memql#1628). The session row must already exist.")
 mutate authSession touchSession {
   args {
@@ -899,7 +882,6 @@ mutate authSession touchSession {
 // Upserts participant presence snapshots for UI status overlays.
 // This is append-only versioning with deterministic IDs for latest-wins reads.
 
-@enabled
 @description("Upsert a participant presence snapshot for multi-client status consistency.")
 mutate presence updateParticipantPresence {
   args {
@@ -947,7 +929,6 @@ mutate presence updateParticipantPresence {
 // Inserts a new version of a participant record with the provided payload.
 // The caller is responsible for passing the full updated payload.
 
-@enabled
 @description("Update a participant record (typically status). Read-merges the existing row (update()): only the fields in `payload` change; every omitted field inherits from the persisted row instead of being wiped (memql#1628 class). The participant row must already exist (created on join).")
 mutate participant updateParticipantStatus {
   args {
@@ -968,7 +949,6 @@ mutate participant updateParticipantStatus {
 // Inserts a new version of a session record with the provided payload.
 // The caller is responsible for passing the full updated payload.
 
-@enabled
 @description("Update a session record's device state. Read-merges the existing row (update()): only the fields in `payload` change; the @required fields (participantId, partitionId, ...) and every other omitted field inherit from the persisted row instead of being wiped (memql#1628). The session row must already exist.")
 mutate session updateSessionDevices {
   args {
@@ -989,7 +969,6 @@ mutate session updateSessionDevices {
 // Inserts a new version of a session record with the provided payload.
 // The caller is responsible for passing the full updated payload.
 
-@enabled
 @description("Update a session record's stream state. Read-merges the existing row (update()): only the fields in `payload` change; the @required fields (participantId, partitionId, ...) and every other omitted field inherit from the persisted row instead of being wiped (memql#1628). The session row must already exist.")
 mutate session updateSessionStreams {
   args {

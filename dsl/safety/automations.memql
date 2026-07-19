@@ -16,7 +16,6 @@ use safety.logic.{ purgeExpiredSafetyClassifications, purgeExpiredOutputScreenin
 // Schedule chosen as 02:35 UTC (5 minutes after policyTrace's
 // 02:30 sweep) so the two retention crons don't contend on the
 // same DB window.
-@enabled
 @trigger(schedule="0 35 2 * * *")
 @description("Daily 02:35 UTC sweep: identifies safety-classification rows past MEMQL_SAFETY_CLASSIFICATION_RETENTION_DAYS (default 90). Observation-only until MemQL gains row-removal support.")
 automation purgeExpiredSafetyClassifications {
@@ -32,7 +31,6 @@ automation purgeExpiredSafetyClassifications {
 // than MEMQL_SAFETY_OUTPUT_SCREENING_RETENTION_DAYS (default 90).
 // Same observation-only pattern as purgeExpiredSafetyClassifications.
 // Offset by 5 minutes so the two safety crons don't contend.
-@enabled
 @trigger(schedule="0 40 2 * * *")
 @description("Daily 02:40 UTC sweep: identifies output-screening rows past MEMQL_SAFETY_OUTPUT_SCREENING_RETENTION_DAYS (default 90). Observation-only until MemQL gains row-removal support.")
 automation purgeExpiredOutputScreenings {

@@ -29,7 +29,6 @@
 // context gate apply uniformly. Builtins underneath are the
 // implementation; tools are the contract.
 
-@enabled
 @handler(type="function", name="ensureAgentForGoal")
 @executionTime("medium")
 @allowedRoles("assistant")

@@ -9,7 +9,6 @@
 
 use common.shapes.{ actorEnvelope }
 
-@enabled
 @description("Actor must hold an identity-issued JWT with the admin role.")
 spec actorEnvelope requiresAdmin {
   return role == "admin"

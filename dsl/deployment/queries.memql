@@ -32,7 +32,6 @@ use deployment.shapes.{ deploymentFull, deploymentNodeSpecFull }
 // (cockpit Deployments view), mirroring clusterNodes' "CLI dedupes
 // + sorts" note -- the MemQL query planner has no order/limit clause.
 
-@enabled
 @description("Deployment history for a cluster: latest-per-deploymentId rows (asOf latest -> current status per deployment) filtered to a clusterId. Backs the cockpit Deployments history list (consumer sorts newest-first by createdAt). #1872.")
 @unbounded("deployments for a cluster -- a bounded topology set consumed whole")
 query deployment deploymentsForCluster {
@@ -54,7 +53,6 @@ query deployment deploymentsForCluster {
 // reconstructable asOf any point in time (acceptance criterion). No asOf
 // directive: the consumer wants all versions, not the latest.
 
-@enabled
 @description("All status-transition rows for one deployment, by deploymentId, oldest-to-newest (full lifecycle history; reconstructable asOf any time). #1872.")
 @unbounded("deployment by unique deploymentId -- bounded to a single row")
 query deployment deploymentById {
@@ -91,7 +89,6 @@ query deployment deploymentById {
 // user-scope field) -> conformance "other" bucket, same as
 // nodesNotInDeployment / deploymentsForCluster.
 
-@enabled
 @description("Latest-per-deploymentId deployment rows whose status is terminal-not-active (superseded / failed / rolled_back) -- the deployments whose still-registered nodes are orphans. Feeds the active-topology reaper (#1874). asOf latest -> current status per deployment.")
 @unbounded("superseded/failed/rolled-back deployments GC sweep -- an internal sweep that must see all")
 query deployment supersededDeployments {
@@ -120,7 +117,6 @@ query deployment supersededDeployments {
 // no user-scope field) -> conformance "other" bucket, same as
 // nodesForDeployment / deploymentsForCluster.
 
-@enabled
 @description("Latest-per-(deploymentId, nodeType) deploymentNodeSpec rows for one deploymentId -- the deployment's current per-node-type spec set (version / replicas / imageDigest). asOf latest collapses the append-only spec stream to current state per node type. Engine-as-spine resolution of an empty version is the consumer's job. Epic 2 / #2094.")
 @unbounded("per-node specs for one deployment -- a bounded topology set consumed whole")
 query deploymentNodeSpec nodeSpecsForDeployment {

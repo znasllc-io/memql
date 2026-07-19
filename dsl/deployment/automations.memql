@@ -104,7 +104,6 @@
 use deployment.logic.{ deploymentForwardAllowed, deployOutcomeLabel, deployRollbackTarget }
 use deployment.mutations.{ createDeployment, updateDeploymentStatus }
 
-@enabled
 @trigger(event="deploy.requested", concept="v1:cluster:deployment", partition="*")
 @description("Deploy the memQL ENGINE cluster to an environment (development | staging | production) on the cockpit/runner surface. Sequences clone -> build -> place (env switch) -> gate -> success/failure finish, recording the deployment lifecycle. Engine mesh ONLY -- no bff or product-carrier nodes.")
 automation deployEngineCluster {

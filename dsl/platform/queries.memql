@@ -5,7 +5,6 @@
 
 use platform.concepts.{ globalVariable, missingCapability, outboundRequest }
 
-@enabled
 @description("Recent persisted policy traces for the named policy, most-recent first.")
 query policyTrace policyTracesForPolicy {
   args {
@@ -33,7 +32,6 @@ query policyTrace policyTracesForPolicy {
 // addDuration today).
 //
 
-@enabled
 @description("All persisted policy traces; the retention sweep iterates and per-row checks createdAt + retention-days < now.")
 query policyTrace allPolicyTraces {
   filter  policyName!=""
@@ -67,7 +65,6 @@ query policyTrace allPolicyTraces {
 //   globalVariable({name: "MEMQL_AUTO_PROVISION_USERS"})
 //
 
-@enabled
 @description("Get a single instance-wide configuration variable by name (v1:platform:globalVariable)")
 @unbounded("global variable by unique name -- bounded to a single row")
 query globalVariable globalVariable {
@@ -100,7 +97,6 @@ query globalVariable globalVariable {
 //   globalVariables({names: ["MEMQL_DEFAULT_USER_ROLE", "MEMQL_DEFAULT_USER_THEME"]})
 //
 
-@enabled
 @description("Get multiple instance-wide configuration variables by name list (v1:platform:globalVariable)")
 @unbounded("global variables by the requested name set -- bounded by the caller's name list")
 query globalVariable globalVariables {
@@ -150,7 +146,6 @@ query globalVariable globalVariables {
 //   userDefaults()  // Returns all user provisioning variables
 //
 
-@enabled
 @internal
 @description("Returns default configuration variables for user provisioning. Used by bootstrapUser automation.")
 @unbounded("user-default variables -- a fixed bounded allow-list of names consumed whole")
@@ -158,7 +153,6 @@ query globalVariable userDefaults {
   filter  isActiveRecord && name in ["MEMQL_DEFAULT_USER_ROLE", "MEMQL_DEFAULT_USER_THEME", "MEMQL_DEFAULT_USER_LANGUAGE", "MEMQL_AUTO_PROVISION_USERS", "MEMQL_UPDATE_LAST_SEEN"]
 }
 
-@enabled
 @description("Per Q7: list missingCapability rows by status, sorted by sightingCount desc. Backs the platform-roadmap prioritization view -- 'most-requested capabilities that the platform doesn't yet support'. Status filter: 'open' for active backlog, 'in_progress' / 'resolved' / 'wontfix' for the audit view.")
 query missingCapability missingCapabilitiesByStatus {
   args {
@@ -173,7 +167,6 @@ query missingCapability missingCapabilitiesByStatus {
   shape   missingCapabilityFull
 }
 
-@enabled
 @description("Per Q7: dedup lookup the Planner Agent runs before logging a new sighting. Returns the existing row (if any) for the (kind, capability) pair so the Planner can call bumpMissingCapabilitySighting instead of creating a duplicate row.")
 @unbounded("missing capability by (kind,name) -- bounded to a single row")
 query missingCapability missingCapabilityByKindAndName {
@@ -187,7 +180,6 @@ query missingCapability missingCapabilityByKindAndName {
 
 // ---- queries/v1/platform/outboundRequestsByStatus.memql ----
 
-@enabled
 @description("Outbound requests in a given delivery status, oldest first (memql#2521). The outbound worker drains 'pending' and 'retrying' through this; operators and products use it to audit delivery state. Bounded first page: the worker drains batches per poll, so a burst larger than one page simply takes extra polls.")
 query outboundRequest outboundRequestsByStatus {
   args {

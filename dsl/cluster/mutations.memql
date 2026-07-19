@@ -5,7 +5,6 @@
 
 use cluster.concepts.{ cluster, database, identityProvider, node, spawnEvent }
 
-@enabled
 @description("Create the cluster record")
 mutate cluster createCluster {
   args {
@@ -35,7 +34,6 @@ mutate cluster createCluster {
 
 // Register the cluster's database in the graph.
 
-@enabled
 @description("Register the cluster's database in the graph")
 mutate database createDatabase {
   args {
@@ -57,7 +55,6 @@ mutate database createDatabase {
 
 // Register the cluster's identity provider in the graph.
 
-@enabled
 @description("Register the cluster's identity provider in the graph")
 mutate identityProvider createIdentityProvider {
   args {
@@ -83,7 +80,6 @@ mutate identityProvider createIdentityProvider {
 // (via updateNodeHealth) share the same time-series timeline -- one
 // concept row per real node, not one per observer.
 
-@enabled
 @description("Register a node in the cluster")
 mutate node createNode {
   args {
@@ -119,7 +115,6 @@ mutate node createNode {
 
 // Record a node lifecycle event (spawned, stopped, failed).
 
-@enabled
 @description("Record a node lifecycle event")
 mutate spawnEvent createSpawnEvent {
   args {
@@ -153,7 +148,6 @@ mutate spawnEvent createSpawnEvent {
 // graph.node.created.<partition>.v1:cluster:node, which the CLI
 // subscribes to for live topology updates.
 
-@enabled
 @description("Record a node health transition. Read-merges the existing v1:cluster:node row (created on startup by registerNode under the same NodeId) so only health + lastSeen change; nodeType/address/parentId/capabilities/labels inherit from the persisted row instead of being wiped when a caller omits them (memql#1628 -- previously the insert form re-stamped address to \"\" and reset capabilities/labels on every transition).")
 mutate node updateNodeHealth {
   args {

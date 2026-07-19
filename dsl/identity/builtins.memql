@@ -3,7 +3,6 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-@enabled
 @executor("integration.identity.createDelegation")
 @args(profile="object")
 @description("Create a delegation granting an agent scoped authority to act on behalf of an identity.")
@@ -26,7 +25,6 @@ builtin identityCreateDelegation {
 // Resolve the active delegation chain for an agent subject.
 // Returns the delegation record linking the agent to its delegating identity.
 
-@enabled
 @executor("integration.identity.resolveDelegation")
 @args(profile="object")
 @description("Resolve the active delegation chain for an agent subject. Returns the delegation record.")
@@ -42,7 +40,6 @@ builtin identityResolveDelegation {
 // Revoke an existing delegation by ID, deactivating all scoped
 // authority it granted.
 
-@enabled
 @executor("integration.identity.revokeDelegation")
 @args(profile="object")
 @description("Revoke an existing delegation by ID, deactivating all scoped authority it granted.")
@@ -58,7 +55,6 @@ builtin identityRevokeDelegation {
 // Check whether a delegation permits a specific operation.
 // Returns a boolean result.
 
-@enabled
 @executor("integration.identity.validateScope")
 @args(profile="object")
 @description("Check whether a delegation permits a specific operation. Returns boolean result.")

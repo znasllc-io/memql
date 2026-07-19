@@ -18,7 +18,6 @@ use common.shapes.{ attachmentDownload }
 // then re-checks the returned row's partitionId. The partitionId predicate here also
 // stops cross-space id probing. Mirrors spaceMedia's space-scoped pattern.
 
-@enabled
 @unbounded("attachment by id (guarded) within a space -- bounded to a single row")
 @description("Fetch a single v1:common:attachment row by id within a space. Backs the attachment download endpoint (GET /spaces/{partitionId}/attachments/{attachmentId}); the handler gates on space ownership first.")
 query attachment attachmentById {
@@ -47,7 +46,6 @@ query attachment attachmentById {
 //
 // carrier#44 (audit) + memql#191.
 
-@enabled
 @description("Returns v1:common:media rows attached to a space. Optional mediaType filter narrows to audio / video / image / document. The frontend's useMedia hook calls this for the per-space attachments view.")
 query media spaceMedia {
   args {

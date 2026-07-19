@@ -11,7 +11,6 @@
 
 use workbench.concepts.{ workspace }
 
-@enabled
 @description("Create the v1:workbench:workspace row for a Plan on first workbenchHost call. Storage root is supplied by the workbench integration which has already created the directory on disk.")
 mutate workspace provisionWorkspace {
   args {
@@ -31,7 +30,6 @@ mutate workspace provisionWorkspace {
   }
 }
 
-@enabled
 @description("Bump lastUsedAt on a workbench workspace after a successful dispatch. Cheap; called per successful workbenchHost call.")
 mutate workspace touchWorkspace {
   args {
@@ -43,7 +41,6 @@ mutate workspace touchWorkspace {
   }
 }
 
-@enabled
 @description("Mark a workbench workspace as released. Called from releaseWorkspaceOnPlanTerminal when the parent Plan reaches a terminal status. The actual on-disk teardown is the workbench integration's responsibility -- this mutation only flips the lifecycle bit.")
 mutate workspace releaseWorkspace {
   args {

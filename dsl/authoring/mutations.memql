@@ -10,7 +10,6 @@
 
 use authoring.concepts.{ bundle, construct, dependencyEdge }
 
-@enabled
 @description("Create a draft authoring bundle -- the atomic unit a Responsibility compiles into. ownerUserId is stamped from actor.userId. Members are added via createAuthoringConstruct; reused (composed) constructs are recorded on reusedConstructRefs.")
 mutate bundle createAuthoringBundle {
   args {
@@ -37,7 +36,6 @@ mutate bundle createAuthoringBundle {
   }
 }
 
-@enabled
 @description("Create an authored construct (the .memql source for one automation / logic / shape / spec / trait / policy / mutation / query / prompt) as a member of a bundle. ownerUserId stamped from actor.userId; status starts draft and follows the bundle.")
 mutate construct createAuthoringConstruct {
   args {
@@ -62,7 +60,6 @@ mutate construct createAuthoringConstruct {
   }
 }
 
-@enabled
 @description("Record the Gate 1 (isolated compile+bind, #956) result on a bundle and transition status. status is validated on success or failed on a binding error; validationReport carries the structured diagnostics; failureReason carries the headline on failure. Re-stamps ownerUserId (keeps the row owned + satisfies per-row authz).")
 mutate bundle recordBundleValidation {
   args {
@@ -80,7 +77,6 @@ mutate bundle recordBundleValidation {
   }
 }
 
-@enabled
 @description("Record the Gate 2 (tiered behavioral dry-run, #958) result on a bundle and transition status. status is dryRunPassed on success or failed otherwise; dryRunReport carries the trace + side-effect manifest + cost estimate (the Gate 3 approval artifact).")
 mutate bundle recordBundleDryRun {
   args {
@@ -98,7 +94,6 @@ mutate bundle recordBundleDryRun {
   }
 }
 
-@enabled
 @description("Activate a bundle after Gate 3 approval: status -> active and activatedAt stamped. The authored-construct runtime (#959) registers the bundle's constructs on this transition; member constructs are flipped to active via setConstructStatus.")
 mutate bundle activateAuthoringBundle {
   args {
@@ -112,7 +107,6 @@ mutate bundle activateAuthoringBundle {
   }
 }
 
-@enabled
 @description("Generic lifecycle transition for the remaining bundle states: paused (circuit breaker / user hold), retired (superseded or removed), or failed. retiredAt is stamped by retireAuthoringBundle; this mutation handles pause/unpause + failed. failureReason optional.")
 mutate bundle setAuthoringBundleStatus {
   args {
@@ -128,7 +122,6 @@ mutate bundle setAuthoringBundleStatus {
   }
 }
 
-@enabled
 @description("Retire a bundle: status -> retired and retiredAt stamped. Used when a new version supersedes it or the user removes the capability. The authored runtime (#959) unregisters its constructs on this transition.")
 mutate bundle retireAuthoringBundle {
   args {
@@ -142,7 +135,6 @@ mutate bundle retireAuthoringBundle {
   }
 }
 
-@enabled
 @description("Set a construct's lifecycle status (draft / active / retired), following its parent bundle. The authored runtime flips constructs to active on bundle activation and retired on bundle retirement.")
 mutate construct setConstructStatus {
   args {
@@ -156,7 +148,6 @@ mutate construct setConstructStatus {
   }
 }
 
-@enabled
 @description("Store the cached compiled form for a construct, produced by the Gate 1 compile+bind harness (#956), so activation doesn't re-parse.")
 mutate construct setConstructCompiledForm {
   args {
@@ -170,7 +161,6 @@ mutate construct setConstructCompiledForm {
   }
 }
 
-@enabled
 @description("Promote a construct into the owner's reusable catalog with provenance (#957): catalogued -> true, catalogKey set to the dedup signature, catalogMatchText set to the embedded near-match text, and the provenance pair (catalogedAt + catalogedFromBundleId) stamped so later bundles that compose it inherit where it came from. The embedding itself is written separately into node_vectors by the Go catalog-write path (PromoteConstructToCatalog). Called post-activation as the catalog-write path.")
 mutate construct catalogueConstruct {
   args {
@@ -190,7 +180,6 @@ mutate construct catalogueConstruct {
   }
 }
 
-@enabled
 @description("Record one dependency edge for a bundle's construct (#957). Written by the compile/bind pass once it resolves a construct's references. ownerUserId stamped from actor.userId.")
 mutate dependencyEdge recordDependencyEdge {
   args {

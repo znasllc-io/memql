@@ -355,7 +355,6 @@ logic onDelegationCreated {
 // the memQL query planner doesn't accept function-call literals in
 // comparison expressions yet.
 
-@enabled
 @description("Find every expired active delegation and soft-revoke it with `system:expiry` as the revoker. Returns the count processed.")
 logic revokeExpiredDelegations {
   args {

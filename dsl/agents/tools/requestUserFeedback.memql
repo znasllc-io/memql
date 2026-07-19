@@ -50,7 +50,6 @@
 // feedback request on their behalf -- the assistant is the sole agent
 // that converses with the user.
 
-@enabled
 @handler(type="function", name="requestUserFeedback")
 @allowedRoles("assistant")
 @executionTime("fast")

@@ -1,6 +1,8 @@
 package sense
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -140,5 +142,75 @@ func (Prompt) foo(args any) {}
 	diags := arraySyntaxRule(src)
 	if len(diags) != 0 {
 		t.Fatalf("migrated source should not fire hint; got %v", diags)
+	}
+}
+
+// #2610: construct-attached @enabled gets the soft-deprecation hint; a
+// stripped construct and prose mentions do not.
+func TestRedundantEnabledRule(t *testing.T) {
+	withAnnotation := "@enabled\n@description(\"probe\")\nquery Space probeQuery {\n  filter { payload.active == true }\n}\n"
+	diags := redundantEnabledRule(withAnnotation)
+	if len(diags) != 1 {
+		t.Fatalf("want 1 hint on a construct-attached @enabled, got %d", len(diags))
+	}
+	if diags[0].Code != "redundant-enabled" || diags[0].Severity != SeverityHint {
+		t.Errorf("want redundant-enabled Hint, got %s severity %d", diags[0].Code, diags[0].Severity)
+	}
+	if diags[0].Range.Start.Line != 1 {
+		t.Errorf("hint anchored at line %d, want 1", diags[0].Range.Start.Line)
+	}
+	indented := "\t@enabled\nquery Space probeQuery {\n  filter { payload.active == true }\n}\n"
+	ind := redundantEnabledRule(indented)
+	if len(ind) != 1 || ind[0].Range.Start.Column != 2 {
+		t.Fatalf("indented @enabled must anchor on the token (col 2), got %+v", ind)
+	}
+	for name, src := range map[string]string{
+		"crlf":     "@enabled\r\nquery Space probeQuery {\n}\n",
+		"arg-form": "@enabled(true)\nquery Space probeQuery {\n}\n",
+		"trailing": "@enabled // temp\nquery Space probeQuery {\n}\n",
+	} {
+		if got := redundantEnabledRule(src); len(got) != 1 {
+			t.Errorf("%s: want 1 hint (gate parity), got %d", name, len(got))
+		}
+	}
+
+	clean := "@description(\"probe mentions @enabled in prose\")\nquery Space probeQuery {\n  filter { payload.active == true }\n}\n// historical note: this construct once carried @enabled\n"
+	if got := redundantEnabledRule(clean); len(got) != 0 {
+		t.Fatalf("prose/comment mentions must not hint, got %d", len(got))
+	}
+}
+
+// #2610 DoD: the stripped embedded tree carries zero redundant-enabled
+// hints (the sweep the PR body claims; previously unpinned per review).
+func TestRedundantEnabledRule_EmbeddedTreeClean(t *testing.T) {
+	root := dslRoot(t)
+	var hints []string
+	err := filepath.Walk(root, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if info.IsDir() || !strings.HasSuffix(path, ".memql") {
+			return nil
+		}
+		// _reference/ is deliberately IN scope: its sheets were stripped in
+		// this same story (prose calling @enabled a no-op must not model
+		// it), and this filesystem walk is the only test that reaches them
+		// (the embedded-tree gates cannot -- the embed directive omits
+		// underscore paths).
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		rel, _ := filepath.Rel(root, path)
+		for _, d := range redundantEnabledRule(string(data)) {
+			hints = append(hints, rel+": "+d.Message)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walking %s: %v", root, err)
+	}
+	if len(hints) > 0 {
+		t.Errorf("stripped tree yields %d redundant-enabled hint(s):\n  %s", len(hints), strings.Join(hints, "\n  "))
 	}
 }

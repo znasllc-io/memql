@@ -3,7 +3,6 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-@enabled
 @description("Matches records with active==true field")
 trait isActiveRecord {
   return active==true
@@ -20,7 +19,6 @@ trait isActiveRecord {
 // Usage in queries:
 //   concept==v1:hr:checkin;isCancelled()
 //
-@enabled
 @description("Matches records with cancelled status")
 trait isCancelled {
   return status=="cancelled"
@@ -38,7 +36,6 @@ trait isCancelled {
 // Usage in queries:
 //   concept==v1:data:record;isChecked()
 //
-@enabled
 @description("Matches active data records in checked validation state")
 trait isChecked {
   return active==true && validationState=="checked"
@@ -57,7 +54,6 @@ trait isChecked {
 //   concept==v1:hr:checkin;isCompleted()
 //   concept==v1:hr:flag;isCompleted()
 //
-@enabled
 @description("Matches records with completed status")
 trait isCompleted {
   return status=="completed"
@@ -75,7 +71,6 @@ trait isCompleted {
 // Usage in queries:
 //   concept==v1:data:record;isConfirmed()
 //
-@enabled
 @description("Matches active data records in confirmed validation state")
 trait isConfirmed {
   return active==true && validationState=="confirmed"
@@ -92,7 +87,6 @@ trait isConfirmed {
 // Usage in queries:
 //   concept==v1:data:record;isDraft()
 //
-@enabled
 @description("Matches active data records in draft validation state")
 trait isDraft {
   return active==true && validationState=="draft"
@@ -109,7 +103,6 @@ trait isDraft {
 // Usage in queries:
 //   concept==v1:hr:checkin;isInProgress()
 //
-@enabled
 @description("Matches records with inProgress status")
 trait isInProgress {
   return status=="inProgress"
@@ -126,7 +119,6 @@ trait isInProgress {
 // Usage in queries:
 //   concept==v1:cognition:space;isNotArchived()
 //
-@enabled
 @description("Matches records that are not archived")
 trait isNotArchived {
   return status!="archived"
@@ -146,7 +138,6 @@ trait isNotArchived {
 // Usage in queries:
 //   concept==v1:agents:agent;isNotDeleted()
 //
-@enabled
 @description("Excludes records with deleted==true field")
 trait isNotDeleted {
   return deleted!=true
@@ -165,7 +156,6 @@ trait isNotDeleted {
 //   concept==v1:hr:flag;isOpen()
 //   concept==v1:hr:case;isOpen()
 //
-@enabled
 @description("Matches records with open status requiring action")
 trait isOpen {
   return status=="open"
@@ -183,7 +173,6 @@ trait isOpen {
 //   concept==v1:hr:checkin;isScheduled()
 //   concept==v1:cognition:space;isScheduled()
 //
-@enabled
 @description("Matches records with scheduled status")
 trait isScheduled {
   return status=="scheduled"
@@ -207,7 +196,6 @@ trait isScheduled {
 // Usage in queries:
 //   concept==v1:data:record;isUsable()
 //
-@enabled
 @description("Matches active data records in checked or confirmed validation state")
 trait isUsable {
   return active==true && validationState!="draft"
@@ -232,7 +220,6 @@ trait isUsable {
 //   concept==v1:hr:employee;statusIsActive()
 //   concept==v1:hr:advocate;statusIsActive()
 //
-@enabled
 @description("Matches records with active status")
 trait statusIsActive {
   return status=="active"
@@ -255,7 +242,6 @@ trait statusIsActive {
 // Usage in queries:
 //   concept==v1:cognition:space;statusIsArchived()
 //
-@enabled
 @description("Matches records with payload.status == 'archived'.")
 trait statusIsArchived {
   return status=="archived"
@@ -274,7 +260,6 @@ trait statusIsArchived {
 // Usage in queries:
 //   concept==v1:cognition:space;statusIsSaved()
 //
-@enabled
 @description("Matches records with payload.status == 'saved'.")
 trait statusIsSaved {
   return status=="saved"
@@ -286,7 +271,6 @@ trait statusIsSaved {
 // Used by identity flows (access requests, invitations) where pending
 // rows are queued for action by an admin or the original requester.
 
-@enabled
 @description("Matches records with payload.status == 'pending'.")
 trait statusIsPending {
   return status=="pending"
@@ -298,7 +282,6 @@ trait statusIsPending {
 // Used by planner Plans / Tasks and by worker invocations that are
 // actively executing right now.
 
-@enabled
 @description("Matches records with payload.status == 'running'.")
 trait statusIsRunning {
   return status=="running"
@@ -311,7 +294,6 @@ trait statusIsRunning {
 // (identityIsWorkerToken) so callers can scope per-credential-class
 // queries explicitly.
 
-@enabled
 @description("Matches v1:identity:identity rows with identityType=='api_key'.")
 trait identityIsApiKey {
   return identityType=="api_key"
@@ -324,7 +306,6 @@ trait identityIsApiKey {
 // only on the WorkerService gRPC path; this trait scopes per-worker
 // credential lookups.
 
-@enabled
 @description("Matches v1:identity:identity rows with identityType=='worker_token'.")
 trait identityIsWorkerToken {
   return identityType=="worker_token"
@@ -338,7 +319,6 @@ trait identityIsWorkerToken {
 // trait scopes per-node credential lookups used by the bootstrap-
 // minted identity-row persistence path (memql#343).
 
-@enabled
 @description("Matches v1:identity:identity rows with identityType=='node_token'.")
 trait identityIsNodeToken {
   return identityType=="node_token"
@@ -353,7 +333,6 @@ trait identityIsNodeToken {
 // credentials.keyHash to mint a short-lived class="badge" grant
 // token for the owning user.
 
-@enabled
 @description("Matches v1:identity:identity rows with identityType=='badge'.")
 trait identityIsBadge {
   return identityType=="badge"
@@ -365,7 +344,6 @@ trait identityIsBadge {
 // Used by the user-deletion cooldown sweep to enumerate identities
 // queued for hard delete after the retention window expires.
 
-@enabled
 @description("Matches records that have a deletion scheduled (deletionScheduledAt is set).")
 trait isDeletionScheduled {
   return deletionScheduledAt!=""

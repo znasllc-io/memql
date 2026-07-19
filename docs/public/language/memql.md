@@ -725,7 +725,6 @@ Named mutations live in `dsl/<namespace>/mutations.memql`. The concept binding l
 ```memql
 use cognition.concepts.{ space }
 
-@enabled
 @description("Insert a new version of a space record (typically used to archive a space).")
 mutation space mutationArchiveSpace {
   args {
@@ -764,7 +763,6 @@ spec participant specIsHumanParticipant {
 
 use common.shapes.{ actorEnvelope }
 
-@enabled
 @description("Actor holds an admin role")
 spec actorEnvelope requiresAdmin {
   return role == "admin"
@@ -776,7 +774,6 @@ spec actorEnvelope requiresAdmin {
 A `trait` is the one deliberately **unbound** row predicate — a cross-concept scaffold declared in `dsl/<namespace>/traits.memql`, with no signature binding, a `return` body over bare payload fields, validated against the concrete concept at the call site:
 
 ```memql
-@enabled
 @description("Matches records with active==true field")
 trait isActiveRecord {
   return active == true
@@ -806,7 +803,6 @@ use cognition.concepts.{ participant }
 use cognition.shapes.{ participantFull }
 use common.traits.{ traitIsActiveRecord }
 
-@enabled
 @description("Get space participants")
 query participant querySpaceParticipants {
   args {
@@ -825,7 +821,6 @@ query participant querySpaceParticipants {
 Body directives: `filter` (the predicate), `shape` (named projection), and optional `sort "field", "dir"` / `paginate N` lines:
 
 ```memql
-@enabled
 @description("Returns the latest space-context row for a given spaceId")
 query context queryLatestSpaceContextForSpace {
   args {
@@ -953,7 +948,6 @@ Logic constructs are imperative procedures called from automation steps (or othe
 ```memql
 use common.builtins.{ ensureDailySpaceForUser }
 
-@enabled
 @description("On user creation, ensure today's daily space exists.")
 logic logicProvisionDailySpaceOnUserCreate {
   args {
@@ -1047,7 +1041,6 @@ Binary `+` `-` `*` `/` `%` (Go precedence) are available in `logic` and collecti
 Builtins wrap Go integrations behind a declarative schema, so they look like regular DSL function calls. Struct form with an `@executor` annotation naming the Go-side capability; the body is the input-schema field list:
 
 ```memql
-@enabled
 @executor("integration.auth.checkPermission")
 @description("Check if the current authenticated user has a specific role. Returns boolean result.")
 builtin authCheckPermission {
@@ -1062,7 +1055,6 @@ The introspection commands (`concepts`, `memqlDocs`, `functions`, `help`, `conte
 Tools are AI-callable tool definitions — the AI-facing surface of queries, mutations, and builtins. Struct form; the body is a list of input-schema fields with types and annotations (`@required`, `@default`, `@enum`, `@description`); `@handler` binds the tool to its backing operation and `@executionTime` hints latency:
 
 ```memql
-@enabled
 @description("Search for users")
 @handler(type="query", query="concept==v1:memql:backend:user")
 @executionTime("fast")
@@ -1081,7 +1073,6 @@ Automations are event- or schedule-triggered workflows declared in `dsl/<namespa
 ```memql
 use cognition.logic.{ logicBootstrapSession }
 
-@enabled
 @trigger(event="node.created", concept="v1:cognition:participant", partition="*")
 @description("Auto-creates a session when a participant joins a space")
 automation bootstrapSession {
@@ -1118,7 +1109,6 @@ This lowers to the canonical longhand above — identical runtime automation, no
 `@filter` attaches a filter predicate to an automation as an alternative to embedding it in the trigger — useful when the expression is complex:
 
 ```memql
-@enabled
 @trigger(event="node.created", concept="v1:cognition:space", partition="*")
 @filter(active==true)
 @description("On space creation, joins the creator's assistant plus any specialist agents.")

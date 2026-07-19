@@ -7,7 +7,6 @@ use worker.logic.{ killSwitchSuspendsRunningPlans, workerInvocationRetentionSwee
 use worker.mutations.{ softDeleteWorkerInvocation }
 use planner.mutations.{ updatePlanStatus }
 
-@enabled
 @trigger(event="node.updated", concept="v1:identity:user", partition="*")
 @filter(event.node.payload.preferences.computerUseEnabled == false)
 @description("Suspend the user's worker-using plans when computerUseEnabled flips false. The TRIGGER RELEVANCE check (kill switch engaged) lives on @filter; the plan-classification policy (has a computerUseScope) is pushed down into runningPlansForUser by the decide logic; the forEach transitions each returned plan unconditionally (#2370).")
@@ -44,7 +43,6 @@ automation killSwitchSuspendsRunningPlans {
 //     the duration math into the query (no `>` operator on
 //     datetime). Per-row gating uses
 //       addDuration(item.createdAt, "P{retention}D") < now
-@enabled
 @trigger(schedule="0 30 2 * * *")
 @description("Daily 02:30 UTC sweep: soft-delete worker-invocation rows past WORKER_INVOCATION_RETENTION_DAYS. decide (pure) returns the candidate rows; window reads the retention var; the forEach apply gates each row on createdAt + P{N}D < now (#2256/#2254 evaluator fix) and soft-deletes it.")
 automation workerInvocationRetentionSweep {

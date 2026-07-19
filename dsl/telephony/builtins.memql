@@ -1,7 +1,6 @@
 // Go-backed telephony operations, exposed to the DSL (and via tools to agents).
 // Implemented by the telephony integration over the LiveKit SIP edge.
 
-@enabled
 @description("Place an outbound PSTN call and bridge the callee into a partition-scoped room the agent talks in.")
 @executor("integration.telephony.placeCall")
 builtin telephonyPlaceCall {
@@ -11,7 +10,6 @@ builtin telephonyPlaceCall {
   dtmf         string  @description("Optional digits to dial after connect (IVR)")
 }
 
-@enabled
 @description("Hang up an outbound call.")
 @executor("integration.telephony.endCall")
 builtin telephonyEndCall {
@@ -19,7 +17,6 @@ builtin telephonyEndCall {
   identity  string  @required @description("SIP participant identity")
 }
 
-@enabled
 @description("Transfer a live call to another E.164.")
 @executor("integration.telephony.transferCall")
 builtin telephonyTransferCall {
@@ -28,7 +25,6 @@ builtin telephonyTransferCall {
   to        string  @required @description("Transfer target E.164")
 }
 
-@enabled
 @description("Send DTMF digits to a live call (IVR navigation).")
 @executor("integration.telephony.sendDtmf")
 builtin telephonySendDtmf {
@@ -39,7 +35,6 @@ builtin telephonySendDtmf {
 
 // --- Provisioning (owner/admin gated in Go; backend functions only) --------
 
-@enabled
 @description("Search the carrier for purchasable DIDs. Owner/admin only.")
 @executor("integration.telephony.searchNumbers")
 builtin telephonySearchNumbers {
@@ -48,7 +43,6 @@ builtin telephonySearchNumbers {
   limit     integer @description("Max results")
 }
 
-@enabled
 @description("Purchase a DID, bind it to a partition, point it at the SIP edge, and provision inbound routing. Owner/admin only.")
 @executor("integration.telephony.buyNumber")
 builtin telephonyBuyNumber {
@@ -57,7 +51,6 @@ builtin telephonyBuyNumber {
   purpose      string  @description("inbound | outbound | both")
 }
 
-@enabled
 @description("Point an owned DID at the SIP edge and (re)provision inbound routing. Owner/admin only.")
 @executor("integration.telephony.configureInboundNumber")
 builtin telephonyConfigureInboundNumber {
@@ -65,7 +58,6 @@ builtin telephonyConfigureInboundNumber {
   partitionId  string  @required
 }
 
-@enabled
 @description("Release an owned DID back to the carrier. Owner/admin only.")
 @executor("integration.telephony.releaseNumber")
 builtin telephonyReleaseNumber {

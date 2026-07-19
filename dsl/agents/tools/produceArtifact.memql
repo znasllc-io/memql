@@ -36,7 +36,6 @@
 // shape (the builtin is integration.agents.produceArtifact in
 // dsl/agents/builtins.memql).
 
-@enabled
 @handler(type="function", name="produceArtifact")
 @allowedRoles("assistant")
 @executionTime("fast")
