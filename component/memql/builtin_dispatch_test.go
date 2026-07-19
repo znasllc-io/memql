@@ -8,6 +8,10 @@ func TestInitBuiltinExecutorHandlers_RejectsUnknownExecutor(t *testing.T) {
 		Name:     "badBuiltin",
 		Type:     FunctionTypeBuiltin,
 		Executor: "doesNotExist",
+		// Enabled is explicit post-#2608: a @disabled builtin deliberately
+		// skips executor validation (the retirement path), so this fixture
+		// must be enabled for the rejection to fire.
+		Enabled: true,
 	}); err != nil {
 		t.Fatalf("add builtin: %v", err)
 	}

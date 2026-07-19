@@ -289,6 +289,9 @@ func TestParseBuiltinFromRegistryMetadata(t *testing.T) {
 		Name:     "customBuiltin",
 		Type:     FunctionTypeBuiltin,
 		Executor: "help",
+		// Enabled is explicit post-#2608: a disabled builtin no longer
+		// matches as a meta-command, and this test exercises that path.
+		Enabled: true,
 		BuiltinArgs: &BuiltinArgContract{
 			Profile:   BuiltinArgProfileStringOrObject,
 			StringKey: "name",

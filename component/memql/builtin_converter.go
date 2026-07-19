@@ -45,11 +45,14 @@ func builtinDeclToFunction(decl *languageParser.BuiltinDecl, origin string) (*Fu
 	var description, executor, argProfile, argStringKey string
 	var aliases []string
 	var argAdditionalProperties *bool
+	enabled := true
 
 	for _, attr := range decl.Attributes {
 		switch attr.Name {
-		case "enabled", "disabled":
-			// Lifecycle flags read by the loader, not the converter.
+		case "enabled":
+			// Accepted no-op: enabled is the default (lifecycle ruling, #2608).
+		case "disabled":
+			enabled = false
 		case "sdk":
 			// Generator marker (sdk/gen reads from source). No engine effect.
 		case "description":
@@ -155,9 +158,11 @@ func builtinDeclToFunction(decl *languageParser.BuiltinDecl, origin string) (*Fu
 		Name:           decl.Name,
 		Description:    description,
 		Type:           FunctionTypeBuiltin,
+		FunctionKind:   FunctionTypeBuiltin,
 		Executor:       executor,
 		BuiltinAliases: aliases,
 		BuiltinArgs:    contract,
 		Origin:         origin,
+		Enabled:        enabled,
 	}, nil
 }
