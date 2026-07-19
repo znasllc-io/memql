@@ -28,7 +28,6 @@
 // the assistant speaks to humans. This tool is the ONLY channel
 // between the assistant and specialists.
 
-@enabled
 @handler(type="function", name="askSpecialist")
 @allowedRoles("assistant")
 @executionTime("medium")

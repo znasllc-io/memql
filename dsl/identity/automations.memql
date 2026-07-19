@@ -6,7 +6,6 @@
 use identity.logic.{ accessRequestExpirySweep, accountDeletionReminder25Days, accountDeletionReminder7Days, accountDeletionSweep, auditEventRetentionSweep, magicLinkExpirySweep, onDelegationCreated, revokeExpiredDelegations }
 use identity.mutations.{ consumeMagicLinkRequest, deleteUserHard, expireAccessRequest, revokeDelegation }
 
-@enabled
 @trigger(schedule="0 0 4 * * *")
 @description("Daily 04:00 UTC sweep: expire pending access requests older than IDENTITY_ACCESS_REQUEST_EXPIRY_DAYS. decide (pure) returns the pending candidates; window reads the expiry var; the forEach apply gates each row on createdAt + P{N}D < now (#2256/#2254 evaluator fix) and stamps status=expired.")
 automation accessRequestExpirySweep {
@@ -43,7 +42,6 @@ automation accessRequestExpirySweep {
 //
 // MemQL parser limitation + email-delivery delegation: see header
 // of accountDeletionReminder7Days.
-@enabled
 @trigger(schedule="0 5 9 * * *")
 @description("Daily 09:05 UTC: emit identity.deletion.reminder events (urgent) for users at the 25-day mark of their deletion cooldown.")
 automation accountDeletionReminder25Days {
@@ -84,7 +82,6 @@ automation accountDeletionReminder25Days {
 // addDuration windowing down (the planner rejects function-call
 // literals in filter comparisons), so windowing happens per-row
 // inside the loop.
-@enabled
 @trigger(schedule="0 0 9 * * *")
 @description("Daily 09:00 UTC: emit identity.deletion.reminder events for users at the 7-day mark of their deletion cooldown.")
 automation accountDeletionReminder7Days {
@@ -131,7 +128,6 @@ automation accountDeletionReminder7Days {
 //       addDuration(item.payload.deletionScheduledAt, "P{cooldown}D") < now
 //   - There's no batch-update path; we revoke sessions one row at a
 //     time inside the loop.
-@enabled
 @trigger(schedule="0 0 3 * * *")
 @description("Daily 03:00 UTC sweep: hard-delete users past MEMQL_IDENTITY_DELETION_COOLDOWN_DAYS. decide (pure) returns users scheduled for deletion; window reads the cooldown var; the forEach apply gates each row on deletionScheduledAt + P{N}D < now (#2256/#2254 evaluator fix) and hard-deletes via deleteUserHard. Auth-session revocation is the documented gap noted in the decide logic.")
 automation accountDeletionSweep {
@@ -176,7 +172,6 @@ automation accountDeletionSweep {
 // Per-row windowing uses addDuration on item.payload.occurredAt
 // against `now`, same as accessRequestExpirySweep -- MemQL
 // can't push that into the filter today.
-@enabled
 @trigger(schedule="0 0 2 * * *")
 @description("Daily 02:00 UTC sweep: identifies audit events past MEMQL_IDENTITY_AUDIT_LOG_RETENTION_DAYS. Currently observation-only; deletion lands when MemQL gains row-removal support.")
 automation auditEventRetentionSweep {
@@ -195,7 +190,6 @@ automation auditEventRetentionSweep {
 // in `revokeExpiredDelegations`; the automation is just the
 // trigger + one step that calls it.
 
-@enabled
 @trigger(schedule="0 */5 * * * *")
 @description("Soft-revoke expired delegations every 5 minutes. The query + revoke loop is in revokeExpiredDelegations.")
 automation expireDelegations {
@@ -242,7 +236,6 @@ automation expireDelegations {
 // The `now` cutoff is passed in as an arg (rather than referencing the clock inline)
 // because the memQL query planner rejects function-call literals
 // in filter comparisons.
-@enabled
 @trigger(schedule="0 0 * * * *")
 @description("Hourly sweep: mark expired magic-link requests as consumed-from-system so the row is canonically spent.")
 automation magicLinkExpirySweep {
@@ -264,7 +257,6 @@ automation magicLinkExpirySweep {
 //
 // Emits a delegation.created event when a new delegation is created.
 // Used for audit logging and downstream event processing.
-@enabled
 @trigger(event="node.created", concept="v1:identity:delegation", partition="*")
 @description("Emit delegation.created event with full context for audit logging")
 automation onDelegationCreated {

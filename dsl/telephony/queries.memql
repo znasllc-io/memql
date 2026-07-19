@@ -6,7 +6,6 @@
 use telephony.concepts.{ number, call, consent }
 use telephony.shapes.{ numberFull, callFull, consentFull }
 
-@enabled
 @description("ADMIN: DIDs provisioned to a partition, newest first. Cluster-owner gated -- numbers are cluster infrastructure.")
 query number numbersByPartition {
   args {
@@ -17,7 +16,6 @@ query number numbersByPartition {
   shape   numberFull
 }
 
-@enabled
 @description("ADMIN: every provisioned DID across all partitions, newest first. Cluster-owner gated. Backs the cockpit numbers view.")
 query number allNumbers {
   filter  actor.isClusterOwner==true
@@ -26,7 +24,6 @@ query number allNumbers {
   shape   numberFull
 }
 
-@enabled
 @description("ADMIN: call records for a partition, newest first. Cluster-owner gated. Powers billing + observability.")
 query call callsByPartition {
   args {
@@ -38,7 +35,6 @@ query call callsByPartition {
   shape   callFull
 }
 
-@enabled
 @description("ADMIN: call records that touched a specific DID (as caller or callee), newest first. Cluster-owner gated.")
 query call callsByNumber {
   args {
@@ -50,7 +46,6 @@ query call callsByNumber {
   shape   callFull
 }
 
-@enabled
 @description("Opt-out rows for an external number (newest first). Read in the outbound call path to block calls to opted-out numbers (TCPA). Not owner-gated: the enforcement check runs in the agent/call context, not an admin one.")
 query consent consentOptOut {
   args {
@@ -61,7 +56,6 @@ query consent consentOptOut {
   shape   consentFull
 }
 
-@enabled
 @description("Resolve an owned DID row by its E.164 (newest first). Used to set E911 / compliance state by number.")
 query number numberByE164 {
   args {

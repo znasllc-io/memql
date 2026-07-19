@@ -7,7 +7,6 @@ use agents.concepts.{ agentAuthorization }
 use identity.concepts.{ user }
 use worker.concepts.{ invocation, registration }
 
-@enabled
 @description("Insert a worker tool-invocation telemetry row.")
 mutate invocation createWorkerInvocation {
   args {
@@ -76,7 +75,6 @@ mutate invocation createWorkerInvocation {
 // caller -- the worker authenticates as worker:<id>, not as the
 // registering user.
 
-@enabled
 @description("Create a worker registration row on first connect.")
 mutate registration createWorkerRegistration {
   args {
@@ -136,7 +134,6 @@ mutate registration createWorkerRegistration {
 // old one. Identity / lifecycle fields (id, ownerUserId, identityId,
 // registeredAt, revoked*) are never touched here.
 
-@enabled
 @description("Refresh registration-authoritative fields on worker reconnect.")
 mutate registration refreshWorkerRegistration {
   args {
@@ -179,7 +176,6 @@ mutate registration refreshWorkerRegistration {
 // and on a periodic sweep -- a revoked worker's gRPC stream is closed
 // out-of-band so any in-flight calls fail with worker_disconnected.
 
-@enabled
 @description("Revoke a worker registration.")
 mutate registration revokeWorker {
   args {
@@ -209,7 +205,6 @@ mutate registration revokeWorker {
 // Called by the workerInvocationRetentionSweep cron once a row
 // passes the WORKER_INVOCATION_RETENTION_DAYS window.
 
-@enabled
 @description("Soft-delete a worker invocation row past retention.")
 mutate invocation softDeleteWorkerInvocation {
   args {
@@ -228,7 +223,6 @@ mutate invocation softDeleteWorkerInvocation {
 // the operator-control settings on every kill-switch flip
 // (memql#1339). The annotation opts the preferences field into an
 // engine-side deep-merge so sibling keys survive.
-@enabled
 @mergeFields("preferences")
 @description("Set User.preferences.computerUseEnabled.")
 mutate user toggleComputerUseEnabled {
@@ -244,7 +238,6 @@ mutate user toggleComputerUseEnabled {
   }
 }
 
-@enabled
 @description("Set computerUseScope on an agent authorization row.")
 mutate agentAuthorization updateAgentAuthScope {
   args {
@@ -271,7 +264,6 @@ mutate agentAuthorization updateAgentAuthScope {
 // of each stream immediately so a (re)connected worker's row is
 // fresh within one beat (memql#1340).
 
-@enabled
 @description("Bump lastSeenAt + lastConnectedFromIP on a worker registration.")
 mutate registration updateWorkerLastSeen {
   args {

@@ -6,7 +6,6 @@
 use planner.concepts.{ plan }
 use worker.concepts.{ invocation, registration }
 
-@enabled
 @unbounded("expired worker-invocation retention sweep -- an internal sweep that must see all")
 @description("List worker invocation rows for retention pruning. When createdBefore is supplied, restricts to rows created strictly before it -- the retention sweep's logic computes the cutoff (now - WORKER_INVOCATION_RETENTION_DAYS) and pushes it down (#2369).")
 query invocation expiredWorkerInvocations {
@@ -29,7 +28,6 @@ query invocation expiredWorkerInvocations {
 // Arguments:
 //   planId (string, required) - v1:planner:plan.id
 
-@enabled
 @description("List all worker invocations belonging to a Plan.")
 query invocation invocationsForPlan {
   args {
@@ -60,7 +58,6 @@ query invocation invocationsForPlan {
 // The only known callsite is the worker invocation retention sweep
 // (system actor). Splitting into self + system variants tracked
 // under #54.
-@enabled
 @public
 @description("List worker invocations belonging to a user.")
 query invocation invocationsForUser {
@@ -76,7 +73,6 @@ query invocation invocationsForUser {
   shape   workerInvocationFull
 }
 
-@enabled
 @description("List a user's running plans.")
 query plan runningPlansForUser {
   args {
@@ -107,7 +103,6 @@ query plan runningPlansForUser {
 // Arguments:
 //   identityId (string, required) - v1:identity:identity.id
 
-@enabled
 @unbounded("worker by identityId -- bounded to a single row")
 @description("Look up the worker registration owned by an identity row.")
 query registration workerByIdentityId {
@@ -142,7 +137,6 @@ query registration workerByIdentityId {
 // and the worker registration sweep (`component/worker/store.go`),
 // both system-actor paths. Splitting into self + system variants
 // tracked under #54.
-@enabled
 @public
 @description("List all workers owned by a user.")
 query registration workersForUser {

@@ -3,7 +3,6 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-@enabled
 @executor("integration.agentworker.dispatchComputer")
 @args(profile="object")
 @description("Dispatch a workerComputer.<action> call to the user's computer-use-capable worker.")
@@ -25,7 +24,6 @@ builtin agentworkerDispatchComputer {
 // Bridges the workerHost.memql tool definition to the agentworker
 // Go integration. Called via @handler(type="query") on the tool.
 
-@enabled
 @executor("integration.agentworker.dispatchHost")
 @args(profile="object")
 @description("Dispatch a workerHost.<action> call to the user's connected worker.")
@@ -44,7 +42,6 @@ builtin agentworkerDispatchHost {
 // builtinAgentworkerListWorkers - List the user's connected workers
 // ==================================================================
 
-@enabled
 @executor("integration.agentworker.listWorkers")
 @args(profile="object")
 @description("List workers connected for the supplied user. Returns a JSON list of {registrationId, name, capabilities, ...}.")
@@ -63,7 +60,6 @@ builtin agentworkerListWorkers {
 // emits a canvas card; the agent's tool result is just a small
 // JSON payload acknowledging the request.
 
-@enabled
 @executor("integration.agentworker.requestScope")
 @args(profile="object")
 @description("Create a scope-elevation Plan + canvas card for a computer_use task awaiting user approval.")
@@ -87,7 +83,6 @@ builtin agentworkerRequestScope {
 // the agentReply prompt is seeded with on every turn, but pulled
 // fresh at call time.
 
-@enabled
 @executor("integration.agentworker.status")
 @args(profile="object")
 @description("Resolve the live computer-use availability for the calling agent's owner user.")

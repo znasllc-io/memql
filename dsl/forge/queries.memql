@@ -60,7 +60,6 @@ use forge.shapes.{ projectFull, requestFull, requestEventFull }
 use forge.specs.{ forgeDeveloper, forgeApprover }
 use common.traits.{ statusIsActive }
 
-@enabled
 @description("Resolve a v1:forge:project by id.")
 query project projectById {
   args {
@@ -70,7 +69,6 @@ query project projectById {
   shape   projectFull
 }
 
-@enabled
 @unbounded("active forge projects -- a small bounded catalog consumed whole")
 @description("List active v1:forge:project rows.")
 query project activeProjects {
@@ -78,7 +76,6 @@ query project activeProjects {
   shape   projectFull
 }
 
-@enabled
 @unbounded("forge project by unique slug -- bounded to a single row")
 @description("Resolve a v1:forge:project by its stable slug (e.g. 'memql', 'acme-app'). Claude uses this to go from a human-supplied name to a projectId before submitting a request or filtering requests. Returns at most one row because slugs are unique within a partition.")
 query project projectBySlug {
@@ -89,7 +86,6 @@ query project projectBySlug {
   shape   projectFull
 }
 
-@enabled
 @description("List the caller's own submitted requests, newest-first. Open to any team member.")
 query request myRequests {
   filter  submitterUserId == actor.userId
@@ -101,7 +97,6 @@ query request myRequests {
   shape   requestFull
 }
 
-@enabled
 @description("Resolve a single v1:forge:request by id (detail view).")
 query request requestById {
   args {
@@ -111,7 +106,6 @@ query request requestById {
   shape   requestFull
 }
 
-@enabled
 @description("List requests by project, newest-first.")
 query request projectRequests {
   args {
@@ -128,7 +122,6 @@ query request projectRequests {
 
 // ----- developer/owner-gated queues -----
 
-@enabled
 @description("The validation queue: requests awaiting first-line developer validation. Developer/owner only (forgeDeveloper).")
 query request validationQueue {
   filter  status == "needs_validation" && forgeDeveloper
@@ -140,7 +133,6 @@ query request validationQueue {
   shape   requestFull
 }
 
-@enabled
 @description("The approval queue: validated requests awaiting owner approval. Owner only (forgeApprover).")
 query request approvalQueue {
   filter  status == "needs_approval" && forgeApprover
@@ -152,7 +144,6 @@ query request approvalQueue {
   shape   requestFull
 }
 
-@enabled
 @description("The full audit trail for a request, newest-first.")
 query requestEvent requestEvents {
   args {

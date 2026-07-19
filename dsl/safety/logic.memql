@@ -3,7 +3,6 @@
 use safety.queries.{ allSafetyClassifications, allOutputScreenings }
 use platform.queries.{ globalVariable }
 
-@enabled
 @description("Daily sweep over v1:safety:classification rows past MEMQL_SAFETY_CLASSIFICATION_RETENTION_DAYS (default 90). Currently observation-only: emits a 'safety.classification.retention.observed' event with the candidate count. Per-row delete lands when the engine grows a delete() mutation -- mirrors the same gap purgeExpiredPolicyTraces + auditEventRetentionSweep document.")
 logic purgeExpiredSafetyClassifications {
   args {
@@ -26,7 +25,6 @@ logic purgeExpiredSafetyClassifications {
   }
 }
 
-@enabled
 @description("Daily sweep over v1:safety:outputScreening rows past MEMQL_SAFETY_OUTPUT_SCREENING_RETENTION_DAYS (default 90). Currently observation-only: emits a 'safety.outputScreening.retention.observed' event with the candidate count. Per-row delete lands when the engine grows a delete() mutation -- mirrors purgeExpiredSafetyClassifications.")
 logic purgeExpiredOutputScreenings {
   args {

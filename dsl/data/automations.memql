@@ -5,7 +5,6 @@
 
 use data.logic.{ conflictDetection }
 
-@enabled
 @trigger(event="node.created", concept="v1:data:record", partition="*")
 @filter(payload.naturalKeyValue!=null)
 @description("Detects conflicts between new data records and existing confirmed records. Emits events for UI conflict resolution -- never auto-resolves.")

@@ -5,7 +5,6 @@
 
 use cognition.concepts.{ audioOverride, participant, presence, session, utterance, videoOverride }
 
-@enabled
 @description("Get active human participants in a space")
 @unbounded("human participants in a space -- a bounded membership set consumed whole for routing")
 query participant activeHumanParticipants {
@@ -55,7 +54,6 @@ query participant activeHumanParticipants {
 //   agentInteractionCount({agentId: "<agent-id>"})
 //
 
-@enabled
 @description("Count utterances by an agent across ALL spaces in the current partition. Drives the agentIsKnownToUser signal.")
 query utterance agentInteractionCount {
   args {
@@ -126,7 +124,6 @@ query utterance agentInteractionCount {
 // whatever it has -- usually the bare slug. Canonicalize the
 // arg before the equality check so both forms resolve to the
 // same value and the comparison matches.
-@enabled
 @description("Active audio overrides for every agent in a space. Read by the cognition handler before TTS forwarding.")
 @unbounded("audio overrides for a space -- bounded by space participants, consumed whole")
 query audioOverride audioOverridesForSpace {
@@ -185,7 +182,6 @@ query audioOverride audioOverridesForSpace {
 //   greetingUtterance({partitionId: "space-123", agentId: "sofia"})
 //
 
-@enabled
 @description("Check if a greeting utterance already exists for an agent in a space")
 @unbounded("the greeting utterance for (space,agent) -- bounded to a single row")
 query utterance greetingUtterance {
@@ -212,7 +208,6 @@ query utterance greetingUtterance {
 // Returns:
 //   Array of utterance records (0 or more); non-empty means the
 //   announcement was already posted.
-@enabled
 @description("Check if the assistant already posted the awaitingFeedback announcement for a Plan (dedup behind the cross-replica announce gate, #1406).")
 @unbounded("the feedback-announcement utterance for a plan -- bounded to a single row")
 query utterance feedbackAnnouncementForPlan {
@@ -240,7 +235,6 @@ query utterance feedbackAnnouncementForPlan {
 // underlying participant IS the GA. Filtering by participantType
 // + status is sufficient under v1 (each user has at most one
 // active AI participant per space; that's their GA).
-@enabled
 @description("Active AI (group GA) participant for a space. The partitionId arg is compared against the stored payload field, which holds the canonical v1:cognition:space id -- internal callers pass that form today; the arg flips to a bare space id with the #2441/#2443 cutover.")
 @unbounded("the GA/assistant participant for a space -- bounded to a single row")
 query participant groupGAForSpace {
@@ -267,7 +261,6 @@ query participant groupGAForSpace {
 // Returns:
 //   Array of matching utterance records (0 = no response yet, 1+ = already responded)
 
-@enabled
 @description("Check if an AI response already exists for a given utterance (idempotency check).")
 @unbounded("existence probe for an AI response to a reply -- a dedupe gate bounded to a single row")
 query utterance hasAIResponseForReply {
@@ -309,7 +302,6 @@ query utterance hasAIResponseForReply {
 //   participantByAgentSpace({partitionId: "space-123", agentId: "sofia"})
 //
 
-@enabled
 @description("Check if an AI agent is already a participant in a space (excludes left status)")
 @unbounded("the participant for (space,agent) -- bounded to a single row")
 query participant participantByAgentSpace {
@@ -357,7 +349,6 @@ query participant participantByAgentSpace {
 //   participantSession({"partitionId": "space-123", "participantId": "participant-456"})  // Specific session
 //
 
-@enabled
 @description("Returns session state for participants in spaces. Optional filters: partitionId, participantId")
 @unbounded("the participant session for (space,participant) -- bounded to a single row")
 query session participantSession {
@@ -408,7 +399,6 @@ query session participantSession {
 // Returns:
 //   Array of AI participant records (typically 0 or 1)
 
-@enabled
 @description("Find the active AI participant in a space.")
 @unbounded("the assistant participant for a space -- bounded to a single row")
 query participant siParticipantForSpace {
@@ -445,7 +435,6 @@ query participant siParticipantForSpace {
 //   settings, slot capacities (maxHumans / maxAgents), selected
 //   specialist agent ids, createdBy, and createdAt.
 
-@enabled
 @description("Participants for a space, optionally narrowed by status or participantType. Used by the cognition handler + space-context engine.")
 @unbounded("participants in a space -- a bounded membership roster consumed whole")
 query participant spaceParticipants {
@@ -467,7 +456,6 @@ query participant spaceParticipants {
 // that fix page 2 would collide with the cached page 1. v1:cognition:* writes
 // (created/updated/deleted) are forwarded cross-node in
 // component/node/routing.go so eviction fires on every replica.
-@enabled
 @description("Returns utterances for the given space. Optional participantId / utteranceType args narrow the result further. Used by the cockpit Chat tab to populate the utterance pane and by the BFF for downstream consumers.")
 @cache(ttl="30")
 query utterance spaceUtterances {
@@ -497,7 +485,6 @@ query utterance spaceUtterances {
 // whatever it has -- usually the bare slug. Canonicalize the
 // arg before the equality check so both forms resolve to the
 // same value and the comparison matches.
-@enabled
 @description("Active video overrides for every agent in a space. Read by the voice-agent process at session start.")
 @unbounded("video overrides for a space -- bounded by space participants, consumed whole")
 query videoOverride videoOverridesForSpace {
@@ -525,7 +512,6 @@ query videoOverride videoOverridesForSpace {
 // shape as spaceParticipants (the calling path verifies the caller
 // is a space participant).
 
-@enabled
 @description("Presence snapshots for every participant in a space (UI state: thinking / responding / waiting / ...). Space-scoped; the SPA dedupes latest-wins by participantId.")
 @unbounded("presence rows for a space -- bounded by space participants, consumed whole")
 query presence spaceParticipantPresence {

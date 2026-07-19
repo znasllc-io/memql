@@ -276,3 +276,33 @@ func stripStringsAndComments(line string) string {
 	}
 	return b.String()
 }
+
+// redundantEnabledRule surfaces the #2610 soft deprecation: enabled is the
+// default on every construct kind (#2604-#2608), so a construct-attached
+// @enabled is an accepted no-op. It stays legal to parse forever (legacy
+// DSL keeps loading), but the editor nudges authors to delete the line.
+func redundantEnabledRule(source string) []Diagnostic {
+	var diagnostics []Diagnostic
+	lines := strings.Split(source, "\n")
+	for lineIdx, line := range lines {
+		content := stripStringsAndComments(line)
+		for _, m := range enabledAnnotationRE.FindAllStringIndex(content, -1) {
+			pos := Position{Line: lineIdx + 1, Column: m[0] + 1}
+			diagnostics = append(diagnostics, Diagnostic{
+				Range: Range{
+					Start: pos,
+					End:   Position{Line: pos.Line, Column: m[1] + 1},
+				},
+				Severity: SeverityHint,
+				Message:  "`@enabled` is an accepted no-op: definitions are enabled by default (#2604-#2608). Delete the line; `@disabled` is the off-switch.",
+				Code:     "redundant-enabled",
+			})
+		}
+	}
+	return diagnostics
+}
+
+// enabledAnnotationRE matches a construct-attached `@enabled` annotation
+// line (whitespace-only prefix, nothing after) -- not the word inside
+// prose or a longer annotation name like @enabledFoo.
+var enabledAnnotationRE = regexp.MustCompile(`^[ \t]*@enabled[ \t]*$`)

@@ -246,6 +246,7 @@ func (s *Service) semanticDiagnostics(file *parser.File, source string) []Diagno
 	// its unit test) are kept for reference.
 	diagnostics = append(diagnostics, nameShapeRule(file, source)...)
 	diagnostics = append(diagnostics, arraySyntaxRule(source)...)
+	diagnostics = append(diagnostics, redundantEnabledRule(source)...)
 
 	// Check function definitions.
 	for _, def := range file.Definitions {

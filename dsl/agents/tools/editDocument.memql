@@ -34,7 +34,6 @@
 // assistantEditDocument in dsl/library/builtins.memql, backed by
 // integration.library.editDocumentAsAssistant.
 
-@enabled
 @handler(type="function", name="assistantEditDocument")
 @allowedRoles("assistant", "specialist")
 @executionTime("fast")

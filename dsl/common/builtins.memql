@@ -3,7 +3,6 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-@enabled
 @executor("integration.auth.checkPermission")
 @args(profile="object")
 @description("Check if the current authenticated user has a specific role. Returns boolean result.")
@@ -19,7 +18,6 @@ builtin authCheckPermission {
 // Resolve the current authenticated user from request context.
 // Returns user identity (subject, email, name, role).
 
-@enabled
 @executor("integration.auth.resolveUser")
 @args(profile="object")
 @description("Resolve the current authenticated user from request context. Returns user identity.")
@@ -38,7 +36,6 @@ builtin authResolveUser {
 // This is an integration capability backed by Go code
 // (Polyphon Cognition real-time scoring engine).
 
-@enabled
 @executor("integration.cognition.scoreUtterance")
 @args(profile="object")
 @description("Score utterance against agent candidates using Polyphon Cognition turn-taking algorithm.")
@@ -61,7 +58,6 @@ builtin cognitionScore {
 // capability backed by Go code for thread-safe concurrent
 // state management.
 
-@enabled
 @executor("integration.cognition.trackPresence")
 @args(profile="object")
 @description("Update participant presence state (idle, thinking, typing, responding).")
@@ -80,7 +76,6 @@ builtin cognitionTrackPresence {
 // Returns metadata for all registered concepts.
 // Optionally filter by pattern.
 
-@enabled
 @executor("concepts")
 @args(profile="optionalString", stringKey="pattern")
 @description("Returns metadata for all registered concepts.")
@@ -96,7 +91,6 @@ builtin concepts {
 // Predict the content-addressed ID for a concept+payload
 // without inserting. Uses the same algorithm as insert().
 
-@enabled
 @executor("contentId")
 @args(profile="object")
 @description("Predict the content-addressed ID for a concept+payload without inserting. Uses the same algorithm as insert().")
@@ -112,7 +106,6 @@ builtin contentId {
 //
 // Check database connectivity and return status with response time.
 
-@enabled
 @executor("integration.database.healthCheck")
 @args(profile="object")
 @description("Check database connectivity. Returns healthy/unhealthy status and response time in milliseconds.")
@@ -126,7 +119,6 @@ builtin databaseHealthCheck {
 //
 // Return database connection pool statistics.
 
-@enabled
 @executor("integration.database.stats")
 @args(profile="object")
 @description("Return database connection pool statistics (open, idle, in use, wait count).")
@@ -159,7 +151,6 @@ builtin databaseStats {
 // See docs/planning/knowledge-seeder.md (v2 bridge chunks) and
 // integrations/knowledge/seed_bridge.go for the pipeline.
 
-@enabled
 @executor("integration.knowledge.ensureKnowledgeBridge")
 @args(profile="object", additionalProperties="true")
 @description("For an agent's (roleSlug, sortedDomainIds), ensures a cross-domain bridge corpus exists. Idempotent + hash-keyed -- pays for the bridge generation once per unique combination then reuses.")
@@ -175,7 +166,6 @@ builtin ensureKnowledgeBridge {
 //
 // Constructs and returns an error from a message string.
 
-@enabled
 @executor("error")
 @args(profile="stringOrObject", stringKey="message")
 @description("Constructs and returns an error from a message string.")
@@ -191,7 +181,6 @@ builtin error {
 // Extract plain text from files (PDF, DOCX, images, text).
 // Uses VisionAIProvider for image descriptions.
 
-@enabled
 @executor("integration.files.extractText")
 @args(profile="object")
 @description("Extract plain text from a file by MIME type. Supports PDF, DOCX, images, and text files.")
@@ -208,7 +197,6 @@ builtin filesExtractText {
 // Returns a minimal list of all registered functions
 // with name and description only. Use help(name) for full details.
 
-@enabled
 @executor("functions")
 @description("Returns a minimal list of all registered functions with name and description only. Use help(name) for full details.")
 builtin functions {
@@ -222,7 +210,6 @@ builtin functions {
 // Returns full details for a specific function or tool by name.
 // Includes all metadata, schema, and configuration.
 
-@enabled
 @executor("help")
 @args(profile="stringOrObject", stringKey="name")
 @description("Returns full details for a specific function or tool by name. Includes all metadata, schema, and configuration.")
@@ -243,7 +230,6 @@ builtin help {
 // frontend uses the outcome to decide whether to surface a Confirm
 // step before paying for the heavier augmentDomainGenerate call.
 
-@enabled
 @executor("integration.knowledge.augmentDomainAnalyze")
 @sdk
 @args(profile="object", additionalProperties="true")
@@ -271,7 +257,6 @@ builtin knowledgeAugmentDomainAnalyze {
 // Synchronous in v1 (~30s for the full AI + embed + write path);
 // the frontend shows a "training queued" state until it returns.
 
-@enabled
 @executor("integration.knowledge.augmentDomainGenerate")
 @sdk
 @args(profile="object", additionalProperties="true")
@@ -295,7 +280,6 @@ builtin knowledgeAugmentDomainGenerate {
 // Idempotent by {domainId, sourceRef, seq, text} hash -- re-ingesting
 // the same source replaces the embeddings on conflict.
 
-@enabled
 @executor("integration.knowledge.ingest")
 @args(profile="object", additionalProperties="true")
 @description("Chunk + embed + persist a document into a knowledge domain. source is REQUIRED and tags the chunk's provenance class -- one of llmSeeded / augment / crossDomainBridge / appStructure / fileUpload. Read by the dev-refresh cache filter and by the citation registry; pick the value that matches what's being ingested.")
@@ -318,7 +302,6 @@ builtin knowledgeIngest {
 // Invoked from the seedKnowledgeDomains automation at system.startup.
 // Idempotent: skips domains that already exist.
 
-@enabled
 @executor("integration.knowledge.seedStandardDomains")
 @args(profile="object")
 @description("Seed standard knowledge domains and registered seed corpora on startup. Idempotent.")
@@ -344,7 +327,6 @@ builtin realtimeCreateClientSecret {
 //
 // Returns embedded MemQL documentation as queryable nodes.
 
-@enabled
 @executor("memqlDocs")
 @description("Returns embedded MemQL documentation as queryable nodes.")
 builtin memqlDocs {
@@ -358,7 +340,6 @@ builtin memqlDocs {
 // Synthesize text to speech audio using OpenAI TTS API.
 // Returns base64-encoded PCM16 audio.
 
-@enabled
 @executor("integration.openaiVoice.synthesize")
 @args(profile="object")
 @description("Synthesize text to speech using OpenAI TTS. Returns base64-encoded PCM16 audio.")
@@ -374,7 +355,6 @@ builtin openaiVoiceSynthesize {
 // Validate payload, predict ID, and check if record exists -
 // without inserting. Returns structured validation result.
 
-@enabled
 @executor("previewInsert")
 @args(profile="object")
 @description("Validate payload, predict ID, and check if record exists - without inserting. Returns structured validation result.")
@@ -430,7 +410,6 @@ builtin routerSetApiKey {
 // Cost: ~$300-500 for the full ~250-domain catalog at recipe v1;
 // partial runs proportional. See docs/planning/knowledge-seeder.md.
 
-@enabled
 @executor("integration.knowledge.seedAllDomainContent")
 @args(profile="object", additionalProperties="true")
 @description("Run seedDomainContent across every shipped domain. Optional tierFilter / domainIdPrefix narrow the run.")
@@ -460,7 +439,6 @@ builtin seedAllDomainContent {
 // See docs/planning/knowledge-seeder.md and
 // integrations/knowledge/seed_domain_content.go for the pipeline.
 
-@enabled
 @executor("integration.knowledge.seedDomainContent")
 @args(profile="object", additionalProperties="true")
 @description("Generate + embed + store seeded knowledge chunks for one domain. Tier-A LLM-generates; Tier-B prepends a disclaimer; Tier-C fetches Wikipedia or writes a placeholder.")
@@ -483,7 +461,6 @@ builtin seedDomainContent {
 // The trainer-tool wiring lives in integrations/planner/train_specialist_dispatch.go;
 // the Go handlers live in integrations/knowledge/trainer_tools.go.
 
-@enabled
 @executor("integration.knowledge.webSearch")
 @args(profile="object", additionalProperties="true")
 @description("Issue a web search for the Trainer Agent. Returns a list of {url, title, snippet}. STUB: no web-search provider is wired in-repo yet (tracked separately); returns an empty result set + a note so the Trainer can fall back to fetchUrl on URLs it already knows. See integrations/knowledge/trainer_tools.go.")
@@ -492,7 +469,6 @@ builtin webSearch {
   num_results  int
 }
 
-@enabled
 @executor("integration.knowledge.fetchUrl")
 @args(profile="object", additionalProperties="true")
 @description("Fetch + extract readable text from a URL for the Trainer Agent. Backed by a bounded http.Client (dial / response / size caps). Returns {url, status, contentType, text, truncated}.")
@@ -500,7 +476,6 @@ builtin fetchUrl {
   url  string  @required
 }
 
-@enabled
 @executor("integration.knowledge.embedChunk")
 @args(profile="object", additionalProperties="true")
 @description("Embed one knowledge chunk so it becomes retrievable via similarTo (#645 lazy embedding). Resolves the chunk text, computes a vector, writes it to node_vectors keyed by the chunk id. Idempotent -- a chunk that already has a vector is acknowledged without re-embedding. Returns {chunkId, embedded, alreadyEmbedded}.")
@@ -509,7 +484,6 @@ builtin embedChunk {
   provider  string
 }
 
-@enabled
 @executor("integration.knowledge.embedDomainItems")
 @args(profile="object", additionalProperties="true")
 @description("Embed every unembedded validated chunk attached to a knowledge domain (optionally scoped to one Document), then recompute the parent Document's embeddingStatus none -> partial -> complete (#645). Materializes vectors into node_vectors so seeded + uploaded knowledge becomes semantically retrievable. Idempotent. Driven by the planner's embedDomainItems Plan dispatcher. Returns {domainId, documentId, total, embedded, already, failed, documentsRolledUp}.")
@@ -526,7 +500,6 @@ builtin embedDomainItems {
 //
 // Returns the current memQL service version.
 
-@enabled
 @executor("serviceVersion")
 @alias("memqlVersion")
 @description("Returns the current memQL service version.")
@@ -541,7 +514,6 @@ builtin serviceVersion {
 // Get full details for a shape template by name,
 // including template structure and inputSchema.
 
-@enabled
 @executor("shapeHelp")
 @args(profile="stringOrObject", stringKey="name")
 @description("Get full details for a shape template by name, including template structure and inputSchema.")
@@ -557,7 +529,6 @@ builtin shapeHelp {
 // List available shape templates, optionally filtered by concept.
 // Returns name and description for each shape.
 
-@enabled
 @executor("shapeTemplates")
 @args(profile="optionalStringOrObject", stringKey="concept")
 @description("List available shape templates, optionally filtered by concept. Returns name and description for each shape.")
@@ -581,7 +552,6 @@ builtin shapeTemplates {
 // PreserveOrder=true so callers observe that order without a
 // client-side re-sort.
 
-@enabled
 @executor("integration.similarity.similarTo")
 @args(profile="object", additionalProperties="true")
 @description("Retrieve top-K nodes of the given concept ranked by cosine similarity to the supplied free-text query. Optionally scoped to a payload.domainId list. domains is passed through additionalProperties because the current builtin arg parser accepts `[]string` field types but array-element typecheck is still permissive.")
@@ -600,7 +570,6 @@ builtin similarTo {
 // Upload file data to cloud storage (GCS).
 // Returns the storage URL of the uploaded object.
 
-@enabled
 @executor("integration.storage.upload")
 @args(profile="object")
 @description("Upload file data to cloud storage. Returns storage URL.")
@@ -619,7 +588,6 @@ builtin storageUpload {
 // Transcribe audio data to text using the configured STT provider.
 // Non-streaming batch transcription.
 
-@enabled
 @executor("integration.stt.transcribe")
 @args(profile="object")
 @description("Transcribe audio data to text. Non-streaming batch transcription.")
@@ -637,7 +605,6 @@ builtin sttTranscribe {
 // Returns MCP-compatible tool definitions with name,
 // description, and inputSchema. Use help(name) for handler details.
 
-@enabled
 @executor("tools")
 @description("Returns MCP-compatible tool definitions with name, description, and inputSchema. Use help(name) for handler details.")
 builtin tools {
@@ -652,7 +619,6 @@ builtin tools {
 // Returns validation result with valid flag, errors, schema info,
 // required fields, and provided fields.
 
-@enabled
 @executor("validate")
 @args(profile="object")
 @description("Validates a payload against a concept's JSON schema. Returns validation result with valid flag, errors, schema info, required fields, and provided fields.")
@@ -674,7 +640,6 @@ builtin validate {
 // <bucket>}`. The catalog itself lives in
 // integrations/voice/voices.go.
 
-@enabled
 @executor("integration.voice.pickForGender")
 @description("Pick a canonical voice name suitable for an agent of the given gender, biased away from voices already used by the owner.")
 builtin voicePickForGender {
@@ -692,7 +657,6 @@ builtin voicePickForGender {
 // Falls back to the provider default when the canonical name is
 // unknown so the audio path never goes silent.
 
-@enabled
 @executor("integration.voice.resolve")
 @description("Resolve a canonical voice name + provider to the provider-specific voice ID.")
 builtin voiceResolve {
@@ -716,7 +680,6 @@ builtin voiceResolve {
 // the dateKey portion of the deterministic space id
 // `daily-<userHash>-<dateKey>`.
 
-@enabled
 @executor("integration.timeutil.dateKeyInTimezone")
 @description("Compute today's YYYY-MM-DD date key in the given IANA timezone. Falls back to UTC on empty/invalid timezone.")
 builtin dateKeyInTimezone {

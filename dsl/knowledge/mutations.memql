@@ -11,7 +11,6 @@ use knowledge.concepts.{ documentChunk }
 // Called by the analyzer after a Plan's Tasks have produced a structured
 // breakdown of an attachment.
 
-@enabled
 @description("Create a document chunk linked to a knowledge domain. Called by every chunk-writing integration (seedDomainContent, augmentDomainGenerate, ensureKnowledgeBridge, the product UI corpus ingest). source is REQUIRED and tags the chunk's provenance class -- the dev-refresh cache filter and the citation registry both read it as the source of truth. Optional sourceUtteranceId / sourceAgentId / sourceTopic carry chat-driven augment provenance back-pointers.")
 mutate documentChunk createDocumentChunk {
   args {
@@ -81,7 +80,6 @@ mutate documentChunk createDocumentChunk {
 // same way seeded content does), and requires sourceRef -- the Trainer's
 // invariant is that every chunk it emits cites a real consulted source.
 
-@enabled
 @description("Write a knowledge chunk distilled by the Trainer Agent during a trainSpecialist Plan. Hard-stamps source='trainerAgent' + validationStatus='validated'. sourceRef is REQUIRED (the Trainer's no-fabricated-citations invariant -- every chunk points at a real URL or named source). Lands as canonical, retrievable once embedded.")
 mutate documentChunk writeKnowledgeChunk {
   args {
@@ -117,7 +115,6 @@ mutate documentChunk writeKnowledgeChunk {
 // only the supersession fields change; the chunk stays in the table for
 // audit + provenance.
 
-@enabled
 @description("Flag an existing knowledge chunk as outdated. Called by the Trainer Agent's markChunkSuperseded tool during a mode='refresh' trainSpecialist Plan. Sets superseded=true + supersededAt + supersededReason; retrieval excludes superseded chunks. Partial update -- the chunk row is preserved for audit.")
 mutate documentChunk markChunkSuperseded {
   args {

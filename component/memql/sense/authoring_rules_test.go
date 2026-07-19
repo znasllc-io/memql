@@ -142,3 +142,24 @@ func (Prompt) foo(args any) {}
 		t.Fatalf("migrated source should not fire hint; got %v", diags)
 	}
 }
+
+// #2610: construct-attached @enabled gets the soft-deprecation hint; a
+// stripped construct and prose mentions do not.
+func TestRedundantEnabledRule(t *testing.T) {
+	withAnnotation := "@enabled\n@description(\"probe\")\nquery Space probeQuery {\n  filter { payload.active == true }\n}\n"
+	diags := redundantEnabledRule(withAnnotation)
+	if len(diags) != 1 {
+		t.Fatalf("want 1 hint on a construct-attached @enabled, got %d", len(diags))
+	}
+	if diags[0].Code != "redundant-enabled" || diags[0].Severity != SeverityHint {
+		t.Errorf("want redundant-enabled Hint, got %s severity %d", diags[0].Code, diags[0].Severity)
+	}
+	if diags[0].Range.Start.Line != 1 {
+		t.Errorf("hint anchored at line %d, want 1", diags[0].Range.Start.Line)
+	}
+
+	clean := "@description(\"probe mentions @enabled in prose\")\nquery Space probeQuery {\n  filter { payload.active == true }\n}\n// historical note: @enabled was required once\n"
+	if got := redundantEnabledRule(clean); len(got) != 0 {
+		t.Fatalf("prose/comment mentions must not hint, got %d", len(got))
+	}
+}

@@ -5,7 +5,6 @@
 
 use data.concepts.{ log, policy, record }
 
-@enabled
 @unbounded("conflict probe by natural key -- a dedupe set the caller must see whole to detect conflicts")
 @description("Find confirmed records that may conflict with a new record by natural key + record type")
 query record detectConflicts {
@@ -39,7 +38,6 @@ query record detectConflicts {
 //   policy({ targetRecordType: "vehicle", partitionId: "space-123" })    // Space-specific or global
 //
 
-@enabled
 @unbounded("the active policy for a record type -- bounded to a single row")
 @description("Returns the validation policy for a record type. Space-specific policies take precedence over global.")
 query policy policy {
@@ -75,7 +73,6 @@ query policy policy {
 //   recordsByState({ partitionId: "space-123", recordType: "vehicle" })         // By type in a space
 //
 
-@enabled
 @description("Returns active data records. Optional filters: partitionId, recordType, validationState, importSource")
 query record recordsByState {
   args {
@@ -124,7 +121,6 @@ query record recordsByState {
 // directly in their query instead.
 //
 
-@enabled
 @description("Returns usable data records (confirmed, or checked if policy allows)")
 query record usableRecords {
   args {
@@ -162,7 +158,6 @@ query record usableRecords {
 //   validationLog({ partitionId: "space-123", action: "confirm" })      // Confirmations in a space
 //
 
-@enabled
 @description("Returns validation state change history. Optional filters: recordId, partitionId, action")
 query log validationLog {
   args {

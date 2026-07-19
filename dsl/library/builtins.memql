@@ -8,7 +8,6 @@
 // dsl/library/concepts.memql (documentVersion) and the integration
 // package header for the full design (memql#1228-1231).
 
-@enabled
 @sdk
 @executor("integration.library.editDocument")
 @args(profile="object")
@@ -25,7 +24,6 @@ builtin editDocument {
   partitionId          string
 }
 
-@enabled
 @executor("integration.library.editDocumentAsAssistant")
 @args(profile="object")
 @description("Assistant-facing document edit (memql#1231). Backs the agent editDocument tool: appends a new version authored by the calling agent (authorKind=assistant, authorId=agentId) to an existing logical document, re-inserting the backing generatedOutput so the Library viewer reflects the revision. ownerUserId is threaded from the document row. Delegates to the same append path as the user edit.")
@@ -40,7 +38,6 @@ builtin assistantEditDocument {
   expectedVersion  int
 }
 
-@enabled
 @sdk
 @executor("integration.library.restoreDocumentVersion")
 @args(profile="object")
