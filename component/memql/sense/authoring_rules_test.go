@@ -192,14 +192,16 @@ func TestRedundantEnabledRule_EmbeddedTreeClean(t *testing.T) {
 		if info.IsDir() || !strings.HasSuffix(path, ".memql") {
 			return nil
 		}
-		rel, _ := filepath.Rel(root, path)
-		if strings.HasPrefix(rel, "_reference") {
-			return nil
-		}
+		// _reference/ is deliberately IN scope: its sheets were stripped in
+		// this same story (prose calling @enabled a no-op must not model
+		// it), and this filesystem walk is the only test that reaches them
+		// (the embedded-tree gates cannot -- the embed directive omits
+		// underscore paths).
 		data, readErr := os.ReadFile(path)
 		if readErr != nil {
 			return readErr
 		}
+		rel, _ := filepath.Rel(root, path)
 		for _, d := range redundantEnabledRule(string(data)) {
 			hints = append(hints, rel+": "+d.Message)
 		}
