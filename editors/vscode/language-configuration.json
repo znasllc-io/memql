@@ -19,5 +19,20 @@
     ["[", "]"],
     ["(", ")"],
     ["\"", "\""]
-  ]
+  ],
+  "onEnterRules": [
+    {
+      "beforeText": "\\{[^}\"']*$",
+      "afterText": "^\\s*\\}",
+      "action": { "indent": "indentOutdent" }
+    },
+    {
+      "beforeText": "\\{[^}\"']*$",
+      "action": { "indent": "indent" }
+    }
+  ],
+  "indentationRules": {
+    "increaseIndentPattern": "\\{[^}\"']*$",
+    "decreaseIndentPattern": "^\\s*\\}"
+  }
 }
