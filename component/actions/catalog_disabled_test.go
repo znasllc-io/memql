@@ -107,3 +107,48 @@ capability fs.writeFile {
 		})
 	}
 }
+
+// Reviewer round-3 queue item: the dup check must be order-independent now
+// that it covers disabled names -- declaring the same dotted name twice
+// errors whichever of the pair is @disabled, and neither silently wins.
+func TestLoadCatalogFromFS_DuplicateAcrossLifecycleStates(t *testing.T) {
+	for name, src := range map[string]string{
+		"disabled-then-enabled": `@disabled
+@sideEffect("read")
+capability fs.readFile {
+  args {
+    path string @required
+  }
+}
+
+@sideEffect("read")
+capability fs.readFile {
+  args {
+    path string @required
+  }
+}
+`,
+		"enabled-then-disabled": `@sideEffect("read")
+capability fs.readFile {
+  args {
+    path string @required
+  }
+}
+
+@disabled
+@sideEffect("read")
+capability fs.readFile {
+  args {
+    path string @required
+  }
+}
+`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			tree := fstest.MapFS{"capabilities.memql": {Data: []byte(src)}}
+			if _, err := LoadCatalogFromFS(tree); err == nil {
+				t.Error("duplicate capability across lifecycle states must error; neither declaration may silently win")
+			}
+		})
+	}
+}
