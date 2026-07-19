@@ -4624,7 +4624,7 @@ func (p *Parser) parseTernary() (ExpressionNode, error) {
 // looser than `&&` (parseLogicalAnd) -- so `a && b || c` parses as
 // `(a && b) || c`, matching Go.
 func (p *Parser) parseLogicalOr() (ExpressionNode, error) {
-	left, err := p.parseNullCoalesce()
+	left, err := p.parseLogicalAnd()
 	if err != nil {
 		return nil, err
 	}
@@ -4634,7 +4634,7 @@ func (p *Parser) parseLogicalOr() (ExpressionNode, error) {
 
 	for (!p.suppressCommaOr && p.check(TokenComma)) || p.check(TokenPipePipe) {
 		p.advance()
-		right, err := p.parseNullCoalesce()
+		right, err := p.parseLogicalAnd()
 		if err != nil {
 			return nil, err
 		}
@@ -4651,25 +4651,41 @@ func (p *Parser) parseLogicalOr() (ExpressionNode, error) {
 	return left, nil
 }
 
-// parseNullCoalesce used to collect ??-separated expressions into a
-// CoalesceExpr. `??` was retired in Phase 4 -- authors use the
-// explicit `coalesce(a, b, c)` form instead. This method remains only
-// to preserve the precedence chain; it returns the result of the next
-// level unchanged and emits a clear error if it sees `??` anywhere.
+// parseNullCoalesce parses the resurrected `??` null-coalescing level
+// (#2611): `a ?? b ?? c` folds n-ary into ONE CoalesceExpr -- identical
+// downstream to the coalesce(a, b, c) spelling, preserving the memql#1614
+// final-arg-fallback semantics and matching the object-literal fold. The
+// precedence is deliberately Swift-TIGHT -- tighter than comparison,
+// looser than additive -- so the dominant fallback-then-compare idiom
+// `args.stage ?? "" == "active"` means `(args.stage ?? "") == "active"`.
+// (The retired Phase-4 slot sat between || and &&, the JS/C# binding,
+// under which a non-nil LHS silently short-circuits the comparison: the
+// silent-constant-gate class wave-3 #2542 eliminated. Zero source carried
+// `??` at resurrection time, so the precedence change migrates nothing.)
 func (p *Parser) parseNullCoalesce() (ExpressionNode, error) {
-	left, err := p.parseLogicalAnd()
+	left, err := p.parseAdditive()
 	if err != nil {
 		return nil, err
 	}
 	if left == nil {
 		return nil, nil
 	}
-
-	if p.check(TokenQuestionQuestion) {
-		return nil, newParseErrorf(&p.current,
-			"the '??' null-coalescing operator was retired; use coalesce(a, b, ...) instead")
+	if !p.check(TokenQuestionQuestion) {
+		return left, nil
 	}
-	return left, nil
+	args := []ExpressionNode{left}
+	for p.check(TokenQuestionQuestion) {
+		p.advance()
+		next, err := p.parseAdditive()
+		if err != nil {
+			return nil, err
+		}
+		if next == nil {
+			return nil, newParseErrorf(&p.current, "expected an expression after '??'")
+		}
+		args = append(args, next)
+	}
+	return &CoalesceExpr{Args: args}, nil
 }
 
 // parseLogicalAnd parses semicolon-separated or &&-separated (AND) expressions.
@@ -4721,7 +4737,7 @@ func (p *Parser) parseLogicalAnd() (ExpressionNode, error) {
 // is not a chained comparison), matching Go and the additive/multiplicative
 // levels' left operand.
 func (p *Parser) parseComparisonLevel() (ExpressionNode, error) {
-	left, err := p.parseAdditive()
+	left, err := p.parseNullCoalesce()
 	if err != nil {
 		return nil, err
 	}
@@ -4731,7 +4747,7 @@ func (p *Parser) parseComparisonLevel() (ExpressionNode, error) {
 	if p.check(TokenOperator) && isComparisonOperatorLiteral(p.current.Literal) {
 		op := ComparisonOperator(p.current.Literal)
 		p.advance()
-		right, err := p.parseAdditive()
+		right, err := p.parseNullCoalesce()
 		if err != nil {
 			return nil, err
 		}
@@ -7099,7 +7115,7 @@ func (p *Parser) parseContainsFunction() (ExpressionNode, error) {
 // keep their established EqExpr/NotExpr shape for the non-identifier LHS forms
 // that already relied on them.
 func (p *Parser) parseExpressionArg() (ExpressionNode, error) {
-	left, err := p.parsePrimary()
+	left, err := p.parseCoalesceArgOperand()
 	if err != nil {
 		return nil, err
 	}
@@ -7107,14 +7123,14 @@ func (p *Parser) parseExpressionArg() (ExpressionNode, error) {
 		switch p.current.Literal {
 		case "==":
 			p.advance()
-			right, rerr := p.parsePrimary()
+			right, rerr := p.parseCoalesceArgOperand()
 			if rerr != nil {
 				return nil, rerr
 			}
 			return &EqExpr{Left: left, Right: right}, nil
 		case "!=":
 			p.advance()
-			right, rerr := p.parsePrimary()
+			right, rerr := p.parseCoalesceArgOperand()
 			if rerr != nil {
 				return nil, rerr
 			}
@@ -7122,7 +7138,7 @@ func (p *Parser) parseExpressionArg() (ExpressionNode, error) {
 		case "<", "<=", ">", ">=":
 			op := ComparisonOperator(p.current.Literal)
 			p.advance()
-			right, rerr := p.parsePrimary()
+			right, rerr := p.parseCoalesceArgOperand()
 			if rerr != nil {
 				return nil, rerr
 			}
@@ -7132,6 +7148,35 @@ func (p *Parser) parseExpressionArg() (ExpressionNode, error) {
 		}
 	}
 	return left, nil
+}
+
+// parseCoalesceArgOperand parses one expression-arg operand: a primary with
+// any `??` chain folded into a single CoalesceExpr (#2611). Expression args
+// bypass the main cascade (parsePrimary plus one comparison, #2407), so the
+// coalesce level is mirrored here in lockstep -- without it `??` would work
+// everywhere except cond args, worse than its absence. The fold produces
+// exactly the AST the coalesce(a, b) spelling produces in this position.
+func (p *Parser) parseCoalesceArgOperand() (ExpressionNode, error) {
+	left, err := p.parsePrimary()
+	if err != nil {
+		return nil, err
+	}
+	if left == nil || !p.check(TokenQuestionQuestion) {
+		return left, nil
+	}
+	args := []ExpressionNode{left}
+	for p.check(TokenQuestionQuestion) {
+		p.advance()
+		next, nerr := p.parsePrimary()
+		if nerr != nil {
+			return nil, nerr
+		}
+		if next == nil {
+			return nil, newParseErrorf(&p.current, "expected an expression after '??'")
+		}
+		args = append(args, next)
+	}
+	return &CoalesceExpr{Args: args}, nil
 }
 
 // consumePostCallDotAccess wraps call with DotAccessExpr nodes if the
