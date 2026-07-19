@@ -95,7 +95,6 @@ mutation partition mutationCreatePartition {
 // 2. An automation fires on the row landing and grants the
 //    creating user owner access. Note the step calls the logic
 //    construct by its bare (un-prefixed) name.
-@enabled
 @trigger(event="node.created", concept="v1:platform:partition", partition="*")
 @description("Grant the partition creator owner access on first landing.")
 automation autoBootstrapWorkspaceOwnerAccess {
@@ -182,7 +181,6 @@ windowing, and latest-per-id snapshots are `sort` / `paginate` /
 ```memql
 use cognition.concepts.{ context }
 
-@enabled
 @description("Latest space-context row for a space.")
 query context queryLatestSpaceContextForSpace {
   args {

@@ -87,7 +87,6 @@ is the input schema; the implementation is the Go integration named
 by `@executor`:
 
 ```memql
-@enabled
 @executor("integration.auth.checkPermission")
 @args(profile="object")
 @description("Check if the current authenticated user has a specific role. Returns boolean result.")
@@ -161,7 +160,6 @@ directives, and a `shape` projection.
 ```memql
 use cognition.concepts.{ participant }
 
-@enabled
 @description("Get active human participants in a space")
 query participant queryActiveHumanParticipants {
   args {
@@ -188,7 +186,6 @@ A `when(args.x) { ... }` guard applies its predicate only when the
 argument is provided:
 
 ```memql
-@enabled
 @description("Active spaces, optionally narrowed to a creator")
 query space queryActiveSpaces {
   args {
@@ -261,7 +258,6 @@ Mutations write exactly one row of their signature-bound concept.
 ```memql
 use cognition.concepts.{ space }
 
-@enabled
 @description("Create a cognition space")
 mutation space mutationCreateSpace {
   args {
@@ -314,7 +310,6 @@ named statements ending in `return <expr>`.
 ```memql
 use common.builtins.{ ensureDailySpaceForUser }
 
-@enabled
 @description("On user creation, ensure today's daily space exists.")
 logic logicProvisionDailySpaceOnUserCreate {
   args {
@@ -371,7 +366,6 @@ the triggering event:
 ```memql
 use cognition.logic.{ logicAutoJoinSI }
 
-@enabled
 @trigger(event="node.created", concept="v1:cognition:space", partition="*")
 @filter(active==true)
 @description("On space creation, join the creator's assistant into the space.")
@@ -397,7 +391,6 @@ empty rather than erroring.
 (sec min hour dom mon dow):
 
 ```memql
-@enabled
 @trigger(schedule="0 */10 * * * *")
 @description("Every 10 min: mark departed cluster nodes as health='stopped'.")
 automation pruneStaleClusterNodes {
@@ -634,7 +627,6 @@ builtins, declared in `dsl/<namespace>/tools.memql`. The body is the
 tool's input schema; `@handler` binds it to the operation it runs:
 
 ```memql
-@enabled
 @handler(type="query", query="queryFindEvents({\"title\": \"$args.title\"})")
 @executionTime("fast")
 @description("Find the caller's calendar events by exact title.")

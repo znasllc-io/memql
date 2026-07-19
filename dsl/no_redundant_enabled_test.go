@@ -16,9 +16,11 @@ import (
 // lesson. It stays legal to PARSE forever (legacy-DSL compatibility, and
 // Sense surfaces a removal hint), but the shipped tree does not carry it.
 //
-// _reference/ files are documentation templates not loaded by the engine;
-// they may illustrate the annotation and are out of scope (the
-// TestNoCallerVocabulary exclusion).
+// _reference/ files are structurally outside this gate: the walker skips
+// underscore-prefixed paths and the embed directive omits them entirely,
+// so no code-level exclusion exists here. Their construct examples are
+// stripped too -- a sheet whose prose calls @enabled an accepted no-op
+// must not model it.
 func TestNoRedundantEnabled(t *testing.T) {
 	tree := Tree()
 	paths, err := dslfs.WalkMemqlFiles(tree)
@@ -31,9 +33,6 @@ func TestNoRedundantEnabled(t *testing.T) {
 
 	var hits []string
 	for _, p := range paths {
-		if strings.HasPrefix(p, "_reference/") {
-			continue
-		}
 		file, openErr := tree.Open(p)
 		if openErr != nil {
 			t.Fatalf("open %s: %v", p, openErr)

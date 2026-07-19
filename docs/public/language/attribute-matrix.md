@@ -333,7 +333,6 @@ automation generateReport { ... }
 use cognition.concepts.{ participant }
 use common.traits.{ traitIsActiveRecord }
 
-@enabled
 @description("Get active human participants in a space")
 query participant queryActiveHumanParticipants {
   args {
@@ -349,7 +348,6 @@ query participant queryActiveHumanParticipants {
 ```memql
 use cognition.concepts.{ space }
 
-@enabled
 @description("Create a cognition space")
 @audit
 @retry(count=3)
@@ -373,7 +371,6 @@ mutation space mutationCreateSpace {
 ```memql
 use cognition.logic.{ logicBootstrapSession }
 
-@enabled
 @trigger(event="node.created", concept="v1:cognition:participant", partition="*")
 @description("Auto-creates a session when a participant joins a space")
 automation bootstrapSession {

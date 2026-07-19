@@ -62,13 +62,11 @@ the call site).
 ```memql
 use cognition.concepts.{ participant }
 
-@enabled
 @description("Matches participants with human participantType")
 spec participant specIsHumanParticipant {
   return participantType == "human"
 }
 
-@enabled
 @description("Active records created by system automation")
 spec participant specSystemActive {
   return active == true && createdBy == "system:automation"
@@ -100,7 +98,6 @@ rejected at parse time -- `&&` / `||` are the only connectives.)
 ```memql
 use common.shapes.{ actorEnvelope }
 
-@enabled
 @description("Caller must hold owner or admin role to use the Deployment Console.")
 spec actorEnvelope requiresOwnerOrAdmin {
   return role == "admin" || role == "owner"

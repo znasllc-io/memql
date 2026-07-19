@@ -286,12 +286,14 @@ func redundantEnabledRule(source string) []Diagnostic {
 	lines := strings.Split(source, "\n")
 	for lineIdx, line := range lines {
 		content := stripStringsAndComments(line)
-		for _, m := range enabledAnnotationRE.FindAllStringIndex(content, -1) {
-			pos := Position{Line: lineIdx + 1, Column: m[0] + 1}
+		for _, m := range enabledAnnotationRE.FindAllStringSubmatchIndex(content, -1) {
+			// Anchor on the @enabled token (submatch 1), not the
+			// whitespace-swallowing full match.
+			pos := Position{Line: lineIdx + 1, Column: m[2] + 1}
 			diagnostics = append(diagnostics, Diagnostic{
 				Range: Range{
 					Start: pos,
-					End:   Position{Line: pos.Line, Column: m[1] + 1},
+					End:   Position{Line: pos.Line, Column: m[3] + 1},
 				},
 				Severity: SeverityHint,
 				Message:  "`@enabled` is an accepted no-op: definitions are enabled by default (#2604-#2608). Delete the line; `@disabled` is the off-switch.",
@@ -303,6 +305,8 @@ func redundantEnabledRule(source string) []Diagnostic {
 }
 
 // enabledAnnotationRE matches a construct-attached `@enabled` annotation
-// line (whitespace-only prefix, nothing after) -- not the word inside
-// prose or a longer annotation name like @enabledFoo.
-var enabledAnnotationRE = regexp.MustCompile(`^[ \t]*@enabled[ \t]*$`)
+// at line start (the gate's form in dsl/no_redundant_enabled_test.go, so
+// the editor hints every shape CI fails: trailing comments, arg forms,
+// CRLF endings) -- not the word inside prose or a longer annotation name
+// like @enabledFoo.
+var enabledAnnotationRE = regexp.MustCompile(`^[ \t]*(@enabled)\b`)

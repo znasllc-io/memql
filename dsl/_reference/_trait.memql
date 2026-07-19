@@ -41,25 +41,21 @@
 //
 // Bare payload field name, `return` body, comparison against a literal.
 
-@enabled
 @description("Matches records with active==true field.")
 trait isActiveRecord {
   return active == true
 }
 
-@enabled
 @description("Matches records with status=='cancelled'.")
 trait isCancelled {
   return status == "cancelled"
 }
 
-@enabled
 @description("Matches records that are not soft-deleted (deleted!=true).")
 trait isNotDeleted {
   return deleted != true
 }
 
-@enabled
 @description("Matches records whose status sits in the live set.")
 trait isLive {
   return status == "active" || status == "saved"
@@ -82,13 +78,11 @@ trait isLive {
 // These are engine-stamped intrinsics, not payload fields; the resolver
 // keeps them bare (a non-intrinsic bare name resolves to payload.<name>).
 
-@enabled
 @description("Matches rows from the cognition:participant concept.")
 trait isParticipantRow {
   return concept == "v1:cognition:participant"
 }
 
-@enabled
 @description("Matches rows authored by a specific known identity.")
 trait isSeedRow {
   return createdBy == "seed"
@@ -150,7 +144,6 @@ trait isSeedRow {
 //     annotation is an accepted no-op).
 //   - @disabled = parse the trait but skip registration (#2607).
 
-@enabled
 @description("Live, registered.")
 trait liveExample {
   return active == true
