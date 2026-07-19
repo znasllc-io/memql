@@ -158,7 +158,7 @@ func TestRedundantEnabledRule(t *testing.T) {
 		t.Errorf("hint anchored at line %d, want 1", diags[0].Range.Start.Line)
 	}
 
-	clean := "@description(\"probe mentions @enabled in prose\")\nquery Space probeQuery {\n  filter { payload.active == true }\n}\n// historical note: @enabled was required once\n"
+	clean := "@description(\"probe mentions @enabled in prose\")\nquery Space probeQuery {\n  filter { payload.active == true }\n}\n// historical note: this construct once carried @enabled\n"
 	if got := redundantEnabledRule(clean); len(got) != 0 {
 		t.Fatalf("prose/comment mentions must not hint, got %d", len(got))
 	}
