@@ -2,7 +2,7 @@
   "name": "memql",
   "displayName": "MemQL",
   "description": "Language support for MemQL (.memql): syntax highlighting, diagnostics, completion, hover, and signature help, powered by the offline memql-lsp language server.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "znasllc",
   "license": "SEE LICENSE IN LICENSE",
   "engines": {
@@ -21,6 +21,7 @@
     }
   },
   "main": "./out/extension.js",
+  "icon": "icons/memql.png",
   "contributes": {
     "languages": [
       {
@@ -32,7 +33,11 @@
         "extensions": [
           ".memql"
         ],
-        "configuration": "./language-configuration.json"
+        "configuration": "./language-configuration.json",
+        "icon": {
+          "light": "./icons/memql.png",
+          "dark": "./icons/memql.png"
+        }
       }
     ],
     "grammars": [
