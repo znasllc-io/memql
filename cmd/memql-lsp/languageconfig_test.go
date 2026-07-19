@@ -62,6 +62,25 @@ func TestLanguageConfigKeepsBaseKeys(t *testing.T) {
 	}
 }
 
+// winningEnterAction mirrors VS Code's evaluation (onEnter.ts): rules are
+// walked in order and the FIRST rule whose beforeText matches (and whose
+// afterText, when present, also matches) wins. Pinning the winner rather than
+// the rules' relative order catches an unreachable rule - e.g. a catch-all
+// prepended above the pair - which order checks alone are blind to.
+func winningEnterAction(t *testing.T, rules []onEnterRule, before, after string) string {
+	t.Helper()
+	for _, r := range rules {
+		if !mustCompile(t, "beforeText", r.BeforeText).MatchString(before) {
+			continue
+		}
+		if r.AfterText != "" && !mustCompile(t, "afterText", r.AfterText).MatchString(after) {
+			continue
+		}
+		return r.Action.Indent
+	}
+	return ""
+}
+
 // TestLanguageConfigOnEnterRules: Enter between an unclosed `{` and its `}`
 // must indent-outdent (the three-line expansion), and Enter after an unclosed
 // `{` with no adjacent `}` must indent. The indentOutdent rule has to come
@@ -97,17 +116,41 @@ func TestLanguageConfigOnEnterRules(t *testing.T) {
 	if indentIdx == -1 {
 		t.Fatal("no indent rule (Enter after an unclosed { would not indent)")
 	}
+	if indentOutdentIdx != 0 {
+		t.Fatalf("indentOutdent rule at index %d, want 0; any earlier rule can shadow it (first match wins)", indentOutdentIdx)
+	}
 	if indentOutdentIdx > indentIdx {
 		t.Fatalf("indentOutdent rule at %d ordered after indent rule at %d; the indent rule has no afterText and would swallow the adjacent-brace case", indentOutdentIdx, indentIdx)
 	}
 
+	// First-match-wins semantics: the WINNING action for each scenario, not
+	// just the presence/order of rules.
+	for _, tc := range []struct {
+		before, after, want string
+	}{
+		{"args {", "}", "indentOutdent"},
+		{"args {", "  }", "indentOutdent"},
+		{"args {", "", "indent"},
+		{"args { // trailing comment", "", "indent"},
+		{"args {", "name: String", "indent"},
+	} {
+		if got := winningEnterAction(t, rules, tc.before, tc.after); got != tc.want {
+			t.Errorf("winning action for (%q, %q) = %q, want %q", tc.before, tc.after, got, tc.want)
+		}
+	}
+	// No rule may fire at all on these: balanced braces and commented-out code.
+	for _, before := range []string{"args {}", "// args {", "  // automation x {"} {
+		if got := winningEnterAction(t, rules, before, ""); got != "" {
+			t.Errorf("winning action for (%q, \"\") = %q, want no rule to fire", before, got)
+		}
+	}
+
 	between := rules[indentOutdentIdx]
-	before := mustCompile(t, "indentOutdent beforeText", between.BeforeText)
 	if between.AfterText == "" {
 		t.Fatal("indentOutdent rule has no afterText; it would fire on every Enter after {")
 	}
-	after := mustCompile(t, "indentOutdent afterText", between.AfterText)
-	for _, line := range []string{"args {", "  insert {", "mutation Space createSpace {"} {
+	before := mustCompile(t, "indentOutdent beforeText", between.BeforeText)
+	for _, line := range []string{"args {", "  insert {", "mutation Space createSpace {", "@variant(discriminator=\"kind\") {"} {
 		if !before.MatchString(line) {
 			t.Errorf("indentOutdent beforeText does not match %q", line)
 		}
@@ -115,16 +158,14 @@ func TestLanguageConfigOnEnterRules(t *testing.T) {
 	if before.MatchString("args {}") {
 		t.Error("indentOutdent beforeText matches a balanced-brace line \"args {}\"")
 	}
-	for _, line := range []string{"}", "  }"} {
-		if !after.MatchString(line) {
-			t.Errorf("indentOutdent afterText does not match %q", line)
-		}
-	}
 
 	open := rules[indentIdx]
 	openBefore := mustCompile(t, "indent beforeText", open.BeforeText)
 	if !openBefore.MatchString("args {") {
 		t.Error("indent beforeText does not match \"args {\"")
+	}
+	if openBefore.MatchString("args {}") {
+		t.Error("indent beforeText matches a balanced-brace line \"args {}\"; Enter after it would mis-indent")
 	}
 }
 
@@ -145,12 +186,12 @@ func TestLanguageConfigIndentationRules(t *testing.T) {
 	inc := mustCompile(t, "increaseIndentPattern", rules.IncreaseIndentPattern)
 	dec := mustCompile(t, "decreaseIndentPattern", rules.DecreaseIndentPattern)
 
-	for _, line := range []string{"args {", "  filter {", "automation dayRollup {"} {
+	for _, line := range []string{"args {", "  filter {", "automation dayRollup {", "args { // trailing comment"} {
 		if !inc.MatchString(line) {
 			t.Errorf("increaseIndentPattern does not match %q", line)
 		}
 	}
-	for _, line := range []string{"args {}", "st := coalesce(args.stage, \"\")"} {
+	for _, line := range []string{"args {}", "st := coalesce(args.stage, \"\")", "// args {", "  // automation x {"} {
 		if inc.MatchString(line) {
 			t.Errorf("increaseIndentPattern matches %q, which opens no block", line)
 		}
