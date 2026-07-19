@@ -72,15 +72,14 @@ func TestExpandFunctionCall_DisabledQueryRejectedNested(t *testing.T) {
 // are its to revisit.
 func TestExpandFunctionCall_BuiltinExemptFromEnabledGate(t *testing.T) {
 	reg := newFunctionRegistry()
+	// The production builtin shape: Executor set, Expr nil (all 74 real
+	// builtins). The exemption is deliberately narrowed to that shape -- a
+	// builtin-typed function WITH a DSL body does not ride the exemption.
 	require.NoError(t, reg.add(&Function{
-		Name:    "help",
-		Type:    FunctionTypeBuiltin,
-		Enabled: false, // the dead-flag reality for all builtins today
-		Expr: &ComparisonExpression{
-			Field:    FieldReference{Raw: "concept", Parts: []string{"concept"}},
-			Operator: OpEq,
-			Value:    "v1:platform:help",
-		},
+		Name:     "help",
+		Type:     FunctionTypeBuiltin,
+		Enabled:  false, // the dead-flag reality for all builtins today
+		Executor: "integration.meta.help",
 	}))
 
 	plan := &QueryPlan{
@@ -88,6 +87,8 @@ func TestExpandFunctionCall_BuiltinExemptFromEnabledGate(t *testing.T) {
 	}
 	require.NoError(t, resolvePlanFunctions(plan, reg, nil),
 		"a builtin with the dead-false Enabled flag must keep expanding until #2608")
+	_, ok := plan.Root.(*BuiltinFunctionExpression)
+	require.True(t, ok, "expected the builtin dispatch branch, got %T", plan.Root)
 }
 
 // The exemption must hold against the REAL boot loader, not only a
@@ -96,7 +97,10 @@ func TestExpandFunctionCall_BuiltinExemptFromEnabledGate(t *testing.T) {
 // every builtin in production while unit fixtures stayed green -- exactly
 // how the first cut of #2605 shipped green and broke mcp-conformance.
 // Arg-validation errors are tolerated; only the gate's error fails the test,
-// so this pin survives #2608 making the Enabled flag honest.
+// so this pin survives #2608 making the Enabled flag honest -- UNTIL a
+// builtin is legitimately @disabled, at which point this test fails on that
+// builtin by design: that failure is #2608's signal to scope the sweep to
+// enabled builtins, not to silence the pin.
 func TestExpandFunctionCall_RealBuiltinsExpandDespiteDeadFlag(t *testing.T) {
 	registry := newFunctionRegistry()
 	if _, err := LoadUnifiedBuiltins(slog.Default(), registry); err != nil {
@@ -114,7 +118,7 @@ func TestExpandFunctionCall_RealBuiltinsExpandDespiteDeadFlag(t *testing.T) {
 		}
 	}
 	if builtins < 50 {
-		t.Fatalf("expected the embedded tree to register 70+ builtins, got %d -- loader path changed?", builtins)
+		t.Fatalf("expected the embedded tree to register its builtins (74 at the time of writing, guarded at 50), got %d -- loader path changed?", builtins)
 	}
 }
 

@@ -375,7 +375,7 @@ func (v *functionValidator) expandFunctionCall(call *FunctionCallExpression) (Ex
 	// regardless of @enabled -- the dead flag #2608 fixes), so gating them
 	// here would reject every builtin call, e.g. help() under the MCP
 	// describeFunction tool.
-	if !fn.Enabled && fn.Type != FunctionTypeBuiltin {
+	if !fn.Enabled && (fn.Type != FunctionTypeBuiltin || fn.Expr != nil) {
 		return nil, fmt.Errorf("function %q is disabled", key)
 	}
 
