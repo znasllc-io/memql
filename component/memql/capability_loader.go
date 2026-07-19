@@ -25,6 +25,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/znasllc-io/memql/component/language/ast"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	memqldsl "github.com/znasllc-io/memql/dsl"
 )
@@ -103,6 +104,13 @@ func loadCapabilityNamesFromFS(tree fs.FS) (map[string]bool, error) {
 			if perr != nil {
 				return fmt.Errorf("%s: capability: %w", p, perr)
 			}
+			// A @disabled capability is invisible to the declared set
+			// (#2607): any @executor referencing it fails loudly at load
+			// rather than silently at call time. Coexists with the
+			// _disabled/ directory convention. @enabled stays a no-op.
+			if capabilityDeclDisabled(decl) {
+				continue
+			}
 			out[decl.Name] = true
 		}
 		return nil
@@ -131,4 +139,19 @@ func declaredCapabilityNames() (map[string]bool, error) {
 		}
 	})
 	return defaultCapabilityNames, defaultCapabilityNamesErr
+}
+
+// capabilityDeclDisabled reports whether a capability decl carries the
+// @disabled annotation. @enabled is an accepted no-op per the lifecycle
+// ruling (#2607).
+func capabilityDeclDisabled(decl *ast.CapabilityDecl) bool {
+	if decl == nil {
+		return false
+	}
+	for _, attr := range decl.Attributes {
+		if attr != nil && attr.Name == ast.AttrDisabled {
+			return true
+		}
+	}
+	return false
 }

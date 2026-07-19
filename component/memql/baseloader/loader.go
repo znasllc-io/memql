@@ -114,6 +114,14 @@ func LoadOne[T any](
 				sink.Add(Skip{Component: component, Keyword: keyword, Name: slice.Name, File: raw.Path, Phase: "parse", Err: err.Error()})
 				continue
 			}
+			// A nil item with a nil error is an intentional skip -- e.g. a
+			// @disabled declaration (#2606/#2607): not registered, and
+			// deliberately not a Report skip (strict boot must not trip on
+			// an intentional disable). LoadMany gets this for free via an
+			// empty slice; this is the LoadOne symmetry.
+			if item == nil {
+				continue
+			}
 			if err := register(item); err != nil {
 				if logger != nil {
 					logger.Warn(component+": register failed",

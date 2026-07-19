@@ -64,6 +64,7 @@ func specDeclToSpec(decl *languageParser.SpecDecl, origin string) (*Spec, error)
 	allowed := annotations.Set("Spec")
 
 	var description string
+	var disabled bool
 	for _, attr := range decl.Attributes {
 		switch attr.Name {
 		case "useConcept", "useShape":
@@ -84,14 +85,23 @@ func specDeclToSpec(decl *languageParser.SpecDecl, origin string) (*Spec, error)
 				return nil, fmt.Errorf("%s: @description expects a string value", origin)
 			}
 			description = val
-		case "enabled", "disabled":
-			// Author-surface lifecycle no-ops; the engine controls spec
-			// lifecycle.
+		case "enabled":
+			// Accepted no-op: enabled is the default (lifecycle ruling, #2607).
+		case "disabled":
+			disabled = true
 		}
 	}
 
 	if err := validateSpecName(decl.Name); err != nil {
 		return nil, err
+	}
+
+	// A @disabled spec/trait is skipped at load (nil, nil is the
+	// baseloader's intentional-skip contract): never registered, no
+	// binding resolution, and the _reference sheets' long-standing claim
+	// that @disabled skips trait registration becomes true (#2607).
+	if disabled {
+		return nil, nil
 	}
 
 	if decl.Body == nil {
