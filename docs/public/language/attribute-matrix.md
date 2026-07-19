@@ -61,7 +61,8 @@ construct-specific (see the end of this document) or rejected.
 ### Lifecycle Attributes
 
 #### `@enabled`
-Activates the definition. **Required** for the definition to be used.
+Accepted explicit no-op: definitions are enabled by default (functions since
+#360, automations since #2604). Use `@disabled` to deactivate.
 
 ```memql
 @enabled
@@ -408,7 +409,7 @@ named by the `shape <Concept> <name>` signature; `@caller` -- use
 
 | Aspect | Default | Notes |
 |--------|---------|-------|
-| Enabled state | **Disabled** | Must use `@enabled` to activate |
+| Enabled state | **Enabled** | Use `@disabled` to deactivate; `@enabled` is an accepted no-op |
 | Visibility | Public | Use `@internal` to hide from API |
 | Timeout | 30s | Platform default |
 | Cache | None | No caching by default |

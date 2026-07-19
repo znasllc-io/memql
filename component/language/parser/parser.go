@@ -1275,9 +1275,15 @@ func isNilOrErrorExpr(expr ExpressionNode) bool {
 // parseGoStyleAutomationBody parses Go-style automation body with := assignments
 func (p *Parser) parseGoStyleAutomationBody(name string) (*AutomationDef, error) {
 	automation := &AutomationDef{
-		Name:    name,
-		Steps:   []StepDef{},
-		Enabled: false,
+		Name:  name,
+		Steps: []StepDef{},
+		// Enabled-by-default (#2604): absent = enabled, @enabled is an
+		// accepted no-op, @disabled is the only off-switch -- the same
+		// lifecycle contract FunctionDef adopted in #360. Autonomous
+		// execution safety rests on @disabled plus the authored-automation
+		// governance stack (kill switch, owner gates, breakers), not on a
+		// divergent default.
+		Enabled: true,
 	}
 
 	for !p.check(TokenBraceClose) && !p.check(TokenEOF) {
