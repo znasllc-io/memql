@@ -62,6 +62,32 @@ func TestExpandFunctionCall_DisabledQueryRejectedNested(t *testing.T) {
 	require.Contains(t, err.Error(), `function "retiredInner" is disabled`)
 }
 
+// Builtins are EXEMPT from the gate until #2608: the converter never sets
+// Enabled, so every builtin registers false regardless of @enabled. Gating
+// them would reject every builtin call (the mcp-conformance lane caught
+// exactly this: describeFunction -> help() -> "function \"help\" is
+// disabled"). When #2608 makes the flag honest, this exemption and test
+// are its to revisit.
+func TestExpandFunctionCall_BuiltinExemptFromEnabledGate(t *testing.T) {
+	reg := newFunctionRegistry()
+	require.NoError(t, reg.add(&Function{
+		Name:    "help",
+		Type:    FunctionTypeBuiltin,
+		Enabled: false, // the dead-flag reality for all builtins today
+		Expr: &ComparisonExpression{
+			Field:    FieldReference{Raw: "concept", Parts: []string{"concept"}},
+			Operator: OpEq,
+			Value:    "v1:platform:help",
+		},
+	}))
+
+	plan := &QueryPlan{
+		Root: &FunctionCallExpression{Name: "help", Args: map[string]any{}},
+	}
+	require.NoError(t, resolvePlanFunctions(plan, reg, nil),
+		"a builtin with the dead-false Enabled flag must keep expanding until #2608")
+}
+
 // Parity guard: an enabled query keeps expanding exactly as before.
 func TestExpandFunctionCall_EnabledQueryUnaffected(t *testing.T) {
 	reg := newFunctionRegistry()
