@@ -1,6 +1,8 @@
 package memql
 
 import (
+	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -86,6 +88,34 @@ func TestExpandFunctionCall_BuiltinExemptFromEnabledGate(t *testing.T) {
 	}
 	require.NoError(t, resolvePlanFunctions(plan, reg, nil),
 		"a builtin with the dead-false Enabled flag must keep expanding until #2608")
+}
+
+// The exemption must hold against the REAL boot loader, not only a
+// hand-registered fixture: if LoadUnifiedBuiltins stamped a different Type
+// discriminator than the exemption checks, the gate would silently reject
+// every builtin in production while unit fixtures stayed green -- exactly
+// how the first cut of #2605 shipped green and broke mcp-conformance.
+// Arg-validation errors are tolerated; only the gate's error fails the test,
+// so this pin survives #2608 making the Enabled flag honest.
+func TestExpandFunctionCall_RealBuiltinsExpandDespiteDeadFlag(t *testing.T) {
+	registry := newFunctionRegistry()
+	if _, err := LoadUnifiedBuiltins(slog.Default(), registry); err != nil {
+		t.Fatalf("LoadUnifiedBuiltins: %v", err)
+	}
+	builtins := 0
+	for name, fn := range registry.Snapshot() {
+		if fn == nil || fn.Type != FunctionTypeBuiltin {
+			continue
+		}
+		builtins++
+		plan := &QueryPlan{Root: &FunctionCallExpression{Name: name, Args: map[string]any{}}}
+		if err := resolvePlanFunctions(plan, registry, nil); err != nil && strings.Contains(err.Error(), "is disabled") {
+			t.Errorf("builtin %q rejected by the enabled gate: %v", name, err)
+		}
+	}
+	if builtins < 50 {
+		t.Fatalf("expected the embedded tree to register 70+ builtins, got %d -- loader path changed?", builtins)
+	}
 }
 
 // Parity guard: an enabled query keeps expanding exactly as before.

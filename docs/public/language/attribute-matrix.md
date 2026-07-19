@@ -75,8 +75,9 @@ loaded at runtime; it stays in the tree, is still maintained, and can
 be re-enabled at any time. ("Deprecated / abandoned" is the separate
 `@deprecated` axis.) For functions the gate is on execution as well as
 discovery: a `@disabled` query, mutation, or logic is hidden from
-`functions()`/MCP and rejected with `function "name" is disabled` if
-called directly (#2605).
+`functions()` and the MCP tool listing (`help()` still describes it,
+reporting `"enabled": false`) and rejected with
+`function "name" is disabled` if called directly (#2605).
 
 ```memql
 @disabled
