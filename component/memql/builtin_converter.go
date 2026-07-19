@@ -158,6 +158,7 @@ func builtinDeclToFunction(decl *languageParser.BuiltinDecl, origin string) (*Fu
 		Name:           decl.Name,
 		Description:    description,
 		Type:           FunctionTypeBuiltin,
+		FunctionKind:   FunctionTypeBuiltin,
 		Executor:       executor,
 		BuiltinAliases: aliases,
 		BuiltinArgs:    contract,

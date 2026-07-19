@@ -86,6 +86,13 @@ func (e *MemQLEngine) lookupBuiltinFunction(name string) (*Function, bool) {
 	if !fn.IsBuiltin() {
 		return nil, false
 	}
+	// A @disabled builtin does not match (#2608 review): the bare call then
+	// flows through normal parsing into the expansion gate, producing the
+	// same "function %q is disabled" rejection as the nested form -- one
+	// gate, both invocation shapes.
+	if !fn.Enabled {
+		return nil, false
+	}
 	return fn, true
 }
 

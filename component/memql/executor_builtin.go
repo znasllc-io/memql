@@ -59,6 +59,12 @@ func (e *MemQLEngine) initBuiltinExecutorHandlers() error {
 			if fn == nil || !fn.IsBuiltin() {
 				continue
 			}
+			// A @disabled builtin skips executor validation (#2608 review):
+			// retiring a builtin whose Go executor is gone is the single
+			// most likely reason to disable one, and must not brick boot.
+			if !fn.Enabled {
+				continue
+			}
 			// Integration capability executors (integration.*) are registered
 			// dynamically via RegisterIntegration after engine startup.
 			if strings.HasPrefix(fn.Executor, "integration.") {
