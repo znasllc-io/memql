@@ -210,6 +210,20 @@ func TestNullCoalesce_SwiftTightForIdentifierOperands(t *testing.T) {
 		}
 	}
 
+	// The args row must be self-standing (round-4 nit): the arm nodes must
+	// be ArgRefExpr -- a SpecReferenceExpr arm is the finding-C degradation
+	// even when the comparison shape is right.
+	argAst := parseFilterExpr(t, `args.stage??args.def=="active"`)
+	if argCmp, ok := argAst.(*BinaryComparisonExpr); ok {
+		if co, ok := argCmp.Left.(*CoalesceExpr); ok {
+			for i, arm := range co.Args {
+				if _, isArg := arm.(*ArgRefExpr); !isArg {
+					t.Errorf("args row arm %d: want ArgRefExpr, got %T (the finding-C payload-path degradation)", i, arm)
+				}
+			}
+		}
+	}
+
 	// Double-sided: a ?? b == c ?? d must compare the two coalesces.
 	ast := parseFilterExpr(t, `payload.a??payload.b==payload.c??payload.d`)
 	cmp, ok := ast.(*BinaryComparisonExpr)

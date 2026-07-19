@@ -289,7 +289,7 @@ Configuration variables (prefixed with `MEMQL_WS_`) let you tune the gateway:
 
 > **Retired operator forms.** The legacy `;`-as-AND and `,`-as-OR separators, the `has` membership operator, and the `?.` optional-chain prefix are retired (#977). The parser rejects them in authored DSL filters with migration-pointing errors. Use `&&` / `||`, `in`, and `when(args.x) { ... }` respectively.
 >
-> **The `??` null-coalescing operator** (retired in struct-form Phase 4, resurrected in #2611): `a ?? b ?? c` is the shorthand for `coalesce(a, b, c)` -- first non-nil/non-empty operand, final operand as the ultimate fallback. Precedence is deliberately tight: `??` binds tighter than comparison and looser than arithmetic, so `args.stage ?? "" == "active"` means `(args.stage ?? "") == "active"` -- the fallback-then-compare idiom needs no parentheses. `coalesce(...)` remains valid everywhere, permanently.
+> **The `??` null-coalescing operator** (retired in struct-form Phase 4, resurrected in #2611): `a ?? b ?? c` is the shorthand for `coalesce(a, b, c)` -- first non-nil/non-empty operand, final operand as the ultimate fallback. Precedence is deliberately tight: `??` binds tighter than the six symbol comparisons and looser than arithmetic, so `args.stage ?? "" == "active"` means `(args.stage ?? "") == "active"` -- the fallback-then-compare idiom needs no parentheses. The `in` membership keyword is outside this contract: `in` requires a bare-identifier left side everywhere, so neither spelling of a coalesced membership test parses -- there is no `?? ... in` idiom to bind. `coalesce(...)` remains valid everywhere, permanently.
 
 IDs are persisted as `<concept>:<raw-id>`. MemQL supports both full IDs and short IDs (when concept context is provided):
 
