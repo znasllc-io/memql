@@ -1,6 +1,9 @@
 package parser
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 // #2611: the `??` null-coalescing operator, resurrected. It was retired in
 // struct-form Phase 4 with a parse error, but the lexer kept the token and
@@ -228,12 +231,27 @@ func TestNullCoalesce_ExpressionArgIdentifierRHS(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseExpressionArg: %v", err)
 	}
-	eq, ok := expr.(*EqExpr)
+	// Post-round-2: the identifier-led fold produces the BASELINE shape --
+	// ComparisonExpr with the coalesce chain as its Value, exactly what
+	// `args.x == coalesce(args.a, args.b)` produces in this position.
+	cmp, ok := expr.(*ComparisonExpr)
 	if !ok {
-		t.Fatalf("want EqExpr at top (Swift-tight), got %T", expr)
+		t.Fatalf("want ComparisonExpr at top (baseline parity), got %T", expr)
 	}
-	if _, ok := eq.Right.(*CoalesceExpr); !ok {
-		t.Errorf("EqExpr right: want CoalesceExpr, got %T", eq.Right)
+	if _, ok := cmp.Value.(*CoalesceExpr); !ok {
+		t.Errorf("comparison value: want CoalesceExpr, got %T", cmp.Value)
+	}
+
+	tokens2, err := NewLexer(`args.x==coalesce(args.a, args.b)`).Tokenize()
+	if err != nil {
+		t.Fatalf("tokenize baseline: %v", err)
+	}
+	base, err := NewParser(tokens2).parseExpressionArg()
+	if err != nil {
+		t.Fatalf("baseline: %v", err)
+	}
+	if fmt.Sprintf("%T", base) != fmt.Sprintf("%T", expr) {
+		t.Errorf("shape parity: baseline %T vs ?? %T", base, expr)
 	}
 }
 
@@ -254,4 +272,73 @@ func (Logic) probeAssign(_ any) {
 	if file == nil || len(file.Definitions) != 1 {
 		t.Fatalf("want one parsed definition")
 	}
+}
+
+// Review round-2 finding A on #2611: the fold-suppression flag must not
+// leak into bracketed subexpressions of a continuation operand. Prefixing
+// `x ?? ` onto a working cond() must not change the predicate's node type
+// (EqExpr under the leak, ComparisonExpr in the baseline -- the leaked
+// shape dies in the AST converter at load).
+func TestNullCoalesce_NoFoldSuppressionLeakIntoCalls(t *testing.T) {
+	predType := func(src string) string {
+		t.Helper()
+		expr, err := ParseExpression(src)
+		if err != nil {
+			t.Fatalf("parse %q: %v", src, err)
+		}
+		co, ok := expr.(*CoalesceExpr)
+		if !ok {
+			t.Fatalf("%q: want CoalesceExpr at top, got %T", src, expr)
+		}
+		cond, ok := co.Args[1].(*CondExpr)
+		if !ok {
+			t.Fatalf("%q: want CondExpr arm, got %T", src, co.Args[1])
+		}
+		return typeName(cond.Condition)
+	}
+
+	baseline := func(src string) string {
+		t.Helper()
+		expr, err := ParseExpression(src)
+		if err != nil {
+			t.Fatalf("parse %q: %v", src, err)
+		}
+		co, ok := expr.(*CoalesceExpr)
+		if !ok {
+			t.Fatalf("%q: want CoalesceExpr at top, got %T", src, expr)
+		}
+		cond, ok := co.Args[1].(*CondExpr)
+		if !ok {
+			t.Fatalf("%q: want CondExpr arm, got %T", src, co.Args[1])
+		}
+		return typeName(cond.Condition)
+	}
+
+	short := predType(`args.a??cond(args.b=="active","yes","no")`)
+	long := baseline(`coalesce(args.a, cond(args.b=="active","yes","no"))`)
+	if short != long {
+		t.Errorf("cond predicate node diverged under ??: short=%s baseline=%s (the flag leaked into the call args)", short, long)
+	}
+
+	// Parens inside a continuation operand: same rule.
+	pShort, err := ParseExpression(`payload.a??(payload.b=="x")`)
+	if err != nil {
+		t.Fatalf("paren short: %v", err)
+	}
+	pLong, err := ParseExpression(`coalesce(payload.a, (payload.b=="x"))`)
+	if err != nil {
+		t.Fatalf("paren baseline: %v", err)
+	}
+	sArm := typeName(pShort.(*CoalesceExpr).Args[1])
+	lArm := typeName(pLong.(*CoalesceExpr).Args[1])
+	if sArm != lArm {
+		t.Errorf("paren arm node diverged under ??: short=%s baseline=%s", sArm, lArm)
+	}
+}
+
+func typeName(v any) string {
+	if v == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("%T", v)
 }

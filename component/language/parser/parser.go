@@ -4956,6 +4956,13 @@ func (p *Parser) parsePrimary() (ExpressionNode, error) {
 
 // parseGrouped parses parenthesized expressions.
 func (p *Parser) parseGrouped() (ExpressionNode, error) {
+	// A parenthesized group is a fresh expression context: the ??-operand
+	// fold suppression (#2611) must not leak in, or `a ?? (b == "x")`
+	// mis-shapes the inner comparison (review round 2, finding A).
+	prevFold := p.suppressComparisonFold
+	p.suppressComparisonFold = false
+	defer func() { p.suppressComparisonFold = prevFold }()
+
 	p.advance() // consume '('
 	expr, err := p.parseExpression()
 	if err != nil {
@@ -5368,9 +5375,9 @@ func (p *Parser) parseIdentifierExpression() (ExpressionNode, error) {
 	// bare reference like `m.a` followed by `+` falls through to the
 	// SpecReferenceExpr return below.
 	if !p.suppressComparisonFold && p.check(TokenOperator) && isComparisonOperatorLiteral(p.current.Literal) {
-		savePos, saveCur := p.pos, p.current
 		op := ComparisonOperator(p.current.Literal)
 		p.advance()
+		valuePos, valueCur := p.pos, p.current
 
 		var value any
 		var err error
@@ -5380,12 +5387,26 @@ func (p *Parser) parseIdentifierExpression() (ExpressionNode, error) {
 		}
 
 		// Swift-tight `??` (#2611): a pending coalesce binds tighter than
-		// the comparison, so `a == b ?? c` must compare a against
-		// COALESCE(b, c). Rewind the whole fold and fall through to the
-		// bare-reference tail; the cascade re-parses with the correct
-		// precedence.
+		// the comparison, so `a == b ?? c` compares a against
+		// COALESCE(b, c). Re-parse the VALUE-led chain through the same
+		// operand parser the coalesce() call form's args use, and store
+		// the fold as the comparison value -- the identical node the
+		// `a == coalesce(b, c)` baseline produces (review round 2,
+		// finding B).
 		if p.check(TokenQuestionQuestion) {
-			p.pos, p.current = savePos, saveCur
+			p.pos, p.current = valuePos, valueCur
+			chain, cerr := p.parseCoalesceArgOperand()
+			if cerr != nil {
+				return nil, cerr
+			}
+			return &ComparisonExpr{
+				Field: FieldReference{
+					Raw:   name,
+					Parts: strings.Split(name, "."),
+				},
+				Operator: op,
+				Value:    chain,
+			}, nil
 		} else {
 			// Handle == nil/null and != nil/null → OpMissing/OpNotMissing
 			if op == OpEq || op == OpNe {
@@ -5497,6 +5518,14 @@ func (p *Parser) parseFunctionCall(name string) (ExpressionNode, error) {
 //     object-literal still routes to the Story 9 wrapper-specific error.
 func (p *Parser) parseFunctionCallWithKind(name, kind string) (ExpressionNode, error) {
 	p.advance() // consume '('
+
+	// Call arguments are a fresh expression context: the ??-operand fold
+	// suppression (#2611) must not leak in, or `x ?? cond(a == "b", ...)`
+	// turns the working predicate into the load-rejected EqExpr shape
+	// (review round 2, finding A).
+	prevFold := p.suppressComparisonFold
+	p.suppressComparisonFold = false
+	defer func() { p.suppressComparisonFold = prevFold }()
 
 	lname := strings.ToLower(name)
 

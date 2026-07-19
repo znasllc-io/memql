@@ -1,7 +1,6 @@
 package compiler
 
 import (
-	"strings"
 	"testing"
 
 	parser "github.com/znasllc-io/memql/component/language/parser"
@@ -36,15 +35,20 @@ func TestNullCoalesce_LowersIdenticallyToCoalesceSpelling(t *testing.T) {
 		}
 	}
 
-	// cmp-then-?? has no identifier-led baseline spelling (the fold's RHS is
-	// parseValue: values only, no parenthesized expressions), so pin the
-	// serialized IR shape directly: the coalesce must sit on the VALUE side
-	// of the comparison, never swallow it.
-	got := serialize(`payload.a=="b"??"c"`)
-	if !strings.Contains(got, "coalesce") {
-		t.Errorf("cmp-then-??: coalesce missing from the lowering: %s", got)
+	// cmp-then-??: the identifier-led baseline IS expressible -- parseValue
+	// accepts a coalesce() call as the comparison value (review round 2
+	// corrected the earlier claim here) -- so the shorthand must reproduce
+	// that exact node and emission on the value side too.
+	cmpRows := [][2]string{
+		{`payload.a==payload.b??payload.c`, `payload.a==coalesce(payload.b, payload.c)`},
+		{`payload.a=="b"??"c"`, `payload.a==coalesce("b", "c")`},
+		{`payload.n>payload.m??0`, `payload.n>coalesce(payload.m, 0)`},
+		{`payload.a!=payload.b??"z"`, `payload.a!=coalesce(payload.b, "z")`},
 	}
-	if strings.HasPrefix(got, "coalesce") {
-		t.Errorf("cmp-then-??: lowered JS-loose (comparison swallowed into the coalesce): %s", got)
+	for _, r := range cmpRows {
+		short, long := serialize(r[0]), serialize(r[1])
+		if short != long {
+			t.Errorf("cmp-then-?? diverged:\n  ?? spelling %q -> %s\n  baseline    %q -> %s", r[0], short, r[1], long)
+		}
 	}
 }
