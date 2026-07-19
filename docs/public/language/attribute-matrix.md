@@ -386,7 +386,7 @@ sets; unknown annotations are rejected at load time:
   `@minLength`, `@maxLength`, `@minimum`, `@maximum`, `@immutable`,
   `@secret`, `@variant`. See `dsl/_reference/_concept.memql`.
 - **Tools**: `@allowedRoles`, `@clientExecution`, `@description`,
-  `@destructive`, `@enabled`, `@executionTime`, `@handler`,
+  `@destructive`, `@disabled`, `@enabled`, `@executionTime`, `@handler`,
   `@rateLimit(maxCalls=N, periodSeconds=N)`, `@requiresConfirmation`,
   `@scopes` (`component/language/parser/tool_decl.go`).
 - **Prompts**: `@description`, `@defaultProvider`, `@templateFile`,

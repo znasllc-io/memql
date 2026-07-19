@@ -53,6 +53,48 @@ tool liveProbeTool {
 	}
 }
 
+// Review finding on #2606: the ToolRegistry has a SECOND writer.
+// registerFunctionTools runs after LoadUnifiedTools in boot order
+// (engine_bootstrap.go) and auto-generates an MCP tool for every enabled,
+// non-internal function unless the name is occupied. A @disabled DSL tool
+// must keep its name occupied, or the generated variant resurrects the tool
+// WITHOUT the DSL tool's governance (@allowedRoles empty = fail-open
+// any-role; @autoInjected stripped = caller-supplied identity fields) -- a
+// privilege escalation, not a disablement.
+func TestLoadUnifiedTools_DisabledNameNotResurrectedByFunctionTools(t *testing.T) {
+	overlay := fstest.MapFS{"tools.memql": {Data: []byte(`@disabled
+@handler(type="function", function="collidingProbeFn")
+@allowedRoles("specialist")
+@description("governed probe tool")
+tool collidingProbeFn {
+  name string @required @description("probe arg")
+}
+`)}}
+	const domain = "lifecycledisabledtoolresurrect"
+	memqldsl.RegisterTree(domain, overlay)
+	t.Cleanup(func() { memqldsl.UnregisterTree(domain) })
+
+	tools := newToolRegistry()
+	if _, err := LoadUnifiedTools(discardLogger(), tools); err != nil {
+		t.Fatalf("LoadUnifiedTools: %v", err)
+	}
+
+	functions := newFunctionRegistry()
+	if err := functions.add(&Function{
+		Name:         "collidingProbeFn",
+		FunctionKind: "mutation",
+		Description:  "colliding probe mutation",
+		Enabled:      true,
+	}); err != nil {
+		t.Fatalf("register colliding function: %v", err)
+	}
+	registerFunctionTools(discardLogger(), functions, tools)
+
+	if tools.Has("collidingProbeFn") {
+		t.Error("@disabled tool resurrected by registerFunctionTools without its governance attributes")
+	}
+}
+
 func TestLoadUnifiedPrompts_DisabledSkipped(t *testing.T) {
 	overlay := fstest.MapFS{
 		"prompts.memql": {Data: []byte(`@disabled
@@ -69,8 +111,10 @@ prompt liveProbePrompt {
   subject string @required @description("subject")
 }
 `)},
-		"retired.tmpl": {Data: []byte("retired {{.subject}}")},
-		"live.tmpl":    {Data: []byte("live {{.subject}}")},
+		// retired.tmpl is deliberately ABSENT: the gate sits before template
+		// resolution, so a @disabled prompt with a missing template must load
+		// clean -- supplying the file would leave that ordering unguarded.
+		"live.tmpl": {Data: []byte("live {{.subject}}")},
 	}
 	const domain = "lifecycledisabledprompts"
 	memqldsl.RegisterTree(domain, overlay)

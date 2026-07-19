@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/znasllc-io/memql/component/memql/baseregistry"
 )
@@ -308,9 +309,18 @@ func cloneSliceAny(s []any) []any {
 	return cloned
 }
 
-// ToolRegistry stores globally registered tools.
+// ToolRegistry stores globally registered tools, plus the names the unified
+// loader skipped as @disabled. A disabled name stays OCCUPIED: the registry
+// has a second writer (registerFunctionTools auto-generates a tool for every
+// enabled, non-internal function unless the name is taken), and without the
+// reservation a @disabled DSL tool would be resurrected from its backing
+// function with @allowedRoles and @autoInjected stripped -- fail-open, the
+// opposite of disabled (#2606).
 type ToolRegistry struct {
 	*baseregistry.Registry[Tool]
+
+	disabledMu sync.RWMutex
+	disabled   map[string]bool
 }
 
 // newToolRegistry creates a new empty ToolRegistry.
@@ -319,7 +329,28 @@ func newToolRegistry() *ToolRegistry {
 		Registry: baseregistry.New[Tool]("tool",
 			func(t *Tool) *Tool { return t.clone() },
 			validateToolName),
+		disabled: make(map[string]bool),
 	}
+}
+
+// MarkDisabled records a tool name skipped as @disabled at load, keeping the
+// name occupied for every later registration pass and observable to
+// operators (disabled, not deleted).
+func (r *ToolRegistry) MarkDisabled(name string) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return
+	}
+	r.disabledMu.Lock()
+	r.disabled[name] = true
+	r.disabledMu.Unlock()
+}
+
+// IsDisabled reports whether the name was skipped as @disabled at load.
+func (r *ToolRegistry) IsDisabled(name string) bool {
+	r.disabledMu.RLock()
+	defer r.disabledMu.RUnlock()
+	return r.disabled[strings.TrimSpace(name)]
 }
 
 // Upsert inserts or replaces a tool registration. Used by the

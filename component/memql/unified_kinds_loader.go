@@ -304,7 +304,10 @@ func LoadUnifiedTools(logger *slog.Logger, registry *ToolRegistry, report ...*Lo
 			// A @disabled tool is skipped entirely (not registered), the
 			// same contract providers established (#2606): no MCP surface,
 			// no calltool resolution, re-enable by dropping the annotation.
+			// The name is RESERVED so registerFunctionTools cannot
+			// regenerate an ungoverned variant from the backing function.
 			if decl.Disabled {
+				registry.MarkDisabled(decl.Name)
 				if logger != nil {
 					logger.Debug("memql.unifiedToolLoader: skipping @disabled tool",
 						"tool", decl.Name)

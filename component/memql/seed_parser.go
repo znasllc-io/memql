@@ -326,7 +326,8 @@ func (p *seedMemQLParser) parseDecorator(decl *seedDecl) error {
 
 	switch name {
 	case "enabled", "disabled":
-		// Tolerated for parity with other primitives; no semantic effect on seed decls.
+		// Legacy path (test-only; production seeds load via
+		// LoadUnifiedSeeds, where @disabled skips registration -- #2606).
 		return nil
 
 	case "description":

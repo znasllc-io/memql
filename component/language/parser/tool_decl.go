@@ -46,9 +46,9 @@ func (p *Parser) parseToolDecl(attrs []*ast.Attribute) (*ast.ToolDecl, error) {
 			continue
 		}
 		switch attr.Name {
-		case "enabled":
+		case ast.AttrEnabled:
 			// Accepted no-op: enabled is the default (lifecycle ruling, #2606).
-		case "disabled":
+		case ast.AttrDisabled:
 			decl.Disabled = true
 		case "description":
 			decl.Description = attrStringValue(attr)
@@ -92,7 +92,7 @@ func (p *Parser) parseToolDecl(attrs []*ast.Attribute) (*ast.ToolDecl, error) {
 		case "mcp":
 			decl.MCPExposed = true
 		default:
-			return nil, newParseErrorf(&p.current, "tool %q: unknown annotation @%s -- supported: @allowedRoles, @clientExecution, @description, @destructive, @enabled, @executionTime, @handler, @mcp, @rateLimit, @requiresConfirmation, @scopes", decl.Name, attr.Name)
+			return nil, newParseErrorf(&p.current, "tool %q: unknown annotation @%s -- supported: @allowedRoles, @clientExecution, @description, @destructive, @disabled, @enabled, @executionTime, @handler, @mcp, @rateLimit, @requiresConfirmation, @scopes", decl.Name, attr.Name)
 		}
 	}
 
