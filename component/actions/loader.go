@@ -127,18 +127,32 @@ func DeclToAction(d *ast.ActionDecl, origin string, capImports map[string]string
 	// rejects unknown args, and types must be compatible. A capability the
 	// catalog does not declare (namespace-valid but undeclared) is left to the
 	// existing namespace check; there is no schema to enforce.
-	if err := DefaultCatalogError(); err != nil {
-		return nil, fmt.Errorf("action %q (%s): capability catalog failed to load/reconcile: %w", d.Name, origin, err)
-	}
-	if DefaultCatalog().Disabled(a.Capability) {
-		return nil, fmt.Errorf("action %q (%s): capability %q is @disabled -- enable the capability or retire the action", d.Name, origin, a.Capability)
-	}
-	if info, ok := DefaultCatalog().Lookup(a.Capability); ok {
-		if err := validateCapabilityArgs(a, info); err != nil {
-			return nil, fmt.Errorf("%s: %w", origin, err)
-		}
+	if err := validateAgainstCatalog(DefaultCatalog(), DefaultCatalogError(), a, d.Name, origin); err != nil {
+		return nil, err
 	}
 	return a, nil
+}
+
+// validateAgainstCatalog enforces the catalog contract for an action's
+// capability reference: a @disabled capability is rejected loudly (#2607),
+// a declared one has its args schema enforced, an undeclared-but-
+// namespace-valid one falls to the namespace check. Split from
+// DeclToAction so tests can drive it with an injected catalog --
+// DefaultCatalog is a process-wide singleton over the embedded tree,
+// which ships no disabled capabilities.
+func validateAgainstCatalog(cat *CapabilityCatalog, catErr error, a *Action, declName, origin string) error {
+	if catErr != nil {
+		return fmt.Errorf("action %q (%s): capability catalog failed to load/reconcile: %w", declName, origin, catErr)
+	}
+	if cat.Disabled(a.Capability) {
+		return fmt.Errorf("action %q (%s): capability %q is @disabled -- enable the capability or retire the action", declName, origin, a.Capability)
+	}
+	if info, ok := cat.Lookup(a.Capability); ok {
+		if err := validateCapabilityArgs(a, info); err != nil {
+			return fmt.Errorf("%s: %w", origin, err)
+		}
+	}
+	return nil
 }
 
 // hasParam reports whether the action declares an arg by this name.

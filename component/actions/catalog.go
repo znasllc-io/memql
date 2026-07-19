@@ -246,19 +246,22 @@ func LoadCatalogFromFS(tree fs.FS) (*CapabilityCatalog, error) {
 			if perr != nil {
 				return fmt.Errorf("%s: capability: %w", p, perr)
 			}
-			// A @disabled capability is recorded but not cataloged (#2607):
-			// Lookup misses, Disabled reports true, and the action loader
-			// rejects references -- disabled means undispatabile, loudly.
-			if decl.IsDisabled() {
-				cat.disabled[decl.Name] = true
-				continue
-			}
 			info, cerr := reconcileCapability(decl, p)
 			if cerr != nil {
 				return cerr
 			}
-			if _, dup := cat.byName[info.Name]; dup {
+			if _, dup := cat.byName[info.Name]; dup || cat.disabled[info.Name] {
 				return fmt.Errorf("capability %q (%s): declared more than once in the catalog", info.Name, p)
+			}
+			// A @disabled capability is reconciled and dup-checked like any
+			// other (a disabled decl must stay semantically valid, or
+			// re-enabling it bricks the catalog - the same rule the spec
+			// gate follows), then recorded but not cataloged (#2607):
+			// Lookup misses, Disabled reports true, and the action loader
+			// rejects references -- disabled means undispatchable, loudly.
+			if decl.IsDisabled() {
+				cat.disabled[info.Name] = true
+				continue
 			}
 			cat.byName[info.Name] = info
 		}
@@ -289,13 +292,14 @@ func LoadCapabilitySource(content, path string) ([]*CapabilityInfo, error) {
 		if err != nil {
 			return nil, fmt.Errorf("%s: capability: %w", path, err)
 		}
-		// A @disabled authored capability compiles to nothing (#2607).
-		if decl.IsDisabled() {
-			continue
-		}
 		info, cerr := reconcileCapability(decl, path)
 		if cerr != nil {
 			return nil, cerr
+		}
+		// A @disabled authored capability reconciles like any other (must
+		// stay semantically valid) but compiles to nothing (#2607).
+		if decl.IsDisabled() {
+			continue
 		}
 		out = append(out, info)
 	}
