@@ -31,6 +31,13 @@ func registerFunctionTools(logger *slog.Logger, functions *FunctionRegistry, too
 		if !fn.Enabled || fn.Internal {
 			continue
 		}
+		// Builtins are deliberately excluded: the MCP connector surface is
+		// a curated @mcp opt-in on TOOLS. With the Enabled flag honest
+		// (#2608), 74 builtins would otherwise flood the generated surface
+		// as an accident of the flag flip.
+		if fn.Type == FunctionTypeBuiltin {
+			continue
+		}
 
 		name := strings.TrimSpace(fn.Name)
 		if name == "" {

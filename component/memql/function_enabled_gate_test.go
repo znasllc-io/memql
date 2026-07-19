@@ -64,51 +64,55 @@ func TestExpandFunctionCall_DisabledQueryRejectedNested(t *testing.T) {
 	require.Contains(t, err.Error(), `function "retiredInner" is disabled`)
 }
 
-// Builtins are EXEMPT from the gate until #2608: the converter never sets
-// Enabled, so every builtin registers false regardless of @enabled. Gating
-// them would reject every builtin call (the mcp-conformance lane caught
-// exactly this: describeFunction -> help() -> "function \"help\" is
-// disabled"). When #2608 makes the flag honest, this exemption and test
-// are its to revisit.
-func TestExpandFunctionCall_BuiltinExemptFromEnabledGate(t *testing.T) {
+// #2608 made the builtin Enabled flag honest and removed the #2605 gate
+// exemption: a @disabled builtin now rejects at expansion exactly like a
+// disabled query, and an enabled one reaches the dispatch branch.
+func TestExpandFunctionCall_BuiltinLifecycleGated(t *testing.T) {
 	reg := newFunctionRegistry()
-	// The production builtin shape: Executor set, Expr nil (all 74 real
-	// builtins). The exemption is deliberately narrowed to that shape -- a
-	// builtin-typed function WITH a DSL body does not ride the exemption.
+	require.NoError(t, reg.add(&Function{
+		Name:     "retiredHelper",
+		Type:     FunctionTypeBuiltin,
+		Enabled:  false, // honest @disabled post-#2608
+		Executor: "integration.meta.retired",
+	}))
 	require.NoError(t, reg.add(&Function{
 		Name:     "help",
 		Type:     FunctionTypeBuiltin,
-		Enabled:  false, // the dead-flag reality for all builtins today
+		Enabled:  true,
 		Executor: "integration.meta.help",
 	}))
 
 	plan := &QueryPlan{
+		Root: &FunctionCallExpression{Name: "retiredHelper", Args: map[string]any{}},
+	}
+	err := resolvePlanFunctions(plan, reg, nil)
+	require.Error(t, err, "a @disabled builtin must not expand post-#2608")
+	require.Contains(t, err.Error(), `function "retiredHelper" is disabled`)
+
+	plan = &QueryPlan{
 		Root: &FunctionCallExpression{Name: "help", Args: map[string]any{}},
 	}
-	require.NoError(t, resolvePlanFunctions(plan, reg, nil),
-		"a builtin with the dead-false Enabled flag must keep expanding until #2608")
+	require.NoError(t, resolvePlanFunctions(plan, reg, nil))
 	_, ok := plan.Root.(*BuiltinFunctionExpression)
 	require.True(t, ok, "expected the builtin dispatch branch, got %T", plan.Root)
 }
 
-// The exemption must hold against the REAL boot loader, not only a
-// hand-registered fixture: if LoadUnifiedBuiltins stamped a different Type
-// discriminator than the exemption checks, the gate would silently reject
-// every builtin in production while unit fixtures stayed green -- exactly
-// how the first cut of #2605 shipped green and broke mcp-conformance.
-// Arg-validation errors are tolerated; only the gate's error fails the test,
-// so this pin survives #2608 making the Enabled flag honest -- UNTIL a
-// builtin is legitimately @disabled, at which point this test fails on that
-// builtin by design: that failure is #2608's signal to scope the sweep to
-// enabled builtins, not to silence the pin.
-func TestExpandFunctionCall_RealBuiltinsExpandDespiteDeadFlag(t *testing.T) {
+// Post-#2608 the flag is honest and the sweep is scoped to ENABLED
+// builtins (a legitimately @disabled one is SUPPOSED to reject): every
+// enabled builtin in the real boot registry must clear the gate. This is
+// the pin that catches a Type-discriminator or loader drift that would
+// mass-reject builtins in production while unit fixtures stay green --
+// exactly how the first cut of #2605 shipped green and broke
+// mcp-conformance. Arg-validation errors are tolerated; only the gate's
+// error fails the test.
+func TestExpandFunctionCall_EnabledBuiltinsClearTheGate(t *testing.T) {
 	registry := newFunctionRegistry()
 	if _, err := LoadUnifiedBuiltins(slog.Default(), registry); err != nil {
 		t.Fatalf("LoadUnifiedBuiltins: %v", err)
 	}
 	builtins := 0
 	for name, fn := range registry.Snapshot() {
-		if fn == nil || fn.Type != FunctionTypeBuiltin {
+		if fn == nil || fn.Type != FunctionTypeBuiltin || !fn.Enabled {
 			continue
 		}
 		builtins++

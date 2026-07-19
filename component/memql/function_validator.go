@@ -373,14 +373,11 @@ func (v *functionValidator) expandFunctionCall(call *FunctionCallExpression) (Ex
 		return nil, fmt.Errorf("function %q is a mutation and cannot be used inside query expressions", key)
 	}
 	// #2605: @disabled gates execution on every function kind. Mutations and
-	// logic reject in the engine call paths (engine.go); queries expand here,
-	// so this is their execution gate -- without it a @disabled query is
-	// hidden from discovery/MCP yet still callable directly. Builtins are
-	// exempt: the converter never sets Enabled (all builtins register false
-	// regardless of @enabled -- the dead flag #2608 fixes), so gating them
-	// here would reject every builtin call, e.g. help() under the MCP
-	// describeFunction tool.
-	if !fn.Enabled && (fn.Type != FunctionTypeBuiltin || fn.Expr != nil) {
+	// logic reject in the engine call paths (engine.go); queries and
+	// builtins expand here, so this is their execution gate. The builtin
+	// exemption that shielded the dead Enabled flag is gone: #2608 made the
+	// flag honest, so a disabled builtin rejects like everything else.
+	if !fn.Enabled {
 		return nil, fmt.Errorf("function %q is disabled", key)
 	}
 
