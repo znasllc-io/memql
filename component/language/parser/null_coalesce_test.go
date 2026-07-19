@@ -149,7 +149,109 @@ func TestNullCoalesce_ExpressionArgLockstep(t *testing.T) {
 		t.Fatalf("LHS coalesce: want 2 args, got %d", len(lhs.Args))
 	}
 
-	if bare := parseArg(`args.kind??""`); func() bool { _, ok := bare.(*CoalesceExpr); return !ok }() {
+	bare := parseArg(`args.kind??""`)
+	if _, ok := bare.(*CoalesceExpr); !ok {
 		t.Fatalf("bare arg fold: want CoalesceExpr, got %T", bare)
+	}
+}
+
+// Review finding 2 on #2611: precedence must NOT depend on the operand's
+// token type. parsePrimary folds identifier-led comparisons early, which
+// made `stage ?? def == "active"` parse JS-loose (the comparison swallowed
+// into the coalesce arm) while the literal-fallback form parsed Swift-tight.
+// This is the reviewer's full matrix; every row must bind Swift-tight.
+func TestNullCoalesce_SwiftTightForIdentifierOperands(t *testing.T) {
+	type row struct {
+		src        string
+		wantTop    string // "cmp" or "coalesce" or "eq"
+		coalesceOn string // "left" or "right" of the comparison
+	}
+	rows := []row{
+		{`payload.stage??payload.def=="active"`, "cmp", "left"},
+		{`payload.a==payload.b??payload.c`, "cmp", "right"},
+		{`payload.a=="b"??"c"`, "cmp", "right"},
+		{`payload.n>payload.m??0`, "cmp", "right"},
+	}
+	for _, r := range rows {
+		ast := parseFilterExpr(t, r.src)
+		cmp, ok := ast.(*BinaryComparisonExpr)
+		if !ok {
+			// identifier-led folds may legitimately produce ComparisonExpr
+			// (field-led) when the coalesce is on the VALUE side; accept
+			// either comparison shape but never a top-level coalesce.
+			if _, isCo := ast.(*CoalesceExpr); isCo {
+				t.Errorf("%s: parsed JS-loose (top-level CoalesceExpr swallowed the comparison)", r.src)
+				continue
+			}
+			fc, isField := ast.(*ComparisonExpr)
+			if !isField {
+				t.Errorf("%s: want a comparison at top, got %T", r.src, ast)
+				continue
+			}
+			if r.coalesceOn == "right" {
+				if _, ok := fc.Value.(*CoalesceExpr); !ok {
+					t.Errorf("%s: comparison value: want CoalesceExpr, got %T", r.src, fc.Value)
+				}
+			}
+			continue
+		}
+		side := cmp.Left
+		if r.coalesceOn == "right" {
+			side = cmp.Right
+		}
+		if _, ok := side.(*CoalesceExpr); !ok {
+			t.Errorf("%s: %s of comparison: want CoalesceExpr, got %T", r.src, r.coalesceOn, side)
+		}
+	}
+
+	// Double-sided: a ?? b == c ?? d must compare the two coalesces.
+	ast := parseFilterExpr(t, `payload.a??payload.b==payload.c??payload.d`)
+	cmp, ok := ast.(*BinaryComparisonExpr)
+	if !ok {
+		t.Fatalf("double-sided: want BinaryComparisonExpr, got %T", ast)
+	}
+	if _, ok := cmp.Left.(*CoalesceExpr); !ok {
+		t.Errorf("double-sided left: want CoalesceExpr, got %T", cmp.Left)
+	}
+	if _, ok := cmp.Right.(*CoalesceExpr); !ok {
+		t.Errorf("double-sided right: want CoalesceExpr, got %T", cmp.Right)
+	}
+}
+
+// The DoD's `x == a ?? b` shape in the cond-args position (finding 3).
+func TestNullCoalesce_ExpressionArgIdentifierRHS(t *testing.T) {
+	tokens, err := NewLexer(`args.x==args.a??args.b`).Tokenize()
+	if err != nil {
+		t.Fatalf("tokenize: %v", err)
+	}
+	expr, err := NewParser(tokens).parseExpressionArg()
+	if err != nil {
+		t.Fatalf("parseExpressionArg: %v", err)
+	}
+	eq, ok := expr.(*EqExpr)
+	if !ok {
+		t.Fatalf("want EqExpr at top (Swift-tight), got %T", expr)
+	}
+	if _, ok := eq.Right.(*CoalesceExpr); !ok {
+		t.Errorf("EqExpr right: want CoalesceExpr, got %T", eq.Right)
+	}
+}
+
+// Review finding 1 on #2611: the logic assignment RHS is a THIRD grammar
+// position (the step parser's speculative arithmetic route). The story's
+// own headline example must parse: `st := args.stage ?? ""`.
+func TestNullCoalesce_LogicAssignmentRHS(t *testing.T) {
+	src := `
+func (Logic) probeAssign(_ any) {
+  st := args.stage ?? ""
+  return st
+}
+`
+	file, err := ParseFile(src)
+	if err != nil {
+		t.Fatalf("the headline assignment `st := args.stage ?? \"\"` must parse: %v", err)
+	}
+	if file == nil || len(file.Definitions) != 1 {
+		t.Fatalf("want one parsed definition")
 	}
 }

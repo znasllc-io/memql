@@ -1717,9 +1717,9 @@ createdAt>"2025-01-01T00:00:00Z"
 - `||` – OR
 - `!` – NOT
 - `()` – Grouping
-- Go precedence: `!` > comparisons > `&&` > `||`
+- Go precedence: `!` > arithmetic > `??` > comparisons > `&&` > `||`
 
-(The legacy `;`-AND / `,`-OR separators, `has`, `?.`, and `??` are retired and rejected.)
+(The legacy `;`-AND / `,`-OR separators, `has`, and `?.` are retired and rejected; `??` is live since #2611.)
 
 ### Defaults / Fallbacks
 

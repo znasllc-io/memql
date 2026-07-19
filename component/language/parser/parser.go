@@ -56,6 +56,13 @@ type Parser struct {
 	// expression (e.g. `reduce(0, (acc, n) => ...)` -- the `0` arg must
 	// stop at the comma). `||` still parses as OR.
 	suppressCommaOr bool
+
+	// suppressComparisonFold disables parseIdentifierExpression's early
+	// identifier-led comparison fold while a `??` chain's continuation
+	// operands parse (#2611): without it, `stage ?? def == "active"` would
+	// swallow the comparison into the coalesce arm (the JS-loose shape) --
+	// precedence must not depend on the operand's token type.
+	suppressComparisonFold bool
 }
 
 // recordDeferredError stashes a parse error that surfaces from inside
@@ -1535,7 +1542,12 @@ func (p *Parser) parseGoStyleStep() (*StepDef, error) {
 	bareCallRHS := p.check(TokenIdentifier) && p.peekAhead(1).Type == TokenParenOpen
 	kindPrefixedCallRHS := p.check(TokenIdentifier) && isInvocationKindKeyword(p.current.Literal) &&
 		p.peekAhead(1).Type == TokenIdentifier && p.peekAhead(2).Type == TokenParenOpen
-	if bareCallRHS || kindPrefixedCallRHS {
+	// A `??` chain RHS (#2611 review finding: the assignment position is a
+	// THIRD grammar surface) rides the same branch: the cascade folds the
+	// chain to a CoalesceExpr and expressionToFunctionCall converts it to
+	// the coalesce call step -- byte-identical to the coalesce() spelling.
+	coalesceRHS := p.check(TokenIdentifier) && p.peekAhead(1).Type == TokenQuestionQuestion
+	if bareCallRHS || kindPrefixedCallRHS || coalesceRHS {
 		rhsStart := p.current.Pos
 		expr, err := p.parseExpression()
 		if err != nil {
@@ -1613,6 +1625,18 @@ func (p *Parser) parseGoStyleStep() (*StepDef, error) {
 		if err == nil {
 			if arith, ok := expr.(*ArithmeticExpr); ok {
 				return arithmeticStepDef(names[0], retryCount, arith), nil
+			}
+			// A paren- or number-led `??` chain (#2611): converts to the
+			// coalesce call step, same as the identifier-led route above.
+			if co, ok := expr.(*CoalesceExpr); ok {
+				if call, okc := expressionToFunctionCall(co); okc {
+					return &StepDef{
+						ID:         names[0],
+						Type:       StepTypeFunction,
+						RetryCount: retryCount,
+						Config:     &FunctionStepConfig{Name: call.Name, Args: call.Args},
+					}, nil
+				}
 			}
 		}
 		// Not arithmetic (or a parse error): rewind fully so the step-type
@@ -4676,7 +4700,13 @@ func (p *Parser) parseNullCoalesce() (ExpressionNode, error) {
 	args := []ExpressionNode{left}
 	for p.check(TokenQuestionQuestion) {
 		p.advance()
+		// Continuation operands parse with the identifier-led comparison
+		// fold suppressed: `stage ?? def == "active"` must leave the
+		// comparison for the level above, not swallow it into the arm.
+		prevFold := p.suppressComparisonFold
+		p.suppressComparisonFold = true
 		next, err := p.parseAdditive()
+		p.suppressComparisonFold = prevFold
 		if err != nil {
 			return nil, err
 		}
@@ -5337,7 +5367,8 @@ func (p *Parser) parseIdentifierExpression() (ExpressionNode, error) {
 	// is left for the additive/multiplicative levels above parsePrimary, so a
 	// bare reference like `m.a` followed by `+` falls through to the
 	// SpecReferenceExpr return below.
-	if p.check(TokenOperator) && isComparisonOperatorLiteral(p.current.Literal) {
+	if !p.suppressComparisonFold && p.check(TokenOperator) && isComparisonOperatorLiteral(p.current.Literal) {
+		savePos, saveCur := p.pos, p.current
 		op := ComparisonOperator(p.current.Literal)
 		p.advance()
 
@@ -5348,26 +5379,35 @@ func (p *Parser) parseIdentifierExpression() (ExpressionNode, error) {
 			return nil, err
 		}
 
-		// Handle == nil/null and != nil/null → OpMissing/OpNotMissing
-		if op == OpEq || op == OpNe {
-			if isNullComparisonLiteral(value) {
-				if op == OpEq {
-					op = OpMissing
-				} else {
-					op = OpNotMissing
+		// Swift-tight `??` (#2611): a pending coalesce binds tighter than
+		// the comparison, so `a == b ?? c` must compare a against
+		// COALESCE(b, c). Rewind the whole fold and fall through to the
+		// bare-reference tail; the cascade re-parses with the correct
+		// precedence.
+		if p.check(TokenQuestionQuestion) {
+			p.pos, p.current = savePos, saveCur
+		} else {
+			// Handle == nil/null and != nil/null → OpMissing/OpNotMissing
+			if op == OpEq || op == OpNe {
+				if isNullComparisonLiteral(value) {
+					if op == OpEq {
+						op = OpMissing
+					} else {
+						op = OpNotMissing
+					}
+					value = nil
 				}
-				value = nil
 			}
-		}
 
-		return &ComparisonExpr{
-			Field: FieldReference{
-				Raw:   name,
-				Parts: strings.Split(name, "."),
-			},
-			Operator: op,
-			Value:    value,
-		}, nil
+			return &ComparisonExpr{
+				Field: FieldReference{
+					Raw:   name,
+					Parts: strings.Split(name, "."),
+				},
+				Operator: op,
+				Value:    value,
+			}, nil
+		}
 	}
 
 	// Check for keyword-based operators: in, has, not in
@@ -7156,6 +7196,10 @@ func (p *Parser) parseExpressionArg() (ExpressionNode, error) {
 // coalesce level is mirrored here in lockstep -- without it `??` would work
 // everywhere except cond args, worse than its absence. The fold produces
 // exactly the AST the coalesce(a, b) spelling produces in this position.
+// Operands are parsePrimary, DELIBERATELY narrower than the cascade's
+// parseAdditive: the #2407 arg grammar admits one comparison and no
+// arithmetic, and the `??` fold inherits that restriction rather than
+// widening the arg surface.
 func (p *Parser) parseCoalesceArgOperand() (ExpressionNode, error) {
 	left, err := p.parsePrimary()
 	if err != nil {
@@ -7167,7 +7211,10 @@ func (p *Parser) parseCoalesceArgOperand() (ExpressionNode, error) {
 	args := []ExpressionNode{left}
 	for p.check(TokenQuestionQuestion) {
 		p.advance()
+		prevFold := p.suppressComparisonFold
+		p.suppressComparisonFold = true
 		next, nerr := p.parsePrimary()
+		p.suppressComparisonFold = prevFold
 		if nerr != nil {
 			return nil, nerr
 		}
