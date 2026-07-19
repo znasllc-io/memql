@@ -559,7 +559,7 @@ automation bootstrapUser() {
 | | `@schedule` | `cron="..."` | Cron-based schedule |
 | | `@async` | none | Runs asynchronously when triggered |
 
-**Note:** Automations are **disabled by default**. You must explicitly add `@enabled` to activate them.
+**Note:** Automations are **enabled by default** (#2604, the uniform lifecycle ruling); `@enabled` is an accepted no-op and `@disabled` is the off-switch.
 
 See also: `/docs/attribute-matrix.md` for the full attribute reference across all function types.
 

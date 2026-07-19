@@ -25,7 +25,7 @@ construct-specific (see the end of this document) or rejected.
 | Attribute | Query | Mutation | Automation | Description |
 |-----------|:-----:|:--------:|:----------:|-------------|
 | **Lifecycle** |
-| `@enabled` | Yes | Yes | Yes | Activates the definition (required to use it) |
+| `@enabled` | Yes | Yes | Yes | Accepted no-op; definitions are enabled by default (#2609) |
 | `@disabled` | Yes | Yes | Yes | Explicitly disables the definition |
 | `@deprecated` | Yes | Yes | Yes | Marks as deprecated with optional message |
 | `@version("v1")` | Yes | Yes | Yes | Version tag for the definition |

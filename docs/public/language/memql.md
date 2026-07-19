@@ -567,7 +567,7 @@ The legacy `func (Provider) name { ... }` form is retired; the parser rejects it
 
 **Provider types** (registered in `component/memql/ai_providers.go`) include `OpenAI` / `OpenAIChat` (chat completions), `OpenAIStream` (streaming chat), `OpenAITTS` (text-to-speech), and `Anthropic` (Claude chat / vision).
 
-**Lifecycle annotations (`@enabled` / `@disabled`).** Providers accept the same lifecycle flags as functions / builtins / prompts / specs / seeds. `@enabled` is the explicit-on default (a no-op). `@disabled` skips the provider at load — it is **not registered and no auth resolution is attempted** — while staying in the tree for a future re-enable. `@disabled` on a `@base` **propagates**: every child that `@extends` it is skipped too. Dependents degrade gracefully — a policy whose `@primary` is disabled routes via its `@fallback`; a prompt whose `@defaultProvider` is disabled falls back to the default.
+**Lifecycle annotations (`@enabled` / `@disabled`).** Providers accept the same lifecycle flags as every other construct kind (the uniform ruling, #2604-#2608). `@enabled` is the explicit-on default (a no-op). `@disabled` skips the provider at load — it is **not registered and no auth resolution is attempted** — while staying in the tree for a future re-enable. `@disabled` on a `@base` **propagates**: every child that `@extends` it is skipped too. Dependents degrade gracefully — a policy whose `@primary` is disabled routes via its `@fallback`; a prompt whose `@defaultProvider` is disabled falls back to the default.
 
 > **Semantics of `@disabled`** (shared across every construct that takes it): the construct is **not loaded/active at runtime right now**. It does NOT mean deprecated, abandoned, or exempt from maintenance / refactors / conformance — it is a reversible on/off switch. ("Deprecated / abandoned" is a separate axis carried by `@deprecated`.)
 
@@ -1278,16 +1278,17 @@ Example response for an invalid payload (missing required field):
 
 ### `functions()`
 
-Returns a minimal list of all registered user-defined functions. Designed for agent discovery with minimal payload size:
+Returns a minimal list of all registered functions -- queries, mutations, logic, and builtins alike, with `kind` as the discriminator (builtins joined the listing when their lifecycle flag became honest, #2608). Designed for agent discovery with minimal payload size:
 
 ```json
 {
   "payload": {
     "functions": [
       {"name": "queryActiveSpaces", "description": "Returns active spaces", "kind": "query"},
-      {"name": "mutationCreateSpace", "description": "Creates a space", "kind": "mutation"}
+      {"name": "mutationCreateSpace", "description": "Creates a space", "kind": "mutation"},
+      {"name": "similarTo", "description": "Semantic similarity search", "kind": "builtin"}
     ],
-    "count": 2
+    "count": 3
   }
 }
 ```
