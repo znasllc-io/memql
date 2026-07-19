@@ -521,6 +521,9 @@ func (e *MemQLEngine) PromoteAuthoredConstruct(ctx context.Context, c *AuthoredC
 			return fmt.Errorf("authoring: promote %s %q: spec registry is not initialized", c.Kind, c.Name)
 		}
 		key := "spec:" + spec.Name
+		if e.specs.IsDisabled(spec.Name) {
+			return fmt.Errorf("authoring: promote %s %q: a @disabled core construct owns that name (re-enable or rename; promotion cannot claim a retired core name)", c.Kind, c.Name)
+		}
 		if _, ok := e.specs.Lookup(spec.Name); ok {
 			if _, promoted := e.promotedAuthored.Load(key); !promoted {
 				return fmt.Errorf("authoring: promote %s %q: a core construct already owns that name (promotion cannot redefine core)", c.Kind, c.Name)

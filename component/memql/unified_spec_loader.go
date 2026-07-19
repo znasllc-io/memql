@@ -41,7 +41,17 @@ func LoadUnifiedSpecs(logger *slog.Logger, registry *SpecRegistry, report ...*Lo
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", origin, err)
 		}
-		return specDeclToSpec(decl, origin)
+		spec, err := specDeclToSpec(decl, origin)
+		if err != nil {
+			return nil, err
+		}
+		// nil, nil = @disabled (the intentional-skip contract). Reserve
+		// the name: promotion guards refuse it and diagnostics say
+		// "disabled" instead of "not found" (#2607).
+		if spec == nil {
+			registry.MarkDisabled(decl.Name)
+		}
+		return spec, nil
 	}
 
 	rep := firstReport(report)

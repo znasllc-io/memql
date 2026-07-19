@@ -103,6 +103,15 @@ func loadCapabilityNamesFromFS(tree fs.FS) (map[string]bool, error) {
 			if perr != nil {
 				return fmt.Errorf("%s: capability: %w", p, perr)
 			}
+			// A @disabled capability is invisible to the declared set
+			// (#2607), so authored-bundle `use capabilities....` imports
+			// stop resolving it. The actions catalog applies the same
+			// filter (ast.CapabilityDecl.IsDisabled) and the action loader
+			// rejects references, so validation and dispatch stay in sync.
+			// Coexists with the _disabled/ directory convention.
+			if decl.IsDisabled() {
+				continue
+			}
 			out[decl.Name] = true
 		}
 		return nil

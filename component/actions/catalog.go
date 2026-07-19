@@ -65,6 +65,18 @@ type CapabilityInfo struct {
 // name, reconciled against the Go vocabulary at load.
 type CapabilityCatalog struct {
 	byName map[string]*CapabilityInfo
+	// disabled records @disabled capability names (#2607): absent from
+	// byName so Lookup misses, but distinguishable from never-declared so
+	// the action loader can reject references loudly.
+	disabled map[string]bool
+}
+
+// Disabled reports whether the named capability was declared @disabled.
+func (c *CapabilityCatalog) Disabled(name string) bool {
+	if c == nil {
+		return false
+	}
+	return c.disabled[name]
 }
 
 // Lookup returns the declared capability info for a full dotted name.
@@ -208,7 +220,7 @@ func reconcileCapability(decl *ast.CapabilityDecl, path string) (*CapabilityInfo
 // (_reference/, _disabled/) are skipped. A reconciliation failure (unknown
 // name, sideEffect mismatch) or a duplicate declaration is a loud load error.
 func LoadCatalogFromFS(tree fs.FS) (*CapabilityCatalog, error) {
-	cat := &CapabilityCatalog{byName: map[string]*CapabilityInfo{}}
+	cat := &CapabilityCatalog{byName: map[string]*CapabilityInfo{}, disabled: map[string]bool{}}
 	if tree == nil {
 		return cat, nil
 	}
@@ -233,6 +245,13 @@ func LoadCatalogFromFS(tree fs.FS) (*CapabilityCatalog, error) {
 			decl, perr := languageParser.ParseCapabilityDecl(slice)
 			if perr != nil {
 				return fmt.Errorf("%s: capability: %w", p, perr)
+			}
+			// A @disabled capability is recorded but not cataloged (#2607):
+			// Lookup misses, Disabled reports true, and the action loader
+			// rejects references -- disabled means undispatabile, loudly.
+			if decl.IsDisabled() {
+				cat.disabled[decl.Name] = true
+				continue
 			}
 			info, cerr := reconcileCapability(decl, p)
 			if cerr != nil {
@@ -269,6 +288,10 @@ func LoadCapabilitySource(content, path string) ([]*CapabilityInfo, error) {
 		decl, err := languageParser.ParseCapabilityDecl(slice)
 		if err != nil {
 			return nil, fmt.Errorf("%s: capability: %w", path, err)
+		}
+		// A @disabled authored capability compiles to nothing (#2607).
+		if decl.IsDisabled() {
+			continue
 		}
 		info, cerr := reconcileCapability(decl, path)
 		if cerr != nil {

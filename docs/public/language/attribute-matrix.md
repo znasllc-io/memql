@@ -78,9 +78,15 @@ discovery: a `@disabled` query, mutation, or logic is hidden from
 `functions()` and the MCP tool listing (`help()` still describes it,
 reporting `"enabled": false`) and rejected with
 `function "name" is disabled` if called directly (#2605). Tools,
-seeds, prompts (#2606), and providers are skipped at load entirely: a
-`@disabled` tool never reaches the MCP surface, a `@disabled` seed is
-never materialised, a `@disabled` prompt never registers.
+seeds, prompts (#2606), providers, specs, and traits (#2607) are
+skipped at load entirely: a `@disabled` tool never reaches the MCP
+surface, a `@disabled` seed is never materialised, a `@disabled`
+prompt never registers, and a `@disabled` spec or trait is validated
+but never binds (its name stays reserved against authored promotion).
+A `@disabled` capability (#2607) drops out of both the authored-import
+crossref and the actions capability catalog: `use capabilities....`
+imports stop resolving it and an action referencing it is rejected at
+load with `capability "name" is @disabled`.
 
 ```memql
 @disabled

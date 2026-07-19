@@ -130,6 +130,9 @@ func DeclToAction(d *ast.ActionDecl, origin string, capImports map[string]string
 	if err := DefaultCatalogError(); err != nil {
 		return nil, fmt.Errorf("action %q (%s): capability catalog failed to load/reconcile: %w", d.Name, origin, err)
 	}
+	if DefaultCatalog().Disabled(a.Capability) {
+		return nil, fmt.Errorf("action %q (%s): capability %q is @disabled -- enable the capability or retire the action", d.Name, origin, a.Capability)
+	}
 	if info, ok := DefaultCatalog().Lookup(a.Capability); ok {
 		if err := validateCapabilityArgs(a, info); err != nil {
 			return nil, fmt.Errorf("%s: %w", origin, err)
