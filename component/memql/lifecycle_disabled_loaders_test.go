@@ -42,8 +42,12 @@ tool liveProbeTool {
 	t.Cleanup(func() { memqldsl.UnregisterTree(domain) })
 
 	registry := newToolRegistry()
-	if _, err := LoadUnifiedTools(discardLogger(), registry); err != nil {
+	rep := newLoadReport()
+	if _, err := LoadUnifiedTools(discardLogger(), registry, rep); err != nil {
 		t.Fatalf("LoadUnifiedTools: %v", err)
+	}
+	if rep.HasProblems() {
+		t.Errorf("@disabled tool must not produce a LoadReport skip (strict boot); skips=%+v", rep.Skipped)
 	}
 	if registry.Has("retiredProbeTool") {
 		t.Error("@disabled tool registered; @disabled must skip tool registration")
@@ -121,8 +125,15 @@ prompt liveProbePrompt {
 	t.Cleanup(func() { memqldsl.UnregisterTree(domain) })
 
 	registry := newPromptRegistry()
-	if _, err := LoadUnifiedPrompts(discardLogger(), registry, template.New("partials")); err != nil {
+	rep := newLoadReport()
+	if _, err := LoadUnifiedPrompts(discardLogger(), registry, template.New("partials"), rep); err != nil {
 		t.Fatalf("LoadUnifiedPrompts: %v", err)
+	}
+	// The discriminator for the gate's ordering: with retired.tmpl absent, a
+	// gate placed AFTER template resolution AddSkips (phase=template) and
+	// trips strict boot; the shipped gate placement yields zero skips.
+	if rep.HasProblems() {
+		t.Errorf("@disabled prompt must not produce a LoadReport skip (strict boot); skips=%+v", rep.Skipped)
 	}
 	if _, ok := registry.Get("retiredProbePrompt"); ok {
 		t.Error("@disabled prompt registered; @disabled must skip prompt registration")
@@ -150,8 +161,12 @@ seed role liveProbeRole {
 	t.Cleanup(func() { memqldsl.UnregisterTree(domain) })
 
 	registry := NewSeedRegistry()
-	if _, err := LoadUnifiedSeeds(discardLogger(), registry); err != nil {
+	rep := newLoadReport()
+	if _, err := LoadUnifiedSeeds(discardLogger(), registry, rep); err != nil {
 		t.Fatalf("LoadUnifiedSeeds: %v", err)
+	}
+	if rep.HasProblems() {
+		t.Errorf("@disabled seed must not produce a LoadReport skip (strict boot); skips=%+v", rep.Skipped)
 	}
 	if _, ok := registry.Get("retiredProbeRole"); ok {
 		t.Error("@disabled seed registered; @disabled must skip seed registration")
