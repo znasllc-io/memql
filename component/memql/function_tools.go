@@ -38,7 +38,10 @@ func registerFunctionTools(logger *slog.Logger, functions *FunctionRegistry, too
 		}
 
 		// If a tool already exists with this name, do not override it.
-		if tools.Has(name) {
+		// A name marked @disabled at load is treated as occupied: generating
+		// a tool from the backing function would resurrect the disabled tool
+		// without its governance attributes (#2606).
+		if tools.Has(name) || tools.IsDisabled(name) {
 			continue
 		}
 

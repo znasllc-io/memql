@@ -77,7 +77,10 @@ be re-enabled at any time. ("Deprecated / abandoned" is the separate
 discovery: a `@disabled` query, mutation, or logic is hidden from
 `functions()` and the MCP tool listing (`help()` still describes it,
 reporting `"enabled": false`) and rejected with
-`function "name" is disabled` if called directly (#2605).
+`function "name" is disabled` if called directly (#2605). Tools,
+seeds, prompts (#2606), and providers are skipped at load entirely: a
+`@disabled` tool never reaches the MCP surface, a `@disabled` seed is
+never materialised, a `@disabled` prompt never registers.
 
 ```memql
 @disabled
@@ -383,7 +386,7 @@ sets; unknown annotations are rejected at load time:
   `@minLength`, `@maxLength`, `@minimum`, `@maximum`, `@immutable`,
   `@secret`, `@variant`. See `dsl/_reference/_concept.memql`.
 - **Tools**: `@allowedRoles`, `@clientExecution`, `@description`,
-  `@destructive`, `@enabled`, `@executionTime`, `@handler`,
+  `@destructive`, `@disabled`, `@enabled`, `@executionTime`, `@handler`,
   `@rateLimit(maxCalls=N, periodSeconds=N)`, `@requiresConfirmation`,
   `@scopes` (`component/language/parser/tool_decl.go`).
 - **Prompts**: `@description`, `@defaultProvider`, `@templateFile`,

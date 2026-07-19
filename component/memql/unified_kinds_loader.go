@@ -301,6 +301,19 @@ func LoadUnifiedTools(logger *slog.Logger, registry *ToolRegistry, report ...*Lo
 			if err != nil {
 				return nil, fmt.Errorf("%s: %w", origin, err)
 			}
+			// A @disabled tool is skipped entirely (not registered), the
+			// same contract providers established (#2606): no MCP surface,
+			// no calltool resolution, re-enable by dropping the annotation.
+			// The name is RESERVED so registerFunctionTools cannot
+			// regenerate an ungoverned variant from the backing function.
+			if decl.Disabled {
+				registry.MarkDisabled(decl.Name)
+				if logger != nil {
+					logger.Debug("memql.unifiedToolLoader: skipping @disabled tool",
+						"tool", decl.Name)
+				}
+				return nil, nil
+			}
 			return toolDeclToTool(decl, origin)
 		},
 		registry.Upsert,
@@ -389,6 +402,17 @@ func LoadUnifiedPrompts(logger *slog.Logger, registry *PromptRegistry, partials 
 						"file", raw.Path, "prompt", slice.Name, "error", err)
 				}
 				rep.AddSkip(baseloader.Skip{Component: "memql.unifiedPromptLoader", Keyword: "prompt", Name: slice.Name, File: raw.Path, Phase: "convert", Err: err.Error()})
+				continue
+			}
+			// A @disabled prompt is skipped entirely (not registered, no
+			// template resolution), the provider-lifecycle contract (#2606).
+			// Deliberately NOT a LoadReport skip: disabling is intentional,
+			// not a load failure, so it must not trip strict boot.
+			if decl.disabled {
+				if logger != nil {
+					logger.Debug("memql.unifiedPromptLoader: skipping @disabled prompt",
+						"prompt", decl.name)
+				}
 				continue
 			}
 			source, err := resolveUnifiedPromptTemplate(decl, raw.Path, tree)
@@ -582,6 +606,16 @@ func LoadUnifiedSeeds(logger *slog.Logger, registry *SeedRegistry, report ...*Lo
 						"file", raw.Path, "seed", slice.Name, "error", err)
 				}
 				rep.AddSkip(baseloader.Skip{Component: "memql.unifiedSeedLoader", Keyword: "seed", Name: slice.Name, File: raw.Path, Phase: "parse", Err: err.Error()})
+				continue
+			}
+			// A @disabled seed is skipped entirely (never materialised),
+			// the provider-lifecycle contract (#2606). Not a LoadReport
+			// skip: disabling is intentional, not a load failure.
+			if astDecl.Disabled {
+				if logger != nil {
+					logger.Debug("memql.unifiedSeedLoader: skipping @disabled seed",
+						"seed", slice.Name)
+				}
 				continue
 			}
 			decl, err := seedDeclASTToInternal(astDecl)

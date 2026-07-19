@@ -31,6 +31,7 @@ type promptDecl struct {
 	defaultProvider string
 	templateSource  string // inline template from @template("""...""")
 	templateFile    string // external template file from @templateFile("...")
+	disabled        bool   // @disabled -- the loader skips registration (#2606)
 
 	// Fields populates the prompt's input schema.
 	fields []toolField
