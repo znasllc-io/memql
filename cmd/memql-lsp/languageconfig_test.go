@@ -14,9 +14,10 @@ import (
 const checkedInLanguageConfig = "../../editors/vscode/language-configuration.json"
 
 type onEnterRule struct {
-	BeforeText string `json:"beforeText"`
-	AfterText  string `json:"afterText"`
-	Action     struct {
+	BeforeText       string `json:"beforeText"`
+	AfterText        string `json:"afterText"`
+	PreviousLineText string `json:"previousLineText"`
+	Action           struct {
 		Indent string `json:"indent"`
 	} `json:"action"`
 }
@@ -42,6 +43,10 @@ func loadLanguageConfig(t *testing.T) map[string]json.RawMessage {
 // mustCompile guards that every pattern stays within RE2 syntax: VS Code
 // accepts a wider dialect (lookaheads), but keeping the patterns RE2-safe
 // keeps them testable here and portable to other editor hosts.
+//
+// Known limit shared by every per-line regex approach: lines INSIDE a
+// /* ... */ block comment cannot be excluded declaratively (the corpus uses
+// // comments exclusively, so this is theoretical today).
 func mustCompile(t *testing.T, name, pattern string) *regexp.Regexp {
 	t.Helper()
 	re, err := regexp.Compile(pattern)
@@ -67,13 +72,16 @@ func TestLanguageConfigKeepsBaseKeys(t *testing.T) {
 // afterText, when present, also matches) wins. Pinning the winner rather than
 // the rules' relative order catches an unreachable rule - e.g. a catch-all
 // prepended above the pair - which order checks alone are blind to.
-func winningEnterAction(t *testing.T, rules []onEnterRule, before, after string) string {
+func winningEnterAction(t *testing.T, rules []onEnterRule, previous, before, after string) string {
 	t.Helper()
 	for _, r := range rules {
 		if !mustCompile(t, "beforeText", r.BeforeText).MatchString(before) {
 			continue
 		}
 		if r.AfterText != "" && !mustCompile(t, "afterText", r.AfterText).MatchString(after) {
+			continue
+		}
+		if r.PreviousLineText != "" && !mustCompile(t, "previousLineText", r.PreviousLineText).MatchString(previous) {
 			continue
 		}
 		return r.Action.Indent
@@ -133,14 +141,18 @@ func TestLanguageConfigOnEnterRules(t *testing.T) {
 		{"args {", "", "indent"},
 		{"args { // trailing comment", "", "indent"},
 		{"args {", "name: String", "indent"},
+		// Slash-bearing openers: the comment guard must anchor on the first
+		// non-space character, not ban '/' anywhere before the brace.
+		{"note string @description(\"n/a\") {", "", "indent"},
+		{"if total / count > 5 {", "", "indent"},
 	} {
-		if got := winningEnterAction(t, rules, tc.before, tc.after); got != tc.want {
+		if got := winningEnterAction(t, rules, "", tc.before, tc.after); got != tc.want {
 			t.Errorf("winning action for (%q, %q) = %q, want %q", tc.before, tc.after, got, tc.want)
 		}
 	}
 	// No rule may fire at all on these: balanced braces and commented-out code.
 	for _, before := range []string{"args {}", "// args {", "  // automation x {"} {
-		if got := winningEnterAction(t, rules, before, ""); got != "" {
+		if got := winningEnterAction(t, rules, "", before, ""); got != "" {
 			t.Errorf("winning action for (%q, \"\") = %q, want no rule to fire", before, got)
 		}
 	}
@@ -186,7 +198,7 @@ func TestLanguageConfigIndentationRules(t *testing.T) {
 	inc := mustCompile(t, "increaseIndentPattern", rules.IncreaseIndentPattern)
 	dec := mustCompile(t, "decreaseIndentPattern", rules.DecreaseIndentPattern)
 
-	for _, line := range []string{"args {", "  filter {", "automation dayRollup {", "args { // trailing comment"} {
+	for _, line := range []string{"args {", "  filter {", "automation dayRollup {", "args { // trailing comment", "note string @description(\"n/a\") {", "if total / count > 5 {"} {
 		if !inc.MatchString(line) {
 			t.Errorf("increaseIndentPattern does not match %q", line)
 		}
@@ -201,7 +213,11 @@ func TestLanguageConfigIndentationRules(t *testing.T) {
 			t.Errorf("decreaseIndentPattern does not match %q", line)
 		}
 	}
-	if dec.MatchString("insert {") {
-		t.Error("decreaseIndentPattern matches \"insert {\"")
+	// The anchor matters: an unanchored pattern would outdent any line merely
+	// CONTAINING a '}' (balanced object literals, closers mid-line).
+	for _, line := range []string{"insert {", "x: { a: 1 }", "label: \"}\""} {
+		if dec.MatchString(line) {
+			t.Errorf("decreaseIndentPattern matches %q, which does not close a block", line)
+		}
 	}
 }
