@@ -93,17 +93,20 @@ func buildConceptIndex(roots []string) conceptIndex {
 
 // assembleConceptIdFromPreamble reads the @version + @namespace annotations
 // from the attribute block immediately preceding a concept header and returns
-// the canonical id `v<major>:<namespace>:<name>`. Returns "" when either
-// attribute is absent (mirrors AssembleConceptIdFromDecl's "" contract for an
-// unmigrated concept).
+// the canonical id `v<major>:<namespace>:<name>`. Absent @version defaults to
+// major 1 -- mirroring AssembleConceptIdFromDecl's #2613 default; the "" for
+// an absent @namespace mirrors its transitional-skip contract.
 func assembleConceptIdFromPreamble(src string, headerStart int, name string) string {
 	preamble := attrPreamble(src, headerStart)
 	vm := versionAttrRe.FindStringSubmatch(preamble)
 	nm := namespaceAttrRe.FindStringSubmatch(preamble)
-	if vm == nil || nm == nil {
+	if nm == nil {
 		return ""
 	}
-	major := majorVersion(vm[1])
+	major := 1
+	if vm != nil {
+		major = majorVersion(vm[1])
+	}
 	namespace := strings.TrimSpace(nm[1])
 	if major < 0 || namespace == "" || name == "" {
 		return ""

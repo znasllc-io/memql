@@ -17,14 +17,23 @@ import (
 // for genuine non-defaults; only the redundant literal is gated.
 //
 // _reference/ is structurally outside this gate (underscore walker skip +
-// embed omission), matching the no_redundant_enabled gate.
+// embed omission), matching the no_redundant_enabled gate. Block comments
+// are blanked before matching so a prose mention inside /* */ never fails
+// the gate. Scope note: the loader default exists for CONCEPTS and SEEDS
+// (#2613); no other construct kind carries the literal today, and no
+// function-construct @version has a behavioral reader -- if one ever
+// gains a default of its own or a reader, revisit this tree-wide scan.
 func TestNoRedundantVersion(t *testing.T) {
 	tree := Tree()
 	paths, err := dslfs.WalkMemqlFiles(tree)
 	if err != nil {
 		t.Fatalf("WalkMemqlFiles: %v", err)
 	}
-	redundantRe := regexp.MustCompile(`(?m)^[ \t]*@version\("1\.0\.0"\)[ \t]*$`)
+	redundantRe := regexp.MustCompile(`^[ \t]*@version\([ \t]*"1\.0\.0"[ \t]*\)[ \t]*\r?$`)
+	// blockCommentRe blanks /* */ spans (newlines preserved so reported
+	// line numbers stay stable) -- prose inside a block comment is not a
+	// redundant annotation.
+	blockCommentRe := regexp.MustCompile(`(?s)/\*.*?\*/`)
 
 	var hits []string
 	for _, p := range paths {
@@ -37,7 +46,16 @@ func TestNoRedundantVersion(t *testing.T) {
 		if readErr != nil {
 			t.Fatalf("read %s: %v", p, readErr)
 		}
-		for i, line := range strings.Split(string(raw), "\n") {
+		src := blockCommentRe.ReplaceAllStringFunc(string(raw), func(m string) string {
+			out := []byte(m)
+			for j := range out {
+				if out[j] != '\n' {
+					out[j] = ' '
+				}
+			}
+			return string(out)
+		})
+		for i, line := range strings.Split(src, "\n") {
 			if redundantRe.MatchString(stripLineComment(line)) {
 				hits = append(hits, fmt.Sprintf("%s:%d", p, i+1))
 			}

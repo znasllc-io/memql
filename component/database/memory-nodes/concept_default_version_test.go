@@ -65,4 +65,23 @@ concept probeParticipant {
 	if err != nil || id3 != "" {
 		t.Errorf("no @namespace: want the transitional empty id, got %q err=%v", id3, err)
 	}
+
+	// The metadata sink defaults too. Concept.Version stores the
+	// "v<major>" prefix form (concept_parser.go), so the default must
+	// land as "v1" -- byte-identical to what an explicit
+	// @version("1.0.0") produced before the #2613 strip.
+	built, err := BuildConceptFromDecl(absent, "v1:cognition:probeParticipant")
+	if err != nil {
+		t.Fatalf("BuildConceptFromDecl without @version: %v", err)
+	}
+	if built.Version != "v1" {
+		t.Errorf("built concept version = %q, want the v1 default", built.Version)
+	}
+	builtExplicit, err := BuildConceptFromDecl(explicit, "v2:cognition:probeParticipant")
+	if err != nil {
+		t.Fatalf("BuildConceptFromDecl with explicit @version: %v", err)
+	}
+	if builtExplicit.Version != "v2" {
+		t.Errorf("built concept version = %q, want v2 (prefix form of the explicit 2.5.7)", builtExplicit.Version)
+	}
 }

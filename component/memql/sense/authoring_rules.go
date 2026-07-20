@@ -320,10 +320,10 @@ func redundantVersionRule(source string) []Diagnostic {
 	for lineIdx, line := range lines {
 		// The RAW line, deliberately: stripStringsAndComments blanks the
 		// annotation's argument, destroying the "1.0.0"-vs-non-default
-		// distinction this rule exists to make. The line-anchored pattern
-		// is comment-safe by construction (only whitespace may precede
-		// the @), leaving the same latent multiline-string exposure the
-		// sibling rules accept.
+		// distinction this rule exists to make. Line-anchoring makes a
+		// `// @version("1.0.0")` prose mention safe; a mention inside a
+		// /* */ block or a multiline string still hints -- the same
+		// latent exposure the sibling rules accept.
 		for _, m := range versionDefaultRE.FindAllStringSubmatchIndex(line, -1) {
 			pos := Position{Line: lineIdx + 1, Column: m[2] + 1}
 			diagnostics = append(diagnostics, Diagnostic{
@@ -340,5 +340,7 @@ func redundantVersionRule(source string) []Diagnostic {
 	return diagnostics
 }
 
-// versionDefaultRE matches the redundant default-version annotation line.
-var versionDefaultRE = regexp.MustCompile(`^[ \t]*(@version\("1\.0\.0"\))[ \t]*$`)
+// versionDefaultRE matches the redundant default-version annotation line in
+// every shape the dsl/ gate fails: inner spacing, a trailing // comment, and
+// CRLF endings -- so the editor hints exactly what CI rejects.
+var versionDefaultRE = regexp.MustCompile(`^[ \t]*(@version\([ \t]*"1\.0\.0"[ \t]*\))[ \t]*(//[^\r]*)?\r?$`)

@@ -108,11 +108,11 @@ func BuildConceptFromDecl(decl *parser.ConceptDecl, conceptName string) (*Concep
 
 	version := parsed.version
 	if version == "" {
-		// Absent @version means 1.0.0 (#2613). Explicit annotations and
-		// the legacy vN-directory derivation both populate parsed.version
-		// upstream; only a genuinely unannotated flat-tree concept lands
-		// here.
-		version = "1.0.0"
+		// Absent @version means 1.0.0 (#2613), stored in the same
+		// "v<major>" prefix form an explicit annotation lands as, so
+		// defaulted and annotated concepts report identical metadata.
+		// Only a genuinely unannotated flat-tree concept lands here.
+		version = "v1"
 	}
 	return &Concept{
 		Name:          conceptName,
@@ -219,7 +219,7 @@ func isDisplayableType(t string) bool {
 type parsedConcept struct {
 	description   string
 	conceptType   string
-	version       string // @version("vN") override; empty means derived from path
+	version       string // "v<major>" prefix form from @version; empty means the 1.0.0 default (#2613)
 	properties    []parsedProperty
 	required      []string
 	relationships []RelationshipDefinition

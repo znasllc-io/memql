@@ -134,8 +134,10 @@ func LoadUnifiedConcepts(logger *slog.Logger) (int, error) {
 				continue
 			}
 			if id == "" {
-				// Concept hasn't migrated to @version + @namespace yet.
-				// Skip silently -- the legacy loader handles it.
+				// Concept carries no @namespace (the only remaining
+				// transitional state -- absent @version defaults to
+				// 1.0.0, #2613). Skip silently -- the legacy loader
+				// handles it.
 				continue
 			}
 

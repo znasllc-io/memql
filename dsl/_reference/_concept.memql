@@ -42,11 +42,11 @@
 //   2. Canonical minimal concept
 // =============================================================================
 //
-// The minimum a concept needs to register is @version + @namespace + the
-// declaration. Everything else is optional. @description is conventional but
-// not required.
+// The minimum a concept needs to register is @namespace + the declaration:
+// absent @version defaults to 1.0.0 (#2613), so annotate a version only for
+// genuine non-defaults. Everything else is optional. @description is
+// conventional but not required.
 
-@version("1.0.0")
 @namespace("reference")
 @description("Smallest legal concept declaration -- one required string field.")
 concept minimal {
@@ -66,10 +66,11 @@ concept minimal {
 //   - Bumping major is the breaking-change signal: it changes the concept
 //     ID, which changes every row id, every event topic, and every
 //     cross-concept reference.
+//   - Absent @version defaults to 1.0.0 (#2613): the shipping baseline
+//     needs no annotation. Annotate only genuine non-defaults.
 
-@version("1.0.0")        // shipping baseline
 @namespace("reference")
-@description("Examples that use @version 1.x.x. ID prefix is v1:.")
+@description("No @version annotation: the 1.0.0 default applies. ID prefix is v1:.")
 concept versionedV1 {
   field string @required
 }
@@ -93,14 +94,12 @@ concept versionedV2 {
 //     mirrors it.
 //   - Every segment must start with a lowercase letter.
 
-@version("1.0.0")
 @namespace("cognition")
 @description("Single-segment namespace.")
 concept singleSegmentNs {
   field string @required
 }
 
-@version("1.0.0")
 @namespace("cognition:client:tool")
 @description("Multi-segment namespace. Assembles to v1:cognition:client:tool:nested.")
 concept nestedNs {
@@ -166,7 +165,6 @@ concept nestedNs {
 // existing rows; an unnecessary reference concept retired later means
 // migrating every product-side row that pointed at it.
 
-@version("1.0.0")
 @namespace("reference")
 @type("object")
 @description("Default record-shaped concept.")
@@ -174,7 +172,6 @@ concept objectExample {
   field string @required
 }
 
-@version("1.0.0")
 @namespace("reference")
 @type("collection")
 @description("Collection concept -- requires a @relationship(type=\"contains\", ...).")
@@ -184,7 +181,6 @@ concept collectionExample {
   memberIds []string
 }
 
-@version("1.0.0")
 @namespace("reference")
 @type("reference")
 @description("Reference concept -- requires a @relationship(type=\"alias\"|\"equals\", ...).")
@@ -213,7 +209,6 @@ concept referenceExample {
 //   The escape hatch:
 //     any         -- accepts any JSON value; no validation
 
-@version("1.0.0")
 @namespace("reference")
 @description("Every supported field type, one of each.")
 concept fieldTypes {
@@ -250,7 +245,6 @@ concept fieldTypes {
 // Unknown @-annotations on a field are rejected at load time with
 //   `unknown property annotation @<name> on field "<field>"`.
 
-@version("1.0.0")
 @namespace("reference")
 @description("Every field-level annotation in use.")
 concept fieldAnnotations {
@@ -287,7 +281,6 @@ concept fieldAnnotations {
 //   Engine validation: payloads carrying this field must match exactly one
 //   declared branch based on the discriminator's value.
 
-@version("1.0.0")
 @namespace("reference")
 @description("Discriminated-union example: the `body` field's shape depends on `kind`.")
 concept variantExample {
@@ -319,7 +312,6 @@ concept variantExample {
 //   its name. Nested objects use the same field-level annotations as
 //   top-level fields.
 
-@version("1.0.0")
 @namespace("reference")
 @description("A flat concept with a nested settings sub-object.")
 concept nestedExample {
@@ -365,7 +357,6 @@ concept nestedExample {
 //                    @type("reference") requirement.
 //     references  -- soft reference -- no constraint, just metadata.
 
-@version("1.0.0")
 @namespace("reference")
 @description("A concept with three different relationship decorators.")
 concept relationshipExample {
@@ -418,7 +409,6 @@ concept relationshipExample {
 // @scope annotation is a load-time error. Declare these concepts exactly
 // like any other; nothing in the body changes.
 
-@version("1.0.0")
 @namespace("cluster")
 @description("Example of an infrastructure-metadata concept that every node loads.")
 concept globalInfraExample {

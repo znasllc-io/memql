@@ -100,27 +100,43 @@ func TestSandboxCompileBundle_MissingConceptRefFails(t *testing.T) {
 	}
 }
 
-// TestSandboxCompileBundle_ConceptMissingVersionFails: a candidate concept
-// without @version/@namespace cannot assemble a canonical id and is rejected
-// with a precise diagnostic.
-func TestSandboxCompileBundle_ConceptMissingVersionFails(t *testing.T) {
+// TestSandboxCompileBundle_ConceptMissingNamespaceFails: a candidate concept
+// without @namespace cannot assemble a canonical id and is rejected with a
+// precise diagnostic. Absent @version is NOT a failure -- it defaults to
+// 1.0.0 (#2613), so @namespace alone compiles.
+func TestSandboxCompileBundle_ConceptMissingNamespaceFails(t *testing.T) {
 	rep := SandboxCompileBundle([]SandboxConstruct{
 		{
 			Kind: "concept",
-			Name: "sandboxNoVersion",
-			Source: `@description("Missing version/namespace")
-concept sandboxNoVersion {
+			Name: "sandboxNoNamespace",
+			Source: `@description("Missing namespace")
+concept sandboxNoNamespace {
   label  string
 }`,
 		},
 	})
 
 	if rep.OK {
-		t.Fatalf("expected bundle FAIL on concept without @version/@namespace, got OK: %+v", rep.Diagnostics)
+		t.Fatalf("expected bundle FAIL on concept without @namespace, got OK: %+v", rep.Diagnostics)
 	}
 	d := rep.Diagnostics[0]
-	if d.OK || d.Skipped || !strings.Contains(d.Error, "version") {
-		t.Errorf("expected a missing-version failure, got %+v", d)
+	if d.OK || d.Skipped || !strings.Contains(d.Error, "namespace") {
+		t.Errorf("expected a missing-namespace failure, got %+v", d)
+	}
+
+	rep = SandboxCompileBundle([]SandboxConstruct{
+		{
+			Kind: "concept",
+			Name: "sandboxDefaultVersion",
+			Source: `@namespace("sandboxns")
+@description("No @version: the 1.0.0 default applies")
+concept sandboxDefaultVersion {
+  label  string
+}`,
+		},
+	})
+	if !rep.OK {
+		t.Fatalf("concept with @namespace but no @version must compile under the #2613 default, got: %+v", rep.Diagnostics)
 	}
 }
 

@@ -8,9 +8,9 @@
 // automations + the persistence mutations + read shapes/queries.
 //
 // ID-PRESERVING MOVE. The concept ids are HELD STABLE across the relocation:
-// the @namespace("cluster") + @version("1.0.0") annotations are what assemble
-// the canonical id (component/language/ast/concept_id.go -- the directory does
-// NOT factor in), so both ids stay exactly:
+// the @namespace("cluster") annotation is what assembles the canonical id
+// (component/language/ast/concept_id.go; absent @version defaults to 1.0.0,
+// and the directory does NOT factor in), so both ids stay exactly:
 //
 //     v1:cluster:deployment
 //     v1:cluster:deploymentNodeSpec

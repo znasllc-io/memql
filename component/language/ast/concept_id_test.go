@@ -262,23 +262,32 @@ func TestAssembleConceptIdFromDecl_HappyPath(t *testing.T) {
 }
 
 // TestAssembleConceptIdFromDecl_PartialAttributes locks the
-// transitional-state path: when @version or @namespace is missing
-// the function returns "" + nil so the caller can decide whether to
-// warn or error.
+// transitional-state path: only a missing @namespace returns "" + nil
+// so the caller can decide whether to warn or error. Absent @version
+// is NOT transitional -- it defaults to 1.0.0 (#2613), so @namespace
+// alone selects the annotated assembly.
 func TestAssembleConceptIdFromDecl_PartialAttributes(t *testing.T) {
-	cases := []*ConceptDecl{
+	transitional := []*ConceptDecl{
 		{Name: "x", Attributes: []*Attribute{{Name: "version", Value: "1.0.0"}}},
-		{Name: "x", Attributes: []*Attribute{{Name: "namespace", Value: "ns"}}},
 		{Name: "x", Attributes: []*Attribute{}},
 	}
-	for _, decl := range cases {
+	for _, decl := range transitional {
 		id, err := AssembleConceptIdFromDecl(decl)
 		if err != nil {
 			t.Errorf("AssembleConceptIdFromDecl: unexpected error: %v", err)
 		}
 		if id != "" {
-			t.Errorf("got id=%q, want \"\" for partial attributes", id)
+			t.Errorf("got id=%q, want \"\" when @namespace is missing", id)
 		}
+	}
+
+	namespaceOnly := &ConceptDecl{Name: "x", Attributes: []*Attribute{{Name: "namespace", Value: "ns"}}}
+	id, err := AssembleConceptIdFromDecl(namespaceOnly)
+	if err != nil {
+		t.Fatalf("AssembleConceptIdFromDecl: unexpected error: %v", err)
+	}
+	if id != "v1:ns:x" {
+		t.Errorf("got id=%q, want \"v1:ns:x\" -- absent @version must default to 1.0.0", id)
 	}
 }
 
