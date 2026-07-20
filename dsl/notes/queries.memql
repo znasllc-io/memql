@@ -20,7 +20,7 @@ query note notes {
 @unbounded("note by id (guarded) gated to the caller -- bounded to a single row")
 query note noteById {
   args {
-    noteId  string  @required
+    noteId  string!
   }
   filter  when(args.noteId) { id==args.noteId } && ownerUserId==actor.userId
   shape   noteFull
@@ -29,7 +29,7 @@ query note noteById {
 @description("Search the caller's notes by tag. Owned: ownerUserId==actor.userId gates the row set server-side; the tag predicate narrows to notes carrying the given tag. Body substring matching is done client-side over this caller-scoped result so the search never leaks across users.")
 query note notesByTag {
   args {
-    tag  string  @required
+    tag  string!
   }
   filter  ownerUserId==actor.userId && when(args.tag) { args.tag in tags }
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over

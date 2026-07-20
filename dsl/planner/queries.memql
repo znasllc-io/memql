@@ -95,7 +95,7 @@ query plan strandedCandidatePlans {
 @description("Succeeded Plans of a kind, with metrics, for estimation bucket queries.")
 query plan historicalPlanMetrics {
   args {
-    planKind  string  @required
+    planKind  string!
   }
   filter  kind==args.planKind && status=="succeeded"
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
@@ -121,7 +121,7 @@ query plan historicalPlanMetrics {
 @description("Single Plan by id.")
 query plan planById {
   args {
-    planId  string  @required
+    planId  string!
   }
   filter  id==args.planId
   shape   planFull
@@ -145,7 +145,7 @@ query plan planById {
 @description("All Plans in a space (Tasks page list). Frontend groups by status and applies the Done-window visual filter.")
 query plan plansForSpace {
   args {
-    partitionId  string  @required
+    partitionId  string!
   }
   filter  partitionId==args.partitionId
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
@@ -192,7 +192,7 @@ query plan waitingPlansForUser {
 @unbounded("task state by taskId -- bounded to a single row")
 query taskState taskStateById {
   args {
-    taskId  string  @required
+    taskId  string!
   }
   filter  taskId==args.taskId
   shape   taskStateFull
@@ -217,7 +217,7 @@ query taskState taskStateById {
 @unbounded("tasks within one plan -- bounded by the plan; the caller runs the whole plan")
 query task tasksForPlan {
   args {
-    planId  string  @required
+    planId  string!
   }
   filter  planId==args.planId
   shape   taskFull
@@ -295,7 +295,7 @@ query responsibility activeResponsibilities {
 @unbounded("responsibilities due for a trigger -- an internal scheduler sweep that must see all due")
 query responsibility dueResponsibilities {
   args {
-    trigger  string  @required  @enum("reactive", "recurring")
+    trigger  enum("reactive", "recurring")!
   }
   filter  ownerUserId==actor.userId && statusIsActive && enabled==true && trigger==args.trigger
   shape   responsibilityFull
@@ -350,7 +350,7 @@ query responsibility activeResponsibilitiesAcrossUsers {
 @description("Every Plan the reactive loop spawned for a responsibility, matched on the input.responsibilityId back-pointer. Backs the C1 dedup guard (one live Plan per continuous responsibility). Terminal-vs-live filtering happens Go-side (no NOT/OR in MemQL filters).")
 query plan plansForResponsibility {
   args {
-    responsibilityId  string  @required
+    responsibilityId  string!
   }
   filter  input.responsibilityId==args.responsibilityId
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
@@ -373,7 +373,7 @@ query plan plansForResponsibility {
 @description("Single v1:planner:responsibility by id. Used by the intake dispatcher (#637) and the management UI's single-row refresh. Filters on id only -- mirrors planById; the owner-scoped list reads stay on responsibilitiesForUser.")
 query responsibility responsibilityById {
   args {
-    responsibilityId  string  @required
+    responsibilityId  string!
   }
   filter  id==args.responsibilityId
   shape   responsibilityFull

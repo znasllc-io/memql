@@ -134,9 +134,9 @@ automation registerNodeLonghand {
 @description("Full form with a typed args contract (G1).")
 automation deployWithArgs {
   args {
-    environment     string   @required @enum("development", "staging", "production")
-    engineNodeTypes []string @required
-    workdir         string   @required
+    environment     enum("development", "staging", "production")!
+    engineNodeTypes []string!
+    workdir         string!
   }
   step gate {
     logic requireForwardDeploy(environment: args.environment, workdir: args.workdir)

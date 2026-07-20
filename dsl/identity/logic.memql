@@ -33,7 +33,7 @@ use platform.queries.{ globalVariable }
 @description("Pure decide for the access-request expiry sweep (#2369, cluster pruneStaleClusterNodes pattern): reads IDENTITY_ACCESS_REQUEST_EXPIRY_DAYS (default 30), computes cutoff = now - window via addDuration with a negative ISO duration, and returns expiredPendingAccessRequests({createdBefore: cutoff}).nodes() -- the pending rows past the window, filtered by QUERY PUSHDOWN. The retention policy lives entirely here; the calling automation's forEach is unconditional.")
 logic accessRequestExpirySweep {
   args {
-    event object @required
+    event object!
   }
   body {
   windowDays := query globalVariable( name: "IDENTITY_ACCESS_REQUEST_EXPIRY_DAYS" )
@@ -66,7 +66,7 @@ logic accessRequestExpirySweep {
 @description("Daily 09:05 UTC sweep that emits an 'identity.deletion.reminder' event for each user 25-26 days into their deletion cooldown -- final notice before accountDeletionSweep performs the hard delete at 30 days. Bracket [P25D, P26D) on deletionScheduledAt fired daily means each user gets exactly one reminder at this milestone.")
 logic accountDeletionReminder25Days {
   args {
-    event object @required
+    event object!
   }
   body {
   candidates := query usersInDeletionCooldown()
@@ -126,7 +126,7 @@ logic accountDeletionReminder25Days {
 @description("Daily 09:00 UTC sweep that emits an 'identity.deletion.reminder' event for each user 7-8 days into their deletion cooldown so they can cancel before the cooldown elapses. Bracket [P7D, P8D) on deletionScheduledAt fired daily means exactly one reminder per user at this milestone. Email delivery is consumed by the component/server subscriber.")
 logic accountDeletionReminder7Days {
   args {
-    event object @required
+    event object!
   }
   body {
   candidates := query usersInDeletionCooldown()
@@ -194,7 +194,7 @@ logic accountDeletionReminder7Days {
 @description("Pure decide for the account-deletion sweep (#2369, cluster pattern): reads MEMQL_IDENTITY_DELETION_COOLDOWN_DAYS (default 30), computes cutoff = now - cooldown via addDuration with a negative ISO duration, and returns usersScheduledForDeletion({scheduledBefore: cutoff}).nodes() -- users whose cooldown has elapsed, filtered by QUERY PUSHDOWN; the automation's forEach hard-deletes each unconditionally. Audit-event rows, invitations the user issued, and access-request rows are intentionally retained for the trail.")
 logic accountDeletionSweep {
   args {
-    event object @required
+    event object!
   }
   body {
   cooldownDays := query globalVariable( name: "MEMQL_IDENTITY_DELETION_COOLDOWN_DAYS" )
@@ -249,7 +249,7 @@ logic accountDeletionSweep {
 @description("Daily 02:00 UTC sweep over v1:identity:auditEvent rows older than MEMQL_IDENTITY_AUDIT_LOG_RETENTION_DAYS. Observation-only today: emits an 'identity.audit.retention.observed' event with the candidate count -- MemQL has no delete() mutation and AuditEvent's append-only semantics forbid soft-delete via active=false. Per-row delete lands when one of those gaps closes.")
 logic auditEventRetentionSweep {
   args {
-    event object @required
+    event object!
   }
   body {
   allEvents := query expiredAuditEvents()
@@ -304,7 +304,7 @@ logic auditEventRetentionSweep {
 @description("Hourly sweep that stamps consumedAt + consumedFromIP='system:expiry' on v1:identity:magiclink rows whose expiresAt is in the past, so the row reads as 'spent' in audit queries and any subsequent click is idempotently rejected by the consume handler's own expiresAt guard.")
 logic magicLinkExpirySweep {
   args {
-    event object @required
+    event object!
   }
   body {
   return query expiredMagicLinkRequests( asOf: now )
@@ -319,7 +319,7 @@ logic magicLinkExpirySweep {
 @description("Emits a 'delegation.created' event when a new v1:identity:delegation row lands. Carries the delegation id + identity / agent / role / scope fields for audit logging and downstream event processing.")
 logic onDelegationCreated {
   args {
-    event object @required
+    event object!
   }
   body {
   emitEvent := publishEvent(
@@ -357,7 +357,7 @@ logic onDelegationCreated {
 @description("Find every expired active delegation and soft-revoke it with `system:expiry` as the revoker. Returns the count processed.")
 logic revokeExpiredDelegations {
   args {
-    asOf string @required
+    asOf string!
   }
   body {
     return query expiredActiveDelegations( asOf: args.asOf )

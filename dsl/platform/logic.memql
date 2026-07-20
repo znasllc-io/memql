@@ -18,7 +18,7 @@
 @description("Daily 02:30 UTC sweep over v1:platform:policyTrace rows older than MEMQL_POLICYTRACE_RETENTION_DAYS (default 90). Currently observation-only: emits a 'platform.policyTrace.retention.observed' event with the candidate count. Per-row delete lands when the engine grows a delete() mutation.")
 logic purgeExpiredPolicyTraces {
   args {
-    event object @required
+    event object!
   }
   body {
   allTraces := query allPolicyTraces()

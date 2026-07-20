@@ -18,11 +18,11 @@
 @description("Create a synthetic Plan that wraps an ad-hoc tool call made outside any user-initiated planning context. Per Q5: every tool call must produce a Task; Tasks must have a parent Plan; chat-driven tool calls (no user-facing Plan) get a synthetic Plan with kind='adHocAction' so the invariant holds. Status is set to running and completes immediately when the synthetic semantic Task wrapping the tool call resolves.")
 mutate plan createAdHocPlan {
   args {
-    planId        string  @required
-    partitionId       string  @required
-    agentId       string  @required
-    ownerUserId   string  @required
-    goal          string  @required
+    planId        string!
+    partitionId       string!
+    agentId       string!
+    ownerUserId   string!
+    goal          string!
   }
   insert {
     id: args.planId
@@ -45,15 +45,15 @@ mutate plan createAdHocPlan {
 @description("Create a semantic Task -- the Planner-decision unit. Differs from createTask (in the product pack) by carrying the new category/logicalStepId/attemptNumber fields explicitly. Used by the Planner Agent at decomposition time and by the taskstamp Stamper to materialize the parent semantic Task for ad-hoc tool calls.")
 mutate task createSemanticTask {
   args {
-    taskId          string  @required
-    planId          string  @required
-    kind            string  @required
-    seq             int     @required
+    taskId          string!
+    planId          string!
+    kind            string!
+    seq             int!
     logicalStepId   string
     attemptNumber   int
     phase           string
     dependsOn       []string
-    input           object  @required
+    input           object!
   }
   insert {
     accept { planId, kind, seq, phase, logicalStepId, dependsOn, input }
@@ -70,12 +70,12 @@ mutate task createSemanticTask {
 @description("Create a toolInvocation Task -- the engine-auto-stamped record of an agent tool call. Per Q5+Q6: every tool call by an executing agent produces one of these, parented to the semantic Task that was executing when the tool fired. The engine's tool-dispatch wrapper inserts this row at dispatch time then calls completeToolInvocation when the call returns. parentTaskId is required (a toolInvocation row must have a semantic parent); the engine enforces this invariant.")
 mutate task createToolInvocationTask {
   args {
-    taskId          string  @required
-    planId          string  @required
-    parentTaskId    string  @required
-    toolName        string  @required
+    taskId          string!
+    planId          string!
+    parentTaskId    string!
+    toolName        string!
     toolArgs        object
-    seq             int     @required
+    seq             int!
   }
   insert {
     id: args.taskId
@@ -102,8 +102,8 @@ mutate task createToolInvocationTask {
 @description("Update a toolInvocation Task to a terminal state with its result or error. Companion to createToolInvocationTask. Status MUST be 'succeeded' or 'failed' (the only terminal transitions a toolInvocation can take -- there is no 'paused' or 'cancelled' on a tool call). On succeeded: toolResult populated. On failed: errorMessage populated.")
 mutate task completeToolInvocation {
   args {
-    taskId        string  @required
-    status        string  @required
+    taskId        string!
+    status        string!
     toolResult    object
     errorMessage  string
     completedAt   string
@@ -142,15 +142,15 @@ mutate task completeToolInvocation {
 mutate plan createPlan {
   args {
     planId                string
-    partitionId               string  @required
+    partitionId               string!
     parentPlanId          string
-    kind                  string  @required
-    goal                  string  @required
-    requestedBy           string  @required
+    kind                  string!
+    goal                  string!
+    requestedBy           string!
     triggerSource         string
     authorizedBy          string
     ownerAgentId          string
-    input                 object  @required
+    input                 object!
     refinementContext     object
     tokenBudget           int
     pauseExtendsDeadline  bool
@@ -178,7 +178,7 @@ mutate plan createPlan {
 @description("Promote a Plan from queued (planning complete, tasks emitted) to running. Triggered by the user clicking Run in the cockpit Planner tab, or by an automation that auto-runs plans on the user's behalf.")
 mutate plan startPlan {
   args {
-    planId  string  @required
+    planId  string!
   }
   update {
     id: args.planId
@@ -224,13 +224,13 @@ mutate plan startPlan {
 @description("Insert a Plan in awaitingFeedback / scope_elevation_required for a pending computer_use task. The emitScopeElevationCanvasCard automation lands the canvas card; the user approves or denies via the card's buttons.")
 mutate plan createScopeElevationPlan {
   args {
-    planId          string  @required
-    agentId         string  @required
-    ownerUserId     string  @required
+    planId          string!
+    agentId         string!
+    ownerUserId     string!
     partitionId         string
-    intent          string  @required
-    summary         string  @required
-    requestedScope  string  @required
+    intent          string!
+    summary         string!
+    requestedScope  string!
   }
   insert {
     id: args.planId
@@ -299,8 +299,8 @@ mutate plan createScopeElevationPlan {
 @description("Transition an existing running Plan to awaitingFeedback / feedback_required with a feedbackRequest{question, kind, options?, timeoutAt}. Backs the requestUserFeedback agent tool. Partial-update via update() -- only status / feedbackReason / feedbackRequest change; required fields inherit from the prior row. The user's answer (feedbackResponse + status->running) resumes the Plan via the existing planner re-invocation path.")
 mutate plan requestPlanFeedback {
   args {
-    planId           string  @required
-    feedbackRequest  object  @required
+    planId           string!
+    feedbackRequest  object!
   }
   update {
     id: args.planId
@@ -358,8 +358,8 @@ mutate plan requestPlanFeedback {
 @description("Attach a user's free-text feedback to a Plan parked in awaitingFeedback and resume it (epic memql#1404 / #1405). Stamps feedbackResponse{response, respondedBy, respondedAt}, transitions awaitingFeedback -> running (fresh startedAt for a clean cross-replica resume claim), and clears feedbackReason/feedbackRequest so the request is consumed. The engine guard (validateFeedbackIntakeTransition) rejects the write unless the prior status is awaitingFeedback and the actor owns the Plan. The owning agent is re-invoked with the feedback in its resume context. Callable by the needs-feedback card AND the assistant chat path (#1406).")
 mutate plan attachPlanFeedback {
   args {
-    planId    string  @required
-    feedback  string  @required
+    planId    string!
+    feedback  string!
   }
   update {
     id: args.planId
@@ -379,14 +379,14 @@ mutate plan attachPlanFeedback {
 mutate task createTask {
   args {
     taskId            string
-    planId            string  @required
-    category          string  @enum("semantic", "toolInvocation")
-    kind              string  @required
-    seq               int     @required
+    planId            string!
+    category          enum("semantic", "toolInvocation")
+    kind              string!
+    seq               int!
     phase             string
     executionSurface  string
     executorBackend   string
-    input             object  @required
+    input             object!
   }
   insert {
     id: args.taskId
@@ -410,7 +410,7 @@ mutate task createTask {
 mutate taskState persistTaskState {
   args {
     stateId            string
-    taskId             string    @required
+    taskId             string!
     workingMemory      object
     reasoningChain     string
     toolCallHistory    []object
@@ -441,8 +441,8 @@ mutate taskState persistTaskState {
 @description("Update a Plan's status with the full v1 lifecycle field set (paused/awaitingFeedback/needsAgent + metrics + estimate + token spend). Partial-update via update() -- only the fields you pass are changed; required fields inherit from the prior row.")
 mutate plan updatePlanStatus {
   args {
-    planId                    string  @required
-    status                    string  @required
+    planId                    string!
+    status                    string!
     ownerAgentId              string
     output                    object
     errorMessage              string
@@ -481,7 +481,7 @@ mutate plan updatePlanStatus {
 @description("Record a planner-agent LLM invocation against a Plan: advance metrics.llmCallCount + tokenSpent without changing status. Caller computes the new totals Go-side (the parser has no arithmetic).")
 mutate plan recordPlannerInvocation {
   args {
-    planId      string  @required
+    planId      string!
     tokenSpent  int
     metrics     object
   }
@@ -503,8 +503,8 @@ mutate plan recordPlannerInvocation {
 @description("Update a Task's status with optional output / error / lifecycle / metrics / parking fields. Partial-update via update() -- only the fields you pass change; required fields inherit from the prior row.")
 mutate task updateTaskStatus {
   args {
-    taskId              string  @required
-    status              string  @required
+    taskId              string!
+    status              string!
     output              object
     errorMessage        string
     startedAt           string
@@ -539,11 +539,11 @@ mutate task updateTaskStatus {
 mutate responsibility createResponsibility {
   args {
     responsibilityId  string
-    statement         string  @required
-    trigger           string  @required  @enum("reactive", "standing", "recurring")
+    statement         string!
+    trigger           enum("reactive", "standing", "recurring")!
     schedule          string
     condition         object
-    targetKind        string  @enum("assistant", "specialist", "unassigned")
+    targetKind        enum("assistant", "specialist", "unassigned")
     assignedAgentId   string
     assignedRoleSlug  string
     successCriteria   string
@@ -566,12 +566,12 @@ mutate responsibility createResponsibility {
 @description("Update an existing v1:planner:responsibility's editable fields (statement / schedule / condition / target binding / scope / enabled). Partial-update via update() -- only the fields you pass change; required fields inherit from the prior row. ownerUserId re-stamped from actor.userId (owned tier) so a caller can only rewrite their own rows.")
 mutate responsibility updateResponsibility {
   args {
-    responsibilityId  string  @required
+    responsibilityId  string!
     statement         string
-    trigger           string  @enum("reactive", "standing", "recurring")
+    trigger           enum("reactive", "standing", "recurring")
     schedule          string
     condition         object
-    targetKind        string  @enum("assistant", "specialist", "unassigned")
+    targetKind        enum("assistant", "specialist", "unassigned")
     assignedAgentId   string
     assignedRoleSlug  string
     successCriteria   string
@@ -591,8 +591,8 @@ mutate responsibility updateResponsibility {
 @description("Transition a v1:planner:responsibility's lifecycle status (draft / active / paused / archived). Partial-update via update(); ownerUserId re-stamped from actor.userId (owned tier).")
 mutate responsibility setResponsibilityStatus {
   args {
-    responsibilityId  string  @required
-    status            string  @required  @enum("draft", "active", "paused", "archived")
+    responsibilityId  string!
+    status            enum("draft", "active", "paused", "archived")!
   }
   update {
     id: args.responsibilityId
@@ -604,8 +604,8 @@ mutate responsibility setResponsibilityStatus {
 @description("Record the outcome of an evaluation/run on a v1:planner:responsibility: stamp lastEvaluatedAt to now and lastResult to the run headline. Called by the reactive-loop evaluator (epic #632) after a reactive condition check, a recurring scheduled tick, or a standing review. ownerUserId re-stamped from actor.userId (owned tier).")
 mutate responsibility recordResponsibilityEvaluation {
   args {
-    responsibilityId  string  @required
-    lastResult        string  @required
+    responsibilityId  string!
+    lastResult        string!
   }
   update {
     id: args.responsibilityId
@@ -618,8 +618,8 @@ mutate responsibility recordResponsibilityEvaluation {
 @description("Persist a routing decision onto a v1:planner:responsibility (epic #632, C2): bind the resolved agent (assignedAgentId), optional role slug (assignedRoleSlug), and flip targetKind off 'unassigned' onto the concrete kind (assistant / specialist). Called by the reactive-loop router after agentFactoryAnalyze + createSpecialist/extendSpecialist mint or match an agent. Partial-update via update(); ownerUserId re-stamped from actor.userId (owned tier) so the router can only rewrite the row's own owner -- the poller impersonates the responsibility's owner in the AccessContext before calling, so this lands as an owned write.")
 mutate responsibility assignResponsibility {
   args {
-    responsibilityId  string  @required
-    targetKind        string  @required  @enum("assistant", "specialist")
+    responsibilityId  string!
+    targetKind        enum("assistant", "specialist")!
     assignedAgentId   string
     assignedRoleSlug  string
   }
@@ -650,7 +650,7 @@ mutate responsibility assignResponsibility {
 @description("Mark a v1:planner:responsibility's intake as in-progress (issue #637). The intake dispatcher calls this when it claims a freshly-created draft so a created+updated double-fire (or a multi-node race) doesn't run the responsibilityIntake prompt twice -- intakeStatus flips '' -> 'pending'. System write (system:planner actor): no ownerUserId re-stamp, no user-scope reference, so it's engine-internal bookkeeping on a row the human already owns.")
 mutate responsibility markResponsibilityIntakePending {
   args {
-    responsibilityId  string  @required
+    responsibilityId  string!
   }
   update {
     id: args.responsibilityId
@@ -661,16 +661,16 @@ mutate responsibility markResponsibilityIntakePending {
 @description("Apply the responsibilityIntake result to a draft v1:planner:responsibility (issue #637). The dispatcher stamps the inferred field set (trigger / schedule / condition / targetKind / assignedRoleSlug / successCriteria / notifyHow) plus the intake outcome. When intake was CLEAR (no questions) the dispatcher passes status='active' + intakeStatus='clear' so the row goes straight live; when intake produced 1-2 questions it passes status='draft' + intakeStatus='awaitingAnswers' + intakeRequest so the row parks for the user (mirrors the Plan awaitingFeedback surfacing). Partial-update: only the supplied fields change. System write -- no ownerUserId re-stamp.")
 mutate responsibility applyResponsibilityIntake {
   args {
-    responsibilityId  string  @required
-    trigger           string  @enum("reactive", "standing", "recurring")
+    responsibilityId  string!
+    trigger           enum("reactive", "standing", "recurring")
     schedule          string
     condition         object
-    targetKind        string  @enum("assistant", "specialist", "unassigned")
+    targetKind        enum("assistant", "specialist", "unassigned")
     assignedRoleSlug  string
     successCriteria   string
     notifyHow         string
-    status            string  @enum("draft", "active", "paused", "archived")
-    intakeStatus      string  @enum("", "pending", "awaitingAnswers", "clear", "applied")
+    status            enum("draft", "active", "paused", "archived")
+    intakeStatus      enum("", "pending", "awaitingAnswers", "clear", "applied")
     intakeRequest     object
   }
   update {
@@ -684,12 +684,12 @@ mutate responsibility applyResponsibilityIntake {
 @description("Fold the user's answers to the intake clarifying questions back into a v1:planner:responsibility and re-stamp the re-inferred field set (issue #637). Called after the user answers the intakeRequest questions: the dispatcher re-runs responsibilityIntake with the answers folded in, then writes the final trigger / schedule / condition / targetKind / assignedRoleSlug / successCriteria / notifyHow, records intakeResponse for audit, sets intakeStatus='applied', and flips status='active'. System write -- no ownerUserId re-stamp.")
 mutate responsibility foldResponsibilityIntakeAnswers {
   args {
-    responsibilityId  string  @required
-    intakeResponse    object  @required
-    trigger           string  @enum("reactive", "standing", "recurring")
+    responsibilityId  string!
+    intakeResponse    object!
+    trigger           enum("reactive", "standing", "recurring")
     schedule          string
     condition         object
-    targetKind        string  @enum("assistant", "specialist", "unassigned")
+    targetKind        enum("assistant", "specialist", "unassigned")
     assignedRoleSlug  string
     successCriteria   string
     notifyHow         string

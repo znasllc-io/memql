@@ -37,7 +37,7 @@
 mutate plan createHarnessPlan {
   args {
     planId  string
-    goal    string  @required
+    goal    string!
     input   object
   }
   insert {
@@ -63,9 +63,9 @@ mutate plan createHarnessPlan {
 mutate step addHarnessStep {
   args {
     stepId          string
-    planId          string  @required
-    title           string  @required
-    idempotencyKey  string  @required
+    planId          string!
+    title           string!
+    idempotencyKey  string!
     dependsOn       []string
     input           object
   }
@@ -97,7 +97,7 @@ mutate step addHarnessStep {
 @description("Promote a step to ready (pending -> ready when dependsOn is satisfied, or blocked -> ready when the blocker finishes). Read-merges the prior row so owned-tier fields are preserved. The engine step guard validates the transition and rejects an illegal source status. Without this mutation the state machine is stuck at 'pending' (#1635).")
 mutate step readyHarnessStep {
   args {
-    stepId  string  @required
+    stepId  string!
   }
   update {
     id: args.stepId
@@ -116,7 +116,7 @@ mutate step readyHarnessStep {
 @description("Claim a ready step (ready -> running). Stamps assignedAgent + startedAt. The engine step guard rejects the transition when the prior status is not 'ready'.")
 mutate step startHarnessStep {
   args {
-    stepId         string  @required
+    stepId         string!
     assignedAgent  string
   }
   update {
@@ -136,7 +136,7 @@ mutate step startHarnessStep {
 @description("Record a running step's result (running -> done). done is terminal. The engine step guard rejects the transition when the prior status is not 'running'.")
 mutate step completeHarnessStep {
   args {
-    stepId  string  @required
+    stepId  string!
     result  object
   }
   update {
@@ -158,7 +158,7 @@ mutate step completeHarnessStep {
 @description("Mark a running step failed (running -> failed). Stamps errorMessage + completedAt. The engine step guard rejects the transition when the prior status is not 'running'. Retry (failed -> ready, attempt++) is a separate write.")
 mutate step failHarnessStep {
   args {
-    stepId        string  @required
+    stepId        string!
     errorMessage  string
   }
   update {
@@ -182,10 +182,10 @@ mutate step failHarnessStep {
 mutate observation recordHarnessObservation {
   args {
     observationId  string
-    stepId         string  @required
+    stepId         string!
     planId         string
-    kind           string  @required  @enum("tool_result", "error", "note", "decision")
-    content        string  @required
+    kind           enum("tool_result", "error", "note", "decision")!
+    content        string!
     data           object
   }
   insert {
@@ -242,9 +242,9 @@ mutate observation recordHarnessObservation {
 mutate semanticMemory createHarnessSemanticMemory {
   args {
     memoryId        string
-    kind            string    @required  @enum("fact", "preference", "outcome")
-    content         string    @required
-    sourceEpisodes  []string  @required
+    kind            enum("fact", "preference", "outcome")!
+    content         string!
+    sourceEpisodes  []string!
     confidence      float
     lastReinforced  datetime
   }
@@ -277,10 +277,10 @@ mutate semanticMemory createHarnessSemanticMemory {
 @description("Reinforce an existing v1:harness:semanticMemory (dedup path): take the engine-computed bumped confidence + reinforceCount, reset lastReinforced to now, and replace sourceEpisodes with the merged/deduped provenance. No new belief row -- this is why re-running over the same episodes does not duplicate. ownerUserId re-stamped from actor.userId (owned tier).")
 mutate semanticMemory reinforceHarnessSemanticMemory {
   args {
-    memoryId        string    @required
-    confidence      float     @required
-    reinforceCount  int       @required
-    sourceEpisodes  []string  @required
+    memoryId        string!
+    confidence      float!
+    reinforceCount  int!
+    sourceEpisodes  []string!
   }
   update {
     accept { confidence, reinforceCount, sourceEpisodes }
@@ -304,8 +304,8 @@ mutate semanticMemory reinforceHarnessSemanticMemory {
 @description("Decay an unreinforced v1:harness:semanticMemory: lower confidence to the engine-computed decayed value. lastReinforced is intentionally NOT reset (decay keeps measuring age from the last real reinforcement). ownerUserId re-stamped from actor.userId (owned tier). A belief that decays below the prune floor is then retired via pruneHarnessSemanticMemory.")
 mutate semanticMemory decayHarnessSemanticMemory {
   args {
-    memoryId    string  @required
-    confidence  float   @required
+    memoryId    string!
+    confidence  float!
   }
   update {
     id: args.memoryId
@@ -326,7 +326,7 @@ mutate semanticMemory decayHarnessSemanticMemory {
 @description("Prune a decayed v1:harness:semanticMemory: status -> 'pruned' (soft-delete; the append-only model has no row removal). Recall (#585) + consolidation dedup filter status=='active', so a pruned belief drops out of both while staying in the audit trail. ownerUserId re-stamped from actor.userId (owned tier).")
 mutate semanticMemory pruneHarnessSemanticMemory {
   args {
-    memoryId  string  @required
+    memoryId  string!
   }
   update {
     id: args.memoryId
@@ -350,7 +350,7 @@ mutate semanticMemory pruneHarnessSemanticMemory {
 mutate consolidationCursor advanceHarnessConsolidationCursor {
   args {
     cursorId      string
-    watermark     datetime  @required
+    watermark     datetime!
     episodesSeen  int
   }
   insert {

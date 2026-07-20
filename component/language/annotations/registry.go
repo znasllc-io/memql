@@ -144,7 +144,7 @@ var Docs = map[string]string{
 	"namespace":    "Concept namespace. Colon-separated lowercase identifiers (e.g., \"cognition\" or \"cognition:client:tool\").",
 	"scope":        "Partition scope. @scope(\"global\") places rows in the reserved _system partition; default is partition-scoped.",
 	"visibility":   "Which node types load this concept. @visibility(\"*\"), @visibility(\"cognition\", \"bff\"), or @visibility(!\"planner\").",
-	"cache":        "Override the result-cache TTL for the query. Format: @cache(ttl=\"300\") -- a whole number of SECONDS (string-valued). Pure reads cache BY DEFAULT (60s backstop) without this annotation (5.6); @cache sets a different TTL, longer or shorter. @cache(ttl=\"0\") is the explicit \"never cache\" opt-out (or use @nocache). The engine keys the cache on the plan signature (query/sort/limit/depth/shape + the keyset cursor) and evicts on any write to the read concept via the cache.invalidate.* broadcast channel (5.4/5.6 invalidation) -- cross-node eviction needs no per-concept routing rule. See docs/internal/planning/cache-audit-phase-0.md.",
+	"cache":        "Override the result-cache TTL for the query. Preferred form (#2618): @cache(300) -- the single ttl arg makes position unambiguous. The keyword form @cache(ttl=\"300\") keeps parsing. Pure reads cache BY DEFAULT (60s backstop) without this annotation (5.6); @cache sets a different TTL, longer or shorter. @cache(ttl=\"0\") is the explicit \"never cache\" opt-out (or use @nocache). The engine keys the cache on the plan signature (query/sort/limit/depth/shape + the keyset cursor) and evicts on any write to the read concept via the cache.invalidate.* broadcast channel (5.4/5.6 invalidation) -- cross-node eviction needs no per-concept routing rule. See docs/internal/planning/cache-audit-phase-0.md.",
 	"nocache":      "Opt this query OUT of caching entirely (force \"never cache\"). Clearer alias for @cache(ttl=\"0\"); use it for reads that must always be live (auth, monotonic counters, presence). Pure reads cache by default (5.6), so @nocache is the escape for the rare read where even brief staleness is wrong.",
 	"relationship": "Foreign-key relationship metadata. Format: @relationship(type=\"parent\", field=\"x\", target=\"v1:ns:concept\", direction=\"outgoing\").",
 }
@@ -190,7 +190,7 @@ var KeywordArgs = map[string][]ArgSpec{
 		{Name: "name", Type: "string", Doc: "Function name (with type=\"function\")."},
 	},
 	"cache": {
-		{Name: "ttl", Type: "string", Doc: "Cache TTL in whole seconds, e.g. ttl=\"300\"."},
+		{Name: "ttl", Type: "string", Doc: "Cache TTL in whole seconds. Positional preferred (#2618): @cache(300); keyword ttl=\"300\" keeps parsing."},
 	},
 	"rateLimit": {
 		{Name: "maxCalls", Type: "int", Doc: "Maximum calls allowed per period."},

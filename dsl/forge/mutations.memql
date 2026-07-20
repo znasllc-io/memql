@@ -20,8 +20,8 @@
 mutate project createProject {
   args {
     projectId    string
-    slug         string  @required
-    name         string  @required
+    slug         string!
+    name         string!
     targetApp    string
     repo         string
     description  string
@@ -47,10 +47,10 @@ mutate project createProject {
 mutate request createRequest {
   args {
     requestId      string
-    projectId      string    @required
+    projectId      string!
     requestType    string
-    title          string    @required
-    body           string    @required
+    title          string!
+    body           string!
     attachmentIds  []string
     priority       string
   }
@@ -78,8 +78,8 @@ mutate request createRequest {
 @description("Transition a v1:forge:request to a new status (the approval pipeline edges). update read-merges the prior row. The role guard belongs in an engine pre-insert hook (follow-up).")
 mutate request advanceRequest {
   args {
-    requestId          string  @required
-    status             string  @required
+    requestId          string!
+    status             string!
     validatedByUserId  string
     approvedByUserId   string
     resolution         string
@@ -104,7 +104,7 @@ mutate request advanceRequest {
 @description("Validate a v1:forge:request (developer action): set status 'needs_approval' and stamp validatedByUserId from actor.userId.")
 mutate request validateRequest {
   args {
-    requestId  string  @required
+    requestId  string!
   }
   update {
     id: args.requestId
@@ -117,7 +117,7 @@ mutate request validateRequest {
 @description("Approve a v1:forge:request (owner action): set status 'queued' (ready to implement) and stamp approvedByUserId from actor.userId.")
 mutate request approveRequest {
   args {
-    requestId  string  @required
+    requestId  string!
   }
   update {
     id: args.requestId
@@ -130,8 +130,8 @@ mutate request approveRequest {
 @description("Send a v1:forge:request back for changes: set status 'changes_requested' with a reason.")
 mutate request requestChanges {
   args {
-    requestId  string  @required
-    resolution string  @required
+    requestId  string!
+    resolution string!
   }
   update {
     id: args.requestId
@@ -157,8 +157,8 @@ mutate request requestChanges {
 @description("Attach ONE v1:common:attachment to a v1:forge:request by appending its id to attachmentIds (no clobbering of existing attachments). Backed by @appendFields -- the update executor appends to the stored array. update read-merges all other request fields.")
 mutate request attachToRequest {
   args {
-    requestId     string  @required
-    attachmentId  string  @required
+    requestId     string!
+    attachmentId  string!
   }
   update {
     id: args.requestId
@@ -187,8 +187,8 @@ mutate request attachToRequest {
 mutate requestEvent recordRequestEvent {
   args {
     eventId     string
-    requestId   string  @required
-    kind        string  @required
+    requestId   string!
+    kind        string!
     fromStatus  string
     toStatus    string
     note        string
@@ -223,8 +223,8 @@ mutate requestEvent recordRequestEvent {
 mutate requestEvent recordMentoredEvent {
   args {
     eventId    string
-    requestId  string  @required
-    note       string  @required
+    requestId  string!
+    note       string!
   }
   insert {
     id: args.eventId

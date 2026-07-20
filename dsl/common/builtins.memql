@@ -7,7 +7,7 @@
 @args(profile="object")
 @description("Check if the current authenticated user has a specific role. Returns boolean result.")
 builtin authCheckPermission {
-  role  string  @required
+  role  string!
 }
 
 // ---- queries/v1/common/builtin/builtinAuthResolveUser.memql ----
@@ -40,10 +40,10 @@ builtin authResolveUser {
 @args(profile="object")
 @description("Score utterance against agent candidates using Polyphon Cognition turn-taking algorithm.")
 builtin cognitionScore {
-  partitionId       string  @required
-  utteranceId   string  @required
-  text          string  @required
-  speakerId     string  @required
+  partitionId       string!
+  utteranceId   string!
+  text          string!
+  speakerId     string!
   speakerName   string
   candidates    object
 }
@@ -62,9 +62,9 @@ builtin cognitionScore {
 @args(profile="object")
 @description("Update participant presence state (idle, thinking, typing, responding).")
 builtin cognitionTrackPresence {
-  participantId  string  @required
-  partitionId        string  @required
-  state          string  @required
+  participantId  string!
+  partitionId        string!
+  state          string!
   metadata       object
 }
 
@@ -95,8 +95,8 @@ builtin concepts {
 @args(profile="object")
 @description("Predict the content-addressed ID for a concept+payload without inserting. Uses the same algorithm as insert().")
 builtin contentId {
-  concept  string  @required
-  payload  object  @required
+  concept  string!
+  payload  object!
 }
 
 // ---- queries/v1/common/builtin/builtinDatabaseHealthCheck.memql ----
@@ -155,8 +155,8 @@ builtin databaseStats {
 @args(profile="object", additionalProperties="true")
 @description("For an agent's (roleSlug, sortedDomainIds), ensures a cross-domain bridge corpus exists. Idempotent + hash-keyed -- pays for the bridge generation once per unique combination then reuses.")
 builtin ensureKnowledgeBridge {
-  roleSlug   string  @required
-  domainIds  array   @required
+  roleSlug   string!
+  domainIds  array!
 }
 
 // ---- queries/v1/common/builtin/builtinError.memql ----
@@ -170,7 +170,7 @@ builtin ensureKnowledgeBridge {
 @args(profile="stringOrObject", stringKey="message")
 @description("Constructs and returns an error from a message string.")
 builtin error {
-  message  string  @required
+  message  string!
 }
 
 // ---- queries/v1/common/builtin/builtinFilesExtractText.memql ----
@@ -185,8 +185,8 @@ builtin error {
 @args(profile="object")
 @description("Extract plain text from a file by MIME type. Supports PDF, DOCX, images, and text files.")
 builtin filesExtractText {
-  mimeType  string  @required
-  data      string  @required
+  mimeType  string!
+  data      string!
 }
 
 // ---- queries/v1/common/builtin/builtinFunctions.memql ----
@@ -214,7 +214,7 @@ builtin functions {
 @args(profile="stringOrObject", stringKey="name")
 @description("Returns full details for a specific function or tool by name. Includes all metadata, schema, and configuration.")
 builtin help {
-  name  string  @required
+  name  string!
 }
 
 // ---- queries/v1/common/builtin/builtinKnowledgeAugmentDomainAnalyze.memql ----
@@ -235,9 +235,9 @@ builtin help {
 @args(profile="object", additionalProperties="true")
 @description("Decide whether a chat exchange's topic warrants augmenting one of an agent's knowledge domains. Returns {outcome, domainId, topic, reasoning, confidence}. Drives the chat 'Analyze for training' button preflight.")
 builtin knowledgeAugmentDomainAnalyze {
-  userQuestion   string  @required
-  agentResponse  string  @required
-  domains        []object  @required
+  userQuestion   string!
+  agentResponse  string!
+  domains        []object!
   retrieved      []object
 }
 
@@ -262,12 +262,12 @@ builtin knowledgeAugmentDomainAnalyze {
 @args(profile="object", additionalProperties="true")
 @description("Generate + embed + persist topic-focused chunks for a knowledge domain. Inserts a Plan row for audit. Returns {planId, chunksAdded, domainId, domainName, topic}.")
 builtin knowledgeAugmentDomainGenerate {
-  domainId           string  @required
-  topic              string  @required
+  domainId           string!
+  topic              string!
   sourceUtteranceId  string
   sourceAgentId      string
-  partitionId            string  @required
-  requestedBy        string  @required
+  partitionId            string!
+  requestedBy        string!
 }
 
 // ---- queries/v1/common/builtin/builtinKnowledgeIngest.memql ----
@@ -284,9 +284,9 @@ builtin knowledgeAugmentDomainGenerate {
 @args(profile="object", additionalProperties="true")
 @description("Chunk + embed + persist a document into a knowledge domain. source is REQUIRED and tags the chunk's provenance class -- one of llmSeeded / augment / crossDomainBridge / appStructure / fileUpload. Read by the dev-refresh cache filter and by the citation registry; pick the value that matches what's being ingested.")
 builtin knowledgeIngest {
-  domainId   string  @required
-  text       string  @required
-  source     string  @required
+  domainId   string!
+  text       string!
+  source     string!
   sourceRef  string
   chunkSize  int
   overlap    int
@@ -344,7 +344,7 @@ builtin memqlDocs {
 @args(profile="object")
 @description("Synthesize text to speech using OpenAI TTS. Returns base64-encoded PCM16 audio.")
 builtin openaiVoiceSynthesize {
-  text  string  @required
+  text  string!
 }
 
 // ---- queries/v1/common/builtin/builtinPreviewInsert.memql ----
@@ -359,8 +359,8 @@ builtin openaiVoiceSynthesize {
 @args(profile="object")
 @description("Validate payload, predict ID, and check if record exists - without inserting. Returns structured validation result.")
 builtin previewInsert {
-  concept  string  @required
-  payload  object  @required
+  concept  string!
+  payload  object!
 }
 
 // ---- queries/v1/common/builtin/builtinRouterListModels.memql ----
@@ -380,8 +380,8 @@ builtin routerListPolicies { }
 @executor("integration.router.setApiKey")
 @description("Encrypt a plaintext vendor API key and persist it as a partition secret (BYOK). Returns the inserted secret row id. Feeds the frontend's /router/settings page.")
 builtin routerSetApiKey {
-  vendor        string  @required
-  plaintextKey  string  @required
+  vendor        string!
+  plaintextKey  string!
   label         string
   addedBy       string
 }
@@ -443,7 +443,7 @@ builtin seedAllDomainContent {
 @args(profile="object", additionalProperties="true")
 @description("Generate + embed + store seeded knowledge chunks for one domain. Tier-A LLM-generates; Tier-B prepends a disclaimer; Tier-C fetches Wikipedia or writes a placeholder.")
 builtin seedDomainContent {
-  domainId       string  @required
+  domainId       string!
   recipeVersion  string
 }
 
@@ -465,7 +465,7 @@ builtin seedDomainContent {
 @args(profile="object", additionalProperties="true")
 @description("Issue a web search for the Trainer Agent. Returns a list of {url, title, snippet}. STUB: no web-search provider is wired in-repo yet (tracked separately); returns an empty result set + a note so the Trainer can fall back to fetchUrl on URLs it already knows. See integrations/knowledge/trainer_tools.go.")
 builtin webSearch {
-  query        string  @required
+  query        string!
   num_results  int
 }
 
@@ -473,14 +473,14 @@ builtin webSearch {
 @args(profile="object", additionalProperties="true")
 @description("Fetch + extract readable text from a URL for the Trainer Agent. Backed by a bounded http.Client (dial / response / size caps). Returns {url, status, contentType, text, truncated}.")
 builtin fetchUrl {
-  url  string  @required
+  url  string!
 }
 
 @executor("integration.knowledge.embedChunk")
 @args(profile="object", additionalProperties="true")
 @description("Embed one knowledge chunk so it becomes retrievable via similarTo (#645 lazy embedding). Resolves the chunk text, computes a vector, writes it to node_vectors keyed by the chunk id. Idempotent -- a chunk that already has a vector is acknowledged without re-embedding. Returns {chunkId, embedded, alreadyEmbedded}.")
 builtin embedChunk {
-  chunkId   string  @required
+  chunkId   string!
   provider  string
 }
 
@@ -488,7 +488,7 @@ builtin embedChunk {
 @args(profile="object", additionalProperties="true")
 @description("Embed every unembedded validated chunk attached to a knowledge domain (optionally scoped to one Document), then recompute the parent Document's embeddingStatus none -> partial -> complete (#645). Materializes vectors into node_vectors so seeded + uploaded knowledge becomes semantically retrievable. Idempotent. Driven by the planner's embedDomainItems Plan dispatcher. Returns {domainId, documentId, total, embedded, already, failed, documentsRolledUp}.")
 builtin embedDomainItems {
-  domainId    string  @required
+  domainId    string!
   documentId  string
   provider    string
 }
@@ -518,7 +518,7 @@ builtin serviceVersion {
 @args(profile="stringOrObject", stringKey="name")
 @description("Get full details for a shape template by name, including template structure and inputSchema.")
 builtin shapeHelp {
-  name  string  @required
+  name  string!
 }
 
 // ---- queries/v1/common/builtin/builtinShapeTemplates.memql ----
@@ -556,8 +556,8 @@ builtin shapeTemplates {
 @args(profile="object", additionalProperties="true")
 @description("Retrieve top-K nodes of the given concept ranked by cosine similarity to the supplied free-text query. Optionally scoped to a payload.domainId list. domains is passed through additionalProperties because the current builtin arg parser accepts `[]string` field types but array-element typecheck is still permissive.")
 builtin similarTo {
-  text      string  @required
-  concept   string  @required
+  text      string!
+  concept   string!
   limit     int
   provider  string
 }
@@ -575,8 +575,8 @@ builtin similarTo {
 @description("Upload file data to cloud storage. Returns storage URL.")
 builtin storageUpload {
   bucket      string
-  objectName  string  @required
-  data        string  @required
+  objectName  string!
+  data        string!
   contentType string
 }
 
@@ -592,7 +592,7 @@ builtin storageUpload {
 @args(profile="object")
 @description("Transcribe audio data to text. Non-streaming batch transcription.")
 builtin sttTranscribe {
-  audio       string  @required
+  audio       string!
   format      string
   sampleRate  number
 }
@@ -623,8 +623,8 @@ builtin tools {
 @args(profile="object")
 @description("Validates a payload against a concept's JSON schema. Returns validation result with valid flag, errors, schema info, required fields, and provided fields.")
 builtin validate {
-  concept  string  @required
-  payload  object  @required
+  concept  string!
+  payload  object!
 }
 
 // ---- queries/v1/common/builtin/builtinVoicePickForGender.memql ----
@@ -643,7 +643,7 @@ builtin validate {
 @executor("integration.voice.pickForGender")
 @description("Pick a canonical voice name suitable for an agent of the given gender, biased away from voices already used by the owner.")
 builtin voicePickForGender {
-  gender   string  @required
+  gender   string!
   exclude  []string
 }
 
@@ -660,7 +660,7 @@ builtin voicePickForGender {
 @executor("integration.voice.resolve")
 @description("Resolve a canonical voice name + provider to the provider-specific voice ID.")
 builtin voiceResolve {
-  voiceId   string  @required
+  voiceId   string!
   provider  string
 }
 

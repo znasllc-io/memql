@@ -40,8 +40,8 @@
 @description("Create a git tag + GitHub release for a version.")
 capability integration.github.tagRelease {
   args {
-    repo string @required
-    tag  string @required
+    repo string!
+    tag  string!
   }
 }
 
@@ -50,7 +50,7 @@ capability integration.github.tagRelease {
 @description("Read a file from the local filesystem surface.")
 capability fs.readFile {
   args {
-    path string @required
+    path string!
   }
 }
 

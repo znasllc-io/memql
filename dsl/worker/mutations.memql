@@ -9,20 +9,20 @@ use identity.concepts.{ user }
 @description("Insert a worker tool-invocation telemetry row.")
 mutate invocation createWorkerInvocation {
   args {
-    invocationId   string  @required
-    ownerUserId    string  @required
-    workerId       string  @required
-    agentId        string  @required
+    invocationId   string!
+    ownerUserId    string!
+    workerId       string!
+    agentId        string!
     planId         string
     taskId         string
     correlationId  string
-    tool           string  @required
-    action         string  @required
+    tool           string!
+    action         string!
     argsRedacted   object
-    startedAt      string  @required
+    startedAt      string!
     completedAt    string
     durationMs     int
-    outcome        string  @required
+    outcome        string!
     exitCode       int
     signal         string
     errorCode      string
@@ -77,19 +77,19 @@ mutate invocation createWorkerInvocation {
 @description("Create a worker registration row on first connect.")
 mutate registration createWorkerRegistration {
   args {
-    registrationId       string  @required
-    ownerUserId          string  @required
-    identityId           string  @required
-    name                 string  @required
-    capabilities         array   @required
+    registrationId       string!
+    ownerUserId          string!
+    identityId           string!
+    name                 string!
+    capabilities         array!
     capabilityDescriptor object
     labels               object
-    concurrency          object  @required
+    concurrency          object!
     platformInfo         object
     permissions          object
     version              string
     buildTag             string
-    registeredAt         string  @required
+    registeredAt         string!
     lastSeenAt           string
     lastConnectedFromIP  string
   }
@@ -136,17 +136,17 @@ mutate registration createWorkerRegistration {
 @description("Refresh registration-authoritative fields on worker reconnect.")
 mutate registration refreshWorkerRegistration {
   args {
-    registrationId       string  @required
-    name                 string  @required
-    capabilities         array   @required
+    registrationId       string!
+    name                 string!
+    capabilities         array!
     capabilityDescriptor object
     labels               object
-    concurrency          object  @required
+    concurrency          object!
     platformInfo         object
     permissions          object
     version              string
     buildTag             string
-    lastSeenAt           string  @required
+    lastSeenAt           string!
     lastConnectedFromIP  string
   }
   update {
@@ -178,8 +178,8 @@ mutate registration refreshWorkerRegistration {
 @description("Revoke a worker registration.")
 mutate registration revokeWorker {
   args {
-    registrationId  string  @required
-    revokedAt       string  @required
+    registrationId  string!
+    revokedAt       string!
     revokedBy       string
     revokeReason    string
   }
@@ -207,7 +207,7 @@ mutate registration revokeWorker {
 @description("Soft-delete a worker invocation row past retention.")
 mutate invocation softDeleteWorkerInvocation {
   args {
-    invocationId  string  @required
+    invocationId  string!
   }
   update {
     id: args.invocationId
@@ -226,8 +226,8 @@ mutate invocation softDeleteWorkerInvocation {
 @description("Set User.preferences.computerUseEnabled.")
 mutate user toggleComputerUseEnabled {
   args {
-    userId   string  @required
-    enabled  bool    @required
+    userId   string!
+    enabled  bool!
   }
   update {
     id: args.userId
@@ -240,8 +240,8 @@ mutate user toggleComputerUseEnabled {
 @description("Set computerUseScope on an agent authorization row.")
 mutate agentAuthorization updateAgentAuthScope {
   args {
-    authorizationId   string  @required
-    computerUseScope  string  @required
+    authorizationId   string!
+    computerUseScope  string!
   }
   update {
     id: args.authorizationId
@@ -266,8 +266,8 @@ mutate agentAuthorization updateAgentAuthScope {
 @description("Bump lastSeenAt + lastConnectedFromIP on a worker registration.")
 mutate registration updateWorkerLastSeen {
   args {
-    registrationId       string  @required
-    lastSeenAt           string  @required
+    registrationId       string!
+    lastSeenAt           string!
     lastConnectedFromIP  string
   }
   update {

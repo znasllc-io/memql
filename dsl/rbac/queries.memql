@@ -21,7 +21,7 @@ use common.traits.{ isActiveRecord }
 @public
 @description("List every active role in the catalog -- the base roles plus any custom roles. Backs the cockpit RBAC view's role list and the rank picker the E1.4 custom-role creation flow uses to choose a slot. Higher rank == more privileged. Small registry consumed whole.")
 @unbounded("rbac role catalog -- a small bounded registry consumed whole")
-@cache(ttl="300")
+@cache(300)
 query role activeRoles {
   filter  isActiveRecord
   shape   roleFull
@@ -30,10 +30,10 @@ query role activeRoles {
 @public
 @description("Resolve a single role by its stable slug. Used to look up a principal's role row (rank + grants) on the auth/enforcement path and by the E1.4 rank-bound check (a creator's own rank). roleSlug matches role.slug, not the node id.")
 @unbounded("role by unique slug -- bounded to a single row")
-@cache(ttl="300")
+@cache(300)
 query role roleBySlug {
   args {
-    slug  string  @required
+    slug  string!
   }
   filter  slug==args.slug && isActiveRecord
   shape   roleFull
@@ -42,7 +42,7 @@ query role roleBySlug {
 @public
 @description("List every active capability row across all roles -- the whole RBAC grant catalog. Backs the cockpit RBAC view and is the bulk read the E1.6 enforcement resolver warms its per-node decision cache from. Small admin/seed-defined registry consumed whole.")
 @unbounded("rbac capability catalog -- a small seed-defined bounded registry consumed whole")
-@cache(ttl="300")
+@cache(300)
 query capability activeCapabilities {
   filter  isActiveRecord
   shape   capabilityFull
@@ -51,10 +51,10 @@ query capability activeCapabilities {
 @public
 @description("List the active capability grants for a single role, by its slug. The per-role grant set whose union IS the role's effective authorization. E1.6's resolver calls this (or reads it out of the warmed activeCapabilities cache) to answer 'does role R hold an allow for (verb,resourceType) with no overriding deny?'. roleSlug is a plain string FK into the role catalog (E1.2, memql#2070).")
 @unbounded("capabilities for one role -- bounded to that role's grant set")
-@cache(ttl="300")
+@cache(300)
 query capability capabilitiesForRole {
   args {
-    roleSlug  string  @required
+    roleSlug  string!
   }
   filter  roleSlug==args.roleSlug && isActiveRecord
   shape   capabilityFull
@@ -65,9 +65,9 @@ query capability capabilitiesForRole {
 @unbounded("capabilities for one (role, verb, resourceType) triple -- bounded to at most the allow+deny pair")
 query capability capabilityGrant {
   args {
-    roleSlug      string  @required
-    verb          string  @required
-    resourceType  string  @required
+    roleSlug      string!
+    verb          string!
+    resourceType  string!
   }
   filter  roleSlug==args.roleSlug && verb==args.verb && resourceType==args.resourceType && isActiveRecord
   shape   capabilityFull
@@ -78,7 +78,7 @@ query capability capabilityGrant {
 @unbounded("capabilities for one resource type -- bounded to that resource's grant set")
 query capability capabilitiesForResourceType {
   args {
-    resourceType  string  @required
+    resourceType  string!
   }
   filter  resourceType==args.resourceType && isActiveRecord
   shape   capabilityFull

@@ -53,8 +53,8 @@ use capabilities.integration.github.{ tagRelease }
 @description("Check out the memQL repo at a specific version into a clean workdir on the deploy runner, so the build runs against a pinned ref.")
 action cloneRepoAtVersion {
   args {
-    workdir string @required
-    ref     string @required
+    workdir string!
+    ref     string!
     dryRun  boolean
   }
   capability script(script: "deploy.cloneRepo", workdir: args.workdir, ref: args.ref, dryRun: args.dryRun)
@@ -67,9 +67,9 @@ action cloneRepoAtVersion {
 @description("Build the container image for one engine node type at a version on the deploy runner (local/dry-run surface) so it can be imported or pushed.")
 action buildEngineImage {
   args {
-    nodeType string @required
-    version  string @required
-    workdir  string @required
+    nodeType string!
+    version  string!
+    workdir  string!
     dryRun  boolean
   }
   capability script(script: "deploy.buildImage", nodeType: args.nodeType, version: args.version, workdir: args.workdir, dryRun: args.dryRun)
@@ -80,8 +80,8 @@ action buildEngineImage {
 @description("Import a built engine node image into the local k3d cluster (development placement) so the development overlay can run it.")
 action importImageToK3d {
   args {
-    nodeType string @required
-    cluster  string @required
+    nodeType string!
+    cluster  string!
     version  string
     dryRun  boolean
   }
@@ -94,8 +94,8 @@ action importImageToK3d {
 @description("Pin a kustomize overlay to the resolved per-node image digests for a release (GitOps placement) so ArgoCD deploys exactly those images.")
 action pinOverlayDigests {
   args {
-    overlayPath string @required
-    digests     object @required
+    overlayPath string!
+    digests     object!
     dryRun  boolean
   }
   capability script(script: "overlay.pinDigests", overlayPath: args.overlayPath, digests: args.digests, dryRun: args.dryRun)
@@ -106,8 +106,8 @@ action pinOverlayDigests {
 @description("Ask ArgoCD to reconcile an application to a pinned git revision.")
 action argoSync {
   args {
-    app      string @required
-    revision string @required
+    app      string!
+    revision string!
     dryRun  boolean
   }
   capability script(script: "argocd.sync", app: args.app, revision: args.revision, dryRun: args.dryRun)
@@ -120,8 +120,8 @@ action argoSync {
 @description("Execute the post-deploy verification gate for an environment and return a structured pass/fail result indicating whether the deployment is healthy.")
 action runDeployGate {
   args {
-    env     string @required
-    workdir string @required
+    env     string!
+    workdir string!
     dryRun  boolean
   }
   capability script(script: "deploy.gate", env: args.env, workdir: args.workdir, dryRun: args.dryRun)
@@ -133,8 +133,8 @@ action runDeployGate {
 @description("Restore an environment overlay's image digests to those of a prior deployment so ArgoCD rolls the environment back (rollback).")
 action revertOverlay {
   args {
-    overlayPath    string @required
-    toDeploymentId string @required
+    overlayPath    string!
+    toDeploymentId string!
     dryRun  boolean
   }
   capability script(script: "overlay.revert", overlayPath: args.overlayPath, toDeploymentId: args.toDeploymentId, dryRun: args.dryRun)
@@ -146,9 +146,9 @@ action revertOverlay {
 @description("Announce the outcome of a deployment (succeeded/failed) so operators see the result without reading logs.")
 action notifyDeploy {
   args {
-    env          string @required
-    status       string @required
-    deploymentId string @required
+    env          string!
+    status       string!
+    deploymentId string!
     dryRun  boolean
   }
   capability script(script: "deploy.notify", env: args.env, status: args.status, deploymentId: args.deploymentId, dryRun: args.dryRun)
@@ -166,8 +166,8 @@ action notifyDeploy {
 @description("Cut a git tag + GitHub release for the version that just deployed.")
 action tagRelease {
   args {
-    repo    string @required
-    version string @required
+    repo    string!
+    version string!
   }
   capability tagRelease(repo: args.repo, tag: args.version)
 }

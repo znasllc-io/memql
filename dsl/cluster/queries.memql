@@ -40,7 +40,7 @@ query node clusterNodes {
 @unbounded("nodes in one deployment -- a bounded topology set consumed whole")
 query node nodesForDeployment {
   args {
-    deploymentId  string  @required
+    deploymentId  string!
   }
   filter  deploymentId == args.deploymentId
   asOf    latest
@@ -64,7 +64,7 @@ query node nodesForDeployment {
 @unbounded("nodes outside a deployment -- a bounded topology set for drain/cutover, consumed whole")
 query node nodesNotInDeployment {
   args {
-    deploymentId  string  @required
+    deploymentId  string!
   }
   filter  deploymentId != args.deploymentId
   asOf    latest

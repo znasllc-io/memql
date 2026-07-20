@@ -8,7 +8,7 @@
 @description("Get detailed usage guidance for a MemQL named function (docs, args schema, and key calling rules)")
 @mcp
 tool describeFunction {
-  name  string  @required @description("The function name to describe (e.g., activeSpaces)")
+  name  string! @description("The function name to describe (e.g., activeSpaces)")
 }
 
 // ---- tools/v1/memql/toolSearchUsers.memql ----

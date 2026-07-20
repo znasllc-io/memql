@@ -12,10 +12,10 @@
 @description("Create a to-do for the caller. Owned: ownerUserId is stamped from actor.userId, so a caller can only ever create their own to-dos. sourceResponsibilityId is optional -- responsibilities pass it to attribute app-generated tasks; user-created to-dos leave it empty.")
 mutate todo createTodo {
   args {
-    todoId                  string  @required
-    title                   string  @required
+    todoId                  string!
+    title                   string!
     dueAt                   datetime
-    priority                string  @enum("low", "medium", "high")
+    priority                enum("low", "medium", "high")
     sourceResponsibilityId  string
   }
   insert {
@@ -31,8 +31,8 @@ mutate todo createTodo {
 @description("Mark a to-do complete (or re-open it) by inserting a new version with the supplied payload. Owned: ownerUserId is re-stamped from actor.userId so the operation re-enforces ownership and can never transfer the row. The caller threads the full updated payload (with done flipped); the complete tool builds it from the current row + done=true.")
 mutate todo completeTodo {
   args {
-    todoId   string  @required
-    payload  object  @required
+    todoId   string!
+    payload  object!
   }
   insert {
     id: args.todoId
@@ -44,8 +44,8 @@ mutate todo completeTodo {
 @description("Update a to-do (title / dueAt / priority) by inserting a new version with the supplied payload. Owned: ownerUserId is re-stamped from actor.userId so a caller can never reassign ownership. The caller threads the full merged payload; the update tool builds it from the current row plus the changed fields.")
 mutate todo updateTodo {
   args {
-    todoId   string  @required
-    payload  object  @required
+    todoId   string!
+    payload  object!
   }
   insert {
     id: args.todoId

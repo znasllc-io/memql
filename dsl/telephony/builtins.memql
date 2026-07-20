@@ -4,33 +4,33 @@
 @description("Place an outbound PSTN call and bridge the callee into a partition-scoped room the agent talks in.")
 @executor("integration.telephony.placeCall")
 builtin telephonyPlaceCall {
-  to           string  @required @description("Callee E.164 number")
-  from         string  @required @description("Caller-ID DID (E.164) to present")
-  partitionId  string  @required @description("Tenant partition the call belongs to")
+  to           string! @description("Callee E.164 number")
+  from         string! @description("Caller-ID DID (E.164) to present")
+  partitionId  string! @description("Tenant partition the call belongs to")
   dtmf         string  @description("Optional digits to dial after connect (IVR)")
 }
 
 @description("Hang up an outbound call.")
 @executor("integration.telephony.endCall")
 builtin telephonyEndCall {
-  room      string  @required @description("Call room")
-  identity  string  @required @description("SIP participant identity")
+  room      string! @description("Call room")
+  identity  string! @description("SIP participant identity")
 }
 
 @description("Transfer a live call to another E.164.")
 @executor("integration.telephony.transferCall")
 builtin telephonyTransferCall {
-  room      string  @required
-  identity  string  @required
-  to        string  @required @description("Transfer target E.164")
+  room      string!
+  identity  string!
+  to        string! @description("Transfer target E.164")
 }
 
 @description("Send DTMF digits to a live call (IVR navigation).")
 @executor("integration.telephony.sendDtmf")
 builtin telephonySendDtmf {
-  room      string  @required
-  identity  string  @required
-  digits    string  @required @description("DTMF digits to send")
+  room      string!
+  identity  string!
+  digits    string! @description("DTMF digits to send")
 }
 
 // --- Provisioning (owner/admin gated in Go; backend functions only) --------
@@ -46,20 +46,20 @@ builtin telephonySearchNumbers {
 @description("Purchase a DID, bind it to a partition, point it at the SIP edge, and provision inbound routing. Owner/admin only.")
 @executor("integration.telephony.buyNumber")
 builtin telephonyBuyNumber {
-  providerId   string  @required @description("Id from telephonySearchNumbers")
-  partitionId  string  @required @description("Partition to assign the DID to")
+  providerId   string! @description("Id from telephonySearchNumbers")
+  partitionId  string! @description("Partition to assign the DID to")
   purpose      string  @description("inbound | outbound | both")
 }
 
 @description("Point an owned DID at the SIP edge and (re)provision inbound routing. Owner/admin only.")
 @executor("integration.telephony.configureInboundNumber")
 builtin telephonyConfigureInboundNumber {
-  e164         string  @required
-  partitionId  string  @required
+  e164         string!
+  partitionId  string!
 }
 
 @description("Release an owned DID back to the carrier. Owner/admin only.")
 @executor("integration.telephony.releaseNumber")
 builtin telephonyReleaseNumber {
-  e164  string  @required
+  e164  string!
 }

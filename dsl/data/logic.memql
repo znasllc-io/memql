@@ -28,7 +28,7 @@
 @eventField("id", "naturalKeyField", "naturalKeyValue", "recordType", "partitionId")
 logic conflictDetection {
   args {
-    event object @required
+    event object!
   }
   body {
   // Query confirmed records with matching natural key + record type

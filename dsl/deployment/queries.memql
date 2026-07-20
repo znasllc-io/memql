@@ -33,7 +33,7 @@
 @unbounded("deployments for a cluster -- a bounded topology set consumed whole")
 query deployment deploymentsForCluster {
   args {
-    clusterId  string  @required
+    clusterId  string!
   }
   filter  clusterId == args.clusterId
   shape   deploymentFull
@@ -54,7 +54,7 @@ query deployment deploymentsForCluster {
 @unbounded("deployment by unique deploymentId -- bounded to a single row")
 query deployment deploymentById {
   args {
-    deploymentId  string  @required
+    deploymentId  string!
   }
   filter  deploymentId == args.deploymentId
   shape   deploymentFull
@@ -118,7 +118,7 @@ query deployment supersededDeployments {
 @unbounded("per-node specs for one deployment -- a bounded topology set consumed whole")
 query deploymentNodeSpec nodeSpecsForDeployment {
   args {
-    deploymentId  string  @required
+    deploymentId  string!
   }
   filter  deploymentId == args.deploymentId
   shape   deploymentNodeSpecFull

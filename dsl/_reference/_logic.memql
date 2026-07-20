@@ -83,7 +83,7 @@
 @description("Pure gate check: was the deploy gate green? Defaults to false when the gate result is absent.")
 logic deployGatePassed {
   args {
-    gate object @required
+    gate object!
   }
   body {
     return coalesce(args.gate.passed, false)

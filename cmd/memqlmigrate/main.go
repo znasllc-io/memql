@@ -69,6 +69,9 @@ var rewriters = map[string]rewriter{
 	"slice-syntax":      rewriteSliceSyntax,
 	"args-description":  rewriteArgsDescription,
 	"accept-stamp":      langparser.RewriteAcceptStamp,
+	"required-sigil":    langparser.RewriteRequiredSigil,
+	"enum-type":         langparser.RewriteEnumTypeArgs,
+	"cache-positional":  langparser.RewriteCachePositional,
 }
 
 var pathRewriters = map[string]pathRewriter{
@@ -238,6 +241,9 @@ func listRewriters(w io.Writer) {
 	fmt.Fprintln(w, "  args-description    strip parser-discarded @description from args{} fields")
 	fmt.Fprintln(w, "  accept-stamp        collapse arg-mirror runs into accept{}/stamp{} (#2616)")
 	fmt.Fprintln(w, "  same-domain-use     delete use imports of the file's own domain (#2617)")
+	fmt.Fprintln(w, "  required-sigil      @required -> the `type!` sigil (#2618)")
+	fmt.Fprintln(w, "  enum-type           args `string @enum(...)` -> the enum(...) type (#2618)")
+	fmt.Fprintln(w, "  cache-positional    @cache(ttl=\"N\") -> @cache(N) (#2618)")
 }
 
 func applyPipeline(path string, src []byte, pipeline []pathRewriter) ([]byte, error) {

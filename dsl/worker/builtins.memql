@@ -7,7 +7,7 @@
 @args(profile="object")
 @description("Dispatch a workerComputer.<action> call to the user's computer-use-capable worker.")
 builtin agentworkerDispatchComputer {
-  action         string  @required
+  action         string!
   args           object
   agentId        string
   ownerUserId    string
@@ -28,7 +28,7 @@ builtin agentworkerDispatchComputer {
 @args(profile="object")
 @description("Dispatch a workerHost.<action> call to the user's connected worker.")
 builtin agentworkerDispatchHost {
-  action         string  @required
+  action         string!
   args           object
   agentId        string
   ownerUserId    string
@@ -46,7 +46,7 @@ builtin agentworkerDispatchHost {
 @args(profile="object")
 @description("List workers connected for the supplied user. Returns a JSON list of {registrationId, name, capabilities, ...}.")
 builtin agentworkerListWorkers {
-  ownerUserId  string  @required
+  ownerUserId  string!
 }
 
 // ---- queries/v1/worker/builtin/builtinAgentworkerRequestScope.memql ----
@@ -64,11 +64,11 @@ builtin agentworkerListWorkers {
 @args(profile="object")
 @description("Create a scope-elevation Plan + canvas card for a computer_use task awaiting user approval.")
 builtin agentworkerRequestScope {
-  intent          string  @required
-  requestedScope  string  @required
-  summary         string  @required
-  agentId         string  @required
-  ownerUserId     string  @required
+  intent          string!
+  requestedScope  string!
+  summary         string!
+  agentId         string!
+  ownerUserId     string!
   partitionId         string
 }
 
@@ -87,6 +87,6 @@ builtin agentworkerRequestScope {
 @args(profile="object")
 @description("Resolve the live computer-use availability for the calling agent's owner user.")
 builtin agentworkerStatus {
-  ownerUserId  string  @required
+  ownerUserId  string!
   agentId      string
 }

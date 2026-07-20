@@ -33,7 +33,7 @@
 @executionTime("medium")
 @description("Query a specialist agent for a structured answer. Returns {response, rationale?, confidence, needsMore?}. Use this when a question falls outside the assistant's domain and a specialist agent (HR, finance, etc.) should answer. The assistant paraphrases the result into the human reply.")
 tool askSpecialist {
-  role     string  @required @description("Specialist roleSlug -- the canonical identifier (e.g. accounting-finance, human-resources, it-support, legal-compliance). Must match an existing specialist agent in the partition.")
-  query    string  @required @description("What you want the specialist to answer. Phrase it as a clear question or task statement. Include relevant constraints from the conversation; the specialist does NOT see the chat directly.")
+  role     string! @description("Specialist roleSlug -- the canonical identifier (e.g. accounting-finance, human-resources, it-support, legal-compliance). Must match an existing specialist agent in the partition.")
+  query    string! @description("What you want the specialist to answer. Phrase it as a clear question or task statement. Include relevant constraints from the conversation; the specialist does NOT see the chat directly.")
   context  object  @description("Optional conversation context: recent utterances, attachments referenced, prior specialist findings. Helps the specialist ground its answer without exposing it to the whole chat.")
 }

@@ -7,7 +7,7 @@
 @templateFile("prompts/cognitionCompaction.tmpl")
 @description("Summarize older conversation messages into a concise rolling summary so the live transcript window stays bounded. Incorporates and extends any previous summary; focuses on facts, decisions, questions asked/answered, and action items. Used by Polyphon context compaction (component/polyphon/context_builder.go).")
 prompt cognitionCompaction {
-  entries         []object  @required @description("Conversation messages to summarize, oldest first; each {speakerName, speakerType, text}.")
+  entries         []object! @description("Conversation messages to summarize, oldest first; each {speakerName, speakerType, text}.")
   previousSummary string              @description("Prior rolling summary to incorporate and extend; empty on the first compaction.")
 }
 
@@ -15,12 +15,12 @@ prompt cognitionCompaction {
 @templateFile("prompts/cognitionDiscussionDispatch.tmpl")
 @description("Phase 6 of the chat-architecture plan. Per-(active human, space) discussion-mode dispatcher. Reads recent group activity + the user's recent private (Team-tab) thread + the user's roster of agents and decides whether one of those agents should chime in proactively in the user's private thread. Returns either {shouldDispatch: false} or {shouldDispatch: true, agentId, message, taskKind?, taskDescription?}. Activity-level capped: caller filters by User.preferences.discussionModeActivityLevel before invoking.")
 prompt cognitionDiscussionDispatch {
-  activityLevel    string    @required @description("'low' | 'medium' | 'high' -- shapes the prompt's eagerness to dispatch (low = mentions only; high = also distress / questions).")
-  forUserDisplayName string  @required @description("User whose Team thread the dispatch would land in.")
+  activityLevel    string! @description("'low' | 'medium' | 'high' -- shapes the prompt's eagerness to dispatch (low = mentions only; high = also distress / questions).")
+  forUserDisplayName string! @description("User whose Team thread the dispatch would land in.")
   spaceContext     object    @description("Title, goal, status -- for grounding.")
   recentGroup      []object            @description("Last several group utterances (most recent last), {speakerName, content, timestamp}.")
   recentPrivate    []object            @description("Last several utterances in this user's private thread (most recent last).")
-  userAgents       []object  @required @description("This user's roster of agents in the space, {agentId, displayName, role, domains, keywords}.")
+  userAgents       []object! @description("This user's roster of agents in the space, {agentId, displayName, role, domains, keywords}.")
   inFlightTurnCount int                @description("How many inter-agent turns have already fired in this dispatch loop iteration. Hard cap is 3.")
   threshold        float               @description("Decaying firing threshold [0, 1]. Each prior turn in this iteration adds +0.1; the dispatcher should only return shouldDispatch=true when its self-assessed value crosses this bar.")
 }
@@ -29,11 +29,11 @@ prompt cognitionDiscussionDispatch {
 @templateFile("prompts/cognitionPlanTriage.tmpl")
 @description("Per Q10: classify whether the latest chat message warrants spawning a Plan (background work) or can be answered inline. Returns needsPlan + suggested planKind + planHint with the recommended owning agent + confidence + reasoning. Cheap small-model call; runs alongside the existing nextSpeaker routing decision so the chat agent's reply path can branch on the result without modifying the established turn-taking prompt.")
 prompt cognitionPlanTriage {
-  utterance      string    @required @description("The latest message to triage.")
-  speakerName    string    @required
+  utterance      string! @description("The latest message to triage.")
+  speakerName    string!
   intent         string              @description("Classified intent of the utterance.")
   transcript     []object            @description("Recent conversation context (oldest first, up to 5 entries).")
-  agents         []object  @required @description("Available agents with id, name, role, domains.")
+  agents         []object! @description("Available agents with id, name, role, domains.")
   attachmentRefs []object            @description("Recent attachment ids the user has dropped in this thread; non-empty implies the message likely refers to one.")
   activeDocs     []object            @description("Validated knowledge documents available for retrieval, with id + format + summary.")
 }
@@ -42,8 +42,8 @@ prompt cognitionPlanTriage {
 @templateFile("prompts/cognitionFeedbackRoute.tmpl")
 @description("epic #1404 / child #1406 (assistant-mediated plan feedback). A Plan in this space is parked in awaitingFeedback with a pending question; classify whether the user's latest chat message is the ANSWER to that question (vs. an unrelated remark) and, when it is, extract the free-text feedback to fold into attachPlanFeedback. Cheap small-model structured call; runs only when the space actually has an awaitingFeedback Plan.")
 prompt cognitionFeedbackRoute {
-  question       string  @required @description("The feedback question the Plan is awaiting (Plan.feedbackRequest.question).")
-  userText       string  @required @description("The user's latest chat message to classify against the question.")
+  question       string! @description("The feedback question the Plan is awaiting (Plan.feedbackRequest.question).")
+  userText       string! @description("The user's latest chat message to classify against the question.")
   feedbackReason string             @description("Why the Plan parked (Plan.feedbackReason), e.g. scope_elevation_required / phase_checkpoint -- context only.")
   options        []object           @description("When the question is a choice, the {label, value} options the user may be picking among.")
   lastAgentText  string             @description("The most recent agent message before the user's, for conversational context.")
@@ -53,19 +53,19 @@ prompt cognitionFeedbackRoute {
 @templateFile("prompts/cognitionPrediction.tmpl")
 @description("Predict conversation trajectory for proactive cognition behavior")
 prompt cognitionPrediction {
-  transcript  []object  @required @description("Recent transcript entries with speakerName, speakerType, text")
-  agents      []object  @required @description("Available AI agents with name, role, and domains")
+  transcript  []object! @description("Recent transcript entries with speakerName, speakerType, text")
+  agents      []object! @description("Available AI agents with name, role, and domains")
 }
 
 @defaultProvider("chat54Mini")
 @templateFile("prompts/cognitionReply.tmpl")
 @description("Generate an AI assistant reply for a space based on participants and recent conversation context.")
 prompt cognitionReply {
-  trigger              string  @required
-  assistant            object  @required
-  space                object  @required
+  trigger              string!
+  assistant            object!
+  space                object!
   participants         []object
-  history              []object  @required
+  history              []object!
   conversationContext  object
   spaceContext         object
   historyInMessages    bool
@@ -93,10 +93,10 @@ prompt cognitionReply {
 @templateFile("prompts/cognitionRouting.tmpl")
 @description("Decide whether any AI agent should respond to a human utterance, and if so, which one. Returns respond=false when silence is the right answer. Sub-500ms fast-model target.")
 prompt cognitionRouting {
-  agents            []object  @required @description("Available AI agents with id, name, role, description, domains, keywords")
+  agents            []object! @description("Available AI agents with id, name, role, description, domains, keywords")
   transcript        []object            @description("Recent conversation (oldest first, up to last 5 entries)")
-  speakerName       string    @required @description("Name of the human who sent the latest message")
-  utterance         string    @required @description("The latest human message to route")
+  speakerName       string! @description("Name of the human who sent the latest message")
+  utterance         string! @description("The latest human message to route")
   intent            string              @description("Classified intent of the utterance (question, task_request, statement, etc.)")
   mentions          []object            @description("Agent names mentioned in the utterance")
   phase             string              @description("Conversation phase (opening, active, closing, etc.)")
@@ -112,7 +112,7 @@ prompt conductorTurn {
   // The agents present in the space (only AI participants; humans
   // travel separately so the prompt can reason about who they're
   // talking to vs. who could respond).
-  agents       []object  @required @description("Available AI agents with id, name, role, description, domains")
+  agents       []object! @description("Available AI agents with id, name, role, description, domains")
 
   // Recent transcript -- last ~15 turns oldest-first. The conductor
   // uses this to detect phase (just opened? deep in a topic? wrapping
@@ -120,8 +120,8 @@ prompt conductorTurn {
   transcript   []object            @description("Recent conversation entries, oldest first")
 
   // The human who just spoke, plus what they said.
-  speakerName  string    @required @description("Name of the human who sent the latest message")
-  utterance    string    @required @description("The latest human message")
+  speakerName  string! @description("Name of the human who sent the latest message")
+  utterance    string! @description("The latest human message")
   intent       string              @description("Heuristic intent classification (greeting, question, etc.)")
   mentions     []object            @description("Agent names mentioned in the utterance, with role: addressee or reference")
 
@@ -166,7 +166,7 @@ prompt conductorTurn {
 @templateFile("prompts/messageClassification.tmpl")
 @description("Classify a user message in a multi-agent space: intent, whether it carries an action request, whether it answers a prior agent prompt, who (if anyone) it's addressing. Pure semantic classification -- no decision about who answers (that's the conductor). Designed for caching: input is just the user text + the prior agent text + the agent roster, no per-conversation state, so identical phrasings hit the cache regardless of conversation. Sub-500ms fast-model target.")
 prompt messageClassification {
-  userText      string @required @description("The latest human message to classify")
+  userText      string! @description("The latest human message to classify")
   lastAgentText string           @description("The previous agent message (empty when no prior agent turn). Lets the classifier detect when the user message is answering a question or offer the agent posed.")
   agentRoster   string           @description("JSON-encoded list of agent display names in the room, so the classifier can resolve in-text mentions like 'is Nova there' even without an @-prefix.")
 }

@@ -25,11 +25,11 @@
 @description("Propose a healed OVERLAY override for a base construct (E4.2 / memql#2140). Writes a tier=overlay row with valid=false -- the repair loop proposes the heal, but it is INVISIBLE to resolution until human validation (E4.5) flips valid=true. Owned: ownerUserId is stamped from actor.userId so a caller can only propose overrides for their own constructs. tier is fixed to overlay (a base row can only be materialized by a system actor); the validateHealingBaseImmutable guard rejects any attempt to write tier=base here.")
 mutate healedOverride proposeOverride {
   args {
-    overrideId            string  @required
-    baseConstructId       string  @required
-    overrideData          object  @required
-    version               int     @required
-    blastRadius           string  @enum("personal", "shared", "spine_adjacent")
+    overrideId            string!
+    baseConstructId       string!
+    overrideData          object!
+    version               int!
+    blastRadius           enum("personal", "shared", "spine_adjacent")
     reason                string
     sourcePreconditionId  string
   }
@@ -50,8 +50,8 @@ mutate healedOverride proposeOverride {
 @description("Validate (ACCEPT) a proposed healed override (E4.5 / memql#2143). Read-merges the existing row and flips valid=false->true + validationStatus=proposed->validated, stamping validatedBy=actor.userId + validatedAt, and bumps version (capture-as-version). Blast-radius-scaled by role: the validateHealingValidationRankBound Go guard rejects the write unless the actor's role rank meets the override's blastRadius-required rank (personal->user, shared->admin, spine_adjacent->developer; owner always allowed). Once validated the override becomes resolution-eligible -- the two-tier resolver prefers it over base. Owned: gated by ownerUserId==actor.userId in the update read-merge.")
 mutate healedOverride validateOverride {
   args {
-    overrideId  string  @required
-    version     int     @required
+    overrideId  string!
+    version     int!
   }
   update {
     id: args.overrideId
@@ -66,7 +66,7 @@ mutate healedOverride validateOverride {
 @description("Reject a proposed healed override (E4.5 / memql#2143). Read-merges the existing row and sets validationStatus=rejected (valid stays false, so the override is never resolution-eligible), stamping validatedBy=actor.userId + validatedAt + the rejectionReason. A rejected proposal is RECORDED for audit, not silently dropped. Owned: gated by ownerUserId==actor.userId in the update read-merge.")
 mutate healedOverride rejectOverride {
   args {
-    overrideId       string  @required
+    overrideId       string!
     rejectionReason  string
   }
   update {

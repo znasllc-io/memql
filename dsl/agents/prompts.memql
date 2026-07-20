@@ -8,33 +8,33 @@
 @templateFile("prompts/plannerAgent.tmpl")
 @description("System prompt for the user's Planner Agent -- the orchestrator persona that owns Plan decomposition, Task dispatch, retry decisions, and escalation to the user. Paired with Claude Sonnet (streamClaudeSonnet) -- the planner's workload is structured pattern-matching over the goal + catalog + phases, not novel chain-of-thought, so extended thinking adds 5-30s and ~10x cost without improving decisions. Opus + thinking (reasoningClaudeOpus) stays available for goals that prove too ambiguous for Sonnet; flip @defaultProvider back per-instance if needed. Invoked by the planner-service on every Plan loop iteration. Output contract: one structured-output decision per turn (decompose / dispatchTask / retry / createSpecialist / extendSpecialist / spawnTrainingPlan / escalate / markPlanSucceeded / markPlanFailed).")
 prompt plannerAgent {
-  plan          object  @required @description("Current v1:planner:plan row with goal, phases, status, tokenBudget, tokenSpent, retryThreshold.")
+  plan          object! @description("Current v1:planner:plan row with goal, phases, status, tokenBudget, tokenSpent, retryThreshold.")
   tasks         []object         @description("All v1:planner:task rows under this plan, semantic + toolInvocation, sorted by createdAt. Lets the Planner see what's been attempted and what's still queued.")
-  specialists   []object @required @description("Agents available in the space, with roleSlug, capabilities.skillIds (the post-Phase-2 capability surface, resolved by the planner-side renderer into effective tools + domains for the prompt block), and lineage. The Planner picks dispatch targets from this list.")
+  specialists   []object! @description("Agents available in the space, with roleSlug, capabilities.skillIds (the post-Phase-2 capability surface, resolved by the planner-side renderer into effective tools + domains for the prompt block), and lineage. The Planner picks dispatch targets from this list.")
   feedbackResponse object       @description("User's response when resuming from an awaitingFeedback parking event. Carries {response, respondedBy, respondedAt}.")
-  partition     string  @required @description("Active partition envelope -- needed when proposing createSpecialist (the new agent lands in this partition).")
-  now           string  @required @description("RFC3339 wall-clock at invocation. Lets the Planner reason about elapsed time, deadlines, refresh windows.")
+  partition     string! @description("Active partition envelope -- needed when proposing createSpecialist (the new agent lands in this partition).")
+  now           string! @description("RFC3339 wall-clock at invocation. Lets the Planner reason about elapsed time, deadlines, refresh windows.")
 }
 
 @defaultProvider("streamClaudeOpus")
 @templateFile("prompts/trainerAgent.tmpl")
 @description("System prompt for the user's Trainer Agent -- the specialist persona that runs knowledge-domain training via web search + reasoning. Paired with a strong-reasoning + web-search-capable model. Invoked when the planner-service picks up a Plan of kind='trainSpecialist'. Output contract: a sequence of tool calls (webSearch / fetchUrl / writeKnowledgeChunk / markChunkSuperseded / embedChunk) followed by a respondToUser envelope summarizing chunks written, sources consulted, and confidence.")
 prompt trainerAgent {
-  plan              object  @required @description("Current v1:planner:plan row, kind='trainSpecialist', input={specialistId, topic, mode, domainId}.")
-  targetSpecialist  object  @required @description("The agent being trained -- role, description, domains, existing chunk summaries (truncated for refresh mode).")
+  plan              object! @description("Current v1:planner:plan row, kind='trainSpecialist', input={specialistId, topic, mode, domainId}.")
+  targetSpecialist  object! @description("The agent being trained -- role, description, domains, existing chunk summaries (truncated for refresh mode).")
   existingCorpus    []object         @description("For mode='refresh': summaries of existing chunks in the target domain, with createdAt. Lets the Trainer decide what's still current.")
-  partition         string  @required @description("Active partition -- new chunks land in this partition.")
-  now               string  @required @description("RFC3339 wall-clock.")
+  partition         string! @description("Active partition -- new chunks land in this partition.")
+  now               string! @description("RFC3339 wall-clock.")
 }
 
 @defaultProvider("chat54Mini")
 @templateFile("prompts/askSpecialist.tmpl")
 @description("Structured-output prompt the assistant invokes via the askSpecialist tool. The specialist returns ONE JSON object: {response, rationale?, confidence, needsMore?}. The assistant then paraphrases the response into a human-facing reply. Specialists never write utterances themselves.")
 prompt askSpecialist {
-  specialistName        string  @required @description("Display name of the specialist agent.")
-  specialistDescription string  @required @description("Short description of the specialist's role/domain.")
+  specialistName        string! @description("Display name of the specialist agent.")
+  specialistDescription string! @description("Short description of the specialist's role/domain.")
   specialistSystemPrompt string           @description("The specialist's custom system prompt, if set. Composed in front of the structured-output contract.")
-  query                 string  @required @description("The assistant's query to the specialist -- what it wants the specialist to answer/decide.")
+  query                 string! @description("The assistant's query to the specialist -- what it wants the specialist to answer/decide.")
   context               object           @description("Optional conversation context the assistant attaches: recent utterances, attachments, prior specialist findings.")
 }
 
@@ -42,18 +42,18 @@ prompt askSpecialist {
 @templateFile("prompts/agentFactoryAnalyze.tmpl")
 @description("Structured-output prompt invoked by the Assistant's ensureAgent tool to analyze a goal + decide whether to match, extend, or create an agent. Phase 2 cut (#158): the output contract collapses the separate domainIds / liveSourceIds / toolSlugs lists into a single skillIds[] -- the v1:agents:skill catalog is the bundling unit. Output JSON contract: { action: 'match'|'extend'|'create', targetAgentId?: string, roleSlug: string, skillIds: []string, reasoning: string }. The ensureAgent executor reads the structured output, validates against the role catalog (the role's maxSkills cap + forbiddenSkillIds + lockedSkillIds) + the skill catalog, and issues the appropriate mutation.")
 prompt agentFactoryAnalyze {
-  goal              string    @required @description("The user-stated goal driving the agent-provisioning decision. Forwarded verbatim from the ensureAgent tool call.")
-  existingAgents    []object  @required @description("Compact snapshot of the user's existing agents -- [{id, name, roleSlug, capabilities: {skillIds}}]. The factory uses this to decide whether an existing agent already fits (match) or could fit with additions (extend).")
-  roleCatalog       []object  @required @description("Compact snapshot of the v1:agents:agentRole catalog -- [{slug, name, category, lockedSkillIds, defaultSkillIds, availableSkillIds, forbiddenSkillIds, maxSkills, tier}]. The factory must pick roleSlug from this set; user-created roles are also valid but predefined ones cover almost every common case.")
-  skillCatalog      []object  @required @description("Compact snapshot of the v1:agents:skill catalog -- [{slug, name, category, description, tier, tags}]. The factory must pick every skillId from this set; Phase 3 mintSkill closes the gap when no catalog row covers the goal, but in Phase 2 the planner is restricted to catalog skills.")
-  now               string    @required @description("RFC3339 wall-clock.")
+  goal              string! @description("The user-stated goal driving the agent-provisioning decision. Forwarded verbatim from the ensureAgent tool call.")
+  existingAgents    []object! @description("Compact snapshot of the user's existing agents -- [{id, name, roleSlug, capabilities: {skillIds}}]. The factory uses this to decide whether an existing agent already fits (match) or could fit with additions (extend).")
+  roleCatalog       []object! @description("Compact snapshot of the v1:agents:agentRole catalog -- [{slug, name, category, lockedSkillIds, defaultSkillIds, availableSkillIds, forbiddenSkillIds, maxSkills, tier}]. The factory must pick roleSlug from this set; user-created roles are also valid but predefined ones cover almost every common case.")
+  skillCatalog      []object! @description("Compact snapshot of the v1:agents:skill catalog -- [{slug, name, category, description, tier, tags}]. The factory must pick every skillId from this set; Phase 3 mintSkill closes the gap when no catalog row covers the goal, but in Phase 2 the planner is restricted to catalog skills.")
+  now               string! @description("RFC3339 wall-clock.")
 }
 
 @defaultProvider("chat54Mini")
 @templateFile("prompts/responsibilityIntake.tmpl")
 @description("Responsibility intake (issue #637 -- epic #631 / program #629). A lightweight reasoning pass that reads a user's freeform responsibility statement (e.g. 'remind me the day before a karate class' or 'all private functions have comments') and (a) INFERS the structured field set the v1:planner:responsibility needs -- trigger archetype (reactive / standing / recurring), schedule (recurring), condition (reactive), targetKind + roleSlug (who carries it out), successCriteria, and notifyHow -- and (b) emits ONLY the genuinely-ambiguous clarifying questions, 0 to 2, hard cap 2. The whole point is to be NOT annoying: when the statement is already clear (the standing software-engineering example needs no schedule, no questions) it asks nothing and the responsibility goes straight to active; when something material is missing (the karate reminder needs a calendar source + lead time) it asks the one or two questions that unblock it. Structured-output: the responsibility-intake dispatcher (integrations/planner/responsibility_intake.go) calls ai('responsibilityIntake', ...), parses the JSON, applies the inferred fields + any questions via applyResponsibilityIntake, and -- once the user answers -- re-runs with answers folded in (foldResponsibilityIntakeAnswers) before flipping the row to active. Fast/cheap tier (chat54Mini) -- this is a quick classification + gap-spotting pass, not deep reasoning.")
 prompt responsibilityIntake {
-  statement   string    @required @description("The user's freeform responsibility statement, verbatim. The single most important input -- everything is inferred from it.")
+  statement   string! @description("The user's freeform responsibility statement, verbatim. The single most important input -- everything is inferred from it.")
   answers     []object            @description("Present only on the SECOND pass (after the user answered the clarifying questions): [{id, question, answer}] folding the user's responses back so the model can finalize the field set. Empty / absent on the first pass.")
   roleCatalog []object            @description("Optional compact snapshot of the available specialist roles -- [{slug, name, category}] -- so when targetKind='specialist' the model can pick a roleSlug from a real set (e.g. the 'all private functions have comments' standing directive maps to a software-engineering specialist). Empty is fine; the model falls back to a descriptive slug.")
   now         string              @description("Optional RFC3339 wall-clock, so a relative schedule ('every Monday', 'the day before') can be reasoned about against the current date. Opaque; never required.")

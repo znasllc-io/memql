@@ -8,7 +8,7 @@
 @description("Look up the workbench workspace row for a Plan. Returns empty when no workspace has been provisioned yet -- the integration uses this to decide whether to call provisionWorkspace on the first workbenchHost dispatch.")
 query workspace workspaceForPlan {
   args {
-    planId  string  @required
+    planId  string!
   }
   filter  planId==args.planId
   shape   workspaceFull

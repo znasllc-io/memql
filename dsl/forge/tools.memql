@@ -25,9 +25,9 @@
 @allowedRoles("owner", "admin", "developer", "writer")
 @mcp
 tool forgeRegisterProject {
-  projectId    string  @required @description("Fresh unique id for the project, e.g. a UUID. The caller mints it so it can reference the row immediately.")
-  slug         string  @required @description("Stable short id, e.g. 'memql' or 'acme-app'.")
-  name         string  @required @description("Human-readable project name.")
+  projectId    string! @description("Fresh unique id for the project, e.g. a UUID. The caller mints it so it can reference the row immediately.")
+  slug         string! @description("Stable short id, e.g. 'memql' or 'acme-app'.")
+  name         string! @description("Human-readable project name.")
   targetApp    string  @description("Which app this develops: memql / memql-cockpit / a client app / ...")
   repo         string  @description("Git repository URL or path.")
   description  string  @description("What the project is.")
@@ -46,7 +46,7 @@ tool forgeActiveProjects {}
 @allowedRoles("owner", "admin", "developer", "writer", "reader")
 @mcp
 tool forgeResolveProject {
-  slug  string  @required  @description("The stable short slug of the project, e.g. 'memql' or 'acme-app'.")
+  slug  string!  @description("The stable short slug of the project, e.g. 'memql' or 'acme-app'.")
 }
 
 // ----- submit + browse (open to all team members) -----
@@ -57,12 +57,12 @@ tool forgeResolveProject {
 @allowedRoles("owner", "admin", "developer", "writer", "reader")
 @mcp
 tool forgeSubmitRequest {
-  requestId  string  @required @description("Fresh unique id for the request, e.g. a UUID. The caller mints it so it can reference the row immediately.")
-  projectId   string  @required @description("v1:forge:project.id this request targets (from forgeActiveProjects).")
-  requestType string  @enum("bug", "feature", "chore", "question", "timeOff", "checkIn") @description("Request kind. Defaults to bug.")
-  title      string  @required @description("Short summary of the request.")
-  body       string  @required @description("Full description: what they want, what they saw, repro steps. Capture the employee's words plus any analysis Claude added.")
-  priority   string  @enum("low", "normal", "high", "urgent") @description("Optional priority. Defaults to normal.")
+  requestId  string! @description("Fresh unique id for the request, e.g. a UUID. The caller mints it so it can reference the row immediately.")
+  projectId   string! @description("v1:forge:project.id this request targets (from forgeActiveProjects).")
+  requestType enum("bug", "feature", "chore", "question", "timeOff", "checkIn") @description("Request kind. Defaults to bug.")
+  title      string! @description("Short summary of the request.")
+  body       string! @description("Full description: what they want, what they saw, repro steps. Capture the employee's words plus any analysis Claude added.")
+  priority   enum("low", "normal", "high", "urgent") @description("Optional priority. Defaults to normal.")
 }
 
 @handler(type="query", query="query myRequests()")
@@ -78,7 +78,7 @@ tool forgeMyRequests {}
 @allowedRoles("owner", "admin", "developer", "writer", "reader")
 @mcp
 tool forgeRequestById {
-  requestId  string  @required @description("Id of the request to fetch.")
+  requestId  string! @description("Id of the request to fetch.")
 }
 
 @handler(type="query", query="query requestEvents(requestId: \"$args.requestId\")")
@@ -87,7 +87,7 @@ tool forgeRequestById {
 @allowedRoles("owner", "admin", "developer", "writer")
 @mcp
 tool forgeRequestHistory {
-  requestId  string  @required @description("Id of the request whose history to fetch.")
+  requestId  string! @description("Id of the request whose history to fetch.")
 }
 
 // ----- developer/owner queues + transitions -----
@@ -105,7 +105,7 @@ tool forgeValidationQueue {}
 @allowedRoles("owner", "admin", "developer", "writer")
 @mcp
 tool forgeValidateRequest {
-  requestId  string  @required @description("Id of the request to validate.")
+  requestId  string! @description("Id of the request to validate.")
 }
 
 @handler(type="query", query="query approvalQueue()")
@@ -121,7 +121,7 @@ tool forgeApprovalQueue {}
 @allowedRoles("owner", "admin", "developer", "writer")
 @mcp
 tool forgeApproveRequest {
-  requestId  string  @required @description("Id of the request to approve.")
+  requestId  string! @description("Id of the request to approve.")
 }
 
 @handler(type="function", name="requestChanges")
@@ -130,8 +130,8 @@ tool forgeApproveRequest {
 @allowedRoles("owner", "admin", "developer", "writer")
 @mcp
 tool forgeRequestChanges {
-  requestId   string  @required @description("Id of the request to send back.")
-  resolution  string  @required @description("Why it's being sent back / what needs to change.")
+  requestId   string! @description("Id of the request to send back.")
+  resolution  string! @description("Why it's being sent back / what needs to change.")
 }
 
 // ----- mentoring -----
@@ -143,8 +143,8 @@ tool forgeRequestChanges {
 @mcp
 tool forgeRecordMentoring {
   eventId    string  @description("Fresh unique id for the event, e.g. a UUID. Optional -- the engine mints one if absent.")
-  requestId  string  @required @description("Id of the request that was mentored (from forgeSubmitRequest).")
-  note       string  @required @description("The mentoring explanation text Claude generated and showed to the user. Stored verbatim as the event note so the audit trail captures exactly what was taught.")
+  requestId  string! @description("Id of the request that was mentored (from forgeSubmitRequest).")
+  note       string! @description("The mentoring explanation text Claude generated and showed to the user. Stored verbatim as the event note so the audit trail captures exactly what was taught.")
 }
 
 // ----- attachments -----
@@ -155,6 +155,6 @@ tool forgeRecordMentoring {
 @allowedRoles("owner", "admin", "developer", "writer", "reader")
 @mcp
 tool forgeAttachToRequest {
-  requestId     string  @required @description("Id of the v1:forge:request to attach to.")
-  attachmentId  string  @required @description("Id of the v1:common:attachment to link. The attachment must already be uploaded (POST /spaces/{partitionId}/attachments). Call this tool once per file; each call appends without clobbering.")
+  requestId     string! @description("Id of the v1:forge:request to attach to.")
+  attachmentId  string! @description("Id of the v1:common:attachment to link. The attachment must already be uploaded (POST /spaces/{partitionId}/attachments). Call this tool once per file; each call appends without clobbering.")
 }

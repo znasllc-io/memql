@@ -106,6 +106,39 @@ func (p *Parser) parseArgsBlockField() (*ArgsField, error) {
 		field.Items = &ArgsField{Type: itemType}
 	}
 
+	// First-class enum type (#2618): `status enum("a", "b")` is the
+	// self-contained spelling of `status string @enum("a", "b")` --
+	// same representation (string type + Enum values), one statement.
+	// A bare `enum` with no parens keeps its legacy meaning (the
+	// lexicon's "pair with @enum(...)" form).
+	if typ == "enum" && p.check(TokenParenOpen) {
+		p.advance()
+		var values []any
+		for !p.check(TokenParenClose) {
+			if !p.check(TokenString) {
+				return nil, newParseErrorf(&p.current, "enum values must be quoted strings on args field %q", name)
+			}
+			values = append(values, p.current.Literal)
+			p.advance()
+			if p.check(TokenComma) {
+				p.advance()
+			}
+		}
+		p.advance() // consume `)`
+		if len(values) == 0 {
+			return nil, newParseErrorf(&p.current, "enum type on args field %q needs at least one value", name)
+		}
+		field.Type = "string"
+		field.Enum = values
+	}
+
+	// Required sigil (#2618): `name string!` sets required exactly as
+	// @required does. Sigil plus an explicit @required is idempotent.
+	if p.check(TokenBang) {
+		p.advance()
+		field.Optional = false
+	}
+
 	for p.check(TokenAt) {
 		p.advance() // consume `@`
 		if !p.check(TokenIdentifier) {

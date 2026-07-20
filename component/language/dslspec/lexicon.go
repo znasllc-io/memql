@@ -77,7 +77,7 @@ func fieldTypes() []FieldType {
 		{Name: "bool", Doc: "Boolean."},
 		{Name: "datetime", Doc: "RFC3339 timestamp."},
 		{Name: "object", Doc: "Nested object / JSON map."},
-		{Name: "enum", Doc: "Restricted value set (pair with @enum(...))."},
+		{Name: "enum", Doc: "Restricted value set. First-class parameterized form (#2618): `status enum(\"open\", \"closed\")` -- self-contained, same representation as the legacy `string @enum(...)` pair (which keeps parsing)."},
 		{Name: "array", Doc: "Deprecated list spelling.", Deprecated: true, ReplacedBy: "[]T"},
 	}
 }

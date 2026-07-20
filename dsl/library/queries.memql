@@ -27,7 +27,7 @@ query artifact libraryArtifacts {
 @description("List the caller's Library rows for one lens (artifact | record) -- backs the Artifacts | Records toggle. Owned: ownerUserId==actor.userId gates the row set; payload.lens narrows to the selected lens.")
 query artifact libraryArtifactsByLens {
   args {
-    lens  string  @required
+    lens  string!
   }
   filter  ownerUserId==actor.userId && lens==args.lens
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
@@ -41,7 +41,7 @@ query artifact libraryArtifactsByLens {
 @description("List the caller's Library rows of one kind (document / generated_output / note / todo / calendar_event / memory / live_source) -- backs the kind facet filter. Owned: ownerUserId==actor.userId gates the row set; payload.kind narrows to the selected kind.")
 query artifact libraryArtifactsByKind {
   args {
-    kind  string  @required
+    kind  string!
   }
   filter  ownerUserId==actor.userId && kind==args.kind
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
@@ -64,7 +64,7 @@ query artifact libraryArtifactsByKind {
 @unbounded("library artifact by id (guarded), gated to the owner -- bounded to a single row")
 query artifact libraryArtifactById {
   args {
-    artifactId  string  @required
+    artifactId  string!
   }
   filter  when(args.artifactId) { id==args.artifactId } && ownerUserId==actor.userId
   shape   artifactFull
@@ -74,7 +74,7 @@ query artifact libraryArtifactById {
 @unbounded("generated output by id (guarded), gated to the owner -- bounded to a single row")
 query generatedOutput generatedOutputById {
   args {
-    outputId  string  @required
+    outputId  string!
   }
   filter  when(args.outputId) { id==args.outputId } && ownerUserId==actor.userId
   shape   generatedOutputFull
@@ -83,7 +83,7 @@ query generatedOutput generatedOutputById {
 @description("List the generated-output rows a Plan produced. Owned: ownerUserId==actor.userId. The planner reads this as the authoritative 'did the deliverable actually get written?' signal for a produceArtifact plan -- promoteWorkbenchOutput stamps producedByPlanId on the row when a workbench fs_write is promoted. The planner stamps the plan's owner as actor before calling, so the read stays inside the owned-row authz model. (memql#939)")
 query generatedOutput generatedOutputsForPlan {
   args {
-    planId  string  @required
+    planId  string!
   }
   filter  ownerUserId==actor.userId && producedByPlanId==args.planId
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
@@ -98,7 +98,7 @@ query generatedOutput generatedOutputsForPlan {
 @unbounded("memory by id (guarded), gated to the owner -- bounded to a single row")
 query memory memoryById {
   args {
-    memoryId  string  @required
+    memoryId  string!
   }
   filter  when(args.memoryId) { id==args.memoryId } && ownerUserId==actor.userId
   shape   memoryFull
@@ -139,7 +139,7 @@ query artifact libraryWorkspaceLiveSources {
 @description("List the append-only version history of a logical document (every retained version, summary projection -- versionNumber, authorKind, author, note, createdAt -- WITHOUT the full body). Owned: ownerUserId==actor.userId gates the row set; payload.documentId narrows to the one document. Backs the Library history drawer (memql#1230); the frontend orders by versionNumber. Each version is a distinct retained row, so no version is ever lost.")
 query documentVersion documentVersions {
   args {
-    documentId  string  @required
+    documentId  string!
   }
   filter  ownerUserId==actor.userId && documentId==args.documentId
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
@@ -154,7 +154,7 @@ query documentVersion documentVersions {
 @unbounded("document version by id (guarded), gated to the owner -- bounded to a single row")
 query documentVersion documentVersionById {
   args {
-    versionId  string  @required
+    versionId  string!
   }
   filter  when(args.versionId) { id==args.versionId } && ownerUserId==actor.userId
   shape   documentVersionFull
@@ -172,7 +172,7 @@ query documentVersion documentVersionById {
 @description("Internal read for the edit/restore handlers: the full version history of a document (full projection) so the handler can compute the next versionNumber + the parentVersionId from the current latest. Owned: ownerUserId==actor.userId; the handler runs under a threaded owner actor. Mirrors documentVersions' filter with the full content shape.")
 query documentVersion documentVersionsForOwner {
   args {
-    documentId  string  @required
+    documentId  string!
   }
   filter  ownerUserId==actor.userId && documentId==args.documentId
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over

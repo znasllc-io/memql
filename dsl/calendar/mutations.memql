@@ -13,8 +13,8 @@
 mutate calendarEvent createCalendarEvent {
   args {
     eventId      string
-    title        string  @required
-    startsAt     datetime @required
+    title        string!
+    startsAt     datetime!
     endsAt       datetime
     allDay       bool
     location     string
@@ -36,8 +36,8 @@ mutate calendarEvent createCalendarEvent {
 @description("Partial update of a calendarEvent. Only the fields passed in `payload` change; everything else inherits from the prior row. Backs editing an event (reschedule, rename, change location / notes / recurrence). The calendar tool reads the row via the owner-scoped calendarEventById before calling this, so cross-user edits are impossible.")
 mutate calendarEvent updateCalendarEvent {
   args {
-    eventId  string  @required
-    payload  object  @required
+    eventId  string!
+    payload  object!
   }
   update {
     id: args.eventId
@@ -48,7 +48,7 @@ mutate calendarEvent updateCalendarEvent {
 @description("Soft-delete a calendarEvent by stamping deleted=true. The time-series row survives for history + so a future external-sync reconciler can propagate the deletion upstream; queries hide it via isNotDeleted. The calendar tool reads the row via the owner-scoped calendarEventById before calling this, so a caller can only delete their own events.")
 mutate calendarEvent deleteCalendarEvent {
   args {
-    eventId  string  @required
+    eventId  string!
   }
   update {
     id: args.eventId

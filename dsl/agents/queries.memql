@@ -33,7 +33,7 @@ query agent activeAgents {
 @unbounded("per-user standing authorizations -- a small bounded set the caller evaluates whole for authz decisions")
 query agentAuthorization agentAuthorizationsForUser {
   args {
-    userId  string  @required
+    userId  string!
   }
   filter  userId==args.userId && isActiveRecord
   shape   agentAuthorizationFull
@@ -49,7 +49,7 @@ query agentAuthorization agentAuthorizationsForUser {
 @description("Get an agent by ID with full configuration.")
 query agent agentById {
   args {
-    agentId  string  @required
+    agentId  string!
   }
   filter  id==args.agentId
   shape   agentFull
@@ -67,7 +67,7 @@ query agent agentById {
 @description("Resolve an agent's owning-user (ownerUserId / createdBy) by id.")
 query agent agentOwner {
   args {
-    agentId  string  @required
+    agentId  string!
   }
   filter  id==args.agentId
   shape   agentFull
@@ -118,7 +118,7 @@ query agent allAgents {
 @unbounded("per-user agents minimal projection for dedupe -- the caller must see all to dedupe")
 query agent activeAgentsForUser {
   args {
-    ownerUserId  string  @required
+    ownerUserId  string!
   }
   filter  ownerUserId==args.ownerUserId && isActiveRecord && isNotDeleted
   shape   agentMinimalForDedupe
@@ -137,7 +137,7 @@ query agent activeAgentsForUser {
 @unbounded("the per-user assistant agent (roleSlug==assistant singleton) -- bounded to a single row")
 query agent assistantAgentForUser {
   args {
-    ownerUserId  string  @required
+    ownerUserId  string!
   }
   filter  ownerUserId==args.ownerUserId && roleSlug=="assistant" && isActiveRecord && isNotDeleted
   shape   agentMinimalForDedupe
@@ -148,10 +148,10 @@ query agent assistantAgentForUser {
 // activeAgentRoles (v1:agents:* forwarded in component/node/routing.go).
 @description("Resolve a single agentRole row by its slug. Used by the role catalog seeder (idempotency check) and by the agent-creation path (look up the locked + default sets when materializing a new agent for the slug).")
 @unbounded("agent role by unique slug -- bounded to a single row")
-@cache(ttl="300")
+@cache(300)
 query agentRole agentRoleBySlug {
   args {
-    slug  string  @required
+    slug  string!
   }
   filter  slug==args.slug && isActiveRecord
   shape   agentRoleFull
@@ -169,7 +169,7 @@ query agentRole agentRoleBySlug {
 // annotations and the `query` header would drop the SDK doc string.
 @description("List every active agentRole row. Backs the role picker on the cockpit's agent-creation surface and on the role-management view. predefined rows render with a lock icon; user-created rows are fully editable.")
 @unbounded("agent role catalog -- a small admin-defined bounded set consumed whole")
-@cache(ttl="300")
+@cache(300)
 query agentRole activeAgentRoles {
   filter  isActiveRecord
   shape   agentRoleFull
@@ -180,10 +180,10 @@ query agentRole activeAgentRoles {
 // 5.4 invalidation evicts on every replica.
 @description("Resolve a single skill catalog row by its slug. Used by the planner-driven mintSkill / attach flows to look up a candidate skill's full composition before deciding whether to apply it.")
 @unbounded("skill by unique slug -- bounded to a single row")
-@cache(ttl="300")
+@cache(300)
 query skill skillBySlug {
   args {
-    slug  string  @required
+    slug  string!
   }
   filter  slug==args.slug && isActiveRecord
   shape   skillFull
@@ -194,7 +194,7 @@ query skill skillBySlug {
 // v1:agents:* forward rules in component/node/routing.go.
 @description("List every active skill catalog row -- summary projection. Backs the Skills picker on the role-edit surface (cockpit#124) and the Planner Agent's candidate scan when deciding which skill bundle to attach in extendSpecialist. Predefined rows render with a lock icon; user-created rows are fully editable.")
 @unbounded("skill catalog (summary) -- a small admin-defined bounded registry consumed whole")
-@cache(ttl="300")
+@cache(300)
 query skill activeSkills {
   filter  isActiveRecord
   shape   skillSummary
@@ -206,7 +206,7 @@ query skill activeSkills {
 // (component/node/routing.go).
 @description("List every active skill catalog row with its full bundle composition (domainIds + toolSlugs + liveSourceIds). Heavier projection than activeSkills; use this when a caller needs to resolve agent capabilities by unioning skill bundles in-process (cockpit#124's Agents view does this on every detail render). The catalog is small (25 rows in Phase 2; growth tracked via the Phase 3 mintSkill roadmap) so the single-shot full-list query is cheaper than N skillBySlug round-trips.")
 @unbounded("skill catalog (full) -- a small admin-defined bounded registry consumed whole")
-@cache(ttl="300")
+@cache(300)
 query skill activeSkillsFull {
   filter  isActiveRecord
   shape   skillFull
@@ -216,7 +216,7 @@ query skill activeSkillsFull {
 @unbounded("skills needing refresh on a stale domain -- an internal refresh sweep over the bounded skill catalog")
 query skill skillNeedsRefresh {
   args {
-    staleDomainId  string  @required
+    staleDomainId  string!
   }
   filter  isActiveRecord && when(args.staleDomainId) { args.staleDomainId in domainIds }
   shape   skillSummary
@@ -225,7 +225,7 @@ query skill skillNeedsRefresh {
 @description("Phase 3 (memql#159 / cockpit#125): list v1:agents:skillChangeEvent rows for a target agent. Backs the cockpit planner trace viewer's per-agent skill-history surface -- the operator selects a Plan, sees its ownerAgentId, and this query feeds the timeline of every attach / reconfigure recorded against that agent (newest first). The skillChangeEvent rows are append-only, so this is just a filter + sort against the time-series.")
 query skillChangeEvent skillChangeEventsForAgent {
   args {
-    targetAgentId  string  @required
+    targetAgentId  string!
   }
   filter  targetAgentId==args.targetAgentId
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
@@ -240,7 +240,7 @@ query skillChangeEvent skillChangeEventsForAgent {
 @unbounded("avatar persona catalog -- a small bounded set consumed whole")
 query avatarPersona avatarPersonas {
   args {
-    vendor  string  @enum("anam", "simli")
+    vendor  enum("anam", "simli")
   }
   filter  isActiveRecord && when(args.vendor) { vendor==args.vendor }
   shape   avatarPersonaFull
@@ -249,7 +249,7 @@ query avatarPersona avatarPersonas {
 @description("Resolve a single avatar persona by id. Hydrates an agent's stamped avatarPersonaId for display and resolves the vendor + vendor-issued personaId.")
 query avatarPersona avatarPersonaById {
   args {
-    avatarPersonaId  string  @required
+    avatarPersonaId  string!
   }
   filter  id==args.avatarPersonaId
   shape   avatarPersonaFull

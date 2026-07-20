@@ -11,7 +11,7 @@ mutate agent createAgent {
   args {
     agentId          string
     ownerUserId      string
-    name             string  @required
+    name             string!
     description      string
     personality      string
     role             string
@@ -49,10 +49,10 @@ mutate agent createAgent {
 mutate agentAuthorization createAgentAuthorization {
   args {
     authId            string
-    agentId           string  @required
-    userId            string  @required
-    planKind          string  @required
-    spaceScope        string  @required
+    agentId           string!
+    userId            string!
+    planKind          string!
+    spaceScope        string!
     tokenBudgetCap    int
     expiresAt         string
     computerUseScope  string
@@ -70,7 +70,7 @@ mutate agentAuthorization createAgentAuthorization {
 @description("Soft-delete an agent (active:false, deleted:true). Read-merges the existing row so the caller only passes the agent id; every other required field (kind, name, ...) inherits from the persisted row instead of being re-supplied (memql#1628).")
 mutate agent deleteAgent {
   args {
-    agentId  string  @required
+    agentId  string!
   }
   update {
     id: args.agentId
@@ -82,7 +82,7 @@ mutate agent deleteAgent {
 @description("Soft-revoke a standing authorization. User-revocable from the agent's settings at any time. Read-merges the existing row so the caller only passes the auth id; agentId/userId/planKind/spaceScope inherit from the persisted row (memql#1628).")
 mutate agentAuthorization revokeAgentAuthorization {
   args {
-    authId  string  @required
+    authId  string!
   }
   update {
     id: args.authId
@@ -93,8 +93,8 @@ mutate agentAuthorization revokeAgentAuthorization {
 @description("Partial update of a v1:agents:agent row. Only the fields you pass are changed; other fields inherit from the prior row.")
 mutate agent updateAgent {
   args {
-    agentId  string  @required
-    payload  object  @required
+    agentId  string!
+    payload  object!
   }
   update {
     id: args.agentId
@@ -105,8 +105,8 @@ mutate agent updateAgent {
 @description("Partial update of a v1:agents:agentAuthorization row. Mirrors updateAgent semantics: only the fields passed in `payload` change; everything else inherits from the prior row. Backs the canvas mintSkillApprovalRequested card's 'Approve & always allow this tier' action (pack#38, memql#169) -- the SPA reads the current skillTierAllowlist, appends the approved tier, and writes the whole array back as `{skillTierAllowlist: [...]}`. Per the agentAuthorization concept's revocation contract this is an OWNED write: only the granting user (the row's payload.userId) may update their own authorization grant.")
 mutate agentAuthorization updateAgentAuthorization {
   args {
-    authId   string  @required
-    payload  object  @required
+    authId   string!
+    payload  object!
   }
   update {
     id: args.authId
@@ -118,15 +118,15 @@ mutate agentAuthorization updateAgentAuthorization {
 mutate skill mintSkill {
   args {
     skillId            string
-    slug               string  @required
-    name               string  @required
+    slug               string!
+    name               string!
     description        string
     category           string
     tags               array
     domainIds          array
     toolSlugs          array
     liveSourceIds      array
-    tier               string  @required
+    tier               string!
     originatingPlanId  string
     mintedByAgentId    string
   }
@@ -152,15 +152,15 @@ mutate skill mintSkill {
 mutate skill createSkill {
   args {
     skillId        string
-    slug           string  @required
-    name           string  @required
+    slug           string!
+    name           string!
     description    string
     category       string
     tags           array
     domainIds      array
     toolSlugs      array
     liveSourceIds  array
-    tier           string  @required
+    tier           string!
     predefined     bool
     active         bool
   }
@@ -183,9 +183,9 @@ mutate skill createSkill {
 @description("Append a v1:agents:skillChangeEvent row recording a skill attach / reconfigure on an agent. Phase 2 (#158) cut: every Planner Agent extendSpecialist / createSpecialist flow that lands a skill on an agent issues one of these per skill. Phase 3 also writes them from the cockpit Skills admin view when a human attaches a skill manually. Empty actorAgentId + actorUserId is allowed for system-driven attaches (the migration tool writes events with actorUserId='system:migration:phase2'). The caller is responsible for providing skillChangeEventId -- mint via the standard NewShortId / MustFromMap helpers caller-side.")
 mutate skillChangeEvent createSkillChangeEvent {
   args {
-    skillChangeEventId  string  @required
-    targetAgentId       string  @required
-    skillId             string  @required
+    skillChangeEventId  string!
+    targetAgentId       string!
+    skillId             string!
     changeKind          string
     before              object
     after               object
@@ -210,8 +210,8 @@ mutate skillChangeEvent createSkillChangeEvent {
 mutate agentRole createAgentRole {
   args {
     agentRoleId             string
-    slug                    string  @required
-    name                    string  @required
+    slug                    string!
+    name                    string!
     description             string
     category                string
     tier                    string
@@ -250,10 +250,10 @@ mutate agentRole createAgentRole {
 mutate avatarPersona createAvatarPersona {
   args {
     avatarPersonaId  string
-    vendor           string  @required
-    personaId        string  @required
-    name             string  @required
-    gender           string  @required
+    vendor           string!
+    personaId        string!
+    name             string!
+    gender           string!
     imageRef         string
     previewRef       string
     active           bool

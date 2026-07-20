@@ -2012,6 +2012,21 @@ func (p *Parser) parseBuiltinField() (*BuiltinField, error) {
 	field.Type += p.current.Literal
 	p.advance()
 
+	// First-class enum type + required sigil (#2618), mirroring the
+	// args-block field grammar: `status enum("a","b")!`.
+	if field.Type == "enum" && p.check(TokenParenOpen) {
+		values, err := p.parseParenStringList("builtin field " + field.Name)
+		if err != nil {
+			return nil, err
+		}
+		field.Type = "string"
+		field.Attributes = append(field.Attributes, enumAttributeFromValues(values))
+	}
+	if p.check(TokenBang) {
+		p.advance()
+		field.Required = true
+	}
+
 	// Field-level annotations: consume `@attribute(args)` while next
 	// token is `@`. The annotation cluster ends as soon as we see an
 	// ident (= next field's name) or `}` (= end of body).
@@ -2144,6 +2159,21 @@ func (p *Parser) parsePromptField() (*PromptField, error) {
 	}
 	field.Type += p.current.Literal
 	p.advance()
+
+	// First-class enum type + required sigil (#2618), mirroring
+	// parseBuiltinField.
+	if field.Type == "enum" && p.check(TokenParenOpen) {
+		values, err := p.parseParenStringList("prompt field " + field.Name)
+		if err != nil {
+			return nil, err
+		}
+		field.Type = "string"
+		field.Attributes = append(field.Attributes, enumAttributeFromValues(values))
+	}
+	if p.check(TokenBang) {
+		p.advance()
+		field.Required = true
+	}
 
 	// Field-level annotations: consume `@attribute(args)` while next
 	// token is `@`. Mirrors parseBuiltinField.
@@ -2447,6 +2477,16 @@ func (p *Parser) parsePropertyDecl() (*PropertyDecl, error) {
 	}
 	prop.Type = typ
 
+	// Required sigil (#2618): `name string!` means @required. The
+	// synthesized attribute is identical to a parsed @required, and a
+	// sigil beside an explicit @required stays idempotent (single
+	// attribute, deduped after the trailing-annotation loop).
+	sigilRequired := false
+	if p.check(TokenBang) {
+		p.advance()
+		sigilRequired = true
+	}
+
 	// Trailing property annotations. Stop as soon as we see
 	// `@relationship` -- that one belongs to the concept body, not
 	// the property, and the caller (parseConceptDecl) is waiting for
@@ -2460,8 +2500,15 @@ func (p *Parser) parsePropertyDecl() (*PropertyDecl, error) {
 			return nil, err
 		}
 		if attr != nil {
+			if attr.Name == "required" && sigilRequired {
+				continue // sigil already carries it (#2618)
+			}
 			prop.Attributes = append(prop.Attributes, attr)
 		}
+	}
+
+	if sigilRequired {
+		prop.Attributes = append(prop.Attributes, &Attribute{Name: "required", Args: map[string]any{}})
 	}
 
 	// Variant-block body:
@@ -3362,6 +3409,24 @@ func (p *Parser) attachAttributes(def Node, attributes []*Attribute) Node {
 }
 
 // getAttrString extracts a string value from an attribute (from Value or Args[""])
+// attrNumericString renders a positional numeric attribute value
+// (@cache(300)) as its decimal string, or "" when the value is not
+// numeric.
+func attrNumericString(attr *Attribute) string {
+	switch v := attr.Value.(type) {
+	case int:
+		return strconv.Itoa(v)
+	case int64:
+		return strconv.FormatInt(v, 10)
+	case float64:
+		if v == float64(int64(v)) {
+			return strconv.FormatInt(int64(v), 10)
+		}
+		return strconv.FormatFloat(v, 'f', -1, 64)
+	}
+	return ""
+}
+
 func getAttrString(attr *Attribute) string {
 	if s, ok := attr.Value.(string); ok {
 		return s
@@ -3410,8 +3475,12 @@ func (p *Parser) processFunctionAttributes(d *FunctionDef, attributes []*Attribu
 		case AttrCache:
 			if v := getAttrArgString(attr, "ttl"); v != "" {
 				d.CacheTTL = v
-			} else {
-				d.CacheTTL = getAttrString(attr)
+			} else if v := getAttrString(attr); v != "" {
+				d.CacheTTL = v
+			} else if v := attrNumericString(attr); v != "" {
+				// Positional numeric form (#2618): @cache(300). The
+				// registry's single ttl arg makes position unambiguous.
+				d.CacheTTL = v
 			}
 		case AttrNocache:
 			// @nocache is the clearer opt-out alias for @cache(ttl="0")
@@ -7513,4 +7582,43 @@ func numericAsInt(v any) (int, bool) {
 		return int(int32(n)), true
 	}
 	return 0, false
+}
+
+// parseParenStringList consumes `("a", "b", ...)` and returns the
+// values -- the enum-type value list shared by the field parsers
+// (#2618). The opening paren must be the current token.
+func (p *Parser) parseParenStringList(where string) ([]string, error) {
+	p.advance() // consume `(`
+	var values []string
+	for !p.check(TokenParenClose) && !p.check(TokenEOF) {
+		if !p.check(TokenString) {
+			return nil, newParseErrorf(&p.current, "enum values must be quoted strings on %s, got %q", where, p.current.Literal)
+		}
+		values = append(values, p.current.Literal)
+		p.advance()
+		if p.check(TokenComma) {
+			p.advance()
+		}
+	}
+	if err := p.expect(TokenParenClose); err != nil {
+		return nil, err
+	}
+	if len(values) == 0 {
+		return nil, newParseErrorf(&p.current, "enum type on %s needs at least one value", where)
+	}
+	return values, nil
+}
+
+// enumAttributeFromValues synthesizes the attribute the @enum
+// annotation would have produced (a single string stores bare;
+// multiple store as []string -- parseAttribute's shape), so the enum
+// TYPE form is indistinguishable downstream (#2618).
+func enumAttributeFromValues(values []string) *Attribute {
+	attr := &Attribute{Name: "enum", Args: map[string]any{}}
+	if len(values) == 1 {
+		attr.Value = values[0]
+	} else {
+		attr.Value = values
+	}
+	return attr
 }

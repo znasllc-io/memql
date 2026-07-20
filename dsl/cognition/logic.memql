@@ -55,7 +55,7 @@ use identity.queries.{ usersActiveInSpace }
 @description("Decides whether a new v1:cognition:session must be created for a freshly-created participant: returns true when no session exists yet (idempotency via participantSession). The bootstrapSession automation performs the gated createSessionForParticipant insert + session.created emit.")
 logic bootstrapSession {
   args {
-    event object @required
+    event object!
   }
   body {
   // The event payload contains the newly created participant node with flattened fields:
@@ -89,7 +89,7 @@ logic bootstrapSession {
 @eventField("agentId", "promptData", "promptTemplateId", "siParticipantId", "partitionId", "utteranceId")
 logic generateResponse {
   args {
-    event object @required
+    event object!
   }
   body {
   // The event payload is assembled by the Go cognition handler with:
@@ -163,7 +163,7 @@ logic generateResponse {
 @eventField("activePartitionId", "id")
 logic voiceMigrationOnSecondHuman {
   args {
-    event object @required
+    event object!
   }
   body {
   active := query usersActiveInSpace( partitionId: args.event.payload.activePartitionId )

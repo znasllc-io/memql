@@ -6,10 +6,10 @@
 @description("Create the cluster record")
 mutate cluster createCluster {
   args {
-    name                string  @required
+    name                string!
     region              string
-    environment         string  @required
-    status              string  @enum("bootstrapping", "healthy", "degraded", "shutting_down")
+    environment         string!
+    status              enum("bootstrapping", "healthy", "degraded", "shutting_down")
     databaseId          string
     identityProviderId  string
     version             string
@@ -35,8 +35,8 @@ mutate cluster createCluster {
 @description("Register the cluster's database in the graph")
 mutate database createDatabase {
   args {
-    host     string  @required
-    dbName   string  @required
+    host     string!
+    dbName   string!
     sslMode  string
   }
   insert {
@@ -56,8 +56,8 @@ mutate database createDatabase {
 @description("Register the cluster's identity provider in the graph")
 mutate identityProvider createIdentityProvider {
   args {
-    name            string  @required
-    issuerUrl       string  @required
+    name            string!
+    issuerUrl       string!
     clientIdPrefix  string
     redirectUrl     string
   }
@@ -81,7 +81,7 @@ mutate identityProvider createIdentityProvider {
 mutate node createNode {
   args {
     id            string
-    nodeType      string    @required
+    nodeType      string!
     address       string
     health        string
     lastSeen      string
@@ -115,9 +115,9 @@ mutate node createNode {
 @description("Record a node lifecycle event")
 mutate spawnEvent createSpawnEvent {
   args {
-    nodeId       string  @required
-    nodeType     string  @required
-    action       string  @required
+    nodeId       string!
+    nodeType     string!
+    action       string!
     initiatorId  string
     reason       string
     metadata     object
@@ -143,9 +143,9 @@ mutate spawnEvent createSpawnEvent {
 @description("Record a node health transition. Read-merges the existing v1:cluster:node row (created on startup by registerNode under the same NodeId) so only health + lastSeen change; nodeType/address/parentId/capabilities/labels inherit from the persisted row instead of being wiped when a caller omits them (memql#1628 -- previously the insert form re-stamped address to \"\" and reset capabilities/labels on every transition).")
 mutate node updateNodeHealth {
   args {
-    id        string  @required
-    health    string  @required
-    lastSeen  string  @required
+    id        string!
+    health    string!
+    lastSeen  string!
   }
   update {
     accept { id, health, lastSeen }

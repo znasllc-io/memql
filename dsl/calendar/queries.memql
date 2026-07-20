@@ -13,7 +13,7 @@ use common.traits.{ isNotDeleted }
 @mcp
 query calendarEvent calendarEventById {
   args {
-    eventId  string  @required
+    eventId  string!
   }
   filter  id==args.eventId && ownerUserId==actor.userId && isNotDeleted
   shape   calendarEventFull
@@ -23,8 +23,8 @@ query calendarEvent calendarEventById {
 @mcp
 query calendarEvent upcomingEvents {
   args {
-    windowStart  datetime  @required
-    windowEnd    datetime  @required
+    windowStart  datetime!
+    windowEnd    datetime!
   }
   filter  ownerUserId==actor.userId && startsAt>=args.windowStart && startsAt<=args.windowEnd && isNotDeleted
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
@@ -38,8 +38,8 @@ query calendarEvent upcomingEvents {
 @description("List the authenticated caller's events that start on a given day, bounded by the caller-supplied [dayStart, dayEnd] instants (computed in the user's timezone client-side). Self-scoped via actor.userId. Backs the calendar tool's day view and 'what's on my schedule today' agent queries.")
 query calendarEvent eventsByDay {
   args {
-    dayStart  datetime  @required
-    dayEnd    datetime  @required
+    dayStart  datetime!
+    dayEnd    datetime!
   }
   filter  ownerUserId==actor.userId && startsAt>=args.dayStart && startsAt<args.dayEnd && isNotDeleted
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
@@ -53,7 +53,7 @@ query calendarEvent eventsByDay {
 @description("Find the caller's own events by exact title. Self-scoped via actor.userId. Backs the calendar tool's `find` action ('find my dentist appointment'); the agent passes the title it captured. Exact match keeps the predicate SQL-pushdownable -- substring / semantic search is a downstream concern (the agent can list a window via upcomingEvents and filter conversationally).")
 query calendarEvent findEvents {
   args {
-    title  string  @required
+    title  string!
   }
   filter  ownerUserId==actor.userId && title==args.title && isNotDeleted
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over

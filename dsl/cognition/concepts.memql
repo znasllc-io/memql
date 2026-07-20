@@ -9,10 +9,10 @@ use identity.concepts.{ user }
 @namespace("cognition")
 @description("Per-(partitionId, agentId) audio control override. Lets a user dial a single agent's TTS publication on / off / mirror_user inside one space without changing the agent's own default (audioControl on v1:agents:agent). Written by the orb-corner overlay in PresencePanel + the canvas presence widget. Read by the cognition handler before forwarding TTS to the Bridge Agent: an active override beats the agent default; absence falls through to the agent default. id is the deterministic audioOverride:<partitionId>:<agentId> so re-toggling on the same orb hits the same row instead of growing a per-click history.")
 concept audioOverride {
-  partitionId   string  @required @description("v1:cognition:space.id this override is scoped to.")
-  agentId   string  @required @description("v1:agents:agent.id this override targets.")
+  partitionId   string! @description("v1:cognition:space.id this override is scoped to.")
+  agentId   string! @description("v1:agents:agent.id this override targets.")
   setBy     string  @description("v1:identity:user.id of the actor who flipped the override -- the space owner under v1 permission rules. Audited against v1:identity:auditEvent.")
-  mode      enum("always_on", "always_off", "mirror_user")  @required @description("Effective publication state. The bridge gating path treats this exactly the same as the agent default once selected: always_on publishes unconditionally; always_off suppresses TTS while letting text replies still flow to chat; mirror_user honours the user's current mic state, querying it at TTS-start time (not per-frame).")
+  mode      enum("always_on", "always_off", "mirror_user")! @description("Effective publication state. The bridge gating path treats this exactly the same as the agent default once selected: always_on publishes unconditionally; always_off suppresses TTS while letting text replies still flow to chat; mirror_user honours the user's current mic state, querying it at TTS-start time (not per-frame).")
   active    bool  @default("true") @description("Soft-revoke flag. Setting active=false collapses back to the agent default without losing the row's history.")
 
   @relationship(type="interactsWith", field="agentId", target=agent, direction="outgoing")
@@ -21,12 +21,12 @@ concept audioOverride {
 @namespace("cognition:text")
 @description("A streaming text chunk emitted incrementally during AI response generation. The frontend subscribes to creation events and accumulates chunks into a real-time message.")
 concept chunk {
-  done  bool  @required  @description("Whether this is the final chunk.")
-  index  int  @required  @description("Sequential chunk index (0-based).")
-  participantId  string  @required  @description("AI participant generating the text.")
-  replyId  string  @required  @description("Stable id for the entire turn. Every chunk in the same agent reply carries the same replyId, and the committed utterance for the reply uses this as its id. The frontend keys the rendered bubble by replyId so streaming chunks and the final commit address the same React element -- no remount, no avatar flicker.")
-  partitionId  string  @required  @description("Space where the text is being generated.")
-  text  string  @required  @description("The text content of this chunk.")
+  done  bool!  @description("Whether this is the final chunk.")
+  index  int!  @description("Sequential chunk index (0-based).")
+  participantId  string!  @description("AI participant generating the text.")
+  replyId  string!  @description("Stable id for the entire turn. Every chunk in the same agent reply carries the same replyId, and the committed utterance for the reply uses this as its id. The frontend keys the rendered bubble by replyId so streaming chunks and the final commit address the same React element -- no remount, no avatar flicker.")
+  partitionId  string!  @description("Space where the text is being generated.")
+  text  string!  @description("The text content of this chunk.")
 
   @relationship(type="createdBy", field="participantId", target=participant, direction="outgoing")
 }
@@ -34,9 +34,9 @@ concept chunk {
 @namespace("cognition:client:tool")
 @description("Ephemeral request envelope for a client-executed tool call bridging cluster nodes. Inserted by cognition's client-tool relay when the agent node emits a ClientToolCall that needs to reach a browser stream on BFF. The browser (via its client-tool relay bridge) subscribes to these events, dispatches the tool, and inserts a matching v1:cognition:client:tool:response. Records are not retained -- once the response arrives the pair is a no-op for future consumers. Lives under v1:cognition because the relay is a cognition-level concern (mediating between the agent loop and the browser stream); consuming products need not define their own variant.")
 concept request {
-  callId  string  @required  @description("UUID correlating this request with its eventual v1:cognition:client:tool:response. Matches the ClientToolCall.call_id the agent emitted.")
+  callId  string!  @description("UUID correlating this request with its eventual v1:cognition:client:tool:response. Matches the ClientToolCall.call_id the agent emitted.")
 
-  toolName  string  @required  @description("Canonical tool name (e.g. `uiReadState`, `uiHighlight`). Resolved against the client-side tool registry.")
+  toolName  string!  @description("Canonical tool name (e.g. `uiReadState`, `uiHighlight`). Resolved against the client-side tool registry.")
 
   argumentsJSON  string  @description("JSON-encoded arguments object for the tool. Empty string is equivalent to `{}`.")
 
@@ -54,7 +54,7 @@ concept request {
 @namespace("cognition:client:tool")
 @description("Ephemeral response envelope paired with a v1:cognition:client:tool:request. Inserted by the browser after it dispatches the tool via the client-tool relay bridge. Cognition subscribes to these events, matches on callId, wraps the payload in a ClientToolResult MemqlClientMessage and forwards it to the agent node via AiForwardRequest so the parked agent tool-loop waiter unblocks.")
 concept response {
-  callId  string  @required  @description("UUID matching the v1:cognition:client:tool:request this response fulfils.")
+  callId  string!  @description("UUID matching the v1:cognition:client:tool:request this response fulfils.")
 
   contentJSON  string  @description("JSON-encoded ToolResultContent[] produced by the browser-side tool dispatcher. Empty for error results.")
 
@@ -75,14 +75,14 @@ concept participant {
     vision  bool
     voiceToVoice  bool
   }
-  displayName  string  @required  @description("Display name shown in the UI.")
+  displayName  string!  @description("Display name shown in the UI.")
   forUserId  string  @description("v1:identity:user.id this AI participant belongs to (which human's team is this agent on?). Required on every AI participant inserted by the agent-roster mutations -- humans bring their own agents into their own private team chat, never each other's. Empty for human participants. The engine pre-insert guard enforces non-empty forUserId on AI participants and validates it matches the authenticated caller (non-elevated callers cannot land an agent on someone else's team). Used by the per-user-per-space 3-cap and by Phase 6's discussion-mode dispatch loop to find the per-user agent set.")
   isGroupGA  bool  @default(false)  @description("True only on the owner's Assistant when it sits in the space's group context. The owner's GA is the only AI in group chat; specialists stay in per-user team chats. The participant guard rejects status='left' inserts on isGroupGA=true rows from non-elevated callers, so the GA cannot be removed from the group via the Roster tab. Set by the autoJoinAI automation on space creation (Phase 1.5) and never via the agent-roster mutations.")
   isGuest  bool  @default(false)  @description("Whether this participant joined via a guest invite (external, no user account of their own).")
   joinedAt  datetime  @description("When the participant joined the space.")
   leftAt  datetime  @description("When the participant left the space.")
-  participantType  enum("human", "si")  @required  @description("Whether this is a human or AI participant. Guests use \"human\" with isGuest=true and userId empty.")
-  partitionId  string  @required  @description("ID of the space this participant belongs to.")
+  participantType  enum("human", "si")!  @description("Whether this is a human or AI participant. Guests use \"human\" with isGuest=true and userId empty.")
+  partitionId  string!  @description("ID of the space this participant belongs to.")
   status  enum("active", "idle", "left")  @default("active")  @description("Participant lifecycle status. Real-time speaking state is tracked in v1:cognition:session.")
   userId  string  @description("External user ID (for human participants).")
   hidden  bool  @default(false)  @description("When true, the participant is present in the space for routing purposes but is never rendered in participant-facing UI (PresencePanel, invite lists, etc.).")
@@ -103,15 +103,15 @@ concept presence {
     requiresHumanApproval  bool
     shouldRespond  bool
   }
-  label  string  @required  @description("Short UI label for the current state (e.g. 'Thinking…', 'Waiting', 'Paused').")
+  label  string!  @description("Short UI label for the current state (e.g. 'Thinking…', 'Waiting', 'Paused').")
   lastError  string  @description("Optional: last error message (safe, non-sensitive).")
-  lastUpdatedAt  datetime  @required  @description("When this presence snapshot was last written.")
+  lastUpdatedAt  datetime!  @description("When this presence snapshot was last written.")
   lastUtteranceId  string  @description("Optional: utterance that this status relates to.")
-  participantId  string  @required  @description("ID of the participant this presence snapshot describes.")
+  participantId  string!  @description("ID of the participant this presence snapshot describes.")
   reason  string  @description("Optional, user-friendly explanation for state (avoid internal jargon).")
-  sinceAt  datetime  @required  @description("When this state began (best-effort).")
-  partitionId  string  @required  @description("ID of the space this presence snapshot belongs to.")
-  state  enum("idle", "listening", "thinking", "responding", "typing", "waiting", "needs_clarification", "needs_human", "paused", "error", "working", "using_tool", "researching", "investigating")  @required  @description("High-level, user-friendly state for UI rendering.")
+  sinceAt  datetime!  @description("When this state began (best-effort).")
+  partitionId  string!  @description("ID of the space this presence snapshot belongs to.")
+  state  enum("idle", "listening", "thinking", "responding", "typing", "waiting", "needs_clarification", "needs_human", "paused", "error", "working", "using_tool", "researching", "investigating")!  @description("High-level, user-friendly state for UI rendering.")
 
   @relationship(type="parent", field="participantId", target=participant, direction="outgoing")
 }
@@ -130,8 +130,8 @@ concept session {
     microphoneEnabled  bool  @default("false")  @description("Whether the microphone is currently enabled.")
   }
   lastActivityAt  datetime  @description("Timestamp of last activity in this session.")
-  participantId  string  @required  @description("ID of the participant this session tracks.")
-  partitionId  string  @required  @description("ID of the space this session belongs to.")
+  participantId  string!  @description("ID of the participant this session tracks.")
+  partitionId  string!  @description("ID of the space this session belongs to.")
   startedAt  datetime  @description("When the session started.")
   streams  object  @description("Active stream and session identifiers for external services: {realtimeSessionId?, avatarStreamId?, audioTrackId?, videoTrackId?}. Matches the createSessionForParticipant `streams object` arg and the SPA's SessionStreams payload (memql#1321).")
 
@@ -162,7 +162,7 @@ concept state {
   queue  []string  @description("Queue of participant IDs waiting to speak.")
   respondingAgentId  string  @description("ID of the AI participant selected to respond in this turn. Used by the AI responder to pick the right agent in multi-agent spaces.")
   silenceDuration  int  @description("Milliseconds of silence (for detecting pauses).")
-  partitionId  string  @required  @description("ID of the space this turn state belongs to.")
+  partitionId  string!  @description("ID of the space this turn state belongs to.")
   trigger  string  @description("Why this turn state version was produced (e.g., utterance, silence_nudge, init).")
 
 }
@@ -187,7 +187,7 @@ concept utterance {
   citations  []object  @description("Source citations for the utterance text. Each item has shape {domainId: string, matchedPhrase: string} -- the frontend wraps each matchedPhrase in the rendered text with a clickable chip linking to the named knowledge domain. Populated by cognition from the agent's respondToUser envelope.")
   retrieved  []object  @description("RAG retrieval audit -- the full chunk pool the agent's replier surfaced to the LLM BEFORE the model decided what to cite. Each item has shape {domainId, sourceRef, similarity, textPreview, citation}. Distinct from `citations`: `citations` names what the model used; `retrieved` names what the model SAW. The frontend's 'Show details' expander beneath each agent reply renders both so the user can see passages the model considered but didn't cite. Empty when no domains were attached or retrieval returned nothing.")
   duration  int  @description("Duration in milliseconds (for audio/video).")
-  participantId  string  @required  @description("ID of the participant who created this utterance.")
+  participantId  string!  @description("ID of the participant who created this utterance.")
   participantType  enum("human", "si", "system")  @description("Type of participant (denormalized from participant for filtering).")
   replyToId  string  @description("ID of utterance this is replying to (for threading).")
   source {
@@ -198,12 +198,12 @@ concept utterance {
     sttProvider  string  @description("Speech-to-text provider used (e.g., openai-realtime, openai-whisper).")
     ttsProvider  string  @description("Text-to-speech provider used (e.g., elevenlabs, openai).")
   }
-  partitionId  string  @required  @description("ID of the space this utterance belongs to.")
+  partitionId  string!  @description("ID of the space this utterance belongs to.")
   text  string  @description("Text content (transcribed or typed).")
   timestamps {
     words  []object
   }
-  utteranceType  enum("speech", "text", "action", "system")  @required  @description("Type of utterance.")
+  utteranceType  enum("speech", "text", "action", "system")!  @description("Type of utterance.")
   videoId  string  @description("ID of associated video media asset.")
 
   @relationship(type="interactsWith", field="participantId", target=participant, direction="outgoing")
@@ -215,10 +215,10 @@ concept utterance {
 @namespace("cognition")
 @description("Per-(partitionId, agentId) video control override. Lets a user dial a single agent's avatar publication on / off / mirror_user inside one space without changing the agent's own default (videoControl on v1:agents:agent). Mirrors v1:cognition:audioOverride exactly -- same fields, same id pattern, same write/read paths -- but governs lip-synced video instead of TTS audio. Read by the voice-agent process at session start (Phase 9): an active override beats the agent default; absence falls through to the agent default. id is the deterministic videoOverride:<partitionId>:<agentId> so re-toggling on the same orb hits the same row instead of growing a per-click history.")
 concept videoOverride {
-  partitionId   string  @required @description("v1:cognition:space.id this override is scoped to.")
-  agentId   string  @required @description("v1:agents:agent.id this override targets.")
+  partitionId   string! @description("v1:cognition:space.id this override is scoped to.")
+  agentId   string! @description("v1:agents:agent.id this override targets.")
   setBy     string  @description("v1:identity:user.id of the actor who flipped the override -- the space owner under v1 permission rules. Audited against v1:identity:auditEvent.")
-  mode      enum("always_on", "always_off", "mirror_user")  @required @description("Effective publication state. The voice-agent's avatar-gating path treats this exactly the same as the agent default once selected: always_on publishes unconditionally; always_off suppresses video while letting audio + chat continue; mirror_user honours the user's current video state at session start.")
+  mode      enum("always_on", "always_off", "mirror_user")! @description("Effective publication state. The voice-agent's avatar-gating path treats this exactly the same as the agent default once selected: always_on publishes unconditionally; always_off suppresses video while letting audio + chat continue; mirror_user honours the user's current video state at session start.")
   active    bool  @default("true") @description("Soft-revoke flag. Setting active=false collapses back to the agent default without losing the row's history.")
 
   @relationship(type="interactsWith", field="agentId", target=agent, direction="outgoing")
@@ -235,13 +235,13 @@ concept videoOverride {
 @namespace("cognition")
 @description("Rolled-up guardrail health metrics for a time window. Written by the rollupGuardrailHealth automation from v1:cognition:unmetCapability rows; advisory-only signal for tuning the fit-score threshold and identifying missing specialist domains. One row per rollup run.")
 concept guardrailHealth {
-  periodStart             datetime  @required  @description("Start of the rollup window (inclusive).")
-  periodEnd               datetime  @required  @description("End of the rollup window (exclusive).")
-  generatedAt             datetime  @required  @description("When this rollup was produced.")
+  periodStart             datetime!  @description("Start of the rollup window (inclusive).")
+  periodEnd               datetime!  @description("End of the rollup window (exclusive).")
+  generatedAt             datetime!  @description("When this rollup was produced.")
 
-  totalUnmet              int  @required  @default("0")  @description("Total v1:cognition:unmetCapability rows in the window.")
-  specialistGapCount      int  @required  @default("0")  @description("Rows with severity=specialist_gap -- assistant absorbed the turn.")
-  fullGapCount            int  @required  @default("0")  @description("Rows with severity=full_gap -- no agent could help.")
+  totalUnmet              int!  @default("0")  @description("Total v1:cognition:unmetCapability rows in the window.")
+  specialistGapCount      int!  @default("0")  @description("Rows with severity=specialist_gap -- assistant absorbed the turn.")
+  fullGapCount            int!  @default("0")  @description("Rows with severity=full_gap -- no agent could help.")
 
   belowThresholdCount     int  @default("0")  @description("Triggered by the fit-score gate.")
   handoffChainCapCount    int  @default("0")  @description("Triggered by the handoff-chain cap.")
@@ -261,14 +261,14 @@ concept guardrailHealth {
 @namespace("cognition")
 @description("A single instance of the cognition router determining that no agent in a space could meet the user's request -- either the assistant stepped in as fallback (specialist_gap) or nobody could help (full_gap). Emitted by cognition via the cognition.capability.unmet event and consumed by the guardrail health rollup for product-level insight into missing capabilities.")
 concept unmetCapability {
-  partitionId          string   @required  @description("ID of the space the utterance occurred in.")
+  partitionId          string!  @description("ID of the space the utterance occurred in.")
   utteranceId      string   @description("ID of the triggering human utterance.")
   utterance        string   @description("Text of the user's request that no agent could meet.")
   speakerName      string   @description("Display name of the human who spoke.")
 
-  severity         enum("specialist_gap", "full_gap")  @required  @description("specialist_gap: assistant absorbed the turn as fallback (we lacked a specialist). full_gap: even the assistant could not help / no assistant in the room.")
+  severity         enum("specialist_gap", "full_gap")!  @description("specialist_gap: assistant absorbed the turn as fallback (we lacked a specialist). full_gap: even the assistant could not help / no assistant in the room.")
   turnMode         enum("answer", "fallback_attempt", "escalation_notice")  @description("Turn mode the router chose. answer = specialist stretch absorbed it; fallback_attempt = assistant stretched on a knowledge gap; escalation_notice = assistant refused and flagged.")
-  trigger          enum("below_threshold", "handoff_chain_cap", "no_fit_no_fallback", "router_escalated", "router_fallback")  @required  @description("Why the unmet event fired: threshold gate, chain cap, missing assistant, or router-initiated.")
+  trigger          enum("below_threshold", "handoff_chain_cap", "no_fit_no_fallback", "router_escalated", "router_fallback")!  @description("Why the unmet event fired: threshold gate, chain cap, missing assistant, or router-initiated.")
 
   topFitScore      float   @description("Router's fit score for the chosen agent (0..1). Low scores indicate nobody was a strong match.")
   routedAgentId    string  @description("ID of the agent the router ultimately routed to (may be empty when no agent was selected).")

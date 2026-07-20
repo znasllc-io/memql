@@ -6,15 +6,15 @@
 @namespace("common")
 @description("A file attachment uploaded to a space, with extracted transcription.")
 concept attachment {
-  fileName  string  @required  @description("Original filename of the uploaded file.")
+  fileName  string!  @description("Original filename of the uploaded file.")
   fileSize  int  @description("File size in bytes.")
-  blobUrl  string  @required  @description("Azure Blob Storage URL where the file is stored (https://account.blob.core.windows.net/container/object).")
-  mimeType  string  @required  @description("MIME type of the uploaded file.")
-  partitionId  string  @required  @description("ID of the space this attachment belongs to.")
-  status  enum("processing", "ready", "error")  @required  @description("Processing status of the attachment.")
+  blobUrl  string!  @description("Azure Blob Storage URL where the file is stored (https://account.blob.core.windows.net/container/object).")
+  mimeType  string!  @description("MIME type of the uploaded file.")
+  partitionId  string!  @description("ID of the space this attachment belongs to.")
+  status  enum("processing", "ready", "error")!  @description("Processing status of the attachment.")
   summary  string  @description("AI-generated 2-3 sentence summary of the file content.")
   transcription  string  @description("Extracted plain text from the file, or image description for images.")
-  uploadedBy  string  @required  @description("Actor identifier of the user who uploaded the file.")
+  uploadedBy  string!  @description("Actor identifier of the user who uploaded the file.")
 
 }
 
@@ -27,15 +27,15 @@ concept media {
   }
   duration  int  @description("Duration in milliseconds (for audio/video).")
   filename  string  @description("Original filename.")
-  mediaType  enum("audio", "video", "image", "document")  @required  @description("Type of media asset.")
+  mediaType  enum("audio", "video", "image", "document")!  @description("Type of media asset.")
   metadata  object  @description("Additional format-specific metadata.")
-  mimeType  string  @required  @description("MIME type of the asset.")
+  mimeType  string!  @description("MIME type of the asset.")
   size  int  @description("File size in bytes.")
-  partitionId  string  @required  @description("ID of the space this media belongs to.")
+  partitionId  string!  @description("ID of the space this media belongs to.")
   transcription {
     text  string  @description("Full transcribed text.")
     timestamps  []object
   }
-  url  string  @required  @description("Storage URL for the asset.")
+  url  string!  @description("Storage URL for the asset.")
 
 }

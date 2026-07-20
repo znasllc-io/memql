@@ -23,7 +23,7 @@ query bundle authoringBundlesForOwner {
 @description("One authoring bundle by id, scoped to the caller. Backs the gate runners + the approval (Gate 3) artifact view.")
 query bundle authoringBundleById {
   args {
-    bundleId  string  @required
+    bundleId  string!
   }
   filter  ownerUserId==actor.userId && id==args.bundleId
   shape   bundleFull
@@ -71,7 +71,7 @@ query bundle systemActiveAuthoringBundles {
 @unbounded("the authoring bundle for one responsibility -- bounded to a single row")
 query bundle authoringBundleForResponsibility {
   args {
-    responsibilityId  string  @required
+    responsibilityId  string!
   }
   filter  ownerUserId==actor.userId && responsibilityId==args.responsibilityId
   shape   bundleFull
@@ -81,7 +81,7 @@ query bundle authoringBundleForResponsibility {
 @unbounded("the authoring bundle for one source plan -- bounded to a single row")
 query bundle authoringBundleForPlan {
   args {
-    sourcePlanId  string  @required
+    sourcePlanId  string!
   }
   filter  ownerUserId==actor.userId && sourcePlanId==args.sourcePlanId
   shape   bundleFull
@@ -91,7 +91,7 @@ query bundle authoringBundleForPlan {
 @unbounded("constructs within one bundle -- bounded by the bundle; the caller compiles the whole bundle")
 query construct authoringConstructsForBundle {
   args {
-    bundleId  string  @required
+    bundleId  string!
   }
   filter  ownerUserId==actor.userId && bundleId==args.bundleId
   shape   constructFull
@@ -112,7 +112,7 @@ query construct cataloguedConstructsForOwner {
 @unbounded("dependency edges within one bundle -- the full edge set is needed to compile the bundle")
 query dependencyEdge dependencyEdgesForBundle {
   args {
-    bundleId  string  @required
+    bundleId  string!
   }
   filter  ownerUserId==actor.userId && bundleId==args.bundleId
   shape   dependencyEdgeFull
@@ -122,8 +122,8 @@ query dependencyEdge dependencyEdgesForBundle {
 @unbounded("dependents of a construct -- the full dependent set is needed for impact analysis")
 query dependencyEdge dependentsOfConstruct {
   args {
-    toName  string  @required
-    toKind  string  @required
+    toName  string!
+    toKind  string!
   }
   filter  ownerUserId==actor.userId && toName==args.toName && toKind==args.toKind
   shape   dependencyEdgeFull
