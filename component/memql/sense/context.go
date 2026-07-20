@@ -37,11 +37,30 @@ type CursorContext struct {
 	Source         string // full source text (so completers can scan file-scope imports)
 	FilePath       string // the document's path (so completers can derive the ambient domain, #2617)
 	AccessorRoot   string // for ContextFieldAccess: the dotted path before the final dot ("actor", "event.actor", ...)
+	// Enclosing is the construct the cursor sits inside -- or, for a
+	// top-level annotation, the construct it precedes (#2626). It is the
+	// ONE enclosure answer; ReceiverType is stamped from its Receiver.
+	Enclosing EnclosingConstruct
 }
 
 // analyzeCursorContext determines the syntactic context at a cursor position.
 func analyzeCursorContext(source string, line, col int) CursorContext {
 	ctx := analyzeCursorContextInner(source, line, col)
+	// Stamp the enclosing construct + receiver on every context (#2626).
+	// A top-level annotation precedes its construct, so that case looks
+	// DOWN for the next header; everything else resolves by enclosure.
+	tokens, _ := parser.NewLexer(textBeforeCursor(source, line, col)).Tokenize()
+	if n := len(tokens); n > 0 && tokens[n-1].Type == parser.TokenEOF {
+		tokens = tokens[:n-1]
+	}
+	if enc, ok := resolveEnclosingConstruct(tokens); ok {
+		ctx.Enclosing = enc
+	} else if ctx.Kind == ContextAnnotation || ctx.Kind == ContextTopLevel {
+		if enc, ok := resolvePreambleConstruct(source, line); ok {
+			ctx.Enclosing = enc
+		}
+	}
+	ctx.ReceiverType = ctx.Enclosing.Receiver
 	// Thread the full source through so completers can scan file-scope `use`
 	// imports (the construct-concept import-suggestion path needs it).
 	ctx.Source = source
