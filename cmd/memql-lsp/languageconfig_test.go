@@ -159,13 +159,21 @@ func TestLanguageConfigOnEnterRules(t *testing.T) {
 		{"x: { a: [1, 2],", "}", "indentOutdent"},
 		{"args { // trailing comment (required)", "", "indent"},
 		{"call(a, {b: 1}", "", "indent"},
+		// Bare openers reach only the second alternative: the first one's
+		// [^/\s] consumes the opener and then demands a second opener.
+		{"{", "}", "indentOutdent"},
+		{"  [", "", "indent"},
+		{"(", ")", "indentOutdent"},
 	} {
 		if got := winningEnterAction(t, rules, "", tc.before, tc.after); got != tc.want {
 			t.Errorf("winning action for (%q, %q) = %q, want %q", tc.before, tc.after, got, tc.want)
 		}
 	}
 	// No rule may fire at all on these: balanced pairs and commented-out code.
-	for _, before := range []string{"args {}", "// args {", "  // automation x {", "cond(a > 0)", "tags: [\"a\", \"b\"]", "x: [1, 2]", "legalAcceptance: []", "// mutation createDatabase ("} {
+	for _, before := range []string{"args {}", "// args {", "  // automation x {", "cond(a > 0)", "tags: [\"a\", \"b\"]", "x: [1, 2]", "legalAcceptance: []", "// mutation createDatabase (",
+		// Openers inside string literals: the quote exclusion is the SOLE
+		// cancellation on these (no own-closer in the tail).
+		"sep: \"[\"", "icon: \"(\"", "x: \"{\"", "msg: \"foo (bar\""} {
 		if got := winningEnterAction(t, rules, "", before, ""); got != "" {
 			t.Errorf("winning action for (%q, \"\") = %q, want no rule to fire", before, got)
 		}
@@ -218,12 +226,20 @@ func TestLanguageConfigIndentationRules(t *testing.T) {
 		// Per-pair cancellation: another pair's closer in the tail (balanced
 		// inner pair, parenthetical comment) must not cancel a brace opener,
 		// and a balanced inner brace pair must not cancel a paren opener.
-		"filter { cond(a)", "x: { a: [1, 2],", "insert { kind: coalesce(x),", "args { // trailing comment (required)", "call(a, {b: 1}"} {
+		"filter { cond(a)", "x: { a: [1, 2],", "insert { kind: coalesce(x),", "args { // trailing comment (required)", "call(a, {b: 1}",
+		// Bare openers reach only the second alternative: the first one's
+		// [^/\s] consumes the opener and then demands a second opener.
+		"{", "  [", "(", "\t("} {
 		if !inc.MatchString(line) {
 			t.Errorf("increaseIndentPattern does not match %q", line)
 		}
 	}
-	for _, line := range []string{"args {}", "st := coalesce(args.stage, \"\")", "// args {", "  // automation x {", "cond(a > 0)", "tags: [\"a\", \"b\"]", "x: [1, 2]", "legalAcceptance: []", "// mutation createDatabase ("} {
+	for _, line := range []string{"args {}", "st := coalesce(args.stage, \"\")", "// args {", "  // automation x {", "cond(a > 0)", "tags: [\"a\", \"b\"]", "x: [1, 2]", "legalAcceptance: []", "// mutation createDatabase (",
+		// Openers inside string literals: the quote exclusion is the SOLE
+		// cancellation on these (no own-closer in the tail). The last one is
+		// a real corpus line (dsl/observability/concepts.memql).
+		"sep: \"[\"", "icon: \"(\"", "x: \"{\"", "msg: \"foo (bar\"", "note: \"a [b\"", "prefix: '['",
+		"callCount int @required @description(\"Number of invocations in [windowStart, windowEnd).\")"} {
 		if inc.MatchString(line) {
 			t.Errorf("increaseIndentPattern matches %q, which opens no block", line)
 		}
