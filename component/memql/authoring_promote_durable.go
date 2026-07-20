@@ -468,6 +468,12 @@ func (e *MemQLEngine) recompileAndPromoteRow(ctx context.Context, row AuthoringC
 			if e.specs != nil {
 				e.specs.MarkDisabled(row.Name)
 			}
+			// Record the reservation as AUTHORED (unlike a core-loader
+			// reservation) so the owner's lifecycle can release it:
+			// promoting the corrected (enabled) source re-enables the name,
+			// demoting it retires it. Without the marker the name would be
+			// permanently dead -- no API path lifts a core reservation.
+			e.promotedAuthored.Store("spec:"+row.Name, true)
 			if e.Component != nil && e.Logger != nil {
 				e.Logger.Info("durable authored construct is @disabled; skipped at re-hydration (name reserved, nothing registered)",
 					"component", "memql.engine", "kind", row.Kind, "name", row.Name, "bundleId", row.BundleId, "owner", row.OwnerUserId)
