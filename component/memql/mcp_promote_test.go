@@ -121,3 +121,38 @@ func TestJSONSchemaType(t *testing.T) {
 		}
 	}
 }
+
+// A @disabled @mcp function must drop out of the ADVERTISED surface entirely
+// (memql#2647): the lifecycle annotation hides it from functions() and from
+// function-backed tool registration (function_tools.go), and the promote path
+// must be equally honest -- not advertise a tool the #2605 execution gate will
+// refuse at call time. The enabled peer stays advertised.
+func TestMCPPromotedFunctionTools_DisabledDropped(t *testing.T) {
+	e := &MemQLEngine{functions: newFunctionRegistry()}
+	for _, fn := range []*Function{
+		{Name: "disabledPromotedQuery", FunctionKind: "query", Enabled: false, MCPPromoted: true},
+		{Name: "enabledPromotedQuery", FunctionKind: "query", Enabled: true, MCPPromoted: true},
+		// Both routable kinds: the drop must not be query-scoped.
+		{Name: "disabledPromotedMutation", FunctionKind: "mutation", Enabled: false, MCPPromoted: true},
+		{Name: "enabledPromotedMutation", FunctionKind: "mutation", Enabled: true, MCPPromoted: true},
+	} {
+		if err := e.functions.Upsert(fn); err != nil {
+			t.Fatalf("seed %s: %v", fn.Name, err)
+		}
+	}
+
+	tools := e.MCPPromotedFunctionTools()
+	if len(tools) != 2 {
+		t.Fatalf("expected exactly the 2 enabled peers advertised, got %d: %+v", len(tools), tools)
+	}
+	if tools[0]["name"] != "enabledPromotedMutation" || tools[1]["name"] != "enabledPromotedQuery" {
+		t.Errorf("advertised tools = %v, %v; want enabledPromotedMutation, enabledPromotedQuery (sorted)", tools[0]["name"], tools[1]["name"])
+	}
+
+	// The ROUTER deliberately keeps routing the @disabled name: a direct
+	// call of the no-longer-advertised tool must reach the #2605 execution
+	// gate's 'function is disabled' refusal, not an unknown-tool error.
+	if kind, ok := e.MCPPromotedFunctionKind("disabledPromotedQuery"); !ok || kind != "query" {
+		t.Errorf("MCPPromotedFunctionKind(disabled) = (%q, %v), want (query, true): the router must keep routing @disabled names", kind, ok)
+	}
+}
