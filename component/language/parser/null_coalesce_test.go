@@ -131,18 +131,18 @@ func TestNullCoalesce_ExpressionArgLockstep(t *testing.T) {
 	}
 
 	baseline := parseArg(`coalesce(args.stage, "")=="active"`)
-	be, ok := baseline.(*EqExpr)
-	if !ok {
-		t.Fatalf("baseline: want EqExpr, got %T", baseline)
+	be, ok := baseline.(*BinaryComparisonExpr)
+	if !ok || be.Operator != OpEq {
+		t.Fatalf("baseline: want BinaryComparisonExpr{OpEq} (memql#2654 normalized shape), got %T", baseline)
 	}
 	if _, ok := be.Left.(*CoalesceExpr); !ok {
 		t.Fatalf("baseline LHS: want CoalesceExpr, got %T", be.Left)
 	}
 
 	short := parseArg(`args.stage??""=="active"`)
-	se, ok := short.(*EqExpr)
-	if !ok {
-		t.Fatalf("?? spelling: want EqExpr (lockstep with the baseline), got %T", short)
+	se, ok := short.(*BinaryComparisonExpr)
+	if !ok || se.Operator != OpEq {
+		t.Fatalf("?? spelling: want BinaryComparisonExpr{OpEq} (lockstep with the baseline), got %T", short)
 	}
 	lhs, ok := se.Left.(*CoalesceExpr)
 	if !ok {
@@ -294,8 +294,8 @@ func (Logic) probeAssign(_ any) {
 // Review round-2 finding A on #2611: the fold-suppression flag must not
 // leak into bracketed subexpressions of a continuation operand. Prefixing
 // `x ?? ` onto a working cond() must not change the predicate's node type
-// (EqExpr under the leak, ComparisonExpr in the baseline -- the leaked
-// shape dies in the AST converter at load).
+// (expression-led BinaryComparisonExpr under the leak, Field-led
+// ComparisonExpr in the baseline).
 func TestNullCoalesce_NoFoldSuppressionLeakIntoCalls(t *testing.T) {
 	predType := func(src string) string {
 		t.Helper()

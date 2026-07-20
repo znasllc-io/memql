@@ -7,52 +7,13 @@ import (
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
 
-// #2612: EqExpr/NotExpr are the shapes parseExpressionArg emits for ==/!=
-// with a non-identifier-led left side (cond predicates, #2407/#2542). The
-// AST converter rejected them ("unsupported parser expression type"), which
-// is the fylo#44-era live-mount law: a coalesce() call -- and now its ??
-// shorthand -- directly inside a nested cond predicate died at load while
-// memqllint stayed green. They convert exactly like BinaryComparisonExpr:
-// in-memory only (WithCollectionMethods), scope-erroring elsewhere.
-
-func TestConvertEqExpr_InMemoryOnly(t *testing.T) {
-	eq := &languageParser.EqExpr{
-		Left:  &languageParser.CoalesceExpr{Args: []languageParser.ExpressionNode{&languageParser.ArgRefExpr{Path: "x"}}},
-		Right: &languageParser.LiteralExpr{Value: "y"},
-	}
-
-	conv := NewASTConverter(WithCollectionMethods())
-	node, err := conv.ConvertExpression(eq)
-	if err != nil {
-		t.Fatalf("EqExpr must convert under WithCollectionMethods: %v", err)
-	}
-	cmp, ok := node.(*BinaryComparisonExpression)
-	if !ok {
-		t.Fatalf("want *BinaryComparisonExpression, got %T", node)
-	}
-	if cmp.Operator != OpEq {
-		t.Errorf("operator: want ==, got %v", cmp.Operator)
-	}
-
-	not := &languageParser.NotExpr{Target: eq}
-	nNode, err := conv.ConvertExpression(not)
-	if err != nil {
-		t.Fatalf("NotExpr{EqExpr} must convert under WithCollectionMethods: %v", err)
-	}
-	nCmp, ok := nNode.(*BinaryComparisonExpression)
-	if !ok {
-		t.Fatalf("want *BinaryComparisonExpression for !=, got %T", nNode)
-	}
-	if nCmp.Operator != OpNe {
-		t.Errorf("operator: want !=, got %v", nCmp.Operator)
-	}
-
-	// Scope parity with BinaryComparisonExpr: specs/query filters reject.
-	strict := NewASTConverter()
-	if _, err := strict.ConvertExpression(eq); err == nil || !strings.Contains(err.Error(), "logic / collection lambdas") {
-		t.Errorf("EqExpr outside collection scope: want the #2542 scope error, got %v", err)
-	}
-}
+// #2612 established that a non-identifier-led ==/!= in a cond predicate must
+// load (the fylo#44-era live-mount law); #2654 normalized the arg grammar so
+// those predicates arrive as BinaryComparisonExpr -- the one comparison shape
+// -- and retired the EqExpr/NotExpr(EqExpr) duals. The loader-altitude test
+// pins the behavior; the NotExpr tests pin that the converter never
+// converts-through a bang negation (boolean inversion) and keeps the scope
+// gate.
 
 // The fylo#44 live-mount law, at the loader altitude: a nested cond whose
 // predicate compares a coalesce (either spelling) to a literal must load.
@@ -86,28 +47,64 @@ func TestLogicNestedCondCoalescePredicate_Loads(t *testing.T) {
 	}
 }
 
-// Review finding 5: both properties below survived mutation with the suite
-// green -- silently converting !x to x (boolean inversion) and deleting the
-// NotExpr scope gate were undetected. Pinned.
-func TestConvertNotExpr_NarrownessAndScope(t *testing.T) {
+// Review finding 5 (#2612) carried forward through #2654: a NOT of ANY target
+// must REJECT, never convert-through (convert-through inverts boolean
+// semantics) -- since the arg grammar no longer produces NotExpr for !=, the
+// only producer left is the bang `!` operator, which never converted. The
+// scope gate must still fire first in strict scope.
+func TestConvertNotExpr_RejectsAndKeepsScopeGate(t *testing.T) {
 	loose := NewASTConverter(WithCollectionMethods())
 
-	// A NOT of anything but the != equality shape must REJECT, never
-	// convert-through (convert-through inverts boolean semantics).
 	bang := &languageParser.NotExpr{Target: &languageParser.ArgRefExpr{Path: "flag"}}
 	if _, err := loose.ConvertExpression(bang); err == nil || !strings.Contains(err.Error(), "#2612") {
-		t.Errorf("NotExpr{non-EqExpr} must reject with the #2612 narrowness error, got %v", err)
+		t.Errorf("NotExpr must reject with the narrowness error, got %v", err)
 	}
 
-	// The scope gate must fire for NotExpr in strict scope, same as EqExpr
-	// and BinaryComparisonExpr -- a != expression-led comparison must not
-	// leak toward SQL compilation.
+	// The scope gate fires for NotExpr in strict scope, same as
+	// BinaryComparisonExpr -- an expression-led negation must not leak
+	// toward SQL compilation.
 	strict := NewASTConverter()
-	ne := &languageParser.NotExpr{Target: &languageParser.EqExpr{
-		Left:  &languageParser.CoalesceExpr{Args: []languageParser.ExpressionNode{&languageParser.ArgRefExpr{Path: "x"}}},
-		Right: &languageParser.LiteralExpr{Value: "y"},
-	}}
+	ne := &languageParser.NotExpr{Target: &languageParser.ArgRefExpr{Path: "flag"}}
 	if _, err := strict.ConvertExpression(ne); err == nil || !strings.Contains(err.Error(), "logic / collection lambdas") {
 		t.Errorf("NotExpr in strict scope must get the #2542 scope error, got %v", err)
+	}
+}
+
+// The normalized equality shape converts under WithCollectionMethods and
+// scope-errors elsewhere -- parity previously pinned for the retired EqExpr
+// shape, now pinned on the one shape both grammar positions emit.
+func TestConvertBinaryComparisonEquality_InMemoryOnly(t *testing.T) {
+	eq := &languageParser.BinaryComparisonExpr{
+		Left:     &languageParser.CoalesceExpr{Args: []languageParser.ExpressionNode{&languageParser.ArgRefExpr{Path: "x"}}},
+		Operator: languageParser.OpEq,
+		Right:    &languageParser.LiteralExpr{Value: "y"},
+	}
+
+	conv := NewASTConverter(WithCollectionMethods())
+	node, err := conv.ConvertExpression(eq)
+	if err != nil {
+		t.Fatalf("equality BinaryComparisonExpr must convert under WithCollectionMethods: %v", err)
+	}
+	cmp, ok := node.(*BinaryComparisonExpression)
+	if !ok {
+		t.Fatalf("want *BinaryComparisonExpression, got %T", node)
+	}
+	if cmp.Operator != OpEq {
+		t.Errorf("operator: want ==, got %v", cmp.Operator)
+	}
+
+	ne := &languageParser.BinaryComparisonExpr{Left: eq.Left, Operator: languageParser.OpNe, Right: eq.Right}
+	nNode, err := conv.ConvertExpression(ne)
+	if err != nil {
+		t.Fatalf("inequality BinaryComparisonExpr must convert under WithCollectionMethods: %v", err)
+	}
+	if nCmp, ok := nNode.(*BinaryComparisonExpression); !ok || nCmp.Operator != OpNe {
+		t.Fatalf("want *BinaryComparisonExpression{!=}, got %T (%v)", nNode, err)
+	}
+
+	// Scope parity: specs/query filters reject the expression-led shape.
+	strict := NewASTConverter()
+	if _, err := strict.ConvertExpression(eq); err == nil || !strings.Contains(err.Error(), "logic / collection lambdas") {
+		t.Errorf("equality outside collection scope: want the #2542 scope error, got %v", err)
 	}
 }

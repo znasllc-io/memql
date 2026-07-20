@@ -5630,8 +5630,9 @@ func (p *Parser) parseFunctionCallWithKind(name, kind string) (ExpressionNode, e
 
 	// Call arguments are a fresh expression context: the ??-operand fold
 	// suppression (#2611) must not leak in, or `x ?? cond(a == "b", ...)`
-	// turns the working predicate into the load-rejected EqExpr shape
-	// (review round 2, finding A).
+	// parses its predicate expression-led instead of the Field-led
+	// ComparisonExpr the identifier fold produces (review round 2,
+	// finding A).
 	prevFold := p.suppressComparisonFold
 	p.suppressComparisonFold = false
 	defer func() { p.suppressComparisonFold = prevFold }()
@@ -7290,8 +7291,10 @@ func (p *Parser) parseContainsFunction() (ExpressionNode, error) {
 // condition evaluator, and the engine single-return evalCollScalar already
 // handle (#2559/#2560); they are purely additive (these operators previously
 // always errored here -- cond three-arg / arg-list reject). The `==`/`!=` cases
-// keep their established EqExpr/NotExpr shape for the non-identifier LHS forms
-// that already relied on them.
+// emit the SAME BinaryComparisonExpr shape (memql#2654): the earlier
+// EqExpr/NotExpr(EqExpr) dual shapes forced every lowering to handle both or
+// silently diverge (the #2653 wrong-branch class), so equality is normalized
+// at the source and those shapes are no longer produced here.
 func (p *Parser) parseExpressionArg() (ExpressionNode, error) {
 	left, err := p.parseCoalesceArgOperand()
 	if err != nil {
@@ -7299,21 +7302,7 @@ func (p *Parser) parseExpressionArg() (ExpressionNode, error) {
 	}
 	if p.check(TokenOperator) {
 		switch p.current.Literal {
-		case "==":
-			p.advance()
-			right, rerr := p.parseCoalesceArgOperand()
-			if rerr != nil {
-				return nil, rerr
-			}
-			return &EqExpr{Left: left, Right: right}, nil
-		case "!=":
-			p.advance()
-			right, rerr := p.parseCoalesceArgOperand()
-			if rerr != nil {
-				return nil, rerr
-			}
-			return &NotExpr{Target: &EqExpr{Left: left, Right: right}}, nil
-		case "<", "<=", ">", ">=":
+		case "==", "!=", "<", "<=", ">", ">=":
 			op := ComparisonOperator(p.current.Literal)
 			p.advance()
 			right, rerr := p.parseCoalesceArgOperand()
