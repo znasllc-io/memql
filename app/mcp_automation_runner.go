@@ -95,6 +95,15 @@ func (r *mcpAutomationRunner) RunAutomation(ctx context.Context, owner, name str
 	if auto == nil {
 		return nil, fmt.Errorf("automation %q not found", name)
 	}
+	// The #2605 analogue for automations (memql#2681): a @disabled
+	// automation is not runnable, on the manual MCP path as on any other.
+	// Dropping it from the advertised surface alone would leave it
+	// RUNNABLE by name -- worse than the function case, which at least
+	// refused at call time. Refused on both the dry-run and live paths,
+	// since the check precedes the dryRun branch.
+	if err := automationRunRefusal(auto); err != nil {
+		return nil, err
+	}
 
 	if dryRun {
 		// Fetch the resolved automation's source by its CANONICAL name -- the
@@ -235,13 +244,7 @@ func (r *mcpAutomationRunner) promotedAutomations() []*automations.Automation {
 		}
 		return nil // not cached; retry on the next call
 	}
-	out := make([]*automations.Automation, 0)
-	for _, a := range all {
-		if a != nil && a.MCPPromoted {
-			out = append(out, a)
-		}
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	out := advertisableAutomations(all)
 	r.promoted = out
 	r.promotedLoaded = true
 	return r.promoted
@@ -258,4 +261,41 @@ func (r *mcpAutomationRunner) ownerEnvelope(ctx context.Context, owner string) c
 		return ctx
 	}
 	return auth.ContextWithAccess(ctx, &auth.AccessContext{UserId: owner, Role: auth.RoleWriter})
+}
+
+// advertisableAutomations returns the @mcp-promoted automations that may
+// appear on the advertised MCP tool surface, sorted by name (memql#2681).
+//
+// @disabled drops an automation from the surface, matching what
+// #2647/#2682 did for the function half -- an advertised construct the
+// caller cannot run is a dishonest surface. Memoizing the FILTERED set
+// stays correct because Loader.LoadAll reads the embedded DSL tree:
+// MCPPromoted and enabled-ness are both load-time properties that cannot
+// change without a reload, which is the same reason the promotion set was
+// already memoized.
+func advertisableAutomations(all []*automations.Automation) []*automations.Automation {
+	out := make([]*automations.Automation, 0, len(all))
+	for _, a := range all {
+		if a == nil || !a.MCPPromoted || !a.IsEnabled() {
+			continue
+		}
+		out = append(out, a)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+// automationRunRefusal is the #2605 analogue for automations
+// (memql#2681): a @disabled automation is not runnable, on the manual MCP
+// path as anywhere else. Dropping it from the advertised surface alone
+// would leave it RUNNABLE by name -- worse than the function case, which
+// at least refused at call time. Returns nil when the automation may run.
+func automationRunRefusal(auto *automations.Automation) error {
+	if auto == nil {
+		return nil
+	}
+	if !auto.IsEnabled() {
+		return fmt.Errorf("automation %q is @disabled and cannot be run; remove the @disabled annotation to re-enable it", auto.Name)
+	}
+	return nil
 }
