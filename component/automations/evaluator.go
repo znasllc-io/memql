@@ -811,6 +811,14 @@ func (e *Evaluator) EvaluateFilterValue(expr string) (any, error) {
 			return e.evaluateBareCoalesce(builtinArgs)
 		case memql.IsDateBuiltin(name):
 			return e.evaluateDateBuiltinCall(name, builtinArgs)
+		case IsStringBuiltin(name):
+			// #2656: lower/upper/trim/hash/shortId reached the
+			// literal-string fallback below, so `lower(args.x) == "y"`
+			// compared the TEXT `lower(args.x)` against "y" and was
+			// always-false -- load-green, evaluate-wrong, exactly the
+			// class the date-builtin case above was added to close.
+			// (concat was already handled; the rest were not.)
+			return e.evaluateStringBuiltinCall(name, builtinArgs)
 		}
 	}
 
@@ -1015,6 +1023,76 @@ func (e *Evaluator) evaluateDateBuiltinCall(name, argsRaw string) (any, error) {
 		vals[i] = v
 	}
 	return memql.EvaluateDateBuiltin(name, vals)
+}
+
+// stringBuiltinArity is the set of pure string/value builtins the logic
+// runner evaluates locally, with their argument counts (#2656). Before
+// this set existed, `lower(args.x) == "y"` in a cond predicate loaded
+// GREEN and evaluated always-false: isPositionalBuiltinName admitted
+// only coalesce/cond/date builtins, so the local path never resolved
+// the call and the comparison could never match -- the same
+// load-green/runtime-wrong class #2612 closed for equality shapes, one
+// builtin-set over. -1 means variadic.
+var stringBuiltinArity = map[string]int{
+	"lower":   1,
+	"upper":   1,
+	"trim":    1,
+	"hash":    1,
+	"shortId": 1,
+	// concat is dispatched by its own case in evaluateOperand (it predates
+	// this set); listed here so the arity check and the local-evaluator
+	// switch stay complete for callers that route through this path.
+	"concat": -1,
+}
+
+// IsStringBuiltin reports whether name is a locally-evaluable string
+// builtin (#2656).
+func IsStringBuiltin(name string) bool {
+	_, ok := stringBuiltinArity[name]
+	return ok
+}
+
+// evaluateStringBuiltinCall resolves a string builtin over locally
+// resolved operands, mirroring evaluateDateBuiltinCall. The semantics
+// come from memql.RuntimeEvaluator so the logic-body path and the
+// mutation-template path cannot diverge on what lower()/concat()/hash()
+// mean.
+func (e *Evaluator) evaluateStringBuiltinCall(name, argsRaw string) (any, error) {
+	arity, ok := stringBuiltinArity[name]
+	if !ok {
+		return nil, fmt.Errorf("%s() is not a string builtin", name)
+	}
+	args, err := splitCoalesceArgs(argsRaw)
+	if err != nil {
+		return nil, err
+	}
+	if arity >= 0 && len(args) != arity {
+		return nil, fmt.Errorf("%s() requires %d argument(s), got %d", name, arity, len(args))
+	}
+	vals := make([]any, len(args))
+	for i, raw := range args {
+		v, verr := e.evaluateOperand(raw)
+		if verr != nil {
+			return nil, fmt.Errorf("%s() arg %d: %w", name, i, verr)
+		}
+		vals[i] = v
+	}
+	re := &memql.RuntimeEvaluator{}
+	switch name {
+	case "lower":
+		return re.EvaluateLower(vals[0]), nil
+	case "upper":
+		return re.EvaluateUpper(vals[0]), nil
+	case "trim":
+		return re.EvaluateTrim(vals[0]), nil
+	case "hash":
+		return re.EvaluateHash(vals[0]), nil
+	case "shortId":
+		return re.EvaluateShortId(vals[0]), nil
+	case "concat":
+		return re.EvaluateConcat(vals...), nil
+	}
+	return nil, fmt.Errorf("string builtin %q has no local evaluator", name)
 }
 
 // evaluateDateOperand resolves a single date-builtin argument. The bare
