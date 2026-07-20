@@ -20,7 +20,6 @@
 
 use planner.concepts.{ plan }
 
-@version("1.0.0")
 @namespace("workbench")
 @description("Per-Plan workbench workspace. Tracks the persistent filesystem mounted into every per-Task container running under the Plan. Created lazily on first workbenchHost call; released when the parent Plan transitions to a terminal status (succeeded / failed / cancelled). Universal authorization -- no scope grants, no kill switch, no per-agent gating; the workbench is sandboxed inside the cluster and the blast radius is contained to the per-Plan directory tree.")
 concept workspace {

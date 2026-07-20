@@ -7,7 +7,6 @@ use agents.concepts.{ agent }
 use identity.concepts.{ identity, user }
 use planner.concepts.{ plan, task }
 
-@version("1.0.0")
 @namespace("worker")
 @description("Per-call telemetry for worker tool invocations. Written once on call completion (success / failure / cancelled / timeout / denied). Operator reads these for plan debugging; auditor reads identity:auditEvent for the security timeline. Linkage between the two layers is via correlationId. Retention default 90 days, tunable via WORKER_INVOCATION_RETENTION_DAYS; the workerInvocationRetentionSweep cron soft-deletes rows past their TTL.")
 concept invocation {
@@ -40,7 +39,6 @@ concept invocation {
   @relationship(type="parent", field="taskId", target=task, direction="outgoing")
 }
 
-@version("1.0.0")
 @namespace("worker")
 @description("Operational registration of a worker -- the runtime record for a memql-cockpit instance running in worker mode and connected to this cluster. Persists stable identity + capabilities + last-seen state. The currently-connected gRPC stream + per-call concurrency live in-memory on whichever agent node holds the stream; this concept is for everything that needs to survive disconnect and binary restart. Per-user routing: every registration is owned by exactly one v1:identity:user; only agents in sessions owned by that user can dispatch tools to this worker.")
 concept registration {

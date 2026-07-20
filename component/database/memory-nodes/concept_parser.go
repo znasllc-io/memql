@@ -106,13 +106,21 @@ func BuildConceptFromDecl(decl *parser.ConceptDecl, conceptName string) (*Concep
 		}
 	}
 
+	version := parsed.version
+	if version == "" {
+		// Absent @version means 1.0.0 (#2613). Explicit annotations and
+		// the legacy vN-directory derivation both populate parsed.version
+		// upstream; only a genuinely unannotated flat-tree concept lands
+		// here.
+		version = "1.0.0"
+	}
 	return &Concept{
 		Name:          conceptName,
 		SchemaId:      conceptName,
 		Schemas:       schemas,
 		NodeType:      nodeType,
 		Description:   parsed.description,
-		Version:       parsed.version,
+		Version:       version,
 		Relationships: parsed.relationships,
 		DisplayCard:   parsed.displayCard,
 	}, nil
@@ -399,10 +407,12 @@ func applyConceptAttribute(c *parsedConcept, attr *parser.Attribute) error {
 	// not the DSL layer. The parser no longer recognizes @visibility;
 	// the strip-from-files migration removed it from every .memql.
 	case "version":
-		// @version("MAJOR.MINOR.PATCH") -- strict semver. Only the
-		// major segment flows into the concept ID prefix
-		// (v<MAJOR>:...); minor + patch document additive schema
-		// evolution within a major version.
+		// @version("MAJOR.MINOR.PATCH") -- strict semver, metadata
+		// only (canonical ids are PARTITION-prefixed -- v1: is the
+		// partition, not this version; the older id-prefix claim here
+		// was stale, #2613). Absent means 1.0.0 (the lifecycle-epoch
+		// default); an explicit annotation wins and marks a genuine
+		// non-default.
 		s := strings.TrimSpace(attrString(attr))
 		if s == "" {
 			return fmt.Errorf("@version requires a semver string like \"1.0.0\"")

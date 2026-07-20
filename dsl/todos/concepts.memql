@@ -13,7 +13,6 @@
 
 use identity.concepts.{ user }
 
-@version("1.0.0")
 @namespace("todos")
 @displayCard(primary="title", secondary="priority", tertiary="dueAt", status="done")
 @description("A user-owned to-do item: a titled task with a done flag plus optional due date, priority, and a back-pointer to the responsibility that spawned it. The standalone source-of-truth to-do concept the assistant manages on the user's behalf. Per-row authz: owned -- ownerUserId is stamped from actor.userId on every write and every read gates on ownerUserId==actor.userId.")

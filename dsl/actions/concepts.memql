@@ -23,7 +23,6 @@
 use harness.concepts.{ plan, step }
 use identity.concepts.{ user }
 
-@version("1.0.0")
 @namespace("actions")
 @description("A captured trace of the concrete capability sequence an LLM step performed, with value + resource provenance per call (#1735). Minted as status='candidate' on first run; a later phase graduates it into a library action. This is the foundation record of the action library (epic #1734) -- no replay yet.")
 @displayCard(primary="stepId", secondary="status", tertiary="ownerUserId", status="status")
@@ -61,7 +60,6 @@ concept candidate {
 // vs confirm (Phase 4 #1739). `capability`, `recordedSurface`, `reliability`,
 // `reinforceCount`, and `version` are carried now so those phases extend the
 // row rather than migrate it.
-@version("1.0.0")
 @namespace("actions")
 @description("A reusable, replayable library entry minted from a candidate trace (Phase 1, #1736). A primitive stores one or more captured capability calls with literal args, keyed by inputFingerprint, and replays them token-free on identical input against the default surface. Reliability rises on verified replay; mismatches fall back to the LLM.")
 @displayCard(primary="slug", secondary="status", tertiary="ownerUserId", status="status")
@@ -111,7 +109,6 @@ concept action {
 // capability->tool invocation binding for a given surface is carrier/operator
 // supplied (the workbench/worker tools live in the carrier DSL), kept off the
 // engine's identity here on purpose.
-@version("1.0.0")
 @namespace("actions")
 @description("A registered execution surface for action replay (Phase 2, #1737): workbench / computer-use:<machineId> / mcp:<server>, with its served capability verbs + current availability. The resolver binds capability->surface per world group with explicit > policy > availability precedence (decision A pins coupled actions to one surface).")
 @displayCard(primary="slug", secondary="kind", tertiary="ownerUserId", status="status")

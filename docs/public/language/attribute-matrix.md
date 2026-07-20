@@ -28,7 +28,7 @@ construct-specific (see the end of this document) or rejected.
 | `@enabled` | Yes | Yes | Yes | Accepted no-op; definitions are enabled by default (#2609) |
 | `@disabled` | Yes | Yes | Yes | Explicitly disables the definition |
 | `@deprecated` | Yes | Yes | Yes | Marks as deprecated with optional message |
-| `@version("v1")` | Yes | Yes | Yes | Version tag for the definition |
+| `@version("v1")` | Yes | Yes | Yes | Version tag; absent means 1.0.0 (#2613) -- annotate only genuine non-defaults |
 | **Documentation** |
 | `@description("...")` | Yes | Yes | Yes | Human-readable description |
 | **Access Control** |

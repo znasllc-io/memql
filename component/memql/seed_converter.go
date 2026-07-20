@@ -45,7 +45,7 @@ func seedDeclASTToInternal(decl *languageParser.SeedDecl) (*seedDecl, error) {
 		name:         decl.Name,
 		description:  decl.Description,
 		namespace:    decl.Namespace,
-		version:      decl.Version,
+		version:      coalesceSeedVersion(decl.Version),
 		scope:        decl.Scope,
 		templateFile: decl.TemplateFile,
 		body:         newSeedBlock(),
@@ -122,4 +122,13 @@ func seedValueASTToInternal(v *languageParser.SeedValue) (seedValue, error) {
 		return seedValue{kind: seedStringArray, stringsV: out}, nil
 	}
 	return seedValue{}, fmt.Errorf("unsupported seed value kind %d", int(v.Kind))
+}
+
+// coalesceSeedVersion applies the #2613 lifecycle-epoch default: absent
+// @version means 1.0.0; an explicit annotation wins.
+func coalesceSeedVersion(v string) string {
+	if strings.TrimSpace(v) == "" {
+		return "1.0.0"
+	}
+	return v
 }

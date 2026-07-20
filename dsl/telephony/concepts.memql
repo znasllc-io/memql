@@ -7,7 +7,6 @@
 // product-level space (Amendment A). A product maps its own scope onto a
 // partition in its pack; the telephony core only ever sees partitionId.
 
-@version("1.0.0")
 @namespace("telephony")
 @description("A provisioned PSTN phone number (DID). Bound to a partition; inbound calls to this DID route to a partition-scoped room. Carrier identifiers are opaque (providerId). Compliance state (E911, consent) is layered by the compliance slice.")
 concept number {
@@ -25,7 +24,6 @@ concept number {
   callerIdVerified bool @default("false") @description("Whether this DID is verified for outbound caller-ID presentation (STIR/SHAKEN attestation is carrier-side; this flags our own verified ownership).")
 }
 
-@version("1.0.0")
 @namespace("telephony")
 @description("A LiveKit SIP trunk configuration record (inbound and/or outbound) for a carrier. Holds the LiveKit trunk id and a reference to externally-stored credentials -- never the secret values themselves (those live in external-secrets).")
 concept trunk {
@@ -38,7 +36,6 @@ concept trunk {
   status         enum("active", "disabled")  @default("active") @description("Whether the trunk is in service.")
 }
 
-@version("1.0.0")
 @namespace("telephony")
 @description("An append-only PSTN call record: one row per call, written on connect and updated on disconnect. Powers billing, observability, and per-call cost attribution. Bound to a partition + a partition-scoped room (Amendment A).")
 concept call {
@@ -57,7 +54,6 @@ concept call {
   costEstimate    float   @default("0") @description("Estimated total cost in USD (carrier + model audio), for per-call attribution.")
 }
 
-@version("1.0.0")
 @namespace("telephony")
 @description("TCPA consent / opt-out state for an external phone number. Outbound calls to an opted-out number are blocked with an auditable reason (memql#1915). Append-only: the newest row per phoneNumber is authoritative.")
 concept consent {

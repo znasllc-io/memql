@@ -20,7 +20,6 @@
 use identity.concepts.{ user }
 use planner.concepts.{ plan, responsibility }
 
-@version("1.0.0")
 @namespace("authoring")
 @description("An atomic, versioned unit of planner-authored DSL: one automation plus the dependency closure it needs (logic / shapes / specs / traits / policies / mutations / queries / prompts), compiled from a user Responsibility. The bundle is the unit of validation and activation -- the whole closure passes Gate 1 (isolated compile+bind), Gate 2 (tiered behavioral dry-run), and Gate 3 (user approval) together, then activates together into the sandboxed authored-construct runtime (#959). Never part of the core engine Init() path, so a malformed bundle can never brick the cluster. Member constructs are v1:authoring:construct rows pointing back via bundleId.")
 @displayCard(primary="title", secondary="status", tertiary="responsibilityId", status="status")
@@ -46,7 +45,6 @@ concept bundle {
   @relationship(type="interactsWith", field="supersedesBundleId", target=bundle, direction="outgoing")
 }
 
-@version("1.0.0")
 @namespace("authoring")
 @description("One authored DSL construct that is a member of a v1:authoring:bundle: the `.memql` source for an automation / logic / shape / spec / trait / policy / mutation / query / prompt, plus its cached compiled form. These are the NET-NEW constructs the planner authored because nothing existing fit (compose-first, author-the-gap); reused constructs are recorded on the bundle's reusedConstructRefs instead. After a bundle activates, a construct can be promoted into the per-owner reusable catalog (catalogued=true) so later bundles compose it -- the catalog match key lives in catalogKey (#957).")
 @displayCard(primary="name", secondary="kind", tertiary="bundleId", status="status")
@@ -71,7 +69,6 @@ concept construct {
   @relationship(type="interactsWith", field="catalogedFromBundleId", target=bundle, direction="outgoing")
 }
 
-@version("1.0.0")
 @namespace("authoring")
 @description("One dependency edge in a bundle's construct graph (epic memql#954, issue #957). Construct `fromConstruct` (kind `fromKind`) in bundle `bundleId` depends on construct `toName` (kind `toKind`), which resolves from `toSource` (core = sealed engine, catalog = the owner's reusable catalog, bundle = bundle-local). Edges are recorded at compile time so the catalog can run IMPACT ANALYSIS -- 'which bundles depend on this construct' -- before a shared / cataloged construct changes. This is the reuse-coupling mitigation from the design doc: editing a cataloged construct re-validates its dependents.")
 @displayCard(primary="fromConstruct", secondary="toName", tertiary="bundleId", status="toSource")

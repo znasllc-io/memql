@@ -22,7 +22,6 @@
 // IMPORT PATH moves (`use deployment.concepts.{ ... }` -- resolved by file path,
 // not namespace), which the pack's own mutations/shapes/queries now use.
 
-@version("1.0.0")
 @namespace("cluster")
 @description("A persisted deployment record (foundation of epic #1871, issue #1872). Append-only + time-series like the other cluster concepts: the row is written at deploy start (pending/in_progress) and every status transition appends a new payload version under the SAME concept id (the deploymentId, which is also the rollout hash) -- so the full lifecycle is reconstructable asOf any time, and `asOf latest` collapses to the deployment's current status. The CDC path emits graph.node.created/updated.<partition>.v1:cluster:deployment on every write, which the cockpit Deployments view subscribes to (same mechanism v1:cluster:node uses for live topology). The image digest -- previously only in releases/*.yaml on disk -- now lands in the data layer so history, node<->deploy linkage, next-version suggestion, and rollback can all be served from a query.")
 concept deployment {
@@ -41,7 +40,6 @@ concept deployment {
   previousDeploymentId string  @description("Optional deploymentId of the deploy this one supersedes. Plain string FK (not a @relationship).")
 }
 
-@version("1.0.0")
 @namespace("cluster")
 @description("Per-node-type spec for a deployment (Epic 2 / #2094). One row per (deploymentId, nodeType): the version + replica count + resolved image digest a given node type runs under a deployment. Engine-as-spine: an empty `version` means this node type resolves against the parent deployment's engine version (the release lockfile's engineVersion); a non-empty `version` pins this node type to a specific version that overrides the spine. Append-only + time-series like the parent deployment: the row is written when the spec is first set and every re-pin (version/replicas/imageDigest change) appends a new payload version under the SAME concept id -- `concat(deploymentId, ':', nodeType)` -- so the per-node-type spec history is reconstructable asOf any time, and `asOf latest` collapses to the node type's current spec. The CDC path emits graph.node.created/updated.<partition>.v1:cluster:deploymentNodeSpec on every write. deploymentId is a plain string FK to v1:cluster:deployment.deploymentId (cross-concept references use FK fields, not @relationship). A deployment's full per-node spec set = every deploymentNodeSpec with the same deploymentId.")
 concept deploymentNodeSpec {

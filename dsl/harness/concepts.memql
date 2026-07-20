@@ -22,7 +22,6 @@
 use agents.concepts.{ agent }
 use identity.concepts.{ user }
 
-@version("1.0.0")
 @namespace("harness")
 @description("The desired state of a unit of agent work -- the spine the reconciler (#583) drives and everything else reads. A Plan is the user/agent mental anchor (the goal); Steps are the executable decomposition that hang off it via step.plan. Lifecycle: open -> running -> done/failed/cancelled. ownerUserId is the per-row authorization key (owned tier): stamped from actor.userId at create time so only the owner reaches the plan's reads/writes. Provenance is automatic -- the engine stamps createdBy from the authenticated actor on every inserted version; provenanceMutation records WHICH mutation produced this version so the audit trail names the transition, not just the actor.")
 @displayCard(primary="goal", secondary="status", tertiary="ownerUserId", status="status")
@@ -42,7 +41,6 @@ concept plan {
   @relationship(type="owns", field="rootStepId", target=step, direction="outgoing")
 }
 
-@version("1.0.0")
 @namespace("harness")
 @description("A unit of work inside a Plan -- one DAG node. Steps form a DAG via dependsOn (not a flat list), enabling parallel specialists. The status state machine is: pending -> ready (dependsOn satisfied) -> running (controller claims) -> done (result recorded) / failed (error, attempts exhausted) / blocked (needs another step); blocked -> ready (blocker done); failed -> ready (retry, attempt++); done is terminal. Invalid transitions (e.g. done -> running) are rejected by the engine pre-insert guard (component/memql/harness_step_validation.go) since the append-only model cannot express a state machine in the DSL alone. idempotencyKey makes step execution safe to retry / replay (critical for the event-sourced loop in #583). ownerUserId is the per-row authz key (owned tier), stamped from actor.userId at create time. Provenance: the engine stamps createdBy automatically; provenanceMutation names the transition.")
 @displayCard(primary="title", secondary="status", tertiary="planId", status="status")
@@ -68,7 +66,6 @@ concept step {
   @relationship(type="interactsWith", field="assignedAgent", target=agent, direction="outgoing")
 }
 
-@version("1.0.0")
 @namespace("harness")
 @description("What actually happened during a step -- the agent's own actions made durable and recall-able. One observation per meaningful event (a tool result, an error, a note, a decision). The `content` field is the embedding text: the harness's embedding loop stores it into node_vectors keyed by this observation's id (via integration.embedding.store with vectorField='content'), so observations become recall-able memory feeding the recall path in #585 -- the agent can semantically search its own history ('what did I try last time I hit this error?'). The `embedding` field carries the vector once computed; until then recall reads node_vectors directly. ownerUserId is the per-row authz key (owned tier), stamped from actor.userId at create time. Provenance is automatic via the engine-stamped createdBy intrinsic.")
 @displayCard(primary="kind", secondary="stepId", tertiary="ownerUserId")
@@ -107,7 +104,6 @@ concept observation {
 // themselves durable, queryable, and event-emitting -- no external job
 // store, no separate belief table, no separate watermark file.
 
-@version("1.0.0")
 @namespace("harness")
 @description("A durable, distilled belief consolidated from episodic memory (#586) -- a stable fact, preference, or learned outcome the agent should keep across plans. The `content` field is the embedding text: the consolidation + embedding loop stores it into node_vectors keyed by this memory's id (integration.embedding.store, vectorField='content'), mirroring v1:harness:observation and v1:knowledge:documentChunk, so semantic memories are themselves similarTo-recall-able -- both for the recall path (#585) and for the dedup step of consolidation itself (before writing a new belief, similarTo against existing semanticMemory rows; reinforce the match instead of duplicating). Provenance is the killer feature: `sourceEpisodes` links every belief back to the episodic node ids that formed it, so a belief is always auditable. `confidence` rises on reinforcement and decays when a belief goes unreinforced; `lastReinforced` is the decay clock. ownerUserId is the per-row authz key (owned tier), stamped from actor.userId at create time; only the owner reaches their own beliefs.")
 @displayCard(primary="content", secondary="kind", tertiary="ownerUserId", status="kind")
@@ -127,7 +123,6 @@ concept semanticMemory {
   @relationship(type="formedFrom", field="sourceEpisodes", target=observation, direction="outgoing")
 }
 
-@version("1.0.0")
 @namespace("harness")
 @description("The per-owner consolidation watermark (#586), stored as a node so the consolidation loop's bookkeeping is itself durable + queryable -- no separate cursor store. Holds the createdAt boundary of the most recent episodic batch already consolidated for this owner; each scheduled run reads only episodes with createdAt > watermark, then advances the watermark to the newest episode it processed. This is what makes consolidation INCREMENTAL: cost is bounded by the new-episode delta, not total history, as the agent's log grows without bound. One row per owner (content-addressed id on ownerUserId), updated in place. ownerUserId is the per-row authz key (owned tier), stamped from actor.userId at create time.")
 @displayCard(primary="ownerUserId", secondary="watermark", tertiary="lastRunAt")

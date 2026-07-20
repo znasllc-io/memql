@@ -14,7 +14,6 @@
 
 use identity.concepts.{ user }
 
-@version("1.0.0")
 @namespace("notes")
 @displayCard(primary="title", secondary="body", tertiary="updatedAt")
 @description("A user-owned standalone note: an optional title, a body, and tags, plus an updatedAt watermark. The standalone notebook concept -- distinct from the product pack's canvas-state note caption field. Per-row authz: owned -- ownerUserId is stamped from actor.userId on every write and every read gates on ownerUserId==actor.userId.")

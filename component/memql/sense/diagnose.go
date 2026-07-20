@@ -247,6 +247,7 @@ func (s *Service) semanticDiagnostics(file *parser.File, source string) []Diagno
 	diagnostics = append(diagnostics, nameShapeRule(file, source)...)
 	diagnostics = append(diagnostics, arraySyntaxRule(source)...)
 	diagnostics = append(diagnostics, redundantEnabledRule(source)...)
+	diagnostics = append(diagnostics, redundantVersionRule(source)...)
 
 	// Check function definitions.
 	for _, def := range file.Definitions {

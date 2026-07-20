@@ -6,7 +6,6 @@
 
 use agents.concepts.{ agent }
 
-@version("1.0.0")
 @namespace("identity")
 @description("Self-service access request placed on the waitlist queue. Created when an unknown email submits the registration form while MEMQL_IDENTITY_REGISTRATION_MODE=approval. Admins triage rows in the admin console: approval mints a v1:identity:invitation and emails a magic link; rejection stamps the reason and closes the row. Also auto-aged by the accessRequestExpirySweep cron once IDENTITY_ACCESS_REQUEST_EXPIRY_DAYS has elapsed without a decision. Global scope so admins in any partition (typically owners of the cluster) can review the queue.")
 concept accessRequest {
@@ -27,7 +26,6 @@ concept accessRequest {
   @relationship(type="parent", field="invitationId", target=invitation, direction="outgoing")
 }
 
-@version("1.0.0")
 @namespace("identity")
 @description("Append-only audit log entry. Captures security-relevant events (auth, identity, authorization, configuration, admin) with actor + target + source attribution. Global scope so any cluster operator can read the full trail. Retention controlled by MEMQL_IDENTITY_AUDIT_LOG_RETENTION_DAYS via the daily auditEventRetentionSweep automation. The prevEventHash field is reserved for future hash-chain tamper-resistance; written but not validated in MVP.")
 @displayCard(primary="action", secondary="category", tertiary="actorEmail", status="outcome")
@@ -59,7 +57,6 @@ concept auditEvent {
   @relationship(type="parent", field="actorIdentityId", target=identity, direction="outgoing")
 }
 
-@version("1.0.0")
 @namespace("identity")
 @description("One-time OAuth authorization code, RFC 6749 §4.1 style. Minted at /auth/magic-link/consume when the originating magic link carried an oauthCtxJSON (third-party OAuth client flow) and exchanged at /oauth/token for an access + refresh token pair. Single-use, redirect-URI bound, client-ID bound, ~60s TTL. Bound to the specific magic-link row it was minted from so a leaked code cannot be replayed across sessions. Global scope: token redemption is unauthenticated and must work without partition context.")
 concept authCode {
@@ -82,7 +79,6 @@ concept authCode {
   @relationship(type="parent", field="magicLinkRequestId", target=magicLinkRequest, direction="outgoing")
 }
 
-@version("1.0.0")
 @namespace("identity")
 @description("Public OAuth client minted at dynamic client registration (RFC 7591). claude.ai / Claude Desktop's 'add custom connector' flow POSTs to /register and cannot pre-configure a client_id, so the identity service issues one here and looks it up at /authorize + /oauth/token exactly like a static MEMQL_IDENTITY_REGISTERED_CLIENTS entry. Public clients only -- no secret is issued (token_endpoint_auth_method = none). Global scope: registration + token redemption are unauthenticated and must work without a partition context.")
 concept oauthClient {
@@ -95,7 +91,6 @@ concept oauthClient {
   registeredAt            string  @description("RFC3339 registration time. Mirrors the row's createdAt intrinsic (createdAt is reserved and cannot be a payload field), kept explicit so the RFC 7591 client_id_issued_at can be re-derived without the row envelope.")
 }
 
-@version("1.0.0")
 @namespace("identity")
 @description("Bearer-token session record. One row per access token issued by the identity service's magic-link / refresh flow. Looked up on every authenticated request to enforce per-session revocation; rows past expiresAt are tombstoned by GC, not by user action. Global scope: lives in _system so any partition's middleware can resolve a session.")
 concept authSession {
@@ -119,7 +114,6 @@ concept authSession {
   @relationship(type="parent", field="identityId", target=identity, direction="outgoing")
 }
 
-@version("1.0.0")
 @namespace("identity")
 @description("Runtime-editable cluster settings. Single-row concept (id='cluster') that holds the operator-tunable knobs originally bootstrapped from IDENTITY_* env vars. The first-run wizard (Phase 3) writes this row; the admin app (Phase 6) edits it. Service.LiveConfig() reads from here first and falls back to env so a fresh deployment is functional without any post-bootstrap edits. Global scope so the configuration is reachable from every binary that needs it (identity itself plus future per-node verifier middleware).")
 concept clusterSettings {
@@ -151,7 +145,6 @@ concept clusterSettings {
   authoredAutomationsEnabled      bool    @default("true")  @description("Cluster-wide GLOBAL KILL SWITCH for planner-authored automations (epic memql#954, issue #961). true = activated authored bundles fire normally; false = the authored runtime is halted across the WHOLE cluster -- no authored automation fires on any node until re-enabled, regardless of any individual bundle's status or any per-user kill switch. The governance hard stop for the authored-automation surface. Single-row (id='cluster') so every node reads the same value; flipped via setAuthoredAutomationsEnabled and read by the authored scheduler's global gate.")
 }
 
-@version("1.0.0")
 @namespace("identity")
 @description("Grants an AI agent the right to act through a user's v1:identity:identity for a bounded role ceiling, scope set, and lifetime. Global scope: lives in _system and is readable from any partition so cross-partition agent work does not require per-partition delegation rows.")
 concept delegation {
@@ -173,7 +166,6 @@ concept delegation {
   @relationship(type="interactsWith", field="agentId", target=agent, direction="outgoing")
 }
 
-@version("1.0.0")
 @namespace("identity")
 @description("An account or credential set owned by a v1:identity:user. One user can have many identities: a magic-link verified email, OAuth accounts on external apps, API keys (Personal Access Tokens), or service accounts. Agents borrow identities to act on the user's behalf via v1:identity:delegation. Global scope: lives in _system and is readable from any partition.")
 concept identity {
@@ -236,7 +228,6 @@ concept identity {
   @relationship(type="parent", field="userId", target=user, direction="outgoing")
 }
 
-@version("1.0.0")
 @namespace("identity")
 @description("Token-hashed invitation credential. Maps an invitee (existing user by ID, or external guest by email + token) to an optional product scope hint. The identity layer owns the lifecycle (pending/accepted/expired/cancelled) and the auth primitive; product layers populate partitionId/spaceName and any display-name denormalizations they need. Global-scoped: an unauthenticated /join/<token> resolve has no envelope partition, and even authenticated invitees may live in a different partition than the inviter, so token -> invitation lookup must work without a partition context. Product-side rows that REFERENCE invitations (e.g. the product pack's participation concept) stay partition-scoped on the partition where the work actually happens.")
 @displayCard(primary="inviteeEmail", secondary="kind", tertiary="inviterName", status="status")
@@ -260,7 +251,6 @@ concept invitation {
   @relationship(type="parent", field="inviteeId", target=user, direction="outgoing")
 }
 
-@version("1.0.0")
 @namespace("identity")
 @description("Pending magic-link authentication request. One row per /auth/magic-link issuance. The plain token is hashed (SHA-256) before persistence -- only the hash lives here so a database snapshot can never be replayed into a login. Single-use semantics: consumedAt is set atomically on the first successful click and any subsequent click against the same row is rejected. Past expiresAt the row is also rejected. Global scope so the public unauthenticated /auth/magic-link/consume endpoint can resolve the row regardless of which partition the eventual user belongs to.")
 concept magicLinkRequest {
@@ -277,7 +267,6 @@ concept magicLinkRequest {
   @relationship(type="parent", field="invitationId", target=invitation, direction="outgoing")
 }
 
-@version("1.0.0")
 @namespace("identity")
 @description("A person (or synthetic principal). Owns identities. Same record cluster-wide.")
 @displayCard(primary="displayName", secondary="role", tertiary="primaryEmail", status="active")
@@ -321,7 +310,6 @@ concept user {
   @relationship(type="interactsWith", field="activeAssistantId", target=agent, direction="outgoing")
 }
 
-@version("1.0.0")
 @namespace("identity")
 @description("Short-lived pairing credential for the computer-use enrollment flow. The frontend's Settings -> Computer Use 'Connect this computer' card mints a row + plain code (XXXX-XXXX, 8 alphanumeric chars from Crockford's Base32 alphabet). The cockpit wizard on the user's machine redeems the code on the cluster's gRPC stream via Authorization: Pair <code>, the redeem handler stamps redeemedAt + redeemedBy, mints a v1:identity:identity worker_token row owned by the same user, and returns the plain mql_wkr_<...> token + cluster URL to the cockpit. Single-use: a row with non-empty redeemedAt is dead. TTL ~10 minutes (IDENTITY_PAIRING_CODE_TTL_MIN, default 10).")
 concept workerPairingCode {
@@ -338,7 +326,6 @@ concept workerPairingCode {
   @relationship(type="parent", field="redeemedBy", target=identity, direction="outgoing")
 }
 
-@version("1.0.0")
 @namespace("identity")
 @description("Organization group. Users belong to groups; agents are assigned to groups for scoped access control. Created and managed in-app; the externalId field is preserved for any legacy rows that came from a previous external sync source.")
 concept group {
@@ -352,7 +339,6 @@ concept group {
   active       bool    @default("true") @description("Whether the group is active.")
 }
 
-@version("1.0.0")
 @namespace("identity")
 @description("Per-account entitlement that caps the number of CONCURRENTLY-RUNNING tasks (Plans) a paying account may have across all of its spaces, sourced from the billing tier (epic memql#902 / foundation child #903). The cap is per paying account -- v1 keys on v1:identity:user.id (accountKind='user'); accountKind='org' is reserved for a future per-organization rollup where many users share one paying account's slots. DEFAULT = UNLIMITED (enterprise behavior): an account with no row here, an enterprise tier, or a non-positive maxConcurrentTasks is uncapped -- the admission controller (#904) is a no-op until a finite cap is written, so existing / unconfigured accounts behave exactly as today (no regression). The NUMBER (maxConcurrentTasks) is the source of truth so billing can change a tier's cap without a code change; tier is carried alongside purely for the Tasks-UX upgrade / limit messaging (#909) and the enterprise=unlimited shortcut. Global scope (lives in _system) so the planner node's admission controller and the billing / admin writer can both reach it from any partition. One logical row per account: setAccountEntitlement mints a deterministic id (accountEntitlement-<hash(accountId)>) so each set appends a new time-series version and the latest wins.")
 concept accountEntitlement {

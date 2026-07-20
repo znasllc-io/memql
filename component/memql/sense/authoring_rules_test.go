@@ -214,3 +214,19 @@ func TestRedundantEnabledRule_EmbeddedTreeClean(t *testing.T) {
 		t.Errorf("stripped tree yields %d redundant-enabled hint(s):\n  %s", len(hints), strings.Join(hints, "\n  "))
 	}
 }
+
+// #2613: the default-version literal hints; explicit non-defaults and prose
+// mentions do not.
+func TestRedundantVersionRule(t *testing.T) {
+	if got := redundantVersionRule("@version(\"1.0.0\")\nconcept probe {\n}\n"); len(got) != 1 || got[0].Code != "redundant-version" {
+		t.Fatalf("default literal must hint once, got %+v", got)
+	}
+	for name, src := range map[string]string{
+		"non-default": "@version(\"2.5.7\")\nconcept probe {\n}\n",
+		"prose":       "// historical: @version(\"1.0.0\") was everywhere\nconcept probe {\n}\n",
+	} {
+		if got := redundantVersionRule(src); len(got) != 0 {
+			t.Errorf("%s: want no hint, got %+v", name, got)
+		}
+	}
+}
