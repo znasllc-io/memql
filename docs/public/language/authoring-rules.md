@@ -514,7 +514,9 @@ The five value positions:
   wrong value. Always write a value-position comparison expression-led
   (parenthesise the left operand, or lead with the literal) or wrap it in
   `cond(...)`. This is why a comparison is a first-class `cond` PREDICATE
-  but not a `cond` BRANCH value.
+  but not a `cond` BRANCH value -- an identifier-led comparison in
+  branch-value position is a load rejection (#2655; it previously loaded
+  green and silently returned its own source text on the multi-step path).
 - **cond predicates** accept a bare boolean chain (`x.any()`), a scalar
   comparison (`r > 50`), an equality (`role == "x"`), a comparison
   over a chain aggregate (`x.count(m => ...) > 0`, wave 3), and a

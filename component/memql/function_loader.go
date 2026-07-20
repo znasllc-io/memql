@@ -424,6 +424,9 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 	if err := validateLogicArithmeticOperands(funcDef); err != nil {
 		return nil, err
 	}
+	if err := validateLogicCondBranchValues(funcDef); err != nil {
+		return nil, err
+	}
 
 	// Validate the function name matches the file-derived function name.
 	if funcDef.Name != "" && funcDef.Name != expectedName {
