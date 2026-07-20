@@ -214,3 +214,30 @@ func TestRedundantEnabledRule_EmbeddedTreeClean(t *testing.T) {
 		t.Errorf("stripped tree yields %d redundant-enabled hint(s):\n  %s", len(hints), strings.Join(hints, "\n  "))
 	}
 }
+
+// #2613: the default-version literal hints; explicit non-defaults and prose
+// mentions do not.
+func TestRedundantVersionRule(t *testing.T) {
+	if got := redundantVersionRule("@version(\"1.0.0\")\nconcept probe {\n}\n"); len(got) != 1 || got[0].Code != "redundant-version" {
+		t.Fatalf("default literal must hint once, got %+v", got)
+	}
+	// Every shape the dsl/ gate fails must hint (#2657 review parity):
+	// trailing comment, inner spacing, CRLF endings.
+	for name, src := range map[string]string{
+		"trailing-comment": "@version(\"1.0.0\") // keep\nconcept probe {\n}\n",
+		"inner-spaces":     "@version( \"1.0.0\" )\nconcept probe {\n}\n",
+		"crlf":             "@version(\"1.0.0\")\r\nconcept probe {\r\n}\r\n",
+	} {
+		if got := redundantVersionRule(src); len(got) != 1 {
+			t.Errorf("%s: want one hint, got %+v", name, got)
+		}
+	}
+	for name, src := range map[string]string{
+		"non-default": "@version(\"2.5.7\")\nconcept probe {\n}\n",
+		"prose":       "// historical: @version(\"1.0.0\") was everywhere\nconcept probe {\n}\n",
+	} {
+		if got := redundantVersionRule(src); len(got) != 0 {
+			t.Errorf("%s: want no hint, got %+v", name, got)
+		}
+	}
+}

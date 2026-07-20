@@ -310,3 +310,39 @@ func redundantEnabledRule(source string) []Diagnostic {
 // CRLF endings) -- not the word inside prose or a longer annotation name
 // like @enabledFoo.
 var enabledAnnotationRE = regexp.MustCompile(`^[ \t]*(@enabled)\b`)
+
+// redundantVersionRule surfaces the #2613 soft deprecation: absent @version
+// means 1.0.0, so the literal @version("1.0.0") is ceremony. An explicit
+// non-default version never hints.
+func redundantVersionRule(source string) []Diagnostic {
+	var diagnostics []Diagnostic
+	lines := strings.Split(source, "\n")
+	for lineIdx, line := range lines {
+		// The RAW line, deliberately: stripStringsAndComments blanks the
+		// annotation's argument, destroying the "1.0.0"-vs-non-default
+		// distinction this rule exists to make. Line-anchoring makes a
+		// `// @version("1.0.0")` prose mention safe; a mention inside a
+		// /* */ block or a multiline string still hints -- the same
+		// latent exposure the sibling rules accept.
+		for _, m := range versionDefaultRE.FindAllStringSubmatchIndex(line, -1) {
+			pos := Position{Line: lineIdx + 1, Column: m[2] + 1}
+			diagnostics = append(diagnostics, Diagnostic{
+				Range: Range{
+					Start: pos,
+					End:   Position{Line: pos.Line, Column: m[3] + 1},
+				},
+				Severity: SeverityHint,
+				Message:  "`@version(\"1.0.0\")` is the default: absent means 1.0.0 (#2613). Delete the line; keep @version only for genuine non-defaults.",
+				Code:     "redundant-version",
+			})
+		}
+	}
+	return diagnostics
+}
+
+// versionDefaultRE matches the redundant default-version annotation line in
+// every shape the dsl/ gate fails: inner spacing, a trailing // comment, and
+// CRLF endings -- so the editor hints the shapes CI rejects. (Inside /* */
+// the editor additionally hints where the gate stays silent; see the rule
+// body's exposure note.)
+var versionDefaultRE = regexp.MustCompile(`^[ \t]*(@version\([ \t]*"1\.0\.0"[ \t]*\))[ \t]*(//[^\r]*)?\r?$`)

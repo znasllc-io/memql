@@ -28,7 +28,7 @@ construct-specific (see the end of this document) or rejected.
 | `@enabled` | Yes | Yes | Yes | Accepted no-op; definitions are enabled by default (#2609) |
 | `@disabled` | Yes | Yes | Yes | Explicitly disables the definition |
 | `@deprecated` | Yes | Yes | Yes | Marks as deprecated with optional message |
-| `@version("v1")` | Yes | Yes | Yes | Version tag for the definition |
+| `@version("v1")` | Yes | Yes | Yes | Version metadata tag (no load-time default for these constructs) |
 | **Documentation** |
 | `@description("...")` | Yes | Yes | Yes | Human-readable description |
 | **Access Control** |
@@ -388,7 +388,9 @@ The constructs outside this matrix carry their own closed annotation
 sets; unknown annotations are rejected at load time:
 
 - **Concepts**: `@description`, `@version`, `@namespace`, `@type`,
-  `@displayCard`. (`@scope` is retired, #56.) Field-level:
+  `@displayCard`. (`@scope` is retired, #56.) `@version` is strict
+  semver and absent means 1.0.0 (#2613) -- annotate only genuine
+  non-defaults; the same default applies to seeds. Field-level:
   `@required`, `@default`, `@description`, `@unique`, `@pattern`,
   `@minLength`, `@maxLength`, `@minimum`, `@maximum`, `@immutable`,
   `@secret`, `@variant`. See `dsl/_reference/_concept.memql`.

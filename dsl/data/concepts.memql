@@ -4,7 +4,6 @@
 // files cover the other construct kinds.
 
 
-@version("1.0.0")
 @namespace("data")
 @description("Audit log entry for validation state transitions. Tracks who performed each check, confirm, or revert action, when, and why.")
 concept log {
@@ -21,7 +20,6 @@ concept log {
   @relationship(type="parent", field="recordId", target=record, direction="outgoing")
 }
 
-@version("1.0.0")
 @namespace("data")
 @description("Validation policy defining check/confirm requirements for a record type. Controls how many synthetic checks and human confirmations are needed, and whether checked data is usable before full confirmation.")
 concept policy {
@@ -35,7 +33,6 @@ concept policy {
 
 }
 
-@version("1.0.0")
 @namespace("data")
 @description("Data record with validation lifecycle: draft -> checked -> confirmed. Replaces the staging/production split with a unified concept where data visibility is governed by validation state and policy.")
 concept record {

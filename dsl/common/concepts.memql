@@ -3,7 +3,6 @@
 // Concepts in the common namespace.
 
 
-@version("1.0.0")
 @namespace("common")
 @description("A file attachment uploaded to a space, with extracted transcription.")
 concept attachment {
@@ -19,7 +18,6 @@ concept attachment {
 
 }
 
-@version("1.0.0")
 @namespace("common")
 @description("Audio, video, image, and document assets referenced by utterances.")
 concept media {

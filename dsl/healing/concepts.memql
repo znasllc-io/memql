@@ -37,7 +37,6 @@
 
 use identity.concepts.{ user }
 
-@version("1.0.0")
 @namespace("healing")
 @description("A two-tier definition of a self-healable construct: the immutable BASE (authored/embedded, never LLM-healed -- the deploy spine's source of truth) and a healed OVERLAY override (data, produced by the repair loop, human-validated) that shadows its base when valid. Resolution prefers the most-recent VALID overlay override for a baseConstructId and falls back to the base. Mirrors the Epic 1 RBAC base/custom hybrid (immutable predefined base + dynamic custom data, newest-wins). The `tier` field is the immutability axis: a tier=base row is immutable at runtime (the validateHealingBaseImmutable Go guard rejects any non-system-actor write to it, so an override can never be forged as base to escape the override-is-data contract); a tier=overlay row is the healed data an actor may add. Per-row authz: owned -- ownerUserId is stamped from actor.userId on every write and every read gates on ownerUserId==actor.userId. Multi-node consistent via the shared Postgres + the cache.invalidate broadcast.")
 concept healedOverride {

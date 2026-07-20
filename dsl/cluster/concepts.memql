@@ -3,7 +3,6 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-@version("1.0.0")
 @namespace("cluster")
 @description("A memQL cluster -- the top-level deployment unit consisting of a shared database and seed nodes (bff, cognition, planner). Partitions exist within a cluster for data isolation.")
 concept cluster {
@@ -23,7 +22,6 @@ concept cluster {
 
 // ---- concepts/v1/cluster/database/concept.memql ----
 
-@version("1.0.0")
 @namespace("cluster")
 @description("A PostgreSQL database instance backing a memQL cluster. Tracks connection info, engine version, and installed extensions.")
 concept database {
@@ -43,7 +41,6 @@ concept database {
 
 // ---- concepts/v1/cluster/identityProvider/concept.memql ----
 
-@version("1.0.0")
 @namespace("cluster")
 @description("An identity provider used for authentication and user management in a memQL cluster. Typically the in-house identity service (component/identity), surfaced for cluster-topology dashboards.")
 concept identityProvider {
@@ -61,7 +58,6 @@ concept identityProvider {
   @relationship(type="parent", field="clusterId", target=cluster, direction="outgoing")
 }
 
-@version("1.0.0")
 @namespace("cluster")
 @description("A registered node in the memQL cluster. The record is written on registration and updated on every liveness transition (connecting, healthy, degraded, draining, offline, stopped). States mirror the NodeHealthStatus enum defined in component/node/node.proto -- that proto is the source of truth.")
 concept node {
@@ -79,7 +75,6 @@ concept node {
   region        string  @description("Cloud region (e.g. 'us-central1') or 'local'. Stamped at registration from MEMQL_REGION (#1873).")
 }
 
-@version("1.0.0")
 @namespace("cluster")
 @description("Definition of a node type and its expected capabilities.")
 concept nodeType {
@@ -91,7 +86,6 @@ concept nodeType {
   codeReference string  @description("Optional architecture-model node id (model.Node.ID, e.g. 'service:memql') linking this node type to its code-side identity. Cockpit's Topology view uses this to bridge the live cluster grid and the architecture-model drill-down: selecting a live node finds the matching code-side service and jumps the navigator to that drill point.")
 }
 
-@version("1.0.0")
 @namespace("cluster")
 @description("Lifecycle event recording node state transitions (started, stopped, failed). Used for audit trail and cluster state recovery. Legacy name retained for data compatibility.")
 concept spawnEvent {

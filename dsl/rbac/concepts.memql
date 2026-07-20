@@ -26,7 +26,6 @@
 // roles immutable at runtime; custom-role capabilities in E1.4 are
 // minted through a rank-bounded mutation, not free-form writes).
 
-@version("1.0.0")
 @namespace("rbac")
 @description("A single authorization GRANT: the right to apply one primitive verb to one resource type, attached to a role. Capability = (verb x resourceType) for a role. This is the atomic unit of the consolidated RBAC model (epic memql#2062). The five verbs (read/create/update/delete/execute) are UNIFORM across every resourceType, including `principal` -- applying a verb to the principal resource is how user-management governance is expressed (E1.3): e.g. `update` on a principal, gated by a rank+self predicate, means 'edit a user'; `create` on a principal means 'add a user' WITHOUT necessarily being able to edit existing ones (the create != update split). A role's effective grants are the union of its capability rows. Global / immutable reference data: authored as `seed` rows materialized into _system, readable by every principal, never per-user-owned. PUBLIC per-row-authz tier -- it is deployment-wide config, not user data. roleSlug points at the role this grant belongs to; the role rows themselves land in E1.2 (memql#2070), so until then capabilities reference a role purely by its stable slug string.")
 concept capability {
@@ -39,7 +38,6 @@ concept capability {
   active        bool    @default("true")  @description("Soft-deactivate flag. An inactive capability is ignored at resolution time but kept for audit. Lets a custom role's grant be retired without churning the row history.")
 }
 
-@version("1.0.0")
 @namespace("rbac")
 @description("A named, RANKED bundle of capabilities -- the role half of the consolidated RBAC model (epic memql#2062). A role's effective authorization is the union of its v1:rbac:capability grants (joined by roleSlug). E1.2 (memql#2070) authors the FOUR base roles as immutable seed rows: owner (400) > developer (300) > admin (200) > user (100). The rank ordering is the locked decision -- developer OUTRANKS admin (the power axes differ: developer is engineering authority, admin is user-management authority) and owner is self-managed only. Ranks are spaced integers (not 1/2/3/4) precisely so E1.4 (memql#2072) custom roles can SLOT BETWEEN existing ranks (e.g. a 'lead' at 250 sits above admin but below developer) without renumbering. The governance predicates in E1.3 (memql#2071) compare actor.rank vs target.rank to decide who-can-manage-whom. Base roles are IMMUTABLE at runtime: predefined=true rows are re-materialized from this DSL on every boot and a Go pre-insert guard (validateRbacBaseRoleImmutable) rejects any non-system-actor write to them, so a base role can never be redefined as data to escalate privilege. Custom roles (predefined=false) are addable as DATA via the rank-bounded createRole path in E1.4. Global / _system reference data: readable by every principal so any node resolves a rank locally; PUBLIC per-row-authz tier.")
 concept role {

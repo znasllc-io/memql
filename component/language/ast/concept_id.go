@@ -183,11 +183,12 @@ func ExtractNamespaceAttribute(attrs []*Attribute) (string, bool, error) {
 // the name, and returns the assembled ID + a structured error path
 // for each individual failure.
 //
-// Returns the empty string when @version or @namespace is missing
-// (transitional state -- many concept files don't carry these yet).
-// The caller decides whether absence is an error: at lint time it
-// might be a warning; at engine-startup it might be a hard fail
-// once migration completes.
+// Returns the empty string when @namespace is missing (transitional
+// state -- some concept files haven't migrated yet). The caller decides
+// whether absence is an error: at lint time it might be a warning; at
+// engine-startup it might be a hard fail once migration completes.
+// Absent @version is NOT transitional: it means 1.0.0 (#2613), so
+// @namespace alone selects the annotated assembly.
 func AssembleConceptIdFromDecl(decl *ConceptDecl) (string, error) {
 	if decl == nil {
 		return "", fmt.Errorf("concept declaration is nil")
@@ -201,7 +202,14 @@ func AssembleConceptIdFromDecl(decl *ConceptDecl) (string, error) {
 	if nErr != nil {
 		return "", fmt.Errorf("concept %q: %w", decl.Name, nErr)
 	}
-	if !hasVersion || !hasNamespace {
+	// Absent @version means 1.0.0 (#2613): @namespace alone selects the
+	// annotated assembly. Before this default, a version-less concept fell
+	// through to the "legacy loader handles it" skip -- a path the flat
+	// tree does not have, so the concept silently never registered.
+	if !hasVersion {
+		version = SemverVersion{Major: 1, Minor: 0, Patch: 0}
+	}
+	if !hasNamespace {
 		return "", nil
 	}
 

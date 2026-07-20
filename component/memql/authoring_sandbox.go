@@ -229,15 +229,16 @@ func sandboxCompileConcept(c SandboxConstruct, overlay *memoryNodes.MemoryRegist
 		return fail(d, fmt.Sprintf("%s: declared name %q does not match the concept name in source (%q)", origin, c.Name, decl.Name))
 	}
 
-	// The concept's canonical id is assembled from @version + @namespace +
-	// declaration name. A candidate concept must carry both so the authored
-	// runtime can register it under a real id.
+	// The concept's canonical id is assembled from @namespace + the
+	// declaration name (@version defaults to 1.0.0, #2613). A candidate
+	// concept must carry @namespace so the authored runtime can register
+	// it under a real id.
 	id, err := languageAst.AssembleConceptIdFromDecl(decl)
 	if err != nil {
 		return fail(d, fmt.Sprintf("%s: %v", origin, err))
 	}
 	if id == "" {
-		return fail(d, fmt.Sprintf("%s: concept %q is missing @version and/or @namespace -- cannot assemble a canonical concept id", origin, c.Name))
+		return fail(d, fmt.Sprintf("%s: concept %q is missing @namespace -- cannot assemble a canonical concept id", origin, c.Name))
 	}
 
 	concept, buildErr := memoryNodes.BuildConceptFromDecl(decl, id)

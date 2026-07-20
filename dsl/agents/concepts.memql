@@ -10,7 +10,6 @@
 use identity.concepts.{ identity, user }
 use planner.concepts.{ plan }
 
-@version("1.0.0")
 @namespace("agents")
 @description("System-level AI assistant templates with configurable capabilities, personalities, and provider settings. Global-scoped: lives in _system alongside v1:identity:user, since per-user platform agents (assistant, plannerAgent, trainerAgent) are infrastructure that every tenant sees the same way -- keyed by ownerUserId payload field, addressed canonically as _system:v1:agents:agent:<seedName>-<userShortId>.")
 @displayCard(primary="name", secondary="role", tertiary="ownerUserId", status="active")
@@ -104,7 +103,6 @@ concept agent {
   @relationship(type="interactsWith", field="extendedFromAgentId", target=agent, direction="outgoing")
 }
 
-@version("1.0.0")
 @namespace("agents")
 @description("Standing authorization granting an agent permission to trigger Plans of certain kinds without per-Plan user approval. Per Q4 Option B (tiered trust + opt-in autonomy): agent-proactive Plans default to 'requires user approval' (canvas suggestion card -> click Approve to start); the user can graduate a specific agent to standing authorization for specific plan kinds via the 'Approve & always allow this' button on the suggestion card. The grant is per (agentId, planKind, spaceScope) and carries a per-grant token budget cap + an expiry so autonomy is bounded by default.")
 concept agentAuthorization {
@@ -125,7 +123,6 @@ concept agentAuthorization {
   @relationship(type="parent", field="userId", target=user, direction="outgoing")
 }
 
-@version("1.0.0")
 @namespace("agents")
 @description("First-class catalog of agent roles. A role is the spine of an agent's identity: it picks the locked minimum skills (knowledge + tool + live-source bundles), declares the recommended LLM policy, and caps how many skills an agent in the role may carry at once. The role is the contract the assistant fulfills when it auto-creates a specialist mid-conversation -- pick the role, copy its locked + default skills onto the new agent, materialize the row. Lock semantics (#158): lockedSkillIds is the minimum required set for any agent carrying this role. The cockpit's Studio renders locked rows with a lock icon; updateAgent rejects writes that strip a locked id (server-side enforcement, not just UI). defaultSkillIds is pre-selected when the agent is created but the user / planner may remove them later. forbiddenSkillIds hard-denies skills the agent factory MUST NOT grant. availableSkillIds (when non-empty) is the inclusive 'visible in the picker' set; empty = anything not forbidden is permitted. maxSkills caps the count -- 5 for specialists, 2 for the assistant by default. Predefined rows are re-seeded on every startup; user-created roles default to predefined=false and stay fully editable. Per-user roles are global-scoped because routing decisions (cognition / conductor) need to see the same role surface across every partition.")
 concept agentRole {
@@ -146,7 +143,6 @@ concept agentRole {
   predefined             bool    @default("false")  @description("True for catalog rows seeded by dsl/agents/roles/*.memql on every startup. Predefined rows are LOCKED in the role manager UI: name / description / category / locked + forbidden fields + maxSkills are read-only; only tier and recommendedPolicySlug edits are accepted. User-created roles default to predefined=false and remain fully editable. The role catalog itself is the only place where 'admin-only edit predefined rows' would happen, and even there the locks come back on the next startup if not aligned with the source slice.")
 }
 
-@version("1.0.0")
 @namespace("agents")
 @description("First-class capability bundle: a named unit of (knowledgeDomains + toolSlugs + liveSources) that the Planner Agent attaches to agents in createSpecialist / extendSpecialist. After the full skills rollout (#157 -> #158 -> #159) the agent factory pulls skills off the catalog rather than threading parallel flat lists; this concept is the spine of that surface. Phase 1 (this PR) lands the schema + a 13-row predefined catalog; consumers don't read skills yet. Phase 2 migrates roles + agents to skillIds[]; Phase 3 lands the mintSkill authority + approval card.")
 concept skill {
@@ -168,7 +164,6 @@ concept skill {
   @relationship(type="interactsWith", field="mintedByAgentId", target=agent, direction="outgoing")
 }
 
-@version("1.0.0")
 @namespace("agents")
 @description("Append-only audit log for every skill attach / reconfigure event on an agent. Mirrors v1:knowledge:validationEvent: denormalized state lives on the agent row for fast queries; this event log carries the per-mutation history the planner trace viewer (cockpit#125) and audits replay against. Two writes per attach (the agent row update + the event row); cheap. Phase 1 lands the concept; Phase 2 starts writing rows from the agent factory. detached is reserved for a future phase -- v1 is append-only because no consumer currently reads the negative path.")
 concept skillChangeEvent {
@@ -188,7 +183,6 @@ concept skillChangeEvent {
   @relationship(type="interactsWith", field="planId", target=plan, direction="outgoing")
 }
 
-@version("1.0.0")
 @namespace("agents")
 @description("Session-scoped memory for UI-driving agents. One record per user; accumulates short notes across takeovers so the operator agent can learn the user's app usage patterns and shortcut repeat work.")
 concept operatorMemory {
@@ -201,7 +195,6 @@ concept operatorMemory {
   @relationship(type="parent", field="userId", target=user, direction="outgoing")
 }
 
-@version("1.0.0")
 @namespace("agents")
 @description("Operator-curated avatar persona catalog (memql#609). Global operator catalog -- like agentRole / skill: a shared set of vendor-minted avatar personas every user PICKS from when creating an assistant (frontend#239). Each row is a custom Simli avatar generated from an operator image; its vendor-issued faceId is hand-curated as a seed under dsl/agents/avatarPersonas.memql. When a user picks a persona the agent's avatarPersonaId/avatarVendor are stamped from the entry; the voice-agent resolves the persona at session start (integrations/voice/agent/avatar_*.go). Per-assistant vendor choice: an entry belongs to exactly one vendor.")
 @displayCard(primary="name", secondary="vendor", tertiary="gender", status="active")

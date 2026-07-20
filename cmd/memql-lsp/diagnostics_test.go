@@ -80,7 +80,7 @@ func TestPublishDiagnostics_CleanAndBroken(t *testing.T) {
 	notify, got := capturingNotify()
 
 	const clean = "file:///clean.memql"
-	s.docs.open(clean, "@version(\"1.0.0\")\n@namespace(\"wp3\")\n@description(\"A widget.\")\nconcept widget {\n  label string @required @description(\"Label\")\n}\n")
+	s.docs.open(clean, "@namespace(\"wp3\")\n@description(\"A widget.\")\nconcept widget {\n  label string @required @description(\"Label\")\n}\n")
 	s.publishDiagnostics(notify, clean)
 
 	const broken = "file:///broken.memql"
