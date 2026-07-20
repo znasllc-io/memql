@@ -46,6 +46,11 @@ func TestLogicCondBranchValue_IdentifierLedComparisonRejectedAtLoad(t *testing.T
 		"nested-predicate": `cond(cond(z == "q", true, args.b == "y"), "1", "2")`,
 		// A projection object literal carrying the cond is still a value walk.
 		"object-literal": `{v: cond(args.a == "x", args.b == "y", "n")}`,
+		// A comparison INSIDE a wrapper as the branch value is the same
+		// silent source-text return one wrapper deep -- the walk carries
+		// branch context through containers, not just direct children.
+		"lower-arg-comparison":    `cond(args.a == "x", lower(args.b == "y"), "n")`,
+		"coalesce-arg-comparison": `cond(args.a == "x", coalesce(args.b == "y", ""), "n")`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			err := loadCondBranchProbe(t, ret)
@@ -104,5 +109,58 @@ func TestLogicCondBranchValue_AssignmentStepRHSRejected(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "BRANCH value") {
 		t.Errorf("rejection should name the branch-value rule, got: %v", err)
+	}
+}
+
+// The FunctionStepConfig feed is the SOLE defense for nested/wrapped
+// assignment shapes (the direct flattened check covers only the bare form) --
+// pin it so deleting the arm fails loudly.
+func TestLogicCondBranchValue_NestedAssignmentShapesRejected(t *testing.T) {
+	for name, rhs := range map[string]string{
+		"coalesce-wrapped": `coalesce(cond(args.a == "x", args.b == "y", "n"), "")`,
+		"nested-cond":      `cond(args.a == "x", cond(z == "q", args.b == "y", "m"), "n")`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			src := strings.Join([]string{
+				"@description(\"nested assignment probe\")",
+				"logic condBranchNestedAssignProbe {",
+				"  args {",
+				"    a string @required",
+				"    b string",
+				"  }",
+				"  body {",
+				"    z := coalesce(args.b, \"\")",
+				"    w := " + rhs,
+				"    return w",
+				"  }",
+				"}",
+			}, "\n")
+			_, err := tryParseNewFunctionSyntax("condBranchNestedAssignProbe", "logic", src, "common.logic.memql", dotAccessLoadRegistry())
+			if err == nil || !strings.Contains(err.Error(), "BRANCH value") {
+				t.Fatalf("nested/wrapped cond assignment must be rejected via the step-args feed, got: %v", err)
+			}
+		})
+	}
+}
+
+// The step-args feed also carries the #2542 arithmetic gate into function-step
+// args: an always-wrong `a - b > 0` trap inside a lambda passed through a cond
+// predicate arg is now a load rejection instead of an opaque runtime failure.
+func TestLogicStepArgs_ArithmeticTrapRejected(t *testing.T) {
+	src := strings.Join([]string{
+		"@description(\"arith trap in step args probe\")",
+		"logic arithStepArgsProbe {",
+		"  args {",
+		"    b string",
+		"  }",
+		"  body {",
+		"    w := cond(args.b.split(\",\").where(m => m.len - m.cap > 0).any(), \"y\", \"n\")",
+		"    return w",
+		"  }",
+		"}",
+	}, "\n")
+	_, err := tryParseNewFunctionSyntax("arithStepArgsProbe", "logic", src, "common.logic.memql", dotAccessLoadRegistry())
+	if err == nil || !strings.Contains(err.Error(), "arithmetic operand is a comparison") {
+		t.Fatalf("the #2542 trap inside function-step args must be rejected at load, got: %v", err)
 	}
 }
