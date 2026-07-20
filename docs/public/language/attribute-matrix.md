@@ -79,7 +79,10 @@ discovery: a `@disabled` query, mutation, logic, or builtin (#2608) is
 hidden from `functions()` and the MCP tool listing -- including the
 `@mcp`-promoted first-class tool surface (#2647) -- (`help()` still
 describes it, reporting `"enabled": false`) and rejected with
-`function "name" is disabled` if called directly (#2605). Tools,
+`function "name" is disabled` if called directly (#2605). Automations
+carry the same pair (#2681): a `@disabled` `@mcp` automation is dropped
+from the advertised MCP tool surface AND refused by the manual run path
+(dry-run and live alike) rather than merely hidden. Tools,
 seeds, prompts (#2606), providers, specs, and traits (#2607) are
 skipped at load entirely: a `@disabled` tool never reaches the MCP
 surface, a `@disabled` seed is never materialised, a `@disabled`
