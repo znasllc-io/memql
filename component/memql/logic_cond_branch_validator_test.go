@@ -112,9 +112,10 @@ func TestLogicCondBranchValue_AssignmentStepRHSRejected(t *testing.T) {
 	}
 }
 
-// The FunctionStepConfig feed is the SOLE defense for nested/wrapped
-// assignment shapes (the direct flattened check covers only the bare form) --
-// pin it so deleting the arm fails loudly.
+// The FunctionStepConfig feed is the defense for assignment shapes the
+// flattened cond-step arm cannot see (a cond nested under ANOTHER wrapper,
+// e.g. coalesce-wrapped -- the flattened arm covers cond-rooted trees,
+// including nested conds) -- pin it so deleting the arm fails loudly.
 func TestLogicCondBranchValue_NestedAssignmentShapesRejected(t *testing.T) {
 	for name, rhs := range map[string]string{
 		"coalesce-wrapped": `coalesce(cond(args.a == "x", args.b == "y", "n"), "")`,
