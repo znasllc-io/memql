@@ -149,6 +149,20 @@ func (s *Service) completeReceiver(prefix string) []CompletionItem {
 
 // completeFuncBody returns completions inside a function body.
 func (s *Service) completeFuncBody(prefix string, enc EnclosingConstruct) []CompletionItem {
+	// Block-specific completion (#2628): inside a named block, offer
+	// THAT block's set -- args offers field types, a filter offers the
+	// reserved heads plus the bound concept's fields, a write block
+	// offers concept fields plus the post-#2599 accept/stamp short
+	// forms. The block labels have been declared in nextrules.go since
+	// the table was written; this is the classifier that finally
+	// computes them.
+	if len(enc.Blocks) > 0 {
+		block := enc.Blocks[len(enc.Blocks)-1]
+		if items, ok := s.completeInBlock(prefix, enc, block); ok {
+			return items
+		}
+	}
+
 	var items []CompletionItem
 
 	// Construct-scoped body blocks (#2627): the spec's BodyBlocks for
@@ -742,4 +756,111 @@ func invocationKeywordsForConstruct(enc EnclosingConstruct) []string {
 		return []string{"query", "mutation", "insert", "update", "delete"}
 	}
 	return nil
+}
+
+// completeInBlock returns the completion set for the innermost named
+// block, and whether the block is one this classifier covers (#2628).
+func (s *Service) completeInBlock(prefix string, enc EnclosingConstruct, block string) ([]CompletionItem, bool) {
+	label := specBlockContextLabel(enc.Keyword, block)
+	if label == "" {
+		return nil, false
+	}
+	switch label {
+	case "inArgsBlock":
+		var items []CompletionItem
+		for _, t := range FieldTypes {
+			if !strings.HasPrefix(t, prefix) {
+				continue
+			}
+			item := CompletionItem{
+				Label: t, Kind: "type", Detail: "field type",
+				InsertText: t, SortPriority: 1,
+			}
+			// The post-#2599 field surface: enum completes to the TYPE
+			// form (#2618), never the retired `string @enum(...)` pair.
+			// The `!` required sigil is an operator, not an item, so it
+			// is taught in the documentation instead.
+			if t == "enum" {
+				item.InsertText = "enum("
+				item.Documentation = "Restricted value set: `status enum(\"open\", \"closed\")` -- self-contained (#2618). Suffix the type with `!` to mark the field required."
+			}
+			items = append(items, item)
+		}
+		return items, true
+
+	case "inFilterClause":
+		var items []CompletionItem
+		for _, head := range reservedFilterHeads {
+			if strings.HasPrefix(head, prefix) {
+				items = append(items, CompletionItem{
+					Label: head, Kind: "keyword", Detail: "filter head",
+					Documentation: KeywordDocs[head], InsertText: head,
+					SortPriority: 2,
+				})
+			}
+		}
+		items = append(items, s.boundConceptFieldItems(prefix, enc)...)
+		return items, true
+
+	case "inWriteBlock":
+		var items []CompletionItem
+		// The post-#2599 write forms (#2616). Offering the retired long
+		// forms here would undo the migration the epic just landed.
+		if strings.HasPrefix("accept", prefix) {
+			items = append(items, CompletionItem{
+				Label: "accept", Kind: "keyword", Detail: "write-block sugar",
+				Documentation: "`accept { a, b }` lists the public fields this mutation accepts; each auto-binds to its same-named declared arg (#2616).",
+				InsertText:    "accept { ", SortPriority: 1,
+			})
+		}
+		if strings.HasPrefix("stamp", prefix) {
+			items = append(items, CompletionItem{
+				Label: "stamp", Kind: "keyword", Detail: "write-block sugar",
+				Documentation: "`stamp { key: value }` carries the server-set fields beside an accept{} list (#2616). Never mix loose fields with accept/stamp.",
+				InsertText:    "stamp {", SortPriority: 1,
+			})
+		}
+		items = append(items, s.boundConceptFieldItems(prefix, enc)...)
+		return items, true
+
+	case "inShapeBody":
+		return s.boundConceptFieldItems(prefix, enc), true
+	}
+	return nil, false
+}
+
+// boundConceptFieldItems offers the fields of the construct's
+// signature-bound concept (the ConceptInfo.Fields projection).
+func (s *Service) boundConceptFieldItems(prefix string, enc EnclosingConstruct) []CompletionItem {
+	if s.registries == nil || enc.Name == "" {
+		return nil
+	}
+	var items []CompletionItem
+	for _, canonical := range s.registries.ConceptNames() {
+		_, short := splitConceptID(canonical)
+		if short != enc.Concept {
+			continue
+		}
+		if c, ok := s.registries.ConceptGet(canonical); ok {
+			for _, f := range c.Fields {
+				if strings.HasPrefix(f.Name, prefix) {
+					items = append(items, CompletionItem{
+						Label: f.Name, Kind: "field", Detail: f.Type,
+						Documentation: f.Description, InsertText: f.Name,
+						SortPriority: 1,
+					})
+				}
+			}
+		}
+		break
+	}
+	return items
+}
+
+// reservedFilterHeads mirrors the engine plan parser's
+// reservedFilterHead set (component/memql/parser.go) -- the path roots
+// legal at the head of a filter predicate.
+var reservedFilterHeads = []string{
+	"payload", "actor", "args", "now", "config",
+	"trace", "meta", "schema", "partition", "provenance",
 }

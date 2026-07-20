@@ -33,6 +33,10 @@ type EnclosingConstruct struct {
 	// Name is the construct's declared name when the header carries one
 	// (the second identifier for concept-bound signatures).
 	Name string
+	// Concept is the signature-bound concept short name for a
+	// concept-binding construct (`query <Concept> <name>`), empty
+	// otherwise (#2628 uses it for field completion).
+	Concept string
 	// Blocks is the chain of enclosing named blocks INSIDE the construct
 	// body, outermost first (args, filter, insert, stamp, step, ...).
 	// Empty when the cursor sits directly in the construct body.
@@ -51,6 +55,7 @@ func resolveEnclosingConstruct(tokens []parser.Token) (EnclosingConstruct, bool)
 	type frame struct {
 		label     string // the identifier immediately before this `{`
 		name      string // a second identifier before that (signature form)
+		concept   string // the middle identifier of a concept-bound signature
 		construct bool
 	}
 	var stack []frame
@@ -80,6 +85,9 @@ func resolveEnclosingConstruct(tokens []parser.Token) (EnclosingConstruct, bool)
 			if len(idents) > 0 {
 				f.label = idents[0]
 				f.name = idents[len(idents)-1]
+				if len(idents) >= 3 {
+					f.concept = idents[1] // `query <Concept> <name> {`
+				}
 				if dslSpec.ConstructByKeyword(f.label) != nil {
 					f.construct = true
 				}
@@ -96,7 +104,7 @@ func resolveEnclosingConstruct(tokens []parser.Token) (EnclosingConstruct, bool)
 		if !stack[i].construct {
 			continue
 		}
-		out := EnclosingConstruct{Keyword: stack[i].label, Name: stack[i].name}
+		out := EnclosingConstruct{Keyword: stack[i].label, Name: stack[i].name, Concept: stack[i].concept}
 		if c := dslSpec.ConstructByKeyword(out.Keyword); c != nil {
 			out.Receiver = c.AnnotationReceiver
 		}
