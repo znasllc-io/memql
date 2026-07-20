@@ -34,6 +34,7 @@ construct-specific (see the end of this document) or rejected.
 | **Access Control** |
 | `@internal` | Yes | Yes | Yes | Not exposed to external API |
 | `@public` | Yes | Yes | No | Authz-classification opt-out: declares that no caller-scope check applies (see below) |
+| `@actor` | Yes | Yes | Yes | Declares the body reads the auth envelope (`actor.*`); used-but-undeclared fails load (#2621) |
 | `@role("admin")` | Yes | Yes | Yes | Restrict to users with specified role |
 | `@permission("...")` | Yes | Yes | No | Require specific permission |
 | **Performance** |

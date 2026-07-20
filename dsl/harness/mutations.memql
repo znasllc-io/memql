@@ -34,6 +34,7 @@
 // owned by someone else.
 @mcp
 @description("Create a v1:harness:plan in status='open'. ownerUserId is stamped from actor.userId (owned tier). Single write path for plan creation.")
+@actor
 mutate plan createHarnessPlan {
   args {
     planId  string
@@ -60,6 +61,7 @@ mutate plan createHarnessPlan {
 // machine via the transition mutations below.
 @mcp
 @description("Add a v1:harness:step to a plan, status='pending', attempt=0. ownerUserId is stamped from actor.userId (owned tier). Creating the step emits graph.node.created.*.v1:harness:step automatically on insert.")
+@actor
 mutate step addHarnessStep {
   args {
     stepId          string
@@ -179,6 +181,7 @@ mutate step failHarnessStep {
 // semantically recall-able (#585).
 @mcp
 @description("Append a v1:harness:observation for a step (tool_result / error / note / decision). ownerUserId stamped from actor.userId (owned tier). content is the embedding source for semantic recall (#585).")
+@actor
 mutate observation recordHarnessObservation {
   args {
     observationId  string
@@ -239,6 +242,7 @@ mutate observation recordHarnessObservation {
 // belief is itself similarTo-recall-able (for #585 recall AND for the
 // next run's own dedup step).
 @description("Create a v1:harness:semanticMemory -- a new distilled belief. ownerUserId stamped from actor.userId (owned tier). sourceEpisodes records provenance back to the episodic nodes it was distilled from. confidence/reinforceCount/lastReinforced seed the decay clock. content is the embedding source for similarTo dedup + recall (#585).")
+@actor
 mutate semanticMemory createHarnessSemanticMemory {
   args {
     memoryId        string
@@ -275,6 +279,7 @@ mutate semanticMemory createHarnessSemanticMemory {
 // MERGED, deduped provenance list (prior + this run's contributors),
 // so the audit trail grows as evidence accumulates.
 @description("Reinforce an existing v1:harness:semanticMemory (dedup path): take the engine-computed bumped confidence + reinforceCount, reset lastReinforced to now, and replace sourceEpisodes with the merged/deduped provenance. No new belief row -- this is why re-running over the same episodes does not duplicate. ownerUserId re-stamped from actor.userId (owned tier).")
+@actor
 mutate semanticMemory reinforceHarnessSemanticMemory {
   args {
     memoryId        string!
@@ -302,6 +307,7 @@ mutate semanticMemory reinforceHarnessSemanticMemory {
 // measuring age from the last real reinforcement, otherwise a belief
 // could never age out.
 @description("Decay an unreinforced v1:harness:semanticMemory: lower confidence to the engine-computed decayed value. lastReinforced is intentionally NOT reset (decay keeps measuring age from the last real reinforcement). ownerUserId re-stamped from actor.userId (owned tier). A belief that decays below the prune floor is then retired via pruneHarnessSemanticMemory.")
+@actor
 mutate semanticMemory decayHarnessSemanticMemory {
   args {
     memoryId    string!
@@ -324,6 +330,7 @@ mutate semanticMemory decayHarnessSemanticMemory {
 // without being lost from the audit trail. Mirrors the safety / platform
 // retention crons' observation-only pattern.
 @description("Prune a decayed v1:harness:semanticMemory: status -> 'pruned' (soft-delete; the append-only model has no row removal). Recall (#585) + consolidation dedup filter status=='active', so a pruned belief drops out of both while staying in the audit trail. ownerUserId re-stamped from actor.userId (owned tier).")
+@actor
 mutate semanticMemory pruneHarnessSemanticMemory {
   args {
     memoryId  string!
@@ -347,6 +354,7 @@ mutate semanticMemory pruneHarnessSemanticMemory {
 // upserts via the engine's ON CONFLICT, so the same call both creates
 // the cursor on first run and advances it on every later run.
 @description("Advance the per-owner v1:harness:consolidationCursor watermark to the engine-computed max(createdAt) of the batch just consolidated -- the incremental-cost mechanism (next run reads only episodes newer than this). Upserts on a stable per-owner id so it creates the cursor on first run and advances it thereafter. episodesSeen takes the engine-computed running total. ownerUserId stamped from actor.userId (owned tier).")
+@actor
 mutate consolidationCursor advanceHarnessConsolidationCursor {
   args {
     cursorId      string

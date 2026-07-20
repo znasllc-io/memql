@@ -43,7 +43,8 @@ func TestSpaceLifecycleMutations_StampOwnerUserId(t *testing.T) {
 	}{
 		{
 			"mutationArchiveSpace",
-			`mutate space mutationArchiveSpace {
+			`@actor
+mutate space mutationArchiveSpace {
 				args {
 					partitionId  string  @required
 					payload  object  @required
@@ -57,7 +58,8 @@ func TestSpaceLifecycleMutations_StampOwnerUserId(t *testing.T) {
 		},
 		{
 			"mutationSaveSpace",
-			`mutate space mutationSaveSpace {
+			`@actor
+mutate space mutationSaveSpace {
 				args {
 					partitionId  string  @required
 					payload  object  @required
@@ -71,7 +73,8 @@ func TestSpaceLifecycleMutations_StampOwnerUserId(t *testing.T) {
 		},
 		{
 			"mutationRestoreSpace",
-			`mutate space mutationRestoreSpace {
+			`@actor
+mutate space mutationRestoreSpace {
 				args {
 					partitionId  string  @required
 					payload  object  @required
@@ -85,7 +88,8 @@ func TestSpaceLifecycleMutations_StampOwnerUserId(t *testing.T) {
 		},
 		{
 			"mutationDeleteSpaceNow",
-			`mutate space mutationDeleteSpaceNow {
+			`@actor
+mutate space mutationDeleteSpaceNow {
 				args {
 					partitionId  string  @required
 					payload  object  @required
@@ -99,7 +103,8 @@ func TestSpaceLifecycleMutations_StampOwnerUserId(t *testing.T) {
 		},
 		{
 			"mutationRenameSpace",
-			`mutate space mutationRenameSpace {
+			`@actor
+mutate space mutationRenameSpace {
 				args {
 					partitionId  string  @required
 					payload  object  @required
@@ -171,7 +176,8 @@ func TestSpaceLifecycleMutations_ActorStampOverridesCallerPayload(t *testing.T) 
 		"v1:cognition:space": {Name: "v1:cognition:space"},
 	})
 
-	src := `mutate space mutationArchiveSpace {
+	src := `@actor
+mutate space mutationArchiveSpace {
 		args {
 			partitionId  string  @required
 			payload  object  @required

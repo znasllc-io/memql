@@ -505,7 +505,7 @@ shape audioOverride audioOverrideFull {
 }
 ```
 
-Body path translations: a bare `name` → payload property; `row.X` → row intrinsic (`id`, `createdAt`, `createdBy`, etc.); `actor.X` → auth envelope. Each path becomes a template entry keyed by the path's terminal segment.
+Body path translations: a bare `name` → payload property; `row.X` → row intrinsic (`id`, `createdAt`, `createdBy`, etc.); `actor.X` → auth envelope (in function bodies, reading `actor.*` requires the `@actor` preamble annotation -- #2621). Each path becomes a template entry keyed by the path's terminal segment.
 
 **Actor shapes** project the engine envelope (the authenticated actor + engine timestamp + allow-listed config). They carry no signature concept. Closed field set: `actor.userId` / `actor.role` / `actor.identityId` / `actor.isClusterOwner` / `actor.now` / `actor.config.<allow-listed-key>`:
 

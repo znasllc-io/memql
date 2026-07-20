@@ -64,6 +64,7 @@ func TestLoader_MutationWithFuncTokenInLineComment(t *testing.T) {
 	src := "use cognition.concepts.{ space }\n\n" +
 		"// Replaces the retired `func (Mutation)` author form (memql#1074).\n" +
 		"@description(\"create a space\")\n" +
+		"@actor\n" +
 		"mutate space mutationCreateSpaceLineComment {\n" +
 		"  args {\n" +
 		"    partitionId  string  @required\n" +
@@ -88,6 +89,7 @@ func TestLoader_MutationWithFuncTokenInBlockComment(t *testing.T) {
 	registry := bug1074Registry()
 	src := "use cognition.concepts.{ space }\n\n" +
 		"/* legacy: func (Mutation) mutationCreateSpace(ctx any) error { ... } */\n" +
+		"@actor\n" +
 		"mutate space mutationCreateSpaceBlockComment {\n" +
 		"  args {\n" +
 		"    partitionId  string  @required\n" +

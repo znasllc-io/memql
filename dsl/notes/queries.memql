@@ -5,6 +5,7 @@
 // their own notes; no arg widens the row set beyond their ownership.
 
 @description("List the caller's notes. Owned: the row set is gated by ownerUserId==actor.userId server-side, so cross-user reads are impossible.")
+@actor
 query note notes {
   filter  ownerUserId==actor.userId
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
@@ -18,6 +19,7 @@ query note notes {
 @description("Fetch a single note by id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard, so a caller can never read another user's note even with its id. Used by the update tool to confirm the row exists before re-inserting a new version.")
 @mcp
 @unbounded("note by id (guarded) gated to the caller -- bounded to a single row")
+@actor
 query note noteById {
   args {
     noteId  string!
@@ -27,6 +29,7 @@ query note noteById {
 }
 
 @description("Search the caller's notes by tag. Owned: ownerUserId==actor.userId gates the row set server-side; the tag predicate narrows to notes carrying the given tag. Body substring matching is done client-side over this caller-scoped result so the search never leaks across users.")
+@actor
 query note notesByTag {
   args {
     tag  string!

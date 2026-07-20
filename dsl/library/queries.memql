@@ -14,6 +14,7 @@
 // matters; search is the cheap client-side refinement on top.
 
 @description("List the caller's entire Library (artifacts + records). Owned: the row set is gated by ownerUserId==actor.userId server-side. The default Library read; the panel filters by lens / kind and searches client-side over this set, or calls the narrower facet queries below when a single facet dominates.")
+@actor
 query artifact libraryArtifacts {
   filter  ownerUserId==actor.userId
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
@@ -25,6 +26,7 @@ query artifact libraryArtifacts {
 }
 
 @description("List the caller's Library rows for one lens (artifact | record) -- backs the Artifacts | Records toggle. Owned: ownerUserId==actor.userId gates the row set; payload.lens narrows to the selected lens.")
+@actor
 query artifact libraryArtifactsByLens {
   args {
     lens  string!
@@ -39,6 +41,7 @@ query artifact libraryArtifactsByLens {
 }
 
 @description("List the caller's Library rows of one kind (document / generated_output / note / todo / calendar_event / memory / live_source) -- backs the kind facet filter. Owned: ownerUserId==actor.userId gates the row set; payload.kind narrows to the selected kind.")
+@actor
 query artifact libraryArtifactsByKind {
   args {
     kind  string!
@@ -62,6 +65,7 @@ query artifact libraryArtifactsByKind {
 @description("Fetch a single Library artifact index row by id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard, so a caller can never read another user's row even with its id. Used by the detail / viewer to resolve the row + its sourceConceptRef before drilling into backing content.")
 @mcp
 @unbounded("library artifact by id (guarded), gated to the owner -- bounded to a single row")
+@actor
 query artifact libraryArtifactById {
   args {
     artifactId  string!
@@ -72,6 +76,7 @@ query artifact libraryArtifactById {
 
 @description("Drill-in read: fetch a generated-output's full content (inline body or attachment ref) by id, gated to the caller. Owned: ownerUserId==actor.userId. Called by the Library viewer when opening a generated_output artifact resolved from its sourceConceptRef.")
 @unbounded("generated output by id (guarded), gated to the owner -- bounded to a single row")
+@actor
 query generatedOutput generatedOutputById {
   args {
     outputId  string!
@@ -81,6 +86,7 @@ query generatedOutput generatedOutputById {
 }
 
 @description("List the generated-output rows a Plan produced. Owned: ownerUserId==actor.userId. The planner reads this as the authoritative 'did the deliverable actually get written?' signal for a produceArtifact plan -- promoteWorkbenchOutput stamps producedByPlanId on the row when a workbench fs_write is promoted. The planner stamps the plan's owner as actor before calling, so the read stays inside the owned-row authz model. (memql#939)")
+@actor
 query generatedOutput generatedOutputsForPlan {
   args {
     planId  string!
@@ -96,6 +102,7 @@ query generatedOutput generatedOutputsForPlan {
 
 @description("Drill-in read: fetch a memory's full content by id, gated to the caller. Owned: ownerUserId==actor.userId. Called by the Library Records lens when opening a memory artifact resolved from its sourceConceptRef.")
 @unbounded("memory by id (guarded), gated to the owner -- bounded to a single row")
+@actor
 query memory memoryById {
   args {
     memoryId  string!
@@ -137,6 +144,7 @@ query artifact libraryWorkspaceLiveSources {
 // versionNumber (or createdAt) -- both are monotonic.
 
 @description("List the append-only version history of a logical document (every retained version, summary projection -- versionNumber, authorKind, author, note, createdAt -- WITHOUT the full body). Owned: ownerUserId==actor.userId gates the row set; payload.documentId narrows to the one document. Backs the Library history drawer (memql#1230); the frontend orders by versionNumber. Each version is a distinct retained row, so no version is ever lost.")
+@actor
 query documentVersion documentVersions {
   args {
     documentId  string!
@@ -152,6 +160,7 @@ query documentVersion documentVersions {
 
 @description("Fetch a single document version's FULL content (immutable body / attachment + provenance) by its version row id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard. Backs the 'open this version' viewer and the restore-source read (memql#1230).")
 @unbounded("document version by id (guarded), gated to the owner -- bounded to a single row")
+@actor
 query documentVersion documentVersionById {
   args {
     versionId  string!
@@ -170,6 +179,7 @@ query documentVersion documentVersionById {
 // read so the handler dependency is explicit and the user-facing query
 // description stays accurate.
 @description("Internal read for the edit/restore handlers: the full version history of a document (full projection) so the handler can compute the next versionNumber + the parentVersionId from the current latest. Owned: ownerUserId==actor.userId; the handler runs under a threaded owner actor. Mirrors documentVersions' filter with the full content shape.")
+@actor
 query documentVersion documentVersionsForOwner {
   args {
     documentId  string!

@@ -4,6 +4,7 @@
 // partition, not space).
 
 @description("ADMIN: DIDs provisioned to a partition, newest first. Cluster-owner gated -- numbers are cluster infrastructure.")
+@actor
 query number numbersByPartition {
   args {
     partitionId  string!
@@ -14,6 +15,7 @@ query number numbersByPartition {
 }
 
 @description("ADMIN: every provisioned DID across all partitions, newest first. Cluster-owner gated. Backs the cockpit numbers view.")
+@actor
 query number allNumbers {
   filter  actor.isClusterOwner==true
   sort    "createdAt", "desc"
@@ -22,6 +24,7 @@ query number allNumbers {
 }
 
 @description("ADMIN: call records for a partition, newest first. Cluster-owner gated. Powers billing + observability.")
+@actor
 query call callsByPartition {
   args {
     partitionId  string!
@@ -33,6 +36,7 @@ query call callsByPartition {
 }
 
 @description("ADMIN: call records that touched a specific DID (as caller or callee), newest first. Cluster-owner gated.")
+@actor
 query call callsByNumber {
   args {
     e164  string!

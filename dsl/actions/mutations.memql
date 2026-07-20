@@ -23,6 +23,7 @@
 // Internal write path: the harness Go side calls this after each LLM step;
 // it is NOT exposed on the MCP/SDK surface (no @mcp / @sdk).
 @description("Record a v1:actions:candidate trace (the captured capability sequence + value/resource provenance for one LLM step, #1735). ownerUserId is stamped from actor.userId (owned tier). status is always 'candidate' on insert.")
+@actor
 mutate candidate recordActionCandidate {
   args {
     candidateId   string
@@ -52,6 +53,7 @@ mutate candidate recordActionCandidate {
 // reinforceCount/version/status take their concept @default values.
 // Internal write path -- not on the MCP/SDK surface.
 @description("Mint a v1:actions:action (primitive) from a completed LLM step (Phase 1, #1736). ownerUserId stamped from actor.userId (owned tier). Stores the replayable capability calls keyed by inputFingerprint.")
+@actor
 mutate action mintAction {
   args {
     actionId          string
@@ -114,6 +116,7 @@ mutate action reinforceAction {
 // The served capability verbs + availability + failover priority are the
 // data the resolver binds against.
 @description("Register a v1:actions:surface (workbench / computer-use:<machineId> / mcp:<server>) with its served capabilities + availability + failover priority. ownerUserId stamped from actor.userId (owned tier). #1737.")
+@actor
 mutate surface registerSurface {
   args {
     surfaceId    string

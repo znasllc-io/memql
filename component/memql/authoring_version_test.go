@@ -69,6 +69,7 @@ func dependentConstructs() []memql.SandboxConstruct {
 	return []memql.SandboxConstruct{
 		{Kind: "trait", Name: "isRefund", Source: sharedSpecGood},
 		{Kind: "query", Name: "queryRefundsForOwner", Source: `use authoring.concepts.{ bundle }
+@actor
 query bundle queryRefundsForOwner {
   filter  payload.ownerUserId==actor.userId
   shape   bundleFull

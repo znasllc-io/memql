@@ -11,6 +11,7 @@ use common.traits.{ isNotDeleted }
 
 @description("Get a single calendar event by node id. Self-scoped: the ownerUserId==actor.userId predicate guarantees a caller can only fetch their own events. Backs the calendar tool's update/delete pre-read and the event detail view.")
 @mcp
+@actor
 query calendarEvent calendarEventById {
   args {
     eventId  string!
@@ -21,6 +22,7 @@ query calendarEvent calendarEventById {
 
 @description("List the authenticated caller's events whose start falls within a [windowStart, windowEnd] instant range, in start order. The reactive harness's reminder responsibilities read this for the 'remind me the day before X' condition (pass windowStart=now, windowEnd=now+lookahead). Self-scoped via actor.userId -- another user's events are never returned.")
 @mcp
+@actor
 query calendarEvent upcomingEvents {
   args {
     windowStart  datetime!
@@ -36,6 +38,7 @@ query calendarEvent upcomingEvents {
 }
 
 @description("List the authenticated caller's events that start on a given day, bounded by the caller-supplied [dayStart, dayEnd] instants (computed in the user's timezone client-side). Self-scoped via actor.userId. Backs the calendar tool's day view and 'what's on my schedule today' agent queries.")
+@actor
 query calendarEvent eventsByDay {
   args {
     dayStart  datetime!
@@ -51,6 +54,7 @@ query calendarEvent eventsByDay {
 }
 
 @description("Find the caller's own events by exact title. Self-scoped via actor.userId. Backs the calendar tool's `find` action ('find my dentist appointment'); the agent passes the title it captured. Exact match keeps the predicate SQL-pushdownable -- substring / semantic search is a downstream concern (the agent can list a window via upcomingEvents and filter conversationally).")
+@actor
 query calendarEvent findEvents {
   args {
     title  string!

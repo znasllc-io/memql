@@ -389,6 +389,16 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 		return nil, err
 	}
 
+	// Actor-binding enforcement (#2621): reading the auth envelope is a
+	// declared capability -- `actor.*` in the body requires `@actor` in
+	// the preamble, exactly the used-requires-declared shape of the
+	// event-binding rule above. Landing in this chain means strict boot
+	// and memqllint's engine-parity tier inherit it with no lint-side
+	// changes.
+	if err := validateActorBinding(rawSourceForUsage, funcDef); err != nil {
+		return nil, err
+	}
+
 	// Field-level event-schema validation (memql#1743): a Logic that OPTS IN by
 	// declaring `@eventField(...)` has every `event.payload.<field>` reference
 	// checked against that declared schema -- rejecting typos / fields the
