@@ -30,8 +30,10 @@ var clockCallFormRe = regexp.MustCompile(`\b(now|timestamp)\(\s*\)`)
 // `config`) and makes every clock dependency legible as a declared name rather
 // than a hidden call.
 //
-// _reference/ skeletons are exempt (they document the grammar, including forms
-// authors do not write).
+// _reference/ skeletons (which document the grammar, including forms authors
+// do not write) are structurally outside the walk: the walker skips
+// underscore-prefixed paths and the embed directive omits them entirely --
+// see TestWalkedTreeHasNoUnderscorePaths.
 func TestNoClockCallForms(t *testing.T) {
 	tree := Tree()
 	paths, err := dslfs.WalkMemqlFiles(tree)
@@ -39,9 +41,6 @@ func TestNoClockCallForms(t *testing.T) {
 		t.Fatalf("WalkMemqlFiles: %v", err)
 	}
 	for _, p := range paths {
-		if strings.HasPrefix(p, "_reference/") {
-			continue
-		}
 		file, openErr := tree.Open(p)
 		if openErr != nil {
 			t.Fatalf("open %s: %v", p, openErr)
