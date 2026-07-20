@@ -84,8 +84,13 @@
 // The longhand the terse form lowers to. `event` is the bound trigger
 // payload; `args.X` reaches its fields inside step calls.
 
+@trigger(event="system.startup")
 @description("Register this node in the database on startup (longhand single-step form).")
-automation registerNodeLonghand @trigger(event="system.startup") => logic registerNode
+automation registerNodeLonghand {
+  step run {
+    logic registerNode(event: event)
+  }
+}
 
 // =============================================================================
 //   3a. Typed input contract -- the `args { }` block  (AVAILABLE, G1 #2363)
