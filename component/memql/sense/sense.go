@@ -27,8 +27,8 @@ type RegistryProvider interface {
 type FunctionInfo struct {
 	Name        string
 	Description string
-	Kind        string // "query", "mutation", "automation", "spec", "tool", "builtin", "prompt", "provider", "shape"
-	ArgsDoc     string // leading documentation comment block
+	Kind        string    // "query", "mutation", "automation", "spec", "tool", "builtin", "prompt", "provider", "shape"
+	ArgsDoc     string    // leading documentation comment block
 	Args        []ArgInfo // declared args from the function's `args { ... }` block
 	Enabled     bool
 	Deprecated  string
@@ -111,6 +111,24 @@ type CompletionItem struct {
 	Documentation string // longer description (markdown)
 	InsertText    string // text to insert
 	SortPriority  int    // lower = higher priority
+	// IsSnippet marks InsertText as LSP snippet syntax ($1, ${1:name},
+	// $0 tabstops). The LSP layer maps it to InsertTextFormat=Snippet;
+	// consumers that do not support snippets render the plain-text
+	// degradation via PlainInsertText (#2629). Snippet syntax sent
+	// WITHOUT this flag inserts literally -- dollar signs visible in
+	// the buffer -- which is why the flag exists rather than sniffing.
+	IsSnippet bool
+}
+
+// PlainInsertText renders an item's insert text for a consumer without
+// snippet support: tabstops and placeholders are stripped
+// (`${1:name}` -> `name`, `$0` -> “), and escaped literals are
+// unescaped. Non-snippet items return InsertText unchanged.
+func (c CompletionItem) PlainInsertText() string {
+	if !c.IsSnippet {
+		return c.InsertText
+	}
+	return plainFromSnippet(c.InsertText)
 }
 
 // Diagnostic represents a single error or warning.

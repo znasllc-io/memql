@@ -157,6 +157,30 @@ editors and agents can key on them:
 | `redundant-version` | Hint | `@version("1.0.0")` restates the default (#2613). |
 | `discarded-args-description` | Hint | `@description` on an args field is parsed and discarded (#2615). |
 
+### Snippet completions (#2629)
+
+Completion items can carry LSP snippet syntax. `CompletionItem` has an
+`IsSnippet` flag; the LSP layer maps it to
+`InsertTextFormat=Snippet`, and every item now declares its format
+explicitly -- snippet syntax sent WITHOUT the flag inserts literally,
+dollar signs visible in the buffer, which is why the flag exists
+rather than sniffing the text.
+
+What ships as a snippet:
+
+| Snippet | Where |
+|---|---|
+| `args { ... }`, `filter { ... }`, `insert { ... }`, ... | Inside a construct body -- opens the block with the cursor inside, offered beside the plain block keyword. |
+| `query` / `mutate` / `logic` / `automation` / `concept` skeletons | Top level -- full declarations with tabstops at the names, sorted BELOW the bare construct keyword so they never displace it. |
+| The `use <domain>.concepts.{ X }` import | Now places the cursor after the bound name (it was multi-line plain text before -- correct, just cursor-less). |
+
+Consumers without snippet support (the Cockpit gRPC path) call
+`PlainInsertText()`, which collapses placeholders to their default
+text and drops tabstops. Generated snippet text escapes literal `$`,
+`}`, and `\` so it cannot be misread as a tabstop or a placeholder
+terminator. The `IsSnippet` flag is mirrored in the proto envelope and
+the Go SDK, with a wire round-trip test.
+
 ### Block-specific completion (#2628)
 
 Inside a named block, completion offers THAT block's set. The block

@@ -104,3 +104,12 @@ darwin-arm64 (standardized dev hardware) is built first. The `vscode-extension`
 CI lane guards the grammar against drift and runs this packaging flow. Release
 targets the VS Code Marketplace and OpenVSX; version the extension in lockstep
 with `GrammarVersion`.
+
+## Snippet completions
+
+The extension advertises `snippetSupport` (vscode-languageclient
+default), and the server emits real snippets (#2629): body-block
+snippets that open a block with the cursor inside, and construct
+skeletons with tabstops at the names you fill. Items that are not
+snippets declare `InsertTextFormat=PlainText` explicitly, so nothing
+inserts tabstop syntax literally.

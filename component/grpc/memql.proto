@@ -1090,6 +1090,7 @@ message SenseCompletionItem {
   string documentation = 4;  // longer description (markdown)
   string insert_text = 5;    // text to insert (may differ from label)
   int32 sort_priority = 6;   // lower = higher priority
+  bool is_snippet = 7;       // insert_text carries LSP snippet syntax ($1, ${1:name}, $0)
 }
 
 // Diagnose -- returns errors and warnings for a document.
