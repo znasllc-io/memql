@@ -45,16 +45,13 @@ mutate policyTrace insertPolicyTrace {
     error            string
   }
   insert {
-    args.policyName
-    args.tier
-    actorUserId: coalesce(args.actorUserId, "")
-    actorRole: coalesce(args.actorRole, "")
-    callerPartition: coalesce(args.callerPartition, "")
-    args.argsHash
-    args.resultJson
-    args.traceJson
-    args.durationMs
-    error: coalesce(args.error, "")
+    accept { policyName, tier, argsHash, resultJson, traceJson, durationMs }
+    stamp {
+      actorUserId: coalesce(args.actorUserId, "")
+      actorRole: coalesce(args.actorRole, "")
+      callerPartition: coalesce(args.callerPartition, "")
+      error: coalesce(args.error, "")
+    }
   }
 }
 
@@ -237,9 +234,10 @@ mutate missingCapability bumpMissingCapabilitySighting {
     lastSeenAt      string  @required
   }
   update {
-    id: args.missingId
-    args.sightingCount
-    args.lastSeenAt
+    accept { sightingCount, lastSeenAt }
+    stamp {
+      id: args.missingId
+    }
   }
 }
 
@@ -251,9 +249,10 @@ mutate missingCapability updateMissingCapabilityStatus {
     resolution  string
   }
   update {
-    id: args.missingId
-    args.status
-    args.resolution
+    accept { status, resolution }
+    stamp {
+      id: args.missingId
+    }
   }
 }
 
@@ -295,15 +294,12 @@ mutate outboundRequest stageOutboundRequest {
     requestedBy  string
   }
   insert {
-    id: args.requestId
-    args.medium
-    args.target
-    args.subject
-    args.body
-    args.dedupeKey
-    args.requestedBy
-    status: "pending"
-    attempts: 0
+    accept { medium, target, subject, body, dedupeKey, requestedBy }
+    stamp {
+      id: args.requestId
+      status: "pending"
+      attempts: 0
+    }
   }
 }
 
@@ -328,11 +324,9 @@ mutate outboundRequest updateOutboundRequestStatus {
     sentAt         string
   }
   update {
-    id: args.requestId
-    args.status
-    args.attempts
-    args.lastError
-    args.nextAttemptAt
-    args.sentAt
+    accept { status, attempts, lastError, nextAttemptAt, sentAt }
+    stamp {
+      id: args.requestId
+    }
   }
 }

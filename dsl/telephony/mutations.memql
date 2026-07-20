@@ -17,15 +17,14 @@ mutate number recordNumber {
     monthlyCost  float
   }
   insert {
-    args.e164
-    args.carrier
-    args.partitionId
-    purpose:     coalesce(args.purpose, "both")
-    status:      "active"
-    args.providerId
-    numberType:  coalesce(args.numberType, "local")
-    monthlyCost: coalesce(args.monthlyCost, 0)
-    purchasedAt: now
+    accept { e164, carrier, partitionId, providerId }
+    stamp {
+      purpose:     coalesce(args.purpose, "both")
+      status:      "active"
+      numberType:  coalesce(args.numberType, "local")
+      monthlyCost: coalesce(args.monthlyCost, 0)
+      purchasedAt: now
+    }
   }
 }
 
@@ -36,8 +35,7 @@ mutate number updateNumberStatus {
     status  string  @required @enum("active", "releasing", "released")
   }
   update {
-    id:     args.id
-    status: args.status
+    accept { id, status }
   }
 }
 
@@ -52,13 +50,10 @@ mutate trunk recordTrunk {
     secretRef      string
   }
   insert {
-    args.carrier
-    args.direction
-    args.name
-    args.livekitTrunkId
-    args.sipEdgeUri
-    args.secretRef
-    status: "active"
+    accept { carrier, direction, name, livekitTrunkId, sipEdgeUri, secretRef }
+    stamp {
+      status: "active"
+    }
   }
 }
 
@@ -78,18 +73,13 @@ mutate call recordCall {
     costEstimate    float
   }
   insert {
-    args.direction
-    args.fromE164
-    args.toE164
-    args.partitionId
-    args.room
-    args.carrier
-    args.providerCallId
-    args.agentId
-    startedAt:       now
-    durationSeconds: coalesce(args.durationSeconds, 0)
-    disposition:     coalesce(args.disposition, "in_progress")
-    costEstimate:    coalesce(args.costEstimate, 0)
+    accept { direction, fromE164, toE164, partitionId, room, carrier, providerCallId, agentId }
+    stamp {
+      startedAt:       now
+      durationSeconds: coalesce(args.durationSeconds, 0)
+      disposition:     coalesce(args.disposition, "in_progress")
+      costEstimate:    coalesce(args.costEstimate, 0)
+    }
   }
 }
 
@@ -102,11 +92,11 @@ mutate call closeCall {
     costEstimate    float
   }
   update {
-    id:              args.id
-    endedAt:         now
-    durationSeconds: args.durationSeconds
-    disposition:     args.disposition
-    costEstimate:    coalesce(args.costEstimate, 0)
+    accept { id, durationSeconds, disposition }
+    stamp {
+      endedAt:         now
+      costEstimate:    coalesce(args.costEstimate, 0)
+    }
   }
 }
 
@@ -120,11 +110,7 @@ mutate consent setConsent {
     source       string
   }
   insert {
-    args.phoneNumber
-    args.partitionId
-    args.status
-    args.reason
-    args.source
+    accept { phoneNumber, partitionId, status, reason, source }
   }
 }
 
@@ -137,9 +123,9 @@ mutate number setNumberE911 {
     callerIdVerified bool
   }
   update {
-    id:               args.id
-    e911Registered:   args.e911Registered
-    e911AddressId:    args.e911AddressId
-    callerIdVerified: coalesce(args.callerIdVerified, false)
+    accept { id, e911Registered, e911AddressId }
+    stamp {
+      callerIdVerified: coalesce(args.callerIdVerified, false)
+    }
   }
 }

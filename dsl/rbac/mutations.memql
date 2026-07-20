@@ -29,13 +29,12 @@ mutate role createRole {
     active       bool
   }
   insert {
-    id: coalesce(args.roleId, args.slug)
-    args.slug
-    args.name
-    args.rank
-    args.description
-    predefined: coalesce(args.predefined, false)
-    active: coalesce(args.active, true)
+    accept { slug, name, rank, description }
+    stamp {
+      id: coalesce(args.roleId, args.slug)
+      predefined: coalesce(args.predefined, false)
+      active: coalesce(args.active, true)
+    }
   }
 }
 
@@ -52,13 +51,12 @@ mutate capability createCapability {
     active        bool
   }
   insert {
-    id: args.capabilityId
-    args.roleSlug
-    args.verb
-    args.resourceType
-    effect: coalesce(args.effect, "allow")
-    args.description
-    predefined: coalesce(args.predefined, false)
-    active: coalesce(args.active, true)
+    accept { roleSlug, verb, resourceType, description }
+    stamp {
+      id: args.capabilityId
+      effect: coalesce(args.effect, "allow")
+      predefined: coalesce(args.predefined, false)
+      active: coalesce(args.active, true)
+    }
   }
 }

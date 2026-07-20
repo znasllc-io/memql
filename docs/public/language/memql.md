@@ -742,7 +742,8 @@ mutation space mutationArchiveSpace {
 ```
 
 - `insert { ... }` writes a new row of the signature concept; `update { id: ..., ... }` is the partial-update counterpart for read-merge-validate-write flows.
-- A bare `args.X` entry spreads the field under its own name; `name: <expr>` assigns explicitly.
+- The preferred body is the accept/stamp form: `accept { a, b }` lists caller-accepted public fields (each auto-binds its same-named declared arg -- load-validated) and `stamp { key: value }` carries the server-set fields. Never mix loose fields beside a nested accept/stamp -- the desugar rebuilds the body from the blocks alone and rejects the mix.
+- Longhand: a bare `args.X` entry spreads the field under its own name; `name: <expr>` assigns explicitly.
 - Engine-provided names are available in the body: `now` (RFC3339 timestamp captured at eval start), `actor.userId` / `actor.role` / `actor.identityId` / `actor.isClusterOwner`, `partition`, and allow-listed `config.X`.
 - Helper calls like `concat(...)`, `hash(...)`, `canonicalId(args.x, concept)`, and `coalesce(a, b, ...)` are available for computed fields; the current time is the bare reserved `now` (no call parens — see "Logic" below).
 

@@ -21,13 +21,12 @@ mutate todo createTodo {
     sourceResponsibilityId  string
   }
   insert {
-    id: args.todoId
-    ownerUserId: actor.userId
-    args.title
-    args.dueAt
-    args.priority
-    args.sourceResponsibilityId
-    done: false
+    accept { title, dueAt, priority, sourceResponsibilityId }
+    stamp {
+      id: args.todoId
+      ownerUserId: actor.userId
+      done: false
+    }
   }
 }
 

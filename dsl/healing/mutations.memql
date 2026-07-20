@@ -36,18 +36,16 @@ mutate healedOverride proposeOverride {
     sourcePreconditionId  string
   }
   insert {
-    id: args.overrideId
-    ownerUserId: actor.userId
-    args.baseConstructId
-    tier: "overlay"
-    args.overrideData
-    valid: false
-    args.version
-    active: true
-    blastRadius: coalesce(args.blastRadius, "personal")
-    validationStatus: "proposed"
-    args.reason
-    args.sourcePreconditionId
+    accept { baseConstructId, overrideData, version, reason, sourcePreconditionId }
+    stamp {
+      id: args.overrideId
+      ownerUserId: actor.userId
+      tier: "overlay"
+      valid: false
+      active: true
+      blastRadius: coalesce(args.blastRadius, "personal")
+      validationStatus: "proposed"
+    }
   }
 }
 

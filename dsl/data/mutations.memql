@@ -116,22 +116,15 @@ mutate record createRecord {
     createdAt           string
   }
   insert {
-    id: args.recordId
-    createdAt: coalesce(args.createdAt, now)
-    args.partitionId
-    args.recordType
-    args.label
-    args.data
-    args.importSource
-    args.importedBy
-    args.naturalKeyField
-    args.naturalKeyValue
-    args.sourceAttachmentId
-    args.confidence
-    validationState: "draft"
-    checkCount: 0
-    confirmCount: 0
-    active: true
+    accept { partitionId, recordType, label, data, importSource, importedBy, naturalKeyField, naturalKeyValue, sourceAttachmentId, confidence }
+    stamp {
+      id: args.recordId
+      createdAt: coalesce(args.createdAt, now)
+      validationState: "draft"
+      checkCount: 0
+      confirmCount: 0
+      active: true
+    }
   }
 }
 
@@ -188,21 +181,14 @@ mutate record createRecordBatch {
     confidence          number
   }
   insert {
-    id: args.recordId
-    args.partitionId
-    args.recordType
-    args.label
-    args.data
-    args.importSource
-    args.importedBy
-    args.sourceAttachmentId
-    args.naturalKeyField
-    args.naturalKeyValue
-    args.confidence
-    validationState: "draft"
-    checkCount: 0
-    confirmCount: 0
-    active: true
+    accept { partitionId, recordType, label, data, importSource, importedBy, sourceAttachmentId, naturalKeyField, naturalKeyValue, confidence }
+    stamp {
+      id: args.recordId
+      validationState: "draft"
+      checkCount: 0
+      confirmCount: 0
+      active: true
+    }
   }
 }
 
@@ -272,10 +258,11 @@ mutate record revertRecord {
     confirmCount  number  @required
   }
   update {
-    id: args.recordId
-    validationState: args.toState
-    args.checkCount
-    args.confirmCount
+    accept { checkCount, confirmCount }
+    stamp {
+      id: args.recordId
+      validationState: args.toState
+    }
   }
 }
 
@@ -319,14 +306,15 @@ mutate policy setPolicy {
     revertMinRole          string
   }
   insert {
-    id: args.policyId
-    args.targetRecordType
-    args.partitionId
-    requiredChecks: coalesce(args.requiredChecks, 1)
-    requiredConfirmations: coalesce(args.requiredConfirmations, 1)
-    checkedDataUsable: coalesce(args.checkedDataUsable, false)
-    revertMinRole: coalesce(args.revertMinRole, "admin")
-    active: true
+    accept { targetRecordType, partitionId }
+    stamp {
+      id: args.policyId
+      requiredChecks: coalesce(args.requiredChecks, 1)
+      requiredConfirmations: coalesce(args.requiredConfirmations, 1)
+      checkedDataUsable: coalesce(args.checkedDataUsable, false)
+      revertMinRole: coalesce(args.revertMinRole, "admin")
+      active: true
+    }
   }
 }
 
@@ -368,14 +356,12 @@ mutate record updateRecord {
     confidence       number
   }
   update {
-    id: args.recordId
-    args.data
-    args.label
-    args.naturalKeyField
-    args.naturalKeyValue
-    args.confidence
-    validationState: "draft"
-    checkCount: 0
-    confirmCount: 0
+    accept { data, label, naturalKeyField, naturalKeyValue, confidence }
+    stamp {
+      id: args.recordId
+      validationState: "draft"
+      checkCount: 0
+      confirmCount: 0
+    }
   }
 }

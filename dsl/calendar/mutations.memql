@@ -24,17 +24,14 @@ mutate calendarEvent createCalendarEvent {
     recurrence   string
   }
   insert {
-    id:          args.eventId
-    ownerUserId: actor.userId
-    args.title
-    args.startsAt
-    args.endsAt
-    allDay: coalesce(args.allDay, false)
-    args.location
-    args.notes
-    args.recurrence
-    source:    "native"
-    deleted:   false
+    accept { title, startsAt, endsAt, location, notes, recurrence }
+    stamp {
+      id:          args.eventId
+      ownerUserId: actor.userId
+      allDay: coalesce(args.allDay, false)
+      source:    "native"
+      deleted:   false
+    }
   }
 }
 

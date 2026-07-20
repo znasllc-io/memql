@@ -19,14 +19,15 @@ mutate workspace provisionWorkspace {
     storageRoot  string  @required
   }
   insert {
-    id: args.workspaceId
-    args.planId
-    status: "provisioned"
-    args.storageRoot
-    createdAt: now
-    lastUsedAt: now
-    releasedAt: ""
-    releasedReason: ""
+    accept { planId, storageRoot }
+    stamp {
+      id: args.workspaceId
+      status: "provisioned"
+      createdAt: now
+      lastUsedAt: now
+      releasedAt: ""
+      releasedReason: ""
+    }
   }
 }
 

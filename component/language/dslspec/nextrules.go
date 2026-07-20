@@ -59,6 +59,11 @@ func nextRules() []NextRule {
 			Doc:     "Inside an args { } block: `<name> <type> [@required] [@enum(...)] [@maxLength(N)] [@pattern(...)]`. (@description here is parsed and DISCARDED -- #2615; per-field docs arrive with /// doc comments, #2601. @default is rejected on an args field -- use coalesce(args.X, ...) or the `args.X ?? fallback` shorthand.)",
 		},
 		{
+			Context: "inWriteBlock",
+			Expect:  []string{"fieldName", "clause"},
+			Doc:     "Inside an insert { } / update { } block: `<key>: <expr>` write fields, or the sugared form -- `accept { argName, ... }` (each name auto-binds its same-named declared arg) plus `stamp { key: value }` (server-set fields). Loose fields never mix with accept/stamp (the desugar rebuilds the body from the blocks alone); update requires an id.",
+		},
+		{
 			Context: "inFilterClause",
 			Expect:  []string{"specRef", "operator", "payloadPath", "intrinsic"},
 			Doc:     "Inside a query filter: spec references, trait references, payload.<field> / intrinsic comparisons joined by && / || / ! with Go precedence; membership via `in`; arg-guards via when(args.x){ }.",

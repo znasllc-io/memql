@@ -35,15 +35,13 @@ mutate candidate recordActionCandidate {
     callCount     int
   }
   insert {
-    id: args.candidateId
-    ownerUserId: actor.userId
-    args.planId
-    args.stepId
-    status: "candidate"
-    args.calls
-    args.resourceEdges
-    args.callCount
-    provenanceMutation: "recordActionCandidate"
+    accept { planId, stepId, calls, resourceEdges, callCount }
+    stamp {
+      id: args.candidateId
+      ownerUserId: actor.userId
+      status: "candidate"
+      provenanceMutation: "recordActionCandidate"
+    }
   }
 }
 
@@ -76,24 +74,14 @@ mutate action mintAction {
     provenanceStepId  string
   }
   insert {
-    id: args.actionId
-    ownerUserId: actor.userId
-    args.slug
-    args.intent
-    args.capability
-    sideEffectClass: coalesce(args.sideEffectClass, "write")
-    status: coalesce(args.status, "active")
-    args.inputFingerprint
-    args.calls
-    args.resourceEdges
-    args.paramBindings
-    args.templateFingerprint
-    args.recordedResult
-    args.resultFingerprint
-    args.recordedSurface
-    args.provenancePlanId
-    args.provenanceStepId
-    provenanceMutation: "mintAction"
+    accept { slug, intent, capability, inputFingerprint, calls, resourceEdges, paramBindings, templateFingerprint, recordedResult, resultFingerprint, recordedSurface, provenancePlanId, provenanceStepId }
+    stamp {
+      id: args.actionId
+      ownerUserId: actor.userId
+      sideEffectClass: coalesce(args.sideEffectClass, "write")
+      status: coalesce(args.status, "active")
+      provenanceMutation: "mintAction"
+    }
   }
 }
 
@@ -112,11 +100,12 @@ mutate action reinforceAction {
     reinforceCount int     @required
   }
   update {
-    id: args.actionId
-    args.reliability
-    args.reinforceCount
-    lastReinforced: now
-    provenanceMutation: "reinforceAction"
+    accept { reliability, reinforceCount }
+    stamp {
+      id: args.actionId
+      lastReinforced: now
+      provenanceMutation: "reinforceAction"
+    }
   }
 }
 
@@ -137,17 +126,16 @@ mutate surface registerSurface {
     priority     int
   }
   insert {
-    id: args.surfaceId
-    ownerUserId: actor.userId
-    args.slug
-    args.kind
-    args.machineId
-    args.capabilities
-    available: true
-    priority: coalesce(args.priority, 100)
-    status: "active"
-    lastSeen: now
-    provenanceMutation: "registerSurface"
+    accept { slug, kind, machineId, capabilities }
+    stamp {
+      id: args.surfaceId
+      ownerUserId: actor.userId
+      available: true
+      priority: coalesce(args.priority, 100)
+      status: "active"
+      lastSeen: now
+      provenanceMutation: "registerSurface"
+    }
   }
 }
 

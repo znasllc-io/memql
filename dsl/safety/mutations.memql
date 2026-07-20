@@ -23,22 +23,7 @@ mutate classification insertSafetyClassification {
     mode          string @required
   }
   insert {
-    args.surface
-    args.action
-    args.argsRedacted
-    args.tier
-    args.categories
-    args.decision
-    args.source
-    args.ruleId
-    args.confidence
-    args.reason
-    args.latencyMs
-    args.agentId
-    args.ownerUserId
-    args.planId
-    args.correlationId
-    args.mode
+    accept { surface, action, argsRedacted, tier, categories, decision, source, ruleId, confidence, reason, latencyMs, agentId, ownerUserId, planId, correlationId, mode }
   }
 }
 
@@ -58,18 +43,10 @@ mutate approvalRequest createApprovalRequest {
     planId         string
   }
   insert {
-    args.correlationKey
-    args.surface
-    args.action
-    args.argsRedacted
-    args.tier
-    args.categories
-    args.reason
-    args.expiresAt
-    status: "pending"
-    args.agentId
-    args.ownerUserId
-    args.planId
+    accept { correlationKey, surface, action, argsRedacted, tier, categories, reason, expiresAt, agentId, ownerUserId, planId }
+    stamp {
+      status: "pending"
+    }
   }
 }
 
@@ -82,11 +59,10 @@ mutate approvalRequest resolveApprovalRequest {
     decisionReason string
   }
   update {
-    id: args.id
-    args.status
-    args.decidedBy
-    decidedAt: now
-    args.decisionReason
+    accept { id, status, decidedBy, decisionReason }
+    stamp {
+      decidedAt: now
+    }
   }
 }
 
@@ -111,21 +87,6 @@ mutate outputScreening insertOutputScreening {
     mode           string @required
   }
   insert {
-    args.contentType
-    args.contentLength
-    args.redactedSample
-    args.tier
-    args.categories
-    args.verdict
-    args.screener
-    args.ruleId
-    args.confidence
-    args.reason
-    args.latencyMs
-    args.agentId
-    args.ownerUserId
-    args.planId
-    args.correlationId
-    args.mode
+    accept { contentType, contentLength, redactedSample, tier, categories, verdict, screener, ruleId, confidence, reason, latencyMs, agentId, ownerUserId, planId, correlationId, mode }
   }
 }

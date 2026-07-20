@@ -20,12 +20,12 @@ mutate note createNote {
     tags    []string
   }
   insert {
-    id: args.noteId
-    ownerUserId: actor.userId
-    args.title
-    args.body
-    args.tags
-    updatedAt: now
+    accept { title, body, tags }
+    stamp {
+      id: args.noteId
+      ownerUserId: actor.userId
+      updatedAt: now
+    }
   }
 }
 

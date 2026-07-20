@@ -42,12 +42,12 @@ mutate database createDatabase {
     sslMode  string
   }
   insert {
-    args.host
-    port: 5432
-    args.dbName
-    engine: "postgresql"
-    args.sslMode
-    status: "healthy"
+    accept { host, dbName, sslMode }
+    stamp {
+      port: 5432
+      engine: "postgresql"
+      status: "healthy"
+    }
   }
 }
 
@@ -64,12 +64,11 @@ mutate identityProvider createIdentityProvider {
     redirectUrl     string
   }
   insert {
-    args.name
-    providerType: "oidc"
-    args.issuerUrl
-    args.clientIdPrefix
-    args.redirectUrl
-    status: "connected"
+    accept { name, issuerUrl, clientIdPrefix, redirectUrl }
+    stamp {
+      providerType: "oidc"
+      status: "connected"
+    }
   }
 }
 
@@ -126,12 +125,7 @@ mutate spawnEvent createSpawnEvent {
     metadata     object
   }
   insert {
-    args.nodeId
-    args.nodeType
-    args.action
-    args.initiatorId
-    args.reason
-    args.metadata
+    accept { nodeId, nodeType, action, initiatorId, reason, metadata }
   }
 }
 
@@ -156,9 +150,7 @@ mutate node updateNodeHealth {
     lastSeen  string  @required
   }
   update {
-    id: args.id
-    args.health
-    args.lastSeen
+    accept { id, health, lastSeen }
   }
 }
 

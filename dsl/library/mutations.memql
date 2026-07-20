@@ -85,20 +85,11 @@ mutate generatedOutput createGeneratedOutput {
     producedByWorkerName string
   }
   insert {
-    id: args.outputId
-    args.ownerUserId
-    args.title
-    args.summary
-    args.body
-    args.attachmentId
-    format: coalesce(args.format, "markdown")
-    args.mimeType
-    args.source
-    args.partitionId
-    args.producedByPlanId
-    args.producedByAgentId
-    args.producedByWorkerId
-    args.producedByWorkerName
+    accept { ownerUserId, title, summary, body, attachmentId, mimeType, source, partitionId, producedByPlanId, producedByAgentId, producedByWorkerId, producedByWorkerName }
+    stamp {
+      id: args.outputId
+      format: coalesce(args.format, "markdown")
+    }
   }
 }
 
@@ -115,15 +106,12 @@ mutate memory createMemory {
     sourceUtteranceId  string
   }
   insert {
-    id: args.memoryId
-    ownerUserId: actor.userId
-    args.title
-    args.content
-    args.summary
-    kind: coalesce(args.kind, "fact")
-    args.agentId
-    args.partitionId
-    args.sourceUtteranceId
+    accept { title, content, summary, agentId, partitionId, sourceUtteranceId }
+    stamp {
+      id: args.memoryId
+      ownerUserId: actor.userId
+      kind: coalesce(args.kind, "fact")
+    }
   }
 }
 
@@ -203,17 +191,10 @@ mutate generatedOutput updateGeneratedOutputContent {
     producedByAgentId string
   }
   insert {
-    id: args.outputId
-    args.ownerUserId
-    args.title
-    args.summary
-    args.body
-    args.attachmentId
-    format: coalesce(args.format, "markdown")
-    args.mimeType
-    args.source
-    args.partitionId
-    args.producedByPlanId
-    args.producedByAgentId
+    accept { ownerUserId, title, summary, body, attachmentId, mimeType, source, partitionId, producedByPlanId, producedByAgentId }
+    stamp {
+      id: args.outputId
+      format: coalesce(args.format, "markdown")
+    }
   }
 }

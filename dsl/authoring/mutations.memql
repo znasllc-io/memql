@@ -23,16 +23,13 @@ mutate bundle createAuthoringBundle {
     reusedConstructRefs []object
   }
   insert {
-    id: args.bundleId
-    ownerUserId: actor.userId
-    args.title
-    args.summary
-    args.responsibilityId
-    args.sourcePlanId
-    args.supersedesBundleId
-    args.reusedConstructRefs
-    version: coalesce(args.version, 1)
-    status: "draft"
+    accept { title, summary, responsibilityId, sourcePlanId, supersedesBundleId, reusedConstructRefs }
+    stamp {
+      id: args.bundleId
+      ownerUserId: actor.userId
+      version: coalesce(args.version, 1)
+      status: "draft"
+    }
   }
 }
 
@@ -48,15 +45,12 @@ mutate construct createAuthoringConstruct {
     grammarVersion   string
   }
   insert {
-    id: args.constructId
-    ownerUserId: actor.userId
-    args.bundleId
-    args.kind
-    args.name
-    args.targetNamespace
-    args.source
-    args.grammarVersion
-    status: "draft"
+    accept { bundleId, kind, name, targetNamespace, source, grammarVersion }
+    stamp {
+      id: args.constructId
+      ownerUserId: actor.userId
+      status: "draft"
+    }
   }
 }
 
@@ -69,11 +63,11 @@ mutate bundle recordBundleValidation {
     failureReason     string
   }
   update {
-    id: args.bundleId
-    ownerUserId: actor.userId
-    args.status
-    args.validationReport
-    args.failureReason
+    accept { status, validationReport, failureReason }
+    stamp {
+      id: args.bundleId
+      ownerUserId: actor.userId
+    }
   }
 }
 
@@ -86,11 +80,11 @@ mutate bundle recordBundleDryRun {
     failureReason  string
   }
   update {
-    id: args.bundleId
-    ownerUserId: actor.userId
-    args.status
-    args.dryRunReport
-    args.failureReason
+    accept { status, dryRunReport, failureReason }
+    stamp {
+      id: args.bundleId
+      ownerUserId: actor.userId
+    }
   }
 }
 
@@ -115,10 +109,11 @@ mutate bundle setAuthoringBundleStatus {
     failureReason  string
   }
   update {
-    id: args.bundleId
-    ownerUserId: actor.userId
-    args.status
-    args.failureReason
+    accept { status, failureReason }
+    stamp {
+      id: args.bundleId
+      ownerUserId: actor.userId
+    }
   }
 }
 
@@ -170,13 +165,14 @@ mutate construct catalogueConstruct {
     fromBundleId      string  @required
   }
   update {
-    id: args.constructId
-    ownerUserId: actor.userId
-    catalogued: true
-    args.catalogKey
-    args.catalogMatchText
-    catalogedAt: now
-    catalogedFromBundleId: args.fromBundleId
+    accept { catalogKey, catalogMatchText }
+    stamp {
+      id: args.constructId
+      ownerUserId: actor.userId
+      catalogued: true
+      catalogedAt: now
+      catalogedFromBundleId: args.fromBundleId
+    }
   }
 }
 
@@ -192,13 +188,10 @@ mutate dependencyEdge recordDependencyEdge {
     toSource       string  @required @enum("core", "catalog", "bundle")
   }
   insert {
-    id: args.edgeId
-    ownerUserId: actor.userId
-    args.bundleId
-    args.fromConstruct
-    args.fromKind
-    args.toName
-    args.toKind
-    args.toSource
+    accept { bundleId, fromConstruct, fromKind, toName, toKind, toSource }
+    stamp {
+      id: args.edgeId
+      ownerUserId: actor.userId
+    }
   }
 }

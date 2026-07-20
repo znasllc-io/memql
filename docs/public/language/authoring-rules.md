@@ -649,34 +649,48 @@ conventions (shapes are conventionally `<concept><Projection>`, e.g.
 
 ---
 
-## 15. Write-block shorthand: bare `args.ident` infers the key
+## 15. Write-block sugar: `accept { ... }` / `stamp { ... }` (and the bare-mirror shorthand)
 
-**Rule.** Inside a mutation's `insert { ... }` / `update { ... }`
-block, a bare `args.ident` with no `key:` prefix is shorthand for
-`ident: args.ident`. The key is taken from the arg path's final
-segment. Only single-segment paths are eligible; `args.user.id`
-falls through to the verbose `userId: args.user.id` form.
+**Rule.** The preferred spelling of a mutation write block is the
+accept/stamp form (#2035/#2592, shipped by #2593): `accept { a, b }`
+lists the public fields the mutation accepts from its caller -- each
+name auto-binds to its same-named declared arg (`a` means
+`a: args.a`, load-validated against the `args { ... }` block) -- and
+`stamp { key: value, ... }` carries the server-set fields. Nested
+inside `insert { ... }` / `update { ... }` the enclosing block spells
+the write kind; the top-level bare form (accept/stamp with no write
+block) means insert.
 
 ```memql
-// Verbose -- still valid, still works.
+// Preferred -- the corpus form after the #2616 migration.
 insert {
-  spaceId:     args.spaceId
-  agentId:     args.agentId
-  displayName: args.displayName
-}
-
-// Shorthand -- equivalent.
-insert {
-  args.spaceId
-  args.agentId
-  args.displayName
+  accept { slug, name, rank, description }
+  stamp {
+    id: coalesce(args.roleId, args.slug)
+    predefined: coalesce(args.predefined, false)
+    active: coalesce(args.active, true)
+  }
 }
 ```
 
-Mix the two freely when it reads better (live example:
-`mutationAddAgentToSpace` in `dsl/cognition/mutations.memql`):
+**All-or-nothing.** A write block never mixes loose `key: value`
+fields with a nested `accept`/`stamp` -- the desugar rebuilds the
+body from the blocks alone, so a loose field would be dropped and the
+rewriter rejects the mix at load. Move every server-set field into
+`stamp { ... }` or stay fully longhand.
+
+**The bare-mirror shorthand remains valid longhand.** Inside a
+longhand write block, a bare `args.ident` with no `key:` prefix is
+shorthand for `ident: args.ident` (the key is the arg path's final
+segment; single-segment paths only -- `args.user.id` needs the
+verbose `userId: args.user.id` form). The conformance gate
+(`dsl/no_bare_mirror_runs_test.go`) collapses provably-safe mirror
+runs into accept/stamp via `memqlmigrate --rewrite=accept-stamp`;
+blocks it cannot prove safe (comments worth keeping, nested object
+values, single mirrors) stay longhand deliberately.
 
 ```memql
+// Longhand with bare mirrors -- still valid where the gate allows it.
 insert {
   id: concat("si-", hash(concat(
     canonicalId(args.agentId, agent), ":",

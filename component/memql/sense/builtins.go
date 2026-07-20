@@ -63,6 +63,8 @@ var AnnotationDocs = annotations.Docs
 // operator (retired for `in`, #971), and the `use v1:domain:concept` import
 // (Form A -- retired for `use <domain>.<construct>.{ names }`).
 var KeywordDocs = map[string]string{
+	"accept":   "Write-block sugar: lists the public fields the mutation accepts; each auto-binds to its same-named declared arg (`accept { slug }` == `slug: args.slug`).",
+	"stamp":    "Write-block sugar: the server-set `key: value` fields beside an accept{} list.",
 	"for":      "Loop over a range: for item := range collection { ... }",
 	"range":    "Used with for to iterate: for item := range collection",
 	"if":       "Conditional execution: if condition { ... } else { ... }",
