@@ -724,7 +724,10 @@ func (e *mutationTemplateEvaluator) evalParserExpression(ctx context.Context, ex
 			return nil, err
 		}
 		return !isTruthy(ev), nil
-	case *languageParser.EqExpr:
+	case *languageParser.BinaryComparisonExpr:
+		// The one comparison shape the builtin-arg grammar emits since
+		// memql#2654 (relationals before it, ==/!= joined by the
+		// normalization). Template cond() predicates land here.
 		left, err := e.evalParserExpression(ctx, t.Left)
 		if err != nil {
 			return nil, err
@@ -733,7 +736,23 @@ func (e *mutationTemplateEvaluator) evalParserExpression(ctx context.Context, ex
 		if err != nil {
 			return nil, err
 		}
-		return runtimeCompareValues(left, right) == 0, nil
+		cmp := runtimeCompareValues(left, right)
+		switch t.Operator {
+		case languageParser.OpEq:
+			return cmp == 0, nil
+		case languageParser.OpNe:
+			return cmp != 0, nil
+		case languageParser.OpLt:
+			return cmp < 0, nil
+		case languageParser.OpLe:
+			return cmp <= 0, nil
+		case languageParser.OpGt:
+			return cmp > 0, nil
+		case languageParser.OpGe:
+			return cmp >= 0, nil
+		default:
+			return nil, fmt.Errorf("unsupported comparison operator in mutation template: %s", t.Operator)
+		}
 	case *languageParser.LtExpr:
 		left, err := e.evalParserExpression(ctx, t.Left)
 		if err != nil {

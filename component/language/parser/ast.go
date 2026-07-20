@@ -75,7 +75,6 @@ type (
 	AndExpr                 = ast.AndExpr
 	OrExpr                  = ast.OrExpr
 	NotExpr                 = ast.NotExpr
-	EqExpr                  = ast.EqExpr
 	LtExpr                  = ast.LtExpr
 	GtExpr                  = ast.GtExpr
 	LteExpr                 = ast.LteExpr

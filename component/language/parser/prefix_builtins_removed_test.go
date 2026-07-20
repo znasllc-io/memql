@@ -36,7 +36,7 @@ func TestPrefixCallBuiltinsRemoved(t *testing.T) {
 			}
 
 			switch expr.(type) {
-			case *AndExpr, *OrExpr, *NotExpr, *EqExpr, *LtExpr, *GtExpr, *LteExpr, *GteExpr:
+			case *AndExpr, *OrExpr, *NotExpr, *LtExpr, *GtExpr, *LteExpr, *GteExpr:
 				t.Fatalf("expected %q to no longer parse as a dedicated builtin AST node, got %T", src, expr)
 			case *FunctionCallExpr:
 				// Expected.

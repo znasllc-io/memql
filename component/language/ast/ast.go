@@ -604,15 +604,6 @@ type NotExpr struct {
 func (*NotExpr) node()           {}
 func (*NotExpr) expressionNode() {}
 
-// EqExpr returns true if a == b: eq(a, b)
-type EqExpr struct {
-	Left  ExpressionNode
-	Right ExpressionNode
-}
-
-func (*EqExpr) node()           {}
-func (*EqExpr) expressionNode() {}
-
 // LtExpr returns true if a < b: lt(a, b)
 type LtExpr struct {
 	Left  ExpressionNode

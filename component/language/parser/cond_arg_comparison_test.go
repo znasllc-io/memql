@@ -15,9 +15,10 @@ import (
 // the compiler serializer + the cond-predicate / single-return evaluators
 // already handle. Before this the arg grammar stopped at the operator and
 // reported "cond() requires three arguments". The change is additive: the four
-// relational operators previously always errored here; == / != keep their
-// established EqExpr shape; identifier-led comparisons are still folded into a
-// Field-led ComparisonExpr one level down and are unaffected.
+// relational operators previously always errored here; == / != emit the same
+// *BinaryComparisonExpr shape since memql#2654 (EqExpr/NotExpr(EqExpr)
+// retired); identifier-led comparisons are still folded into a Field-led
+// ComparisonExpr one level down and are unaffected.
 
 func condArg(t *testing.T, src string) *ast.CondExpr {
 	t.Helper()
@@ -71,20 +72,55 @@ func TestCondArg_IdentifierLedComparisonUnchanged(t *testing.T) {
 	}
 }
 
-// BACK-COMPAT: the == / != equality forms over a non-identifier LHS keep their
-// established EqExpr / NotExpr(EqExpr) shape (#2407 / S9).
-func TestCondArg_EqualityShapeUnchanged(t *testing.T) {
+// The == / != equality forms over a non-identifier LHS emit the SAME
+// *BinaryComparisonExpr the relational operators emit (memql#2654): one shape,
+// one lowering -- the EqExpr / NotExpr(EqExpr) dual shapes are retired, so no
+// consumer can silently diverge on them again.
+func TestCondArg_EqualityNormalizedShape(t *testing.T) {
 	eq := condArg(t, `cond(first(rows).status == "active", "a", "b")`)
-	if _, ok := eq.Condition.(*ast.EqExpr); !ok {
-		t.Fatalf("== predicate = %T, want *ast.EqExpr (unchanged)", eq.Condition)
+	bc, ok := eq.Condition.(*ast.BinaryComparisonExpr)
+	if !ok {
+		t.Fatalf("== predicate = %T, want *ast.BinaryComparisonExpr", eq.Condition)
+	}
+	if bc.Operator != ast.OpEq {
+		t.Errorf("== predicate operator = %q, want %q", bc.Operator, ast.OpEq)
 	}
 	ne := condArg(t, `cond(first(rows).status != "active", "a", "b")`)
-	not, ok := ne.Condition.(*ast.NotExpr)
+	nbc, ok := ne.Condition.(*ast.BinaryComparisonExpr)
 	if !ok {
-		t.Fatalf("!= predicate = %T, want *ast.NotExpr wrapping EqExpr (unchanged)", ne.Condition)
+		t.Fatalf("!= predicate = %T, want *ast.BinaryComparisonExpr", ne.Condition)
 	}
-	if _, ok := not.Target.(*ast.EqExpr); !ok {
-		t.Errorf("!= predicate target = %T, want *ast.EqExpr", not.Target)
+	if nbc.Operator != ast.OpNe {
+		t.Errorf("!= predicate operator = %q, want %q", nbc.Operator, ast.OpNe)
+	}
+}
+
+// The DoD conformance guard (memql#2654): for every symbol comparison operator,
+// the restricted builtin-arg grammar (parseExpressionArg) and the main cascade
+// (parseComparisonLevel) emit the IDENTICAL node shape and operator for the
+// same non-identifier-led comparison. A divergence here is the root of the
+// #2653 silent-wrong-branch class.
+func TestCondArg_ComparisonShapeParity(t *testing.T) {
+	for _, op := range []string{"==", "!=", ">", ">=", "<", "<="} {
+		comparison := `first(rows).age ` + op + ` 18`
+
+		cascade, err := ParseExpression(comparison)
+		if err != nil {
+			t.Fatalf("op %q cascade: %v", op, err)
+		}
+		cbc, ok := cascade.(*ast.BinaryComparisonExpr)
+		if !ok {
+			t.Fatalf("op %q cascade shape = %T, want *ast.BinaryComparisonExpr", op, cascade)
+		}
+
+		arg := condArg(t, `cond(`+comparison+`, "a", "b")`).Condition
+		abc, ok := arg.(*ast.BinaryComparisonExpr)
+		if !ok {
+			t.Fatalf("op %q arg-position shape = %T, want *ast.BinaryComparisonExpr (cascade parity)", op, arg)
+		}
+		if abc.Operator != cbc.Operator {
+			t.Errorf("op %q: arg operator %q != cascade operator %q", op, abc.Operator, cbc.Operator)
+		}
 	}
 }
 
