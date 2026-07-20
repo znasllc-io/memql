@@ -6948,6 +6948,7 @@ type SenseCompletionItem struct {
 	Documentation string                 `protobuf:"bytes,4,opt,name=documentation,proto3" json:"documentation,omitempty"`                    // longer description (markdown)
 	InsertText    string                 `protobuf:"bytes,5,opt,name=insert_text,json=insertText,proto3" json:"insert_text,omitempty"`        // text to insert (may differ from label)
 	SortPriority  int32                  `protobuf:"varint,6,opt,name=sort_priority,json=sortPriority,proto3" json:"sort_priority,omitempty"` // lower = higher priority
+	IsSnippet     bool                   `protobuf:"varint,7,opt,name=is_snippet,json=isSnippet,proto3" json:"is_snippet,omitempty"`          // insert_text carries LSP snippet syntax ($1, ${1:name}, $0)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -7022,6 +7023,13 @@ func (x *SenseCompletionItem) GetSortPriority() int32 {
 		return x.SortPriority
 	}
 	return 0
+}
+
+func (x *SenseCompletionItem) GetIsSnippet() bool {
+	if x != nil {
+		return x.IsSnippet
+	}
+	return false
 }
 
 // Diagnose -- returns errors and warnings for a document.
@@ -15169,7 +15177,7 @@ const file_memql_proto_rawDesc = "" +
 	"\x13SenseCompleteResult\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12;\n" +
-	"\x05items\x18\x02 \x03(\v2%.znasllc.memql.v1.SenseCompletionItemR\x05items\"\xc3\x01\n" +
+	"\x05items\x18\x02 \x03(\v2%.znasllc.memql.v1.SenseCompletionItemR\x05items\"\xe2\x01\n" +
 	"\x13SenseCompletionItem\x12\x14\n" +
 	"\x05label\x18\x01 \x01(\tR\x05label\x12\x12\n" +
 	"\x04kind\x18\x02 \x01(\tR\x04kind\x12\x16\n" +
@@ -15177,7 +15185,9 @@ const file_memql_proto_rawDesc = "" +
 	"\rdocumentation\x18\x04 \x01(\tR\rdocumentation\x12\x1f\n" +
 	"\vinsert_text\x18\x05 \x01(\tR\n" +
 	"insertText\x12#\n" +
-	"\rsort_priority\x18\x06 \x01(\x05R\fsortPriority\"f\n" +
+	"\rsort_priority\x18\x06 \x01(\x05R\fsortPriority\x12\x1d\n" +
+	"\n" +
+	"is_snippet\x18\a \x01(\bR\tisSnippet\"f\n" +
 	"\x10SenseDiagnoseMsg\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x16\n" +

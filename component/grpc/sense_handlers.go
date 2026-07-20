@@ -66,6 +66,7 @@ func (s *streamSession) handleSenseComplete(envelope *memqlv1.MemqlClientMessage
 				Documentation: item.Documentation,
 				InsertText:    item.InsertText,
 				SortPriority:  int32(item.SortPriority),
+				IsSnippet:     item.IsSnippet,
 			}
 		}
 		_ = s.sendServerMessage(envelope.GetMessageId(), &memqlv1.MemqlServerMessage{

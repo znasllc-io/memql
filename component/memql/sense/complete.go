@@ -69,6 +69,9 @@ func (s *Service) completeTopLevel(prefix string) []CompletionItem {
 	// `mutate` (the declaration keyword; `mutation` is invocation-only), etc.
 	// (#2122 / #2123).
 	items = append(items, specConstructItems(prefix)...)
+	// Construct skeletons (#2629): full declarations with tabstops,
+	// sorted below the bare keywords so they offer without displacing.
+	items = append(items, constructSkeletonItems(prefix)...)
 
 	return items
 }
@@ -177,6 +180,9 @@ func (s *Service) completeFuncBody(prefix string, enc EnclosingConstruct) []Comp
 					Documentation: KeywordDocs[blk], InsertText: blk + " {",
 					SortPriority: 2,
 				})
+				// The snippet form opens the block and places the cursor
+				// inside (#2629).
+				items = append(items, blockSnippet(blk, enc.Keyword))
 			}
 		}
 	}
@@ -363,8 +369,13 @@ func (s *Service) completeConstructConcept(ctx CursorContext) []CompletionItem {
 				Kind:          "snippet",
 				Detail:        "import concept",
 				Documentation: "Import `" + short + "` from `" + domain + "` into file scope, then bind it.",
-				InsertText:    useLine + "\n" + short,
-				SortPriority:  2,
+				// AUDITED (#2629): this was multi-line PLAIN text -- no
+				// snippet syntax, so it never suffered the literal-insert
+				// bug; it simply left the cursor at the end of the bound
+				// name. Now a real snippet, with the literals escaped.
+				InsertText:   escapeSnippetLiteral(useLine) + "\n" + escapeSnippetLiteral(short) + "$0",
+				IsSnippet:    true,
+				SortPriority: 2,
 			})
 		}
 	}

@@ -45,6 +45,15 @@ func toLSPCompletionItem(it sense.CompletionItem) protocol.CompletionItem {
 	if it.InsertText != "" {
 		insert := it.InsertText
 		ci.InsertText = &insert
+		// Snippet items must declare the format or LSP inserts the
+		// tabstop syntax LITERALLY (#2629).
+		if it.IsSnippet {
+			format := protocol.InsertTextFormatSnippet
+			ci.InsertTextFormat = &format
+		} else {
+			format := protocol.InsertTextFormatPlainText
+			ci.InsertTextFormat = &format
+		}
 	}
 	// LSP sorts sortText lexically; zero-pad the numeric priority so lower
 	// priority (higher rank) sorts first.

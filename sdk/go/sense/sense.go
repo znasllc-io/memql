@@ -92,6 +92,10 @@ type CompletionItem struct {
 	Documentation string
 	InsertText    string
 	SortPriority  int
+	// IsSnippet marks InsertText as LSP snippet syntax (#2629). A
+	// consumer without snippet support must render a plain-text
+	// degradation rather than inserting the tabstops literally.
+	IsSnippet bool
 }
 
 // Hover is the structured response from a Hover request. Contents
@@ -221,6 +225,7 @@ func (c *Client) Complete(ctx context.Context, source string, cursor Position) (
 			Documentation: item.GetDocumentation(),
 			InsertText:    item.GetInsertText(),
 			SortPriority:  int(item.GetSortPriority()),
+			IsSnippet:     item.GetIsSnippet(),
 		})
 	}
 	return out, nil
