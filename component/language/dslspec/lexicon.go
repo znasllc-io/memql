@@ -26,6 +26,8 @@ func keywords() []Keyword {
 		{Name: "shape", Doc: "Query clause: names the projection shape for the result. (Also the `shape` construct keyword and the `<expr> with shape(...)` expression.)", Kind: "clause"},
 		{Name: "insert", Doc: "Mutation block: the row to create. Exactly one insert OR update per mutation.", Kind: "clause"},
 		{Name: "update", Doc: "Mutation block: partial read-merge-write of an existing row (keyed by id).", Kind: "clause"},
+		{Name: "accept", Doc: "Write-block sugar: `accept { name, ... }` lists the public fields the mutation accepts -- each auto-binds to its same-named arg (`name` -> `name: args.name`). Every name must be a declared arg. Nested inside insert{}/update{} (or top-level, which means insert). Never mixed with loose fields.", Kind: "clause"},
+		{Name: "stamp", Doc: "Write-block sugar: `stamp { key: value, ... }` carries the server-set fields beside an accept{} list. Nested inside insert{}/update{} (or top-level with accept, which means insert).", Kind: "clause"},
 		{Name: "body", Doc: "Logic/automation block: named statements ending in `return <expr>`.", Kind: "clause"},
 		{Name: "params", Doc: "Provider block: model/window/cost parameters.", Kind: "clause"},
 		{Name: "auth", Doc: "Provider block: vendor auth (e.g. apiKey env(\"...\")).", Kind: "clause"},

@@ -129,13 +129,14 @@ mutate deploymentNodeSpec createDeploymentNodeSpec {
     imageDigest   string
   }
   insert {
-    id: concat(args.deploymentId, ":", args.nodeType)
-    deploymentId: args.deploymentId
-    nodeType: args.nodeType
-    version: coalesce(args.version, "")
-    replicas: coalesce(args.replicas, 1)
-    imageDigest: coalesce(args.imageDigest, "")
-    updatedAt: now
+    accept { deploymentId, nodeType }
+    stamp {
+      id: concat(args.deploymentId, ":", args.nodeType)
+      version: coalesce(args.version, "")
+      replicas: coalesce(args.replicas, 1)
+      imageDigest: coalesce(args.imageDigest, "")
+      updatedAt: now
+    }
   }
 }
 

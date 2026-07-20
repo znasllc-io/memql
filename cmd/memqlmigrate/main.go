@@ -23,6 +23,12 @@
 //	                    #2615); declaration-level and concept-field
 //	                    @description are load-bearing and untouched.
 //
+//	accept-stamp        collapse arg-mirror runs in mutation write blocks
+//	                    into the accept/stamp form (#2616; form shipped by
+//	                    #2593). Only provably-safe blocks rewrite -- the
+//	                    result is verified equivalent through the engine's
+//	                    own mutation emitter.
+//
 // Flags:
 //
 //	--rewrite=NAME[,NAME...]   comma-separated list of rewrites to apply
@@ -53,6 +59,7 @@ var rewriters = map[string]rewriter{
 	"result-navigation": rewriteResultNavigation,
 	"slice-syntax":      rewriteSliceSyntax,
 	"args-description":  rewriteArgsDescription,
+	"accept-stamp":      langparser.RewriteAcceptStamp,
 }
 
 type opts struct {
@@ -204,6 +211,7 @@ func listRewriters(w io.Writer) {
 	fmt.Fprintln(w, "  result-navigation   .empty/.first/.last/.count/.nodes → method forms")
 	fmt.Fprintln(w, "  slice-syntax        array(T) → []T")
 	fmt.Fprintln(w, "  args-description    strip parser-discarded @description from args{} fields")
+	fmt.Fprintln(w, "  accept-stamp        collapse arg-mirror runs into accept{}/stamp{} (#2616)")
 }
 
 func applyPipeline(src []byte, pipeline []rewriter) ([]byte, error) {

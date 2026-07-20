@@ -26,16 +26,13 @@ mutate documentChunk createDocumentChunk {
     sourceTopic        string
   }
   insert {
-    id: args.chunkId
-    args.domainId
-    args.text
-    args.source
-    sourceRef: coalesce(args.sourceRef, "")
-    seq: coalesce(args.seq, 0)
-    tokenCount: coalesce(args.tokenCount, 0)
-    args.sourceUtteranceId
-    args.sourceAgentId
-    args.sourceTopic
+    accept { domainId, text, source, sourceUtteranceId, sourceAgentId, sourceTopic }
+    stamp {
+      id: args.chunkId
+      sourceRef: coalesce(args.sourceRef, "")
+      seq: coalesce(args.seq, 0)
+      tokenCount: coalesce(args.tokenCount, 0)
+    }
   }
 }
 
@@ -92,16 +89,15 @@ mutate documentChunk writeKnowledgeChunk {
     sourceTopic  string
   }
   insert {
-    id: args.chunkId
-    args.domainId
-    args.text
-    args.sourceRef
-    seq: coalesce(args.seq, 0)
-    tokenCount: coalesce(args.tokenCount, 0)
-    args.sourceTopic
-    source: "trainerAgent"
-    validationStatus: "validated"
-    superseded: false
+    accept { domainId, text, sourceRef, sourceTopic }
+    stamp {
+      id: args.chunkId
+      seq: coalesce(args.seq, 0)
+      tokenCount: coalesce(args.tokenCount, 0)
+      source: "trainerAgent"
+      validationStatus: "validated"
+      superseded: false
+    }
   }
 }
 

@@ -29,15 +29,13 @@ mutate project createProject {
     description  string
   }
   insert {
-    id: args.projectId
-    args.slug
-    args.name
-    args.targetApp
-    args.repo
-    args.description
-    status: "active"
-    createdByUserId: actor.userId
-    provenanceMutation: "createProject"
+    accept { slug, name, targetApp, repo, description }
+    stamp {
+      id: args.projectId
+      status: "active"
+      createdByUserId: actor.userId
+      provenanceMutation: "createProject"
+    }
   }
 }
 
@@ -59,18 +57,17 @@ mutate request createRequest {
     priority       string
   }
   insert {
-    id: args.requestId
-    args.projectId
-    requestType: coalesce(args.requestType, "bug")
-    args.title
-    args.body
-    submitterUserId: actor.userId
-    submitterRole: actor.role
-    args.attachmentIds
-    priority: coalesce(args.priority, "normal")
-    status: "submitted"
-    targetEnv: "staging"
-    provenanceMutation: "createRequest"
+    accept { projectId, title, body, attachmentIds }
+    stamp {
+      id: args.requestId
+      requestType: coalesce(args.requestType, "bug")
+      submitterUserId: actor.userId
+      submitterRole: actor.role
+      priority: coalesce(args.priority, "normal")
+      status: "submitted"
+      targetEnv: "staging"
+      provenanceMutation: "createRequest"
+    }
   }
 }
 
@@ -90,12 +87,11 @@ mutate request advanceRequest {
     resolution         string
   }
   update {
-    id: args.requestId
-    args.status
-    args.validatedByUserId
-    args.approvedByUserId
-    args.resolution
-    provenanceMutation: "advanceRequest"
+    accept { status, validatedByUserId, approvedByUserId, resolution }
+    stamp {
+      id: args.requestId
+      provenanceMutation: "advanceRequest"
+    }
   }
 }
 
@@ -200,15 +196,14 @@ mutate requestEvent recordRequestEvent {
     note        string
   }
   insert {
-    id: args.eventId
-    requestId: shortId(args.requestId)
-    args.kind
-    actorUserId: actor.userId
-    actorRole: actor.role
-    args.fromStatus
-    args.toStatus
-    args.note
-    provenanceMutation: "recordRequestEvent"
+    accept { kind, fromStatus, toStatus, note }
+    stamp {
+      id: args.eventId
+      requestId: shortId(args.requestId)
+      actorUserId: actor.userId
+      actorRole: actor.role
+      provenanceMutation: "recordRequestEvent"
+    }
   }
 }
 

@@ -14,12 +14,13 @@ mutate accessRequest approveAccessRequest {
     reviewerNote  string
   }
   update {
-    id: args.requestId
-    status: "approved"
-    args.reviewedBy
-    args.invitationId
-    reviewedAt: now
-    reviewerNote: coalesce(args.reviewerNote, "")
+    accept { reviewedBy, invitationId }
+    stamp {
+      id: args.requestId
+      status: "approved"
+      reviewedAt: now
+      reviewerNote: coalesce(args.reviewerNote, "")
+    }
   }
 }
 
@@ -400,18 +401,13 @@ mutate authCode createAuthCode {
     expiresAt           string  @required
   }
   insert {
-    id: args.codeId
-    args.code
-    args.codeHash
-    args.clientId
-    args.redirectURI
-    state: coalesce(args.state, "")
-    codeChallenge:       coalesce(args.codeChallenge, "")
-    codeChallengeMethod: coalesce(args.codeChallengeMethod, "")
-    args.userId
-    args.identityId
-    args.magicLinkRequestId
-    args.expiresAt
+    accept { code, codeHash, clientId, redirectURI, userId, identityId, magicLinkRequestId, expiresAt }
+    stamp {
+      id: args.codeId
+      state: coalesce(args.state, "")
+      codeChallenge:       coalesce(args.codeChallenge, "")
+      codeChallengeMethod: coalesce(args.codeChallengeMethod, "")
+    }
   }
 }
 
@@ -456,14 +452,14 @@ mutate oauthClient createOAuthClient {
     registeredAt             string  @required
   }
   insert {
-    id: args.clientId
-    args.clientId
-    clientName: coalesce(args.clientName, "")
-    args.redirectURIsJSON
-    grantTypes: coalesce(args.grantTypes, "")
-    responseTypes: coalesce(args.responseTypes, "")
-    tokenEndpointAuthMethod: coalesce(args.tokenEndpointAuthMethod, "")
-    args.registeredAt
+    accept { clientId, redirectURIsJSON, registeredAt }
+    stamp {
+      id: args.clientId
+      clientName: coalesce(args.clientName, "")
+      grantTypes: coalesce(args.grantTypes, "")
+      responseTypes: coalesce(args.responseTypes, "")
+      tokenEndpointAuthMethod: coalesce(args.tokenEndpointAuthMethod, "")
+    }
   }
 }
 
@@ -507,18 +503,17 @@ mutate authSession createAuthSession {
     expiresAt    string  @required
   }
   insert {
-    id: args.sessionId
-    userId: coalesce(args.userId, "")
-    identityId: coalesce(args.identityId, "")
-    args.subject
-    args.tokenHash
-    args.source
-    clientLabel: coalesce(args.clientLabel, "")
-    args.expiresAt
-    lastActivityAt: now
-    firstAuthenticatedAt: now
-    refreshTokenHash: ""
-    revokedReason: ""
+    accept { subject, tokenHash, source, expiresAt }
+    stamp {
+      id: args.sessionId
+      userId: coalesce(args.userId, "")
+      identityId: coalesce(args.identityId, "")
+      clientLabel: coalesce(args.clientLabel, "")
+      lastActivityAt: now
+      firstAuthenticatedAt: now
+      refreshTokenHash: ""
+      revokedReason: ""
+    }
   }
 }
 
@@ -652,17 +647,11 @@ mutate delegation createDelegation {
     note              string
   }
   insert {
-    id: args.delegationId
-    args.identityId
-    args.identitySubject
-    args.identityType
-    args.agentId
-    args.roleCeiling
-    args.scopes
-    args.createdBySubject
-    args.expiresAt
-    args.note
-    active: true
+    accept { identityId, identitySubject, identityType, agentId, roleCeiling, scopes, createdBySubject, expiresAt, note }
+    stamp {
+      id: args.delegationId
+      active: true
+    }
   }
 }
 
@@ -702,13 +691,13 @@ mutate identity createIdentity {
     usableByAgents  bool
   }
   insert {
-    id: args.identityId
-    args.userId
-    args.identityType
-    args.credentials
-    label: coalesce(args.label, "")
-    usableByAgents: coalesce(args.usableByAgents, false)
-    active: true
+    accept { userId, identityType, credentials }
+    stamp {
+      id: args.identityId
+      label: coalesce(args.label, "")
+      usableByAgents: coalesce(args.usableByAgents, false)
+      active: true
+    }
   }
 }
 
@@ -750,14 +739,14 @@ mutate magicLinkRequest createMagicLinkRequest {
     invitationId  string
   }
   insert {
-    id: args.requestId
-    args.email
-    args.tokenHash
-    args.expiresAt
-    sourceIP: coalesce(args.sourceIP, "")
-    userAgent: coalesce(args.userAgent, "")
-    oauthCtxJSON: coalesce(args.oauthCtxJSON, "")
-    invitationId: coalesce(args.invitationId, "")
+    accept { email, tokenHash, expiresAt }
+    stamp {
+      id: args.requestId
+      sourceIP: coalesce(args.sourceIP, "")
+      userAgent: coalesce(args.userAgent, "")
+      oauthCtxJSON: coalesce(args.oauthCtxJSON, "")
+      invitationId: coalesce(args.invitationId, "")
+    }
   }
 }
 
@@ -936,12 +925,11 @@ mutate workerPairingCode createWorkerPairingCode {
     sourceIP     string
   }
   insert {
-    id: args.pairingId
-    args.ownerUserId
-    args.codeHash
-    args.clusterURL
-    args.expiresAt
-    sourceIP: coalesce(args.sourceIP, "")
+    accept { ownerUserId, codeHash, clusterURL, expiresAt }
+    stamp {
+      id: args.pairingId
+      sourceIP: coalesce(args.sourceIP, "")
+    }
   }
 }
 
@@ -1321,10 +1309,11 @@ mutate workerPairingCode redeemWorkerPairingCode {
     redeemedFromIP  string
   }
   update {
-    id: args.pairingId
-    args.redeemedAt
-    args.redeemedBy
-    redeemedFromIP: coalesce(args.redeemedFromIP, "")
+    accept { redeemedAt, redeemedBy }
+    stamp {
+      id: args.pairingId
+      redeemedFromIP: coalesce(args.redeemedFromIP, "")
+    }
   }
 }
 
@@ -1745,32 +1734,7 @@ mutate clusterSettings updateClusterSettings {
     authoredAutomationsEnabled bool
   }
   update {
-    id: args.id
-    args.clusterDomain
-    args.brandName
-    args.brandPrimaryColor
-    args.brandLogoDataURI
-    args.brandIconDataURI
-    args.registrationMode
-    args.registrationDomains
-    args.internalDomains
-    args.internalDefaultRole
-    args.registeredClientsJSON
-    args.accessRequestNotifyEmails
-    args.bootstrapEmail
-    args.bootstrapFirstName
-    args.bootstrapLastName
-    args.bootstrapPhone
-    args.bootstrapPrimaryRole
-    args.bootstrapGender
-    args.bootstrapBirthdate
-    args.bootstrappedAt
-    args.accessTokenTTLSeconds
-    args.refreshTokenTTLSeconds
-    args.magicLinkTTLSeconds
-    args.invitationTTLDays
-    args.refreshCookieSameSite
-    args.authoredAutomationsEnabled
+    accept { id, clusterDomain, brandName, brandPrimaryColor, brandLogoDataURI, brandIconDataURI, registrationMode, registrationDomains, internalDomains, internalDefaultRole, registeredClientsJSON, accessRequestNotifyEmails, bootstrapEmail, bootstrapFirstName, bootstrapLastName, bootstrapPhone, bootstrapPrimaryRole, bootstrapGender, bootstrapBirthdate, bootstrappedAt, accessTokenTTLSeconds, refreshTokenTTLSeconds, magicLinkTTLSeconds, invitationTTLDays, refreshCookieSameSite, authoredAutomationsEnabled }
   }
 }
 
@@ -1861,11 +1825,12 @@ mutate accountEntitlement setAccountEntitlement {
     note               string
   }
   insert {
-    id: concat("accountEntitlement-", hash(args.accountId))
-    args.accountId
-    args.tier
-    accountKind: coalesce(args.accountKind, "user")
-    maxConcurrentTasks: coalesce(args.maxConcurrentTasks, 0)
-    note: coalesce(args.note, "")
+    accept { accountId, tier }
+    stamp {
+      id: concat("accountEntitlement-", hash(args.accountId))
+      accountKind: coalesce(args.accountKind, "user")
+      maxConcurrentTasks: coalesce(args.maxConcurrentTasks, 0)
+      note: coalesce(args.note, "")
+    }
   }
 }

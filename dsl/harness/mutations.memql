@@ -43,12 +43,13 @@ mutate plan createHarnessPlan {
     input   object
   }
   insert {
-    id: args.planId
-    ownerUserId: actor.userId
-    args.goal
-    status: "open"
-    args.input
-    provenanceMutation: "createHarnessPlan"
+    accept { goal, input }
+    stamp {
+      id: args.planId
+      ownerUserId: actor.userId
+      status: "open"
+      provenanceMutation: "createHarnessPlan"
+    }
   }
 }
 
@@ -71,16 +72,14 @@ mutate step addHarnessStep {
     input           object
   }
   insert {
-    id: args.stepId
-    ownerUserId: actor.userId
-    args.planId
-    args.title
-    status: "pending"
-    args.idempotencyKey
-    args.dependsOn
-    args.input
-    attempt: 0
-    provenanceMutation: "addHarnessStep"
+    accept { planId, title, idempotencyKey, dependsOn, input }
+    stamp {
+      id: args.stepId
+      ownerUserId: actor.userId
+      status: "pending"
+      attempt: 0
+      provenanceMutation: "addHarnessStep"
+    }
   }
 }
 
@@ -192,13 +191,11 @@ mutate observation recordHarnessObservation {
     data           object
   }
   insert {
-    id: args.observationId
-    ownerUserId: actor.userId
-    args.stepId
-    args.planId
-    args.kind
-    args.content
-    args.data
+    accept { stepId, planId, kind, content, data }
+    stamp {
+      id: args.observationId
+      ownerUserId: actor.userId
+    }
   }
 }
 
@@ -254,16 +251,16 @@ mutate semanticMemory createHarnessSemanticMemory {
     lastReinforced  datetime
   }
   insert {
-    id: args.memoryId
-    ownerUserId: actor.userId
-    args.kind
-    args.content
-    args.sourceEpisodes
-    confidence: coalesce(args.confidence, 0.5)
-    reinforceCount: 1
-    lastReinforced: coalesce(args.lastReinforced, now)
-    status: "active"
-    provenanceMutation: "createHarnessSemanticMemory"
+    accept { kind, content, sourceEpisodes }
+    stamp {
+      id: args.memoryId
+      ownerUserId: actor.userId
+      confidence: coalesce(args.confidence, 0.5)
+      reinforceCount: 1
+      lastReinforced: coalesce(args.lastReinforced, now)
+      status: "active"
+      provenanceMutation: "createHarnessSemanticMemory"
+    }
   }
 }
 
@@ -288,13 +285,13 @@ mutate semanticMemory reinforceHarnessSemanticMemory {
     sourceEpisodes  []string  @required
   }
   update {
-    id: args.memoryId
-    ownerUserId: actor.userId
-    args.confidence
-    args.reinforceCount
-    args.sourceEpisodes
-    lastReinforced: now
-    provenanceMutation: "reinforceHarnessSemanticMemory"
+    accept { confidence, reinforceCount, sourceEpisodes }
+    stamp {
+      id: args.memoryId
+      ownerUserId: actor.userId
+      lastReinforced: now
+      provenanceMutation: "reinforceHarnessSemanticMemory"
+    }
   }
 }
 
@@ -359,11 +356,12 @@ mutate consolidationCursor advanceHarnessConsolidationCursor {
     episodesSeen  int
   }
   insert {
-    id: args.cursorId
-    ownerUserId: actor.userId
-    args.watermark
-    lastRunAt: now
-    args.episodesSeen
-    provenanceMutation: "advanceHarnessConsolidationCursor"
+    accept { watermark, episodesSeen }
+    stamp {
+      id: args.cursorId
+      ownerUserId: actor.userId
+      lastRunAt: now
+      provenanceMutation: "advanceHarnessConsolidationCursor"
+    }
   }
 }

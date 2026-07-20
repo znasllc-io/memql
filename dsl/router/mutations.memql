@@ -36,32 +36,10 @@ mutate call recordRouterCall {
     fallbackFromModel   string
   }
   insert {
-    id: args.callId
-    args.requestId
-    args.agentId
-    args.userId
-    args.promptName
-    args.policyName
-    args.vendor
-    args.model
-    args.providerName
-    args.inputTokens
-    args.outputTokens
-    args.cachedInputTokens
-    args.tokensEstimated
-    args.inputCost
-    args.outputCost
-    args.cachedInputCost
-    args.totalCost
-    args.pricingConfigured
-    args.timeToFirstTokenMs
-    args.totalDurationMs
-    args.tokensPerSec
-    args.streaming
-    args.outcome
-    args.errorCategory
-    args.errorMessage
-    args.fallbackFromModel
+    accept { requestId, agentId, userId, promptName, policyName, vendor, model, providerName, inputTokens, outputTokens, cachedInputTokens, tokensEstimated, inputCost, outputCost, cachedInputCost, totalCost, pricingConfigured, timeToFirstTokenMs, totalDurationMs, tokensPerSec, streaming, outcome, errorCategory, errorMessage, fallbackFromModel }
+    stamp {
+      id: args.callId
+    }
   }
 }
 

@@ -32,25 +32,18 @@ mutate agent createAgent {
     deleted          bool
   }
   insert {
-    id: args.agentId
-    args.ownerUserId
-    args.name
-    args.description
-    args.personality
-    args.capabilities
-    args.avatar
-    args.providerConfig
-    args.triggerBehavior
-    role: coalesce(args.role, "specialist")
-    roleSlug: coalesce(args.roleSlug, "")
-    kind: coalesce(args.kind, "assistant")
-    gender: coalesce(args.gender, "female")
-    audioControl: coalesce(args.audioControl, "mirror_user")
-    videoControl: coalesce(args.videoControl, "mirror_user")
-    args.avatarPersonaId
-    args.avatarVendor
-    active: coalesce(args.active, true)
-    deleted: coalesce(args.deleted, false)
+    accept { ownerUserId, name, description, personality, capabilities, avatar, providerConfig, triggerBehavior, avatarPersonaId, avatarVendor }
+    stamp {
+      id: args.agentId
+      role: coalesce(args.role, "specialist")
+      roleSlug: coalesce(args.roleSlug, "")
+      kind: coalesce(args.kind, "assistant")
+      gender: coalesce(args.gender, "female")
+      audioControl: coalesce(args.audioControl, "mirror_user")
+      videoControl: coalesce(args.videoControl, "mirror_user")
+      active: coalesce(args.active, true)
+      deleted: coalesce(args.deleted, false)
+    }
   }
 }
 
@@ -67,15 +60,12 @@ mutate agentAuthorization createAgentAuthorization {
     computerUseScope  string
   }
   insert {
-    id: args.authId
-    args.agentId
-    args.userId
-    args.planKind
-    args.spaceScope
-    args.tokenBudgetCap
-    args.expiresAt
-    computerUseScope: coalesce(args.computerUseScope, "")
-    active: true
+    accept { agentId, userId, planKind, spaceScope, tokenBudgetCap, expiresAt }
+    stamp {
+      id: args.authId
+      computerUseScope: coalesce(args.computerUseScope, "")
+      active: true
+    }
   }
 }
 
@@ -271,13 +261,10 @@ mutate avatarPersona createAvatarPersona {
     active           bool
   }
   insert {
-    id: coalesce(args.avatarPersonaId, args.personaId)
-    args.vendor
-    args.personaId
-    args.name
-    args.gender
-    args.imageRef
-    args.previewRef
-    active: coalesce(args.active, true)
+    accept { vendor, personaId, name, gender, imageRef, previewRef }
+    stamp {
+      id: coalesce(args.avatarPersonaId, args.personaId)
+      active: coalesce(args.active, true)
+    }
   }
 }

@@ -58,18 +58,14 @@ mutate task createSemanticTask {
     input           object  @required
   }
   insert {
-    id: args.taskId
-    args.planId
-    category: "semantic"
-    args.kind
-    status: "queued"
-    args.seq
-    args.phase
-    args.logicalStepId
-    args.dependsOn
-    attemptNumber: coalesce(args.attemptNumber, 1)
-    executionSurface: "inProcess"
-    args.input
+    accept { planId, kind, seq, phase, logicalStepId, dependsOn, input }
+    stamp {
+      id: args.taskId
+      category: "semantic"
+      status: "queued"
+      attemptNumber: coalesce(args.attemptNumber, 1)
+      executionSurface: "inProcess"
+    }
   }
 }
 
@@ -115,11 +111,11 @@ mutate task completeToolInvocation {
     completedAt   string
   }
   update {
-    id: args.taskId
-    args.status
-    args.toolResult
-    args.errorMessage
-    completedAt: coalesce(args.completedAt, now)
+    accept { status, toolResult, errorMessage }
+    stamp {
+      id: args.taskId
+      completedAt: coalesce(args.completedAt, now)
+    }
   }
 }
 
@@ -163,21 +159,13 @@ mutate plan createPlan {
     chatAnchorMessageId   string
   }
   insert {
-    id: args.planId
-    args.partitionId
-    args.parentPlanId
-    args.kind
-    status: "planning"
-    args.goal
-    args.requestedBy
-    triggerSource: coalesce(args.triggerSource, "user.explicit")
-    args.authorizedBy
-    args.ownerAgentId
-    args.input
-    args.refinementContext
-    args.tokenBudget
-    pauseExtendsDeadline: coalesce(args.pauseExtendsDeadline, false)
-    args.chatAnchorMessageId
+    accept { partitionId, parentPlanId, kind, goal, requestedBy, authorizedBy, ownerAgentId, input, refinementContext, tokenBudget, chatAnchorMessageId }
+    stamp {
+      id: args.planId
+      status: "planning"
+      triggerSource: coalesce(args.triggerSource, "user.explicit")
+      pauseExtendsDeadline: coalesce(args.pauseExtendsDeadline, false)
+    }
   }
 }
 
@@ -431,12 +419,10 @@ mutate taskState persistTaskState {
     pendingSubPlanIds  []string
   }
   insert {
-    id: args.stateId
-    args.taskId
-    args.workingMemory
-    args.reasoningChain
-    args.toolCallHistory
-    args.pendingSubPlanIds
+    accept { taskId, workingMemory, reasoningChain, toolCallHistory, pendingSubPlanIds }
+    stamp {
+      id: args.stateId
+    }
   }
 }
 
@@ -480,27 +466,10 @@ mutate plan updatePlanStatus {
     computerUseScope          string
   }
   update {
-    id: args.planId
-    args.status
-    args.ownerAgentId
-    args.output
-    args.errorMessage
-    args.startedAt
-    args.completedAt
-    args.cancelledBy
-    args.pausedAt
-    args.totalPausedMs
-    args.feedbackRequest
-    args.feedbackResponse
-    args.feedbackReason
-    args.recommendationCardId
-    args.phases
-    args.estimate
-    args.estimatedAt
-    args.tokenSpent
-    args.tokenAllocatedToChildren
-    args.metrics
-    args.computerUseScope
+    accept { status, ownerAgentId, output, errorMessage, startedAt, completedAt, cancelledBy, pausedAt, totalPausedMs, feedbackRequest, feedbackResponse, feedbackReason, recommendationCardId, phases, estimate, estimatedAt, tokenSpent, tokenAllocatedToChildren, metrics, computerUseScope }
+    stamp {
+      id: args.planId
+    }
   }
 }
 
@@ -519,9 +488,10 @@ mutate plan recordPlannerInvocation {
     metrics     object
   }
   update {
-    id: args.planId
-    args.tokenSpent
-    args.metrics
+    accept { tokenSpent, metrics }
+    stamp {
+      id: args.planId
+    }
   }
 }
 
@@ -546,15 +516,10 @@ mutate task updateTaskStatus {
     metrics             object
   }
   update {
-    id: args.taskId
-    args.status
-    args.output
-    args.errorMessage
-    args.startedAt
-    args.completedAt
-    args.parkedAt
-    args.parkedAtCheckpoint
-    args.metrics
+    accept { status, output, errorMessage, startedAt, completedAt, parkedAt, parkedAtCheckpoint, metrics }
+    stamp {
+      id: args.taskId
+    }
   }
 }
 
@@ -589,20 +554,14 @@ mutate responsibility createResponsibility {
     enabled           bool
   }
   insert {
-    id: args.responsibilityId
-    ownerUserId: actor.userId
-    args.statement
-    args.trigger
-    args.schedule
-    args.condition
-    targetKind: coalesce(args.targetKind, "unassigned")
-    args.assignedAgentId
-    args.assignedRoleSlug
-    args.successCriteria
-    args.notifyHow
-    args.scopePartitionId
-    enabled: coalesce(args.enabled, true)
-    status: "draft"
+    accept { statement, trigger, schedule, condition, assignedAgentId, assignedRoleSlug, successCriteria, notifyHow, scopePartitionId }
+    stamp {
+      id: args.responsibilityId
+      ownerUserId: actor.userId
+      targetKind: coalesce(args.targetKind, "unassigned")
+      enabled: coalesce(args.enabled, true)
+      status: "draft"
+    }
   }
 }
 
@@ -623,19 +582,11 @@ mutate responsibility updateResponsibility {
     enabled           bool
   }
   update {
-    id: args.responsibilityId
-    ownerUserId: actor.userId
-    args.statement
-    args.trigger
-    args.schedule
-    args.condition
-    args.targetKind
-    args.assignedAgentId
-    args.assignedRoleSlug
-    args.successCriteria
-    args.notifyHow
-    args.scopePartitionId
-    args.enabled
+    accept { statement, trigger, schedule, condition, targetKind, assignedAgentId, assignedRoleSlug, successCriteria, notifyHow, scopePartitionId, enabled }
+    stamp {
+      id: args.responsibilityId
+      ownerUserId: actor.userId
+    }
   }
 }
 
@@ -675,11 +626,11 @@ mutate responsibility assignResponsibility {
     assignedRoleSlug  string
   }
   update {
-    id: args.responsibilityId
-    ownerUserId: actor.userId
-    args.targetKind
-    args.assignedAgentId
-    args.assignedRoleSlug
+    accept { targetKind, assignedAgentId, assignedRoleSlug }
+    stamp {
+      id: args.responsibilityId
+      ownerUserId: actor.userId
+    }
   }
 }
 
@@ -725,17 +676,10 @@ mutate responsibility applyResponsibilityIntake {
     intakeRequest     object
   }
   update {
-    id: args.responsibilityId
-    args.trigger
-    args.schedule
-    args.condition
-    args.targetKind
-    args.assignedRoleSlug
-    args.successCriteria
-    args.notifyHow
-    args.status
-    args.intakeStatus
-    args.intakeRequest
+    accept { trigger, schedule, condition, targetKind, assignedRoleSlug, successCriteria, notifyHow, status, intakeStatus, intakeRequest }
+    stamp {
+      id: args.responsibilityId
+    }
   }
 }
 
@@ -753,16 +697,11 @@ mutate responsibility foldResponsibilityIntakeAnswers {
     notifyHow         string
   }
   update {
-    id: args.responsibilityId
-    args.trigger
-    args.schedule
-    args.condition
-    args.targetKind
-    args.assignedRoleSlug
-    args.successCriteria
-    args.notifyHow
-    args.intakeResponse
-    intakeStatus: "applied"
-    status: "active"
+    accept { trigger, schedule, condition, targetKind, assignedRoleSlug, successCriteria, notifyHow, intakeResponse }
+    stamp {
+      id: args.responsibilityId
+      intakeStatus: "applied"
+      status: "active"
+    }
   }
 }

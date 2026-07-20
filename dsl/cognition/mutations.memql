@@ -172,14 +172,12 @@ mutate session createSessionForParticipant {
     streams        object
   }
   insert {
-    id: args.sessionId
-    args.partitionId
-    args.participantId
-    args.humanInput
-    args.aiOutput
-    args.streams
-    startedAt: now
-    lastActivityAt: now
+    accept { partitionId, participantId, humanInput, aiOutput, streams }
+    stamp {
+      id: args.sessionId
+      startedAt: now
+      lastActivityAt: now
+    }
   }
 }
 
@@ -254,14 +252,10 @@ mutate request emitClientToolRequest {
     expiresAt      string
   }
   insert {
-    id: args.requestId
-    args.callId
-    args.toolName
-    args.argumentsJSON
-    args.partitionId
-    args.participantId
-    args.agentId
-    args.expiresAt
+    accept { callId, toolName, argumentsJSON, partitionId, participantId, agentId, expiresAt }
+    stamp {
+      id: args.requestId
+    }
   }
 }
 
@@ -288,12 +282,11 @@ mutate response emitClientToolResponse {
     partitionId       string
   }
   insert {
-    id: args.responseId
-    args.callId
-    args.contentJSON
-    isError: coalesce(args.isError, false)
-    args.errorMessage
-    args.partitionId
+    accept { callId, contentJSON, errorMessage, partitionId }
+    stamp {
+      id: args.responseId
+      isError: coalesce(args.isError, false)
+    }
   }
 }
 
@@ -318,13 +311,10 @@ mutate chunk emitTextChunk {
     done           boolean  @required
   }
   insert {
-    id: concat("text-chunk-", args.chunkId)
-    args.partitionId
-    args.participantId
-    args.replyId
-    args.text
-    args.index
-    args.done
+    accept { partitionId, participantId, replyId, text, index, done }
+    stamp {
+      id: concat("text-chunk-", args.chunkId)
+    }
   }
 }
 
@@ -733,15 +723,12 @@ mutate utterance sendTextUtterance {
     citations        []object
   }
   insert {
-    id: args.utteranceId
-    args.partitionId
-    args.participantId
-    participantType: coalesce(args.participantType, "human")
-    utteranceType: "text"
-    args.text
-    args.replyToId
-    args.source
-    args.citations
+    accept { partitionId, participantId, text, replyToId, source, citations }
+    stamp {
+      id: args.utteranceId
+      participantType: coalesce(args.participantType, "human")
+      utteranceType: "text"
+    }
   }
 }
 
