@@ -67,3 +67,37 @@ func (Query) allTodos(_ any) {
 		}
 	}
 }
+
+// TestSandboxInheritsActorBinding pins that authoring-sandbox compiles
+// run the same loader chain: a candidate query reading actor.* without
+// @actor fails at sandbox compile, not just at boot (#2621).
+func TestSandboxInheritsActorBinding(t *testing.T) {
+	if _, err := LoadUnifiedConcepts(nil); err != nil {
+		t.Fatalf("LoadUnifiedConcepts: %v", err)
+	}
+	rep := SandboxCompileBundle([]SandboxConstruct{{
+		Kind: "query",
+		Name: "sandboxOwned",
+		Source: `query todo sandboxOwned {
+  filter todo.ownerUserId == actor.userId
+}`,
+	}})
+	if rep.OK {
+		t.Fatalf("sandbox must reject an undeclared actor read, got OK: %+v", rep.Diagnostics)
+	}
+	if len(rep.Diagnostics) == 0 || !strings.Contains(rep.Diagnostics[0].Error, "@actor") {
+		t.Errorf("diagnostic must name the missing @actor: %+v", rep.Diagnostics)
+	}
+
+	rep = SandboxCompileBundle([]SandboxConstruct{{
+		Kind: "query",
+		Name: "sandboxOwned",
+		Source: `@actor
+query todo sandboxOwned {
+  filter todo.ownerUserId == actor.userId
+}`,
+	}})
+	if !rep.OK {
+		t.Fatalf("declared @actor must compile in the sandbox: %+v", rep.Diagnostics)
+	}
+}
