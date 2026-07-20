@@ -22,17 +22,17 @@
   ],
   "onEnterRules": [
     {
-      "beforeText": "^\\s*[^/\\s].*\\{[^}\"']*$|^\\s*\\{[^}\"']*$",
-      "afterText": "^\\s*\\}",
+      "beforeText": "^\\s*[^/\\s].*[{\\[(][^}\\])\"']*$|^\\s*[{\\[(][^}\\])\"']*$",
+      "afterText": "^\\s*[}\\])]",
       "action": { "indent": "indentOutdent" }
     },
     {
-      "beforeText": "^\\s*[^/\\s].*\\{[^}\"']*$|^\\s*\\{[^}\"']*$",
+      "beforeText": "^\\s*[^/\\s].*[{\\[(][^}\\])\"']*$|^\\s*[{\\[(][^}\\])\"']*$",
       "action": { "indent": "indent" }
     }
   ],
   "indentationRules": {
-    "increaseIndentPattern": "^\\s*[^/\\s].*\\{[^}\"']*$|^\\s*\\{[^}\"']*$",
-    "decreaseIndentPattern": "^\\s*\\}"
+    "increaseIndentPattern": "^\\s*[^/\\s].*[{\\[(][^}\\])\"']*$|^\\s*[{\\[(][^}\\])\"']*$",
+    "decreaseIndentPattern": "^\\s*[}\\])]"
   }
 }
