@@ -130,6 +130,27 @@ func TestRewriteAcceptStamp(t *testing.T) {
 }`,
 		},
 		{
+			// #2660 review: splitInsertFields glues depth>0 newlines to
+			// spaces, so the multi-line check must run on the raw inner
+			// -- otherwise the codemod reflows the expression with its
+			// indentation frozen as space runs.
+			name: "paren-continued multi-line field stays longhand",
+			in: `mutate space addAgentToSpace {
+  args {
+    spaceId string @required
+    agentId string @required
+  }
+  insert {
+    id: concat("si-", hash(concat(
+      canonicalId(args.agentId, agent), ":",
+      canonicalId(args.spaceId, space)
+    )))
+    args.spaceId
+    args.agentId
+  }
+}`,
+		},
+		{
 			name: "nested object value stays longhand",
 			in: `mutate identity addCredential {
   args {

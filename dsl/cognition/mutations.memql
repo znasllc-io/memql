@@ -16,15 +16,19 @@ mutate participant addAgentToSpace {
     capabilityOverrides  object
   }
   insert {
-    accept { partitionId, agentId, displayName, capabilityOverrides }
-    stamp {
-      id: concat("si-", hash(concat(       canonicalId(args.agentId, agent), ":",       args.partitionId     )))
-      participantType: "si"
-      status: "active"
-      joinedAt: now
-      hidden: false
-      isGroupGA: false
-    }
+    id: concat("si-", hash(concat(
+      canonicalId(args.agentId, agent), ":",
+      args.partitionId
+    )))
+    args.partitionId
+    args.agentId
+    participantType: "si"
+    args.displayName
+    status: "active"
+    joinedAt: now
+    args.capabilityOverrides
+    hidden: false
+    isGroupGA: false
   }
 }
 
@@ -678,12 +682,24 @@ mutate utterance sendSpeechUtterance {
     source           object
   }
   insert {
-    accept { partitionId, participantId, text, audioId, videoId, duration, timestamps, source }
-    stamp {
-      id: coalesce(       args.utteranceId,       concat("utt-", hash(concat(         args.partitionId, ":",         canonicalId(args.participantId, participant), ":",         now       )))     )
-      participantType: coalesce(args.participantType, "human")
-      utteranceType: "speech"
-    }
+    id: coalesce(
+      args.utteranceId,
+      concat("utt-", hash(concat(
+        args.partitionId, ":",
+        canonicalId(args.participantId, participant), ":",
+        now
+      )))
+    )
+    args.partitionId
+    args.participantId
+    participantType: coalesce(args.participantType, "human")
+    utteranceType: "speech"
+    args.text
+    args.audioId
+    args.videoId
+    args.duration
+    args.timestamps
+    args.source
   }
 }
 
@@ -750,11 +766,15 @@ mutate audioOverride setAgentAudioOverride {
     active   bool
   }
   insert {
-    accept { partitionId, agentId, setBy, mode }
-    stamp {
-      id: concat("audioOverride-", hash(concat(       args.partitionId, ":",       canonicalId(args.agentId, agent)     )))
-      active: coalesce(args.active, true)
-    }
+    id: concat("audioOverride-", hash(concat(
+      args.partitionId, ":",
+      canonicalId(args.agentId, agent)
+    )))
+    args.partitionId
+    args.agentId
+    args.setBy
+    args.mode
+    active: coalesce(args.active, true)
   }
 }
 
@@ -801,11 +821,15 @@ mutate videoOverride setAgentVideoOverride {
     active   bool
   }
   insert {
-    accept { partitionId, agentId, setBy, mode }
-    stamp {
-      id: concat("videoOverride-", hash(concat(       args.partitionId, ":",       canonicalId(args.agentId, agent)     )))
-      active: coalesce(args.active, true)
-    }
+    id: concat("videoOverride-", hash(concat(
+      args.partitionId, ":",
+      canonicalId(args.agentId, agent)
+    )))
+    args.partitionId
+    args.agentId
+    args.setBy
+    args.mode
+    active: coalesce(args.active, true)
   }
 }
 

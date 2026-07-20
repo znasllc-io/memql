@@ -691,6 +691,8 @@ values, single mirrors) stay longhand deliberately.
 
 ```memql
 // Longhand with bare mirrors -- still valid where the gate allows it.
+// This block stays longhand deliberately: the multi-line computed id
+// is exactly the shape the codemod refuses to reflow.
 insert {
   id: concat("si-", hash(concat(
     canonicalId(args.agentId, agent), ":",

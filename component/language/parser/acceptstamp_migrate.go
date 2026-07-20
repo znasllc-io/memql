@@ -183,6 +183,13 @@ func acceptStampEditForMutation(runes []rune, mtoks []Token, braceIdx, bodyStart
 	if strings.Contains(inner, "//") || strings.Contains(inner, "/*") {
 		return none, false // comments are preserved by not rewriting
 	}
+	if hasMultilineField(inner) {
+		// splitInsertFields glues depth>0 newlines to spaces, so a
+		// paren-continued multi-line expression would reflow into one
+		// line with the original indentation frozen as space runs
+		// (#2660 review). Formatting is preserved by not rewriting.
+		return none, false
+	}
 
 	fields, err := splitInsertFields(inner)
 	if err != nil {
@@ -193,8 +200,8 @@ func acceptStampEditForMutation(runes []rune, mtoks []Token, braceIdx, bodyStart
 	var stampFields []string
 	seen := map[string]bool{}
 	for _, f := range fields {
-		if strings.ContainsAny(f, "{[\n") {
-			return none, false // multi-line / nested-object values stay longhand
+		if strings.ContainsAny(f, "{[") {
+			return none, false // nested-object / array values stay longhand
 		}
 		if m := bareMirrorRe.FindStringSubmatch(f); m != nil {
 			if seen[m[1]] {
@@ -341,4 +348,37 @@ func canonicalPayloadField(f string) string {
 		return strings.TrimSpace(f[:idx]) + ": " + strings.TrimSpace(f[idx+1:])
 	}
 	return f
+}
+
+// hasMultilineField reports whether any field in a write-block inner
+// continues across lines (a newline at bracket depth > 0, outside
+// strings). splitInsertFields glues those newlines to spaces, so the
+// check must run on the RAW inner text.
+func hasMultilineField(inner string) bool {
+	depth := 0
+	inString := false
+	var quote byte
+	for i := 0; i < len(inner); i++ {
+		c := inner[i]
+		if inString {
+			if c == quote {
+				inString = false
+			}
+			continue
+		}
+		switch c {
+		case '"', '`':
+			inString = true
+			quote = c
+		case '{', '[', '(':
+			depth++
+		case '}', ']', ')':
+			depth--
+		case '\n':
+			if depth > 0 {
+				return true
+			}
+		}
+	}
+	return false
 }
