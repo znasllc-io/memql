@@ -157,6 +157,28 @@ editors and agents can key on them:
 | `redundant-version` | Hint | `@version("1.0.0")` restates the default (#2613). |
 | `discarded-args-description` | Hint | `@description` on an args field is parsed and discarded (#2615). |
 
+### Block-specific completion (#2628)
+
+Inside a named block, completion offers THAT block's set. The block
+labels have been declared in `nextrules.go` since the table was
+written, but a label is not a detector -- a NextRule has zero effect
+until the classifier computes its label, which is what this closes:
+
+| Block | Offers |
+|---|---|
+| `args { }` | Field types (`string`, `bool`, `enum(...)`, ...). `enum` completes to the TYPE form (#2618); the `!` required sigil is documented on the item rather than offered as one. |
+| `filter { }` | The engine's reserved filter heads (`payload`, `actor`, `args`, `now`, `config`, `trace`, `meta`, `schema`, `partition`, `provenance`) plus the bound concept's fields. |
+| `insert { }` / `update { }` | `accept` / `stamp` in the post-#2616 short form, plus the bound concept's fields. |
+| `shape { }` | The bound concept's fields. |
+
+The editor teaches the POST-epoch surface deliberately: offering the
+retired long forms (`@required`, `string @enum(...)`, `@cache(ttl=)`)
+here would undo the grammar-epoch migration, and a conformance test
+asserts no completion item's insert text carries one. A second gate
+requires every declared NextRule label to be either computed by the
+classifier or explicitly listed as not-yet-detected, so a rule added
+to the table can never sit silently dead again.
+
 ### Receiver-filtered and construct-scoped completion (#2627)
 
 With the enclosing construct resolved, completion is construct-aware

@@ -209,3 +209,56 @@ func specKeywordDoc(name string) string {
 	}
 	return ""
 }
+
+// specBlockContextLabel maps an enclosing construct + its innermost
+// named block to the dslspec NextRule Context label for that block
+// (#2628). The block labels have existed in nextrules.go since the
+// table was written, but a LABEL IS NOT A DETECTOR -- a NextRule has
+// zero effect until the classifier computes its label, and this switch
+// previously served only the construct-signature contexts. Returns ""
+// when no rule covers the block.
+func specBlockContextLabel(keyword, block string) string {
+	switch block {
+	case "args":
+		return "inArgsBlock"
+	case "filter":
+		return "inFilterClause"
+	case "shape":
+		if keyword == "shape" {
+			return "inShapeBody"
+		}
+		return ""
+	case "body":
+		return "inFunctionBody"
+	case "insert", "update":
+		return "inWriteBlock"
+	}
+	return ""
+}
+
+// specDetectedContextLabels is the set of NextRule labels the
+// classifier can actually compute, and specUndetectedContextLabels the
+// ones deliberately not detected yet. Together they must cover every
+// declared rule -- the #2628 conformance test fails on a label that is
+// neither, so a rule added to the table can never sit silently dead
+// again.
+var specDetectedContextLabels = map[string]bool{
+	"afterMutationKeyword": true,
+	"afterQueryKeyword":    true,
+	"afterSeedKeyword":     true,
+	"afterShapeKeyword":    true,
+	"inArgsBlock":          true,
+	"inFilterClause":       true,
+	"inShapeBody":          true,
+	"inFunctionBody":       true,
+	"inWriteBlock":         true,
+	"inConceptBody":        true,
+	"afterAtSign":          true,
+	"topLevel":             true,
+}
+
+var specUndetectedContextLabels = map[string]bool{
+	// `use` import paths are completed by their own dedicated context
+	// (ContextUseDeclaration), not through the NextRule label path.
+	"afterUseKeyword": true,
+}
