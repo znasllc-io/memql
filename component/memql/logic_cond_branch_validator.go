@@ -31,16 +31,31 @@ func validateLogicCondBranchValues(funcDef *languageParser.FunctionDef) error {
 		return nil
 	}
 	for _, step := range auto.Steps {
+		// A `w := cond(...)` assignment step is FLATTENED into a positional
+		// FunctionStepConfig -- arg "0" the predicate, args "1"/"2" the
+		// branch values -- with no CondExpr node left for the generic walk
+		// to anchor on. Check the branch positions directly.
+		if fc, ok := step.Config.(*languageParser.FunctionStepConfig); ok && fc != nil && strings.EqualFold(fc.Name, "cond") {
+			for _, key := range []string{"1", "2"} {
+				if cmp, isCmp := fc.Args[key].(*languageParser.ComparisonExpr); isCmp {
+					return condBranchValueError(funcDef.Name, cmp)
+				}
+			}
+		}
 		for _, expr := range stepValueExpressions(step) {
 			if bad := findIdentifierComparisonBranchValue(expr); bad != nil {
-				field := strings.Join(bad.Field.Parts, ".")
-				return fmt.Errorf(
-					"logic %q: a comparison is a cond PREDICATE, not a cond BRANCH value: the identifier-led comparison `%s %s ...` in branch-value position would be returned as its own source text; move the comparison into a predicate (`cond(%s %s ..., true, false)`) or return literals from the branches (#2655)",
-					funcDef.Name, field, bad.Operator, field, bad.Operator)
+				return condBranchValueError(funcDef.Name, bad)
 			}
 		}
 	}
 	return nil
+}
+
+func condBranchValueError(logicName string, bad *languageParser.ComparisonExpr) error {
+	field := strings.Join(bad.Field.Parts, ".")
+	return fmt.Errorf(
+		"logic %q: a comparison is a cond PREDICATE, not a cond BRANCH value: the identifier-led comparison `%s %s ...` in branch-value position would be returned as its own source text; move the comparison into a predicate (`cond(%s %s ..., true, false)`) or return literals from the branches (#2655)",
+		logicName, field, bad.Operator, field, bad.Operator)
 }
 
 // findIdentifierComparisonBranchValue walks a logic value expression and
@@ -96,9 +111,79 @@ func findIdentifierComparisonBranchValue(node languageParser.ExpressionNode) *la
 		}
 		return findIdentifierComparisonBranchValueIn(n.Args)
 	case *languageParser.LambdaExpr:
-		return findIdentifierComparisonBranchValue(n.Body)
+		// STOP: a lambda body is a different, correct evaluation context --
+		// the in-memory collection evaluator handles a Field-led comparison
+		// as a cond branch value fine (docs matrix: "yes (lambda body)"),
+		// and gating it would brick loadable trees.
+		return nil
 	case *languageParser.DotAccessExpr:
 		return findIdentifierComparisonBranchValue(n.Object)
+	// Single-target and fixed-arity wrapper builtins must not launder a
+	// nested violation (`lower(cond(..., x == "y", ...))`).
+	case *languageParser.ToStringExpr:
+		return findIdentifierComparisonBranchValue(n.Target)
+	case *languageParser.FirstExpr:
+		return findIdentifierComparisonBranchValue(n.Target)
+	case *languageParser.LastExpr:
+		return findIdentifierComparisonBranchValue(n.Target)
+	case *languageParser.LowerExpr:
+		return findIdentifierComparisonBranchValue(n.Target)
+	case *languageParser.UpperExpr:
+		return findIdentifierComparisonBranchValue(n.Target)
+	case *languageParser.TrimExpr:
+		return findIdentifierComparisonBranchValue(n.Target)
+	case *languageParser.HashExpr:
+		return findIdentifierComparisonBranchValue(n.Target)
+	case *languageParser.ContainsExpr:
+		if cmp := findIdentifierComparisonBranchValue(n.Target); cmp != nil {
+			return cmp
+		}
+		return findIdentifierComparisonBranchValue(n.Substring)
+	case *languageParser.CanonicalIdExpr:
+		return findIdentifierComparisonBranchValue(n.Value)
+	case *languageParser.AddDurationExpr:
+		if cmp := findIdentifierComparisonBranchValue(n.Timestamp); cmp != nil {
+			return cmp
+		}
+		return findIdentifierComparisonBranchValue(n.Duration)
+	case *languageParser.SubtractTimestampsExpr:
+		if cmp := findIdentifierComparisonBranchValue(n.T1); cmp != nil {
+			return cmp
+		}
+		return findIdentifierComparisonBranchValue(n.T2)
+	case *languageParser.DaysBetweenExpr:
+		if cmp := findIdentifierComparisonBranchValue(n.Date1); cmp != nil {
+			return cmp
+		}
+		return findIdentifierComparisonBranchValue(n.Date2)
+	case *languageParser.FunctionCallExpr:
+		return findIdentifierComparisonBranchValueInValue(n.Args)
+	case *languageParser.LiteralExpr:
+		// Projection object/array literals carry ExpressionNodes in Value.
+		return findIdentifierComparisonBranchValueInValue(n.Value)
+	}
+	return nil
+}
+
+// findIdentifierComparisonBranchValueInValue recurses projection literal /
+// call-arg values (maps, slices, nested ExpressionNodes), mirroring the
+// arithmetic validator's findArithOverComparisonInValue.
+func findIdentifierComparisonBranchValueInValue(v any) *languageParser.ComparisonExpr {
+	switch val := v.(type) {
+	case languageParser.ExpressionNode:
+		return findIdentifierComparisonBranchValue(val)
+	case map[string]any:
+		for _, e := range val {
+			if cmp := findIdentifierComparisonBranchValueInValue(e); cmp != nil {
+				return cmp
+			}
+		}
+	case []any:
+		for _, e := range val {
+			if cmp := findIdentifierComparisonBranchValueInValue(e); cmp != nil {
+				return cmp
+			}
+		}
 	}
 	return nil
 }

@@ -61,8 +61,35 @@ func stepValueExpressions(step languageParser.StepDef) []languageParser.Expressi
 		if cfg != nil && cfg.Query != nil {
 			return []languageParser.ExpressionNode{cfg.Query}
 		}
+	case *languageParser.FunctionStepConfig:
+		// A cond/builtin assignment step (`w := cond(...)`) compiles here,
+		// its expressions carried in the Args map -- without this arm the
+		// bind-then-return refactor walked straight past every step
+		// validator (memql#2655 review).
+		if cfg != nil {
+			return exprNodesInStepArgs(cfg.Args)
+		}
 	}
 	return nil
+}
+
+// exprNodesInStepArgs collects the ExpressionNodes carried (possibly nested
+// in maps/slices) by a function-step args map.
+func exprNodesInStepArgs(v any) []languageParser.ExpressionNode {
+	var out []languageParser.ExpressionNode
+	switch val := v.(type) {
+	case languageParser.ExpressionNode:
+		out = append(out, val)
+	case map[string]any:
+		for _, e := range val {
+			out = append(out, exprNodesInStepArgs(e)...)
+		}
+	case []any:
+		for _, e := range val {
+			out = append(out, exprNodesInStepArgs(e)...)
+		}
+	}
+	return out
 }
 
 // findArithmeticOverComparison walks a logic value expression and returns the
