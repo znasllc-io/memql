@@ -361,6 +361,13 @@ func hasMultilineField(inner string) bool {
 	for i := 0; i < len(inner); i++ {
 		c := inner[i]
 		if inString {
+			// Escape-aware, matching skipStringLiteral: an escaped quote
+			// must not close the string early and desync the depth
+			// (#2660 delta review).
+			if c == '\\' && quote == '"' && i+1 < len(inner) {
+				i++
+				continue
+			}
 			if c == quote {
 				inString = false
 			}

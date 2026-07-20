@@ -151,6 +151,27 @@ func TestRewriteAcceptStamp(t *testing.T) {
 }`,
 		},
 		{
+			// #2660 delta review: an escaped quote inside a string must
+			// not desync hasMultilineField's depth -- the multi-line
+			// coalesce below must still be detected and skipped.
+			name: "escaped quote before a multi-line field stays longhand",
+			in: `mutate widget addWidget {
+  args {
+    a string @required
+    b string @required
+  }
+  insert {
+    args.a
+    args.b
+    q: concat("say \")(", args.a)
+    c: coalesce(
+      args.a,
+      args.b
+    )
+  }
+}`,
+		},
+		{
 			name: "nested object value stays longhand",
 			in: `mutate identity addCredential {
   args {
