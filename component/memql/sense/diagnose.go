@@ -248,6 +248,7 @@ func (s *Service) semanticDiagnostics(file *parser.File, source string) []Diagno
 	diagnostics = append(diagnostics, arraySyntaxRule(source)...)
 	diagnostics = append(diagnostics, redundantEnabledRule(source)...)
 	diagnostics = append(diagnostics, redundantVersionRule(source)...)
+	diagnostics = append(diagnostics, actorUndeclaredRule(source)...)
 	diagnostics = append(diagnostics, discardedArgsDescriptionRule(source)...)
 
 	// Check function definitions.
