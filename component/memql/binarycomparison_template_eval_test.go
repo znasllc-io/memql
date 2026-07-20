@@ -5,9 +5,9 @@ package memql
 // predicates parsed by the restricted builtin-arg grammar; with ==/!=
 // normalized to *BinaryComparisonExpr (the shape the relationals already
 // emit), evalParserExpression must evaluate that shape directly. Without the
-// case, the node falls to the best-effort default (stringify-then-evaluate)
-// and yields a silently wrong value -- the #2653 wrong-branch class on the
-// template surface.
+// case, the node hits the typed-node rejection ("unsupported expression in
+// mutation template") -- a loud error, which is also what relational template
+// predicates did on main before this case existed.
 
 import (
 	"context"
