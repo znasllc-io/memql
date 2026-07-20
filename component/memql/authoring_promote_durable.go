@@ -463,19 +463,32 @@ func (e *MemQLEngine) recompileAndPromoteRow(ctx context.Context, row AuthoringC
 			// compileAuthoredSpec's (nil, nil) is the #2607 intentional-skip
 			// contract: the stored row is @disabled. An intentional disable
 			// must NOT read as a failure -- skip re-registration without the
-			// quarantine channel, but keep the name occupied so an authored
-			// promote cannot claim it (the resurrection guard, memql#2643).
+			// quarantine channel, and reserve the name so an authored promote
+			// cannot claim it (the resurrection guard, memql#2643).
+			//
+			// The reservation may only claim UNOWNED territory. A stale
+			// @disabled row must never disable a name that is LIVE in the
+			// registry (a core spec of the same name, or the author's own
+			// corrected re-promote on a later walk tick), and must never
+			// overwrite an existing reservation's provenance (a core
+			// retirement is permanent by design; planting the authored
+			// marker over it would let a later promote lift it -- or let
+			// demote remove a core spec).
 			if e.specs != nil {
-				e.specs.MarkDisabled(row.Name)
+				_, live := e.specs.Lookup(row.Name)
+				if !live && !e.specs.IsDisabled(row.Name) {
+					e.specs.MarkDisabled(row.Name)
+					// Record the reservation as AUTHORED (unlike a
+					// core-loader reservation) so the owner's lifecycle can
+					// release it: promoting the corrected (enabled) source
+					// re-enables the name, demoting it retires it. Without
+					// the marker the name would be permanently dead -- no
+					// API path lifts a core reservation.
+					e.promotedAuthored.Store("spec:"+row.Name, true)
+				}
 			}
-			// Record the reservation as AUTHORED (unlike a core-loader
-			// reservation) so the owner's lifecycle can release it:
-			// promoting the corrected (enabled) source re-enables the name,
-			// demoting it retires it. Without the marker the name would be
-			// permanently dead -- no API path lifts a core reservation.
-			e.promotedAuthored.Store("spec:"+row.Name, true)
 			if e.Component != nil && e.Logger != nil {
-				e.Logger.Info("durable authored construct is @disabled; skipped at re-hydration (name reserved, nothing registered)",
+				e.Logger.Info("durable authored construct is @disabled; skipped at re-hydration (nothing registered)",
 					"component", "memql.engine", "kind", row.Kind, "name", row.Name, "bundleId", row.BundleId, "owner", row.OwnerUserId)
 			}
 			return errRehydrateSkippedDisabled

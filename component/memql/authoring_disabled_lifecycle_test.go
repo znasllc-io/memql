@@ -300,3 +300,126 @@ func TestPromoteAuthoredConstruct_CoreDisabledName_StillRefused(t *testing.T) {
 		t.Error("a refused promote must not lift a core reservation")
 	}
 }
+
+// TestRehydrate_DisabledRow_DoesNotPoisonActiveCoreSpec: a stored @disabled
+// AUTHORED row whose name a LIVE core spec owns (cross-version drift) must not
+// touch it: no IsDisabled mark (the validator would refuse calls), no authored
+// marker (demote could then REMOVE core -- the never-shadow invariant in
+// reverse). The row is still an intentional skip, not a failure.
+func TestRehydrate_DisabledRow_DoesNotPoisonActiveCoreSpec(t *testing.T) {
+	e := &MemQLEngine{specs: newSpecRegistry()}
+	e.loadReport = newLoadReport()
+	if err := e.specs.Upsert("mcpDisabledSpec", &Spec{Name: "mcpDisabledSpec", ExprSource: "core"}); err != nil {
+		t.Fatalf("seed core spec: %v", err)
+	}
+	store := &fakeRehydrateStore{
+		bundles: []AuthoringBundleRow{{Id: durablePromoteBundlePrefix + "b1", OwnerUserId: "owner-1", Status: BundleActive}},
+		constructs: map[string][]AuthoringConstructRow{
+			durablePromoteBundlePrefix + "b1": {{
+				Id: "c1", OwnerUserId: "owner-1", BundleId: durablePromoteBundlePrefix + "b1",
+				Kind: "spec", Name: "mcpDisabledSpec", Source: sessionDisabledSpecSrc,
+			}},
+		},
+	}
+	res, err := e.rehydratePromotedNow(context.Background(), store)
+	if err != nil {
+		t.Fatalf("re-hydrate: %v", err)
+	}
+	if len(res.Failed) != 0 || res.SkippedDisabled != 1 {
+		t.Errorf("result = %+v, want skippedDisabled=1 failed=[]", res)
+	}
+	if e.specs.IsDisabled("mcpDisabledSpec") {
+		t.Error("a stale @disabled authored row disabled a LIVE core spec")
+	}
+	if got, ok := e.specs.Lookup("mcpDisabledSpec"); !ok || got.ExprSource != "core" {
+		t.Error("core spec no longer intact after re-hydrating the stale row")
+	}
+	if err := e.DemoteAuthoredConstruct(context.Background(), "spec", "mcpDisabledSpec"); err == nil {
+		t.Fatal("the stale row must not plant a marker that lets demote remove a core spec")
+	}
+	if _, ok := e.specs.Lookup("mcpDisabledSpec"); !ok {
+		t.Error("core spec was removed")
+	}
+}
+
+// TestRehydrate_DisabledRow_DoesNotLiftCoreReservation: when the CORE tree
+// already retired the name (MarkDisabled by the loaders, permanent by design),
+// a stored @disabled authored row of the same name must not overwrite the
+// reservation's provenance -- the corrected promote stays refused.
+func TestRehydrate_DisabledRow_DoesNotLiftCoreReservation(t *testing.T) {
+	e := &MemQLEngine{specs: newSpecRegistry()}
+	e.loadReport = newLoadReport()
+	e.specs.MarkDisabled("mcpDisabledSpec")
+	store := &fakeRehydrateStore{
+		bundles: []AuthoringBundleRow{{Id: durablePromoteBundlePrefix + "b1", OwnerUserId: "owner-1", Status: BundleActive}},
+		constructs: map[string][]AuthoringConstructRow{
+			durablePromoteBundlePrefix + "b1": {{
+				Id: "c1", OwnerUserId: "owner-1", BundleId: durablePromoteBundlePrefix + "b1",
+				Kind: "spec", Name: "mcpDisabledSpec", Source: sessionDisabledSpecSrc,
+			}},
+		},
+	}
+	if _, err := e.rehydratePromotedNow(context.Background(), store); err != nil {
+		t.Fatalf("re-hydrate: %v", err)
+	}
+
+	reg := NewAuthoredRuntimeRegistry()
+	if _, err := AuthorSessionBundle(reg, "owner-1", sessionCorrectedSpecSrc); err != nil {
+		t.Fatalf("author corrected session spec: %v", err)
+	}
+	c, _ := reg.Lookup("owner-1", "spec", "mcpDisabledSpec")
+	err := e.PromoteAuthoredConstruct(context.Background(), c)
+	if err == nil || !strings.Contains(err.Error(), "@disabled core construct owns that name") {
+		t.Fatalf("the core reservation must survive a rehydrated authored row of the same name, got: %v", err)
+	}
+	if !e.specs.IsDisabled("mcpDisabledSpec") {
+		t.Error("core reservation was lifted")
+	}
+}
+
+// TestRehydrate_ReenabledSpec_SurvivesRefire: the durable promote of the
+// corrected source does not rewrite the OLD stored @disabled row, so the next
+// boot walk / promote broadcast re-fires over it. That stale row must not
+// re-disable the now-live re-enabled spec -- the re-enable has to survive
+// every subsequent replication tick.
+func TestRehydrate_ReenabledSpec_SurvivesRefire(t *testing.T) {
+	e := &MemQLEngine{specs: newSpecRegistry()}
+	e.loadReport = newLoadReport()
+	bundleId := durablePromoteBundlePrefix + "b1"
+	store := &fakeRehydrateStore{
+		bundles: []AuthoringBundleRow{{Id: bundleId, OwnerUserId: "owner-1", Status: BundleActive}},
+		constructs: map[string][]AuthoringConstructRow{
+			bundleId: {{
+				Id: "c1", OwnerUserId: "owner-1", BundleId: bundleId,
+				Kind: "spec", Name: "mcpDisabledSpec", Source: sessionDisabledSpecSrc,
+			}},
+		},
+	}
+	if _, err := e.rehydratePromotedNow(context.Background(), store); err != nil {
+		t.Fatalf("re-hydrate: %v", err)
+	}
+
+	reg := NewAuthoredRuntimeRegistry()
+	if _, err := AuthorSessionBundle(reg, "owner-1", sessionCorrectedSpecSrc); err != nil {
+		t.Fatalf("author corrected session spec: %v", err)
+	}
+	c, _ := reg.Lookup("owner-1", "spec", "mcpDisabledSpec")
+	if err := e.PromoteAuthoredConstruct(context.Background(), c); err != nil {
+		t.Fatalf("re-enable promote: %v", err)
+	}
+
+	// The stale @disabled row re-fires (boot walk or promote broadcast).
+	res, err := e.rehydratePromotedBundleNow(context.Background(), store, "owner-1", bundleId)
+	if err != nil {
+		t.Fatalf("re-fire: %v", err)
+	}
+	if len(res.Failed) != 0 {
+		t.Errorf("re-fire result = %+v, want no failures", res)
+	}
+	if e.specs.IsDisabled("mcpDisabledSpec") {
+		t.Error("the stale @disabled row re-disabled the live re-enabled spec")
+	}
+	if _, ok := e.specs.Lookup("mcpDisabledSpec"); !ok {
+		t.Error("re-enabled spec lost after re-fire")
+	}
+}

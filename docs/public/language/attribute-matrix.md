@@ -102,13 +102,16 @@ construct cannot be disabled in place as a soft-retire; the retire path
 for a promoted construct is the demote. A STORED `@disabled` authored
 row (persisted by an older engine or an activated bundle) re-hydrates
 as an intentional skip on both the boot walk and the live propagation
-walk: nothing registers, the name is reserved, and the row is reported
-as `skippedDisabled` -- never through the quarantine channel (no ERROR
-log, no load-report entry), which is reserved for rows that genuinely
-fail to recompile. Unlike a core `@disabled` reservation (permanent by
-design), the authored reservation is releasable by its own lifecycle:
-promoting the corrected (enabled) source re-enables the name, and the
-demote retires it. A bundle authoring a `@disabled` capability fails
+walk: nothing registers and the row is reported as `skippedDisabled`
+-- never through the quarantine channel (no ERROR log, no load-report
+entry), which is reserved for rows that genuinely fail to recompile.
+The skip also reserves the name, but only when the name is UNOWNED: a
+stale `@disabled` row never disables a name that is live in the
+registry (a core spec, or the author's own corrected re-promote on a
+later walk tick) and never overwrites a core `@disabled` reservation,
+which is permanent by design. The authored reservation, by contrast,
+is releasable by its own lifecycle: promoting the corrected (enabled)
+source re-enables the name, and the demote retires it. A bundle authoring a `@disabled` capability fails
 Gate-1 with `capability "name" is @disabled` (it would compile to
 nothing), not the misleading "no capability declaration found".
 
