@@ -31,7 +31,7 @@ func (s *Service) Complete(source string, line, col int, filePath string) []Comp
 	case ContextReceiver:
 		items = s.completeReceiver(ctx.Prefix)
 	case ContextFuncBody:
-		items = s.completeFuncBody(ctx.Prefix)
+		items = s.completeFuncBody(ctx.Prefix, ctx.Enclosing)
 		// G2 (memql#2364): inside an automation body that declares an
 		// `args { }` block, offer the declared field names -- they resolve
 		// bare per ADR Decision 3.
@@ -75,14 +75,7 @@ func (s *Service) completeTopLevel(prefix string) []CompletionItem {
 
 // completeAnnotation returns annotation name completions after @.
 func (s *Service) completeAnnotation(ctx CursorContext) []CompletionItem {
-	// Determine which receiver we're in to filter annotations.
-	receiverType := ctx.ReceiverType
-	validAnnotations := allAnnotationNames()
-	if receiverType != "" {
-		if ra, ok := AnnotationsByReceiver[receiverType]; ok {
-			validAnnotations = ra
-		}
-	}
+	validAnnotations := annotationsForConstruct(ctx.Enclosing)
 
 	var items []CompletionItem
 	for _, name := range validAnnotations {
@@ -155,8 +148,24 @@ func (s *Service) completeReceiver(prefix string) []CompletionItem {
 }
 
 // completeFuncBody returns completions inside a function body.
-func (s *Service) completeFuncBody(prefix string) []CompletionItem {
+func (s *Service) completeFuncBody(prefix string, enc EnclosingConstruct) []CompletionItem {
 	var items []CompletionItem
+
+	// Construct-scoped body blocks (#2627): the spec's BodyBlocks for
+	// THIS construct, offered where a block can open (directly in the
+	// construct body, not nested inside another block). A logic body
+	// never offers `filter`; a shape body never offers `insert`.
+	if len(enc.Blocks) == 0 {
+		for _, blk := range bodyBlocksForConstruct(enc) {
+			if strings.HasPrefix(blk, prefix) {
+				items = append(items, CompletionItem{
+					Label: blk, Kind: "keyword", Detail: enc.Keyword + " block",
+					Documentation: KeywordDocs[blk], InsertText: blk + " {",
+					SortPriority: 2,
+				})
+			}
+		}
+	}
 
 	// Keywords (control flow).
 	controlKeywords := []string{
@@ -173,8 +182,11 @@ func (s *Service) completeFuncBody(prefix string) []CompletionItem {
 		}
 	}
 
-	// Query/mutation keywords.
-	for _, kw := range []string{"query", "mutation", "insert", "update", "delete"} {
+	// Invocation keywords, scoped by construct (#2627): the write verbs
+	// belong to a mutation body; the call verbs to the behavioral
+	// constructs that may invoke other constructs. A query body offers
+	// neither -- its body is declarative clauses.
+	for _, kw := range invocationKeywordsForConstruct(enc) {
 		if strings.HasPrefix(kw, prefix) {
 			items = append(items, CompletionItem{
 				Label: kw, Kind: "keyword", Detail: "statement",
@@ -412,7 +424,7 @@ func (s *Service) completeFuncCallArgs(ctx CursorContext) []CompletionItem {
 		}
 	}
 	// For user functions, suggest based on args schema.
-	return s.completeFuncBody(ctx.Prefix)
+	return s.completeFuncBody(ctx.Prefix, ctx.Enclosing)
 }
 
 // completeConceptDef returns completions inside a concept definition body.
@@ -457,6 +469,10 @@ func allAnnotationNames() []string {
 func annotationTakesArgs(name string) bool {
 	switch name {
 	case "description", "version", "trigger", "filter",
+		// rateLimit + relationship were MISSING from this
+		// hand-maintained switch, so completion inserted them without
+		// the opening paren (#2627's in-sync test is what caught it).
+		"rateLimit", "relationship",
 		"handler", "executionTime", "executor", "args",
 		"defaultProvider", "templateFile", "type", "model", "extends",
 		"cache", "defaultFilter", "concepts", "default":
@@ -670,4 +686,60 @@ func eventMemberCompletions(prefix string) []CompletionItem {
 		}
 	}
 	return items
+}
+
+// annotationsForConstruct maps a detected construct to the annotations
+// legal on it (#2627), handling the three documented edges:
+//
+//   - the CONCEPT construct's receiver key is "" -- a real registry key,
+//     not "unresolved", so an empty Keyword (detection abstained) and an
+//     empty Receiver (concept) must not be conflated;
+//   - an unbacked construct (today exactly `use`, pinned by the dslspec
+//     drift test's knownUnbacked set) falls back to the union rather
+//     than offering nothing;
+//   - no detection at all (EOF, unparseable) keeps the union fallback,
+//     preserving the pre-#2626 behavior.
+func annotationsForConstruct(enc EnclosingConstruct) []string {
+	if enc.Keyword == "" {
+		return allAnnotationNames()
+	}
+	c := dslSpec.ConstructByKeyword(enc.Keyword)
+	if c == nil || !c.RegistryBacked {
+		return allAnnotationNames()
+	}
+	if ra, ok := AnnotationsByReceiver[c.AnnotationReceiver]; ok {
+		return ra
+	}
+	return allAnnotationNames()
+}
+
+// bodyBlocksForConstruct returns the named sub-blocks legal inside a
+// construct's body, from the spec (#2627) -- a logic body never offers
+// `filter`, a shape body never offers `insert`.
+func bodyBlocksForConstruct(enc EnclosingConstruct) []string {
+	if enc.Keyword == "" {
+		return nil
+	}
+	if c := dslSpec.ConstructByKeyword(enc.Keyword); c != nil {
+		return c.BodyBlocks
+	}
+	return nil
+}
+
+// invocationKeywordsForConstruct scopes the statement/invocation verbs
+// to the enclosing construct (#2627). Coarse by design -- the
+// block-level sets land in #2628 -- but never offers another
+// construct's verbs.
+func invocationKeywordsForConstruct(enc EnclosingConstruct) []string {
+	switch enc.Keyword {
+	case "mutate":
+		return []string{"insert", "update"}
+	case "logic", "automation", "action":
+		return []string{"query", "mutation", "logic"}
+	case "":
+		// Detection abstained: keep the pre-#2627 union so completion
+		// never regresses to silence.
+		return []string{"query", "mutation", "insert", "update", "delete"}
+	}
+	return nil
 }
