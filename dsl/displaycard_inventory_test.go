@@ -42,9 +42,6 @@ func TestDisplayCardInventory(t *testing.T) {
 	var rows []row
 
 	for _, p := range paths {
-		if strings.HasPrefix(p, "_reference/") {
-			continue
-		}
 		f, openErr := tree.Open(p)
 		if openErr != nil {
 			t.Fatalf("open %s: %v", p, openErr)

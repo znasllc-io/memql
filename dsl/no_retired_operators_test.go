@@ -47,9 +47,6 @@ func TestNoRetiredOperatorForms(t *testing.T) {
 		t.Fatalf("WalkMemqlFiles: %v", err)
 	}
 	for _, p := range paths {
-		if strings.HasPrefix(p, "_reference/") {
-			continue
-		}
 		file, openErr := tree.Open(p)
 		if openErr != nil {
 			t.Fatalf("open %s: %v", p, openErr)

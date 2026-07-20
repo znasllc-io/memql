@@ -188,9 +188,6 @@ func TestNoShortIdConceptPrefix(t *testing.T) {
 		"identity/logic.memql:426": true, // partition lookup-by-name (same; issue #56)
 	}
 	for _, p := range paths {
-		if strings.HasPrefix(p, "_reference/") {
-			continue
-		}
 		file, openErr := tree.Open(p)
 		if openErr != nil {
 			t.Fatalf("open %s: %v", p, openErr)
@@ -288,9 +285,6 @@ func TestNoCanonicalPatternOnArgs(t *testing.T) {
 		t.Fatalf("WalkMemqlFiles: %v", err)
 	}
 	for _, p := range paths {
-		if strings.HasPrefix(p, "_reference/") {
-			continue
-		}
 		file, openErr := tree.Open(p)
 		if openErr != nil {
 			t.Fatalf("open %s: %v", p, openErr)
@@ -450,7 +444,7 @@ func TestIdBearingFieldsDeclareRelationship(t *testing.T) {
 
 	exemptSeen := map[string]bool{}
 	for _, p := range paths {
-		if strings.HasPrefix(p, "_reference/") || !strings.HasSuffix(p, "concepts.memql") {
+		if !strings.HasSuffix(p, "concepts.memql") {
 			continue
 		}
 		ns := strings.SplitN(p, "/", 2)[0]
@@ -558,9 +552,6 @@ func TestRelationshipTargetsUseImports(t *testing.T) {
 		t.Fatalf("WalkMemqlFiles: %v", err)
 	}
 	for _, p := range paths {
-		if strings.HasPrefix(p, "_reference/") {
-			continue
-		}
 		file, openErr := tree.Open(p)
 		if openErr != nil {
 			t.Fatalf("open %s: %v", p, openErr)
@@ -648,9 +639,6 @@ func TestPerRowAuthzClassification(t *testing.T) {
 	headerRe := regexp.MustCompile(`(?m)^[ \t]*(query|mutation)[ \t]+(?:[A-Za-z_][A-Za-z0-9_]*[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
 
 	for _, p := range paths {
-		if strings.HasPrefix(p, "_reference/") {
-			continue
-		}
 		file, openErr := tree.Open(p)
 		if openErr != nil {
 			t.Fatalf("open %s: %v", p, openErr)
@@ -790,8 +778,8 @@ func matchingClose(src string, openIdx int) int {
 
 // visitFilterPredicates walks every .memql file in the unified tree,
 // extracts filter-clause lines, splits on `;`, and invokes f for
-// each predicate. Files under _reference/ are skipped -- they are
-// documentation, not loaded.
+// each predicate. (_reference/ is structurally outside the walk --
+// see TestWalkedTreeHasNoUnderscorePaths.)
 func visitFilterPredicates(t *testing.T, f func(file string, lineno int, pred string)) {
 	t.Helper()
 	tree := Tree()
@@ -800,9 +788,6 @@ func visitFilterPredicates(t *testing.T, f func(file string, lineno int, pred st
 		t.Fatalf("WalkMemqlFiles: %v", err)
 	}
 	for _, p := range paths {
-		if strings.HasPrefix(p, "_reference/") {
-			continue
-		}
 		file, openErr := tree.Open(p)
 		if openErr != nil {
 			t.Fatalf("open %s: %v", p, openErr)
@@ -1031,9 +1016,8 @@ func hasFilterOperator(pred string) bool {
 // surfaces the violation with a clean file:line and a migration
 // hint rather than relying on log-scraping the load failure.
 //
-// _reference/ files are documentation templates not loaded by the
-// engine; this test treats them as out-of-scope (matches the
-// existing per-row-authz classification test's exclusion).
+// (_reference/ is structurally outside the walk -- see
+// TestWalkedTreeHasNoUnderscorePaths.)
 func TestNoCallerVocabulary(t *testing.T) {
 	tree := Tree()
 	paths, err := dslfs.WalkMemqlFiles(tree)
@@ -1054,9 +1038,6 @@ func TestNoCallerVocabulary(t *testing.T) {
 	}
 	var hits []hit
 	for _, p := range paths {
-		if strings.HasPrefix(p, "_reference/") {
-			continue
-		}
 		file, openErr := tree.Open(p)
 		if openErr != nil {
 			t.Fatalf("open %s: %v", p, openErr)
@@ -1171,7 +1152,7 @@ func TestQueryConceptMatchesShapeConcept(t *testing.T) {
 	// Pass 1: global shapeName -> concept (concept-bound shapes only).
 	shapeConcept := map[string]string{}
 	for _, p := range paths {
-		if strings.HasPrefix(p, "_reference/") || !strings.HasSuffix(p, "shapes.memql") {
+		if !strings.HasSuffix(p, "shapes.memql") {
 			continue
 		}
 		for _, line := range strings.Split(readFile(p), "\n") {
@@ -1187,7 +1168,7 @@ func TestQueryConceptMatchesShapeConcept(t *testing.T) {
 	}
 	var violations []violation
 	for _, p := range paths {
-		if strings.HasPrefix(p, "_reference/") || !strings.HasSuffix(p, "queries.memql") {
+		if !strings.HasSuffix(p, "queries.memql") {
 			continue
 		}
 		var curQuery, curConcept string
@@ -1252,7 +1233,7 @@ func TestPaginationAuthoringRule(t *testing.T) {
 
 	var findings []pagination.QueryFinding
 	for _, p := range paths {
-		if strings.HasPrefix(p, "_reference/") || !strings.HasSuffix(p, "queries.memql") {
+		if !strings.HasSuffix(p, "queries.memql") {
 			continue
 		}
 		f, openErr := tree.Open(p)
