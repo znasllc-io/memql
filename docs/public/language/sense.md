@@ -156,6 +156,23 @@ editors and agents can key on them:
 | `redundant-version` | Hint | `@version("1.0.0")` restates the default (#2613). |
 | `discarded-args-description` | Hint | `@description` on an args field is parsed and discarded (#2615). |
 
+### Member completion (#2624)
+
+Typing a dot after a known accessor root completes ONLY that root's
+members -- a dot context never offers keywords, builtins, functions,
+or concepts, and an unknown root offers nothing:
+
+| Root | Members offered |
+|---|---|
+| `actor.` | The canonical auth envelope from the dslspec property table (#2623), aliases sorted after canonical members. |
+| `event.` | The event envelope: `topic`, `kind`, `payload`, `actor`, `timestamp`. |
+| `event.actor.` | `id` only -- the emitter's identity stamp (G4), a different object from the auth envelope. |
+| `args.` | The enclosing construct's declared args fields (any function kind; the automation BARE-name completion shares the same declared-field scanner, so the two can never disagree). |
+| `payload.` | The enclosing construct's bound-concept fields (via the registry's concept projection). |
+
+Both lexer shapes are detected: a trailing dot (`actor.`) and a
+mid-member position (`actor.us`, where the prefix filters).
+
 ## The CI drift guard
 
 `dslspec` is only useful if it stays true to the live grammar. A CI

@@ -15,7 +15,8 @@ func (f *fakeRegistry) ConceptNames() []string                   { return f.conc
 func (f *fakeRegistry) ConceptGet(name string) (*ConceptInfo, bool) {
 	for _, c := range f.concepts {
 		if c == name {
-			return &ConceptInfo{Name: name, Description: "concept " + name}, true
+			return &ConceptInfo{Name: name, Description: "concept " + name,
+				Fields: []FieldInfo{{Name: "title", Type: "string", Description: "probe field"}}}, true
 		}
 	}
 	return nil, false
