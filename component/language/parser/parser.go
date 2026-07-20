@@ -18,6 +18,16 @@ type Parser struct {
 	current Token
 	uses    []*UseDeclaration // populated during parseFile for implicit concept resolution
 
+	// forEachOrdinal counts the forEach loops parsed within the CURRENT
+	// top-level construct, and is the discriminator in a synthetic
+	// forEach step id (#2659). It replaces the loop's character offset +
+	// line, which churned on any edit above the loop -- a comment reflow
+	// renamed the step, and step ids are persisted in automation
+	// checkpoints (component/automations/checkpoint.go keys step results
+	// by id), so unrelated edits silently broke resume. Reset per
+	// construct in parseDefinition.
+	forEachOrdinal int
+
 	// src is the original source the tokens were lexed from, stored as
 	// runes because Token.Pos / Token.EndPos are rune indices (the lexer
 	// scans over a []rune). It is populated by ParseFile and by the
@@ -579,6 +589,11 @@ var TopLevelDeclKeywords = func() []string {
 // parseDefinition parses a single definition (function).
 // Supports @attribute Python-style decorators before func declarations.
 func (p *Parser) parseDefinition() (Node, error) {
+	// Each top-level construct numbers its forEach loops from zero, so a
+	// loop's id depends only on its ORDER within its own construct --
+	// not on anything above it in the file (#2659).
+	p.forEachOrdinal = 0
+
 	// Parse any leading attributes (@name, @name(value), @name(key=value), @name({...}))
 	var attributes []*Attribute
 	for p.check(TokenAt) {
@@ -2933,9 +2948,18 @@ func (p *Parser) parseForRangeStep() (*StepDef, error) {
 		return nil, err
 	}
 
-	// Generate a unique ID for the forEach step
-	// Note: variable name is fixed to "item", so include the loop start position for uniqueness.
-	stepId := fmt.Sprintf("forEach_%s_%d_L%d", valueVar, loopStartPos, loopStartLine)
+	// Synthetic forEach step id (#2659): the loop's VALUE VARIABLE plus
+	// its ordinal within the enclosing construct. Both inputs are stable
+	// under edits elsewhere in the file, which the previous
+	// `forEach_<var>_<charOffset>_L<line>` form was not: any edit that
+	// changed the character count above a loop renamed its step, and
+	// automation checkpoints key persisted step results by id, so a
+	// comment reflow could silently break resume for an in-flight run.
+	// The ordinal also keeps two same-named loops in one construct
+	// distinct, which the offset previously provided.
+	stepId := fmt.Sprintf("forEach_%s_%d", valueVar, p.forEachOrdinal)
+	p.forEachOrdinal++
+	_, _ = loopStartPos, loopStartLine
 
 	return &StepDef{
 		ID:   stepId,
