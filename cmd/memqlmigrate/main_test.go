@@ -166,3 +166,93 @@ func TestSplitCSVTrimsAndSkipsEmpty(t *testing.T) {
 		t.Errorf("splitCSV: got %v, want %v", got, want)
 	}
 }
+
+func TestRewriteArgsDescription(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "inline annotation stripped, rest of the field line intact",
+			in:   "query q {\n  args {\n    workdir string @required @description(\"path\")\n    ref string\n  }\n}\n",
+			want: "query q {\n  args {\n    workdir string @required\n    ref string\n  }\n}\n",
+		},
+		{
+			name: "standalone annotation line removed entirely",
+			in:   "query q {\n  args {\n    workdir string\n    @description(\"orphan\")\n  }\n}\n",
+			want: "query q {\n  args {\n    workdir string\n  }\n}\n",
+		},
+		{
+			name: "declaration-level annotation untouched",
+			in:   "@description(\"load-bearing\")\nquery q {\n  args {\n    x string\n  }\n}\n",
+			want: "@description(\"load-bearing\")\nquery q {\n  args {\n    x string\n  }\n}\n",
+		},
+		{
+			name: "concept-field annotation untouched",
+			in:   "concept widget {\n  label string @description(\"load-bearing\")\n}\n",
+			want: "concept widget {\n  label string @description(\"load-bearing\")\n}\n",
+		},
+		{
+			name: "annotation after the args block close untouched",
+			in:   "mutation m {\n  args {\n    x string @description(\"dead\")\n  }\n  shape {\n    y string @description(\"outside args\")\n  }\n}\n",
+			want: "mutation m {\n  args {\n    x string\n  }\n  shape {\n    y string @description(\"outside args\")\n  }\n}\n",
+		},
+		{
+			name: "args in a comment or string never opens a block",
+			in:   "// args { commentary\nconcept widget {\n  label string @description(\"keep\")\n}\n",
+			want: "// args { commentary\nconcept widget {\n  label string @description(\"keep\")\n}\n",
+		},
+		{
+			name: "multiple fields stripped in one block",
+			in:   "action a {\n  args {\n    x string @required @description(\"one\")\n    y string @description(\"two\")\n  }\n}\n",
+			want: "action a {\n  args {\n    x string @required\n    y string\n  }\n}\n",
+		},
+	}
+	for _, tc := range cases {
+		got, err := rewriteArgsDescription([]byte(tc.in))
+		if err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		if string(got) != tc.want {
+			t.Errorf("%s:\n got %q\nwant %q", tc.name, string(got), tc.want)
+		}
+	}
+}
+
+// TestRewritesAreRuneOffsetCorrect pins the #2615 discovery: token
+// positions are RUNE offsets (the lexer scans []rune), so a multibyte
+// character upstream of the rewrite site must not skew the edit range.
+// The section-sign prose mirrors dsl/deployment/logic.memql, where
+// byte-offset slicing left a dangling paren.
+func TestRewritesAreRuneOffsetCorrect(t *testing.T) {
+	argsIn := "// clause § 4\nquery q {\n  args {\n    x string @description(\"dead\")\n  }\n}\n"
+	argsWant := "// clause § 4\nquery q {\n  args {\n    x string\n  }\n}\n"
+	got, err := rewriteArgsDescription([]byte(argsIn))
+	if err != nil {
+		t.Fatalf("args-description: %v", err)
+	}
+	if string(got) != argsWant {
+		t.Errorf("args-description after multibyte:\n got %q\nwant %q", string(got), argsWant)
+	}
+
+	sliceIn := "// clause § 4\nx array(string)\n"
+	sliceWant := "// clause § 4\nx []string\n"
+	got, err = rewriteSliceSyntax([]byte(sliceIn))
+	if err != nil {
+		t.Fatalf("slice-syntax: %v", err)
+	}
+	if string(got) != sliceWant {
+		t.Errorf("slice-syntax after multibyte:\n got %q\nwant %q", string(got), sliceWant)
+	}
+
+	navIn := "// clause § 4\nreturn getAgent.first.payload.id\n"
+	navWant := "// clause § 4\nreturn getAgent.First().payload.id\n"
+	got, err = rewriteResultNavigation([]byte(navIn))
+	if err != nil {
+		t.Fatalf("result-navigation: %v", err)
+	}
+	if string(got) != navWant {
+		t.Errorf("result-navigation after multibyte:\n got %q\nwant %q", string(got), navWant)
+	}
+}

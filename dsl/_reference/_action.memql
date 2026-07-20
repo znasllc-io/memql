@@ -34,9 +34,13 @@
 //   @description("...")    Human-readable description. KEPT -- it is the
 //                          planner's retrieval embedding source. The retired
 //                          `intent` text merges into it.
-//   args { <name> <type> [@required] [@description("...")] ... }
+//   args { <name> <type> [@required] ... }
 //                          The action's input schema (same grammar as every
-//                          other construct's args block).
+//                          other construct's args block). @description on an
+//                          args FIELD is parsed and discarded (#2615) -- do
+//                          not write it; per-field docs arrive with /// doc
+//                          comments (#2601). The declaration-level
+//                          @description above is the load-bearing one.
 //   capability <verb>(<key>: <value>, ...)
 //                          The single external capability. Each value is a
 //                          LITERAL or an `args.<x>` reference -- never a call
@@ -49,8 +53,8 @@ use capabilities.shell.{ script }
 @description("Check out a git repository at a specific ref on the deploy runner, so a build runs against a pinned version.")
 action cloneRepoAtVersion {
   args {
-    workdir string @required @description("Absolute path of the repository working tree on the surface.")
-    ref     string @required @description("Git ref (branch, tag, or SHA) to check out.")
+    workdir string @required
+    ref     string @required
   }
   capability script(script: "deploy.cloneRepo", workdir: args.workdir, ref: args.ref)
 }
@@ -80,7 +84,7 @@ use capabilities.fs.{ readFile }
 @description("Read a deployment manifest off the surface so a later step can inspect it.")
 action readManifest {
   args {
-    path string @required @description("Absolute path to read.")
+    path string @required
   }
   capability readFile(path: args.path)
 }
@@ -97,8 +101,8 @@ use capabilities.integration.github.{ tagRelease }
 @description("Cut a git tag + release on GitHub for the version that just deployed.")
 action tagReleaseExample {
   args {
-    repo    string @required @description("owner/name of the repository.")
-    version string @required @description("Semver tag to create, e.g. 0.12.0.")
+    repo    string @required
+    version string @required
   }
   capability tagRelease(repo: args.repo, tag: args.version)
 }

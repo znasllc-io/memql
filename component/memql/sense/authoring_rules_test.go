@@ -241,3 +241,23 @@ func TestRedundantVersionRule(t *testing.T) {
 		}
 	}
 }
+
+func TestDiscardedArgsDescriptionRule(t *testing.T) {
+	src := "@description(\"declaration level\")\nquery q {\n  args {\n    x string @required @description(\"dead\")\n  }\n}\nconcept widget {\n  label string @description(\"load-bearing\")\n}\n"
+	got := discardedArgsDescriptionRule(src)
+	if len(got) != 1 || got[0].Code != "discarded-args-description" || got[0].Range.Start.Line != 4 {
+		t.Fatalf("want one hint on line 4, got %+v", got)
+	}
+
+	for name, clean := range map[string]string{
+		"declaration-level": "@description(\"keep\")\nquery q {\n  args {\n    x string\n  }\n}\n",
+		"concept-field":     "concept widget {\n  label string @description(\"keep\")\n}\n",
+		"shape-block":       "mutation m {\n  args {\n    x string\n  }\n  shape {\n    y string @description(\"keep\")\n  }\n}\n",
+		"args-in-comment":   "// args { commentary\nconcept w {\n  label string @description(\"keep\")\n}\n",
+		"args-in-string":    "query q {\n  filter { note == \"args {\" }\n}\n@description(\"keep\")\n",
+	} {
+		if got := discardedArgsDescriptionRule(clean); len(got) != 0 {
+			t.Errorf("%s: want no hint, got %+v", name, got)
+		}
+	}
+}

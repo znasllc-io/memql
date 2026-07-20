@@ -2,6 +2,7 @@ package dslspec
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/znasllc-io/memql/component/language/annotations"
@@ -196,4 +197,25 @@ func TestJSONRoundTrips(t *testing.T) {
 	if c := back.ConstructByKeyword("mutate"); c == nil || !c.ConceptInSignature {
 		t.Error("mutate construct did not survive round-trip with ConceptInSignature")
 	}
+}
+
+// TestArgsBlockRuleStopsAdvertisingDiscardedDescription pins #2615: the
+// inArgsBlock next-rule must not steer authors into @description on an
+// args field -- the parser discards it. The doc must instead carry the
+// discard warning.
+func TestArgsBlockRuleStopsAdvertisingDiscardedDescription(t *testing.T) {
+	s := Build()
+	for _, r := range s.NextRules {
+		if r.Context != "inArgsBlock" {
+			continue
+		}
+		if strings.Contains(r.Doc, "[@description") {
+			t.Errorf("inArgsBlock doc still advertises @description as part of the field shape: %q", r.Doc)
+		}
+		if !strings.Contains(r.Doc, "DISCARDED") {
+			t.Errorf("inArgsBlock doc must warn that @description is discarded (#2615): %q", r.Doc)
+		}
+		return
+	}
+	t.Fatal("inArgsBlock rule missing")
 }

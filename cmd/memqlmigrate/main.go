@@ -18,6 +18,11 @@
 //
 //	slice-syntax        array(T) → []T (Go-aligned slice type spelling).
 //
+//	args-description    strip @description("...") from args{} fields --
+//	                    the parser discards the annotation (no AST slot,
+//	                    #2615); declaration-level and concept-field
+//	                    @description are load-bearing and untouched.
+//
 // Flags:
 //
 //	--rewrite=NAME[,NAME...]   comma-separated list of rewrites to apply
@@ -47,6 +52,7 @@ type rewriter func([]byte) ([]byte, error)
 var rewriters = map[string]rewriter{
 	"result-navigation": rewriteResultNavigation,
 	"slice-syntax":      rewriteSliceSyntax,
+	"args-description":  rewriteArgsDescription,
 }
 
 type opts struct {
@@ -197,6 +203,7 @@ func listRewriters(w io.Writer) {
 	fmt.Fprintln(w, "available rewrites:")
 	fmt.Fprintln(w, "  result-navigation   .empty/.first/.last/.count/.nodes → method forms")
 	fmt.Fprintln(w, "  slice-syntax        array(T) → []T")
+	fmt.Fprintln(w, "  args-description    strip parser-discarded @description from args{} fields")
 }
 
 func applyPipeline(src []byte, pipeline []rewriter) ([]byte, error) {
@@ -338,6 +345,9 @@ func rewriteSliceSyntax(src []byte) ([]byte, error) {
 	// input is reassembled from the original bytes so we preserve
 	// surrounding whitespace and comments; we only substitute the
 	// matched run's byte range.
+	// Rune space throughout: token positions are rune offsets (the lexer
+	// scans []rune), so byte slicing drifts after any multibyte char.
+	runes := []rune(string(src))
 	type edit struct {
 		start, end  int
 		replacement string
@@ -356,27 +366,24 @@ func rewriteSliceSyntax(src []byte) ([]byte, error) {
 		if tokens[i+3].Type != langparser.TokenParenClose {
 			continue
 		}
-		start := tokens[i].Pos
-		end := tokens[i+3].Pos + 1 // closing paren is one byte
 		edits = append(edits, edit{
-			start:       start,
-			end:         end,
+			start:       tokens[i].Pos,
+			end:         tokens[i+3].EndPos,
 			replacement: "[]" + tokens[i+2].Literal,
 		})
 	}
 	if len(edits) == 0 {
 		return src, nil
 	}
-	var out bytes.Buffer
-	out.Grow(len(src))
+	out := make([]rune, 0, len(runes))
 	prev := 0
 	for _, e := range edits {
-		out.Write(src[prev:e.start])
-		out.WriteString(e.replacement)
+		out = append(out, runes[prev:e.start]...)
+		out = append(out, []rune(e.replacement)...)
 		prev = e.end
 	}
-	out.Write(src[prev:])
-	return out.Bytes(), nil
+	out = append(out, runes[prev:]...)
+	return []byte(string(out)), nil
 }
 
 // lexicalTokenRewrite walks every lexer token in src and gives the
@@ -389,8 +396,11 @@ func lexicalTokenRewrite(src []byte, mapper func(langparser.Token) (string, bool
 	if err != nil {
 		return src, nil
 	}
-	var out bytes.Buffer
-	out.Grow(len(src))
+	// Rune space throughout: token Pos/EndPos are rune offsets. EndPos is
+	// the lexer-stamped half-open end -- Pos+len(Literal) undercounts for
+	// string tokens (quotes stripped, escapes decoded).
+	runes := []rune(string(src))
+	out := make([]rune, 0, len(runes))
 	prev := 0
 	for _, tok := range tokens {
 		if tok.Type == langparser.TokenEOF {
@@ -398,14 +408,108 @@ func lexicalTokenRewrite(src []byte, mapper func(langparser.Token) (string, bool
 		}
 		if replacement, ok := mapper(tok); ok {
 			if tok.Pos >= prev {
-				out.Write(src[prev:tok.Pos])
+				out = append(out, runes[prev:tok.Pos]...)
 			}
-			out.WriteString(replacement)
-			prev = tok.Pos + len(tok.Literal)
+			out = append(out, []rune(replacement)...)
+			prev = tok.EndPos
 		}
 	}
-	if prev < len(src) {
-		out.Write(src[prev:])
+	if prev < len(runes) {
+		out = append(out, runes[prev:]...)
 	}
-	return out.Bytes(), nil
+	return []byte(string(out)), nil
+}
+
+// rewriteArgsDescription strips @description("...") annotations from
+// args{} fields (#2615). The args-block parser consumes the annotation
+// and throws it away ("silently accepted (no AST slot)"), so the prose
+// is dead weight. Only annotations lexically inside an `args { }` block
+// are touched -- declaration-level and concept-field @description are
+// load-bearing. Tracking happens on the token stream, so `args {` in a
+// comment or string never opens a block. A deletion that leaves its
+// line blank removes the whole line.
+func rewriteArgsDescription(src []byte) ([]byte, error) {
+	tokens, err := langparser.NewLexer(string(src)).Tokenize()
+	if err != nil {
+		return src, nil
+	}
+	if n := len(tokens); n > 0 && tokens[n-1].Type == langparser.TokenEOF {
+		tokens = tokens[:n-1]
+	}
+	// Token positions are RUNE offsets (the lexer scans []rune), so all
+	// range math and slicing happen in rune space -- byte slicing drifts
+	// after the first multibyte character in the file.
+	runes := []rune(string(src))
+	type edit struct{ start, end int }
+	var edits []edit
+	depth := 0
+	argsDepth := -1 // interior depth of the innermost args block; -1 = outside
+	for i := 0; i < len(tokens); i++ {
+		tok := tokens[i]
+		switch tok.Type {
+		case langparser.TokenBraceOpen:
+			depth++
+			if argsDepth < 0 && i > 0 &&
+				tokens[i-1].Type == langparser.TokenIdentifier &&
+				tokens[i-1].Literal == "args" {
+				argsDepth = depth
+			}
+		case langparser.TokenBraceClose:
+			depth--
+			if argsDepth >= 0 && depth < argsDepth {
+				argsDepth = -1
+			}
+		case langparser.TokenAt:
+			if argsDepth < 0 || i+4 >= len(tokens) {
+				continue
+			}
+			if tokens[i+1].Type != langparser.TokenIdentifier ||
+				tokens[i+1].Literal != "description" ||
+				tokens[i+1].Pos != tok.Pos+1 ||
+				tokens[i+2].Type != langparser.TokenParenOpen ||
+				tokens[i+3].Type != langparser.TokenString ||
+				tokens[i+4].Type != langparser.TokenParenClose {
+				continue
+			}
+			start := tok.Pos
+			for start > 0 && (runes[start-1] == ' ' || runes[start-1] == '\t') {
+				start--
+			}
+			end := tokens[i+4].EndPos // half-open, past the closing paren
+			// Standalone-line annotation: remove the line entirely.
+			lineStart := start
+			for lineStart > 0 && runes[lineStart-1] != '\n' {
+				lineStart--
+			}
+			leadingWS := true
+			for j := lineStart; j < start; j++ {
+				if runes[j] != ' ' && runes[j] != '\t' {
+					leadingWS = false
+					break
+				}
+			}
+			if leadingWS {
+				switch {
+				case end < len(runes) && runes[end] == '\n':
+					start, end = lineStart, end+1
+				case end+1 < len(runes) && runes[end] == '\r' && runes[end+1] == '\n':
+					start, end = lineStart, end+2
+				}
+			}
+			edits = append(edits, edit{start, end})
+			i += 4
+		}
+	}
+	if len(edits) == 0 {
+		return src, nil
+	}
+	var out []rune
+	out = make([]rune, 0, len(runes))
+	prev := 0
+	for _, e := range edits {
+		out = append(out, runes[prev:e.start]...)
+		prev = e.end
+	}
+	out = append(out, runes[prev:]...)
+	return []byte(string(out)), nil
 }

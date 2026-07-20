@@ -346,3 +346,50 @@ func redundantVersionRule(source string) []Diagnostic {
 // the editor additionally hints where the gate stays silent; see the rule
 // body's exposure note.)
 var versionDefaultRE = regexp.MustCompile(`^[ \t]*(@version\([ \t]*"1\.0\.0"[ \t]*\))[ \t]*(//[^\r]*)?\r?$`)
+
+// discardedArgsDescriptionRule surfaces the #2615 corpus rule: the parser
+// consumes @description on an args field and throws it away
+// (args_block_parser.go, "silently accepted (no AST slot)"), so the prose
+// is dead weight the runtime never sees. Declaration-level and
+// concept-field @description are load-bearing and never hint. Brace depth
+// is tracked on stripped lines (strings blanked, // tails cut), the same
+// scan the dsl/ tree gate runs, so the editor hints what CI rejects.
+// Per-field documentation returns with /// doc comments (#2601).
+func discardedArgsDescriptionRule(source string) []Diagnostic {
+	var diagnostics []Diagnostic
+	depth := 0
+	inArgs := false
+	argsDepth := 0
+	for lineIdx, line := range strings.Split(source, "\n") {
+		code := stripStringsAndComments(line)
+		if inArgs && depth < argsDepth {
+			inArgs = false
+		}
+		if !inArgs && argsBlockOpenRE.MatchString(code) {
+			inArgs = true
+			argsDepth = depth + 1
+			depth += strings.Count(code, "{") - strings.Count(code, "}")
+			continue
+		}
+		if inArgs {
+			if col := strings.Index(code, "@description"); col >= 0 {
+				pos := Position{Line: lineIdx + 1, Column: col + 1}
+				diagnostics = append(diagnostics, Diagnostic{
+					Range: Range{
+						Start: pos,
+						End:   Position{Line: pos.Line, Column: col + 1 + len("@description")},
+					},
+					Severity: SeverityHint,
+					Message:  "`@description` on an args field is parsed and discarded (no AST slot, #2615). Delete it -- per-field docs arrive with /// doc comments (#2601).",
+					Code:     "discarded-args-description",
+				})
+			}
+		}
+		depth += strings.Count(code, "{") - strings.Count(code, "}")
+	}
+	return diagnostics
+}
+
+// argsBlockOpenRE matches an `args {` block opener outside strings and
+// comments (the rule scans stripped lines).
+var argsBlockOpenRE = regexp.MustCompile(`(^|[^A-Za-z0-9_])args[ \t]*\{`)

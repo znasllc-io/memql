@@ -56,7 +56,7 @@ func nextRules() []NextRule {
 		{
 			Context: "inArgsBlock",
 			Expect:  []string{"fieldName", "fieldType", "annotation"},
-			Doc:     "Inside an args { } block: `<name> <type> [@required] [@enum(...)] [@description(...)]`. (@default is rejected on an args field -- use coalesce(args.X, ...) or the `args.X ?? fallback` shorthand.)",
+			Doc:     "Inside an args { } block: `<name> <type> [@required] [@enum(...)] [@maxLength(N)] [@pattern(...)]`. (@description here is parsed and DISCARDED -- #2615; per-field docs arrive with /// doc comments, #2601. @default is rejected on an args field -- use coalesce(args.X, ...) or the `args.X ?? fallback` shorthand.)",
 		},
 		{
 			Context: "inFilterClause",
