@@ -199,13 +199,30 @@ func (s *Scheduler) Start(ctx context.Context) {
 	s.running = true
 	s.mu.Unlock()
 
+	// readyCh is deliberately NOT closed here (#2648). It used to be, which
+	// made Ready() mean "Start was called" rather than "automations are
+	// registered": a caller that waited on Ready() and immediately triggered
+	// an automation raced s.run's load, and lost whenever the goroutine had
+	// not been scheduled yet. That is exactly the db-tests lane flake --
+	// three packages competing for CPU widened the window until
+	// `automation "accountDeletionSweep" not found` surfaced on unrelated
+	// diffs. run() now signals readiness after registration (and on every
+	// exit path, so a waiter can never hang).
+	go s.run(runCtx)
+}
+
+// markReady closes readyCh exactly once. Called after the initial
+// automation registration completes, and from run's deferred cleanup so
+// an early return (load failure) still releases every waiter rather
+// than hanging them (#2648).
+func (s *Scheduler) markReady() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	select {
 	case <-s.readyCh:
 	default:
 		close(s.readyCh)
 	}
-
-	go s.run(runCtx)
 }
 
 // Stop halts the scheduler.
@@ -338,6 +355,9 @@ func (s *Scheduler) ResumeAutomation(ctx context.Context, executionId string, fr
 
 func (s *Scheduler) run(ctx context.Context) {
 	defer func() {
+		// Release any Ready() waiter even on the load-failure path, so a
+		// broken automation tree cannot hang a caller (#2648).
+		s.markReady()
 		s.mu.Lock()
 		s.running = false
 		s.cancel = nil
@@ -393,6 +413,10 @@ func (s *Scheduler) run(ctx context.Context) {
 	s.cron.Start()
 
 	s.logInfo("scheduler started", "automationCount", len(automations), "scheduledCount", scheduled, "eventTriggeredCount", eventTriggered)
+
+	// Every automation is registered and the cron is running: Ready() now
+	// means what its callers have always assumed (#2648).
+	s.markReady()
 
 	// Wait for shutdown
 	<-ctx.Done()
