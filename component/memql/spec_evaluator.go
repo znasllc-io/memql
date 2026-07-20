@@ -69,10 +69,8 @@ func buildSpecCtx(ctx context.Context, engine *MemQLEngine) map[string]any {
 	out := make(map[string]any, 6)
 	actor := map[string]any{}
 	if access, ok := auth.AccessFromContext(ctx); ok {
-		actor["userId"] = access.UserId
-		actor["role"] = string(access.Role)
-		actor["identityId"] = access.IdentityId
-		actor["isClusterOwner"] = access.IsClusterOwner()
+		// One canonical envelope (#2623).
+		actor = auth.ActorEnvelopeMap(access)
 	}
 	out["actor"] = actor
 	out["partition"] = currentPartitionFromContext(ctx)

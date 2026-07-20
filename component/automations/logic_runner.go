@@ -1266,12 +1266,11 @@ func (r *LogicRunner) newEvaluatorForLogic(ctx context.Context, args map[string]
 	// silently resolves to the literal path text (#2380, the deploy role
 	// gates). Absent auth leaves actor unbound -- reads resolve nil.
 	if ac, ok := auth.AccessFromContext(ctx); ok && ac != nil {
-		evaluator.SetCustom("actor", map[string]any{
-			"userId":         ac.UserId,
-			"role":           string(ac.Role),
-			"identityId":     ac.IdentityId,
-			"isClusterOwner": ac.Role == auth.RoleOwner,
-		})
+		// One canonical envelope (#2623): the seeded map now carries
+		// the full field set (primaryEmail / now / the isOwner alias
+		// included) and the owner bit comes from IsClusterOwner() --
+		// the inlined Role comparison here was a drift seed.
+		evaluator.SetCustom("actor", auth.ActorEnvelopeMap(ac))
 	}
 	if r.logger != nil {
 		evaluator.SetLogger(r.logger)

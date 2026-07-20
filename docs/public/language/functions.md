@@ -674,7 +674,10 @@ shape space spaceCard {
 
 Project the engine envelope; no signature concept. Closed field set:
 `actor.userId` / `actor.role` / `actor.identityId` /
-`actor.isClusterOwner` / `actor.now` / `actor.config.<key>`:
+`actor.isClusterOwner` / `actor.primaryEmail` / `actor.now` (the
+`isOwner` spelling is a legacy alias of `isClusterOwner`;
+`actor.config.<key>` is retired -- read config through the bare
+reserved `config.<key>`, #2623):
 
 ```memql
 @description("Actor identity envelope")
