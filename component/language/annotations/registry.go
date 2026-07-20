@@ -29,17 +29,17 @@ package annotations
 // the editor projection of each decl parser's accepted set.
 var ByReceiver = map[string][]string{
 	"Query": {
-		"description", "enabled", "disabled", "internal", "public", "mcp", "unbounded", "cache", "nocache", "latestMode",
+		"description", "enabled", "disabled", "internal", "public", "mcp", "unbounded", "cache", "nocache", "latestMode", "actor",
 	},
 	"Mutation": {
 		"description", "enabled", "disabled", "internal", "actor", "public",
 		"mergeFields", "appendFields", "createOnly", "scrubPii", "mcp",
 	},
 	"Logic": {
-		"description", "enabled", "disabled", "eventField",
+		"description", "enabled", "disabled", "eventField", "actor",
 	},
 	"Automation": {
-		"description", "enabled", "disabled", "trigger", "filter", "mcp",
+		"description", "enabled", "disabled", "trigger", "filter", "mcp", "actor",
 	},
 	"Action": {
 		"description", "enabled", "disabled", "kind", "sideEffect",

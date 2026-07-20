@@ -83,6 +83,16 @@ The fields are the only names valid under `actor.` -- a typo like
 spellings are retired in #221; the parser rejects them with a
 migration hint pointing at the canonical `actor.X` / `@actor`.
 
+Reading the envelope is a DECLARED capability (#2621): a query,
+mutation, logic, or automation whose body references `actor.*` must
+carry a bare `@actor` annotation in its preamble, or it fails load
+with a file-attributed error (used-requires-declared, the same shape
+as the logic event-binding rule). Declared-but-unused is legal. Spec
+and trait bodies keep the inverse rule -- direct `actor.*` reads are
+load-rejected there; bind an `@actor` shape instead. The seed-file
+`@actor("system")` (a seed-write identity) is a different construct
+and is unaffected.
+
 ---
 
 ## 4. Imported names (`use` declarations)

@@ -167,6 +167,7 @@ query plan plansForSpace {
 // come from waitingPlansForUser sorted by createdAt.
 
 @description("The caller's currently-RUNNING Plans -- the account's active tasks occupying concurrency slots (epic memql#902 / #909). Owned tier: payload.requestedBy==actor.userId binds server-side so a caller only sees their own. The active count is the result length; pair with accountEntitlement for the cap and waitingPlansForUser for the queue.")
+@actor
 query plan activePlansForUser {
   filter  requestedBy==actor.userId && statusIsRunning
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
@@ -178,6 +179,7 @@ query plan activePlansForUser {
 }
 
 @description("The caller's Plans parked in the per-account waiting queue (status=waitingForSlot) because the account is at its concurrency cap (epic memql#902 / #909). Owned tier (payload.requestedBy==actor.userId). FIFO order is by row.createdAt of the waitingForSlot version (carried in planFull); the frontend derives each Plan's queue position from that ascending order -- MemQL has no in-query window/rank function.")
+@actor
 query plan waitingPlansForUser {
   filter  requestedBy==actor.userId && status=="waitingForSlot"
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
@@ -241,6 +243,7 @@ query task tasksForPlan {
 // actor.userId predicate is the only gate -- no userId arg, so a
 // caller can never request another user's rows.
 @description("Every responsibility owned by the caller (all statuses + triggers). Backs the management surface. The ownerUserId predicate binds to actor.userId server-side so cross-user reads are impossible.")
+@actor
 query responsibility responsibilitiesForUser {
   filter  ownerUserId==actor.userId
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
@@ -260,6 +263,7 @@ query responsibility responsibilitiesForUser {
 // rejected by the conformance test). enabled==true filters out
 // soft-disabled rows.
 @description("The caller's active + enabled responsibilities -- the live working set. Owned tier (ownerUserId == actor.userId). status filtered via statusIsActive; enabled==true drops soft-disabled rows.")
+@actor
 query responsibility activeResponsibilities {
   filter  ownerUserId==actor.userId && statusIsActive && enabled==true
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
@@ -293,6 +297,7 @@ query responsibility activeResponsibilities {
 // archetype; the recurring + reactive results are merged Go-side.
 @description("The caller's active + enabled responsibilities of a given trigger archetype (recurring or reactive) -- the candidate set the reactive-loop evaluator (epic #632) checks for due-ness. Owned tier (ownerUserId == actor.userId). Cron-due / condition-match filtering happens Go-side (no OR operator + no cron arithmetic in the filter), mirroring queryDueRefreshDomains.")
 @unbounded("responsibilities due for a trigger -- an internal scheduler sweep that must see all due")
+@actor
 query responsibility dueResponsibilities {
   args {
     trigger  enum("reactive", "recurring")!

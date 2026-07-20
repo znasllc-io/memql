@@ -64,6 +64,7 @@ logic nextDeploymentVersion {
 // rows at the first live deploy); until that engine path evaluates
 // in-process, author role gates in this shape.
 @description("Pure forward-deploy role gate, mirroring spec requiresDeveloperOrAbove (#1876): true when the actor holds developer, admin, or owner. Writer/reader are read-only.")
+@actor
 logic deploymentForwardAllowed {
   body {
     role := coalesce(actor.role, "")
@@ -78,6 +79,7 @@ logic deploymentForwardAllowed {
 // not even admin may roll back. Reads actor.role. The rollback automation
 // calls this before reverting; a non-owner's request is dropped.
 @description("Pure rollback role gate, mirroring spec requiresOwner (#1876): true ONLY when the actor holds the owner role. Rollback is owner-only -- not even admin may roll back.")
+@actor
 logic deploymentRollbackAllowed {
   body {
     role := coalesce(actor.role, "")

@@ -84,6 +84,7 @@ query project projectBySlug {
 }
 
 @description("List the caller's own submitted requests, newest-first. Open to any team member.")
+@actor
 query request myRequests {
   filter  submitterUserId == actor.userId
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over

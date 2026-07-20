@@ -17,6 +17,7 @@
 // createProject -- register a project forge develops against.
 // ---------------------------------------------------------------------------
 @description("Register a v1:forge:project. createdByUserId is stamped from actor.userId.")
+@actor
 mutate project createProject {
   args {
     projectId    string
@@ -44,6 +45,7 @@ mutate project createProject {
 // state. Returns the created request.
 // ---------------------------------------------------------------------------
 @description("Submit a v1:forge:request. submitterUserId + submitterRole are stamped server-side from actor (no spoofing). status lands 'submitted'; the routeRequest automation routes it by role.")
+@actor
 mutate request createRequest {
   args {
     requestId      string
@@ -102,6 +104,7 @@ mutate request advanceRequest {
 // ---------------------------------------------------------------------------
 
 @description("Validate a v1:forge:request (developer action): set status 'needs_approval' and stamp validatedByUserId from actor.userId.")
+@actor
 mutate request validateRequest {
   args {
     requestId  string!
@@ -115,6 +118,7 @@ mutate request validateRequest {
 }
 
 @description("Approve a v1:forge:request (owner action): set status 'queued' (ready to implement) and stamp approvedByUserId from actor.userId.")
+@actor
 mutate request approveRequest {
   args {
     requestId  string!
@@ -184,6 +188,7 @@ mutate request attachToRequest {
 // write-side point keeps every requestEvent.requestId in one short form.
 // ---------------------------------------------------------------------------
 @description("Append a v1:forge:requestEvent (the time-series audit trail). actorUserId + actorRole stamped from actor. requestId is normalized to the short id form (shortId()) so the trail keys consistently whether the caller passes a canonical node id (automation path) or a bare short id (tool path) -- #1859.")
+@actor
 mutate requestEvent recordRequestEvent {
   args {
     eventId     string
@@ -220,6 +225,7 @@ mutate requestEvent recordRequestEvent {
 // automation-written audit events (#1859).
 // ---------------------------------------------------------------------------
 @description("Append a 'mentored' v1:forge:requestEvent after a non-owner submitter was taught about the area they touched. Injects kind='mentored' and forwards eventId / requestId / note. actorUserId + actorRole stamped from actor; requestId normalized to short form (shortId(), #1859). The forgeRecordMentoring tool's direct single writer (replaces the recordMentoring logic -- #2235).")
+@actor
 mutate requestEvent recordMentoredEvent {
   args {
     eventId    string

@@ -29,6 +29,7 @@
 // is passed as args.
 
 @description("Relational governance entry point: may the actor apply `verb` (update/delete) to the target principal? Resolves the actor + target ranks from the role catalog (roleBySlug) and hands them with the ids + verb + owner flag to the Go core (component/auth/rbac_governance.go:GovernPrincipal), which applies actor.rank > target.rank OR actor==target with the owner-only carve-out. read passes through (capability gates it); create is gated by governanceCanCreatePrincipal (the create != edit split).")
+@actor
 logic governanceCanManagePrincipal {
   args {
     targetUserId   string!
@@ -43,6 +44,7 @@ logic governanceCanManagePrincipal {
 }
 
 @description("Relational governance entry point for the create != edit split: may the actor CREATE a principal carrying newRoleSlug? Resolves the actor + new-role ranks (roleBySlug) and hands them to the Go core (component/auth/rbac_governance.go:CanCreatePrincipal), which permits minting a principal STRICTLY BELOW the actor's own rank (an owner at any sub-owner rank). Independent of update -- a role can hold create-on-principal without update-on-principal.")
+@actor
 logic governanceCanCreatePrincipal {
   args {
     newRoleSlug string!

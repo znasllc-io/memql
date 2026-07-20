@@ -73,6 +73,7 @@ var rewriters = map[string]rewriter{
 	"enum-type":         langparser.RewriteEnumTypeArgs,
 	"cache-positional":  langparser.RewriteCachePositional,
 	"terse-automation":  langparser.RewriteLonghandSingleStepAutomation,
+	"actor-binding":     langparser.RewriteActorBinding,
 }
 
 var pathRewriters = map[string]pathRewriter{
@@ -246,6 +247,7 @@ func listRewriters(w io.Writer) {
 	fmt.Fprintln(w, "  enum-type           args `string @enum(...)` -> the enum(...) type (#2618)")
 	fmt.Fprintln(w, "  cache-positional    @cache(ttl=\"N\") -> @cache(N) (#2618)")
 	fmt.Fprintln(w, "  terse-automation    longhand single-step automations -> the => form (#2619)")
+	fmt.Fprintln(w, "  actor-binding       insert @actor above constructs reading actor.* (#2621)")
 }
 
 func applyPipeline(path string, src []byte, pipeline []pathRewriter) ([]byte, error) {

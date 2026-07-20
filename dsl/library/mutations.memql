@@ -92,6 +92,7 @@ mutate generatedOutput createGeneratedOutput {
 }
 
 @description("Create a memory the assistant retains about the user. Owned: ownerUserId is stamped from actor.userId, so a memory can only ever be created for the acting user (or their delegated agent's bound user). indexMemory folds it into the Library Records lens automatically.")
+@actor
 mutate memory createMemory {
   args {
     memoryId           string!

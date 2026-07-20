@@ -356,6 +356,7 @@ mutate plan requestPlanFeedback {
 // this as an owned-tier write for the per-row-authz conformance test.
 
 @description("Attach a user's free-text feedback to a Plan parked in awaitingFeedback and resume it (epic memql#1404 / #1405). Stamps feedbackResponse{response, respondedBy, respondedAt}, transitions awaitingFeedback -> running (fresh startedAt for a clean cross-replica resume claim), and clears feedbackReason/feedbackRequest so the request is consumed. The engine guard (validateFeedbackIntakeTransition) rejects the write unless the prior status is awaitingFeedback and the actor owns the Plan. The owning agent is re-invoked with the feedback in its resume context. Callable by the needs-feedback card AND the assistant chat path (#1406).")
+@actor
 mutate plan attachPlanFeedback {
   args {
     planId    string!
@@ -536,6 +537,7 @@ mutate task updateTaskStatus {
 // -----------------------------------------------------------------------------
 
 @description("Create a v1:planner:responsibility in status='draft'. ownerUserId is stamped from actor.userId (owned tier) so a caller cannot author a directive owned by someone else. trigger discriminates the archetype: recurring carries schedule, reactive carries condition, standing carries neither. Single write path for responsibility creation.")
+@actor
 mutate responsibility createResponsibility {
   args {
     responsibilityId  string
@@ -564,6 +566,7 @@ mutate responsibility createResponsibility {
 }
 
 @description("Update an existing v1:planner:responsibility's editable fields (statement / schedule / condition / target binding / scope / enabled). Partial-update via update() -- only the fields you pass change; required fields inherit from the prior row. ownerUserId re-stamped from actor.userId (owned tier) so a caller can only rewrite their own rows.")
+@actor
 mutate responsibility updateResponsibility {
   args {
     responsibilityId  string!
@@ -589,6 +592,7 @@ mutate responsibility updateResponsibility {
 }
 
 @description("Transition a v1:planner:responsibility's lifecycle status (draft / active / paused / archived). Partial-update via update(); ownerUserId re-stamped from actor.userId (owned tier).")
+@actor
 mutate responsibility setResponsibilityStatus {
   args {
     responsibilityId  string!
@@ -602,6 +606,7 @@ mutate responsibility setResponsibilityStatus {
 }
 
 @description("Record the outcome of an evaluation/run on a v1:planner:responsibility: stamp lastEvaluatedAt to now and lastResult to the run headline. Called by the reactive-loop evaluator (epic #632) after a reactive condition check, a recurring scheduled tick, or a standing review. ownerUserId re-stamped from actor.userId (owned tier).")
+@actor
 mutate responsibility recordResponsibilityEvaluation {
   args {
     responsibilityId  string!
@@ -616,6 +621,7 @@ mutate responsibility recordResponsibilityEvaluation {
 }
 
 @description("Persist a routing decision onto a v1:planner:responsibility (epic #632, C2): bind the resolved agent (assignedAgentId), optional role slug (assignedRoleSlug), and flip targetKind off 'unassigned' onto the concrete kind (assistant / specialist). Called by the reactive-loop router after agentFactoryAnalyze + createSpecialist/extendSpecialist mint or match an agent. Partial-update via update(); ownerUserId re-stamped from actor.userId (owned tier) so the router can only rewrite the row's own owner -- the poller impersonates the responsibility's owner in the AccessContext before calling, so this lands as an owned write.")
+@actor
 mutate responsibility assignResponsibility {
   args {
     responsibilityId  string!
