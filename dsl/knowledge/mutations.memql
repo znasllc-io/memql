@@ -12,10 +12,10 @@
 @description("Create a document chunk linked to a knowledge domain. Called by every chunk-writing integration (seedDomainContent, augmentDomainGenerate, ensureKnowledgeBridge, the product UI corpus ingest). source is REQUIRED and tags the chunk's provenance class -- the dev-refresh cache filter and the citation registry both read it as the source of truth. Optional sourceUtteranceId / sourceAgentId / sourceTopic carry chat-driven augment provenance back-pointers.")
 mutate documentChunk createDocumentChunk {
   args {
-    chunkId            string  @required
-    domainId           string  @required
-    text               string  @required
-    source             string  @required
+    chunkId            string!
+    domainId           string!
+    text               string!
+    source             string!
     sourceRef          string
     seq                int
     tokenCount         int
@@ -78,10 +78,10 @@ mutate documentChunk createDocumentChunk {
 @description("Write a knowledge chunk distilled by the Trainer Agent during a trainSpecialist Plan. Hard-stamps source='trainerAgent' + validationStatus='validated'. sourceRef is REQUIRED (the Trainer's no-fabricated-citations invariant -- every chunk points at a real URL or named source). Lands as canonical, retrievable once embedded.")
 mutate documentChunk writeKnowledgeChunk {
   args {
-    chunkId      string  @required
-    domainId     string  @required
-    text         string  @required
-    sourceRef    string  @required
+    chunkId      string!
+    domainId     string!
+    text         string!
+    sourceRef    string!
     seq          int
     tokenCount   int
     sourceTopic  string
@@ -112,8 +112,8 @@ mutate documentChunk writeKnowledgeChunk {
 @description("Flag an existing knowledge chunk as outdated. Called by the Trainer Agent's markChunkSuperseded tool during a mode='refresh' trainSpecialist Plan. Sets superseded=true + supersededAt + supersededReason; retrieval excludes superseded chunks. Partial update -- the chunk row is preserved for audit.")
 mutate documentChunk markChunkSuperseded {
   args {
-    chunkId           string  @required
-    supersededAt      string  @required
+    chunkId           string!
+    supersededAt      string!
     reason            string
     supersededReason  string
   }

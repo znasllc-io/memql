@@ -26,9 +26,9 @@
 mutate candidate recordActionCandidate {
   args {
     candidateId   string
-    planId        string    @required
-    stepId        string    @required
-    calls         []object  @required
+    planId        string!
+    stepId        string!
+    calls         []object!
     resourceEdges []object
     callCount     int
   }
@@ -55,13 +55,13 @@ mutate candidate recordActionCandidate {
 mutate action mintAction {
   args {
     actionId          string
-    slug              string    @required
-    intent            string    @required
+    slug              string!
+    intent            string!
     capability        string
     sideEffectClass   string
     status            string
-    inputFingerprint  string    @required
-    calls             []object  @required
+    inputFingerprint  string!
+    calls             []object!
     resourceEdges     []object
     paramBindings     []object
     templateFingerprint string
@@ -93,9 +93,9 @@ mutate action mintAction {
 @description("Reinforce a v1:actions:action after a verified replay: set the engine-computed reliability + reinforceCount and reset the decay clock (Phase 1 #1736; surface-aware decay lands in Phase 4 #1739).")
 mutate action reinforceAction {
   args {
-    actionId       string  @required
-    reliability    float   @required
-    reinforceCount int     @required
+    actionId       string!
+    reliability    float!
+    reinforceCount int!
   }
   update {
     accept { reliability, reinforceCount }
@@ -117,10 +117,10 @@ mutate action reinforceAction {
 mutate surface registerSurface {
   args {
     surfaceId    string
-    slug         string    @required
-    kind         string    @required
+    slug         string!
+    kind         string!
     machineId    string
-    capabilities []string  @required
+    capabilities []string!
     priority     int
   }
   insert {
@@ -145,8 +145,8 @@ mutate surface registerSurface {
 @description("Set a v1:actions:surface availability flag (the resolver's failover signal) and refresh its lastSeen heartbeat. #1737.")
 mutate surface setSurfaceAvailability {
   args {
-    surfaceId  string   @required
-    available  boolean  @required
+    surfaceId  string!
+    available  boolean!
   }
   update {
     id: args.surfaceId
@@ -166,7 +166,7 @@ mutate surface setSurfaceAvailability {
 @description("Confirm a candidate v1:actions:action, promoting it to active so it is offered for replay (Phase 4 #1739, the human gate for real-machine side effects).")
 mutate action confirmAction {
   args {
-    actionId  string  @required
+    actionId  string!
   }
   update {
     id: args.actionId
@@ -184,7 +184,7 @@ mutate action confirmAction {
 @description("Deprecate a v1:actions:action (reliability below floor or superseded), removing it from replay (Phase 4 #1739).")
 mutate action deprecateAction {
   args {
-    actionId  string  @required
+    actionId  string!
   }
   update {
     id: args.actionId
@@ -202,8 +202,8 @@ mutate action deprecateAction {
 @description("Set a v1:actions:action decayed reliability from the consolidation sweep (Phase 4 #1739; value computed engine-side).")
 mutate action decayAction {
   args {
-    actionId     string  @required
-    reliability  float   @required
+    actionId     string!
+    reliability  float!
   }
   update {
     id: args.actionId
@@ -222,8 +222,8 @@ mutate action decayAction {
 @description("Bump a v1:actions:action monotonic version on edit (Phase 5 #1740; value computed engine-side). Pins stay on the prior version until the verified upgrade migration moves them.")
 mutate action bumpActionVersion {
   args {
-    actionId  string  @required
-    version   int     @required
+    actionId  string!
+    version   int!
   }
   update {
     id: args.actionId

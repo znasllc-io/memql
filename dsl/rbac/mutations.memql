@@ -19,9 +19,9 @@
 mutate role createRole {
   args {
     roleId       string
-    slug         string  @required
-    name         string  @required
-    rank         integer  @required
+    slug         string!
+    name         string!
+    rank         integer!
     description  string
     predefined   bool
     active       bool
@@ -40,10 +40,10 @@ mutate role createRole {
 mutate capability createCapability {
   args {
     capabilityId  string
-    roleSlug      string  @required
-    verb          string  @required  @enum("read", "create", "update", "delete", "execute")
-    resourceType  string  @required
-    effect        string  @enum("allow", "deny")
+    roleSlug      string!
+    verb          enum("read", "create", "update", "delete", "execute")!
+    resourceType  string!
+    effect        enum("allow", "deny")
     description   string
     predefined    bool
     active        bool

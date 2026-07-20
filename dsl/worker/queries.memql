@@ -30,7 +30,7 @@ query invocation expiredWorkerInvocations {
 @description("List all worker invocations belonging to a Plan.")
 query invocation invocationsForPlan {
   args {
-    planId  string  @required
+    planId  string!
   }
   filter  planId==args.planId && isNotDeleted
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
@@ -61,7 +61,7 @@ query invocation invocationsForPlan {
 @description("List worker invocations belonging to a user.")
 query invocation invocationsForUser {
   args {
-    ownerUserId  string  @required
+    ownerUserId  string!
   }
   filter  ownerUserId==args.ownerUserId && isNotDeleted
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
@@ -76,7 +76,7 @@ query invocation invocationsForUser {
 query plan runningPlansForUser {
   args {
     withComputerUseScope  boolean
-    userId  string  @required
+    userId  string!
   }
   filter  requestedBy==args.userId && statusIsRunning && when(args.withComputerUseScope) { computerUseScope!=null }
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
@@ -106,7 +106,7 @@ query plan runningPlansForUser {
 @description("Look up the worker registration owned by an identity row.")
 query registration workerByIdentityId {
   args {
-    identityId  string  @required
+    identityId  string!
   }
   filter  identityId==args.identityId
   shape   workerRegistrationFull
@@ -140,7 +140,7 @@ query registration workerByIdentityId {
 @description("List all workers owned by a user.")
 query registration workersForUser {
   args {
-    ownerUserId  string  @required
+    ownerUserId  string!
   }
   filter  ownerUserId==args.ownerUserId
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over

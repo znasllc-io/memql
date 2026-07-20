@@ -51,8 +51,8 @@
 @description("Create a git tag + GitHub release for a version.")
 capability integration.github.tagRelease {
   args {
-    repo string @required
-    tag  string @required
+    repo string!
+    tag  string!
   }
 }
 
@@ -64,7 +64,7 @@ capability integration.github.tagRelease {
 @description("Read a file from the local filesystem surface.")
 capability fs.readFile {
   args {
-    path string @required
+    path string!
   }
 }
 
@@ -72,7 +72,7 @@ capability fs.readFile {
 @description("Stat a path on the local filesystem surface (existence + metadata).")
 capability fs.stat {
   args {
-    path string @required
+    path string!
   }
 }
 
@@ -80,8 +80,8 @@ capability fs.stat {
 @description("Write a file to the local filesystem surface.")
 capability fs.writeFile {
   args {
-    path    string @required
-    content string @required
+    path    string!
+    content string!
   }
 }
 
@@ -93,7 +93,7 @@ capability fs.writeFile {
 @description("Issue an HTTP GET to an outbound URL and return the response.")
 capability http.get {
   args {
-    url string @required
+    url string!
   }
 }
 
@@ -101,7 +101,7 @@ capability http.get {
 @description("Issue an HTTP POST to an outbound URL with a body.")
 capability http.post {
   args {
-    url  string @required
+    url  string!
     body string
   }
 }
@@ -120,7 +120,7 @@ capability http.post {
 @description("Run an allowlisted named capability script on the runner surface, passing structured params as data.")
 capability shell.script {
   args {
-    script string @required
+    script string!
   }
 }
 
@@ -128,6 +128,6 @@ capability shell.script {
 @description("Run a shell command on the runner surface.")
 capability shell.exec {
   args {
-    cmd string @required
+    cmd string!
   }
 }

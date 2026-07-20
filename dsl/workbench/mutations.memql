@@ -12,9 +12,9 @@
 @description("Create the v1:workbench:workspace row for a Plan on first workbenchHost call. Storage root is supplied by the workbench integration which has already created the directory on disk.")
 mutate workspace provisionWorkspace {
   args {
-    workspaceId  string  @required
-    planId       string  @required
-    storageRoot  string  @required
+    workspaceId  string!
+    planId       string!
+    storageRoot  string!
   }
   insert {
     accept { planId, storageRoot }
@@ -32,7 +32,7 @@ mutate workspace provisionWorkspace {
 @description("Bump lastUsedAt on a workbench workspace after a successful dispatch. Cheap; called per successful workbenchHost call.")
 mutate workspace touchWorkspace {
   args {
-    workspaceId  string  @required
+    workspaceId  string!
   }
   update {
     id: args.workspaceId
@@ -43,8 +43,8 @@ mutate workspace touchWorkspace {
 @description("Mark a workbench workspace as released. Called from releaseWorkspaceOnPlanTerminal when the parent Plan reaches a terminal status. The actual on-disk teardown is the workbench integration's responsibility -- this mutation only flips the lifecycle bit.")
 mutate workspace releaseWorkspace {
   args {
-    workspaceId  string  @required
-    reason       string  @required @enum("plan_terminal", "explicit", "ttl_expired")
+    workspaceId  string!
+    reason       enum("plan_terminal", "explicit", "ttl_expired")!
   }
   update {
     id: args.workspaceId

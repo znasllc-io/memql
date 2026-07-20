@@ -9,9 +9,9 @@ use identity.concepts.{ user, authSession }
 @description("Add the caller's agent to a space's roster. forUserId is server-stamped; per-user-per-space 3-cap and agent-ownership are enforced by the engine guard.")
 mutate participant addAgentToSpace {
   args {
-    partitionId              string  @required
-    agentId              string  @required
-    displayName          string  @required
+    partitionId              string!
+    agentId              string!
+    displayName          string!
     capabilityOverrides  object
   }
   insert {
@@ -134,11 +134,11 @@ mutate participant addAgentToSpace {
 @description("Create a greeting utterance for an AI participant joining a space")
 mutate utterance createGreetingUtterance {
   args {
-    partitionId        string  @required
-    participantId  string  @required
-    agentId        string  @required
-    text           string  @required
-    greetingKind   string  @required
+    partitionId        string!
+    participantId  string!
+    agentId        string!
+    text           string!
+    greetingKind   string!
   }
   insert {
     args.partitionId
@@ -164,8 +164,8 @@ mutate utterance createGreetingUtterance {
 mutate session createSessionForParticipant {
   args {
     sessionId      string
-    partitionId        string  @required
-    participantId  string  @required
+    partitionId        string!
+    participantId  string!
     humanInput     object
     aiOutput       object
     streams        object
@@ -241,9 +241,9 @@ mutate session createSessionForParticipant {
 @description("Emit a client-tool request envelope for cross-node relay to a browser stream.")
 mutate request emitClientToolRequest {
   args {
-    requestId      string  @required
-    callId         string  @required
-    toolName       string  @required
+    requestId      string!
+    callId         string!
+    toolName       string!
     argumentsJSON  string
     partitionId        string
     participantId  string
@@ -273,8 +273,8 @@ mutate request emitClientToolRequest {
 @description("Emit a client-tool response envelope fulfilling a pending clientToolRequest.")
 mutate response emitClientToolResponse {
   args {
-    responseId    string  @required
-    callId        string  @required
+    responseId    string!
+    callId        string!
     contentJSON   string
     isError       bool
     errorMessage  string
@@ -301,13 +301,13 @@ mutate response emitClientToolResponse {
 @description("Emit a streaming text chunk during AI response generation.")
 mutate chunk emitTextChunk {
   args {
-    chunkId        string   @required
-    partitionId        string   @required
-    participantId  string   @required
-    replyId        string   @required
-    text           string   @required
-    index          number   @required
-    done           boolean  @required
+    chunkId        string!
+    partitionId        string!
+    participantId  string!
+    replyId        string!
+    text           string!
+    index          number!
+    done           boolean!
   }
   insert {
     accept { partitionId, participantId, replyId, text, index, done }
@@ -348,9 +348,9 @@ mutate chunk emitTextChunk {
 @description("Join a space as a human participant.")
 mutate participant joinSpaceAsHuman {
   args {
-    partitionId              string  @required
-    userId               string  @required
-    displayName          string  @required
+    partitionId              string!
+    userId               string!
+    displayName          string!
     status               string
     joinedAt             string
     capabilityOverrides  object
@@ -400,9 +400,9 @@ mutate participant joinSpaceAsHuman {
 @description("Join a space as an AI participant. Uses canonicalized deterministic ID.")
 mutate participant joinSpaceAsAI {
   args {
-    partitionId              string  @required
-    agentId              string  @required
-    displayName          string  @required
+    partitionId              string!
+    agentId              string!
+    displayName          string!
     status               string
     joinedAt             string
     capabilityOverrides  object
@@ -442,8 +442,8 @@ mutate participant joinSpaceAsAI {
 @description("Insert a new version of a participant record (typically used to mark the participant as left).")
 mutate participant leaveSpace {
   args {
-    participantId  string  @required
-    payload        object  @required
+    participantId  string!
+    payload        object!
   }
   insert {
     id: args.participantId
@@ -477,8 +477,8 @@ mutate participant leaveSpace {
 @description("Remove the caller's agent from a space (status='left'). The engine guard enforces caller-owns-agent and rejects removal of the pinned owner GA.")
 mutate participant removeAgentFromSpace {
   args {
-    partitionId  string  @required
-    agentId  string  @required
+    partitionId  string!
+    agentId  string!
   }
   update {
     id: concat("si-", hash(concat(
@@ -554,13 +554,13 @@ mutate participant removeAgentFromSpace {
 mutate utterance sendActionUtterance {
   args {
     utteranceId      string
-    partitionId          string  @required
-    participantId    string  @required
+    partitionId          string!
+    participantId    string!
     participantType  string
     replyToId        string
     source           object
     createdAt        string
-    action           object  @required
+    action           object!
   }
   insert {
     id: coalesce(
@@ -609,9 +609,9 @@ mutate utterance sendRealtimeTranscriptUtterance {
     utteranceId      string
     idempotencyKey   string
     createdAt        string
-    partitionId          string  @required
-    participantId    string  @required
-    participantType  string  @enum("human", "si", "system")
+    partitionId          string!
+    participantId    string!
+    participantType  enum("human", "si", "system")
     text             string
     audioId          string
     videoId          string
@@ -670,8 +670,8 @@ mutate utterance sendRealtimeTranscriptUtterance {
 mutate utterance sendSpeechUtterance {
   args {
     utteranceId      string
-    partitionId          string  @required
-    participantId    string  @required
+    partitionId          string!
+    participantId    string!
     participantType  string
     text             string
     audioId          string
@@ -713,10 +713,10 @@ mutate utterance sendSpeechUtterance {
 mutate utterance sendTextUtterance {
   args {
     utteranceId      string
-    partitionId          string  @required
-    participantId    string  @required
+    partitionId          string!
+    participantId    string!
     participantType  string
-    text             string  @required
+    text             string!
     replyToId        string
     source           object
     citations        []object
@@ -758,9 +758,9 @@ mutate utterance sendTextUtterance {
 @description("Set the per-session audio control mode for an agent in a space.")
 mutate audioOverride setAgentAudioOverride {
   args {
-    partitionId  string  @required
-    agentId  string  @required
-    mode     string  @required
+    partitionId  string!
+    agentId  string!
+    mode     string!
     setBy    string
     active   bool
   }
@@ -813,9 +813,9 @@ mutate audioOverride setAgentAudioOverride {
 @description("Set the per-session video control mode for an agent in a space.")
 mutate videoOverride setAgentVideoOverride {
   args {
-    partitionId  string  @required
-    agentId  string  @required
-    mode     string  @required
+    partitionId  string!
+    agentId  string!
+    mode     string!
     setBy    string
     active   bool
   }
@@ -851,8 +851,8 @@ mutate videoOverride setAgentVideoOverride {
 @description("Update an auth-session record (typically a heartbeat to bump lastActivityAt). Read-merges the existing row (update()): only the fields in `payload` change; the @required discriminators (subject, tokenHash, source, expiresAt) and every other omitted field inherit from the persisted row instead of having to be re-supplied (memql#1628). The session row must already exist.")
 mutate authSession touchSession {
   args {
-    sessionId  string  @required
-    payload    object  @required
+    sessionId  string!
+    payload    object!
   }
   update {
     id: args.sessionId
@@ -872,10 +872,10 @@ mutate authSession touchSession {
 mutate presence updateParticipantPresence {
   args {
     presenceId       string
-    participantId    string  @required
-    partitionId          string  @required
-    state            string  @required  @enum("idle", "listening", "thinking", "typing", "responding", "working", "waiting", "needs_human", "needs_clarification", "paused", "error", "using_tool", "researching", "investigating")
-    label            string  @required
+    participantId    string!
+    partitionId          string!
+    state            enum("idle", "listening", "thinking", "typing", "responding", "working", "waiting", "needs_human", "needs_clarification", "paused", "error", "using_tool", "researching", "investigating")!
+    label            string!
     reason           string
     sinceAt          string
     lastUpdatedAt    string
@@ -918,8 +918,8 @@ mutate presence updateParticipantPresence {
 @description("Update a participant record (typically status). Read-merges the existing row (update()): only the fields in `payload` change; every omitted field inherits from the persisted row instead of being wiped (memql#1628 class). The participant row must already exist (created on join).")
 mutate participant updateParticipantStatus {
   args {
-    participantId  string  @required
-    payload        object  @required
+    participantId  string!
+    payload        object!
   }
   update {
     id: args.participantId
@@ -938,8 +938,8 @@ mutate participant updateParticipantStatus {
 @description("Update a session record's device state. Read-merges the existing row (update()): only the fields in `payload` change; the @required fields (participantId, partitionId, ...) and every other omitted field inherit from the persisted row instead of being wiped (memql#1628). The session row must already exist.")
 mutate session updateSessionDevices {
   args {
-    sessionId  string  @required
-    payload    object  @required
+    sessionId  string!
+    payload    object!
   }
   update {
     id: args.sessionId
@@ -958,8 +958,8 @@ mutate session updateSessionDevices {
 @description("Update a session record's stream state. Read-merges the existing row (update()): only the fields in `payload` change; the @required fields (participantId, partitionId, ...) and every other omitted field inherit from the persisted row instead of being wiped (memql#1628). The session row must already exist.")
 mutate session updateSessionStreams {
   args {
-    sessionId  string  @required
-    payload    object  @required
+    sessionId  string!
+    payload    object!
   }
   update {
     id: args.sessionId

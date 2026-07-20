@@ -6,7 +6,7 @@
 @description("Recent persisted policy traces for the named policy, most-recent first.")
 query policyTrace policyTracesForPolicy {
   args {
-    policyName  string  @required
+    policyName  string!
   }
   filter  policyName==args.policyName
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
@@ -67,7 +67,7 @@ query policyTrace allPolicyTraces {
 @unbounded("global variable by unique name -- bounded to a single row")
 query globalVariable globalVariable {
   args {
-    name  string  @required
+    name  string!
   }
   filter  name==args.name && isActiveRecord
   shape   variableFull
@@ -99,7 +99,7 @@ query globalVariable globalVariable {
 @unbounded("global variables by the requested name set -- bounded by the caller's name list")
 query globalVariable globalVariables {
   args {
-    names  array  @required
+    names  array!
   }
   filter  name in args.names && isActiveRecord
   shape   variableFull
@@ -154,7 +154,7 @@ query globalVariable userDefaults {
 @description("Per Q7: list missingCapability rows by status, sorted by sightingCount desc. Backs the platform-roadmap prioritization view -- 'most-requested capabilities that the platform doesn't yet support'. Status filter: 'open' for active backlog, 'in_progress' / 'resolved' / 'wontfix' for the audit view.")
 query missingCapability missingCapabilitiesByStatus {
   args {
-    status  string  @required
+    status  string!
   }
   filter  status==args.status
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
@@ -169,8 +169,8 @@ query missingCapability missingCapabilitiesByStatus {
 @unbounded("missing capability by (kind,name) -- bounded to a single row")
 query missingCapability missingCapabilityByKindAndName {
   args {
-    kind        string  @required
-    capability  string  @required
+    kind        string!
+    capability  string!
   }
   filter  kind==args.kind && capability==args.capability
   shape   missingCapabilityFull
@@ -181,7 +181,7 @@ query missingCapability missingCapabilityByKindAndName {
 @description("Outbound requests in a given delivery status, oldest first (memql#2521). The outbound worker drains 'pending' and 'retrying' through this; operators and products use it to audit delivery state. Bounded first page: the worker drains batches per poll, so a burst larger than one page simply takes extra polls.")
 query outboundRequest outboundRequestsByStatus {
   args {
-    status  string  @required
+    status  string!
   }
   filter  status==args.status
   sort     "createdAt", "asc"

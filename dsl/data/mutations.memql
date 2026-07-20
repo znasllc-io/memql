@@ -6,10 +6,10 @@
 @description("Synthetically check a data record, updating check count and validation state")
 mutate record checkRecord {
   args {
-    recordId       string  @required
-    identityId     string  @required
-    newCheckCount  number  @required
-    newState       string  @required
+    recordId       string!
+    identityId     string!
+    newCheckCount  number!
+    newState       string!
   }
   update {
     id: args.recordId
@@ -47,10 +47,10 @@ mutate record checkRecord {
 @description("Human confirm a data record, updating confirm count and validation state")
 mutate record confirmRecord {
   args {
-    recordId         string  @required
-    identityId       string  @required
-    newConfirmCount  number  @required
-    newState         string  @required
+    recordId         string!
+    identityId       string!
+    newConfirmCount  number!
+    newState         string!
   }
   update {
     id: args.recordId
@@ -100,13 +100,13 @@ mutate record confirmRecord {
 @description("Create a data record in draft validation state awaiting check and confirmation")
 mutate record createRecord {
   args {
-    recordId            string  @required
-    partitionId             string  @required
-    recordType          string  @required
-    label               string  @required
-    data                object  @required
-    importSource        string  @required
-    importedBy          string  @required
+    recordId            string!
+    partitionId             string!
+    recordType          string!
+    label               string!
+    data                object!
+    importSource        string!
+    importedBy          string!
     naturalKeyField     string
     naturalKeyValue     string
     sourceAttachmentId  string
@@ -166,13 +166,13 @@ mutate record createRecord {
 @description("Create a single data record from a batch import in draft validation state (called once per record)")
 mutate record createRecordBatch {
   args {
-    recordId            string  @required
-    partitionId             string  @required
-    recordType          string  @required
-    label               string  @required
-    data                object  @required
-    importSource        string  @required
-    importedBy          string  @required
+    recordId            string!
+    partitionId             string!
+    recordType          string!
+    label               string!
+    data                object!
+    importSource        string!
+    importedBy          string!
     sourceAttachmentId  string
     naturalKeyField     string
     naturalKeyValue     string
@@ -210,7 +210,7 @@ mutate record createRecordBatch {
 @description("Soft-delete a data record (sets active=false)")
 mutate record deleteRecord {
   args {
-    recordId  string  @required
+    recordId  string!
   }
   update {
     id: args.recordId
@@ -250,10 +250,10 @@ mutate record deleteRecord {
 @description("Revert a data record to a previous validation state with counter reset")
 mutate record revertRecord {
   args {
-    recordId      string  @required
-    toState       string  @required
-    checkCount    number  @required
-    confirmCount  number  @required
+    recordId      string!
+    toState       string!
+    checkCount    number!
+    confirmCount  number!
   }
   update {
     accept { checkCount, confirmCount }
@@ -295,8 +295,8 @@ mutate record revertRecord {
 @description("Create or update a validation policy for a record type")
 mutate policy setPolicy {
   args {
-    policyId               string  @required
-    targetRecordType       string  @required
+    policyId               string!
+    targetRecordType       string!
     partitionId                string
     requiredChecks         number
     requiredConfirmations  number
@@ -346,7 +346,7 @@ mutate policy setPolicy {
 @description("Update a data record (resets validation state to draft)")
 mutate record updateRecord {
   args {
-    recordId         string  @required
+    recordId         string!
     data             object
     label            string
     naturalKeyField  string

@@ -12,7 +12,7 @@ use common.traits.{ statusIsActive }
 @description("List v1:actions:candidate traces captured for a plan, newest-first by createdAt (owned tier). #1735.")
 query candidate actionCandidatesForPlan {
   args {
-    planId  string  @required
+    planId  string!
   }
   filter  planId == args.planId && ownerUserId == actor.userId
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
@@ -31,7 +31,7 @@ query candidate actionCandidatesForPlan {
 @unbounded("unique inputFingerprint dedupe probe scoped to the owner -- must see all matches")
 query action actionByInputFingerprint {
   args {
-    inputFingerprint  string  @required
+    inputFingerprint  string!
   }
   filter  inputFingerprint == args.inputFingerprint && statusIsActive && ownerUserId == actor.userId
   shape   actionFull
@@ -61,7 +61,7 @@ query surface surfacesForOwner {
 @unbounded("unique templateFingerprint dedupe probe scoped to the owner -- must see all matches")
 query action actionByTemplateFingerprint {
   args {
-    templateFingerprint  string  @required
+    templateFingerprint  string!
   }
   filter  templateFingerprint == args.templateFingerprint && statusIsActive && ownerUserId == actor.userId
   shape   actionFull
@@ -100,8 +100,8 @@ query action activeActionsForOwner {
 @description("Resolve a pinned v1:actions:action reference (id + version) for the calling owner -- pin-by-default resolution (Phase 5 #1740). Owned tier.")
 query action actionByIdAndVersion {
   args {
-    actionId  string  @required
-    version   int     @required
+    actionId  string!
+    version   int!
   }
   filter  id == args.actionId && version == args.version && ownerUserId == actor.userId
   shape   actionFull
@@ -112,7 +112,7 @@ query action actionByIdAndVersion {
 @description("Resolve a floating v1:actions:action reference by id (latest version) for the calling owner -- floating-ref resolution (#1758). Owned tier.")
 query action actionById {
   args {
-    actionId  string  @required
+    actionId  string!
   }
   filter  id == args.actionId && ownerUserId == actor.userId
   shape   actionFull
@@ -129,7 +129,7 @@ query action actionById {
 @executor("integration.actionSearch.searchActions")
 @args(profile="object")
 builtin searchActions {
-  text      string  @required
+  text      string!
   k         integer
   provider  string
 }

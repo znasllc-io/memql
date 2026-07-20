@@ -21,9 +21,9 @@ tool notesList {
 @description("Create a note for the user. Owned: the new note is owned by the caller (server-stamped). Pass a fresh unique noteId. title and tags are optional; body is required.")
 @mcp
 tool notesCreate {
-  noteId  string    @required @description("Fresh unique id for the new note, e.g. a UUID. The caller mints it so it can reference the created row immediately.")
+  noteId  string! @description("Fresh unique id for the new note, e.g. a UUID. The caller mints it so it can reference the created row immediately.")
   title   string    @description("Optional title / heading for the note.")
-  body    string    @required @description("The note's text content.")
+  body    string! @description("The note's text content.")
   tags    array     @description("Optional list of string tags for grouping / filtering.")
 }
 
@@ -32,8 +32,8 @@ tool notesCreate {
 @description("Update a note's fields (title / body / tags). Pass the full merged payload built from the current note (via notesList or notesSearch) plus the changed fields. Owned: ownership is re-enforced server-side and updatedAt is re-stamped.")
 @mcp
 tool notesUpdate {
-  noteId   string  @required @description("Id of the note to update.")
-  payload  object  @required @description("Full merged note payload with the changed fields applied (title, body, tags).")
+  noteId   string! @description("Id of the note to update.")
+  payload  object! @description("Full merged note payload with the changed fields applied (title, body, tags).")
 }
 
 @handler(type="query", query="query notesByTag(tag: \"$args.tag\")")
@@ -41,5 +41,5 @@ tool notesUpdate {
 @description("Search the caller's notes by tag -- returns every note carrying the given tag. Owned: only the caller's own notes are searched. Read-only. To find notes by body text, list / tag-search first and substring-match the bodies in your reasoning.")
 @mcp
 tool notesSearch {
-  tag  string  @required @description("Tag to search for. Returns the caller's notes that carry this tag.")
+  tag  string! @description("Tag to search for. Returns the caller's notes that carry this tag.")
 }

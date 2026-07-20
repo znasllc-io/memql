@@ -21,10 +21,10 @@ tool todosList {
 @description("Create a to-do for the user. Owned: the new to-do is owned by the caller (server-stamped). Pass a fresh unique todoId. dueAt (RFC3339), priority (low/medium/high), and sourceResponsibilityId are optional.")
 @mcp
 tool todosCreate {
-  todoId                  string  @required @description("Fresh unique id for the new to-do, e.g. a UUID. The caller mints it so it can reference the created row immediately.")
-  title                   string  @required @description("Short description of the task.")
+  todoId                  string! @description("Fresh unique id for the new to-do, e.g. a UUID. The caller mints it so it can reference the created row immediately.")
+  title                   string! @description("Short description of the task.")
   dueAt                   string  @description("Optional due date / time in RFC3339 (e.g. 2026-06-15T09:00:00Z).")
-  priority                string  @enum("low", "medium", "high") @description("Optional priority bucket.")
+  priority                enum("low", "medium", "high") @description("Optional priority bucket.")
   sourceResponsibilityId  string  @description("Optional id of the responsibility that spawned this to-do. Leave empty for user-created to-dos.")
 }
 
@@ -33,8 +33,8 @@ tool todosCreate {
 @description("Mark a to-do complete (or re-open it). Pass the full updated payload with the done flag set; build it from the current row (via todosList) and flip done. Owned: ownership is re-enforced server-side.")
 @mcp
 tool todosComplete {
-  todoId   string  @required @description("Id of the to-do to complete / re-open.")
-  payload  object  @required @description("Full updated to-do payload (title, done, dueAt, priority, sourceResponsibilityId). Set done=true to complete, false to re-open.")
+  todoId   string! @description("Id of the to-do to complete / re-open.")
+  payload  object! @description("Full updated to-do payload (title, done, dueAt, priority, sourceResponsibilityId). Set done=true to complete, false to re-open.")
 }
 
 @handler(type="query", query="mutation updateTodo(todoId: \"$args.todoId\", payload: $args.payload)")
@@ -42,6 +42,6 @@ tool todosComplete {
 @description("Update a to-do's fields (title / dueAt / priority). Pass the full merged payload built from the current row plus the changed fields. Owned: ownership is re-enforced server-side.")
 @mcp
 tool todosUpdate {
-  todoId   string  @required @description("Id of the to-do to update.")
-  payload  object  @required @description("Full merged to-do payload with the changed fields applied (title, done, dueAt, priority, sourceResponsibilityId).")
+  todoId   string! @description("Id of the to-do to update.")
+  payload  object! @description("Full merged to-do payload with the changed fields applied (title, done, dueAt, priority, sourceResponsibilityId).")
 }

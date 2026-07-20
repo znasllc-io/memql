@@ -10,7 +10,7 @@
 // every replica (this namespace is not in the default forward set).
 @unbounded("router budgets (optionally by scope) -- a small bounded config set consumed whole")
 @description("Returns all active budget rows for the current partition.")
-@cache(ttl="120")
+@cache(120)
 query budget routerBudgets {
   args {
     scope  string

@@ -105,12 +105,12 @@
 @description("Deploy the memQL ENGINE cluster to an environment (development | staging | production) on the cockpit/runner surface. Sequences clone -> build -> place (env switch) -> gate -> success/failure finish, recording the deployment lifecycle. Engine mesh ONLY -- no bff or product-carrier nodes.")
 automation deployEngineCluster {
   args {
-    deploymentId         string   @required
-    environment          string   @required @enum("development", "staging", "production")
-    engineNodeTypes      []string @required
-    ref                  string   @required
-    version              string   @required
-    workdir              string   @required
+    deploymentId         string!
+    environment          enum("development", "staging", "production")!
+    engineNodeTypes      []string!
+    ref                  string!
+    version              string!
+    workdir              string!
     overlayPath          string
     digests              object
     previousDeploymentId string

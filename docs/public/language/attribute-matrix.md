@@ -38,7 +38,7 @@ construct-specific (see the end of this document) or rejected.
 | `@permission("...")` | Yes | Yes | No | Require specific permission |
 | **Performance** |
 | `@timeout("30s")` | Yes | Yes | Yes | Maximum execution time |
-| `@cache(ttl="5m")` | Yes | No | No | Cache results for duration |
+| `@cache(300)` | Yes | No | No | Result-cache TTL in whole seconds; positional preferred (#2618), `ttl="300"` keeps parsing |
 | **Reliability** |
 | `@retry(count=3)` | No | Yes | Yes | Retry on failure |
 | `@idempotent` | No | Yes | No | Safe to retry without side effects |
@@ -185,12 +185,15 @@ Maximum execution time. Supports duration formats: `"30s"`, `"5m"`, `"1h"`.
 query record queryHeavyReport { ... }
 ```
 
-#### `@cache(ttl="...")`
-Cache query results for the specified duration. **Query only** -
-mutations and automations should not be cached.
+#### `@cache(N)`
+Cache query results for N whole seconds. **Query only** - mutations
+and automations should not be cached. Positional is preferred (#2618:
+the single ttl arg makes position unambiguous); the keyword form
+`@cache(ttl="300")` keeps parsing. Duration strings like "5m" were
+doc drift -- the engine reads whole seconds.
 
 ```memql
-@cache(ttl="5m")
+@cache(300)
 query nodeType queryNodeTypeCatalog { ... }
 ```
 

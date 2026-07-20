@@ -53,8 +53,8 @@ use capabilities.shell.{ script }
 @description("Check out a git repository at a specific ref on the deploy runner, so a build runs against a pinned version.")
 action cloneRepoAtVersion {
   args {
-    workdir string @required
-    ref     string @required
+    workdir string!
+    ref     string!
   }
   capability script(script: "deploy.cloneRepo", workdir: args.workdir, ref: args.ref)
 }
@@ -84,7 +84,7 @@ use capabilities.fs.{ readFile }
 @description("Read a deployment manifest off the surface so a later step can inspect it.")
 action readManifest {
   args {
-    path string @required
+    path string!
   }
   capability readFile(path: args.path)
 }
@@ -101,8 +101,8 @@ use capabilities.integration.github.{ tagRelease }
 @description("Cut a git tag + release on GitHub for the version that just deployed.")
 action tagReleaseExample {
   args {
-    repo    string @required
-    version string @required
+    repo    string!
+    version string!
   }
   capability tagRelease(repo: args.repo, tag: args.version)
 }

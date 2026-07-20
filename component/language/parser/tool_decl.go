@@ -131,6 +131,21 @@ func (p *Parser) parseToolFieldDecl(toolName string) (*ast.ToolFieldDecl, error)
 	field.Type = p.current.Literal
 	p.advance()
 
+	// First-class enum type + required sigil (#2618): the type form
+	// lands exactly where @enum's values land (field.EnumValues).
+	if field.Type == "enum" && p.check(TokenParenOpen) {
+		values, err := p.parseParenStringList("tool " + toolName + " field " + field.Name)
+		if err != nil {
+			return nil, err
+		}
+		field.Type = "string"
+		field.EnumValues = values
+	}
+	if p.check(TokenBang) {
+		p.advance()
+		field.Required = true
+	}
+
 	// Trailing annotations.
 	for p.check(TokenAt) {
 		attr, err := p.parseAttribute()
@@ -228,6 +243,14 @@ func attrStringListValue(attr *ast.Attribute) []string {
 func attrEnumValues(attr *ast.Attribute) []string {
 	if attr == nil {
 		return nil
+	}
+	// parseAttribute stores multiple comma-separated strings as
+	// []string -- the missing case here silently dropped every
+	// multi-value tool @enum from MCP inputSchemas until the #2618
+	// equivalence probe caught the constraint reappearing when the
+	// codemod switched those fields to the enum TYPE.
+	if vs, ok := attr.Value.([]string); ok {
+		return vs
 	}
 	if vs, ok := attr.Value.([]any); ok {
 		out := make([]string, 0, len(vs))

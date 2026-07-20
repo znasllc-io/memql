@@ -6,9 +6,9 @@
 @description("Approve an access request (status=approved, stamps reviewer + invitation).")
 mutate accessRequest approveAccessRequest {
   args {
-    requestId     string  @required
-    reviewedBy    string  @required
-    invitationId  string  @required
+    requestId     string!
+    reviewedBy    string!
+    invitationId  string!
     reviewerNote  string
   }
   update {
@@ -38,8 +38,8 @@ mutate accessRequest approveAccessRequest {
 @description("Bump the lastUsedAt stamp on a PAT identity. Best-effort; callers must not fail the request on error. Read-merges the existing row so only lastUsedAt changes; identityType/credentials/label/active/usableByAgents inherit from the persisted row instead of being re-supplied (memql#1628).")
 mutate identity bumpPATLastUsedAt {
   args {
-    identityId      string  @required
-    lastUsedAt      string  @required
+    identityId      string!
+    lastUsedAt      string!
   }
   update {
     id: args.identityId
@@ -68,7 +68,7 @@ mutate identity bumpPATLastUsedAt {
 @description("Stamp dataExportLastAt = now after a successful /me/export download.")
 mutate user bumpUserDataExport {
   args {
-    userId  string  @required
+    userId  string!
   }
   update {
     id: args.userId
@@ -107,8 +107,8 @@ mutate user bumpUserDataExport {
 @description("Stamp revocationEpoch on the user row. Bulk-revoke admin path for memql#106. Caller computes the +1 in Go.")
 mutate user bumpUserRevocationEpoch {
   args {
-    userId    string  @required
-    newEpoch  int     @required
+    userId    string!
+    newEpoch  int!
   }
   update {
     id: args.userId
@@ -145,7 +145,7 @@ mutate user bumpUserRevocationEpoch {
 @description("Cancel a scheduled account deletion (clears deletionScheduledAt).")
 mutate user cancelScheduledDeletion {
   args {
-    userId  string  @required
+    userId  string!
   }
   update {
     id: args.userId
@@ -179,7 +179,7 @@ mutate user cancelScheduledDeletion {
 @description("Mark an auth code consumed (stamps consumedAt = now).")
 mutate authCode consumeAuthCode {
   args {
-    codeId          string  @required
+    codeId          string!
     consumedFromIP  string
   }
   update {
@@ -213,7 +213,7 @@ mutate authCode consumeAuthCode {
 @description("Mark a magic-link request consumed (stamps consumedAt = now).")
 mutate magicLinkRequest consumeMagicLinkRequest {
   args {
-    requestId       string  @required
+    requestId       string!
     consumedFromIP  string
   }
   update {
@@ -252,8 +252,8 @@ mutate magicLinkRequest consumeMagicLinkRequest {
 @description("Create a self-service access request (waitlist row, status=pending).")
 mutate accessRequest createAccessRequest {
   args {
-    requestId          string  @required
-    email              string  @required
+    requestId          string!
+    email              string!
     name               string
     additionalContext  string
     riskScore          int
@@ -314,22 +314,22 @@ mutate accessRequest createAccessRequest {
 @description("Append a row to the append-only security audit log.")
 mutate auditEvent createAuditEvent {
   args {
-    eventId          string  @required
-    occurredAt       string  @required
-    category         string  @required  @enum("auth", "identity", "authorization", "configuration", "admin", "data")
-    action           string  @required
+    eventId          string!
+    occurredAt       string!
+    category         enum("auth", "identity", "authorization", "configuration", "admin", "data")!
+    action           string!
     actorUserId      string
     actorEmail       string
     actorRole        string
     actorIdentityId  string
-    targetType       string  @enum("user", "session", "identity", "invitation", "accessRequest", "config", "magicLinkRequest", "authCode", "clusterSettings")
+    targetType       enum("user", "session", "identity", "invitation", "accessRequest", "config", "magicLinkRequest", "authCode", "clusterSettings")
     targetId         string
     targetEmail      string
     detail           object
     sourceIP         string
     userAgent        string
     correlationId    string
-    outcome          string  @enum("success", "failure", "blocked")
+    outcome          enum("success", "failure", "blocked")
     failureReason    string
     prevEventHash    string
   }
@@ -385,18 +385,18 @@ mutate auditEvent createAuditEvent {
 @description("Mint a one-time OAuth authorization code from a consumed magic link.")
 mutate authCode createAuthCode {
   args {
-    codeId              string  @required
-    code                string  @required
-    codeHash            string  @required
-    clientId            string  @required
-    redirectURI         string  @required
+    codeId              string!
+    code                string!
+    codeHash            string!
+    clientId            string!
+    redirectURI         string!
     state               string
     codeChallenge       string
     codeChallengeMethod string
-    userId              string  @required
-    identityId          string  @required
-    magicLinkRequestId  string  @required
-    expiresAt           string  @required
+    userId              string!
+    identityId          string!
+    magicLinkRequestId  string!
+    expiresAt           string!
   }
   insert {
     accept { code, codeHash, clientId, redirectURI, userId, identityId, magicLinkRequestId, expiresAt }
@@ -441,13 +441,13 @@ mutate authCode createAuthCode {
 @description("Persist a dynamically-registered public OAuth client (RFC 7591).")
 mutate oauthClient createOAuthClient {
   args {
-    clientId                 string  @required
+    clientId                 string!
     clientName               string
-    redirectURIsJSON         string  @required
+    redirectURIsJSON         string!
     grantTypes               string
     responseTypes            string
     tokenEndpointAuthMethod  string
-    registeredAt             string  @required
+    registeredAt             string!
   }
   insert {
     accept { clientId, redirectURIsJSON, registeredAt }
@@ -491,14 +491,14 @@ mutate oauthClient createOAuthClient {
 @description("Create a bearer-token session record at issuance time.")
 mutate authSession createAuthSession {
   args {
-    sessionId    string  @required
-    subject      string  @required
-    tokenHash    string  @required
-    source       string  @required  @enum("bff_exchange", "oidc_cookie")
+    sessionId    string!
+    subject      string!
+    tokenHash    string!
+    source       enum("bff_exchange", "oidc_cookie")!
     userId       string
     identityId   string
     clientLabel  string
-    expiresAt    string  @required
+    expiresAt    string!
   }
   insert {
     accept { subject, tokenHash, source, expiresAt }
@@ -553,16 +553,16 @@ mutate authSession createAuthSession {
 @description("Persist (or refresh) the singleton cluster-settings row.")
 mutate clusterSettings createClusterSettings {
   args {
-    id                         string  @required
+    id                         string!
     clusterDomain              string
     brandName                  string
     brandPrimaryColor          string
     brandLogoDataURI           string
     brandIconDataURI           string
-    registrationMode           string  @required  @enum("open", "domain_restricted", "invite_only", "waitlist")
+    registrationMode           enum("open", "domain_restricted", "invite_only", "waitlist")!
     registrationDomains        string
     internalDomains            string
-    internalDefaultRole        string  @required  @enum("owner", "admin", "developer", "writer", "reader")
+    internalDefaultRole        enum("owner", "admin", "developer", "writer", "reader")!
     registeredClientsJSON      string
     accessRequestNotifyEmails  string
     bootstrapEmail             string
@@ -614,7 +614,7 @@ mutate clusterSettings createClusterSettings {
 @description("Flip the cluster-wide GLOBAL KILL SWITCH for planner-authored automations (epic memql#954, issue #961). Partial-update of the singleton cluster-settings row (id='cluster'): sets authoredAutomationsEnabled true (resume) or false (halt). false halts EVERY authored automation across the whole cluster -- the governance hard stop -- independent of any bundle status or per-user kill switch. Operator-only in practice (the admin settings surface calls it); the authored scheduler reads the flag through clusterSettingsCurrent on its global gate.")
 mutate clusterSettings setAuthoredAutomationsEnabled {
   args {
-    enabled  bool  @required
+    enabled  bool!
   }
   update {
     id: "cluster"
@@ -634,13 +634,13 @@ mutate clusterSettings setAuthoredAutomationsEnabled {
 mutate delegation createDelegation {
   args {
     delegationId      string
-    identityId        string    @required
-    identitySubject   string    @required
-    identityType      string    @required  @enum("human", "synthetic")
-    agentId           string    @required
-    roleCeiling       string    @required  @enum("owner", "admin", "developer", "writer", "reader")
-    scopes            []string  @required
-    createdBySubject  string    @required
+    identityId        string!
+    identitySubject   string!
+    identityType      enum("human", "synthetic")!
+    agentId           string!
+    roleCeiling       enum("owner", "admin", "developer", "writer", "reader")!
+    scopes            []string!
+    createdBySubject  string!
     expiresAt         string
     note              string
   }
@@ -681,10 +681,10 @@ mutate delegation createDelegation {
 @description("Create a new identity (credential set owned by a user).")
 mutate identity createIdentity {
   args {
-    identityId      string  @required
-    userId          string  @required
-    identityType    string  @required  @enum("oauth", "api_key", "service_account", "magic_link", "worker_token")
-    credentials     object  @required
+    identityId      string!
+    userId          string!
+    identityType    enum("oauth", "api_key", "service_account", "magic_link", "worker_token")!
+    credentials     object!
     label           string
     usableByAgents  bool
   }
@@ -727,10 +727,10 @@ mutate identity createIdentity {
 @description("Create a magic-link request row at issuance time.")
 mutate magicLinkRequest createMagicLinkRequest {
   args {
-    requestId     string  @required
-    email         string  @required
-    tokenHash     string  @required
-    expiresAt     string  @required
+    requestId     string!
+    email         string!
+    tokenHash     string!
+    expiresAt     string!
     sourceIP      string
     userAgent     string
     oauthCtxJSON  string
@@ -769,10 +769,10 @@ mutate magicLinkRequest createMagicLinkRequest {
 @description("Create a Personal Access Token identity (api_key) owned by a user. Stores only the SHA-256 hex hash; plaintext lives at the caller for one-time display.")
 mutate identity createPATIdentity {
   args {
-    identityId      string  @required
-    userId          string  @required
-    label           string  @required
-    keyHash         string  @required
+    identityId      string!
+    userId          string!
+    label           string!
+    keyHash         string!
     usableByAgents  bool
   }
   insert {
@@ -809,10 +809,10 @@ mutate identity createPATIdentity {
 @description("Create a new user (person / synthetic principal).")
 mutate user createUser {
   args {
-    userId        string  @required
-    displayName   string  @required
-    primaryEmail  string  @required
-    role          string  @enum("owner", "admin", "developer", "writer", "reader")
+    userId        string!
+    displayName   string!
+    primaryEmail  string!
+    role          enum("owner", "admin", "developer", "writer", "reader")
     groupIds      object
     preferences   object
   }
@@ -864,17 +864,17 @@ mutate user createUser {
 @description("Create a user record on first successful magic-link login.")
 mutate user createUserOnFirstLogin {
   args {
-    userId        string  @required
-    displayName   string  @required
+    userId        string!
+    displayName   string!
     firstName     string
     lastName      string
-    primaryEmail  string  @required
+    primaryEmail  string!
     phone         string
     primaryRole   string
     gender        string
     birthdate     string
-    role          string  @enum("owner", "admin", "developer", "writer", "reader")
-    internal      bool    @required
+    role          enum("owner", "admin", "developer", "writer", "reader")
+    internal      bool!
     groupIds      object
     preferences   object
   }
@@ -915,11 +915,11 @@ mutate user createUserOnFirstLogin {
 @description("Persist a worker-pairing-code row at creation time.")
 mutate workerPairingCode createWorkerPairingCode {
   args {
-    pairingId    string  @required
-    ownerUserId  string  @required
-    codeHash     string  @required
-    clusterURL   string  @required
-    expiresAt    string  @required
+    pairingId    string!
+    ownerUserId  string!
+    codeHash     string!
+    clusterURL   string!
+    expiresAt    string!
     sourceIP     string
   }
   insert {
@@ -955,11 +955,11 @@ mutate workerPairingCode createWorkerPairingCode {
 @description("Create a worker_token identity (machine credential for a memql-cockpit-worker). Stores only the SHA-256 hex hash; plaintext lives at the caller for one-time display.")
 mutate identity createWorkerTokenIdentity {
   args {
-    identityId              string  @required
-    userId                  string  @required
-    name                    string  @required
-    keyHash                 string  @required
-    registeredBy            string  @required
+    identityId              string!
+    userId                  string!
+    name                    string!
+    keyHash                 string!
+    registeredBy            string!
     capabilitiesAdvertised  array
     labelsAdvertised        object
     expiresAt               string
@@ -1010,12 +1010,12 @@ mutate identity createWorkerTokenIdentity {
 @description("Create a node_token identity (machine credential for a cluster-internal node binary). Stores only the SHA-256 hex hash; the actual credential is a class=node JWT.")
 mutate identity createNodeTokenIdentity {
   args {
-    identityId        string  @required
-    userId            string  @required
-    nodeId            string  @required
-    nodeType          string  @required
-    keyHash           string  @required
-    mintedBy          string  @required
+    identityId        string!
+    userId            string!
+    nodeId            string!
+    nodeType          string!
+    keyHash           string!
+    mintedBy          string!
     expiresAt         string
     bootstrappedAt    string
     bootstrappedFrom  string
@@ -1058,10 +1058,10 @@ mutate identity createNodeTokenIdentity {
 @description("Update audit fields on a node_token identity row when the bootstrap handler issues a fresh JWT for it. memql#343. Read-merges the existing row and deep-merges credentials (@mergeFields) so only the rotating keyHash + bootstrappedAt/bootstrappedFrom change; nodeId/nodeType/mintedBy/expiresAt/lastConnectAt inherit from the persisted row instead of being re-supplied or wiped (memql#1628).")
 mutate identity stampNodeTokenBootstrap {
   args {
-    identityId        string  @required
-    keyHash           string  @required
-    bootstrappedAt    string  @required
-    bootstrappedFrom  string  @required
+    identityId        string!
+    keyHash           string!
+    bootstrappedAt    string!
+    bootstrappedFrom  string!
   }
   update {
     id: args.identityId
@@ -1101,7 +1101,7 @@ mutate identity stampNodeTokenBootstrap {
 @description("Revoke a node_token identity by flipping active=false on the row. Read-merges the existing row so only `active` changes; the credentials block + every other field inherit from the persisted row instead of being re-supplied (memql#1628 -- replaces the old whole-replace restate-every-credentials-field pattern). memql#350.")
 mutate identity revokeNodeTokenIdentity {
   args {
-    identityId  string  @required
+    identityId  string!
   }
   update {
     id: args.identityId
@@ -1134,11 +1134,11 @@ mutate identity revokeNodeTokenIdentity {
 @description("Create a voice_agent_token identity (credential row for the Go voice-agent process). Plain JWT is returned by JWTIssuer.IssueVoiceAgentAccessToken; this row stores only the SHA-256 of an auxiliary random bearer for schema completeness + audit fingerprinting.")
 mutate identity createVoiceAgentTokenIdentity {
   args {
-    identityId  string  @required
-    userId      string  @required
-    instanceId  string  @required
-    keyHash     string  @required
-    mintedBy    string  @required
+    identityId  string!
+    userId      string!
+    instanceId  string!
+    keyHash     string!
+    mintedBy    string!
     expiresAt   string
     label       string
   }
@@ -1205,7 +1205,7 @@ mutate identity createVoiceAgentTokenIdentity {
 @description("Hard-delete (soft-delete + generic @pii scrub) a user after the deletion-cooldown sweep.")
 mutate user deleteUserHard {
   args {
-    userId  string  @required
+    userId  string!
   }
   update {
     id: args.userId
@@ -1234,7 +1234,7 @@ mutate user deleteUserHard {
 @description("Expire a pending access request (status=expired).")
 mutate accessRequest expireAccessRequest {
   args {
-    requestId  string  @required
+    requestId  string!
   }
   update {
     id: args.requestId
@@ -1272,8 +1272,8 @@ mutate accessRequest expireAccessRequest {
 @description("Replace a user's legalAcceptance array (caller must read-modify-write to append).")
 mutate user recordLegalAcceptance {
   args {
-    userId           string    @required
-    legalAcceptance  []object  @required
+    userId           string!
+    legalAcceptance  []object!
   }
   update {
     id: args.userId
@@ -1301,9 +1301,9 @@ mutate user recordLegalAcceptance {
 @description("Stamp a pairing-code row redeemed.")
 mutate workerPairingCode redeemWorkerPairingCode {
   args {
-    pairingId       string  @required
-    redeemedAt      string  @required
-    redeemedBy      string  @required
+    pairingId       string!
+    redeemedAt      string!
+    redeemedBy      string!
     redeemedFromIP  string
   }
   update {
@@ -1338,8 +1338,8 @@ mutate workerPairingCode redeemWorkerPairingCode {
 @description("Reject an access request (status=rejected, stamps reviewer + note).")
 mutate accessRequest rejectAccessRequest {
   args {
-    requestId     string  @required
-    reviewedBy    string  @required
+    requestId     string!
+    reviewedBy    string!
     reviewerNote  string
   }
   update {
@@ -1381,8 +1381,8 @@ mutate accessRequest rejectAccessRequest {
 @description("Mark a bearer-token session revoked. Read-merges the existing row so only revokedReason + revokedAt change; the discriminator fields (subject, tokenHash, source, expiresAt, userId) and the rotation bookkeeping inherit from the persisted row instead of being re-supplied (memql#1628).")
 mutate authSession revokeAuthSession {
   args {
-    sessionId      string  @required
-    revokedReason  string  @required  @enum("user_action", "all_sessions", "admin")
+    sessionId      string!
+    revokedReason  enum("user_action", "all_sessions", "admin")!
   }
   update {
     id: args.sessionId
@@ -1413,7 +1413,7 @@ mutate authSession revokeAuthSession {
 @description("Revoke a delegation: authoritatively flips active=false and stamps revokedAt/revokedBySubject regardless of caller input. Read-merges the persisted row so every other field is preserved (memql#1729).")
 mutate delegation revokeDelegation {
   args {
-    delegationId      string  @required
+    delegationId      string!
     revokedBySubject  string
     revokedAt         string
   }
@@ -1443,7 +1443,7 @@ mutate delegation revokeDelegation {
 @description("Soft-revoke a PAT identity (api_key) by flipping active=false. Read-merges the existing row so only `active` changes; identityType/credentials/label/usableByAgents inherit from the persisted row instead of being re-supplied (memql#1628).")
 mutate identity revokePATIdentity {
   args {
-    identityId  string  @required
+    identityId  string!
   }
   update {
     id: args.identityId
@@ -1468,7 +1468,7 @@ mutate identity revokePATIdentity {
 @description("Revoke (deactivate) a worker_token identity row.")
 mutate identity revokeWorkerTokenIdentity {
   args {
-    identityId  string  @required
+    identityId  string!
   }
   update {
     id: args.identityId
@@ -1494,11 +1494,11 @@ mutate identity revokeWorkerTokenIdentity {
 @description("Register a badge identity (shared-terminal operator credential). Stores only the SHA-256 hex hash of the badge/device id.")
 mutate identity createBadgeIdentity {
   args {
-    identityId    string  @required
-    userId        string  @required
-    label         string  @required
-    keyHash       string  @required
-    registeredBy  string  @required
+    identityId    string!
+    userId        string!
+    label         string!
+    keyHash       string!
+    registeredBy  string!
   }
   insert {
     id: args.identityId
@@ -1530,7 +1530,7 @@ mutate identity createBadgeIdentity {
 @description("Revoke (deactivate) a badge identity row. Future grant exchanges are blocked immediately; outstanding short-TTL grant tokens expire on their own.")
 mutate identity revokeBadgeIdentity {
   args {
-    identityId  string  @required
+    identityId  string!
   }
   update {
     id: args.identityId
@@ -1551,8 +1551,8 @@ mutate identity revokeBadgeIdentity {
 @description("Stamp credentials.lastUsedAt on a badge identity after a successful grant exchange. Best-effort; the grant succeeds even when this write fails.")
 mutate identity touchBadgeLastUsed {
   args {
-    identityId   string  @required
-    credentials  object  @required
+    identityId   string!
+    credentials  object!
   }
   update {
     id: args.identityId
@@ -1592,10 +1592,10 @@ mutate identity touchBadgeLastUsed {
 @description("Rotate refresh-token bookkeeping on a session after a successful refresh. Stores the old hash as previousRefreshTokenHash with a fresh previousRotatedAt timestamp so the rotator can accept that hash inside its grace window.")
 mutate authSession rotateAuthSession {
   args {
-    sessionId                 string  @required
-    newRefreshTokenHash       string  @required
-    previousRefreshTokenHash  string  @required
-    newExpiresAt              string  @required
+    sessionId                 string!
+    newRefreshTokenHash       string!
+    previousRefreshTokenHash  string!
+    newExpiresAt              string!
   }
   update {
     id: args.sessionId
@@ -1629,7 +1629,7 @@ mutate authSession rotateAuthSession {
 @description("Schedule the user for hard-deletion after the cooldown.")
 mutate user scheduleAccountDeletion {
   args {
-    userId  string  @required
+    userId  string!
   }
   update {
     id: args.userId
@@ -1667,7 +1667,7 @@ mutate user scheduleAccountDeletion {
 @description("Set or clear the caller's activePartitionId. Empty partitionId clears the pointer.")
 mutate user setUserActiveSpace {
   args {
-    userId         string  @required
+    userId         string!
     partitionId        string
     activePartitionId  string
   }
@@ -1704,16 +1704,16 @@ mutate user setUserActiveSpace {
 @description("Update the singleton cluster-settings row from the admin UI. Read-merges the existing row (update()): only the fields the caller actually passes change; every omitted field -- internalDomains, brand*, TTLs, bootstrap*, etc. -- inherits from the persisted row instead of being wiped to its empty default (memql#1686). registrationMode + internalDefaultRole stay @required because the admin form always submits them.")
 mutate clusterSettings updateClusterSettings {
   args {
-    id                         string  @required
+    id                         string!
     clusterDomain              string
     brandName                  string
     brandPrimaryColor          string
     brandLogoDataURI           string
     brandIconDataURI           string
-    registrationMode           string  @required  @enum("open", "domain_restricted", "invite_only", "waitlist")
+    registrationMode           enum("open", "domain_restricted", "invite_only", "waitlist")!
     registrationDomains        string
     internalDomains            string
-    internalDefaultRole        string  @required  @enum("owner", "admin", "developer", "writer", "reader")
+    internalDefaultRole        enum("owner", "admin", "developer", "writer", "reader")!
     registeredClientsJSON      string
     accessRequestNotifyEmails  string
     bootstrapEmail             string
@@ -1747,8 +1747,8 @@ mutate clusterSettings updateClusterSettings {
 @description("Update an identity record. Read-merges the existing row (update()): only the fields in `payload` change; every omitted field (identityType discriminator, credentials, label, active, usableByAgents) inherits from the persisted row instead of being wiped (memql#1628 class). The row must already exist (use createIdentity to create).")
 mutate identity updateIdentity {
   args {
-    identityId  string  @required
-    payload     object  @required
+    identityId  string!
+    payload     object!
   }
   update {
     id: args.identityId
@@ -1792,8 +1792,8 @@ mutate identity updateIdentity {
 @description("Partial update of a v1:identity:user row. Only the fields you pass are changed; other fields inherit from the prior row.")
 mutate user updateUser {
   args {
-    userId   string  @required
-    payload  object  @required
+    userId   string!
+    payload  object!
   }
   update {
     id: args.userId
@@ -1816,10 +1816,10 @@ mutate user updateUser {
 @description("Set (upsert) an account's task-concurrency entitlement (epic memql#902 / #903). Deterministic per-account id so each set appends a new version and the latest wins. Finite maxConcurrentTasks caps the account; <=0 or tier='enterprise' leaves it unlimited.")
 mutate accountEntitlement setAccountEntitlement {
   args {
-    accountId          string  @required
-    tier               string  @required @enum("free", "pro", "team", "enterprise")
+    accountId          string!
+    tier               enum("free", "pro", "team", "enterprise")!
     maxConcurrentTasks int
-    accountKind        string  @enum("user", "org")
+    accountKind        enum("user", "org")
     note               string
   }
   insert {

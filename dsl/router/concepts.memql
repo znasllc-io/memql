@@ -8,10 +8,10 @@ use agents.concepts.{ agent }
 @namespace("router")
 @description("Spend limit for a partition or a specific agent within a partition. The router checks the current-period spend against this cap before every AI call; over-budget calls are refused with a typed error that surfaces in the UI as a clear 'budget reached' state. Rolls over at periodType boundary (UTC day, week, or month).")
 concept budget {
-  scope            enum("partition", "agent")  @required  @description("Whether this budget caps the whole partition or a single agent.")
+  scope            enum("partition", "agent")!  @description("Whether this budget caps the whole partition or a single agent.")
   scopeId          string  @description("When scope=agent, the v1:agents:agent id being capped. Empty when scope=partition.")
-  periodType       enum("daily", "weekly", "monthly")  @required  @description("Budget window. Resets at UTC midnight / Monday / first-of-month.")
-  limitUSD         float   @required  @description("Maximum USD spend allowed during one period. The router refuses calls once ledger totals reach this figure.")
+  periodType       enum("daily", "weekly", "monthly")!  @description("Budget window. Resets at UTC midnight / Monday / first-of-month.")
+  limitUSD         float!  @description("Maximum USD spend allowed during one period. The router refuses calls once ledger totals reach this figure.")
   alertThresholdPct int    @description("Emit an alert event when spend crosses this percentage of the limit (e.g. 80 for early warning). 0 disables early alerts.")
   alertSent        bool    @default("false")  @description("True when the threshold alert for the current period has been emitted. Reset to false on period rollover.")
   resetAt          datetime  @description("The next UTC moment the period rolls over. The router uses this to decide whether to reset alertSent.")
@@ -23,7 +23,7 @@ concept budget {
 @namespace("router")
 @description("One AI invocation recorded by the memQL AI Router. Every call through the router -- agent replies, prompt renders, suggest endpoints, TTS, transcription -- produces exactly one row here with attribution, token counts, latency, and cost. Partition-scoped usage ledger; the time-series axis rides the shared MemoryNodes hypertable.")
 concept call {
-  requestId           string  @required  @description("Correlates this AI call to an upstream request -- cognition turn, suggest envelope, prompt invocation. Free-form string; uniqueness is not enforced across partitions.")
+  requestId           string!  @description("Correlates this AI call to an upstream request -- cognition turn, suggest envelope, prompt invocation. Free-form string; uniqueness is not enforced across partitions.")
   agentId             string  @description("Agent whose reply this call was generating; empty for non-agent AI calls (suggest, render, TTS, etc).")
   userId              string  @description("Identity subject of the end-user driving this call, when resolvable. Empty for system-triggered calls.")
   // Epic 3 3.2 (#1899): partitionId (a product-layer notion) dropped from the
@@ -33,9 +33,9 @@ concept call {
   promptName          string  @description("Name of the MemQL prompt invoked when the call went through InvokeAI (e.g. agentReply, cognitionRouting).")
   policyName          string  @description("Routing policy that picked the provider. Reserved for Phase 2+ when policies land; Phase 1 leaves this empty.")
 
-  vendor              string  @required  @description("Vendor family: openai or anthropic. Derived from provider .memql @type.")
-  model               string  @required  @description("Model identifier as sent to the vendor (e.g. gpt-5.4-mini, claude-sonnet-4-6).")
-  providerName        string  @required  @description("memQL provider registry name (e.g. stream54Mini, streamClaudeSonnet).")
+  vendor              string!  @description("Vendor family: openai or anthropic. Derived from provider .memql @type.")
+  model               string!  @description("Model identifier as sent to the vendor (e.g. gpt-5.4-mini, claude-sonnet-4-6).")
+  providerName        string!  @description("memQL provider registry name (e.g. stream54Mini, streamClaudeSonnet).")
 
   inputTokens         int     @description("Tokens in the input/prompt.")
   outputTokens        int     @description("Tokens generated in the output.")
@@ -49,11 +49,11 @@ concept call {
   pricingConfigured   bool    @description("True when the provider declared pricing annotations in its .memql file. False means cost fields are 0 because nobody has configured pricing yet, not because the call was free.")
 
   timeToFirstTokenMs  int     @description("Wall-clock ms from call start to first streamed token. 0 for non-streaming calls (chat, suggest, TTS).")
-  totalDurationMs     int     @required  @description("Wall-clock ms from call start to completion (success or error).")
+  totalDurationMs     int!  @description("Wall-clock ms from call start to completion (success or error).")
   tokensPerSec        float   @description("Output tokens per second for streaming calls (computed end-of-stream). 0 for non-streaming or too-short calls.")
   streaming           bool    @description("True when the call used a streaming provider path.")
 
-  outcome             enum("ok", "error", "cancelled", "fallback_used")  @required  @description("Final state of this call. `fallback_used` marks a failed pre-flight attempt in a policy chain whose successor succeeded (or failed and fell further).")
+  outcome             enum("ok", "error", "cancelled", "fallback_used")!  @description("Final state of this call. `fallback_used` marks a failed pre-flight attempt in a policy chain whose successor succeeded (or failed and fell further).")
   errorCategory       string  @description("Short classifier when outcome=error: timeout, rate_limit, auth, upstream, cancelled, other.")
   errorMessage        string  @description("Truncated error string for debugging (max 500 chars). Must not contain PII or secrets.")
   fallbackFromModel   string  @description("On outcome=fallback_used rows, the model that failed and triggered the retry. Empty on ok/error/cancelled rows.")

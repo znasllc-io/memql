@@ -60,7 +60,7 @@ use common.traits.{ statusIsActive }
 @description("Resolve a v1:forge:project by id.")
 query project projectById {
   args {
-    projectId  string  @required
+    projectId  string!
   }
   filter  id == args.projectId
   shape   projectFull
@@ -77,7 +77,7 @@ query project activeProjects {
 @description("Resolve a v1:forge:project by its stable slug (e.g. 'memql', 'acme-app'). Claude uses this to go from a human-supplied name to a projectId before submitting a request or filtering requests. Returns at most one row because slugs are unique within a partition.")
 query project projectBySlug {
   args {
-    slug  string  @required
+    slug  string!
   }
   filter  slug == args.slug
   shape   projectFull
@@ -97,7 +97,7 @@ query request myRequests {
 @description("Resolve a single v1:forge:request by id (detail view).")
 query request requestById {
   args {
-    requestId  string  @required
+    requestId  string!
   }
   filter  id == args.requestId
   shape   requestFull
@@ -106,7 +106,7 @@ query request requestById {
 @description("List requests by project, newest-first.")
 query request projectRequests {
   args {
-    projectId  string  @required
+    projectId  string!
   }
   filter  projectId == args.projectId
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
@@ -144,7 +144,7 @@ query request approvalQueue {
 @description("The full audit trail for a request, newest-first.")
 query requestEvent requestEvents {
   args {
-    requestId  string  @required
+    requestId  string!
   }
   filter  requestId == args.requestId
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over

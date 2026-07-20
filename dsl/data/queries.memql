@@ -7,9 +7,9 @@
 @description("Find confirmed records that may conflict with a new record by natural key + record type")
 query record detectConflicts {
   args {
-    partitionId  string  @required
-    naturalKeyValue  string  @required
-    recordType  string  @required
+    partitionId  string!
+    naturalKeyValue  string!
+    recordType  string!
   }
   filter  isConfirmed && partitionId==args.partitionId && recordType==args.recordType && naturalKeyValue==args.naturalKeyValue
   shape   recordFull
@@ -40,7 +40,7 @@ query record detectConflicts {
 @description("Returns the validation policy for a record type. Space-specific policies take precedence over global.")
 query policy policy {
   args {
-    targetRecordType  string  @required
+    targetRecordType  string!
     partitionId  string
   }
   filter  isActiveRecord && targetRecordType==args.targetRecordType && when(args.partitionId) { partitionId==args.partitionId }

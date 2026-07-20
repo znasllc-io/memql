@@ -7,12 +7,12 @@
 @args(profile="object")
 @description("Create a delegation granting an agent scoped authority to act on behalf of an identity.")
 builtin identityCreateDelegation {
-  identityId       string  @required
-  identitySubject  string  @required
-  identityType     string  @required
-  agentId          string  @required
-  roleCeiling      string  @required
-  scopes           object  @required
+  identityId       string!
+  identitySubject  string!
+  identityType     string!
+  agentId          string!
+  roleCeiling      string!
+  scopes           object!
   expiresAt        string
   note             string
 }
@@ -29,7 +29,7 @@ builtin identityCreateDelegation {
 @args(profile="object")
 @description("Resolve the active delegation chain for an agent subject. Returns the delegation record.")
 builtin identityResolveDelegation {
-  agentSubject  string  @required
+  agentSubject  string!
 }
 
 // ---- queries/v1/identity/builtin/builtinIdentityRevokeDelegation.memql ----
@@ -44,7 +44,7 @@ builtin identityResolveDelegation {
 @args(profile="object")
 @description("Revoke an existing delegation by ID, deactivating all scoped authority it granted.")
 builtin identityRevokeDelegation {
-  delegationId  string  @required
+  delegationId  string!
 }
 
 // ---- queries/v1/identity/builtin/builtinIdentityValidateScope.memql ----
@@ -59,6 +59,6 @@ builtin identityRevokeDelegation {
 @args(profile="object")
 @description("Check whether a delegation permits a specific operation. Returns boolean result.")
 builtin identityValidateScope {
-  delegationId  string  @required
-  operation     string  @required
+  delegationId  string!
+  operation     string!
 }

@@ -51,12 +51,12 @@ func nextRules() []NextRule {
 		{
 			Context: "inConceptBody",
 			Expect:  []string{"fieldName", "fieldType", "annotation"},
-			Doc:     "Inside a concept body: field declarations `<name> <type> [@annotations]` and @relationship links.",
+			Doc:     "Inside a concept body: field declarations `<name> <type>[!] [@annotations]` and @relationship links. The `!` sigil means required (#2618: preferred over @required, which keeps parsing); `enum(\"a\", \"b\")` is a first-class type.",
 		},
 		{
 			Context: "inArgsBlock",
 			Expect:  []string{"fieldName", "fieldType", "annotation"},
-			Doc:     "Inside an args { } block: `<name> <type> [@required] [@enum(...)] [@maxLength(N)] [@pattern(...)]`. (@description here is parsed and DISCARDED -- #2615; per-field docs arrive with /// doc comments, #2601. @default is rejected on an args field -- use coalesce(args.X, ...) or the `args.X ?? fallback` shorthand.)",
+			Doc:     "Inside an args { } block: `<name> <type>[!] [@maxLength(N)] [@pattern(...)]` -- the `!` sigil means required and `enum(\"a\", \"b\")` is a first-class type (#2618; @required and @enum keep parsing). (@description here is parsed and DISCARDED -- #2615; per-field docs arrive with /// doc comments, #2601. @default is rejected on an args field -- use coalesce(args.X, ...) or the `args.X ?? fallback` shorthand.)",
 		},
 		{
 			Context: "inWriteBlock",

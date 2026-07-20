@@ -20,7 +20,7 @@ query documentChunk allDocumentChunkDomains {
 @description("Every documentChunk attached to a knowledge domain, full shape. Consumed by the trainSpecialist dispatcher for the Trainer Agent's mode='refresh' existingCorpus (read-what's-there-now-to-decide-what-to-supersede).")
 query documentChunk documentChunksForDomain {
   args {
-    domainId  string  @required
+    domainId  string!
   }
   filter  domainId==args.domainId
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over

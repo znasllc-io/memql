@@ -7,7 +7,7 @@
 @unbounded("human participants in a space -- a bounded membership set consumed whole for routing")
 query participant activeHumanParticipants {
   args {
-    partitionId  string  @required
+    partitionId  string!
   }
   filter  partitionId==args.partitionId && participantType=="human" && statusIsActive
   shape   participantFull
@@ -55,7 +55,7 @@ query participant activeHumanParticipants {
 @description("Count utterances by an agent across ALL spaces in the current partition. Drives the agentIsKnownToUser signal.")
 query utterance agentInteractionCount {
   args {
-    agentId  string  @required
+    agentId  string!
   }
   filter  source.agentId==args.agentId && utteranceType in ["speech", "agentGreeting"] && isActiveRecord
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
@@ -126,7 +126,7 @@ query utterance agentInteractionCount {
 @unbounded("audio overrides for a space -- bounded by space participants, consumed whole")
 query audioOverride audioOverridesForSpace {
   args {
-    partitionId  string  @required
+    partitionId  string!
   }
   filter  partitionId==args.partitionId && isActiveRecord
   shape   audioOverrideFull
@@ -184,8 +184,8 @@ query audioOverride audioOverridesForSpace {
 @unbounded("the greeting utterance for (space,agent) -- bounded to a single row")
 query utterance greetingUtterance {
   args {
-    partitionId  string  @required
-    agentId  string  @required
+    partitionId  string!
+    agentId  string!
   }
   filter  partitionId==args.partitionId && source.agentId==args.agentId && source.kind in ["agentGreeting"] && isActiveRecord
   shape   utteranceFull
@@ -210,7 +210,7 @@ query utterance greetingUtterance {
 @unbounded("the feedback-announcement utterance for a plan -- bounded to a single row")
 query utterance feedbackAnnouncementForPlan {
   args {
-    planId  string  @required
+    planId  string!
   }
   filter  source.feedbackAnnouncePlanId==args.planId && isActiveRecord
   shape   utteranceFull
@@ -237,7 +237,7 @@ query utterance feedbackAnnouncementForPlan {
 @unbounded("the GA/assistant participant for a space -- bounded to a single row")
 query participant groupGAForSpace {
   args {
-    partitionId  string  @required
+    partitionId  string!
   }
   filter  partitionId==args.partitionId && participantType=="si" && statusIsActive
   shape   participantFull
@@ -263,8 +263,8 @@ query participant groupGAForSpace {
 @unbounded("existence probe for an AI response to a reply -- a dedupe gate bounded to a single row")
 query utterance hasAIResponseForReply {
   args {
-    replyToId  string  @required
-    participantId  string  @required
+    replyToId  string!
+    participantId  string!
   }
   filter  replyToId==args.replyToId && participantId==args.participantId
   shape   utteranceFull
@@ -304,8 +304,8 @@ query utterance hasAIResponseForReply {
 @unbounded("the participant for (space,agent) -- bounded to a single row")
 query participant participantByAgentSpace {
   args {
-    partitionId  string  @required
-    agentId  string  @required
+    partitionId  string!
+    agentId  string!
   }
   filter  partitionId==args.partitionId && agentId==args.agentId && status!="left"
   shape   participantFull
@@ -401,7 +401,7 @@ query session participantSession {
 @unbounded("the assistant participant for a space -- bounded to a single row")
 query participant siParticipantForSpace {
   args {
-    partitionId  string  @required
+    partitionId  string!
   }
   filter  partitionId==args.partitionId && participantType=="si" && statusIsActive
   shape   participantFull
@@ -437,7 +437,7 @@ query participant siParticipantForSpace {
 @unbounded("participants in a space -- a bounded membership roster consumed whole")
 query participant spaceParticipants {
   args {
-    partitionId          string  @required
+    partitionId          string!
     status           string
     participantType  string
   }
@@ -455,10 +455,10 @@ query participant spaceParticipants {
 // (created/updated/deleted) are forwarded cross-node in
 // component/node/routing.go so eviction fires on every replica.
 @description("Returns utterances for the given space. Optional participantId / utteranceType args narrow the result further. Used by the cockpit Chat tab to populate the utterance pane and by the BFF for downstream consumers.")
-@cache(ttl="30")
+@cache(30)
 query utterance spaceUtterances {
   args {
-    partitionId          string  @required
+    partitionId          string!
     participantId    string
     utteranceType    string
   }
@@ -487,7 +487,7 @@ query utterance spaceUtterances {
 @unbounded("video overrides for a space -- bounded by space participants, consumed whole")
 query videoOverride videoOverridesForSpace {
   args {
-    partitionId  string  @required
+    partitionId  string!
   }
   filter  partitionId==args.partitionId && isActiveRecord
   shape   videoOverrideFull
@@ -514,7 +514,7 @@ query videoOverride videoOverridesForSpace {
 @unbounded("presence rows for a space -- bounded by space participants, consumed whole")
 query presence spaceParticipantPresence {
   args {
-    partitionId  string  @required
+    partitionId  string!
   }
   filter  partitionId==args.partitionId
   shape   presenceFull

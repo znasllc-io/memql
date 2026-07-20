@@ -20,9 +20,9 @@
 @handler(type="function", name="telephonyPlaceCall")
 @executionTime("slow")
 tool placeCall {
-  to           string  @required @description("The phone number to call, in E.164 (e.g. +14155550100)")
-  from         string  @required @description("The caller-ID phone number to present, in E.164")
-  partitionId  string  @required @description("The tenant partition the call belongs to")
+  to           string! @description("The phone number to call, in E.164 (e.g. +14155550100)")
+  from         string! @description("The caller-ID phone number to present, in E.164")
+  partitionId  string! @description("The tenant partition the call belongs to")
   dtmf         string  @description("Optional digits to dial after the call connects")
 }
 
@@ -30,24 +30,24 @@ tool placeCall {
 @handler(type="function", name="telephonyEndCall")
 @executionTime("fast")
 tool endCall {
-  room      string  @required @description("The call's room")
-  identity  string  @required @description("The call's SIP participant identity")
+  room      string! @description("The call's room")
+  identity  string! @description("The call's SIP participant identity")
 }
 
 @description("Transfer an active phone call to another phone number.")
 @handler(type="function", name="telephonyTransferCall")
 @executionTime("fast")
 tool transferCall {
-  room      string  @required
-  identity  string  @required
-  to        string  @required @description("The phone number to transfer to, in E.164")
+  room      string!
+  identity  string!
+  to        string! @description("The phone number to transfer to, in E.164")
 }
 
 @description("Send DTMF tones (digits) to an active call to navigate phone menus / IVRs.")
 @handler(type="function", name="telephonySendDtmf")
 @executionTime("fast")
 tool sendDtmf {
-  room      string  @required
-  identity  string  @required
-  digits    string  @required @description("The digits to send, e.g. '1' or '0#'")
+  room      string!
+  identity  string!
+  digits    string! @description("The digits to send, e.g. '1' or '0#'")
 }

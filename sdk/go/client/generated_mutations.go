@@ -345,7 +345,7 @@ type ApplyResponsibilityIntakeArgs struct {
 	NotifyHow        string
 	// Enum: draft | active | paused | archived
 	Status string
-	// Enum:  | pending | awaitingAnswers | clear | applied
+	// Enum: pending | awaitingAnswers | clear | applied
 	IntakeStatus  string
 	IntakeRequest map[string]any
 }

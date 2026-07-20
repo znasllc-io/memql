@@ -18,23 +18,23 @@
 @description("Insert (or re-version) a Library artifact index row for a backing source concept. System / automation-invoked: ownerUserId is threaded from the backing row's owner because promotion runs server-side on the owner's behalf. Idempotent -- the id is derived from sourceConceptRef so re-promoting the same source versions the same row. Not a user-facing tool; the Library is populated automatically.")
 mutate artifact createArtifact {
   args {
-    sourceConceptRef  string  @required
-    ownerUserId       string  @required
-    lens              string  @required @enum("artifact", "record")
-    kind              string  @required @enum("document", "generated_output", "note", "todo", "calendar_event", "memory", "live_source")
-    source            string  @required @enum("uploaded", "workbench_generated", "computer_use", "agent_generated", "derived", "live")
-    title             string  @required
+    sourceConceptRef  string!
+    ownerUserId       string!
+    lens              enum("artifact", "record")!
+    kind              enum("document", "generated_output", "note", "todo", "calendar_event", "memory", "live_source")!
+    source            enum("uploaded", "workbench_generated", "computer_use", "agent_generated", "derived", "live")!
+    title             string!
     summary           string
-    format            string  @enum("markdown", "document", "pdf", "spreadsheet", "image", "text", "conversation", "other")
+    format            enum("markdown", "document", "pdf", "spreadsheet", "image", "text", "conversation", "other")
     mimeType          string
     live              bool
-    scope             string  @enum("workspace", "private")
+    scope             enum("workspace", "private")
     partitionId           string
     agentId           string
     producedByPlanId  string
     producedByWorkerId   string
     producedByWorkerName string
-    validationStatus  string  @enum("none", "unvalidated", "validated", "rejected", "partiallyValidated", "superseded")
+    validationStatus  enum("none", "unvalidated", "validated", "rejected", "partiallyValidated", "superseded")
   }
   insert {
     id: concat("artifact-", hash(args.sourceConceptRef))
@@ -67,15 +67,15 @@ mutate artifact createArtifact {
 @description("Create a generated-output row -- a deliverable PRODUCED through the app (workbench result, computer-use output, or standalone agent output). System / agent-invoked: ownerUserId is the producing user. indexGeneratedOutput folds the new row into the Library index automatically. body carries inline text outputs; attachmentId references file bytes for file-backed outputs.")
 mutate generatedOutput createGeneratedOutput {
   args {
-    outputId          string  @required
-    ownerUserId       string  @required
-    title             string  @required
+    outputId          string!
+    ownerUserId       string!
+    title             string!
     summary           string
     body              string
     attachmentId      string
-    format            string  @enum("markdown", "document", "pdf", "spreadsheet", "image", "text", "other")
+    format            enum("markdown", "document", "pdf", "spreadsheet", "image", "text", "other")
     mimeType          string
-    source            string  @required @enum("workbench_generated", "computer_use", "agent_generated", "derived")
+    source            enum("workbench_generated", "computer_use", "agent_generated", "derived")!
     partitionId           string
     producedByPlanId  string
     producedByAgentId string
@@ -94,11 +94,11 @@ mutate generatedOutput createGeneratedOutput {
 @description("Create a memory the assistant retains about the user. Owned: ownerUserId is stamped from actor.userId, so a memory can only ever be created for the acting user (or their delegated agent's bound user). indexMemory folds it into the Library Records lens automatically.")
 mutate memory createMemory {
   args {
-    memoryId           string  @required
-    title              string  @required
-    content            string  @required
+    memoryId           string!
+    title              string!
+    content            string!
     summary            string
-    kind               string  @enum("fact", "preference", "instruction", "episodic", "other")
+    kind               enum("fact", "preference", "instruction", "episodic", "other")
     agentId            string
     partitionId            string
     sourceUtteranceId  string
@@ -131,13 +131,13 @@ mutate memory createMemory {
 @description("Append an immutable document-version snapshot to a logical document's history. Handler-invoked (integration.library.editDocument / restoreDocumentVersion) -- ownerUserId is threaded from the backing document's owner, versionNumber + versionId are computed server-side from the current latest. Append-only: every call inserts a new immutable row; nothing is overwritten.")
 mutate documentVersion appendDocumentVersion {
   args {
-    versionId        string  @required
-    documentId       string  @required
-    ownerUserId      string  @required
-    versionNumber    int     @required
+    versionId        string!
+    documentId       string!
+    ownerUserId      string!
+    versionNumber    int!
     content          string
     attachmentId     string
-    authorKind       string  @required @enum("user", "assistant", "system")
+    authorKind       enum("user", "assistant", "system")!
     authorId         string
     note             string
     parentVersionId  string
@@ -175,15 +175,15 @@ mutate documentVersion appendDocumentVersion {
 @description("Re-insert a generatedOutput row (same id, new version) carrying the latest edited content so the Library viewer + artifact index reflect the most recent document version. Append-only by (id, createdAt): a new node version, reads return the latest. Handler-invoked by integration.library.editDocument / restoreDocumentVersion; ownerUserId is threaded from the existing row.")
 mutate generatedOutput updateGeneratedOutputContent {
   args {
-    outputId      string  @required
-    ownerUserId   string  @required
-    title         string  @required
+    outputId      string!
+    ownerUserId   string!
+    title         string!
     summary       string
     body          string
     attachmentId  string
-    format        string  @enum("markdown", "document", "pdf", "spreadsheet", "image", "text", "other")
+    format        enum("markdown", "document", "pdf", "spreadsheet", "image", "text", "other")
     mimeType      string
-    source        string  @required @enum("workbench_generated", "computer_use", "agent_generated", "derived")
+    source        enum("workbench_generated", "computer_use", "agent_generated", "derived")!
     partitionId       string
     producedByPlanId  string
     producedByAgentId string

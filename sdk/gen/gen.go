@@ -78,7 +78,7 @@ var (
 	//   docs from /// doc comments)
 	// Multiple lines per block.
 	argsFieldRe = regexp.MustCompile(
-		`(?m)^[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]+([A-Za-z_][A-Za-z0-9_]*|enum\([^)]*\)|\[\][A-Za-z_][A-Za-z0-9_]*)([ \t]+@[^\n]*)?[ \t]*$`,
+		`(?m)^[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]+([A-Za-z_][A-Za-z0-9_]*|enum\([^)]*\)|\[\][A-Za-z_][A-Za-z0-9_]*)(!?)([ \t]+@[^\n]*)?[ \t]*$`,
 	)
 	// Description annotation above a construct.
 	descRe = regexp.MustCompile(`(?m)^@description\("(.*?)"\)`)
@@ -482,11 +482,26 @@ func parseFields(inner string) []ArgField {
 	for _, fm := range argsFieldRe.FindAllStringSubmatch(inner, -1) {
 		name := fm[1]
 		typ := fm[2]
+		sigil := fm[3]
 		annotations := ""
-		if len(fm) > 3 {
-			annotations = fm[3]
+		if len(fm) > 4 {
+			annotations = fm[4]
 		}
 		af := ArgField{Name: name, Type: typ}
+		// The required sigil and the first-class enum type (#2618) --
+		// same representation the engine parsers produce: sigil means
+		// required, enum("a","b") means string + the value set.
+		if sigil == "!" {
+			af.Required = true
+		}
+		if strings.HasPrefix(typ, "enum(") && strings.HasSuffix(typ, ")") {
+			af.Type = "string"
+			for _, raw := range strings.Split(typ[len("enum("):len(typ)-1], ",") {
+				if v := strings.Trim(strings.TrimSpace(raw), `"`); v != "" {
+					af.Enum = append(af.Enum, v)
+				}
+			}
+		}
 		if strings.Contains(annotations, "@required") {
 			af.Required = true
 		}

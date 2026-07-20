@@ -6,12 +6,12 @@
 @description("Persist a provisioned DID. Called after a carrier BuyNumber succeeds.")
 mutate number recordNumber {
   args {
-    e164         string  @required
-    carrier      string  @required
-    partitionId  string  @required
-    purpose      string  @enum("inbound", "outbound", "both")
+    e164         string!
+    carrier      string!
+    partitionId  string!
+    purpose      enum("inbound", "outbound", "both")
     providerId   string
-    numberType   string  @enum("local", "tollfree", "mobile")
+    numberType   enum("local", "tollfree", "mobile")
     monthlyCost  float
   }
   insert {
@@ -29,8 +29,8 @@ mutate number recordNumber {
 @description("Update a DID's lifecycle status (e.g. on release).")
 mutate number updateNumberStatus {
   args {
-    id      string  @required
-    status  string  @required @enum("active", "releasing", "released")
+    id      string!
+    status  enum("active", "releasing", "released")!
   }
   update {
     accept { id, status }
@@ -40,8 +40,8 @@ mutate number updateNumberStatus {
 @description("Persist a LiveKit SIP trunk configuration. secretRef points at external-secrets, never a secret value.")
 mutate trunk recordTrunk {
   args {
-    carrier        string  @required
-    direction      string  @required @enum("inbound", "outbound", "both")
+    carrier        string!
+    direction      enum("inbound", "outbound", "both")!
     name           string
     livekitTrunkId string
     sipEdgeUri     string
@@ -58,16 +58,16 @@ mutate trunk recordTrunk {
 @description("Write an append-only call record. A completed leg writes one row with the real duration + disposition; durationSeconds/disposition default to an in-progress row when omitted (Amendment A: bound to partition + partition-scoped room).")
 mutate call recordCall {
   args {
-    direction       string  @required @enum("inbound", "outbound")
-    fromE164        string  @required
-    toE164          string  @required
-    partitionId     string  @required
-    room            string  @required
+    direction       enum("inbound", "outbound")!
+    fromE164        string!
+    toE164          string!
+    partitionId     string!
+    room            string!
     carrier         string
     providerCallId  string
     agentId         string
     durationSeconds int
-    disposition     string  @enum("in_progress", "completed", "no_answer", "busy", "failed", "canceled")
+    disposition     enum("in_progress", "completed", "no_answer", "busy", "failed", "canceled")
     costEstimate    float
   }
   insert {
@@ -84,9 +84,9 @@ mutate call recordCall {
 @description("Close a call record on disconnect: stamp end time, duration, disposition, and cost estimate.")
 mutate call closeCall {
   args {
-    id              string  @required
-    durationSeconds int     @required
-    disposition     string  @required @enum("completed", "no_answer", "busy", "failed", "canceled")
+    id              string!
+    durationSeconds int!
+    disposition     enum("completed", "no_answer", "busy", "failed", "canceled")!
     costEstimate    float
   }
   update {
@@ -101,9 +101,9 @@ mutate call closeCall {
 @description("Record TCPA consent / opt-out for an external number (append-only; newest wins).")
 mutate consent setConsent {
   args {
-    phoneNumber  string  @required
-    partitionId  string  @required
-    status       string  @required @enum("opted_in", "opted_out")
+    phoneNumber  string!
+    partitionId  string!
+    status       enum("opted_in", "opted_out")!
     reason       string
     source       string
   }
@@ -115,8 +115,8 @@ mutate consent setConsent {
 @description("Set E911 / caller-ID verification state on an owned DID (by row id).")
 mutate number setNumberE911 {
   args {
-    id               string  @required
-    e911Registered   bool @required
+    id               string!
+    e911Registered   bool!
     e911AddressId    string
     callerIdVerified bool
   }

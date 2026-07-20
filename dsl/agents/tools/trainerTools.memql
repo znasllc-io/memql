@@ -28,7 +28,7 @@
 @executionTime("medium")
 @description("Issue a web search. Returns a list of {url, title, snippet}. Use this to discover authoritative primary sources for the training topic before fetching them. STUB: no web-search provider is wired in-repo yet -- the call returns an empty result set with a note. Fall back to fetchUrl on URLs you already know.")
 tool webSearch {
-  query        string   @required @description("The search query. Be specific -- name the topic + the kind of source you want (e.g. 'GAAP revenue recognition ASC 606 official guidance').")
+  query        string! @description("The search query. Be specific -- name the topic + the kind of source you want (e.g. 'GAAP revenue recognition ASC 606 official guidance').")
   num_results  integer  @default("5") @description("Max results to return. Default 5.")
 }
 
@@ -37,7 +37,7 @@ tool webSearch {
 @executionTime("medium")
 @description("Fetch and extract readable content from a URL. Returns {url, status, contentType, text, truncated}. Read more than you write -- pull the primary source, then distill it into grounded chunks via writeKnowledgeChunk with the URL as the sourceRef.")
 tool fetchUrl {
-  url  string  @required @description("The absolute URL to fetch (http/https). Must be a real, consultable source -- its URL becomes the chunk's sourceRef.")
+  url  string! @description("The absolute URL to fetch (http/https). Must be a real, consultable source -- its URL becomes the chunk's sourceRef.")
 }
 
 @handler(type="function", name="writeKnowledgeChunk")
@@ -45,10 +45,10 @@ tool fetchUrl {
 @executionTime("fast")
 @description("Persist a distilled knowledge chunk into the target domain. source is hard-stamped 'trainerAgent' and the chunk lands validated (canonical). sourceRef is REQUIRED and MUST point at a real URL or named source you consulted -- no fabricated citations.")
 tool writeKnowledgeChunk {
-  chunkId      string   @required @description("Stable chunk id. Use a deterministic id (e.g. a hash of domainId+sourceRef+seq) so re-runs are idempotent.")
-  domainId     string   @required @description("Target v1:knowledge:knowledgeDomain id -- the one domain this Plan trains against (from the Plan input).")
-  text         string   @required @description("The chunk text. Plain, self-contained, grounded in the cited source.")
-  sourceRef    string   @required @description("Where the chunk came from, e.g. 'url:https://...'. The Trainer's no-fabricated-citations invariant: every chunk points at a real consulted source.")
+  chunkId      string! @description("Stable chunk id. Use a deterministic id (e.g. a hash of domainId+sourceRef+seq) so re-runs are idempotent.")
+  domainId     string! @description("Target v1:knowledge:knowledgeDomain id -- the one domain this Plan trains against (from the Plan input).")
+  text         string! @description("The chunk text. Plain, self-contained, grounded in the cited source.")
+  sourceRef    string! @description("Where the chunk came from, e.g. 'url:https://...'. The Trainer's no-fabricated-citations invariant: every chunk points at a real consulted source.")
   seq          integer  @default("0") @description("Order within this training run (0-based).")
   tokenCount   integer  @default("0") @description("Approximate token count (chars/4 heuristic) for context-budgeting.")
   sourceTopic  string   @description("The narrow topic this chunk covers. Groups all chunks from one training run together in the Knowledge panel.")
@@ -59,8 +59,8 @@ tool writeKnowledgeChunk {
 @executionTime("fast")
 @description("Flag an existing chunk as outdated (mode='refresh' only). Sets superseded=true so retrieval stops surfacing it; the row is preserved for audit. Pair with a fresh writeKnowledgeChunk when you have replacement content.")
 tool markChunkSuperseded {
-  chunkId       string  @required @description("Id of the existing chunk to deprecate (from the existingCorpus you were given).")
-  supersededAt  string  @required @description("RFC3339 timestamp of when you marked it outdated (use `now`).")
+  chunkId       string! @description("Id of the existing chunk to deprecate (from the existingCorpus you were given).")
+  supersededAt  string! @description("RFC3339 timestamp of when you marked it outdated (use `now`).")
   reason        string  @description("Why it's outdated, e.g. 'superseded by 2026 figures', 'source page removed'.")
 }
 
@@ -69,5 +69,5 @@ tool markChunkSuperseded {
 @executionTime("fast")
 @description("Embed a chunk you just wrote so it becomes semantically retrievable (#645). Resolves the chunk text, computes a vector, and writes it to the vector index. Idempotent -- calling it twice on the same chunk is harmless. Call it after each writeKnowledgeChunk so the corpus is immediately searchable.")
 tool embedChunk {
-  chunkId  string  @required @description("Id of the chunk to embed (from a prior writeKnowledgeChunk call).")
+  chunkId  string! @description("Id of the chunk to embed (from a prior writeKnowledgeChunk call).")
 }

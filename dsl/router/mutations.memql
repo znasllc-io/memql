@@ -6,15 +6,15 @@
 @description("Record a single AI call through the memQL AI Router. Writes one v1:router:call row per call for observability, usage reporting, and cost attribution.")
 mutate call recordRouterCall {
   args {
-    callId              string  @required
-    requestId           string  @required
+    callId              string!
+    requestId           string!
     agentId             string
     userId              string
     promptName          string
     policyName          string
-    vendor              string  @required
-    model               string  @required
-    providerName        string  @required
+    vendor              string!
+    model               string!
+    providerName        string!
     inputTokens         int
     outputTokens        int
     cachedInputTokens   int
@@ -25,10 +25,10 @@ mutate call recordRouterCall {
     totalCost           float
     pricingConfigured   bool
     timeToFirstTokenMs  int
-    totalDurationMs     int     @required
+    totalDurationMs     int!
     tokensPerSec        float
     streaming           bool
-    outcome             string  @required
+    outcome             string!
     errorCategory       string
     errorMessage        string
     fallbackFromModel   string
@@ -52,11 +52,11 @@ mutate call recordRouterCall {
 @description("Create or update a budget cap. Scope 'partition' covers all agents; scope 'agent' targets one v1:agents:agent by scopeId.")
 mutate budget setBudget {
   args {
-    id                 string  @required
-    scope              string  @required
+    id                 string!
+    scope              string!
     scopeId            string
-    periodType         string  @required
-    limitUSD           float   @required
+    periodType         string!
+    limitUSD           float!
     alertThresholdPct  int
     resetAt            string
     active             bool

@@ -19,8 +19,8 @@
 @description("Fetch a single v1:common:attachment row by id within a space. Backs the attachment download endpoint (GET /spaces/{partitionId}/attachments/{attachmentId}); the handler gates on space ownership first.")
 query attachment attachmentById {
   args {
-    attachmentId  string  @required
-    partitionId       string  @required
+    attachmentId  string!
+    partitionId       string!
   }
   filter  when(args.attachmentId) { id==args.attachmentId } && partitionId==args.partitionId
   shape   attachmentDownload
@@ -46,7 +46,7 @@ query attachment attachmentById {
 @description("Returns v1:common:media rows attached to a space. Optional mediaType filter narrows to audio / video / image / document. The frontend's useMedia hook calls this for the per-space attachments view.")
 query media spaceMedia {
   args {
-    partitionId    string  @required @pattern("^v1:[a-z0-9]+:[a-z0-9_]+:[a-zA-Z0-9_-]{1,128}$")
+    partitionId    string! @pattern("^v1:[a-z0-9]+:[a-z0-9_]+:[a-zA-Z0-9_-]{1,128}$")
     mediaType  string
   }
   filter  partitionId==args.partitionId && when(args.mediaType) { mediaType==args.mediaType }

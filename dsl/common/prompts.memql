@@ -8,5 +8,5 @@
 @description("Summarize a document in 2-3 sentences for a business user.")
 prompt docSummary {
   title    string
-  content  string  @required
+  content  string!
 }

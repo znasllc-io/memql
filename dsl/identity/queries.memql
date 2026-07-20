@@ -30,7 +30,7 @@
 @unbounded("entitlements for an account -- a small bounded set per account consumed whole")
 query accountEntitlement accountEntitlement {
   args {
-    accountId  string  @required
+    accountId  string!
   }
   filter  accountId==args.accountId
   shape   accountEntitlementFull
@@ -57,7 +57,7 @@ query accountEntitlement accountEntitlement {
 @unbounded("access request by id (guarded) -- bounded to a single row")
 query accessRequest accessRequestById {
   args {
-    requestId  string  @required
+    requestId  string!
   }
   filter  when(args.requestId) { id==args.requestId }
   shape   accessRequestFull
@@ -85,7 +85,7 @@ query accessRequest accessRequestById {
 @unbounded("active delegations for an agent -- a small bounded set consumed whole for authz")
 query delegation activeDelegationsForAgent {
   args {
-    agentId  string  @required
+    agentId  string!
   }
   filter  agentId==args.agentId && isActiveRecord
   shape   delegationFull
@@ -119,7 +119,7 @@ query delegation activeDelegationsForAgent {
 @unbounded("active delegations for an identity subject -- a small bounded set consumed whole for authz")
 query delegation activeDelegationsByIdentitySubject {
   args {
-    identitySubject  string  @required
+    identitySubject  string!
   }
   filter  identitySubject==args.identitySubject && isActiveRecord
   shape   delegationFull
@@ -204,7 +204,7 @@ query user searchUsers {
 @description("Audit events where actorUserId equals the supplied userId. Pair with auditEventsByTarget for full per-user history (no OR operator in the filter grammar yet).")
 query auditEvent auditEventsByActor {
   args {
-    userId  string  @required
+    userId  string!
   }
   filter  actorUserId==args.userId
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
@@ -245,7 +245,7 @@ query auditEvent auditEventsByActor {
 @description("Audit events where targetId equals the supplied targetId. Pair with auditEventsByActor for full per-user history (no OR operator in the filter grammar yet).")
 query auditEvent auditEventsByTarget {
   args {
-    targetId  string  @required
+    targetId  string!
   }
   filter  targetId==args.targetId
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
@@ -283,7 +283,7 @@ query auditEvent auditEventsByTarget {
 @unbounded("auth code by unique codeHash -- a credential lookup bounded to a single row")
 query authCode authCodeByCodeHash {
   args {
-    codeHash  string  @required
+    codeHash  string!
   }
   filter  codeHash==args.codeHash
   shape   authCodeFull
@@ -315,7 +315,7 @@ query authCode authCodeByCodeHash {
 @unbounded("oauth client by unique clientId -- bounded to a single row")
 query oauthClient oAuthClientByClientId {
   args {
-    clientId  string  @required
+    clientId  string!
   }
   filter  clientId==args.clientId
   shape   oauthClientFull
@@ -352,7 +352,7 @@ query oauthClient oAuthClientByClientId {
 @unbounded("auth session by unique previousRefreshTokenHash -- a credential lookup bounded to a single row")
 query authSession authSessionByPreviousRefreshTokenHash {
   args {
-    previousRefreshTokenHash  string  @required
+    previousRefreshTokenHash  string!
   }
   filter  previousRefreshTokenHash==args.previousRefreshTokenHash
   shape   authSessionFull
@@ -390,7 +390,7 @@ query authSession authSessionByPreviousRefreshTokenHash {
 @unbounded("auth session by unique refreshTokenHash -- a credential lookup bounded to a single row")
 query authSession authSessionByRefreshTokenHash {
   args {
-    refreshTokenHash  string  @required
+    refreshTokenHash  string!
   }
   filter  refreshTokenHash==args.refreshTokenHash
   shape   authSessionFull
@@ -422,7 +422,7 @@ query authSession authSessionByRefreshTokenHash {
 @unbounded("auth session by unique tokenHash -- a credential lookup bounded to a single row")
 query authSession authSessionByTokenHash {
   args {
-    tokenHash  string  @required
+    tokenHash  string!
   }
   filter  tokenHash==args.tokenHash
   shape   authSessionFull
@@ -455,7 +455,7 @@ query authSession authSessionByTokenHash {
 @description("Returns every auth-session row owned by the given JWT subject. Latest version per row, including revoked rows.")
 query authSession authSessionsForSubject {
   args {
-    subject  string  @required
+    subject  string!
   }
   filter  subject==args.subject
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
@@ -527,7 +527,7 @@ query clusterSettings clusterSettingsCurrent {
 @unbounded("delegations for an identity -- a small bounded set consumed whole for authz")
 query delegation delegationsByIdentity {
   args {
-    identityId  string  @required
+    identityId  string!
   }
   filter  identityId==args.identityId
   shape   delegationFull
@@ -561,7 +561,7 @@ query delegation delegationsByIdentity {
 @unbounded("expired-delegation reaper sweep -- an internal sweep that must see all")
 query delegation expiredActiveDelegations {
   args {
-    asOf  string  @required
+    asOf  string!
   }
   filter  isActiveRecord && expiresAt<args.asOf
   shape   delegationFull
@@ -631,7 +631,7 @@ query auditEvent expiredAuditEvents {
 @unbounded("expired consumed auth-code GC sweep -- an internal sweep that must see all")
 query authCode expiredConsumedAuthCodes {
   args {
-    asOf  string  @required
+    asOf  string!
   }
   filter  expiresAt<args.asOf && consumedAt!=""
   shape   authCodeFull
@@ -665,7 +665,7 @@ query authCode expiredConsumedAuthCodes {
 @unbounded("expired magic-link GC sweep -- an internal sweep that must see all")
 query magicLinkRequest expiredMagicLinkRequests {
   args {
-    asOf  string  @required
+    asOf  string!
   }
   filter  expiresAt<args.asOf
   shape   magicLinkRequestFull
@@ -727,7 +727,7 @@ query accessRequest expiredPendingAccessRequests {
 @unbounded("invitation by id (guarded) -- bounded to a single row")
 query invitation invitationById {
   args {
-    invitationId  string  @required
+    invitationId  string!
   }
   filter  when(args.invitationId) { id==args.invitationId }
   shape   invitationFull
@@ -761,7 +761,7 @@ query invitation invitationById {
 @unbounded("invitation by unique tokenHash -- a credential lookup bounded to a single row")
 query invitation invitationByTokenHash {
   args {
-    tokenHash  string  @required
+    tokenHash  string!
   }
   filter  kind=="guest" && tokenHash==args.tokenHash
   shape   invitationFull
@@ -799,7 +799,7 @@ query invitation invitationByTokenHash {
 @unbounded("invitation by unique previousTokenHash -- a credential lookup bounded to a single row")
 query invitation invitationByPreviousTokenHash {
   args {
-    tokenHash  string  @required
+    tokenHash  string!
   }
   filter  kind=="guest" && previousTokenHash==args.tokenHash
   shape   invitationFull
@@ -833,7 +833,7 @@ query invitation invitationByPreviousTokenHash {
 @unbounded("magic-link request by unique tokenHash -- a credential lookup bounded to a single row")
 query magicLinkRequest magicLinkRequestByTokenHash {
   args {
-    tokenHash  string  @required
+    tokenHash  string!
   }
   filter  tokenHash==args.tokenHash
   shape   magicLinkRequestFull
@@ -871,7 +871,7 @@ query magicLinkRequest magicLinkRequestByTokenHash {
 @description("List PAT (api_key) identities owned by a user, in patSummary shape (no credentials).")
 query identity patIdentitiesForUser {
   args {
-    userId  string  @required
+    userId  string!
   }
   filter  userId==args.userId && identityIsApiKey
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
@@ -907,7 +907,7 @@ query identity patIdentitiesForUser {
 @description("Lookup a PAT identity by id (full shape, includes keyHash). Server-side only -- never feed to UI.")
 query identity patIdentityById {
   args {
-    identityId  string  @required
+    identityId  string!
   }
   filter  identityIsApiKey && id==args.identityId
   shape   identityFull
@@ -942,7 +942,7 @@ query identity patIdentityById {
 @unbounded("PAT identity by unique credential keyHash -- bounded to a single row")
 query identity patIdentityByKeyHash {
   args {
-    keyHash  string  @required
+    keyHash  string!
   }
   filter  identityIsApiKey && credentials.keyHash==args.keyHash
   shape   identityFull
@@ -1008,7 +1008,7 @@ query auditEvent recentAuditEvents {
 @unbounded("the user's active-space projection by id (guarded) -- bounded to a single row")
 query user userActiveSpace {
   args {
-    userId  string  @required
+    userId  string!
   }
   filter  when(args.userId) { id==args.userId }
   shape   userActiveSpaceProjection
@@ -1036,7 +1036,7 @@ query user userActiveSpace {
 @unbounded("user by unique primaryEmail -- bounded to a single row")
 query user userByEmail {
   args {
-    primaryEmail  string  @required
+    primaryEmail  string!
   }
   filter  primaryEmail==args.primaryEmail && isActiveRecord
   shape   userFull
@@ -1061,7 +1061,7 @@ query user userByEmail {
 @description("Get a user by id.")
 query user userById {
   args {
-    userId  string  @required
+    userId  string!
   }
   filter  id==args.userId && isActiveRecord
   shape   userFull
@@ -1134,7 +1134,7 @@ query user userCount {
 @unbounded("users whose activePartitionId matches a space -- bounded by space membership, presence resolution consumed whole")
 query user usersActiveInSpace {
   args {
-    partitionId  string  @required
+    partitionId  string!
   }
   filter  when(args.partitionId) { activePartitionId==args.partitionId }
   shape   userActiveSpaceProjection
@@ -1231,7 +1231,7 @@ query user usersScheduledForDeletion {
 @unbounded("worker pairing code by unique codeHash -- a credential lookup bounded to a single row")
 query workerPairingCode workerPairingCodeByHash {
   args {
-    codeHash  string  @required
+    codeHash  string!
   }
   filter  codeHash==args.codeHash
   shape   workerPairingCodeFull
@@ -1260,7 +1260,7 @@ query workerPairingCode workerPairingCodeByHash {
 @unbounded("worker token identity by unique credential keyHash -- bounded to a single row")
 query identity workerTokenByKeyHash {
   args {
-    keyHash  string  @required
+    keyHash  string!
   }
   filter  identityIsWorkerToken && credentials.keyHash==args.keyHash
   shape   identityFull
@@ -1287,7 +1287,7 @@ query identity workerTokenByKeyHash {
 @description("List worker-token identities owned by a user.")
 query identity workerTokensForUser {
   args {
-    userId  string  @required
+    userId  string!
   }
   filter  identityIsWorkerToken && userId==args.userId
   // Pagination (5.2 / epic #1964): bounded first page + keyset cursor over
@@ -1323,7 +1323,7 @@ query identity workerTokensForUser {
 @unbounded("badge identity by unique credential keyHash -- bounded to a single row")
 query identity badgeByKeyHash {
   args {
-    keyHash  string  @required
+    keyHash  string!
   }
   filter  identityIsBadge && credentials.keyHash==args.keyHash
   shape   identityFull
@@ -1349,7 +1349,7 @@ query identity badgeByKeyHash {
 @description("List badge identities owned by a user. Projects identitySummary (id / userId / label / active) -- NEVER credentials, so the badge keyHash (a low-entropy physical id's hash) is never exposed on this public surface.")
 query identity badgesForUser {
   args {
-    userId  string  @required
+    userId  string!
   }
   filter  identityIsBadge && userId==args.userId
   sort     "createdAt", "desc"
@@ -1385,8 +1385,8 @@ query identity badgesForUser {
 @unbounded("node-token identity by unique (nodeType,nodeId) binding -- bounded to a single row")
 query identity nodeTokenIdentityByBinding {
   args {
-    nodeType  string  @required
-    nodeId    string  @required
+    nodeType  string!
+    nodeId    string!
   }
   filter  identityIsNodeToken && credentials.nodeType==args.nodeType && credentials.nodeId==args.nodeId
   shape   identityFull
@@ -1431,7 +1431,7 @@ query identity nodeTokenIdentities {
 @description("Lookup a single node_token identity row by id (bare shortId; the signature-bound filter resolves it server-side). Drives the admin revoke path. memql#350.")
 query identity nodeTokenIdentityById {
   args {
-    identityId  string  @required
+    identityId  string!
   }
   filter  identityIsNodeToken && id==args.identityId
   shape   identityFull

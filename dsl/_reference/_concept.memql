@@ -50,7 +50,7 @@
 @namespace("reference")
 @description("Smallest legal concept declaration -- one required string field.")
 concept minimal {
-  name string @required @description("Display name.")
+  name string! @description("Display name.")
 }
 
 // =============================================================================
@@ -72,14 +72,14 @@ concept minimal {
 @namespace("reference")
 @description("No @version annotation: the 1.0.0 default applies. ID prefix is v1:.")
 concept versionedV1 {
-  field string @required
+  field string!
 }
 
 @version("2.5.7")        // post-breaking-change, minor + patch reflect evolution
 @namespace("reference")
 @description("Example bumping past major version 2. ID prefix becomes v2:.")
 concept versionedV2 {
-  field string @required
+  field string!
 }
 
 // =============================================================================
@@ -97,13 +97,13 @@ concept versionedV2 {
 @namespace("cognition")
 @description("Single-segment namespace.")
 concept singleSegmentNs {
-  field string @required
+  field string!
 }
 
 @namespace("cognition:client:tool")
 @description("Multi-segment namespace. Assembles to v1:cognition:client:tool:nested.")
 concept nestedNs {
-  field string @required
+  field string!
 }
 
 // =============================================================================
@@ -169,7 +169,7 @@ concept nestedNs {
 @type("object")
 @description("Default record-shaped concept.")
 concept objectExample {
-  field string @required
+  field string!
 }
 
 @namespace("reference")
@@ -186,7 +186,7 @@ concept collectionExample {
 @description("Reference concept -- requires a @relationship(type=\"alias\"|\"equals\", ...).")
 concept referenceExample {
   @relationship(type="alias", field="targetId", target="v1:reference:objectExample", direction="outgoing")
-  targetId string @required
+  targetId string!
 }
 
 // =============================================================================
@@ -249,9 +249,9 @@ concept fieldTypes {
 @description("Every field-level annotation in use.")
 concept fieldAnnotations {
   // String constraints
-  slug         string @required @pattern("^[a-z][a-z0-9-]{0,49}$") @description("URL slug.")
+  slug         string! @pattern("^[a-z][a-z0-9-]{0,49}$") @description("URL slug.")
   shortText    string @minLength(1) @maxLength(280) @description("Tweet-shaped string.")
-  uniqueKey    string @required @unique @description("Engine-enforced unique key.")
+  uniqueKey    string! @unique @description("Engine-enforced unique key.")
 
   // Numeric constraints
   ratingScore  int    @minimum(1) @maximum(5) @description("1-5 rating scale.")
@@ -263,7 +263,7 @@ concept fieldAnnotations {
   isPinned     bool   @default("false")
 
   // Immutability + secrecy
-  externalId   string @required @immutable @description("Foreign-system id; never changes.")
+  externalId   string! @immutable @description("Foreign-system id; never changes.")
   apiKey       string @secret @description("Redacted from logs + reads.")
 
   // Description-only (no constraint)
@@ -284,22 +284,22 @@ concept fieldAnnotations {
 @namespace("reference")
 @description("Discriminated-union example: the `body` field's shape depends on `kind`.")
 concept variantExample {
-  kind  enum("text", "image", "embed") @required
+  kind  enum("text", "image", "embed")!
 
   body  @variant(discriminator="kind") {
     text {
-      content   string @required
+      content   string!
       wordCount int    @default("0")
     }
     image {
-      url       string @required
-      width     int    @required
-      height    int    @required
+      url       string!
+      width     int!
+      height    int!
       altText   string
     }
     embed {
-      url       string @required
-      provider  enum("youtube", "vimeo", "twitter") @required
+      url       string!
+      provider  enum("youtube", "vimeo", "twitter")!
     }
   }
 }
@@ -315,7 +315,7 @@ concept variantExample {
 @namespace("reference")
 @description("A flat concept with a nested settings sub-object.")
 concept nestedExample {
-  name   string @required
+  name   string!
 
   // Inline nested object: the body declares its own fields.
   settings {
@@ -362,14 +362,14 @@ concept nestedExample {
 concept relationshipExample {
   // Parent: this row hangs off a space.
   @relationship(type="parent", field="partitionId", target="v1:cognition:space", direction="outgoing")
-  partitionId    string @required
+  partitionId    string!
 
   // References (soft): this row may name an author.
   @relationship(type="references", field="authorId", target="v1:identity:user", direction="outgoing")
   authorId   string
 
   // Plain data fields can sit next to relationships.
-  content    string @required
+  content    string!
   publishedAt datetime
 }
 
@@ -412,7 +412,7 @@ concept relationshipExample {
 @namespace("cluster")
 @description("Example of an infrastructure-metadata concept that every node loads.")
 concept globalInfraExample {
-  hostname  string @required
-  nodeType  enum("bff", "voice", "cognition", "agent", "planner") @required
-  startedAt datetime @required
+  hostname  string!
+  nodeType  enum("bff", "voice", "cognition", "agent", "planner")!
+  startedAt datetime!
 }

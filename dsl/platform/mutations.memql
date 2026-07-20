@@ -31,15 +31,15 @@
 @description("Persist a single policy evaluation trace to v1:platform:policyTrace.")
 mutate policyTrace insertPolicyTrace {
   args {
-    policyName       string  @required
-    tier             string  @required
+    policyName       string!
+    tier             string!
     actorUserId      string
     actorRole        string
     callerPartition  string
-    argsHash         string  @required
-    resultJson       string  @required
-    traceJson        string  @required
-    durationMs       number  @required
+    argsHash         string!
+    resultJson       string!
+    traceJson        string!
+    durationMs       number!
     error            string
   }
   insert {
@@ -79,10 +79,10 @@ mutate policyTrace insertPolicyTrace {
 @description("Persist an instance-wide (global) encrypted secret row in v1:platform:globalSecret. The encryptedValue and fingerprint are produced by the backend secret helper; this mutation only stores them.")
 mutate globalSecret setGlobalSecret {
   args {
-    id              string  @required
-    name            string  @required
-    encryptedValue  string  @required
-    fingerprint     string  @required
+    id              string!
+    name            string!
+    encryptedValue  string!
+    fingerprint     string!
     kind            string
     description     string
     addedBy         string
@@ -112,9 +112,9 @@ mutate globalSecret setGlobalSecret {
 @description("Persist an instance-wide (global) plaintext variable row in v1:platform:globalVariable.")
 mutate globalVariable setGlobalVariable {
   args {
-    id           string  @required
-    name         string  @required
-    value        string  @required
+    id           string!
+    name         string!
+    value        string!
     description  string
     active       bool
   }
@@ -144,10 +144,10 @@ mutate globalVariable setGlobalVariable {
 @description("Persist a partition-scoped encrypted secret row in v1:platform:partitionSecret. The encryptedValue and fingerprint are produced by the backend secret helper; this mutation only stores them.")
 mutate partitionSecret setPartitionSecret {
   args {
-    id              string  @required
-    name            string  @required
-    encryptedValue  string  @required
-    fingerprint     string  @required
+    id              string!
+    name            string!
+    encryptedValue  string!
+    fingerprint     string!
     kind            string
     description     string
     addedBy         string
@@ -178,9 +178,9 @@ mutate partitionSecret setPartitionSecret {
 @description("Persist a partition-scoped plaintext variable row in v1:platform:partitionVariable.")
 mutate partitionVariable setPartitionVariable {
   args {
-    id           string  @required
-    name         string  @required
-    value        string  @required
+    id           string!
+    name         string!
+    value        string!
     description  string
     active       bool
   }
@@ -196,15 +196,15 @@ mutate partitionVariable setPartitionVariable {
 @description("Per Q7 missing-capability surface: log a new gap the Planner Agent identified during a Plan. First sighting creates the row; repeat sightings (same (kind, capability)) call bumpMissingCapabilitySighting instead so the row stays unique-by-capability and sightingCount climbs. Status defaults to 'open'.")
 mutate missingCapability logMissingCapability {
   args {
-    missingId       string  @required
-    kind            string  @required
-    capability      string  @required
-    description     string  @required
+    missingId       string!
+    kind            string!
+    capability      string!
+    description     string!
     requestedFromPlanId  string
     requestedByAgentId   string
     partitionId         string
     partitionScope  string
-    firstSeenAt     string  @required
+    firstSeenAt     string!
     exampleGoal     string
   }
   insert {
@@ -227,9 +227,9 @@ mutate missingCapability logMissingCapability {
 @description("Per Q7 missing-capability surface: a repeat sighting of an already-logged gap. Increments sightingCount and refreshes lastSeenAt. The Planner Agent calls this when it encounters a known gap; aggregated counts feed the platform-roadmap prioritization view.")
 mutate missingCapability bumpMissingCapabilitySighting {
   args {
-    missingId       string  @required
-    sightingCount   int     @required
-    lastSeenAt      string  @required
+    missingId       string!
+    sightingCount   int!
+    lastSeenAt      string!
   }
   update {
     accept { sightingCount, lastSeenAt }
@@ -242,8 +242,8 @@ mutate missingCapability bumpMissingCapabilitySighting {
 @description("Operator-driven status transition on a missingCapability row. Used by the platform team's backlog tooling to mark a gap as in_progress, resolved (with a note on what shipped), or wontfix.")
 mutate missingCapability updateMissingCapabilityStatus {
   args {
-    missingId   string  @required
-    status      string  @required
+    missingId   string!
+    status      string!
     resolution  string
   }
   update {
@@ -283,11 +283,11 @@ mutate missingCapability updateMissingCapabilityStatus {
 @description("Stage an outbound delivery (memql#2521): insert a v1:platform:outboundRequest row with status='pending' for the engine outbound worker to drain. Credentials are never part of the row; targets must satisfy the deployment's per-medium allowlist or the worker fails the row fast. Idempotent by requestId: a re-stage onto an existing row preserves the worker-owned status/attempts (@createOnly, fylo#63) rather than resetting delivery state.")
 mutate outboundRequest stageOutboundRequest {
   args {
-    requestId    string  @required
-    medium       string  @required
-    target       string  @required
+    requestId    string!
+    medium       string!
+    target       string!
     subject      string
-    body         string  @required
+    body         string!
     dedupeKey    string
     requestedBy  string
   }
@@ -314,8 +314,8 @@ mutate outboundRequest stageOutboundRequest {
 @description("Stamp a delivery-state transition on a v1:platform:outboundRequest row (memql#2521). Called by the engine outbound worker (sending/sent/retrying/failed + attempt metadata); operators may set status='pending' to requeue a failed row.")
 mutate outboundRequest updateOutboundRequestStatus {
   args {
-    requestId      string  @required
-    status         string  @required
+    requestId      string!
+    status         string!
     attempts       int
     lastError      string
     nextAttemptAt  string

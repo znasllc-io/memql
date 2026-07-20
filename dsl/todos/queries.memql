@@ -24,7 +24,7 @@ query todo todos {
 @mcp
 query todo todoById {
   args {
-    todoId  string  @required
+    todoId  string!
   }
   filter  when(args.todoId) { id==args.todoId } && ownerUserId==actor.userId
   shape   todoFull
