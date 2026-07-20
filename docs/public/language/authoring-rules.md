@@ -524,7 +524,12 @@ The five value positions:
   the bind-then-compare workaround (`z := coalesce(...); cond(z == ...)`)
   was required. The workaround remains valid; it is no longer necessary.
   The predicate aggregate is resolved through the in-memory collection
-  evaluator, not a lexicographic string compare.
+  evaluator, not a lexicographic string compare. A **string builtin**
+  operand (`lower(args.b) == "y"`, also `upper`/`trim`/`hash`/`shortId`/
+  `concat`) is likewise evaluated in memory (#2656): before that it
+  loaded green and compared the builtin's SOURCE TEXT, so it was
+  always-false in every shape -- the door form, the parenthesised form,
+  and bind-then-compare alike.
 
 ---
 

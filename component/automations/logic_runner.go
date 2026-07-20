@@ -681,6 +681,17 @@ func tryEvaluateBuiltinLocally(expr string, evaluator *Evaluator) (any, bool, er
 			return nil, false, err
 		}
 		return val, true, nil
+	case IsStringBuiltin(name):
+		// #2656: operands resolve through the same local operand path the
+		// date builtins use, then the shared memql.RuntimeEvaluator applies
+		// the builtin -- so a logic body and a mutation template agree on
+		// what lower()/concat()/hash() mean. An evaluation failure is a hard
+		// error, never a fall-through to the literal source text.
+		val, err := evaluator.evaluateStringBuiltinCall(name, inner)
+		if err != nil {
+			return nil, false, err
+		}
+		return val, true, nil
 	case memql.IsDateBuiltin(name):
 		// Date/duration builtins (#2541): operands resolve through the
 		// evaluator's operand path (quoted literals, $-paths, step refs,
@@ -707,6 +718,13 @@ func tryEvaluateBuiltinLocally(expr string, evaluator *Evaluator) (any, bool, er
 // switch.
 func isPositionalBuiltinName(name string) bool {
 	if memql.IsDateBuiltin(name) {
+		return true
+	}
+	// String/value builtins (#2656): lower/upper/trim/hash/shortId/concat
+	// are accepted by the AST converter in these positions, so the runner
+	// must evaluate them -- admitting them at load and never resolving
+	// them made `lower(args.x) == "y"` evaluate always-false silently.
+	if IsStringBuiltin(name) {
 		return true
 	}
 	switch name {
