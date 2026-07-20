@@ -86,10 +86,12 @@ type Construct struct {
 	// genuinely un-keyed lookup is impossible because Keyword is required.
 	AnnotationReceiver string `json:"annotationReceiver"`
 	// RegistryBacked is true when AnnotationReceiver resolves in
-	// component/language/annotations.ByReceiver. When false, the construct's
-	// annotations are not yet enumerated in the shared registry (policy /
-	// seed / trait / relationship today) -- a gap the drift test (#2124)
-	// tracks and A2 (#2123) is expected to close by extending the registry.
+	// component/language/annotations.ByReceiver. #2151 closed the
+	// policy / seed / trait gaps this comment used to name; today only
+	// `use` is unbacked (it is the file-top import statement, not an
+	// annotatable construct), pinned by the drift test's knownUnbacked
+	// set. An unbacked construct falls back to the union of every
+	// receiver's annotations rather than offering nothing (#2627).
 	RegistryBacked bool `json:"registryBacked"`
 	// ConceptInSignature is true for constructs whose signature names a
 	// bound concept: `query <Concept> <name>`, `mutation <Concept> <name>`,

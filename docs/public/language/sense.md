@@ -157,6 +157,26 @@ editors and agents can key on them:
 | `redundant-version` | Hint | `@version("1.0.0")` restates the default (#2613). |
 | `discarded-args-description` | Hint | `@description` on an args field is parsed and discarded (#2615). |
 
+### Receiver-filtered and construct-scoped completion (#2627)
+
+With the enclosing construct resolved, completion is construct-aware
+in the two places it matters:
+
+- **Annotations.** `@` offers only the construct's legal annotations,
+  mapped keyword -> `Construct.AnnotationReceiver` -> the registry's
+  receiver list. Three edges: the CONCEPT construct's receiver key is
+  `""` (a real key -- not "unresolved"), an unbacked construct (today
+  exactly `use`) falls back to the union rather than offering nothing,
+  and no detection at all (EOF) keeps the union. A registry-driven
+  conformance test asserts that every annotation offered for every
+  construct is legal for that receiver, so the never-offer-what-the-
+  engine-rejects contract survives future registry edits.
+- **Body blocks and statements.** A body offers ITS construct's
+  `BodyBlocks` from the spec (query: args/filter/shape; mutate:
+  args/insert/update; logic and automation: args/body) and only its own
+  invocation verbs -- a logic body never offers `filter`, a shape body
+  never offers `insert`.
+
 ### The context model
 
 Every completion request resolves ONE enclosing-construct answer
