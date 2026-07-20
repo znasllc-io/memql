@@ -35,7 +35,15 @@ func keywords() []Keyword {
 
 		// Reserved engine identifiers (bare top-level names, not args).
 		{Name: "now", Doc: "Reserved: RFC3339 timestamp captured at eval start.", Kind: "reserved"},
-		{Name: "actor", Doc: "Reserved: resolved auth context (userId, role, identityId, isClusterOwner, partitions).", Kind: "reserved"},
+		{Name: "actor", Doc: "Reserved: the auth envelope. Closed member set (#2623): userId, role, identityId, isClusterOwner, primaryEmail, now, plus the legacy isOwner alias. Reading it requires @actor in the construct preamble (#2621).", Kind: "reserved", Properties: []KeywordProperty{
+			{Name: "userId", Doc: "The acting user's id."},
+			{Name: "role", Doc: "Cluster role: owner / admin / writer / reader."},
+			{Name: "identityId", Doc: "The credential row (token, magic-link, PAT)."},
+			{Name: "isClusterOwner", Doc: "Bool short-circuit; bypasses the per-partition ACL."},
+			{Name: "primaryEmail", Doc: "The acting user's primary email address."},
+			{Name: "now", Doc: "RFC3339 timestamp at evaluation start (the shape-body spelling of the reserved `now`)."},
+			{Name: "isOwner", Doc: "Legacy alias of isClusterOwner.", AliasOf: "isClusterOwner"},
+		}},
 		{Name: "partition", Doc: "Reserved: the active partition for this call.", Kind: "reserved"},
 		{Name: "config", Doc: "Reserved: allow-listed config values (component/config/policy_exposable.go).", Kind: "reserved"},
 		{Name: "trace", Doc: "Reserved engine identifier.", Kind: "reserved"},

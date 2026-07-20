@@ -135,6 +135,22 @@ type Keyword struct {
 	// (filter/shape/args... block headers), "reserved" (now/actor/partition...),
 	// or "import" (use).
 	Kind string `json:"kind"`
+	// Properties is the structured member table for Kind=="reserved"
+	// identifiers that expose a closed dotted-path set (#2623: actor is
+	// the first). Empty for every other keyword; additive in the JSON
+	// envelope, so no SpecVersion bump.
+	Properties []KeywordProperty `json:"properties,omitempty"`
+}
+
+// KeywordProperty is one member of a reserved identifier's closed
+// dotted-path set (e.g. actor.userId). AliasOf marks a legacy alias of
+// a canonical member. The engine-side source of truth is
+// auth.ActorEnvelopeFields; a two-directional drift test pins the two
+// tables together.
+type KeywordProperty struct {
+	Name    string `json:"name"`
+	Doc     string `json:"doc"`
+	AliasOf string `json:"aliasOf,omitempty"`
 }
 
 // Operator is a boolean/comparison/membership operator in the one-Go-grammar

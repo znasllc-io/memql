@@ -29,7 +29,7 @@ local args / fields:
 | Name | What | Where |
 |------|------|-------|
 | `args` | Caller-passed arguments object. Read fields as `args.X`. | every body |
-| `actor` | Resolved auth context. Fields: `userId`, `role`, `identityId`, `isClusterOwner`, `partitions`. | every body |
+| `actor` | The auth envelope. Closed member set (#2623, section 3 below): `userId`, `role`, `identityId`, `isClusterOwner`, `primaryEmail`, `now`, plus the legacy `isOwner` alias. Reading it requires `@actor` (#2621). | every body |
 | `now` | RFC3339 timestamp captured at evaluation start. | every body |
 | `partition` | Active partition for this call. | every body |
 | `config` | Allow-listed config entries. See `component/config/policy_exposable.go` for the surface. Read as `config.X`. | every body |
@@ -75,8 +75,16 @@ fixed envelope. Field paths under `actor.` are restricted to:
 | `actor.role` | Cluster role: `owner` / `admin` / `writer` / `reader`. |
 | `actor.identityId` | The credential row (token, magic-link, PAT). |
 | `actor.isClusterOwner` | Bool short-circuit; bypasses the per-partition ACL. |
-| `actor.now` | RFC3339 timestamp at evaluation start. |
-| `actor.config.<key>` | Allow-listed config entries. |
+| `actor.primaryEmail` | The acting user's primary email address. |
+| `actor.now` | RFC3339 timestamp at evaluation start (the shape-body spelling of the reserved `now`). |
+| `actor.isOwner` | Legacy alias of `actor.isClusterOwner`. |
+
+This is the ONE canonical envelope (#2623), uniform across query
+filters, mutation values, logic bodies, and context-specs; the
+engine-side table is `auth.ActorEnvelopeFields` and the dslspec
+editor table is drift-pinned to it. `actor.config.<key>` is retired
+from this list -- no resolver ever implemented it; read allow-listed
+config through the bare reserved `config.<key>` instead.
 
 The fields are the only names valid under `actor.` -- a typo like
 `actor.userid` (lowercase) is a hard error. The `caller.X` / `@caller`

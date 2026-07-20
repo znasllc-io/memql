@@ -433,35 +433,11 @@ func (e *mutationTemplateEvaluator) evalString(ctx context.Context, s string) (a
 			return nil, fmt.Errorf("actor.<path>: invalid character %q in %q", c, trimmed)
 		}
 		ac, _ := auth.AccessFromContext(ctx)
-		switch path {
-		case "userId":
-			if ac == nil {
-				return "", nil
-			}
-			return ac.UserId, nil
-		case "identityId":
-			if ac == nil {
-				return "", nil
-			}
-			return ac.IdentityId, nil
-		case "role":
-			if ac == nil {
-				return "", nil
-			}
-			return string(ac.Role), nil
-		case "primaryEmail":
-			if ac == nil {
-				return "", nil
-			}
-			return ac.PrimaryEmail, nil
-		case "isOwner":
-			if ac == nil {
-				return true, nil
-			}
-			return ac.IsClusterOwner(), nil
-		default:
-			return nil, fmt.Errorf("unsupported actor reference path %q (valid: userId, identityId, role, primaryEmail, isOwner)", path)
+		// One canonical envelope (#2623): auth.ActorEnvelopeFields.
+		if v, ok := auth.ActorEnvelopeValue(ac, path); ok {
+			return v, nil
 		}
+		return nil, fmt.Errorf("unsupported actor reference path %q (valid: %s)", path, auth.ActorEnvelopeValidNames())
 	}
 
 	// The clock. classifyScalarOrExpr rewrites a bare top-level `now` to the

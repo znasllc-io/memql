@@ -355,40 +355,14 @@ func resolveActorReferences(ctx context.Context, expr ExpressionNode) (Expressio
 func resolveActorPath(ctx context.Context, path string, op ComparisonOperator) (any, error) {
 	_ = op
 	ac, _ := auth.AccessFromContext(ctx)
-	switch path {
-	case "userId":
-		if ac == nil {
-			return "", nil
-		}
-		return ac.UserId, nil
-	case "identityId":
-		if ac == nil {
-			return "", nil
-		}
-		return ac.IdentityId, nil
-	case "role":
-		if ac == nil {
-			return "", nil
-		}
-		return string(ac.Role), nil
-	case "primaryEmail":
-		if ac == nil {
-			return "", nil
-		}
-		return ac.PrimaryEmail, nil
-	case "isOwner", "isClusterOwner":
-		// `isClusterOwner` is the canonical name the actorEnvelope @actor
-		// shape exposes (dsl/common/shapes.memql) and the form admin queries
-		// gate on (e.g. systemActiveAuthoringBundles, #1039); `isOwner`
-		// is the legacy alias. Both resolve to the cluster-owner bit.
-		if ac == nil {
-			// No auth context (dev mode) -- treat as owner.
-			return true, nil
-		}
-		return ac.IsClusterOwner(), nil
-	default:
-		return nil, fmt.Errorf("unsupported actor reference path %q (valid: userId, identityId, role, primaryEmail, isOwner, isClusterOwner)", path)
+	// The canonical envelope lives in ONE table (#2623):
+	// auth.ActorEnvelopeFields drives resolution, the alias mapping,
+	// and this error's accepted-path list, so the four runtime
+	// surfaces and the dslspec editor table cannot drift.
+	if v, ok := auth.ActorEnvelopeValue(ac, path); ok {
+		return v, nil
 	}
+	return nil, fmt.Errorf("unsupported actor reference path %q (valid: %s)", path, auth.ActorEnvelopeValidNames())
 }
 
 // resolveExpressionForExecution creates a copy of an expression tree with any short IDs resolved to
