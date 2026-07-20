@@ -15,6 +15,7 @@ import (
 	"github.com/uptrace/bun/driver/pgdriver"
 
 	"github.com/znasllc-io/memql/component/automations"
+	"github.com/znasllc-io/memql/component/database/dbtest"
 	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/memql"
@@ -44,7 +45,7 @@ func TestSchedulerReadyMeansAutomationsRegistered(t *testing.T) {
 	}
 	db := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn))), pgdialect.New())
 	if err := db.PingContext(context.Background()); err != nil {
-		t.Skipf("scheduler-ready race test: no Postgres reachable (%v)", err)
+		dbtest.Unreachable(t, "scheduler-ready race test", dsn, err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
 

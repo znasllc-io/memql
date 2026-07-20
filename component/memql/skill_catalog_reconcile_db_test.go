@@ -13,6 +13,7 @@ import (
 	"github.com/uptrace/bun/dialect/pgdialect"
 	"github.com/uptrace/bun/driver/pgdriver"
 
+	"github.com/znasllc-io/memql/component/database/dbtest"
 	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
 	memqldsl "github.com/znasllc-io/memql/dsl"
 )
@@ -59,7 +60,7 @@ func reconcileTestDB(t *testing.T) *bun.DB {
 	connector := pgdriver.NewConnector(pgdriver.WithDSN(dsn))
 	db := bun.NewDB(sql.OpenDB(connector), pgdialect.New())
 	if err := db.PingContext(context.Background()); err != nil {
-		t.Skipf("skill catalog reconcile DB test: no Postgres reachable (%v)", err)
+		dbtest.Unreachable(t, "skill catalog reconcile DB test", dsn, err)
 	}
 	return db
 }

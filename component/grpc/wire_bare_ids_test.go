@@ -39,6 +39,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/database/dbtest"
 	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/events"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
@@ -212,7 +213,7 @@ func openWireTestDB(t *testing.T) *bun.DB {
 	defer cancel()
 	if err := probe.PingContext(ctx); err != nil {
 		_ = probe.Close()
-		t.Skipf("no Postgres reachable for the #2441 wire-scanner round-trip: %v", err)
+		dbtest.Unreachable(t, "DB-gated test for the #2441 wire-scanner round-trip", dsn, err)
 	}
 	_ = probe.Close()
 

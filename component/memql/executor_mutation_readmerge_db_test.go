@@ -18,6 +18,7 @@ import (
 	"github.com/uptrace/bun/driver/pgdriver"
 
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/database/dbtest"
 	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
 
@@ -50,7 +51,7 @@ func readMergeTestEngine(t *testing.T) (*MemQLEngine, *bun.DB, context.Context) 
 	connector := pgdriver.NewConnector(pgdriver.WithDSN(dsn))
 	db := bun.NewDB(sql.OpenDB(connector), pgdialect.New())
 	if err := db.PingContext(context.Background()); err != nil {
-		t.Skipf("read-merge mutation DB test: no Postgres reachable (%v)", err)
+		dbtest.Unreachable(t, "read-merge mutation DB test", dsn, err)
 	}
 
 	if _, err := LoadUnifiedConcepts(nil); err != nil {

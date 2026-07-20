@@ -17,6 +17,7 @@ import (
 	"github.com/uptrace/bun/dialect/pgdialect"
 	"github.com/uptrace/bun/driver/pgdriver"
 
+	"github.com/znasllc-io/memql/component/database/dbtest"
 	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
@@ -377,7 +378,7 @@ func openVoiceScopeTestDB(t *testing.T) *bun.DB {
 	defer cancel()
 	if err := db.PingContext(ctx); err != nil {
 		_ = db.Close()
-		t.Skipf("no Postgres reachable for the #1454 full-path test: %v", err)
+		dbtest.Unreachable(t, "DB-gated test for the #1454 full-path test", dsn, err)
 	}
 	return db
 }
