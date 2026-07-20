@@ -67,9 +67,12 @@ func (e *MemQLEngine) mcpPromotedFunctions() []*Function {
 			continue
 		}
 		// @disabled drops the function from the ADVERTISED surface, matching
-		// the function-backed tool registration path (function_tools.go) --
-		// the #2605 execution gate already refuses it at call time, and an
-		// advertised-but-refused tool is a dishonest surface (memql#2647).
+		// the Enabled check on the function-backed tool registration path
+		// (function_tools.go) -- the #2605 execution gate already refuses it
+		// at call time, and an advertised-but-refused tool is a dishonest
+		// surface (memql#2647). The router (MCPPromotedFunctionKind) keeps
+		// routing the name so a direct call gets that refusal, not an
+		// unknown-tool error.
 		if !fn.Enabled {
 			continue
 		}

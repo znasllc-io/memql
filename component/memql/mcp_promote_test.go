@@ -144,4 +144,11 @@ func TestMCPPromotedFunctionTools_DisabledDropped(t *testing.T) {
 	if tools[0]["name"] != "enabledPromotedQuery" {
 		t.Errorf("advertised tool = %v, want enabledPromotedQuery", tools[0]["name"])
 	}
+
+	// The ROUTER deliberately keeps routing the @disabled name: a direct
+	// call of the no-longer-advertised tool must reach the #2605 execution
+	// gate's 'function is disabled' refusal, not an unknown-tool error.
+	if kind, ok := e.MCPPromotedFunctionKind("disabledPromotedQuery"); !ok || kind != "query" {
+		t.Errorf("MCPPromotedFunctionKind(disabled) = (%q, %v), want (query, true): the router must keep routing @disabled names", kind, ok)
+	}
 }
