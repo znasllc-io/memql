@@ -121,3 +121,27 @@ func TestJSONSchemaType(t *testing.T) {
 		}
 	}
 }
+
+// A @disabled @mcp function must drop out of the ADVERTISED surface entirely
+// (memql#2647): the lifecycle annotation hides it from functions() and from
+// function-backed tool registration (function_tools.go), and the promote path
+// must be equally honest -- not advertise a tool the #2605 execution gate will
+// refuse at call time. The enabled peer stays advertised.
+func TestMCPPromotedFunctionTools_DisabledDropped(t *testing.T) {
+	e := &MemQLEngine{functions: newFunctionRegistry()}
+	disabled := &Function{Name: "disabledPromotedQuery", FunctionKind: "query", Enabled: false, MCPPromoted: true}
+	enabled := &Function{Name: "enabledPromotedQuery", FunctionKind: "query", Enabled: true, MCPPromoted: true}
+	for _, fn := range []*Function{disabled, enabled} {
+		if err := e.functions.Upsert(fn); err != nil {
+			t.Fatalf("seed %s: %v", fn.Name, err)
+		}
+	}
+
+	tools := e.MCPPromotedFunctionTools()
+	if len(tools) != 1 {
+		t.Fatalf("expected exactly 1 advertised tool (the enabled peer), got %d: %+v", len(tools), tools)
+	}
+	if tools[0]["name"] != "enabledPromotedQuery" {
+		t.Errorf("advertised tool = %v, want enabledPromotedQuery", tools[0]["name"])
+	}
+}

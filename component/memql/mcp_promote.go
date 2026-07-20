@@ -66,6 +66,13 @@ func (e *MemQLEngine) mcpPromotedFunctions() []*Function {
 		if fn == nil || !fn.MCPPromoted {
 			continue
 		}
+		// @disabled drops the function from the ADVERTISED surface, matching
+		// the function-backed tool registration path (function_tools.go) --
+		// the #2605 execution gate already refuses it at call time, and an
+		// advertised-but-refused tool is a dishonest surface (memql#2647).
+		if !fn.Enabled {
+			continue
+		}
 		if fn.FunctionKind == "query" || fn.FunctionKind == "mutation" {
 			out = append(out, fn)
 		}
