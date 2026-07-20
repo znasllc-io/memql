@@ -1469,3 +1469,16 @@ use cognition.concepts.{ space }
   additive), but the tree gate (`dsl/no_same_domain_use_test.go`,
   which runs the `memqlmigrate --rewrite=same-domain-use` codemod)
   keeps them out of the shipped corpus.
+
+---
+
+## 26. Reading `actor.*` requires `@actor` (#2621)
+
+**Rule.** A query / mutation / logic / automation whose body reads the
+auth envelope (`actor.*`) must declare `@actor` in its preamble --
+used-but-undeclared is a file-attributed load error AND an edit-time
+`actor-undeclared` Error squiggle (#2622, same shared detection).
+Declared-but-unused is legal. Spec/trait bodies keep the inverse rule
+(direct reads rejected; bind an `@actor` shape); shapes use `@actor`
+as their kind marker; the seed-file `@actor("system")` is a different
+construct.

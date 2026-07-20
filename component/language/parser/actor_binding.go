@@ -95,12 +95,9 @@ func RewriteActorBinding(src []byte) ([]byte, error) {
 	var b strings.Builder
 	prev := 0
 	changed := false
-	for i, h := range headers {
+	for _, h := range headers {
 		start := h[0]
-		end := len(text)
-		if i+1 < len(headers) {
-			end = headers[i+1][0]
-		}
+		end := constructEnd(text, start)
 		construct := text[start:end]
 		// The preamble (annotations above the header) belongs to this
 		// construct; scan back over contiguous annotation/comment lines.
@@ -137,4 +134,73 @@ func preambleStart(text string, headerStart int) int {
 		lineStart = ps
 	}
 	return lineStart
+}
+
+// constructEnd returns the exclusive end offset of the construct whose
+// header starts at headerStart: the matching close of its body brace,
+// or end-of-line for the braceless terse arrow form. Bounding at the
+// real body close keeps a following construct of another kind (a spec
+// or shape declared after a query in the same file) out of the
+// region -- next-header bounding leaked those bodies in (#2622).
+func constructEnd(text string, headerStart int) int {
+	lineEnd := strings.IndexByte(text[headerStart:], '\n')
+	if lineEnd < 0 {
+		lineEnd = len(text) - headerStart
+	}
+	braceIdx := strings.IndexByte(text[headerStart:headerStart+lineEnd], '{')
+	if braceIdx < 0 {
+		return headerStart + lineEnd // terse arrow form: one line, no body
+	}
+	depth := 0
+	inString := false
+	inComment := false
+	for i := headerStart + braceIdx; i < len(text); i++ {
+		c := text[i]
+		switch {
+		case inComment:
+			if c == '\n' {
+				inComment = false
+			}
+		case inString:
+			if c == '"' || c == '\n' {
+				inString = false
+			}
+		case c == '"':
+			inString = true
+		case c == '/' && i+1 < len(text) && text[i+1] == '/':
+			inComment = true
+		case c == '{':
+			depth++
+		case c == '}':
+			depth--
+			if depth == 0 {
+				return i + 1
+			}
+		}
+	}
+	return len(text)
+}
+
+// ActorUndeclaredRefOffsets returns the byte offset (into src) of every
+// actor-envelope read inside a query/mutate/logic/automation construct
+// whose preamble lacks @actor -- the edit-time mirror (#2622) of the
+// load rule, sharing the same header, preamble, and detection
+// internals so the engine error and the editor squiggle cannot drift.
+func ActorUndeclaredRefOffsets(src string) []int {
+	headers := actorConstructHeaderRe.FindAllStringSubmatchIndex(src, -1)
+	var out []int
+	for _, h := range headers {
+		start := h[0]
+		end := constructEnd(src, start)
+		construct := src[start:end]
+		region := src[preambleStart(src, start):end]
+		if ActorDeclaredInSource(region) {
+			continue
+		}
+		stripped := stripCommentsAndStrings(construct)
+		for _, m := range actorRefPattern.FindAllStringSubmatchIndex(stripped, -1) {
+			out = append(out, start+m[3]) // group 1 end == the `actor` token start
+		}
+	}
+	return out
 }

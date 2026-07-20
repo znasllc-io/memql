@@ -143,6 +143,19 @@ legal-next rule:
 
 ---
 
+## Edit-time diagnostics
+
+Diagnose runs parse errors plus a set of authoring rules over the
+authored source. The load-mirroring rules carry stable code strings so
+editors and agents can key on them:
+
+| Code | Severity | Rule |
+|---|---|---|
+| `actor-undeclared` | Error | A query/mutate/logic/automation body reads `actor.*` without `@actor` in the preamble -- the edit-time mirror of the engine's load rule (#2621), sharing the loader's own detection so squiggle and boot error cannot drift. |
+| `redundant-enabled` | Hint | `@enabled` restates the default (#2610). |
+| `redundant-version` | Hint | `@version("1.0.0")` restates the default (#2613). |
+| `discarded-args-description` | Hint | `@description` on an args field is parsed and discarded (#2615). |
+
 ## The CI drift guard
 
 `dslspec` is only useful if it stays true to the live grammar. A CI

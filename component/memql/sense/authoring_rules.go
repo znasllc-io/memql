@@ -485,3 +485,44 @@ func BlankBlockComments(src string) string {
 // argsBlockOpenRE matches an `args {` block opener outside strings and
 // comments (the rule scans stripped lines).
 var argsBlockOpenRE = regexp.MustCompile(`(^|[^A-Za-z0-9_])args[ \t]*\{`)
+
+// actorUndeclaredRule mirrors the engine's actor-binding load rule
+// (#2621) as an edit-time Error (#2622): a query/mutate/logic/
+// automation body reading `actor.*` without `@actor` in its preamble.
+// The detection is parser.ActorUndeclaredRefOffsets -- the SAME
+// header/preamble/reference internals the loader validator and the
+// memqlmigrate codemod consume, so squiggle and boot error cannot
+// drift, and every position is computed from the AUTHORED source (the
+// findInSource first-occurrence trap and the lowered-AST scaffolding
+// trap never apply: the rule reads no AST at all). Spec/trait bodies
+// (inverse rule) and shapes (@actor kind marker) are excluded by the
+// shared header regex; declared-but-unused never flags.
+func actorUndeclaredRule(source string) []Diagnostic {
+	offsets := parser.ActorUndeclaredRefOffsets(source)
+	if len(offsets) == 0 {
+		return nil
+	}
+	var diagnostics []Diagnostic
+	line, col, prev := 1, 1, 0
+	for _, off := range offsets {
+		for i := prev; i < off && i < len(source); i++ {
+			if source[i] == '\n' {
+				line++
+				col = 1
+			} else {
+				col++
+			}
+		}
+		prev = off
+		diagnostics = append(diagnostics, Diagnostic{
+			Range: Range{
+				Start: Position{Line: line, Column: col},
+				End:   Position{Line: line, Column: col + len("actor.")},
+			},
+			Severity: SeverityError,
+			Message:  "this body reads the auth envelope (actor.*) but the construct does not declare `@actor`; reading the actor is a declared capability (#2621) -- add a bare `@actor` annotation line above the declaration",
+			Code:     "actor-undeclared",
+		})
+	}
+	return diagnostics
+}
