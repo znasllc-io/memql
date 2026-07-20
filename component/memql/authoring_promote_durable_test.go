@@ -98,7 +98,7 @@ func TestPromoteConstructDurable_PromotedFunctionCallableInFreshSession(t *testi
 	// A net-new authored function (compiled form supplied directly, mirroring the
 	// session author path) durably promotes into the shared function registry.
 	c := &AuthoredConstruct{OwnerUserId: "owner-1", Kind: "query", Name: "promotedDurableQuery", Status: AuthoredActive,
-		Source: `query promotedDurableQuery { }`,
+		Source:   `query promotedDurableQuery { }`,
 		Compiled: &Function{Name: "promotedDurableQuery", FunctionKind: "query", Enabled: true}}
 	if err := e.promoteConstructDurableWithStore(context.Background(), &fakePromoteStore{}, "owner-1", c); err != nil {
 		t.Fatalf("durable promote: %v", err)

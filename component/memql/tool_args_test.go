@@ -15,8 +15,8 @@ func TestApplyToolDefaults_FillsMissing(t *testing.T) {
 
 	got := applyToolDefaults(context.Background(), tool, args, defaults)
 	want := map[string]any{
-		"keyword": "go",                       // LLM-supplied value preserved
-		"partitionId": "v1:cognition:space:abc",   // default fills missing
+		"keyword":     "go",                     // LLM-supplied value preserved
+		"partitionId": "v1:cognition:space:abc", // default fills missing
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("applyToolDefaults = %v, want %v", got, want)
@@ -32,18 +32,18 @@ func TestApplyToolDefaults_AutoInjectedServerWins(t *testing.T) {
 	// values via defaults. Server values must win.
 	args := map[string]any{
 		"partitionId": "v1:cognition:space:FORGED",
-		"agentId": "v1:agents:agent:FORGED",
-		"keyword": "go", // not auto-injected, LLM value preserved
+		"agentId":     "v1:agents:agent:FORGED",
+		"keyword":     "go", // not auto-injected, LLM value preserved
 	}
 	defaults := map[string]any{
-		"partitionId":       "v1:cognition:space:real",
+		"partitionId":   "v1:cognition:space:real",
 		"agentId":       "v1:agents:agent:real",
 		"participantId": "v1:cognition:participant:real",
 	}
 
 	got := applyToolDefaults(context.Background(), tool, args, defaults)
 	want := map[string]any{
-		"partitionId":       "v1:cognition:space:real",       // server wins
+		"partitionId":   "v1:cognition:space:real",       // server wins
 		"agentId":       "v1:agents:agent:real",          // server wins
 		"keyword":       "go",                            // LLM-supplied non-auto-injected preserved
 		"participantId": "v1:cognition:participant:real", // default fills missing
@@ -98,7 +98,7 @@ func TestApplyToolDefaults_NilToolPreservesLegacyBehavior(t *testing.T) {
 	got := applyToolDefaults(context.Background(), nil, args, defaults)
 	want := map[string]any{
 		"ownerUserId": "forged", // unchanged -- no @autoInjected info available
-		"partitionId":     "v1:cognition:space:real",
+		"partitionId": "v1:cognition:space:real",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("applyToolDefaults(nil tool) =\n  got:  %v\n  want: %v", got, want)

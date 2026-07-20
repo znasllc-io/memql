@@ -397,7 +397,7 @@ func TestCanonicalizeRelationshipFields(t *testing.T) {
 
 	t.Run("outgoing fields canonicalize, incoming and untagged fields untouched", func(t *testing.T) {
 		payload := map[string]any{
-			"partitionId":     "daily-2026-05-06", // bare -> default:v1:cognition:space:daily-...
+			"partitionId": "daily-2026-05-06", // bare -> default:v1:cognition:space:daily-...
 			"userId":      "user-abc",         // bare -> v1:identity:user:user-abc
 			"deliveredTo": "utt-bare",         // incoming -> NOT rewritten
 			"displayName": "Jose",             // not a relationship field
@@ -413,7 +413,7 @@ func TestCanonicalizeRelationshipFields(t *testing.T) {
 	t.Run("already-canonical values pass through unchanged", func(t *testing.T) {
 		payload := map[string]any{
 			"partitionId": "v1:cognition:space:abc",
-			"userId":  "v1:identity:user:user-xyz",
+			"userId":      "v1:identity:user:user-xyz",
 		}
 		err := engine.canonicalizeRelationshipFields(ctx, "v1:cognition:participant", payload)
 		require.NoError(t, err)
@@ -434,7 +434,7 @@ func TestCanonicalizeRelationshipFields(t *testing.T) {
 	t.Run("empty-string field skipped (optional null-equivalent)", func(t *testing.T) {
 		payload := map[string]any{
 			"partitionId": "",
-			"userId":  "user-abc",
+			"userId":      "user-abc",
 		}
 		err := engine.canonicalizeRelationshipFields(ctx, "v1:cognition:participant", payload)
 		require.NoError(t, err)

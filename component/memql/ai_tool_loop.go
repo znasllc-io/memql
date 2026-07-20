@@ -264,7 +264,7 @@ func (e *MemQLEngine) InvokeAIChatWithFilteredToolsOpts(ctx context.Context, tem
 	toolCaller, ok := entry.Client.(common.ToolCallingChatAIProvider)
 	if !ok || toolCaller == nil {
 		// DIAGNOSTIC: Log the provider type so we can see why tool calling is unavailable.
-		if e.Logger != nil {
+		if e.Component != nil && e.Logger != nil {
 			e.Logger.Warn("tool loop: provider does not support tool calling, falling back to text-only",
 				"template", templateId,
 				"provider", providerName,
@@ -356,7 +356,7 @@ func (e *MemQLEngine) InvokeAIChatWithFilteredToolsOpts(ctx context.Context, tem
 				trimmed = append(trimmed, summaryMsg)  // trim note
 				trimmed = append(trimmed, messages[1+plan.DropCount:]...)
 				messages = trimmed
-				if e.Logger != nil {
+				if e.Component != nil && e.Logger != nil {
 					e.Logger.Info("tool loop: context trimmed",
 						"template", templateId,
 						"iteration", iter,
@@ -372,7 +372,7 @@ func (e *MemQLEngine) InvokeAIChatWithFilteredToolsOpts(ctx context.Context, tem
 		}
 		step, err := toolCaller.CallChatWithTools(ctx, messages, tools)
 		if err != nil {
-			if e.Logger != nil {
+			if e.Component != nil && e.Logger != nil {
 				e.Logger.Warn("tool loop: API error",
 					"template", templateId,
 					"iteration", iter,
@@ -394,7 +394,7 @@ func (e *MemQLEngine) InvokeAIChatWithFilteredToolsOpts(ctx context.Context, tem
 		messages = append(messages, assistantMsg)
 
 		if len(step.ToolCalls) == 0 {
-			if e.Logger != nil {
+			if e.Component != nil && e.Logger != nil {
 				e.Logger.Info("tool loop: complete",
 					"template", templateId,
 					"iterations", iter+1,
@@ -415,7 +415,7 @@ func (e *MemQLEngine) InvokeAIChatWithFilteredToolsOpts(ctx context.Context, tem
 			}
 			earlyTextCb(ackText)
 			earlyTextEmitted = true
-			if e.Logger != nil {
+			if e.Component != nil && e.Logger != nil {
 				e.Logger.Info("tool loop: early text emitted",
 					"template", templateId,
 					"synthetic", assistantText == "",
@@ -438,7 +438,7 @@ func (e *MemQLEngine) InvokeAIChatWithFilteredToolsOpts(ctx context.Context, tem
 			sig := ToolCallSignature(c.Name, c.Arguments)
 			if loopDetector.Observe(sig) {
 				reason := fmt.Sprintf("repeated identical tool call %q -- stopping (loop detected)", strings.TrimSpace(c.Name))
-				if e.Logger != nil {
+				if e.Component != nil && e.Logger != nil {
 					e.Logger.Warn("tool loop: "+string(StopLoopDetected),
 						"template", templateId,
 						"iteration", iter,
@@ -455,7 +455,7 @@ func (e *MemQLEngine) InvokeAIChatWithFilteredToolsOpts(ctx context.Context, tem
 		}
 
 		// Log the tool calls for this iteration.
-		if e.Logger != nil {
+		if e.Component != nil && e.Logger != nil {
 			logToolNames := make([]string, 0, len(calls))
 			for _, c := range calls {
 				logToolNames = append(logToolNames, strings.TrimSpace(c.Name))
@@ -568,7 +568,7 @@ func (e *MemQLEngine) InvokeAIChatWithFilteredToolsOpts(ctx context.Context, tem
 					if toolErr != nil {
 						// Unknown tool -- structured not_found error (model
 						// can recover by choosing a different tool).
-						if e.Logger != nil {
+						if e.Component != nil && e.Logger != nil {
 							e.Logger.Warn("tool loop: tool not found", "tool", p.name, "error", toolErr)
 						}
 						se := newStructuredToolError(ToolErrorNotFound,
@@ -599,7 +599,7 @@ func (e *MemQLEngine) InvokeAIChatWithFilteredToolsOpts(ctx context.Context, tem
 								return string(b), nil
 							})
 						if se != nil {
-							if e.Logger != nil {
+							if e.Component != nil && e.Logger != nil {
 								e.Logger.Warn("tool loop: tool execution error",
 									"tool", p.name, "type", string(se.Type),
 									"attempts", attempts, "error", se.Message)
@@ -687,7 +687,7 @@ func (e *MemQLEngine) InvokeAIChatWithFilteredToolsOpts(ctx context.Context, tem
 		}
 	}
 
-	if e.Logger != nil {
+	if e.Component != nil && e.Logger != nil {
 		e.Logger.Warn("tool loop: "+string(StopMaxIterations),
 			"template", templateId,
 			"maxIterations", maxIterations,
@@ -714,7 +714,7 @@ func (e *MemQLEngine) toolsForToolCallingFiltered(names []string) []common.ToolD
 		}
 		t, err := e.tools.Get(name)
 		if err != nil || t == nil {
-			if e.Logger != nil {
+			if e.Component != nil && e.Logger != nil {
 				e.Logger.Warn("toolsForToolCallingFiltered: tool not in registry",
 					"tool", name, "error", err)
 			}

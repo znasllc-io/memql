@@ -378,7 +378,7 @@ func (m *SeedMaterializer) applyDevDefaultAvatarPersona(ctx context.Context, def
 
 	vendor, personaId, ok := m.resolveAvatarPersonaByName(ctx, personaName)
 	if !ok {
-		if m.engine != nil && m.engine.Logger != nil {
+		if m.engine != nil && m.engine.Component != nil && m.engine.Logger != nil {
 			m.engine.Logger.Warn("seed materializer: dev default avatar persona not found in catalog; assistant stays avatar-less",
 				"env", devDefaultAvatarPersonaEnv, "personaName", personaName)
 		}
@@ -386,7 +386,7 @@ func (m *SeedMaterializer) applyDevDefaultAvatarPersona(ctx context.Context, def
 	}
 	args["avatarVendor"] = vendor
 	args["avatarPersonaId"] = personaId
-	if m.engine != nil && m.engine.Logger != nil {
+	if m.engine != nil && m.engine.Component != nil && m.engine.Logger != nil {
 		m.engine.Logger.Info("seed materializer: stamped dev default avatar persona on assistant",
 			"personaName", personaName, "vendor", vendor, "avatarPersonaId", personaId)
 	}
@@ -403,7 +403,7 @@ func (m *SeedMaterializer) resolveAvatarPersonaByName(ctx context.Context, name 
 	}
 	result, err := m.engine.Execute(systemActorContext(ctx), `query avatarPersonas()`)
 	if err != nil {
-		if m.engine.Logger != nil {
+		if m.engine != nil && m.engine.Component != nil && m.engine.Logger != nil {
 			m.engine.Logger.Warn("seed materializer: avatarPersonas failed resolving dev default avatar",
 				"error", err)
 		}
@@ -507,7 +507,7 @@ func (m *SeedMaterializer) lookupOrMintPerUserId(ctx context.Context, def *SeedD
 		// name doesn't resolve). Surface LOUDLY rather than firing a
 		// malformed "v1::<concept>" lookup that silently fails; the
 		// deterministic-id fallback keeps seeding correct.
-		if m.engine.Logger != nil {
+		if m.engine != nil && m.engine.Component != nil && m.engine.Logger != nil {
 			m.engine.Logger.Error("seed materializer: cannot resolve canonical concept id for per-user seed dedup; using deterministic id (dedup guard skipped)",
 				"seed", def.Name, "concept", def.UseConcept, "namespace", def.UseNamespace, "error", err.Error())
 		}
@@ -516,7 +516,7 @@ func (m *SeedMaterializer) lookupOrMintPerUserId(ctx context.Context, def *SeedD
 	query := buildPerUserDedupQuery(def, userId, conceptId)
 	result, err := m.engine.Execute(systemActorContext(ctx), query)
 	if err != nil {
-		if m.engine.Logger != nil {
+		if m.engine != nil && m.engine.Component != nil && m.engine.Logger != nil {
 			// #1385: capture the EXACT built query string on the WARN so
 			// a staging parse failure is self-diagnosing -- the next run
 			// reveals the failing input (e.g. a divergent concept id or a

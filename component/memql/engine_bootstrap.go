@@ -396,7 +396,7 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	// constructs each loader recorded on the report.
 	dups := DetectDuplicateConstructs(baseloader.ReadAll(e.Logger))
 	report.SetDuplicates(dups)
-	if e.Logger != nil && len(dups) > 0 {
+	if e.Component != nil && e.Logger != nil && len(dups) > 0 {
 		for _, d := range dups {
 			e.Logger.Error("duplicate DSL construct registration (silent last-wins)",
 				"component", "memql.engine",
@@ -426,7 +426,7 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 			return fmt.Errorf("strict DSL boot refused: %d problem(s) loading the embedded tree + registered packs (%d skipped construct(s), %d duplicate(s)); set %s=1 to boot anyway (operator break-glass).\n%s",
 				report.ProblemCount(), len(report.Skipped), len(report.Duplicates), allowSkipsEnvVar, report.Detail())
 		}
-		if e.Logger != nil {
+		if e.Component != nil && e.Logger != nil {
 			e.Logger.Error("MEMQL_DSL_ALLOW_SKIPS set: booting despite DSL load problems (operator break-glass)",
 				"component", "memql.engine",
 				"problems", report.ProblemCount(),

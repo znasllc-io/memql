@@ -134,13 +134,13 @@ func (e *MemQLEngine) embedCatalogConstruct(ctx context.Context, constructID, ma
 		"vectorField": "content",
 	}
 	if _, err := handler(ctx, args, 1); err != nil {
-		if e.Logger != nil {
+		if e.Component != nil && e.Logger != nil {
 			e.Logger.Warn("catalog construct embed failed (near-match retrieval will skip this construct until backfilled)",
 				"constructId", constructID, "error", err)
 		}
 		return
 	}
-	if e.Logger != nil {
+	if e.Component != nil && e.Logger != nil {
 		e.Logger.Debug("catalog construct embedded for near-match reuse", "constructId", constructID, "match_text_len", len(matchText))
 	}
 }

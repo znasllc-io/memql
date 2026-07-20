@@ -84,7 +84,7 @@ func (e *MemQLEngine) startAuthoringPromoteSubscriberWithStore(ctx context.Conte
 				}
 			}
 			res, err := e.rehydratePromotedBundleNow(ctx, store, owner, bundleId)
-			if e.Logger != nil {
+			if e.Component != nil && e.Logger != nil {
 				if err != nil {
 					e.Logger.Warn("authoring promote propagation: bundle re-hydration failed",
 						"bundleId", bundleId, "owner", owner, "originNode", event.OriginNodeId, "error", err)
