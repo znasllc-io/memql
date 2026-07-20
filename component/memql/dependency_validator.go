@@ -102,9 +102,11 @@ func validateDependencyTree(tree fs.FS) error {
 	var consumers []depConsumer
 
 	for _, p := range paths {
-		if strings.HasPrefix(p, "_reference/") {
-			continue
-		}
+		// No _reference/ skip needed: dslfs.WalkMemqlFiles structurally
+		// omits every underscore-prefixed dir and file for any fs.FS
+		// (walker.go), so `paths` never contains one -- pinned by
+		// dsl/underscore_walk_test.go (#2686, the production sibling of
+		// the fifteen dead test-side skips #2651 removed).
 		raw, rErr := readTreeFile(tree, p)
 		if rErr != nil {
 			return fmt.Errorf("dependency validator: read %s: %w", p, rErr)

@@ -166,3 +166,24 @@ shape guide card {
 		t.Errorf("include error should name the ref + suggest the qualified form, got:\n%s", err.Error())
 	}
 }
+
+// TestValidateDependencyTree_NoReferencePathsWalked pins the #2686
+// invariant that made the removed `_reference/` skip dead: even a
+// SYNTHETIC tree carrying an underscore-prefixed file yields a walked
+// set with no such path, because dslfs.WalkMemqlFiles skips it
+// structurally -- so the validator never sees one and the skip branch
+// could never fire. (The differential proof: the branch was removed and
+// this tree still validates identically.)
+func TestValidateDependencyTree_NoReferencePathsWalked(t *testing.T) {
+	tree := fstest.MapFS{
+		"cognition/shapes.memql":    {Data: []byte("shape space spaceCard {\n  ownerUserId\n}\n")},
+		"_reference/_shape.memql":   {Data: []byte("this is deliberately invalid DSL {{{")},
+		"_reference/nested/x.memql": {Data: []byte("also invalid )))")},
+	}
+	// The invalid _reference/ files would make validation fail IF they
+	// were walked. They are not, so validation succeeds -- which is the
+	// whole reason the skip branch was dead.
+	if err := validateDependencyTree(tree); err != nil {
+		t.Fatalf("validation must not touch _reference/ files (walker skips them): %v", err)
+	}
+}
