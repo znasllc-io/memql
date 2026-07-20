@@ -108,6 +108,10 @@ func (c *ASTConverter) ConvertExpression(expr languageParser.ExpressionNode) (Ex
 		return c.convertArithmeticExpr(node)
 	case *languageParser.BinaryComparisonExpr:
 		return c.convertBinaryComparisonExpr(node)
+	case *languageParser.EqExpr:
+		return c.convertEqExpr(node)
+	case *languageParser.NotExpr:
+		return c.convertNotExpr(node)
 	case *languageParser.RelationshipExpr:
 		return c.convertRelationshipExpr(node)
 	case *languageParser.SortExpr:
@@ -361,7 +365,7 @@ func (c *ASTConverter) convertBinaryComparisonExpr(expr *languageParser.BinaryCo
 		return nil, nil
 	}
 	if !c.allowCollectionMethods {
-		return nil, fmt.Errorf("expression-led comparisons (an arithmetic or literal left side, e.g. `a - 10 > 0` / `0 < a`) are only available in logic / collection lambdas (in-memory), not in specs or query filters (#2542)")
+		return nil, errExpressionLedScope()
 	}
 	left, err := c.ConvertExpression(expr.Left)
 	if err != nil {
@@ -376,6 +380,63 @@ func (c *ASTConverter) convertBinaryComparisonExpr(expr *languageParser.BinaryCo
 		Operator: convertComparisonOperator(expr.Operator),
 		Right:    right,
 	}, nil
+}
+
+// convertEqExpr admits the ==-shaped comparison parseExpressionArg emits
+// for non-identifier-led left sides (cond predicates, #2407) -- the shape
+// behind the fylo#44 live-mount law that #2612 closes: a coalesce (either
+// spelling) compared to a literal inside a nested cond predicate died here
+// with "unsupported parser expression type" while memqllint stayed green.
+// Mirrors convertBinaryComparisonExpr exactly: in-memory only.
+func (c *ASTConverter) convertEqExpr(expr *languageParser.EqExpr) (ExpressionNode, error) {
+	if expr == nil {
+		return nil, nil
+	}
+	if !c.allowCollectionMethods {
+		return nil, errExpressionLedScope()
+	}
+	left, err := c.ConvertExpression(expr.Left)
+	if err != nil {
+		return nil, fmt.Errorf("convert equality left: %w", err)
+	}
+	right, err := c.ConvertExpression(expr.Right)
+	if err != nil {
+		return nil, fmt.Errorf("convert equality right: %w", err)
+	}
+	return &BinaryComparisonExpression{Left: left, Operator: OpEq, Right: right}, nil
+}
+
+// convertNotExpr admits parseExpressionArg's != shape -- a NotExpr wrapping
+// an EqExpr (#2612). Other NOT targets keep the default rejection: the
+// converter admits exactly the shapes the arg grammar emits, no wider.
+func (c *ASTConverter) convertNotExpr(expr *languageParser.NotExpr) (ExpressionNode, error) {
+	if expr == nil {
+		return nil, nil
+	}
+	if !c.allowCollectionMethods {
+		return nil, errExpressionLedScope()
+	}
+	eq, ok := expr.Target.(*languageParser.EqExpr)
+	if !ok {
+		return nil, fmt.Errorf("unsupported parser expression type: %T (NOT converts only when wrapping the != equality shape the arg grammar emits, #2612)", expr.Target)
+	}
+	left, err := c.ConvertExpression(eq.Left)
+	if err != nil {
+		return nil, fmt.Errorf("convert inequality left: %w", err)
+	}
+	right, err := c.ConvertExpression(eq.Right)
+	if err != nil {
+		return nil, fmt.Errorf("convert inequality right: %w", err)
+	}
+	return &BinaryComparisonExpression{Left: left, Operator: OpNe, Right: right}, nil
+}
+
+// errExpressionLedScope is the shared #2542 scope rejection for every
+// expression-led comparison shape (arithmetic, literal, or coalesce-led
+// left sides; == != < <= > >=): in-memory surfaces only, never specs or
+// query filters, so these shapes cannot leak into SQL compilation.
+func errExpressionLedScope() error {
+	return fmt.Errorf("expression-led comparisons (an arithmetic, literal, or coalesce-led left side) are only available in logic / collection lambdas (in-memory), not in specs or query filters (#2542)")
 }
 
 // convertLogicalExpr converts languageParser.LogicalExpr to memql.LogicalExpression.

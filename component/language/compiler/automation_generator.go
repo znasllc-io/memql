@@ -1412,7 +1412,21 @@ func (c *Compiler) expressionToString(expr parser.ExpressionNode) string {
 	case *parser.IsFirstDayOfQuarterExpr:
 		return fmt.Sprintf("isFirstDayOfQuarter(%s)", c.expressionToString(e.Target))
 
+	case *parser.EqExpr:
+		// The ==-shape parseExpressionArg emits for non-identifier-led left
+		// sides (#2612): serialize as the operator form so the runtime
+		// re-parse produces the working BinaryComparisonExpr -- without this
+		// case the predicate became "<<unsupported expression>>", which
+		// EvaluateCondition resolves to FALSE (a silent wrong branch).
+		return fmt.Sprintf("(%s == %s)", c.expressionToString(e.Left), c.expressionToString(e.Right))
+
 	case *parser.NotExpr:
+		// != MUST emit the operator form, not not(==): the re-parse of
+		// not(<comparison>) is not a working cond predicate (#2612 review
+		// finding 2 -- it also pinned always-one-branch).
+		if eq, ok := e.Target.(*parser.EqExpr); ok {
+			return fmt.Sprintf("(%s != %s)", c.expressionToString(eq.Left), c.expressionToString(eq.Right))
+		}
 		return fmt.Sprintf("not(%s)", c.expressionToString(e.Target))
 
 	case *parser.AndExpr:
