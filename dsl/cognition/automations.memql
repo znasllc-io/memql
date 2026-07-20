@@ -139,11 +139,6 @@ automation generateResponse {
 // "voice moved back to your Team chat" card lands -- handled by a
 // sibling automation when needed (deferred until the frontend wiring
 // shows the need).
-@trigger(event="node.created", concept="v1:identity:user", partition="*")
 @filter(payload.activePartitionId!="")
 @description("On second-active-human-in-space, emit the Phase 7 voice-migration canvas-card pair (public group card + private operator card per existing user).")
-automation voiceMigrationOnSecondHuman {
-  step run {
-    logic voiceMigrationOnSecondHuman ( event: event )
-  }
-}
+automation voiceMigrationOnSecondHuman @trigger(event="node.created", concept="v1:identity:user", partition="*") => logic voiceMigrationOnSecondHuman
