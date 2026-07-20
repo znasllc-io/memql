@@ -145,13 +145,27 @@ func TestLanguageConfigOnEnterRules(t *testing.T) {
 		// non-space character, not ban '/' anywhere before the brace.
 		{"note string @description(\"n/a\") {", "", "indent"},
 		{"if total / count > 5 {", "", "indent"},
+		// Paren and bracket blocks (#2638): the multi-line call-args idiom
+		// (dsl/cluster/automations.memql) and list literals must expand and
+		// indent exactly like braces.
+		{"logic bootstrapCluster (", ")", "indentOutdent"},
+		{"      mutation createDatabase (", "", "indent"},
+		{"tags: [", "]", "indentOutdent"},
+		{"tags: [", "", "indent"},
+		// A brace opener stays a brace opener when its tail carries another
+		// pair's closer (a balanced inner pair, a parenthetical comment):
+		// each pair may only be cancelled by its OWN closer.
+		{"filter { cond(a)", "", "indent"},
+		{"x: { a: [1, 2],", "}", "indentOutdent"},
+		{"args { // trailing comment (required)", "", "indent"},
+		{"call(a, {b: 1}", "", "indent"},
 	} {
 		if got := winningEnterAction(t, rules, "", tc.before, tc.after); got != tc.want {
 			t.Errorf("winning action for (%q, %q) = %q, want %q", tc.before, tc.after, got, tc.want)
 		}
 	}
-	// No rule may fire at all on these: balanced braces and commented-out code.
-	for _, before := range []string{"args {}", "// args {", "  // automation x {"} {
+	// No rule may fire at all on these: balanced pairs and commented-out code.
+	for _, before := range []string{"args {}", "// args {", "  // automation x {", "cond(a > 0)", "tags: [\"a\", \"b\"]", "x: [1, 2]", "legalAcceptance: []", "// mutation createDatabase ("} {
 		if got := winningEnterAction(t, rules, "", before, ""); got != "" {
 			t.Errorf("winning action for (%q, \"\") = %q, want no rule to fire", before, got)
 		}
@@ -162,13 +176,15 @@ func TestLanguageConfigOnEnterRules(t *testing.T) {
 		t.Fatal("indentOutdent rule has no afterText; it would fire on every Enter after {")
 	}
 	before := mustCompile(t, "indentOutdent beforeText", between.BeforeText)
-	for _, line := range []string{"args {", "  insert {", "mutation Space createSpace {", "@variant(discriminator=\"kind\") {"} {
+	for _, line := range []string{"args {", "  insert {", "mutation Space createSpace {", "@variant(discriminator=\"kind\") {", "logic bootstrapCluster (", "tags: ["} {
 		if !before.MatchString(line) {
 			t.Errorf("indentOutdent beforeText does not match %q", line)
 		}
 	}
-	if before.MatchString("args {}") {
-		t.Error("indentOutdent beforeText matches a balanced-brace line \"args {}\"")
+	for _, line := range []string{"args {}", "cond(a > 0)"} {
+		if before.MatchString(line) {
+			t.Errorf("indentOutdent beforeText matches balanced-pair line %q", line)
+		}
 	}
 
 	open := rules[indentIdx]
@@ -198,24 +214,28 @@ func TestLanguageConfigIndentationRules(t *testing.T) {
 	inc := mustCompile(t, "increaseIndentPattern", rules.IncreaseIndentPattern)
 	dec := mustCompile(t, "decreaseIndentPattern", rules.DecreaseIndentPattern)
 
-	for _, line := range []string{"args {", "  filter {", "automation dayRollup {", "args { // trailing comment", "note string @description(\"n/a\") {", "if total / count > 5 {"} {
+	for _, line := range []string{"args {", "  filter {", "automation dayRollup {", "args { // trailing comment", "note string @description(\"n/a\") {", "if total / count > 5 {", "logic bootstrapCluster (", "      mutation createDatabase (", "tags: [",
+		// Per-pair cancellation: another pair's closer in the tail (balanced
+		// inner pair, parenthetical comment) must not cancel a brace opener,
+		// and a balanced inner brace pair must not cancel a paren opener.
+		"filter { cond(a)", "x: { a: [1, 2],", "insert { kind: coalesce(x),", "args { // trailing comment (required)", "call(a, {b: 1}"} {
 		if !inc.MatchString(line) {
 			t.Errorf("increaseIndentPattern does not match %q", line)
 		}
 	}
-	for _, line := range []string{"args {}", "st := coalesce(args.stage, \"\")", "// args {", "  // automation x {"} {
+	for _, line := range []string{"args {}", "st := coalesce(args.stage, \"\")", "// args {", "  // automation x {", "cond(a > 0)", "tags: [\"a\", \"b\"]", "x: [1, 2]", "legalAcceptance: []", "// mutation createDatabase ("} {
 		if inc.MatchString(line) {
 			t.Errorf("increaseIndentPattern matches %q, which opens no block", line)
 		}
 	}
-	for _, line := range []string{"}", "  }", "\t}"} {
+	for _, line := range []string{"}", "  }", "\t}", ")", "  )", "\t)", "]", "  ],", "),"} {
 		if !dec.MatchString(line) {
 			t.Errorf("decreaseIndentPattern does not match %q", line)
 		}
 	}
 	// The anchor matters: an unanchored pattern would outdent any line merely
-	// CONTAINING a '}' (balanced object literals, closers mid-line).
-	for _, line := range []string{"insert {", "x: { a: 1 }", "label: \"}\""} {
+	// CONTAINING a closer (balanced object literals, closers mid-line).
+	for _, line := range []string{"insert {", "x: { a: 1 }", "label: \"}\"", "st := coalesce(args.stage, \"\")", "x: [1, 2]"} {
 		if dec.MatchString(line) {
 			t.Errorf("decreaseIndentPattern matches %q, which does not close a block", line)
 		}
