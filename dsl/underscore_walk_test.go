@@ -4,11 +4,13 @@ package dsl
 // and deliberately carry NO per-test _reference/ exclusions (memql#2651):
 // the exemption is structural, not policy. WalkMemqlFiles skips every
 // underscore-prefixed directory and file (pinned in the walker's own tests)
-// and the go:embed directive omits _reference/ entirely. This test states
-// that fact once, against the REAL tree: if either half ever changes -- a
-// walker regression, or an underscore path reaching the embedded/registered
-// tree -- every gate in this package would silently start scanning
-// documentation skeletons, so fail loudly here instead.
+// and the go:embed directive omits _reference/ entirely. This test pins
+// the COMPOSED end condition against the real tree: the walk never yields
+// an underscore path. (Underscore paths INSIDE the tree are normal
+// soft-disabled content -- common/_partials is embedded today -- so only
+// the walk OUTPUT matters here; the per-half single-fault pins live in
+// component/memql/dslfs/walker_test.go.) If this fails, every gate in this
+// package has silently started scanning paths it was written to never see.
 
 import (
 	"strings"
