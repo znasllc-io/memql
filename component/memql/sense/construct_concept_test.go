@@ -9,9 +9,9 @@ type fakeRegistry struct {
 	concepts []string
 }
 
-func (f *fakeRegistry) FunctionNames() []string                 { return nil }
+func (f *fakeRegistry) FunctionNames() []string                  { return nil }
 func (f *fakeRegistry) FunctionGet(string) (*FunctionInfo, bool) { return nil, false }
-func (f *fakeRegistry) ConceptNames() []string                  { return f.concepts }
+func (f *fakeRegistry) ConceptNames() []string                   { return f.concepts }
 func (f *fakeRegistry) ConceptGet(name string) (*ConceptInfo, bool) {
 	for _, c := range f.concepts {
 		if c == name {
@@ -20,16 +20,16 @@ func (f *fakeRegistry) ConceptGet(name string) (*ConceptInfo, bool) {
 	}
 	return nil, false
 }
-func (f *fakeRegistry) SpecNames() []string                    { return nil }
-func (f *fakeRegistry) ToolNames() []string                    { return nil }
-func (f *fakeRegistry) ToolGet(string) (*ToolInfo, bool)       { return nil, false }
-func (f *fakeRegistry) PromptNames() []string                  { return nil }
-func (f *fakeRegistry) PromptGet(string) (*PromptInfo, bool)   { return nil, false }
-func (f *fakeRegistry) ProviderNames() []string                { return nil }
+func (f *fakeRegistry) SpecNames() []string                      { return nil }
+func (f *fakeRegistry) ToolNames() []string                      { return nil }
+func (f *fakeRegistry) ToolGet(string) (*ToolInfo, bool)         { return nil, false }
+func (f *fakeRegistry) PromptNames() []string                    { return nil }
+func (f *fakeRegistry) PromptGet(string) (*PromptInfo, bool)     { return nil, false }
+func (f *fakeRegistry) ProviderNames() []string                  { return nil }
 func (f *fakeRegistry) ProviderGet(string) (*ProviderInfo, bool) { return nil, false }
-func (f *fakeRegistry) ShapeNames() []string                   { return nil }
-func (f *fakeRegistry) ShapeGet(string) (*ShapeInfo, bool)     { return nil, false }
-func (f *fakeRegistry) IntegrationCapabilities() []string      { return nil }
+func (f *fakeRegistry) ShapeNames() []string                     { return nil }
+func (f *fakeRegistry) ShapeGet(string) (*ShapeInfo, bool)       { return nil, false }
+func (f *fakeRegistry) IntegrationCapabilities() []string        { return nil }
 
 // completionLabels collects completion labels at the end of the given source.
 // The cursor is placed at the end of the (single-line or multi-line) source.
@@ -173,4 +173,33 @@ func labelsOf(items []CompletionItem) []string {
 		out = append(out, it.Label)
 	}
 	return out
+}
+
+// TestConstructConceptImportSuppressedForSameDomain pins the #2617
+// ambient-scope carve-out: a concept of the file's OWN domain needs no
+// import (the loader seeds the namespace hint from the directory), so
+// the "use ..." import suggestion must not fire -- while a cross-domain
+// concept still gets one.
+func TestConstructConceptImportSuppressedForSameDomain(t *testing.T) {
+	rp := &fakeRegistry{concepts: []string{"v1:planner:plan", "v1:cognition:space"}}
+	s := New(rp)
+	src := "mutate pla"
+	items := s.Complete(src, 1, len(src)+1, "dsl/planner/mutations.memql")
+	for _, it := range items {
+		if it.Kind == "snippet" && it.Label == "use planner.concepts.{ plan }" {
+			t.Errorf("same-domain concept must not get an import suggestion, got %+v", it)
+		}
+	}
+
+	src = "mutate spa"
+	items = s.Complete(src, 1, len(src)+1, "dsl/planner/mutations.memql")
+	found := false
+	for _, it := range items {
+		if it.Kind == "snippet" && it.Label == "use cognition.concepts.{ space }" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("cross-domain concept must still get the import suggestion")
+	}
 }

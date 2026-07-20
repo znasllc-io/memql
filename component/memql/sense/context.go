@@ -10,17 +10,17 @@ import (
 type ContextKind int
 
 const (
-	ContextTopLevel       ContextKind = iota // Outside any definition
-	ContextAnnotation                        // After @
-	ContextAnnotationArgs                    // Inside @trigger(...)
-	ContextFuncBody                          // Inside func body { ... }
-	ContextFuncCallArgs                      // Inside someFunc(...)
-	ContextConceptFilter                     // After concept==
-	ContextFieldAccess                       // After node.payload. or event.payload.
-	ContextReceiver                          // Inside func (...) receiver declaration
-	ContextUseDeclaration                    // After "use "
-	ContextConceptDef                        // Inside concept { ... }
-	ContextConstructConcept                  // After a concept-binding construct keyword (mutation/query/seed/shape <Concept>)
+	ContextTopLevel         ContextKind = iota // Outside any definition
+	ContextAnnotation                          // After @
+	ContextAnnotationArgs                      // Inside @trigger(...)
+	ContextFuncBody                            // Inside func body { ... }
+	ContextFuncCallArgs                        // Inside someFunc(...)
+	ContextConceptFilter                       // After concept==
+	ContextFieldAccess                         // After node.payload. or event.payload.
+	ContextReceiver                            // Inside func (...) receiver declaration
+	ContextUseDeclaration                      // After "use "
+	ContextConceptDef                          // Inside concept { ... }
+	ContextConstructConcept                    // After a concept-binding construct keyword (mutation/query/seed/shape <Concept>)
 )
 
 // CursorContext describes the syntactic context at a cursor position.
@@ -34,6 +34,7 @@ type CursorContext struct {
 	ConceptName    string // if in field access, the relevant concept
 	ConstructKey   string // if after a concept-binding construct keyword, the keyword (mutation/query/seed/shape)
 	Source         string // full source text (so completers can scan file-scope imports)
+	FilePath       string // the document's path (so completers can derive the ambient domain, #2617)
 }
 
 // analyzeCursorContext determines the syntactic context at a cursor position.

@@ -9,8 +9,6 @@
 // calendarEventById first, so a caller can only mutate their own
 // events. Exposed as typed SDK methods on `conn.query`.
 
-use calendar.concepts.{ calendarEvent }
-
 @description("Create a native calendar event owned by the authenticated caller. ownerUserId is stamped from actor.userId (caller-scoped write); createdAt + createdBy are engine-stamped row intrinsics (NOT payload fields -- declaring them is rejected as reserved, memql#1673); source defaults to 'native'. The reactive harness's reminder triggers pick the row up via upcomingEvents. Pass `eventId` to control the id (idempotent re-create), else the engine assigns one.")
 mutate calendarEvent createCalendarEvent {
   args {

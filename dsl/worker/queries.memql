@@ -4,7 +4,6 @@
 // files cover the other construct kinds.
 
 use planner.concepts.{ plan }
-use worker.concepts.{ invocation, registration }
 
 @unbounded("expired worker-invocation retention sweep -- an internal sweep that must see all")
 @description("List worker invocation rows for retention pruning. When createdBefore is supplied, restricts to rows created strictly before it -- the retention sweep's logic computes the cutoff (now - WORKER_INVOCATION_RETENTION_DAYS) and pushes it down (#2369).")

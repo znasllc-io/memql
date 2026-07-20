@@ -9,8 +9,6 @@
 // Go level (the integration short-circuits before invoking the
 // mutation). The release path is similarly single-write.
 
-use workbench.concepts.{ workspace }
-
 @description("Create the v1:workbench:workspace row for a Plan on first workbenchHost call. Storage root is supplied by the workbench integration which has already created the directory on disk.")
 mutate workspace provisionWorkspace {
   args {

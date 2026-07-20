@@ -25,8 +25,6 @@
 // (e.g. v1:library:memory:mem-...), so the direct bind yields the identical ref.
 // The #2235 library-index-promotion conformance dimension guards all five paths.
 
-use library.mutations.{ createArtifact }
-
 @trigger(event="node.created", concept="v1:library:generatedOutput", partition="*")
 @description("On generated-output creation, promote the new v1:library:generatedOutput into the Library as an artifact index row (lens=artifact, kind=generated_output). #2235.")
 automation indexGeneratedOutputOnCreate {

@@ -1,8 +1,5 @@
 // queries.memql -- safety namespace.
 
-use safety.concepts.{ classification, approvalRequest, outputScreening }
-use safety.shapes.{ classificationFull, approvalRequestFull, outputScreeningFull }
-
 @unbounded("safety classification catalog -- a bounded config set consumed whole")
 @description("Returns every v1:safety:classification row. Used by the retention sweep (mirrors allPolicyTraces); future cockpit Command Safety view will layer more targeted queries on top.")
 query classification allSafetyClassifications {

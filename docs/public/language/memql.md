@@ -150,11 +150,14 @@ Consumers should check for the presence of `errors` before operating on the resu
 
 Concepts are schemas for nodes (like tables in SQL). Each concept is declared in struct form in `dsl/<namespace>/concepts.memql`. The full concept id is derived from the `@namespace` annotation plus the construct name: `@namespace("cognition")` + `concept space` → `v1:cognition:space`. Nested namespaces are colon-delimited (`@namespace("cognition:text")` + `concept chunk` → `v1:cognition:text:chunk`). Each segment must be a single lowercase alphanumeric word; invalid names cause the loader to reject the concept.
 
+Cross-domain references are imported with a file-top
+`use <domain>.<construct>.{ names }` line. Constructs of the file's
+OWN domain are ambient -- in scope with no import (#2617); the tree
+gate keeps redundant same-domain imports out of the corpus.
+
 ```memql
-use cognition.concepts.{ space }
 use agents.concepts.{ agent }
 
-@version("1.0.0")
 @namespace("cognition")
 @description("Per-(spaceId, agentId) audio control override.")
 concept audioOverride {

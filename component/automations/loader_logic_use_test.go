@@ -73,7 +73,7 @@ func TestDryRunCompileResolvesLogicConstructUseImports(t *testing.T) {
 		"killSwitchSuspendsRunningPlans": false, "onDelegationCreated": false,
 	}
 
-	sawLogicUseImport := false
+	automationFiles := 0
 
 	err := fs.WalkDir(tree, ".", func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -87,9 +87,7 @@ func TestDryRunCompileResolvesLogicConstructUseImports(t *testing.T) {
 			t.Fatalf("read %s: %v", path, readErr)
 		}
 		source := string(data)
-		if strings.Contains(source, ".logic.{") {
-			sawLogicUseImport = true
-		}
+		automationFiles++
 
 		// ExtractAutomationSlices prepends the file-top `use` preamble to each
 		// slice -- the exact text the dry-run path compiles (memql#1663).
@@ -113,8 +111,14 @@ func TestDryRunCompileResolvesLogicConstructUseImports(t *testing.T) {
 		t.Fatalf("walk dsl tree: %v", err)
 	}
 
-	if !sawLogicUseImport {
-		t.Fatal("no automation file imported a `.logic.{ ... }` construct -- the regression fixture is stale")
+	// #2617: same-domain constructs are ambient and every `.logic.{ }`
+	// import in the corpus was same-domain, so the tree legitimately
+	// carries none -- the old saw-an-import staleness sentinel is gone.
+	// The memql#1681 protection is the walk itself: every automation
+	// slice compiles through the dry-run path with its use preamble,
+	// and the tracked list below proves the compile actually ran.
+	if automationFiles == 0 {
+		t.Fatal("no automations.memql files walked -- the regression fixture tree is stale")
 	}
 
 	for name, compiled := range wantAutomations {

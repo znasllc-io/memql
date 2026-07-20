@@ -13,8 +13,6 @@
 // is tracked as a follow-up. The query-layer gating (traits.memql) keeps
 // non-developers from ever reaching the queues in the first place.
 
-use forge.concepts.{ project, request, requestEvent }
-
 // ---------------------------------------------------------------------------
 // createProject -- register a project forge develops against.
 // ---------------------------------------------------------------------------

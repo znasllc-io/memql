@@ -16,9 +16,6 @@
 // topology), not the deployment record, so they belong with the cluster
 // concept they project. Only the deployment-RECORD reads move here.
 
-use deployment.concepts.{ deployment, deploymentNodeSpec }
-use deployment.shapes.{ deploymentFull, deploymentNodeSpecFull }
-
 // ---- deploymentsForCluster ----
 
 // Deployment history for a cluster (#1872). Returns ONE row per

@@ -7,8 +7,6 @@
 // (v1:cluster:deployment / v1:cluster:deploymentNodeSpec -- see concepts.memql),
 // so only the import path moved (`use deployment.concepts.{ ... }`).
 
-use deployment.concepts.{ deployment, deploymentNodeSpec }
-
 @row
 @description("Deployment record projection (#1872). Carries the full lifecycle row: stable deploymentId, current status, the version + image digest being shipped, the deploy target (provider/environment/region), the target clusterId, the operator (triggeredBy), the supersession back-pointer, and both timestamps (row.createdAt = deploy start, payload.updatedAt = last transition). Backs the cockpit Deployments history + asOf reconstruction.")
 shape deployment deploymentFull {

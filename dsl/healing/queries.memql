@@ -16,8 +16,6 @@
 // entirely -- exactly the RBAC pattern where base roles are seeded, not
 // queried as a separate store.
 
-use healing.concepts.{ healedOverride }
-
 @description("Resolve the winning VALID overlay override for a base construct -- the read half of the two-tier resolution (E4.2 / memql#2140). Returns the caller's newest valid, active overlay override for the given baseConstructId (highest version first, newest createdAt on a tie). An empty result means no valid override exists and the Go resolver falls back to the embedded base. Owned: gated by ownerUserId==actor.userId, and tier=overlay + valid + active so a base-tier or unvalidated or retired row can never win resolution.")
 query healedOverride resolveValidOverride {
   args {

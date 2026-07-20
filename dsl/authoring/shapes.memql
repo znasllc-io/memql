@@ -4,8 +4,6 @@
 // Comprehensive @row shapes over v1:authoring:bundle + v1:authoring:construct
 // for the management UI, the gate runners, and the authored runtime loader.
 
-use authoring.concepts.{ bundle, construct, dependencyEdge }
-
 @row
 @description("Comprehensive bundle projection: every field including the validation/dry-run reports and lifecycle timestamps. Backs the management list, the Gate 3 approval artifact, and the runtime loader.")
 shape bundle bundleFull {

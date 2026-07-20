@@ -41,7 +41,6 @@
 // - bootstrapSession automation creates sessions for new AI
 //   participants.
 // - Emits "si.auto-joined" event for observability.
-use cognition.queries.{ hasAIResponseForReply, participantSession }
 use identity.queries.{ usersActiveInSpace }
 
 // automations/v1/cognition/bootstrapSession/automation.memql

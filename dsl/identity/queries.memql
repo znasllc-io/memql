@@ -3,8 +3,6 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use identity.concepts.{ accessRequest, accountEntitlement, auditEvent, authCode, authSession, clusterSettings, delegation, identity, invitation, magicLinkRequest, oauthClient, user, workerPairingCode }
-
 // ---- queries/v1/identity/accountEntitlement.memql ----
 
 // accountEntitlement - the account's task-concurrency cap
@@ -840,7 +838,6 @@ query magicLinkRequest magicLinkRequestByTokenHash {
   filter  tokenHash==args.tokenHash
   shape   magicLinkRequestFull
 }
-
 
 // ---- queries/v1/identity/patIdentitiesForUser.memql ----
 

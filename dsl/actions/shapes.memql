@@ -3,8 +3,6 @@
 // Reusable projections in the `actions` namespace (epic #1734). Phase 0
 // (#1735) ships candidateFull -- the read projection over a captured trace.
 
-use actions.concepts.{ candidate, action, surface }
-
 @row
 @description("Full v1:actions:candidate projection: every field the action-library browse/recall surfaces need to inspect a captured trace (#1735).")
 shape candidate candidateFull {

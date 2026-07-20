@@ -9,7 +9,6 @@
 // Decides whether the cluster / database / identity-provider rows need
 // creating; the calling automation owns the conditional writes. Only BFF
 // nodes create. Idempotent: decides "create nothing" once a cluster exists.
-use cluster.queries.{ existingCluster, staleClusterNodes }
 use platform.queries.{ globalVariable }
 
 // PURE decision logic (ADR S2.1 logic-purity, #2235). It performs the

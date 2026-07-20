@@ -186,7 +186,7 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 	// `canonicalId(x, <importedConceptName>)` to the canonical-id string form
 	// against the file's `use ...concepts.{ ... }` imports + the registry. The
 	// quoted string form passes through unchanged (additive).
-	if resolved, cerr := NewConceptResolver(registry).ResolveCanonicalIdConceptRefs(content); cerr != nil {
+	if resolved, cerr := NewConceptResolver(registry).ResolveCanonicalIdConceptRefsInDomain(content, DomainFromFilePath(origin)); cerr != nil {
 		return nil, fmt.Errorf("%s: %w", origin, cerr)
 	} else {
 		content = resolved
@@ -228,7 +228,7 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 			version = "v1" // default
 		}
 		resolver := NewConceptResolver(registry)
-		if err := resolver.ResolveFileWithSignatureConcepts(file, version, signatureConcepts); err != nil {
+		if err := resolver.ResolveFileWithSignatureConceptsInDomain(file, version, signatureConcepts, DomainFromFilePath(origin)); err != nil {
 			return nil, fmt.Errorf("concept resolution: %w", err)
 		}
 	}
@@ -269,6 +269,9 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 	if boundConcept == "" && registry != nil && len(signatureConcepts) == 1 {
 		resolver := NewConceptResolver(registry)
 		nsHint := namespaceHintForName(file.Uses, signatureConcepts[0])
+		if nsHint == "" {
+			nsHint = DomainFromFilePath(origin) // ambient same-domain scope (#2617)
+		}
 		if id, err := resolver.resolveBareConceptNameWithNamespace(signatureConcepts[0], nsHint); err == nil {
 			boundConcept = id
 		}

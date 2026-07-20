@@ -3,9 +3,6 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use cognition.logic.{ bootstrapSession, generateResponse, voiceMigrationOnSecondHuman }
-use cognition.mutations.{ createSessionForParticipant, sendTextUtterance }
-
 // automations/v1/cognition/bootstrapSession/automation.memql
 // Auto-creates a v1:cognition:session record when a participant is created.
 // Ensures every participant has a session tracking their real-time interaction state.

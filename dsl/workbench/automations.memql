@@ -7,10 +7,6 @@
 // automation flips the concept's lifecycle bit and emits the
 // event the integration listens for.
 
-use workbench.logic.{ planIsTerminal, releaseWorkspaceOnPlanTerminal }
-use workbench.mutations.{ releaseWorkspace }
-use workbench.builtins.{ workbenchTeardownDirectory }
-
 @trigger(event="graph.node.updated.v1:planner:plan")
 @description("When a Plan transitions to a terminal status (succeeded / failed / cancelled), release the associated workbench workspace if one exists and tear down its on-disk directory. terminal (pure logic planIsTerminal) owns the terminal-status vocabulary ONCE (#2370); decide (pure) returns the plan's workspaces; apply releases each still-provisioned one and teardown removes the directory tree (even when no concept row exists -- the MVP integration provisions without writing the row), both gated on the terminal scalar.")
 automation releaseWorkspaceOnPlanTerminal {

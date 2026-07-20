@@ -3,8 +3,6 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use knowledge.concepts.{ documentChunk }
-
 // ---- mutations/v1/knowledge/createDocument.memql ----
 
 // mutationCreateDocument -- single write path for v1:knowledge:document.

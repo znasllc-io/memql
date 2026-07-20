@@ -16,7 +16,6 @@
 // invalidation needs lands alongside the custom-role mutations in E1.4 /
 // the enforcement wiring in E1.6.
 
-use rbac.concepts.{ capability, role }
 use common.traits.{ isActiveRecord }
 
 @public

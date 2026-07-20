@@ -11,8 +11,6 @@
 // existing createDeployment / updateDeploymentStatus mutations
 // (dsl/deployment/mutations.memql) one-write-per-step.
 
-use deployment.builtins.{ suggestNextVersion }
-
 // ---- gate ----
 
 // deployGateGreen is the pure post-deploy-gate check. It reads the structured

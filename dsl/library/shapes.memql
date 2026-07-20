@@ -1,7 +1,5 @@
 // library domain -- row projections.
 
-use library.concepts.{ artifact, generatedOutput, memory, documentVersion }
-
 @row
 @description("Comprehensive Library index projection: every payload field plus row id and timestamps. The default shape for the Library list / search / filter reads (memql#695) and the per-item detail view.")
 shape artifact artifactFull {

@@ -4,8 +4,6 @@
 // payload.ownerUserId==actor.userId so a caller can only ever read
 // their own notes; no arg widens the row set beyond their ownership.
 
-use notes.concepts.{ note }
-
 @description("List the caller's notes. Owned: the row set is gated by ownerUserId==actor.userId server-side, so cross-user reads are impossible.")
 query note notes {
   filter  ownerUserId==actor.userId

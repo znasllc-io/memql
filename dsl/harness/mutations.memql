@@ -27,8 +27,6 @@
 // is preserved. The conformance classifier reads actor.userId in the
 // insert bodies and buckets these as owned.
 
-use harness.concepts.{ plan, step, observation, semanticMemory, consolidationCursor }
-
 // createHarnessPlan
 // ==========
 // Create a v1:harness:plan in status='open'. ownerUserId is

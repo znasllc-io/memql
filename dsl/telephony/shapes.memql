@@ -1,8 +1,6 @@
 // Row-projection shapes for the telephony concepts. Used by the telephony
 // queries and by the cockpit number/call views.
 
-use telephony.concepts.{ number, trunk, call, consent }
-
 @row
 @description("Full DID projection: address, carrier, the bound partition (Amendment A), purpose/status, origination class, and cost/lifecycle.")
 shape number numberFull {

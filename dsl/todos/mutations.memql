@@ -9,8 +9,6 @@
 // re-stamped on every version so ownership is immutable across the
 // row's history.
 
-use todos.concepts.{ todo }
-
 @description("Create a to-do for the caller. Owned: ownerUserId is stamped from actor.userId, so a caller can only ever create their own to-dos. sourceResponsibilityId is optional -- responsibilities pass it to attribute app-generated tasks; user-created to-dos leave it empty.")
 mutate todo createTodo {
   args {

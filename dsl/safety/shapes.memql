@@ -1,7 +1,5 @@
 // shapes.memql -- safety namespace.
 
-use safety.concepts.{ classification, approvalRequest, outputScreening }
-
 @row
 @description("Comprehensive projection of every v1:safety:classification field. Backs the retention sweep + future cockpit Command Safety view.")
 shape classification classificationFull {

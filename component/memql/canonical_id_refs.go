@@ -45,6 +45,17 @@ func importedConceptHints(content string) map[string]string {
 // inside string literals (e.g. an `@description`) is skipped. An unimported or
 // unknown concept name is a hard error so the typo surfaces at load.
 func (r *ConceptResolver) ResolveCanonicalIdConceptRefs(content string) (string, error) {
+	return r.ResolveCanonicalIdConceptRefsInDomain(content, "")
+}
+
+// ResolveCanonicalIdConceptRefsInDomain is ResolveCanonicalIdConceptRefs with
+// the #2617 ambient-domain rule: when no file-top import names the concept,
+// the file's own domain directory is tried as the namespace hint, and the
+// resolution is accepted only when the resolved id actually lives in that
+// domain -- cross-domain concepts still require the explicit import, so the
+// import discipline stays enforceable at lint. An explicit import always
+// wins (the import map is consulted first).
+func (r *ConceptResolver) ResolveCanonicalIdConceptRefsInDomain(content, domain string) (string, error) {
 	imports := importedConceptHints(content)
 
 	var b strings.Builder
@@ -97,7 +108,7 @@ func (r *ConceptResolver) ResolveCanonicalIdConceptRefs(content string) (string,
 		}
 		if depth != 0 || commaIdx == -1 {
 			// Malformed / single-arg -- leave it for the parser to flag.
-			b.WriteString(content[i:openParen+1])
+			b.WriteString(content[i : openParen+1])
 			i = openParen + 1
 			continue
 		}
@@ -113,8 +124,15 @@ func (r *ConceptResolver) ResolveCanonicalIdConceptRefs(content string) (string,
 		}
 
 		nsHint, ok := imports[secondArg]
+		if !ok && domain != "" {
+			// Ambient same-domain scope (#2617): accept the bare name when
+			// it resolves INTO the file's own domain.
+			if id, aerr := r.resolveBareConceptNameWithNamespace(secondArg, domain); aerr == nil && strings.Contains(id, ":"+domain+":") {
+				nsHint, ok = domain, true
+			}
+		}
 		if !ok {
-			return "", fmt.Errorf("canonicalId: concept %q is not imported -- add a file-top `use <ns>.concepts.{ %s }` import (or use the canonical-id string form)", secondArg, secondArg)
+			return "", fmt.Errorf("canonicalId: concept %q is neither imported nor a same-domain concept -- add a file-top `use <ns>.concepts.{ %s }` import (or use the canonical-id string form)", secondArg, secondArg)
 		}
 		canonicalID, err := r.resolveBareConceptNameWithNamespace(secondArg, nsHint)
 		if err != nil {

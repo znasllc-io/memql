@@ -7,8 +7,6 @@
 // tool's `list` / `find` actions and the frontend read the rest.
 // Exposed as typed SDK methods on `conn.query`.
 
-use calendar.concepts.{ calendarEvent }
-use calendar.shapes.{ calendarEventFull }
 use common.traits.{ isNotDeleted }
 
 @description("Get a single calendar event by node id. Self-scoped: the ownerUserId==actor.userId predicate guarantees a caller can only fetch their own events. Backs the calendar tool's update/delete pre-read and the event detail view.")

@@ -1,6 +1,5 @@
 // logic.memql -- safety namespace.
 
-use safety.queries.{ allSafetyClassifications, allOutputScreenings }
 use platform.queries.{ globalVariable }
 
 @description("Daily sweep over v1:safety:classification rows past MEMQL_SAFETY_CLASSIFICATION_RETENTION_DAYS (default 90). Currently observation-only: emits a 'safety.classification.retention.observed' event with the candidate count. Per-row delete lands when the engine grows a delete() mutation -- mirrors the same gap purgeExpiredPolicyTraces + auditEventRetentionSweep document.")
