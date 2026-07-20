@@ -152,6 +152,13 @@ func rehydratePromotedBundleWithStore(ctx context.Context, store promoteRehydrat
 		}
 		result.Seen++
 		if perr := cfg.promote(ctx, row); perr != nil {
+			if errors.Is(perr, errRehydrateSkippedDisabled) {
+				// Intentional skip (#2607/#2643), same classification as the
+				// boot walk: a stored @disabled row must not read as a
+				// re-hydration failure on peer replicas either.
+				result.SkippedDisabled++
+				continue
+			}
 			result.Failed = append(result.Failed, row.Kind+":"+row.Name)
 			continue
 		}

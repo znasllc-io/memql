@@ -34,6 +34,7 @@ package memql
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"strings"
@@ -42,6 +43,12 @@ import (
 	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/core/id"
 )
+
+// errRehydrateSkippedDisabled is recompileAndPromoteRow's intentional-skip
+// signal for a stored @disabled row (#2607/#2643): the walk counts it as
+// SkippedDisabled, and the quarantine defer lets it pass -- an intentional
+// disable must never read as a re-hydration failure.
+var errRehydrateSkippedDisabled = errors.New("authored construct is @disabled; skipped at re-hydration (name reserved)")
 
 // durablePromoteBundlePrefix marks a v1:authoring:bundle row as one created by
 // the durable-promote path (vs. the planner-authored-automation path). The boot
@@ -315,6 +322,10 @@ type RehydrateResult struct {
 	Seen       int      `json:"seen"`
 	Rehydrated int      `json:"rehydrated"`
 	Failed     []string `json:"failed,omitempty"`
+	// SkippedDisabled counts stored @disabled rows: intentional skips (name
+	// reserved, nothing registered), neither re-hydrated nor failed
+	// (memql#2643).
+	SkippedDisabled int `json:"skippedDisabled,omitempty"`
 }
 
 // promoteRehydrateStore is the narrow graph surface the boot re-hydration needs:
@@ -362,6 +373,13 @@ func rehydratePromotedConstructsWithStore(ctx context.Context, store promoteRehy
 			}
 			result.Seen++
 			if perr := cfg.promote(ctx, row); perr != nil {
+				if errors.Is(perr, errRehydrateSkippedDisabled) {
+					// Intentional skip (#2607/#2643): the stored row is
+					// @disabled -- name reserved, nothing registered, and
+					// deliberately NOT a Failed entry.
+					result.SkippedDisabled++
+					continue
+				}
 				result.Failed = append(result.Failed, row.Kind+":"+row.Name)
 				continue
 			}
@@ -403,7 +421,7 @@ func (e *MemQLEngine) recompileAndPromoteRow(ctx context.Context, row AuthoringC
 	// boot walk and the live authoring-promote propagation path, which both
 	// funnel here.
 	defer func() {
-		if err != nil {
+		if err != nil && !errors.Is(err, errRehydrateSkippedDisabled) {
 			e.quarantineRehydratedConstruct(row, err)
 		}
 	}()
@@ -440,6 +458,40 @@ func (e *MemQLEngine) recompileAndPromoteRow(ctx context.Context, row AuthoringC
 		spec, err := compileAuthoredSpec(sc)
 		if err != nil {
 			return fmt.Errorf("recompile %s %q: %w", row.Kind, row.Name, err)
+		}
+		if spec == nil {
+			// compileAuthoredSpec's (nil, nil) is the #2607 intentional-skip
+			// contract: the stored row is @disabled. An intentional disable
+			// must NOT read as a failure -- skip re-registration without the
+			// quarantine channel, and reserve the name so an authored promote
+			// cannot claim it (the resurrection guard, memql#2643).
+			//
+			// The reservation may only claim UNOWNED territory. A stale
+			// @disabled row must never disable a name that is LIVE in the
+			// registry (a core spec of the same name, or the author's own
+			// corrected re-promote on a later walk tick), and must never
+			// overwrite an existing reservation's provenance (a core
+			// retirement is permanent by design; planting the authored
+			// marker over it would let a later promote lift it -- or let
+			// demote remove a core spec).
+			if e.specs != nil {
+				_, live := e.specs.Lookup(row.Name)
+				if !live && !e.specs.IsDisabled(row.Name) {
+					e.specs.MarkDisabled(row.Name)
+					// Record the reservation as AUTHORED (unlike a
+					// core-loader reservation) so the owner's lifecycle can
+					// release it: promoting the corrected (enabled) source
+					// re-enables the name, demoting it retires it. Without
+					// the marker the name would be permanently dead -- no
+					// API path lifts a core reservation.
+					e.promotedAuthored.Store("spec:"+row.Name, true)
+				}
+			}
+			if e.Component != nil && e.Logger != nil {
+				e.Logger.Info("durable authored construct is @disabled; skipped at re-hydration (nothing registered)",
+					"component", "memql.engine", "kind", row.Kind, "name", row.Name, "bundleId", row.BundleId, "owner", row.OwnerUserId)
+			}
+			return errRehydrateSkippedDisabled
 		}
 		c.Compiled = spec
 	default:

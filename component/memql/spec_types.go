@@ -73,6 +73,20 @@ func (r *SpecRegistry) MarkDisabled(name string) {
 	r.disabledMu.Unlock()
 }
 
+// UnmarkDisabled releases a @disabled name reservation. Only the authored
+// lifecycle calls it (memql#2643): a reservation placed by a stored @disabled
+// AUTHORED row is lifted by promoting the corrected (enabled) source or by
+// demoting the name. Core-loader reservations are never released.
+func (r *SpecRegistry) UnmarkDisabled(name string) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return
+	}
+	r.disabledMu.Lock()
+	delete(r.disabled, name)
+	r.disabledMu.Unlock()
+}
+
 // IsDisabled reports whether the name was skipped as @disabled at load.
 func (r *SpecRegistry) IsDisabled(name string) bool {
 	r.disabledMu.RLock()

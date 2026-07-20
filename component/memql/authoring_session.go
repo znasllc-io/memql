@@ -514,7 +514,14 @@ func (e *MemQLEngine) PromoteAuthoredConstruct(ctx context.Context, c *AuthoredC
 		return nil
 	case "spec", "trait":
 		spec, ok := c.Compiled.(*Spec)
-		if !ok || spec == nil {
+		if ok && spec == nil {
+			// A typed-nil *Spec is compileAuthoredSpec's (nil, nil) output --
+			// the #2607 intentional-skip contract for @disabled. The construct
+			// compiled fine and was deliberately disabled; name the state, not
+			// a compile failure (memql#2643).
+			return fmt.Errorf("authoring: promote %s %q: construct is @disabled; enable it (remove @disabled from the source) before promoting", c.Kind, c.Name)
+		}
+		if !ok {
 			return fmt.Errorf("authoring: promote %s %q: construct is not compiled", c.Kind, c.Name)
 		}
 		if e.specs == nil {
@@ -522,7 +529,13 @@ func (e *MemQLEngine) PromoteAuthoredConstruct(ctx context.Context, c *AuthoredC
 		}
 		key := "spec:" + spec.Name
 		if e.specs.IsDisabled(spec.Name) {
-			return fmt.Errorf("authoring: promote %s %q: a @disabled core construct owns that name (re-enable or rename; promotion cannot claim a retired core name)", c.Kind, c.Name)
+			if _, authored := e.promotedAuthored.Load(key); !authored {
+				return fmt.Errorf("authoring: promote %s %q: a @disabled core construct owns that name (re-enable or rename; promotion cannot claim a retired core name)", c.Kind, c.Name)
+			}
+			// The reservation came from a stored @disabled AUTHORED row
+			// (recompileAndPromoteRow): promoting the corrected (enabled)
+			// source is the re-enable path -- lift it (memql#2643).
+			e.specs.UnmarkDisabled(spec.Name)
 		}
 		if _, ok := e.specs.Lookup(spec.Name); ok {
 			if _, promoted := e.promotedAuthored.Load(key); !promoted {
@@ -585,6 +598,10 @@ func (e *MemQLEngine) DemoteAuthoredConstruct(ctx context.Context, kind, name st
 			return fmt.Errorf("authoring: demote %s %q: not an author-promoted construct (demotion cannot remove a core construct)", kind, name)
 		}
 		e.specs.Remove(name)
+		// The marker also covers a name reserved by a stored @disabled
+		// authored row (never registered): demote is its retire path, so
+		// release the reservation too (memql#2643).
+		e.specs.UnmarkDisabled(name)
 		e.promotedAuthored.Delete(key)
 		return nil
 	default:

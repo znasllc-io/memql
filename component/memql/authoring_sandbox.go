@@ -368,6 +368,14 @@ func sandboxCompileOne(c SandboxConstruct, concepts memoryNodes.Registry) Sandbo
 			return attachPos(fail(d, fmt.Sprintf("%s: %v", origin, err)), c, err)
 		}
 		if len(caps) == 0 {
+			// LoadCapabilitySource validates a @disabled capability but
+			// compiles it to nothing (#2607), so an empty result here can mean
+			// EITHER "no declaration" or "declared but @disabled". Name the
+			// actual state -- the source plainly contains the declaration
+			// (memql#2643).
+			if decl, derr := languageParser.ParseCapabilityDecl(stripUseDeclarations(c.Source)); derr == nil && decl.IsDisabled() {
+				return fail(d, fmt.Sprintf("%s: capability %q is @disabled; remove @disabled to author it in a bundle (a disabled capability compiles to nothing)", origin, decl.Name))
+			}
 			return fail(d, fmt.Sprintf("%s: no capability declaration found in source", origin))
 		}
 		actualName = caps[0].Name
