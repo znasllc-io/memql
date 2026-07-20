@@ -1,6 +1,8 @@
 package memql
 
 import (
+	"log/slog"
+	"os"
 	"strings"
 	"testing"
 
@@ -104,5 +106,56 @@ func TestResolveFileWithSignatureConcepts_AmbientDomain(t *testing.T) {
 	// The ambient domain disambiguates.
 	if err := resolver.ResolveFileWithSignatureConceptsInDomain(&languageParser.File{}, "v1", []string{"plan"}, "planner"); err != nil {
 		t.Errorf("ambient domain must disambiguate the signature concept: %v", err)
+	}
+}
+
+// TestSignatureBindingBeatsSingleUseImport pins the precedence fix the
+// #2661 boot-equivalence probe forced: a construct whose binding lives
+// in its SIGNATURE must never take the legacy single-use-import
+// binding, no matter how many use lines survive the #2617 strip.
+// worker/queries.memql keeps exactly one (cross-domain) use line, so
+// without the gate every worker query silently bound v1:planner:plan
+// -- and ensureBoundConceptFilter would have injected that into their
+// row filters. The actions mutations pin the flip side: their
+// BoundConcept now matches the signature (main's latent candidate
+// label was inert -- the mutation executor reads
+// MutationTemplate.Concept, proven identical both sides).
+func TestSignatureBindingBeatsSingleUseImport(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	if _, err := LoadUnifiedConcepts(logger); err != nil {
+		t.Fatalf("LoadUnifiedConcepts: %v", err)
+	}
+	registry := newFunctionRegistry()
+	if _, _, err := LoadUnifiedFunctions(logger, registry, memoryNodes.DefaultRegistry()); err != nil {
+		t.Fatalf("LoadUnifiedFunctions: %v", err)
+	}
+
+	for name, want := range map[string]string{
+		"invocationsForPlan":       "v1:worker:invocation",
+		"invocationsForUser":       "v1:worker:invocation",
+		"expiredWorkerInvocations": "v1:worker:invocation",
+		"workerByIdentityId":       "v1:worker:registration",
+		"bumpActionVersion":        "v1:actions:action",
+		"registerSurface":          "v1:actions:surface",
+	} {
+		fn, err := registry.Get(name)
+		if err != nil {
+			t.Errorf("%s: not registered: %v", name, err)
+			continue
+		}
+		if fn.BoundConcept != want {
+			t.Errorf("%s: BoundConcept=%q, want %q (signature must beat the single-use import)", name, fn.BoundConcept, want)
+		}
+	}
+
+	// The legacy heuristic must also never bind a signatureless
+	// non-query/mutation construct: the identity sweeps' logic file
+	// keeps a single platform use line post-strip and stays unbound.
+	fn, err := registry.Get("accountDeletionSweep")
+	if err != nil {
+		t.Fatalf("accountDeletionSweep: %v", err)
+	}
+	if fn.BoundConcept != "" {
+		t.Errorf("accountDeletionSweep: BoundConcept=%q, want empty (legacy binding is query/mutation-only)", fn.BoundConcept)
 	}
 }
