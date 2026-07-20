@@ -129,20 +129,24 @@ func TestJSONSchemaType(t *testing.T) {
 // refuse at call time. The enabled peer stays advertised.
 func TestMCPPromotedFunctionTools_DisabledDropped(t *testing.T) {
 	e := &MemQLEngine{functions: newFunctionRegistry()}
-	disabled := &Function{Name: "disabledPromotedQuery", FunctionKind: "query", Enabled: false, MCPPromoted: true}
-	enabled := &Function{Name: "enabledPromotedQuery", FunctionKind: "query", Enabled: true, MCPPromoted: true}
-	for _, fn := range []*Function{disabled, enabled} {
+	for _, fn := range []*Function{
+		{Name: "disabledPromotedQuery", FunctionKind: "query", Enabled: false, MCPPromoted: true},
+		{Name: "enabledPromotedQuery", FunctionKind: "query", Enabled: true, MCPPromoted: true},
+		// Both routable kinds: the drop must not be query-scoped.
+		{Name: "disabledPromotedMutation", FunctionKind: "mutation", Enabled: false, MCPPromoted: true},
+		{Name: "enabledPromotedMutation", FunctionKind: "mutation", Enabled: true, MCPPromoted: true},
+	} {
 		if err := e.functions.Upsert(fn); err != nil {
 			t.Fatalf("seed %s: %v", fn.Name, err)
 		}
 	}
 
 	tools := e.MCPPromotedFunctionTools()
-	if len(tools) != 1 {
-		t.Fatalf("expected exactly 1 advertised tool (the enabled peer), got %d: %+v", len(tools), tools)
+	if len(tools) != 2 {
+		t.Fatalf("expected exactly the 2 enabled peers advertised, got %d: %+v", len(tools), tools)
 	}
-	if tools[0]["name"] != "enabledPromotedQuery" {
-		t.Errorf("advertised tool = %v, want enabledPromotedQuery", tools[0]["name"])
+	if tools[0]["name"] != "enabledPromotedMutation" || tools[1]["name"] != "enabledPromotedQuery" {
+		t.Errorf("advertised tools = %v, %v; want enabledPromotedMutation, enabledPromotedQuery (sorted)", tools[0]["name"], tools[1]["name"])
 	}
 
 	// The ROUTER deliberately keeps routing the @disabled name: a direct
