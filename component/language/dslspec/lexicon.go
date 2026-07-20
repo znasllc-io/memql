@@ -60,6 +60,7 @@ func operators() []Operator {
 		{Symbol: "||", Doc: "Logical OR."},
 		{Symbol: "!", Doc: "Logical NOT (highest precedence)."},
 		{Symbol: "in", Doc: "Membership: lhs in rhsCollection."},
+		{Symbol: "??", Doc: "Null-coalescing: first non-nil/non-empty operand; a ?? b ?? c folds to coalesce(a, b, c) with the final operand as the ultimate fallback. Binds tighter than comparison, looser than arithmetic (#2611)."},
 	}
 }
 

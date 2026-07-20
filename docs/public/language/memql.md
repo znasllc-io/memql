@@ -287,7 +287,9 @@ Configuration variables (prefixed with `MEMQL_WS_`) let you tune the gateway:
 | Parentheses          | Group complex logic: `(concept==v1:assistant \|\| concept==v1:examples:persona) && active==true`.       |
 | Limit                | Use `paginate(<expr>, limit)` to request an explicit page size; omitting both `paginate` and `sort` caps the read at `MEMORY_ENGINE_DEFAULT_LIST_CAP` (default 50, the unmarked-list backstop). Continuation is via keyset cursors, not an offset skip. |
 
-> **Retired operator forms.** The legacy `;`-as-AND and `,`-as-OR separators, the `has` membership operator, the `?.` optional-chain prefix, and the `??` null-coalescing operator are all retired (#977, and `??` in the struct-form Phase 4 work). The parser rejects them in authored DSL filters with migration-pointing errors. Use `&&` / `||`, `in`, `when(args.x) { ... }`, and `coalesce(a, b, ...)` respectively.
+> **Retired operator forms.** The legacy `;`-as-AND and `,`-as-OR separators, the `has` membership operator, and the `?.` optional-chain prefix are retired (#977). The parser rejects them in authored DSL filters with migration-pointing errors. Use `&&` / `||`, `in`, and `when(args.x) { ... }` respectively.
+>
+> **The `??` null-coalescing operator** (retired in struct-form Phase 4, resurrected in #2611): `a ?? b ?? c` is the shorthand for `coalesce(a, b, c)` -- first non-nil/non-empty operand, final operand as the ultimate fallback. Precedence is deliberately tight: `??` binds tighter than the six symbol comparisons and looser than arithmetic, so `args.stage ?? "" == "active"` means `(args.stage ?? "") == "active"` -- the fallback-then-compare idiom needs no parentheses. The `in` membership keyword is outside this contract: `in` requires a bare-identifier left side everywhere, so neither spelling of a coalesced membership test parses -- there is no `?? ... in` idiom to bind. `coalesce(...)` remains valid everywhere, permanently.
 
 IDs are persisted as `<concept>:<raw-id>`. MemQL supports both full IDs and short IDs (when concept context is provided):
 
@@ -1715,9 +1717,9 @@ createdAt>"2025-01-01T00:00:00Z"
 - `||` – OR
 - `!` – NOT
 - `()` – Grouping
-- Go precedence: `!` > comparisons > `&&` > `||`
+- Go precedence: `!` > arithmetic > `??` > comparisons > `&&` > `||`
 
-(The legacy `;`-AND / `,`-OR separators, `has`, `?.`, and `??` are retired and rejected.)
+(The legacy `;`-AND / `,`-OR separators, `has`, and `?.` are retired and rejected; `??` is live since #2611.)
 
 ### Defaults / Fallbacks
 
@@ -1725,7 +1727,7 @@ createdAt>"2025-01-01T00:00:00Z"
 coalesce(args.nickname, args.name, "Unknown")
 ```
 
-`coalesce(a, b, ...)` returns the first non-null operand. (The `??` operator it replaces is retired.)
+`coalesce(a, b, ...)` returns the first non-null operand; `a ?? b` is its operator shorthand (#2611), binding tighter than comparison.
 
 ### Core Directives
 

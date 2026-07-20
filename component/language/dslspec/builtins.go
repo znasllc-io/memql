@@ -171,7 +171,7 @@ func builtins() []Builtin {
 			Name:      "coalesce",
 			Category:  CategoryBuiltinExpr,
 			Signature: `coalesce(values ...any)`,
-			Doc:       "Return the first non-nil value. The final argument is the ultimate fallback and is returned even if empty.",
+			Doc:       "Return the first non-nil value. The final argument is the ultimate fallback and is returned even if empty. Shorthand: the `??` operator (a ?? b ?? c), #2611.",
 			Params: []BuiltinParam{
 				{Name: "values", Doc: "Values to check, in order."},
 			},
