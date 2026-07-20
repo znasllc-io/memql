@@ -115,3 +115,7 @@ docs/public/reference/_generated/*
 # Docs bundle staging + tarballs
 /docs-bundle/
 /docs-*.tgz
+# local tool builds (go build ./cmd/<tool> drops the binary in cwd)
+/memqlmigrate
+/memqllint
+/memqlfmt

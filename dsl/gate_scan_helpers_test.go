@@ -1,99 +1,22 @@
 package dsl
 
 import (
-	"strings"
 	"testing"
+
+	"github.com/znasllc-io/memql/component/memql/sense"
 )
 
-// Shared lexical helpers for the tree gates. The gates scan raw .memql
-// source (the constructs they police leave no AST trace), so they need
-// comment- and string-aware blanking that a bare regex cannot provide:
-// a `/*` inside a line comment or a string literal must NOT open a
-// block-comment span (#2615 found dsl/deployment/actions.memql fully
-// blanked by the `scripts/*` prose in a // comment).
+// The gates' lexical scanning is shared with the sense editor rules
+// (component/memql/sense): one implementation, hinted in the editor
+// and enforced in CI, so the two cannot drift. The tests here pin the
+// shared behavior from the gate's side.
 
-// blankBlockComments blanks real /* */ spans (newline-preserving, so
-// reported line numbers stay stable) while leaving line comments and
-// string literals intact. String handling matches the per-line
-// helpers: a bare `"` toggles, no escape processing.
+// blankBlockComments delegates to the shared state-machine blanker. A
+// bare regex cannot do this job: a `/*` inside a line comment or a
+// string literal must NOT open a span -- combined with a real */
+// downstream it phantom-blanks live corpus (#2615, #2658 review).
 func blankBlockComments(src string) string {
-	var b strings.Builder
-	b.Grow(len(src))
-	const (
-		stNormal = iota
-		stString
-		stLineComment
-		stBlockComment
-	)
-	state := stNormal
-	for i := 0; i < len(src); i++ {
-		c := src[i]
-		switch state {
-		case stNormal:
-			switch {
-			case c == '"':
-				state = stString
-				b.WriteByte(c)
-			case c == '/' && i+1 < len(src) && src[i+1] == '/':
-				state = stLineComment
-				b.WriteByte(c)
-			case c == '/' && i+1 < len(src) && src[i+1] == '*':
-				state = stBlockComment
-				b.WriteByte(' ')
-				b.WriteByte(' ')
-				i++
-			default:
-				b.WriteByte(c)
-			}
-		case stString:
-			if c == '"' || c == '\n' {
-				state = stNormal
-			}
-			b.WriteByte(c)
-		case stLineComment:
-			if c == '\n' {
-				state = stNormal
-			}
-			b.WriteByte(c)
-		case stBlockComment:
-			if c == '*' && i+1 < len(src) && src[i+1] == '/' {
-				state = stNormal
-				b.WriteByte(' ')
-				b.WriteByte(' ')
-				i++
-			} else if c == '\n' {
-				b.WriteByte('\n')
-			} else {
-				b.WriteByte(' ')
-			}
-		}
-	}
-	return b.String()
-}
-
-// stripStringsForScan blanks string-literal contents and cuts // tails
-// on a single line, so brace counting and annotation matching skip
-// embedded syntax. Positions before the cut are preserved.
-func stripStringsForScan(line string) string {
-	var b strings.Builder
-	inString := false
-	for i := 0; i < len(line); i++ {
-		c := line[i]
-		if !inString && c == '/' && i+1 < len(line) && line[i+1] == '/' {
-			break
-		}
-		if c == '"' {
-			inString = !inString
-			b.WriteByte(' ')
-			continue
-		}
-		if inString {
-			b.WriteByte(' ')
-		} else {
-			b.WriteByte(c)
-		}
-	}
-	return b.String()
+	return sense.BlankBlockComments(src)
 }
 
 // TestBlankBlockComments_RespectsLineCommentsAndStrings pins the #2615
@@ -105,14 +28,17 @@ func TestBlankBlockComments_RespectsLineCommentsAndStrings(t *testing.T) {
 		name, in, want string
 	}{
 		{
-			name: "line-comment glob does not open a span",
-			in:   "// maps scripts/* path\nargs {\n",
-			want: "// maps scripts/* path\nargs {\n",
+			// The discriminating shape (#2658 review): with a REAL
+			// span downstream, a naive regex pairs the // glob with
+			// its closer and phantom-blanks the live code between.
+			name: "line-comment glob plus real span downstream",
+			in:   "// maps scripts/* path\nargs {\n/* real */\n",
+			want: "// maps scripts/* path\nargs {\n          \n",
 		},
 		{
-			name: "string glob does not open a span",
-			in:   "x string @pattern(\"/*\")\nargs {\n",
-			want: "x string @pattern(\"/*\")\nargs {\n",
+			name: "string glob plus real span downstream",
+			in:   "x string @pattern(\"/*\")\nargs {\n/* real */\n",
+			want: "x string @pattern(\"/*\")\nargs {\n          \n",
 		},
 		{
 			name: "real span blanks newline-preserving",
@@ -152,5 +78,22 @@ concept widget {
 	got := argsFieldDescriptionLines(src)
 	if len(got) != 1 || got[0] != 5 {
 		t.Errorf("want exactly line 5, got %v", got)
+	}
+}
+
+// TestArgsFieldDescriptionLines_PositionAware pins the #2658 findings:
+// an annotation on the `args {` opener line IS inside the block (the
+// old line scanner skipped the opener), and a one-line `} shape {`
+// transition exits args at the closing brace -- the sibling block's
+// load-bearing field prose never flags.
+func TestArgsFieldDescriptionLines_PositionAware(t *testing.T) {
+	opener := "query q {\n  args { x string @description(\"dead\") }\n}\n"
+	if got := argsFieldDescriptionLines(opener); len(got) != 1 || got[0] != 2 {
+		t.Errorf("opener-line annotation: want line 2, got %v", got)
+	}
+
+	transition := "mutation m {\n  args {\n    x string\n  } shape {\n    y string @description(\"keep\")\n  }\n}\n"
+	if got := argsFieldDescriptionLines(transition); len(got) != 0 {
+		t.Errorf("one-line }-shape-{ transition: want no hits, got %v", got)
 	}
 }

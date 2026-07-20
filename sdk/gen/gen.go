@@ -72,7 +72,10 @@ var (
 	// per construct (the parser rejects multiple args blocks).
 	argsBlockRe = regexp.MustCompile(`(?s)\bargs[ \t]*\{(.*?)\}`)
 	// Single args field declaration:
-	//   <name>  <type>  [@required] [@enum("a","b")] [@default("...")] [@description("...")]
+	//   <name>  <type>  [@required] [@enum("a","b")] [@default("...")]
+	//   (args-field @description is stripped from the corpus -- #2615; the
+	//   descRe capture remains for stragglers until #2634 re-sources field
+	//   docs from /// doc comments)
 	// Multiple lines per block.
 	argsFieldRe = regexp.MustCompile(
 		`(?m)^[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]+([A-Za-z_][A-Za-z0-9_]*|enum\([^)]*\)|\[\][A-Za-z_][A-Za-z0-9_]*)([ \t]+@[^\n]*)?[ \t]*$`,

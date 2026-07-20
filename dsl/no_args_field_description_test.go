@@ -3,11 +3,11 @@ package dsl
 import (
 	"fmt"
 	"io"
-	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/znasllc-io/memql/component/memql/dslfs"
+	"github.com/znasllc-io/memql/component/memql/sense"
 )
 
 // TestNoArgsFieldDescription keeps args{} blocks free of @description
@@ -49,34 +49,17 @@ func TestNoArgsFieldDescription(t *testing.T) {
 	}
 }
 
-var argsOpenRE = regexp.MustCompile(`(^|[^A-Za-z0-9_])args[ \t]*\{`)
-
 // argsFieldDescriptionLines returns the 1-indexed lines carrying a
-// @description annotation inside an args{} block. Line comments and
-// string contents are blanked before brace tracking so embedded braces
-// never skew the depth; /* */ spans are blanked newline-preserving so
-// reported line numbers stay stable.
+// @description annotation inside an args{} block. It delegates to the
+// EXACT scan the editor runs (sense.DiscardedArgsDescriptions), so the
+// CI gate and the sense Hint cannot drift -- parity by construction
+// (#2658 review round: the gate's own line-based scanner had both a
+// false negative on the `args {` opener line and a false positive on a
+// one-line `} shape {` transition).
 func argsFieldDescriptionLines(src string) []int {
-	src = blankBlockComments(src)
 	var out []int
-	depth := 0
-	inArgs := false
-	argsDepth := 0
-	for i, line := range strings.Split(src, "\n") {
-		code := stripStringsForScan(line)
-		if inArgs && depth < argsDepth {
-			inArgs = false
-		}
-		if !inArgs && argsOpenRE.MatchString(code) {
-			inArgs = true
-			argsDepth = depth + 1
-			depth += strings.Count(code, "{") - strings.Count(code, "}")
-			continue
-		}
-		if inArgs && strings.Contains(code, "@description") {
-			out = append(out, i+1)
-		}
-		depth += strings.Count(code, "{") - strings.Count(code, "}")
+	for _, d := range sense.DiscardedArgsDescriptions(src) {
+		out = append(out, d.Range.Start.Line)
 	}
 	return out
 }

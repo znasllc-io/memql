@@ -256,3 +256,19 @@ func TestRewritesAreRuneOffsetCorrect(t *testing.T) {
 		t.Errorf("result-navigation after multibyte:\n got %q\nwant %q", string(got), navWant)
 	}
 }
+
+// TestLexicalTokenRewriteUsesEndPos pins the EndPos half of the rune-
+// offset fix (#2658 review: the mutant `prev = tok.Pos + len(tok.Literal)`
+// survived the original fixtures). A non-ASCII IDENTIFIER makes byte-len
+// overshoot the rune offset, eating the bytes after the token.
+func TestLexicalTokenRewriteUsesEndPos(t *testing.T) {
+	in := "logic l {\n  body {\n    return résumé.first.payload.x }\n}\n"
+	want := "logic l {\n  body {\n    return résumé.First().payload.x }\n}\n"
+	got, err := rewriteResultNavigation([]byte(in))
+	if err != nil {
+		t.Fatalf("result-navigation: %v", err)
+	}
+	if string(got) != want {
+		t.Errorf("non-ASCII identifier rewrite:\n got %q\nwant %q", string(got), want)
+	}
+}

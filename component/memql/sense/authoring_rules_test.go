@@ -249,12 +249,21 @@ func TestDiscardedArgsDescriptionRule(t *testing.T) {
 		t.Fatalf("want one hint on line 4, got %+v", got)
 	}
 
+	// #2658 review: the opener line is inside the block.
+	opener := "query q {\n  args { x string @description(\"dead\") }\n}\n"
+	if got := discardedArgsDescriptionRule(opener); len(got) != 1 || got[0].Range.Start.Line != 2 {
+		t.Errorf("opener-line annotation: want one hint on line 2, got %+v", got)
+	}
+
 	for name, clean := range map[string]string{
-		"declaration-level": "@description(\"keep\")\nquery q {\n  args {\n    x string\n  }\n}\n",
-		"concept-field":     "concept widget {\n  label string @description(\"keep\")\n}\n",
-		"shape-block":       "mutation m {\n  args {\n    x string\n  }\n  shape {\n    y string @description(\"keep\")\n  }\n}\n",
-		"args-in-comment":   "// args { commentary\nconcept w {\n  label string @description(\"keep\")\n}\n",
-		"args-in-string":    "query q {\n  filter { note == \"args {\" }\n}\n@description(\"keep\")\n",
+		"declaration-level":     "@description(\"keep\")\nquery q {\n  args {\n    x string\n  }\n}\n",
+		"concept-field":         "concept widget {\n  label string @description(\"keep\")\n}\n",
+		"shape-block":           "mutation m {\n  args {\n    x string\n  }\n  shape {\n    y string @description(\"keep\")\n  }\n}\n",
+		"shape-same-line":       "mutation m {\n  args {\n    x string\n  } shape {\n    y string @description(\"keep\")\n  }\n}\n",
+		"args-in-comment":       "// args { commentary\nconcept w {\n  label string @description(\"keep\")\n}\n",
+		"args-in-string":        "query q {\n  filter { note == \"args {\" }\n}\n@description(\"keep\")\n",
+		"args-in-block-comment": "/*\nargs {\n  x string @description(\"commented out\")\n}\n*/\nconcept w {\n  label string\n}\n",
+		"longer-annotation":     "query q {\n  args {\n    x string @descriptionX(\"different\")\n  }\n}\n",
 	} {
 		if got := discardedArgsDescriptionRule(clean); len(got) != 0 {
 			t.Errorf("%s: want no hint, got %+v", name, got)
