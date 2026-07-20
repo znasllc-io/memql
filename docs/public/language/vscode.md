@@ -105,6 +105,27 @@ CI lane guards the grammar against drift and runs this packaging flow. Release
 targets the VS Code Marketplace and OpenVSX; version the extension in lockstep
 with `GrammarVersion`.
 
+Nothing bundled is tracked in git: `editors/vscode/bin/` and `*.vsix` are
+ignored (editors/vscode/.gitignore), so the platform binary is cross-built
+fresh at package time. A stale extension on a developer machine is therefore
+a locally-installed VSIX, not a stale artifact in the repository -- reinstall
+from a fresh `make vscode-package` to pick up server changes.
+
+### 0.2.0 -- the editor-intelligence epic (#2600)
+
+Packaged against `GrammarVersion` `2026.07-null-coalescing-operator`, this
+release carries the epic end to end:
+
+- `@` offers only the enclosing construct's legal annotations, and body
+  completion is scoped to that construct's blocks and verbs (#2626, #2627).
+- Member completion after a dot: `actor.`, `event.`, `args.`, `payload.`
+  (#2624), driven by the canonical actor envelope (#2623).
+- Block-specific completion inside `args` / `filter` / `insert` / `update`
+  / `shape`, teaching the post-grammar-epoch short forms (#2628).
+- Real snippet completions -- body blocks and construct skeletons (#2629).
+- Edit-time errors mirroring the engine's load rules: `actor-undeclared`
+  (#2622) and `actor-unknown-property` (#2625).
+
 ## Snippet completions
 
 The extension advertises `snippetSupport` (vscode-languageclient
