@@ -1,6 +1,7 @@
 package sense
 
 import (
+	"regexp"
 	"strings"
 
 	"github.com/znasllc-io/memql/component/language/parser"
@@ -35,6 +36,7 @@ type CursorContext struct {
 	ConstructKey   string // if after a concept-binding construct keyword, the keyword (mutation/query/seed/shape)
 	Source         string // full source text (so completers can scan file-scope imports)
 	FilePath       string // the document's path (so completers can derive the ambient domain, #2617)
+	AccessorRoot   string // for ContextFieldAccess: the dotted path before the final dot ("actor", "event.actor", ...)
 }
 
 // analyzeCursorContext determines the syntactic context at a cursor position.
@@ -95,6 +97,14 @@ func analyzeCursorContextInner(source string, line, col int) CursorContext {
 
 	// 4.5 After a concept-binding construct keyword: mutation/query/seed/shape <Concept>
 	if ctx, ok := checkConstructConceptContext(tokens, prefix); ok {
+		return ctx
+	}
+
+	// 4.7 After a dotted accessor: member completion (#2624). Must sit
+	// ABOVE the func-call check so `cond(actor.` completes members, and
+	// above the body fallback so a dot context never offers the
+	// everything list.
+	if ctx, ok := checkFieldAccessContext(textBefore); ok {
 		return ctx
 	}
 
@@ -391,4 +401,56 @@ func countCommasBetween(tokens []parser.Token, start, end int) int {
 		}
 	}
 	return count
+}
+
+// checkFieldAccessContext recognizes a dotted member access at the
+// cursor (#2624). Both lexer shapes reduce to the same TEXT shape at
+// the cursor -- a trailing dot (`actor.`, Identifier + TokenDot) and a
+// mid-member position (`actor.us`, one dot-joined identifier with the
+// prefix after the last dot) -- so the detector reads the raw text:
+// walk back over the member prefix, require a '.', then walk back over
+// the dotted root. The root must start with a letter/underscore so a
+// float literal (`3.`) never fires.
+func checkFieldAccessContext(textBefore string) (CursorContext, bool) {
+	i := len(textBefore) - 1
+	for i >= 0 && isIdentChar(textBefore[i]) {
+		i--
+	}
+	if i < 0 || textBefore[i] != '.' {
+		return CursorContext{}, false
+	}
+	memberPrefix := textBefore[i+1:]
+	j := i - 1
+	for j >= 0 && (isIdentChar(textBefore[j]) || textBefore[j] == '.') {
+		j--
+	}
+	root := textBefore[j+1 : i]
+	if root == "" || strings.HasSuffix(root, ".") || !isIdentStart(root[0]) {
+		return CursorContext{}, false
+	}
+	return CursorContext{
+		Kind:         ContextFieldAccess,
+		Prefix:       memberPrefix,
+		AccessorRoot: root,
+		ConceptName:  enclosingSignatureConcept(textBefore),
+	}, true
+}
+
+func isIdentStart(c byte) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_'
+}
+
+// enclosingSignatureConceptRe captures the concept short-name of the
+// nearest preceding concept-binding construct header.
+var enclosingSignatureConceptRe = regexp.MustCompile(`(?m)^[ \t]*(?:query|mutate|shape|seed)[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]*\{`)
+
+// enclosingSignatureConcept returns the signature concept of the last
+// construct header above the cursor, or "" (automations/logic carry
+// none).
+func enclosingSignatureConcept(textBefore string) string {
+	ms := enclosingSignatureConceptRe.FindAllStringSubmatch(textBefore, -1)
+	if len(ms) == 0 {
+		return ""
+	}
+	return ms[len(ms)-1][1]
 }

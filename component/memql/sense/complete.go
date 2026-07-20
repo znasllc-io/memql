@@ -17,6 +17,11 @@ func (s *Service) Complete(source string, line, col int, filePath string) []Comp
 	var items []CompletionItem
 
 	switch ctx.Kind {
+	case ContextFieldAccess:
+		// Member completion (#2624): a dot context offers ONLY the
+		// root's members -- never keywords, builtins, functions, or
+		// concepts. An unknown root offers nothing.
+		items = s.completeFieldAccess(ctx, source, line)
 	case ContextTopLevel:
 		items = s.completeTopLevel(ctx.Prefix)
 	case ContextAnnotation:
@@ -461,30 +466,54 @@ func annotationTakesArgs(name string) bool {
 	}
 }
 
-// automationArgsFieldCompletions returns the enclosing automation's declared
-// args-field names when the cursor sits inside an `automation NAME { ... }`
-// block that carries an `args { ... }` block (G2, memql#2364 / ADR Decision
-// 3: those fields resolve bare in step args, conditions, switch subjects and
-// forEach expressions). Pure source-level scan -- no registry needed.
+// enclosingConstructArgsFields returns the declared args-field names of
+// the construct enclosing the cursor line -- the unified source (#2624)
+// behind both the automation bare-name completion (G2, memql#2364 / ADR
+// Decision 3) and the `args.` member completion, so the two can never
+// disagree about what is declared. Pure source-level scan, no registry.
+func enclosingConstructArgsFields(source string, line int) []string {
+	return constructArgsFields(source, line, `^\s*(?:automation|query|mutate|logic)\s+[A-Za-z_]`)
+}
+
+// automationArgsFieldCompletions keeps the G2 bare-name behavior:
+// inside an AUTOMATION body the declared args fields resolve bare, so
+// they complete without the `args.` prefix. Other construct kinds only
+// get the `args.` member path (bare args fields do not resolve there).
 func automationArgsFieldCompletions(source string, line int, prefix string) []CompletionItem {
+	var items []CompletionItem
+	for _, f := range constructArgsFields(source, line, `^\s*automation\s+[A-Za-z_]`) {
+		if strings.HasPrefix(f, prefix) {
+			items = append(items, CompletionItem{
+				Label: f, Kind: "variable", Detail: "args field",
+				Documentation: "Declared in this automation's args { } block; resolves bare (ADR event-payload-binding Decision 3).",
+				InsertText:    f, SortPriority: 2,
+			})
+		}
+	}
+	return items
+}
+
+// constructArgsFields scans for the construct (matching headerPattern)
+// enclosing the cursor line and returns its args-block field names.
+func constructArgsFields(source string, line int, headerPattern string) []string {
 	lines := strings.Split(source, "\n")
 	if line < 1 || line > len(lines) {
 		return nil
 	}
-	headerPat := regexp.MustCompile(`^\s*automation\s+[A-Za-z_][A-Za-z0-9_]*\s*\{`)
+	headerPat := regexp.MustCompile(headerPattern)
 	fieldPat := regexp.MustCompile(`^\s*([A-Za-z_][A-Za-z0-9_]*)\s+\S`)
+	argsPat := regexp.MustCompile(`^\s*args\s*\{`)
 
-	var items []CompletionItem
-	depth, inAutomation, inArgs, argsDepthAt, autoStart := 0, false, false, 0, -1
+	depth, inConstruct, inArgs, argsDepthAt, start := 0, false, false, 0, -1
 	var fields []string
 	for i, ln := range lines {
 		opens := strings.Count(ln, "{")
 		closes := strings.Count(ln, "}")
-		if !inAutomation && headerPat.MatchString(ln) {
-			inAutomation, autoStart, depth = true, i+1, 0
+		if !inConstruct && headerPat.MatchString(ln) {
+			inConstruct, start, depth = true, i+1, 0
 			fields = nil
 		}
-		if inAutomation {
+		if inConstruct {
 			if inArgs {
 				if trimmed := strings.TrimSpace(ln); trimmed != "" && !strings.HasPrefix(trimmed, "//") && !strings.Contains(ln, "args") {
 					if m := fieldPat.FindStringSubmatch(ln); m != nil {
@@ -494,30 +523,24 @@ func automationArgsFieldCompletions(source string, line int, prefix string) []Co
 				if depth+opens-closes < argsDepthAt {
 					inArgs = false
 				}
-			} else if regexp.MustCompile(`^\s*args\s*\{`).MatchString(ln) {
+			} else if argsPat.MatchString(ln) {
 				inArgs = true
 				argsDepthAt = depth + opens
 			}
 			depth += opens - closes
-			if depth <= 0 && i+1 > autoStart {
-				// automation block closed; if the cursor was inside, emit.
-				if line >= autoStart && line <= i+1 {
-					for _, f := range fields {
-						if strings.HasPrefix(f, prefix) {
-							items = append(items, CompletionItem{
-								Label: f, Kind: "variable", Detail: "args field",
-								Documentation: "Declared in this automation's args { } block; resolves bare (ADR event-payload-binding Decision 3).",
-								InsertText:    f, SortPriority: 2,
-							})
-						}
-					}
-					return items
+			if depth <= 0 && i+1 > start {
+				if line >= start && line <= i+1 {
+					return fields
 				}
-				inAutomation, inArgs = false, false
+				inConstruct, inArgs = false, false
 			}
 		}
 	}
-	return items
+	// Cursor inside a still-open construct at EOF (mid-typing).
+	if inConstruct && line >= start {
+		return fields
+	}
+	return nil
 }
 
 // fileDomain derives the ambient domain from a document path: the base
@@ -532,4 +555,119 @@ func fileDomain(p string) string {
 		return ""
 	}
 	return path.Base(dir)
+}
+
+// completeFieldAccess dispatches member completion per accessor root
+// (#2624). Every item sets SortPriority deliberately (the LSP renders
+// SortText as %08d of it; unset sorts first).
+func (s *Service) completeFieldAccess(ctx CursorContext, source string, line int) []CompletionItem {
+	switch ctx.AccessorRoot {
+	case "actor":
+		return actorMemberCompletions(ctx.Prefix)
+	case "event":
+		return eventMemberCompletions(ctx.Prefix)
+	case "event.actor":
+		// The EVENT envelope's acting-identity stamp (G4, memql#2366):
+		// {id} only, present only when the emitter stamped it -- a
+		// different object from the auth actor.
+		if strings.HasPrefix("id", ctx.Prefix) {
+			return []CompletionItem{{
+				Label: "id", Kind: "field", Detail: "event actor stamp",
+				Documentation: "The emitting identity's id -- present only when the emitter stamped it (G4). Not the auth envelope: for the caller identity use `actor.*` with @actor.",
+				InsertText:    "id", SortPriority: 1,
+			}}
+		}
+		return nil
+	case "args":
+		var items []CompletionItem
+		for _, f := range enclosingConstructArgsFields(source, line) {
+			if strings.HasPrefix(f, ctx.Prefix) {
+				items = append(items, CompletionItem{
+					Label: f, Kind: "variable", Detail: "args field",
+					Documentation: "Declared in the enclosing construct's args { } block.",
+					InsertText:    f, SortPriority: 1,
+				})
+			}
+		}
+		return items
+	case "payload", "node.payload", "event.payload":
+		if s.registries == nil || ctx.ConceptName == "" {
+			return nil
+		}
+		var items []CompletionItem
+		for _, canonical := range s.registries.ConceptNames() {
+			_, short := splitConceptID(canonical)
+			if short != ctx.ConceptName {
+				continue
+			}
+			if c, ok := s.registries.ConceptGet(canonical); ok {
+				for _, f := range c.Fields {
+					if strings.HasPrefix(f.Name, ctx.Prefix) {
+						items = append(items, CompletionItem{
+							Label: f.Name, Kind: "field", Detail: f.Type,
+							Documentation: f.Description,
+							InsertText:    f.Name, SortPriority: 1,
+						})
+					}
+				}
+			}
+			break
+		}
+		return items
+	}
+	return nil
+}
+
+// actorMemberCompletions offers the canonical auth-envelope members
+// from the dslspec structured property table (#2623) -- the drift test
+// keeps that table pinned to the engine's resolvers, so completion can
+// never offer a member the runtime rejects. Aliases sort after
+// canonical members.
+func actorMemberCompletions(prefix string) []CompletionItem {
+	var items []CompletionItem
+	for _, k := range dslSpec.Keywords {
+		if k.Kind != "reserved" || k.Name != "actor" {
+			continue
+		}
+		for _, p := range k.Properties {
+			if !strings.HasPrefix(p.Name, prefix) {
+				continue
+			}
+			priority := 1
+			detail := "actor envelope"
+			if p.AliasOf != "" {
+				priority = 3
+				detail = "legacy alias of " + p.AliasOf
+			}
+			items = append(items, CompletionItem{
+				Label: p.Name, Kind: "field", Detail: detail,
+				Documentation: p.Doc, InsertText: p.Name,
+				SortPriority: priority,
+			})
+		}
+	}
+	return items
+}
+
+// eventMemberCompletions offers the event-envelope members
+// (component/automations executor.buildEventEnvelope: topic, kind,
+// payload, actor, timestamp).
+func eventMemberCompletions(prefix string) []CompletionItem {
+	envelope := []struct{ name, doc string }{
+		{"topic", "The published topic string (e.g. deploy.requested)."},
+		{"kind", "The event kind."},
+		{"payload", "The event payload object; fields per the emitting concept/automation."},
+		{"actor", "The emitting identity stamp ({id} only, present when stamped -- G4). NOT the auth envelope."},
+		{"timestamp", "RFC3339 emission timestamp."},
+	}
+	var items []CompletionItem
+	for _, e := range envelope {
+		if strings.HasPrefix(e.name, prefix) {
+			items = append(items, CompletionItem{
+				Label: e.name, Kind: "field", Detail: "event envelope",
+				Documentation: e.doc, InsertText: e.name, SortPriority: 1,
+			})
+		}
+	}
+	return items
 }
