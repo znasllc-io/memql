@@ -174,3 +174,20 @@ func TestSigilAndEnumType_OtherFieldParsers(t *testing.T) {
 	}
 	_ = bf
 }
+
+// TestToolEnumAnnotationMultiValue pins the attrEnumValues []string
+// case (#2618 probe finding): parseAttribute stores multiple strings
+// as []string, and the missing branch silently dropped every
+// multi-value tool @enum from the tool's field surface.
+func TestToolEnumAnnotationMultiValue(t *testing.T) {
+	file, err := ParseFile(`tool probeTool {
+  level int @enum("1", "2", "3")
+}`)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	tool := file.Definitions[0].(*ToolDecl)
+	if len(tool.Fields) != 1 || len(tool.Fields[0].EnumValues) != 3 {
+		t.Errorf("multi-value @enum must land in EnumValues, got %+v", tool.Fields[0])
+	}
+}

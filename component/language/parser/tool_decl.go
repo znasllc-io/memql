@@ -244,6 +244,14 @@ func attrEnumValues(attr *ast.Attribute) []string {
 	if attr == nil {
 		return nil
 	}
+	// parseAttribute stores multiple comma-separated strings as
+	// []string -- the missing case here silently dropped every
+	// multi-value tool @enum from MCP inputSchemas until the #2618
+	// equivalence probe caught the constraint reappearing when the
+	// codemod switched those fields to the enum TYPE.
+	if vs, ok := attr.Value.([]string); ok {
+		return vs
+	}
 	if vs, ok := attr.Value.([]any); ok {
 		out := make([]string, 0, len(vs))
 		for _, v := range vs {
