@@ -342,5 +342,7 @@ func redundantVersionRule(source string) []Diagnostic {
 
 // versionDefaultRE matches the redundant default-version annotation line in
 // every shape the dsl/ gate fails: inner spacing, a trailing // comment, and
-// CRLF endings -- so the editor hints exactly what CI rejects.
+// CRLF endings -- so the editor hints the shapes CI rejects. (Inside /* */
+// the editor additionally hints where the gate stays silent; see the rule
+// body's exposure note.)
 var versionDefaultRE = regexp.MustCompile(`^[ \t]*(@version\([ \t]*"1\.0\.0"[ \t]*\))[ \t]*(//[^\r]*)?\r?$`)
