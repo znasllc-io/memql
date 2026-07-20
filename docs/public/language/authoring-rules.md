@@ -1481,4 +1481,6 @@ used-but-undeclared is a file-attributed load error AND an edit-time
 Declared-but-unused is legal. Spec/trait bodies keep the inverse rule
 (direct reads rejected; bind an `@actor` shape); shapes use `@actor`
 as their kind marker; the seed-file `@actor("system")` is a different
-construct.
+construct. An unknown member (`actor.displayName`) is likewise a load
+error and an `actor-unknown-property` squiggle (#2625): the envelope is
+a closed set, and both layers read the same canonical table.

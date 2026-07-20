@@ -399,6 +399,13 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 		return nil, err
 	}
 
+	// Closed-set member validation (#2625): an unknown actor member was
+	// a runtime error on two surfaces and a SILENT NIL on the other two;
+	// it is a load error on all four now.
+	if err := validateActorMemberPaths(rawSourceForUsage, funcDef); err != nil {
+		return nil, err
+	}
+
 	// Field-level event-schema validation (memql#1743): a Logic that OPTS IN by
 	// declaring `@eventField(...)` has every `event.payload.<field>` reference
 	// checked against that declared schema -- rejecting typos / fields the

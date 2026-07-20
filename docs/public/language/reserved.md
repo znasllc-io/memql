@@ -87,7 +87,10 @@ from this list -- no resolver ever implemented it; read allow-listed
 config through the bare reserved `config.<key>` instead.
 
 The fields are the only names valid under `actor.` -- a typo like
-`actor.userid` (lowercase) is a hard error. The `caller.X` / `@caller`
+`actor.userid` (lowercase) is a hard error AT LOAD (#2625: it was a
+runtime error on the query/mutation surfaces and a SILENT NIL on the
+logic/spec surfaces before), and an `actor-unknown-property` squiggle
+at edit time. The `caller.X` / `@caller`
 spellings are retired in #221; the parser rejects them with a
 migration hint pointing at the canonical `actor.X` / `@actor`.
 

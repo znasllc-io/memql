@@ -21,6 +21,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/language/parser"
 )
 
@@ -525,4 +526,55 @@ func actorUndeclaredRule(source string) []Diagnostic {
 		})
 	}
 	return diagnostics
+}
+
+// actorUnknownPropertyRule mirrors the engine's closed-set member
+// validation (#2625) as an edit-time Error: `actor.displayName` was
+// memqllint-green and failed only at runtime -- or resolved to silent
+// nil on the logic/spec surfaces. Both layers consume the SAME two
+// sources -- parser.ActorMemberRefs for what counts as a read,
+// auth.ActorEnvelopeCanonicalName for what is valid -- so no second
+// hand-maintained property list can creep in (pinned by a conformance
+// test). Positions are computed from the authored source; comments and
+// strings are stripped by the shared extractor, so the corpus's
+// prose-only `actor.rank` and the `event.actor.id` event stamp never
+// flag.
+func actorUnknownPropertyRule(source string) []Diagnostic {
+	refs := parser.ActorMemberRefs(source)
+	if len(refs) == 0 {
+		return nil
+	}
+	var diagnostics []Diagnostic
+	line, col, prev := 1, 1, 0
+	for _, ref := range refs {
+		for i := prev; i < ref.Offset && i < len(source); i++ {
+			if source[i] == '\n' {
+				line++
+				col = 1
+			} else {
+				col++
+			}
+		}
+		prev = ref.Offset
+		if _, ok := auth.ActorEnvelopeCanonicalName(ref.Name); ok {
+			continue
+		}
+		diagnostics = append(diagnostics, Diagnostic{
+			Range: Range{
+				Start: Position{Line: line, Column: col},
+				End:   Position{Line: line, Column: col + len(ref.Name)},
+			},
+			Severity: SeverityError,
+			Message:  "unknown actor member `actor." + ref.Name + "`; the auth envelope is a closed set (#2623) -- valid: " + auth.ActorEnvelopeValidNames(),
+			Code:     "actor-unknown-property",
+		})
+	}
+	return diagnostics
+}
+
+// ActorUnknownPropertyDiagnostics exposes the closed-set member rule to
+// the engine-side conformance test that pins the loader rule and this
+// rule to the same tables (#2625).
+func ActorUnknownPropertyDiagnostics(source string) []Diagnostic {
+	return actorUnknownPropertyRule(source)
 }

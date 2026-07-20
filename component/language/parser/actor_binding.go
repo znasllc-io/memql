@@ -204,3 +204,33 @@ func ActorUndeclaredRefOffsets(src string) []int {
 	}
 	return out
 }
+
+// actorMemberPattern captures the member name of an actor-envelope
+// read: the same anchored `actor.` shape as actorRefPattern, plus the
+// dotted member. Group 2 is the member; the leading class keeps
+// `event.actor.id` (the event envelope stamp) out.
+var actorMemberPattern = regexp.MustCompile(`(^|[^.\w])actor\.([A-Za-z_][A-Za-z0-9_]*)`)
+
+// ActorMemberRef is one actor member read in a source file: the member
+// name and its byte offset (pointing at the member token, so editors
+// can underline exactly the wrong word).
+type ActorMemberRef struct {
+	Name   string
+	Offset int
+}
+
+// ActorMemberRefs returns every actor-envelope member read in the
+// comment- and string-stripped source. Shared by the load-time
+// validator and the sense diagnostic (#2625) so the two cannot drift
+// in what they consider a read.
+func ActorMemberRefs(source string) []ActorMemberRef {
+	stripped := stripCommentsAndStrings(source)
+	var out []ActorMemberRef
+	for _, m := range actorMemberPattern.FindAllStringSubmatchIndex(stripped, -1) {
+		out = append(out, ActorMemberRef{
+			Name:   stripped[m[4]:m[5]],
+			Offset: m[4],
+		})
+	}
+	return out
+}
