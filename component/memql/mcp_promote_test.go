@@ -156,3 +156,47 @@ func TestMCPPromotedFunctionTools_DisabledDropped(t *testing.T) {
 		t.Errorf("MCPPromotedFunctionKind(disabled) = (%q, %v), want (query, true): the router must keep routing @disabled names", kind, ok)
 	}
 }
+
+// TestMCPPromotedFunctionTools_InternalDropped pins memql#2682: the
+// promoted MCP surface is external discovery, and @internal means "hide
+// from external API discovery", so an @internal @mcp function must not
+// be advertised -- matching function_tools.go's registration filter,
+// which has always skipped Internal. Its external peer is unaffected.
+func TestMCPPromotedFunctionTools_InternalDropped(t *testing.T) {
+	e := &MemQLEngine{functions: newFunctionRegistry()}
+	for _, fn := range []*Function{
+		{Name: "internalPromotedQuery", FunctionKind: "query", Enabled: true, Internal: true, MCPPromoted: true},
+		{Name: "externalPromotedQuery", FunctionKind: "query", Enabled: true, MCPPromoted: true},
+		{Name: "internalPromotedMutation", FunctionKind: "mutation", Enabled: true, Internal: true, MCPPromoted: true},
+		{Name: "externalPromotedMutation", FunctionKind: "mutation", Enabled: true, MCPPromoted: true},
+	} {
+		if err := e.functions.Upsert(fn); err != nil {
+			t.Fatalf("upsert %s: %v", fn.Name, err)
+		}
+	}
+
+	tools := e.MCPPromotedFunctionTools()
+	if len(tools) != 2 {
+		t.Fatalf("advertised %d tools, want 2 (the external pair): %v", len(tools), toolNames(tools))
+	}
+	if tools[0]["name"] != "externalPromotedMutation" || tools[1]["name"] != "externalPromotedQuery" {
+		t.Errorf("advertised = %v; want the external pair only (sorted)", toolNames(tools))
+	}
+
+	// Hidden, not off: an @internal promoted function still ROUTES, so an
+	// internal caller that knows the name resolves it rather than getting
+	// an unknown-tool error. (@disabled differs -- it routes to the #2605
+	// execution refusal.)
+	if kind, ok := e.MCPPromotedFunctionKind("internalPromotedQuery"); !ok || kind != "query" {
+		t.Errorf("internal promoted function must still route, got (%q, %v)", kind, ok)
+	}
+}
+
+func toolNames(tools []map[string]any) []string {
+	out := make([]string, 0, len(tools))
+	for _, t := range tools {
+		name, _ := t["name"].(string)
+		out = append(out, name)
+	}
+	return out
+}

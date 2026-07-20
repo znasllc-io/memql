@@ -164,6 +164,14 @@ Marks the definition as internal-only. Not exposed to the external API.
 query node querySystemMetrics { ... }
 ```
 
+Concretely, "external API" includes every discovery surface: the
+function-backed tool registration path and the `@mcp`-promoted tool
+surface both skip `@internal` constructs (#2682), so an
+`@internal @mcp` function is advertised nowhere. It stays CALLABLE --
+`@internal` hides, it does not disable -- so an internal caller that
+knows the name still routes to it. (Contrast `@disabled`, which also
+drops from the surface but then refuses the call, #2647/#2605.)
+
 #### `@public`
 Declares that the construct intentionally carries **no caller-scope
 check**. The per-row authorization gate
