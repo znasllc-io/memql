@@ -15,6 +15,7 @@ import (
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
 	"github.com/uptrace/bun/driver/pgdriver"
+	"github.com/znasllc-io/memql/component/database/dbtest"
 )
 
 func dispatchGateTestLogger() *slog.Logger {
@@ -146,7 +147,7 @@ func openDispatchGateTestDB(t *testing.T) *bun.DB {
 	defer cancel()
 	if err := db.PingContext(ctx); err != nil {
 		_ = db.Close()
-		t.Skipf("no Postgres reachable for the dispatch-gate integration test: %v", err)
+		dbtest.Unreachable(t, "DB-gated test for the dispatch-gate integration test", dsn, err)
 	}
 	return db
 }

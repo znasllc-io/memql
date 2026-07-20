@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"testing"
 	"time"
 
 	"github.com/uptrace/bun"
@@ -73,7 +74,14 @@ func EnsureSchema(ctx context.Context) (reachable bool, err error) {
 	defer cancelPing()
 	if perr := lockDB.PingContext(pingCtx); perr != nil {
 		// No Postgres reachable: leave migration to nobody and let the
-		// individual tests skip (they each ping + Skipf).
+		// individual tests skip (they each ping + Skipf). Under
+		// MEMQL_REQUIRE_DB the run WANTED a database, so an unreachable
+		// one -- including a wrong password, which pings the same way --
+		// is an error rather than a silent degrade to green-by-skip
+		// (#2680).
+		if RequireDB() {
+			return false, fmt.Errorf("dbtest: %s=1 but Postgres is UNREACHABLE at %s: %w", RequireDBEnv, SafeDSN(dsn), perr)
+		}
 		return false, nil
 	}
 
@@ -118,4 +126,75 @@ func EnsureSchema(ctx context.Context) (reachable bool, err error) {
 		return true, fmt.Errorf("dbtest: migrate shared test schema: %w", migErr)
 	}
 	return true, nil
+}
+
+// --- Reachability reporting (#2680) -----------------------------------------
+//
+// Every db-gated suite self-skips when Postgres is unreachable, which keeps a
+// DB-less lane green. The failure mode that motivated these helpers: a WRONG
+// DSN (bad password, wrong port) is also "unreachable", so a run intended as
+// db-gated verification silently degrades to green-by-skip and reports `ok`.
+// Local verification of #2599/#2600 ran that way for a whole session --
+// 17 conformance tests skipped while the run looked green.
+//
+// Two guards: the skip message names the DSN it actually tried (password
+// redacted), so "wrong credentials" is never mistaken for "no database"; and
+// MEMQL_REQUIRE_DB=1 converts every such skip into a failure, so a run meant
+// to exercise the DB cannot quietly not.
+
+// RequireDBEnv is the opt-in that turns db-gated skips into failures.
+const RequireDBEnv = "MEMQL_REQUIRE_DB"
+
+// DSN returns the database DSN the db-gated suites target: the
+// MEMQL_DATABASE_DSN environment value, or the shared default.
+func DSN() string {
+	if dsn := strings.TrimSpace(os.Getenv("MEMQL_DATABASE_DSN")); dsn != "" {
+		return dsn
+	}
+	return defaultDSN
+}
+
+// RequireDB reports whether MEMQL_REQUIRE_DB demands a reachable database.
+func RequireDB() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(RequireDBEnv))) {
+	case "", "0", "false", "no":
+		return false
+	}
+	return true
+}
+
+// SafeDSN redacts the password in a DSN so it can appear in test output.
+// Returns the input unchanged when it carries no credentials.
+func SafeDSN(dsn string) string {
+	at := strings.LastIndex(dsn, "@")
+	if at < 0 {
+		return dsn
+	}
+	scheme := strings.Index(dsn, "://")
+	if scheme < 0 || scheme+3 > at {
+		return dsn
+	}
+	creds := dsn[scheme+3 : at]
+	colon := strings.Index(creds, ":")
+	if colon < 0 {
+		return dsn // user only, no password to hide
+	}
+	return dsn[:scheme+3] + creds[:colon] + ":***" + dsn[at:]
+}
+
+// Unreachable is the single decision point for a db-gated test whose ping
+// failed: it FAILS the test when MEMQL_REQUIRE_DB is set, and otherwise skips
+// with a message naming the redacted DSN and the underlying error -- so an
+// authentication failure reads as one instead of looking like an absent
+// database. purpose describes the suite ("accountDeletionSweep acceptance").
+func Unreachable(t testing.TB, purpose, dsn string, err error) {
+	t.Helper()
+	if RequireDB() {
+		// Explicit return rather than relying on Fatalf's implicit
+		// Goexit: the control flow must be correct for any testing.TB,
+		// not just the stdlib one (#2680's own test caught this).
+		t.Fatalf("%s: %s=1 but Postgres is UNREACHABLE at %s: %v", purpose, RequireDBEnv, SafeDSN(dsn), err)
+		return
+	}
+	t.Skipf("%s: no Postgres reachable at %s (%v) -- set %s=1 to make this a failure", purpose, SafeDSN(dsn), err, RequireDBEnv)
 }

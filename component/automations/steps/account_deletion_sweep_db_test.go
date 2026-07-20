@@ -19,6 +19,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/automations"
+	"github.com/znasllc-io/memql/component/database/dbtest"
 	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/memql"
@@ -57,7 +58,7 @@ func TestAccountDeletionSweep_HardDeletesExpiredUser_DBAcceptance(t *testing.T) 
 	}
 	db := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn))), pgdialect.New())
 	if err := db.PingContext(context.Background()); err != nil {
-		t.Skipf("accountDeletionSweep acceptance test: no Postgres reachable (%v)", err)
+		dbtest.Unreachable(t, "accountDeletionSweep acceptance test", dsn, err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
 

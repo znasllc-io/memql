@@ -13,6 +13,7 @@ import (
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
 	"github.com/uptrace/bun/driver/pgdriver"
+	"github.com/znasllc-io/memql/component/database/dbtest"
 )
 
 // openTestDB connects to a Postgres for the #561 guard integration test,
@@ -31,7 +32,7 @@ func openTestDB(t *testing.T) *bun.DB {
 	defer cancel()
 	if err := db.PingContext(ctx); err != nil {
 		_ = db.Close()
-		t.Skipf("no Postgres reachable for the cluster-guard integration test: %v", err)
+		dbtest.Unreachable(t, "DB-gated test for the cluster-guard integration test", dsn, err)
 	}
 
 	// The guard relies on the migration's table; create it here so the test is

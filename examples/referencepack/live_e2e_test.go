@@ -45,6 +45,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/automations"
 	automationSteps "github.com/znasllc-io/memql/component/automations/steps"
+	"github.com/znasllc-io/memql/component/database/dbtest"
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/memql"
@@ -97,7 +98,7 @@ func TestLiveE2E_ReferencePackAutomationFiresOnNoteCreate(t *testing.T) {
 	probe := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn))), pgdialect.New())
 	if err := probe.PingContext(context.Background()); err != nil {
 		_ = probe.Close()
-		t.Skipf("live e2e: no Postgres reachable at %s (%v)", dsn, err)
+		dbtest.Unreachable(t, "live e2e", dsn, err)
 	}
 	_ = probe.Close()
 
