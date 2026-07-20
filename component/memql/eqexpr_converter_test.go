@@ -85,3 +85,29 @@ func TestLogicNestedCondCoalescePredicate_Loads(t *testing.T) {
 		})
 	}
 }
+
+// Review finding 5: both properties below survived mutation with the suite
+// green -- silently converting !x to x (boolean inversion) and deleting the
+// NotExpr scope gate were undetected. Pinned.
+func TestConvertNotExpr_NarrownessAndScope(t *testing.T) {
+	loose := NewASTConverter(WithCollectionMethods())
+
+	// A NOT of anything but the != equality shape must REJECT, never
+	// convert-through (convert-through inverts boolean semantics).
+	bang := &languageParser.NotExpr{Target: &languageParser.ArgRefExpr{Path: "flag"}}
+	if _, err := loose.ConvertExpression(bang); err == nil || !strings.Contains(err.Error(), "#2612") {
+		t.Errorf("NotExpr{non-EqExpr} must reject with the #2612 narrowness error, got %v", err)
+	}
+
+	// The scope gate must fire for NotExpr in strict scope, same as EqExpr
+	// and BinaryComparisonExpr -- a != expression-led comparison must not
+	// leak toward SQL compilation.
+	strict := NewASTConverter()
+	ne := &languageParser.NotExpr{Target: &languageParser.EqExpr{
+		Left:  &languageParser.CoalesceExpr{Args: []languageParser.ExpressionNode{&languageParser.ArgRefExpr{Path: "x"}}},
+		Right: &languageParser.LiteralExpr{Value: "y"},
+	}}
+	if _, err := strict.ConvertExpression(ne); err == nil || !strings.Contains(err.Error(), "logic / collection lambdas") {
+		t.Errorf("NotExpr in strict scope must get the #2542 scope error, got %v", err)
+	}
+}

@@ -516,10 +516,15 @@ The five value positions:
   `cond(...)`. This is why a comparison is a first-class `cond` PREDICATE
   but not a `cond` BRANCH value.
 - **cond predicates** accept a bare boolean chain (`x.any()`), a scalar
-  comparison (`r > 50`), an equality (`role == "x"`), and a comparison
-  over a chain aggregate (`x.count(m => ...) > 0`, wave 3). The predicate
-  aggregate is resolved through the in-memory collection evaluator, not a
-  lexicographic string compare.
+  comparison (`r > 50`), an equality (`role == "x"`), a comparison
+  over a chain aggregate (`x.count(m => ...) > 0`, wave 3), and a
+  coalesce-led equality in either spelling (`coalesce(args.b, "") ==
+  "y"` / `args.b ?? "" == "y"`, #2612) -- including inside NESTED
+  cond predicates, where that shape was previously a load rejection and
+  the bind-then-compare workaround (`z := coalesce(...); cond(z == ...)`)
+  was required. The workaround remains valid; it is no longer necessary.
+  The predicate aggregate is resolved through the in-memory collection
+  evaluator, not a lexicographic string compare.
 
 ---
 
