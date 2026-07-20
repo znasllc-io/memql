@@ -514,7 +514,14 @@ func (e *MemQLEngine) PromoteAuthoredConstruct(ctx context.Context, c *AuthoredC
 		return nil
 	case "spec", "trait":
 		spec, ok := c.Compiled.(*Spec)
-		if !ok || spec == nil {
+		if ok && spec == nil {
+			// A typed-nil *Spec is compileAuthoredSpec's (nil, nil) output --
+			// the #2607 intentional-skip contract for @disabled. The construct
+			// compiled fine and was deliberately disabled; name the state, not
+			// a compile failure (memql#2643).
+			return fmt.Errorf("authoring: promote %s %q: construct is @disabled; enable it (remove @disabled from the source) before promoting", c.Kind, c.Name)
+		}
+		if !ok {
 			return fmt.Errorf("authoring: promote %s %q: construct is not compiled", c.Kind, c.Name)
 		}
 		if e.specs == nil {

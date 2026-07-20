@@ -93,6 +93,22 @@ validation bypass, so a decl parked ahead of its unshipped Go verb is
 a hard load error; the `_disabled/` directory convention is the tool
 for parking DSL ahead of Go.
 
+AUTHORED constructs carry the same intentional-state semantics through
+the authoring lifecycle (#2643). A session-authored `@disabled` spec or
+trait passes Gate-1 (it must stay semantically valid) but cannot be
+promoted: the promote is refused with `construct is @disabled; enable
+it (remove @disabled from the source) before promoting` -- an authored
+construct cannot be disabled in place as a soft-retire; the retire path
+for a promoted construct is the demote. A STORED `@disabled` authored
+row (persisted by an older engine or an activated bundle) re-hydrates
+as an intentional skip: nothing registers, the name stays reserved
+against authored promotion, and the row is reported as
+`skippedDisabled` -- never through the quarantine channel (no ERROR
+log, no load-report entry), which is reserved for rows that genuinely
+fail to recompile. A bundle authoring a `@disabled` capability fails
+Gate-1 with `capability "name" is @disabled` (it would compile to
+nothing), not the misleading "no capability declaration found".
+
 ```memql
 @disabled
 query user queryLegacyUsers { ... }
