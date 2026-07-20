@@ -39,13 +39,8 @@ automation accessRequestExpirySweep {
 //
 // MemQL parser limitation + email-delivery delegation: see header
 // of accountDeletionReminder7Days.
-@trigger(schedule="0 5 9 * * *")
 @description("Daily 09:05 UTC: emit identity.deletion.reminder events (urgent) for users at the 25-day mark of their deletion cooldown.")
-automation accountDeletionReminder25Days {
-  step run {
-    logic accountDeletionReminder25Days ( event: event )
-  }
-}
+automation accountDeletionReminder25Days @trigger(schedule="0 5 9 * * *") => logic accountDeletionReminder25Days
 
 // accountDeletionReminder7Days
 // =============================
@@ -79,13 +74,8 @@ automation accountDeletionReminder25Days {
 // addDuration windowing down (the planner rejects function-call
 // literals in filter comparisons), so windowing happens per-row
 // inside the loop.
-@trigger(schedule="0 0 9 * * *")
 @description("Daily 09:00 UTC: emit identity.deletion.reminder events for users at the 7-day mark of their deletion cooldown.")
-automation accountDeletionReminder7Days {
-  step run {
-    logic accountDeletionReminder7Days ( event: event )
-  }
-}
+automation accountDeletionReminder7Days @trigger(schedule="0 0 9 * * *") => logic accountDeletionReminder7Days
 
 // accountDeletionSweep
 // =====================
@@ -169,13 +159,8 @@ automation accountDeletionSweep {
 // Per-row windowing uses addDuration on item.payload.occurredAt
 // against `now`, same as accessRequestExpirySweep -- MemQL
 // can't push that into the filter today.
-@trigger(schedule="0 0 2 * * *")
 @description("Daily 02:00 UTC sweep: identifies audit events past MEMQL_IDENTITY_AUDIT_LOG_RETENTION_DAYS. Currently observation-only; deletion lands when MemQL gains row-removal support.")
-automation auditEventRetentionSweep {
-  step run {
-    logic auditEventRetentionSweep ( event: event )
-  }
-}
+automation auditEventRetentionSweep @trigger(schedule="0 0 2 * * *") => logic auditEventRetentionSweep
 
 // ---- automations/v1/identity/expireDelegations/automation.memql ----
 
@@ -254,11 +239,6 @@ automation magicLinkExpirySweep {
 //
 // Emits a delegation.created event when a new delegation is created.
 // Used for audit logging and downstream event processing.
-@trigger(event="node.created", concept="v1:identity:delegation", partition="*")
 @description("Emit delegation.created event with full context for audit logging")
-automation onDelegationCreated {
-  step run {
-    logic onDelegationCreated ( event: event )
-  }
-}
+automation onDelegationCreated @trigger(event="node.created", concept="v1:identity:delegation", partition="*") => logic onDelegationCreated
 

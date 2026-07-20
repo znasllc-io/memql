@@ -72,6 +72,7 @@ var rewriters = map[string]rewriter{
 	"required-sigil":    langparser.RewriteRequiredSigil,
 	"enum-type":         langparser.RewriteEnumTypeArgs,
 	"cache-positional":  langparser.RewriteCachePositional,
+	"terse-automation":  langparser.RewriteLonghandSingleStepAutomation,
 }
 
 var pathRewriters = map[string]pathRewriter{
@@ -244,6 +245,7 @@ func listRewriters(w io.Writer) {
 	fmt.Fprintln(w, "  required-sigil      @required -> the `type!` sigil (#2618)")
 	fmt.Fprintln(w, "  enum-type           args `string @enum(...)` -> the enum(...) type (#2618)")
 	fmt.Fprintln(w, "  cache-positional    @cache(ttl=\"N\") -> @cache(N) (#2618)")
+	fmt.Fprintln(w, "  terse-automation    longhand single-step automations -> the => form (#2619)")
 }
 
 func applyPipeline(path string, src []byte, pipeline []pathRewriter) ([]byte, error) {
