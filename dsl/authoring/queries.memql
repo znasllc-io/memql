@@ -7,8 +7,6 @@
 // (#956/#958), the authored runtime loader (#959), and the compose-first
 // catalog matcher (#957).
 
-use authoring.concepts.{ bundle, construct, dependencyEdge }
-use authoring.shapes.{ bundleFull, constructFull, dependencyEdgeFull }
 use common.traits.{ statusIsActive }
 
 @description("All authoring bundles owned by the caller, newest first. Backs the 'my authored capabilities' management list.")

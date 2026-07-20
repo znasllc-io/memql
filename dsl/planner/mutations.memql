@@ -15,8 +15,6 @@
 // the Planner tab's allPlans / createPlan calls were
 // failing with "function not found" as a result.
 
-use planner.concepts.{ plan, task, taskState, responsibility }
-
 @description("Create a synthetic Plan that wraps an ad-hoc tool call made outside any user-initiated planning context. Per Q5: every tool call must produce a Task; Tasks must have a parent Plan; chat-driven tool calls (no user-facing Plan) get a synthetic Plan with kind='adHocAction' so the invariant holds. Status is set to running and completes immediately when the synthetic semantic Task wrapping the tool call resolves.")
 mutate plan createAdHocPlan {
   args {

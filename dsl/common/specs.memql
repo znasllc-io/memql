@@ -7,8 +7,6 @@
 // via spec("name") (e.g. the per-row-authz admin gate), never by bare
 // name in a query filter.
 
-use common.shapes.{ actorEnvelope }
-
 @description("Actor must hold an identity-issued JWT with the admin role.")
 spec actorEnvelope requiresAdmin {
   return role == "admin"

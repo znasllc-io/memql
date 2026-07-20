@@ -22,9 +22,6 @@
 // which writes v1:forge:requestEvent (a DIFFERENT concept) and so never re-fires
 // node.updated on v1:forge:request. No cycle.
 
-use forge.logic.{ requestRouteStatus, transitionEventKind }
-use forge.mutations.{ advanceRequest, recordRequestEvent }
-
 @trigger(event="node.created", concept="v1:forge:request", partition="*")
 @description("On submission of a v1:forge:request, route it to its next approval-pipeline state by the submitter's role (owner fast-track -> queued / developer -> needs_approval / non-developer -> needs_validation) and record a 'routed' audit event. Decide -> switch -> persist: the role->status policy lives in logic requestRouteStatus; approvedByUserId is stamped ONLY in the queued (owner fast-track) case. P1 #2368.")
 automation routeRequest {

@@ -13,9 +13,6 @@
 // ARE server-side -- they're the high-cardinality narrowing that
 // matters; search is the cheap client-side refinement on top.
 
-use library.concepts.{ artifact, generatedOutput, memory, documentVersion }
-use library.shapes.{ artifactFull, generatedOutputFull, memoryFull, documentVersionSummary, documentVersionFull }
-
 @description("List the caller's entire Library (artifacts + records). Owned: the row set is gated by ownerUserId==actor.userId server-side. The default Library read; the panel filters by lens / kind and searches client-side over this set, or calls the narrower facet queries below when a single facet dominates.")
 query artifact libraryArtifacts {
   filter  ownerUserId==actor.userId

@@ -28,9 +28,6 @@
 // envelope (actor.userId / actor.role / actor.isClusterOwner); the target side
 // is passed as args.
 
-use rbac.queries.{ roleBySlug }
-use rbac.builtins.{ rbacGovernPrincipal, rbacCanCreatePrincipal }
-
 @description("Relational governance entry point: may the actor apply `verb` (update/delete) to the target principal? Resolves the actor + target ranks from the role catalog (roleBySlug) and hands them with the ids + verb + owner flag to the Go core (component/auth/rbac_governance.go:GovernPrincipal), which applies actor.rank > target.rank OR actor==target with the owner-only carve-out. read passes through (capability gates it); create is gated by governanceCanCreatePrincipal (the create != edit split).")
 logic governanceCanManagePrincipal {
   args {

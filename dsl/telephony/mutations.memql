@@ -3,8 +3,6 @@
 // dispatch, outbound placeCall) and the call lifecycle. Records bind to a
 // partition, never a space (Amendment A).
 
-use telephony.concepts.{ number, trunk, call, consent }
-
 @description("Persist a provisioned DID. Called after a carrier BuyNumber succeeds.")
 mutate number recordNumber {
   args {

@@ -6,8 +6,6 @@
 // product-specific mutations (e.g. the product pack's space-join flow)
 // layer on top, never re-implement the row write.
 
-use agents.concepts.{ agent, agentAuthorization, agentRole, avatarPersona }
-
 @description("Create a new AI agent template. The `kind` arg defaults to `assistant` -- the safe value for the frontend's create-agent modal flow. The SeedMaterializer (running under the `system:seedMaterializer` actor) passes `kind: \"system\"` when materializing platform agents (MemQL Planner / MemQL Trainer). The planner integration (running under the `system:planner` actor; memql#399) passes `kind: \"specialist\"` when auto-provisioning a specialist for a Plan's capability gap. User-actor calls that try to pass `kind in (\"system\", \"specialist\")` are rejected pre-insert by an engine-level actor-scope guard (component/memql/agent_kind_actor_validation.go, memql#403); the mutation surface itself stays permissive on `kind` so the seed + planner paths can keep writing their values with the rejection one layer up.")
 mutate agent createAgent {
   args {

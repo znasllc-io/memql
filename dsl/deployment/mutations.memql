@@ -20,8 +20,6 @@
 // `use deployment.mutations.{ ... }`; component/deploycontrol invokes them by
 // name through the engine, unaffected by the relocation.
 
-use deployment.concepts.{ deployment, deploymentNodeSpec }
-
 // ---- createDeployment ----
 
 // Write a new deployment record at deploy start (#1872). The

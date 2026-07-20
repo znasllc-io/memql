@@ -9,8 +9,6 @@
 // version so ownership is immutable across the row's history.
 // updatedAt is stamped to `now` on every write.
 
-use notes.concepts.{ note }
-
 @description("Create a note for the caller. Owned: ownerUserId is stamped from actor.userId, so a caller can only ever create their own notes. title and tags are optional; body is required. updatedAt is stamped to now.")
 mutate note createNote {
   args {

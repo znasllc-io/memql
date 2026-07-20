@@ -1,7 +1,5 @@
 // automations.memql -- safety namespace.
 
-use safety.logic.{ purgeExpiredSafetyClassifications, purgeExpiredOutputScreenings }
-
 // purgeExpiredSafetyClassifications
 // =================================
 //

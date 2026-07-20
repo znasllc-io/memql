@@ -62,7 +62,8 @@ func TestResolveCanonicalIdConceptRefs_StringFormUntouched(t *testing.T) {
 }
 
 // TestResolveCanonicalIdConceptRefs_Unimported errors when the concept name is
-// not imported (type-check at load).
+// neither imported nor a same-domain ambient name (#2617) -- the load-time
+// type check stands.
 func TestResolveCanonicalIdConceptRefs_Unimported(t *testing.T) {
 	src := `use cognition.concepts.{ space }
 mutate x y { insert { id: canonicalId(args.id, widget) } }`
@@ -70,8 +71,8 @@ mutate x y { insert { id: canonicalId(args.id, widget) } }`
 	if err == nil {
 		t.Fatalf("expected an error for the unimported concept %q", "widget")
 	}
-	if !strings.Contains(err.Error(), "widget") || !strings.Contains(err.Error(), "not imported") {
-		t.Fatalf("expected an unimported-concept error, got: %v", err)
+	if !strings.Contains(err.Error(), "widget") || !strings.Contains(err.Error(), "neither imported nor a same-domain concept") {
+		t.Fatalf("expected a not-in-scope concept error, got: %v", err)
 	}
 }
 

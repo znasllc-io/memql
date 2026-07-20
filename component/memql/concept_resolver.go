@@ -38,6 +38,17 @@ func (r *ConceptResolver) ResolveFile(file *languageParser.File, versionContext 
 // the bare-name list it pulled from the pre-NormaliseAll source via
 // extractAllSignatureConceptNames.
 func (r *ConceptResolver) ResolveFileWithSignatureConcepts(file *languageParser.File, versionContext string, signatureConcepts []string) error {
+	return r.ResolveFileWithSignatureConceptsInDomain(file, versionContext, signatureConcepts, "")
+}
+
+// ResolveFileWithSignatureConceptsInDomain is ResolveFileWithSignatureConcepts
+// with the #2617 ambient-domain rule: `domain` is the file's own domain
+// directory, and it becomes the namespace hint for any signature concept no
+// file-top import names -- same-domain constructs are in scope without a
+// `use` line. An explicit import always wins (namespaceHintForName is
+// consulted first), and the resolver's ambiguity error is unchanged when
+// the hint cannot disambiguate.
+func (r *ConceptResolver) ResolveFileWithSignatureConceptsInDomain(file *languageParser.File, versionContext string, signatureConcepts []string, domain string) error {
 	if file == nil {
 		return nil
 	}
@@ -54,7 +65,11 @@ func (r *ConceptResolver) ResolveFileWithSignatureConcepts(file *languageParser.
 		if _, dup := symbols[bareName]; dup {
 			continue
 		}
-		resolvedId, err := r.resolveBareConceptNameWithNamespace(bareName, namespaceHintForName(file.Uses, bareName))
+		nsHint := namespaceHintForName(file.Uses, bareName)
+		if nsHint == "" {
+			nsHint = domain // ambient same-domain scope (#2617)
+		}
+		resolvedId, err := r.resolveBareConceptNameWithNamespace(bareName, nsHint)
 		if err != nil {
 			return fmt.Errorf("signature concept %q: %w", bareName, err)
 		}
@@ -534,6 +549,36 @@ func VersionFromFilePath(path string) string {
 				return part
 			}
 		}
+	}
+	return ""
+}
+
+// DomainFromFilePath returns the domain directory containing a mounted
+// .memql file -- the last path segment before the filename that is not
+// a legacy v<digits> version directory. This is the file's ambient
+// namespace under the #2617 same-domain scope rule ("planner" for
+// planner/queries.memql). Loader origin decorations are tolerated: the
+// unified loader stamps slice origins as
+// "unified:<path>:<sliceName>" (unified_kinds_loader.go), and the
+// prefix would otherwise pollute the leading directory segment.
+// Returns "" when the path carries no directory.
+func DomainFromFilePath(path string) string {
+	// Strip a loader origin decoration ("unified:", "dryrun:", ...):
+	// a colon-terminated prefix before the first slash is never part
+	// of the mounted path.
+	if idx := strings.Index(path, ":"); idx >= 0 && !strings.Contains(path[:idx], "/") && strings.Contains(path[idx+1:], "/") {
+		path = path[idx+1:]
+	}
+	parts := strings.Split(path, "/")
+	for i := len(parts) - 2; i >= 0; i-- {
+		part := parts[i]
+		if part == "" || part == "." {
+			continue
+		}
+		if VersionFromFilePath(part) == part {
+			continue // legacy v<digits> layout segment, not a domain
+		}
+		return part
 	}
 	return ""
 }

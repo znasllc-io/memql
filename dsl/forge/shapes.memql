@@ -2,8 +2,6 @@
 //
 // Read projections in the `forge` namespace.
 
-use forge.concepts.{ project, request, requestEvent }
-
 @row
 @description("Full v1:forge:project projection.")
 shape project projectFull {

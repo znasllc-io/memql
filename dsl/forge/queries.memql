@@ -55,9 +55,6 @@
 //   projects. The forge DSL requires NO code changes for a new client --
 //   partition isolation is structural and automatic.
 
-use forge.concepts.{ project, request, requestEvent }
-use forge.shapes.{ projectFull, requestFull, requestEventFull }
-use forge.specs.{ forgeDeveloper, forgeApprover }
 use common.traits.{ statusIsActive }
 
 @description("Resolve a v1:forge:project by id.")

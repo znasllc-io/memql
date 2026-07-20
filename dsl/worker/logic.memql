@@ -18,7 +18,6 @@
 // the kill switch is the emergency-stop, and re-enable is the
 // confirmation, but resume is per-plan-explicit).
 use platform.queries.{ globalVariable }
-use worker.queries.{ expiredWorkerInvocations, runningPlansForUser }
 
 @description("Pure decide for the kill-switch sweep: returns every running plan owned by the updated user. The suspend write + the gate (computerUseEnabled==false AND the plan has a computerUseScope) live in the killSwitchSuspendsRunningPlans automation's forEach step (#2235). Re-enable flips the flag back; resume is per-plan-explicit.")
 logic killSwitchSuspendsRunningPlans {
@@ -59,5 +58,4 @@ logic workerInvocationRetentionSweep {
   return candidates.nodes()
   }
 }
-
 

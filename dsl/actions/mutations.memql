@@ -13,8 +13,6 @@
 // Id handling mirrors recordHarnessObservation: candidateId is
 // optional -- when omitted the engine assigns the id on insert.
 
-use actions.concepts.{ candidate }
-
 // recordActionCandidate
 // =============================
 // Append a v1:actions:candidate trace for a completed LLM step. The

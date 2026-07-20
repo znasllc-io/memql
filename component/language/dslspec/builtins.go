@@ -253,10 +253,10 @@ func builtins() []Builtin {
 			Doc: "Normalize an id-shaped value to canonical form (`<partition>:<concept>:<bareSlug>`).\n\n" +
 				"Use in mutation id derivations that hash foreign-key args, so the derived id stays stable whether the caller passes a bare slug or an already-canonical id.\n\n" +
 				"Example: `id = concat(\"participant-\", hash(concat(canonicalId(args.partitionId, space), \":\", canonicalId(args.userId, user))))`\n\n" +
-				"The second argument is an imported concept short-name (resolved against the file-top `use ...concepts.{ ... }` imports); the stringly-typed `\"v1:ns:name\"` literal is retired. The engine reads the named concept's @scope to pick the right partition prefix (`_system` for global, otherwise the request envelope's partition). Errors when the concept name isn't imported / registered or when the value is already canonical for a different concept (catches type-tag typos).",
+				"The second argument is a concept short-name -- resolved against the file-top `use ...concepts.{ ... }` imports, or ambient when the concept lives in the file's own domain (#2617: same-domain constructs need no import); the stringly-typed `\"v1:ns:name\"` literal is retired. The engine reads the named concept's @scope to pick the right partition prefix (`_system` for global, otherwise the request envelope's partition). Errors when the concept name isn't imported / registered or when the value is already canonical for a different concept (catches type-tag typos).",
 			Params: []BuiltinParam{
 				{Name: "value", Doc: "Id-shaped value (bare slug or canonical). Empty input returns empty."},
-				{Name: "concept", Doc: "Imported concept short-name, e.g. `user` (from `use identity.concepts.{ user }`)."},
+				{Name: "concept", Doc: "Concept short-name: imported (`use identity.concepts.{ user }`) or ambient same-domain (#2617)."},
 			},
 		},
 		{

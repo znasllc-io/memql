@@ -128,8 +128,11 @@ func TestRewritePipelineCombinesRewrites(t *testing.T) {
 	src := "scores array(int); x := getAgent.first.payload.id; check := if getAgent.empty { f() }"
 	want := "scores []int; x := getAgent.First().payload.id; check := if getAgent.Empty() { f() }"
 
-	pipeline := []rewriter{rewriteResultNavigation, rewriteSliceSyntax}
-	got, err := applyPipeline([]byte(src), pipeline)
+	pipeline := []pathRewriter{
+		func(_ string, b []byte) ([]byte, error) { return rewriteResultNavigation(b) },
+		func(_ string, b []byte) ([]byte, error) { return rewriteSliceSyntax(b) },
+	}
+	got, err := applyPipeline("x.memql", []byte(src), pipeline)
 	if err != nil {
 		t.Fatalf("applyPipeline: %v", err)
 	}
@@ -270,5 +273,25 @@ func TestLexicalTokenRewriteUsesEndPos(t *testing.T) {
 	}
 	if string(got) != want {
 		t.Errorf("non-ASCII identifier rewrite:\n got %q\nwant %q", string(got), want)
+	}
+}
+
+// TestRewriteSameDomainUsePathAware pins the path-aware plumbing: the
+// domain comes from the file's containing directory (#2617).
+func TestRewriteSameDomainUsePathAware(t *testing.T) {
+	src := "use planner.concepts.{ plan }\nuse harness.concepts.{ run }\n"
+	got, err := rewriteSameDomainUse("dsl/planner/queries.memql", []byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "use harness.concepts.{ run }\n" {
+		t.Errorf("same-domain line must go, cross-domain stay: %q", string(got))
+	}
+	got, err = rewriteSameDomainUse("dsl/harness/queries.memql", []byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "use planner.concepts.{ plan }\n" {
+		t.Errorf("domain derives from the path: %q", string(got))
 	}
 }

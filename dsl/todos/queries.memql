@@ -5,8 +5,6 @@
 // their own to-dos; there is no arg that lets a caller widen the
 // row set beyond their own ownership.
 
-use todos.concepts.{ todo }
-
 @description("List the caller's to-dos. Owned: the row set is gated by ownerUserId==actor.userId server-side, so cross-user reads are impossible. Optional done filter narrows to open (done=false) or completed (done=true) items; omit it to return everything.")
 query todo todos {
   args {

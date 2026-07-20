@@ -1,7 +1,5 @@
 // rbac domain -- row projections for the role + capability catalog.
 
-use rbac.concepts.{ capability, role }
-
 @description("Full projection of a role row: its stable slug, display name, numeric rank, and provenance/lifecycle flags. The canonical shape every role query returns. Higher rank == more privileged.")
 @row
 shape role roleFull {

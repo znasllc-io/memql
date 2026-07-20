@@ -4,8 +4,6 @@
 // requires logic to live as a separate construct from its parent
 // automation.
 
-use workbench.queries.{ workspaceForPlan }
-
 @description("Pure decide for the workspace-release sweep: returns every v1:workbench:workspace for the updated plan. The terminal-status gate, the per-row release write (provisioned workspaces only), and the unconditional on-disk teardown all live in the releaseWorkspaceOnPlanTerminal automation's steps (#2235).")
 logic releaseWorkspaceOnPlanTerminal {
   args {

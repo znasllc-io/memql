@@ -26,8 +26,6 @@
 //
 // Returns: Array of plan records (planFull shape).
 
-use planner.concepts.{ plan, task, taskState, responsibility }
-
 // payload.partitionId!="" is the tautological row-matches-all predicate:
 // partitionId is @required on the Plan concept, so every row passes. We
 // can't use isNotDeleted / isActiveRecord because Plans

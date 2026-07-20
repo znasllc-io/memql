@@ -7,8 +7,6 @@
 // and its data shapes have to be uniformly available on every binary
 // that loads concepts, not just on the carrier-built BFF.
 
-use planner.concepts.{ plan, task, taskState, responsibility }
-
 @row
 @description("Comprehensive plan projection for the Tasks page row, the plan.created / plan.completed canvas cards, and the planner's own routing decisions. Carries every Plan field including lifecycle timestamps, the per-kind input/output blobs, and the token + estimate accounting the Tasks page progress strips read.")
 shape plan planFull {

@@ -1433,3 +1433,39 @@ identifiers every body may read; an `args { }` field of the same name is
 REJECTED at parse time (rename it -- e.g. `asOf` for a caller-passed
 evaluation instant). `event` is additionally reserved for AUTOMATION args
 by the load-time shadow check (G2, memql#2364).
+
+---
+
+## 25. Import scope: same-domain constructs are ambient (#2617)
+
+**Rule.** A construct never imports its OWN domain. Constructs of the
+file's containing `dsl/<domain>/` directory are ambient -- in scope
+with no `use` line: the loader seeds the concept-resolution namespace
+hint from the directory, canonicalId() accepts ambient same-domain
+concept short-names, and the editor suppresses same-domain import
+suggestions. `use` stays required (and lint-enforced) cross-domain.
+
+```memql
+// dsl/planner/queries.memql -- `plan` is ambient (v1:planner:plan),
+// even though v1:harness:plan shares the trailing segment.
+query plan plansForSpace {
+  ...
+}
+
+// Cross-domain names still need the import:
+use cognition.concepts.{ space }
+```
+
+**Constraints.**
+
+- **Explicit wins.** A file-top import of a name always beats the
+  ambient resolution -- importing `harness.concepts.{ plan }` from
+  inside `dsl/planner/` binds the harness concept.
+- **Ambiguity stays an error.** When the domain hint cannot single
+  out one concept (colon-scoped sub-namespaces can still collide),
+  the loader reports the ambiguity by name -- exactly as it always
+  did for unhinted collisions.
+- **Explicit same-domain imports keep parsing** (the rule is
+  additive), but the tree gate (`dsl/no_same_domain_use_test.go`,
+  which runs the `memqlmigrate --rewrite=same-domain-use` codemod)
+  keeps them out of the shipped corpus.

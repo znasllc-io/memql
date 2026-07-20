@@ -3,8 +3,6 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use data.concepts.{ policy, record }
-
 @description("Synthetically check a data record, updating check count and validation state")
 mutate record checkRecord {
   args {

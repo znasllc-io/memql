@@ -4,8 +4,6 @@
 // workspaceForPlan as the existence-check before the lazy
 // provision path.
 
-use workbench.concepts.{ workspace }
-
 @unbounded("the workspace for a plan -- a per-plan singleton bounded to a single row")
 @description("Look up the workbench workspace row for a Plan. Returns empty when no workspace has been provisioned yet -- the integration uses this to decide whether to call provisionWorkspace on the first workbenchHost dispatch.")
 query workspace workspaceForPlan {

@@ -24,8 +24,6 @@
 // images whose Simli faces are not yet generated -- add their seeds here
 // once minted.
 
-use agents.concepts.{ avatarPersona }
-
 // Sofia -- our one custom Simli avatar, generated from avatars/female_0.png.
 // personaId is the Simli faceId, validated against POST /compose/token
 // (HTTP 200). The earlier d6ee6443 value was rejected INVALID_FACE_ID

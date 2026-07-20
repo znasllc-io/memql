@@ -29,6 +29,11 @@
 //	                    result is verified equivalent through the engine's
 //	                    own mutation emitter.
 //
+//	same-domain-use     delete use imports of the file's own domain
+//	                    (#2617: same-domain constructs are ambient); the
+//	                    domain is the file's containing directory, so this
+//	                    rewrite is path-aware.
+//
 // Flags:
 //
 //	--rewrite=NAME[,NAME...]   comma-separated list of rewrites to apply
@@ -55,11 +60,26 @@ import (
 
 type rewriter func([]byte) ([]byte, error)
 
+// pathRewriter is a rewrite that needs the file's path (e.g. to derive
+// the containing domain directory, #2617).
+type pathRewriter func(path string, src []byte) ([]byte, error)
+
 var rewriters = map[string]rewriter{
 	"result-navigation": rewriteResultNavigation,
 	"slice-syntax":      rewriteSliceSyntax,
 	"args-description":  rewriteArgsDescription,
 	"accept-stamp":      langparser.RewriteAcceptStamp,
+}
+
+var pathRewriters = map[string]pathRewriter{
+	"same-domain-use": rewriteSameDomainUse,
+}
+
+// rewriteSameDomainUse derives the file's domain (its containing
+// directory) and delegates to the engine-package rewrite the dsl/
+// conformance gate also runs.
+func rewriteSameDomainUse(path string, src []byte) ([]byte, error) {
+	return langparser.RewriteSameDomainUse(filepath.Base(filepath.Dir(path)), src)
 }
 
 type opts struct {
@@ -95,15 +115,20 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return errUsage
 	}
 
-	pipeline := make([]rewriter, 0, len(o.rewrites))
+	pipeline := make([]pathRewriter, 0, len(o.rewrites))
 	for _, name := range o.rewrites {
-		fn, ok := rewriters[name]
-		if !ok {
-			fmt.Fprintf(stderr, "memqlmigrate: unknown rewrite %q\n", name)
-			listRewriters(stderr)
-			return errUsage
+		if fn, ok := rewriters[name]; ok {
+			plain := fn
+			pipeline = append(pipeline, func(_ string, b []byte) ([]byte, error) { return plain(b) })
+			continue
 		}
-		pipeline = append(pipeline, fn)
+		if fn, ok := pathRewriters[name]; ok {
+			pipeline = append(pipeline, fn)
+			continue
+		}
+		fmt.Fprintf(stderr, "memqlmigrate: unknown rewrite %q\n", name)
+		listRewriters(stderr)
+		return errUsage
 	}
 
 	expanded, err := expandPaths(paths)
@@ -117,7 +142,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 		if err != nil {
 			return fmt.Errorf("memqlmigrate: read %s: %w", p, err)
 		}
-		out, err := applyPipeline(orig, pipeline)
+		out, err := applyPipeline(p, orig, pipeline)
 		if err != nil {
 			return fmt.Errorf("memqlmigrate: rewrite %s: %w", p, err)
 		}
@@ -212,12 +237,13 @@ func listRewriters(w io.Writer) {
 	fmt.Fprintln(w, "  slice-syntax        array(T) → []T")
 	fmt.Fprintln(w, "  args-description    strip parser-discarded @description from args{} fields")
 	fmt.Fprintln(w, "  accept-stamp        collapse arg-mirror runs into accept{}/stamp{} (#2616)")
+	fmt.Fprintln(w, "  same-domain-use     delete use imports of the file's own domain (#2617)")
 }
 
-func applyPipeline(src []byte, pipeline []rewriter) ([]byte, error) {
+func applyPipeline(path string, src []byte, pipeline []pathRewriter) ([]byte, error) {
 	out := src
 	for _, fn := range pipeline {
-		next, err := fn(out)
+		next, err := fn(path, out)
 		if err != nil {
 			return nil, err
 		}

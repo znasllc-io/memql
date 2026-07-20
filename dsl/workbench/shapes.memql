@@ -1,7 +1,5 @@
 // shapes.memql -- workbench namespace
 
-use workbench.concepts.{ workspace }
-
 @row
 @description("Full projection of a v1:workbench:workspace row. Used by workspaceForPlan (the integration's existence-check) and provisionedWorkspaces (inventory).")
 shape workspace workspaceFull {

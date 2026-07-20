@@ -23,7 +23,6 @@
 // SIDE EFFECTS:
 // - Emits "data.conflicts.detected" event with conflict details
 // - Does NOT modify any records
-use data.queries.{ detectConflicts }
 
 @description("Triggered on new v1:data:record creation with a non-empty naturalKeyValue. Queries confirmed records for matching natural key + record type; if any exist, emits 'data.conflicts.detected' event for the UI's ConflictResolutionPanel. Never auto-resolves -- always requires human approval.")
 @eventField("id", "naturalKeyField", "naturalKeyValue", "recordType", "partitionId")

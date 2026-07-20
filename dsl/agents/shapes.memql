@@ -5,8 +5,6 @@
 // agentAuthorizationFull projection for the standing-grants surface,
 // and the dedupe-step shapes the planner uses.
 
-use agents.concepts.{ agent, agentAuthorization, agentRole, avatarPersona, skill, skillChangeEvent }
-
 @row
 @description("AgentAuthorization projection. Backs the agent settings 'Standing authorizations' table where the user reviews and revokes grants, plus the agent's prompt-context resolver that needs to read the current standing computer_use scope.")
 shape agentAuthorization agentAuthorizationFull {

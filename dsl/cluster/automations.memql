@@ -24,9 +24,6 @@
 // mutation-DEFINITION rewriter (NormaliseMutationSource matches the header
 // anywhere in the file).
 
-use cluster.logic.{ bootstrapCluster, pruneStaleClusterNodes }
-use cluster.mutations.{ createCluster, createDatabase, createIdentityProvider, createNode, createSpawnEvent, updateNodeHealth }
-
 // Bootstrap cluster, database, and identity provider records on first startup.
 // The pure bootstrapCluster logic decides { create, withIdentityProvider }
 // (create == existingCluster() empty AND node.type=="bff"); the three creates

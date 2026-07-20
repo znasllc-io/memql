@@ -28,7 +28,6 @@
 //
 // The pending-access-request table is small (admin queue), so
 // iterating all of it daily is cheap.
-use identity.queries.{ expiredActiveDelegations, expiredAuditEvents, expiredMagicLinkRequests, expiredPendingAccessRequests, usersInDeletionCooldown, usersScheduledForDeletion }
 use platform.queries.{ globalVariable }
 
 @description("Pure decide for the access-request expiry sweep (#2369, cluster pruneStaleClusterNodes pattern): reads IDENTITY_ACCESS_REQUEST_EXPIRY_DAYS (default 30), computes cutoff = now - window via addDuration with a negative ISO duration, and returns expiredPendingAccessRequests({createdBefore: cutoff}).nodes() -- the pending rows past the window, filtered by QUERY PUSHDOWN. The retention policy lives entirely here; the calling automation's forEach is unconditional.")
@@ -364,5 +363,4 @@ logic revokeExpiredDelegations {
     return query expiredActiveDelegations( asOf: args.asOf )
   }
 }
-
 

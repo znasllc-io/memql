@@ -3,9 +3,6 @@
 // infrastructure, so reads are cluster-owner gated (Amendment A scoping is by
 // partition, not space).
 
-use telephony.concepts.{ number, call, consent }
-use telephony.shapes.{ numberFull, callFull, consentFull }
-
 @description("ADMIN: DIDs provisioned to a partition, newest first. Cluster-owner gated -- numbers are cluster infrastructure.")
 query number numbersByPartition {
   args {

@@ -44,8 +44,6 @@
 // key on. The same split on `role` (admin/owner create/update/delete vs
 // read-only for others) is what bounds custom-role authoring in E1.4.
 
-use rbac.concepts.{ capability, role }
-
 // =============================================================================
 //   Base roles -- the four ranked, immutable role rows. Higher rank ==
 //   more privileged. Spaced by 100 so E1.4 custom roles slot between.

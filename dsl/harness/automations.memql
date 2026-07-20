@@ -32,8 +32,6 @@
 // framing -- beliefs are durable, so distilling once a day is plenty;
 // the watermark guarantees nothing is missed between runs.
 
-use harness.logic.{ consolidateMemory }
-
 @trigger(schedule="0 45 2 * * *")
 @description("Daily 02:45 UTC memory consolidation (#586). Per owner: reads episodic nodes (plans / steps / observations) created since that owner's v1:harness:consolidationCursor watermark, groups them by similarity, LLM-distills stable facts / preferences / outcomes, dedups each candidate via similarTo against existing v1:harness:semanticMemory rows (reinforce on match -- bump confidence + reset the decay clock + merge provenance, no duplicate; write a new belief with sourceEpisodes provenance on no match), decays + prunes stale unreinforced beliefs, then advances the watermark so the next run is incremental (cost bounded by the new-episode delta, not total history). Schedule offset past the other nightly crons to avoid DB-window contention.")
 automation consolidateMemory {

@@ -1,7 +1,5 @@
 // todos domain -- row projections.
 
-use todos.concepts.{ todo }
-
 @row
 @description("Comprehensive to-do projection: every payload field plus row id and timestamps. The default shape for list / create / update reads.")
 shape todo todoFull {

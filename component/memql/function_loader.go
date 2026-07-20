@@ -186,7 +186,7 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 	// `canonicalId(x, <importedConceptName>)` to the canonical-id string form
 	// against the file's `use ...concepts.{ ... }` imports + the registry. The
 	// quoted string form passes through unchanged (additive).
-	if resolved, cerr := NewConceptResolver(registry).ResolveCanonicalIdConceptRefs(content); cerr != nil {
+	if resolved, cerr := NewConceptResolver(registry).ResolveCanonicalIdConceptRefsInDomain(content, DomainFromFilePath(origin)); cerr != nil {
 		return nil, fmt.Errorf("%s: %w", origin, cerr)
 	} else {
 		content = resolved
@@ -228,7 +228,7 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 			version = "v1" // default
 		}
 		resolver := NewConceptResolver(registry)
-		if err := resolver.ResolveFileWithSignatureConcepts(file, version, signatureConcepts); err != nil {
+		if err := resolver.ResolveFileWithSignatureConceptsInDomain(file, version, signatureConcepts, DomainFromFilePath(origin)); err != nil {
 			return nil, fmt.Errorf("concept resolution: %w", err)
 		}
 	}
@@ -240,19 +240,34 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 	// and argument-less `insert()` calls. Exactly one binding source
 	// is permitted; the concept-resolver guards against collisions.
 	var boundConcept string
+	// The single-use fallbacks below are LEGACY: they served the
+	// procedural single-construct layout where the file's one import
+	// WAS the concept binding. They must never fire for a construct
+	// whose binding lives in its SIGNATURE -- before #2617 that held
+	// only by accident of use-line counts, and the same-domain import
+	// strip exposed the hijack: worker/queries.memql dropped to a
+	// single (cross-domain) use line and every worker query silently
+	// bound v1:planner:plan, which ensureBoundConceptFilter would
+	// have injected into their row filters. Caught by the boot-
+	// equivalence probe in the #2661 review round.
+	legacyBindingEligible := len(signatureConcepts) == 0
+	if legacyBindingEligible && len(file.Definitions) > 0 {
+		fd, ok := file.Definitions[0].(*languageParser.FunctionDef)
+		legacyBindingEligible = ok && (fd.Type == languageParser.FunctionTypeQuery || fd.Type == languageParser.FunctionTypeMutation)
+	}
 	// Legacy Form A (`use cognition.space`) is rejected at parse
 	// time, but the resolver still stamps ResolvedId on any
 	// declaration it manages to canonicalize. Pick that up first.
 	// Form B (`use cognition.concepts.{ space, participant }`)
 	// leaves ResolvedId empty -- the binding comes from one of the
 	// fallbacks below.
-	if len(file.Uses) == 1 && file.Uses[0].ResolvedId != "" {
+	if legacyBindingEligible && len(file.Uses) == 1 && file.Uses[0].ResolvedId != "" {
 		boundConcept = file.Uses[0].ResolvedId
 	}
 	// Form B with a single imported Name: resolve that name through
 	// the registry. Procedural queries with bare `concept;` rely on
 	// this when the file imports exactly one concept.
-	if boundConcept == "" && registry != nil && len(file.Uses) == 1 && len(file.Uses[0].Names) == 1 {
+	if legacyBindingEligible && boundConcept == "" && registry != nil && len(file.Uses) == 1 && len(file.Uses[0].Names) == 1 {
 		resolver := NewConceptResolver(registry)
 		nsHint := ""
 		if len(file.Uses[0].Parts) > 0 {
@@ -269,6 +284,9 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 	if boundConcept == "" && registry != nil && len(signatureConcepts) == 1 {
 		resolver := NewConceptResolver(registry)
 		nsHint := namespaceHintForName(file.Uses, signatureConcepts[0])
+		if nsHint == "" {
+			nsHint = DomainFromFilePath(origin) // ambient same-domain scope (#2617)
+		}
 		if id, err := resolver.resolveBareConceptNameWithNamespace(signatureConcepts[0], nsHint); err == nil {
 			boundConcept = id
 		}

@@ -1,6 +1,7 @@
 package sense
 
 import (
+	"path"
 	"regexp"
 	"sort"
 	"strings"
@@ -11,6 +12,7 @@ import (
 // Complete returns completion suggestions at a cursor position.
 func (s *Service) Complete(source string, line, col int, filePath string) []CompletionItem {
 	ctx := analyzeCursorContext(source, line, col)
+	ctx.FilePath = filePath
 
 	var items []CompletionItem
 
@@ -319,8 +321,11 @@ func (s *Service) completeConstructConcept(ctx CursorContext) []CompletionItem {
 		// Secondary: a fully-formed `use <domain>.concepts.{ short }` import
 		// when the concept isn't already in file scope, the domain is known,
 		// and the spec rule asks for it -- the owner's "no concept in scope ->
-		// suggest importing one" behaviour.
-		if suggestImport && domain != "" && !inScope[short] {
+		// suggest importing one" behaviour. A concept of the file's OWN
+		// domain is ambient (#2617) -- in scope with no import -- so the
+		// import suggestion is suppressed there (the bare suggestion above
+		// already binds it).
+		if suggestImport && domain != "" && !inScope[short] && domain != fileDomain(ctx.FilePath) {
 			useLine := "use " + domain + ".concepts.{ " + short + " }"
 			items = append(items, CompletionItem{
 				Label:         useLine,
@@ -513,4 +518,18 @@ func automationArgsFieldCompletions(source string, line int, prefix string) []Co
 		}
 	}
 	return items
+}
+
+// fileDomain derives the ambient domain from a document path: the base
+// name of the containing directory ("planner" for
+// .../dsl/planner/queries.memql). Empty when the path is unknown.
+func fileDomain(p string) string {
+	if p == "" {
+		return ""
+	}
+	dir := path.Dir(strings.ReplaceAll(p, "\\", "/"))
+	if dir == "." || dir == "/" {
+		return ""
+	}
+	return path.Base(dir)
 }

@@ -8,8 +8,6 @@
 // the gates (#956 validation, #958 dry-run) and the authored runtime
 // (#959) call these to record state.
 
-use authoring.concepts.{ bundle, construct, dependencyEdge }
-
 @description("Create a draft authoring bundle -- the atomic unit a Responsibility compiles into. ownerUserId is stamped from actor.userId. Members are added via createAuthoringConstruct; reused (composed) constructs are recorded on reusedConstructRefs.")
 mutate bundle createAuthoringBundle {
   args {

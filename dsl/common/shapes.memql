@@ -4,7 +4,6 @@
 // files cover the other construct kinds.
 
 use knowledge.concepts.{ documentChunk }
-use common.concepts.{ media, attachment }
 
 @row
 @description("Attachment projection for the download endpoint (memql#804): the file's storage URL + the metadata needed to serve it back (name + MIME + owning space for the cross-space guard).")
