@@ -157,6 +157,28 @@ editors and agents can key on them:
 | `redundant-version` | Hint | `@version("1.0.0")` restates the default (#2613). |
 | `discarded-args-description` | Hint | `@description` on an args field is parsed and discarded (#2615). |
 
+### The context model
+
+Every completion request resolves ONE enclosing-construct answer
+(#2626): a backward walk over the token stream pairs each still-open
+brace with the header that opened it, and the innermost frame whose
+label is a dslspec construct keyword is the enclosure. It yields the
+construct keyword, its annotations-registry receiver, the declared
+name, and the chain of enclosing named blocks (`args`, `insert/stamp`,
+`step`, `body`, ...). A top-level `@` is the one inverted case -- it
+PRECEDES its construct, so the receiver comes from the next header
+below the cursor, and at EOF there is none (the completer falls back
+to the union of every receiver's annotations).
+
+The lowercase construct keywords lex as plain identifiers (only
+`concept` and `use` are lexer keywords), so headers are matched by
+identifier literal against the spec's construct set -- a construct a
+future grammar epic adds is recognized automatically.
+
+Populating the receiver is what finally engages the per-receiver
+annotation filter: `@` above a query no longer offers mutation-only
+annotations like `@mergeFields`.
+
 ### Member completion (#2624)
 
 Typing a dot after a known accessor root completes ONLY that root's
