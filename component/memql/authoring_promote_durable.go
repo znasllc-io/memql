@@ -460,7 +460,7 @@ func (e *MemQLEngine) quarantineRehydratedConstruct(row AuthoringConstructRow, c
 	if e == nil || cause == nil {
 		return
 	}
-	if e.Logger != nil {
+	if e.Component != nil && e.Logger != nil {
 		e.Logger.Error("durable authored construct quarantined at re-hydration (stored source failed to recompile; not re-registered, boot continues)",
 			"component", "memql.engine",
 			"kind", row.Kind,

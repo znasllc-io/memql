@@ -107,7 +107,7 @@ func (e *MemQLEngine) ResolveSkills(ctx context.Context, skillIds []string) (Ski
 		seen[node.ID] = struct{}{}
 		var payload map[string]any
 		if err := json.Unmarshal(node.Payload, &payload); err != nil {
-			if e.Logger != nil {
+			if e.Component != nil && e.Logger != nil {
 				e.Logger.Warn("ResolveSkills: skill payload decode failed",
 					"skillId", node.ID, "error", err)
 			}
@@ -130,7 +130,7 @@ func (e *MemQLEngine) ResolveSkills(ctx context.Context, skillIds []string) (Ski
 		}
 	}
 
-	if e.Logger != nil {
+	if e.Component != nil && e.Logger != nil {
 		for _, id := range want {
 			if _, ok := seen[id]; !ok {
 				e.Logger.Warn("ResolveSkills: unknown skill id (skipped)", "skillId", id)

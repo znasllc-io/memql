@@ -54,7 +54,7 @@ func TestExecuteToolAppliesContextToolDefaults(t *testing.T) {
 	// ctx; ExecuteTool must merge them in before dispatch.
 	ctx := common.ContextWithToolDefaults(agentCtxForTest(), map[string]any{
 		"ownerUserId": "user-jose",
-		"partitionId":     "standard:v1:cognition:space:demo",
+		"partitionId": "standard:v1:cognition:space:demo",
 	})
 	result, err := e.ExecuteTool(ctx, tool, map[string]any{"goal": "a markdown file of birds"})
 	if err != nil {

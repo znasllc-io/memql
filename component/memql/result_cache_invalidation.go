@@ -59,7 +59,7 @@ func (e *MemQLEngine) StartCacheInvalidationSubscriber(ctx context.Context) {
 				return
 			}
 			evicted := e.cache.evictConcept(concept)
-			if evicted > 0 && e.Logger != nil {
+			if evicted > 0 && e.Component != nil && e.Logger != nil {
 				e.Logger.Debug("resultCache: evicted on cache.invalidate",
 					"concept", concept,
 					"topic", event.Topic,

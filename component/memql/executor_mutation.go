@@ -864,7 +864,7 @@ func (e *MemQLEngine) fetchNodesByIds(ctx context.Context, ids []string, timesta
 			continue
 		}
 
-		if e.Logger != nil {
+		if e.Component != nil && e.Logger != nil {
 			e.Logger.Warn("memql reference missing; skipping node", "id", id, "concept_allowlist", allowed[id])
 		}
 		continue
@@ -1066,13 +1066,13 @@ func (e *MemQLEngine) embedHarnessObservation(ctx context.Context, id string, pa
 		"vectorField": "content",
 	}
 	if _, err := handler(ctx, args, 1); err != nil {
-		if e.Logger != nil {
+		if e.Component != nil && e.Logger != nil {
 			e.Logger.Warn("harness observation embed failed (recall will skip this row until backfilled)",
 				"id", id, "error", err)
 		}
 		return
 	}
-	if e.Logger != nil {
+	if e.Component != nil && e.Logger != nil {
 		e.Logger.Debug("harness observation embedded for recall", "id", id, "content_len", len(content))
 	}
 }
@@ -1107,13 +1107,13 @@ func (e *MemQLEngine) embedActionIntent(ctx context.Context, id string, payload 
 		"vectorField": "intent",
 	}
 	if _, err := handler(ctx, args, 1); err != nil {
-		if e.Logger != nil {
+		if e.Component != nil && e.Logger != nil {
 			e.Logger.Warn("action intent embed failed (planner search will skip this action until backfilled)",
 				"id", id, "error", err)
 		}
 		return
 	}
-	if e.Logger != nil {
+	if e.Component != nil && e.Logger != nil {
 		e.Logger.Debug("action intent embedded for planner search", "id", id, "intent_len", len(intent))
 	}
 }

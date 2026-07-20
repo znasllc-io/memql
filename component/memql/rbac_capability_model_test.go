@@ -125,7 +125,7 @@ func TestRBACCapabilityModelExpressible(t *testing.T) {
 	// developer: engineering power (authors + inline + data + forward deploy)
 	// but NO user management -- the developer-outranks-admin power axis is
 	// engineering, not principals.
-	mustHave("developer", "create", "construct")  // CanAuthor
+	mustHave("developer", "create", "construct")   // CanAuthor
 	mustHave("developer", "execute", "construct")  // CanRunInline
 	mustHave("developer", "execute", "deployment") // AtLeastDeveloper forward deploy
 	mustHave("developer", "create", "data")        // CanWrite

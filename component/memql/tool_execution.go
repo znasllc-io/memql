@@ -72,7 +72,7 @@ func (e *MemQLEngine) validateToolArgs(tool *Tool, args map[string]any) error {
 		// Compile failure is logged but not fatal -- the tool's
 		// own dispatch handler runs anyway. Validating against a
 		// half-compiled schema would be worse than skipping.
-		if e != nil && e.Logger != nil {
+		if e != nil && e.Component != nil && e.Logger != nil {
 			e.Logger.Warn("tool schema compile failed; skipping validation",
 				"tool", tool.Name, "error", err)
 		}
@@ -108,7 +108,7 @@ func (e *MemQLEngine) validateToolArgs(tool *Tool, args map[string]any) error {
 		// args (best-effort JSON) so we see what was actually
 		// sent. The LLM-facing message is shorter; the operator
 		// gets the full picture in the log.
-		if e != nil && e.Logger != nil {
+		if e != nil && e.Component != nil && e.Logger != nil {
 			argsJSON, _ := json.Marshal(args)
 			e.Logger.Warn("tool args validation failed",
 				"tool", tool.Name,

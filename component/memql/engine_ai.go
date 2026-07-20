@@ -87,7 +87,7 @@ func (e *MemQLEngine) WireSemanticCache(embeddingProviderName string, dbGetter f
 	}
 	provider, err := e.providers.EmbeddingProvider(embeddingProviderName)
 	if err != nil || provider == nil {
-		if e.Logger != nil {
+		if e.Component != nil && e.Logger != nil {
 			e.Logger.Info("semantic AI cache not wired: embedding provider unavailable",
 				"provider", embeddingProviderName, "err", err)
 		}
@@ -114,7 +114,7 @@ func (e *MemQLEngine) WireSemanticCache(embeddingProviderName string, dbGetter f
 			enabledCount++
 		}
 	}
-	if e.Logger != nil {
+	if e.Component != nil && e.Logger != nil {
 		e.Logger.Info("semantic AI cache wired",
 			"embeddingProvider", embeddingProviderName,
 			"enabledNamespaces", enabledCount)
@@ -244,7 +244,7 @@ func (e *MemQLEngine) InvokeAIStructured(
 	// log line so the fallback is observable rather than silent.
 	var result string
 	structured := e.StructuredChatProviderByName(providerName)
-	if structured == nil && providerName != "" && e.Logger != nil {
+	if structured == nil && providerName != "" && e.Component != nil && e.Logger != nil {
 		e.Logger.Info("prompt @defaultProvider unavailable; falling back to default structured provider",
 			"template", templateId, "requestedProvider", providerName)
 	}
@@ -313,7 +313,7 @@ func (e *MemQLEngine) ReloadAIProviders(ctx context.Context) (int, error) {
 	if e.aiRuntime != nil {
 		e.aiRuntime = newAIRuntime(e.Logger, e.prompts, registry, e.aiCacheConfig)
 	}
-	if e.Logger != nil {
+	if e.Component != nil && e.Logger != nil {
 		e.Logger.Info("AI providers reloaded after seed",
 			"providerCount", registry.Count())
 	}
