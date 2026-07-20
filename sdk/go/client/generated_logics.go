@@ -216,7 +216,6 @@ func DeployGateGreenBuild(args DeployGateGreenArgs) string {
 
 // DeployOutcomeLabel -- Map the deploy-gate result to the terminal deployment status label: \"succeeded\" when the gate passed, else \"failed\" (fail-closed, mirroring deployGateGreen). The deploy automation's finalize step switches on this.
 type DeployOutcomeLabelArgs struct {
-	// The gate capability's result.passed boolean; absent/false -> failed. The automation passes the LEAF (steps.gate.result.result.passed -- the action envelope nests the script's result under result), not the envelope object (#2380).
 	Passed any
 }
 

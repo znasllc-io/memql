@@ -563,7 +563,7 @@ query delegation delegationsByIdentity {
 @unbounded("expired-delegation reaper sweep -- an internal sweep that must see all")
 query delegation expiredActiveDelegations {
   args {
-    asOf  string  @required @description("RFC3339 evaluation instant the caller passes (usually the ambient now). Renamed from `now` -- args fields may not shadow reserved engine names (S6 #2361).")
+    asOf  string  @required
   }
   filter  isActiveRecord && expiresAt<args.asOf
   shape   delegationFull
@@ -633,7 +633,7 @@ query auditEvent expiredAuditEvents {
 @unbounded("expired consumed auth-code GC sweep -- an internal sweep that must see all")
 query authCode expiredConsumedAuthCodes {
   args {
-    asOf  string  @required @description("RFC3339 evaluation instant the caller passes (usually the ambient now). Renamed from `now` -- args fields may not shadow reserved engine names (S6 #2361).")
+    asOf  string  @required
   }
   filter  expiresAt<args.asOf && consumedAt!=""
   shape   authCodeFull
@@ -667,7 +667,7 @@ query authCode expiredConsumedAuthCodes {
 @unbounded("expired magic-link GC sweep -- an internal sweep that must see all")
 query magicLinkRequest expiredMagicLinkRequests {
   args {
-    asOf  string  @required @description("RFC3339 evaluation instant the caller passes (usually the ambient now). Renamed from `now` -- args fields may not shadow reserved engine names (S6 #2361).")
+    asOf  string  @required
   }
   filter  expiresAt<args.asOf
   shape   magicLinkRequestFull
@@ -704,7 +704,7 @@ query magicLinkRequest expiredMagicLinkRequests {
 @unbounded("expired pending access-request sweep -- an internal sweep that must see all")
 query accessRequest expiredPendingAccessRequests {
   args {
-    createdBefore  string  @description("Optional RFC3339 cutoff; when set, only pending requests created strictly before it are returned. The expiry sweep's logic computes it (now - IDENTITY_ACCESS_REQUEST_EXPIRY_DAYS) and pushes it down (#2369).")
+    createdBefore  string
   }
   filter  statusIsPending && when(args.createdBefore) { createdAt<args.createdBefore }
   shape   accessRequestFull
@@ -1208,7 +1208,7 @@ query user usersInDeletionCooldown {
 @unbounded("scheduled-deletion sweep -- an internal sweep that must see all")
 query user usersScheduledForDeletion {
   args {
-    scheduledBefore  string  @description("Optional RFC3339 cutoff; when set, only rows whose deletionScheduledAt is strictly before it are returned.")
+    scheduledBefore  string
   }
   filter  isActiveRecord && isDeletionScheduled && when(args.scheduledBefore) { deletionScheduledAt<args.scheduledBefore }
   shape   userFull

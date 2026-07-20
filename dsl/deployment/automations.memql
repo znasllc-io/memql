@@ -108,17 +108,17 @@ use deployment.mutations.{ createDeployment, updateDeploymentStatus }
 @description("Deploy the memQL ENGINE cluster to an environment (development | staging | production) on the cockpit/runner surface. Sequences clone -> build -> place (env switch) -> gate -> success/failure finish, recording the deployment lifecycle. Engine mesh ONLY -- no bff or product-carrier nodes.")
 automation deployEngineCluster {
   args {
-    deploymentId         string   @required @description("The v1:cluster:deployment timeline id; createDeployment uses it as the concept id so every status transition appends to one timeline (#1872).")
-    environment          string   @required @enum("development", "staging", "production") @description("THE single switch dimension -- one coherent flow differing only by this value (owner decision: env switch in ONE automation).")
-    engineNodeTypes      []string @required @description("The ENGINE node types to (re)build + place. The emitter fills it from the canonical logic engineNodeTypes -- all eight by default, or a subset for a single-node redeploy. Engine mesh ONLY: no bff or product-carrier nodes.")
-    ref                  string   @required @description("Git ref (tag/branch/SHA) to check out + sync.")
-    version              string   @required @description("Version tag to build/stamp, e.g. 0.12.0.")
-    workdir              string   @required @description("Absolute path of the checked-out tree on the deploy runner.")
-    overlayPath          string   @description("Kustomize overlay for staging/production (e.g. deploy/k8s/overlays/staging); the emitter resolves env->overlay. Unused on the development path.")
-    digests              object   @description("Map nodeType -> image@sha256 the overlay is pinned to (staging/production; resolved by the build server -- HARD RULE: staging/prod images build on GitHub). Unused on the development path.")
-    previousDeploymentId string   @description("The deployment to roll back to on a failed staging/production deploy (revertOverlay).")
-    triggeredBy          string   @description("Actor/system id stamped on the record. Successor: event.actor.id (G4, #2366) -- migrates in #2381.")
-    dryRun               boolean  @description("When true (THE DEFAULT, including when omitted) every capability action reports its intended work without performing it; the cockpit's deploy --apply sets false. One documented switch, threaded to every action (#2378).")
+    deploymentId         string   @required
+    environment          string   @required @enum("development", "staging", "production")
+    engineNodeTypes      []string @required
+    ref                  string   @required
+    version              string   @required
+    workdir              string   @required
+    overlayPath          string
+    digests              object
+    previousDeploymentId string
+    triggeredBy          string
+    dryRun               boolean
   }
 
   step authorize {

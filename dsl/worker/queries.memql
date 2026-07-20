@@ -10,7 +10,7 @@ use worker.concepts.{ invocation, registration }
 @description("List worker invocation rows for retention pruning. When createdBefore is supplied, restricts to rows created strictly before it -- the retention sweep's logic computes the cutoff (now - WORKER_INVOCATION_RETENTION_DAYS) and pushes it down (#2369).")
 query invocation expiredWorkerInvocations {
   args {
-    createdBefore  string  @description("Optional RFC3339 cutoff; when set, only rows whose createdAt is strictly before it are returned.")
+    createdBefore  string
   }
   filter  action!="" && isNotDeleted && when(args.createdBefore) { createdAt<args.createdBefore }
   shape   workerInvocationFull
@@ -76,7 +76,7 @@ query invocation invocationsForUser {
 @description("List a user's running plans.")
 query plan runningPlansForUser {
   args {
-    withComputerUseScope  boolean  @description("When true, restricts to plans carrying a computerUseScope -- the kill-switch sweep's plan-classification policy, pushed down (#2370).")
+    withComputerUseScope  boolean
     userId  string  @required
   }
   filter  requestedBy==args.userId && statusIsRunning && when(args.withComputerUseScope) { computerUseScope!=null }

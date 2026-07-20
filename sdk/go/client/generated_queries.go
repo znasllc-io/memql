@@ -1186,7 +1186,6 @@ func AvatarPersonaByIdBuild(args AvatarPersonaByIdArgs) string {
 //
 // Bound concept: v1:agents:avatarPersona (machine-readable: BoundConcepts["avatarPersonas"] in generated_concepts.go).
 type AvatarPersonasArgs struct {
-	// Optional vendor filter. Omit to list every active persona; pass to scope to one vendor.
 	// Enum: anam | simli
 	Vendor string
 }
@@ -1819,10 +1818,8 @@ func DueResponsibilitiesBuild(args DueResponsibilitiesArgs) string {
 //
 // Bound concept: v1:calendar:calendarEvent (machine-readable: BoundConcepts["eventsByDay"] in generated_concepts.go).
 type EventsByDayArgs struct {
-	// Inclusive start-of-day instant in the user's timezone (e.g. 2026-06-01T00:00:00-07:00).
 	DayStart string
-	// Exclusive end-of-day instant (next midnight) in the user's timezone.
-	DayEnd string
+	DayEnd   string
 }
 
 // EventsByDay calls the engine query eventsByDay.
@@ -1866,7 +1863,6 @@ func ExistingClusterBuild(args ExistingClusterArgs) string {
 //
 // Bound concept: v1:identity:delegation (machine-readable: BoundConcepts["expiredActiveDelegations"] in generated_concepts.go).
 type ExpiredActiveDelegationsArgs struct {
-	// RFC3339 evaluation instant the caller passes (usually the ambient now). Renamed from `now` -- args fields may not shadow reserved engine names (S6 #2361).
 	AsOf string
 }
 
@@ -1906,7 +1902,6 @@ func ExpiredAuditEventsBuild(args ExpiredAuditEventsArgs) string {
 //
 // Bound concept: v1:identity:authCode (machine-readable: BoundConcepts["expiredConsumedAuthCodes"] in generated_concepts.go).
 type ExpiredConsumedAuthCodesArgs struct {
-	// RFC3339 evaluation instant the caller passes (usually the ambient now). Renamed from `now` -- args fields may not shadow reserved engine names (S6 #2361).
 	AsOf string
 }
 
@@ -1929,7 +1924,6 @@ func ExpiredConsumedAuthCodesBuild(args ExpiredConsumedAuthCodesArgs) string {
 //
 // Bound concept: v1:identity:magicLinkRequest (machine-readable: BoundConcepts["expiredMagicLinkRequests"] in generated_concepts.go).
 type ExpiredMagicLinkRequestsArgs struct {
-	// RFC3339 evaluation instant the caller passes (usually the ambient now). Renamed from `now` -- args fields may not shadow reserved engine names (S6 #2361).
 	AsOf string
 }
 
@@ -1952,7 +1946,6 @@ func ExpiredMagicLinkRequestsBuild(args ExpiredMagicLinkRequestsArgs) string {
 //
 // Bound concept: v1:identity:accessRequest (machine-readable: BoundConcepts["expiredPendingAccessRequests"] in generated_concepts.go).
 type ExpiredPendingAccessRequestsArgs struct {
-	// Optional RFC3339 cutoff; when set, only pending requests created strictly before it are returned. The expiry sweep's logic computes it (now - IDENTITY_ACCESS_REQUEST_EXPIRY_DAYS) and pushes it down (#2369).
 	CreatedBefore string
 }
 
@@ -1977,7 +1970,6 @@ func ExpiredPendingAccessRequestsBuild(args ExpiredPendingAccessRequestsArgs) st
 //
 // Bound concept: v1:worker:invocation (machine-readable: BoundConcepts["expiredWorkerInvocations"] in generated_concepts.go).
 type ExpiredWorkerInvocationsArgs struct {
-	// Optional RFC3339 cutoff; when set, only rows whose createdAt is strictly before it are returned.
 	CreatedBefore string
 }
 
@@ -2024,7 +2016,6 @@ func FeedbackAnnouncementForPlanBuild(args FeedbackAnnouncementForPlanArgs) stri
 //
 // Bound concept: v1:calendar:calendarEvent (machine-readable: BoundConcepts["findEvents"] in generated_concepts.go).
 type FindEventsArgs struct {
-	// Exact event title to match against title.
 	Title string
 }
 
@@ -3449,7 +3440,6 @@ func RouterBudgetsBuild(args RouterBudgetsArgs) string {
 //
 // Bound concept: v1:planner:plan (machine-readable: BoundConcepts["runningPlansForUser"] in generated_concepts.go).
 type RunningPlansForUserArgs struct {
-	// When true, restricts to plans carrying a computerUseScope -- the kill-switch sweep's plan-classification policy, pushed down (#2370).
 	WithComputerUseScope    bool
 	WithComputerUseScopeSet bool // set true to send withComputerUseScope; required because zero-value bool is ambiguous
 	UserId                  string
@@ -3722,7 +3712,6 @@ func SpaceUtterancesBuild(args SpaceUtterancesArgs) string {
 //
 // Bound concept: v1:cluster:node (machine-readable: BoundConcepts["staleClusterNodes"] in generated_concepts.go).
 type StaleClusterNodesArgs struct {
-	// Optional RFC3339 cutoff; when set, only rows whose lastSeen is strictly before it are returned.
 	OlderThan string
 }
 
@@ -3906,10 +3895,8 @@ func TodosBuild(args TodosArgs) string {
 //
 // Bound concept: v1:calendar:calendarEvent (machine-readable: BoundConcepts["upcomingEvents"] in generated_concepts.go).
 type UpcomingEventsArgs struct {
-	// Inclusive lower bound on startsAt (typically `now`).
 	WindowStart string
-	// Inclusive upper bound on startsAt (e.g. now + 48h for a day-before reminder sweep).
-	WindowEnd string
+	WindowEnd   string
 }
 
 // UpcomingEvents calls the engine query upcomingEvents.
@@ -4107,7 +4094,6 @@ func UsersInDeletionCooldownBuild(args UsersInDeletionCooldownArgs) string {
 //
 // Bound concept: v1:identity:user (machine-readable: BoundConcepts["usersScheduledForDeletion"] in generated_concepts.go).
 type UsersScheduledForDeletionArgs struct {
-	// Optional RFC3339 cutoff; when set, only rows whose deletionScheduledAt is strictly before it are returned.
 	ScheduledBefore string
 }
 

@@ -7532,7 +7532,6 @@ func ProposeOverrideBuild(args ProposeOverrideArgs) string {
 //
 // Bound concept: v1:workbench:workspace (machine-readable: BoundConcepts["provisionWorkspace"] in generated_concepts.go).
 type ProvisionWorkspaceArgs struct {
-	// Synthesized id, typically `{planId}` since one workspace per Plan.
 	WorkspaceId string
 	PlanId      string
 	StorageRoot string
@@ -8832,7 +8831,6 @@ func RejectOverrideBuild(args RejectOverrideArgs) string {
 // Bound concept: v1:workbench:workspace (machine-readable: BoundConcepts["releaseWorkspace"] in generated_concepts.go).
 type ReleaseWorkspaceArgs struct {
 	WorkspaceId string
-	// Why the workspace was released. Drives the released-row audit trail.
 	// Enum: plan_terminal | explicit | ttl_expired
 	Reason string
 }

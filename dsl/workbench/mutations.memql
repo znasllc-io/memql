@@ -14,7 +14,7 @@ use workbench.concepts.{ workspace }
 @description("Create the v1:workbench:workspace row for a Plan on first workbenchHost call. Storage root is supplied by the workbench integration which has already created the directory on disk.")
 mutate workspace provisionWorkspace {
   args {
-    workspaceId  string  @required @description("Synthesized id, typically `{planId}` since one workspace per Plan.")
+    workspaceId  string  @required
     planId       string  @required
     storageRoot  string  @required
   }
@@ -45,7 +45,7 @@ mutate workspace touchWorkspace {
 mutate workspace releaseWorkspace {
   args {
     workspaceId  string  @required
-    reason       string  @required @enum("plan_terminal", "explicit", "ttl_expired") @description("Why the workspace was released. Drives the released-row audit trail.")
+    reason       string  @required @enum("plan_terminal", "explicit", "ttl_expired")
   }
   update {
     id: args.workspaceId

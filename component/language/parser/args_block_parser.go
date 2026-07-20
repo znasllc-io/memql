@@ -9,11 +9,14 @@ import (
 // parseFileTopArgsBlock parses a file-level `args { ... }` declaration.
 // Each non-blank line declares one field:
 //
-//	<name> <type> [@required] [@enum("a", "b", ...)] [@description("...")]
+//	<name> <type> [@required] [@enum("a", "b", ...)]
 //	               [@maxLength(N)] [@pattern("re")]
 //
 // (`@default` is NOT a valid args-field annotation -- it was never applied
-// and is rejected; apply defaults in the body via `coalesce(args.X, <v>)`.)
+// and is rejected; apply defaults in the body via `coalesce(args.X, <v>)`.
+// `@description` on an args field is accepted for compatibility but
+// DISCARDED -- no AST slot, #2615; per-field docs arrive with /// doc
+// comments, #2601. Do not write it.)
 //
 // Returns an *ArgsSchema populated with the field list. Caller stores it
 // on the parser and attaches to the next definition.
@@ -195,7 +198,7 @@ func (p *Parser) parseArgsBlockField() (*ArgsField, error) {
 			}
 			p.advance()
 		default:
-			return nil, newParseErrorf(&p.current, "unknown annotation @%s on args field %q (supported: @required, @enum, @description, @maxLength, @pattern)", ann, name)
+			return nil, newParseErrorf(&p.current, "unknown annotation @%s on args field %q (supported: @required, @enum, @maxLength, @pattern; @description is accepted but discarded -- #2615)", ann, name)
 		}
 	}
 	return field, nil

@@ -53,9 +53,9 @@ use capabilities.integration.github.{ tagRelease }
 @description("Check out the memQL repo at a specific version into a clean workdir on the deploy runner, so the build runs against a pinned ref.")
 action cloneRepoAtVersion {
   args {
-    workdir string @required @description("Absolute path of the repository working tree on the runner.")
-    ref     string @required @description("Git ref (branch, tag, or SHA) to check out.")
-    dryRun  boolean          @description("When true (THE DEFAULT, including when omitted) the backend reports its intended work without performing it; pass false to apply. Threaded from the deploy.requested payload (#2378).")
+    workdir string @required
+    ref     string @required
+    dryRun  boolean
   }
   capability script(script: "deploy.cloneRepo", workdir: args.workdir, ref: args.ref, dryRun: args.dryRun)
 }
@@ -67,10 +67,10 @@ action cloneRepoAtVersion {
 @description("Build the container image for one engine node type at a version on the deploy runner (local/dry-run surface) so it can be imported or pushed.")
 action buildEngineImage {
   args {
-    nodeType string @required @description("Engine node type, e.g. identity / cognition / voice / agent / planner.")
-    version  string @required @description("Version tag to build, e.g. 0.12.0.")
-    workdir  string @required @description("Absolute path of the checked-out repository on the runner.")
-    dryRun  boolean          @description("When true (THE DEFAULT, including when omitted) the backend reports its intended work without performing it; pass false to apply. Threaded from the deploy.requested payload (#2378).")
+    nodeType string @required
+    version  string @required
+    workdir  string @required
+    dryRun  boolean
   }
   capability script(script: "deploy.buildImage", nodeType: args.nodeType, version: args.version, workdir: args.workdir, dryRun: args.dryRun)
 }
@@ -80,10 +80,10 @@ action buildEngineImage {
 @description("Import a built engine node image into the local k3d cluster (development placement) so the development overlay can run it.")
 action importImageToK3d {
   args {
-    nodeType string @required @description("Engine node type whose image to import.")
-    cluster  string @required @description("Target k3d cluster name, e.g. memql.")
-    version  string          @description("Image version tag to import; defaults to the dev tag when omitted.")
-    dryRun  boolean          @description("When true (THE DEFAULT, including when omitted) the backend reports its intended work without performing it; pass false to apply. Threaded from the deploy.requested payload (#2378).")
+    nodeType string @required
+    cluster  string @required
+    version  string
+    dryRun  boolean
   }
   capability script(script: "k3d.importImage", nodeType: args.nodeType, cluster: args.cluster, version: args.version, dryRun: args.dryRun)
 }
@@ -94,9 +94,9 @@ action importImageToK3d {
 @description("Pin a kustomize overlay to the resolved per-node image digests for a release (GitOps placement) so ArgoCD deploys exactly those images.")
 action pinOverlayDigests {
   args {
-    overlayPath string @required @description("Path to the environment overlay, e.g. deploy/k8s/overlays/staging.")
-    digests     object @required @description("Map of node type -> image@sha256 digest to pin.")
-    dryRun  boolean          @description("When true (THE DEFAULT, including when omitted) the backend reports its intended work without performing it; pass false to apply. Threaded from the deploy.requested payload (#2378).")
+    overlayPath string @required
+    digests     object @required
+    dryRun  boolean
   }
   capability script(script: "overlay.pinDigests", overlayPath: args.overlayPath, digests: args.digests, dryRun: args.dryRun)
 }
@@ -106,9 +106,9 @@ action pinOverlayDigests {
 @description("Ask ArgoCD to reconcile an application to a pinned git revision.")
 action argoSync {
   args {
-    app      string @required @description("ArgoCD application name, e.g. memql.")
-    revision string @required @description("Git revision (tag/SHA) to sync to.")
-    dryRun  boolean          @description("When true (THE DEFAULT, including when omitted) the backend reports its intended work without performing it; pass false to apply. Threaded from the deploy.requested payload (#2378).")
+    app      string @required
+    revision string @required
+    dryRun  boolean
   }
   capability script(script: "argocd.sync", app: args.app, revision: args.revision, dryRun: args.dryRun)
 }
@@ -120,9 +120,9 @@ action argoSync {
 @description("Execute the post-deploy verification gate for an environment and return a structured pass/fail result indicating whether the deployment is healthy.")
 action runDeployGate {
   args {
-    env     string @required @description("Target environment: development | staging | production.")
-    workdir string @required @description("Absolute path of the checked-out repository on the runner.")
-    dryRun  boolean          @description("When true (THE DEFAULT, including when omitted) the backend reports its intended work without performing it; pass false to apply. Threaded from the deploy.requested payload (#2378).")
+    env     string @required
+    workdir string @required
+    dryRun  boolean
   }
   capability script(script: "deploy.gate", env: args.env, workdir: args.workdir, dryRun: args.dryRun)
 }
@@ -133,9 +133,9 @@ action runDeployGate {
 @description("Restore an environment overlay's image digests to those of a prior deployment so ArgoCD rolls the environment back (rollback).")
 action revertOverlay {
   args {
-    overlayPath    string @required @description("Path to the environment overlay to revert.")
-    toDeploymentId string @required @description("Deployment id whose pinned digests to restore.")
-    dryRun  boolean          @description("When true (THE DEFAULT, including when omitted) the backend reports its intended work without performing it; pass false to apply. Threaded from the deploy.requested payload (#2378).")
+    overlayPath    string @required
+    toDeploymentId string @required
+    dryRun  boolean
   }
   capability script(script: "overlay.revert", overlayPath: args.overlayPath, toDeploymentId: args.toDeploymentId, dryRun: args.dryRun)
 }
@@ -146,10 +146,10 @@ action revertOverlay {
 @description("Announce the outcome of a deployment (succeeded/failed) so operators see the result without reading logs.")
 action notifyDeploy {
   args {
-    env          string @required @description("Target environment the deploy ran against.")
-    status       string @required @description("Deploy outcome: succeeded | failed.")
-    deploymentId string @required @description("Deployment id the notification refers to.")
-    dryRun  boolean          @description("When true (THE DEFAULT, including when omitted) the backend reports its intended work without performing it; pass false to apply. Threaded from the deploy.requested payload (#2378).")
+    env          string @required
+    status       string @required
+    deploymentId string @required
+    dryRun  boolean
   }
   capability script(script: "deploy.notify", env: args.env, status: args.status, deploymentId: args.deploymentId, dryRun: args.dryRun)
 }
@@ -166,8 +166,8 @@ action notifyDeploy {
 @description("Cut a git tag + GitHub release for the version that just deployed.")
 action tagRelease {
   args {
-    repo    string @required @description("owner/name of the repository.")
-    version string @required @description("Semver tag to create, e.g. 0.12.0.")
+    repo    string @required
+    version string @required
   }
   capability tagRelease(repo: args.repo, tag: args.version)
 }

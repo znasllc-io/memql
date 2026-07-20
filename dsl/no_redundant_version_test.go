@@ -30,10 +30,6 @@ func TestNoRedundantVersion(t *testing.T) {
 		t.Fatalf("WalkMemqlFiles: %v", err)
 	}
 	redundantRe := regexp.MustCompile(`^[ \t]*@version\([ \t]*"1\.0\.0"[ \t]*\)[ \t]*\r?$`)
-	// blockCommentRe blanks /* */ spans (newlines preserved so reported
-	// line numbers stay stable) -- prose inside a block comment is not a
-	// redundant annotation.
-	blockCommentRe := regexp.MustCompile(`(?s)/\*.*?\*/`)
 
 	var hits []string
 	for _, p := range paths {
@@ -46,16 +42,10 @@ func TestNoRedundantVersion(t *testing.T) {
 		if readErr != nil {
 			t.Fatalf("read %s: %v", p, readErr)
 		}
-		src := blockCommentRe.ReplaceAllStringFunc(string(raw), func(m string) string {
-			out := []byte(m)
-			for j := range out {
-				if out[j] != '\n' {
-					out[j] = ' '
-				}
-			}
-			return string(out)
-		})
-		for i, line := range strings.Split(src, "\n") {
+		// blankBlockComments (gate_scan_helpers_test.go) is line-comment-
+		// and string-aware: a `/*` in // prose or a string literal must
+		// not blank the rest of the file (#2615 hardening of this gate).
+		for i, line := range strings.Split(blankBlockComments(string(raw)), "\n") {
 			if redundantRe.MatchString(stripLineComment(line)) {
 				hits = append(hits, fmt.Sprintf("%s:%d", p, i+1))
 			}

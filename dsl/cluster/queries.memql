@@ -128,7 +128,7 @@ query cluster existingCluster {
 @unbounded("stale-node reaper sweep -- an internal sweep that must see all stale nodes")
 query node staleClusterNodes {
   args {
-    olderThan  string  @description("Optional RFC3339 cutoff; when set, only rows whose lastSeen is strictly before it are returned.")
+    olderThan  string
   }
   filter  health!="stopped" && when(args.olderThan) { lastSeen<args.olderThan }
   asOf    latest

@@ -346,3 +346,142 @@ func redundantVersionRule(source string) []Diagnostic {
 // the editor additionally hints where the gate stays silent; see the rule
 // body's exposure note.)
 var versionDefaultRE = regexp.MustCompile(`^[ \t]*(@version\([ \t]*"1\.0\.0"[ \t]*\))[ \t]*(//[^\r]*)?\r?$`)
+
+// discardedArgsDescriptionRule surfaces the #2615 corpus rule via
+// DiscardedArgsDescriptions (shared with the dsl/ tree gate).
+func discardedArgsDescriptionRule(source string) []Diagnostic {
+	return DiscardedArgsDescriptions(source)
+}
+
+// DiscardedArgsDescriptions flags every @description annotation on an
+// args{} field: the parser consumes the annotation and throws it away
+// (args_block_parser.go, "silently accepted (no AST slot)", #2615), so
+// the prose is dead weight the runtime never sees. Declaration-level
+// and concept-field @description are load-bearing and never flag.
+// Per-field documentation returns with /// doc comments (#2601).
+//
+// EXPORTED deliberately: the dsl/ tree gate (no_args_field_description
+// _test.go) runs this exact function, so the editor hint and the CI
+// gate cannot drift -- parity by construction (#2658 review round).
+//
+// The scan blanks /* */ spans (BlankBlockComments), strips strings and
+// // tails per line, then walks characters so brace transitions are
+// position-aware: an annotation on the `args {` opener line is inside
+// the block, and a `} shape {` line exits args at the closing brace --
+// the sibling block's fields never flag (both were #2658 findings).
+func DiscardedArgsDescriptions(source string) []Diagnostic {
+	var diagnostics []Diagnostic
+	depth := 0
+	inArgs := false
+	argsDepth := 0
+	for lineIdx, line := range strings.Split(BlankBlockComments(source), "\n") {
+		code := stripStringsAndComments(line)
+		openBraces := map[int]bool{}
+		for _, m := range argsBlockOpenRE.FindAllStringSubmatchIndex(code, -1) {
+			openBraces[m[1]-1] = true // the opener's brace position
+		}
+		for i := 0; i < len(code); i++ {
+			switch code[i] {
+			case '{':
+				depth++
+				if !inArgs && openBraces[i] {
+					inArgs = true
+					argsDepth = depth
+				}
+			case '}':
+				depth--
+				if inArgs && depth < argsDepth {
+					inArgs = false
+				}
+			case '@':
+				if !inArgs || !strings.HasPrefix(code[i:], "@description") {
+					continue
+				}
+				if end := i + len("@description"); end < len(code) && isWordByte(code[end]) {
+					continue // @descriptionX -- a different annotation
+				}
+				pos := Position{Line: lineIdx + 1, Column: i + 1}
+				diagnostics = append(diagnostics, Diagnostic{
+					Range: Range{
+						Start: pos,
+						End:   Position{Line: pos.Line, Column: i + 1 + len("@description")},
+					},
+					Severity: SeverityHint,
+					Message:  "`@description` on an args field is parsed and discarded (no AST slot, #2615). Delete it -- per-field docs arrive with /// doc comments (#2601).",
+					Code:     "discarded-args-description",
+				})
+			}
+		}
+	}
+	return diagnostics
+}
+
+func isWordByte(c byte) bool {
+	return c == '_' || ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z') || ('0' <= c && c <= '9')
+}
+
+// BlankBlockComments blanks real /* */ spans (newline-preserving, so
+// line numbers stay stable) while leaving line comments and string
+// literals intact -- a `/*` inside a // comment or a string must NOT
+// open a span (#2615: dsl/deployment/actions.memql's "scripts/*" prose
+// combined with a later real span would phantom-blank live code).
+// String handling matches stripStringsAndComments: a bare `"` toggles,
+// no escape processing. Shared by the sense rules and the dsl/ gates.
+func BlankBlockComments(src string) string {
+	var b strings.Builder
+	b.Grow(len(src))
+	const (
+		stNormal = iota
+		stString
+		stLineComment
+		stBlockComment
+	)
+	state := stNormal
+	for i := 0; i < len(src); i++ {
+		c := src[i]
+		switch state {
+		case stNormal:
+			switch {
+			case c == '"':
+				state = stString
+				b.WriteByte(c)
+			case c == '/' && i+1 < len(src) && src[i+1] == '/':
+				state = stLineComment
+				b.WriteByte(c)
+			case c == '/' && i+1 < len(src) && src[i+1] == '*':
+				state = stBlockComment
+				b.WriteByte(' ')
+				b.WriteByte(' ')
+				i++
+			default:
+				b.WriteByte(c)
+			}
+		case stString:
+			if c == '"' || c == '\n' {
+				state = stNormal
+			}
+			b.WriteByte(c)
+		case stLineComment:
+			if c == '\n' {
+				state = stNormal
+			}
+			b.WriteByte(c)
+		case stBlockComment:
+			if c == '*' && i+1 < len(src) && src[i+1] == '/' {
+				state = stNormal
+				b.WriteByte(' ')
+				b.WriteByte(' ')
+				i++
+			} else if c == '\n' {
+				b.WriteByte('\n')
+			} else {
+				b.WriteByte(' ')
+			}
+		}
+	}
+	return b.String()
+}
+
+// argsBlockOpenRE matches an `args {` block opener outside strings and
+// comments (the rule scans stripped lines).
+var argsBlockOpenRE = regexp.MustCompile(`(^|[^A-Za-z0-9_])args[ \t]*\{`)

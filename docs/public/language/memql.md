@@ -873,7 +873,7 @@ The dotted path maps to a file on disk (`cognition.concepts` → `dsl/cognition/
 
 ### Argument Declaration and Resolution
 
-`args { ... }` field syntax: `<name> <type> [@required] [@enum("a", "b", ...)] [@description("...")] [@maxLength(N)] [@pattern("re")]`. Omitting `@required` makes the field optional.
+`args { ... }` field syntax: `<name> <type> [@required] [@enum("a", "b", ...)] [@maxLength(N)] [@pattern("re")]`. Omitting `@required` makes the field optional. Do not write `@description` on an args field -- the parser accepts and DISCARDS it (#2615); per-field documentation arrives with `///` doc comments (#2601). The declaration-level `@description` on the construct itself is load-bearing.
 
 > **`@default` is not valid on an args field** (rejected at load, #991). Apply a default in the body via `coalesce(args.X, <default>)`, or use a concept-field `@default` (those ARE honored on insert).
 

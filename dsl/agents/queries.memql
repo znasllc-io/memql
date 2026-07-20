@@ -242,7 +242,7 @@ query skillChangeEvent skillChangeEventsForAgent {
 @unbounded("avatar persona catalog -- a small bounded set consumed whole")
 query avatarPersona avatarPersonas {
   args {
-    vendor  string  @enum("anam", "simli")  @description("Optional vendor filter. Omit to list every active persona; pass to scope to one vendor.")
+    vendor  string  @enum("anam", "simli")
   }
   filter  isActiveRecord && when(args.vendor) { vendor==args.vendor }
   shape   avatarPersonaFull
