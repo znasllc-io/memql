@@ -49,8 +49,8 @@
 // The explicit `payload.X` form is rejected at load with a migration hint
 // (write the property bare). `row.X` / `actor.X` are unchanged.
 
-/// Comprehensive participant projection.
 @row
+@description("Comprehensive participant projection.")
 shape participant participantFull {
   row.id
   partitionId
@@ -80,14 +80,14 @@ shape participant participantFull {
 //   savedRowTrait       payload.savedAt
 //   validationRowTrait  payload.validationStatus + checkedAt + confirmedAt
 
-/// Concept-agnostic scaffold for predicates that check payload.active.
 @row
+@description("Concept-agnostic scaffold for predicates that check payload.active.")
 shape activeRowTrait {
   active
 }
 
-/// Concept-agnostic scaffold for predicates that check payload.status.
 @row
+@description("Concept-agnostic scaffold for predicates that check payload.status.")
 shape statusRowTrait {
   status
 }
@@ -103,8 +103,8 @@ shape statusRowTrait {
 // the ONLY gateway to the auth envelope -- a spec body never reads
 // actor.* directly.
 
-/// Caller envelope projection: authenticated actor, role, and now.
 @actor
+@description("Caller envelope projection: authenticated actor, role, and now.")
 shape actorEnvelope {
   actor.userId
   actor.role
@@ -121,9 +121,9 @@ shape actorEnvelope {
 // both row fields and caller fields. The engine accepts this; no
 // current users exist.
 
-/// Hypothetical mixed projection -- row + caller envelope.
 @row
 @actor
+@description("Hypothetical mixed projection -- row + caller envelope.")
 shape participant participantWithCallerContext {
   row.id
   displayName
@@ -154,8 +154,8 @@ shape participant participantWithCallerContext {
 //
 //   actor.X             Auth-envelope reference. Requires @actor.
 
-/// Demonstrates the body path forms in one place.
 @row
+@description("Demonstrates the body path forms in one place.")
 shape participant pathSyntaxExample {
   row.id                            // intrinsic
   row.createdAt                     // intrinsic

@@ -24,6 +24,14 @@
 // mutation-DEFINITION rewriter (NormaliseMutationSource matches the header
 // anywhere in the file).
 
+// Bootstrap cluster, database, and identity provider records on first startup.
+// The pure bootstrapCluster logic decides { create, withIdentityProvider }
+// (create == existingCluster() empty AND node.type=="bff"); the three creates
+// are `if`-gated mutation steps so nothing is written once a cluster exists or
+// off the bff node, and the identityProvider row lands only when the startup
+// envelope carries one. Every create field binds an explicit key + coalesce (a
+// multi-segment path like event.payload.database.host is nil when absent, and a
+// nil @required arg trips validation), mirroring registerNode/deregisterNode.
 /// Bootstrap cluster, database, and identity provider records on first startup
 @trigger(event="system.startup")
 automation bootstrapCluster {
@@ -73,6 +81,14 @@ automation bootstrapCluster {
   }
 }
 
+// Record node shutdown in the database: append a v1:cluster:spawnEvent with
+// action="stopped", reason="system.shutdown". The former deregisterNode logic
+// was a single inline write (ADR S2.1 logic-purity violation); the write now
+// lives here as a mutation step and the logic is gone (#2235). Every field is
+// bound with an explicit key + coalesce: a multi-segment path like
+// event.payload.node.id evaluates to nil when absent, and passing nil for a
+// @required mutation arg (nodeId / nodeType / action) trips "required argument
+// missing" at validation; coalesce(..., "") guarantees a non-nil string.
 /// Record node shutdown in the database
 @trigger(event="system.shutdown")
 automation deregisterNode {
@@ -90,6 +106,17 @@ automation deregisterNode {
   }
 }
 
+// Register this node in the database when it starts up: a v1:cluster:node record
+// + a spawn event. Runs on ALL node types; safe to run on every restart. The
+// peer's NodeId is passed as the explicit concept id (createNode.id) so later
+// NodeStatusWriter rows (via updateNodeHealth) share the same time-series
+// timeline -- one concept row per real node. The former registerNode logic did
+// both inline writes (ADR S2.1 logic-purity violation); each write is now its
+// own mutation step and the logic is gone (#2235). Every field is bound with an
+// explicit key + coalesce for the same reason as deregisterNode above: a
+// multi-segment path is nil when absent and would trip the @required check.
+// version/address are not createSpawnEvent args (they already live on the node
+// record from createNode), so the spawn step carries only the flat event fields.
 /// Register this node in the database on startup
 @trigger(event="system.startup")
 automation registerNode {
@@ -124,6 +151,18 @@ automation registerNode {
   }
 }
 
+// Heartbeat-based prune of departed cluster nodes (#1061). Every 10 minutes,
+// mark v1:cluster:node rows whose latest lastSeen is older than
+// MEMQL_NODE_STALE_PRUNE_MINUTES (default 30) as health="stopped" so topology /
+// CLI / WorkerDialer stop treating dead pods as live. BACKSTOP to the fast
+// reconciler (#1874); both append the same idempotent terminal health="stopped".
+// Six-field cron (sec min hour dom mon dow): minute 0,10,20,30,40,50.
+//
+// The pure pruneStaleClusterNodes logic decides WHICH rows to retire (cutoff =
+// now - window, pushed into staleClusterNodes via olderThan) and returns that
+// node list (#2235). The `prune` forEach step appends the terminal
+// health="stopped" row per returned node -- the per-row write that used to live
+// inline in the logic. updateNodeHealth takes only id / health / lastSeen.
 /// Every 10 min: mark departed cluster nodes (lastSeen older than MEMQL_NODE_STALE_PRUNE_MINUTES,
 /// default 30) as health='stopped'.
 @trigger(schedule="0 */10 * * * *")

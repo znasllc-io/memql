@@ -47,8 +47,8 @@
 // genuine non-defaults. Everything else is optional. @description is
 // conventional but not required.
 
-/// Smallest legal concept declaration -- one required string field.
 @namespace("reference")
+@description("Smallest legal concept declaration -- one required string field.")
 concept minimal {
   name string! @description("Display name.")
 }
@@ -69,15 +69,15 @@ concept minimal {
 //   - Absent @version defaults to 1.0.0 (#2613): the shipping baseline
 //     needs no annotation. Annotate only genuine non-defaults.
 
-/// No @version annotation: the 1.0.0 default applies. ID prefix is v1:.
 @namespace("reference")
+@description("No @version annotation: the 1.0.0 default applies. ID prefix is v1:.")
 concept versionedV1 {
   field string!
 }
 
-/// Example bumping past major version 2. ID prefix becomes v2:.
 @version("2.5.7")        // post-breaking-change, minor + patch reflect evolution
 @namespace("reference")
+@description("Example bumping past major version 2. ID prefix becomes v2:.")
 concept versionedV2 {
   field string!
 }
@@ -94,14 +94,14 @@ concept versionedV2 {
 //     mirrors it.
 //   - Every segment must start with a lowercase letter.
 
-/// Single-segment namespace.
 @namespace("cognition")
+@description("Single-segment namespace.")
 concept singleSegmentNs {
   field string!
 }
 
-/// Multi-segment namespace. Assembles to v1:cognition:client:tool:nested.
 @namespace("cognition:client:tool")
+@description("Multi-segment namespace. Assembles to v1:cognition:client:tool:nested.")
 concept nestedNs {
   field string!
 }
@@ -165,25 +165,25 @@ concept nestedNs {
 // existing rows; an unnecessary reference concept retired later means
 // migrating every product-side row that pointed at it.
 
-/// Default record-shaped concept.
 @namespace("reference")
 @type("object")
+@description("Default record-shaped concept.")
 concept objectExample {
   field string!
 }
 
-/// Collection concept -- requires a @relationship(type="contains", ...).
 @namespace("reference")
 @type("collection")
+@description("Collection concept -- requires a @relationship(type=\"contains\", ...).")
 concept collectionExample {
   // Body decorator: every collection MUST declare what it contains.
   @relationship(type="contains", field="memberIds", target="v1:reference:objectExample", direction="outgoing")
   memberIds []string
 }
 
-/// Reference concept -- requires a @relationship(type="alias"|"equals", ...).
 @namespace("reference")
 @type("reference")
+@description("Reference concept -- requires a @relationship(type=\"alias\"|\"equals\", ...).")
 concept referenceExample {
   @relationship(type="alias", field="targetId", target="v1:reference:objectExample", direction="outgoing")
   targetId string!
@@ -209,8 +209,8 @@ concept referenceExample {
 //   The escape hatch:
 //     any         -- accepts any JSON value; no validation
 
-/// Every supported field type, one of each.
 @namespace("reference")
+@description("Every supported field type, one of each.")
 concept fieldTypes {
   textField        string                      @description("UTF-8 text.")
   flagField        bool       @default("false") @description("Boolean.")
@@ -245,8 +245,8 @@ concept fieldTypes {
 // Unknown @-annotations on a field are rejected at load time with
 //   `unknown property annotation @<name> on field "<field>"`.
 
-/// Every field-level annotation in use.
 @namespace("reference")
+@description("Every field-level annotation in use.")
 concept fieldAnnotations {
   // String constraints
   slug         string! @pattern("^[a-z][a-z0-9-]{0,49}$") @description("URL slug.")
@@ -281,8 +281,8 @@ concept fieldAnnotations {
 //   Engine validation: payloads carrying this field must match exactly one
 //   declared branch based on the discriminator's value.
 
-/// Discriminated-union example: the `body` field's shape depends on `kind`.
 @namespace("reference")
+@description("Discriminated-union example: the `body` field's shape depends on `kind`.")
 concept variantExample {
   kind  enum("text", "image", "embed")!
 
@@ -312,8 +312,8 @@ concept variantExample {
 //   its name. Nested objects use the same field-level annotations as
 //   top-level fields.
 
-/// A flat concept with a nested settings sub-object.
 @namespace("reference")
+@description("A flat concept with a nested settings sub-object.")
 concept nestedExample {
   name   string!
 
@@ -357,8 +357,8 @@ concept nestedExample {
 //                    @type("reference") requirement.
 //     references  -- soft reference -- no constraint, just metadata.
 
-/// A concept with three different relationship decorators.
 @namespace("reference")
+@description("A concept with three different relationship decorators.")
 concept relationshipExample {
   // Parent: this row hangs off a space.
   @relationship(type="parent", field="partitionId", target="v1:cognition:space", direction="outgoing")
@@ -409,8 +409,8 @@ concept relationshipExample {
 // @scope annotation is a load-time error. Declare these concepts exactly
 // like any other; nothing in the body changes.
 
-/// Example of an infrastructure-metadata concept that every node loads.
 @namespace("cluster")
+@description("Example of an infrastructure-metadata concept that every node loads.")
 concept globalInfraExample {
   hostname  string!
   nodeType  enum("bff", "voice", "cognition", "agent", "planner")!

@@ -7,8 +7,7 @@
 
 use agents.concepts.{ agentRole }
 
-/// Bookkeeping, financial reporting, tax fundamentals, budget cycles, and variance analysis at the
-/// corporate level.
+@description("Bookkeeping, financial reporting, tax fundamentals, budget cycles, and variance analysis at the corporate level.")
 seed agentRole accounting-finance {
   slug:                  "accounting-finance"
   name:                  "Accounting & Finance"
@@ -24,7 +23,7 @@ seed agentRole accounting-finance {
   predefined:            true
 }
 
-/// Recruiting, onboarding, employee relations, benefits administration, and organizational design.
+@description("Recruiting, onboarding, employee relations, benefits administration, and organizational design.")
 seed agentRole human-resources {
   slug:                  "human-resources"
   name:                  "Human Resources"
@@ -40,7 +39,7 @@ seed agentRole human-resources {
   predefined:            true
 }
 
-/// Customer-facing support: ticket triage, account questions, SLA tracking, and escalation paths.
+@description("Customer-facing support: ticket triage, account questions, SLA tracking, and escalation paths.")
 seed agentRole customer-service {
   slug:                  "customer-service"
   name:                  "Customer Service"
@@ -54,7 +53,7 @@ seed agentRole customer-service {
   predefined:            true
 }
 
-/// Defect tracking, inspection workflows, compliance audits, and process-improvement metrics.
+@description("Defect tracking, inspection workflows, compliance audits, and process-improvement metrics.")
 seed agentRole quality-assurance {
   slug:                  "quality-assurance"
   name:                  "Quality Assurance"
@@ -68,7 +67,7 @@ seed agentRole quality-assurance {
   predefined:            true
 }
 
-/// Pipeline management, lead generation, campaign analytics, and brand positioning.
+@description("Pipeline management, lead generation, campaign analytics, and brand positioning.")
 seed agentRole sales-marketing {
   slug:                  "sales-marketing"
   name:                  "Sales & Marketing"
@@ -82,8 +81,7 @@ seed agentRole sales-marketing {
   predefined:            true
 }
 
-/// End-user IT help, ticket triage, software / hardware / network troubleshooting, account
-/// management.
+@description("End-user IT help, ticket triage, software / hardware / network troubleshooting, account management.")
 seed agentRole it-support {
   slug:                  "it-support"
   name:                  "IT Support"
@@ -97,7 +95,7 @@ seed agentRole it-support {
   predefined:            true
 }
 
-/// Process improvement, vendor management, logistics, inventory, and operational risk.
+@description("Process improvement, vendor management, logistics, inventory, and operational risk.")
 seed agentRole operations {
   slug:                  "operations"
   name:                  "Operations"
@@ -111,7 +109,7 @@ seed agentRole operations {
   predefined:            true
 }
 
-/// Plans, milestones, deliverables, stakeholder communications, and project-level risk.
+@description("Plans, milestones, deliverables, stakeholder communications, and project-level risk.")
 seed agentRole project-management {
   slug:                  "project-management"
   name:                  "Project Management"
@@ -125,8 +123,7 @@ seed agentRole project-management {
   predefined:            true
 }
 
-/// Experimental design, statistical analysis, innovation portfolios, and IP management for R&D
-/// groups.
+@description("Experimental design, statistical analysis, innovation portfolios, and IP management for R&D groups.")
 seed agentRole research-development {
   slug:                  "research-development"
   name:                  "Research & Development"
@@ -140,8 +137,7 @@ seed agentRole research-development {
   predefined:            true
 }
 
-/// Corporate L&D: curriculum design, performance assessment, instructional design, and learning
-/// analytics.
+@description("Corporate L&D: curriculum design, performance assessment, instructional design, and learning analytics.")
 seed agentRole training-education {
   slug:                  "training-education"
   name:                  "Training & Education"
@@ -155,8 +151,7 @@ seed agentRole training-education {
   predefined:            true
 }
 
-/// Calendar, correspondence, travel coordination, meeting prep, and inbox triage for a busy
-/// executive.
+@description("Calendar, correspondence, travel coordination, meeting prep, and inbox triage for a busy executive.")
 seed agentRole executive-assistant {
   slug:                  "executive-assistant"
   name:                  "Executive Assistant"
@@ -170,8 +165,7 @@ seed agentRole executive-assistant {
   predefined:            true
 }
 
-/// SQL, dashboards, A/B testing, descriptive + diagnostic analytics, and stakeholder-friendly
-/// insights.
+@description("SQL, dashboards, A/B testing, descriptive + diagnostic analytics, and stakeholder-friendly insights.")
 seed agentRole data-analyst {
   slug:                  "data-analyst"
   name:                  "Data Analyst"
@@ -185,7 +179,7 @@ seed agentRole data-analyst {
   predefined:            true
 }
 
-/// ML model design, statistical modeling, feature engineering, and experiment design.
+@description("ML model design, statistical modeling, feature engineering, and experiment design.")
 seed agentRole data-scientist {
   slug:                  "data-scientist"
   name:                  "Data Scientist"
@@ -199,7 +193,7 @@ seed agentRole data-scientist {
   predefined:            true
 }
 
-/// Pipelines, warehouses, lake-houses, streaming systems, schema design, and data-quality tooling.
+@description("Pipelines, warehouses, lake-houses, streaming systems, schema design, and data-quality tooling.")
 seed agentRole data-engineer {
   slug:                  "data-engineer"
   name:                  "Data Engineer"
@@ -213,8 +207,7 @@ seed agentRole data-engineer {
   predefined:            true
 }
 
-/// Backend / full-stack engineering: API design, system architecture, code review, debugging, and
-/// refactoring.
+@description("Backend / full-stack engineering: API design, system architecture, code review, debugging, and refactoring.")
 seed agentRole software-engineer {
   slug:                  "software-engineer"
   name:                  "Software Engineer"
@@ -228,7 +221,7 @@ seed agentRole software-engineer {
   predefined:            true
 }
 
-/// Web UIs, accessibility, state management, performance, and design-system implementation.
+@description("Web UIs, accessibility, state management, performance, and design-system implementation.")
 seed agentRole frontend-engineer {
   slug:                  "frontend-engineer"
   name:                  "Frontend Engineer"
@@ -242,7 +235,7 @@ seed agentRole frontend-engineer {
   predefined:            true
 }
 
-/// CI/CD, infrastructure-as-code, observability, incident response, and platform reliability.
+@description("CI/CD, infrastructure-as-code, observability, incident response, and platform reliability.")
 seed agentRole devops-engineer {
   slug:                  "devops-engineer"
   name:                  "DevOps Engineer"
@@ -256,7 +249,7 @@ seed agentRole devops-engineer {
   predefined:            true
 }
 
-/// AppSec, threat modeling, vulnerability triage, incident response, and security architecture.
+@description("AppSec, threat modeling, vulnerability triage, incident response, and security architecture.")
 seed agentRole security-engineer {
   slug:                  "security-engineer"
   name:                  "Security Engineer"
@@ -272,7 +265,7 @@ seed agentRole security-engineer {
   predefined:            true
 }
 
-/// Roadmap, customer interviews, prioritization frameworks, OKRs, and cross-functional rollout.
+@description("Roadmap, customer interviews, prioritization frameworks, OKRs, and cross-functional rollout.")
 seed agentRole product-manager {
   slug:                  "product-manager"
   name:                  "Product Manager"
@@ -286,7 +279,7 @@ seed agentRole product-manager {
   predefined:            true
 }
 
-/// API docs, runbooks, knowledge-base articles, release notes, and developer onboarding content.
+@description("API docs, runbooks, knowledge-base articles, release notes, and developer onboarding content.")
 seed agentRole technical-writer {
   slug:                  "technical-writer"
   name:                  "Technical Writer"
@@ -300,7 +293,7 @@ seed agentRole technical-writer {
   predefined:            true
 }
 
-/// Requirements elicitation, process mapping, stakeholder facilitation, and impact analysis.
+@description("Requirements elicitation, process mapping, stakeholder facilitation, and impact analysis.")
 seed agentRole business-analyst {
   slug:                  "business-analyst"
   name:                  "Business Analyst"
@@ -314,7 +307,7 @@ seed agentRole business-analyst {
   predefined:            true
 }
 
-/// Procurement, supplier scorecards, S&OP, demand planning, and logistics performance.
+@description("Procurement, supplier scorecards, S&OP, demand planning, and logistics performance.")
 seed agentRole supply-chain-manager {
   slug:                  "supply-chain-manager"
   name:                  "Supply Chain Manager"

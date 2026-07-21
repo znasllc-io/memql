@@ -6,8 +6,7 @@
 
 use agents.concepts.{ agentRole }
 
-/// Contracts, corporate policies, regulatory frameworks, IP, and audit readiness at a
-/// business-level.
+@description("Contracts, corporate policies, regulatory frameworks, IP, and audit readiness at a business-level.")
 seed agentRole legal-compliance {
   slug:                  "legal-compliance"
   name:                  "Legal & Compliance"
@@ -23,7 +22,7 @@ seed agentRole legal-compliance {
   predefined:            true
 }
 
-/// General-information immigration-law education: visa categories, process overviews, common forms.
+@description("General-information immigration-law education: visa categories, process overviews, common forms.")
 seed agentRole immigration-legal-educator {
   slug:                  "immigration-legal-educator"
   name:                  "Immigration Law Educator"
@@ -39,7 +38,7 @@ seed agentRole immigration-legal-educator {
   predefined:            true
 }
 
-/// Divorce, custody, adoption, and prenuptial agreement education. Never advice.
+@description("Divorce, custody, adoption, and prenuptial agreement education. Never advice.")
 seed agentRole family-law-educator {
   slug:                  "family-law-educator"
   name:                  "Family Law Educator"
@@ -55,7 +54,7 @@ seed agentRole family-law-educator {
   predefined:            true
 }
 
-/// Wills, trusts, beneficiary designations, and estate-tax basics. Information only.
+@description("Wills, trusts, beneficiary designations, and estate-tax basics. Information only.")
 seed agentRole estate-planning-educator {
   slug:                  "estate-planning-educator"
   name:                  "Estate Planning Educator"
@@ -71,7 +70,7 @@ seed agentRole estate-planning-educator {
   predefined:            true
 }
 
-/// Personal-life legal questions: leases, contracts, basic estate documents. Information only.
+@description("Personal-life legal questions: leases, contracts, basic estate documents. Information only.")
 seed agentRole personal-legal-advisor {
   slug:                  "personal-legal-advisor"
   name:                  "Personal Legal Educator"

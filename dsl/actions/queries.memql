@@ -25,6 +25,10 @@ query candidate actionCandidatesForPlan {
   shape   candidateFull
 }
 
+// actionByInputFingerprint -- the literal-replay lookup (Phase 1 #1736).
+// The harness computes a stable hash of the dispatched step input and asks
+// for an active action minted under the same fingerprint; a hit is replayed
+// token-free, a miss falls through to the LLM. Owned tier.
 /// Resolve an active v1:actions:action by inputFingerprint for the calling owner -- the
 /// literal-replay lookup (Phase 1 #1736).
 @unbounded("unique inputFingerprint dedupe probe scoped to the owner -- must see all matches")
@@ -37,6 +41,10 @@ query action actionByInputFingerprint {
   shape   actionFull
 }
 
+// surfacesForOwner -- the resolver's registry read (Phase 2 #1737).
+// Returns the owner's active execution surfaces; the surfaceresolver filters
+// by capability + availability in Go and applies the precedence/world-group
+// logic. Owned tier.
 /// List the calling owner's active v1:actions:surface registry entries for the capability->surface
 /// resolver (Phase 2 #1737). Owned tier.
 @actor
@@ -50,6 +58,11 @@ query surface surfacesForOwner {
   shape   surfaceFull
 }
 
+// actionByTemplateFingerprint -- Phase 3 (#1738) parameterized-replay
+// lookup. Matches an action by the STRUCTURE of the step input (key set hash),
+// so an action minted for one input can replay on a different input with the
+// same shape via parameter re-binding. Owned tier; superseded by the planner's
+// semantic search once wired.
 /// Resolve an active v1:actions:action by templateFingerprint (input structure) for the calling
 /// owner -- the parameterized-replay lookup (Phase 3 #1738). Owned tier.
 @unbounded("unique templateFingerprint dedupe probe scoped to the owner -- must see all matches")
@@ -75,6 +88,9 @@ query action actionsPendingConfirm {
   shape   actionFull
 }
 
+// activeActionsForOwner -- the consolidation sweep's input (Phase 4
+// #1739): the owner's active actions, to decay unused ones + deprecate those
+// below the reliability floor. Owned tier.
 /// List the calling owner's active v1:actions:action rows for the consolidation decay/deprecate
 /// sweep (Phase 4 #1739). Owned tier.
 @actor
@@ -88,6 +104,9 @@ query action activeActionsForOwner {
   shape   actionFull
 }
 
+// actionByIdAndVersion -- pin resolution (Phase 5 #1740). Resolves a
+// pinned reference (id@version) to the exact action version, so a bundle that
+// pinned act_x@3 always replays version 3 regardless of later edits. Owned tier.
 /// Resolve a pinned v1:actions:action reference (id + version) for the calling owner --
 /// pin-by-default resolution (Phase 5 #1740). Owned tier.
 @actor

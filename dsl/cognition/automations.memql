@@ -3,6 +3,16 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
+// automations/v1/cognition/bootstrapSession/automation.memql
+// Auto-creates a v1:cognition:session record when a participant is created.
+// Ensures every participant has a session tracking their real-time interaction state.
+//
+// #2235 / #2271: the pure `bootstrapSession` logic decides whether a session is
+// missing (`steps.decide.result == true`); the two writes that used to live
+// inline in the logic (ADR §2.1 logic-purity violation) are now `if`-gated steps
+// here -- the createSessionForParticipant insert and the session.created emit --
+// mirroring the cluster bootstrapCluster pattern. Every field binds an explicit
+// key + coalesce (a nil @required mutation arg trips validation).
 /// Auto-creates a session when a participant joins a space
 @trigger(event="node.created", concept="v1:cognition:participant", partition="*")
 automation bootstrapSession {
@@ -37,6 +47,21 @@ automation bootstrapSession {
   }
 }
 
+// automations/v1/cognition/generateResponse/automation.memql
+// Generates and inserts an AI response when the cognition integration
+// determines that a response is needed. The Go handler performs event
+// reception, concurrent context loading, Polyphon scoring, and streaming
+// dispatch, then emits this event with pre-loaded context when a
+// non-streaming AI response is needed.
+//
+// #2235 / #2271: the pure `generateResponse` logic does the idempotency read +
+// the ai() call and returns the reply TEXT as a scalar (empty when already
+// answered). The two writes that used to live inline in the logic (the
+// sendTextUtterance insert -- the ADR §2.1 logic-purity violation -- plus the
+// presence bump) are now `if`-gated steps here, gated on
+// `steps.decide.result != ""` and reading the reply text via
+// `steps.decide.result`. The #2271 engine fix unwraps the Bundle-wrapped step
+// result so that read resolves flat at real-DB runtime.
 /// Generate and insert AI response for an utterance
 @trigger(event="cognition.response.requested")
 automation generateResponse {
@@ -74,6 +99,46 @@ automation generateResponse {
 
 // ---- automations/v1/cognition/purgeExpiredArchivedSpaces/automation.memql ----
 
+// voiceMigrationOnSecondHuman
+// ===========================
+//
+// PURPOSE:
+// Phase 7 of the chat-architecture plan. When the SECOND active human
+// shows up in a space, voice transport migrates from each user's per-
+// user Team thread to the shared GROUP thread. The automation emits
+// the canvas-card pair that announces the migration:
+//
+//   Public group card  -- "{user} joined -- voice is active in this chat."
+//                          Visible to every space participant.
+//   Private operator   -- "Voice moved to the group chat -- push-to-talk
+//   card per user        or type to message your team here."
+//                          Per-existing-user; lands on each user's
+//                          private canvas timeline.
+//
+// TRIGGER:
+// graph.node.created.v1:identity:user fires on every user-row write
+// (primary path: setUserActiveSpace shipping a new version).
+// We filter to rows whose payload.activePartitionId is non-empty -- a user
+// whose pointer is set has just become active in some space.
+//
+// FIRE CONDITION:
+// usersActiveInSpace returns the full set of users currently
+// pointing at the same space. We act when the count is exactly 2 --
+// the just-joined user PLUS one prior active human. Counts of 1 (single
+// user) and 3+ (already migrated) are no-ops.
+//
+// IDEMPOTENCY:
+// The public canvas-state id is content-addressed on
+// (space, "voice-migrated"). Re-firing the automation for the same
+// (space) lands the same id, which the executeInsert path collapses
+// via ON CONFLICT. The per-user private cards are content-addressed
+// on (space, "voice-migrated", userId) for the same reason.
+//
+// REVERSE MIGRATION:
+// When the count drops below 2 (last other human leaves), the symmetric
+// "voice moved back to your Team chat" card lands -- handled by a
+// sibling automation when needed (deferred until the frontend wiring
+// shows the need).
 /// On second-active-human-in-space, emit the Phase 7 voice-migration canvas-card pair (public group
 /// card + private operator card per existing user).
 @filter(payload.activePartitionId!="")

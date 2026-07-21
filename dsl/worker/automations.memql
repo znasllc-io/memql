@@ -26,6 +26,24 @@ automation killSwitchSuspendsRunningPlans {
   }
 }
 
+// workerInvocationRetentionSweep
+// ===============================
+//
+// Daily 02:30 UTC sweep. Soft-deletes worker-invocation rows older
+// than WORKER_INVOCATION_RETENTION_DAYS (default 90). Per-user
+// invocation queries already filter on @skipDeleted so the rows
+// disappear from UIs the moment the soft-delete lands.
+//
+// Different from auditEventRetentionSweep on the identity side
+// (default 365) because per-call telemetry is high-volume and
+// security signals are not. Operators tune via the
+// WORKER_INVOCATION_RETENTION_DAYS env var.
+//
+// MemQL parser limitations:
+//   - The filter side of expiredWorkerInvocations can't push
+//     the duration math into the query (no `>` operator on
+//     datetime). Per-row gating uses
+//       addDuration(item.createdAt, "P{retention}D") < now
 /// Daily 02:30 UTC sweep: soft-delete worker-invocation rows past WORKER_INVOCATION_RETENTION_DAYS.
 /// decide (pure) returns the candidate rows; window reads the retention var; the forEach apply
 /// gates each row on createdAt + P{N}D < now (#2256/#2254 evaluator fix) and soft-deletes it.

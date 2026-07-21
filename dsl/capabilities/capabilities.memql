@@ -110,6 +110,12 @@ capability http.post {
 //   shell.*  -- process execution on the runner surface (OPEN/pass-through)
 // =============================================================================
 
+// `shell.script` runs an ALLOWLISTED named capability script (the I14 contract,
+// #2221) selected by its reserved `script` arg; every other arg is a structured
+// param forwarded to the script as data (never a `sh -c` string) and validated
+// by that script's own `--print-spec` envelope at run time. Only the stable
+// selector is declared @required here; the rest of the per-script argument
+// surface is intentionally open (see the OPEN vs CLOSED note above).
 /// Run an allowlisted named capability script on the runner surface, passing structured params as
 /// data.
 @sideEffect("exec")

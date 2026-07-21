@@ -11,9 +11,8 @@
 // via the streamClaudeOpus policy. Not user-facing in chat: autoJoin +
 // greetOnJoin both false, audio + video control always_off.
 
-/// Per-user Planner Agent. Platform orchestration persona -- decomposes Plans into Tasks,
-/// dispatches to specialists, manages retries.
 @scope("perUser")
+@description("Per-user Planner Agent. Platform orchestration persona -- decomposes Plans into Tasks, dispatches to specialists, manages retries.")
 seed agent plannerAgent {
   name:        "MemQL Planner"
   description: "Platform orchestration agent -- decomposes Plans into Tasks, dispatches to specialists, manages retries. Not user-facing in chat."

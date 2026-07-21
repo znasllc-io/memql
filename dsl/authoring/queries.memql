@@ -46,6 +46,22 @@ query bundle activeAuthoringBundles {
   shape   bundleFull
 }
 
+// SYSTEM-SCOPED active-bundle query (#1039). Unlike the owner-scoped
+// queries above, this returns EVERY active bundle across ALL owners --
+// there is NO payload.ownerUserId==actor.userId filter. It exists for one
+// caller: the boot-time authored-runtime re-arm (wireAuthoredRuntime),
+// which must enumerate other owners' active bundles to re-register their
+// constructs after a restart. A normal user never reads through it.
+//
+// Per-row-authz classification: ADMIN. The `actor.isClusterOwner == true`
+// gate is the cluster-owner spec the per-row-authz audit
+// (docs/auth/per-row-authz-audit.md) requires for a cross-owner read --
+// it both classifies the query as admin (dsl/conformance_test.go) and
+// REALLY gates it: a non-cluster-owner caller matches nothing (the actor
+// constant binds false). The boot re-arm runs under a cluster-owner
+// envelope, so it sees every owner's active bundles; per-owner construct
+// loads + the scheduler run then re-stamp the BUNDLE AUTHOR's envelope so
+// no privilege escalation leaks into the fired automation.
 /// ADMIN/SYSTEM: every active authoring bundle across ALL owners (NOT owner-scoped). Cluster-owner
 /// gated. Backs the boot-time authored-runtime re-arm (#1039) that re-registers active bundles'
 /// automations after a restart.

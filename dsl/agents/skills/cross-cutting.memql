@@ -8,12 +8,7 @@
 
 use agents.concepts.{ skill }
 
-/// Ingest external documents (PDFs, spreadsheets, web pages, images) into the v1:knowledge:document
-/// + chunk family. Pairs with workbench-baseline for the actual extraction + transformation runs;
-/// the skill itself bundles the knowledge of the validation lifecycle (proposed -> validated ->
-/// rejected), the supersession model, the per-format item concepts (spreadsheetRow / imageRegion).
-/// Phase 2 ships a dedicated knowledge-pipeline domain; the current bundle leans on
-/// research-methodology in the interim.
+@description("Ingest external documents (PDFs, spreadsheets, web pages, images) into the v1:knowledge:document + chunk family. Pairs with workbench-baseline for the actual extraction + transformation runs; the skill itself bundles the knowledge of the validation lifecycle (proposed -> validated -> rejected), the supersession model, the per-format item concepts (spreadsheetRow / imageRegion). Phase 2 ships a dedicated knowledge-pipeline domain; the current bundle leans on research-methodology in the interim.")
 seed skill knowledge-ingestion {
   slug:          "knowledge-ingestion"
   name:          "Knowledge Ingestion"
@@ -27,10 +22,7 @@ seed skill knowledge-ingestion {
   predefined:    true
 }
 
-/// Open-web research delegated to an agent: framing queries, evaluating source quality, distilling
-/// citations into knowledge graph rows the user can audit. Phase 2 wires this skill into the
-/// workbench-use http_fetch surface explicitly; today the skill carries the methodology + the
-/// framing, the agent reaches the network via the workbench tool that workbench-baseline provides.
+@description("Open-web research delegated to an agent: framing queries, evaluating source quality, distilling citations into knowledge graph rows the user can audit. Phase 2 wires this skill into the workbench-use http_fetch surface explicitly; today the skill carries the methodology + the framing, the agent reaches the network via the workbench tool that workbench-baseline provides.")
 seed skill web-research {
   slug:          "web-research"
   name:          "Web Research"
@@ -44,9 +36,7 @@ seed skill web-research {
   predefined:    true
 }
 
-/// Customer-support operations: ticket triage, response drafting against the customer-relations
-/// history, escalation handoffs, audit-trail mindfulness. Pairs naturally with a product's UI
-/// knowledge baseline when the user runs support inside the product.
+@description("Customer-support operations: ticket triage, response drafting against the customer-relations history, escalation handoffs, audit-trail mindfulness. Pairs naturally with a product's UI knowledge baseline when the user runs support inside the product.")
 seed skill customer-support-ops {
   slug:          "customer-support-ops"
   name:          "Customer Support Ops"

@@ -18,12 +18,7 @@
 
 use agents.concepts.{ skill }
 
-/// Knowledge baseline for every white-collar professional role -- accounting / HR / IT support /
-/// operations / project management / sales+marketing / executive assistant / data + software roles
-/// / security. Bundles the union of locked domains across professional.memql so a role's
-/// lockedSkillIds = [workbench-baseline, professional-baseline] reproduces the pre-Phase-2 domain
-/// reach. Phase 3 mintSkill carves narrower specializations off this when a planner-minted
-/// specialist needs them.
+@description("Knowledge baseline for every white-collar professional role -- accounting / HR / IT support / operations / project management / sales+marketing / executive assistant / data + software roles / security. Bundles the union of locked domains across professional.memql so a role's lockedSkillIds = [workbench-baseline, professional-baseline] reproduces the pre-Phase-2 domain reach. Phase 3 mintSkill carves narrower specializations off this when a planner-minted specialist needs them.")
 seed skill professional-baseline {
   slug:          "professional-baseline"
   name:          "Professional Baseline"
@@ -37,11 +32,7 @@ seed skill professional-baseline {
   predefined:    true
 }
 
-/// Knowledge baseline for every regulated medical role -- family doctor / pediatrician / dentist /
-/// physical therapist / nurse educator / pharmacist educator / veterinarian educator / mental
-/// health educator. Bundles the union of locked domains across medical.memql. Tier C: every medical
-/// role is high-stakes regulated and the agent factory injects an advisory disclaimer into the
-/// system prompt for any role that locks this skill.
+@description("Knowledge baseline for every regulated medical role -- family doctor / pediatrician / dentist / physical therapist / nurse educator / pharmacist educator / veterinarian educator / mental health educator. Bundles the union of locked domains across medical.memql. Tier C: every medical role is high-stakes regulated and the agent factory injects an advisory disclaimer into the system prompt for any role that locks this skill.")
 seed skill medical-baseline {
   slug:          "medical-baseline"
   name:          "Medical Baseline"
@@ -55,11 +46,7 @@ seed skill medical-baseline {
   predefined:    true
 }
 
-/// Knowledge baseline for every legal role -- compliance / immigration / family law / estate /
-/// personal-legal. Tier B: the agent factory injects a 'general legal info, not personal advice'
-/// disclaimer for any role that locks this skill. Practising-attorney boundaries are enforced at
-/// the role level (no role grants tools that send communications on behalf of a client without
-/// explicit user approval).
+@description("Knowledge baseline for every legal role -- compliance / immigration / family law / estate / personal-legal. Tier B: the agent factory injects a 'general legal info, not personal advice' disclaimer for any role that locks this skill. Practising-attorney boundaries are enforced at the role level (no role grants tools that send communications on behalf of a client without explicit user approval).")
 seed skill legal-baseline {
   slug:          "legal-baseline"
   name:          "Legal Baseline"
@@ -73,10 +60,7 @@ seed skill legal-baseline {
   predefined:    true
 }
 
-/// Knowledge baseline for skilled trades -- general contracting, electrical, plumbing, HVAC,
-/// carpentry, automotive, welding, landscaping. Tier B because electrical / HVAC carry real-world
-/// safety stakes; the agent factory injects a 'consult a licensed pro for code and permitting
-/// questions' disclaimer for any role that locks this skill.
+@description("Knowledge baseline for skilled trades -- general contracting, electrical, plumbing, HVAC, carpentry, automotive, welding, landscaping. Tier B because electrical / HVAC carry real-world safety stakes; the agent factory injects a 'consult a licensed pro for code and permitting questions' disclaimer for any role that locks this skill.")
 seed skill trades-baseline {
   slug:          "trades-baseline"
   name:          "Trades Baseline"
@@ -90,9 +74,7 @@ seed skill trades-baseline {
   predefined:    true
 }
 
-/// Knowledge baseline for scientific-educator roles -- physics / chemistry / biology / astronomy /
-/// geology. Tier A: research-grounded explanation, not policy advice. Pairs with role-specific
-/// specialty Phase 3 skills for deeper sub-discipline coverage.
+@description("Knowledge baseline for scientific-educator roles -- physics / chemistry / biology / astronomy / geology. Tier A: research-grounded explanation, not policy advice. Pairs with role-specific specialty Phase 3 skills for deeper sub-discipline coverage.")
 seed skill scientific-baseline {
   slug:          "scientific-baseline"
   name:          "Scientific Baseline"
@@ -106,9 +88,7 @@ seed skill scientific-baseline {
   predefined:    true
 }
 
-/// Knowledge baseline for education roles -- K-12 tutoring, test prep, language tutoring, history /
-/// philosophy education. Tier A; the agent factory layers in age-appropriate communication hints
-/// from the role's systemPromptHints.
+@description("Knowledge baseline for education roles -- K-12 tutoring, test prep, language tutoring, history / philosophy education. Tier A; the agent factory layers in age-appropriate communication hints from the role's systemPromptHints.")
 seed skill education-baseline {
   slug:          "education-baseline"
   name:          "Education Baseline"
@@ -122,8 +102,7 @@ seed skill education-baseline {
   predefined:    true
 }
 
-/// Knowledge baseline for agriculture roles -- row crops, livestock, horticulture. Tier A. Pairs
-/// with the existing weather-climate-ag domain for forecasting context.
+@description("Knowledge baseline for agriculture roles -- row crops, livestock, horticulture. Tier A. Pairs with the existing weather-climate-ag domain for forecasting context.")
 seed skill agriculture-baseline {
   slug:          "agriculture-baseline"
   name:          "Agriculture Baseline"
@@ -137,8 +116,7 @@ seed skill agriculture-baseline {
   predefined:    true
 }
 
-/// Knowledge baseline for hospitality roles -- chef, sommelier, barista, event planner. Tier A.
-/// Pairs with the food-safety domain when the role's specialty involves prepared food.
+@description("Knowledge baseline for hospitality roles -- chef, sommelier, barista, event planner. Tier A. Pairs with the food-safety domain when the role's specialty involves prepared food.")
 seed skill hospitality-baseline {
   slug:          "hospitality-baseline"
   name:          "Hospitality Baseline"
@@ -152,8 +130,7 @@ seed skill hospitality-baseline {
   predefined:    true
 }
 
-/// Knowledge baseline for civic roles -- civic navigator, nonprofit program manager. Tier A.
-/// Bundles the rare domains around government benefits, voting, nonprofit operations.
+@description("Knowledge baseline for civic roles -- civic navigator, nonprofit program manager. Tier A. Bundles the rare domains around government benefits, voting, nonprofit operations.")
 seed skill civic-baseline {
   slug:          "civic-baseline"
   name:          "Civic Baseline"
@@ -167,9 +144,7 @@ seed skill civic-baseline {
   predefined:    true
 }
 
-/// Knowledge baseline for transportation roles -- currently the commercial-pilot educator. Tier C
-/// because aviation is a regulated domain; the agent factory injects an FAA-disclaimer-shaped hint
-/// when this skill is locked.
+@description("Knowledge baseline for transportation roles -- currently the commercial-pilot educator. Tier C because aviation is a regulated domain; the agent factory injects an FAA-disclaimer-shaped hint when this skill is locked.")
 seed skill transportation-baseline {
   slug:          "transportation-baseline"
   name:          "Transportation Baseline"
@@ -183,10 +158,7 @@ seed skill transportation-baseline {
   predefined:    true
 }
 
-/// Knowledge baseline for creative roles -- graphic / UX design, fiction / screenwriting, music,
-/// photography, video, illustration, game design, the creative companion. Tier A. The deepest
-/// catalog -- creative.memql ships 11 specialists so the baseline carries every locked domain
-/// across them.
+@description("Knowledge baseline for creative roles -- graphic / UX design, fiction / screenwriting, music, photography, video, illustration, game design, the creative companion. Tier A. The deepest catalog -- creative.memql ships 11 specialists so the baseline carries every locked domain across them.")
 seed skill creative-baseline {
   slug:          "creative-baseline"
   name:          "Creative Baseline"
@@ -200,11 +172,7 @@ seed skill creative-baseline {
   predefined:    true
 }
 
-/// Knowledge baseline for personal-life roles -- household manager, parenting coach, health +
-/// wellness, meal-planning, travel, learning companion, social / relationships, pet care, home
-/// improvement, mindfulness, entertainment, senior care, real estate, personal finance. Tier B
-/// because personal-finance is the only Tier-B subset; every other role downgrades the effective
-/// disclaimer at agent-factory time.
+@description("Knowledge baseline for personal-life roles -- household manager, parenting coach, health + wellness, meal-planning, travel, learning companion, social / relationships, pet care, home improvement, mindfulness, entertainment, senior care, real estate, personal finance. Tier B because personal-finance is the only Tier-B subset; every other role downgrades the effective disclaimer at agent-factory time.")
 seed skill personal-baseline {
   slug:          "personal-baseline"
   name:          "Personal Baseline"

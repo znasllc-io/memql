@@ -18,11 +18,7 @@
 
 use agents.concepts.{ skill }
 
-/// App-native calendar: create, list, find, reschedule, and delete the user's own events. Backs the
-/// 'remind me the day before X' flow -- the reactive harness reads the same calendarEvent rows.
-/// First-party source of truth; external Google Calendar can sync in later via the liveSource
-/// mechanism (not part of this skill). Bundles the calendarList / calendarFind / calendarCreate /
-/// calendarUpdate / calendarDelete tools.
+@description("App-native calendar: create, list, find, reschedule, and delete the user's own events. Backs the 'remind me the day before X' flow -- the reactive harness reads the same calendarEvent rows. First-party source of truth; external Google Calendar can sync in later via the liveSource mechanism (not part of this skill). Bundles the calendarList / calendarFind / calendarCreate / calendarUpdate / calendarDelete tools.")
 seed skill calendar {
   slug:          "calendar"
   name:          "Calendar"

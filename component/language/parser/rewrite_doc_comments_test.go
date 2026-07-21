@@ -146,6 +146,7 @@ mutate candidate mutateDoneProbe {
     id string!
   }
   update {
+    id:     args.id
     status: "done"
   }
 }
@@ -244,4 +245,89 @@ func TestParseHeuristic_BareConstructKeywordIsFile(t *testing.T) {
 			t.Error("expression use of a contextual keyword must stay an expression")
 		}
 	})
+}
+
+// Seeds and builtins are outside the ruling-1 target set (no DocComment
+// resolution path) -- their @description must survive conversion.
+func TestRewriteDocComments_SeedAndBuiltinSkipped(t *testing.T) {
+	for name, src := range map[string]string{
+		"builtin": "@description(\"Builtin stays.\")\nbuiltin probeBuiltin {\n  subject string @required\n}\n",
+		"seed":    "@description(\"Seed stays.\")\nseed probeSeed {\n}\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := rewriteDoc(t, src)
+			if !strings.Contains(got, "@description(") {
+				t.Errorf("%s @description must survive (no /// resolution path):\n%s", name, got)
+			}
+			if strings.Contains(got, "///") {
+				t.Errorf("%s must not gain an unresolvable /// block:\n%s", name, got)
+			}
+		})
+	}
+}
+
+// The self-verification bail: an orphan annotation between the would-be ///
+// block and the construct blocks attachment, so converting would lose the
+// description -- the file must come back UNCHANGED.
+func TestRewriteDocComments_OrphanAnnotationBails(t *testing.T) {
+	src := `@actor("system")
+
+@description("Guarded by verification.")
+logic orphanProbe {
+  args {
+    a string @required
+  }
+  body {
+    return coalesce(args.a, "")
+  }
+}
+`
+	got := rewriteDoc(t, src)
+	if got != src {
+		t.Errorf("verification must bail the file unchanged when resolution would lose the description:\n%s", got)
+	}
+}
+
+// The containment direction: a LONG additive header whose tokens are not
+// contained in the short description stays, even though the description is
+// fully contained in the header (the round-1 direction bug).
+func TestRewriteDocComments_AdditiveLongHeaderKept(t *testing.T) {
+	src := `// Matches active data records in checked validation state. Checked records
+// have been synthetically validated but not yet confirmed by a human
+// identity, and may be usable if the concept's policy allows it; see the
+// isConfirmed sibling for the human-confirmed tier and the usage example
+// concept==v1:data:record;isChecked() for filter composition.
+@description("Matches active data records in checked validation state.")
+trait probeChecked {
+  return validationState == "checked"
+}
+`
+	got := rewriteDoc(t, src)
+	if !strings.Contains(got, "synthetically validated but not yet confirmed") {
+		t.Errorf("additive header prose must never be deleted:\n%s", got)
+	}
+	if !strings.Contains(got, "/// Matches active data records in checked validation state.") {
+		t.Errorf("description still converts:\n%s", got)
+	}
+}
+
+// An Arguments section naming a field ABSENT from args{} is unplaceable and
+// must stay whole.
+func TestRewriteDocComments_ArgumentsAbsentFieldKept(t *testing.T) {
+	src := `// Arguments:
+//   ghostField -- prose about a field that does not exist
+@description("Probe.")
+logic absentProbe {
+  args {
+    a string @required
+  }
+  body {
+    return coalesce(args.a, "")
+  }
+}
+`
+	got := rewriteDoc(t, src)
+	if !strings.Contains(got, "ghostField -- prose about a field that does not exist") {
+		t.Errorf("unplaceable Arguments prose must be kept:\n%s", got)
+	}
 }

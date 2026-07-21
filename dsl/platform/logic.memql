@@ -3,6 +3,18 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
+// purgeExpiredPolicyTraces
+// ========================
+//
+// Daily 02:30 UTC sweep over v1:platform:policyTrace rows older
+// than MEMQL_POLICYTRACE_RETENTION_DAYS (default 90). Same
+// observation-only pattern as auditEventRetentionSweep:
+// MemQL has no row-removal mutation today, so this cron emits
+// a "would-expire N rows" publishEvent each tick. Flip to a
+// per-row delete once the engine grows a delete() mutation.
+//
+// Schedule chosen as 02:30 UTC (offset from the 02:00 archive
+// purge so the two crons don't contend on the same DB window).
 /// Daily 02:30 UTC sweep over v1:platform:policyTrace rows older than
 /// MEMQL_POLICYTRACE_RETENTION_DAYS (default 90). Currently observation-only: emits a
 /// 'platform.policyTrace.retention.observed' event with the candidate count. Per-row delete lands

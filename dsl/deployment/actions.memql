@@ -75,6 +75,8 @@ action buildEngineImage {
   capability script(script: "deploy.buildImage", nodeType: args.nodeType, version: args.version, workdir: args.workdir, dryRun: args.dryRun)
 }
 
+// importImageToK3d -- load a built node image into the local k3d cluster (the
+// development-environment placement step). Backend: scripts/k3d/import-image.sh.
 /// Import a built engine node image into the local k3d cluster (development placement) so the
 /// development overlay can run it.
 action importImageToK3d {
@@ -161,6 +163,11 @@ action notifyDeploy {
 //   Integration-backed deploy action (capability integration.*)
 // =============================================================================
 
+// tagRelease -- cut a git tag + GitHub release for a shipped version. A SIDE-
+// EFFECTING integration (its capability class=write, ADR §3 + §7) is reachable
+// ONLY through an action; it resolves to the engine's integration tool, not a
+// shell script. integration.github.* is control-plane by capability, so it also
+// pins to the cockpit/runner surface (I13 deployControlCapabilityPrefixes).
 /// Cut a git tag + GitHub release for the version that just deployed.
 action tagRelease {
   args {

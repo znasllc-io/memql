@@ -10071,7 +10071,7 @@ func SetConstructStatusBuild(args SetConstructStatusArgs) string {
 	return b.String()
 }
 
-// SetGlobalSecret wraps the mutation named "setGlobalSecret".
+// SetGlobalSecret -- Persist an instance-wide (global) encrypted secret row in v1:platform:globalSecret. The encryptedValue and fingerprint are produced by the backend secret helper; this mutation only stores them.
 //
 // Bound concept: v1:platform:globalSecret (machine-readable: BoundConcepts["setGlobalSecret"] in generated_concepts.go).
 type SetGlobalSecretArgs struct {

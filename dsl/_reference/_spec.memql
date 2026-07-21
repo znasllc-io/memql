@@ -59,12 +59,12 @@
 
 use cognition.concepts.{ participant }
 
-/// Matches participants with human participantType
+@description("Matches participants with human participantType")
 spec participant isHumanParticipant {
   return participantType == "human"
 }
 
-/// Matches participants with AI participantType
+@description("Matches participants with AI participantType")
 spec participant isAIParticipant {
   return participantType == "si"
 }
@@ -83,12 +83,12 @@ spec participant isAIParticipant {
 
 use common.shapes.{ actorEnvelope }
 
-/// Caller must hold an admin or owner role.
+@description("Caller must hold an admin or owner role.")
 spec actorEnvelope requiresAdmin {
   return role == "admin" || role == "owner"
 }
 
-/// Caller is the cluster owner.
+@description("Caller is the cluster owner.")
 spec actorEnvelope isClusterOwner {
   return isClusterOwner == true
 }
@@ -106,7 +106,7 @@ spec actorEnvelope isClusterOwner {
 
 use cognition.shapes.{ participantRow }
 
-/// Row authored by a specific seed identity.
+@description("Row authored by a specific seed identity.")
 spec participantRow isSeedParticipant {
   return createdBy == "seed" && participantType == "human"
 }
@@ -122,17 +122,17 @@ spec participantRow isSeedParticipant {
 // reference row.* or actor.* (it binds no gateway shape). The tree's trait
 // library lives under `dsl/<ns>/traits.memql`.
 
-/// Matches records with active == true.
+@description("Matches records with active == true.")
 trait isActiveRecord {
   return active == true
 }
 
-/// Matches records with deleted != true.
+@description("Matches records with deleted != true.")
 trait isNotDeleted {
   return deleted != true
 }
 
-/// Matches records with status == 'active'.
+@description("Matches records with status == 'active'.")
 trait statusIsActive {
   return status == "active"
 }
@@ -177,7 +177,7 @@ trait statusIsActive {
 
 use agents.concepts.{ agent }
 
-/// Rich predicate showing the operator surface (concept-bound).
+@description("Rich predicate showing the operator surface (concept-bound).")
 spec agent richPredicate {
   return kind == "assistant"
     && (status == "active" || status == "invited")

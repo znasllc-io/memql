@@ -7,8 +7,7 @@
 
 use agents.concepts.{ agentRole }
 
-/// Household finance education: budgeting, debt, savings, retirement, taxes, insurance. Information
-/// only.
+@description("Household finance education: budgeting, debt, savings, retirement, taxes, insurance. Information only.")
 seed agentRole personal-finance-advisor {
   slug:                  "personal-finance-advisor"
   name:                  "Personal Finance Advisor"
@@ -24,7 +23,7 @@ seed agentRole personal-finance-advisor {
   predefined:            true
 }
 
-/// Day-to-day household operations: chores, inventory, vendors, calendar, and routines.
+@description("Day-to-day household operations: chores, inventory, vendors, calendar, and routines.")
 seed agentRole household-manager {
   slug:                  "household-manager"
   name:                  "Household Manager"
@@ -38,7 +37,7 @@ seed agentRole household-manager {
   predefined:            true
 }
 
-/// Child development, behavior, schooling, family routines, and parenting strategies.
+@description("Child development, behavior, schooling, family routines, and parenting strategies.")
 seed agentRole parenting-coach {
   slug:                  "parenting-coach"
   name:                  "Parenting Coach"
@@ -52,8 +51,7 @@ seed agentRole parenting-coach {
   predefined:            true
 }
 
-/// Healthy habits across nutrition, fitness, sleep, mental health, and mindfulness. Information
-/// only.
+@description("Healthy habits across nutrition, fitness, sleep, mental health, and mindfulness. Information only.")
 seed agentRole health-wellness-coach {
   slug:                  "health-wellness-coach"
   name:                  "Health & Wellness Coach"
@@ -69,7 +67,7 @@ seed agentRole health-wellness-coach {
   predefined:            true
 }
 
-/// General fitness programming: strength, cardio, mobility, recovery. Information only.
+@description("General fitness programming: strength, cardio, mobility, recovery. Information only.")
 seed agentRole fitness-coach {
   slug:                  "fitness-coach"
   name:                  "Fitness Coach"
@@ -85,7 +83,7 @@ seed agentRole fitness-coach {
   predefined:            true
 }
 
-/// Training plans (5K -> marathon), form, gear, race strategy. Information only.
+@description("Training plans (5K -> marathon), form, gear, race strategy. Information only.")
 seed agentRole running-coach {
   slug:                  "running-coach"
   name:                  "Running Coach"
@@ -99,7 +97,7 @@ seed agentRole running-coach {
   predefined:            true
 }
 
-/// Asana, pranayama, sequencing, and yoga philosophy for practice and teaching.
+@description("Asana, pranayama, sequencing, and yoga philosophy for practice and teaching.")
 seed agentRole yoga-instructor {
   slug:                  "yoga-instructor"
   name:                  "Yoga Instructor"
@@ -113,7 +111,7 @@ seed agentRole yoga-instructor {
   predefined:            true
 }
 
-/// Periodization, lift technique, programming for strength + power.
+@description("Periodization, lift technique, programming for strength + power.")
 seed agentRole strength-coach {
   slug:                  "strength-coach"
   name:                  "Strength & Conditioning Coach"
@@ -128,7 +126,7 @@ seed agentRole strength-coach {
   predefined:            true
 }
 
-/// Home-cook meal planning: recipes, dietary preferences, weekly menus, grocery lists.
+@description("Home-cook meal planning: recipes, dietary preferences, weekly menus, grocery lists.")
 seed agentRole meal-planning-chef {
   slug:                  "meal-planning-chef"
   name:                  "Meal Planning Chef"
@@ -142,7 +140,7 @@ seed agentRole meal-planning-chef {
   predefined:            true
 }
 
-/// Trip planning, itineraries, document requirements, lodging, transit, and personal budgeting.
+@description("Trip planning, itineraries, document requirements, lodging, transit, and personal budgeting.")
 seed agentRole travel-planner {
   slug:                  "travel-planner"
   name:                  "Travel Planner"
@@ -156,7 +154,7 @@ seed agentRole travel-planner {
   predefined:            true
 }
 
-/// Self-directed learning: language, course-work, book summaries, study skills.
+@description("Self-directed learning: language, course-work, book summaries, study skills.")
 seed agentRole learning-companion {
   slug:                  "learning-companion"
   name:                  "Learning Companion"
@@ -170,7 +168,7 @@ seed agentRole learning-companion {
   predefined:            true
 }
 
-/// Communication, conflict resolution, milestone celebrations, gift planning. Education only.
+@description("Communication, conflict resolution, milestone celebrations, gift planning. Education only.")
 seed agentRole relationships-social {
   slug:                  "relationships-social"
   name:                  "Relationships & Social Companion"
@@ -186,7 +184,7 @@ seed agentRole relationships-social {
   predefined:            true
 }
 
-/// Daily pet care: feeding, training, grooming, common health issues. Information only.
+@description("Daily pet care: feeding, training, grooming, common health issues. Information only.")
 seed agentRole pet-care-specialist {
   slug:                  "pet-care-specialist"
   name:                  "Pet Care Specialist"
@@ -200,7 +198,7 @@ seed agentRole pet-care-specialist {
   predefined:            true
 }
 
-/// Repairs, upgrades, gardening, sustainability, and home-inventory maintenance.
+@description("Repairs, upgrades, gardening, sustainability, and home-inventory maintenance.")
 seed agentRole home-improvement-diy {
   slug:                  "home-improvement-diy"
   name:                  "Home Improvement / DIY"
@@ -214,7 +212,7 @@ seed agentRole home-improvement-diy {
   predefined:            true
 }
 
-/// Meditation practice, journaling prompts, stress-management techniques.
+@description("Meditation practice, journaling prompts, stress-management techniques.")
 seed agentRole mindfulness-coach {
   slug:                  "mindfulness-coach"
   name:                  "Mindfulness & Meditation Coach"
@@ -228,7 +226,7 @@ seed agentRole mindfulness-coach {
   predefined:            true
 }
 
-/// Movies, TV, music, books, podcasts, dining: recommendations and discussion partner.
+@description("Movies, TV, music, books, podcasts, dining: recommendations and discussion partner.")
 seed agentRole entertainment-curator {
   slug:                  "entertainment-curator"
   name:                  "Entertainment Curator"
@@ -242,8 +240,7 @@ seed agentRole entertainment-curator {
   predefined:            true
 }
 
-/// Aging-in-place planning, eldercare options, medication management, end-of-life documents.
-/// Information only.
+@description("Aging-in-place planning, eldercare options, medication management, end-of-life documents. Information only.")
 seed agentRole senior-care-advisor {
   slug:                  "senior-care-advisor"
   name:                  "Senior Care Advisor"
@@ -259,8 +256,7 @@ seed agentRole senior-care-advisor {
   predefined:            true
 }
 
-/// Home-buying / selling, mortgages, neighborhood research, inspections, closings. Information
-/// only.
+@description("Home-buying / selling, mortgages, neighborhood research, inspections, closings. Information only.")
 seed agentRole real-estate-advisor {
   slug:                  "real-estate-advisor"
   name:                  "Real Estate Educator"

@@ -38,8 +38,25 @@ var constructDescLineRe = regexp.MustCompile(`^@description\("((?:[^"\\]|\\.)*)"
 // headers while catching the near-verbatim restatement pattern.
 const dupThreshold = 0.6
 
-// RewriteDocCommentDescriptions applies the #2635 dedup to one file.
+// RewriteDocCommentDescriptions applies the #2635 dedup to one file, then
+// SELF-VERIFIES: every construct's resolved description in the rewritten
+// source (parsed DocComment, ruling-3 precedence) must equal the original's
+// (parsed @description attribute value). Any mismatch -- an orphan
+// annotation blocking attachment, an escape the conversion mishandled, a
+// slicing shape the walk cannot see -- returns the ORIGINAL bytes
+// unchanged: the codemod refuses to trade a description for a token win.
 func RewriteDocCommentDescriptions(src []byte) ([]byte, error) {
+	out, err := rewriteDocCommentDescriptionsUnverified(src)
+	if err != nil || string(out) == string(src) {
+		return src, err
+	}
+	if !descriptionsEquivalent(string(src), string(out)) {
+		return src, nil
+	}
+	return out, nil
+}
+
+func rewriteDocCommentDescriptionsUnverified(src []byte) ([]byte, error) {
 	lines := strings.Split(string(src), "\n")
 	out := make([]string, 0, len(lines))
 
@@ -47,6 +64,15 @@ func RewriteDocCommentDescriptions(src []byte) ([]byte, error) {
 		line := lines[i]
 		m := constructDescLineRe.FindStringSubmatch(line)
 		if m == nil {
+			out = append(out, line)
+			continue
+		}
+		// Kind guard: seed and builtin are outside the design's ruling-1
+		// target set -- they have no DocComment resolution path (BuiltinDecl
+		// carries no slot; the seed loader reads only the attribute), so
+		// converting them would blank their resolved descriptions. Their
+		// @description stays.
+		if k := constructKeywordAhead(lines, i); k == "seed" || k == "builtin" {
 			out = append(out, line)
 			continue
 		}
@@ -67,8 +93,12 @@ func RewriteDocCommentDescriptions(src []byte) ([]byte, error) {
 		header := out[hdrStart:annStart]
 
 		// Rewrite 3 first: pull Arguments/Returns sections out of the
-		// header so movable per-arg prose survives the dedup deletion.
-		remainder, fieldDocs, sectionsRemoved := extractArgSections(header)
+		// header so movable per-arg prose survives the dedup deletion. A
+		// section naming a field ABSENT from the construct's args block is
+		// unplaceable and stays untouched (prose is never deleted into
+		// nowhere).
+		argNames := argsFieldNamesAhead(lines, i)
+		remainder, fieldDocs, sectionsRemoved := extractArgSections(header, argNames)
 
 		// Rewrite 2: does the remaining header restate the description?
 		headerDeleted := false
@@ -176,30 +206,47 @@ func normalizeProse(s string) []string {
 	return strings.Fields(b.String())
 }
 
-// isNearVerbatim reports whether the shorter of (header prose, description)
-// is contained in the longer at >= dupThreshold token rate.
+// isNearVerbatim reports whether the HEADER's tokens are contained in the
+// description at >= dupThreshold: the header is deletable only when it adds
+// little beyond the surviving description. (The first cut tested containment
+// of the SHORTER text, which deleted long ADDITIVE headers whenever the
+// short description was contained in them -- the #2635 review demonstrated
+// 473 unique-content lines lost that way.)
 func isNearVerbatim(header, desc string) bool {
 	h := normalizeProse(strings.ReplaceAll(header, "//", " "))
 	d := normalizeProse(desc)
 	if len(h) == 0 || len(d) == 0 {
 		return false
 	}
-	shorter, longer := h, d
-	if len(d) < len(h) {
-		shorter, longer = d, h
-	}
-	set := make(map[string]int, len(longer))
-	for _, t := range longer {
+	set := make(map[string]int, len(d))
+	for _, t := range d {
 		set[t]++
 	}
 	hits := 0
-	for _, t := range shorter {
+	for _, t := range h {
 		if set[t] > 0 {
 			set[t]--
 			hits++
 		}
 	}
-	return float64(hits)/float64(len(shorter)) >= dupThreshold
+	return float64(hits)/float64(len(h)) >= dupThreshold
+}
+
+// constructKeywordAhead returns the first word of the construct header the
+// annotation block at lines[i] belongs to (scanning forward over @lines).
+func constructKeywordAhead(lines []string, i int) string {
+	for j := i + 1; j < len(lines); j++ {
+		t := strings.TrimSpace(lines[j])
+		if t == "" || strings.HasPrefix(t, "@") || strings.HasPrefix(t, "//") {
+			continue
+		}
+		f := strings.Fields(t)
+		if len(f) > 0 {
+			return f[0]
+		}
+		return ""
+	}
+	return ""
 }
 
 var bareRestateRe = regexp.MustCompile(`^//\s+[A-Za-z_][A-Za-z0-9_]*(\s+\S+){0,2}\s*$`)
@@ -211,7 +258,7 @@ var argLineRe = regexp.MustCompile(`^//\s*(?:-\s*)?([A-Za-z_][A-Za-z0-9_]*)\s*(?
 // declaration are returned as fieldDocs (field name -> prose) for /// moves;
 // pure restating sections are dropped. A section the heuristic cannot fully
 // account for is kept untouched (conservative).
-func extractArgSections(header []string) (remainder []string, fieldDocs map[string]string, removed bool) {
+func extractArgSections(header []string, argNames map[string]bool) (remainder []string, fieldDocs map[string]string, removed bool) {
 	fieldDocs = map[string]string{}
 	i := 0
 	for i < len(header) {
@@ -250,6 +297,12 @@ func extractArgSections(header []string) (remainder []string, fieldDocs map[stri
 					}
 				}
 				j++
+			}
+			for _, kv := range sectionDocs {
+				if !argNames[kv[0]] {
+					sectionOK = false
+					break
+				}
 			}
 			if sectionOK {
 				for _, kv := range sectionDocs {
@@ -324,3 +377,109 @@ func fieldNameOf(trimmed string) string {
 // docCommentRewriteError is reserved for future strict modes; the rewrite
 // is total today (unconvertible shapes are left untouched).
 var _ = fmt.Sprintf
+
+// argsFieldNamesAhead scans forward from the annotation block for the
+// construct's args { ... } block and returns its field names.
+func argsFieldNamesAhead(lines []string, from int) map[string]bool {
+	names := map[string]bool{}
+	depth := 0
+	inArgs := false
+	for j := from + 1; j < len(lines) && j < from+200; j++ {
+		t := strings.TrimSpace(lines[j])
+		if !inArgs {
+			if t == "args {" || strings.HasSuffix(t, " args {") {
+				inArgs = true
+				depth = 1
+			}
+			if t == "}" && j > from+1 {
+				return names // construct ended without args
+			}
+			continue
+		}
+		depth += strings.Count(t, "{") - strings.Count(t, "}")
+		if depth <= 0 {
+			return names
+		}
+		if n := fieldNameOf(t); n != "" {
+			names[n] = true
+		}
+	}
+	return names
+}
+
+// resolvedConstructDescs parses source (through the struct-form rewrite,
+// the real load shape) and returns kind:name -> resolved description, where
+// resolution follows ruling 3: DocComment wins, @description falls back.
+// A nil map means the source did not parse (callers treat that as
+// unverifiable and bail).
+func resolvedConstructDescs(source string) map[string]string {
+	normalised, err := NormaliseAll(source)
+	if err != nil {
+		return nil
+	}
+	file, err := ParseFile(normalised)
+	if err != nil {
+		return nil
+	}
+	out := map[string]string{}
+	put := func(kind, name, doc, desc string) {
+		out[kind+":"+name] = EffectiveDescription(doc, desc)
+	}
+	attrDesc := func(attrs []*Attribute) string {
+		for _, a := range attrs {
+			if a != nil && a.Name == "description" {
+				if s, ok := a.Value.(string); ok {
+					return s
+				}
+			}
+		}
+		return ""
+	}
+	for _, def := range file.Definitions {
+		switch d := def.(type) {
+		case *FunctionDef:
+			put(string(d.Type), d.Name, d.DocComment, d.Description)
+		case *ConceptDecl:
+			put("concept", d.Name, d.DocComment, attrDesc(d.Attributes))
+		case *ShapeDecl:
+			put("shape", d.Name, d.DocComment, attrDesc(d.Attributes))
+		case *ToolDecl:
+			put("tool", d.Name, d.DocComment, d.Description)
+		case *PromptDecl:
+			put("prompt", d.Name, d.DocComment, attrDesc(d.Attributes))
+		case *ProviderDecl:
+			put("provider", d.Name, d.DocComment, d.Description)
+		case *PolicyDecl:
+			put("policy", d.Name, d.DocComment, d.Description)
+		case *SpecDecl:
+			kind := "spec"
+			if d.IsTrait {
+				kind = "trait"
+			}
+			put(kind, d.Name, d.DocComment, attrDesc(d.Attributes))
+		case *CapabilityDecl:
+			put("capability", d.Name, d.DocComment, attrDesc(d.Attributes))
+		case *ActionDecl:
+			put("action", d.Name, d.DocComment, attrDesc(d.Attributes))
+		}
+	}
+	return out
+}
+
+// descriptionsEquivalent reports whether every construct resolves the same
+// description before and after the rewrite. Constructs present on either
+// side only (parse-shape drift) fail the check.
+func descriptionsEquivalent(before, after string) bool {
+	b := resolvedConstructDescs(before)
+	a := resolvedConstructDescs(after)
+	if b == nil || a == nil || len(a) != len(b) {
+		return false
+	}
+	for k, v := range b {
+		av, ok := a[k]
+		if !ok || av != v {
+			return false
+		}
+	}
+	return true
+}

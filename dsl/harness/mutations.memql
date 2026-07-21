@@ -27,6 +27,11 @@
 // is preserved. The conformance classifier reads actor.userId in the
 // insert bodies and buckets these as owned.
 
+// createHarnessPlan
+// ==========
+// Create a v1:harness:plan in status='open'. ownerUserId is
+// server-stamped from actor.userId so the caller cannot land a plan
+// owned by someone else.
 /// Create a v1:harness:plan in status='open'. ownerUserId is stamped from actor.userId (owned
 /// tier). Single write path for plan creation.
 @mcp
@@ -48,6 +53,13 @@ mutate plan createHarnessPlan {
   }
 }
 
+// addHarnessStep
+// =======
+// Add a v1:harness:step to a plan in status='pending'. The engine
+// emits graph.node.created.*.v1:harness:step on the insert (the
+// `.*.` partition-segment wildcard caveat applies -- see CLAUDE.md).
+// attempt starts at 0; status starts at pending and walks the state
+// machine via the transition mutations below.
 /// Add a v1:harness:step to a plan, status='pending', attempt=0. ownerUserId is stamped from
 /// actor.userId (owned tier). Creating the step emits graph.node.created.*.v1:harness:step
 /// automatically on insert.
@@ -74,6 +86,18 @@ mutate step addHarnessStep {
   }
 }
 
+// readyHarnessStep
+// =========
+// Promote a step to ready: pending -> ready (dependsOn satisfied) or
+// blocked -> ready (blocker finished). Without this write the step
+// state machine is unreachable past 'pending' -- addHarnessStep
+// lands the step in 'pending' and the engine guard only admits
+// 'ready' -> 'running', so start/complete/fail could never fire
+// (#1635). update() read-merges the prior row, so the owned-tier
+// fields (ownerUserId, planId, title, ...) are preserved. The engine
+// step guard validates the transition and rejects an illegal source
+// status (e.g. done -> ready). The failed -> ready retry path (which
+// must also bump attempt) stays a separate write.
 /// Promote a step to ready (pending -> ready when dependsOn is satisfied, or blocked -> ready when
 /// the blocker finishes). Read-merges the prior row so owned-tier fields are preserved. The engine
 /// step guard validates the transition and rejects an illegal source status. Without this mutation
@@ -90,6 +114,12 @@ mutate step readyHarnessStep {
   }
 }
 
+// startHarnessStep
+// =========
+// Claim a ready step: ready -> running. assignedAgent records which
+// agent claimed it; startedAt stamps the claim time. The engine
+// guard rejects this when the prior status is not 'ready' (e.g.
+// done -> running is invalid).
 /// Claim a ready step (ready -> running). Stamps assignedAgent + startedAt. The engine step guard
 /// rejects the transition when the prior status is not 'ready'.
 @mcp
@@ -142,6 +172,13 @@ mutate step failHarnessStep {
   }
 }
 
+// recordHarnessObservation
+// =================
+// Append a v1:harness:observation for a step -- what actually
+// happened. ownerUserId is stamped from actor.userId. content is the
+// embedding source; the harness embedding loop stores it into
+// node_vectors keyed by this observation's id so it becomes
+// semantically recall-able (#585).
 /// Append a v1:harness:observation for a step (tool_result / error / note / decision). ownerUserId
 /// stamped from actor.userId (owned tier). content is the embedding source for semantic recall
 /// (#585).
@@ -194,6 +231,18 @@ mutate observation recordHarnessObservation {
 // semanticMemory + consolidationCursor concepts are pulled into scope
 // by the file-top `use harness.concepts` import (extended for #586).
 
+// createHarnessSemanticMemory
+// ===========================
+// Write a brand-new distilled belief. confidence + reinforceCount +
+// lastReinforced seed the decay clock; sourceEpisodes carries the
+// provenance back to the episodic nodes this belief was distilled
+// from. The consolidation loop calls this only after similarTo found
+// NO matching existing belief (otherwise it reinforces instead).
+//
+// content is the embedding source -- after this insert, the embedding
+// loop stores it into node_vectors keyed by this memory's id so the
+// belief is itself similarTo-recall-able (for #585 recall AND for the
+// next run's own dedup step).
 /// Create a v1:harness:semanticMemory -- a new distilled belief. ownerUserId stamped from
 /// actor.userId (owned tier). sourceEpisodes records provenance back to the episodic nodes it was
 /// distilled from. confidence/reinforceCount/lastReinforced seed the decay clock. content is the
@@ -283,6 +332,14 @@ mutate semanticMemory decayHarnessSemanticMemory {
   }
 }
 
+// pruneHarnessSemanticMemory
+// ==========================
+// A belief that decayed below MEMQL_HARNESS_CONSOLIDATION_PRUNE_CONFIDENCE
+// is retired: status -> pruned. Soft-delete (the row stays, append-only
+// model has no row-removal mutation) -- recall (#585) and the next run's
+// dedup step filter status=='active', so a pruned belief is invisible
+// without being lost from the audit trail. Mirrors the safety / platform
+// retention crons' observation-only pattern.
 /// Prune a decayed v1:harness:semanticMemory: status -> 'pruned' (soft-delete; the append-only
 /// model has no row removal). Recall (#585) + consolidation dedup filter status=='active', so a
 /// pruned belief drops out of both while staying in the audit trail. ownerUserId re-stamped from
@@ -300,6 +357,16 @@ mutate semanticMemory pruneHarnessSemanticMemory {
   }
 }
 
+// advanceHarnessConsolidationCursor
+// =================================
+// Move the per-owner watermark forward after a run. watermark is set to
+// the engine-computed max(createdAt) over the batch just processed, so
+// the next run reads only episodes newer than this -- the mechanism that
+// keeps consolidation INCREMENTAL (cost bounded by the new-episode
+// delta, not total history). One cursor row per owner, content-addressed
+// on ownerUserId, updated in place: the insert {} path with a stable id
+// upserts via the engine's ON CONFLICT, so the same call both creates
+// the cursor on first run and advances it on every later run.
 /// Advance the per-owner v1:harness:consolidationCursor watermark to the engine-computed
 /// max(createdAt) of the batch just consolidated -- the incremental-cost mechanism (next run reads
 /// only episodes newer than this). Upserts on a stable per-owner id so it creates the cursor on

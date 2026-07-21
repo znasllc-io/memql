@@ -6,7 +6,7 @@
 
 use agents.concepts.{ agentRole }
 
-/// Residential and light-commercial construction: scheduling, subs, permits, scopes of work.
+@description("Residential and light-commercial construction: scheduling, subs, permits, scopes of work.")
 seed agentRole general-contractor {
   slug:                  "general-contractor"
   name:                  "General Contractor"
@@ -20,8 +20,7 @@ seed agentRole general-contractor {
   predefined:            true
 }
 
-/// Residential / commercial electrical: codes, troubleshooting, common installations. Information
-/// only -- live electrical work is licensed labor.
+@description("Residential / commercial electrical: codes, troubleshooting, common installations. Information only -- live electrical work is licensed labor.")
 seed agentRole electrician {
   slug:                  "electrician"
   name:                  "Electrical Trades"
@@ -37,8 +36,7 @@ seed agentRole electrician {
   predefined:            true
 }
 
-/// Residential plumbing systems: drain / waste / vent, water supply, fixtures, basic
-/// troubleshooting.
+@description("Residential plumbing systems: drain / waste / vent, water supply, fixtures, basic troubleshooting.")
 seed agentRole plumber {
   slug:                  "plumber"
   name:                  "Plumbing Trades"
@@ -52,7 +50,7 @@ seed agentRole plumber {
   predefined:            true
 }
 
-/// Heating, ventilation, A/C, refrigeration: principles, sizing, common faults, controls.
+@description("Heating, ventilation, A/C, refrigeration: principles, sizing, common faults, controls.")
 seed agentRole hvac-technician {
   slug:                  "hvac-technician"
   name:                  "HVAC Technician"
@@ -66,7 +64,7 @@ seed agentRole hvac-technician {
   predefined:            true
 }
 
-/// Framing, finish carpentry, cabinetry, joinery; hand and power tools.
+@description("Framing, finish carpentry, cabinetry, joinery; hand and power tools.")
 seed agentRole carpenter {
   slug:                  "carpenter"
   name:                  "Carpentry"
@@ -80,7 +78,7 @@ seed agentRole carpenter {
   predefined:            true
 }
 
-/// Passenger-car diagnostics and repair: engine, drivetrain, brakes, electrical, scan tools.
+@description("Passenger-car diagnostics and repair: engine, drivetrain, brakes, electrical, scan tools.")
 seed agentRole automotive-mechanic {
   slug:                  "automotive-mechanic"
   name:                  "Automotive Mechanic"
@@ -94,7 +92,7 @@ seed agentRole automotive-mechanic {
   predefined:            true
 }
 
-/// Welding processes (MIG / TIG / stick), metallurgy basics, safety, and inspection criteria.
+@description("Welding processes (MIG / TIG / stick), metallurgy basics, safety, and inspection criteria.")
 seed agentRole welder {
   slug:                  "welder"
   name:                  "Welding"
@@ -108,7 +106,7 @@ seed agentRole welder {
   predefined:            true
 }
 
-/// Landscape design, installation, and maintenance: plants, irrigation, hardscape, seasonal care.
+@description("Landscape design, installation, and maintenance: plants, irrigation, hardscape, seasonal care.")
 seed agentRole landscaping-grounds {
   slug:                  "landscaping-grounds"
   name:                  "Landscaping & Grounds"

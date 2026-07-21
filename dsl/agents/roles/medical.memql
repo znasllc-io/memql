@@ -8,8 +8,7 @@
 
 use agents.concepts.{ agentRole }
 
-/// General-practice medicine education and patient communication. Information only -- never
-/// personalized clinical advice.
+@description("General-practice medicine education and patient communication. Information only -- never personalized clinical advice.")
 seed agentRole family-doctor {
   slug:                  "family-doctor"
   name:                  "Family Medicine Physician"
@@ -25,8 +24,7 @@ seed agentRole family-doctor {
   predefined:            true
 }
 
-/// Child health education: developmental milestones, vaccinations, common childhood illnesses.
-/// Information only.
+@description("Child health education: developmental milestones, vaccinations, common childhood illnesses. Information only.")
 seed agentRole pediatrician {
   slug:                  "pediatrician"
   name:                  "Pediatrics Specialist"
@@ -42,7 +40,7 @@ seed agentRole pediatrician {
   predefined:            true
 }
 
-/// Oral health, preventive dentistry, common dental issues. Information only.
+@description("Oral health, preventive dentistry, common dental issues. Information only.")
 seed agentRole dentist {
   slug:                  "dentist"
   name:                  "Dental Health Specialist"
@@ -58,7 +56,7 @@ seed agentRole dentist {
   predefined:            true
 }
 
-/// Movement health, rehab principles, common injuries. Educational only.
+@description("Movement health, rehab principles, common injuries. Educational only.")
 seed agentRole physical-therapist {
   slug:                  "physical-therapist"
   name:                  "Physical Therapy Educator"
@@ -74,7 +72,7 @@ seed agentRole physical-therapist {
   predefined:            true
 }
 
-/// Nursing-school-level patient care concepts. Educational only.
+@description("Nursing-school-level patient care concepts. Educational only.")
 seed agentRole registered-nurse-education {
   slug:                  "registered-nurse-education"
   name:                  "Nursing Education"
@@ -90,7 +88,7 @@ seed agentRole registered-nurse-education {
   predefined:            true
 }
 
-/// Drug class overviews, mechanism of action, common interactions at the textbook level.
+@description("Drug class overviews, mechanism of action, common interactions at the textbook level.")
 seed agentRole pharmacist-educator {
   slug:                  "pharmacist-educator"
   name:                  "Pharmacology Educator"
@@ -106,7 +104,7 @@ seed agentRole pharmacist-educator {
   predefined:            true
 }
 
-/// General companion-animal health, common conditions, preventive care for owners.
+@description("General companion-animal health, common conditions, preventive care for owners.")
 seed agentRole veterinarian-educator {
   slug:                  "veterinarian-educator"
   name:                  "Veterinary Educator"
@@ -122,7 +120,7 @@ seed agentRole veterinarian-educator {
   predefined:            true
 }
 
-/// Mental-health literacy, common conditions, coping skills education. Never therapy.
+@description("Mental-health literacy, common conditions, coping skills education. Never therapy.")
 seed agentRole mental-health-educator {
   slug:                  "mental-health-educator"
   name:                  "Mental Health Educator"

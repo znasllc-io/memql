@@ -51,6 +51,28 @@ query plan awaitingFeedbackPlansPastTimeout {
   shape   planFull
 }
 
+// strandedCandidatePlans
+// ===========================
+//
+// Returns every Plan still in a pre-dispatch lifecycle status
+// (planning / queued). Backs the planner-side stranded-plan watchdog
+// (memql#1389): a Plan only starts via the graph.node.created event
+// (PlannerAgentLoop.HandlePlanCreated). If that single event is lost
+// (cross-node mesh drop -- cf. the peer-table decay issue #1388 --
+// or a planner replica crash between receive and dispatch), the Plan
+// sits in planning/queued forever with no retry and no user-visible
+// failure. The watchdog poller re-drives such Plans through
+// invokeAndDispatch as an at-least-once safety net behind the
+// created-event fast path.
+//
+// Broad-by-design: the precise "older than N minutes AND not yet
+// claimed by the agent loop" check runs Go-side in the watchdog
+// (StrandedPlanWatchdog.pollOnce), mirroring queryDueRefreshDomains
+// -- the MemQL comparison evaluator
+// doesn't accept now as a comparison RHS for createdAt arithmetic
+// (component/memql/executor.go), and the candidate set is small
+// (planning/queued is a transient window). status membership uses the
+// single `in` operator since MemQL has no OR.
 /// Plans still in a pre-dispatch status (planning / queued). Backs the stranded-plan watchdog
 /// (memql#1389); the age + dedup check runs Go-side.
 @unbounded("stranded-plan recovery sweep -- an internal sweep that must see all")
@@ -223,6 +245,14 @@ query task tasksForPlan {
 // epic #632 consumes dueResponsibilities.
 // -----------------------------------------------------------------------------
 
+// responsibilitiesForUser
+// ============================
+//
+// Every responsibility owned by the caller, regardless of status or
+// trigger. Backs the settings / management surface where the user
+// reviews and edits all their standing directives. The ownerUserId ==
+// actor.userId predicate is the only gate -- no userId arg, so a
+// caller can never request another user's rows.
 /// Every responsibility owned by the caller (all statuses + triggers). Backs the management
 /// surface. The ownerUserId predicate binds to actor.userId server-side so cross-user reads are
 /// impossible.
@@ -237,6 +267,14 @@ query responsibility responsibilitiesForUser {
   shape   responsibilityFull
 }
 
+// activeResponsibilities
+// ===========================
+//
+// The caller's active, enabled directives -- the live working set the
+// evaluator/dispatcher cares about. status=='active' is expressed via
+// the statusIsActive trait (inline payload.status=="active" is
+// rejected by the conformance test). enabled==true filters out
+// soft-disabled rows.
 /// The caller's active + enabled responsibilities -- the live working set. Owned tier (ownerUserId
 /// == actor.userId). status filtered via statusIsActive; enabled==true drops soft-disabled rows.
 @actor
@@ -250,6 +288,27 @@ query responsibility activeResponsibilities {
   shape   responsibilityFull
 }
 
+// dueResponsibilities
+// ========================
+//
+// The candidate set the reactive-loop evaluator (epic #632) walks each
+// heartbeat: the caller's active, enabled responsibilities that are
+// either recurring (a cron schedule that may be due) or reactive (a
+// condition pending evaluation). standing directives are always-on and
+// don't need a due-check, so they're excluded here.
+//
+// Due-ness itself is NOT pushed into the filter. The MemQL comparison
+// evaluator can't evaluate a cron expression against now, and it has
+// no OR operator to union the recurring + reactive sets in one query.
+// So this query returns the bounded candidate set (active + enabled +
+// trigger in {recurring, reactive}) and the Go evaluator does the
+// cron-due check (recurring) and the condition-match check (reactive)
+// per row -- mirroring queryDueRefreshDomains, which returns a bounded
+// candidate set and does the due-ness math Go-side.
+//
+// Two passes because there's no OR: the evaluator calls this once per
+// trigger value. trigger is a required arg so the caller picks the
+// archetype; the recurring + reactive results are merged Go-side.
 /// The caller's active + enabled responsibilities of a given trigger archetype (recurring or
 /// reactive) -- the candidate set the reactive-loop evaluator (epic #632) checks for due-ness.
 /// Owned tier (ownerUserId == actor.userId). Cron-due / condition-match filtering happens Go-side
@@ -264,6 +323,29 @@ query responsibility dueResponsibilities {
   shape   responsibilityFull
 }
 
+// activeResponsibilitiesAcrossUsers
+// ======================================
+//
+// The cross-user sweep the reactive-loop heartbeat (epic #632, C1)
+// walks each tick. Returns EVERY active + enabled responsibility in
+// the partition, regardless of owner -- the planner-node poller has no
+// single user context, so it can't lean on the owned-tier
+// activeResponsibilities (which binds ownerUserId to actor.userId).
+//
+// This is the same cron-sweep-helper shape as
+// queryAllArchivedSpacesAcrossUsers: no owner filter on purpose. The
+// per-row-authz conformance classifier buckets it as 'other' (the
+// header body references no payload.ownerUserId/userId literal -- the
+// owner field is projected through the responsibilityFull shape, not
+// compared in the filter), so it needs no caller-check.
+//
+// Cross-user isolation is preserved one layer up: the poller reads the
+// sweep under the system actor, then re-enters each row UNDER THAT
+// ROW'S OWNER (impersonating ownerUserId in the AccessContext) for the
+// owned-tier per-user writes (record-evaluation, assignment). A row's
+// owner can never write another owner's responsibility because the
+// sweep is read-only and every downstream write goes back through the
+// owned-tier mutations gated on actor.userId.
 /// Every active + enabled responsibility in the partition, regardless of owner -- the cross-user
 /// sweep the reactive-loop heartbeat (epic #632) walks each tick. Cron-sweep-helper shape (no owner
 /// filter; classifies as 'other' like queryAllArchivedSpacesAcrossUsers). The planner poller reads
@@ -275,6 +357,22 @@ query responsibility activeResponsibilitiesAcrossUsers {
   shape   responsibilityFull
 }
 
+// plansForResponsibility
+// ===========================
+//
+// Every Plan the reactive loop spawned for a given responsibility,
+// matched on the input.responsibilityId back-pointer the loop stamps at
+// Plan-creation time. Backs the C1 dedup guard: before honoring a
+// reactive responsibility (epic #632, C3) the loop checks whether a
+// non-terminal Plan already exists for it and skips if so (continuity).
+// Terminal-vs-live filtering happens Go-side -- MemQL has no NOT/OR to
+// express "status not in {succeeded, failed, cancelled}" in one filter.
+//
+// input.responsibilityId is a synthetic field the planner stamps on the
+// Plan's input object (the Plan concept has no first-class
+// responsibility relationship); the filter reaches into the nested
+// payload object the same way awaitingFeedbackPlansPastTimeout
+// reaches payload.feedbackRequest.timeoutAt.
 /// Every Plan the reactive loop spawned for a responsibility, matched on the input.responsibilityId
 /// back-pointer. Backs the C1 dedup guard (one live Plan per continuous responsibility).
 /// Terminal-vs-live filtering happens Go-side (no NOT/OR in MemQL filters).
@@ -291,6 +389,15 @@ query plan plansForResponsibility {
   shape   planFull
 }
 
+// responsibilityById
+// =======================
+//
+// Single responsibility lookup by id. Used by the intake dispatcher
+// (issue #637 -- integrations/planner/responsibility_intake.go) to load
+// the row it is processing, and by the management UI for a live single-
+// row refresh. Filters on id only (system reads it under system:planner);
+// per-row authz on the human-facing read paths stays on
+// responsibilitiesForUser, which owner-scopes. Mirrors planById.
 /// Single v1:planner:responsibility by id. Used by the intake dispatcher (#637) and the management
 /// UI's single-row refresh. Filters on id only -- mirrors planById; the owner-scoped list reads
 /// stay on responsibilitiesForUser.

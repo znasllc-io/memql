@@ -46,6 +46,14 @@ mutate candidate recordActionCandidate {
   }
 }
 
+// mintAction
+// ==================
+// Mint a v1:actions:action (primitive) from a completed LLM step (Phase 1,
+// #1736). ownerUserId is stamped from actor.userId (owned tier). The harness
+// calls this after an LLM step succeeds, passing the captured replayable
+// calls + the input/result fingerprints; kind/sideEffectClass/reliability/
+// reinforceCount/version/status take their concept @default values.
+// Internal write path -- not on the MCP/SDK surface.
 /// Mint a v1:actions:action (primitive) from a completed LLM step (Phase 1, #1736). ownerUserId
 /// stamped from actor.userId (owned tier). Stores the replayable capability calls keyed by
 /// inputFingerprint.
@@ -160,6 +168,13 @@ mutate surface setSurfaceAvailability {
   }
 }
 
+// confirmAction
+// =====================
+// Promote a confirm-gated candidate action to active after a human confirms
+// it (Phase 4 #1739). A real-machine write/exec action mints as candidate and
+// is held off the replay ladder (the active-only replay queries skip it) until
+// this confirm flips it to active. update read-merges so the captured calls +
+// ownerUserId are preserved. Internal write path driven by the confirm UI.
 /// Confirm a candidate v1:actions:action, promoting it to active so it is offered for replay (Phase
 /// 4 #1739, the human gate for real-machine side effects).
 mutate action confirmAction {
@@ -173,6 +188,12 @@ mutate action confirmAction {
   }
 }
 
+// deprecateAction
+// =======================
+// Deprecate an action whose reliability fell below the floor (Phase 4 #1739).
+// A deprecated action is kept (append-only) but excluded from the active-only
+// replay queries, so it is no longer offered. Driven by the consolidation
+// decay sweep.
 /// Deprecate a v1:actions:action (reliability below floor or superseded), removing it from replay
 /// (Phase 4 #1739).
 mutate action deprecateAction {
@@ -186,6 +207,12 @@ mutate action deprecateAction {
   }
 }
 
+// decayAction
+// ===================
+// Set an action's decayed reliability (Phase 4 #1739). The decayed value is
+// computed engine-side from lastReinforced age (the MemQL parser has no
+// arithmetic, mirroring the semanticMemory decay mutation) and handed in by
+// the consolidation sweep.
 /// Set a v1:actions:action decayed reliability from the consolidation sweep (Phase 4 #1739; value
 /// computed engine-side).
 mutate action decayAction {
@@ -200,6 +227,13 @@ mutate action decayAction {
   }
 }
 
+// bumpActionVersion
+// =========================
+// Bump an action's monotonic version (Phase 5 #1740). References pin by
+// default, so an edited action lands a new version and existing pins stay on
+// the old one until the verified upgrade migration bumps them. The new version
+// value is computed engine-side (the MemQL parser has no arithmetic) and
+// handed in. update read-merges so the captured calls + ownerUserId persist.
 /// Bump a v1:actions:action monotonic version on edit (Phase 5 #1740; value computed engine-side).
 /// Pins stay on the prior version until the verified upgrade migration moves them.
 mutate action bumpActionVersion {

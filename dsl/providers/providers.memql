@@ -522,6 +522,35 @@ provider streamClaudeOpus {
   }
 }
 
+// ---- providers/v1/anthropic/reasoningClaudeOpus.memql ----
+//
+// Claude Opus 4.6 with extended-thinking enabled. The same model as
+// streamClaudeOpus, just with a thinkingBudgetTokens param that the
+// anthropicStreamProvider reads via anthropicThinking() and injects
+// into every MessageNewParams build. The Anthropic API runs the
+// model with an internal reasoning budget BEFORE emitting the user-
+// visible response -- the "extended thinking" surface documented at
+// https://docs.claude.com/en/docs/build-with-claude/extended-thinking.
+//
+// Use this provider when an agent's job is reasoning-heavy: the
+// planner (decomposing a goal into phases + tasks), the agent
+// factory's role / tool selection, training-plan composition, etc.
+// For chat replies, summaries, or anything latency-sensitive, stay
+// on streamClaudeOpus (or Sonnet) -- extended thinking adds 5-30s
+// of latency depending on budget.
+//
+// Constraints baked in here:
+//   - maxTokens raised to 16384 so the reasoning budget (8192) leaves
+//     room for a meaningful response. Per API rules,
+//     thinkingBudgetTokens must be < maxTokens.
+//   - thinkingBudgetTokens 8192 is a reasonable mid-tier budget --
+//     enough for multi-step planning without paying for an
+//     uncapped think. Tune up to 16384 if specific agents prove
+//     reasoning-budget-bound; tune down to 4096 if cost becomes
+//     the constraint.
+//   - The anthropicStreamProvider suppresses the temperature param
+//     when thinking is enabled (Anthropic API requires temp==1
+//     under extended thinking). Callers do not need to coordinate.
 /// Claude Opus 4.6 with extended-thinking enabled. Same model as streamClaudeOpus but the API
 /// reasons over an 8192-token internal budget before answering. Use for planner / factory /
 /// training-plan-composition workloads; stay on streamClaudeOpus for chat replies and

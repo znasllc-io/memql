@@ -38,6 +38,12 @@ mutate project createProject {
   }
 }
 
+// ---------------------------------------------------------------------------
+// createRequest -- submit a request. submitterUserId + submitterRole
+// are stamped from the auth context; status always lands 'submitted' and the
+// routeRequest automation (fired by node.created) sets the role-based next
+// state. Returns the created request.
+// ---------------------------------------------------------------------------
 /// Submit a v1:forge:request. submitterUserId + submitterRole are stamped server-side from actor
 /// (no spoofing). status lands 'submitted'; the routeRequest automation routes it by role.
 @actor
@@ -143,6 +149,18 @@ mutate request requestChanges {
   }
 }
 
+// ---------------------------------------------------------------------------
+// attachToRequest -- link ONE v1:common:attachment to a request by APPENDING
+// its id to the stored attachmentIds array. @appendFields("attachmentIds")
+// (memql#2240) makes the update executor append the new id to the prior array
+// instead of replacing it wholesale, so this is a PURE single-writer mutation
+// with no read-merge-append logic wrapper. update read-merges all OTHER request
+// fields (body, status, submitter, priority, ...) so they survive unchanged;
+// the id is appended without clobbering existing attachments. Not deduped:
+// attaching an already-present id appends a duplicate, so callers avoid
+// attaching the same id twice. Replaces the former read-modify-write contract
+// + the appendAttachmentToRequest logic (#2235 burn-down).
+// ---------------------------------------------------------------------------
 /// Attach ONE v1:common:attachment to a v1:forge:request by appending its id to attachmentIds (no
 /// clobbering of existing attachments). Backed by @appendFields -- the update executor appends to
 /// the stored array. update read-merges all other request fields.
@@ -159,6 +177,22 @@ mutate request attachToRequest {
   }
 }
 
+// ---------------------------------------------------------------------------
+// recordRequestEvent -- append an audit/pipeline event. actorUserId +
+// actorRole stamped from the auth context.
+//
+// requestId is normalized to the SHORT id form via shortId() (#1859). The two
+// caller paths feed two id shapes:
+//   - automation path (routeRequest / recordTransition) passes
+//     args.event.payload.id, which is the CANONICAL node id
+//     (v1:forge:request:r-...) of the created/updated request row;
+//   - tool path (recordMentoredEvent) passes the SHORT tool arg (r-...).
+// Without normalization the audit trail splits across both forms and
+// forgeRequestHistory(<shortId>) finds only the tool-written events.
+// shortId() strips the `v1:forge:request:` concept prefix; it is idempotent
+// (a no-op on an already-short id), so the tool path is unaffected. This single
+// write-side point keeps every requestEvent.requestId in one short form.
+// ---------------------------------------------------------------------------
 /// Append a v1:forge:requestEvent (the time-series audit trail). actorUserId + actorRole stamped
 /// from actor. requestId is normalized to the short id form (shortId()) so the trail keys
 /// consistently whether the caller passes a canonical node id (automation path) or a bare short id

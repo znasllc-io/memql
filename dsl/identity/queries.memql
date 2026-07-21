@@ -144,6 +144,24 @@ query user activeUsers {
   shape   userFull
 }
 
+// searchUsers backs the searchUsers MCP tool (#1682). The tool
+// declares an optional `active` filter; before this query the handler
+// was a bare `concept==v1:identity:user` scan that silently ignored
+// `active` (and `limit`) and returned every user. The `active` predicate
+// is arg-conditional: omit it to list all users, pass true/false to gate
+// on liveness.
+//
+// Pagination (epic #1964 / memql#1975): this query declares ONLY `sort`
+// (deterministic, keyset-eligible createdAt-desc order) and NO inner
+// `paginate`. The dynamic page window is applied by the searchUsers tool
+// handler's OUTER paginate($args.limit) wrapper (dsl/memql/tools.memql). The
+// inner query must NOT also declare `paginate` -- two nested paginate()
+// directives are rejected by the engine ("multiple paginate() directives are
+// not supported"), which broke the searchUsers tool for every call after the
+// 5.3 backfill added an inner `paginate 50` while the wrapper was still there.
+// `sort` (with no inner paginate) keeps this a bounded-list for the pagination
+// audit while leaving the single window to the caller. A second paginated
+// reader of this query would wrap its own paginate(); none exists today.
 /// Search users, optionally gated by active status. Omit `active` to list every user; pass true to
 /// return only active users or false for only deactivated ones. Backs the searchUsers tool.
 query user searchUsers {

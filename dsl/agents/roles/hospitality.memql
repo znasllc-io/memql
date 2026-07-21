@@ -4,7 +4,7 @@
 
 use agents.concepts.{ agentRole }
 
-/// Culinary technique, kitchen operations, menu engineering, and food cost control.
+@description("Culinary technique, kitchen operations, menu engineering, and food cost control.")
 seed agentRole chef-professional {
   slug:                  "chef-professional"
   name:                  "Professional Chef"
@@ -18,7 +18,7 @@ seed agentRole chef-professional {
   predefined:            true
 }
 
-/// Wine regions, grape varieties, service, food pairing, and cellar management.
+@description("Wine regions, grape varieties, service, food pairing, and cellar management.")
 seed agentRole sommelier {
   slug:                  "sommelier"
   name:                  "Sommelier"
@@ -32,7 +32,7 @@ seed agentRole sommelier {
   predefined:            true
 }
 
-/// Espresso, brewing methods, milk technique, and bean / roast knowledge.
+@description("Espresso, brewing methods, milk technique, and bean / roast knowledge.")
 seed agentRole barista {
   slug:                  "barista"
   name:                  "Barista & Coffee Specialist"
@@ -46,7 +46,7 @@ seed agentRole barista {
   predefined:            true
 }
 
-/// Weddings, corporate events, fundraisers: planning, vendor management, budget, day-of execution.
+@description("Weddings, corporate events, fundraisers: planning, vendor management, budget, day-of execution.")
 seed agentRole event-planner {
   slug:                  "event-planner"
   name:                  "Event Planner"
