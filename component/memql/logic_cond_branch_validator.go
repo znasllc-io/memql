@@ -19,6 +19,15 @@ import (
 // BinaryComparisonExpr) is deliberately NOT gated here: it already fails
 // loudly at runtime, and this validator changes only the silent shape.
 //
+// memql#2693 extends the gate to the two value positions ADJACENT to the cond
+// branch that carried the identical silent-wrong class: a bare/terminal
+// identifier-led comparison `return args.b == "y"` (a logic value step is a
+// named-call query, so a top-level comparison here mis-routes as a store query
+// -- the inline `query { ... }` filter form does not parse in a logic body),
+// and the same comparison laundered through a coalesce/concat arg. The gate
+// stays OFF for the legal boolean-returning shape (`x.empty() && args.b=="y"`),
+// where a comparison is a first-class `&&`/`||`/`!` operand.
+//
 // Scope: Logic functions only, same altitude as
 // validateLogicArithmeticOperands -- every step expression at load, so the
 // lint/boot-parity pass surfaces it too.
@@ -44,6 +53,20 @@ func validateLogicCondBranchValues(funcDef *languageParser.FunctionDef) error {
 				}
 			}
 		}
+		// P2 (memql#2693): a QueryStepConfig is the terminal `return <expr>`
+		// and every `x := <expr>` value step -- a logic query step is a named
+		// call (FunctionCallExpr), so a bare top-level identifier-led
+		// comparison here is the "mis-routed as a store query" shape, not a
+		// real filter (the inline `query { ... }` filter form does not parse
+		// in a logic body). Walk the value in branch context; real named-call
+		// query steps carry no top-level comparison, and their value-builtin
+		// wrappers are covered by the coalesce/concat arms above.
+		if qc, ok := step.Config.(*languageParser.QueryStepConfig); ok && qc != nil && qc.Query != nil {
+			if bad := findIdentifierComparisonBranchValue(qc.Query, true); bad != nil {
+				return condBranchValueError(funcDef.Name, bad)
+			}
+			continue
+		}
 		for _, expr := range stepValueExpressions(step) {
 			if bad := findIdentifierComparisonBranchValue(expr, false); bad != nil {
 				return condBranchValueError(funcDef.Name, bad)
@@ -56,8 +79,8 @@ func validateLogicCondBranchValues(funcDef *languageParser.FunctionDef) error {
 func condBranchValueError(logicName string, bad *languageParser.ComparisonExpr) error {
 	field := strings.Join(bad.Field.Parts, ".")
 	return fmt.Errorf(
-		"logic %q: a comparison is a cond PREDICATE, not a cond BRANCH value: the identifier-led comparison `%s %s ...` in branch-value position would be returned as its own source text; move the comparison into a predicate (`cond(%s %s ..., true, false)`) or return literals from the branches (#2655)",
-		logicName, field, bad.Operator, field, bad.Operator)
+		"logic %q: an identifier-led comparison `%s %s ...` in a VALUE position (a cond BRANCH value, a coalesce/concat arg, or a bare/terminal return) silently returns its own source text or mis-routes as a store query -- neither evaluates the comparison; move it into a predicate (`cond(%s %s ..., true, false)`), combine it into a boolean expression (`... && %s %s ...`), or return literals (#2655, #2693)",
+		logicName, field, bad.Operator, field, bad.Operator, field, bad.Operator)
 }
 
 // findIdentifierComparisonBranchValue walks a logic value expression carrying
@@ -99,17 +122,22 @@ func findIdentifierComparisonBranchValue(node languageParser.ExpressionNode, inB
 		return findIdentifierComparisonBranchValueIn(n.Args, inBranch)
 	case *languageParser.ConcatExpr:
 		return findIdentifierComparisonBranchValueIn(n.Args, inBranch)
-	case *languageParser.AndExpr:
-		return findIdentifierComparisonBranchValueIn(n.Args, inBranch)
-	case *languageParser.OrExpr:
-		return findIdentifierComparisonBranchValueIn(n.Args, inBranch)
+	// Boolean combinators are a PREDICATE context: a comparison that is a
+	// direct `&&`/`||`/`!` operand is a legal boolean-returning logic
+	// (`existing.empty() && args.x == "bff"`, dsl/cluster/logic.memql), not a
+	// mis-lowering value -- so reset the mode to false for the operands. The
+	// walk CONTINUES (it does not stop), so a genuine cond-branch violation
+	// nested under a boolean operand is still caught (memql#2693). `&&`/`||`
+	// parse to LogicalExpr and `!` to NotExpr; the parser no longer builds
+	// AndExpr/OrExpr (the removed `and()`/`or()` prefix builtins), so those
+	// vestigial node types have no arm.
 	case *languageParser.NotExpr:
-		return findIdentifierComparisonBranchValue(n.Target, inBranch)
+		return findIdentifierComparisonBranchValue(n.Target, false)
 	case *languageParser.LogicalExpr:
-		if cmp := findIdentifierComparisonBranchValue(n.Left, inBranch); cmp != nil {
+		if cmp := findIdentifierComparisonBranchValue(n.Left, false); cmp != nil {
 			return cmp
 		}
-		return findIdentifierComparisonBranchValue(n.Right, inBranch)
+		return findIdentifierComparisonBranchValue(n.Right, false)
 	case *languageParser.MethodCallExpr:
 		if cmp := findIdentifierComparisonBranchValue(n.Receiver, inBranch); cmp != nil {
 			return cmp
