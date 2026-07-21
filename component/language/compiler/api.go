@@ -45,6 +45,7 @@ func CompileSource(source string) (*CompileResult, error) {
 
 	// Parse
 	p := parser.NewParser(tokens)
+	p.SetDocComments(lexer.DocComments())
 	ast, err := p.Parse()
 	if err != nil {
 		return nil, fmt.Errorf("parser error: %w", err)
@@ -220,6 +221,7 @@ func ParseFileSource(source string) (*parser.File, error) {
 	}
 
 	p := parser.NewParser(tokens)
+	p.SetDocComments(lexer.DocComments())
 	node, err := p.Parse()
 	if err != nil {
 		return nil, fmt.Errorf("parser error: %w", err)
@@ -271,6 +273,7 @@ func ParseMemQL(source string) (parser.Node, error) {
 	}
 
 	p := parser.NewParser(tokens)
+	p.SetDocComments(lexer.DocComments())
 	return p.Parse()
 }
 
@@ -340,6 +343,7 @@ func ValidateMemQL(source string) error {
 	}
 
 	p := parser.NewParser(tokens)
+	p.SetDocComments(lexer.DocComments())
 	ast, err := p.Parse()
 	if err != nil {
 		return fmt.Errorf("parser error: %w", err)

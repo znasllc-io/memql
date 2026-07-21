@@ -472,6 +472,7 @@ func (l *Loader) parseResolveCompile(source, path string) (*compiler.CompileResu
 
 	// Parse
 	p := languageParser.NewParser(tokens)
+	p.SetDocComments(lexer.DocComments())
 	ast, err := p.Parse()
 	if err != nil {
 		return nil, fmt.Errorf("parser error: %w", err)

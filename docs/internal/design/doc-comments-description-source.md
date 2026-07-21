@@ -48,8 +48,15 @@ arg descriptions: the grammar epoch retired args-field `@description`
 resurrect that spelling.
 
 Annotations between a `///` block and its declaration do not break
-attachment: `///` above `@mcp` above `query x` documents `query x`. Only a
-blank line or a non-comment, non-annotation line breaks the block.
+attachment: `///` above `@mcp` above `query x` documents `query x`.
+Precisely: the block attaches when it sits immediately above the
+DEFINITION'S FIRST TOKEN (its first annotation when annotations are
+present), walking transparently over comment-ONLY lines; a blank line or a
+code line between the block and that first token breaks attachment. A
+comment trailing after code on the same line is part of the code line --
+neither a doc comment nor transparent. (Blank lines between an annotation
+and its declaration keyword are the annotation grammar's domain, unchanged
+by this design.)
 
 ### 2. Multi-line join
 

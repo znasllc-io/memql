@@ -214,6 +214,48 @@ type Lexer struct {
 	pos    int
 	line   int
 	column int
+
+	// docBlocks collects /// doc-comment blocks captured at lex time
+	// (memql#2633): consecutive /// lines merge into one block. The token
+	// stream is untouched -- ~24 consumers iterate it positionally, the
+	// terse-automation migrator compares two streams for equality, and
+	// sense emits its own comment tokens -- so doc comments travel on this
+	// side channel and reach the parser via SetDocComments.
+	docBlocks []DocCommentBlock
+	// lastTokenLine is the last line on which a real token ended -- the
+	// trailing-comment guard: a comment on a line that already carries
+	// code is neither a doc comment nor a transparent line (a code line
+	// breaks attachment per ruling 1), so the side channel ignores it.
+	lastTokenLine int
+	// commentLines marks lines occupied by ordinary (non-///) comments,
+	// so the parser's attachment walk can treat them as transparent per
+	// the design's ruling 1 (docs/internal/design/
+	// doc-comments-description-source.md).
+	commentLines map[int]bool
+}
+
+// DocCommentBlock is a run of consecutive /// lines. Lines hold each
+// line's content after the /// prefix, unstripped; the ruling-2 join
+// (JoinDocComment) happens at attachment time.
+type DocCommentBlock struct {
+	Lines     []string
+	StartLine int
+	EndLine   int
+}
+
+// DocComments returns the /// blocks and ordinary-comment line set the
+// lexer captured. Valid after Tokenize.
+func (l *Lexer) DocComments() ([]DocCommentBlock, map[int]bool) {
+	return l.docBlocks, l.commentLines
+}
+
+func (l *Lexer) markCommentLines(from, to int) {
+	if l.commentLines == nil {
+		l.commentLines = make(map[int]bool)
+	}
+	for i := from; i <= to; i++ {
+		l.commentLines[i] = true
+	}
 }
 
 // NewLexer creates a new lexer for the given input.
@@ -256,6 +298,14 @@ func (l *Lexer) Tokenize() ([]Token, error) {
 			tok.EndPos = l.pos
 			tok.EndLine = l.line
 			tok.EndCol = l.column
+			l.lastTokenLine = l.line
+			// A line that carries a token is CODE, not a transparent
+			// comment line -- even when a block comment opened it
+			// (`/* note */ use ...`, the leading-side mirror of the
+			// trailing-comment guard; memql#2633 review round 2).
+			for i := tok.Line; i <= l.line; i++ {
+				delete(l.commentLines, i)
+			}
 		}
 		tokens = append(tokens, tok)
 		if tok.Type == TokenEOF {
@@ -717,14 +767,40 @@ func (l *Lexer) skipWhitespace() {
 }
 
 func (l *Lexer) skipLineComment() {
-	// Skip to end of line (handles both -- and // comments)
+	// Skip to end of line, capturing /// doc-comment content on the side
+	// channel (memql#2633). Exactly three slashes is a doc comment; //// and
+	// longer runs (divider art) stay ordinary comments.
+	startLine := l.line
+	start := l.pos
 	for !l.eof() && l.peek() != '\n' {
 		l.advance()
 	}
+	if startLine == l.lastTokenLine {
+		// Trailing comment after code: not a doc comment, and the code
+		// line stays opaque so it breaks attachment (memql#2633 review).
+		return
+	}
+	text := string(l.input[start:l.pos])
+	if strings.HasPrefix(text, "///") && !strings.HasPrefix(text, "////") {
+		content := text[3:]
+		if n := len(l.docBlocks); n > 0 && l.docBlocks[n-1].EndLine == startLine-1 {
+			l.docBlocks[n-1].Lines = append(l.docBlocks[n-1].Lines, content)
+			l.docBlocks[n-1].EndLine = startLine
+		} else {
+			l.docBlocks = append(l.docBlocks, DocCommentBlock{Lines: []string{content}, StartLine: startLine, EndLine: startLine})
+		}
+		return
+	}
+	l.markCommentLines(startLine, startLine)
 }
 
 func (l *Lexer) skipBlockComment() {
-	// Skip /* ... */ block comment
+	// Skip /* ... */ block comment; its full line span is transparent for
+	// doc-comment attachment (memql#2633).
+	startLine := l.line
+	if startLine != l.lastTokenLine {
+		defer func() { l.markCommentLines(startLine, l.line) }()
+	}
 	l.advance() // consume '/'
 	l.advance() // consume '*'
 
