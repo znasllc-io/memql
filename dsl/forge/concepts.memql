@@ -62,7 +62,6 @@ use identity.concepts.{ user }
 /// A project/codebase forge develops against (e.g. memql, or a given client's app). Requests are
 /// scoped to a project so one agnostic bundle serves many apps. Partition-scoped: team-shared
 /// within the tenant.
-@namespace("forge")
 @displayCard(primary="name", secondary="targetApp", tertiary="status", status="status")
 concept project {
   slug         string!  @description("Stable short id, e.g. 'memql', 'acme-app'. Unique within the partition.")
@@ -87,7 +86,6 @@ concept project {
 /// needs_validation -> validated -> needs_approval -> approved -> queued). Partition-scoped so
 /// validators/approvers can read it. Every transition is recorded as a v1:forge:requestEvent for a
 /// full time-series audit trail.
-@namespace("forge")
 @displayCard(primary="title", secondary="requestType", tertiary="status", status="status")
 concept request {
   projectId      string!  @description("v1:forge:project.id this request targets.")
@@ -119,7 +117,6 @@ concept request {
 /// An append-only event in a request's lifecycle: a routing decision, validation, approval,
 /// rejection, comment, or mentoring touch. The time-series audit trail for a request -- every
 /// transition is one row, never mutated.
-@namespace("forge")
 @displayCard(primary="kind", secondary="requestId", tertiary="actorUserId", status="kind")
 concept requestEvent {
   requestId   string!  @description("v1:forge:request.id this event belongs to.")

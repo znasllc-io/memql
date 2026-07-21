@@ -30,7 +30,6 @@ use identity.concepts.{ user }
 /// automatic -- the engine stamps createdBy from the authenticated actor on every inserted version;
 /// provenanceMutation records WHICH mutation produced this version so the audit trail names the
 /// transition, not just the actor.
-@namespace("harness")
 @displayCard(primary="goal", secondary="status", tertiary="ownerUserId", status="status")
 concept plan {
   ownerUserId  string!  @description("v1:identity:user.id of the plan owner. The per-row authz key (owned tier); stamped from actor.userId at create time. Only the owner reaches this plan's reads/writes.")
@@ -58,7 +57,6 @@ concept plan {
 /// to retry / replay (critical for the event-sourced loop in #583). ownerUserId is the per-row
 /// authz key (owned tier), stamped from actor.userId at create time. Provenance: the engine stamps
 /// createdBy automatically; provenanceMutation names the transition.
-@namespace("harness")
 @displayCard(primary="title", secondary="status", tertiary="planId", status="status")
 concept step {
   ownerUserId    string!  @description("v1:identity:user.id of the step owner. The per-row authz key (owned tier); stamped from actor.userId at create time. Inherited from the parent plan's owner.")
@@ -91,7 +89,6 @@ concept step {
 /// `embedding` field carries the vector once computed; until then recall reads node_vectors
 /// directly. ownerUserId is the per-row authz key (owned tier), stamped from actor.userId at create
 /// time. Provenance is automatic via the engine-stamped createdBy intrinsic.
-@namespace("harness")
 @displayCard(primary="kind", secondary="stepId", tertiary="ownerUserId")
 concept observation {
   ownerUserId  string!  @description("v1:identity:user.id of the observation owner. The per-row authz key (owned tier); stamped from actor.userId at create time. Inherited from the parent step's owner.")
@@ -140,7 +137,6 @@ concept observation {
 /// `confidence` rises on reinforcement and decays when a belief goes unreinforced; `lastReinforced`
 /// is the decay clock. ownerUserId is the per-row authz key (owned tier), stamped from actor.userId
 /// at create time; only the owner reaches their own beliefs.
-@namespace("harness")
 @displayCard(primary="content", secondary="kind", tertiary="ownerUserId", status="kind")
 concept semanticMemory {
   ownerUserId    string!  @description("v1:identity:user.id of the belief owner. The per-row authz key (owned tier); stamped from actor.userId at create time. Consolidation runs per owner, so a belief only ever draws on -- and is only ever recall-able by -- its owner's own episodes.")
@@ -166,7 +162,6 @@ concept semanticMemory {
 /// new-episode delta, not total history, as the agent's log grows without bound. One row per owner
 /// (content-addressed id on ownerUserId), updated in place. ownerUserId is the per-row authz key
 /// (owned tier), stamped from actor.userId at create time.
-@namespace("harness")
 @displayCard(primary="ownerUserId", secondary="watermark", tertiary="lastRunAt")
 concept consolidationCursor {
   ownerUserId  string!  @description("v1:identity:user.id this cursor belongs to. The per-row authz key (owned tier); stamped from actor.userId at create time. One cursor row per owner -- consolidation is per-owner, so each owner's watermark advances independently.")

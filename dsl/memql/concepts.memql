@@ -4,7 +4,6 @@
 // files cover the other construct kinds.
 
 /// Automation execution checkpoints for failure recovery and audit history.
-@namespace("memql")
 concept checkpoint {
   automationFingerprint  string  @description("Content-addressed hash of the automation definition for change detection.")
   automationName  string!  @description("Name of the automation that was running.")

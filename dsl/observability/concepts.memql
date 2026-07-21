@@ -17,7 +17,6 @@ use identity.concepts.{ user }
 /// 'method:github.com/znasllc-io/memql/component/auth.(*Handler).Login'). Cockpit writes these from
 /// the drill-down 'bump verbosity for this method' control; the observe runtime reads them through
 /// a CDC-driven cache.
-@namespace("observability")
 concept codeProfile {
   codeReference  string!  @description("Fully-qualified node id from the architecture model. Format documented in component/architecture/model/ids.go. The single join key shared by static topology, live profile, raw invocations, and aggregate metrics.")
   level          enum("off", "count", "meta", "verbose")!  @default("off")  @description("Capture verbosity. off = not instrumented. count = duration + error only. meta = + arg types/sizes. verbose = + full arg/return values, subject to redaction.")
@@ -38,7 +37,6 @@ concept codeProfile {
 /// uniformly, but the read path on the hot drill-down view is intended to use the continuous
 /// aggregates (codeMetric) rather than these raw rows. Hand-querying invocation rows directly is
 /// fine for forensic 'last 20 calls to X' lookups.
-@namespace("observability")
 concept invocation {
   codeReference  string!  @description("Fully-qualified node id of the Method/Func that ran. Join key shared with codeProfile and codeMetric.")
   occurredAt     datetime!  @description("Wall-clock time when the call started. The hypertable time column.")
@@ -58,7 +56,6 @@ concept invocation {
 /// outlive raw rows: when codeProfile.retentionDays evicts the underlying invocation chunk, the
 /// matching codeMetric rows for that chunk are preserved by the policy so the trendline stays
 /// continuous.
-@namespace("observability")
 concept codeMetric {
   codeReference  string!  @description("Fully-qualified node id. Same join key as codeProfile / invocation.")
   windowStart    datetime!  @description("Inclusive start of the aggregation window. Matches a TimescaleDB time_bucket boundary -- typically 1m or 1h aligned.")

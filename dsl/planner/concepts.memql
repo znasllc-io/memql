@@ -13,7 +13,6 @@ use identity.concepts.{ user }
 /// needsAgent), succeeded / failed / cancelled. The planner emits Tasks per Q3's outline+per-phase
 /// incremental strategy: the Plan's `phases` array carries the coarse outline, Tasks emerge per
 /// phase with a phase tag.
-@namespace("planner")
 @displayCard(primary="goal", secondary="kind", tertiary="partitionId", status="status")
 concept plan {
   partitionId             string! @description("v1:cognition:space.id this Plan belongs to. Tasks page is per-space; estimation buckets and budget rollups scope to the space.")
@@ -65,7 +64,6 @@ concept plan {
 /// (dueResponsibilities feeds the heartbeat-driven evaluator; recordResponsibilityEvaluation closes
 /// the loop). Replaces the retired standingTask concept -- recurring directives carry the same cron
 /// schedule + soft-disable + last-run bookkeeping standingTask had.
-@namespace("planner")
 @displayCard(primary="statement", secondary="trigger", tertiary="scopePartitionId", status="status")
 concept responsibility {
   ownerUserId       string! @description("v1:identity:user.id who authored this responsibility. Per-row authz owner; output posts into this user's surfaces. Server-stamped from actor.userId at create -- never caller-supplied.")
@@ -99,7 +97,6 @@ concept responsibility {
 /// happens at the Plan level via `parentPlanId` (Q1); the recursion here is purely mechanical
 /// record-keeping. Per Q13 each Task declares its executionSurface so the planner can route
 /// inProcess work to the agent node and containerExecutor work to NemoClaw / homegrown sandboxes.
-@namespace("planner")
 @displayCard(primary="kind", secondary="category", tertiary="planId", status="status")
 concept task {
   planId            string! @description("v1:planner:plan.id this Task belongs to. Every Task -- semantic or toolInvocation -- lives under exactly one Plan, even ad-hoc tool calls in chat (which get a synthetic single-Task Plan of kind=adHocAction).")
@@ -136,7 +133,6 @@ concept task {
 /// the user responds, the planner re-invokes the agent with this state as bootstrap context. Same
 /// machinery powers Pause/Resume (Q12) and refinement-Plan parent-Task resumption (Q9). Per Task;
 /// written when the Task transitions to awaitingFeedback / paused; read on resume.
-@namespace("planner")
 concept taskState {
   taskId            string! @description("v1:planner:task.id this state belongs to. One row per (taskId, persisted-version-seq); the planner reads the latest on resume.")
   workingMemory     object  @description("Intermediate results from previous tool calls in this Task. Free-form per agent kind; the agent's prompt template knows how to consume.")

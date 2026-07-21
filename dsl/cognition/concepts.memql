@@ -13,7 +13,6 @@ use identity.concepts.{ user }
 /// an active override beats the agent default; absence falls through to the agent default. id is
 /// the deterministic audioOverride:<partitionId>:<agentId> so re-toggling on the same orb hits the
 /// same row instead of growing a per-click history.
-@namespace("cognition")
 concept audioOverride {
   partitionId   string! @description("v1:cognition:space.id this override is scoped to.")
   agentId   string! @description("v1:agents:agent.id this override targets.")
@@ -83,7 +82,6 @@ concept response {
 }
 
 /// A human or AI participant instance within a space.
-@namespace("cognition")
 concept participant {
   agentId  string  @description("ID of the agent template (for AI participants).")
   capabilityOverrides {
@@ -139,7 +137,6 @@ concept presence {
 /// agent's audioControl mode -- there is NO tier ceiling anymore. Whether voice flows in / out of
 /// the room is purely a function of who has their mic open and which agents are configured to
 /// publish TTS.
-@namespace("cognition")
 concept session {
   aiOutput {
     avatarEnabled  bool  @default("false")  @description("Whether AI avatar video is currently rendering.")
@@ -191,7 +188,6 @@ concept state {
 }
 
 /// A single multi-modal contribution to the conversation stream.
-@namespace("cognition")
 concept utterance {
   action {
     idempotencyKey  string  @description("Optional idempotency key to allow safe retries.")
@@ -243,7 +239,6 @@ concept utterance {
 /// default; absence falls through to the agent default. id is the deterministic
 /// videoOverride:<partitionId>:<agentId> so re-toggling on the same orb hits the same row instead
 /// of growing a per-click history.
-@namespace("cognition")
 concept videoOverride {
   partitionId   string! @description("v1:cognition:space.id this override is scoped to.")
   agentId   string! @description("v1:agents:agent.id this override targets.")
@@ -265,7 +260,6 @@ concept videoOverride {
 /// Rolled-up guardrail health metrics for a time window. Written by the rollupGuardrailHealth
 /// automation from v1:cognition:unmetCapability rows; advisory-only signal for tuning the fit-score
 /// threshold and identifying missing specialist domains. One row per rollup run.
-@namespace("cognition")
 concept guardrailHealth {
   periodStart             datetime!  @description("Start of the rollup window (inclusive).")
   periodEnd               datetime!  @description("End of the rollup window (exclusive).")
@@ -294,7 +288,6 @@ concept guardrailHealth {
 /// user's request -- either the assistant stepped in as fallback (specialist_gap) or nobody could
 /// help (full_gap). Emitted by cognition via the cognition.capability.unmet event and consumed by
 /// the guardrail health rollup for product-level insight into missing capabilities.
-@namespace("cognition")
 concept unmetCapability {
   partitionId          string!  @description("ID of the space the utterance occurred in.")
   utteranceId      string   @description("ID of the triggering human utterance.")

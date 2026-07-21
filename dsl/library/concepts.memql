@@ -36,7 +36,6 @@ use worker.concepts.{ registration }
 /// The LOCKED backend shape for the Library epic (memql#693): a real index concept, not a UI
 /// projection. Per-row authz: owned -- ownerUserId is stamped from actor.userId on every write and
 /// every read gates on ownerUserId==actor.userId.
-@namespace("library")
 @displayCard(primary="title", secondary="summary", tertiary="updatedAt", status="lens")
 concept artifact {
   ownerUserId      string!  @description("v1:identity:user.id that owns this index row. Stamped from actor.userId at create time and re-stamped on every update so ownership can never be reassigned. The load-bearing per-row authz key.")
@@ -102,7 +101,6 @@ concept artifact {
 /// reference to file bytes (attachmentId -> v1:common:attachment). Auto-promoted into the Library
 /// by indexGeneratedOutput on creation. Per-row authz: owned -- ownerUserId is the producing user;
 /// reads gate on ownerUserId==actor.userId.
-@namespace("library")
 @displayCard(primary="title", secondary="summary", tertiary="createdAt")
 concept generatedOutput {
   ownerUserId       string!  @description("v1:identity:user.id this output belongs to (the user the producing agent / plan acts for). The per-row authz key for Library reads.")
@@ -170,7 +168,6 @@ concept generatedOutput {
 /// long-lived, compression-after-90-days, no retention drop (memql#1228). Per-row authz: owned --
 /// ownerUserId is threaded from the document's owner on append; reads gate on
 /// ownerUserId==actor.userId.
-@namespace("library")
 @displayCard(primary="documentId", secondary="note", tertiary="createdAt")
 concept documentVersion {
   ownerUserId      string!  @description("v1:identity:user.id that owns the logical document this version belongs to. Threaded from the backing document's owner on every append (edits run server-side on the owner's behalf, not as the owner); the load-bearing per-row authz key for every history read.")
@@ -223,7 +220,6 @@ concept documentVersion {
 /// standing instruction, or episodic recollection). The user-facing LLM-memory concept; surfaced in
 /// the Library's Records lens. Per-row authz: owned -- ownerUserId stamped from actor.userId; reads
 /// gate on ownerUserId==actor.userId.
-@namespace("library")
 @displayCard(primary="title", secondary="content", tertiary="createdAt")
 concept memory {
   ownerUserId       string!  @description("v1:identity:user.id this memory is about / belongs to. Stamped from actor.userId at create time. The per-row authz key.")

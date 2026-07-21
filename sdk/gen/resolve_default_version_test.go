@@ -37,7 +37,8 @@ func TestBuildConceptIndex_RealTreeDefaultVersion(t *testing.T) {
 
 // TestAssembleConceptIdFromPreamble_VersionDefault pins the unit contract:
 // @namespace alone assembles with the major-1 default; an explicit non-default
-// @version still wins; absent @namespace stays the transitional "" skip.
+// @version still wins; absent @namespace derives the containing directory
+// (#2614, lockstep with AssembleConceptIdFromDeclInDir).
 func TestAssembleConceptIdFromPreamble_VersionDefault(t *testing.T) {
 	cases := []struct {
 		name string
@@ -55,9 +56,9 @@ func TestAssembleConceptIdFromPreamble_VersionDefault(t *testing.T) {
 			want: "v2:cognition:widget",
 		},
 		{
-			name: "missing namespace stays transitional",
+			name: "missing namespace derives the directory",
 			src:  "@version(\"1.0.0\")\nconcept widget {\n}\n",
-			want: "",
+			want: "v1:gadgets:widget",
 		},
 	}
 	for _, tc := range cases {
@@ -65,7 +66,7 @@ func TestAssembleConceptIdFromPreamble_VersionDefault(t *testing.T) {
 		if m == nil {
 			t.Fatalf("%s: fixture has no concept header", tc.name)
 		}
-		got := assembleConceptIdFromPreamble(tc.src, m[0], "widget")
+		got := assembleConceptIdFromPreamble(tc.src, m[0], "widget", "gadgets")
 		if got != tc.want {
 			t.Errorf("%s: got %q, want %q", tc.name, got, tc.want)
 		}

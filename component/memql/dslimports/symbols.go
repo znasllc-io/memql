@@ -174,7 +174,22 @@ func resolveInFile(file string, ast *languageAst.File, name string) (*Resolution
 		switch d := def.(type) {
 		case *languageAst.ConceptDecl:
 			if d.Name == name {
-				id, _ := languageAst.AssembleConceptIdFromDecl(d)
+				// Directory-derived namespace default (#2614): the file's
+				// first path segment is its domain. Pin enforcement lives
+				// in the unified loader; resolution here is best-effort.
+				dir := file
+				if i := strings.IndexByte(dir, '/'); i > 0 {
+					dir = dir[:i]
+				}
+				id, idErr := languageAst.AssembleConceptIdFromDeclInDir(d, dir, "")
+				if idErr != nil {
+					// Best-effort resolution has no pin file in hand: a
+					// pinned divergence (dsl/deployment's cluster) or a
+					// genuine mismatch falls back to the EXPLICIT
+					// annotation's assembly, exactly as before #2614 --
+					// the loud guard lives in the unified loader.
+					id, _ = languageAst.AssembleConceptIdFromDecl(d)
+				}
 				return &Resolution{
 					Kind:      SymbolConcept,
 					File:      file,

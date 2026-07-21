@@ -78,7 +78,36 @@ var rewriters = map[string]rewriter{
 }
 
 var pathRewriters = map[string]pathRewriter{
-	"same-domain-use": rewriteSameDomainUse,
+	"same-domain-use":   rewriteSameDomainUse,
+	"namespace-default": rewriteNamespaceDefault,
+}
+
+// rewriteNamespaceDefault strips @namespace annotations that restate the
+// file's containing DOMAIN directory (#2614) -- absent @namespace derives
+// the domain at load, so the domain-equal form is redundant. The domain is
+// the first path segment under the dsl root -- NOT the immediate parent:
+// nested files (dsl/agents/tools/x.memql) belong to the top-level domain,
+// matching the unified loader's firstPathSegment and the
+// no_redundant_namespace gate (review #2614: an immediate-parent derivation
+// left nested files gate-flagged but codemod-unfixable, and worse, could
+// strip an erroneous nested @namespace the loader would have rejected).
+func rewriteNamespaceDefault(path string, src []byte) ([]byte, error) {
+	return langparser.RewriteRedundantNamespace(domainForDSLPath(path), src)
+}
+
+// domainForDSLPath returns the first path segment after the LAST "dsl"
+// element (the domain), falling back to the immediate parent directory for
+// paths outside a dsl root (e.g. a product tree mounted elsewhere).
+func domainForDSLPath(path string) string {
+	segs := strings.Split(filepath.ToSlash(path), "/")
+	for i := len(segs) - 2; i >= 0; i-- {
+		if segs[i] == "dsl" && i+1 < len(segs)-1+1 {
+			if i+1 <= len(segs)-2 {
+				return segs[i+1]
+			}
+		}
+	}
+	return filepath.Base(filepath.Dir(path))
 }
 
 // rewriteSameDomainUse derives the file's domain (its containing
@@ -250,6 +279,7 @@ func listRewriters(w io.Writer) {
 	fmt.Fprintln(w, "  terse-automation    longhand single-step automations -> the => form (#2619)")
 	fmt.Fprintln(w, "  actor-binding       insert @actor above constructs reading actor.* (#2621)")
 	fmt.Fprintln(w, "  doc-comment-descriptions  construct @description -> /// doc comments; dedup restating headers + Arguments/Returns (#2635)")
+	fmt.Fprintln(w, "  namespace-default   strip @namespace restating the containing domain directory (#2614)")
 }
 
 func applyPipeline(path string, src []byte, pipeline []pathRewriter) ([]byte, error) {

@@ -76,7 +76,7 @@ func buildConceptIndex(roots []string) conceptIndex {
 			dir := dirForPath(root, path)
 			for _, m := range conceptHeaderRe.FindAllStringSubmatchIndex(src, -1) {
 				name := src[m[2]:m[3]]
-				id := assembleConceptIdFromPreamble(src, m[0], name)
+				id := assembleConceptIdFromPreamble(src, m[0], name, dir)
 				if id == "" {
 					continue // concept missing @version/@namespace -- not addressable
 				}
@@ -94,20 +94,21 @@ func buildConceptIndex(roots []string) conceptIndex {
 // assembleConceptIdFromPreamble reads the @version + @namespace annotations
 // from the attribute block immediately preceding a concept header and returns
 // the canonical id `v<major>:<namespace>:<name>`. Absent @version defaults to
-// major 1 -- mirroring AssembleConceptIdFromDecl's #2613 default; the "" for
-// an absent @namespace mirrors its transitional-skip contract.
-func assembleConceptIdFromPreamble(src string, headerStart int, name string) string {
+// major 1 (#2613) and absent @namespace derives the containing domain
+// directory (#2614) -- both mirroring AssembleConceptIdFromDeclInDir in
+// LOCKSTEP (the PR #2657 law: the two assemblers change together).
+func assembleConceptIdFromPreamble(src string, headerStart int, name, dir string) string {
 	preamble := attrPreamble(src, headerStart)
 	vm := versionAttrRe.FindStringSubmatch(preamble)
 	nm := namespaceAttrRe.FindStringSubmatch(preamble)
-	if nm == nil {
-		return ""
-	}
 	major := 1
 	if vm != nil {
 		major = majorVersion(vm[1])
 	}
-	namespace := strings.TrimSpace(nm[1])
+	namespace := dir
+	if nm != nil {
+		namespace = strings.TrimSpace(nm[1])
+	}
 	if major < 0 || namespace == "" || name == "" {
 		return ""
 	}

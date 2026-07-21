@@ -22,6 +22,7 @@ package memql
 import (
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"strings"
 
@@ -105,7 +106,7 @@ func LoadUnifiedConcepts(logger *slog.Logger) (int, error) {
 		files = append(files, conceptFile{path: p, dir: dir, decls: decls, uses: uses})
 
 		for _, decl := range decls {
-			id, idErr := languageAst.AssembleConceptIdFromDecl(decl)
+			id, idErr := languageAst.AssembleConceptIdFromDeclInDir(decl, dir, namespacePin(tree, dir))
 			if idErr != nil || id == "" {
 				continue
 			}
@@ -122,23 +123,14 @@ func LoadUnifiedConcepts(logger *slog.Logger) (int, error) {
 
 	for _, cf := range files {
 		for _, decl := range cf.decls {
-			id, idErr := languageAst.AssembleConceptIdFromDecl(decl)
+			id, idErr := languageAst.AssembleConceptIdFromDeclInDir(decl, cf.dir, namespacePin(tree, cf.dir))
 			if idErr != nil {
-				if logger != nil {
-					logger.Warn("unified loader: skipping concept with bad ID",
-						"component", "memql.unifiedLoader",
-						"file", cf.path,
-						"concept", decl.Name,
-						"error", idErr)
-				}
-				continue
-			}
-			if id == "" {
-				// Concept carries no @namespace (the only remaining
-				// transitional state -- absent @version defaults to
-				// 1.0.0, #2613). Skip silently -- the legacy loader
-				// handles it.
-				continue
+				// The moved-file guard (#2614) and malformed attributes
+				// are load ERRORS, not warn-skips: a silently dropped or
+				// mis-namespaced concept changes canonical ids, so boot,
+				// the memqllint parity tier, and the sense build must all
+				// fail loudly here.
+				return 0, fmt.Errorf("%s: %w", cf.path, idErr)
 			}
 
 			resolveRelationshipTargets(decl, cf.dir, cf.uses, index, id, logger)
@@ -261,3 +253,22 @@ func resolveRelationshipTargetName(
 // vet doesn't complain about unused imports if the loader is
 // extended later.
 var _ = fmt.Sprintf
+
+// namespacePin reads the domain's one-line namespace.pin file -- the #2614
+// escape hatch declaring a DELIBERATE @namespace divergence from the
+// directory (the id-preserving I11 move: dsl/deployment pins "cluster").
+// Returns "" when no pin exists. The pin file is not a .memql file, so
+// every walker ignores it; go:embed all:<domain> and the runtime domain
+// mounts both carry it.
+func namespacePin(tree fs.FS, dir string) string {
+	f, err := tree.Open(dir + "/namespace.pin")
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	b, err := io.ReadAll(f)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(b))
+}

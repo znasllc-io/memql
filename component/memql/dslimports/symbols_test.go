@@ -177,8 +177,8 @@ func (Query) c(_ any) (any, error) { return nil, nil }`)},
 	if res.Kind != SymbolConcept {
 		t.Errorf("Kind = %v, want SymbolConcept", res.Kind)
 	}
-	if res.ConceptId != "" {
-		t.Errorf("ConceptId = %q, want empty (legacy concept)", res.ConceptId)
+	if res.ConceptId != "v1:legacy:oldStyle" {
+		t.Errorf("ConceptId = %q, want the directory-derived id (#2614: absent @namespace derives the domain directory; the transitional empty-id skip is over)", res.ConceptId)
 	}
 }
 
@@ -198,5 +198,27 @@ func (Query) a(_ any) (any, error) { return nil, nil }`)},
 		if err == nil {
 			t.Errorf("expected error for ref=%q, got nil", ref)
 		}
+	}
+}
+
+// #2614 review: pinned-divergence concepts (dsl/deployment declaring
+// @namespace("cluster")) keep their EXPLICIT-annotation id in best-effort
+// resolution -- the guard error must not erase the id here (the loud path
+// is the unified loader).
+func TestResolveSymbol_PinnedDivergenceKeepsExplicitId(t *testing.T) {
+	root := fstest.MapFS{
+		"deployment/concepts.memql": {Data: []byte("@namespace(\"cluster\")\nconcept deployment {\n  name string\n}\n")},
+		"caller.memql":              {Data: []byte("import (\n\t\"./deployment/concepts\" as dep\n)\nquery deployment queryX {\n}\n")},
+	}
+	tree, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	res, err := tree.ResolveSymbol("caller.memql", "dep.deployment")
+	if err != nil {
+		t.Fatalf("ResolveSymbol: %v", err)
+	}
+	if res.ConceptId != "v1:cluster:deployment" {
+		t.Errorf("ConceptId = %q, want the explicit-annotation assembly (pin-blind best effort must not erase it)", res.ConceptId)
 	}
 }

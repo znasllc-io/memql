@@ -39,7 +39,6 @@
 /// config, not user data. roleSlug points at the role this grant belongs to; the role rows
 /// themselves land in E1.2 (memql#2070), so until then capabilities reference a role purely by its
 /// stable slug string.
-@namespace("rbac")
 concept capability {
   roleSlug      string!  @description("Stable kebab-case slug of the role this capability is granted to (e.g. 'owner', 'developer', 'admin', 'user', or a custom-role slug). A foreign-key-by-slug into the v1:rbac:role catalog -- matched against role.slug, not the role's node id (mirrors how v1:agents:agent.roleSlug references v1:agents:agentRole.slug). A role's effective capability set is every capability row with a matching roleSlug.")
   verb          enum("read", "create", "update", "delete", "execute")!  @description("The primitive verb this capability grants. The five verbs are the COMPLETE, uniform set across every resourceType -- there is deliberately no separate `grant`/`manage`/`admin` verb. read = observe a resource. create = bring a new resource into existence. update = modify an existing resource. delete = remove a resource. execute = run/invoke a resource (a tool, an automation, a deploy action). The create != update split is load-bearing for governance (E1.3): a role can hold `create` on principals of a given rank without holding `update`, i.e. 'mint developers but not edit existing ones'.")
@@ -65,7 +64,6 @@ concept capability {
 /// privilege. Custom roles (predefined=false) are addable as DATA via the rank-bounded createRole
 /// path in E1.4. Global / _system reference data: readable by every principal so any node resolves
 /// a rank locally; PUBLIC per-row-authz tier.
-@namespace("rbac")
 concept role {
   slug         string!  @description("Stable kebab-case identifier -- the value v1:rbac:capability.roleSlug points to and the value a principal's role resolves to. Never renamed (rename = new row + migration). The four base slugs are 'owner', 'developer', 'admin', 'user'; custom roles pick their own stable slug.")
   name         string!  @description("Display name shown in the cockpit RBAC view and role pickers, e.g. 'Owner', 'Developer', 'Admin', 'Member'.")
