@@ -61,6 +61,7 @@ func (s *Service) Diagnose(source string, filePath string) []Diagnostic {
 	// constructs load via their own dedicated loaders. The real load
 	// pipeline swallows it (dslimports.Load via errors.Is), so match that.
 	p := parser.NewParser(tokens)
+	p.SetDocComments(lexer.DocComments())
 	ast, parseErr := p.Parse()
 	if parseErr != nil && !errors.Is(parseErr, parser.ErrEmptyInput) {
 		for _, d := range parserDiagnostics(parseErr) {
@@ -251,6 +252,7 @@ func (s *Service) semanticDiagnostics(file *parser.File, source string) []Diagno
 	diagnostics = append(diagnostics, actorUndeclaredRule(source)...)
 	diagnostics = append(diagnostics, actorUnknownPropertyRule(source)...)
 	diagnostics = append(diagnostics, discardedArgsDescriptionRule(source)...)
+	diagnostics = append(diagnostics, descriptionLengthRule(file, source)...)
 
 	// Check function definitions.
 	for _, def := range file.Definitions {
