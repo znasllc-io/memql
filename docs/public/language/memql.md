@@ -875,7 +875,7 @@ The dotted path maps to a file on disk (`cognition.concepts` → `dsl/cognition/
 
 > **Retired.** The `@use*` annotation family (`@useConcept`, `@useShape`, `@useQuery`, `@useMutation`, `@useLogic`, `@useBuiltin`, ...) is retired and rejected at parse time with a migration-pointing error. The concept binding lives in the construct signature; everything else comes in through `use` imports.
 
-### Doc Comments (`///`)
+### Doc Comments (`///`) -- the preferred description spelling
 
 A `///` doc-comment block immediately above a declaration is captured by the
 parser and attached to that declaration (#2633) -- for every describable
@@ -894,7 +894,11 @@ construct kind (`concept`, `query`, `mutation`, `logic`, `automation`,
   consecutive lines with a single space; a bare `///` line is a paragraph
   break (newline). Extra indentation after the first space survives.
 
-Sourcing (#2634, in force): the `///` doc comment IS the description --
+Sourcing (#2634, in force; gated #2636): the `///` doc comment IS the
+description and the PREFERRED spelling -- the engine tree's conformance
+gate rejects `@description` where `///` suffices, and downstream trees
+convert with `memqlmigrate --rewrite=doc-comment-descriptions` at their
+repin. Aim for ~200 characters (editorial target; sense hints). It --
 it **wins** over `@description` whenever both are present (never
 concatenated), and `@description` remains the fallback, so
 annotation-only files behave exactly as before. This feeds every
