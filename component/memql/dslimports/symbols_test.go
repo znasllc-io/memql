@@ -177,8 +177,8 @@ func (Query) c(_ any) (any, error) { return nil, nil }`)},
 	if res.Kind != SymbolConcept {
 		t.Errorf("Kind = %v, want SymbolConcept", res.Kind)
 	}
-	if res.ConceptId != "" {
-		t.Errorf("ConceptId = %q, want empty (legacy concept)", res.ConceptId)
+	if res.ConceptId != "v1:legacy:oldStyle" {
+		t.Errorf("ConceptId = %q, want the directory-derived id (#2614: absent @namespace derives the domain directory; the transitional empty-id skip is over)", res.ConceptId)
 	}
 }
 

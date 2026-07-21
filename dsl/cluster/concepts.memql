@@ -5,7 +5,6 @@
 
 /// A memQL cluster -- the top-level deployment unit consisting of a shared database and seed nodes
 /// (bff, cognition, planner). Partitions exist within a cluster for data isolation.
-@namespace("cluster")
 concept cluster {
   name              string! @description("Cluster name (e.g., 'development', 'staging-us-central1').")
   region            string  @description("Cloud region (e.g., 'us-central1') or 'local' for development.")
@@ -25,7 +24,6 @@ concept cluster {
 
 /// A PostgreSQL database instance backing a memQL cluster. Tracks connection info, engine version,
 /// and installed extensions.
-@namespace("cluster")
 concept database {
   host              string! @description("Database hostname (e.g., 'postgres', 'tiger-cloud-abc.timescaledb.io').")
   port              int     @default("5432") @description("Database port.")
@@ -45,7 +43,6 @@ concept database {
 
 /// An identity provider used for authentication and user management in a memQL cluster. Typically
 /// the in-house identity service (component/identity), surfaced for cluster-topology dashboards.
-@namespace("cluster")
 concept identityProvider {
   name              string! @description("Provider name (e.g., 'memQL Identity').")
   providerType      enum("oidc", "saml", "ldap")! @default("oidc") @description("Authentication protocol.")
@@ -65,7 +62,6 @@ concept identityProvider {
 /// every liveness transition (connecting, healthy, degraded, draining, offline, stopped). States
 /// mirror the NodeHealthStatus enum defined in component/node/node.proto -- that proto is the
 /// source of truth.
-@namespace("cluster")
 concept node {
   nodeType      string! @description("Node role: bff, voice, cognition, agent, planner.")
   flavor        string  @description("Domain flavor within the node type. Empty for single-flavor types like cognition.")
@@ -82,7 +78,6 @@ concept node {
 }
 
 /// Definition of a node type and its expected capabilities.
-@namespace("cluster")
 concept nodeType {
   name          string! @description("Node type identifier: bff, voice, cognition, agent, planner.")
   description   string  @description("Human-readable description of this node type's purpose.")
@@ -94,7 +89,6 @@ concept nodeType {
 
 /// Lifecycle event recording node state transitions (started, stopped, failed). Used for audit
 /// trail and cluster state recovery. Legacy name retained for data compatibility.
-@namespace("cluster")
 concept spawnEvent {
   nodeId        string! @description("ID of the node this event pertains to.")
   nodeType      string! @description("Type of the node: bff, cognition, agent, planner.")

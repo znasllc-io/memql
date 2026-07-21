@@ -263,7 +263,11 @@ IS its description, winning over `@description` when both are present --
 never concatenated; `@description` remains valid as the fallback form.
 
 The full concept-annotation author surface is `@description`,
-`@version`, `@namespace`, `@type`, and `@displayCard` -- see
+`@version`, `@namespace`, `@type`, and `@displayCard`. `@namespace`
+absent defaults to the containing `dsl/<domain>/` directory (#2614);
+write it only colon-scoped or pinned (`namespace.pin`), and NEVER move
+a `.memql` file between domain directories casually -- file location is
+id-bearing and the load guard errors on an unpinned mismatch -- see
 [#7](#7-annotations-on-concepts-where-to-put-new-ones).
 
 (Unrelated: **seed** constructs have their own `@scope("perUser")`

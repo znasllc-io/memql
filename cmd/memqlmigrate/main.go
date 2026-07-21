@@ -78,7 +78,15 @@ var rewriters = map[string]rewriter{
 }
 
 var pathRewriters = map[string]pathRewriter{
-	"same-domain-use": rewriteSameDomainUse,
+	"same-domain-use":   rewriteSameDomainUse,
+	"namespace-default": rewriteNamespaceDefault,
+}
+
+// rewriteNamespaceDefault strips @namespace annotations that restate the
+// file's containing domain directory (#2614) -- absent @namespace derives
+// the directory at load, so the directory-equal form is redundant.
+func rewriteNamespaceDefault(path string, src []byte) ([]byte, error) {
+	return langparser.RewriteRedundantNamespace(filepath.Base(filepath.Dir(path)), src)
 }
 
 // rewriteSameDomainUse derives the file's domain (its containing
@@ -250,6 +258,7 @@ func listRewriters(w io.Writer) {
 	fmt.Fprintln(w, "  terse-automation    longhand single-step automations -> the => form (#2619)")
 	fmt.Fprintln(w, "  actor-binding       insert @actor above constructs reading actor.* (#2621)")
 	fmt.Fprintln(w, "  doc-comment-descriptions  construct @description -> /// doc comments; dedup restating headers + Arguments/Returns (#2635)")
+	fmt.Fprintln(w, "  namespace-default   strip @namespace restating the containing domain directory (#2614)")
 }
 
 func applyPipeline(path string, src []byte, pipeline []pathRewriter) ([]byte, error) {

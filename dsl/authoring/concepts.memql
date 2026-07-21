@@ -27,7 +27,6 @@ use planner.concepts.{ plan, responsibility }
 /// (user approval) together, then activates together into the sandboxed authored-construct runtime
 /// (#959). Never part of the core engine Init() path, so a malformed bundle can never brick the
 /// cluster. Member constructs are v1:authoring:construct rows pointing back via bundleId.
-@namespace("authoring")
 @displayCard(primary="title", secondary="status", tertiary="responsibilityId", status="status")
 concept bundle {
   ownerUserId         string! @description("v1:identity:user.id who owns this bundle (the Responsibility author). Per-row authz owner; server-stamped from actor.userId at create, never caller-supplied. Authored automations run under THIS user's authz envelope -- no privilege escalation.")
@@ -58,7 +57,6 @@ concept bundle {
 /// reusedConstructRefs instead. After a bundle activates, a construct can be promoted into the
 /// per-owner reusable catalog (catalogued=true) so later bundles compose it -- the catalog match
 /// key lives in catalogKey (#957).
-@namespace("authoring")
 @displayCard(primary="name", secondary="kind", tertiary="bundleId", status="status")
 concept construct {
   ownerUserId       string! @description("v1:identity:user.id who owns this construct (same as the parent bundle's owner). Per-row authz owner; server-stamped from actor.userId at create.")
@@ -88,7 +86,6 @@ concept construct {
 /// IMPACT ANALYSIS -- 'which bundles depend on this construct' -- before a shared / cataloged
 /// construct changes. This is the reuse-coupling mitigation from the design doc: editing a
 /// cataloged construct re-validates its dependents.
-@namespace("authoring")
 @displayCard(primary="fromConstruct", secondary="toName", tertiary="bundleId", status="toSource")
 concept dependencyEdge {
   ownerUserId    string! @description("v1:identity:user.id who owns this edge (the bundle owner). Per-row authz owner; server-stamped from actor.userId.")

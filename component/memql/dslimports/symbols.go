@@ -174,7 +174,14 @@ func resolveInFile(file string, ast *languageAst.File, name string) (*Resolution
 		switch d := def.(type) {
 		case *languageAst.ConceptDecl:
 			if d.Name == name {
-				id, _ := languageAst.AssembleConceptIdFromDecl(d)
+				// Directory-derived namespace default (#2614): the file's
+				// first path segment is its domain. Pin enforcement lives
+				// in the unified loader; resolution here is best-effort.
+				dir := file
+				if i := strings.IndexByte(dir, '/'); i > 0 {
+					dir = dir[:i]
+				}
+				id, _ := languageAst.AssembleConceptIdFromDeclInDir(d, dir, "")
 				return &Resolution{
 					Kind:      SymbolConcept,
 					File:      file,

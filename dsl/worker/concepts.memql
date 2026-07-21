@@ -12,7 +12,6 @@ use planner.concepts.{ plan, task }
 /// identity:auditEvent for the security timeline. Linkage between the two layers is via
 /// correlationId. Retention default 90 days, tunable via WORKER_INVOCATION_RETENTION_DAYS; the
 /// workerInvocationRetentionSweep cron soft-deletes rows past their TTL.
-@namespace("worker")
 concept invocation {
   ownerUserId    string!  @description("v1:identity:user.id of the worker's owner. Same as WorkerRegistration.ownerUserId; denormalized so the frontend's per-user invocations query doesn't need to join.")
   workerId       string!  @description("v1:worker:registration.id the call dispatched to.")
@@ -49,7 +48,6 @@ concept invocation {
 /// whichever agent node holds the stream; this concept is for everything that needs to survive
 /// disconnect and binary restart. Per-user routing: every registration is owned by exactly one
 /// v1:identity:user; only agents in sessions owned by that user can dispatch tools to this worker.
-@namespace("worker")
 concept registration {
   ownerUserId    string!  @description("v1:identity:user.id who owns this worker. Set once at register time from the worker_token's registeredBy. Dispatch-time access check: caller's session-owner must equal this value.")
   identityId     string!  @description("v1:identity:identity.id of the worker_token credential the worker authenticated with. Lookup target on every reconnect; rotated tokens stamp a new identity row, not a new registration.")

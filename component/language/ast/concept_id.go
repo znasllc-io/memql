@@ -218,3 +218,40 @@ func AssembleConceptIdFromDecl(decl *ConceptDecl) (string, error) {
 	}
 	return AssembleConceptId(version, namespace, decl.Name), nil
 }
+
+// AssembleConceptIdFromDeclInDir is the directory-aware assembly (#2614):
+// absent @namespace DERIVES the containing domain directory -- file location
+// is id-bearing, so the transitional "" skip ends where a directory is
+// known. An explicit @namespace stays valid and WINS, but must equal the
+// directory, extend it as a `<dir>:...` colon-scoped sub-namespace, or match
+// the domain's namespace pin (the one-line namespace.pin escape hatch for
+// deliberate id-preserving divergence, e.g. dsl/deployment pinning
+// "cluster") -- any other mismatch is the moved-file guard firing: a .memql
+// file moved between domain directories would otherwise silently change
+// every canonical id it declares.
+func AssembleConceptIdFromDeclInDir(decl *ConceptDecl, dir, pinned string) (string, error) {
+	if decl == nil {
+		return "", fmt.Errorf("concept declaration is nil")
+	}
+	version, hasVersion, vErr := ExtractVersionAttribute(decl.Attributes)
+	if vErr != nil {
+		return "", fmt.Errorf("concept %q: %w", decl.Name, vErr)
+	}
+	namespace, hasNamespace, nErr := ExtractNamespaceAttribute(decl.Attributes)
+	if nErr != nil {
+		return "", fmt.Errorf("concept %q: %w", decl.Name, nErr)
+	}
+	if !hasVersion {
+		version = SemverVersion{Major: 1, Minor: 0, Patch: 0}
+	}
+	if !hasNamespace {
+		namespace = dir
+	} else if namespace != dir && !strings.HasPrefix(namespace, dir+":") && namespace != pinned {
+		return "", fmt.Errorf("concept %q: @namespace(%q) does not match its domain directory %q (nor extend it as %q, nor match a namespace.pin): a moved file silently changes canonical ids -- move the file back, fix the annotation, or pin the deliberate divergence with a one-line %s/namespace.pin file (#2614)",
+			decl.Name, namespace, dir, dir+":...", dir)
+	}
+	if err := ValidateAssemblyInputs(version, namespace, decl.Name); err != nil {
+		return "", fmt.Errorf("concept %q: %w", decl.Name, err)
+	}
+	return AssembleConceptId(version, namespace, decl.Name), nil
+}

@@ -18,7 +18,6 @@ use identity.concepts.{ user }
 /// The standalone notebook concept -- distinct from the product pack's canvas-state note caption
 /// field. Per-row authz: owned -- ownerUserId is stamped from actor.userId on every write and every
 /// read gates on ownerUserId==actor.userId.
-@namespace("notes")
 @displayCard(primary="title", secondary="body", tertiary="updatedAt")
 concept note {
   ownerUserId  string!  @description("v1:identity:user.id that owns this note. Stamped from actor.userId at create time; re-stamped from actor.userId on every update so ownership can never be reassigned by a caller. The load-bearing per-row authz key.")

@@ -446,7 +446,15 @@ sets; unknown annotations are rejected at load time:
 - **Concepts**: `@description`, `@version`, `@namespace`, `@type`,
   `@displayCard`. (`@scope` is retired, #56.) `@version` is strict
   semver and absent means 1.0.0 (#2613) -- annotate only genuine
-  non-defaults; the same default applies to seeds. Field-level:
+  non-defaults; the same default applies to seeds. `@namespace` absent
+  DEFAULTS to the containing `dsl/<domain>/` directory (#2614): write it
+  only for a colon-scoped sub-namespace (`cognition:client:tool`) or a
+  deliberate divergence pinned by a one-line `namespace.pin` file in the
+  domain directory (the id-preserving precedent: `dsl/deployment` pins
+  `cluster`). Any other explicit-vs-directory mismatch is a load error.
+  WARNING -- file location is id-bearing: moving a `.memql` file between
+  domain directories changes every canonical id (`v1:<ns>:<concept>`) it
+  declares; the load guard exists to catch exactly that. Field-level:
   `@required`, `@default`, `@description`, `@unique`, `@pattern`,
   `@minLength`, `@maxLength`, `@minimum`, `@maximum`, `@immutable`,
   `@secret`, `@variant`. See `dsl/_reference/_concept.memql`.

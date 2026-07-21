@@ -15,7 +15,6 @@ use planner.concepts.{ plan }
 /// agents (assistant, plannerAgent, trainerAgent) are infrastructure that every tenant sees the
 /// same way -- keyed by ownerUserId payload field, addressed canonically as
 /// _system:v1:agents:agent:<seedName>-<userShortId>.
-@namespace("agents")
 @displayCard(primary="name", secondary="role", tertiary="ownerUserId", status="active")
 concept agent {
   ownerUserId     string  @description("Canonical owning-user pointer. Distinct from the engine-auto-stamped `createdBy` column: createdBy carries the request actor at insert time, which is the user when the agent is created via the Create Agent modal but is the system actor (`system:automation:provisionAssistantOnUserCreate`) when the assistant is auto-seeded by the provisioning automation. Owner-keyed lookups (Computer Use status, worker dispatch routing, agent-context auto-injection for worker tools) read this field first and fall back to createdBy.")
@@ -114,7 +113,6 @@ concept agent {
 /// & always allow this' button on the suggestion card. The grant is per (agentId, planKind,
 /// spaceScope) and carries a per-grant token budget cap + an expiry so autonomy is bounded by
 /// default.
-@namespace("agents")
 concept agentAuthorization {
   agentId         string! @description("v1:agents:agent.id this grant authorizes.")
   userId          string! @description("v1:identity:user.id of the user who granted the authorization. Only the granting user can revoke.")
@@ -148,7 +146,6 @@ concept agentAuthorization {
 /// user-created roles default to predefined=false and stay fully editable. Per-user roles are
 /// global-scoped because routing decisions (cognition / conductor) need to see the same role
 /// surface across every partition.
-@namespace("agents")
 concept agentRole {
   slug                   string!  @description("Canonical slug -- the value v1:agents:agent.roleSlug points to. Kebab-case, stable, never renamed (rename = new row + migration). Examples: 'it-support', 'family-doctor', 'commercial-pilot', 'union-carpenter'.")
   name                   string!  @description("Display name, e.g. 'IT Support' or 'Family Medicine Physician'. Surfaced in role pickers and on the agent card.")
@@ -173,7 +170,6 @@ concept agentRole {
 /// threading parallel flat lists; this concept is the spine of that surface. Phase 1 (this PR)
 /// lands the schema + a 13-row predefined catalog; consumers don't read skills yet. Phase 2
 /// migrates roles + agents to skillIds[]; Phase 3 lands the mintSkill authority + approval card.
-@namespace("agents")
 concept skill {
   slug           string!  @description("Canonical slug -- stable, kebab-case identifier. Examples: workbench-baseline, web-research, go-backend-engineering. Never renamed (rename = new row + migration).")
   name           string!  @description("Display name shown in the role manager and the agent edit modal. Example: 'Web Research'.")
@@ -199,7 +195,6 @@ concept skill {
 /// replay against. Two writes per attach (the agent row update + the event row); cheap. Phase 1
 /// lands the concept; Phase 2 starts writing rows from the agent factory. detached is reserved for
 /// a future phase -- v1 is append-only because no consumer currently reads the negative path.
-@namespace("agents")
 concept skillChangeEvent {
   targetAgentId   string!  @description("v1:agents:agent.id whose skill set changed. Pair with createdAt to reconstruct an agent's skill timeline.")
   skillId         string!  @description("v1:agents:skill.id that was attached or reconfigured. The event log entries are denormalized by skillId so the audit / trace viewer can answer 'when was X attached to Y'.")
@@ -220,7 +215,6 @@ concept skillChangeEvent {
 /// Session-scoped memory for UI-driving agents. One record per user; accumulates short notes across
 /// takeovers so the operator agent can learn the user's app usage patterns and shortcut repeat
 /// work.
-@namespace("agents")
 concept operatorMemory {
   userId  string!  @description("ID of the user this memory belongs to. One-to-one with v1:identity:user.")
 
@@ -238,7 +232,6 @@ concept operatorMemory {
 /// user picks a persona the agent's avatarPersonaId/avatarVendor are stamped from the entry; the
 /// voice-agent resolves the persona at session start (integrations/voice/agent/avatar_*.go).
 /// Per-assistant vendor choice: an entry belongs to exactly one vendor.
-@namespace("agents")
 @displayCard(primary="name", secondary="vendor", tertiary="gender", status="active")
 concept avatarPersona {
   vendor      enum("anam", "simli")!  @description("Which avatar vendor minted personaId. The agent's avatarVendor is stamped from this when the user picks the persona, so the voice-agent instantiates the matching vendor plugin regardless of the runtime MEMQL_AVATAR_VENDOR default.")

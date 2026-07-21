@@ -7,7 +7,6 @@ use agents.concepts.{ agent }
 use identity.concepts.{ user }
 use planner.concepts.{ plan }
 
-@namespace("platform")
 @description("Instance-wide encrypted secret. Lives in the reserved _system partition (via @scope(\"global\")). The cleartext value is NEVER stored -- only a NaCl secretbox ciphertext (base64(nonce||ct)) under MEMQL_MASTER_KEY and a short fingerprint for UI display. Used for instance-level API keys, OAuth client secrets, Azure/Graph credentials, etc. For per-tenant overrides (BYOK) use v1:platform:partitionSecret; the resolver falls back partition -> global automatically.")
 concept globalSecret {
   name            string!  @description("Secret name (uppercase with underscores by convention).")
@@ -21,7 +20,6 @@ concept globalSecret {
   rotatedAt       datetime  @description("Timestamp of the most recent rotation (optional).")
 }
 
-@namespace("platform")
 @description("Instance-wide plaintext configuration variable. Lives in the reserved _system partition (via @scope(\"global\")) and is visible to every tenant. Used for instance-level defaults like provider names, feature flags, log levels, and tuning knobs. For per-tenant overrides use v1:platform:partitionVariable. For sensitive values use v1:platform:globalSecret.")
 concept globalVariable {
   name         string!  @description("Variable name (uppercase with underscores by convention).")
@@ -45,7 +43,6 @@ concept globalVariable {
 
 // ---- concepts/v1/platform/partitionSecret/concept.memql ----
 
-@namespace("platform")
 @description("Partition-scoped encrypted secret. Holds per-tenant sensitive values (BYOK vendor API keys, per-tenant Twilio/SMTP creds, etc.). Same wire shape as v1:platform:globalSecret, different scope. The cleartext value is NEVER stored -- only a NaCl secretbox ciphertext under MEMQL_MASTER_KEY and a fingerprint. When the partition-scoped resolver (resolveSecret) cannot find a row, it falls back to v1:platform:globalSecret so a tenant's BYOK key wins over the instance default but the instance default is always available.")
 concept partitionSecret {
   name            string!  @description("Secret name (uppercase with underscores by convention).")
@@ -61,7 +58,6 @@ concept partitionSecret {
 
 // ---- concepts/v1/platform/partitionVariable/concept.memql ----
 
-@namespace("platform")
 @description("Partition-scoped plaintext configuration variable. Holds per-tenant non-sensitive overrides (default chat provider, default language, feature flags scoped to a single tenant, etc.). Same wire shape as v1:platform:globalVariable, different scope. When the partition-scoped resolver (resolveVariable) cannot find a row, it falls back to v1:platform:globalVariable so a tenant's override wins over the instance default but the instance default is always available.")
 concept partitionVariable {
   name         string!  @description("Variable name (uppercase with underscores by convention).")
@@ -70,7 +66,6 @@ concept partitionVariable {
   active       bool    @default("true")  @description("When false the resolver skips this row and falls back to the global v1:platform:globalVariable.")
 }
 
-@namespace("platform")
 @description("Persisted trace tree for a single policy evaluation. The engine writes one row per evaluation when the resolved policy carries @traces_persisted or when the caller requests PersistTrace=true on the EvaluatePolicy options. The row carries the policy name, the tier, the caller (actor / partition), the args hash (for cache lookup and audit correlation), the JSON-serialized PolicyTrace tree, the computed result, the wall-clock duration in milliseconds, and any error message that arose during evaluation. Retention is governed by the MEMQL_POLICYTRACE_RETENTION_DAYS env var (default 90); the daily purge automation hard-deletes rows whose `createdAt + retentionDays < now`. Distinct from v1:identity:auditEvent, which is the lightweight @audited per-eval row -- policyTrace is the heavyweight 'I'm debugging WHY this returned X' artifact.")
 concept policyTrace {
   policyName   string! @description("Name of the policy that produced this trace.")
@@ -89,7 +84,6 @@ concept policyTrace {
 
 // ---- concepts/v1/platform/missingCapability/concept.memql ----
 
-@namespace("platform")
 @description("A capability the platform itself cannot yet provide -- a missing tool, missing integration, missing liveSource connector kind, missing knowledge domain category, etc. Distinct from v1:cognition:unmetCapability which fires when the chat router can't find a specialist for an utterance: missingCapability fires when even creating the right specialist wouldn't solve the problem because the underlying platform surface doesn't exist. Logged by the Planner Agent during its capability-gap detection step before agent creation. Becomes the product backlog -- 'these are the things the platform can't do yet that users actually want.' Global-scoped so it's visible across tenants for prioritization.")
 concept missingCapability {
   kind            enum("tool", "integration", "liveSource", "connectorKind", "knowledgeDomain", "modelCapability", "other")! @description("What category of platform extension would close this gap. 'tool' = an agent-callable action that doesn't exist yet (e.g. 'sendSlackMessage'). 'integration' = a backing service we don't speak to yet (e.g. Jira). 'liveSource' = a volatile data source we'd want bound to agents but don't have a query for. 'connectorKind' = a brand-new liveConnector implementation kind (e.g. 'snowflake'). 'knowledgeDomain' = a category-level gap, e.g. agents trying to act in a domain we never seeded. 'modelCapability' = a model-level feature we don't support yet (e.g. structured-output with strict schemas on a new provider).")
@@ -112,7 +106,6 @@ concept missingCapability {
 
 // ---- concepts/v1/platform/outboundRequest/concept.memql ----
 
-@namespace("platform")
 @description("A staged outbound delivery (memql#2521): the durable outbox row a product automation or logic body creates when it decides something must leave the cluster (an email, a webhook call). The engine-owned outbound worker drains pending/retrying rows, performs the delivery through the deploy-configured transport (per-medium allowlists, credentials from env/globalSecret -- NEVER from this row), and stamps the status transitions back, so delivery state is ordinary graph state products can query and react to. See docs/internal/design/outbound-delivery-adr.md.")
 concept outboundRequest {
   medium        enum("email", "webhook")! @description("Delivery transport. 'email' delivers via the engine email integration (Graph/SMTP/log per deployment). 'webhook' POSTs the payload as JSON to the target URL.")
