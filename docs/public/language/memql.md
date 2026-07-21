@@ -899,8 +899,8 @@ description and the PREFERRED spelling -- the engine tree's conformance
 gate rejects `@description` where `///` suffices (including a bare
 `@description` shadowed by a `///` block), and downstream trees convert
 with `memqlmigrate --rewrite=doc-comment-descriptions` at their repin.
-Aim for ~200 characters (editorial target, surfaced in the annotation
-hover docs; a diagnostic-level length hint is tracked as follow-up). It
+Aim for ~200 characters (editorial target; sense emits a
+hint-severity `description-length` diagnostic over the target, #2703). It
 **wins** over `@description` whenever both are present (never
 concatenated), and `@description` remains the fallback, so
 annotation-only files behave exactly as before. This feeds every

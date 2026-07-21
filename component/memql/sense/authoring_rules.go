@@ -578,3 +578,65 @@ func actorUnknownPropertyRule(source string) []Diagnostic {
 func ActorUnknownPropertyDiagnostics(source string) []Diagnostic {
 	return actorUnknownPropertyRule(source)
 }
+
+// descriptionLengthTarget is the ruling-5 editorial target (#2601 design;
+// #2703): a description longer than this gets a HINT -- never an error --
+// nudging authors toward the terse agent-facing form. One constant,
+// re-tunable.
+const descriptionLengthTarget = 200
+
+// descriptionLengthRule hints when a construct's RESOLVED description (the
+// /// doc comment when present, else @description -- ruling-3 precedence)
+// exceeds the editorial target. The corpus's long tail is grandfathered by
+// severity: a hint never fails the whole-tree sweep or any gate.
+func descriptionLengthRule(file *parser.File, source string) []Diagnostic {
+	if file == nil {
+		return nil
+	}
+	var diagnostics []Diagnostic
+	report := func(name string, resolved string) {
+		if len(resolved) <= descriptionLengthTarget {
+			return
+		}
+		line := 1
+		// Anchor on the construct's name where findable; the hint is
+		// advisory, so a fuzzy anchor is acceptable.
+		for i, l := range strings.Split(source, "\n") {
+			if strings.Contains(l, name) && !strings.HasPrefix(strings.TrimSpace(l), "//") {
+				line = i + 1
+				break
+			}
+		}
+		diagnostics = append(diagnostics, Diagnostic{
+			Range:    Range{Start: Position{Line: line, Column: 1}, End: Position{Line: line, Column: 2}},
+			Severity: SeverityHint,
+			Message:  fmt.Sprintf("description is %d characters; the editorial target is ~%d (#2601 ruling 5) -- consider moving elaboration into an ordinary comment above the /// block", len(resolved), descriptionLengthTarget),
+			Code:     "description-length",
+		})
+	}
+	attrDesc := func(attrs []*parser.Attribute) string {
+		for _, a := range attrs {
+			if a != nil && a.Name == "description" {
+				if s, ok := a.Value.(string); ok {
+					return s
+				}
+			}
+		}
+		return ""
+	}
+	for _, def := range file.Definitions {
+		switch d := def.(type) {
+		case *parser.FunctionDef:
+			report(d.Name, parser.EffectiveDescription(d.DocComment, d.Description))
+		case *parser.ConceptDecl:
+			report(d.Name, parser.EffectiveDescription(d.DocComment, attrDesc(d.Attributes)))
+		case *parser.ShapeDecl:
+			report(d.Name, parser.EffectiveDescription(d.DocComment, attrDesc(d.Attributes)))
+		case *parser.ToolDecl:
+			report(d.Name, parser.EffectiveDescription(d.DocComment, d.Description))
+		case *parser.SpecDecl:
+			report(d.Name, parser.EffectiveDescription(d.DocComment, attrDesc(d.Attributes)))
+		}
+	}
+	return diagnostics
+}
