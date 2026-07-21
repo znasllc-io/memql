@@ -73,6 +73,10 @@ type Function struct {
 
 	// Description provides human-readable context for the function.
 	Description string
+	// DocComment carries the /// doc-comment block captured above the
+	// declaration (memql#2633). Populated, not yet consumed: description
+	// sourcing flips to it in #2634 (/// wins over @description).
+	DocComment string
 
 	// UsageDoc contains the leading documentation comment block extracted from
 	// the function .memql file. This is intended for on-demand agent guidance

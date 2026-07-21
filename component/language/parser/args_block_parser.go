@@ -25,6 +25,7 @@ import (
 // with literal "args". parseDefinition / parseFile checks for that
 // before falling through to the regular switch.
 func (p *Parser) parseFileTopArgsBlock() (*ArgsSchema, error) {
+	p.argsBlockOpenLine = p.current.Line
 	if !(p.check(TokenIdentifier) && p.current.Literal == "args") {
 		return nil, newParseErrorf(&p.current, "expected `args` keyword")
 	}
@@ -64,7 +65,7 @@ func (p *Parser) parseArgsBlockField() (*ArgsField, error) {
 	// A /// block immediately above the field is the field's doc comment
 	// (memql#2633) -- the ONLY channel for arg descriptions; the args-field
 	// @description spelling stays retired (#2615).
-	fieldDoc := p.takeDocFor(p.current.Line)
+	fieldDoc := p.takeFieldDocFor(p.current.Line)
 	name := p.current.Literal
 	// Reserved engine names (S6, memql#2361 -- implementing the documented
 	// rejection): `now`, `actor`, `partition`, `config`, and `trace` are

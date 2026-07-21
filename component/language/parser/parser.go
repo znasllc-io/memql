@@ -19,9 +19,10 @@ type Parser struct {
 	uses    []*UseDeclaration // populated during parseFile for implicit concept resolution
 
 	// Doc-comment side channel (memql#2633; see doc_comments.go).
-	docBlocks        []DocCommentBlock
-	docConsumed      []bool
-	transparentLines map[int]bool
+	docBlocks         []DocCommentBlock
+	docConsumed       []bool
+	transparentLines  map[int]bool
+	argsBlockOpenLine int
 
 	// forEachOrdinal counts the forEach loops parsed within the CURRENT
 	// top-level construct, and is the discriminator in a synthetic

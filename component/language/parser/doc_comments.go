@@ -43,6 +43,27 @@ func (p *Parser) addTransparentSpan(from, to int) {
 	}
 }
 
+// takeFieldDocFor is takeDocFor scoped to args-block FIELDS: only a block
+// that STARTS after the enclosing args block opened may attach, so a
+// single-line (or hoisted) args block cannot steal the declaration's own
+// doc block for its first field (memql#2633 review).
+func (p *Parser) takeFieldDocFor(firstLine int) string {
+	if len(p.docBlocks) == 0 {
+		return ""
+	}
+	line := firstLine - 1
+	for line > 0 && p.transparentLines[line] {
+		line--
+	}
+	for i := range p.docBlocks {
+		if !p.docConsumed[i] && p.docBlocks[i].EndLine == line && p.docBlocks[i].StartLine > p.argsBlockOpenLine {
+			p.docConsumed[i] = true
+			return JoinDocComment(p.docBlocks[i].Lines)
+		}
+	}
+	return ""
+}
+
 // takeDocFor returns the joined doc comment attached to a definition whose
 // first token sits on firstLine, consuming the block so it can attach only
 // once. Returns "" when no block is adjacent.
@@ -93,8 +114,9 @@ func JoinDocComment(lines []string) string {
 
 // attachDocComment stores the joined doc on the definition node's DocComment
 // slot -- one attach site, one type switch, every describable kind from the
-// design's ruling-1 target set. Kinds outside the set (seed, builtin) leave
-// their blocks unconsumed, which is the detached-block behavior: ignored.
+// design's ruling-1 target set. For kinds outside the set (seed, builtin)
+// the block was already consumed by takeDocFor and is simply discarded --
+// observably identical to the detached-block behavior: ignored.
 func attachDocComment(def Node, doc string) {
 	if doc == "" || def == nil {
 		return

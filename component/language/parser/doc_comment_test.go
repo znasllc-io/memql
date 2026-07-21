@@ -342,3 +342,158 @@ func TestDocComment_BlankCommentsStillBlanks(t *testing.T) {
 		t.Errorf("BlankComments must preserve offsets: len %d != %d", len(blanked), len(src))
 	}
 }
+
+// Trailing comments after code are neither doc comments nor transparent
+// lines (memql#2633 review majors): a trailing /// must not attach to the
+// NEXT node, and a trailing // must not make its code line transparent.
+func TestDocComment_TrailingCommentsAreOpaque(t *testing.T) {
+	t.Run("trailing-triple-slash-not-captured", func(t *testing.T) {
+		src := "concept alpha {\n  x string\n} /// about alpha, trailing\nconcept beta {\n  y string\n}"
+		file := parseNormalised(t, src)
+		for _, def := range file.Definitions {
+			if c, ok := def.(*ast.ConceptDecl); ok {
+				if c.DocComment != "" {
+					t.Errorf("concept %s: trailing /// must not attach, got %q", c.Name, c.DocComment)
+				}
+			}
+		}
+	})
+	t.Run("trailing-slash-in-args-not-stolen-by-next-field", func(t *testing.T) {
+		src := "logic probeLogic {\n  args {\n    planId string! /// note about planId\n    limit number\n  }\n  body {\n    return coalesce(args.planId, \"\")\n  }\n}"
+		file := parseNormalised(t, src)
+		for _, def := range file.Definitions {
+			if fn, ok := def.(*FunctionDef); ok && fn.ArgsSchema != nil {
+				for _, f := range fn.ArgsSchema.Fields {
+					if f.DocComment != "" {
+						t.Errorf("field %s: trailing /// must not attach, got %q", f.Name, f.DocComment)
+					}
+				}
+			}
+		}
+	})
+	t.Run("trailing-comment-does-not-make-code-line-transparent", func(t *testing.T) {
+		src := "/// Doc.\nuse cognition.concepts.{ space } // trailing note\nlogic probeLogic {\n  args {\n    a string @required\n  }\n  body {\n    return coalesce(args.a, \"\")\n  }\n}"
+		if got := firstDeclDoc(t, src); got != "" {
+			t.Errorf("a /// block must not tunnel through a code line with a trailing comment, got %q", got)
+		}
+	})
+	t.Run("trailing-block-comment-same", func(t *testing.T) {
+		src := "/// Doc.\nuse cognition.concepts.{ space } /* trailing */\nlogic probeLogic {\n  args {\n    a string @required\n  }\n  body {\n    return coalesce(args.a, \"\")\n  }\n}"
+		if got := firstDeclDoc(t, src); got != "" {
+			t.Errorf("a /// block must not tunnel through a trailing block comment, got %q", got)
+		}
+	})
+}
+
+// The four single-decl entry points wire the side channel too.
+func TestDocComment_SingleDeclEntries(t *testing.T) {
+	if decl, err := ParseToolDecl("/// Tool doc.\n@handler(type=\"function\", name=\"probeTool\")\ntool probeTool {\n  role string!\n}"); err != nil || decl.DocComment != "Tool doc." {
+		t.Errorf("ParseToolDecl: doc=%q err=%v", declDoc(decl), err)
+	}
+	if decl, err := ParseProviderDecl("/// Provider doc.\n@base\n@type(\"Anthropic\")\nprovider probeProvider {\n  auth {\n    apiKey env(\"X\")\n  }\n}"); err != nil || decl.DocComment != "Provider doc." {
+		t.Errorf("ParseProviderDecl: doc=%q err=%v", declDoc(decl), err)
+	}
+	if decl, err := ParsePolicyDecl("/// Policy doc.\n@primary(\"p\")\npolicy probePolicy {\n}"); err != nil || decl.DocComment != "Policy doc." {
+		t.Errorf("ParsePolicyDecl: doc=%q err=%v", declDoc(decl), err)
+	}
+	if decl, err := ParseSpecDecl("/// Spec doc.\nspec actorEnvelope probeSpec {\n  return role == \"admin\"\n}"); err != nil || decl.DocComment != "Spec doc." {
+		t.Errorf("ParseSpecDecl: doc=%q err=%v", declDoc(decl), err)
+	}
+}
+
+func declDoc(d any) string {
+	switch v := d.(type) {
+	case *ast.ToolDecl:
+		if v != nil {
+			return v.DocComment
+		}
+	case *ast.ProviderDecl:
+		if v != nil {
+			return v.DocComment
+		}
+	case *ast.PolicyDecl:
+		if v != nil {
+			return v.DocComment
+		}
+	case *ast.SpecDecl:
+		if v != nil {
+			return v.DocComment
+		}
+	}
+	return "<nil>"
+}
+
+// Consume-once semantics: with two blank-separated blocks above one decl,
+// only the adjacent block attaches and the earlier one stays detached; a
+// consumed block cannot re-attach to a later declaration.
+func TestDocComment_ConsumeOnceAndAdjacency(t *testing.T) {
+	src := "/// Far block.\n\n/// Near block.\nconcept alpha {\n  x string\n}\nconcept beta {\n  y string\n}"
+	file := parseNormalised(t, src)
+	var docs []string
+	for _, def := range file.Definitions {
+		if c, ok := def.(*ast.ConceptDecl); ok {
+			docs = append(docs, c.DocComment)
+		}
+	}
+	if len(docs) != 2 || docs[0] != "Near block." || docs[1] != "" {
+		t.Errorf("docs = %q, want [Near block., empty]", docs)
+	}
+}
+
+// The FunctionDef arm mirrors the doc onto its AutomationDef body so the
+// automations subsystem reads it without reaching back to the FunctionDef.
+func TestDocComment_AutomationBodyMirror(t *testing.T) {
+	src := `/// Automation doc.
+@trigger(event="system.shutdown")
+automation probeAuto {
+  args {
+    node any
+  }
+
+  step persist {
+    mutation createSpawnEvent (
+      nodeId: coalesce(node.id, "")
+    )
+  }
+}`
+	file := parseNormalised(t, src)
+	for _, def := range file.Definitions {
+		if fn, ok := def.(*FunctionDef); ok {
+			auto, ok := fn.Body.(*ast.AutomationDef)
+			if !ok || auto == nil {
+				t.Fatal("automation body missing")
+			}
+			if auto.DocComment != "Automation doc." {
+				t.Errorf("AutomationDef mirror = %q", auto.DocComment)
+			}
+			return
+		}
+	}
+	t.Fatal("automation not parsed")
+}
+
+// A hoisted args block must not steal the declaration's own doc block for
+// its first field: the decl doc attaches to the decl, the field slot stays
+// empty unless the field carries its own /// inside the block.
+func TestDocComment_HoistedArgsDoesNotStealDeclDoc(t *testing.T) {
+	src := `/// Decl doc.
+query candidate probeQuery {
+  args {
+    planId string!
+  }
+  filter planId == args.planId
+}`
+	file := parseNormalised(t, src)
+	for _, def := range file.Definitions {
+		if fn, ok := def.(*FunctionDef); ok {
+			if fn.DocComment != "Decl doc." {
+				t.Errorf("decl doc = %q", fn.DocComment)
+			}
+			if fn.ArgsSchema != nil && len(fn.ArgsSchema.Fields) > 0 && fn.ArgsSchema.Fields[0].DocComment != "" {
+				t.Errorf("first field stole the decl doc: %q", fn.ArgsSchema.Fields[0].DocComment)
+			}
+			return
+		}
+	}
+	t.Fatal("query not parsed")
+}

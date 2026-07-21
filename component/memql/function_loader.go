@@ -200,6 +200,7 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 	}
 
 	p := languageParser.NewParser(tokens)
+	p.SetDocComments(lexer.DocComments())
 	// Record the (fully-rewritten) source so a collection-chain logic step
 	// RHS can be sliced back to its exact span during parsing (#2317). The
 	// tokens were lexed from this same `content`, so the rune offsets line up.
@@ -440,6 +441,7 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 	fn := &Function{
 		Name:         expectedName,
 		Description:  funcDef.Description,
+		DocComment:   funcDef.DocComment,
 		FunctionKind: string(funcDef.Type),
 		BoundConcept: boundConcept,
 		Origin:       origin,
