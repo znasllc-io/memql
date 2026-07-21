@@ -498,7 +498,7 @@ The five value positions:
 | `cond(...)` (nested) | yes | yes | -- | yes | yes | Connectives (`&&`/`||`) are NOT allowed inside a cond arg -- nest cond or use an `if` step. |
 | Comparison, **expression-led** `(a - b) > 0`, `0 < count`, `rows.count() >= 1` | yes | no (parse-rejected) | yes | no | yes (lambda body) | The LHS must be non-identifier-led: parenthesize the arithmetic / lead with a literal / end in a call. |
 | Comparison **over a chain aggregate** `rows.count(m => ...) > 0` | single-return only | no | yes | no | yes (lambda body) | As a cond PREDICATE this is the #2542 item-2 headline. As a bare multi-step `return`, wrap it: `return cond(rows.count(m => ...) > 0, thenV, elseV)`. |
-| Comparison, **scalar / identifier-led** `x > 10`, `role == "admin"` | boolean-condition return only | no (parse-rejected) | yes | no | yes (lambda body) | Fine as a cond/`if` predicate and inside a boolean-condition return (`a.empty() && x == "b"`). A BARE `return x == 5` is mis-routed to a store query -- write it expression-led `(x) == 5` / literal-led `5 == x`, or `return cond(x == 5, true, false)`. |
+| Comparison, **scalar / identifier-led** `x > 10`, `role == "admin"` | boolean-condition return only | no (parse-rejected) | yes | no | yes (lambda body) | Fine as a cond/`if` predicate and inside a boolean-condition return (`a.empty() && x == "b"`). A BARE `return x == 5` is a LOAD rejection (#2693; it previously loaded green and mis-routed to a store query) -- write it expression-led `(x) == 5` / literal-led `5 == x`, boolean-condition (`... && x == 5`), or `return cond(x == 5, true, false)`. The same comparison as a `coalesce`/`concat` arg is likewise rejected. |
 | Arithmetic over a comparison `a - b > 0` | REJECTED | REJECTED | REJECTED | REJECTED | REJECTED | The unparenthesized-comparison trap: `a - b > 0` parses as `a - (b > 0)`. Lint/boot rejects it -- parenthesize `(a - b) > 0`. |
 
 **Notes.**
@@ -517,6 +517,14 @@ The five value positions:
   but not a `cond` BRANCH value -- an identifier-led comparison in
   branch-value position is a load rejection (#2655; it previously loaded
   green and silently returned its own source text on the multi-step path).
+  **#2693** extends that load rejection from the cond BRANCH to the two
+  adjacent value positions that shared the same silent-wrong class: a
+  bare/terminal `return args.n == 5` (mis-routed as a store query, since a
+  logic value step is a named-call query and the inline `query { ... }`
+  filter form does not parse in a logic body), and the same comparison
+  laundered through a `coalesce`/`concat` arg. The gate stays OFF for a
+  comparison that is a direct `&&`/`||`/`!` operand -- that is the legal
+  boolean-condition return (`a.empty() && x == "b"`).
 - **cond predicates** accept a bare boolean chain (`x.any()`), a scalar
   comparison (`r > 50`), an equality (`role == "x"`), a comparison
   over a chain aggregate (`x.count(m => ...) > 0`, wave 3), and a
