@@ -258,6 +258,11 @@ var specDetectedContextLabels = map[string]bool{
 }
 
 var specUndetectedContextLabels = map[string]bool{
+	// beforeConstructHeader (#2636): the /// doc-comment guidance rule.
+	// Detecting "cursor above a construct header" needs lookAHEAD past the
+	// cursor line, which the line-prefix classifier cannot do; the hover /
+	// annotation-docs channel carries the same guidance meanwhile.
+	"beforeConstructHeader": true,
 	// `use` import paths are completed by their own dedicated context
 	// (ContextUseDeclaration), not through the NextRule label path.
 	"afterUseKeyword": true,

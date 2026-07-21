@@ -30,7 +30,7 @@ construct-specific (see the end of this document) or rejected.
 | `@deprecated` | Yes | Yes | Yes | Marks as deprecated with optional message |
 | `@version("v1")` | Yes | Yes | Yes | Version metadata tag (no load-time default for these constructs) |
 | **Documentation** |
-| `@description("...")` | Yes | Yes | Yes | Human-readable description |
+| `@description("...")` | Yes | Yes | Yes | Human-readable description (fallback; prefer `///` doc comments, #2601) |
 | **Access Control** |
 | `@internal` | Yes | Yes | Yes | Not exposed to external API |
 | `@public` | Yes | Yes | No | Authz-classification opt-out: declares that no caller-scope check applies (see below) |
@@ -148,7 +148,25 @@ query user queryActiveUsers { ... }
 ### Documentation Attributes
 
 #### `@description("...")`
-Human-readable description of the definition.
+Human-readable description of the definition -- the **compatibility
+fallback**. The preferred spelling since #2601 is a `///` doc-comment
+block immediately above the declaration: it IS the description, needs no
+quote-escaping, and **wins** over `@description` when both are present
+(never concatenated). Attachment: a blank line breaks it, annotations
+between the block and the declaration are transparent, consecutive `///`
+lines join with single spaces, and a bare `///` line is a paragraph
+break. Aim for ~200 characters (the editorial length target, surfaced in the
+annotation hover docs; no hard gate -- a diagnostic-level hint is
+tracked as follow-up). The engine tree's conformance gate rejects the
+redundant long form where `///` suffices; downstream trees convert with
+`memqlmigrate --rewrite=doc-comment-descriptions` at their repin.
+
+```memql
+/// Returns all active user profiles with optional filters.
+query user queryActiveUsers { ... }
+```
+
+The fallback form stays valid wherever it parses today:
 
 ```memql
 @description("Returns all active user profiles with optional filters")
