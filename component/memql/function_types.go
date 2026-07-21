@@ -430,6 +430,7 @@ func (f *FunctionArgsField) clone() *FunctionArgsField {
 	}
 	clone := &FunctionArgsField{
 		Name:         f.Name,
+		Description:  f.Description,
 		Type:         f.Type,
 		Optional:     f.Optional,
 		Format:       f.Format,

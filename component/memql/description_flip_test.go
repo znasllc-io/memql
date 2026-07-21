@@ -5,6 +5,9 @@ package memql
 // concatenate; @description-only output must be byte-identical to pre-flip).
 
 import (
+	"encoding/json"
+	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"strings"
 	"testing"
 )
@@ -101,4 +104,81 @@ func TestDescriptionFlip_CatalogMatchText(t *testing.T) {
 	if !strings.Contains(text2, "intent:Catalog annot channel.") {
 		t.Errorf("@description-only catalog text must be unchanged, got %q", text2)
 	}
+}
+
+// The registry clones at ingress AND egress -- the review blocker: arg docs
+// must survive Upsert+Lookup, or both schema renderers serve empty
+// descriptions in production while loader-level tests stay green.
+func TestDescriptionFlip_ArgDocSurvivesRegistry(t *testing.T) {
+	fn := loadFlipProbe(t, "Doc.", "")
+	reg := newFunctionRegistry()
+	if err := reg.Upsert(fn); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	got, err := reg.Get(fn.Name)
+	if err != nil || got == nil {
+		t.Fatalf("lookup: %v", err)
+	}
+	if got.ArgsSchema == nil || len(got.ArgsSchema.Fields) == 0 || got.ArgsSchema.Fields[0].Description != "The subject arg." {
+		t.Fatalf("arg Description dropped across the registry: %+v", got.ArgsSchema)
+	}
+	schema := FunctionInputJSONSchema(got)
+	props, _ := schema["properties"].(map[string]any)
+	prop, _ := props["a"].(map[string]any)
+	if d, _ := prop["description"].(string); d != "The subject arg." {
+		t.Errorf("registry-egress schema description = %q", d)
+	}
+}
+
+// The SECOND schema renderer (function-tools) emits the description too --
+// its own pin so the two schemas cannot silently diverge.
+func TestDescriptionFlip_FunctionToolsSchemaDescription(t *testing.T) {
+	fn := loadFlipProbe(t, "Doc.", "")
+	raw, err := toolInputSchemaFromArgs(fn.ArgsSchema)
+	if err != nil {
+		t.Fatalf("toolInputSchemaFromArgs: %v", err)
+	}
+	if !strings.Contains(string(raw), `"description":"The subject arg."`) {
+		t.Errorf("function-tools schema missing field description: %s", raw)
+	}
+}
+
+// The catalog extraction anchors on the construct even when a use/import
+// prelude precedes it (authoring slices carry file-top imports).
+func TestDescriptionFlip_CatalogWithUsePrelude(t *testing.T) {
+	src := "use cognition.concepts.{ space }\n\n/// Prelude doc channel.\nlogic catPreludeProbe {\n  args {\n    a string @required\n  }\n  body {\n    return coalesce(args.a, \"\")\n  }\n}"
+	text, err := CatalogMatchText("logic", src)
+	if err != nil {
+		t.Fatalf("CatalogMatchText: %v", err)
+	}
+	if !strings.Contains(text, "intent:Prelude doc channel.") {
+		t.Errorf("use-prelude must not hide the /// block, got %q", text)
+	}
+}
+
+// The concept-level JSON schema description agrees with Concept.Description
+// (single-point precedence -- no contradictory surfaces within one concept).
+func TestDescriptionFlip_ConceptSchemaCoherence(t *testing.T) {
+	src := "/// Concept doc channel.\n@description(\"Concept annot channel.\")\nconcept flipCoherenceProbe {\n  ownerUserId string!\n}"
+	file := parseKind(t, src)
+	for _, def := range file.Definitions {
+		if cd, ok := def.(*languageParser.ConceptDecl); ok {
+			c, err := concept.BuildConceptFromDecl(cd, "flipCoherenceProbe")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if c.Description != "Concept doc channel." {
+				t.Errorf("Concept.Description = %q", c.Description)
+			}
+			var schema map[string]any
+			if err := json.Unmarshal(c.Schemas["definition"], &schema); err != nil {
+				t.Fatalf("schema: %v (keys: %v)", err, c.Schemas)
+			}
+			if d, _ := schema["description"].(string); d != "Concept doc channel." {
+				t.Errorf("schema description = %q, disagrees with Concept.Description", d)
+			}
+			return
+		}
+	}
+	t.Fatal("concept not parsed")
 }

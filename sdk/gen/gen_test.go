@@ -629,3 +629,39 @@ func TestParseFields_DocCommentAboveField(t *testing.T) {
 		t.Errorf("undocumented field must stay empty, got %q", fields[1].Description)
 	}
 }
+
+// Engine-parity matrix (memql#2634 review): the SDK extraction must agree
+// with the parser's adjacency semantics -- blank-line-detached blocks do NOT
+// attach, a /// below annotations does NOT attach, and an ordinary comment
+// between the block and the header is transparent.
+func TestDescriptionFor_EngineParity(t *testing.T) {
+	cases := map[string]struct {
+		src  string
+		want string
+	}{
+		"blank-detached":       {"/// Doc.\n\n@description(\"Annot.\")\nquery space queryParityProbe {\n}\n", "Annot."},
+		"doc-below-annotation": {"@description(\"Annot.\")\n/// Doc.\nquery space queryParityProbe {\n}\n", "Annot."},
+		"comment-transparent":  {"/// Doc.\n// note\nquery space queryParityProbe {\n}\n", "Doc."},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			header := strings.Index(tc.src, "query space")
+			if got := descriptionFor(tc.src, header); got != tc.want {
+				t.Errorf("%s: descriptionFor = %q, want %q (engine parity)", name, got, tc.want)
+			}
+		})
+	}
+}
+
+// Field docs share the adjacency semantics: blank-line-detached field ///
+// does not attach.
+func TestParseFields_BlankDetachedDocIgnored(t *testing.T) {
+	inner := "\n    /// Detached note.\n\n    planId  string!\n"
+	fields := parseFields(inner)
+	if len(fields) != 1 {
+		t.Fatalf("fields = %d", len(fields))
+	}
+	if fields[0].Description != "" {
+		t.Errorf("blank-detached field doc must not attach, got %q", fields[0].Description)
+	}
+}

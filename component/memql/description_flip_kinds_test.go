@@ -80,3 +80,50 @@ func TestDescriptionFlip_ShapeToolSpecPromptPolicy(t *testing.T) {
 		}
 	})
 }
+
+// Prompt, provider, and policy converters resolve ruling-3 precedence too --
+// each was a surviving mutant in the round-1 review.
+func TestDescriptionFlip_PromptProviderPolicy(t *testing.T) {
+	t.Run("prompt", func(t *testing.T) {
+		file := parseKind(t, "/// Prompt doc.\n@description(\"Prompt annot.\")\n@templateFile(\"prompts/x.tmpl\")\nprompt flipPrompt {\n}")
+		for _, def := range file.Definitions {
+			if pd, ok := def.(*languageParser.PromptDecl); ok {
+				out, err := promptDeclToPromptDecl(pd, "test")
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got := languageParser.EffectiveDescription(out.docComment, out.description); got != "Prompt doc." {
+					t.Errorf("prompt resolved description = %q", got)
+				}
+				return
+			}
+		}
+		t.Fatal("prompt not parsed")
+	})
+	t.Run("policy", func(t *testing.T) {
+		decl, err := languageParser.ParsePolicyDecl("/// Policy doc.\n@primary(\"p\")\n@description(\"Policy annot.\")\npolicy flipPolicy {\n}")
+		if err != nil {
+			t.Fatal(err)
+		}
+		pol, err := policyDeclToPolicyConfig(decl)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if pol.Description != "Policy doc." {
+			t.Errorf("policy Description = %q", pol.Description)
+		}
+	})
+	t.Run("provider", func(t *testing.T) {
+		decl, err := languageParser.ParseProviderDecl("/// Provider doc.\n@base\n@type(\"Anthropic\")\n@description(\"Provider annot.\")\nprovider flipProvider {\n  auth {\n    apiKey env(\"X\")\n  }\n}")
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := providerDeclToProviderConfig(decl)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Description != "Provider doc." {
+			t.Errorf("provider Description = %q", cfg.Description)
+		}
+	})
+}

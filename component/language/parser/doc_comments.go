@@ -172,6 +172,10 @@ func EffectiveDescription(docComment, description string) string {
 // design demands for raw-source consumers (the promote-time catalog). Returns
 // "" when the source has no attached block or does not tokenize.
 func LeadingDocComment(source string) string {
+	// Skip a use/import prelude (authoring slices carry the file-top
+	// imports): the doc block belongs to the construct below it, and the
+	// prelude's tokens would otherwise become the anchor.
+	source = stripLeadingUseLines(source)
 	lexer := NewLexer(source)
 	tokens, err := lexer.Tokenize()
 	if err != nil || len(tokens) == 0 || tokens[0].Type == TokenEOF {
@@ -180,4 +184,22 @@ func LeadingDocComment(source string) string {
 	p := NewParser(tokens)
 	p.SetDocComments(lexer.DocComments())
 	return p.takeDocFor(tokens[0].Line)
+}
+
+
+// stripLeadingUseLines drops initial use/import declaration lines and the
+// blank lines around them, keeping everything from the first other line on
+// (comments included, so a /// block above the construct survives).
+func stripLeadingUseLines(source string) string {
+	lines := strings.Split(source, "\n")
+	i := 0
+	for i < len(lines) {
+		t := strings.TrimSpace(lines[i])
+		if t == "" || strings.HasPrefix(t, "use ") || strings.HasPrefix(t, "import ") || strings.HasPrefix(t, "import(") {
+			i++
+			continue
+		}
+		break
+	}
+	return strings.Join(lines[i:], "\n")
 }

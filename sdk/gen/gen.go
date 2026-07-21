@@ -452,38 +452,42 @@ func attrPreamble(src string, headerStart int) string {
 }
 
 // descriptionFor resolves the construct description with the design's
-// ruling-3 precedence (memql#2634): a /// doc-comment block in the preamble
-// WINS; the @description annotation is the fallback. Returns empty string
-// when both are absent.
+// ruling-3 precedence (memql#2634): the /// doc-comment block WINS, the
+// @description annotation is the fallback. Extraction goes through the
+// PARSER'S own lexer (parser.LeadingDocComment) rather than a second regex
+// dialect, so the SDK's adjacency semantics -- blank-line detachment,
+// annotation anchoring, comment transparency -- are byte-for-byte the
+// engine's (the #2634 review demonstrated three divergences in the earlier
+// hand-rolled walk).
 func descriptionFor(src string, headerStart int) string {
-	preamble := attrPreamble(src, headerStart)
-	if doc := joinDocLines(preamble); doc != "" {
+	slice := src[docContextStart(src, headerStart):]
+	if doc := langparser.LeadingDocComment(slice); doc != "" {
 		return doc
 	}
-	if m := descRe.FindStringSubmatch(preamble); len(m) > 1 {
+	if m := descRe.FindStringSubmatch(attrPreamble(src, headerStart)); len(m) > 1 {
 		return m[1]
 	}
 	return ""
 }
 
-// joinDocLines collects the contiguous /// lines of a preamble (or field
-// prefix) and joins them with the parser's ruling-2 join.
-func joinDocLines(block string) string {
-	var lines []string
-	for _, raw := range strings.Split(block, "\n") {
-		line := strings.TrimSpace(raw)
-		if strings.HasPrefix(line, "///") && !strings.HasPrefix(line, "////") {
-			lines = append(lines, strings.TrimPrefix(line, "///"))
-		} else if line != "" && len(lines) > 0 {
-			// A non-/// line after the block ends it (annotations follow
-			// the doc block in the preamble).
-			break
+// docContextStart walks up from the construct header over attribute,
+// comment, and blank lines to the nearest code boundary, so the slice fed
+// to the parser's extraction starts at (or above) the construct's own
+// preamble with its full comment context intact -- including the blank
+// lines the parser needs to see to BREAK detached blocks.
+func docContextStart(src string, headerStart int) int {
+	start := strings.LastIndex(src[:headerStart], "\n") + 1
+	for start > 0 {
+		prevEnd := start - 1
+		lineStart := strings.LastIndex(src[:prevEnd], "\n") + 1
+		line := strings.TrimSpace(src[lineStart:prevEnd])
+		if line == "" || strings.HasPrefix(line, "@") || strings.HasPrefix(line, "//") {
+			start = lineStart
+			continue
 		}
+		break
 	}
-	if len(lines) == 0 {
-		return ""
-	}
-	return langparser.JoinDocComment(lines)
+	return start
 }
 
 // parseArgsBlock extracts the args { ... } block from a construct body
@@ -516,14 +520,14 @@ func parseFields(inner string) []ArgField {
 				fm = append(fm, inner[idx[2*g]:idx[2*g+1]])
 			}
 		}
-		// /// lines between the previous field (or block start) and this
-		// field are its doc comment (memql#2634) -- the only channel for
-		// arg docs since the #2615 strip.
+		// /// lines immediately above the field are its doc comment
+		// (memql#2634) -- parser adjacency semantics: contiguous /// lines,
+		// ordinary comments transparent, a blank line breaks.
 		prevEnd := 0
 		if mi > 0 {
 			prevEnd = matches[mi-1][1]
 		}
-		fieldDoc := joinDocLines(inner[prevEnd:idx[0]])
+		fieldDoc := docLinesAbove(inner[prevEnd:idx[0]])
 		name := fm[1]
 		typ := fm[2]
 		sigil := fm[3]
@@ -652,4 +656,48 @@ func lowerFirst(s string) string {
 		r[0] = r[0] - 'A' + 'a'
 	}
 	return string(r)
+}
+
+// docLinesAbove extracts the /// block ADJACENT to the end of gap (the text
+// between the previous field and this one), mirroring the parser's
+// takeFieldDocFor walk: from the bottom, ordinary comment lines are
+// transparent, a blank line breaks, and only the contiguous /// block
+// touching that walk attaches.
+func docLinesAbove(gap string) string {
+	// Strip the field's own indentation and exactly ONE structural newline
+	// (the line break before the field); any further trailing newline is a
+	// REAL blank line and must break attachment.
+	gap = strings.TrimRight(gap, " \t")
+	gap = strings.TrimSuffix(gap, "\n")
+	lines := strings.Split(gap, "\n")
+	var collected []string
+	collecting := false
+	for i := len(lines) - 1; i >= 0; i-- {
+		t := strings.TrimSpace(lines[i])
+		switch {
+		case strings.HasPrefix(t, "///") && !strings.HasPrefix(t, "////"):
+			collected = append([]string{strings.TrimPrefix(t, "///")}, collected...)
+			collecting = true
+		case t == "":
+			if collecting || len(collected) > 0 {
+				return join(collected)
+			}
+			return ""
+		case strings.HasPrefix(t, "//"):
+			if collecting {
+				return join(collected)
+			}
+			// transparent, keep walking
+		default:
+			return join(collected)
+		}
+	}
+	return join(collected)
+}
+
+func join(collected []string) string {
+	if len(collected) == 0 {
+		return ""
+	}
+	return langparser.JoinDocComment(collected)
 }
