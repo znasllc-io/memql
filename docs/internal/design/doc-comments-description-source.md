@@ -9,9 +9,11 @@ conformance-gate story (#2636) lands.
 A `///` doc-comment immediately above a declaration becomes its description.
 The form is additive — `@description` stays valid everywhere it parses today —
 and `///` wins when both are present. The epic exists because the corpus
-states its prose twice: 2,902 `@description` occurrences (~510KB, a third of
-corpus bytes) heavily duplicated by header comments, plus 82 "// Arguments:"
-and 58 "// Returns:" blocks restating `args{}` field-for-field. One channel,
+states its prose twice: 2,645 `@description` occurrences as of this design's
+merge (~470KB, a third of corpus bytes; the epic's 2,902 figure predates the
+#2615 args-field strip), heavily duplicated by header comments, plus 82
+"// Arguments:" and 58 "// Returns:" blocks restating `args{}`
+field-for-field. One channel,
 stated once, un-escaped, is the token win.
 
 ## Why
@@ -33,9 +35,14 @@ declaration, or trailing at end of file) is an **ordinary comment — ignored,
 never an error**. This matches the Go/Rust convention authors already expect,
 and "ignored" lets the codemod convert incrementally with no flag day.
 
-The attachment target set is every describable construct kind — `concept`,
-`query`, `mutation`, `logic`, `automation`, `tool`, `shape`, `capability` —
-plus `args{}` block **fields**. The args-field half is the only channel for
+The attachment target set is **every describable construct kind** — the
+full `@description`-valid set from the attribute matrix: `concept`, `query`,
+`mutation`, `logic`, `automation`, `tool`, `shape`, `capability`, `prompt`,
+`provider`, `policy`, `spec`, `trait`, `action` — plus `args{}` block
+**fields**. (The #2633 story text enumerates only the first eight; its test
+coverage must span this full set — the corpus carries live descriptions on
+prompts, providers, policies, specs and actions, and the #2635 codemod and
+#2636 gate would otherwise strand them.) The args-field half is the only channel for
 arg descriptions: the grammar epoch retired args-field `@description`
 (parser-discarded, corpus stripped in #2615), and this epic does **not**
 resurrect that spelling.
@@ -67,8 +74,9 @@ main at the time of writing:
 | Promote-time catalog rows | `component/memql/authoring_catalog_match.go:25-27` | `catalogDescRe` regex over **raw source** |
 | MCP tool descriptors | `component/memql/mcp_promote.go:27` | `fn.Description` (synthesized fallback when empty) |
 | `functions()` / `tools` discovery | `component/memql/executor_builtin.go:382,439,497,586` | `fn.Description` / `tool.Description` |
-| SDK generator | `sdk/gen/gen.go:84,95` (`descRe`, `descriptionFor`) → `sdk/gen/emit_ts.go`, `sdk/gen/emit_go.go` | its own regex over **raw source** |
-| sense hover | `component/memql/sense/hover.go:93,129,142` | `Description` fields |
+| SDK generator | `sdk/gen/gen.go:84` (`descRe`), `:453-456` (`descriptionFor`, used at `:390`) → `sdk/gen/emit_ts.go`, `sdk/gen/emit_go.go` | its own regex over **raw source** |
+| `shapes()` / shape-help builtins | `component/memql/executor_builtin.go:745,797` | `shape.Description` |
+| sense hover | `component/memql/sense/hover.go:93,129,142,159` | `Description` fields (shape, concept, concept-field, function) |
 | gRPC concept surface | `component/grpc/concepts_handlers.go:35` | `c.Description` |
 | Language docs about `@description` | `docs/public/language/attribute-matrix.md`, `memql.md`, `authoring-rules.md` | prose — final story (#2636) updates |
 
@@ -84,8 +92,8 @@ the parser's).
 (Adopted per the #2632 proposal's recommendation; the number lives in one
 lint constant and may be re-tuned before #2636 merges.)
 
-Rationale: the corpus average is 178.4 chars, so typical descriptions pass
-untouched; the waste concentrates in the long tail. A hard gate would force
+Rationale: the corpus average is ~166 chars post-#2615 (178.4 at the epic's
+filing), so typical descriptions pass untouched; the waste concentrates in the long tail. A hard gate would force
 truncation of legitimately longer descriptions and could block the epic's own
 migration; the hint nudges without breaking. If a hard gate is ever wanted, it
 applies to NEW descriptions only, grandfathering the corpus.
