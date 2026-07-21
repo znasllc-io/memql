@@ -144,7 +144,7 @@ members. The complete ruling:
 | Built-in | `dslspec` category | Ruling | Why |
 |---|---|---|---|
 | `coalesce`, `cond`, `concat`, `lower`, `upper`, `trim`, `hash`, `shortId`, `canonicalId`, `toString`, `contains` | expr | **ambient** | pure deterministic operators |
-| `addDuration`, `daysBetween`, `subtractTimestamps`, `year`, `quarter`, `month`, `dayOfMonth`, `isAnniversary`, `isFirstDayOfQuarter` | expr | **ambient** | pure given a passed timestamp (no clock read) |
+| `addDuration`, `daysBetween` | expr | **ambient** | pure given a passed timestamp (no clock read). The seven calendar builtins that shared this row (`subtractTimestamps`, `year`, `quarter`, `month`, `dayOfMonth`, `isAnniversary`, `isFirstDayOfQuarter`) were hard-retired under 2026.08 (#2620 ruling / #2707) |
 | `memqlVersion` | expr | **ambient** | constant per running binary; deterministic within a deploy (documented exception -- it is build metadata, not runtime ambient input) |
 | `first`, `last` | expr | **fold into collection lib** (2.2) | collection ops -- retired as grammar builtins |
 | bare `now` | reserved keyword | **ambient (the one clock primitive)** | engine context (with `actor`/`partition`/`config`); the sole author spelling |
@@ -296,11 +296,12 @@ logic logicExpiryFromNow {
   body { return addDuration(now, concat("PT", toString(args.ttlHours), "H")) }
 }
 
+// (subtractTimestamps was retired under 2026.08, #2707 -- a staleness gate
+// compares against addDuration with the window instead:)
 logic logicIsStale {
   args { lastSeen string @required, windowMinutes int @required }
   body {
-    return subtractTimestamps(now, args.lastSeen) >
-           addDuration("PT0S", concat("PT", toString(args.windowMinutes), "M"))
+    return addDuration(args.lastSeen, concat("PT", toString(args.windowMinutes), "M")) < now
   }
 }
 

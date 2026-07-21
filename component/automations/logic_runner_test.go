@@ -1325,38 +1325,6 @@ logic streakDelta {
 	}
 }
 
-// Date-component extraction as step values (year / month / dayOfMonth -- the
-// primitives a calendar-day boundary is built from), recombined through
-// multi-operand terminal-return arithmetic over the three step bindings.
-func TestLogicRunner_RunLogic_DateComponentsStepValues(t *testing.T) {
-	src := `@enabled
-@description("date components as step values (#2541)")
-logic dayParts {
-  args {
-    ts string @required
-  }
-  body {
-    y := year(args.ts)
-    m := month(args.ts)
-    d := dayOfMonth(args.ts)
-    return y * 10000 + m * 100 + d
-  }
-}
-`
-	body := parseLogicBody(t, src)
-	r := NewLogicRunner(&memql.MemQLEngine{}, &recordingStepRegistry{}, nil)
-
-	out, err := r.RunLogic(context.Background(), "dayParts", body, map[string]any{
-		"ts": "2026-07-14T09:30:00Z",
-	})
-	if err != nil {
-		t.Fatalf("RunLogic returned error: %v", err)
-	}
-	if !numericEquals(out, 20260714) {
-		t.Errorf("RunLogic return = %#v (%T), want 20260714 (y*10000 + m*100 + d)", out, out)
-	}
-}
-
 // A date builtin in the TERMINAL RETURN position, over a prior step result.
 func TestLogicRunner_RunLogic_DateBuiltinTerminalReturn(t *testing.T) {
 	src := `@enabled
@@ -1417,67 +1385,6 @@ logic weeksBetween {
 	}
 }
 
-// TestLogicRunner_RunLogic_CalendarDayWindowCondition pins the #2541
-// calendar-day window END-TO-END: a conditional step gated on the TRUE
-// midnight boundary (year+month+dayOfMonth equality against a reference
-// timestamp), not a rolling-24h approximation. The prior-day-same-time case
-// is the discriminator: a rolling window would fire it, a calendar-day gate
-// must not.
-func TestLogicRunner_RunLogic_CalendarDayWindowCondition(t *testing.T) {
-	src := `@enabled
-@description("orders-since-midnight day gate (#2541)")
-logic dayGate {
-  args {
-    createdAt string @required
-    today string @required
-  }
-  body {
-    marker := if year(args.createdAt) == year(args.today) && month(args.createdAt) == month(args.today) && dayOfMonth(args.createdAt) == dayOfMonth(args.today) {
-      recordSameDay( note: "same-day" )
-    }
-    return 1
-  }
-}
-`
-	cases := []struct {
-		name      string
-		createdAt string
-		wantFires bool
-	}{
-		{"after_midnight_today_fires", "2026-07-14T00:30:00Z", true},
-		{"late_today_fires", "2026-07-14T23:59:00Z", true},
-		{"yesterday_same_time_does_not_fire", "2026-07-13T09:00:00Z", false},
-		{"same_day_of_month_prior_month_does_not_fire", "2026-06-14T09:00:00Z", false},
-		{"same_date_prior_year_does_not_fire", "2025-07-14T09:00:00Z", false},
-	}
-	for _, tc := range cases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			body := parseLogicBody(t, src)
-			registry := &recordingStepRegistry{}
-			r := NewLogicRunner(&memql.MemQLEngine{}, registry, nil)
-
-			_, err := r.RunLogic(context.Background(), "dayGate", body, map[string]any{
-				"createdAt": tc.createdAt,
-				"today":     "2026-07-14T09:00:00Z",
-			})
-			if err != nil {
-				t.Fatalf("RunLogic returned error: %v", err)
-			}
-			fired := false
-			for _, id := range registry.dispatched {
-				if id == "marker" {
-					fired = true
-				}
-			}
-			if fired != tc.wantFires {
-				t.Errorf("marker fired = %v for createdAt=%s, want %v (calendar-day gate, #2541)",
-					fired, tc.createdAt, tc.wantFires)
-			}
-		})
-	}
-}
-
 // TestLogicRunner_CompileRoundTrip_ArithmeticAndDateBuiltins pins the
 // serializer half of #2541/#2542: the compiled `_return` string carries
 // re-parseable source, never the `<<unsupported expression %T>>` marker.
@@ -1491,7 +1398,6 @@ func TestLogicRunner_CompileRoundTrip_ArithmeticAndDateBuiltins(t *testing.T) {
 		{"nested_arithmetic", "return (r * 100) / o", "((r * 100) / o)"},
 		{"addDuration", `return addDuration(r, "P1D")`, `addDuration(r, "P1D")`},
 		{"daysBetween_args", "return daysBetween(args.a, args.b)", "daysBetween($args.a, $args.b)"},
-		{"year_now", "return year(now)", "year(timestamp())"},
 		{"date_in_arithmetic", "return daysBetween(args.a, args.b) / 7", "(daysBetween($args.a, $args.b) / 7)"},
 	}
 	for _, tc := range cases {

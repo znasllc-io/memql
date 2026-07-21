@@ -112,30 +112,35 @@ func buildCallableParsers() map[string]callableEntry {
 		"now":       {CallableRetired, (*Parser).parseClockCallFormRetired},
 		"timestamp": {CallableRetired, (*Parser).parseClockCallFormRetired},
 
+		// The eight zero-use expression builtins retired under the 2026.08
+		// epoch by the #2620 ruling (#2707). Recognised only to emit the
+		// migration-hint error; the kept toolbox (lower / upper / trim /
+		// toString / daysBetween / contains) and the used set stay below.
+		"memqlversion":        {CallableRetired, parseRetiredExprBuiltin("memqlVersion", "")},
+		"year":                {CallableRetired, parseRetiredExprBuiltin("year", "")},
+		"quarter":             {CallableRetired, parseRetiredExprBuiltin("quarter", "")},
+		"month":               {CallableRetired, parseRetiredExprBuiltin("month", "")},
+		"dayofmonth":          {CallableRetired, parseRetiredExprBuiltin("dayOfMonth", "")},
+		"isanniversary":       {CallableRetired, parseRetiredExprBuiltin("isAnniversary", "")},
+		"isfirstdayofquarter": {CallableRetired, parseRetiredExprBuiltin("isFirstDayOfQuarter", "")},
+		"subtracttimestamps":  {CallableRetired, parseRetiredExprBuiltin("subtractTimestamps", "use addDuration with a negative duration")},
+
 		// --- Editor-callable expression builtins ---
-		"memqlversion":        {CallableBuiltin, (*Parser).parseMemqlVersionFunction},
-		"concat":              {CallableBuiltin, (*Parser).parseConcatFunction},
-		"coalesce":            {CallableBuiltin, (*Parser).parseCoalesceFunction},
-		"cond":                {CallableBuiltin, (*Parser).parseCondFunction},
-		"first":               {CallableBuiltin, (*Parser).parseFirstFunction},
-		"last":                {CallableBuiltin, (*Parser).parseLastFunction},
-		"lower":               {CallableBuiltin, (*Parser).parseLowerFunction},
-		"upper":               {CallableBuiltin, (*Parser).parseUpperFunction},
-		"trim":                {CallableBuiltin, (*Parser).parseTrimFunction},
-		"hash":                {CallableBuiltin, (*Parser).parseHashFunction},
-		"shortid":             {CallableBuiltin, (*Parser).parseShortIdFunction},
-		"canonicalid":         {CallableBuiltin, (*Parser).parseCanonicalIdFunction},
-		"tostring":            {CallableBuiltin, (*Parser).parseToStringFunction},
-		"addduration":         {CallableBuiltin, (*Parser).parseAddDurationFunction},
-		"daysbetween":         {CallableBuiltin, (*Parser).parseDaysBetweenFunction},
-		"subtracttimestamps":  {CallableBuiltin, (*Parser).parseSubtractTimestampsFunction},
-		"year":                {CallableBuiltin, (*Parser).parseYearFunction},
-		"quarter":             {CallableBuiltin, (*Parser).parseQuarterFunction},
-		"month":               {CallableBuiltin, (*Parser).parseMonthFunction},
-		"dayofmonth":          {CallableBuiltin, (*Parser).parseDayOfMonthFunction},
-		"isanniversary":       {CallableBuiltin, (*Parser).parseIsAnniversaryFunction},
-		"isfirstdayofquarter": {CallableBuiltin, (*Parser).parseIsFirstDayOfQuarterFunction},
-		"contains":            {CallableBuiltin, (*Parser).parseContainsFunction},
+		"concat":      {CallableBuiltin, (*Parser).parseConcatFunction},
+		"coalesce":    {CallableBuiltin, (*Parser).parseCoalesceFunction},
+		"cond":        {CallableBuiltin, (*Parser).parseCondFunction},
+		"first":       {CallableBuiltin, (*Parser).parseFirstFunction},
+		"last":        {CallableBuiltin, (*Parser).parseLastFunction},
+		"lower":       {CallableBuiltin, (*Parser).parseLowerFunction},
+		"upper":       {CallableBuiltin, (*Parser).parseUpperFunction},
+		"trim":        {CallableBuiltin, (*Parser).parseTrimFunction},
+		"hash":        {CallableBuiltin, (*Parser).parseHashFunction},
+		"shortid":     {CallableBuiltin, (*Parser).parseShortIdFunction},
+		"canonicalid": {CallableBuiltin, (*Parser).parseCanonicalIdFunction},
+		"tostring":    {CallableBuiltin, (*Parser).parseToStringFunction},
+		"addduration": {CallableBuiltin, (*Parser).parseAddDurationFunction},
+		"daysbetween": {CallableBuiltin, (*Parser).parseDaysBetweenFunction},
+		"contains":    {CallableBuiltin, (*Parser).parseContainsFunction},
 
 		// --- Keyword-functions (control-flow shaped expression functions) ---
 		"case":    {CallableKeywordFunc, (*Parser).parseCaseFunction},
@@ -187,6 +192,24 @@ var relationshipWrapperNames = []string{
 // two parsers by the #244 cross-parser equivalence test).
 func (p *Parser) parseCallerRetired() (ExpressionNode, error) {
 	return nil, newParseErrorf(&p.current, "%s", baseparser.ErrCallerRetired.Error())
+}
+
+// parseRetiredExprBuiltin builds the dispatch target for an expression
+// builtin hard-retired under the 2026.08 epoch by the #2620 ruling (#2707):
+// the name is recognised only to emit this migration-hint error instead of an
+// opaque "unknown function". hint is the per-name replacement pointer; empty
+// means there is no replacement (the calendar predicates and memqlVersion --
+// file an engine issue if a real pack genuinely needs one back).
+func parseRetiredExprBuiltin(name, hint string) func(p *Parser) (ExpressionNode, error) {
+	msg := name + "() is retired under the 2026.08 grammar epoch (#2620 ruling / #2707)"
+	if hint != "" {
+		msg += " -- " + hint
+	} else {
+		msg += " -- no replacement; file an engine issue if genuinely needed"
+	}
+	return func(p *Parser) (ExpressionNode, error) {
+		return nil, newParseErrorf(&p.current, "%s", msg)
+	}
 }
 
 // parseClockCallFormRetired is the dispatch target for the retired now() /

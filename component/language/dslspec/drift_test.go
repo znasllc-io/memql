@@ -583,9 +583,12 @@ func TestBuiltinRegistryNamesNotParserSpecialCased(t *testing.T) {
 // This asserts dslspec now models every one (belt-and-suspenders over the
 // name-set equality test, with a self-explaining name list).
 func TestBuiltinsCoverGapFilledNames(t *testing.T) {
+	// The other #2155 gap-filled names (year / quarter / month / dayOfMonth /
+	// subtractTimestamps / isAnniversary / isFirstDayOfQuarter / memqlVersion)
+	// were hard-retired under the 2026.08 epoch (#2620 ruling / #2707), so
+	// only contains remains modellable.
 	gapFilled := []string{
-		"year", "quarter", "month", "dayOfMonth", "subtractTimestamps",
-		"isAnniversary", "isFirstDayOfQuarter", "memqlVersion", "contains",
+		"contains",
 	}
 	present := map[string]bool{}
 	for _, b := range builtins() {

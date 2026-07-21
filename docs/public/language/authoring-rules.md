@@ -506,7 +506,7 @@ The five value positions:
 |---|---|---|---|---|---|---|
 | Arithmetic `a / b`, `a * 100 / c`, `a - b` | yes | yes | -- | yes | yes | Integer division truncates; use a float operand for a ratio. |
 | Collection chain `rows.where(m => ...).count()` | yes | yes | yes (bare boolean chain) | yes | yes | `.first().field` DotAccess and `.sum/min/max/avg/count(lambda)` included. |
-| Date builtins `daysBetween(...)`, `year(...)`, `addDuration(...)` | yes | yes | -- | yes | yes | #2541. |
+| Date builtins `daysBetween(...)`, `addDuration(...)` | yes | yes | -- | yes | yes | #2541; the calendar extractors (`year` et al.) were retired under 2026.08 (#2707). |
 | `cond(...)` (nested) | yes | yes | -- | yes | yes | Connectives (`&&`/`||`) are NOT allowed inside a cond arg -- nest cond or use an `if` step. |
 | Comparison, **expression-led** `(a - b) > 0`, `0 < count`, `rows.count() >= 1` | yes | no (parse-rejected) | yes | no | yes (lambda body) | The LHS must be non-identifier-led: parenthesize the arithmetic / lead with a literal / end in a call. |
 | Comparison **over a chain aggregate** `rows.count(m => ...) > 0` | single-return only | no | yes | no | yes (lambda body) | As a cond PREDICATE this is the #2542 item-2 headline. As a bare multi-step `return`, wrap it: `return cond(rows.count(m => ...) > 0, thenV, elseV)`. |

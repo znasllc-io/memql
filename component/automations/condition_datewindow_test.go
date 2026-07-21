@@ -135,38 +135,6 @@ func TestCondition_KillSwitchCompound(t *testing.T) {
 	}
 }
 
-// #2541: the full date-builtin set is usable as condition operands, not just
-// addDuration. A TRUE calendar-day window (midnight boundary) is
-// year+month+dayOfMonth equality against the run clock -- the
-// yesterday-evening row is the discriminator: a rolling-24h approximation
-// fires it, a calendar-day gate must not.
-func TestCondition_CalendarDayWindow(t *testing.T) {
-	cond := `year(item.createdAt) == year(timestamp()) && month(item.createdAt) == month(timestamp()) && dayOfMonth(item.createdAt) == dayOfMonth(timestamp())`
-	now := "2026-07-14T09:00:00Z"
-
-	cases := []struct {
-		name      string
-		createdAt string
-		want      bool
-	}{
-		{"just_after_midnight_today", "2026-07-14T00:30:00Z", true},
-		{"late_tonight", "2026-07-14T23:59:00Z", true},
-		{"yesterday_evening_within_24h", "2026-07-13T22:00:00Z", false},
-		{"same_day_of_month_prior_month", "2026-06-14T09:00:00Z", false},
-		{"same_date_prior_year", "2025-07-14T09:00:00Z", false},
-	}
-	for _, tc := range cases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			item := map[string]any{"createdAt": tc.createdAt}
-			if got := evalItemCond(t, item, now, cond); got != tc.want {
-				t.Errorf("calendar-day gate = %v for createdAt=%s (now=%s), want %v (#2541)",
-					got, tc.createdAt, now, tc.want)
-			}
-		})
-	}
-}
-
 // daysBetween as a comparison operand: the streak gate "today is exactly one
 // day after the last activity".
 func TestCondition_DaysBetweenOperand(t *testing.T) {
@@ -181,10 +149,14 @@ func TestCondition_DaysBetweenOperand(t *testing.T) {
 	}
 }
 
-// The remaining #2541 builtins evaluate as operands too (quarter,
-// subtractTimestamps, isAnniversary, isFirstDayOfQuarter), and `now` inside a
-// builtin call resolves to the run clock rather than the literal text "now".
-func TestCondition_RemainingDateBuiltinOperands(t *testing.T) {
+// #2707 (the #2620 ruling): the seven calendar builtins retired under the
+// 2026.08 epoch are no longer condition operands. A string condition naming
+// one falls through matchBuiltinCall unrecognised to the literal-string
+// fallback, so the gate is constant-false rather than resolving a calendar
+// value -- the pre-#2541 behavior, now permanent for the retired names. (The
+// authored => form rejects them earlier, at parse.) addDuration and
+// daysBetween remain first-class operands (tests above).
+func TestCondition_RetiredCalendarBuiltinsDoNotResolve(t *testing.T) {
 	item := map[string]any{"payload": map[string]any{
 		"startedAt": "2024-07-14T00:00:00Z",
 	}}
@@ -193,14 +165,13 @@ func TestCondition_RemainingDateBuiltinOperands(t *testing.T) {
 	cases := []string{
 		`quarter(timestamp()) == 3`,
 		`isAnniversary(item.payload.startedAt, timestamp()) == true`,
-		`isFirstDayOfQuarter(timestamp()) == false`,
 		`year(now) == 2026`,
 	}
 	for _, cond := range cases {
 		cond := cond
 		t.Run(cond, func(t *testing.T) {
-			if !evalItemCond(t, item, now, cond) {
-				t.Errorf("%s = false, want true (#2541)", cond)
+			if evalItemCond(t, item, now, cond) {
+				t.Errorf("%s = true; retired builtins must not resolve as condition operands (#2707)", cond)
 			}
 		})
 	}

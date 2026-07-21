@@ -878,63 +878,6 @@ func (e *mutationTemplateEvaluator) evalParserExpression(ctx context.Context, ex
 		}
 		rt := NewRuntimeEvaluator(nil)
 		return rt.EvaluateDaysBetween(fmt.Sprintf("%v", d1), fmt.Sprintf("%v", d2))
-	case *languageParser.SubtractTimestampsExpr:
-		t1, err := e.evalParserExpression(ctx, t.T1)
-		if err != nil {
-			return nil, err
-		}
-		t2, err := e.evalParserExpression(ctx, t.T2)
-		if err != nil {
-			return nil, err
-		}
-		rt := NewRuntimeEvaluator(nil)
-		return rt.EvaluateSubtractTimestamps(fmt.Sprintf("%v", t1), fmt.Sprintf("%v", t2))
-	case *languageParser.YearExpr:
-		ts, err := e.evalParserExpression(ctx, t.Target)
-		if err != nil {
-			return nil, err
-		}
-		rt := NewRuntimeEvaluator(nil)
-		return rt.EvaluateYear(fmt.Sprintf("%v", ts))
-	case *languageParser.QuarterExpr:
-		ts, err := e.evalParserExpression(ctx, t.Target)
-		if err != nil {
-			return nil, err
-		}
-		rt := NewRuntimeEvaluator(nil)
-		return rt.EvaluateQuarter(fmt.Sprintf("%v", ts))
-	case *languageParser.MonthExpr:
-		ts, err := e.evalParserExpression(ctx, t.Target)
-		if err != nil {
-			return nil, err
-		}
-		rt := NewRuntimeEvaluator(nil)
-		return rt.EvaluateMonth(fmt.Sprintf("%v", ts))
-	case *languageParser.DayOfMonthExpr:
-		ts, err := e.evalParserExpression(ctx, t.Target)
-		if err != nil {
-			return nil, err
-		}
-		rt := NewRuntimeEvaluator(nil)
-		return rt.EvaluateDayOfMonth(fmt.Sprintf("%v", ts))
-	case *languageParser.IsAnniversaryExpr:
-		start, err := e.evalParserExpression(ctx, t.StartDate)
-		if err != nil {
-			return nil, err
-		}
-		check, err := e.evalParserExpression(ctx, t.CheckDate)
-		if err != nil {
-			return nil, err
-		}
-		rt := NewRuntimeEvaluator(nil)
-		return rt.EvaluateIsAnniversary(fmt.Sprintf("%v", start), fmt.Sprintf("%v", check))
-	case *languageParser.IsFirstDayOfQuarterExpr:
-		ts, err := e.evalParserExpression(ctx, t.Target)
-		if err != nil {
-			return nil, err
-		}
-		rt := NewRuntimeEvaluator(nil)
-		return rt.EvaluateIsFirstDayOfQuarter(fmt.Sprintf("%v", ts))
 	default:
 		return nil, fmt.Errorf("unsupported expression in mutation template: %T", expr)
 	}

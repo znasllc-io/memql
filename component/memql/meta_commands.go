@@ -75,13 +75,36 @@ func (e *MemQLEngine) tryParseMetaCommand(query string) (*BuiltinFunctionExpress
 // engine's Function registry, returning the Function only when it is
 // a builtin (FunctionTypeBuiltin). The existing FunctionRegistry IS
 // the meta-command catalogue -- there is no second source of truth.
+// A miss on the primary name falls back to the builtins' declared
+// @alias names (BuiltinAliases), so memqlVersion() keeps resolving to
+// the serviceVersion builtin now that the expression-builtin
+// special-case is retired (#2707) -- the alias lives in the registry,
+// not in either parser.
 func (e *MemQLEngine) lookupBuiltinFunction(name string) (*Function, bool) {
 	if e == nil || e.functions == nil {
 		return nil, false
 	}
-	fn, err := e.functions.Get(strings.TrimSpace(name))
+	trimmed := strings.TrimSpace(name)
+	fn, err := e.functions.Get(trimmed)
 	if err != nil || fn == nil {
-		return nil, false
+		fn = nil
+		for _, cand := range e.functions.List() {
+			if cand == nil || !cand.IsBuiltin() {
+				continue
+			}
+			for _, alias := range cand.BuiltinAliases {
+				if strings.EqualFold(alias, trimmed) {
+					fn = cand
+					break
+				}
+			}
+			if fn != nil {
+				break
+			}
+		}
+		if fn == nil {
+			return nil, false
+		}
 	}
 	if !fn.IsBuiltin() {
 		return nil, false

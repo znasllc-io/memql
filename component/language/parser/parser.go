@@ -2830,24 +2830,6 @@ func expressionToFunctionCall(e ExpressionNode) (*FunctionCallExpr, bool) {
 		return &FunctionCallExpr{Name: "daysBetween", Args: map[string]any{
 			"0": t.Date1, "1": t.Date2,
 		}}, true
-	case *SubtractTimestampsExpr:
-		return &FunctionCallExpr{Name: "subtractTimestamps", Args: map[string]any{
-			"0": t.T1, "1": t.T2,
-		}}, true
-	case *YearExpr:
-		return &FunctionCallExpr{Name: "year", Args: map[string]any{"0": t.Target}}, true
-	case *QuarterExpr:
-		return &FunctionCallExpr{Name: "quarter", Args: map[string]any{"0": t.Target}}, true
-	case *MonthExpr:
-		return &FunctionCallExpr{Name: "month", Args: map[string]any{"0": t.Target}}, true
-	case *DayOfMonthExpr:
-		return &FunctionCallExpr{Name: "dayOfMonth", Args: map[string]any{"0": t.Target}}, true
-	case *IsAnniversaryExpr:
-		return &FunctionCallExpr{Name: "isAnniversary", Args: map[string]any{
-			"0": t.StartDate, "1": t.CheckDate,
-		}}, true
-	case *IsFirstDayOfQuarterExpr:
-		return &FunctionCallExpr{Name: "isFirstDayOfQuarter", Args: map[string]any{"0": t.Target}}, true
 	default:
 		return nil, false
 	}
@@ -6829,17 +6811,6 @@ func (p *Parser) parseErrorAccessor() (ExpressionNode, error) {
 	return &ErrorExpr{Message: message}, nil
 }
 
-// parseMemqlVersionFunction parses memqlVersion() - current service version.
-func (p *Parser) parseMemqlVersionFunction() (ExpressionNode, error) {
-	if err := p.expect(TokenParenClose); err != nil {
-		return nil, err
-	}
-	return &BuiltinFunctionExpr{
-		Name:     "memqlVersion",
-		Executor: "serviceVersion",
-	}, nil
-}
-
 // parseConcatFunction parses concat(a, b, ...) - string concatenation.
 func (p *Parser) parseConcatFunction() (ExpressionNode, error) {
 	args, err := p.parseExpressionArgList()
@@ -7137,124 +7108,6 @@ func (p *Parser) parseDaysBetweenFunction() (ExpressionNode, error) {
 	}
 
 	return &DaysBetweenExpr{Date1: date1, Date2: date2}, nil
-}
-
-// parseSubtractTimestampsFunction parses subtractTimestamps(t1, t2).
-func (p *Parser) parseSubtractTimestampsFunction() (ExpressionNode, error) {
-	t1, err := p.parseExpressionArg()
-	if err != nil {
-		return nil, err
-	}
-
-	if !p.check(TokenComma) {
-		return nil, newParseErrorf(&p.current, "subtractTimestamps() requires two arguments")
-	}
-	p.advance()
-
-	t2, err := p.parseExpressionArg()
-	if err != nil {
-		return nil, err
-	}
-
-	if err := p.expect(TokenParenClose); err != nil {
-		return nil, err
-	}
-
-	return &SubtractTimestampsExpr{T1: t1, T2: t2}, nil
-}
-
-// parseYearFunction parses year(timestamp).
-func (p *Parser) parseYearFunction() (ExpressionNode, error) {
-	target, err := p.parseExpressionArg()
-	if err != nil {
-		return nil, err
-	}
-
-	if err := p.expect(TokenParenClose); err != nil {
-		return nil, err
-	}
-
-	return &YearExpr{Target: target}, nil
-}
-
-// parseQuarterFunction parses quarter(timestamp).
-func (p *Parser) parseQuarterFunction() (ExpressionNode, error) {
-	target, err := p.parseExpressionArg()
-	if err != nil {
-		return nil, err
-	}
-
-	if err := p.expect(TokenParenClose); err != nil {
-		return nil, err
-	}
-
-	return &QuarterExpr{Target: target}, nil
-}
-
-// parseMonthFunction parses month(timestamp).
-func (p *Parser) parseMonthFunction() (ExpressionNode, error) {
-	target, err := p.parseExpressionArg()
-	if err != nil {
-		return nil, err
-	}
-
-	if err := p.expect(TokenParenClose); err != nil {
-		return nil, err
-	}
-
-	return &MonthExpr{Target: target}, nil
-}
-
-// parseDayOfMonthFunction parses dayOfMonth(timestamp).
-func (p *Parser) parseDayOfMonthFunction() (ExpressionNode, error) {
-	target, err := p.parseExpressionArg()
-	if err != nil {
-		return nil, err
-	}
-
-	if err := p.expect(TokenParenClose); err != nil {
-		return nil, err
-	}
-
-	return &DayOfMonthExpr{Target: target}, nil
-}
-
-// parseIsAnniversaryFunction parses isAnniversary(startDate, checkDate).
-func (p *Parser) parseIsAnniversaryFunction() (ExpressionNode, error) {
-	startDate, err := p.parseExpressionArg()
-	if err != nil {
-		return nil, err
-	}
-
-	if !p.check(TokenComma) {
-		return nil, newParseErrorf(&p.current, "isAnniversary() requires two arguments")
-	}
-	p.advance()
-
-	checkDate, err := p.parseExpressionArg()
-	if err != nil {
-		return nil, err
-	}
-
-	if err := p.expect(TokenParenClose); err != nil {
-		return nil, err
-	}
-
-	return &IsAnniversaryExpr{StartDate: startDate, CheckDate: checkDate}, nil
-}
-
-// parseIsFirstDayOfQuarterFunction parses isFirstDayOfQuarter(timestamp).
-func (p *Parser) parseIsFirstDayOfQuarterFunction() (ExpressionNode, error) {
-	target, err := p.parseExpressionArg()
-	if err != nil {
-		return nil, err
-	}
-
-	if err := p.expect(TokenParenClose); err != nil {
-		return nil, err
-	}
-
-	return &IsFirstDayOfQuarterExpr{Target: target}, nil
 }
 
 // parseContainsFunction parses contains(str, substr).

@@ -179,11 +179,6 @@ func findIdentifierComparisonBranchValue(node languageParser.ExpressionNode, inB
 			return cmp
 		}
 		return findIdentifierComparisonBranchValue(n.Duration, inBranch)
-	case *languageParser.SubtractTimestampsExpr:
-		if cmp := findIdentifierComparisonBranchValue(n.T1, inBranch); cmp != nil {
-			return cmp
-		}
-		return findIdentifierComparisonBranchValue(n.T2, inBranch)
 	case *languageParser.DaysBetweenExpr:
 		if cmp := findIdentifierComparisonBranchValue(n.Date1, inBranch); cmp != nil {
 			return cmp

@@ -22,14 +22,6 @@ func TestEvaluateDateBuiltin_Values(t *testing.T) {
 		{"addDuration_day", "addDuration", []any{"2026-01-01T00:00:00Z", "P1D"}, "2026-01-02T00:00:00Z"},
 		{"addDuration_date_only", "addDuration", []any{"2026-03-10", "P1D"}, "2026-03-11T00:00:00Z"},
 		{"daysBetween", "daysBetween", []any{"2026-01-01", "2026-01-11"}, 10},
-		{"subtractTimestamps", "subtractTimestamps", []any{"2026-01-01T02:00:00Z", "2026-01-01T00:00:00Z"}, "PT2H0M0S"},
-		{"year", "year", []any{"2026-07-14T09:00:00Z"}, 2026},
-		{"quarter", "quarter", []any{"2026-07-14"}, 3},
-		{"month", "month", []any{"2026-07-14"}, 7},
-		{"dayOfMonth", "dayOfMonth", []any{"2026-07-14"}, 14},
-		{"isAnniversary", "isAnniversary", []any{"2024-07-14", "2026-07-14"}, true},
-		{"isFirstDayOfQuarter", "isFirstDayOfQuarter", []any{"2026-07-01"}, true},
-		{"isFirstDayOfQuarter_false", "isFirstDayOfQuarter", []any{"2026-07-02"}, false},
 	}
 	for _, tc := range cases {
 		tc := tc
@@ -46,30 +38,38 @@ func TestEvaluateDateBuiltin_Values(t *testing.T) {
 }
 
 func TestEvaluateDateBuiltin_Errors(t *testing.T) {
-	if _, err := EvaluateDateBuiltin("year", []any{"not-a-date"}); err == nil || !strings.Contains(err.Error(), "invalid timestamp") {
-		t.Errorf("year(not-a-date) err = %v, want invalid-timestamp", err)
+	if _, err := EvaluateDateBuiltin("addDuration", []any{"not-a-date", "P1D"}); err == nil || !strings.Contains(err.Error(), "invalid timestamp") {
+		t.Errorf("addDuration(not-a-date) err = %v, want invalid-timestamp", err)
 	}
 	if _, err := EvaluateDateBuiltin("daysBetween", []any{"2026-01-01"}); err == nil || !strings.Contains(err.Error(), "expects 2 args") {
 		t.Errorf("daysBetween arity err = %v, want expects-2-args", err)
 	}
-	if _, err := EvaluateDateBuiltin("year", []any{nil}); err == nil || !strings.Contains(err.Error(), "resolved to nil") {
-		t.Errorf("year(nil) err = %v, want resolved-to-nil", err)
+	if _, err := EvaluateDateBuiltin("daysBetween", []any{nil, "2026-01-01"}); err == nil || !strings.Contains(err.Error(), "resolved to nil") {
+		t.Errorf("daysBetween(nil) err = %v, want resolved-to-nil", err)
 	}
 	if _, err := EvaluateDateBuiltin("notADateFn", []any{"x"}); err == nil {
 		t.Errorf("unknown builtin accepted; want error")
 	}
+	// #2707: the seven retired calendar builtins are gone from the dispatch.
+	for _, retired := range []string{"subtractTimestamps", "year", "quarter", "month", "dayOfMonth", "isAnniversary", "isFirstDayOfQuarter"} {
+		if _, err := EvaluateDateBuiltin(retired, []any{"2026-07-14"}); err == nil || !strings.Contains(err.Error(), "not a date/duration builtin") {
+			t.Errorf("%s must be rejected by the dispatch (retired, #2707), err = %v", retired, err)
+		}
+	}
 }
 
 func TestIsDateBuiltin(t *testing.T) {
-	for _, name := range []string{
-		"addDuration", "daysBetween", "subtractTimestamps", "year",
-		"quarter", "month", "dayOfMonth", "isAnniversary", "isFirstDayOfQuarter",
-	} {
+	for _, name := range []string{"addDuration", "daysBetween"} {
 		if !IsDateBuiltin(name) {
 			t.Errorf("IsDateBuiltin(%q) = false, want true", name)
 		}
 	}
-	for _, name := range []string{"coalesce", "concat", "cond", "timestamp", ""} {
+	for _, name := range []string{
+		"coalesce", "concat", "cond", "timestamp", "",
+		// Retired under 2026.08 (#2620 ruling / #2707):
+		"subtractTimestamps", "year", "quarter", "month",
+		"dayOfMonth", "isAnniversary", "isFirstDayOfQuarter",
+	} {
 		if IsDateBuiltin(name) {
 			t.Errorf("IsDateBuiltin(%q) = true, want false", name)
 		}
@@ -100,14 +100,6 @@ func TestEvalCollScalar_DateBuiltinDispatch(t *testing.T) {
 	}
 	if got != int64(2) {
 		t.Errorf("daysBetween / 7 = %#v, want int64(2)", got)
-	}
-
-	got, err = eval(`year("2026-07-14")`)
-	if err != nil {
-		t.Fatalf("year: %v", err)
-	}
-	if got != 2026 {
-		t.Errorf("year = %#v, want 2026", got)
 	}
 
 	// A non-date function call keeps the unsupported error.

@@ -937,31 +937,6 @@ func TestParser_BareNowIsTimestamp(t *testing.T) {
 	}
 }
 
-func TestParser_MemqlVersionFunction(t *testing.T) {
-	lexer := NewLexer("memqlVersion()")
-	tokens, err := lexer.Tokenize()
-	if err != nil {
-		t.Fatalf("Lexer error: %v", err)
-	}
-
-	parser := NewParser(tokens)
-	ast, err := parser.Parse()
-	if err != nil {
-		t.Fatalf("Parser error: %v", err)
-	}
-
-	builtin, ok := ast.(*BuiltinFunctionExpr)
-	if !ok {
-		t.Fatalf("Expected BuiltinFunctionExpr, got %T", ast)
-	}
-	if builtin.Name != "memqlVersion" {
-		t.Fatalf("Expected builtin name memqlVersion, got %q", builtin.Name)
-	}
-	if builtin.Executor != "serviceVersion" {
-		t.Fatalf("Expected executor serviceVersion, got %q", builtin.Executor)
-	}
-}
-
 func TestParser_NoArgAccessors(t *testing.T) {
 	tests := []struct {
 		input    string
