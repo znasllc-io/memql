@@ -553,3 +553,26 @@ func TestDocComment_MixedCommentLineStillAttaches(t *testing.T) {
 		t.Errorf("mixed comment-only line must still attach its /// half, got %q", got)
 	}
 }
+
+// LeadingDocComment (the catalog's extraction) matches engine adjacency for
+// prelude shapes: a file-header /// ABOVE the use prelude is discarded (the
+// use line breaks adjacency in the real parser), a construct /// BELOW the
+// prelude attaches, and a multi-line import ( ... ) block is a prelude too.
+func TestLeadingDocComment_PreludeShapes(t *testing.T) {
+	logicSrc := "logic preludeProbe {\n  args {\n    a string @required\n  }\n  body {\n    return coalesce(args.a, \"\")\n  }\n}"
+	for name, tc := range map[string]struct {
+		src  string
+		want string
+	}{
+		"doc-below-use":         {"use cognition.concepts.{ space }\n\n/// Construct doc.\n" + logicSrc, "Construct doc."},
+		"doc-above-use-dropped": {"/// File header.\nuse cognition.concepts.{ space }\n\n" + logicSrc, ""},
+		"multiline-import":      {"import (\n  \"./cognition/space\"\n)\n\n/// Construct doc.\n" + logicSrc, "Construct doc."},
+		"no-prelude":            {"/// Construct doc.\n" + logicSrc, "Construct doc."},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := LeadingDocComment(tc.src); got != tc.want {
+				t.Errorf("%s: LeadingDocComment = %q, want %q", name, got, tc.want)
+			}
+		})
+	}
+}

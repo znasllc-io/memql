@@ -186,20 +186,43 @@ func LeadingDocComment(source string) string {
 	return p.takeDocFor(tokens[0].Line)
 }
 
-
-// stripLeadingUseLines drops initial use/import declaration lines and the
-// blank lines around them, keeping everything from the first other line on
-// (comments included, so a /// block above the construct survives).
+// stripLeadingUseLines drops the use/import prelude an authoring slice
+// carries -- including grammar-legal multi-line `import ( ... )` blocks --
+// plus anything ABOVE the prelude's last line: a file-header /// or comment
+// above the imports belongs to the file, not the construct, and the engine
+// parser discards it (a use line breaks adjacency), so the catalog must
+// too. Comments and blanks BETWEEN the prelude and the construct survive,
+// keeping the construct's own /// block attached.
 func stripLeadingUseLines(source string) string {
 	lines := strings.Split(source, "\n")
-	i := 0
-	for i < len(lines) {
-		t := strings.TrimSpace(lines[i])
-		if t == "" || strings.HasPrefix(t, "use ") || strings.HasPrefix(t, "import ") || strings.HasPrefix(t, "import(") {
-			i++
+	lastPrelude := -1
+	inImportBlock := false
+scan:
+	for i, l := range lines {
+		t := strings.TrimSpace(l)
+		switch {
+		case inImportBlock:
+			lastPrelude = i
+			if strings.HasPrefix(t, ")") {
+				inImportBlock = false
+			}
+		case strings.HasPrefix(t, "use "):
+			lastPrelude = i
+		case t == "import (" || strings.HasPrefix(t, "import ("):
+			lastPrelude = i
+			inImportBlock = true
+		case strings.HasPrefix(t, "import "):
+			lastPrelude = i
+		case t == "" || strings.HasPrefix(t, "//"):
+			// May be file-header prose above the prelude or the
+			// construct's own doc below it -- decided by lastPrelude.
 			continue
+		default:
+			break scan
 		}
-		break
 	}
-	return strings.Join(lines[i:], "\n")
+	if lastPrelude < 0 {
+		return source
+	}
+	return strings.Join(lines[lastPrelude+1:], "\n")
 }
