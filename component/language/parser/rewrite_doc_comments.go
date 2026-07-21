@@ -437,6 +437,13 @@ func resolvedConstructDescs(source string) map[string]string {
 	}
 	for _, def := range file.Definitions {
 		switch d := def.(type) {
+		case *SeedDecl:
+			// Attribute-only kinds: no DocComment slot exists, so the
+			// resolved description IS the attribute value -- comparing it
+			// makes the verifier itself catch a kind-guard regression.
+			put("seed", d.Name, "", d.Description)
+		case *BuiltinDecl:
+			put("builtin", d.Name, "", attrDesc(d.Attributes))
 		case *FunctionDef:
 			put(string(d.Type), d.Name, d.DocComment, d.Description)
 		case *ConceptDecl:

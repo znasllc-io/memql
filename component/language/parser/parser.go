@@ -7664,7 +7664,6 @@ func enumAttributeFromValues(values []string) *Attribute {
 	return attr
 }
 
-
 // declShapeAhead reports whether the tokens after the current contextual
 // keyword form a declaration opening: IDENT { or IDENT IDENT { (the
 // two-identifier form covers `spec BOUND NAME {` and `shape CONCEPT NAME {`).
