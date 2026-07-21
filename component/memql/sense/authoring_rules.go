@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/language/parser"
@@ -585,34 +586,59 @@ func ActorUnknownPropertyDiagnostics(source string) []Diagnostic {
 // re-tunable.
 const descriptionLengthTarget = 200
 
-// descriptionLengthRule hints when a construct's RESOLVED description (the
-// /// doc comment when present, else @description -- ruling-3 precedence)
-// exceeds the editorial target. The corpus's long tail is grandfathered by
-// severity: a hint never fails the whole-tree sweep or any gate.
+// descriptionLengthRule hints when a resolved description (the /// doc
+// comment when present, else @description -- ruling-3 precedence) exceeds
+// the editorial target, across the full ruling-1 target set: every
+// describable declaration kind plus args{} fields. The corpus's long tail
+// is grandfathered by severity: a hint never fails the whole-tree sweep or
+// any gate. Lengths are rune counts -- the target is defined in characters.
 func descriptionLengthRule(file *parser.File, source string) []Diagnostic {
 	if file == nil {
 		return nil
 	}
 	var diagnostics []Diagnostic
-	report := func(name string, resolved string) {
-		if len(resolved) <= descriptionLengthTarget {
-			return
-		}
-		line := 1
-		// Anchor on the construct's name where findable; the hint is
-		// advisory, so a fuzzy anchor is acceptable.
-		for i, l := range strings.Split(source, "\n") {
-			if strings.Contains(l, name) && !strings.HasPrefix(strings.TrimSpace(l), "//") {
-				line = i + 1
-				break
-			}
-		}
+	hint := func(pos Position, subject string, runes int) {
 		diagnostics = append(diagnostics, Diagnostic{
-			Range:    Range{Start: Position{Line: line, Column: 1}, End: Position{Line: line, Column: 2}},
+			Range:    Range{Start: pos, End: Position{Line: pos.Line, Column: pos.Column + 1}},
 			Severity: SeverityHint,
-			Message:  fmt.Sprintf("description is %d characters; the editorial target is ~%d (#2601 ruling 5) -- consider moving elaboration into an ordinary comment above the /// block", len(resolved), descriptionLengthTarget),
+			Message:  fmt.Sprintf("%sdescription is %d characters; the editorial target is ~%d (#2601 ruling 5) -- consider moving elaboration into an ordinary comment above the /// block", subject, runes, descriptionLengthTarget),
 			Code:     "description-length",
 		})
+	}
+	report := func(name string, resolved string) {
+		runes := utf8.RuneCountInString(resolved)
+		if runes <= descriptionLengthTarget {
+			return
+		}
+		// Anchor on the declaration header (exact-name match), never on
+		// an earlier call site or a field that merely contains the name
+		// as a substring.
+		hint(declHeaderPos(source, name), "", runes)
+	}
+	reportArgs := func(owner string, schema *parser.ArgsSchema) {
+		if schema == nil {
+			return
+		}
+		ownerPos := declHeaderPos(source, owner)
+		var walk func(fields []*parser.ArgsField)
+		walk = func(fields []*parser.ArgsField) {
+			for _, f := range fields {
+				if f == nil {
+					continue
+				}
+				// Args fields have a single description channel:
+				// the /// doc comment (#2615 stripped the discarded
+				// @description form).
+				if runes := utf8.RuneCountInString(f.DocComment); runes > descriptionLengthTarget {
+					hint(argsFieldAnchor(source, ownerPos, f.Name), fmt.Sprintf("args field %q ", f.Name), runes)
+				}
+				walk(f.Nested)
+				if f.Items != nil {
+					walk([]*parser.ArgsField{f.Items})
+				}
+			}
+		}
+		walk(schema.Fields)
 	}
 	attrDesc := func(attrs []*parser.Attribute) string {
 		for _, a := range attrs {
@@ -628,6 +654,7 @@ func descriptionLengthRule(file *parser.File, source string) []Diagnostic {
 		switch d := def.(type) {
 		case *parser.FunctionDef:
 			report(d.Name, parser.EffectiveDescription(d.DocComment, d.Description))
+			reportArgs(d.Name, d.ArgsSchema)
 		case *parser.ConceptDecl:
 			report(d.Name, parser.EffectiveDescription(d.DocComment, attrDesc(d.Attributes)))
 		case *parser.ShapeDecl:
@@ -636,7 +663,65 @@ func descriptionLengthRule(file *parser.File, source string) []Diagnostic {
 			report(d.Name, parser.EffectiveDescription(d.DocComment, d.Description))
 		case *parser.SpecDecl:
 			report(d.Name, parser.EffectiveDescription(d.DocComment, attrDesc(d.Attributes)))
+		case *parser.PromptDecl:
+			report(d.Name, parser.EffectiveDescription(d.DocComment, attrDesc(d.Attributes)))
+		case *parser.ProviderDecl:
+			report(d.Name, parser.EffectiveDescription(d.DocComment, d.Description))
+		case *parser.PolicyDecl:
+			report(d.Name, parser.EffectiveDescription(d.DocComment, d.Description))
+		case *parser.CapabilityDecl:
+			report(d.Name, parser.EffectiveDescription(d.DocComment, attrDesc(d.Attributes)))
+			reportArgs(d.Name, d.Args)
+		case *parser.ActionDecl:
+			report(d.Name, parser.EffectiveDescription(d.DocComment, attrDesc(d.Attributes)))
+			reportArgs(d.Name, d.Args)
 		}
 	}
 	return diagnostics
+}
+
+// declHeaderPos anchors a length hint on the line declaring `name`: a line
+// whose first word is a construct keyword and where `name` appears as one of
+// the following whole words (allowing for an optional concept binder, e.g.
+// `query <Concept> <name>`). Exact-word matching -- an earlier call site or
+// a field containing the name as a substring never wins. Falls back to line
+// 1 when no header matches (the hint is advisory).
+func declHeaderPos(source, name string) Position {
+	for i, l := range strings.Split(source, "\n") {
+		fields := strings.Fields(l)
+		if len(fields) < 2 || !constructKeywords[fields[0]] {
+			continue
+		}
+		limit := len(fields)
+		if limit > 4 {
+			limit = 4
+		}
+		for _, f := range fields[1:limit] {
+			if f == name || strings.Trim(f, "\"") == name {
+				return Position{Line: i + 1, Column: 1}
+			}
+		}
+	}
+	return Position{Line: 1, Column: 1}
+}
+
+// argsFieldAnchor anchors an args-field hint on the field's own line: the
+// first line at or after the owning construct's header whose first word is
+// the field name. Falls back to the construct header when the field line is
+// not found (the hint is advisory; a header anchor beats line 1).
+func argsFieldAnchor(source string, ownerPos Position, fieldName string) Position {
+	lines := strings.Split(source, "\n")
+	for i := ownerPos.Line - 1; i >= 0 && i < len(lines); i++ {
+		trimmed := strings.TrimSpace(lines[i])
+		if strings.HasPrefix(trimmed, "//") {
+			continue
+		}
+		if strings.HasPrefix(trimmed, fieldName) {
+			rest := trimmed[len(fieldName):]
+			if rest == "" || !isIdentByte(rest[0]) {
+				return Position{Line: i + 1, Column: 1}
+			}
+		}
+	}
+	return ownerPos
 }
