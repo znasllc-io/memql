@@ -22,15 +22,18 @@ func ParseProviderDecl(source string) (*ast.ProviderDecl, error) {
 		return nil, fmt.Errorf("tokenise: %w", err)
 	}
 	p := NewParser(tokens)
+	p.SetDocComments(lexer.DocComments())
 
 	// The slice arrives with any leading attribute set already in
 	// place: walk the same dispatch parseFile would use so the
 	// attribute collection + provider keyword recognition stays in
 	// one canonical place.
+	defFirstLine := p.current.Line
 	def, err := p.parseDefinition()
 	if err != nil {
 		return nil, err
 	}
+	attachDocComment(def, p.takeDocFor(defFirstLine))
 	decl, ok := def.(*ast.ProviderDecl)
 	if !ok {
 		return nil, fmt.Errorf("expected provider declaration, got %T", def)

@@ -61,6 +61,10 @@ func (p *Parser) parseArgsBlockField() (*ArgsField, error) {
 	if !p.check(TokenIdentifier) {
 		return nil, newParseErrorf(&p.current, "expected field name in args block, got %q", p.current.Literal)
 	}
+	// A /// block immediately above the field is the field's doc comment
+	// (memql#2633) -- the ONLY channel for arg descriptions; the args-field
+	// @description spelling stays retired (#2615).
+	fieldDoc := p.takeDocFor(p.current.Line)
 	name := p.current.Literal
 	// Reserved engine names (S6, memql#2361 -- implementing the documented
 	// rejection): `now`, `actor`, `partition`, `config`, and `trace` are
@@ -101,7 +105,7 @@ func (p *Parser) parseArgsBlockField() (*ArgsField, error) {
 		return nil, newParseErrorf(&p.current, "expected type after field name %q in args block", name)
 	}
 
-	field := &ArgsField{Name: name, Type: typ, Optional: true}
+	field := &ArgsField{Name: name, Type: typ, Optional: true, DocComment: fieldDoc}
 	if itemType != "" {
 		field.Items = &ArgsField{Type: itemType}
 	}

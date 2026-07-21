@@ -24,11 +24,14 @@ func ParseSpecDecl(source string) (*ast.SpecDecl, error) {
 		return nil, fmt.Errorf("tokenise: %w", err)
 	}
 	p := NewParser(tokens)
+	p.SetDocComments(lexer.DocComments())
 
+	defFirstLine := p.current.Line
 	def, err := p.parseDefinition()
 	if err != nil {
 		return nil, err
 	}
+	attachDocComment(def, p.takeDocFor(defFirstLine))
 	decl, ok := def.(*ast.SpecDecl)
 	if !ok {
 		return nil, fmt.Errorf("expected spec or trait declaration, got %T", def)

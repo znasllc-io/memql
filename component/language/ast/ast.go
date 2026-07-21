@@ -1115,6 +1115,10 @@ type FunctionReceiver struct {
 // FunctionDef represents a named function definition.
 // Go-style syntax: func (Type) name(args any) (any, error) { ... }
 type FunctionDef struct {
+	// DocComment carries the joined /// doc-comment block attached
+	// immediately above this declaration (memql#2633, capture-only;
+	// description sourcing flips in #2634).
+	DocComment string
 	Attributes  []*Attribute      // @name Python-style attributes
 	Receiver    *FunctionReceiver // Go-style receiver: (Query), (m Mutation), etc.
 	Name        string
@@ -1182,6 +1186,10 @@ type FunctionArg struct {
 
 // AutomationDef represents an automation definition.
 type AutomationDef struct {
+	// DocComment carries the joined /// doc-comment block attached
+	// immediately above this declaration (memql#2633, capture-only;
+	// description sourcing flips in #2634).
+	DocComment string
 	Attributes  []*Attribute // @name Python-style attributes
 	Name        string
 	Description string
@@ -1230,6 +1238,10 @@ type ArgsSchema struct {
 
 // ArgsField defines a single field's type assertion.
 type ArgsField struct {
+	// DocComment carries the joined /// doc-comment block attached
+	// immediately above this declaration (memql#2633, capture-only;
+	// description sourcing flips in #2634).
+	DocComment string
 	// Name is the field name (e.g., "subject", "email")
 	Name string
 	// Type is the expected type: "string", "number", "bool", "object", "array"
@@ -1444,6 +1456,10 @@ func (*File) node() {}
 // downstream consumers (Sense hover, diagnostics, schema builder) can
 // reference it before the legacy concept_parser.go is retired.
 type ConceptDecl struct {
+	// DocComment carries the joined /// doc-comment block attached
+	// immediately above this declaration (memql#2633, capture-only;
+	// description sourcing flips in #2634).
+	DocComment string
 	Name          string              // concept name (post-colon trailing segment)
 	Attributes    []*Attribute        // concept-level annotations (@description, @scope, @cache, ...)
 	Properties    []*PropertyDecl     // field declarations
@@ -1521,6 +1537,10 @@ type BuiltinField struct {
 // form becomes load-bearing again, the lexer grows triple-quoted
 // support first.
 type PromptDecl struct {
+	// DocComment carries the joined /// doc-comment block attached
+	// immediately above this declaration (memql#2633, capture-only;
+	// description sourcing flips in #2634).
+	DocComment string
 	Name       string         // prompt name
 	Attributes []*Attribute   // prompt-level annotations
 	Fields     []*PromptField // body field declarations (the input schema)
@@ -1557,6 +1577,10 @@ func (*PromptDecl) node() {}
 // automation `action <name>(...)` step. The I7 call-graph validator enforces
 // the one-external-capability / no-graph rules.
 type ActionDecl struct {
+	// DocComment carries the joined /// doc-comment block attached
+	// immediately above this declaration (memql#2633, capture-only;
+	// description sourcing flips in #2634).
+	DocComment string
 	Name       string           // action name (the slice/reference name)
 	Attributes []*Attribute     // action-level annotations (@description, @enabled/@disabled)
 	Args       *ArgsSchema      // input schema (the `args { ... }` block); nil when omitted
@@ -1607,6 +1631,10 @@ type ActionCallArg struct {
 // (`capability NAME(args)` call sites) and the action rewrite that
 // consumes it land in later stories (2 + 4).
 type CapabilityDecl struct {
+	// DocComment carries the joined /// doc-comment block attached
+	// immediately above this declaration (memql#2633, capture-only;
+	// description sourcing flips in #2634).
+	DocComment string
 	Name       string       // dotted/namespaced capability verb (e.g. "integration.github.tagRelease")
 	Attributes []*Attribute // capability-level annotations (@sideEffect, @description, @enabled/@disabled)
 	Args       *ArgsSchema  // input schema from the `args { ... }` block; nil when omitted
@@ -1666,6 +1694,10 @@ type PromptField struct {
 // classification of whether the entry binds a concept (specs do via
 // file-top use + signature; traits are concept-agnostic).
 type SpecDecl struct {
+	// DocComment carries the joined /// doc-comment block attached
+	// immediately above this declaration (memql#2633, capture-only;
+	// description sourcing flips in #2634).
+	DocComment string
 	Name       string         // spec / trait name
 	BoundName  string         // signature binding: `spec <BoundName> <Name>` resolves to an imported shape XOR concept (specs only; empty for traits)
 	IsTrait    bool           // true for `trait NAME { ... }`, false for `spec NAME { ... }`
@@ -1698,6 +1730,10 @@ func (*SpecDecl) node() {}
 // recorded on SignatureConcept; the bound concept is also appended to
 // UseConcepts so downstream consumers see one canonical list.
 type ShapeDecl struct {
+	// DocComment carries the joined /// doc-comment block attached
+	// immediately above this declaration (memql#2633, capture-only;
+	// description sourcing flips in #2634).
+	DocComment string
 	Name             string       // shape name
 	Attributes       []*Attribute // shape-level annotations
 	Paths            []string     // body field paths in source order
@@ -1814,6 +1850,10 @@ type RelationshipDecl struct {
 // string `${VAR}` so the loader's resolveAuthPlaceholders pass can
 // substitute the OS env at startup.
 type ProviderDecl struct {
+	// DocComment carries the joined /// doc-comment block attached
+	// immediately above this declaration (memql#2633, capture-only;
+	// description sourcing flips in #2634).
+	DocComment string
 	Name        string
 	Description string
 	Type        string // "OpenAI" / "Anthropic" / "OpenAIStream" / etc.
@@ -1860,6 +1900,10 @@ func (*ProviderDecl) node() {}
 // rateLimit attribute is similar (maxCalls, periodSeconds). Field-
 // level @autoInjected is captured as a per-field flag.
 type ToolDecl struct {
+	// DocComment carries the joined /// doc-comment block attached
+	// immediately above this declaration (memql#2633, capture-only;
+	// description sourcing flips in #2634).
+	DocComment string
 	Name        string
 	Description string
 
@@ -1929,6 +1973,10 @@ type ToolFieldDecl struct {
 // path. This node represents only the AI-Router provider-chain
 // shape.
 type PolicyDecl struct {
+	// DocComment carries the joined /// doc-comment block attached
+	// immediately above this declaration (memql#2633, capture-only;
+	// description sourcing flips in #2634).
+	DocComment string
 	Name                  string
 	Description           string
 	Primary               string

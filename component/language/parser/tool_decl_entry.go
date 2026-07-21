@@ -22,10 +22,13 @@ func ParseToolDecl(source string) (*ast.ToolDecl, error) {
 		return nil, fmt.Errorf("tokenise: %w", err)
 	}
 	p := NewParser(tokens)
+	p.SetDocComments(lexer.DocComments())
+	defFirstLine := p.current.Line
 	def, err := p.parseDefinition()
 	if err != nil {
 		return nil, err
 	}
+	attachDocComment(def, p.takeDocFor(defFirstLine))
 	decl, ok := def.(*ast.ToolDecl)
 	if !ok {
 		return nil, fmt.Errorf("expected tool declaration, got %T", def)

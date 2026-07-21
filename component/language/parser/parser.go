@@ -18,6 +18,11 @@ type Parser struct {
 	current Token
 	uses    []*UseDeclaration // populated during parseFile for implicit concept resolution
 
+	// Doc-comment side channel (memql#2633; see doc_comments.go).
+	docBlocks        []DocCommentBlock
+	docConsumed      []bool
+	transparentLines map[int]bool
+
 	// forEachOrdinal counts the forEach loops parsed within the CURRENT
 	// top-level construct, and is the discriminator in a synthetic
 	// forEach step id (#2659). It replaces the loop's character offset +
@@ -197,6 +202,7 @@ func ParseFile(source string) (*File, error) {
 	}
 	parser := NewParser(tokens)
 	parser.SetSource(source)
+	parser.SetDocComments(lexer.DocComments())
 	return parser.parseFile()
 }
 
@@ -363,20 +369,27 @@ func (p *Parser) parseFile() (*File, error) {
 
 	for !p.check(TokenEOF) {
 		// File-top `args { ... }` block? Parse it and stash on the
-		// parser so the next definition picks it up.
+		// parser so the next definition picks it up. Its line span is
+		// transparent for doc-comment attachment: the rewriter hoists
+		// args{} between a /// block (or its annotations) and the func
+		// line (memql#2633).
 		if p.check(TokenIdentifier) && p.current.Literal == "args" {
+			argsFirstLine := p.current.Line
 			argsDef, err := p.parseFileTopArgsBlock()
 			if err != nil {
 				return nil, err
 			}
+			p.addTransparentSpan(argsFirstLine, p.current.Line)
 			p.pendingArgs = argsDef
 			continue
 		}
+		defFirstLine := p.current.Line
 		def, err := p.parseDefinition()
 		if err != nil {
 			return nil, err
 		}
 		if def != nil {
+			attachDocComment(def, p.takeDocFor(defFirstLine))
 			file.Definitions = append(file.Definitions, def)
 		}
 	}
@@ -613,10 +626,12 @@ func (p *Parser) parseDefinition() (Node, error) {
 	// shape: `@enabled @description("...") args { ... } func (...)`),
 	// consume the args block here so it lands on the same definition.
 	if p.check(TokenIdentifier) && p.current.Literal == "args" {
+		argsFirstLine := p.current.Line
 		argsDef, err := p.parseFileTopArgsBlock()
 		if err != nil {
 			return nil, err
 		}
+		p.addTransparentSpan(argsFirstLine, p.current.Line)
 		p.pendingArgs = argsDef
 	}
 

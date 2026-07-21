@@ -875,9 +875,32 @@ The dotted path maps to a file on disk (`cognition.concepts` → `dsl/cognition/
 
 > **Retired.** The `@use*` annotation family (`@useConcept`, `@useShape`, `@useQuery`, `@useMutation`, `@useLogic`, `@useBuiltin`, ...) is retired and rejected at parse time with a migration-pointing error. The concept binding lives in the construct signature; everything else comes in through `use` imports.
 
+### Doc Comments (`///`)
+
+A `///` doc-comment block immediately above a declaration is captured by the
+parser and attached to that declaration (#2633) -- for every describable
+construct kind (`concept`, `query`, `mutation`, `logic`, `automation`,
+`tool`, `shape`, `capability`, `prompt`, `provider`, `policy`, `spec`,
+`trait`, `action`) and for `args {}` block fields. Capture semantics
+(rulings 1-2, `docs/internal/design/doc-comments-description-source.md`):
+
+- **Attachment**: the block attaches to the immediately following
+  declaration. Annotations between the block and the declaration are
+  transparent (`///` above `@mcp` above `query x` documents `query x`), as
+  are ordinary `//` comments. A **blank line breaks attachment**; a detached
+  block is an ordinary comment -- ignored, never an error. Exactly three
+  slashes: `////` divider art is not a doc comment.
+- **Join**: strip `///` plus exactly one following space per line, join
+  consecutive lines with a single space; a bare `///` line is a paragraph
+  break (newline). Extra indentation after the first space survives.
+
+Capture-only today: `@description` remains the description SOURCE until the
+sourcing flip (#2634), after which `///` wins whenever both are present
+(never concatenated).
+
 ### Argument Declaration and Resolution
 
-`args { ... }` field syntax: `<name> <type>[!] [@maxLength(N)] [@pattern("re")]`. The `!` sigil marks the field required (#2618; the `@required` annotation keeps parsing); omitting it makes the field optional. `enum("a", "b")` is a first-class type -- the self-contained spelling of the legacy `string @enum(...)` pair. Do not write `@description` on an args field -- the parser accepts and DISCARDS it (#2615); per-field documentation arrives with `///` doc comments (#2601). The declaration-level `@description` on the construct itself is load-bearing.
+`args { ... }` field syntax: `<name> <type>[!] [@maxLength(N)] [@pattern("re")]`. The `!` sigil marks the field required (#2618; the `@required` annotation keeps parsing); omitting it makes the field optional. `enum("a", "b")` is a first-class type -- the self-contained spelling of the legacy `string @enum(...)` pair. Do not write `@description` on an args field -- the parser accepts and DISCARDS it (#2615); per-field documentation is a `///` doc comment on the line(s) immediately above the field (#2633). The declaration-level `@description` on the construct itself is load-bearing.
 
 > **`@default` is not valid on an args field** (rejected at load, #991). Apply a default in the body via `coalesce(args.X, <default>)`, or use a concept-field `@default` (those ARE honored on insert).
 

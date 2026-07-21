@@ -214,6 +214,43 @@ type Lexer struct {
 	pos    int
 	line   int
 	column int
+
+	// docBlocks collects /// doc-comment blocks captured at lex time
+	// (memql#2633): consecutive /// lines merge into one block. The token
+	// stream is untouched -- ~24 consumers iterate it positionally, the
+	// terse-automation migrator compares two streams for equality, and
+	// sense emits its own comment tokens -- so doc comments travel on this
+	// side channel and reach the parser via SetDocComments.
+	docBlocks []DocCommentBlock
+	// commentLines marks lines occupied by ordinary (non-///) comments,
+	// so the parser's attachment walk can treat them as transparent per
+	// the design's ruling 1 (docs/internal/design/
+	// doc-comments-description-source.md).
+	commentLines map[int]bool
+}
+
+// DocCommentBlock is a run of consecutive /// lines. Lines hold each
+// line's content after the /// prefix, unstripped; the ruling-2 join
+// (JoinDocComment) happens at attachment time.
+type DocCommentBlock struct {
+	Lines     []string
+	StartLine int
+	EndLine   int
+}
+
+// DocComments returns the /// blocks and ordinary-comment line set the
+// lexer captured. Valid after Tokenize.
+func (l *Lexer) DocComments() ([]DocCommentBlock, map[int]bool) {
+	return l.docBlocks, l.commentLines
+}
+
+func (l *Lexer) markCommentLines(from, to int) {
+	if l.commentLines == nil {
+		l.commentLines = make(map[int]bool)
+	}
+	for i := from; i <= to; i++ {
+		l.commentLines[i] = true
+	}
 }
 
 // NewLexer creates a new lexer for the given input.
@@ -717,14 +754,33 @@ func (l *Lexer) skipWhitespace() {
 }
 
 func (l *Lexer) skipLineComment() {
-	// Skip to end of line (handles both -- and // comments)
+	// Skip to end of line, capturing /// doc-comment content on the side
+	// channel (memql#2633). Exactly three slashes is a doc comment; //// and
+	// longer runs (divider art) stay ordinary comments.
+	startLine := l.line
+	start := l.pos
 	for !l.eof() && l.peek() != '\n' {
 		l.advance()
 	}
+	text := string(l.input[start:l.pos])
+	if strings.HasPrefix(text, "///") && !strings.HasPrefix(text, "////") {
+		content := text[3:]
+		if n := len(l.docBlocks); n > 0 && l.docBlocks[n-1].EndLine == startLine-1 {
+			l.docBlocks[n-1].Lines = append(l.docBlocks[n-1].Lines, content)
+			l.docBlocks[n-1].EndLine = startLine
+		} else {
+			l.docBlocks = append(l.docBlocks, DocCommentBlock{Lines: []string{content}, StartLine: startLine, EndLine: startLine})
+		}
+		return
+	}
+	l.markCommentLines(startLine, startLine)
 }
 
 func (l *Lexer) skipBlockComment() {
-	// Skip /* ... */ block comment
+	// Skip /* ... */ block comment; its full line span is transparent for
+	// doc-comment attachment (memql#2633).
+	startLine := l.line
+	defer func() { l.markCommentLines(startLine, l.line) }()
 	l.advance() // consume '/'
 	l.advance() // consume '*'
 
