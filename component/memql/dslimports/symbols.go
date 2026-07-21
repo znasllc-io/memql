@@ -181,7 +181,15 @@ func resolveInFile(file string, ast *languageAst.File, name string) (*Resolution
 				if i := strings.IndexByte(dir, '/'); i > 0 {
 					dir = dir[:i]
 				}
-				id, _ := languageAst.AssembleConceptIdFromDeclInDir(d, dir, "")
+				id, idErr := languageAst.AssembleConceptIdFromDeclInDir(d, dir, "")
+				if idErr != nil {
+					// Best-effort resolution has no pin file in hand: a
+					// pinned divergence (dsl/deployment's cluster) or a
+					// genuine mismatch falls back to the EXPLICIT
+					// annotation's assembly, exactly as before #2614 --
+					// the loud guard lives in the unified loader.
+					id, _ = languageAst.AssembleConceptIdFromDecl(d)
+				}
 				return &Resolution{
 					Kind:      SymbolConcept,
 					File:      file,

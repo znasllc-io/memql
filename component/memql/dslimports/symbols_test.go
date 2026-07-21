@@ -200,3 +200,25 @@ func (Query) a(_ any) (any, error) { return nil, nil }`)},
 		}
 	}
 }
+
+// #2614 review: pinned-divergence concepts (dsl/deployment declaring
+// @namespace("cluster")) keep their EXPLICIT-annotation id in best-effort
+// resolution -- the guard error must not erase the id here (the loud path
+// is the unified loader).
+func TestResolveSymbol_PinnedDivergenceKeepsExplicitId(t *testing.T) {
+	root := fstest.MapFS{
+		"deployment/concepts.memql": {Data: []byte("@namespace(\"cluster\")\nconcept deployment {\n  name string\n}\n")},
+		"caller.memql":              {Data: []byte("import (\n\t\"./deployment/concepts\" as dep\n)\nquery deployment queryX {\n}\n")},
+	}
+	tree, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	res, err := tree.ResolveSymbol("caller.memql", "dep.deployment")
+	if err != nil {
+		t.Fatalf("ResolveSymbol: %v", err)
+	}
+	if res.ConceptId != "v1:cluster:deployment" {
+		t.Errorf("ConceptId = %q, want the explicit-annotation assembly (pin-blind best effort must not erase it)", res.ConceptId)
+	}
+}
