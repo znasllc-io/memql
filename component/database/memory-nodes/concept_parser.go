@@ -119,7 +119,7 @@ func BuildConceptFromDecl(decl *parser.ConceptDecl, conceptName string) (*Concep
 		SchemaId:      conceptName,
 		Schemas:       schemas,
 		NodeType:      nodeType,
-		Description:   parsed.description,
+		Description:   parser.EffectiveDescription(decl.DocComment, parsed.description),
 		Version:       version,
 		Relationships: parsed.relationships,
 		DisplayCard:   parsed.displayCard,

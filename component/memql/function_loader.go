@@ -440,7 +440,7 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 	// Convert to Function struct
 	fn := &Function{
 		Name:         expectedName,
-		Description:  funcDef.Description,
+		Description:  languageParser.EffectiveDescription(funcDef.DocComment, funcDef.Description),
 		DocComment:   funcDef.DocComment,
 		FunctionKind: string(funcDef.Type),
 		BoundConcept: boundConcept,
@@ -1446,6 +1446,7 @@ func convertArgsField(field *languageParser.ArgsField) (*FunctionArgsField, erro
 
 	result := &FunctionArgsField{
 		Name:                 field.Name,
+		Description:          field.DocComment,
 		Type:                 field.Type,
 		Optional:             field.Optional,
 		Enum:                 append([]any(nil), field.Enum...),

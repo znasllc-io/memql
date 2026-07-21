@@ -3,6 +3,7 @@ package memql
 import (
 	"encoding/json"
 	"fmt"
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"strings"
 
 	"github.com/znasllc-io/memql/component/language/ast"
@@ -102,7 +103,7 @@ func toolDeclToTool(decl *ast.ToolDecl, origin string) ([]*Tool, error) {
 
 	tool := &Tool{
 		Name:               decl.Name,
-		Description:        decl.Description,
+		Description:        languageParser.EffectiveDescription(decl.DocComment, decl.Description),
 		InputSchema:        json.RawMessage(schemaJSON),
 		AutoInjectedFields: autoInjected,
 		ClientExecution:    decl.ClientExecution,

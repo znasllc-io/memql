@@ -154,3 +154,30 @@ func attachDocComment(def Node, doc string) {
 		d.DocComment = doc
 	}
 }
+
+// EffectiveDescription implements the design's ruling-3 precedence
+// (memql#2634): the /// doc comment WINS over @description when both are
+// present -- never concatenated -- and @description remains the fallback so
+// an annotation-only corpus behaves identically to the pre-flip engine.
+func EffectiveDescription(docComment, description string) string {
+	if strings.TrimSpace(docComment) != "" {
+		return docComment
+	}
+	return description
+}
+
+// LeadingDocComment extracts the /// doc-comment block attached to the FIRST
+// declaration in source, using the real lexer's side channel and the same
+// adjacency walk the parser uses -- the "one extraction, the parser's" the
+// design demands for raw-source consumers (the promote-time catalog). Returns
+// "" when the source has no attached block or does not tokenize.
+func LeadingDocComment(source string) string {
+	lexer := NewLexer(source)
+	tokens, err := lexer.Tokenize()
+	if err != nil || len(tokens) == 0 || tokens[0].Type == TokenEOF {
+		return ""
+	}
+	p := NewParser(tokens)
+	p.SetDocComments(lexer.DocComments())
+	return p.takeDocFor(tokens[0].Line)
+}

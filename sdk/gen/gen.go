@@ -39,6 +39,7 @@ package gen
 import (
 	"bytes"
 	"fmt"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -436,7 +437,7 @@ func attrPreamble(src string, headerStart int) string {
 			prev = lineStart - 1
 			continue
 		}
-		if !strings.HasPrefix(line, "@") {
+		if !strings.HasPrefix(line, "@") && !strings.HasPrefix(line, "///") {
 			break
 		}
 		prev = lineStart - 1
@@ -450,13 +451,39 @@ func attrPreamble(src string, headerStart int) string {
 	return src[prev:headerStart]
 }
 
-// descriptionFor pulls the @description("...") annotation from the
-// construct's attribute preamble. Returns empty string when absent.
+// descriptionFor resolves the construct description with the design's
+// ruling-3 precedence (memql#2634): a /// doc-comment block in the preamble
+// WINS; the @description annotation is the fallback. Returns empty string
+// when both are absent.
 func descriptionFor(src string, headerStart int) string {
-	if m := descRe.FindStringSubmatch(attrPreamble(src, headerStart)); len(m) > 1 {
+	preamble := attrPreamble(src, headerStart)
+	if doc := joinDocLines(preamble); doc != "" {
+		return doc
+	}
+	if m := descRe.FindStringSubmatch(preamble); len(m) > 1 {
 		return m[1]
 	}
 	return ""
+}
+
+// joinDocLines collects the contiguous /// lines of a preamble (or field
+// prefix) and joins them with the parser's ruling-2 join.
+func joinDocLines(block string) string {
+	var lines []string
+	for _, raw := range strings.Split(block, "\n") {
+		line := strings.TrimSpace(raw)
+		if strings.HasPrefix(line, "///") && !strings.HasPrefix(line, "////") {
+			lines = append(lines, strings.TrimPrefix(line, "///"))
+		} else if line != "" && len(lines) > 0 {
+			// A non-/// line after the block ends it (annotations follow
+			// the doc block in the preamble).
+			break
+		}
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	return langparser.JoinDocComment(lines)
 }
 
 // parseArgsBlock extracts the args { ... } block from a construct body
@@ -479,7 +506,24 @@ func parseArgsBlock(body string) []ArgField {
 // the field list IS the body (no args block).
 func parseFields(inner string) []ArgField {
 	var out []ArgField
-	for _, fm := range argsFieldRe.FindAllStringSubmatch(inner, -1) {
+	matches := argsFieldRe.FindAllStringSubmatchIndex(inner, -1)
+	for mi, idx := range matches {
+		fm := make([]string, 0, 5)
+		for g := 0; g < len(idx)/2; g++ {
+			if idx[2*g] < 0 {
+				fm = append(fm, "")
+			} else {
+				fm = append(fm, inner[idx[2*g]:idx[2*g+1]])
+			}
+		}
+		// /// lines between the previous field (or block start) and this
+		// field are its doc comment (memql#2634) -- the only channel for
+		// arg docs since the #2615 strip.
+		prevEnd := 0
+		if mi > 0 {
+			prevEnd = matches[mi-1][1]
+		}
+		fieldDoc := joinDocLines(inner[prevEnd:idx[0]])
 		name := fm[1]
 		typ := fm[2]
 		sigil := fm[3]
@@ -505,7 +549,9 @@ func parseFields(inner string) []ArgField {
 		if strings.Contains(annotations, "@required") {
 			af.Required = true
 		}
-		if dm := regexp.MustCompile(`@description\("([^"]*)"\)`).FindStringSubmatch(annotations); len(dm) > 1 {
+		if fieldDoc != "" {
+			af.Description = fieldDoc
+		} else if dm := regexp.MustCompile(`@description\("([^"]*)"\)`).FindStringSubmatch(annotations); len(dm) > 1 {
 			af.Description = dm[1]
 		}
 		if dm := regexp.MustCompile(`@default\("([^"]*)"\)`).FindStringSubmatch(annotations); len(dm) > 1 {

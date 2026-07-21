@@ -594,3 +594,38 @@ func TestEmitGoMethods_OptionalObjectAndArrayArgsAreNilGuarded(t *testing.T) {
 		t.Errorf("required object arg Payload must emit unconditionally, found nil guard\n--- output ---\n%s", out)
 	}
 }
+
+// memql#2634: descriptionFor resolves /// over @description (ruling 3), and
+// args fields read /// lines above them (the only arg-doc channel since the
+// #2615 strip). Annotation-only sources stay byte-identical.
+func TestDescriptionFor_DocCommentPrecedence(t *testing.T) {
+	src := "/// Doc channel.\n@description(\"Annot channel.\")\nquery space queryFlipProbe {\n}\n"
+	header := strings.Index(src, "query space")
+	if got := descriptionFor(src, header); got != "Doc channel." {
+		t.Errorf("both channels: %q, want the /// channel", got)
+	}
+	annotOnly := "@description(\"Annot only.\")\nquery space queryFlipProbe {\n}\n"
+	header = strings.Index(annotOnly, "query space")
+	if got := descriptionFor(annotOnly, header); got != "Annot only." {
+		t.Errorf("annotation-only must be identical: %q", got)
+	}
+	docOnly := "/// Doc only.\nquery space queryFlipProbe {\n}\n"
+	header = strings.Index(docOnly, "query space")
+	if got := descriptionFor(docOnly, header); got != "Doc only." {
+		t.Errorf("///-only: %q", got)
+	}
+}
+
+func TestParseFields_DocCommentAboveField(t *testing.T) {
+	inner := "\n    /// The plan to inspect.\n    planId  string!\n    limit   number\n"
+	fields := parseFields(inner)
+	if len(fields) != 2 {
+		t.Fatalf("fields = %d, want 2", len(fields))
+	}
+	if fields[0].Description != "The plan to inspect." {
+		t.Errorf("field doc = %q", fields[0].Description)
+	}
+	if fields[1].Description != "" {
+		t.Errorf("undocumented field must stay empty, got %q", fields[1].Description)
+	}
+}

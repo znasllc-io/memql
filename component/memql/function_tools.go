@@ -137,7 +137,18 @@ func toolInputSchemaFromArgs(assert *ArgsSchemaConfig) (json.RawMessage, error) 
 	return json.Marshal(schema)
 }
 
+// jsonSchemaForArgsField wraps the type-specific base schema with the
+// resolved field description (memql#2634: /// field docs reach every
+// function-tool inputSchema, in lockstep with argsFieldToJSONSchema).
 func jsonSchemaForArgsField(f *FunctionArgsField) map[string]any {
+	schema := jsonSchemaForArgsFieldBase(f)
+	if f != nil && f.Description != "" {
+		schema["description"] = f.Description
+	}
+	return schema
+}
+
+func jsonSchemaForArgsFieldBase(f *FunctionArgsField) map[string]any {
 	if f == nil {
 		return map[string]any{}
 	}

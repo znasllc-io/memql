@@ -144,6 +144,9 @@ func argsFieldToJSONSchema(f *FunctionArgsField) map[string]any {
 	if f == nil {
 		return prop
 	}
+	if f.Description != "" {
+		prop["description"] = f.Description
+	}
 	jsType := jsonSchemaType(f.Type)
 	if jsType != "" {
 		prop["type"] = jsType

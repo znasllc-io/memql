@@ -139,7 +139,7 @@ func specDeclToSpec(decl *languageParser.SpecDecl, origin string) (*Spec, error)
 
 	return &Spec{
 		Name:        decl.Name,
-		Description: description,
+		Description: languageParser.EffectiveDescription(decl.DocComment, description),
 		ExprSource:  canonicalExpression(expr),
 		Expr:        expr,
 		Kind:        "",

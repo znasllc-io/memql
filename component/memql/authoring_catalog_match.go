@@ -18,6 +18,7 @@ package memql
 //     net-new construct).
 
 import (
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"regexp"
 	"strings"
 )
@@ -37,7 +38,13 @@ func CatalogMatchText(kind, source string) (string, error) {
 		return "", err
 	}
 	parts := []string{"kind:" + kind}
-	if m := catalogDescRe.FindStringSubmatch(source); m != nil && m[1] != "" {
+	// Ruling-3 precedence (memql#2634): the /// doc comment wins, extracted
+	// by the parser's own lexer (LeadingDocComment) rather than a second
+	// regex dialect; the @description regex remains the fallback for the
+	// annotation-only corpus.
+	if doc := languageParser.LeadingDocComment(source); doc != "" {
+		parts = append(parts, "intent:"+doc)
+	} else if m := catalogDescRe.FindStringSubmatch(source); m != nil && m[1] != "" {
 		parts = append(parts, "intent:"+m[1])
 	}
 	parts = append(parts, "form:"+canonicalizeConstructSource(source, name))

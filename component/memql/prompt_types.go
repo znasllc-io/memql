@@ -26,6 +26,7 @@ import "strings"
 // promptDecl is the unified loader's internal representation of a
 // `prompt NAME { ... }` block.
 type promptDecl struct {
+	docComment      string
 	name            string
 	description     string
 	defaultProvider string

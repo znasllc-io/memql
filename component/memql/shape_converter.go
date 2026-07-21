@@ -118,7 +118,7 @@ func shapeDeclToShapeDefinition(decl *languageParser.ShapeDecl, origin string) (
 		}
 		return &ShapeDefinition{
 			Name:              decl.Name,
-			Description:       description,
+			Description:       languageParser.EffectiveDescription(decl.DocComment, description),
 			Template:          map[string]any{},
 			Origin:            origin,
 			KindRow:           true,
@@ -184,7 +184,7 @@ func shapeDeclToShapeDefinition(decl *languageParser.ShapeDecl, origin string) (
 
 	return &ShapeDefinition{
 		Name:        decl.Name,
-		Description: description,
+		Description: languageParser.EffectiveDescription(decl.DocComment, description),
 		Template:    template,
 		Origin:      origin,
 		KindRow:     kindRow,
