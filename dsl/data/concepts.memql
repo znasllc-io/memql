@@ -4,8 +4,9 @@
 // files cover the other construct kinds.
 
 
+/// Audit log entry for validation state transitions. Tracks who performed each check, confirm, or
+/// revert action, when, and why.
 @namespace("data")
-@description("Audit log entry for validation state transitions. Tracks who performed each check, confirm, or revert action, when, and why.")
 concept log {
   active        bool    @default("true")  @description("Soft-delete flag (append-only semantics)")
   recordId      string!  @description("The v1:data:record node ID this log entry refers to")
@@ -20,8 +21,10 @@ concept log {
   @relationship(type="parent", field="recordId", target=record, direction="outgoing")
 }
 
+/// Validation policy defining check/confirm requirements for a record type. Controls how many
+/// synthetic checks and human confirmations are needed, and whether checked data is usable before
+/// full confirmation.
 @namespace("data")
-@description("Validation policy defining check/confirm requirements for a record type. Controls how many synthetic checks and human confirmations are needed, and whether checked data is usable before full confirmation.")
 concept policy {
   active                bool    @default("true")  @description("Soft-delete flag (append-only semantics)")
   targetRecordType      string!  @description("Record type this policy applies to (e.g., 'vehicle', 'bird')")
@@ -33,8 +36,10 @@ concept policy {
 
 }
 
+/// Data record with validation lifecycle: draft -> checked -> confirmed. Replaces the
+/// staging/production split with a unified concept where data visibility is governed by validation
+/// state and policy.
 @namespace("data")
-@description("Data record with validation lifecycle: draft -> checked -> confirmed. Replaces the staging/production split with a unified concept where data visibility is governed by validation state and policy.")
 concept record {
   active              bool      @default("true")  @description("Soft-delete flag (append-only semantics)")
   validationState     enum("draft", "checked", "confirmed")  @default("draft")  @description("Current lifecycle state")

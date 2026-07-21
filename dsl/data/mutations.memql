@@ -3,7 +3,7 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-@description("Synthetically check a data record, updating check count and validation state")
+/// Synthetically check a data record, updating check count and validation state
 mutate record checkRecord {
   args {
     recordId       string!
@@ -44,7 +44,7 @@ mutate record checkRecord {
 //   })
 //
 
-@description("Human confirm a data record, updating confirm count and validation state")
+/// Human confirm a data record, updating confirm count and validation state
 mutate record confirmRecord {
   args {
     recordId         string!
@@ -97,7 +97,7 @@ mutate record confirmRecord {
 //   })
 //
 
-@description("Create a data record in draft validation state awaiting check and confirmation")
+/// Create a data record in draft validation state awaiting check and confirmation
 mutate record createRecord {
   args {
     recordId            string!
@@ -163,7 +163,8 @@ mutate record createRecord {
 //   })
 //
 
-@description("Create a single data record from a batch import in draft validation state (called once per record)")
+/// Create a single data record from a batch import in draft validation state (called once per
+/// record)
 mutate record createRecordBatch {
   args {
     recordId            string!
@@ -207,7 +208,7 @@ mutate record createRecordBatch {
 //   deleteRecord({ recordId: "record-uuid", partitionId: "space-456" })
 //
 
-@description("Soft-delete a data record (sets active=false)")
+/// Soft-delete a data record (sets active=false)
 mutate record deleteRecord {
   args {
     recordId  string!
@@ -247,7 +248,7 @@ mutate record deleteRecord {
 //   })
 //
 
-@description("Revert a data record to a previous validation state with counter reset")
+/// Revert a data record to a previous validation state with counter reset
 mutate record revertRecord {
   args {
     recordId      string!
@@ -292,7 +293,7 @@ mutate record revertRecord {
 //   })
 //
 
-@description("Create or update a validation policy for a record type")
+/// Create or update a validation policy for a record type
 mutate policy setPolicy {
   args {
     policyId               string!
@@ -343,7 +344,7 @@ mutate policy setPolicy {
 //   })
 //
 
-@description("Update a data record (resets validation state to draft)")
+/// Update a data record (resets validation state to draft)
 mutate record updateRecord {
   args {
     recordId         string!

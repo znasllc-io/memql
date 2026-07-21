@@ -8,8 +8,8 @@
 // on any v1:router:budget write; the v1:router:* created/updated/deleted
 // forward rules in component/node/routing.go guarantee the eviction fires on
 // every replica (this namespace is not in the default forward set).
+/// Returns all active budget rows for the current partition.
 @unbounded("router budgets (optionally by scope) -- a small bounded config set consumed whole")
-@description("Returns all active budget rows for the current partition.")
 @cache(120)
 query budget routerBudgets {
   args {

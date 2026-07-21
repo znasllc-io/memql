@@ -162,6 +162,18 @@ func (p *Parser) Parse() (Node, error) {
 		return p.parseFile()
 	}
 
+	// A bare top-level construct keyword (trait / spec / concept / ...)
+	// opening a DECLARATION SHAPE -- keyword IDENT [IDENT] { -- is a file.
+	// Before the #2635 codemod every corpus construct carried at least
+	// @description, so the TokenAt branch above always fired first and this
+	// gap was unreachable; a ///-documented, annotation-free construct
+	// exposes it. The brace lookahead keeps every expression use of the
+	// contextual keywords (`spec == "x"`, kind-prefixed invocations,
+	// predicate expressions) on the expression path.
+	if p.check(TokenIdentifier) && topLevelDeclParsers[p.current.Literal] != nil && p.declShapeAhead() {
+		return p.parseFile()
+	}
+
 	// Otherwise, parse as an expression (for direct query execution)
 	expr, err := p.parseExpression()
 	if err != nil {
@@ -7650,4 +7662,20 @@ func enumAttributeFromValues(values []string) *Attribute {
 		attr.Value = values
 	}
 	return attr
+}
+
+// declShapeAhead reports whether the tokens after the current contextual
+// keyword form a declaration opening: IDENT { or IDENT IDENT { (the
+// two-identifier form covers `spec BOUND NAME {` and `shape CONCEPT NAME {`).
+func (p *Parser) declShapeAhead() bool {
+	i := p.pos + 1
+	idents := 0
+	for i < len(p.tokens) && p.tokens[i].Type == TokenIdentifier && idents < 2 {
+		idents++
+		i++
+	}
+	if idents == 0 || i >= len(p.tokens) {
+		return false
+	}
+	return p.tokens[i].Type == TokenBraceOpen
 }

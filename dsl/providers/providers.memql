@@ -19,11 +19,12 @@ provider anthropic {
 
 // ---- providers/v1/openai/audio15.memql ----
 
+/// OpenAI gpt-audio-1.5 - unified audio in/out single-shot model. Placeholder type until the real
+/// client lands.
 @extends("openai")
 @type("OpenAIAudio")
 @model("gpt-audio-1.5")
 @modality("audio")
-@description("OpenAI gpt-audio-1.5 - unified audio in/out single-shot model. Placeholder type until the real client lands.")
 provider audio15 {
   params {
     voice  "alloy"
@@ -33,11 +34,12 @@ provider audio15 {
 
 // ---- providers/v1/openai/audioMini.memql ----
 
+/// OpenAI gpt-audio-mini - smaller unified audio in/out model. Placeholder type until the real
+/// client lands.
 @extends("openai")
 @type("OpenAIAudio")
 @model("gpt-audio-mini")
 @modality("audio")
-@description("OpenAI gpt-audio-mini - smaller unified audio in/out model. Placeholder type until the real client lands.")
 provider audioMini {
   params {
     voice  "alloy"
@@ -47,9 +49,10 @@ provider audioMini {
 
 // ---- providers/v1/openai/chat53Latest.memql ----
 
+/// OpenAI gpt-5.3-chat-latest - auto-updated chat-tuned alias (non-streaming); use for dev/preview
+/// flows where you want newest tuning without a code change
 @extends("openai")
 @model("gpt-5.3-chat-latest")
-@description("OpenAI gpt-5.3-chat-latest - auto-updated chat-tuned alias (non-streaming); use for dev/preview flows where you want newest tuning without a code change")
 provider chat53Latest {
   params {
     contextWindow        128000
@@ -59,9 +62,9 @@ provider chat53Latest {
 
 // ---- providers/v1/openai/chat54.memql ----
 
+/// OpenAI GPT-5.4 - flagship standard-tier chat (non-streaming)
 @extends("openai")
 @model("gpt-5.4")
-@description("OpenAI GPT-5.4 - flagship standard-tier chat (non-streaming)")
 provider chat54 {
   params {
     contextWindow              128000
@@ -74,9 +77,9 @@ provider chat54 {
 
 // ---- providers/v1/openai/chat54Mini.memql ----
 
+/// OpenAI GPT-5.4 Mini - balanced cost/latency chat (non-streaming)
 @extends("openai")
 @model("gpt-5.4-mini")
-@description("OpenAI GPT-5.4 Mini - balanced cost/latency chat (non-streaming)")
 provider chat54Mini {
   params {
     contextWindow              128000
@@ -96,9 +99,9 @@ provider chat54Mini {
 
 // ---- providers/v1/openai/chat54Nano.memql ----
 
+/// OpenAI GPT-5.4 Nano - cheapest high-volume chat for low-complexity tasks (non-streaming)
 @extends("openai")
 @model("gpt-5.4-nano")
-@description("OpenAI GPT-5.4 Nano - cheapest high-volume chat for low-complexity tasks (non-streaming)")
 provider chat54Nano {
   params {
     contextWindow              32000
@@ -122,9 +125,10 @@ provider chat54Nano {
 // @model back to `gpt-5.4-pro` when this codebase adds Responses
 // API support and routes pro-tier calls there instead.
 
+/// OpenAI GPT-5.4 Pro tier (non-streaming) -- aliases to gpt-5.4 because gpt-5.4-pro is
+/// responses-API only; switch the @model back when responses-API support lands
 @extends("openai")
 @model("gpt-5.4")
-@description("OpenAI GPT-5.4 Pro tier (non-streaming) -- aliases to gpt-5.4 because gpt-5.4-pro is responses-API only; switch the @model back when responses-API support lands")
 provider chat54Pro {
   params {
     contextWindow              256000
@@ -179,11 +183,13 @@ provider claudeSonnet {
 
 // ---- providers/v1/openai/computerUse.memql ----
 
+/// OpenAI computer-use-preview - agentic control of a virtual machine. The preview label is kept
+/// because this is the only non-dated computer-use alias available today. Placeholder type until
+/// the computer-use client lands.
 @extends("openai")
 @type("OpenAIComputerUse")
 @model("computer-use-preview")
 @modality("computerUse")
-@description("OpenAI computer-use-preview - agentic control of a virtual machine. The preview label is kept because this is the only non-dated computer-use alias available today. Placeholder type until the computer-use client lands.")
 provider computerUse {
   params {
     displayWidth  1024
@@ -193,11 +199,11 @@ provider computerUse {
 
 // ---- providers/v1/openai/embedding3Large.memql ----
 
+/// OpenAI text-embedding-3-large for high-fidelity vector embeddings (3072 dimensions)
 @extends("openai")
 @type("OpenAIEmbedding")
 @model("text-embedding-3-large")
 @modality("embedding")
-@description("OpenAI text-embedding-3-large for high-fidelity vector embeddings (3072 dimensions)")
 provider embedding3Large {
   params {
     dimensions  3072
@@ -206,11 +212,12 @@ provider embedding3Large {
 
 // ---- providers/v1/openai/embedding3Small.memql ----
 
+/// OpenAI text-embedding-3-small for cheaper vector embeddings (1536 dimensions); default for
+/// high-volume retrieval
 @extends("openai")
 @type("OpenAIEmbedding")
 @model("text-embedding-3-small")
 @modality("embedding")
-@description("OpenAI text-embedding-3-small for cheaper vector embeddings (1536 dimensions); default for high-volume retrieval")
 provider embedding3Small {
   params {
     dimensions  1536
@@ -219,11 +226,12 @@ provider embedding3Small {
 
 // ---- providers/v1/openai/image15.memql ----
 
+/// OpenAI gpt-image-1.5 - newest generative image model. Placeholder type until the image client
+/// lands.
 @extends("openai")
 @type("OpenAIImage")
 @model("gpt-image-1.5")
 @modality("image")
-@description("OpenAI gpt-image-1.5 - newest generative image model. Placeholder type until the image client lands.")
 provider image15 {
   params {
     size    "1024x1024"
@@ -233,11 +241,12 @@ provider image15 {
 
 // ---- providers/v1/openai/image1Mini.memql ----
 
+/// OpenAI gpt-image-1-mini - smaller/cheaper generative image model. Placeholder type until the
+/// image client lands.
 @extends("openai")
 @type("OpenAIImage")
 @model("gpt-image-1-mini")
 @modality("image")
-@description("OpenAI gpt-image-1-mini - smaller/cheaper generative image model. Placeholder type until the image client lands.")
 provider image1Mini {
   params {
     size    "1024x1024"
@@ -247,11 +256,12 @@ provider image1Mini {
 
 // ---- providers/v1/openai/moderationOmni.memql ----
 
+/// OpenAI omni-moderation-latest - self-updating moderation alias for text + image safety
+/// classification. Placeholder type until the moderation client lands.
 @extends("openai")
 @type("OpenAIModeration")
 @model("omni-moderation-latest")
 @modality("moderation")
-@description("OpenAI omni-moderation-latest - self-updating moderation alias for text + image safety classification. Placeholder type until the moderation client lands.")
 provider moderationOmni {
   params {
   }
@@ -267,11 +277,12 @@ provider openai {
 
 // ---- providers/v1/openai/realtime15.memql ----
 
+/// OpenAI gpt-realtime-1.5 - bidirectional audio + text over WebSocket; used by Polyphon for
+/// low-latency voice chat. Placeholder type until the real client lands.
 @extends("openai")
 @type("OpenAIRealtime")
 @model("gpt-realtime-1.5")
 @modality("realtime")
-@description("OpenAI gpt-realtime-1.5 - bidirectional audio + text over WebSocket; used by Polyphon for low-latency voice chat. Placeholder type until the real client lands.")
 provider realtime15 {
   params {
     voice              "alloy"
@@ -281,11 +292,12 @@ provider realtime15 {
 
 // ---- providers/v1/openai/realtimeMini.memql ----
 
+/// OpenAI gpt-realtime-mini - smaller/cheaper realtime model; preferred for high-volume voice
+/// sessions where peak capability isn't required. Placeholder type until the real client lands.
 @extends("openai")
 @type("OpenAIRealtime")
 @model("gpt-realtime-mini")
 @modality("realtime")
-@description("OpenAI gpt-realtime-mini - smaller/cheaper realtime model; preferred for high-volume voice sessions where peak capability isn't required. Placeholder type until the real client lands.")
 provider realtimeMini {
   params {
     voice              "alloy"
@@ -295,11 +307,12 @@ provider realtimeMini {
 
 // ---- providers/v1/openai/research3.memql ----
 
+/// OpenAI o3-deep-research - higher-tier long-form deep-research pipeline. Placeholder type until
+/// the deep-research client lands.
 @extends("openai")
 @type("OpenAIDeepResearch")
 @model("o3-deep-research")
 @modality("research")
-@description("OpenAI o3-deep-research - higher-tier long-form deep-research pipeline. Placeholder type until the deep-research client lands.")
 provider research3 {
   params {
     contextWindow        200000
@@ -309,11 +322,12 @@ provider research3 {
 
 // ---- providers/v1/openai/research4Mini.memql ----
 
+/// OpenAI o4-mini-deep-research - long-form deep-research pipeline (cheaper tier). Placeholder type
+/// until the deep-research client lands.
 @extends("openai")
 @type("OpenAIDeepResearch")
 @model("o4-mini-deep-research")
 @modality("research")
-@description("OpenAI o4-mini-deep-research - long-form deep-research pipeline (cheaper tier). Placeholder type until the deep-research client lands.")
 provider research4Mini {
   params {
     contextWindow        200000
@@ -323,11 +337,12 @@ provider research4Mini {
 
 // ---- providers/v1/openai/search5.memql ----
 
+/// OpenAI gpt-5-search-api - web-search-grounded chat. Placeholder type until the search client
+/// lands.
 @extends("openai")
 @type("OpenAISearch")
 @model("gpt-5-search-api")
 @modality("search")
-@description("OpenAI gpt-5-search-api - web-search-grounded chat. Placeholder type until the search client lands.")
 provider search5 {
   params {
     contextWindow        128000
@@ -337,11 +352,11 @@ provider search5 {
 
 // ---- providers/v1/openai/sora2.memql ----
 
+/// OpenAI sora-2 - generative video model. Placeholder type until the video client lands.
 @extends("openai")
 @type("OpenAIVideo")
 @model("sora-2")
 @modality("video")
-@description("OpenAI sora-2 - generative video model. Placeholder type until the video client lands.")
 provider sora2 {
   params {
     resolution "720p"
@@ -351,11 +366,12 @@ provider sora2 {
 
 // ---- providers/v1/openai/sora2Pro.memql ----
 
+/// OpenAI sora-2-pro - higher-quality / longer-duration generative video model. Placeholder type
+/// until the video client lands.
 @extends("openai")
 @type("OpenAIVideo")
 @model("sora-2-pro")
 @modality("video")
-@description("OpenAI sora-2-pro - higher-quality / longer-duration generative video model. Placeholder type until the video client lands.")
 provider sora2Pro {
   params {
     resolution "1080p"
@@ -365,10 +381,11 @@ provider sora2Pro {
 
 // ---- providers/v1/openai/stream53Latest.memql ----
 
+/// OpenAI gpt-5.3-chat-latest - auto-updated chat-tuned alias (streaming); useful for dev where you
+/// want newest tuning without a code change
 @extends("openai")
 @type("OpenAIStream")
 @model("gpt-5.3-chat-latest")
-@description("OpenAI gpt-5.3-chat-latest - auto-updated chat-tuned alias (streaming); useful for dev where you want newest tuning without a code change")
 provider stream53Latest {
   params {
     contextWindow        128000
@@ -378,11 +395,12 @@ provider stream53Latest {
 
 // ---- providers/v1/openai/stream54.memql ----
 
+/// OpenAI GPT-5.4 - flagship standard-tier chat (streaming); marked @default so every caller that
+/// does not explicitly pick a provider lands here
 @extends("openai")
 @type("OpenAIStream")
 @model("gpt-5.4")
 @default
-@description("OpenAI GPT-5.4 - flagship standard-tier chat (streaming); marked @default so every caller that does not explicitly pick a provider lands here")
 provider stream54 {
   params {
     contextWindow              128000
@@ -395,10 +413,10 @@ provider stream54 {
 
 // ---- providers/v1/openai/stream54Mini.memql ----
 
+/// OpenAI GPT-5.4 Mini - balanced cost/latency streaming chat
 @extends("openai")
 @type("OpenAIStream")
 @model("gpt-5.4-mini")
-@description("OpenAI GPT-5.4 Mini - balanced cost/latency streaming chat")
 provider stream54Mini {
   params {
     contextWindow              128000
@@ -411,10 +429,10 @@ provider stream54Mini {
 
 // ---- providers/v1/openai/stream54Nano.memql ----
 
+/// OpenAI GPT-5.4 Nano - cheapest high-volume streaming chat for low-complexity tasks
 @extends("openai")
 @type("OpenAIStream")
 @model("gpt-5.4-nano")
-@description("OpenAI GPT-5.4 Nano - cheapest high-volume streaming chat for low-complexity tasks")
 provider stream54Nano {
   params {
     contextWindow              32000
@@ -459,10 +477,11 @@ provider stream54Nano {
 //   gpt-5.4-pro -> 404 "not a chat model"
 //   gpt-5.4     -> OK (streams + tools work)
 
+/// OpenAI GPT-5.4 Pro tier (streaming) -- aliases to gpt-5.4 because gpt-5.4-pro is responses-API
+/// only; switch the @model back when responses-API support lands
 @extends("openai")
 @type("OpenAIStream")
 @model("gpt-5.4")
-@description("OpenAI GPT-5.4 Pro tier (streaming) -- aliases to gpt-5.4 because gpt-5.4-pro is responses-API only; switch the @model back when responses-API support lands")
 provider stream54Pro {
   params {
     contextWindow              256000
@@ -532,10 +551,13 @@ provider streamClaudeOpus {
 //   - The anthropicStreamProvider suppresses the temperature param
 //     when thinking is enabled (Anthropic API requires temp==1
 //     under extended thinking). Callers do not need to coordinate.
+/// Claude Opus 4.6 with extended-thinking enabled. Same model as streamClaudeOpus but the API
+/// reasons over an 8192-token internal budget before answering. Use for planner / factory /
+/// training-plan-composition workloads; stay on streamClaudeOpus for chat replies and
+/// latency-sensitive flows.
 @extends("anthropic")
 @type("AnthropicStream")
 @model("claude-opus-4-6")
-@description("Claude Opus 4.6 with extended-thinking enabled. Same model as streamClaudeOpus but the API reasons over an 8192-token internal budget before answering. Use for planner / factory / training-plan-composition workloads; stay on streamClaudeOpus for chat replies and latency-sensitive flows.")
 provider reasoningClaudeOpus {
   params {
     contextWindow              200000
@@ -565,10 +587,11 @@ provider streamClaudeSonnet {
 
 // ---- providers/v1/openai/streamCodex51Max.memql ----
 
+/// OpenAI gpt-5.1-codex-max - heavy long-context coding model (streaming); preferred for multi-file
+/// refactors and large-repo understanding tasks
 @extends("openai")
 @type("OpenAIStream")
 @model("gpt-5.1-codex-max")
-@description("OpenAI gpt-5.1-codex-max - heavy long-context coding model (streaming); preferred for multi-file refactors and large-repo understanding tasks")
 provider streamCodex51Max {
   params {
     contextWindow        400000
@@ -578,10 +601,11 @@ provider streamCodex51Max {
 
 // ---- providers/v1/openai/streamCodex53.memql ----
 
+/// OpenAI gpt-5.3-codex - coding-specialized chat model (streaming); use for NemoClaw /
+/// code-generation flows
 @extends("openai")
 @type("OpenAIStream")
 @model("gpt-5.3-codex")
-@description("OpenAI gpt-5.3-codex - coding-specialized chat model (streaming); use for NemoClaw / code-generation flows")
 provider streamCodex53 {
   params {
     contextWindow        256000
@@ -591,10 +615,10 @@ provider streamCodex53 {
 
 // ---- providers/v1/openai/streamReasoning4Mini.memql ----
 
+/// OpenAI o4-mini - efficient reasoning-focused model (o-series); streaming
 @extends("openai")
 @type("OpenAIStream")
 @model("o4-mini")
-@description("OpenAI o4-mini - efficient reasoning-focused model (o-series); streaming")
 provider streamReasoning4Mini {
   params {
     contextWindow        200000
@@ -604,11 +628,13 @@ provider streamReasoning4Mini {
 
 // ---- providers/v1/openai/transcribeDiarize.memql ----
 
+/// OpenAI gpt-4o-transcribe-diarize - speech-to-text with speaker diarization. Use for
+/// multi-speaker recordings where speaker attribution matters. Placeholder type until
+/// diarization-aware client lands.
 @extends("openai")
 @type("OpenAISTT")
 @model("gpt-4o-transcribe-diarize")
 @modality("stt")
-@description("OpenAI gpt-4o-transcribe-diarize - speech-to-text with speaker diarization. Use for multi-speaker recordings where speaker attribution matters. Placeholder type until diarization-aware client lands.")
 provider transcribeDiarize {
   params {
     format     "wav"
@@ -618,11 +644,12 @@ provider transcribeDiarize {
 
 // ---- providers/v1/openai/tts1Hd.memql ----
 
+/// OpenAI tts-1-hd - classic high-definition text-to-speech; reliable fallback when gpt-4o-mini-tts
+/// is unavailable
 @extends("openai")
 @type("OpenAITTS")
 @model("tts-1-hd")
 @modality("tts")
-@description("OpenAI tts-1-hd - classic high-definition text-to-speech; reliable fallback when gpt-4o-mini-tts is unavailable")
 provider tts1Hd {
   params {
     voice  "nova"
@@ -633,11 +660,11 @@ provider tts1Hd {
 
 // ---- providers/v1/openai/tts4oMini.memql ----
 
+/// OpenAI gpt-4o-mini-tts - newest natural-sounding text-to-speech model
 @extends("openai")
 @type("OpenAITTS")
 @model("gpt-4o-mini-tts")
 @modality("tts")
-@description("OpenAI gpt-4o-mini-tts - newest natural-sounding text-to-speech model")
 provider tts4oMini {
   params {
     voice  "alloy"
@@ -648,11 +675,12 @@ provider tts4oMini {
 
 // ---- providers/v1/openai/whisper1.memql ----
 
+/// OpenAI whisper-1 - verbatim speech-to-text; the memQL default STT model (see
+/// integrations/stt/openai_whisper.go and MEMQL_WHISPER_MODEL)
 @extends("openai")
 @type("OpenAISTT")
 @model("whisper-1")
 @modality("stt")
-@description("OpenAI whisper-1 - verbatim speech-to-text; the memQL default STT model (see integrations/stt/openai_whisper.go and MEMQL_WHISPER_MODEL)")
 provider whisper1 {
   params {
     format    "wav"

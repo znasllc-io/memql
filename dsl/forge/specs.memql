@@ -18,12 +18,13 @@
 
 use common.shapes.{ actorEnvelope }
 
-@description("Caller is a forge developer (owner/admin/writer) -- may see the validation queue and validate requests.")
+/// Caller is a forge developer (owner/admin/writer) -- may see the validation queue and validate
+/// requests.
 spec actorEnvelope forgeDeveloper {
   return role == "owner" || role == "admin" || role == "writer"
 }
 
-@description("Caller is a forge approver (owner) -- holds final approval + fast-track authority.")
+/// Caller is a forge approver (owner) -- holds final approval + fast-track authority.
 spec actorEnvelope forgeApprover {
   return role == "owner"
 }

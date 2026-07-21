@@ -7,8 +7,10 @@
 // product-level space (Amendment A). A product maps its own scope onto a
 // partition in its pack; the telephony core only ever sees partitionId.
 
+/// A provisioned PSTN phone number (DID). Bound to a partition; inbound calls to this DID route to
+/// a partition-scoped room. Carrier identifiers are opaque (providerId). Compliance state (E911,
+/// consent) is layered by the compliance slice.
 @namespace("telephony")
-@description("A provisioned PSTN phone number (DID). Bound to a partition; inbound calls to this DID route to a partition-scoped room. Carrier identifiers are opaque (providerId). Compliance state (E911, consent) is layered by the compliance slice.")
 concept number {
   e164          string! @description("Canonical +<countrycode><number> address, e.g. '+14155550100'.")
   carrier       string! @description("Owning carrier name ('telnyx', ...).")
@@ -24,8 +26,10 @@ concept number {
   callerIdVerified bool @default("false") @description("Whether this DID is verified for outbound caller-ID presentation (STIR/SHAKEN attestation is carrier-side; this flags our own verified ownership).")
 }
 
+/// A LiveKit SIP trunk configuration record (inbound and/or outbound) for a carrier. Holds the
+/// LiveKit trunk id and a reference to externally-stored credentials -- never the secret values
+/// themselves (those live in external-secrets).
 @namespace("telephony")
-@description("A LiveKit SIP trunk configuration record (inbound and/or outbound) for a carrier. Holds the LiveKit trunk id and a reference to externally-stored credentials -- never the secret values themselves (those live in external-secrets).")
 concept trunk {
   carrier        string! @description("Carrier this trunk fronts ('telnyx', ...).")
   direction      enum("inbound", "outbound", "both")! @description("Call directions this trunk serves.")
@@ -36,8 +40,10 @@ concept trunk {
   status         enum("active", "disabled")  @default("active") @description("Whether the trunk is in service.")
 }
 
+/// An append-only PSTN call record: one row per call, written on connect and updated on disconnect.
+/// Powers billing, observability, and per-call cost attribution. Bound to a partition + a
+/// partition-scoped room (Amendment A).
 @namespace("telephony")
-@description("An append-only PSTN call record: one row per call, written on connect and updated on disconnect. Powers billing, observability, and per-call cost attribution. Bound to a partition + a partition-scoped room (Amendment A).")
 concept call {
   direction       enum("inbound", "outbound")! @description("Call direction.")
   fromE164        string! @description("Calling party E.164.")
@@ -54,8 +60,10 @@ concept call {
   costEstimate    float   @default("0") @description("Estimated total cost in USD (carrier + model audio), for per-call attribution.")
 }
 
+/// TCPA consent / opt-out state for an external phone number. Outbound calls to an opted-out number
+/// are blocked with an auditable reason (memql#1915). Append-only: the newest row per phoneNumber
+/// is authoritative.
 @namespace("telephony")
-@description("TCPA consent / opt-out state for an external phone number. Outbound calls to an opted-out number are blocked with an auditable reason (memql#1915). Append-only: the newest row per phoneNumber is authoritative.")
 concept consent {
   phoneNumber  string! @description("The external party's E.164 number this consent record governs.")
   partitionId  string! @description("Tenant partition the consent was recorded under (Amendment A).")

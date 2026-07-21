@@ -65,15 +65,16 @@ type rewriter func([]byte) ([]byte, error)
 type pathRewriter func(path string, src []byte) ([]byte, error)
 
 var rewriters = map[string]rewriter{
-	"result-navigation": rewriteResultNavigation,
-	"slice-syntax":      rewriteSliceSyntax,
-	"args-description":  rewriteArgsDescription,
-	"accept-stamp":      langparser.RewriteAcceptStamp,
-	"required-sigil":    langparser.RewriteRequiredSigil,
-	"enum-type":         langparser.RewriteEnumTypeArgs,
-	"cache-positional":  langparser.RewriteCachePositional,
-	"terse-automation":  langparser.RewriteLonghandSingleStepAutomation,
-	"actor-binding":     langparser.RewriteActorBinding,
+	"result-navigation":        rewriteResultNavigation,
+	"slice-syntax":             rewriteSliceSyntax,
+	"args-description":         rewriteArgsDescription,
+	"accept-stamp":             langparser.RewriteAcceptStamp,
+	"required-sigil":           langparser.RewriteRequiredSigil,
+	"enum-type":                langparser.RewriteEnumTypeArgs,
+	"cache-positional":         langparser.RewriteCachePositional,
+	"terse-automation":         langparser.RewriteLonghandSingleStepAutomation,
+	"actor-binding":            langparser.RewriteActorBinding,
+	"doc-comment-descriptions": langparser.RewriteDocCommentDescriptions,
 }
 
 var pathRewriters = map[string]pathRewriter{
@@ -248,6 +249,7 @@ func listRewriters(w io.Writer) {
 	fmt.Fprintln(w, "  cache-positional    @cache(ttl=\"N\") -> @cache(N) (#2618)")
 	fmt.Fprintln(w, "  terse-automation    longhand single-step automations -> the => form (#2619)")
 	fmt.Fprintln(w, "  actor-binding       insert @actor above constructs reading actor.* (#2621)")
+	fmt.Fprintln(w, "  doc-comment-descriptions  construct @description -> /// doc comments; dedup restating headers + Arguments/Returns (#2635)")
 }
 
 func applyPipeline(path string, src []byte, pipeline []pathRewriter) ([]byte, error) {

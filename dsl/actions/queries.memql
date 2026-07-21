@@ -9,7 +9,8 @@
 
 use common.traits.{ statusIsActive }
 
-@description("List v1:actions:candidate traces captured for a plan, newest-first by createdAt (owned tier). #1735.")
+/// List v1:actions:candidate traces captured for a plan, newest-first by createdAt (owned tier).
+/// #1735.
 @actor
 query candidate actionCandidatesForPlan {
   args {
@@ -28,7 +29,8 @@ query candidate actionCandidatesForPlan {
 // The harness computes a stable hash of the dispatched step input and asks
 // for an active action minted under the same fingerprint; a hit is replayed
 // token-free, a miss falls through to the LLM. Owned tier.
-@description("Resolve an active v1:actions:action by inputFingerprint for the calling owner -- the literal-replay lookup (Phase 1 #1736).")
+/// Resolve an active v1:actions:action by inputFingerprint for the calling owner -- the
+/// literal-replay lookup (Phase 1 #1736).
 @unbounded("unique inputFingerprint dedupe probe scoped to the owner -- must see all matches")
 @actor
 query action actionByInputFingerprint {
@@ -43,7 +45,8 @@ query action actionByInputFingerprint {
 // Returns the owner's active execution surfaces; the surfaceresolver filters
 // by capability + availability in Go and applies the precedence/world-group
 // logic. Owned tier.
-@description("List the calling owner's active v1:actions:surface registry entries for the capability->surface resolver (Phase 2 #1737). Owned tier.")
+/// List the calling owner's active v1:actions:surface registry entries for the capability->surface
+/// resolver (Phase 2 #1737). Owned tier.
 @actor
 query surface surfacesForOwner {
   filter  ownerUserId == actor.userId && statusIsActive
@@ -60,7 +63,8 @@ query surface surfacesForOwner {
 // so an action minted for one input can replay on a different input with the
 // same shape via parameter re-binding. Owned tier; superseded by the planner's
 // semantic search once wired.
-@description("Resolve an active v1:actions:action by templateFingerprint (input structure) for the calling owner -- the parameterized-replay lookup (Phase 3 #1738). Owned tier.")
+/// Resolve an active v1:actions:action by templateFingerprint (input structure) for the calling
+/// owner -- the parameterized-replay lookup (Phase 3 #1738). Owned tier.
 @unbounded("unique templateFingerprint dedupe probe scoped to the owner -- must see all matches")
 @actor
 query action actionByTemplateFingerprint {
@@ -71,9 +75,8 @@ query action actionByTemplateFingerprint {
   shape   actionFull
 }
 
-// actionsPendingConfirm -- the confirm UI's worklist (Phase 4 #1739):
-// candidate actions awaiting a human confirm before they replay. Owned tier.
-@description("List the calling owner's candidate v1:actions:action rows awaiting confirmation (real-machine side effects gate on a human, Phase 4 #1739). Owned tier.")
+/// List the calling owner's candidate v1:actions:action rows awaiting confirmation (real-machine
+/// side effects gate on a human, Phase 4 #1739). Owned tier.
 @actor
 query action actionsPendingConfirm {
   filter  status == "candidate" && ownerUserId == actor.userId
@@ -88,7 +91,8 @@ query action actionsPendingConfirm {
 // activeActionsForOwner -- the consolidation sweep's input (Phase 4
 // #1739): the owner's active actions, to decay unused ones + deprecate those
 // below the reliability floor. Owned tier.
-@description("List the calling owner's active v1:actions:action rows for the consolidation decay/deprecate sweep (Phase 4 #1739). Owned tier.")
+/// List the calling owner's active v1:actions:action rows for the consolidation decay/deprecate
+/// sweep (Phase 4 #1739). Owned tier.
 @actor
 query action activeActionsForOwner {
   filter  ownerUserId == actor.userId && statusIsActive
@@ -103,7 +107,8 @@ query action activeActionsForOwner {
 // actionByIdAndVersion -- pin resolution (Phase 5 #1740). Resolves a
 // pinned reference (id@version) to the exact action version, so a bundle that
 // pinned act_x@3 always replays version 3 regardless of later edits. Owned tier.
-@description("Resolve a pinned v1:actions:action reference (id + version) for the calling owner -- pin-by-default resolution (Phase 5 #1740). Owned tier.")
+/// Resolve a pinned v1:actions:action reference (id + version) for the calling owner --
+/// pin-by-default resolution (Phase 5 #1740). Owned tier.
 @actor
 query action actionByIdAndVersion {
   args {
@@ -116,7 +121,8 @@ query action actionByIdAndVersion {
 
 // actionById -- floating-ref resolution (#1758). Resolves a bare action
 // reference (no @version) to the latest version of that action. Owned tier.
-@description("Resolve a floating v1:actions:action reference by id (latest version) for the calling owner -- floating-ref resolution (#1758). Owned tier.")
+/// Resolve a floating v1:actions:action reference by id (latest version) for the calling owner --
+/// floating-ref resolution (#1758). Owned tier.
 @actor
 query action actionById {
   args {

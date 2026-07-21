@@ -7,8 +7,12 @@
 // (v1:cluster:deployment / v1:cluster:deploymentNodeSpec -- see concepts.memql),
 // so only the import path moved (`use deployment.concepts.{ ... }`).
 
+/// Deployment record projection (#1872). Carries the full lifecycle row: stable deploymentId,
+/// current status, the version + image digest being shipped, the deploy target
+/// (provider/environment/region), the target clusterId, the operator (triggeredBy), the
+/// supersession back-pointer, and both timestamps (row.createdAt = deploy start, payload.updatedAt
+/// = last transition). Backs the cockpit Deployments history + asOf reconstruction.
 @row
-@description("Deployment record projection (#1872). Carries the full lifecycle row: stable deploymentId, current status, the version + image digest being shipped, the deploy target (provider/environment/region), the target clusterId, the operator (triggeredBy), the supersession back-pointer, and both timestamps (row.createdAt = deploy start, payload.updatedAt = last transition). Backs the cockpit Deployments history + asOf reconstruction.")
 shape deployment deploymentFull {
   row.id
   deploymentId
@@ -27,8 +31,11 @@ shape deployment deploymentFull {
   row.createdAt
 }
 
+/// Per-node-type deployment spec projection (Epic 2 / #2094). Carries the (deploymentId, nodeType)
+/// key plus the version (empty = engine-as-spine), replica count, resolved image digest, and both
+/// timestamps (row.createdAt = first set, payload.updatedAt = last transition). Backs
+/// nodeSpecsForDeployment + asOf reconstruction of a deployment's per-node spec set.
 @row
-@description("Per-node-type deployment spec projection (Epic 2 / #2094). Carries the (deploymentId, nodeType) key plus the version (empty = engine-as-spine), replica count, resolved image digest, and both timestamps (row.createdAt = first set, payload.updatedAt = last transition). Backs nodeSpecsForDeployment + asOf reconstruction of a deployment's per-node spec set.")
 shape deploymentNodeSpec deploymentNodeSpecFull {
   row.id
   deploymentId

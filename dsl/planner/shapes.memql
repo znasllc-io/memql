@@ -7,8 +7,11 @@
 // and its data shapes have to be uniformly available on every binary
 // that loads concepts, not just on the carrier-built BFF.
 
+/// Comprehensive plan projection for the Tasks page row, the plan.created / plan.completed canvas
+/// cards, and the planner's own routing decisions. Carries every Plan field including lifecycle
+/// timestamps, the per-kind input/output blobs, and the token + estimate accounting the Tasks page
+/// progress strips read.
 @row
-@description("Comprehensive plan projection for the Tasks page row, the plan.created / plan.completed canvas cards, and the planner's own routing decisions. Carries every Plan field including lifecycle timestamps, the per-kind input/output blobs, and the token + estimate accounting the Tasks page progress strips read.")
 shape plan planFull {
   row.id
   partitionId
@@ -40,8 +43,11 @@ shape plan planFull {
   row.createdBy
 }
 
+/// Comprehensive task projection for the Tasks page expand-drawer (which lists Tasks under a Plan)
+/// and the planner's per-Task lifecycle automations. Carries the metrics rollup (tokensSpent,
+/// llmCallCount, toolCallCount, modelBreakdown[]) so per-task token cost surfaces in the cockpit's
+/// planner detail pane.
 @row
-@description("Comprehensive task projection for the Tasks page expand-drawer (which lists Tasks under a Plan) and the planner's per-Task lifecycle automations. Carries the metrics rollup (tokensSpent, llmCallCount, toolCallCount, modelBreakdown[]) so per-task token cost surfaces in the cockpit's planner detail pane.")
 shape task taskFull {
   row.id
   planId
@@ -71,8 +77,9 @@ shape task taskFull {
   row.createdBy
 }
 
+/// TaskState projection. Used by the planner to bootstrap an agent's resume context after a paused
+/// / awaitingFeedback Task is resumed.
 @row
-@description("TaskState projection. Used by the planner to bootstrap an agent's resume context after a paused / awaitingFeedback Task is resumed.")
 shape taskState taskStateFull {
   row.id
   taskId
@@ -83,8 +90,12 @@ shape taskState taskStateFull {
   row.createdAt
 }
 
+/// Comprehensive responsibility projection (epic #631). Carries every field across the reactive /
+/// standing / recurring archetypes -- trigger discriminator, schedule (recurring), condition
+/// (reactive), target binding (assistant / specialist / unassigned + assignedAgentId /
+/// assignedRoleSlug), scope pin, lifecycle status + enabled flag, and the lastEvaluatedAt /
+/// lastResult run bookkeeping the reactive-loop epic #632 consumes.
 @row
-@description("Comprehensive responsibility projection (epic #631). Carries every field across the reactive / standing / recurring archetypes -- trigger discriminator, schedule (recurring), condition (reactive), target binding (assistant / specialist / unassigned + assignedAgentId / assignedRoleSlug), scope pin, lifecycle status + enabled flag, and the lastEvaluatedAt / lastResult run bookkeeping the reactive-loop epic #632 consumes.")
 shape responsibility responsibilityFull {
   row.id
   ownerUserId

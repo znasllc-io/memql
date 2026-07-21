@@ -15,5 +15,6 @@
 //
 // Schedule chosen as 02:30 UTC (offset from the 02:00 archive
 // purge so the two crons don't contend on the same DB window).
-@description("Daily 02:30 UTC sweep: identifies policy traces past MEMQL_POLICYTRACE_RETENTION_DAYS. Observation-only until MemQL gains row-removal support.")
+/// Daily 02:30 UTC sweep: identifies policy traces past MEMQL_POLICYTRACE_RETENTION_DAYS.
+/// Observation-only until MemQL gains row-removal support.
 automation purgeExpiredPolicyTraces @trigger(schedule="0 30 2 * * *") => logic purgeExpiredPolicyTraces

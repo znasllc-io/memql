@@ -4,8 +4,10 @@
 // Comprehensive @row shapes over v1:authoring:bundle + v1:authoring:construct
 // for the management UI, the gate runners, and the authored runtime loader.
 
+/// Comprehensive bundle projection: every field including the validation/dry-run reports and
+/// lifecycle timestamps. Backs the management list, the Gate 3 approval artifact, and the runtime
+/// loader.
 @row
-@description("Comprehensive bundle projection: every field including the validation/dry-run reports and lifecycle timestamps. Backs the management list, the Gate 3 approval artifact, and the runtime loader.")
 shape bundle bundleFull {
   row.id
   ownerUserId
@@ -26,8 +28,9 @@ shape bundle bundleFull {
   row.createdBy
 }
 
+/// Comprehensive construct projection: source + cached compiled form + catalog metadata. Backs the
+/// gate runners (compile/bind the closure), the runtime register path, and the catalog matcher.
 @row
-@description("Comprehensive construct projection: source + cached compiled form + catalog metadata. Backs the gate runners (compile/bind the closure), the runtime register path, and the catalog matcher.")
 shape construct constructFull {
   row.id
   ownerUserId
@@ -47,8 +50,9 @@ shape construct constructFull {
   row.createdBy
 }
 
+/// Dependency edge projection (#957): from-construct, to-construct, resolution source, and owning
+/// bundle. Backs dependency-closure + impact-analysis views.
 @row
-@description("Dependency edge projection (#957): from-construct, to-construct, resolution source, and owning bundle. Backs dependency-closure + impact-analysis views.")
 shape dependencyEdge dependencyEdgeFull {
   row.id
   ownerUserId

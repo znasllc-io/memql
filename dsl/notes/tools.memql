@@ -8,17 +8,19 @@
 // no ownerUserId arg for the LLM to forge -- ownership is
 // server-stamped from the auth context.
 
+/// List the caller's notes (id, title, body, tags, updatedAt). Read-only; owned -- only the
+/// caller's own notes are returned.
 @handler(type="query", query="query notes()")
 @executionTime("fast")
-@description("List the caller's notes (id, title, body, tags, updatedAt). Read-only; owned -- only the caller's own notes are returned.")
 @mcp
 tool notesList {
   limit  integer  @default("50") @description("Advisory cap on how many notes to consider. The query returns the caller's notes; trim to this many in your reasoning.")
 }
 
+/// Create a note for the user. Owned: the new note is owned by the caller (server-stamped). Pass a
+/// fresh unique noteId. title and tags are optional; body is required.
 @handler(type="function", name="createNote")
 @executionTime("fast")
-@description("Create a note for the user. Owned: the new note is owned by the caller (server-stamped). Pass a fresh unique noteId. title and tags are optional; body is required.")
 @mcp
 tool notesCreate {
   noteId  string! @description("Fresh unique id for the new note, e.g. a UUID. The caller mints it so it can reference the created row immediately.")
@@ -27,18 +29,22 @@ tool notesCreate {
   tags    array     @description("Optional list of string tags for grouping / filtering.")
 }
 
+/// Update a note's fields (title / body / tags). Pass the full merged payload built from the
+/// current note (via notesList or notesSearch) plus the changed fields. Owned: ownership is
+/// re-enforced server-side and updatedAt is re-stamped.
 @handler(type="query", query="mutation updateNote(noteId: \"$args.noteId\", payload: $args.payload)")
 @executionTime("fast")
-@description("Update a note's fields (title / body / tags). Pass the full merged payload built from the current note (via notesList or notesSearch) plus the changed fields. Owned: ownership is re-enforced server-side and updatedAt is re-stamped.")
 @mcp
 tool notesUpdate {
   noteId   string! @description("Id of the note to update.")
   payload  object! @description("Full merged note payload with the changed fields applied (title, body, tags).")
 }
 
+/// Search the caller's notes by tag -- returns every note carrying the given tag. Owned: only the
+/// caller's own notes are searched. Read-only. To find notes by body text, list / tag-search first
+/// and substring-match the bodies in your reasoning.
 @handler(type="query", query="query notesByTag(tag: \"$args.tag\")")
 @executionTime("fast")
-@description("Search the caller's notes by tag -- returns every note carrying the given tag. Owned: only the caller's own notes are searched. Read-only. To find notes by body text, list / tag-search first and substring-match the bodies in your reasoning.")
 @mcp
 tool notesSearch {
   tag  string! @description("Tag to search for. Returns the caller's notes that carry this tag.")

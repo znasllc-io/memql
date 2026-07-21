@@ -18,7 +18,9 @@
 // capability result carries a `passed` boolean -- and returns whether the
 // gate is green. Defaults to false when the result or its `passed` flag is
 // absent, so a missing/garbled gate result fails CLOSED (never auto-promotes).
-@description("Pure gate check: did the deploy gate pass? Reads the runDeployGate action's structured result object. Fails closed: false when the result or its `passed` flag is absent. The deploy automation (I10) branches success/rollback on this decision.")
+/// Pure gate check: did the deploy gate pass? Reads the runDeployGate action's structured result
+/// object. Fails closed: false when the result or its `passed` flag is absent. The deploy
+/// automation (I10) branches success/rollback on this decision.
 logic deployGateGreen {
   args {
     gate object!
@@ -37,7 +39,9 @@ logic deployGateGreen {
 // write. Returns the builtin result object { current, bump, next }; the deploy
 // automation reads `.next` and stamps it on the deployment record via
 // createDeployment.
-@description("Decide the next release version by bumping the current version (bump in {major, minor, patch}, default patch). Pure: delegates the version arithmetic to the read-only suggestNextVersion builtin. Returns { current, bump, next }.")
+/// Decide the next release version by bumping the current version (bump in {major, minor, patch},
+/// default patch). Pure: delegates the version arithmetic to the read-only suggestNextVersion
+/// builtin. Returns { current, bump, next }.
 logic nextDeploymentVersion {
   args {
     current  string!
@@ -63,7 +67,8 @@ logic nextDeploymentVersion {
 // query-path expression that SCANS (it died on the engine's bookkeeping
 // rows at the first live deploy); until that engine path evaluates
 // in-process, author role gates in this shape.
-@description("Pure forward-deploy role gate, mirroring spec requiresDeveloperOrAbove (#1876): true when the actor holds developer, admin, or owner. Writer/reader are read-only.")
+/// Pure forward-deploy role gate, mirroring spec requiresDeveloperOrAbove (#1876): true when the
+/// actor holds developer, admin, or owner. Writer/reader are read-only.
 @actor
 logic deploymentForwardAllowed {
   body {
@@ -78,7 +83,8 @@ logic deploymentForwardAllowed {
 // requiresOwner (dsl/deployment/specs.memql, #1876): rollback is owner-only --
 // not even admin may roll back. Reads actor.role. The rollback automation
 // calls this before reverting; a non-owner's request is dropped.
-@description("Pure rollback role gate, mirroring spec requiresOwner (#1876): true ONLY when the actor holds the owner role. Rollback is owner-only -- not even admin may roll back.")
+/// Pure rollback role gate, mirroring spec requiresOwner (#1876): true ONLY when the actor holds
+/// the owner role. Rollback is owner-only -- not even admin may roll back.
 @actor
 logic deploymentRollbackAllowed {
   body {
@@ -88,7 +94,11 @@ logic deploymentRollbackAllowed {
   }
 }
 
-@description("PURE rollback-target decision (#2380): returns the deployment id to roll back to when the gate FAILED and a previousDeploymentId is present; returns empty -- meaning NO rollback -- on a passed gate or when no rollback target was supplied (the development path). The automation switches on this scalar and fires revertOverlay only in the non-empty case (decide -> switch -> act).")
+/// PURE rollback-target decision (#2380): returns the deployment id to roll back to when the gate
+/// FAILED and a previousDeploymentId is present; returns empty -- meaning NO rollback -- on a
+/// passed gate or when no rollback target was supplied (the development path). The automation
+/// switches on this scalar and fires revertOverlay only in the non-empty case (decide -> switch ->
+/// act).
 logic deployRollbackTarget {
   args {
     passed any
@@ -118,7 +128,9 @@ logic deployRollbackTarget {
 // the per-node fan-out free of an inter-step dependency so the deploy phases
 // run in the authored order; see the automation header.) An emitter may pass a
 // SUBSET to redeploy a single node.
-@description("Canonical ENGINE node-type list the deploy bundle builds + places: identity, cognition, voice, agent, planner, workbench, mcp, voice-agent. No bff or product-carrier nodes (carrier/product layer, shipped by their own repos).")
+/// Canonical ENGINE node-type list the deploy bundle builds + places: identity, cognition, voice,
+/// agent, planner, workbench, mcp, voice-agent. No bff or product-carrier nodes (carrier/product
+/// layer, shipped by their own repos).
 logic engineNodeTypes {
   body {
     return ["identity", "cognition", "voice", "agent", "planner", "workbench", "mcp", "voice-agent"]
@@ -137,7 +149,9 @@ logic engineNodeTypes {
 // fork that the env switch's GitOps placement and the rollback share. Returning
 // a string (rather than the deployGateGreen bool) is what lets the success /
 // failure branching ride the same `switch` construct the env placement uses.
-@description("Map the deploy-gate result to the terminal deployment status label: \"succeeded\" when the gate passed, else \"failed\" (fail-closed, mirroring deployGateGreen). The deploy automation's finalize step switches on this.")
+/// Map the deploy-gate result to the terminal deployment status label: "succeeded" when the gate
+/// passed, else "failed" (fail-closed, mirroring deployGateGreen). The deploy automation's finalize
+/// step switches on this.
 logic deployOutcomeLabel {
   args {
     passed any

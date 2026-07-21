@@ -3,7 +3,8 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-@description("Returns the parent domainId for every chunk in the active partition. Frontend groups + counts to render per-domain chunk counts in the Knowledge panel.")
+/// Returns the parent domainId for every chunk in the active partition. Frontend groups + counts to
+/// render per-domain chunk counts in the Knowledge panel.
 @unbounded("distinct chunk domain ids -- a bounded dedupe enumeration consumed whole")
 query documentChunk allDocumentChunkDomains {
   filter  domainId!=""
@@ -17,7 +18,9 @@ query documentChunk allDocumentChunkDomains {
 // Go-side dispatcher truncates the text per chunk before handing the
 // corpus to the prompt (token budget).
 
-@description("Every documentChunk attached to a knowledge domain, full shape. Consumed by the trainSpecialist dispatcher for the Trainer Agent's mode='refresh' existingCorpus (read-what's-there-now-to-decide-what-to-supersede).")
+/// Every documentChunk attached to a knowledge domain, full shape. Consumed by the trainSpecialist
+/// dispatcher for the Trainer Agent's mode='refresh' existingCorpus
+/// (read-what's-there-now-to-decide-what-to-supersede).
 query documentChunk documentChunksForDomain {
   args {
     domainId  string!

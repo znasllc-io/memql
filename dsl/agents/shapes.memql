@@ -5,8 +5,10 @@
 // agentAuthorizationFull projection for the standing-grants surface,
 // and the dedupe-step shapes the planner uses.
 
+/// AgentAuthorization projection. Backs the agent settings 'Standing authorizations' table where
+/// the user reviews and revokes grants, plus the agent's prompt-context resolver that needs to read
+/// the current standing computer_use scope.
 @row
-@description("AgentAuthorization projection. Backs the agent settings 'Standing authorizations' table where the user reviews and revokes grants, plus the agent's prompt-context resolver that needs to read the current standing computer_use scope.")
 shape agentAuthorization agentAuthorizationFull {
   row.id
   agentId
@@ -34,8 +36,8 @@ shape agentAuthorization agentAuthorizationFull {
 //     so resolveAgentOwner / scanCreatedBy fall back to it after
 //     ownerUserId.
 
+/// Comprehensive agent projection with all configuration fields
 @row
-@description("Comprehensive agent projection with all configuration fields")
 shape agent agentFull {
   row.id
   ownerUserId
@@ -62,15 +64,20 @@ shape agent agentFull {
   row.createdBy
 }
 
+/// Minimal agent projection used by agentRoleSlugsInUse: just id + roleSlug, since the create-agent
+/// dropdown only needs to know which slugs are taken (not the full agent payload).
 @row
-@description("Minimal agent projection used by agentRoleSlugsInUse: just id + roleSlug, since the create-agent dropdown only needs to know which slugs are taken (not the full agent payload).")
 shape agent agentRoleSlugLite {
   row.id
   roleSlug
 }
 
+/// Compact agent projection the layered-dedupe similarity step consumes. Carries only the fields
+/// that influence dedupe decisions: identity (id, roleSlug, name, description), capabilities the
+/// Planner reasons about (domains, tools, keywords), and the lineage that lets the Planner avoid
+/// daisy-chaining extensions (extendedFromAgentId, extensionGoals). Embedding (roleEmbedding) is
+/// included so the dedupe-Layer-1 cosine math has the data it needs without a second row fetch.
 @row
-@description("Compact agent projection the layered-dedupe similarity step consumes. Carries only the fields that influence dedupe decisions: identity (id, roleSlug, name, description), capabilities the Planner reasons about (domains, tools, keywords), and the lineage that lets the Planner avoid daisy-chaining extensions (extendedFromAgentId, extensionGoals). Embedding (roleEmbedding) is included so the dedupe-Layer-1 cosine math has the data it needs without a second row fetch.")
 shape agent agentMinimalForDedupe {
   row.id
   name
@@ -83,8 +90,13 @@ shape agent agentMinimalForDedupe {
   roleEmbedding
 }
 
+/// Full projection of an agentRole catalog row. Carries every field the cockpit's role picker + the
+/// agent-creation factory need: slug + display + category + tier for the picker; the skill-id lock
+/// + default + forbidden lists + maxSkills cap for the materialization step (Phase 2 cut: #158 --
+/// replaces the seven flat domain/tool/liveKnowledge lists with a single skill-id surface);
+/// recommended policy / gender / system-prompt hints for the agent's initial values. predefined is
+/// included so the UI can render predefined rows as locked.
 @row
-@description("Full projection of an agentRole catalog row. Carries every field the cockpit's role picker + the agent-creation factory need: slug + display + category + tier for the picker; the skill-id lock + default + forbidden lists + maxSkills cap for the materialization step (Phase 2 cut: #158 -- replaces the seven flat domain/tool/liveKnowledge lists with a single skill-id surface); recommended policy / gender / system-prompt hints for the agent's initial values. predefined is included so the UI can render predefined rows as locked.")
 shape agentRole agentRoleFull {
   row.id
   slug
@@ -104,8 +116,11 @@ shape agentRole agentRoleFull {
   predefined
 }
 
+/// Lightweight skill projection: slug + display + tier + tags. Backs catalog list / picker surfaces
+/// where the caller doesn't yet need the domain / tool composition. Faster + smaller than skillFull
+/// so the cockpit's Skills admin list and the role-edit picker don't pay for the bundle payload
+/// until the user expands a row.
 @row
-@description("Lightweight skill projection: slug + display + tier + tags. Backs catalog list / picker surfaces where the caller doesn't yet need the domain / tool composition. Faster + smaller than skillFull so the cockpit's Skills admin list and the role-edit picker don't pay for the bundle payload until the user expands a row.")
 shape skill skillSummary {
   row.id
   slug
@@ -118,8 +133,13 @@ shape skill skillSummary {
   active
 }
 
+/// Full skill projection: the catalog row plus its bundle composition + Phase 3 mint provenance.
+/// Backs the Skills admin detail view, the Planner Agent's mintSkill candidate read, the trace
+/// viewer's mint-event detail, and the agent factory's attach path (Phase 2). Keeps domainIds /
+/// toolSlugs / liveSourceIds inline so a single read fully describes what attaching the skill will
+/// do to an agent. originatingPlanId / mintedByAgentId are empty for predefined catalog rows and
+/// populated for planner-minted ones.
 @row
-@description("Full skill projection: the catalog row plus its bundle composition + Phase 3 mint provenance. Backs the Skills admin detail view, the Planner Agent's mintSkill candidate read, the trace viewer's mint-event detail, and the agent factory's attach path (Phase 2). Keeps domainIds / toolSlugs / liveSourceIds inline so a single read fully describes what attaching the skill will do to an agent. originatingPlanId / mintedByAgentId are empty for predefined catalog rows and populated for planner-minted ones.")
 shape skill skillFull {
   row.id
   slug
@@ -139,8 +159,11 @@ shape skill skillFull {
   row.createdBy
 }
 
+/// Full skillChangeEvent projection. Carries the changeKind + before/after snapshots + actor
+/// attribution (agent or user) + originating Plan link so the cockpit trace viewer (cockpit#125)
+/// can render an agent's skill-attach history inline with the plan task detail. Phase 3 surface
+/// (memql#159); rows are append-only.
 @row
-@description("Full skillChangeEvent projection. Carries the changeKind + before/after snapshots + actor attribution (agent or user) + originating Plan link so the cockpit trace viewer (cockpit#125) can render an agent's skill-attach history inline with the plan task detail. Phase 3 surface (memql#159); rows are append-only.")
 shape skillChangeEvent skillChangeEventFull {
   row.id
   targetAgentId
@@ -154,8 +177,10 @@ shape skillChangeEvent skillChangeEventFull {
   row.createdAt
 }
 
+/// Avatar persona catalog projection (memql#609). Backs the Create-Assistant persona picker
+/// (frontend#239) and the agent-display hydration of a stamped avatarPersonaId. Carries the vendor
+/// + vendor-issued personaId the voice-agent resolves at session start.
 @row
-@description("Avatar persona catalog projection (memql#609). Backs the Create-Assistant persona picker (frontend#239) and the agent-display hydration of a stamped avatarPersonaId. Carries the vendor + vendor-issued personaId the voice-agent resolves at session start.")
 shape avatarPersona avatarPersonaFull {
   row.id
   vendor

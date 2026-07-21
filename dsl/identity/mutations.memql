@@ -3,7 +3,7 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-@description("Approve an access request (status=approved, stamps reviewer + invitation).")
+/// Approve an access request (status=approved, stamps reviewer + invitation).
 mutate accessRequest approveAccessRequest {
   args {
     requestId     string!
@@ -35,7 +35,10 @@ mutate accessRequest approveAccessRequest {
 // Re-stamps the other fields so the new version preserves the row's
 // shape (identityType discriminator, credentials, active flag).
 
-@description("Bump the lastUsedAt stamp on a PAT identity. Best-effort; callers must not fail the request on error. Read-merges the existing row so only lastUsedAt changes; identityType/credentials/label/active/usableByAgents inherit from the persisted row instead of being re-supplied (memql#1628).")
+/// Bump the lastUsedAt stamp on a PAT identity. Best-effort; callers must not fail the request on
+/// error. Read-merges the existing row so only lastUsedAt changes;
+/// identityType/credentials/label/active/usableByAgents inherit from the persisted row instead of
+/// being re-supplied (memql#1628).
 mutate identity bumpPATLastUsedAt {
   args {
     identityId      string!
@@ -65,7 +68,7 @@ mutate identity bumpPATLastUsedAt {
 //   userId  (string)  - User node ID
 //
 
-@description("Stamp dataExportLastAt = now after a successful /me/export download.")
+/// Stamp dataExportLastAt = now after a successful /me/export download.
 mutate user bumpUserDataExport {
   args {
     userId  string!
@@ -104,7 +107,8 @@ mutate user bumpUserDataExport {
 //                                   responsible for the read-then-+1
 //                                   round-trip.
 
-@description("Stamp revocationEpoch on the user row. Bulk-revoke admin path for memql#106. Caller computes the +1 in Go.")
+/// Stamp revocationEpoch on the user row. Bulk-revoke admin path for memql#106. Caller computes the
+/// +1 in Go.
 mutate user bumpUserRevocationEpoch {
   args {
     userId    string!
@@ -142,7 +146,7 @@ mutate user bumpUserRevocationEpoch {
 //   userId  (string)  - User node ID
 //
 
-@description("Cancel a scheduled account deletion (clears deletionScheduledAt).")
+/// Cancel a scheduled account deletion (clears deletionScheduledAt).
 mutate user cancelScheduledDeletion {
   args {
     userId  string!
@@ -176,7 +180,7 @@ mutate user cancelScheduledDeletion {
 //   consumedFromIP  (string, optional)  - IP the redemption request came from
 //
 
-@description("Mark an auth code consumed (stamps consumedAt = now).")
+/// Mark an auth code consumed (stamps consumedAt = now).
 mutate authCode consumeAuthCode {
   args {
     codeId          string!
@@ -210,7 +214,7 @@ mutate authCode consumeAuthCode {
 //   consumedFromIP  (string, optional)  - IP the consume request came from
 //
 
-@description("Mark a magic-link request consumed (stamps consumedAt = now).")
+/// Mark a magic-link request consumed (stamps consumedAt = now).
 mutate magicLinkRequest consumeMagicLinkRequest {
   args {
     requestId       string!
@@ -249,7 +253,7 @@ mutate magicLinkRequest consumeMagicLinkRequest {
 //   userAgent          (string, optional)  - User-Agent header at submission
 //
 
-@description("Create a self-service access request (waitlist row, status=pending).")
+/// Create a self-service access request (waitlist row, status=pending).
 mutate accessRequest createAccessRequest {
   args {
     requestId          string!
@@ -311,7 +315,7 @@ mutate accessRequest createAccessRequest {
 //   prevEventHash    (string, optional)  - Reserved hash-chain anchor
 //
 
-@description("Append a row to the append-only security audit log.")
+/// Append a row to the append-only security audit log.
 mutate auditEvent createAuditEvent {
   args {
     eventId          string!
@@ -382,7 +386,7 @@ mutate auditEvent createAuditEvent {
 //   expiresAt           (string)            - Absolute expiration (~60s after creation)
 //
 
-@description("Mint a one-time OAuth authorization code from a consumed magic link.")
+/// Mint a one-time OAuth authorization code from a consumed magic link.
 mutate authCode createAuthCode {
   args {
     codeId              string!
@@ -438,7 +442,7 @@ mutate authCode createAuthCode {
 //   registeredAt             (string)            - RFC3339 registration time
 //
 
-@description("Persist a dynamically-registered public OAuth client (RFC 7591).")
+/// Persist a dynamically-registered public OAuth client (RFC 7591).
 mutate oauthClient createOAuthClient {
   args {
     clientId                 string!
@@ -488,7 +492,7 @@ mutate oauthClient createOAuthClient {
 //   expiresAt    (string)            - ISO 8601 expiration timestamp
 //
 
-@description("Create a bearer-token session record at issuance time.")
+/// Create a bearer-token session record at issuance time.
 mutate authSession createAuthSession {
   args {
     sessionId    string!
@@ -550,7 +554,7 @@ mutate authSession createAuthSession {
 //                                                   via mutationStampBootstrapped.
 //
 
-@description("Persist (or refresh) the singleton cluster-settings row.")
+/// Persist (or refresh) the singleton cluster-settings row.
 mutate clusterSettings createClusterSettings {
   args {
     id                         string!
@@ -611,7 +615,12 @@ mutate clusterSettings createClusterSettings {
   }
 }
 
-@description("Flip the cluster-wide GLOBAL KILL SWITCH for planner-authored automations (epic memql#954, issue #961). Partial-update of the singleton cluster-settings row (id='cluster'): sets authoredAutomationsEnabled true (resume) or false (halt). false halts EVERY authored automation across the whole cluster -- the governance hard stop -- independent of any bundle status or per-user kill switch. Operator-only in practice (the admin settings surface calls it); the authored scheduler reads the flag through clusterSettingsCurrent on its global gate.")
+/// Flip the cluster-wide GLOBAL KILL SWITCH for planner-authored automations (epic memql#954, issue
+/// #961). Partial-update of the singleton cluster-settings row (id='cluster'): sets
+/// authoredAutomationsEnabled true (resume) or false (halt). false halts EVERY authored automation
+/// across the whole cluster -- the governance hard stop -- independent of any bundle status or
+/// per-user kill switch. Operator-only in practice (the admin settings surface calls it); the
+/// authored scheduler reads the flag through clusterSettingsCurrent on its global gate.
 mutate clusterSettings setAuthoredAutomationsEnabled {
   args {
     enabled  bool!
@@ -630,7 +639,7 @@ mutate clusterSettings setAuthoredAutomationsEnabled {
 // Creates a new v1:identity:delegation record granting an agent
 // scoped authority to act on behalf of an identity.
 
-@description("Create a new delegation granting an agent scoped authority on behalf of an identity.")
+/// Create a new delegation granting an agent scoped authority on behalf of an identity.
 mutate delegation createDelegation {
   args {
     delegationId      string
@@ -678,7 +687,7 @@ mutate delegation createDelegation {
 // passes the computed id so re-creating the same identity is idempotent
 // (a new time-series version under the same id rather than a new row).
 
-@description("Create a new identity (credential set owned by a user).")
+/// Create a new identity (credential set owned by a user).
 mutate identity createIdentity {
   args {
     identityId      string!
@@ -724,7 +733,7 @@ mutate identity createIdentity {
 //   invitationId   (string, optional)  - v1:identity:invitation that triggered this issuance, when applicable
 //
 
-@description("Create a magic-link request row at issuance time.")
+/// Create a magic-link request row at issuance time.
 mutate magicLinkRequest createMagicLinkRequest {
   args {
     requestId     string!
@@ -766,7 +775,8 @@ mutate magicLinkRequest createMagicLinkRequest {
 // CLI user, not an agent acting on their behalf. Agent delegation
 // happens through the v1:identity:delegation concept.
 
-@description("Create a Personal Access Token identity (api_key) owned by a user. Stores only the SHA-256 hex hash; plaintext lives at the caller for one-time display.")
+/// Create a Personal Access Token identity (api_key) owned by a user. Stores only the SHA-256 hex
+/// hash; plaintext lives at the caller for one-time display.
 mutate identity createPATIdentity {
   args {
     identityId      string!
@@ -806,7 +816,7 @@ mutate identity createPATIdentity {
 // is responsible for picking the right role; callers of createUser
 // set role directly.
 
-@description("Create a new user (person / synthetic principal).")
+/// Create a new user (person / synthetic principal).
 mutate user createUser {
   args {
     userId        string!
@@ -861,7 +871,7 @@ mutate user createUser {
 //   preferences   (object, optional)  - User preference bag
 //
 
-@description("Create a user record on first successful magic-link login.")
+/// Create a user record on first successful magic-link login.
 mutate user createUserOnFirstLogin {
   args {
     userId        string!
@@ -912,7 +922,7 @@ mutate user createUserOnFirstLogin {
 // stamping redeemedAt on the row. redeemedAt is intentionally
 // omitted here so the row is born "unspent."
 
-@description("Persist a worker-pairing-code row at creation time.")
+/// Persist a worker-pairing-code row at creation time.
 mutate workerPairingCode createWorkerPairingCode {
   args {
     pairingId    string!
@@ -952,7 +962,8 @@ mutate workerPairingCode createWorkerPairingCode {
 // the id alongside the plain token so audit/log lines can reason
 // about a stable id without knowing the plaintext.
 
-@description("Create a worker_token identity (machine credential for a memql-cockpit-worker). Stores only the SHA-256 hex hash; plaintext lives at the caller for one-time display.")
+/// Create a worker_token identity (machine credential for a memql-cockpit-worker). Stores only the
+/// SHA-256 hex hash; plaintext lives at the caller for one-time display.
 mutate identity createWorkerTokenIdentity {
   args {
     identityId              string!
@@ -1007,7 +1018,8 @@ mutate identity createWorkerTokenIdentity {
 // an existing row on the second restart of a given node rather than
 // piling up stale rows.
 
-@description("Create a node_token identity (machine credential for a cluster-internal node binary). Stores only the SHA-256 hex hash; the actual credential is a class=node JWT.")
+/// Create a node_token identity (machine credential for a cluster-internal node binary). Stores
+/// only the SHA-256 hex hash; the actual credential is a class=node JWT.
 mutate identity createNodeTokenIdentity {
   args {
     identityId        string!
@@ -1054,8 +1066,12 @@ mutate identity createNodeTokenIdentity {
 // Mutations use update() (not insert) -- the row already exists from
 // either an earlier bootstrap or an operator-CLI mint.
 
+/// Update audit fields on a node_token identity row when the bootstrap handler issues a fresh JWT
+/// for it. memql#343. Read-merges the existing row and deep-merges credentials (@mergeFields) so
+/// only the rotating keyHash + bootstrappedAt/bootstrappedFrom change;
+/// nodeId/nodeType/mintedBy/expiresAt/lastConnectAt inherit from the persisted row instead of being
+/// re-supplied or wiped (memql#1628).
 @mergeFields("credentials")
-@description("Update audit fields on a node_token identity row when the bootstrap handler issues a fresh JWT for it. memql#343. Read-merges the existing row and deep-merges credentials (@mergeFields) so only the rotating keyHash + bootstrappedAt/bootstrappedFrom change; nodeId/nodeType/mintedBy/expiresAt/lastConnectAt inherit from the persisted row instead of being re-supplied or wiped (memql#1628).")
 mutate identity stampNodeTokenBootstrap {
   args {
     identityId        string!
@@ -1098,7 +1114,10 @@ mutate identity stampNodeTokenBootstrap {
 // admin UI continues to show "when was this node last online" on
 // the revoked row -- useful for incident triage.
 
-@description("Revoke a node_token identity by flipping active=false on the row. Read-merges the existing row so only `active` changes; the credentials block + every other field inherit from the persisted row instead of being re-supplied (memql#1628 -- replaces the old whole-replace restate-every-credentials-field pattern). memql#350.")
+/// Revoke a node_token identity by flipping active=false on the row. Read-merges the existing row
+/// so only `active` changes; the credentials block + every other field inherit from the persisted
+/// row instead of being re-supplied (memql#1628 -- replaces the old whole-replace
+/// restate-every-credentials-field pattern). memql#350.
 mutate identity revokeNodeTokenIdentity {
   args {
     identityId  string!
@@ -1131,7 +1150,9 @@ mutate identity revokeNodeTokenIdentity {
 // Provisioned by the `voice-agent-token mint` subcommand on the
 // identity binary; see docs/auth/voice-agent-jwt.md.
 
-@description("Create a voice_agent_token identity (credential row for the Go voice-agent process). Plain JWT is returned by JWTIssuer.IssueVoiceAgentAccessToken; this row stores only the SHA-256 of an auxiliary random bearer for schema completeness + audit fingerprinting.")
+/// Create a voice_agent_token identity (credential row for the Go voice-agent process). Plain JWT
+/// is returned by JWTIssuer.IssueVoiceAgentAccessToken; this row stores only the SHA-256 of an
+/// auxiliary random bearer for schema completeness + audit fingerprinting.
 mutate identity createVoiceAgentTokenIdentity {
   args {
     identityId  string!
@@ -1201,8 +1222,8 @@ mutate identity createVoiceAgentTokenIdentity {
 //   userId  (string)  - User node ID
 //
 
+/// Hard-delete (soft-delete + generic @pii scrub) a user after the deletion-cooldown sweep.
 @scrubPii
-@description("Hard-delete (soft-delete + generic @pii scrub) a user after the deletion-cooldown sweep.")
 mutate user deleteUserHard {
   args {
     userId  string!
@@ -1231,7 +1252,7 @@ mutate user deleteUserHard {
 //   requestId  (string)  - Access-request node ID
 //
 
-@description("Expire a pending access request (status=expired).")
+/// Expire a pending access request (status=expired).
 mutate accessRequest expireAccessRequest {
   args {
     requestId  string!
@@ -1269,7 +1290,7 @@ mutate accessRequest expireAccessRequest {
 //   legalAcceptance  (object)  - Full new legalAcceptance array (caller pre-appended)
 //
 
-@description("Replace a user's legalAcceptance array (caller must read-modify-write to append).")
+/// Replace a user's legalAcceptance array (caller must read-modify-write to append).
 mutate user recordLegalAcceptance {
   args {
     userId           string!
@@ -1298,7 +1319,7 @@ mutate user recordLegalAcceptance {
 // token, and we want both rows to land before the response is sent
 // so the audit trail is complete.
 
-@description("Stamp a pairing-code row redeemed.")
+/// Stamp a pairing-code row redeemed.
 mutate workerPairingCode redeemWorkerPairingCode {
   args {
     pairingId       string!
@@ -1335,7 +1356,7 @@ mutate workerPairingCode redeemWorkerPairingCode {
 //   reviewerNote  (string, optional)  - Free-text admin rationale
 //
 
-@description("Reject an access request (status=rejected, stamps reviewer + note).")
+/// Reject an access request (status=rejected, stamps reviewer + note).
 mutate accessRequest rejectAccessRequest {
   args {
     requestId     string!
@@ -1378,7 +1399,10 @@ mutate accessRequest rejectAccessRequest {
 //   userId         (string, optional)  - Owning user (preserved across the version bump)
 //
 
-@description("Mark a bearer-token session revoked. Read-merges the existing row so only revokedReason + revokedAt change; the discriminator fields (subject, tokenHash, source, expiresAt, userId) and the rotation bookkeeping inherit from the persisted row instead of being re-supplied (memql#1628).")
+/// Mark a bearer-token session revoked. Read-merges the existing row so only revokedReason +
+/// revokedAt change; the discriminator fields (subject, tokenHash, source, expiresAt, userId) and
+/// the rotation bookkeeping inherit from the persisted row instead of being re-supplied
+/// (memql#1628).
 mutate authSession revokeAuthSession {
   args {
     sessionId      string!
@@ -1410,7 +1434,9 @@ mutate authSession revokeAuthSession {
 // is caller-sourced (the human subject, or `system:expiry` for the
 // expiry cron) and recorded for audit.
 
-@description("Revoke a delegation: authoritatively flips active=false and stamps revokedAt/revokedBySubject regardless of caller input. Read-merges the persisted row so every other field is preserved (memql#1729).")
+/// Revoke a delegation: authoritatively flips active=false and stamps revokedAt/revokedBySubject
+/// regardless of caller input. Read-merges the persisted row so every other field is preserved
+/// (memql#1729).
 mutate delegation revokeDelegation {
   args {
     delegationId      string!
@@ -1440,7 +1466,9 @@ mutate delegation revokeDelegation {
 // the existing payload alongside the id so the new version preserves
 // the discriminator (identityType=api_key) and credentials.keyHash.
 
-@description("Soft-revoke a PAT identity (api_key) by flipping active=false. Read-merges the existing row so only `active` changes; identityType/credentials/label/usableByAgents inherit from the persisted row instead of being re-supplied (memql#1628).")
+/// Soft-revoke a PAT identity (api_key) by flipping active=false. Read-merges the existing row so
+/// only `active` changes; identityType/credentials/label/usableByAgents inherit from the persisted
+/// row instead of being re-supplied (memql#1628).
 mutate identity revokePATIdentity {
   args {
     identityId  string!
@@ -1465,7 +1493,7 @@ mutate identity revokePATIdentity {
 // token (this row) without affecting the operational record, or
 // vice versa.
 
-@description("Revoke (deactivate) a worker_token identity row.")
+/// Revoke (deactivate) a worker_token identity row.
 mutate identity revokeWorkerTokenIdentity {
   args {
     identityId  string!
@@ -1491,7 +1519,8 @@ mutate identity revokeWorkerTokenIdentity {
 // already-authenticated terminal bearer, and the resulting grant
 // token is short-lived and role-ceiling-clamped.
 
-@description("Register a badge identity (shared-terminal operator credential). Stores only the SHA-256 hex hash of the badge/device id.")
+/// Register a badge identity (shared-terminal operator credential). Stores only the SHA-256 hex
+/// hash of the badge/device id.
 mutate identity createBadgeIdentity {
   args {
     identityId    string!
@@ -1527,7 +1556,8 @@ mutate identity createBadgeIdentity {
 // their exp -- the same revoke-by-expiry tradeoff service-account
 // tokens document.
 
-@description("Revoke (deactivate) a badge identity row. Future grant exchanges are blocked immediately; outstanding short-TTL grant tokens expire on their own.")
+/// Revoke (deactivate) a badge identity row. Future grant exchanges are blocked immediately;
+/// outstanding short-TTL grant tokens expire on their own.
 mutate identity revokeBadgeIdentity {
   args {
     identityId  string!
@@ -1548,7 +1578,8 @@ mutate identity revokeBadgeIdentity {
 // are not supported), so the handler passes the full credentials
 // map with only lastUsedAt changed.
 
-@description("Stamp credentials.lastUsedAt on a badge identity after a successful grant exchange. Best-effort; the grant succeeds even when this write fails.")
+/// Stamp credentials.lastUsedAt on a badge identity after a successful grant exchange. Best-effort;
+/// the grant succeeds even when this write fails.
 mutate identity touchBadgeLastUsed {
   args {
     identityId   string!
@@ -1589,7 +1620,9 @@ mutate identity touchBadgeLastUsed {
 //   newExpiresAt                (string)  - New absolute expiry for the access token (ISO 8601)
 //
 
-@description("Rotate refresh-token bookkeeping on a session after a successful refresh. Stores the old hash as previousRefreshTokenHash with a fresh previousRotatedAt timestamp so the rotator can accept that hash inside its grace window.")
+/// Rotate refresh-token bookkeeping on a session after a successful refresh. Stores the old hash as
+/// previousRefreshTokenHash with a fresh previousRotatedAt timestamp so the rotator can accept that
+/// hash inside its grace window.
 mutate authSession rotateAuthSession {
   args {
     sessionId                 string!
@@ -1626,7 +1659,7 @@ mutate authSession rotateAuthSession {
 //   userId  (string)  - User node ID
 //
 
-@description("Schedule the user for hard-deletion after the cooldown.")
+/// Schedule the user for hard-deletion after the cooldown.
 mutate user scheduleAccountDeletion {
   args {
     userId  string!
@@ -1664,7 +1697,7 @@ mutate user scheduleAccountDeletion {
 // activePartitionId on every iteration, so a switch fires their state
 // transitions implicitly -- no separate notification needed.
 
-@description("Set or clear the caller's activePartitionId. Empty partitionId clears the pointer.")
+/// Set or clear the caller's activePartitionId. Empty partitionId clears the pointer.
 mutate user setUserActiveSpace {
   args {
     userId         string!
@@ -1701,7 +1734,11 @@ mutate user setUserActiveSpace {
 // Arguments mirror createClusterSettings.
 //
 
-@description("Update the singleton cluster-settings row from the admin UI. Read-merges the existing row (update()): only the fields the caller actually passes change; every omitted field -- internalDomains, brand*, TTLs, bootstrap*, etc. -- inherits from the persisted row instead of being wiped to its empty default (memql#1686). registrationMode + internalDefaultRole stay @required because the admin form always submits them.")
+/// Update the singleton cluster-settings row from the admin UI. Read-merges the existing row
+/// (update()): only the fields the caller actually passes change; every omitted field --
+/// internalDomains, brand*, TTLs, bootstrap*, etc. -- inherits from the persisted row instead of
+/// being wiped to its empty default (memql#1686). registrationMode + internalDefaultRole stay
+/// @required because the admin form always submits them.
 mutate clusterSettings updateClusterSettings {
   args {
     id                         string!
@@ -1744,7 +1781,10 @@ mutate clusterSettings updateClusterSettings {
 // Inserts a new version of an identity record with the provided payload.
 // The caller is responsible for passing the full updated payload.
 
-@description("Update an identity record. Read-merges the existing row (update()): only the fields in `payload` change; every omitted field (identityType discriminator, credentials, label, active, usableByAgents) inherits from the persisted row instead of being wiped (memql#1628 class). The row must already exist (use createIdentity to create).")
+/// Update an identity record. Read-merges the existing row (update()): only the fields in `payload`
+/// change; every omitted field (identityType discriminator, credentials, label, active,
+/// usableByAgents) inherits from the persisted row instead of being wiped (memql#1628 class). The
+/// row must already exist (use createIdentity to create).
 mutate identity updateIdentity {
   args {
     identityId  string!
@@ -1789,7 +1829,8 @@ mutate identity updateIdentity {
 // user first and stitches every field). update() with a full payload
 // behaves identically to insert(), so the admin path is unchanged.
 
-@description("Partial update of a v1:identity:user row. Only the fields you pass are changed; other fields inherit from the prior row.")
+/// Partial update of a v1:identity:user row. Only the fields you pass are changed; other fields
+/// inherit from the prior row.
 mutate user updateUser {
   args {
     userId   string!
@@ -1813,7 +1854,9 @@ mutate user updateUser {
 // running Plans; a value <= 0 (or tier='enterprise') leaves the account
 // unlimited. System / admin-actor mutation.
 
-@description("Set (upsert) an account's task-concurrency entitlement (epic memql#902 / #903). Deterministic per-account id so each set appends a new version and the latest wins. Finite maxConcurrentTasks caps the account; <=0 or tier='enterprise' leaves it unlimited.")
+/// Set (upsert) an account's task-concurrency entitlement (epic memql#902 / #903). Deterministic
+/// per-account id so each set appends a new version and the latest wins. Finite maxConcurrentTasks
+/// caps the account; <=0 or tier='enterprise' leaves it unlimited.
 mutate accountEntitlement setAccountEntitlement {
   args {
     accountId          string!

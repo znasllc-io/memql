@@ -12,9 +12,15 @@
 // then either reinforces a match or is written as a new belief with
 // the cluster's episode ids as sourceEpisodes provenance.
 
+/// Distill at most one durable belief (fact / preference / outcome) from a similarity-grouped
+/// cluster of episodic harness nodes (#586). Structured-output: returns {distilled, kind, content,
+/// confidence}. distilled=false when the cluster holds nothing stable enough to keep (transient
+/// chatter, one-off tool noise). content is a single self-contained natural-language statement --
+/// the embedding source for similarTo dedup + recall (#585). Conservative by design: it is better
+/// to NOT distill than to mint a low-value belief, because every belief costs recall budget and
+/// must be decayed back out later.
 @defaultProvider("chat54Mini")
 @templateFile("prompts/consolidateMemory.tmpl")
-@description("Distill at most one durable belief (fact / preference / outcome) from a similarity-grouped cluster of episodic harness nodes (#586). Structured-output: returns {distilled, kind, content, confidence}. distilled=false when the cluster holds nothing stable enough to keep (transient chatter, one-off tool noise). content is a single self-contained natural-language statement -- the embedding source for similarTo dedup + recall (#585). Conservative by design: it is better to NOT distill than to mint a low-value belief, because every belief costs recall budget and must be decayed back out later.")
 prompt consolidateMemory {
   episodes      []object!  @description("The similarity-grouped cluster of episodic nodes to distill from. Each entry carries {id, kind, content, createdAt} -- the embedding-source text plus enough metadata for the model to judge recurrence and recency.")
   existingHints []object  @description("Optional: the top existing semantic memories near this cluster (from a similarTo pre-pass), so the model can phrase a reinforcement consistently with how the belief is already worded -- improves dedup hit rate. Each entry: {content, kind}.")
@@ -39,9 +45,17 @@ prompt consolidateMemory {
 // Appended for #587 -- the #586 consolidateMemory prompt above is
 // untouched.
 
+/// Decompose a user goal into a step DAG for the harness planner (#587). Structured-output: returns
+/// {steps:[{key, title, goal, dependsOn[], roleHint}]}. key is a stable local id used only to wire
+/// dependsOn within this result (the planner content-addresses the real step id). dependsOn lists
+/// the keys of prerequisite steps -- the DAG in-edges; an empty dependsOn means the step is
+/// immediately runnable. roleHint optionally names a seed role (researcher / builder / operator)
+/// the planner provisions or fit-scores against; leave empty to let the planner pick by keyword.
+/// Keep the decomposition tight -- one step per genuinely separable unit of work, parallel where
+/// possible (independent steps share no dependsOn). The result must be acyclic; a single-step plan
+/// is a valid answer when the goal is atomic.
 @defaultProvider("chat54Mini")
 @templateFile("prompts/decomposeGoal.tmpl")
-@description("Decompose a user goal into a step DAG for the harness planner (#587). Structured-output: returns {steps:[{key, title, goal, dependsOn[], roleHint}]}. key is a stable local id used only to wire dependsOn within this result (the planner content-addresses the real step id). dependsOn lists the keys of prerequisite steps -- the DAG in-edges; an empty dependsOn means the step is immediately runnable. roleHint optionally names a seed role (researcher / builder / operator) the planner provisions or fit-scores against; leave empty to let the planner pick by keyword. Keep the decomposition tight -- one step per genuinely separable unit of work, parallel where possible (independent steps share no dependsOn). The result must be acyclic; a single-step plan is a valid answer when the goal is atomic.")
 prompt decomposeGoal {
   goal         string!  @description("The user goal to decompose into a step DAG.")
   ownerContext object  @description("Optional lightweight owner / workspace context so the decomposition can lean on known constraints. Opaque; never required.")

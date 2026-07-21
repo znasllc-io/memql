@@ -16,7 +16,7 @@
 // ---------------------------------------------------------------------------
 // createProject -- register a project forge develops against.
 // ---------------------------------------------------------------------------
-@description("Register a v1:forge:project. createdByUserId is stamped from actor.userId.")
+/// Register a v1:forge:project. createdByUserId is stamped from actor.userId.
 @actor
 mutate project createProject {
   args {
@@ -44,7 +44,8 @@ mutate project createProject {
 // routeRequest automation (fired by node.created) sets the role-based next
 // state. Returns the created request.
 // ---------------------------------------------------------------------------
-@description("Submit a v1:forge:request. submitterUserId + submitterRole are stamped server-side from actor (no spoofing). status lands 'submitted'; the routeRequest automation routes it by role.")
+/// Submit a v1:forge:request. submitterUserId + submitterRole are stamped server-side from actor
+/// (no spoofing). status lands 'submitted'; the routeRequest automation routes it by role.
 @actor
 mutate request createRequest {
   args {
@@ -77,7 +78,8 @@ mutate request createRequest {
 // target status and the relevant actor stamp (validatedByUserId /
 // approvedByUserId). Pair every call with recordRequestEvent.
 // ---------------------------------------------------------------------------
-@description("Transition a v1:forge:request to a new status (the approval pipeline edges). update read-merges the prior row. The role guard belongs in an engine pre-insert hook (follow-up).")
+/// Transition a v1:forge:request to a new status (the approval pipeline edges). update read-merges
+/// the prior row. The role guard belongs in an engine pre-insert hook (follow-up).
 mutate request advanceRequest {
   args {
     requestId          string!
@@ -103,7 +105,8 @@ mutate request advanceRequest {
 // automation will append the audit event automatically).
 // ---------------------------------------------------------------------------
 
-@description("Validate a v1:forge:request (developer action): set status 'needs_approval' and stamp validatedByUserId from actor.userId.")
+/// Validate a v1:forge:request (developer action): set status 'needs_approval' and stamp
+/// validatedByUserId from actor.userId.
 @actor
 mutate request validateRequest {
   args {
@@ -117,7 +120,8 @@ mutate request validateRequest {
   }
 }
 
-@description("Approve a v1:forge:request (owner action): set status 'queued' (ready to implement) and stamp approvedByUserId from actor.userId.")
+/// Approve a v1:forge:request (owner action): set status 'queued' (ready to implement) and stamp
+/// approvedByUserId from actor.userId.
 @actor
 mutate request approveRequest {
   args {
@@ -131,7 +135,7 @@ mutate request approveRequest {
   }
 }
 
-@description("Send a v1:forge:request back for changes: set status 'changes_requested' with a reason.")
+/// Send a v1:forge:request back for changes: set status 'changes_requested' with a reason.
 mutate request requestChanges {
   args {
     requestId  string!
@@ -157,8 +161,10 @@ mutate request requestChanges {
 // attaching the same id twice. Replaces the former read-modify-write contract
 // + the appendAttachmentToRequest logic (#2235 burn-down).
 // ---------------------------------------------------------------------------
+/// Attach ONE v1:common:attachment to a v1:forge:request by appending its id to attachmentIds (no
+/// clobbering of existing attachments). Backed by @appendFields -- the update executor appends to
+/// the stored array. update read-merges all other request fields.
 @appendFields("attachmentIds")
-@description("Attach ONE v1:common:attachment to a v1:forge:request by appending its id to attachmentIds (no clobbering of existing attachments). Backed by @appendFields -- the update executor appends to the stored array. update read-merges all other request fields.")
 mutate request attachToRequest {
   args {
     requestId     string!
@@ -187,7 +193,10 @@ mutate request attachToRequest {
 // (a no-op on an already-short id), so the tool path is unaffected. This single
 // write-side point keeps every requestEvent.requestId in one short form.
 // ---------------------------------------------------------------------------
-@description("Append a v1:forge:requestEvent (the time-series audit trail). actorUserId + actorRole stamped from actor. requestId is normalized to the short id form (shortId()) so the trail keys consistently whether the caller passes a canonical node id (automation path) or a bare short id (tool path) -- #1859.")
+/// Append a v1:forge:requestEvent (the time-series audit trail). actorUserId + actorRole stamped
+/// from actor. requestId is normalized to the short id form (shortId()) so the trail keys
+/// consistently whether the caller passes a canonical node id (automation path) or a bare short id
+/// (tool path) -- #1859.
 @actor
 mutate requestEvent recordRequestEvent {
   args {
@@ -224,7 +233,10 @@ mutate requestEvent recordRequestEvent {
 // tool-written 'mentored' events key under the same short id form as the
 // automation-written audit events (#1859).
 // ---------------------------------------------------------------------------
-@description("Append a 'mentored' v1:forge:requestEvent after a non-owner submitter was taught about the area they touched. Injects kind='mentored' and forwards eventId / requestId / note. actorUserId + actorRole stamped from actor; requestId normalized to short form (shortId(), #1859). The forgeRecordMentoring tool's direct single writer (replaces the recordMentoring logic -- #2235).")
+/// Append a 'mentored' v1:forge:requestEvent after a non-owner submitter was taught about the area
+/// they touched. Injects kind='mentored' and forwards eventId / requestId / note. actorUserId +
+/// actorRole stamped from actor; requestId normalized to short form (shortId(), #1859). The
+/// forgeRecordMentoring tool's direct single writer (replaces the recordMentoring logic -- #2235).
 @actor
 mutate requestEvent recordMentoredEvent {
   args {

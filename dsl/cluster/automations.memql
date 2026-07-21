@@ -32,8 +32,8 @@
 // envelope carries one. Every create field binds an explicit key + coalesce (a
 // multi-segment path like event.payload.database.host is nil when absent, and a
 // nil @required arg trips validation), mirroring registerNode/deregisterNode.
+/// Bootstrap cluster, database, and identity provider records on first startup
 @trigger(event="system.startup")
-@description("Bootstrap cluster, database, and identity provider records on first startup")
 automation bootstrapCluster {
   args {
     database any
@@ -89,8 +89,8 @@ automation bootstrapCluster {
 // event.payload.node.id evaluates to nil when absent, and passing nil for a
 // @required mutation arg (nodeId / nodeType / action) trips "required argument
 // missing" at validation; coalesce(..., "") guarantees a non-nil string.
+/// Record node shutdown in the database
 @trigger(event="system.shutdown")
-@description("Record node shutdown in the database")
 automation deregisterNode {
   args {
     node any
@@ -117,8 +117,8 @@ automation deregisterNode {
 // multi-segment path is nil when absent and would trip the @required check.
 // version/address are not createSpawnEvent args (they already live on the node
 // record from createNode), so the spawn step carries only the flat event fields.
+/// Register this node in the database on startup
 @trigger(event="system.startup")
-@description("Register this node in the database on startup")
 automation registerNode {
   args {
     deploymentId any
@@ -163,8 +163,9 @@ automation registerNode {
 // node list (#2235). The `prune` forEach step appends the terminal
 // health="stopped" row per returned node -- the per-row write that used to live
 // inline in the logic. updateNodeHealth takes only id / health / lastSeen.
+/// Every 10 min: mark departed cluster nodes (lastSeen older than MEMQL_NODE_STALE_PRUNE_MINUTES,
+/// default 30) as health='stopped'.
 @trigger(schedule="0 */10 * * * *")
-@description("Every 10 min: mark departed cluster nodes (lastSeen older than MEMQL_NODE_STALE_PRUNE_MINUTES, default 30) as health='stopped'.")
 automation pruneStaleClusterNodes {
   step decide {
     logic pruneStaleClusterNodes (

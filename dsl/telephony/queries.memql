@@ -3,7 +3,8 @@
 // infrastructure, so reads are cluster-owner gated (Amendment A scoping is by
 // partition, not space).
 
-@description("ADMIN: DIDs provisioned to a partition, newest first. Cluster-owner gated -- numbers are cluster infrastructure.")
+/// ADMIN: DIDs provisioned to a partition, newest first. Cluster-owner gated -- numbers are cluster
+/// infrastructure.
 @actor
 query number numbersByPartition {
   args {
@@ -14,7 +15,8 @@ query number numbersByPartition {
   shape   numberFull
 }
 
-@description("ADMIN: every provisioned DID across all partitions, newest first. Cluster-owner gated. Backs the cockpit numbers view.")
+/// ADMIN: every provisioned DID across all partitions, newest first. Cluster-owner gated. Backs the
+/// cockpit numbers view.
 @actor
 query number allNumbers {
   filter  actor.isClusterOwner==true
@@ -23,7 +25,8 @@ query number allNumbers {
   shape   numberFull
 }
 
-@description("ADMIN: call records for a partition, newest first. Cluster-owner gated. Powers billing + observability.")
+/// ADMIN: call records for a partition, newest first. Cluster-owner gated. Powers billing +
+/// observability.
 @actor
 query call callsByPartition {
   args {
@@ -35,7 +38,8 @@ query call callsByPartition {
   shape   callFull
 }
 
-@description("ADMIN: call records that touched a specific DID (as caller or callee), newest first. Cluster-owner gated.")
+/// ADMIN: call records that touched a specific DID (as caller or callee), newest first.
+/// Cluster-owner gated.
 @actor
 query call callsByNumber {
   args {
@@ -47,7 +51,9 @@ query call callsByNumber {
   shape   callFull
 }
 
-@description("Opt-out rows for an external number (newest first). Read in the outbound call path to block calls to opted-out numbers (TCPA). Not owner-gated: the enforcement check runs in the agent/call context, not an admin one.")
+/// Opt-out rows for an external number (newest first). Read in the outbound call path to block
+/// calls to opted-out numbers (TCPA). Not owner-gated: the enforcement check runs in the agent/call
+/// context, not an admin one.
 query consent consentOptOut {
   args {
     phoneNumber  string!
@@ -57,7 +63,8 @@ query consent consentOptOut {
   shape   consentFull
 }
 
-@description("Resolve an owned DID row by its E.164 (newest first). Used to set E911 / compliance state by number.")
+/// Resolve an owned DID row by its E.164 (newest first). Used to set E911 / compliance state by
+/// number.
 query number numberByE164 {
   args {
     e164  string!

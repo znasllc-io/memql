@@ -3,8 +3,10 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
+/// Full projection of v1:identity:accountEntitlement -- the per-account concurrency cap (epic
+/// memql#902 / #903) read by the admission controller (#904) and the Tasks UX (#909). createdAt is
+/// carried so a reader that gets more than one time-series version can pick the latest.
 @row
-@description("Full projection of v1:identity:accountEntitlement -- the per-account concurrency cap (epic memql#902 / #903) read by the admission controller (#904) and the Tasks UX (#909). createdAt is carried so a reader that gets more than one time-series version can pick the latest.")
 shape accountEntitlement accountEntitlementFull {
   row.id
   accountId
@@ -16,8 +18,8 @@ shape accountEntitlement accountEntitlementFull {
   row.createdBy
 }
 
+/// Full projection of v1:identity:accessRequest including review state and risk signals.
 @row
-@description("Full projection of v1:identity:accessRequest including review state and risk signals.")
 shape accessRequest accessRequestFull {
   row.id
   email
@@ -35,8 +37,8 @@ shape accessRequest accessRequestFull {
   row.createdAt
 }
 
+/// Full projection of v1:identity:auditEvent including actor, target, and source attribution.
 @row
-@description("Full projection of v1:identity:auditEvent including actor, target, and source attribution.")
 shape auditEvent auditEventFull {
   row.id
   occurredAt
@@ -59,8 +61,10 @@ shape auditEvent auditEventFull {
   row.createdAt
 }
 
+/// Full projection of v1:identity:authCode. Excludes the plaintext code field; only the SHA-256
+/// hash is exposed to query consumers so a query result can never be replayed at the token
+/// endpoint.
 @row
-@description("Full projection of v1:identity:authCode. Excludes the plaintext code field; only the SHA-256 hash is exposed to query consumers so a query result can never be replayed at the token endpoint.")
 shape authCode authCodeFull {
   row.id
   codeHash
@@ -76,8 +80,9 @@ shape authCode authCodeFull {
   row.createdAt
 }
 
+/// Full projection of v1:identity:oauthClient -- a dynamically-registered (RFC 7591) public OAuth
+/// client. No secret column; public clients only.
 @row
-@description("Full projection of v1:identity:oauthClient -- a dynamically-registered (RFC 7591) public OAuth client. No secret column; public clients only.")
 shape oauthClient oauthClientFull {
   row.id
   clientId
@@ -90,8 +95,8 @@ shape oauthClient oauthClientFull {
   row.createdAt
 }
 
+/// Full projection of v1:identity:authSession including revocation state.
 @row
-@description("Full projection of v1:identity:authSession including revocation state.")
 shape authSession authSessionFull {
   row.id
   userId
@@ -112,8 +117,9 @@ shape authSession authSessionFull {
   row.createdAt
 }
 
+/// Full projection of v1:identity:clusterSettings -- the singleton runtime-editable cluster
+/// configuration row.
 @row
-@description("Full projection of v1:identity:clusterSettings -- the singleton runtime-editable cluster configuration row.")
 shape clusterSettings clusterSettingsFull {
   row.id
   registrationMode
@@ -132,8 +138,8 @@ shape clusterSettings clusterSettingsFull {
   row.createdAt
 }
 
+/// Comprehensive delegation projection with all fields
 @row
-@description("Comprehensive delegation projection with all fields")
 shape delegation delegationFull {
   row.id
   identityId
@@ -151,8 +157,9 @@ shape delegation delegationFull {
   row.createdAt
 }
 
+/// Comprehensive identity projection for the post-restructure identity concept: a credential set
+/// owned by a user. Use userFull for the person and delegationFull for delegations.
 @row
-@description("Comprehensive identity projection for the post-restructure identity concept: a credential set owned by a user. Use userFull for the person and delegationFull for delegations.")
 shape identity identityFull {
   row.id
   userId
@@ -165,8 +172,9 @@ shape identity identityFull {
   row.createdAt
 }
 
+/// Compact identity projection with the identifying fields only. The full credentials object lives
+/// on identityFull.
 @row
-@description("Compact identity projection with the identifying fields only. The full credentials object lives on identityFull.")
 shape identity identitySummary {
   row.id
   userId
@@ -176,8 +184,8 @@ shape identity identitySummary {
   active
 }
 
+/// Comprehensive invitation projection (user + guest kinds)
 @row
-@description("Comprehensive invitation projection (user + guest kinds)")
 shape invitation invitationFull {
   row.id
   kind
@@ -196,8 +204,8 @@ shape invitation invitationFull {
   row.createdAt
 }
 
+/// Full projection of v1:identity:magicLinkRequest including consume state.
 @row
-@description("Full projection of v1:identity:magicLinkRequest including consume state.")
 shape magicLinkRequest magicLinkRequestFull {
   row.id
   email
@@ -212,8 +220,9 @@ shape magicLinkRequest magicLinkRequestFull {
   row.createdAt
 }
 
+/// Lightweight PAT (api_key identity) projection for UI listings. Excludes credentials entirely so
+/// neither the keyHash nor any future per-variant secret material lands in user-facing payloads.
 @row
-@description("Lightweight PAT (api_key identity) projection for UI listings. Excludes credentials entirely so neither the keyHash nor any future per-variant secret material lands in user-facing payloads.")
 shape identity patSummary {
   row.id
   userId
@@ -224,15 +233,16 @@ shape identity patSummary {
   row.createdAt
 }
 
+/// Lightweight projection: just the user's id and activePartitionId pointer. Phase 4 of the
+/// chat-architecture plan.
 @row
-@description("Lightweight projection: just the user's id and activePartitionId pointer. Phase 4 of the chat-architecture plan.")
 shape user userActiveSpaceProjection {
   row.id
   activePartitionId
 }
 
+/// Comprehensive user projection: the person behind one or more identities.
 @row
-@description("Comprehensive user projection: the person behind one or more identities.")
 shape user userFull {
   row.id
   displayName
@@ -255,8 +265,9 @@ shape user userFull {
   row.createdAt
 }
 
+/// Full projection of a v1:identity:workerPairingCode row. Backs the Pair-aware gRPC interceptor's
+/// lookup path + the redeem handler's validation path.
 @row
-@description("Full projection of a v1:identity:workerPairingCode row. Backs the Pair-aware gRPC interceptor's lookup path + the redeem handler's validation path.")
 shape workerPairingCode workerPairingCodeFull {
   row.id
   ownerUserId

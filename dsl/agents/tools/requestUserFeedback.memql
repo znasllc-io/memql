@@ -50,10 +50,14 @@
 // feedback request on their behalf -- the assistant is the sole agent
 // that converses with the user.
 
+/// Pause the active Plan and ask the user for missing detail mid-task. Transitions the Plan to
+/// awaitingFeedback (feedbackReason=feedback_required) and lands a feedback card on the canvas. Use
+/// this -- not a guess -- when you (or a specialist you are fronting for) need information, a
+/// decision, or a file the user has not provided. After calling it, emit a short acknowledgement
+/// and END YOUR TURN; the user's answer resumes the Plan.
 @handler(type="function", name="requestUserFeedback")
 @allowedRoles("assistant")
 @executionTime("fast")
-@description("Pause the active Plan and ask the user for missing detail mid-task. Transitions the Plan to awaitingFeedback (feedbackReason=feedback_required) and lands a feedback card on the canvas. Use this -- not a guess -- when you (or a specialist you are fronting for) need information, a decision, or a file the user has not provided. After calling it, emit a short acknowledgement and END YOUR TURN; the user's answer resumes the Plan.")
 tool requestUserFeedback {
   question     string! @description("The question to put to the user. Be specific and self-contained -- the user sees only this text on the card, not the chat history. State exactly what you need and why.")
   kind         enum("choice", "text", "multi")! @description("Response widget. choice = pick exactly one of `options`. multi = pick one or more of `options`. text = free-form (also the path for a file the user drops in chat/canvas). Pick choice/multi whenever the answer space is bounded -- it is faster and less error-prone for the user.")

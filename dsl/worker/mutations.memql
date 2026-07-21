@@ -6,7 +6,7 @@
 use agents.concepts.{ agentAuthorization }
 use identity.concepts.{ user }
 
-@description("Insert a worker tool-invocation telemetry row.")
+/// Insert a worker tool-invocation telemetry row.
 mutate invocation createWorkerInvocation {
   args {
     invocationId   string!
@@ -74,7 +74,7 @@ mutate invocation createWorkerInvocation {
 // caller -- the worker authenticates as worker:<id>, not as the
 // registering user.
 
-@description("Create a worker registration row on first connect.")
+/// Create a worker registration row on first connect.
 mutate registration createWorkerRegistration {
   args {
     registrationId       string!
@@ -133,7 +133,7 @@ mutate registration createWorkerRegistration {
 // old one. Identity / lifecycle fields (id, ownerUserId, identityId,
 // registeredAt, revoked*) are never touched here.
 
-@description("Refresh registration-authoritative fields on worker reconnect.")
+/// Refresh registration-authoritative fields on worker reconnect.
 mutate registration refreshWorkerRegistration {
   args {
     registrationId       string!
@@ -175,7 +175,7 @@ mutate registration refreshWorkerRegistration {
 // and on a periodic sweep -- a revoked worker's gRPC stream is closed
 // out-of-band so any in-flight calls fail with worker_disconnected.
 
-@description("Revoke a worker registration.")
+/// Revoke a worker registration.
 mutate registration revokeWorker {
   args {
     registrationId  string!
@@ -204,7 +204,7 @@ mutate registration revokeWorker {
 // Called by the workerInvocationRetentionSweep cron once a row
 // passes the WORKER_INVOCATION_RETENTION_DAYS window.
 
-@description("Soft-delete a worker invocation row past retention.")
+/// Soft-delete a worker invocation row past retention.
 mutate invocation softDeleteWorkerInvocation {
   args {
     invocationId  string!
@@ -222,8 +222,8 @@ mutate invocation softDeleteWorkerInvocation {
 // the operator-control settings on every kill-switch flip
 // (memql#1339). The annotation opts the preferences field into an
 // engine-side deep-merge so sibling keys survive.
+/// Set User.preferences.computerUseEnabled.
 @mergeFields("preferences")
-@description("Set User.preferences.computerUseEnabled.")
 mutate user toggleComputerUseEnabled {
   args {
     userId   string!
@@ -237,7 +237,7 @@ mutate user toggleComputerUseEnabled {
   }
 }
 
-@description("Set computerUseScope on an agent authorization row.")
+/// Set computerUseScope on an agent authorization row.
 mutate agentAuthorization updateAgentAuthScope {
   args {
     authorizationId   string!
@@ -263,7 +263,7 @@ mutate agentAuthorization updateAgentAuthScope {
 // of each stream immediately so a (re)connected worker's row is
 // fresh within one beat (memql#1340).
 
-@description("Bump lastSeenAt + lastConnectedFromIP on a worker registration.")
+/// Bump lastSeenAt + lastConnectedFromIP on a worker registration.
 mutate registration updateWorkerLastSeen {
   args {
     registrationId       string!

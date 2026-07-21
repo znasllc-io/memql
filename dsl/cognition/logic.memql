@@ -52,7 +52,10 @@ use identity.queries.{ usersActiveInSpace }
 // session.created emit -- the ADR §2.1 logic-purity violation) now live as
 // `if`-gated steps on the bootstrapSession automation, gated on
 // `steps.decide.result == true`, mirroring the cluster bootstrapCluster pattern.
-@description("Decides whether a new v1:cognition:session must be created for a freshly-created participant: returns true when no session exists yet (idempotency via participantSession). The bootstrapSession automation performs the gated createSessionForParticipant insert + session.created emit.")
+/// Decides whether a new v1:cognition:session must be created for a freshly-created participant:
+/// returns true when no session exists yet (idempotency via participantSession). The
+/// bootstrapSession automation performs the gated createSessionForParticipant insert +
+/// session.created emit.
 logic bootstrapSession {
   args {
     event object!
@@ -85,7 +88,10 @@ logic bootstrapSession {
 // via `steps.decide.result`. This is the scalar form of the decide->persist
 // pattern; the engine fix (#2271) makes the Bundle-wrapped step result read flat.
 // ai() is a read/compute (not a graph write), so the logic stays contract-pure.
-@description("Decides + generates the AI reply for a cognition.response.requested event: returns the reply text (empty when a response already exists -- idempotency via hasAIResponseForReply). The generateResponse automation performs the gated sendTextUtterance insert + presence bump from this text.")
+/// Decides + generates the AI reply for a cognition.response.requested event: returns the reply
+/// text (empty when a response already exists -- idempotency via hasAIResponseForReply). The
+/// generateResponse automation performs the gated sendTextUtterance insert + presence bump from
+/// this text.
 @eventField("agentId", "promptData", "promptTemplateId", "siParticipantId", "partitionId", "utteranceId")
 logic generateResponse {
   args {
@@ -159,7 +165,10 @@ logic generateResponse {
 // "voice moved back to your Team chat" card lands -- handled by a
 // sibling automation when needed (deferred until the frontend wiring
 // shows the need).
-@description("Phase 7 of chat-architecture. Triggered when a user's activePartitionId pointer changes. When exactly two humans become active in the same space, emits a public 'voice.migrated.group' canvas card plus per-user 'voice.migrated.private' cards announcing voice transport migration from Team to Group thread. Idempotent via content-addressed stateIds.")
+/// Phase 7 of chat-architecture. Triggered when a user's activePartitionId pointer changes. When
+/// exactly two humans become active in the same space, emits a public 'voice.migrated.group' canvas
+/// card plus per-user 'voice.migrated.private' cards announcing voice transport migration from Team
+/// to Group thread. Idempotent via content-addressed stateIds.
 @eventField("activePartitionId", "id")
 logic voiceMigrationOnSecondHuman {
   args {

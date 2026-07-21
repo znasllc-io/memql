@@ -31,17 +31,20 @@
 
 use common.shapes.{ actorEnvelope }
 
-@description("Caller must hold the owner role. The owner-only gate (#1876): rollback -- not even admin may roll back a deployment.")
+/// Caller must hold the owner role. The owner-only gate (#1876): rollback -- not even admin may
+/// roll back a deployment.
 spec actorEnvelope requiresOwner {
   return role == "owner"
 }
 
-@description("Caller must hold owner or admin role. The legacy Deployment Console gate (#728): DeployStaging / Promote / Rollback / RolloutAction / GetDeploymentStatus.")
+/// Caller must hold owner or admin role. The legacy Deployment Console gate (#728): DeployStaging /
+/// Promote / Rollback / RolloutAction / GetDeploymentStatus.
 spec actorEnvelope requiresOwnerOrAdmin {
   return role == "admin" || role == "owner"
 }
 
-@description("Caller must hold developer, admin, or owner role. The forward-deploy gate (#1876): cut a version + deploy. Writer/reader are read-only; rollback is owner-only via requiresOwner.")
+/// Caller must hold developer, admin, or owner role. The forward-deploy gate (#1876): cut a version
+/// + deploy. Writer/reader are read-only; rollback is owner-only via requiresOwner.
 spec actorEnvelope requiresDeveloperOrAbove {
   return role == "developer" || role == "admin" || role == "owner"
 }

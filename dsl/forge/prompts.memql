@@ -8,9 +8,13 @@
 // file. Claude calls this after forgeSubmitRequest succeeds for any submitter
 // whose role is NOT "owner", then records the result via forgeRecordMentoring.
 
+/// Generate a short (3-6 sentence) mentoring explanation for a non-owner forge submitter. Explains
+/// the area their request touches -- one key design decision or trade-off, and one concrete tip for
+/// filing better requests in this area in the future. Called by Claude immediately after
+/// forgeSubmitRequest for reader/writer/admin submitters; the resulting text is shown to the user
+/// and then recorded as a 'mentored' requestEvent via forgeRecordMentoring.
 @defaultProvider("chat54Mini")
 @templateFile("prompts/forgeMentoringExplanation.tmpl")
-@description("Generate a short (3-6 sentence) mentoring explanation for a non-owner forge submitter. Explains the area their request touches -- one key design decision or trade-off, and one concrete tip for filing better requests in this area in the future. Called by Claude immediately after forgeSubmitRequest for reader/writer/admin submitters; the resulting text is shown to the user and then recorded as a 'mentored' requestEvent via forgeRecordMentoring.")
 prompt forgeMentoringExplanation {
   projectSlug   string! @description("Short slug of the project the request targets (e.g. 'memql', 'acme-app'). Used to ground the explanation in the right codebase/context.")
   requestType   string! @description("Request kind: bug / feature / chore / question / timeOff / checkIn. Shapes the framing (a bug explanation differs from a feature one).")

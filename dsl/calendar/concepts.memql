@@ -13,8 +13,14 @@
 
 use identity.concepts.{ user }
 
+/// A single calendar event owned by one user. The app-native source of truth for that user's
+/// schedule (#642): the reactive harness's reminder triggers read upcomingEvents over these rows
+/// ('remind me the day before X'), and the calendar tool/skill lets agents create + list + edit
+/// them. source discriminates native (first-party, the only writer in v1) from externalSync (a
+/// future Google/CalDAV sync via knowledge:liveConnector, which stamps externalRef back to the
+/// upstream event id). recurrence is an optional RFC-5545 RRULE string carried verbatim for v1 --
+/// expansion into concrete occurrences is a downstream concern, not stored here.
 @namespace("calendar")
-@description("A single calendar event owned by one user. The app-native source of truth for that user's schedule (#642): the reactive harness's reminder triggers read upcomingEvents over these rows ('remind me the day before X'), and the calendar tool/skill lets agents create + list + edit them. source discriminates native (first-party, the only writer in v1) from externalSync (a future Google/CalDAV sync via knowledge:liveConnector, which stamps externalRef back to the upstream event id). recurrence is an optional RFC-5545 RRULE string carried verbatim for v1 -- expansion into concrete occurrences is a downstream concern, not stored here.")
 @displayCard(primary="title", secondary="startsAt", tertiary="location", status="source")
 concept calendarEvent {
   ownerUserId  string! @description("v1:identity:user.id who owns this event. Stamped from actor.userId at create time. Every read self-scopes on this field; it is the load-bearing per-row authz guard.")

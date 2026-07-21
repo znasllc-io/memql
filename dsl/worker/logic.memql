@@ -19,7 +19,10 @@
 // confirmation, but resume is per-plan-explicit).
 use platform.queries.{ globalVariable }
 
-@description("Pure decide for the kill-switch sweep: returns every running plan owned by the updated user. The suspend write + the gate (computerUseEnabled==false AND the plan has a computerUseScope) live in the killSwitchSuspendsRunningPlans automation's forEach step (#2235). Re-enable flips the flag back; resume is per-plan-explicit.")
+/// Pure decide for the kill-switch sweep: returns every running plan owned by the updated user. The
+/// suspend write + the gate (computerUseEnabled==false AND the plan has a computerUseScope) live in
+/// the killSwitchSuspendsRunningPlans automation's forEach step (#2235). Re-enable flips the flag
+/// back; resume is per-plan-explicit.
 logic killSwitchSuspendsRunningPlans {
   args {
     event object!
@@ -47,7 +50,12 @@ logic killSwitchSuspendsRunningPlans {
 //     the duration math into the query (no `>` operator on
 //     datetime). Per-row gating uses
 //       addDuration(item.createdAt, "P{retention}D") < now
-@description("Pure decide for the worker-invocation retention sweep (#2369, cluster pruneStaleClusterNodes pattern): reads WORKER_INVOCATION_RETENTION_DAYS (default 90), computes cutoff = now - window via addDuration with a negative ISO duration, and returns expiredWorkerInvocations({createdBefore: cutoff}).nodes() -- rows past retention, filtered by QUERY PUSHDOWN. The retention policy lives entirely here; the calling automation's forEach soft-deletes each unconditionally.")
+/// Pure decide for the worker-invocation retention sweep (#2369, cluster pruneStaleClusterNodes
+/// pattern): reads WORKER_INVOCATION_RETENTION_DAYS (default 90), computes cutoff = now - window
+/// via addDuration with a negative ISO duration, and returns
+/// expiredWorkerInvocations({createdBefore: cutoff}).nodes() -- rows past retention, filtered by
+/// QUERY PUSHDOWN. The retention policy lives entirely here; the calling automation's forEach
+/// soft-deletes each unconditionally.
 logic workerInvocationRetentionSweep {
   args {
     event object!

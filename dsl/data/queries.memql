@@ -3,8 +3,8 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
+/// Find confirmed records that may conflict with a new record by natural key + record type
 @unbounded("conflict probe by natural key -- a dedupe set the caller must see whole to detect conflicts")
-@description("Find confirmed records that may conflict with a new record by natural key + record type")
 query record detectConflicts {
   args {
     partitionId  string!
@@ -36,8 +36,9 @@ query record detectConflicts {
 //   policy({ targetRecordType: "vehicle", partitionId: "space-123" })    // Space-specific or global
 //
 
+/// Returns the validation policy for a record type. Space-specific policies take precedence over
+/// global.
 @unbounded("the active policy for a record type -- bounded to a single row")
-@description("Returns the validation policy for a record type. Space-specific policies take precedence over global.")
 query policy policy {
   args {
     targetRecordType  string!
@@ -71,7 +72,8 @@ query policy policy {
 //   recordsByState({ partitionId: "space-123", recordType: "vehicle" })         // By type in a space
 //
 
-@description("Returns active data records. Optional filters: partitionId, recordType, validationState, importSource")
+/// Returns active data records. Optional filters: partitionId, recordType, validationState,
+/// importSource
 query record recordsByState {
   args {
     partitionId  string
@@ -119,7 +121,7 @@ query record recordsByState {
 // directly in their query instead.
 //
 
-@description("Returns usable data records (confirmed, or checked if policy allows)")
+/// Returns usable data records (confirmed, or checked if policy allows)
 query record usableRecords {
   args {
     partitionId  string
@@ -156,7 +158,7 @@ query record usableRecords {
 //   validationLog({ partitionId: "space-123", action: "confirm" })      // Confirmations in a space
 //
 
-@description("Returns validation state change history. Optional filters: recordId, partitionId, action")
+/// Returns validation state change history. Optional filters: recordId, partitionId, action
 query log validationLog {
   args {
     recordId  string

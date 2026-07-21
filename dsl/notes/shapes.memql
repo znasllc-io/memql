@@ -1,7 +1,8 @@
 // notes domain -- row projections.
 
+/// Comprehensive note projection: every payload field plus row id and timestamps. The default shape
+/// for list / create / update / search reads.
 @row
-@description("Comprehensive note projection: every payload field plus row id and timestamps. The default shape for list / create / update / search reads.")
 shape note noteFull {
   row.id
   ownerUserId

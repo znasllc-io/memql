@@ -47,8 +47,8 @@
 //   integration.*  -- named integration backends (closed/typed)
 // =============================================================================
 
+/// Create a git tag + GitHub release for a version.
 @sideEffect("write")
-@description("Create a git tag + GitHub release for a version.")
 capability integration.github.tagRelease {
   args {
     repo string!
@@ -60,24 +60,24 @@ capability integration.github.tagRelease {
 //   fs.*  -- filesystem surface (closed/typed)
 // =============================================================================
 
+/// Read a file from the local filesystem surface.
 @sideEffect("read")
-@description("Read a file from the local filesystem surface.")
 capability fs.readFile {
   args {
     path string!
   }
 }
 
+/// Stat a path on the local filesystem surface (existence + metadata).
 @sideEffect("read")
-@description("Stat a path on the local filesystem surface (existence + metadata).")
 capability fs.stat {
   args {
     path string!
   }
 }
 
+/// Write a file to the local filesystem surface.
 @sideEffect("write")
-@description("Write a file to the local filesystem surface.")
 capability fs.writeFile {
   args {
     path    string!
@@ -89,16 +89,16 @@ capability fs.writeFile {
 //   http.*  -- outbound HTTP surface (closed/typed)
 // =============================================================================
 
+/// Issue an HTTP GET to an outbound URL and return the response.
 @sideEffect("read")
-@description("Issue an HTTP GET to an outbound URL and return the response.")
 capability http.get {
   args {
     url string!
   }
 }
 
+/// Issue an HTTP POST to an outbound URL with a body.
 @sideEffect("write")
-@description("Issue an HTTP POST to an outbound URL with a body.")
 capability http.post {
   args {
     url  string!
@@ -116,16 +116,17 @@ capability http.post {
 // by that script's own `--print-spec` envelope at run time. Only the stable
 // selector is declared @required here; the rest of the per-script argument
 // surface is intentionally open (see the OPEN vs CLOSED note above).
+/// Run an allowlisted named capability script on the runner surface, passing structured params as
+/// data.
 @sideEffect("exec")
-@description("Run an allowlisted named capability script on the runner surface, passing structured params as data.")
 capability shell.script {
   args {
     script string!
   }
 }
 
+/// Run a shell command on the runner surface.
 @sideEffect("exec")
-@description("Run a shell command on the runner surface.")
 capability shell.exec {
   args {
     cmd string!

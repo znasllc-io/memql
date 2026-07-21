@@ -2,8 +2,8 @@
 //
 // Read projections in the `forge` namespace.
 
+/// Full v1:forge:project projection.
 @row
-@description("Full v1:forge:project projection.")
 shape project projectFull {
   row.id
   slug
@@ -16,8 +16,8 @@ shape project projectFull {
   row.createdAt
 }
 
+/// Full v1:forge:request projection: every field a queue/detail view or the routing logic needs.
 @row
-@description("Full v1:forge:request projection: every field a queue/detail view or the routing logic needs.")
 shape request requestFull {
   row.id
   projectId
@@ -36,8 +36,8 @@ shape request requestFull {
   row.createdAt
 }
 
+/// Full v1:forge:requestEvent projection: the audit-trail row.
 @row
-@description("Full v1:forge:requestEvent projection: the audit-trail row.")
 shape requestEvent requestEventFull {
   row.id
   requestId

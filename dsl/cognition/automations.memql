@@ -13,8 +13,8 @@
 // here -- the createSessionForParticipant insert and the session.created emit --
 // mirroring the cluster bootstrapCluster pattern. Every field binds an explicit
 // key + coalesce (a nil @required mutation arg trips validation).
+/// Auto-creates a session when a participant joins a space
 @trigger(event="node.created", concept="v1:cognition:participant", partition="*")
-@description("Auto-creates a session when a participant joins a space")
 automation bootstrapSession {
   args {
     id any
@@ -62,8 +62,8 @@ automation bootstrapSession {
 // `steps.decide.result != ""` and reading the reply text via
 // `steps.decide.result`. The #2271 engine fix unwraps the Bundle-wrapped step
 // result so that read resolves flat at real-DB runtime.
+/// Generate and insert AI response for an utterance
 @trigger(event="cognition.response.requested")
-@description("Generate and insert AI response for an utterance")
 automation generateResponse {
   args {
     agentId any
@@ -139,6 +139,7 @@ automation generateResponse {
 // "voice moved back to your Team chat" card lands -- handled by a
 // sibling automation when needed (deferred until the frontend wiring
 // shows the need).
+/// On second-active-human-in-space, emit the Phase 7 voice-migration canvas-card pair (public group
+/// card + private operator card per existing user).
 @filter(payload.activePartitionId!="")
-@description("On second-active-human-in-space, emit the Phase 7 voice-migration canvas-card pair (public group card + private operator card per existing user).")
 automation voiceMigrationOnSecondHuman @trigger(event="node.created", concept="v1:identity:user", partition="*") => logic voiceMigrationOnSecondHuman

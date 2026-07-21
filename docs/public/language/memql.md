@@ -159,7 +159,7 @@ gate keeps redundant same-domain imports out of the corpus.
 use agents.concepts.{ agent }
 
 @namespace("cognition")
-@description("Per-(spaceId, agentId) audio control override.")
+/// Per-(spaceId, agentId) audio control override.
 concept audioOverride {
   spaceId  string  @required @description("v1:cognition:space.id this override is scoped to.")
   agentId  string  @required @description("v1:agents:agent.id this override targets.")
@@ -494,7 +494,7 @@ Each shape declares its **kind** (where its fields come from) via `@row` and/or 
 use cognition.concepts.{ audioOverride }
 
 @row
-@description("Per-(space, agent) audio override projection")
+/// Per-(space, agent) audio override projection
 shape audioOverride audioOverrideFull {
   row.id
   spaceId
@@ -511,7 +511,7 @@ Body path translations: a bare `name` → payload property; `row.X` → row intr
 
 ```memql
 @actor
-@description("Actor envelope projection: authenticated actor, role, and now.")
+/// Actor envelope projection: authenticated actor, role, and now.
 shape actorEnvelope {
   actor.userId
   actor.role
@@ -547,7 +547,7 @@ AI provider configurations (OpenAI and Anthropic — the only supported vendors)
 ```memql
 @extends("openai")
 @model("gpt-5.4-mini")
-@description("OpenAI GPT-5.4 Mini - balanced cost/latency chat (non-streaming)")
+/// OpenAI GPT-5.4 Mini - balanced cost/latency chat (non-streaming)
 provider chat54Mini {
   params {
     contextWindow        128000
@@ -585,7 +585,7 @@ The live `policy` construct is an **AI provider-selection record**: empty-bodied
 @fallback("stream54Pro")
 @fallback("streamClaudeHaiku")
 @maxLatencyMs(60000)
-@description("Default chat policy for non-operator agents.")
+/// Default chat policy for non-operator agents.
 policy balancedChat { }
 ```
 
@@ -598,7 +598,7 @@ AI prompt templates with input schemas and default providers live in `dsl/<names
 ```memql
 @defaultProvider("chat54Mini")
 @templateFile("prompts/cognitionPrediction.tmpl")
-@description("Predict conversation trajectory for proactive cognition behavior")
+/// Predict conversation trajectory for proactive cognition behavior
 prompt cognitionPrediction {
   transcript  []object  @required @description("Recent transcript entries with speakerName, speakerType, text")
   agents      []object  @required @description("Available AI agents with name, role, and domains")
@@ -730,7 +730,7 @@ Named mutations live in `dsl/<namespace>/mutations.memql`. The concept binding l
 ```memql
 use cognition.concepts.{ space }
 
-@description("Insert a new version of a space record (typically used to archive a space).")
+/// Insert a new version of a space record (typically used to archive a space).
 mutation space mutationArchiveSpace {
   args {
     spaceId  string  @required
@@ -762,14 +762,14 @@ A spec body never reads `actor.*` / `row.*` directly — bind a shape that proje
 ```memql
 use cognition.concepts.{ participant }
 
-@description("Matches participants with human participantType")
+/// Matches participants with human participantType
 spec participant specIsHumanParticipant {
   return participantType == "human"
 }
 
 use common.shapes.{ actorEnvelope }
 
-@description("Actor holds an admin role")
+/// Actor holds an admin role
 spec actorEnvelope requiresAdmin {
   return role == "admin"
 }
@@ -780,7 +780,7 @@ spec actorEnvelope requiresAdmin {
 A `trait` is the one deliberately **unbound** row predicate — a cross-concept scaffold declared in `dsl/<namespace>/traits.memql`, with no signature binding, a `return` body over bare payload fields, validated against the concrete concept at the call site:
 
 ```memql
-@description("Matches records with active==true field")
+/// Matches records with active==true field
 trait isActiveRecord {
   return active == true
 }
@@ -809,7 +809,7 @@ use cognition.concepts.{ participant }
 use cognition.shapes.{ participantFull }
 use common.traits.{ traitIsActiveRecord }
 
-@description("Get space participants")
+/// Get space participants
 query participant querySpaceParticipants {
   args {
     spaceId          string
@@ -827,7 +827,7 @@ query participant querySpaceParticipants {
 Body directives: `filter` (the predicate), `shape` (named projection), and optional `sort "field", "dir"` / `paginate N` lines:
 
 ```memql
-@description("Returns the latest space-context row for a given spaceId")
+/// Returns the latest space-context row for a given spaceId
 query context queryLatestSpaceContextForSpace {
   args {
     spaceId  string  @required
@@ -982,7 +982,7 @@ Logic constructs are imperative procedures called from automation steps (or othe
 ```memql
 use common.builtins.{ ensureDailySpaceForUser }
 
-@description("On user creation, ensure today's daily space exists.")
+/// On user creation, ensure today's daily space exists.
 logic logicProvisionDailySpaceOnUserCreate {
   args {
     event object @required
@@ -996,7 +996,7 @@ logic logicProvisionDailySpaceOnUserCreate {
 Multi-statement bodies use `name := <call>` steps followed by a trailing `return <expr>`. Step results support iteration and result accessors, and steps can be gated with `if`:
 
 ```memql
-@description("Daily sweep that hard-deletes archived spaces whose retention window has elapsed.")
+/// Daily sweep that hard-deletes archived spaces whose retention window has elapsed.
 logic logicPurgeExpiredArchivedSpaces {
   args {
     event object @required
@@ -1076,7 +1076,7 @@ Builtins wrap Go integrations behind a declarative schema, so they look like reg
 
 ```memql
 @executor("integration.auth.checkPermission")
-@description("Check if the current authenticated user has a specific role. Returns boolean result.")
+/// Check if the current authenticated user has a specific role. Returns boolean result.
 builtin authCheckPermission {
   role  string  @required
 }
@@ -1089,7 +1089,7 @@ The introspection commands (`concepts`, `memqlDocs`, `functions`, `help`, `conte
 Tools are AI-callable tool definitions — the AI-facing surface of queries, mutations, and builtins. Struct form; the body is a list of input-schema fields with types and annotations (`@required`, `@default`, `@enum`, `@description`); `@handler` binds the tool to its backing operation and `@executionTime` hints latency:
 
 ```memql
-@description("Search for users")
+/// Search for users
 @handler(type="query", query="concept==v1:memql:backend:user")
 @executionTime("fast")
 tool searchUsers {
@@ -1108,7 +1108,7 @@ Automations are event- or schedule-triggered workflows declared in `dsl/<namespa
 use cognition.logic.{ logicBootstrapSession }
 
 @trigger(event="node.created", concept="v1:cognition:participant", partition="*")
-@description("Auto-creates a session when a participant joins a space")
+/// Auto-creates a session when a participant joins a space
 automation bootstrapSession {
   step run {
     logic bootstrapSession { event: event }
@@ -1147,7 +1147,7 @@ The longhand single-step form is gate-enforced out of the shipped corpus, not me
 ```memql
 @trigger(event="node.created", concept="v1:cognition:space", partition="*")
 @filter(active==true)
-@description("On space creation, joins the creator's assistant plus any specialist agents.")
+/// On space creation, joins the creator's assistant plus any specialist agents.
 automation autoJoinSI {
   step run {
     logic autoJoinSI { event: event }

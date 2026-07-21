@@ -5,8 +5,10 @@
 
 use planner.concepts.{ plan }
 
+/// List worker invocation rows for retention pruning. When createdBefore is supplied, restricts to
+/// rows created strictly before it -- the retention sweep's logic computes the cutoff (now -
+/// WORKER_INVOCATION_RETENTION_DAYS) and pushes it down (#2369).
 @unbounded("expired worker-invocation retention sweep -- an internal sweep that must see all")
-@description("List worker invocation rows for retention pruning. When createdBefore is supplied, restricts to rows created strictly before it -- the retention sweep's logic computes the cutoff (now - WORKER_INVOCATION_RETENTION_DAYS) and pushes it down (#2369).")
 query invocation expiredWorkerInvocations {
   args {
     createdBefore  string
@@ -27,7 +29,7 @@ query invocation expiredWorkerInvocations {
 // Arguments:
 //   planId (string, required) - v1:planner:plan.id
 
-@description("List all worker invocations belonging to a Plan.")
+/// List all worker invocations belonging to a Plan.
 query invocation invocationsForPlan {
   args {
     planId  string!
@@ -57,8 +59,8 @@ query invocation invocationsForPlan {
 // The only known callsite is the worker invocation retention sweep
 // (system actor). Splitting into self + system variants tracked
 // under #54.
+/// List worker invocations belonging to a user.
 @public
-@description("List worker invocations belonging to a user.")
 query invocation invocationsForUser {
   args {
     ownerUserId  string!
@@ -72,7 +74,7 @@ query invocation invocationsForUser {
   shape   workerInvocationFull
 }
 
-@description("List a user's running plans.")
+/// List a user's running plans.
 query plan runningPlansForUser {
   args {
     withComputerUseScope  boolean
@@ -102,8 +104,8 @@ query plan runningPlansForUser {
 // Arguments:
 //   identityId (string, required) - v1:identity:identity.id
 
+/// Look up the worker registration owned by an identity row.
 @unbounded("worker by identityId -- bounded to a single row")
-@description("Look up the worker registration owned by an identity row.")
 query registration workerByIdentityId {
   args {
     identityId  string!
@@ -136,8 +138,8 @@ query registration workerByIdentityId {
 // and the worker registration sweep (`component/worker/store.go`),
 // both system-actor paths. Splitting into self + system variants
 // tracked under #54.
+/// List all workers owned by a user.
 @public
-@description("List all workers owned by a user.")
 query registration workersForUser {
   args {
     ownerUserId  string!

@@ -26,7 +26,12 @@ use platform.queries.{ globalVariable }
 // `exists(payload.identityProvider)` event check for the idp create alone, so
 // the identityProvider row lands only on the bff create path AND when a
 // provider is configured (the extra guard the idp create had).
-@description("Decides whether to run the cluster bootstrap writes on first startup (ADR S2.1 pure logic, #2235). Reads existingCluster() and returns the boolean `create` -- true only when no cluster row exists yet AND this node is the bff (both idempotency guards). The calling automation gates the three conditional creates (v1:cluster:database / :identityProvider / :cluster) on `steps.decide.result == true`, with the idp create additionally requiring an identityProvider block in the startup envelope.")
+/// Decides whether to run the cluster bootstrap writes on first startup (ADR S2.1 pure logic,
+/// #2235). Reads existingCluster() and returns the boolean `create` -- true only when no cluster
+/// row exists yet AND this node is the bff (both idempotency guards). The calling automation gates
+/// the three conditional creates (v1:cluster:database / :identityProvider / :cluster) on
+/// `steps.decide.result == true`, with the idp create additionally requiring an identityProvider
+/// block in the startup envelope.
 logic bootstrapCluster {
   args {
     event object!
@@ -96,7 +101,12 @@ logic bootstrapCluster {
 // Runs every 10 minutes. The cluster node table is small (one row-stream
 // per pod ever seen), so a frequent walk is cheap and keeps topology
 // fresh shortly after a rollover.
-@description("Decides which departed cluster nodes to retire (ADR S2.1 pure logic, #2235). Reads MEMQL_NODE_STALE_PRUNE_MINUTES (default 30), computes cutoff = now - window via addDuration with a negative ISO duration, and returns staleClusterNodes({olderThan: cutoff}).nodes() -- the LATEST non-stopped rows whose lastSeen is past the window (the olderThan arg pushes a payload.lastSeen<cutoff predicate onto the query, #1642). The calling automation appends the terminal health='stopped' row per returned node via a forEach updateNodeHealth step.")
+/// Decides which departed cluster nodes to retire (ADR S2.1 pure logic, #2235). Reads
+/// MEMQL_NODE_STALE_PRUNE_MINUTES (default 30), computes cutoff = now - window via addDuration with
+/// a negative ISO duration, and returns staleClusterNodes({olderThan: cutoff}).nodes() -- the
+/// LATEST non-stopped rows whose lastSeen is past the window (the olderThan arg pushes a
+/// payload.lastSeen<cutoff predicate onto the query, #1642). The calling automation appends the
+/// terminal health='stopped' row per returned node via a forEach updateNodeHealth step.
 logic pruneStaleClusterNodes {
   args {
     event object!

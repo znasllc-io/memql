@@ -1237,7 +1237,7 @@ func CreateAdHocPlanBuild(args CreateAdHocPlanArgs) string {
 	return b.String()
 }
 
-// CreateAgent -- Create a new AI agent template. The `kind` arg defaults to `assistant` -- the safe value for the frontend's create-agent modal flow. The SeedMaterializer (running under the `system:seedMaterializer` actor) passes `kind: \"system\"` when materializing platform agents (MemQL Planner / MemQL Trainer). The planner integration (running under the `system:planner` actor; memql#399) passes `kind: \"specialist\"` when auto-provisioning a specialist for a Plan's capability gap. User-actor calls that try to pass `kind in (\"system\", \"specialist\
+// CreateAgent -- Create a new AI agent template. The `kind` arg defaults to `assistant` -- the safe value for the frontend's create-agent modal flow. The SeedMaterializer (running under the `system:seedMaterializer` actor) passes `kind: "system"` when materializing platform agents (MemQL Planner / MemQL Trainer). The planner integration (running under the `system:planner` actor; memql#399) passes `kind: "specialist"` when auto-provisioning a specialist for a Plan's capability gap. User-actor calls that try to pass `kind in ("system", "specialist")` are rejected pre-insert by an engine-level actor-scope guard (component/memql/agent_kind_actor_validation.go, memql#403); the mutation surface itself stays permissive on `kind` so the seed + planner paths can keep writing their values with the rejection one layer up.
 //
 // Bound concept: v1:agents:agent (machine-readable: BoundConcepts["createAgent"] in generated_concepts.go).
 type CreateAgentArgs struct {
@@ -4918,7 +4918,7 @@ func CreateSessionForParticipantBuild(args CreateSessionForParticipantArgs) stri
 	return b.String()
 }
 
-// CreateSkill -- Materialize a v1:agents:skill catalog row from a `seed skill ...` declaration under dsl/agents/skills/*.memql. Matches the SeedMaterializer's `mutationCreate<Concept>` naming convention -- the materializer stamps the seed body's id into `skillId` and forwards every other seed body field as a same-named arg, so this mutation's arg surface mirrors the on-disk seed body 1:1. Sibling to `mintSkill`: same row shape, but the seed path is for the predefined catalog (predefined defaults true) and carries no originatingPlanId / mintedByAgentId provenance triad. Was missing pre-#344, which made every skill seed in the bundled catalog fail to materialize with `function \"createSkill\" not found`. The materializer convention itself lives in component/memql/seed_materializer.go.
+// CreateSkill -- Materialize a v1:agents:skill catalog row from a `seed skill ...` declaration under dsl/agents/skills/*.memql. Matches the SeedMaterializer's `mutationCreate<Concept>` naming convention -- the materializer stamps the seed body's id into `skillId` and forwards every other seed body field as a same-named arg, so this mutation's arg surface mirrors the on-disk seed body 1:1. Sibling to `mintSkill`: same row shape, but the seed path is for the predefined catalog (predefined defaults true) and carries no originatingPlanId / mintedByAgentId provenance triad. Was missing pre-#344, which made every skill seed in the bundled catalog fail to materialize with `function "createSkill" not found`. The materializer convention itself lives in component/memql/seed_materializer.go.
 //
 // Bound concept: v1:agents:skill (machine-readable: BoundConcepts["createSkill"] in generated_concepts.go).
 type CreateSkillArgs struct {
@@ -11396,7 +11396,7 @@ func UpdateMissingCapabilityStatusBuild(args UpdateMissingCapabilityStatusArgs) 
 	return b.String()
 }
 
-// UpdateNodeHealth -- Record a node health transition. Read-merges the existing v1:cluster:node row (created on startup by registerNode under the same NodeId) so only health + lastSeen change; nodeType/address/parentId/capabilities/labels inherit from the persisted row instead of being wiped when a caller omits them (memql#1628 -- previously the insert form re-stamped address to \"\" and reset capabilities/labels on every transition).
+// UpdateNodeHealth -- Record a node health transition. Read-merges the existing v1:cluster:node row (created on startup by registerNode under the same NodeId) so only health + lastSeen change; nodeType/address/parentId/capabilities/labels inherit from the persisted row instead of being wiped when a caller omits them (memql#1628 -- previously the insert form re-stamped address to "" and reset capabilities/labels on every transition).
 //
 // Bound concept: v1:cluster:node (machine-readable: BoundConcepts["updateNodeHealth"] in generated_concepts.go).
 type UpdateNodeHealthArgs struct {

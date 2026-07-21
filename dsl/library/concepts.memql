@@ -29,9 +29,15 @@ use common.concepts.{ attachment }
 use planner.concepts.{ plan }
 use worker.concepts.{ registration }
 
+/// A single Library index row pointing at one underlying source concept (document / generated
+/// output / note / to-do / calendar event / memory / live source). Carries the shared provenance +
+/// type spine the Library panel needs to list / search / filter / sort across heterogeneous
+/// sources, while the actual content stays on the backing concept referenced by sourceConceptRef.
+/// The LOCKED backend shape for the Library epic (memql#693): a real index concept, not a UI
+/// projection. Per-row authz: owned -- ownerUserId is stamped from actor.userId on every write and
+/// every read gates on ownerUserId==actor.userId.
 @namespace("library")
 @displayCard(primary="title", secondary="summary", tertiary="updatedAt", status="lens")
-@description("A single Library index row pointing at one underlying source concept (document / generated output / note / to-do / calendar event / memory / live source). Carries the shared provenance + type spine the Library panel needs to list / search / filter / sort across heterogeneous sources, while the actual content stays on the backing concept referenced by sourceConceptRef. The LOCKED backend shape for the Library epic (memql#693): a real index concept, not a UI projection. Per-row authz: owned -- ownerUserId is stamped from actor.userId on every write and every read gates on ownerUserId==actor.userId.")
 concept artifact {
   ownerUserId      string!  @description("v1:identity:user.id that owns this index row. Stamped from actor.userId at create time and re-stamped on every update so ownership can never be reassigned. The load-bearing per-row authz key.")
 
@@ -91,9 +97,13 @@ concept artifact {
 // integration step tracked on #694 -- the DSL surface here is complete and
 // the document path already has a live producer (the attachment handler).
 
+/// A deliverable PRODUCED through the app (as opposed to an uploaded document): a workbench result,
+/// a computer-use output, or a standalone agent output. Carries either inline text (body) or a
+/// reference to file bytes (attachmentId -> v1:common:attachment). Auto-promoted into the Library
+/// by indexGeneratedOutput on creation. Per-row authz: owned -- ownerUserId is the producing user;
+/// reads gate on ownerUserId==actor.userId.
 @namespace("library")
 @displayCard(primary="title", secondary="summary", tertiary="createdAt")
-@description("A deliverable PRODUCED through the app (as opposed to an uploaded document): a workbench result, a computer-use output, or a standalone agent output. Carries either inline text (body) or a reference to file bytes (attachmentId -> v1:common:attachment). Auto-promoted into the Library by indexGeneratedOutput on creation. Per-row authz: owned -- ownerUserId is the producing user; reads gate on ownerUserId==actor.userId.")
 concept generatedOutput {
   ownerUserId       string!  @description("v1:identity:user.id this output belongs to (the user the producing agent / plan acts for). The per-row authz key for Library reads.")
   title             string!  @description("Display title for the output, e.g. 'Ten most beautiful birds'.")
@@ -152,9 +162,16 @@ concept generatedOutput {
 // on ownerUserId==actor.userId so a caller can only ever see their own
 // document history.
 
+/// An immutable content snapshot of one logical Library document at one point in its edit history.
+/// Appended -- never overwritten -- whenever a document is produced, edited (by user or assistant),
+/// or restored, with a monotonically increasing versionNumber. The artifact index + backing
+/// document always point at the LATEST version while the full append-only history is retained
+/// behind it. Backed by the MemoryNodes TimescaleDB hypertable (partitioned on createdAt);
+/// long-lived, compression-after-90-days, no retention drop (memql#1228). Per-row authz: owned --
+/// ownerUserId is threaded from the document's owner on append; reads gate on
+/// ownerUserId==actor.userId.
 @namespace("library")
 @displayCard(primary="documentId", secondary="note", tertiary="createdAt")
-@description("An immutable content snapshot of one logical Library document at one point in its edit history. Appended -- never overwritten -- whenever a document is produced, edited (by user or assistant), or restored, with a monotonically increasing versionNumber. The artifact index + backing document always point at the LATEST version while the full append-only history is retained behind it. Backed by the MemoryNodes TimescaleDB hypertable (partitioned on createdAt); long-lived, compression-after-90-days, no retention drop (memql#1228). Per-row authz: owned -- ownerUserId is threaded from the document's owner on append; reads gate on ownerUserId==actor.userId.")
 concept documentVersion {
   ownerUserId      string!  @description("v1:identity:user.id that owns the logical document this version belongs to. Threaded from the backing document's owner on every append (edits run server-side on the owner's behalf, not as the owner); the load-bearing per-row authz key for every history read.")
 
@@ -202,9 +219,12 @@ concept documentVersion {
 // ownerUserId stamped from actor.userId; reads gate on
 // ownerUserId==actor.userId. Auto-promoted via indexMemory.
 
+/// A durable memory the assistant retains about the user across sessions (a fact, preference,
+/// standing instruction, or episodic recollection). The user-facing LLM-memory concept; surfaced in
+/// the Library's Records lens. Per-row authz: owned -- ownerUserId stamped from actor.userId; reads
+/// gate on ownerUserId==actor.userId.
 @namespace("library")
 @displayCard(primary="title", secondary="content", tertiary="createdAt")
-@description("A durable memory the assistant retains about the user across sessions (a fact, preference, standing instruction, or episodic recollection). The user-facing LLM-memory concept; surfaced in the Library's Records lens. Per-row authz: owned -- ownerUserId stamped from actor.userId; reads gate on ownerUserId==actor.userId.")
 concept memory {
   ownerUserId       string!  @description("v1:identity:user.id this memory is about / belongs to. Stamped from actor.userId at create time. The per-row authz key.")
   title             string!  @description("Short label for the memory, e.g. 'Prefers concise replies'. The primary display line.")

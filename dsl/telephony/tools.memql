@@ -16,7 +16,8 @@
 // effect of a lint fix. Re-add `@mcp` -- and add them to that curated list --
 // only as a deliberate, reviewed connector-exposure decision.
 
-@description("Place an outbound phone call to a number. The callee is bridged into the room so you can talk to them. Optionally dial DTMF digits after connect for IVR menus.")
+/// Place an outbound phone call to a number. The callee is bridged into the room so you can talk to
+/// them. Optionally dial DTMF digits after connect for IVR menus.
 @handler(type="function", name="telephonyPlaceCall")
 @executionTime("slow")
 tool placeCall {
@@ -26,7 +27,7 @@ tool placeCall {
   dtmf         string  @description("Optional digits to dial after the call connects")
 }
 
-@description("Hang up / end an active phone call.")
+/// Hang up / end an active phone call.
 @handler(type="function", name="telephonyEndCall")
 @executionTime("fast")
 tool endCall {
@@ -34,7 +35,7 @@ tool endCall {
   identity  string! @description("The call's SIP participant identity")
 }
 
-@description("Transfer an active phone call to another phone number.")
+/// Transfer an active phone call to another phone number.
 @handler(type="function", name="telephonyTransferCall")
 @executionTime("fast")
 tool transferCall {
@@ -43,7 +44,7 @@ tool transferCall {
   to        string! @description("The phone number to transfer to, in E.164")
 }
 
-@description("Send DTMF tones (digits) to an active call to navigate phone menus / IVRs.")
+/// Send DTMF tones (digits) to an active call to navigate phone menus / IVRs.
 @handler(type="function", name="telephonySendDtmf")
 @executionTime("fast")
 tool sendDtmf {

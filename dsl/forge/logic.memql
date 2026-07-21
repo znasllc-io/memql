@@ -30,7 +30,11 @@
 //     appendPayloadFields), so no read-merge-append logic wrapper is needed. The
 //     forgeAttachToRequest tool targets the mutation directly.
 
-@description("PURE routing decision table for a newly submitted v1:forge:request: submitter role -> the next approval-pipeline status. owner fast-tracks to queued (pre-approved); admin/writer to needs_approval; anyone else (reader) to needs_validation. Returns the status string only -- the automation switches on it and stamps approvedByUserId solely in the queued (owner) case. No graph reads or writes (ADR section 2.1). P1 #2368.")
+/// PURE routing decision table for a newly submitted v1:forge:request: submitter role -> the next
+/// approval-pipeline status. owner fast-tracks to queued (pre-approved); admin/writer to
+/// needs_approval; anyone else (reader) to needs_validation. Returns the status string only -- the
+/// automation switches on it and stamps approvedByUserId solely in the queued (owner) case. No
+/// graph reads or writes (ADR section 2.1). P1 #2368.
 logic requestRouteStatus {
   args {
     submitterRole any
@@ -43,7 +47,11 @@ logic requestRouteStatus {
   }
 }
 
-@description("PURE audit-vocabulary decision table for a v1:forge:request status transition: new status -> the v1:forge:requestEvent kind (needs_approval -> validated, queued -> approved, changes_requested / rejected pass through). Returns \"\" -- meaning SKIP, record nothing -- for an unrecognised status AND for an update whose status did not change (oldStatus == status), which the automation's former shape claimed but never checked. No graph reads or writes. P1 #2368.")
+/// PURE audit-vocabulary decision table for a v1:forge:request status transition: new status -> the
+/// v1:forge:requestEvent kind (needs_approval -> validated, queued -> approved, changes_requested /
+/// rejected pass through). Returns "" -- meaning SKIP, record nothing -- for an unrecognised status
+/// AND for an update whose status did not change (oldStatus == status), which the automation's
+/// former shape claimed but never checked. No graph reads or writes. P1 #2368.
 logic transitionEventKind {
   args {
     status any
