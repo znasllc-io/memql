@@ -43,16 +43,10 @@
 // - Emits "si.auto-joined" event for observability.
 use identity.queries.{ usersActiveInSpace }
 
-// automations/v1/cognition/bootstrapSession/automation.memql
-// Auto-creates a v1:cognition:session record when a participant is created.
-// Ensures every participant has a session tracking their real-time interaction state.
-// PURE decide logic (#2235 / #2271): it only READS (the existence check) and
-// returns the boolean decision "no session exists yet -> create one". The two
-// writes it used to perform inline (the createSessionForParticipant insert + the
-// session.created emit -- the ADR §2.1 logic-purity violation) now live as
-// `if`-gated steps on the bootstrapSession automation, gated on
-// `steps.decide.result == true`, mirroring the cluster bootstrapCluster pattern.
-@description("Decides whether a new v1:cognition:session must be created for a freshly-created participant: returns true when no session exists yet (idempotency via participantSession). The bootstrapSession automation performs the gated createSessionForParticipant insert + session.created emit.")
+/// Decides whether a new v1:cognition:session must be created for a freshly-created participant:
+/// returns true when no session exists yet (idempotency via participantSession). The
+/// bootstrapSession automation performs the gated createSessionForParticipant insert +
+/// session.created emit.
 logic bootstrapSession {
   args {
     event object!
@@ -70,22 +64,10 @@ logic bootstrapSession {
   }
 }
 
-// automations/v1/cognition/generateResponse/automation.memql
-// Generates and inserts an AI response when the cognition integration
-// determines that a response is needed. The Go handler performs event
-// reception, concurrent context loading, Polyphon scoring, and streaming
-// dispatch, then emits this event with pre-loaded context when a
-// non-streaming AI response is needed.
-// PURE decide logic (#2235 / #2271): idempotency READ + the ai() call, returning
-// the generated reply TEXT as a scalar (empty string when a response already
-// exists, so nothing is written). The two graph writes it used to perform inline
-// (the sendTextUtterance insert -- the ADR §2.1 logic-purity violation -- plus
-// the presence bump) now live as `if`-gated steps on the generateResponse
-// automation, gated on `steps.decide.result != ""` and reading the reply text
-// via `steps.decide.result`. This is the scalar form of the decide->persist
-// pattern; the engine fix (#2271) makes the Bundle-wrapped step result read flat.
-// ai() is a read/compute (not a graph write), so the logic stays contract-pure.
-@description("Decides + generates the AI reply for a cognition.response.requested event: returns the reply text (empty when a response already exists -- idempotency via hasAIResponseForReply). The generateResponse automation performs the gated sendTextUtterance insert + presence bump from this text.")
+/// Decides + generates the AI reply for a cognition.response.requested event: returns the reply
+/// text (empty when a response already exists -- idempotency via hasAIResponseForReply). The
+/// generateResponse automation performs the gated sendTextUtterance insert + presence bump from
+/// this text.
 @eventField("agentId", "promptData", "promptTemplateId", "siParticipantId", "partitionId", "utteranceId")
 logic generateResponse {
   args {
@@ -119,47 +101,10 @@ logic generateResponse {
 
 // ---- logic/v1/cognition/purgeExpiredArchivedSpaces.memql ----
 
-// voiceMigrationOnSecondHuman
-// ===========================
-//
-// PURPOSE:
-// Phase 7 of the chat-architecture plan. When the SECOND active human
-// shows up in a space, voice transport migrates from each user's per-
-// user Team thread to the shared GROUP thread. The automation emits
-// the canvas-card pair that announces the migration:
-//
-//   Public group card  -- "{user} joined -- voice is active in this chat."
-//                          Visible to every space participant.
-//   Private operator   -- "Voice moved to the group chat -- push-to-talk
-//   card per user        or type to message your team here."
-//                          Per-existing-user; lands on each user's
-//                          private canvas timeline.
-//
-// TRIGGER:
-// graph.node.created.v1:identity:user fires on every user-row write
-// (primary path: setUserActiveSpace shipping a new version).
-// We filter to rows whose payload.activePartitionId is non-empty -- a user
-// whose pointer is set has just become active in some space.
-//
-// FIRE CONDITION:
-// usersActiveInSpace returns the full set of users currently
-// pointing at the same space. We act when the count is exactly 2 --
-// the just-joined user PLUS one prior active human. Counts of 1 (single
-// user) and 3+ (already migrated) are no-ops.
-//
-// IDEMPOTENCY:
-// The public canvas-state id is content-addressed on
-// (space, "voice-migrated"). Re-firing the automation for the same
-// (space) lands the same id, which the executeInsert path collapses
-// via ON CONFLICT. The per-user private cards are content-addressed
-// on (space, "voice-migrated", userId) for the same reason.
-//
-// REVERSE MIGRATION:
-// When the count drops below 2 (last other human leaves), the symmetric
-// "voice moved back to your Team chat" card lands -- handled by a
-// sibling automation when needed (deferred until the frontend wiring
-// shows the need).
-@description("Phase 7 of chat-architecture. Triggered when a user's activePartitionId pointer changes. When exactly two humans become active in the same space, emits a public 'voice.migrated.group' canvas card plus per-user 'voice.migrated.private' cards announcing voice transport migration from Team to Group thread. Idempotent via content-addressed stateIds.")
+/// Phase 7 of chat-architecture. Triggered when a user's activePartitionId pointer changes. When
+/// exactly two humans become active in the same space, emits a public 'voice.migrated.group' canvas
+/// card plus per-user 'voice.migrated.private' cards announcing voice transport migration from Team
+/// to Group thread. Idempotent via content-addressed stateIds.
 @eventField("activePartitionId", "id")
 logic voiceMigrationOnSecondHuman {
   args {

@@ -23,8 +23,11 @@
 use harness.concepts.{ plan, step }
 use identity.concepts.{ user }
 
+/// A captured trace of the concrete capability sequence an LLM step performed, with value +
+/// resource provenance per call (#1735). Minted as status='candidate' on first run; a later phase
+/// graduates it into a library action. This is the foundation record of the action library (epic
+/// #1734) -- no replay yet.
 @namespace("actions")
-@description("A captured trace of the concrete capability sequence an LLM step performed, with value + resource provenance per call (#1735). Minted as status='candidate' on first run; a later phase graduates it into a library action. This is the foundation record of the action library (epic #1734) -- no replay yet.")
 @displayCard(primary="stepId", secondary="status", tertiary="ownerUserId", status="status")
 concept candidate {
   ownerUserId   string!  @description("v1:identity:user.id of the owner. The per-row authz key (owned tier), stamped from actor.userId by recordActionCandidate.")
@@ -41,27 +44,11 @@ concept candidate {
   @relationship(type="parent", field="stepId", target=step, direction="outgoing")
 }
 
-// action -- a reusable, replayable library entry (Phase 1, #1736).
-//
-// Phase 1 mints a `primitive` action from a candidate trace once an LLM step
-// completes: it stores the concrete capability sequence the step performed
-// plus an `inputFingerprint` (a stable hash of the dispatched step input) and
-// a `resultFingerprint` (a stable hash of the recorded tool results). On the
-// next dispatch of a step with the SAME inputFingerprint, the harness replays
-// the stored calls via ExecuteToolByName (default surface, no LLM); if the
-// replay's result fingerprint matches the recorded one, the recorded result
-// is returned and `reliability` is reinforced -- otherwise the harness falls
-// back to the LLM. This is "literal replay keyed on input fingerprint against
-// the default surface only" (the doc, Phase 1).
-//
-// What is deliberately NOT here yet: the capability->surface resolver and
-// world groups (Phase 2 #1737), automatic parameterization + composites
-// (Phase 3 #1738), and the surface-aware trust ladder that gates auto-promote
-// vs confirm (Phase 4 #1739). `capability`, `recordedSurface`, `reliability`,
-// `reinforceCount`, and `version` are carried now so those phases extend the
-// row rather than migrate it.
+/// A reusable, replayable library entry minted from a candidate trace (Phase 1, #1736). A primitive
+/// stores one or more captured capability calls with literal args, keyed by inputFingerprint, and
+/// replays them token-free on identical input against the default surface. Reliability rises on
+/// verified replay; mismatches fall back to the LLM.
 @namespace("actions")
-@description("A reusable, replayable library entry minted from a candidate trace (Phase 1, #1736). A primitive stores one or more captured capability calls with literal args, keyed by inputFingerprint, and replays them token-free on identical input against the default surface. Reliability rises on verified replay; mismatches fall back to the LLM.")
 @displayCard(primary="slug", secondary="status", tertiary="ownerUserId", status="status")
 concept action {
   ownerUserId       string!  @description("v1:identity:user.id of the owner. The per-row authz key (owned tier), stamped from actor.userId by mintAction.")
@@ -95,22 +82,11 @@ concept action {
   @relationship(type="interactsWith", field="provenanceStepId", target=step, direction="outgoing")
 }
 
-// surface -- a registered execution backend the resolver binds to (Phase 2,
-// #1737). A surface declares which abstract capabilities it serves and
-// whether it is currently available; the capability->surface resolver
-// (component/harness/surfaceresolver) chooses one per world group at replay
-// time with the precedence explicit > policy > availability failover, and
-// pins every resource-coupled action in a group to a SINGLE surface
-// (decision A).
-//
-// Capability coverage is DATA, not a hardcoded engine table: a surface lists
-// the capability verbs it serves, so new surfaces (additional computer-use
-// machines, MCP servers) register without an engine change. The concrete
-// capability->tool invocation binding for a given surface is carrier/operator
-// supplied (the workbench/worker tools live in the carrier DSL), kept off the
-// engine's identity here on purpose.
+/// A registered execution surface for action replay (Phase 2, #1737): workbench /
+/// computer-use:<machineId> / mcp:<server>, with its served capability verbs + current
+/// availability. The resolver binds capability->surface per world group with explicit > policy >
+/// availability precedence (decision A pins coupled actions to one surface).
 @namespace("actions")
-@description("A registered execution surface for action replay (Phase 2, #1737): workbench / computer-use:<machineId> / mcp:<server>, with its served capability verbs + current availability. The resolver binds capability->surface per world group with explicit > policy > availability precedence (decision A pins coupled actions to one surface).")
 @displayCard(primary="slug", secondary="kind", tertiary="ownerUserId", status="status")
 concept surface {
   ownerUserId   string!  @description("v1:identity:user.id of the owner. Per-row authz key (owned tier); computer-use machines + workbenches are per-user. Stamped from actor.userId by registerSurface.")

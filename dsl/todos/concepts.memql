@@ -13,9 +13,12 @@
 
 use identity.concepts.{ user }
 
+/// A user-owned to-do item: a titled task with a done flag plus optional due date, priority, and a
+/// back-pointer to the responsibility that spawned it. The standalone source-of-truth to-do concept
+/// the assistant manages on the user's behalf. Per-row authz: owned -- ownerUserId is stamped from
+/// actor.userId on every write and every read gates on ownerUserId==actor.userId.
 @namespace("todos")
 @displayCard(primary="title", secondary="priority", tertiary="dueAt", status="done")
-@description("A user-owned to-do item: a titled task with a done flag plus optional due date, priority, and a back-pointer to the responsibility that spawned it. The standalone source-of-truth to-do concept the assistant manages on the user's behalf. Per-row authz: owned -- ownerUserId is stamped from actor.userId on every write and every read gates on ownerUserId==actor.userId.")
 concept todo {
   ownerUserId  string!  @description("v1:identity:user.id that owns this to-do. Stamped from actor.userId at create time; re-stamped from actor.userId on every update so ownership can never be reassigned by a caller. The load-bearing per-row authz key.")
   title        string!  @description("Short human-readable description of the task. The primary display field.")

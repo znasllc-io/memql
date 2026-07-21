@@ -1,7 +1,8 @@
 // Go-backed telephony operations, exposed to the DSL (and via tools to agents).
 // Implemented by the telephony integration over the LiveKit SIP edge.
 
-@description("Place an outbound PSTN call and bridge the callee into a partition-scoped room the agent talks in.")
+/// Place an outbound PSTN call and bridge the callee into a partition-scoped room the agent talks
+/// in.
 @executor("integration.telephony.placeCall")
 builtin telephonyPlaceCall {
   to           string! @description("Callee E.164 number")
@@ -10,14 +11,14 @@ builtin telephonyPlaceCall {
   dtmf         string  @description("Optional digits to dial after connect (IVR)")
 }
 
-@description("Hang up an outbound call.")
+/// Hang up an outbound call.
 @executor("integration.telephony.endCall")
 builtin telephonyEndCall {
   room      string! @description("Call room")
   identity  string! @description("SIP participant identity")
 }
 
-@description("Transfer a live call to another E.164.")
+/// Transfer a live call to another E.164.
 @executor("integration.telephony.transferCall")
 builtin telephonyTransferCall {
   room      string!
@@ -25,7 +26,7 @@ builtin telephonyTransferCall {
   to        string! @description("Transfer target E.164")
 }
 
-@description("Send DTMF digits to a live call (IVR navigation).")
+/// Send DTMF digits to a live call (IVR navigation).
 @executor("integration.telephony.sendDtmf")
 builtin telephonySendDtmf {
   room      string!
@@ -35,7 +36,7 @@ builtin telephonySendDtmf {
 
 // --- Provisioning (owner/admin gated in Go; backend functions only) --------
 
-@description("Search the carrier for purchasable DIDs. Owner/admin only.")
+/// Search the carrier for purchasable DIDs. Owner/admin only.
 @executor("integration.telephony.searchNumbers")
 builtin telephonySearchNumbers {
   areaCode  string  @description("Area / national destination code")
@@ -43,7 +44,8 @@ builtin telephonySearchNumbers {
   limit     integer @description("Max results")
 }
 
-@description("Purchase a DID, bind it to a partition, point it at the SIP edge, and provision inbound routing. Owner/admin only.")
+/// Purchase a DID, bind it to a partition, point it at the SIP edge, and provision inbound routing.
+/// Owner/admin only.
 @executor("integration.telephony.buyNumber")
 builtin telephonyBuyNumber {
   providerId   string! @description("Id from telephonySearchNumbers")
@@ -51,14 +53,14 @@ builtin telephonyBuyNumber {
   purpose      string  @description("inbound | outbound | both")
 }
 
-@description("Point an owned DID at the SIP edge and (re)provision inbound routing. Owner/admin only.")
+/// Point an owned DID at the SIP edge and (re)provision inbound routing. Owner/admin only.
 @executor("integration.telephony.configureInboundNumber")
 builtin telephonyConfigureInboundNumber {
   e164         string!
   partitionId  string!
 }
 
-@description("Release an owned DID back to the carrier. Owner/admin only.")
+/// Release an owned DID back to the carrier. Owner/admin only.
 @executor("integration.telephony.releaseNumber")
 builtin telephonyReleaseNumber {
   e164  string!

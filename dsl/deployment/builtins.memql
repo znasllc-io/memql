@@ -13,8 +13,10 @@
 // contract (ADR §2). Backed by integrations/deployversion (mirrors the
 // cut-version semver in component/deploycontrol/semver.go).
 
+/// Compute the next release version by bumping a clean three-part numeric version (X.Y.Z; classic
+/// semver or CalVer). bump in {major, minor, patch}, default patch; major/minor zero the lower
+/// parts. Pure + read-only. Returns { current, bump, next }.
 @executor("integration.deployversion.suggestNextVersion")
-@description("Compute the next release version by bumping a clean three-part numeric version (X.Y.Z; classic semver or CalVer). bump in {major, minor, patch}, default patch; major/minor zero the lower parts. Pure + read-only. Returns { current, bump, next }.")
 builtin suggestNextVersion {
   current  string!
   bump     string

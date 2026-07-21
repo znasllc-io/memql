@@ -11,22 +11,12 @@
 // nodes create. Idempotent: decides "create nothing" once a cluster exists.
 use platform.queries.{ globalVariable }
 
-// PURE decision logic (ADR S2.1 logic-purity, #2235). It performs the
-// existingCluster() read + the bff-only / no-cluster gating and returns a
-// two-field decision object; the three conditional create writes
-// (createDatabase / createIdentityProvider / createCluster) moved onto the
-// bootstrapCluster automation as `if`-gated mutation steps. No graph write
-// survives in the logic, so the logic-purity baseline entry was removed in the
-// same change.
-//
-// Returns a single boolean `create`: true only when NO cluster row exists yet
-// AND this node is the bff. That captures BOTH idempotency guards (skip-if-
-// exists + bff-only) the three original `if existing.empty() &&
-// node.type=="bff"` guards shared. The automation ANDs this with an
-// `exists(payload.identityProvider)` event check for the idp create alone, so
-// the identityProvider row lands only on the bff create path AND when a
-// provider is configured (the extra guard the idp create had).
-@description("Decides whether to run the cluster bootstrap writes on first startup (ADR S2.1 pure logic, #2235). Reads existingCluster() and returns the boolean `create` -- true only when no cluster row exists yet AND this node is the bff (both idempotency guards). The calling automation gates the three conditional creates (v1:cluster:database / :identityProvider / :cluster) on `steps.decide.result == true`, with the idp create additionally requiring an identityProvider block in the startup envelope.")
+/// Decides whether to run the cluster bootstrap writes on first startup (ADR S2.1 pure logic,
+/// #2235). Reads existingCluster() and returns the boolean `create` -- true only when no cluster
+/// row exists yet AND this node is the bff (both idempotency guards). The calling automation gates
+/// the three conditional creates (v1:cluster:database / :identityProvider / :cluster) on
+/// `steps.decide.result == true`, with the idp create additionally requiring an identityProvider
+/// block in the startup envelope.
 logic bootstrapCluster {
   args {
     event object!
@@ -39,64 +29,12 @@ logic bootstrapCluster {
 
 // ---- logic/v1/cluster/pruneStaleClusterNodes.memql ----
 
-// pruneStaleClusterNodes
-// ======================
-//
-// Heartbeat-based prune of departed cluster nodes (#1061). The
-// v1:cluster:node store is append-only: NodeStatusWriter appends a row
-// on every liveness transition, and across K8s rollouts (nodes keyed by
-// pod name, #1042) rows for long-gone pods accumulate forever. This cron
-// marks those rows terminal so topology / CLI / WorkerDialer stop
-// treating dead pods as live.
-//
-// BACKSTOP to the fast reaper (#1874). The active reconciliation loop
-// (TopologyReconciler, component/node/reconciler.go) is the primary path now
-// -- it retires superseded-deployment orphans (supersededDeployments)
-// immediately and mesh-absent nodes within a short grace window, in seconds.
-// This 30-min prune stays only as the lazy safety net for whatever the fast
-// path missed. Both append the SAME idempotent terminal health="stopped" and
-// staleClusterNodes excludes already-stopped rows, so they can never
-// write conflicting statuses for the same node.
-//
-// PURE decision logic (ADR S2.1 logic-purity, #2235). The logic resolves the
-// stale window, computes the cutoff timestamp, and returns the LIST of rows to
-// retire; the per-row terminal write (updateNodeHealth) moved onto the
-// pruneStaleClusterNodes automation as a `forEach` step. No graph write
-// survives in the logic, so the logic-purity baseline entry was removed in the
-// same change.
-//
-// Mechanism:
-//   1. The stale window is read from the global variable registry
-//      (MEMQL_NODE_STALE_PRUNE_MINUTES), so only CONFIG differs per env
-//      -- the code/architecture is identical local-cluster and staging.
-//      Default 30 minutes via coalesce: comfortably longer than the
-//      in-memory peer windows (offline=25s, stale-gossip=60s) so a node
-//      that is merely mid-restart is not pruned, but short enough that a
-//      genuinely-departed pod clears within an hour. Set
-//      `make variable-set NAME=MEMQL_NODE_STALE_PRUNE_MINUTES VALUE=...
-//      SCOPE=global` (or the process env) to override per environment.
-//   2. The cutoff is `now - window`: addDuration with a NEGATIVE ISO-8601
-//      duration ("PT-30M") subtracts the window from the current timestamp.
-//      This replaces the old per-row `lastSeen + window < now` `if` guard --
-//      the window math now lives ONCE here instead of per row, and the
-//      comparison pushes down into the query (next step).
-//   3. staleClusterNodes({ olderThan: cutoff }) pushes a
-//      `payload.lastSeen < cutoff` predicate onto the query (#1642), so the
-//      query returns ONLY the latest-non-stopped rows past the window --
-//      already filtered, idempotent (asOf latest), and excluding rows already
-//      health="stopped". The logic returns that node list for the automation
-//      to retire.
-//   4. Prune (on the automation) == write a terminal health="stopped" row
-//      (append-only; we don't hard-delete). cluster:node has no
-//      `deleted`/`active` field and no soft-delete trait, and consumers
-//      already treat "stopped" as gone: WorkerDialer skips offline/stopped
-//      rows, and the CLI / topology dedupe to latest-per-id so the stopped
-//      marker hides the node from the live set.
-//
-// Runs every 10 minutes. The cluster node table is small (one row-stream
-// per pod ever seen), so a frequent walk is cheap and keeps topology
-// fresh shortly after a rollover.
-@description("Decides which departed cluster nodes to retire (ADR S2.1 pure logic, #2235). Reads MEMQL_NODE_STALE_PRUNE_MINUTES (default 30), computes cutoff = now - window via addDuration with a negative ISO duration, and returns staleClusterNodes({olderThan: cutoff}).nodes() -- the LATEST non-stopped rows whose lastSeen is past the window (the olderThan arg pushes a payload.lastSeen<cutoff predicate onto the query, #1642). The calling automation appends the terminal health='stopped' row per returned node via a forEach updateNodeHealth step.")
+/// Decides which departed cluster nodes to retire (ADR S2.1 pure logic, #2235). Reads
+/// MEMQL_NODE_STALE_PRUNE_MINUTES (default 30), computes cutoff = now - window via addDuration with
+/// a negative ISO duration, and returns staleClusterNodes({olderThan: cutoff}).nodes() -- the
+/// LATEST non-stopped rows whose lastSeen is past the window (the olderThan arg pushes a
+/// payload.lastSeen<cutoff predicate onto the query, #1642). The calling automation appends the
+/// terminal health='stopped' row per returned node via a forEach updateNodeHealth step.
 logic pruneStaleClusterNodes {
   args {
     event object!

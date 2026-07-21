@@ -8,7 +8,9 @@
 
 use agents.concepts.{ skill }
 
-@description("To-do management: list, create, complete, and update the user's app-native to-dos. Every operation is per-row-authz owned -- the agent acts only on the calling user's to-dos. Attach this skill to an agent that helps the user track and reconcile tasks.")
+/// To-do management: list, create, complete, and update the user's app-native to-dos. Every
+/// operation is per-row-authz owned -- the agent acts only on the calling user's to-dos. Attach
+/// this skill to an agent that helps the user track and reconcile tasks.
 seed skill todos {
   slug:          "todos"
   name:          "To-dos"

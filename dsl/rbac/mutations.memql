@@ -15,7 +15,16 @@
 // concept field-for-field, matching the materializer's
 // mutationCreate<Concept> convention.
 
-@description("Insert a v1:rbac:role catalog row -- a named, ranked capability bundle. Called by the SeedMaterializer when it walks the base-role seed declarations under dsl/rbac/seeds.memql (the materializer stamps the seed body's `id` into `roleId`). Also the write surface the E1.4 (memql#2072) rank-bounded custom-role authoring path layers on top of -- predefined defaults false there so the role stays editable within the creator's rank bound, and the creator's own rank caps the `rank` arg. Base-role seeds pass predefined=true to mark the row IMMUTABLE at runtime: the validateRbacRoleImmutable Go guard (E1.2) rejects any non-system-actor write to a predefined role, so a base role can never be redefined / re-ranked as data to escalate privilege. Partition-agnostic: the engine stamps every v1:rbac:role insert into the _system slot regardless of the envelope, exactly like createAgentRole / createCapability.")
+/// Insert a v1:rbac:role catalog row -- a named, ranked capability bundle. Called by the
+/// SeedMaterializer when it walks the base-role seed declarations under dsl/rbac/seeds.memql (the
+/// materializer stamps the seed body's `id` into `roleId`). Also the write surface the E1.4
+/// (memql#2072) rank-bounded custom-role authoring path layers on top of -- predefined defaults
+/// false there so the role stays editable within the creator's rank bound, and the creator's own
+/// rank caps the `rank` arg. Base-role seeds pass predefined=true to mark the row IMMUTABLE at
+/// runtime: the validateRbacRoleImmutable Go guard (E1.2) rejects any non-system-actor write to a
+/// predefined role, so a base role can never be redefined / re-ranked as data to escalate
+/// privilege. Partition-agnostic: the engine stamps every v1:rbac:role insert into the _system slot
+/// regardless of the envelope, exactly like createAgentRole / createCapability.
 mutate role createRole {
   args {
     roleId       string
@@ -36,7 +45,14 @@ mutate role createRole {
   }
 }
 
-@description("Insert a v1:rbac:capability catalog row -- one (verb x resourceType) grant for a role. Called by the SeedMaterializer when it walks the capability seed declarations under dsl/rbac/*.memql (the materializer stamps the seed body's `id` into `capabilityId`). Also the write surface the E1.4 (memql#2074) rank-bounded custom-role authoring path layers on top of -- predefined defaults false there so the grant stays editable within the creator's rank bound; base-role seeds pass predefined=true to mark the row immutable at runtime (enforced by E1.2). Partition-agnostic: the engine stamps every v1:rbac:capability insert into the _system slot regardless of the envelope, exactly like createAgentRole / createSkill.")
+/// Insert a v1:rbac:capability catalog row -- one (verb x resourceType) grant for a role. Called by
+/// the SeedMaterializer when it walks the capability seed declarations under dsl/rbac/*.memql (the
+/// materializer stamps the seed body's `id` into `capabilityId`). Also the write surface the E1.4
+/// (memql#2074) rank-bounded custom-role authoring path layers on top of -- predefined defaults
+/// false there so the grant stays editable within the creator's rank bound; base-role seeds pass
+/// predefined=true to mark the row immutable at runtime (enforced by E1.2). Partition-agnostic: the
+/// engine stamps every v1:rbac:capability insert into the _system slot regardless of the envelope,
+/// exactly like createAgentRole / createSkill.
 mutate capability createCapability {
   args {
     capabilityId  string

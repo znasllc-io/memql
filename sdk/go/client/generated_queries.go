@@ -1182,7 +1182,7 @@ func AvatarPersonaByIdBuild(args AvatarPersonaByIdArgs) string {
 	return b.String()
 }
 
-// AvatarPersonas -- List active avatar personas in the operator catalog (memql#609). Backs the Create-Assistant persona picker (frontend#239); the SPA filters to the user's selected gender client-side over this small catalog. `vendor` is an OPTIONAL filter -- omit it to list every active persona across vendors; pass vendor=\"simli\" to scope to custom Simli avatars (memql#1708: the predicate was a hardcoded vendor==simli that silently dropped every other vendor's personas from the list, even though by-id reads returned them). Rows are hand-curated as seeds in dsl/agents/avatarPersonas.memql.
+// AvatarPersonas -- List active avatar personas in the operator catalog (memql#609). Backs the Create-Assistant persona picker (frontend#239); the SPA filters to the user's selected gender client-side over this small catalog. `vendor` is an OPTIONAL filter -- omit it to list every active persona across vendors; pass vendor="simli" to scope to custom Simli avatars (memql#1708: the predicate was a hardcoded vendor==simli that silently dropped every other vendor's personas from the list, even though by-id reads returned them). Rows are hand-curated as seeds in dsl/agents/avatarPersonas.memql.
 //
 // Bound concept: v1:agents:avatarPersona (machine-readable: BoundConcepts["avatarPersonas"] in generated_concepts.go).
 type AvatarPersonasArgs struct {
@@ -1994,6 +1994,7 @@ func ExpiredWorkerInvocationsBuild(args ExpiredWorkerInvocationsArgs) string {
 //
 // Bound concept: v1:cognition:utterance (machine-readable: BoundConcepts["feedbackAnnouncementForPlan"] in generated_concepts.go).
 type FeedbackAnnouncementForPlanArgs struct {
+	// The Plan whose announcement to check.
 	PlanId string
 }
 

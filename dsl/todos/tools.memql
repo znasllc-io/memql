@@ -8,17 +8,20 @@
 // ownerUserId arg for the LLM to forge -- ownership is server-stamped
 // from the auth context.
 
+/// List the caller's to-dos. Optional done filter narrows to open (false) or completed (true)
+/// items; omit it to list all. Read-only.
 @handler(type="query", query="query todos(done: $args.done)")
 @executionTime("fast")
-@description("List the caller's to-dos. Optional done filter narrows to open (false) or completed (true) items; omit it to list all. Read-only.")
 @mcp
 tool todosList {
   done  boolean  @description("Filter by completion: true for completed to-dos, false for open ones. Omit to list everything.")
 }
 
+/// Create a to-do for the user. Owned: the new to-do is owned by the caller (server-stamped). Pass
+/// a fresh unique todoId. dueAt (RFC3339), priority (low/medium/high), and sourceResponsibilityId
+/// are optional.
 @handler(type="function", name="createTodo")
 @executionTime("fast")
-@description("Create a to-do for the user. Owned: the new to-do is owned by the caller (server-stamped). Pass a fresh unique todoId. dueAt (RFC3339), priority (low/medium/high), and sourceResponsibilityId are optional.")
 @mcp
 tool todosCreate {
   todoId                  string! @description("Fresh unique id for the new to-do, e.g. a UUID. The caller mints it so it can reference the created row immediately.")
@@ -28,18 +31,21 @@ tool todosCreate {
   sourceResponsibilityId  string  @description("Optional id of the responsibility that spawned this to-do. Leave empty for user-created to-dos.")
 }
 
+/// Mark a to-do complete (or re-open it). Pass the full updated payload with the done flag set;
+/// build it from the current row (via todosList) and flip done. Owned: ownership is re-enforced
+/// server-side.
 @handler(type="query", query="mutation completeTodo(todoId: \"$args.todoId\", payload: $args.payload)")
 @executionTime("fast")
-@description("Mark a to-do complete (or re-open it). Pass the full updated payload with the done flag set; build it from the current row (via todosList) and flip done. Owned: ownership is re-enforced server-side.")
 @mcp
 tool todosComplete {
   todoId   string! @description("Id of the to-do to complete / re-open.")
   payload  object! @description("Full updated to-do payload (title, done, dueAt, priority, sourceResponsibilityId). Set done=true to complete, false to re-open.")
 }
 
+/// Update a to-do's fields (title / dueAt / priority). Pass the full merged payload built from the
+/// current row plus the changed fields. Owned: ownership is re-enforced server-side.
 @handler(type="query", query="mutation updateTodo(todoId: \"$args.todoId\", payload: $args.payload)")
 @executionTime("fast")
-@description("Update a to-do's fields (title / dueAt / priority). Pass the full merged payload built from the current row plus the changed fields. Owned: ownership is re-enforced server-side.")
 @mcp
 tool todosUpdate {
   todoId   string! @description("Id of the to-do to update.")

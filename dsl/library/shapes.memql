@@ -1,7 +1,9 @@
 // library domain -- row projections.
 
+/// Comprehensive Library index projection: every payload field plus row id and timestamps. The
+/// default shape for the Library list / search / filter reads (memql#695) and the per-item detail
+/// view.
 @row
-@description("Comprehensive Library index projection: every payload field plus row id and timestamps. The default shape for the Library list / search / filter reads (memql#695) and the per-item detail view.")
 shape artifact artifactFull {
   row.id
   ownerUserId
@@ -23,8 +25,9 @@ shape artifact artifactFull {
   row.createdAt
 }
 
+/// Comprehensive generatedOutput projection: every payload field plus row id and timestamps. Used
+/// by the Library detail / viewer when drilling into a generated_output artifact.
 @row
-@description("Comprehensive generatedOutput projection: every payload field plus row id and timestamps. Used by the Library detail / viewer when drilling into a generated_output artifact.")
 shape generatedOutput generatedOutputFull {
   row.id
   ownerUserId
@@ -41,8 +44,8 @@ shape generatedOutput generatedOutputFull {
   row.createdAt
 }
 
+/// Full memory projection for the Library Records lens detail / drill-in.
 @row
-@description("Full memory projection for the Library Records lens detail / drill-in.")
 shape memory memoryFull {
   row.id
   ownerUserId
@@ -56,8 +59,11 @@ shape memory memoryFull {
   row.createdAt
 }
 
+/// History-list projection of a document version: the metadata a user scans the edit history with
+/// (version number, who, when, what-changed note) WITHOUT the full content body. Backs
+/// documentVersions. The full content is fetched on demand per-version via documentVersionFull
+/// (documentVersionById).
 @row
-@description("History-list projection of a document version: the metadata a user scans the edit history with (version number, who, when, what-changed note) WITHOUT the full content body. Backs documentVersions. The full content is fetched on demand per-version via documentVersionFull (documentVersionById).")
 shape documentVersion documentVersionSummary {
   row.id
   ownerUserId
@@ -73,8 +79,10 @@ shape documentVersion documentVersionSummary {
   row.createdAt
 }
 
+/// Full document-version projection including the immutable content body. Backs documentVersionById
+/// (the 'open this version' / restore-source read) and the edit/restore handlers that read the
+/// latest version to compute the next versionNumber.
 @row
-@description("Full document-version projection including the immutable content body. Backs documentVersionById (the 'open this version' / restore-source read) and the edit/restore handlers that read the latest version to compute the next versionNumber.")
 shape documentVersion documentVersionFull {
   row.id
   ownerUserId

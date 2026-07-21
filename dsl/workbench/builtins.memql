@@ -6,9 +6,10 @@
 // name resolves to this builtin, which forwards to the workbench
 // integration's `dispatchHost` capability.
 
+/// Dispatch a workbenchHost.<action> call to the per-Plan workbench workspace. Lazily provisions
+/// the workspace on first call; subsequent calls in the same Plan see persisted files.
 @executor("integration.workbench.dispatchHost")
 @args(profile="object")
-@description("Dispatch a workbenchHost.<action> call to the per-Plan workbench workspace. Lazily provisions the workspace on first call; subsequent calls in the same Plan see persisted files.")
 builtin workbenchDispatchHost {
   action   string!
   args     object
@@ -24,9 +25,10 @@ builtin workbenchDispatchHost {
 // tree under MEMQL_WORKBENCH_ROOT/{planId}/. Idempotent: a Plan
 // that never provisioned a workspace is a no-op.
 
+/// Remove the on-disk workbench workspace directory for a Plan. Idempotent. Called by the
+/// releaseWorkspaceOnPlanTerminal automation after the concept row has been flipped to released.
 @executor("integration.workbench.teardownDirectory")
 @args(profile="object")
-@description("Remove the on-disk workbench workspace directory for a Plan. Idempotent. Called by the releaseWorkspaceOnPlanTerminal automation after the concept row has been flipped to released.")
 builtin workbenchTeardownDirectory {
   planId  string!
 }

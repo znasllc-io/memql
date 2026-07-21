@@ -15,17 +15,23 @@
 // against the (actor, target) pair) and live in dsl/rbac/logic.memql
 // there.
 
-@description("Row predicate: the capability is an ALLOW grant. allow capabilities confer the (verb, resourceType); deny capabilities revoke it. The enforcement resolver (E1.6) treats a role as holding a grant when an allow row matches AND no deny row does.")
+/// Row predicate: the capability is an ALLOW grant. allow capabilities confer the (verb,
+/// resourceType); deny capabilities revoke it. The enforcement resolver (E1.6) treats a role as
+/// holding a grant when an allow row matches AND no deny row does.
 trait capabilityIsAllow {
   return effect == "allow"
 }
 
-@description("Row predicate: the capability is a DENY grant -- an explicit revocation that wins over any allow for the same (role, verb, resourceType). Lets a role carve a hole in an otherwise-broad grant set.")
+/// Row predicate: the capability is a DENY grant -- an explicit revocation that wins over any allow
+/// for the same (role, verb, resourceType). Lets a role carve a hole in an otherwise-broad grant
+/// set.
 trait capabilityIsDeny {
   return effect == "deny"
 }
 
-@description("Row predicate: the capability is a base-role (predefined, seed-authored) grant. The immutable grant set E1.2 (memql#2070) marks read-only at runtime. User/custom-role grants are predefined=false.")
+/// Row predicate: the capability is a base-role (predefined, seed-authored) grant. The immutable
+/// grant set E1.2 (memql#2070) marks read-only at runtime. User/custom-role grants are
+/// predefined=false.
 trait capabilityIsPredefined {
   return predefined == true
 }

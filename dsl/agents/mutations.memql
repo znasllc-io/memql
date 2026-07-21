@@ -6,7 +6,16 @@
 // product-specific mutations (e.g. the product pack's space-join flow)
 // layer on top, never re-implement the row write.
 
-@description("Create a new AI agent template. The `kind` arg defaults to `assistant` -- the safe value for the frontend's create-agent modal flow. The SeedMaterializer (running under the `system:seedMaterializer` actor) passes `kind: \"system\"` when materializing platform agents (MemQL Planner / MemQL Trainer). The planner integration (running under the `system:planner` actor; memql#399) passes `kind: \"specialist\"` when auto-provisioning a specialist for a Plan's capability gap. User-actor calls that try to pass `kind in (\"system\", \"specialist\")` are rejected pre-insert by an engine-level actor-scope guard (component/memql/agent_kind_actor_validation.go, memql#403); the mutation surface itself stays permissive on `kind` so the seed + planner paths can keep writing their values with the rejection one layer up.")
+/// Create a new AI agent template. The `kind` arg defaults to `assistant` -- the safe value for the
+/// frontend's create-agent modal flow. The SeedMaterializer (running under the
+/// `system:seedMaterializer` actor) passes `kind: "system"` when materializing platform agents
+/// (MemQL Planner / MemQL Trainer). The planner integration (running under the `system:planner`
+/// actor; memql#399) passes `kind: "specialist"` when auto-provisioning a specialist for a Plan's
+/// capability gap. User-actor calls that try to pass `kind in ("system", "specialist")` are
+/// rejected pre-insert by an engine-level actor-scope guard
+/// (component/memql/agent_kind_actor_validation.go, memql#403); the mutation surface itself stays
+/// permissive on `kind` so the seed + planner paths can keep writing their values with the
+/// rejection one layer up.
 mutate agent createAgent {
   args {
     agentId          string
@@ -45,7 +54,7 @@ mutate agent createAgent {
   }
 }
 
-@description("Grant a standing authorization for an agent to trigger a plan kind without per-Plan approval.")
+/// Grant a standing authorization for an agent to trigger a plan kind without per-Plan approval.
 mutate agentAuthorization createAgentAuthorization {
   args {
     authId            string
@@ -67,7 +76,9 @@ mutate agentAuthorization createAgentAuthorization {
   }
 }
 
-@description("Soft-delete an agent (active:false, deleted:true). Read-merges the existing row so the caller only passes the agent id; every other required field (kind, name, ...) inherits from the persisted row instead of being re-supplied (memql#1628).")
+/// Soft-delete an agent (active:false, deleted:true). Read-merges the existing row so the caller
+/// only passes the agent id; every other required field (kind, name, ...) inherits from the
+/// persisted row instead of being re-supplied (memql#1628).
 mutate agent deleteAgent {
   args {
     agentId  string!
@@ -79,7 +90,9 @@ mutate agent deleteAgent {
   }
 }
 
-@description("Soft-revoke a standing authorization. User-revocable from the agent's settings at any time. Read-merges the existing row so the caller only passes the auth id; agentId/userId/planKind/spaceScope inherit from the persisted row (memql#1628).")
+/// Soft-revoke a standing authorization. User-revocable from the agent's settings at any time.
+/// Read-merges the existing row so the caller only passes the auth id;
+/// agentId/userId/planKind/spaceScope inherit from the persisted row (memql#1628).
 mutate agentAuthorization revokeAgentAuthorization {
   args {
     authId  string!
@@ -90,7 +103,8 @@ mutate agentAuthorization revokeAgentAuthorization {
   }
 }
 
-@description("Partial update of a v1:agents:agent row. Only the fields you pass are changed; other fields inherit from the prior row.")
+/// Partial update of a v1:agents:agent row. Only the fields you pass are changed; other fields
+/// inherit from the prior row.
 mutate agent updateAgent {
   args {
     agentId  string!
@@ -102,7 +116,13 @@ mutate agent updateAgent {
   }
 }
 
-@description("Partial update of a v1:agents:agentAuthorization row. Mirrors updateAgent semantics: only the fields passed in `payload` change; everything else inherits from the prior row. Backs the canvas mintSkillApprovalRequested card's 'Approve & always allow this tier' action (pack#38, memql#169) -- the SPA reads the current skillTierAllowlist, appends the approved tier, and writes the whole array back as `{skillTierAllowlist: [...]}`. Per the agentAuthorization concept's revocation contract this is an OWNED write: only the granting user (the row's payload.userId) may update their own authorization grant.")
+/// Partial update of a v1:agents:agentAuthorization row. Mirrors updateAgent semantics: only the
+/// fields passed in `payload` change; everything else inherits from the prior row. Backs the canvas
+/// mintSkillApprovalRequested card's 'Approve & always allow this tier' action (pack#38, memql#169)
+/// -- the SPA reads the current skillTierAllowlist, appends the approved tier, and writes the whole
+/// array back as `{skillTierAllowlist: [...]}`. Per the agentAuthorization concept's revocation
+/// contract this is an OWNED write: only the granting user (the row's payload.userId) may update
+/// their own authorization grant.
 mutate agentAuthorization updateAgentAuthorization {
   args {
     authId   string!
@@ -114,7 +134,15 @@ mutate agentAuthorization updateAgentAuthorization {
   }
 }
 
-@description("Mint a new v1:agents:skill catalog row from a Planner Agent mintSkill action (Phase 3 / memql#159). The caller is the planner integration; it has already run the authority gate (action='mintSkill' on the planner's agentAuthorization + tier in skillTierAllowlist) and the catalog-search heuristic (no existing skill covers >60% of the requested bundle) before invoking this. predefined is hard-stamped false -- the runtime mint surface is for user-/planner-created rows only; the predefined catalog stays in dsl/agents/skills/*.memql. originatingPlanId + mintedByAgentId carry the Phase 3 provenance triad. Server-side enforcement: the tier-validation rule from Phase 1 still applies (skill.tier >= max(domain tier)) -- a mint that violates it rejects with the same error path as the load-time check.")
+/// Mint a new v1:agents:skill catalog row from a Planner Agent mintSkill action (Phase 3 /
+/// memql#159). The caller is the planner integration; it has already run the authority gate
+/// (action='mintSkill' on the planner's agentAuthorization + tier in skillTierAllowlist) and the
+/// catalog-search heuristic (no existing skill covers >60% of the requested bundle) before invoking
+/// this. predefined is hard-stamped false -- the runtime mint surface is for user-/planner-created
+/// rows only; the predefined catalog stays in dsl/agents/skills/*.memql. originatingPlanId +
+/// mintedByAgentId carry the Phase 3 provenance triad. Server-side enforcement: the tier-validation
+/// rule from Phase 1 still applies (skill.tier >= max(domain tier)) -- a mint that violates it
+/// rejects with the same error path as the load-time check.
 mutate skill mintSkill {
   args {
     skillId            string
@@ -148,7 +176,15 @@ mutate skill mintSkill {
   }
 }
 
-@description("Materialize a v1:agents:skill catalog row from a `seed skill ...` declaration under dsl/agents/skills/*.memql. Matches the SeedMaterializer's `mutationCreate<Concept>` naming convention -- the materializer stamps the seed body's id into `skillId` and forwards every other seed body field as a same-named arg, so this mutation's arg surface mirrors the on-disk seed body 1:1. Sibling to `mintSkill`: same row shape, but the seed path is for the predefined catalog (predefined defaults true) and carries no originatingPlanId / mintedByAgentId provenance triad. Was missing pre-#344, which made every skill seed in the bundled catalog fail to materialize with `function \"createSkill\" not found`. The materializer convention itself lives in component/memql/seed_materializer.go.")
+/// Materialize a v1:agents:skill catalog row from a `seed skill ...` declaration under
+/// dsl/agents/skills/*.memql. Matches the SeedMaterializer's `mutationCreate<Concept>` naming
+/// convention -- the materializer stamps the seed body's id into `skillId` and forwards every other
+/// seed body field as a same-named arg, so this mutation's arg surface mirrors the on-disk seed
+/// body 1:1. Sibling to `mintSkill`: same row shape, but the seed path is for the predefined
+/// catalog (predefined defaults true) and carries no originatingPlanId / mintedByAgentId provenance
+/// triad. Was missing pre-#344, which made every skill seed in the bundled catalog fail to
+/// materialize with `function "createSkill" not found`. The materializer convention itself lives in
+/// component/memql/seed_materializer.go.
 mutate skill createSkill {
   args {
     skillId        string
@@ -180,7 +216,13 @@ mutate skill createSkill {
   }
 }
 
-@description("Append a v1:agents:skillChangeEvent row recording a skill attach / reconfigure on an agent. Phase 2 (#158) cut: every Planner Agent extendSpecialist / createSpecialist flow that lands a skill on an agent issues one of these per skill. Phase 3 also writes them from the cockpit Skills admin view when a human attaches a skill manually. Empty actorAgentId + actorUserId is allowed for system-driven attaches (the migration tool writes events with actorUserId='system:migration:phase2'). The caller is responsible for providing skillChangeEventId -- mint via the standard NewShortId / MustFromMap helpers caller-side.")
+/// Append a v1:agents:skillChangeEvent row recording a skill attach / reconfigure on an agent.
+/// Phase 2 (#158) cut: every Planner Agent extendSpecialist / createSpecialist flow that lands a
+/// skill on an agent issues one of these per skill. Phase 3 also writes them from the cockpit
+/// Skills admin view when a human attaches a skill manually. Empty actorAgentId + actorUserId is
+/// allowed for system-driven attaches (the migration tool writes events with
+/// actorUserId='system:migration:phase2'). The caller is responsible for providing
+/// skillChangeEventId -- mint via the standard NewShortId / MustFromMap helpers caller-side.
 mutate skillChangeEvent createSkillChangeEvent {
   args {
     skillChangeEventId  string!
@@ -206,7 +248,15 @@ mutate skillChangeEvent createSkillChangeEvent {
   }
 }
 
-@description("Insert (or version) a v1:agents:agentRole catalog row. Called by the SeedMaterializer when it walks role seed declarations under dsl/agents/roles/ (the materializer stamps the seed body's `id` into `agentRoleId`); also callable directly when a user mints a custom (non-predefined) role from the UI. predefined=true marks the row as locked in the UI; user-created roles default to false and remain fully editable. Phase 2 cut (#158): the args surface collapses the seven flat lockedDomain / defaultDomain / availableDomain / lockedTool / defaultTool / forbiddenTool / lockedLiveKnowledge fields into the five skill-id fields the role catalog now carries plus a maxSkills cap. The mutation is partition-agnostic for global-scoped concepts -- the engine stamps every v1:agents:agentRole insert into the _system slot regardless of the envelope.")
+/// Insert (or version) a v1:agents:agentRole catalog row. Called by the SeedMaterializer when it
+/// walks role seed declarations under dsl/agents/roles/ (the materializer stamps the seed body's
+/// `id` into `agentRoleId`); also callable directly when a user mints a custom (non-predefined)
+/// role from the UI. predefined=true marks the row as locked in the UI; user-created roles default
+/// to false and remain fully editable. Phase 2 cut (#158): the args surface collapses the seven
+/// flat lockedDomain / defaultDomain / availableDomain / lockedTool / defaultTool / forbiddenTool /
+/// lockedLiveKnowledge fields into the five skill-id fields the role catalog now carries plus a
+/// maxSkills cap. The mutation is partition-agnostic for global-scoped concepts -- the engine
+/// stamps every v1:agents:agentRole insert into the _system slot regardless of the envelope.
 mutate agentRole createAgentRole {
   args {
     agentRoleId             string
@@ -246,7 +296,12 @@ mutate agentRole createAgentRole {
   }
 }
 
-@description("Insert a v1:agents:avatarPersona catalog row (memql#609). Called by the SeedMaterializer when it walks the avatar-persona seed declarations under dsl/agents/avatarPersonas.memql -- the materializer stamps the seed body's `id` (the seed name) into `avatarPersonaId`. The seeds themselves are hand-curated in dsl/agents/avatarPersonas.memql (the vendor-issued faceId pasted in per persona). Global operator catalog: the engine stamps the insert into the _system slot regardless of the caller's partition, exactly like createAgentRole / createSkill.")
+/// Insert a v1:agents:avatarPersona catalog row (memql#609). Called by the SeedMaterializer when it
+/// walks the avatar-persona seed declarations under dsl/agents/avatarPersonas.memql -- the
+/// materializer stamps the seed body's `id` (the seed name) into `avatarPersonaId`. The seeds
+/// themselves are hand-curated in dsl/agents/avatarPersonas.memql (the vendor-issued faceId pasted
+/// in per persona). Global operator catalog: the engine stamps the insert into the _system slot
+/// regardless of the caller's partition, exactly like createAgentRole / createSkill.
 mutate avatarPersona createAvatarPersona {
   args {
     avatarPersonaId  string

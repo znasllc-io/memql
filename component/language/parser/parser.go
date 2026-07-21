@@ -162,6 +162,18 @@ func (p *Parser) Parse() (Node, error) {
 		return p.parseFile()
 	}
 
+	// A bare top-level construct keyword (trait / spec / concept / ...)
+	// followed by an identifier is a declaration file. Before the #2635
+	// codemod every corpus construct carried at least @description, so the
+	// TokenAt branch above always fired first and this gap was unreachable;
+	// a ///-documented, annotation-free construct exposes it. The
+	// identifier-follows guard keeps expression uses of these contextual
+	// keywords (`spec == "x"`, `shape(...)`) on the expression path.
+	if p.check(TokenIdentifier) && topLevelDeclParsers[p.current.Literal] != nil &&
+		p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Type == TokenIdentifier {
+		return p.parseFile()
+	}
+
 	// Otherwise, parse as an expression (for direct query execution)
 	expr, err := p.parseExpression()
 	if err != nil {

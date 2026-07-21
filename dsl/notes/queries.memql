@@ -4,7 +4,8 @@
 // payload.ownerUserId==actor.userId so a caller can only ever read
 // their own notes; no arg widens the row set beyond their ownership.
 
-@description("List the caller's notes. Owned: the row set is gated by ownerUserId==actor.userId server-side, so cross-user reads are impossible.")
+/// List the caller's notes. Owned: the row set is gated by ownerUserId==actor.userId server-side,
+/// so cross-user reads are impossible.
 @actor
 query note notes {
   filter  ownerUserId==actor.userId
@@ -16,7 +17,9 @@ query note notes {
   shape    noteFull
 }
 
-@description("Fetch a single note by id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard, so a caller can never read another user's note even with its id. Used by the update tool to confirm the row exists before re-inserting a new version.")
+/// Fetch a single note by id, gated to the caller. Owned: ownerUserId==actor.userId is the
+/// load-bearing guard, so a caller can never read another user's note even with its id. Used by the
+/// update tool to confirm the row exists before re-inserting a new version.
 @mcp
 @unbounded("note by id (guarded) gated to the caller -- bounded to a single row")
 @actor
@@ -28,7 +31,9 @@ query note noteById {
   shape   noteFull
 }
 
-@description("Search the caller's notes by tag. Owned: ownerUserId==actor.userId gates the row set server-side; the tag predicate narrows to notes carrying the given tag. Body substring matching is done client-side over this caller-scoped result so the search never leaks across users.")
+/// Search the caller's notes by tag. Owned: ownerUserId==actor.userId gates the row set
+/// server-side; the tag predicate narrows to notes carrying the given tag. Body substring matching
+/// is done client-side over this caller-scoped result so the search never leaks across users.
 @actor
 query note notesByTag {
   args {

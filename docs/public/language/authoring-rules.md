@@ -96,7 +96,7 @@ mutation partition mutationCreatePartition {
 //    creating user owner access. Note the step calls the logic
 //    construct by its bare (un-prefixed) name.
 @trigger(event="node.created", concept="v1:platform:partition", partition="*")
-@description("Grant the partition creator owner access on first landing.")
+/// Grant the partition creator owner access on first landing.
 automation autoBootstrapWorkspaceOwnerAccess {
   step grant {
     logic grantOwnerOnPartitionCreate { event: event }
@@ -181,7 +181,7 @@ windowing, and latest-per-id snapshots are `sort` / `paginate` /
 ```memql
 use cognition.concepts.{ context }
 
-@description("Latest space-context row for a space.")
+/// Latest space-context row for a space.
 query context queryLatestSpaceContextForSpace {
   args {
     spaceId  string  @required
@@ -773,7 +773,7 @@ form is rejected at load.
 use agents.concepts.{ agent }
 
 @row
-@description("Full agent projection")
+/// Full agent projection
 shape agent agentFull {
   row.id
   name
@@ -1053,7 +1053,7 @@ is rejected at load time): `now`, `actor`, `partition`, `config`,
 use cognition.concepts.{ utterance, space }
 use common.traits.{ traitIsActiveRecord }
 
-@description("Insert a chat utterance")
+/// Insert a chat utterance
 mutation utterance mutationSendUtterance {
   args {
     spaceId  string  @required
@@ -1067,7 +1067,7 @@ mutation utterance mutationSendUtterance {
   }
 }
 
-@description("Active spaces visible to caller")
+/// Active spaces visible to caller
 query space queryActiveSpaces {
   args {
     ownerId  string  @required
@@ -1094,7 +1094,7 @@ context-specs called via `spec("name")`):
 ```memql
 @primary("streamClaudeSonnet")
 @fallback("stream54Pro")
-@description("Default chat policy for non-operator agents.")
+/// Default chat policy for non-operator agents.
 policy balancedChat { }
 ```
 

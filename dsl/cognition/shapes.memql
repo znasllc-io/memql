@@ -3,8 +3,8 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
+/// Per-(space, agent) audio override projection
 @row
-@description("Per-(space, agent) audio override projection")
 shape audioOverride audioOverrideFull {
   row.id
   partitionId
@@ -15,8 +15,8 @@ shape audioOverride audioOverrideFull {
   row.createdAt
 }
 
+/// Comprehensive participant projection with all fields
 @row
-@description("Comprehensive participant projection with all fields")
 shape participant participantFull {
   row.id
   partitionId
@@ -32,8 +32,8 @@ shape participant participantFull {
   row.createdAt
 }
 
+/// Comprehensive session projection with device + stream state
 @row
-@description("Comprehensive session projection with device + stream state")
 shape session sessionFull {
   row.id
   humanInput
@@ -43,8 +43,8 @@ shape session sessionFull {
   lastActivityAt
 }
 
+/// Comprehensive utterance projection with all fields
 @row
-@description("Comprehensive utterance projection with all fields")
 shape utterance utteranceFull {
   row.id
   partitionId
@@ -64,8 +64,8 @@ shape utterance utteranceFull {
   row.createdAt
 }
 
+/// Per-(space, agent) video override projection
 @row
-@description("Per-(space, agent) video override projection")
 shape videoOverride videoOverrideFull {
   row.id
   partitionId
@@ -80,8 +80,10 @@ shape videoOverride videoOverrideFull {
 // product pack (the carrier repo's pack shapes file) by
 // Epic 3 (3.3b-i, memql#1991) along with their concepts (ids preserved).
 
+/// UI-friendly presence snapshot for a participant. Carries the high-level state (thinking /
+/// responding / waiting / ...) plus the short UI label + timing fields. The SPA keys these
+/// latest-wins by participantId to drive the presence panel + chat activity indicator.
 @row
-@description("UI-friendly presence snapshot for a participant. Carries the high-level state (thinking / responding / waiting / ...) plus the short UI label + timing fields. The SPA keys these latest-wins by participantId to drive the presence panel + chat activity indicator.")
 shape presence presenceFull {
   row.id
   partitionId

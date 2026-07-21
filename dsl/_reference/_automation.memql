@@ -84,8 +84,8 @@
 // The longhand the terse form lowers to. `event` is the bound trigger
 // payload; `args.X` reaches its fields inside step calls.
 
+/// Register this node in the database on startup (longhand single-step form).
 @trigger(event="system.startup")
-@description("Register this node in the database on startup (longhand single-step form).")
 automation registerNodeLonghand {
   step run {
     logic registerNode(event: event)
@@ -130,8 +130,8 @@ automation registerNodeLonghand {
 // `event.actor.id` (the acting identity, present when the emitter stamped
 // it -- graph CDC events do; check with exists(event.actor)).
 
+/// Full form with a typed args contract (G1).
 @trigger(event="deploy.requested", concept="v1:cluster:deployment", partition="*")
-@description("Full form with a typed args contract (G1).")
 automation deployWithArgs {
   args {
     environment     enum("development", "staging", "production")!

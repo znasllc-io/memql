@@ -214,7 +214,7 @@ func DeployGateGreenBuild(args DeployGateGreenArgs) string {
 	return b.String()
 }
 
-// DeployOutcomeLabel -- Map the deploy-gate result to the terminal deployment status label: \"succeeded\" when the gate passed, else \"failed\" (fail-closed, mirroring deployGateGreen). The deploy automation's finalize step switches on this.
+// DeployOutcomeLabel -- Map the deploy-gate result to the terminal deployment status label: "succeeded" when the gate passed, else "failed" (fail-closed, mirroring deployGateGreen). The deploy automation's finalize step switches on this.
 type DeployOutcomeLabelArgs struct {
 	Passed any
 }
@@ -625,7 +625,7 @@ func RevokeExpiredDelegationsBuild(args RevokeExpiredDelegationsArgs) string {
 	return b.String()
 }
 
-// TransitionEventKind -- PURE audit-vocabulary decision table for a v1:forge:request status transition: new status -> the v1:forge:requestEvent kind (needs_approval -> validated, queued -> approved, changes_requested / rejected pass through). Returns \"\" -- meaning SKIP, record nothing -- for an unrecognised status AND for an update whose status did not change (oldStatus == status), which the automation's former shape claimed but never checked. No graph reads or writes. P1 #2368.
+// TransitionEventKind -- PURE audit-vocabulary decision table for a v1:forge:request status transition: new status -> the v1:forge:requestEvent kind (needs_approval -> validated, queued -> approved, changes_requested / rejected pass through). Returns "" -- meaning SKIP, record nothing -- for an unrecognised status AND for an update whose status did not change (oldStatus == status), which the automation's former shape claimed but never checked. No graph reads or writes. P1 #2368.
 type TransitionEventKindArgs struct {
 	Status    any
 	OldStatus any

@@ -22,7 +22,9 @@
 // arrays; the mutation stays declarative.
 // Internal write path: the harness Go side calls this after each LLM step;
 // it is NOT exposed on the MCP/SDK surface (no @mcp / @sdk).
-@description("Record a v1:actions:candidate trace (the captured capability sequence + value/resource provenance for one LLM step, #1735). ownerUserId is stamped from actor.userId (owned tier). status is always 'candidate' on insert.")
+/// Record a v1:actions:candidate trace (the captured capability sequence + value/resource
+/// provenance for one LLM step, #1735). ownerUserId is stamped from actor.userId (owned tier).
+/// status is always 'candidate' on insert.
 @actor
 mutate candidate recordActionCandidate {
   args {
@@ -44,15 +46,9 @@ mutate candidate recordActionCandidate {
   }
 }
 
-// mintAction
-// ==================
-// Mint a v1:actions:action (primitive) from a completed LLM step (Phase 1,
-// #1736). ownerUserId is stamped from actor.userId (owned tier). The harness
-// calls this after an LLM step succeeds, passing the captured replayable
-// calls + the input/result fingerprints; kind/sideEffectClass/reliability/
-// reinforceCount/version/status take their concept @default values.
-// Internal write path -- not on the MCP/SDK surface.
-@description("Mint a v1:actions:action (primitive) from a completed LLM step (Phase 1, #1736). ownerUserId stamped from actor.userId (owned tier). Stores the replayable capability calls keyed by inputFingerprint.")
+/// Mint a v1:actions:action (primitive) from a completed LLM step (Phase 1, #1736). ownerUserId
+/// stamped from actor.userId (owned tier). Stores the replayable capability calls keyed by
+/// inputFingerprint.
 @actor
 mutate action mintAction {
   args {
@@ -92,7 +88,9 @@ mutate action mintAction {
 // MemQL parser has no arithmetic, mirroring the semanticMemory reinforce
 // pattern) and handed in. update read-merges the prior row, so ownerUserId
 // and the captured calls are preserved. Internal write path.
-@description("Reinforce a v1:actions:action after a verified replay: set the engine-computed reliability + reinforceCount and reset the decay clock (Phase 1 #1736; surface-aware decay lands in Phase 4 #1739).")
+/// Reinforce a v1:actions:action after a verified replay: set the engine-computed reliability +
+/// reinforceCount and reset the decay clock (Phase 1 #1736; surface-aware decay lands in Phase 4
+/// #1739).
 mutate action reinforceAction {
   args {
     actionId       string!
@@ -115,7 +113,9 @@ mutate action reinforceAction {
 // (Phase 2, #1737). ownerUserId is stamped from actor.userId (owned tier).
 // The served capability verbs + availability + failover priority are the
 // data the resolver binds against.
-@description("Register a v1:actions:surface (workbench / computer-use:<machineId> / mcp:<server>) with its served capabilities + availability + failover priority. ownerUserId stamped from actor.userId (owned tier). #1737.")
+/// Register a v1:actions:surface (workbench / computer-use:<machineId> / mcp:<server>) with its
+/// served capabilities + availability + failover priority. ownerUserId stamped from actor.userId
+/// (owned tier). #1737.
 @actor
 mutate surface registerSurface {
   args {
@@ -145,7 +145,8 @@ mutate surface registerSurface {
 // Flip a surface's availability (the failover signal) and stamp the
 // heartbeat clock. update read-merges so the served capabilities + slug are
 // preserved. #1737.
-@description("Set a v1:actions:surface availability flag (the resolver's failover signal) and refresh its lastSeen heartbeat. #1737.")
+/// Set a v1:actions:surface availability flag (the resolver's failover signal) and refresh its
+/// lastSeen heartbeat. #1737.
 mutate surface setSurfaceAvailability {
   args {
     surfaceId  string!
@@ -159,14 +160,8 @@ mutate surface setSurfaceAvailability {
   }
 }
 
-// confirmAction
-// =====================
-// Promote a confirm-gated candidate action to active after a human confirms
-// it (Phase 4 #1739). A real-machine write/exec action mints as candidate and
-// is held off the replay ladder (the active-only replay queries skip it) until
-// this confirm flips it to active. update read-merges so the captured calls +
-// ownerUserId are preserved. Internal write path driven by the confirm UI.
-@description("Confirm a candidate v1:actions:action, promoting it to active so it is offered for replay (Phase 4 #1739, the human gate for real-machine side effects).")
+/// Confirm a candidate v1:actions:action, promoting it to active so it is offered for replay (Phase
+/// 4 #1739, the human gate for real-machine side effects).
 mutate action confirmAction {
   args {
     actionId  string!
@@ -178,13 +173,8 @@ mutate action confirmAction {
   }
 }
 
-// deprecateAction
-// =======================
-// Deprecate an action whose reliability fell below the floor (Phase 4 #1739).
-// A deprecated action is kept (append-only) but excluded from the active-only
-// replay queries, so it is no longer offered. Driven by the consolidation
-// decay sweep.
-@description("Deprecate a v1:actions:action (reliability below floor or superseded), removing it from replay (Phase 4 #1739).")
+/// Deprecate a v1:actions:action (reliability below floor or superseded), removing it from replay
+/// (Phase 4 #1739).
 mutate action deprecateAction {
   args {
     actionId  string!
@@ -196,13 +186,8 @@ mutate action deprecateAction {
   }
 }
 
-// decayAction
-// ===================
-// Set an action's decayed reliability (Phase 4 #1739). The decayed value is
-// computed engine-side from lastReinforced age (the MemQL parser has no
-// arithmetic, mirroring the semanticMemory decay mutation) and handed in by
-// the consolidation sweep.
-@description("Set a v1:actions:action decayed reliability from the consolidation sweep (Phase 4 #1739; value computed engine-side).")
+/// Set a v1:actions:action decayed reliability from the consolidation sweep (Phase 4 #1739; value
+/// computed engine-side).
 mutate action decayAction {
   args {
     actionId     string!
@@ -215,14 +200,8 @@ mutate action decayAction {
   }
 }
 
-// bumpActionVersion
-// =========================
-// Bump an action's monotonic version (Phase 5 #1740). References pin by
-// default, so an edited action lands a new version and existing pins stay on
-// the old one until the verified upgrade migration bumps them. The new version
-// value is computed engine-side (the MemQL parser has no arithmetic) and
-// handed in. update read-merges so the captured calls + ownerUserId persist.
-@description("Bump a v1:actions:action monotonic version on edit (Phase 5 #1740; value computed engine-side). Pins stay on the prior version until the verified upgrade migration moves them.")
+/// Bump a v1:actions:action monotonic version on edit (Phase 5 #1740; value computed engine-side).
+/// Pins stay on the prior version until the verified upgrade migration moves them.
 mutate action bumpActionVersion {
   args {
     actionId  string!

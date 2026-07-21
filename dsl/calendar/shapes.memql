@@ -3,8 +3,10 @@
 // Row projection for the calendar namespace, consumed by the queries
 // below + the calendar tool's listing surface and the generated SDK.
 
+/// Full calendarEvent projection: every field an agent or the frontend needs to render / reason
+/// about an event. source + externalRef are included so a client can visually distinguish native
+/// rows from externally-synced ones.
 @row
-@description("Full calendarEvent projection: every field an agent or the frontend needs to render / reason about an event. source + externalRef are included so a client can visually distinguish native rows from externally-synced ones.")
 shape calendarEvent calendarEventFull {
   row.id
   ownerUserId

@@ -10,7 +10,9 @@
 
 use agents.concepts.{ skill }
 
-@description("Go service development against the memQL platform: idiomatic Go, the project's bus + integration patterns, build-tag-gated node binaries, the testing surface. Pairs with workbench-baseline -- the skill bundles the knowledge; the workbench provides the execution surface.")
+/// Go service development against the memQL platform: idiomatic Go, the project's bus + integration
+/// patterns, build-tag-gated node binaries, the testing surface. Pairs with workbench-baseline --
+/// the skill bundles the knowledge; the workbench provides the execution surface.
 seed skill go-backend-engineering {
   slug:          "go-backend-engineering"
   name:          "Go Backend Engineering"
@@ -24,7 +26,11 @@ seed skill go-backend-engineering {
   predefined:    true
 }
 
-@description("Authoring memQL DSL constructs (concepts, queries, mutations, seeds, shapes, specs, policies, tools, prompts, builtins). Knows the struct-form authoring shape, the load-time validation chain, and the trait-based filter conventions documented in docs/core/memql-authoring-rules.md. Phase 2 ships a dedicated memql-dsl-authoring knowledge domain; this skill currently bundles the generic engineering domains and is upgraded when the dedicated domain lands.")
+/// Authoring memQL DSL constructs (concepts, queries, mutations, seeds, shapes, specs, policies,
+/// tools, prompts, builtins). Knows the struct-form authoring shape, the load-time validation
+/// chain, and the trait-based filter conventions documented in docs/core/memql-authoring-rules.md.
+/// Phase 2 ships a dedicated memql-dsl-authoring knowledge domain; this skill currently bundles the
+/// generic engineering domains and is upgraded when the dedicated domain lands.
 seed skill memql-dsl-author {
   slug:          "memql-dsl-author"
   name:          "MemQL DSL Authoring"
@@ -38,7 +44,10 @@ seed skill memql-dsl-author {
   predefined:    true
 }
 
-@description("gRPC service surfaces on MemqlService.Stream + NodeService.Stream: oneof envelope grammar, handler wiring, the multiplexed-request_id streaming protocols (AI transcription, agent turn generation, client-tool relay). Pairs with go-backend-engineering for actual server-side implementation.")
+/// gRPC service surfaces on MemqlService.Stream + NodeService.Stream: oneof envelope grammar,
+/// handler wiring, the multiplexed-request_id streaming protocols (AI transcription, agent turn
+/// generation, client-tool relay). Pairs with go-backend-engineering for actual server-side
+/// implementation.
 seed skill grpc-services {
   slug:          "grpc-services"
   name:          "gRPC Services"
@@ -52,7 +61,10 @@ seed skill grpc-services {
   predefined:    true
 }
 
-@description("memql-cockpit CLI + TUI development: the terminal-native operations console, its command surface, the worker-mode subcommand, the live cluster wiring. Lives in the separate memql-cockpit repo but rides the memql Go SDK so any agent assigned this skill needs the platform engineering baseline first.")
+/// memql-cockpit CLI + TUI development: the terminal-native operations console, its command
+/// surface, the worker-mode subcommand, the live cluster wiring. Lives in the separate
+/// memql-cockpit repo but rides the memql Go SDK so any agent assigned this skill needs the
+/// platform engineering baseline first.
 seed skill cockpit-cli-dev {
   slug:          "cockpit-cli-dev"
   name:          "Cockpit CLI Development"

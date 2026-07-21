@@ -3,8 +3,9 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
+/// Comprehensive policy-trace projection for v1:platform:policyTrace rows. Backs the
+/// policyTracesForPolicy debug query and any operator surface that lists recent policy evaluations.
 @row
-@description("Comprehensive policy-trace projection for v1:platform:policyTrace rows. Backs the policyTracesForPolicy debug query and any operator surface that lists recent policy evaluations.")
 shape policyTrace policyTraceFull {
   row.id
   policyName
@@ -20,8 +21,10 @@ shape policyTrace policyTraceFull {
   row.createdAt
 }
 
+/// Comprehensive configuration variable projection. Used for both v1:platform:partitionVariable
+/// (partition-scoped) and v1:platform:globalVariable (global) -- the two concepts share the same
+/// field layout, so one shape serves both.
 @row
-@description("Comprehensive configuration variable projection. Used for both v1:platform:partitionVariable (partition-scoped) and v1:platform:globalVariable (global) -- the two concepts share the same field layout, so one shape serves both.")
 shape partitionVariable variableFull {
   row.id
   name
@@ -30,8 +33,10 @@ shape partitionVariable variableFull {
   row.createdAt
 }
 
+/// Missing-capability projection for the platform-backlog view + the Planner Agent's
+/// lookup-by-(kind, capability) before logging a new sighting. Carries the dedup key (kind,
+/// capability) plus the prioritization signals (sightingCount, lastSeenAt, exampleGoals).
 @row
-@description("Missing-capability projection for the platform-backlog view + the Planner Agent's lookup-by-(kind, capability) before logging a new sighting. Carries the dedup key (kind, capability) plus the prioritization signals (sightingCount, lastSeenAt, exampleGoals).")
 shape missingCapability missingCapabilityFull {
   row.id
   kind
@@ -51,8 +56,9 @@ shape missingCapability missingCapabilityFull {
 
 // ---- shapes/v1/platform/outboundRequestFull.memql ----
 
+/// Full outbound-request projection (memql#2521). Backs the worker's drain scan and any
+/// operator/product surface auditing delivery state.
 @row
-@description("Full outbound-request projection (memql#2521). Backs the worker's drain scan and any operator/product surface auditing delivery state.")
 shape outboundRequest outboundRequestFull {
   row.id
   medium

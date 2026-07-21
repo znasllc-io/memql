@@ -29,10 +29,12 @@
 // context gate apply uniformly. Builtins underneath are the
 // implementation; tools are the contract.
 
+/// Ensure an agent exists that can handle the given goal. Matches an existing agent, extends one
+/// with missing capabilities, or creates a new specialist from the role catalog. Returns {agentId,
+/// action, reasoning}.
 @handler(type="function", name="ensureAgentForGoal")
 @executionTime("medium")
 @allowedRoles("assistant")
-@description("Ensure an agent exists that can handle the given goal. Matches an existing agent, extends one with missing capabilities, or creates a new specialist from the role catalog. Returns {agentId, action, reasoning}.")
 tool ensureAgent {
   goal         string! @description("Free-form description of what the user wants done. The factory's structured-output analysis reads this verbatim to pick the role + domains + tools.")
   ownerUserId  string! @description("v1:identity:user.id of the user the resulting agent will be owned by. Used to scope the existing-agent lookup and to stamp the created agent's ownerUserId. The GA pulls this from its conversation context.")

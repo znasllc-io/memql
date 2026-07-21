@@ -6,7 +6,7 @@
 
 use agents.concepts.{ agentRole }
 
-@description("Aerodynamics, navigation, regs, weather, systems at the commercial-pilot study level.")
+/// Aerodynamics, navigation, regs, weather, systems at the commercial-pilot study level.
 seed agentRole commercial-pilot-educator {
   slug:                  "commercial-pilot-educator"
   name:                  "Commercial Pilot Educator"

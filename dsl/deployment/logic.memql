@@ -13,12 +13,9 @@
 
 // ---- gate ----
 
-// deployGateGreen is the pure post-deploy-gate check. It reads the structured
-// gate-result object produced by the runDeployGate action (I8) -- whose
-// capability result carries a `passed` boolean -- and returns whether the
-// gate is green. Defaults to false when the result or its `passed` flag is
-// absent, so a missing/garbled gate result fails CLOSED (never auto-promotes).
-@description("Pure gate check: did the deploy gate pass? Reads the runDeployGate action's structured result object. Fails closed: false when the result or its `passed` flag is absent. The deploy automation (I10) branches success/rollback on this decision.")
+/// Pure gate check: did the deploy gate pass? Reads the runDeployGate action's structured result
+/// object. Fails closed: false when the result or its `passed` flag is absent. The deploy
+/// automation (I10) branches success/rollback on this decision.
 logic deployGateGreen {
   args {
     gate object!
@@ -30,14 +27,9 @@ logic deployGateGreen {
 
 // ---- version ----
 
-// nextDeploymentVersion decides the next release version by bumping the
-// current one. MemQL has no native string-split / int-parse, so the version
-// arithmetic is delegated to the read-only suggestNextVersion builtin (the
-// _reference/_logic blessed pattern). Pure: a query/builtin read + return, no
-// write. Returns the builtin result object { current, bump, next }; the deploy
-// automation reads `.next` and stamps it on the deployment record via
-// createDeployment.
-@description("Decide the next release version by bumping the current version (bump in {major, minor, patch}, default patch). Pure: delegates the version arithmetic to the read-only suggestNextVersion builtin. Returns { current, bump, next }.")
+/// Decide the next release version by bumping the current version (bump in {major, minor, patch},
+/// default patch). Pure: delegates the version arithmetic to the read-only suggestNextVersion
+/// builtin. Returns { current, bump, next }.
 logic nextDeploymentVersion {
   args {
     current  string!
@@ -50,20 +42,8 @@ logic nextDeploymentVersion {
 
 // ---- role gating ----
 
-// deploymentForwardAllowed is the pure forward-deploy role gate. It mirrors
-// spec requiresDeveloperOrAbove (dsl/deployment/specs.memql, #1876): a cut +
-// forward deploy is engineering power (developer / admin / owner); writer /
-// reader stay read-only. Reads actor.role (the resolved auth context,
-// available in every body). The deploy automation calls this before kicking
-// off a deploy; an out-of-role caller's request is dropped.
-//
-// SHAPE NOTE (#2380): both gates use the multi-step decide form (steps +
-// cond + return of a step ref) -- the LogicRunner-executed shape proven at
-// runtime. The single-statement `return a == b || ...` form compiles to a
-// query-path expression that SCANS (it died on the engine's bookkeeping
-// rows at the first live deploy); until that engine path evaluates
-// in-process, author role gates in this shape.
-@description("Pure forward-deploy role gate, mirroring spec requiresDeveloperOrAbove (#1876): true when the actor holds developer, admin, or owner. Writer/reader are read-only.")
+/// Pure forward-deploy role gate, mirroring spec requiresDeveloperOrAbove (#1876): true when the
+/// actor holds developer, admin, or owner. Writer/reader are read-only.
 @actor
 logic deploymentForwardAllowed {
   body {
@@ -74,11 +54,8 @@ logic deploymentForwardAllowed {
   }
 }
 
-// deploymentRollbackAllowed is the pure rollback role gate. It mirrors spec
-// requiresOwner (dsl/deployment/specs.memql, #1876): rollback is owner-only --
-// not even admin may roll back. Reads actor.role. The rollback automation
-// calls this before reverting; a non-owner's request is dropped.
-@description("Pure rollback role gate, mirroring spec requiresOwner (#1876): true ONLY when the actor holds the owner role. Rollback is owner-only -- not even admin may roll back.")
+/// Pure rollback role gate, mirroring spec requiresOwner (#1876): true ONLY when the actor holds
+/// the owner role. Rollback is owner-only -- not even admin may roll back.
 @actor
 logic deploymentRollbackAllowed {
   body {
@@ -88,7 +65,11 @@ logic deploymentRollbackAllowed {
   }
 }
 
-@description("PURE rollback-target decision (#2380): returns the deployment id to roll back to when the gate FAILED and a previousDeploymentId is present; returns empty -- meaning NO rollback -- on a passed gate or when no rollback target was supplied (the development path). The automation switches on this scalar and fires revertOverlay only in the non-empty case (decide -> switch -> act).")
+/// PURE rollback-target decision (#2380): returns the deployment id to roll back to when the gate
+/// FAILED and a previousDeploymentId is present; returns empty -- meaning NO rollback -- on a
+/// passed gate or when no rollback target was supplied (the development path). The automation
+/// switches on this scalar and fires revertOverlay only in the non-empty case (decide -> switch ->
+/// act).
 logic deployRollbackTarget {
   args {
     passed any
@@ -104,21 +85,9 @@ logic deployRollbackTarget {
 
 // ---- engine mesh ----
 
-// engineNodeTypes is the canonical list of ENGINE node types the deploy
-// bundle builds + places. Engine mesh ONLY -- identity, cognition, voice,
-// agent, planner, workbench, mcp, voice-agent. There is deliberately NO bff
-// and NO product-carrier node here: those are the carrier/product layer, built
-// + shipped by their own repos, not by the engine deploy automation (I10
-// #2224). Pure: a list literal, no read, no write. This is the DEFAULT engine
-// set the deploy EMITTER (cockpit `deploy --env` / CI) stamps onto the
-// deploy.requested event payload as `engineNodeTypes`; the deployEngineCluster
-// automation (automations.memql) reads the set off the event and fans the
-// per-node build (and the development-environment k3d import) over it with a
-// forEach step. (Reading from the event -- not a logic step -- is what keeps
-// the per-node fan-out free of an inter-step dependency so the deploy phases
-// run in the authored order; see the automation header.) An emitter may pass a
-// SUBSET to redeploy a single node.
-@description("Canonical ENGINE node-type list the deploy bundle builds + places: identity, cognition, voice, agent, planner, workbench, mcp, voice-agent. No bff or product-carrier nodes (carrier/product layer, shipped by their own repos).")
+/// Canonical ENGINE node-type list the deploy bundle builds + places: identity, cognition, voice,
+/// agent, planner, workbench, mcp, voice-agent. No bff or product-carrier nodes (carrier/product
+/// layer, shipped by their own repos).
 logic engineNodeTypes {
   body {
     return ["identity", "cognition", "voice", "agent", "planner", "workbench", "mcp", "voice-agent"]
@@ -127,17 +96,9 @@ logic engineNodeTypes {
 
 // ---- outcome ----
 
-// deployOutcomeLabel maps the post-deploy gate result to the terminal
-// deployment STATUS the automation stamps + announces: "succeeded" when the
-// gate passed, "failed" otherwise. It mirrors deployGateGreen's fail-closed
-// coalesce (a missing/garbled gate result is treated as NOT passed -> "failed")
-// so a deploy never auto-succeeds on a blank gate. Pure: reads the action
-// result object + returns a string, no write. The deployEngineCluster
-// automation switches its finalize step on this label -- the "succeeded"/"failed"
-// fork that the env switch's GitOps placement and the rollback share. Returning
-// a string (rather than the deployGateGreen bool) is what lets the success /
-// failure branching ride the same `switch` construct the env placement uses.
-@description("Map the deploy-gate result to the terminal deployment status label: \"succeeded\" when the gate passed, else \"failed\" (fail-closed, mirroring deployGateGreen). The deploy automation's finalize step switches on this.")
+/// Map the deploy-gate result to the terminal deployment status label: "succeeded" when the gate
+/// passed, else "failed" (fail-closed, mirroring deployGateGreen). The deploy automation's finalize
+/// step switches on this.
 logic deployOutcomeLabel {
   args {
     passed any

@@ -15,7 +15,11 @@
 // re-versions the same logical row instead of creating duplicates --
 // the idempotency guarantee #694 calls for.
 
-@description("Insert (or re-version) a Library artifact index row for a backing source concept. System / automation-invoked: ownerUserId is threaded from the backing row's owner because promotion runs server-side on the owner's behalf. Idempotent -- the id is derived from sourceConceptRef so re-promoting the same source versions the same row. Not a user-facing tool; the Library is populated automatically.")
+/// Insert (or re-version) a Library artifact index row for a backing source concept. System /
+/// automation-invoked: ownerUserId is threaded from the backing row's owner because promotion runs
+/// server-side on the owner's behalf. Idempotent -- the id is derived from sourceConceptRef so
+/// re-promoting the same source versions the same row. Not a user-facing tool; the Library is
+/// populated automatically.
 mutate artifact createArtifact {
   args {
     sourceConceptRef  string!
@@ -64,7 +68,10 @@ mutate artifact createArtifact {
   }
 }
 
-@description("Create a generated-output row -- a deliverable PRODUCED through the app (workbench result, computer-use output, or standalone agent output). System / agent-invoked: ownerUserId is the producing user. indexGeneratedOutput folds the new row into the Library index automatically. body carries inline text outputs; attachmentId references file bytes for file-backed outputs.")
+/// Create a generated-output row -- a deliverable PRODUCED through the app (workbench result,
+/// computer-use output, or standalone agent output). System / agent-invoked: ownerUserId is the
+/// producing user. indexGeneratedOutput folds the new row into the Library index automatically.
+/// body carries inline text outputs; attachmentId references file bytes for file-backed outputs.
 mutate generatedOutput createGeneratedOutput {
   args {
     outputId          string!
@@ -91,7 +98,9 @@ mutate generatedOutput createGeneratedOutput {
   }
 }
 
-@description("Create a memory the assistant retains about the user. Owned: ownerUserId is stamped from actor.userId, so a memory can only ever be created for the acting user (or their delegated agent's bound user). indexMemory folds it into the Library Records lens automatically.")
+/// Create a memory the assistant retains about the user. Owned: ownerUserId is stamped from
+/// actor.userId, so a memory can only ever be created for the acting user (or their delegated
+/// agent's bound user). indexMemory folds it into the Library Records lens automatically.
 @actor
 mutate memory createMemory {
   args {
@@ -129,7 +138,10 @@ mutate memory createMemory {
 // (its own versionId) -- the history is append-only, nothing is ever
 // overwritten.
 
-@description("Append an immutable document-version snapshot to a logical document's history. Handler-invoked (integration.library.editDocument / restoreDocumentVersion) -- ownerUserId is threaded from the backing document's owner, versionNumber + versionId are computed server-side from the current latest. Append-only: every call inserts a new immutable row; nothing is overwritten.")
+/// Append an immutable document-version snapshot to a logical document's history. Handler-invoked
+/// (integration.library.editDocument / restoreDocumentVersion) -- ownerUserId is threaded from the
+/// backing document's owner, versionNumber + versionId are computed server-side from the current
+/// latest. Append-only: every call inserts a new immutable row; nothing is overwritten.
 mutate documentVersion appendDocumentVersion {
   args {
     versionId        string!
@@ -166,14 +178,11 @@ mutate documentVersion appendDocumentVersion {
   }
 }
 
-// updateGeneratedOutputContent re-inserts a generatedOutput row
-// (SAME id) with the new latest content so the artifact index + Library
-// viewer -- which resolve content through the backing generatedOutput --
-// reflect the edit. memQL is append-only by (id, createdAt), so this
-// inserts a new node VERSION of the same logical generatedOutput; reads
-// return the latest. Handler-invoked alongside mutationAppendDocument-
-// Version; ownerUserId is threaded from the existing row's owner.
-@description("Re-insert a generatedOutput row (same id, new version) carrying the latest edited content so the Library viewer + artifact index reflect the most recent document version. Append-only by (id, createdAt): a new node version, reads return the latest. Handler-invoked by integration.library.editDocument / restoreDocumentVersion; ownerUserId is threaded from the existing row.")
+/// Re-insert a generatedOutput row (same id, new version) carrying the latest edited content so the
+/// Library viewer + artifact index reflect the most recent document version. Append-only by (id,
+/// createdAt): a new node version, reads return the latest. Handler-invoked by
+/// integration.library.editDocument / restoreDocumentVersion; ownerUserId is threaded from the
+/// existing row.
 mutate generatedOutput updateGeneratedOutputContent {
   args {
     outputId      string!

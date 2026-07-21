@@ -5,8 +5,9 @@
 
 use knowledge.concepts.{ documentChunk }
 
+/// Attachment projection for the download endpoint (memql#804): the file's storage URL + the
+/// metadata needed to serve it back (name + MIME + owning space for the cross-space guard).
 @row
-@description("Attachment projection for the download endpoint (memql#804): the file's storage URL + the metadata needed to serve it back (name + MIME + owning space for the cross-space guard).")
 shape attachment attachmentDownload {
   row.id
   fileName
@@ -16,14 +17,16 @@ shape attachment attachmentDownload {
   status
 }
 
+/// Minimal document-chunk projection used for per-domain counting on the frontend. Returns only the
+/// parent domainId for each chunk so the Knowledge panel can build a {domainId: count} map without
+/// paying for full-chunk-payload bandwidth.
 @row
-@description("Minimal document-chunk projection used for per-domain counting on the frontend. Returns only the parent domainId for each chunk so the Knowledge panel can build a {domainId: count} map without paying for full-chunk-payload bandwidth.")
 shape documentChunk documentChunkDomainLite {
   domainId
 }
 
+/// Document chunk projection including the source reference and ordering.
 @row
-@description("Document chunk projection including the source reference and ordering.")
 shape documentChunk documentChunkFull {
   row.id
   domainId
@@ -65,38 +68,39 @@ shape documentChunk documentChunkFull {
 // so the engine knows the predicate's field-reference universe without
 // committing to a single concept's schema.
 
+/// Concept-agnostic scaffold for predicates that check payload.active.
 @row
-@description("Concept-agnostic scaffold for predicates that check payload.active.")
 shape activeRowTrait {
   active
 }
 
+/// Concept-agnostic scaffold for predicates that check payload.status.
 @row
-@description("Concept-agnostic scaffold for predicates that check payload.status.")
 shape statusRowTrait {
   status
 }
 
+/// Concept-agnostic scaffold for predicates that check payload.deleted (soft-delete flag).
 @row
-@description("Concept-agnostic scaffold for predicates that check payload.deleted (soft-delete flag).")
 shape deletedRowTrait {
   deleted
 }
 
+/// Concept-agnostic scaffold for predicates that check payload.archivedAt (archive timestamp).
 @row
-@description("Concept-agnostic scaffold for predicates that check payload.archivedAt (archive timestamp).")
 shape archivedRowTrait {
   archivedAt
 }
 
+/// Concept-agnostic scaffold for predicates that check payload.savedAt (save timestamp).
 @row
-@description("Concept-agnostic scaffold for predicates that check payload.savedAt (save timestamp).")
 shape savedRowTrait {
   savedAt
 }
 
+/// Concept-agnostic scaffold for predicates that check the validation lifecycle
+/// (payload.validationStatus + payload.checkedAt + payload.confirmedAt).
 @row
-@description("Concept-agnostic scaffold for predicates that check the validation lifecycle (payload.validationStatus + payload.checkedAt + payload.confirmedAt).")
 shape validationRowTrait {
   validationStatus
   checkedAt
@@ -112,8 +116,8 @@ shape validationRowTrait {
 // SIGNATURE -- `spec actorEnvelope <name> { return <bare key> }` (epic
 // #2281) -- and read the projected key by bare name.
 
+/// Actor envelope projection: authenticated actor, role, and now.
 @actor
-@description("Actor envelope projection: authenticated actor, role, and now.")
 shape actorEnvelope {
   actor.userId
   actor.role
@@ -131,8 +135,9 @@ shape actorEnvelope {
 //
 // carrier#44 (audit) + memql#191.
 
+/// Full projection of a v1:common:media row -- every payload field used by the product SPA's Media
+/// interface, plus the row intrinsics the frontend reads for ordering and ids.
 @row
-@description("Full projection of a v1:common:media row -- every payload field used by the product SPA's Media interface, plus the row intrinsics the frontend reads for ordering and ids.")
 shape media mediaFull {
   row.id
   partitionId

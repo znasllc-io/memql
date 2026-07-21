@@ -3,7 +3,7 @@
 // dispatch, outbound placeCall) and the call lifecycle. Records bind to a
 // partition, never a space (Amendment A).
 
-@description("Persist a provisioned DID. Called after a carrier BuyNumber succeeds.")
+/// Persist a provisioned DID. Called after a carrier BuyNumber succeeds.
 mutate number recordNumber {
   args {
     e164         string!
@@ -26,7 +26,7 @@ mutate number recordNumber {
   }
 }
 
-@description("Update a DID's lifecycle status (e.g. on release).")
+/// Update a DID's lifecycle status (e.g. on release).
 mutate number updateNumberStatus {
   args {
     id      string!
@@ -37,7 +37,8 @@ mutate number updateNumberStatus {
   }
 }
 
-@description("Persist a LiveKit SIP trunk configuration. secretRef points at external-secrets, never a secret value.")
+/// Persist a LiveKit SIP trunk configuration. secretRef points at external-secrets, never a secret
+/// value.
 mutate trunk recordTrunk {
   args {
     carrier        string!
@@ -55,7 +56,9 @@ mutate trunk recordTrunk {
   }
 }
 
-@description("Write an append-only call record. A completed leg writes one row with the real duration + disposition; durationSeconds/disposition default to an in-progress row when omitted (Amendment A: bound to partition + partition-scoped room).")
+/// Write an append-only call record. A completed leg writes one row with the real duration +
+/// disposition; durationSeconds/disposition default to an in-progress row when omitted (Amendment
+/// A: bound to partition + partition-scoped room).
 mutate call recordCall {
   args {
     direction       enum("inbound", "outbound")!
@@ -81,7 +84,7 @@ mutate call recordCall {
   }
 }
 
-@description("Close a call record on disconnect: stamp end time, duration, disposition, and cost estimate.")
+/// Close a call record on disconnect: stamp end time, duration, disposition, and cost estimate.
 mutate call closeCall {
   args {
     id              string!
@@ -98,7 +101,7 @@ mutate call closeCall {
   }
 }
 
-@description("Record TCPA consent / opt-out for an external number (append-only; newest wins).")
+/// Record TCPA consent / opt-out for an external number (append-only; newest wins).
 mutate consent setConsent {
   args {
     phoneNumber  string!
@@ -112,7 +115,7 @@ mutate consent setConsent {
   }
 }
 
-@description("Set E911 / caller-ID verification state on an owned DID (by row id).")
+/// Set E911 / caller-ID verification state on an owned DID (by row id).
 mutate number setNumberE911 {
   args {
     id               string!

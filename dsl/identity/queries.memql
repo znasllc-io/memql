@@ -26,7 +26,9 @@
 // Returns:
 //   Zero or one accountEntitlement row in accountEntitlementFull shape.
 
-@description("The account's task-concurrency entitlement row (zero or one current row). Backs the admission controller (#904) and Tasks UX (#909). Filters on accountId only; classifies as 'other' in the per-row-authz audit. No-row => unlimited is enforced in the Go resolver.")
+/// The account's task-concurrency entitlement row (zero or one current row). Backs the admission
+/// controller (#904) and Tasks UX (#909). Filters on accountId only; classifies as 'other' in the
+/// per-row-authz audit. No-row => unlimited is enforced in the Go resolver.
 @unbounded("entitlements for an account -- a small bounded set per account consumed whole")
 query accountEntitlement accountEntitlement {
   args {
@@ -53,7 +55,7 @@ query accountEntitlement accountEntitlement {
 //   Zero or one access-request row in accessRequestFull shape.
 //
 
-@description("Returns the access request with the given id. Zero or one result.")
+/// Returns the access request with the given id. Zero or one result.
 @unbounded("access request by id (guarded) -- bounded to a single row")
 query accessRequest accessRequestById {
   args {
@@ -81,7 +83,7 @@ query accessRequest accessRequestById {
 //   activeDelegationsForAgent({agentId: "agent-sofia"})
 //
 
-@description("Get all active delegations for a given agent ID")
+/// Get all active delegations for a given agent ID
 @unbounded("active delegations for an agent -- a small bounded set consumed whole for authz")
 query delegation activeDelegationsForAgent {
   args {
@@ -115,7 +117,8 @@ query delegation activeDelegationsForAgent {
 // Returns:
 //   Zero or more delegation rows in delegationFull shape.
 
-@description("Get all active delegations whose identitySubject matches the argument. Used by the per-request DelegationResolver on the auth hot path. See memql#112.")
+/// Get all active delegations whose identitySubject matches the argument. Used by the per-request
+/// DelegationResolver on the auth hot path. See memql#112.
 @unbounded("active delegations for an identity subject -- a small bounded set consumed whole for authz")
 query delegation activeDelegationsByIdentitySubject {
   args {
@@ -125,7 +128,8 @@ query delegation activeDelegationsByIdentitySubject {
   shape   delegationFull
 }
 
-@description("Active users in the cluster, optionally filtered by role or group membership. Both args are optional -- omit them to list all active users (the identity admin portal's user-list view).")
+/// Active users in the cluster, optionally filtered by role or group membership. Both args are
+/// optional -- omit them to list all active users (the identity admin portal's user-list view).
 query user activeUsers {
   args {
     role     string
@@ -140,25 +144,8 @@ query user activeUsers {
   shape   userFull
 }
 
-// searchUsers backs the searchUsers MCP tool (#1682). The tool
-// declares an optional `active` filter; before this query the handler
-// was a bare `concept==v1:identity:user` scan that silently ignored
-// `active` (and `limit`) and returned every user. The `active` predicate
-// is arg-conditional: omit it to list all users, pass true/false to gate
-// on liveness.
-//
-// Pagination (epic #1964 / memql#1975): this query declares ONLY `sort`
-// (deterministic, keyset-eligible createdAt-desc order) and NO inner
-// `paginate`. The dynamic page window is applied by the searchUsers tool
-// handler's OUTER paginate($args.limit) wrapper (dsl/memql/tools.memql). The
-// inner query must NOT also declare `paginate` -- two nested paginate()
-// directives are rejected by the engine ("multiple paginate() directives are
-// not supported"), which broke the searchUsers tool for every call after the
-// 5.3 backfill added an inner `paginate 50` while the wrapper was still there.
-// `sort` (with no inner paginate) keeps this a bounded-list for the pagination
-// audit while leaving the single window to the caller. A second paginated
-// reader of this query would wrap its own paginate(); none exists today.
-@description("Search users, optionally gated by active status. Omit `active` to list every user; pass true to return only active users or false for only deactivated ones. Backs the searchUsers tool.")
+/// Search users, optionally gated by active status. Omit `active` to list every user; pass true to
+/// return only active users or false for only deactivated ones. Backs the searchUsers tool.
 query user searchUsers {
   args {
     active  boolean
@@ -200,8 +187,9 @@ query user searchUsers {
 // UI under elevated context). Proper admin gating via a
 // `requiresClusterOwner` spec is a #54 follow-up once the admin
 // surface is consolidated.
+/// Audit events where actorUserId equals the supplied userId. Pair with auditEventsByTarget for
+/// full per-user history (no OR operator in the filter grammar yet).
 @public
-@description("Audit events where actorUserId equals the supplied userId. Pair with auditEventsByTarget for full per-user history (no OR operator in the filter grammar yet).")
 query auditEvent auditEventsByActor {
   args {
     userId  string!
@@ -241,8 +229,9 @@ query auditEvent auditEventsByActor {
 // `@public` marks this query as intentionally not caller-scoped.
 // Companion of `auditEventsByActor`; same admin-only audit
 // view. Proper admin gating is a #54 follow-up.
+/// Audit events where targetId equals the supplied targetId. Pair with auditEventsByActor for full
+/// per-user history (no OR operator in the filter grammar yet).
 @public
-@description("Audit events where targetId equals the supplied targetId. Pair with auditEventsByActor for full per-user history (no OR operator in the filter grammar yet).")
 query auditEvent auditEventsByTarget {
   args {
     targetId  string!
@@ -279,7 +268,7 @@ query auditEvent auditEventsByTarget {
 //   Zero or one auth-code row in authCodeFull shape.
 //
 
-@description("Returns the auth code whose codeHash matches the argument. Zero or one result.")
+/// Returns the auth code whose codeHash matches the argument. Zero or one result.
 @unbounded("auth code by unique codeHash -- a credential lookup bounded to a single row")
 query authCode authCodeByCodeHash {
   args {
@@ -311,7 +300,8 @@ query authCode authCodeByCodeHash {
 //   Zero or one oauthClient row in oauthClientFull shape.
 //
 
-@description("Returns the dynamically-registered OAuth client whose clientId matches the argument. Zero or one result.")
+/// Returns the dynamically-registered OAuth client whose clientId matches the argument. Zero or one
+/// result.
 @unbounded("oauth client by unique clientId -- bounded to a single row")
 query oauthClient oAuthClientByClientId {
   args {
@@ -348,7 +338,8 @@ query oauthClient oAuthClientByClientId {
 //   Zero or one session row in authSessionFull shape.
 //
 
-@description("Returns the auth session whose previousRefreshTokenHash matches the argument. Used by the rotator's grace-window fallback. Zero or one result.")
+/// Returns the auth session whose previousRefreshTokenHash matches the argument. Used by the
+/// rotator's grace-window fallback. Zero or one result.
 @unbounded("auth session by unique previousRefreshTokenHash -- a credential lookup bounded to a single row")
 query authSession authSessionByPreviousRefreshTokenHash {
   args {
@@ -386,7 +377,7 @@ query authSession authSessionByPreviousRefreshTokenHash {
 //   Zero or one session row in authSessionFull shape.
 //
 
-@description("Returns the auth session whose refreshTokenHash matches the argument. Zero or one result.")
+/// Returns the auth session whose refreshTokenHash matches the argument. Zero or one result.
 @unbounded("auth session by unique refreshTokenHash -- a credential lookup bounded to a single row")
 query authSession authSessionByRefreshTokenHash {
   args {
@@ -418,7 +409,7 @@ query authSession authSessionByRefreshTokenHash {
 //   Zero or one session row, in authSessionFull shape.
 //
 
-@description("Returns the auth session whose tokenHash matches the argument. Zero or one result.")
+/// Returns the auth session whose tokenHash matches the argument. Zero or one result.
 @unbounded("auth session by unique tokenHash -- a credential lookup bounded to a single row")
 query authSession authSessionByTokenHash {
   args {
@@ -452,7 +443,8 @@ query authSession authSessionByTokenHash {
 //   Zero or more session rows in authSessionFull shape.
 //
 
-@description("Returns every auth-session row owned by the given JWT subject. Latest version per row, including revoked rows.")
+/// Returns every auth-session row owned by the given JWT subject. Latest version per row, including
+/// revoked rows.
 query authSession authSessionsForSubject {
   args {
     subject  string!
@@ -499,7 +491,7 @@ query authSession authSessionsForSubject {
 // retired when partition-scoping was removed; the current canonical form
 // is plain `v1:identity:clusterSettings:cluster`.
 
-@description("Latest singleton cluster-settings row, pinned to id=cluster.")
+/// Latest singleton cluster-settings row, pinned to id=cluster.
 query clusterSettings clusterSettingsCurrent {
   filter  id=="cluster"
   shape   clusterSettingsFull
@@ -523,7 +515,7 @@ query clusterSettings clusterSettingsCurrent {
 //   delegationsByIdentity({identityId: "id-user-alice"})
 //
 
-@description("Get all delegations (active and revoked) for a given identity ID")
+/// Get all delegations (active and revoked) for a given identity ID
 @unbounded("delegations for an identity -- a small bounded set consumed whole for authz")
 query delegation delegationsByIdentity {
   args {
@@ -557,7 +549,7 @@ query delegation delegationsByIdentity {
 //   expiredActiveDelegations({ now: now })
 //
 
-@description("Active delegations whose expiresAt is before the supplied cutoff.")
+/// Active delegations whose expiresAt is before the supplied cutoff.
 @unbounded("expired-delegation reaper sweep -- an internal sweep that must see all")
 query delegation expiredActiveDelegations {
   args {
@@ -594,7 +586,8 @@ query delegation expiredActiveDelegations {
 //   Zero or more audit-event rows in auditEventFull shape.
 //
 
-@description("All audit events; the retention sweep iterates and per-row checks occurredAt + retention-days < now.")
+/// All audit events; the retention sweep iterates and per-row checks occurredAt + retention-days <
+/// now.
 @unbounded("expired audit-event retention purge sweep -- an internal sweep that must see all")
 query auditEvent expiredAuditEvents {
   filter  action!=""
@@ -627,7 +620,10 @@ query auditEvent expiredAuditEvents {
 //   Zero or more auth-code rows in authCodeFull shape.
 //
 
-@description("CONSUMED auth codes whose expiresAt is before the supplied cutoff. Both predicates are load-bearing: the name says `Consumed`, so the consumedAt gate (memql#1714) keeps the result set to spent-then-expired codes and never sweeps an unspent-but-expired code that a redemption is still racing against.")
+/// CONSUMED auth codes whose expiresAt is before the supplied cutoff. Both predicates are
+/// load-bearing: the name says `Consumed`, so the consumedAt gate (memql#1714) keeps the result set
+/// to spent-then-expired codes and never sweeps an unspent-but-expired code that a redemption is
+/// still racing against.
 @unbounded("expired consumed auth-code GC sweep -- an internal sweep that must see all")
 query authCode expiredConsumedAuthCodes {
   args {
@@ -661,7 +657,7 @@ query authCode expiredConsumedAuthCodes {
 //   Zero or more magic-link request rows in magicLinkRequestFull shape.
 //
 
-@description("Magic-link requests whose expiresAt is before the supplied cutoff.")
+/// Magic-link requests whose expiresAt is before the supplied cutoff.
 @unbounded("expired magic-link GC sweep -- an internal sweep that must see all")
 query magicLinkRequest expiredMagicLinkRequests {
   args {
@@ -698,7 +694,8 @@ query magicLinkRequest expiredMagicLinkRequests {
 //   Zero or more access-request rows in accessRequestFull shape.
 //
 
-@description("Pending access requests; the expiry sweep iterates these and per-row checks createdAt + expiry-days < now.")
+/// Pending access requests; the expiry sweep iterates these and per-row checks createdAt +
+/// expiry-days < now.
 @unbounded("expired pending access-request sweep -- an internal sweep that must see all")
 query accessRequest expiredPendingAccessRequests {
   args {
@@ -723,7 +720,7 @@ query accessRequest expiredPendingAccessRequests {
 //                           (the partition prefix is re-added by memQL).
 //
 
-@description("Returns the invitation with the given id. Zero or one result.")
+/// Returns the invitation with the given id. Zero or one result.
 @unbounded("invitation by id (guarded) -- bounded to a single row")
 query invitation invitationById {
   args {
@@ -757,7 +754,7 @@ query invitation invitationById {
 //   Zero or one invitation record.
 //
 
-@description("Returns the invitation whose tokenHash matches the argument. Zero or one result.")
+/// Returns the invitation whose tokenHash matches the argument. Zero or one result.
 @unbounded("invitation by unique tokenHash -- a credential lookup bounded to a single row")
 query invitation invitationByTokenHash {
   args {
@@ -795,7 +792,8 @@ query invitation invitationByTokenHash {
 // Returns:
 //   Zero or one invitation record (latest version, append-only semantics).
 
-@description("Returns the invitation whose previousTokenHash matches the argument. Used by the resolve handler to label rotated-out links as `superseded` rather than `invalid`. See memql#108.")
+/// Returns the invitation whose previousTokenHash matches the argument. Used by the resolve handler
+/// to label rotated-out links as `superseded` rather than `invalid`. See memql#108.
 @unbounded("invitation by unique previousTokenHash -- a credential lookup bounded to a single row")
 query invitation invitationByPreviousTokenHash {
   args {
@@ -829,7 +827,7 @@ query invitation invitationByPreviousTokenHash {
 //   Zero or one magic-link request row in magicLinkRequestFull shape.
 //
 
-@description("Returns the magic-link request whose tokenHash matches the argument. Zero or one result.")
+/// Returns the magic-link request whose tokenHash matches the argument. Zero or one result.
 @unbounded("magic-link request by unique tokenHash -- a credential lookup bounded to a single row")
 query magicLinkRequest magicLinkRequestByTokenHash {
   args {
@@ -867,8 +865,8 @@ query magicLinkRequest magicLinkRequestByTokenHash {
 // actor.userId` is a #54 follow-up; it requires the web
 // handler to stop accepting an explicit userId and let the
 // query derive it from the actor instead.
+/// List PAT (api_key) identities owned by a user, in patSummary shape (no credentials).
 @public
-@description("List PAT (api_key) identities owned by a user, in patSummary shape (no credentials).")
 query identity patIdentitiesForUser {
   args {
     userId  string!
@@ -904,7 +902,8 @@ query identity patIdentitiesForUser {
 //   Zero or one identity row in identityFull shape.
 //
 
-@description("Lookup a PAT identity by id (full shape, includes keyHash). Server-side only -- never feed to UI.")
+/// Lookup a PAT identity by id (full shape, includes keyHash). Server-side only -- never feed to
+/// UI.
 query identity patIdentityById {
   args {
     identityId  string!
@@ -938,7 +937,7 @@ query identity patIdentityById {
 //   Zero or one identity row in identityFull shape.
 //
 
-@description("Hot-path PAT lookup by keyHash for the gRPC interceptor. Returns active + inactive rows.")
+/// Hot-path PAT lookup by keyHash for the gRPC interceptor. Returns active + inactive rows.
 @unbounded("PAT identity by unique credential keyHash -- bounded to a single row")
 query identity patIdentityByKeyHash {
   args {
@@ -962,7 +961,7 @@ query identity patIdentityByKeyHash {
 //   Zero or more access-request rows in accessRequestFull shape.
 //
 
-@description("Access requests with status=pending; backs the admin review queue.")
+/// Access requests with status=pending; backs the admin review queue.
 query accessRequest pendingAccessRequests {
   filter  statusIsPending
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
@@ -973,7 +972,7 @@ query accessRequest pendingAccessRequests {
   shape   accessRequestFull
 }
 
-@description("Recent audit events, optionally filtered by category. Powers the admin audit-log view.")
+/// Recent audit events, optionally filtered by category. Powers the admin audit-log view.
 query auditEvent recentAuditEvents {
   args {
     category  string
@@ -1004,7 +1003,7 @@ query auditEvent recentAuditEvents {
 // canonical way to react to a switch -- the user concept is global,
 // so the partition slot is _system; the rewriter handles that.
 
-@description("Returns a user's current activePartitionId. Empty when the user is not focused on any space.")
+/// Returns a user's current activePartitionId. Empty when the user is not focused on any space.
 @unbounded("the user's active-space projection by id (guarded) -- bounded to a single row")
 query user userActiveSpace {
   args {
@@ -1032,7 +1031,7 @@ query user userActiveSpace {
 // Returns:
 //   Array with 0 or 1 user record in userFull shape.
 
-@description("Look up a user by primary email (the dedup key during bootstrap).")
+/// Look up a user by primary email (the dedup key during bootstrap).
 @unbounded("user by unique primaryEmail -- bounded to a single row")
 query user userByEmail {
   args {
@@ -1058,7 +1057,7 @@ query user userByEmail {
 // Returns:
 //   Array with 0 or 1 user record in userFull shape.
 
-@description("Get a user by id.")
+/// Get a user by id.
 query user userById {
   args {
     userId  string!
@@ -1084,7 +1083,8 @@ query user userById {
 // Returns:
 //   Array with 0 or 1 user record in userFull shape.
 
-@description("Get the authenticated caller's own user record. Self-scoped via actor.userId (no args) -- the caller cannot read another user's row.")
+/// Get the authenticated caller's own user record. Self-scoped via actor.userId (no args) -- the
+/// caller cannot read another user's row.
 @mcp
 @actor
 query user currentUser {
@@ -1106,7 +1106,7 @@ query user currentUser {
 //   {count: N} -- N is the number of active v1:identity:user rows.
 //
 
-@description("Count of active v1:identity:user rows. Returns a {count: N} aggregate.")
+/// Count of active v1:identity:user rows. Returns a {count: N} aggregate.
 query user userCount {
   filter  isActiveRecord
   count
@@ -1131,7 +1131,8 @@ query user userCount {
 // any space" -- they don't appear here. The query result count IS the
 // active-human count for the space.
 
-@description("Returns users whose activePartitionId == arg(partitionId). Active-human roster per the activity model (Phase 4).")
+/// Returns users whose activePartitionId == arg(partitionId). Active-human roster per the activity
+/// model (Phase 4).
 @unbounded("users whose activePartitionId matches a space -- bounded by space membership, presence resolution consumed whole")
 query user usersActiveInSpace {
   args {
@@ -1167,7 +1168,8 @@ query user usersActiveInSpace {
 //   Zero or more user rows in userFull shape.
 //
 
-@description("Active users with a pending deletionScheduledAt; consumers per-row check cooldown windows via addDuration.")
+/// Active users with a pending deletionScheduledAt; consumers per-row check cooldown windows via
+/// addDuration.
 @unbounded("deletion-cooldown sweep -- an internal sweep that must see all")
 query user usersInDeletionCooldown {
   filter  isActiveRecord && isDeletionScheduled
@@ -1202,7 +1204,9 @@ query user usersInDeletionCooldown {
 //   Zero or more user rows in userFull shape.
 //
 
-@description("Active users whose deletionScheduledAt is set. When scheduledBefore is supplied, restricts to rows whose deletionScheduledAt is strictly before it -- the deletion sweep's logic computes the cutoff (now - MEMQL_IDENTITY_DELETION_COOLDOWN_DAYS) and pushes it down (#2369).")
+/// Active users whose deletionScheduledAt is set. When scheduledBefore is supplied, restricts to
+/// rows whose deletionScheduledAt is strictly before it -- the deletion sweep's logic computes the
+/// cutoff (now - MEMQL_IDENTITY_DELETION_COOLDOWN_DAYS) and pushes it down (#2369).
 @unbounded("scheduled-deletion sweep -- an internal sweep that must see all")
 query user usersScheduledForDeletion {
   args {
@@ -1228,7 +1232,7 @@ query user usersScheduledForDeletion {
 // Arguments:
 //   codeHash (string, required) - SHA-256 hex digest of the plain code.
 
-@description("Hot-path pairing-code lookup by codeHash for the Pair-aware gRPC interceptor.")
+/// Hot-path pairing-code lookup by codeHash for the Pair-aware gRPC interceptor.
 @unbounded("worker pairing code by unique codeHash -- a credential lookup bounded to a single row")
 query workerPairingCode workerPairingCodeByHash {
   args {
@@ -1257,7 +1261,7 @@ query workerPairingCode workerPairingCodeByHash {
 // Returns:
 //   Zero or one identity row in identityFull shape.
 
-@description("Hot-path worker-token lookup by keyHash. Returns active + inactive rows.")
+/// Hot-path worker-token lookup by keyHash. Returns active + inactive rows.
 @unbounded("worker token identity by unique credential keyHash -- bounded to a single row")
 query identity workerTokenByKeyHash {
   args {
@@ -1284,8 +1288,8 @@ query identity workerTokenByKeyHash {
 // cockpit Workers tab). Same auth shape as the PAT list above
 // (web-layer authentication; userId is the authenticated
 // subject). Tightening tracked under #54.
+/// List worker-token identities owned by a user.
 @public
-@description("List worker-token identities owned by a user.")
 query identity workerTokensForUser {
   args {
     userId  string!
@@ -1320,7 +1324,8 @@ query identity workerTokensForUser {
 // Returns:
 //   Zero or one identity row in identityFull shape.
 
-@description("Hot-path badge lookup by keyHash for the operator grant exchange. Returns active + inactive rows.")
+/// Hot-path badge lookup by keyHash for the operator grant exchange. Returns active + inactive
+/// rows.
 @unbounded("badge identity by unique credential keyHash -- bounded to a single row")
 query identity badgeByKeyHash {
   args {
@@ -1346,8 +1351,10 @@ query identity badgeByKeyHash {
 // Same auth shape as workerTokensForUser above (web-layer
 // authentication; userId is the authenticated subject). Tightening
 // tracked under #54.
+/// List badge identities owned by a user. Projects identitySummary (id / userId / label / active)
+/// -- NEVER credentials, so the badge keyHash (a low-entropy physical id's hash) is never exposed
+/// on this public surface.
 @public
-@description("List badge identities owned by a user. Projects identitySummary (id / userId / label / active) -- NEVER credentials, so the badge keyHash (a low-entropy physical id's hash) is never exposed on this public surface.")
 query identity badgesForUser {
   args {
     userId  string!
@@ -1381,8 +1388,8 @@ query identity badgesForUser {
 // Returns:
 //   Zero or one identity row in identityFull shape.
 
+/// Lookup a node_token identity by its (nodeType, nodeId) binding. memql#343.
 @public
-@description("Lookup a node_token identity by its (nodeType, nodeId) binding. memql#343.")
 @unbounded("node-token identity by unique (nodeType,nodeId) binding -- bounded to a single row")
 query identity nodeTokenIdentityByBinding {
   args {
@@ -1406,8 +1413,8 @@ query identity nodeTokenIdentityByBinding {
 // Returns rows even when active=false so the admin UI can show
 // revoked tokens explicitly (rather than ghosting them).
 
+/// List every node_token identity across the cluster (active + inactive). memql#343.
 @public
-@description("List every node_token identity across the cluster (active + inactive). memql#343.")
 @unbounded("all node-token identities -- a bounded cluster-node credential set consumed whole for verification")
 query identity nodeTokenIdentities {
   filter  identityIsNodeToken
@@ -1428,8 +1435,9 @@ query identity nodeTokenIdentities {
 // whole-replace revokeNodeTokenIdentity restating every
 // credentials field.
 
+/// Lookup a single node_token identity row by id (bare shortId; the signature-bound filter resolves
+/// it server-side). Drives the admin revoke path. memql#350.
 @public
-@description("Lookup a single node_token identity row by id (bare shortId; the signature-bound filter resolves it server-side). Drives the admin revoke path. memql#350.")
 query identity nodeTokenIdentityById {
   args {
     identityId  string!

@@ -9,7 +9,8 @@
 
 use common.traits.{ statusIsActive }
 
-@description("All authoring bundles owned by the caller, newest first. Backs the 'my authored capabilities' management list.")
+/// All authoring bundles owned by the caller, newest first. Backs the 'my authored capabilities'
+/// management list.
 @actor
 query bundle authoringBundlesForOwner {
   filter  ownerUserId==actor.userId
@@ -21,7 +22,8 @@ query bundle authoringBundlesForOwner {
   shape   bundleFull
 }
 
-@description("One authoring bundle by id, scoped to the caller. Backs the gate runners + the approval (Gate 3) artifact view.")
+/// One authoring bundle by id, scoped to the caller. Backs the gate runners + the approval (Gate 3)
+/// artifact view.
 @actor
 query bundle authoringBundleById {
   args {
@@ -31,7 +33,8 @@ query bundle authoringBundleById {
   shape   bundleFull
 }
 
-@description("The caller's currently-active bundles. Backs the authored-construct runtime loader (#959) -- the set of authored automations to register on boot / on change.")
+/// The caller's currently-active bundles. Backs the authored-construct runtime loader (#959) -- the
+/// set of authored automations to register on boot / on change.
 @actor
 query bundle activeAuthoringBundles {
   filter  ownerUserId==actor.userId && statusIsActive
@@ -43,23 +46,9 @@ query bundle activeAuthoringBundles {
   shape   bundleFull
 }
 
-// SYSTEM-SCOPED active-bundle query (#1039). Unlike the owner-scoped
-// queries above, this returns EVERY active bundle across ALL owners --
-// there is NO payload.ownerUserId==actor.userId filter. It exists for one
-// caller: the boot-time authored-runtime re-arm (wireAuthoredRuntime),
-// which must enumerate other owners' active bundles to re-register their
-// constructs after a restart. A normal user never reads through it.
-//
-// Per-row-authz classification: ADMIN. The `actor.isClusterOwner == true`
-// gate is the cluster-owner spec the per-row-authz audit
-// (docs/auth/per-row-authz-audit.md) requires for a cross-owner read --
-// it both classifies the query as admin (dsl/conformance_test.go) and
-// REALLY gates it: a non-cluster-owner caller matches nothing (the actor
-// constant binds false). The boot re-arm runs under a cluster-owner
-// envelope, so it sees every owner's active bundles; per-owner construct
-// loads + the scheduler run then re-stamp the BUNDLE AUTHOR's envelope so
-// no privilege escalation leaks into the fired automation.
-@description("ADMIN/SYSTEM: every active authoring bundle across ALL owners (NOT owner-scoped). Cluster-owner gated. Backs the boot-time authored-runtime re-arm (#1039) that re-registers active bundles' automations after a restart.")
+/// ADMIN/SYSTEM: every active authoring bundle across ALL owners (NOT owner-scoped). Cluster-owner
+/// gated. Backs the boot-time authored-runtime re-arm (#1039) that re-registers active bundles'
+/// automations after a restart.
 @actor
 query bundle systemActiveAuthoringBundles {
   filter  actor.isClusterOwner==true && statusIsActive
@@ -71,7 +60,8 @@ query bundle systemActiveAuthoringBundles {
   shape   bundleFull
 }
 
-@description("The bundle compiled from a given Responsibility, scoped to the caller. Lets the planner find the existing artifact when a Responsibility is edited (to supersede rather than duplicate).")
+/// The bundle compiled from a given Responsibility, scoped to the caller. Lets the planner find the
+/// existing artifact when a Responsibility is edited (to supersede rather than duplicate).
 @unbounded("the authoring bundle for one responsibility -- bounded to a single row")
 @actor
 query bundle authoringBundleForResponsibility {
@@ -82,7 +72,10 @@ query bundle authoringBundleForResponsibility {
   shape   bundleFull
 }
 
-@description("The bundle post-hoc captured from a given Plan (everyday-task capture path, #1161), scoped to the caller. Lets the capture orchestrator skip re-authoring a task it already captured (idempotency on a re-delivered terminal Plan event) and backs the per-task view/edit/export surface (#1162).")
+/// The bundle post-hoc captured from a given Plan (everyday-task capture path, #1161), scoped to
+/// the caller. Lets the capture orchestrator skip re-authoring a task it already captured
+/// (idempotency on a re-delivered terminal Plan event) and backs the per-task view/edit/export
+/// surface (#1162).
 @unbounded("the authoring bundle for one source plan -- bounded to a single row")
 @actor
 query bundle authoringBundleForPlan {
@@ -93,7 +86,8 @@ query bundle authoringBundleForPlan {
   shape   bundleFull
 }
 
-@description("All authored constructs belonging to a bundle, scoped to the caller. Backs the gate runners (compile/bind the whole closure) + the runtime register/unregister path.")
+/// All authored constructs belonging to a bundle, scoped to the caller. Backs the gate runners
+/// (compile/bind the whole closure) + the runtime register/unregister path.
 @unbounded("constructs within one bundle -- bounded by the bundle; the caller compiles the whole bundle")
 @actor
 query construct authoringConstructsForBundle {
@@ -104,7 +98,8 @@ query construct authoringConstructsForBundle {
   shape   constructFull
 }
 
-@description("The caller's cataloged (reusable) constructs. Backs the compose-first matcher (#957): the planner searches these before authoring a net-new dependency.")
+/// The caller's cataloged (reusable) constructs. Backs the compose-first matcher (#957): the
+/// planner searches these before authoring a net-new dependency.
 @actor
 query construct cataloguedConstructsForOwner {
   filter  ownerUserId==actor.userId && catalogued==true
@@ -116,7 +111,8 @@ query construct cataloguedConstructsForOwner {
   shape   constructFull
 }
 
-@description("All dependency edges declared by a bundle (what it depends on), scoped to the caller. Backs dependency-closure inspection for a bundle.")
+/// All dependency edges declared by a bundle (what it depends on), scoped to the caller. Backs
+/// dependency-closure inspection for a bundle.
 @unbounded("dependency edges within one bundle -- the full edge set is needed to compile the bundle")
 @actor
 query dependencyEdge dependencyEdgesForBundle {
@@ -127,7 +123,9 @@ query dependencyEdge dependencyEdgesForBundle {
   shape   dependencyEdgeFull
 }
 
-@description("IMPACT ANALYSIS (#957): every edge that depends ON a given construct, scoped to the caller. The dependents to re-validate before changing a shared / cataloged construct. The caller joins bundleId -> v1:authoring:bundle to filter to ACTIVE dependents.")
+/// IMPACT ANALYSIS (#957): every edge that depends ON a given construct, scoped to the caller. The
+/// dependents to re-validate before changing a shared / cataloged construct. The caller joins
+/// bundleId -> v1:authoring:bundle to filter to ACTIVE dependents.
 @unbounded("dependents of a construct -- the full dependent set is needed for impact analysis")
 @actor
 query dependencyEdge dependentsOfConstruct {
@@ -139,7 +137,7 @@ query dependencyEdge dependentsOfConstruct {
   shape   dependencyEdgeFull
 }
 
-@description("Every dependency edge owned by the caller. Backs a full dependency-graph view.")
+/// Every dependency edge owned by the caller. Backs a full dependency-graph view.
 @actor
 query dependencyEdge dependencyEdgesForOwner {
   filter  ownerUserId==actor.userId

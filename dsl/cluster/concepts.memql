@@ -3,8 +3,9 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
+/// A memQL cluster -- the top-level deployment unit consisting of a shared database and seed nodes
+/// (bff, cognition, planner). Partitions exist within a cluster for data isolation.
 @namespace("cluster")
-@description("A memQL cluster -- the top-level deployment unit consisting of a shared database and seed nodes (bff, cognition, planner). Partitions exist within a cluster for data isolation.")
 concept cluster {
   name              string! @description("Cluster name (e.g., 'development', 'staging-us-central1').")
   region            string  @description("Cloud region (e.g., 'us-central1') or 'local' for development.")
@@ -22,8 +23,9 @@ concept cluster {
 
 // ---- concepts/v1/cluster/database/concept.memql ----
 
+/// A PostgreSQL database instance backing a memQL cluster. Tracks connection info, engine version,
+/// and installed extensions.
 @namespace("cluster")
-@description("A PostgreSQL database instance backing a memQL cluster. Tracks connection info, engine version, and installed extensions.")
 concept database {
   host              string! @description("Database hostname (e.g., 'postgres', 'tiger-cloud-abc.timescaledb.io').")
   port              int     @default("5432") @description("Database port.")
@@ -41,8 +43,9 @@ concept database {
 
 // ---- concepts/v1/cluster/identityProvider/concept.memql ----
 
+/// An identity provider used for authentication and user management in a memQL cluster. Typically
+/// the in-house identity service (component/identity), surfaced for cluster-topology dashboards.
 @namespace("cluster")
-@description("An identity provider used for authentication and user management in a memQL cluster. Typically the in-house identity service (component/identity), surfaced for cluster-topology dashboards.")
 concept identityProvider {
   name              string! @description("Provider name (e.g., 'memQL Identity').")
   providerType      enum("oidc", "saml", "ldap")! @default("oidc") @description("Authentication protocol.")
@@ -58,8 +61,11 @@ concept identityProvider {
   @relationship(type="parent", field="clusterId", target=cluster, direction="outgoing")
 }
 
+/// A registered node in the memQL cluster. The record is written on registration and updated on
+/// every liveness transition (connecting, healthy, degraded, draining, offline, stopped). States
+/// mirror the NodeHealthStatus enum defined in component/node/node.proto -- that proto is the
+/// source of truth.
 @namespace("cluster")
-@description("A registered node in the memQL cluster. The record is written on registration and updated on every liveness transition (connecting, healthy, degraded, draining, offline, stopped). States mirror the NodeHealthStatus enum defined in component/node/node.proto -- that proto is the source of truth.")
 concept node {
   nodeType      string! @description("Node role: bff, voice, cognition, agent, planner.")
   flavor        string  @description("Domain flavor within the node type. Empty for single-flavor types like cognition.")
@@ -75,8 +81,8 @@ concept node {
   region        string  @description("Cloud region (e.g. 'us-central1') or 'local'. Stamped at registration from MEMQL_REGION (#1873).")
 }
 
+/// Definition of a node type and its expected capabilities.
 @namespace("cluster")
-@description("Definition of a node type and its expected capabilities.")
 concept nodeType {
   name          string! @description("Node type identifier: bff, voice, cognition, agent, planner.")
   description   string  @description("Human-readable description of this node type's purpose.")
@@ -86,8 +92,9 @@ concept nodeType {
   codeReference string  @description("Optional architecture-model node id (model.Node.ID, e.g. 'service:memql') linking this node type to its code-side identity. Cockpit's Topology view uses this to bridge the live cluster grid and the architecture-model drill-down: selecting a live node finds the matching code-side service and jumps the navigator to that drill point.")
 }
 
+/// Lifecycle event recording node state transitions (started, stopped, failed). Used for audit
+/// trail and cluster state recovery. Legacy name retained for data compatibility.
 @namespace("cluster")
-@description("Lifecycle event recording node state transitions (started, stopped, failed). Used for audit trail and cluster state recovery. Legacy name retained for data compatibility.")
 concept spawnEvent {
   nodeId        string! @description("ID of the node this event pertains to.")
   nodeType      string! @description("Type of the node: bff, cognition, agent, planner.")

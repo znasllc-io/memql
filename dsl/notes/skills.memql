@@ -8,7 +8,9 @@
 
 use agents.concepts.{ skill }
 
-@description("Note-taking: list, create, update, and tag-search the user's standalone notes. Every operation is per-row-authz owned -- the agent acts only on the calling user's notes. Distinct from the product pack's canvas-state note caption; this is the standalone notebook surface.")
+/// Note-taking: list, create, update, and tag-search the user's standalone notes. Every operation
+/// is per-row-authz owned -- the agent acts only on the calling user's notes. Distinct from the
+/// product pack's canvas-state note caption; this is the standalone notebook surface.
 seed skill notes {
   slug:          "notes"
   name:          "Notes"

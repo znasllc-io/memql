@@ -9,21 +9,12 @@
 // `filter`. A `spec` is reserved for authorization predicates that
 // read actor.*.
 
-@description("Matches participants with human participantType")
+/// Matches participants with human participantType
 trait isHumanParticipant {
   return participantType == "human"
 }
 
-// isAIParticipant - AI Participant Type Trait
-// ================================================
-//
-// Reusable filter that matches participants with AI type.
-// AI participants are automated agents in spaces.
-//
-// Usage in queries:
-//   filter concept==v1:cognition:participant && isAIParticipant
-//
-@description("Matches participants with AI participantType")
+/// Matches participants with AI participantType
 trait isAIParticipant {
   return participantType=="si"
 }

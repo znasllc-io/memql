@@ -7,9 +7,13 @@
 // builtins are the typed call surface. Each returns a single synthetic node
 // whose payload carries `{allowed: bool}` (the integration handler builds it).
 
+/// Relational governance decision over (actor, target, verb) for the PRINCIPAL resource. Applies
+/// actor.rank > target.rank OR actor==target for update/delete, the owner-only carve-out (owner
+/// manages everyone; a non-owner can never edit an owner; an owner cannot self-delete), and
+/// read-always-passes. Backed by component/auth/rbac_governance.go:GovernPrincipal. Returns
+/// {allowed: bool}.
 @executor("integration.rbac.governPrincipal")
 @args(profile="object")
-@description("Relational governance decision over (actor, target, verb) for the PRINCIPAL resource. Applies actor.rank > target.rank OR actor==target for update/delete, the owner-only carve-out (owner manages everyone; a non-owner can never edit an owner; an owner cannot self-delete), and read-always-passes. Backed by component/auth/rbac_governance.go:GovernPrincipal. Returns {allowed: bool}.")
 builtin rbacGovernPrincipal {
   actorUserId     string
   actorRank       int!
@@ -20,9 +24,12 @@ builtin rbacGovernPrincipal {
   verb            string!
 }
 
+/// The create != edit split: may an actor at actorRank CREATE a principal at newRank? Permits
+/// minting STRICTLY BELOW the actor's own rank (an owner at any sub-owner rank). Independent of the
+/// update grant -- a role can hold create-on-principal without update-on-principal. Backed by
+/// component/auth/rbac_governance.go:CanCreatePrincipal. Returns {allowed: bool}.
 @executor("integration.rbac.canCreatePrincipal")
 @args(profile="object")
-@description("The create != edit split: may an actor at actorRank CREATE a principal at newRank? Permits minting STRICTLY BELOW the actor's own rank (an owner at any sub-owner rank). Independent of the update grant -- a role can hold create-on-principal without update-on-principal. Backed by component/auth/rbac_governance.go:CanCreatePrincipal. Returns {allowed: bool}.")
 builtin rbacCanCreatePrincipal {
   actorRank     int!
   actorIsOwner  bool

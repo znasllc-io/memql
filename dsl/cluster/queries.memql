@@ -3,7 +3,7 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-@description("Returns all registered cluster node types (bff, voice, cognition, agent, planner, ...)")
+/// Returns all registered cluster node types (bff, voice, cognition, agent, planner, ...)
 @unbounded("node-type registry -- a tiny bounded topology set consumed whole")
 query nodeType clusterNodeTypes {
 }
@@ -17,7 +17,7 @@ query nodeType clusterNodeTypes {
 // use `asOf(..., latest)` here because it's a query-level directive and
 // the function-loader validator treats it as an unknown function call.
 
-@description("Returns all cluster node rows (CLI dedupes to latest per id)")
+/// Returns all cluster node rows (CLI dedupes to latest per id)
 @unbounded("registered cluster nodes -- a bounded topology set consumed whole")
 query node clusterNodes {
 }
@@ -36,7 +36,8 @@ query node clusterNodes {
 // alongside clusterNodes / staleClusterNodes -- no caller-check
 // needed (per-row-authz-audit.md).
 
-@description("Latest-per-id cluster node rows for one deploymentId -- the live topology of that deployment (#1873). asOf latest collapses the append-only node stream to current state per node.")
+/// Latest-per-id cluster node rows for one deploymentId -- the live topology of that deployment
+/// (#1873). asOf latest collapses the append-only node stream to current state per node.
 @unbounded("nodes in one deployment -- a bounded topology set consumed whole")
 query node nodesForDeployment {
   args {
@@ -60,7 +61,8 @@ query node nodesForDeployment {
 // Authz: filters on payload.deploymentId only (infrastructure topology, no
 // user-scope field) -> conformance "other" bucket, same as clusterNodes.
 
-@description("Latest-per-id cluster nodes whose deploymentId != the supplied current deployment -- orphans from a previous deploy (feeds the reaper #1874 + cockpit orphan highlight). #1873.")
+/// Latest-per-id cluster nodes whose deploymentId != the supplied current deployment -- orphans
+/// from a previous deploy (feeds the reaper #1874 + cockpit orphan highlight). #1873.
 @unbounded("nodes outside a deployment -- a bounded topology set for drain/cutover, consumed whole")
 query node nodesNotInDeployment {
   args {
@@ -75,7 +77,7 @@ query node nodesNotInDeployment {
 // Returns all cluster spawn events (node lifecycle: spawned, stopped, failed).
 // Used by the CLI topology view to discover nodes via their spawn history.
 
-@description("Returns all cluster spawn events")
+/// Returns all cluster spawn events
 query spawnEvent clusterSpawnEvents {
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
@@ -89,7 +91,7 @@ query spawnEvent clusterSpawnEvents {
 // Returns the existing cluster record, if any.
 // Used by bootstrapCluster to check if cluster is already initialized.
 
-@description("Returns the existing cluster record, if any")
+/// Returns the existing cluster record, if any
 @unbounded("the cluster singleton row -- bounded to a single row")
 query cluster existingCluster {
 }
@@ -122,7 +124,9 @@ query cluster existingCluster {
 // per-row side in pruneStaleClusterNodes, mirroring
 // accessRequestExpirySweep / logicPurgeExpiredArchivedSpaces.
 
-@description("Latest-per-id cluster node rows whose health is not already 'stopped'. When olderThan is supplied, restricts to rows whose lastSeen is strictly before it (RFC3339 cutoff). Drives the stale-node prune cron.")
+/// Latest-per-id cluster node rows whose health is not already 'stopped'. When olderThan is
+/// supplied, restricts to rows whose lastSeen is strictly before it (RFC3339 cutoff). Drives the
+/// stale-node prune cron.
 @unbounded("stale-node reaper sweep -- an internal sweep that must see all stale nodes")
 query node staleClusterNodes {
   args {

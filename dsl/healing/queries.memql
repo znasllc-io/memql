@@ -16,7 +16,12 @@
 // entirely -- exactly the RBAC pattern where base roles are seeded, not
 // queried as a separate store.
 
-@description("Resolve the winning VALID overlay override for a base construct -- the read half of the two-tier resolution (E4.2 / memql#2140). Returns the caller's newest valid, active overlay override for the given baseConstructId (highest version first, newest createdAt on a tie). An empty result means no valid override exists and the Go resolver falls back to the embedded base. Owned: gated by ownerUserId==actor.userId, and tier=overlay + valid + active so a base-tier or unvalidated or retired row can never win resolution.")
+/// Resolve the winning VALID overlay override for a base construct -- the read half of the two-tier
+/// resolution (E4.2 / memql#2140). Returns the caller's newest valid, active overlay override for
+/// the given baseConstructId (highest version first, newest createdAt on a tie). An empty result
+/// means no valid override exists and the Go resolver falls back to the embedded base. Owned: gated
+/// by ownerUserId==actor.userId, and tier=overlay + valid + active so a base-tier or unvalidated or
+/// retired row can never win resolution.
 @actor
 query healedOverride resolveValidOverride {
   args {
@@ -28,7 +33,9 @@ query healedOverride resolveValidOverride {
   shape   healedOverrideFull
 }
 
-@description("List the caller's healed overrides for a base construct -- the full override history (every tier, valid + invalid, active + retired) for audit + the cockpit healed-pack view (E4.6). Owned: gated by ownerUserId==actor.userId. Newest version first.")
+/// List the caller's healed overrides for a base construct -- the full override history (every
+/// tier, valid + invalid, active + retired) for audit + the cockpit healed-pack view (E4.6). Owned:
+/// gated by ownerUserId==actor.userId. Newest version first.
 @actor
 query healedOverride overridesForConstruct {
   args {
@@ -40,8 +47,10 @@ query healedOverride overridesForConstruct {
   shape   healedOverrideFull
 }
 
+/// Fetch a single healed override by id, gated to the caller. Owned: ownerUserId==actor.userId is
+/// the load-bearing guard, so a caller can never read another user's override even with its id.
+/// Used by the validation flow (E4.5) to confirm the row before capturing the next version.
 @unbounded("healed override by id (guarded), gated to the owner -- bounded to a single row")
-@description("Fetch a single healed override by id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard, so a caller can never read another user's override even with its id. Used by the validation flow (E4.5) to confirm the row before capturing the next version.")
 @actor
 query healedOverride overrideById {
   args {

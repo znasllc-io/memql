@@ -3,8 +3,9 @@
 // Reusable projections in the `actions` namespace (epic #1734). Phase 0
 // (#1735) ships candidateFull -- the read projection over a captured trace.
 
+/// Full v1:actions:candidate projection: every field the action-library browse/recall surfaces need
+/// to inspect a captured trace (#1735).
 @row
-@description("Full v1:actions:candidate projection: every field the action-library browse/recall surfaces need to inspect a captured trace (#1735).")
 shape candidate candidateFull {
   row.id
   ownerUserId
@@ -17,8 +18,9 @@ shape candidate candidateFull {
   row.createdAt
 }
 
+/// Full v1:actions:action projection: the fields the harness replay path needs to resolve + replay
+/// an action (Phase 1 #1736).
 @row
-@description("Full v1:actions:action projection: the fields the harness replay path needs to resolve + replay an action (Phase 1 #1736).")
 shape action actionFull {
   row.id
   ownerUserId
@@ -43,8 +45,9 @@ shape action actionFull {
   row.createdAt
 }
 
+/// Full v1:actions:surface projection: the fields the resolver needs to bind a capability to a
+/// surface (Phase 2 #1737).
 @row
-@description("Full v1:actions:surface projection: the fields the resolver needs to bind a capability to a surface (Phase 2 #1737).")
 shape surface surfaceFull {
   row.id
   ownerUserId

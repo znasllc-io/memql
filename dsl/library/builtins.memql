@@ -8,10 +8,15 @@
 // dsl/library/concepts.memql (documentVersion) and the integration
 // package header for the full design (memql#1228-1231).
 
+/// Append a new version of a Library document with new content. Reads the current latest version,
+/// computes the next versionNumber + parentVersionId, appends an immutable
+/// v1:library:documentVersion snapshot (authorKind=user|assistant) and re-inserts the backing
+/// generatedOutput so the Library viewer reflects the edit. Optimistic concurrency via
+/// expectedVersion. ownerUserId is threaded from the document row, never the caller. Backs both the
+/// user edit (memql#1229) and the assistant editDocument tool (memql#1231).
 @sdk
 @executor("integration.library.editDocument")
 @args(profile="object")
-@description("Append a new version of a Library document with new content. Reads the current latest version, computes the next versionNumber + parentVersionId, appends an immutable v1:library:documentVersion snapshot (authorKind=user|assistant) and re-inserts the backing generatedOutput so the Library viewer reflects the edit. Optimistic concurrency via expectedVersion. ownerUserId is threaded from the document row, never the caller. Backs both the user edit (memql#1229) and the assistant editDocument tool (memql#1231).")
 builtin editDocument {
   documentId       string!
   content          string
@@ -24,9 +29,13 @@ builtin editDocument {
   partitionId          string
 }
 
+/// Assistant-facing document edit (memql#1231). Backs the agent editDocument tool: appends a new
+/// version authored by the calling agent (authorKind=assistant, authorId=agentId) to an existing
+/// logical document, re-inserting the backing generatedOutput so the Library viewer reflects the
+/// revision. ownerUserId is threaded from the document row. Delegates to the same append path as
+/// the user edit.
 @executor("integration.library.editDocumentAsAssistant")
 @args(profile="object")
-@description("Assistant-facing document edit (memql#1231). Backs the agent editDocument tool: appends a new version authored by the calling agent (authorKind=assistant, authorId=agentId) to an existing logical document, re-inserting the backing generatedOutput so the Library viewer reflects the revision. ownerUserId is threaded from the document row. Delegates to the same append path as the user edit.")
 builtin assistantEditDocument {
   documentId       string!
   content          string
@@ -38,10 +47,13 @@ builtin assistantEditDocument {
   expectedVersion  int
 }
 
+/// Restore a Library document to an earlier version by APPENDING a new latest version equal to the
+/// chosen one (memql#1230). Forward-only and non-destructive: history is never deleted; the restore
+/// lands as a new version (authorKind=system) with note 'restored from vN'. ownerUserId is threaded
+/// from the document row.
 @sdk
 @executor("integration.library.restoreDocumentVersion")
 @args(profile="object")
-@description("Restore a Library document to an earlier version by APPENDING a new latest version equal to the chosen one (memql#1230). Forward-only and non-destructive: history is never deleted; the restore lands as a new version (authorKind=system) with note 'restored from vN'. ownerUserId is threaded from the document row.")
 builtin restoreDocumentVersion {
   documentId  string!
   versionId   string!

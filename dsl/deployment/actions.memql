@@ -48,9 +48,8 @@ use capabilities.integration.github.{ tagRelease }
 //   Shell-backed deploy actions (capability shell.script)
 // =============================================================================
 
-// cloneRepoAtVersion -- check out a clean working tree at a pinned ref so a
-// build runs against a known version. Backend: scripts/deploy/clone-repo.sh.
-@description("Check out the memQL repo at a specific version into a clean workdir on the deploy runner, so the build runs against a pinned ref.")
+/// Check out the memQL repo at a specific version into a clean workdir on the deploy runner, so the
+/// build runs against a pinned ref.
 action cloneRepoAtVersion {
   args {
     workdir string!
@@ -64,7 +63,8 @@ action cloneRepoAtVersion {
 // scripts/deploy/build-image.sh (a thin, dry-run-capable wrapper; the real
 // release build runs on the GitHub build server, not here -- this is the
 // local/no-op surface).
-@description("Build the container image for one engine node type at a version on the deploy runner (local/dry-run surface) so it can be imported or pushed.")
+/// Build the container image for one engine node type at a version on the deploy runner
+/// (local/dry-run surface) so it can be imported or pushed.
 action buildEngineImage {
   args {
     nodeType string!
@@ -75,9 +75,8 @@ action buildEngineImage {
   capability script(script: "deploy.buildImage", nodeType: args.nodeType, version: args.version, workdir: args.workdir, dryRun: args.dryRun)
 }
 
-// importImageToK3d -- load a built node image into the local k3d cluster (the
-// development-environment placement step). Backend: scripts/k3d/import-image.sh.
-@description("Import a built engine node image into the local k3d cluster (development placement) so the development overlay can run it.")
+/// Import a built engine node image into the local k3d cluster (development placement) so the
+/// development overlay can run it.
 action importImageToK3d {
   args {
     nodeType string!
@@ -91,7 +90,8 @@ action importImageToK3d {
 // pinOverlayDigests -- pin a kustomize overlay to the exact image digests for a
 // release (the GitOps placement step for staging/production). Backend:
 // scripts/deploy/pin-overlay-digests.sh.
-@description("Pin a kustomize overlay to the resolved per-node image digests for a release (GitOps placement) so ArgoCD deploys exactly those images.")
+/// Pin a kustomize overlay to the resolved per-node image digests for a release (GitOps placement)
+/// so ArgoCD deploys exactly those images.
 action pinOverlayDigests {
   args {
     overlayPath string!
@@ -103,7 +103,7 @@ action pinOverlayDigests {
 
 // argoSync -- trigger an ArgoCD application sync to the pinned revision.
 // Backend: scripts/deploy/argo-sync.sh.
-@description("Ask ArgoCD to reconcile an application to a pinned git revision.")
+/// Ask ArgoCD to reconcile an application to a pinned git revision.
 action argoSync {
   args {
     app      string!
@@ -117,7 +117,8 @@ action argoSync {
 // carrying `passed`. The deploy automation (I10) branches success/rollback on
 // logic deployGateGreen, which reads this action's `passed`. Backend:
 // scripts/deploy/deploy-gate.sh.
-@description("Execute the post-deploy verification gate for an environment and return a structured pass/fail result indicating whether the deployment is healthy.")
+/// Execute the post-deploy verification gate for an environment and return a structured pass/fail
+/// result indicating whether the deployment is healthy.
 action runDeployGate {
   args {
     env     string!
@@ -130,7 +131,8 @@ action runDeployGate {
 // revertOverlay -- roll an overlay back to a previous deployment's pinned
 // digests (owner-only via the deploy automation's spec gate). Backend:
 // scripts/deploy/revert-overlay.sh.
-@description("Restore an environment overlay's image digests to those of a prior deployment so ArgoCD rolls the environment back (rollback).")
+/// Restore an environment overlay's image digests to those of a prior deployment so ArgoCD rolls
+/// the environment back (rollback).
 action revertOverlay {
   args {
     overlayPath    string!
@@ -143,7 +145,8 @@ action revertOverlay {
 // notifyDeploy -- post a deploy status notification. Backend:
 // scripts/deploy/notify.sh (a no-op-locally notifier; an integration.slack.*
 // backend can replace it where a Slack engine tool is configured).
-@description("Announce the outcome of a deployment (succeeded/failed) so operators see the result without reading logs.")
+/// Announce the outcome of a deployment (succeeded/failed) so operators see the result without
+/// reading logs.
 action notifyDeploy {
   args {
     env          string!
@@ -158,12 +161,7 @@ action notifyDeploy {
 //   Integration-backed deploy action (capability integration.*)
 // =============================================================================
 
-// tagRelease -- cut a git tag + GitHub release for a shipped version. A SIDE-
-// EFFECTING integration (its capability class=write, ADR §3 + §7) is reachable
-// ONLY through an action; it resolves to the engine's integration tool, not a
-// shell script. integration.github.* is control-plane by capability, so it also
-// pins to the cockpit/runner surface (I13 deployControlCapabilityPrefixes).
-@description("Cut a git tag + GitHub release for the version that just deployed.")
+/// Cut a git tag + GitHub release for the version that just deployed.
 action tagRelease {
   args {
     repo    string!

@@ -21,17 +21,23 @@
 // via the enum); a row that matches one cannot match either of the
 // other two.
 
-@description("Matches v1:agents:agent rows where payload.kind == 'assistant' -- user-facing conversational agents (the per-user General Assistant; the only kind the frontend's create-agent modal mints).")
+/// Matches v1:agents:agent rows where payload.kind == 'assistant' -- user-facing conversational
+/// agents (the per-user General Assistant; the only kind the frontend's create-agent modal mints).
 trait agentKindAssistant {
   return kind == "assistant"
 }
 
-@description("Matches v1:agents:agent rows where payload.kind == 'specialist' -- tool-driven agents (planner-provisioned for capability gaps under memql#399, or user-created with role=specialist). Specialists answer through tools; they never participate in spaces as conversational members.")
+/// Matches v1:agents:agent rows where payload.kind == 'specialist' -- tool-driven agents
+/// (planner-provisioned for capability gaps under memql#399, or user-created with role=specialist).
+/// Specialists answer through tools; they never participate in spaces as conversational members.
 trait agentKindSpecialist {
   return kind == "specialist"
 }
 
-@description("Matches v1:agents:agent rows where payload.kind == 'system' -- platform-internal agents (MemQL Planner, MemQL Trainer, future system-owned ones). System agents must never be candidates for utterance routing, the CreateAgent role picker, or the planner's match/extend dedupe; consumers use this trait on the negative side to filter them out of every user-facing surface.")
+/// Matches v1:agents:agent rows where payload.kind == 'system' -- platform-internal agents (MemQL
+/// Planner, MemQL Trainer, future system-owned ones). System agents must never be candidates for
+/// utterance routing, the CreateAgent role picker, or the planner's match/extend dedupe; consumers
+/// use this trait on the negative side to filter them out of every user-facing surface.
 trait agentKindSystem {
   return kind == "system"
 }

@@ -57,7 +57,7 @@
 
 use common.traits.{ statusIsActive }
 
-@description("Resolve a v1:forge:project by id.")
+/// Resolve a v1:forge:project by id.
 query project projectById {
   args {
     projectId  string!
@@ -66,15 +66,17 @@ query project projectById {
   shape   projectFull
 }
 
+/// List active v1:forge:project rows.
 @unbounded("active forge projects -- a small bounded catalog consumed whole")
-@description("List active v1:forge:project rows.")
 query project activeProjects {
   filter  statusIsActive
   shape   projectFull
 }
 
+/// Resolve a v1:forge:project by its stable slug (e.g. 'memql', 'acme-app'). Claude uses this to go
+/// from a human-supplied name to a projectId before submitting a request or filtering requests.
+/// Returns at most one row because slugs are unique within a partition.
 @unbounded("forge project by unique slug -- bounded to a single row")
-@description("Resolve a v1:forge:project by its stable slug (e.g. 'memql', 'acme-app'). Claude uses this to go from a human-supplied name to a projectId before submitting a request or filtering requests. Returns at most one row because slugs are unique within a partition.")
 query project projectBySlug {
   args {
     slug  string!
@@ -83,7 +85,7 @@ query project projectBySlug {
   shape   projectFull
 }
 
-@description("List the caller's own submitted requests, newest-first. Open to any team member.")
+/// List the caller's own submitted requests, newest-first. Open to any team member.
 @actor
 query request myRequests {
   filter  submitterUserId == actor.userId
@@ -95,7 +97,7 @@ query request myRequests {
   shape   requestFull
 }
 
-@description("Resolve a single v1:forge:request by id (detail view).")
+/// Resolve a single v1:forge:request by id (detail view).
 query request requestById {
   args {
     requestId  string!
@@ -104,7 +106,7 @@ query request requestById {
   shape   requestFull
 }
 
-@description("List requests by project, newest-first.")
+/// List requests by project, newest-first.
 query request projectRequests {
   args {
     projectId  string!
@@ -120,7 +122,8 @@ query request projectRequests {
 
 // ----- developer/owner-gated queues -----
 
-@description("The validation queue: requests awaiting first-line developer validation. Developer/owner only (forgeDeveloper).")
+/// The validation queue: requests awaiting first-line developer validation. Developer/owner only
+/// (forgeDeveloper).
 query request validationQueue {
   filter  status == "needs_validation" && forgeDeveloper
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
@@ -131,7 +134,7 @@ query request validationQueue {
   shape   requestFull
 }
 
-@description("The approval queue: validated requests awaiting owner approval. Owner only (forgeApprover).")
+/// The approval queue: validated requests awaiting owner approval. Owner only (forgeApprover).
 query request approvalQueue {
   filter  status == "needs_approval" && forgeApprover
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
@@ -142,7 +145,7 @@ query request approvalQueue {
   shape   requestFull
 }
 
-@description("The full audit trail for a request, newest-first.")
+/// The full audit trail for a request, newest-first.
 query requestEvent requestEvents {
   args {
     requestId  string!

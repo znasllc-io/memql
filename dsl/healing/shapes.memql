@@ -1,7 +1,9 @@
 // healing domain -- row projections.
 
+/// Comprehensive healed-override projection: every payload field plus row id and timestamps. The
+/// default shape for resolution + list + create reads of the two-tier base/overlay store (E4.2 /
+/// memql#2140).
 @row
-@description("Comprehensive healed-override projection: every payload field plus row id and timestamps. The default shape for resolution + list + create reads of the two-tier base/overlay store (E4.2 / memql#2140).")
 shape healedOverride healedOverrideFull {
   row.id
   ownerUserId

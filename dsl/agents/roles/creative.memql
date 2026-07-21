@@ -4,7 +4,7 @@
 
 use agents.concepts.{ agentRole }
 
-@description("Visual identity, layout, typography, color, and brand-system design.")
+/// Visual identity, layout, typography, color, and brand-system design.
 seed agentRole graphic-designer {
   slug:                  "graphic-designer"
   name:                  "Graphic Designer"
@@ -18,7 +18,7 @@ seed agentRole graphic-designer {
   predefined:            true
 }
 
-@description("User research, wireframing, prototyping, usability testing, and design-system stewardship.")
+/// User research, wireframing, prototyping, usability testing, and design-system stewardship.
 seed agentRole ux-designer {
   slug:                  "ux-designer"
   name:                  "UX Designer"
@@ -32,7 +32,7 @@ seed agentRole ux-designer {
   predefined:            true
 }
 
-@description("Novels, short fiction, structure, character work, dialogue, and craft.")
+/// Novels, short fiction, structure, character work, dialogue, and craft.
 seed agentRole fiction-writer {
   slug:                  "fiction-writer"
   name:                  "Fiction Writer"
@@ -46,7 +46,7 @@ seed agentRole fiction-writer {
   predefined:            true
 }
 
-@description("Feature and TV scripting: structure, formatting, dialogue, and the development pipeline.")
+/// Feature and TV scripting: structure, formatting, dialogue, and the development pipeline.
 seed agentRole screenwriter {
   slug:                  "screenwriter"
   name:                  "Screenwriter"
@@ -60,7 +60,7 @@ seed agentRole screenwriter {
   predefined:            true
 }
 
-@description("Lyrics, melody, song structure, genre conventions, and demo workflow.")
+/// Lyrics, melody, song structure, genre conventions, and demo workflow.
 seed agentRole songwriter {
   slug:                  "songwriter"
   name:                  "Songwriter"
@@ -74,7 +74,7 @@ seed agentRole songwriter {
   predefined:            true
 }
 
-@description("Scales, harmony, voice leading, form, and ear-training pedagogy.")
+/// Scales, harmony, voice leading, form, and ear-training pedagogy.
 seed agentRole music-theory-teacher {
   slug:                  "music-theory-teacher"
   name:                  "Music Theory Teacher"
@@ -88,7 +88,7 @@ seed agentRole music-theory-teacher {
   predefined:            true
 }
 
-@description("Exposure, composition, lighting, editing workflow, and genre conventions.")
+/// Exposure, composition, lighting, editing workflow, and genre conventions.
 seed agentRole photographer {
   slug:                  "photographer"
   name:                  "Photographer"
@@ -102,7 +102,7 @@ seed agentRole photographer {
   predefined:            true
 }
 
-@description("Edit theory, pacing, audio, color, and post-production workflow.")
+/// Edit theory, pacing, audio, color, and post-production workflow.
 seed agentRole video-editor {
   slug:                  "video-editor"
   name:                  "Video Editor"
@@ -116,7 +116,7 @@ seed agentRole video-editor {
   predefined:            true
 }
 
-@description("Digital + traditional illustration: drawing fundamentals, style, color, and commercial workflow.")
+/// Digital + traditional illustration: drawing fundamentals, style, color, and commercial workflow.
 seed agentRole illustrator {
   slug:                  "illustrator"
   name:                  "Illustrator"
@@ -130,7 +130,7 @@ seed agentRole illustrator {
   predefined:            true
 }
 
-@description("Systems design, mechanics, level design, narrative integration, and prototyping.")
+/// Systems design, mechanics, level design, narrative integration, and prototyping.
 seed agentRole game-designer {
   slug:                  "game-designer"
   name:                  "Game Designer"
@@ -144,7 +144,7 @@ seed agentRole game-designer {
   predefined:            true
 }
 
-@description("Hobby creative pursuits: drawing, music, photography, journaling. Encouragement + reference.")
+/// Hobby creative pursuits: drawing, music, photography, journaling. Encouragement + reference.
 seed agentRole creative-companion {
   slug:                  "creative-companion"
   name:                  "Creative Companion"

@@ -1,7 +1,8 @@
 // shapes.memql -- safety namespace.
 
+/// Comprehensive projection of every v1:safety:classification field. Backs the retention sweep +
+/// future cockpit Command Safety view.
 @row
-@description("Comprehensive projection of every v1:safety:classification field. Backs the retention sweep + future cockpit Command Safety view.")
 shape classification classificationFull {
   row.id
   row.createdAt
@@ -23,8 +24,9 @@ shape classification classificationFull {
   mode
 }
 
+/// Comprehensive projection of every v1:safety:approvalRequest field. Backs the cockpit approval
+/// inbox (memql-cockpit follow-up) + the Gate's bypass-check query.
 @row
-@description("Comprehensive projection of every v1:safety:approvalRequest field. Backs the cockpit approval inbox (memql-cockpit follow-up) + the Gate's bypass-check query.")
 shape approvalRequest approvalRequestFull {
   row.id
   row.createdAt
@@ -45,8 +47,9 @@ shape approvalRequest approvalRequestFull {
   planId
 }
 
+/// Comprehensive projection of every v1:safety:outputScreening field. Backs the retention sweep +
+/// future cockpit prompt-injection dashboard.
 @row
-@description("Comprehensive projection of every v1:safety:outputScreening field. Backs the retention sweep + future cockpit prompt-injection dashboard.")
 shape outputScreening outputScreeningFull {
   row.id
   row.createdAt

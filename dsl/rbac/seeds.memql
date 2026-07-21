@@ -49,7 +49,8 @@
 //   more privileged. Spaced by 100 so E1.4 custom roles slot between.
 // =============================================================================
 
-@description("owner: the cluster owner -- full authority over every resource including principals (owner-only-by-owner self-management). Self-managed only; highest rank.")
+/// owner: the cluster owner -- full authority over every resource including principals
+/// (owner-only-by-owner self-management). Self-managed only; highest rank.
 seed role owner {
   slug:        "owner"
   name:        "Owner"
@@ -58,7 +59,8 @@ seed role owner {
   predefined:  true
 }
 
-@description("developer: ENGINEERING power -- authors constructs, runs inline DSL, drives the data plane, forward-deploys. OUTRANKS admin (different power axis); does NOT manage principals.")
+/// developer: ENGINEERING power -- authors constructs, runs inline DSL, drives the data plane,
+/// forward-deploys. OUTRANKS admin (different power axis); does NOT manage principals.
 seed role developer {
   slug:        "developer"
   name:        "Developer"
@@ -67,7 +69,8 @@ seed role developer {
   predefined:  true
 }
 
-@description("admin: USER-MANAGEMENT power -- creates/edits/removes lower-ranked principals, creates agents/groups, drives the data plane, forward-deploys. Does NOT author constructs.")
+/// admin: USER-MANAGEMENT power -- creates/edits/removes lower-ranked principals, creates
+/// agents/groups, drives the data plane, forward-deploys. Does NOT author constructs.
 seed role admin {
   slug:        "admin"
   name:        "Admin"
@@ -76,7 +79,9 @@ seed role admin {
   predefined:  true
 }
 
-@description("user: the member tier -- read/write data plane plus read on the catalogs. No user management, authoring, or deploy. The locked base model collapses the legacy writer rank here (E1.5: the writer slug resolves to this member capability profile).")
+/// user: the member tier -- read/write data plane plus read on the catalogs. No user management,
+/// authoring, or deploy. The locked base model collapses the legacy writer rank here (E1.5: the
+/// writer slug resolves to this member capability profile).
 seed role user {
   slug:        "user"
   name:        "Member"
@@ -85,7 +90,9 @@ seed role user {
   predefined:  true
 }
 
-@description("viewer: the read-only tier. The E1.5 (memql#2073) reconciliation target for the legacy reader slug -- reads the data plane + catalogs, writes nothing. Ranked below user (member) so a member out-ranks a viewer. Mirrors component/auth/rbac_model.go's reader/viewer capability profile.")
+/// viewer: the read-only tier. The E1.5 (memql#2073) reconciliation target for the legacy reader
+/// slug -- reads the data plane + catalogs, writes nothing. Ranked below user (member) so a member
+/// out-ranks a viewer. Mirrors component/auth/rbac_model.go's reader/viewer capability profile.
 seed role viewer {
   slug:        "viewer"
   name:        "Viewer"
@@ -98,43 +105,45 @@ seed role viewer {
 //   owner -- full authority over every resource type, every verb.
 // =============================================================================
 
-@description("owner: read principals (users/identities).")
+/// owner: read principals (users/identities).
 seed capability cap-owner-read-principal { roleSlug: "owner"  verb: "read"    resourceType: "principal"  predefined: true }
-@description("owner: create principals -- add users.")
+/// owner: create principals -- add users.
 seed capability cap-owner-create-principal { roleSlug: "owner"  verb: "create"  resourceType: "principal"  predefined: true }
-@description("owner: update principals -- edit any user, including owners (owner-only-by-owner is the E1.3 rank+self predicate, not a separate grant).")
+/// owner: update principals -- edit any user, including owners (owner-only-by-owner is the E1.3
+/// rank+self predicate, not a separate grant).
 seed capability cap-owner-update-principal { roleSlug: "owner"  verb: "update"  resourceType: "principal"  predefined: true }
-@description("owner: delete principals -- remove users.")
+/// owner: delete principals -- remove users.
 seed capability cap-owner-delete-principal { roleSlug: "owner"  verb: "delete"  resourceType: "principal"  predefined: true }
-@description("owner: author constructs (define DSL).")
+/// owner: author constructs (define DSL).
 seed capability cap-owner-create-construct { roleSlug: "owner"  verb: "create"  resourceType: "construct"  predefined: true }
-@description("owner: edit constructs.")
+/// owner: edit constructs.
 seed capability cap-owner-update-construct { roleSlug: "owner"  verb: "update"  resourceType: "construct"  predefined: true }
-@description("owner: delete constructs.")
+/// owner: delete constructs.
 seed capability cap-owner-delete-construct { roleSlug: "owner"  verb: "delete"  resourceType: "construct"  predefined: true }
-@description("owner: run inline DSL (execute construct).")
+/// owner: run inline DSL (execute construct).
 seed capability cap-owner-execute-construct { roleSlug: "owner"  verb: "execute"  resourceType: "construct"  predefined: true }
-@description("owner: read the data plane.")
+/// owner: read the data plane.
 seed capability cap-owner-read-data { roleSlug: "owner"  verb: "read"    resourceType: "data"  predefined: true }
-@description("owner: create data.")
+/// owner: create data.
 seed capability cap-owner-create-data { roleSlug: "owner"  verb: "create"  resourceType: "data"  predefined: true }
-@description("owner: update data.")
+/// owner: update data.
 seed capability cap-owner-update-data { roleSlug: "owner"  verb: "update"  resourceType: "data"  predefined: true }
-@description("owner: delete data.")
+/// owner: delete data.
 seed capability cap-owner-delete-data { roleSlug: "owner"  verb: "delete"  resourceType: "data"  predefined: true }
-@description("owner: execute deploy actions -- cut/deploy/rollback (rollback is owner-only via the E1.3 predicate).")
+/// owner: execute deploy actions -- cut/deploy/rollback (rollback is owner-only via the E1.3
+/// predicate).
 seed capability cap-owner-execute-deployment { roleSlug: "owner"  verb: "execute"  resourceType: "deployment"  predefined: true }
-@description("owner: create agents.")
+/// owner: create agents.
 seed capability cap-owner-create-agent { roleSlug: "owner"  verb: "create"  resourceType: "agent"  predefined: true }
-@description("owner: manage groups (create).")
+/// owner: manage groups (create).
 seed capability cap-owner-create-group { roleSlug: "owner"  verb: "create"  resourceType: "group"  predefined: true }
-@description("owner: read the RBAC role catalog.")
+/// owner: read the RBAC role catalog.
 seed capability cap-owner-read-role { roleSlug: "owner"  verb: "read"    resourceType: "role"  predefined: true }
-@description("owner: create custom roles.")
+/// owner: create custom roles.
 seed capability cap-owner-create-role { roleSlug: "owner"  verb: "create"  resourceType: "role"  predefined: true }
-@description("owner: edit custom roles.")
+/// owner: edit custom roles.
 seed capability cap-owner-update-role { roleSlug: "owner"  verb: "update"  resourceType: "role"  predefined: true }
-@description("owner: delete custom roles.")
+/// owner: delete custom roles.
 seed capability cap-owner-delete-role { roleSlug: "owner"  verb: "delete"  resourceType: "role"  predefined: true }
 
 // =============================================================================
@@ -142,29 +151,30 @@ seed capability cap-owner-delete-role { roleSlug: "owner"  verb: "delete"  resou
 //   NO principal management (cannot create/update/delete users).
 // =============================================================================
 
-@description("developer: read principals (see the user list; no management).")
+/// developer: read principals (see the user list; no management).
 seed capability cap-developer-read-principal { roleSlug: "developer"  verb: "read"    resourceType: "principal"  predefined: true }
-@description("developer: author constructs (CanAuthor).")
+/// developer: author constructs (CanAuthor).
 seed capability cap-developer-create-construct { roleSlug: "developer"  verb: "create"  resourceType: "construct"  predefined: true }
-@description("developer: edit constructs.")
+/// developer: edit constructs.
 seed capability cap-developer-update-construct { roleSlug: "developer"  verb: "update"  resourceType: "construct"  predefined: true }
-@description("developer: delete constructs.")
+/// developer: delete constructs.
 seed capability cap-developer-delete-construct { roleSlug: "developer"  verb: "delete"  resourceType: "construct"  predefined: true }
-@description("developer: run inline DSL (CanRunInline).")
+/// developer: run inline DSL (CanRunInline).
 seed capability cap-developer-execute-construct { roleSlug: "developer"  verb: "execute"  resourceType: "construct"  predefined: true }
-@description("developer: read the data plane.")
+/// developer: read the data plane.
 seed capability cap-developer-read-data { roleSlug: "developer"  verb: "read"    resourceType: "data"  predefined: true }
-@description("developer: create data.")
+/// developer: create data.
 seed capability cap-developer-create-data { roleSlug: "developer"  verb: "create"  resourceType: "data"  predefined: true }
-@description("developer: update data.")
+/// developer: update data.
 seed capability cap-developer-update-data { roleSlug: "developer"  verb: "update"  resourceType: "data"  predefined: true }
-@description("developer: delete data.")
+/// developer: delete data.
 seed capability cap-developer-delete-data { roleSlug: "developer"  verb: "delete"  resourceType: "data"  predefined: true }
-@description("developer: forward-deploy (execute deployment -- AtLeastDeveloper; rollback stays owner-only via the E1.3 predicate, not a developer grant).")
+/// developer: forward-deploy (execute deployment -- AtLeastDeveloper; rollback stays owner-only via
+/// the E1.3 predicate, not a developer grant).
 seed capability cap-developer-execute-deployment { roleSlug: "developer"  verb: "execute"  resourceType: "deployment"  predefined: true }
-@description("developer: read agents.")
+/// developer: read agents.
 seed capability cap-developer-read-agent { roleSlug: "developer"  verb: "read"    resourceType: "agent"  predefined: true }
-@description("developer: read the RBAC role catalog.")
+/// developer: read the RBAC role catalog.
 seed capability cap-developer-read-role { roleSlug: "developer"  verb: "read"    resourceType: "role"  predefined: true }
 
 // =============================================================================
@@ -172,35 +182,36 @@ seed capability cap-developer-read-role { roleSlug: "developer"  verb: "read"   
 //   creation + data plane + deploy. Does NOT author constructs (read only).
 // =============================================================================
 
-@description("admin: read principals.")
+/// admin: read principals.
 seed capability cap-admin-read-principal { roleSlug: "admin"  verb: "read"    resourceType: "principal"  predefined: true }
-@description("admin: create principals -- add users (CanManageUser create half).")
+/// admin: create principals -- add users (CanManageUser create half).
 seed capability cap-admin-create-principal { roleSlug: "admin"  verb: "create"  resourceType: "principal"  predefined: true }
-@description("admin: update principals -- edit lower-ranked users (the E1.3 rank predicate bounds which; admin cannot edit owners).")
+/// admin: update principals -- edit lower-ranked users (the E1.3 rank predicate bounds which; admin
+/// cannot edit owners).
 seed capability cap-admin-update-principal { roleSlug: "admin"  verb: "update"  resourceType: "principal"  predefined: true }
-@description("admin: delete principals -- remove lower-ranked users.")
+/// admin: delete principals -- remove lower-ranked users.
 seed capability cap-admin-delete-principal { roleSlug: "admin"  verb: "delete"  resourceType: "principal"  predefined: true }
-@description("admin: read constructs (NOT author -- admin gains no authoring per CanAuthor).")
+/// admin: read constructs (NOT author -- admin gains no authoring per CanAuthor).
 seed capability cap-admin-read-construct { roleSlug: "admin"  verb: "read"    resourceType: "construct"  predefined: true }
-@description("admin: read the data plane.")
+/// admin: read the data plane.
 seed capability cap-admin-read-data { roleSlug: "admin"  verb: "read"    resourceType: "data"  predefined: true }
-@description("admin: create data.")
+/// admin: create data.
 seed capability cap-admin-create-data { roleSlug: "admin"  verb: "create"  resourceType: "data"  predefined: true }
-@description("admin: update data.")
+/// admin: update data.
 seed capability cap-admin-update-data { roleSlug: "admin"  verb: "update"  resourceType: "data"  predefined: true }
-@description("admin: delete data.")
+/// admin: delete data.
 seed capability cap-admin-delete-data { roleSlug: "admin"  verb: "delete"  resourceType: "data"  predefined: true }
-@description("admin: forward-deploy (execute deployment -- AtLeastAdmin gates the legacy console actions).")
+/// admin: forward-deploy (execute deployment -- AtLeastAdmin gates the legacy console actions).
 seed capability cap-admin-execute-deployment { roleSlug: "admin"  verb: "execute"  resourceType: "deployment"  predefined: true }
-@description("admin: create agents (CanCreateAgent).")
+/// admin: create agents (CanCreateAgent).
 seed capability cap-admin-create-agent { roleSlug: "admin"  verb: "create"  resourceType: "agent"  predefined: true }
-@description("admin: manage groups (CanManageGroup -- create).")
+/// admin: manage groups (CanManageGroup -- create).
 seed capability cap-admin-create-group { roleSlug: "admin"  verb: "create"  resourceType: "group"  predefined: true }
-@description("admin: read the RBAC role catalog.")
+/// admin: read the RBAC role catalog.
 seed capability cap-admin-read-role { roleSlug: "admin"  verb: "read"    resourceType: "role"  predefined: true }
-@description("admin: create custom roles (bounded to <= admin rank by E1.4).")
+/// admin: create custom roles (bounded to <= admin rank by E1.4).
 seed capability cap-admin-create-role { roleSlug: "admin"  verb: "create"  resourceType: "role"  predefined: true }
-@description("admin: edit custom roles within rank bound.")
+/// admin: edit custom roles within rank bound.
 seed capability cap-admin-update-role { roleSlug: "admin"  verb: "update"  resourceType: "role"  predefined: true }
 
 // =============================================================================
@@ -208,17 +219,17 @@ seed capability cap-admin-update-role { roleSlug: "admin"  verb: "update"  resou
 //   + read on the catalogs. No principal management, no authoring, no deploy.
 // =============================================================================
 
-@description("user: read the data plane.")
+/// user: read the data plane.
 seed capability cap-user-read-data { roleSlug: "user"  verb: "read"    resourceType: "data"  predefined: true }
-@description("user: create data (CanWrite).")
+/// user: create data (CanWrite).
 seed capability cap-user-create-data { roleSlug: "user"  verb: "create"  resourceType: "data"  predefined: true }
-@description("user: update data (CanWrite).")
+/// user: update data (CanWrite).
 seed capability cap-user-update-data { roleSlug: "user"  verb: "update"  resourceType: "data"  predefined: true }
-@description("user: delete own data (CanWrite; per-row ownership still gates which rows).")
+/// user: delete own data (CanWrite; per-row ownership still gates which rows).
 seed capability cap-user-delete-data { roleSlug: "user"  verb: "delete"  resourceType: "data"  predefined: true }
-@description("user: read agents (pick from the catalog; no creation).")
+/// user: read agents (pick from the catalog; no creation).
 seed capability cap-user-read-agent { roleSlug: "user"  verb: "read"    resourceType: "agent"  predefined: true }
-@description("user: read groups.")
+/// user: read groups.
 seed capability cap-user-read-group { roleSlug: "user"  verb: "read"    resourceType: "group"  predefined: true }
 
 // =============================================================================
@@ -226,9 +237,9 @@ seed capability cap-user-read-group { roleSlug: "user"  verb: "read"    resource
 //   Reads the data plane + catalogs; writes nothing.
 // =============================================================================
 
-@description("viewer: read the data plane (read-only tier).")
+/// viewer: read the data plane (read-only tier).
 seed capability cap-viewer-read-data { roleSlug: "viewer"  verb: "read"  resourceType: "data"  predefined: true }
-@description("viewer: read agents.")
+/// viewer: read agents.
 seed capability cap-viewer-read-agent { roleSlug: "viewer"  verb: "read"  resourceType: "agent"  predefined: true }
-@description("viewer: read groups.")
+/// viewer: read groups.
 seed capability cap-viewer-read-group { roleSlug: "viewer"  verb: "read"  resourceType: "group"  predefined: true }

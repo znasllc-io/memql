@@ -36,8 +36,8 @@
 // ---------------------------------------------------------------------------
 // Declaration shape
 // ---------------------------------------------------------------------------
+/// Create a git tag + GitHub release for a version.
 @sideEffect("write")
-@description("Create a git tag + GitHub release for a version.")
 capability integration.github.tagRelease {
   args {
     repo string!
@@ -46,8 +46,8 @@ capability integration.github.tagRelease {
 }
 
 // A read capability with a single arg.
+/// Read a file from the local filesystem surface.
 @sideEffect("read")
-@description("Read a file from the local filesystem surface.")
 capability fs.readFile {
   args {
     path string!
@@ -55,8 +55,8 @@ capability fs.readFile {
 }
 
 // An exec capability may take no args at all (args block omitted).
+/// Run a shell script on the host surface.
 @sideEffect("exec")
-@description("Run a shell script on the host surface.")
 capability shell.script { }
 
 // ---------------------------------------------------------------------------

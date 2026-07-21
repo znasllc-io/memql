@@ -9,7 +9,10 @@
 
 use agents.concepts.{ skill }
 
-@description("Universal headless capability surface: workbench filesystem + shell + http_fetch on the per-Plan sandbox. Every agent ends up with this -- the role-factory injects it as a locked skill on creation (mirrors the existing universal workbench_use baseline). No agent authorization wall: the blast radius is contained to the per-Plan workspace.")
+/// Universal headless capability surface: workbench filesystem + shell + http_fetch on the per-Plan
+/// sandbox. Every agent ends up with this -- the role-factory injects it as a locked skill on
+/// creation (mirrors the existing universal workbench_use baseline). No agent authorization wall:
+/// the blast radius is contained to the per-Plan workspace.
 seed skill workbench-baseline {
   slug:          "workbench-baseline"
   name:          "Workbench Baseline"
@@ -23,7 +26,12 @@ seed skill workbench-baseline {
   predefined:    true
 }
 
-@description("Computer use on the user's own machine: shell + filesystem + http (headless via workerHost) and mouse + keyboard + screenshot (embodied via workerComputer). Opt-in per role; gated at dispatch by v1:agents:agentAuthorization.computerUseScope plus the per-Plan kill switch. The standing-grant model + per-action scope card live with the worker integration; this skill bundles the tool surface the role-factory copies onto the agent's capabilities when the user opts in.")
+/// Computer use on the user's own machine: shell + filesystem + http (headless via workerHost) and
+/// mouse + keyboard + screenshot (embodied via workerComputer). Opt-in per role; gated at dispatch
+/// by v1:agents:agentAuthorization.computerUseScope plus the per-Plan kill switch. The
+/// standing-grant model + per-action scope card live with the worker integration; this skill
+/// bundles the tool surface the role-factory copies onto the agent's capabilities when the user
+/// opts in.
 seed skill operator-computer-use {
   slug:          "operator-computer-use"
   name:          "Operator Computer Use"
@@ -37,7 +45,12 @@ seed skill operator-computer-use {
   predefined:    true
 }
 
-@description("Delegate produce-an-artifact requests to the planner. Bundles the produceArtifact tool so the Assistant can hand off 'create / make / build a file' requests to the async planner pipeline (which routes/creates a specialist, researches, and writes the deliverable into the Library) instead of authoring deliverables inline in a chat turn. Assistant-only -- specialists are the delegates, they never delegate. The tool itself is @allowedRoles(assistant), so a specialist that somehow carries this skill still cannot call it.")
+/// Delegate produce-an-artifact requests to the planner. Bundles the produceArtifact tool so the
+/// Assistant can hand off 'create / make / build a file' requests to the async planner pipeline
+/// (which routes/creates a specialist, researches, and writes the deliverable into the Library)
+/// instead of authoring deliverables inline in a chat turn. Assistant-only -- specialists are the
+/// delegates, they never delegate. The tool itself is @allowedRoles(assistant), so a specialist
+/// that somehow carries this skill still cannot call it.
 seed skill delegation-baseline {
   slug:          "delegation-baseline"
   name:          "Delegation Baseline"

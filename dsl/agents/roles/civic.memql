@@ -5,7 +5,8 @@
 
 use agents.concepts.{ agentRole }
 
-@description("Public-services orientation: DMV, voter registration, permits, social services, and government benefits.")
+/// Public-services orientation: DMV, voter registration, permits, social services, and government
+/// benefits.
 seed agentRole civic-navigator {
   slug:                  "civic-navigator"
   name:                  "Civic Services Navigator"
@@ -19,7 +20,7 @@ seed agentRole civic-navigator {
   predefined:            true
 }
 
-@description("Grant writing, program design, impact measurement, fundraising, and board relations.")
+/// Grant writing, program design, impact measurement, fundraising, and board relations.
 seed agentRole nonprofit-program-manager {
   slug:                  "nonprofit-program-manager"
   name:                  "Nonprofit Program Manager"

@@ -24,11 +24,8 @@
 // images whose Simli faces are not yet generated -- add their seeds here
 // once minted.
 
-// Sofia -- our one custom Simli avatar, generated from avatars/female_0.png.
-// personaId is the Simli faceId, validated against POST /compose/token
-// (HTTP 200). The earlier d6ee6443 value was rejected INVALID_FACE_ID
-// (memql#1239), so the avatar never came up; ab2f2d4b is the valid face.
-@description("Avatar persona Sofia (female) -- custom Simli avatar from avatars/female_0.png (memql#1237; faceId corrected memql#1239).")
+/// Avatar persona Sofia (female) -- custom Simli avatar from avatars/female_0.png (memql#1237;
+/// faceId corrected memql#1239).
 seed avatarPersona sofia {
   vendor:     "simli"
   personaId:  "ab2f2d4b-779b-40b7-be72-d4c69c136642"

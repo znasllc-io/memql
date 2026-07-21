@@ -3,200 +3,84 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-@description("Matches records with active==true field")
+/// Matches records with active==true field
 trait isActiveRecord {
   return active==true
 }
 
 // ---- specs/v1/common/isCancelled.memql ----
 
-// isCancelled - Cancelled Status Spec
-// ========================================
-//
-// Reusable filter that matches records with cancelled status.
-// Cancelled records were scheduled but did not complete.
-//
-// Usage in queries:
-//   concept==v1:hr:checkin;isCancelled()
-//
-@description("Matches records with cancelled status")
+/// Matches records with cancelled status
 trait isCancelled {
   return status=="cancelled"
 }
 
 // ---- specs/v1/data/isChecked.memql ----
 
-// isChecked - Checked Data Record Spec
-// ==========================================
-//
-// Reusable filter that matches data records in checked validation state.
-// Checked records have been synthetically validated but not yet confirmed
-// by a human identity. May be usable if the concept's policy allows it.
-//
-// Usage in queries:
-//   concept==v1:data:record;isChecked()
-//
-@description("Matches active data records in checked validation state")
+/// Matches active data records in checked validation state
 trait isChecked {
   return active==true && validationState=="checked"
 }
 
 // ---- specs/v1/common/isCompleted.memql ----
 
-// isCompleted - Completed Status Spec
-// =======================================
-//
-// Reusable filter that matches records with completed status.
-// Completed check-ins have survey responses submitted.
-// Completed flags/cases have been resolved.
-//
-// Usage in queries:
-//   concept==v1:hr:checkin;isCompleted()
-//   concept==v1:hr:flag;isCompleted()
-//
-@description("Matches records with completed status")
+/// Matches records with completed status
 trait isCompleted {
   return status=="completed"
 }
 
 // ---- specs/v1/data/isConfirmed.memql ----
 
-// isConfirmed - Confirmed Data Record Spec
-// ==============================================
-//
-// Reusable filter that matches data records in confirmed validation state.
-// Confirmed records have been validated by a human identity and are always
-// considered usable.
-//
-// Usage in queries:
-//   concept==v1:data:record;isConfirmed()
-//
-@description("Matches active data records in confirmed validation state")
+/// Matches active data records in confirmed validation state
 trait isConfirmed {
   return active==true && validationState=="confirmed"
 }
 
 // ---- specs/v1/data/isDraft.memql ----
 
-// isDraft - Draft Data Record Spec
-// =====================================
-//
-// Reusable filter that matches data records in draft validation state.
-// Draft records are being worked on and are not yet usable.
-//
-// Usage in queries:
-//   concept==v1:data:record;isDraft()
-//
-@description("Matches active data records in draft validation state")
+/// Matches active data records in draft validation state
 trait isDraft {
   return active==true && validationState=="draft"
 }
 
 // ---- specs/v1/common/isInProgress.memql ----
 
-// isInProgress - In Progress Status Spec
-// ===========================================
-//
-// Reusable filter that matches records with inProgress status.
-// InProgress records are actively being worked on or executed.
-//
-// Usage in queries:
-//   concept==v1:hr:checkin;isInProgress()
-//
-@description("Matches records with inProgress status")
+/// Matches records with inProgress status
 trait isInProgress {
   return status=="inProgress"
 }
 
 // ---- specs/v1/common/isNotArchived.memql ----
 
-// isNotArchived - Not Archived Status Spec
-// ==============================================
-//
-// Reusable filter that matches records that are NOT archived.
-// Used to exclude archived items from active queries.
-//
-// Usage in queries:
-//   concept==v1:cognition:space;isNotArchived()
-//
-@description("Matches records that are not archived")
+/// Matches records that are not archived
 trait isNotArchived {
   return status!="archived"
 }
 
 // ---- specs/v1/common/isNotDeleted.memql ----
 
-// isNotDeleted - Not Deleted Record Spec
-// ============================================
-//
-// Reusable filter that excludes records with deleted==true field.
-// Deleted records have been permanently removed by the user and
-// should not appear in any listing. This is distinct from
-// isActiveRecord() which checks active status -- an agent can
-// be inactive (deactivated) but still visible in management views.
-//
-// Usage in queries:
-//   concept==v1:agents:agent;isNotDeleted()
-//
-@description("Excludes records with deleted==true field")
+/// Excludes records with deleted==true field
 trait isNotDeleted {
   return deleted!=true
 }
 
 // ---- specs/v1/common/isOpen.memql ----
 
-// isOpen - Open Status Spec
-// =============================
-//
-// Reusable filter that matches records with open status.
-// Open records require action and haven't been resolved yet.
-// Applicable to flags, cases, and other actionable items.
-//
-// Usage in queries:
-//   concept==v1:hr:flag;isOpen()
-//   concept==v1:hr:case;isOpen()
-//
-@description("Matches records with open status requiring action")
+/// Matches records with open status requiring action
 trait isOpen {
   return status=="open"
 }
 
 // ---- specs/v1/common/isScheduled.memql ----
 
-// isScheduled - Scheduled Status Spec
-// ========================================
-//
-// Reusable filter that matches records with scheduled status.
-// Scheduled records are pending execution at a future time.
-//
-// Usage in queries:
-//   concept==v1:hr:checkin;isScheduled()
-//   concept==v1:cognition:space;isScheduled()
-//
-@description("Matches records with scheduled status")
+/// Matches records with scheduled status
 trait isScheduled {
   return status=="scheduled"
 }
 
 // ---- specs/v1/data/isUsable.memql ----
 
-// isUsable - Usable Data Record Spec
-// ========================================
-//
-// Reusable filter that matches data records that may be usable.
-// Matches both checked and confirmed records. Whether checked records
-// are actually usable depends on the concept's policy (checkedDataUsable).
-// Policy-aware filtering happens at the query level.
-//
-// Implementation note: Because the MemQL lexer does not yet support the
-// || (logical OR) operator, this spec uses a negation approach. A record
-// is usable if it is active AND its validation state is NOT "draft".
-// This effectively matches "checked" and "confirmed" states.
-//
-// Usage in queries:
-//   concept==v1:data:record;isUsable()
-//
-@description("Matches active data records in checked or confirmed validation state")
+/// Matches active data records in checked or confirmed validation state
 trait isUsable {
   return active==true && validationState!="draft"
 }
@@ -209,58 +93,21 @@ trait isUsable {
 
 // ---- specs/v1/common/statusIsActive.memql ----
 
-// statusIsActive - Active Status Spec
-// ========================================
-//
-// Reusable filter that matches records with active status.
-// Active employees are currently employed and receiving check-ins.
-// Active advocates are available for assignment.
-//
-// Usage in queries:
-//   concept==v1:hr:employee;statusIsActive()
-//   concept==v1:hr:advocate;statusIsActive()
-//
-@description("Matches records with active status")
+/// Matches records with active status
 trait statusIsActive {
   return status=="active"
 }
 
 // ---- specs/v1/common/statusIsArchived.memql ----
 
-// statusIsArchived - Archived Status Spec
-// ============================================
-//
-// Reusable filter that matches records whose payload.status == "archived".
-// Archived spaces are hidden from the active list and on a retention
-// countdown to hard-delete (see purgeExpiredArchivedSpaces automation +
-// User.preferences.archiveRetentionDays).
-//
-// Counterpart to isNotArchived (which excludes archived rows from
-// active lists). Used by queryArchivedSpaces to populate the Archived
-// tab in the SpacesListPanel.
-//
-// Usage in queries:
-//   concept==v1:cognition:space;statusIsArchived()
-//
-@description("Matches records with payload.status == 'archived'.")
+/// Matches records with payload.status == 'archived'.
 trait statusIsArchived {
   return status=="archived"
 }
 
 // ---- specs/v1/common/statusIsSaved.memql ----
 
-// statusIsSaved - Saved Status Spec
-// ======================================
-//
-// Reusable filter that matches records whose payload.status == "saved".
-// Saved spaces are user-preserved -- they never auto-delete, regardless
-// of the archive retention policy. Used by querySavedSpaces to populate
-// the Saved tab in the SpacesListPanel.
-//
-// Usage in queries:
-//   concept==v1:cognition:space;statusIsSaved()
-//
-@description("Matches records with payload.status == 'saved'.")
+/// Matches records with payload.status == 'saved'.
 trait statusIsSaved {
   return status=="saved"
 }
@@ -271,7 +118,7 @@ trait statusIsSaved {
 // Used by identity flows (access requests, invitations) where pending
 // rows are queued for action by an admin or the original requester.
 
-@description("Matches records with payload.status == 'pending'.")
+/// Matches records with payload.status == 'pending'.
 trait statusIsPending {
   return status=="pending"
 }
@@ -282,7 +129,7 @@ trait statusIsPending {
 // Used by planner Plans / Tasks and by worker invocations that are
 // actively executing right now.
 
-@description("Matches records with payload.status == 'running'.")
+/// Matches records with payload.status == 'running'.
 trait statusIsRunning {
   return status=="running"
 }
@@ -294,7 +141,7 @@ trait statusIsRunning {
 // (identityIsWorkerToken) so callers can scope per-credential-class
 // queries explicitly.
 
-@description("Matches v1:identity:identity rows with identityType=='api_key'.")
+/// Matches v1:identity:identity rows with identityType=='api_key'.
 trait identityIsApiKey {
   return identityType=="api_key"
 }
@@ -306,7 +153,7 @@ trait identityIsApiKey {
 // only on the WorkerService gRPC path; this trait scopes per-worker
 // credential lookups.
 
-@description("Matches v1:identity:identity rows with identityType=='worker_token'.")
+/// Matches v1:identity:identity rows with identityType=='worker_token'.
 trait identityIsWorkerToken {
   return identityType=="worker_token"
 }
@@ -319,7 +166,7 @@ trait identityIsWorkerToken {
 // trait scopes per-node credential lookups used by the bootstrap-
 // minted identity-row persistence path (memql#343).
 
-@description("Matches v1:identity:identity rows with identityType=='node_token'.")
+/// Matches v1:identity:identity rows with identityType=='node_token'.
 trait identityIsNodeToken {
   return identityType=="node_token"
 }
@@ -333,7 +180,7 @@ trait identityIsNodeToken {
 // credentials.keyHash to mint a short-lived class="badge" grant
 // token for the owning user.
 
-@description("Matches v1:identity:identity rows with identityType=='badge'.")
+/// Matches v1:identity:identity rows with identityType=='badge'.
 trait identityIsBadge {
   return identityType=="badge"
 }
@@ -344,7 +191,7 @@ trait identityIsBadge {
 // Used by the user-deletion cooldown sweep to enumerate identities
 // queued for hard delete after the retention window expires.
 
-@description("Matches records that have a deletion scheduled (deletionScheduledAt is set).")
+/// Matches records that have a deletion scheduled (deletionScheduledAt is set).
 trait isDeletionScheduled {
   return deletionScheduledAt!=""
 }

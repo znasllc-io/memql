@@ -40,9 +40,11 @@
 // filtered by id==<planId>, or query the Plan later via
 // planById, to observe progress + read Plan.output on success.
 
+/// Async-invoke a DSL-registered agent by name. Creates a queued v1:planner:plan
+/// (kind=agentInvocation) and returns its id. Use ai() for blocking LLM calls; agent() is for
+/// agent-orchestrated work that runs through the planner.
 @executor("integration.agents.invoke")
 @args(profile="object")
-@description("Async-invoke a DSL-registered agent by name. Creates a queued v1:planner:plan (kind=agentInvocation) and returns its id. Use ai() for blocking LLM calls; agent() is for agent-orchestrated work that runs through the planner.")
 builtin agent {
   name     string!
   prompt   string!
@@ -60,9 +62,11 @@ builtin agent {
 // the tool result. The assistant paraphrases response.response into
 // the human-facing reply.
 
+/// Synchronously query a specialist agent by role. Returns ONE JSON object {response, rationale?,
+/// confidence, needsMore?}. Specialists never write utterances; the assistant translates response
+/// to a human reply.
 @executor("integration.agents.askSpecialist")
 @args(profile="object")
-@description("Synchronously query a specialist agent by role. Returns ONE JSON object {response, rationale?, confidence, needsMore?}. Specialists never write utterances; the assistant translates response to a human reply.")
 builtin askSpecialist {
   role     string!
   query    string!
@@ -106,9 +110,12 @@ builtin askSpecialist {
 // agentworkerRequestScope pair (the scope_elevation_required
 // variant); this is the generic feedback_required variant.
 
+/// Transition the active Plan to awaitingFeedback (feedbackReason=feedback_required) with a
+/// feedbackRequest{question, kind, options?, timeoutAt}. The agent calls this when it needs the
+/// user to supply missing detail mid-task; the user's answer (stamped via Plan.feedbackResponse +
+/// status->running) resumes the Plan through the existing planner re-invocation path.
 @executor("integration.agents.requestUserFeedback")
 @args(profile="object")
-@description("Transition the active Plan to awaitingFeedback (feedbackReason=feedback_required) with a feedbackRequest{question, kind, options?, timeoutAt}. The agent calls this when it needs the user to supply missing detail mid-task; the user's answer (stamped via Plan.feedbackResponse + status->running) resumes the Plan through the existing planner re-invocation path.")
 builtin requestUserFeedback {
   question     string!
   kind         string!
@@ -120,9 +127,15 @@ builtin requestUserFeedback {
   partitionId      string
 }
 
+/// Match-extend-or-create an agent that can handle the given goal. Reads the role + domain + tool
+/// catalogs, runs agentFactoryAnalyze, issues the appropriate write, and returns {agentId, action,
+/// reasoning}. Planner-driven callers (integrations/planner/agent_loop.go) pass `planId` so the
+/// factory can stamp `lineage.originatingPlanId` on the created specialist (memql#399); the
+/// GA-driven `ensureAgent` tool omits it -- the resulting specialist still lands with
+/// `kind="specialist"` (the factory only ever creates specialists, never assistants or system
+/// agents) but without a Plan back-pointer.
 @executor("integration.agents.ensureForGoal")
 @args(profile="object")
-@description("Match-extend-or-create an agent that can handle the given goal. Reads the role + domain + tool catalogs, runs agentFactoryAnalyze, issues the appropriate write, and returns {agentId, action, reasoning}. Planner-driven callers (integrations/planner/agent_loop.go) pass `planId` so the factory can stamp `lineage.originatingPlanId` on the created specialist (memql#399); the GA-driven `ensureAgent` tool omits it -- the resulting specialist still lands with `kind=\"specialist\"` (the factory only ever creates specialists, never assistants or system agents) but without a Plan back-pointer.")
 builtin ensureAgentForGoal {
   goal         string!
   ownerUserId  string!
@@ -141,9 +154,12 @@ builtin ensureAgentForGoal {
 // the Assistant just acks and ends its turn. Mirrors the requestUserFeedback
 // builtin's "mutate a Plan from the agents integration, return an ack" shape.
 
+/// Delegate a produce-an-artifact request to the planner. Mints a v1:planner:plan
+/// (kind=produceArtifact, triggerSource=user.implicit) carrying the goal + desired format/filename
+/// in Plan.input, and returns {status:"delegated", planId, ack}. The plan auto-runs; the
+/// deliverable lands in the Library asynchronously.
 @executor("integration.agents.produceArtifact")
 @args(profile="object")
-@description("Delegate a produce-an-artifact request to the planner. Mints a v1:planner:plan (kind=produceArtifact, triggerSource=user.implicit) carrying the goal + desired format/filename in Plan.input, and returns {status:\"delegated\", planId, ack}. The plan auto-runs; the deliverable lands in the Library asynchronously.")
 builtin produceArtifact {
   goal         string!
   format       string

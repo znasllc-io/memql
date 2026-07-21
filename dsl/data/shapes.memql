@@ -3,8 +3,8 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
+/// Validation log entry projection with full audit trail fields
 @row
-@description("Validation log entry projection with full audit trail fields")
 shape log logFull {
   row.id
   recordId
@@ -19,8 +19,8 @@ shape log logFull {
   row.createdAt
 }
 
+/// Validation policy projection with all configuration fields
 @row
-@description("Validation policy projection with all configuration fields")
 shape policy policyFull {
   row.id
   targetRecordType
@@ -33,8 +33,8 @@ shape policy policyFull {
   row.createdAt
 }
 
+/// Comprehensive data record projection with validation lifecycle fields
 @row
-@description("Comprehensive data record projection with validation lifecycle fields")
 shape record recordFull {
   row.id
   partitionId

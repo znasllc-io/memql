@@ -6,7 +6,7 @@
 
 use agents.concepts.{ agentRole }
 
-@description("Classical mechanics, E&M, thermodynamics, waves, modern physics at undergrad level.")
+/// Classical mechanics, E&M, thermodynamics, waves, modern physics at undergrad level.
 seed agentRole physics-educator {
   slug:                  "physics-educator"
   name:                  "Physics Educator"
@@ -20,7 +20,7 @@ seed agentRole physics-educator {
   predefined:            true
 }
 
-@description("General, organic, inorganic, and physical chemistry at undergrad level.")
+/// General, organic, inorganic, and physical chemistry at undergrad level.
 seed agentRole chemistry-educator {
   slug:                  "chemistry-educator"
   name:                  "Chemistry Educator"
@@ -34,7 +34,7 @@ seed agentRole chemistry-educator {
   predefined:            true
 }
 
-@description("Cell, molecular, organismal, ecology, and evolutionary biology at undergrad level.")
+/// Cell, molecular, organismal, ecology, and evolutionary biology at undergrad level.
 seed agentRole biology-educator {
   slug:                  "biology-educator"
   name:                  "Biology Educator"
@@ -48,7 +48,7 @@ seed agentRole biology-educator {
   predefined:            true
 }
 
-@description("Stars, galaxies, cosmology, planetary science, and observational astronomy.")
+/// Stars, galaxies, cosmology, planetary science, and observational astronomy.
 seed agentRole astronomy-educator {
   slug:                  "astronomy-educator"
   name:                  "Astronomy & Astrophysics Educator"
@@ -62,7 +62,7 @@ seed agentRole astronomy-educator {
   predefined:            true
 }
 
-@description("Mineralogy, petrology, structural geology, plate tectonics, and earth history.")
+/// Mineralogy, petrology, structural geology, plate tectonics, and earth history.
 seed agentRole geology-educator {
   slug:                  "geology-educator"
   name:                  "Geology Educator"

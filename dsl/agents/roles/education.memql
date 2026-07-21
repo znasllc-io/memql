@@ -5,7 +5,7 @@
 
 use agents.concepts.{ agentRole }
 
-@description("Reading, writing, math, science, and social studies at the elementary level.")
+/// Reading, writing, math, science, and social studies at the elementary level.
 seed agentRole elementary-school-tutor {
   slug:                  "elementary-school-tutor"
   name:                  "Elementary School Tutor (K-5)"
@@ -19,7 +19,7 @@ seed agentRole elementary-school-tutor {
   predefined:            true
 }
 
-@description("Pre-algebra, algebra I, life science, earth science, language arts, and study skills.")
+/// Pre-algebra, algebra I, life science, earth science, language arts, and study skills.
 seed agentRole middle-school-tutor {
   slug:                  "middle-school-tutor"
   name:                  "Middle School Tutor (6-8)"
@@ -33,7 +33,8 @@ seed agentRole middle-school-tutor {
   predefined:            true
 }
 
-@description("Algebra II, geometry, trig, precalc, biology, chemistry, physics, English, history, and study skills.")
+/// Algebra II, geometry, trig, precalc, biology, chemistry, physics, English, history, and study
+/// skills.
 seed agentRole high-school-tutor {
   slug:                  "high-school-tutor"
   name:                  "High School Tutor (9-12)"
@@ -47,7 +48,7 @@ seed agentRole high-school-tutor {
   predefined:            true
 }
 
-@description("Standardized-test strategy, content review, and practice review.")
+/// Standardized-test strategy, content review, and practice review.
 seed agentRole test-prep-coach {
   slug:                  "test-prep-coach"
   name:                  "Test Prep Coach (SAT / ACT / GRE / GMAT)"
@@ -61,7 +62,7 @@ seed agentRole test-prep-coach {
   predefined:            true
 }
 
-@description("Single and multivariable calculus, limits, derivatives, integrals, series.")
+/// Single and multivariable calculus, limits, derivatives, integrals, series.
 seed agentRole math-tutor-calculus {
   slug:                  "math-tutor-calculus"
   name:                  "Math Tutor (Calculus)"
@@ -75,7 +76,7 @@ seed agentRole math-tutor-calculus {
   predefined:            true
 }
 
-@description("Spanish grammar, vocabulary, conversation, and culture at A1 -> C2.")
+/// Spanish grammar, vocabulary, conversation, and culture at A1 -> C2.
 seed agentRole language-tutor-spanish {
   slug:                  "language-tutor-spanish"
   name:                  "Spanish Language Tutor"
@@ -89,7 +90,7 @@ seed agentRole language-tutor-spanish {
   predefined:            true
 }
 
-@description("Mandarin grammar, tones, characters, conversation, and culture.")
+/// Mandarin grammar, tones, characters, conversation, and culture.
 seed agentRole language-tutor-mandarin {
   slug:                  "language-tutor-mandarin"
   name:                  "Mandarin Chinese Tutor"
@@ -103,7 +104,7 @@ seed agentRole language-tutor-mandarin {
   predefined:            true
 }
 
-@description("French grammar, vocabulary, conversation, and culture at A1 -> C2.")
+/// French grammar, vocabulary, conversation, and culture at A1 -> C2.
 seed agentRole language-tutor-french {
   slug:                  "language-tutor-french"
   name:                  "French Language Tutor"
@@ -117,7 +118,7 @@ seed agentRole language-tutor-french {
   predefined:            true
 }
 
-@description("World history, US history, European history, and historiography.")
+/// World history, US history, European history, and historiography.
 seed agentRole history-educator {
   slug:                  "history-educator"
   name:                  "History Educator"
@@ -131,7 +132,7 @@ seed agentRole history-educator {
   predefined:            true
 }
 
-@description("Ethics, epistemology, metaphysics, logic, and major philosophical traditions.")
+/// Ethics, epistemology, metaphysics, logic, and major philosophical traditions.
 seed agentRole philosophy-educator {
   slug:                  "philosophy-educator"
   name:                  "Philosophy Educator"

@@ -1,8 +1,9 @@
 // Row-projection shapes for the telephony concepts. Used by the telephony
 // queries and by the cockpit number/call views.
 
+/// Full DID projection: address, carrier, the bound partition (Amendment A), purpose/status,
+/// origination class, and cost/lifecycle.
 @row
-@description("Full DID projection: address, carrier, the bound partition (Amendment A), purpose/status, origination class, and cost/lifecycle.")
 shape number numberFull {
   row.id
   e164
@@ -17,8 +18,9 @@ shape number numberFull {
   row.createdAt
 }
 
+/// Full trunk projection: carrier, direction, LiveKit trunk id, SIP edge, secret reference (never
+/// the secret), and status.
 @row
-@description("Full trunk projection: carrier, direction, LiveKit trunk id, SIP edge, secret reference (never the secret), and status.")
 shape trunk trunkFull {
   row.id
   carrier
@@ -31,8 +33,9 @@ shape trunk trunkFull {
   row.createdAt
 }
 
+/// Full call-record projection for billing + observability: direction, endpoints, the bound
+/// partition + room (Amendment A), carrier, timing, duration, disposition, and cost attribution.
 @row
-@description("Full call-record projection for billing + observability: direction, endpoints, the bound partition + room (Amendment A), carrier, timing, duration, disposition, and cost attribution.")
 shape call callFull {
   row.id
   direction
@@ -51,8 +54,8 @@ shape call callFull {
   row.createdAt
 }
 
+/// Consent / opt-out projection for an external number.
 @row
-@description("Consent / opt-out projection for an external number.")
 shape consent consentFull {
   row.id
   phoneNumber
