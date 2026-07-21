@@ -293,6 +293,9 @@ func conceptDeclToParsed(decl *parser.ConceptDecl) (*parsedConcept, error) {
 			return nil, err
 		}
 	}
+	// Ruling-3 precedence resolved ONCE here (memql#2634) so the Concept
+	// literal and buildJSONSchema's concept-level description agree.
+	out.description = parser.EffectiveDescription(decl.DocComment, out.description)
 
 	for _, prop := range decl.Properties {
 		pp, err := propertyDeclToParsed(prop)

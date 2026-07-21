@@ -365,8 +365,8 @@ func (c *Compiler) compileAutomation(def *parser.FunctionDef) (*AutomationOutput
 
 	// Basic metadata
 	output["name"] = def.Name
-	if automation.Description != "" {
-		output["description"] = automation.Description
+	if desc := parser.EffectiveDescription(automation.DocComment, automation.Description); desc != "" {
+		output["description"] = desc
 	}
 	if automation.Schedule != "" {
 		output["schedule"] = automation.Schedule
@@ -503,7 +503,7 @@ func (c *Compiler) compileAutomation(def *parser.FunctionDef) (*AutomationOutput
 
 	return &AutomationOutput{
 		Name:        def.Name,
-		Description: automation.Description,
+		Description: parser.EffectiveDescription(automation.DocComment, automation.Description),
 		JSON:        output,
 	}, nil
 }

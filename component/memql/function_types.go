@@ -205,6 +205,7 @@ func (f *Function) clone() *Function {
 	return &Function{
 		Name:             f.Name,
 		Description:      f.Description,
+		DocComment:       f.DocComment,
 		UsageDoc:         f.UsageDoc,
 		ExprSource:       f.ExprSource,
 		BoundConcept:     f.BoundConcept,
@@ -383,6 +384,10 @@ func (a *ArgsSchemaConfig) clone() *ArgsSchemaConfig {
 
 // FunctionArgsField defines a single argument field's type assertion.
 type FunctionArgsField struct {
+	// Description is the resolved field documentation -- the /// doc
+	// comment captured above the field (memql#2634; the args-field
+	// @description spelling stays retired, #2615).
+	Description string
 	// Name is the field name (e.g., "userId", "email")
 	Name string
 
@@ -425,6 +430,7 @@ func (f *FunctionArgsField) clone() *FunctionArgsField {
 	}
 	clone := &FunctionArgsField{
 		Name:         f.Name,
+		Description:  f.Description,
 		Type:         f.Type,
 		Optional:     f.Optional,
 		Format:       f.Format,

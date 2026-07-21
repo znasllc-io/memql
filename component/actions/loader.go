@@ -53,6 +53,9 @@ func DeclToAction(d *ast.ActionDecl, origin string, capImports map[string]string
 			a.Enabled = true
 		}
 	}
+	// Ruling-3 precedence (memql#2634): the /// doc comment wins over the
+	// @description annotation, never concatenated.
+	a.Description = languageParser.EffectiveDescription(d.DocComment, a.Description)
 
 	// Resolve the bare capability verb to its full dotted name via the file's
 	// capability imports. An action body may call only its one imported

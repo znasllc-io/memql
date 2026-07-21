@@ -53,7 +53,8 @@ func promptDeclToPromptDecl(decl *languageParser.PromptDecl, origin string) (*pr
 	}
 
 	out := &promptDecl{
-		name: decl.Name,
+		name:       decl.Name,
+		docComment: decl.DocComment,
 	}
 
 	for _, attr := range decl.Attributes {

@@ -154,3 +154,75 @@ func attachDocComment(def Node, doc string) {
 		d.DocComment = doc
 	}
 }
+
+// EffectiveDescription implements the design's ruling-3 precedence
+// (memql#2634): the /// doc comment WINS over @description when both are
+// present -- never concatenated -- and @description remains the fallback so
+// an annotation-only corpus behaves identically to the pre-flip engine.
+func EffectiveDescription(docComment, description string) string {
+	if strings.TrimSpace(docComment) != "" {
+		return docComment
+	}
+	return description
+}
+
+// LeadingDocComment extracts the /// doc-comment block attached to the FIRST
+// declaration in source, using the real lexer's side channel and the same
+// adjacency walk the parser uses -- the "one extraction, the parser's" the
+// design demands for raw-source consumers (the promote-time catalog). Returns
+// "" when the source has no attached block or does not tokenize.
+func LeadingDocComment(source string) string {
+	// Skip a use/import prelude (authoring slices carry the file-top
+	// imports): the doc block belongs to the construct below it, and the
+	// prelude's tokens would otherwise become the anchor.
+	source = stripLeadingUseLines(source)
+	lexer := NewLexer(source)
+	tokens, err := lexer.Tokenize()
+	if err != nil || len(tokens) == 0 || tokens[0].Type == TokenEOF {
+		return ""
+	}
+	p := NewParser(tokens)
+	p.SetDocComments(lexer.DocComments())
+	return p.takeDocFor(tokens[0].Line)
+}
+
+// stripLeadingUseLines drops the use/import prelude an authoring slice
+// carries -- including grammar-legal multi-line `import ( ... )` blocks --
+// plus anything ABOVE the prelude's last line: a file-header /// or comment
+// above the imports belongs to the file, not the construct, and the engine
+// parser discards it (a use line breaks adjacency), so the catalog must
+// too. Comments and blanks BETWEEN the prelude and the construct survive,
+// keeping the construct's own /// block attached.
+func stripLeadingUseLines(source string) string {
+	lines := strings.Split(source, "\n")
+	lastPrelude := -1
+	inImportBlock := false
+scan:
+	for i, l := range lines {
+		t := strings.TrimSpace(l)
+		switch {
+		case inImportBlock:
+			lastPrelude = i
+			if strings.HasPrefix(t, ")") {
+				inImportBlock = false
+			}
+		case strings.HasPrefix(t, "use "):
+			lastPrelude = i
+		case t == "import (" || strings.HasPrefix(t, "import ("):
+			lastPrelude = i
+			inImportBlock = true
+		case strings.HasPrefix(t, "import "):
+			lastPrelude = i
+		case t == "" || strings.HasPrefix(t, "//"):
+			// May be file-header prose above the prelude or the
+			// construct's own doc below it -- decided by lastPrelude.
+			continue
+		default:
+			break scan
+		}
+	}
+	if lastPrelude < 0 {
+		return source
+	}
+	return strings.Join(lines[lastPrelude+1:], "\n")
+}

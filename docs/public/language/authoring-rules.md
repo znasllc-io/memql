@@ -254,6 +254,11 @@ rejects the annotation at load time:
 concept node { ... }
 ```
 
+Descriptions source from `///` doc comments first (#2634): a `///` block
+immediately above any describable declaration (or above an `args{}` field)
+IS its description, winning over `@description` when both are present --
+never concatenated; `@description` remains valid as the fallback form.
+
 The full concept-annotation author surface is `@description`,
 `@version`, `@namespace`, `@type`, and `@displayCard` -- see
 [#7](#7-annotations-on-concepts-where-to-put-new-ones).

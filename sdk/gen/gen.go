@@ -39,6 +39,7 @@ package gen
 import (
 	"bytes"
 	"fmt"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -436,7 +437,7 @@ func attrPreamble(src string, headerStart int) string {
 			prev = lineStart - 1
 			continue
 		}
-		if !strings.HasPrefix(line, "@") {
+		if !strings.HasPrefix(line, "@") && !strings.HasPrefix(line, "///") {
 			break
 		}
 		prev = lineStart - 1
@@ -450,13 +451,43 @@ func attrPreamble(src string, headerStart int) string {
 	return src[prev:headerStart]
 }
 
-// descriptionFor pulls the @description("...") annotation from the
-// construct's attribute preamble. Returns empty string when absent.
+// descriptionFor resolves the construct description with the design's
+// ruling-3 precedence (memql#2634): the /// doc-comment block WINS, the
+// @description annotation is the fallback. Extraction goes through the
+// PARSER'S own lexer (parser.LeadingDocComment) rather than a second regex
+// dialect, so the SDK's adjacency semantics -- blank-line detachment,
+// annotation anchoring, comment transparency -- are byte-for-byte the
+// engine's (the #2634 review demonstrated three divergences in the earlier
+// hand-rolled walk).
 func descriptionFor(src string, headerStart int) string {
+	slice := src[docContextStart(src, headerStart):]
+	if doc := langparser.LeadingDocComment(slice); doc != "" {
+		return doc
+	}
 	if m := descRe.FindStringSubmatch(attrPreamble(src, headerStart)); len(m) > 1 {
 		return m[1]
 	}
 	return ""
+}
+
+// docContextStart walks up from the construct header over attribute,
+// comment, and blank lines to the nearest code boundary, so the slice fed
+// to the parser's extraction starts at (or above) the construct's own
+// preamble with its full comment context intact -- including the blank
+// lines the parser needs to see to BREAK detached blocks.
+func docContextStart(src string, headerStart int) int {
+	start := strings.LastIndex(src[:headerStart], "\n") + 1
+	for start > 0 {
+		prevEnd := start - 1
+		lineStart := strings.LastIndex(src[:prevEnd], "\n") + 1
+		line := strings.TrimSpace(src[lineStart:prevEnd])
+		if line == "" || strings.HasPrefix(line, "@") || strings.HasPrefix(line, "//") {
+			start = lineStart
+			continue
+		}
+		break
+	}
+	return start
 }
 
 // parseArgsBlock extracts the args { ... } block from a construct body
@@ -479,7 +510,24 @@ func parseArgsBlock(body string) []ArgField {
 // the field list IS the body (no args block).
 func parseFields(inner string) []ArgField {
 	var out []ArgField
-	for _, fm := range argsFieldRe.FindAllStringSubmatch(inner, -1) {
+	matches := argsFieldRe.FindAllStringSubmatchIndex(inner, -1)
+	for mi, idx := range matches {
+		fm := make([]string, 0, 5)
+		for g := 0; g < len(idx)/2; g++ {
+			if idx[2*g] < 0 {
+				fm = append(fm, "")
+			} else {
+				fm = append(fm, inner[idx[2*g]:idx[2*g+1]])
+			}
+		}
+		// /// lines immediately above the field are its doc comment
+		// (memql#2634) -- parser adjacency semantics: contiguous /// lines,
+		// ordinary comments transparent, a blank line breaks.
+		prevEnd := 0
+		if mi > 0 {
+			prevEnd = matches[mi-1][1]
+		}
+		fieldDoc := docLinesAbove(inner[prevEnd:idx[0]])
 		name := fm[1]
 		typ := fm[2]
 		sigil := fm[3]
@@ -505,7 +553,9 @@ func parseFields(inner string) []ArgField {
 		if strings.Contains(annotations, "@required") {
 			af.Required = true
 		}
-		if dm := regexp.MustCompile(`@description\("([^"]*)"\)`).FindStringSubmatch(annotations); len(dm) > 1 {
+		if fieldDoc != "" {
+			af.Description = fieldDoc
+		} else if dm := regexp.MustCompile(`@description\("([^"]*)"\)`).FindStringSubmatch(annotations); len(dm) > 1 {
 			af.Description = dm[1]
 		}
 		if dm := regexp.MustCompile(`@default\("([^"]*)"\)`).FindStringSubmatch(annotations); len(dm) > 1 {
@@ -606,4 +656,48 @@ func lowerFirst(s string) string {
 		r[0] = r[0] - 'A' + 'a'
 	}
 	return string(r)
+}
+
+// docLinesAbove extracts the /// block ADJACENT to the end of gap (the text
+// between the previous field and this one), mirroring the parser's
+// takeFieldDocFor walk: from the bottom, ordinary comment lines are
+// transparent, a blank line breaks, and only the contiguous /// block
+// touching that walk attaches.
+func docLinesAbove(gap string) string {
+	// Strip the field's own indentation and exactly ONE structural newline
+	// (the line break before the field); any further trailing newline is a
+	// REAL blank line and must break attachment.
+	gap = strings.TrimRight(gap, " \t")
+	gap = strings.TrimSuffix(gap, "\n")
+	lines := strings.Split(gap, "\n")
+	var collected []string
+	collecting := false
+	for i := len(lines) - 1; i >= 0; i-- {
+		t := strings.TrimSpace(lines[i])
+		switch {
+		case strings.HasPrefix(t, "///") && !strings.HasPrefix(t, "////"):
+			collected = append([]string{strings.TrimPrefix(t, "///")}, collected...)
+			collecting = true
+		case t == "":
+			if collecting || len(collected) > 0 {
+				return join(collected)
+			}
+			return ""
+		case strings.HasPrefix(t, "//"):
+			if collecting {
+				return join(collected)
+			}
+			// transparent, keep walking
+		default:
+			return join(collected)
+		}
+	}
+	return join(collected)
+}
+
+func join(collected []string) string {
+	if len(collected) == 0 {
+		return ""
+	}
+	return langparser.JoinDocComment(collected)
 }

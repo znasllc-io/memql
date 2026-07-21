@@ -20,7 +20,7 @@ import (
 )
 
 // GrammarVersion names the current grammar epoch. Format: <year>.<month>-<epic-slug>.
-const GrammarVersion = "2026.07-null-coalescing-operator"
+const GrammarVersion = "2026.08-doc-comment-descriptions"
 
 // GrammarFingerprint is a drift detector over the author-facing keyword
 // surface: when the invocation-kind keyword set changes, the pinned test

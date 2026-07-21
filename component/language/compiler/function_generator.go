@@ -23,8 +23,8 @@ func (c *Compiler) compileFunction(def *parser.FunctionDef) (*FunctionOutput, er
 		"type":    "object",
 	}
 
-	if def.Description != "" {
-		definition["description"] = def.Description
+	if desc := parser.EffectiveDescription(def.DocComment, def.Description); desc != "" {
+		definition["description"] = desc
 	}
 
 	// Build properties from args

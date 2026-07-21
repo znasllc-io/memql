@@ -894,9 +894,14 @@ construct kind (`concept`, `query`, `mutation`, `logic`, `automation`,
   consecutive lines with a single space; a bare `///` line is a paragraph
   break (newline). Extra indentation after the first space survives.
 
-Capture-only today: `@description` remains the description SOURCE until the
-sourcing flip (#2634), after which `///` wins whenever both are present
-(never concatenated).
+Sourcing (#2634, in force): the `///` doc comment IS the description --
+it **wins** over `@description` whenever both are present (never
+concatenated), and `@description` remains the fallback, so
+annotation-only files behave exactly as before. This feeds every
+description surface: `functions()`/`tools` discovery, MCP tool
+descriptors and input schemas (args-field `///` docs appear as
+`properties.<name>.description`), the promote-time catalog embedding,
+SDK-generated Go/TS docs (construct and arg), and sense hover.
 
 ### Argument Declaration and Resolution
 

@@ -2,6 +2,7 @@ package memql
 
 import (
 	"fmt"
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 
 	"github.com/znasllc-io/memql/component/language/ast"
 )
@@ -32,7 +33,7 @@ func policyDeclToPolicyConfig(decl *ast.PolicyDecl) (*PolicyConfig, error) {
 	}
 	return &PolicyConfig{
 		Name:                  decl.Name,
-		Description:           decl.Description,
+		Description:           languageParser.EffectiveDescription(decl.DocComment, decl.Description),
 		Primary:               decl.Primary,
 		Fallbacks:             decl.Fallbacks,
 		MaxLatencyMs:          decl.MaxLatencyMs,
