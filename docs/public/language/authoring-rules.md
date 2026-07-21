@@ -257,7 +257,7 @@ concept node { ... }
 Descriptions source from `///` doc comments first (#2634; the PREFERRED
 spelling, gate-enforced on the engine tree since #2636 -- @description
 remains the compatibility fallback, and the ~200-character editorial
-target is a sense hint, not a hard gate): a `///` block
+target is surfaced in the annotation hover docs, not a hard gate): a `///` block
 immediately above any describable declaration (or above an `args{}` field)
 IS its description, winning over `@description` when both are present --
 never concatenated; `@description` remains valid as the fallback form.

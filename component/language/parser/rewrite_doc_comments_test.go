@@ -331,3 +331,27 @@ logic absentProbe {
 		t.Errorf("unplaceable Arguments prose must be kept:\n%s", got)
 	}
 }
+
+// A @description shadowed by an existing /// block is dead weight (/// wins,
+// never concatenated) and is DELETED rather than converted -- the #2636
+// review's gate blind spot: converting it would double the resolved
+// description and make self-verification refuse the file.
+func TestRewriteDocComments_ShadowedDescriptionDropped(t *testing.T) {
+	src := `/// Lists active spaces for the calling user, newest first.
+@description("Lists active spaces for the calling user, newest first.")
+query space queryShadowProbe {
+  filter ownerUserId == actor.userId
+}
+`
+	got := rewriteDoc(t, src)
+	if strings.Contains(got, "@description") {
+		t.Errorf("shadowed @description must be dropped:\n%s", got)
+	}
+	if want := "Lists active spaces for the calling user, newest first."; LeadingDocComment(got) != want {
+		t.Errorf("resolved description must be unchanged: %q", LeadingDocComment(got))
+	}
+	twice := rewriteDoc(t, got)
+	if twice != got {
+		t.Errorf("must stay converged")
+	}
+}

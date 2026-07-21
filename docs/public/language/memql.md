@@ -896,10 +896,12 @@ construct kind (`concept`, `query`, `mutation`, `logic`, `automation`,
 
 Sourcing (#2634, in force; gated #2636): the `///` doc comment IS the
 description and the PREFERRED spelling -- the engine tree's conformance
-gate rejects `@description` where `///` suffices, and downstream trees
-convert with `memqlmigrate --rewrite=doc-comment-descriptions` at their
-repin. Aim for ~200 characters (editorial target; sense hints). It --
-it **wins** over `@description` whenever both are present (never
+gate rejects `@description` where `///` suffices (including a bare
+`@description` shadowed by a `///` block), and downstream trees convert
+with `memqlmigrate --rewrite=doc-comment-descriptions` at their repin.
+Aim for ~200 characters (editorial target, surfaced in the annotation
+hover docs; a diagnostic-level length hint is tracked as follow-up). It
+**wins** over `@description` whenever both are present (never
 concatenated), and `@description` remains the fallback, so
 annotation-only files behave exactly as before. This feeds every
 description surface: `functions()`/`tools` discovery, MCP tool

@@ -76,6 +76,15 @@ func rewriteDocCommentDescriptionsUnverified(src []byte) ([]byte, error) {
 			out = append(out, line)
 			continue
 		}
+		// Shadowed-annotation drop (#2636 review): when a /// block already
+		// sits attached above this construct, the @description is dead
+		// weight -- /// wins, never concatenated -- so the line is simply
+		// deleted. (Converting it instead would emit a SECOND adjacent
+		// block, double the resolved description, and make the
+		// self-verification refuse the whole file: the gate's blind spot.)
+		if hasAttachedDocBlock(out) {
+			continue
+		}
 		desc := unescapeDescription(m[1])
 
 		// The annotation block: contiguous column-0 @lines around this one
@@ -489,4 +498,27 @@ func descriptionsEquivalent(before, after string) bool {
 		}
 	}
 	return true
+}
+
+
+// hasAttachedDocBlock reports whether the lines emitted so far end in an
+// annotation block whose transparent walk-up reaches a /// block -- i.e.
+// the construct this @description belongs to is already ///-documented.
+func hasAttachedDocBlock(out []string) bool {
+	i := len(out)
+	for i > 0 && strings.HasPrefix(out[i-1], "@") {
+		i--
+	}
+	for i > 0 {
+		t := strings.TrimSpace(out[i-1])
+		switch {
+		case strings.HasPrefix(t, "///"):
+			return true
+		case strings.HasPrefix(t, "//"):
+			i--
+		default:
+			return false
+		}
+	}
+	return false
 }
