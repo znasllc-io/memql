@@ -51,14 +51,15 @@ func (p *Parser) takeFieldDocFor(firstLine int) string {
 	if len(p.docBlocks) == 0 {
 		return ""
 	}
-	line := firstLine - 1
-	for line > 0 && p.transparentLines[line] {
-		line--
-	}
-	for i := range p.docBlocks {
-		if !p.docConsumed[i] && p.docBlocks[i].EndLine == line && p.docBlocks[i].StartLine > p.argsBlockOpenLine {
-			p.docConsumed[i] = true
-			return JoinDocComment(p.docBlocks[i].Lines)
+	for line := firstLine - 1; line > 0; line-- {
+		for i := range p.docBlocks {
+			if !p.docConsumed[i] && p.docBlocks[i].EndLine == line && p.docBlocks[i].StartLine > p.argsBlockOpenLine {
+				p.docConsumed[i] = true
+				return JoinDocComment(p.docBlocks[i].Lines)
+			}
+		}
+		if !p.transparentLines[line] {
+			break
 		}
 	}
 	return ""
@@ -71,14 +72,18 @@ func (p *Parser) takeDocFor(firstLine int) string {
 	if len(p.docBlocks) == 0 {
 		return ""
 	}
-	line := firstLine - 1
-	for line > 0 && p.transparentLines[line] {
-		line--
-	}
-	for i := range p.docBlocks {
-		if !p.docConsumed[i] && p.docBlocks[i].EndLine == line {
-			p.docConsumed[i] = true
-			return JoinDocComment(p.docBlocks[i].Lines)
+	// Check-then-walk: a block ending ON a transparent line (the
+	// `/* x */ /// Doc.` comment-only mix) still matches before the walk
+	// steps past it.
+	for line := firstLine - 1; line > 0; line-- {
+		for i := range p.docBlocks {
+			if !p.docConsumed[i] && p.docBlocks[i].EndLine == line {
+				p.docConsumed[i] = true
+				return JoinDocComment(p.docBlocks[i].Lines)
+			}
+		}
+		if !p.transparentLines[line] {
+			break
 		}
 	}
 	return ""

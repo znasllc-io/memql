@@ -497,3 +497,59 @@ query candidate probeQuery {
 	}
 	t.Fatal("query not parsed")
 }
+
+// Round-2 review majors: a block comment OPENING a line that carries code
+// after its closing */ must not make that code line transparent (the
+// leading-side mirror of the trailing bug), and the single-line args steal
+// must be pinned at ParseFile altitude (the rewriter expands args blocks, so
+// the rewritten pin never exercised the guard -- but single-line args reach
+// ParseFile unchanged through internal-form sources).
+func TestDocComment_LeadingBlockCommentWithCodeIsOpaque(t *testing.T) {
+	t.Run("single-line", func(t *testing.T) {
+		src := "/// Doc.\n/* note */ use cognition.concepts.{ space }\nlogic probeLogic {\n  args {\n    a string @required\n  }\n  body {\n    return coalesce(args.a, \"\")\n  }\n}"
+		if got := firstDeclDoc(t, src); got != "" {
+			t.Errorf("code after a leading block comment must break attachment, got %q", got)
+		}
+	})
+	t.Run("multi-line-ending-on-code", func(t *testing.T) {
+		src := "/// Doc.\n/* note\n   more */ use cognition.concepts.{ space }\nlogic probeLogic {\n  args {\n    a string @required\n  }\n  body {\n    return coalesce(args.a, \"\")\n  }\n}"
+		if got := firstDeclDoc(t, src); got != "" {
+			t.Errorf("a block comment ending on a code line must not tunnel, got %q", got)
+		}
+	})
+	t.Run("own-line-block-comment-still-transparent", func(t *testing.T) {
+		src := "/// Doc.\n/* just a note */\nlogic probeLogic {\n  args {\n    a string @required\n  }\n  body {\n    return coalesce(args.a, \"\")\n  }\n}"
+		if got := firstDeclDoc(t, src); got != "Doc." {
+			t.Errorf("a comment-only block line stays transparent, got %q", got)
+		}
+	})
+}
+
+func TestDocComment_SingleLineArgsNoStealAtParseFileAltitude(t *testing.T) {
+	src := "/// Decl doc.\nargs { planId string! }\nfunc (Query) probeQuery(_ any) (any, error) {\n}"
+	file, err := ParseFile(src)
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	for _, def := range file.Definitions {
+		if fn, ok := def.(*FunctionDef); ok {
+			if fn.DocComment != "Decl doc." {
+				t.Errorf("decl doc = %q, want Decl doc.", fn.DocComment)
+			}
+			if fn.ArgsSchema != nil && len(fn.ArgsSchema.Fields) > 0 && fn.ArgsSchema.Fields[0].DocComment != "" {
+				t.Errorf("single-line args field stole the decl doc: %q", fn.ArgsSchema.Fields[0].DocComment)
+			}
+			return
+		}
+	}
+	t.Fatal("function not parsed")
+}
+
+// The `/* x */ /// Doc.` comment-only mix: the /// half is the doc block and
+// still attaches (check-then-walk), never silently dropped.
+func TestDocComment_MixedCommentLineStillAttaches(t *testing.T) {
+	src := "/* x */ /// Doc.\nlogic probeLogic {\n  args {\n    a string @required\n  }\n  body {\n    return coalesce(args.a, \"\")\n  }\n}"
+	if got := firstDeclDoc(t, src); got != "Doc." {
+		t.Errorf("mixed comment-only line must still attach its /// half, got %q", got)
+	}
+}

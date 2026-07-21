@@ -299,6 +299,13 @@ func (l *Lexer) Tokenize() ([]Token, error) {
 			tok.EndLine = l.line
 			tok.EndCol = l.column
 			l.lastTokenLine = l.line
+			// A line that carries a token is CODE, not a transparent
+			// comment line -- even when a block comment opened it
+			// (`/* note */ use ...`, the leading-side mirror of the
+			// trailing-comment guard; memql#2633 review round 2).
+			for i := tok.Line; i <= l.line; i++ {
+				delete(l.commentLines, i)
+			}
 		}
 		tokens = append(tokens, tok)
 		if tok.Type == TokenEOF {
