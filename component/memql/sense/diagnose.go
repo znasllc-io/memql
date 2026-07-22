@@ -76,10 +76,16 @@ func (s *Service) Diagnose(source string, filePath string) []Diagnostic {
 	// wrapped in a non-nil parser.Node interface, so a bare `ast != nil`
 	// guard is not enough -- dereferencing the nil *File panics. Assert and
 	// nil-check the pointer explicitly.
-	if s.registries != nil {
-		if file, ok := ast.(*parser.File); ok && file != nil {
+	if file, ok := ast.(*parser.File); ok && file != nil {
+		// Registry-backed semantic diagnostics (annotations, provider refs,
+		// authoring rules) need the vocabulary; skip them when it is absent.
+		if s.registries != nil {
 			diagnostics = append(diagnostics, s.semanticDiagnostics(file, source)...)
 		}
+		// Import diagnostics need only the workspace graph (always non-nil, a
+		// no-op that answers Unknown when absent), so they run regardless -- a
+		// broken-reference workspace is exactly the registry-less case.
+		diagnostics = append(diagnostics, s.importDiagnostics(file, source)...)
 	}
 
 	return diagnostics
@@ -307,33 +313,121 @@ func (s *Service) semanticDiagnostics(file *parser.File, source string) []Diagno
 		}
 	}
 
-	// Check use declarations.
-	//
-	// Only concept-id-shaped paths are checked. The modern Form-B import
-	// (`use cluster.concepts.{ node, ... }`) carries a dotted MODULE path in
-	// u.Path (e.g. "cluster.concepts"), not a concept id, so passing it to
-	// ConceptGet would miss and warn on every import. Concept ids are
-	// colon-shaped (`v1:cluster:node`); gate on that so module-path imports
-	// don't produce a spurious "unknown concept" warning on every file.
-	for _, u := range file.Uses {
-		conceptPath := u.Path
-		if strings.Contains(conceptPath, ":") {
-			if _, ok := s.registries.ConceptGet(conceptPath); !ok {
-				pos := findInSource(source, conceptPath)
-				diagnostics = append(diagnostics, Diagnostic{
-					Range: Range{
-						Start: pos,
-						End:   Position{Line: pos.Line, Column: pos.Column + len(conceptPath)},
-					},
-					Severity: SeverityWarning,
-					Message:  fmt.Sprintf("unknown concept \"%s\"", conceptPath),
-					Code:     "unknown-concept",
-				})
-			}
-		}
-	}
+	// Form-B import resolution (`use <ns>.<kind>.{ id, ... }`) lives in
+	// importDiagnostics, called from Diagnose OUTSIDE this registry gate: it
+	// needs only the workspace graph, so it runs even in the registry-less
+	// fallback where the engine tripped strict boot -- a broken-reference
+	// workspace is exactly when an author needs those warnings.
 
 	return diagnostics
+}
+
+// importDiagnostics resolves every Form-B import against the workspace graph and
+// warns on a PROVABLE failure: a kind segment that names no module in a
+// workspace-owned namespace (the user's `use fylo.concept.{...}` typo), or an id
+// not declared in the resolved module (`use fylo.concepts.{ oder }`). It needs
+// only s.workspace -- not the registry -- so Diagnose runs it in the registry-
+// less fallback too.
+//
+// Every "missing" conclusion is gated on the graph's tri-state. A namespace the
+// workspace does not own (an external engine namespace a product bundle imports,
+// e.g. `platform`/`common`/`identity`) resolves Unknown and is left silent --
+// never a false squiggle -- mirroring the load side's own missingIsProvable
+// conservatism. Warnings, not errors: there is no Error-severity reference-check
+// precedent, and a stale edit-path registry must not hard-fail the buffer.
+func (s *Service) importDiagnostics(file *parser.File, source string) []Diagnostic {
+	var diagnostics []Diagnostic
+	// cursor advances past each processed `use` so a module path that appears on
+	// more than one line anchors each diagnostic on its OWN line rather than the
+	// first occurrence (file.Uses is in source order).
+	cursor := 0
+	for _, u := range file.Uses {
+		// Resolve only exactly-two-segment module paths (`<ns>.<kind>`). Fewer
+		// segments are Form A / legacy / malformed (not a Form-B module import).
+		// MORE segments are consolidated-capability paths
+		// (`capabilities.integration.github.{...}`), which map to a consolidated
+		// file with a dotted construct prefix and cannot be faithfully resolved
+		// through the graph's (ns, kind) API -- skip them rather than risk a
+		// false squiggle on a valid capability verb.
+		if u == nil || len(u.Names) == 0 || len(u.Parts) != 2 {
+			continue
+		}
+		useStart := indexFrom(source, u.Path, cursor)
+		if useStart >= 0 {
+			cursor = useStart + len(u.Path)
+		}
+		ns, kind := u.Parts[0], u.Parts[1]
+		switch s.workspace.ModuleResolves(ns, kind) {
+		case ResolvedNo:
+			// Namespace is owned by the workspace but names no such module. The
+			// kind segment lives inside the dotted path, so anchor from useStart.
+			pos := segmentPos(source, useStart, kind)
+			diagnostics = append(diagnostics, Diagnostic{
+				Range:    spanAt(pos, len(kind)),
+				Severity: SeverityWarning,
+				Message:  fmt.Sprintf("unknown import module %q: namespace %q has no %q module", ns+"."+kind, ns, kind),
+				Code:     "unknown-import-module",
+			})
+		case ResolvedYes:
+			// Ids live in the brace list AFTER the path; search from past the
+			// path so an id that also appears in the ns/kind (`order.concepts.{
+			// order }`) anchors on the braced id. Dedup a repeated id so a
+			// `{ oder, oder }` list flags once, matching the loader.
+			idsFrom := -1
+			if useStart >= 0 {
+				idsFrom = useStart + len(u.Path)
+			}
+			flagged := make(map[string]bool, len(u.Names))
+			for _, name := range u.Names {
+				if flagged[name] || s.workspace.SymbolDeclared(ns, kind, name) != ResolvedNo {
+					continue
+				}
+				flagged[name] = true
+				pos := segmentPos(source, idsFrom, name)
+				diagnostics = append(diagnostics, Diagnostic{
+					Range:    spanAt(pos, len(name)),
+					Severity: SeverityWarning,
+					Message:  fmt.Sprintf("%q is not declared in %s.%s", name, ns, kind),
+					Code:     "unknown-import-symbol",
+				})
+			}
+		case ResolvedUnknown:
+			// External / unmounted namespace, or no workspace graph -- inconclusive.
+		}
+	}
+	return diagnostics
+}
+
+// spanAt returns a single-line Range of n columns starting at start.
+func spanAt(start Position, n int) Range {
+	return Range{Start: start, End: Position{Line: start.Line, Column: start.Column + n}}
+}
+
+// indexFrom returns the byte offset of the first occurrence of substr at or
+// after `from` (clamped into range), or -1.
+func indexFrom(source, substr string, from int) int {
+	if from < 0 {
+		from = 0
+	}
+	if from > len(source) {
+		return -1
+	}
+	if i := strings.Index(source[from:], substr); i >= 0 {
+		return from + i
+	}
+	return -1
+}
+
+// segmentPos returns the Position of `segment` searching from byte offset `from`
+// (an anchor within a single `use` statement), falling back to a whole-source
+// search when `from` is out of range or the segment is not found past it.
+func segmentPos(source string, from int, segment string) Position {
+	if from >= 0 && from <= len(source) {
+		if rel := strings.Index(source[from:], segment); rel >= 0 {
+			return positionFromOffset(source, from+rel)
+		}
+	}
+	return findInSource(source, segment)
 }
 
 // findInSource finds the first occurrence of text in source and returns its position.
