@@ -24,6 +24,7 @@ const (
 	ContextConstructConcept                    // After a concept-binding construct keyword (mutation/query/seed/shape <Concept>)
 	ContextUseKind                             // After "use <ns>." -> module kinds
 	ContextUseImportList                       // Inside "use <ns>.<kind>.{ ... }" -> importable ids
+	ContextInvocation                          // After an in-body invocation verb (query/mutation/logic <name>)
 )
 
 // CursorContext describes the syntactic context at a cursor position.
@@ -124,6 +125,13 @@ func analyzeCursorContextInner(source string, line, col int) CursorContext {
 
 	// 4.5 After a concept-binding construct keyword: mutation/query/seed/shape <Concept>
 	if ctx, ok := checkConstructConceptContext(tokens, prefix); ok {
+		return ctx
+	}
+
+	// 4.6 After an in-body invocation verb (query/mutation/logic <name>): offer
+	// only functions of that kind, not the whole registry. Sits above the body
+	// fallback so the verb's name position is kind-scoped.
+	if ctx, ok := checkInvocationContext(tokens, prefix); ok {
 		return ctx
 	}
 
@@ -424,6 +432,59 @@ func checkConstructConceptContext(tokens []parser.Token, prefix string) (CursorC
 		}
 	}
 
+	return CursorContext{}, false
+}
+
+// invocationVerbKind maps the in-body invocation verbs to the FunctionKind the
+// verb expects, mirroring the invocation grammar (`<verb> <name>(...)` inside a
+// behavioral body). A logic body's `query listOrders(...)` binds a query, so
+// completion of the name should offer only query-kind functions.
+var invocationVerbKind = map[string]string{
+	"query":    "query",
+	"mutation": "mutation",
+	"logic":    "logic",
+}
+
+// checkInvocationContext detects the NAME position of an in-body invocation:
+// `<verb> [partialName]` inside a body (an unmatched brace), where <verb> is a
+// query/mutation/logic invocation keyword. It carries the expected kind in
+// ConstructKey so the completer offers only functions of that kind instead of
+// the whole registry. It requires body depth, so it never fires on the
+// top-level `query <Concept> <name>` declaration (that is checkConstructConcept-
+// Context, gated on depth 0).
+func checkInvocationContext(tokens []parser.Token, prefix string) (CursorContext, bool) {
+	n := len(tokens)
+	if n == 0 {
+		return CursorContext{}, false
+	}
+	depth := 0
+	for _, t := range tokens {
+		switch t.Type {
+		case parser.TokenBraceOpen:
+			depth++
+		case parser.TokenBraceClose:
+			depth--
+		}
+	}
+	if depth <= 0 {
+		return CursorContext{}, false // top-level signature, not a body invocation
+	}
+	// `<verb> ` -- the last token is the verb and the cursor is just past it.
+	if prefix == "" {
+		if last := tokens[n-1]; last.Type == parser.TokenIdentifier {
+			if kind, ok := invocationVerbKind[last.Literal]; ok {
+				return CursorContext{Kind: ContextInvocation, ConstructKey: kind}, true
+			}
+		}
+		return CursorContext{}, false
+	}
+	// `<verb> <partialName>` -- the last token is the partial, the one before it
+	// the verb.
+	if n >= 2 && tokens[n-1].Type == parser.TokenIdentifier && tokens[n-1].Literal == prefix {
+		if kind, ok := invocationVerbKind[tokens[n-2].Literal]; ok {
+			return CursorContext{Kind: ContextInvocation, Prefix: prefix, ConstructKey: kind}, true
+		}
+	}
 	return CursorContext{}, false
 }
 

@@ -174,6 +174,14 @@ legal-next rule:
   fell through to the offer-everything body bucket and dumped the whole symbol
   table -- the classifier now claims the braced id list before it can be
   mistaken for a function body. Backed by the graph, so it needs no registry.
+- **Kind-filtered invocation (#2733).** In a behavioral body an invocation is
+  `<verb> <name>(...)` where the verb -- `query` / `mutation` / `logic` -- names
+  the kind it can bind. Completing the name now offers only functions of that
+  kind (a `query <name>` position lists queries, never mutations, logic, or
+  tools), instead of dumping the whole registry. The verb requires body depth,
+  so the top-level `query <Concept> <name>` declaration is unaffected. (Two more
+  reference positions -- `@relationship` target and shape `include` -- are
+  tracked as a follow-up.)
 
 ---
 

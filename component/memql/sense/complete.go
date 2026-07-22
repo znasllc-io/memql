@@ -50,6 +50,8 @@ func (s *Service) Complete(source string, line, col int, filePath string) []Comp
 		items = s.completeConceptDef(ctx.Prefix)
 	case ContextConstructConcept:
 		items = s.completeConstructConcept(ctx)
+	case ContextInvocation:
+		items = s.completeInvocation(ctx)
 	}
 
 	return items
@@ -281,6 +283,33 @@ func (s *Service) completeConceptFilter(prefix string) []CompletionItem {
 				SortPriority: 1,
 			})
 		}
+	}
+	return items
+}
+
+// completeInvocation offers the functions of the kind an in-body invocation verb
+// expects (`query <name>` -> queries, `mutation <name>` -> mutations, `logic
+// <name>` -> logic), instead of the whole registry the generic body completion
+// dumps. This is the census gap: an automation body that offered queries, tools,
+// and mutations interchangeably now offers only what the call verb can bind.
+func (s *Service) completeInvocation(ctx CursorContext) []CompletionItem {
+	if s.registries == nil {
+		return nil
+	}
+	var items []CompletionItem
+	for _, name := range s.registries.FunctionNames() {
+		if !strings.HasPrefix(name, ctx.Prefix) {
+			continue
+		}
+		fn, ok := s.registries.FunctionGet(name)
+		if !ok || fn.Kind != ctx.ConstructKey {
+			continue
+		}
+		items = append(items, CompletionItem{
+			Label: name, Kind: "function", Detail: fn.Kind,
+			Documentation: fn.Description, InsertText: name + "(",
+			SortPriority: 1,
+		})
 	}
 	return items
 }
