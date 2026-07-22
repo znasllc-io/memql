@@ -178,9 +178,32 @@ type Parameter struct {
 // Service is the MemQL Sense language service. Thread-safe and stateless.
 type Service struct {
 	registries RegistryProvider
+	// workspace resolves cross-references (imports, signature concepts) against
+	// the whole .memql tree. Always non-nil: New stores a no-op graph, so
+	// consumers query s.workspace without a nil check.
+	workspace WorkspaceGraph
 }
 
-// New creates a new Sense language service.
+// New creates a new Sense language service backed by the registry vocabulary
+// alone; cross-reference resolution answers inconclusively (no workspace graph).
 func New(rp RegistryProvider) *Service {
-	return &Service{registries: rp}
+	return NewWithWorkspace(rp, nil)
+}
+
+// NewWithWorkspace creates a Sense service backed by both the registry
+// vocabulary and a workspace symbol graph for cross-reference resolution. A nil
+// graph is replaced with a no-op that answers every query inconclusively, so the
+// service is safe to build (and consumers safe to write) whether or not a
+// workspace was resolvable.
+func NewWithWorkspace(rp RegistryProvider, wg WorkspaceGraph) *Service {
+	if wg == nil {
+		wg = noWorkspace{}
+	}
+	return &Service{registries: rp, workspace: wg}
+}
+
+// Workspace returns the service's cross-reference resolution graph. Always
+// non-nil (a no-op graph when none was supplied), so callers query it directly.
+func (s *Service) Workspace() WorkspaceGraph {
+	return s.workspace
 }

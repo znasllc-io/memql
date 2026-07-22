@@ -86,6 +86,31 @@ The package is a near-leaf: it imports only the annotations registry,
 so both Sense and the gRPC/SDK export layer can consume it without an
 import cycle.
 
+### The workspace graph (cross-reference resolution)
+
+The spec answers "what is legal *here*" from the grammar; it cannot
+answer "does `fylo.concepts` resolve" or "is `order` declared there".
+Those are cross-reference questions about the whole `.memql` tree, and
+Sense answers them from a second source: a **workspace graph** built
+from the `dslimports` tree -- the same file/tree resolution `memqllint`
+uses -- and handed to the service alongside the registry
+(`sense.WorkspaceGraph`; adapter in `component/memql/workspace_graph.go`,
+built by `BuildOfflineSense`). The registry is a *flat vocabulary*
+(concept/function/shape names); the graph is *structured* (namespaces,
+kinds, per-module declared ids) -- the input import and reference
+diagnostics and segment-aware `use`-line completion consume.
+
+Every graph answer is tri-state (`ResolvedYes` / `ResolvedNo` /
+`ResolvedUnknown`). The third state is load-bearing: a product bundle
+imports engine namespaces it does not carry (`common`, `platform`,
+`identity`), and the edit-path registry can be stale between saves, so a
+fact the workspace cannot *prove* is `Unknown` and callers stay silent
+rather than emit a false squiggle -- mirroring the load-side verifier's
+own conservatism (`dslimports.missingIsProvable`). The graph is built
+from the file tree independently of engine boot, so it survives a
+workspace with a broken reference -- exactly when reference resolution
+is needed most.
+
 ---
 
 ## MemQL Sense: the five operations

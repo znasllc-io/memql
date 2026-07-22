@@ -70,11 +70,21 @@ var offlineSenseBuildMu sync.Mutex
 // the workspace tripping the strict-boot gate) is returned as-is, so the LSP can
 // surface it; the embedded core tree loads clean.
 func BuildOfflineSense(root fs.FS) (*sense.Service, error) {
+	// The workspace graph is built from the file tree (dslimports.Load returns a
+	// partial tree even on error), independent of the engine's strict-boot
+	// validation. Build it first so a service backed by it survives an Init
+	// failure below -- reference diagnostics must keep working on exactly the
+	// broken-reference workspace that trips boot.
+	graph := buildWorkspaceGraph(root)
+
 	adapter, err := buildOfflineSenseAdapter(nil, root)
 	if err != nil {
-		return nil, err
+		// A workspace construct tripped the strict-boot gate. Return a service
+		// that still carries the workspace graph (registry-less) and surface the
+		// error for logging, rather than dropping to a graph-less fallback.
+		return sense.NewWithWorkspace(nil, graph), err
 	}
-	return sense.New(adapter), nil
+	return sense.NewWithWorkspace(adapter, graph), nil
 }
 
 // buildOfflineSenseAdapter performs the DB-free construction and returns the
