@@ -165,6 +165,15 @@ legal-next rule:
   authoring a fresh file pulls the concept into scope in one keystroke.
   Concepts already imported are suppressed from the import set (the
   bare concept suggestion stands).
+- **Segment-aware `use` line (#2732).** An import is `use <ns>.<kind>.{ id,
+  ... }`, and each segment now completes against the [workspace
+  graph](#the-workspace-graph-cross-reference-resolution): after `use ` the
+  namespaces; after `use <ns>.` the module kinds (`concepts` / `queries` /
+  `mutations` / ...); inside the brace list the ids that module declares, minus
+  the ids already listed. This replaces the old behaviour where typing `fylo.`
+  fell through to the offer-everything body bucket and dumped the whole symbol
+  table -- the classifier now claims the braced id list before it can be
+  mistaken for a function body. Backed by the graph, so it needs no registry.
 
 ---
 

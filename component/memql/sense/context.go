@@ -19,9 +19,11 @@ const (
 	ContextConceptFilter                       // After concept==
 	ContextFieldAccess                         // After node.payload. or event.payload.
 	ContextReceiver                            // Inside func (...) receiver declaration
-	ContextUseDeclaration                      // After "use "
+	ContextUseNamespace                        // After "use " -> namespaces
 	ContextConceptDef                          // Inside concept { ... }
 	ContextConstructConcept                    // After a concept-binding construct keyword (mutation/query/seed/shape <Concept>)
+	ContextUseKind                             // After "use <ns>." -> module kinds
+	ContextUseImportList                       // Inside "use <ns>.<kind>.{ ... }" -> importable ids
 )
 
 // CursorContext describes the syntactic context at a cursor position.
@@ -37,6 +39,12 @@ type CursorContext struct {
 	Source         string // full source text (so completers can scan file-scope imports)
 	FilePath       string // the document's path (so completers can derive the ambient domain, #2617)
 	AccessorRoot   string // for ContextFieldAccess: the dotted path before the final dot ("actor", "event.actor", ...)
+	// Use-line completion (#2732): the namespace and kind segments already
+	// typed, and the ids already listed in the brace, so completers offer the
+	// valid next segment scoped to the workspace and skip duplicates.
+	UseNamespace string
+	UseKind      string
+	UseListed    []string
 	// Enclosing is the construct the cursor sits inside -- or, for a
 	// top-level annotation, the construct it precedes (#2626). It is the
 	// ONE enclosure answer; ReceiverType is stamped from its Receiver.
@@ -246,16 +254,102 @@ func checkReceiverContext(tokens []parser.Token, prefix string) (CursorContext, 
 	return CursorContext{}, false
 }
 
-// checkUseContext checks if cursor is after "use ".
+// checkUseContext classifies a cursor inside an in-progress Form-B import
+// (`use <ns>.<kind>.{ ids }`). It runs BEFORE the field-access and func-body
+// checks, so the braced id list -- which the lexer leaves an open brace for --
+// is caught here instead of falling into the offer-everything body bucket
+// (the user's "typing `fylo.` dumps everything").
+//
+// The lexer folds a completed dotted path into one identifier (`fylo.concepts`)
+// but leaves a TRAILING dot as its own TokenDot (`use fylo.` -> [use, "fylo",
+// '.']). The three positions:
+//   - `use ` / `use <partial>`              -> namespaces
+//   - `use <ns>.` / `use <ns>.<partialkind>` -> module kinds for <ns>
+//   - `use <ns>.<kind>.{ ... }`             -> importable ids of that module
+//
+// `use <ns>.<kind>.` (dotted id + trailing dot, pre-brace) is intentionally not
+// claimed -- it falls through to field access, which offers nothing, rather than
+// the body dump.
 func checkUseContext(tokens []parser.Token, prefix string) (CursorContext, bool) {
-	n := len(tokens)
-	if n >= 1 && tokens[n-1].Type == parser.TokenKeywordUse {
-		return CursorContext{Kind: ContextUseDeclaration, Prefix: prefix}, true
+	// Find the `use` that begins the in-progress declaration; a closing brace
+	// before it means we are past a completed use (or in unrelated code).
+	useIdx := -1
+	for i := len(tokens) - 1; i >= 0; i-- {
+		if tokens[i].Type == parser.TokenKeywordUse {
+			useIdx = i
+			break
+		}
+		if tokens[i].Type == parser.TokenBraceClose {
+			return CursorContext{}, false
+		}
 	}
-	if n >= 2 && tokens[n-2].Type == parser.TokenKeywordUse && tokens[n-1].Type == parser.TokenIdentifier {
-		return CursorContext{Kind: ContextUseDeclaration, Prefix: tokens[n-1].Literal}, true
+	if useIdx < 0 {
+		return CursorContext{}, false
+	}
+	seg := tokens[useIdx+1:]
+
+	// Inside the braced id list?
+	for i, t := range seg {
+		if t.Type == parser.TokenBraceOpen {
+			ns, kind := useModuleFromSeg(seg[:i])
+			if ns == "" || kind == "" {
+				return CursorContext{}, false
+			}
+			return CursorContext{
+				Kind: ContextUseImportList, Prefix: prefix,
+				UseNamespace: ns, UseKind: kind, UseListed: bracedIdentifiers(seg[i+1:], prefix),
+			}, true
+		}
+	}
+
+	if len(seg) == 0 {
+		return CursorContext{Kind: ContextUseNamespace, Prefix: ""}, true
+	}
+	last := seg[len(seg)-1]
+	// `use <ns>.` -- a bare namespace identifier followed by a trailing dot.
+	if last.Type == parser.TokenDot && len(seg) >= 2 && seg[len(seg)-2].Type == parser.TokenIdentifier {
+		id := seg[len(seg)-2].Literal
+		if strings.Contains(id, ".") {
+			return CursorContext{}, false // `use <ns>.<kind>.` -> pre-brace, unclaimed
+		}
+		return CursorContext{Kind: ContextUseKind, Prefix: "", UseNamespace: id}, true
+	}
+	// `use <ns>` (partial namespace) or `use <ns>.<partialkind>`.
+	if last.Type == parser.TokenIdentifier {
+		id := last.Literal
+		if j := strings.LastIndex(id, "."); j > 0 {
+			return CursorContext{Kind: ContextUseKind, Prefix: id[j+1:], UseNamespace: id[:j]}, true
+		}
+		return CursorContext{Kind: ContextUseNamespace, Prefix: id}, true
 	}
 	return CursorContext{}, false
+}
+
+// useModuleFromSeg extracts the (ns, kind) module of a Form-B import from the
+// tokens before its brace -- the trailing dotted identifier, e.g.
+// [Identifier("fylo.concepts"), Dot] -> ("fylo", "concepts").
+func useModuleFromSeg(seg []parser.Token) (ns, kind string) {
+	for i := len(seg) - 1; i >= 0; i-- {
+		if seg[i].Type == parser.TokenIdentifier {
+			if j := strings.LastIndex(seg[i].Literal, "."); j > 0 {
+				return seg[i].Literal[:j], seg[i].Literal[j+1:]
+			}
+			return "", ""
+		}
+	}
+	return "", ""
+}
+
+// bracedIdentifiers collects the ids already listed inside a `use` brace, minus
+// the partial one being typed (== prefix), so completion does not re-offer them.
+func bracedIdentifiers(seg []parser.Token, prefix string) []string {
+	var out []string
+	for _, t := range seg {
+		if t.Type == parser.TokenIdentifier && t.Literal != prefix {
+			out = append(out, t.Literal)
+		}
+	}
+	return out
 }
 
 // checkConceptFilterContext checks if cursor is after concept==.

@@ -219,3 +219,37 @@ concept item {
 		t.Errorf("unimported engine concept (registry-resolvable) flagged: got %d", got)
 	}
 }
+
+// End-to-end: the REAL workspace graph drives segment-aware `use`-line
+// completion (#2732) -- `use demo.` offers the module kinds, and the brace list
+// offers the module's declared ids, over a real tree.
+func TestBuildOfflineSense_UseCompletionEndToEnd(t *testing.T) {
+	root := fstest.MapFS{
+		"demo/concepts.memql": &fstest.MapFile{Data: []byte(`@version("1.0.0")
+@namespace("demo")
+concept item {
+  id  string  @required
+}`)},
+	}
+	svc, err := BuildOfflineSense(root)
+	if err != nil {
+		t.Fatalf("BuildOfflineSense: %v", err)
+	}
+	labels := func(src string) map[string]bool {
+		out := map[string]bool{}
+		for _, it := range svc.Complete(src, 1, len(src)+1, "p.memql") {
+			out[it.Label] = true
+		}
+		return out
+	}
+	if got := labels("use demo."); !got["concepts"] {
+		t.Errorf("`use demo.` should offer the concepts kind, got %v", got)
+	}
+	if got := labels("use demo.concepts.{ "); !got["item"] {
+		t.Errorf("brace list should offer `item`, got %v", got)
+	}
+	// Namespace segment offers demo (and not a dump of concept names).
+	if got := labels("use "); !got["demo"] || got["item"] {
+		t.Errorf("`use ` should offer namespace demo only, got %v", got)
+	}
+}

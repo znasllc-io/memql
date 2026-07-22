@@ -18,6 +18,10 @@ type fakeGraph struct {
 	concepts    map[string]Resolved // "name" -> resolved (ConceptExists)
 	namespaces  map[string]bool     // owned namespaces (HasNamespace)
 	importsOnly bool
+	// completion data (#2732)
+	nsList     []string            // Namespaces()
+	kinds      map[string][]string // ns -> Kinds(ns)
+	moduleSyms map[string][]string // "ns.kind" -> SymbolsInModule(ns,kind)
 }
 
 func (f fakeGraph) ModuleResolves(ns, kind string) Resolved {
@@ -41,11 +45,13 @@ func (f fakeGraph) ConceptExists(name, _ string) Resolved {
 	return ResolvedUnknown
 }
 
-func (f fakeGraph) HasNamespace(ns string) bool           { return f.namespaces[ns] }
-func (f fakeGraph) HasImportsOnlyFiles() bool             { return f.importsOnly }
-func (fakeGraph) Namespaces() []string                    { return nil }
-func (fakeGraph) Kinds(string) []string                   { return nil }
-func (fakeGraph) SymbolsInModule(string, string) []string { return nil }
+func (f fakeGraph) HasNamespace(ns string) bool { return f.namespaces[ns] }
+func (f fakeGraph) HasImportsOnlyFiles() bool   { return f.importsOnly }
+func (f fakeGraph) Namespaces() []string        { return f.nsList }
+func (f fakeGraph) Kinds(ns string) []string    { return f.kinds[ns] }
+func (f fakeGraph) SymbolsInModule(ns, kind string) []string {
+	return f.moduleSyms[ns+"."+kind]
+}
 
 // diagCodes returns the Code of every diagnostic whose message contains want, or
 // all codes when want is empty.

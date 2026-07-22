@@ -76,6 +76,8 @@ var senseKindToLSP = map[string]protocol.CompletionItemKind{
 	"snippet":    protocol.CompletionItemKindSnippet,
 	"receiver":   protocol.CompletionItemKindClass,
 	"variable":   protocol.CompletionItemKindVariable,
+	"namespace":  protocol.CompletionItemKindModule,
+	"module":     protocol.CompletionItemKindModule,
 }
 
 func completionKind(k string) protocol.CompletionItemKind {
