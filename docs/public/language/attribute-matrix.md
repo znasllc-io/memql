@@ -201,22 +201,26 @@ query nodeType queryNodeTypes { ... }
 
 #### `@role` (buried)
 `@role("...")` was documented here as declarative access control, but
-the load gate always rejected it and nothing ever enforced the value
--- dead vocabulary wearing a security costume. It was BURIED under the
-#2631 ruling (#2709): the AST/parser/registry plumbing is deleted and
-the load gate emits a pointed message. Access control lives at the
-actor layer (RBAC) plus the `@public` per-row-authz classification.
+nothing ever enforced the value -- and since #989 the load gate has
+rejected it outright (before then it parsed into a `Role` field that
+only a dead help-payload branch ever read). Dead vocabulary wearing a
+security costume. It was BURIED under the #2631 ruling (#2709): the
+AST/parser/registry plumbing is deleted and the load gate emits a
+pointed message. Access control lives at the actor layer (RBAC) plus
+the `@public` per-row-authz classification.
 
-NOTE: `@permission` (below) is the same documented-only class -- it is
-parsed into a field nothing reads. It is a candidate for the same
-audit-and-bury treatment; see the #2709 close-out.
+NOTE: `@permission` (below) is the same documented-only class -- it
+parses into a `Permission` field whose only reader is a help-payload
+branch the load gate never lets fire (the field is provably always
+empty). It is a candidate for the same audit-and-bury treatment; see
+the #2709 close-out.
 
 #### `@permission("...")` (documented-only; bury pending)
 Documented here as requiring a caller permission, but the load gate
-rejects it on every construct (absent from the annotation registry)
-and nothing reads the value -- the same never-enforced class as the
-buried `@role`. Audited during #2709; its bury is tracked as #2713.
-Do not author it.
+rejects it on every construct (absent from the annotation registry),
+so its one reader -- a `help()`/`listFunctions` payload branch -- can
+never fire: the same never-enforced class as the buried `@role`.
+Audited during #2709; its bury is tracked as #2713. Do not author it.
 
 ---
 
