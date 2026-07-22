@@ -45,6 +45,13 @@ type WorkspaceGraph interface {
 	// ConceptExists reports whether a concept named `name` exists; nsHint, when
 	// non-empty, scopes the match to that namespace.
 	ConceptExists(name, nsHint string) Resolved
+	// HasNamespace reports whether the workspace OWNS namespace ns (has files
+	// under it). Used to tell a workspace-local import from an external
+	// (engine) one; false does not mean "unknown namespace".
+	HasNamespace(ns string) bool
+	// HasImportsOnlyFiles reports whether the tree has any imports-only file,
+	// which makes a "does not exist anywhere" conclusion unsafe.
+	HasImportsOnlyFiles() bool
 	// Namespaces returns the workspace's top-level namespaces (for completion).
 	Namespaces() []string
 	// Kinds returns the module kind segments under ns (for completion).
@@ -63,6 +70,8 @@ type noWorkspace struct{}
 func (noWorkspace) ModuleResolves(string, string) Resolved         { return ResolvedUnknown }
 func (noWorkspace) SymbolDeclared(string, string, string) Resolved { return ResolvedUnknown }
 func (noWorkspace) ConceptExists(string, string) Resolved          { return ResolvedUnknown }
+func (noWorkspace) HasNamespace(string) bool                       { return false }
+func (noWorkspace) HasImportsOnlyFiles() bool                      { return false }
 func (noWorkspace) Namespaces() []string                           { return nil }
 func (noWorkspace) Kinds(string) []string                          { return nil }
 func (noWorkspace) SymbolsInModule(string, string) []string        { return nil }

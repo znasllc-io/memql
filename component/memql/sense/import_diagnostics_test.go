@@ -13,8 +13,11 @@ import (
 // fakeGraph answers module/symbol queries from lookup tables; anything absent is
 // Unknown (the inconclusive default), matching the no-op graph.
 type fakeGraph struct {
-	modules map[string]Resolved // "ns.kind" -> resolved
-	symbols map[string]Resolved // "ns.kind.id" -> resolved
+	modules     map[string]Resolved // "ns.kind" -> resolved
+	symbols     map[string]Resolved // "ns.kind.id" -> resolved
+	concepts    map[string]Resolved // "name" -> resolved (ConceptExists)
+	namespaces  map[string]bool     // owned namespaces (HasNamespace)
+	importsOnly bool
 }
 
 func (f fakeGraph) ModuleResolves(ns, kind string) Resolved {
@@ -31,7 +34,15 @@ func (f fakeGraph) SymbolDeclared(ns, kind, id string) Resolved {
 	return ResolvedUnknown
 }
 
-func (fakeGraph) ConceptExists(string, string) Resolved   { return ResolvedUnknown }
+func (f fakeGraph) ConceptExists(name, _ string) Resolved {
+	if r, ok := f.concepts[name]; ok {
+		return r
+	}
+	return ResolvedUnknown
+}
+
+func (f fakeGraph) HasNamespace(ns string) bool           { return f.namespaces[ns] }
+func (f fakeGraph) HasImportsOnlyFiles() bool             { return f.importsOnly }
 func (fakeGraph) Namespaces() []string                    { return nil }
 func (fakeGraph) Kinds(string) []string                   { return nil }
 func (fakeGraph) SymbolsInModule(string, string) []string { return nil }

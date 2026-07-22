@@ -54,6 +54,14 @@ func (ix *Index) HasNamespace(ns string) bool {
 	return ix.idx.namespaces[ns]
 }
 
+// HasImportsOnlyFiles reports whether the tree contains any file that parsed
+// only to its imports projection (its declarations are invisible). When true, a
+// "does not exist anywhere" conclusion is unsafe -- the symbol may be declared
+// in such a file -- so callers must stay inconclusive.
+func (ix *Index) HasImportsOnlyFiles() bool {
+	return len(ix.tree.ImportsOnly) > 0
+}
+
 // Namespaces returns the workspace's top-level namespace dirs, sorted.
 func (ix *Index) Namespaces() []string {
 	out := make([]string, 0, len(ix.idx.namespaces))
