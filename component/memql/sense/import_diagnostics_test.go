@@ -131,6 +131,53 @@ func TestImportDiagnostics_NoWorkspaceGraphSilent(t *testing.T) {
 	}
 }
 
+func TestImportDiagnostics_IdAnchoredInBraceList(t *testing.T) {
+	// The id also appears as the namespace: the squiggle must land on the braced
+	// id (past the path), not the earlier namespace occurrence.
+	src := "use order.concepts.{ order }" + useConstructTail
+	s := NewWithWorkspace(nil, fakeGraph{
+		modules: map[string]Resolved{"order.concepts": ResolvedYes},
+		symbols: map[string]Resolved{"order.concepts.order": ResolvedNo},
+	})
+	got := codesFor(s.Diagnose(src, "f.memql"), "unknown-import-symbol")
+	if len(got) != 1 {
+		t.Fatalf("want 1 unknown-import-symbol, got %d", len(got))
+	}
+	// "use order.concepts.{ order }": the braced id starts near column 22, well
+	// past the namespace "order" at column 5.
+	if got[0].Range.Start.Column < 15 {
+		t.Errorf("id squiggle at column %d anchored on the namespace, not the braced id", got[0].Range.Start.Column)
+	}
+}
+
+func TestImportDiagnostics_RepeatedModuleAnchorsPerLine(t *testing.T) {
+	// Two use lines importing the SAME broken module must each anchor on their
+	// own line, not both on the first occurrence.
+	src := "use fylo.concept.{ a }\nuse fylo.concept.{ b }" + useConstructTail
+	s := NewWithWorkspace(nil, fakeGraph{
+		modules: map[string]Resolved{"fylo.concept": ResolvedNo},
+	})
+	got := codesFor(s.Diagnose(src, "f.memql"), "unknown-import-module")
+	if len(got) != 2 {
+		t.Fatalf("want 2 unknown-import-module, got %d", len(got))
+	}
+	if got[0].Range.Start.Line != 1 || got[1].Range.Start.Line != 2 {
+		t.Errorf("diagnostics anchored on lines %d and %d, want 1 and 2", got[0].Range.Start.Line, got[1].Range.Start.Line)
+	}
+}
+
+func TestImportDiagnostics_DuplicateIdFlaggedOnce(t *testing.T) {
+	// A repeated undeclared id in one list flags once (matching the loader).
+	src := "use fylo.concepts.{ oder, oder }" + useConstructTail
+	s := NewWithWorkspace(nil, fakeGraph{
+		modules: map[string]Resolved{"fylo.concepts": ResolvedYes},
+		symbols: map[string]Resolved{"fylo.concepts.oder": ResolvedNo},
+	})
+	if got := codesFor(s.Diagnose(src, "f.memql"), "unknown-import-symbol"); len(got) != 1 {
+		t.Fatalf("duplicate id flagged %d times, want 1", len(got))
+	}
+}
+
 // lineOf returns the source line containing pos (1-indexed).
 func lineOf(source string, pos Position) string {
 	lines := strings.Split(source, "\n")

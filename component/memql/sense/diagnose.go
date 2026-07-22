@@ -337,6 +337,10 @@ func (s *Service) semanticDiagnostics(file *parser.File, source string) []Diagno
 // precedent, and a stale edit-path registry must not hard-fail the buffer.
 func (s *Service) importDiagnostics(file *parser.File, source string) []Diagnostic {
 	var diagnostics []Diagnostic
+	// cursor advances past each processed `use` so a module path that appears on
+	// more than one line anchors each diagnostic on its OWN line rather than the
+	// first occurrence (file.Uses is in source order).
+	cursor := 0
 	for _, u := range file.Uses {
 		// Resolve only exactly-two-segment module paths (`<ns>.<kind>`). Fewer
 		// segments are Form A / legacy / malformed (not a Form-B module import).
@@ -348,11 +352,16 @@ func (s *Service) importDiagnostics(file *parser.File, source string) []Diagnost
 		if u == nil || len(u.Names) == 0 || len(u.Parts) != 2 {
 			continue
 		}
+		useStart := indexFrom(source, u.Path, cursor)
+		if useStart >= 0 {
+			cursor = useStart + len(u.Path)
+		}
 		ns, kind := u.Parts[0], u.Parts[1]
 		switch s.workspace.ModuleResolves(ns, kind) {
 		case ResolvedNo:
-			// Namespace is owned by the workspace but names no such module.
-			pos := findUseSegment(source, u.Path, kind)
+			// Namespace is owned by the workspace but names no such module. The
+			// kind segment lives inside the dotted path, so anchor from useStart.
+			pos := segmentPos(source, useStart, kind)
 			diagnostics = append(diagnostics, Diagnostic{
 				Range:    spanAt(pos, len(kind)),
 				Severity: SeverityWarning,
@@ -360,16 +369,27 @@ func (s *Service) importDiagnostics(file *parser.File, source string) []Diagnost
 				Code:     "unknown-import-module",
 			})
 		case ResolvedYes:
+			// Ids live in the brace list AFTER the path; search from past the
+			// path so an id that also appears in the ns/kind (`order.concepts.{
+			// order }`) anchors on the braced id. Dedup a repeated id so a
+			// `{ oder, oder }` list flags once, matching the loader.
+			idsFrom := -1
+			if useStart >= 0 {
+				idsFrom = useStart + len(u.Path)
+			}
+			flagged := make(map[string]bool, len(u.Names))
 			for _, name := range u.Names {
-				if s.workspace.SymbolDeclared(ns, kind, name) == ResolvedNo {
-					pos := findUseSegment(source, u.Path, name)
-					diagnostics = append(diagnostics, Diagnostic{
-						Range:    spanAt(pos, len(name)),
-						Severity: SeverityWarning,
-						Message:  fmt.Sprintf("%q is not declared in %s.%s", name, ns, kind),
-						Code:     "unknown-import-symbol",
-					})
+				if flagged[name] || s.workspace.SymbolDeclared(ns, kind, name) != ResolvedNo {
+					continue
 				}
+				flagged[name] = true
+				pos := segmentPos(source, idsFrom, name)
+				diagnostics = append(diagnostics, Diagnostic{
+					Range:    spanAt(pos, len(name)),
+					Severity: SeverityWarning,
+					Message:  fmt.Sprintf("%q is not declared in %s.%s", name, ns, kind),
+					Code:     "unknown-import-symbol",
+				})
 			}
 		case ResolvedUnknown:
 			// External / unmounted namespace, or no workspace graph -- inconclusive.
@@ -383,19 +403,31 @@ func spanAt(start Position, n int) Range {
 	return Range{Start: start, End: Position{Line: start.Line, Column: start.Column + n}}
 }
 
-// findUseSegment locates `segment` in source anchored at (at or after) the
-// occurrence of the import's dotted path, so an id or kind is found within its
-// own `use` statement rather than an unrelated earlier match. Falls back to a
-// bare first-occurrence search when the path is not found verbatim.
-func findUseSegment(source, usePath, segment string) Position {
-	anchor := strings.Index(source, usePath)
-	if anchor < 0 {
-		return findInSource(source, segment)
+// indexFrom returns the byte offset of the first occurrence of substr at or
+// after `from` (clamped into range), or -1.
+func indexFrom(source, substr string, from int) int {
+	if from < 0 {
+		from = 0
 	}
-	if rel := strings.Index(source[anchor:], segment); rel >= 0 {
-		return positionFromOffset(source, anchor+rel)
+	if from > len(source) {
+		return -1
 	}
-	return positionFromOffset(source, anchor)
+	if i := strings.Index(source[from:], substr); i >= 0 {
+		return from + i
+	}
+	return -1
+}
+
+// segmentPos returns the Position of `segment` searching from byte offset `from`
+// (an anchor within a single `use` statement), falling back to a whole-source
+// search when `from` is out of range or the segment is not found past it.
+func segmentPos(source string, from int, segment string) Position {
+	if from >= 0 && from <= len(source) {
+		if rel := strings.Index(source[from:], segment); rel >= 0 {
+			return positionFromOffset(source, from+rel)
+		}
+	}
+	return findInSource(source, segment)
 }
 
 // findInSource finds the first occurrence of text in source and returns its position.
