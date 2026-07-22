@@ -27,8 +27,8 @@ construct-specific (see the end of this document) or rejected.
 | **Lifecycle** |
 | `@enabled` | Yes | Yes | Yes | Accepted no-op; definitions are enabled by default (#2609) |
 | `@disabled` | Yes | Yes | Yes | Explicitly disables the definition |
-| `@deprecated` | Yes | Yes | Yes | Marks as deprecated with optional message |
-| `@version("v1")` | Yes | Yes | Yes | Version metadata tag (no load-time default for these constructs) |
+| `@deprecated` | Yes | Yes | No | Marks as deprecated (functions only; rejected on automations, #2712 -- the value was never read there) |
+| `@version("v1")` | Yes | Yes | No | Version metadata tag (functions only; rejected on automations, #2712) |
 | **Documentation** |
 | `@description("...")` | Yes | Yes | Yes | Human-readable description (fallback; prefer `///` doc comments, #2601) |
 | **Access Control** |
@@ -36,22 +36,22 @@ construct-specific (see the end of this document) or rejected.
 | `@actor` | Yes | Yes | Yes | Declares the body reads the auth envelope (`actor.*`); used-but-undeclared fails load (#2621) |
 | `@permission("...")` | -- | -- | -- | BURIED (#2713); never enforced. See below |
 | **Performance** |
-| `@timeout("30s")` | Yes | Yes | Yes | Maximum execution time |
+| `@timeout("30s")` | Yes | Yes | No | Maximum execution time (functions only; rejected on automations, #2712) |
 | `@cache(300)` | Yes | No | No | Result-cache TTL in whole seconds; positional preferred (#2618), `ttl="300"` keeps parsing |
 | **Reliability** |
-| `@retry(count=3)` | No | Yes | Yes | Retry on failure |
+| `@retry(count=3)` | No | Yes | No | Retry on failure (mutations only; rejected on automations, #2712 -- never retried them) |
 | `@idempotent` | No | Yes | No | Safe to retry without side effects |
 | `@mergeFields("a", "b")` | No | Yes | No | Deep-merge the named object payload fields on update instead of replacing them |
 | `@appendFields("a", "b")` | No | Yes | No | Append the named array payload fields' elements to the stored array on update instead of replacing them |
 | `@createOnly("a", "b")` | No | Yes | No | Write the named payload fields only on create; preserve the stored value on an insert (upsert) onto an existing id |
 | **Auditing** |
-| `@audit` | No | Yes | Yes | Log all executions for audit trail |
+| `@audit` | No | Yes | No | Log all executions for audit trail (mutations only; rejected on automations, #2712) |
 | **Triggers (Automation Only)** |
 | `@trigger(event="...")` | No | No | Yes | Event-based trigger |
 | `@trigger(schedule="...")` | No | No | Yes | Cron-based schedule (6-field, with seconds) |
 | `@filter(...)` | No | No | Yes | Predicate over the triggering event's payload |
 | `@schedule(cron="...")` | No | No | Yes | Accepted synonym for `@trigger(schedule="...")` |
-| `@async` | No | No | Yes | Run asynchronously when triggered |
+| `@async` | No | No | No | Dead vocabulary -- never honored on automations; rejected (#2712). Automations run async by their event/schedule trigger |
 
 ---
 

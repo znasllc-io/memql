@@ -39,7 +39,7 @@ var ByReceiver = map[string][]string{
 		"description", "enabled", "disabled", "eventField", "actor",
 	},
 	"Automation": {
-		"description", "enabled", "disabled", "trigger", "filter", "mcp", "actor",
+		"description", "enabled", "disabled", "trigger", "filter", "mcp", "actor", "schedule",
 	},
 	"Action": {
 		"description", "enabled", "disabled", "kind", "sideEffect",
@@ -95,8 +95,9 @@ var Docs = map[string]string{
 	"createOnly":   "On an insert (create-or-upsert) mutation: write the named payload fields ONLY when creating the row. If the target id already exists, the fields are dropped from the delta before the engine read-merge, so the stored value is preserved rather than clobbered -- making a deterministic-id re-stage idempotent for lifecycle fields another writer owns after creation (e.g. stageOutboundRequest seeds status but must not reset a row the outbound worker moved to sent). The inverse of @mergeFields/@appendFields: only valid on insert-kind mutations. Format: @createOnly(\"status\", \"attempts\"). See fylo#63.",
 	"scrubPii":     "On an update mutation (the hard-delete / data-deletion path): after the partial payload merges, zero EVERY field the bound concept marks @pii. The field set is derived from the schema, so a newly-annotated PII field is scrubbed automatically with no change to the mutation. Bare flag, no arguments. See memql#1711.",
 	// Automation.
-	"trigger": "Event trigger for automations. Format: @trigger(event=\"graph.node.created.*.v1:ns:concept\") or @trigger(schedule=\"0 0 * * * *\").",
-	"filter":  "Filter expression for automation triggers.",
+	"trigger":  "Event trigger for automations. Format: @trigger(event=\"graph.node.created.*.v1:ns:concept\") or @trigger(schedule=\"0 0 * * * *\").",
+	"filter":   "Filter expression for automation triggers.",
+	"schedule": "Cron schedule for a scheduled automation. Format: @schedule(cron=\"0 0 * * * *\"). Synonym for @trigger(schedule=...); folds to the same scheduler field (#2712).",
 	// Action (memql#2218, behavioral-constructs ADR §2.3).
 	"kind":       "On an action: the action kind. @kind(\"primitive\") = one external capability rendered from params (the only kind today; composites collapse into automations, ADR §2.2).",
 	"sideEffect": "On an action: coarse risk class @sideEffect(\"read\"|\"write\"|\"exec\") carried for authoring + the surface-aware trust gate. The AUTHORITATIVE sideEffectClass lives on the capability (ADR §7) so an authored/generated action cannot spoof it.",
@@ -182,6 +183,9 @@ var KeywordArgs = map[string][]ArgSpec{
 		{Name: "schedule", Type: "string", Doc: "Cron schedule, e.g. \"0 0 * * * *\"."},
 		{Name: "concept", Type: "string", Doc: "Concept id the triggering event targets."},
 		{Name: "partition", Type: "string", Doc: "Partition selector, e.g. \"*\" for all partitions. Required while the event topic carries a partition segment (#56 phase 8)."},
+	},
+	"schedule": {
+		{Name: "cron", Type: "string", Doc: "Cron schedule, e.g. \"0 0 * * * *\". Synonym for @trigger(schedule=...)."},
 	},
 	"handler": {
 		{Name: "type", Type: "string", Doc: "Handler type: \"query\", \"function\", or \"webhook\"."},

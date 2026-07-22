@@ -36,7 +36,6 @@ func TestRemovedAnnotationsRejected(t *testing.T) {
 		// Logic allow-list removal.
 		{"deprecated", "logic", "logic removedAnnoLogic", allowedLogicAnnotations},
 		// Automation allow-list removals.
-		{"schedule", "automation", "automation removedAnnoAutomation", allowedAutomationAnnotations},
 		{"async", "automation", "automation removedAnnoAutomation", allowedAutomationAnnotations},
 		{"deprecated", "automation", "automation removedAnnoAutomation", allowedAutomationAnnotations},
 	}
@@ -79,6 +78,9 @@ func TestKeptAnnotationsStillAccepted(t *testing.T) {
 		{"actor", "mutation", "mutation lead keptAnnoMutation", allowedMutationAnnotations},
 		{"trigger", "automation", "automation keptAnnoAutomation", allowedAutomationAnnotations},
 		{"filter", "automation", "automation keptAnnoAutomation", allowedAutomationAnnotations},
+		// @schedule reinstated on automations (#2712): LIVE (folds to the
+		// honored AutomationDef.Schedule / cron scheduler).
+		{"schedule", "automation", "automation keptAnnoAutomation", allowedAutomationAnnotations},
 	}
 
 	for _, tc := range cases {

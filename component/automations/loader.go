@@ -318,6 +318,16 @@ func (l *Loader) loadMemQL(path string) (*Automation, error) {
 //   - Can have supporting queries (helpers)
 //   - Cannot have mutations (mutations go in functions/ directory)
 func (l *Loader) compileMemQL(source, path string) (*Automation, error) {
+	// Close the annotation silent-tolerance gap (#2712): automations reach
+	// this dedicated loader instead of the function slicer's gate, so an
+	// unknown / dead / retired annotation would otherwise be silently
+	// dropped. Run the same allow-list + retired-name gate every function
+	// kind uses. The source is already terse-lowered here (unified_loader),
+	// and the helper re-lowers idempotently for any direct caller.
+	if err := memql.ValidateAutomationAnnotations(source); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+
 	// Enforce .memql automation syntax: do not allow JSON-style $steps references.
 	// In .memql, step references should be bare (e.g., "getAgent.result.Bundle.nodes")
 	// and are resolved by the evaluator at runtime.

@@ -1,6 +1,10 @@
 package memql
 
-import "github.com/znasllc-io/memql/component/language/annotations"
+import (
+	"github.com/znasllc-io/memql/component/language/annotations"
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/component/memql/baseparser"
+)
 
 // function_annotation_allow_lists.go exposes the four per-construct
 // annotation allow-lists the unified function loader's pre-parse
@@ -35,3 +39,18 @@ var (
 	allowedLogicAnnotations      = annotations.Set("Logic")
 	allowedAutomationAnnotations = annotations.Set("Automation")
 )
+
+// ValidateAutomationAnnotations closes the silent-tolerance gap (#2712):
+// automations load through component/automations (the dedicated runtime
+// loader), never reaching dispatchPerConstructParser's gate, and
+// processAutomationAttributes has no default case -- so an unknown, dead, or
+// retired annotation on an automation was silently dropped instead of
+// load-rejected. This applies the SAME allow-list + retired-name gate the
+// function kinds use. Terse single-step sources are lowered first (idempotent
+// for the struct form) so leading annotations are visible to the header scan.
+func ValidateAutomationAnnotations(source string) error {
+	if lowered, err := languageParser.NormaliseTerseAutomationSource(source); err == nil {
+		source = lowered
+	}
+	return baseparser.ValidateConstructAnnotations(source, "automation", allowedAutomationAnnotations)
+}

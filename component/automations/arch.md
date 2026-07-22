@@ -539,23 +539,16 @@ automation bootstrapUser() {
 | **Lifecycle** |
 | | `@enabled` | none | Accepted no-op; automations are enabled by default (#2604) |
 | | `@disabled` | none | Explicitly disables the automation |
-| | `@deprecated` | `"message"` (optional) | Marks as deprecated |
-| | `@version` | `"v1"` | Version tag |
 | **Documentation** |
 | | `@description` | `"..."` | Human-readable description |
-| **Performance** |
-| | `@timeout` | `"30s"` | Execution timeout |
-| | `@rateLimit` | `requests=N, per="1m"` | Throttle execution |
-| **Reliability** |
-| | `@retry` | `count=3` | Retry on failure |
-| **Auditing** |
-| | `@audit` | none | Log all executions for audit trail |
 | **Triggers** |
-| | `@trigger` | `event="..."`, `filter="..."` | Event-based trigger |
-| | `@schedule` | `cron="..."` | Cron-based schedule |
-| | `@async` | none | Runs asynchronously when triggered |
+| | `@trigger` | `event="..."`, `filter="..."`, `schedule="..."` | Event- or schedule-based trigger |
+| | `@filter` | `expression` | Predicate over the triggering event's payload |
+| | `@schedule` | `cron="..."` | Cron-based schedule (synonym for `@trigger(schedule=...)`) |
 
-**Note:** Automations are **enabled by default** (#2604, the uniform lifecycle ruling); `@enabled` is an accepted no-op and `@disabled` is the off-switch.
+Automations also accept `@actor` (declares the body reads `actor.*`) and `@mcp`.
+
+**Note:** Automations are **enabled by default** (#2604, the uniform lifecycle ruling); `@enabled` is an accepted no-op and `@disabled` is the off-switch. The lifecycle/reliability/audit annotations functions carry -- `@deprecated`, `@version`, `@timeout`, `@retry`, `@audit`, `@async`, `@rateLimit` -- are **not** valid on automations: the automation runtime never honored them, and the load gate now rejects them (#2712). Only `@schedule` among the once-tolerated extras is live (it feeds the cron scheduler).
 
 See also: `/docs/attribute-matrix.md` for the full attribute reference across all function types.
 
