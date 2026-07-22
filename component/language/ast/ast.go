@@ -803,7 +803,6 @@ const (
 
 	// Access control
 	AttrPublic     = "public"
-	AttrRole       = "role"
 	AttrPermission = "permission"
 
 	// Performance
@@ -1073,7 +1072,6 @@ type FunctionDef struct {
 	Enabled    bool   // from //memql:enabled
 	Deprecated string // from //memql:deprecated (empty = not deprecated)
 	Version    string // from //memql:version
-	Role       string // from //memql:role
 	Permission string // from //memql:permission
 	Timeout    string // from //memql:timeout
 	CacheTTL   string // from //memql:cache (queries only)
@@ -1144,7 +1142,6 @@ type AutomationDef struct {
 	Enabled    bool   // from @enabled
 	Deprecated string // from @deprecated
 	Version    string // from @version
-	Role       string // from @role
 	Permission string // from @permission
 	Timeout    string // from @timeout
 	RateLimit  *RateLimitConfig

@@ -34,8 +34,7 @@ construct-specific (see the end of this document) or rejected.
 | **Access Control** |
 | `@public` | Yes | Yes | No | Authz-classification opt-out: declares that no caller-scope check applies (see below) |
 | `@actor` | Yes | Yes | Yes | Declares the body reads the auth envelope (`actor.*`); used-but-undeclared fails load (#2621) |
-| `@role("admin")` | Yes | Yes | Yes | Restrict to users with specified role |
-| `@permission("...")` | Yes | Yes | No | Require specific permission |
+| `@permission("...")` | No | No | No | Documented-only, never enforced; load-rejected. Bury tracked as #2713 |
 | **Performance** |
 | `@timeout("30s")` | Yes | Yes | Yes | Maximum execution time |
 | `@cache(300)` | Yes | No | No | Result-cache TTL in whole seconds; positional preferred (#2618), `ttl="300"` keeps parsing |
@@ -200,23 +199,24 @@ fails CI unless it carries `@public` with a comment explaining why.
 query nodeType queryNodeTypes { ... }
 ```
 
-#### `@role("...")`
-Restricts access to users with the specified role
-(owner / admin / writer / reader).
+#### `@role` (buried)
+`@role("...")` was documented here as declarative access control, but
+the load gate always rejected it and nothing ever enforced the value
+-- dead vocabulary wearing a security costume. It was BURIED under the
+#2631 ruling (#2709): the AST/parser/registry plumbing is deleted and
+the load gate emits a pointed message. Access control lives at the
+actor layer (RBAC) plus the `@public` per-row-authz classification.
 
-```memql
-@role("admin")
-query auditEvent queryAdminDashboard { ... }
-```
+NOTE: `@permission` (below) is the same documented-only class -- it is
+parsed into a field nothing reads. It is a candidate for the same
+audit-and-bury treatment; see the #2709 close-out.
 
-#### `@permission("...")`
-Requires the caller to have the specified permission.
-Query / mutation only.
-
-```memql
-@permission("read:users")
-query user queryUserProfiles { ... }
-```
+#### `@permission("...")` (documented-only; bury pending)
+Documented here as requiring a caller permission, but the load gate
+rejects it on every construct (absent from the annotation registry)
+and nothing reads the value -- the same never-enforced class as the
+buried `@role`. Audited during #2709; its bury is tracked as #2713.
+Do not author it.
 
 ---
 

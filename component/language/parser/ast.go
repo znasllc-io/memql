@@ -170,7 +170,6 @@ var (
 	AttrRateLimit            = ast.AttrRateLimit
 	AttrRequiresConfirmation = ast.AttrRequiresConfirmation
 	AttrRetry                = ast.AttrRetry
-	AttrRole                 = ast.AttrRole
 	AttrSchedule             = ast.AttrSchedule
 	AttrScrubPii             = ast.AttrScrubPii
 	AttrUse                  = ast.AttrUse
