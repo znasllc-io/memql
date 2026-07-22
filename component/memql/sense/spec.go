@@ -263,7 +263,8 @@ var specUndetectedContextLabels = map[string]bool{
 	// cursor line, which the line-prefix classifier cannot do; the hover /
 	// annotation-docs channel carries the same guidance meanwhile.
 	"beforeConstructHeader": true,
-	// `use` import paths are completed by their own dedicated context
-	// (ContextUseDeclaration), not through the NextRule label path.
+	// `use` import paths are completed by their own dedicated contexts
+	// (ContextUseNamespace / ContextUseKind / ContextUseImportList), not through
+	// the NextRule label path.
 	"afterUseKeyword": true,
 }

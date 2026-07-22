@@ -285,7 +285,6 @@ func (s *Service) completeConceptFilter(prefix string) []CompletionItem {
 	return items
 }
 
-// completeUseDeclaration returns concept path completions after "use".
 // completeUseNamespace offers the workspace's top-level namespaces after `use `
 // (the user's symptom 3: typing `fylo` then `.` should lead to real segments,
 // not a dump of every concept). Backed by the workspace graph, so it needs no
@@ -326,17 +325,36 @@ func (s *Service) completeUseImportList(ctx CursorContext) []CompletionItem {
 	for _, id := range ctx.UseListed {
 		listed[id] = true
 	}
+	kind := importItemKind(ctx.UseKind)
 	var items []CompletionItem
 	for _, id := range s.workspace.SymbolsInModule(ctx.UseNamespace, ctx.UseKind) {
 		if listed[id] || !strings.HasPrefix(id, ctx.Prefix) {
 			continue
 		}
 		items = append(items, CompletionItem{
-			Label: id, Kind: "concept", Detail: ctx.UseNamespace + "." + ctx.UseKind,
+			Label: id, Kind: kind, Detail: ctx.UseNamespace + "." + ctx.UseKind,
 			InsertText: id, SortPriority: 1,
 		})
 	}
 	return items
+}
+
+// importItemKind maps a module kind segment (the plural `concepts` / `queries`
+// / ...) to the completion item Kind used for its editor icon. Falls back to
+// "concept" for an unrecognized kind -- purely cosmetic.
+func importItemKind(moduleKind string) string {
+	switch moduleKind {
+	case "shapes":
+		return "shape"
+	case "queries", "mutations", "logic", "tools", "builtins", "actions":
+		return "function"
+	case "traits", "specs":
+		return "spec"
+	case "providers":
+		return "provider"
+	default:
+		return "concept"
+	}
 }
 
 // completeConstructConcept returns concept completions where a concept-binding
