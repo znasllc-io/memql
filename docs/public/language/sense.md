@@ -178,9 +178,13 @@ editors and agents can key on them:
 |---|---|---|
 | `actor-unknown-property` | Error | `actor.<member>` names something outside the closed envelope (#2625) -- same tables as the load-time gate, pinned by a conformance test. |
 | `actor-undeclared` | Error | A query/mutate/logic/automation body reads `actor.*` without `@actor` in the preamble -- the edit-time mirror of the engine's load rule (#2621), sharing the loader's own detection so squiggle and boot error cannot drift. |
+| `unknown-import-module` | Warning | A Form-B import `use <ns>.<kind>.{ ... }` whose kind segment names no module in a workspace-owned namespace (`use fylo.concept.{...}` where the module is `concepts`). Resolved against the workspace graph (#2730). |
+| `unknown-import-symbol` | Warning | An imported id that the resolved module does not declare (`use fylo.concepts.{ oder }`). |
 | `redundant-enabled` | Hint | `@enabled` restates the default (#2610). |
 | `redundant-version` | Hint | `@version("1.0.0")` restates the default (#2613). |
 | `discarded-args-description` | Hint | `@description` on an args field is parsed and discarded (#2615). |
+
+The two import checks resolve against the [workspace graph](#the-workspace-graph-cross-reference-resolution) rather than the flat registry, and they run even in the registry-less fallback (a workspace whose engine boot tripped) because the graph needs no registry. They are deliberately conservative: a reference the workspace cannot *prove* wrong -- an id under an external engine namespace the bundle imports but does not carry, or anything when the graph is absent -- resolves inconclusively and is left silent, so a legitimate cross-namespace import never squiggles. That is why they are Warnings, not Errors.
 
 ### Snippet completions (#2629)
 

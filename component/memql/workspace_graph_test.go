@@ -131,3 +131,48 @@ mutate ghostConcept touchGhost {
 		t.Errorf("graph lost on init failure: ModuleResolves(demo, concepts) = %v, want ResolvedYes", got)
 	}
 }
+
+// End-to-end: the REAL workspace graph (not a fake) drives Diagnose's import
+// checks. Proves #2729's graph and #2730's importDiagnostics compose, and that a
+// valid import over a real tree produces zero import diagnostics.
+func TestBuildOfflineSense_ImportDiagnosticsEndToEnd(t *testing.T) {
+	root := fstest.MapFS{
+		"demo/concepts.memql": &fstest.MapFile{Data: []byte(`@version("1.0.0")
+@namespace("demo")
+concept item {
+  id  string  @required
+}`)},
+	}
+	svc, err := BuildOfflineSense(root)
+	if err != nil {
+		t.Fatalf("BuildOfflineSense over a clean workspace: %v", err)
+	}
+
+	importCodes := func(src string) map[string]int {
+		out := map[string]int{}
+		for _, d := range svc.Diagnose(src, "q.memql") {
+			if d.Code == "unknown-import-module" || d.Code == "unknown-import-symbol" {
+				out[d.Code]++
+			}
+		}
+		return out
+	}
+	tail := "\n\nquery item listItems {\n  filter id == \"x\"\n}\n"
+
+	// Valid import: zero import diagnostics.
+	if got := importCodes("use demo.concepts.{ item }" + tail); len(got) != 0 {
+		t.Errorf("valid import flagged: %v", got)
+	}
+	// Wrong kind segment: one unknown-import-module.
+	if got := importCodes("use demo.concept.{ item }" + tail); got["unknown-import-module"] != 1 {
+		t.Errorf("wrong-kind import: got %v, want 1 unknown-import-module", got)
+	}
+	// Undeclared id: one unknown-import-symbol.
+	if got := importCodes("use demo.concepts.{ ghost }" + tail); got["unknown-import-symbol"] != 1 {
+		t.Errorf("undeclared id: got %v, want 1 unknown-import-symbol", got)
+	}
+	// External engine namespace absent from this workspace: silent.
+	if got := importCodes("use platform.mutations.{ stageOutboundRequest }" + tail); len(got) != 0 {
+		t.Errorf("external-namespace import flagged: %v", got)
+	}
+}

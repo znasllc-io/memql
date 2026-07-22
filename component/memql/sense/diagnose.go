@@ -76,10 +76,16 @@ func (s *Service) Diagnose(source string, filePath string) []Diagnostic {
 	// wrapped in a non-nil parser.Node interface, so a bare `ast != nil`
 	// guard is not enough -- dereferencing the nil *File panics. Assert and
 	// nil-check the pointer explicitly.
-	if s.registries != nil {
-		if file, ok := ast.(*parser.File); ok && file != nil {
+	if file, ok := ast.(*parser.File); ok && file != nil {
+		// Registry-backed semantic diagnostics (annotations, provider refs,
+		// authoring rules) need the vocabulary; skip them when it is absent.
+		if s.registries != nil {
 			diagnostics = append(diagnostics, s.semanticDiagnostics(file, source)...)
 		}
+		// Import diagnostics need only the workspace graph (always non-nil, a
+		// no-op that answers Unknown when absent), so they run regardless -- a
+		// broken-reference workspace is exactly the registry-less case.
+		diagnostics = append(diagnostics, s.importDiagnostics(file, source)...)
 	}
 
 	return diagnostics
@@ -307,33 +313,82 @@ func (s *Service) semanticDiagnostics(file *parser.File, source string) []Diagno
 		}
 	}
 
-	// Check use declarations.
-	//
-	// Only concept-id-shaped paths are checked. The modern Form-B import
-	// (`use cluster.concepts.{ node, ... }`) carries a dotted MODULE path in
-	// u.Path (e.g. "cluster.concepts"), not a concept id, so passing it to
-	// ConceptGet would miss and warn on every import. Concept ids are
-	// colon-shaped (`v1:cluster:node`); gate on that so module-path imports
-	// don't produce a spurious "unknown concept" warning on every file.
-	for _, u := range file.Uses {
-		conceptPath := u.Path
-		if strings.Contains(conceptPath, ":") {
-			if _, ok := s.registries.ConceptGet(conceptPath); !ok {
-				pos := findInSource(source, conceptPath)
-				diagnostics = append(diagnostics, Diagnostic{
-					Range: Range{
-						Start: pos,
-						End:   Position{Line: pos.Line, Column: pos.Column + len(conceptPath)},
-					},
-					Severity: SeverityWarning,
-					Message:  fmt.Sprintf("unknown concept \"%s\"", conceptPath),
-					Code:     "unknown-concept",
-				})
-			}
-		}
-	}
+	// Form-B import resolution (`use <ns>.<kind>.{ id, ... }`) lives in
+	// importDiagnostics, called from Diagnose OUTSIDE this registry gate: it
+	// needs only the workspace graph, so it runs even in the registry-less
+	// fallback where the engine tripped strict boot -- a broken-reference
+	// workspace is exactly when an author needs those warnings.
 
 	return diagnostics
+}
+
+// importDiagnostics resolves every Form-B import against the workspace graph and
+// warns on a PROVABLE failure: a kind segment that names no module in a
+// workspace-owned namespace (the user's `use fylo.concept.{...}` typo), or an id
+// not declared in the resolved module (`use fylo.concepts.{ oder }`). It needs
+// only s.workspace -- not the registry -- so Diagnose runs it in the registry-
+// less fallback too.
+//
+// Every "missing" conclusion is gated on the graph's tri-state. A namespace the
+// workspace does not own (an external engine namespace a product bundle imports,
+// e.g. `platform`/`common`/`identity`) resolves Unknown and is left silent --
+// never a false squiggle -- mirroring the load side's own missingIsProvable
+// conservatism. Warnings, not errors: there is no Error-severity reference-check
+// precedent, and a stale edit-path registry must not hard-fail the buffer.
+func (s *Service) importDiagnostics(file *parser.File, source string) []Diagnostic {
+	var diagnostics []Diagnostic
+	for _, u := range file.Uses {
+		if u == nil || len(u.Names) == 0 || len(u.Parts) < 2 {
+			continue // Form A / legacy / malformed -- not a Form-B module import
+		}
+		ns, kind := u.Parts[0], u.Parts[1]
+		switch s.workspace.ModuleResolves(ns, kind) {
+		case ResolvedNo:
+			// Namespace is owned by the workspace but names no such module.
+			pos := findUseSegment(source, u.Path, kind)
+			diagnostics = append(diagnostics, Diagnostic{
+				Range:    spanAt(pos, len(kind)),
+				Severity: SeverityWarning,
+				Message:  fmt.Sprintf("unknown import module %q: namespace %q has no %q module", ns+"."+kind, ns, kind),
+				Code:     "unknown-import-module",
+			})
+		case ResolvedYes:
+			for _, name := range u.Names {
+				if s.workspace.SymbolDeclared(ns, kind, name) == ResolvedNo {
+					pos := findUseSegment(source, u.Path, name)
+					diagnostics = append(diagnostics, Diagnostic{
+						Range:    spanAt(pos, len(name)),
+						Severity: SeverityWarning,
+						Message:  fmt.Sprintf("%q is not declared in %s.%s", name, ns, kind),
+						Code:     "unknown-import-symbol",
+					})
+				}
+			}
+		case ResolvedUnknown:
+			// External / unmounted namespace, or no workspace graph -- inconclusive.
+		}
+	}
+	return diagnostics
+}
+
+// spanAt returns a single-line Range of n columns starting at start.
+func spanAt(start Position, n int) Range {
+	return Range{Start: start, End: Position{Line: start.Line, Column: start.Column + n}}
+}
+
+// findUseSegment locates `segment` in source anchored at (at or after) the
+// occurrence of the import's dotted path, so an id or kind is found within its
+// own `use` statement rather than an unrelated earlier match. Falls back to a
+// bare first-occurrence search when the path is not found verbatim.
+func findUseSegment(source, usePath, segment string) Position {
+	anchor := strings.Index(source, usePath)
+	if anchor < 0 {
+		return findInSource(source, segment)
+	}
+	if rel := strings.Index(source[anchor:], segment); rel >= 0 {
+		return positionFromOffset(source, anchor+rel)
+	}
+	return positionFromOffset(source, anchor)
 }
 
 // findInSource finds the first occurrence of text in source and returns its position.
