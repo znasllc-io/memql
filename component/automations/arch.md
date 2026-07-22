@@ -548,7 +548,7 @@ automation bootstrapUser() {
 
 Automations also accept `@actor` (declares the body reads `actor.*`) and `@mcp`.
 
-**Note:** Automations are **enabled by default** (#2604, the uniform lifecycle ruling); `@enabled` is an accepted no-op and `@disabled` is the off-switch. The lifecycle/reliability/audit annotations functions carry -- `@deprecated`, `@version`, `@timeout`, `@retry`, `@audit`, `@async`, `@rateLimit` -- are **not** valid on automations: the automation runtime never honored them, and the load gate now rejects them (#2712). Only `@schedule` among the once-tolerated extras is live (it feeds the cron scheduler).
+**Note:** Automations are **enabled by default** (#2604, the uniform lifecycle ruling); `@enabled` is an accepted no-op and `@disabled` is the off-switch. The annotations the parser also folds on automations -- `@deprecated`, `@version`, `@timeout`, `@retry`, `@audit`, `@async`, `@rateLimit` -- are **not** valid: the automation runtime never honored them, and the load gate now rejects them (#2712). (Most are dead vocabulary on the function-style constructs generally, removed from the allow-lists in #989 -- see attribute-matrix.md; `@rateLimit` is valid only on tools, `@version` only on seeds/concepts.) Only `@schedule` among the once-tolerated extras is live on automations (it feeds the cron scheduler).
 
 See also: `/docs/attribute-matrix.md` for the full attribute reference across all function types.
 
