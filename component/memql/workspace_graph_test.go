@@ -212,4 +212,10 @@ concept item {
 	if got := sigErrs("use demo.concepts.{ item }\n\nmutate item" + body); got != 0 {
 		t.Errorf("valid signature concept flagged: got %d", got)
 	}
+	// Bound to a real ENGINE concept WITHOUT an import: the global registry
+	// (embedded core) resolves it by trailing segment, so boot binds it and sense
+	// must stay silent -- the adversarial-review blocker.
+	if got := sigErrs("use demo.concepts.{ item }\n\nmutate user" + body); got != 0 {
+		t.Errorf("unimported engine concept (registry-resolvable) flagged: got %d", got)
+	}
 }

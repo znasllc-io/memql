@@ -98,6 +98,29 @@ func TestSignatureConcept_ImportsOnlyTreeNotProvableSilent(t *testing.T) {
 	}
 }
 
+func TestSignatureConcept_RegistryResolvesUnimportedEngineConcept(t *testing.T) {
+	// The blocker case: `budget` is a real engine concept (v1:router:budget)
+	// bound without an import from a product-only buffer. The product-scoped
+	// workspace graph says absent, but the GLOBAL registry -- what boot actually
+	// resolves against -- has it, so sense must stay silent.
+	src := "use fylo.concepts.{ order }\n\n" + mutateOn("budget")
+	reg := &stubRegistry{concepts: map[string]*ConceptInfo{"v1:router:budget": {Name: "v1:router:budget"}}}
+	s := NewWithWorkspace(reg, fakeGraph{
+		namespaces: map[string]bool{"fylo": true},
+		// Both absent from the product graph; only the registry knows budget.
+		concepts: map[string]Resolved{"budget": ResolvedNo, "nope": ResolvedNo},
+	})
+	if got := codesFor(s.Diagnose(src, "m.memql"), "unknown-signature-concept"); len(got) != 0 {
+		t.Fatalf("engine concept resolvable via the registry was flagged: %+v", got)
+	}
+	// A genuine typo still flags even with a registry present (not a trailing
+	// match of any id).
+	src2 := "use fylo.concepts.{ order }\n\n" + mutateOn("nope")
+	if got := codesFor(s.Diagnose(src2, "m.memql"), "unknown-signature-concept"); len(got) != 1 {
+		t.Fatalf("genuine missing concept not flagged with a registry present: %+v", got)
+	}
+}
+
 func TestSignatureConcept_NoWorkspaceGraphSilent(t *testing.T) {
 	src := "use fylo.concepts.{ order }\n\n" + mutateOn("full")
 	if got := codesFor(New(nil).Diagnose(src, "m.memql"), "unknown-signature-concept"); len(got) != 0 {

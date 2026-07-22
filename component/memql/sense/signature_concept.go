@@ -2,6 +2,7 @@ package sense
 
 import (
 	"fmt"
+	"strings"
 
 	parser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql/dslimports"
@@ -31,10 +32,15 @@ func (s *Service) signatureConceptDiagnostics(file *parser.File, source string) 
 
 	var diagnostics []Diagnostic
 	for _, ref := range refs {
-		if imported[ref.Name] || local[ref.Name] {
+		if imported[ref.Name] || local[ref.Name] || s.registryResolvesConcept(ref.Name) {
 			// Imported: the import checks (#2730) own its validity, and an
 			// external import is legitimately supplied from outside the tree.
 			// Local: declared in this same buffer -> resolves.
+			// Registry: present in the global vocabulary boot actually resolves
+			// against (engine + product) -- boot binds it by trailing segment
+			// with NO import. Skipping it here is what stops an unimported engine
+			// concept (e.g. `mutate user ...` over a product bundle) from being
+			// flagged as missing when it boots clean.
 			continue
 		}
 		if !provable {
@@ -54,6 +60,28 @@ func (s *Service) signatureConceptDiagnostics(file *parser.File, source string) 
 		}
 	}
 	return diagnostics
+}
+
+// registryResolvesConcept reports whether the engine registry -- the GLOBAL
+// vocabulary boot resolves a signature concept against (engine + product) --
+// carries a concept whose canonical id (`v1:namespace:name`) matches `name` by
+// trailing segment, mirroring boot's resolveConceptByTrailingSegment. It returns
+// false when there is no registry, so the registry-less fallback keeps its
+// graph-only conservatism (the workspace graph sees product namespaces only, and
+// without the registry an unimported engine concept is indistinguishable from a
+// typo). The workspace graph alone cannot answer this -- it is a product-scoped
+// view -- which is why the check consults the registry the LSP service holds.
+func (s *Service) registryResolvesConcept(name string) bool {
+	if s.registries == nil {
+		return false
+	}
+	suffix := ":" + name
+	for _, id := range s.registries.ConceptNames() {
+		if id == name || strings.HasSuffix(id, suffix) {
+			return true
+		}
+	}
+	return false
 }
 
 // signatureMissingIsProvable mirrors dslimports.missingIsProvable for the open
