@@ -493,10 +493,11 @@ func allAnnotationNames() []string {
 // annotationTakesArgs returns true if the annotation expects arguments.
 func annotationTakesArgs(name string) bool {
 	switch name {
-	case "description", "version", "trigger", "filter",
+	case "description", "version", "trigger", "filter", "schedule",
 		// rateLimit + relationship were MISSING from this
 		// hand-maintained switch, so completion inserted them without
 		// the opening paren (#2627's in-sync test is what caught it).
+		// schedule joined the automation surface in #2712.
 		"rateLimit", "relationship",
 		"handler", "executionTime", "executor", "args",
 		"defaultProvider", "templateFile", "type", "model", "extends",
