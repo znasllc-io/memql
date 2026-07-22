@@ -262,8 +262,8 @@ func TestBuildOfflineSense_InvocationKindFilteredEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildOfflineSense over embedded tree: %v", err)
 	}
-	src := "logic probe {\n  query "
-	items := svc.Complete(src, 2, len("  query ")+1, "x/logic.memql")
+	src := "logic probe {\n  body {\n    query "
+	items := svc.Complete(src, 3, len("    query ")+1, "x/logic.memql")
 	if len(items) == 0 {
 		t.Fatal("`query ` in a logic body offered nothing; expected the engine's query functions")
 	}

@@ -469,6 +469,14 @@ func checkInvocationContext(tokens []parser.Token, prefix string) (CursorContext
 	if depth <= 0 {
 		return CursorContext{}, false // top-level signature, not a body invocation
 	}
+	// Suppress inside a DECLARATION / clause block, where `<verb> <ident>` is a
+	// field declaration (`args { query string }` -- a field literally named
+	// `query`), a written payload key, or a clause -- NOT an invocation. An
+	// invocation lives in a procedural body (a `body { }` block, or an
+	// automation body), whose opener is not one of these.
+	if invocationSuppressBlock[innermostOpenBlockKeyword(tokens)] {
+		return CursorContext{}, false
+	}
 	// `<verb> ` -- the last token is the verb and the cursor is just past it.
 	if prefix == "" {
 		if last := tokens[n-1]; last.Type == parser.TokenIdentifier {
@@ -486,6 +494,41 @@ func checkInvocationContext(tokens []parser.Token, prefix string) (CursorContext
 		}
 	}
 	return CursorContext{}, false
+}
+
+// invocationSuppressBlock names the declaration / clause blocks where a
+// `<verb> <ident>` pair is a field or clause, not an invocation, so the
+// invocation completer must not fire inside them (the block-specific completer
+// owns those positions).
+var invocationSuppressBlock = map[string]bool{
+	"args": true, "insert": true, "update": true, "filter": true,
+	"params": true, "auth": true, "shape": true,
+}
+
+// innermostOpenBlockKeyword returns the identifier that opens the innermost
+// still-open brace before the cursor -- `args` for `... args { <cursor>`, the
+// construct name for `logic foo { <cursor>`, or "" if none is open. Used to tell
+// a procedural body from a declaration block.
+func innermostOpenBlockKeyword(tokens []parser.Token) string {
+	var stack []string
+	for i, t := range tokens {
+		switch t.Type {
+		case parser.TokenBraceOpen:
+			opener := ""
+			if i > 0 && tokens[i-1].Type == parser.TokenIdentifier {
+				opener = tokens[i-1].Literal
+			}
+			stack = append(stack, opener)
+		case parser.TokenBraceClose:
+			if len(stack) > 0 {
+				stack = stack[:len(stack)-1]
+			}
+		}
+	}
+	if len(stack) == 0 {
+		return ""
+	}
+	return stack[len(stack)-1]
 }
 
 // checkFuncCallContext checks if cursor is inside a function call's arguments.

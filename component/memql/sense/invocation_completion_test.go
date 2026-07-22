@@ -17,7 +17,7 @@ func invocationRegistry() *stubRegistry {
 }
 
 func TestInvocation_QueryVerbOffersOnlyQueries(t *testing.T) {
-	got := completeAtEnd(New(invocationRegistry()), "logic doThing {\n  query ")
+	got := completeAtEnd(New(invocationRegistry()), "logic doThing {\n  body {\n    query ")
 	if !got["listOrders"] {
 		t.Errorf("query verb should offer the query listOrders, got %v", got)
 	}
@@ -41,16 +41,33 @@ func TestInvocation_LogicVerbOffersOnlyLogic(t *testing.T) {
 }
 
 func TestInvocation_MutationVerbOffersOnlyMutations(t *testing.T) {
-	got := completeAtEnd(New(invocationRegistry()), "logic doThing {\n  mutation ")
+	got := completeAtEnd(New(invocationRegistry()), "logic doThing {\n  body {\n    mutation ")
 	if !got["writeThing"] || got["listOrders"] || got["dayRollup"] {
 		t.Errorf("mutation verb should offer only writeThing, got %v", got)
 	}
 }
 
 func TestInvocation_PrefixFilter(t *testing.T) {
-	got := completeAtEnd(New(invocationRegistry()), "logic doThing {\n  query list")
+	got := completeAtEnd(New(invocationRegistry()), "logic doThing {\n  body {\n    query list")
 	if !got["listOrders"] {
 		t.Errorf("`query list` should offer listOrders, got %v", got)
+	}
+}
+
+func TestInvocation_ArgsBlockSuppressed(t *testing.T) {
+	// A field literally named `query` in an args block is a field declaration,
+	// not an invocation: the invocation completer must NOT fire and hide the
+	// field-type completion.
+	rp := &stubRegistry{
+		functions: map[string]*FunctionInfo{"listOrders": {Name: "listOrders", Kind: "query"}},
+		concepts:  map[string]*ConceptInfo{"v1:todos:todo": {Name: "v1:todos:todo"}},
+	}
+	got := completeAtEnd(New(rp), "query todo todos {\n  args {\n    query ")
+	if got["listOrders"] {
+		t.Errorf("invocation completion fired inside an args block, hiding field types: %v", got)
+	}
+	if !got["string"] {
+		t.Errorf("args block should offer field types (string), got %v", got)
 	}
 }
 
