@@ -108,6 +108,20 @@ func TestImportDiagnostics_ExternalNamespaceSilent(t *testing.T) {
 	}
 }
 
+func TestImportDiagnostics_MultiSegmentCapabilitySkipped(t *testing.T) {
+	// A consolidated-capability import has 3+ segments; the (ns, kind) graph API
+	// cannot faithfully resolve it (it maps to capabilities/capabilities.memql
+	// with a dotted prefix), so it must be skipped -- NOT flagged even though a
+	// naive 2-arg lookup of ("capabilities","integration") answers ResolvedNo.
+	src := "use capabilities.integration.github.{ tagRelease }" + useConstructTail
+	s := NewWithWorkspace(nil, fakeGraph{
+		modules: map[string]Resolved{"capabilities.integration": ResolvedNo},
+	})
+	if diags := s.Diagnose(src, "f.memql"); len(diags) != 0 {
+		t.Fatalf("multi-segment capability import flagged: %+v", diags)
+	}
+}
+
 func TestImportDiagnostics_NoWorkspaceGraphSilent(t *testing.T) {
 	// The registry-less, graph-less service (New(nil)) must stay silent.
 	src := "use fylo.concept.{ oder }" + useConstructTail

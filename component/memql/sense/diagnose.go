@@ -338,8 +338,15 @@ func (s *Service) semanticDiagnostics(file *parser.File, source string) []Diagno
 func (s *Service) importDiagnostics(file *parser.File, source string) []Diagnostic {
 	var diagnostics []Diagnostic
 	for _, u := range file.Uses {
-		if u == nil || len(u.Names) == 0 || len(u.Parts) < 2 {
-			continue // Form A / legacy / malformed -- not a Form-B module import
+		// Resolve only exactly-two-segment module paths (`<ns>.<kind>`). Fewer
+		// segments are Form A / legacy / malformed (not a Form-B module import).
+		// MORE segments are consolidated-capability paths
+		// (`capabilities.integration.github.{...}`), which map to a consolidated
+		// file with a dotted construct prefix and cannot be faithfully resolved
+		// through the graph's (ns, kind) API -- skip them rather than risk a
+		// false squiggle on a valid capability verb.
+		if u == nil || len(u.Names) == 0 || len(u.Parts) != 2 {
+			continue
 		}
 		ns, kind := u.Parts[0], u.Parts[1]
 		switch s.workspace.ModuleResolves(ns, kind) {
