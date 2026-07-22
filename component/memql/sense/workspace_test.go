@@ -9,6 +9,8 @@ type stubWorkspace struct{}
 func (stubWorkspace) ModuleResolves(string, string) Resolved         { return ResolvedYes }
 func (stubWorkspace) SymbolDeclared(string, string, string) Resolved { return ResolvedYes }
 func (stubWorkspace) ConceptExists(string, string) Resolved          { return ResolvedYes }
+func (stubWorkspace) HasNamespace(string) bool                       { return true }
+func (stubWorkspace) HasImportsOnlyFiles() bool                      { return false }
 func (stubWorkspace) Namespaces() []string                           { return []string{"fylo"} }
 func (stubWorkspace) Kinds(string) []string                          { return []string{"concepts"} }
 func (stubWorkspace) SymbolsInModule(string, string) []string        { return []string{"order"} }

@@ -55,6 +55,9 @@ func (g senseWorkspaceGraph) ConceptExists(name, nsHint string) sense.Resolved {
 	return sense.ResolvedNo
 }
 
+func (g senseWorkspaceGraph) HasNamespace(ns string) bool { return g.idx.HasNamespace(ns) }
+func (g senseWorkspaceGraph) HasImportsOnlyFiles() bool   { return g.idx.HasImportsOnlyFiles() }
+
 func (g senseWorkspaceGraph) Namespaces() []string     { return g.idx.Namespaces() }
 func (g senseWorkspaceGraph) Kinds(ns string) []string { return g.idx.Kinds(ns) }
 

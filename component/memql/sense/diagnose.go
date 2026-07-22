@@ -82,10 +82,12 @@ func (s *Service) Diagnose(source string, filePath string) []Diagnostic {
 		if s.registries != nil {
 			diagnostics = append(diagnostics, s.semanticDiagnostics(file, source)...)
 		}
-		// Import diagnostics need only the workspace graph (always non-nil, a
-		// no-op that answers Unknown when absent), so they run regardless -- a
-		// broken-reference workspace is exactly the registry-less case.
+		// Import + signature-concept diagnostics need only the workspace graph
+		// (always non-nil, a no-op that answers Unknown when absent), so they run
+		// regardless -- a broken-reference workspace is exactly the registry-less
+		// case.
 		diagnostics = append(diagnostics, s.importDiagnostics(file, source)...)
+		diagnostics = append(diagnostics, s.signatureConceptDiagnostics(file, source)...)
 	}
 
 	return diagnostics

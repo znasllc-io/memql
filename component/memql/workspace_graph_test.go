@@ -176,3 +176,46 @@ concept item {
 		t.Errorf("external-namespace import flagged: %v", got)
 	}
 }
+
+// End-to-end: the REAL workspace graph drives Diagnose's signature-concept check
+// (symptom 5). A mutation bound to a concept that exists nowhere -- with the
+// buffer importing workspace-only -- is flagged; the same bound to a real,
+// imported concept is silent.
+func TestBuildOfflineSense_SignatureConceptEndToEnd(t *testing.T) {
+	root := fstest.MapFS{
+		"demo/concepts.memql": &fstest.MapFile{Data: []byte(`@version("1.0.0")
+@namespace("demo")
+concept item {
+  id  string  @required
+}`)},
+	}
+	svc, err := BuildOfflineSense(root)
+	if err != nil {
+		t.Fatalf("BuildOfflineSense: %v", err)
+	}
+	sigErrs := func(src string) int {
+		n := 0
+		for _, d := range svc.Diagnose(src, "m.memql") {
+			if d.Code == "unknown-signature-concept" {
+				n++
+			}
+		}
+		return n
+	}
+	body := " setThing {\n  args {\n    id  string!\n  }\n  update {\n    id: args.id\n  }\n}\n"
+
+	// Bound to a nonexistent concept, buffer imports demo-only (provable): flagged.
+	if got := sigErrs("use demo.concepts.{ item }\n\nmutate full" + body); got != 1 {
+		t.Errorf("nonexistent signature concept: got %d unknown-signature-concept, want 1", got)
+	}
+	// Bound to the real, imported concept: silent.
+	if got := sigErrs("use demo.concepts.{ item }\n\nmutate item" + body); got != 0 {
+		t.Errorf("valid signature concept flagged: got %d", got)
+	}
+	// Bound to a real ENGINE concept WITHOUT an import: the global registry
+	// (embedded core) resolves it by trailing segment, so boot binds it and sense
+	// must stay silent -- the adversarial-review blocker.
+	if got := sigErrs("use demo.concepts.{ item }\n\nmutate user" + body); got != 0 {
+		t.Errorf("unimported engine concept (registry-resolvable) flagged: got %d", got)
+	}
+}
