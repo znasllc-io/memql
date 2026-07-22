@@ -13,10 +13,15 @@ owner: znas
 
 This document defines the `@attribute` decorators available on the
 function-style constructs (queries, mutations, automations) and points
-at the annotation surfaces of the other construct kinds. Every row
-below is backed by the parser (`component/language/ast/ast.go` +
-`component/language/parser/parser.go`); anything not listed is either
-construct-specific (see the end of this document) or rejected.
+at the annotation surfaces of the other construct kinds. The Yes/No
+columns reflect the **load-time allow-list** — `annotations.ByReceiver`
+in `component/language/annotations/registry.go`, the authoritative gate
+`ValidateConstructAnnotations` enforces. A `Yes` means the construct
+actually accepts the annotation at load; a `No` means it is rejected
+(even where the parser still folds it into an AST field — several
+annotations were removed from the allow-lists in #989 and are load-
+rejected, shown as `No` here). `TestAttributeMatrixMatchesAllowLists`
+pins this table to the allow-lists so the two cannot drift.
 
 ---
 
@@ -27,8 +32,8 @@ construct-specific (see the end of this document) or rejected.
 | **Lifecycle** |
 | `@enabled` | Yes | Yes | Yes | Accepted no-op; definitions are enabled by default (#2609) |
 | `@disabled` | Yes | Yes | Yes | Explicitly disables the definition |
-| `@deprecated` | Yes | Yes | No | Marks as deprecated (functions only; rejected on automations, #2712 -- the value was never read there) |
-| `@version("v1")` | Yes | Yes | No | Version metadata tag (functions only; rejected on automations, #2712) |
+| `@deprecated` | No | No | No | Not accepted on any function-style construct -- removed from the allow-lists (#989); the parser still folds it but the load gate rejects it. Use `@disabled` to deactivate |
+| `@version("v1")` | No | No | No | Version metadata -- valid on **seeds and concept definitions only**, rejected at load on query/mutation/automation |
 | **Documentation** |
 | `@description("...")` | Yes | Yes | Yes | Human-readable description (fallback; prefer `///` doc comments, #2601) |
 | **Access Control** |
@@ -36,22 +41,22 @@ construct-specific (see the end of this document) or rejected.
 | `@actor` | Yes | Yes | Yes | Declares the body reads the auth envelope (`actor.*`); used-but-undeclared fails load (#2621) |
 | `@permission("...")` | -- | -- | -- | BURIED (#2713); never enforced. See below |
 | **Performance** |
-| `@timeout("30s")` | Yes | Yes | No | Maximum execution time (functions only; rejected on automations, #2712) |
+| `@timeout("30s")` | No | No | No | Not accepted -- removed from the allow-lists (#989); rejected at load |
 | `@cache(300)` | Yes | No | No | Result-cache TTL in whole seconds; positional preferred (#2618), `ttl="300"` keeps parsing |
 | **Reliability** |
-| `@retry(count=3)` | No | Yes | No | Retry on failure (mutations only; rejected on automations, #2712 -- never retried them) |
-| `@idempotent` | No | Yes | No | Safe to retry without side effects |
+| `@retry(count=3)` | No | No | No | Not accepted -- removed from the allow-lists (#989); rejected at load |
+| `@idempotent` | No | No | No | Not accepted -- removed from the mutation allow-list (#989); rejected at load |
 | `@mergeFields("a", "b")` | No | Yes | No | Deep-merge the named object payload fields on update instead of replacing them |
 | `@appendFields("a", "b")` | No | Yes | No | Append the named array payload fields' elements to the stored array on update instead of replacing them |
 | `@createOnly("a", "b")` | No | Yes | No | Write the named payload fields only on create; preserve the stored value on an insert (upsert) onto an existing id |
 | **Auditing** |
-| `@audit` | No | Yes | No | Log all executions for audit trail (mutations only; rejected on automations, #2712) |
+| `@audit` | No | No | No | Not accepted -- removed from the allow-lists (#989); rejected at load |
 | **Triggers (Automation Only)** |
 | `@trigger(event="...")` | No | No | Yes | Event-based trigger |
 | `@trigger(schedule="...")` | No | No | Yes | Cron-based schedule (6-field, with seconds) |
 | `@filter(...)` | No | No | Yes | Predicate over the triggering event's payload |
 | `@schedule(cron="...")` | No | No | Yes | Accepted synonym for `@trigger(schedule="...")` |
-| `@async` | No | No | No | Dead vocabulary -- never honored on automations; rejected (#2712). Automations run async by their event/schedule trigger |
+| `@async` | No | No | No | Not accepted -- dead vocabulary; rejected at load. Automations run async by their event/schedule trigger |
 
 ---
 
@@ -71,8 +76,9 @@ query user queryActiveUsers { ... }
 #### `@disabled`
 Explicitly disables the definition. The construct is parsed but not
 loaded at runtime; it stays in the tree, is still maintained, and can
-be re-enabled at any time. ("Deprecated / abandoned" is the separate
-`@deprecated` axis.) For functions the gate is on execution as well as
+be re-enabled at any time. ("Deprecated / abandoned" as a distinct
+lifecycle axis has no working annotation today -- `@deprecated` was
+removed in #989.) For functions the gate is on execution as well as
 discovery: a `@disabled` query, mutation, logic, or builtin (#2608) is
 hidden from `functions()` and the MCP tool listing -- including the
 `@mcp`-promoted first-class tool surface (#2647) -- (`help()` still
@@ -122,23 +128,18 @@ nothing), not the misleading "no capability declaration found".
 query user queryLegacyUsers { ... }
 ```
 
-#### `@deprecated`
-Marks the definition as deprecated. Optionally includes a message.
-
-```memql
-@deprecated
-query user queryOldUsers { ... }
-
-@deprecated("Use queryActiveUsers instead")
-query user queryUsers { ... }
-```
+#### `@deprecated` (removed)
+Removed from the allow-lists in #989 and **rejected at load** on every
+construct -- it is in no receiver's allow-list. Use `@disabled` to take
+a construct out of service.
 
 #### `@version("...")`
-Version tag for the definition.
+Version metadata tag. Accepted on **seeds and concept definitions only**;
+rejected at load on query / mutation / automation.
 
 ```memql
 @version("v2")
-query user queryActiveUsers { ... }
+seed defaultSettings { ... }
 ```
 
 ---
@@ -226,13 +227,9 @@ actor layer (RBAC) plus the `@public` per-row-authz classification.
 
 ### Performance Attributes
 
-#### `@timeout("...")`
-Maximum execution time. Supports duration formats: `"30s"`, `"5m"`, `"1h"`.
-
-```memql
-@timeout("30s")
-query record queryHeavyReport { ... }
-```
+#### `@timeout("...")` (removed)
+Removed from the allow-lists in #989 and **rejected at load** on every
+construct.
 
 #### `@cache(N)`
 Cache query results for N whole seconds. **Query only** - mutations
@@ -250,21 +247,13 @@ query nodeType queryNodeTypeCatalog { ... }
 
 ### Reliability Attributes
 
-#### `@retry(count=N)`
-Retry the operation on failure. **Mutation and Automation only**.
+#### `@retry(count=N)` (removed)
+Removed from the allow-lists in #989 and **rejected at load** on every
+construct. The parser still folds it into an AST field, but no loader
+reads it -- authoring it hard-drops the construct at load.
 
-```memql
-@retry(count=3)
-mutation user mutationCreateUser { ... }
-```
-
-#### `@idempotent`
-Marks the mutation as safe to retry without side effects. **Mutation only**.
-
-```memql
-@idempotent
-mutation user mutationUpsertUser { ... }
-```
+#### `@idempotent` (removed)
+Removed from the mutation allow-list in #989 and **rejected at load**.
 
 #### `@mergeFields("...")`
 Opts an update-kind mutation into engine-side deep-merge for the named
@@ -315,13 +304,9 @@ mutation outboundRequest stageOutboundRequest { ... }
 
 ### Auditing Attributes
 
-#### `@audit`
-Log all executions for audit trail. **Mutation and Automation only**.
-
-```memql
-@audit
-mutation user mutationDeleteUser { ... }
-```
+#### `@audit` (removed)
+Removed from the allow-lists in #989 and **rejected at load** on every
+construct.
 
 ---
 
@@ -401,8 +386,6 @@ query participant queryActiveHumanParticipants {
 use cognition.concepts.{ space }
 
 @description("Create a cognition space")
-@audit
-@retry(count=3)
 mutation space mutationCreateSpace {
   args {
     spaceId  string  @required
