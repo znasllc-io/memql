@@ -34,7 +34,7 @@ construct-specific (see the end of this document) or rejected.
 | **Access Control** |
 | `@public` | Yes | Yes | No | Authz-classification opt-out: declares that no caller-scope check applies (see below) |
 | `@actor` | Yes | Yes | Yes | Declares the body reads the auth envelope (`actor.*`); used-but-undeclared fails load (#2621) |
-| `@permission("...")` | No | No | No | Documented-only, never enforced; load-rejected. Bury tracked as #2713 |
+| `@permission("...")` | -- | -- | -- | BURIED (#2713); never enforced. See below |
 | **Performance** |
 | `@timeout("30s")` | Yes | Yes | Yes | Maximum execution time |
 | `@cache(300)` | Yes | No | No | Result-cache TTL in whole seconds; positional preferred (#2618), `ttl="300"` keeps parsing |
@@ -209,18 +209,18 @@ AST/parser/registry plumbing is deleted and the load gate emits a
 pointed message. Access control lives at the actor layer (RBAC) plus
 the `@public` per-row-authz classification.
 
-NOTE: `@permission` (below) is the same documented-only class -- it
-parses into a `Permission` field whose only reader is a help-payload
-branch the load gate never lets fire (the field is provably always
-empty). It is a candidate for the same audit-and-bury treatment; see
-the #2709 close-out.
+NOTE: `@permission` (below) was the same documented-only class and has
+been buried alongside it (#2713).
 
-#### `@permission("...")` (documented-only; bury pending)
-Documented here as requiring a caller permission, but the load gate
-rejects it on every construct (absent from the annotation registry),
-so its one reader -- a `help()`/`listFunctions` payload branch -- can
-never fire: the same never-enforced class as the buried `@role`.
-Audited during #2709; its bury is tracked as #2713. Do not author it.
+#### `@permission("...")` (buried)
+`@permission("...")` was documented as requiring a caller permission,
+but nothing ever enforced it: the load gate rejected it (absent from
+the annotation registry) and its one reader -- a `help()`/`listFunctions`
+payload branch -- was dead (the field it read was provably always
+empty). The @role twin. It was BURIED under the #2631 ruling's
+audited close-out (#2713): the AST/parser/registry plumbing is deleted
+and the load gate emits a pointed message. Access control lives at the
+actor layer (RBAC) plus the `@public` per-row-authz classification.
 
 ---
 

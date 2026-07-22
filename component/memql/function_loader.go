@@ -449,7 +449,6 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 		Enabled:    funcDef.Enabled,
 		Deprecated: funcDef.Deprecated,
 		Version:    funcDef.Version,
-		Permission: funcDef.Permission,
 		Timeout:    funcDef.Timeout,
 		CacheTTL:   funcDef.CacheTTL,
 		Retry:      funcDef.Retry,

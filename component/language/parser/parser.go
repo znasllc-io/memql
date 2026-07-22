@@ -3498,8 +3498,6 @@ func (p *Parser) processFunctionAttributes(d *FunctionDef, attributes []*Attribu
 			d.Version = getAttrString(attr)
 		case AttrDescription:
 			d.Description = getAttrString(attr)
-		case AttrPermission:
-			d.Permission = getAttrString(attr)
 		case AttrTimeout:
 			d.Timeout = getAttrString(attr)
 		case AttrCache:

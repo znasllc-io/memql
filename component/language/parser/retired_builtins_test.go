@@ -126,3 +126,15 @@ func TestRetiredRoleAnnotationOnDeclarativeKinds(t *testing.T) {
 		t.Fatalf("@role on a shape must carry the bury hint, got: %v", err)
 	}
 }
+
+// TestRetiredPermissionAnnotationOnDeclarativeKinds is the #2713 twin of the
+// above: buried @permission must carry the pointed message through the
+// declarative-kind validator too.
+func TestRetiredPermissionAnnotationOnDeclarativeKinds(t *testing.T) {
+	if _, err := ParseBuiltinDecl("@permission(\"read\")\n@executor(\"help\")\nbuiltin probePerm {\n}\n"); err == nil || !strings.Contains(err.Error(), "#2713") {
+		t.Fatalf("@permission on a builtin must carry the bury hint, got: %v", err)
+	}
+	if _, err := ParseShapeDecl("@permission(\"read\")\nshape ProbePerm {\n  a string\n}\n"); err == nil || !strings.Contains(err.Error(), "#2713") {
+		t.Fatalf("@permission on a shape must carry the bury hint, got: %v", err)
+	}
+}

@@ -543,8 +543,6 @@ automation bootstrapUser() {
 | | `@version` | `"v1"` | Version tag |
 | **Documentation** |
 | | `@description` | `"..."` | Human-readable description |
-| **Access Control** |
-| | `@permission` | -- | Documented-only, never enforced; load-rejected. Bury tracked as #2713 |
 | **Performance** |
 | | `@timeout` | `"30s"` | Execution timeout |
 | | `@rateLimit` | `requests=N, per="1m"` | Throttle execution |

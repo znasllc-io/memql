@@ -48,12 +48,13 @@ func TestRemovedAnnotationsRejected(t *testing.T) {
 			if err == nil {
 				t.Fatalf("expected @%s on a %s to be rejected, but it was accepted", tc.annotation, tc.kindLabel)
 			}
-			// @role graduated from generic unknown-annotation to the
-			// pointed BURY message (#2631 ruling / #2709) -- the load
-			// rejection this test locks in is preserved, sharper.
-			if tc.annotation == "role" {
-				if !strings.Contains(err.Error(), "#2709") {
-					t.Fatalf("expected the @role bury message, got: %v", err)
+			// @role (#2709) and @permission (#2713) graduated from the
+			// generic unknown-annotation error to the pointed BURY
+			// message -- the load rejection this test locks in is
+			// preserved, sharper.
+			if buried := map[string]string{"role": "#2709", "permission": "#2713"}; buried[tc.annotation] != "" {
+				if !strings.Contains(err.Error(), buried[tc.annotation]) {
+					t.Fatalf("expected the @%s bury message (%s), got: %v", tc.annotation, buried[tc.annotation], err)
 				}
 				return
 			}

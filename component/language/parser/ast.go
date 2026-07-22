@@ -165,7 +165,6 @@ var (
 	AttrAppendFields         = ast.AttrAppendFields
 	AttrCreateOnly           = ast.AttrCreateOnly
 	AttrNocache              = ast.AttrNocache
-	AttrPermission           = ast.AttrPermission
 	AttrPublic               = ast.AttrPublic
 	AttrRateLimit            = ast.AttrRateLimit
 	AttrRequiresConfirmation = ast.AttrRequiresConfirmation

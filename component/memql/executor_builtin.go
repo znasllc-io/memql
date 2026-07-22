@@ -505,9 +505,6 @@ func functionHelpPayload(fn *Function) map[string]any {
 	if fn.Deprecated != "" {
 		payload["deprecated"] = fn.Deprecated
 	}
-	if fn.Permission != "" {
-		payload["permission"] = fn.Permission
-	}
 	if fn.Timeout != "" {
 		payload["timeout"] = fn.Timeout
 	}

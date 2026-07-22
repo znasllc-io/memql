@@ -144,9 +144,9 @@ Flagged with rationale; keep/remove is the owner's call.
 > This table is the #964 point-in-time snapshot, not current state. Since
 > then: the "Recognized, ZERO real usage" set was removed from the
 > allow-lists in #989 (load-rejected thereafter); `@internal` was retired
-> (#2620 ruling / #2708); `@role` was buried (#2631 ruling / #2709); and
-> `@permission`'s bury is tracked as #2713. See `attribute-matrix.md` for the
-> live disposition.
+> (#2620 ruling / #2708); and `@role` (#2631 ruling / #2709) and
+> `@permission` (#2713) were buried -- their AST/parser/registry plumbing
+> deleted. See `attribute-matrix.md` for the live disposition.
 
 ---
 
