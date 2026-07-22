@@ -876,7 +876,6 @@ const (
 	AttrTrigger  = "trigger"
 	AttrFilter   = "filter"
 	AttrSchedule = "schedule"
-	AttrAsync    = "async"
 
 	// Tool-specific attributes
 	AttrHandler              = "handler"
@@ -1136,15 +1135,11 @@ type AutomationDef struct {
 	OnComplete  *StepDef
 	OnError     *StepDef
 
-	// Parsed attribute values
-	Enabled    bool   // from @enabled
-	Deprecated string // from @deprecated
-	Version    string // from @version
-	Timeout    string // from @timeout
-	RateLimit  *RateLimitConfig
-	Retry      int  // from @retry
-	Audit      bool // from @audit
-	Async      bool // from @async
+	// Parsed attribute values. @deprecated / @version / @timeout / @retry /
+	// @audit / @async / @rateLimit were folded here but never read by the
+	// automation runtime (audited in #2712) and are load-rejected on
+	// automations by the #2712 gate; the dead fields were removed in #2724.
+	Enabled bool // from @enabled
 }
 
 func (*AutomationDef) node() {}

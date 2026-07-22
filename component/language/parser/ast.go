@@ -148,7 +148,6 @@ type (
 // do not carry through simple `=` redeclaration; using var is idiomatic
 // for this compatibility shim and the values are immutable in practice).
 var (
-	AttrAsync                = ast.AttrAsync
 	AttrAudit                = ast.AttrAudit
 	AttrCache                = ast.AttrCache
 	AttrDeprecated           = ast.AttrDeprecated
