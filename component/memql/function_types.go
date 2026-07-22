@@ -141,9 +141,6 @@ type Function struct {
 	// Version is the function version tag
 	Version string
 
-	// Permission requires this permission to call
-	Permission string
-
 	// Timeout is the maximum execution time
 	Timeout string
 
@@ -217,7 +214,6 @@ func (f *Function) clone() *Function {
 		Enabled:           f.Enabled,
 		Deprecated:        f.Deprecated,
 		Version:           f.Version,
-		Permission:        f.Permission,
 		Timeout:           f.Timeout,
 		CacheTTL:          f.CacheTTL,
 		RateLimitRequests: f.RateLimitRequests,

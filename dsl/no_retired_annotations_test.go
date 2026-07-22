@@ -10,8 +10,9 @@ import (
 )
 
 // standaloneRetiredRe matches a line consisting solely of a retired
-// construct-level annotation: @internal (#2620 ruling / #2708) or @role
-// (#2631 BURY ruling / #2709), with or without an argument list and with
+// construct-level annotation: @internal (#2620 ruling / #2708), @role
+// (#2631 BURY ruling / #2709), or @permission (#2713), with or without an
+// argument list and with
 // optional whitespace before the paren. Whether such a line is the retired
 // construct form or something legal depends on context: the concept parser
 // attaches a standalone annotation line to the PRECEDING field, so a bare
@@ -25,8 +26,8 @@ import (
 // parser validator), which rejects the retired names in ANY formatting the
 // parser accepts. The `(internal|role)` alternation is anchored between `@`
 // and a mandatory paren-or-end, so it never matches longer live names like
-// @allowedRoles / @preferredRole.
-var standaloneRetiredRe = regexp.MustCompile(`^\s*@(internal|role)(\s*\([^)]*\))?\s*$`)
+// @allowedRoles / @preferredRole / @permissions.
+var standaloneRetiredRe = regexp.MustCompile(`^\s*@(internal|role|permission)(\s*\([^)]*\))?\s*$`)
 
 // constructKeywordAfterInternal matches the construct-declaration keywords a
 // retired construct-level annotation could annotate.
@@ -62,7 +63,7 @@ func TestNoRetiredConstructAnnotations(t *testing.T) {
 				continue
 			}
 			if headsConstructDecl(lines, i+1) {
-				t.Errorf("%s:%d: retired construct-level annotation (@internal #2708 / @role #2709) -- delete the annotation", p, i+1)
+				t.Errorf("%s:%d: retired construct-level annotation (@internal #2708 / @role #2709 / @permission #2713) -- delete the annotation", p, i+1)
 			}
 		}
 	}
@@ -79,6 +80,8 @@ func TestStandaloneRetiredRe(t *testing.T) {
 		`@role("admin")`,
 		`@role ("admin")`,    // space-before-paren evasion
 		`@role(  "admin"  )`, // inner whitespace
+		`@permission("read:users")`,
+		`@permission`,
 	}
 	for _, s := range match {
 		if !standaloneRetiredRe.MatchString(s) {
@@ -88,6 +91,7 @@ func TestStandaloneRetiredRe(t *testing.T) {
 	noMatch := []string{
 		`@allowedRoles("assistant")`,
 		`@preferredRole("assistant")`,
+		`@permissions("read")`,
 		`@rolething`,
 		`roleSlug string!`,
 		`  filter role == "admin"`,
