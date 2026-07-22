@@ -21,6 +21,10 @@ func TestEvaluateDateBuiltin_Values(t *testing.T) {
 	}{
 		{"addDuration_day", "addDuration", []any{"2026-01-01T00:00:00Z", "P1D"}, "2026-01-02T00:00:00Z"},
 		{"addDuration_date_only", "addDuration", []any{"2026-03-10", "P1D"}, "2026-03-11T00:00:00Z"},
+		// The documented subtractTimestamps replacement (#2707): a leading
+		// sign negates the whole duration.
+		{"addDuration_negative_day", "addDuration", []any{"2026-01-02T00:00:00Z", "-P1D"}, "2026-01-01T00:00:00Z"},
+		{"addDuration_negative_hours", "addDuration", []any{"2026-07-14T09:00:00Z", "-PT2H"}, "2026-07-14T07:00:00Z"},
 		{"daysBetween", "daysBetween", []any{"2026-01-01", "2026-01-11"}, 10},
 	}
 	for _, tc := range cases {

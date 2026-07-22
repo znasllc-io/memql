@@ -14,7 +14,9 @@ import "sort"
 // with no drift guard -- and it had already gone stale against the grammar
 // (it omitted year / quarter / month / dayOfMonth / subtractTimestamps /
 // isAnniversary / isFirstDayOfQuarter / memqlVersion / contains, all of which
-// the parser recognises). This table is the durable fix: Sense is now DRIVEN
+// the parser recognised at the time; all but contains were later
+// hard-retired under 2026.08, #2620 ruling / #2707). This table is the
+// durable fix: Sense is now DRIVEN
 // from dslspec.Builtins (sense/builtins.go projects it), and the drift test
 // (drift_test.go) pins the grammar-recognised subset to parser.CallableBuiltins
 // so the editor can never fall behind the grammar again.

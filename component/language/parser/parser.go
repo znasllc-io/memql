@@ -4657,6 +4657,20 @@ func (p *Parser) parseConditionExpression() (string, error) {
 		tok := p.current
 		literal := tok.Literal
 
+		// Conditions are canonicalised to raw strings that never reach
+		// the callable dispatch, so the 2026.08 retirement gate (#2707)
+		// must fire here too: a retired expression builtin in call
+		// position would otherwise fall through the runtime condition
+		// evaluator unrecognised and make the gate silently
+		// constant-false. Only the eight retired EXPR builtins are
+		// rejected -- timestamp() stays a live condition operand (the
+		// automations evaluator resolves it to the run clock).
+		if tok.Type == TokenIdentifier && p.peekAhead(1).Type == TokenParenOpen {
+			if hint, retired := retiredExprBuiltins[strings.ToLower(tok.Literal)]; retired {
+				return "", newParseErrorf(&tok, "%s", retiredExprBuiltinMessage(tok.Literal, hint))
+			}
+		}
+
 		// Handle token type-specific behavior
 		switch tok.Type {
 		case TokenParenOpen:

@@ -570,8 +570,16 @@ func parseDate(s string) (time.Time, error) {
 
 // parseISO8601Duration parses an ISO 8601 duration string (e.g., "PT24H", "P1D", "PT30M").
 func parseISO8601Duration(s string) (time.Duration, error) {
+	// A leading sign negates the whole duration (ISO-8601 "-P1D"). This is
+	// the documented subtractTimestamps replacement (#2707): addDuration
+	// with a negative duration subtracts.
+	negative := false
+	if len(s) > 0 && s[0] == '-' {
+		negative = true
+		s = s[1:]
+	}
 	if len(s) < 2 || s[0] != 'P' {
-		return 0, fmt.Errorf("duration must start with P")
+		return 0, fmt.Errorf("duration must start with P (optionally -P for a negative duration)")
 	}
 
 	var d time.Duration
@@ -617,35 +625,10 @@ func parseISO8601Duration(s string) (time.Duration, error) {
 		}
 	}
 
-	return d, nil
-}
-
-// formatISO8601Duration formats a duration as an ISO 8601 duration string.
-func formatISO8601Duration(d time.Duration) string {
-	if d < 0 {
+	if negative {
 		d = -d
 	}
-
-	hours := int(d.Hours())
-	minutes := int(d.Minutes()) % 60
-	seconds := int(d.Seconds()) % 60
-
-	if hours >= 24 {
-		days := hours / 24
-		hours = hours % 24
-		if hours == 0 && minutes == 0 && seconds == 0 {
-			return fmt.Sprintf("P%dD", days)
-		}
-		return fmt.Sprintf("P%dDT%dH%dM%dS", days, hours, minutes, seconds)
-	}
-
-	if hours == 0 && minutes == 0 {
-		return fmt.Sprintf("PT%dS", seconds)
-	}
-	if hours == 0 {
-		return fmt.Sprintf("PT%dM%dS", minutes, seconds)
-	}
-	return fmt.Sprintf("PT%dH%dM%dS", hours, minutes, seconds)
+	return d, nil
 }
 
 // isTruthy determines if a value is truthy.

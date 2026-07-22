@@ -152,6 +152,31 @@ func (r *Registry[T]) Snapshot() map[string]*T {
 	return result
 }
 
+// Range calls fn for each registered entry in sorted-name order, WITHOUT
+// cloning, under the registry read lock. fn returning false stops the walk.
+// For read-only scans where List()'s per-entry deep clone is pure waste
+// (e.g. the meta-command alias lookup, #2707); fn MUST NOT retain or mutate
+// the item, and MUST NOT call back into the registry (the RLock is held).
+func (r *Registry[T]) Range(fn func(name string, item *T) bool) {
+	if r == nil || fn == nil {
+		return
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	names := make([]string, 0, len(r.byName))
+	for name := range r.byName {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if item := r.byName[name]; item != nil {
+			if !fn(name, item) {
+				return
+			}
+		}
+	}
+}
+
 // List returns all registered entries as a sorted slice.
 func (r *Registry[T]) List() []*T {
 	if r == nil {

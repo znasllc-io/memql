@@ -44,6 +44,34 @@ func TestRetiredExprBuiltinsRejectWithHint(t *testing.T) {
 	}
 }
 
+// TestRetiredExprBuiltinsRejectedInConditionPositions pins the second gate:
+// conditions are canonicalised to raw strings (parseConditionExpression)
+// that never reach the callable dispatch, so without this gate a retired
+// builtin in an if-condition would be load-green and silently constant-false
+// at evaluation -- the exact class the retirement must not reintroduce.
+func TestRetiredExprBuiltinsRejectedInConditionPositions(t *testing.T) {
+	body := func(cond string) string {
+		return "logic probe {\n  args {\n    a string @required\n  }\n  body {\n    x := coalesce(args.a, \"\")\n    if " + cond + " {\n      y := concat(x, \"!\")\n    }\n    return x\n  }\n}\n"
+	}
+	src := body("year(args.a) == 2026")
+	normalised, err := NormaliseAll(src)
+	if err != nil {
+		t.Fatalf("normalise: %v", err)
+	}
+	if _, err := ParseFile(normalised); err == nil || !strings.Contains(err.Error(), "#2707") {
+		t.Fatalf("retired builtin in an if-condition must fail parse with the migration hint, got: %v", err)
+	}
+	// A live builtin in the same position still parses.
+	src = body(`coalesce(args.a, "") == "x"`)
+	normalised, err = NormaliseAll(src)
+	if err != nil {
+		t.Fatalf("normalise: %v", err)
+	}
+	if _, err := ParseFile(normalised); err != nil {
+		t.Fatalf("live builtin in an if-condition must keep parsing: %v", err)
+	}
+}
+
 // TestRetiredExprBuiltinsGoneFromCallableSet pins the introspection surface:
 // the retired names moved from CallableBuiltins (the dslspec-pinned editor
 // set) to CallableRetiredNames.
