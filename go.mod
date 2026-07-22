@@ -15,7 +15,7 @@ require (
 	github.com/lib/pq v1.12.3
 	github.com/livekit/media-sdk v0.0.0-20260605212526-4c11a51d3c97
 	github.com/livekit/protocol v1.49.0
-	github.com/livekit/server-sdk-go/v2 v2.18.0
+	github.com/livekit/server-sdk-go/v2 v2.18.1
 	github.com/oschwald/geoip2-golang v1.13.0
 	github.com/pion/webrtc/v4 v4.2.16
 	github.com/prometheus/client_golang v1.23.2
