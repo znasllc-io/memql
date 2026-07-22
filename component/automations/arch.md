@@ -543,7 +543,6 @@ automation bootstrapUser() {
 | | `@version` | `"v1"` | Version tag |
 | **Documentation** |
 | | `@description` | `"..."` | Human-readable description |
-| **Access Control** |
 | **Performance** |
 | | `@timeout` | `"30s"` | Execution timeout |
 | | `@rateLimit` | `requests=N, per="1m"` | Throttle execution |
