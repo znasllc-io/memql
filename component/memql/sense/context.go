@@ -457,24 +457,24 @@ func checkInvocationContext(tokens []parser.Token, prefix string) (CursorContext
 	if n == 0 {
 		return CursorContext{}, false
 	}
-	depth := 0
-	for _, t := range tokens {
-		switch t.Type {
-		case parser.TokenBraceOpen:
-			depth++
-		case parser.TokenBraceClose:
-			depth--
-		}
+	// Only a BEHAVIORAL construct (logic / automation / action) invokes others.
+	// In a concept / query / mutate / shape / seed body a `<verb> <ident>` pair
+	// is a field or clause declaration -- a field literally named `query` must
+	// not misfire. Gating on the enclosing construct (which also implies body
+	// depth) covers those, plus the mutate write-sugar blocks (accept / stamp /
+	// insert / update) since mutate is not behavioral.
+	enc, ok := resolveEnclosingConstruct(tokens)
+	if !ok || !behavioralConstruct[enc.Keyword] {
+		return CursorContext{}, false
 	}
-	if depth <= 0 {
-		return CursorContext{}, false // top-level signature, not a body invocation
+	// Within the behavioral body, still suppress inside its `args {}` declaration
+	// block (a field there named query/mutation/logic), and inside call-arg
+	// parens (`foo(query ` is an argument, not an invocation) -- positions the
+	// block and func-call completers own.
+	if b := enc.Blocks; len(b) > 0 && b[len(b)-1] == "args" {
+		return CursorContext{}, false
 	}
-	// Suppress inside a DECLARATION / clause block, where `<verb> <ident>` is a
-	// field declaration (`args { query string }` -- a field literally named
-	// `query`), a written payload key, or a clause -- NOT an invocation. An
-	// invocation lives in a procedural body (a `body { }` block, or an
-	// automation body), whose opener is not one of these.
-	if invocationSuppressBlock[innermostOpenBlockKeyword(tokens)] {
+	if insideUnmatchedParen(tokens) {
 		return CursorContext{}, false
 	}
 	// `<verb> ` -- the last token is the verb and the cursor is just past it.
@@ -496,39 +496,27 @@ func checkInvocationContext(tokens []parser.Token, prefix string) (CursorContext
 	return CursorContext{}, false
 }
 
-// invocationSuppressBlock names the declaration / clause blocks where a
-// `<verb> <ident>` pair is a field or clause, not an invocation, so the
-// invocation completer must not fire inside them (the block-specific completer
-// owns those positions).
-var invocationSuppressBlock = map[string]bool{
-	"args": true, "insert": true, "update": true, "filter": true,
-	"params": true, "auth": true, "shape": true,
+// behavioralConstruct is the set of constructs whose body invokes other
+// constructs (`<verb> <name>(...)`), so an invocation-name completion is valid
+// inside them. Mirrors invocationKeywordsForConstruct's call-verb constructs.
+var behavioralConstruct = map[string]bool{
+	"logic": true, "automation": true, "action": true,
 }
 
-// innermostOpenBlockKeyword returns the identifier that opens the innermost
-// still-open brace before the cursor -- `args` for `... args { <cursor>`, the
-// construct name for `logic foo { <cursor>`, or "" if none is open. Used to tell
-// a procedural body from a declaration block.
-func innermostOpenBlockKeyword(tokens []parser.Token) string {
-	var stack []string
-	for i, t := range tokens {
+// insideUnmatchedParen reports whether the cursor sits inside an open `(` -- a
+// call-argument position, where a token that happens to be query/mutation/logic
+// is an argument, not an invocation verb.
+func insideUnmatchedParen(tokens []parser.Token) bool {
+	depth := 0
+	for _, t := range tokens {
 		switch t.Type {
-		case parser.TokenBraceOpen:
-			opener := ""
-			if i > 0 && tokens[i-1].Type == parser.TokenIdentifier {
-				opener = tokens[i-1].Literal
-			}
-			stack = append(stack, opener)
-		case parser.TokenBraceClose:
-			if len(stack) > 0 {
-				stack = stack[:len(stack)-1]
-			}
+		case parser.TokenParenOpen:
+			depth++
+		case parser.TokenParenClose:
+			depth--
 		}
 	}
-	if len(stack) == 0 {
-		return ""
-	}
-	return stack[len(stack)-1]
+	return depth > 0
 }
 
 // checkFuncCallContext checks if cursor is inside a function call's arguments.

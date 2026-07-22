@@ -54,6 +54,46 @@ func TestInvocation_PrefixFilter(t *testing.T) {
 	}
 }
 
+// firedInvocation reports whether the result is the kind-filtered query
+// invocation set -- listOrders (a query) present while writeThing (a mutation)
+// is absent. Every fallthrough (func-body dump, block field completion,
+// func-call args) either omits listOrders or also offers writeThing, so this
+// cleanly distinguishes a fired invocation from a suppressed one.
+func firedInvocation(got map[string]bool) bool {
+	return got["listOrders"] && !got["writeThing"]
+}
+
+func TestInvocation_ConceptBodySuppressed(t *testing.T) {
+	// A concept body holds field declarations; a field named `query` is not an
+	// invocation (concept is not a behavioral construct).
+	if firedInvocation(completeAtEnd(New(invocationRegistry()), "concept thing {\n  query ")) {
+		t.Error("invocation fired in a concept body")
+	}
+}
+
+func TestInvocation_MutateWriteBlockSuppressed(t *testing.T) {
+	// mutate is not behavioral; an insert/accept key named `query` is a write
+	// field, not an invocation.
+	rp := &stubRegistry{
+		functions: map[string]*FunctionInfo{
+			"listOrders": {Name: "listOrders", Kind: "query"},
+			"writeThing": {Name: "writeThing", Kind: "mutation"},
+		},
+		concepts: map[string]*ConceptInfo{"v1:orders:order": {Name: "v1:orders:order"}},
+	}
+	if firedInvocation(completeAtEnd(New(rp), "mutate order place {\n  insert {\n    query ")) {
+		t.Error("invocation fired in a mutate insert block")
+	}
+}
+
+func TestInvocation_CallArgsParenSuppressed(t *testing.T) {
+	// Inside call-arg parens `foo(query ` the token is an argument, not an
+	// invocation verb -- func-call-args completion must own it.
+	if firedInvocation(completeAtEnd(New(invocationRegistry()), "logic doThing {\n  body {\n    foo(query ")) {
+		t.Error("invocation fired inside call-arg parens")
+	}
+}
+
 func TestInvocation_ArgsBlockSuppressed(t *testing.T) {
 	// A field literally named `query` in an args block is a field declaration,
 	// not an invocation: the invocation completer must NOT fire and hide the
