@@ -93,21 +93,47 @@ func TestIndex_ConceptDeclared(t *testing.T) {
 concept order {
   id  string  @required
 }`),
+		// gadget is declared in TWO namespaces -- an ambiguous bare name.
+		"alpha/concepts.memql": file(`@version("1.0.0")
+@namespace("alpha")
+concept gadget {
+  id  string  @required
+}`),
+		"beta/concepts.memql": file(`@version("1.0.0")
+@namespace("beta")
+concept gadget {
+  id  string  @required
+}`),
 	})
 	ix := tree.NewIndex()
 
-	if declared, decidable := ix.ConceptDeclared("order", ""); !declared || !decidable {
-		t.Errorf(`ConceptDeclared(order, "") = (%v,%v), want (true,true)`, declared, decidable)
+	// A UNIQUE bare name resolves regardless of the hint -- the hint is a
+	// tiebreaker, not a hard namespace filter (boot's resolveConceptByTrailing-
+	// Segment). `order` exists only in fylo; a "beta" hint must NOT reject it.
+	for _, hint := range []string{"", "fylo", "beta"} {
+		if declared, decidable := ix.ConceptDeclared("order", hint); !declared || !decidable {
+			t.Errorf("ConceptDeclared(order, %q) = (%v,%v), want (true,true) -- unique name resolves regardless of hint", hint, declared, decidable)
+		}
 	}
-	if declared, decidable := ix.ConceptDeclared("order", "fylo"); !declared || !decidable {
-		t.Errorf("ConceptDeclared(order, fylo) = (%v,%v), want (true,true)", declared, decidable)
+
+	// An ambiguous bare name (gadget in alpha AND beta): the hint disambiguates.
+	if declared, decidable := ix.ConceptDeclared("gadget", "alpha"); !declared || !decidable {
+		t.Errorf("ConceptDeclared(gadget, alpha) = (%v,%v), want (true,true)", declared, decidable)
 	}
-	// The user's symptom 5: a signature concept that exists nowhere.
+	if declared, decidable := ix.ConceptDeclared("gadget", ""); !declared || !decidable {
+		t.Errorf(`ConceptDeclared(gadget, "") = (%v,%v), want (true,true) -- ambiguous name still exists`, declared, decidable)
+	}
+	if declared, decidable := ix.ConceptDeclared("gadget", "fylo"); declared || !decidable {
+		t.Errorf("ConceptDeclared(gadget, fylo) = (%v,%v), want (false,true) -- ambiguous, hinted ns holds none", declared, decidable)
+	}
+
+	// The user's symptom 5: a signature concept that exists nowhere -- provably
+	// absent from the tree with a workspace-local or empty hint.
 	if declared, decidable := ix.ConceptDeclared("full", ""); declared || !decidable {
 		t.Errorf(`ConceptDeclared(full, "") = (%v,%v), want (false,true)`, declared, decidable)
 	}
-	// nsHint names a namespace absent from the workspace -> inconclusive.
-	if declared, decidable := ix.ConceptDeclared("order", "platform"); declared || decidable {
-		t.Errorf("ConceptDeclared(order, platform) = (%v,%v), want (false,false)", declared, decidable)
+	// Absent name + external hint -> inconclusive (it may live in that namespace).
+	if declared, decidable := ix.ConceptDeclared("full", "platform"); declared || decidable {
+		t.Errorf("ConceptDeclared(full, platform) = (%v,%v), want (false,false)", declared, decidable)
 	}
 }

@@ -24,6 +24,18 @@ import (
 // Tree even on error, an Index is available -- and useful -- even when the
 // workspace has broken references, which is exactly when the editor most needs
 // reference resolution.
+//
+// Query scope: the module queries take a TWO-segment path (namespace + kind,
+// e.g. "fylo"+"concepts" -> fylo/concepts.memql), which covers every product /
+// engine module. Multi-segment consolidated-capability paths
+// (`capabilities.integration.github` -> the consolidated
+// capabilities/capabilities.memql with a dotted construct prefix, which
+// resolveUseModule handles) are NOT representable through the (ns, kind) shape;
+// a consumer that must resolve those handles them separately. Callers also pass
+// an UNVERSIONED namespace -- a leading version segment (`v1.cognition.concepts`)
+// is the caller's to strip (cf. stripVersionPrefix). An unstripped "v1"
+// namespace is simply absent from the tree, so every query degrades to the
+// inconclusive answer, never a false negative.
 type Index struct {
 	tree *Tree
 	idx  *declIndex
@@ -138,20 +150,36 @@ func (ix *Index) SymbolDeclared(ns, kind, id string) (declared bool, decidable b
 }
 
 // ConceptDeclared reports whether a concept named `name` is declared in the
-// workspace tree. nsHint, when non-empty, restricts the match to a concept in
-// that namespace (mirroring the boot resolver's namespace hint); an empty hint
-// matches by bare name across the tree. decidable is false when nsHint names a
-// namespace absent from this workspace (external), so a miss is inconclusive.
+// workspace tree, following the boot resolver's resolution SHAPE: a concept is
+// resolved by UNIQUE trailing-segment (bare) name, and nsHint is only a
+// TIEBREAKER among two-or-more concepts sharing the name -- NOT a hard namespace
+// filter. So a name that is unique in the tree resolves regardless of the hint
+// (matching function_loader.go's resolveConceptByTrailingSegment, where the hint
+// only disambiguates duplicates).
+//
+// decidable is false only when the answer cannot be proven from this workspace:
+// the hinted namespace is external (absent here), so the concept may live there.
+// A bare name absent from the tree is reported (false, true) at this level; the
+// consumer layers file-context conservatism on top -- whether the importing file
+// pulls in an external namespace that could hold it (cf.
+// dslimports.verifySignatureBindings / missingIsProvable) -- since this
+// tree-global query has no importing-file context.
 func (ix *Index) ConceptDeclared(name, nsHint string) (declared bool, decidable bool) {
-	if nsHint != "" && !ix.idx.namespaces[nsHint] {
-		return false, false
-	}
 	entries, ok := ix.idx.concepts[name]
 	if !ok {
+		if nsHint != "" && !ix.idx.namespaces[nsHint] {
+			return false, false // hint is external -- the concept may live there
+		}
 		return false, true
 	}
-	if nsHint == "" {
+	if len(entries) == 1 || nsHint == "" {
+		// A unique bare name resolves regardless of the hint; an ambiguous name
+		// with no hint still exists (ambiguity is the consumer's concern, not an
+		// existence question).
 		return true, true
+	}
+	if !ix.idx.namespaces[nsHint] {
+		return false, false // ambiguous, and the hint is external -- undecidable
 	}
 	for _, e := range entries {
 		if i := strings.IndexByte(e.file, '/'); i > 0 && e.file[:i] == nsHint {
