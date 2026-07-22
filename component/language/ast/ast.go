@@ -802,7 +802,6 @@ const (
 	AttrDescription = "description"
 
 	// Access control
-	AttrInternal   = "internal"
 	AttrPublic     = "public"
 	AttrRole       = "role"
 	AttrPermission = "permission"
@@ -1074,7 +1073,6 @@ type FunctionDef struct {
 	Enabled    bool   // from //memql:enabled
 	Deprecated string // from //memql:deprecated (empty = not deprecated)
 	Version    string // from //memql:version
-	Internal   bool   // from //memql:internal
 	Role       string // from //memql:role
 	Permission string // from //memql:permission
 	Timeout    string // from //memql:timeout
@@ -1146,7 +1144,6 @@ type AutomationDef struct {
 	Enabled    bool   // from @enabled
 	Deprecated string // from @deprecated
 	Version    string // from @version
-	Internal   bool   // from @internal
 	Role       string // from @role
 	Permission string // from @permission
 	Timeout    string // from @timeout

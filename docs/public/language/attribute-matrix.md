@@ -32,7 +32,6 @@ construct-specific (see the end of this document) or rejected.
 | **Documentation** |
 | `@description("...")` | Yes | Yes | Yes | Human-readable description (fallback; prefer `///` doc comments, #2601) |
 | **Access Control** |
-| `@internal` | Yes | Yes | Yes | Not exposed to external API |
 | `@public` | Yes | Yes | No | Authz-classification opt-out: declares that no caller-scope check applies (see below) |
 | `@actor` | Yes | Yes | Yes | Declares the body reads the auth envelope (`actor.*`); used-but-undeclared fails load (#2621) |
 | `@role("admin")` | Yes | Yes | Yes | Restrict to users with specified role |
@@ -177,21 +176,14 @@ query user queryActiveUsers { ... }
 
 ### Access Control Attributes
 
-#### `@internal`
-Marks the definition as internal-only. Not exposed to the external API.
-
-```memql
-@internal
-query node querySystemMetrics { ... }
-```
-
-Concretely, "external API" includes every discovery surface: the
-function-backed tool registration path and the `@mcp`-promoted tool
-surface both skip `@internal` constructs (#2682), so an
-`@internal @mcp` function is advertised nowhere. It stays CALLABLE --
-`@internal` hides, it does not disable -- so an internal caller that
-knows the name still routes to it. (Contrast `@disabled`, which also
-drops from the surface but then refuses the call, #2647/#2605.)
+#### `@internal` (retired)
+Construct-level `@internal` was hard-retired under the 2026.08 epoch
+(#2620 ruling / #2708). It only hid the construct from discovery
+surfaces (tool listing, `@mcp` promotion) while leaving it callable --
+one corpus use in its lifetime. The load gate now rejects it with a
+migration hint; delete the annotation. Field-level `@internal` on
+concept PROPERTIES (the `@secret` / `@pii` sensitivity family) is a
+different surface and remains fully supported.
 
 #### `@public`
 Declares that the construct intentionally carries **no caller-scope
@@ -490,7 +482,7 @@ named by the `shape <Concept> <name>` signature; `@caller` -- use
 | Aspect | Default | Notes |
 |--------|---------|-------|
 | Enabled state | **Enabled** | Use `@disabled` to deactivate; `@enabled` is an accepted no-op |
-| Visibility | Public | Use `@internal` to hide from API |
+| Visibility | Public | Always discoverable (`@internal` retired, #2708) |
 | Timeout | 30s | Platform default |
 | Cache | None | No caching by default |
 | Audit | Off | Must explicitly enable |

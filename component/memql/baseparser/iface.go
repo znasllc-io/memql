@@ -20,6 +20,17 @@ import (
 //
 // Returns nil when every top-level `@name` is in the allow-list and
 // no @use* annotation is present.
+
+// retiredConstructAnnotations maps construct-level annotations hard-retired
+// under the 2026.08 epoch to their migration hints, checked BEFORE the
+// allow-list (the @use* precedent) so the author gets the pointed retirement
+// message rather than a generic unknown-annotation error. Field-level
+// annotations (the concept property fold: @secret / @pii / @internal on
+// FIELDS) are a separate surface and are not consulted here.
+var retiredConstructAnnotations = map[string]string{
+	"internal": "retired under the 2026.08 epoch (#2620 ruling / #2708); it only hid the construct from external API discovery (tool listing / MCP promotion) -- delete the annotation",
+}
+
 func ValidateConstructAnnotations(source, kindLabel string, allowed map[string]bool) error {
 	bodyStart := findConstructBodyOpen(source, kindLabel)
 	if bodyStart < 0 {
@@ -38,6 +49,9 @@ func ValidateConstructAnnotations(source, kindLabel string, allowed map[string]b
 		}
 		if strings.HasPrefix(name, "use") && len(name) > 3 && name[3] >= 'A' && name[3] <= 'Z' {
 			return fmt.Errorf("`@%s(...)` is retired -- declare the dependency via a file-top `use <module>.{ ... }` import instead, and (for seeds/queries/mutations/shapes) put the bound concept in the signature (`%s <Concept> <name> { ... }`)", name, kindLabel)
+		}
+		if hint, retired := retiredConstructAnnotations[name]; retired {
+			return fmt.Errorf("@%s on a %s is retired -- %s", name, kindLabel, hint)
 		}
 		if !allowed[name] {
 			return fmt.Errorf("unknown %s annotation @%s -- supported: %s", kindLabel, name, FormatAnnotationAllowList(allowed))

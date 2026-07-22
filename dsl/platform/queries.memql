@@ -137,16 +137,16 @@ query globalVariable globalVariables {
 //   - globalVariable.active: Whether the variable is active
 //
 // Note:
-//   This function is marked @internal and should not be called directly from
-//   external clients. It's designed to be used by the bootstrapUser automation
-//   when creating new user accounts.
+//   This function is designed to be used by the bootstrapUser automation
+//   when creating new user accounts, not called directly from external
+//   clients. (It formerly carried @internal, retired under 2026.08 --
+//   #2620 ruling / #2708; the annotation only hid it from discovery.)
 //
 // Usage:
 //   userDefaults()  // Returns all user provisioning variables
 //
 
 /// Returns default configuration variables for user provisioning. Used by bootstrapUser automation.
-@internal
 @unbounded("user-default variables -- a fixed bounded allow-list of names consumed whole")
 query globalVariable userDefaults {
   filter  isActiveRecord && name in ["MEMQL_DEFAULT_USER_ROLE", "MEMQL_DEFAULT_USER_THEME", "MEMQL_DEFAULT_USER_LANGUAGE", "MEMQL_AUTO_PROVISION_USERS", "MEMQL_UPDATE_LAST_SEEN"]

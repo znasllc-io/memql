@@ -141,9 +141,6 @@ type Function struct {
 	// Version is the function version tag
 	Version string
 
-	// Internal indicates if the function is hidden from external API
-	Internal bool
-
 	// Role restricts access to users with this role
 	Role string
 
@@ -223,7 +220,6 @@ func (f *Function) clone() *Function {
 		Enabled:           f.Enabled,
 		Deprecated:        f.Deprecated,
 		Version:           f.Version,
-		Internal:          f.Internal,
 		Role:              f.Role,
 		Permission:        f.Permission,
 		Timeout:           f.Timeout,
