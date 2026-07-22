@@ -544,7 +544,6 @@ automation bootstrapUser() {
 | **Documentation** |
 | | `@description` | `"..."` | Human-readable description |
 | **Access Control** |
-| | `@internal` | none | Hide from external API |
 | | `@role` | `"admin"` | Restrict to users with role |
 | | `@permission` | `"..."` | Require specific permission |
 | **Performance** |

@@ -20,8 +20,36 @@ import (
 //
 // Returns nil when every top-level `@name` is in the allow-list and
 // no @use* annotation is present.
+
+// retiredConstructAnnotations maps construct-level annotations hard-retired
+// under the 2026.08 epoch to their migration hints, checked BEFORE the
+// allow-list (the @use* precedent) so the author gets the pointed retirement
+// message rather than a generic unknown-annotation error. Field-level
+// annotations (the concept property fold: @secret / @pii / @internal on
+// FIELDS) are a separate surface and are not consulted here.
+var retiredConstructAnnotations = map[string]string{
+	"internal": "retired under the 2026.08 epoch (#2620 ruling / #2708); it only hid the construct from external discovery surfaces (tool listing, MCP promotion, the help()/listFunctions internal flag) while leaving it callable -- delete the annotation",
+}
+
+// RetiredConstructAnnotation reports whether a construct-level annotation
+// name is hard-retired, returning its migration hint. Exported so every
+// annotation gate (this validator, the parser's declarative-kind validator,
+// the sense editor diagnostics) emits the same pointed message instead of a
+// generic unknown-annotation error.
+func RetiredConstructAnnotation(name string) (string, bool) {
+	hint, ok := retiredConstructAnnotations[name]
+	return hint, ok
+}
+
 func ValidateConstructAnnotations(source, kindLabel string, allowed map[string]bool) error {
-	bodyStart := findConstructBodyOpen(source, kindLabel)
+	keyword := kindLabel
+	if kindLabel == "mutation" {
+		// Mutation slices spell the header `mutate NAME {`; without the
+		// keyword mapping the header scan would run past the body open
+		// and inspect body lines too.
+		keyword = "mutate"
+	}
+	bodyStart := findConstructBodyOpen(source, keyword)
 	if bodyStart < 0 {
 		bodyStart = len(source)
 	}
@@ -38,6 +66,9 @@ func ValidateConstructAnnotations(source, kindLabel string, allowed map[string]b
 		}
 		if strings.HasPrefix(name, "use") && len(name) > 3 && name[3] >= 'A' && name[3] <= 'Z' {
 			return fmt.Errorf("`@%s(...)` is retired -- declare the dependency via a file-top `use <module>.{ ... }` import instead, and (for seeds/queries/mutations/shapes) put the bound concept in the signature (`%s <Concept> <name> { ... }`)", name, kindLabel)
+		}
+		if hint, retired := retiredConstructAnnotations[name]; retired {
+			return fmt.Errorf("@%s on a %s is retired -- %s", name, kindLabel, hint)
 		}
 		if !allowed[name] {
 			return fmt.Errorf("unknown %s annotation @%s -- supported: %s", kindLabel, name, FormatAnnotationAllowList(allowed))

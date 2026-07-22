@@ -3498,8 +3498,6 @@ func (p *Parser) processFunctionAttributes(d *FunctionDef, attributes []*Attribu
 			d.Version = getAttrString(attr)
 		case AttrDescription:
 			d.Description = getAttrString(attr)
-		case AttrInternal:
-			d.Internal = true
 		case AttrRole:
 			d.Role = getAttrString(attr)
 		case AttrPermission:
@@ -3551,8 +3549,6 @@ func (p *Parser) processAutomationAttributes(d *AutomationDef, attributes []*Att
 			d.Version = getAttrString(attr)
 		case AttrDescription:
 			d.Description = getAttrString(attr)
-		case AttrInternal:
-			d.Internal = true
 		case AttrRole:
 			d.Role = getAttrString(attr)
 		case AttrTimeout:

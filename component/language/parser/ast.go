@@ -161,7 +161,6 @@ var (
 	AttrFilter               = ast.AttrFilter
 	AttrHandler              = ast.AttrHandler
 	AttrIdempotent           = ast.AttrIdempotent
-	AttrInternal             = ast.AttrInternal
 	AttrMergeFields          = ast.AttrMergeFields
 	AttrAppendFields         = ast.AttrAppendFields
 	AttrCreateOnly           = ast.AttrCreateOnly

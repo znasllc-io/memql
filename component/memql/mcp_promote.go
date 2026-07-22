@@ -76,19 +76,6 @@ func (e *MemQLEngine) mcpPromotedFunctions() []*Function {
 		if !fn.Enabled {
 			continue
 		}
-		// @internal means exactly "hide from external API discovery"
-		// (annotations/registry.go), and the promoted MCP tool surface IS
-		// external discovery -- so an @internal @mcp function is advertised
-		// nowhere, matching the function-backed REGISTRATION path which has
-		// always skipped `!fn.Enabled || fn.Internal` (function_tools.go).
-		// The two paths disagreeing was the same dishonest-surface class
-		// #2647 closed for @disabled (memql#2682). Routing is deliberately
-		// NOT filtered: unlike @disabled, an @internal function is still
-		// callable -- it is hidden, not off -- so an internal caller that
-		// knows the name still resolves it.
-		if fn.Internal {
-			continue
-		}
 		if fn.FunctionKind == "query" || fn.FunctionKind == "mutation" {
 			out = append(out, fn)
 		}

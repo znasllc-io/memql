@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/component/memql/baseparser"
 )
 
 // Diagnose returns errors and warnings for a MemQL source document.
@@ -275,7 +276,7 @@ func (s *Service) semanticDiagnostics(file *parser.File, source string) []Diagno
 							End:   Position{Line: pos.Line, Column: pos.Column + len(attr.Name) + 1},
 						},
 						Severity: SeverityError,
-						Message:  fmt.Sprintf("annotation @%s is not valid for receiver type %s", attr.Name, receiverType),
+						Message:  annotationRejectionMessage(attr.Name, receiverType),
 						Code:     "invalid-annotation",
 					})
 				}
@@ -368,4 +369,14 @@ func containsStr(slice []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// annotationRejectionMessage renders the invalid-annotation diagnostic,
+// preferring the pointed retirement hint (#2708) over the generic
+// not-valid-for-receiver message so the editor matches the load gate.
+func annotationRejectionMessage(name, receiverType string) string {
+	if hint, retired := baseparser.RetiredConstructAnnotation(name); retired {
+		return fmt.Sprintf("annotation @%s is retired -- %s", name, hint)
+	}
+	return fmt.Sprintf("annotation @%s is not valid for receiver type %s", name, receiverType)
 }

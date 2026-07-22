@@ -73,7 +73,6 @@ func TestRegisterFunctionToolsDoesNotOverrideExistingTool(t *testing.T) {
 		Name:         "activeSpaces",
 		Description:  "fn desc",
 		Enabled:      true,
-		Internal:     false,
 		FunctionKind: "query",
 	}); err != nil {
 		t.Fatalf("add function: %v", err)

@@ -28,7 +28,7 @@ func registerFunctionTools(logger *slog.Logger, functions *FunctionRegistry, too
 		if fn == nil {
 			continue
 		}
-		if !fn.Enabled || fn.Internal {
+		if !fn.Enabled {
 			continue
 		}
 		// Builtins are deliberately excluded: the MCP connector surface is

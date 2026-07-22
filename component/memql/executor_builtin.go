@@ -545,9 +545,6 @@ func functionHelpPayload(fn *Function) map[string]any {
 	if excerpt := strings.TrimSpace(functionSchemaReferenceExcerpt()); excerpt != "" {
 		payload["schemaReferenceExcerpt"] = excerpt
 	}
-	if fn.Internal {
-		payload["internal"] = true
-	}
 	if fn.Idempotent {
 		payload["idempotent"] = true
 	}

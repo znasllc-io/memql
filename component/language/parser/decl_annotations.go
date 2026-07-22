@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/znasllc-io/memql/component/language/annotations"
+	"github.com/znasllc-io/memql/component/memql/baseparser"
 )
 
 // validateDeclAnnotations rejects unknown leading annotations on the
@@ -28,6 +29,9 @@ func (p *Parser) validateDeclAnnotations(receiver, kindWord, name string, attrs 
 	for _, attr := range attrs {
 		if attr == nil || set[attr.Name] {
 			continue
+		}
+		if hint, retired := baseparser.RetiredConstructAnnotation(attr.Name); retired {
+			return newParseErrorf(&p.current, "%s %q: @%s is retired -- %s", kindWord, name, attr.Name, hint)
 		}
 		sorted := append([]string(nil), allowed...)
 		sort.Strings(sorted)

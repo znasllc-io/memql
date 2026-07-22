@@ -171,7 +171,7 @@ parser's allow-list (search `allowedXAnnotations` in
 | `@description("...")` | Every construct. |
 | `@enabled` / `@disabled` | Lifecycle on queries / mutations / logic / automations / traits / tools / builtins / prompts / providers / specs / seeds. Enabled is the default on every kind (#2604-#2608); `@enabled` is an accepted no-op. `@disabled` means "not loaded right now", not "deprecated" -- that axis is `@deprecated`. `@disabled` on a `@base` provider propagates to every child that `@extends` it. |
 | `@deprecated("hint")` | Functions, automations, tools, builtins. |
-| `@internal` | Functions; hides from AI tool surfaces + external docs. |
+| `@internal` | RETIRED at construct level under the 2026.08 epoch (#2620 ruling / #2708) -- it only hid a callable construct from discovery surfaces; the load gate rejects it with a migration hint. Field-level `@internal` on concept properties (the `@secret`/`@pii` sensitivity family) remains live. |
 
 **Cross-construct dependencies do NOT go through annotations.** The
 legacy `@useConcept` / `@useShape` / `@useQuery` / `@useMutation` /

@@ -100,3 +100,16 @@ func TestRetiredExprBuiltinsGoneFromCallableSet(t *testing.T) {
 		}
 	}
 }
+
+// TestRetiredInternalAnnotationOnDeclarativeKinds pins the #2708 pointed
+// hint on the parser's declarative-kind validator (builtin / shape / prompt
+// / ...), which routes through validateDeclAnnotations rather than the
+// baseparser gate -- both must emit the retirement message, not the generic
+// unknown-annotation error.
+func TestRetiredInternalAnnotationOnDeclarativeKinds(t *testing.T) {
+	src := "@internal\n@executor(\"help\")\nbuiltin probeInternal {\n}\n"
+	_, err := ParseBuiltinDecl(src)
+	if err == nil || !strings.Contains(err.Error(), "#2708") {
+		t.Fatalf("@internal on a builtin must carry the retirement hint, got: %v", err)
+	}
+}
