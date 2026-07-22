@@ -38,8 +38,12 @@ func (s *Service) Complete(source string, line, col int, filePath string) []Comp
 		items = append(items, automationArgsFieldCompletions(source, line, ctx.Prefix)...)
 	case ContextConceptFilter:
 		items = s.completeConceptFilter(ctx.Prefix)
-	case ContextUseDeclaration:
-		items = s.completeUseDeclaration(ctx.Prefix)
+	case ContextUseNamespace:
+		items = s.completeUseNamespace(ctx.Prefix)
+	case ContextUseKind:
+		items = s.completeUseKind(ctx)
+	case ContextUseImportList:
+		items = s.completeUseImportList(ctx)
 	case ContextFuncCallArgs:
 		items = s.completeFuncCallArgs(ctx)
 	case ContextConceptDef:
@@ -282,19 +286,55 @@ func (s *Service) completeConceptFilter(prefix string) []CompletionItem {
 }
 
 // completeUseDeclaration returns concept path completions after "use".
-func (s *Service) completeUseDeclaration(prefix string) []CompletionItem {
-	if s.registries == nil {
-		return nil
-	}
-
+// completeUseNamespace offers the workspace's top-level namespaces after `use `
+// (the user's symptom 3: typing `fylo` then `.` should lead to real segments,
+// not a dump of every concept). Backed by the workspace graph, so it needs no
+// registry.
+func (s *Service) completeUseNamespace(prefix string) []CompletionItem {
 	var items []CompletionItem
-	for _, name := range s.registries.ConceptNames() {
-		if strings.HasPrefix(name, prefix) {
+	for _, ns := range s.workspace.Namespaces() {
+		if strings.HasPrefix(ns, prefix) {
 			items = append(items, CompletionItem{
-				Label: name, Kind: "concept", Detail: "concept",
-				InsertText: name, SortPriority: 1,
+				Label: ns, Kind: "namespace", Detail: "namespace",
+				InsertText: ns, SortPriority: 1,
 			})
 		}
+	}
+	return items
+}
+
+// completeUseKind offers the module kinds available under the typed namespace
+// after `use <ns>.` (concepts / queries / mutations / logic / ...).
+func (s *Service) completeUseKind(ctx CursorContext) []CompletionItem {
+	var items []CompletionItem
+	for _, kind := range s.workspace.Kinds(ctx.UseNamespace) {
+		if strings.HasPrefix(kind, ctx.Prefix) {
+			items = append(items, CompletionItem{
+				Label: kind, Kind: "module", Detail: ctx.UseNamespace + "." + kind,
+				InsertText: kind, SortPriority: 1,
+			})
+		}
+	}
+	return items
+}
+
+// completeUseImportList offers the ids declared in <ns>.<kind> inside its brace
+// list, minus the ids already listed, so the author picks real symbols instead
+// of the whole symbol table.
+func (s *Service) completeUseImportList(ctx CursorContext) []CompletionItem {
+	listed := make(map[string]bool, len(ctx.UseListed))
+	for _, id := range ctx.UseListed {
+		listed[id] = true
+	}
+	var items []CompletionItem
+	for _, id := range s.workspace.SymbolsInModule(ctx.UseNamespace, ctx.UseKind) {
+		if listed[id] || !strings.HasPrefix(id, ctx.Prefix) {
+			continue
+		}
+		items = append(items, CompletionItem{
+			Label: id, Kind: "concept", Detail: ctx.UseNamespace + "." + ctx.UseKind,
+			InsertText: id, SortPriority: 1,
+		})
 	}
 	return items
 }
