@@ -390,7 +390,6 @@ type Automation struct {
     OnComplete  *Step            // Success hook (optional)
     OnError     *Step            // Failure hook (optional)
     Enabled     *bool            // Active flag (default: true since #2604; @disabled clears it)
-    Async       bool             // Run asynchronously (from @async)
     Origin      string           // Source file path
 }
 ```
@@ -564,12 +563,6 @@ automation bootstrapUser() { ... }
 @disabled
 @schedule(cron="*/30 * * * *")
 automation leadClassification() { ... }
-
--- Async automation
-@enabled
-@async
-@trigger(event="report.requested")
-automation generateReport() { ... }
 ```
 
 ### JSON Format (`.json`) - Legacy/Compiled
