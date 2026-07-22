@@ -449,7 +449,9 @@ sets; unknown annotations are rejected at load time:
   declares; the load guard exists to catch exactly that. Field-level:
   `@required`, `@default`, `@description`, `@unique`, `@pattern`,
   `@minLength`, `@maxLength`, `@minimum`, `@maximum`, `@immutable`,
-  `@secret`, `@variant`. See `dsl/_reference/_concept.memql`.
+  `@secret`, `@pii`, `@internal`, `@serverSet`, `@variant`. See
+  `dsl/_reference/_concept.memql`. (Field-level `@internal` is live --
+  only the construct-level form was retired, #2708.)
 - **Tools**: `@allowedRoles`, `@clientExecution`, `@description`,
   `@destructive`, `@disabled`, `@enabled`, `@executionTime`, `@handler`,
   `@rateLimit(maxCalls=N, periodSeconds=N)`, `@requiresConfirmation`,

@@ -23,4 +23,10 @@ func TestRetiredConstructAnnotationInternal(t *testing.T) {
 	if err := ValidateConstructAnnotations("@public\nquery g x {\n}\n", "query", allowed); err != nil {
 		t.Errorf("live annotation must pass: %v", err)
 	}
+	// Mutation slices spell the header `mutate NAME {`; the keyword mapping
+	// keeps the scan header-only AND the retirement firing there.
+	msrc := "@internal\nmutate recordThing {\n  accept { a }\n}\n"
+	if err := ValidateConstructAnnotations(msrc, "mutation", allowed); err == nil || !strings.Contains(err.Error(), "#2708") {
+		t.Errorf("@internal on a mutate-spelled slice must carry the retirement hint, got: %v", err)
+	}
 }
