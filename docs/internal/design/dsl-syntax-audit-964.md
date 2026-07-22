@@ -141,6 +141,13 @@ Flagged with rationale; keep/remove is the owner's call.
 | No-op on some receivers | `@enabled`/`@disabled` (no effect on tools; no semantic effect on seeds) | `tool_decl.go:48`; `seed_parser.go:328` |
 | Silent-tolerance gap (add rejection) | Tool / Provider / Builtin / Prompt accept any unknown annotation | `tool_decl.go`, `provider_decl.go`, `builtin_converter.go:91`, `prompt_converter.go:81` |
 
+> This table is the #964 point-in-time snapshot, not current state. Since
+> then: the "Recognized, ZERO real usage" set was removed from the
+> allow-lists in #989 (load-rejected thereafter); `@internal` was retired
+> (#2620 ruling / #2708); `@role` was buried (#2631 ruling / #2709); and
+> `@permission`'s bury is tracked as #2713. See `attribute-matrix.md` for the
+> live disposition.
+
 ---
 
 ## Part 4 — Kitchen-sink reference (all 13 constructs)

@@ -113,3 +113,16 @@ func TestRetiredInternalAnnotationOnDeclarativeKinds(t *testing.T) {
 		t.Fatalf("@internal on a builtin must carry the retirement hint, got: %v", err)
 	}
 }
+
+// TestRetiredRoleAnnotationOnDeclarativeKinds is the #2709 twin: the buried
+// @role must also carry the pointed message through the declarative-kind
+// validator, on both a builtin and a shape (the two dedicated-loader kinds
+// that route through validateDeclAnnotations).
+func TestRetiredRoleAnnotationOnDeclarativeKinds(t *testing.T) {
+	if _, err := ParseBuiltinDecl("@role(\"admin\")\n@executor(\"help\")\nbuiltin probeRole {\n}\n"); err == nil || !strings.Contains(err.Error(), "#2709") {
+		t.Fatalf("@role on a builtin must carry the bury hint, got: %v", err)
+	}
+	if _, err := ParseShapeDecl("@role(\"admin\")\nshape ProbeRole {\n  a string\n}\n"); err == nil || !strings.Contains(err.Error(), "#2709") {
+		t.Fatalf("@role on a shape must carry the bury hint, got: %v", err)
+	}
+}

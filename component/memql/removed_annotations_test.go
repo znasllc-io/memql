@@ -48,6 +48,15 @@ func TestRemovedAnnotationsRejected(t *testing.T) {
 			if err == nil {
 				t.Fatalf("expected @%s on a %s to be rejected, but it was accepted", tc.annotation, tc.kindLabel)
 			}
+			// @role graduated from generic unknown-annotation to the
+			// pointed BURY message (#2631 ruling / #2709) -- the load
+			// rejection this test locks in is preserved, sharper.
+			if tc.annotation == "role" {
+				if !strings.Contains(err.Error(), "#2709") {
+					t.Fatalf("expected the @role bury message, got: %v", err)
+				}
+				return
+			}
 			if !strings.Contains(err.Error(), "unknown "+tc.kindLabel+" annotation @"+tc.annotation) {
 				t.Fatalf("expected unknown-annotation error for @%s on %s, got: %v", tc.annotation, tc.kindLabel, err)
 			}

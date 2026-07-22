@@ -141,9 +141,6 @@ type Function struct {
 	// Version is the function version tag
 	Version string
 
-	// Role restricts access to users with this role
-	Role string
-
 	// Permission requires this permission to call
 	Permission string
 
@@ -220,7 +217,6 @@ func (f *Function) clone() *Function {
 		Enabled:           f.Enabled,
 		Deprecated:        f.Deprecated,
 		Version:           f.Version,
-		Role:              f.Role,
 		Permission:        f.Permission,
 		Timeout:           f.Timeout,
 		CacheTTL:          f.CacheTTL,

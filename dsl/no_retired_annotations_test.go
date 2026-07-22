@@ -9,18 +9,27 @@ import (
 	"github.com/znasllc-io/memql/component/memql/dslfs"
 )
 
-// standaloneInternalRe matches a line consisting solely of @internal. Whether
-// that line is the RETIRED construct-level form (#2620 ruling / #2708) or a
-// legal field-level property annotation depends on context: the concept
-// parser attaches a standalone annotation line to the PRECEDING field, so a
-// bare @internal between two concept fields is live @secret/@pii-family
-// redaction vocabulary, not the retired construct form. The walk below
-// therefore looks AHEAD: only a standalone @internal that (skipping comments
-// and further leading annotations) heads a construct declaration is flagged.
-var standaloneInternalRe = regexp.MustCompile(`^\s*@internal\s*$`)
+// standaloneRetiredRe matches a line consisting solely of a retired
+// construct-level annotation: @internal (#2620 ruling / #2708) or @role
+// (#2631 BURY ruling / #2709), with or without an argument list and with
+// optional whitespace before the paren. Whether such a line is the retired
+// construct form or something legal depends on context: the concept parser
+// attaches a standalone annotation line to the PRECEDING field, so a bare
+// @internal between two concept fields is live @secret/@pii-family redaction
+// vocabulary, not the retired construct form. The walk below therefore looks
+// AHEAD: only a standalone retired annotation that (skipping comments and
+// further leading annotations) heads a construct declaration is flagged.
+//
+// This grep is belt-and-suspenders for a clear tree-wide file:line report;
+// the real gate is the loader (ValidateConstructAnnotations / the declarative
+// parser validator), which rejects the retired names in ANY formatting the
+// parser accepts. The `(internal|role)` alternation is anchored between `@`
+// and a mandatory paren-or-end, so it never matches longer live names like
+// @allowedRoles / @preferredRole.
+var standaloneRetiredRe = regexp.MustCompile(`^\s*@(internal|role)(\s*\([^)]*\))?\s*$`)
 
 // constructKeywordAfterInternal matches the construct-declaration keywords a
-// retired construct-level @internal could annotate.
+// retired construct-level annotation could annotate.
 var constructKeywordAfterInternal = regexp.MustCompile(
 	`^\s*(query|mutation|mutate|logic|automation|builtin|tool|shape|spec|trait|prompt|provider|policy|capability|action|concept|seed)\b`)
 
@@ -49,12 +58,44 @@ func TestNoRetiredConstructAnnotations(t *testing.T) {
 			if idx := strings.Index(line, "//"); idx >= 0 {
 				line = line[:idx]
 			}
-			if !standaloneInternalRe.MatchString(line) {
+			if !standaloneRetiredRe.MatchString(line) {
 				continue
 			}
 			if headsConstructDecl(lines, i+1) {
-				t.Errorf("%s:%d: construct-level @internal is retired (2026.08 epoch, #2620 ruling / #2708) -- delete the annotation", p, i+1)
+				t.Errorf("%s:%d: retired construct-level annotation (@internal #2708 / @role #2709) -- delete the annotation", p, i+1)
 			}
+		}
+	}
+}
+
+// TestStandaloneRetiredRe pins the retired-annotation matcher: it catches
+// the canonical and evasion spellings of @internal / @role but never a
+// longer live role-family annotation.
+func TestStandaloneRetiredRe(t *testing.T) {
+	match := []string{
+		`@internal`,
+		`  @internal  `,
+		`@role`,
+		`@role("admin")`,
+		`@role ("admin")`,    // space-before-paren evasion
+		`@role(  "admin"  )`, // inner whitespace
+	}
+	for _, s := range match {
+		if !standaloneRetiredRe.MatchString(s) {
+			t.Errorf("expected match for %q", s)
+		}
+	}
+	noMatch := []string{
+		`@allowedRoles("assistant")`,
+		`@preferredRole("assistant")`,
+		`@rolething`,
+		`roleSlug string!`,
+		`  filter role == "admin"`,
+		`@internalize`,
+	}
+	for _, s := range noMatch {
+		if standaloneRetiredRe.MatchString(s) {
+			t.Errorf("expected NO match for %q", s)
 		}
 	}
 }

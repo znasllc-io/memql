@@ -29,6 +29,7 @@ import (
 // FIELDS) are a separate surface and are not consulted here.
 var retiredConstructAnnotations = map[string]string{
 	"internal": "retired under the 2026.08 epoch (#2620 ruling / #2708); it only hid the construct from external discovery surfaces (tool listing, MCP promotion, the help()/listFunctions internal flag) while leaving it callable -- delete the annotation",
+	"role":     "buried (#2631 ruling / #2709); it was documented but never enforced (nothing ever checked the value at runtime; the load gate rejects it) -- access control lives at the actor layer (RBAC + the @public per-row-authz classification)",
 }
 
 // RetiredConstructAnnotation reports whether a construct-level annotation
