@@ -6,15 +6,19 @@ import (
 )
 
 // date_builtins.go is the single name-keyed dispatch for the date/duration
-// builtins (#2541): addDuration, daysBetween, subtractTimestamps, year,
-// quarter, month, dayOfMonth, isAnniversary, isFirstDayOfQuarter. The Go
-// implementations live on the RuntimeEvaluator (runtime_evaluator.go) and were
-// previously reachable only from the mutation-template evaluator
+// builtins (#2541): addDuration and daysBetween. The Go implementations live
+// on the RuntimeEvaluator (runtime_evaluator.go) and were previously
+// reachable only from the mutation-template evaluator
 // (mutation_templates.go). Logic bodies serialize these builtins to source
 // text at the compile/re-parse boundary, so every position a logic evaluates
 // them in (terminal return, step RHS, condition operand, arithmetic operand,
 // collection-lambda comparison value) resolves operand VALUES first and then
 // dispatches here by name.
+//
+// The other seven date builtins that once lived here (subtractTimestamps,
+// year, quarter, month, dayOfMonth, isAnniversary, isFirstDayOfQuarter) were
+// hard-retired with zero corpus uses under the 2026.08 epoch (#2620 ruling /
+// #2707); the parser now rejects them with a migration hint.
 //
 // Like arithmetic (#2316), the date builtins are IN-MEMORY only: the AST
 // converter admits them solely under WithCollectionMethods (logic bodies /
@@ -22,15 +26,8 @@ import (
 
 // dateBuiltinArity maps each date/duration builtin to its argument count.
 var dateBuiltinArity = map[string]int{
-	"addDuration":         2,
-	"daysBetween":         2,
-	"subtractTimestamps":  2,
-	"year":                1,
-	"quarter":             1,
-	"month":               1,
-	"dayOfMonth":          1,
-	"isAnniversary":       2,
-	"isFirstDayOfQuarter": 1,
+	"addDuration": 2,
+	"daysBetween": 2,
 }
 
 // IsDateBuiltin reports whether name is one of the date/duration builtins
@@ -77,28 +74,6 @@ func EvaluateDateBuiltin(name string, args []any) (any, error) {
 		return t.Add(d).Format(time.RFC3339), nil
 	case "daysBetween":
 		return rt.EvaluateDaysBetween(str[0], str[1])
-	case "subtractTimestamps":
-		t1, err := parseDate(str[0])
-		if err != nil {
-			return nil, fmt.Errorf("subtractTimestamps() invalid timestamp t1 %q: %w", str[0], err)
-		}
-		t2, err := parseDate(str[1])
-		if err != nil {
-			return nil, fmt.Errorf("subtractTimestamps() invalid timestamp t2 %q: %w", str[1], err)
-		}
-		return formatISO8601Duration(t1.Sub(t2)), nil
-	case "year":
-		return rt.EvaluateYear(str[0])
-	case "quarter":
-		return rt.EvaluateQuarter(str[0])
-	case "month":
-		return rt.EvaluateMonth(str[0])
-	case "dayOfMonth":
-		return rt.EvaluateDayOfMonth(str[0])
-	case "isAnniversary":
-		return rt.EvaluateIsAnniversary(str[0], str[1])
-	case "isFirstDayOfQuarter":
-		return rt.EvaluateIsFirstDayOfQuarter(str[0])
 	}
 	// Unreachable -- the arity table and this switch carry the same names.
 	return nil, fmt.Errorf("date builtin %q has no evaluator", name)

@@ -506,13 +506,6 @@ func TestConvertExpressionHandlesDateBuiltins(t *testing.T) {
 	}{
 		{`addDuration("2026-01-01T00:00:00Z", "P1D")`, "addDuration", 2},
 		{`daysBetween("2026-01-01", "2026-01-11")`, "daysBetween", 2},
-		{`subtractTimestamps("2026-01-02T00:00:00Z", "2026-01-01T00:00:00Z")`, "subtractTimestamps", 2},
-		{`year("2026-07-14")`, "year", 1},
-		{`quarter("2026-07-14")`, "quarter", 1},
-		{`month("2026-07-14")`, "month", 1},
-		{`dayOfMonth("2026-07-14")`, "dayOfMonth", 1},
-		{`isAnniversary("2024-07-14", "2026-07-14")`, "isAnniversary", 2},
-		{`isFirstDayOfQuarter("2026-07-01")`, "isFirstDayOfQuarter", 1},
 	}
 	for _, tc := range cases {
 		tc := tc

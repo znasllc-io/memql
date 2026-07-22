@@ -356,7 +356,55 @@ func LoadUnifiedBuiltins(logger *slog.Logger, registry *FunctionRegistry, report
 		sink,
 	)
 	firstReport(report).FoldSink("functions", n, sink)
-	return n, err
+	if err != nil {
+		return n, err
+	}
+	if aliasErr := validateBuiltinAliases(registry); aliasErr != nil {
+		return n, aliasErr
+	}
+	return n, nil
+}
+
+// validateBuiltinAliases rejects @alias collisions at load: two builtins
+// claiming the same alias, or an alias shadowing a registered primary name.
+// The meta-command shim resolves aliases at lookup (#2707), so an ambiguous
+// alias would otherwise be settled silently by sorted-name order.
+func validateBuiltinAliases(registry *FunctionRegistry) error {
+	if registry == nil {
+		return nil
+	}
+	primaries := map[string]bool{}
+	registry.Range(func(name string, _ *Function) bool {
+		primaries[strings.ToLower(name)] = true
+		return true
+	})
+	claimed := map[string]string{}
+	var err error
+	registry.Range(func(name string, fn *Function) bool {
+		if fn == nil || !fn.IsBuiltin() {
+			return true
+		}
+		for _, alias := range fn.BuiltinAliases {
+			key := strings.ToLower(strings.TrimSpace(alias))
+			if key == "" {
+				continue
+			}
+			if key == strings.ToLower(name) {
+				continue
+			}
+			if primaries[key] {
+				err = fmt.Errorf("builtin %q declares @alias(%q) which shadows a registered function name", name, alias)
+				return false
+			}
+			if prev, dup := claimed[key]; dup && prev != name {
+				err = fmt.Errorf("builtins %q and %q both declare @alias(%q); aliases must be unique", prev, name, alias)
+				return false
+			}
+			claimed[key] = name
+		}
+		return true
+	})
+	return err
 }
 
 // LoadUnifiedPrompts walks the new tree, extracts every `prompt NAME

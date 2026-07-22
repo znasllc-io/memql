@@ -71,17 +71,45 @@ func (e *MemQLEngine) tryParseMetaCommand(query string) (*BuiltinFunctionExpress
 	}, true, nil
 }
 
-// lookupBuiltinFunction resolves a name (case-insensitive) against the
-// engine's Function registry, returning the Function only when it is
-// a builtin (FunctionTypeBuiltin). The existing FunctionRegistry IS
-// the meta-command catalogue -- there is no second source of truth.
+// lookupBuiltinFunction resolves a name against the engine's Function
+// registry, returning the Function only when it is a builtin
+// (FunctionTypeBuiltin). The existing FunctionRegistry IS the
+// meta-command catalogue -- there is no second source of truth.
+// Resolution is exact on the primary name (the registry's own lookup
+// semantics), then case-insensitive over the builtins' declared @alias
+// names (BuiltinAliases) on a miss, so memqlVersion() keeps resolving
+// to the serviceVersion builtin now that the expression-builtin
+// special-case is retired (#2707) -- the alias lives in the registry,
+// not in either parser. The alias scan uses the non-cloning Range walk
+// (sorted-name order, so the first claimant is deterministic); only
+// the matched entry is cloned via a second Get.
 func (e *MemQLEngine) lookupBuiltinFunction(name string) (*Function, bool) {
 	if e == nil || e.functions == nil {
 		return nil, false
 	}
-	fn, err := e.functions.Get(strings.TrimSpace(name))
+	trimmed := strings.TrimSpace(name)
+	fn, err := e.functions.Get(trimmed)
 	if err != nil || fn == nil {
-		return nil, false
+		primary := ""
+		e.functions.Range(func(_ string, cand *Function) bool {
+			if cand == nil || !cand.IsBuiltin() {
+				return true
+			}
+			for _, alias := range cand.BuiltinAliases {
+				if strings.EqualFold(alias, trimmed) {
+					primary = cand.Name
+					return false
+				}
+			}
+			return true
+		})
+		if primary == "" {
+			return nil, false
+		}
+		fn, err = e.functions.Get(primary)
+		if err != nil || fn == nil {
+			return nil, false
+		}
 	}
 	if !fn.IsBuiltin() {
 		return nil, false

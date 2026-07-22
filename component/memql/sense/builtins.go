@@ -28,10 +28,12 @@ var Keywords = specKeywordNames()
 // documentation, DRIVEN from the single source of truth dslspec.Builtins
 // (#2155) rather than a hand-maintained literal. The expression-builtin subset
 // is pinned to parser.CallableBuiltins by the dslspec drift test, so this map
-// can no longer fall behind the grammar (it picks up year / quarter / month /
-// dayOfMonth / subtractTimestamps / isAnniversary / isFirstDayOfQuarter /
-// memqlVersion that the old hand-coded literal omitted). Completion / hover /
-// signature consume the same map shape (name -> BuiltinDef) as before.
+// can no longer fall behind the grammar -- which also means the eight
+// builtins hard-retired under 2026.08 (#2620 ruling / #2707: year / quarter
+// / month / dayOfMonth / subtractTimestamps / isAnniversary /
+// isFirstDayOfQuarter / memqlVersion) dropped out of completion / hover the
+// moment their dslspec rows were deleted. Completion / hover / signature
+// consume the same map shape (name -> BuiltinDef) as before.
 var BuiltinFunctions = specBuiltinFunctions()
 
 // AnnotationsByReceiver is the editor projection of the single

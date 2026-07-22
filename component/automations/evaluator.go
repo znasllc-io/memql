@@ -795,14 +795,13 @@ func (e *Evaluator) EvaluateFilterValue(expr string) (any, error) {
 	}
 
 	// Builtin calls usable as comparison operands (#2256): concat / coalesce
-	// plus the full date/duration builtin set (#2541: addDuration,
-	// daysBetween, subtractTimestamps, year, quarter, month, dayOfMonth,
-	// isAnniversary, isFirstDayOfQuarter). Before this they fell through to
-	// the literal-string fallback at the bottom of this function, and a
-	// date-arithmetic expression then toNumber()'d to 0 -- making every
-	// retention/deletion date-window gate constant-false (#2254), and a
-	// calendar-day gate like `year(item.createdAt) == year(timestamp())`
-	// constant-false too. An unrecognised call name falls through unchanged.
+	// plus the date/duration builtin set (#2541 -- addDuration and
+	// daysBetween since the #2707 retirement of the seven zero-use calendar
+	// builtins). Before this they fell through to the literal-string
+	// fallback at the bottom of this function, and a date-arithmetic
+	// expression then toNumber()'d to 0 -- making every retention/deletion
+	// date-window gate constant-false (#2254). An unrecognised call name
+	// falls through unchanged.
 	if name, builtinArgs, ok := matchBuiltinCall(expr); ok {
 		switch {
 		case name == "concat":

@@ -488,94 +488,6 @@ func (e *RuntimeEvaluator) EvaluateDaysBetween(date1, date2 string) (int, error)
 	return int(hours / 24), nil
 }
 
-// EvaluateSubtractTimestamps resolves a subtractTimestamps(t1, t2) expression.
-// Calculates the duration between two timestamps (t1 - t2).
-// Returns an ISO 8601 duration string.
-func (e *RuntimeEvaluator) EvaluateSubtractTimestamps(t1, t2 string) (string, error) {
-	time1, err := time.Parse(time.RFC3339, t1)
-	if err != nil {
-		return "", fmt.Errorf("invalid timestamp t1 %q: %w", t1, err)
-	}
-
-	time2, err := time.Parse(time.RFC3339, t2)
-	if err != nil {
-		return "", fmt.Errorf("invalid timestamp t2 %q: %w", t2, err)
-	}
-
-	d := time1.Sub(time2)
-	return formatISO8601Duration(d), nil
-}
-
-// EvaluateYear resolves a year(timestamp) expression.
-// Returns the year as an integer.
-func (e *RuntimeEvaluator) EvaluateYear(timestamp string) (int, error) {
-	t, err := parseDate(timestamp)
-	if err != nil {
-		return 0, fmt.Errorf("invalid timestamp %q: %w", timestamp, err)
-	}
-	return t.Year(), nil
-}
-
-// EvaluateQuarter resolves a quarter(timestamp) expression.
-// Returns the calendar quarter (1-4).
-func (e *RuntimeEvaluator) EvaluateQuarter(timestamp string) (int, error) {
-	t, err := parseDate(timestamp)
-	if err != nil {
-		return 0, fmt.Errorf("invalid timestamp %q: %w", timestamp, err)
-	}
-	return (int(t.Month())-1)/3 + 1, nil
-}
-
-// EvaluateMonth resolves a month(timestamp) expression.
-// Returns the month (1-12).
-func (e *RuntimeEvaluator) EvaluateMonth(timestamp string) (int, error) {
-	t, err := parseDate(timestamp)
-	if err != nil {
-		return 0, fmt.Errorf("invalid timestamp %q: %w", timestamp, err)
-	}
-	return int(t.Month()), nil
-}
-
-// EvaluateDayOfMonth resolves a dayOfMonth(timestamp) expression.
-// Returns the day of the month (1-31).
-func (e *RuntimeEvaluator) EvaluateDayOfMonth(timestamp string) (int, error) {
-	t, err := parseDate(timestamp)
-	if err != nil {
-		return 0, fmt.Errorf("invalid timestamp %q: %w", timestamp, err)
-	}
-	return t.Day(), nil
-}
-
-// EvaluateIsAnniversary resolves an isAnniversary(startDate, checkDate) expression.
-// Returns true if checkDate is an anniversary of startDate (same month and day).
-func (e *RuntimeEvaluator) EvaluateIsAnniversary(startDate, checkDate string) (bool, error) {
-	start, err := parseDate(startDate)
-	if err != nil {
-		return false, fmt.Errorf("invalid startDate %q: %w", startDate, err)
-	}
-
-	check, err := parseDate(checkDate)
-	if err != nil {
-		return false, fmt.Errorf("invalid checkDate %q: %w", checkDate, err)
-	}
-
-	return start.Month() == check.Month() && start.Day() == check.Day(), nil
-}
-
-// EvaluateIsFirstDayOfQuarter resolves an isFirstDayOfQuarter(timestamp) expression.
-// Returns true if the date is Jan 1, Apr 1, Jul 1, or Oct 1.
-func (e *RuntimeEvaluator) EvaluateIsFirstDayOfQuarter(timestamp string) (bool, error) {
-	t, err := parseDate(timestamp)
-	if err != nil {
-		return false, fmt.Errorf("invalid timestamp %q: %w", timestamp, err)
-	}
-
-	// First day of quarter: Jan 1, Apr 1, Jul 1, Oct 1
-	month := t.Month()
-	day := t.Day()
-	return day == 1 && (month == time.January || month == time.April || month == time.July || month == time.October), nil
-}
-
 // runtimeCompareValues compares two values and returns:
 // -1 if a < b, 0 if a == b, 1 if a > b
 func runtimeCompareValues(a, b any) int {
@@ -658,8 +570,16 @@ func parseDate(s string) (time.Time, error) {
 
 // parseISO8601Duration parses an ISO 8601 duration string (e.g., "PT24H", "P1D", "PT30M").
 func parseISO8601Duration(s string) (time.Duration, error) {
+	// A leading sign negates the whole duration (ISO-8601 "-P1D"). This is
+	// the documented subtractTimestamps replacement (#2707): addDuration
+	// with a negative duration subtracts.
+	negative := false
+	if len(s) > 0 && s[0] == '-' {
+		negative = true
+		s = s[1:]
+	}
 	if len(s) < 2 || s[0] != 'P' {
-		return 0, fmt.Errorf("duration must start with P")
+		return 0, fmt.Errorf("duration must start with P (optionally -P for a negative duration)")
 	}
 
 	var d time.Duration
@@ -705,35 +625,10 @@ func parseISO8601Duration(s string) (time.Duration, error) {
 		}
 	}
 
-	return d, nil
-}
-
-// formatISO8601Duration formats a duration as an ISO 8601 duration string.
-func formatISO8601Duration(d time.Duration) string {
-	if d < 0 {
+	if negative {
 		d = -d
 	}
-
-	hours := int(d.Hours())
-	minutes := int(d.Minutes()) % 60
-	seconds := int(d.Seconds()) % 60
-
-	if hours >= 24 {
-		days := hours / 24
-		hours = hours % 24
-		if hours == 0 && minutes == 0 && seconds == 0 {
-			return fmt.Sprintf("P%dD", days)
-		}
-		return fmt.Sprintf("P%dDT%dH%dM%dS", days, hours, minutes, seconds)
-	}
-
-	if hours == 0 && minutes == 0 {
-		return fmt.Sprintf("PT%dS", seconds)
-	}
-	if hours == 0 {
-		return fmt.Sprintf("PT%dM%dS", minutes, seconds)
-	}
-	return fmt.Sprintf("PT%dH%dM%dS", hours, minutes, seconds)
+	return d, nil
 }
 
 // isTruthy determines if a value is truthy.

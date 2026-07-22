@@ -206,20 +206,6 @@ func evalLogicArithOperand(node languageParser.ExpressionNode, evaluator *Evalua
 		return evalArithDateBuiltin("addDuration", evaluator, n.Timestamp, n.Duration)
 	case *languageParser.DaysBetweenExpr:
 		return evalArithDateBuiltin("daysBetween", evaluator, n.Date1, n.Date2)
-	case *languageParser.SubtractTimestampsExpr:
-		return evalArithDateBuiltin("subtractTimestamps", evaluator, n.T1, n.T2)
-	case *languageParser.YearExpr:
-		return evalArithDateBuiltin("year", evaluator, n.Target)
-	case *languageParser.QuarterExpr:
-		return evalArithDateBuiltin("quarter", evaluator, n.Target)
-	case *languageParser.MonthExpr:
-		return evalArithDateBuiltin("month", evaluator, n.Target)
-	case *languageParser.DayOfMonthExpr:
-		return evalArithDateBuiltin("dayOfMonth", evaluator, n.Target)
-	case *languageParser.IsAnniversaryExpr:
-		return evalArithDateBuiltin("isAnniversary", evaluator, n.StartDate, n.CheckDate)
-	case *languageParser.IsFirstDayOfQuarterExpr:
-		return evalArithDateBuiltin("isFirstDayOfQuarter", evaluator, n.Target)
 	default:
 		return nil, fmt.Errorf("expression %T is not supported as an arithmetic operand in a logic body", node)
 	}

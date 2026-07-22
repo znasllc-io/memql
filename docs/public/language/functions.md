@@ -506,10 +506,18 @@ Verified author-surface helpers (see `component/language/parser`):
 | Function | Description |
 |----------|-------------|
 | `now` | Current ISO timestamp — the bare reserved primitive (no call parens; `now()` / `timestamp()` are retired). See Data Access above. |
-| `addDuration(ts, dur)` | Timestamp arithmetic |
-| `daysBetween(a, b)` / `subtractTimestamps(a, b)` | Differences |
-| `year(ts)` / `quarter(ts)` / `month(ts)` / `dayOfMonth(ts)` | Components |
-| `isAnniversary(ts)` / `isFirstDayOfQuarter(ts)` | Calendar predicates |
+| `addDuration(ts, dur)` | Timestamp arithmetic (a leading-sign negative duration subtracts, e.g. `addDuration(ts, "-PT2H")`) |
+| `daysBetween(a, b)` | Whole-day difference |
+
+The calendar extractors and predicates that once sat alongside these
+(`year` / `quarter` / `month` / `dayOfMonth` / `isAnniversary` /
+`isFirstDayOfQuarter` / `subtractTimestamps` / `memqlVersion`) were
+hard-retired with zero corpus uses under the 2026.08 grammar epoch
+(#2620 ruling / #2707); the parser rejects them with a migration hint.
+`subtractTimestamps`'s replacement is `addDuration` with a negative
+duration (leading sign: `"-P1D"`, `"-PT2H"`). `memqlVersion()` survives as a client meta-command (the
+registry builtin `serviceVersion`, alias `memqlVersion`), not as an
+expression builtin.
 
 ### AI
 

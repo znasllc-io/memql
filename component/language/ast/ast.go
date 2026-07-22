@@ -666,64 +666,6 @@ type DaysBetweenExpr struct {
 func (*DaysBetweenExpr) node()           {}
 func (*DaysBetweenExpr) expressionNode() {}
 
-// SubtractTimestampsExpr calculates duration between timestamps: subtractTimestamps(t1, t2)
-type SubtractTimestampsExpr struct {
-	T1 ExpressionNode
-	T2 ExpressionNode
-}
-
-func (*SubtractTimestampsExpr) node()           {}
-func (*SubtractTimestampsExpr) expressionNode() {}
-
-// YearExpr extracts year from timestamp: year(timestamp)
-type YearExpr struct {
-	Target ExpressionNode
-}
-
-func (*YearExpr) node()           {}
-func (*YearExpr) expressionNode() {}
-
-// QuarterExpr extracts quarter (1-4) from timestamp: quarter(timestamp)
-type QuarterExpr struct {
-	Target ExpressionNode
-}
-
-func (*QuarterExpr) node()           {}
-func (*QuarterExpr) expressionNode() {}
-
-// MonthExpr extracts month (1-12) from timestamp: month(timestamp)
-type MonthExpr struct {
-	Target ExpressionNode
-}
-
-func (*MonthExpr) node()           {}
-func (*MonthExpr) expressionNode() {}
-
-// DayOfMonthExpr extracts day of month (1-31) from timestamp: dayOfMonth(timestamp)
-type DayOfMonthExpr struct {
-	Target ExpressionNode
-}
-
-func (*DayOfMonthExpr) node()           {}
-func (*DayOfMonthExpr) expressionNode() {}
-
-// IsAnniversaryExpr checks if checkDate is anniversary of startDate: isAnniversary(startDate, checkDate)
-type IsAnniversaryExpr struct {
-	StartDate ExpressionNode
-	CheckDate ExpressionNode
-}
-
-func (*IsAnniversaryExpr) node()           {}
-func (*IsAnniversaryExpr) expressionNode() {}
-
-// IsFirstDayOfQuarterExpr checks if date is first day of quarter: isFirstDayOfQuarter(timestamp)
-type IsFirstDayOfQuarterExpr struct {
-	Target ExpressionNode
-}
-
-func (*IsFirstDayOfQuarterExpr) node()           {}
-func (*IsFirstDayOfQuarterExpr) expressionNode() {}
-
 // ----------------------------------------------------------------------------
 // Statement Nodes (for functions, mutations, automations)
 // ----------------------------------------------------------------------------
@@ -1118,7 +1060,7 @@ type FunctionDef struct {
 	// DocComment carries the joined /// doc-comment block attached
 	// immediately above this declaration (memql#2633, capture-only;
 	// description sourcing flips in #2634).
-	DocComment string
+	DocComment  string
 	Attributes  []*Attribute      // @name Python-style attributes
 	Receiver    *FunctionReceiver // Go-style receiver: (Query), (m Mutation), etc.
 	Name        string
@@ -1189,7 +1131,7 @@ type AutomationDef struct {
 	// DocComment carries the joined /// doc-comment block attached
 	// immediately above this declaration (memql#2633, capture-only;
 	// description sourcing flips in #2634).
-	DocComment string
+	DocComment  string
 	Attributes  []*Attribute // @name Python-style attributes
 	Name        string
 	Description string
@@ -1459,7 +1401,7 @@ type ConceptDecl struct {
 	// DocComment carries the joined /// doc-comment block attached
 	// immediately above this declaration (memql#2633, capture-only;
 	// description sourcing flips in #2634).
-	DocComment string
+	DocComment    string
 	Name          string              // concept name (post-colon trailing segment)
 	Attributes    []*Attribute        // concept-level annotations (@description, @scope, @cache, ...)
 	Properties    []*PropertyDecl     // field declarations
@@ -1733,7 +1675,7 @@ type ShapeDecl struct {
 	// DocComment carries the joined /// doc-comment block attached
 	// immediately above this declaration (memql#2633, capture-only;
 	// description sourcing flips in #2634).
-	DocComment string
+	DocComment       string
 	Name             string       // shape name
 	Attributes       []*Attribute // shape-level annotations
 	Paths            []string     // body field paths in source order
@@ -1853,7 +1795,7 @@ type ProviderDecl struct {
 	// DocComment carries the joined /// doc-comment block attached
 	// immediately above this declaration (memql#2633, capture-only;
 	// description sourcing flips in #2634).
-	DocComment string
+	DocComment  string
 	Name        string
 	Description string
 	Type        string // "OpenAI" / "Anthropic" / "OpenAIStream" / etc.
@@ -1903,7 +1845,7 @@ type ToolDecl struct {
 	// DocComment carries the joined /// doc-comment block attached
 	// immediately above this declaration (memql#2633, capture-only;
 	// description sourcing flips in #2634).
-	DocComment string
+	DocComment  string
 	Name        string
 	Description string
 
@@ -1976,7 +1918,7 @@ type PolicyDecl struct {
 	// DocComment carries the joined /// doc-comment block attached
 	// immediately above this declaration (memql#2633, capture-only;
 	// description sourcing flips in #2634).
-	DocComment string
+	DocComment            string
 	Name                  string
 	Description           string
 	Primary               string

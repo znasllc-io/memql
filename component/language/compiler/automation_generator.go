@@ -1389,29 +1389,6 @@ func (c *Compiler) expressionToString(expr parser.ExpressionNode) string {
 		return fmt.Sprintf("daysBetween(%s, %s)",
 			c.expressionToString(e.Date1), c.expressionToString(e.Date2))
 
-	case *parser.SubtractTimestampsExpr:
-		return fmt.Sprintf("subtractTimestamps(%s, %s)",
-			c.expressionToString(e.T1), c.expressionToString(e.T2))
-
-	case *parser.YearExpr:
-		return fmt.Sprintf("year(%s)", c.expressionToString(e.Target))
-
-	case *parser.QuarterExpr:
-		return fmt.Sprintf("quarter(%s)", c.expressionToString(e.Target))
-
-	case *parser.MonthExpr:
-		return fmt.Sprintf("month(%s)", c.expressionToString(e.Target))
-
-	case *parser.DayOfMonthExpr:
-		return fmt.Sprintf("dayOfMonth(%s)", c.expressionToString(e.Target))
-
-	case *parser.IsAnniversaryExpr:
-		return fmt.Sprintf("isAnniversary(%s, %s)",
-			c.expressionToString(e.StartDate), c.expressionToString(e.CheckDate))
-
-	case *parser.IsFirstDayOfQuarterExpr:
-		return fmt.Sprintf("isFirstDayOfQuarter(%s)", c.expressionToString(e.Target))
-
 	case *parser.NotExpr:
 		// The bang `!` shape. (The #2612 NotExpr{EqExpr} != case is gone:
 		// since memql#2654 the arg grammar emits BinaryComparisonExpr for

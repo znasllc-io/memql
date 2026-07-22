@@ -193,29 +193,11 @@ var localExprCases = []conformanceCase{
 		want: 10,
 	},
 	{
-		name: "date_year_literal",
-		expr: `year("2026-07-14T09:30:00Z")`,
-		want: 2026,
-	},
-	{
-		name: "date_month_literal",
-		expr: `month("2026-07-14T09:30:00Z")`,
-		want: 7,
-	},
-	{
-		name: "date_dayOfMonth_literal",
-		expr: `dayOfMonth("2026-07-14T09:30:00Z")`,
-		want: 14,
-	},
-	{
 		// A bare step reference as a date-builtin operand: the step's raw
-		// string result feeds the date parser on both paths.
-		name:  "date_year_of_step_result",
-		setup: seedStep("startedAt", "2026-07-14T09:30:00Z", "success"),
-		expr:  `year(startedAt)`,
-		want:  2026,
-	},
-	{
+		// string result feeds the date parser on both paths. (The calendar
+		// extractors -- year / month / dayOfMonth -- were retired under
+		// 2026.08, #2620 ruling / #2707; addDuration and daysBetween are
+		// the surviving date builtins.)
 		name:  "date_addDuration_over_step_result",
 		setup: seedStep("startedAt", "2026-03-10", "success"),
 		expr:  `addDuration(startedAt, "P1D")`,

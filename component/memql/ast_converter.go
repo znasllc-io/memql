@@ -213,20 +213,6 @@ func (c *ASTConverter) ConvertExpression(expr languageParser.ExpressionNode) (Ex
 		return c.convertDateBuiltin("addDuration", node.Timestamp, node.Duration)
 	case *languageParser.DaysBetweenExpr:
 		return c.convertDateBuiltin("daysBetween", node.Date1, node.Date2)
-	case *languageParser.SubtractTimestampsExpr:
-		return c.convertDateBuiltin("subtractTimestamps", node.T1, node.T2)
-	case *languageParser.YearExpr:
-		return c.convertDateBuiltin("year", node.Target)
-	case *languageParser.QuarterExpr:
-		return c.convertDateBuiltin("quarter", node.Target)
-	case *languageParser.MonthExpr:
-		return c.convertDateBuiltin("month", node.Target)
-	case *languageParser.DayOfMonthExpr:
-		return c.convertDateBuiltin("dayOfMonth", node.Target)
-	case *languageParser.IsAnniversaryExpr:
-		return c.convertDateBuiltin("isAnniversary", node.StartDate, node.CheckDate)
-	case *languageParser.IsFirstDayOfQuarterExpr:
-		return c.convertDateBuiltin("isFirstDayOfQuarter", node.Target)
 	case *languageParser.NilExpr:
 		// `nil` literal in a Logic body (e.g. `return ctx.x != nil ?
 		// ctx.x : default`). Represented as an engine LiteralValueNode

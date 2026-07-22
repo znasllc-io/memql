@@ -14,7 +14,9 @@ import "sort"
 // with no drift guard -- and it had already gone stale against the grammar
 // (it omitted year / quarter / month / dayOfMonth / subtractTimestamps /
 // isAnniversary / isFirstDayOfQuarter / memqlVersion / contains, all of which
-// the parser recognises). This table is the durable fix: Sense is now DRIVEN
+// the parser recognised at the time; all but contains were later
+// hard-retired under 2026.08, #2620 ruling / #2707). This table is the
+// durable fix: Sense is now DRIVEN
 // from dslspec.Builtins (sense/builtins.go projects it), and the drift test
 // (drift_test.go) pins the grammar-recognised subset to parser.CallableBuiltins
 // so the editor can never fall behind the grammar again.
@@ -153,12 +155,6 @@ func builtins() []Builtin {
 		// Expression builtins (parser.CallableBuiltins) -- pinned exactly.
 		// ============================================================
 		{
-			Name:      "memqlVersion",
-			Category:  CategoryBuiltinExpr,
-			Signature: `memqlVersion()`,
-			Doc:       "Return the running memQL engine version string.",
-		},
-		{
 			Name:      "concat",
 			Category:  CategoryBuiltinExpr,
 			Signature: `concat(values ...string)`,
@@ -285,61 +281,6 @@ func builtins() []Builtin {
 				{Name: "start", Doc: "Start timestamp."},
 				{Name: "end", Doc: "End timestamp."},
 			},
-		},
-		{
-			Name:      "subtractTimestamps",
-			Category:  CategoryBuiltinExpr,
-			Signature: `subtractTimestamps(end, start)`,
-			Doc:       "Return the signed duration between two timestamps (end - start) as a duration value.",
-			Params: []BuiltinParam{
-				{Name: "end", Doc: "End timestamp (minuend)."},
-				{Name: "start", Doc: "Start timestamp (subtrahend)."},
-			},
-		},
-		{
-			Name:      "year",
-			Category:  CategoryBuiltinExpr,
-			Signature: `year(timestamp)`,
-			Doc:       "Extract the calendar year (integer) from a timestamp.",
-			Params:    []BuiltinParam{{Name: "timestamp", Doc: "Timestamp to read the year from."}},
-		},
-		{
-			Name:      "quarter",
-			Category:  CategoryBuiltinExpr,
-			Signature: `quarter(timestamp)`,
-			Doc:       "Extract the calendar quarter (1-4) from a timestamp.",
-			Params:    []BuiltinParam{{Name: "timestamp", Doc: "Timestamp to read the quarter from."}},
-		},
-		{
-			Name:      "month",
-			Category:  CategoryBuiltinExpr,
-			Signature: `month(timestamp)`,
-			Doc:       "Extract the calendar month (1-12) from a timestamp.",
-			Params:    []BuiltinParam{{Name: "timestamp", Doc: "Timestamp to read the month from."}},
-		},
-		{
-			Name:      "dayOfMonth",
-			Category:  CategoryBuiltinExpr,
-			Signature: `dayOfMonth(timestamp)`,
-			Doc:       "Extract the day of the month (1-31) from a timestamp.",
-			Params:    []BuiltinParam{{Name: "timestamp", Doc: "Timestamp to read the day-of-month from."}},
-		},
-		{
-			Name:      "isAnniversary",
-			Category:  CategoryBuiltinExpr,
-			Signature: `isAnniversary(timestamp, reference)`,
-			Doc:       "True when timestamp falls on the same month+day as the reference date (a yearly anniversary match).",
-			Params: []BuiltinParam{
-				{Name: "timestamp", Doc: "Timestamp to test."},
-				{Name: "reference", Doc: "Reference date whose month+day defines the anniversary."},
-			},
-		},
-		{
-			Name:      "isFirstDayOfQuarter",
-			Category:  CategoryBuiltinExpr,
-			Signature: `isFirstDayOfQuarter(timestamp)`,
-			Doc:       "True when timestamp is the first day of a calendar quarter (Jan 1 / Apr 1 / Jul 1 / Oct 1).",
-			Params:    []BuiltinParam{{Name: "timestamp", Doc: "Timestamp to test."}},
 		},
 		{
 			Name:      "contains",
