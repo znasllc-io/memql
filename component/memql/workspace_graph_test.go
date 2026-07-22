@@ -253,3 +253,23 @@ concept item {
 		t.Errorf("`use ` should offer namespace demo only, got %v", got)
 	}
 }
+
+// End-to-end over the REAL registry (embedded engine): an in-body `query <name>`
+// invocation offers only query-kind functions (#2733) -- never mutations, logic,
+// or tools. Property test so it does not pin specific engine function names.
+func TestBuildOfflineSense_InvocationKindFilteredEndToEnd(t *testing.T) {
+	svc, err := BuildOfflineSense(nil)
+	if err != nil {
+		t.Fatalf("BuildOfflineSense over embedded tree: %v", err)
+	}
+	src := "logic probe {\n  body {\n    query "
+	items := svc.Complete(src, 3, len("    query ")+1, "x/logic.memql")
+	if len(items) == 0 {
+		t.Fatal("`query ` in a logic body offered nothing; expected the engine's query functions")
+	}
+	for _, it := range items {
+		if it.Detail != "query" {
+			t.Errorf("invocation completion offered a non-query item %q (kind %q); want only query-kind", it.Label, it.Detail)
+		}
+	}
+}
