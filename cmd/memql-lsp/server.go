@@ -66,14 +66,19 @@ func (s *server) setSense(svc *sense.Service) {
 	s.sense = svc
 }
 
-// buildSense builds the offline Sense service over the workspace root. On
-// failure (a workspace construct trips the strict-boot gate) it falls back to a
-// registry-less service so syntax diagnostics still work -- an author iterating
-// on broken DSL must still see their errors.
+// buildSense builds the offline Sense service over the workspace root. On engine
+// failure (a workspace construct trips the strict-boot gate) BuildOfflineSense
+// still returns a service carrying the workspace symbol graph, so import and
+// reference diagnostics keep working on exactly the broken workspace an author
+// is iterating on -- only the registry-backed vocabulary (completion, hover) is
+// absent until boot is clean.
 func (s *server) buildSense() {
 	svc, err := memql.BuildOfflineSense(os.DirFS(s.root))
 	if err != nil {
-		s.log.Warningf("offline Sense build failed for %s (%s); falling back to syntax-only analysis", s.root, err)
+		s.log.Warningf("offline Sense engine build failed for %s (%s); serving workspace-graph reference analysis + syntax diagnostics without the full registry", s.root, err)
+	}
+	if svc == nil {
+		// Defensive: BuildOfflineSense returns a non-nil service even on error.
 		svc = sense.New(nil)
 	}
 	s.setSense(svc)
