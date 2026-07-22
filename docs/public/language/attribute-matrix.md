@@ -350,15 +350,10 @@ fires when the predicate holds.
 automation autoJoinSI { ... }
 ```
 
-#### `@async`
-Run the automation asynchronously when triggered. The caller doesn't
-wait for completion.
-
-```memql
-@async
-@trigger(event="report.requested")
-automation generateReport { ... }
-```
+#### `@async` (removed)
+Not accepted -- dead vocabulary, rejected at load (#2712), and its
+`AutomationDef.Async` field was deleted (#2724). Automations already run
+asynchronously off their event/schedule trigger.
 
 ---
 

@@ -3536,27 +3536,13 @@ func (p *Parser) processAutomationAttributes(d *AutomationDef, attributes []*Att
 			d.Enabled = true
 		case AttrDisabled:
 			d.Enabled = false
-		case AttrDeprecated:
-			d.Deprecated = "deprecated"
-			if v := getAttrString(attr); v != "" {
-				d.Deprecated = v
-			}
-		case AttrVersion:
-			d.Version = getAttrString(attr)
 		case AttrDescription:
 			d.Description = getAttrString(attr)
-		case AttrTimeout:
-			d.Timeout = getAttrString(attr)
-		case AttrRetry:
-			if v := getAttrArgString(attr, "count"); v != "" {
-				d.Retry, _ = strconv.Atoi(v)
-			} else if v := getAttrString(attr); v != "" {
-				d.Retry, _ = strconv.Atoi(v)
-			}
-		case AttrAudit:
-			d.Audit = true
-		case AttrAsync:
-			d.Async = true
+		// @deprecated / @version / @timeout / @retry / @audit / @async folded
+		// into AutomationDef fields the automation runtime never read (audited
+		// in #2712); the #2712 load gate rejects them on automations, so this
+		// fold is now dead. Deleted with those fields (#2724). They remain live
+		// on functions via processFunctionAttributes.
 		case AttrSchedule:
 			if v := getAttrArgString(attr, "cron"); v != "" {
 				d.Schedule = v
