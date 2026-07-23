@@ -52,6 +52,10 @@ func (s *Service) Complete(source string, line, col int, filePath string) []Comp
 		items = s.completeConstructConcept(ctx)
 	case ContextInvocation:
 		items = s.completeInvocation(ctx)
+	case ContextRelationshipTarget:
+		items = s.completeRelationshipTarget(ctx.Prefix)
+	case ContextShapeInclude:
+		items = s.completeShapeInclude(ctx.Prefix)
 	}
 
 	return items
@@ -281,6 +285,42 @@ func (s *Service) completeConceptFilter(prefix string) []CompletionItem {
 				Label: name, Kind: "concept", Detail: "concept",
 				Documentation: doc, InsertText: name,
 				SortPriority: 1,
+			})
+		}
+	}
+	return items
+}
+
+// completeRelationshipTarget offers concept ids for a @relationship target=
+// value. Concepts are bound by their CANONICAL id there (`v1:reference:node`),
+// which is exactly what ConceptNames() returns, so it is offered verbatim.
+func (s *Service) completeRelationshipTarget(prefix string) []CompletionItem {
+	if s.registries == nil {
+		return nil
+	}
+	var items []CompletionItem
+	for _, id := range s.registries.ConceptNames() {
+		if strings.HasPrefix(id, prefix) {
+			items = append(items, CompletionItem{
+				Label: id, Kind: "concept", Detail: "concept",
+				InsertText: id, SortPriority: 1,
+			})
+		}
+	}
+	return items
+}
+
+// completeShapeInclude offers shape names for a shape body's `include <name>`.
+func (s *Service) completeShapeInclude(prefix string) []CompletionItem {
+	if s.registries == nil {
+		return nil
+	}
+	var items []CompletionItem
+	for _, name := range s.registries.ShapeNames() {
+		if strings.HasPrefix(name, prefix) {
+			items = append(items, CompletionItem{
+				Label: name, Kind: "shape", Detail: "shape",
+				InsertText: name, SortPriority: 1,
 			})
 		}
 	}

@@ -11,20 +11,22 @@ import (
 type ContextKind int
 
 const (
-	ContextTopLevel         ContextKind = iota // Outside any definition
-	ContextAnnotation                          // After @
-	ContextAnnotationArgs                      // Inside @trigger(...)
-	ContextFuncBody                            // Inside func body { ... }
-	ContextFuncCallArgs                        // Inside someFunc(...)
-	ContextConceptFilter                       // After concept==
-	ContextFieldAccess                         // After node.payload. or event.payload.
-	ContextReceiver                            // Inside func (...) receiver declaration
-	ContextUseNamespace                        // After "use " -> namespaces
-	ContextConceptDef                          // Inside concept { ... }
-	ContextConstructConcept                    // After a concept-binding construct keyword (mutation/query/seed/shape <Concept>)
-	ContextUseKind                             // After "use <ns>." -> module kinds
-	ContextUseImportList                       // Inside "use <ns>.<kind>.{ ... }" -> importable ids
-	ContextInvocation                          // After an in-body invocation verb (query/mutation/logic <name>)
+	ContextTopLevel           ContextKind = iota // Outside any definition
+	ContextAnnotation                            // After @
+	ContextAnnotationArgs                        // Inside @trigger(...)
+	ContextFuncBody                              // Inside func body { ... }
+	ContextFuncCallArgs                          // Inside someFunc(...)
+	ContextConceptFilter                         // After concept==
+	ContextFieldAccess                           // After node.payload. or event.payload.
+	ContextReceiver                              // Inside func (...) receiver declaration
+	ContextUseNamespace                          // After "use " -> namespaces
+	ContextConceptDef                            // Inside concept { ... }
+	ContextConstructConcept                      // After a concept-binding construct keyword (mutation/query/seed/shape <Concept>)
+	ContextUseKind                               // After "use <ns>." -> module kinds
+	ContextUseImportList                         // Inside "use <ns>.<kind>.{ ... }" -> importable ids
+	ContextInvocation                            // After an in-body invocation verb (query/mutation/logic <name>)
+	ContextRelationshipTarget                    // Inside @relationship(... target="<cursor>
+	ContextShapeInclude                          // Inside a shape body after `include `
 )
 
 // CursorContext describes the syntactic context at a cursor position.
@@ -85,6 +87,14 @@ func analyzeCursorContextInner(source string, line, col int) CursorContext {
 		return CursorContext{Kind: ContextTopLevel}
 	}
 
+	// A @relationship target="..." value is completed from the RAW text before
+	// tokenizing: its unterminated string value makes the lexer return zero
+	// tokens, which would otherwise short-circuit to ContextTopLevel below and
+	// skip every token-based check.
+	if ctx, ok := checkRelationshipTargetContext(textBefore); ok {
+		return ctx
+	}
+
 	// Tokenize the text before the cursor.
 	lexer := parser.NewLexer(textBefore)
 	tokens, _ := lexer.Tokenize()
@@ -132,6 +142,12 @@ func analyzeCursorContextInner(source string, line, col int) CursorContext {
 	// only functions of that kind, not the whole registry. Sits above the body
 	// fallback so the verb's name position is kind-scoped.
 	if ctx, ok := checkInvocationContext(tokens, prefix); ok {
+		return ctx
+	}
+
+	// 4.65 A shape body's `include <name>` names another shape: offer shapes,
+	// not the everything list.
+	if ctx, ok := checkShapeIncludeContext(tokens, prefix); ok {
 		return ctx
 	}
 
@@ -529,6 +545,50 @@ func insideUnmatchedParen(tokens []parser.Token) bool {
 		}
 	}
 	return depth > 0
+}
+
+// relationshipTargetRe matches the cursor sitting in a @relationship annotation's
+// `target="..."` value -- the concept-id position. The value's unterminated
+// string breaks the token-based annotation-args detector (the lexer cannot close
+// the quote), so this matches the raw text instead. `[^)]*` keeps the match
+// inside the still-open annotation call; the capture is the partial id typed so
+// far. It fires ONLY at target= -- a type=/field=/direction= value has no
+// `target="` immediately before the cursor, so those get no concept noise.
+var relationshipTargetRe = regexp.MustCompile(`@relationship\([^)]*\btarget\s*=\s*"([^"]*)$`)
+
+// checkRelationshipTargetContext detects the cursor inside a @relationship
+// target concept value and carries the partial concept id as the prefix.
+func checkRelationshipTargetContext(textBefore string) (CursorContext, bool) {
+	m := relationshipTargetRe.FindStringSubmatch(textBefore)
+	if m == nil {
+		return CursorContext{}, false
+	}
+	return CursorContext{Kind: ContextRelationshipTarget, Prefix: m[1]}, true
+}
+
+// checkShapeIncludeContext detects `include <partial>` inside a shape body, where
+// another shape's name is expected (`shape X { include Y }`). Gated on the
+// enclosing construct being a shape so an identifier `include` elsewhere is not
+// mistaken for the shape-include verb.
+func checkShapeIncludeContext(tokens []parser.Token, prefix string) (CursorContext, bool) {
+	if enc, ok := resolveEnclosingConstruct(tokens); !ok || enc.Keyword != "shape" {
+		return CursorContext{}, false
+	}
+	n := len(tokens)
+	// `include ` -- the last token is the verb, cursor just past it.
+	if prefix == "" {
+		if n >= 1 && tokens[n-1].Type == parser.TokenIdentifier && tokens[n-1].Literal == "include" {
+			return CursorContext{Kind: ContextShapeInclude}, true
+		}
+		return CursorContext{}, false
+	}
+	// `include <partial>` -- the last token is the partial, the one before it the
+	// verb.
+	if n >= 2 && tokens[n-1].Type == parser.TokenIdentifier && tokens[n-1].Literal == prefix &&
+		tokens[n-2].Type == parser.TokenIdentifier && tokens[n-2].Literal == "include" {
+		return CursorContext{Kind: ContextShapeInclude, Prefix: prefix}, true
+	}
+	return CursorContext{}, false
 }
 
 // checkFuncCallContext checks if cursor is inside a function call's arguments.

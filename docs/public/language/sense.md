@@ -179,9 +179,14 @@ legal-next rule:
   the kind it can bind. Completing the name now offers only functions of that
   kind (a `query <name>` position lists queries, never mutations, logic, or
   tools), instead of dumping the whole registry. The verb requires body depth,
-  so the top-level `query <Concept> <name>` declaration is unaffected. (Two more
-  reference positions -- `@relationship` target and shape `include` -- are
-  tracked as a follow-up.)
+  so the top-level `query <Concept> <name>` declaration is unaffected.
+- **Reference positions that name a construct (#2740).** A concept's
+  `@relationship(... target="<cursor>")` offers concept ids (by canonical
+  `v1:ns:leaf` form -- the form the target binds), and only at the `target=`
+  value, never at `type=` / `field=` / `direction=`. Because the target's
+  unterminated string zeroes the lexer's tokens, this position is matched from
+  the raw text before tokenizing. A shape body's `include <cursor>` offers shape
+  names, scoped to a shape enclosing construct.
 
 ---
 
