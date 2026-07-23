@@ -93,6 +93,25 @@ npm run compile
 # binary, and open a folder of .memql files.
 ```
 
+## Install / update locally
+
+The language intelligence lives in the bundled `memql-lsp` binary, so refreshing
+your editor after a server or extension change is a build + reinstall + reload
+loop. One command does the first two:
+
+```bash
+make vscode-install                  # build a fresh .vsix and (re)install it into VS Code
+make vscode-install EDITOR_CMD=cursor # ... into Cursor / code-insiders / codium
+```
+
+Then run **Developer: Reload Window** so the new server process spawns.
+`scripts/vscode/install.sh` wraps `package.sh` (the build) + `code
+--install-extension --force` (the reinstall, which overwrites the currently
+installed build); `--no-build` reinstalls the last-built `.vsix`, `--help` lists
+the flags. Re-run it whenever you change the server or extension -- there is no
+marketplace auto-update for a locally-built extension, so a stale editor is
+always a locally-installed VSIX, never a repo artifact.
+
 ## Packaging
 
 ```bash
