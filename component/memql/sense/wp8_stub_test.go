@@ -8,6 +8,7 @@ type stubRegistry struct {
 	functions map[string]*FunctionInfo
 	concepts  map[string]*ConceptInfo
 	providers []string
+	shapes    []string
 }
 
 func (r *stubRegistry) FunctionNames() []string {
@@ -32,13 +33,13 @@ func (r *stubRegistry) ConceptGet(name string) (*ConceptInfo, bool) {
 	c, ok := r.concepts[name]
 	return c, ok
 }
-func (r *stubRegistry) SpecNames() []string                     { return nil }
-func (r *stubRegistry) ToolNames() []string                     { return nil }
-func (r *stubRegistry) ToolGet(string) (*ToolInfo, bool)        { return nil, false }
-func (r *stubRegistry) PromptNames() []string                   { return nil }
-func (r *stubRegistry) PromptGet(string) (*PromptInfo, bool)    { return nil, false }
-func (r *stubRegistry) ProviderNames() []string                 { return r.providers }
+func (r *stubRegistry) SpecNames() []string                      { return nil }
+func (r *stubRegistry) ToolNames() []string                      { return nil }
+func (r *stubRegistry) ToolGet(string) (*ToolInfo, bool)         { return nil, false }
+func (r *stubRegistry) PromptNames() []string                    { return nil }
+func (r *stubRegistry) PromptGet(string) (*PromptInfo, bool)     { return nil, false }
+func (r *stubRegistry) ProviderNames() []string                  { return r.providers }
 func (r *stubRegistry) ProviderGet(string) (*ProviderInfo, bool) { return nil, false }
-func (r *stubRegistry) ShapeNames() []string                    { return nil }
-func (r *stubRegistry) ShapeGet(string) (*ShapeInfo, bool)      { return nil, false }
-func (r *stubRegistry) IntegrationCapabilities() []string       { return nil }
+func (r *stubRegistry) ShapeNames() []string                     { return r.shapes }
+func (r *stubRegistry) ShapeGet(string) (*ShapeInfo, bool)       { return nil, false }
+func (r *stubRegistry) IntegrationCapabilities() []string        { return nil }

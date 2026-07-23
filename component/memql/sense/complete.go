@@ -52,6 +52,10 @@ func (s *Service) Complete(source string, line, col int, filePath string) []Comp
 		items = s.completeConstructConcept(ctx)
 	case ContextInvocation:
 		items = s.completeInvocation(ctx)
+	case ContextRelationshipTarget:
+		items = s.completeRelationshipTarget(ctx)
+	case ContextShapeInclude:
+		items = s.completeShapeInclude(ctx.Prefix)
 	}
 
 	return items
@@ -281,6 +285,56 @@ func (s *Service) completeConceptFilter(prefix string) []CompletionItem {
 				Label: name, Kind: "concept", Detail: "concept",
 				Documentation: doc, InsertText: name,
 				SortPriority: 1,
+			})
+		}
+	}
+	return items
+}
+
+// completeRelationshipTarget offers concepts for a @relationship target= value,
+// in the form the position uses: the common BARE `target=user` binds the SHORT
+// name (ctx.ConstructKey == "short"), while the quoted `target="v1:ns:leaf"`
+// binds the CANONICAL id. ConceptNames() returns canonical ids; the short form
+// projects each to its leaf and dedupes.
+func (s *Service) completeRelationshipTarget(ctx CursorContext) []CompletionItem {
+	if s.registries == nil {
+		return nil
+	}
+	short := ctx.ConstructKey == "short"
+	seen := make(map[string]bool)
+	var items []CompletionItem
+	for _, canonical := range s.registries.ConceptNames() {
+		value := canonical
+		detail := "concept"
+		if short {
+			if _, leaf := splitConceptID(canonical); leaf != "" {
+				value = leaf
+				detail = canonical // disambiguate duplicate short names
+			}
+		}
+		if seen[value] || !strings.HasPrefix(value, ctx.Prefix) {
+			continue
+		}
+		seen[value] = true
+		items = append(items, CompletionItem{
+			Label: value, Kind: "concept", Detail: detail,
+			InsertText: value, SortPriority: 1,
+		})
+	}
+	return items
+}
+
+// completeShapeInclude offers shape names for a shape body's `include <name>`.
+func (s *Service) completeShapeInclude(prefix string) []CompletionItem {
+	if s.registries == nil {
+		return nil
+	}
+	var items []CompletionItem
+	for _, name := range s.registries.ShapeNames() {
+		if strings.HasPrefix(name, prefix) {
+			items = append(items, CompletionItem{
+				Label: name, Kind: "shape", Detail: "shape",
+				InsertText: name, SortPriority: 1,
 			})
 		}
 	}
