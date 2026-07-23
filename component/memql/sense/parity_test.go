@@ -45,7 +45,17 @@ func TestParity_ConstructClassificationCoversSoT(t *testing.T) {
 // invocationKeywordsForConstruct offers the CALL verbs (query/mutation/logic)
 // for it. If one table is updated without the other, this fails.
 func TestParity_BehavioralMatchesInvocationKeywords(t *testing.T) {
-	callVerb := map[string]bool{"query": true, "mutation": true, "logic": true}
+	// "Call verbs" are the parser's invocation-kind keywords (query / mutation /
+	// logic / capability / ...), as opposed to a mutate body's WRITE verbs
+	// (insert / update), which are not invocation keywords. Deriving the set from
+	// the parser SoT -- rather than hardcoding {query,mutation,logic} -- means a
+	// behavioral construct that legitimately invokes a DIFFERENT verb (e.g. an
+	// action's `capability`, once its completion is fixed) stays consistent
+	// instead of tripping a misleading "tables disagree" failure.
+	callVerb := map[string]bool{}
+	for _, k := range parser.InvocationKindKeywords() {
+		callVerb[k] = true
+	}
 	for _, c := range dslSpec.Constructs {
 		kw := c.Keyword
 		offersCallVerbs := false
@@ -58,6 +68,27 @@ func TestParity_BehavioralMatchesInvocationKeywords(t *testing.T) {
 		if offersCallVerbs != behavioralConstruct[kw] {
 			t.Errorf("construct %q: behavioralConstruct=%v but invocationKeywordsForConstruct offers-call-verbs=%v -- "+
 				"the two hand-maintained tables (context.go / complete.go) disagree", kw, behavioralConstruct[kw], offersCallVerbs)
+		}
+	}
+}
+
+// TestParity_ClassificationKeysAreRealConstructs is the reverse check: every key
+// in the two classification sets must be a real dslspec construct, so a typo'd
+// key or one left stale after a construct is removed from the grammar is caught
+// rather than lingering silently.
+func TestParity_ClassificationKeysAreRealConstructs(t *testing.T) {
+	real := map[string]bool{}
+	for _, c := range dslSpec.Constructs {
+		real[c.Keyword] = true
+	}
+	for name, set := range map[string]map[string]bool{
+		"behavioralConstruct":    behavioralConstruct,
+		"nonBehavioralConstruct": nonBehavioralConstruct,
+	} {
+		for kw := range set {
+			if !real[kw] {
+				t.Errorf("%s (context.go) contains %q, which is not a dslspec construct -- a stale or typo'd key; remove it or fix the spelling", name, kw)
+			}
 		}
 	}
 }

@@ -352,8 +352,11 @@ on construct keyword or invocation verb -- `behavioralConstruct` /
   per `parser.InvocationKindKeywords()`.
 
 **This is how "keep MemQL Sense updated whenever the syntax or rules
-change" is enforced:** changing the DSL's constructs or invocation
-keywords fails this gate in CI until Sense is brought back in sync.
+change" is enforced:** adding a construct to the grammar, removing or
+renaming an invocation keyword, or letting the two invocation tables
+disagree fails this gate in CI until Sense is brought back in sync. (It
+does not yet force Sense to handle a NEW invocation verb added to an
+existing construct -- the verb pin is a one-directional subset check.)
 Follows the #2628 detected/undetected-label conformance pattern.
 
 ---
