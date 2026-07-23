@@ -56,8 +56,16 @@
 // Bind a concept; read its payload props bare. The engine flattens the
 // concept (no `payload.` prefix) and classifies the spec as a row-spec
 // (compiles to a SQL WHERE fragment, pushed down to the database).
+//
+// Every binding below resolves through a file-top `use` import. The parser
+// accepts `use` only in the preamble, before the first declaration, so all
+// four imports the examples bind (participant concept, actorEnvelope @actor
+// shape, participantRow @row shape, agent concept) live here together:
 
 use cognition.concepts.{ participant }
+use common.shapes.{ actorEnvelope }
+use cognition.shapes.{ participantRow }
+use agents.concepts.{ agent }
 
 @description("Matches participants with human participantType")
 spec participant isHumanParticipant {
@@ -80,8 +88,8 @@ spec participant isAIParticipant {
 //
 //     @actor
 //     shape actorEnvelope { actor.userId; actor.role; actor.isClusterOwner }
-
-use common.shapes.{ actorEnvelope }
+//
+// (the `actorEnvelope` shape is imported in the file-top preamble above)
 
 @description("Caller must hold an admin or owner role.")
 spec actorEnvelope requiresAdmin {
@@ -103,8 +111,8 @@ spec actorEnvelope isClusterOwner {
 //
 //     @row
 //     shape participant participantRow { participantType; row.createdBy }
-
-use cognition.shapes.{ participantRow }
+//
+// (the `participantRow` shape is imported in the file-top preamble above)
 
 @description("Row authored by a specific seed identity.")
 spec participantRow isSeedParticipant {
@@ -174,8 +182,8 @@ trait statusIsActive {
 // Set operators:        in (X, Y, Z)
 // Null check:           field == null  /  field != null
 // Parentheses:          (expr1) || (expr2 && expr3)
-
-use agents.concepts.{ agent }
+//
+// (the `agent` concept is imported in the file-top preamble above)
 
 @description("Rich predicate showing the operator surface (concept-bound).")
 spec agent richPredicate {

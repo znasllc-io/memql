@@ -47,8 +47,16 @@
 //                          into another construct (an action is atomic).
 //
 // Compliant example -- the deployment bundle's clone primitive:
+//
+// Every capability verb an action calls is imported file-top: the parser
+// accepts `use` only in the preamble, before the first declaration, so all
+// three imports for the examples below (shell.script, fs.readFile,
+// integration.github.tagRelease) live here together rather than beside each
+// example.
 
 use capabilities.shell.{ script }
+use capabilities.fs.{ readFile }
+use capabilities.integration.github.{ tagRelease }
 
 @description("Check out a git repository at a specific ref on the deploy runner, so a build runs against a pinned version.")
 action cloneRepoAtVersion {
@@ -77,9 +85,8 @@ action cloneRepoAtVersion {
 //
 // The capability namespace selects the backend; the shape is identical.
 //
-// 2a. A filesystem read (the capability's @sideEffect class = read):
-
-use capabilities.fs.{ readFile }
+// 2a. A filesystem read (the capability's @sideEffect class = read). Its
+//     `readFile` verb is imported in the file-top preamble above:
 
 @description("Read a deployment manifest off the surface so a later step can inspect it.")
 action readManifest {
@@ -94,9 +101,8 @@ action readManifest {
 //     capability resolves to integration.* instead of shell.*/fs.* (ADR §3).
 //     A read-only integration stays a builtin callable from queries/logic. The
 //     authoritative side-effect class lives on the CAPABILITY declaration
-//     (dsl/capabilities/capabilities.memql), never on the action.
-
-use capabilities.integration.github.{ tagRelease }
+//     (dsl/capabilities/capabilities.memql), never on the action. Its
+//     `tagRelease` verb is imported in the file-top preamble above.
 
 @description("Cut a git tag + release on GitHub for the version that just deployed.")
 action tagReleaseExample {

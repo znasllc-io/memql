@@ -92,9 +92,10 @@ func TestDiagnose_EmbeddedTree_NoErrors(t *testing.T) {
 			return nil
 		}
 		rel, _ := filepath.Rel(root, path)
-		// dsl/_reference/ holds authoring skeletons (placeholder syntax) that
-		// the engine never loads, so they are outside the "embedded tree that
-		// must diagnose clean" contract.
+		// dsl/_reference/ holds authoring skeletons the engine never loads, so
+		// they are outside THIS "embedded tree" contract -- but they must still
+		// diagnose clean (they are the syntax source-of-truth), gated separately
+		// by TestDiagnose_ReferenceFiles_NoErrors (memql#2748).
 		if strings.HasPrefix(rel, "_reference"+string(os.PathSeparator)) {
 			return nil
 		}
