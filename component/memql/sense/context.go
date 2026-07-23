@@ -503,6 +503,18 @@ var behavioralConstruct = map[string]bool{
 	"logic": true, "automation": true, "action": true,
 }
 
+// nonBehavioralConstruct is the explicit complement of behavioralConstruct: the
+// constructs whose body does NOT invoke others (schema fields, declarative
+// projections, write clauses). Together the two sets must partition every
+// dslspec construct -- the #2734 parity test fails on a construct in neither, so
+// a construct added to the grammar cannot silently inherit a default
+// classification. When adding a construct, put it in exactly one of these.
+var nonBehavioralConstruct = map[string]bool{
+	"concept": true, "query": true, "mutate": true, "capability": true,
+	"spec": true, "trait": true, "shape": true, "tool": true, "prompt": true,
+	"provider": true, "builtin": true, "policy": true, "seed": true, "use": true,
+}
+
 // insideUnmatchedParen reports whether the cursor sits inside an open `(` -- a
 // call-argument position, where a token that happens to be query/mutation/logic
 // is an argument, not an invocation verb.
