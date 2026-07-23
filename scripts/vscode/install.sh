@@ -105,7 +105,7 @@ function build_vsix() {
     [[ -n "$GOOS_TARGET" ]] && args+=("--goos=$GOOS_TARGET")
     [[ -n "$GOARCH_TARGET" ]] && args+=("--goarch=$GOARCH_TARGET")
     [[ -n "$VSIX" ]] && args+=("--out=$VSIX")
-    echo "INFO: building the extension (this cross-builds memql-lsp)"
+    echo "INFO: building the extension (bundles memql-lsp for this host by default)"
     # ${args[@]+...} guards an empty array under `set -u` on bash 3.2 (macOS).
     bash "$PACKAGE_SH" ${args[@]+"${args[@]}"}
 }
