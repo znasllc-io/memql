@@ -58,7 +58,11 @@ function parse_arguments() {
             --editor-cmd=*) EDITOR_CMD="${1#*=}"; shift ;;
             --goos=*) GOOS_TARGET="${1#*=}"; shift ;;
             --goarch=*) GOARCH_TARGET="${1#*=}"; shift ;;
-            --vsix=*) VSIX="${1#*=}"; shift ;;
+            # Normalize a relative --vsix to absolute: package.sh writes --out
+            # relative to editors/vscode/ (it cd's there), but install runs from
+            # the invoking CWD, so a relative path would resolve differently in
+            # the two steps.
+            --vsix=*) VSIX="${1#*=}"; [[ -n "$VSIX" && "$VSIX" != /* ]] && VSIX="$PWD/$VSIX"; shift ;;
             --no-build) NO_BUILD=true; shift ;;
             --help) show_help; exit 0 ;;
             *) echo "ERROR: unknown option: $1"; show_help; exit 1 ;;

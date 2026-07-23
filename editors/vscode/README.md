@@ -18,7 +18,7 @@ Cockpit uses). Works fully offline against local files -- no cluster, no auth.
 
 ## Install / update locally
 
-One command builds the extension (cross-building a fresh `memql-lsp`) and
+One command builds the extension (building a fresh `memql-lsp`) and
 (re)installs it into VS Code:
 
 ```bash
