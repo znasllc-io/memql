@@ -181,12 +181,15 @@ legal-next rule:
   tools), instead of dumping the whole registry. The verb requires body depth,
   so the top-level `query <Concept> <name>` declaration is unaffected.
 - **Reference positions that name a construct (#2740).** A concept's
-  `@relationship(... target="<cursor>")` offers concept ids (by canonical
-  `v1:ns:leaf` form -- the form the target binds), and only at the `target=`
-  value, never at `type=` / `field=` / `direction=`. Because the target's
-  unterminated string zeroes the lexer's tokens, this position is matched from
-  the raw text before tokenizing. A shape body's `include <cursor>` offers shape
-  names, scoped to a shape enclosing construct.
+  `@relationship(... target=<cursor>)` offers concepts, in the form the slot
+  uses: the common bare `target=user` binds the SHORT name, and the quoted
+  `target="v1:ns:leaf"` binds the canonical id -- and only at the `target=`
+  value, never at `type=` / `field=` / `direction=`. Both are matched from the
+  raw text before tokenizing (the quoted form's unterminated string zeroes the
+  lexer's tokens), confined to a single well-formed annotation call so an
+  unclosed `@relationship(` elsewhere cannot poison a later `target=`. A shape
+  body's `include <cursor>` offers shape names, scoped to a shape enclosing
+  construct.
 
 ---
 

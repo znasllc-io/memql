@@ -55,6 +55,41 @@ func TestRelationshipTarget_NoConceptNoiseAtOtherArgs(t *testing.T) {
 	}
 }
 
+func TestRelationshipTarget_BareOffersShortNames(t *testing.T) {
+	// The common form: `target=user` (bare) binds the SHORT concept name.
+	got := completeAtEnd(New(refShapeRegistry()), "concept x {\n  @relationship(type=\"contains\", target=")
+	for _, want := range []string{"objectExample", "node", "order"} {
+		if !got[want] {
+			t.Errorf("bare target= should offer short name %q, got %v", want, got)
+		}
+	}
+	// Not the canonical form here.
+	if got["v1:reference:node"] {
+		t.Errorf("bare target= must offer short names, not canonical ids: %v", got)
+	}
+}
+
+func TestRelationshipTarget_BarePrefixFilter(t *testing.T) {
+	got := completeAtEnd(New(refShapeRegistry()), "concept x {\n  @relationship(target=no")
+	if !got["node"] || got["order"] || got["objectExample"] {
+		t.Errorf("bare `target=no` should offer only node, got %v", got)
+	}
+}
+
+func TestRelationshipTarget_NotPoisonedAcrossLines(t *testing.T) {
+	// An unclosed @relationship( upstream, or one inside a comment, must NOT make
+	// a later target= elsewhere offer concepts (the regex is single-line).
+	for _, src := range []string{
+		"concept x {\n  @relationship(type=\"x\"\n  @foo(target=\"bar",
+		"// @relationship(type=\nconcept y {\n  @index(target=\"z",
+	} {
+		got := completeAtEnd(New(refShapeRegistry()), src)
+		if got["v1:reference:node"] || got["node"] {
+			t.Errorf("relationship-target poisoned a later position: %q -> %v", src, got)
+		}
+	}
+}
+
 func TestShapeInclude_OffersShapes(t *testing.T) {
 	got := completeAtEnd(New(refShapeRegistry()), "shape participant p {\n  include ")
 	for _, want := range []string{"participantFull", "actorEnvelope", "roleFull"} {

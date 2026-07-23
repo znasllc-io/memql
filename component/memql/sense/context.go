@@ -547,23 +547,32 @@ func insideUnmatchedParen(tokens []parser.Token) bool {
 	return depth > 0
 }
 
-// relationshipTargetRe matches the cursor sitting in a @relationship annotation's
-// `target="..."` value -- the concept-id position. The value's unterminated
-// string breaks the token-based annotation-args detector (the lexer cannot close
-// the quote), so this matches the raw text instead. `[^)]*` keeps the match
-// inside the still-open annotation call; the capture is the partial id typed so
-// far. It fires ONLY at target= -- a type=/field=/direction= value has no
-// `target="` immediately before the cursor, so those get no concept noise.
-var relationshipTargetRe = regexp.MustCompile(`@relationship\([^)]*\btarget\s*=\s*"([^"]*)$`)
+// A @relationship target names a concept, in one of two forms: the common BARE
+// short name (`target=user`) or the canonical id in quotes
+// (`target="v1:ns:leaf"`). Both are matched from the raw text before tokenizing:
+// the quoted form's unterminated string makes the lexer return zero tokens (which
+// would short-circuit the classifier), and matching the bare form here keeps the
+// two paths together. `[^)(\n]*` confines the match to a SINGLE well-formed
+// annotation call on one line -- no newline and no stray `(` -- so an unclosed
+// `@relationship(` upstream (a mid-edit, or one inside a comment/string) cannot
+// poison a later `target=` elsewhere in the file. Each fires ONLY at target=; a
+// type=/field=/direction= value has no `target=` immediately before the cursor.
+var (
+	relationshipTargetQuotedRe = regexp.MustCompile(`@relationship\([^)(\n]*\btarget\s*=\s*"([^"\n]*)$`)
+	relationshipTargetBareRe   = regexp.MustCompile(`@relationship\([^)(\n]*\btarget\s*=\s*([A-Za-z_][A-Za-z0-9_]*)?$`)
+)
 
-// checkRelationshipTargetContext detects the cursor inside a @relationship
-// target concept value and carries the partial concept id as the prefix.
+// checkRelationshipTargetContext detects the cursor at a @relationship target
+// value and carries the partial name as the prefix. ConstructKey records the
+// form: "canonical" (quoted -> canonical ids) or "short" (bare -> short names).
 func checkRelationshipTargetContext(textBefore string) (CursorContext, bool) {
-	m := relationshipTargetRe.FindStringSubmatch(textBefore)
-	if m == nil {
-		return CursorContext{}, false
+	if m := relationshipTargetQuotedRe.FindStringSubmatch(textBefore); m != nil {
+		return CursorContext{Kind: ContextRelationshipTarget, Prefix: m[1], ConstructKey: "canonical"}, true
 	}
-	return CursorContext{Kind: ContextRelationshipTarget, Prefix: m[1]}, true
+	if m := relationshipTargetBareRe.FindStringSubmatch(textBefore); m != nil {
+		return CursorContext{Kind: ContextRelationshipTarget, Prefix: m[1], ConstructKey: "short"}, true
+	}
+	return CursorContext{}, false
 }
 
 // checkShapeIncludeContext detects `include <partial>` inside a shape body, where
@@ -571,7 +580,9 @@ func checkRelationshipTargetContext(textBefore string) (CursorContext, bool) {
 // enclosing construct being a shape so an identifier `include` elsewhere is not
 // mistaken for the shape-include verb.
 func checkShapeIncludeContext(tokens []parser.Token, prefix string) (CursorContext, bool) {
-	if enc, ok := resolveEnclosingConstruct(tokens); !ok || enc.Keyword != "shape" {
+	// Must be directly in the shape body (a shape declares no nested blocks), not
+	// inside some `{ }` a malformed shape might contain.
+	if enc, ok := resolveEnclosingConstruct(tokens); !ok || enc.Keyword != "shape" || len(enc.Blocks) > 0 {
 		return CursorContext{}, false
 	}
 	n := len(tokens)

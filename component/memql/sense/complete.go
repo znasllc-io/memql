@@ -53,7 +53,7 @@ func (s *Service) Complete(source string, line, col int, filePath string) []Comp
 	case ContextInvocation:
 		items = s.completeInvocation(ctx)
 	case ContextRelationshipTarget:
-		items = s.completeRelationshipTarget(ctx.Prefix)
+		items = s.completeRelationshipTarget(ctx)
 	case ContextShapeInclude:
 		items = s.completeShapeInclude(ctx.Prefix)
 	}
@@ -291,21 +291,35 @@ func (s *Service) completeConceptFilter(prefix string) []CompletionItem {
 	return items
 }
 
-// completeRelationshipTarget offers concept ids for a @relationship target=
-// value. Concepts are bound by their CANONICAL id there (`v1:reference:node`),
-// which is exactly what ConceptNames() returns, so it is offered verbatim.
-func (s *Service) completeRelationshipTarget(prefix string) []CompletionItem {
+// completeRelationshipTarget offers concepts for a @relationship target= value,
+// in the form the position uses: the common BARE `target=user` binds the SHORT
+// name (ctx.ConstructKey == "short"), while the quoted `target="v1:ns:leaf"`
+// binds the CANONICAL id. ConceptNames() returns canonical ids; the short form
+// projects each to its leaf and dedupes.
+func (s *Service) completeRelationshipTarget(ctx CursorContext) []CompletionItem {
 	if s.registries == nil {
 		return nil
 	}
+	short := ctx.ConstructKey == "short"
+	seen := make(map[string]bool)
 	var items []CompletionItem
-	for _, id := range s.registries.ConceptNames() {
-		if strings.HasPrefix(id, prefix) {
-			items = append(items, CompletionItem{
-				Label: id, Kind: "concept", Detail: "concept",
-				InsertText: id, SortPriority: 1,
-			})
+	for _, canonical := range s.registries.ConceptNames() {
+		value := canonical
+		detail := "concept"
+		if short {
+			if _, leaf := splitConceptID(canonical); leaf != "" {
+				value = leaf
+				detail = canonical // disambiguate duplicate short names
+			}
 		}
+		if seen[value] || !strings.HasPrefix(value, ctx.Prefix) {
+			continue
+		}
+		seen[value] = true
+		items = append(items, CompletionItem{
+			Label: value, Kind: "concept", Detail: detail,
+			InsertText: value, SortPriority: 1,
+		})
 	}
 	return items
 }
