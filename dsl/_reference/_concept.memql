@@ -275,8 +275,11 @@ concept fieldAnnotations {
 // =============================================================================
 //
 //   A `@variant(discriminator="kind")` field declares a value whose shape
-//   depends on the value of a sibling field. Inside the variant body the
-//   author writes each branch keyed by the discriminator value.
+//   depends on the value of a sibling field. Like any field it carries a
+//   type -- `object!` (or `object` when optional) -- BEFORE the @variant
+//   annotation; the variant body then refines that object's shape per
+//   discriminator value. Inside the variant body the author writes each
+//   branch keyed by the discriminator value.
 //
 //   Engine validation: payloads carrying this field must match exactly one
 //   declared branch based on the discriminator's value.
@@ -286,7 +289,7 @@ concept fieldAnnotations {
 concept variantExample {
   kind  enum("text", "image", "embed")!
 
-  body  @variant(discriminator="kind") {
+  body  object!  @variant(discriminator="kind") {
     text {
       content   string!
       wordCount int    @default("0")
