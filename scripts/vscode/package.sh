@@ -6,8 +6,16 @@ set -euo pipefail
 #          VS Code extension, compile the extension, and produce a .vsix.
 #
 # The offline LSP embeds the engine, so the binary is bundled per platform and
-# the extension resolves it at bin/<GOOS>-<GOARCH>/memql-lsp. darwin-arm64 is
-# the standardized dev target and is built by default.
+# the extension resolves it at bin/<node-platform>-<node-arch>/memql-lsp -- where
+# node-platform / node-arch are Node's `process.platform` / `process.arch` values
+# (darwin|linux|win32 / x64|arm64|ia32), NOT Go's GOOS/GOARCH (darwin|linux|windows
+# / amd64|arm64|386). We BUILD with Go but STAGE under the Node-named directory the
+# extension actually looks in, so producer and consumer always agree. (They only
+# happen to coincide for arm64-on-darwin, which is why a Mac-only default silently
+# broke every amd64 / windows host.)
+#
+# Defaults to the HOST platform (via `go env`), so `make vscode-install` bundles a
+# binary that runs on THIS machine. Cross-build with --goos / --goarch.
 
 #=============================================================================
 # CONFIGURATION
@@ -15,8 +23,11 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 EXT_DIR="$REPO_ROOT/editors/vscode"
-DEFAULT_GOOS="darwin"
-DEFAULT_GOARCH="arm64"
+# Default to the host platform. Fall back to the standardized dev target
+# (darwin/arm64) if `go` is unavailable -- check_prerequisites reports that
+# clearly a moment later.
+DEFAULT_GOOS="$(go env GOHOSTOS 2>/dev/null || echo darwin)"
+DEFAULT_GOARCH="$(go env GOHOSTARCH 2>/dev/null || echo arm64)"
 VSCE_VERSION="@vscode/vsce@latest"
 
 #=============================================================================
@@ -28,12 +39,13 @@ function show_help() {
 Usage: $0 [--goos=OS] [--goarch=ARCH] [--out=FILE]
 
 Options:
-    --goos=OS      Target OS for the bundled binary (default: $DEFAULT_GOOS)
-    --goarch=ARCH  Target arch (default: $DEFAULT_GOARCH)
+    --goos=OS      Target OS for the bundled binary (default: host -- $DEFAULT_GOOS)
+    --goarch=ARCH  Target arch (default: host -- $DEFAULT_GOARCH)
     --out=FILE     VSIX output path (default: editors/vscode/<name>-<version>.vsix)
     --help         Show this help
 
-Produces a .vsix bundling bin/<goos>-<goarch>/memql-lsp.
+Produces a .vsix bundling the memql-lsp binary under the Node-named directory
+(bin/<node-platform>-<node-arch>/) the extension resolves at runtime.
 EOF
 }
 
@@ -57,11 +69,32 @@ function check_prerequisites() {
     command -v npm >/dev/null || { echo "ERROR: npm is not installed"; exit 1; }
 }
 
+# node_platform maps a Go GOOS to Node's process.platform naming (what the
+# extension's resolveServerPath uses to build the bundle directory name).
+function node_platform() {
+    case "$1" in
+        windows) echo "win32" ;;
+        *)       echo "$1"    ;; # darwin, linux pass through unchanged
+    esac
+}
+
+# node_arch maps a Go GOARCH to Node's process.arch naming.
+function node_arch() {
+    case "$1" in
+        amd64) echo "x64"  ;;
+        386)   echo "ia32" ;;
+        *)     echo "$1"   ;; # arm64 passes through unchanged
+    esac
+}
+
 function build_binary() {
-    local bindir="$EXT_DIR/bin/${GOOS_TARGET}-${GOARCH_TARGET}"
-    local binname="memql-lsp"
+    local nodeos nodearch bindir binname
+    nodeos="$(node_platform "$GOOS_TARGET")"
+    nodearch="$(node_arch "$GOARCH_TARGET")"
+    bindir="$EXT_DIR/bin/${nodeos}-${nodearch}"
+    binname="memql-lsp"
     [[ "$GOOS_TARGET" == "windows" ]] && binname="memql-lsp.exe"
-    echo "INFO: building memql-lsp for ${GOOS_TARGET}/${GOARCH_TARGET}"
+    echo "INFO: building memql-lsp (GOOS=${GOOS_TARGET} GOARCH=${GOARCH_TARGET}) -> bin/${nodeos}-${nodearch}/${binname}"
     mkdir -p "$bindir"
     ( cd "$REPO_ROOT" && GOOS="$GOOS_TARGET" GOARCH="$GOARCH_TARGET" CGO_ENABLED=0 \
         go build -o "$bindir/$binname" ./cmd/memql-lsp )

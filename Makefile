@@ -21,6 +21,8 @@ VERSION     := $(shell cat VERSION 2>/dev/null || echo "dev")
 # Build targets
 # ---------------------------------------------------------------------------
 
+##@ Build
+##> Staging/prod images are built on the GitHub build server, not here (see CLAUDE.md).
 .PHONY: all build build-all bff voice cognition agent planner workbench mcp identity identity-templ identity-tailwind identity-assets identity-build healthcheck
 
 ## Build all binaries (standalone + healthcheck)
@@ -37,8 +39,9 @@ build-all: build bff voice cognition agent planner identity healthcheck
 bff:
 	$(GO) build $(GOFLAGS) -tags bff -o $(BIN_DIR)/memql-bff .
 
-## Build voice node binary. The Go voice-agent's LiveKit server-sdk-go +
-## media-sdk pull a CGO libopus/opusfile/soxr dependency (see docs/voice/
+## Build voice node binary (CGO; needs libopus-dev / libopusfile-dev / libsoxr-dev).
+## The Go voice-agent's LiveKit server-sdk-go + media-sdk pull a CGO
+## libopus/opusfile/soxr dependency (see docs/voice/
 ## 451-livekit-go-room-participation.md, Caveat 1), so this target overrides
 ## the repo-wide CGO_ENABLED=0 default. Requires libopus-dev / libopusfile-dev
 ## / libsoxr-dev (apt) or opus-dev / opusfile-dev / soxr-dev (apk) installed.
@@ -65,6 +68,8 @@ workbench:
 mcp:
 	$(GO) build $(GOFLAGS) -tags mcp -o $(BIN_DIR)/memql-mcp .
 
+##@ VS Code / LSP
+##> `make vscode-install` builds+installs the extension for THIS host; then reload the editor window.
 .PHONY: memql-lsp vscode-grammar vscode-package vscode-install
 ## Build the memql-lsp binary (offline VS Code language server)
 memql-lsp:
@@ -74,7 +79,7 @@ memql-lsp:
 vscode-grammar: memql-lsp
 	$(BIN_DIR)/memql-lsp gen-grammar editors/vscode/syntaxes/memql.tmLanguage.json
 
-## Package the VS Code extension into a .vsix (bundles the darwin-arm64 binary)
+## Package the VS Code extension into a .vsix (bundles the host-platform binary by default)
 vscode-package:
 	bash scripts/vscode/package.sh
 
@@ -84,6 +89,7 @@ vscode-package:
 vscode-install:
 	bash scripts/vscode/install.sh $(if $(EDITOR_CMD),--editor-cmd=$(EDITOR_CMD),)
 
+##@ Identity (auth web app)
 ## Generate Go from .templ files for the identity web app.
 ## Uses `go run` so contributors don't need templ on their PATH.
 identity-templ:
@@ -121,6 +127,7 @@ healthcheck:
 # have both been retired.
 # ---------------------------------------------------------------------------
 
+##@ Tokens & keys
 .PHONY: voice-agent-token
 
 ## Mint a class="voice_agent" JWT for the running local k3d cluster's
@@ -164,6 +171,7 @@ identity-signing-key:
 # Run targets
 # ---------------------------------------------------------------------------
 
+##@ Cluster tests & DB
 .PHONY: cluster-e2e db
 
 ## Cross-replica delivery gate (memql#1261): boot the 2-replica k3d +
@@ -201,9 +209,11 @@ db:
 #   MEMQL_K3D_SERVERS          k3d server count (default: 1)
 #   MEMQL_K3D_AGENTS           k3d agent count (default: 0)
 
+##@ Local cluster (k3d + ArgoCD -- the blessed local topology, #2061)
+##> This IS the GitOps deploy path (same manifests as staging); `make deploy` is break-glass only.
 .PHONY: up up-refresh down secrets dev status scale
 
-## Fresh bring-up of the local k3d cluster, end to end: create cluster,
+## Fresh k3d bring-up: cluster + ArgoCD + secrets + images, wait healthy (SERVERS=2 AGENTS=1 for multi-node)
 ## install ArgoCD (pinned v2.13.3, same as staging), apply the memql-local
 ## Application, seed k8s Secrets, build + import the engine images, and wait
 ## for the mesh to become Available. Idempotent -- safe on an existing cluster.
@@ -267,7 +277,7 @@ up-refresh:
 		$${CARRIER_NODES:+--carrier-nodes="$${CARRIER_NODES}"} \
 		$${CARRIER_CONTEXT:+--carrier-context="$${CARRIER_CONTEXT}"}
 
-## Tear down the local k3d cluster.
+## Tear down the local k3d cluster (PURGE=1 also removes the kubeconfig context)
 ## Pass PURGE=1 to also remove the kubeconfig context.
 down:
 	@bash scripts/k3d/down.sh \
@@ -280,7 +290,7 @@ secrets:
 	@bash scripts/k3d/seed-secrets.sh \
 		$${CLUSTER:+--namespace=$${NAMESPACE:-memql}}
 
-## Inner-loop dev: rebuild image(s), import into k3d, restart Deployment(s).
+## Inner-loop dev: rebuild image(s) + import into k3d + restart Deployment(s) (NODE=<type> for one node)
 ## No direct-apply bypass -- ArgoCD owns the manifests; only pods restart.
 ## Downstream product stacks run the product-agnostic engine images and
 ## deliver their DSL at runtime via the dsl-bundle component (MEMQL_DSL_PATH);
@@ -325,6 +335,7 @@ scale:
 # Test targets
 # ---------------------------------------------------------------------------
 
+##@ Test & SDK
 .PHONY: test test-v test-cover test-polyphon sdk-gen sdk-gen-check sdk-ts-install sdk-ts-typecheck dsl-lint
 
 ## Regenerate the typed SDK surface from the DSL tree. Reads every
@@ -402,6 +413,7 @@ test-polyphon:
 # Code quality
 # ---------------------------------------------------------------------------
 
+##@ Quality & codegen
 .PHONY: vet fmt lint tidy generate proto-gen proto-gen-check
 
 ## Run go vet on all packages
@@ -439,6 +451,8 @@ proto-gen-check:
 # Docker image targets
 # ---------------------------------------------------------------------------
 
+##@ Release (engine image)
+##> Staging is GitOps: bump the digest in deploy/k8s/overlays/staging + merge -> ArgoCD reconciles.
 .PHONY: release
 
 ## Cut an immutable engine release image memql:<VERSION> from VERSION + the
@@ -476,6 +490,7 @@ release:
 # (writes ~/.memql/genesis.znas). `make up` seeds the decrypted envelope
 # into the k3d cluster's k8s Secrets via scripts/k3d/seed-secrets.sh.
 
+##@ Dev tooling
 .PHONY: install-deps genesis-seal env-registry-sync env-registry-check
 
 ## Regenerate the embedded genesis manifest snapshot
@@ -514,6 +529,7 @@ install-deps:
 # Deploy gates (engine ops)
 # ---------------------------------------------------------------------------
 
+##@ Deploy gates (engine ops)
 .PHONY: conn-headroom-check
 
 ## Connection-headroom deploy gate (memql#1820, from the #1817 53300 spike):
@@ -537,6 +553,7 @@ conn-headroom-check:
 #   docs/public/operate/deployment-strategy.md.
 # ===========================================================================
 
+##@ Deploy (break-glass -- ArgoCD owns staging; use only when Argo is unavailable)
 .PHONY: deploy
 
 ## BREAK-GLASS imperative deploy -- DELEGATES TO THE COCKPIT (I16, epic
@@ -580,7 +597,8 @@ deploy:
 # Utility targets
 # ---------------------------------------------------------------------------
 
-.PHONY: clean version help
+##@ Utility
+.PHONY: clean version help help-check
 
 ## Remove build artifacts
 clean:
@@ -590,66 +608,10 @@ clean:
 version:
 	@echo $(VERSION)
 
-## Show all available targets
+## Show all available targets (auto-generated from the '##' doc comments -- never drifts)
 help:
-	@echo "memQL Makefile — v$(VERSION)"
-	@echo ""
-	@echo "LOCAL (k3d + ArgoCD cluster -- the blessed local topology, #2061)"
-	@echo "  make up                        Fresh bring-up: k3d + ArgoCD + secrets + images, wait healthy (single-node default)"
-	@echo "  make up SERVERS=2 AGENTS=1     Multi-node cluster (for cross-node mesh testing)"
-	@echo "  make dev [NODE=<type>]         Inner loop: rebuild image -> k3d import -> rollout restart"
-	@echo "  make up-refresh                Clean slate: nuke + repave (fresh DB + ArgoCD), then the same bring-up"
-	@echo "  make status                    Show per-pod MEMQL_NODE_IDs (mesh parity litmus) + ArgoCD sync"
-	@echo "  make scale N=2                 Scale every app Deployment to N replicas (2 = staging parity)"
-	@echo "  make secrets                   (Re-)seed the k8s Secrets in a running cluster"
-	@echo "  make down [PURGE=1]            Tear down the k3d cluster (PURGE=1 also drops the kubeconfig context)"
-	@echo "  make db                        Connect to development database (psql, via the postgres port-forward)"
-	@echo ""
-	@echo "BUILD"
-	@echo "  make              Build standalone server + healthcheck"
-	@echo "  make build        Build standalone server"
-	@echo "  make build-all    Build all binaries (server + all node types)"
-	@echo "  make bff          Build BFF node binary"
-	@echo "  make voice        Build voice node binary"
-	@echo "  make cognition    Build cognition node binary"
-	@echo "  make agent        Build agent node binary"
-	@echo "  make planner      Build planner node binary"
-	@echo ""
-	@echo "TEST"
-	@echo "  make test         Run all tests"
-	@echo "  make test-v       Run all tests (verbose)"
-	@echo "  make test-cover   Run tests with coverage report"
-	@echo "  make test-polyphon Run Polyphon/cognition tests only"
-	@echo ""
-	@echo "QUALITY"
-	@echo "  make vet          Run go vet"
-	@echo "  make fmt          Format all Go files"
-	@echo "  make lint         Run fmt + vet"
-	@echo "  make tidy         Tidy go.mod dependencies"
-	@echo "  make generate     Run code generation (protobuf)"
-	@echo ""
-	@echo "RELEASE"
-	@echo "  make release                            Cut immutable memql:<VERSION> image (VERSION + short SHA)"
-	@echo "  make release VERSION=X.Y.Z ACR=acrmemql PUSH=1   Build + push the pinnable release tag to the shared ACR"
-	@echo "  (Staging/prod images are built on the GitHub build server, not locally -- see CLAUDE.md.)"
-	@echo ""
-	@echo "DEV TOOLING"
-	@echo "  Authoring of env vars / secrets is in memql-cockpit (see"
-	@echo "  'memql-cockpit genesis init'). 'make up' seeds the decrypted"
-	@echo "  genesis envelope into the k3d cluster's k8s Secrets."
-	@echo "  make install-deps              Install + verify build tools (protoc, plugins, go, docker, k3d, kubectl)"
-	@echo "  make genesis-seal ENV_FILE=... Seal a plaintext .env into ~/.memql/genesis.znas"
-	@echo ""
-	@echo "DEPLOY -- the normal way:"
-	@echo "  STAGING is GitOps: bump the image digest in deploy/k8s/overlays/staging and"
-	@echo "  merge to main -> ArgoCD reconciles. Rollback = 'git revert' the overlay."
-	@echo "  (The product bff/SPA deploy + release estate now lives in the pack repo.)"
-	@echo ""
-	@echo "BREAK-GLASS (imperative deploy -- ArgoCD owns staging; use only when Argo is unavailable, or for prod until #2207)"
-	@echo "  make deploy ENV=production VERSION=X.Y.Z  Imperative roll-out (delegates to the cockpit)"
-	@echo "  make deploy [DRY_RUN=1]                    Imperative apply (escape hatch; NOT the staging norm)"
-	@echo ""
-	@echo "UTILITY"
-	@echo "  make clean        Remove build artifacts"
-	@echo "  make version      Print current version"
-	@echo "  make help         Show this help"
+	@bash scripts/make/help.sh
+
+## Drift guard: fail if any target lacks a '## ' doc comment (also run by `make test`)
+help-check:
+	@bash scripts/make/help.sh --check && echo "OK: every Makefile target is documented"
