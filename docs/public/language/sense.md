@@ -332,6 +332,30 @@ not its contents: a new construct or annotation does NOT bump it; only
 a backward-incompatible change to the JSON shape does, so a consuming
 editor can detect a contract mismatch.
 
+### The syntax&lt;-&gt;Sense parity gate (#2734)
+
+Most of Sense's vocabulary is projected from the spec at runtime, so it
+cannot drift. But a few surfaces added for cross-reference resolution
+(the invocation kind-filter, #2733) keep HAND-MAINTAINED tables that key
+on construct keyword or invocation verb -- `behavioralConstruct` /
+`nonBehavioralConstruct` / `invocationVerbKind` (`context.go`) and
+`invocationKeywordsForConstruct` (`complete.go`). A conformance gate
+(`component/memql/sense/parity_test.go`) pins them to the same SoT:
+
+- Every dslspec construct must be classified EXACTLY once as behavioral
+  (its body invokes other constructs) or non-behavioral -- a construct
+  added to the grammar lands in neither set and fails, naming the file
+  to update.
+- The two invocation tables must agree (a construct is behavioral IFF
+  `invocationKeywordsForConstruct` offers the call verbs).
+- Every verb in `invocationVerbKind` must be a real invocation keyword
+  per `parser.InvocationKindKeywords()`.
+
+**This is how "keep MemQL Sense updated whenever the syntax or rules
+change" is enforced:** changing the DSL's constructs or invocation
+keywords fails this gate in CI until Sense is brought back in sync.
+Follows the #2628 detected/undetected-label conformance pattern.
+
 ---
 
 ## Portable JSON export (for editors)
