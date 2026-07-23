@@ -864,25 +864,6 @@ func (l *Lexer) match(expected rune) bool {
 	return true
 }
 
-func (l *Lexer) matchSequence(chars ...rune) bool {
-	if l.pos+len(chars) > len(l.input) {
-		return false
-	}
-	for i, ch := range chars {
-		if l.input[l.pos+i] != ch {
-			return false
-		}
-	}
-	l.pos += len(chars)
-	l.column += len(chars)
-	return true
-}
-
-func (l *Lexer) matchSequenceStr(s string) bool {
-	runes := []rune(s)
-	return l.matchSequence(runes...)
-}
-
 func isDigit(ch rune) bool {
 	return ch >= '0' && ch <= '9'
 }

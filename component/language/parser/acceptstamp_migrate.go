@@ -251,13 +251,21 @@ func acceptStampEditForMutation(runes []rune, mtoks []Token, braceIdx, bodyStart
 	closeInd := blockCloseIndent(runes, innerEnd)
 	var b strings.Builder
 	b.WriteString("\n")
-	b.WriteString(ind + "accept { " + strings.Join(acceptNames, ", ") + " }\n")
+	b.WriteString(ind)
+	b.WriteString("accept { ")
+	b.WriteString(strings.Join(acceptNames, ", "))
+	b.WriteString(" }\n")
 	if len(stampFields) > 0 {
-		b.WriteString(ind + "stamp {\n")
+		b.WriteString(ind)
+		b.WriteString("stamp {\n")
 		for _, f := range stampFields {
-			b.WriteString(ind + "  " + f + "\n")
+			b.WriteString(ind)
+			b.WriteString("  ")
+			b.WriteString(f)
+			b.WriteString("\n")
 		}
-		b.WriteString(ind + "}\n")
+		b.WriteString(ind)
+		b.WriteString("}\n")
 	}
 	b.WriteString(closeInd)
 

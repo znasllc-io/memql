@@ -109,7 +109,8 @@ func RewriteActorBinding(src []byte) ([]byte, error) {
 		}
 		ind := text[h[2]:h[3]]
 		b.WriteString(text[prev:start])
-		b.WriteString(ind + "@actor\n")
+		b.WriteString(ind)
+		b.WriteString("@actor\n")
 		prev = start
 		changed = true
 	}

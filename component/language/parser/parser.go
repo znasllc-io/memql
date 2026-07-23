@@ -48,12 +48,6 @@ type Parser struct {
 	// to the resulting FunctionDef and clears the field.
 	pendingArgs *ArgsSchema
 
-	// deferredErrors collects errors that surface during attribute
-	// processing or other post-parse passes where the call chain has
-	// no error-return path. parseFile drains the slice after parsing
-	// completes and surfaces the first entry.
-	deferredErrors []error
-
 	// currentFuncType is the receiver kind of the construct whose body
 	// is being parsed (set in parseGoStyleFunction around the body
 	// switch, restored after). It lets construct-scoped grammar rules
@@ -79,16 +73,6 @@ type Parser struct {
 	// swallow the comparison into the coalesce arm (the JS-loose shape) --
 	// precedence must not depend on the operand's token type.
 	suppressComparisonFold bool
-}
-
-// recordDeferredError stashes a parse error that surfaces from inside
-// a void-returning helper (e.g. attribute processing). parseFile
-// surfaces the first one after the per-definition parse completes.
-func (p *Parser) recordDeferredError(err error) {
-	if err == nil {
-		return
-	}
-	p.deferredErrors = append(p.deferredErrors, err)
 }
 
 // NewParser creates a new parser for the given tokens.
@@ -405,15 +389,6 @@ func (p *Parser) parseFile() (*File, error) {
 			attachDocComment(def, p.takeDocFor(defFirstLine))
 			file.Definitions = append(file.Definitions, def)
 		}
-	}
-
-	// Surface any deferred parse errors collected during attribute
-	// processing (where the void-returning helpers can't return an
-	// error directly). The first deferred error wins; the rest are
-	// dropped to keep the error surface focused on the most useful
-	// hint.
-	if len(p.deferredErrors) > 0 {
-		return nil, p.deferredErrors[0]
 	}
 
 	return file, nil
@@ -1663,7 +1638,6 @@ func (p *Parser) parseGoStyleStep() (*StepDef, error) {
 	// by construction.
 	if p.rhsLooksArithmetic() {
 		savePos, saveCur := p.pos, p.current
-		saveDeferred := len(p.deferredErrors)
 		expr, err := p.parseExpression()
 		if err == nil {
 			if arith, ok := expr.(*ArithmeticExpr); ok {
@@ -1686,7 +1660,6 @@ func (p *Parser) parseGoStyleStep() (*StepDef, error) {
 		// switch below sees the exact same tokens it would have without the
 		// speculative attempt.
 		p.pos, p.current = savePos, saveCur
-		p.deferredErrors = p.deferredErrors[:saveDeferred]
 	}
 
 	// Check for step type (inline blocks are rejected in favor of function-call syntax)
@@ -6323,12 +6296,9 @@ func (p *Parser) wrapDirective(name string, args map[string]any, target Expressi
 func (p *Parser) valueToExprNode(val any) ExpressionNode {
 	switch v := val.(type) {
 	case ExpressionNode:
-		return v
-	case *FunctionCallExpr:
-		return v
-	case *ArgRefExpr:
-		return v
-	case *NilExpr:
+		// *FunctionCallExpr, *ArgRefExpr, *NilExpr, etc. all satisfy
+		// ExpressionNode, so this case returns them as-is; a raw literal
+		// (string/float64/bool/other) falls through and is wrapped below.
 		return v
 	case string:
 		return &LiteralExpr{Value: v}
