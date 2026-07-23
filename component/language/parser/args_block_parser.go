@@ -1,9 +1,7 @@
 package parser
 
 import (
-	"fmt"
 	"strconv"
-	"strings"
 )
 
 // parseFileTopArgsBlock parses a file-level `args { ... }` declaration.
@@ -240,36 +238,6 @@ func (p *Parser) parseArgsBlockField() (*ArgsField, error) {
 		}
 	}
 	return field, nil
-}
-
-// formatArgsBlock renders an *ArgsSchema back into source-form
-// `args { <field>... }` text. Used by the struct rewriters when they
-// move the args block from inside a struct body to file-top.
-func formatArgsBlock(def *ArgsSchema) string {
-	if def == nil || len(def.Fields) == 0 {
-		return "args { }"
-	}
-	var b strings.Builder
-	b.WriteString("args {\n")
-	for _, f := range def.Fields {
-		b.WriteString(fmt.Sprintf("  %s %s", f.Name, f.Type))
-		if !f.Optional {
-			b.WriteString(" @required")
-		}
-		if len(f.Enum) > 0 {
-			b.WriteString(" @enum(")
-			for i, v := range f.Enum {
-				if i > 0 {
-					b.WriteString(", ")
-				}
-				b.WriteString(fmt.Sprintf("%q", fmt.Sprint(v)))
-			}
-			b.WriteString(")")
-		}
-		b.WriteString("\n")
-	}
-	b.WriteString("}\n")
-	return b.String()
 }
 
 // reservedArgsNames are the ambient top-level identifiers an args field may
