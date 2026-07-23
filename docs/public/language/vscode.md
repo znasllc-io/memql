@@ -126,6 +126,29 @@ release carries the epic end to end:
 - Edit-time errors mirroring the engine's load rules: `actor-undeclared`
   (#2622) and `actor-unknown-property` (#2625).
 
+### 0.3.0 -- the cross-reference resolution epic (#2728)
+
+This release teaches Sense to RESOLVE cross-references, not just complete them,
+backed by a workspace symbol graph built from the `dslimports` tree (#2729):
+
+- Import diagnostics: `use fylo.concept.{ oder }` now flags the wrong kind
+  segment and the undeclared id (#2730), and a `mutate/query/shape/seed
+  <Concept>` bound to a concept that exists nowhere is an error (#2731) --
+  both conservative, so a legitimate external/global reference never squiggles.
+- Segment-aware `use`-line completion: typing `fylo.` offers the module kinds,
+  and the brace list offers that module's importable ids, instead of dumping
+  the whole symbol table (#2732).
+- Kind-filtered invocation completion: in a behavioral body, `query <name>`
+  offers only queries, `logic <name>` only logic, etc. (#2733).
+- A syntax&lt;-&gt;Sense parity gate keeps these tables in step with the grammar
+  (#2734).
+
+**Updating:** the intelligence lives in the bundled `memql-lsp` binary, so a new
+release ships only when you rebuild it. Run `make vscode-package`, reinstall the
+`.vsix` (`code --install-extension editors/vscode/memql-0.3.0.vsix --force`), and
+reload the window -- a stale editor is a locally-installed VSIX, never a repo
+artifact.
+
 ## Snippet completions
 
 The extension advertises `snippetSupport` (vscode-languageclient

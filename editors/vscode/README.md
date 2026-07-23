@@ -8,8 +8,12 @@ Cockpit uses). Works fully offline against local files -- no cluster, no auth.
 
 - Syntax highlighting (TextMate grammar, generated from the DSL spec) refined
   by semantic tokens from the server.
-- Live diagnostics (errors and warnings) as you type.
-- Context-aware completion (constructs, concepts, functions, annotations, ...).
+- Live diagnostics (errors and warnings) as you type, including cross-reference
+  resolution: unknown import modules/ids and signature concepts that resolve to
+  nothing.
+- Context-aware completion (constructs, concepts, functions, annotations, ...),
+  including segment-aware `use`-line completion (namespaces -> kinds -> ids) and
+  kind-filtered in-body invocation completion.
 - Hover documentation and signature help.
 
 ## Requirements
