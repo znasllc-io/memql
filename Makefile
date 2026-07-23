@@ -65,7 +65,7 @@ workbench:
 mcp:
 	$(GO) build $(GOFLAGS) -tags mcp -o $(BIN_DIR)/memql-mcp .
 
-.PHONY: memql-lsp vscode-grammar vscode-package
+.PHONY: memql-lsp vscode-grammar vscode-package vscode-install
 ## Build the memql-lsp binary (offline VS Code language server)
 memql-lsp:
 	$(GO) build $(GOFLAGS) -o $(BIN_DIR)/memql-lsp ./cmd/memql-lsp
@@ -77,6 +77,12 @@ vscode-grammar: memql-lsp
 ## Package the VS Code extension into a .vsix (bundles the darwin-arm64 binary)
 vscode-package:
 	bash scripts/vscode/package.sh
+
+## Build the extension AND (re)install it into local VS Code, then reload to pick
+## up server changes. The refresh-my-editor loop after a local LSP/extension edit.
+## Override the target editor with EDITOR_CMD (e.g. make vscode-install EDITOR_CMD=cursor).
+vscode-install:
+	bash scripts/vscode/install.sh $(if $(EDITOR_CMD),--editor-cmd=$(EDITOR_CMD),)
 
 ## Generate Go from .templ files for the identity web app.
 ## Uses `go run` so contributors don't need templ on their PATH.
