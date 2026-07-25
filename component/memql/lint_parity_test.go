@@ -31,7 +31,7 @@ func diagsContain(diags []LintDiagnostic, sub string) bool {
 
 func lint(t *testing.T, root fstest.MapFS) []LintDiagnostic {
 	t.Helper()
-	diags, err := LintUnifiedTree(nil, root)
+	diags, _, err := LintUnifiedTree(nil, root)
 	if err != nil {
 		t.Fatalf("LintUnifiedTree: %v", err)
 	}

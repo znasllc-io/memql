@@ -15,10 +15,11 @@ import (
 
 // MountOverlayDomains registers every product-domain directory found at the
 // top level of root as a plugin overlay in the unified Tree(), and returns the
-// mounted domain names plus an unmount func that removes exactly those
-// registrations. Callers MUST defer the unmount so the global registration
-// state is restored for the next caller (this matters for in-process test
-// runs; a one-shot CLI could skip it).
+// mounted domain names, the names skipped for colliding with a core embedded
+// domain, and an unmount func that removes exactly those registrations.
+// Callers MUST defer the unmount so the global registration state is restored
+// for the next caller (this matters for in-process test runs; a one-shot CLI
+// could skip it).
 //
 // A top-level entry is mounted only when it is a directory that directly
 // contains at least one .memql file -- the shape of a product namespace
@@ -28,10 +29,18 @@ import (
 // or whose name collides with a core embedded domain are skipped. The core
 // collision skip mirrors MountRuntimeDomainsFromEnv: the embedded tree owns
 // that namespace and RegisterTree would panic on the collision.
-func MountOverlayDomains(logger *slog.Logger, root fs.FS) (mounted []string, unmount func()) {
+//
+// Only the core-collision skip is reported back (memql#2782). It is the one a
+// caller cannot infer and would not expect: the directory looks like a
+// perfectly good product domain, it is silently left out of the merged tree,
+// and whatever the embedded tree holds for that namespace is validated in its
+// place. The other skips are self-evident from the root's own shape -- a file,
+// a "_"-prefixed soft-disable, a sidecar with no .memql in it -- and reporting
+// them would bury the collision signal in noise.
+func MountOverlayDomains(logger *slog.Logger, root fs.FS) (mounted, skippedCore []string, unmount func()) {
 	noop := func() {}
 	if root == nil {
-		return nil, noop
+		return nil, nil, noop
 	}
 	entries, err := fs.ReadDir(root, ".")
 	if err != nil {
@@ -39,7 +48,7 @@ func MountOverlayDomains(logger *slog.Logger, root fs.FS) (mounted []string, unm
 			logger.Warn("lint overlay mount: root unreadable; ignoring",
 				"component", "dsl.lintMount", "err", err)
 		}
-		return nil, noop
+		return nil, nil, noop
 	}
 
 	core := make(map[string]struct{})
@@ -55,14 +64,19 @@ func MountOverlayDomains(logger *slog.Logger, root fs.FS) (mounted []string, unm
 		if strings.HasPrefix(domain, "_") || strings.HasPrefix(domain, ".") {
 			continue
 		}
+		// Order matters: the .memql check runs first so skippedCore means
+		// "would have mounted but for the collision". A core-named directory
+		// holding no .memql file is not a product domain at all and would be
+		// skipped either way -- reporting it as a collision would be noise.
+		if !directoryHasMemqlFile(root, domain) {
+			continue
+		}
 		if _, isCore := core[domain]; isCore {
 			if logger != nil {
 				logger.Warn("lint overlay mount: ignoring domain that collides with a core embedded domain",
 					"component", "dsl.lintMount", "domain", domain)
 			}
-			continue
-		}
-		if !directoryHasMemqlFile(root, domain) {
+			skippedCore = append(skippedCore, domain)
 			continue
 		}
 		sub, subErr := fs.Sub(root, domain)
@@ -82,7 +96,7 @@ func MountOverlayDomains(logger *slog.Logger, root fs.FS) (mounted []string, unm
 			UnregisterTree(d)
 		}
 	}
-	return mounted, unmount
+	return mounted, skippedCore, unmount
 }
 
 // directoryHasMemqlFile reports whether dir (a top-level entry of root)

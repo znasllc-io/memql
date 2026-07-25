@@ -167,8 +167,10 @@ func run(args []string) int {
 	// it, so a pack that lints clean here also MOUNTS clean at boot. Directory
 	// mode only: single-file mode keeps its file-scoped report, and the root
 	// there is a namespace directory rather than a DSL root of domains.
+	var paritySkipped []string
 	if target == "" {
-		parityDiags, perr := memql.LintUnifiedTree(nil, root)
+		parityDiags, skipped, perr := memql.LintUnifiedTree(nil, root)
+		paritySkipped = skipped
 		if perr != nil {
 			integrityErrs = append(integrityErrs, fmt.Errorf("engine-parity lint: %w", perr))
 		}
@@ -183,6 +185,7 @@ func run(args []string) int {
 
 	report := buildReport(tree, loadErr, integrityErrs, target)
 	report.Root = rootDir
+	report.ParitySkippedDomains = paritySkipped
 
 	if jsonOut {
 		return emitJSON(report)
@@ -197,6 +200,12 @@ type Report struct {
 	Files  int          `json:"files"`
 	Order  []string     `json:"order,omitempty"`
 	Errors []Diagnostic `json:"errors,omitempty"`
+	// ParitySkippedDomains names the top-level directories the engine-parity
+	// pass left out of its overlay because they collide with a core embedded
+	// domain (memql#2782). These are not errors -- the skip is by design, the
+	// embedded tree owns the namespace -- but without them a clean report is
+	// ambiguous between "parity-checked and clean" and "never parity-checked".
+	ParitySkippedDomains []string `json:"paritySkippedDomains,omitempty"`
 }
 
 // Diagnostic carries one error from the load pipeline. Level is
@@ -283,13 +292,60 @@ func emitJSON(r *Report) int {
 func emitHuman(r *Report, rootDir string) int {
 	if len(r.Errors) == 0 {
 		fmt.Printf("OK: %d file(s) loaded, no diagnostics.\n", r.Files)
+		emitParitySkips(r)
 		return 0
 	}
 	fmt.Printf("ERROR: %d diagnostic(s) in %s\n", len(r.Errors), rootDir)
 	for _, d := range r.Errors {
 		fmt.Printf("  - %s\n", d.Message)
 	}
+	emitParitySkips(r)
 	return 1
+}
+
+// paritySkipListMax bounds the human-readable skip list. The benign in-repo
+// case skips ~30 domains; the case worth reading skips one or two. Truncating
+// keeps the second from drowning in the first, and --json always carries the
+// full set.
+const paritySkipListMax = 8
+
+// emitParitySkips prints the domains the engine-parity overlay left out.
+//
+// It prints on the clean path AND the error path: an error report is just as
+// ambiguous as a clean one about the namespaces that were never looked at, and
+// a skipped domain is often exactly where the reader should look next. It never
+// changes the exit code -- the skip is designed behaviour, and making it fatal
+// would break every in-repo `memqllint dsl/` run, where all ~30 domains collide
+// with core by construction.
+//
+// The wording stops short of asserting the skipped directories went unchecked,
+// because that depends on something the tool cannot see. Linting the engine's
+// own dsl/ via `go run` recompiles the embedded tree from these very files, so
+// the parity tier did cover them -- through the embed rather than the overlay.
+// Linting a product bundle, or running a prebuilt binary whose embed is frozen,
+// is the case where the contents here really were never read. The two are
+// indistinguishable from inside the process, so the note states the condition
+// and lets the reader resolve it rather than guessing and being wrong on every
+// in-repo run.
+func emitParitySkips(r *Report) {
+	skipped := r.ParitySkippedDomains
+	if len(skipped) == 0 {
+		return
+	}
+	fmt.Printf("NOTE: engine-parity pass did not mount %d domain(s) -- their names collide with core embedded\n"+
+		"      domains, so those namespaces were validated from the embedded tree rather than from the\n"+
+		"      directories here. If this root IS the engine's own dsl/, that embed was rebuilt from these\n"+
+		"      same files and they were covered; if it is a product bundle, or you are running a prebuilt\n"+
+		"      binary, it was not.\n",
+		len(skipped))
+
+	shown := skipped
+	suffix := ""
+	if len(shown) > paritySkipListMax {
+		shown = shown[:paritySkipListMax]
+		suffix = fmt.Sprintf(" ... and %d more (--json for the full list)", len(skipped)-paritySkipListMax)
+	}
+	fmt.Printf("      Skipped: %s%s\n", strings.Join(shown, ", "), suffix)
 }
 
 func printUsage() {

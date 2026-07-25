@@ -52,15 +52,21 @@ type LintDiagnostic struct {
 // domain are skipped (the embedded tree already owns them), so pointing this
 // at the engine's own dsl/ tree validates the embedded tree as-is.
 //
+// Those skipped names are returned as skippedCoreDomains (memql#2782). The
+// caller needs them to tell two very different outcomes apart: a domain that
+// was validated and found clean, and a domain whose on-disk contents were
+// never looked at because the embedded tree owns the namespace. Both otherwise
+// produce zero diagnostics.
+//
 // Global state (the plugin-tree registrations and the additive concept
 // registry) is restored before returning, so repeated in-process calls do not
 // leak a mounted pack's concepts into the next run.
-func LintUnifiedTree(logger *slog.Logger, root fs.FS) ([]LintDiagnostic, error) {
+func LintUnifiedTree(logger *slog.Logger, root fs.FS) ([]LintDiagnostic, []string, error) {
 	if logger == nil {
 		logger = slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
 	}
 
-	_, unmount := memqldsl.MountOverlayDomains(logger, root)
+	_, skippedCore, unmount := memqldsl.MountOverlayDomains(logger, root)
 	defer func() {
 		unmount()
 		// LoadUnifiedConcepts is additive (MergeAll), and Init normalizes
@@ -71,7 +77,7 @@ func LintUnifiedTree(logger *slog.Logger, root fs.FS) ([]LintDiagnostic, error) 
 	}()
 
 	if _, err := LoadUnifiedConcepts(logger); err != nil {
-		return nil, fmt.Errorf("loading concepts from merged tree: %w", err)
+		return nil, skippedCore, fmt.Errorf("loading concepts from merged tree: %w", err)
 	}
 	registry := concept.DefaultRegistry()
 
@@ -79,7 +85,7 @@ func LintUnifiedTree(logger *slog.Logger, root fs.FS) ([]LintDiagnostic, error) 
 	// stays quiet; Init-time logs go through eng.Logger, set below.
 	eng, err := New(nil, (&component.Component{}).WithLoggerWriter(io.Discard))
 	if err != nil {
-		return nil, fmt.Errorf("constructing lint engine: %w", err)
+		return nil, skippedCore, fmt.Errorf("constructing lint engine: %w", err)
 	}
 	eng.Logger = logger
 
@@ -120,5 +126,5 @@ func LintUnifiedTree(logger *slog.Logger, root fs.FS) ([]LintDiagnostic, error) 
 		}
 		return diags[i].Message < diags[j].Message
 	})
-	return diags, nil
+	return diags, skippedCore, nil
 }
