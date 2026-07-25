@@ -1423,10 +1423,14 @@ func parseObjectLiteral(s string) map[string]any {
 			return nil
 		}
 		pos++ // skip ':'
-		val, next := parseLiteralOrExpr(inner, pos)
-		if next <= pos {
-			// Same no-progress guard as parseArrayLiteral: this is the sibling
-			// loop, reached by the issue's own repro `{ k: [}{] }` (memql#2785).
+		val, next, ok := parseLiteralOrExpr(inner, pos)
+		if !ok {
+			// Malformed value. Deliberately NO position check here: this loop
+			// cannot spin (after a non-advancing assignment the next
+			// iteration's leading skip consumes the comma, and otherwise
+			// parseObjectKey either advances or bails), and a position check
+			// WOULD change `{k:}` from a null value into a load error while
+			// leaving `{ k: }` -- the same input plus a space -- untouched.
 			return nil
 		}
 		out[key] = val
@@ -1511,34 +1515,53 @@ func parseObjectKey(s string, pos int) (string, int) {
 	return strings.TrimSpace(s[start:pos]), pos
 }
 
-func parseLiteralOrExpr(s string, pos int) (any, int) {
+// parseLiteralOrExpr returns the parsed value, the position after it, and
+// whether the input was WELL-FORMED.
+//
+// The ok result exists because a caller could not otherwise tell a malformed
+// literal from a legitimately-empty value: both came back as `(nil, pos)`
+// (memql#2785). That ambiguity is why a first cut of the fix turned the
+// issue's own repro from a hang into a SILENT NULL -- `{ k: [}{] }` loaded
+// `k: null` with err=nil instead of failing the strict-boot gate. A nested
+// object/array that fails to parse propagates ok=false rather than passing its
+// nil up as a value.
+func parseLiteralOrExpr(s string, pos int) (any, int, bool) {
 	// skip whitespace
 	for pos < len(s) && (s[pos] == ' ' || s[pos] == '\t' || s[pos] == '\n' || s[pos] == '\r') {
 		pos++
 	}
 	if pos >= len(s) {
-		return nil, pos
+		// Empty remainder -- `{k:}` is not malformed, it is a null value.
+		return nil, pos, true
 	}
 
 	switch s[pos] {
 	case '{':
 		obj, next := scanBalanced(s, pos, '{', '}')
 		if next == pos {
-			return nil, pos
+			return nil, pos, false
 		}
-		return parseObjectLiteral(obj), next
+		parsed := parseObjectLiteral(obj)
+		if parsed == nil {
+			return nil, pos, false
+		}
+		return parsed, next, true
 	case '[':
 		arr, next := scanBalanced(s, pos, '[', ']')
 		if next == pos {
-			return nil, pos
+			return nil, pos, false
 		}
-		return parseArrayLiteral(arr), next
+		parsed := parseArrayLiteral(arr)
+		if parsed == nil {
+			return nil, pos, false
+		}
+		return parsed, next, true
 	case '"':
 		lit, next, ok := scanQuotedString(s, pos)
 		if !ok {
-			return nil, pos
+			return nil, pos, false
 		}
-		return lit, next
+		return lit, next, true
 	default:
 		// read until comma or closing brace/bracket at depth 0
 		start := pos
@@ -1580,12 +1603,12 @@ func parseLiteralOrExpr(s string, pos int) (any, int) {
 				case ',':
 					if depth == 0 {
 						raw := strings.TrimSpace(s[start:pos])
-						return classifyScalarOrExpr(raw), pos
+						return classifyScalarOrExpr(raw), pos, true
 					}
 				case '}', ']':
 					if depth == 0 {
 						raw := strings.TrimSpace(s[start:pos])
-						return classifyScalarOrExpr(raw), pos
+						return classifyScalarOrExpr(raw), pos, true
 					}
 					depth--
 				}
@@ -1593,7 +1616,7 @@ func parseLiteralOrExpr(s string, pos int) (any, int) {
 			pos++
 		}
 		raw := strings.TrimSpace(s[start:pos])
-		return classifyScalarOrExpr(raw), pos
+		return classifyScalarOrExpr(raw), pos, true
 	}
 }
 
@@ -1616,19 +1639,21 @@ func parseArrayLiteral(s string) []any {
 		if pos >= len(inner) {
 			break
 		}
-		val, next := parseLiteralOrExpr(inner, pos)
-		if next <= pos {
-			// No progress. parseLiteralOrExpr returns its input pos unchanged
-			// on an unbalanced literal (`[}{]`), so without this guard the
-			// loop appends nil forever -- an unbounded memory grow and a hang,
-			// not a panic (memql#2785). It matters at LOAD:
-			// parsePayloadRawToTemplate runs while the tree is read, so a
-			// malformed payload literal in an authored .memql file would hang
-			// the node at boot instead of failing the strict-boot gate.
+		val, next, ok := parseLiteralOrExpr(inner, pos)
+		if !ok || next <= pos {
+			// Malformed, or no progress. parseLiteralOrExpr returns its input
+			// pos unchanged on an unbalanced literal (`[}{]`) and on a stray
+			// depth-0 closer (`[}]`), so without this the loop appends nil
+			// forever -- an unbounded memory grow and a hang, not a panic
+			// (memql#2785). It matters at LOAD: parsePayloadRawToTemplate runs
+			// while the tree is read, so a malformed payload literal in an
+			// authored .memql file would hang the node at boot instead of
+			// failing the strict-boot gate.
 			//
-			// nil is the established "malformed payload" answer here -- every
-			// other rejection path in this parser returns it, and the caller
-			// reports `invalid object literal payload`.
+			// The position check is safe to treat as malformed HERE (unlike in
+			// parseObjectLiteral) because the loop's leading skip has already
+			// consumed commas and whitespace, so a non-advancing return cannot
+			// be a legitimately-empty element.
 			return nil
 		}
 		out = append(out, val)

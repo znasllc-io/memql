@@ -1690,6 +1690,9 @@ func (c *Compiler) parseObjectLiteral(s string) map[string]any {
 
 		// Parse value
 		value, newPos := c.parseValue(inner, pos)
+		if newPos < pos {
+			return nil // defensive: a value scan must never rewind
+		}
 		result[key] = value
 		pos = newPos
 
@@ -2008,6 +2011,21 @@ func (c *Compiler) parseArrayLiteral(s string) []any {
 		}
 
 		val, newPos := c.parseValue(inner, pos)
+		if newPos <= pos {
+			// No progress: parseValue returns its input pos unchanged on an
+			// unbalanced literal and on a stray depth-0 closer, so the loop
+			// would append nil forever -- an unbounded memory grow and a hang
+			// (memql#2785). This parser is a duplicate of the one in
+			// component/memql/mutation_templates.go and carried the same
+			// defect; it sits on the automation LOAD path
+			// (loader -> CompileFile -> compileMutationConfig -> parsePayloadRaw),
+			// so `{ k: [}{] }` in an authored automation hung the node at boot.
+			//
+			// The leading skip has already consumed commas and whitespace, so
+			// a non-advancing return here cannot be a legitimately-empty
+			// element. nil signals a malformed payload to the caller.
+			return nil
+		}
 		items = append(items, val)
 		pos = newPos
 

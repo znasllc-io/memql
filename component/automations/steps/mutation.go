@@ -1348,6 +1348,9 @@ func (e *MutationExecutor) parseAndEvaluateObjectLiteral(evaluator *automations.
 
 		// Parse value
 		valueStr, newPos := e.parseValueFromString(inner, pos)
+		if newPos < pos {
+			return nil, fmt.Errorf("malformed object literal at offset %d: %q", pos, inner)
+		}
 		pos = newPos
 
 		// Evaluate the value
@@ -1391,6 +1394,18 @@ func (e *MutationExecutor) parseAndEvaluateArrayLiteral(evaluator *automations.E
 		}
 
 		valueStr, newPos := e.parseValueFromString(inner, pos)
+		if newPos <= pos {
+			// No progress: parseValueFromString returns its input pos
+			// unchanged on an unbalanced literal and on a stray depth-0
+			// closer, so the loop appended forever -- an unbounded memory grow
+			// and a hang (memql#2785). Unlike the load-time copies of this
+			// parser, this one runs at EVENT-DISPATCH time, so the failure is
+			// a spinning automation worker on a live node.
+			//
+			// The leading skip has already consumed commas and whitespace, so
+			// a non-advancing return cannot be a legitimately-empty element.
+			return nil, fmt.Errorf("malformed array literal at offset %d: %q", pos, inner)
+		}
 		pos = newPos
 
 		evaluated, err := e.evaluateValue(evaluator, valueStr)
