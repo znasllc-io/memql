@@ -53,6 +53,12 @@ func TestScanBareRowIntrinsicSortKeys(t *testing.T) {
 		// so this IS a sort clause to the engine and must not slip the gate.
 		{"no space before the literal", "query widget q {\n  sort\"createdAt\", \"desc\"\n}\n", []string{"createdAt"}},
 		{"tab before the literal", "query widget q {\n  sort\t\"createdAt\", \"desc\"\n}\n", []string{"createdAt"}},
+		// The rewriter separates keyword from args with unicode TrimSpace, so
+		// these rewrite byte-identically to the ASCII-space form and must not
+		// bypass the gate.
+		{"nbsp before the literal", "query widget q {\n  sort \"createdAt\", \"desc\"\n}\n", []string{"createdAt"}},
+		{"ideographic space before the literal", "query widget q {\n  sort　\"createdAt\", \"desc\"\n}\n", []string{"createdAt"}},
+		{"narrow nbsp before the literal", "query widget q {\n  sort \"createdAt\", \"desc\"\n}\n", []string{"createdAt"}},
 
 		// Comments are not authored code.
 		{"line comment", "query widget q {\n  // sort \"createdAt\", \"desc\"\n}\n", nil},

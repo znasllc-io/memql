@@ -16,6 +16,7 @@ package sense
 import (
 	"regexp"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -150,12 +151,28 @@ func isFilterClauseOpener(trimmed string) bool {
 //     `@default("createdAt")` on a concept field, would fail CI pointing
 //     inside the annotation. A field named `sort` (letting a caller pick an
 //     ordering) is an ordinary shape, so this had to be a scanner-side fix
-//     rather than a tree convention.
+//     rather than a tree convention. NOTE this covers the `name type
+//     @annotation` field shape, NOT the `key "value"` block shape that
+//     providers use (`voice "alloy"` in a `params` block): a `params` entry
+//     spelled `sort "createdAt"` is byte-identical to a directionless sort
+//     clause, so no line-local rule can separate them. Distinguishing it needs
+//     enclosing-construct state, which this scanner deliberately does not
+//     carry -- the filter sibling records why multi-line tracking was removed.
+//     Reaching it requires a `params` key named exactly `sort` whose value is
+//     exactly one of the five intrinsic names; the tree has none.
 //   - FALSE NEGATIVE. The rewriter opens the clause with a bare
 //     strings.HasPrefix(line, "sort") and no boundary at all
 //     (component/language/parser/rewriter.go), so `sort"createdAt"` with no
 //     space IS a sort clause to the engine. Skipping optional whitespace
 //     before the quote keeps the scanner and the rewriter agreeing.
+//
+// The whitespace skip is UNICODE-aware for the same reason: the rewriter
+// separates the keyword from the arguments with strings.TrimSpace, which is
+// unicode.IsSpace-based, so `sort<NBSP>"createdAt"` rewrites byte-identically
+// to the ASCII-space form and is a live clause. An ASCII-only TrimLeft here
+// would let it bypass the gate -- and NBSP is exactly the character the
+// rune-column fix in bareRowIntrinsicSortKeyRule exists to handle, so treating
+// it as unreachable one column to the left would contradict that.
 //
 // `sortOrder "x"` is still excluded -- after the `sort` prefix comes `O`,
 // which is neither whitespace nor a quote.
@@ -164,7 +181,7 @@ func isSortClauseOpener(trimmed string) bool {
 	if !ok {
 		return false
 	}
-	return strings.HasPrefix(strings.TrimLeft(rest, " \t"), `"`)
+	return strings.HasPrefix(strings.TrimLeftFunc(rest, unicode.IsSpace), `"`)
 }
 
 // ScanBareRowIntrinsicSortKeys returns every sort KEY in source that names a
