@@ -3,6 +3,7 @@ package sense
 import (
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/znasllc-io/memql/component/language/parser"
 )
@@ -358,17 +359,35 @@ func isInsideString(line string, pos int) bool {
 	return inString
 }
 
-// positionFromOffset converts a byte offset to a line/column position.
+// positionFromOffset converts a byte offset to a line / RUNE-column position.
+//
+// Columns count runes, not bytes (memql#2788): cmd/memql-lsp/internal/position
+// states the contract -- the lexer scans a []rune and does one column++ per
+// rune -- so a byte-counting walk shifts every position right by one per extra
+// UTF-8 byte earlier on the line. This is the shared conversion behind
+// findInSource, so fixing it here fixes every rule anchoring through it instead
+// of each re-deriving the arithmetic.
+//
+// Decoding rather than testing utf8.RuneStart also keeps invalid UTF-8
+// consistent with []rune and utf8.RuneCountInString: DecodeRuneInString yields
+// (RuneError, 1) per bad byte, so it contributes exactly one column. Counting
+// only rune-start bytes would contribute zero for a stray continuation byte and
+// place the squiggle LEFT of where the author sees it.
 func positionFromOffset(source string, offset int) Position {
 	line := 1
 	col := 1
-	for i := 0; i < offset && i < len(source); i++ {
-		if source[i] == '\n' {
+	for i := 0; i < offset && i < len(source); {
+		r, size := utf8.DecodeRuneInString(source[i:])
+		if size == 0 {
+			break
+		}
+		if r == '\n' {
 			line++
 			col = 1
 		} else {
 			col++
 		}
+		i += size
 	}
 	return Position{Line: line, Column: col}
 }
