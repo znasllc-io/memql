@@ -1424,6 +1424,11 @@ func parseObjectLiteral(s string) map[string]any {
 		}
 		pos++ // skip ':'
 		val, next := parseLiteralOrExpr(inner, pos)
+		if next <= pos {
+			// Same no-progress guard as parseArrayLiteral: this is the sibling
+			// loop, reached by the issue's own repro `{ k: [}{] }` (memql#2785).
+			return nil
+		}
 		out[key] = val
 		pos = next
 	}
@@ -1612,6 +1617,20 @@ func parseArrayLiteral(s string) []any {
 			break
 		}
 		val, next := parseLiteralOrExpr(inner, pos)
+		if next <= pos {
+			// No progress. parseLiteralOrExpr returns its input pos unchanged
+			// on an unbalanced literal (`[}{]`), so without this guard the
+			// loop appends nil forever -- an unbounded memory grow and a hang,
+			// not a panic (memql#2785). It matters at LOAD:
+			// parsePayloadRawToTemplate runs while the tree is read, so a
+			// malformed payload literal in an authored .memql file would hang
+			// the node at boot instead of failing the strict-boot gate.
+			//
+			// nil is the established "malformed payload" answer here -- every
+			// other rejection path in this parser returns it, and the caller
+			// reports `invalid object literal payload`.
+			return nil
+		}
 		out = append(out, val)
 		pos = next
 	}
