@@ -5,6 +5,7 @@ package sense
 // sibling authoring-rule idiom): Diagnose runs the rule registry-gated.
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 
@@ -38,7 +39,7 @@ func parseWithDocs(t *testing.T, src string) *parser.File {
 }
 
 func TestDescriptionLengthRule(t *testing.T) {
-	long := strings.Repeat("alpha beta gamma delta ", 12) // ~276 chars
+	long := strings.Repeat("alpha beta gamma delta ", 24) // ~552 chars, over the 500 target
 	logicBody := "logic lengthProbe {\n  args {\n    a string @required\n  }\n  body {\n    return coalesce(args.a, \"\")\n  }\n}\n"
 
 	t.Run("over-target-hints", func(t *testing.T) {
@@ -83,25 +84,25 @@ func TestDescriptionLengthRule(t *testing.T) {
 		}
 	})
 	t.Run("runes-not-bytes", func(t *testing.T) {
-		// 150 characters, 300 UTF-8 bytes: under the 200-character
+		// 400 characters, 800 UTF-8 bytes: under the 500-character
 		// target, so no hint -- the target is defined in characters.
-		accented := strings.Repeat("é", 150)
+		accented := strings.Repeat("é", 400)
 		src := "/// " + accented + "\n" + logicBody
 		file := parseWithDocs(t, src)
 		if diags := descriptionLengthRule(file, src); len(diags) != 0 {
-			t.Fatalf("150 runes (300 bytes) is under the character target; must not hint: %+v", diags)
+			t.Fatalf("400 runes (800 bytes) is under the character target; must not hint: %+v", diags)
 		}
-		// 250 characters of the same rune: over target, and the message
+		// 600 characters of the same rune: over target, and the message
 		// must report the rune count, not the byte count.
-		over := strings.Repeat("é", 250)
+		over := strings.Repeat("é", 600)
 		src = "/// " + over + "\n" + logicBody
 		file = parseWithDocs(t, src)
 		diags := descriptionLengthRule(file, src)
 		if len(diags) != 1 {
-			t.Fatalf("250 runes must hint, got %+v", diags)
+			t.Fatalf("600 runes must hint, got %+v", diags)
 		}
-		if !strings.Contains(diags[0].Message, "250 characters") {
-			t.Errorf("message must report the rune count (250), got %q", diags[0].Message)
+		if !strings.Contains(diags[0].Message, "600 characters") {
+			t.Errorf("message must report the rune count (600), got %q", diags[0].Message)
 		}
 	})
 	t.Run("anchors-on-declaration-not-call-site", func(t *testing.T) {
@@ -165,7 +166,7 @@ func TestDescriptionLengthRule(t *testing.T) {
 // plus the doc-comment side channel on the diagnose parse), not only by the
 // rule function in isolation.
 func TestDescriptionLengthThroughDiagnose(t *testing.T) {
-	long := strings.Repeat("alpha beta gamma delta ", 12)
+	long := strings.Repeat("alpha beta gamma delta ", 24)
 	src := "/// " + long + "\nlogic lengthProbe {\n  args {\n    a string @required\n  }\n  body {\n    return coalesce(args.a, \"\")\n  }\n}\n"
 	s := New(&stubRegistry{})
 	found := false
@@ -180,4 +181,42 @@ func TestDescriptionLengthThroughDiagnose(t *testing.T) {
 	if !found {
 		t.Fatalf("Diagnose must emit the description-length hint end-to-end (SetDocComments wiring + rule registration)")
 	}
+}
+
+// TestDescriptionLengthTargetIsConsistent pins the three places the editorial
+// target is stated to ONE number (#2759). The rule enforces
+// descriptionLengthTarget, but two author-facing doc strings quote it
+// independently -- the @description annotation doc and the doc-comment
+// next-rule -- and both are what an author actually reads in completion and
+// hover. Before this pin they were plain prose that could silently disagree
+// with the diagnostic, advising one length while the editor flagged another.
+func TestDescriptionLengthTargetIsConsistent(t *testing.T) {
+	want := "~" + strconv.Itoa(descriptionLengthTarget) + " characters"
+
+	t.Run("@description annotation doc", func(t *testing.T) {
+		doc, ok := AnnotationDocs["description"]
+		if !ok {
+			t.Fatal("no doc registered for @description")
+		}
+		if !strings.Contains(doc, want) {
+			t.Errorf("annotation doc must quote %q (the live target); got: %s", want, doc)
+		}
+	})
+
+	t.Run("doc-comment next-rule doc", func(t *testing.T) {
+		var docs []string
+		for _, rule := range dslSpec.NextRules {
+			if strings.Contains(rule.Doc, "editorial length target") {
+				docs = append(docs, rule.Doc)
+			}
+		}
+		if len(docs) == 0 {
+			t.Fatal("no next-rule quotes the editorial length target; the pin has lost its subject")
+		}
+		for _, doc := range docs {
+			if !strings.Contains(doc, want) {
+				t.Errorf("next-rule doc must quote %q (the live target); got: %s", want, doc)
+			}
+		}
+	})
 }

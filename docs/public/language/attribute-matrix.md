@@ -154,7 +154,7 @@ quote-escaping, and **wins** over `@description` when both are present
 (never concatenated). Attachment: a blank line breaks it, annotations
 between the block and the declaration are transparent, consecutive `///`
 lines join with single spaces, and a bare `///` line is a paragraph
-break. Aim for ~200 characters (the editorial length target; sense emits a
+break. Aim for ~500 characters (the editorial length target; sense emits a
 hint-severity `description-length` diagnostic over the target -- never
 a hard gate, #2703). The engine tree's conformance gate rejects the
 redundant long form where `///` suffices; downstream trees convert with
