@@ -66,6 +66,24 @@ func (g senseWorkspaceGraph) SymbolsInModule(ns, kind string) []string {
 	return names
 }
 
+func (g senseWorkspaceGraph) DeclarationSites(name string) []sense.DeclSite {
+	sites := g.idx.DeclarationSites(name)
+	if len(sites) == 0 {
+		return nil
+	}
+	out := make([]sense.DeclSite, 0, len(sites))
+	for _, s := range sites {
+		out = append(out, sense.DeclSite{
+			File:   s.File,
+			Name:   s.Name,
+			Kind:   s.Kind,
+			Line:   s.Line,
+			Column: s.Column,
+		})
+	}
+	return out
+}
+
 // buildWorkspaceGraph loads the workspace tree and returns a sense.WorkspaceGraph
 // over it. It returns nil (-> the service's no-op graph) only when there is no
 // workspace to resolve against (a nil root). A partial Load -- broken

@@ -99,6 +99,7 @@ func (s *server) handler() *protocol.Handler {
 		TextDocumentSemanticTokensFull: s.semanticTokensFull,
 		TextDocumentCompletion:         s.completion,
 		TextDocumentHover:              s.hover,
+		TextDocumentDefinition:         s.definition,
 		TextDocumentSignatureHelp:      s.signatureHelp,
 		WorkspaceDidChangeWatchedFiles: s.didChangeWatchedFiles,
 	}
@@ -130,6 +131,10 @@ func (s *server) initialize(_ *glsp.Context, _ *protocol.InitializeParams) (any,
 			TriggerCharacters: completionTriggerChars,
 		},
 		HoverProvider: true,
+		// glsp's auto-advertise path is not used here (capabilities are
+		// hand-built), so without this the client never sends
+		// textDocument/definition at all.
+		DefinitionProvider: true,
 		SignatureHelpProvider: &protocol.SignatureHelpOptions{
 			TriggerCharacters: signatureHelpTriggerChars,
 		},

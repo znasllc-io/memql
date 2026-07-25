@@ -14,6 +14,9 @@ func (stubWorkspace) HasImportsOnlyFiles() bool                      { return fa
 func (stubWorkspace) Namespaces() []string                           { return []string{"fylo"} }
 func (stubWorkspace) Kinds(string) []string                          { return []string{"concepts"} }
 func (stubWorkspace) SymbolsInModule(string, string) []string        { return []string{"order"} }
+func (stubWorkspace) DeclarationSites(string) []DeclSite {
+	return []DeclSite{{File: "fylo/concepts.memql", Name: "order", Kind: "concept", Line: 3, Column: 9}}
+}
 
 func TestNew_StoresNoOpWorkspaceGraph(t *testing.T) {
 	s := New(nil)
