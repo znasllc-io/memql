@@ -32,6 +32,18 @@ func TestBareRowIntrinsicRuleFlagsFilters(t *testing.T) {
 		{"spec return body", "spec widget isSeeded {\n  return createdBy == \"seed\"\n}\n", ""},
 		// Commented-out code is not authored code.
 		{"comment", "query widget q {\n  // filter id == args.x\n  filter region == args.r\n}\n", ""},
+		// Reviewer-found holes (memql#2780 review): boolean shape must not
+		// hide a bare intrinsic, and a string literal must not manufacture one.
+		{"or-joined", "query widget q {\n  filter ownerUserId==actor.userId || id==args.x\n}\n", "id"},
+		{"parenthesized", "query widget q {\n  filter (id==args.x)\n}\n", "id"},
+		{"negated", "query widget q {\n  filter !(id==args.x)\n}\n", "id"},
+		{"in operator", "query widget q {\n  filter id in args.ids\n}\n", "id"},
+		{"lowercase intrinsic", "query widget q {\n  filter createdat < args.x\n}\n", "createdAt"},
+		{"provenance leaf", "query widget q {\n  filter provenance.kind==\"automation\"\n}\n", "provenance"},
+		{"continuation line", "query widget q {\n  filter ownerUserId==actor.userId &&\n    id==args.x\n}\n", "id"},
+		{"url literal does not truncate", "query widget q {\n  filter url==\"http://x\" && id==args.a\n}\n", "id"},
+		// A string literal containing what looks like a predicate is not one.
+		{"intrinsic inside a string literal", "query widget q {\n  filter name==\"a id==b\"\n}\n", ""},
 	}
 
 	for _, tc := range cases {
@@ -48,6 +60,9 @@ func TestBareRowIntrinsicRuleFlagsFilters(t *testing.T) {
 			}
 			if !strings.Contains(got[0].Message, "`row."+tc.want+"`") {
 				t.Errorf("message must name the replacement `row.%s`, got: %s", tc.want, got[0].Message)
+			}
+			if got[0].Severity != SeverityWarning {
+				t.Errorf("Severity = %v, want Warning (the engine still resolves bare intrinsics; only the gates retired them)", got[0].Severity)
 			}
 			if got[0].Code != "bare-row-intrinsic" {
 				t.Errorf("Code = %q, want bare-row-intrinsic", got[0].Code)

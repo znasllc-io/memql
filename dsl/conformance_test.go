@@ -11,18 +11,11 @@ import (
 
 	"github.com/znasllc-io/memql/component/language/pagination"
 	"github.com/znasllc-io/memql/component/memql/dslfs"
+	"github.com/znasllc-io/memql/component/memql/sense"
 )
 
 // itoa is a small wrapper to make exemption-map line refs more readable.
 func itoa(i int) string { return strconv.Itoa(i) }
-
-// rowIntrinsicNames are the row-envelope fields a filter predicate can name.
-// In a filter they are addressed through the `row.` namespace (memql#2779);
-// the bare spelling is retired and rejected by
-// TestFilterIntrinsicsUseRowNamespace.
-var rowIntrinsicNames = []string{
-	"id", "concept", "type", "createdAt", "createdBy", "provenance",
-}
 
 // TestFilterIntrinsicsUseRowNamespace asserts that every filter predicate
 // names a row intrinsic through the `row.` namespace -- `row.id`, not a bare
@@ -38,43 +31,46 @@ var rowIntrinsicNames = []string{
 // `args.spaceId`, `config.X`), and matches shape bodies, which have always
 // projected `row.id` / `row.createdAt`.
 //
+// Detection is shared with the edit-time Cockpit rule via
+// sense.ScanBareRowIntrinsics, deliberately: the first cut of this gate had
+// its own detector built on splitPredicates, which splits on `&&` only -- so
+// a bare intrinsic joined by `||` or wrapped in parens
+// (`filter (row.id==args.a || id==args.b)`) passed CI green while the editor
+// flagged it. dsl/telephony/queries.memql already carries a
+// parenthesized-OR filter, so that hole was reachable, not theoretical. One
+// detector, one answer.
+//
 // Scope: filter predicates only. A spec/trait body still reads its
 // signature-bound fields BARE and rejects `row.*` outright (epic #2281) --
 // the binding lives in the signature there, so the namespace would be
 // redundant. Mutation insert/update blocks write `id:` / `createdAt:` as
 // target keys rather than references, and are likewise untouched.
 func TestFilterIntrinsicsUseRowNamespace(t *testing.T) {
-	type violation struct {
-		file string
-		line int
-		text string
-		name string
+	tree := Tree()
+	paths, err := dslfs.WalkMemqlFiles(tree)
+	if err != nil {
+		t.Fatalf("WalkMemqlFiles: %v", err)
 	}
-	var violations []violation
 
-	visitFilterPredicates(t, func(file string, lineno int, pred string) {
-		head, rest := splitFilterRef(pred)
-		if head == "" || head == "row" {
-			return // unparsed, or already namespaced
+	violations := 0
+	for _, p := range paths {
+		f, openErr := tree.Open(p)
+		if openErr != nil {
+			t.Fatalf("open %s: %v", p, openErr)
 		}
-		// A dotted head is some other namespace (args / actor / config) or a
-		// nested payload path -- not a bare intrinsic.
-		if strings.HasPrefix(rest, ".") {
-			return
+		raw, readErr := io.ReadAll(f)
+		f.Close()
+		if readErr != nil {
+			t.Fatalf("read %s: %v", p, readErr)
 		}
-		for _, name := range rowIntrinsicNames {
-			if head == name {
-				violations = append(violations, violation{file, lineno, pred, name})
-				return
-			}
+		for _, hit := range sense.ScanBareRowIntrinsics(string(raw)) {
+			violations++
+			t.Errorf("%s:%d:%d  filter names the row intrinsic %q bare -- write `row.%s`",
+				p, hit.Line, hit.Column, hit.Text, hit.Name)
 		}
-	})
-
-	if len(violations) > 0 {
-		t.Errorf("found %d filter predicates naming a row intrinsic bare (write it through the `row.` namespace):", len(violations))
-		for _, v := range violations {
-			t.Errorf("  %s:%d  %s  -- write `row.%s`", v.file, v.line, v.text, v.name)
-		}
+	}
+	if violations > 0 {
+		t.Errorf("found %d filter predicate(s) naming a row intrinsic bare; the `row.` namespace is the canonical form (memql#2779)", violations)
 	}
 }
 

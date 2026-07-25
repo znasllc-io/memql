@@ -416,9 +416,19 @@ func compareComparable(a, b sortComparable) int {
 // non-sortable leaf: provenance is an object-valued intrinsic with no
 // ordering, and compileSortField has no branch for it.
 func rowIntrinsicSortField(name string) (string, error) {
-	head, leaf, found := strings.Cut(strings.TrimSpace(name), ".")
-	if !found || !strings.EqualFold(strings.TrimSpace(head), rowIntrinsicNamespace) {
+	trimmed := strings.TrimSpace(name)
+	head, leaf, found := strings.Cut(trimmed, ".")
+	if !strings.EqualFold(strings.TrimSpace(head), rowIntrinsicNamespace) {
 		return "", nil
+	}
+	if !found {
+		// A bare `row` sort key names nothing. Without this it fell through
+		// to the payload branch and ordered on the JSONB path {row} --
+		// exactly the silent no-op this function exists to prevent, and
+		// asymmetric with filterFieldRef, which errors on bare `row`.
+		return "", fmt.Errorf(
+			"%w: `row` is the row-intrinsic namespace and needs a field -- write \"row.createdAt\", \"row.id\", \"row.concept\", \"row.type\", or \"row.createdBy\"",
+			ErrInvalidArgument)
 	}
 
 	leaf = strings.TrimSpace(leaf)

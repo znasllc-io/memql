@@ -232,6 +232,17 @@ func rowIntrinsicFieldRef(ref FieldReference) (FieldReference, error) {
 	}
 
 	leaf := strings.TrimSpace(ref.Parts[1])
+
+	// `partition` and `schema` ARE row intrinsics, but the filter compiler
+	// has no branch for either -- both end at "field %q is not supported".
+	// Say that, rather than routing them into the payload advice below: an
+	// author told to "write it bare" would hit the same wall one edit later.
+	if isUnfilterableRowIntrinsic(leaf) {
+		return FieldReference{}, fmt.Errorf(
+			"%w: `row.%s` is a row intrinsic but is not filter-comparable -- there is no SQL push-down for it. Filterable intrinsics: id, concept, type, createdAt, createdBy, provenance.<leaf>",
+			ErrInvalidArgument, leaf)
+	}
+
 	info, ok := resolveIntrinsicField(leaf)
 	if !ok {
 		return FieldReference{}, fmt.Errorf(
@@ -239,12 +250,59 @@ func rowIntrinsicFieldRef(ref FieldReference) (FieldReference, error) {
 			ErrInvalidArgument, leaf, leaf)
 	}
 
-	parts := append([]string{info.canonical}, ref.Parts[2:]...)
+	// Depth validation, mirroring validateFieldReference (the strict literal
+	// path) so the namespace is not WEAKER than the bare spelling it
+	// replaces. Without this, `row.id.foo` slipped past parse -- this rewrite
+	// runs after validateFieldReference -- and surfaced later as a SQL-compile
+	// error whose text had lost the `row.` the author actually typed.
+	rest := ref.Parts[2:]
+	if info.kind == intrinsicFieldProvenance {
+		if len(rest) != 1 {
+			return FieldReference{}, fmt.Errorf(
+				"%w: `row.provenance` addresses an object -- compare a leaf instead (row.provenance.kind / .name / .trigger / .via)",
+				ErrInvalidArgument)
+		}
+		if !isProvenanceLeaf(rest[0]) {
+			return FieldReference{}, fmt.Errorf(
+				"%w: `row.provenance.%s` is not a provenance field (valid: kind, name, trigger, via)",
+				ErrInvalidArgument, rest[0])
+		}
+	} else if len(rest) > 0 {
+		return FieldReference{}, fmt.Errorf(
+			"%w: row intrinsic `row.%s` is a scalar and does not support nested paths (got `row.%s.%s`)",
+			ErrInvalidArgument, info.canonical, info.canonical, strings.Join(rest, "."))
+	}
+
+	parts := append([]string{info.canonical}, rest...)
 	return FieldReference{
 		Raw:      strings.Join(parts, "."),
 		Parts:    parts,
 		Wildcard: ref.Wildcard,
 	}, nil
+}
+
+// isUnfilterableRowIntrinsic reports whether name is a row intrinsic that
+// carries no filter push-down. `partition` and `schema` are stamped on every
+// row and are reserved filter heads (so they are never payload-prefixed), but
+// compileComparisonExpressionWithContext has no case for either.
+func isUnfilterableRowIntrinsic(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "partition", "schema":
+		return true
+	}
+	return false
+}
+
+// isProvenanceLeaf reports whether name is one of the engine-stamped
+// provenance fields. Mirrors the allow-list the provenance compiler enforces
+// (executor_filter.go) so the error arrives at parse time with the authored
+// `row.` spelling intact.
+func isProvenanceLeaf(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "kind", "name", "trigger", "via":
+		return true
+	}
+	return false
 }
 
 // rewriteFilterFieldRefs walks a resolved query plan expression and

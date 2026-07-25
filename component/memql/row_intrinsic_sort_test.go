@@ -45,7 +45,7 @@ func TestRowNamespaceInSortKeys(t *testing.T) {
 // is an error, not a silent payload ordering. `provenance` is an
 // object-valued intrinsic with no ordering, so it is rejected too.
 func TestRowNamespaceSortRejectsNonIntrinsic(t *testing.T) {
-	for _, key := range []string{"row.title", "row.status", "row.schema", "row.provenance"} {
+	for _, key := range []string{"row.title", "row.status", "row.schema", "row.provenance", "row"} {
 		got, err := compileSortField(SortField{Field: key})
 		if err == nil {
 			t.Fatalf("compileSortField(%q) = %+v, want an error", key, got)

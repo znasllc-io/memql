@@ -48,7 +48,7 @@ func TestRowNamespaceResolvesIntrinsics(t *testing.T) {
 // natural mistake once `row.` exists) must be a loud error naming the bare
 // form, never a silent payload lookup.
 func TestRowNamespaceRejectsNonIntrinsicLeaf(t *testing.T) {
-	for _, leaf := range []string{"region", "status", "ownerUserId", "schema", "partition"} {
+	for _, leaf := range []string{"region", "status", "ownerUserId"} {
 		ref := FieldReference{Raw: "row." + leaf, Parts: []string{"row", leaf}}
 		got, err := filterFieldRef(ref)
 		if err == nil {
@@ -56,6 +56,77 @@ func TestRowNamespaceRejectsNonIntrinsicLeaf(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), "row."+leaf) {
 			t.Errorf("filterFieldRef(row.%s) error must quote the offending path, got: %v", leaf, err)
+		}
+		// The advice must be actionable: name the bare replacement.
+		if !strings.Contains(err.Error(), "`"+leaf+"`") {
+			t.Errorf("filterFieldRef(row.%s) must suggest the bare form, got: %v", leaf, err)
+		}
+	}
+}
+
+// TestRowNamespaceRejectsUnfilterableIntrinsics -- `partition` and `schema`
+// ARE row intrinsics, but the filter compiler has no push-down for either.
+// Telling the author to "write it bare" (the payload advice) would send them
+// into the same wall one edit later, so they get their own message.
+func TestRowNamespaceRejectsUnfilterableIntrinsics(t *testing.T) {
+	for _, leaf := range []string{"partition", "schema"} {
+		ref := FieldReference{Raw: "row." + leaf, Parts: []string{"row", leaf}}
+		_, err := filterFieldRef(ref)
+		if err == nil {
+			t.Fatalf("filterFieldRef(row.%s) = nil error, want an error", leaf)
+		}
+		if !strings.Contains(err.Error(), "not filter-comparable") {
+			t.Errorf("filterFieldRef(row.%s) must say it is not filter-comparable, got: %v", leaf, err)
+		}
+		if strings.Contains(err.Error(), "named BARE") {
+			t.Errorf("filterFieldRef(row.%s) must NOT suggest the bare form -- it fails too. Got: %v", leaf, err)
+		}
+	}
+}
+
+// TestRowNamespaceRejectsNestedPathsOnScalars -- the namespace must not be
+// WEAKER than the bare spelling. validateFieldReference rejects `id.foo` at
+// parse time; before this check `row.id.foo` slipped through the rewrite and
+// failed later at SQL compile, with the authored `row.` missing from the
+// message.
+func TestRowNamespaceRejectsNestedPathsOnScalars(t *testing.T) {
+	for _, parts := range [][]string{
+		{"row", "id", "foo"},
+		{"row", "createdAt", "foo"},
+		{"row", "concept", "a", "b"},
+	} {
+		ref := FieldReference{Raw: strings.Join(parts, "."), Parts: parts}
+		got, err := filterFieldRef(ref)
+		if err == nil {
+			t.Fatalf("filterFieldRef(%v) = %v, want a nested-path error", parts, got.Parts)
+		}
+		if !strings.Contains(err.Error(), "nested paths") {
+			t.Errorf("filterFieldRef(%v) should name the nested-path problem, got: %v", parts, err)
+		}
+	}
+}
+
+// TestRowProvenanceLeafValidation -- provenance is the one object-valued
+// intrinsic. Its leaf is validated at parse time against the same allow-list
+// the compiler enforces, so the error keeps the authored `row.` spelling.
+func TestRowProvenanceLeafValidation(t *testing.T) {
+	for _, leaf := range []string{"kind", "name", "trigger", "via"} {
+		parts := []string{"row", "provenance", leaf}
+		got, err := filterFieldRef(FieldReference{Raw: strings.Join(parts, "."), Parts: parts})
+		if err != nil {
+			t.Fatalf("filterFieldRef(row.provenance.%s): unexpected error: %v", leaf, err)
+		}
+		if strings.Join(got.Parts, ".") != "provenance."+leaf {
+			t.Errorf("filterFieldRef(row.provenance.%s).Parts = %v, want [provenance %s]", leaf, got.Parts, leaf)
+		}
+	}
+	for _, bad := range [][]string{
+		{"row", "provenance"},              // object, no leaf
+		{"row", "provenance", "bogus"},     // not a provenance field
+		{"row", "provenance", "kind", "x"}, // too deep
+	} {
+		if _, err := filterFieldRef(FieldReference{Raw: strings.Join(bad, "."), Parts: bad}); err == nil {
+			t.Errorf("filterFieldRef(%v) = nil error, want a provenance error", bad)
 		}
 	}
 }
