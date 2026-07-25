@@ -1470,7 +1470,28 @@ file's containing `dsl/<domain>/` directory are ambient -- in scope
 with no `use` line: the loader seeds the concept-resolution namespace
 hint from the directory, canonicalId() accepts ambient same-domain
 concept short-names, and the editor suppresses same-domain import
-suggestions. `use` stays required (and lint-enforced) cross-domain.
+suggestions. `use` stays required cross-domain, and is now enforced
+(#2755) by `dsl/cross_domain_use_test.go`.
+
+The asymmetry is about information, not consistency. By the flattened
+one-file-per-kind layout a same-domain name can only come from one
+place, so the import carries nothing -- but nothing about
+`isActiveRecord` tells you it lives in `common`, so there the import is
+the only thing that says so.
+
+The cross-domain gate checks the references whose bare spelling really
+is a construct reference: a trait or spec invoked in a `filter` clause,
+and a shape named in a `shape` projection clause. It deliberately does
+NOT check bare identifiers that resolve to a concept -- a bare name in a
+filter clause is a payload field (`filter surface!=""` reads the payload
+field `surface`, not the `v1:actions:surface` concept), and 10 construct
+names double as payload field names across the tree.
+
+A reference to a construct declared NOWHERE in the tree is skipped
+rather than flagged: a product bundle mounts extra domains at boot via
+`MEMQL_DSL_PATH`, and you cannot import what does not exist at lint
+time. The rule is "if the tree can see it in another domain, name it" --
+never "every reference must resolve here".
 
 ```memql
 // dsl/planner/queries.memql -- `plan` is ambient (v1:planner:plan),

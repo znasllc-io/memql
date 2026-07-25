@@ -16,6 +16,8 @@
 // entirely -- exactly the RBAC pattern where base roles are seeded, not
 // queried as a separate store.
 
+use common.traits.{ isActiveRecord }
+
 /// Resolve the winning VALID overlay override for a base construct -- the read half of the two-tier
 /// resolution (E4.2 / memql#2140). Returns the caller's newest valid, active overlay override for
 /// the given baseConstructId (highest version first, newest createdAt on a tie). An empty result
