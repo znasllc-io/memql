@@ -273,3 +273,58 @@ mutate gizmo createGizmo {
 		}
 	})
 }
+
+// TestRun_ReportsParitySkippedDomains is the defect memql#2782 reports.
+//
+// The engine-parity pass mounts the linted root as an overlay on the embedded
+// core tree, and MountOverlayDomains skips any top-level directory whose name
+// collides with a core embedded domain -- the embedded tree already owns that
+// namespace and RegisterTree would panic on the collision. The skip itself is
+// correct. What was wrong is that it was invisible: the Warn went to a logger
+// LintUnifiedTree hard-wires to io.Discard, and the mount returned no skip
+// list, so a domain that got zero parity coverage reported exactly the same
+// "OK" as one that was checked and found clean.
+//
+// The failure mode this protects against is a product bundle shipping a
+// directory named after a core domain: its contents are never parity-checked,
+// and nothing said so.
+func TestRun_ReportsParitySkippedDomains(t *testing.T) {
+	// "cluster" is a core embedded domain, so this directory is skipped by
+	// the parity overlay. It is otherwise clean, so the run still exits 0 --
+	// a skip is information, not a diagnostic.
+	coreNamed := map[string]string{
+		"cluster/concepts.memql": `@version("1.0.0")
+@namespace("cluster")
+@description("A bundle-supplied row under a core domain name.")
+concept shadowed {
+  name  string  @required  @description("Row name.")
+}`,
+	}
+
+	t.Run("names the skipped domain", func(t *testing.T) {
+		code, out := captureRun(t, []string{writeTree(t, coreNamed)})
+		if code != 0 {
+			t.Fatalf("run() = %d, want 0 (a parity skip is informational, not a diagnostic); output:\n%s", code, out)
+		}
+		if !strings.Contains(out, "cluster") {
+			t.Errorf("report must name the skipped domain %q so the gap is visible; output:\n%s", "cluster", out)
+		}
+		if !strings.Contains(out, "parity") {
+			t.Errorf("report must say the domain was skipped from the engine-parity pass; output:\n%s", out)
+		}
+	})
+
+	t.Run("stays quiet when nothing was skipped", func(t *testing.T) {
+		// A non-colliding domain mounts normally; the report must not grow a
+		// skip note, or the signal is noise on every clean run.
+		code, out := captureRun(t, []string{writeTree(t, map[string]string{
+			"demo/concepts.memql": testConcepts,
+		})})
+		if code != 0 {
+			t.Fatalf("run() = %d, want 0; output:\n%s", code, out)
+		}
+		if strings.Contains(out, "parity") {
+			t.Errorf("no domain was skipped, so the report must carry no parity-skip note; output:\n%s", out)
+		}
+	})
+}

@@ -109,7 +109,7 @@ func buildOfflineSenseAdapter(logger *slog.Logger, root fs.FS) (*SenseAdapter, e
 	// embedded domains and are correctly skipped, and a product bundle whose
 	// domains sit at the top level resolves to the root unchanged.
 	overlayRoot, _ := resolveDSLRoot(root)
-	_, unmount := memqldsl.MountOverlayDomains(logger, overlayRoot)
+	_, _, unmount := memqldsl.MountOverlayDomains(logger, overlayRoot)
 	defer func() {
 		unmount()
 		// LoadUnifiedConcepts is additive (MergeAll). Restore a clean
