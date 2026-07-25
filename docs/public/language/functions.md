@@ -200,7 +200,7 @@ query space queryActiveSpaces {
   args {
     userId  string
   }
-  filter  traitIsActiveRecord && traitStatusIsActive && when(args.userId) { createdBy==args.userId }
+  filter  traitIsActiveRecord && traitStatusIsActive && when(args.userId) { row.createdBy==args.userId }
   shape   spaceFull
 }
 ```

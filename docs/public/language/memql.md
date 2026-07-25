@@ -847,7 +847,7 @@ Time-travel is a **query-only** clause (alongside `filter` / `shape` / `sort` / 
 @latestMode    // surfaced on the contract: this query is time-dependent
 query node queryLiveNodes {
   asOf latest
-  filter  type == "node"
+  filter  row.type == "node"
   shape   nodeCard
 }
 
