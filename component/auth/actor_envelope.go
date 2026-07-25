@@ -67,15 +67,19 @@ func ActorEnvelopeCanonicalName(name string) (string, bool) {
 // ActorEnvelopeMap builds the seeded-map form of the envelope (logic
 // bodies, context-specs): every canonical field plus the legacy alias
 // key, so map-based and path-based surfaces expose the identical set.
-// A nil AccessContext yields the dev-mode envelope (owner bit true,
-// empty identity), matching the path-resolvers' historical nil
-// behavior.
+// A nil AccessContext yields a DENYING envelope (owner bits false, empty
+// identity), matching both the path resolver and AccessContext.
+// IsClusterOwner() (memql#2801).
 func ActorEnvelopeMap(ac *AccessContext) map[string]any {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	if ac == nil {
+		// Owner bits FALSE for an absent context (memql#2801) -- see the
+		// isClusterOwner case in ActorEnvelopeValue. The two surfaces
+		// must give the same answer or the gate depends on which one
+		// evaluated it.
 		return map[string]any{
 			"userId": "", "role": "", "identityId": "", "primaryEmail": "",
-			"isClusterOwner": true, "isOwner": true, "now": now,
+			"isClusterOwner": false, "isOwner": false, "now": now,
 		}
 	}
 	owner := ac.IsClusterOwner()
@@ -121,10 +125,20 @@ func ActorEnvelopeValue(ac *AccessContext, path string) (any, bool) {
 		}
 		return ac.PrimaryEmail, true
 	case "isClusterOwner":
-		if ac == nil {
-			// No auth context (dev mode) -- treat as owner.
-			return true, true
-		}
+		// Nil DENIES (memql#2801). `actor.isClusterOwner==true` is the
+		// whole gate on the admin-tier constructs -- it compiles to a
+		// bound `? = ?` fragment and nothing else bounds the query -- so
+		// a permissive default returns every row instead of none.
+		//
+		// The old default called nil "dev mode", which it is not: with
+		// MEMQL_IDENTITY_ENABLED=false the local-dev interceptor injects
+		// a synthetic AccessContext (subject "local-dev", role "owner"),
+		// so dev mode is non-nil and still resolves to owner here. Nil
+		// means the context genuinely never arrived.
+		//
+		// IsClusterOwner() is already nil-safe (`ac != nil && ac.Role ==
+		// RoleOwner`), so this defers to the canonical helper rather
+		// than keeping a second, contradictory answer.
 		return ac.IsClusterOwner(), true
 	case "now":
 		return time.Now().UTC().Format(time.RFC3339Nano), true
