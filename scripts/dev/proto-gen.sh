@@ -87,19 +87,35 @@ resolve_protoc() {
 	local url="https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-${platform}.zip"
 	echo "  downloading pinned protoc ${PROTOC_VERSION} for ${platform}..." >&2
 	local zip="${dir}/protoc.zip"
-	if ! curl -sSL --fail --retry 5 --retry-all-errors --retry-delay 2 -o "${zip}" "${url}"; then
-		echo "ERROR: failed to download ${url}" >&2
-		rm -rf "${dir}"
-		exit 1
+	if curl -sSL --fail --retry 5 --retry-all-errors --retry-delay 2 -o "${zip}" "${url}" &&
+		unzip -oq "${zip}" -d "${dir}"; then
+		rm -f "${zip}"
+		chmod +x "${dir}/bin/protoc"
+		echo "${dir}/bin/protoc"
+		return 0
 	fi
-	if ! unzip -oq "${zip}" -d "${dir}"; then
-		echo "ERROR: failed to unpack ${zip}" >&2
-		rm -rf "${dir}"
-		exit 1
+	rm -rf "${dir}"
+
+	# Fall back to a system protoc rather than failing the lane outright. A
+	# registry/release outage should not block a proto change -- and the
+	# fallback is SAFE for the gate, because --check diffs with the version
+	# stamp ignored, so a differing protoc still produces a correct verdict.
+	# The only cost is cosmetic stamp churn on a plain regenerate, which is
+	# exactly the annoyance the pin exists to avoid -- hence the loud warning
+	# rather than silent degradation.
+	if command -v protoc >/dev/null 2>&1; then
+		echo "WARNING: could not fetch pinned protoc ${PROTOC_VERSION} (${url})." >&2
+		echo "         Falling back to system protoc $(protoc --version 2>/dev/null | awk '{print $2}')." >&2
+		echo "         Drift detection is unaffected (the version stamp is ignored when diffing)," >&2
+		echo "         but a plain regenerate may rewrite the stamp in every generated file." >&2
+		command -v protoc
+		return 0
 	fi
-	rm -f "${zip}"
-	chmod +x "${dir}/bin/protoc"
-	echo "${dir}/bin/protoc"
+
+	echo "ERROR: could not fetch pinned protoc ${PROTOC_VERSION} from ${url}," >&2
+	echo "       and no system protoc is available as a fallback." >&2
+	echo "       Install one (e.g. 'apt-get install -y protobuf-compiler' or 'brew install protobuf') and retry." >&2
+	exit 1
 }
 
 # ensure_tools installs the pinned plugins into a throwaway bin, provisions the

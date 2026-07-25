@@ -69,11 +69,33 @@ func TestProtoGen_ProtocIsPinned(t *testing.T) {
 		t.Error("proto-gen.sh must provision the pinned protoc itself (bin/tools/, mirroring " +
 			"scripts/identity/build-css.sh) rather than trusting whatever is on PATH")
 	}
-	// The old prerequisite instruction is what told contributors to install an
-	// arbitrary system protoc; provisioning replaces it.
-	if strings.Contains(src, "apt-get install -y protobuf-compiler") {
-		t.Error("proto-gen.sh still instructs installing a system protobuf-compiler; " +
-			"the pinned protoc is provisioned by the script")
+}
+
+// TestProtoGen_FallsBackToSystemProtoc pins the availability tradeoff.
+//
+// Pinning protoc introduced a network dependency on GitHub releases. An
+// outage there must not block a proto change, so the script degrades to a
+// system protoc rather than failing outright. That fallback is safe for the
+// GATE specifically because --check diffs with the version stamp ignored, so a
+// differing protoc still produces a correct drift verdict -- the only cost is
+// cosmetic stamp churn on a plain regenerate, which is why the fallback warns
+// loudly instead of degrading silently.
+func TestProtoGen_FallsBackToSystemProtoc(t *testing.T) {
+	src := protoGenSource(t)
+
+	if !strings.Contains(src, "command -v protoc") {
+		t.Error("proto-gen.sh must fall back to a system protoc when the pinned download " +
+			"fails; a releases outage should not block the proto lane (#2774)")
+	}
+	if !strings.Contains(src, "WARNING") {
+		t.Error("the protoc fallback must warn -- silently generating with an unpinned " +
+			"protoc reintroduces the stamp churn the pin exists to prevent")
+	}
+	// The stamp-ignore is what makes the fallback safe for the gate; losing it
+	// would turn a fallback into false drift.
+	if !strings.Contains(src, "STAMP_IGNORE") {
+		t.Error("the drift diff must keep ignoring the protoc version stamp, or a fallback " +
+			"protoc would report false drift")
 	}
 }
 
