@@ -1,6 +1,9 @@
 package parser
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 // memql#2772: `??` (#2611) in the remaining VALUE slots.
 //
@@ -120,6 +123,47 @@ func TestNullCoalesce_ValueSlotFoldShape(t *testing.T) {
 	plain := parseValueSlot(t, `args.a`)
 	if _, wrapped := plain.(*CoalesceExpr); wrapped {
 		t.Error("a ??-free value must not be wrapped in a CoalesceExpr")
+	}
+}
+
+// The arms must be the SAME node kind the coalesce() call form
+// produces. parseValue returns a bare Go string for an identifier and
+// valueToExprNode wraps it in a LiteralExpr, so folding parseValue
+// results turned `body ?? ""` into coalesce("body", "") -- the
+// automation then wrote the identifier's own NAME into the row
+// (`summary: "body"` instead of the note body), the memql#580
+// render-the-identifier-as-its-own-name class. A source-text assertion
+// cannot see this; only the node kind can.
+func TestNullCoalesce_BareIdentifierArmStaysAReference(t *testing.T) {
+	shorthand := parseValueSlot(t, `body ?? ""`)
+	co, ok := shorthand.(*CoalesceExpr)
+	if !ok {
+		t.Fatalf("want *CoalesceExpr, got %T", shorthand)
+	}
+	if lit, isLit := co.Args[0].(*LiteralExpr); isLit {
+		t.Fatalf("bare identifier arm became a string literal %v -- it renders as its own name", lit.Value)
+	}
+
+	// Pin it positively against the call spelling: the same operand must
+	// produce the same node kind in both.
+	baseline := parseFilterExpr(t, `coalesce(body, "")`)
+	baseCo, ok := baseline.(*CoalesceExpr)
+	if !ok {
+		t.Fatalf("baseline: want *CoalesceExpr, got %T", baseline)
+	}
+	if got, want := reflect.TypeOf(co.Args[0]), reflect.TypeOf(baseCo.Args[0]); got != want {
+		t.Errorf("arm node kind differs from the coalesce() spelling: got %v, want %v", got, want)
+	}
+
+	// Dotted references too -- `node.id ?? ""` is the cluster-registration
+	// shape that wrote the literal "node.id" into every registered node.
+	dotted := parseValueSlot(t, `node.id ?? ""`)
+	dco, ok := dotted.(*CoalesceExpr)
+	if !ok {
+		t.Fatalf("dotted: want *CoalesceExpr, got %T", dotted)
+	}
+	if lit, isLit := dco.Args[0].(*LiteralExpr); isLit {
+		t.Fatalf("dotted reference arm became a string literal %v", lit.Value)
 	}
 }
 

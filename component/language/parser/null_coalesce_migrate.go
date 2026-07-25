@@ -191,7 +191,10 @@ func foldCoalesceAt(line string, start int, code, str []bool) (string, bool) {
 	if b, found := prevCodeByte(line, start, code); found && strings.IndexByte("+-*/%!", b) >= 0 {
 		return "", false
 	}
-	if b, found := nextCodeByte(line, end+1, code); found && strings.IndexByte("+-*/%", b) >= 0 {
+	if b, found := nextCodeByte(line, end+1, code); found && strings.IndexByte("+-*/%.[(", b) >= 0 {
+		// `.` / `[` / `(` are postfix accessors on the call RESULT.
+		// Folding would re-attach them to the final ARM instead:
+		// `coalesce(a, b).payload` -> `a ?? b.payload` (memql#2766 review).
 		return "", false
 	}
 	return line[:start] + strings.Join(args, " ?? ") + line[end+1:], true
@@ -286,6 +289,14 @@ func hasTopLevelBoolOperator(arg string) bool {
 			if depth == 0 {
 				return true
 			}
+		case 'i':
+			// `in` -- the DSL's single membership operator (CLAUDE.md).
+			// It binds like a comparison, so an arm carrying one folds
+			// wrong just as `==` does, and the result does not even
+			// parse (memql#2766 review).
+			if depth == 0 && isWordAt(arg, i, "in") {
+				return true
+			}
 		case '=', '!':
 			// `==` / `!=`. A lone `=` or `!` is not a comparison; `!`
 			// leading a negated operand is safe under the fold.
@@ -325,4 +336,18 @@ func nextCodeByte(line string, idx int, code []bool) (byte, bool) {
 		return line[i], true
 	}
 	return 0, false
+}
+
+// isWordAt reports whether word sits at offset i as a whole word.
+func isWordAt(s string, i int, word string) bool {
+	if i+len(word) > len(s) || s[i:i+len(word)] != word {
+		return false
+	}
+	if i > 0 && isIdentByte(s[i-1]) {
+		return false
+	}
+	if end := i + len(word); end < len(s) && isIdentByte(s[end]) {
+		return false
+	}
+	return true
 }

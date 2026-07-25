@@ -174,6 +174,21 @@ func TestRewriteNullCoalesce_SkipsUnsafe(t *testing.T) {
 			why:  "prose, not code",
 		},
 		{
+			name: "postfix dot access on the call result",
+			in:   "    x: coalesce(args.a, args.b).payload",
+			why:  "`a ?? b.payload` moves the access onto the ARM instead of the result",
+		},
+		{
+			name: "postfix index on the call result",
+			in:   "    x: coalesce(args.a, args.b)[0]",
+			why:  "same re-association, via the index",
+		},
+		{
+			name: "membership operator inside an arg",
+			in:   `    ok: coalesce(args.k in args.list, false)`,
+			why:  "`in` binds like a comparison, so `k in list ?? false` re-associates (and does not parse)",
+		},
+		{
 			name: "identifier suffix is not the builtin",
 			in:   "    x: mycoalesce(args.a, args.b)",
 			why:  "word boundary -- a different function",

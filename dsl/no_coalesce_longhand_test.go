@@ -29,6 +29,11 @@ func TestNoCoalesceLonghand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("WalkMemqlFiles: %v", err)
 	}
+	// A floor, so an empty walk cannot pass this gate vacuously (the
+	// convention the sibling walks follow).
+	if len(paths) == 0 {
+		t.Fatal("WalkMemqlFiles returned no files; the gate must not pass vacuously")
+	}
 	var stale []string
 	for _, p := range paths {
 		f, openErr := tree.Open(p)
