@@ -6,7 +6,7 @@
   "publisher": "znasllc",
   "license": "SEE LICENSE IN LICENSE",
   "engines": {
-    "vscode": "^1.85.0"
+    "vscode": "^1.91.0"
   },
   "categories": [
     "Programming Languages"
