@@ -122,3 +122,60 @@ func TestBuildOfflineSense_OverlayVisibleToServiceButRestoredGlobally(t *testing
 		t.Errorf("overlay concept %s leaked into a subsequent embedded-only build", gadgetConceptID)
 	}
 }
+
+// repoShapedOverlay is a workspace shaped like the REPOSITORY an author opens
+// in VS Code: the product domains live under dsl/, and a scratch .memql file
+// sits directly in that container directory. Scratch files like it exist in
+// real working trees.
+var repoShapedOverlay = fstest.MapFS{
+	"dsl/test.memql": {Data: []byte("// a scratch file an author left in the tree\n")},
+	"dsl/gadgets/concepts.memql": {Data: []byte(`@version("1.0.0")
+@namespace("gadgets")
+@description("A gadget for offline-sense overlay testing.")
+concept gadget {
+  label  string  @required  @description("Gadget label.")
+}
+`)},
+	"dsl/widgets/concepts.memql": {Data: []byte(`@version("1.0.0")
+@namespace("widgets")
+@description("A widget for offline-sense overlay testing.")
+concept widget {
+  label  string  @required  @description("Widget label.")
+}
+`)},
+}
+
+// TestBuildOfflineSense_StrayFileInContainerDirDoesNotBreakTheBuild is the
+// #2770 regression net.
+//
+// MountOverlayDomains treats any immediate subdirectory holding a .memql file
+// as a product domain. From a repository root that is normally nothing --
+// dsl/ holds only subdirectories -- but ONE scratch file made `dsl` itself
+// qualify, so it mounted as a domain named "dsl" and every concept beneath it
+// failed namespace validation. The whole registry build aborted, and the
+// editor lost all concept knowledge.
+//
+// The failure was confusing rather than obvious: go-to-definition kept working
+// (the workspace graph is built from files independently), so it read as
+// "hover is broken", not "one file is misplaced".
+func TestBuildOfflineSense_StrayFileInContainerDirDoesNotBreakTheBuild(t *testing.T) {
+	adapter, err := buildOfflineSenseAdapter(nil, repoShapedOverlay)
+	if err != nil {
+		t.Fatalf("a scratch .memql in the DSL container dir must not break the build: %v", err)
+	}
+	if adapter == nil {
+		t.Fatal("no adapter built")
+	}
+	// The core embedded registry must still be there -- the symptom was it
+	// vanishing entirely.
+	if len(adapter.ConceptNames()) == 0 {
+		t.Error("expected the embedded concept registry to survive; got 0 concepts")
+	}
+	// And the product domains below dsl/ must still mount, since resolving the
+	// root is what lets them be seen as domains at all.
+	for _, want := range []string{"v1:gadgets:gadget", "v1:widgets:widget"} {
+		if _, ok := adapter.ConceptGet(want); !ok {
+			t.Errorf("overlay concept %s not mounted from the resolved DSL root", want)
+		}
+	}
+}

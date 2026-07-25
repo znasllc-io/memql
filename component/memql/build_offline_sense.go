@@ -99,7 +99,17 @@ func buildOfflineSenseAdapter(logger *slog.Logger, root fs.FS) (*SenseAdapter, e
 	offlineSenseBuildMu.Lock()
 	defer offlineSenseBuildMu.Unlock()
 
-	_, unmount := memqldsl.MountOverlayDomains(logger, root)
+	// Mount overlays from the resolved DSL root, not the raw workspace root
+	// (memql#2770). MountOverlayDomains treats any immediate subdirectory
+	// holding a .memql file as a product domain -- and from a repository root
+	// a single scratch file in dsl/ makes `dsl` itself qualify, so it mounts
+	// as a domain and every concept beneath it fails namespace validation,
+	// taking the whole registry down. Resolving first mounts from where the
+	// real domains live: in the engine repo they all collide with core
+	// embedded domains and are correctly skipped, and a product bundle whose
+	// domains sit at the top level resolves to the root unchanged.
+	overlayRoot, _ := resolveDSLRoot(root)
+	_, unmount := memqldsl.MountOverlayDomains(logger, overlayRoot)
 	defer func() {
 		unmount()
 		// LoadUnifiedConcepts is additive (MergeAll). Restore a clean
