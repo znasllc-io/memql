@@ -839,20 +839,7 @@ var queryFilterHeadRe = regexp.MustCompile(
 // lane 2 owns unresolved bindings, and a product bundle linted standalone
 // legitimately binds engine concepts it does not carry.
 func (t *Tree) verifyQueryFilterFields(path string, f *languageAst.File, idx *declIndex) []error {
-	conceptFor := map[string]string{}
-	dupNames := map[string]bool{}
-	for _, m := range queryFilterHeadRe.FindAllStringSubmatch(languageParser.BlankComments(t.readSource(path)), -1) {
-		if _, seen := conceptFor[m[2]]; seen {
-			// Two queries share a name in one file. The name->concept map
-			// cannot say which binding belongs to which AST node, and a
-			// last-wins guess reports a real property of one as undeclared on
-			// the other's concept. Skip both rather than emit a wrong
-			// diagnostic; the duplicate itself is a separate defect.
-			dupNames[m[2]] = true
-			continue
-		}
-		conceptFor[m[2]] = m[1] // name -> concept
-	}
+	conceptFor, dupNames := t.queryConceptBindings(path)
 	if len(conceptFor) == 0 {
 		return nil
 	}
@@ -860,6 +847,15 @@ func (t *Tree) verifyQueryFilterFields(path string, f *languageAst.File, idx *de
 	inScope := constructNamesInScope(path, f, idx)
 
 	var errs []error
+	// Report the duplicate rather than only skipping past it. Nothing else in
+	// the pipeline flags two queries sharing a name in one file, so the
+	// earlier "the duplicate is a separate defect" hand-wave left BOTH
+	// queries' filters unchecked with no trace.
+	for _, name := range sortedKeys(dupNames) {
+		errs = append(errs, fmt.Errorf(
+			"%s: query %q is declared more than once in this file; filter fields cannot be checked for either (the name does not identify one binding)",
+			path, name))
+	}
 	for _, def := range f.Definitions {
 		fd, ok := def.(*languageAst.FunctionDef)
 		if !ok || fd.Type != languageAst.FunctionTypeQuery {
@@ -1107,17 +1103,14 @@ func (t *Tree) QueryFilterCoverage() (total int, skipped []string) {
 		if f == nil || t.ImportsOnly[path] {
 			continue
 		}
-		conceptFor := map[string]string{}
-		for _, m := range queryFilterHeadRe.FindAllStringSubmatch(languageParser.BlankComments(t.readSource(path)), -1) {
-			conceptFor[m[2]] = m[1]
-		}
+		conceptFor, dupNames := t.queryConceptBindings(path)
 		for _, def := range f.Definitions {
 			fd, ok := def.(*languageAst.FunctionDef)
 			if !ok || fd.Type != languageAst.FunctionTypeQuery {
 				continue
 			}
 			total++
-			if t.resolveFilterConcept(path, f, idx, conceptFor[fd.Name]) == nil {
+			if dupNames[fd.Name] || t.resolveFilterConcept(path, f, idx, conceptFor[fd.Name]) == nil {
 				skipped = append(skipped, fmt.Sprintf("%s: query %q (concept %q)", path, fd.Name, conceptFor[fd.Name]))
 			}
 		}
@@ -1160,6 +1153,23 @@ func (t *Tree) resolveFilterConcept(path string, f *languageAst.File, idx *declI
 	if res := t.resolveConceptForFile(path, f, idx, name); res.state == conceptResolved && res.decl != nil {
 		return res.decl
 	}
+	// An EXPLICIT import wins over the ambient domain, matching boot:
+	// concept_resolver.go consults namespaceHintForName(file.Uses, ...) first
+	// and only falls back to the ambient domain when no import names the
+	// concept. Without this guard the fallback also fired for the documented
+	// product-bundle case -- a file importing an engine concept from a
+	// namespace absent from the linted root -- and reported that namespace's
+	// properties as undeclared, i.e. red CI on legal DSL.
+	for _, u := range f.Uses {
+		if u == nil {
+			continue
+		}
+		for _, n := range u.Names {
+			if n == name {
+				return nil
+			}
+		}
+	}
 	domain := path
 	if i := strings.IndexByte(path, '/'); i > 0 {
 		domain = path[:i]
@@ -1173,4 +1183,37 @@ func (t *Tree) resolveFilterConcept(path string, f *languageAst.File, idx *declI
 		}
 	}
 	return nil
+}
+
+// queryConceptBindings maps each struct-form query name in a file to the
+// concept its signature binds, and separately reports names declared more than
+// once.
+//
+// Shared by lane 5 and QueryFilterCoverage deliberately: when the two derived
+// the mapping independently, the lane skipped duplicate names while the
+// coverage probe counted them as covered, so the guard that exists to make
+// silent skips impossible had a blind spot on the one skip path the lane
+// itself introduced.
+func (t *Tree) queryConceptBindings(path string) (conceptFor map[string]string, dupNames map[string]bool) {
+	conceptFor = map[string]string{}
+	dupNames = map[string]bool{}
+	for _, m := range queryFilterHeadRe.FindAllStringSubmatch(languageParser.BlankComments(t.readSource(path)), -1) {
+		if _, seen := conceptFor[m[2]]; seen {
+			dupNames[m[2]] = true
+			continue
+		}
+		conceptFor[m[2]] = m[1] // name -> concept
+	}
+	return conceptFor, dupNames
+}
+
+// sortedKeys returns a set's keys in deterministic order, so repeated runs
+// report findings identically.
+func sortedKeys(set map[string]bool) []string {
+	out := make([]string, 0, len(set))
+	for k := range set {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }

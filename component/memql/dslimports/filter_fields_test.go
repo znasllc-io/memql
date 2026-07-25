@@ -267,3 +267,79 @@ concept gadget {
   size  string  @description("Size.")
 }
 `
+
+// TestFilterFieldsExplicitImportWinsOverAmbientDomain pins memql#2795-review
+// F1. The same-domain fallback exists for an unimported ambiguous short name,
+// but it must not override an EXPLICIT import -- boot resolves the import
+// first (concept_resolver.go consults namespaceHintForName before the ambient
+// domain).
+//
+// The failure it prevents is the documented product-bundle case: a file
+// importing an engine concept from a namespace absent from the linted root,
+// while a same-named concept happens to exist in its own domain. Reporting the
+// engine concept's properties as undeclared is red CI on legal DSL.
+func TestFilterFieldsExplicitImportWinsOverAmbientDomain(t *testing.T) {
+	tree, err := Load(fstest.MapFS{
+		"acme/concepts.memql": &fstest.MapFile{Data: []byte(
+			"/// A local request, unrelated to the imported one.\nconcept request {\n  localProp  string  @description(\"Local.\")\n}\n")},
+		"acme/queries.memql": &fstest.MapFile{Data: []byte(`use cognition.concepts.{ request }
+
+/// Bound to the IMPORTED request, whose namespace this root does not carry.
+query request findRequest {
+  filter  channel == args.channel
+}
+`)},
+	})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	for _, e := range tree.VerifyReferentialIntegrity() {
+		if strings.Contains(e.Error(), "filter compares field") {
+			t.Errorf("an explicit import must win over the ambient domain; got: %v", e)
+		}
+	}
+}
+
+// TestFilterFieldsReportsDuplicateQueryNames pins F2. Skipping a duplicate
+// silently left BOTH queries' filters unchecked with no trace, and the
+// coverage guard -- which exists precisely to make silent skips impossible --
+// counted them as covered because it derived the name map independently.
+func TestFilterFieldsReportsDuplicateQueryNames(t *testing.T) {
+	tree, err := Load(fstest.MapFS{
+		"lab/concepts.memql": &fstest.MapFile{Data: []byte(dupConceptsSrc)},
+		"lab/queries.memql": &fstest.MapFile{Data: []byte(`use lab.concepts.{ widget, gadget }
+
+/// First.
+query widget dup {
+  filter  region == "x"
+}
+
+/// Second, same name.
+query gadget dup {
+  filter  size == "y"
+}
+`)},
+	})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	reported := false
+	for _, e := range tree.VerifyReferentialIntegrity() {
+		if strings.Contains(e.Error(), "declared more than once") {
+			reported = true
+		}
+		if strings.Contains(e.Error(), "filter compares field") {
+			t.Errorf("must not guess a concept for a duplicate name; got: %v", e)
+		}
+	}
+	if !reported {
+		t.Error("a duplicate query name must be reported, not silently skipped")
+	}
+
+	// And the coverage probe must agree that those queries are NOT covered.
+	total, skipped := tree.QueryFilterCoverage()
+	if total != 2 || len(skipped) != 2 {
+		t.Errorf("coverage must count both duplicates as skipped; got total=%d skipped=%v", total, skipped)
+	}
+}

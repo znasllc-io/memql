@@ -23,14 +23,21 @@ import (
 // candidate space that spans both namespaces and ordinary property spellings
 // is what makes both directions detectable.
 func TestReservedFilterHeadsMatchEngine(t *testing.T) {
+	// Row intrinsics are DERIVED from the engine's registry, not listed: a
+	// hand-written list passes when the engine GAINS an intrinsic, which is
+	// the direction that breaks things. Adding `updatedAt` to
+	// intrinsicFieldRegistry must fail this test, not slip past it.
 	candidates := []string{
-		// Engine namespaces.
+		// Engine namespaces (a literal switch in reservedFilterHead; there is
+		// no registry to derive these from).
 		"row", "payload", "actor", "args", "now", "config", "trace", "meta", "provenance",
-		// Row intrinsics -- engine-reserved, so never payload-prefixed.
-		"id", "concept", "type", "createdAt", "createdBy", "schema", "partition",
+		"schema", "partition",
 		// Ordinary payload properties -- classified by neither side.
 		"status", "ownerUserId", "region", "kind", "name", "rowCount", "rows",
 		"parent", "aliasOf", "session", "settings", "credentials", "source",
+	}
+	for name := range intrinsicFieldRegistry {
+		candidates = append(candidates, name)
 	}
 
 	for _, name := range candidates {
