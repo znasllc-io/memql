@@ -634,7 +634,7 @@ automation "test": dependency cycle among steps [a b]
 
 **Rule.** Query / mutation / spec / trait / logic constructs are
 named with a kind prefix: `queryActiveSpaces`, `mutationCreateSpace`,
-`specIsHumanParticipant`, `traitIsActiveRecord`, `logicAutoJoinSI`.
+`specIsHumanParticipant`, `isActiveRecord`, `logicAutoJoinSI`.
 Constructs live in one consolidated file per kind per namespace
 (`dsl/<namespace>/<construct>s.memql`), so the file name never
 carries an individual construct's name.
@@ -643,7 +643,7 @@ carries an individual construct's name.
 dsl/cognition/queries.memql     query space queryActiveSpaces { ... }
 dsl/cognition/mutations.memql   mutation space mutationCreateSpace { ... }
 dsl/cognition/specs.memql       spec specIsHumanParticipant { ... }
-dsl/common/traits.memql         trait traitIsActiveRecord { ... }
+dsl/common/traits.memql         trait isActiveRecord { ... }
 dsl/cognition/logic.memql       logic logicAutoJoinSI { ... }
 ```
 
@@ -1058,7 +1058,7 @@ is rejected at load time): `now`, `actor`, `partition`, `config`,
 
 ```memql
 use cognition.concepts.{ utterance, space }
-use common.traits.{ traitIsActiveRecord }
+use common.traits.{ isActiveRecord }
 
 /// Insert a chat utterance
 mutation utterance mutationSendUtterance {
@@ -1079,7 +1079,7 @@ query space queryActiveSpaces {
   args {
     ownerId  string  @required
   }
-  filter  ownerId == args.ownerId && traitIsActiveRecord
+  filter  ownerId == args.ownerId && isActiveRecord
   shape   spaceFull
 }
 
@@ -1187,9 +1187,9 @@ the change. The gates, with their test names:
 - **Mandatory trait specs** (`TestNoInlineTraitablePredicates`).
   When a trait in `dsl/common/traits.memql` covers a predicate, the
   filter must call the trait, not inline the comparison:
-  `traitIsActiveRecord` (not `active == true`),
-  `traitIsNotDeleted` (not `deleted != true`),
-  `traitStatusIsActive` (not `status == "active"`), and so
+  `isActiveRecord` (not `active == true`),
+  `isNotDeleted` (not `deleted != true`),
+  `statusIsActive` (not `status == "active"`), and so
   on for the status / identity-type / deletion-scheduled traits.
   Concept-specific predicates (`ownerUserId == args.userId`)
   stay inline.
@@ -1286,7 +1286,7 @@ query space queryFirstTenSpaces {
 // Legitimate full-set read — compliant, marked + auditable.
 @unbounded("provider catalog is a small bounded set — never more than a handful of rows")
 query provider queryAllProviders {
-  filter  traitIsActiveRecord
+  filter  isActiveRecord
   shape   providerFull
 }
 
@@ -1348,7 +1348,7 @@ explicit "never cache" escape.
 ```memql
 @cache(ttl="300")
 query agentRole queryActiveAgentRoles {
-  filter  traitIsActiveRecord
+  filter  isActiveRecord
   shape   agentRoleFull
 }
 ```

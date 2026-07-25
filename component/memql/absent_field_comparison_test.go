@@ -169,25 +169,38 @@ func TestAbsentPayloadField_SQLPushdownSemantics(t *testing.T) {
 func sqlMatchesAbsentRow(t *testing.T, fragment string, operand any) bool {
 	t.Helper()
 	switch {
-	case strings.Contains(fragment, "IS DISTINCT FROM ?"):
-		// NULL IS DISTINCT FROM <non-null operand> -> TRUE.
-		return true
-
+	// COALESCE FIRST. It rewrites the NULL away, so the operator that
+	// follows applies to '' rather than to NULL -- which means this arm
+	// must win even when the fragment also contains IS DISTINCT FROM.
+	// `COALESCE(NULL,'') IS DISTINCT FROM ''` is FALSE, the opposite of
+	// the bare IS DISTINCT FROM answer, so checking that arm first would
+	// report a divergence that does not exist.
 	case strings.HasPrefix(fragment, "(COALESCE("):
-		// COALESCE(NULL, '') -> ''. Apply the fragment's own operator to
-		// '' and the operand.
+		// COALESCE(NULL, '') -> ''. Apply the fragment's own operator.
 		s, ok := operand.(string)
 		require.True(t, ok, "a COALESCE fragment compares strings; got %T", operand)
 		switch {
 		case strings.Contains(fragment, "<> ?"):
-			return "" != s
-		case strings.Contains(fragment, "= ?"):
-			return "" == s
+			return s != ""
+		case strings.Contains(fragment, "IS DISTINCT FROM ?"):
+			return s != ""
+		case strings.Contains(fragment, "= ?") && !strings.Contains(fragment, ">= ?") && !strings.Contains(fragment, "<= ?"):
+			return s == ""
 		}
 		t.Fatalf("unrecognised operator in COALESCE fragment %q", fragment)
 
-	case strings.Contains(fragment, "= ?"):
-		// NULL = <v> -> NULL -> row not returned.
+	case strings.Contains(fragment, "IS DISTINCT FROM ?"):
+		// NULL IS DISTINCT FROM <non-null operand> -> TRUE.
+		return true
+
+	// Every remaining shape compares NULL directly, which yields NULL --
+	// never true -- so the row is not returned. Guarding `= ?` against
+	// the compound operators keeps `>=` / `<=` from being read as
+	// equality even though the answer happens to coincide.
+	case strings.Contains(fragment, "= ?"),
+		strings.Contains(fragment, "> ?"),
+		strings.Contains(fragment, "< ?"),
+		strings.Contains(fragment, "IN (?)"):
 		return false
 	}
 	t.Fatalf("unrecognised SQL shape %q -- extend sqlMatchesAbsentRow deliberately "+
@@ -238,6 +251,18 @@ func TestAbsentPayloadField_OnlyNotEqualsIsNullSafe(t *testing.T) {
 		{"not in", OpOut, []any{true}, `((payload #>> '{deleted}')::boolean NOT IN (?))`},
 		{"in", OpIn, []any{true}, `((payload #>> '{deleted}')::boolean IN (?))`},
 		{"greater than", OpGt, 5, `((payload #>> '{deleted}')::numeric > ?)`},
+		// A STRING collection compiles to an entirely different shape
+		// (jsonb_typeof / jsonb_exists_any, to support array-valued
+		// payload fields). It must reach the same answer for an absent
+		// field: jsonb_typeof(NULL) is NULL, so neither disjunct holds.
+		{
+			"in, string collection", OpIn, []any{"a", "b"},
+			`((jsonb_typeof(payload->'deleted') = 'array' AND jsonb_exists_any(payload->'deleted', ?::text[])) OR (payload #>> '{deleted}' IN (?)))`,
+		},
+		{
+			"not in, string collection", OpOut, []any{"a", "b"},
+			`((jsonb_typeof(payload->'deleted') = 'array' AND NOT jsonb_exists_any(payload->'deleted', ?::text[])) OR (jsonb_typeof(payload->'deleted') != 'array' AND payload #>> '{deleted}' NOT IN (?)))`,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			match, err := nodeMatchesComparison(node, absentFieldComparison(tc.op, tc.value), map[string]map[string]any{})
