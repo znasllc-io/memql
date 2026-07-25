@@ -29,7 +29,7 @@ query bundle authoringBundleById {
   args {
     bundleId  string!
   }
-  filter  ownerUserId==actor.userId && id==args.bundleId
+  filter  ownerUserId==actor.userId && row.id==args.bundleId
   shape   bundleFull
 }
 

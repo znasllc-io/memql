@@ -128,7 +128,7 @@ query plan planById {
   args {
     planId  string!
   }
-  filter  id==args.planId
+  filter  row.id==args.planId
   shape   planFull
 }
 
@@ -407,6 +407,6 @@ query responsibility responsibilityById {
   args {
     responsibilityId  string!
   }
-  filter  id==args.responsibilityId
+  filter  row.id==args.responsibilityId
   shape   responsibilityFull
 }

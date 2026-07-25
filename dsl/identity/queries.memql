@@ -63,7 +63,7 @@ query accessRequest accessRequestById {
   args {
     requestId  string!
   }
-  filter  when(args.requestId) { id==args.requestId }
+  filter  when(args.requestId) { row.id==args.requestId }
   shape   accessRequestFull
 }
 
@@ -513,7 +513,7 @@ query authSession authSessionsForSubject {
 
 /// Latest singleton cluster-settings row, pinned to id=cluster.
 query clusterSettings clusterSettingsCurrent {
-  filter  id=="cluster"
+  filter  row.id=="cluster"
   shape   clusterSettingsFull
 }
 
@@ -721,7 +721,7 @@ query accessRequest expiredPendingAccessRequests {
   args {
     createdBefore  string
   }
-  filter  statusIsPending && when(args.createdBefore) { createdAt<args.createdBefore }
+  filter  statusIsPending && when(args.createdBefore) { row.createdAt<args.createdBefore }
   shape   accessRequestFull
 }
 
@@ -746,7 +746,7 @@ query invitation invitationById {
   args {
     invitationId  string!
   }
-  filter  when(args.invitationId) { id==args.invitationId }
+  filter  when(args.invitationId) { row.id==args.invitationId }
   shape   invitationFull
 }
 
@@ -928,7 +928,7 @@ query identity patIdentityById {
   args {
     identityId  string!
   }
-  filter  identityIsApiKey && id==args.identityId
+  filter  identityIsApiKey && row.id==args.identityId
   shape   identityFull
 }
 
@@ -1029,7 +1029,7 @@ query user userActiveSpace {
   args {
     userId  string!
   }
-  filter  when(args.userId) { id==args.userId }
+  filter  when(args.userId) { row.id==args.userId }
   shape   userActiveSpaceProjection
 }
 
@@ -1082,7 +1082,7 @@ query user userById {
   args {
     userId  string!
   }
-  filter  id==args.userId && isActiveRecord
+  filter  row.id==args.userId && isActiveRecord
   shape   userFull
 }
 
@@ -1108,7 +1108,7 @@ query user userById {
 @mcp
 @actor
 query user currentUser {
-  filter  id==actor.userId && isActiveRecord
+  filter  row.id==actor.userId && isActiveRecord
   shape   userFull
 }
 
@@ -1462,6 +1462,6 @@ query identity nodeTokenIdentityById {
   args {
     identityId  string!
   }
-  filter  identityIsNodeToken && id==args.identityId
+  filter  identityIsNodeToken && row.id==args.identityId
   shape   identityFull
 }

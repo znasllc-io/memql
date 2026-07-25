@@ -80,7 +80,7 @@ query artifact libraryArtifactById {
   args {
     artifactId  string!
   }
-  filter  when(args.artifactId) { id==args.artifactId } && ownerUserId==actor.userId
+  filter  when(args.artifactId) { row.id==args.artifactId } && ownerUserId==actor.userId
   shape   artifactFull
 }
 
@@ -93,7 +93,7 @@ query generatedOutput generatedOutputById {
   args {
     outputId  string!
   }
-  filter  when(args.outputId) { id==args.outputId } && ownerUserId==actor.userId
+  filter  when(args.outputId) { row.id==args.outputId } && ownerUserId==actor.userId
   shape   generatedOutputFull
 }
 
@@ -125,7 +125,7 @@ query memory memoryById {
   args {
     memoryId  string!
   }
-  filter  when(args.memoryId) { id==args.memoryId } && ownerUserId==actor.userId
+  filter  when(args.memoryId) { row.id==args.memoryId } && ownerUserId==actor.userId
   shape   memoryFull
 }
 
@@ -193,7 +193,7 @@ query documentVersion documentVersionById {
   args {
     versionId  string!
   }
-  filter  when(args.versionId) { id==args.versionId } && ownerUserId==actor.userId
+  filter  when(args.versionId) { row.id==args.versionId } && ownerUserId==actor.userId
   shape   documentVersionFull
 }
 

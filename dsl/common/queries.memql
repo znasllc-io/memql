@@ -24,7 +24,7 @@ query attachment attachmentById {
     attachmentId  string!
     partitionId       string!
   }
-  filter  when(args.attachmentId) { id==args.attachmentId } && partitionId==args.partitionId
+  filter  when(args.attachmentId) { row.id==args.attachmentId } && partitionId==args.partitionId
   shape   attachmentDownload
 }
 

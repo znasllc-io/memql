@@ -35,7 +35,7 @@ query user queryUserById {
   args {
     userId  string  @required
   }
-  filter  id == args.userId
+  filter  row.id == args.userId
   shape   userFull
 }
 

@@ -27,7 +27,7 @@ query note noteById {
   args {
     noteId  string!
   }
-  filter  when(args.noteId) { id==args.noteId } && ownerUserId==actor.userId
+  filter  when(args.noteId) { row.id==args.noteId } && ownerUserId==actor.userId
   shape   noteFull
 }
 

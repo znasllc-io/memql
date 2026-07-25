@@ -28,7 +28,9 @@ func TestRewriteBarePayloadFilterFields(t *testing.T) {
 				Operator: OpEq,
 				Value:    "x",
 			}
-			rewriteBarePayloadFilterFields(cmp)
+			if err := rewriteFilterFieldRefs(cmp); err != nil {
+				t.Fatalf("rewriteFilterFieldRefs: %v", err)
+			}
 			got := cmp.Field.Parts
 			if len(got) != len(tc.want) {
 				t.Fatalf("parts = %v, want %v", got, tc.want)

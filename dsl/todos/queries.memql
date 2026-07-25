@@ -32,6 +32,6 @@ query todo todoById {
   args {
     todoId  string!
   }
-  filter  when(args.todoId) { id==args.todoId } && ownerUserId==actor.userId
+  filter  when(args.todoId) { row.id==args.todoId } && ownerUserId==actor.userId
   shape   todoFull
 }

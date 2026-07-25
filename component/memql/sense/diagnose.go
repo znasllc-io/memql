@@ -259,6 +259,7 @@ func (s *Service) semanticDiagnostics(file *parser.File, source string) []Diagno
 	diagnostics = append(diagnostics, arraySyntaxRule(source)...)
 	diagnostics = append(diagnostics, redundantEnabledRule(source)...)
 	diagnostics = append(diagnostics, redundantVersionRule(source)...)
+	diagnostics = append(diagnostics, bareRowIntrinsicRule(source)...)
 	diagnostics = append(diagnostics, actorUndeclaredRule(source)...)
 	diagnostics = append(diagnostics, actorUnknownPropertyRule(source)...)
 	diagnostics = append(diagnostics, discardedArgsDescriptionRule(source)...)
@@ -474,6 +475,9 @@ func containsStr(slice []string, s string) bool {
 func annotationRejectionMessage(name, receiverType string) string {
 	if hint, retired := baseparser.RetiredConstructAnnotation(name); retired {
 		return fmt.Sprintf("annotation @%s is retired -- %s", name, hint)
+	}
+	if hint, misplaced := baseparser.MisplacedConstructAnnotation(name); misplaced {
+		return fmt.Sprintf("annotation @%s is not valid on a %s -- %s", name, strings.ToLower(receiverType), hint)
 	}
 	return fmt.Sprintf("annotation @%s is not valid for receiver type %s", name, receiverType)
 }

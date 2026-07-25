@@ -732,3 +732,56 @@ func argsFieldAnchor(source string, ownerPos Position, fieldName string) Positio
 	}
 	return ownerPos
 }
+
+// bareRowIntrinsicRule flags a filter predicate that names a row intrinsic
+// BARE -- `filter id == args.x` instead of `filter row.id == args.x`
+// (memql#2779). It is the edit-time half of dsl.TestFilterIntrinsicsUseRowNamespace,
+// so an author sees the rule in Cockpit instead of discovering it when CI
+// rejects the branch.
+//
+// Why it matters beyond style: a filter mixes two field surfaces under one
+// syntax. Payload properties are bare (epic #2292), so a bare `id` is
+// indistinguishable from a payload property by shape alone, and the two
+// compile to completely different SQL. `row.` names the envelope explicitly.
+//
+// Scope is deliberately narrow -- only `filter` clause lines. A spec/trait
+// body reads its signature-bound fields bare and REJECTS `row.*` outright
+// (epic #2281), so flagging a `return` predicate here would teach the exact
+// opposite of what that surface accepts.
+func bareRowIntrinsicRule(source string) []Diagnostic {
+	var diagnostics []Diagnostic
+	for i, raw := range strings.Split(source, "\n") {
+		line := raw
+		if idx := strings.Index(line, "//"); idx >= 0 {
+			line = line[:idx]
+		}
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "filter ") && !strings.HasPrefix(trimmed, "filter\t") {
+			continue
+		}
+		for _, m := range bareRowIntrinsicRE.FindAllStringSubmatchIndex(line, -1) {
+			name := line[m[4]:m[5]]
+			col := m[4] + 1
+			diagnostics = append(diagnostics, Diagnostic{
+				Range: Range{
+					Start: Position{Line: i + 1, Column: col},
+					End:   Position{Line: i + 1, Column: col + len(name)},
+				},
+				Severity: SeverityError,
+				Message: fmt.Sprintf(
+					"filter names the row intrinsic %q bare -- write `row.%s`. In a filter, payload properties are BARE (the concept is bound by the signature) and the row envelope is addressed through `row.`, so the two surfaces stay distinguishable (memql#2779)",
+					name, name),
+				Code: "bare-row-intrinsic",
+			})
+		}
+	}
+	return diagnostics
+}
+
+// bareRowIntrinsicRE matches a row intrinsic used as a comparison LHS with no
+// namespace. The leading group rejects a dotted or identifier context so
+// `args.id`, `row.id`, and a payload property like `threadId` never match;
+// the trailing group requires a comparison operator so a bare word inside a
+// string or a spec-call argument does not.
+var bareRowIntrinsicRE = regexp.MustCompile(
+	`(^|[^A-Za-z0-9_.])(id|concept|type|createdAt|createdBy|provenance)[ \t]*(==|!=|<=|>=|<|>)`)

@@ -98,13 +98,18 @@ var (
 	queryHeaderRe = regexp.MustCompile(`(?m)^[ \t]*query[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
 
 	// uniqueKeyFilterRe matches a unique-key equality on the row's
-	// primary intrinsic: a bare `id == <expr>` (single-row read). A
-	// guarded `when(args.x) { id == ... }` is intentionally NOT matched
-	// here -- the id filter is conditional on the arg being present, so
-	// the query can still return the full set when the arg is omitted.
-	// We require the `id` token to stand alone on its LHS (not a
-	// payload sub-field like `payload.threadId`).
-	uniqueKeyFilterRe = regexp.MustCompile(`(^|[^A-Za-z0-9_.])id[ \t]*==`)
+	// primary intrinsic: `row.id == <expr>` (single-row read). A
+	// guarded `when(args.x) { row.id == ... }` is intentionally NOT
+	// matched here -- the id filter is conditional on the arg being
+	// present, so the query can still return the full set when the arg
+	// is omitted.
+	//
+	// The `row.` namespace makes this unambiguous (memql#2779). Before it,
+	// the pattern had to match a BARE `id ==` while excluding payload
+	// sub-fields that merely end in "id" (`payload.threadId`) -- that is
+	// what the leading negative class did, and it is kept so a property
+	// named `myrow` cannot masquerade as the namespace.
+	uniqueKeyFilterRe = regexp.MustCompile(`(^|[^A-Za-z0-9_.])row\.id[ \t]*==`)
 
 	// unboundedRe matches `@unbounded("reason")` and captures the
 	// reason.

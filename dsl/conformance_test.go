@@ -16,6 +16,68 @@ import (
 // itoa is a small wrapper to make exemption-map line refs more readable.
 func itoa(i int) string { return strconv.Itoa(i) }
 
+// rowIntrinsicNames are the row-envelope fields a filter predicate can name.
+// In a filter they are addressed through the `row.` namespace (memql#2779);
+// the bare spelling is retired and rejected by
+// TestFilterIntrinsicsUseRowNamespace.
+var rowIntrinsicNames = []string{
+	"id", "concept", "type", "createdAt", "createdBy", "provenance",
+}
+
+// TestFilterIntrinsicsUseRowNamespace asserts that every filter predicate
+// names a row intrinsic through the `row.` namespace -- `row.id`, not a bare
+// `id`.
+//
+// Why the namespace exists (memql#2779): a filter mixes two field surfaces
+// under one syntax. Payload properties are BARE (epic #2292 -- the concept is
+// bound by the query signature), so before this rule a reader could not tell
+// `id == args.x` (row envelope) from `status == args.x` (payload) without
+// memorising the reserved-word list, and the two compile to completely
+// different SQL. `row.` makes the envelope explicit, lines the filter surface
+// up with the namespaces an author already writes (`actor.userId`,
+// `args.spaceId`, `config.X`), and matches shape bodies, which have always
+// projected `row.id` / `row.createdAt`.
+//
+// Scope: filter predicates only. A spec/trait body still reads its
+// signature-bound fields BARE and rejects `row.*` outright (epic #2281) --
+// the binding lives in the signature there, so the namespace would be
+// redundant. Mutation insert/update blocks write `id:` / `createdAt:` as
+// target keys rather than references, and are likewise untouched.
+func TestFilterIntrinsicsUseRowNamespace(t *testing.T) {
+	type violation struct {
+		file string
+		line int
+		text string
+		name string
+	}
+	var violations []violation
+
+	visitFilterPredicates(t, func(file string, lineno int, pred string) {
+		head, rest := splitFilterRef(pred)
+		if head == "" || head == "row" {
+			return // unparsed, or already namespaced
+		}
+		// A dotted head is some other namespace (args / actor / config) or a
+		// nested payload path -- not a bare intrinsic.
+		if strings.HasPrefix(rest, ".") {
+			return
+		}
+		for _, name := range rowIntrinsicNames {
+			if head == name {
+				violations = append(violations, violation{file, lineno, pred, name})
+				return
+			}
+		}
+	})
+
+	if len(violations) > 0 {
+		t.Errorf("found %d filter predicates naming a row intrinsic bare (write it through the `row.` namespace):", len(violations))
+		for _, v := range violations {
+			t.Errorf("  %s:%d  %s  -- write `row.%s`", v.file, v.line, v.text, v.name)
+		}
+	}
+}
+
 // TestFilterSyntaxCanonical asserts that every filter clause in the
 // tree references payload fields via `payload.X`, never via
 // `<conceptName>.X` or `?.<conceptName>.X`.
