@@ -7,8 +7,11 @@ import (
 	"github.com/znasllc-io/memql/component/language/parser"
 )
 
-// Hover returns information about the symbol at a position.
-func (s *Service) Hover(source string, line, col int) *HoverResult {
+// Hover returns information about the symbol at a position. filePath is
+// the document's path, used to derive the ambient domain when a bare
+// construct name is ambiguous across namespaces; "" is accepted and only
+// costs that disambiguation.
+func (s *Service) Hover(source string, line, col int, filePath string) *HoverResult {
 	if source == "" || s.registries == nil {
 		return nil
 	}
@@ -95,7 +98,77 @@ func (s *Service) Hover(source string, line, col int) *HoverResult {
 		}
 	}
 
+	// 9. Tool name.
+	if tl, ok := s.registries.ToolGet(token); ok {
+		return &HoverResult{
+			Contents: fmt.Sprintf("**%s** (tool)\n\n%s", tl.Name, tl.Description),
+			Range:    tokenRange,
+		}
+	}
+
+	// 10. Prompt name.
+	if pr, ok := s.registries.PromptGet(token); ok {
+		return &HoverResult{
+			Contents: fmt.Sprintf("**%s** (prompt)\n\n%s", pr.Name, pr.Description),
+			Range:    tokenRange,
+		}
+	}
+
+	// 11. Bare concept short name. Same-domain constructs are ambient --
+	// referenced with no `use` import (authoring rule 25, #2617) -- so the
+	// signature binding in `shape candidate candidateFull` names a concept
+	// the registry only knows by its canonical id. Resolve the short name
+	// last, after every exact-name lookup above has had its turn.
+	if canonical, ok := s.resolveBareConcept(token, filePath); ok {
+		if c, ok := s.registries.ConceptGet(canonical); ok {
+			return &HoverResult{
+				Contents: formatConceptHover(c),
+				Range:    tokenRange,
+			}
+		}
+	}
+
 	return nil
+}
+
+// resolveBareConcept maps a bare short name to a canonical concept id by
+// trailing segment, mirroring the loader's own resolution
+// (component/memql/concept_resolver.go:119-158). A single match wins
+// outright. An ambiguous one -- `plan` is both v1:planner:plan and
+// v1:harness:plan, and 46 bare names collide tree-wide -- is settled only
+// by the file's own domain, and otherwise stays unresolved: hover says
+// nothing rather than naming the wrong concept.
+func (s *Service) resolveBareConcept(name, filePath string) (string, bool) {
+	if s.registries == nil || name == "" || strings.Contains(name, ":") {
+		return "", false
+	}
+	var matches []string
+	for _, canonical := range s.registries.ConceptNames() {
+		if idx := strings.LastIndex(canonical, ":"); idx >= 0 && canonical[idx+1:] == name {
+			matches = append(matches, canonical)
+		}
+	}
+	switch len(matches) {
+	case 0:
+		return "", false
+	case 1:
+		return matches[0], true
+	}
+	domain := fileDomain(filePath)
+	if domain == "" {
+		return "", false
+	}
+	needle := ":" + domain + ":"
+	var scoped []string
+	for _, m := range matches {
+		if strings.Contains(m, needle) {
+			scoped = append(scoped, m)
+		}
+	}
+	if len(scoped) == 1 {
+		return scoped[0], true
+	}
+	return "", false
 }
 
 // tokenAtPosition finds the token (word or identifier) at a cursor position.

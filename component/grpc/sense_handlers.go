@@ -130,7 +130,12 @@ func (s *streamSession) handleSenseHover(envelope *memqlv1.MemqlClientMessage, m
 
 	go func() {
 		pos := msg.GetPosition()
-		result := svc.Hover(msg.GetSource(), int(pos.GetLine()), int(pos.GetColumn()))
+		// SenseHoverMsg carries no file_path (SenseCompleteMsg and
+		// SenseDiagnoseMsg do). Without it a bare concept name whose
+		// trailing segment collides across namespaces stays unresolved
+		// here rather than resolving wrongly; every unambiguous name is
+		// unaffected. Adding the field is a proto change (#2753).
+		result := svc.Hover(msg.GetSource(), int(pos.GetLine()), int(pos.GetColumn()), "")
 		resp := &memqlv1.SenseHoverResult{RequestId: requestId}
 		if result != nil {
 			resp.Contents = result.Contents
