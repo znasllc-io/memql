@@ -105,6 +105,21 @@ func compileSortField(field SortField) (compiledSortField, error) {
 	}
 
 	direction := normalizeSortDirection(field.Direction)
+
+	// The `row.` namespace names a row intrinsic here for the same reason it
+	// does in a filter (memql#2779): without it, `sort "row.createdAt"` fell
+	// through to the bare-payload branch below and ordered on the JSONB path
+	// {row,createdAt}, which no stored row carries -- a silent no-op ordering
+	// rather than an error. Resolving it here keeps the two surfaces honest:
+	// an author taught `row.` by the filter rule writes it in a sort key too.
+	resolved, err := rowIntrinsicSortField(name)
+	if err != nil {
+		return compiledSortField{}, err
+	}
+	if resolved != "" {
+		name = resolved
+	}
+
 	lowered := strings.ToLower(name)
 
 	if info, ok := resolveIntrinsicField(name); ok {
@@ -386,4 +401,32 @@ func compareComparable(a, b sortComparable) int {
 		raw = -raw
 	}
 	return raw
+}
+
+// rowIntrinsicSortField resolves a `row.`-namespaced sort key to the bare
+// intrinsic name compileSortField already understands, mirroring
+// filterFieldRef for the ordering surface (memql#2779).
+//
+// Returns "" when name is not `row.`-namespaced, so the caller falls through
+// to its existing intrinsic / payload handling untouched. A non-intrinsic
+// leaf is an error rather than a fall-through to the payload surface -- that
+// fall-through is precisely the silent no-op this closes.
+//
+// `row.provenance` is rejected with the same message as any other
+// non-sortable leaf: provenance is an object-valued intrinsic with no
+// ordering, and compileSortField has no branch for it.
+func rowIntrinsicSortField(name string) (string, error) {
+	head, leaf, found := strings.Cut(strings.TrimSpace(name), ".")
+	if !found || !strings.EqualFold(strings.TrimSpace(head), rowIntrinsicNamespace) {
+		return "", nil
+	}
+
+	leaf = strings.TrimSpace(leaf)
+	info, ok := resolveIntrinsicField(leaf)
+	if !ok || info.kind == intrinsicFieldProvenance {
+		return "", fmt.Errorf(
+			"%w: sort key `row.%s` is not a sortable row intrinsic (valid: id, concept, type, createdAt, createdBy) -- a payload property is named BARE in a sort key, so write \"%s\"",
+			ErrInvalidArgument, leaf, leaf)
+	}
+	return info.canonical, nil
 }
