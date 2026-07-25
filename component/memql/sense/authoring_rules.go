@@ -72,7 +72,7 @@ func walkExpressionsForDirectives(funcDef *parser.FunctionDef, node parser.Node,
 			*out = append(*out, Diagnostic{
 				Range: Range{
 					Start: pos,
-					End:   Position{Line: pos.Line, Column: pos.Column + len(n.Name)},
+					End:   Position{Line: pos.Line, Column: pos.Column + runeWidth(n.Name)},
 				},
 				Severity: SeverityError,
 				Message:  fmt.Sprintf("directive %q cannot appear inside a function body; the function-loader validator will reject it at engine init. Move it to the caller or inline the query at the call site. See docs/public/language/authoring-rules.md gotcha #1.", n.Name),
@@ -117,7 +117,7 @@ func reportDirectiveExpr(funcDef *parser.FunctionDef, name, source string, out *
 	*out = append(*out, Diagnostic{
 		Range: Range{
 			Start: pos,
-			End:   Position{Line: pos.Line, Column: pos.Column + len(name)},
+			End:   Position{Line: pos.Line, Column: pos.Column + runeWidth(name)},
 		},
 		Severity: SeverityError,
 		Message:  fmt.Sprintf("directive %q cannot appear inside a function body (function %q); see docs/public/language/authoring-rules.md gotcha #1.", name, funcDef.Name),
@@ -176,7 +176,7 @@ func appendIfBadName(diagnostics []Diagnostic, name, kind, source string) []Diag
 		diagnostics = append(diagnostics, Diagnostic{
 			Range: Range{
 				Start: pos,
-				End:   Position{Line: pos.Line, Column: pos.Column + len(name)},
+				End:   Position{Line: pos.Line, Column: pos.Column + runeWidth(name)},
 			},
 			Severity: SeverityWarning,
 			Message:  fmt.Sprintf("%s name %q is %d characters; max 50 recommended (gotcha #6)", kind, name, len(name)),
@@ -193,7 +193,7 @@ func appendIfBadName(diagnostics []Diagnostic, name, kind, source string) []Diag
 		diagnostics = append(diagnostics, Diagnostic{
 			Range: Range{
 				Start: pos,
-				End:   Position{Line: pos.Line, Column: pos.Column + len(name)},
+				End:   Position{Line: pos.Line, Column: pos.Column + runeWidth(name)},
 			},
 			Severity: SeverityError,
 			Message:  fmt.Sprintf("%s name %q contains whitespace; names must be contiguous (gotcha #6)", kind, name),
@@ -205,7 +205,7 @@ func appendIfBadName(diagnostics []Diagnostic, name, kind, source string) []Diag
 		diagnostics = append(diagnostics, Diagnostic{
 			Range: Range{
 				Start: pos,
-				End:   Position{Line: pos.Line, Column: pos.Column + len(name)},
+				End:   Position{Line: pos.Line, Column: pos.Column + runeWidth(name)},
 			},
 			Severity: SeverityWarning,
 			Message:  fmt.Sprintf("%s name %q should not start or end with '-' (gotcha #6)", kind, name),
@@ -234,11 +234,11 @@ func arraySyntaxRule(source string) []Diagnostic {
 			// Filter out calls named `array` inside a larger identifier;
 			// the regex anchors to non-identifier-chars on both sides.
 			_ = matchText
-			pos := Position{Line: lineIdx + 1, Column: start + 1}
+			pos := Position{Line: lineIdx + 1, Column: runeColumn(line, start)}
 			diagnostics = append(diagnostics, Diagnostic{
 				Range: Range{
 					Start: pos,
-					End:   Position{Line: pos.Line, Column: end + 1},
+					End:   Position{Line: pos.Line, Column: runeColumn(line, end)},
 				},
 				Severity: SeverityHint,
 				Message:  "`array(T)` is deprecated; use `[]T` (run `memqlmigrate --rewrite=slice-syntax` to migrate). See Phase 6 of the language-improvements plan.",
@@ -253,6 +253,69 @@ func arraySyntaxRule(source string) []Diagnostic {
 // It deliberately matches only the declared-shape form, not a call
 // named `array` that appears inside a larger expression.
 var arrayCallRE = regexp.MustCompile(`\barray\(\s*[A-Za-z_][A-Za-z0-9_:]*\s*\)`)
+
+// runeColumn converts a 0-based BYTE offset into line to the 1-based RUNE
+// column the Sense position contract specifies (cmd/memql-lsp/internal/
+// position: "A Sense column counts runes: the lexer scans a []rune and does
+// one column++ per rune"). Rules that derive positions from regexp index
+// functions or byte-wise scan loops MUST route through this, or a multi-byte
+// rune earlier on the line pushes the squiggle right one position per extra
+// UTF-8 byte (memql#2788).
+//
+// line must be the ORIGINAL source line, not a stripped or blanked copy. The
+// property callers rely on is INDEX ALIGNMENT, not equal length: both
+// transforms emit at most one byte per input byte and never relocate one, so a
+// byte offset into the transformed text indexes the same position in the
+// original. (BlankBlockComments preserves length exactly; stripStringsAndComments
+// stops at a `//` tail, so its output can be shorter.) Alignment is what makes
+// line[:byteOffset] the right prefix -- counting runes in the transformed text
+// would not work, because a blanked multi-byte rune becomes that many
+// single-byte spaces and would count as that many runes, recovering the byte
+// count it was supposed to replace.
+//
+// A byteOffset landing mid-rune rounds up to the next column. No caller passes
+// one -- offsets come from regex match boundaries and rune-aligned scans.
+func runeColumn(line string, byteOffset int) int {
+	if byteOffset <= 0 {
+		return 1
+	}
+	if byteOffset > len(line) {
+		byteOffset = len(line)
+	}
+	return utf8.RuneCountInString(line[:byteOffset]) + 1
+}
+
+// runeWidth is the column span of s -- its rune count, not its byte length.
+// Used for End columns, which are Start plus the width of the flagged token.
+// Identifiers can carry non-ASCII: the lexer admits them via unicode.IsLetter
+// (component/language/parser/lexer.go), so len() is wrong there too.
+func runeWidth(s string) int { return utf8.RuneCountInString(s) }
+
+// advanceRuneColumns walks source from byte offset `from` to `to`, returning
+// the line and RUNE column reached. Rules that report a sorted run of offsets
+// use it to carry position forward incrementally instead of re-scanning the
+// prefix per hit.
+//
+// It decodes rather than testing utf8.RuneStart so invalid UTF-8 costs exactly
+// one column, matching []rune and utf8.RuneCountInString (DecodeRuneInString
+// returns RuneError with width 1). Counting only rune-start bytes would give a
+// stray continuation byte zero width and drift the squiggle LEFT.
+func advanceRuneColumns(source string, from, to, line, col int) (int, int) {
+	for i := from; i < to && i < len(source); {
+		r, size := utf8.DecodeRuneInString(source[i:])
+		if size == 0 {
+			break
+		}
+		if r == '\n' {
+			line++
+			col = 1
+		} else {
+			col++
+		}
+		i += size
+	}
+	return line, col
+}
 
 // stripStringsAndComments returns the input line with string-literal
 // contents and // line-comment tails blanked out, so regex-based
@@ -291,11 +354,11 @@ func redundantEnabledRule(source string) []Diagnostic {
 		for _, m := range enabledAnnotationRE.FindAllStringSubmatchIndex(content, -1) {
 			// Anchor on the @enabled token (submatch 1), not the
 			// whitespace-swallowing full match.
-			pos := Position{Line: lineIdx + 1, Column: m[2] + 1}
+			pos := Position{Line: lineIdx + 1, Column: runeColumn(line, m[2])}
 			diagnostics = append(diagnostics, Diagnostic{
 				Range: Range{
 					Start: pos,
-					End:   Position{Line: pos.Line, Column: m[3] + 1},
+					End:   Position{Line: pos.Line, Column: runeColumn(line, m[3])},
 				},
 				Severity: SeverityHint,
 				Message:  "`@enabled` is an accepted no-op: definitions are enabled by default (#2604-#2608). Delete the line; `@disabled` is the off-switch.",
@@ -327,11 +390,11 @@ func redundantVersionRule(source string) []Diagnostic {
 		// /* */ block or a multiline string still hints -- the same
 		// latent exposure the sibling rules accept.
 		for _, m := range versionDefaultRE.FindAllStringSubmatchIndex(line, -1) {
-			pos := Position{Line: lineIdx + 1, Column: m[2] + 1}
+			pos := Position{Line: lineIdx + 1, Column: runeColumn(line, m[2])}
 			diagnostics = append(diagnostics, Diagnostic{
 				Range: Range{
 					Start: pos,
-					End:   Position{Line: pos.Line, Column: m[3] + 1},
+					End:   Position{Line: pos.Line, Column: runeColumn(line, m[3])},
 				},
 				Severity: SeverityHint,
 				Message:  "`@version(\"1.0.0\")` is the default: absent means 1.0.0 (#2613). Delete the line; keep @version only for genuine non-defaults.",
@@ -376,8 +439,17 @@ func DiscardedArgsDescriptions(source string) []Diagnostic {
 	depth := 0
 	inArgs := false
 	argsDepth := 0
+	// Columns are counted in the ORIGINAL line, not the blanked one: both
+	// transforms emit one byte per input byte (and preserve newlines), so byte
+	// offsets and line indices carry over exactly, but a blanked multi-byte
+	// rune becomes that many spaces and would count as that many runes.
+	origLines := strings.Split(source, "\n")
 	for lineIdx, line := range strings.Split(BlankBlockComments(source), "\n") {
 		code := stripStringsAndComments(line)
+		orig := line
+		if lineIdx < len(origLines) {
+			orig = origLines[lineIdx]
+		}
 		openBraces := map[int]bool{}
 		for _, m := range argsBlockOpenRE.FindAllStringSubmatchIndex(code, -1) {
 			openBraces[m[1]-1] = true // the opener's brace position
@@ -402,11 +474,11 @@ func DiscardedArgsDescriptions(source string) []Diagnostic {
 				if end := i + len("@description"); end < len(code) && isWordByte(code[end]) {
 					continue // @descriptionX -- a different annotation
 				}
-				pos := Position{Line: lineIdx + 1, Column: i + 1}
+				pos := Position{Line: lineIdx + 1, Column: runeColumn(orig, i)}
 				diagnostics = append(diagnostics, Diagnostic{
 					Range: Range{
 						Start: pos,
-						End:   Position{Line: pos.Line, Column: i + 1 + len("@description")},
+						End:   Position{Line: pos.Line, Column: pos.Column + runeWidth("@description")},
 					},
 					Severity: SeverityHint,
 					Message:  "`@description` on an args field is parsed and discarded (no AST slot, #2615). Delete it -- per-field docs arrive with /// doc comments (#2601).",
@@ -507,19 +579,12 @@ func actorUndeclaredRule(source string) []Diagnostic {
 	var diagnostics []Diagnostic
 	line, col, prev := 1, 1, 0
 	for _, off := range offsets {
-		for i := prev; i < off && i < len(source); i++ {
-			if source[i] == '\n' {
-				line++
-				col = 1
-			} else {
-				col++
-			}
-		}
+		line, col = advanceRuneColumns(source, prev, off, line, col)
 		prev = off
 		diagnostics = append(diagnostics, Diagnostic{
 			Range: Range{
 				Start: Position{Line: line, Column: col},
-				End:   Position{Line: line, Column: col + len("actor.")},
+				End:   Position{Line: line, Column: col + runeWidth("actor.")},
 			},
 			Severity: SeverityError,
 			Message:  "this body reads the auth envelope (actor.*) but the construct does not declare `@actor`; reading the actor is a declared capability (#2621) -- add a bare `@actor` annotation line above the declaration",
@@ -548,14 +613,7 @@ func actorUnknownPropertyRule(source string) []Diagnostic {
 	var diagnostics []Diagnostic
 	line, col, prev := 1, 1, 0
 	for _, ref := range refs {
-		for i := prev; i < ref.Offset && i < len(source); i++ {
-			if source[i] == '\n' {
-				line++
-				col = 1
-			} else {
-				col++
-			}
-		}
+		line, col = advanceRuneColumns(source, prev, ref.Offset, line, col)
 		prev = ref.Offset
 		if _, ok := auth.ActorEnvelopeCanonicalName(ref.Name); ok {
 			continue
@@ -563,7 +621,7 @@ func actorUnknownPropertyRule(source string) []Diagnostic {
 		diagnostics = append(diagnostics, Diagnostic{
 			Range: Range{
 				Start: Position{Line: line, Column: col},
-				End:   Position{Line: line, Column: col + len(ref.Name)},
+				End:   Position{Line: line, Column: col + runeWidth(ref.Name)},
 			},
 			Severity: SeverityError,
 			Message:  "unknown actor member `actor." + ref.Name + "`; the auth envelope is a closed set (#2623) -- valid: " + auth.ActorEnvelopeValidNames(),
@@ -761,7 +819,7 @@ func bareRowIntrinsicRule(source string) []Diagnostic {
 		diagnostics = append(diagnostics, Diagnostic{
 			Range: Range{
 				Start: Position{Line: hit.Line, Column: hit.Column},
-				End:   Position{Line: hit.Line, Column: hit.Column + len(hit.Text)},
+				End:   Position{Line: hit.Line, Column: hit.Column + runeWidth(hit.Text)},
 			},
 			Severity: SeverityWarning,
 			Message: fmt.Sprintf(
