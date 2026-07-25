@@ -578,7 +578,7 @@ func (e *mutationTemplateEvaluator) evalString(ctx context.Context, s string) (a
 	// to correctly type coalesce fallback values like coalesce(ctx.x, []).
 	if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
 		if arr := parseArrayLiteral(trimmed); arr != nil {
-			return arr, nil
+			return unwrapMalformedNullCoalesce(arr), nil
 		}
 	}
 
@@ -586,7 +586,7 @@ func (e *mutationTemplateEvaluator) evalString(ctx context.Context, s string) (a
 	// to correctly type coalesce fallback values like coalesce(ctx.x, {}).
 	if strings.HasPrefix(trimmed, "{") && strings.HasSuffix(trimmed, "}") {
 		if obj := parseObjectLiteral(trimmed); obj != nil {
-			return obj, nil
+			return unwrapMalformedNullCoalesce(obj), nil
 		}
 	}
 
@@ -696,11 +696,14 @@ func (e *mutationTemplateEvaluator) evalParserExpression(ctx context.Context, ex
 			}
 			if i == len(t.Args)-1 {
 				// Normalise the sentinel away: a missing final arm is
-				// "no value", matching both reference implementations.
-				// evalStringMaybe already maps nil and missingValue{} to
-				// "" for these slots, but isTruthy(missingValue{}) is
-				// TRUE, so leaking the sentinel would make an all-missing
-				// coalesce truthy inside And/Or/Not.
+				// "no value", matching coalesceFromArgs. (evalCoalesce
+				// returns "" rather than nil for the blank-then-missing
+				// corner; not observable here, since evalStringMaybe maps
+				// nil and missingValue{} alike to "" for these slots.)
+				// The normalisation matters because
+				// isTruthy(missingValue{}) is TRUE, so leaking the
+				// sentinel would make an all-missing coalesce read as
+				// truthy inside And/Or/Not.
 				if isMissing(ev) {
 					return nil, nil
 				}

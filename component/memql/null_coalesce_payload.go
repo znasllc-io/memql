@@ -266,6 +266,15 @@ func lowerNullCoalesceInGroups(expr string) (string, bool) {
 			if depth > 0 {
 				depth--
 			}
+		case ')':
+			// Balances the `depth++` below for a paren opened INSIDE a
+			// literal group. Without it the walker stayed permanently
+			// "inside a literal" after the first such paren and silently
+			// skipped every later group -- `f([g(1)]+h(a ?? 1))` left its
+			// `??` unlowered with no error (memql#2772 review round 3).
+			if depth > 0 {
+				depth--
+			}
 		case '(':
 			if depth > 0 {
 				depth++
@@ -346,6 +355,33 @@ func matchingCloseParen(expr string, open int) int {
 		}
 	}
 	return -1
+}
+
+// unwrapMalformedNullCoalesce restores the sentinel to its raw text.
+//
+// The load guard cannot see a `??` inside an object or array literal ARM
+// (their members are `key: value` pairs, so the lowering does not descend
+// into them). Those arms are re-classified at RUNTIME by
+// parseObjectLiteral / parseArrayLiteral, which would otherwise put the
+// unexported sentinel struct into the stored payload -- it marshals to
+// `{}`, indistinguishable from a deliberate empty object, and crosses the
+// persistence boundary. Restoring the raw text keeps the pre-#2772
+// behaviour for that corner: the value lands as visible garbage a human
+// can spot, exactly as the coalesce() spelling always did.
+func unwrapMalformedNullCoalesce(v any) any {
+	switch t := v.(type) {
+	case malformedNullCoalesce:
+		return t.raw
+	case map[string]any:
+		for k, nested := range t {
+			t[k] = unwrapMalformedNullCoalesce(nested)
+		}
+	case []any:
+		for i, nested := range t {
+			t[i] = unwrapMalformedNullCoalesce(nested)
+		}
+	}
+	return v
 }
 
 // firstMalformedNullCoalesce finds a payload field carrying the

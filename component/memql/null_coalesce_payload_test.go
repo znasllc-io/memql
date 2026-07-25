@@ -165,6 +165,52 @@ func TestParsePayloadRawToTemplate_RejectsMalformedInsideArray(t *testing.T) {
 func TestLowerNullCoalesceExpr_BooleanConnectivePrecedence(t *testing.T) {
 	require.Equal(t, `a && coalesce(b, c)`, lowerNullCoalesceExpr(`a && b ?? c`))
 	require.Equal(t, `coalesce(a, b) || c`, lowerNullCoalesceExpr(`a ?? b || c`))
+	// `;` is the retired separator spelling of AND, still accepted by
+	// parseLogicalAnd -- so it has to split like `&&` or the same drift
+	// reappears through the back door.
+	require.Equal(t, `a ; coalesce(b, c)`, lowerNullCoalesceExpr(`a ; b ?? c`))
+	// Mixed connectives keep each side's coalesce independent.
+	require.Equal(t, `coalesce(a, b) && coalesce(c, d)`, lowerNullCoalesceExpr(`a ?? b && c ?? d`))
+}
+
+// A paren opened INSIDE an object/array literal must not leave the group
+// walker stuck "inside a literal": the missing ')' decrement silently
+// skipped every later group, so a real `??` reached the template
+// unlowered AND unreported.
+func TestLowerNullCoalesceExpr_ParenInsideLiteralGroup(t *testing.T) {
+	require.Equal(t, `f([g(1)]+h(coalesce(a, 1)))`, lowerNullCoalesceExpr(`f([g(1)]+h(a ?? 1))`))
+	require.Equal(t, `f({x: g(1)}, h(coalesce(a, 1)))`, lowerNullCoalesceExpr(`f({x: g(1)}, h(a ?? 1))`))
+}
+
+// The sentinel must never cross the persistence boundary. A `??` inside
+// a literal ARM is invisible to the load guard (the lowering does not
+// descend into `key: value` members), so it is re-classified at runtime;
+// without unwrapping, the unexported struct marshals to `{}` -- silently
+// indistinguishable from a deliberate empty object.
+func TestUnwrapMalformedNullCoalesce_KeepsRawTextOutOfPayloads(t *testing.T) {
+	obj := parseObjectLiteral(`{ a: ctx.b ?? }`)
+	require.NotNil(t, obj)
+	require.IsType(t, malformedNullCoalesce{}, obj["a"], "classification marks it")
+
+	unwrapped, ok := unwrapMalformedNullCoalesce(obj).(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, `ctx.b ??`, unwrapped["a"], "the raw text survives, not a sentinel struct")
+
+	arr, ok := unwrapMalformedNullCoalesce([]any{malformedNullCoalesce{raw: "x ??"}}).([]any)
+	require.True(t, ok)
+	require.Equal(t, "x ??", arr[0])
+}
+
+// The FINAL arm resolving to missing must come back as nil, not the
+// missingValue{} sentinel: isTruthy(missingValue{}) is true, so leaking
+// it would make an all-missing coalesce read as truthy.
+func TestIdTemplateCoalesce_MissingFinalArmIsNil(t *testing.T) {
+	eval := &mutationTemplateEvaluator{args: map[string]any{}}
+	got, err := eval.evalParserExpression(context.Background(),
+		coalesceOf(argRef("absentA"), argRef("absentB")))
+	require.NoError(t, err)
+	require.Nil(t, got, "an all-missing coalesce is nil, never the missingValue sentinel")
+	require.False(t, isMissing(got))
 }
 
 // Review finding, the severe one: the id / createdAt / parent / aliasOf
