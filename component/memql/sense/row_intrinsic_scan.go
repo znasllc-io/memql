@@ -4,26 +4,27 @@ package sense
 // name a row intrinsic without the `row.` namespace (memql#2779). Both gates
 // consume it -- the edit-time Sense rule (bareRowIntrinsicRule) and the
 // tree-wide CI gate (dsl.TestFilterIntrinsicsUseRowNamespace) -- so the two
-// can never drift into disagreeing about what counts as a violation.
+// cannot drift into disagreeing about what counts as a violation.
 //
-// The first cut of this rule kept two independent detectors, and they
-// disagreed immediately: the CI gate split filter clauses on `&&` only, so a
-// bare intrinsic joined by `||` or wrapped in parens
+// The first cut kept two independent detectors and they disagreed
+// immediately: the CI gate split filter clauses on `&&` only, so a bare
+// intrinsic joined by `||` or wrapped in parens
 // (`filter (row.id==args.a || id==args.b)`) sailed through green while the
-// editor flagged it. This scanner works on clause TEXT rather than on parsed
+// editor flagged it. This scanner reads clause TEXT rather than parsed
 // predicate structure, so boolean shape is irrelevant to it.
 
 import (
 	"regexp"
 	"strings"
+	"unicode/utf8"
 )
 
 // BareRowIntrinsic is one filter predicate naming a row intrinsic bare.
 type BareRowIntrinsic struct {
 	Line   int    // 1-based line in the authored source
-	Column int    // 1-based column of the offending token
-	Text   string // the token exactly as authored (may differ in case)
-	Name   string // the canonical intrinsic name to suggest (`row.<Name>`)
+	Column int    // 1-based RUNE column of the offending token (the Sense contract)
+	Text   string // the token exactly as authored, including any leaf
+	Name   string // the replacement to suggest, rendered as `row.<Name>`
 }
 
 // bareRowIntrinsicRE matches a row intrinsic in comparison-LHS position with
@@ -31,70 +32,84 @@ type BareRowIntrinsic struct {
 //
 //   - group 1 rejects a dotted or identifier context, so `args.id`, `row.id`
 //     and a payload property like `threadId` never match;
-//   - group 2 is the intrinsic, matched case-insensitively because
+//   - group 2 is a SCALAR intrinsic, matched case-insensitively because
 //     resolveIntrinsicField is (the engine accepts `createdat`);
-//   - group 3 is the optional leaf `provenance` requires -- without it the
-//     rule would claim to cover provenance while never firing on the only
-//     form it can be written in;
+//   - group 3 is `provenance` WITH its mandatory leaf. Provenance is the one
+//     object-valued intrinsic: bare `provenance ==` has no SQL push-down, and
+//     `row.provenance` is rejected outright by the parser -- so suggesting
+//     `row.provenance` for a leafless `provenance` would name a spelling
+//     nothing accepts. Requiring the leaf here keeps every suggestion this
+//     scanner makes a form the engine actually compiles;
 //   - group 4 requires a comparison or membership operator, so a bare word in
-//     a spec call or an identifier elsewhere on the line does not match.
-//     `in` is included: `filter id in args.ids` is a real predicate shape.
+//     a spec call does not match. `in` is included: `filter id in args.ids`
+//     is a real predicate shape.
 var bareRowIntrinsicRE = regexp.MustCompile(
-	`(^|[^A-Za-z0-9_.])((?i:id|concept|type|createdAt|createdBy|provenance))(\.[A-Za-z_][A-Za-z0-9_]*)?[ \t]*(==|!=|<=|>=|<|>|\bin\b)`)
+	`(^|[^A-Za-z0-9_.])(?:((?i:id|concept|type|createdAt|createdBy))|((?i:provenance)\.[A-Za-z_][A-Za-z0-9_]*))[ \t]*(==|!=|<=|>=|<|>|\bin\b)`)
 
-// canonicalRowIntrinsic maps a lower-cased intrinsic token to the spelling the
-// suggestion should use. Mirrors component/memql/intrinsic_fields.go, which is
-// in a package this one must not import (sense is consumed by the editor and
-// by the dsl conformance suite; both would pull the engine in).
-var canonicalRowIntrinsic = map[string]string{
-	"id":         "id",
-	"concept":    "concept",
-	"type":       "type",
-	"createdat":  "createdAt",
-	"createdby":  "createdBy",
-	"provenance": "provenance",
+// canonicalScalarIntrinsic maps a lower-cased scalar intrinsic to the
+// spelling the suggestion should use. Mirrors
+// component/memql/intrinsic_fields.go, which lives in a package this one must
+// not import -- sense is consumed by the editor AND by the dsl conformance
+// suite, and either would pull the engine in.
+var canonicalScalarIntrinsic = map[string]string{
+	"id":        "id",
+	"concept":   "concept",
+	"type":      "type",
+	"createdat": "createdAt",
+	"createdby": "createdBy",
 }
 
 // ScanBareRowIntrinsics returns every filter predicate in source that names a
-// row intrinsic bare. Comments and string-literal contents are excluded, so
-// `filter name == "a id==b"` does not fire and a `//` inside a string does not
-// truncate the rest of the line.
+// row intrinsic bare.
 //
-// Multi-line filter clauses are covered: the clause continues until a line
-// opens another clause (shape / sort / paginate / asOf / args / return), an
-// annotation, a brace at column 0, or a blank line.
+// Line comments, block comments, and string-literal contents are excluded, so
+// `filter name == "a id==b"` does not fire, a `//` inside a URL literal does
+// not truncate the rest of the line, and commented-out code in a `/* */`
+// block is not authored code.
+//
+// Only a line that OPENS a filter clause is scanned. A filter clause cannot
+// span lines: parseStructQueryBody (component/language/parser/rewriter.go)
+// walks a struct-query body line by line and hard-errors on any line that is
+// not a clause keyword, so a continuation line never reaches the engine
+// anyway. An earlier version carried multi-line tracking for that shape; it
+// protected a grammar the parser rejects while giving a block comment a way
+// to escape the single-line bound.
+//
+// KNOWN, ACCEPTED GAP: BlankBlockComments ends a string literal at a newline
+// rather than letting it span lines, so the second line of a multi-line string
+// is treated as code -- if it happens to begin `filter ` and contain a bare
+// intrinsic, this reports a false positive. That is the deliberate trade-off
+// the helper already makes for DiscardedArgsDescriptions, and the alternative
+// is worse for a gate: a string that spans newlines means one unbalanced quote
+// blanks the rest of the file, silently disabling detection everywhere after
+// it. A false positive fails CI at a precise file:line and is obvious; a
+// silent false negative is the failure mode this whole change exists to kill.
 func ScanBareRowIntrinsics(source string) []BareRowIntrinsic {
 	var found []BareRowIntrinsic
-	inFilter := false
 
-	for i, raw := range strings.Split(source, "\n") {
-		code := blankCommentsAndStrings(raw)
-		trimmed := strings.TrimSpace(code)
-
-		if !inFilter {
-			if !isFilterClauseOpener(trimmed) {
-				continue
-			}
-			inFilter = true
-		} else if trimmed == "" || endsFilterClause(trimmed) {
-			inFilter = false
-			// The terminator may itself open a new filter clause.
-			if !isFilterClauseOpener(trimmed) {
-				continue
-			}
-			inFilter = true
+	for i, line := range strings.Split(BlankBlockComments(source), "\n") {
+		code := blankLineCommentsAndStrings(line)
+		if !isFilterClauseOpener(strings.TrimSpace(code)) {
+			continue
 		}
-
 		for _, m := range bareRowIntrinsicRE.FindAllStringSubmatchIndex(code, -1) {
-			token := code[m[4]:m[5]]
-			name, ok := canonicalRowIntrinsic[strings.ToLower(token)]
-			if !ok {
+			start, text, name := -1, "", ""
+			switch {
+			case m[4] >= 0: // scalar intrinsic
+				start, text = m[4], code[m[4]:m[5]]
+				name = canonicalScalarIntrinsic[strings.ToLower(text)]
+			case m[6] >= 0: // provenance.<leaf>
+				start, text = m[6], code[m[6]:m[7]]
+				_, leaf, _ := strings.Cut(text, ".")
+				name = "provenance." + leaf
+			}
+			if name == "" {
 				continue
 			}
 			found = append(found, BareRowIntrinsic{
 				Line:   i + 1,
-				Column: m[4] + 1,
-				Text:   token,
+				Column: utf8.RuneCountInString(line[:start]) + 1,
+				Text:   text,
 				Name:   name,
 			})
 		}
@@ -102,36 +117,23 @@ func ScanBareRowIntrinsics(source string) []BareRowIntrinsic {
 	return found
 }
 
-// filterClauseEnders are the tokens that close a filter clause: any other
-// clause keyword, or a block delimiter.
-var filterClauseEnders = map[string]bool{
-	"shape": true, "sort": true, "paginate": true, "asOf": true,
-	"args": true, "return": true, "insert": true, "update": true,
-	"filter": true,
-}
-
+// isFilterClauseOpener reports whether a trimmed line opens a `filter` clause.
+// `@filter(...)` on an automation is a different surface with a different
+// evaluator and is deliberately excluded -- it does not start with `filter`.
 func isFilterClauseOpener(trimmed string) bool {
 	rest, ok := strings.CutPrefix(trimmed, "filter")
 	return ok && (rest == "" || rest[0] == ' ' || rest[0] == '\t')
 }
 
-func endsFilterClause(trimmed string) bool {
-	if strings.HasPrefix(trimmed, "@") || strings.HasPrefix(trimmed, "}") || strings.HasPrefix(trimmed, "{") {
-		return true
-	}
-	head := trimmed
-	if idx := strings.IndexAny(head, " \t"); idx >= 0 {
-		head = head[:idx]
-	}
-	return filterClauseEnders[head]
-}
-
-// blankCommentsAndStrings replaces string-literal contents and any trailing
-// `//` comment with spaces, preserving byte offsets so reported columns still
-// index the ORIGINAL line. Quote-awareness is the point: a naive
+// blankLineCommentsAndStrings replaces string-literal contents and any
+// trailing `//` comment with spaces, preserving byte offsets so the caller can
+// still index the ORIGINAL line. Quote-awareness is the point: a naive
 // strings.Index(line, "//") truncates at the `//` inside a URL literal and
 // blinds the scanner to everything after it.
-func blankCommentsAndStrings(line string) string {
+//
+// Block comments are handled by the caller via BlankBlockComments, which is
+// whole-source (they span lines) and already used by DiscardedArgsDescriptions.
+func blankLineCommentsAndStrings(line string) string {
 	out := []byte(line)
 	inStr := false
 	for i := 0; i < len(out); i++ {

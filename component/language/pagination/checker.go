@@ -109,7 +109,13 @@ var (
 	// sub-fields that merely end in "id" (`payload.threadId`) -- that is
 	// what the leading negative class did, and it is kept so a property
 	// named `myrow` cannot masquerade as the namespace.
-	uniqueKeyFilterRe = regexp.MustCompile(`(^|[^A-Za-z0-9_.])row\.id[ \t]*==`)
+	//
+	// BOTH spellings match. The engine still resolves a bare `id` correctly
+	// -- only the authoring gates retired it -- so a product bundle mounted
+	// via MEMQL_DSL_PATH and authored before #2779 is still a single-row
+	// read, and misclassifying it as an unmarked list would report a
+	// pagination violation that has nothing to do with pagination.
+	uniqueKeyFilterRe = regexp.MustCompile(`(^|[^A-Za-z0-9_.])(row\.)?id[ \t]*==`)
 
 	// unboundedRe matches `@unbounded("reason")` and captures the
 	// reason.

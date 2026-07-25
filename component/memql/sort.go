@@ -432,8 +432,29 @@ func rowIntrinsicSortField(name string) (string, error) {
 	}
 
 	leaf = strings.TrimSpace(leaf)
+
+	// A leaf that IS a row intrinsic but carries no ordering (`provenance` is
+	// an object; `partition` / `schema` have no sort branch) must not be told
+	// to "write it bare" -- bare would fall through to the payload surface and
+	// order on a JSONB path that does not exist, which is the silent no-op
+	// this whole function exists to prevent.
+	if leaf == "" {
+		return "", fmt.Errorf(
+			"%w: `row.` needs a field after the dot -- write \"row.createdAt\", \"row.id\", \"row.concept\", \"row.type\", or \"row.createdBy\"",
+			ErrInvalidArgument)
+	}
 	info, ok := resolveIntrinsicField(leaf)
-	if !ok || info.kind == intrinsicFieldProvenance {
+	if ok && info.kind == intrinsicFieldProvenance {
+		return "", fmt.Errorf(
+			"%w: sort key `row.provenance` addresses an object and has no ordering -- sortable row intrinsics are id, concept, type, createdAt, createdBy",
+			ErrInvalidArgument)
+	}
+	if !ok {
+		if isUnfilterableRowIntrinsic(leaf) {
+			return "", fmt.Errorf(
+				"%w: sort key `row.%s` is a row intrinsic but is not sortable -- there is no ORDER BY push-down for it. Sortable row intrinsics: id, concept, type, createdAt, createdBy",
+				ErrInvalidArgument, leaf)
+		}
 		return "", fmt.Errorf(
 			"%w: sort key `row.%s` is not a sortable row intrinsic (valid: id, concept, type, createdAt, createdBy) -- a payload property is named BARE in a sort key, so write \"%s\"",
 			ErrInvalidArgument, leaf, leaf)

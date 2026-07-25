@@ -39,8 +39,18 @@ func TestBareRowIntrinsicRuleFlagsFilters(t *testing.T) {
 		{"negated", "query widget q {\n  filter !(id==args.x)\n}\n", "id"},
 		{"in operator", "query widget q {\n  filter id in args.ids\n}\n", "id"},
 		{"lowercase intrinsic", "query widget q {\n  filter createdat < args.x\n}\n", "createdAt"},
-		{"provenance leaf", "query widget q {\n  filter provenance.kind==\"automation\"\n}\n", "provenance"},
-		{"continuation line", "query widget q {\n  filter ownerUserId==actor.userId &&\n    id==args.x\n}\n", "id"},
+		{"provenance leaf", "query widget q {\n  filter provenance.kind==\"automation\"\n}\n", "provenance.kind"},
+		// A filter clause CANNOT span lines -- parseStructQueryBody hard-errors
+		// on a continuation line -- so there is nothing here for the scanner to
+		// find, and pretending otherwise let block comments escape the
+		// single-line bound.
+		{"continuation line is not reachable grammar", "query widget q {\n  filter ownerUserId==actor.userId &&\n    id==args.x\n}\n", ""},
+		// Leafless `provenance` has no push-down and `row.provenance` is
+		// rejected outright, so flagging it would name a spelling nothing
+		// accepts.
+		{"leafless provenance is not flagged", "query widget q {\n  filter provenance==\"x\"\n}\n", ""},
+		// Commented-out code in a block comment is not authored code.
+		{"block comment", "query widget q {\n  /* filter id == args.x */\n  filter region == args.r\n}\n", ""},
 		{"url literal does not truncate", "query widget q {\n  filter url==\"http://x\" && id==args.a\n}\n", "id"},
 		// A string literal containing what looks like a predicate is not one.
 		{"intrinsic inside a string literal", "query widget q {\n  filter name==\"a id==b\"\n}\n", ""},

@@ -245,6 +245,20 @@ func rowIntrinsicFieldRef(ref FieldReference) (FieldReference, error) {
 
 	info, ok := resolveIntrinsicField(leaf)
 	if !ok {
+		// "Write it bare" is only sound advice when the bare form would read
+		// the payload. A leaf that is itself a reserved head (`row.actor`,
+		// `row.payload`, `row.row`, ...) would NOT -- suggesting it sends the
+		// author somewhere else wrong, and `row.row` would loop.
+		if leaf == "" {
+			return FieldReference{}, fmt.Errorf(
+				"%w: `row.` needs a field after the dot -- write row.id, row.concept, row.type, row.createdAt, row.createdBy, or row.provenance.<leaf>",
+				ErrInvalidArgument)
+		}
+		if reservedFilterHead(leaf) {
+			return FieldReference{}, fmt.Errorf(
+				"%w: `row.%s` is not a row intrinsic -- `%s` is a reserved engine namespace of its own, not a field under `row`. Row intrinsics: id, concept, type, createdAt, createdBy, provenance.<leaf>",
+				ErrInvalidArgument, leaf, leaf)
+		}
 		return FieldReference{}, fmt.Errorf(
 			"%w: `row.%s` is not a row intrinsic (valid: id, concept, type, createdAt, createdBy, provenance) -- a concept's payload property is named BARE in a filter, so write `%s`",
 			ErrInvalidArgument, leaf, leaf)
@@ -257,10 +271,17 @@ func rowIntrinsicFieldRef(ref FieldReference) (FieldReference, error) {
 	// error whose text had lost the `row.` the author actually typed.
 	rest := ref.Parts[2:]
 	if info.kind == intrinsicFieldProvenance {
-		if len(rest) != 1 {
+		switch {
+		case len(rest) == 0:
 			return FieldReference{}, fmt.Errorf(
 				"%w: `row.provenance` addresses an object -- compare a leaf instead (row.provenance.kind / .name / .trigger / .via)",
 				ErrInvalidArgument)
+		case len(rest) > 1:
+			// The author DID supply a leaf; the problem is depth. Saying
+			// "compare a leaf instead" here would describe the wrong mistake.
+			return FieldReference{}, fmt.Errorf(
+				"%w: `row.provenance.%s` is too deep -- provenance leaves are scalars, so compare row.provenance.%s directly",
+				ErrInvalidArgument, strings.Join(rest, "."), rest[0])
 		}
 		if !isProvenanceLeaf(rest[0]) {
 			return FieldReference{}, fmt.Errorf(

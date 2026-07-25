@@ -82,10 +82,20 @@ silent fall-through to a payload lookup -- that fall-through is the
 defect the namespace closed. `partition` and `schema` are intrinsics on
 the row but are not filter-comparable, so they have no `row.` form.
 
+A **sort key** accepts the same namespace -- `sort "row.createdAt", "desc"` --
+and rejects a non-sortable leaf rather than silently ordering on a JSONB path
+that does not exist. The bare spelling still works there and the tree has not
+been migrated (memql#2786); only filter predicates are gated today.
+
 Other surfaces are unchanged: a shape body already projects `row.id` /
 `row.createdAt`; a spec/trait body reads its signature-bound fields bare
 and rejects `row.*` (epic #2281); a mutation `insert`/`update` block
 writes `id:` / `createdAt:` as target keys rather than references.
+
+> One consequence worth stating: `row` is now a reserved head in a filter, so
+> a concept that declares a payload property literally named `row` cannot be
+> filtered on it. No concept in the engine tree does, but a product bundle
+> mounted via `MEMQL_DSL_PATH` should avoid the name.
 
 ---
 
