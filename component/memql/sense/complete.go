@@ -31,7 +31,7 @@ func (s *Service) Complete(source string, line, col int, filePath string) []Comp
 	case ContextReceiver:
 		items = s.completeReceiver(ctx.Prefix)
 	case ContextFuncBody:
-		items = s.completeFuncBody(ctx.Prefix, ctx.Enclosing)
+		items = s.completeFuncBody(ctx.Prefix, ctx.Enclosing, source)
 		// G2 (memql#2364): inside an automation body that declares an
 		// `args { }` block, offer the declared field names -- they resolve
 		// bare per ADR Decision 3.
@@ -161,7 +161,7 @@ func (s *Service) completeReceiver(prefix string) []CompletionItem {
 }
 
 // completeFuncBody returns completions inside a function body.
-func (s *Service) completeFuncBody(prefix string, enc EnclosingConstruct) []CompletionItem {
+func (s *Service) completeFuncBody(prefix string, enc EnclosingConstruct, source string) []CompletionItem {
 	// Block-specific completion (#2628): inside a named block, offer
 	// THAT block's set -- args offers field types, a filter offers the
 	// reserved heads plus the bound concept's fields, a write block
@@ -172,6 +172,17 @@ func (s *Service) completeFuncBody(prefix string, enc EnclosingConstruct) []Comp
 	if len(enc.Blocks) > 0 {
 		block := enc.Blocks[len(enc.Blocks)-1]
 		if items, ok := s.completeInBlock(prefix, enc, block); ok {
+			return items
+		}
+	}
+
+	// A projection body (memql#2762): the legal vocabulary is the bound
+	// concept's fields plus the accessor roots the signature annotations
+	// enable -- and nothing else. This RETURNS rather than appending,
+	// because the point is to stop offering the global keyword / builtin /
+	// function set inside a body that can hold none of it.
+	if len(enc.Blocks) == 0 {
+		if items, ok := s.projectionBodyItems(prefix, enc, source); ok {
 			return items
 		}
 	}
@@ -589,8 +600,10 @@ func (s *Service) completeFuncCallArgs(ctx CursorContext) []CompletionItem {
 			}}
 		}
 	}
-	// For user functions, suggest based on args schema.
-	return s.completeFuncBody(ctx.Prefix, ctx.Enclosing)
+	// For user functions, suggest based on args schema. No source is
+	// threaded here: a call-arg position is never a projection body, so the
+	// annotation scan the projection path would run has nothing to find.
+	return s.completeFuncBody(ctx.Prefix, ctx.Enclosing, "")
 }
 
 // completeConceptDef returns completions inside a concept definition body.
@@ -773,6 +786,13 @@ func (s *Service) completeFieldAccess(ctx CursorContext, source string, line int
 			}
 		}
 		return items
+	case "row":
+		// `@row` puts the row envelope in scope: the intrinsics every
+		// stored row carries, independent of its concept's payload
+		// (memql#2762). The payload fields are the BARE names in the
+		// same body, so this deliberately offers only the intrinsics --
+		// `row.name` is not a thing.
+		return rowMemberCompletions(ctx.Prefix)
 	case "payload", "node.payload", "event.payload":
 		if s.registries == nil || ctx.ConceptName == "" {
 			return nil
@@ -1016,4 +1036,121 @@ func (s *Service) boundConceptFieldItems(prefix string, enc EnclosingConstruct) 
 var reservedFilterHeads = []string{
 	"payload", "actor", "args", "now", "config",
 	"trace", "meta", "schema", "partition", "provenance",
+}
+
+// rowIntrinsics is the row envelope every stored row carries regardless of
+// its concept -- the names legal after `row.` in a body that declares `@row`.
+// Payload fields are referenced BARE (epic #2292), so they are deliberately
+// absent here; `row.` is the intrinsic namespace only.
+var rowIntrinsics = []struct {
+	Name string
+	Type string
+	Doc  string
+}{
+	{"id", "string", "The row's identifier. Bare-id on the wire; canonical `{concept}:{shortId}` internally."},
+	{"concept", "string", "The row's concept id (e.g. v1:actions:candidate)."},
+	{"type", "string", "The row's type discriminator."},
+	{"schema", "string", "The schema version the row was written under."},
+	{"createdAt", "timestamp", "When the row was written. The time-series ordering key."},
+	{"createdBy", "string", "The v1:identity:user id that wrote the row."},
+}
+
+// rowMemberCompletions offers the row intrinsics after `row.`.
+func rowMemberCompletions(prefix string) []CompletionItem {
+	var items []CompletionItem
+	for _, m := range rowIntrinsics {
+		if !strings.HasPrefix(m.Name, prefix) {
+			continue
+		}
+		items = append(items, CompletionItem{
+			Label: m.Name, Kind: "field", Detail: m.Type,
+			Documentation: m.Doc, InsertText: m.Name, SortPriority: 1,
+		})
+	}
+	return items
+}
+
+// projectionBodyConstructs are the constructs whose bare body is a list of the
+// BOUND CONCEPT's fields rather than clauses or a schema of their own. A shape
+// projects a concept, so its body's legal vocabulary is that concept's fields
+// plus whichever accessor roots the signature annotations put in scope.
+var projectionBodyConstructs = map[string]bool{"shape": true}
+
+// projectionBodyItems offers the vocabulary legal directly inside a
+// projection body (memql#2762).
+//
+// Before this, a shape body fell through to the generic function-body
+// completion and offered the entire global vocabulary -- every keyword,
+// builtin and function name -- when the only things that belong there are the
+// bound concept's fields and the accessor roots. The concept is already known:
+// the signature binds it and resolveEnclosingConstruct reports it.
+func (s *Service) projectionBodyItems(prefix string, enc EnclosingConstruct, source string) ([]CompletionItem, bool) {
+	if !projectionBodyConstructs[enc.Keyword] || enc.Concept == "" {
+		return nil, false
+	}
+	items := s.boundConceptFieldItems(prefix, enc)
+	// Accessor roots follow the signature annotations: @row puts `row` in
+	// scope, @actor puts `actor` in scope. Offering a root the shape did not
+	// declare would teach a body the loader then rejects.
+	for _, root := range accessorRootsForConstruct(source, enc) {
+		if !strings.HasPrefix(root, prefix) {
+			continue
+		}
+		items = append(items, CompletionItem{
+			Label: root, Kind: "variable", Detail: "accessor",
+			Documentation: accessorRootDocs[root],
+			InsertText:    root + ".", SortPriority: 2,
+		})
+	}
+	return items, true
+}
+
+var accessorRootDocs = map[string]string{
+	"row":   "The row envelope: id, concept, type, schema, createdAt, createdBy. Enabled by @row.",
+	"actor": "The resolved auth context: userId, role, identityId, isClusterOwner. Enabled by @actor.",
+}
+
+// accessorRootsForConstruct returns the accessor roots the construct's
+// annotations put in scope. A shape declares its kind with @row and/or @actor,
+// and each one admits exactly one root.
+func accessorRootsForConstruct(source string, enc EnclosingConstruct) []string {
+	if enc.Name == "" {
+		return nil
+	}
+	var roots []string
+	for _, ann := range annotationsAboveDeclaration(source, enc.Name) {
+		switch ann {
+		case "row":
+			roots = append(roots, "row")
+		case "actor":
+			roots = append(roots, "actor")
+		}
+	}
+	return roots
+}
+
+// annotationsAboveDeclaration returns the bare annotation names in the
+// contiguous run immediately above the declaration of name.
+func annotationsAboveDeclaration(source, name string) []string {
+	pos := declHeaderPos(source, name)
+	if pos.Line <= 1 {
+		return nil
+	}
+	lines := strings.Split(source, "\n")
+	var out []string
+	for i := pos.Line - 2; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line == "" || strings.HasPrefix(line, "//") || strings.HasPrefix(line, "///") {
+			continue
+		}
+		if !strings.HasPrefix(line, "@") {
+			break
+		}
+		ann := strings.TrimPrefix(line, "@")
+		if idx := strings.IndexAny(ann, "( \t"); idx >= 0 {
+			ann = ann[:idx]
+		}
+		out = append(out, ann)
+	}
+	return out
 }
