@@ -88,6 +88,7 @@ func (s *Service) Diagnose(source string, filePath string) []Diagnostic {
 		// case.
 		diagnostics = append(diagnostics, s.importDiagnostics(file, source)...)
 		diagnostics = append(diagnostics, s.signatureConceptDiagnostics(file, source)...)
+		diagnostics = append(diagnostics, s.signatureKindDiagnostics(file, source)...)
 	}
 
 	return diagnostics

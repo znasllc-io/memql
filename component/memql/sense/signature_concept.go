@@ -130,3 +130,68 @@ func localConceptNames(file *parser.File) map[string]bool {
 	}
 	return out
 }
+
+// signatureKindDiagnostics flags a signature that binds a name which IS
+// declared -- just not as a concept (memql#2762).
+//
+// `shape todos displayTodo` where `todos` is a query is the motivating case:
+// `shape` binds a CONCEPT, and todos is declared at
+// dsl/todos/queries.memql. The sibling rule above only asks "does this name
+// exist anywhere", so a name that exists as the WRONG KIND sailed through and
+// the author got no squiggle at all -- the failure surfaced at boot instead.
+//
+// Scope follows the extractor: SignatureConceptRefs is pinned to
+// `query|mutate|shape|seed`, every one of which binds a concept and nothing
+// else. `spec` is deliberately outside it, which is what keeps the
+// shape-XOR-concept binding legal -- flagging a spec that binds a shape would
+// be wrong, and there are live ones in the tree.
+//
+// Conservatism, matching the rest of this file: a name the workspace has
+// never seen is left to the missing-concept rule (it may be delivered at
+// runtime via MEMQL_DSL_PATH); only a name the tree can SEE, declared solely
+// as something other than a concept, is provably wrong. Measured over dsl/:
+// 680 signature bindings, zero flagged.
+func (s *Service) signatureKindDiagnostics(file *parser.File, source string) []Diagnostic {
+	refs := dslimports.SignatureConceptRefs(source)
+	if len(refs) == 0 {
+		return nil
+	}
+	local := localConceptNames(file)
+
+	var diagnostics []Diagnostic
+	for _, ref := range refs {
+		if local[ref.Name] || s.registryResolvesConcept(ref.Name) {
+			continue
+		}
+		sites := s.workspace.DeclarationSites(ref.Name)
+		if len(sites) == 0 {
+			// Never seen here -- the missing-concept rule owns this case, and
+			// a runtime-delivered concept must not be flagged.
+			continue
+		}
+		var kinds []string
+		seen := map[string]bool{}
+		for _, site := range sites {
+			if site.Kind == "concept" {
+				kinds = nil
+				break
+			}
+			if !seen[site.Kind] {
+				seen[site.Kind] = true
+				kinds = append(kinds, site.Kind)
+			}
+		}
+		if len(kinds) == 0 {
+			continue
+		}
+		pos := positionFromOffset(source, ref.Offset)
+		diagnostics = append(diagnostics, Diagnostic{
+			Range:    spanAt(pos, len(ref.Name)),
+			Severity: SeverityError,
+			Message: fmt.Sprintf("signature binds %q, which is declared as %s -- this construct binds a concept",
+				ref.Name, strings.Join(kinds, "/")),
+			Code: "signature-binds-wrong-kind",
+		})
+	}
+	return diagnostics
+}
