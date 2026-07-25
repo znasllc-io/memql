@@ -40,7 +40,7 @@ query plan allPlans {
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
-  sort     "createdAt", "desc"
+  sort     "row.createdAt", "desc"
   paginate 50
   shape   planFull
 }
@@ -106,7 +106,7 @@ query plan historicalPlanMetrics {
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
-  sort     "createdAt", "desc"
+  sort     "row.createdAt", "desc"
   paginate 50
   shape   planFull
 }
@@ -157,7 +157,7 @@ query plan plansForSpace {
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
-  sort     "createdAt", "desc"
+  sort     "row.createdAt", "desc"
   paginate 50
   shape   planFull
 }
@@ -182,7 +182,7 @@ query plan activePlansForUser {
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
-  sort     "createdAt", "desc"
+  sort     "row.createdAt", "desc"
   paginate 50
   shape   planFull
 }
@@ -198,7 +198,7 @@ query plan waitingPlansForUser {
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
-  sort     "createdAt", "desc"
+  sort     "row.createdAt", "desc"
   paginate 50
   shape   planFull
 }
@@ -264,7 +264,7 @@ query responsibility responsibilitiesForUser {
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
-  sort     "createdAt", "desc"
+  sort     "row.createdAt", "desc"
   paginate 50
   shape   responsibilityFull
 }
@@ -285,7 +285,7 @@ query responsibility activeResponsibilities {
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
-  sort     "createdAt", "desc"
+  sort     "row.createdAt", "desc"
   paginate 50
   shape   responsibilityFull
 }
@@ -386,7 +386,7 @@ query plan plansForResponsibility {
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
-  sort     "createdAt", "desc"
+  sort     "row.createdAt", "desc"
   paginate 50
   shape   planFull
 }

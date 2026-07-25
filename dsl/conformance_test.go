@@ -74,6 +74,53 @@ func TestFilterIntrinsicsUseRowNamespace(t *testing.T) {
 	}
 }
 
+// TestSortKeysUseRowNamespace is the ordering half of the rule above
+// (memql#2786). #2779 taught compileSortField to resolve `row.<intrinsic>`
+// but migrated nothing and gated nothing, so the tree carried 70 bare keys
+// and no test would have noticed a 71st.
+//
+// The ambiguity is the same one that justified the filter rule: in
+// `sort "id"` the key can be the row id or a payload property named `id`,
+// and the two compile to completely different ORDER BY expressions -- a
+// table column vs `payload #>> '{id}'`.
+//
+// Detection is shared with the edit-time Cockpit rule via
+// sense.ScanBareRowIntrinsicSortKeys, for the same reason the filter gate
+// shares ScanBareRowIntrinsics: two detectors drift, one does not.
+//
+// Scope is authored `.memql` only. The runtime and SDK sort surfaces accept
+// bare keys from callers and keep working -- compileSortField still resolves
+// them (locked by TestSortKeysWithoutRowNamespaceUnchanged) -- exactly as the
+// filter gate leaves the runtime filter surface alone.
+func TestSortKeysUseRowNamespace(t *testing.T) {
+	tree := Tree()
+	paths, err := dslfs.WalkMemqlFiles(tree)
+	if err != nil {
+		t.Fatalf("WalkMemqlFiles: %v", err)
+	}
+
+	violations := 0
+	for _, p := range paths {
+		f, openErr := tree.Open(p)
+		if openErr != nil {
+			t.Fatalf("open %s: %v", p, openErr)
+		}
+		raw, readErr := io.ReadAll(f)
+		f.Close()
+		if readErr != nil {
+			t.Fatalf("read %s: %v", p, readErr)
+		}
+		for _, hit := range sense.ScanBareRowIntrinsicSortKeys(string(raw)) {
+			violations++
+			t.Errorf("%s:%d:%d  sort key names the row intrinsic %q bare -- write \"row.%s\"",
+				p, hit.Line, hit.Column, hit.Text, hit.Name)
+		}
+	}
+	if violations > 0 {
+		t.Errorf("found %d sort key(s) naming a row intrinsic bare; the `row.` namespace is the canonical form (memql#2786)", violations)
+	}
+}
+
 // TestFilterSyntaxCanonical asserts that every filter clause in the
 // tree references payload fields via `payload.X`, never via
 // `<conceptName>.X` or `?.<conceptName>.X`.

@@ -11,7 +11,7 @@ query number numbersByPartition {
     partitionId  string!
   }
   filter  partitionId==args.partitionId && actor.isClusterOwner==true
-  sort    "createdAt", "desc"
+  sort    "row.createdAt", "desc"
   shape   numberFull
 }
 
@@ -20,7 +20,7 @@ query number numbersByPartition {
 @actor
 query number allNumbers {
   filter  actor.isClusterOwner==true
-  sort    "createdAt", "desc"
+  sort    "row.createdAt", "desc"
   paginate 100
   shape   numberFull
 }
@@ -33,7 +33,7 @@ query call callsByPartition {
     partitionId  string!
   }
   filter  partitionId==args.partitionId && actor.isClusterOwner==true
-  sort    "createdAt", "desc"
+  sort    "row.createdAt", "desc"
   paginate 100
   shape   callFull
 }
@@ -46,7 +46,7 @@ query call callsByNumber {
     e164  string!
   }
   filter  (fromE164==args.e164 || toE164==args.e164) && actor.isClusterOwner==true
-  sort    "createdAt", "desc"
+  sort    "row.createdAt", "desc"
   paginate 100
   shape   callFull
 }
@@ -59,7 +59,7 @@ query consent consentOptOut {
     phoneNumber  string!
   }
   filter  phoneNumber==args.phoneNumber && status=="opted_out"
-  sort    "createdAt", "desc"
+  sort    "row.createdAt", "desc"
   shape   consentFull
 }
 
@@ -70,6 +70,6 @@ query number numberByE164 {
     e164  string!
   }
   filter  e164==args.e164
-  sort    "createdAt", "desc"
+  sort    "row.createdAt", "desc"
   shape   numberFull
 }

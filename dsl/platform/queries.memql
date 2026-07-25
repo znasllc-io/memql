@@ -14,7 +14,7 @@ query policyTrace policyTracesForPolicy {
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
-  sort     "createdAt", "desc"
+  sort     "row.createdAt", "desc"
   paginate 50
   shape   policyTraceFull
 }
@@ -39,7 +39,7 @@ query policyTrace allPolicyTraces {
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
-  sort     "createdAt", "desc"
+  sort     "row.createdAt", "desc"
   paginate 50
   shape   policyTraceFull
 }
@@ -166,7 +166,7 @@ query missingCapability missingCapabilitiesByStatus {
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
-  sort     "createdAt", "desc"
+  sort     "row.createdAt", "desc"
   paginate 50
   shape   missingCapabilityFull
 }
@@ -195,7 +195,7 @@ query outboundRequest outboundRequestsByStatus {
     status  string!
   }
   filter  status==args.status
-  sort     "createdAt", "asc"
+  sort     "row.createdAt", "asc"
   paginate 50
   shape   outboundRequestFull
 }

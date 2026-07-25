@@ -141,7 +141,7 @@ query user activeUsers {
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
-  sort     "createdAt", "desc"
+  sort     "row.createdAt", "desc"
   paginate 50
   shape   userFull
 }
@@ -171,7 +171,7 @@ query user searchUsers {
     active  boolean
   }
   filter  when(args.active) { active==args.active }
-  sort    "createdAt", "desc"
+  sort    "row.createdAt", "desc"
   shape   userFull
 }
 
@@ -218,7 +218,7 @@ query auditEvent auditEventsByActor {
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
-  sort     "createdAt", "desc"
+  sort     "row.createdAt", "desc"
   paginate 50
   shape   auditEventFull
 }
@@ -260,7 +260,7 @@ query auditEvent auditEventsByTarget {
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
-  sort     "createdAt", "desc"
+  sort     "row.createdAt", "desc"
   paginate 50
   shape   auditEventFull
 }
@@ -473,7 +473,7 @@ query authSession authSessionsForSubject {
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
-  sort     "createdAt", "desc"
+  sort     "row.createdAt", "desc"
   paginate 50
   shape   authSessionFull
 }
@@ -895,7 +895,7 @@ query identity patIdentitiesForUser {
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
-  sort     "createdAt", "desc"
+  sort     "row.createdAt", "desc"
   paginate 50
   shape   patSummary
 }
@@ -987,7 +987,7 @@ query accessRequest pendingAccessRequests {
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
-  sort     "createdAt", "desc"
+  sort     "row.createdAt", "desc"
   paginate 50
   shape   accessRequestFull
 }
@@ -1001,7 +1001,7 @@ query auditEvent recentAuditEvents {
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
-  sort     "createdAt", "desc"
+  sort     "row.createdAt", "desc"
   paginate 50
   shape   auditEventFull
 }
@@ -1320,7 +1320,7 @@ query identity workerTokensForUser {
   // nextCursor on a full page; an inbound cursor (ExecuteQueryMsg.cursor)
   // continues the keyset scan. Literal page size -- the struct-query paginate
   // directive only accepts an integer literal, not an arg expression.
-  sort     "createdAt", "desc"
+  sort     "row.createdAt", "desc"
   paginate 50
   shape    identityFull
 }
@@ -1380,7 +1380,7 @@ query identity badgesForUser {
     userId  string!
   }
   filter  identityIsBadge && userId==args.userId
-  sort     "createdAt", "desc"
+  sort     "row.createdAt", "desc"
   paginate 50
   shape    identitySummary
 }

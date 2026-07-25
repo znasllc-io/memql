@@ -82,10 +82,15 @@ silent fall-through to a payload lookup -- that fall-through is the
 defect the namespace closed. `partition` and `schema` are intrinsics on
 the row but are not filter-comparable, so they have no `row.` form.
 
-A **sort key** accepts the same namespace -- `sort "row.createdAt", "desc"` --
+A **sort key** takes the same namespace -- `sort "row.createdAt", "desc"` --
 and rejects a non-sortable leaf rather than silently ordering on a JSONB path
-that does not exist. The bare spelling still works there and the tree has not
-been migrated (memql#2786); only filter predicates are gated today.
+that does not exist. Authored sort keys are gated exactly like filter
+predicates (memql#2786): the tree is migrated, and naming an intrinsic bare in
+a `.memql` sort clause fails CI. `provenance` has no sort form -- it is
+object-valued with no ordering, so `row.provenance` is rejected.
+
+The bare spelling remains valid at RUNTIME, where callers pass sort keys in
+through the SDK and the query API; the gate covers authored `.memql` only.
 
 Other surfaces are unchanged: a shape body already projects `row.id` /
 `row.createdAt`; a spec/trait body reads its signature-bound fields bare

@@ -136,6 +136,166 @@ func isFilterClauseOpener(trimmed string) bool {
 	return ok && (rest == "" || rest[0] == ' ' || rest[0] == '\t')
 }
 
+// isSortClauseOpener reports whether a trimmed line opens a `sort` clause.
+// Mirrors isFilterClauseOpener; the word boundary keeps a payload property
+// spelled `sortOrder` from opening a clause.
+func isSortClauseOpener(trimmed string) bool {
+	rest, ok := strings.CutPrefix(trimmed, "sort")
+	return ok && (rest == "" || rest[0] == ' ' || rest[0] == '\t')
+}
+
+// ScanBareRowIntrinsicSortKeys returns every sort KEY in source that names a
+// row intrinsic without the `row.` namespace (memql#2786) -- the ordering half
+// of the filter rule above.
+//
+// It is a sibling of ScanBareRowIntrinsics rather than a branch inside it
+// because the two read opposite halves of a line. A filter names fields as
+// CODE, so that scanner blanks string literals before matching; a sort names
+// them as STRING LITERALS (`sort "createdAt", "desc"`), so this one must read
+// literal contents and ignore the code around them. Folding both into one
+// regex pass would mean a scanner that both blanks and reads the same bytes.
+//
+// The ambiguity is identical to the filter case and so is the fix: in
+// `sort "id"` the key can be the row id or a payload property named `id`, and
+// the two compile to completely different ORDER BY expressions -- a table
+// column vs `payload #>> '{id}'` (component/memql compileSortField).
+//
+// Key-vs-direction classification mirrors parseSortFunction
+// (component/language/parser/parser.go) exactly: literals alternate
+// field [, direction] [, field [, direction]] ..., and a literal counts as a
+// direction only when it directly follows a field AND spells asc/desc. A first
+// literal spelled "desc" is therefore a FIELD here, as it is to the parser.
+//
+// Scope is the five SCALAR intrinsics compileSortField resolves under `row.`
+// (id / concept / type / createdAt / createdBy). `provenance` is deliberately
+// absent: it is object-valued with no ordering, and `row.provenance` is
+// rejected outright by compileSortField (locked by
+// TestRowNamespaceSortRejectsNonIntrinsic), so suggesting it would name a
+// spelling nothing accepts -- the same reasoning that gives provenance its
+// mandatory-leaf arm in the filter scanner.
+//
+// Comment and block-comment handling matches the filter scanner, including its
+// documented multi-line-string trade-off.
+func ScanBareRowIntrinsicSortKeys(source string) []BareRowIntrinsic {
+	var found []BareRowIntrinsic
+
+	// Columns count against the ORIGINAL line for the same reason as the
+	// filter scanner: BlankBlockComments preserves byte offsets but not rune
+	// counts.
+	original := strings.Split(source, "\n")
+
+	for i, line := range strings.Split(BlankBlockComments(source), "\n") {
+		code := blankLineComments(line)
+		if !isSortClauseOpener(strings.TrimSpace(code)) {
+			continue
+		}
+		literals := stringLiterals(code)
+		for j := 0; j < len(literals); j++ {
+			key := literals[j]
+			// Consume an optional trailing direction so the NEXT iteration
+			// lands on a field, never on "asc"/"desc".
+			if j+1 < len(literals) && isSortDirectionLiteral(literals[j+1].value) {
+				j++
+			}
+			name, ok := canonicalScalarIntrinsic[strings.ToLower(strings.TrimSpace(key.value))]
+			if !ok {
+				continue
+			}
+			prefix := line[:key.start]
+			if i < len(original) && key.start <= len(original[i]) {
+				prefix = original[i][:key.start]
+			}
+			found = append(found, BareRowIntrinsic{
+				Line:   i + 1,
+				Column: utf8.RuneCountInString(prefix) + 1,
+				Text:   key.value,
+				Name:   name,
+			})
+		}
+	}
+	return found
+}
+
+// isSortDirectionLiteral mirrors the parser predicate of the same name
+// (component/language/parser/parser.go). Duplicated rather than imported for
+// the reason canonicalScalarIntrinsic is: sense is consumed by the editor AND
+// by the dsl conformance suite, and importing the parser from here would pull
+// the language package into both.
+func isSortDirectionLiteral(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "asc", "desc":
+		return true
+	}
+	return false
+}
+
+// sortLiteral is one string literal on a clause line: its contents and the
+// byte offset of the first CONTENT byte (past the opening quote), so a
+// diagnostic underlines the key itself rather than the quote.
+type sortLiteral struct {
+	value string
+	start int
+}
+
+// stringLiterals returns the double-quoted literals on a line in source order.
+// Escape pairs are skipped so `"a\"b"` is one literal, matching the lexer.
+// An unterminated literal is ignored rather than run to end-of-line: a sort
+// clause with an unbalanced quote does not parse, so there is no authored key
+// to report.
+func stringLiterals(line string) []sortLiteral {
+	var out []sortLiteral
+	for i := 0; i < len(line); i++ {
+		if line[i] != '"' {
+			continue
+		}
+		start := i + 1
+		j := start
+		closed := false
+		for ; j < len(line); j++ {
+			if line[j] == '\\' && j+1 < len(line) {
+				j++
+				continue
+			}
+			if line[j] == '"' {
+				closed = true
+				break
+			}
+		}
+		if !closed {
+			break
+		}
+		out = append(out, sortLiteral{value: line[start:j], start: start})
+		i = j
+	}
+	return out
+}
+
+// blankLineComments replaces a trailing `//` comment with spaces while
+// PRESERVING string-literal contents -- the inverse of
+// blankLineCommentsAndStrings, which the filter scanner needs and this one
+// must not use. Quote-awareness still matters: a `//` inside a literal is
+// content, not a comment.
+func blankLineComments(line string) string {
+	out := []byte(line)
+	inStr := false
+	for i := 0; i < len(out); i++ {
+		switch {
+		case inStr && out[i] == '\\' && i+1 < len(out):
+			i++
+		case out[i] == '"':
+			inStr = !inStr
+		case inStr:
+			// literal content -- preserved
+		case out[i] == '/' && i+1 < len(out) && out[i+1] == '/':
+			for j := i; j < len(out); j++ {
+				out[j] = ' '
+			}
+			return string(out)
+		}
+	}
+	return string(out)
+}
+
 // blankLineCommentsAndStrings replaces string-literal contents and any
 // trailing `//` comment with spaces, preserving byte offsets so the caller can
 // still index the ORIGINAL line. Quote-awareness is the point: a naive

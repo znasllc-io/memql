@@ -260,6 +260,7 @@ func (s *Service) semanticDiagnostics(file *parser.File, source string) []Diagno
 	diagnostics = append(diagnostics, redundantEnabledRule(source)...)
 	diagnostics = append(diagnostics, redundantVersionRule(source)...)
 	diagnostics = append(diagnostics, bareRowIntrinsicRule(source)...)
+	diagnostics = append(diagnostics, bareRowIntrinsicSortKeyRule(source)...)
 	diagnostics = append(diagnostics, actorUndeclaredRule(source)...)
 	diagnostics = append(diagnostics, actorUnknownPropertyRule(source)...)
 	diagnostics = append(diagnostics, discardedArgsDescriptionRule(source)...)

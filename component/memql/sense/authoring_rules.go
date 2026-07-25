@@ -772,3 +772,34 @@ func bareRowIntrinsicRule(source string) []Diagnostic {
 	}
 	return diagnostics
 }
+
+// bareRowIntrinsicSortKeyRule flags a SORT KEY that names a row intrinsic bare
+// -- `sort "createdAt", "desc"` instead of `sort "row.createdAt", "desc"`
+// (memql#2786). It is the edit-time half of dsl.TestSortKeysUseRowNamespace,
+// and like its filter sibling both halves call one scanner
+// (ScanBareRowIntrinsicSortKeys) so they cannot drift.
+//
+// Same ambiguity, same fix as the filter rule: `sort "id"` can mean the row id
+// or a payload property named `id`, and the two compile to completely
+// different ORDER BY expressions.
+//
+// Severity is Warning for the same reason: compileSortField still resolves
+// bare keys, so this never breaks boot, and a product bundle mounted via
+// MEMQL_DSL_PATH and authored before the rule should read as "migrate this".
+func bareRowIntrinsicSortKeyRule(source string) []Diagnostic {
+	var diagnostics []Diagnostic
+	for _, hit := range ScanBareRowIntrinsicSortKeys(source) {
+		diagnostics = append(diagnostics, Diagnostic{
+			Range: Range{
+				Start: Position{Line: hit.Line, Column: hit.Column},
+				End:   Position{Line: hit.Line, Column: hit.Column + len(hit.Text)},
+			},
+			Severity: SeverityWarning,
+			Message: fmt.Sprintf(
+				"sort key names the row intrinsic %q bare -- write \"row.%s\". A sort key can name a payload property or the row envelope, and the two compile to different ORDER BY expressions, so the envelope is addressed through `row.` (memql#2786)",
+				hit.Text, hit.Name),
+			Code: "bare-row-intrinsic-sort-key",
+		})
+	}
+	return diagnostics
+}

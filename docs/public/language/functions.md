@@ -219,11 +219,18 @@ query context queryLatestSpaceContextForSpace {
     spaceId  string  @required
   }
   filter  spaceId==args.spaceId
-  sort    "createdAt", "desc"
+  sort    "row.createdAt", "desc"
   paginate 1
   shape   spaceContextFull
 }
 ```
+
+A sort key names either a payload property (`"version"`, bare) or a row
+intrinsic (`"row.createdAt"`, namespaced). The two compile to different
+`ORDER BY` expressions -- a table column vs a JSONB path -- so in an authored
+`.memql` file the intrinsics take the `row.` namespace, exactly as they do in a
+filter predicate. See [Reserved identifiers](reserved.md) for the accepted
+leaves.
 
 ### Counting
 
