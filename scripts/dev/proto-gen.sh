@@ -28,6 +28,12 @@ set -euo pipefail
 
 readonly PROTOC_GEN_GO_VERSION="v1.36.11"
 readonly PROTOC_GEN_GO_GRPC_VERSION="v1.6.2"
+# protoc is pinned too (memql#2774). The generated BODY is plugin-determined,
+# but the `// protoc vX.Y.Z` header comment is not -- so an unpinned protoc
+# rewrote that line in all 8 generated files, turning a one-message change into
+# an 8-file diff the author had to hand-revert. Pinning makes every machine and
+# CI produce byte-identical output.
+readonly PROTOC_VERSION="33.4"
 
 # "<dir>|<grpc:yes|no>|<space-separated .proto files>" -- mirrors the
 # //go:generate directives. grpc=no for service-less protos (bus has only
@@ -44,14 +50,64 @@ readonly STAMP_IGNORE='^//[[:space:]].*protoc'
 
 repo_root() { git rev-parse --show-toplevel; }
 
-# ensure_tools installs the pinned plugins into a throwaway bin and prepends it
-# to PATH; verifies protoc itself is reachable (the body is plugin-determined,
-# so any modern protoc works).
-ensure_tools() {
-	if ! command -v protoc >/dev/null 2>&1; then
-		echo "ERROR: protoc not found. Install the protobuf compiler (e.g. 'apt-get install -y protobuf-compiler' or 'brew install protobuf')." >&2
+# protoc_platform echoes the asset suffix protobuf's releases use for this
+# host, matching github.com/protocolbuffers/protobuf/releases.
+protoc_platform() {
+	local kernel arch
+	kernel="$(uname -s | tr '[:upper:]' '[:lower:]')"
+	arch="$(uname -m)"
+	case "${kernel}/${arch}" in
+		darwin/arm64)  echo "osx-aarch_64" ;;
+		darwin/x86_64) echo "osx-x86_64" ;;
+		linux/x86_64)  echo "linux-x86_64" ;;
+		linux/aarch64|linux/arm64) echo "linux-aarch_64" ;;
+		*)
+			echo "ERROR: unsupported platform ${kernel}/${arch} for pinned protoc ${PROTOC_VERSION}." >&2
+			exit 1
+			;;
+	esac
+}
+
+# resolve_protoc echoes the path to the PINNED protoc, downloading it into
+# bin/tools/ on first use. Mirrors the Tailwind CLI provisioning in
+# scripts/identity/build-css.sh: per-platform, cached, retried.
+#
+# The pinned binary is used even when a system protoc exists, because
+# "whatever is on PATH" is exactly what produced the stamp churn.
+resolve_protoc() {
+	local platform tools_dir dir
+	platform="$(protoc_platform)"
+	tools_dir="$(repo_root)/bin/tools"
+	dir="${tools_dir}/protoc-${PROTOC_VERSION}-${platform}"
+	if [[ -x "${dir}/bin/protoc" ]]; then
+		echo "${dir}/bin/protoc"
+		return 0
+	fi
+	mkdir -p "${dir}"
+	local url="https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-${platform}.zip"
+	echo "  downloading pinned protoc ${PROTOC_VERSION} for ${platform}..." >&2
+	local zip="${dir}/protoc.zip"
+	if ! curl -sSL --fail --retry 5 --retry-all-errors --retry-delay 2 -o "${zip}" "${url}"; then
+		echo "ERROR: failed to download ${url}" >&2
+		rm -rf "${dir}"
 		exit 1
 	fi
+	if ! unzip -oq "${zip}" -d "${dir}"; then
+		echo "ERROR: failed to unpack ${zip}" >&2
+		rm -rf "${dir}"
+		exit 1
+	fi
+	rm -f "${zip}"
+	chmod +x "${dir}/bin/protoc"
+	echo "${dir}/bin/protoc"
+}
+
+# ensure_tools installs the pinned plugins into a throwaway bin, provisions the
+# pinned protoc, and prepends both to PATH.
+ensure_tools() {
+	local protoc_bin
+	protoc_bin="$(resolve_protoc)"
+	export PATH="$(dirname "${protoc_bin}"):$PATH"
 	local bin
 	bin="$(mktemp -d)/protobin"
 	mkdir -p "$bin"
@@ -88,12 +144,32 @@ regenerate() {
 
 # run_check regenerates, diffs ignoring the stamp, restores the tree, and fails
 # on real drift.
+#
+# The restore is from a BACKUP taken first, not from git (memql#2774).
+# `git checkout --` restores to HEAD, which silently discarded an
+# already-regenerated-but-uncommitted tree: run `make proto-gen` then
+# `make proto-gen-check` before committing and the check ate the work, exiting
+# 0 while the next build failed on undefined symbols. Restoring from the backup
+# means the check leaves the tree exactly as it found it, committed or not --
+# which is what the old comment claimed and never did.
 run_check() {
+	local backup
+	backup="$(mktemp -d)"
+	local p
+	for p in "${GEN_PATHS[@]}"; do
+		mkdir -p "${backup}/$(dirname "$p")"
+		cp -R "$p" "${backup}/$(dirname "$p")/"
+	done
+
 	regenerate
 	local rc=0
 	git diff --exit-code -I"$STAMP_IGNORE" -- "${GEN_PATHS[@]}" || rc=$?
-	# Always restore so the check never leaves the working tree dirty.
-	git checkout -- "${GEN_PATHS[@]}"
+
+	for p in "${GEN_PATHS[@]}"; do
+		rm -rf "$p"
+		cp -R "${backup}/$p" "$p"
+	done
+	rm -rf "${backup}"
 	if [[ $rc -ne 0 ]]; then
 		echo "" >&2
 		echo "ERROR: proto bindings are out of date (component/grpc, component/node)." >&2

@@ -206,10 +206,6 @@ jobs:
       # touching normalization) and diff against the checked-in tree, ignoring
       # the cosmetic protoc version stamp. Catches a .proto edited without its
       # .pb.go regenerated -- the gap that let stale bindings merge green.
-      # Needs the protobuf compiler; the script go-installs the pinned plugins.
-      - name: install protoc
-        if: ${{ env.RUN_PROTO == 'true' }}
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - name: proto-gen-check (proto drift)
         if: ${{ env.RUN_PROTO == 'true' }}
         run: make proto-gen-check
