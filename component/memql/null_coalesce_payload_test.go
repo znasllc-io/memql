@@ -201,6 +201,50 @@ func TestUnwrapMalformedNullCoalesce_KeepsRawTextOutOfPayloads(t *testing.T) {
 	require.Equal(t, "x ??", arr[0])
 }
 
+// ...and the same through the RUNTIME evaluator, which is where the
+// sentinel would actually escape. Asserting on the helper alone leaves
+// the two call sites in evalString unprotected -- reverting them keeps a
+// helper-only test green.
+func TestEvalString_NeverYieldsMalformedSentinel(t *testing.T) {
+	eval := &mutationTemplateEvaluator{args: map[string]any{}}
+	ctx := context.Background()
+	for _, src := range []string{
+		`{ a: args.b ?? }`,
+		`[ args.b ?? ]`,
+		`coalesce(args.missing, { a: args.b ?? })`,
+		`coalesce(args.missing, [ args.b ?? ])`,
+		`cond(args.missing, { a: args.b ?? }, 1)`,
+		`{ outer: { inner: args.b ?? } }`,
+	} {
+		t.Run(src, func(t *testing.T) {
+			got, err := eval.evalString(ctx, src)
+			require.NoError(t, err)
+			require.False(t, containsMalformedSentinel(got),
+				"the unexported sentinel must never reach a stored payload; got %#v", got)
+		})
+	}
+}
+
+func containsMalformedSentinel(v any) bool {
+	switch t := v.(type) {
+	case malformedNullCoalesce:
+		return true
+	case map[string]any:
+		for _, nested := range t {
+			if containsMalformedSentinel(nested) {
+				return true
+			}
+		}
+	case []any:
+		for _, nested := range t {
+			if containsMalformedSentinel(nested) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // The FINAL arm resolving to missing must come back as nil, not the
 // missingValue{} sentinel: isTruthy(missingValue{}) is true, so leaking
 // it would make an all-missing coalesce read as truthy.
