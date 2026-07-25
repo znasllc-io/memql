@@ -82,8 +82,8 @@ mutate action mintAction {
     stamp {
       id: args.actionId
       ownerUserId: actor.userId
-      sideEffectClass: coalesce(args.sideEffectClass, "write")
-      status: coalesce(args.status, "active")
+      sideEffectClass: args.sideEffectClass ?? "write"
+      status: args.status ?? "active"
       provenanceMutation: "mintAction"
     }
   }
@@ -140,7 +140,7 @@ mutate surface registerSurface {
       id: args.surfaceId
       ownerUserId: actor.userId
       available: true
-      priority: coalesce(args.priority, 100)
+      priority: args.priority ?? 100
       status: "active"
       lastSeen: now
       provenanceMutation: "registerSurface"

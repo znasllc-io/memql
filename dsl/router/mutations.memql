@@ -71,6 +71,6 @@ mutate budget setBudget {
     args.limitUSD
     args.alertThresholdPct
     args.resetAt
-    active: coalesce(args.active, true)
+    active: args.active ?? true
   }
 }

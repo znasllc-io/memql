@@ -86,7 +86,7 @@ logic deployGatePassed {
     gate object!
   }
   body {
-    return coalesce(args.gate.passed, false)
+    return args.gate.passed ?? false
   }
 }
 

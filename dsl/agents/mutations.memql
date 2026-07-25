@@ -42,14 +42,14 @@ mutate agent createAgent {
     accept { ownerUserId, name, description, personality, capabilities, avatar, providerConfig, triggerBehavior, avatarPersonaId, avatarVendor }
     stamp {
       id: args.agentId
-      role: coalesce(args.role, "specialist")
-      roleSlug: coalesce(args.roleSlug, "")
-      kind: coalesce(args.kind, "assistant")
-      gender: coalesce(args.gender, "female")
-      audioControl: coalesce(args.audioControl, "mirror_user")
-      videoControl: coalesce(args.videoControl, "mirror_user")
-      active: coalesce(args.active, true)
-      deleted: coalesce(args.deleted, false)
+      role: args.role ?? "specialist"
+      roleSlug: args.roleSlug ?? ""
+      kind: args.kind ?? "assistant"
+      gender: args.gender ?? "female"
+      audioControl: args.audioControl ?? "mirror_user"
+      videoControl: args.videoControl ?? "mirror_user"
+      active: args.active ?? true
+      deleted: args.deleted ?? false
     }
   }
 }
@@ -70,7 +70,7 @@ mutate agentAuthorization createAgentAuthorization {
     accept { agentId, userId, planKind, spaceScope, tokenBudgetCap, expiresAt }
     stamp {
       id: args.authId
-      computerUseScope: coalesce(args.computerUseScope, "")
+      computerUseScope: args.computerUseScope ?? ""
       active: true
     }
   }
@@ -159,15 +159,15 @@ mutate skill mintSkill {
     mintedByAgentId    string
   }
   insert {
-    id: coalesce(args.skillId, args.slug)
+    id: args.skillId ?? args.slug
     args.slug
     args.name
     args.description
-    category: coalesce(args.category, "specialized")
-    tags: coalesce(args.tags, [])
-    domainIds: coalesce(args.domainIds, [])
-    toolSlugs: coalesce(args.toolSlugs, [])
-    liveSourceIds: coalesce(args.liveSourceIds, [])
+    category: args.category ?? "specialized"
+    tags: args.tags ?? []
+    domainIds: args.domainIds ?? []
+    toolSlugs: args.toolSlugs ?? []
+    liveSourceIds: args.liveSourceIds ?? []
     args.tier
     predefined: false
     active: true
@@ -201,18 +201,18 @@ mutate skill createSkill {
     active         bool
   }
   insert {
-    id: coalesce(args.skillId, args.slug)
+    id: args.skillId ?? args.slug
     args.slug
     args.name
     args.description
-    category: coalesce(args.category, "specialized")
-    tags: coalesce(args.tags, [])
-    domainIds: coalesce(args.domainIds, [])
-    toolSlugs: coalesce(args.toolSlugs, [])
-    liveSourceIds: coalesce(args.liveSourceIds, [])
+    category: args.category ?? "specialized"
+    tags: args.tags ?? []
+    domainIds: args.domainIds ?? []
+    toolSlugs: args.toolSlugs ?? []
+    liveSourceIds: args.liveSourceIds ?? []
     args.tier
-    predefined: coalesce(args.predefined, true)
-    active: coalesce(args.active, true)
+    predefined: args.predefined ?? true
+    active: args.active ?? true
   }
 }
 
@@ -239,9 +239,9 @@ mutate skillChangeEvent createSkillChangeEvent {
     id: args.skillChangeEventId
     args.targetAgentId
     args.skillId
-    changeKind: coalesce(args.changeKind, "attached")
-    before: coalesce(args.before, {})
-    after: coalesce(args.after, {})
+    changeKind: args.changeKind ?? "attached"
+    before: args.before ?? {}
+    after: args.after ?? {}
     args.actorAgentId
     args.actorUserId
     args.planId
@@ -277,22 +277,22 @@ mutate agentRole createAgentRole {
     predefined              bool
   }
   insert {
-    id: coalesce(args.agentRoleId, args.slug)
+    id: args.agentRoleId ?? args.slug
     args.slug
     args.name
     args.description
-    category: coalesce(args.category, "professional")
-    tier: coalesce(args.tier, "A")
-    lockedSkillIds: coalesce(args.lockedSkillIds, [])
-    defaultSkillIds: coalesce(args.defaultSkillIds, [])
-    availableSkillIds: coalesce(args.availableSkillIds, [])
-    forbiddenSkillIds: coalesce(args.forbiddenSkillIds, [])
-    maxSkills: coalesce(args.maxSkills, 5)
+    category: args.category ?? "professional"
+    tier: args.tier ?? "A"
+    lockedSkillIds: args.lockedSkillIds ?? []
+    defaultSkillIds: args.defaultSkillIds ?? []
+    availableSkillIds: args.availableSkillIds ?? []
+    forbiddenSkillIds: args.forbiddenSkillIds ?? []
+    maxSkills: args.maxSkills ?? 5
     args.recommendedPolicySlug
     args.recommendedGender
     args.systemPromptHints
-    active: coalesce(args.active, true)
-    predefined: coalesce(args.predefined, false)
+    active: args.active ?? true
+    predefined: args.predefined ?? false
   }
 }
 
@@ -316,8 +316,8 @@ mutate avatarPersona createAvatarPersona {
   insert {
     accept { vendor, personaId, name, gender, imageRef, previewRef }
     stamp {
-      id: coalesce(args.avatarPersonaId, args.personaId)
-      active: coalesce(args.active, true)
+      id: args.avatarPersonaId ?? args.personaId
+      active: args.active ?? true
     }
   }
 }

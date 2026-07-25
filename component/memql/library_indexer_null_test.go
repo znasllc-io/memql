@@ -163,41 +163,57 @@ func TestLibraryIndexersCoalesceNullableOptionalFields(t *testing.T) {
 	require.NoError(t, err, "library/automations.memql must be readable from the embedded DSL tree")
 	blocks := splitAutomationBlocks(string(data))
 
-	// Each entry: the indexer's mutation-call binding for a nullable
-	// optional field that MUST be coalesced. The `want` substring is the
-	// coalesced form that must be present; the `rawBad` substring is the
-	// raw passthrough that must be absent (it is the null-producing bug).
+	// Each entry: an indexer's mutation-call binding for a nullable
+	// optional field that MUST carry a fallback, and the source
+	// expression it falls back FROM.
+	//
+	// The assertion is spelling-agnostic: the fallback may be written
+	// `coalesce(src, ...)` or with the `??` shorthand (memql#2766
+	// migrated the corpus to the latter; both parse to the same node).
+	// What it still catches is the actual bug -- a RAW `field: src`
+	// binding with no fallback at all, which resolves to null and fails
+	// artifact validation, exactly how #1605 left 6 of 7 indexers broken.
 	cases := []struct {
 		automation string
 		field      string
-		want       string
-		rawBad     string
+		src        string
 	}{
 		// Post-G5 (#2367) the indexers read their typed args bare -- the
-		// coalesce guard is unchanged, only the read form migrated from
+		// fallback guard is unchanged, only the read form migrated from
 		// event.payload.X to the bare field.
-		// indexNoteOnCreate
-		{"indexNoteOnCreate", "summary", `summary:          coalesce(body`, `summary:          body`},
+		{"indexNoteOnCreate", "summary", "body"},
 		// indexMemoryOnCreate (the indexer failing live on 0.9.67)
-		{"indexMemoryOnCreate", "summary", `summary:          coalesce(summary`, `summary:          summary`},
-		{"indexMemoryOnCreate", "agentId", `agentId:          coalesce(agentId`, `agentId:          agentId`},
-		{"indexMemoryOnCreate", "partitionId", `partitionId:      coalesce(partitionId`, `partitionId:      partitionId`},
+		{"indexMemoryOnCreate", "summary", "summary"},
+		{"indexMemoryOnCreate", "agentId", "agentId"},
+		{"indexMemoryOnCreate", "partitionId", "partitionId"},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.automation+"/"+tc.field, func(t *testing.T) {
 			block, ok := blocks[tc.automation]
 			require.True(t, ok, "%s must exist in library/automations.memql", tc.automation)
-			require.Contains(t, block, tc.want,
-				"%s must coalesce its nullable %s field (memql#1626)", tc.automation, tc.field)
-			// The coalesced form is `field: coalesce(event...)`, so the raw
-			// `field: event...` passthrough is never a substring of it -- a
-			// plain NotContains over THIS automation's block cleanly catches a
-			// revert to the raw form.
-			require.NotContains(t, block, tc.rawBad,
-				"%s must NOT bind %s raw (resolves to null -> artifact validation fails, memql#1626)", tc.automation, tc.field)
+			line, found := bindingLine(block, tc.field)
+			require.True(t, found, "%s must bind %s in its mutation call", tc.automation, tc.field)
+			hasFallback := strings.Contains(line, "coalesce("+tc.src) ||
+				strings.Contains(line, tc.src+" ??")
+			require.True(t, hasFallback,
+				"%s must give its nullable %s field a fallback -- `coalesce(%s, ...)` or `%s ?? ...` "+
+					"-- but binds it raw, which resolves to null and fails artifact validation "+
+					"(memql#1626). Got: %q", tc.automation, tc.field, tc.src, tc.src, line)
 		})
 	}
+}
+
+// bindingLine returns the line in an automation block that binds the
+// named field (`field: <expr>`), trimmed of surrounding whitespace.
+func bindingLine(block, field string) (string, bool) {
+	for _, raw := range strings.Split(block, "\n") {
+		line := strings.TrimSpace(raw)
+		if strings.HasPrefix(line, field+":") {
+			return line, true
+		}
+	}
+	return "", false
 }
 
 // splitAutomationBlocks carves library/automations.memql into a map keyed

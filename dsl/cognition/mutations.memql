@@ -285,7 +285,7 @@ mutate response emitClientToolResponse {
     accept { callId, contentJSON, errorMessage, partitionId }
     stamp {
       id: args.responseId
-      isError: coalesce(args.isError, false)
+      isError: args.isError ?? false
     }
   }
 }
@@ -368,8 +368,8 @@ mutate participant joinSpaceAsHuman {
     args.userId
     participantType: "human"
     args.displayName
-    status: coalesce(args.status, "active")
-    joinedAt: coalesce(args.joinedAt, now)
+    status: args.status ?? "active"
+    joinedAt: args.joinedAt ?? now
     args.capabilityOverrides
   }
 }
@@ -423,10 +423,10 @@ mutate participant joinSpaceAsAI {
     args.agentId
     participantType: "si"
     args.displayName
-    status: coalesce(args.status, "active")
-    joinedAt: coalesce(args.joinedAt, now)
+    status: args.status ?? "active"
+    joinedAt: args.joinedAt ?? now
     args.capabilityOverrides
-    hidden: coalesce(args.hidden, false)
+    hidden: args.hidden ?? false
     args.forUserId
     args.isGroupGA
   }
@@ -577,20 +577,20 @@ mutate utterance sendActionUtterance {
         concat("utt-", hash(concat(
           args.partitionId, ":",
           canonicalId(args.participantId, participant), ":",
-          coalesce(args.createdAt, now), ":", args.action.type
+          args.createdAt ?? now, ":", args.action.type
         )))
       )
     )
     args.partitionId
     args.participantId
-    participantType: coalesce(args.participantType, "human")
+    participantType: args.participantType ?? "human"
     utteranceType: "action"
     args.replyToId
     args.source
     action: {
         type: args.action.type,
         payload: args.action.payload,
-        schemaVersion: coalesce(args.action.schemaVersion, 1),
+        schemaVersion: args.action.schemaVersion ?? 1,
         idempotencyKey: args.action.idempotencyKey
       }
   }
@@ -634,14 +634,14 @@ mutate utterance sendRealtimeTranscriptUtterance {
         concat("utt-", hash(concat(
           args.partitionId, ":",
           canonicalId(args.participantId, participant), ":",
-          now, ":", coalesce(args.text, "")
+          now, ":", args.text ?? ""
         )))
       )
     )
-    createdAt: coalesce(args.createdAt, now)
+    createdAt: args.createdAt ?? now
     args.partitionId
     args.participantId
-    participantType: coalesce(args.participantType, "human")
+    participantType: args.participantType ?? "human"
     utteranceType: "speech"
     args.text
     args.audioId
@@ -649,9 +649,9 @@ mutate utterance sendRealtimeTranscriptUtterance {
     args.duration
     args.timestamps
     source: {
-        inputMethod: coalesce(args.source.inputMethod, "realtimeVoice"),
-        outputMethod: coalesce(args.source.outputMethod, "realtimeVoice"),
-        pipeline: coalesce(args.source.pipeline, "polyphon"),
+        inputMethod: args.source.inputMethod ?? "realtimeVoice",
+        outputMethod: args.source.outputMethod ?? "realtimeVoice",
+        pipeline: args.source.pipeline ?? "polyphon",
         sttProvider: args.source.sttProvider,
         ttsProvider: args.source.ttsProvider,
         avatarProvider: args.source.avatarProvider,
@@ -693,7 +693,7 @@ mutate utterance sendSpeechUtterance {
     )
     args.partitionId
     args.participantId
-    participantType: coalesce(args.participantType, "human")
+    participantType: args.participantType ?? "human"
     utteranceType: "speech"
     args.text
     args.audioId
@@ -727,7 +727,7 @@ mutate utterance sendTextUtterance {
     accept { partitionId, participantId, text, replyToId, source, citations }
     stamp {
       id: args.utteranceId
-      participantType: coalesce(args.participantType, "human")
+      participantType: args.participantType ?? "human"
       utteranceType: "text"
     }
   }
@@ -775,7 +775,7 @@ mutate audioOverride setAgentAudioOverride {
     args.agentId
     args.setBy
     args.mode
-    active: coalesce(args.active, true)
+    active: args.active ?? true
   }
 }
 
@@ -830,7 +830,7 @@ mutate videoOverride setAgentVideoOverride {
     args.agentId
     args.setBy
     args.mode
-    active: coalesce(args.active, true)
+    active: args.active ?? true
   }
 }
 
@@ -904,8 +904,8 @@ mutate presence updateParticipantPresence {
     args.state
     args.label
     args.reason
-    sinceAt: coalesce(args.sinceAt, now)
-    lastUpdatedAt: coalesce(args.lastUpdatedAt, now)
+    sinceAt: args.sinceAt ?? now
+    lastUpdatedAt: args.lastUpdatedAt ?? now
     args.lastUtteranceId
     args.lastError
     args.intent

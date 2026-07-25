@@ -34,6 +34,12 @@
 //	                    domain is the file's containing directory, so this
 //	                    rewrite is path-aware.
 //
+//	null-coalesce       coalesce(a, b, c) → a ?? b ?? c (#2766; the
+//	                    operator shipped by #2611). Skips what the
+//	                    Swift-tight precedence would re-associate --
+//	                    arithmetic / unary neighbours, and comparisons
+//	                    inside an argument -- plus multi-line calls.
+//
 // Flags:
 //
 //	--rewrite=NAME[,NAME...]   comma-separated list of rewrites to apply
@@ -75,6 +81,7 @@ var rewriters = map[string]rewriter{
 	"terse-automation":         langparser.RewriteLonghandSingleStepAutomation,
 	"actor-binding":            langparser.RewriteActorBinding,
 	"doc-comment-descriptions": langparser.RewriteDocCommentDescriptions,
+	"null-coalesce":            langparser.RewriteNullCoalesce,
 }
 
 var pathRewriters = map[string]pathRewriter{

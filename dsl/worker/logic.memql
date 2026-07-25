@@ -28,7 +28,7 @@ logic killSwitchSuspendsRunningPlans {
     event object!
   }
   body {
-  return query runningPlansForUser( userId: coalesce(args.event.node.id, ""), withComputerUseScope: true )
+  return query runningPlansForUser( userId: args.event.node.id ?? "", withComputerUseScope: true )
   }
 }
 
@@ -62,7 +62,7 @@ logic workerInvocationRetentionSweep {
   }
   body {
   windowDays := query globalVariable( name: "WORKER_INVOCATION_RETENTION_DAYS" )
-  candidates := query expiredWorkerInvocations( createdBefore: addDuration(now, concat("P-", coalesce(windowDays.first().payload.value, "90"), "D")) )
+  candidates := query expiredWorkerInvocations( createdBefore: addDuration(now, concat("P-", windowDays.first().payload.value ?? "90", "D")) )
   return candidates.nodes()
   }
 }

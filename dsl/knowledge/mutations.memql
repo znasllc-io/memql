@@ -31,9 +31,9 @@ mutate documentChunk createDocumentChunk {
     accept { domainId, text, source, sourceUtteranceId, sourceAgentId, sourceTopic }
     stamp {
       id: args.chunkId
-      sourceRef: coalesce(args.sourceRef, "")
-      seq: coalesce(args.seq, 0)
-      tokenCount: coalesce(args.tokenCount, 0)
+      sourceRef: args.sourceRef ?? ""
+      seq: args.seq ?? 0
+      tokenCount: args.tokenCount ?? 0
     }
   }
 }
@@ -97,8 +97,8 @@ mutate documentChunk writeKnowledgeChunk {
     accept { domainId, text, sourceRef, sourceTopic }
     stamp {
       id: args.chunkId
-      seq: coalesce(args.seq, 0)
-      tokenCount: coalesce(args.tokenCount, 0)
+      seq: args.seq ?? 0
+      tokenCount: args.tokenCount ?? 0
       source: "trainerAgent"
       validationStatus: "validated"
       superseded: false
@@ -135,6 +135,6 @@ mutate documentChunk markChunkSuperseded {
     // so the natural arg name is `reason`; the concept field is
     // `supersededReason`. Accept either and land it on the concept field --
     // previously `reason` was silently dropped. (#1633)
-    supersededReason: coalesce(args.reason, args.supersededReason, "")
+    supersededReason: args.reason ?? args.supersededReason ?? ""
   }
 }

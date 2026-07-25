@@ -47,7 +47,7 @@ mutate healedOverride proposeOverride {
       tier: "overlay"
       valid: false
       active: true
-      blastRadius: coalesce(args.blastRadius, "personal")
+      blastRadius: args.blastRadius ?? "personal"
       validationStatus: "proposed"
     }
   }

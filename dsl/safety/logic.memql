@@ -18,7 +18,7 @@ logic purgeExpiredSafetyClassifications {
       topic: "safety.classification.retention.observed",
       payload: {
         candidateCount: allRows.count(),
-        retentionDays: coalesce(retentionDays.first().payload.value, "90"),
+        retentionDays: retentionDays.first().payload.value ?? "90",
         timestamp: now
       }
     )
@@ -43,7 +43,7 @@ logic purgeExpiredOutputScreenings {
       topic: "safety.outputScreening.retention.observed",
       payload: {
         candidateCount: allRows.count(),
-        retentionDays: coalesce(retentionDays.first().payload.value, "90"),
+        retentionDays: retentionDays.first().payload.value ?? "90",
         timestamp: now
       }
     )

@@ -59,17 +59,17 @@ mutate deployment createDeployment {
   insert {
     id: args.deploymentId
     deploymentId: args.deploymentId
-    status: coalesce(args.status, "pending")
-    version: coalesce(args.version, "")
-    imageDigest: coalesce(args.imageDigest, "")
-    provider: coalesce(args.provider, "")
-    environment: coalesce(args.environment, "development")
-    region: coalesce(args.region, "")
-    clusterId: coalesce(args.clusterId, "")
-    triggeredBy: coalesce(args.triggeredBy, "")
-    notes: coalesce(args.notes, "")
-    changelog: coalesce(args.changelog, "")
-    previousDeploymentId: coalesce(args.previousDeploymentId, "")
+    status: args.status ?? "pending"
+    version: args.version ?? ""
+    imageDigest: args.imageDigest ?? ""
+    provider: args.provider ?? ""
+    environment: args.environment ?? "development"
+    region: args.region ?? ""
+    clusterId: args.clusterId ?? ""
+    triggeredBy: args.triggeredBy ?? ""
+    notes: args.notes ?? ""
+    changelog: args.changelog ?? ""
+    previousDeploymentId: args.previousDeploymentId ?? ""
     updatedAt: now
   }
 }
@@ -135,9 +135,9 @@ mutate deploymentNodeSpec createDeploymentNodeSpec {
     accept { deploymentId, nodeType }
     stamp {
       id: concat(args.deploymentId, ":", args.nodeType)
-      version: coalesce(args.version, "")
-      replicas: coalesce(args.replicas, 1)
-      imageDigest: coalesce(args.imageDigest, "")
+      version: args.version ?? ""
+      replicas: args.replicas ?? 1
+      imageDigest: args.imageDigest ?? ""
       updatedAt: now
     }
   }
@@ -168,9 +168,9 @@ mutate deploymentNodeSpec updateDeploymentNodeSpec {
   }
   update {
     id: concat(args.deploymentId, ":", args.nodeType)
-    version: coalesce(args.version, "")
-    replicas: coalesce(args.replicas, 1)
-    imageDigest: coalesce(args.imageDigest, "")
+    version: args.version ?? ""
+    replicas: args.replicas ?? 1
+    imageDigest: args.imageDigest ?? ""
     updatedAt: now
   }
 }

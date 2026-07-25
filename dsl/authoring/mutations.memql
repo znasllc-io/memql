@@ -28,7 +28,7 @@ mutate bundle createAuthoringBundle {
     stamp {
       id: args.bundleId
       ownerUserId: actor.userId
-      version: coalesce(args.version, 1)
+      version: args.version ?? 1
       status: "draft"
     }
   }

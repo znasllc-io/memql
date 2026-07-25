@@ -36,23 +36,23 @@ mutate invocation createWorkerInvocation {
     args.ownerUserId
     args.workerId
     args.agentId
-    planId: coalesce(args.planId, "")
-    taskId: coalesce(args.taskId, "")
-    correlationId: coalesce(args.correlationId, "")
+    planId: args.planId ?? ""
+    taskId: args.taskId ?? ""
+    correlationId: args.correlationId ?? ""
     args.tool
     args.action
-    argsRedacted: coalesce(args.argsRedacted, {})
+    argsRedacted: args.argsRedacted ?? {}
     args.startedAt
-    completedAt: coalesce(args.completedAt, "")
-    durationMs: coalesce(args.durationMs, 0)
+    completedAt: args.completedAt ?? ""
+    durationMs: args.durationMs ?? 0
     args.outcome
-    exitCode: coalesce(args.exitCode, 0)
-    signal: coalesce(args.signal, "")
-    errorCode: coalesce(args.errorCode, "")
-    errorMessage: coalesce(args.errorMessage, "")
-    bytesIn: coalesce(args.bytesIn, 0)
-    bytesOut: coalesce(args.bytesOut, 0)
-    outputPreview: coalesce(args.outputPreview, "")
+    exitCode: args.exitCode ?? 0
+    signal: args.signal ?? ""
+    errorCode: args.errorCode ?? ""
+    errorMessage: args.errorMessage ?? ""
+    bytesIn: args.bytesIn ?? 0
+    bytesOut: args.bytesOut ?? 0
+    outputPreview: args.outputPreview ?? ""
   }
 }
 
@@ -99,16 +99,16 @@ mutate registration createWorkerRegistration {
     args.identityId
     args.name
     args.capabilities
-    capabilityDescriptor: coalesce(args.capabilityDescriptor, {})
-    labels: coalesce(args.labels, {})
+    capabilityDescriptor: args.capabilityDescriptor ?? {}
+    labels: args.labels ?? {}
     args.concurrency
-    platformInfo: coalesce(args.platformInfo, {})
-    permissions: coalesce(args.permissions, {})
-    version: coalesce(args.version, "")
-    buildTag: coalesce(args.buildTag, "")
+    platformInfo: args.platformInfo ?? {}
+    permissions: args.permissions ?? {}
+    version: args.version ?? ""
+    buildTag: args.buildTag ?? ""
     args.registeredAt
-    lastSeenAt: coalesce(args.lastSeenAt, args.registeredAt)
-    lastConnectedFromIP: coalesce(args.lastConnectedFromIP, "")
+    lastSeenAt: args.lastSeenAt ?? args.registeredAt
+    lastConnectedFromIP: args.lastConnectedFromIP ?? ""
   }
 }
 
@@ -153,15 +153,15 @@ mutate registration refreshWorkerRegistration {
     id: args.registrationId
     args.name
     args.capabilities
-    capabilityDescriptor: coalesce(args.capabilityDescriptor, {})
-    labels: coalesce(args.labels, {})
+    capabilityDescriptor: args.capabilityDescriptor ?? {}
+    labels: args.labels ?? {}
     args.concurrency
-    platformInfo: coalesce(args.platformInfo, {})
-    permissions: coalesce(args.permissions, {})
-    version: coalesce(args.version, "")
-    buildTag: coalesce(args.buildTag, "")
+    platformInfo: args.platformInfo ?? {}
+    permissions: args.permissions ?? {}
+    version: args.version ?? ""
+    buildTag: args.buildTag ?? ""
     args.lastSeenAt
-    lastConnectedFromIP: coalesce(args.lastConnectedFromIP, "")
+    lastConnectedFromIP: args.lastConnectedFromIP ?? ""
   }
 }
 
@@ -186,8 +186,8 @@ mutate registration revokeWorker {
   update {
     id: args.registrationId
     args.revokedAt
-    revokedBy: coalesce(args.revokedBy, "")
-    revokeReason: coalesce(args.revokeReason, "")
+    revokedBy: args.revokedBy ?? ""
+    revokeReason: args.revokeReason ?? ""
   }
 }
 
@@ -273,6 +273,6 @@ mutate registration updateWorkerLastSeen {
   update {
     id: args.registrationId
     args.lastSeenAt
-    lastConnectedFromIP: coalesce(args.lastConnectedFromIP, "")
+    lastConnectedFromIP: args.lastConnectedFromIP ?? ""
   }
 }

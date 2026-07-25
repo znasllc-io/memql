@@ -20,11 +20,11 @@ mutate cluster createCluster {
     args.region
     args.environment
     seedNodeTypes: ["bff", "cognition", "planner"]
-    status: coalesce(args.status, "healthy")
+    status: args.status ?? "healthy"
     args.databaseId
     args.identityProviderId
     args.version
-    provider: coalesce(args.provider, "")
+    provider: args.provider ?? ""
   }
 }
 
@@ -93,18 +93,18 @@ mutate node createNode {
     region        string
   }
   insert {
-    id: coalesce(args.id, concat("node-", hash(concat(args.nodeType, ":", now))))
+    id: args.id ?? concat("node-", hash(concat(args.nodeType, ":", now)))
     args.nodeType
-    address: coalesce(args.address, "")
+    address: args.address ?? ""
     parentId: ""
-    health: coalesce(args.health, "healthy")
-    lastSeen: coalesce(args.lastSeen, now)
-    capabilities: coalesce(args.capabilities, [])
-    labels: coalesce(args.labels, {})
-    deploymentId: coalesce(args.deploymentId, "")
-    provider: coalesce(args.provider, "")
-    environment: coalesce(args.environment, "")
-    region: coalesce(args.region, "")
+    health: args.health ?? "healthy"
+    lastSeen: args.lastSeen ?? now
+    capabilities: args.capabilities ?? []
+    labels: args.labels ?? {}
+    deploymentId: args.deploymentId ?? ""
+    provider: args.provider ?? ""
+    environment: args.environment ?? ""
+    region: args.region ?? ""
   }
 }
 

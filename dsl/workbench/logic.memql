@@ -13,7 +13,7 @@ logic releaseWorkspaceOnPlanTerminal {
     event object!
   }
   body {
-    return query workspaceForPlan( planId: coalesce(args.event.node.id, "") )
+    return query workspaceForPlan( planId: args.event.node.id ?? "" )
   }
 }
 
@@ -27,7 +27,7 @@ logic planIsTerminal {
     status any
   }
   body {
-    st := coalesce(args.status, "")
+    st := args.status ?? ""
     isTerminal := cond(st == "succeeded", true, cond(st == "failed", true, cond(st == "cancelled", true, false)))
     return isTerminal
   }

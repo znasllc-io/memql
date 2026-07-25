@@ -113,7 +113,7 @@ logic pruneStaleClusterNodes {
   }
   body {
   windowMinutes := query globalVariable( name: "MEMQL_NODE_STALE_PRUNE_MINUTES" )
-  stale := query staleClusterNodes( olderThan: addDuration(now, concat("PT-", coalesce(windowMinutes.first().payload.value, "30"), "M")) )
+  stale := query staleClusterNodes( olderThan: addDuration(now, concat("PT-", windowMinutes.first().payload.value ?? "30", "M")) )
   return stale.nodes()
   }
 }

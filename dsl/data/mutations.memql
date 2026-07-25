@@ -117,7 +117,7 @@ mutate record createRecord {
     accept { partitionId, recordType, label, data, importSource, importedBy, naturalKeyField, naturalKeyValue, sourceAttachmentId, confidence }
     stamp {
       id: args.recordId
-      createdAt: coalesce(args.createdAt, now)
+      createdAt: args.createdAt ?? now
       validationState: "draft"
       checkCount: 0
       confirmCount: 0
@@ -308,10 +308,10 @@ mutate policy setPolicy {
     accept { targetRecordType, partitionId }
     stamp {
       id: args.policyId
-      requiredChecks: coalesce(args.requiredChecks, 1)
-      requiredConfirmations: coalesce(args.requiredConfirmations, 1)
-      checkedDataUsable: coalesce(args.checkedDataUsable, false)
-      revertMinRole: coalesce(args.revertMinRole, "admin")
+      requiredChecks: args.requiredChecks ?? 1
+      requiredConfirmations: args.requiredConfirmations ?? 1
+      checkedDataUsable: args.checkedDataUsable ?? false
+      revertMinRole: args.revertMinRole ?? "admin"
       active: true
     }
   }
