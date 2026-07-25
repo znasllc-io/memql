@@ -45,7 +45,9 @@ func TestAuthoredAutomations_NoQuotedIdentifierCoalesceArgs(t *testing.T) {
 		for _, step := range auto.Steps {
 			blob, merr := json.Marshal(step)
 			if merr != nil {
-				continue
+				// Fail rather than skip: a silently-skipped step would
+				// not count toward the non-vacuity floor below either.
+				t.Fatalf("%s/%s: marshal step: %v", auto.Name, step.ID, merr)
 			}
 			checked++
 			// The serialized form escapes inner quotes, so the bug shows
