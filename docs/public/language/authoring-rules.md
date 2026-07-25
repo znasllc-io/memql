@@ -1557,3 +1557,58 @@ as their kind marker; the seed-file `@actor("system")` is a different
 construct. An unknown member (`actor.displayName`) is likewise a load
 error and an `actor-unknown-property` squiggle (#2625): the envelope is
 a closed set, and both layers read the same canonical table.
+
+---
+
+## 27. `!=` matches rows where the field is ABSENT (#1685 / #2783)
+
+**Rule.** A `!=` predicate is null-safe: a row whose payload lacks the
+field **matches**. A `==` predicate does not. The one exception is
+`!= ""`, which excludes absent fields.
+
+```memql
+filter deleted != true      // matches rows with NO `deleted` key
+filter status == "active"   // does NOT match rows with no `status` key
+filter consumedAt != ""     // does NOT match rows with no `consumedAt` key
+```
+
+**Why.** Both directions were bugs before they were rules:
+
+- Plain SQL `<>` yields NULL, not true, when the field is missing, so
+  `deleted != true` silently DROPPED every row that never had a
+  `deleted` key -- the concept `@default` is not always stamped
+  (#1685). Hence `IS DISTINCT FROM`.
+- An absent string field is logically equal to `""` -- both mean "not
+  set" -- and `!= ""` is the canonical *is set* idiom
+  (`deletionScheduledAt != ""`, `consumedAt != ""`). Under the bare
+  #1685 rule those returned every unset row (#1708 / #1714). Hence the
+  `COALESCE(expr, '') <> ''` carve-out.
+
+The SQL push-down and the in-process post-filter implement both rules
+identically, and must continue to: a combined-filter query scans in SQL
+and then re-filters in process, so any disagreement means the rows you
+get depend on which path ran. `absent_field_comparison_test.go` pins
+all of it, including that agreement.
+
+**The trap this creates.** A misspelled property in a `!=` predicate is
+ABSENT, so it matches **every row**:
+
+```memql
+filter delted != true       // typo -- matches everything, including deleted rows
+```
+
+The failure direction is the dangerous one. The same typo in `==`
+returns zero rows and someone notices immediately; in `!=` on an
+authorization- or deletion-scoped filter it quietly serves rows that
+were meant to be excluded.
+
+**What to do about it.** Prefer the trait over an inline predicate --
+`traitIsNotDeleted` rather than `deleted != true` (the conformance gate
+already requires this where a trait exists, see rule 22). A trait name
+is a construct reference, so a typo in it fails to resolve at load
+instead of silently widening the result set.
+
+The semantics cannot catch the typo on their own: they cannot tell
+*declared-but-absent* (where null semantics are correct) from
+*undeclared entirely* (an author error). Only field-existence
+validation can -- tracked in #2781.
