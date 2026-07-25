@@ -130,12 +130,7 @@ func (s *streamSession) handleSenseHover(envelope *memqlv1.MemqlClientMessage, m
 
 	go func() {
 		pos := msg.GetPosition()
-		// SenseHoverMsg carries no file_path (SenseCompleteMsg and
-		// SenseDiagnoseMsg do). Without it a bare concept name whose
-		// trailing segment collides across namespaces stays unresolved
-		// here rather than resolving wrongly; every unambiguous name is
-		// unaffected. Adding the field is a proto change (#2753).
-		result := svc.Hover(msg.GetSource(), int(pos.GetLine()), int(pos.GetColumn()), "")
+		result := svc.Hover(msg.GetSource(), int(pos.GetLine()), int(pos.GetColumn()), msg.GetFilePath())
 		resp := &memqlv1.SenseHoverResult{RequestId: requestId}
 		if result != nil {
 			resp.Contents = result.Contents
@@ -187,6 +182,41 @@ func (s *streamSession) handleSenseSignatureHelp(envelope *memqlv1.MemqlClientMe
 		_ = s.sendServerMessage(envelope.GetMessageId(), &memqlv1.MemqlServerMessage{
 			Payload: &memqlv1.MemqlServerMessage_SenseSignatureHelpResult{
 				SenseSignatureHelpResult: resp,
+			},
+		})
+	}()
+	return nil
+}
+
+// handleSenseDefinition handles SenseDefinitionMsg requests.
+func (s *streamSession) handleSenseDefinition(envelope *memqlv1.MemqlClientMessage, msg *memqlv1.SenseDefinitionMsg) error {
+	if msg == nil {
+		return s.sendQueryError("", envelope.GetMessageId(), codes.InvalidArgument, "sense_definition: request body missing")
+	}
+	requestId := s.normalizeRequestId(envelope, msg.GetRequestId())
+
+	svc := s.service.sense
+	if svc == nil {
+		return s.sendQueryError(requestId, envelope.GetMessageId(), codes.Unavailable, "MemQL Sense is not configured")
+	}
+
+	go func() {
+		pos := msg.GetPosition()
+		results := svc.Definition(msg.GetSource(), int(pos.GetLine()), int(pos.GetColumn()), msg.GetFilePath())
+		targets := make([]*memqlv1.SenseDefinitionTarget, len(results))
+		for i, r := range results {
+			targets[i] = &memqlv1.SenseDefinitionTarget{
+				File:  r.File,
+				Kind:  r.Kind,
+				Range: senseRangeToProto(r.Range),
+			}
+		}
+		_ = s.sendServerMessage(envelope.GetMessageId(), &memqlv1.MemqlServerMessage{
+			Payload: &memqlv1.MemqlServerMessage_SenseDefinitionResult{
+				SenseDefinitionResult: &memqlv1.SenseDefinitionResult{
+					RequestId: requestId,
+					Targets:   targets,
+				},
 			},
 		})
 	}()

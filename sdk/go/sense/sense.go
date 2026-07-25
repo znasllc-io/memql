@@ -236,12 +236,18 @@ func (c *Client) Complete(ctx context.Context, source string, cursor Position) (
 // to say at that position -- that's the normal case for whitespace,
 // punctuation, etc., and shouldn't produce a "no hover" error path
 // in the consumer.
-func (c *Client) Hover(ctx context.Context, source string, cursor Position) (*Hover, error) {
+//
+// filePath is the document's workspace-relative path. It supplies the
+// ambient domain that disambiguates a bare construct name whose trailing
+// segment collides across namespaces; "" is accepted and costs only that
+// tie-break.
+func (c *Client) Hover(ctx context.Context, source string, cursor Position, filePath string) (*Hover, error) {
 	msg := &memqlv1.MemqlClientMessage{
 		Payload: &memqlv1.MemqlClientMessage_SenseHover{
 			SenseHover: &memqlv1.SenseHoverMsg{
 				Source:   source,
 				Position: protoPosition(cursor),
+				FilePath: filePath,
 			},
 		},
 	}
@@ -327,4 +333,51 @@ func protoRange(r *memqlv1.SenseRange) Range {
 		out.End = Position{Line: int(e.GetLine()), Column: int(e.GetColumn())}
 	}
 	return out
+}
+
+// DefinitionTarget is one place a construct is declared.
+//
+// File is WORKSPACE-RELATIVE, not a URI: an LSP maps it to file://, while a
+// pack browser addresses it as (domain, path), so the wire stays neutral
+// between them.
+type DefinitionTarget struct {
+	File  string
+	Kind  string
+	Range Range
+}
+
+// Definition asks Sense where the construct referenced at the cursor is
+// declared (go-to-definition).
+//
+// Returns nil when the reference resolves to nothing -- an unknown name, or
+// a name that resolves ambiguously and cannot be narrowed by the document's
+// own domain. Sense returns nothing rather than guessing, because sending an
+// editor to the wrong file is worse than not jumping.
+func (c *Client) Definition(ctx context.Context, source string, cursor Position, filePath string) ([]DefinitionTarget, error) {
+	msg := &memqlv1.MemqlClientMessage{
+		Payload: &memqlv1.MemqlClientMessage_SenseDefinition{
+			SenseDefinition: &memqlv1.SenseDefinitionMsg{
+				Source:   source,
+				Position: protoPosition(cursor),
+				FilePath: filePath,
+			},
+		},
+	}
+	resp, err := c.dispatcher.SendAndWait(ctx, msg)
+	if err != nil {
+		return nil, fmt.Errorf("sense.definition: %w", err)
+	}
+	result := resp.GetSenseDefinitionResult()
+	if result == nil || len(result.GetTargets()) == 0 {
+		return nil, nil
+	}
+	targets := make([]DefinitionTarget, 0, len(result.GetTargets()))
+	for _, t := range result.GetTargets() {
+		targets = append(targets, DefinitionTarget{
+			File:  t.GetFile(),
+			Kind:  t.GetKind(),
+			Range: protoRange(t.GetRange()),
+		})
+	}
+	return targets, nil
 }
