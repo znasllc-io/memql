@@ -22,6 +22,7 @@ package parser
 // A slot with no `??` returns exactly what parseValue produced, so this
 // is a drop-in for parseValue at any value position.
 func (p *Parser) parseValueMaybeCoalesce() (any, error) {
+	startPos, startCur := p.pos, p.current
 	val, err := p.parseValue()
 	if err != nil {
 		return nil, err
@@ -29,14 +30,20 @@ func (p *Parser) parseValueMaybeCoalesce() (any, error) {
 	if !p.check(TokenQuestionQuestion) {
 		return val, nil
 	}
-	args := []ExpressionNode{p.valueToExprNode(val)}
-	for p.check(TokenQuestionQuestion) {
-		p.advance()
-		rhs, rerr := p.parseValue()
-		if rerr != nil {
-			return nil, rerr
-		}
-		args = append(args, p.valueToExprNode(rhs))
-	}
-	return &CoalesceExpr{Args: args}, nil
+	// Rewind and re-parse the WHOLE chain through the operand parser the
+	// coalesce() CALL form uses, instead of folding the parseValue
+	// results (memql#2766 review).
+	//
+	// parseValue returns a bare Go string for an identifier and
+	// valueToExprNode wraps that in a LiteralExpr, so `body ?? ""`
+	// compiled to coalesce("body", "") -- the automation then wrote the
+	// identifier's own NAME into the row (`summary: "body"`), which is
+	// the memql#580 render-the-identifier-as-its-own-name bug class. The
+	// coalesce() spelling never had this: its args go through
+	// parsePrimary, which keeps a reference a reference.
+	//
+	// Same rewind-and-reparse the comparison-value position already does
+	// for a pending `??` (#2611 review round 2, finding B).
+	p.pos, p.current = startPos, startCur
+	return p.parseCoalesceArgOperand()
 }

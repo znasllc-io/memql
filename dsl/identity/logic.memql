@@ -42,7 +42,7 @@ logic accessRequestExpirySweep {
   }
   body {
   windowDays := query globalVariable( name: "IDENTITY_ACCESS_REQUEST_EXPIRY_DAYS" )
-  pending := query expiredPendingAccessRequests( createdBefore: addDuration(now, concat("P-", coalesce(windowDays.first().payload.value, "30"), "D")) )
+  pending := query expiredPendingAccessRequests( createdBefore: addDuration(now, concat("P-", windowDays.first().payload.value ?? "30", "D")) )
   return pending.nodes()
   }
 }
@@ -215,7 +215,7 @@ logic accountDeletionSweep {
   }
   body {
   cooldownDays := query globalVariable( name: "MEMQL_IDENTITY_DELETION_COOLDOWN_DAYS" )
-  candidates := query usersScheduledForDeletion( scheduledBefore: addDuration(now, concat("P-", coalesce(cooldownDays.first().payload.value, "30"), "D")) )
+  candidates := query usersScheduledForDeletion( scheduledBefore: addDuration(now, concat("P-", cooldownDays.first().payload.value ?? "30", "D")) )
 
   // Auth-session revocation gap (intentional): the user concept holds
   // user.id, but authSessionsForSubject is keyed on the JWT
@@ -284,7 +284,7 @@ logic auditEventRetentionSweep {
     topic: "identity.audit.retention.observed",
     payload: {
       candidateCount: allEvents.count(),
-      retentionDays: coalesce(retentionDays.first().payload.value, "365"),
+      retentionDays: retentionDays.first().payload.value ?? "365",
       timestamp: now
     }
   )

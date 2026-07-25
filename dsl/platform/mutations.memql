@@ -45,10 +45,10 @@ mutate policyTrace insertPolicyTrace {
   insert {
     accept { policyName, tier, argsHash, resultJson, traceJson, durationMs }
     stamp {
-      actorUserId: coalesce(args.actorUserId, "")
-      actorRole: coalesce(args.actorRole, "")
-      callerPartition: coalesce(args.callerPartition, "")
-      error: coalesce(args.error, "")
+      actorUserId: args.actorUserId ?? ""
+      actorRole: args.actorRole ?? ""
+      callerPartition: args.callerPartition ?? ""
+      error: args.error ?? ""
     }
   }
 }
@@ -96,7 +96,7 @@ mutate globalSecret setGlobalSecret {
     args.kind
     args.description
     args.addedBy
-    active: coalesce(args.active, true)
+    active: args.active ?? true
   }
 }
 
@@ -123,7 +123,7 @@ mutate globalVariable setGlobalVariable {
     args.name
     args.value
     args.description
-    active: coalesce(args.active, true)
+    active: args.active ?? true
   }
 }
 
@@ -161,7 +161,7 @@ mutate partitionSecret setPartitionSecret {
     args.kind
     args.description
     args.addedBy
-    active: coalesce(args.active, true)
+    active: args.active ?? true
   }
 }
 
@@ -189,7 +189,7 @@ mutate partitionVariable setPartitionVariable {
     args.name
     args.value
     args.description
-    active: coalesce(args.active, true)
+    active: args.active ?? true
   }
 }
 
@@ -220,7 +220,7 @@ mutate missingCapability logMissingCapability {
     lastSeenAt: args.firstSeenAt
     sightingCount: 1
     status: "open"
-    exampleGoals: [coalesce(args.exampleGoal, "")]
+    exampleGoals: [args.exampleGoal ?? ""]
   }
 }
 

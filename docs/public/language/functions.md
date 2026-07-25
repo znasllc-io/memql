@@ -293,18 +293,28 @@ is rejected (`TestNoRetiredBindingForms`).
 `@description("...")`, `@maxLength(N)`, `@pattern("re")`.
 
 > **Retired: `@default` on args fields.** It was never applied and is
-> rejected at load time. Apply a default in the body via
-> `coalesce(args.X, <default>)`, or use a concept-field `@default`
+> rejected at load time. Apply a default in the body with the `??`
+> null-coalescing operator, or use a concept-field `@default`
 > (those ARE honored on insert):
 
 ```memql
 insert {
   id:      args.guideId
-  kind:    coalesce(args.kind, "walkthrough")
-  version: coalesce(args.version, 1)
-  active:  coalesce(args.active, true)
+  kind:    args.kind ?? "walkthrough"
+  version: args.version ?? 1
+  active:  args.active ?? true
 }
 ```
+
+`a ?? b ?? c` folds to exactly what `coalesce(a, b, c)` produces, so the
+two spellings are interchangeable to the engine. The shorthand is the
+authored form -- `dsl/no_coalesce_longhand_test.go` gates the corpus on
+it, and `memqlmigrate --rewrite=null-coalesce` converts the call form.
+
+`??` binds **tighter than comparison** and **looser than arithmetic**, so
+`args.stage ?? "" == "active"` means `(args.stage ?? "") == "active"`,
+and `args.n ?? 0 + 1` means `args.n ?? (0 + 1)` -- parenthesise when you
+want the sum coalesced.
 
 ---
 

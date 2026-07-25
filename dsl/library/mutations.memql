@@ -51,14 +51,14 @@ mutate artifact createArtifact {
     args.summary
     args.format
     args.mimeType
-    live: coalesce(args.live, false)
+    live: args.live ?? false
     args.scope
     args.partitionId
     args.agentId
     args.producedByPlanId
     args.producedByWorkerId
     args.producedByWorkerName
-    validationStatus: coalesce(args.validationStatus, "none")
+    validationStatus: args.validationStatus ?? "none"
     // now, NOT bare `now`: this mutation is invoked from the index
     // automations (indexGeneratedOutput et al.), and the automation step
     // resolver only evaluates the function-call forms now/now -- a
@@ -93,7 +93,7 @@ mutate generatedOutput createGeneratedOutput {
     accept { ownerUserId, title, summary, body, attachmentId, mimeType, source, partitionId, producedByPlanId, producedByAgentId, producedByWorkerId, producedByWorkerName }
     stamp {
       id: args.outputId
-      format: coalesce(args.format, "markdown")
+      format: args.format ?? "markdown"
     }
   }
 }
@@ -118,7 +118,7 @@ mutate memory createMemory {
     stamp {
       id: args.memoryId
       ownerUserId: actor.userId
-      kind: coalesce(args.kind, "fact")
+      kind: args.kind ?? "fact"
     }
   }
 }
@@ -202,7 +202,7 @@ mutate generatedOutput updateGeneratedOutputContent {
     accept { ownerUserId, title, summary, body, attachmentId, mimeType, source, partitionId, producedByPlanId, producedByAgentId }
     stamp {
       id: args.outputId
-      format: coalesce(args.format, "markdown")
+      format: args.format ?? "markdown"
     }
   }
 }

@@ -52,15 +52,15 @@ automation indexGeneratedOutputOnCreate {
       kind:                 "generated_output",
       source,
       title:                title,
-      summary:              coalesce(summary, ""),
+      summary:              summary ?? "",
       format,
-      mimeType:             coalesce(mimeType, ""),
+      mimeType:             mimeType ?? "",
       live:                 false,
-      partitionId:          coalesce(partitionId, ""),
-      agentId:              coalesce(producedByAgentId, ""),
-      producedByPlanId:     coalesce(producedByPlanId, ""),
-      producedByWorkerId:   coalesce(producedByWorkerId, ""),
-      producedByWorkerName: coalesce(producedByWorkerName, "")
+      partitionId:          partitionId ?? "",
+      agentId:              producedByAgentId ?? "",
+      producedByPlanId:     producedByPlanId ?? "",
+      producedByWorkerId:   producedByWorkerId ?? "",
+      producedByWorkerName: producedByWorkerName ?? ""
     )
   }
 }
@@ -83,8 +83,8 @@ automation indexNoteOnCreate {
       lens:             "record",
       kind:             "note",
       source:           "agent_generated",
-      title:            coalesce(title, "Untitled note"),
-      summary:          coalesce(body, ""),
+      title:            title ?? "Untitled note",
+      summary:          body ?? "",
       live:             false
     )
   }
@@ -107,7 +107,7 @@ automation indexTodoOnCreate {
       lens:             "record",
       kind:             "todo",
       source:           "agent_generated",
-      title:            coalesce(title, "Untitled to-do"),
+      title:            title ?? "Untitled to-do",
       live:             false
     )
   }
@@ -130,7 +130,7 @@ automation indexCalendarEventOnCreate {
       lens:             "record",
       kind:             "calendar_event",
       source:           "agent_generated",
-      title:            coalesce(title, "Untitled event"),
+      title:            title ?? "Untitled event",
       live:             false
     )
   }
@@ -157,9 +157,9 @@ automation indexMemoryOnCreate {
       kind:             "memory",
       source:           "agent_generated",
       title,
-      summary:          coalesce(summary, ""),
-      agentId:          coalesce(agentId, ""),
-      partitionId:      coalesce(partitionId, ""),
+      summary:          summary ?? "",
+      agentId:          agentId ?? "",
+      partitionId:      partitionId ?? "",
       live:             false
     )
   }

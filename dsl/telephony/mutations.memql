@@ -17,10 +17,10 @@ mutate number recordNumber {
   insert {
     accept { e164, carrier, partitionId, providerId }
     stamp {
-      purpose:     coalesce(args.purpose, "both")
+      purpose:     args.purpose ?? "both"
       status:      "active"
-      numberType:  coalesce(args.numberType, "local")
-      monthlyCost: coalesce(args.monthlyCost, 0)
+      numberType:  args.numberType ?? "local"
+      monthlyCost: args.monthlyCost ?? 0
       purchasedAt: now
     }
   }
@@ -77,9 +77,9 @@ mutate call recordCall {
     accept { direction, fromE164, toE164, partitionId, room, carrier, providerCallId, agentId }
     stamp {
       startedAt:       now
-      durationSeconds: coalesce(args.durationSeconds, 0)
-      disposition:     coalesce(args.disposition, "in_progress")
-      costEstimate:    coalesce(args.costEstimate, 0)
+      durationSeconds: args.durationSeconds ?? 0
+      disposition:     args.disposition ?? "in_progress"
+      costEstimate:    args.costEstimate ?? 0
     }
   }
 }
@@ -96,7 +96,7 @@ mutate call closeCall {
     accept { id, durationSeconds, disposition }
     stamp {
       endedAt:         now
-      costEstimate:    coalesce(args.costEstimate, 0)
+      costEstimate:    args.costEstimate ?? 0
     }
   }
 }
@@ -126,7 +126,7 @@ mutate number setNumberE911 {
   update {
     accept { id, e911Registered, e911AddressId }
     stamp {
-      callerIdVerified: coalesce(args.callerIdVerified, false)
+      callerIdVerified: args.callerIdVerified ?? false
     }
   }
 }

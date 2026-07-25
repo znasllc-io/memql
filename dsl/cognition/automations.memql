@@ -27,8 +27,8 @@ automation bootstrapSession {
   step createSession {
     if steps.decide.result == true {
       mutation createSessionForParticipant (
-        participantId: coalesce(id, ""),
-        partitionId:   coalesce(partitionId, "")
+        participantId: id ?? "",
+        partitionId:   partitionId ?? ""
       )
     }
   }
@@ -37,9 +37,9 @@ automation bootstrapSession {
       publishEvent(
         topic: "session.created",
         payload: {
-          sessionId:     coalesce(id, ""),
-          participantId: coalesce(id, ""),
-          partitionId:   coalesce(partitionId, ""),
+          sessionId:     id ?? "",
+          participantId: id ?? "",
+          partitionId:   partitionId ?? "",
           timestamp:     now
         }
       )
@@ -78,19 +78,19 @@ automation generateResponse {
   step insert {
     if steps.decide.result != "" {
       mutation sendTextUtterance (
-        partitionId:   coalesce(partitionId, ""),
-        participantId: coalesce(siParticipantId, ""),
+        partitionId:   partitionId ?? "",
+        participantId: siParticipantId ?? "",
         text:          steps.decide.result,
-        replyToId:     coalesce(utteranceId, ""),
-        source:        { inputMethod: "si", agentId: coalesce(agentId, "") }
+        replyToId:     utteranceId ?? "",
+        source:        { inputMethod: "si", agentId: agentId ?? "" }
       )
     }
   }
   step presence {
     if steps.decide.result != "" {
       builtin cognitionTrackPresence(
-        participantId: coalesce(siParticipantId, ""),
-        partitionId:   coalesce(partitionId, ""),
+        participantId: siParticipantId ?? "",
+        partitionId:   partitionId ?? "",
         state:         "idle"
       )
     }

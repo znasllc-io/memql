@@ -68,7 +68,7 @@ mutate task createSemanticTask {
       id: args.taskId
       category: "semantic"
       status: "queued"
-      attemptNumber: coalesce(args.attemptNumber, 1)
+      attemptNumber: args.attemptNumber ?? 1
       executionSurface: "inProcess"
     }
   }
@@ -105,7 +105,7 @@ mutate task createToolInvocationTask {
     // tool call went un-stamped. A toolInvocation always runs inside the agent
     // node's process, so it's always inProcess (mirrors createSemanticTask). (memql#889)
     executionSurface: "inProcess"
-    input: coalesce(args.toolArgs, {})
+    input: args.toolArgs ?? {}
     startedAt: now
   }
 }
@@ -126,7 +126,7 @@ mutate task completeToolInvocation {
     accept { status, toolResult, errorMessage }
     stamp {
       id: args.taskId
-      completedAt: coalesce(args.completedAt, now)
+      completedAt: args.completedAt ?? now
     }
   }
 }
@@ -176,8 +176,8 @@ mutate plan createPlan {
     stamp {
       id: args.planId
       status: "planning"
-      triggerSource: coalesce(args.triggerSource, "user.explicit")
-      pauseExtendsDeadline: coalesce(args.pauseExtendsDeadline, false)
+      triggerSource: args.triggerSource ?? "user.explicit"
+      pauseExtendsDeadline: args.pauseExtendsDeadline ?? false
     }
   }
 }
@@ -426,12 +426,12 @@ mutate task createTask {
     // @default("semantic") is NOT applied on insert, so a caller-supplied
     // category was silently dropped and the insert failed "missing properties:
     // category". Accept it as an arg and default to "semantic" here. (#1633)
-    category: coalesce(args.category, "semantic")
+    category: args.category ?? "semantic"
     args.kind
     status: "queued"
     args.seq
     args.phase
-    executionSurface: coalesce(args.executionSurface, "inProcess")
+    executionSurface: args.executionSurface ?? "inProcess"
     args.executorBackend
     args.input
   }
@@ -597,8 +597,8 @@ mutate responsibility createResponsibility {
     stamp {
       id: args.responsibilityId
       ownerUserId: actor.userId
-      targetKind: coalesce(args.targetKind, "unassigned")
-      enabled: coalesce(args.enabled, true)
+      targetKind: args.targetKind ?? "unassigned"
+      enabled: args.enabled ?? true
       status: "draft"
     }
   }

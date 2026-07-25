@@ -262,9 +262,9 @@ mutate semanticMemory createHarnessSemanticMemory {
     stamp {
       id: args.memoryId
       ownerUserId: actor.userId
-      confidence: coalesce(args.confidence, 0.5)
+      confidence: args.confidence ?? 0.5
       reinforceCount: 1
-      lastReinforced: coalesce(args.lastReinforced, now)
+      lastReinforced: args.lastReinforced ?? now
       status: "active"
       provenanceMutation: "createHarnessSemanticMemory"
     }

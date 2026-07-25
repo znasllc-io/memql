@@ -119,7 +119,7 @@ logic generateResponse {
 
   // The reply text -- empty string when already answered, so the automation's
   // `!= ""`-gated persist + presence steps skip.
-  return coalesce(aiResponse, "")
+  return aiResponse ?? ""
   }
 }
 

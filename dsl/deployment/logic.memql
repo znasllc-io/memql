@@ -26,7 +26,7 @@ logic deployGateGreen {
     gate object!
   }
   body {
-    return coalesce(args.gate.passed, false)
+    return args.gate.passed ?? false
   }
 }
 
@@ -48,7 +48,7 @@ logic nextDeploymentVersion {
     bump     string
   }
   body {
-    return builtin suggestNextVersion( current: args.current, bump: coalesce(args.bump, "patch") )
+    return builtin suggestNextVersion( current: args.current, bump: args.bump ?? "patch" )
   }
 }
 
@@ -72,7 +72,7 @@ logic nextDeploymentVersion {
 @actor
 logic deploymentForwardAllowed {
   body {
-    role := coalesce(actor.role, "")
+    role := actor.role ?? ""
     isElevated := cond(role == "admin", true, cond(role == "owner", true, false))
     allowed := cond(role == "developer", true, isElevated)
     return allowed
@@ -88,7 +88,7 @@ logic deploymentForwardAllowed {
 @actor
 logic deploymentRollbackAllowed {
   body {
-    role := coalesce(actor.role, "")
+    role := actor.role ?? ""
     allowed := cond(role == "owner", true, false)
     return allowed
   }
@@ -105,8 +105,8 @@ logic deployRollbackTarget {
     previousDeploymentId any
   }
   body {
-    prev := coalesce(args.previousDeploymentId, "")
-    ok := coalesce(args.passed, false)
+    prev := args.previousDeploymentId ?? ""
+    ok := args.passed ?? false
     target := cond(ok == true, "", prev)
     return target
   }
@@ -157,7 +157,7 @@ logic deployOutcomeLabel {
     passed any
   }
   body {
-    ok := coalesce(args.passed, false)
+    ok := args.passed ?? false
     outcome := cond(ok == true, "succeeded", "failed")
     return outcome
   }

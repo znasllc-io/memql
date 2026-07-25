@@ -31,7 +31,7 @@ mutate calendarEvent createCalendarEvent {
     stamp {
       id:          args.eventId
       ownerUserId: actor.userId
-      allDay: coalesce(args.allDay, false)
+      allDay: args.allDay ?? false
       source:    "native"
       deleted:   false
     }

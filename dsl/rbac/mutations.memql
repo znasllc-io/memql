@@ -38,9 +38,9 @@ mutate role createRole {
   insert {
     accept { slug, name, rank, description }
     stamp {
-      id: coalesce(args.roleId, args.slug)
-      predefined: coalesce(args.predefined, false)
-      active: coalesce(args.active, true)
+      id: args.roleId ?? args.slug
+      predefined: args.predefined ?? false
+      active: args.active ?? true
     }
   }
 }
@@ -68,9 +68,9 @@ mutate capability createCapability {
     accept { roleSlug, verb, resourceType, description }
     stamp {
       id: args.capabilityId
-      effect: coalesce(args.effect, "allow")
-      predefined: coalesce(args.predefined, false)
-      active: coalesce(args.active, true)
+      effect: args.effect ?? "allow"
+      predefined: args.predefined ?? false
+      active: args.active ?? true
     }
   }
 }

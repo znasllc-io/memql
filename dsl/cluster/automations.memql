@@ -52,19 +52,19 @@ automation bootstrapCluster {
   step databaseRecord {
     if steps.decide.result == true {
       mutation createDatabase (
-        host:    coalesce(database.host, "localhost"),
-        dbName:  coalesce(database.dbName, "memql"),
-        sslMode: coalesce(database.sslMode, "disable")
+        host:    database.host ?? "localhost",
+        dbName:  database.dbName ?? "memql",
+        sslMode: database.sslMode ?? "disable"
       )
     }
   }
   step idpRecord {
     if steps.decide.result == true && exists(payload.identityProvider) {
       mutation createIdentityProvider (
-        name:           coalesce(identityProvider.name, "memql-identity"),
-        issuerUrl:      coalesce(identityProvider.issuerUrl, ""),
-        clientIdPrefix: coalesce(identityProvider.clientIdPrefix, ""),
-        redirectUrl:    coalesce(identityProvider.redirectUrl, "")
+        name:           identityProvider.name ?? "memql-identity",
+        issuerUrl:      identityProvider.issuerUrl ?? "",
+        clientIdPrefix: identityProvider.clientIdPrefix ?? "",
+        redirectUrl:    identityProvider.redirectUrl ?? ""
       )
     }
   }
@@ -74,8 +74,8 @@ automation bootstrapCluster {
         name:        "development",
         environment: "development",
         region:      "local",
-        provider:    coalesce(provider, ""),
-        version:     coalesce(node.version, "")
+        provider:    provider ?? "",
+        version:     node.version ?? ""
       )
     }
   }
@@ -98,8 +98,8 @@ automation deregisterNode {
 
   step persist {
     mutation createSpawnEvent (
-      nodeId:   coalesce(node.id, ""),
-      nodeType: coalesce(node.type, ""),
+      nodeId:   node.id ?? "",
+      nodeType: node.type ?? "",
       action:   "stopped",
       reason:   "system.shutdown"
     )
@@ -132,19 +132,19 @@ automation registerNode {
   // step id colliding with the args field of the same name.
   step record {
     mutation createNode (
-      id:           coalesce(node.id, ""),
-      nodeType:     coalesce(node.type, ""),
-      address:      coalesce(node.address, ""),
-      deploymentId: coalesce(deploymentId, ""),
-      provider:     coalesce(provider, ""),
-      environment:  coalesce(environment, ""),
-      region:       coalesce(region, "")
+      id:           node.id ?? "",
+      nodeType:     node.type ?? "",
+      address:      node.address ?? "",
+      deploymentId: deploymentId ?? "",
+      provider:     provider ?? "",
+      environment:  environment ?? "",
+      region:       region ?? ""
     )
   }
   step spawn {
     mutation createSpawnEvent (
-      nodeId:   coalesce(node.id, ""),
-      nodeType: coalesce(node.type, ""),
+      nodeId:   node.id ?? "",
+      nodeType: node.type ?? "",
       action:   "spawned",
       reason:   "system.startup"
     )

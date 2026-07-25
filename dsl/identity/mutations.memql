@@ -17,7 +17,7 @@ mutate accessRequest approveAccessRequest {
       id: args.requestId
       status: "approved"
       reviewedAt: now
-      reviewerNote: coalesce(args.reviewerNote, "")
+      reviewerNote: args.reviewerNote ?? ""
     }
   }
 }
@@ -189,7 +189,7 @@ mutate authCode consumeAuthCode {
   update {
     id: args.codeId
     consumedAt: now
-    consumedFromIP: coalesce(args.consumedFromIP, "")
+    consumedFromIP: args.consumedFromIP ?? ""
   }
 }
 
@@ -223,7 +223,7 @@ mutate magicLinkRequest consumeMagicLinkRequest {
   update {
     id: args.requestId
     consumedAt: now
-    consumedFromIP: coalesce(args.consumedFromIP, "")
+    consumedFromIP: args.consumedFromIP ?? ""
   }
 }
 
@@ -268,13 +268,13 @@ mutate accessRequest createAccessRequest {
   insert {
     id: args.requestId
     args.email
-    name: coalesce(args.name, "")
-    additionalContext: coalesce(args.additionalContext, "")
+    name: args.name ?? ""
+    additionalContext: args.additionalContext ?? ""
     status: "pending"
-    riskScore: coalesce(args.riskScore, 0)
-    riskSignals: coalesce(args.riskSignals, "")
-    sourceIP: coalesce(args.sourceIP, "")
-    userAgent: coalesce(args.userAgent, "")
+    riskScore: args.riskScore ?? 0
+    riskSignals: args.riskSignals ?? ""
+    sourceIP: args.sourceIP ?? ""
+    userAgent: args.userAgent ?? ""
   }
 }
 
@@ -342,20 +342,20 @@ mutate auditEvent createAuditEvent {
     args.occurredAt
     args.category
     args.action
-    actorUserId: coalesce(args.actorUserId, "")
-    actorEmail: coalesce(args.actorEmail, "")
-    actorRole: coalesce(args.actorRole, "")
-    actorIdentityId: coalesce(args.actorIdentityId, "")
-    targetType: coalesce(args.targetType, "")
-    targetId: coalesce(args.targetId, "")
-    targetEmail: coalesce(args.targetEmail, "")
-    detail: coalesce(args.detail, {})
-    sourceIP: coalesce(args.sourceIP, "")
-    userAgent: coalesce(args.userAgent, "")
-    correlationId: coalesce(args.correlationId, "")
-    outcome: coalesce(args.outcome, "")
-    failureReason: coalesce(args.failureReason, "")
-    prevEventHash: coalesce(args.prevEventHash, "")
+    actorUserId: args.actorUserId ?? ""
+    actorEmail: args.actorEmail ?? ""
+    actorRole: args.actorRole ?? ""
+    actorIdentityId: args.actorIdentityId ?? ""
+    targetType: args.targetType ?? ""
+    targetId: args.targetId ?? ""
+    targetEmail: args.targetEmail ?? ""
+    detail: args.detail ?? {}
+    sourceIP: args.sourceIP ?? ""
+    userAgent: args.userAgent ?? ""
+    correlationId: args.correlationId ?? ""
+    outcome: args.outcome ?? ""
+    failureReason: args.failureReason ?? ""
+    prevEventHash: args.prevEventHash ?? ""
   }
 }
 
@@ -406,9 +406,9 @@ mutate authCode createAuthCode {
     accept { code, codeHash, clientId, redirectURI, userId, identityId, magicLinkRequestId, expiresAt }
     stamp {
       id: args.codeId
-      state: coalesce(args.state, "")
-      codeChallenge:       coalesce(args.codeChallenge, "")
-      codeChallengeMethod: coalesce(args.codeChallengeMethod, "")
+      state: args.state ?? ""
+      codeChallenge:       args.codeChallenge ?? ""
+      codeChallengeMethod: args.codeChallengeMethod ?? ""
     }
   }
 }
@@ -457,10 +457,10 @@ mutate oauthClient createOAuthClient {
     accept { clientId, redirectURIsJSON, registeredAt }
     stamp {
       id: args.clientId
-      clientName: coalesce(args.clientName, "")
-      grantTypes: coalesce(args.grantTypes, "")
-      responseTypes: coalesce(args.responseTypes, "")
-      tokenEndpointAuthMethod: coalesce(args.tokenEndpointAuthMethod, "")
+      clientName: args.clientName ?? ""
+      grantTypes: args.grantTypes ?? ""
+      responseTypes: args.responseTypes ?? ""
+      tokenEndpointAuthMethod: args.tokenEndpointAuthMethod ?? ""
     }
   }
 }
@@ -508,9 +508,9 @@ mutate authSession createAuthSession {
     accept { subject, tokenHash, source, expiresAt }
     stamp {
       id: args.sessionId
-      userId: coalesce(args.userId, "")
-      identityId: coalesce(args.identityId, "")
-      clientLabel: coalesce(args.clientLabel, "")
+      userId: args.userId ?? ""
+      identityId: args.identityId ?? ""
+      clientLabel: args.clientLabel ?? ""
       lastActivityAt: now
       firstAuthenticatedAt: now
       refreshTokenHash: ""
@@ -586,32 +586,32 @@ mutate clusterSettings createClusterSettings {
   }
   insert {
     args.id
-    clusterDomain: coalesce(args.clusterDomain, "")
-    brandName: coalesce(args.brandName, "")
-    brandPrimaryColor: coalesce(args.brandPrimaryColor, "")
-    brandLogoDataURI: coalesce(args.brandLogoDataURI, "")
-    brandIconDataURI: coalesce(args.brandIconDataURI, "")
+    clusterDomain: args.clusterDomain ?? ""
+    brandName: args.brandName ?? ""
+    brandPrimaryColor: args.brandPrimaryColor ?? ""
+    brandLogoDataURI: args.brandLogoDataURI ?? ""
+    brandIconDataURI: args.brandIconDataURI ?? ""
     args.registrationMode
-    registrationDomains: coalesce(args.registrationDomains, "")
-    internalDomains: coalesce(args.internalDomains, "")
+    registrationDomains: args.registrationDomains ?? ""
+    internalDomains: args.internalDomains ?? ""
     args.internalDefaultRole
-    registeredClientsJSON: coalesce(args.registeredClientsJSON, "")
-    accessRequestNotifyEmails: coalesce(args.accessRequestNotifyEmails, "")
+    registeredClientsJSON: args.registeredClientsJSON ?? ""
+    accessRequestNotifyEmails: args.accessRequestNotifyEmails ?? ""
     accessRequestNotifyThrottleMins: 5
-    bootstrapEmail: coalesce(args.bootstrapEmail, "")
-    bootstrapFirstName: coalesce(args.bootstrapFirstName, "")
-    bootstrapLastName: coalesce(args.bootstrapLastName, "")
-    bootstrapPhone: coalesce(args.bootstrapPhone, "")
-    bootstrapPrimaryRole: coalesce(args.bootstrapPrimaryRole, "")
-    bootstrapGender: coalesce(args.bootstrapGender, "")
-    bootstrapBirthdate: coalesce(args.bootstrapBirthdate, "")
-    bootstrappedAt: coalesce(args.bootstrappedAt, "")
-    accessTokenTTLSeconds: coalesce(args.accessTokenTTLSeconds, 0)
-    refreshTokenTTLSeconds: coalesce(args.refreshTokenTTLSeconds, 0)
-    magicLinkTTLSeconds: coalesce(args.magicLinkTTLSeconds, 0)
-    invitationTTLDays: coalesce(args.invitationTTLDays, 0)
-    refreshCookieSameSite: coalesce(args.refreshCookieSameSite, "")
-    authoredAutomationsEnabled: coalesce(args.authoredAutomationsEnabled, true)
+    bootstrapEmail: args.bootstrapEmail ?? ""
+    bootstrapFirstName: args.bootstrapFirstName ?? ""
+    bootstrapLastName: args.bootstrapLastName ?? ""
+    bootstrapPhone: args.bootstrapPhone ?? ""
+    bootstrapPrimaryRole: args.bootstrapPrimaryRole ?? ""
+    bootstrapGender: args.bootstrapGender ?? ""
+    bootstrapBirthdate: args.bootstrapBirthdate ?? ""
+    bootstrappedAt: args.bootstrappedAt ?? ""
+    accessTokenTTLSeconds: args.accessTokenTTLSeconds ?? 0
+    refreshTokenTTLSeconds: args.refreshTokenTTLSeconds ?? 0
+    magicLinkTTLSeconds: args.magicLinkTTLSeconds ?? 0
+    invitationTTLDays: args.invitationTTLDays ?? 0
+    refreshCookieSameSite: args.refreshCookieSameSite ?? ""
+    authoredAutomationsEnabled: args.authoredAutomationsEnabled ?? true
   }
 }
 
@@ -701,8 +701,8 @@ mutate identity createIdentity {
     accept { userId, identityType, credentials }
     stamp {
       id: args.identityId
-      label: coalesce(args.label, "")
-      usableByAgents: coalesce(args.usableByAgents, false)
+      label: args.label ?? ""
+      usableByAgents: args.usableByAgents ?? false
       active: true
     }
   }
@@ -749,10 +749,10 @@ mutate magicLinkRequest createMagicLinkRequest {
     accept { email, tokenHash, expiresAt }
     stamp {
       id: args.requestId
-      sourceIP: coalesce(args.sourceIP, "")
-      userAgent: coalesce(args.userAgent, "")
-      oauthCtxJSON: coalesce(args.oauthCtxJSON, "")
-      invitationId: coalesce(args.invitationId, "")
+      sourceIP: args.sourceIP ?? ""
+      userAgent: args.userAgent ?? ""
+      oauthCtxJSON: args.oauthCtxJSON ?? ""
+      invitationId: args.invitationId ?? ""
     }
   }
 }
@@ -791,7 +791,7 @@ mutate identity createPATIdentity {
     identityType: "api_key"
     credentials: {keyHash: args.keyHash}
     args.label
-    usableByAgents: coalesce(args.usableByAgents, false)
+    usableByAgents: args.usableByAgents ?? false
     active: true
   }
 }
@@ -830,9 +830,9 @@ mutate user createUser {
     id: args.userId
     args.displayName
     args.primaryEmail
-    role: coalesce(args.role, "reader")
-    groupIds: coalesce(args.groupIds, [])
-    preferences: coalesce(args.preferences, {})
+    role: args.role ?? "reader"
+    groupIds: args.groupIds ?? []
+    preferences: args.preferences ?? {}
     active: true
   }
 }
@@ -891,16 +891,16 @@ mutate user createUserOnFirstLogin {
   insert {
     id: args.userId
     args.displayName
-    firstName: coalesce(args.firstName, "")
-    lastName: coalesce(args.lastName, "")
+    firstName: args.firstName ?? ""
+    lastName: args.lastName ?? ""
     args.primaryEmail
-    phone: coalesce(args.phone, "")
-    primaryRole: coalesce(args.primaryRole, "")
-    gender: coalesce(args.gender, "")
-    birthdate: coalesce(args.birthdate, "")
-    role: coalesce(args.role, "reader")
-    groupIds: coalesce(args.groupIds, [])
-    preferences: coalesce(args.preferences, {})
+    phone: args.phone ?? ""
+    primaryRole: args.primaryRole ?? ""
+    gender: args.gender ?? ""
+    birthdate: args.birthdate ?? ""
+    role: args.role ?? "reader"
+    groupIds: args.groupIds ?? []
+    preferences: args.preferences ?? {}
     active: true
     args.internal
     legalAcceptance: []
@@ -936,7 +936,7 @@ mutate workerPairingCode createWorkerPairingCode {
     accept { ownerUserId, codeHash, clusterURL, expiresAt }
     stamp {
       id: args.pairingId
-      sourceIP: coalesce(args.sourceIP, "")
+      sourceIP: args.sourceIP ?? ""
     }
   }
 }
@@ -983,9 +983,9 @@ mutate identity createWorkerTokenIdentity {
         name: args.name,
         keyHash: args.keyHash,
         registeredBy: args.registeredBy,
-        capabilitiesAdvertised: coalesce(args.capabilitiesAdvertised, []),
-        labelsAdvertised: coalesce(args.labelsAdvertised, {}),
-        expiresAt: coalesce(args.expiresAt, "")
+        capabilitiesAdvertised: args.capabilitiesAdvertised ?? [],
+        labelsAdvertised: args.labelsAdvertised ?? {},
+        expiresAt: args.expiresAt ?? ""
       }
     label: args.name
     usableByAgents: false
@@ -1041,10 +1041,10 @@ mutate identity createNodeTokenIdentity {
         nodeType: args.nodeType,
         keyHash: args.keyHash,
         mintedBy: args.mintedBy,
-        expiresAt: coalesce(args.expiresAt, ""),
+        expiresAt: args.expiresAt ?? "",
         lastConnectAt: "",
-        bootstrappedAt: coalesce(args.bootstrappedAt, ""),
-        bootstrappedFrom: coalesce(args.bootstrappedFrom, "")
+        bootstrappedAt: args.bootstrappedAt ?? "",
+        bootstrappedFrom: args.bootstrappedFrom ?? ""
       }
     label: args.nodeType
     usableByAgents: false
@@ -1171,9 +1171,9 @@ mutate identity createVoiceAgentTokenIdentity {
         instanceId: args.instanceId,
         keyHash:    args.keyHash,
         mintedBy:   args.mintedBy,
-        expiresAt:  coalesce(args.expiresAt, "")
+        expiresAt:  args.expiresAt ?? ""
       }
-    label: coalesce(args.label, args.instanceId)
+    label: args.label ?? args.instanceId
     usableByAgents: false
     active: true
   }
@@ -1331,7 +1331,7 @@ mutate workerPairingCode redeemWorkerPairingCode {
     accept { redeemedAt, redeemedBy }
     stamp {
       id: args.pairingId
-      redeemedFromIP: coalesce(args.redeemedFromIP, "")
+      redeemedFromIP: args.redeemedFromIP ?? ""
     }
   }
 }
@@ -1368,7 +1368,7 @@ mutate accessRequest rejectAccessRequest {
     status: "rejected"
     args.reviewedBy
     reviewedAt: now
-    reviewerNote: coalesce(args.reviewerNote, "")
+    reviewerNote: args.reviewerNote ?? ""
   }
 }
 
@@ -1446,8 +1446,8 @@ mutate delegation revokeDelegation {
   update {
     id: args.delegationId
     active: false
-    revokedAt: coalesce(args.revokedAt, now)
-    revokedBySubject: coalesce(args.revokedBySubject, "")
+    revokedAt: args.revokedAt ?? now
+    revokedBySubject: args.revokedBySubject ?? ""
   }
 }
 
@@ -1710,7 +1710,7 @@ mutate user setUserActiveSpace {
     // 2-Spaces QA suite pass) or `activePartitionId` (the concept-field name; what
     // the 1-Identity QA suite passed and silently lost). Both land on the
     // concept's activePartitionId field; empty/missing clears the pointer. (#1633)
-    activePartitionId: coalesce(args.partitionId, args.activePartitionId, "")
+    activePartitionId: args.partitionId ?? args.activePartitionId ?? ""
   }
 }
 
@@ -1869,9 +1869,9 @@ mutate accountEntitlement setAccountEntitlement {
     accept { accountId, tier }
     stamp {
       id: concat("accountEntitlement-", hash(args.accountId))
-      accountKind: coalesce(args.accountKind, "user")
-      maxConcurrentTasks: coalesce(args.maxConcurrentTasks, 0)
-      note: coalesce(args.note, "")
+      accountKind: args.accountKind ?? "user"
+      maxConcurrentTasks: args.maxConcurrentTasks ?? 0
+      note: args.note ?? ""
     }
   }
 }

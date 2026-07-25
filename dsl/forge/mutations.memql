@@ -61,10 +61,10 @@ mutate request createRequest {
     accept { projectId, title, body, attachmentIds }
     stamp {
       id: args.requestId
-      requestType: coalesce(args.requestType, "bug")
+      requestType: args.requestType ?? "bug"
       submitterUserId: actor.userId
       submitterRole: actor.role
-      priority: coalesce(args.priority, "normal")
+      priority: args.priority ?? "normal"
       status: "submitted"
       targetEnv: "staging"
       provenanceMutation: "createRequest"

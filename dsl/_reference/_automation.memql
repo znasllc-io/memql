@@ -105,7 +105,9 @@ automation registerNodeLonghand {
 //   <name> <type> [@required] [@enum("a","b")] [@description("...")]
 //                 [@maxLength(N)] [@pattern("re")]
 //   -- `@default` is REJECTED on an args field (#991); default in the body
-//      via `coalesce(args.X, <v>)`.
+//      via the `??` shorthand, `args.X ?? <v>` (#2611/#2766). The
+//      `coalesce(args.X, <v>)` call form still parses and is what the
+//      shorthand folds to, but the corpus is gated on the shorthand.
 //
 // Fire-time validation (ADR Decision 2): when the automation declares an
 // args block, the trigger path binds `event.payload` -> `args` and validates
