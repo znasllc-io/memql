@@ -1602,13 +1602,27 @@ returns zero rows and someone notices immediately; in `!=` on an
 authorization- or deletion-scoped filter it quietly serves rows that
 were meant to be excluded.
 
+Note the rule is specific to `!=`. `not in` and the ordered
+comparisons (`<`, `>`, `<=`, `>=`) all treat an absent field as a
+NON-match, on both paths -- so `deleted not in [true]` does NOT behave
+like `deleted != true`.
+
 **What to do about it.** Prefer the trait over an inline predicate --
-`traitIsNotDeleted` rather than `deleted != true` (the conformance gate
-already requires this where a trait exists, see rule 22). A trait name
-is a construct reference, so a typo in it fails to resolve at load
-instead of silently widening the result set.
+`isNotDeleted` rather than `deleted != true`. The conformance gate
+already requires this wherever a trait exists (rule 22,
+`TestNoInlineTraitablePredicates`).
+
+That helps, but be clear about how much: a trait name is a construct
+reference, so a typo in it fails **closed** -- the query errors with
+`unknown spec "isNotDeletd"` instead of quietly returning every row.
+It does **not** fail at load. Verified: injecting that typo into a
+shipped query leaves `go test ./dsl/...` green and the engine boots
+fine; the failure appears at query-parse time, on first call. So the
+trait converts a silent wrong-answer into a loud runtime error, which
+is a real improvement, but not a build-time gate.
 
 The semantics cannot catch the typo on their own: they cannot tell
 *declared-but-absent* (where null semantics are correct) from
 *undeclared entirely* (an author error). Only field-existence
-validation can -- tracked in #2781.
+validation can -- tracked in #2781, which would make this a load-time
+failure.
