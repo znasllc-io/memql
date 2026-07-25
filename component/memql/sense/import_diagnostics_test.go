@@ -22,7 +22,11 @@ type fakeGraph struct {
 	nsList     []string            // Namespaces()
 	kinds      map[string][]string // ns -> Kinds(ns)
 	moduleSyms map[string][]string // "ns.kind" -> SymbolsInModule(ns,kind)
+	// definition data (#2754)
+	declSites map[string][]DeclSite // name -> DeclarationSites(name)
 }
+
+func (f fakeGraph) DeclarationSites(name string) []DeclSite { return f.declSites[name] }
 
 func (f fakeGraph) ModuleResolves(ns, kind string) Resolved {
 	if r, ok := f.modules[ns+"."+kind]; ok {

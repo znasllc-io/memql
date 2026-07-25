@@ -59,6 +59,24 @@ type WorkspaceGraph interface {
 	// SymbolsInModule returns the ids importable from <ns>.<kind> (for
 	// completion).
 	SymbolsInModule(ns, kind string) []string
+	// DeclarationSites returns every declaration of name in the workspace,
+	// with the position of the declared name token. It returns ALL of them
+	// -- 46 bare names collide across the tree -- so the caller, which knows
+	// the referencing file's domain, picks. An empty result means "not
+	// found here", which for a workspace that need not mount every namespace
+	// is inconclusive, not proof of absence.
+	DeclarationSites(name string) []DeclSite
+}
+
+// DeclSite is one declaration of a construct: the workspace-relative file
+// that declares it, its construct kind, and the position of the declared
+// name token.
+type DeclSite struct {
+	File   string
+	Name   string
+	Kind   string
+	Line   int
+	Column int
 }
 
 // noWorkspace is the nil-object WorkspaceGraph: it knows nothing, so every query
@@ -75,3 +93,4 @@ func (noWorkspace) HasImportsOnlyFiles() bool                      { return fals
 func (noWorkspace) Namespaces() []string                           { return nil }
 func (noWorkspace) Kinds(string) []string                          { return nil }
 func (noWorkspace) SymbolsInModule(string, string) []string        { return nil }
+func (noWorkspace) DeclarationSites(string) []DeclSite             { return nil }

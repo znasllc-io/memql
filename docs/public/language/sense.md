@@ -12,7 +12,7 @@ owner: znas
 MemQL Sense is the language-intelligence service for `.memql` files:
 tokenize (syntax highlighting), complete (context-aware
 autocompletion), diagnose (errors and warnings), hover (symbol info),
-and signature help. It is what colors and assists the source you read
+signature help, and go-to-definition. It is what colors and assists the source you read
 in the Cockpit [Editor](../cockpit/editor.md).
 
 Sense has **two consumers** today, both driving the same brain:
@@ -31,7 +31,7 @@ This document covers two things and how they relate:
 1. **The DSL spec (`dslspec`)** -- the single machine-readable source
    of truth for the memQL authoring surface, from which Sense is driven
    and which any editor can fetch as portable JSON.
-2. **MemQL Sense itself** -- the five language operations, how their
+2. **MemQL Sense itself** -- the language operations, how their
    completion / hover / diagnose behaviour is projected from the spec,
    and the CI drift guard that keeps the spec honest against the live
    grammar.
@@ -113,7 +113,7 @@ is needed most.
 
 ---
 
-## MemQL Sense: the five operations
+## MemQL Sense: the language operations
 
 Sense is exposed via gRPC on `MemqlService.Stream`. The core is pure
 Go (`component/memql/sense/`, no gRPC dependency); the gRPC handlers
@@ -126,6 +126,7 @@ live in `component/grpc/sense_handlers.go`.
 | **Diagnose** | Errors and warnings from the lexer, parser, and semantic validation |
 | **Hover** | Symbol info at the cursor -- function docs, concept schemas, annotation docs, tool and prompt docs. Resolves a BARE concept short name too (#2753): `candidate` in `shape candidate candidateFull` is ambient under rule 25, so it is matched by trailing segment against the registry. A collision across namespaces (`plan` is both `v1:planner:plan` and `v1:harness:plan`) is broken by the document's own domain; where that cannot decide, hover returns nothing rather than the wrong concept. The domain comes from the document path, which the LSP supplies and `SenseHoverMsg` does not yet carry |
 | **SignatureHelp** | Parameter help inside call arguments |
+| **Definition** | Go-to-definition (F12) -- resolves the construct reference under the cursor to the file and position that declares it (#2754). Backed by `dslimports.Index.DeclarationSites`, which finds the declaring file from the declaration index and recovers the line/column by re-lexing that file's raw source (the AST carries no positions). Colliding names are narrowed by the referencing file's own domain, and where that cannot decide it returns nothing rather than jumping to the wrong file. **LSP only today** -- there is no `SenseDefinitionMsg` on the gRPC surface |
 
 ### Driven from the spec
 

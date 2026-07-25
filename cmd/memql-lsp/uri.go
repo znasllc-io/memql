@@ -2,6 +2,7 @@ package main
 
 import (
 	"net/url"
+	"path/filepath"
 	"strings"
 )
 
@@ -19,4 +20,19 @@ func uriToPath(uri string) string {
 		p = strings.TrimPrefix(p, "/")
 	}
 	return p
+}
+
+// pathToURI is the inverse of uriToPath: it turns a filesystem path into a
+// file:// document URI. Used to point the editor at a definition target,
+// which the workspace graph reports as a path relative to the server root.
+func pathToURI(p string) string {
+	p = filepath.ToSlash(p)
+	// Windows drive paths (C:/foo) need the leading slash back: file:///C:/foo.
+	if !strings.HasPrefix(p, "/") {
+		if len(p) >= 2 && p[1] == ':' {
+			p = "/" + p
+		}
+	}
+	u := url.URL{Scheme: "file", Path: p}
+	return u.String()
 }
