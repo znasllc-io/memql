@@ -188,6 +188,106 @@ func TestTokenize_ConstructKeywordsColored(t *testing.T) {
 	}
 }
 
+// tokenTypeAtLine returns the Type of the token on `line` whose Literal
+// matches, or "" if none. Unlike firstTokenType this disambiguates a
+// spelling that appears in several positions -- `action` is both a
+// construct keyword and a bound concept name in the same snippet.
+func tokenTypeAtLine(tokens []Token, literal string, line int) string {
+	for _, tk := range tokens {
+		if tk.Literal == literal && tk.Range.Start.Line == line {
+			return tk.Type
+		}
+	}
+	return ""
+}
+
+// TestTokenize_ConstructKeywordPositionAware pins the fix for the
+// over-coloring the tokenizer previously accepted as a trade-off: an
+// identifier that merely SHARES a construct keyword's spelling rendered
+// as `keyword` wherever it appeared. `capability` is both a construct
+// keyword and a payload field of v1:actions:action, so a shape
+// projecting that field lit up as a declaration.
+//
+// The contract this pins: a construct keyword colors as `keyword` only
+// where it leads a top-level declaration header or an in-body invocation
+// step; everywhere else it is an ordinary identifier. The concept a
+// signature binds colors as `concept`, so `shape action actionFull`
+// renders keyword / concept / identifier rather than three keywords.
+func TestTokenize_ConstructKeywordPositionAware(t *testing.T) {
+	const shapeDecl = "@row\n" +
+		"shape action actionFull {\n" +
+		"  intent\n" +
+		"  capability\n" +
+		"  sideEffectClass\n" +
+		"}"
+	const conceptDecl = "concept action {\n" +
+		"  capability  string\n" +
+		"}"
+	const invocation = "automation onThing {\n" +
+		"  step run {\n" +
+		"    mutation mutationCreateCanvasState(stateId: \"x\")\n" +
+		"  }\n" +
+		"}"
+	// The three forms where a construct kind does NOT lead its line or
+	// sits outside a declaration header. Each regressed during the fix
+	// before the classifier learned it.
+	const midLineCall = "logic bootstrap {\n" +
+		"  body {\n" +
+		"    existing := query existingCluster()\n" +
+		"  }\n" +
+		"}"
+	const arrowTarget = "automation onUser @trigger(event=\"node.created\") => logic handleUser"
+	const queryClause = "query participant activeOnes {\n" +
+		"  filter status==\"active\"\n" +
+		"  shape participantFull\n" +
+		"}"
+
+	cases := []struct {
+		name    string
+		source  string
+		literal string
+		line    int
+		want    string
+	}{
+		{"declaration keyword leads its line", shapeDecl, "shape", 2, "keyword"},
+		{"signature-bound concept", shapeDecl, "action", 2, "concept"},
+		{"declared construct name", shapeDecl, "actionFull", 2, "identifier"},
+		{"projected field sharing a keyword spelling", shapeDecl, "capability", 4, "identifier"},
+		{"concept declaration keyword", conceptDecl, "concept", 1, "keyword"},
+		{"declared concept name", conceptDecl, "action", 1, "concept"},
+		{"payload field sharing a keyword spelling", conceptDecl, "capability", 2, "identifier"},
+		{"in-body invocation step keeps keyword", invocation, "mutation", 3, "keyword"},
+		{"mid-line invocation keeps keyword", midLineCall, "query", 3, "keyword"},
+		{"automation arrow target keeps keyword", arrowTarget, "logic", 1, "keyword"},
+		{"query shape clause keeps keyword", queryClause, "shape", 3, "keyword"},
+		{"query signature concept", queryClause, "participant", 1, "concept"},
+	}
+	svc := &Service{}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := tokenTypeAtLine(svc.Tokenize(tc.source), tc.literal, tc.line)
+			if got != tc.want {
+				t.Errorf("%q on line %d rendered as %q, want %q", tc.literal, tc.line, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestTokenize_SingleIdentifierHeaderNamesItself pins the boundary of the
+// signature-concept rule: a one-identifier header (`trait x`, `provider
+// x`) declares no concept, so its name must stay an identifier. Only the
+// two-identifier signature forms and `concept <Name>` bind one.
+func TestTokenize_SingleIdentifierHeaderNamesItself(t *testing.T) {
+	svc := &Service{}
+	tokens := svc.Tokenize("trait isActiveRecord {\n  return active == true\n}")
+	if got := firstTokenType(tokens, "trait"); got != "keyword" {
+		t.Errorf("trait rendered as %q, want keyword", got)
+	}
+	if got := firstTokenType(tokens, "isActiveRecord"); got != "identifier" {
+		t.Errorf("isActiveRecord rendered as %q, want identifier", got)
+	}
+}
+
 // TestTokenize_RetiredHasNotKeyword pins the E2 (memql#2373) `has` de-keywording
 // at the tokenize layer: the core lexer still emits TokenKeywordHas for the
 // retired `has` word, but the Sense tokenizer no longer maps it to `keyword`
