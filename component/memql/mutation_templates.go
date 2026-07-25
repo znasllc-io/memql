@@ -578,7 +578,7 @@ func (e *mutationTemplateEvaluator) evalString(ctx context.Context, s string) (a
 	// to correctly type coalesce fallback values like coalesce(ctx.x, []).
 	if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
 		if arr := parseArrayLiteral(trimmed); arr != nil {
-			return arr, nil
+			return unwrapMalformedNullCoalesce(arr), nil
 		}
 	}
 
@@ -586,7 +586,7 @@ func (e *mutationTemplateEvaluator) evalString(ctx context.Context, s string) (a
 	// to correctly type coalesce fallback values like coalesce(ctx.x, {}).
 	if strings.HasPrefix(trimmed, "{") && strings.HasSuffix(trimmed, "}") {
 		if obj := parseObjectLiteral(trimmed); obj != nil {
-			return obj, nil
+			return unwrapMalformedNullCoalesce(obj), nil
 		}
 	}
 
@@ -676,12 +676,43 @@ func (e *mutationTemplateEvaluator) evalParserExpression(ctx context.Context, ex
 		}
 		return e.engine.canonicalizeIdValue(ctx, fmt.Sprintf("%v", ev), t.Concept)
 	case *languageParser.CoalesceExpr:
-		for _, a := range t.Args {
+		// #1614 selection, matching evalCoalesce and the automation
+		// evaluator's coalesceFromArgs: the FINAL argument is the
+		// ultimate fallback and is returned even when it resolves to "",
+		// while every NON-final argument is skipped when it is nil,
+		// missing, or a blank string.
+		//
+		// This slot (id / createdAt / parent / aliasOf templates)
+		// previously skipped only nil/missing, so a blank non-final arm
+		// won and `id: args.roleId ?? args.slug` yielded "" when roleId
+		// was the empty string clients send for an absent optional --
+		// which makes the engine mint a RANDOM id instead of the
+		// deterministic fallback, silently turning idempotent upserts
+		// into duplicate rows (memql#2772 review).
+		for i, a := range t.Args {
 			ev, err := e.evalParserExpression(ctx, a)
 			if err != nil {
 				return nil, err
 			}
+			if i == len(t.Args)-1 {
+				// Normalise the sentinel away: a missing final arm is
+				// "no value", matching coalesceFromArgs. (evalCoalesce
+				// returns "" rather than nil for the blank-then-missing
+				// corner; not observable here, since evalStringMaybe maps
+				// nil and missingValue{} alike to "" for these slots.)
+				// The normalisation matters because
+				// isTruthy(missingValue{}) is TRUE, so leaking the
+				// sentinel would make an all-missing coalesce read as
+				// truthy inside And/Or/Not.
+				if isMissing(ev) {
+					return nil, nil
+				}
+				return ev, nil
+			}
 			if ev == nil || isMissing(ev) {
+				continue
+			}
+			if s, isStr := ev.(string); isStr && strings.TrimSpace(s) == "" {
 				continue
 			}
 			return ev, nil
@@ -1327,6 +1358,15 @@ func parsePayloadRawToTemplate(raw string) (map[string]any, error) {
 	if obj == nil {
 		return nil, fmt.Errorf("invalid object literal payload")
 	}
+	// A malformed `??` (a dangling `a ??`, a doubled `a ?? ?? b`) is
+	// marked with a typed sentinel while the values are classified.
+	// Refuse at LOAD: the runtime value evaluator has no parser behind
+	// it, so the operator would otherwise reach it as opaque text
+	// (memql#2772). Only EXPRESSION text is ever classified, so a quoted
+	// literal containing `??` -- ordinary prose -- cannot trip this.
+	if field, raw, bad := firstMalformedNullCoalesce(obj); bad {
+		return nil, fmt.Errorf("field %q: malformed `??` in %q (an operand is missing)", field, raw)
+	}
 	return obj, nil
 }
 
@@ -1519,7 +1559,14 @@ func parseLiteralOrExpr(s string, pos int) (any, int) {
 			}
 			if !inString {
 				switch ch {
-				case '(':
+				// Brace and bracket openers count toward depth exactly
+				// as parens do (memql#2772). Without them a literal arm
+				// in an unparenthesised expression ended the value at
+				// its own closer: `ctx.labels ?? {}` truncated to
+				// `ctx.labels ?? {`. The `coalesce(ctx.labels, {})`
+				// spelling never hit this because its braces sat inside
+				// the call's parens.
+				case '(', '{', '[':
 					depth++
 				case ')':
 					if depth > 0 {
@@ -1535,6 +1582,7 @@ func parseLiteralOrExpr(s string, pos int) (any, int) {
 						raw := strings.TrimSpace(s[start:pos])
 						return classifyScalarOrExpr(raw), pos
 					}
+					depth--
 				}
 			}
 			pos++
@@ -1601,7 +1649,12 @@ func classifyScalarOrExpr(raw string) any {
 	if f, err := strconv.ParseFloat(raw, 64); err == nil {
 		return f
 	}
-	return raw
+	// Store the lowered coalesce() spelling so the runtime value
+	// evaluator -- a string-prefix dispatcher over a closed set of forms
+	// -- never meets the `??` token (memql#2772). No-op when the value
+	// carries no live `??`; yields a malformedNullCoalesce sentinel when
+	// an operand is missing, which parsePayloadRawToTemplate refuses.
+	return lowerNullCoalesceValue(raw)
 }
 
 func scanQuotedString(s string, pos int) (string, int, bool) {

@@ -4104,13 +4104,13 @@ func (p *Parser) parseMutationBody() (*MutationStmt, error) {
 
 					switch argName {
 					case "id":
-						idTmpl, err := p.parseValue()
+						idTmpl, err := p.parseValueMaybeCoalesce()
 						if err != nil {
 							return nil, err
 						}
 						mutation.IDTemplate = idTmpl
 					case "createdAt":
-						createdAtTmpl, err := p.parseValue()
+						createdAtTmpl, err := p.parseValueMaybeCoalesce()
 						if err != nil {
 							return nil, err
 						}
@@ -4135,13 +4135,13 @@ func (p *Parser) parseMutationBody() (*MutationStmt, error) {
 						}
 						mutation.PayloadRaw = p.reconstructTokens(start, p.pos)
 					case "parent":
-						valTmpl, err := p.parseValue()
+						valTmpl, err := p.parseValueMaybeCoalesce()
 						if err != nil {
 							return nil, err
 						}
 						mutation.ParentTemplate = valTmpl
 					case "aliasOf":
-						valTmpl, err := p.parseValue()
+						valTmpl, err := p.parseValueMaybeCoalesce()
 						if err != nil {
 							return nil, err
 						}
@@ -4194,13 +4194,13 @@ func (p *Parser) parseMutationBody() (*MutationStmt, error) {
 
 					switch argName {
 					case "id":
-						idTmpl, err := p.parseValue()
+						idTmpl, err := p.parseValueMaybeCoalesce()
 						if err != nil {
 							return nil, err
 						}
 						mutation.IDTemplate = idTmpl
 					case "createdAt":
-						createdAtTmpl, err := p.parseValue()
+						createdAtTmpl, err := p.parseValueMaybeCoalesce()
 						if err != nil {
 							return nil, err
 						}
@@ -4226,13 +4226,13 @@ func (p *Parser) parseMutationBody() (*MutationStmt, error) {
 						}
 						mutation.PayloadRaw = p.reconstructTokens(start, p.pos)
 					case "parent":
-						valTmpl, err := p.parseValue()
+						valTmpl, err := p.parseValueMaybeCoalesce()
 						if err != nil {
 							return nil, err
 						}
 						mutation.ParentTemplate = valTmpl
 					case "aliasOf":
-						valTmpl, err := p.parseValue()
+						valTmpl, err := p.parseValueMaybeCoalesce()
 						if err != nil {
 							return nil, err
 						}
@@ -5690,7 +5690,7 @@ func (p *Parser) parseFunctionCallWithKind(name, kind string) (ExpressionNode, e
 			argName := p.current.Literal
 			p.advance() // consume name
 			p.advance() // consume '='
-			val, err := p.parseValue()
+			val, err := p.parseValueMaybeCoalesce()
 			if err != nil {
 				return nil, err
 			}
@@ -5706,7 +5706,7 @@ func (p *Parser) parseFunctionCallWithKind(name, kind string) (ExpressionNode, e
 			argName := p.current.Literal
 			p.advance() // consume name
 			p.advance() // consume ':'
-			val, err := p.parseValue()
+			val, err := p.parseValueMaybeCoalesce()
 			if err != nil {
 				return nil, err
 			}
@@ -5733,7 +5733,7 @@ func (p *Parser) parseFunctionCallWithKind(name, kind string) (ExpressionNode, e
 					kind, name, name, name)
 			}
 			// Positional argument
-			val, err := p.parseValue()
+			val, err := p.parseValueMaybeCoalesce()
 			if err != nil {
 				return nil, err
 			}
@@ -6611,27 +6611,14 @@ func (p *Parser) parseObject() (map[string]any, error) {
 			continue
 		}
 
-		// Value -- support ?? coalescing inside object literals
-		val, err := p.parseValue()
+		// Value -- support ?? coalescing inside object literals. Shares
+		// the one fold with every other value slot (memql#2772) so the
+		// object-literal and construct-call spellings cannot drift.
+		val, err := p.parseValueMaybeCoalesce()
 		if err != nil {
 			return nil, err
 		}
-		// Handle ?? (null coalescing) after a value
-		if p.check(TokenQuestionQuestion) {
-			// Build a CoalesceExpr wrapping the left value and right default
-			args := []ExpressionNode{p.valueToExprNode(val)}
-			for p.check(TokenQuestionQuestion) {
-				p.advance()
-				rVal, err := p.parseValue()
-				if err != nil {
-					return nil, err
-				}
-				args = append(args, p.valueToExprNode(rVal))
-			}
-			obj[key] = &CoalesceExpr{Args: args}
-		} else {
-			obj[key] = val
-		}
+		obj[key] = val
 
 		if p.check(TokenComma) {
 			p.advance()
