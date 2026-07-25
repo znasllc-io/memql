@@ -634,7 +634,7 @@ automation "test": dependency cycle among steps [a b]
 
 **Rule.** Query / mutation / spec / trait / logic constructs are
 named with a kind prefix: `queryActiveSpaces`, `mutationCreateSpace`,
-`specIsHumanParticipant`, `traitIsActiveRecord`, `logicAutoJoinSI`.
+`specIsHumanParticipant`, `isActiveRecord`, `logicAutoJoinSI`.
 Constructs live in one consolidated file per kind per namespace
 (`dsl/<namespace>/<construct>s.memql`), so the file name never
 carries an individual construct's name.
@@ -643,7 +643,7 @@ carries an individual construct's name.
 dsl/cognition/queries.memql     query space queryActiveSpaces { ... }
 dsl/cognition/mutations.memql   mutation space mutationCreateSpace { ... }
 dsl/cognition/specs.memql       spec specIsHumanParticipant { ... }
-dsl/common/traits.memql         trait traitIsActiveRecord { ... }
+dsl/common/traits.memql         trait isActiveRecord { ... }
 dsl/cognition/logic.memql       logic logicAutoJoinSI { ... }
 ```
 
@@ -1058,7 +1058,7 @@ is rejected at load time): `now`, `actor`, `partition`, `config`,
 
 ```memql
 use cognition.concepts.{ utterance, space }
-use common.traits.{ traitIsActiveRecord }
+use common.traits.{ isActiveRecord }
 
 /// Insert a chat utterance
 mutation utterance mutationSendUtterance {
@@ -1079,7 +1079,7 @@ query space queryActiveSpaces {
   args {
     ownerId  string  @required
   }
-  filter  ownerId == args.ownerId && traitIsActiveRecord
+  filter  ownerId == args.ownerId && isActiveRecord
   shape   spaceFull
 }
 
@@ -1187,9 +1187,9 @@ the change. The gates, with their test names:
 - **Mandatory trait specs** (`TestNoInlineTraitablePredicates`).
   When a trait in `dsl/common/traits.memql` covers a predicate, the
   filter must call the trait, not inline the comparison:
-  `traitIsActiveRecord` (not `active == true`),
-  `traitIsNotDeleted` (not `deleted != true`),
-  `traitStatusIsActive` (not `status == "active"`), and so
+  `isActiveRecord` (not `active == true`),
+  `isNotDeleted` (not `deleted != true`),
+  `statusIsActive` (not `status == "active"`), and so
   on for the status / identity-type / deletion-scheduled traits.
   Concept-specific predicates (`ownerUserId == args.userId`)
   stay inline.
@@ -1286,7 +1286,7 @@ query space queryFirstTenSpaces {
 // Legitimate full-set read — compliant, marked + auditable.
 @unbounded("provider catalog is a small bounded set — never more than a handful of rows")
 query provider queryAllProviders {
-  filter  traitIsActiveRecord
+  filter  isActiveRecord
   shape   providerFull
 }
 
@@ -1348,7 +1348,7 @@ explicit "never cache" escape.
 ```memql
 @cache(ttl="300")
 query agentRole queryActiveAgentRoles {
-  filter  traitIsActiveRecord
+  filter  isActiveRecord
   shape   agentRoleFull
 }
 ```
@@ -1557,3 +1557,72 @@ as their kind marker; the seed-file `@actor("system")` is a different
 construct. An unknown member (`actor.displayName`) is likewise a load
 error and an `actor-unknown-property` squiggle (#2625): the envelope is
 a closed set, and both layers read the same canonical table.
+
+---
+
+## 27. `!=` matches rows where the field is ABSENT (#1685 / #2783)
+
+**Rule.** A `!=` predicate is null-safe: a row whose payload lacks the
+field **matches**. A `==` predicate does not. The one exception is
+`!= ""`, which excludes absent fields.
+
+```memql
+filter deleted != true      // matches rows with NO `deleted` key
+filter status == "active"   // does NOT match rows with no `status` key
+filter consumedAt != ""     // does NOT match rows with no `consumedAt` key
+```
+
+**Why.** Both directions were bugs before they were rules:
+
+- Plain SQL `<>` yields NULL, not true, when the field is missing, so
+  `deleted != true` silently DROPPED every row that never had a
+  `deleted` key -- the concept `@default` is not always stamped
+  (#1685). Hence `IS DISTINCT FROM`.
+- An absent string field is logically equal to `""` -- both mean "not
+  set" -- and `!= ""` is the canonical *is set* idiom
+  (`deletionScheduledAt != ""`, `consumedAt != ""`). Under the bare
+  #1685 rule those returned every unset row (#1708 / #1714). Hence the
+  `COALESCE(expr, '') <> ''` carve-out.
+
+The SQL push-down and the in-process post-filter implement both rules
+identically, and must continue to: a combined-filter query scans in SQL
+and then re-filters in process, so any disagreement means the rows you
+get depend on which path ran. `absent_field_comparison_test.go` pins
+all of it, including that agreement.
+
+**The trap this creates.** A misspelled property in a `!=` predicate is
+ABSENT, so it matches **every row**:
+
+```memql
+filter delted != true       // typo -- matches everything, including deleted rows
+```
+
+The failure direction is the dangerous one. The same typo in `==`
+returns zero rows and someone notices immediately; in `!=` on an
+authorization- or deletion-scoped filter it quietly serves rows that
+were meant to be excluded.
+
+Note the rule is specific to `!=`. `not in` and the ordered
+comparisons (`<`, `>`, `<=`, `>=`) all treat an absent field as a
+NON-match, on both paths -- so `deleted not in [true]` does NOT behave
+like `deleted != true`.
+
+**What to do about it.** Prefer the trait over an inline predicate --
+`isNotDeleted` rather than `deleted != true`. The conformance gate
+already requires this wherever a trait exists (rule 22,
+`TestNoInlineTraitablePredicates`).
+
+That helps, but be clear about how much: a trait name is a construct
+reference, so a typo in it fails **closed** -- the query errors with
+`unknown spec "isNotDeletd"` instead of quietly returning every row.
+It does **not** fail at load. Verified: injecting that typo into a
+shipped query leaves `go test ./dsl/...` green and the engine boots
+fine; the failure appears at query-parse time, on first call. So the
+trait converts a silent wrong-answer into a loud runtime error, which
+is a real improvement, but not a build-time gate.
+
+The semantics cannot catch the typo on their own: they cannot tell
+*declared-but-absent* (where null semantics are correct) from
+*undeclared entirely* (an author error). Only field-existence
+validation can -- tracked in #2781, which would make this a load-time
+failure.
