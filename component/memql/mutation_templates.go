@@ -1519,7 +1519,14 @@ func parseLiteralOrExpr(s string, pos int) (any, int) {
 			}
 			if !inString {
 				switch ch {
-				case '(':
+				// Brace and bracket openers count toward depth exactly
+				// as parens do (memql#2772). Without them a literal arm
+				// in an unparenthesised expression ended the value at
+				// its own closer: `ctx.labels ?? {}` truncated to
+				// `ctx.labels ?? {`. The `coalesce(ctx.labels, {})`
+				// spelling never hit this because its braces sat inside
+				// the call's parens.
+				case '(', '{', '[':
 					depth++
 				case ')':
 					if depth > 0 {
@@ -1535,6 +1542,7 @@ func parseLiteralOrExpr(s string, pos int) (any, int) {
 						raw := strings.TrimSpace(s[start:pos])
 						return classifyScalarOrExpr(raw), pos
 					}
+					depth--
 				}
 			}
 			pos++
@@ -1601,7 +1609,11 @@ func classifyScalarOrExpr(raw string) any {
 	if f, err := strconv.ParseFloat(raw, 64); err == nil {
 		return f
 	}
-	return raw
+	// Store the lowered coalesce() spelling so the runtime value
+	// evaluator -- a string-prefix dispatcher over a closed set of forms
+	// -- never meets the `??` token (memql#2772). No-op when the value
+	// carries no live `??`.
+	return lowerNullCoalesceExpr(raw)
 }
 
 func scanQuotedString(s string, pos int) (string, int, bool) {
