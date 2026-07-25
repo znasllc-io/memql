@@ -42,11 +42,16 @@ func lowerNullCoalesceExpr(expr string) string {
 		lead := expr[:strings.Index(expr, core)]
 		return lead + lowerNullCoalesceExpr(core) + expr[len(lead)+len(core):]
 	}
-	// Recurse through a top-level comparison before touching `??`.
+	// Split the LOOSER operators first, so each recursion lowers a
+	// tighter slice than its caller. `??` binds tighter than every
+	// boolean connective and tighter than comparison, and looser than
+	// additive -- so by the time the `??` split runs, its arms are
+	// exactly the operands the parser cascade would have folded.
+	if op, at := topLevelBinary(expr, boolConnectives); at >= 0 {
+		return lowerNullCoalesceExpr(expr[:at]) + op + lowerNullCoalesceExpr(expr[at+len(op):])
+	}
 	if op, at := topLevelComparison(expr); at >= 0 {
-		left := lowerNullCoalesceExpr(expr[:at])
-		right := lowerNullCoalesceExpr(expr[at+len(op):])
-		return left + op + right
+		return lowerNullCoalesceExpr(expr[:at]) + op + lowerNullCoalesceExpr(expr[at+len(op):])
 	}
 	arms := splitTopLevelNullCoalesce(expr)
 	if len(arms) < 2 {
@@ -55,9 +60,42 @@ func lowerNullCoalesceExpr(expr string) string {
 		return lowerNullCoalesceInCallArgs(expr)
 	}
 	for i, arm := range arms {
-		arms[i] = lowerNullCoalesceExpr(strings.TrimSpace(arm))
+		arm = strings.TrimSpace(arm)
+		if arm == "" {
+			// A dangling or doubled operator (`a ??`, `a ?? ?? b`).
+			// Leave the text ALONE so the value keeps its live `??` and
+			// the load-time guard in parsePayloadRawToTemplate refuses
+			// the construct, rather than silently lowering to a
+			// coalesce() with an empty argument (memql#2772 review).
+			return expr
+		}
+		arms[i] = lowerNullCoalesceExpr(arm)
 	}
 	return "coalesce(" + strings.Join(arms, ", ") + ")"
+}
+
+// boolConnectives are the two-byte boolean operators, which bind LOOSER
+// than `??` in the parser cascade (parseLogicalOr -> parseLogicalAnd ->
+// ... -> parseNullCoalesce).
+var boolConnectives = []string{"&&", "||"}
+
+// topLevelBinary returns the first unparenthesised occurrence of any of
+// the given operators, or ("", -1).
+func topLevelBinary(expr string, ops []string) (string, int) {
+	sc := &exprScanner{s: expr}
+	for sc.i < len(expr) {
+		at := sc.i
+		_, live, top := sc.next()
+		if !live || !top {
+			continue
+		}
+		for _, op := range ops {
+			if strings.HasPrefix(expr[at:], op) {
+				return op, at
+			}
+		}
+	}
+	return "", -1
 }
 
 // exprScanner walks an expression tracking string literals and bracket
@@ -158,14 +196,20 @@ func splitTopLevelNullCoalesce(expr string) []string {
 // split at their own top level and lowered independently.
 func lowerNullCoalesceInCallArgs(expr string) string {
 	open := strings.IndexByte(expr, '(')
-	if open < 0 || !strings.HasSuffix(strings.TrimSpace(expr), ")") {
+	if open < 0 {
 		return expr
 	}
-	close := strings.LastIndexByte(expr, ')')
-	if close <= open {
+	// Find the paren that actually MATCHES this opener, not the last one
+	// in the string: `f(a ?? 1) + g(2)` would otherwise slice from f's
+	// opener to g's closer and rejoin `+ g(2)` inside f's argument list
+	// (memql#2772 review). Bail unless the matched closer ends the
+	// expression, i.e. this really is one `callee( ... )` and nothing
+	// else.
+	closeAt := matchingCloseParen(expr, open)
+	if closeAt < 0 || strings.TrimSpace(expr[closeAt+1:]) != "" {
 		return expr
 	}
-	inner := expr[open+1 : close]
+	inner := expr[open+1 : closeAt]
 	if !strings.Contains(inner, "??") {
 		return expr
 	}
@@ -189,5 +233,29 @@ func lowerNullCoalesceInCallArgs(expr string) string {
 		}
 		args[i] = strings.Replace(a, trimmed, lowered, 1)
 	}
-	return expr[:open+1] + strings.Join(args, ",") + expr[close:]
+	return expr[:open+1] + strings.Join(args, ",") + expr[closeAt:]
+}
+
+// matchingCloseParen returns the offset of the ')' closing the '(' at
+// open, ignoring parens inside string literals, or -1 when unbalanced.
+func matchingCloseParen(expr string, open int) int {
+	sc := &exprScanner{s: expr, i: open}
+	depth := 0
+	for sc.i < len(expr) {
+		at := sc.i
+		b, live, _ := sc.next()
+		if !live {
+			continue
+		}
+		switch b {
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 {
+				return at
+			}
+		}
+	}
+	return -1
 }

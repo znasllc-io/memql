@@ -1,9 +1,11 @@
 package memql
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // memql#2772: the `??` operator (#2611) must reach write-block payloads.
@@ -81,4 +83,85 @@ func TestParsePayloadRawToTemplate_LowersNullCoalesce(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, `coalesce(ctx.sinceAt, now)`, tpl["sinceAt"])
 	require.Equal(t, `coalesce(ctx.labels, {})`, tpl["labels"])
+}
+
+// Review finding: a malformed operator must not be silently absorbed
+// into a coalesce() with an empty argument. The runtime evaluator has no
+// parser behind it, so this has to fail at LOAD -- the strict-boot gate
+// then refuses the construct instead of shipping a silent misread.
+func TestParsePayloadRawToTemplate_RejectsMalformedNullCoalesce(t *testing.T) {
+	for _, src := range []string{
+		`{ active: ctx.a ?? }`,
+		`{ active: ctx.a ?? ?? ctx.b }`,
+		`{ nested: { inner: ctx.a ?? } }`,
+	} {
+		t.Run(src, func(t *testing.T) {
+			_, err := parsePayloadRawToTemplate(src)
+			require.Error(t, err, "a dangling/doubled ?? must be refused at load")
+			require.Contains(t, err.Error(), "malformed `??`")
+		})
+	}
+}
+
+// Review finding: the call-argument lowering must find the paren that
+// MATCHES the opener. Slicing to the LAST ')' in the string rejoined a
+// trailing term inside the first call's argument list.
+func TestLowerNullCoalesceExpr_DoesNotSwallowTrailingTerms(t *testing.T) {
+	// Two sibling calls: the arg lowering must not restructure them.
+	require.Equal(t, `f(a ?? 1) + g(2)`, lowerNullCoalesceExpr(`f(a ?? 1) + g(2)`))
+	// A single well-formed call still lowers in place.
+	require.Equal(t, `f(coalesce(a, 1))`, lowerNullCoalesceExpr(`f(a ?? 1)`))
+	// A paren inside a string must not be mistaken for the closer.
+	require.Equal(t, `f(coalesce(a, ")"))`, lowerNullCoalesceExpr(`f(a ?? ")")`))
+}
+
+// Review finding: `&&` / `||` bind LOOSER than `??` in the parser
+// cascade, so the lowering has to split them first or the two spellings
+// drift.
+func TestLowerNullCoalesceExpr_BooleanConnectivePrecedence(t *testing.T) {
+	require.Equal(t, `a && coalesce(b, c)`, lowerNullCoalesceExpr(`a && b ?? c`))
+	require.Equal(t, `coalesce(a, b) || c`, lowerNullCoalesceExpr(`a ?? b || c`))
+}
+
+// Review finding, the severe one: the id / createdAt / parent / aliasOf
+// templates evaluate a CoalesceExpr through a DIFFERENT implementation
+// than payload fields, and it skipped only nil/missing -- so a blank
+// non-final arm won.
+//
+// "" is what clients send for an absent optional string, which is the
+// whole reason #1614 exists. With the old behaviour
+// `id: args.roleId ?? args.slug` yielded "" for roleId=="", the engine
+// minted a RANDOM id instead of the deterministic slug, and idempotent
+// upserts silently became duplicate rows.
+func TestIdTemplateCoalesce_SkipsBlankNonFinalArm(t *testing.T) {
+	eval := &mutationTemplateEvaluator{args: map[string]any{
+		"roleId": "",
+		"slug":   "editor",
+		"blank":  "",
+	}}
+	ctx := context.Background()
+
+	got, err := eval.evalParserExpression(ctx, coalesceOf(argRef("roleId"), argRef("slug")))
+	require.NoError(t, err)
+	require.Equal(t, "editor", got, "a blank non-final arm must be skipped (#1614)")
+
+	// The FINAL arm stays the ultimate fallback: it is returned even
+	// when it resolves to "", so an explicit empty default still wins
+	// over inventing a value.
+	got, err = eval.evalParserExpression(ctx, coalesceOf(argRef("roleId"), argRef("blank")))
+	require.NoError(t, err)
+	require.Equal(t, "", got, "the final arm is returned even when blank (#1614)")
+
+	// A non-blank leading arm still short-circuits.
+	got, err = eval.evalParserExpression(ctx, coalesceOf(argRef("slug"), argRef("blank")))
+	require.NoError(t, err)
+	require.Equal(t, "editor", got)
+}
+
+func argRef(name string) languageParser.ExpressionNode {
+	return &languageParser.ArgRefExpr{Path: name}
+}
+
+func coalesceOf(args ...languageParser.ExpressionNode) languageParser.ExpressionNode {
+	return &languageParser.CoalesceExpr{Args: args}
 }

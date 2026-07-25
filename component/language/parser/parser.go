@@ -5717,7 +5717,7 @@ func (p *Parser) parseFunctionCallWithKind(name, kind string) (ExpressionNode, e
 			// Dotted paths (args.workdir) do not pun (no single name); they
 			// fall through to the positional rejection below with a hint.
 			argName := p.current.Literal
-			val, err := p.parseValueMaybeCoalesce()
+			val, err := p.parseValue()
 			if err != nil {
 				return nil, err
 			}

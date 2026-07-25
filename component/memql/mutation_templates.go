@@ -676,12 +676,31 @@ func (e *mutationTemplateEvaluator) evalParserExpression(ctx context.Context, ex
 		}
 		return e.engine.canonicalizeIdValue(ctx, fmt.Sprintf("%v", ev), t.Concept)
 	case *languageParser.CoalesceExpr:
-		for _, a := range t.Args {
+		// #1614 selection, matching evalCoalesce and the automation
+		// evaluator's coalesceFromArgs: the FINAL argument is the
+		// ultimate fallback and is returned even when it resolves to "",
+		// while every NON-final argument is skipped when it is nil,
+		// missing, or a blank string.
+		//
+		// This slot (id / createdAt / parent / aliasOf templates)
+		// previously skipped only nil/missing, so a blank non-final arm
+		// won and `id: args.roleId ?? args.slug` yielded "" when roleId
+		// was the empty string clients send for an absent optional --
+		// which makes the engine mint a RANDOM id instead of the
+		// deterministic fallback, silently turning idempotent upserts
+		// into duplicate rows (memql#2772 review).
+		for i, a := range t.Args {
 			ev, err := e.evalParserExpression(ctx, a)
 			if err != nil {
 				return nil, err
 			}
+			if i == len(t.Args)-1 {
+				return ev, nil
+			}
 			if ev == nil || isMissing(ev) {
+				continue
+			}
+			if s, isStr := ev.(string); isStr && strings.TrimSpace(s) == "" {
 				continue
 			}
 			return ev, nil
@@ -1327,7 +1346,47 @@ func parsePayloadRawToTemplate(raw string) (map[string]any, error) {
 	if obj == nil {
 		return nil, fmt.Errorf("invalid object literal payload")
 	}
+	// Every well-formed `??` was lowered to coalesce() while the values
+	// were classified, so a survivor means a malformed operator (a
+	// dangling `a ??`, a doubled `a ?? ?? b`). Refuse at LOAD -- the
+	// runtime value evaluator has no parser behind it, so an unlowered
+	// operator would otherwise reach it as opaque text (memql#2772).
+	if field, bad := firstFieldWithLiveNullCoalesce(obj); bad {
+		return nil, fmt.Errorf("field %q: malformed `??` (an operand is missing)", field)
+	}
 	return obj, nil
+}
+
+// firstFieldWithLiveNullCoalesce reports a payload field whose value
+// still carries a `??` operator outside a string literal.
+func firstFieldWithLiveNullCoalesce(obj map[string]any) (string, bool) {
+	for k, v := range obj {
+		switch t := v.(type) {
+		case string:
+			if hasLiveNullCoalesce(t) {
+				return k, true
+			}
+		case map[string]any:
+			if nested, bad := firstFieldWithLiveNullCoalesce(t); bad {
+				return k + "." + nested, true
+			}
+		}
+	}
+	return "", false
+}
+
+// hasLiveNullCoalesce reports whether the text carries a `??` outside a
+// string literal.
+func hasLiveNullCoalesce(s string) bool {
+	sc := &exprScanner{s: s}
+	for sc.i < len(s) {
+		at := sc.i
+		b, live, _ := sc.next()
+		if live && b == '?' && at+1 < len(s) && s[at+1] == '?' {
+			return true
+		}
+	}
+	return false
 }
 
 // parseObjectLiteral parses a MemQL object literal like {key: value, nested: {x: 1}} into map[string]any.
