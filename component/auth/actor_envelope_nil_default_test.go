@@ -79,6 +79,7 @@ func TestActorEnvelope_OnlyARealOwnerPassesTheGate(t *testing.T) {
 		{"reader", &AccessContext{Role: RoleReader}, false},
 		{"writer", &AccessContext{Role: RoleWriter}, false},
 		{"admin is not cluster owner", &AccessContext{Role: RoleAdmin}, false},
+		{"developer is not cluster owner", &AccessContext{Role: RoleDeveloper}, false},
 		{"owner", &AccessContext{Role: RoleOwner}, true},
 	}
 	for _, tc := range cases {

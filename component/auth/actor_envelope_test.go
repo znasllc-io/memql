@@ -49,11 +49,12 @@ func TestActorEnvelope(t *testing.T) {
 
 	// Nil context DENIES (memql#2801). This assertion previously expected
 	// the owner bit TRUE, justified as "dev-mode owner semantics" -- but
-	// dev mode does not produce a nil context: with
-	// MEMQL_IDENTITY_ENABLED=false the local-dev interceptor injects a
-	// synthetic AccessContext (subject "local-dev", role "owner"), which
-	// resolves to owner through the normal path above. Nil means the
-	// context never arrived, and `actor.isClusterOwner==true` is the
+	// dev mode does not produce a nil context. The local-dev interceptor
+	// injects CLAIMS (sub "local-dev", role "owner"); ensureAccess
+	// converts them to an AccessContext two hops later via LoadFromClaims
+	// / FallbackFromClaims, which always allocates. So dev mode arrives
+	// here non-nil and resolves to owner through the normal path above.
+	// Nil means the context never arrived, and `actor.isClusterOwner==true` is the
 	// entire gate on the admin-tier constructs, so defaulting it open
 	// returned every row instead of none.
 	//
@@ -66,10 +67,6 @@ func TestActorEnvelope(t *testing.T) {
 	nm := ActorEnvelopeMap(nil)
 	if nm["isOwner"] != false || nm["isClusterOwner"] != false || nm["userId"] != "" {
 		t.Errorf("nil-context map wrong: %+v", nm)
-	}
-	// The alias must mirror the canonical bit on the nil path too.
-	if nm["isOwner"] != nm["isClusterOwner"] {
-		t.Error("nil-context alias key must mirror the canonical owner bit")
 	}
 
 	valid := ActorEnvelopeValidNames()

@@ -130,11 +130,15 @@ func ActorEnvelopeValue(ac *AccessContext, path string) (any, bool) {
 		// bound `? = ?` fragment and nothing else bounds the query -- so
 		// a permissive default returns every row instead of none.
 		//
-		// The old default called nil "dev mode", which it is not: with
-		// MEMQL_IDENTITY_ENABLED=false the local-dev interceptor injects
-		// a synthetic AccessContext (subject "local-dev", role "owner"),
-		// so dev mode is non-nil and still resolves to owner here. Nil
-		// means the context genuinely never arrived.
+		// The old default called nil "dev mode", which it is not. With
+		// MEMQL_IDENTITY_ENABLED=false the local-dev interceptor injects claims
+		// (sub "local-dev", role "owner",
+		// component/grpc/local_dev_stream_interceptor.go:41-49) and
+		// ensureAccess converts them into an AccessContext two hops later
+		// (component/grpc/server.go:1024-1036: LoadFromClaims, falling back
+		// to FallbackFromClaims, which always allocates). So dev mode is
+		// non-nil and still resolves to owner through the normal path.
+		// Nil means the context genuinely never arrived.
 		//
 		// IsClusterOwner() is already nil-safe (`ac != nil && ac.Role ==
 		// RoleOwner`), so this defers to the canonical helper rather

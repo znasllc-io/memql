@@ -1282,14 +1282,21 @@ func (r *LogicRunner) newEvaluatorForLogic(ctx context.Context, args map[string]
 	// contract); the runner's step evaluator must bind it from the caller's
 	// auth context or a logic step like `role := coalesce(actor.role, "")`
 	// silently resolves to the literal path text (#2380, the deploy role
-	// gates). Absent auth leaves actor unbound -- reads resolve nil.
-	if ac, ok := auth.AccessFromContext(ctx); ok && ac != nil {
-		// One canonical envelope (#2623): the seeded map now carries
-		// the full field set (primaryEmail / now / the isOwner alias
-		// included) and the owner bit comes from IsClusterOwner() --
-		// the inlined Role comparison here was a drift seed.
-		evaluator.SetCustom("actor", auth.ActorEnvelopeMap(ac))
-	}
+	// gates).
+	//
+	// Bound UNCONDITIONALLY (#2801). Leaving actor unbound on absent auth
+	// hit exactly the #2380 hazard on the security-relevant field: an
+	// unbound `actor.isClusterOwner` resolves to its own path text, which
+	// is a non-empty string and therefore TRUTHY -- fail-open, in the
+	// runner, for the one field that gates admin work. ActorEnvelopeMap
+	// handles nil by denying (owner bits false, identity empty), so
+	// binding it always is both safer and simpler than the guard.
+	ac, _ := auth.AccessFromContext(ctx)
+	// One canonical envelope (#2623): the seeded map carries the full
+	// field set (primaryEmail / now / the isOwner alias included) and the
+	// owner bit comes from IsClusterOwner() -- the inlined Role
+	// comparison here was a drift seed.
+	evaluator.SetCustom("actor", auth.ActorEnvelopeMap(ac))
 	if r.logger != nil {
 		evaluator.SetLogger(r.logger)
 	}
