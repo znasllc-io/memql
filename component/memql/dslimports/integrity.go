@@ -840,12 +840,24 @@ var queryFilterHeadRe = regexp.MustCompile(
 // legitimately binds engine concepts it does not carry.
 func (t *Tree) verifyQueryFilterFields(path string, f *languageAst.File, idx *declIndex) []error {
 	conceptFor := map[string]string{}
+	dupNames := map[string]bool{}
 	for _, m := range queryFilterHeadRe.FindAllStringSubmatch(languageParser.BlankComments(t.readSource(path)), -1) {
+		if _, seen := conceptFor[m[2]]; seen {
+			// Two queries share a name in one file. The name->concept map
+			// cannot say which binding belongs to which AST node, and a
+			// last-wins guess reports a real property of one as undeclared on
+			// the other's concept. Skip both rather than emit a wrong
+			// diagnostic; the duplicate itself is a separate defect.
+			dupNames[m[2]] = true
+			continue
+		}
 		conceptFor[m[2]] = m[1] // name -> concept
 	}
 	if len(conceptFor) == 0 {
 		return nil
 	}
+
+	inScope := constructNamesInScope(path, f, idx)
 
 	var errs []error
 	for _, def := range f.Definitions {
@@ -854,18 +866,22 @@ func (t *Tree) verifyQueryFilterFields(path string, f *languageAst.File, idx *de
 			continue
 		}
 		conceptName := conceptFor[fd.Name]
-		if conceptName == "" {
+		if conceptName == "" || dupNames[fd.Name] {
 			continue
 		}
-		res := t.resolveConceptForFile(path, f, idx, conceptName)
-		if res.state != conceptResolved || res.decl == nil {
+		decl := t.resolveFilterConcept(path, f, idx, conceptName)
+		if decl == nil {
 			continue // lane 2 reports unresolved/ambiguous concepts
 		}
-		allowed := conceptPropertyNames(res.decl)
-		inScope := constructNamesInScope(path, f, idx)
+		allowed := conceptPropertyNames(decl)
 
 		for _, head := range filterFieldHeads(fd.Body) {
-			if rowIntrinsics[head] || reservedFilterHeads[head] || allowed[head] || inScope[head] {
+			// The engine lower-cases every head it classifies
+			// (reservedFilterHead, resolveIntrinsicField), so `createdat` and
+			// `Row.id` are legal filters. Matching case-sensitively here would
+			// report them as undeclared properties.
+			lowered := strings.ToLower(head)
+			if filterRowIntrinsics[lowered] || reservedFilterHeads[lowered] || allowed[head] || inScope[head] {
 				continue
 			}
 			errs = append(errs, fmt.Errorf(
@@ -874,6 +890,29 @@ func (t *Tree) verifyQueryFilterFields(path string, f *languageAst.File, idx *de
 		}
 	}
 	return errs
+}
+
+// filterRowIntrinsics are the row intrinsics a FILTER may name, lower-cased.
+//
+// Deliberately NOT lane 3's rowIntrinsics: that map is the write side, and it
+// admits `parent` / `aliasOf` because an insert block uses them as relationship
+// templates. In a filter the engine treats both as ordinary payload properties
+// (reservedFilterHead returns false, so they are payload-prefixed), so sharing
+// the map would have made `filter parent == args.x` on a concept without a
+// `parent` property unreportable -- the #2781 bug verbatim.
+//
+// `partition` and `schema` ARE admitted: the engine reserves them, so they are
+// never payload-prefixed. They have no filter push-down and fail loudly at SQL
+// compile instead, which is a different (visible) problem.
+var filterRowIntrinsics = map[string]bool{
+	"id":         true,
+	"concept":    true,
+	"type":       true,
+	"createdat":  true,
+	"createdby":  true,
+	"schema":     true,
+	"partition":  true,
+	"provenance": true,
 }
 
 // reservedFilterHeads are the engine namespaces a filter field reference may
@@ -934,6 +973,11 @@ func filterFieldHeads(n languageAst.Node) []string {
 			walk(v.Filter)
 		case *languageAst.NotExpr:
 			walk(v.Target)
+		case *languageAst.RelationshipExpr:
+			// The engine's rewriteFilterFieldRefs walks this, so a bare
+			// property under childOf(...) IS payload-prefixed -- omitting it
+			// here left the lane blind to the exact defect it exists to catch.
+			walk(v.Target)
 		case *languageAst.ShapeExpr:
 			walk(v.Target)
 		case *languageAst.SortExpr:
@@ -988,7 +1032,7 @@ func constructNamesInScope(path string, f *languageAst.File, idx *declIndex) map
 	out := make(map[string]bool)
 	for _, decls := range idx.byFile {
 		for name, kind := range decls {
-			if kind == "spec" || kind == "trait" {
+			if predicateConstructKinds[kind] {
 				out[name] = true
 			}
 		}
@@ -1006,8 +1050,127 @@ func constructNamesInScope(path string, f *languageAst.File, idx *declIndex) map
 			out[n] = true
 		}
 	}
-	for name := range idx.byFile[path] {
-		out[name] = true
+	for name, kind := range idx.byFile[path] {
+		// Only kinds that can legitimately appear in a predicate. Admitting
+		// EVERY local declaration was far too wide: a sibling `query regionn`
+		// in the same file would silence a `regionn` typo, and query /
+		// mutation / shape names are picked freely and vastly outnumber
+		// specs.
+		if predicateConstructKinds[kind] {
+			out[name] = true
+		}
 	}
 	return out
+}
+
+// predicateConstructKinds are the construct kinds whose NAME can appear inside
+// a filter predicate -- as a bare boolean (spec / trait) or as a call or
+// compared value (builtin / logic). A query / mutation / shape / concept /
+// prompt / provider / tool / automation name cannot, so admitting one would
+// only ever mask a payload-property typo that happens to share its spelling.
+var predicateConstructKinds = map[string]bool{
+	"spec":    true,
+	"trait":   true,
+	"builtin": true,
+	"logic":   true,
+}
+
+// QueryFilterCoverage reports how many queries in the tree lane 5 actually
+// checked, and names the ones it skipped.
+//
+// The lane skips a query whose signature concept it cannot resolve, which is
+// the right conservatism -- but it made the guarantee silently partial. On the
+// shipped tree, four concept short-names are declared in two namespaces each
+// (`plan`, `request`, `call`, `invocation`); a query file that binds one
+// WITHOUT importing it resolves inconclusively, and because the tree also
+// carries imports-only files, lane 2 stays silent too. 19 of 197 queries were
+// unlinted with nothing reporting it (memql#2795 review).
+//
+// Exported so a test can assert full coverage over the embedded tree and turn
+// a recurrence into a CI failure instead of an invisible gap. The fix for a
+// reported skip is normally to add the explicit
+// `use <namespace>.concepts.{ <Concept> }` import.
+func (t *Tree) QueryFilterCoverage() (total int, skipped []string) {
+	if t == nil {
+		return 0, nil
+	}
+	idx := t.buildDeclIndex()
+
+	paths := make([]string, 0, len(t.Files))
+	for p := range t.Files {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+
+	for _, path := range paths {
+		f := t.Files[path]
+		if f == nil || t.ImportsOnly[path] {
+			continue
+		}
+		conceptFor := map[string]string{}
+		for _, m := range queryFilterHeadRe.FindAllStringSubmatch(languageParser.BlankComments(t.readSource(path)), -1) {
+			conceptFor[m[2]] = m[1]
+		}
+		for _, def := range f.Definitions {
+			fd, ok := def.(*languageAst.FunctionDef)
+			if !ok || fd.Type != languageAst.FunctionTypeQuery {
+				continue
+			}
+			total++
+			if t.resolveFilterConcept(path, f, idx, conceptFor[fd.Name]) == nil {
+				skipped = append(skipped, fmt.Sprintf("%s: query %q (concept %q)", path, fd.Name, conceptFor[fd.Name]))
+			}
+		}
+	}
+	return total, skipped
+}
+
+// IsFilterRowIntrinsic reports whether a name is a row intrinsic a FILTER may
+// compare against. Exported alongside IsReservedFilterHead so the engine-side
+// drift-pin can probe both classifications without an import cycle.
+func IsFilterRowIntrinsic(name string) bool {
+	return filterRowIntrinsics[strings.ToLower(strings.TrimSpace(name))]
+}
+
+// resolveFilterConcept resolves a query's signature concept for lane 5,
+// falling back to the file's OWN domain when the shared resolver is
+// inconclusive.
+//
+// Why the fallback is needed: four concept short-names are declared in two
+// namespaces each on the shipped tree (`plan` in harness + planner, `request`
+// in cognition + forge, `call` in router + telephony, `invocation` in
+// observability + worker). resolveConceptForFile answers inconclusively for an
+// unimported ambiguous name, so 19 of 197 queries were skipped with nothing
+// reporting it (memql#2795 review).
+//
+// Adding the import is NOT the fix: #2617 makes same-domain constructs
+// ambient and TestNoSameDomainUse rejects a file importing its own domain. So
+// `query plan allPlans` in dsl/planner/queries.memql is already unambiguous by
+// the tree's own rules -- it binds planner's `plan`. This encodes that:
+// prefer a declaration in the query file's own namespace, which is exactly
+// what ambient same-domain resolution means.
+//
+// Conservatism is preserved: the fallback only fires for a concept declared in
+// the file's own domain. A name that resolves nowhere, or only in some other
+// namespace, still yields nil and is skipped.
+func (t *Tree) resolveFilterConcept(path string, f *languageAst.File, idx *declIndex, name string) *languageAst.ConceptDecl {
+	if name == "" {
+		return nil
+	}
+	if res := t.resolveConceptForFile(path, f, idx, name); res.state == conceptResolved && res.decl != nil {
+		return res.decl
+	}
+	domain := path
+	if i := strings.IndexByte(path, '/'); i > 0 {
+		domain = path[:i]
+	}
+	for _, entry := range idx.concepts[name] {
+		if entry.decl == nil {
+			continue
+		}
+		if i := strings.IndexByte(entry.file, '/'); i > 0 && entry.file[:i] == domain {
+			return entry.decl
+		}
+	}
+	return nil
 }

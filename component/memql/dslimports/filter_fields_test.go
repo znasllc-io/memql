@@ -150,6 +150,86 @@ query widget widgetsLocalSpec {
 	}
 }
 
+// TestFilterFieldsWalksRelationshipExpr pins memql#2795-review F2. The engine's
+// rewriteFilterFieldRefs walks RelationshipExpression, so a bare property under
+// childOf(...) IS payload-prefixed -- omitting the node from the lint walker
+// left the lane blind to the exact defect it exists to catch.
+func TestFilterFieldsWalksRelationshipExpr(t *testing.T) {
+	errs := filterFieldErrs(t, `use lab.concepts.{ widget }
+
+/// Typo hidden under a relationship wrapper.
+query widget widgetsRelated {
+  filter  region != "" && childOf(bogusUnderRel == "x")
+}
+`)
+	if len(errs) != 1 {
+		t.Fatalf("expected the typo under childOf() to be reported, got %d: %v", len(errs), errs)
+	}
+}
+
+// TestFilterFieldsRejectsWriteOnlyIntrinsics pins F3. `parent` / `aliasOf` are
+// insert-side relationship templates; in a FILTER the engine payload-prefixes
+// them like any property, so sharing lane 3's rowIntrinsics made them
+// unreportable.
+func TestFilterFieldsRejectsWriteOnlyIntrinsics(t *testing.T) {
+	errs := filterFieldErrs(t, `use lab.concepts.{ widget }
+
+/// Filters on a write-side template the concept does not declare.
+query widget widgetsParent {
+  filter  parent == "x"
+}
+`)
+	if len(errs) != 1 {
+		t.Fatalf("expected `parent` to be reported as undeclared, got %d: %v", len(errs), errs)
+	}
+}
+
+// TestFilterFieldsAcceptsMixedCaseHeads pins F5. The engine lower-cases every
+// head it classifies, so these are all legal filters; matching
+// case-sensitively reported them as undeclared properties.
+func TestFilterFieldsAcceptsMixedCaseHeads(t *testing.T) {
+	errs := filterFieldErrs(t, `use lab.concepts.{ widget }
+
+/// Intrinsics and namespaces spelled with non-canonical case.
+query widget widgetsMixedCase {
+  filter  createdat != "" && Row.id != "" && region != ""
+}
+`)
+	if len(errs) != 0 {
+		t.Fatalf("mixed-case heads are legal to the engine; got %d: %v", len(errs), errs)
+	}
+}
+
+// TestFilterFieldsSkipsDuplicateQueryNames pins F6. With two queries sharing a
+// name in one file, the name->concept map cannot say which binding belongs to
+// which AST node; a last-wins guess reported a real property of one as
+// undeclared on the other's concept.
+func TestFilterFieldsSkipsDuplicateQueryNames(t *testing.T) {
+	tree, err := Load(fstest.MapFS{
+		"lab/concepts.memql": &fstest.MapFile{Data: []byte(dupConceptsSrc)},
+		"lab/queries.memql": &fstest.MapFile{Data: []byte(`use lab.concepts.{ widget, gadget }
+
+/// First.
+query widget dup {
+  filter  region == "x"
+}
+
+/// Second, same name.
+query gadget dup {
+  filter  size == "y"
+}
+`)},
+	})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	for _, e := range tree.VerifyReferentialIntegrity() {
+		if strings.Contains(e.Error(), "filter compares field") {
+			t.Errorf("must not guess a concept for duplicate query names, got: %v", e)
+		}
+	}
+}
+
 // TestFilterFieldsSkipsUnresolvableConcept keeps the lane conservative, the
 // house rule for this file: a query whose concept the tree cannot resolve
 // (supplied externally via MEMQL_DSL_PATH, or reported by lane 2) must not
@@ -173,3 +253,17 @@ query space spacesExternal {
 		}
 	}
 }
+
+// dupConceptsSrc declares two concepts with disjoint properties, so a
+// wrong-concept diagnostic is unmistakable: `region` belongs to widget only,
+// `size` to gadget only.
+const dupConceptsSrc = `/// A widget.
+concept widget {
+  region  string  @description("Region.")
+}
+
+/// A gadget.
+concept gadget {
+  size  string  @description("Size.")
+}
+`
