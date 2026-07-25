@@ -792,7 +792,14 @@ func bareRowIntrinsicSortKeyRule(source string) []Diagnostic {
 		diagnostics = append(diagnostics, Diagnostic{
 			Range: Range{
 				Start: Position{Line: hit.Line, Column: hit.Column},
-				End:   Position{Line: hit.Line, Column: hit.Column + len(hit.Text)},
+				// RUNE length, not byte length: Column is a rune column (the
+				// Sense contract) and a sort key can carry non-ASCII. The key
+				// lookup trims per the parser (parser.go parseSortFunction
+				// TrimSpaces the literal), and unicode.IsSpace covers NBSP, so
+				// `"<NBSP>createdAt"` resolves as the intrinsic while Text
+				// keeps the NBSP -- 11 bytes, 10 runes. len() there overruns
+				// the key and swallows the closing quote.
+				End: Position{Line: hit.Line, Column: hit.Column + utf8.RuneCountInString(hit.Text)},
 			},
 			Severity: SeverityWarning,
 			Message: fmt.Sprintf(

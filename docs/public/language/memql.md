@@ -834,7 +834,7 @@ query context queryLatestSpaceContextForSpace {
     spaceId  string  @required
   }
   filter  spaceId==args.spaceId
-  sort    "createdAt", "desc"
+  sort    "row.createdAt", "desc"
   paginate 1
   shape   spaceContextFull
 }

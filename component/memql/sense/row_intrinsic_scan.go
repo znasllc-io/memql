@@ -137,11 +137,34 @@ func isFilterClauseOpener(trimmed string) bool {
 }
 
 // isSortClauseOpener reports whether a trimmed line opens a `sort` clause.
-// Mirrors isFilterClauseOpener; the word boundary keeps a payload property
-// spelled `sortOrder` from opening a clause.
+//
+// It requires the STRING LITERAL the grammar demands (parseSortFunction
+// rejects a sort whose first argument is not a string), not merely the word
+// `sort` followed by a boundary. That is stricter than isFilterClauseOpener
+// on purpose, and it closes two holes a boundary check leaves open:
+//
+//   - FALSE POSITIVE. Unlike the filter scanner, this one READS literal
+//     contents rather than blanking them, so a construct FIELD named `sort`
+//     would otherwise have its annotation literals read as sort keys --
+//     `sort string @enum("createdAt", "title")` in an args block, or a
+//     `@default("createdAt")` on a concept field, would fail CI pointing
+//     inside the annotation. A field named `sort` (letting a caller pick an
+//     ordering) is an ordinary shape, so this had to be a scanner-side fix
+//     rather than a tree convention.
+//   - FALSE NEGATIVE. The rewriter opens the clause with a bare
+//     strings.HasPrefix(line, "sort") and no boundary at all
+//     (component/language/parser/rewriter.go), so `sort"createdAt"` with no
+//     space IS a sort clause to the engine. Skipping optional whitespace
+//     before the quote keeps the scanner and the rewriter agreeing.
+//
+// `sortOrder "x"` is still excluded -- after the `sort` prefix comes `O`,
+// which is neither whitespace nor a quote.
 func isSortClauseOpener(trimmed string) bool {
 	rest, ok := strings.CutPrefix(trimmed, "sort")
-	return ok && (rest == "" || rest[0] == ' ' || rest[0] == '\t')
+	if !ok {
+		return false
+	}
+	return strings.HasPrefix(strings.TrimLeft(rest, " \t"), `"`)
 }
 
 // ScanBareRowIntrinsicSortKeys returns every sort KEY in source that names a
@@ -176,6 +199,13 @@ func isSortClauseOpener(trimmed string) bool {
 //
 // Comment and block-comment handling matches the filter scanner, including its
 // documented multi-line-string trade-off.
+//
+// KNOWN, ACCEPTED GAP: the scanner reads a literal's RAW text, while the lexer
+// resolves escapes -- so `sort "\u0063reatedAt"` is a bare intrinsic to the
+// engine and invisible here. Unescaping would mean reimplementing the lexer's
+// escape handling in a package that must not import it, to close a spelling
+// no author produces by accident. The gate's job is catching the ordinary
+// bare key, and it does that exactly.
 func ScanBareRowIntrinsicSortKeys(source string) []BareRowIntrinsic {
 	var found []BareRowIntrinsic
 

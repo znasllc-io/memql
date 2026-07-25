@@ -40,6 +40,20 @@ func TestScanBareRowIntrinsicSortKeys(t *testing.T) {
 		{"filter clause untouched", "query widget q {\n  filter name==\"createdAt\"\n}\n", nil},
 		{"sortOrder does not open a clause", "query widget q {\n  sortOrder \"createdAt\", \"desc\"\n}\n", nil},
 
+		// A construct FIELD named `sort` is an ordinary shape (it lets a
+		// caller pick an ordering). Because this scanner reads literal
+		// contents, a boundary-only opener check read its annotation literals
+		// as sort keys and failed CI pointing inside an @enum. Requiring the
+		// string literal the grammar demands is what excludes it.
+		{"args field named sort", "query widget q {\n  args {\n    sort  string  @enum(\"createdAt\", \"title\")\n  }\n  filter status==\"a\"\n}\n", nil},
+		{"concept field named sort", "concept widget {\n  sort  string  @default(\"createdAt\")\n}\n", nil},
+		{"tool field named sort", "tool t {\n  sort  string  @enum(\"createdAt\", \"desc\")\n}\n", nil},
+
+		// The rewriter opens the clause with a bare HasPrefix and no boundary,
+		// so this IS a sort clause to the engine and must not slip the gate.
+		{"no space before the literal", "query widget q {\n  sort\"createdAt\", \"desc\"\n}\n", []string{"createdAt"}},
+		{"tab before the literal", "query widget q {\n  sort\t\"createdAt\", \"desc\"\n}\n", []string{"createdAt"}},
+
 		// Comments are not authored code.
 		{"line comment", "query widget q {\n  // sort \"createdAt\", \"desc\"\n}\n", nil},
 		{"block comment", "query widget q {\n  /* sort \"createdAt\", \"desc\" */\n}\n", nil},
@@ -108,6 +122,26 @@ func TestBareRowIntrinsicSortKeyRule(t *testing.T) {
 	line := strings.Split(src, "\n")[1]
 	if covered := line[d.Range.Start.Column-1 : d.Range.End.Column-1]; covered != "createdAt" {
 		t.Errorf("range covers %q, want \"createdAt\"", covered)
+	}
+}
+
+// TestBareRowIntrinsicSortKeyRuleRangeIsRunes -- Column is a RUNE column per
+// the Sense contract, so Range.End must advance by runes. The key lookup
+// trims like the parser does, and unicode.IsSpace covers NBSP, so a key
+// spelled "<NBSP>createdAt" resolves as the intrinsic while Text keeps the
+// NBSP: 11 bytes, 10 runes. A byte length there overruns the key and swallows
+// the closing quote.
+func TestBareRowIntrinsicSortKeyRuleRangeIsRunes(t *testing.T) {
+	src := "query widget q {\n  sort \" createdAt\", \"desc\"\n}\n"
+	got := bareRowIntrinsicSortKeyRule(src)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 diagnostic, got %d", len(got))
+	}
+	d := got[0]
+	line := []rune(strings.Split(src, "\n")[1])
+	covered := string(line[d.Range.Start.Column-1 : d.Range.End.Column-1])
+	if covered != " createdAt" {
+		t.Errorf("range covers %q, want the key exactly (no trailing quote)", covered)
 	}
 }
 
