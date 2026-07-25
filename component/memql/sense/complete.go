@@ -501,11 +501,29 @@ func (s *Service) completeConstructConcept(ctx CursorContext) []CompletionItem {
 		if canonical != short {
 			detail = canonical
 		}
-		// Primary: the short name the signature binds (highest priority).
+		// Rank by whether the concept is already bindable HERE (memql#2762).
+		// Every concept in the tree stays on offer -- picking an unimported
+		// one is legitimate, and the import snippet below completes it in one
+		// keystroke -- but the ones the file can bind right now come first.
+		// Previously all ~100 sorted identically at priority 1, so the author
+		// scrolled a flat alphabetical wall with no signal about which two
+		// were actually in scope.
+		priority := 5
+		switch {
+		case inScope[short]:
+			detail = "concept (imported)"
+			priority = 1
+		case domain != "" && domain == fileDomain(ctx.FilePath):
+			// Same-domain concepts are ambient: in scope with no import
+			// (authoring rule 25, #2617).
+			detail = "concept (this domain)"
+			priority = 1
+		}
+		// Primary: the short name the signature binds.
 		items = append(items, CompletionItem{
 			Label: short, Kind: "concept", Detail: detail,
 			Documentation: doc, InsertText: short,
-			SortPriority: 1,
+			SortPriority: priority,
 		})
 		// Secondary: a fully-formed `use <domain>.concepts.{ short }` import
 		// when the concept isn't already in file scope, the domain is known,
