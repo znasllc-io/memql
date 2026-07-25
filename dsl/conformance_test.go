@@ -974,12 +974,74 @@ func strim(s string, r byte) string {
 	return s
 }
 
-// splitPredicates splits a filter clause into its AND-ed predicates on the
-// canonical `&&` operator (#977), respecting paren/brace/string nesting so the
-// `&&` inside a `when(args.x) { a && b }` guard block is not split. Each
-// `when(args.x) { <inner> }` guard is unwrapped to its inner predicate so the
-// canonical-prefix / traitable checks apply to the real comparison.
+// splitPredicates decomposes a filter clause into the individual predicates
+// the gates inspect, seeing through every layer of the Go boolean grammar
+// (#977): `&&`, `||`, `!`, parens, plus `when(args.x) { ... }` guards.
+//
+// It splits on BOTH connectives and recurses into what it finds (memql#2787).
+// Splitting on `&&` alone handed the gates a parenthesized group as ONE
+// predicate, which hit them differently:
+//
+//   - TestFilterSyntaxCanonical was BLIND. It classifies by head, and
+//     splitFilterRef returns "" for a predicate that does not start with an
+//     identifier character, so `(a || payload.b)` was inspected by nothing.
+//   - TestNoInlineTraitablePredicates still fired -- it regex-matches predicate
+//     TEXT, not the head -- but reported the whole group rather than the
+//     offending comparison, and it lost anything a `when(x) { }` guard was
+//     OR-ed with, because unwrapWhenPredicate cuts at the last `}`.
+//
+// The corpus already carries the shape (dsl/telephony/queries.memql, a
+// parenthesized OR), so the blind spot was live, not hypothetical.
+//
+// Recursion is what makes it total. Each step strictly shortens the predicate
+// -- unwrap a guard, drop a `!`, peel balanced outer parens -- or splits it
+// into shorter pieces, so it terminates; maxPredicateNesting is a backstop
+// against a malformed clause, not a real bound.
+//
+// String literals still suppress splitting at every level: a connective inside
+// a quoted value is data, not structure.
 func splitPredicates(s string) []string {
+	return appendSplitPredicates(nil, s, 0)
+}
+
+// maxPredicateNesting bounds the recursion. Nothing in the corpus approaches
+// it; it exists so a malformed clause cannot spin.
+const maxPredicateNesting = 64
+
+func appendSplitPredicates(out []string, s string, depth int) []string {
+	if depth > maxPredicateNesting {
+		if p := strings.TrimSpace(s); p != "" {
+			out = append(out, p)
+		}
+		return out
+	}
+	for _, raw := range splitTopLevelConnectives(s) {
+		p := strings.TrimSpace(raw)
+		if p == "" {
+			continue
+		}
+		// Peel one layer per recursion, in the order the grammar nests them.
+		if inner := unwrapWhenPredicate(p); inner != p {
+			out = appendSplitPredicates(out, inner, depth+1)
+			continue
+		}
+		if inner, ok := stripLeadingNot(p); ok {
+			out = appendSplitPredicates(out, inner, depth+1)
+			continue
+		}
+		if inner, ok := stripOuterParens(p); ok {
+			out = appendSplitPredicates(out, inner, depth+1)
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
+// splitTopLevelConnectives splits on `&&` and `||` at paren/brace/bracket
+// depth 0, outside string literals. Both split identically: a violation is a
+// violation whichever side of a disjunct it sits on.
+func splitTopLevelConnectives(s string) []string {
 	var raw []string
 	depth := 0
 	inStr := false
@@ -995,23 +1057,53 @@ func splitPredicates(s string) []string {
 			depth++
 		case c == ')' || c == '}' || c == ']':
 			depth--
-		case depth == 0 && c == '&' && i+1 < len(s) && s[i+1] == '&':
+		case depth == 0 && (c == '&' || c == '|') && i+1 < len(s) && s[i+1] == c:
 			raw = append(raw, s[start:i])
 			i++
 			start = i + 1
 		}
 	}
-	raw = append(raw, s[start:])
+	return append(raw, s[start:])
+}
 
-	out := make([]string, 0, len(raw))
-	for _, p := range raw {
-		p = strings.TrimSpace(p)
-		if p == "" {
-			continue
-		}
-		out = append(out, unwrapWhenPredicate(p))
+// stripLeadingNot removes a negation prefix. `!=` is a comparison operator,
+// never a leading negation, so it is left alone.
+func stripLeadingNot(p string) (string, bool) {
+	if !strings.HasPrefix(p, "!") || strings.HasPrefix(p, "!=") {
+		return p, false
 	}
-	return out
+	return strings.TrimSpace(p[1:]), true
+}
+
+// stripOuterParens peels a paren pair wrapping the WHOLE predicate. It declines
+// when the opener closes early (`(a) == (b)`), which is a comparison between
+// groups rather than one parenthesized predicate.
+func stripOuterParens(p string) (string, bool) {
+	if len(p) < 2 || p[0] != '(' || p[len(p)-1] != ')' {
+		return p, false
+	}
+	depth := 0
+	inStr := false
+	for i := 0; i < len(p); i++ {
+		c := p[i]
+		switch {
+		case c == '"':
+			inStr = !inStr
+		case inStr:
+			// skip
+		case c == '(':
+			depth++
+		case c == ')':
+			depth--
+			if depth == 0 && i != len(p)-1 {
+				return p, false
+			}
+		}
+	}
+	if depth != 0 {
+		return p, false
+	}
+	return strings.TrimSpace(p[1 : len(p)-1]), true
 }
 
 // unwrapWhenPredicate returns the inner predicate of a `when(args.x) { <inner> }`
