@@ -81,6 +81,9 @@ message MemqlClientMessage {
     SenseDiagnoseMsg sense_diagnose = 32;
     SenseHoverMsg sense_hover = 33;
     SenseSignatureHelpMsg sense_signature_help = 34;
+    // The Sense block 30-34 is full and 35 belongs to Polyphon, so the
+    // go-to-definition pair appends at the current maxima instead.
+    SenseDefinitionMsg sense_definition = 85;
     // Polyphon -- multi-agent voice
     PolyphonRoomTokenMsg polyphon_room_token = 35;
     PolyphonStatusMsg polyphon_status = 36;
@@ -324,6 +327,7 @@ message MemqlServerMessage {
     SenseDiagnoseResult sense_diagnose_result = 72;
     SenseHoverResult sense_hover_result = 73;
     SenseSignatureHelpResult sense_signature_help_result = 74;
+    SenseDefinitionResult sense_definition_result = 122;
     // Polyphon results
     PolyphonRoomTokenResult polyphon_room_token_result = 75;
     PolyphonStatusResult polyphon_status_result = 76;
@@ -1125,12 +1129,36 @@ message SenseHoverMsg {
   string request_id = 1;
   string source = 2;
   SensePosition position = 3;
+  string file_path = 4;  // optional; supplies the ambient domain that disambiguates a bare construct name
 }
 
 message SenseHoverResult {
   string request_id = 1;
   string contents = 2;   // markdown formatted
   SenseRange range = 3;  // range of the hovered symbol
+}
+
+// Definition -- resolves the construct reference under the cursor to the
+// place it is declared. The result carries a WORKSPACE-RELATIVE path rather
+// than a URI: the LSP maps it to file://, while the Cockpit addresses pack
+// files as (domain, path), so baking either mapping into the wire would
+// serve only one client.
+message SenseDefinitionMsg {
+  string request_id = 1;
+  string source = 2;
+  SensePosition position = 3;
+  string file_path = 4;  // optional; supplies the ambient domain that disambiguates a bare construct name
+}
+
+message SenseDefinitionResult {
+  string request_id = 1;
+  repeated SenseDefinitionTarget targets = 2;
+}
+
+message SenseDefinitionTarget {
+  string file = 1;       // workspace-relative path of the declaring file
+  string kind = 2;       // declaration kind: concept, shape, query, mutation, logic, ...
+  SenseRange range = 3;  // range of the declared name within that file
 }
 
 // SignatureHelp -- returns function signature help at a position.

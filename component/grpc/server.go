@@ -1363,6 +1363,8 @@ func (s *streamSession) handleMessage(envelope *memqlv1.MemqlClientMessage) erro
 		return s.handleSenseHover(envelope, payload.SenseHover)
 	case *memqlv1.MemqlClientMessage_SenseSignatureHelp:
 		return s.handleSenseSignatureHelp(envelope, payload.SenseSignatureHelp)
+	case *memqlv1.MemqlClientMessage_SenseDefinition:
+		return s.handleSenseDefinition(envelope, payload.SenseDefinition)
 	// Pack browser -- read-only DSL pack enumeration (memql#2127 / B1)
 	case *memqlv1.MemqlClientMessage_ListPackDomains:
 		return s.handleListPackDomains(envelope, payload.ListPackDomains)
