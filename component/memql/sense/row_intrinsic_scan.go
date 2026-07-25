@@ -87,6 +87,13 @@ var canonicalScalarIntrinsic = map[string]string{
 func ScanBareRowIntrinsics(source string) []BareRowIntrinsic {
 	var found []BareRowIntrinsic
 
+	// Columns are counted against the ORIGINAL line, not the blanked one.
+	// BlankBlockComments substitutes one space per BYTE, so a multi-byte rune
+	// inside a same-line block comment becomes several runes and shifts every
+	// rune column after it. Byte offsets are preserved by that substitution,
+	// so a byte index from the blanked line indexes the original correctly.
+	original := strings.Split(source, "\n")
+
 	for i, line := range strings.Split(BlankBlockComments(source), "\n") {
 		code := blankLineCommentsAndStrings(line)
 		if !isFilterClauseOpener(strings.TrimSpace(code)) {
@@ -106,9 +113,13 @@ func ScanBareRowIntrinsics(source string) []BareRowIntrinsic {
 			if name == "" {
 				continue
 			}
+			prefix := line[:start]
+			if i < len(original) && start <= len(original[i]) {
+				prefix = original[i][:start]
+			}
 			found = append(found, BareRowIntrinsic{
 				Line:   i + 1,
-				Column: utf8.RuneCountInString(line[:start]) + 1,
+				Column: utf8.RuneCountInString(prefix) + 1,
 				Text:   text,
 				Name:   name,
 			})

@@ -455,6 +455,15 @@ func rowIntrinsicSortField(name string) (string, error) {
 				"%w: sort key `row.%s` is a row intrinsic but is not sortable -- there is no ORDER BY push-down for it. Sortable row intrinsics: id, concept, type, createdAt, createdBy",
 				ErrInvalidArgument, leaf)
 		}
+		// Same carve-out the filter surface makes: "write it bare" is only
+		// sound when the bare form reads the payload. A leaf that is itself a
+		// reserved head (`row.actor`, `row.row`) would not -- and `row.row`
+		// would loop, since bare `row` errors above.
+		if reservedFilterHead(leaf) {
+			return "", fmt.Errorf(
+				"%w: sort key `row.%s` is not a row intrinsic -- `%s` is a reserved engine namespace of its own, not a field under `row`. Sortable row intrinsics: id, concept, type, createdAt, createdBy",
+				ErrInvalidArgument, leaf, leaf)
+		}
 		return "", fmt.Errorf(
 			"%w: sort key `row.%s` is not a sortable row intrinsic (valid: id, concept, type, createdAt, createdBy) -- a payload property is named BARE in a sort key, so write \"%s\"",
 			ErrInvalidArgument, leaf, leaf)
