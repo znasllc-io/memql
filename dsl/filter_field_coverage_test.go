@@ -42,3 +42,26 @@ func TestQueryFilterLaneCoversEveryQuery(t *testing.T) {
 		}
 	}
 }
+
+// TestMutationFieldLaneCoversEveryMutation is the lane-3 counterpart. Lane 3
+// carried the identical blind spot lane 5 was blocked on: it required a fully
+// resolved concept, so a mutation binding an ambiguous same-domain short name
+// was skipped, and 21 of 213 mutations went unchecked with nothing saying so.
+// Both lanes now share resolveFilterConcept.
+func TestMutationFieldLaneCoversEveryMutation(t *testing.T) {
+	tree, err := dslimports.Load(Tree())
+	if err != nil {
+		t.Fatalf("dslimports.Load: %v", err)
+	}
+
+	total, skipped := tree.MutationFieldCoverage()
+	if total == 0 {
+		t.Fatal("coverage reported zero mutations -- the probe is broken, not the tree")
+	}
+	if len(skipped) > 0 {
+		t.Errorf("insert/update field validation skipped %d of %d mutations:", len(skipped), total)
+		for _, s := range skipped {
+			t.Errorf("  %s", s)
+		}
+	}
+}

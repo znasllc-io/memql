@@ -34,6 +34,9 @@ package dslimports
 //     empty without an import, so boot provably fails on it too.
 //  3. INSERT/UPDATE FIELDS -- every field an insert/update block writes must
 //     be a payload property the bound concept declares, or a row intrinsic.
+//     Shares lane 5's concept resolution, so a mutation binding an ambiguous
+//     same-domain short name is checked rather than silently skipped (21 of
+//     213 mutations were dark before memql#2781).
 //     Bare `args.X` shorthand contributes field X; the one exception is the
 //     literal name `payload`, which the boot loader treats as the
 //     whole-payload splat wrapper rather than a field write.
@@ -599,11 +602,11 @@ func (t *Tree) verifyMutationFields(path string, f *languageAst.File, idx *declI
 		if !ok || ms.Concept == "" {
 			continue
 		}
-		res := t.resolveConceptForFile(path, f, idx, ms.Concept)
-		if res.state != conceptResolved || res.decl == nil {
+		decl := t.resolveFilterConcept(path, f, idx, ms.Concept)
+		if decl == nil {
 			continue // lane 2 reports unresolved/ambiguous concepts
 		}
-		allowed := conceptPropertyNames(res.decl)
+		allowed := conceptPropertyNames(decl)
 		verb := "insert"
 		if ms.Kind == languageAst.MutationKindUpdate {
 			verb = "update"
@@ -853,7 +856,7 @@ func (t *Tree) verifyQueryFilterFields(path string, f *languageAst.File, idx *de
 	// queries' filters unchecked with no trace.
 	for _, name := range sortedKeys(dupNames) {
 		errs = append(errs, fmt.Errorf(
-			"%s: query %q is declared more than once in this file; filter fields cannot be checked for either (the name does not identify one binding)",
+			"%s: query %q is declared more than once in this file; filter fields cannot be checked for any of them (the name does not identify one binding)",
 			path, name))
 	}
 	for _, def := range f.Definitions {
@@ -1216,4 +1219,47 @@ func sortedKeys(set map[string]bool) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// MutationFieldCoverage is the lane-3 counterpart of QueryFilterCoverage:
+// how many mutations lane 3 actually checked, and which it skipped.
+//
+// Lane 3 had the same silent-partial-coverage defect lane 5 was blocked on --
+// 21 of 213 mutations went unchecked because their bound concept's short name
+// is declared in two namespaces and the file cannot import its own domain
+// (#2617). Both lanes now share resolveFilterConcept; both now have a guard
+// so a recurrence is a CI failure rather than an invisible gap.
+func (t *Tree) MutationFieldCoverage() (total int, skipped []string) {
+	if t == nil {
+		return 0, nil
+	}
+	idx := t.buildDeclIndex()
+
+	paths := make([]string, 0, len(t.Files))
+	for p := range t.Files {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+
+	for _, path := range paths {
+		f := t.Files[path]
+		if f == nil || t.ImportsOnly[path] {
+			continue
+		}
+		for _, def := range f.Definitions {
+			fd, ok := def.(*languageAst.FunctionDef)
+			if !ok || fd.Type != languageAst.FunctionTypeMutation {
+				continue
+			}
+			ms, ok := fd.Body.(*languageAst.MutationStmt)
+			if !ok || ms.Concept == "" {
+				continue
+			}
+			total++
+			if t.resolveFilterConcept(path, f, idx, ms.Concept) == nil {
+				skipped = append(skipped, fmt.Sprintf("%s: mutation %q (concept %q)", path, fd.Name, ms.Concept))
+			}
+		}
+	}
+	return total, skipped
 }
