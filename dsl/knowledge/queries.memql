@@ -3,6 +3,8 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
+use common.shapes.{ documentChunkDomainLite, documentChunkFull }
+
 /// Returns the parent domainId for every chunk in the active partition. Frontend groups + counts to
 /// render per-domain chunk counts in the Knowledge panel.
 @unbounded("distinct chunk domain ids -- a bounded dedupe enumeration consumed whole")

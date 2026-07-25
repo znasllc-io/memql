@@ -7,6 +7,8 @@
 // "wire it up to call allAgents" -- not "re-implement the agent
 // list query."
 
+use common.traits.{ isActiveRecord, isNotDeleted }
+
 /// Returns available AI agent templates. Optional filter: groupId
 query agent activeAgents {
   args {

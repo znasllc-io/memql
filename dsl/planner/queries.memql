@@ -7,6 +7,8 @@
 // built with -tags planner) and its read surface has to be uniformly
 // available on every binary that loads concepts.
 
+use common.traits.{ statusIsActive, statusIsRunning }
+
 // allPlans
 // =============
 //
