@@ -695,6 +695,15 @@ func (e *mutationTemplateEvaluator) evalParserExpression(ctx context.Context, ex
 				return nil, err
 			}
 			if i == len(t.Args)-1 {
+				// Normalise the sentinel away: a missing final arm is
+				// "no value", matching both reference implementations.
+				// evalStringMaybe already maps nil and missingValue{} to
+				// "" for these slots, but isTruthy(missingValue{}) is
+				// TRUE, so leaking the sentinel would make an all-missing
+				// coalesce truthy inside And/Or/Not.
+				if isMissing(ev) {
+					return nil, nil
+				}
 				return ev, nil
 			}
 			if ev == nil || isMissing(ev) {
@@ -1346,47 +1355,16 @@ func parsePayloadRawToTemplate(raw string) (map[string]any, error) {
 	if obj == nil {
 		return nil, fmt.Errorf("invalid object literal payload")
 	}
-	// Every well-formed `??` was lowered to coalesce() while the values
-	// were classified, so a survivor means a malformed operator (a
-	// dangling `a ??`, a doubled `a ?? ?? b`). Refuse at LOAD -- the
-	// runtime value evaluator has no parser behind it, so an unlowered
-	// operator would otherwise reach it as opaque text (memql#2772).
-	if field, bad := firstFieldWithLiveNullCoalesce(obj); bad {
-		return nil, fmt.Errorf("field %q: malformed `??` (an operand is missing)", field)
+	// A malformed `??` (a dangling `a ??`, a doubled `a ?? ?? b`) is
+	// marked with a typed sentinel while the values are classified.
+	// Refuse at LOAD: the runtime value evaluator has no parser behind
+	// it, so the operator would otherwise reach it as opaque text
+	// (memql#2772). Only EXPRESSION text is ever classified, so a quoted
+	// literal containing `??` -- ordinary prose -- cannot trip this.
+	if field, raw, bad := firstMalformedNullCoalesce(obj); bad {
+		return nil, fmt.Errorf("field %q: malformed `??` in %q (an operand is missing)", field, raw)
 	}
 	return obj, nil
-}
-
-// firstFieldWithLiveNullCoalesce reports a payload field whose value
-// still carries a `??` operator outside a string literal.
-func firstFieldWithLiveNullCoalesce(obj map[string]any) (string, bool) {
-	for k, v := range obj {
-		switch t := v.(type) {
-		case string:
-			if hasLiveNullCoalesce(t) {
-				return k, true
-			}
-		case map[string]any:
-			if nested, bad := firstFieldWithLiveNullCoalesce(t); bad {
-				return k + "." + nested, true
-			}
-		}
-	}
-	return "", false
-}
-
-// hasLiveNullCoalesce reports whether the text carries a `??` outside a
-// string literal.
-func hasLiveNullCoalesce(s string) bool {
-	sc := &exprScanner{s: s}
-	for sc.i < len(s) {
-		at := sc.i
-		b, live, _ := sc.next()
-		if live && b == '?' && at+1 < len(s) && s[at+1] == '?' {
-			return true
-		}
-	}
-	return false
 }
 
 // parseObjectLiteral parses a MemQL object literal like {key: value, nested: {x: 1}} into map[string]any.
@@ -1671,8 +1649,9 @@ func classifyScalarOrExpr(raw string) any {
 	// Store the lowered coalesce() spelling so the runtime value
 	// evaluator -- a string-prefix dispatcher over a closed set of forms
 	// -- never meets the `??` token (memql#2772). No-op when the value
-	// carries no live `??`.
-	return lowerNullCoalesceExpr(raw)
+	// carries no live `??`; yields a malformedNullCoalesce sentinel when
+	// an operand is missing, which parsePayloadRawToTemplate refuses.
+	return lowerNullCoalesceValue(raw)
 }
 
 func scanQuotedString(s string, pos int) (string, int, bool) {

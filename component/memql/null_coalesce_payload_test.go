@@ -107,12 +107,56 @@ func TestParsePayloadRawToTemplate_RejectsMalformedNullCoalesce(t *testing.T) {
 // MATCHES the opener. Slicing to the LAST ')' in the string rejoined a
 // trailing term inside the first call's argument list.
 func TestLowerNullCoalesceExpr_DoesNotSwallowTrailingTerms(t *testing.T) {
-	// Two sibling calls: the arg lowering must not restructure them.
-	require.Equal(t, `f(a ?? 1) + g(2)`, lowerNullCoalesceExpr(`f(a ?? 1) + g(2)`))
+	// The defect: slicing to the LAST ')' produced
+	// `f(coalesce(a, 1) + g(2))`, moving `+ g(2)` inside f's arg list.
+	// Each group is now lowered in place and siblings stay siblings.
+	require.Equal(t, `f(coalesce(a, 1)) + g(2)`, lowerNullCoalesceExpr(`f(a ?? 1) + g(2)`))
+	require.Equal(t, `daysBetween(a, coalesce(b, now)) + 1`,
+		lowerNullCoalesceExpr(`daysBetween(a, b ?? now) + 1`))
 	// A single well-formed call still lowers in place.
 	require.Equal(t, `f(coalesce(a, 1))`, lowerNullCoalesceExpr(`f(a ?? 1)`))
-	// A paren inside a string must not be mistaken for the closer.
+	// A paren inside a string is not a group delimiter -- neither the
+	// closer nor the opener.
 	require.Equal(t, `f(coalesce(a, ")"))`, lowerNullCoalesceExpr(`f(a ?? ")")`))
+	require.Equal(t, `x + "(" + f(coalesce(a, 1))`,
+		lowerNullCoalesceExpr(`x + "(" + f(a ?? 1)`))
+	// Nested groups lower at every level.
+	require.Equal(t, `f(g(coalesce(a, 1)))`, lowerNullCoalesceExpr(`f(g(a ?? 1))`))
+	// Unbalanced input is left alone rather than corrupted.
+	require.Equal(t, `f(a ?? 1`, lowerNullCoalesceExpr(`f(a ?? 1`))
+}
+
+// The malformed-operator sentinel must never fire on a quoted literal:
+// prose containing `??` is legitimate authoring, the guard runs at LOAD,
+// and a false positive would refuse the node's boot entirely.
+func TestParsePayloadRawToTemplate_AllowsNullCoalesceInsideStrings(t *testing.T) {
+	tpl, err := parsePayloadRawToTemplate(
+		`{ note: "pass ?? to get a default", hint: "a ?? b ?? c", slug: ctx.slug ?? "x" }`)
+	require.NoError(t, err, "a `??` inside a string literal is prose, not an operator")
+	require.Equal(t, `pass ?? to get a default`, tpl["note"])
+	require.Equal(t, `a ?? b ?? c`, tpl["hint"])
+	require.Equal(t, `coalesce(ctx.slug, "x")`, tpl["slug"])
+}
+
+// The load guard walks arrays as well as nested objects, so a malformed
+// operator cannot hide in an array element.
+func TestParsePayloadRawToTemplate_RejectsMalformedInsideArray(t *testing.T) {
+	for _, src := range []string{
+		`{ tags: [ctx.a ??] }`,
+		`{ tags: [ctx.a ?? ?? ctx.b] }`,
+		`{ tags: [{ inner: ctx.a ?? }] }`,
+	} {
+		t.Run(src, func(t *testing.T) {
+			_, err := parsePayloadRawToTemplate(src)
+			require.Error(t, err, "a malformed ?? in an array element must be refused at load")
+			require.Contains(t, err.Error(), "malformed `??`")
+		})
+	}
+
+	// ...and a well-formed one in an array still lowers.
+	tpl, err := parsePayloadRawToTemplate(`{ tags: [ctx.a ?? "x"] }`)
+	require.NoError(t, err)
+	require.Equal(t, []any{`coalesce(ctx.a, "x")`}, tpl["tags"])
 }
 
 // Review finding: `&&` / `||` bind LOOSER than `??` in the parser

@@ -1,6 +1,9 @@
 package memql
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+)
 
 // memql#2772: bring the `??` operator (#2611) to write-block payloads.
 //
@@ -17,86 +20,104 @@ import "strings"
 // `coalesce(a, b)` while the template is built, and the evaluator never
 // sees the token at all.
 
-// lowerNullCoalesceExpr rewrites the `??` operators in one payload value
-// expression into the equivalent coalesce() call, honouring the
-// precedence #2611 chose: tighter than comparison, looser than additive.
+// malformedNullCoalesce marks a payload value whose `??` could not be
+// lowered because an operand is missing (`a ??`, `a ?? ?? b`).
 //
-// A comparison is therefore split FIRST and each side lowered on its own,
-// so `a ?? "" == "x"` becomes `coalesce(a, "") == "x"` and not
-// `coalesce(a, "" == "x")`. Below a comparison, the top-level `??` arms
-// become the coalesce arguments verbatim, which gives the
-// looser-than-additive binding for free: `a + 1 ?? 0` has the single arm
-// `a + 1`, so it lowers to `coalesce(a + 1, 0)`.
+// It is a typed sentinel rather than a re-scan of the finished template
+// because only EXPRESSION text reaches the lowering: a quoted literal is
+// decoded by scanQuotedString and never classified, so re-scanning the
+// decoded map cannot tell `note: "pass ?? for a default"` -- legitimate
+// prose -- from a real typo, and would refuse the construct at boot.
+type malformedNullCoalesce struct{ raw string }
+
+// lowerNullCoalesceValue lowers one payload value expression, reporting a
+// sentinel when the operator is malformed. This is the entry point the
+// value classifier uses.
+func lowerNullCoalesceValue(expr string) any {
+	lowered, malformed := lowerNullCoalesce(expr)
+	if malformed {
+		return malformedNullCoalesce{raw: expr}
+	}
+	return lowered
+}
+
+// lowerNullCoalesceExpr is the string-only form, for callers that have
+// already established the expression is well formed (and for tests).
+func lowerNullCoalesceExpr(expr string) string {
+	lowered, _ := lowerNullCoalesce(expr)
+	return lowered
+}
+
+// lowerNullCoalesce rewrites the `??` operators in one expression into the
+// equivalent coalesce() call, honouring the precedence #2611 chose:
+// tighter than comparison, looser than additive, looser than the boolean
+// connectives.
+//
+// Operators are therefore split LOOSEST-FIRST, so each recursion lowers a
+// strictly tighter slice than its caller and the arms that finally reach
+// the `??` split are exactly the operands the parser cascade would fold.
+// `a ?? "" == "x"` becomes `coalesce(a, "") == "x"` rather than
+// `coalesce(a, "" == "x")`; `a + 1 ?? 0` has the single arm `a + 1`, so it
+// lowers to `coalesce(a + 1, 0)` for free.
+//
+// The second return reports a MISSING OPERAND -- the only condition that
+// is a genuine authoring error. A well-formed `??` that this function
+// cannot place (inside an object or array literal arm, whose arms the
+// payload evaluator does not evaluate anyway) is left alone and is NOT
+// reported: that is the pre-#2772 status quo, not a typo.
 //
 // Text carrying no live `??` is returned unchanged, so the function is a
 // no-op on already-lowered templates and on ordinary values.
-func lowerNullCoalesceExpr(expr string) string {
+func lowerNullCoalesce(expr string) (string, bool) {
 	if !strings.Contains(expr, "??") {
-		return expr
+		return expr, false
 	}
 	// Lower the core and give the caller back its own padding, so the
-	// comparison recursion below rejoins around the operator exactly as
-	// the author spaced it.
+	// splits below rejoin around their operator exactly as authored.
 	core := strings.TrimSpace(expr)
 	if core != expr {
 		lead := expr[:strings.Index(expr, core)]
-		return lead + lowerNullCoalesceExpr(core) + expr[len(lead)+len(core):]
+		lowered, bad := lowerNullCoalesce(core)
+		return lead + lowered + expr[len(lead)+len(core):], bad
 	}
-	// Split the LOOSER operators first, so each recursion lowers a
-	// tighter slice than its caller. `??` binds tighter than every
-	// boolean connective and tighter than comparison, and looser than
-	// additive -- so by the time the `??` split runs, its arms are
-	// exactly the operands the parser cascade would have folded.
 	if op, at := topLevelBinary(expr, boolConnectives); at >= 0 {
-		return lowerNullCoalesceExpr(expr[:at]) + op + lowerNullCoalesceExpr(expr[at+len(op):])
+		l, lbad := lowerNullCoalesce(expr[:at])
+		r, rbad := lowerNullCoalesce(expr[at+len(op):])
+		return l + op + r, lbad || rbad
 	}
 	if op, at := topLevelComparison(expr); at >= 0 {
-		return lowerNullCoalesceExpr(expr[:at]) + op + lowerNullCoalesceExpr(expr[at+len(op):])
+		l, lbad := lowerNullCoalesce(expr[:at])
+		r, rbad := lowerNullCoalesce(expr[at+len(op):])
+		return l + op + r, lbad || rbad
 	}
 	arms := splitTopLevelNullCoalesce(expr)
 	if len(arms) < 2 {
-		// No live top-level `??` -- the token was inside a string, or
-		// nested in a call argument. Lower each call argument in place.
-		return lowerNullCoalesceInCallArgs(expr)
+		// No live top-level `??` -- it sits inside a nested group.
+		return lowerNullCoalesceInGroups(expr)
 	}
+	bad := false
 	for i, arm := range arms {
-		arm = strings.TrimSpace(arm)
-		if arm == "" {
-			// A dangling or doubled operator (`a ??`, `a ?? ?? b`).
-			// Leave the text ALONE so the value keeps its live `??` and
-			// the load-time guard in parsePayloadRawToTemplate refuses
-			// the construct, rather than silently lowering to a
-			// coalesce() with an empty argument (memql#2772 review).
-			return expr
+		trimmed := strings.TrimSpace(arm)
+		if trimmed == "" {
+			// A dangling or doubled operator. Leave the text ALONE so
+			// nothing downstream silently reads a coalesce() with an
+			// empty argument, and report it.
+			return expr, true
 		}
-		arms[i] = lowerNullCoalesceExpr(arm)
+		lowered, armBad := lowerNullCoalesce(trimmed)
+		bad = bad || armBad
+		arms[i] = lowered
 	}
-	return "coalesce(" + strings.Join(arms, ", ") + ")"
+	if bad {
+		return expr, true
+	}
+	return "coalesce(" + strings.Join(arms, ", ") + ")", false
 }
 
-// boolConnectives are the two-byte boolean operators, which bind LOOSER
-// than `??` in the parser cascade (parseLogicalOr -> parseLogicalAnd ->
-// ... -> parseNullCoalesce).
-var boolConnectives = []string{"&&", "||"}
-
-// topLevelBinary returns the first unparenthesised occurrence of any of
-// the given operators, or ("", -1).
-func topLevelBinary(expr string, ops []string) (string, int) {
-	sc := &exprScanner{s: expr}
-	for sc.i < len(expr) {
-		at := sc.i
-		_, live, top := sc.next()
-		if !live || !top {
-			continue
-		}
-		for _, op := range ops {
-			if strings.HasPrefix(expr[at:], op) {
-				return op, at
-			}
-		}
-	}
-	return "", -1
-}
+// boolConnectives bind LOOSER than `??` in the parser cascade
+// (parseLogicalOr -> parseLogicalAnd -> ... -> parseNullCoalesce). `;` is
+// the retired separator spelling of AND, still accepted by parseLogicalAnd.
+var boolConnectives = []string{"&&", "||", ";"}
 
 // exprScanner walks an expression tracking string literals and bracket
 // nesting, so callers only ever act on live, top-level bytes.
@@ -139,6 +160,25 @@ func (sc *exprScanner) next() (b byte, live, top bool) {
 	}
 	sc.i++
 	return b, true, atTop
+}
+
+// topLevelBinary returns the first unparenthesised occurrence of any of
+// the given operators, or ("", -1).
+func topLevelBinary(expr string, ops []string) (string, int) {
+	sc := &exprScanner{s: expr}
+	for sc.i < len(expr) {
+		at := sc.i
+		_, live, top := sc.next()
+		if !live || !top {
+			continue
+		}
+		for _, op := range ops {
+			if strings.HasPrefix(expr[at:], op) {
+				return op, at
+			}
+		}
+	}
+	return "", -1
 }
 
 // topLevelComparison returns the first unparenthesised comparison
@@ -191,49 +231,97 @@ func splitTopLevelNullCoalesce(expr string) []string {
 	return append(arms, expr[prev:])
 }
 
-// lowerNullCoalesceInCallArgs lowers `??` that sits inside a call's
-// argument list, e.g. `concat("P-", w ?? "30", "D")`. The arguments are
-// split at their own top level and lowered independently.
-func lowerNullCoalesceInCallArgs(expr string) string {
-	open := strings.IndexByte(expr, '(')
-	if open < 0 {
-		return expr
+// lowerNullCoalesceInGroups lowers `??` nested inside parenthesised
+// groups, e.g. `concat("P-", w ?? "30", "D")` and `f(a ?? 1) + g(2)`.
+// Each group's comma-separated members are lowered independently.
+//
+// Object and array literal groups are deliberately NOT descended into:
+// their members are `key: value` pairs (splitting those on `??` would
+// straddle the colon) and the payload evaluator does not evaluate a
+// literal arm anyway, so leaving them is the pre-existing behaviour.
+func lowerNullCoalesceInGroups(expr string) (string, bool) {
+	var out strings.Builder
+	bad := false
+	last := 0
+	depth := 0
+	inStr := false
+	for i := 0; i < len(expr); i++ {
+		c := expr[i]
+		if inStr {
+			if c == '\\' {
+				i++
+				continue
+			}
+			if c == '"' {
+				inStr = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inStr = true
+		case '[', '{':
+			depth++
+		case ']', '}':
+			if depth > 0 {
+				depth--
+			}
+		case '(':
+			if depth > 0 {
+				depth++
+				continue
+			}
+			closeAt := matchingCloseParen(expr, i)
+			if closeAt < 0 {
+				// Unbalanced -- leave the remainder untouched.
+				out.WriteString(expr[last:])
+				return out.String(), bad
+			}
+			lowered, memberBad := lowerGroupMembers(expr[i+1 : closeAt])
+			bad = bad || memberBad
+			out.WriteString(expr[last : i+1])
+			out.WriteString(lowered)
+			out.WriteString(")")
+			last = closeAt + 1
+			i = closeAt
+		}
 	}
-	// Find the paren that actually MATCHES this opener, not the last one
-	// in the string: `f(a ?? 1) + g(2)` would otherwise slice from f's
-	// opener to g's closer and rejoin `+ g(2)` inside f's argument list
-	// (memql#2772 review). Bail unless the matched closer ends the
-	// expression, i.e. this really is one `callee( ... )` and nothing
-	// else.
-	closeAt := matchingCloseParen(expr, open)
-	if closeAt < 0 || strings.TrimSpace(expr[closeAt+1:]) != "" {
-		return expr
+	if last == 0 {
+		return expr, bad
 	}
-	inner := expr[open+1 : closeAt]
-	if !strings.Contains(inner, "??") {
-		return expr
-	}
-	var args []string
+	out.WriteString(expr[last:])
+	return out.String(), bad
+}
+
+// lowerGroupMembers lowers each top-level comma-separated member of a
+// parenthesised group, preserving the authored spacing.
+func lowerGroupMembers(inner string) (string, bool) {
+	var members []string
 	prev := 0
+	bad := false
 	sc := &exprScanner{s: inner}
 	for sc.i < len(inner) {
 		at := sc.i
 		b, live, top := sc.next()
 		if live && top && b == ',' {
-			args = append(args, inner[prev:at])
+			members = append(members, inner[prev:at])
 			prev = at + 1
 		}
 	}
-	args = append(args, inner[prev:])
-	for i, a := range args {
-		trimmed := strings.TrimSpace(a)
-		lowered := lowerNullCoalesceExpr(trimmed)
+	members = append(members, inner[prev:])
+	for i, m := range members {
+		trimmed := strings.TrimSpace(m)
+		if trimmed == "" {
+			continue
+		}
+		lowered, memberBad := lowerNullCoalesce(trimmed)
+		bad = bad || memberBad
 		if lowered == trimmed {
 			continue // preserve the original spacing
 		}
-		args[i] = strings.Replace(a, trimmed, lowered, 1)
+		members[i] = strings.Replace(m, trimmed, lowered, 1)
 	}
-	return expr[:open+1] + strings.Join(args, ",") + expr[closeAt:]
+	return strings.Join(members, ","), bad
 }
 
 // matchingCloseParen returns the offset of the ')' closing the '(' at
@@ -258,4 +346,33 @@ func matchingCloseParen(expr string, open int) int {
 		}
 	}
 	return -1
+}
+
+// firstMalformedNullCoalesce finds a payload field carrying the
+// malformed-operator sentinel, walking nested objects and arrays.
+func firstMalformedNullCoalesce(v any) (string, string, bool) {
+	switch t := v.(type) {
+	case malformedNullCoalesce:
+		return "", t.raw, true
+	case map[string]any:
+		for k, nested := range t {
+			if path, raw, bad := firstMalformedNullCoalesce(nested); bad {
+				if path == "" {
+					return k, raw, true
+				}
+				return k + "." + path, raw, true
+			}
+		}
+	case []any:
+		for i, nested := range t {
+			if path, raw, bad := firstMalformedNullCoalesce(nested); bad {
+				idx := "[" + strconv.Itoa(i) + "]"
+				if path == "" {
+					return idx, raw, true
+				}
+				return idx + "." + path, raw, true
+			}
+		}
+	}
+	return "", "", false
 }
