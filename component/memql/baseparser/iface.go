@@ -43,6 +43,29 @@ func RetiredConstructAnnotation(name string) (string, bool) {
 	return hint, ok
 }
 
+// misplacedConstructAnnotations maps an annotation that is LIVE on some other
+// construct kind to the hint an author needs when they put it on a kind that
+// does not accept it. Without this they get the generic unknown-annotation
+// error, which lists the allow-list but never says where the annotation DOES
+// belong or what to write instead (memql#2779).
+//
+// `@row` is the motivating case: an author who wants to filter on the row
+// envelope reaches for `@row` on the query, because that is how a SHAPE opts
+// into the row surface. A query needs no kind marker -- it binds its concept
+// in the signature, and `row.` is available in its filter unconditionally.
+var misplacedConstructAnnotations = map[string]string{
+	"row": "`@row` is a SHAPE kind marker -- it declares that a shape body projects the row envelope (`shape <Concept> <name> { row.id ... }`). A query needs no kind marker: it binds its concept in the signature (`query <Concept> <name>`), and the `row.` namespace is always available in its filter. To filter on the row id, delete the annotation and write `filter row.id == args.<x>`",
+}
+
+// MisplacedConstructAnnotation reports whether an annotation is live on a
+// different construct kind, returning the hint that names where it belongs
+// and what to write instead. Consulted only after the allow-list rejects the
+// name, so a kind that legitimately accepts the annotation is unaffected.
+func MisplacedConstructAnnotation(name string) (string, bool) {
+	hint, ok := misplacedConstructAnnotations[name]
+	return hint, ok
+}
+
 func ValidateConstructAnnotations(source, kindLabel string, allowed map[string]bool) error {
 	keyword := kindLabel
 	if kindLabel == "mutation" {
@@ -73,6 +96,9 @@ func ValidateConstructAnnotations(source, kindLabel string, allowed map[string]b
 			return fmt.Errorf("@%s on a %s is retired -- %s", name, kindLabel, hint)
 		}
 		if !allowed[name] {
+			if hint, misplaced := MisplacedConstructAnnotation(name); misplaced {
+				return fmt.Errorf("@%s is not valid on a %s -- %s", name, kindLabel, hint)
+			}
 			return fmt.Errorf("unknown %s annotation @%s -- supported: %s", kindLabel, name, FormatAnnotationAllowList(allowed))
 		}
 	}

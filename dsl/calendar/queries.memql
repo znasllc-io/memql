@@ -18,7 +18,7 @@ query calendarEvent calendarEventById {
   args {
     eventId  string!
   }
-  filter  id==args.eventId && ownerUserId==actor.userId && isNotDeleted
+  filter  row.id==args.eventId && ownerUserId==actor.userId && isNotDeleted
   shape   calendarEventFull
 }
 

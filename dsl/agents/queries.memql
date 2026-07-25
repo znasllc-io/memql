@@ -53,7 +53,7 @@ query agent agentById {
   args {
     agentId  string!
   }
-  filter  id==args.agentId
+  filter  row.id==args.agentId
   shape   agentFull
 }
 
@@ -71,7 +71,7 @@ query agent agentOwner {
   args {
     agentId  string!
   }
-  filter  id==args.agentId
+  filter  row.id==args.agentId
   shape   agentFull
 }
 
@@ -292,6 +292,6 @@ query avatarPersona avatarPersonaById {
   args {
     avatarPersonaId  string!
   }
-  filter  id==args.avatarPersonaId
+  filter  row.id==args.avatarPersonaId
   shape   avatarPersonaFull
 }

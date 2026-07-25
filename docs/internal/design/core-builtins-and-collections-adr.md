@@ -334,7 +334,7 @@ Temporal visibility on a query contract:
 @latestMode    // surfaced on the contract: this query is time-dependent
 query node queryLiveNodes {
   asOf latest
-  filter  type == "node"
+  filter  row.type == "node"
   shape   nodeCard
 }
 

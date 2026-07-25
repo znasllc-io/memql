@@ -1155,10 +1155,35 @@ A PR that violates any of them fails before the engine ever parses
 the change. The gates, with their test names:
 
 - **Canonical filter prefixes** (`TestFilterSyntaxCanonical`).
-  Filter predicates reference payload fields as `<field>`
-  and row intrinsics (`id`, `concept`, `createdAt`, `createdBy`,
-  `partition`, `type`, `schema`) by their bare names. The
-  `<conceptName>.<field>` alias form is rejected.
+  Filter predicates reference payload fields as `<field>` -- bare, with
+  no prefix. The `payload.<field>` and `<conceptName>.<field>` forms are
+  both rejected.
+- **Row intrinsics use the `row.` namespace**
+  (`TestFilterIntrinsicsUseRowNamespace`, memql#2779). In a filter the
+  row envelope is addressed through `row.` -- `row.id`, `row.concept`,
+  `row.type`, `row.createdAt`, `row.createdBy`, `row.provenance.<leaf>`.
+  The bare spelling (`filter id == args.x`) is retired.
+
+  Why: a filter mixes two field surfaces under one syntax. Payload
+  properties are bare, so a bare `id` is indistinguishable from a payload
+  property by shape alone -- yet the two compile to completely different
+  SQL (a table column vs a JSONB path). `row.` names the envelope
+  explicitly and lines the filter up with the namespaces you already
+  write (`args.X`, `actor.X`, `config.X`) and with shape bodies, which
+  have always projected `row.id` / `row.createdAt`.
+
+  ```memql
+  filter  row.id == args.clusterId      // correct -- the row envelope
+  filter  id == args.clusterId          // rejected -- bare intrinsic
+  filter  region == args.region         // correct -- payload property, bare
+  filter  row.region == args.region     // rejected -- not a row intrinsic
+  ```
+
+  Scope: **filter predicates only.** A spec/trait body reads its
+  signature-bound fields bare and rejects `row.*` outright (epic #2281) --
+  the binding lives in the signature there. Mutation `insert` / `update`
+  blocks write `id:` / `createdAt:` as target keys rather than
+  references, and are unaffected.
 - **Mandatory trait specs** (`TestNoInlineTraitablePredicates`).
   When a trait in `dsl/common/traits.memql` covers a predicate, the
   filter must call the trait, not inline the comparison:
@@ -1226,11 +1251,11 @@ to stop (epic 5, memql#1965).
 A query is list-returning when its `shape` projects a row set
 **without a unique-key equality filter**. Concretely:
 
-- **Single-row read — EXEMPT.** The filter contains a bare `id == <expr>`
+- **Single-row read — EXEMPT.** The filter contains a `row.id == <expr>`
   equality on the row's primary intrinsic. It reads at most one row, so
-  it is not a list. A *guarded* `when(args.x) { id == ... }` does **not**
-  count — the id filter is conditional, so the query can still return
-  the full set when the arg is omitted.
+  it is not a list. A *guarded* `when(args.x) { row.id == ... }` does
+  **not** count — the id filter is conditional, so the query can still
+  return the full set when the arg is omitted.
 - **Aggregate — EXEMPT.** The query carries a `count` clause. It returns
   a `{count: N}` number, not rows.
 - **Bounded list — COMPLIANT.** The query declares `paginate` (an
@@ -1244,10 +1269,10 @@ A query is list-returning when its `shape` projects a row set
   rule targets.
 
 ```memql
-// Single-row read — exempt (id == equality).
+// Single-row read — exempt (row.id == equality).
 query space querySpaceMeta {
   args { spaceId string @required }
-  filter  id==args.spaceId
+  filter  row.id==args.spaceId
   shape   spaceFull
 }
 

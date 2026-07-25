@@ -62,6 +62,41 @@ the executor reads at SQL push-down time.
 Defined in `component/memql/intrinsic_fields.go`. Cross-referenced
 in `docs/public/language/authoring-rules.md` (gotcha #19).
 
+### Naming an intrinsic in a filter: the `row.` namespace
+
+In a query `filter` clause an intrinsic is addressed through the `row.`
+namespace -- `row.id`, `row.createdAt`, `row.provenance.kind` -- never
+bare (memql#2779, `TestFilterIntrinsicsUseRowNamespace`). Payload
+properties in the same clause are bare, so the namespace is what keeps
+the two surfaces apart:
+
+```memql
+filter  row.id == args.spaceId && status == "active"
+//      ^^^^^^ row envelope      ^^^^^^ payload property
+```
+
+`row.` accepts only the intrinsics the filter compiler pushes down:
+`id`, `concept`, `type`, `createdAt`, `createdBy`, and
+`provenance.<leaf>`. `row.<anything else>` is an error rather than a
+silent fall-through to a payload lookup -- that fall-through is the
+defect the namespace closed. `partition` and `schema` are intrinsics on
+the row but are not filter-comparable, so they have no `row.` form.
+
+A **sort key** accepts the same namespace -- `sort "row.createdAt", "desc"` --
+and rejects a non-sortable leaf rather than silently ordering on a JSONB path
+that does not exist. The bare spelling still works there and the tree has not
+been migrated (memql#2786); only filter predicates are gated today.
+
+Other surfaces are unchanged: a shape body already projects `row.id` /
+`row.createdAt`; a spec/trait body reads its signature-bound fields bare
+and rejects `row.*` (epic #2281); a mutation `insert`/`update` block
+writes `id:` / `createdAt:` as target keys rather than references.
+
+> One consequence worth stating: `row` is now a reserved head in a filter, so
+> a concept that declares a payload property literally named `row` cannot be
+> filtered on it. No concept in the engine tree does, but a product bundle
+> mounted via `MEMQL_DSL_PATH` should avoid the name.
+
 ---
 
 ## 3. Actor-envelope fields

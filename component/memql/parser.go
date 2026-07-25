@@ -181,7 +181,9 @@ func (e *MemQLEngine) parseWithFunctions(query string, fns *FunctionRegistry, sp
 	// function inlining so inlined query-author fields are present; inlined
 	// specs/traits already carry payload.* (first part "payload") and are
 	// skipped. The legacy explicit payload.X form passes through unchanged.
-	rewriteBarePayloadFilterFields(plan.Root)
+	if err := rewriteFilterFieldRefs(plan.Root); err != nil {
+		return nil, err
+	}
 	populateCacheHints(plan)
 	populateConceptFields(plan)
 	if err := validateAIContext(plan.Root); err != nil {
@@ -197,7 +199,7 @@ func (e *MemQLEngine) parseWithFunctions(query string, fns *FunctionRegistry, sp
 // rewrite (epic #2292).
 func reservedFilterHead(name string) bool {
 	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "payload", "actor", "args", "now", "config", "trace", "meta",
+	case "row", "payload", "actor", "args", "now", "config", "trace", "meta",
 		"schema", "partition", "provenance":
 		return true
 	}
@@ -205,54 +207,193 @@ func reservedFilterHead(name string) bool {
 	return ok
 }
 
-// rewriteBarePayloadFilterFields walks a resolved query plan expression
-// and rewrites every bare payload field reference (a FieldReference whose
-// first segment is not a reserved head per reservedFilterHead) to its
-// payload.<...> form. Spec references and comparison values are left
-// untouched. Mirrors collectConceptFields' wrapper traversal so it reaches
-// comparisons nested under directive wrappers.
-func rewriteBarePayloadFilterFields(expr ExpressionNode) {
-	switch node := expr.(type) {
-	case *ComparisonExpression:
-		node.Field = barePayloadFieldRef(node.Field)
-		for i := range node.FieldSelections {
-			node.FieldSelections[i] = barePayloadFieldRef(node.FieldSelections[i])
-		}
-	case *LogicalExpression:
-		rewriteBarePayloadFilterFields(node.Left)
-		rewriteBarePayloadFilterFields(node.Right)
-	case *RelationshipExpression:
-		rewriteBarePayloadFilterFields(node.Target)
-	case *SortExpression:
-		rewriteBarePayloadFilterFields(node.Target)
-	case *PaginateExpression:
-		rewriteBarePayloadFilterFields(node.Target)
-	case *SelectExpression:
-		rewriteBarePayloadFilterFields(node.Target)
-	case *TimestampExpression:
-		rewriteBarePayloadFilterFields(node.Target)
-	case *DepthExpression:
-		rewriteBarePayloadFilterFields(node.Target)
-	case *CountExpression:
-		rewriteBarePayloadFilterFields(node.Target)
-	case *ShapeExpression:
-		rewriteBarePayloadFilterFields(node.Target)
+// rowIntrinsicNamespace is the head that addresses the row envelope in a
+// predicate: `row.id`, `row.createdAt`, `row.provenance.kind`. It mirrors
+// the prefix shape bodies already project through, so one spelling names a
+// row intrinsic everywhere an author can write one (memql#2779).
+const rowIntrinsicNamespace = "row"
+
+// rowIntrinsicFieldRef strips the `row.` namespace from a filter field
+// reference and returns the intrinsic it addresses, canonically cased.
+// `row.provenance.<leaf>` keeps its leaf path -- provenance is the one
+// object-valued intrinsic.
+//
+// A leaf that is not an intrinsic is an ERROR rather than a fall-through to
+// the payload surface. That fall-through is exactly the defect this
+// namespace closes: before #2779 `row` was not a reserved head, so
+// `row.id` was payload-prefixed into `payload.row.id` -- a JSON path no
+// stored row carries, which parsed, loaded, and linted clean while matching
+// zero rows forever.
+func rowIntrinsicFieldRef(ref FieldReference) (FieldReference, error) {
+	if len(ref.Parts) < 2 {
+		return FieldReference{}, fmt.Errorf(
+			"%w: `row` is the row-intrinsic namespace and needs a field -- write row.id, row.concept, row.type, row.createdAt, row.createdBy, or row.provenance.<leaf>",
+			ErrInvalidArgument)
 	}
+
+	leaf := strings.TrimSpace(ref.Parts[1])
+
+	// `partition` and `schema` ARE row intrinsics, but the filter compiler
+	// has no branch for either -- both end at "field %q is not supported".
+	// Say that, rather than routing them into the payload advice below: an
+	// author told to "write it bare" would hit the same wall one edit later.
+	if isUnfilterableRowIntrinsic(leaf) {
+		return FieldReference{}, fmt.Errorf(
+			"%w: `row.%s` is a row intrinsic but is not filter-comparable -- there is no SQL push-down for it. Filterable intrinsics: id, concept, type, createdAt, createdBy, provenance.<leaf>",
+			ErrInvalidArgument, leaf)
+	}
+
+	info, ok := resolveIntrinsicField(leaf)
+	if !ok {
+		// "Write it bare" is only sound advice when the bare form would read
+		// the payload. A leaf that is itself a reserved head (`row.actor`,
+		// `row.payload`, `row.row`, ...) would NOT -- suggesting it sends the
+		// author somewhere else wrong, and `row.row` would loop.
+		if leaf == "" {
+			return FieldReference{}, fmt.Errorf(
+				"%w: `row.` needs a field after the dot -- write row.id, row.concept, row.type, row.createdAt, row.createdBy, or row.provenance.<leaf>",
+				ErrInvalidArgument)
+		}
+		if reservedFilterHead(leaf) {
+			return FieldReference{}, fmt.Errorf(
+				"%w: `row.%s` is not a row intrinsic -- `%s` is a reserved engine namespace of its own, not a field under `row`. Row intrinsics: id, concept, type, createdAt, createdBy, provenance.<leaf>",
+				ErrInvalidArgument, leaf, leaf)
+		}
+		return FieldReference{}, fmt.Errorf(
+			"%w: `row.%s` is not a row intrinsic (valid: id, concept, type, createdAt, createdBy, provenance) -- a concept's payload property is named BARE in a filter, so write `%s`",
+			ErrInvalidArgument, leaf, leaf)
+	}
+
+	// Depth validation, mirroring validateFieldReference (the strict literal
+	// path) so the namespace is not WEAKER than the bare spelling it
+	// replaces. Without this, `row.id.foo` slipped past parse -- this rewrite
+	// runs after validateFieldReference -- and surfaced later as a SQL-compile
+	// error whose text had lost the `row.` the author actually typed.
+	rest := ref.Parts[2:]
+	if info.kind == intrinsicFieldProvenance {
+		switch {
+		case len(rest) == 0:
+			return FieldReference{}, fmt.Errorf(
+				"%w: `row.provenance` addresses an object -- compare a leaf instead (row.provenance.kind / .name / .trigger / .via)",
+				ErrInvalidArgument)
+		case len(rest) > 1:
+			// The author DID supply a leaf; the problem is depth. Saying
+			// "compare a leaf instead" here would describe the wrong mistake.
+			return FieldReference{}, fmt.Errorf(
+				"%w: `row.provenance.%s` is too deep -- provenance leaves are scalars, so compare row.provenance.%s directly",
+				ErrInvalidArgument, strings.Join(rest, "."), rest[0])
+		}
+		if !isProvenanceLeaf(rest[0]) {
+			return FieldReference{}, fmt.Errorf(
+				"%w: `row.provenance.%s` is not a provenance field (valid: kind, name, trigger, via)",
+				ErrInvalidArgument, rest[0])
+		}
+	} else if len(rest) > 0 {
+		return FieldReference{}, fmt.Errorf(
+			"%w: row intrinsic `row.%s` is a scalar and does not support nested paths (got `row.%s.%s`)",
+			ErrInvalidArgument, info.canonical, info.canonical, strings.Join(rest, "."))
+	}
+
+	parts := append([]string{info.canonical}, rest...)
+	return FieldReference{
+		Raw:      strings.Join(parts, "."),
+		Parts:    parts,
+		Wildcard: ref.Wildcard,
+	}, nil
 }
 
-// barePayloadFieldRef returns ref unchanged when its head is reserved (a
-// row intrinsic, actor/args/config/now/trace, or an already-payload
-// path); otherwise it prepends "payload" so a bare property reads the
-// payload surface.
-func barePayloadFieldRef(ref FieldReference) FieldReference {
+// isUnfilterableRowIntrinsic reports whether name is a row intrinsic that
+// carries no filter push-down. `partition` and `schema` are stamped on every
+// row and are reserved filter heads (so they are never payload-prefixed), but
+// compileComparisonExpressionWithContext has no case for either.
+func isUnfilterableRowIntrinsic(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "partition", "schema":
+		return true
+	}
+	return false
+}
+
+// isProvenanceLeaf reports whether name is one of the engine-stamped
+// provenance fields. Mirrors the allow-list the provenance compiler enforces
+// (executor_filter.go) so the error arrives at parse time with the authored
+// `row.` spelling intact.
+func isProvenanceLeaf(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "kind", "name", "trigger", "via":
+		return true
+	}
+	return false
+}
+
+// rewriteFilterFieldRefs walks a resolved query plan expression and
+// normalises every field reference through filterFieldRef: the `row.`
+// namespace collapses to the intrinsic it names, and a bare, non-reserved
+// property gains its `payload.` prefix. Spec references and comparison
+// values are left untouched. Mirrors collectConceptFields' wrapper
+// traversal so it reaches comparisons nested under directive wrappers.
+//
+// It returns an error (rather than rewriting in place silently) because a
+// malformed `row.<leaf>` must fail the parse loudly -- see
+// rowIntrinsicFieldRef.
+func rewriteFilterFieldRefs(expr ExpressionNode) error {
+	switch node := expr.(type) {
+	case *ComparisonExpression:
+		field, err := filterFieldRef(node.Field)
+		if err != nil {
+			return err
+		}
+		node.Field = field
+		for i := range node.FieldSelections {
+			selection, err := filterFieldRef(node.FieldSelections[i])
+			if err != nil {
+				return err
+			}
+			node.FieldSelections[i] = selection
+		}
+	case *LogicalExpression:
+		if err := rewriteFilterFieldRefs(node.Left); err != nil {
+			return err
+		}
+		return rewriteFilterFieldRefs(node.Right)
+	case *RelationshipExpression:
+		return rewriteFilterFieldRefs(node.Target)
+	case *SortExpression:
+		return rewriteFilterFieldRefs(node.Target)
+	case *PaginateExpression:
+		return rewriteFilterFieldRefs(node.Target)
+	case *SelectExpression:
+		return rewriteFilterFieldRefs(node.Target)
+	case *TimestampExpression:
+		return rewriteFilterFieldRefs(node.Target)
+	case *DepthExpression:
+		return rewriteFilterFieldRefs(node.Target)
+	case *CountExpression:
+		return rewriteFilterFieldRefs(node.Target)
+	case *ShapeExpression:
+		return rewriteFilterFieldRefs(node.Target)
+	}
+	return nil
+}
+
+// filterFieldRef normalises one filter field reference to the form the SQL
+// pushdown and the in-memory evaluator both consume:
+//
+//	row.<intrinsic>  -> <intrinsic>          (the row envelope, #2779)
+//	<reserved head>  -> unchanged            (actor / args / payload / ...)
+//	<bare property>  -> payload.<property>   (epic #2292)
+func filterFieldRef(ref FieldReference) (FieldReference, error) {
 	if len(ref.Parts) == 0 {
-		return ref
+		return ref, nil
+	}
+	if strings.EqualFold(strings.TrimSpace(ref.Parts[0]), rowIntrinsicNamespace) {
+		return rowIntrinsicFieldRef(ref)
 	}
 	if reservedFilterHead(ref.Parts[0]) {
-		return ref
+		return ref, nil
 	}
 	parts := append([]string{"payload"}, ref.Parts...)
-	return FieldReference{Raw: strings.Join(parts, "."), Parts: parts}
+	return FieldReference{Raw: strings.Join(parts, "."), Parts: parts, Wildcard: ref.Wildcard}, nil
 }
 
 func applyDirectiveWrappers(plan *QueryPlan) (ExpressionNode, error) {

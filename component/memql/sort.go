@@ -105,6 +105,21 @@ func compileSortField(field SortField) (compiledSortField, error) {
 	}
 
 	direction := normalizeSortDirection(field.Direction)
+
+	// The `row.` namespace names a row intrinsic here for the same reason it
+	// does in a filter (memql#2779): without it, `sort "row.createdAt"` fell
+	// through to the bare-payload branch below and ordered on the JSONB path
+	// {row,createdAt}, which no stored row carries -- a silent no-op ordering
+	// rather than an error. Resolving it here keeps the two surfaces honest:
+	// an author taught `row.` by the filter rule writes it in a sort key too.
+	resolved, err := rowIntrinsicSortField(name)
+	if err != nil {
+		return compiledSortField{}, err
+	}
+	if resolved != "" {
+		name = resolved
+	}
+
 	lowered := strings.ToLower(name)
 
 	if info, ok := resolveIntrinsicField(name); ok {
@@ -386,4 +401,72 @@ func compareComparable(a, b sortComparable) int {
 		raw = -raw
 	}
 	return raw
+}
+
+// rowIntrinsicSortField resolves a `row.`-namespaced sort key to the bare
+// intrinsic name compileSortField already understands, mirroring
+// filterFieldRef for the ordering surface (memql#2779).
+//
+// Returns "" when name is not `row.`-namespaced, so the caller falls through
+// to its existing intrinsic / payload handling untouched. A non-intrinsic
+// leaf is an error rather than a fall-through to the payload surface -- that
+// fall-through is precisely the silent no-op this closes.
+//
+// `row.provenance` is rejected with the same message as any other
+// non-sortable leaf: provenance is an object-valued intrinsic with no
+// ordering, and compileSortField has no branch for it.
+func rowIntrinsicSortField(name string) (string, error) {
+	trimmed := strings.TrimSpace(name)
+	head, leaf, found := strings.Cut(trimmed, ".")
+	if !strings.EqualFold(strings.TrimSpace(head), rowIntrinsicNamespace) {
+		return "", nil
+	}
+	if !found {
+		// A bare `row` sort key names nothing. Without this it fell through
+		// to the payload branch and ordered on the JSONB path {row} --
+		// exactly the silent no-op this function exists to prevent, and
+		// asymmetric with filterFieldRef, which errors on bare `row`.
+		return "", fmt.Errorf(
+			"%w: `row` is the row-intrinsic namespace and needs a field -- write \"row.createdAt\", \"row.id\", \"row.concept\", \"row.type\", or \"row.createdBy\"",
+			ErrInvalidArgument)
+	}
+
+	leaf = strings.TrimSpace(leaf)
+
+	// A leaf that IS a row intrinsic but carries no ordering (`provenance` is
+	// an object; `partition` / `schema` have no sort branch) must not be told
+	// to "write it bare" -- bare would fall through to the payload surface and
+	// order on a JSONB path that does not exist, which is the silent no-op
+	// this whole function exists to prevent.
+	if leaf == "" {
+		return "", fmt.Errorf(
+			"%w: `row.` needs a field after the dot -- write \"row.createdAt\", \"row.id\", \"row.concept\", \"row.type\", or \"row.createdBy\"",
+			ErrInvalidArgument)
+	}
+	info, ok := resolveIntrinsicField(leaf)
+	if ok && info.kind == intrinsicFieldProvenance {
+		return "", fmt.Errorf(
+			"%w: sort key `row.provenance` addresses an object and has no ordering -- sortable row intrinsics are id, concept, type, createdAt, createdBy",
+			ErrInvalidArgument)
+	}
+	if !ok {
+		if isUnfilterableRowIntrinsic(leaf) {
+			return "", fmt.Errorf(
+				"%w: sort key `row.%s` is a row intrinsic but is not sortable -- there is no ORDER BY push-down for it. Sortable row intrinsics: id, concept, type, createdAt, createdBy",
+				ErrInvalidArgument, leaf)
+		}
+		// Same carve-out the filter surface makes: "write it bare" is only
+		// sound when the bare form reads the payload. A leaf that is itself a
+		// reserved head (`row.actor`, `row.row`) would not -- and `row.row`
+		// would loop, since bare `row` errors above.
+		if reservedFilterHead(leaf) {
+			return "", fmt.Errorf(
+				"%w: sort key `row.%s` is not a row intrinsic -- `%s` is a reserved engine namespace of its own, not a field under `row`. Sortable row intrinsics: id, concept, type, createdAt, createdBy",
+				ErrInvalidArgument, leaf, leaf)
+		}
+		return "", fmt.Errorf(
+			"%w: sort key `row.%s` is not a sortable row intrinsic (valid: id, concept, type, createdAt, createdBy) -- a payload property is named BARE in a sort key, so write \"%s\"",
+			ErrInvalidArgument, leaf, leaf)
+	}
+	return info.canonical, nil
 }

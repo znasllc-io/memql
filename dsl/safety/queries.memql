@@ -29,7 +29,7 @@ query approvalRequest approvalRequestById {
   args {
     id string!
   }
-  filter  id==args.id
+  filter  row.id==args.id
   shape   approvalRequestFull
 }
 

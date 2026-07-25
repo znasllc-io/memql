@@ -58,6 +58,6 @@ query healedOverride overrideById {
   args {
     overrideId  string!
   }
-  filter  when(args.overrideId) { id==args.overrideId } && ownerUserId==actor.userId
+  filter  when(args.overrideId) { row.id==args.overrideId } && ownerUserId==actor.userId
   shape   healedOverrideFull
 }

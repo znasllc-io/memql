@@ -33,6 +33,9 @@ func (p *Parser) validateDeclAnnotations(receiver, kindWord, name string, attrs 
 		if hint, retired := baseparser.RetiredConstructAnnotation(attr.Name); retired {
 			return newParseErrorf(&p.current, "%s %q: @%s is retired -- %s", kindWord, name, attr.Name, hint)
 		}
+		if hint, misplaced := baseparser.MisplacedConstructAnnotation(attr.Name); misplaced {
+			return newParseErrorf(&p.current, "%s %q: @%s is not valid on a %s -- %s", kindWord, name, attr.Name, kindWord, hint)
+		}
 		sorted := append([]string(nil), allowed...)
 		sort.Strings(sorted)
 		return newParseErrorf(&p.current,

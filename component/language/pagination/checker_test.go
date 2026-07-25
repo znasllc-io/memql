@@ -47,7 +47,7 @@ query widget queryAllWidgetsUnmarked {
 func TestSingleRowReadIsExempt(t *testing.T) {
 	src := `query space querySpaceMeta {
   args { partitionId string @required }
-  filter  id==args.partitionId
+  filter  row.id==args.partitionId
   shape   spaceFull
 }`
 	f := findingFor(t, ScanSource("f.memql", src), "querySpaceMeta")
@@ -60,7 +60,7 @@ func TestSingleRowReadIsExempt(t *testing.T) {
 // whitespace also reads as single-row.
 func TestSingleRowReadWithSpacedEquality(t *testing.T) {
 	src := `query space querySpaceMetaSpaced {
-  filter  id == args.partitionId && isActiveRecord
+  filter  row.id == args.partitionId && isActiveRecord
   shape   spaceFull
 }`
 	f := findingFor(t, ScanSource("f.memql", src), "querySpaceMetaSpaced")
@@ -148,7 +148,7 @@ query provider queryAllProviders {
 func TestGuardedIdFilterStaysList(t *testing.T) {
 	src := `query space queryMaybeOneSpace {
   args { partitionId string }
-  filter  when(args.partitionId) { id==args.partitionId } && payload.ownerUserId==actor.userId
+  filter  when(args.partitionId) { row.id==args.partitionId } && payload.ownerUserId==actor.userId
   shape   spaceFull
 }`
 	f := findingFor(t, ScanSource("f.memql", src), "queryMaybeOneSpace")

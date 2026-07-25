@@ -62,7 +62,7 @@ query project projectById {
   args {
     projectId  string!
   }
-  filter  id == args.projectId
+  filter  row.id == args.projectId
   shape   projectFull
 }
 
@@ -102,7 +102,7 @@ query request requestById {
   args {
     requestId  string!
   }
-  filter  id == args.requestId
+  filter  row.id == args.requestId
   shape   requestFull
 }
 

@@ -115,8 +115,8 @@ actor.userId         -- Resolved auth context (role, identityId, isClusterOwner,
 now                  -- RFC3339 timestamp captured at evaluation start
 partition            -- Active partition for this call
 config.X             -- Allow-listed config entry
-fieldName    -- Row payload field (query filter / shape contexts)
-id, createdAt, ...   -- Row intrinsics, bare names
+fieldName            -- Row payload field (query filter / shape contexts)
+row.id, row.createdAt, ...  -- Row intrinsics, via the `row.` namespace
 ```
 
 > **Retired: the `ctx` envelope.** `ctx.input.X` and `ctx.X` are gone
@@ -172,9 +172,18 @@ query participant queryActiveHumanParticipants {
 
 Filter rules (enforced by `dsl/conformance_test.go`):
 
-- Payload fields are `<field>` -- never `<conceptName>.<field>`.
-- Intrinsics (`id`, `concept`, `createdAt`, `createdBy`, `partition`,
-  `type`, `schema`) are bare names.
+- Payload fields are `<field>` -- bare, never `payload.<field>` or
+  `<conceptName>.<field>`.
+- Row intrinsics go through the `row.` namespace: `row.id`,
+  `row.concept`, `row.type`, `row.createdAt`, `row.createdBy`,
+  `row.provenance.<leaf>`. The bare spelling is retired (memql#2779) --
+  it left a row intrinsic indistinguishable from a payload property even
+  though the two compile to entirely different SQL:
+
+  ```memql
+  filter  row.id == args.spaceId   // the row envelope (a table column)
+  filter  status == args.status    // a payload property (a JSONB path)
+  ```
 - Named trait / spec predicates are called bare
   (`traitIsActiveRecord`), and are **mandatory** where a trait covers
   the predicate -- inline `active==true` is rejected when
@@ -191,7 +200,7 @@ query space queryActiveSpaces {
   args {
     userId  string
   }
-  filter  traitIsActiveRecord && traitStatusIsActive && when(args.userId) { createdBy==args.userId }
+  filter  traitIsActiveRecord && traitStatusIsActive && when(args.userId) { row.createdBy==args.userId }
   shape   spaceFull
 }
 ```

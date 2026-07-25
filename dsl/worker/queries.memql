@@ -15,7 +15,7 @@ query invocation expiredWorkerInvocations {
   args {
     createdBefore  string
   }
-  filter  action!="" && isNotDeleted && when(args.createdBefore) { createdAt<args.createdBefore }
+  filter  action!="" && isNotDeleted && when(args.createdBefore) { row.createdAt<args.createdBefore }
   shape   workerInvocationFull
 }
 

@@ -1379,8 +1379,18 @@ concept id.
 
 - Payload fields: **bare property** (`status`, `ownerUserId`) — never
   `<field>` (removed, epic #2292) and never `<conceptName>.<field>`
-- Intrinsics (`id`, `concept`, `createdAt`, `createdBy`,
-  `partition`, `type`, `schema`): bare names
+- Row intrinsics: the **`row.` namespace** — `row.id`, `row.concept`,
+  `row.type`, `row.createdAt`, `row.createdBy`, `row.provenance.<leaf>`.
+  The bare spelling is retired (memql#2779) and rejected by
+  `TestFilterIntrinsicsUseRowNamespace`. A filter mixes two field
+  surfaces under one syntax — payload properties are bare, so a bare
+  `id` was indistinguishable from a payload property while compiling to
+  entirely different SQL (a table column vs a JSONB path). `row.` names
+  the envelope explicitly, matching `actor.X` / `args.X` / `config.X`
+  and the shape bodies that have always projected `row.id`.
+  Filter predicates only: a spec/trait body reads its signature-bound
+  fields bare and rejects `row.*` (epic #2281), and mutation
+  `insert`/`update` blocks write `id:` as a target key, not a reference.
 - **One Go boolean grammar** (operator standardization #971): `&&`
   (AND), `||` (OR), `!` (NOT), parens `( )` with Go precedence
   (`!` > comparisons > `&&` > `||`). The legacy `;`-AND and `,`-OR

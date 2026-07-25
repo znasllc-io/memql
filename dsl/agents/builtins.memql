@@ -37,7 +37,7 @@
 // Returns one MemoryNode whose payload is
 //   { planId: string, agent: {name, role, roleSlug} }
 // The caller can subscribe to graph.node.updated.v1:planner:plan
-// filtered by id==<planId>, or query the Plan later via
+// filtered by row.id==<planId>, or query the Plan later via
 // planById, to observe progress + read Plan.output on success.
 
 @executor("integration.agents.invoke")

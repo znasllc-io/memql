@@ -115,7 +115,7 @@ query action actionByIdAndVersion {
     actionId  string!
     version   int!
   }
-  filter  id == args.actionId && version == args.version && ownerUserId == actor.userId
+  filter  row.id == args.actionId && version == args.version && ownerUserId == actor.userId
   shape   actionFull
 }
 
@@ -128,7 +128,7 @@ query action actionById {
   args {
     actionId  string!
   }
-  filter  id == args.actionId && ownerUserId == actor.userId
+  filter  row.id == args.actionId && ownerUserId == actor.userId
   shape   actionFull
 }
 

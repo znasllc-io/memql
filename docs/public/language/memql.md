@@ -847,7 +847,7 @@ Time-travel is a **query-only** clause (alongside `filter` / `shape` / `sort` / 
 @latestMode    // surfaced on the contract: this query is time-dependent
 query node queryLiveNodes {
   asOf latest
-  filter  type == "node"
+  filter  row.type == "node"
   shape   nodeCard
 }
 
@@ -924,7 +924,8 @@ How names resolve inside a body:
 | `now` | RFC3339 timestamp captured at eval start | every body |
 | `partition` | Active partition for this call | every body |
 | `config.X` | Allow-listed config | every body |
-| `X`, `id`, `concept`, `type`, `createdAt`, `createdBy`, `schema` | Row fields / intrinsics | queries' `filter` + `shape` only (SQL pushdown) |
+| `X` | Row payload property, bare | queries' `filter` + `shape` only (SQL pushdown) |
+| `row.id`, `row.concept`, `row.type`, `row.createdAt`, `row.createdBy`, `row.provenance.<leaf>` | Row intrinsics, via the `row.` namespace (memql#2779) | queries' `filter` + `shape` only (SQL pushdown) |
 
 **Reserved engine names.** `now`, `actor`, `partition`, `config`, `trace` are reserved as top-level identifiers. An `args` field that collides with one of these names is rejected at load time.
 

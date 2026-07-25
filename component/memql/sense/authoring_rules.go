@@ -732,3 +732,43 @@ func argsFieldAnchor(source string, ownerPos Position, fieldName string) Positio
 	}
 	return ownerPos
 }
+
+// bareRowIntrinsicRule flags a filter predicate that names a row intrinsic
+// BARE -- `filter id == args.x` instead of `filter row.id == args.x`
+// (memql#2779). It is the edit-time half of
+// dsl.TestFilterIntrinsicsUseRowNamespace, so an author sees the rule in
+// Cockpit instead of discovering it when CI rejects the branch. Both halves
+// call ScanBareRowIntrinsics, so they cannot drift.
+//
+// Why it matters beyond style: a filter mixes two field surfaces under one
+// syntax. Payload properties are bare (epic #2292), so a bare `id` is
+// indistinguishable from a payload property by shape alone, and the two
+// compile to completely different SQL.
+//
+// Severity is Warning, not Error: the ENGINE still resolves bare intrinsics
+// correctly -- only the authoring gates retired the spelling -- so this never
+// breaks boot, and the sense.md convention reserves Error for what does. A
+// product bundle mounted via MEMQL_DSL_PATH and authored before the rule
+// should read as "migrate this", not as "your workspace is broken".
+//
+// Scope is deliberately narrow -- filter clauses only. A spec/trait body
+// reads its signature-bound fields bare and REJECTS `row.*` outright (epic
+// #2281), so flagging a `return` predicate would teach the exact opposite of
+// what that surface accepts.
+func bareRowIntrinsicRule(source string) []Diagnostic {
+	var diagnostics []Diagnostic
+	for _, hit := range ScanBareRowIntrinsics(source) {
+		diagnostics = append(diagnostics, Diagnostic{
+			Range: Range{
+				Start: Position{Line: hit.Line, Column: hit.Column},
+				End:   Position{Line: hit.Line, Column: hit.Column + len(hit.Text)},
+			},
+			Severity: SeverityWarning,
+			Message: fmt.Sprintf(
+				"filter names the row intrinsic %q bare -- write `row.%s`. In a filter, payload properties are BARE (the concept is bound by the signature) and the row envelope is addressed through `row.`, so the two surfaces stay distinguishable (memql#2779)",
+				hit.Text, hit.Name),
+			Code: "bare-row-intrinsic",
+		})
+	}
+	return diagnostics
+}
