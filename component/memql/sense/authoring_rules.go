@@ -584,7 +584,14 @@ func ActorUnknownPropertyDiagnostics(source string) []Diagnostic {
 // #2703): a description longer than this gets a HINT -- never an error --
 // nudging authors toward the terse agent-facing form. One constant,
 // re-tunable.
-const descriptionLengthTarget = 200
+//
+// Raised 200 -> 500 in #2759. At 200 the hint fired on 701 of the corpus's
+// 2607 descriptions (26%) -- frequent enough to read as background noise
+// rather than an editorial nudge, which trains authors to tune the whole
+// diagnostic class out. At 500 it flags 133, which is the genuine long
+// tail. TestDescriptionLengthTargetIsConsistent pins the two author-facing
+// doc strings to this constant so the advice cannot drift from the rule.
+const descriptionLengthTarget = 500
 
 // descriptionLengthRule hints when a resolved description (the /// doc
 // comment when present, else @description -- ruling-3 precedence) exceeds

@@ -46,7 +46,7 @@ func nextRules() []NextRule {
 		{
 			Context: "beforeConstructHeader",
 			Expect:  []string{"docComment", "annotation", "constructKeyword"},
-			Doc:     "Above a construct: document it with a /// doc-comment block (the PREFERRED spelling, #2601 -- the block immediately above the declaration IS its description; a blank line breaks attachment, consecutive /// lines join with spaces, a bare /// is a paragraph break, and /// wins over @description). @description(\"...\") remains the valid compatibility fallback; the engine tree gate rejects the redundant long form, including a bare @description shadowed by a /// block. Aim for ~200 characters (the editorial length target).",
+			Doc:     "Above a construct: document it with a /// doc-comment block (the PREFERRED spelling, #2601 -- the block immediately above the declaration IS its description; a blank line breaks attachment, consecutive /// lines join with spaces, a bare /// is a paragraph break, and /// wins over @description). @description(\"...\") remains the valid compatibility fallback; the engine tree gate rejects the redundant long form, including a bare @description shadowed by a /// block. Aim for ~500 characters (the editorial length target).",
 		},
 		{
 			Context: "afterUseKeyword",
