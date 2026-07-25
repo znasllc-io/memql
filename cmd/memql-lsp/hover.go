@@ -17,7 +17,7 @@ func (s *server) hover(_ *glsp.Context, params *protocol.HoverParams) (*protocol
 		return nil, nil
 	}
 	line, col := position.FromLSPPosition(text, params.Position)
-	res := svc.Hover(text, line, col)
+	res := svc.Hover(text, line, col, uriToPath(params.TextDocument.URI))
 	if res == nil {
 		return nil, nil
 	}

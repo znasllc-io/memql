@@ -124,7 +124,7 @@ live in `component/grpc/sense_handlers.go`.
 | **Tokenize** | Semantic tokens for syntax highlighting -- keywords, identifiers, strings, annotations, concept ids |
 | **Complete** | Context-aware autocompletion -- constructs, annotations, concepts, builtins, keywords |
 | **Diagnose** | Errors and warnings from the lexer, parser, and semantic validation |
-| **Hover** | Symbol info at the cursor -- function docs, concept schemas, annotation docs |
+| **Hover** | Symbol info at the cursor -- function docs, concept schemas, annotation docs, tool and prompt docs. Resolves a BARE concept short name too (#2753): `candidate` in `shape candidate candidateFull` is ambient under rule 25, so it is matched by trailing segment against the registry. A collision across namespaces (`plan` is both `v1:planner:plan` and `v1:harness:plan`) is broken by the document's own domain; where that cannot decide, hover returns nothing rather than the wrong concept. The domain comes from the document path, which the LSP supplies and `SenseHoverMsg` does not yet carry |
 | **SignatureHelp** | Parameter help inside call arguments |
 
 ### Driven from the spec
