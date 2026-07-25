@@ -2,6 +2,8 @@ package memql
 
 import (
 	"io/fs"
+	"path"
+	"strings"
 
 	"github.com/znasllc-io/memql/component/memql/dslimports"
 	"github.com/znasllc-io/memql/component/memql/sense"
@@ -16,8 +18,15 @@ import (
 // legitimate external (engine) import.
 
 // senseWorkspaceGraph wraps a dslimports.Index as a sense.WorkspaceGraph.
+//
+// prefix is the path from the root the CALLER passed down to the DSL root the
+// index was actually built from ("" when they are the same directory). The
+// index keys namespaces off the first path segment, so it must be rooted where
+// the domain directories live; but every path this type hands back is relative
+// to the caller's root, so the prefix is restored on the way out.
 type senseWorkspaceGraph struct {
-	idx *dslimports.Index
+	idx    *dslimports.Index
+	prefix string
 }
 
 func (g senseWorkspaceGraph) ModuleResolves(ns, kind string) sense.Resolved {
@@ -74,7 +83,7 @@ func (g senseWorkspaceGraph) DeclarationSites(name string) []sense.DeclSite {
 	out := make([]sense.DeclSite, 0, len(sites))
 	for _, s := range sites {
 		out = append(out, sense.DeclSite{
-			File:   s.File,
+			File:   path.Join(g.prefix, s.File),
 			Name:   s.Name,
 			Kind:   s.Kind,
 			Line:   s.Line,
@@ -82,6 +91,91 @@ func (g senseWorkspaceGraph) DeclarationSites(name string) []sense.DeclSite {
 		})
 	}
 	return out
+}
+
+// dslRootCandidates are the conventional places a DSL tree sits relative to an
+// opened workspace. The engine keeps its domains under dsl/; a product bundle
+// repo may keep them at the top level, which resolveDSLRoot handles by testing
+// the root itself first.
+var dslRootCandidates = []string{"dsl"}
+
+// resolveDSLRoot returns the sub-tree the workspace graph should resolve
+// against, plus the path from root down to it.
+//
+// This is what makes reference resolution work in a real editor session. An
+// author opens the REPOSITORY in VS Code, so root is the repo -- but dslimports
+// derives a namespace from the first path segment, which from there is
+// uniformly "dsl". Every namespace query (HasNamespace / Kinds /
+// SymbolsInModule) then answers for a namespace called "dsl" that no `use` line
+// ever names, so segment-aware completion offered nothing and import
+// diagnostics could never prove a symbol missing (memql#2762). Rooting the
+// index where the domain directories actually live is what makes
+// `use calendar.concepts.{ ... }` resolvable.
+func resolveDSLRoot(root fs.FS) (fs.FS, string) {
+	if root == nil {
+		return nil, ""
+	}
+	if isDSLRoot(root) {
+		return root, ""
+	}
+	for _, candidate := range dslRootCandidates {
+		sub, err := fs.Sub(root, candidate)
+		if err != nil {
+			continue
+		}
+		if isDSLRoot(sub) {
+			return sub, candidate
+		}
+	}
+	return root, ""
+}
+
+// isDSLRoot reports whether d's immediate children look like DSL domain
+// directories: at least two of them directly contain a .memql file.
+//
+// Two rather than one deliberately. A repository root whose dsl/ directory
+// happens to hold a stray .memql would otherwise look like a domain holder and
+// win over the real tree below it; requiring a second sibling domain makes the
+// answer stable against scratch files.
+func isDSLRoot(d fs.FS) bool {
+	entries, err := fs.ReadDir(d, ".")
+	if err != nil {
+		return false
+	}
+	domains := 0
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if strings.HasPrefix(name, "_") || strings.HasPrefix(name, ".") {
+			continue
+		}
+		if !directoryHasDirectMemqlFile(d, name) {
+			continue
+		}
+		domains++
+		if domains >= 2 {
+			return true
+		}
+	}
+	return false
+}
+
+// directoryHasDirectMemqlFile reports whether dir holds a .memql file
+// DIRECTLY (not in a nested sub-directory), which is what makes it look like a
+// DSL domain rather than a container of them.
+func directoryHasDirectMemqlFile(root fs.FS, dir string) bool {
+	entries, err := fs.ReadDir(root, dir)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".memql") {
+			return true
+		}
+	}
+	return false
 }
 
 // buildWorkspaceGraph loads the workspace tree and returns a sense.WorkspaceGraph
@@ -96,9 +190,10 @@ func buildWorkspaceGraph(root fs.FS) sense.WorkspaceGraph {
 	if root == nil {
 		return nil
 	}
-	tree, _ := dslimports.Load(root)
+	dslRoot, prefix := resolveDSLRoot(root)
+	tree, _ := dslimports.Load(dslRoot)
 	if tree == nil {
 		return nil
 	}
-	return senseWorkspaceGraph{idx: tree.NewIndex()}
+	return senseWorkspaceGraph{idx: tree.NewIndex(), prefix: prefix}
 }
