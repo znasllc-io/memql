@@ -206,6 +206,13 @@ jobs:
       # touching normalization) and diff against the checked-in tree, ignoring
       # the cosmetic protoc version stamp. Catches a .proto edited without its
       # .pb.go regenerated -- the gap that let stale bindings merge green.
+      # FALLBACK only. proto-gen.sh provisions its own pinned protoc into
+      # bin/tools/; this apt copy exists so a GitHub-releases outage degrades
+      # to a working lane instead of a red build (the drift diff ignores the
+      # version stamp, so a differing protoc still gives a correct verdict).
+      - name: install protoc (fallback for the pinned download)
+        if: ${{ env.RUN_PROTO == 'true' }}
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - name: proto-gen-check (proto drift)
         if: ${{ env.RUN_PROTO == 'true' }}
         run: make proto-gen-check
