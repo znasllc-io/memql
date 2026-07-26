@@ -58,10 +58,20 @@ query deployment deploymentsForCluster {
 // stale on both counts: the {partition}: prefix was retired in #56, and
 // the concept prefix is composed by the engine, not the caller (#2784).
 //
-// The payload field stays. It is not merely a mirror: deploymentNodeSpec
-// keys on it as an FK (concat(deploymentId, ':', nodeType)),
-// previousDeploymentId points at it, node/reconciler.go reads it off the
-// payload, and deploymentFull projects it.
+// The payload field STAYS, on two verified readers: node/reconciler.go
+// reads deploymentId off the payload, and deploymentFull projects it. So
+// deleting it is a consumer-visible change this fix has no business
+// forcing. (An earlier draft of this comment also claimed
+// deploymentNodeSpec keys on it as an FK and that previousDeploymentId
+// points at it. Both were wrong -- deploymentNodeSpec composes its id
+// from its OWN args.deploymentId, and previousDeploymentId holds another
+// deployment's row id -- so neither would be affected by dropping the
+// mirror. Corrected in review rather than left to mislead the next
+// person deciding whether the field can go.)
+//
+// Querying THROUGH the mirror is the defect; storing it is not.
+// TestByIdQueriesFilterTheRowIdNotASelfMirror (dsl/row_id_mirror_test.go)
+// enforces exactly that distinction, across the tree rather than here.
 //
 // Returns ONE row: the latest version. The comment here previously
 // claimed this returned "EVERY appended row ... reconstructable asOf any
@@ -72,13 +82,14 @@ query deployment deploymentsForCluster {
 // asOf. Status transitions still APPEND (one row per transition under the
 // same id) and the history is in the table; there is simply no query mode
 // that returns more than the newest. #1872's asOf-reconstructability
-// criterion is tracked separately -- see the issue referenced below.
+// criterion is tracked separately in #2880.
 //
 // Omitting `asOf latest` therefore changes nothing here; it is left off
 // because the collapse is unconditional.
 
-/// All status-transition rows for one deployment, by deploymentId, oldest-to-newest (full lifecycle
-/// history; reconstructable asOf any time). #1872.
+/// The CURRENT state of one deployment, by deploymentId. Returns at most one row -- the latest
+/// version. Status transitions append under the same id, but every query result collapses to one
+/// row per id, so this is not a timeline read; an all-versions mode is tracked in #2880.
 @unbounded("deployment by unique deploymentId -- bounded to a single row")
 query deployment deploymentById {
   args {

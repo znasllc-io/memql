@@ -1625,7 +1625,7 @@ func DependentsOfConstructBuild(args DependentsOfConstructArgs) string {
 	return b.String()
 }
 
-// DeploymentById -- All status-transition rows for one deployment, by deploymentId, oldest-to-newest (full lifecycle history; reconstructable asOf any time). #1872.
+// DeploymentById -- The CURRENT state of one deployment, by deploymentId. Returns at most one row -- the latest version. Status transitions append under the same id, but every query result collapses to one row per id, so this is not a timeline read; an all-versions mode is tracked in #2880.
 //
 // Bound concept: v1:cluster:deployment (machine-readable: BoundConcepts["deploymentById"] in generated_concepts.go).
 type DeploymentByIdArgs struct {

@@ -11,7 +11,7 @@
 /// current status, the version + image digest being shipped, the deploy target
 /// (provider/environment/region), the target clusterId, the operator (triggeredBy), the
 /// supersession back-pointer, and both timestamps (row.createdAt = deploy start, payload.updatedAt
-/// = last transition). Backs the cockpit Deployments history + asOf reconstruction.
+/// = last transition). Backs the cockpit Deployments view. NOTE: a query returns only the latest row per id, so this is a current-state projection, not a timeline -- #2880.
 @row
 shape deployment deploymentFull {
   row.id
@@ -34,7 +34,7 @@ shape deployment deploymentFull {
 /// Per-node-type deployment spec projection (Epic 2 / #2094). Carries the (deploymentId, nodeType)
 /// key plus the version (empty = engine-as-spine), replica count, resolved image digest, and both
 /// timestamps (row.createdAt = first set, payload.updatedAt = last transition). Backs
-/// nodeSpecsForDeployment + asOf reconstruction of a deployment's per-node spec set.
+/// nodeSpecsForDeployment. As with deploymentFull this is current-state per (deploymentId, nodeType); a query returns only the latest row per id -- #2880.
 @row
 shape deploymentNodeSpec deploymentNodeSpecFull {
   row.id

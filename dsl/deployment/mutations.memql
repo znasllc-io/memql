@@ -26,9 +26,15 @@
 // deploymentId is used as the explicit concept id so every later
 // status transition (updateDeploymentStatus) appends a new
 // payload version under the SAME time-series timeline -- one record per
-// deployment, reconstructable asOf any time. deploymentId is ALSO
-// stamped as a payload field so deploymentById can filter on the
-// bare id without canonical-id prefixing.
+// deployment. (The history IS in the table; reading more than the newest
+// row is not something the query layer offers today -- #2880.)
+//
+// deploymentId is ALSO stamped as a payload field. It is NOT for
+// deploymentById, which filters `row.id` as of #2784 -- this comment used
+// to say otherwise, and would have stopped the next person from deleting
+// the field on the strength of a reader that no longer exists. The live
+// readers are component/node/reconciler.go, which reads it off the
+// payload, and the deploymentFull projection.
 //
 // Admin action: the Deployment Console gates this path to owner/admin
 // in Go (deploycontrol.authorize -> auth.AtLeastAdmin); the DSL mirror
