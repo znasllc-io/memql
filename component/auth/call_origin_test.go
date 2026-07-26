@@ -99,3 +99,38 @@ func TestOriginStringsAreStable(t *testing.T) {
 		t.Error("an unknown CallOrigin reported internal; unknown must fail closed")
 	}
 }
+
+// TestClientStampDefeatsAnInheritedInternalOrigin covers the one thing
+// ContextWithClientOrigin is for, and the reason it is called at the gRPC
+// query handler rather than left as documentation.
+//
+// OriginClient is the zero value, so an unstamped context is already
+// untrusted; the explicit stamp is not what provides that. What it provides is
+// OVERRIDE: if a request handler ever runs on a context derived from
+// server-side Go -- a background worker dispatching a request, a future
+// in-process bridge -- the inherited internal mark would otherwise laundry
+// into every construct that request touches, and nothing would look wrong.
+//
+// The review that prompted this noted the function had zero production callers
+// while its doc claimed the wire entry points used it. Either the doc or the
+// wiring had to change; the wiring is the half worth having.
+func TestClientStampDefeatsAnInheritedInternalOrigin(t *testing.T) {
+	// Simulate a request context descended from a trusted server-side one.
+	trustedParent := ContextWithInternalOrigin(context.Background())
+	if !OriginFromContext(trustedParent).IsInternal() {
+		t.Fatal("fixture: parent is not internal")
+	}
+
+	requestCtx := ContextWithClientOrigin(trustedParent)
+	if OriginFromContext(requestCtx).IsInternal() {
+		t.Fatal("a request context derived from an internal parent still reported " +
+			"internal after the client stamp; origin would launder inward")
+	}
+
+	// And the stamp must survive further derivation, the way a real handler
+	// wraps the context afterwards (access context, provenance, timeouts).
+	derived := ContextWithAccess(requestCtx, &AccessContext{UserId: "v1:identity:user:x", Role: RoleOwner})
+	if OriginFromContext(derived).IsInternal() {
+		t.Error("client origin was lost when the handler layered an AccessContext on top")
+	}
+}

@@ -7,7 +7,7 @@ package memql
 // queries the worker dispatcher uses so the authored-automation gate and the
 // agent gate read the same source of truth:
 //
-//   - userById -> preferences.computerUseEnabled (the kill switch);
+//   - userByIdSystem -> preferences.computerUseEnabled (the kill switch);
 //   - agentAuthorizationsForUser -> the BROADEST standing
 //     computerUseScope the author has granted (the author's envelope ceiling).
 //

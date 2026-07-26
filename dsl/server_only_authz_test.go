@@ -63,7 +63,14 @@ func TestUserDisplayCardStaysMinimal(t *testing.T) {
 }
 
 // serverOnlyRe finds constructs carrying @serverOnly.
-var serverOnlyRe = regexp.MustCompile(`(?m)^@serverOnly\s*$`)
+//
+// `\b`, not `\s*$`: three places match this annotation (here,
+// dsl/conformance_test.go's classification gate, and sdk/gen/gen.go's SDK
+// skip) and they must agree. They did not -- this one required the annotation
+// to be alone on its line, so `@serverOnly // note` exempted the authz gate
+// and was skipped by the SDK while being INVISIBLE here, i.e. an exemption
+// without the mandatory rationale this test exists to require.
+var serverOnlyRe = regexp.MustCompile(`(?m)^@serverOnly\b`)
 
 // TestServerOnlyConstructsAreDocumented requires every @serverOnly construct to
 // carry a doc comment, and that comment to say WHY caller-scoping is not the

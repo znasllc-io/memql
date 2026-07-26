@@ -76,6 +76,16 @@ func (e *MemQLEngine) mcpPromotedFunctions() []*Function {
 		if !fn.Enabled {
 			continue
 		}
+		// #2800: same reasoning, different gate. A @serverOnly construct is
+		// refused for every client-originated call, and MCP is a client
+		// surface -- advertising it would be the same dishonest surface, and
+		// worse here, since these constructs exist precisely because they
+		// read across users. sdk/gen applies the identical skip for the typed
+		// SDK. No construct carries both @serverOnly and @mcp today; this
+		// keeps it that way by construction rather than by convention.
+		if fn.ServerOnly {
+			continue
+		}
 		if fn.FunctionKind == "query" || fn.FunctionKind == "mutation" {
 			out = append(out, fn)
 		}

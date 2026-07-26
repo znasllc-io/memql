@@ -130,3 +130,88 @@ func TestAutomationTrustIsGrantedOnlyByTheTreeLoader(t *testing.T) {
 		t.Error("AutomationExecution.SourceTrusted is not false by default")
 	}
 }
+
+// TestTreeLoadedAutomationReachesDispatchTrusted is the END-TO-END link the
+// two tests above do not cover, and its absence was the review finding that
+// mattered most on this change.
+//
+// Those tests set SourceTrusted BY HAND, so the chain that actually produces
+// it -- unified loader sets Automation.Trusted, ExecuteWithEvent mirrors it
+// onto AutomationExecution.SourceTrusted, executeStep reads it -- had zero
+// coverage at any link. All three production lines could be deleted with the
+// full suite green, and deleting either of the first two silently reproduces
+// the original defect: every tree-loaded automation reverts to untrusted, the
+// stamp stops, and the kill switch is refused as a client call while the DSL
+// comment says it works.
+//
+// This drives a REAL automation from the registered tree through the REAL
+// ExecuteWithEvent and asserts on the origin the step dispatch actually
+// receives, so each link is load-bearing for the assertion.
+func TestTreeLoadedAutomationReachesDispatchTrusted(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	loader := NewLoader(LoaderOptions{Logger: logger})
+
+	all, err := loader.LoadAll()
+	if err != nil {
+		t.Fatalf("LoadAll: %v", err)
+	}
+	if len(all) == 0 {
+		t.Fatal("no automations loaded from the registered tree")
+	}
+	for _, a := range all {
+		if !a.Trusted {
+			t.Errorf("automation %q loaded from the registered tree is NOT trusted; "+
+				"every tree-loaded automation must be, or it silently loses the "+
+				"ability to reach @serverOnly constructs", a.Name)
+		}
+	}
+
+	// Drive one through the real execution path.
+	reg := &originCapturingRegistry{}
+	e := NewExecutor(ExecutorOptions{Logger: logger, StepRegistry: reg})
+	defer e.Close()
+
+	if _, err := e.ExecuteWithEvent(context.Background(), all[0], "test", nil); err != nil {
+		t.Logf("ExecuteWithEvent returned %v (fine -- the origin is what is under test)", err)
+	}
+	if !reg.got.IsInternal() {
+		t.Fatalf("a tree-loaded automation dispatched its step with origin %v, want internal. "+
+			"One of the three links is broken: unified_loader sets Automation.Trusted, "+
+			"ExecuteWithEvent mirrors it to SourceTrusted, executeStep reads it.", reg.got)
+	}
+}
+
+// TestCompiledSourceAutomationIsUntrustedEndToEnd is the same chain from the
+// other side: source compiled at runtime -- which is what RunBundleDryRun does
+// with a caller-submitted bundle -- must NOT come out trusted.
+func TestCompiledSourceAutomationIsUntrustedEndToEnd(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	loader := NewLoader(LoaderOptions{Logger: logger})
+
+	src := `@trigger(event="node.created", concept="v1:identity:user")
+automation zzAttackerSubmitted {
+  step steal {
+    query userByIdSystem(userId: "v1:identity:user:victim")
+  }
+}`
+	a, err := loader.CompileSource(src, "attacker:inline")
+	if err != nil {
+		t.Skipf("CompileSource rejected the probe (%v); the trust assertion below "+
+			"needs a compiling body, so this is inconclusive rather than passing", err)
+	}
+	if a.Trusted {
+		t.Fatal("an automation compiled from submitted SOURCE came out trusted -- " +
+			"this is the round-2 bypass: a caller wraps a @serverOnly read in a " +
+			"bundle and its steps run with internal origin")
+	}
+
+	reg := &originCapturingRegistry{}
+	e := NewExecutor(ExecutorOptions{Logger: logger, StepRegistry: reg})
+	defer e.Close()
+	if _, err := e.ExecuteWithEvent(context.Background(), a, "dryrun", nil); err != nil {
+		t.Logf("ExecuteWithEvent returned %v (fine -- the origin is what is under test)", err)
+	}
+	if reg.got.IsInternal() {
+		t.Fatalf("caller-supplied automation dispatched with origin %v, want client", reg.got)
+	}
+}
