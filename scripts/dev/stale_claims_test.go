@@ -63,6 +63,14 @@ type stubIssue struct {
 	closedAt time.Time
 	// parked marks the issue as carrying the `parked` label.
 	parked bool
+	// viewFail makes `gh issue view` fail for this issue, so the tri-state
+	// has_label path (lookup FAILED, distinct from "not parked") is reachable.
+	viewFail bool
+	// padEvents prepends this many unrelated OLDER timeline events, so the
+	// `labeled` event falls beyond page 1. Real gh returns the oldest 100
+	// first, so an issue with 100+ prior events yields no labeled event at all
+	// without --paginate -- and is then never swept and never SUSPECT.
+	padEvents int
 	// extraLabels ride alongside on `gh issue view`.
 	extraLabels []string
 }
@@ -167,6 +175,7 @@ case "$1 $2" in
     # </dev/null eats the loop's input and the missing rows are visible.
     cat >/dev/null
     num="$3"
+    [ -f "$STUB_DIR/viewfail-$num" ] && exit 1
     for a in "$@"; do
       case "$a" in
         issue|view|-R|--json|--jq) ;;
@@ -177,18 +186,31 @@ case "$1 $2" in
     run_jq "$STUB_DIR/view-$num.json" "$@"
     exit $? ;;
 
-  "api repos"*)
-    num=$(printf '%s' "$2" | sed -n 's#.*/issues/\([0-9]*\)/timeline.*#\1#p')
+  "api "*)
+    # Matched on $1 alone. The first cut keyed on "$1 $2" = "api repos"*, which
+    # broke the moment --paginate was inserted before the path -- the arm
+    # stopped matching and everything fell through to deny. Positional
+    # dispatch is brittle; the stub should not care where the path sits.
+    num=$(printf '%s\n' "$@" | sed -n 's#.*/issues/\([0-9]*\)/timeline.*#\1#p' | head -1)
     for a in "$@"; do
       case "$a" in
-        api|--jq) ;;
+        api|--jq|--paginate) ;;
         -X*|-F*|-f*|--method*|--field*|--raw-field*|--input*)
           DENY_REASON="write-capable api flag $a" deny "$@" ;;
         -*) DENY_REASON="unrecognised api flag $a" deny "$@" ;;
         *) ;;
       esac
     done
-    run_jq "$STUB_DIR/timeline-$num.json" "$@"
+    # WITHOUT --paginate, real gh returns page 1 only -- and page 1 is the
+    # OLDEST events. Modelling that is what makes the --paginate fix
+    # observable: serving the full timeline either way left removing
+    # --paginate completely green.
+    tl="$STUB_DIR/timeline-$num.json"
+    case "$*" in
+      *--paginate*) ;;
+      *) [ -f "$STUB_DIR/timeline-$num-page1.json" ] && tl="$STUB_DIR/timeline-$num-page1.json" ;;
+    esac
+    run_jq "$tl" "$@"
     exit $? ;;
 
   "issue edit")
@@ -261,7 +283,22 @@ func writeStaleClaimsStub(t *testing.T, cfg staleClaimsStub) (dir, logPath strin
 					"created_at": is.claimedAt.UTC().Format(time.RFC3339),
 				})
 			}
+			if is.padEvents > 0 {
+				pad := make([]map[string]any, 0, is.padEvents)
+				for i := 0; i < is.padEvents; i++ {
+					pad = append(pad, map[string]any{
+						"event": "commented", "label": nil,
+						"created_at": is.claimedAt.Add(-1000 * time.Hour).UTC().Format(time.RFC3339),
+					})
+				}
+				timeline = append(pad, timeline...)
+			}
 			writeJSON(t, filepath.Join(dir, fmt.Sprintf("timeline-%d.json", is.num)), timeline)
+			page1 := timeline
+			if len(page1) > 100 {
+				page1 = page1[:100]
+			}
+			writeJSON(t, filepath.Join(dir, fmt.Sprintf("timeline-%d-page1.json", is.num)), page1)
 
 			viewLabels := []map[string]any{{"name": "enhancement"}}
 			for _, l := range is.extraLabels {
@@ -269,6 +306,9 @@ func writeStaleClaimsStub(t *testing.T, cfg staleClaimsStub) (dir, logPath strin
 			}
 			if is.parked {
 				viewLabels = append(viewLabels, map[string]any{"name": "parked"})
+			}
+			if is.viewFail {
+				write(t, filepath.Join(dir, fmt.Sprintf("viewfail-%d", is.num)), "1")
 			}
 			writeJSON(t, filepath.Join(dir, fmt.Sprintf("view-%d.json", is.num)),
 				map[string]any{"labels": viewLabels})
@@ -351,8 +391,29 @@ func staleClaimsEnv(stubDir, logPath string, extra ...string) []string {
 	}, extra...)
 }
 
+// requireJQ fails loudly when jq is absent.
+//
+// The stub execs REAL jq so the script's own filters are exercised -- that is
+// what closed round-2's blocker. But jq is not declared anywhere in CI or
+// install-deps.sh, and without it every test fails with the script's own
+// "could not list labels" error, which blames the script rather than the
+// missing tool.
+//
+// Note gh's built-in --jq is gojq while this is jq 1.7; the two were compared
+// byte-for-byte on all four of this script's filters against real repo JSON
+// and agreed exactly, including @tsv escaping, null handling, the two-output
+// "#count \(length)" form, and index() returning 0 through `// empty`.
+func requireJQ(t *testing.T) {
+	t.Helper()
+	if _, err := exec.LookPath("jq"); err != nil {
+		t.Fatalf("jq is not on PATH, and the gh stub execs it to evaluate the script's real " +
+			"--jq filters. Install jq (apt install jq / brew install jq).")
+	}
+}
+
 func runStaleClaims(t *testing.T, cfg staleClaimsStub, args []string, env ...string) staleClaimsResult {
 	t.Helper()
+	requireJQ(t)
 	dir, logPath := writeStaleClaimsStub(t, cfg)
 
 	cmd := exec.Command("bash", append([]string{staleClaimsScript}, args...)...)
@@ -407,6 +468,13 @@ func mixedClaims() staleClaimsStub {
 			{num: 2803, state: "CLOSED", title: "closed, no readable closedAt",
 				claimedAt: hoursAgo(100)},
 		},
+		// A NON-claim label, so the jq selection filter and its ascii_downcase
+		// are actually exercised. Without one, widening the filter or dropping
+		// the downcase changes nothing and stays green.
+		"bug": {
+			{num: 2900, state: "CLOSED", title: "not a claim label at all",
+				claimedAt: hoursAgo(100), closedAt: hoursAgo(90)},
+		},
 		"claimed:s7c2e9": {
 			{num: 2999, state: "OPEN", title: "live work, claimed 30min ago", claimedAt: time.Now().Add(-30 * time.Minute)},
 			{num: 2998, state: "OPEN", title: "open and long idle -- may still be live", claimedAt: hoursAgo(100)},
@@ -429,6 +497,10 @@ var branchExpectations = []struct {
 	{2997, "UNKNOWN"},
 	{2996, "UNKNOWN"},
 }
+
+// notAClaim is the fixture issue carrying a non-claim label. It must never
+// appear in the report at all.
+const notAClaim = 2900
 
 // titleOf returns the fixture title for an issue, for the column assertion.
 func titleOf(issue int) string {
@@ -495,6 +567,25 @@ func TestStaleClaims_DefaultRunMakesNoMutation(t *testing.T) {
 		t.Errorf("the default run did not report the abandoned claim.\ngot:\n%s", res.stdout)
 	}
 	mustReachEveryBranch(t, res)
+	mustIgnoreNonClaimLabels(t, res)
+}
+
+// mustIgnoreNonClaimLabels pins the jq selection filter. The fixture carries a
+// `bug` label on a closed, long-cold issue: if the filter is widened, or its
+// ascii_downcase is changed, that issue enters the report -- and the write path
+// then refuses it loudly (exit 5) rather than deleting it, which is the
+// defence-in-depth working. Both halves are asserted.
+func mustIgnoreNonClaimLabels(t *testing.T, res staleClaimsResult) {
+	t.Helper()
+	if got := res.rowFor(notAClaim); got != "" {
+		t.Errorf("a NON-claim label reached the report: %q\nOnly claimed:* labels are in scope; "+
+			"anything else means the selection filter was widened.", got)
+	}
+	for _, e := range res.edits() {
+		if strings.Contains(e, "bug") {
+			t.Errorf("attempted to remove a non-claim label: %q", e)
+		}
+	}
 }
 
 // TestStaleClaims_ApplySweepsOnlyColdClosedClaims is the other half: --apply
@@ -535,6 +626,7 @@ func TestStaleClaims_ApplySweepsOnlyColdClosedClaims(t *testing.T) {
 		t.Errorf("forbidden call under --apply:\n  %s", strings.Join(got, "\n  "))
 	}
 	mustReachEveryBranch(t, res)
+	mustIgnoreNonClaimLabels(t, res)
 }
 
 // TestStaleClaims_StubRefusesWrites guards the guard.
@@ -954,5 +1046,113 @@ func TestStaleClaims_RemoveClaimRefusesANonClaimLabel(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("the legitimate removal was not issued: %v", calls)
+	}
+}
+
+// TestStaleClaims_ParkedLookupFailureIsUnknownNotAFinding pins the tri-state.
+//
+// has_label returns 0/1/2, and collapsing 2 into 1 makes a transient API
+// failure read as "not parked" -- which then produces a SUSPECT finding on an
+// issue nobody can vouch for, contradicting this file's default-deny rule. The
+// fix shipped with a comment asserting that and nothing pinning it; a fixture
+// where `gh issue view` fails is what makes the 2) arm reachable.
+func TestStaleClaims_ParkedLookupFailureIsUnknownNotAFinding(t *testing.T) {
+	cfg := staleClaimsStub{labelIssues: map[string][]stubIssue{
+		"claimed:sV": {
+			{num: 5001, state: "OPEN", title: "parked lookup fails",
+				claimedAt: hoursAgo(100), viewFail: true},
+		},
+	}}
+	res := runStaleClaims(t, cfg, []string{"--apply"})
+
+	if got := res.rowFor(5001); !strings.Contains(got, "UNKNOWN") {
+		t.Errorf("#5001 = %q, want UNKNOWN.\nThe `parked` lookup FAILED -- that is not the same "+
+			"as \"not parked\". Collapsing the two lets a transient API error manufacture a "+
+			"SUSPECT finding.", got)
+	}
+	if got := res.edits(); len(got) > 0 {
+		t.Errorf("swept after a failed lookup: %v", got)
+	}
+}
+
+// TestStaleClaims_FullIssuePageWarns is the issue-side twin of
+// TestStaleClaims_FullLabelPageWarns. Both caps guard the same class of silent
+// truncation; covering only one was asymmetric.
+func TestStaleClaims_FullIssuePageWarns(t *testing.T) {
+	var issues []stubIssue
+	for i := 0; i < issuePageLimit; i++ {
+		issues = append(issues, stubIssue{
+			num: 6000 + i, state: "OPEN", title: "padding", claimedAt: hoursAgo(1),
+		})
+	}
+	cfg := staleClaimsStub{labelIssues: map[string][]stubIssue{"claimed:sFull": issues}}
+
+	res := runStaleClaims(t, cfg, nil)
+	if !strings.Contains(res.stderr, "page cap") {
+		t.Errorf("a FULL issue page produced no warning.\nA label whose issues are truncated "+
+			"hides claims exactly like a truncated label page does.\nstderr:\n%s", res.stderr)
+	}
+}
+
+// issuePageLimit mirrors ISSUE_PAGE_LIMIT in the script; the drift guard below
+// fails if they diverge, so this test cannot silently stop targeting the cap.
+const issuePageLimit = 200
+
+func TestStaleClaims_IssuePageCapConstantMatchesTheScript(t *testing.T) {
+	src, err := os.ReadFile(staleClaimsScript)
+	if err != nil {
+		t.Fatalf("read script: %v", err)
+	}
+	want := fmt.Sprintf("ISSUE_PAGE_LIMIT=%d", issuePageLimit)
+	if !strings.Contains(string(src), want) {
+		t.Fatalf("the script no longer sets %s, so TestStaleClaims_FullIssuePageWarns is "+
+			"padding to the wrong number and silently stopped testing the cap.", want)
+	}
+}
+
+// TestStaleClaims_ClaimAgeSurvivesALongTimeline pins the --paginate fix.
+//
+// The timeline call was the one paginated request with no cap guard, and page
+// 1 is the OLDEST 100 events. So an issue that already had 100+ events before
+// it was claimed yielded no `labeled` event at all: unknown claim age, never
+// swept, never SUSPECT -- permanently, and silently, because the row sits among
+// genuine unknowns. Not hypothetical: memql#2212 stood at 99 events when this
+// was found, one short of the cap, and the long-lived epics most worth
+// tracking are exactly the ones that cross it.
+func TestStaleClaims_ClaimAgeSurvivesALongTimeline(t *testing.T) {
+	cfg := staleClaimsStub{labelIssues: map[string][]stubIssue{
+		"claimed:sLong": {
+			{num: 7001, state: "OPEN", title: "busy issue, claimed late",
+				claimedAt: hoursAgo(100), padEvents: 150},
+		},
+	}}
+	res := runStaleClaims(t, cfg, nil)
+
+	if got := res.rowFor(7001); !strings.Contains(got, "SUSPECT") {
+		t.Errorf("#7001 = %q, want SUSPECT.\nIts claim is 100h old, but the `labeled` event sits "+
+			"past page 1 of a 150-event timeline. Without --paginate the age reads unknown, so "+
+			"the claim is never swept and never a finding -- permanently, since a timeline only "+
+			"grows (memql#2834).", got)
+	}
+}
+
+// TestStaleClaims_MixedCaseClaimLabelIsEnumerated pins the ascii_downcase.
+//
+// `gh issue list --label` matches case-INSENSITIVELY, so a `Claimed:x` label is
+// reachable by the sweep but would be missed by a case-sensitive enumeration --
+// the two sides would disagree about what exists.
+func TestStaleClaims_MixedCaseClaimLabelIsEnumerated(t *testing.T) {
+	cfg := staleClaimsStub{labelIssues: map[string][]stubIssue{
+		"Claimed:sMixed": {
+			{num: 7100, state: "CLOSED", title: "mixed-case claim label",
+				claimedAt: hoursAgo(100), closedAt: hoursAgo(90)},
+		},
+	}}
+	res := runStaleClaims(t, cfg, nil)
+
+	if got := res.rowFor(7100); got == "" {
+		t.Errorf("a mixed-case `Claimed:` label was not enumerated.\ngh issue list --label matches "+
+			"case-insensitively, so dropping ascii_downcase makes the enumeration and the sweep "+
+			"disagree about which labels exist.\ngot:\n%s", res.stdout)
 	}
 }

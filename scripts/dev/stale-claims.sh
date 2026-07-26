@@ -103,9 +103,10 @@ REPO="${REPO:-znasllc-io/memql}"
 # #2834: a slow review gate must not be reaped mid-flight.
 IDLE_HOURS="${IDLE_HOURS:-4}"
 # Page caps. Not configurable -- raising a cap silently is how it stops being
-# noticed. Both sites WARN when a page comes back full, and the warning is
+# noticed. Both list sites WARN when a page comes back full, and the warning is
 # measured against the RAW page length, not a filtered subset (the first cut
-# compared the filtered count and so could never fire).
+# compared the filtered count and so could never fire). The timeline call needs
+# no warning because it uses --paginate and so has no cap to hit.
 LABEL_PAGE_LIMIT=300
 ISSUE_PAGE_LIMIT=200
 TIMELINE_PAGE_LIMIT=100
@@ -232,7 +233,16 @@ claim_age_hours() {
   # `--arg l x` outright ("accepts 1 arg(s), received 4"). The first cut used
   # --arg, so this lookup ALWAYS failed and every row reported UNKNOWN -- and
   # the suite was green because the stub accepted a flag real gh rejects.
-  then=$(STALE_CLAIMS_LABEL="$label" gh api "repos/$REPO/issues/$num/timeline?per_page=$TIMELINE_PAGE_LIMIT" \
+  # --paginate, NOT a single page. The timeline call was the ONE paginated
+  # request with no page-cap guard, and page 1 is the OLDEST 100 events -- so an
+  # issue that already had 100+ events before it was claimed never yields its
+  # `labeled` event, reports an unknown claim age, and is therefore NEVER
+  # swept and never SUSPECT. Permanently, and silently, since the row sits
+  # among genuine unknowns. It is not hypothetical: #2212 stands at 99 events
+  # today, one short of the cap, and the long-lived epics most worth tracking
+  # are exactly the ones that cross it. A timeline is small and bounded, so
+  # paginating it fully is cheap.
+  then=$(STALE_CLAIMS_LABEL="$label" gh api --paginate "repos/$REPO/issues/$num/timeline?per_page=$TIMELINE_PAGE_LIMIT" \
     --jq '[.[] | select(.event=="labeled" and .label.name==$ENV.STALE_CLAIMS_LABEL) | .created_at] | last // empty | fromdateiso8601' \
     </dev/null 2>/dev/null) || {
     echo "unknown"
