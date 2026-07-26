@@ -1067,6 +1067,29 @@ query user userActiveSpace {
 //   Array with 0 or 1 user record in userFull shape.
 
 /// Look up a user by primary email (the dedup key during bootstrap).
+///
+/// @serverOnly, and caller-scoping is not the alternative: every caller runs
+/// during LOGIN, before an actor exists. The magic-link verifier calls this to
+/// decide whether an address already belongs to a user, and the /login
+/// email-first flow calls it to branch between magic-link and registration --
+/// the lookup is part of working out WHO the caller is, so
+/// `primaryEmail==actor.primaryEmail` is circular in exactly the way
+/// `id==actor.userId` was on userById (memql#2800).
+///
+/// Left open it projected userFull -- every @pii field, plus the cluster-wide
+/// auth role -- keyed on the one identifier an attacker is most likely to
+/// already have, so no id enumeration was needed. userByIdSystem returns the
+/// identical shape and was gated by #2860; this one was missed (memql#2881).
+///
+/// It is NOT the worst reader of this shape, and saying so here because the
+/// next person to gate one should start from the right end: searchUsers,
+/// activeUsers, usersScheduledForDeletion and usersInDeletionCooldown all
+/// return userFull and are all reachable from the wire today. searchUsers is
+/// the extreme -- its only predicate is `when(args.active) { ... }`, which is
+/// DROPPED when the arg is absent, so calling it with no arguments returns
+/// every user in the cluster, and it is exposed to agents as an MCP tool.
+/// Tracked in memql#2883.
+@serverOnly
 @unbounded("user by unique primaryEmail -- bounded to a single row")
 query user userByEmail {
   args {

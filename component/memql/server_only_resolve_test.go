@@ -44,9 +44,15 @@ func resolveAuthored(t *testing.T, fns *FunctionRegistry, specs *SpecRegistry, n
 	return err
 }
 
-// userIdArg is the one required arg every construct under test declares.
+// userIdArg is the required arg most constructs under test declare.
 func userIdArg() map[string]any {
 	return map[string]any{"userId": "v1:identity:user:someone"}
+}
+
+// emailArg is userByEmail's required arg -- it keys on the address, not an id,
+// which is precisely what made it the sharpest ungated read (memql#2881).
+func emailArg() map[string]any {
+	return map[string]any{"primaryEmail": "someone@example.com"}
 }
 
 // TestAuthoredQueriesResolve is the test whose absence let a dead gate ship.
@@ -70,10 +76,15 @@ func TestAuthoredQueriesResolve(t *testing.T) {
 
 	for _, name := range []string{
 		"userById", "userByIdSystem", "userDisplayById", "userActiveSpace", "currentUser",
+		"userByEmail", // memql#2881
 	} {
+		args := userIdArg()
+		if name == "userByEmail" {
+			args = emailArg()
+		}
 		// Internal origin, so @serverOnly is not what fails here and any
 		// error is a genuine resolution problem.
-		if err := resolveAuthored(t, fns, specs, name, auth.OriginInternal, userIdArg()); err != nil {
+		if err := resolveAuthored(t, fns, specs, name, auth.OriginInternal, args); err != nil {
 			t.Errorf("%s did not resolve: %v", name, err)
 		}
 	}
@@ -87,12 +98,17 @@ func TestServerOnlyQueriesRefuseClientOrigin(t *testing.T) {
 	for name, wantRefused := range map[string]bool{
 		"userByIdSystem":      true,
 		"runningPlansForUser": true,
+		"userByEmail":         true, // memql#2881
 		// The client-callable siblings must still resolve.
 		"userDisplayById": false,
 		"currentUser":     false,
 		"userById":        false, // admin-gated, but reachable from the wire
 	} {
-		err := resolveAuthored(t, fns, specs, name, auth.OriginClient, userIdArg())
+		args := userIdArg()
+		if name == "userByEmail" {
+			args = emailArg()
+		}
+		err := resolveAuthored(t, fns, specs, name, auth.OriginClient, args)
 		refused := err != nil && strings.Contains(err.Error(), "server-only")
 		if refused != wantRefused {
 			t.Errorf("%s: refused=%v want %v (err=%v)", name, refused, wantRefused, err)
@@ -107,9 +123,15 @@ func TestServerOnlyQueriesPassInternalOrigin(t *testing.T) {
 	fns, specs := loadRealTree(t)
 
 	for _, name := range []string{"userByIdSystem", "runningPlansForUser"} {
-		err := resolveAuthored(t, fns, specs, name, auth.OriginInternal, userIdArg())
-		if err != nil && strings.Contains(err.Error(), "server-only") {
-			t.Errorf("%s was refused from INTERNAL origin: %v -- this is the path "+
+		// Asserts on ANY error, not just a "server-only" one. Gating on the
+		// message let an UNRESOLVABLE construct pass -- the #2800 dead-gate
+		// defect this file exists to catch. Measured: mutating
+		// runningPlansForUser's filter to the `spec("...")` form left this
+		// test, ./dsl/... and ./component/automations all green.
+		// runningPlansForUser is not in TestAuthoredQueriesResolve, so this
+		// was its only coverage (memql#2881 review round 2).
+		if err := resolveAuthored(t, fns, specs, name, auth.OriginInternal, userIdArg()); err != nil {
+			t.Errorf("%s did not resolve from INTERNAL origin: %v -- this is the path "+
 				"authentication and the kill switch depend on", name, err)
 		}
 	}

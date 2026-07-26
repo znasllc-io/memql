@@ -84,13 +84,24 @@ package dsl
 //
 // # Known limits, stated rather than implied
 //
-// The gate detects selection by the `id` INTRINSIC. It does not detect
-// selection by another unique column: `userByEmail` takes an arbitrary
-// `primaryEmail` and returns `userFull` -- every `@pii` field -- with no
-// caller check, and is invisible both here and to
-// TestPerRowAuthzClassification. Widening to "any column compared against
-// args" is the 122-construct corpus again, so that is filed separately rather
-// than guessed at here (memql#2881).
+// The gate detects selection by the `id` INTRINSIC, and nothing about what a
+// construct PROJECTS. Both limits have already produced findings:
+//
+//   - selection by another unique column is invisible. `userByEmail` took an
+//     arbitrary `primaryEmail` and returned `userFull` -- every `@pii` field
+//     -- ungated; that was memql#2881, now gated with @serverOnly.
+//   - the projection question is not asked at all, and it turns out to be the
+//     sharper one. `searchUsers` binds `userFull` behind a single
+//     `when(args.active)` guard, which is DROPPED when the arg is absent, so
+//     it returns EVERY user in the cluster and is exposed to agents as an MCP
+//     tool. Three siblings (activeUsers, usersScheduledForDeletion,
+//     usersInDeletionCooldown) also bind userFull ungated, though none is a
+//     tool and each keeps a real predicate. That is memql#2883, and no gate
+//     in this package sees any of them.
+//
+// Widening this gate to "any column compared against args" is the
+// 122-construct corpus again; the projection axis is a different gate
+// entirely. Both are filed rather than guessed at here.
 //
 // The gate walks the EMBEDDED tree. A product bundle mounted at
 // MEMQL_DSL_PATH is never scanned, and cross-domain concept binding means such
