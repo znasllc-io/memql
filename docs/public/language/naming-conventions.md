@@ -22,7 +22,8 @@ Use kind-specific prefixes so intent is obvious at call sites and in diffs.
   The `spec` / `trait` keyword already marks the kind at the declaration,
   and the call site reads better without it:
   `filter spaceId==args.spaceId && isActiveRecord`.
-- Logic: `logic*` (for example `logicAutoJoinSI`)
+- Logic: `logic*` (see the accuracy note below; the shipped names are
+  bare, e.g. `bootstrapSession`)
 - Automations: verb-first names, no prefix (for example
   `bootstrapSession`, `autoJoinSI`)
 - Shapes: `<concept><Projection>`, no kind prefix (for example

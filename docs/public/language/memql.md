@@ -1153,12 +1153,11 @@ The longhand single-step form is gate-enforced out of the shipped corpus, not me
 `@filter` attaches a filter predicate to an automation as an alternative to embedding it in the trigger — useful when the expression is complex:
 
 ```memql
-@trigger(event="node.created", concept="v1:cognition:space", partition="*")
-@filter(active==true)
-/// On space creation, joins the creator's assistant plus any specialist agents.
-automation autoJoinSI {
-  step run {
-    logic autoJoinSI { event: event }
+@trigger(event="node.created", concept="v1:cognition:participant", partition="*")
+/// On participant creation, opens the session that participant needs.
+automation bootstrapSession {
+  step decide {
+    logic bootstrapSession ( event )
   }
 }
 ```

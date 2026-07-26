@@ -665,11 +665,11 @@ build if any `naming.*` warning is emitted. References resolve
 structurally instead: the dependency-tree validator (C3/#2043) fails a
 reference that does not exist at load time.
 
-One wrinkle: automation **step bodies reference logic constructs by
-the bare, un-prefixed name** -- `step run { logic autoJoinSI { event:
-event ) }` resolves to `logic bootstrapSession` through the file-top
-`use cognition.logic.{ bootstrapSession }` import (see
-`dsl/cognition/automations.memql`).
+An automation step calls a logic construct by the same name the
+file-top import names -- `step decide { logic bootstrapSession ( event )
+}` resolves through `use cognition.logic.{ bootstrapSession }` (see
+`dsl/cognition/automations.memql`). The corpus uses the paren call form
+throughout.
 
 Automations are event-triggered, not called by name, so they use
 verb-first names with no prefix (`autoJoinSI`, `bootstrapSession`,
@@ -1025,8 +1025,8 @@ Affected mutations (audit done 2026-05-06; all live under
 `sendSpeechUtterance`, `sendActionUtterance`,
 `sendRealtimeTranscriptUtterance`.
 
-The historical `concat("ga-", hash(actor))` pattern in autoJoinSI is
-gone entirely: `logicAutoJoinSI` (`dsl/cognition/logic.memql`) now
+The historical `concat("ga-", hash(actor))` pattern in the auto-join
+path is gone entirely: the logic (`dsl/cognition/logic.memql`) now
 resolves the assistant via `queryAssistantAgentForUser` + the space
 row's `ownerUserId` (memql#273, locked in by
 `TestAutoJoinSILocksInOwnerUserIdResolution`), and shortId prefixes
