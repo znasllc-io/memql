@@ -479,6 +479,14 @@ var idBearingFieldExemptions = map[string]string{
 	"knowledge/documentChunk.domainId":          "bare-by-contract-A0 (#2439); also pack-owned v1:knowledge:knowledgeDomain + bare raw-SQL readers",
 	"knowledge/documentChunk.sourceUtteranceId": "bare-by-contract-A0 (#2439); replier/augment store bare",
 	"knowledge/documentChunk.sourceAgentId":     "bare-by-contract-A0 (#2439); replier/augment store bare",
+	// --- nested sub-field: @relationship binds top-level payload fields only ---
+	// Both live inside utterance's closed `source { }` block. Every
+	// @relationship in the tree names a top-level field (zero use a dotted
+	// path), so the annotation cannot address these -- exempting is the only
+	// way to describe them accurately instead of under-documenting them to
+	// duck this gate (#2794).
+	"cognition/utterance.agentId":                "nested-subfield-of-source; @relationship binds top-level fields only (#2794)",
+	"cognition/utterance.feedbackAnnouncePlanId": "nested-subfield-of-source; dedup key for feedbackAnnouncementForPlan, not a graph edge (#2794)",
 	// --- plain string FK by design (own @description says so) ---
 	"deployment/deployment.clusterId":            "plain-fk-by-design (@description declares plain string FK)",
 	"deployment/deploymentNodeSpec.deploymentId": "plain-fk-by-design; part of composite id concat(deploymentId, ':', nodeType)",
