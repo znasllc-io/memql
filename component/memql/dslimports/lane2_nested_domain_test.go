@@ -154,7 +154,7 @@ func TestLane2_SharedSubdirectoryNameIsNotSharedNamespace(t *testing.T) {
 // which is the input this test means to exercise.
 func TestLane2_PinnedNamespaceDivergenceFollowsTheDecl(t *testing.T) {
 	root := fstest.MapFS{
-		"deployment/namespace.pin":  file("cluster\n"),
+		"deployment/namespace.pin": file("cluster\n"),
 		"deployment/concepts.memql": file(`@version("1.0.0")
 @namespace("cluster")
 @description("Declared under deployment/, namespaced to cluster.")
