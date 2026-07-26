@@ -32,15 +32,15 @@ var automationStructHeader = regexp.MustCompile(`(?m)^[ \t]*automation[ \t]+([A-
 // regex above misses is an automation that would silently vanish, so the
 // loose form is used only to DETECT and report those -- never to extract.
 //
-// Neither regex understands `/* */` block comments, so a block-commented
-// automation whose `{` is on the HEADER line is extracted and loaded as a
-// live automation today (verified: it raises the loaded count). That is a
-// pre-existing slice-extraction defect, tracked in memql#2861 -- not introduced
-// here. The one case this detection adds is the mirror: a block-commented
-// automation whose `{` is on the NEXT line is now reported rather than
-// ignored. Given the former already treats block-commented automations as
-// live code, reporting the latter is the consistent behaviour; the shipped
-// tree contains no block comments in any automations.memql.
+// Neither regex understands `/* */`, so both are run over a comment-blanked
+// copy of the source (languageParser.BlankComments, memql#2861) rather than
+// the raw text. Scanning raw, a commented-out automation matched here and loaded
+// LIVE, and -- once a dropped automation became a refused boot (#2830) -- a
+// commented-out automation whose `{` sat on the next line was reported
+// unextractable and took the node down instead.
+//
+// Both regexes anchor at `^[ \t]*automation`, so a `//` line-commented
+// automation can never match them; line comments need no masking.
 var automationLooseHeader = regexp.MustCompile(`(?m)^[ \t]*automation[ \t]+([A-Za-z_][A-Za-z0-9_]*)`)
 
 // LoadFromUnifiedTree walks dsl.Tree() looking for
@@ -105,6 +105,17 @@ func (l *Loader) LoadFromUnifiedTree() ([]*Automation, error) {
 			return nil
 		}
 		source := string(data)
+		// An unterminated `/*` comments out the rest of the file, so every
+		// automation below it is ABSENT -- correct per the lexer, and now
+		// per the comment-blanked extractor, but silently absent is what
+		// #2830 outlawed. One typo'd opener would remove a workflow from the
+		// fleet with no diagnostic at all. Lexer-legal input, so this is a
+		// WARN naming the line rather than a load problem (memql#2861).
+		if line := languageParser.UnterminatedBlockCommentLine(source); line > 0 && l.logger != nil {
+			l.logger.Warn("unified automation loader: unterminated block comment",
+				"component", ComponentName, "path", path, "line", line,
+				"effect", "every automation below this line is commented out and will not load")
+		}
 		// Lower terse single-step automations (memql#2215) to their longhand
 		// block form so the slice extractor below (which keys off `automation
 		// NAME {`) discovers them. compileMemQL re-runs the rewriter, so this is
@@ -288,14 +299,29 @@ func extractAutomationSlices(source string) []automationSlice {
 func extractAutomationSlicesReporting(source string) ([]automationSlice, []string) {
 	var unextracted []string
 
-	matches := automationStructHeader.FindAllStringSubmatchIndex(source, -1)
+	// Detect headers on a comment-blanked view so a commented-out automation
+	// is ABSENT rather than live (memql#2861). BlankComments preserves byte
+	// offsets, so every offset below indexes the original text identically:
+	// headers and braces are found on `scan`, the slice is cut from `source`,
+	// and the emitted slice keeps its authored comments verbatim.
+	//
+	// This mirrors ExtractFunctionSlices (component/memql/function_slices.go),
+	// which has blanked comments before header detection since memql#1074 --
+	// which is why queries, mutations and logic were never exposed to this
+	// defect, and why the fix reuses that helper instead of adding a second
+	// implementation. Other extractors still scan raw text and have the same
+	// blindness (component/actions/loader.go, component/memql/keyword_slices.go
+	// and capability_loader.go) -- tracked in memql#2868, not fixed here.
+	scan := languageParser.BlankComments(source)
+
+	matches := automationStructHeader.FindAllStringSubmatchIndex(scan, -1)
 
 	// A header the strict regex missed is a silent loss, so find those too.
 	matchedAt := make(map[int]bool, len(matches))
 	for _, m := range matches {
 		matchedAt[m[0]] = true
 	}
-	for _, lm := range automationLooseHeader.FindAllStringSubmatchIndex(source, -1) {
+	for _, lm := range automationLooseHeader.FindAllStringSubmatchIndex(scan, -1) {
 		if !matchedAt[lm[0]] {
 			unextracted = append(unextracted, source[lm[2]:lm[3]])
 		}
@@ -314,13 +340,31 @@ func extractAutomationSlicesReporting(source string) ([]automationSlice, []strin
 		name := source[nameStart:nameEnd]
 
 		openIdx := headerEnd - 1 // position of `{`
-		closeIdx := findMatchingBrace(source, openIdx)
+		closeIdx := findMatchingBrace(scan, openIdx)
 		if closeIdx < 0 {
 			unextracted = append(unextracted, name)
 			continue
 		}
 
 		// Walk backwards for the @-attribute + comment preamble.
+		//
+		// This walk runs on the ORIGINAL source and stops at any line that is
+		// not `@`- or `//`-prefixed -- including a `/* ... */` line. So an
+		// annotation ABOVE a block comment is cut out of the slice: `@disabled`
+		// is dropped and the automation runs, `@trigger` is dropped and the
+		// automation loads with a nil trigger that is never subscribed. Both
+		// are silent.
+		//
+		// That is a REAL defect, it predates this change, and it is NOT fixed
+		// here -- tracked in memql#2872. Two attempts inside this PR made
+		// things worse rather than better, and the evidence is on that issue:
+		// stepping over comment lines pulls the comment body INTO the slice,
+		// where compileMemQL's raw-text gates then scan it, so an ordinary
+		// comment mentioning `$steps.` or containing an `@`-annotation or a
+		// commented-out `automation` header either refuses the boot or
+		// silently disables the #2712 annotation gate. Fixing it needs a
+		// comment-SPAN-aware walk plus a decision about those raw-text gates,
+		// which is design work, not a drive-by in an extraction fix.
 		preambleStart := headerStart
 		for k := headerStart - 1; k >= 0; k-- {
 			lineStart := strings.LastIndexByte(source[:k], '\n') + 1
@@ -346,8 +390,9 @@ func extractAutomationSlicesReporting(source string) ([]automationSlice, []strin
 }
 
 // findMatchingBrace returns the index of the `}` matching the `{`
-// at openIdx. String + line-comment aware. Returns -1 if
-// unbalanced.
+// at openIdx. String + line-comment aware. Callers pass a
+// BlankComments'd source so a brace inside a `/* */` comment does
+// not close a block early (memql#2861). Returns -1 if unbalanced.
 func findMatchingBrace(source string, openIdx int) int {
 	if openIdx < 0 || openIdx >= len(source) || source[openIdx] != '{' {
 		return -1

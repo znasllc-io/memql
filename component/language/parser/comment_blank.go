@@ -1,5 +1,7 @@
 package parser
 
+import "strings"
+
 // comment_blank.go provides an offset-preserving comment scrubber used
 // by the text-based header detectors that run BEFORE the lexer/parser
 // see the source: the struct-form rewriter (rewriter.go), the
@@ -94,4 +96,76 @@ func BlankComments(source string) string {
 		}
 	}
 	return string(out)
+}
+
+// UnterminatedBlockCommentLine returns the 1-based line on which an
+// unterminated `/*` opens, or 0 when every block comment in source is closed.
+//
+// It shares BlankComments' state machine, so it agrees with it exactly on what
+// counts as a comment opener: a `/*` inside a string, a backtick span, or a
+// `//` line comment is not one.
+//
+// The motivating case is memql#2861. An unterminated block comment comments
+// out the rest of the file -- that is what the lexer does, and what the
+// comment-blanked header detectors now do -- so every construct below it goes
+// ABSENT. Silently absent is exactly what memql#2830 outlawed for automations:
+// one typo'd `/*` removes a workflow from the fleet with no diagnostic. The
+// input is lexer-legal, so this is a WARN-grade signal, not a load failure;
+// callers decide.
+func UnterminatedBlockCommentLine(source string) int {
+	const (
+		stateCode = iota
+		stateString
+		stateBacktick
+		stateLineComment
+		stateBlockComment
+	)
+	state := stateCode
+	n := len(source)
+	openedAt := -1
+	for i := 0; i < n; i++ {
+		c := source[i]
+		switch state {
+		case stateString:
+			if c == '\\' && i+1 < n {
+				i++
+				continue
+			}
+			if c == '"' {
+				state = stateCode
+			}
+		case stateBacktick:
+			if c == '`' {
+				state = stateCode
+			}
+		case stateLineComment:
+			if c == '\n' {
+				state = stateCode
+			}
+		case stateBlockComment:
+			if c == '*' && i+1 < n && source[i+1] == '/' {
+				i++
+				state = stateCode
+				openedAt = -1
+			}
+		default: // stateCode
+			switch {
+			case c == '"':
+				state = stateString
+			case c == '`':
+				state = stateBacktick
+			case c == '/' && i+1 < n && source[i+1] == '/':
+				i++
+				state = stateLineComment
+			case c == '/' && i+1 < n && source[i+1] == '*':
+				openedAt = i
+				i++
+				state = stateBlockComment
+			}
+		}
+	}
+	if state == stateBlockComment && openedAt >= 0 {
+		return strings.Count(source[:openedAt], "\n") + 1
+	}
+	return 0
 }
