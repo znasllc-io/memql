@@ -205,5 +205,15 @@ func constructNameAfter(src string, from int) (string, bool) {
 
 // namedConstructHeaderRe matches `<kind> [<Concept>] <name> {` for the kinds
 // that can carry @serverOnly.
+//
+// `automation` is in the list even though it is not a struct-query kind:
+// ParseFileSource runs NormaliseAll, which lowers an automation to a
+// FunctionDef, so a real @serverOnly on one DOES enter the parsed set. Omitting
+// it made the locator walk past `automation x {` to the NEXT header, attribute
+// the annotation to that construct, find it absent from the set, and silently
+// drop the docs requirement for a construct that was in it.
+//
+// `func` is deliberately absent -- the procedural author form is rejected at
+// parse, so no such header can reach a loading tree.
 var namedConstructHeaderRe = regexp.MustCompile(
-	`(?m)^[ \t]*(query|mutate|seed|logic|concept|builtin|shape|spec|trait|tool|prompt|provider|action|capability)[ \t]+(?:([A-Za-z_][A-Za-z0-9_]*)[ \t]+)?([A-Za-z_][A-Za-z0-9_.-]*)[ \t]*\{`)
+	`(?m)^[ \t]*(query|mutate|seed|logic|automation|concept|builtin|shape|spec|trait|tool|prompt|provider|action|capability)[ \t]+(?:([A-Za-z_][A-Za-z0-9_]*)[ \t]+)?([A-Za-z_][A-Za-z0-9_.-]*)[ \t]*\{`)

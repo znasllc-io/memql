@@ -8,12 +8,20 @@ import (
 
 // server_only_gate_parity_test.go -- memql#2875, the drift half.
 //
-// The FIX for #2875 is in dsl/server_only_parsed_test.go, and both dsl-side
-// gates now consume it: TestPerRowAuthzClassification's `hasServerOnly` and
-// TestServerOnlyConstructsAreDocumented's membership check read
+// The FIX for #2875 is in dsl/server_only_parsed_test.go, and ALL FOUR dsl-side
+// gates now consume it -- TestPerRowAuthzClassification's `hasServerOnly`,
+// TestServerOnlyConstructsAreDocumented's membership check,
+// TestPiiProjectionRequiresCallerGate and
+// TestCallerSuppliedRowSelectionOnPersonScopedConcepts -- reading
 // serverOnlyConstructs(), which applies the loader's own rule --
-// hasFlagAttribute(attrs, "serverOnly") -- to the same parse. Those two cannot
-// diverge from Function.ServerOnly.
+// hasFlagAttribute(attrs, "serverOnly") -- to the same parse. None can diverge
+// from Function.ServerOnly.
+//
+// An earlier version of this comment said "both dsl-side gates", and the count
+// was the defect: two of the four were still regex VERDICTS, including the PII
+// projection gate. `grep -rn serverOnlyAnnotationRe dsl/` was five lines and
+// would have caught it -- the same way grep caught the round before. Counting
+// the call sites beats asserting the count.
 //
 // TWO REGEX SITES REMAIN, and this file pins their pattern:
 //
@@ -26,6 +34,10 @@ import (
 //	                               from it. WHICH constructs are server-only
 //	                               comes from the parsed set; a location whose
 //	                               construct is not in that set is skipped.
+//
+// dsl/conformance_test.go's serverOnlyAnnotationRe is GONE -- with all four
+// gates on the parsed verdict it had no consumers left, so it is deleted rather
+// than left as a loaded gun for the next author to reach for.
 //
 // An earlier version of this file also ran a tree-wide regex/registry
 // comparison. That is deleted rather than repaired, because review found it

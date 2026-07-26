@@ -2,6 +2,7 @@ package dsl
 
 import (
 	"fmt"
+	"maps"
 	"reflect"
 	"regexp"
 	"sort"
@@ -114,7 +115,9 @@ func serverOnlyConstructs(t *testing.T) map[serverOnlyKey]bool {
 			"user-scope detector report a meaningless zero (#2799). Check declNameAndAttributes " +
 			"against the AST definition types.")
 	}
-	return serverOnlySet
+	// A CLONE: four gates now hold this, and one of them writing to it would
+	// corrupt the others' verdicts. Cheap -- six entries.
+	return maps.Clone(serverOnlySet)
 }
 
 // declNameAndAttributes pulls the name + annotations off any named top-level
