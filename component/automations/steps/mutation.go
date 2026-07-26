@@ -1399,12 +1399,20 @@ func (e *MutationExecutor) parseAndEvaluateArrayLiteral(evaluator *automations.E
 
 		valueStr, newPos, ok := e.parseValueFromString(inner, pos)
 		if !ok || newPos <= pos {
+			// Malformed, or no progress -- BOTH halves are live here.
+			//
 			// No progress: parseValueFromString returns its input pos
-			// unchanged on an unbalanced literal and on a stray depth-0
-			// closer, so the loop appended forever -- an unbounded memory grow
-			// and a hang (memql#2785). Unlike the load-time copies of this
-			// parser, this one runs at EVENT-DISPATCH time, so the failure is
-			// a spinning automation worker on a live node.
+			// unchanged on a stray depth-0 closer (`}`), so without the
+			// position check the loop appended forever -- an unbounded memory
+			// grow and a hang (memql#2785). Unlike the load-time copies of
+			// this parser, this one runs at EVENT-DISPATCH time, so the
+			// failure is a spinning automation worker on a live node.
+			//
+			// Malformed: an unbalanced nested literal reports ok=false HAVING
+			// ADVANCED to len(s), so the position check cannot see it and
+			// `!ok` is what catches it. (That was not true when this comment
+			// was first written -- it said "unchanged on an unbalanced
+			// literal", which the arms now contradict.)
 			//
 			// The leading skip has already consumed commas and whitespace, so
 			// a non-advancing return cannot be a legitimately-empty element.
@@ -1429,12 +1437,28 @@ func (e *MutationExecutor) parseAndEvaluateArrayLiteral(evaluator *automations.E
 
 // parseValueFromString extracts a single value starting at position pos.
 // Returns the value string and new position.
-// The bool reports well-formedness. Today the only ill-formed case it can
-// report is an unterminated string; it exists so this RUNTIME copy agrees with
-// the two load-time copies (component/memql, component/language/compiler),
-// which both reject that input. Before this, `{ k: "abc }` compiled to an
-// error but DISPATCHED as {"k":"abc"} -- the same literal accepted or rejected
-// depending on which parser saw it (memql#2785).
+// The bool reports well-formedness. It exists so this RUNTIME copy agrees with
+// the two load-time copies (component/memql, component/language/compiler) on
+// inputs they reject: before it, `{ k: "abc }` compiled to an error but
+// DISPATCHED as {"k":"abc"} -- the same literal accepted or rejected depending
+// on which parser saw it (memql#2785).
+//
+// THREE arms report ill-formed, and the list is load-bearing enough to keep
+// accurate -- an earlier version of this comment named only the first, was
+// then made false by the commit that added the other two, and a maintainer
+// reasoning from it would have reasoned wrongly:
+//
+//	unterminated string        "abc          -> ("", len, false)
+//	unbalanced nested object   { b: 1        -> ("", len, false)
+//	unbalanced nested array    [ 1, 2        -> ("", len, false)
+//
+// All three ADVANCE pos to len(s) before reporting false. That matters to the
+// array caller's guard: `!ok || newPos <= pos` needs the `!ok` half, because
+// the position half alone cannot see a failure that advanced. The sibling in
+// component/memql is the opposite case -- its ok=false arms never advance, so
+// there `!ok` is dead and TestArrayOkImpliesNoProgress pins that. The two
+// copies genuinely differ here; do not "harmonise" one to the other without
+// re-deriving which half is doing the work.
 func (e *MutationExecutor) parseValueFromString(s string, pos int) (string, int, bool) {
 	if pos >= len(s) {
 		return "", pos, true

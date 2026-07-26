@@ -294,12 +294,20 @@ func TestCompilerEmptyValueIsNullNotAnError(t *testing.T) {
 // of the round-4 review was exactly this: a valid nested payload newly
 // rejected, caught only because the accept net was widened.
 //
-// This corpus is synthetic on purpose. Walking the real dsl/ tree finds
-// exactly ZERO PayloadRaw sites across all 199 .memql files -- the compiler's
-// payload parser is unreachable from authored DSL today, which is the "latent"
-// caveat memql#2816 carries. A corpus probe therefore proves nothing here, and
-// these hand-written shapes are the only thing standing between a future
-// authored payload and a silent rejection.
+// This corpus is synthetic on purpose, and the reason needs stating precisely
+// because an earlier version of this comment got it wrong. It claimed "zero
+// PayloadRaw sites across all 199 .memql files"; there are 213. What is zero
+// is the sites reachable from THIS parser:
+//
+//	213  struct-form `insert {` / `update {` blocks. The rewriter turns these
+//	     into a non-empty PayloadRaw, but they route to component/memql's copy.
+//	  0  inline `mutation { ... }` steps inside an automation, which is the
+//	     only shape reaching compileMutationConfig -> parsePayloadRaw.
+//
+// So the compiler's payload parser is unreachable from authored DSL today --
+// the "latent" caveat memql#2816 carries -- and a corpus probe over the tree
+// proves nothing about THIS function. These hand-written shapes are the only
+// thing standing between a future authored payload and a silent rejection.
 func TestCompilerAcceptsRealisticPayloads(t *testing.T) {
 	c := New(Config{})
 	for _, src := range []string{
