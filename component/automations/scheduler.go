@@ -514,6 +514,11 @@ func (s *Scheduler) subscribeToEventTrigger(automation *Automation) error {
 		// Optionally evaluate filter condition
 		if a.Trigger.Filter != "" {
 			evaluator := NewEvaluator()
+			// An event trigger fires from the bus, not from a request --
+			// there is provably no caller, so the actor envelope denies
+			// (memql#2801). Without it `@filter(actor.isClusterOwner !=
+			// false)` read TRUE off the unbound path text.
+			bindNoCallerActorEnvelope(evaluator)
 			// Shared envelope builder so @filter sees the same event shape
 			// as step bodies (incl. event.actor / event.timestamp, G4).
 			eventMap := buildEventEnvelope(&event, "", "")

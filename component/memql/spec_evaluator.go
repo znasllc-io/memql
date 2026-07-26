@@ -67,12 +67,19 @@ func (e *MemQLEngine) EvaluateSpec(ctx context.Context, name string) (bool, erro
 // args or produce output.
 func buildSpecCtx(ctx context.Context, engine *MemQLEngine) map[string]any {
 	out := make(map[string]any, 6)
-	actor := map[string]any{}
-	if access, ok := auth.AccessFromContext(ctx); ok {
-		// One canonical envelope (#2623).
-		actor = auth.ActorEnvelopeMap(access)
-	}
-	out["actor"] = actor
+	// One canonical envelope (#2623), built UNCONDITIONALLY (#2801).
+	//
+	// Seeding an empty map when auth is absent introduced a third
+	// nil-representation -- absent keys -- alongside the envelope's two.
+	// specEqual short-circuits on nil (`a == nil || b == nil` -> `a == b`,
+	// expression_evaluator.go), so a NEGATED actor predicate diverged from
+	// the envelope's deny answer: `isClusterOwner != false` evaluated TRUE
+	// on an absent context, which is the same fail-open the envelope's own
+	// default was fixed for. AccessFromContext already returns nil when
+	// !ok, so passing it straight through yields the denying envelope with
+	// every key present.
+	access, _ := auth.AccessFromContext(ctx)
+	out["actor"] = auth.ActorEnvelopeMap(access)
 	out["partition"] = currentPartitionFromContext(ctx)
 	out["now"] = time.Now().UTC().Format(time.RFC3339Nano)
 	var snapshot *busv1.ConfigSnapshot
