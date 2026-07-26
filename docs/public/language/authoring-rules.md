@@ -1647,21 +1647,34 @@ injecting it into a shipped construct:
 |---|---|
 | a payload field in a `filter` (#2781) | `query "expiredWorkerInvocations": filter compares field "actionTYPO", which concept "invocation" does not declare` |
 | a field inside a spec body (#2804) | `spec "requiresAdmin": body reads field "rolle", which shape "actorEnvelope" does not declare` |
-| the trait's own name | `use common.traits: "isNotDeletd" is not declared in common/traits.memql` |
+| a trait's name in a cross-domain `use` | `use common.traits: "isNotDeletd" is not declared in common/traits.memql` |
 
-**The trap worth knowing: this is `memqllint`, not `go test`.** All three
-injections leave `go test ./dsl/...` green and the engine booting -- the
-lanes run in the lint CLI, which CI runs separately. Reasoning about
-coverage from the Go suite alone tells you this is unguarded, and it is
-not.
+**The trap worth knowing: `go test ./dsl/...` does NOT cover these.** All
+three injections leave that package's suite green and the engine booting.
+The lanes run in `memqllint` and in the real-tree test that drives them
+(`TestVerifyReferentialIntegrity_RealDSLTree`, in
+`component/memql/dslimports`), so a full `go test ./...` does catch them
+-- but judging coverage from the `dsl` package's own tests, which is the
+natural place to look, tells you this is unguarded when it is not.
 
-**What is still unguarded** is the case field validation structurally
-cannot see: a field that is real and declared, but scoped from the wrong
-*source*. `filter id==args.userId` is a well-formed reference to an
-existing property -- it just trusts an argument where it should have
-trusted the token. That is #2799 / #2800 / #2803, not this rule.
+**One typo shape is still silent: a same-domain trait referenced
+ambiently.** Rule 25 (#2617) makes same-domain constructs ambient, so
+`filter ... && isHumanParticipnt` inside `dsl/cognition/` carries no
+`use` line for the import lane to check. Verified: both `memqllint` and
+the referential tests stay green. It fails **closed** at query-parse on
+first call -- `unknown spec "isHumanParticipnt"` -- so it is a loud
+runtime error rather than a silent wrong answer, but it is not a
+build-time gate. Naming the trait in an explicit cross-domain `use` is
+what moves it to lint time.
 
-So the fail-open direction above is real but no longer reachable by a
-typo. It remains reachable by a caller-supplied id, and by a field
+**What field validation structurally cannot see** is a field that is real
+and declared but scoped from the wrong *source*: `filter
+row.id==args.userId` is a well-formed reference to an existing property
+-- it just trusts an argument where it should have trusted the token.
+That is #2799 / #2800 / #2803, not this rule. (Note the `row.` prefix:
+the bare-intrinsic spelling is retired by rule 22.)
+
+So the fail-open direction above is real but mostly out of reach of a
+typo now. It remains reachable by a caller-supplied id, and by a field
 declared on the concept that is simply absent on a given row -- which is
 the case the null semantics get deliberately right.
