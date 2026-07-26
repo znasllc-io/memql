@@ -285,3 +285,75 @@ func TestSpecBodyTypoNotMaskedByUnrelatedConstruct(t *testing.T) {
 		t.Error("a typo colliding with an unrelated construct name must still be reported")
 	}
 }
+
+// A default-projection shape names its concept in ITS OWN scope. Resolving
+// that concept against the SPEC's file instead answers with a same-named
+// concept from the spec's domain -- which both flags the correct field and
+// admits the wrong one (memql#2804 review, D1).
+func TestSpecBodyResolvesDefaultProjectionInTheShapesScope(t *testing.T) {
+	tree, err := Load(fstest.MapFS{
+		"core/concepts.memql": &fstest.MapFile{Data: []byte(
+			"/// The real widget.\nconcept widget {\n  region string  @description(\"Region.\")\n}\n")},
+		"catalog/shapes.memql": &fstest.MapFile{Data: []byte(
+			"use core.concepts.{ widget }\n\n" +
+				"/// Default projection.\n@row\nshape widget widgetFull {\n}\n")},
+		// An unrelated concept sharing the short name, in the SPEC's domain.
+		"orders/concepts.memql": &fstest.MapFile{Data: []byte(
+			"/// A different widget.\nconcept widget {\n  sku string  @description(\"SKU.\")\n}\n")},
+		"orders/specs.memql": &fstest.MapFile{Data: []byte(
+			"use catalog.shapes.{ widgetFull }\n\n" +
+				"/// Reads the SHAPE's concept field.\nspec widgetFull inRegion {\n  return region == \"eu\"\n}\n")},
+	})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	for _, e := range tree.VerifyReferentialIntegrity() {
+		if strings.Contains(e.Error(), "inRegion") {
+			t.Errorf("the shape's own concept must answer, not a same-named one in the spec's "+
+				"domain: %v", e)
+		}
+	}
+}
+
+// A default projection exposes ProjectableFields(), which excludes
+// @internal. Admitting an internal field would lint clean and refuse at
+// boot -- the same asymmetry the shape-bound intrinsic rule exists to avoid
+// (memql#2804 review, D2).
+func TestSpecBodyRejectsInternalFieldOnDefaultProjection(t *testing.T) {
+	tree, err := Load(fstest.MapFS{
+		"lab/concepts.memql": &fstest.MapFile{Data: []byte(
+			"/// A lab widget.\nconcept widget {\n" +
+				"  region string  @description(\"Region.\")\n" +
+				"  secret string  @internal  @description(\"Server-only.\")\n}\n")},
+		"lab/shapes.memql": &fstest.MapFile{Data: []byte(
+			"/// Default projection.\n@row\nshape widget widgetFull {\n}\n")},
+		"lab/specs.memql": &fstest.MapFile{Data: []byte(
+			"/// Reads a server-only field.\nspec widgetFull readsInternal {\n  return secret == \"x\"\n}\n")},
+	})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	found := false
+	for _, e := range tree.VerifyReferentialIntegrity() {
+		if strings.Contains(e.Error(), "readsInternal") && strings.Contains(e.Error(), "secret") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("an @internal field is not in a default projection and must be reported")
+	}
+}
+
+// conceptFieldMapper reads the bound concept "by bare name only" and rejects
+// any dotted reference, so a concept-bound spec must not be allowed the
+// reserved heads a query filter may use (memql#2804 review, D3).
+func TestSpecBodyRejectsReservedHeadOnConceptBoundSpec(t *testing.T) {
+	for _, body := range []string{`args.foo == "y"`, `actor.userId == "y"`} {
+		errs := specBodyErrs(t, "use lab.concepts.{ widget }\n\n"+
+			"/// Reads a reserved head.\nspec widget usesReserved {\n  return "+body+"\n}\n")
+		if len(errs) != 1 {
+			t.Errorf("%s: a concept-bound spec may name only bare fields/intrinsics; got %d: %v",
+				body, len(errs), errs)
+		}
+	}
+}

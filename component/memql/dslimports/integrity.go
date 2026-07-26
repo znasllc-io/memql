@@ -1328,14 +1328,15 @@ func (t *Tree) verifySpecBodyFields(path string, f *languageAst.File, idx *declI
 			if allowed[head] {
 				continue
 			}
-			// A concept-bound (row) spec may name the same intrinsics a
-			// filter may. A shape-bound spec may not: the mapper resolves
-			// projected keys and nothing else.
-			if kind == "concept" {
-				lowered := strings.ToLower(head)
-				if filterRowIntrinsics[lowered] || reservedFilterHeads[lowered] {
-					continue
-				}
+			// A concept-bound (row) spec may name a BARE row intrinsic.
+			// It may NOT name a reserved head (args / actor / config ...):
+			// conceptFieldMapper reads "the bound concept by bare name
+			// only" and rejects any dotted reference, so admitting those
+			// -- as lane 5 does for a filter, where they ARE legal -- would
+			// lint clean and refuse at boot. A shape-bound spec gets
+			// neither: its mapper resolves projected keys and nothing else.
+			if kind == "concept" && filterRowIntrinsics[strings.ToLower(head)] {
+				continue
 			}
 			errs = append(errs, fmt.Errorf(
 				"%s: spec %q: body reads field %q, which %s %q does not declare",
@@ -1392,8 +1393,8 @@ func (t *Tree) SpecBodyCoverage() (total int, skipped []string) {
 // Shape is tried before concept, matching the engine's own
 // resolveOneSpecBinding.
 func (t *Tree) resolveSpecBindingFields(path string, f *languageAst.File, idx *declIndex, name string) (map[string]bool, string) {
-	if decl := t.resolveSpecShape(path, f, idx, name); decl != nil {
-		keys := t.shapeProjectedKeys(path, f, idx, decl)
+	if decl, declFile := t.resolveSpecShape(path, f, idx, name); decl != nil {
+		keys := t.shapeProjectedKeys(declFile, t.Files[declFile], idx, decl)
 		if keys == nil {
 			return nil, "" // default projection we could not expand -- skip
 		}
@@ -1405,7 +1406,39 @@ func (t *Tree) resolveSpecBindingFields(path string, f *languageAst.File, idx *d
 	return nil, ""
 }
 
-// resolveSpecShape resolves a shape name to its declaration.
+// projectableConceptFields returns the concept properties a default shape
+// projection exposes -- every declared property except @internal ones,
+// mirroring Concept.ProjectableFields().
+func projectableConceptFields(decl *languageAst.ConceptDecl) map[string]bool {
+	out := make(map[string]bool, len(decl.Properties))
+	for _, p := range decl.Properties {
+		if p == nil || p.Name == "" || hasAttribute(p.Attributes, "internal") {
+			continue
+		}
+		out[p.Name] = true
+	}
+	return out
+}
+
+// hasAttribute reports whether the annotation list carries the named
+// annotation, case-insensitively and ignoring a leading @.
+func hasAttribute(attrs []*languageAst.Attribute, name string) bool {
+	for _, a := range attrs {
+		if a == nil {
+			continue
+		}
+		if strings.EqualFold(strings.TrimPrefix(a.Name, "@"), name) {
+			return true
+		}
+	}
+	return false
+}
+
+// resolveSpecShape resolves a shape name to its declaration and the file
+// that declares it. The FILE matters: a default-projection shape names its
+// concept in ITS OWN scope, so resolving that concept against the spec's
+// file would answer with a same-named concept from the spec's domain
+// (memql#2804 review).
 //
 // An explicit `use` naming the shape wins and is followed to its target
 // file, matching boot; a name imported from a namespace absent from this
@@ -1416,9 +1449,9 @@ func (t *Tree) resolveSpecBindingFields(path string, f *languageAst.File, idx *d
 // Deliberately NO "single declaration anywhere in the tree" fallback: lane 5
 // does not have one, and it would resolve a bundle's unrelated shape that
 // merely shares a short name -- reporting undeclared fields on legal DSL.
-func (t *Tree) resolveSpecShape(path string, f *languageAst.File, idx *declIndex, name string) *languageAst.ShapeDecl {
+func (t *Tree) resolveSpecShape(path string, f *languageAst.File, idx *declIndex, name string) (*languageAst.ShapeDecl, string) {
 	if name == "" {
-		return nil
+		return nil, ""
 	}
 	for _, u := range f.Uses {
 		if u == nil {
@@ -1436,18 +1469,18 @@ func (t *Tree) resolveSpecShape(path string, f *languageAst.File, idx *declIndex
 		}
 		parts := stripVersionPrefix(u.Parts)
 		if len(parts) == 0 || !idx.namespaces[parts[0]] {
-			return nil // supplied externally
+			return nil, "" // supplied externally
 		}
 		target, ok := t.resolveUseModule(parts)
 		if !ok || t.ImportsOnly[target.file] {
-			return nil // lane 1 reports bad modules
+			return nil, "" // lane 1 reports bad modules
 		}
 		for _, e := range idx.shapeDecls[name] {
 			if e.file == target.file {
-				return e.decl
+				return e.decl, e.file
 			}
 		}
-		return nil // imported but not declared there -- lane 2 reports
+		return nil, "" // imported but not declared there -- lane 2 reports
 	}
 	domain := path
 	if i := strings.IndexByte(path, '/'); i > 0 {
@@ -1458,10 +1491,10 @@ func (t *Tree) resolveSpecShape(path string, f *languageAst.File, idx *declIndex
 			continue
 		}
 		if i := strings.IndexByte(e.file, '/'); i > 0 && e.file[:i] == domain {
-			return e.decl
+			return e.decl, e.file
 		}
 	}
-	return nil
+	return nil, ""
 }
 
 // shapeProjectedKeys returns the keys a shape projects, or nil when they
@@ -1484,7 +1517,11 @@ func (t *Tree) shapeProjectedKeys(path string, f *languageAst.File, idx *declInd
 		if conceptDecl == nil {
 			return nil
 		}
-		return conceptPropertyNames(conceptDecl)
+		// Projectable, not every property: expandDefaultShapeProjections
+		// fills a default projection from ProjectableFields(), which
+		// excludes @internal. Admitting an internal field here would lint
+		// clean and refuse at boot.
+		return projectableConceptFields(conceptDecl)
 	}
 	out := make(map[string]bool, len(decl.Paths))
 	for _, p := range decl.Paths {
