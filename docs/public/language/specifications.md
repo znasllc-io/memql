@@ -47,9 +47,9 @@ the call site).
   (no `payload.` prefix -- the binding names the surface).
 - Side-effect free. Specs cannot call mutation functions or logic
   functions.
-- Prefer `spec*` naming for concept-bound row-specs (matches the call
-  sites in query filter clauses). Actor-bound context-specs may drop the
-  prefix when the name reads more naturally (`requiresAdmin`).
+- Named for the predicate they express, with no kind prefix
+  (`requiresAdmin`, `isActiveRecord`). The `spec` / `trait` keyword
+  already marks the kind at the declaration.
 - The `@shape("name")` annotation is removed; the legacy
   `func (Spec) name(ctx any) bool { ... }` form and the older
   bare-expression body (no `return`) are retired and rejected with a
@@ -62,13 +62,13 @@ the call site).
 ```memql
 use cognition.concepts.{ participant }
 
-@description("Matches participants with human participantType")
-spec participant isHumanParticipant {
-  return participantType == "human"
+@description("Matches participants that completed verification")
+spec participant isVerifiedParticipant {
+  return verified == true
 }
 
 @description("Active records created by system automation")
-spec participant specSystemActive {
+spec participant systemActive {
   return active == true && createdBy == "system:automation"
 }
 ```

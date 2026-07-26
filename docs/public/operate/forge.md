@@ -145,8 +145,8 @@ pipeline personas:
 | `reader` | Non-developer employee | Submit-only. Requests enter the pipeline at `needs_validation`. Receives the mentoring layer while filing (see below). |
 
 The validation and approval queues are gated at the query layer via the forge
-role traits (`traitForgeDeveloper` for `owner` / `admin` / `writer`;
-`traitForgeApprover` for `owner` only). A `reader` calling
+role specs (`forgeDeveloper` for `owner` / `admin` / `writer`;
+`forgeApprover` for `owner` only). A `reader` calling
 `forgeValidationQueue` or `forgeApprovalQueue` receives an empty list, not an
 error. Submission (`forgeSubmitRequest`) and reading own requests
 (`forgeMyRequests`) are open to every authenticated team member.
@@ -298,4 +298,4 @@ All forge constructs live under `dsl/forge/`:
 | `logic.memql` | `logicRouteRequest` — role-based pipeline router |
 | `automations.memql` | `routeRequest` — fires on `node.created` for `v1:forge:request` |
 | `tools.memql` | All `@mcp`-annotated tools (the team's Claude-facing surface) |
-| `traits.memql` | `traitForgeDeveloper`, `traitForgeApprover` — query-layer role gates |
+| `specs.memql` | `forgeDeveloper`, `forgeApprover` — actor-bound role gates |

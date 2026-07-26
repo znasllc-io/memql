@@ -763,9 +763,9 @@ A spec body never reads `actor.*` / `row.*` directly — bind a shape that proje
 ```memql
 use cognition.concepts.{ participant }
 
-/// Matches participants with human participantType
-spec participant isHumanParticipant {
-  return participantType == "human"
+/// Matches participants that completed verification
+spec participant isVerifiedParticipant {
+  return verified == true
 }
 
 use common.shapes.{ actorEnvelope }
@@ -1814,7 +1814,7 @@ mutation space mutationCreateSpace {
   insert { id: args.spaceId  name: args.name  status: "active"  createdAt: now  createdBy: actor.userId }
 }
 
-spec participant isHumanParticipant { return participantType == "human" }
+spec participant isVerifiedParticipant { return verified == true }
 
 @row
 shape participant participantCard { row.id  displayName }

@@ -1684,9 +1684,9 @@ fields, validated at the call site).
 use cognition.concepts.{ participant }
 
 @enabled
-@description("Matches participants with human participantType")
-spec participant isHumanParticipant {
-  return participantType == "human"             // concept-bound row-spec
+@description("Matches participants that completed verification")
+spec participant isVerifiedParticipant {
+  return verified == true             // concept-bound row-spec
 }
 
 use common.shapes.{ actorEnvelope }

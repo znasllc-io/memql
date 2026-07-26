@@ -30,7 +30,8 @@ Use kind-specific prefixes so intent is obvious at call sites and in diffs.
 
 > **Accuracy note (#2853).** The `query*` / `mutation*` / `logic*` prefixes
 > above are not what the shipped tree does: **no** construct carries them
-> (0 of 197 queries, 0 of 213 mutations, 0 of 35 logic functions -- the
+> (0 of 197 queries, 0 of 213 mutations, 0 of 33 logic functions in the
+> shipped tree, excluding the non-embedded `_reference/` skeleton -- the
 > real names are `activeHumanParticipants`, `addAgentToSpace`,
 > `bootstrapSession`). The spec / trait entry was corrected in #2806
 > because its examples named constructs that do not exist, so a reader who
@@ -63,8 +64,8 @@ mutation user mutationArchiveUser {
   }
 }
 
-spec space statusIsActive {
-  return status == "active"
+spec space spaceIsPublic {
+  return visibility == "public"
 }
 
 trait isActiveRecord {

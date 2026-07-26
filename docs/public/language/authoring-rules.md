@@ -642,7 +642,7 @@ carries an individual construct's name.
 ```
 dsl/cognition/queries.memql     query space queryActiveSpaces { ... }
 dsl/cognition/mutations.memql   mutation space mutationCreateSpace { ... }
-dsl/cognition/specs.memql       spec isHumanParticipant { ... }
+dsl/common/specs.memql          spec actorEnvelope requiresAdmin { ... }
 dsl/common/traits.memql         trait isActiveRecord { ... }
 dsl/cognition/logic.memql       logic logicAutoJoinSI { ... }
 ```
@@ -1087,8 +1087,8 @@ query space queryActiveSpaces {
 // the body returns a boolean over bare field names. No args.
 use cognition.concepts.{ participant }
 
-spec participant isHumanParticipant {
-  return participantType == "human"
+spec participant isVerifiedParticipant {
+  return verified == true
 }
 ```
 
