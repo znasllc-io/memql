@@ -400,8 +400,12 @@ func dslJSONString(s string) string {
 }
 
 func (s *Store) LookupUserByEmail(ctx context.Context, email string) (*UserRow, error) {
+	// #2881: userByEmail is @serverOnly -- it projects userFull (every @pii
+	// field plus the cluster-wide auth role) keyed on an email address. This is
+	// the trusted server-side caller, so it stamps internal origin, exactly as
+	// the by-id lookup above does for userByIdSystem.
 	query := fmt.Sprintf(`query userByEmail(primaryEmail: %s)`, dslJSONString(email))
-	nodes, err := s.executeAndExtract(ctx, query)
+	nodes, err := s.executeAndExtractInternal(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("identity.store: lookup user by email: %w", err)
 	}

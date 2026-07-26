@@ -44,9 +44,15 @@ func resolveAuthored(t *testing.T, fns *FunctionRegistry, specs *SpecRegistry, n
 	return err
 }
 
-// userIdArg is the one required arg every construct under test declares.
+// userIdArg is the required arg most constructs under test declare.
 func userIdArg() map[string]any {
 	return map[string]any{"userId": "v1:identity:user:someone"}
+}
+
+// emailArg is userByEmail's required arg -- it keys on the address, not an id,
+// which is precisely what made it the sharpest ungated read (memql#2881).
+func emailArg() map[string]any {
+	return map[string]any{"primaryEmail": "someone@example.com"}
 }
 
 // TestAuthoredQueriesResolve is the test whose absence let a dead gate ship.
@@ -87,16 +93,33 @@ func TestServerOnlyQueriesRefuseClientOrigin(t *testing.T) {
 	for name, wantRefused := range map[string]bool{
 		"userByIdSystem":      true,
 		"runningPlansForUser": true,
+		"userByEmail":         true, // memql#2881
 		// The client-callable siblings must still resolve.
 		"userDisplayById": false,
 		"currentUser":     false,
 		"userById":        false, // admin-gated, but reachable from the wire
 	} {
-		err := resolveAuthored(t, fns, specs, name, auth.OriginClient, userIdArg())
+		args := userIdArg()
+		if name == "userByEmail" {
+			args = emailArg()
+		}
+		err := resolveAuthored(t, fns, specs, name, auth.OriginClient, args)
 		refused := err != nil && strings.Contains(err.Error(), "server-only")
 		if refused != wantRefused {
 			t.Errorf("%s: refused=%v want %v (err=%v)", name, refused, wantRefused, err)
 		}
+	}
+}
+
+// TestUserByEmailPassesInternalOrigin is the other half for memql#2881: the
+// identity store's login-path lookup must keep working, or magic-link
+// completion and the /login existing-user branch break.
+func TestUserByEmailPassesInternalOrigin(t *testing.T) {
+	fns, specs := loadRealTree(t)
+	if err := resolveAuthored(t, fns, specs, "userByEmail", auth.OriginInternal, emailArg()); err != nil &&
+		strings.Contains(err.Error(), "server-only") {
+		t.Errorf("userByEmail was refused from INTERNAL origin: %v -- that is the "+
+			"path magic-link verification and the /login branch depend on", err)
 	}
 }
 
