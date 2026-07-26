@@ -888,10 +888,10 @@ func TestPerRowAuthzClassification(t *testing.T) {
 			if isQuery {
 				clause = filterClauseOf(body)
 			}
-			ownerLeaf := func(p string) bool { return strings.Contains(p, "actor.userId") }
-			adminLeaf := func(p string) bool {
-				return strings.Contains(p, "actor.isClusterOwner") || strings.Contains(p, "requiresClusterOwner")
-			}
+			// Shared with TestAdminGateIsATopLevelConjunct (memql#2839), so
+			// the two gates cannot drift about what counts as a gate term.
+			ownerLeaf := ownerScopeLeaf
+			adminLeaf := adminGateLeaf
 
 			hasAdmin := strings.Contains(body, "actor.isClusterOwner") ||
 				strings.Contains(body, "requiresClusterOwner")
