@@ -99,3 +99,49 @@ func TestOriginStringsAreStable(t *testing.T) {
 		t.Error("an unknown CallOrigin reported internal; unknown must fail closed")
 	}
 }
+
+// TestClientStampDefeatsAnInheritedInternalOrigin covers the one thing
+// ContextWithClientOrigin is for: OVERRIDE.
+//
+// OriginClient is the zero value, so an unstamped context is already
+// untrusted; the explicit stamp is not what provides that. What it provides is
+// that an inherited internal mark does NOT survive -- if a handler runs on a
+// context derived from server-side Go, the inherited mark would otherwise
+// launder into every construct that request touches, and nothing would look
+// wrong.
+//
+// SCOPE, stated because an earlier version of this comment overclaimed. This
+// test exercises the auth package only. It does not reach component/grpc, and
+// deleting the gRPC handler's stamp leaves it green -- so it is not evidence
+// for that wiring, and should not be read as such.
+//
+// The override property IS load-bearing beyond documentation, and the #2879
+// review is what established where: component/automations' originForSource
+// stamps CLIENT explicitly for untrusted source rather than passing the parent
+// through, so an untrusted automation body executed on an internally-stamped
+// parent cannot inherit trust it was denied. That was a live hole until a test
+// asserted the inherited case.
+//
+// The bare override is also asserted by TestInternalOriginRoundTrips. What is
+// unique here is that the stamp SURVIVES the layering a real handler does
+// afterwards.
+func TestClientStampDefeatsAnInheritedInternalOrigin(t *testing.T) {
+	// Simulate a request context descended from a trusted server-side one.
+	trustedParent := ContextWithInternalOrigin(context.Background())
+	if !OriginFromContext(trustedParent).IsInternal() {
+		t.Fatal("fixture: parent is not internal")
+	}
+
+	requestCtx := ContextWithClientOrigin(trustedParent)
+	if OriginFromContext(requestCtx).IsInternal() {
+		t.Fatal("a request context derived from an internal parent still reported " +
+			"internal after the client stamp; origin would launder inward")
+	}
+
+	// And the stamp must survive further derivation, the way a real handler
+	// wraps the context afterwards (access context, provenance, timeouts).
+	derived := ContextWithAccess(requestCtx, &AccessContext{UserId: "v1:identity:user:x", Role: RoleOwner})
+	if OriginFromContext(derived).IsInternal() {
+		t.Error("client origin was lost when the handler layered an AccessContext on top")
+	}
+}

@@ -1519,6 +1519,14 @@ func (s *streamSession) handleExecuteQuery(envelope *memqlv1.MemqlClientMessage,
 	// query/mutation silently no-ops (zero rows). See memql#216.
 	ctx = auth.ContextWithAccess(ctx, s.ensureAccess(ctx))
 
+	// #2800: mark the wire explicitly. OriginClient is the zero value, so this
+	// is not what makes an unstamped context untrusted -- it is a positive
+	// assertion at the one frame that knows the call came off the wire, and it
+	// OVERRIDES any inherited internal stamp. That matters if this handler
+	// ever runs on a context derived from server-side Go: without it, origin
+	// would launder inward silently, and the failure would be invisible.
+	ctx = auth.ContextWithClientOrigin(ctx)
+
 	s.activeRequests.Store(requestId, cancel)
 
 	// Extract clientId for optimistic update reconciliation

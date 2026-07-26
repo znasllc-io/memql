@@ -76,6 +76,24 @@ func (e *MemQLEngine) mcpPromotedFunctions() []*Function {
 		if !fn.Enabled {
 			continue
 		}
+		// #2800: same reasoning, different gate. A @serverOnly construct is
+		// refused for every client-originated call, and MCP is a client
+		// surface -- advertising it would be the same dishonest surface, and
+		// worse here, since these constructs exist precisely because they
+		// read across users. sdk/gen applies the identical skip for the typed
+		// SDK.
+		//
+		// No construct carries both @serverOnly and @mcp today, and nothing
+		// REJECTS the pair -- component/language/annotations/registry.go
+		// permits both on a query/mutation and no loader refuses the
+		// combination. So this skip keeps such a construct OFF the advertised
+		// surface; it does not make one impossible. An earlier version of this
+		// comment claimed "by construction", which was the same overclaiming
+		// this issue exists to correct. The skip is pinned by
+		// TestMCPPromotionDropsServerOnlyConstructs.
+		if fn.ServerOnly {
+			continue
+		}
 		if fn.FunctionKind == "query" || fn.FunctionKind == "mutation" {
 			out = append(out, fn)
 		}

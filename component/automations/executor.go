@@ -442,11 +442,7 @@ func (e *Executor) ExecuteWithEvent(ctx context.Context, automation *Automation,
 		// #2800: the input block reaches the engine exactly like a step, so
 		// it gets the same trust rule -- stamped only when the automation's
 		// SOURCE came from the registered tree.
-		inputCtx := ctx
-		if automation.Trusted {
-			inputCtx = auth.ContextWithInternalOrigin(ctx)
-		}
-		inputResult, err := e.executeInput(inputCtx, automation.Input)
+		inputResult, err := e.executeInput(originForSource(ctx, automation.Trusted), automation.Input)
 		if err != nil {
 			exec.Fail(fmt.Errorf("input query failed: %w", err))
 			e.handleAutomationError(ctx, automation, exec, triggeringEvent, err)
@@ -733,6 +729,34 @@ func (e *Executor) ExecuteWithEvent(ctx context.Context, automation *Automation,
 }
 
 // executeInput runs the input query.
+// originForSource applies the #2800 trust rule: an automation body reaches the
+// engine with INTERNAL origin only when its source came from the registered
+// tree. Caller-submitted source (a bundle dry-run, an inline automation) stays
+// at client origin, so it cannot launder itself into reaching a @serverOnly
+// construct.
+//
+// This is a named function rather than an inline `if` because the inline form
+// was DELETABLE WITH A GREEN SUITE: the only end-to-end tests drive automations
+// with no `input:` block, so the branch was never entered. The Executor holds a
+// concrete *memql.MemQLEngine rather than an interface, so there is no seam to
+// inject a capturing engine through -- extracting the decision is what makes it
+// assertable at all. See TestOriginForSource.
+// The untrusted branch stamps CLIENT explicitly rather than passing ctx
+// through. Passing through looks equivalent -- OriginClient is the zero value
+// -- but it is not: it INHERITS whatever the parent context carried. An
+// untrusted body executed on a context descended from server-side Go (the MCP
+// run_automation runner, a nested automation dispatched from an already-
+// internal step) would then reach a @serverOnly construct on trust it was
+// explicitly denied. That is the same laundering ContextWithClientOrigin
+// exists to stop at the wire, and it was live here until a test asserted the
+// inherited case.
+func originForSource(ctx context.Context, trusted bool) context.Context {
+	if trusted {
+		return auth.ContextWithInternalOrigin(ctx)
+	}
+	return auth.ContextWithClientOrigin(ctx)
+}
+
 func (e *Executor) executeInput(ctx context.Context, input *AutomationInput) (any, error) {
 	if e.engine == nil {
 		return nil, fmt.Errorf("MemQL engine not configured")
@@ -745,9 +769,9 @@ func (e *Executor) executeInput(ctx context.Context, input *AutomationInput) (an
 
 	// #2800: same trust rule as executeStep -- an inline automation's
 	// `input:` block is caller-supplied source too, so it cannot be stamped
-	// unconditionally. The automation is not threaded here, so the stamp is
-	// applied by the caller (executeAutomation) before dispatch; this frame
-	// deliberately does NOT stamp.
+	// unconditionally. The automation record is not threaded into this frame,
+	// so the stamp is applied by ExecuteWithEvent (which has it) before
+	// calling here; this frame deliberately does NOT stamp.
 	result, err := e.engine.Execute(ctx, query)
 	if err != nil {
 		return nil, err
@@ -816,35 +840,45 @@ func (e *Executor) executeStep(ctx context.Context, step *Step, stepCtx *StepCon
 
 	// Execute the step.
 	//
-	// #2800: an automation step is server-side by construction -- the body is
-	// AUTHORED DSL dispatched from a graph event, not query text submitted by
-	// a caller -- so it may reach @serverOnly constructs. The kill-switch
-	// automation is the motivating case: killSwitchSuspendsRunningPlans reads
-	// the affected USER's running plans, and the actor is the automation's
-	// context rather than that user, so the construct cannot be scoped to
-	// actor.userId and must instead be barred from the wire.
+	// #2800: a step whose automation came from the REGISTERED DSL TREE may
+	// reach @serverOnly constructs; one whose body was supplied by a caller
+	// may not. killSwitchSuspendsRunningPlans is the motivating case for the
+	// first half -- it reads the affected USER's running plans, and the actor
+	// is the automation's context rather than that user, so the construct
+	// cannot be scoped to actor.userId and is barred from the wire instead.
 	//
-	// The stamp belongs HERE, not deeper. A first attempt put it on the
-	// `input:` block's engine call, which no step goes through -- every step
-	// type dispatches via stepRegistry.Execute and reached the engine with an
-	// unstamped context, so the kill switch was refused as a client call and
-	// silently suspended nothing. That is the failure the issue's own park
-	// comment predicted: a security control failing closed-looking but open.
+	// THE CONDITION IS THE SECURITY PROPERTY. Do not simplify it to an
+	// unconditional stamp; two earlier attempts were wrong in opposite
+	// directions and the reasoning for each looked sound at the time:
+	//
+	//   1. Stamped the `input:` block only. No step goes through that path --
+	//      every step type dispatches via stepRegistry.Execute -- so the kill
+	//      switch was refused as a client call and silently suspended
+	//      nothing. Closed-looking but open, exactly as the issue's park
+	//      comment predicted.
+	//
+	//   2. Stamped HERE unconditionally, justified by "executeStep is
+	//      reachable only from automation execution and resume". That is
+	//      TRUE and is NOT a security argument: automation execution includes
+	//      automations whose body the caller supplied. RunBundleDryRun
+	//      compiles submitted source and drives this exact frame, and its
+	//      reads are not sandboxed -- so MCP run_inline_automation and the
+	//      planner's LLM-emitted bundle could each wrap a @serverOnly read in
+	//      a step and have it execute with internal origin.
+	//
+	// Trust therefore rides on the automation's SOURCE (Automation.Trusted,
+	// granted only by the unified tree loader), not on which function does
+	// the dispatching.
 	//
 	// It also must not go any deeper. LogicRunner is shared with the
-	// client-callable `logic foo(...)` path, so stamping there would let any
-	// caller launder client origin into internal by wrapping a @serverOnly
-	// read in a logic. executeStep is reachable only from automation
-	// execution and resume, which is what makes it the correct seam.
+	// client-callable `logic foo(...)` path, so stamping there would let a
+	// caller launder client origin by wrapping a @serverOnly read in a logic.
 	//
-	// Note this marks who authored the CALL, not the data: a client can
-	// certainly cause an automation to fire, but it cannot choose which
-	// constructs the authored body invokes.
-	stepCtx2 := ctx
-	if stepCtx != nil && stepCtx.Execution != nil && stepCtx.Execution.SourceTrusted {
-		stepCtx2 = auth.ContextWithInternalOrigin(ctx)
-	}
-	result, err := e.stepRegistry.Execute(stepCtx2, step, stepCtx)
+	// Routed through originForSource so the step and input: paths cannot
+	// drift, and so the untrusted branch stamps CLIENT rather than inheriting
+	// whatever the parent carried -- see that function's comment.
+	trusted := stepCtx != nil && stepCtx.Execution != nil && stepCtx.Execution.SourceTrusted
+	result, err := e.stepRegistry.Execute(originForSource(ctx, trusted), step, stepCtx)
 
 	// Publish step completed/failed event
 	var stepTopic string
