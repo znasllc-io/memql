@@ -1,10 +1,13 @@
 package automations
 
 import (
+	"bytes"
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/events"
 )
 
 // memql#2801: an UNBOUND actor root is fail-open, so every evaluator
@@ -33,7 +36,7 @@ func TestBindActorEnvelope_UnboundActorIsFailOpen(t *testing.T) {
 
 	// Bound: the denying envelope closes it.
 	bound := NewEvaluator()
-	bindActorEnvelope(bound, context.Background())
+	bindActorEnvelope(context.Background(), bound)
 	got, err = bound.EvaluateCondition("actor.isClusterOwner != false")
 	if err != nil {
 		t.Fatalf("bound evaluate: %v", err)
@@ -59,7 +62,7 @@ func TestBindActorEnvelope_RealOwnerStillPasses(t *testing.T) {
 		UserId: "u1", Role: auth.RoleOwner,
 	})
 	ev := NewEvaluator()
-	bindActorEnvelope(ev, ctx)
+	bindActorEnvelope(ctx, ev)
 
 	got, err := ev.EvaluateCondition("actor.isClusterOwner == true")
 	if err != nil {
@@ -87,4 +90,80 @@ func TestBindNoCallerActorEnvelope_Denies(t *testing.T) {
 			t.Errorf("%s must be false for a trigger with no caller (memql#2801)", cond)
 		}
 	}
+}
+
+// End-to-end at the seam the whole memql#2801 narrative is built around:
+// an event trigger's @filter. The structural invariant above proves the
+// binding is PRESENT at every site; this proves it has the intended
+// EFFECT on the path that matters most, because a `@filter` gating on an
+// actor field decides whether the automation fires at all.
+//
+// `@filter(actor.isClusterOwner != false)` loads green (with or without
+// @actor) and the compiler does not rewrite the actor root away, so an
+// unbound root made this fire on every event.
+func TestScheduler_EventFilterOnActor_DoesNotFireWithoutAuth(t *testing.T) {
+	bus := events.NewBus()
+	defer bus.Close()
+	var buf bytes.Buffer
+	s := newMinimalScheduler(&buf, bus)
+
+	// Zero steps: a fire completes cleanly without a step registry, and the
+	// assertion is on whether the filter admitted the event at all.
+	gated := &Automation{
+		Name:    "adminOnlySweep",
+		Trigger: &TriggerConfig{Event: "node.created", Filter: `actor.isClusterOwner != false`},
+	}
+	// Control: a filter that does NOT mention actor and is true. Without it
+	// this test could pass because the harness never fires anything.
+	control := &Automation{
+		Name:    "ungatedSweep",
+		Trigger: &TriggerConfig{Event: "node.created", Filter: `event.topic != ""`},
+	}
+	for _, a := range []*Automation{gated, control} {
+		s.automations[a.Name] = a
+		if err := s.subscribeToEventTrigger(a); err != nil {
+			t.Fatalf("subscribeToEventTrigger(%s): %v", a.Name, err)
+		}
+	}
+
+	bus.PublishSync(events.NewEvent("node.created", events.KindNodeCreated, map[string]any{"id": "x"}))
+	log := buf.String()
+
+	// The bus carries no caller, so the denying envelope must make the
+	// actor-gated filter false. Before the binding, the unbound
+	// `actor.isClusterOwner` rendered as its own path text -- non-empty,
+	// therefore truthy -- and this admitted every event.
+	if !schedulerLogged(log, "filter not satisfied", gated.Name) {
+		t.Errorf("the actor-gated @filter did NOT deny an event with no caller -- the actor root is "+
+			"unbound or resolving truthy (memql#2801). Scheduler log:\n%s", log)
+	}
+
+	// The control asserts POSITIVELY that the harness fires. A negative
+	// "the control was not denied" is satisfied by any early return that
+	// skips the deny log -- a filter parse error, for instance -- which
+	// would leave the assertion above proving nothing (review round 4).
+	if !schedulerLogged(log, "event trigger fired", control.Name) {
+		t.Errorf("the control (non-actor) automation did not fire, so the harness admits nothing and "+
+			"the assertion above is vacuous. Scheduler log:\n%s", log)
+	}
+}
+
+// schedulerLogged reports whether the scheduler logged the given message
+// for the named automation.
+//
+// The name is matched on the structured `automation=` field rather than
+// anywhere in the line: a bare substring match makes one automation's
+// name match another's when it is a prefix (review round 4).
+func schedulerLogged(log, msg, automation string) bool {
+	for _, line := range strings.Split(log, "\n") {
+		if !strings.Contains(line, msg) {
+			continue
+		}
+		if strings.Contains(line, "automation="+automation+" ") ||
+			strings.HasSuffix(line, "automation="+automation) ||
+			strings.Contains(line, `"automation":"`+automation+`"`) {
+			return true
+		}
+	}
+	return false
 }

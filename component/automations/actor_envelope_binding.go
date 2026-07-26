@@ -21,7 +21,7 @@ import (
 // four evaluators each inventing their own representation of "no actor"
 // (an empty map, an unbound root, absent keys, the envelope), so the
 // answer depended on which one ran.
-func bindActorEnvelope(evaluator *Evaluator, ctx context.Context) {
+func bindActorEnvelope(ctx context.Context, evaluator *Evaluator) {
 	ac, _ := auth.AccessFromContext(ctx)
 	evaluator.SetCustom("actor", auth.ActorEnvelopeMap(ac))
 }

@@ -1297,7 +1297,7 @@ func (r *LogicRunner) newEvaluatorForLogic(ctx context.Context, args map[string]
 	// binding it always is both safer and simpler than the guard.
 	// One canonical envelope (#2623), via the one shared binder so the
 	// five evaluator sites cannot drift apart again.
-	bindActorEnvelope(evaluator, ctx)
+	bindActorEnvelope(ctx, evaluator)
 	if r.logger != nil {
 		evaluator.SetLogger(r.logger)
 	}
