@@ -288,8 +288,47 @@ func buildEventEnvelope(triggeringEvent *events.Event, triggeredBy, trigger stri
 	}
 }
 
-// ExecuteWithEvent runs an automation with an optional triggering event.
+// ExecuteWithEvent runs an automation with an optional triggering event, from a
+// SERVER-ORIGINATED trigger: a graph event, a cron tick, a sub-automation. The
+// automation's source decides whether its steps reach the engine with internal
+// origin.
 func (e *Executor) ExecuteWithEvent(ctx context.Context, automation *Automation, triggeredBy string, triggeringEvent *events.Event) (*AutomationExecution, error) {
+	return e.executeWithEvent(ctx, automation, triggeredBy, triggeringEvent, false)
+}
+
+// ExecuteWithClientEvent runs an automation whose TRIGGER PAYLOAD came from a
+// caller, and therefore never grants internal origin however trusted the
+// automation's source is (memql#2888).
+//
+// The #2800 rule -- "trust rides on the automation's SOURCE, not on which
+// function does the dispatching" -- is right and is not sufficient. Its earlier
+// phrasing carried the half that explains why:
+//
+//	a client can certainly cause an automation to fire, but it cannot choose
+//	which constructs the authored body invokes.
+//
+// On the MCP run_automation path the client still cannot choose the CONSTRUCT,
+// but it chooses the ARGUMENT -- and for a @serverOnly construct the argument
+// IS the authorization decision, because dsl/conformance_test.go treats
+// @serverOnly as the bucket that EXEMPTS a construct from carrying any
+// caller-scope filter. Origin is the only gate, so an unchecked argument is an
+// unchecked query.
+//
+// Concretely, before this existed: run_automation("killSwitchSuspendsRunningPlans",
+// {node:{id: <any user>}}) reached runningPlansForUser (@serverOnly) with an
+// attacker-chosen userId and then transitioned every plan it returned through
+// updatePlanStatus, which stamps `id: args.planId` with no owner predicate --
+// a cross-user write, not just a read leak. @filter does not help: the
+// scheduler evaluates it on the event-bus path, not here, and the caller
+// supplies the payload it would test.
+//
+// So the rule is: internal origin requires BOTH a trusted source AND a trigger
+// payload the caller did not supply.
+func (e *Executor) ExecuteWithClientEvent(ctx context.Context, automation *Automation, triggeredBy string, triggeringEvent *events.Event) (*AutomationExecution, error) {
+	return e.executeWithEvent(ctx, automation, triggeredBy, triggeringEvent, true)
+}
+
+func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation, triggeredBy string, triggeringEvent *events.Event, callerSuppliedPayload bool) (*AutomationExecution, error) {
 	if automation == nil {
 		return nil, fmt.Errorf("automation is nil")
 	}
@@ -333,7 +372,10 @@ func (e *Executor) ExecuteWithEvent(ctx context.Context, automation *Automation,
 	ctx = provenance.ContextWithProvenance(ctx, provenance.Automation(automation.Name, trigger))
 
 	exec := NewExecution(automation.Name, triggeredBy)
-	exec.SourceTrusted = automation.Trusted
+	// Internal origin requires a trusted SOURCE and a trigger payload the
+	// caller did not supply. See ExecuteWithClientEvent for why the source
+	// alone is not enough (memql#2888).
+	exec.SourceTrusted = automation.Trusted && !callerSuppliedPayload
 
 	// Global execution budget (memql#1142). The storm WARN above is a
 	// SIGNAL; this is the STOP. A process-global, cross-executor ceiling

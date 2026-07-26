@@ -132,7 +132,14 @@ func (r *mcpAutomationRunner) RunAutomation(ctx context.Context, owner, name str
 		Payload:   input,
 		Timestamp: time.Now().UTC(),
 	}
-	execn, err := r.exec.ExecuteWithEvent(r.ownerEnvelope(ctx, owner), auto, "mcp", ev)
+	// ExecuteWithClientEvent, NOT ExecuteWithEvent: `input` above is
+	// caller-supplied and is bound as the trigger event, so this run must not
+	// reach the engine with internal origin however trusted the tree-loaded
+	// automation's source is (memql#2888). The client cannot choose the
+	// construct the body invokes, but it chooses that construct's ARGUMENT --
+	// and a @serverOnly construct carries no caller-scope filter by design, so
+	// origin is the whole gate.
+	execn, err := r.exec.ExecuteWithClientEvent(r.ownerEnvelope(ctx, owner), auto, "mcp", ev)
 	if err != nil {
 		return nil, err
 	}

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/events"
 )
 
 // originCapturingRegistry records the origin of the context each step is
@@ -355,5 +356,114 @@ automation zzAttackerSubmitted {
 	if reg.got.IsInternal() {
 		t.Fatalf("caller-supplied automation dispatched with origin %v, want client -- "+
 			"an untrusted body inherited internal origin from its parent context", reg.got)
+	}
+}
+
+// TestExecuteWithClientEventDoesNotGrantInternalOrigin is the memql#2888 rule,
+// pinned at the executor rather than at the MCP runner.
+//
+// THAT PLACEMENT IS THE POINT. The seam the bug lives on is
+// app/mcp_automation_runner.go, which is behind `//go:build mcp` -- and CI runs
+// `-tags agent` and `-tags voice` but NOT `-tags mcp`, so nothing in that file
+// is ever compiled by CI. (The build-tagged-lane comment in ci.yml claims an
+// audit of every tagged test file and omits mcp; app/mcp_automation_runner_test.go
+// has three tests that have never run there.) A security assertion that only
+// exists behind an uncompiled tag is not a gate. This one runs untagged, on the
+// function that actually computes the trust, so it holds for every caller of
+// ExecuteWithClientEvent rather than for the one that exists today.
+func TestExecuteWithClientEventDoesNotGrantInternalOrigin(t *testing.T) {
+	reg := &originCapturingRegistry{}
+	e := NewExecutor(ExecutorOptions{
+		Logger:       slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})),
+		StepRegistry: reg,
+	})
+
+	// Trusted: loaded from the registered DSL tree, exactly as LoadByName
+	// returns it on the MCP run_automation path.
+	auto := &Automation{
+		Name:    "zzTreeLoadedAutomation",
+		Trusted: true,
+		Steps:   []*Step{{ID: "s1", Name: "decide", Type: StepTypeFunction}},
+	}
+	// The half the caller controls.
+	ev := &events.Event{Topic: "mcp.run.zzTreeLoadedAutomation", Payload: map[string]any{
+		"node": map[string]any{"id": "v1:identity:user:victim"},
+	}}
+
+	if _, err := e.ExecuteWithClientEvent(context.Background(), auto, "mcp", ev); err != nil {
+		t.Fatalf("ExecuteWithClientEvent: %v", err)
+	}
+	if !reg.called {
+		t.Fatal("no step was dispatched, so this asserts nothing -- OriginClient is the zero " +
+			"value, so a negative origin check passes when nothing ran")
+	}
+	if reg.got.IsInternal() {
+		t.Fatalf("a caller-parameterised run of a TRUSTED automation dispatched with origin %v, "+
+			"want client.\n\nThe client cannot choose which construct the authored body invokes, "+
+			"but it chooses that construct's ARGUMENT -- and @serverOnly exempts a construct from "+
+			"carrying any caller-scope filter, so origin is the entire authorization decision. "+
+			"Live chain: run_automation(killSwitchSuspendsRunningPlans, {node:{id:<victim>}}) "+
+			"reaches runningPlansForUser under an attacker-chosen userId and then transitions the "+
+			"plans it returns via updatePlanStatus, which stamps id: args.planId with no owner "+
+			"predicate (memql#2888).", reg.got)
+	}
+}
+
+// TestExecuteWithEventStillGrantsInternalOriginForTrustedSource is the other
+// direction, and it matters as much: #2800's first attempt shipped a BROKEN
+// KILL SWITCH by getting this wrong. A server-originated trigger -- a graph
+// event, a cron tick -- must still reach @serverOnly constructs, or
+// killSwitchSuspendsRunningPlans silently suspends nothing when a user trips
+// the computer-use kill switch.
+func TestExecuteWithEventStillGrantsInternalOriginForTrustedSource(t *testing.T) {
+	reg := &originCapturingRegistry{}
+	e := NewExecutor(ExecutorOptions{
+		Logger:       slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})),
+		StepRegistry: reg,
+	})
+	auto := &Automation{
+		Name:    "zzTreeLoadedAutomation",
+		Trusted: true,
+		Steps:   []*Step{{ID: "s1", Name: "decide", Type: StepTypeFunction}},
+	}
+	ev := &events.Event{Topic: "graph.node.updated.v1:identity:user"}
+
+	if _, err := e.ExecuteWithEvent(context.Background(), auto, "event", ev); err != nil {
+		t.Fatalf("ExecuteWithEvent: %v", err)
+	}
+	if !reg.called {
+		t.Fatal("no step was dispatched")
+	}
+	if !reg.got.IsInternal() {
+		t.Fatalf("a graph-event-triggered run of a TRUSTED automation dispatched with origin %v, "+
+			"want internal. Downgrading this path breaks the computer-use kill switch: its decide "+
+			"step reads runningPlansForUser (@serverOnly) and would be refused as a client call, "+
+			"suspending nothing (memql#2800).", reg.got)
+	}
+}
+
+// TestExecuteWithClientEventOnUntrustedSourceIsStillClient closes the
+// combination: caller-supplied source AND caller-supplied payload. Without it,
+// the && could be written as either operand alone and one of the two tests
+// above would still pass.
+func TestExecuteWithClientEventOnUntrustedSourceIsStillClient(t *testing.T) {
+	reg := &originCapturingRegistry{}
+	e := NewExecutor(ExecutorOptions{
+		Logger:       slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})),
+		StepRegistry: reg,
+	})
+	auto := &Automation{ // Trusted false: compiled from submitted source.
+		Name:  "zzCallerSubmitted",
+		Steps: []*Step{{ID: "s1", Name: "steal", Type: StepTypeFunction}},
+	}
+	if _, err := e.ExecuteWithClientEvent(context.Background(), auto, "mcp", &events.Event{Topic: "t"}); err != nil {
+		t.Fatalf("ExecuteWithClientEvent: %v", err)
+	}
+	if !reg.called {
+		t.Fatal("no step was dispatched")
+	}
+	if reg.got.IsInternal() {
+		t.Fatalf("caller-supplied source AND caller-supplied payload dispatched with origin %v, "+
+			"want client", reg.got)
 	}
 }
