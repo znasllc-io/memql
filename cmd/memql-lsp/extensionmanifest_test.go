@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -30,8 +31,9 @@ const (
 )
 
 type extensionManifest struct {
-	Engines      map[string]string `json:"engines"`
-	Dependencies map[string]string `json:"dependencies"`
+	Engines         map[string]string `json:"engines"`
+	Dependencies    map[string]string `json:"dependencies"`
+	DevDependencies map[string]string `json:"devDependencies"`
 }
 
 type extensionLockfile struct {
@@ -39,6 +41,18 @@ type extensionLockfile struct {
 		Version string            `json:"version"`
 		Dev     bool              `json:"dev"`
 		Engines map[string]string `json:"engines"`
+	} `json:"packages"`
+}
+
+// extensionLockfileRoot reads only the lockfile's root entry (""), which
+// mirrors the manifest's own ranges; npm rejects the tree when the two drift.
+// Kept as its own type rather than a field on extensionLockfile: that struct's
+// anonymous package shape is built literally by the engines.node fixtures
+// (memql#2790), and widening it there would break those literals for a field
+// only this test reads.
+type extensionLockfileRoot struct {
+	Packages map[string]struct {
+		DevDependencies map[string]string `json:"devDependencies"`
 	} `json:"packages"`
 }
 
@@ -53,28 +67,98 @@ func loadExtensionJSON(t *testing.T, path string, into any) {
 	}
 }
 
-// engineFloor parses the lowest version an npm `engines` range admits.
+// splitRange separates a leading npm range operator from the version behind
+// it. Only the single-character operators this file admits are recognised;
+// anything else stays in the version and fails the numeric parse, so a
+// doubled or exotic operator ("~~1.91.0", ">=1.91.0") cannot slip through as
+// if it had been understood.
+func splitRange(rng string) (op, version string) {
+	if rng != "" && (rng[0] == '^' || rng[0] == '~') {
+		return rng[:1], rng[1:]
+	}
+	return "", rng
+}
+
+// versionFloor parses the lowest version an npm range admits, accepting ONLY
+// the operators the caller names in allowedOps ("^", "~", or "" for a bare
+// exact version).
 //
-// Deliberately narrow: it accepts only the caret form npm writes for a VS Code
-// engine ("^1.91.0"). Anything else is a hard failure rather than a silent
-// pass, because a range this check cannot read is a range it cannot police.
-// The one exception is "*", which npm writes to mean "no constraint" -- callers
-// skip it before getting here, since there is no floor to compare.
-func engineFloor(t *testing.T, who, rng string) [3]int {
+// The allow-list is per-caller and deliberately not widened to a union
+// (memql#2789 review): the operator carries meaning this guard depends on, and
+// which operators are legal differs by subject. An `engines.vscode` value must
+// be a caret -- a tilde or exact there declares a CEILING, and this guard's
+// model is floor-only, so it would compare floors, see them equal, and pass a
+// manifest that actually supports a narrower host range than it advertises.
+// Rejecting the unreadable form is what forces a human to look.
+//
+// Anything outside the allow-list is a hard failure rather than a silent pass,
+// because a range this check cannot read is a range it cannot police. That
+// includes "*", npm's "no constraint": the dependency-engines caller skips it
+// before getting here (there is no floor to compare), while the @types/vscode
+// caller lets it reach this hard failure, because an unpinned types range is
+// exactly the defect this guard exists to reject.
+//
+// `subject` names what is being parsed (e.g. "the extension's engines.vscode")
+// and appears verbatim in the failure, so one parser serves every caller
+// without any message going vague.
+func versionFloor(t *testing.T, subject, rng string, allowedOps ...string) [3]int {
 	t.Helper()
-	parts := strings.Split(strings.TrimPrefix(rng, "^"), ".")
-	if !strings.HasPrefix(rng, "^") || len(parts) != 3 {
-		t.Fatalf("%s declares engines.vscode %q; this guard only understands the caret form npm writes (e.g. \"^1.91.0\") -- teach it the new form rather than dropping the check", who, rng)
+	op, version := splitRange(rng)
+	if !slices.Contains(allowedOps, op) {
+		t.Fatalf("%s is %q; this guard only understands %s here -- teach it the new form rather than dropping the check",
+			subject, rng, describeOps(allowedOps))
+	}
+	parts := strings.Split(version, ".")
+	if len(parts) != 3 {
+		t.Fatalf("%s is %q; this guard only understands a three-component version (e.g. \"1.91.0\") -- teach it the new form rather than dropping the check", subject, rng)
 	}
 	var floor [3]int
 	for i, p := range parts {
-		n, err := strconv.Atoi(p)
-		if err != nil {
-			t.Fatalf("%s declares engines.vscode %q with non-numeric component %q", who, rng, p)
+		if !isCanonicalVersionComponent(p) {
+			t.Fatalf("%s is %q, with non-canonical component %q; each component must be plain digits, no sign and no leading zero", subject, rng, p)
 		}
+		n, _ := strconv.Atoi(p) // Shape already validated above.
 		floor[i] = n
 	}
 	return floor
+}
+
+// isCanonicalVersionComponent reports whether a dotted component is a plain
+// semver number.
+//
+// strconv.Atoi alone is too lax for a guard whose job is judging range SHAPE:
+// it accepts a sign and leading zeros, so "~1.091.0" reads here as ~1.91.0
+// while node-semver calls it an invalid range, and "+1.91.0" reads as a clean
+// exact pin while node-semver expands it to "*" -- which would satisfy 1.125.0,
+// the exact version this guard exists to reject. Neither is reachable through
+// npm today; both are spellings where npm and this parser would disagree about
+// what they mean, which is precisely what must not happen quietly.
+func isCanonicalVersionComponent(p string) bool {
+	if p == "" || (p != "0" && p[0] == '0') {
+		return false
+	}
+	for i := 0; i < len(p); i++ {
+		if p[i] < '0' || p[i] > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// describeOps renders an allow-list as example ranges for a failure message.
+func describeOps(allowedOps []string) string {
+	examples := make([]string, 0, len(allowedOps))
+	for _, op := range allowedOps {
+		examples = append(examples, fmt.Sprintf("%q", op+"1.91.0"))
+	}
+	return "the " + strings.Join(examples, " or ") + " form"
+}
+
+// engineFloor parses an `engines.vscode` range. Caret only -- see versionFloor
+// for why a tilde or exact version must NOT be quietly accepted here.
+func engineFloor(t *testing.T, subject, rng string) [3]int {
+	t.Helper()
+	return versionFloor(t, subject, rng, "^")
 }
 
 func formatEngineVersion(v [3]int) string {
@@ -299,7 +383,7 @@ func TestExtensionEngineCoversDependencyEngines(t *testing.T) {
 	if !ok {
 		t.Fatal("extension manifest declares no engines.vscode; the marketplace would have no floor to enforce")
 	}
-	extensionFloor := engineFloor(t, "the extension", declared)
+	extensionFloor := engineFloor(t, "the extension's engines.vscode", declared)
 
 	shipped := 0
 	for lockPath, pkg := range lock.Packages {
@@ -312,7 +396,7 @@ func TestExtensionEngineCoversDependencyEngines(t *testing.T) {
 			continue // Not every package constrains the editor version.
 		}
 		name := lockedPackageName(lockPath)
-		depFloor := engineFloor(t, name, required)
+		depFloor := engineFloor(t, name+"'s engines.vscode", required)
 		if engineOlder(extensionFloor, depFloor) {
 			t.Errorf("extension declares engines.vscode %q (floor %s) but bundled %s@%s requires %q (floor %s); every VS Code host from %s up to (not including) %s would install this extension and fail at runtime -- raise engines.vscode to %q",
 				declared, formatEngineVersion(extensionFloor),
@@ -359,7 +443,7 @@ func TestExtensionHostNodeSatisfiesDependencyEngines(t *testing.T) {
 	if !ok {
 		t.Fatal("extension manifest declares no engines.vscode; without it the host Node cannot be derived")
 	}
-	floor := engineFloor(t, "the extension", declared)
+	floor := engineFloor(t, "the extension's engines.vscode", declared)
 	majors := hostNodeMajors(t, declared, floor)
 	if len(majors) == 0 {
 		t.Fatal("no host Node majors derived; vscodeHostNodeMajor lost its entries and this guard has silently stopped protecting anything")
@@ -509,4 +593,135 @@ func TestVSCodeHostNodeMajorIsSelfConsistent(t *testing.T) {
 				cur[0], cur[1], vscodeHostNodeMajor[cur], prev[0], prev[1], vscodeHostNodeMajor[prev])
 		}
 	}
+}
+
+// typesVSCodePackage is the types package whose version decides which VS Code
+// API surface `tsc` type-checks src/extension.ts against.
+const typesVSCodePackage = "@types/vscode"
+
+// TestExtensionTypesMatchEngineFloor guards the OTHER side of the same contract
+// (memql#2789). TestExtensionEngineCoversDependencyEngines stops a dependency's
+// floor from rising above what the extension advertises; this stops the TYPES
+// from rising above it, which fails in the opposite direction and is invisible
+// to every other gate.
+//
+// `tsc` type-checks against @types/vscode, so that package alone decides which
+// API surface compiles. A caret range floats to the newest 1.x -- it had
+// resolved to 1.125.0 against a declared floor of 1.91 -- so any API added
+// after the floor type-checks clean, ships, and throws at runtime on a host
+// inside the advertised range. `vsce package` does not catch it: it only errors
+// when the types are NEWER than engines.vscode, and "^1.85.0" reads as older,
+// so packaging exited 0 on the broken state.
+//
+// Two assertions, and the pin needs both:
+//
+//   - the range must not FLOAT past the declared minor -- so tilde ("~1.91.0")
+//     or an exact pin ("1.91.0"), never a caret. This is the load-bearing half:
+//     a caret at the correct floor ("^1.91.0") still resolves to 1.125 and
+//     reproduces the entire defect, so comparing floors alone would not close
+//     it. An exact pin is stricter than the tilde and equally correct, so it is
+//     accepted rather than blocked on style.
+//   - its floor must EQUAL engines.vscode's floor. Lower under-constrains the
+//     compiler against APIs the manifest promises; higher type-checks against
+//     APIs the oldest supported host does not have.
+//
+// It then checks the RESOLVED version in the lockfile, because the declared
+// range is only half the contract -- the defect was 1.125.0 actually being
+// installed.
+//
+// WHAT THIS ADDS OVER `npm ci`. An INCONSISTENT pair -- a manifest and
+// lockfile that disagree -- is already an `npm ci` error wherever one runs.
+// What no npm command can see is a CONSISTENT but WRONG pin, and that is what
+// shipped: `^1.85.0` declared, 1.125.0 correctly resolved, with `npm ci`, tsc
+// and `vsce package` ALL GREEN on it (verified by reconstructing that state).
+// Judging the declared range's SHAPE is this guard's job alone; the resolved
+// and root-range checks below are belt-and-braces so an inconsistent pair also
+// fails here, at a file:line, rather than only wherever npm happens to run.
+//
+// Deliberately no claim here about WHICH CI lane runs what. Two revisions of
+// this comment asserted CI topology and both were wrong in ways review had to
+// catch -- first that a lane ran only the grammar package, then that the lane
+// was itself a required check, when the ruleset does not list it and ci.yml
+// warns in capitals against requiring individual jobs at all. That belongs in
+// the workflow file, which is versioned next to the truth. memql#2792 tracks
+// widening the lane that runs this package.
+func TestExtensionTypesMatchEngineFloor(t *testing.T) {
+	var manifest extensionManifest
+	loadExtensionJSON(t, checkedInExtensionManifest, &manifest)
+
+	declared, ok := manifest.Engines["vscode"]
+	if !ok {
+		t.Fatal("extension manifest declares no engines.vscode; there is no floor for the types to match")
+	}
+	types, ok := manifest.DevDependencies[typesVSCodePackage]
+	if !ok {
+		t.Fatalf("extension manifest declares no devDependencies[%q]; tsc would fall back to whatever is installed and this guard would protect nothing", typesVSCodePackage)
+	}
+
+	// Resolve the engine floor FIRST: it validates that engines.vscode is the
+	// caret form, so the suggestion below quotes a real version rather than
+	// echoing an unparsed range back at the author.
+	engine := engineFloor(t, "the extension's engines.vscode", declared)
+
+	if strings.HasPrefix(types, "^") {
+		t.Errorf("%s is %q; pin it with a tilde (\"~%s\") so tsc type-checks against the floor the manifest advertises. A caret floats to the newest 1.x -- it resolved to 1.125.0 while engines.vscode said %q -- so any API added after the floor compiles clean and throws at runtime on a supported host",
+			typesVSCodePackage, types, formatEngineVersion(engine), declared)
+		return // The floor comparison below would be misleading on a caret.
+	}
+
+	// Tilde or exact only -- a caret was rejected above, and this guard must
+	// not inherit engineFloor's caret-only rule, which is the opposite
+	// constraint.
+	typesOp, _ := splitRange(types)
+	typesFloor := versionFloor(t, typesVSCodePackage, types, "~", "")
+	if engine != typesFloor {
+		t.Errorf("%s floor is %s but engines.vscode floor is %s; they must be equal so the compiler enforces exactly the API surface the marketplace advertises -- pin %s to \"~%s\"",
+			typesVSCodePackage, formatEngineVersion(typesFloor), formatEngineVersion(engine),
+			typesVSCodePackage, formatEngineVersion(engine))
+		return // A resolved-version check against a wrong floor would only repeat this.
+	}
+
+	// The declared range is only half the contract: the defect was about the
+	// version npm actually RESOLVED. A consistent-but-wrong pin is invisible to
+	// `npm ci`, so the shape check above is this guard's alone -- but an
+	// INCONSISTENT pair must not slip through here either, or the failure
+	// depends on which lane happens to run.
+	var lock extensionLockfile
+	loadExtensionJSON(t, checkedInExtensionLockfile, &lock)
+	locked, ok := lock.Packages["node_modules/"+typesVSCodePackage]
+	if !ok {
+		t.Fatalf("%s is absent from the lockfile; run `npm install` in editors/vscode to resync", typesVSCodePackage)
+	}
+	resolved := versionFloor(t, typesVSCodePackage+" in the lockfile", locked.Version, "")
+	if !rangeAdmits(typesOp, typesFloor, resolved) {
+		t.Errorf("%s resolves to %s in the lockfile but package.json pins %q; tsc type-checks against the RESOLVED version, so the pin is not being honoured -- run `npm install` in editors/vscode",
+			typesVSCodePackage, locked.Version, types)
+	}
+
+	// npm records the manifest's own ranges in the lockfile root. If those two
+	// disagree the tree is stale in a way `npm ci` rejects, and this guard
+	// should say so at the file:line rather than leave it to a CI lane.
+	var lockRoot extensionLockfileRoot
+	loadExtensionJSON(t, checkedInExtensionLockfile, &lockRoot)
+	if rootRange, ok := lockRoot.Packages[""].DevDependencies[typesVSCodePackage]; ok && rootRange != types {
+		t.Errorf("package.json pins %s at %q but the lockfile root records %q; the lockfile is stale -- run `npm install` in editors/vscode",
+			typesVSCodePackage, types, rootRange)
+	}
+}
+
+// rangeAdmits reports whether `resolved` satisfies the pin `op`+`floor`, for
+// the two operators this guard accepts.
+//
+// Major.minor equality is NOT the range check, which an earlier revision
+// assumed: `~1.91.3` excludes 1.91.0 (below the floor), and an exact `1.91.0`
+// excludes 1.91.5 (npm: "lock file's @types/vscode@1.91.5 does not satisfy
+// @types/vscode@1.91.0"). Both slipped through as equal major.minor.
+func rangeAdmits(op string, floor, resolved [3]int) bool {
+	switch op {
+	case "": // Exact pin -- only that version.
+		return resolved == floor
+	case "~": // >=floor, and only within the same major.minor.
+		return resolved[0] == floor[0] && resolved[1] == floor[1] && resolved[2] >= floor[2]
+	}
+	return false
 }
