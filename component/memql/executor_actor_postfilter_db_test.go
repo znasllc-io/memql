@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/znasllc-io/memql/component/auth"
@@ -166,4 +167,106 @@ func TestActorComparisonPostFilterResolvesToConstant(t *testing.T) {
 	_, err = nodeMatchesExpression(node, expr, map[string]map[string]any{})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "is not supported in queries")
+}
+
+// memql#2822 part B: with NO AccessContext, the admin gate must DENY on
+// both paths a query takes -- which is what makes an admin-gated query
+// return zero rows.
+//
+// memql#2801 was a silent fail-open here: the actor envelope resolved
+// `isClusterOwner` to TRUE on a nil context, and since
+// `actor.isClusterOwner==true` is the entire gate on the admin-tier
+// constructs, those queries returned EVERY row rather than none. The
+// telephony admin reads are full call-detail-record and DID inventory
+// dumps across every partition.
+//
+// #2811 fixed the resolver and #2824 pinned the bindings; neither
+// asserted the end property. This does, at the DB-free helper level --
+// the file's DB variants skip without Postgres, which is the lane where
+// #2801 shipped green.
+//
+// Scope, stated honestly: this asserts the GATE denies, not that a query
+// executes and returns nothing. The step between the two is that the
+// gate is a top-level `&&` conjunct in all five shipped admin
+// constructs (dsl/telephony/queries.memql:13,22,35,48 --
+// note :48 keeps its `||` parenthesized so the gate sits outside it --
+// and dsl/authoring/queries.memql:70), so a false leaf zeroes the
+// result. That composition is a corpus property rather than an engine
+// one; memql#2839 tracks gating it.
+func TestActorGate_NoAccessContext_DeniesOnBothPaths(t *testing.T) {
+	// A request that never carried auth. Not "dev mode": with
+	// MEMQL_IDENTITY_ENABLED=false the local-dev interceptor injects
+	// claims that ensureAccess turns into a real owner AccessContext, so
+	// dev mode does NOT reach here nil (memql#2801).
+	noAuth := context.Background()
+
+	gate := actorCmp("isClusterOwner", OpEq, true)
+	gated := &LogicalExpression{
+		Op:    LogicalAnd,
+		Left:  gate,
+		Right: payloadCmp("status", OpEq, "active"),
+	}
+	node := activeStatusNode(t)
+
+	// Path 1 -- the in-process post-filter. The actor term must resolve
+	// to FALSE, dropping the AND regardless of the payload.
+	resolved, err := resolveActorComparisonsToConstants(noAuth, gated)
+	require.NoError(t, err)
+	postFilterMatch, err := nodeMatchesExpression(node, resolved, map[string]map[string]any{})
+	require.NoError(t, err)
+	// assert, not require: the agreement check below must stay reachable
+	// when one path regresses, or it is decoration (memql#2822 review).
+	assert.False(t, postFilterMatch,
+		"an active row MATCHED the cluster-owner-gated filter with NO AccessContext -- "+
+			"the admin gate is fail-open (memql#2801/#2822)")
+
+	// Path 2 -- the SQL push-down. The gate compiles to a bound `? op ?`
+	// and the LEFT bind is the resolved actor value; it must be false, so
+	// the DB returns nothing. Asserting the bound VALUE rather than the
+	// SQL text is the point -- the fragment is byte-identical whether the
+	// gate is open or shut, so a text assertion passes either way. (The
+	// text itself is already pinned by TestCompileActorFieldComparison.)
+	compiled, err := compileActorFieldComparison(noAuth, gate)
+	require.NoError(t, err)
+	require.Len(t, compiled.args, 2)
+	assert.Equal(t, false, compiled.args[0],
+		"the actor constant bound into the WHERE clause must be FALSE with no AccessContext; "+
+			"binding true makes every admin-tier query return the full table")
+
+	// Both paths must agree, or a combined-filter query returns different
+	// rows depending on which one ran. Modelled through the compiled
+	// OPERATOR rather than assuming equality, so changing the gate's
+	// operator cannot silently invalidate the comparison.
+	sqlGateOpen, err := sqlBoundComparisonHolds(compiled)
+	require.NoError(t, err)
+	assert.Equal(t, postFilterMatch, sqlGateOpen,
+		"SQL bind and post-filter disagree about a nil AccessContext")
+
+	// Control: a real cluster owner still passes, so this is a gate and
+	// not a denial of service on the admin surface.
+	ownerResolved, err := resolveActorComparisonsToConstants(clusterOwnerCtx("u-owner-2822"), gated)
+	require.NoError(t, err)
+	ownerMatch, err := nodeMatchesExpression(node, ownerResolved, map[string]map[string]any{})
+	require.NoError(t, err)
+	assert.True(t, ownerMatch, "a real cluster owner must still see the row")
+}
+
+// sqlBoundComparisonHolds evaluates a compiled `? op ?` fragment over its
+// own bound arguments, so the test models what the DB does with the
+// emitted operator instead of hardcoding equality.
+func sqlBoundComparisonHolds(compiled compiledExpression) (bool, error) {
+	// Self-guarded: the sole call site checks this too, but the helper is
+	// package-level and a future caller should not have to know.
+	if len(compiled.args) != 2 {
+		return false, fmt.Errorf("actor-gate fragment %q has %d bound args, want 2",
+			compiled.sql, len(compiled.args))
+	}
+	switch compiled.sql {
+	case "? = ?":
+		return compiled.args[0] == compiled.args[1], nil
+	case "? <> ?":
+		return compiled.args[0] != compiled.args[1], nil
+	}
+	return false, fmt.Errorf("unmodelled actor-gate fragment %q -- extend sqlBoundComparisonHolds "+
+		"deliberately rather than letting a new operator go unchecked", compiled.sql)
 }
