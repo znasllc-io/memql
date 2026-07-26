@@ -414,7 +414,7 @@ test-polyphon:
 # ---------------------------------------------------------------------------
 
 ##@ Quality & codegen
-.PHONY: vet fmt lint tidy generate proto-gen proto-gen-check prs-stalled
+.PHONY: vet fmt lint tidy generate proto-gen proto-gen-check prs-stalled claims-stale
 
 ## Run go vet on all packages
 vet:
@@ -432,6 +432,13 @@ lint: fmt vet
 ## IDLE_MINUTES=15 tightens the idle threshold; REPO=owner/name retargets.
 prs-stalled:
 	bash scripts/dev/stalled-prs.sh
+
+## Report claimed:* labels no live session is holding (memql#2834). READ-ONLY by
+## default. Pass APPLY=1 to remove the label from CLOSED issues, where an
+## abandoned claim is unambiguous and cannot race a live session; claims on OPEN
+## issues are always reported, never swept.
+claims-stale:
+	bash scripts/dev/stale-claims.sh $(if $(APPLY),--apply,)
 
 ## Tidy go.mod dependencies
 tidy:
