@@ -47,6 +47,22 @@ func TestBuildSpecCtx_AbsentAuthYieldsTheDenyingEnvelope(t *testing.T) {
 	require.Equal(t, false, actor["isClusterOwner"],
 		"absent auth must deny the admin gate")
 	require.NotNil(t, actor["now"], "actor.now must be bound")
+
+	// And the divergence itself, not just its proxy: evaluate the
+	// NEGATED predicate that used to short-circuit TRUE on absent keys.
+	require.False(t, specEqualNe(actor["isClusterOwner"], false),
+		"`isClusterOwner != false` must be FALSE on absent auth; TRUE here is the fail-open "+
+			"the absent-key representation produced (memql#2801)")
+	require.False(t, specEqualNe(actor["isClusterOwner"], true) == false && actor["isClusterOwner"] == true,
+		"sanity: absent auth is not an owner")
+}
+
+// specEqualNe mirrors how a context-spec body evaluates `a != b`: the
+// shared comparator with the result negated. Written out so the test
+// exercises the same nil short-circuit the real evaluator has, rather
+// than Go's own != which has no such rule.
+func specEqualNe(a, b any) bool {
+	return !specEqual(a, b)
 }
 
 // With a real context the spec surface must agree with the envelope too

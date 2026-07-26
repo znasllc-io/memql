@@ -357,6 +357,7 @@ func (e *Executor) ExecuteWithEvent(ctx context.Context, automation *Automation,
 	}
 
 	evaluator := NewEvaluator()
+	bindActorEnvelope(evaluator, ctx)
 
 	// Wire variable resolver for $var.X expressions
 	evaluator.SetVariableResolver(e.createVariableResolver())
@@ -916,6 +917,7 @@ func (e *Executor) handleAutomationError(ctx context.Context, automation *Automa
 	// Execute onError hook if defined
 	if automation.OnError != nil {
 		evaluator := NewEvaluator()
+		bindActorEnvelope(evaluator, ctx)
 		evaluator.SetCustom("error", err.Error())
 		evaluator.SetCustom("timestamp", time.Now().UTC().Format(time.RFC3339))
 		if triggeringEvent != nil {
