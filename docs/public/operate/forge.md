@@ -31,7 +31,7 @@ multiple projects from one tenant.
 Three concept types form the forge data model. All are partition-scoped (no
 `@scope`), meaning rows are team-shared within the tenant — a validator or
 approver can read a submitter's request. Read gating to developers and owners
-is enforced at the query layer via the forge role traits; it is not per-row
+is enforced at the query layer via the forge role specs; it is not per-row
 ownership.
 
 ### project (`v1:forge:project`)

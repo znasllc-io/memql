@@ -62,14 +62,14 @@ the call site).
 ```memql
 use cognition.concepts.{ participant }
 
-@description("Matches participants that completed verification")
-spec participant isVerifiedParticipant {
-  return verified == true
+@description("Matches guest participants")
+spec participant isGuestParticipant {
+  return isGuest == true
 }
 
-@description("Active records created by system automation")
-spec participant systemActive {
-  return active == true && createdBy == "system:automation"
+@description("Guest participants created by system automation")
+spec participant systemCreatedGuest {
+  return isGuest == true && createdBy == "system:automation"
 }
 ```
 
@@ -85,7 +85,7 @@ query participant queryHumanParticipants {
   args {
     spaceId  string  @required
   }
-  filter  spaceId==args.spaceId && isHumanParticipant
+  filter  spaceId==args.spaceId && isGuestParticipant
   shape   participantFull
 }
 ```

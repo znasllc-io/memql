@@ -630,11 +630,14 @@ automation "test": dependency cycle among steps [a b]
 
 ---
 
-## 14. Function naming: construct name carries the kind prefix
+## 14. Function naming: the construct name says what it does
 
-**Rule.** Query / mutation / spec / trait / logic constructs are
-named with a kind prefix: `queryActiveSpaces`, `mutationCreateSpace`,
-`isHumanParticipant`, `isActiveRecord`, `logicAutoJoinSI`.
+**Rule.** A construct is named for what it does, not for its kind --
+the declaration keyword already carries that: `activeHumanParticipants`,
+`addAgentToSpace`, `isHumanParticipant`, `isActiveRecord`,
+`bootstrapSession`. (See naming-conventions.md; #2853 tracks the
+`query*` / `mutation*` / `logic*` entries that still describe a prefix
+no construct carries.)
 Constructs live in one consolidated file per kind per namespace
 (`dsl/<namespace>/<construct>s.memql`), so the file name never
 carries an individual construct's name.
@@ -1087,8 +1090,8 @@ query space queryActiveSpaces {
 // the body returns a boolean over bare field names. No args.
 use cognition.concepts.{ participant }
 
-spec participant isVerifiedParticipant {
-  return verified == true
+spec participant isGuestParticipant {
+  return isGuest == true
 }
 ```
 
