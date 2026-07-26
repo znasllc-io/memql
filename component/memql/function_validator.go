@@ -8,6 +8,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/language/ast"
 )
 
@@ -17,14 +18,27 @@ type functionValidator struct {
 	specs     *SpecRegistry
 	resolved  map[string]ExpressionNode
 	resolving map[string]struct{}
+
+	// origin is where the call came from (memql#2800). The parse path is
+	// ctx-free by design, so the engine reads auth.OriginFromContext once in
+	// executeWith and hands the result down rather than threading a context
+	// through the parser. The ZERO VALUE is auth.OriginClient -- a validator
+	// built without an explicit origin (tests, internal tooling) is treated as
+	// untrusted, so forgetting to pass it denies rather than grants.
+	origin auth.CallOrigin
 }
 
 func newFunctionValidator(functions map[string]*Function, specs *SpecRegistry) *functionValidator {
+	return newFunctionValidatorWithOrigin(functions, specs, auth.OriginClient)
+}
+
+func newFunctionValidatorWithOrigin(functions map[string]*Function, specs *SpecRegistry, origin auth.CallOrigin) *functionValidator {
 	return &functionValidator{
 		functions: functions,
 		specs:     specs,
 		resolved:  make(map[string]ExpressionNode),
 		resolving: make(map[string]struct{}),
+		origin:    origin,
 	}
 }
 
@@ -379,6 +393,17 @@ func (v *functionValidator) expandFunctionCall(call *FunctionCallExpression) (Ex
 	// flag honest, so a disabled builtin rejects like everything else.
 	if !fn.Enabled {
 		return nil, fmt.Errorf("function %q is disabled", key)
+	}
+	// #2800: @serverOnly bars client-originated calls while leaving
+	// server-side Go free to call the construct. This sits beside the
+	// @disabled gate because it is the same kind of check at the same depth
+	// -- the resolved *Function is in hand -- but it is NOT the same
+	// property: @disabled stops every caller, which would break the very
+	// server-side paths @serverOnly exists to keep working (the auth path
+	// resolving `sub` -> user before an actor exists; the kill-switch
+	// automation acting on a user other than the actor).
+	if fn.ServerOnly && !v.origin.IsInternal() {
+		return nil, fmt.Errorf("function %q is server-only and cannot be called by a client", key)
 	}
 
 	// Validate arguments against schema. Normalise positional
@@ -979,6 +1004,14 @@ func (*LiteralValueNode) isExpressionNode() {}
 // resolvePlanFunctions resolves all function calls in a query plan.
 // This should be called after spec resolution but before execution.
 func resolvePlanFunctions(plan *QueryPlan, functions *FunctionRegistry, specs *SpecRegistry) error {
+	return resolvePlanFunctionsWithOrigin(plan, functions, specs, auth.OriginClient)
+}
+
+// resolvePlanFunctionsWithOrigin is resolvePlanFunctions with the call origin
+// made explicit (memql#2800). The no-origin wrapper defaults to OriginClient
+// so any caller that has not been taught about origin gets the restricted
+// treatment.
+func resolvePlanFunctionsWithOrigin(plan *QueryPlan, functions *FunctionRegistry, specs *SpecRegistry, origin auth.CallOrigin) error {
 	if plan == nil || plan.Root == nil {
 		return nil
 	}
@@ -987,7 +1020,7 @@ func resolvePlanFunctions(plan *QueryPlan, functions *FunctionRegistry, specs *S
 	if functions != nil {
 		snapshot = functions.Snapshot()
 	}
-	validator := newFunctionValidator(snapshot, specs)
+	validator := newFunctionValidatorWithOrigin(snapshot, specs, origin)
 
 	// Special case: top-level mutation function call.
 	// We don't expand it to an expression; Execute will evaluate it into an insert.

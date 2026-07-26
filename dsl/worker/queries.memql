@@ -77,6 +77,21 @@ query invocation invocationsForUser {
 }
 
 /// List a user's running plans.
+/// memql#2800: SERVER-SIDE ONLY. Returns another user's in-flight plans --
+/// including, via withComputerUseScope, which of them hold host-control scope.
+/// A caller-supplied userId is not a caller check, so over the wire this
+/// enumerated any user's plans.
+///
+/// It cannot be scoped to actor.userId instead: its caller is the
+/// killSwitchSuspendsRunningPlans automation (dsl/worker/logic.memql), which
+/// fires on a USER ROW UPDATE and suspends THAT user's plans. The actor there
+/// is the automation's context, not the affected user, so caller-scoping would
+/// return the wrong set and silently stop the kill switch -- a security
+/// control failing open while looking closed.
+///
+/// The automation path stamps auth.ContextWithInternalOrigin in
+/// component/automations/executor.go, so it keeps working.
+@serverOnly
 query plan runningPlansForUser {
   args {
     withComputerUseScope  boolean

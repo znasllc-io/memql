@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"github.com/znasllc-io/memql/component/auth"
 	"net/http"
 	"os"
 	"strings"
@@ -617,8 +618,9 @@ func (l *patUserLookup) UserById(ctx context.Context, userId string) (*pat.UserS
 	if l == nil || l.store == nil {
 		return nil, nil
 	}
-	res, err := l.store.Engine.Execute(ctx,
-		`query userById(userId: "`+escapeMemQLArg(userId)+`")`)
+	// #2800: server-side identity lookup.
+	res, err := l.store.Engine.Execute(auth.ContextWithInternalOrigin(ctx),
+		`query userByIdSystem(userId: "`+escapeMemQLArg(userId)+`")`)
 	if err != nil {
 		return nil, err
 	}

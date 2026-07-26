@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/znasllc-io/memql/component/auth"
 	"time"
 
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
@@ -70,7 +71,8 @@ func SaveCheckpoint(ctx context.Context, engine *memql.MemQLEngine, checkpoint *
 		string(payloadJSON),
 	)
 
-	_, err = engine.Execute(ctx, query)
+	// #2800: checkpoint bookkeeping is engine-internal, never client text.
+	_, err = engine.Execute(auth.ContextWithInternalOrigin(ctx), query)
 	if err != nil {
 		return fmt.Errorf("failed to save checkpoint: %w", err)
 	}

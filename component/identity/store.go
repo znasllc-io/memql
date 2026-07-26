@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/znasllc-io/memql/component/auth"
 	"log/slog"
 	"strings"
 	"time"
@@ -373,8 +374,9 @@ func (s *Store) LookupUserById(ctx context.Context, userId string) (*UserRow, er
 	if strings.TrimSpace(userId) == "" {
 		return nil, nil
 	}
-	query := fmt.Sprintf(`query userById(userId: %s)`, dslJSONString(userId))
-	nodes, err := s.executeAndExtract(ctx, query)
+	// #2800: identity-store lookup by id, server-side only.
+	query := fmt.Sprintf(`query userByIdSystem(userId: %s)`, dslJSONString(userId))
+	nodes, err := s.executeAndExtractInternal(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("identity.store: lookup user by id: %w", err)
 	}
@@ -1117,6 +1119,13 @@ func (s *Store) HasOwnerUser(ctx context.Context) (bool, error) {
 // exactly this, leaving Email/Role/Name unset on freshly minted
 // access tokens (which then broke the GA-auto-join chain because
 // hash(actor) diverged from hash(email)).
+// executeAndExtractInternal is executeAndExtract for a @serverOnly construct
+// (memql#2800). The stamp is applied here rather than at each call site so the
+// trusted marking is visible in one place and greppable.
+func (s *Store) executeAndExtractInternal(ctx context.Context, query string) ([]*memqlv1.MemoryNode, error) {
+	return s.executeAndExtract(auth.ContextWithInternalOrigin(ctx), query)
+}
+
 func (s *Store) executeAndExtract(ctx context.Context, query string) ([]*memqlv1.MemoryNode, error) {
 	res, err := s.Engine.Execute(ctx, query)
 	if err != nil {

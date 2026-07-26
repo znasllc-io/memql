@@ -735,7 +735,18 @@ func (e *Executor) executeInput(ctx context.Context, input *AutomationInput) (an
 		query = fmt.Sprintf("paginate(%s, %d)", query, input.Limit)
 	}
 
-	result, err := e.engine.Execute(ctx, query)
+	// #2800: an automation step is server-side by construction -- the body is
+	// AUTHORED DSL dispatched from a graph event, not query text submitted by
+	// a caller -- so it may reach @serverOnly constructs. The kill-switch
+	// automation is the motivating case: killSwitchSuspendsRunningPlans reads
+	// the affected USER's running plans, and the actor is the automation's
+	// context rather than that user, so the construct cannot be scoped to
+	// actor.userId and must instead be barred from the wire.
+	//
+	// Note this marks who authored the CALL, not the data: a client can
+	// certainly cause an automation to fire, but it cannot choose which
+	// constructs the authored body invokes.
+	result, err := e.engine.Execute(auth.ContextWithInternalOrigin(ctx), query)
 	if err != nil {
 		return nil, err
 	}

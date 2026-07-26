@@ -243,6 +243,25 @@ shape user userActiveSpaceProjection {
 
 /// Comprehensive user projection: the person behind one or more identities.
 @row
+/// Minimal, PII-free projection of a v1:identity:user row: enough to render
+/// someone's name next to their id, and nothing else.
+///
+/// This shape is the client-callable half of the memql#2800 split. userFull
+/// carries primaryEmail / phone / birthdate / gender / role / preferences --
+/// directory-grade PII -- and was reachable by any authenticated caller
+/// passing any user id, because the filter keys on a CALLER-SUPPLIED id rather
+/// than on the actor.
+///
+/// EVERY FIELD ADDED HERE IS A PII LEAK on a query clients can call for
+/// arbitrary users. TestUserDisplayCardStaysMinimal pins the field set for
+/// exactly that reason; if you are here to add a field, add it to userFull and
+/// gate the read instead.
+@row
+shape user userDisplayCard {
+  row.id
+  displayName
+}
+
 shape user userFull {
   row.id
   displayName

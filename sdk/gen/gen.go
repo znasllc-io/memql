@@ -69,6 +69,13 @@ var (
 	// @sdk opt-in marker above a builtin: emits a typed wrapper for an
 	// otherwise-internal builtin.
 	sdkMarkerRe = regexp.MustCompile(`(?m)^@sdk\b`)
+
+	// serverOnlyRe matches @serverOnly (memql#2800). A construct carrying it
+	// is refused at execution for any client-originated call, so emitting a
+	// typed client method for it would advertise an API that can only ever
+	// fail -- and would read to an SDK consumer as a supported way to fetch
+	// another user's full row.
+	serverOnlyRe = regexp.MustCompile(`(?m)^@serverOnly\b`)
 	// Args block inside a construct body: `args { ... }`. Single match
 	// per construct (the parser rejects multiple args blocks).
 	argsBlockRe = regexp.MustCompile(`(?s)\bargs[ \t]*\{(.*?)\}`)
@@ -366,6 +373,17 @@ func CollectConstructs(root string) ([]Construct, error) {
 			// only inspect its body when extracting args / shape ref.
 			body, ok := bodyFor(src, m[1]-1)
 			if !ok {
+				continue
+			}
+
+			// @serverOnly constructs never reach the client surface
+			// (memql#2800). Same principle as the @sdk gate on builtins
+			// below: the generated SDK is a client API, and a method the
+			// engine will always refuse is worse than a missing one --
+			// it documents the construct as callable and sends whoever
+			// tries it hunting through auth code for a permission
+			// problem that does not exist.
+			if serverOnlyRe.MatchString(attrPreamble(src, m[0])) {
 				continue
 			}
 
