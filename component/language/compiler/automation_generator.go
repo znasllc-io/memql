@@ -1626,18 +1626,17 @@ func (c *Compiler) compileMutationConfig(m *parser.MutationStmt) (map[string]any
 // value, so `{ k: [}{] }` compiled to `{"k": null}` with no error anywhere --
 // a silent wrong value, which is worse than the hang it replaced.
 //
-// HOW FAR THE ERROR ACTUALLY TRAVELS, precisely -- it is NOT a refused boot.
-// It reaches compileStep -> compileAutomation -> CompileFile ->
-// Loader.compileMemQL -> LoadFromUnifiedTree, and THAT frame logs a Warn and
-// `continue`s (component/automations/unified_loader.go). So the automation is
-// DROPPED, not loaded-with-a-null, and nothing fails the strict-boot gate:
-// component/memql/load_report.go takes no input from the automation loader.
-// The improvement here is real but bounded -- "silently wrong" became
-// "absent, with a WARN" rather than "absent, with a red boot". That the
-// loader swallows every compile error this way is a separate, pre-existing
-// defect affecting far more than payload literals; it is memql#2830, kept out
-// of this change because fixing it alters boot semantics for the whole
-// automation tree.
+// HOW FAR THE ERROR ACTUALLY TRAVELS, precisely -- it IS a refused boot, as
+// of memql#2830. It reaches compileStep -> compileAutomation -> CompileFile ->
+// Loader.compileMemQL -> LoadFromUnifiedTree, and THAT frame now records the
+// failure and returns it (component/automations/unified_loader.go); app/engine.go
+// gates on it synchronously, so the node refuses to start rather than running
+// with the automation silently absent. MEMQL_DSL_ALLOW_SKIPS is the operator
+// break-glass that restores the old drop-and-continue behaviour.
+//
+// So the progression for a malformed payload literal is: "silently wrong"
+// (pre-#2785) -> "absent, with a WARN" (#2785/#2816) -> "red boot naming the
+// automation" (#2830).
 //
 // The two sibling copies (component/memql/mutation_templates.go at load,
 // component/automations/steps/mutation.go at dispatch) both surface the

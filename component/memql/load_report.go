@@ -42,12 +42,12 @@ import (
 	"github.com/znasllc-io/memql/component/memql/baseloader"
 )
 
-// allowSkipsEnvVar is the operator break-glass: when set truthy, a DSL
+// AllowSkipsEnvVar is the operator break-glass: when set truthy, a DSL
 // load pass with skipped constructs and/or duplicate registrations boots
 // anyway (loudly), instead of engine.Init returning an error. Registered
 // in scripts/secrets/manifest.yaml so the env-registry drift gate
 // (cmd/envscan) and the cockpit Configuration screen both see it.
-const allowSkipsEnvVar = "MEMQL_DSL_ALLOW_SKIPS"
+const AllowSkipsEnvVar = "MEMQL_DSL_ALLOW_SKIPS"
 
 // QuarantinedConstruct is a durably-promoted authored construct whose
 // STORED source failed to recompile at boot re-hydration (grammar drift,
@@ -252,12 +252,12 @@ func (r *LoadReport) logSummary(logger *slog.Logger) {
 		"detail", r.Detail())
 }
 
-// dslAllowSkips reports whether the operator has set the break-glass
+// DSLAllowSkips reports whether the operator has set the break-glass
 // MEMQL_DSL_ALLOW_SKIPS to a truthy value. Read directly off the process
 // env (like MEMQL_DSL_PATH) -- the engine bootstrap runs before the
 // config snapshot exists. A malformed value is treated as false (strict).
-func dslAllowSkips() bool {
-	v := strings.TrimSpace(os.Getenv(allowSkipsEnvVar))
+func DSLAllowSkips() bool {
+	v := strings.TrimSpace(os.Getenv(AllowSkipsEnvVar))
 	if v == "" {
 		return false
 	}

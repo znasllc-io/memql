@@ -461,7 +461,7 @@ variables:
     scope: node
     default: "false"
     optional: true
-    description: "Operator break-glass for strict DSL boot (memql#2357). When truthy, engine.Init boots even if a unified loader skipped an in-tree construct or the uniqueness gate found a duplicate registration, instead of refusing to boot; the load report is still ERROR-logged. Leave unset (strict) in normal operation -- a skipped construct means the embedded tree or a pack half-loaded."
+    description: "Operator break-glass for strict DSL loading (memql#2357, memql#2830). Silences TWO independent gates: (1) engine.Init boots even if a unified loader skipped an in-tree construct or the uniqueness gate found a duplicate registration; (2) the automation loader loads even if an automation failed to read, lower, extract or compile, so the node boots with those automations MISSING. Both still ERROR-log their report. Leave unset (strict) in normal operation -- a skipped construct or dropped automation means the embedded tree or a pack half-loaded."
 
   - name: MEMQL_ENVIRONMENT
     component: engine

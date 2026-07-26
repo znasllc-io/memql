@@ -422,9 +422,9 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	// and must not brick a fleet, so the boot re-hydration path quarantines
 	// them (ERROR + report entry) rather than failing boot.
 	if report.HasProblems() {
-		if !dslAllowSkips() {
+		if !DSLAllowSkips() {
 			return fmt.Errorf("strict DSL boot refused: %d problem(s) loading the embedded tree + registered packs (%d skipped construct(s), %d duplicate(s)); set %s=1 to boot anyway (operator break-glass).\n%s",
-				report.ProblemCount(), len(report.Skipped), len(report.Duplicates), allowSkipsEnvVar, report.Detail())
+				report.ProblemCount(), len(report.Skipped), len(report.Duplicates), AllowSkipsEnvVar, report.Detail())
 		}
 		if e.Component != nil && e.Logger != nil {
 			e.Logger.Error("MEMQL_DSL_ALLOW_SKIPS set: booting despite DSL load problems (operator break-glass)",

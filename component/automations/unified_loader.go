@@ -19,12 +19,29 @@ import (
 	"strings"
 
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/component/memql"
 	memqldsl "github.com/znasllc-io/memql/dsl"
 )
 
 // automationStructHeader matches the opening of an `automation
 // NAME {` block at column 0 (with optional leading whitespace).
 var automationStructHeader = regexp.MustCompile(`(?m)^[ \t]*automation[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
+
+// automationLooseHeader matches an `automation NAME` declaration WITHOUT
+// requiring the opening brace on the same line. Every header the strict
+// regex above misses is an automation that would silently vanish, so the
+// loose form is used only to DETECT and report those -- never to extract.
+//
+// Neither regex understands `/* */` block comments, so a block-commented
+// automation whose `{` is on the HEADER line is extracted and loaded as a
+// live automation today (verified: it raises the loaded count). That is a
+// pre-existing slice-extraction defect, tracked in memql#2861 -- not introduced
+// here. The one case this detection adds is the mirror: a block-commented
+// automation whose `{` is on the NEXT line is now reported rather than
+// ignored. Given the former already treats block-commented automations as
+// live code, reporting the latter is the consistent behaviour; the shipped
+// tree contains no block comments in any automations.memql.
+var automationLooseHeader = regexp.MustCompile(`(?m)^[ \t]*automation[ \t]+([A-Za-z_][A-Za-z0-9_]*)`)
 
 // LoadFromUnifiedTree walks dsl.Tree() looking for
 // `<domain>/automations.memql` files, extracts every
@@ -36,18 +53,41 @@ var automationStructHeader = regexp.MustCompile(`(?m)^[ \t]*automation[ \t]+([A-
 // walk balanced braces to the closer, walk backwards from the
 // header to gather the @-attribute + comment preamble.
 //
-// Returns the list of compiled automations. Errors per slice are
-// logged via the loader's logger + skipped (one bad automation
-// shouldn't blank the whole tree).
+// Returns the list of compiled automations. EVERY load problem, across all
+// four phases -- read, terse-lowering, extract, compile -- is collected and,
+// unless the MEMQL_DSL_ALLOW_SKIPS break-glass is set, returned as an error,
+// so the node refuses to boot half-loaded rather than running silently
+// without the automation (memql#2830).
+//
+// Directories whose name starts with `_` or `.` are skipped as soft-disabled,
+// matching every other DSL walker.
 func (l *Loader) LoadFromUnifiedTree() ([]*Automation, error) {
 	tree := memqldsl.Tree()
 	var out []*Automation
+	// Hard load problems collected across the whole walk (memql#2830). We
+	// keep walking after the first one so the operator gets the COMPLETE
+	// list in a single boot attempt rather than peeling them off one per
+	// restart.
+	var problems []automationLoadProblem
 
 	err := fs.WalkDir(tree, ".", func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
+		// Soft-disable / hidden directories are skipped, matching the
+		// convention every other DSL walker enforces (dslfs.WalkMemqlFiles,
+		// component/actions/loader.go, capability_loader.go) and documented
+		// for MEMQL_DSL_PATH in dsl/runtime_mount.go. This walker previously
+		// had no such filter, which did not matter while a drop was a silent
+		// WARN -- but now that a load problem REFUSES BOOT, a product bundle
+		// parking a WIP automation in `<domain>/_disabled/automations.memql`
+		// would brick the fleet on a file the rest of the DSL system treats
+		// as disabled (memql#2830 review round 2).
 		if d.IsDir() {
+			base := d.Name()
+			if base != "." && (strings.HasPrefix(base, "_") || strings.HasPrefix(base, ".")) {
+				return fs.SkipDir
+			}
 			return nil
 		}
 		if !strings.HasSuffix(path, "/automations.memql") {
@@ -59,6 +99,9 @@ func (l *Loader) LoadFromUnifiedTree() ([]*Automation, error) {
 				l.logger.Warn("unified automation loader: read failed",
 					"path", path, "error", readErr)
 			}
+			problems = append(problems, automationLoadProblem{
+				Path: path, Phase: "read", Err: readErr.Error(),
+			})
 			return nil
 		}
 		source := string(data)
@@ -78,28 +121,60 @@ func (l *Loader) LoadFromUnifiedTree() ([]*Automation, error) {
 				l.logger.Warn("unified automation loader: terse lowering rejected",
 					"component", ComponentName, "path", path, "error", lerr)
 			}
+			problems = append(problems, automationLoadProblem{
+				Path: path, Phase: "terseLowering", Err: lerr.Error(),
+			})
 			return nil
 		}
 		source = lowered
-		for _, slice := range extractAutomationSlices(source) {
+		slices, unextracted := extractAutomationSlicesReporting(source)
+		for _, name := range unextracted {
+			if l.logger != nil {
+				l.logger.Warn("unified automation loader: automation header could not be extracted",
+					"component", ComponentName, "path", path, "automation", name)
+			}
+			problems = append(problems, automationLoadProblem{
+				Path: path, Name: name, Phase: "extract",
+				Err: "could not extract an automation block for this header -- unbalanced braces, or the opening `{` is not on the header line",
+			})
+		}
+		for _, slice := range slices {
 			origin := "unified:" + path + ":" + slice.Name
 			automation, compileErr := l.compileMemQL(slice.Source, origin)
 			if compileErr != nil {
+				// EVERY compile error is a hard problem -- there is no
+				// by-design skip left to carve out. The old code exempted
+				// errors containing "not found in registry" as expected
+				// per-node-type concept-visibility filtering. That exemption
+				// is now provably unreachable for its intended purpose AND
+				// actively harmful:
+				//
+				//   - Both by-design producers of that text
+				//     (component/memql/concept_resolver.go, and the twin in
+				//     this package's loader.go) sit behind the LEGACY FORM A
+				//     `use` syntax, which the parser now rejects outright --
+				//     `use a.b` fails with "retired Form A shape" long before
+				//     concept resolution runs. Form B (`use a.b.{ c }`)
+				//     tolerates an unresolvable name by design and returns no
+				//     error at all.
+				//   - @visibility filtering no longer exists in the tree, and
+				//     app/database.go loads the full concept set on every node
+				//     type, so no automation is dropped for concept-absence.
+				//     Measured on the shipped tree: 0 such skips.
+				//   - The only REACHABLE producers of that text are
+				//     component/memql/executor_filter.go, where it means a
+				//     filter names a concept that does not exist -- a genuine
+				//     authoring defect. So the exemption could only ever
+				//     swallow real bugs, which is exactly memql#2830.
 				if l.logger != nil {
-					// Concept-visibility filtering is expected to drop some
-					// automations on each node type; log at debug for that case.
-					if strings.Contains(compileErr.Error(), "not found in registry") {
-						l.logger.Debug("automation excluded by concept visibility",
-							"component", ComponentName,
-							"path", origin,
-							"error", compileErr.Error())
-					} else {
-						l.logger.Warn("unified automation loader: compile failed",
-							"component", ComponentName,
-							"path", origin,
-							"error", compileErr)
-					}
+					l.logger.Warn("unified automation loader: compile failed",
+						"component", ComponentName,
+						"path", origin,
+						"error", compileErr)
 				}
+				problems = append(problems, automationLoadProblem{
+					Path: path, Name: slice.Name, Phase: "compile", Err: compileErr.Error(),
+				})
 				continue
 			}
 			automation.Origin = origin
@@ -111,11 +186,65 @@ func (l *Loader) LoadFromUnifiedTree() ([]*Automation, error) {
 		return out, fmt.Errorf("walk unified DSL tree: %w", err)
 	}
 
+	// Strict automation boot (memql#2830). Before this gate every compile
+	// error was swallowed by the `continue` above: a malformed automation
+	// was dropped with a WARN and the node booted green, silently missing
+	// the workflow. That is the pack-rot failure mode the DSL strict-boot
+	// gate already refuses for every other construct kind
+	// (component/memql/engine_bootstrap.go); automations were the one
+	// exemption. MEMQL_DSL_ALLOW_SKIPS is the same operator break-glass.
+	if len(problems) > 0 {
+		if !memql.DSLAllowSkips() {
+			// "load refused", not "boot refused": this error also surfaces at
+			// runtime through LoadByName -> MCP run_automation, where the
+			// process is already up and "boot" would be the wrong noun.
+			return out, fmt.Errorf("strict automation load refused: %d automation load problem(s) in the unified DSL tree; set %s=1 to load anyway (operator break-glass -- a node with problems will boot with those automations missing).\n%s",
+				len(problems), memql.AllowSkipsEnvVar, formatAutomationProblems(problems))
+		}
+		if l.logger != nil {
+			l.logger.Error("MEMQL_DSL_ALLOW_SKIPS set: loading automations despite load problems (operator break-glass)",
+				"component", ComponentName,
+				"problems", len(problems),
+				"detail", formatAutomationProblems(problems))
+		}
+	}
+
 	if l.logger != nil {
 		l.logger.Info("unified automation loader: loaded",
 			"count", len(out))
 	}
 	return out, nil
+}
+
+// automationLoadProblem is one automation (or one whole file) the unified
+// loader could not turn into a runnable automation. No reason is exempt.
+type automationLoadProblem struct {
+	Path  string // automations.memql file in the DSL tree
+	Name  string // automation name (empty for whole-file problems)
+	Phase string // "read" | "terseLowering" | "extract" | "compile"
+	Err   string
+}
+
+// formatAutomationProblems renders the collected problems one per line for
+// the refusal error + the break-glass log.
+func formatAutomationProblems(problems []automationLoadProblem) string {
+	var b strings.Builder
+	for i, p := range problems {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString("  - ")
+		b.WriteString(p.Path)
+		if p.Name != "" {
+			b.WriteString(":")
+			b.WriteString(p.Name)
+		}
+		b.WriteString(" [")
+		b.WriteString(p.Phase)
+		b.WriteString("] ")
+		b.WriteString(p.Err)
+	}
+	return b.String()
 }
 
 // automationSlice is one extracted automation declaration ready to
@@ -136,9 +265,44 @@ type automationSlice struct {
 // any logic-block references resolve via the function registry at
 // runtime.
 func extractAutomationSlices(source string) []automationSlice {
+	slices, _ := extractAutomationSlicesReporting(source)
+	return slices
+}
+
+// extractAutomationSlicesReporting is extractAutomationSlices plus the names
+// of headers it could NOT turn into a slice.
+//
+// Extraction was the one drop phase with no signal at all -- not even a WARN
+// (memql#2830 review round 2). An automation with unbalanced braces, or whose
+// opening `{` sits on the next line, simply vanished: `LoadAll -> 31
+// automations, err=<nil>` with a workflow missing, which is verbatim the
+// failure mode this issue is about. Unbalanced braces is also the single most
+// common malformed-automation shape.
+//
+// Two classes are detected:
+//   - a matched header whose `{` never closes (findMatchingBrace fails);
+//   - a bare `automation NAME` header the strict struct regex does not match,
+//     which is almost always the `{`-on-the-next-line spelling. Terse
+//     `automation NAME @trigger(...) => logic X` declarations are lowered to
+//     longhand BEFORE extraction, so they do not reach here as bare headers.
+func extractAutomationSlicesReporting(source string) ([]automationSlice, []string) {
+	var unextracted []string
+
 	matches := automationStructHeader.FindAllStringSubmatchIndex(source, -1)
+
+	// A header the strict regex missed is a silent loss, so find those too.
+	matchedAt := make(map[int]bool, len(matches))
+	for _, m := range matches {
+		matchedAt[m[0]] = true
+	}
+	for _, lm := range automationLooseHeader.FindAllStringSubmatchIndex(source, -1) {
+		if !matchedAt[lm[0]] {
+			unextracted = append(unextracted, source[lm[2]:lm[3]])
+		}
+	}
+
 	if len(matches) == 0 {
-		return nil
+		return nil, unextracted
 	}
 
 	var out []automationSlice
@@ -152,6 +316,7 @@ func extractAutomationSlices(source string) []automationSlice {
 		openIdx := headerEnd - 1 // position of `{`
 		closeIdx := findMatchingBrace(source, openIdx)
 		if closeIdx < 0 {
+			unextracted = append(unextracted, name)
 			continue
 		}
 
@@ -177,7 +342,7 @@ func extractAutomationSlices(source string) []automationSlice {
 			Name:   name,
 		})
 	}
-	return out
+	return out, unextracted
 }
 
 // findMatchingBrace returns the index of the `}` matching the `{`
