@@ -114,6 +114,14 @@ func TestParseObjectLiteralTerminatesOnUnbalancedInput(t *testing.T) {
 // `k: null` with err=nil -- a silent wrong value at boot, which is worse than
 // the hang it replaced. parseLiteralOrExpr now reports well-formedness
 // explicitly so the failure reaches the caller's error path.
+//
+// Every case here feeds a MALFORMED array to the same loop the hang tests
+// exercise, so it must go through mustTerminate too. Calling the parser
+// directly would sidestep the `leaked` latch entirely: with the guard
+// regressed, this test spun up a SECOND live spinner alongside the one the
+// hang test had already stopped on, and the pair reached 25.9 GiB before the
+// package timeout fired. Only tests whose inputs are all well-formed may call
+// a parser directly -- those cannot spin no matter what a guard does.
 func TestMalformedPayloadFailsLoudly(t *testing.T) {
 	for _, src := range []string{
 		"{ k: [}{] }",
@@ -121,12 +129,14 @@ func TestMalformedPayloadFailsLoudly(t *testing.T) {
 		`{ k: ["a", }{] }`,
 		"{ k: [}] }",
 	} {
-		t.Run(src, func(t *testing.T) {
+		if !mustTerminate(t, "parsePayloadRawToTemplate("+src+")", func() {
 			tpl, err := parsePayloadRawToTemplate(src)
 			if err == nil {
-				t.Fatalf("parsePayloadRawToTemplate(%q) = %v, err=nil; want a malformed-payload error", src, tpl)
+				t.Errorf("parsePayloadRawToTemplate(%q) = %v, err=nil; want a malformed-payload error", src, tpl)
 			}
-		})
+		}) {
+			break
+		}
 	}
 }
 
@@ -161,17 +171,32 @@ func TestEmptyValueIsNullNotAnError(t *testing.T) {
 // TestObjectValueOkGuardIsLive covers the object loop's `!ok` check, which is
 // the one guard in this change that is neither a hang-stopper nor dead code:
 // it rejects a malformed value that the ARRAY guard cannot see because the
-// value is not an array. Without a case behind it, it would be exactly the
-// untested guard the review flagged elsewhere.
+// value is not an array.
+//
+// `{k:{:}` is the minimal input that actually DEPENDS on the guard. Verified
+// by neutralizing it (`if false && !ok`):
+//
+//	with the guard:    err = "invalid object literal payload"
+//	without the guard: map[string]any{"k": nil, "{": nil}, err = nil
+//
+// The obvious-looking candidates do NOT work. An unterminated string value
+// (`{ k: "unterminated }`) errors either way: the next iteration's
+// parseObjectKey hits the same unterminated quote, returns "", and bails, so
+// the guard is never the deciding step. An earlier version of this test used
+// exactly those inputs and passed with the guard neutralized -- a vacuous test
+// standing in for the untested guard it was written to rule out.
 func TestObjectValueOkGuardIsLive(t *testing.T) {
-	// An unterminated string value: parseLiteralOrExpr's scanQuotedString arm
-	// reports !ok, and nothing else in the loop would notice.
 	for _, src := range []string{
-		`{ k: "unterminated }`,
-		`{ a: 1, k: "unterminated }`,
+		`{k:{:}`,
+		`{ a: 1, k:{:}`,
 	} {
-		if _, err := parsePayloadRawToTemplate(src); err == nil {
-			t.Errorf("parsePayloadRawToTemplate(%q) = nil error, want a malformed-payload error", src)
+		if !mustTerminate(t, "parsePayloadRawToTemplate("+src+")", func() {
+			tpl, err := parsePayloadRawToTemplate(src)
+			if err == nil {
+				t.Errorf("parsePayloadRawToTemplate(%q) = %#v, err=nil; want a malformed-payload error", src, tpl)
+			}
+		}) {
+			break
 		}
 	}
 }
@@ -196,6 +221,63 @@ func TestSeparatorOnlyArrayIsEmptyNotMalformed(t *testing.T) {
 			t.Errorf("parsePayloadRawToTemplate(%q) = %v, want one key", src, tpl)
 		}
 	}
+}
+
+// TestArrayOkImpliesNoProgress pins the invariant that makes the `!ok` half of
+// parseArrayLiteral's guard dead code: every ok=false return from
+// parseLiteralOrExpr leaves the position at or below where it started (after
+// the caller's own whitespace skip), so `next <= pos` alone already covers it.
+//
+// The guard keeps `!ok` anyway, as defence against a future parseLiteralOrExpr
+// that reports failure AFTER advancing -- at which point the position check
+// would silently stop covering the case and a malformed element would become a
+// silent nil. This test is what turns that day into a red test. If it starts
+// failing, do not delete it: the `!ok` guard has just become load-bearing.
+func TestArrayOkImpliesNoProgress(t *testing.T) {
+	// The invariant is scoped to the loop's PRECONDITION, and that scope is
+	// the whole reason it holds. parseArrayLiteral skips whitespace and commas
+	// before every call, so it never calls at such a position. Without that
+	// filter the invariant is simply false -- parseLiteralOrExpr skips leading
+	// whitespace internally and then fails, so `parseLiteralOrExpr(" {", 0)`
+	// reports !ok having advanced 0 -> 1. Measured: 947 such violations across
+	// 54,320 (input, position) pairs, every one of them at a whitespace or
+	// comma position the loop cannot reach.
+	skippedByLoop := func(c byte) bool {
+		return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == ','
+	}
+
+	// Every reachable position of every string over a bracket-heavy alphabet,
+	// which is where the ok=false arms live.
+	alphabet := []rune(`{}[],:"a1 `)
+	var gen func(prefix string, depth int)
+	checked, violations := 0, 0
+	gen = func(prefix string, depth int) {
+		if depth == 0 {
+			for pos := 0; pos < len(prefix); pos++ {
+				if skippedByLoop(prefix[pos]) {
+					continue // unreachable from parseArrayLiteral's call site
+				}
+				_, next, ok := parseLiteralOrExpr(prefix, pos)
+				checked++
+				if !ok && next > pos {
+					violations++
+					if violations <= 5 {
+						t.Errorf("parseLiteralOrExpr(%q, %d) reported !ok but advanced %d -> %d; "+
+							"the `next <= pos` check no longer covers !ok, so the `!ok` guard in "+
+							"parseArrayLiteral is now load-bearing", prefix, pos, pos, next)
+					}
+				}
+			}
+			return
+		}
+		for _, r := range alphabet {
+			gen(prefix+string(r), depth-1)
+		}
+	}
+	for d := 1; d <= 4; d++ {
+		gen("", d)
+	}
+	t.Logf("checked %d (input, position) pairs; %d violations", checked, violations)
 }
 
 // TestParenMismatchInsideArrayIsNotAHang records an asymmetry worth pinning so

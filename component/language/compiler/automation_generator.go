@@ -899,7 +899,10 @@ func (c *Compiler) compileStep(step *parser.StepDef) (map[string]any, error) {
 		if cfg, ok := step.Config.(*parser.MutationStepConfig); ok {
 			// Output mutation as structured config, not as a query string
 			// The mutation executor will evaluate expressions and build proper JSON
-			mutationConfig := c.compileMutationConfig(cfg.Mutation)
+			mutationConfig, err := c.compileMutationConfig(cfg.Mutation)
+			if err != nil {
+				return nil, err
+			}
 			output["mutation"] = mutationConfig
 		}
 
@@ -1534,9 +1537,9 @@ func (c *Compiler) mutationToString(m *parser.MutationStmt) string {
 // compileMutationConfig converts a MutationStmt to a structured config map.
 // This parses the mutation into a format that can be evaluated at runtime
 // by the mutation executor.
-func (c *Compiler) compileMutationConfig(m *parser.MutationStmt) map[string]any {
+func (c *Compiler) compileMutationConfig(m *parser.MutationStmt) (map[string]any, error) {
 	if m == nil {
-		return nil
+		return nil, nil
 	}
 
 	config := map[string]any{
@@ -1559,7 +1562,10 @@ func (c *Compiler) compileMutationConfig(m *parser.MutationStmt) map[string]any 
 
 	// Parse the PayloadRaw into a structured payload map
 	if m.PayloadRaw != "" {
-		parsed := c.parsePayloadRaw(m.PayloadRaw)
+		parsed, err := c.parsePayloadRaw(m.PayloadRaw)
+		if err != nil {
+			return nil, fmt.Errorf("mutation %s: %w", m.Concept, err)
+		}
 		if parsed != nil {
 			// Check if this is object literal syntax with id and payload inside
 			// e.g., {id: ..., payload: {...}}
@@ -1607,34 +1613,51 @@ func (c *Compiler) compileMutationConfig(m *parser.MutationStmt) map[string]any 
 		}
 	}
 
-	return config
+	return config, nil
 }
 
 // parsePayloadRaw parses the raw payload string into a structured map.
 // It handles MemQL object syntax and converts expressions to evaluatable format.
-func (c *Compiler) parsePayloadRaw(raw string) map[string]any {
+//
+// A malformed literal is an ERROR, not a nil map. Returning a bare nil was the
+// second half of memql#2785 (and the whole of memql#2816): the array parser's
+// no-progress guard stopped the hang by returning nil, but parseValue wrapped
+// that nil in a non-nil `any` and parseObjectLiteral stored it as the key's
+// value, so `{ k: [}{] }` compiled to `{"k": null}` with no error anywhere --
+// a silent wrong value, which is worse than the hang it replaced. The two
+// sibling copies of this parser (component/memql/mutation_templates.go at
+// load, component/automations/steps/mutation.go at dispatch) both surface the
+// failure; this one now matches them.
+func (c *Compiler) parsePayloadRaw(raw string) (map[string]any, error) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
-		return nil
+		// Not malformed -- there is simply no payload to compile.
+		return nil, nil
 	}
 
-	// Parse the raw payload using a simple state machine
-	result := c.parseObjectLiteral(trimmed)
-	return result
+	result, ok := c.parseObjectLiteral(trimmed)
+	if !ok {
+		return nil, fmt.Errorf("malformed payload literal: %q", raw)
+	}
+	return result, nil
 }
 
 // parseObjectLiteral parses a MemQL object literal like {key: value, key2: value2}
 // into a Go map, preserving expressions as strings for runtime evaluation.
-func (c *Compiler) parseObjectLiteral(s string) map[string]any {
+//
+// The bool reports whether the literal was well-formed. It is distinct from a
+// nil/empty map: `{}` is a legitimate empty payload, a stray `[}{]` inside is
+// not. See parsePayloadRaw for why that distinction is load-bearing.
+func (c *Compiler) parseObjectLiteral(s string) (map[string]any, bool) {
 	s = strings.TrimSpace(s)
 	if !strings.HasPrefix(s, "{") || !strings.HasSuffix(s, "}") {
-		return nil
+		return nil, false
 	}
 
 	// Remove outer braces
 	inner := strings.TrimSpace(s[1 : len(s)-1])
 	if inner == "" {
-		return map[string]any{}
+		return map[string]any{}, true
 	}
 
 	result := make(map[string]any)
@@ -1693,7 +1716,16 @@ func (c *Compiler) parseObjectLiteral(s string) map[string]any {
 		// value scan, so it cannot spin, and c.parseValue never returns a
 		// position below its input. The array loop below is the one that needs
 		// the guard (memql#2785).
-		value, newPos := c.parseValue(inner, pos)
+		//
+		// The !ok check is a different concern from spinning: it catches a
+		// malformed value the array guard cannot see because the value is not
+		// an array (an unterminated string, a `{` that never closes), and it
+		// is what stops a malformed literal from being stored as a silent nil
+		// (memql#2816).
+		value, newPos, ok := c.parseValue(inner, pos)
+		if !ok {
+			return nil, false
+		}
 		result[key] = value
 		pos = newPos
 
@@ -1703,7 +1735,7 @@ func (c *Compiler) parseObjectLiteral(s string) map[string]any {
 		}
 	}
 
-	return result
+	return result, true
 }
 
 // tryParseBarePathShorthand parses a bare dotted path like
@@ -1789,9 +1821,13 @@ func isIdentChar(c byte) bool {
 }
 
 // parseValue parses a value starting at position pos and returns the value and new position.
-func (c *Compiler) parseValue(s string, pos int) (any, int) {
+// parseValue scans one value. The bool reports whether it was well-formed;
+// an EMPTY value is well-formed (it is a null), a malformed one is not. That
+// distinction is why this returns an explicit ok rather than leaning on a nil
+// value or an unadvanced position -- see parsePayloadRaw (memql#2816).
+func (c *Compiler) parseValue(s string, pos int) (any, int, bool) {
 	if pos >= len(s) {
-		return nil, pos
+		return nil, pos, true
 	}
 
 	// Skip whitespace
@@ -1800,7 +1836,7 @@ func (c *Compiler) parseValue(s string, pos int) (any, int) {
 	}
 
 	if pos >= len(s) {
-		return nil, pos
+		return nil, pos, true
 	}
 
 	ch := s[pos]
@@ -1837,13 +1873,17 @@ func (c *Compiler) parseValue(s string, pos int) (any, int) {
 					if depth == 0 {
 						pos++
 						arrStr := s[start:pos]
-						return c.parseArrayLiteral(arrStr), pos
+						arr, ok := c.parseArrayLiteral(arrStr)
+						if !ok {
+							return nil, pos, false
+						}
+						return arr, pos, true
 					}
 				}
 			}
 			pos++
 		}
-		return nil, pos
+		return nil, pos, false
 	}
 
 	// Nested object
@@ -1859,12 +1899,16 @@ func (c *Compiler) parseValue(s string, pos int) (any, int) {
 				if depth == 0 {
 					pos++
 					objStr := s[start:pos]
-					return c.parseObjectLiteral(objStr), pos
+					obj, ok := c.parseObjectLiteral(objStr)
+					if !ok {
+						return nil, pos, false
+					}
+					return obj, pos, true
 				}
 			}
 			pos++
 		}
-		return nil, pos
+		return nil, pos, false
 	}
 
 	// String literal
@@ -1879,20 +1923,24 @@ func (c *Compiler) parseValue(s string, pos int) (any, int) {
 			}
 		}
 		value := s[start:pos]
-		if pos < len(s) {
-			pos++ // skip closing quote
+		if pos >= len(s) {
+			// Unterminated string: the scan ran off the end without a closing
+			// quote. Matches the sibling parsers in component/memql and
+			// component/automations/steps, which both reject this.
+			return nil, pos, false
 		}
-		return value, pos
+		pos++ // skip closing quote
+		return value, pos, true
 	}
 
 	// Boolean true
 	if strings.HasPrefix(s[pos:], "true") {
-		return true, pos + 4
+		return true, pos + 4, true
 	}
 
 	// Boolean false
 	if strings.HasPrefix(s[pos:], "false") {
-		return false, pos + 5
+		return false, pos + 5, true
 	}
 
 	// Number
@@ -1906,15 +1954,15 @@ func (c *Compiler) parseValue(s string, pos int) (any, int) {
 		if strings.Contains(numStr, ".") {
 			// Float
 			if f, err := strconv.ParseFloat(numStr, 64); err == nil {
-				return f, pos
+				return f, pos, true
 			}
-			return numStr, pos
+			return numStr, pos, true
 		}
 		// Int
 		if i, err := strconv.ParseInt(numStr, 10, 64); err == nil {
-			return i, pos
+			return i, pos, true
 		}
-		return numStr, pos
+		return numStr, pos, true
 	}
 
 	// Expression (identifier, function call, etc.)
@@ -1985,19 +2033,24 @@ done:
 	if strings.HasPrefix(expr, "event.") {
 		expr = "$" + expr
 	}
-	return expr, pos
+	return expr, pos, true
 }
 
 // parseArrayLiteral parses a JSON-like array literal like [a, b, {x: 1}, []]
 // into a Go []any, preserving expressions as strings for runtime evaluation.
-func (c *Compiler) parseArrayLiteral(s string) []any {
+//
+// The bool reports well-formedness. A separator-only array like `[,]` is an
+// EMPTY array, not a malformed one, so the slice is built non-nil up front --
+// the sibling copy in component/memql regressed exactly that case by using
+// `var out []any` and then reading the resulting nil as a parse failure.
+func (c *Compiler) parseArrayLiteral(s string) ([]any, bool) {
 	s = strings.TrimSpace(s)
 	if !strings.HasPrefix(s, "[") || !strings.HasSuffix(s, "]") {
-		return nil
+		return nil, false
 	}
 	inner := strings.TrimSpace(s[1 : len(s)-1])
 	if inner == "" {
-		return []any{}
+		return []any{}, true
 	}
 
 	items := make([]any, 0)
@@ -2011,8 +2064,8 @@ func (c *Compiler) parseArrayLiteral(s string) []any {
 			break
 		}
 
-		val, newPos := c.parseValue(inner, pos)
-		if newPos <= pos {
+		val, newPos, ok := c.parseValue(inner, pos)
+		if !ok || newPos <= pos {
 			// No progress: parseValue returns its input pos unchanged on an
 			// unbalanced literal and on a stray depth-0 closer, so the loop
 			// would append nil forever -- an unbounded memory grow and a hang
@@ -2024,8 +2077,14 @@ func (c *Compiler) parseArrayLiteral(s string) []any {
 			//
 			// The leading skip has already consumed commas and whitespace, so
 			// a non-advancing return here cannot be a legitimately-empty
-			// element. nil signals a malformed payload to the caller.
-			return nil
+			// element.
+			//
+			// Reporting !ok is the half a bare `return nil` got WRONG
+			// (memql#2816): parseValue wraps a nil []any in a non-nil `any`
+			// and parseObjectLiteral stores it, so the nil never reached
+			// parsePayloadRaw's own nil check and `{ k: [}{] }` compiled to
+			// `{"k": null}` with no error -- a silent wrong value at load.
+			return nil, false
 		}
 		items = append(items, val)
 		pos = newPos
@@ -2036,7 +2095,7 @@ func (c *Compiler) parseArrayLiteral(s string) []any {
 		}
 	}
 
-	return items
+	return items, true
 }
 
 // valueToString converts a value to its string representation.

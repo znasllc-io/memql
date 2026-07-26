@@ -91,12 +91,22 @@ func TestRuntimeLiteralParsersTerminate(t *testing.T) {
 // TestRuntimeMalformedLiteralErrors -- terminating is necessary but not
 // sufficient: the dispatch must FAIL rather than quietly write a partial value
 // into the row.
+//
+// These inputs are the same MALFORMED literals the hang test feeds, so they go
+// through mustTerminate as well. Calling the parser directly would bypass the
+// `leaked` latch and, with the guard regressed, leak a second live spinner
+// next to the one the hang test already stopped on -- the exact unbounded
+// growth the latch exists to bound.
 func TestRuntimeMalformedLiteralErrors(t *testing.T) {
 	e := &MutationExecutor{}
 	ev := automations.NewEvaluator()
 	for _, src := range []string{"[}{]", "[}]", "[]]"} {
-		if _, err := e.parseAndEvaluateArrayLiteral(ev, src); err == nil {
-			t.Errorf("parseAndEvaluateArrayLiteral(%q) = nil error, want a malformed-literal error", src)
+		if !mustTerminate(t, "parseAndEvaluateArrayLiteral("+src+")", func() {
+			if _, err := e.parseAndEvaluateArrayLiteral(ev, src); err == nil {
+				t.Errorf("parseAndEvaluateArrayLiteral(%q) = nil error, want a malformed-literal error", src)
+			}
+		}) {
+			break
 		}
 	}
 }

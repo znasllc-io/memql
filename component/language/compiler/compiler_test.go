@@ -760,7 +760,7 @@ func TestCompiler_ExpressionToJSONExpr_FieldAccess(t *testing.T) {
 // `key:` prefix infers the terminal segment as the key.
 func TestParseObjectLiteral_BarePathShorthand(t *testing.T) {
 	c := New(Config{})
-	obj := c.parseObjectLiteral(`{
+	obj, _ := c.parseObjectLiteral(`{
 		event.payload.partitionId,
 		event.payload.email,
 		registerNode.result.node.id,
@@ -797,7 +797,7 @@ func TestParseObjectLiteral_BarePathRejectsSingleIdentifier(t *testing.T) {
 	// verbose parser, which will then fail to find a colon and
 	// produce a malformed entry. We just verify shorthand didn't
 	// silently claim it.
-	obj := c.parseObjectLiteral(`{foo: bar, allAgents}`)
+	obj, _ := c.parseObjectLiteral(`{foo: bar, allAgents}`)
 	if obj == nil {
 		return // acceptable: parser rejected the malformed input
 	}
@@ -814,7 +814,7 @@ func TestParseObjectLiteral_BarePathRejectsSingleIdentifier(t *testing.T) {
 // path that the AST and compiler produce.
 func TestParseObjectLiteral_UnquotedKeys(t *testing.T) {
 	c := New(Config{})
-	obj := c.parseObjectLiteral(`{name: "Alice", age: 30, active: true}`)
+	obj, _ := c.parseObjectLiteral(`{name: "Alice", age: 30, active: true}`)
 	if obj == nil {
 		t.Fatal("expected parsed object")
 	}

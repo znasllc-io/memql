@@ -1646,19 +1646,33 @@ func parseArrayLiteral(s string) []any {
 		}
 		val, next, ok := parseLiteralOrExpr(inner, pos)
 		if !ok || next <= pos {
-			// Malformed, or no progress. parseLiteralOrExpr returns its input
-			// pos unchanged on an unbalanced literal (`[}{]`) and on a stray
-			// depth-0 closer (`[}]`), so without this the loop appends nil
-			// forever -- an unbounded memory grow and a hang, not a panic
-			// (memql#2785). It matters at LOAD: parsePayloadRawToTemplate runs
-			// while the tree is read, so a malformed payload literal in an
-			// authored .memql file would hang the node at boot instead of
-			// failing the strict-boot gate.
+			// No progress. parseLiteralOrExpr returns its input pos unchanged
+			// on an unbalanced literal (`[}{]`) and on a stray depth-0 closer
+			// (`[}]`), so without this the loop appends nil forever -- an
+			// unbounded memory grow and a hang, not a panic (memql#2785). It
+			// matters at LOAD: parsePayloadRawToTemplate runs while the tree is
+			// read, so a malformed payload literal in an authored .memql file
+			// would hang the node at boot instead of failing the strict-boot
+			// gate.
 			//
 			// The position check is safe to treat as malformed HERE (unlike in
 			// parseObjectLiteral) because the loop's leading skip has already
 			// consumed commas and whitespace, so a non-advancing return cannot
 			// be a legitimately-empty element.
+			//
+			// `!ok` decides NOTHING today and is deliberately kept: every
+			// ok=false return in parseLiteralOrExpr returns the
+			// whitespace-skipped pos, and this loop's leading skip has already
+			// consumed that whitespace, so !ok always implies next == pos and
+			// the position check alone would suffice. It stays because that is
+			// a property of a DIFFERENT function -- if parseLiteralOrExpr ever
+			// grows an ok=false path that DOES advance, the position check
+			// silently stops covering it and a malformed element becomes a
+			// silent nil. TestArrayOkImpliesNoProgress pins the invariant so
+			// the day it changes is a red test rather than a silent wrong
+			// value. (Contrast the two `newPos < pos` guards deleted in this
+			// same change: those were unreachable by construction within one
+			// expression, so nothing could ever revive them.)
 			return nil
 		}
 		out = append(out, val)
