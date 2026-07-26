@@ -103,6 +103,10 @@ func (l *Loader) LoadFromUnifiedTree() ([]*Automation, error) {
 				continue
 			}
 			automation.Origin = origin
+			// #2800: this is the ONLY place trust is granted. These bodies
+			// come from the embedded/registered DSL tree, so they are
+			// authored, reviewed and not caller-supplied.
+			automation.Trusted = true
 			out = append(out, automation)
 		}
 		return nil

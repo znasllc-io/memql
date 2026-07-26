@@ -808,6 +808,10 @@ var userScopeSelectionExemptions = map[string]string{
 
 var userScopeExemptSeen = map[string]bool{}
 
+// serverOnlyAnnotationRe matches the @serverOnly ANNOTATION -- at line start,
+// so a comment mentioning it cannot be mistaken for the construct carrying it.
+var serverOnlyAnnotationRe = regexp.MustCompile(`(?m)^@serverOnly\b`)
+
 func TestPerRowAuthzClassification(t *testing.T) {
 	type counts struct {
 		owned      int
@@ -889,7 +893,15 @@ func TestPerRowAuthzClassification(t *testing.T) {
 			// impossible -- the auth path resolving `sub` -> user before an
 			// actor exists, an automation acting on a user other than the
 			// actor.
-			hasServerOnly := strings.Contains(preamble, "@serverOnly")
+			//
+			// Matched at LINE START, not by substring. A substring test let a
+			// COMMENT merely mentioning the annotation silence the gate --
+			// and in that shape there is no annotation, so Function.ServerOnly
+			// stays false and there is no runtime guarantee at all. The
+			// justification above ("rests on a runtime guarantee rather than
+			// on a promise") is exactly what a prose mention does not buy.
+			// sdk/gen/gen.go's serverOnlyRe already had this right.
+			hasServerOnly := serverOnlyAnnotationRe.MatchString(preamble)
 
 			// A QUERY's scoping lives in its filter's boolean STRUCTURE, so
 			// the gate evaluates the clause rather than substring-matching

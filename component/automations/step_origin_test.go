@@ -47,6 +47,7 @@ func TestStepDispatchCarriesInternalOrigin(t *testing.T) {
 
 	step := &Step{ID: "s1", Name: "decide", Type: StepTypeFunction}
 	stepCtx := &StepContext{Execution: NewExecution("killSwitchSuspendsRunningPlans", "test")}
+	stepCtx.Execution.SourceTrusted = true // loaded from the registered DSL tree
 	if _, err := e.executeStep(context.Background(), step, stepCtx); err != nil {
 		t.Fatalf("executeStep: %v", err)
 	}
@@ -67,5 +68,65 @@ func TestStepDispatchCarriesInternalOrigin(t *testing.T) {
 func TestUnstampedExecutorContextIsStillClient(t *testing.T) {
 	if auth.OriginFromContext(context.Background()).IsInternal() {
 		t.Fatal("a bare context reported internal origin")
+	}
+}
+
+// TestCallerSuppliedAutomationDoesNotGetInternalOrigin closes a working BYPASS
+// that a previous revision of this file's fix introduced.
+//
+// The stamp was applied in executeStep unconditionally, justified by
+// "executeStep is reachable only from automation execution and resume". That
+// is true and is not a security argument, because AUTOMATION EXECUTION
+// INCLUDES AUTOMATIONS WHOSE BODY THE CALLER SUPPLIED: RunBundleDryRun
+// compiles submitted source and drives this very Executor. So MCP
+// run_inline_automation and the planner's LLM-emitted bundle could each wrap a
+// @serverOnly read in a step and have it execute with internal origin --
+// laundering client origin into trusted, and handing a caller the full user
+// row that userById's admin gate denies them.
+//
+// It also falsified the headline claim that "a cluster owner over the wire is
+// still refused", since the MCP path is reachable by an owner.
+//
+// Trust now rides on the automation's SOURCE (Automation.Trusted, granted only
+// by the unified tree loader) rather than on which function does the
+// dispatching. False is the zero value, so anything compiled from submitted
+// source is untrusted without having to be recognised as such.
+func TestCallerSuppliedAutomationDoesNotGetInternalOrigin(t *testing.T) {
+	reg := &originCapturingRegistry{}
+	e := &Executor{
+		logger:       slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})),
+		stepRegistry: reg,
+	}
+
+	step := &Step{ID: "s1", Name: "steal", Type: StepTypeFunction}
+	// An execution whose source was NOT the registered tree -- exactly what
+	// RunBundleDryRun produces from caller-submitted bundle source.
+	stepCtx := &StepContext{Execution: NewExecution("attackerSubmitted", "dryrun")}
+	if stepCtx.Execution.SourceTrusted {
+		t.Fatal("NewExecution defaulted to trusted; caller-supplied source would be trusted by default")
+	}
+
+	if _, err := e.executeStep(context.Background(), step, stepCtx); err != nil {
+		t.Fatalf("executeStep: %v", err)
+	}
+
+	if reg.got.IsInternal() {
+		t.Fatalf("a caller-supplied automation dispatched with origin %v -- "+
+			"this is a client-to-@serverOnly bypass: submit a bundle whose step "+
+			"reads userByIdSystem and the gate is skipped", reg.got)
+	}
+}
+
+// TestAutomationTrustIsGrantedOnlyByTheTreeLoader pins where trust comes from.
+// A second grant site added later would reopen the bypass, and the grep that
+// would catch it is easy to skip.
+func TestAutomationTrustIsGrantedOnlyByTheTreeLoader(t *testing.T) {
+	if (&Automation{}).Trusted {
+		t.Error("Automation.Trusted is not false by default; caller-supplied " +
+			"automations would be trusted unless explicitly marked, which is the " +
+			"wrong direction for this flag")
+	}
+	if NewExecution("x", "y").SourceTrusted {
+		t.Error("AutomationExecution.SourceTrusted is not false by default")
 	}
 }

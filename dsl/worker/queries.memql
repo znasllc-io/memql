@@ -91,10 +91,21 @@ query invocation invocationsForUser {
 ///
 /// The automation path stamps auth.ContextWithInternalOrigin in
 /// component/automations/executor.go's executeStep -- the dispatch point every
-/// step type goes through -- so the kill switch keeps working. (An earlier
+/// step type goes through -- and only for automations loaded from the
+/// registered tree, so this construct stays reachable from the kill-switch
+/// automation and not from a caller-submitted bundle.
+///
+/// NOTE the kill switch does not currently run, for an unrelated and
+/// pre-existing reason: `args.event.node.id ?? ""` reaches argument
+/// validation as an unevaluated CoalesceExpr (memql#2870, reproduced at the
+/// merge base). The origin plumbing below is correct and was verified
+/// separately; do not read it as evidence the automation works end to end. (An earlier
 /// attempt stamped the `input:` block instead, which no step uses, and this
 /// comment claimed success while the switch was in fact refused as a client
-/// call. TestKillSwitchAutomationPathIsInternal pins the real path.)
+/// call. TestStepDispatchCarriesInternalOrigin pins the real path, and
+/// TestCallerSuppliedAutomationDoesNotGetInternalOrigin pins that the stamp
+/// applies only to automations loaded from the registered tree -- a
+/// caller-submitted bundle must NOT reach this construct.)
 @serverOnly
 query plan runningPlansForUser {
   args {
