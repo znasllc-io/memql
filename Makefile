@@ -414,7 +414,7 @@ test-polyphon:
 # ---------------------------------------------------------------------------
 
 ##@ Quality & codegen
-.PHONY: vet fmt lint tidy generate proto-gen proto-gen-check
+.PHONY: vet fmt lint tidy generate proto-gen proto-gen-check prs-stalled
 
 ## Run go vet on all packages
 vet:
@@ -426,6 +426,12 @@ fmt:
 
 ## Run vet + fmt (quick lint)
 lint: fmt vet
+
+## Report open PRs that are green + mergeable but nobody is advancing
+## (memql#2833). READ-ONLY: it never enqueues, because green is not reviewed.
+## IDLE_MINUTES=15 tightens the idle threshold; REPO=owner/name retargets.
+prs-stalled:
+	bash scripts/dev/stalled-prs.sh
 
 ## Tidy go.mod dependencies
 tidy:
