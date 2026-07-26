@@ -1639,17 +1639,56 @@ like `deleted != true`.
 already requires this wherever a trait exists (rule 22,
 `TestNoInlineTraitablePredicates`).
 
-That helps, but be clear about how much: a trait name is a construct
-reference, so a typo in it fails **closed** -- the query errors with
-`unknown spec "isNotDeletd"` instead of quietly returning every row.
-It does **not** fail at load. Verified: injecting that typo into a
-shipped query leaves `go test ./dsl/...` green and the engine boots
-fine; the failure appears at query-parse time, on first call. So the
-trait converts a silent wrong-answer into a loud runtime error, which
-is a real improvement, but not a build-time gate.
+**A misspelled FIELD is now caught before it ships**, and so is a
+misspelled trait in a `use` line. Three referential lanes cover those
+three positions, each verified by injecting the typo into a shipped
+construct. A misspelled trait at a *call site* is the position they
+miss -- see below:
 
-The semantics cannot catch the typo on their own: they cannot tell
-*declared-but-absent* (where null semantics are correct) from
-*undeclared entirely* (an author error). Only field-existence
-validation can -- tracked in #2781, which would make this a load-time
-failure.
+| you misspell | reported as |
+|---|---|
+| a payload field in a `filter` (#2781) | `query "expiredWorkerInvocations": filter compares field "actionTYPO", which concept "invocation" does not declare` |
+| a field inside a spec body (#2804) | `spec "requiresAdmin": body reads field "rolle", which shape "actorEnvelope" does not declare` |
+| a trait's name in a cross-domain `use` | `use common.traits: "isNotDeletd" is not declared in common/traits.memql` |
+
+**Where these run matters.** The field lanes (rows 1 and 2) live in
+`memqllint` and in the real-tree test that drives them
+(`TestVerifyReferentialIntegrity_RealDSLTree`, in
+`component/memql/dslimports`), so `go test ./...` catches them but
+`go test ./dsl/...` alone stays green -- and the `dsl` package is the
+natural place to look. Row 3 is caught by both, since the cross-domain
+import gate (rule 25) also runs in `./dsl/...`.
+
+**The typo shape that is still silent is a misspelled trait at the CALL
+SITE.** Row 3 catches a name misspelled in the `use` line. It does not
+check that call sites match what was imported -- so this is silent:
+
+```memql
+use common.traits.{ isNotDeleted }        // correct
+
+filter  planId==args.planId && isNotDeletd    // typo -- nothing reports it
+filter  ownerUserId==args.ownerUserId && isNotDeleted   // sibling keeps the import "used"
+```
+
+Verified: `memqllint`, `go test ./dsl/...` and the referential tests all
+stay green. It surfaces only when the typo orphans the import entirely
+(every call site misspelled), which reports the import as never
+referenced. A same-domain trait is the same hole with no import at all
+to orphan -- rule 25 (#2617) makes it ambient, so there is nothing for
+the import lane to inspect.
+
+It does fail **closed**: at query-parse on first call the query errors
+`unknown spec "isNotDeletd"` rather than quietly returning every row. A
+loud runtime error, not a build-time gate.
+
+**What field validation structurally cannot see** is a field that is real
+and declared but scoped from the wrong *source*: `filter
+row.id==args.userId` is a well-formed reference to an existing property
+-- it just trusts an argument where it should have trusted the token.
+That is #2799 / #2800 / #2803, not this rule. (Note the `row.` prefix:
+the bare-intrinsic spelling is retired by rule 22.)
+
+So the fail-open direction above is real but mostly out of reach of a
+typo now. It remains reachable by a caller-supplied id, and by a field
+declared on the concept that is simply absent on a given row -- which is
+the case the null semantics get deliberately right.
