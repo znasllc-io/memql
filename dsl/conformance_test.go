@@ -798,18 +798,24 @@ func rowSelectionSurface(body string) string {
 // already tracked elsewhere while still failing on anything new. Removing the
 // entry is part of closing the issue it names.
 var userScopeSelectionExemptions = map[string]string{
-	"worker/queries.memql runningPlansForUser": "scopes on the caller-supplied args.userId rather than actor.userId; tracked in #2800 (parked pending the repo-owner decision on the userById split). Called internally from worker/logic.memql with an event node id, but it is also on the generated SDK surface, so a client can pass any userId.",
+	// Empty on purpose. runningPlansForUser was the last entry; #2800 resolved
+	// it by marking the construct @serverOnly rather than by exempting it, so
+	// the debt is paid rather than deferred. Both halves of the old rationale
+	// are now false: it is no longer on the generated SDK surface (the
+	// generator skips @serverOnly), and a client can no longer pass any
+	// userId because a client cannot call it at all.
 }
 
 var userScopeExemptSeen = map[string]bool{}
 
 func TestPerRowAuthzClassification(t *testing.T) {
 	type counts struct {
-		owned   int
-		admin   int
-		public  int
-		flagged int
-		other   int
+		owned      int
+		admin      int
+		public     int
+		serverOnly int
+		flagged    int
+		other      int
 	}
 	byDomain := map[string]*counts{}
 	type flag struct {
@@ -870,6 +876,21 @@ func TestPerRowAuthzClassification(t *testing.T) {
 
 			hasPublic := strings.Contains(preamble, "@public")
 
+			// @serverOnly resolves the same question @public does, from the
+			// other direction (memql#2800). @public says "callable by anyone
+			// and that is intended"; @serverOnly says "not callable by a
+			// client at all", which is why a caller-scope filter is neither
+			// present nor meaningful -- there is no client caller to scope to.
+			//
+			// Unlike @public it is not merely an author's acknowledgement: it
+			// is ENFORCED at every dispatch point against auth.CallOrigin, so
+			// accepting it here rests on a runtime guarantee rather than on a
+			// promise. Constructs carrying it are the ones where scoping is
+			// impossible -- the auth path resolving `sub` -> user before an
+			// actor exists, an automation acting on a user other than the
+			// actor.
+			hasServerOnly := strings.Contains(preamble, "@serverOnly")
+
 			// A QUERY's scoping lives in its filter's boolean STRUCTURE, so
 			// the gate evaluates the clause rather than substring-matching
 			// the body (memql#2832). A substring test reads
@@ -907,6 +928,8 @@ func TestPerRowAuthzClassification(t *testing.T) {
 			exemptKey := p + " " + name
 
 			switch {
+			case hasServerOnly:
+				byDomain[domain].serverOnly++
 			case hasPublic:
 				byDomain[domain].public++
 			case hasOwner:
@@ -933,12 +956,12 @@ func TestPerRowAuthzClassification(t *testing.T) {
 	}
 	sort.Strings(domains)
 	t.Logf("\n=== Per-row authz classification (informational; see docs/public/operate/auth/per-row-authz-audit.md) ===")
-	t.Logf("%-15s %5s %5s %5s %5s %5s",
-		"domain", "owned", "admin", "public", "FLAG", "other")
+	t.Logf("%-15s %5s %5s %5s %6s %5s %5s",
+		"domain", "owned", "admin", "public", "srvOnly", "FLAG", "other")
 	for _, d := range domains {
 		c := byDomain[d]
-		t.Logf("%-15s %5d %5d %5d %5d %5d",
-			d, c.owned, c.admin, c.public, c.flagged, c.other)
+		t.Logf("%-15s %5d %5d %5d %6d %5d %5d",
+			d, c.owned, c.admin, c.public, c.serverOnly, c.flagged, c.other)
 	}
 	t.Logf("")
 	// Keep the exemption table honest: an entry whose construct no longer

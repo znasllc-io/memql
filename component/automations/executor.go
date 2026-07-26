@@ -735,17 +735,8 @@ func (e *Executor) executeInput(ctx context.Context, input *AutomationInput) (an
 		query = fmt.Sprintf("paginate(%s, %d)", query, input.Limit)
 	}
 
-	// #2800: an automation step is server-side by construction -- the body is
-	// AUTHORED DSL dispatched from a graph event, not query text submitted by
-	// a caller -- so it may reach @serverOnly constructs. The kill-switch
-	// automation is the motivating case: killSwitchSuspendsRunningPlans reads
-	// the affected USER's running plans, and the actor is the automation's
-	// context rather than that user, so the construct cannot be scoped to
-	// actor.userId and must instead be barred from the wire.
-	//
-	// Note this marks who authored the CALL, not the data: a client can
-	// certainly cause an automation to fire, but it cannot choose which
-	// constructs the authored body invokes.
+	// #2800: server-side, see the stamp in executeStep. The input block runs
+	// on the same footing as a step.
 	result, err := e.engine.Execute(auth.ContextWithInternalOrigin(ctx), query)
 	if err != nil {
 		return nil, err
@@ -812,8 +803,33 @@ func (e *Executor) executeStep(ctx context.Context, step *Step, stepCtx *StepCon
 		}
 	}
 
-	// Execute the step
-	result, err := e.stepRegistry.Execute(ctx, step, stepCtx)
+	// Execute the step.
+	//
+	// #2800: an automation step is server-side by construction -- the body is
+	// AUTHORED DSL dispatched from a graph event, not query text submitted by
+	// a caller -- so it may reach @serverOnly constructs. The kill-switch
+	// automation is the motivating case: killSwitchSuspendsRunningPlans reads
+	// the affected USER's running plans, and the actor is the automation's
+	// context rather than that user, so the construct cannot be scoped to
+	// actor.userId and must instead be barred from the wire.
+	//
+	// The stamp belongs HERE, not deeper. A first attempt put it on the
+	// `input:` block's engine call, which no step goes through -- every step
+	// type dispatches via stepRegistry.Execute and reached the engine with an
+	// unstamped context, so the kill switch was refused as a client call and
+	// silently suspended nothing. That is the failure the issue's own park
+	// comment predicted: a security control failing closed-looking but open.
+	//
+	// It also must not go any deeper. LogicRunner is shared with the
+	// client-callable `logic foo(...)` path, so stamping there would let any
+	// caller launder client origin into internal by wrapping a @serverOnly
+	// read in a logic. executeStep is reachable only from automation
+	// execution and resume, which is what makes it the correct seam.
+	//
+	// Note this marks who authored the CALL, not the data: a client can
+	// certainly cause an automation to fire, but it cannot choose which
+	// constructs the authored body invokes.
+	result, err := e.stepRegistry.Execute(auth.ContextWithInternalOrigin(ctx), step, stepCtx)
 
 	// Publish step completed/failed event
 	var stepTopic string

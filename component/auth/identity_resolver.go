@@ -46,7 +46,8 @@ var ErrUserNotProvisioned = errors.New("auth: user not provisioned in database")
 //  1. `sub` must already be a canonical v1:identity:user id (every
 //     identity-service-issued JWT carries one). Anything else is
 //     rejected with ErrUserNotProvisioned.
-//  2. userById(userId) -> user row (for Role + email).
+//  2. userByIdSystem(userId) -> user row (for Role + email). @serverOnly:
+//     this is the call that makes caller-scoping circular (#2800).
 //
 // If step 2 returns no rows, ErrUserNotProvisioned is returned so the
 // caller can decide whether to short-circuit with a claims-based

@@ -116,13 +116,13 @@ func (d *Integration) Capabilities() []memql.IntegrationCapability {
 // automation; nothing reads them today but logging them keeps the
 // "why didn't my daily land" debug loop self-contained.
 type ensureResult struct {
-	UserId   string `json:"userId"`
-	Skipped  bool   `json:"skipped,omitempty"`
-	Reason   string `json:"reason,omitempty"`
-	PartitionId  string `json:"partitionId,omitempty"`
-	DateKey  string `json:"dateKey,omitempty"`
-	TzUsed   string `json:"tzUsed,omitempty"`
-	Inserted bool   `json:"inserted,omitempty"`
+	UserId      string `json:"userId"`
+	Skipped     bool   `json:"skipped,omitempty"`
+	Reason      string `json:"reason,omitempty"`
+	PartitionId string `json:"partitionId,omitempty"`
+	DateKey     string `json:"dateKey,omitempty"`
+	TzUsed      string `json:"tzUsed,omitempty"`
+	Inserted    bool   `json:"inserted,omitempty"`
 }
 
 func (d *Integration) handleEnsureForUser(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
@@ -319,13 +319,19 @@ func (d *Integration) handleRolloverAllUsers(ctx context.Context, _ map[string]a
 	}}, nil
 }
 
-// loadUser runs userById and unwraps the first row's payload +
+// loadUser runs userByIdSystem and unwraps the first row's payload +
 // id into a flat map. The query is shape-wrapped (userFull), so the
 // projection lands at the row top level under the post-shape
 // flattening convention.
+//
+// #2800: daily-space provisioning reads the row of the user being provisioned
+// for, which is not the actor -- it runs from a user-created event and from a
+// rollover cron. systemActorContext already marks the ACTOR as system; the
+// origin stamp is a separate axis (which channel the call came from), so both
+// are needed.
 func (d *Integration) loadUser(ctx context.Context, userId string) (map[string]any, error) {
-	q := fmt.Sprintf(`userById({userId: %q})`, userId)
-	raw, err := d.engine.Execute(systemActorContext(ctx), q)
+	q := fmt.Sprintf(`userByIdSystem({userId: %q})`, userId)
+	raw, err := d.engine.Execute(auth.ContextWithInternalOrigin(systemActorContext(ctx)), q)
 	if err != nil {
 		return nil, err
 	}

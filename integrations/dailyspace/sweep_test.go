@@ -91,7 +91,15 @@ func (f *fakeEngine) Execute(_ context.Context, query string) (*memql.ExecuteRes
 	switch name {
 	case "activeUsers":
 		return rowsResult(f.users), nil
-	case "userById":
+	case "userByIdSystem":
+		// #2800 renamed this read: loadUser now calls the @serverOnly
+		// userByIdSystem, since daily-space provisioning reads the row of the
+		// user being provisioned for, which is not the actor.
+		//
+		// The fake is strict about names, which is what caught the rename --
+		// a permissive stub would have fallen through to an empty result and
+		// turned a rename into a silent loss of coverage.
+		//
 		// fmt-built literal: extract the id between quotes.
 		for _, u := range f.users {
 			if id, _ := u["id"].(string); id != "" && strings.Contains(query, fmt.Sprintf("%q", id)) {

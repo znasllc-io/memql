@@ -1101,7 +1101,7 @@ query user userById {
   args {
     userId  string!
   }
-  filter  row.id==args.userId && isActiveRecord && spec("requiresOwnerOrAdmin")
+  filter  row.id==args.userId && isActiveRecord && requiresOwnerOrAdmin
   shape   userFull
 }
 

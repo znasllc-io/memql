@@ -90,7 +90,11 @@ query invocation invocationsForUser {
 /// control failing open while looking closed.
 ///
 /// The automation path stamps auth.ContextWithInternalOrigin in
-/// component/automations/executor.go, so it keeps working.
+/// component/automations/executor.go's executeStep -- the dispatch point every
+/// step type goes through -- so the kill switch keeps working. (An earlier
+/// attempt stamped the `input:` block instead, which no step uses, and this
+/// comment claimed success while the switch was in fact refused as a client
+/// call. TestKillSwitchAutomationPathIsInternal pins the real path.)
 @serverOnly
 query plan runningPlansForUser {
   args {

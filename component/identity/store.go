@@ -1119,13 +1119,6 @@ func (s *Store) HasOwnerUser(ctx context.Context) (bool, error) {
 // exactly this, leaving Email/Role/Name unset on freshly minted
 // access tokens (which then broke the GA-auto-join chain because
 // hash(actor) diverged from hash(email)).
-// executeAndExtractInternal is executeAndExtract for a @serverOnly construct
-// (memql#2800). The stamp is applied here rather than at each call site so the
-// trusted marking is visible in one place and greppable.
-func (s *Store) executeAndExtractInternal(ctx context.Context, query string) ([]*memqlv1.MemoryNode, error) {
-	return s.executeAndExtract(auth.ContextWithInternalOrigin(ctx), query)
-}
-
 func (s *Store) executeAndExtract(ctx context.Context, query string) ([]*memqlv1.MemoryNode, error) {
 	res, err := s.Engine.Execute(ctx, query)
 	if err != nil {
@@ -1165,6 +1158,16 @@ func (s *Store) executeAndExtract(ctx context.Context, query string) ([]*memqlv1
 		out = append(out, node)
 	}
 	return out, nil
+}
+
+// executeAndExtractInternal is executeAndExtract for a @serverOnly construct
+// (memql#2800). The stamp lives here rather than at each call site so the
+// trusted marking is visible in one place and greppable.
+//
+// Keep the caller list short and deliberate: everything routed through here
+// can reach constructs that are barred from the wire.
+func (s *Store) executeAndExtractInternal(ctx context.Context, query string) ([]*memqlv1.MemoryNode, error) {
+	return s.executeAndExtract(auth.ContextWithInternalOrigin(ctx), query)
 }
 
 // fieldGetter wraps a MemoryNode with typed accessors. Mirrors the

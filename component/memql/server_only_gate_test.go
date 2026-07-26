@@ -1,6 +1,7 @@
 package memql
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -123,4 +124,98 @@ func TestServerOnlyIsIndependentOfDisabled(t *testing.T) {
 			"@disabled must stop EVERY caller, which is precisely why it cannot "+
 			"stand in for @serverOnly", err)
 	}
+}
+
+// TestAllDispatchPointsAreGated covers the FOUR entry points, because the
+// review found two of them had no test at all: both @serverOnly guards in
+// engine.go could be deleted with the whole suite still green, while the
+// commit message claimed "enforced at all three dispatch points" and "each
+// test fails when its guard is reverted".
+//
+// A construct reachable through an ungated point is fully reachable, so
+// per-point coverage is the only kind that means anything here.
+func TestAllDispatchPointsAreGated(t *testing.T) {
+	mk := func(kind string) map[string]*Function {
+		return map[string]*Function{
+			"secret": {
+				Name:         "secret",
+				FunctionKind: kind,
+				Enabled:      true,
+				ServerOnly:   true,
+				ExprSource:   `concept=="v1:identity:user"`,
+			},
+		}
+	}
+
+	t.Run("query expansion", func(t *testing.T) {
+		v := newFunctionValidatorWithOrigin(mk("query"), nil, auth.OriginClient)
+		_, err := v.expandFunctionCall(&FunctionCallExpression{Name: "secret"})
+		if err == nil || !strings.Contains(err.Error(), "server-only") {
+			t.Errorf("expandFunctionCall did not refuse: %v", err)
+		}
+	})
+
+	t.Run("mutation dispatch", func(t *testing.T) {
+		e := &MemQLEngine{}
+		reg := newFunctionRegistry()
+		fn := mk("mutation")["secret"]
+		if err := reg.Upsert(fn); err != nil {
+			t.Fatalf("Upsert: %v", err)
+		}
+		_, err := e.executeMutationFunctionCall(context.Background(),
+			&FunctionCallExpression{Name: "secret"}, reg)
+		if err == nil || !strings.Contains(err.Error(), "server-only") {
+			t.Errorf("executeMutationFunctionCall did not refuse: %v", err)
+		}
+		// ...and an internal context must get PAST the gate.
+		_, err = e.executeMutationFunctionCall(auth.ContextWithInternalOrigin(context.Background()),
+			&FunctionCallExpression{Name: "secret"}, reg)
+		if err != nil && strings.Contains(err.Error(), "server-only") {
+			t.Errorf("internal origin was refused by the mutation gate: %v", err)
+		}
+	})
+
+	t.Run("logic dispatch", func(t *testing.T) {
+		e := &MemQLEngine{}
+		reg := newFunctionRegistry()
+		fn := mk("logic")["secret"]
+		if err := reg.Upsert(fn); err != nil {
+			t.Fatalf("Upsert: %v", err)
+		}
+		_, err := e.executeLogicFunctionCall(context.Background(),
+			&FunctionCallExpression{Name: "secret"}, reg)
+		if err == nil || !strings.Contains(err.Error(), "server-only") {
+			t.Errorf("executeLogicFunctionCall did not refuse: %v", err)
+		}
+		_, err = e.executeLogicFunctionCall(auth.ContextWithInternalOrigin(context.Background()),
+			&FunctionCallExpression{Name: "secret"}, reg)
+		if err != nil && strings.Contains(err.Error(), "server-only") {
+			t.Errorf("internal origin was refused by the logic gate: %v", err)
+		}
+	})
+
+	t.Run("F.6 mutation-leaf hoist", func(t *testing.T) {
+		fns := mk("logic")
+		fns["secret"].Expr = &ComparisonExpression{Field: FieldReference{Raw: "id", Parts: []string{"id"}}, Operator: "==", Value: "x"}
+		v := newFunctionValidatorWithOrigin(fns, nil, auth.OriginClient)
+		_, err := v.expandFunctionCallAllowMutationLeaf(&FunctionCallExpression{Name: "secret"})
+		if err == nil || !strings.Contains(err.Error(), "server-only") {
+			t.Errorf("the F.6 hoist did not refuse: %v -- it reaches a construct "+
+				"without going through expandFunctionCall, so it needs its own gate", err)
+		}
+	})
+
+	// The same hoist also leaked @disabled, which is a pre-existing hole the
+	// server-only work surfaced.
+	t.Run("F.6 hoist honours disabled", func(t *testing.T) {
+		fns := mk("logic")
+		fns["secret"].ServerOnly = false
+		fns["secret"].Enabled = false
+		fns["secret"].Expr = &ComparisonExpression{Field: FieldReference{Raw: "id", Parts: []string{"id"}}, Operator: "==", Value: "x"}
+		v := newFunctionValidatorWithOrigin(fns, nil, auth.OriginInternal)
+		_, err := v.expandFunctionCallAllowMutationLeaf(&FunctionCallExpression{Name: "secret"})
+		if err == nil || !strings.Contains(err.Error(), "disabled") {
+			t.Errorf("a @disabled logic hoisted through the F.6 path: %v", err)
+		}
+	})
 }
