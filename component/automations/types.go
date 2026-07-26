@@ -428,6 +428,34 @@ type CacheConfig struct {
 
 // IsCacheable returns true if this step can be cached.
 // Returns false for side-effecting steps (mutation, webhook, event).
+//
+// StepTypeFunction is NOT cacheable by default (memql#2869). It used to be, on
+// the assumption that a "function step" is pure -- and nothing checked that. A
+// DSL `logic` call compiles to exactly this step type
+// (component/automations/logic_runner.go), so a SIDE-EFFECTING logic was
+// cacheable unless its author remembered `cache.enabled = false`. The live
+// example is `logic revokeExpiredDelegations ( asOf: now )` in
+// dsl/identity/automations.memql -- a sweep that REVOKES rows, which could be
+// served from cache and skip the sweep for the entry's TTL.
+//
+// Why it had not bitten, and why that was luck rather than design: the cache key
+// included a per-second wall-clock reading, so it churned every second and an
+// entry almost never survived to be reused. #2867 removed wall-clock values from
+// the key -- correctly, since a key that changes every nanosecond is a cache
+// that can never hit -- which widened the window from under a second to the full
+// TTL (default 5m). A cache-invalidation strategy made of clock granularity
+// narrows a window rather than closing it; the sweep could always have been
+// skipped for up to a second.
+//
+// Opt IN with `cache.enabled = true` where the callee is genuinely pure. That is
+// the right default for a flag that is off everywhere (MEMQL_STEP_CACHE_ENABLED
+// defaults false and appears in no deploy overlay), because nothing regresses
+// and it converts a silent correctness risk into an explicit author decision.
+//
+// The alternative considered was classifying by the callee -- a `logic` whose
+// body contains a mutation is not cacheable -- which is more precise but needs a
+// purity analysis the loader does not have. Worth revisiting if the opt-out
+// ergonomics are missed.
 func (s *Step) IsCacheable() bool {
 	if s == nil {
 		return false
@@ -443,12 +471,15 @@ func (s *Step) IsCacheable() bool {
 		return true
 	}
 
-	// Default by type: pure steps are cacheable
+	// Default by type: only steps that CANNOT have side effects are cacheable.
+	// A query reads; a shape projects. A function step dispatches arbitrary
+	// authored code, so it is opt-in (see the doc comment).
 	switch s.Type {
-	case StepTypeQuery, StepTypeShape, StepTypeFunction:
+	case StepTypeQuery, StepTypeShape:
 		return true
 	default:
-		// Mutations, webhooks, events have side effects - not cacheable
+		// Mutations, webhooks, events and function steps may have side
+		// effects - not cacheable without an explicit opt-in.
 		return false
 	}
 }
