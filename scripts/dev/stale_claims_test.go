@@ -405,9 +405,14 @@ func staleClaimsEnv(stubDir, logPath string, extra ...string) []string {
 // "#count \(length)" form, and index() returning 0 through `// empty`.
 func requireJQ(t *testing.T) {
 	t.Helper()
-	if _, err := exec.LookPath("jq"); err != nil {
-		t.Fatalf("jq is not on PATH, and the gh stub execs it to evaluate the script's real " +
-			"--jq filters. Install jq (apt install jq / brew install jq).")
+	// `jq --version`, not LookPath: it covers MISSING and BROKEN in one probe.
+	// LookPath succeeds for any executable named jq, so a shimmed or
+	// incompatible one passed the guard and the suite then failed with the
+	// misleading "could not list labels" error this guard exists to prevent.
+	// The sibling's require_gh names the same pattern for `gh --version`.
+	if err := exec.Command("jq", "--version").Run(); err != nil {
+		t.Fatalf("jq is not usable (%v), and the gh stub execs it to evaluate the script's real "+
+			"--jq filters. Install jq (apt install jq / brew install jq).", err)
 	}
 }
 
@@ -1088,7 +1093,10 @@ func TestStaleClaims_FullIssuePageWarns(t *testing.T) {
 	cfg := staleClaimsStub{labelIssues: map[string][]stubIssue{"claimed:sFull": issues}}
 
 	res := runStaleClaims(t, cfg, nil)
-	if !strings.Contains(res.stderr, "page cap") {
+	// Match the ISSUE warning specifically. Bare "page cap" is a substring the
+	// LABEL warning also contains, so a future padLabels in this fixture would
+	// let this pass off the wrong warning.
+	if !strings.Contains(res.stderr, "label claimed:sFull hit the") {
 		t.Errorf("a FULL issue page produced no warning.\nA label whose issues are truncated "+
 			"hides claims exactly like a truncated label page does.\nstderr:\n%s", res.stderr)
 	}
@@ -1150,9 +1158,54 @@ func TestStaleClaims_MixedCaseClaimLabelIsEnumerated(t *testing.T) {
 	}}
 	res := runStaleClaims(t, cfg, nil)
 
-	if got := res.rowFor(7100); got == "" {
-		t.Errorf("a mixed-case `Claimed:` label was not enumerated.\ngh issue list --label matches "+
+	if got := res.rowFor(7100); !strings.Contains(got, "ABANDONED") {
+		t.Errorf("a mixed-case `Claimed:` label was not enumerated and classified.\ngh issue list --label matches "+
 			"case-insensitively, so dropping ascii_downcase makes the enumeration and the sweep "+
 			"disagree about which labels exist.\ngot:\n%s", res.stdout)
+	}
+}
+
+// timelinePageLimit mirrors TIMELINE_PAGE_LIMIT, and the stub's page-1 model
+// splits at the same number. With --paginate the cap no longer affects
+// correctness, but the split is what keeps
+// TestStaleClaims_ClaimAgeSurvivesALongTimeline's 150-event fixture meaningful
+// -- it was the one cap of three with no drift guard.
+const timelinePageLimit = 100
+
+func TestStaleClaims_TimelinePageCapConstantMatchesTheScript(t *testing.T) {
+	src, err := os.ReadFile(staleClaimsScript)
+	if err != nil {
+		t.Fatalf("read script: %v", err)
+	}
+	want := fmt.Sprintf("TIMELINE_PAGE_LIMIT=%d", timelinePageLimit)
+	if !strings.Contains(string(src), want) {
+		t.Fatalf("the script no longer sets %s, so the stub's page-1 split is at the wrong "+
+			"boundary and the long-timeline fixture may no longer straddle a page.", want)
+	}
+}
+
+// TestStaleClaims_CountLineIsStrippedFromTheLabelList pins the `#count`
+// plumbing.
+//
+// claim_labels emits the RAW page length as a leading `#count <n>` line from
+// the same call that produces the names -- that is what made the page-cap
+// warning measure the right number. main() must strip it before iterating, or
+// it is consumed as a label name. Deleting the strip left the suite green: the
+// tests that emit `#count` did not cover the shell that removes it, and I
+// wrongly recorded this as already covered.
+//
+// The real-gh consequence is nil (`gh issue list --label '#count 300'` matches
+// no issues), so this is cosmetic -- but the plumbing is new and an untested
+// half is how it stops being cosmetic later.
+func TestStaleClaims_CountLineIsStrippedFromTheLabelList(t *testing.T) {
+	res := runStaleClaims(t, mixedClaims(), nil)
+	if strings.Contains(res.stdout, "#count") {
+		t.Errorf("the `#count` sentinel leaked into the report:\n%s", res.stdout)
+	}
+	for _, c := range res.calls {
+		if strings.Contains(c, "--label #count") || strings.Contains(c, "--label '#count") {
+			t.Errorf("the `#count` line was iterated as a LABEL: %q\nmain() must strip it from "+
+				"the label list before the loop.", c)
+		}
 	}
 }
