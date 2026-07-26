@@ -30,6 +30,15 @@ var leaked bool
 // leaves at most ONE live spinner in this package: the first case to blow the
 // deadline reports the failure, and every later case skips instead of adding
 // another goroutine to race the runner's memory limit.
+//
+// What that does and does NOT buy, stated exactly. The spinner is not
+// cancellable -- these parsers take no context -- so it keeps growing until
+// the process exits, and its peak therefore tracks how much memory the box
+// will hand out, NOT any fixed bound. What the latch guarantees is that the
+// actionable `--- FAIL` line is printed at the 2s deadline, long before any
+// later OOM can truncate the log. That ordering is the whole point: a run that
+// dies at 6 GiB having already said which guard regressed is debuggable, and
+// one that dies without saying is not.
 func mustTerminate(t *testing.T, name string, fn func()) bool {
 	t.Helper()
 	if leaked {
@@ -104,6 +113,44 @@ func TestRuntimeMalformedLiteralErrors(t *testing.T) {
 		if !mustTerminate(t, "parseAndEvaluateArrayLiteral("+src+")", func() {
 			if _, err := e.parseAndEvaluateArrayLiteral(ev, src); err == nil {
 				t.Errorf("parseAndEvaluateArrayLiteral(%q) = nil error, want a malformed-literal error", src)
+			}
+		}) {
+			break
+		}
+	}
+}
+
+// TestRuntimeCrossCopyParity pins the RUNTIME copy's half of the shared
+// accept/reject table. The list is duplicated verbatim in
+// component/language/compiler and component/memql -- see the comment on
+// crossCopyParityCases there for why the three must agree.
+//
+// This copy is the one that diverged on `{ k: "abc }`: parseValueFromString
+// returned the partial text on an unterminated string, so a literal that
+// FAILED to compile still DISPATCHED, as {"k":"abc"}.
+func TestRuntimeCrossCopyParity(t *testing.T) {
+	e := &MutationExecutor{}
+	ev := automations.NewEvaluator()
+	for _, tc := range []struct {
+		src    string
+		accept bool
+	}{
+		{`{ k: "ok" }`, true},
+		{`{ k: }`, true},
+		{`{k:}`, true},
+		{`{ k: [,] }`, true},
+		{`{ k: ["a", "b"] }`, true},
+		{`{ punct: "commas, braces } brackets ]" }`, true},
+		{`{ a: { b: "}" } }`, true},
+		{`{ a: { b: "a}b" }, c: 1 }`, true},
+		{`{ k: "abc }`, false},
+		{`{ k: [}{] }`, false},
+	} {
+		if !mustTerminate(t, "parseAndEvaluateObjectLiteral("+tc.src+")", func() {
+			_, err := e.parseAndEvaluateObjectLiteral(ev, tc.src)
+			if got := err == nil; got != tc.accept {
+				t.Errorf("parseAndEvaluateObjectLiteral(%q): accepted=%v, want %v (err=%v)",
+					tc.src, got, tc.accept, err)
 			}
 		}) {
 			break

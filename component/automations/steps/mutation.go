@@ -1351,7 +1351,10 @@ func (e *MutationExecutor) parseAndEvaluateObjectLiteral(evaluator *automations.
 		// value scan, so it cannot spin, and parseValueFromString never
 		// returns a position below its input. The array loop below is the one
 		// that needs the guard (memql#2785).
-		valueStr, newPos := e.parseValueFromString(inner, pos)
+		valueStr, newPos, ok := e.parseValueFromString(inner, pos)
+		if !ok {
+			return nil, fmt.Errorf("malformed value for key %q at offset %d: %q", key, pos, inner)
+		}
 		pos = newPos
 
 		// Evaluate the value
@@ -1394,8 +1397,8 @@ func (e *MutationExecutor) parseAndEvaluateArrayLiteral(evaluator *automations.E
 			break
 		}
 
-		valueStr, newPos := e.parseValueFromString(inner, pos)
-		if newPos <= pos {
+		valueStr, newPos, ok := e.parseValueFromString(inner, pos)
+		if !ok || newPos <= pos {
 			// No progress: parseValueFromString returns its input pos
 			// unchanged on an unbalanced literal and on a stray depth-0
 			// closer, so the loop appended forever -- an unbounded memory grow
@@ -1426,9 +1429,15 @@ func (e *MutationExecutor) parseAndEvaluateArrayLiteral(evaluator *automations.E
 
 // parseValueFromString extracts a single value starting at position pos.
 // Returns the value string and new position.
-func (e *MutationExecutor) parseValueFromString(s string, pos int) (string, int) {
+// The bool reports well-formedness. Today the only ill-formed case it can
+// report is an unterminated string; it exists so this RUNTIME copy agrees with
+// the two load-time copies (component/memql, component/language/compiler),
+// which both reject that input. Before this, `{ k: "abc }` compiled to an
+// error but DISPATCHED as {"k":"abc"} -- the same literal accepted or rejected
+// depending on which parser saw it (memql#2785).
+func (e *MutationExecutor) parseValueFromString(s string, pos int) (string, int, bool) {
 	if pos >= len(s) {
-		return "", pos
+		return "", pos, true
 	}
 
 	// Skip leading whitespace
@@ -1436,7 +1445,7 @@ func (e *MutationExecutor) parseValueFromString(s string, pos int) (string, int)
 		pos++
 	}
 	if pos >= len(s) {
-		return "", pos
+		return "", pos, true
 	}
 
 	ch := s[pos]
@@ -1469,13 +1478,13 @@ func (e *MutationExecutor) parseValueFromString(s string, pos int) (string, int)
 					depth--
 					if depth == 0 {
 						pos++
-						return s[start:pos], pos
+						return s[start:pos], pos, true
 					}
 				}
 			}
 			pos++
 		}
-		return s[start:pos], pos
+		return s[start:pos], pos, true
 	}
 
 	// Array
@@ -1506,13 +1515,13 @@ func (e *MutationExecutor) parseValueFromString(s string, pos int) (string, int)
 					depth--
 					if depth == 0 {
 						pos++
-						return s[start:pos], pos
+						return s[start:pos], pos, true
 					}
 				}
 			}
 			pos++
 		}
-		return s[start:pos], pos
+		return s[start:pos], pos, true
 	}
 
 	// String literal
@@ -1535,11 +1544,13 @@ func (e *MutationExecutor) parseValueFromString(s string, pos int) (string, int)
 			if cur == '"' {
 				value := s[start:pos]
 				pos++ // skip closing quote
-				return value, pos
+				return value, pos, true
 			}
 			pos++
 		}
-		return s[start:pos], pos
+		// Ran off the end with no closing quote. Returning the partial text
+		// here silently truncated the value at dispatch time.
+		return "", pos, false
 	}
 
 	// Boolean, number, null, or expression
@@ -1575,32 +1586,32 @@ func (e *MutationExecutor) parseValueFromString(s string, pos int) (string, int)
 			case ')':
 				parenDepth--
 				if parenDepth < 0 {
-					return strings.TrimSpace(s[start:pos]), pos
+					return strings.TrimSpace(s[start:pos]), pos, true
 				}
 			case '{':
 				braceDepth++
 			case '}':
 				braceDepth--
 				if braceDepth < 0 {
-					return strings.TrimSpace(s[start:pos]), pos
+					return strings.TrimSpace(s[start:pos]), pos, true
 				}
 			case '[':
 				bracketDepth++
 			case ']':
 				bracketDepth--
 				if bracketDepth < 0 {
-					return strings.TrimSpace(s[start:pos]), pos
+					return strings.TrimSpace(s[start:pos]), pos, true
 				}
 			case ',':
 				if parenDepth == 0 && braceDepth == 0 && bracketDepth == 0 {
-					return strings.TrimSpace(s[start:pos]), pos
+					return strings.TrimSpace(s[start:pos]), pos, true
 				}
 			}
 		}
 		pos++
 	}
 
-	return strings.TrimSpace(s[start:pos]), pos
+	return strings.TrimSpace(s[start:pos]), pos, true
 }
 
 // splitFunctionArgs splits function arguments, handling nested parentheses and braces.
