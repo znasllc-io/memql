@@ -77,11 +77,10 @@ Constructs live in one consolidated file per kind per namespace
 (`dsl/<namespace>/queries.memql`, `dsl/<namespace>/mutations.memql`,
 ...), so file names never carry an individual construct's name.
 
-One asymmetry to know: automation step bodies reference logic
-constructs by the bare, un-prefixed name -- `step run { logic
-autoJoinSI { event: event } }` resolves to `logic logicAutoJoinSI`
-through the file-top `use cognition.logic.{ logicAutoJoinSI }`
-import.
+An automation step references a logic construct by the same name the
+file-top import names -- `step decide { logic bootstrapSession ( event )
+}` resolves through `use cognition.logic.{ bootstrapSession }`. There is
+no prefixed/bare split between the two.
 
 ## Why This Matters
 
@@ -91,10 +90,16 @@ import.
 
 ## Enforcement
 
-Compiler lint emits non-fatal warnings for naming mismatches:
+None, by design. The naming-prefix lint (`naming.query-prefix` /
+`naming.mutation-prefix` / `naming.spec-prefix`) was **retired** in the
+grammar redesign (epic #2031, C2/#2042): references resolve structurally
+by slot keyword plus enclosing concept, so a construct's name is free.
+`component/language/compiler/linter.go` records this in its own header,
+and `TestCompileSource_NoNamingWarnings` fails the build if any
+`naming.*` warning is emitted.
 
-- `naming.query-prefix`
-- `naming.mutation-prefix`
-- `naming.spec-prefix`
-
-Warnings can be promoted to errors using strict compile settings.
+What replaced it is a structural check rather than a spelling one: the
+dependency-tree validator (C3/#2043,
+`component/memql.ValidateDependencyTree`) resolves every reference at
+load, so a name that does not exist fails then instead of being warned
+about.

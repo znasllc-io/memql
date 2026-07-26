@@ -81,7 +81,7 @@ predicates compose with the Go boolean grammar (`&&` / `||` / `!`):
 ```memql
 use cognition.concepts.{ participant }
 
-query participant queryHumanParticipants {
+query participant guestParticipants {
   args {
     spaceId  string  @required
   }

@@ -647,27 +647,28 @@ dsl/cognition/queries.memql     query space queryActiveSpaces { ... }
 dsl/cognition/mutations.memql   mutation space mutationCreateSpace { ... }
 dsl/common/specs.memql          spec actorEnvelope requiresAdmin { ... }
 dsl/common/traits.memql         trait isActiveRecord { ... }
-dsl/cognition/logic.memql       logic logicAutoJoinSI { ... }
+dsl/cognition/logic.memql       logic bootstrapSession { ... }
 ```
 
 **Why it bites you.** Callers (the product frontend, automations, Go
-integration code) name functions as a string. A mixed convention means
-every caller has to guess whether to add a prefix. Pre-rename, the
-frontend hit runtime "function not found" errors because half the
-backend had prefixed names and half didn't.
+integration code) name constructs as a string, so a name is a wire
+contract: renaming one breaks every caller silently, and a name that
+never existed fails only when the caller first runs. Historically the
+tree mixed prefixed and unprefixed names and the frontend hit runtime
+"function not found" errors as a result -- the fix was consistency, not
+a particular prefix.
 
-Enforcement: the **linter** (`component/language/compiler/linter.go`)
-emits `naming.query-prefix` / `naming.mutation-prefix` /
-`naming.spec-prefix` warnings when a construct of the given kind is
-declared without the prefix. With `StrictWarnings: true` in the
-compiler config, these become hard errors. (The old filename-derived
-enforcement in the function loader was retired with the flattened
-per-construct tree.)
+Enforcement: none on the spelling. The naming-prefix lint was retired in
+epic #2031 (C2/#2042) -- `component/language/compiler/linter.go` records
+this in its header, and `TestCompileSource_NoNamingWarnings` fails the
+build if any `naming.*` warning is emitted. References resolve
+structurally instead: the dependency-tree validator (C3/#2043) fails a
+reference that does not exist at load time.
 
 One wrinkle: automation **step bodies reference logic constructs by
 the bare, un-prefixed name** -- `step run { logic autoJoinSI { event:
-event } }` resolves to `logic logicAutoJoinSI` through the file-top
-`use cognition.logic.{ logicAutoJoinSI }` import (see
+event ) }` resolves to `logic bootstrapSession` through the file-top
+`use cognition.logic.{ bootstrapSession }` import (see
 `dsl/cognition/automations.memql`).
 
 Automations are event-triggered, not called by name, so they use

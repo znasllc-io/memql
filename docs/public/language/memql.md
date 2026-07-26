@@ -1113,7 +1113,7 @@ The tool loop binds tool-call args to handler args and forwards. The legacy `fun
 Automations are event- or schedule-triggered workflows declared in `dsl/<namespace>/automations.memql`. The body is a list of `step` blocks; steps call logic, named mutations/queries, or builtins:
 
 ```memql
-use cognition.logic.{ logicBootstrapSession }
+use cognition.logic.{ bootstrapSession }
 
 @trigger(event="node.created", concept="v1:cognition:participant", partition="*")
 /// Auto-creates a session when a participant joins a space

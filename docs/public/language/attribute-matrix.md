@@ -399,7 +399,7 @@ mutation space mutationCreateSpace {
 ### Automation
 
 ```memql
-use cognition.logic.{ logicBootstrapSession }
+use cognition.logic.{ bootstrapSession }
 
 @trigger(event="node.created", concept="v1:cognition:participant", partition="*")
 @description("Auto-creates a session when a participant joins a space")

@@ -390,14 +390,13 @@ the triggering event:
 ### Event-Triggered
 
 ```memql
-use cognition.logic.{ logicAutoJoinSI }
+use cognition.logic.{ bootstrapSession }
 
-@trigger(event="node.created", concept="v1:cognition:space", partition="*")
-@filter(active==true)
-@description("On space creation, join the creator's assistant into the space.")
-automation autoJoinSI {
-  step run {
-    logic autoJoinSI { event: event }
+@trigger(event="node.created", concept="v1:cognition:participant", partition="*")
+@description("On participant creation, open the session that participant needs.")
+automation bootstrapSession {
+  step decide {
+    logic bootstrapSession ( event )
   }
 }
 ```
