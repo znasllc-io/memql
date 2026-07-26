@@ -130,6 +130,22 @@ func (e *Evaluator) SetCustom(name string, value any) {
 	e.custom[name] = value
 }
 
+// hasCustomRoot reports whether name is a root this evaluator has been seeded
+// with, and can therefore resolve.
+//
+// Exists so a caller asking "can this evaluator resolve <root>.X?" asks the
+// evaluator rather than keeping a parallel list (memql#2818). One such list in
+// the logic runner had drifted -- it omitted `actor`, which newEvaluatorForLogic
+// seeds -- which silently turned both shipped deploy role gates into
+// deny-everyone.
+func (e *Evaluator) hasCustomRoot(name string) bool {
+	if e == nil || name == "" {
+		return false
+	}
+	_, ok := e.custom[name]
+	return ok
+}
+
 // Clone creates a copy of the evaluator for nested contexts.
 func (e *Evaluator) Clone() *Evaluator {
 	clone := &Evaluator{
