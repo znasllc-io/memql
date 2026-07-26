@@ -101,19 +101,30 @@ func TestOriginStringsAreStable(t *testing.T) {
 }
 
 // TestClientStampDefeatsAnInheritedInternalOrigin covers the one thing
-// ContextWithClientOrigin is for, and the reason it is called at the gRPC
-// query handler rather than left as documentation.
+// ContextWithClientOrigin is for: OVERRIDE.
 //
 // OriginClient is the zero value, so an unstamped context is already
 // untrusted; the explicit stamp is not what provides that. What it provides is
-// OVERRIDE: if a request handler ever runs on a context derived from
-// server-side Go -- a background worker dispatching a request, a future
-// in-process bridge -- the inherited internal mark would otherwise laundry
-// into every construct that request touches, and nothing would look wrong.
+// that an inherited internal mark does NOT survive -- if a handler runs on a
+// context derived from server-side Go, the inherited mark would otherwise
+// launder into every construct that request touches, and nothing would look
+// wrong.
 //
-// The review that prompted this noted the function had zero production callers
-// while its doc claimed the wire entry points used it. Either the doc or the
-// wiring had to change; the wiring is the half worth having.
+// SCOPE, stated because an earlier version of this comment overclaimed. This
+// test exercises the auth package only. It does not reach component/grpc, and
+// deleting the gRPC handler's stamp leaves it green -- so it is not evidence
+// for that wiring, and should not be read as such.
+//
+// The override property IS load-bearing beyond documentation, and the #2879
+// review is what established where: component/automations' originForSource
+// stamps CLIENT explicitly for untrusted source rather than passing the parent
+// through, so an untrusted automation body executed on an internally-stamped
+// parent cannot inherit trust it was denied. That was a live hole until a test
+// asserted the inherited case.
+//
+// The bare override is also asserted by TestInternalOriginRoundTrips. What is
+// unique here is that the stamp SURVIVES the layering a real handler does
+// afterwards.
 func TestClientStampDefeatsAnInheritedInternalOrigin(t *testing.T) {
 	// Simulate a request context descended from a trusted server-side one.
 	trustedParent := ContextWithInternalOrigin(context.Background())

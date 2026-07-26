@@ -442,11 +442,7 @@ func (e *Executor) ExecuteWithEvent(ctx context.Context, automation *Automation,
 		// #2800: the input block reaches the engine exactly like a step, so
 		// it gets the same trust rule -- stamped only when the automation's
 		// SOURCE came from the registered tree.
-		inputCtx := ctx
-		if automation.Trusted {
-			inputCtx = auth.ContextWithInternalOrigin(ctx)
-		}
-		inputResult, err := e.executeInput(inputCtx, automation.Input)
+		inputResult, err := e.executeInput(originForSource(ctx, automation.Trusted), automation.Input)
 		if err != nil {
 			exec.Fail(fmt.Errorf("input query failed: %w", err))
 			e.handleAutomationError(ctx, automation, exec, triggeringEvent, err)
@@ -733,6 +729,34 @@ func (e *Executor) ExecuteWithEvent(ctx context.Context, automation *Automation,
 }
 
 // executeInput runs the input query.
+// originForSource applies the #2800 trust rule: an automation body reaches the
+// engine with INTERNAL origin only when its source came from the registered
+// tree. Caller-submitted source (a bundle dry-run, an inline automation) stays
+// at client origin, so it cannot launder itself into reaching a @serverOnly
+// construct.
+//
+// This is a named function rather than an inline `if` because the inline form
+// was DELETABLE WITH A GREEN SUITE: the only end-to-end tests drive automations
+// with no `input:` block, so the branch was never entered. The Executor holds a
+// concrete *memql.MemQLEngine rather than an interface, so there is no seam to
+// inject a capturing engine through -- extracting the decision is what makes it
+// assertable at all. See TestOriginForSource.
+// The untrusted branch stamps CLIENT explicitly rather than passing ctx
+// through. Passing through looks equivalent -- OriginClient is the zero value
+// -- but it is not: it INHERITS whatever the parent context carried. An
+// untrusted body executed on a context descended from server-side Go (the MCP
+// run_automation runner, a nested automation dispatched from an already-
+// internal step) would then reach a @serverOnly construct on trust it was
+// explicitly denied. That is the same laundering ContextWithClientOrigin
+// exists to stop at the wire, and it was live here until a test asserted the
+// inherited case.
+func originForSource(ctx context.Context, trusted bool) context.Context {
+	if trusted {
+		return auth.ContextWithInternalOrigin(ctx)
+	}
+	return auth.ContextWithClientOrigin(ctx)
+}
+
 func (e *Executor) executeInput(ctx context.Context, input *AutomationInput) (any, error) {
 	if e.engine == nil {
 		return nil, fmt.Errorf("MemQL engine not configured")
@@ -849,11 +873,12 @@ func (e *Executor) executeStep(ctx context.Context, step *Step, stepCtx *StepCon
 	// It also must not go any deeper. LogicRunner is shared with the
 	// client-callable `logic foo(...)` path, so stamping there would let a
 	// caller launder client origin by wrapping a @serverOnly read in a logic.
-	stepCtx2 := ctx
-	if stepCtx != nil && stepCtx.Execution != nil && stepCtx.Execution.SourceTrusted {
-		stepCtx2 = auth.ContextWithInternalOrigin(ctx)
-	}
-	result, err := e.stepRegistry.Execute(stepCtx2, step, stepCtx)
+	//
+	// Routed through originForSource so the step and input: paths cannot
+	// drift, and so the untrusted branch stamps CLIENT rather than inheriting
+	// whatever the parent carried -- see that function's comment.
+	trusted := stepCtx != nil && stepCtx.Execution != nil && stepCtx.Execution.SourceTrusted
+	result, err := e.stepRegistry.Execute(originForSource(ctx, trusted), step, stepCtx)
 
 	// Publish step completed/failed event
 	var stepTopic string

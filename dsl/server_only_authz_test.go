@@ -70,7 +70,46 @@ func TestUserDisplayCardStaysMinimal(t *testing.T) {
 // to be alone on its line, so `@serverOnly // note` exempted the authz gate
 // and was skipped by the SDK while being INVISIBLE here, i.e. an exemption
 // without the mandatory rationale this test exists to require.
+//
+// Pinned by TestServerOnlyRegexSeesATrailingComment, because no construct in
+// the tree carries a trailing comment today -- so the bug this widening fixes
+// is not reproduced by any fixture, and reverting it left the suite green.
 var serverOnlyRe = regexp.MustCompile(`(?m)^@serverOnly\b`)
+
+// TestServerOnlyRegexSeesATrailingComment covers the widening directly.
+//
+// It matters because this regex is one of THREE copies of the same decision
+// (here, dsl/conformance_test.go's classification gate, sdk/gen/gen.go's SDK
+// skip), and the loader makes a fourth by parsing. When the regex is NARROWER
+// than the loader the disagreement is fail-open in the audit: the gate treats
+// the construct as server-only and exempts it from per-row-authz
+// classification, while Function.ServerOnly is whatever the parser decided.
+func TestServerOnlyRegexSeesATrailingComment(t *testing.T) {
+	for _, tc := range []struct {
+		name, src string
+		want      bool
+	}{
+		{"alone on its line", "@serverOnly\nquery user x {\n", true},
+		{"trailing line comment", "@serverOnly // parked, see #123\nquery user x {\n", true},
+		{"trailing block comment", "@serverOnly /* why */\nquery user x {\n", true},
+		{"trailing whitespace", "@serverOnly   \nquery user x {\n", true},
+		// Must NOT match: a longer annotation that merely starts with the same
+		// letters. `\b` is what keeps these apart -- a bare prefix match would
+		// read both as the annotation.
+		{"longer annotation sharing the prefix", "@serverOnlyish\nquery user x {\n", false},
+		// Not line-anchored -> not the annotation. Substring-matching a
+		// preamble is how `/// TODO: mark this @serverOnly` cleared a sibling
+		// gate with no annotation present.
+		{"named inside a doc comment", "/// TODO: mark this @serverOnly\nquery user x {\n", false},
+		{"indented", "  @serverOnly\nquery user x {\n", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := serverOnlyRe.MatchString(tc.src); got != tc.want {
+				t.Errorf("serverOnlyRe.MatchString(%q) = %v, want %v", tc.src, got, tc.want)
+			}
+		})
+	}
+}
 
 // TestServerOnlyConstructsAreDocumented requires every @serverOnly construct to
 // carry a doc comment, and that comment to say WHY caller-scoping is not the
@@ -78,8 +117,8 @@ var serverOnlyRe = regexp.MustCompile(`(?m)^@serverOnly\b`)
 //
 // The annotation is easy to reach for and easy to misuse: it makes a construct
 // unreachable from the wire, which looks like a security improvement even when
-// the correct fix was an actor.userId filter. The three constructs that have it
-// today each have a specific reason the obvious fix is wrong -- circular with
+// the correct fix was an actor.userId filter. Each construct that carries it
+// has a specific reason the obvious fix is wrong -- circular with
 // auth, or the actor is not the affected user -- and that reasoning is the part
 // a future reader needs. #2800 was parked once precisely because the reasoning
 // had not been written down.
