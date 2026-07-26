@@ -512,38 +512,6 @@ func ActiveSkillsFullBuild(args ActiveSkillsFullArgs) string {
 	return "query activeSkillsFull()"
 }
 
-// ActiveUsers -- Active users in the cluster, optionally filtered by role or group membership. Both args are optional -- omit them to list all active users (the identity admin portal's user-list view).
-//
-// Bound concept: v1:identity:user (machine-readable: BoundConcepts["activeUsers"] in generated_concepts.go).
-type ActiveUsersArgs struct {
-	Role    string
-	GroupId string
-}
-
-// ActiveUsers calls the engine query activeUsers.
-func (qc *QueryClient) ActiveUsers(ctx context.Context, args ActiveUsersArgs) (*Result, error) {
-	call := ActiveUsersBuild(args)
-	return qc.executeNamed(ctx, "activeUsers", call)
-}
-
-func ActiveUsersBuild(args ActiveUsersArgs) string {
-	var b strings.Builder
-	b.WriteString("query activeUsers(")
-	if args.Role != "" {
-		b.WriteString("role: ")
-		b.WriteString(fmt.Sprintf("%q", args.Role))
-	}
-	if args.GroupId != "" {
-		if b.Len() > 18 {
-			b.WriteString(", ")
-		}
-		b.WriteString("groupId: ")
-		b.WriteString(fmt.Sprintf("%q", args.GroupId))
-	}
-	b.WriteString(")")
-	return b.String()
-}
-
 // AgentAuthorizationsForUser -- All active standing authorizations granted by a user, across all agents and plan kinds.
 //
 // Bound concept: v1:agents:agentAuthorization (machine-readable: BoundConcepts["agentAuthorizationsForUser"] in generated_concepts.go).
@@ -3437,7 +3405,9 @@ func RouterBudgetsBuild(args RouterBudgetsArgs) string {
 	return b.String()
 }
 
-// SearchUsers -- Search users, optionally gated by active status. Omit `active` to list every user; pass true to return only active users or false for only deactivated ones. Backs the searchUsers tool.
+// SearchUsers -- Search users, optionally gated by active status. Omit `active` to list active and deactivated users alike; pass true to return only active users or false for only deactivated ones. Owner-or-admin only. Backs the searchUsers tool.
+// memql#2883: `when(args.active)` is DROPPED when the arg is absent (authoring rules), so before this gate `searchUsers()` with no arguments applied no predicate at all and returned every user in the cluster in userFull -- every @pii field plus the cluster-wide auth role. It is also on the agent tool surface (dsl/memql/tools.memql), so a prompt-injected or over-eager agent could pull the whole user table.
+// requiresOwnerOrAdmin rather than @serverOnly, because unlike its three siblings this one has a genuine client caller: the MCP tool. Gating by origin would delete the tool; gating by role keeps it working for the administrators it was built for. This is the same gate #2860 put on userById.
 //
 // Bound concept: v1:identity:user (machine-readable: BoundConcepts["searchUsers"] in generated_concepts.go).
 type SearchUsersArgs struct {
@@ -4043,47 +4013,6 @@ func UsersActiveInSpaceBuild(args UsersActiveInSpaceArgs) string {
 	b.WriteString("query usersActiveInSpace(")
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	b.WriteString(")")
-	return b.String()
-}
-
-// UsersInDeletionCooldown -- Active users with a pending deletionScheduledAt; consumers per-row check cooldown windows via addDuration.
-//
-// Bound concept: v1:identity:user (machine-readable: BoundConcepts["usersInDeletionCooldown"] in generated_concepts.go).
-type UsersInDeletionCooldownArgs struct {
-}
-
-// UsersInDeletionCooldown calls the engine query usersInDeletionCooldown.
-func (qc *QueryClient) UsersInDeletionCooldown(ctx context.Context, args UsersInDeletionCooldownArgs) (*Result, error) {
-	call := UsersInDeletionCooldownBuild(args)
-	return qc.executeNamed(ctx, "usersInDeletionCooldown", call)
-}
-
-func UsersInDeletionCooldownBuild(args UsersInDeletionCooldownArgs) string {
-	_ = args
-	return "query usersInDeletionCooldown()"
-}
-
-// UsersScheduledForDeletion -- Active users whose deletionScheduledAt is set. When scheduledBefore is supplied, restricts to rows whose deletionScheduledAt is strictly before it -- the deletion sweep's logic computes the cutoff (now - MEMQL_IDENTITY_DELETION_COOLDOWN_DAYS) and pushes it down (#2369).
-//
-// Bound concept: v1:identity:user (machine-readable: BoundConcepts["usersScheduledForDeletion"] in generated_concepts.go).
-type UsersScheduledForDeletionArgs struct {
-	ScheduledBefore string
-}
-
-// UsersScheduledForDeletion calls the engine query usersScheduledForDeletion.
-func (qc *QueryClient) UsersScheduledForDeletion(ctx context.Context, args UsersScheduledForDeletionArgs) (*Result, error) {
-	call := UsersScheduledForDeletionBuild(args)
-	return qc.executeNamed(ctx, "usersScheduledForDeletion", call)
-}
-
-func UsersScheduledForDeletionBuild(args UsersScheduledForDeletionArgs) string {
-	var b strings.Builder
-	b.WriteString("query usersScheduledForDeletion(")
-	if args.ScheduledBefore != "" {
-		b.WriteString("scheduledBefore: ")
-		b.WriteString(fmt.Sprintf("%q", args.ScheduledBefore))
-	}
 	b.WriteString(")")
 	return b.String()
 }

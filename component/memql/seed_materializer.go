@@ -851,7 +851,10 @@ func seedNames(defs []*SeedDefinition) []string {
 // empty actor produces a "no actor found in context" failure even
 // for read paths that touch global concepts.
 func (m *SeedMaterializer) listUserIds(ctx context.Context) ([]string, error) {
-	result, err := m.engine.Execute(systemActorContext(ctx), `query activeUsers()`)
+	// #2883: activeUsers is @serverOnly. systemActorContext supplies the actor
+	// the executor needs; the origin stamp is the separate question of which
+	// CHANNEL the call arrived on, and seed materialization is server-side Go.
+	result, err := m.engine.Execute(auth.ContextWithInternalOrigin(systemActorContext(ctx)), `query activeUsers()`)
 	if err != nil {
 		return nil, fmt.Errorf("activeUsers: %w", err)
 	}
