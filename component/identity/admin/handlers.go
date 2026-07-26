@@ -890,7 +890,10 @@ func (s *AdminServer) queryUsers(ctx context.Context, q string) ([]userView, err
 	needle := strings.ToLower(strings.TrimSpace(q))
 	cursor := ""
 	for i := 0; i < maxUserPageWalk; i++ {
-		res, err := s.Engine.Execute(memqlengine.ContextWithCursor(ctx, cursor), `query activeUsers()`)
+		// #2883: activeUsers is @serverOnly. The admin app is server-side Go
+		// gated at its own HTTP layer and reads arbitrary users by design --
+		// the same reasoning userById below already records for userByIdSystem.
+		res, err := s.Engine.Execute(auth.ContextWithInternalOrigin(memqlengine.ContextWithCursor(ctx, cursor)), `query activeUsers()`)
 		if err != nil {
 			return nil, err
 		}

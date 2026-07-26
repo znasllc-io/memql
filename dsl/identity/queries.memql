@@ -133,6 +133,25 @@ query delegation activeDelegationsByIdentitySubject {
 
 /// Active users in the cluster, optionally filtered by role or group membership. Both args are
 /// optional -- omit them to list all active users (the identity admin portal's user-list view).
+///
+/// @serverOnly (memql#2883). Both args are optional, so `activeUsers()` returned every active user
+/// in userFull -- every @pii field plus the cluster-wide auth role -- to any authenticated caller.
+///
+/// Scoping it to actor.userId is NOT the fix, and would be actively wrong: this query's whole
+/// purpose is to enumerate OTHER users. A user row IS a person rather than something a person owns,
+/// so there is no ownership column for actor.userId to match; such a filter would reduce every
+/// caller to their own row and delete the construct's reason to exist.
+///
+/// The weaker caller-scoping -- requiresOwnerOrAdmin, the gate searchUsers takes -- is also wrong
+/// here, for the same circularity that kept userByIdSystem server-only rather than
+/// actor.userId-scoped (#2800): two callers run BEFORE an actor exists. `CountActiveUsers` and
+/// `HasOwnerUser` (component/identity/store.go) answer "has this cluster been bootstrapped / does it
+/// have an owner yet" during first-run setup, so a role predicate would evaluate against an empty
+/// role, return zero rows, and wedge the cluster as permanently un-bootstrapped.
+///
+/// Every caller is server-side Go -- the identity store, the identity admin app, the PAT store, the
+/// seed materializer -- and each now stamps auth.ContextWithInternalOrigin.
+@serverOnly
 query user activeUsers {
   args {
     role     string
@@ -165,13 +184,24 @@ query user activeUsers {
 // `sort` (with no inner paginate) keeps this a bounded-list for the pagination
 // audit while leaving the single window to the caller. A second paginated
 // reader of this query would wrap its own paginate(); none exists today.
-/// Search users, optionally gated by active status. Omit `active` to list every user; pass true to
-/// return only active users or false for only deactivated ones. Backs the searchUsers tool.
+/// Search users, optionally gated by active status. Omit `active` to list active and deactivated
+/// users alike; pass true to return only active users or false for only deactivated ones.
+/// Owner-or-admin only. Backs the searchUsers tool.
+///
+/// memql#2883: `when(args.active)` is DROPPED when the arg is absent (authoring rules), so before
+/// this gate `searchUsers()` with no arguments applied no predicate at all and returned every user
+/// in the cluster in userFull -- every @pii field plus the cluster-wide auth role. It is also on the
+/// agent tool surface (dsl/memql/tools.memql), so a prompt-injected or over-eager agent could pull
+/// the whole user table.
+///
+/// requiresOwnerOrAdmin rather than @serverOnly, because unlike its three siblings this one has a
+/// genuine client caller: the MCP tool. Gating by origin would delete the tool; gating by role keeps
+/// it working for the administrators it was built for. This is the same gate #2860 put on userById.
 query user searchUsers {
   args {
     active  boolean
   }
-  filter  when(args.active) { active==args.active }
+  filter  requiresOwnerOrAdmin && when(args.active) { active==args.active }
   sort    "row.createdAt", "desc"
   shape   userFull
 }
@@ -1286,6 +1316,18 @@ query user usersActiveInSpace {
 
 /// Active users with a pending deletionScheduledAt; consumers per-row check cooldown windows via
 /// addDuration.
+///
+/// @serverOnly (memql#2883). It takes NO arguments and projects userFull, so a client-originated
+/// call returned every cooling-off user's full row -- every @pii field plus the cluster-wide auth
+/// role -- with no predicate to constrain it.
+///
+/// Scoping it to actor.userId is NOT the fix. This is a scheduled sweep, not a self-service read:
+/// there is no actor at all when it runs, and its purpose is precisely to see every OTHER user in
+/// the cooldown window -- which is what its `@unbounded` reason already records. An actor.userId
+/// filter would return at most the sweeping actor's own row and silently stop the reminder emails.
+/// Its only callers are the accountDeletionReminder7Days / accountDeletionReminder25Days logics,
+/// which run as automation steps and therefore reach it with OriginInternal stamped by executeStep.
+@serverOnly
 @unbounded("deletion-cooldown sweep -- an internal sweep that must see all")
 query user usersInDeletionCooldown {
   filter  isActiveRecord && isDeletionScheduled
@@ -1323,6 +1365,17 @@ query user usersInDeletionCooldown {
 /// Active users whose deletionScheduledAt is set. When scheduledBefore is supplied, restricts to
 /// rows whose deletionScheduledAt is strictly before it -- the deletion sweep's logic computes the
 /// cutoff (now - MEMQL_IDENTITY_DELETION_COOLDOWN_DAYS) and pushes it down (#2369).
+///
+/// @serverOnly (memql#2883). Same reasoning as usersInDeletionCooldown: `scheduledBefore` is
+/// optional, so with no arguments the filter reduces to "active and scheduled" and the query
+/// returns every such user in userFull.
+///
+/// Scoping it to actor.userId is NOT the fix, for the same reason: this is the deletion sweep's
+/// candidate list, it runs on a cron with no actor, and it must see every OTHER user whose cooldown
+/// has elapsed. An actor.userId filter would empty the candidate set and silently stop account
+/// deletion -- a data-retention obligation failing closed-looking-but-broken. Its only caller is the
+/// accountDeletionSweep logic, which runs as an automation step and reaches it with OriginInternal.
+@serverOnly
 @unbounded("scheduled-deletion sweep -- an internal sweep that must see all")
 query user usersScheduledForDeletion {
   args {

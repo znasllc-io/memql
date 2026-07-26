@@ -275,6 +275,28 @@ func (e *Env) runQuery(t *testing.T, name string, args map[string]any) any {
 	return out
 }
 
+// runQueryServerSide executes a named query straight against the engine with
+// INTERNAL origin, bypassing the MCP meta-tool.
+//
+// It exists for @serverOnly constructs (memql#2800 / #2883), which run_query
+// correctly refuses because MCP is a client surface. A conformance assertion
+// that needs such a query's ROWS -- rather than its reachability -- has to
+// reach it the way its real callers do.
+//
+// Use this only where the property under test is the query's RESULT. Where the
+// property is "a client may reach this", assert the refusal instead.
+func (e *Env) runQueryServerSide(t *testing.T, query string) int {
+	t.Helper()
+	res, err := e.Eng.Execute(auth.ContextWithInternalOrigin(e.Ctx), query)
+	if err != nil {
+		t.Fatalf("server-side %s failed: %v", query, err)
+	}
+	if res == nil || res.Bundle == nil {
+		return 0
+	}
+	return len(res.Bundle.Nodes)
+}
+
 // latestPayload reads the most-recent version of (concept, id) directly off the
 // append-only MemoryNodes table -- the ground-truth read for sibling-field
 // preservation + PII-scrub assertions.

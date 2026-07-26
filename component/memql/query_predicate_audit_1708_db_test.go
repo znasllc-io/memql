@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/znasllc-io/memql/component/auth"
 )
 
 // query_predicate_audit_1708_db_test.go is the real-engine reproduction + fix
@@ -100,12 +101,30 @@ func TestQueryUsersScheduledForDeletion_OnlyScheduled(t *testing.T) {
 	// Only the first gets a pending deletion.
 	runMutation(t, ctx, eng, "scheduleAccountDeletion", map[string]any{"userId": scheduledID})
 
+	// Both queries became @serverOnly in memql#2883 -- they take no required
+	// args and project userFull, so a client-originated call returned every
+	// cooling-off user's full row. The predicate behaviour this test is about
+	// (#1708) is unchanged; only the origin gate is new, so the read is
+	// stamped the way its real callers reach it: the deletion-sweep logics run
+	// as automation steps, which executeStep stamps with OriginInternal.
+	sweepCtx := auth.ContextWithInternalOrigin(ctx)
+
 	for _, q := range []string{"usersScheduledForDeletion()", "usersInDeletionCooldown()"} {
-		got := queryIds(t, ctx, eng, q)
+		got := queryIds(t, sweepCtx, eng, q)
 		require.True(t, contains(got, scheduledID),
 			"%s MUST return the user with deletionScheduledAt set (#1708), got %v", q, got)
 		require.False(t, contains(got, plainID),
 			"%s MUST exclude an active user with NO deletionScheduledAt -- it must not return every active user (#1708), got %v", q, got)
+
+		// The other half of #2883, asserted here because this is the only
+		// place these two run against a real engine with real rows: a CLIENT
+		// call must be refused outright rather than quietly returning the set
+		// above. A cluster OWNER is used deliberately -- the gate is ORIGIN,
+		// not role, so even the most privileged wire caller is refused.
+		_, err := eng.Execute(ctx, q)
+		require.Error(t, err, "%s must refuse a client-originated call (#2883)", q)
+		require.Contains(t, err.Error(), "server-only",
+			"%s refused a client call for the wrong reason: %v", q, err)
 	}
 }
 

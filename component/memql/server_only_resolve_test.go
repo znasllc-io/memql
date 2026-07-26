@@ -55,6 +55,22 @@ func emailArg() map[string]any {
 	return map[string]any{"primaryEmail": "someone@example.com"}
 }
 
+// argsFor returns the call args for a construct under test. The memql#2883
+// constructs declare NO required args -- which is the whole reason they were
+// dangerous, since calling them with nothing returned the entire user table --
+// so they take an empty map rather than userIdArg(), whose `userId` they do not
+// declare.
+func argsFor(name string) map[string]any {
+	switch name {
+	case "userByEmail":
+		return emailArg()
+	case "searchUsers", "activeUsers", "usersInDeletionCooldown", "usersScheduledForDeletion":
+		return map[string]any{}
+	default:
+		return userIdArg()
+	}
+}
+
 // TestAuthoredQueriesResolve is the test whose absence let a dead gate ship.
 //
 // memql#2800 first wrote userById's gate as `spec("requiresOwnerOrAdmin")`.
@@ -77,14 +93,15 @@ func TestAuthoredQueriesResolve(t *testing.T) {
 	for _, name := range []string{
 		"userById", "userByIdSystem", "userDisplayById", "userActiveSpace", "currentUser",
 		"userByEmail", // memql#2881
+		// memql#2883. searchUsers matters most here: it gained a
+		// requiresOwnerOrAdmin conjunct, and this is the test that would have
+		// caught #2800's dead `spec("...")` gate. A context-spec that does not
+		// resolve is a gate that refuses everyone including admins.
+		"searchUsers", "activeUsers", "usersInDeletionCooldown", "usersScheduledForDeletion",
 	} {
-		args := userIdArg()
-		if name == "userByEmail" {
-			args = emailArg()
-		}
 		// Internal origin, so @serverOnly is not what fails here and any
 		// error is a genuine resolution problem.
-		if err := resolveAuthored(t, fns, specs, name, auth.OriginInternal, args); err != nil {
+		if err := resolveAuthored(t, fns, specs, name, auth.OriginInternal, argsFor(name)); err != nil {
 			t.Errorf("%s did not resolve: %v", name, err)
 		}
 	}
@@ -99,16 +116,23 @@ func TestServerOnlyQueriesRefuseClientOrigin(t *testing.T) {
 		"userByIdSystem":      true,
 		"runningPlansForUser": true,
 		"userByEmail":         true, // memql#2881
+		// memql#2883. All three project userFull -- every @pii field plus the
+		// cluster-wide auth role -- and all three take only optional args, so
+		// before the gate a bare client call returned every matching user.
+		"activeUsers":               true,
+		"usersInDeletionCooldown":   true,
+		"usersScheduledForDeletion": true,
 		// The client-callable siblings must still resolve.
 		"userDisplayById": false,
 		"currentUser":     false,
 		"userById":        false, // admin-gated, but reachable from the wire
+		// memql#2883: searchUsers is gated by ROLE, not by origin, because
+		// unlike its siblings it has a real client caller (the MCP tool). It
+		// must therefore still RESOLVE from the wire -- the role check happens
+		// when the predicate evaluates, not at expansion.
+		"searchUsers": false,
 	} {
-		args := userIdArg()
-		if name == "userByEmail" {
-			args = emailArg()
-		}
-		err := resolveAuthored(t, fns, specs, name, auth.OriginClient, args)
+		err := resolveAuthored(t, fns, specs, name, auth.OriginClient, argsFor(name))
 		refused := err != nil && strings.Contains(err.Error(), "server-only")
 		if refused != wantRefused {
 			t.Errorf("%s: refused=%v want %v (err=%v)", name, refused, wantRefused, err)
@@ -122,7 +146,14 @@ func TestServerOnlyQueriesRefuseClientOrigin(t *testing.T) {
 func TestServerOnlyQueriesPassInternalOrigin(t *testing.T) {
 	fns, specs := loadRealTree(t)
 
-	for _, name := range []string{"userByIdSystem", "runningPlansForUser"} {
+	for _, name := range []string{
+		"userByIdSystem", "runningPlansForUser",
+		// memql#2883. These three have live server-side callers that MUST keep
+		// working: the identity store's bootstrap counts, the admin user list,
+		// the PAT roll-up, the seed materializer, and the two deletion sweeps.
+		// Gating them by origin is only correct if internal origin still passes.
+		"activeUsers", "usersInDeletionCooldown", "usersScheduledForDeletion",
+	} {
 		// Asserts on ANY error, not just a "server-only" one. Gating on the
 		// message let an UNRESOLVABLE construct pass -- the #2800 dead-gate
 		// defect this file exists to catch. Measured: mutating
@@ -130,7 +161,7 @@ func TestServerOnlyQueriesPassInternalOrigin(t *testing.T) {
 		// test, ./dsl/... and ./component/automations all green.
 		// runningPlansForUser is not in TestAuthoredQueriesResolve, so this
 		// was its only coverage (memql#2881 review round 2).
-		if err := resolveAuthored(t, fns, specs, name, auth.OriginInternal, userIdArg()); err != nil {
+		if err := resolveAuthored(t, fns, specs, name, auth.OriginInternal, argsFor(name)); err != nil {
 			t.Errorf("%s did not resolve from INTERNAL origin: %v -- this is the path "+
 				"authentication and the kill switch depend on", name, err)
 		}

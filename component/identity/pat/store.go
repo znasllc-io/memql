@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/identity"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
@@ -281,7 +282,9 @@ func (s *Store) activeUsers(ctx context.Context) ([]string, error) {
 	out := []string{}
 	cursor := ""
 	for i := 0; i < maxPATPageWalk; i++ {
-		res, err := s.Engine.Execute(memqlengine.ContextWithCursor(ctx, cursor), `query activeUsers()`)
+		// #2883: activeUsers is @serverOnly. This is the cluster-wide PAT
+		// roll-up, a server-side administrative read with no wire caller.
+		res, err := s.Engine.Execute(auth.ContextWithInternalOrigin(memqlengine.ContextWithCursor(ctx, cursor)), `query activeUsers()`)
 		if err != nil {
 			return nil, err
 		}

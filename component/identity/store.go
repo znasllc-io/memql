@@ -1020,7 +1020,10 @@ func (s *Store) RevokeAuthSession(
 // full row set and the count is a Go-side len. Cheap on a small
 // user base.
 func (s *Store) CountActiveUsers(ctx context.Context) (int, error) {
-	nodes, err := s.executeAndExtract(ctx, `query activeUsers()`)
+	// #2883: activeUsers is @serverOnly. This call runs during first-run setup,
+	// before any actor exists -- which is exactly why the construct is gated by
+	// ORIGIN rather than caller-scoped.
+	nodes, err := s.executeAndExtractInternal(ctx, `query activeUsers()`)
 	if err != nil {
 		return 0, fmt.Errorf("identity.store: count active users: %w", err)
 	}
@@ -1091,7 +1094,9 @@ func (s *Store) IsClusterBootstrappedE(ctx context.Context) (bool, error) {
 // not be silently swallowed into "no owner", so the caller can
 // fail-safe (do not send) rather than re-spam the owner.
 func (s *Store) HasOwnerUser(ctx context.Context) (bool, error) {
-	nodes, err := s.executeAndExtract(ctx, `query activeUsers(role: "owner")`)
+	// #2883: activeUsers is @serverOnly. Like CountActiveUsers this answers a
+	// bootstrap question that precedes any actor.
+	nodes, err := s.executeAndExtractInternal(ctx, `query activeUsers(role: "owner")`)
 	if err != nil {
 		return false, fmt.Errorf("identity.store: has owner user: %w", err)
 	}
