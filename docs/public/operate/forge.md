@@ -31,7 +31,7 @@ multiple projects from one tenant.
 Three concept types form the forge data model. All are partition-scoped (no
 `@scope`), meaning rows are team-shared within the tenant — a validator or
 approver can read a submitter's request. Read gating to developers and owners
-is enforced at the query layer via the forge role traits; it is not per-row
+is enforced at the query layer via the forge role specs; it is not per-row
 ownership.
 
 ### project (`v1:forge:project`)
@@ -145,8 +145,8 @@ pipeline personas:
 | `reader` | Non-developer employee | Submit-only. Requests enter the pipeline at `needs_validation`. Receives the mentoring layer while filing (see below). |
 
 The validation and approval queues are gated at the query layer via the forge
-role traits (`traitForgeDeveloper` for `owner` / `admin` / `writer`;
-`traitForgeApprover` for `owner` only). A `reader` calling
+role specs (`forgeDeveloper` for `owner` / `admin` / `writer`;
+`forgeApprover` for `owner` only). A `reader` calling
 `forgeValidationQueue` or `forgeApprovalQueue` receives an empty list, not an
 error. Submission (`forgeSubmitRequest`) and reading own requests
 (`forgeMyRequests`) are open to every authenticated team member.
@@ -298,4 +298,4 @@ All forge constructs live under `dsl/forge/`:
 | `logic.memql` | `logicRouteRequest` — role-based pipeline router |
 | `automations.memql` | `routeRequest` — fires on `node.created` for `v1:forge:request` |
 | `tools.memql` | All `@mcp`-annotated tools (the team's Claude-facing surface) |
-| `traits.memql` | `traitForgeDeveloper`, `traitForgeApprover` — query-layer role gates |
+| `specs.memql` | `forgeDeveloper`, `forgeApprover` — actor-bound role gates |

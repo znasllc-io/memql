@@ -363,14 +363,14 @@ asynchronously off their event/schedule trigger.
 
 ```memql
 use cognition.concepts.{ participant }
-use common.traits.{ traitIsActiveRecord }
+use common.traits.{ isActiveRecord }
 
 @description("Get active human participants in a space")
 query participant queryActiveHumanParticipants {
   args {
     spaceId  string  @required
   }
-  filter  spaceId==args.spaceId && participantType=="human" && traitIsActiveRecord
+  filter  spaceId==args.spaceId && participantType=="human" && isActiveRecord
   shape   participantFull
 }
 ```
@@ -399,7 +399,7 @@ mutation space mutationCreateSpace {
 ### Automation
 
 ```memql
-use cognition.logic.{ logicBootstrapSession }
+use cognition.logic.{ bootstrapSession }
 
 @trigger(event="node.created", concept="v1:cognition:participant", partition="*")
 @description("Auto-creates a session when a participant joins a space")

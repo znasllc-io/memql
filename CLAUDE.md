@@ -1358,7 +1358,7 @@ tools) is declared via a dotted-path import:
 ```memql
 use cognition.concepts.{ participant, space }
 use cognition.shapes.{ participantFull }
-use common.traits.{ traitIsActiveRecord, traitIsNotDeleted }
+use common.traits.{ isActiveRecord, isNotDeleted }
 ```
 
 The dotted path maps to a file on disk (`cognition.concepts` →
@@ -1409,7 +1409,7 @@ concept id.
   if `args.x` is absent the guarded block AND its connective are
   dropped as if never written (unambiguous under `||`). The `?.`
   optional-chain prefix it replaces is retired.
-- When a trait spec covers the predicate (e.g. `traitIsActiveRecord`
+- When a trait spec covers the predicate (e.g. `isActiveRecord`
   for `active==true`), the trait is mandatory. Inline
   `active==true` / `deleted==false` are rejected
   by the conformance test.
@@ -1437,14 +1437,14 @@ Queries:
 ```memql
 use cognition.concepts.{ participant }
 use cognition.shapes.{ participantFull }
-use common.traits.{ traitIsActiveRecord }
+use common.traits.{ isActiveRecord }
 
 @description("Get space participants")
 query participant querySpaceParticipants {
   args {
     spaceId  string  @required
   }
-  filter  spaceId==args.spaceId && traitIsActiveRecord
+  filter  spaceId==args.spaceId && isActiveRecord
   shape   participantFull
 }
 ```
@@ -1684,9 +1684,9 @@ fields, validated at the call site).
 use cognition.concepts.{ participant }
 
 @enabled
-@description("Matches participants with human participantType")
-spec participant specIsHumanParticipant {
-  return participantType == "human"             // concept-bound row-spec
+@description("Matches guest participants")
+spec participant isGuestParticipant {
+  return isGuest == true             // concept-bound row-spec
 }
 
 use common.shapes.{ actorEnvelope }

@@ -763,9 +763,9 @@ A spec body never reads `actor.*` / `row.*` directly — bind a shape that proje
 ```memql
 use cognition.concepts.{ participant }
 
-/// Matches participants with human participantType
-spec participant specIsHumanParticipant {
-  return participantType == "human"
+/// Matches guest participants
+spec participant isGuestParticipant {
+  return isGuest == true
 }
 
 use common.shapes.{ actorEnvelope }
@@ -787,14 +787,14 @@ trait isActiveRecord {
 }
 ```
 
-When a trait covers a predicate (e.g. `traitIsActiveRecord` for `active==true`), **using the trait is mandatory** in authored query filters — inline `active==true` / `deleted==false` are rejected by the conformance test (`dsl/conformance_test.go`).
+When a trait covers a predicate (e.g. `isActiveRecord` for `active==true`), **using the trait is mandatory** in authored query filters — inline `active==true` / `deleted==false` are rejected by the conformance test (`dsl/conformance_test.go`).
 
 ### Using Specs and Traits in Filters
 
 Specs and traits are referenced by bare name inside DSL query filter clauses:
 
 ```memql
-filter  spaceId==args.spaceId && specIsHumanParticipant && traitIsActiveRecord
+filter  spaceId==args.spaceId && isHumanParticipant && isActiveRecord
 ```
 
 During load the engine resolves every spec reference into the underlying expression tree, so the resulting query plan behaves exactly as if the spec contents were written inline. Spec dependencies are resolved at load; cycles and duplicates are rejected.
@@ -808,7 +808,7 @@ Named queries are reusable, parameterized reads, declared in struct form in `dsl
 ```memql
 use cognition.concepts.{ participant }
 use cognition.shapes.{ participantFull }
-use common.traits.{ traitIsActiveRecord }
+use common.traits.{ isActiveRecord }
 
 /// Get space participants
 query participant querySpaceParticipants {
@@ -820,7 +820,7 @@ query participant querySpaceParticipants {
   filter  when(args.spaceId) { spaceId==args.spaceId } &&
           when(args.status) { status==args.status } &&
           when(args.participantType) { participantType==args.participantType } &&
-          traitIsActiveRecord
+          isActiveRecord
   shape   participantFull
 }
 ```
@@ -869,7 +869,7 @@ Every construct another file pulls into local scope is declared via a dotted-pat
 ```memql
 use cognition.concepts.{ participant, space }
 use cognition.shapes.{ participantFull }
-use common.traits.{ traitIsActiveRecord, traitIsNotDeleted }
+use common.traits.{ isActiveRecord, isNotDeleted }
 ```
 
 The dotted path maps to a file on disk (`cognition.concepts` → `dsl/cognition/concepts.memql`); the brace list names the constructs imported into local scope.
@@ -948,7 +948,7 @@ sort(querySpaceUtterances({"spaceId": "s-1"}), "createdAt", "desc")
 paginate(queryActiveSpaces({"userId": "u-1"}), 10)
 ```
 
-The parentheses make functions immediately recognizable: `traitIsActiveRecord` (no parens) is a spec/trait reference inside a DSL filter; `queryActiveSpaces()` (parens) is a function call.
+The parentheses make functions immediately recognizable: `isActiveRecord` (no parens) is a spec/trait reference inside a DSL filter; `queryActiveSpaces()` (parens) is a function call.
 
 ### Argument Validation
 
@@ -1113,7 +1113,7 @@ The tool loop binds tool-call args to handler args and forwards. The legacy `fun
 Automations are event- or schedule-triggered workflows declared in `dsl/<namespace>/automations.memql`. The body is a list of `step` blocks; steps call logic, named mutations/queries, or builtins:
 
 ```memql
-use cognition.logic.{ logicBootstrapSession }
+use cognition.logic.{ bootstrapSession }
 
 @trigger(event="node.created", concept="v1:cognition:participant", partition="*")
 /// Auto-creates a session when a participant joins a space
@@ -1153,12 +1153,11 @@ The longhand single-step form is gate-enforced out of the shipped corpus, not me
 `@filter` attaches a filter predicate to an automation as an alternative to embedding it in the trigger — useful when the expression is complex:
 
 ```memql
-@trigger(event="node.created", concept="v1:cognition:space", partition="*")
-@filter(active==true)
-/// On space creation, joins the creator's assistant plus any specialist agents.
-automation autoJoinSI {
-  step run {
-    logic autoJoinSI { event: event }
+@trigger(event="node.created", concept="v1:cognition:participant", partition="*")
+/// On participant creation, opens the session that participant needs.
+automation bootstrapSession {
+  step decide {
+    logic bootstrapSession ( event )
   }
 }
 ```
@@ -1801,11 +1800,11 @@ insert("concept", id="id", payload={...})
 ```memql
 use cognition.concepts.{ participant }
 use cognition.shapes.{ participantFull }
-use common.traits.{ traitIsActiveRecord }
+use common.traits.{ isActiveRecord }
 
 query participant queryX {
   args { spaceId string @required }
-  filter spaceId==args.spaceId && traitIsActiveRecord
+  filter spaceId==args.spaceId && isActiveRecord
   shape participantFull
 }
 
@@ -1814,7 +1813,7 @@ mutation space mutationCreateSpace {
   insert { id: args.spaceId  name: args.name  status: "active"  createdAt: now  createdBy: actor.userId }
 }
 
-spec participant specIsHumanParticipant { return participantType == "human" }
+spec participant isGuestParticipant { return isGuest == true }
 
 @row
 shape participant participantCard { row.id  displayName }

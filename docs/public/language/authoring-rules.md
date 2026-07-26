@@ -630,11 +630,14 @@ automation "test": dependency cycle among steps [a b]
 
 ---
 
-## 14. Function naming: construct name carries the kind prefix
+## 14. Function naming: the construct name says what it does
 
-**Rule.** Query / mutation / spec / trait / logic constructs are
-named with a kind prefix: `queryActiveSpaces`, `mutationCreateSpace`,
-`specIsHumanParticipant`, `isActiveRecord`, `logicAutoJoinSI`.
+**Rule.** A construct is named for what it does, not for its kind --
+the declaration keyword already carries that: `activeHumanParticipants`,
+`addAgentToSpace`, `isHumanParticipant`, `isActiveRecord`,
+`bootstrapSession`. (See naming-conventions.md; #2853 tracks the
+`query*` / `mutation*` / `logic*` entries that still describe a prefix
+no construct carries.)
 Constructs live in one consolidated file per kind per namespace
 (`dsl/<namespace>/<construct>s.memql`), so the file name never
 carries an individual construct's name.
@@ -642,30 +645,31 @@ carries an individual construct's name.
 ```
 dsl/cognition/queries.memql     query space queryActiveSpaces { ... }
 dsl/cognition/mutations.memql   mutation space mutationCreateSpace { ... }
-dsl/cognition/specs.memql       spec specIsHumanParticipant { ... }
+dsl/common/specs.memql          spec actorEnvelope requiresAdmin { ... }
 dsl/common/traits.memql         trait isActiveRecord { ... }
-dsl/cognition/logic.memql       logic logicAutoJoinSI { ... }
+dsl/cognition/logic.memql       logic bootstrapSession { ... }
 ```
 
 **Why it bites you.** Callers (the product frontend, automations, Go
-integration code) name functions as a string. A mixed convention means
-every caller has to guess whether to add a prefix. Pre-rename, the
-frontend hit runtime "function not found" errors because half the
-backend had prefixed names and half didn't.
+integration code) name constructs as a string, so a name is a wire
+contract: renaming one breaks every caller silently, and a name that
+never existed fails only when the caller first runs. Historically the
+tree mixed prefixed and unprefixed names and the frontend hit runtime
+"function not found" errors as a result -- the fix was consistency, not
+a particular prefix.
 
-Enforcement: the **linter** (`component/language/compiler/linter.go`)
-emits `naming.query-prefix` / `naming.mutation-prefix` /
-`naming.spec-prefix` warnings when a construct of the given kind is
-declared without the prefix. With `StrictWarnings: true` in the
-compiler config, these become hard errors. (The old filename-derived
-enforcement in the function loader was retired with the flattened
-per-construct tree.)
+Enforcement: none on the spelling. The naming-prefix lint was retired in
+epic #2031 (C2/#2042) -- `component/language/compiler/linter.go` records
+this in its header, and `TestCompileSource_NoNamingWarnings` fails the
+build if any `naming.*` warning is emitted. References resolve
+structurally instead: the dependency-tree validator (C3/#2043) fails a
+reference that does not exist at load time.
 
-One wrinkle: automation **step bodies reference logic constructs by
-the bare, un-prefixed name** -- `step run { logic autoJoinSI { event:
-event } }` resolves to `logic logicAutoJoinSI` through the file-top
-`use cognition.logic.{ logicAutoJoinSI }` import (see
-`dsl/cognition/automations.memql`).
+An automation step calls a logic construct by the same name the
+file-top import names -- `step decide { logic bootstrapSession ( event )
+}` resolves through `use cognition.logic.{ bootstrapSession }` (see
+`dsl/cognition/automations.memql`). The corpus uses the paren call form
+throughout.
 
 Automations are event-triggered, not called by name, so they use
 verb-first names with no prefix (`autoJoinSI`, `bootstrapSession`,
@@ -1021,8 +1025,8 @@ Affected mutations (audit done 2026-05-06; all live under
 `sendSpeechUtterance`, `sendActionUtterance`,
 `sendRealtimeTranscriptUtterance`.
 
-The historical `concat("ga-", hash(actor))` pattern in autoJoinSI is
-gone entirely: `logicAutoJoinSI` (`dsl/cognition/logic.memql`) now
+The historical `concat("ga-", hash(actor))` pattern in the auto-join
+path is gone entirely: the logic (`dsl/cognition/logic.memql`) now
 resolves the assistant via `queryAssistantAgentForUser` + the space
 row's `ownerUserId` (memql#273, locked in by
 `TestAutoJoinSILocksInOwnerUserIdResolution`), and shortId prefixes
@@ -1087,8 +1091,8 @@ query space queryActiveSpaces {
 // the body returns a boolean over bare field names. No args.
 use cognition.concepts.{ participant }
 
-spec participant specIsHumanParticipant {
-  return participantType == "human"
+spec participant isGuestParticipant {
+  return isGuest == true
 }
 ```
 

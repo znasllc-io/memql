@@ -47,9 +47,9 @@ the call site).
   (no `payload.` prefix -- the binding names the surface).
 - Side-effect free. Specs cannot call mutation functions or logic
   functions.
-- Prefer `spec*` naming for concept-bound row-specs (matches the call
-  sites in query filter clauses). Actor-bound context-specs may drop the
-  prefix when the name reads more naturally (`requiresAdmin`).
+- Named for the predicate they express, with no kind prefix
+  (`requiresAdmin`, `isActiveRecord`). The `spec` / `trait` keyword
+  already marks the kind at the declaration.
 - The `@shape("name")` annotation is removed; the legacy
   `func (Spec) name(ctx any) bool { ... }` form and the older
   bare-expression body (no `return`) are retired and rejected with a
@@ -62,14 +62,14 @@ the call site).
 ```memql
 use cognition.concepts.{ participant }
 
-@description("Matches participants with human participantType")
-spec participant specIsHumanParticipant {
-  return participantType == "human"
+@description("Matches guest participants")
+spec participant isGuestParticipant {
+  return isGuest == true
 }
 
-@description("Active records created by system automation")
-spec participant specSystemActive {
-  return active == true && createdBy == "system:automation"
+@description("Guest participants created by system automation")
+spec participant systemCreatedGuest {
+  return isGuest == true && createdBy == "system:automation"
 }
 ```
 
@@ -81,11 +81,11 @@ predicates compose with the Go boolean grammar (`&&` / `||` / `!`):
 ```memql
 use cognition.concepts.{ participant }
 
-query participant queryHumanParticipants {
+query participant guestParticipants {
   args {
     spaceId  string  @required
   }
-  filter  spaceId==args.spaceId && specIsHumanParticipant
+  filter  spaceId==args.spaceId && isGuestParticipant
   shape   participantFull
 }
 ```
