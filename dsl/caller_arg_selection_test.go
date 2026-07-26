@@ -18,20 +18,19 @@ package dsl
 // # Why this gate is narrow, and what it deliberately does not cover
 //
 // Selecting a row by its own id is the NORMAL shape for a write, so a blanket
-// rule is wrong. Measured on the tree: 120 constructs across 42 bound concepts
+// rule is wrong. Measured on the tree: 122 constructs across 43 bound concepts
 // select by `id==args.*`, nearly all of them legitimately (update THIS action,
 // expire THAT access request).
 //
 // The question that separates them is not the spelling, it is what the row IS.
 // This gate keeps the concepts where a caller-supplied id names a PERSON:
+// `user`, because the row IS one, and the credential concepts (`identity`,
+// `authSession`, `delegation`, `magicLinkRequest`, `authCode`, `invitation`),
+// because each row is one person's ability to authenticate -- selecting one by
+// a caller-supplied id revokes their session, burns their pending login, or
+// rewrites their key hash.
 //
-//	user      -- the row IS a person. Selecting by a caller-supplied id means
-//	             reading or writing an arbitrary human's record.
-//	identity  -- the row is a credential owned by exactly one person. Selecting
-//	             by a caller-supplied id means acting on an arbitrary human's
-//	             credentials (revoke their PAT, their worker token, ...).
-//
-// The other 100 constructs are the systemic question -- whether the data
+// The remaining ~95 constructs are the systemic question -- whether the data
 // resource enforces anything on the request path at all -- and that is #2802 /
 // #2803, not this gate. Widening here before that decision would produce a
 // hundred-entry exemption map that means nothing.
@@ -61,10 +60,27 @@ package dsl
 // annotation family and found `@public` has no field on `Function` at all), so
 // it records an intent rather than enforcing one. That is a reasonable
 // classification for an open construct in general; it is not a reason to stop
-// asking the question about a row that identifies a PERSON. The one construct
-// this catches -- `nodeTokenIdentityById`, `@public` and projecting
-// `identityFull`, which includes `credentials` -- is exactly the case worth
-// not silencing.
+// asking the question about a row that identifies a PERSON.
+//
+// It catches two `@public` constructs, and they land in different places,
+// which is the point: `nodeTokenIdentityById` projects `identityFull` --
+// including `credentials` -- and is tracked as debt below, while
+// `userDisplayById` projects a name and an id and is recorded as accepted. A
+// rule that cleared both would have said nothing about either.
+//
+// # Known limits, stated rather than implied
+//
+// The gate detects selection by the `id` INTRINSIC. It does not detect
+// selection by another unique column: `userByEmail` takes an arbitrary
+// `primaryEmail` and returns `userFull` -- every `@pii` field -- with no
+// caller check, and is invisible both here and to
+// TestPerRowAuthzClassification. Widening to "any column compared against
+// args" is the 122-construct corpus again, so that is filed separately rather
+// than guessed at here (memql#2881).
+//
+// The gate walks the EMBEDDED tree. A product bundle mounted at
+// MEMQL_DSL_PATH is never scanned, and cross-domain concept binding means such
+// a bundle can declare constructs against these very concepts.
 
 import (
 	"fmt"
@@ -82,8 +98,23 @@ import (
 // rather than an ordinary row update. See the file header for why the gate
 // stops here.
 var personScopedConcepts = map[string]bool{
-	"user":     true,
-	"identity": true,
+	// The row IS a person.
+	"user": true,
+
+	// The row is a credential belonging to exactly one person, so selecting
+	// one by a caller-supplied id acts on that person's ability to
+	// authenticate. Review pointed out that the first version named only
+	// `identity` while the stated criterion covers all of these -- and that
+	// `revokeAuthSession` is structurally the same primitive as
+	// `bumpUserRevocationEpoch`, which was already exempted here as "a
+	// denial-of-service primitive against an arbitrary user". An inconsistent
+	// criterion is worse than a narrow one: it reads as audited.
+	"identity":         true,
+	"authSession":      true,
+	"delegation":       true,
+	"magicLinkRequest": true,
+	"authCode":         true,
+	"invitation":       true,
 }
 
 // callerArgIdSelection matches row SELECTION by the `id` intrinsic against a
@@ -102,31 +133,44 @@ var callerArgIdSelection = regexp.MustCompile(`(?m)(?:^[ \t]*id:[ \t]*args\.|(?:
 // the point: this class grew to twenty constructs precisely because nothing
 // counted it.
 //
-// Every entry below is fixed the same way, by #2860's `@serverOnly`: each has
-// a server-side caller (the identity resolver, the admin app, the token
-// lifecycle) and no legitimate wire caller. When that annotation lands and is
-// applied, the construct clears this gate on its own and its line here should
-// be deleted.
+// Most entries below want the same fix -- `@serverOnly`, which has LANDED
+// (#2860): each has a server-side caller (the identity resolver, the admin
+// app, the token lifecycle) and no obvious wire caller. #2860 applied it to
+// the three constructs #2800 named and stopped there, so the rest of this list
+// is the same work, not new work. Annotating one clears this gate on its own,
+// and the stale-entry check below then FAILS until its line here is deleted --
+// so a fixed construct cannot leave debt behind.
+//
+// "Wants @serverOnly" is a judgement about each construct's callers, not a
+// verified fact for all of them; a few may instead want a caller-scoping
+// context-spec, as `userById` got.
 var callerArgSelectionExemptions = map[string]string{
 	// --- user: the row IS a person ------------------------------------------
 	"identity/mutations.memql updateUser":              "writes an UNRESTRICTED caller-supplied payload to any userId -- `role` is in scope, so this is the sharpest entry here. Admin-app caller only; see #2840 for the reachability analysis.",
 	"identity/mutations.memql deleteUserHard":          "hard-deletes any userId. Administrative by nature; needs origin gating, not caller scoping.",
 	"identity/mutations.memql scheduleAccountDeletion": "schedules deletion of any userId. Same shape as deleteUserHard.",
 	"identity/mutations.memql cancelScheduledDeletion": "cancels deletion for any userId.",
-	"identity/mutations.memql bumpUserRevocationEpoch": "invalidates every session for any userId -- a denial-of-service primitive against an arbitrary user.",
+	"identity/mutations.memql bumpUserRevocationEpoch": "sets revocationEpoch to a caller-supplied int on any userId. RAISING it invalidates every live session (denial of service); LOWERING it re-validates previously revoked tokens, because the verifier rejects only claims BELOW the stored value (see the field @description). Both directions matter.",
 	"identity/mutations.memql bumpUserDataExport":      "stamps the data-export marker on any userId.",
 	"identity/mutations.memql recordLegalAcceptance":   "records legal acceptance on behalf of any userId -- attributing consent to a person who did not give it.",
 	"identity/mutations.memql setUserActiveSpace":      "sets any userId's active space.",
 	"identity/queries.memql userActiveSpace":           "returns any userId's active space. #2860 landed @serverOnly and fixed its sibling userById (now gated by the requiresOwnerOrAdmin context-spec) but left this one ungated.",
 
 	// --- identity: the row is one person's credential ------------------------
-	"identity/mutations.memql updateIdentity":            "updates any identity row by id.",
+	"identity/mutations.memql rotateAuthSession":         "sets refreshTokenHash to a CALLER-SUPPLIED value on an arbitrary session id -- an attacker who can name a session can install a refresh token they control. The sharpest entry in this map after updateUser.",
+	"cognition/mutations.memql touchSession":             "unrestricted `payload object!` spread onto an arbitrary authSession row.",
+	"identity/mutations.memql revokeAuthSession":         "revokes an arbitrary session by id -- the same denial-of-service primitive as bumpUserRevocationEpoch, one session at a time.",
+	"identity/mutations.memql revokeDelegation":          "revokes an arbitrary delegation by id.",
+	"identity/mutations.memql consumeAuthCode":           "marks an arbitrary auth code consumed, burning a pending login before its owner can use it.",
+	"identity/mutations.memql consumeMagicLinkRequest":   "marks an arbitrary magic-link request consumed -- burning a pending login, and magic-link IS the primary login path.",
+	"identity/queries.memql invitationById":              "returns invitationFull for an arbitrary invitation id.",
+	"identity/mutations.memql updateIdentity":            "unrestricted `payload object!` spread onto an arbitrary CREDENTIAL row: can rewrite `userId` (re-pointing a credential at another person) and `credentials.keyHash`. Structurally identical to updateUser.",
 	"identity/mutations.memql revokePATIdentity":         "revokes any user's personal access token.",
 	"identity/mutations.memql revokeWorkerTokenIdentity": "revokes any user's worker token.",
 	"identity/mutations.memql revokeBadgeIdentity":       "revokes any user's badge identity.",
 	"identity/mutations.memql revokeNodeTokenIdentity":   "revokes any node token identity.",
 	"identity/mutations.memql bumpPATLastUsedAt":         "stamps last-used on any PAT; server-side token path.",
-	"identity/mutations.memql touchBadgeLastUsed":        "stamps last-used on any badge identity; server-side token path.",
+	"identity/mutations.memql touchBadgeLastUsed":        "MISNAMED, and sharper than its name: it takes `credentials object!` and spreads it, so it overwrites the ENTIRE credentials block -- keyHash included -- of an arbitrary identity from caller input. Badge-credential substitution, not a timestamp stamp.",
 	"identity/mutations.memql stampNodeTokenBootstrap":   "stamps bootstrap state on any node token identity; server-side node path.",
 	"identity/queries.memql patIdentityById":             "returns a PAT identity row by id; server-side token verification path.",
 	"identity/queries.memql nodeTokenIdentityById":       "returns a node token identity row by id; server-side node auth path. Additionally marked @public while projecting identityFull, which includes `credentials` -- a credential row classified as intentionally open. @public carries no runtime semantics, so the classification is the defect rather than the exposure, but it should be reconsidered rather than inherited.",
@@ -143,6 +187,23 @@ var callerArgSelectionExemptions = map[string]string{
 // userDisplayById split exists for.
 var callerArgSelectionAccepted = map[string]string{
 	"identity/queries.memql userDisplayById": "projects userDisplayCard, which is `row.id` + `displayName` and nothing else. #2860 introduced it precisely so a caller can render another user's name without userById's full row; cross-user display IS the construct's purpose, so caller-scoping it would defeat it.",
+}
+
+// stripLineComments blanks `//` comment tails so a clearance token mentioned in
+// a comment cannot pass for a caller check. Verified in review: a construct
+// with no gate at all, carrying only
+// `// TODO: gate with requiresOwnerOrAdmin later`, was cleared by the first
+// version of this gate.
+func stripLineComments(s string) string {
+	var b strings.Builder
+	for _, line := range strings.Split(s, "\n") {
+		if i := strings.Index(line, "//"); i >= 0 {
+			line = line[:i]
+		}
+		b.WriteString(line)
+		b.WriteByte('\n')
+	}
+	return b.String()
 }
 
 // boundConceptOf returns the signature-bound concept from a construct header,
@@ -273,13 +334,33 @@ func TestCallerSuppliedRowSelectionOnPersonScopedConcepts(t *testing.T) {
 			}
 			preamble := src[preambleStart:m[0]]
 
-			// Anything that constrains the caller clears the gate.
-			gated := strings.Contains(body, "actor.") || strings.Contains(preamble, "@serverOnly")
-			for _, ref := range specRefs {
-				if gated {
-					break
+			// A caller check only counts where it can actually constrain the
+			// selection, so this reads the SELECTION SURFACE with comments
+			// stripped -- not the whole body.
+			//
+			// Substring-testing the body clears three things that gate
+			// nothing, all demonstrated in review: a `// TODO: ... actor.userId
+			// ...` comment; an audit field like `credentials: { mintedBy:
+			// actor.userId }` on a write that still targets an arbitrary row;
+			// and `(row.id==args.userId || row.id==actor.userId)`, whose left
+			// arm returns rows the caller does not own. That last one is
+			// exactly what #2832 removed from TestPerRowAuthzClassification in
+			// this same file, so repeating it here would have re-imported a
+			// bug the package had already paid to learn.
+			//
+			// The `||` case is handled by refusing to clear on a selection
+			// surface that contains one: a disjunct means SOME path through
+			// the predicate is ungated, and this gate should not certify that.
+			surface := stripLineComments(rowSelectionSurface(body))
+			gated := strings.Contains(preamble, "@serverOnly")
+			if !gated && !strings.Contains(surface, "||") {
+				gated = strings.Contains(surface, "actor.")
+				for _, ref := range specRefs {
+					if gated {
+						break
+					}
+					gated = ref.MatchString(surface)
 				}
-				gated = ref.MatchString(body)
 			}
 			if gated {
 				continue

@@ -770,22 +770,60 @@ var userScopeFieldRe = regexp.MustCompile(`(^|[^.\w])(ownerUserId|userId|actorUs
 //
 // A struct-form filter is a single line -- the parser rejects a multi-line
 // clause -- so line extraction is sufficient here.
+// The update block is tracked by BRACE DEPTH, not by the first line that
+// trims to `}`. A nested object closes with its own `}`, so the naive version
+// left the block early and every `id:` after a nested field became invisible
+// (memql#2840 review). That is not a corner case: it is the shape of
+// `toggleComputerUseEnabled`, the construct that opened #2840, with two lines
+// swapped --
+//
+//	update {
+//	  preferences: { computerUseEnabled: args.enabled }
+//	  id: args.userId          // <- was not part of the selection surface
+//	}
+//
+// A same-line `update { id: args.x` opener is handled too: the remainder after
+// the brace is scanned like any other line, so the one-line spelling is not an
+// escape hatch either.
 func rowSelectionSurface(body string) string {
 	var b strings.Builder
-	inUpdate := false
+	depth := 0
 	for _, line := range strings.Split(body, "\n") {
 		t := strings.TrimSpace(line)
-		switch {
-		case strings.HasPrefix(t, "filter"):
+
+		if strings.HasPrefix(t, "filter") {
 			b.WriteString(t)
 			b.WriteByte('\n')
-		case strings.HasPrefix(t, "update"):
-			inUpdate = true
-		case inUpdate && t == "}":
-			inUpdate = false
-		case inUpdate && strings.HasPrefix(t, "id:"):
-			b.WriteString(t)
-			b.WriteByte('\n')
+			continue
+		}
+
+		rest := t
+		if depth == 0 {
+			if idx := strings.Index(t, "update"); idx == 0 {
+				if open := strings.IndexByte(t, '{'); open >= 0 {
+					depth = 1
+					rest = strings.TrimSpace(t[open+1:])
+				} else {
+					// `update` on its own line; the `{` follows.
+					continue
+				}
+			} else {
+				continue
+			}
+		}
+
+		// Inside the update block: collect every `id:` assignment, wherever it
+		// sits, then account for this line's braces.
+		for _, seg := range strings.Split(rest, ",") {
+			seg = strings.TrimSpace(seg)
+			if strings.HasPrefix(seg, "id:") {
+				b.WriteString(seg)
+				b.WriteByte('\n')
+			}
+		}
+		depth += strings.Count(rest, "{") - strings.Count(rest, "}")
+		if depth <= 0 {
+			depth = 0
 		}
 	}
 	return b.String()
