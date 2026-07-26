@@ -11,6 +11,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/language/dslclause"
 	"github.com/znasllc-io/memql/component/language/pagination"
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql/dslfs"
 	"github.com/znasllc-io/memql/component/memql/sense"
 )
@@ -770,25 +771,125 @@ var userScopeFieldRe = regexp.MustCompile(`(^|[^.\w])(ownerUserId|userId|actorUs
 //
 // A struct-form filter is a single line -- the parser rejects a multi-line
 // clause -- so line extraction is sufficient here.
+// The update block is tracked by BRACE DEPTH, not by the first line that
+// trims to `}`. A nested object closes with its own `}`, so the naive version
+// left the block early and every `id:` after a nested field became invisible
+// (memql#2840 review). That is not a corner case: it is the shape of
+// `toggleComputerUseEnabled`, the construct that opened #2840, with two lines
+// swapped --
+//
+//	update {
+//	  preferences: { computerUseEnabled: args.enabled }
+//	  id: args.userId          // <- was not part of the selection surface
+//	}
+//
+// A same-line `update { id: args.x` opener is handled too: the remainder after
+// the brace is scanned like any other line, so the one-line spelling is not an
+// escape hatch either.
 func rowSelectionSurface(body string) string {
+	body = blankComments(body)
 	var b strings.Builder
-	inUpdate := false
+	depth := 0
+	awaitingOpen := false
+
 	for _, line := range strings.Split(body, "\n") {
 		t := strings.TrimSpace(line)
+
+		if strings.HasPrefix(t, "filter") {
+			b.WriteString(t)
+			b.WriteByte('\n')
+			continue
+		}
+
+		rest := t
 		switch {
-		case strings.HasPrefix(t, "filter"):
-			b.WriteString(t)
-			b.WriteByte('\n')
+		case depth > 0:
+			// already inside the update block
+		case awaitingOpen:
+			open := strings.IndexByte(structureOf(t), '{')
+			if open < 0 {
+				continue // still between `update` and its `{`
+			}
+			awaitingOpen = false
+			depth = 1
+			rest = strings.TrimSpace(t[open+1:])
 		case strings.HasPrefix(t, "update"):
-			inUpdate = true
-		case inUpdate && t == "}":
-			inUpdate = false
-		case inUpdate && strings.HasPrefix(t, "id:"):
-			b.WriteString(t)
-			b.WriteByte('\n')
+			if open := strings.IndexByte(structureOf(t), '{'); open >= 0 {
+				depth = 1
+				rest = strings.TrimSpace(t[open+1:])
+			} else {
+				// `update` on its own line; the `{` is on a following line.
+				// The old helper handled this by flagging on the `update`
+				// line alone; dropping the flag made the new version WEAKER
+				// than the one it replaced (memql#2840 review round 2).
+				awaitingOpen = true
+				continue
+			}
+		default:
+			continue
+		}
+
+		// Inside the update block: collect every `id:` assignment, wherever it
+		// sits, then account for this line's braces.
+		for _, seg := range strings.Split(rest, ",") {
+			seg = strings.TrimSpace(seg)
+			if strings.HasPrefix(seg, "id:") {
+				b.WriteString(seg)
+				b.WriteByte('\n')
+			}
+		}
+		// Braces are counted on the STRUCTURE of the line -- string literals
+		// blanked, comments dropped -- so `displayName: "}"` or a trailing
+		// `// ends with }` cannot close the block early. That is HIGH-1's
+		// failure mode reached through a different brace; matchingClose in
+		// this file has been string- and comment-aware all along.
+		s := structureOf(rest)
+		depth += strings.Count(s, "{") - strings.Count(s, "}")
+		if depth <= 0 {
+			depth = 0
 		}
 	}
 	return b.String()
+}
+
+// blankComments removes BOTH comment forms -- `//` line and `/* */` block --
+// via the parser's own offset-preserving blanker, so a construct's structure
+// is read the way the lexer reads it.
+//
+// Three hand-rolled attempts preceded this, each blind to something the
+// previous one handled (memql#2840 review rounds 1-3): the first ended an
+// update block at a nested `}`, the second truncated a filter clause at the
+// `//` inside a URL, the third handled `//` but not `/* */`, so a gate term
+// commented out with `/* && requiresOwnerOrAdmin */` still read as live.
+// parser.BlankComments is string-, line-comment- AND block-comment-aware, is
+// documented for exactly this use ("the text-based header detectors that run
+// BEFORE the lexer/parser"), and preserves byte offsets so line-oriented
+// walkers keep working.
+func blankComments(s string) string { return languageParser.BlankComments(s) }
+
+// structureOf returns line with double-quoted string contents blanked, so
+// brace counting sees only structural punctuation. Comments must already be
+// blanked by blankComments -- BlankComments deliberately preserves string
+// CONTENT, which is what a `}` inside a string literal hides behind.
+func structureOf(line string) string {
+	out := make([]byte, 0, len(line))
+	inString := false
+	for i := 0; i < len(line); i++ {
+		c := line[i]
+		switch {
+		case inString && c == '\\' && i+1 < len(line):
+			out = append(out, ' ', ' ')
+			i++
+		case c == '"':
+			inString = !inString
+			out = append(out, ' ')
+		case inString:
+			out = append(out, ' ')
+		default:
+			out = append(out, c)
+		}
+	}
+	return string(out)
 }
 
 // userScopeSelectionExemptions records constructs that select rows by a user-scope
@@ -1397,11 +1498,7 @@ func clauseGuaranteesAt(clause string, leaf func(string) bool, depth int) bool {
 func filterClauseOf(body string) string {
 	var out []string
 	inFilter := false
-	for _, raw := range strings.Split(body, "\n") {
-		line := raw
-		if i := strings.Index(line, "//"); i >= 0 {
-			line = line[:i]
-		}
+	for _, line := range strings.Split(blankComments(body), "\n") {
 		trim := strings.TrimSpace(line)
 		if !inFilter {
 			if rest, ok := strings.CutPrefix(trim, "filter"); ok && (rest == "" || rest[0] == ' ' || rest[0] == '\t') {
