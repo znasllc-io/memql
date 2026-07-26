@@ -604,6 +604,37 @@ func (e *Evaluator) evaluateCoalesceArg(raw string) (any, bool) {
 		return n, true
 	}
 
+	// A dotted path rooted at a seeded/ambient root (`actor.*`, `args.*`,
+	// `steps.*`, ...) is a REFERENCE, not a literal. Without this it fell
+	// through to the unquoted-string case below and coalesce returned the
+	// path's own SOURCE TEXT (memql#2848).
+	//
+	// The text is the dangerous part, not merely the wrongness: it is a
+	// non-empty and therefore TRUTHY string, so `$coalesce(actor.isClusterOwner,
+	// false)` read as an authorization gate is fail-OPEN -- it reports admin
+	// for a caller with no AccessContext at all. The same class was fixed one
+	// position at a time in #2841 and #2818; routing through
+	// conditionRootSegment is what makes this position agree with the bare
+	// form rather than being a fourth parallel implementation of "what is a
+	// reference".
+	if e.conditionRootSegment(raw) != "" {
+		v, err := e.EvaluateFilterValue(raw)
+		if err != nil || v == nil {
+			return nil, false
+		}
+		return v, true
+	}
+	// Softness here is INHERITED from EvaluateFilterValue rather than
+	// established, and it is uneven: a missing key under a map-backed root
+	// (`actor.*`, `ctx.*`, `input.*`, `item.*`) resolves to nil and falls
+	// through to the next argument, while an unresolved `args.` / `steps.` /
+	// `var.` / `secret.` / `automation.` path returns its own text and so
+	// reads as PRESENT. Measured on both sides of this change and identical,
+	// so it is pre-existing and not widened here -- but it means
+	// `$coalesce(var.killSwitch, false)` still yields a truthy string.
+	// Filed as memql#2851; narrowing it would change what every existing
+	// coalesce returns.
+
 	// Treat as an unquoted string literal.
 	if strings.TrimSpace(raw) == "" {
 		return nil, false
