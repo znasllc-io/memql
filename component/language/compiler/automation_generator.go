@@ -1910,7 +1910,7 @@ func (c *Compiler) parseValue(s string, pos int) (any, int, bool) {
 	// error (memql#2816) the same input turned into a hard rejection of a
 	// PERFECTLY VALID payload, which is worse still.
 	//
-	// The array arm 45 lines above always tracked inString/escaped, and both
+	// The array arm in this same function always tracked inString/escaped, and both
 	// sibling parsers do too (component/memql's scanBalanced,
 	// component/automations/steps' parseValueFromString). This arm was the odd
 	// one out; all three now agree on the cases below.

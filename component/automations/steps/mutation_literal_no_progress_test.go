@@ -101,15 +101,51 @@ func TestRuntimeLiteralParsersTerminate(t *testing.T) {
 // sufficient: the dispatch must FAIL rather than quietly write a partial value
 // into the row.
 //
-// These inputs are the same MALFORMED literals the hang test feeds, so they go
-// through mustTerminate as well. Calling the parser directly would bypass the
-// `leaked` latch and, with the guard regressed, leak a second live spinner
-// next to the one the hang test already stopped on -- the exact unbounded
-// growth the latch exists to bound.
+// Every input here is malformed, so all of them go through mustTerminate.
+// Calling a parser directly with malformed input would bypass the `leaked`
+// latch and, with a guard regressed, leak a live spinner -- the exact
+// unbounded growth the latch exists to bound.
+//
+// (`["abc]` and `[[1, 2]` are NOT among the hang test's inputs; the rest
+// overlap it. Two earlier versions of this sentence were wrong -- first
+// claiming all of them were fed by the hang test, then miscounting the
+// overlap -- so it no longer states a count. If you need the overlap, read
+// the two lists.)
+//
+// The list covers BOTH halves of the array loop's `!ok || newPos <= pos`
+// guard. It originally held only the first three, which are all NO-PROGRESS
+// cases the position half already catches -- so `!ok` could be deleted and
+// this package stayed green, even though dropping it silently turns a
+// malformed element into an empty one:
+//
+//	["abc]   with !ok -> error       without -> []any{""}, err=nil
+//	[{]      with !ok -> error       without -> []any{""}, err=nil
+//	[[1, 2]  with !ok -> error       without -> []any{""}, err=nil
+//
+// Those report ok=false HAVING ADVANCED to len(s), which is exactly what the
+// position half cannot see.
+//
+// The three copies are NOT mirror images of each other -- the load-bearing
+// sets are nested, and the position half carries every one of them:
+//
+//	component/memql              {position}          `!ok` is dead
+//	component/language/compiler  {position, !ok}     both live
+//	this copy                    {position, !ok}     both live
+//
+// So `!ok` needs pinning HERE and in the compiler, while memql needs the
+// opposite -- TestArrayOkImpliesNoProgress pins that its `!ok` stays dead. A
+// test in one copy is not evidence about another; an earlier version of this
+// comment called the relationship an "inversion" with "opposite halves",
+// which is wrong in both directions.
 func TestRuntimeMalformedLiteralErrors(t *testing.T) {
 	e := &MutationExecutor{}
 	ev := automations.NewEvaluator()
-	for _, src := range []string{"[}{]", "[}]", "[]]"} {
+	for _, src := range []string{
+		// no-progress -- caught by the position half
+		"[}{]", "[}]", "[]]",
+		// advanced-then-failed -- caught ONLY by `!ok`
+		`["abc]`, "[{]", "[[1, 2]",
+	} {
 		if !mustTerminate(t, "parseAndEvaluateArrayLiteral("+src+")", func() {
 			if _, err := e.parseAndEvaluateArrayLiteral(ev, src); err == nil {
 				t.Errorf("parseAndEvaluateArrayLiteral(%q) = nil error, want a malformed-literal error", src)
@@ -145,6 +181,17 @@ func TestRuntimeCrossCopyParity(t *testing.T) {
 		{`{ a: { b: "a}b" }, c: 1 }`, true},
 		{`{ k: "abc }`, false},
 		{`{ k: [}{] }`, false},
+
+		// Unbalanced NESTED literals -- see the compiler-side table for why
+		// the third case matters (an unterminated string one level down,
+		// swallowed by the enclosing arm's runoff).
+		{`{ a: { b: 1 }`, false},
+		{`{ a: [ 1, 2 }`, false},
+		{`{ a: { b: """ } }`, false},
+
+		{`{ a: { b: 1 } }`, true},
+		{`{ a: [ 1, 2 ] }`, true},
+		{`{ name: "x", nested: { deep: { deeper: 1 } } }`, true},
 	} {
 		if !mustTerminate(t, "parseAndEvaluateObjectLiteral("+tc.src+")", func() {
 			_, err := e.parseAndEvaluateObjectLiteral(ev, tc.src)

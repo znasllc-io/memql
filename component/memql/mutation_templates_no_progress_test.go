@@ -251,6 +251,17 @@ func TestLoadCrossCopyParity(t *testing.T) {
 		{`{ a: { b: "a}b" }, c: 1 }`, true},
 		{`{ k: "abc }`, false},
 		{`{ k: [}{] }`, false},
+
+		// Unbalanced NESTED literals -- see the compiler-side table for why
+		// the third case matters (an unterminated string one level down,
+		// swallowed by the enclosing arm's runoff).
+		{`{ a: { b: 1 }`, false},
+		{`{ a: [ 1, 2 }`, false},
+		{`{ a: { b: """ } }`, false},
+
+		{`{ a: { b: 1 } }`, true},
+		{`{ a: [ 1, 2 ] }`, true},
+		{`{ name: "x", nested: { deep: { deeper: 1 } } }`, true},
 	} {
 		if !mustTerminate(t, "parsePayloadRawToTemplate("+tc.src+")", func() {
 			_, err := parsePayloadRawToTemplate(tc.src)
@@ -280,20 +291,28 @@ func TestArrayOkImpliesNoProgress(t *testing.T) {
 	// before every call, so it never calls at such a position. Without that
 	// filter the invariant is simply false -- parseLiteralOrExpr skips leading
 	// whitespace internally and then fails, so `parseLiteralOrExpr(" {", 0)`
-	// reports !ok having advanced 0 -> 1. Measured over the SAME enumeration
-	// this test runs, minus the precondition filter: 947 such violations
-	// across 43,210 (input, position) pairs, every one of them at a whitespace
-	// or comma position the loop cannot reach. The filter leaves 34,568.
+	// reports !ok having advanced 0 -> 1 -- a violation at a position the loop
+	// cannot reach.
 	//
-	// (43,210 = sum over d in 1..4 of 10^d * d, the alphabet being 10 runes
-	// and the position bound `pos < len`. An earlier note said 54,320, which
-	// is the `pos <= len` bound -- it counts the end-of-input position, where
-	// parseLiteralOrExpr trivially returns ok=true and nothing is at stake.)
+	// The test therefore counts BOTH populations and logs them: unfiltered
+	// (where violations are expected and non-zero) and array-legal (where the
+	// invariant must hold exactly). No count is written down in prose here.
+	// Earlier versions of this comment asserted four figures, and two of them
+	// were wrong at different times -- a restated number drifts, a printed one
+	// cannot. Run the test to see them.
 	//
-	// The sibling copy in component/language/compiler is the mirror image:
-	// there `!ok` IS load-bearing, because its unterminated-string and
-	// unclosed-`{` arms report failure HAVING ADVANCED, so a position check
-	// alone would miss them.
+	// The other two copies are supersets, not mirror images -- the position
+	// half is load-bearing in all three, and they differ only in whether
+	// `!ok` is ALSO needed:
+	//
+	//	this copy                    {position}          `!ok` is dead
+	//	component/language/compiler  {position, !ok}     both live
+	//	component/automations/steps  {position, !ok}     both live
+	//
+	// In those two, the unterminated-string and unbalanced-bracket arms report
+	// failure HAVING ADVANCED, so a position check alone would miss them.
+	// ("Mirror image" was the earlier wording here and overstated it: nothing
+	// is reversed, one term is added.)
 	skippedByLoop := func(c byte) bool {
 		return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == ','
 	}
@@ -303,9 +322,15 @@ func TestArrayOkImpliesNoProgress(t *testing.T) {
 	alphabet := []rune(`{}[],:"a1 `)
 	var gen func(prefix string, depth int)
 	checked, violations := 0, 0
+	allChecked, allViolations := 0, 0
 	gen = func(prefix string, depth int) {
 		if depth == 0 {
 			for pos := 0; pos < len(prefix); pos++ {
+				_, nextAll, okAll := parseLiteralOrExpr(prefix, pos)
+				allChecked++
+				if !okAll && nextAll > pos {
+					allViolations++
+				}
 				if skippedByLoop(prefix[pos]) {
 					continue // unreachable from parseArrayLiteral's call site
 				}
@@ -329,7 +354,18 @@ func TestArrayOkImpliesNoProgress(t *testing.T) {
 	for d := 1; d <= 4; d++ {
 		gen("", d)
 	}
-	t.Logf("checked %d (input, position) pairs; %d violations", checked, violations)
+	// Both populations, measured rather than asserted. The array-legal count
+	// is the invariant under test; the unfiltered one exists so the scope of
+	// that invariant is visible instead of described.
+	t.Logf("array-legal: checked %d (input, position) pairs; %d violations", checked, violations)
+	t.Logf("unfiltered:  checked %d (input, position) pairs; %d violations", allChecked, allViolations)
+	if allViolations == 0 {
+		t.Errorf("unfiltered violations = 0, want > 0: the precondition filter is "+
+			"supposed to be what makes this invariant hold, so if the unscoped "+
+			"population is ALSO clean, either the enumeration stopped covering "+
+			"whitespace positions or parseLiteralOrExpr changed. Either way the "+
+			"scoping comment above is no longer describing reality.")
+	}
 }
 
 // TestParenMismatchInsideArrayIsNotAHang records an asymmetry worth pinning so
