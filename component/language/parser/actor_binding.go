@@ -13,11 +13,44 @@ import (
 // live here so the loader-side validator (component/memql) and the
 // memqlmigrate rewrite share ONE definition of "reads the actor".
 
+// identChar is the character class the LEXER accepts inside an identifier,
+// spelled for regexp. It mirrors isIdentifierCharNoColon (lexer.go):
+// unicode.IsLetter, unicode.IsDigit, `_` and `-`. Go's `\w` is ASCII-only, so
+// patterns written with it are narrower than the grammar they police -- which
+// is the whole of memql#2809.
+//
+// `\p{Nd}`, not `\p{N}`: unicode.IsDigit is Nd only, while `\p{N}` also admits
+// Nl/No (`Ⅰ`, `½`, `②`). Those are lexer errors, so the wider class could only
+// ever disagree on input that cannot load -- but the point of this const is to
+// BE the lexer's class, and an approximation is how the original drifted.
+//
+// `-` is included even though it reads like an operator. The lexer joins it
+// UNCONDITIONALLY (the "only when the next rune is alphanumeric" clause in
+// that function's comment governs `:` and `.`, not `-`), so `my-actor.userId`
+// and `actor.userId-1` are each ONE identifier token. Excluding it left both
+// directions of this bug alive:
+//
+//	my-actor.userId   guard saw `-` as a boundary  -> read as an actor ref,
+//	                  so a valid file load-rejected for a missing @actor
+//	actor.userId-1    member truncated to `userId` -> a member that is NOT in
+//	                  the closed set passed the validator silently
+//
+// Arithmetic is unaffected: subtraction needs surrounding spaces
+// (`actor.userId - 1` lexes as three tokens), which these patterns already
+// stop at.
+const identChar = `\p{L}\p{Nd}_\-`
+
 // actorRefPattern matches a genuine actor-envelope read: `actor.`
-// led by a non-word, non-dot character (or line start), so
+// led by a non-identifier, non-dot character (or line start), so
 // `event.actor.id` (the event envelope, a different object) and
 // identifiers merely ending in "actor" never match.
-var actorRefPattern = regexp.MustCompile(`(^|[^.\w])actor\.`)
+//
+// The leading class must use identChar rather than `\w`: with the ASCII-only
+// class a non-ASCII letter immediately before `actor.` counted as a boundary,
+// so `mïactor.userId` -- one ordinary identifier -- read as an actor
+// reference. Under the #2621 used-but-undeclared rule that is a LOAD ERROR on
+// valid DSL, not merely a bad message.
+var actorRefPattern = regexp.MustCompile(`(^|[^.` + identChar + `])actor\.`)
 
 // actorDeclPattern matches an `@actor` annotation line (bare or with
 // arguments -- the seed-file `@actor("system")` is a different
@@ -210,7 +243,15 @@ func ActorUndeclaredRefOffsets(src string) []int {
 // read: the same anchored `actor.` shape as actorRefPattern, plus the
 // dotted member. Group 2 is the member; the leading class keeps
 // `event.actor.id` (the event envelope stamp) out.
-var actorMemberPattern = regexp.MustCompile(`(^|[^.\w])actor\.([A-Za-z_][A-Za-z0-9_]*)`)
+//
+// The member class matches what the lexer admits, not ASCII. An ASCII-only
+// class stopped at the first non-ASCII byte, so `actor.naïveProp` reported the
+// member as `actor.na` and underlined two characters. The VERDICT was still
+// right -- the envelope is a closed set of ASCII names, so any member
+// containing a non-ASCII letter is invalid either way -- but the message named
+// a token absent from the author's file, which reads as the tool being
+// confused rather than as a real finding.
+var actorMemberPattern = regexp.MustCompile(`(^|[^.` + identChar + `])actor\.([\p{L}_][` + identChar + `]*)`)
 
 // ActorMemberRef is one actor member read in a source file: the member
 // name and its byte offset (pointing at the member token, so editors
