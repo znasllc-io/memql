@@ -269,7 +269,10 @@ func resolveArithLeafPath(name string, evaluator *Evaluator) (any, error) {
 	if dot := strings.IndexByte(name, '.'); dot > 0 {
 		first = name[:dot]
 	}
-	if isCustomVarRoot(first) {
+	// Steps first (memql#2818): see the note at logic_runner.go's
+	// evaluateScalarArg -- an ambient root that is also a step name must read
+	// the step, or the $-form path returns leftover accessor text.
+	if isCustomVarRoot(evaluator, first) && !evaluator.HasStep(first) {
 		return evaluator.EvaluateValue("$" + name)
 	}
 	val, err := evaluator.EvaluateStepReference(normalizeStepMethodCalls(name))

@@ -75,7 +75,7 @@ func (e *Evaluator) resolveCollectionBaseRaw(basePath string) (any, error) {
 	if dot := strings.IndexByte(basePath, '.'); dot > 0 {
 		first = basePath[:dot]
 	}
-	if _, isStep := e.steps[first]; !isStep && isCustomVarRoot(first) {
+	if _, isStep := e.steps[first]; !isStep && isCustomVarRoot(e, first) {
 		return e.EvaluateValue("$" + basePath)
 	}
 	return e.EvaluateStepReference(basePath)

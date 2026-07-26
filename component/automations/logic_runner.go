@@ -568,7 +568,7 @@ func tryEvaluateReturnLocally(expr string, evaluator *Evaluator) (any, bool, err
 			// (the `$`-path for custom roots) and applies the accessor plus
 			// the trailing field walk in-memory. Steps stay first in
 			// precedence (checked above), mirroring resolveCollectionBaseRaw.
-			if root := strings.TrimPrefix(normalized[:firstDot], "$"); isCustomVarRoot(root) && !evaluator.HasStep(root) {
+			if root := strings.TrimPrefix(normalized[:firstDot], "$"); isCustomVarRoot(evaluator, root) && !evaluator.HasStep(root) {
 				val, isChain, err := memql.EvaluateCollectionChainString(
 					strings.TrimPrefix(expr, "$"),
 					evaluator.resolveCollectionBase,
@@ -1083,7 +1083,14 @@ func evaluateScalarArg(raw string, evaluator *Evaluator) (any, error) {
 	if dot := strings.IndexAny(raw, "."); dot > 0 {
 		firstSegment = raw[:dot]
 	}
-	if isCustomVarRoot(firstSegment) {
+	// Steps win over ambient roots: a logic body that names a step `actor` (or
+	// any seeded root) must still read its step result here. Without this the
+	// widened predicate sends `actor.first().id` down the $-form path, which
+	// cannot see step results and yields the leftover accessor text ("().id")
+	// -- a non-empty, TRUTHY string rather than nil, so a gate reading it fails
+	// OPEN. The two sites that already had this guard (collection_chain.go and
+	// the chain branch above) are why the hazard was invisible at these two.
+	if isCustomVarRoot(evaluator, firstSegment) && !evaluator.HasStep(firstSegment) {
 		val, err := evaluator.EvaluateValue("$" + raw)
 		if err != nil {
 			return nil, nil //nolint:nilerr // soft-fail for coalesce
@@ -1118,16 +1125,29 @@ func normalizeStepMethodCalls(expr string) string {
 	return expr
 }
 
-// isCustomVarRoot reports whether segment is a well-known root the
-// evaluator seeds for logic bodies (see newEvaluatorForLogic and
-// resolvePath). Anything else falls through to step-reference
-// resolution.
-func isCustomVarRoot(segment string) bool {
+// isCustomVarRoot reports whether segment is a root the evaluator can resolve
+// for a logic body, so a path like `actor.role` inside a coalesce argument is
+// upgraded to $-form instead of falling through to step-reference resolution.
+//
+// It asks the EVALUATOR rather than re-listing the roots (memql#2818). This was
+// a hardcoded `args, event, ctx, input, item` while newEvaluatorForLogic also
+// seeds `actor` -- so `role := actor.role ?? ""`, the exact spelling both
+// shipped deploy role gates use, fell through to a step lookup that could not
+// resolve it, coalesce took its fallback, and every downstream `role ==
+// "owner"` compared against "". The gates denied every role including owner.
+//
+// The list had drifted from two others that describe the same set --
+// conditionRootSegment in the evaluator, and reservedAutomationRoots in
+// args_resolution.go -- which is why nobody noticed one of the three was short.
+// Consulting the evaluator's own seeded roots means a root added to
+// newEvaluatorForLogic is resolvable here automatically, rather than correct in
+// two places out of three.
+func isCustomVarRoot(evaluator *Evaluator, segment string) bool {
 	switch segment {
 	case "args", "event", "ctx", "input", "item":
 		return true
 	}
-	return false
+	return evaluator.hasCustomRoot(segment)
 }
 
 // isBareIdentifier returns true when expr is a single identifier --
@@ -1281,12 +1301,20 @@ func (r *LogicRunner) newEvaluatorForLogic(ctx context.Context, args map[string]
 	// contract), so the runner's step evaluator binds it from the caller's
 	// auth context (#2380).
 	//
-	// Note the #2380 example -- `role := coalesce(actor.role, "")` -- is
-	// NOT actually repaired by binding: the coalesce arg resolver does not
-	// consult the seeded custom roots, so that spelling still yields the
-	// literal path text even with actor bound (memql#2818). The
-	// comparison forms (`actor.role == "owner"`, `actor.isClusterOwner !=
-	// false`) do resolve, and those are what the gates below use.
+	// The #2380 example -- `role := coalesce(actor.role, "")`, and its `??`
+	// spelling -- resolves as of memql#2818. It did not before: the runner's
+	// coalesce-argument resolver gated on a hardcoded root list that omitted
+	// `actor`, so the path fell through to a step lookup, coalesce took its
+	// fallback, and both shipped deploy role gates denied every role including
+	// owner.
+	//
+	// The #2380 HAZARD ITSELF IS NOT GONE, only that position. A bare dotted
+	// path still renders as its own text in a cond() predicate -- with no actor,
+	// `cond(actor.isClusterOwner, "ALLOW", "DENY")` yields "ALLOW", because the
+	// unresolved path is a non-empty and therefore truthy string. That is
+	// fail-OPEN on the one field that gates admin work, and it is memql#2819.
+	// Nothing in the shipped tree uses that shape today. Do not read the fix
+	// below as covering it.
 	//
 	// Bound UNCONDITIONALLY (#2801). Leaving actor unbound on absent auth
 	// hit exactly the #2380 hazard on the security-relevant field: an
