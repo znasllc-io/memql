@@ -1003,7 +1003,15 @@ func TestPerRowAuthzClassification(t *testing.T) {
 			// justification above ("rests on a runtime guarantee rather than
 			// on a promise") is exactly what a prose mention does not buy.
 			// sdk/gen/gen.go's serverOnlyRe already had this right.
-			hasServerOnly := serverOnlyAnnotationRe.MatchString(preamble)
+			//
+			// #2875: the verdict now comes from the PARSED tree, not from this
+			// regex. serverOnlyConstructs applies the loader's own rule --
+			// hasFlagAttribute(attrs, "serverOnly") -- to the same parse, so the
+			// gate's answer and Function.ServerOnly cannot diverge. The regex
+			// could be satisfied by an `@serverOnly` inside a multi-line
+			// annotation string or a block comment opened on an `@`-line, which
+			// EXEMPTED the construct here while nothing enforced it at runtime.
+			hasServerOnly := serverOnlyConstructs(t)[serverOnlyKey{Path: p, Name: name}]
 
 			// A QUERY's scoping lives in its filter's boolean STRUCTURE, so
 			// the gate evaluates the clause rather than substring-matching

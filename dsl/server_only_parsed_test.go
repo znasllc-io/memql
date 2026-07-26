@@ -1,12 +1,16 @@
 package dsl
 
 import (
+	"fmt"
+	"reflect"
 	"regexp"
+	"sort"
+	"strings"
 	"sync"
 	"testing"
 
 	languageAst "github.com/znasllc-io/memql/component/language/ast"
-	languageParser "github.com/znasllc-io/memql/component/language/parser"
+	languageCompiler "github.com/znasllc-io/memql/component/language/compiler"
 	"github.com/znasllc-io/memql/component/memql/dslimports"
 )
 
@@ -116,10 +120,16 @@ func serverOnlyConstructs(t *testing.T) map[serverOnlyKey]bool {
 // declNameAndAttributes pulls the name + annotations off any named top-level
 // declaration.
 //
-// Every kind is listed explicitly rather than reflected over, so a NEW
-// declaration type is a compile-time hole that TestServerOnlyParsedSetCoversEveryDeclKind
-// reports, instead of silently returning ok=false and quietly dropping a whole
-// construct kind out of the audit.
+// Every Attributes-bearing kind must be listed. The `default: return false` is
+// a SILENT DROP -- Go's type switch has no exhaustiveness check -- so
+// TestServerOnlyParsedSetCoversEveryAttributedDeclKind walks the real tree and
+// fails on any node type carrying an `Attributes` field that this switch does
+// not handle. Without it, the first five kinds were missing (ShapeDecl 87,
+// SpecDecl 36, PromptDecl 25, ActionDecl 9, CapabilityDecl 8 = 165
+// declarations), which is the exact class of hole this file exists to close.
+//
+// SeedDecl / ToolDecl / ProviderDecl / PolicyDecl are deliberately absent: they
+// carry no Attributes field, so there is nothing to read.
 func declNameAndAttributes(def languageAst.Node) (string, []*languageAst.Attribute, bool) {
 	switch d := def.(type) {
 	case *languageAst.FunctionDef:
@@ -127,6 +137,16 @@ func declNameAndAttributes(def languageAst.Node) (string, []*languageAst.Attribu
 	case *languageAst.ConceptDecl:
 		return d.Name, d.Attributes, true
 	case *languageAst.BuiltinDecl:
+		return d.Name, d.Attributes, true
+	case *languageAst.ShapeDecl:
+		return d.Name, d.Attributes, true
+	case *languageAst.SpecDecl:
+		return d.Name, d.Attributes, true
+	case *languageAst.PromptDecl:
+		return d.Name, d.Attributes, true
+	case *languageAst.ActionDecl:
+		return d.Name, d.Attributes, true
+	case *languageAst.CapabilityDecl:
 		return d.Name, d.Attributes, true
 	default:
 		return "", nil, false
@@ -143,24 +163,48 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 			"component/memql/function_validator.go is still exercised by anything -- or the " +
 			"attribute name changed, which would silently exempt nothing and gate nothing.")
 	}
-	names := map[string]bool{}
-	for k := range set {
-		names[k.Name] = true
+	want := map[serverOnlyKey]bool{
+		{Path: "identity/queries.memql", Name: "activeUsers"}:               true,
+		{Path: "identity/queries.memql", Name: "userByEmail"}:               true,
+		{Path: "identity/queries.memql", Name: "userByIdSystem"}:            true,
+		{Path: "identity/queries.memql", Name: "usersInDeletionCooldown"}:   true,
+		{Path: "identity/queries.memql", Name: "usersScheduledForDeletion"}: true,
+		{Path: "worker/queries.memql", Name: "runningPlansForUser"}:         true,
 	}
-	// These six are the live set as of memql#2883. The assertion is one-way:
-	// each MUST be present. A new one appearing is fine and needs no edit here;
-	// one DISAPPEARING means a construct silently lost its origin gate.
-	for _, want := range []string{
-		"activeUsers", "userByEmail", "userByIdSystem",
-		"usersInDeletionCooldown", "usersScheduledForDeletion", "runningPlansForUser",
-	} {
-		if !names[want] {
-			t.Errorf("%q no longer carries @serverOnly in the PARSED tree. If that is deliberate, "+
-				"it needs a caller-scope filter instead -- each of these is server-only because "+
-				"caller-scoping it is circular or because it is a sweep (#2800 / #2883).", want)
+	for k := range want {
+		if !set[k] {
+			t.Errorf("%s in %s no longer carries @serverOnly in the PARSED tree. If that is "+
+				"deliberate it needs a caller-scope filter instead -- each of these is "+
+				"server-only because caller-scoping is circular or because it is a sweep "+
+				"(#2800 / #2883).", k.Name, k.Path)
 		}
 	}
-	t.Logf("parsed tree: %d @serverOnly construct(s) across %d named declarations", len(set), serverOnlySeen)
+	for k := range set {
+		if !want[k] {
+			t.Errorf("%s in %s GAINED @serverOnly. That exempts it from per-row-authz "+
+				"classification (the gate short-circuits on hasServerOnly) and drops it from the "+
+				"generated SDK, so it needs the same argument the other six carry: why is "+
+				"caller-scoping impossible here? If the answer is good, add it to `want`.", k.Name, k.Path)
+		}
+	}
+	// These six are the live set as of memql#2883, keyed by PATH AND NAME.
+	// Collapsing to name-only would defeat the key's stated purpose -- two
+	// domains may declare the same construct name, so `activeUsers` in a
+	// different file would satisfy the assertion.
+	//
+	// The assertion is two-way, and the ADDITION direction is the riskier one.
+	// A construct DISAPPEARING means it silently lost its origin gate. A
+	// construct APPEARING is how an author silences the per-row-authz
+	// classification gate, which short-circuits on hasServerOnly -- so a new
+	// @serverOnly on a client-facing query must not land with zero test signal.
+	// The count is the covered set, not the whole tree. Attributes-bearing kinds
+	// only: FunctionDef 476, ConceptDecl 100, ShapeDecl 87, BuiltinDecl 74,
+	// SpecDecl 36, PromptDecl 25, ActionDecl 9, CapabilityDecl 8 = 815 of 1091
+	// definitions. SeedDecl (185), ToolDecl (43), ProviderDecl (41) and
+	// PolicyDecl (7) carry no Attributes field, so there is nothing to read --
+	// TestServerOnlyParsedSetCoversEveryAttributedDeclKind is what keeps that
+	// honest rather than assumed.
+	t.Logf("parsed tree: %d @serverOnly construct(s) across %d attributed declarations", len(set), serverOnlySeen)
 }
 
 // TestServerOnlyParsedSetIgnoresSmuggledAnnotations is the failing-first half.
@@ -248,8 +292,79 @@ func TestServerOnlyParsedSetIgnoresSmuggledAnnotations(t *testing.T) {
 // removes; nothing in the audit path consults it.
 var smuggledServerOnlyRe = regexp.MustCompile(`(?m)^@serverOnly\b`)
 
-// parseOneFileForAudit parses a fixture through the same entry point the tree
-// load uses, so a fixture cannot pass on a laxer path than production.
+// parseOneFileForAudit parses a fixture through the entry point the TREE LOAD
+// uses -- languageCompiler.ParseFileSource, which applies the full rewrite chain
+// (StripNonProceduralBlocks + NormaliseAll).
+//
+// It used to call languageParser.ParseFile, the bare lexer/parser, under a
+// comment claiming it was "the same entry point the tree load uses". That was
+// false, and the two demonstrably disagree: `@serverOnly` above an
+// `automation a {...}` is a parse ERROR to ParseFile and a successful
+// FunctionDef with serverOnly=true to ParseFileSource. A fixture validated on
+// the bare parser is validated on a path production never runs.
 func parseOneFileForAudit(src string) (*languageAst.File, error) {
-	return languageParser.ParseFile(src)
+	return languageCompiler.ParseFileSource(src)
+}
+
+// TestServerOnlyParsedSetCoversEveryAttributedDeclKind is the exhaustiveness
+// check the type switch cannot give us.
+//
+// It reflects over every node in the real tree and fails on any type that has an
+// `Attributes []*ast.Attribute` field but is not handled by
+// declNameAndAttributes. Reflection is the right tool ONLY here: the walk itself
+// stays an explicit switch (fast, obvious), and this test is what makes the
+// switch's completeness checkable rather than assumed.
+func TestServerOnlyParsedSetCoversEveryAttributedDeclKind(t *testing.T) {
+	tree, err := dslimports.Load(Tree())
+	if err != nil {
+		t.Fatalf("dslimports.Load: %v", err)
+	}
+
+	seen := map[string]int{}
+	uncovered := map[string]int{}
+	for _, file := range tree.Files {
+		if file == nil {
+			continue
+		}
+		for _, def := range file.Definitions {
+			typeName := fmt.Sprintf("%T", def)
+			seen[typeName]++
+
+			_, _, covered := declNameAndAttributes(def)
+			if covered {
+				continue
+			}
+			// Not covered -- does it carry Attributes anyway?
+			v := reflect.Indirect(reflect.ValueOf(def))
+			if v.Kind() != reflect.Struct {
+				continue
+			}
+			f := v.FieldByName("Attributes")
+			if f.IsValid() && f.Kind() == reflect.Slice {
+				uncovered[typeName]++
+			}
+		}
+	}
+
+	if len(seen) == 0 {
+		t.Fatal("walked 0 definitions; this test would pass vacuously")
+	}
+
+	names := make([]string, 0, len(uncovered))
+	for n := range uncovered {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for _, n := range names {
+		t.Errorf("%s carries an Attributes field and appears %d time(s) in the tree, but "+
+			"declNameAndAttributes does not handle it -- so every construct of that kind is "+
+			"SILENTLY EXCLUDED from the @serverOnly audit. Add a case for it.", n, uncovered[n])
+	}
+
+	kinds := make([]string, 0, len(seen))
+	for n := range seen {
+		kinds = append(kinds, fmt.Sprintf("%s=%d", n, seen[n]))
+	}
+	sort.Strings(kinds)
+	t.Logf("declaration kinds in the tree: %s", strings.Join(kinds, " "))
 }
