@@ -1455,10 +1455,17 @@ func (e *MutationExecutor) parseAndEvaluateArrayLiteral(evaluator *automations.E
 // All three ADVANCE pos to len(s) before reporting false. That matters to the
 // array caller's guard: `!ok || newPos <= pos` needs the `!ok` half, because
 // the position half alone cannot see a failure that advanced. The sibling in
-// component/memql is the opposite case -- its ok=false arms never advance, so
-// there `!ok` is dead and TestArrayOkImpliesNoProgress pins that. The two
-// copies genuinely differ here; do not "harmonise" one to the other without
-// re-deriving which half is doing the work.
+// component/memql is the opposite case -- its ok=false arms never advance *at
+// the positions its array loop calls from*, so there `!ok` is dead and
+// TestArrayOkImpliesNoProgress pins that. The two copies genuinely differ
+// here; do not "harmonise" one to the other without re-deriving which half is
+// doing the work.
+//
+// That qualifier is load-bearing, and dropping it is how three earlier
+// comments in this file became false. Unqualified the claim is simply wrong:
+// parseLiteralOrExpr skips leading whitespace internally and then returns the
+// advanced pos, so brute force finds 21,442 advancing ok=false cases across
+// all positions -- and 0 across the array-legal ones.
 func (e *MutationExecutor) parseValueFromString(s string, pos int) (string, int, bool) {
 	if pos >= len(s) {
 		return "", pos, true

@@ -106,10 +106,32 @@ func TestRuntimeLiteralParsersTerminate(t *testing.T) {
 // `leaked` latch and, with the guard regressed, leak a second live spinner
 // next to the one the hang test already stopped on -- the exact unbounded
 // growth the latch exists to bound.
+//
+// The list covers BOTH halves of the array loop's `!ok || newPos <= pos`
+// guard. It originally held only the first three, which are all NO-PROGRESS
+// cases the position half already catches -- so `!ok` could be deleted and
+// this package stayed green, even though dropping it silently turns a
+// malformed element into an empty one:
+//
+//	["abc]   with !ok -> error       without -> []any{""}, err=nil
+//	[{]      with !ok -> error       without -> []any{""}, err=nil
+//	[[1, 2]  with !ok -> error       without -> []any{""}, err=nil
+//
+// Those report ok=false HAVING ADVANCED to len(s), which is exactly what the
+// position half cannot see. Note the inversion against the sibling: in
+// component/memql `!ok` is DEAD and TestArrayOkImpliesNoProgress pins that it
+// stays dead; here it is LIVE and these rows pin that it stays live. Same
+// expression, opposite halves load-bearing -- a test in one copy is not
+// evidence about the other.
 func TestRuntimeMalformedLiteralErrors(t *testing.T) {
 	e := &MutationExecutor{}
 	ev := automations.NewEvaluator()
-	for _, src := range []string{"[}{]", "[}]", "[]]"} {
+	for _, src := range []string{
+		// no-progress -- caught by the position half
+		"[}{]", "[}]", "[]]",
+		// advanced-then-failed -- caught ONLY by `!ok`
+		`["abc]`, "[{]", "[[1, 2]",
+	} {
 		if !mustTerminate(t, "parseAndEvaluateArrayLiteral("+src+")", func() {
 			if _, err := e.parseAndEvaluateArrayLiteral(ev, src); err == nil {
 				t.Errorf("parseAndEvaluateArrayLiteral(%q) = nil error, want a malformed-literal error", src)
