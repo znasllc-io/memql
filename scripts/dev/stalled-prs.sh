@@ -59,6 +59,9 @@ set -uo pipefail
 
 REPO="${REPO:-znasllc-io/memql}"
 IDLE_MINUTES="${IDLE_MINUTES:-45}"
+# One page of PRs. Not configurable on purpose -- raising it silently is how a
+# cap stops being noticed. main() warns when the page comes back full.
+PR_PAGE_LIMIT=100
 
 require_gh() {
   # `gh --version` rather than `command -v gh`: it covers missing AND broken in
@@ -106,7 +109,7 @@ require_valid_threshold() {
 # idle of 0, so every PR reported FRESH and the tool said "no stalled PRs"
 # forever without a word.
 open_prs() {
-  gh pr list -R "$REPO" --state open --limit 100 \
+  gh pr list -R "$REPO" --state open --limit "$PR_PAGE_LIMIT" \
     --json number,isDraft,mergeStateStatus,updatedAt,title \
     --jq '.[] | [.number, .isDraft, .mergeStateStatus, (.updatedAt|fromdateiso8601), .title] | @tsv'
 }
@@ -138,6 +141,21 @@ in_merge_queue() {
 # survived in a comment.
 collapse_runs() {
   local runs="$1"
+  # Blank lines are stripped first. Without this a TRAILING newline made the
+  # final `grep -qvE` match the empty line and return `unknown` for a
+  # perfectly green PR:
+  #
+  #   collapse_runs $'success\nsuccess'    -> green
+  #   collapse_runs $'success\nsuccess\n'  -> unknown
+  #
+  # Unreachable from check_state today only because $( ) strips trailing
+  # newlines -- but the whole reason this function is split out is to be
+  # callable without the API, and a newline-delimited list is exactly the
+  # shape a caller would hand it. Any future change to how `runs` is captured
+  # (mapfile, a file redirect, --slurp) would otherwise turn every PR UNKNOWN
+  # forever, under a note telling the operator to re-run to resolve it.
+  runs=$(printf '%s\n' "$runs" | grep -v '^[[:space:]]*$' || true)
+
   # No runs at all: CI never triggered. NOT green -- that is precisely the
   # state where "ready to merge" is least trustworthy.
   [ -z "$runs" ] && { echo "none"; return; }
@@ -242,6 +260,15 @@ main() {
     exit 4
   fi
 
+  # A full page means the list was almost certainly truncated. Say so: this
+  # tool's entire job is to notice work nobody is advancing, so dropping the
+  # remainder silently -- and possibly still printing "No STALLED PRs" -- is
+  # the one failure mode it must not have. (CLAUDE.md: no silent caps.)
+  if [ "$(grep -c . <<<"$rows")" -ge "$PR_PAGE_LIMIT" ]; then
+    echo "WARNING: hit the ${PR_PAGE_LIMIT}-PR page limit; PRs beyond it were NOT examined." >&2
+    echo "         This report is incomplete -- treat a clean result as unproven." >&2
+  fi
+
   printf '%-7s %-9s %-7s %-7s  %s\n' "PR" "STATE" "IDLE" "CHECKS" "TITLE"
   printf '%-7s %-9s %-7s %-7s  %s\n' "-------" "---------" "-------" "-------" "-----"
 
@@ -265,7 +292,12 @@ main() {
   if [ "$total" -eq 0 ]; then
     echo "No open PRs."
   elif [ "$stalled" -eq 0 ]; then
-    echo "No stalled PRs: every open PR is queued, draft, red, or still within the ${IDLE_MINUTES}m idle window."
+    # Deliberately does NOT enumerate the other buckets. An earlier version
+    # said "every open PR is queued, draft, red, or still within the idle
+    # window", which is false: CONFLICT, BEHIND, BLOCKED, NO-CI and UNKNOWN
+    # are all reachable and none of them is any of those four. A summary line
+    # that lists the wrong set reads as an all-clear over PRs that need work.
+    echo "No stalled PRs. ${total} open PR(s) are in some other state -- see the table above."
   else
     echo "${stalled} of ${total} open PR(s) are STALLED -- green, mergeable, and nobody is advancing them."
     echo "Review before enqueuing: green is not reviewed (memql#2833). A dead session may also"
@@ -273,9 +305,44 @@ main() {
   fi
   if [ "$unknown" -gt 0 ]; then
     echo
-    echo "NOTE: ${unknown} PR(s) are UNKNOWN -- an API call failed or GitHub is still computing"
-    echo "mergeability. They are deliberately NOT reported as stalled; re-run to resolve them."
+    # UNKNOWN has three causes and only one of them clears on a re-run, so the
+    # note names all three. Saying "re-run to resolve them" alone sent the
+    # operator into a loop on the two that never resolve.
+    echo "NOTE: ${unknown} PR(s) are UNKNOWN. Three causes:"
+    echo "  - an API call failed, or GitHub is still computing mergeability -- a re-run resolves this one;"
+    echo "  - mergeStateStatus is UNSTABLE (a non-required check is red) -- a re-run will not change it;"
+    echo "  - a check-run conclusion this script has not been taught -- needs a code change."
+    echo "They are deliberately NOT reported as stalled either way."
   fi
 }
+
+usage() {
+  cat <<'USAGE'
+stalled-prs.sh -- report open PRs that are green, mergeable, and un-enqueued.
+
+READ-ONLY. Makes no GitHub mutation of any kind; that is enforced by
+TestStalledPRs_MakesNoMutatingCall, which runs the script against a stub `gh`
+that refuses anything outside a read allowlist.
+
+Usage:
+  bash scripts/dev/stalled-prs.sh          # or: make prs-stalled
+  IDLE_MINUTES=15 bash scripts/dev/stalled-prs.sh
+
+Environment:
+  REPO           owner/name to report on (default: znasllc-io/memql)
+  IDLE_MINUTES   how long a green PR must sit before it counts as STALLED
+                 (default: 45)
+
+Exit codes: 0 report produced, 2 bad parameter, 4 gh unusable.
+USAGE
+}
+
+# `main` never read $@, so `--help` printed the full report -- a live API sweep
+# for someone who just wanted the usage text. Usage lived only in a comment.
+case "${1:-}" in
+  -h | --help) usage; exit 0 ;;
+  "") ;;
+  *) echo "ERROR: unrecognised argument: $1" >&2; usage >&2; exit 2 ;;
+esac
 
 main "$@"

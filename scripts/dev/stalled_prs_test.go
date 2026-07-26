@@ -61,6 +61,68 @@ type ghStub struct {
 // row arrived as a single field and each PR classified UNKNOWN.
 func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 
+// bucketColumn extracts the STATE column from the report's table rows.
+//
+// A report line is `#<num> <STATE> <IDLE> <CHECKS> <TITLE>`; everything else
+// (the header, the rules, the summary prose) is skipped. Parsing the column
+// rather than substring-matching stdout keeps the assertions about what the
+// classifier DECIDED instead of about how the summary happens to be worded.
+func bucketColumn(stdout string) []string {
+	var out []string
+	for _, line := range strings.Split(stdout, "\n") {
+		if !strings.HasPrefix(line, "#") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) >= 2 {
+			out = append(out, fields[1])
+		}
+	}
+	return out
+}
+
+// scriptBody returns the script with its `main "$@"` invocation removed, so a
+// test can source the function definitions without running the report.
+//
+// The removal is ASSERTED, and that assertion is load-bearing rather than
+// defensive. A silent no-op here does not fail the test -- it makes the
+// sourced body EXECUTE main, and the tests that source it put no stub `gh` on
+// PATH, so every subtest fires a real sweep against the live GitHub API.
+// Measured by breaking the anchor deliberately: runtime went from 1.2s to
+// >120s (timeout). In CI, where there is no `gh auth`, the script exits 4 and
+// the failure surfaces as `classify(...): exit status 4` -- pointing at the
+// classifier, which is not what broke.
+func scriptBody(t *testing.T) string {
+	t.Helper()
+	src := readScript(t)
+	body := strings.Replace(src, "\nmain \"$@\"\n", "\n", 1)
+	if body == src {
+		t.Fatalf("could not find the `main \"$@\"` anchor in %s -- its last line has drifted. "+
+			"Without the removal, sourcing this body RUNS the report against the live GitHub "+
+			"API instead of just defining its functions.", stalledPRsScript)
+	}
+	return body
+}
+
+// hermeticEnv builds the environment for a bash subprocess under test.
+//
+// os.Environ() is deliberately NOT inherited. The script documents
+// `IDLE_MINUTES=15 bash scripts/dev/stalled-prs.sh`, so a developer who
+// exports that variable breaks this suite from the outside -- and not subtly:
+//
+//	IDLE_MINUTES=200 go test ./scripts/dev/   -> classify(...idle=120) = "FRESH", want "STALLED"
+//	IDLE_MINUTES=45m go test ./scripts/dev/   -> 11 failures, incl. an exit-code assertion
+//
+// REPO is the same hazard. Passing only what a case sets makes the suite
+// depend on its inputs rather than on the developer's shell.
+func hermeticEnv(extra ...string) []string {
+	env := []string{
+		"PATH=" + os.Getenv("PATH"),
+		"HOME=" + os.Getenv("HOME"),
+	}
+	return append(env, extra...)
+}
+
 func writeGhStub(t *testing.T, cfg ghStub) (dir, logPath string) {
 	t.Helper()
 	dir = t.TempDir()
@@ -78,31 +140,63 @@ printf '%%s\n' "$*" >> %q
 
 # A write can also hide in the ARGUMENTS of a legitimate read verb, so argv is
 # screened before the verb is dispatched.
-#   - gh sends POST as soon as any field flag is present, with no -X in sight,
-#     and pflag accepts the shorthand attached (-fbody=hi).
+#
+# This is an ALLOWLIST, and the distinction is the whole point. The previous
+# version enumerated write flags -- -X, --method, --input, --field,
+# --raw-field -- and pflag's ATTACHED forms walked straight past it. All four
+# of these were ACCEPTED by that screener:
+#
+#     api --method=POST repos/o/r/merges
+#     api --field=body=hi repos/o/r/issues/1/comments
+#     api --raw-field=q=1 repos/o/r/x
+#     api -XPOST repos/o/r/merges
+#
+# -XPOST is the sharpest, because the old code implemented attached-shorthand
+# detection for -f/-F only, in a comment that named exactly that hazard.
+# Enumerating spellings is the losing side of this game -- the same weakness
+# that defeated three earlier rounds of this guard, relocated from the script
+# into the stub that was supposed to make the guarantee unconditional.
+#
+# So every argument must MATCH a known-safe form and anything unrecognised is
+# refused by DEFAULT. A new gh flag, a new spelling of an old one, or an
+# abbreviation nobody anticipated all land in the default case.
+#
+# Two gh behaviours still need naming explicitly:
+#   - gh sends POST as soon as any field flag is present, with no -X in sight.
+#     So -f is tolerated ONLY on the graphql endpoint, never on a REST path.
 #   - GraphQL is always POSTed, so read vs write is decided by the document.
-#     gh is last-wins on a duplicated -f query=, and --input overrides the
-#     inline query entirely -- so the ONLY tolerated field flag is a single
-#     -f query=..., and everything else on an api call is refused.
+#     gh is last-wins on a duplicated -f query=, so more than one is refused.
 if [ "$1" = "api" ]; then
-  expect_val=""
-  qcount=0
+  shift
+  endpoint=""; expect_jq=""; expect_query=""; qcount=0
   for a in "$@"; do
-    if [ -n "$expect_val" ]; then
+    if [ -n "$expect_jq" ]; then expect_jq=""; continue; fi
+    if [ -n "$expect_query" ]; then
       case "$a" in
         query=*) qcount=$((qcount + 1)) ;;
-        *) FORBID="field flag value $a" ;;
+        *) FORBID="-f value is not a query document: $a" ;;
       esac
-      expect_val=""
+      expect_query=""
       continue
     fi
     case "$a" in
-      -X | --method | --input | --field | --raw-field) FORBID="write flag $a" ;;
-      -f | -F) expect_val=1 ;;
-      -f* | -F*) FORBID="attached field flag $a" ;;
+      --paginate) ;;
+      --jq | -q)  expect_jq=1 ;;
+      -f)         expect_query=1 ;;
+      -*)         FORBID="unrecognised api flag $a" ;;
+      *)          if [ -z "$endpoint" ]; then endpoint="$a"; else FORBID="second positional api argument $a"; fi ;;
     esac
   done
+  [ -n "$expect_jq$expect_query" ] && FORBID="dangling flag with no value"
   [ "$qcount" -gt 1 ] && FORBID="duplicate -f query= (gh takes the last)"
+  if [ "$qcount" -gt 0 ] && [ "$endpoint" != "graphql" ]; then
+    FORBID="-f on the REST path $endpoint makes it a POST"
+  fi
+  case "$endpoint" in
+    graphql | repos/*) ;;
+    *) FORBID="api endpoint outside the read allowlist: $endpoint" ;;
+  esac
+  set -- api "$@"
 fi
 for a in "$@"; do
   case "$a" in *mutation*) FORBID="graphql mutation" ;; esac
@@ -167,7 +261,7 @@ func runScript(t *testing.T, cfg ghStub, env ...string) runResult {
 	dir, logPath := writeGhStub(t, cfg)
 
 	cmd := exec.Command("bash", stalledPRsScript)
-	cmd.Env = append(append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH")), env...)
+	cmd.Env = hermeticEnv(append([]string{"PATH=" + dir + ":" + os.Getenv("PATH")}, env...)...)
 	var stdout, stderr strings.Builder
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 
@@ -230,6 +324,32 @@ func TestStalledPRs_StubRefusesWrites(t *testing.T) {
 		"issue edit 7 --add-label x",
 		"label create foo",
 		"workflow run ci.yml",
+
+		// The four spellings that DEFEATED the previous screener. It matched
+		// -X / --method / --input / --field / --raw-field as exact tokens;
+		// pflag also accepts each attached to its value, and all four of these
+		// were accepted as read-only. They are pinned individually rather than
+		// as one case so a regression names which form came back.
+		"api --method=POST repos/o/r/merges",
+		"api --field=body=hi repos/o/r/issues/1/comments",
+		"api --raw-field=q=1 repos/o/r/x",
+		"api -XPOST repos/o/r/merges",
+
+		// The forms the old screener DID catch must stay caught -- inverting
+		// to an allowlist is only an improvement if it is a superset.
+		"api -X POST repos/o/r/merges",
+		"api --input body.json repos/o/r/x",
+		"api -fbody=hi repos/o/r/issues/1/comments",
+
+		// An endpoint outside the read allowlist, with no flag to give it
+		// away. gh defaults to GET, so this one is harmless in itself -- it is
+		// pinned because "the stub only knows the endpoints the script uses"
+		// is the property that makes the default-deny meaningful.
+		"api user/repos",
+
+		// -f makes gh POST even with no -X, so it is tolerated only on
+		// graphql. On a REST path it is a write in disguise.
+		"api -f query=x repos/o/r/x",
 	} {
 		cmd := exec.Command(filepath.Join(dir, "gh"), strings.Fields(write)...)
 		if err := cmd.Run(); err == nil {
@@ -304,12 +424,31 @@ func TestStalledPRs_FailuresNeverBecomeFindings(t *testing.T) {
 			tc.mutate(&cfg)
 			res := runScript(t, cfg)
 
-			if strings.Contains(res.stdout, "STALLED") {
-				t.Errorf("a %s produced a STALLED finding -- an unresolved state must never invite an enqueue.\ngot:\n%s",
-					tc.name, res.stdout)
+			// Assert on the STATE COLUMN of the table rows, not on the whole
+			// stdout. A bare strings.Contains here reads the summary prose
+			// too: rewording the clean-run line to "No STALLED PRs." made
+			// every one of these cases fail on a report that was correct.
+			// The inverse -- prose that happens to contain the wanted bucket
+			// name satisfying wantCol -- is the same bug pointing the other
+			// way, and would pass silently.
+			buckets := bucketColumn(res.stdout)
+			for _, b := range buckets {
+				if b == "STALLED" {
+					t.Errorf("a %s produced a STALLED finding -- an unresolved state must never invite an enqueue.\ngot:\n%s",
+						tc.name, res.stdout)
+				}
 			}
-			if !strings.Contains(res.stdout, tc.wantCol) {
-				t.Errorf("want bucket %s in output, got:\n%s", tc.wantCol, res.stdout)
+			if len(buckets) == 0 {
+				t.Fatalf("no table rows parsed from the report; this case would assert nothing.\ngot:\n%s", res.stdout)
+			}
+			found := false
+			for _, b := range buckets {
+				if b == tc.wantCol {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("want bucket %s in the STATE column, got %v:\n%s", tc.wantCol, buckets, res.stdout)
 			}
 			if got := res.forbidden(); len(got) > 0 {
 				t.Errorf("mutating call during %s: %v", tc.name, got)
@@ -453,10 +592,11 @@ func TestStalledPRs_NoBlatantMutationVerbs(t *testing.T) {
 // through the stub (precedence between two bad states) are cheap here.
 func classify(t *testing.T, draft, mergeState, queued, checks, idle string) string {
 	t.Helper()
-	body := strings.Replace(readScript(t), "\nmain \"$@\"\n", "\n", 1)
-	script := body + "\nclassify " +
+	script := scriptBody(t) + "\nclassify " +
 		strings.Join([]string{draft, mergeState, queued, checks, idle}, " ") + "\n"
-	out, err := exec.Command("bash", "-c", script).Output()
+	cmd := exec.Command("bash", "-c", script)
+	cmd.Env = hermeticEnv()
+	out, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("classify(%s %s %s %s %s): %v", draft, mergeState, queued, checks, idle, err)
 	}
@@ -502,10 +642,12 @@ func TestStalledPRs_ClassifierPrecedence(t *testing.T) {
 // Its predecessor asserted only that the script CONTAINED the word "skipped",
 // and passed with the logic gutted, because the word survived in a comment.
 func TestStalledPRs_CollapseRuns(t *testing.T) {
-	body := strings.Replace(readScript(t), "\nmain \"$@\"\n", "\n", 1)
+	body := scriptBody(t)
 	call := func(runs string) string {
 		q := "'" + strings.ReplaceAll(runs, "'", `'\''`) + "'"
-		out, err := exec.Command("bash", "-c", body+"\ncollapse_runs "+q+"\n").Output()
+		cmd := exec.Command("bash", "-c", body+"\ncollapse_runs "+q+"\n")
+		cmd.Env = hermeticEnv()
+		out, err := cmd.Output()
 		if err != nil {
 			t.Fatalf("collapse_runs(%q): %v", runs, err)
 		}
