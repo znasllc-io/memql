@@ -50,14 +50,31 @@ REPO="${REPO:-znasllc-io/memql}"
 IDLE_MINUTES="${IDLE_MINUTES:-45}"
 
 require_gh() {
-  if ! command -v gh >/dev/null 2>&1; then
-    echo "ERROR: gh CLI not found; this report reads the GitHub API." >&2
+  # `gh --version` rather than `command -v gh`: it covers missing AND broken in
+  # one probe, and it keeps every `gh` token in this file an actual invocation,
+  # which is what lets the allowlist in stalled_prs_test.go demand that EVERY
+  # occurrence be a known-read-only call instead of guessing which ones are.
+  if ! gh --version >/dev/null 2>&1; then
+    echo "ERROR: gh CLI not found or not working; this report reads the GitHub API." >&2
     exit 4
   fi
   if ! gh auth status >/dev/null 2>&1; then
-    echo "ERROR: gh is not authenticated (gh auth login)." >&2
+    echo "ERROR: gh is not authenticated (run: gh auth login)." >&2
     exit 4
   fi
+}
+
+# IDLE_MINUTES is a documented knob, so a typo in it must not silently become a
+# finding. `[ "$x" -lt "$y" ]` ERRORS on a non-integer rather than evaluating
+# false, so an unvalidated `IDLE_MINUTES=45m` made every comparison fail and
+# every PR -- including one-minute-old ones -- fall through to STALLED.
+require_valid_threshold() {
+  case "$IDLE_MINUTES" in
+    '' | *[!0-9]*)
+      echo "ERROR: IDLE_MINUTES must be a whole number of minutes; got '${IDLE_MINUTES}'." >&2
+      exit 2
+      ;;
+  esac
 }
 
 # open_prs prints one TSV row per open PR: number, draft, mergeState,
@@ -94,16 +111,13 @@ in_merge_queue() {
 # lanes, so a healthy PR routinely carries them, and treating a skip as
 # non-green would mark every PR red. A failure outranks a pending run: a build
 # that has already failed is failing, whatever else is still going.
-check_state() {
-  local num="$1" sha runs
-  sha=$(gh pr view "$num" -R "$REPO" --json headRefOid --jq .headRefOid 2>/dev/null)
-  [ -z "$sha" ] && { echo "unknown"; return; }
-
-  runs=$(gh api "repos/$REPO/commits/$sha/check-runs" --jq '.check_runs[] | (.conclusion // .status)' 2>/dev/null)
-  if [ $? -ne 0 ]; then
-    echo "unknown"
-    return
-  fi
+# collapse_runs reduces a newline-separated list of check-run conclusions to a
+# single state. Split out of check_state so it is testable without the API --
+# the previous "skipped counts as green" test only grepped the source for the
+# word `skipped` and passed even when the logic was gutted, because the word
+# survived in a comment.
+collapse_runs() {
+  local runs="$1"
   # No runs at all: CI never triggered. NOT green -- that is precisely the
   # state where "ready to merge" is least trustworthy.
   [ -z "$runs" ] && { echo "none"; return; }
@@ -123,10 +137,23 @@ check_state() {
   echo "green"
 }
 
+check_state() {
+  local num="$1" sha runs
+  sha=$(gh pr view "$num" -R "$REPO" --json headRefOid --jq .headRefOid 2>/dev/null)
+  [ -z "$sha" ] && { echo "unknown"; return; }
+
+  runs=$(gh api "repos/$REPO/commits/$sha/check-runs" --jq '.check_runs[] | (.conclusion // .status)' 2>/dev/null)
+  if [ $? -ne 0 ]; then
+    echo "unknown"
+    return
+  fi
+  collapse_runs "$runs"
+}
+
 idle_minutes() {
   local updated_epoch="$1" now
   case "$updated_epoch" in
-    '' | *[!0-9]*) echo "-1"; return ;; # unparseable -> caller treats as unknown
+    '' | *[!0-9]*) echo "unknown"; return ;;
   esac
   now=$(date -u +%s)
   echo $(( (now - updated_epoch) / 60 ))
@@ -141,7 +168,11 @@ idle_minutes() {
 classify() {
   local draft="$1" merge_state="$2" queued="$3" checks="$4" idle="$5"
 
-  [ "$draft" = "true" ] && { echo "DRAFT"; return; }
+  case "$draft" in
+    true) echo "DRAFT"; return ;;
+    false) ;;
+    *) echo "UNKNOWN"; return ;;
+  esac
 
   case "$queued" in
     true) echo "QUEUED"; return ;;
@@ -163,12 +194,19 @@ classify() {
     *) echo "UNKNOWN"; return ;; # UNKNOWN / UNSTABLE / anything new
   esac
 
-  [ "$idle" -lt 0 ] && { echo "UNKNOWN"; return; }
+  # Digits only. `[ "$idle" -lt N ]` errors (rather than being false) on a
+  # non-integer, and an errored test falls through to the line below it -- so
+  # without this guard an unreadable timestamp reached STALLED.
+  case "$idle" in
+    '' | *[!0-9]*) echo "UNKNOWN"; return ;;
+  esac
+
   [ "$idle" -lt "$IDLE_MINUTES" ] && { echo "FRESH"; return; }
   echo "STALLED"
 }
 
 main() {
+  require_valid_threshold
   require_gh
 
   local rows
@@ -193,7 +231,7 @@ main() {
     [ "$bucket" = "STALLED" ] && stalled=$((stalled + 1))
     [ "$bucket" = "UNKNOWN" ] && unknown=$((unknown + 1))
     local idle_col="${idle}m"
-    [ "$idle" -lt 0 ] && idle_col="?"
+    [ "$idle" = "unknown" ] && idle_col="?"
     printf '#%-6s %-9s %-7s %-7s  %s\n' "$num" "$bucket" "$idle_col" "$checks" "${title:0:56}"
   done <<<"$rows"
 
