@@ -74,11 +74,28 @@ func ValidateConstructAnnotations(source, kindLabel string, allowed map[string]b
 		// and inspect body lines too.
 		keyword = "mutate"
 	}
-	bodyStart := findConstructBodyOpen(source, keyword)
+	// Scan a COMMENT-BLANKED view, not the raw source (memql#2872).
+	//
+	// Two distinct silent failures, both closed by this:
+	//
+	//   - findConstructBodyOpen cut the header scan at the first
+	//     `<keyword> ... {`. A COMMENTED-OUT copy of the construct above the
+	//     live one -- exactly what an author writes when parking a version --
+	//     supplied that header, so the LIVE construct's annotations were never
+	//     inspected and this gate silently did nothing. An invalid @public
+	//     loaded clean.
+	//   - an `@`-annotation named inside a comment was read as a real one, so
+	//     an ordinary note like `/* @useConcept(node) */` refused the boot.
+	//
+	// BlankComments preserves byte offsets and newlines, so scanning it is
+	// positionally identical to scanning source; only comment CONTENT differs.
+	// Same treatment the header detectors got in #1074 / #2868 / #2896.
+	scan := BlankComments(source)
+	bodyStart := findConstructBodyOpen(scan, keyword)
 	if bodyStart < 0 {
-		bodyStart = len(source)
+		bodyStart = len(scan)
 	}
-	header := source[:bodyStart]
+	header := scan[:bodyStart]
 
 	for _, raw := range strings.Split(header, "\n") {
 		line := strings.TrimSpace(raw)

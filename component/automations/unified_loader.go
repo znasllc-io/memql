@@ -320,6 +320,9 @@ func extractAutomationSlicesReporting(source string) ([]automationSlice, []strin
 	// blindness (component/actions/loader.go, component/memql/keyword_slices.go
 	// and capability_loader.go) -- tracked in memql#2868, not fixed here.
 	scan := languageParser.BlankComments(source)
+	// Spans, not just the blanked copy: see the preamble walk below for why a
+	// blank line inside a block comment is indistinguishable without them.
+	commentSpans := languageParser.CommentSpans(source)
 
 	matches := automationStructHeader.FindAllStringSubmatchIndex(scan, -1)
 
@@ -355,35 +358,56 @@ func extractAutomationSlicesReporting(source string) ([]automationSlice, []strin
 
 		// Walk backwards for the @-attribute + comment preamble.
 		//
-		// This walk runs on the ORIGINAL source and stops at any line that is
-		// not `@`- or `//`-prefixed -- including a `/* ... */` line. So an
-		// annotation ABOVE a block comment is cut out of the slice: `@disabled`
-		// is dropped and the automation runs, `@trigger` is dropped and the
-		// automation loads with a nil trigger that is never subscribed. Both
-		// are silent.
+		// The walk runs on `scan` -- the COMMENT-BLANKED view -- and the slice
+		// is cut from `source`, so authored comments (including semantic `///`
+		// doc comments) survive verbatim in the emitted text.
 		//
-		// That is a REAL defect, it predates this change, and it is NOT fixed
-		// here -- tracked in memql#2872. Two attempts inside this PR made
-		// things worse rather than better, and the evidence is on that issue:
-		// stepping over comment lines pulls the comment body INTO the slice,
-		// where compileMemQL's raw-text gates then scan it, so an ordinary
-		// comment mentioning `$steps.` or containing an `@`-annotation or a
-		// commented-out `automation` header either refuses the boot or
-		// silently disables the #2712 annotation gate. Fixing it needs a
-		// comment-SPAN-aware walk plus a decision about those raw-text gates,
-		// which is design work, not a drive-by in an extraction fix.
+		// Blanking is what makes the walk correct (memql#2872). It previously
+		// ran on the original and stopped at any line not starting with `@` or
+		// `//`, which a `/* ... */` line is -- so EVERY annotation above a
+		// block comment was cut out of the slice. Both directions were silent:
+		// a dropped `@disabled` means the automation loads ENABLED and fires on
+		// every replica; a dropped `@trigger` means it loads with a nil trigger,
+		// registered and counted but never subscribed, and invisible to the
+		// shipped-count guard because IsEventTriggered() is false for nil.
+		//
+		// On the blanked view a comment line is all spaces, so the rule is:
+		//
+		//   - blanked line starts with `@`            -> annotation, include
+		//   - blanked line empty, and the line is a
+		//     comment (original non-empty, OR the
+		//     line sits INSIDE a comment span)        -> include, keep going
+		//   - blanked line empty and genuinely blank  -> real blank line, STOP
+		//   - anything else                           -> real code, STOP
+		//
+		// The span check is not redundant with the blanked comparison, and
+		// leaving it out is how the first cut of this fix broke: a BLANK LINE
+		// INSIDE a block comment is byte-identical in both views (newlines are
+		// preserved and there is nothing else on the line to blank), so the
+		// walk stopped mid-comment and the slice started inside it -- the
+		// remaining comment text and its `*/` then parsed as code. That is
+		// verbatim the documented "2+ consecutive blank lines refuses boot"
+		// failure that sank the two earlier attempts, and the pre-existing
+		// TestBlockCommentAboveAutomationDoesNotDisturbTheLoad caught it.
+		//
+		// The last two matter: without them the walk would swallow the previous
+		// construct, so parking one automation would silently disable its
+		// neighbour. TestSlicePreambleStopsAtRealCode pins that direction.
+		//
+		// Two earlier attempts at this were reverted because pulling the
+		// comment body into the slice made compileMemQL's raw-text gates fire
+		// on ordinary comments. Those gates now scan a blanked view too
+		// (loader.go), which is the half that makes this safe.
 		preambleStart := headerStart
 		for k := headerStart - 1; k >= 0; k-- {
 			lineStart := strings.LastIndexByte(source[:k], '\n') + 1
-			line := strings.TrimRight(source[lineStart:k+1], "\r\n")
-			trimmed := strings.TrimSpace(line)
-			if strings.HasPrefix(trimmed, "@") || strings.HasPrefix(trimmed, "//") {
+			blanked := strings.TrimSpace(strings.TrimRight(scan[lineStart:k+1], "\r\n"))
+			original := strings.TrimSpace(strings.TrimRight(source[lineStart:k+1], "\r\n"))
+			inComment := languageParser.OffsetInComment(commentSpans, lineStart)
+			if strings.HasPrefix(blanked, "@") || (blanked == "" && (original != "" || inComment)) {
 				preambleStart = lineStart
 				k = lineStart - 1
 				continue
-			}
-			if trimmed == "" {
-				break
 			}
 			break
 		}

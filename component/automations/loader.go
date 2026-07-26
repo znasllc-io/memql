@@ -228,18 +228,38 @@ func (l *Loader) compileMemQL(source, path string) (*Automation, error) {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 
+	// The three raw-text gates below scan a COMMENT-BLANKED view, not the raw
+	// slice (memql#2872).
+	//
+	// They are substring/regex scans, so a comment merely MENTIONING the thing
+	// they forbid tripped them and refused the whole boot: a note reading
+	// `/* the old form used $steps.foo */` or a commented-out
+	// `mutation(concept: ...)` example is valid, memqllint-clean input that an
+	// author writes constantly. That is why the two earlier attempts at
+	// #2872's preamble fix had to be reverted -- pulling a comment into the
+	// slice made these fire. Blanking is what makes the preamble fix possible.
+	//
+	// The gates keep firing on REAL code: BlankComments only blanks comment
+	// spans, and it is byte-length- and newline-preserving, so a live
+	// `$steps.` is untouched.
+	//
+	// Note the ORIGINAL source is what gets parsed below -- `///` doc comments
+	// are semantic (they become @description), so the blanked copy is used for
+	// GATING only, never for compilation.
+	gateScan := languageParser.BlankComments(source)
+
 	// Enforce .memql automation syntax: do not allow JSON-style $steps references.
 	// In .memql, step references should be bare (e.g., "getAgent.result.Bundle.nodes")
 	// and are resolved by the evaluator at runtime.
-	if strings.Contains(source, "$steps.") {
+	if strings.Contains(gateScan, "$steps.") {
 		return nil, fmt.Errorf("invalid .memql syntax: '$steps.' is not allowed (use bare step references like 'stepId.result.X')")
 	}
-	if inlineStepBlockPattern.MatchString(source) {
+	if inlineStepBlockPattern.MatchString(gateScan) {
 		return nil, fmt.Errorf("inline step blocks are no longer supported in .memql automations; use kind-prefixed named-args call syntax such as query name(k: v), mutation name(k: v), builtin publishEvent(k: v), or webhook name(k: v)")
 	}
 
 	// Enforce architectural layering: reject direct query() and mutation() calls
-	if inlineOperationCallPattern.MatchString(source) {
+	if inlineOperationCallPattern.MatchString(gateScan) {
 		return nil, fmt.Errorf("direct query() and mutation() calls are not allowed in automations\n\n" +
 			"Use named query/mutation functions instead:\n" +
 			"  - For queries: see queries/v1/ directory\n" +
