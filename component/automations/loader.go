@@ -3,12 +3,10 @@ package automations
 import (
 	"encoding/json"
 	"fmt"
-	"io/fs"
 	"log/slog"
 	"path/filepath"
 	"regexp"
 	"strings"
-	"testing/fstest"
 
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/language/ast"
@@ -20,11 +18,9 @@ import (
 var inlineStepBlockPattern = regexp.MustCompile(`:=\s*(query|mutation|shape|webhook|event|publishEvent)\s*(if\s+[^{]+)?\{`)
 var inlineOperationCallPattern = regexp.MustCompile(`:=\s*(?:if\s+[^{]+\{\s*)?(query|mutation)\s*\(`)
 
-// Loader loads automation definitions from .memql or .json files.
-// All automations are loaded from embedded files only.
+// Loader loads automation definitions from the unified DSL tree.
 type Loader struct {
 	logger   *slog.Logger
-	fsys     fs.FS
 	registry memoryNodes.Registry
 }
 
@@ -43,15 +39,8 @@ func NewLoader(opts LoaderOptions) *Loader {
 		logger = NewLogger()
 	}
 
-	// Pass 3 of the DSL restructure migration: the legacy walk over
-	// dsl/v1/automations/ is retired. The loader's filesystem is
-	// initialised to an empty FS; a unified automation loader will
-	// walk the new dsl/<domain>/automations.memql tree in a
-	// follow-up. Until then, LoadAll yields zero automations and
-	// the scheduler has nothing to register.
 	return &Loader{
 		logger:   logger,
-		fsys:     fstest.MapFS{},
 		registry: opts.Registry,
 	}
 }
@@ -61,106 +50,21 @@ func NewLoader(opts LoaderOptions) *Loader {
 // `<domain>/automations.memql` file contributes a list of
 // automations (extracted via slice-based parsing).
 //
-// The legacy walker over l.fsys is retained for tests that inject
-// a custom FS via the fsys field. When l.fsys has content, the
-// legacy walk runs after the unified load and appends entries.
+// This used to run two further fs.WalkDir passes over an `l.fsys` field, under
+// a comment saying they were "retained for tests that inject a custom FS via
+// the fsys field". No such test existed and none could: NewLoader
+// unconditionally set `fsys: fstest.MapFS{}`, LoaderOptions exposes only Logger
+// and Registry, and the field was unexported -- so there was no seam to inject
+// through, and both passes always walked an empty FS.
+//
+// Removed in memql#2858, along with the `.json` automation loader they reached,
+// which had no live source. If a custom-FS seam is ever actually wanted, add an
+// FS field to LoaderOptions and a test that uses it -- that is a feature
+// decision, not cleanup.
 func (l *Loader) LoadAll() ([]*Automation, error) {
-	// Pass 1: load from the unified tree.
 	automations, err := l.LoadFromUnifiedTree()
 	if err != nil {
 		return nil, err
-	}
-	loadedDirs := make(map[string]bool)
-
-	// Pass 2 (legacy): walk l.fsys for automation.memql files. The
-	// default fsys is an empty fstest.MapFS so this is a no-op
-	// unless a test injects content.
-	err = fs.WalkDir(l.fsys, ".", func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			return nil
-		}
-		// Skip reference files
-		if strings.HasPrefix(filepath.Base(path), "_") {
-			return nil
-		}
-
-		// Check for automation.memql files
-		if filepath.Base(path) == "automation.memql" {
-			automation, err := l.loadMemQL(path)
-			if err != nil {
-				if l.logger != nil {
-					// "concept not found in registry" means the
-					// concept is filtered out by @visibility on this
-					// node type. The automation simply doesn't apply
-					// here; log at debug level instead of warning.
-					if strings.Contains(err.Error(), "not found in registry") {
-						l.logger.Debug("automation excluded by concept visibility",
-							"component", ComponentName,
-							"path", path,
-							"error", err.Error(),
-						)
-					} else {
-						l.logger.Warn("failed to load automation from .memql",
-							"component", ComponentName,
-							"path", path,
-							"error", err,
-						)
-					}
-				}
-				return nil // Continue loading other files
-			}
-			automation.Origin = path
-			automations = append(automations, automation)
-			// Mark this directory as loaded
-			loadedDirs[filepath.Dir(path)] = true
-			return nil
-		}
-
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("walking embedded fs for .memql: %w", err)
-	}
-
-	// Second pass: load .json files that aren't in directories with .memql
-	err = fs.WalkDir(l.fsys, ".", func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			return nil
-		}
-		if !strings.HasSuffix(path, ".json") {
-			return nil
-		}
-		// Skip reference files
-		if strings.HasPrefix(filepath.Base(path), "_") {
-			return nil
-		}
-		// Skip if this directory already has a .memql file loaded
-		if loadedDirs[filepath.Dir(path)] {
-			return nil
-		}
-
-		automation, err := l.loadJSON(path)
-		if err != nil {
-			if l.logger != nil {
-				l.logger.Warn("failed to load automation from .json",
-					"path", path,
-					"error", err,
-				)
-			}
-			return nil // Continue loading other files
-		}
-		automation.Origin = path
-		automations = append(automations, automation)
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("walking embedded fs for .json: %w", err)
 	}
 
 	if l.logger != nil {
@@ -301,15 +205,6 @@ func invokedLogicNames(a *Automation) []string {
 // The logic name prefix bridge (isLogicConstructName / fullLogicName /
 // bareLogicName) was removed by C6 (memql#2036): construct names are now bare,
 // so logic resolution is a direct name comparison (see LoadByName step 2).
-
-// loadMemQL loads and compiles a .memql file from embedded filesystem.
-func (l *Loader) loadMemQL(path string) (*Automation, error) {
-	data, err := fs.ReadFile(l.fsys, path)
-	if err != nil {
-		return nil, fmt.Errorf("reading file: %w", err)
-	}
-	return l.compileMemQL(string(data), path)
-}
 
 // compileMemQL compiles MemQL source to an Automation struct.
 //
@@ -773,15 +668,6 @@ func versionFromFilePath(path string) string {
 		}
 	}
 	return ""
-}
-
-// loadJSON loads an automation from the embedded filesystem.
-func (l *Loader) loadJSON(path string) (*Automation, error) {
-	data, err := fs.ReadFile(l.fsys, path)
-	if err != nil {
-		return nil, fmt.Errorf("reading file: %w", err)
-	}
-	return l.parseJSON(data, path)
 }
 
 // parseJSON parses automation JSON data.
