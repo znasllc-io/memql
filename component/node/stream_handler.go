@@ -3,10 +3,13 @@ package node
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
+	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	nodev1 "github.com/znasllc-io/memql/component/node/gen"
 	"github.com/znasllc-io/memql/core/id"
@@ -17,6 +20,20 @@ import (
 // Satisfied by *memqlengine.MemQLEngine.
 type QueryExecutor interface {
 	Execute(ctx context.Context, query string) (*memqlengine.ExecuteResult, error)
+}
+
+// ForwardedAccessResolver turns a forwarded claims map into the caller's
+// AccessContext by looking the principal up in the database. Satisfied by
+// *auth.IdentityResolver.
+//
+// A forwarded query executes MemQL -- reads, mutations and logic -- under the
+// originating caller's authority, and the claims arrive as an unsigned map on
+// a peer message. Deriving authority from that map directly would let any peer
+// assert cluster-owner for an arbitrary subject, so the receiving node
+// re-resolves it against the graph instead. Whoever wires SetQueryExecutor
+// must wire this too; without it every forward is refused (memql#2814).
+type ForwardedAccessResolver interface {
+	LoadFromClaims(ctx context.Context, claims map[string]any) (*auth.AccessContext, error)
 }
 
 // AiForwardHandler is the worker-side entry point for a forwarded AI /
@@ -85,6 +102,7 @@ type nodeService struct {
 	identity                 *Identity
 	peerManager              *PeerManager
 	queryExecutor            QueryExecutor                // set via SetQueryExecutor for cross-node query forwarding
+	accessResolver           ForwardedAccessResolver      // set via SetIdentityResolver; required for forwarded queries
 	aiForwardHandler         AiForwardHandler             // worker-side handler; nil on BFF binaries
 	aiForwardResponse        AiForwardResponseSink        // BFF-side response sink; nil on worker binaries
 	workbenchForwardHandler  WorkbenchForwardHandler      // workbench-side handler; nil on non-workbench binaries
@@ -473,6 +491,36 @@ func (s *nodeService) SetQueryExecutor(executor QueryExecutor) {
 	s.queryExecutor = executor
 }
 
+// SetIdentityResolver installs the database-backed resolver used to turn a
+// forwarded claims map into the caller's AccessContext. Required alongside
+// SetQueryExecutor: without it every forwarded query is refused, because the
+// alternative -- trusting the claims on the wire -- would let a peer assert
+// cluster-owner for an arbitrary subject (memql#2814).
+func (s *nodeService) SetIdentityResolver(r ForwardedAccessResolver) {
+	s.accessResolver = r
+}
+
+// resolveForwardedAccess resolves the forwarded claims to a real principal,
+// or returns an error. It never falls back to claim-derived authority: on this
+// path the claims are an unsigned assertion from a peer, not a verified token
+// on the caller's own stream.
+func (s *nodeService) resolveForwardedAccess(ctx context.Context, claims map[string]any) (*auth.AccessContext, error) {
+	if len(claims) == 0 {
+		return nil, errors.New("forwarded query carries no auth claims")
+	}
+	if s.accessResolver == nil {
+		return nil, errors.New("no identity resolver wired (SetIdentityResolver); refusing to derive authority from forwarded claims")
+	}
+	access, err := s.accessResolver.LoadFromClaims(ctx, claims)
+	if err != nil {
+		return nil, err
+	}
+	if access == nil || strings.TrimSpace(access.UserId) == "" {
+		return nil, errors.New("identity resolver returned no principal")
+	}
+	return access, nil
+}
+
 // SetAiForwardHandler installs the worker-side handler invoked for
 // inbound AiForwardRequest messages. Left nil on BFF binaries (they
 // don't execute forwards locally; they only originate them).
@@ -600,13 +648,80 @@ func (s *nodeService) handleQueryForward(peerId string, req *nodev1.QueryForward
 		return
 	}
 
+	// Rebuild the originating caller's identity before executing anything.
+	// Identity does NOT travel implicitly across a mesh hop: this handler
+	// used to run forwarded DSL on context.Background(), so the query
+	// executed with NO actor at all (memql#2814). Combined with the
+	// deny-on-nil default (#2801) that silently returns zero rows for any
+	// actor-gated construct; before that default it failed the other way,
+	// resolving isClusterOwner=true and serving every partition's rows.
+	//
+	// TWO context keys are required, and attaching only the first is the
+	// trap: ContextWithForwardedClaims sets TokenInfo + Claims, but every
+	// engine actor surface (resolveActorPath, the spec evaluator, mutation
+	// templates, result-cache policy, the automation actor binding) reads
+	// auth.AccessFromContext. Claims alone still yield the deny-all envelope
+	// -- userId "", isClusterOwner false -- i.e. the exact zero-row symptom
+	// above.
+	//
+	// The AccessContext is resolved AGAINST THE DATABASE, never derived from
+	// the forwarded claims. That distinction is the security boundary here:
+	// auth.FallbackFromClaims would take `role` straight off the wire, so a
+	// peer sending {"sub":"anyone","role":"owner"} would execute as cluster
+	// owner (IsClusterOwner() is just Role==RoleOwner) against a surface that
+	// dispatches mutations and logic, not just reads. The resolver enforces
+	// what the claims cannot: a canonical v1:identity:user:* subject, an
+	// existing user row, and the role as stored. This is the resolver half of
+	// component/grpc/server.go's ensureAccess bridge (memql#216) -- but NOT
+	// its claims fallback, which exists there to survive a brand-new user
+	// racing the magic-link insert on the caller's OWN stream. Across a mesh
+	// hop that fallback is just an unsigned assertion, so this path fails
+	// closed instead.
+	//
+	// Claims are read from req.GetAuth() DIRECTLY. Round-tripping them
+	// through the context would silently fall back to whatever identity the
+	// peer's own stream carries when the envelope's map is empty -- a forward
+	// with no auth would then execute as the sending NODE.
+	claims := make(map[string]any, len(req.GetAuth()))
+	for k, v := range req.GetAuth() {
+		claims[k] = v
+	}
+
+	access, resolveErr := s.resolveForwardedAccess(stream.Context(), claims)
+	if resolveErr != nil {
+		s.logger.Warn("refusing forwarded query: caller identity did not resolve",
+			"peer_id", peerId,
+			"request_id", req.GetRequestId(),
+			"has_auth_claims", len(req.GetAuth()) > 0,
+			"error", resolveErr,
+		)
+		_ = stream.Send(&nodev1.NodeServerMessage{
+			CorrelateTo: req.GetRequestId(),
+			Payload: &nodev1.NodeServerMessage_QueryResponse{
+				QueryResponse: &nodev1.QueryResponse{
+					RequestId: req.GetRequestId(),
+					Success:   false,
+					// Deliberately does not echo resolveErr: the peer learns
+					// that identity failed, not whether a given subject exists.
+					Error: "forwarded query has no resolvable caller identity: set QueryForward.auth from auth.ForwardedClaimsFromIdentity on the forwarding node, and wire SetIdentityResolver on this one (memql#2814)",
+				},
+			},
+		})
+		return
+	}
+
+	// stream.Context(), not context.Background(): the forwarded execution
+	// should die with the peer stream that asked for it.
+	ctx := auth.ContextWithForwardedClaims(stream.Context(), req.GetAuth())
+	ctx = auth.ContextWithAccess(ctx, access)
+
 	s.logger.Debug("executing forwarded query",
 		"peer_id", peerId,
 		"request_id", req.RequestId,
 		"query", req.Query,
 	)
 
-	result, err := s.queryExecutor.Execute(context.Background(), req.Query)
+	result, err := s.queryExecutor.Execute(ctx, req.Query)
 	if err != nil {
 		_ = stream.Send(&nodev1.NodeServerMessage{
 			CorrelateTo: req.RequestId,

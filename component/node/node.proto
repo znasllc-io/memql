@@ -199,6 +199,19 @@ message QueryForward {
   string query = 2;
   reserved 3;
   reserved "partition";
+  // Originating caller's claims, in the same map<string,string> shape
+  // AiForwardRequest.auth uses: build it with auth.ForwardedClaimsFromIdentity
+  // on the forwarding node. Identity does NOT travel implicitly across a mesh
+  // hop, so without this the receiving node executes forwarded DSL with no
+  // actor at all (memql#2814).
+  //
+  // A `sub` claim is REQUIRED. The receiver rebuilds an AccessContext from
+  // these claims and refuses the forward unless it resolves to a real
+  // principal -- a subject-less map carrying only `role` would otherwise
+  // become cluster-owner authority. Unlike the AI/workbench forwards, this
+  // one runs caller-authored DSL against the graph, so it does not fall back
+  // to a synthetic subject.
+  map<string, string> auth = 4;
 }
 
 // QueryResponse carries the result of a forwarded query back to the

@@ -45,6 +45,7 @@ type NodeServer struct {
 	peerManager              *PeerManager
 	readyCh                  chan struct{}
 	queryExecutor            QueryExecutor
+	accessResolver           ForwardedAccessResolver
 	aiForwardHandler         AiForwardHandler
 	aiForwardResponse        AiForwardResponseSink
 	workbenchForwardHandler  WorkbenchForwardHandler
@@ -79,6 +80,17 @@ func (s *NodeServer) SetQueryExecutor(e QueryExecutor) {
 		return
 	}
 	s.queryExecutor = e
+}
+
+// SetIdentityResolver installs the database-backed resolver that turns a
+// forwarded query's claims into the caller's AccessContext. Must be wired
+// wherever SetQueryExecutor is: without it forwarded queries are refused
+// rather than executed on peer-asserted authority (memql#2814).
+func (s *NodeServer) SetIdentityResolver(r ForwardedAccessResolver) {
+	if s == nil {
+		return
+	}
+	s.accessResolver = r
 }
 
 // SetAiForwardHandler installs the worker-side AI/voice request handler.
@@ -247,6 +259,7 @@ func (s *NodeServer) prepareForRun(ctx context.Context) (context.Context, contex
 		identity:                 s.identity,
 		peerManager:              s.peerManager,
 		queryExecutor:            s.queryExecutor,
+		accessResolver:           s.accessResolver,
 		aiForwardHandler:         s.aiForwardHandler,
 		aiForwardResponse:        s.aiForwardResponse,
 		workbenchForwardHandler:  s.workbenchForwardHandler,

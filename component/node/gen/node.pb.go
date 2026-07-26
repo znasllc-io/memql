@@ -1422,9 +1422,22 @@ func (x *CapabilityResponse) GetAddress() string {
 // own the target concept. The receiving node executes the query
 // locally and returns a QueryResponse.
 type QueryForward struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	Query         string                 `protobuf:"bytes,2,opt,name=query,proto3" json:"query,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	RequestId string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Query     string                 `protobuf:"bytes,2,opt,name=query,proto3" json:"query,omitempty"`
+	// Originating caller's claims, in the same map<string,string> shape
+	// AiForwardRequest.auth uses: build it with auth.ForwardedClaimsFromIdentity
+	// on the forwarding node. Identity does NOT travel implicitly across a mesh
+	// hop, so without this the receiving node executes forwarded DSL with no
+	// actor at all (memql#2814).
+	//
+	// A `sub` claim is REQUIRED. The receiver rebuilds an AccessContext from
+	// these claims and refuses the forward unless it resolves to a real
+	// principal -- a subject-less map carrying only `role` would otherwise
+	// become cluster-owner authority. Unlike the AI/workbench forwards, this
+	// one runs caller-authored DSL against the graph, so it does not fall back
+	// to a synthetic subject.
+	Auth          map[string]string `protobuf:"bytes,4,rep,name=auth,proto3" json:"auth,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1471,6 +1484,13 @@ func (x *QueryForward) GetQuery() string {
 		return x.Query
 	}
 	return ""
+}
+
+func (x *QueryForward) GetAuth() map[string]string {
+	if x != nil {
+		return x.Auth
+	}
+	return nil
 }
 
 // QueryResponse carries the result of a forwarded query back to the
@@ -2150,11 +2170,15 @@ const file_node_proto_rawDesc = "" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1c\n" +
 	"\tavailable\x18\x02 \x01(\bR\tavailable\x12\x17\n" +
 	"\anode_id\x18\x03 \x01(\tR\x06nodeId\x12\x18\n" +
-	"\aaddress\x18\x04 \x01(\tR\aaddress\"T\n" +
+	"\aaddress\x18\x04 \x01(\tR\aaddress\"\xd0\x01\n" +
 	"\fQueryForward\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x14\n" +
-	"\x05query\x18\x02 \x01(\tR\x05queryJ\x04\b\x03\x10\x04R\tpartition\"\x7f\n" +
+	"\x05query\x18\x02 \x01(\tR\x05query\x12A\n" +
+	"\x04auth\x18\x04 \x03(\v2-.znasllc.memql.node.v1.QueryForward.AuthEntryR\x04auth\x1a7\n" +
+	"\tAuthEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01J\x04\b\x03\x10\x04R\tpartition\"\x7f\n" +
 	"\rQueryResponse\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x18\n" +
@@ -2229,7 +2253,7 @@ func file_node_proto_rawDescGZIP() []byte {
 }
 
 var file_node_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_node_proto_msgTypes = make([]protoimpl.MessageInfo, 31)
+var file_node_proto_msgTypes = make([]protoimpl.MessageInfo, 32)
 var file_node_proto_goTypes = []any{
 	(NodeHealthStatus)(0),            // 0: znasllc.memql.node.v1.NodeHealthStatus
 	(*NodeClientMessage)(nil),        // 1: znasllc.memql.node.v1.NodeClientMessage
@@ -2261,10 +2285,11 @@ var file_node_proto_goTypes = []any{
 	nil,                              // 27: znasllc.memql.node.v1.PeerInfo.LabelsEntry
 	nil,                              // 28: znasllc.memql.node.v1.SpawnRequest.LabelsEntry
 	nil,                              // 29: znasllc.memql.node.v1.SpawnRequest.EnvEntry
-	nil,                              // 30: znasllc.memql.node.v1.AiForwardRequest.AuthEntry
-	nil,                              // 31: znasllc.memql.node.v1.WorkbenchForwardRequest.AuthEntry
-	(*timestamppb.Timestamp)(nil),    // 32: google.protobuf.Timestamp
-	(*structpb.Struct)(nil),          // 33: google.protobuf.Struct
+	nil,                              // 30: znasllc.memql.node.v1.QueryForward.AuthEntry
+	nil,                              // 31: znasllc.memql.node.v1.AiForwardRequest.AuthEntry
+	nil,                              // 32: znasllc.memql.node.v1.WorkbenchForwardRequest.AuthEntry
+	(*timestamppb.Timestamp)(nil),    // 33: google.protobuf.Timestamp
+	(*structpb.Struct)(nil),          // 34: google.protobuf.Struct
 }
 var file_node_proto_depIdxs = []int32{
 	23, // 0: znasllc.memql.node.v1.NodeClientMessage.metadata:type_name -> znasllc.memql.node.v1.NodeClientMessage.MetadataEntry
@@ -2298,7 +2323,7 @@ var file_node_proto_depIdxs = []int32{
 	20, // 28: znasllc.memql.node.v1.NodeServerMessage.workbench_forward_response:type_name -> znasllc.memql.node.v1.WorkbenchForwardResponse
 	25, // 29: znasllc.memql.node.v1.NodeHello.labels:type_name -> znasllc.memql.node.v1.NodeHello.LabelsEntry
 	6,  // 30: znasllc.memql.node.v1.NodeWelcome.peers:type_name -> znasllc.memql.node.v1.PeerInfo
-	32, // 31: znasllc.memql.node.v1.NodeHeartbeat.ts:type_name -> google.protobuf.Timestamp
+	33, // 31: znasllc.memql.node.v1.NodeHeartbeat.ts:type_name -> google.protobuf.Timestamp
 	0,  // 32: znasllc.memql.node.v1.NodeHeartbeat.health:type_name -> znasllc.memql.node.v1.NodeHealthStatus
 	26, // 33: znasllc.memql.node.v1.NodeHeartbeat.metrics:type_name -> znasllc.memql.node.v1.NodeHeartbeat.MetricsEntry
 	0,  // 34: znasllc.memql.node.v1.PeerInfo.health:type_name -> znasllc.memql.node.v1.NodeHealthStatus
@@ -2306,17 +2331,18 @@ var file_node_proto_depIdxs = []int32{
 	6,  // 36: znasllc.memql.node.v1.PeerIntroduction.peers:type_name -> znasllc.memql.node.v1.PeerInfo
 	28, // 37: znasllc.memql.node.v1.SpawnRequest.labels:type_name -> znasllc.memql.node.v1.SpawnRequest.LabelsEntry
 	29, // 38: znasllc.memql.node.v1.SpawnRequest.env:type_name -> znasllc.memql.node.v1.SpawnRequest.EnvEntry
-	32, // 39: znasllc.memql.node.v1.EventForward.ts:type_name -> google.protobuf.Timestamp
-	33, // 40: znasllc.memql.node.v1.EventForward.payload:type_name -> google.protobuf.Struct
-	30, // 41: znasllc.memql.node.v1.AiForwardRequest.auth:type_name -> znasllc.memql.node.v1.AiForwardRequest.AuthEntry
-	31, // 42: znasllc.memql.node.v1.WorkbenchForwardRequest.auth:type_name -> znasllc.memql.node.v1.WorkbenchForwardRequest.AuthEntry
-	1,  // 43: znasllc.memql.node.v1.NodeService.Stream:input_type -> znasllc.memql.node.v1.NodeClientMessage
-	2,  // 44: znasllc.memql.node.v1.NodeService.Stream:output_type -> znasllc.memql.node.v1.NodeServerMessage
-	44, // [44:45] is the sub-list for method output_type
-	43, // [43:44] is the sub-list for method input_type
-	43, // [43:43] is the sub-list for extension type_name
-	43, // [43:43] is the sub-list for extension extendee
-	0,  // [0:43] is the sub-list for field type_name
+	33, // 39: znasllc.memql.node.v1.EventForward.ts:type_name -> google.protobuf.Timestamp
+	34, // 40: znasllc.memql.node.v1.EventForward.payload:type_name -> google.protobuf.Struct
+	30, // 41: znasllc.memql.node.v1.QueryForward.auth:type_name -> znasllc.memql.node.v1.QueryForward.AuthEntry
+	31, // 42: znasllc.memql.node.v1.AiForwardRequest.auth:type_name -> znasllc.memql.node.v1.AiForwardRequest.AuthEntry
+	32, // 43: znasllc.memql.node.v1.WorkbenchForwardRequest.auth:type_name -> znasllc.memql.node.v1.WorkbenchForwardRequest.AuthEntry
+	1,  // 44: znasllc.memql.node.v1.NodeService.Stream:input_type -> znasllc.memql.node.v1.NodeClientMessage
+	2,  // 45: znasllc.memql.node.v1.NodeService.Stream:output_type -> znasllc.memql.node.v1.NodeServerMessage
+	45, // [45:46] is the sub-list for method output_type
+	44, // [44:45] is the sub-list for method input_type
+	44, // [44:44] is the sub-list for extension type_name
+	44, // [44:44] is the sub-list for extension extendee
+	0,  // [0:44] is the sub-list for field type_name
 }
 
 func init() { file_node_proto_init() }
@@ -2361,7 +2387,7 @@ func file_node_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_node_proto_rawDesc), len(file_node_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   31,
+			NumMessages:   32,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
