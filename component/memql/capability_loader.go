@@ -42,7 +42,16 @@ var capabilityHeaderRe = regexp.MustCompile(`(?m)^[ \t]*capability[ \t]+([A-Za-z
 // reuses findMatchingCloseBraceRune (function_slices.go) for string- and
 // comment-aware brace balancing.
 func extractCapabilitySlices(source string) []string {
-	matches := capabilityHeaderRe.FindAllStringSubmatchIndex(source, -1)
+	// Comment-blanked view for header detection and brace balancing, offsets
+	// preserved so the slice is still cut from the ORIGINAL (memql#2868).
+	//
+	// #2868 named this the highest-stakes instance of the raw-source defect and
+	// explicitly left it unverified. Capabilities back DSL `action`s and deploy
+	// scripts, so a commented-out capability that still loads is a
+	// deploy-surface concern rather than a schema one. Confirmed structurally
+	// identical to ExtractKeywordSlices and fixed the same way.
+	scan := languageParser.BlankComments(source)
+	matches := capabilityHeaderRe.FindAllStringSubmatchIndex(scan, -1)
 	if len(matches) == 0 {
 		return nil
 	}
@@ -50,7 +59,7 @@ func extractCapabilitySlices(source string) []string {
 	for _, m := range matches {
 		headerStart, headerEnd := m[0], m[1]
 		openIdx := headerEnd - 1 // index of '{'
-		closeIdx := findMatchingCloseBraceRune(source, openIdx)
+		closeIdx := findMatchingCloseBraceRune(scan, openIdx)
 		if closeIdx < 0 {
 			continue
 		}

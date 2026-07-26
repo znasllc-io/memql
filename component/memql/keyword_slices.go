@@ -14,6 +14,8 @@ package memql
 import (
 	"regexp"
 	"strings"
+
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // KeywordSlice is one extracted declaration of a given keyword
@@ -47,7 +49,31 @@ func ExtractKeywordSlices(source, keyword string) []KeywordSlice {
 		`(?m)^[ \t]*` + regexp.QuoteMeta(keyword) +
 			`[ \t]+(?:[A-Za-z_][A-Za-z0-9_]*[ \t]+)?([A-Za-z_][A-Za-z0-9_-]*)[ \t]*\{`,
 	)
-	matches := headerRe.FindAllStringSubmatchIndex(source, -1)
+	// Detect headers and balance braces on a comment-BLANKED view, so a
+	// declaration that exists only inside a `/* ... */` block is never
+	// extracted as a live construct (memql#2868).
+	//
+	// Same split ExtractFunctionSlices has made since #1074 and
+	// ExtractAutomationSlices since #2866, copied rather than re-derived.
+	// BlankComments preserves byte offsets, so every index below maps 1:1 onto
+	// the ORIGINAL `source` -- which is what the emitted slice is cut from,
+	// keeping authored comments in the slice text.
+	//
+	// Why it mattered here more than for automations: this extractor backs
+	// `extractAdapter` in unified_kinds_loader.go, so it loads concepts,
+	// shapes, tools, prompts, providers, specs and builtins -- and those are
+	// not all inert schema. A commented-out TOOL was still offered to the
+	// model; a commented-out PROVIDER still registered as a selectable vendor
+	// lane, including one parked precisely because its API key is not seeded.
+	//
+	// Only BLOCK comments were affected: the header pattern is anchored at
+	// `^[ \t]*<keyword>`, so a `// concept x {` line never matched anyway.
+	//
+	// The brace walk moves to the blanked view too, not just the header scan --
+	// a `}` inside a comment would otherwise close a slice early and emit a
+	// truncated construct.
+	scan := languageParser.BlankComments(source)
+	matches := headerRe.FindAllStringSubmatchIndex(scan, -1)
 	if len(matches) == 0 {
 		return nil
 	}
@@ -61,7 +87,7 @@ func ExtractKeywordSlices(source, keyword string) []KeywordSlice {
 		name := source[nameStart:nameEnd]
 
 		openIdx := headerEnd - 1 // index of `{`
-		closeIdx := findMatchingCloseBraceRune(source, openIdx)
+		closeIdx := findMatchingCloseBraceRune(scan, openIdx)
 		if closeIdx < 0 {
 			continue
 		}
