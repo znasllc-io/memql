@@ -1538,12 +1538,73 @@ func (e *Evaluator) evaluateAtomicCondition(condition string) (bool, error) {
 		return e.evaluateNumericComparison(condition, "<")
 	}
 
+	// A bare dotted path that does NOT resolve renders as its own path text,
+	// and a non-empty string is truthy -- so the condition is unconditionally
+	// TRUE (memql#2819). `@filter(actor.isClusterOwner)` matched every event
+	// even with the denying envelope bound, while both comparison spellings
+	// correctly read false:
+	//
+	//	@filter(actor.isClusterOwner)          -> was TRUE  (fail-open)
+	//	@filter(actor.isClusterOwner == true)  -> false
+	//	@filter(actor.isClusterOwner != false) -> false
+	//
+	// #2801 could not reach this: it makes an absent actor DENY, but the
+	// truthiness is decided on the rendered string before any resolved value
+	// participates, so binding an envelope changes nothing. Same class as the
+	// exists() fall-through above (memql#1396), and not specific to actor --
+	// ANY unresolved bare path was unconditionally true.
+	//
+	// Erroring rather than returning false is deliberate: a condition on a
+	// path that does not resolve is an authoring mistake, and a silent false
+	// would trade a filter that always fires for one that never fires --
+	// equally wrong and harder to notice. Matches the strict-boot posture.
+	// Two distinct defects met here, and both had to be fixed to close it.
+	// EvaluateValue below does not resolve the ambient roots -- that is
+	// EvaluateFilterValue's job, which is why the comparison spellings worked
+	// and this one did not. So a bare path is resolved through the SAME
+	// resolver the comparison operands use, and its resolved value decides
+	// the truthiness; only a path that genuinely does not resolve errors.
+	if isBareDottedPath(condition) {
+		resolved, rerr := e.EvaluateFilterValue(condition)
+		if rerr != nil || renderedAsOwnText(condition, resolved) {
+			return false, fmt.Errorf("condition %q is a bare path that does not resolve: it renders as its own text, and a non-empty string is truthy, so this filter would match EVERYTHING. Write the comparison explicitly (%s == true) or use exists(%s)",
+				condition, condition, condition)
+		}
+		return isTruthy(resolved), nil
+	}
+
 	// Try to evaluate as a truthy value
 	val, err := e.EvaluateValue(condition)
 	if err != nil {
 		return false, err
 	}
 	return isTruthy(val), nil
+}
+
+// bareDottedPathRe matches a dotted reference and nothing else -- no
+// operators, calls or quotes. Single identifiers are deliberately excluded: a
+// bare `toStatus` is the legitimate bare-step-variable shape (see
+// isBareStepIdentifier), and treating it as an unresolved path would reject
+// working automations.
+//
+// Whitespace around the dots is tolerated because a condition does not always
+// reach here as the author typed it: the `forEach ... where` parser
+// (component/language/parser/parser.go) rebuilds the clause with
+// strings.Join(parts, " "), so `where a.b` arrives as `a . b`. An anchored
+// no-space pattern silently failed to match that spelling, leaving the exact
+// fail-open this guard exists to close alive on that one path.
+var bareDottedPathRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(?:[ \t]*\.[ \t]*[A-Za-z_][A-Za-z0-9_]*)+$`)
+
+func isBareDottedPath(condition string) bool {
+	return bareDottedPathRe.MatchString(strings.TrimSpace(condition))
+}
+
+// renderedAsOwnText reports whether resolution handed back the expression
+// itself -- the signature of a path that did not resolve, since the resolvers
+// in this file fall back to returning their input rather than nil.
+func renderedAsOwnText(condition string, resolved any) bool {
+	s, ok := resolved.(string)
+	return ok && strings.TrimSpace(s) == strings.TrimSpace(condition)
 }
 
 // matchSingleArgCall reports whether expr is a single-argument call of the
