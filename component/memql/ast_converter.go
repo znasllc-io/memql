@@ -774,10 +774,37 @@ func (c *ASTConverter) convertFunctionCallExpr(expr *languageParser.FunctionCall
 		return nil, nil
 	}
 
-	// Clone the args map
-	args := make(map[string]any)
+	// Convert each argument, rather than shallow-copying the map.
+	//
+	// memql#2870: this used to copy `expr.Args` verbatim, so a parser AST node
+	// passed as an argument to a NESTED call was stored unconverted and reached
+	// argument validation as itself:
+	//
+	//	function "runningPlansForUser": argument validation failed:
+	//	argument "userId": expected string, got *ast.CoalesceExpr
+	//
+	// That is the computer-use kill switch. `killSwitchSuspendsRunningPlans`
+	// passes `args.event.node.id ?? ""`, so its decide step failed before the
+	// query ever ran, and NO plan was suspended when a user tripped the switch.
+	//
+	// convertMethodCallExpr, twenty lines below, already converts its args this
+	// way; this path simply never did. The defect is not in coalesce -- it is a
+	// whole CLASS of expressions passed through raw, and `??` is only the
+	// spelling the tree happens to use.
+	args := make(map[string]any, len(expr.Args))
 	for k, v := range expr.Args {
-		args[k] = v
+		node, ok := v.(languageParser.ExpressionNode)
+		if !ok {
+			// Already a plain literal (string / number / bool) -- the parser
+			// emits those directly for constant arguments.
+			args[k] = v
+			continue
+		}
+		converted, err := c.ConvertExpression(node)
+		if err != nil {
+			return nil, fmt.Errorf("convert argument %q of call %q: %w", k, expr.Name, err)
+		}
+		args[k] = converted
 	}
 
 	return &FunctionCallExpression{
