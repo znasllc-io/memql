@@ -1423,7 +1423,17 @@ func parseObjectLiteral(s string) map[string]any {
 			return nil
 		}
 		pos++ // skip ':'
-		val, next := parseLiteralOrExpr(inner, pos)
+		val, next, ok := parseLiteralOrExpr(inner, pos)
+		if !ok {
+			// Malformed value. Deliberately NO position check here: this loop
+			// cannot spin, because parseObjectKey either advances or returns
+			// "" (which bails), so every iteration makes progress regardless of
+			// what the value scan returned. A position check WOULD change
+			// `{k:}` from a null value into a load error while leaving
+			// `{ k: }` -- the same input plus a space -- untouched, because
+			// parseLiteralOrExpr skips that space internally and so advances.
+			return nil
+		}
 		out[key] = val
 		pos = next
 	}
@@ -1506,34 +1516,53 @@ func parseObjectKey(s string, pos int) (string, int) {
 	return strings.TrimSpace(s[start:pos]), pos
 }
 
-func parseLiteralOrExpr(s string, pos int) (any, int) {
+// parseLiteralOrExpr returns the parsed value, the position after it, and
+// whether the input was WELL-FORMED.
+//
+// The ok result exists because a caller could not otherwise tell a malformed
+// literal from a legitimately-empty value: both came back as `(nil, pos)`
+// (memql#2785). That ambiguity is why a first cut of the fix turned the
+// issue's own repro from a hang into a SILENT NULL -- `{ k: [}{] }` loaded
+// `k: null` with err=nil instead of failing the strict-boot gate. A nested
+// object/array that fails to parse propagates ok=false rather than passing its
+// nil up as a value.
+func parseLiteralOrExpr(s string, pos int) (any, int, bool) {
 	// skip whitespace
 	for pos < len(s) && (s[pos] == ' ' || s[pos] == '\t' || s[pos] == '\n' || s[pos] == '\r') {
 		pos++
 	}
 	if pos >= len(s) {
-		return nil, pos
+		// Empty remainder -- `{k:}` is not malformed, it is a null value.
+		return nil, pos, true
 	}
 
 	switch s[pos] {
 	case '{':
 		obj, next := scanBalanced(s, pos, '{', '}')
 		if next == pos {
-			return nil, pos
+			return nil, pos, false
 		}
-		return parseObjectLiteral(obj), next
+		parsed := parseObjectLiteral(obj)
+		if parsed == nil {
+			return nil, pos, false
+		}
+		return parsed, next, true
 	case '[':
 		arr, next := scanBalanced(s, pos, '[', ']')
 		if next == pos {
-			return nil, pos
+			return nil, pos, false
 		}
-		return parseArrayLiteral(arr), next
+		parsed := parseArrayLiteral(arr)
+		if parsed == nil {
+			return nil, pos, false
+		}
+		return parsed, next, true
 	case '"':
 		lit, next, ok := scanQuotedString(s, pos)
 		if !ok {
-			return nil, pos
+			return nil, pos, false
 		}
-		return lit, next
+		return lit, next, true
 	default:
 		// read until comma or closing brace/bracket at depth 0
 		start := pos
@@ -1575,12 +1604,12 @@ func parseLiteralOrExpr(s string, pos int) (any, int) {
 				case ',':
 					if depth == 0 {
 						raw := strings.TrimSpace(s[start:pos])
-						return classifyScalarOrExpr(raw), pos
+						return classifyScalarOrExpr(raw), pos, true
 					}
 				case '}', ']':
 					if depth == 0 {
 						raw := strings.TrimSpace(s[start:pos])
-						return classifyScalarOrExpr(raw), pos
+						return classifyScalarOrExpr(raw), pos, true
 					}
 					depth--
 				}
@@ -1588,7 +1617,7 @@ func parseLiteralOrExpr(s string, pos int) (any, int) {
 			pos++
 		}
 		raw := strings.TrimSpace(s[start:pos])
-		return classifyScalarOrExpr(raw), pos
+		return classifyScalarOrExpr(raw), pos, true
 	}
 }
 
@@ -1601,7 +1630,11 @@ func parseArrayLiteral(s string) []any {
 	if inner == "" {
 		return []any{}
 	}
-	var out []any
+	// Non-nil from the start: nil is this parser's "malformed" signal, and an
+	// input of only separators (`[,]`) appends nothing while being perfectly
+	// well-formed. Leaving it nil made the ok-propagation read it as a parse
+	// failure (memql#2785 review).
+	out := []any{}
 	pos := 0
 	for pos < len(inner) {
 		// skip whitespace/commas
@@ -1611,7 +1644,37 @@ func parseArrayLiteral(s string) []any {
 		if pos >= len(inner) {
 			break
 		}
-		val, next := parseLiteralOrExpr(inner, pos)
+		val, next, ok := parseLiteralOrExpr(inner, pos)
+		if !ok || next <= pos {
+			// No progress. parseLiteralOrExpr returns its input pos unchanged
+			// on an unbalanced literal (`[}{]`) and on a stray depth-0 closer
+			// (`[}]`), so without this the loop appends nil forever -- an
+			// unbounded memory grow and a hang, not a panic (memql#2785). It
+			// matters at LOAD: parsePayloadRawToTemplate runs while the tree is
+			// read, so a malformed payload literal in an authored .memql file
+			// would hang the node at boot instead of failing the strict-boot
+			// gate.
+			//
+			// The position check is safe to treat as malformed HERE (unlike in
+			// parseObjectLiteral) because the loop's leading skip has already
+			// consumed commas and whitespace, so a non-advancing return cannot
+			// be a legitimately-empty element.
+			//
+			// `!ok` decides NOTHING today and is deliberately kept: every
+			// ok=false return in parseLiteralOrExpr returns the
+			// whitespace-skipped pos, and this loop's leading skip has already
+			// consumed that whitespace, so !ok always implies next == pos and
+			// the position check alone would suffice. It stays because that is
+			// a property of a DIFFERENT function -- if parseLiteralOrExpr ever
+			// grows an ok=false path that DOES advance, the position check
+			// silently stops covering it and a malformed element becomes a
+			// silent nil. TestArrayOkImpliesNoProgress pins the invariant so
+			// the day it changes is a red test rather than a silent wrong
+			// value. (Contrast the two `newPos < pos` guards deleted in this
+			// same change: those were unreachable by construction within one
+			// expression, so nothing could ever revive them.)
+			return nil
+		}
 		out = append(out, val)
 		pos = next
 	}
