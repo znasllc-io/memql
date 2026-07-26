@@ -4,10 +4,13 @@ package automations
 // domain-first DSL tree (dsl/<domain>/automations.memql) and feeds
 // each one through the existing compileMemQL pipeline.
 //
-// The legacy walker (LoadAll → Loader.fsys.WalkDir) handles
-// `automation.memql` single-file declarations. The unified tree
-// instead bundles multiple automations + their logic blocks per
-// file (`<domain>/automations.memql`), so we extract each
+// This is the ONLY automation loading path. A legacy walker over a
+// `Loader.fsys` field once handled `automation.memql` single-file
+// declarations; it was unreachable and was deleted in memql#2858, so
+// LoadAll is now a thin wrapper over LoadFromUnifiedTree.
+//
+// The unified tree bundles multiple automations + their logic blocks
+// per file (`<domain>/automations.memql`), so we extract each
 // automation slice from the bundled source and compile each in
 // isolation.
 

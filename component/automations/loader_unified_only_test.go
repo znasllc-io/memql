@@ -23,9 +23,28 @@ import (
 // and it preserved a copy of the concept-visibility swallow that #2856 deleted
 // from the unified loader as a hazard.
 //
-// This test is the guard that keeps LoadAll a thin wrapper. It would have
-// failed on the old code, because the second pass appended to the slice the
-// first returned.
+// This test guards the shape that was actually removed: a pass that ADDS to or
+// DROPS FROM the set LoadFromUnifiedTree returned. It would have failed on the
+// old code, because the second pass appended to the slice the first returned.
+//
+// STATED LIMIT, because "keeps LoadAll a thin wrapper" would overclaim. The
+// assertion is over the NAME SET, so a reintroduced pass that MUTATES existing
+// automations -- appending a step to each, say -- is invisible to it. Measured:
+// injecting an extra Step into every tree-loaded automation leaves this test
+// and the whole package suite green.
+//
+// That gap is narrower than it looks, and deliberately not closed here:
+//
+//   - the deleted code APPENDED, so this covers the actual regression;
+//   - a cruder in-place hijack is caught by neighbours --
+//     replacing steps and clearing Trusted reds
+//     TestTreeLoadedAutomationReachesDispatchTrusted,
+//     TestLoadByName_CanonicalResolution and
+//     TestLoadByName_LiveAndDryRunResolveSameConstruct.
+//
+// It is the additive step-injection variant specifically that slips through
+// everything. Closing it wants a fingerprint over the loaded step graph, which
+// is a different test than this one.
 
 // TestLoadAllIsExactlyTheUnifiedTree pins that LoadAll adds nothing to
 // LoadFromUnifiedTree.

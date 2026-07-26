@@ -52,10 +52,15 @@ func NewLoader(opts LoaderOptions) *Loader {
 //
 // This used to run two further fs.WalkDir passes over an `l.fsys` field, under
 // a comment saying they were "retained for tests that inject a custom FS via
-// the fsys field". No such test existed and none could: NewLoader
-// unconditionally set `fsys: fstest.MapFS{}`, LoaderOptions exposes only Logger
-// and Registry, and the field was unexported -- so there was no seam to inject
-// through, and both passes always walked an empty FS.
+// the fsys field". No such test existed -- verified across all history
+// (`git log --all -S ".fsys ="`) -- and LoaderOptions exposed no seam to
+// inject through, so it was never an intentional injection point and both
+// passes always walked the empty `fstest.MapFS{}` NewLoader hardcoded.
+//
+// (Precisely: an IN-PACKAGE test could have assigned `loader.fsys` directly,
+// since every test here is `package automations`. So the seam was reachable in
+// principle; it was simply never used. An earlier draft of this comment said
+// "and none could", which was wrong.)
 //
 // Removed in memql#2858, along with the `.json` automation loader they reached,
 // which had no live source. If a custom-FS seam is ever actually wanted, add an
@@ -677,9 +682,15 @@ func (l *Loader) parseJSON(data []byte, path string) (*Automation, error) {
 		return nil, fmt.Errorf("parsing JSON: %w", err)
 	}
 
-	// Validate required fields
+	// Validate required fields.
+	//
+	// The `.json` suffix trim is vestigial: since memql#2858 removed the
+	// on-disk .json loader, the sole caller is the LogicRunner
+	// (logic_runner.go compileBodyToAutomation) passing a synthetic
+	// "logic:<name>" path, which never carries the suffix. Harmless, and
+	// left rather than changed because `path` is caller-supplied and a
+	// future caller may again pass a filename.
 	if automation.Name == "" {
-		// Use filename as name if not specified
 		base := filepath.Base(path)
 		automation.Name = strings.TrimSuffix(base, ".json")
 	}
@@ -697,7 +708,10 @@ func (l *Loader) parseJSON(data []byte, path string) (*Automation, error) {
 	l.validateTrigger(&automation)
 
 	if l.logger != nil {
-		l.logger.Debug("automation loaded from .json",
+		// Not ".json" any more: memql#2858 removed the on-disk .json
+		// loader, so every call now comes from the LogicRunner compiling a
+		// logic body in memory.
+		l.logger.Debug("automation parsed from compiler JSON",
 			"name", automation.Name,
 			"path", path,
 			"stepCount", len(automation.Steps),
