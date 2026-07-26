@@ -38,12 +38,23 @@ package dsl
 //
 // # What clears the gate
 //
-// An `actor.` term in the body (the construct checks its caller), or
-// `@serverOnly` (#2800 / PR #2860 -- the origin capability that makes a
-// construct unreachable from the wire). `@serverOnly` is recognised here
-// BEFORE it exists in the tree, on purpose: it is the fix vehicle for most of
-// the entries below, and recognising it means each one leaves the exemption
-// map by being annotated rather than by editing this file.
+// Three things, and the middle one is the one worth explaining:
+//
+//   - an `actor.` term in the body -- the construct compares against its
+//     caller directly;
+//   - a CONTEXT-SPEC reference. A spec bound to an `@actor` shape is the
+//     canonical spelling of a caller check, and it carries no literal `actor.`
+//     at the call site: `filter row.id==args.userId && requiresOwnerOrAdmin`
+//     is fully gated, and a substring test sees nothing. The set is computed
+//     FROM THE TREE (specs whose signature binds an `@actor`-annotated shape)
+//     rather than hardcoded, so a newly authored one is recognised the day it
+//     lands. This is not hypothetical -- #2860 fixed `userById` exactly this
+//     way while this gate was being written, and the first version of the
+//     clearance check reported it as unguarded;
+//   - `@serverOnly` (#2800 / #2860) -- the origin capability that makes a
+//     construct unreachable from the wire, and the fix vehicle for most of the
+//     entries below. A construct leaves the exemption map by being ANNOTATED
+//     rather than by someone remembering to edit this file.
 //
 // `@public` does NOT clear this gate, unlike in TestPerRowAuthzClassification.
 // It is a parse-only marker with no runtime semantics (#2860 surveyed the
@@ -106,8 +117,7 @@ var callerArgSelectionExemptions = map[string]string{
 	"identity/mutations.memql bumpUserDataExport":      "stamps the data-export marker on any userId.",
 	"identity/mutations.memql recordLegalAcceptance":   "records legal acceptance on behalf of any userId -- attributing consent to a person who did not give it.",
 	"identity/mutations.memql setUserActiveSpace":      "sets any userId's active space.",
-	"identity/queries.memql userById":                  "returns the full user row (primaryEmail, phone, birthdate, gender, role) for any userId. Tracked in #2800; `id==actor.userId` is circular because the identity resolver calls this to BUILD the actor, which is why #2860 introduces @serverOnly instead.",
-	"identity/queries.memql userActiveSpace":           "returns any userId's active space. Tracked in #2800.",
+	"identity/queries.memql userActiveSpace":           "returns any userId's active space. #2860 landed @serverOnly and fixed its sibling userById (now gated by the requiresOwnerOrAdmin context-spec) but left this one ungated.",
 
 	// --- identity: the row is one person's credential ------------------------
 	"identity/mutations.memql updateIdentity":            "updates any identity row by id.",
@@ -120,6 +130,19 @@ var callerArgSelectionExemptions = map[string]string{
 	"identity/mutations.memql stampNodeTokenBootstrap":   "stamps bootstrap state on any node token identity; server-side node path.",
 	"identity/queries.memql patIdentityById":             "returns a PAT identity row by id; server-side token verification path.",
 	"identity/queries.memql nodeTokenIdentityById":       "returns a node token identity row by id; server-side node auth path. Additionally marked @public while projecting identityFull, which includes `credentials` -- a credential row classified as intentionally open. @public carries no runtime semantics, so the classification is the defect rather than the exposure, but it should be reconsidered rather than inherited.",
+}
+
+// callerArgSelectionAccepted records constructs that select a person-scoped row
+// by a caller-supplied id and are CORRECT that way. Unlike
+// callerArgSelectionExemptions, an entry here is a decision, not debt.
+//
+// The criterion is that the PROJECTION is the mitigation: the construct returns
+// so little about the person that handing it an arbitrary id discloses nothing
+// worth gating. Anything returning contact details, credentials, preferences or
+// role does not qualify -- that is what the userById / userByIdSystem /
+// userDisplayById split exists for.
+var callerArgSelectionAccepted = map[string]string{
+	"identity/queries.memql userDisplayById": "projects userDisplayCard, which is `row.id` + `displayName` and nothing else. #2860 introduced it precisely so a caller can render another user's name without userById's full row; cross-user display IS the construct's purpose, so caller-scoping it would defeat it.",
 }
 
 // boundConceptOf returns the signature-bound concept from a construct header,
@@ -136,7 +159,64 @@ func boundConceptOf(header string) string {
 	return ""
 }
 
+var (
+	// actorShapeDeclRe matches an `@actor` shape declaration -- the annotation,
+	// then the header, allowing other annotations and doc comments between.
+	actorShapeDeclRe = regexp.MustCompile(`(?m)^@actor[ \t]*\r?\n(?:[ \t]*(?:@[^\n]*|//[^\n]*)\r?\n)*[ \t]*shape[ \t]+(?:[A-Za-z_][A-Za-z0-9_]*[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
+	specDeclRe       = regexp.MustCompile(`(?m)^[ \t]*spec[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
+)
+
+// actorBoundSpecNames returns every spec whose signature binds an `@actor`
+// shape -- the context-specs. They are the canonical way to express a caller
+// check and carry no literal `actor.` where they are used, so a gate that
+// substring-tests for `actor.` reports them as unguarded.
+func actorBoundSpecNames(t *testing.T) map[string]bool {
+	t.Helper()
+	tree := Tree()
+	paths, err := dslfs.WalkMemqlFiles(tree)
+	if err != nil {
+		t.Fatalf("WalkMemqlFiles: %v", err)
+	}
+
+	actorShapes := map[string]bool{}
+	sources := make(map[string]string, len(paths))
+	for _, p := range paths {
+		f, openErr := tree.Open(p)
+		if openErr != nil {
+			t.Fatalf("open %s: %v", p, openErr)
+		}
+		raw, readErr := io.ReadAll(f)
+		f.Close()
+		if readErr != nil {
+			t.Fatalf("read %s: %v", p, readErr)
+		}
+		sources[p] = string(raw)
+		for _, m := range actorShapeDeclRe.FindAllStringSubmatch(sources[p], -1) {
+			actorShapes[m[1]] = true
+		}
+	}
+
+	specs := map[string]bool{}
+	for _, src := range sources {
+		for _, m := range specDeclRe.FindAllStringSubmatch(src, -1) {
+			if actorShapes[m[1]] {
+				specs[m[2]] = true
+			}
+		}
+	}
+	if len(specs) == 0 {
+		t.Fatal("found 0 context-specs -- the clearance check would then report every spec-gated construct as unguarded, which is a false FLAG rather than a false clear, but still means this gate is not measuring what it says; check actorShapeDeclRe/specDeclRe against the tree")
+	}
+	return specs
+}
+
 func TestCallerSuppliedRowSelectionOnPersonScopedConcepts(t *testing.T) {
+	contextSpecs := actorBoundSpecNames(t)
+	specRefs := make(map[string]*regexp.Regexp, len(contextSpecs))
+	for name := range contextSpecs {
+		specRefs[name] = regexp.MustCompile(`\b` + regexp.QuoteMeta(name) + `\b`)
+	}
+
 	tree := Tree()
 	paths, err := dslfs.WalkMemqlFiles(tree)
 	if err != nil {
@@ -194,13 +274,23 @@ func TestCallerSuppliedRowSelectionOnPersonScopedConcepts(t *testing.T) {
 			preamble := src[preambleStart:m[0]]
 
 			// Anything that constrains the caller clears the gate.
-			if strings.Contains(body, "actor.") || strings.Contains(preamble, "@serverOnly") {
+			gated := strings.Contains(body, "actor.") || strings.Contains(preamble, "@serverOnly")
+			for _, ref := range specRefs {
+				if gated {
+					break
+				}
+				gated = ref.MatchString(body)
+			}
+			if gated {
 				continue
 			}
 
 			key := p + " " + name
 			seen[key] = true
 			if _, exempt := callerArgSelectionExemptions[key]; exempt {
+				continue
+			}
+			if _, accepted := callerArgSelectionAccepted[key]; accepted {
 				continue
 			}
 			flagged = append(flagged, fmt.Sprintf("%s: %s selects a %s row by a caller-supplied id with no caller check", p, name, concept))
@@ -219,9 +309,17 @@ func TestCallerSuppliedRowSelectionOnPersonScopedConcepts(t *testing.T) {
 	// A stale exemption is worse than a missing one: it reports that a finding
 	// is tracked when the construct it names no longer exists, so the next
 	// author trusts a line that measures nothing.
-	for key := range callerArgSelectionExemptions {
-		if !seen[key] {
-			t.Errorf("callerArgSelectionExemptions has a stale entry %q -- the construct no longer matches this detector (renamed, fixed, or deleted). Remove the entry.", key)
+	for _, m := range []struct {
+		name    string
+		entries map[string]string
+	}{
+		{"callerArgSelectionExemptions", callerArgSelectionExemptions},
+		{"callerArgSelectionAccepted", callerArgSelectionAccepted},
+	} {
+		for key := range m.entries {
+			if !seen[key] {
+				t.Errorf("%s has a stale entry %q -- the construct no longer matches this detector (renamed, fixed, gated, or deleted). Remove the entry.", m.name, key)
+			}
 		}
 	}
 }
