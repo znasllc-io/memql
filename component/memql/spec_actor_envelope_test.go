@@ -31,6 +31,20 @@ func TestBuildSpecCtx_AbsentAuthYieldsTheDenyingEnvelope(t *testing.T) {
 	actor, ok := specCtx["actor"].(map[string]any)
 	require.True(t, ok, "actor must be a map")
 
+	// The divergence FIRST, so it is reachable: require aborts the test on
+	// the first failure, and the key-presence loop below used to run
+	// ahead of this, making these assertions dead on a regression
+	// (memql#2801 review round 3).
+	//
+	// specEqual is the production comparator a context-spec body uses;
+	// `!=` is its negation. On the old absent-key representation this
+	// short-circuited TRUE.
+	require.False(t, !specEqual(actor["isClusterOwner"], false),
+		"`isClusterOwner != false` must be FALSE on absent auth; TRUE here is the fail-open "+
+			"the absent-key representation produced (memql#2801)")
+	require.Equal(t, false, actor["isClusterOwner"],
+		"absent auth must deny the admin gate")
+
 	// Every envelope key must be PRESENT, not absent -- that is what
 	// stops the nil short-circuit from flipping a negated predicate.
 	want := auth.ActorEnvelopeMap(nil)
@@ -44,25 +58,7 @@ func TestBuildSpecCtx_AbsentAuthYieldsTheDenyingEnvelope(t *testing.T) {
 		require.Equal(t, wantVal, got, "actor.%s must match the canonical envelope", key)
 	}
 
-	require.Equal(t, false, actor["isClusterOwner"],
-		"absent auth must deny the admin gate")
 	require.NotNil(t, actor["now"], "actor.now must be bound")
-
-	// And the divergence itself, not just its proxy: evaluate the
-	// NEGATED predicate that used to short-circuit TRUE on absent keys.
-	require.False(t, specEqualNe(actor["isClusterOwner"], false),
-		"`isClusterOwner != false` must be FALSE on absent auth; TRUE here is the fail-open "+
-			"the absent-key representation produced (memql#2801)")
-	require.False(t, specEqualNe(actor["isClusterOwner"], true) == false && actor["isClusterOwner"] == true,
-		"sanity: absent auth is not an owner")
-}
-
-// specEqualNe mirrors how a context-spec body evaluates `a != b`: the
-// shared comparator with the result negated. Written out so the test
-// exercises the same nil short-circuit the real evaluator has, rather
-// than Go's own != which has no such rule.
-func specEqualNe(a, b any) bool {
-	return !specEqual(a, b)
 }
 
 // With a real context the spec surface must agree with the envelope too

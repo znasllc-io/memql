@@ -78,7 +78,7 @@ func (e *Executor) ResumeFrom(
 
 	// Set up evaluator
 	evaluator := NewEvaluator()
-	bindActorEnvelope(evaluator, ctx)
+	bindActorEnvelope(ctx, evaluator)
 	evaluator.SetVariableResolver(e.createVariableResolver())
 	evaluator.SetSystemVariableResolver(e.createSystemVariableResolver())
 	evaluator.SetSecretResolver(e.createSecretResolver())
