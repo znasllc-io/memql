@@ -83,6 +83,7 @@ package dslimports
 import (
 	"fmt"
 	"io"
+	"io/fs"
 	"regexp"
 	"sort"
 	"strings"
@@ -194,6 +195,13 @@ type declIndex struct {
 	shapeDecls map[string][]shapeEntry
 	// namespaces[dir] = true when the tree has files under top-level dir.
 	namespaces map[string]bool
+	// root is the tree's fs.FS, carried so candidateConceptId can read a
+	// domain's namespace.pin -- the third input the unified loader uses to
+	// assemble a concept id, alongside the decl and its directory. Reading a
+	// FILE is not the import cycle; CALLING component/memql's namespacePin
+	// would be. nil in a Tree built without a root, which only degrades the
+	// pin to "" (see candidateConceptId).
+	root fs.FS
 }
 
 func (t *Tree) buildDeclIndex() *declIndex {
@@ -203,6 +211,7 @@ func (t *Tree) buildDeclIndex() *declIndex {
 		shapes:     make(map[string]bool),
 		shapeDecls: make(map[string][]shapeEntry),
 		namespaces: make(map[string]bool),
+		root:       t.Root,
 	}
 	for path, f := range t.Files {
 		if i := strings.IndexByte(path, '/'); i > 0 {
@@ -1416,12 +1425,6 @@ func sameDomainConceptDecl(path string, f *languageAst.File, idx *declIndex, nam
 	//     crash-loops every node at boot. memqllint is the only pre-boot gate a
 	//     product bundle has.
 	//
-	// The pin caveat is the one symbols.go already carries: no namespace.pin is
-	// in hand here (namespacePin lives in component/memql, which imports THIS
-	// package), so a pinned divergence falls back to the decl's own
-	// annotation-derived id. For dsl/deployment the two agree -- its concepts
-	// carry @namespace("cluster") explicitly -- and the loud guard for a
-	// genuine pin mismatch lives in the unified loader.
 	hint := dslfs.DomainFromFilePath(path)
 	if hint == "" {
 		return nil
@@ -1432,7 +1435,7 @@ func sameDomainConceptDecl(path string, f *languageAst.File, idx *declIndex, nam
 		if entry.decl == nil {
 			continue
 		}
-		if !strings.Contains(candidateConceptId(entry), needle) {
+		if !strings.Contains(candidateConceptId(idx.root, entry), needle) {
 			continue
 		}
 		if found != nil {
@@ -1443,28 +1446,58 @@ func sameDomainConceptDecl(path string, f *languageAst.File, idx *declIndex, nam
 	return found
 }
 
-// candidateConceptId assembles a concept candidate's canonical id the way the
-// unified loader does: under the declaring file's FIRST path segment, with the
-// decl's own @namespace winning when present.
+// candidateConceptId assembles a concept candidate's canonical id with exactly
+// the three inputs the unified loader uses (unified_loader.go:105): the decl,
+// its FIRST path segment, and that directory's namespace.pin.
 //
-// Shared by sameDomainConceptDecl and sameNamespaceShapeDecl's concept half so
-// the two cannot drift -- the shape analogue twenty lines below was still on a
-// bare first-segment comparison when #2852's review found this.
-func candidateConceptId(entry conceptEntry) string {
+// Single caller: sameDomainConceptDecl. The shape analogue below deliberately
+// does NOT share it -- a shape has no canonical namespaced id to assemble
+// (LoadUnifiedShapes registers shapes in a flat, name-keyed registry), so
+// there is nothing there for a namespace hint to match. See the note at that
+// site.
+//
+// An assembly ERROR returns "" rather than falling back to the decl's own
+// @namespace, and that is load-bearing. The error IS the #2614 moved-file
+// guard -- the case where the loader hard-refuses the entire tree. Trusting
+// the annotation there would resolve the binding against an id the engine
+// will never mint, so a bundle that cannot boot would lint clean; #2852's
+// review caught exactly that, on a nested declaration the engine-parity tier
+// cannot see (lint_mount.go's directoryHasMemqlFile is non-recursive, so a
+// domain dir with no direct .memql never mounts). A candidate the loader
+// would reject is not a candidate.
+func candidateConceptId(root fs.FS, entry conceptEntry) string {
 	if entry.decl == nil {
 		return ""
 	}
+	// >= 0, matching unified_loader.firstPathSegment byte-for-byte. Differs
+	// from > 0 only on a leading slash, which WalkMemqlFiles never emits.
 	dir := entry.file
-	if i := strings.IndexByte(dir, '/'); i > 0 {
+	if i := strings.IndexByte(dir, '/'); i >= 0 {
 		dir = dir[:i]
 	}
-	id, err := languageAst.AssembleConceptIdFromDeclInDir(entry.decl, dir, "")
-	if err != nil || id == "" {
-		// No pin in hand (see the caller's note); fall back to the explicit
-		// annotation's assembly, exactly as symbols.go does.
-		id, _ = languageAst.AssembleConceptIdFromDecl(entry.decl)
+	id, err := languageAst.AssembleConceptIdFromDeclInDir(entry.decl, dir, treeNamespacePin(root, dir))
+	if err != nil {
+		return ""
 	}
 	return id
+}
+
+// treeNamespacePin reads a domain's namespace.pin off the tree's own fs.FS.
+//
+// This is the component/memql `namespacePin` value, obtained without the
+// import cycle: CALLING that function would be one, READING the file it reads
+// is not. Tree.Root is retained precisely so a downstream pass can re-read
+// file contents. Absent or unreadable pin is "", which is also what the loader
+// sees for an unpinned domain.
+func treeNamespacePin(root fs.FS, dir string) string {
+	if root == nil || dir == "" {
+		return ""
+	}
+	b, err := fs.ReadFile(root, dir+"/namespace.pin")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(b))
 }
 
 // queryConceptBindings maps each struct-form query name in a file to the
@@ -1754,6 +1787,15 @@ func (t *Tree) resolveSpecShape(path string, f *languageAst.File, idx *declIndex
 	// path compares a namespace HINT against an assembled ID, which is a
 	// different comparison between different objects -- making these two agree
 	// would mean making one of them wrong.
+	//
+	// Note what this directory scoping is and is NOT. Boot applies no domain
+	// scoping to shapes whatsoever -- it is a bare name lookup in that flat
+	// registry. So this is not "what boot does"; it is a CONSERVATIVE
+	// NARROWING of boot, and the direction is the point: it can only decline
+	// where boot would resolve, never resolve where boot would fail. That is
+	// the safe side of the asymmetry #2852 is about -- a false positive here
+	// is a noisy lint, while a false negative is a bundle that lints clean and
+	// crash-loops every node at boot.
 	domain := path
 	if i := strings.IndexByte(path, '/'); i > 0 {
 		domain = path[:i]

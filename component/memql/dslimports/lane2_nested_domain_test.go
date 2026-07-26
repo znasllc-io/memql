@@ -144,8 +144,17 @@ func TestLane2_SharedSubdirectoryNameIsNotSharedNamespace(t *testing.T) {
 // DIRECTORY strings says deployment == deployment and resolves; boot's hint is
 // "deployment" and the id contains ":cluster:", so it does NOT. Following the
 // decl's assembled id is what makes the two agree.
+//
+// The namespace.pin below is load-bearing, not decoration. Without it the
+// annotation diverges from the directory, AssembleConceptIdFromDeclInDir
+// returns the #2614 mismatch error, and candidateConceptId drops the candidate
+// as unusable -- so this test would still pass, but because the id could not be
+// BUILT rather than because it was FOLLOWED. The pin is what dsl/deployment
+// carries on disk; with it the assembly succeeds and yields v1:cluster:widget,
+// which is the input this test means to exercise.
 func TestLane2_PinnedNamespaceDivergenceFollowsTheDecl(t *testing.T) {
 	root := fstest.MapFS{
+		"deployment/namespace.pin":  file("cluster\n"),
 		"deployment/concepts.memql": file(`@version("1.0.0")
 @namespace("cluster")
 @description("Declared under deployment/, namespaced to cluster.")

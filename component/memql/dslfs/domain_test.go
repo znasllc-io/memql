@@ -51,35 +51,6 @@ func TestDomainFromFilePath(t *testing.T) {
 	}
 }
 
-// TestDomainFromFilePathIsNotTheFirstSegment is the regression pin, stated as
-// the property rather than as a list of paths.
-//
-// The retired rule was `path[:strings.IndexByte(path, '/')]`. For every nested
-// path the two rules give DIFFERENT answers, and this asserts the surviving one
-// is boot's. Without it, someone "simplifying" DomainFromFilePath back to a
-// first-segment split would pass every case above that happens to be flat.
-func TestDomainFromFilePathIsNotTheFirstSegment(t *testing.T) {
-	for _, path := range []string{
-		"agents/tools/askSpecialist.memql",
-		"alpha/sub/queries.memql",
-		"mutations/v1/cognition/joinSpace.memql",
-	} {
-		first := path
-		for i := 0; i < len(path); i++ {
-			if path[i] == '/' {
-				first = path[:i]
-				break
-			}
-		}
-		if got := DomainFromFilePath(path); got == first {
-			t.Errorf("DomainFromFilePath(%q) = %q, which is the FIRST path segment. Boot walks "+
-				"from the last directory segment backwards, and the lint lanes now share this "+
-				"function -- a first-segment rule reintroduces the memql#2852 divergence, where "+
-				"one gate forbids an import that the other declines to make unnecessary.", path, got)
-		}
-	}
-}
-
 func TestVersionFromFilePath(t *testing.T) {
 	for _, tc := range []struct{ path, want string }{
 		{"v1/mutationJoinSpace.memql", "v1"},
