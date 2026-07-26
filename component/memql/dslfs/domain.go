@@ -2,8 +2,26 @@ package dslfs
 
 import "strings"
 
-// domain.go owns ONE answer to "which domain does this .memql file belong to",
-// so boot and the lint lanes cannot drift about it (memql#2852).
+// domain.go owns ONE answer to "what is a .memql file's namespace HINT" -- the
+// last directory segment -- so boot and the lint lanes cannot drift about it
+// (memql#2852).
+//
+// SCOPE, because an earlier version of this comment claimed to own "which
+// domain does this file belong to" and that is a DIFFERENT and wider question
+// this file does not answer. There are two rules in the tree and both are
+// correct for what they do:
+//
+//	LAST segment  (here)              a file's namespace HINT, matched against a
+//	                                  concept's canonical id
+//	FIRST segment (unified_loader.go  the DIRECTORY a concept's canonical id is
+//	 firstPathSegment, dslimports/    assembled under, and the domain a shape
+//	 symbols.go, integrity.go)        name is scoped to
+//
+// Conflating them is exactly how #2852's first fix opened a hole in both
+// directions. cmd/memqlmigrate/main.go records the same distinction from the
+// other side (review #2614): the codemod deliberately uses the FIRST segment,
+// "NOT the immediate parent", because nested files belong to the top-level
+// domain for id-assembly purposes.
 //
 // The drift this exists to stop was measured. component/memql's boot resolver
 // walked from the LAST directory segment backwards; dslimports'

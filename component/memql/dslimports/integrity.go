@@ -1385,40 +1385,86 @@ func sameDomainConceptDecl(path string, f *languageAst.File, idx *declIndex, nam
 			}
 		}
 	}
-	// BOOT'S RULE, not a reimplementation of it (memql#2852). This used to take
-	// the FIRST path segment while boot's resolver walked from the LAST
-	// directory segment backwards, so for a nested file the two disagreed:
+	// BOOT'S COMPARISON, both sides of it (memql#2852).
 	//
-	//	agents/tools/askSpecialist.memql   boot -> "tools"   here -> "agents"
+	// The two sides are DIFFERENT derivations, and getting that wrong is how
+	// the first cut of this fix opened a hole in both directions:
 	//
-	// The tree carries 23 such files, so two definitions of "same domain" were
-	// in force at once and the LINT's was the odd one out. That is #2805's
-	// unsatisfiable-lint shape again: TestNoSameDomainUse uses BOOT's rule to
-	// forbid an import, while this rule declined to grant the ambient
-	// preference that would have made the import unnecessary -- leaving an
-	// affected bundle no spelling that passes both gates.
+	//	LEFT  the file's namespace HINT -- boot's DomainFromFilePath, the LAST
+	//	      directory segment (concept_resolver.go). "sub" for
+	//	      alpha/sub/queries.memql.
+	//	RIGHT the candidate concept's CANONICAL NAMESPACE, assembled from its
+	//	      decl under its FIRST path segment (unified_loader.go's
+	//	      firstPathSegment + AssembleConceptIdFromDeclInDir). "beta" for
+	//	      beta/sub/concepts.memql, and "cluster" for dsl/deployment's
+	//	      @namespace("cluster") concepts.
 	//
-	// dslfs.DomainFromFilePath is now the single answer. It lives in dslfs
-	// because component/memql imports THIS package, so calling component/memql's
-	// copy -- which is what #2852 suggested -- would be an import cycle.
-	domain := dslfs.DomainFromFilePath(path)
-	if domain == "" {
+	// Boot then matches ":"+hint+":" against that id
+	// (resolveBareConceptNameWithNamespace). Using the LAST segment on both
+	// sides -- which is what the first cut did -- is wrong twice:
+	//
+	//   - FALSE POSITIVE: beta/queries.memql ("beta") vs beta/sub/concepts.memql
+	//     ("sub") stopped matching, so lane 2 reported ambiguity for a binding
+	//     boot resolves. And the import that silences lane 2 is the one
+	//     TestNoSameDomainUse strips, so the bundle had NO spelling that passed
+	//     both gates -- #2805's unsatisfiable-lint shape, newly created by the
+	//     very change meant to remove it.
+	//   - FALSE NEGATIVE: alpha/sub/queries.memql and beta/sub/concepts.memql
+	//     both reduced to "sub", so two UNRELATED top-level namespaces were
+	//     treated as one domain and the binding resolved. Boot refuses it
+	//     ("ambiguous concept name"), so the lint went green on a bundle that
+	//     crash-loops every node at boot. memqllint is the only pre-boot gate a
+	//     product bundle has.
+	//
+	// The pin caveat is the one symbols.go already carries: no namespace.pin is
+	// in hand here (namespacePin lives in component/memql, which imports THIS
+	// package), so a pinned divergence falls back to the decl's own
+	// annotation-derived id. For dsl/deployment the two agree -- its concepts
+	// carry @namespace("cluster") explicitly -- and the loud guard for a
+	// genuine pin mismatch lives in the unified loader.
+	hint := dslfs.DomainFromFilePath(path)
+	if hint == "" {
 		return nil
 	}
+	needle := ":" + hint + ":"
 	var found *languageAst.ConceptDecl
 	for _, entry := range idx.concepts[name] {
 		if entry.decl == nil {
 			continue
 		}
-		if dslfs.DomainFromFilePath(entry.file) != domain {
+		if !strings.Contains(candidateConceptId(entry), needle) {
 			continue
 		}
 		if found != nil {
-			return nil // Ambiguous WITHIN the domain -- not resolvable.
+			return nil // Ambiguous WITHIN the namespace -- not resolvable.
 		}
 		found = entry.decl
 	}
 	return found
+}
+
+// candidateConceptId assembles a concept candidate's canonical id the way the
+// unified loader does: under the declaring file's FIRST path segment, with the
+// decl's own @namespace winning when present.
+//
+// Shared by sameDomainConceptDecl and sameNamespaceShapeDecl's concept half so
+// the two cannot drift -- the shape analogue twenty lines below was still on a
+// bare first-segment comparison when #2852's review found this.
+func candidateConceptId(entry conceptEntry) string {
+	if entry.decl == nil {
+		return ""
+	}
+	dir := entry.file
+	if i := strings.IndexByte(dir, '/'); i > 0 {
+		dir = dir[:i]
+	}
+	id, err := languageAst.AssembleConceptIdFromDeclInDir(entry.decl, dir, "")
+	if err != nil || id == "" {
+		// No pin in hand (see the caller's note); fall back to the explicit
+		// annotation's assembly, exactly as symbols.go does.
+		id, _ = languageAst.AssembleConceptIdFromDecl(entry.decl)
+	}
+	return id
 }
 
 // queryConceptBindings maps each struct-form query name in a file to the
@@ -1698,6 +1744,16 @@ func (t *Tree) resolveSpecShape(path string, f *languageAst.File, idx *declIndex
 		}
 		return nil, "" // imported but not declared there -- lane 2 reports
 	}
+	// FIRST segment on BOTH sides, and that is deliberate -- it is NOT the
+	// concept rule above and must not be "unified" with it (memql#2852 review).
+	//
+	// A shape has no canonical namespaced id. LoadUnifiedShapes registers shapes
+	// in a flat name-keyed registry (engine_bootstrap.go), so there is nothing
+	// for a namespace hint to match against; scoping a shape name to its
+	// top-level domain directory is all the information that exists. The concept
+	// path compares a namespace HINT against an assembled ID, which is a
+	// different comparison between different objects -- making these two agree
+	// would mean making one of them wrong.
 	domain := path
 	if i := strings.IndexByte(path, '/'); i > 0 {
 		domain = path[:i]
