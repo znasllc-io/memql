@@ -89,6 +89,7 @@ import (
 
 	languageAst "github.com/znasllc-io/memql/component/language/ast"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/component/memql/dslfs"
 )
 
 // rowIntrinsics are the engine-owned row fields an insert/update block may
@@ -1384,21 +1385,38 @@ func sameDomainConceptDecl(path string, f *languageAst.File, idx *declIndex, nam
 			}
 		}
 	}
-	domain := path
-	if i := strings.IndexByte(path, '/'); i > 0 {
-		domain = path[:i]
+	// BOOT'S RULE, not a reimplementation of it (memql#2852). This used to take
+	// the FIRST path segment while boot's resolver walked from the LAST
+	// directory segment backwards, so for a nested file the two disagreed:
+	//
+	//	agents/tools/askSpecialist.memql   boot -> "tools"   here -> "agents"
+	//
+	// The tree carries 23 such files, so two definitions of "same domain" were
+	// in force at once and the LINT's was the odd one out. That is #2805's
+	// unsatisfiable-lint shape again: TestNoSameDomainUse uses BOOT's rule to
+	// forbid an import, while this rule declined to grant the ambient
+	// preference that would have made the import unnecessary -- leaving an
+	// affected bundle no spelling that passes both gates.
+	//
+	// dslfs.DomainFromFilePath is now the single answer. It lives in dslfs
+	// because component/memql imports THIS package, so calling component/memql's
+	// copy -- which is what #2852 suggested -- would be an import cycle.
+	domain := dslfs.DomainFromFilePath(path)
+	if domain == "" {
+		return nil
 	}
 	var found *languageAst.ConceptDecl
 	for _, entry := range idx.concepts[name] {
 		if entry.decl == nil {
 			continue
 		}
-		if i := strings.IndexByte(entry.file, '/'); i > 0 && entry.file[:i] == domain {
-			if found != nil {
-				return nil // Ambiguous WITHIN the domain -- not resolvable.
-			}
-			found = entry.decl
+		if dslfs.DomainFromFilePath(entry.file) != domain {
+			continue
 		}
+		if found != nil {
+			return nil // Ambiguous WITHIN the domain -- not resolvable.
+		}
+		found = entry.decl
 	}
 	return found
 }
