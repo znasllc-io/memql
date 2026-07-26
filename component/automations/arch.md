@@ -97,38 +97,33 @@ dsl/v1/automations/
 
 ### 1. Loader (`loader.go`)
 
-Responsible for loading automation definitions from the filesystem.
+Responsible for loading automation definitions from the unified DSL tree.
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────────────┐
 │                              LOADER FLOW                                          │
 ├───────────────────────────────────────────────────────────────────────────────────┤
 │                                                                                   │
-│   automations/v1/                                                                 │
+│   dsl/<domain>/automations.memql   (one bundled file per domain)                   │
 │        │                                                                          │
-│        ├── bootstrapUser/                                                         │
-│        │   ├── automation.memql  ──────┐  (.memql has priority)                   │
-│        │   ├── automation.md           │                                          │
-│        │   └── bootstrapUser.json      │  (ignored if .memql exists)              │
-│        │                               │                                          │
-│        ├── leadClassification/         │                                          │
-│        │   ├── automation.md           │                                          │
-│        │   └── leadClassification.json─┼──┐                                       │
-│        │                               │  │                                       │
-│        └── ...                         │  │                                       │
-│                                        ▼  ▼                                       │
+│        │   each file declares MANY automations + their logic blocks                │
+│        ▼                                                                          │
 │   ┌─────────────────────────────────────────────────────────────────────────┐     │
-│   │                           LOADER                                        │     │
+│   │                    LoadAll -> LoadFromUnifiedTree                       │     │
 │   │                                                                         │     │
-│   │  Priority Order:                                                        │     │
-│   │  1. Look for automation.memql → Compile via engine/compiler             │     │
-│   │  2. Fall back to .json files → Parse directly                           │     │
+│   │  1. Slice each `automation <name> { ... }` out of the bundled source     │     │
+│   │  2. Compile each slice in isolation via compileMemQL                     │     │
+│   │  3. Stamp Origin = "unified:<path>:<name>" and Trusted = true           │     │
 │   │                                                                         │     │
 │   │  Rules:                                                                 │     │
-│   │  • One automation per directory                                         │     │
-│   │  • .memql must contain exactly ONE automation definition                │     │
 │   │  • Files starting with _ are skipped                                    │     │
-│   │  • Directory with .memql ignores sibling .json files                    │     │
+│   │  • A malformed construct refuses boot (strict-boot gate)                │     │
+│   │                                                                         │     │
+│   │  There is NO second pass and no .json loading path. A legacy walker     │     │
+│   │  over a Loader.fsys field, plus an on-disk `.json` automation format,   │     │
+│   │  were unreachable and were deleted in memql#2858 -- LoadAll is now a    │     │
+│   │  thin wrapper. (parseJSON survives, but only as the LogicRunner's       │     │
+│   │  in-memory compiler-JSON -> Automation step; it reads no files.)        │     │
 │   └─────────────────────────────────────────────────────────────────────────┘     │
 │                            │                                                      │
 │                            ▼                                                      │
@@ -152,16 +147,16 @@ Each automation should have its own directory under `v1/`:
 
 ```
 automations/v1/{automationName}/
-├── automation.memql          # MemQL source (preferred)
+├── automation.memql          # RETIRED layout -- see memql#2858
 ├── automation.md             # Flow diagrams and documentation (required)
 └── {automationName}.json     # Compiled JSON or legacy definition
 ```
 
 | File | Purpose |
 |------|---------|
-| `automation.memql` | MemQL source definition (takes priority over .json) |
+| `automation.memql` | RETIRED per-directory layout (memql#2858); automations now live in `dsl/<domain>/automations.memql` |
 | `automation.md` | Human-readable documentation with flow diagrams, timestamp |
-| `{name}.json` | Compiled output or legacy JSON definition |
+| `{name}.json` | RETIRED. The on-disk `.json` automation loader was deleted in memql#2858 |
 
 ---
 
@@ -565,7 +560,7 @@ automation bootstrapUser() { ... }
 automation leadClassification() { ... }
 ```
 
-### JSON Format (`.json`) - Legacy/Compiled
+### JSON Format (`.json`) - RETIRED (memql#2858; no on-disk loader exists)
 
 ```json
 {
@@ -648,7 +643,7 @@ go test ./automations -run "Test.*Integration"
 | File | Purpose |
 |------|---------|
 | `types.go` | Core type definitions |
-| `loader.go` | .memql and .json file loading |
+| `loader.go` | .memql compilation (LoadAll -> LoadFromUnifiedTree) |
 | `scheduler.go` | Cron and event triggering |
 | `executor.go` | Step orchestration |
 | `evaluator.go` | $ expression resolution |
