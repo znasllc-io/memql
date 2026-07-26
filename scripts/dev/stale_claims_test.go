@@ -1,10 +1,10 @@
 package dev
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -14,101 +14,208 @@ import (
 //
 // stale-claims.sh is the first script in scripts/dev/ that CAN write to GitHub,
 // so the load-bearing property is not "it is read-only" (its sibling's) but
-// "it writes ONLY under --apply, and only to closed issues".
+// "it writes ONLY under --apply, and only to cold claims on closed issues".
 //
 // Both halves are checked BEHAVIOURALLY: the script is executed against a stub
 // `gh` that records every invocation and refuses anything outside a read
 // allowlist. That is what the #2873 review established as the only durable
-// approach -- three earlier rounds of a static source scan on the sibling script
-// were defeated three different ways, the last simply by quoting a token
-// (`"gh" pr merge`). Out-parsing shell quoting, eval and indirection is not a
-// winnable game, so this does not try; it observes what bash actually ran.
+// approach -- three earlier rounds of a static source scan on the sibling
+// script were defeated three different ways, the last simply by quoting a
+// token (`"gh" pr merge`). Out-parsing shell quoting, eval and indirection is
+// not a winnable game, so this does not try; it observes what bash actually
+// ran.
 //
-// The stub's screener is an ALLOWLIST, which is the other #2873 lesson. Its
-// first version enumerated write flags and pflag's attached forms walked past
-// it -- `-XPOST`, `--method=POST`, `--field=x`, `--raw-field=x` were all
-// accepted as read-only. Every argument must now match a known-safe form and
-// anything unrecognised is refused by default.
+// THE STUB'S SCREENER IS AN ALLOWLIST IN EVERY ARM, AND THERE IS A META-TEST.
+//
+// That is the #2873 lesson, and the first cut of this file re-broke it in the
+// one arm where it mattered. `issue edit` -- the only branch that permits a
+// write -- enumerated six flags to refuse and had no `-*)` default, so anything
+// unenumerated was silently accepted. Review fired the sibling's must-refuse
+// corpus at it and 7 of 14 spellings got through: every pflag attached form
+// (`--add-label=x`, `--title=x`, `--body=x`, `--add-assignee=x`) plus
+// `--body-file`, `--add-project` and `--remove-project`. Patching the real
+// script to smuggle any of those alongside the legitimate `--remove-label`
+// left the entire suite green.
+//
+// So: every arm now ends in `-*) FORBIDDEN`, and TestStaleClaims_StubRefusesWrites
+// fires that corpus at the stub directly. A guard this suite depends on needs
+// its own guard, or "the tests pass" only means "nobody tried that spelling".
 
 const staleClaimsScript = "stale-claims.sh"
 
-// ghStubConfig is the canned API data the stub serves.
+// stubIssue is one row the fake `gh issue list --label` returns.
+type stubIssue struct {
+	num   int
+	state string
+	title string
+	// claimedAt is what the timeline's `labeled` event reports for this
+	// issue's claim. Empty means "no readable event" -> the script must
+	// classify UNKNOWN and never sweep.
+	claimedAt time.Time
+	noEvent   bool
+	// parked marks the issue as carrying the `parked` label.
+	parked bool
+}
+
+// staleClaimsStub is the canned API surface the stub serves.
 type staleClaimsStub struct {
-	issueList string // stdout for `gh issue list`
-	listFail  bool
+	// labelIssues maps a claimed:* label to the issues carrying it. The stub
+	// derives the repo's label list from these keys, so a fixture cannot
+	// accidentally describe a label with no issues or an issue with no label.
+	labelIssues map[string][]stubIssue
+	labelFail   bool
+	editFail    bool
 }
 
 func shQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 
-// writeStaleClaimsStub emits a `gh` that serves canned reads, records every
-// call, and REFUSES anything outside the allowlist.
+// ghStubSource is the fake `gh`. Every arm is default-deny: an argument that is
+// not positively recognised is logged FORBIDDEN and refused, including in
+// `issue edit`.
 //
 // `issue edit --remove-label` is the one mutation the script may make. It is
-// admitted here -- recorded with an EDIT marker so a test can assert on it --
-// precisely so the tests can tell "the script did not write" from "the stub
-// blocked a write it attempted". A stub that refused it outright would make
-// those two indistinguishable, which is the failure mode that matters most for
-// a script whose default must be inert.
+// ADMITTED here -- recorded with an EDIT marker -- precisely so the tests can
+// tell "the script did not write" from "the stub blocked a write it attempted".
+// A stub that refused it outright would make those indistinguishable, which is
+// the failure mode that matters most for a script whose default must be inert.
+const ghStubSource = `#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$STUB_LOG"
+
+deny() {
+  printf 'FORBIDDEN %s (%s)\n' "$*" "${DENY_REASON:-non-read invocation}" >> "$STUB_LOG"
+  echo "stub gh: refusing: $*" >&2
+  exit 1
+}
+
+case "$1 $2" in
+  "--version "*) echo 'gh version 2.45.0'; exit 0 ;;
+  "auth status") exit 0 ;;
+
+  "label list")
+    [ -f "$STUB_DIR/labelfail" ] && exit 1
+    for a in "$@"; do
+      case "$a" in
+        label|list|-R|--limit|--json|--jq) ;;
+        -*) DENY_REASON="unrecognised label-list flag $a" deny "$@" ;;
+        *) ;;
+      esac
+    done
+    # 'length' is the page-cap probe; anything else is the name list.
+    case "$*" in
+      *length*) grep -c . "$STUB_DIR/labels.txt" 2>/dev/null || echo 0 ;;
+      *) cat "$STUB_DIR/labels.txt" 2>/dev/null ;;
+    esac
+    exit 0 ;;
+
+  "issue list")
+    want=""
+    prev=""
+    for a in "$@"; do
+      [ "$prev" = "--label" ] && want="$a"
+      prev="$a"
+      case "$a" in
+        issue|list|-R|--label|--state|--limit|--json|--jq) ;;
+        -*) DENY_REASON="unrecognised issue-list flag $a" deny "$@" ;;
+        *) ;;
+      esac
+    done
+    cat "$STUB_DIR/issues-$want.tsv" 2>/dev/null
+    exit 0 ;;
+
+  "issue view")
+    num="$3"
+    for a in "$@"; do
+      case "$a" in
+        issue|view|-R|--json|--jq) ;;
+        -*) DENY_REASON="unrecognised issue-view flag $a" deny "$@" ;;
+        *) ;;
+      esac
+    done
+    [ -f "$STUB_DIR/parked-$num" ] && echo 0
+    exit 0 ;;
+
+  "api repos"*)
+    num=$(printf '%s' "$2" | sed -n 's#.*/issues/\([0-9]*\)/timeline.*#\1#p')
+    for a in "$@"; do
+      case "$a" in
+        api|--jq) ;;
+        -X*|-F*|-f*|--method*|--field*|--raw-field*|--input*)
+          DENY_REASON="write-capable api flag $a" deny "$@" ;;
+        -*) DENY_REASON="unrecognised api flag $a" deny "$@" ;;
+        *) ;;
+      esac
+    done
+    cat "$STUB_DIR/claimedat-$num" 2>/dev/null
+    exit 0 ;;
+
+  "issue edit")
+    # The ONE tolerated mutation -- and still default-deny. The first cut
+    # enumerated flags to refuse and had no catch-all, so every pflag attached
+    # form walked straight through (memql#2873, re-broken and re-fixed).
+    seen_remove=0
+    for a in "$@"; do
+      case "$a" in
+        issue|edit|-R|*/*) ;;
+        [0-9]*) ;;
+        --remove-label) seen_remove=1 ;;
+        claimed:*) ;;
+        -*) DENY_REASON="unexpected edit flag $a" deny "$@" ;;
+        *) DENY_REASON="unexpected edit operand $a" deny "$@" ;;
+      esac
+    done
+    if [ "$seen_remove" -eq 1 ]; then
+      [ -f "$STUB_DIR/editfail" ] && { echo "stub gh: edit rejected" >&2; exit 1; }
+      printf 'EDIT %s\n' "$*" >> "$STUB_LOG"
+      exit 0
+    fi
+    DENY_REASON="issue edit with no --remove-label" deny "$@" ;;
+esac
+
+deny "$@"
+`
+
+// writeStaleClaimsStub materialises the stub and its canned data.
 func writeStaleClaimsStub(t *testing.T, cfg staleClaimsStub) (dir, logPath string) {
 	t.Helper()
 	dir = t.TempDir()
 	logPath = filepath.Join(dir, "calls.log")
 
-	fail := "exit 0"
-	if cfg.listFail {
-		fail = "exit 1"
+	var labels []string
+	for label, issues := range cfg.labelIssues {
+		labels = append(labels, label)
+		var rows strings.Builder
+		for _, is := range issues {
+			fmt.Fprintf(&rows, "%d\t%s\t%s\n", is.num, is.state, is.title)
+			at := ""
+			if !is.noEvent {
+				at = is.claimedAt.UTC().Format(time.RFC3339)
+			}
+			write(t, filepath.Join(dir, fmt.Sprintf("claimedat-%d", is.num)), at)
+			if is.parked {
+				write(t, filepath.Join(dir, fmt.Sprintf("parked-%d", is.num)), "1")
+			}
+		}
+		write(t, filepath.Join(dir, "issues-"+label+".tsv"), rows.String())
 	}
-
-	stub := `#!/usr/bin/env bash
-printf '%s\n' "$*" >> ` + shQuote(logPath) + `
-
-# ALLOWLIST, not a blocklist (memql#2873's lesson): every argument must match a
-# known-safe form, and anything unrecognised is refused by default. Enumerating
-# write spellings loses to pflag's attached forms -- -XPOST, --method=POST,
-# --field=x and --raw-field=x all slipped past an enumerating screener.
-case "$1 $2" in
-  "--version "*) echo 'gh version 2.45.0'; exit 0 ;;
-  "auth status") exit 0 ;;
-  "issue list")
-    for a in "$@"; do
-      case "$a" in
-        issue|list|-R|--state|--limit|--json|--jq) ;;
-        all|100|` + shQuote("znasllc-io/memql") + `) ;;
-        number,state,labels,updatedAt,title) ;;
-        .*|'"'"'*'"'"') ;;
-        -*) printf 'FORBIDDEN %s (unrecognised issue-list flag %s)\n' "$*" "$a" >> ` + shQuote(logPath) + `
-            echo "stub gh: refusing $a" >&2; exit 1 ;;
-      esac
-    done
-    printf '%s' ` + shQuote(cfg.issueList) + `; ` + fail + ` ;;
-  "issue edit")
-    # The ONE tolerated mutation. Recorded distinctly so a test can assert the
-    # default run made none, and that --apply made exactly the right ones.
-    seen_remove=0
-    for a in "$@"; do
-      case "$a" in
-        --remove-label) seen_remove=1 ;;
-        --add-label|--add-assignee|--body|--title|--milestone|--remove-assignee)
-          printf 'FORBIDDEN %s (unexpected edit flag %s)\n' "$*" "$a" >> ` + shQuote(logPath) + `
-          echo "stub gh: refusing $a" >&2; exit 1 ;;
-      esac
-    done
-    if [ "$seen_remove" -eq 1 ]; then
-      printf 'EDIT %s\n' "$*" >> ` + shQuote(logPath) + `
-      exit 0
-    fi
-    printf 'FORBIDDEN %s (issue edit with no --remove-label)\n' "$*" >> ` + shQuote(logPath) + `
-    exit 1 ;;
-esac
-
-printf 'FORBIDDEN %s (non-read invocation)\n' "$*" >> ` + shQuote(logPath) + `
-echo "stub gh: refusing non-read invocation: $*" >&2
-exit 1
-`
-	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(stub), 0o755); err != nil {
-		t.Fatalf("write stub gh: %v", err)
+	write(t, filepath.Join(dir, "labels.txt"), strings.Join(labels, "\n")+"\n")
+	if cfg.labelFail {
+		write(t, filepath.Join(dir, "labelfail"), "1")
+	}
+	if cfg.editFail {
+		write(t, filepath.Join(dir, "editfail"), "1")
+	}
+	write(t, filepath.Join(dir, "gh"), ghStubSource)
+	if err := os.Chmod(filepath.Join(dir, "gh"), 0o755); err != nil {
+		t.Fatalf("chmod stub gh: %v", err)
 	}
 	return dir, logPath
+}
+
+func write(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
 }
 
 type staleClaimsResult struct {
@@ -117,24 +224,27 @@ type staleClaimsResult struct {
 	calls          []string
 }
 
-func (r staleClaimsResult) edits() []string {
+func (r staleClaimsResult) edits() []string     { return r.marked("EDIT ") }
+func (r staleClaimsResult) forbidden() []string { return r.marked("FORBIDDEN ") }
+
+func (r staleClaimsResult) marked(prefix string) []string {
 	var out []string
 	for _, c := range r.calls {
-		if strings.HasPrefix(c, "EDIT ") {
-			out = append(out, strings.TrimPrefix(c, "EDIT "))
+		if strings.HasPrefix(c, prefix) {
+			out = append(out, strings.TrimPrefix(c, prefix))
 		}
 	}
 	return out
 }
 
-func (r staleClaimsResult) forbidden() []string {
-	var out []string
-	for _, c := range r.calls {
-		if strings.HasPrefix(c, "FORBIDDEN ") {
-			out = append(out, strings.TrimPrefix(c, "FORBIDDEN "))
+// rowFor returns the report line for an issue, or "" when absent.
+func (r staleClaimsResult) rowFor(issue int) string {
+	for _, l := range strings.Split(r.stdout, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(l), fmt.Sprintf("#%d ", issue)) {
+			return strings.TrimSpace(l)
 		}
 	}
-	return out
+	return ""
 }
 
 // staleClaimsEnv passes only PATH and HOME plus what a case sets.
@@ -142,10 +252,12 @@ func (r staleClaimsResult) forbidden() []string {
 // os.Environ() is deliberately NOT inherited -- the #2873 review found that
 // exporting the sibling's documented IDLE_MINUTES broke its whole suite from
 // outside. IDLE_HOURS and REPO are the same hazard here.
-func staleClaimsEnv(stubDir string, extra ...string) []string {
+func staleClaimsEnv(stubDir, logPath string, extra ...string) []string {
 	return append([]string{
 		"PATH=" + stubDir + ":" + os.Getenv("PATH"),
 		"HOME=" + os.Getenv("HOME"),
+		"STUB_DIR=" + stubDir,
+		"STUB_LOG=" + logPath,
 	}, extra...)
 }
 
@@ -154,7 +266,7 @@ func runStaleClaims(t *testing.T, cfg staleClaimsStub, args []string, env ...str
 	dir, logPath := writeStaleClaimsStub(t, cfg)
 
 	cmd := exec.Command("bash", append([]string{staleClaimsScript}, args...)...)
-	cmd.Env = staleClaimsEnv(dir, env...)
+	cmd.Env = staleClaimsEnv(dir, logPath, env...)
 	var stdout, stderr strings.Builder
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	err := cmd.Run()
@@ -176,59 +288,63 @@ func runStaleClaims(t *testing.T, cfg staleClaimsStub, args []string, env ...str
 	return staleClaimsResult{stdout: stdout.String(), stderr: stderr.String(), code: code, calls: calls}
 }
 
-// tsv builds one issue-list row.
-func tsv(num, state, labels, updated, title string) string {
-	return strings.Join([]string{num, state, labels, updated, title}, "\t") + "\n"
-}
+func hoursAgo(h int) time.Time { return time.Now().Add(-time.Duration(h) * time.Hour) }
 
-// mixedClaims covers one issue per branch the sweep decision can take: the
-// CLOSED issue that IS swept, plus all three OPEN shapes that must NOT be --
-// FRESH (under IDLE_HOURS), SUSPECT (over it), and UNKNOWN (unusable
-// timestamp).
+// mixedClaims covers one issue per branch the sweep decision can take: the cold
+// CLOSED claim that IS swept, the freshly-CLOSED one that is not (the live
+// session's shutdown window), and all three OPEN shapes -- FRESH, SUSPECT,
+// UNKNOWN -- plus an unrecognised STATE.
 //
-// The SUSPECT row is the one that carries the safety property. An earlier
-// version of this fixture had only a single OPEN row stamped 9999999999,
-// intending "fresh"; because idle_hours treats a future timestamp as clock skew
-// that row landed in UNKNOWN, so NO row ever reached the SUSPECT branch and the
-// suite stayed GREEN against a script that swept open SUSPECT issues under
-// --apply -- the exact regression these two tests exist to catch. Hence the
-// branch-reached assertions in mustReachEveryOpenBranch: without them a later
-// fixture edit can silently re-introduce the same vacuum.
+// Every branch is represented on purpose, and mustReachEveryBranch asserts each
+// was actually entered. An earlier fixture had a single OPEN row stamped with a
+// FUTURE timestamp, intending "fresh"; because that classifies as clock skew it
+// landed in UNKNOWN, so no row ever reached SUSPECT and the suite stayed GREEN
+// against a script that swept open SUSPECT issues under --apply -- the exact
+// regression these tests exist to catch. Un-entered branches defend nothing.
 func mixedClaims() staleClaimsStub {
-	fresh := strconv.FormatInt(time.Now().Add(-30*time.Minute).Unix(), 10)
-	return staleClaimsStub{issueList: "" +
-		tsv("2801", "CLOSED", "claimed:s4b9e2,bug", "1000000000", "already closed, claim left behind") +
-		tsv("2999", "OPEN", "claimed:s7c2e9", fresh, "live work, claimed 30min ago") +
-		tsv("2998", "OPEN", "claimed:s6f08e5", "1000000000", "open and long idle -- may still be live") +
-		tsv("2997", "OPEN", "claimed:sQ", "notanumber", "open, timestamp unusable"),
-	}
+	return staleClaimsStub{labelIssues: map[string][]stubIssue{
+		"claimed:s4b9e2": {
+			{num: 2801, state: "CLOSED", title: "closed, claim went cold", claimedAt: hoursAgo(100)},
+			{num: 2802, state: "CLOSED", title: "just closed, session still finishing", claimedAt: hoursAgo(0)},
+		},
+		"claimed:s7c2e9": {
+			{num: 2999, state: "OPEN", title: "live work, claimed 30min ago", claimedAt: time.Now().Add(-30 * time.Minute)},
+			{num: 2998, state: "OPEN", title: "open and long idle -- may still be live", claimedAt: hoursAgo(100)},
+			{num: 2997, state: "OPEN", title: "open, no readable labeled event", noEvent: true},
+			{num: 2996, state: "LOCKED", title: "unrecognised state", claimedAt: hoursAgo(100)},
+		},
+	}}
 }
 
-// mustReachEveryOpenBranch fails unless the report actually classified an open
-// claim into each of the three non-sweepable states. A fixture that does not
-// reach a branch cannot defend it.
-func mustReachEveryOpenBranch(t *testing.T, stdout string) {
+// branchExpectations is the classification each fixture row must receive.
+var branchExpectations = []struct {
+	issue int
+	state string
+}{
+	{2801, "ABANDONED"},
+	{2802, "CLOSING"},
+	{2999, "FRESH"},
+	{2998, "SUSPECT"},
+	{2997, "UNKNOWN"},
+	{2996, "UNKNOWN"},
+}
+
+// mustReachEveryBranch fails unless the report classified each fixture row into
+// the state it exists to represent. A branch the fixture never enters cannot be
+// defended by any assertion about it.
+func mustReachEveryBranch(t *testing.T, res staleClaimsResult) {
 	t.Helper()
-	for _, want := range []struct{ issue, state string }{
-		{"2999", "FRESH"},
-		{"2998", "SUSPECT"},
-		{"2997", "UNKNOWN"},
-	} {
-		line := ""
-		for _, l := range strings.Split(stdout, "\n") {
-			if strings.Contains(l, "#"+want.issue) {
-				line = l
-				break
-			}
-		}
+	for _, want := range branchExpectations {
+		line := res.rowFor(want.issue)
 		if line == "" {
-			t.Errorf("issue #%s absent from the report; the %s branch is untested.\ngot:\n%s",
-				want.issue, want.state, stdout)
+			t.Errorf("issue #%d absent from the report; the %s branch is untested.\ngot:\n%s",
+				want.issue, want.state, res.stdout)
 			continue
 		}
 		if !strings.Contains(line, want.state) {
-			t.Errorf("issue #%s classified as %q, wanted %s -- the %s branch is not being exercised, "+
-				"so nothing here proves a claim in that state is left alone.", want.issue, strings.TrimSpace(line), want.state, want.state)
+			t.Errorf("issue #%d classified as %q, wanted %s -- that branch is not being exercised, "+
+				"so nothing here proves a claim in that state is handled correctly.",
+				want.issue, line, want.state)
 		}
 	}
 }
@@ -254,14 +370,14 @@ func TestStaleClaims_DefaultRunMakesNoMutation(t *testing.T) {
 	// And it must still have REPORTED the abandoned claim, or "no mutation" is
 	// satisfied by a script that does nothing.
 	if !strings.Contains(res.stdout, "2801") || !strings.Contains(res.stdout, "ABANDONED") {
-		t.Errorf("the default run did not report the abandoned claim on the CLOSED issue.\ngot:\n%s", res.stdout)
+		t.Errorf("the default run did not report the abandoned claim.\ngot:\n%s", res.stdout)
 	}
-	mustReachEveryOpenBranch(t, res.stdout)
+	mustReachEveryBranch(t, res)
 }
 
-// TestStaleClaims_ApplySweepsOnlyClosedIssues is the other half: --apply must
-// remove the closed issue's claim and MUST NOT touch the open one.
-func TestStaleClaims_ApplySweepsOnlyClosedIssues(t *testing.T) {
+// TestStaleClaims_ApplySweepsOnlyColdClosedClaims is the other half: --apply
+// must remove the cold closed claim and nothing else.
+func TestStaleClaims_ApplySweepsOnlyColdClosedClaims(t *testing.T) {
 	res := runStaleClaims(t, mixedClaims(), []string{"--apply"})
 
 	if res.code != 0 {
@@ -269,162 +385,334 @@ func TestStaleClaims_ApplySweepsOnlyClosedIssues(t *testing.T) {
 	}
 	edits := res.edits()
 	if len(edits) != 1 {
-		t.Fatalf("expected exactly ONE label removal, got %d:\n  %s\nOnly the CLOSED issue's claim "+
-			"may be swept -- a claim on an open issue may be live work.", len(edits), strings.Join(edits, "\n  "))
+		t.Fatalf("expected exactly ONE label removal, got %d:\n  %s\nOnly a COLD claim on a CLOSED "+
+			"issue may be swept.", len(edits), strings.Join(edits, "\n  "))
 	}
 	if !strings.Contains(edits[0], "2801") || !strings.Contains(edits[0], "claimed:s4b9e2") {
 		t.Errorf("swept the wrong thing: %q", edits[0])
 	}
-	// Every OPEN issue by number, against every recorded edit -- not just
-	// edits[0]. The count check above would already have caught a second write,
-	// but naming the numbers is what makes the failure say WHICH state leaked.
-	for _, open := range []string{"2999", "2998", "2997"} {
+	// Every non-sweepable issue by number, against every recorded edit.
+	for _, keep := range []struct {
+		issue int
+		why   string
+	}{
+		{2999, "OPEN and fresh"},
+		{2998, "OPEN and idle -- may still be live work, the unsettled half of memql#2834"},
+		{2997, "OPEN with an unknown claim age"},
+		{2996, "an unrecognised state, which must never be swept"},
+		{2802, "CLOSED moments ago -- the window between a merge closing the issue and the session dropping its claim"},
+	} {
 		for _, e := range edits {
-			if strings.Contains(e, open) {
-				t.Errorf("swept a claim on OPEN issue #%s: %q\nOnly CLOSED issues may be swept: a claim "+
-					"on an open issue may be live work, and telling a live worker from a dead one is the "+
-					"unsettled half of memql#2834.", open, e)
+			if strings.Contains(e, fmt.Sprint(keep.issue)) {
+				t.Errorf("swept the claim on #%d (%s): %q", keep.issue, keep.why, e)
 			}
 		}
 	}
 	if got := res.forbidden(); len(got) > 0 {
 		t.Errorf("forbidden call under --apply:\n  %s", strings.Join(got, "\n  "))
 	}
-	mustReachEveryOpenBranch(t, res.stdout)
+	mustReachEveryBranch(t, res)
 }
 
-// TestStaleClaims_ParkedOpenIssueIsNotAFinding -- `parked` means a human already
-// recorded why the issue is not moving, so the claim is not what hides it.
-func TestStaleClaims_ParkedOpenIssueIsNotAFinding(t *testing.T) {
-	cfg := staleClaimsStub{issueList: tsv("2870", "OPEN", "claimed:s7c2e9,parked", "1000000000", "parked with a diagnosis")}
+// TestStaleClaims_StubRefusesWrites guards the guard.
+//
+// Every other test in this file is only as strong as the stub's screener, and
+// review proved that is not a formality: the first cut's `issue edit` arm was
+// an enumerating blocklist, 7 of these 14 spellings were accepted as harmless,
+// and smuggling any of them into the real script's removal call left the whole
+// suite green. If this test ever fails, the other results are worthless rather
+// than merely wrong.
+func TestStaleClaims_StubRefusesWrites(t *testing.T) {
+	dir, logPath := writeStaleClaimsStub(t, mixedClaims())
+
+	mustRefuse := [][]string{
+		{"issue", "edit", "7", "--add-label", "pwned"},
+		{"issue", "edit", "7", "--remove-label", "claimed:x", "--add-label=pwned"},
+		{"issue", "edit", "7", "--remove-label", "claimed:x", "--title=pwned"},
+		{"issue", "edit", "7", "--remove-label", "claimed:x", "--body=pwned"},
+		{"issue", "edit", "7", "--remove-label", "claimed:x", "--add-assignee=someone"},
+		{"issue", "edit", "7", "--remove-label", "claimed:x", "--body-file", "/etc/hostname"},
+		{"issue", "edit", "7", "--remove-label", "claimed:x", "--add-project", "Roadmap"},
+		{"issue", "edit", "7", "--remove-label", "claimed:x", "--remove-project", "Roadmap"},
+		{"issue", "edit", "7", "--remove-label", "claimed:x", "--milestone=m1"},
+		{"issue", "close", "7"},
+		{"issue", "comment", "7", "--body", "hi"},
+		{"api", "-XPOST", "repos/o/r/issues/7/labels"},
+		{"api", "--method=POST", "repos/o/r/issues/7/labels"},
+		{"api", "repos/o/r/issues/7/timeline", "--field=x"},
+		{"api", "repos/o/r/issues/7/timeline", "--raw-field=x"},
+		{"pr", "merge", "7", "--squash"},
+		{"label", "create", "evil"},
+		{"label", "delete", "claimed:x"},
+		{"issue", "list", "-R", "o/r", "--label", "claimed:x", "--jq", ".", "--template", "{{.}}"},
+		// Not writes -- these guard against the stub being MORE PERMISSIVE than
+		// real gh, which is its own way of testing nothing. Neither `gh api` nor
+		// `gh issue view` accepts --arg ("accepts 1 arg(s), received 4"), and the
+		// first cut of the script used it on both. Every lookup failed in
+		// production while the suite stayed green, because the stub took it.
+		{"api", "repos/o/r/issues/7/timeline", "--jq", ".", "--arg", "l", "x"},
+		{"issue", "view", "7", "-R", "o/r", "--json", "labels", "--jq", ".", "--arg", "w", "parked"},
+	}
+
+	for _, args := range mustRefuse {
+		cmd := exec.Command(filepath.Join(dir, "gh"), args...)
+		cmd.Env = staleClaimsEnv(dir, logPath)
+		out, err := cmd.CombinedOutput()
+		if err == nil {
+			t.Errorf("the stub ACCEPTED a write it must refuse: gh %s\noutput: %s\n\n"+
+				"Every arm must be default-deny (`-*) deny`). An enumerating blocklist only "+
+				"catches the spellings someone happened to list, and pflag's attached forms "+
+				"(--flag=value) walk past it -- that is exactly how this broke before (memql#2873).",
+				strings.Join(args, " "), out)
+		}
+	}
+
+	// And the legitimate call must still be admitted, or the tests above would
+	// pass because the stub refuses everything.
+	cmd := exec.Command(filepath.Join(dir, "gh"), "issue", "edit", "7", "-R", "o/r", "--remove-label", "claimed:x")
+	cmd.Env = staleClaimsEnv(dir, logPath)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("the stub refused the ONE legitimate mutation, so every 'no write happened' "+
+			"assertion in this file would pass vacuously: %v\n%s", err, out)
+	}
+}
+
+// TestStaleClaims_ClaimAgeComesFromTheLabelEvent pins the #2834 requirement
+// that age is the CLAIM's, not the issue's.
+//
+// Asserted per row, not against whole stdout. The earlier whole-stdout form was
+// vacuous: another row always supplied the substring, so deleting the guard
+// entirely left the suite green.
+func TestStaleClaims_ClaimAgeComesFromTheLabelEvent(t *testing.T) {
+	cfg := staleClaimsStub{labelIssues: map[string][]stubIssue{
+		"claimed:sA": {
+			// Claimed 100h ago -> SUSPECT, regardless of any later issue
+			// activity. Reading .updatedAt instead would call this FRESH the
+			// moment anyone commented.
+			{num: 3100, state: "OPEN", title: "claimed long ago", claimedAt: hoursAgo(100)},
+			// Claimed in the FUTURE: clock skew. Must be UNKNOWN, never a
+			// finding and never swept.
+			{num: 3101, state: "OPEN", title: "future timestamp", claimedAt: time.Now().Add(48 * time.Hour)},
+			// Closed and skewed: must NOT be swept either.
+			{num: 3102, state: "CLOSED", title: "closed, skewed claim", claimedAt: time.Now().Add(48 * time.Hour)},
+		},
+	}}
 	res := runStaleClaims(t, cfg, []string{"--apply"})
 
-	if !strings.Contains(res.stdout, "PARKED") {
-		t.Errorf("a parked open issue was not classified PARKED.\ngot:\n%s", res.stdout)
+	if got := res.rowFor(3100); !strings.Contains(got, "SUSPECT") {
+		t.Errorf("#3100 = %q, want SUSPECT: its claim is 100h old.", got)
+	}
+	if got := res.rowFor(3101); !strings.Contains(got, "UNKNOWN") {
+		t.Errorf("#3101 = %q, want UNKNOWN: a future label timestamp is clock skew, and skew must "+
+			"never manufacture a finding.", got)
+	}
+	if got := res.rowFor(3102); !strings.Contains(got, "UNKNOWN") {
+		t.Errorf("#3102 = %q, want UNKNOWN.", got)
+	}
+	if got := res.edits(); len(got) > 0 {
+		t.Errorf("swept a claim whose age is unknown: %v\nDefault-deny: a removal happens only when "+
+			"every input is positively known.", got)
+	}
+}
+
+// TestStaleClaims_IdleThresholdGatesBothSides pins IDLE_HOURS as the single
+// cutoff for "cold", on the closed side as well as the open one.
+func TestStaleClaims_IdleThresholdGatesBothSides(t *testing.T) {
+	cfg := staleClaimsStub{labelIssues: map[string][]stubIssue{
+		"claimed:sZ": {
+			{num: 3200, state: "OPEN", title: "open, 5h", claimedAt: hoursAgo(5)},
+			{num: 3201, state: "CLOSED", title: "closed, 5h", claimedAt: hoursAgo(5)},
+		},
+	}}
+
+	strict := runStaleClaims(t, cfg, []string{"--apply"}, "IDLE_HOURS=4")
+	if got := strict.rowFor(3200); !strings.Contains(got, "SUSPECT") {
+		t.Errorf("IDLE_HOURS=4, claim 5h old: #3200 = %q, want SUSPECT", got)
+	}
+	if len(strict.edits()) != 1 {
+		t.Errorf("IDLE_HOURS=4: expected the 5h-old CLOSED claim to be swept, got %v", strict.edits())
+	}
+
+	lax := runStaleClaims(t, cfg, []string{"--apply"}, "IDLE_HOURS=48")
+	if got := lax.rowFor(3200); !strings.Contains(got, "FRESH") {
+		t.Errorf("IDLE_HOURS=48, claim 5h old: #3200 = %q, want FRESH", got)
+	}
+	if got := lax.rowFor(3201); !strings.Contains(got, "CLOSING") {
+		t.Errorf("IDLE_HOURS=48: #3201 = %q, want CLOSING -- a recently-closed issue's claim is the "+
+			"session's normal shutdown window, not an abandonment.", got)
+	}
+	if got := lax.edits(); len(got) > 0 {
+		t.Errorf("IDLE_HOURS=48: swept a claim younger than the threshold: %v", got)
+	}
+}
+
+// TestStaleClaims_ParkedOpenIssueIsNotAFinding: a human already recorded why a
+// parked issue is not moving, so its claim is not what is hiding it.
+func TestStaleClaims_ParkedOpenIssueIsNotAFinding(t *testing.T) {
+	cfg := staleClaimsStub{labelIssues: map[string][]stubIssue{
+		"claimed:sP": {{num: 2870, state: "OPEN", title: "parked with a diagnosis",
+			claimedAt: hoursAgo(100), parked: true}},
+	}}
+	res := runStaleClaims(t, cfg, []string{"--apply"})
+	if got := res.rowFor(2870); !strings.Contains(got, "PARKED") {
+		t.Errorf("#2870 = %q, want PARKED", got)
 	}
 	if strings.Contains(res.stdout, "SUSPECT") {
-		t.Errorf("a parked issue was reported as SUSPECT; a human already recorded why it is not moving.\ngot:\n%s", res.stdout)
+		t.Errorf("a parked issue was reported as SUSPECT.\ngot:\n%s", res.stdout)
 	}
 	if got := res.edits(); len(got) > 0 {
 		t.Errorf("swept a claim on an OPEN parked issue: %v", got)
 	}
 }
 
-// TestStaleClaims_ClockSkewIsUnknownNotAFinding -- an updatedAt in the future
-// must never manufacture a finding, and must never be swept.
-func TestStaleClaims_ClockSkewIsUnknownNotAFinding(t *testing.T) {
-	cfg := staleClaimsStub{issueList: "" +
-		tsv("3001", "OPEN", "claimed:sX", "99999999999", "future timestamp") +
-		tsv("3002", "OPEN", "claimed:sY", "notanumber", "unparseable timestamp"),
-	}
-	res := runStaleClaims(t, cfg, []string{"--apply"})
-
-	if strings.Contains(res.stdout, "SUSPECT") {
-		t.Errorf("clock skew or an unparseable timestamp produced a SUSPECT finding.\ngot:\n%s", res.stdout)
-	}
-	if !strings.Contains(res.stdout, "UNKNOWN") {
-		t.Errorf("expected UNKNOWN for both rows.\ngot:\n%s", res.stdout)
-	}
-	if got := res.edits(); len(got) > 0 {
-		t.Errorf("swept an UNKNOWN claim: %v", got)
-	}
-}
-
-// TestStaleClaims_IdleThresholdGatesTheOpenReport pins that IDLE_HOURS is the
-// knob it documents, using a hermetic env so an exported IDLE_HOURS cannot
-// change the answer.
-func TestStaleClaims_IdleThresholdGatesTheOpenReport(t *testing.T) {
-	// updatedAt = epoch 1000000000 (2001), so the age is enormous either way;
-	// the threshold is what decides.
-	cfg := staleClaimsStub{issueList: tsv("3100", "OPEN", "claimed:sZ", "1000000000", "old open claim")}
-
-	suspect := runStaleClaims(t, cfg, nil, "IDLE_HOURS=4")
-	if !strings.Contains(suspect.stdout, "SUSPECT") {
-		t.Errorf("an open claim older than IDLE_HOURS was not SUSPECT.\ngot:\n%s", suspect.stdout)
-	}
-
-	// A threshold above the age must classify it FRESH. 9999999 hours is ~1141
-	// years, comfortably past any real age.
-	fresh := runStaleClaims(t, cfg, nil, "IDLE_HOURS=9999999")
-	if strings.Contains(fresh.stdout, "SUSPECT") {
-		t.Errorf("IDLE_HOURS did not gate the report.\ngot:\n%s", fresh.stdout)
-	}
-}
-
-// TestStaleClaims_BadThresholdIsAParameterError -- honest exit codes.
-func TestStaleClaims_BadThresholdIsAParameterError(t *testing.T) {
-	res := runStaleClaims(t, mixedClaims(), nil, "IDLE_HOURS=4h")
-	if res.code != 2 {
-		t.Errorf("IDLE_HOURS=4h gave exit %d, want 2 (bad parameter)\nstderr: %s", res.code, res.stderr)
-	}
-	if got := res.edits(); len(got) > 0 {
-		t.Errorf("mutated GitHub while rejecting a bad parameter: %v", got)
-	}
-}
-
-// TestStaleClaims_ListFailureIsLoud -- a failed list must not read as
-// "no stale claims".
-func TestStaleClaims_ListFailureIsLoud(t *testing.T) {
+// TestStaleClaims_LabelListFailureIsLoud: a failed enumeration must not read as
+// "no claims anywhere". That false all-clear is the failure this tool exists to
+// prevent, so producing one would be worse than not running.
+func TestStaleClaims_LabelListFailureIsLoud(t *testing.T) {
 	cfg := mixedClaims()
-	cfg.listFail = true
+	cfg.labelFail = true
+	res := runStaleClaims(t, cfg, nil)
+	if res.code == 0 {
+		t.Errorf("a failed label enumeration exited 0.\nstdout:\n%s", res.stdout)
+	}
+	if strings.Contains(res.stdout, "No claimed:* labels") {
+		t.Errorf("a failed enumeration printed an all-clear:\n%s", res.stdout)
+	}
+}
+
+// TestStaleClaims_FailedSweepExitsNonZero: every removal can be rejected and
+// the run must not look successful. The capability contract reserves 5 for
+// "op failed"; without it an automated caller cannot tell a complete sweep
+// from a total failure.
+func TestStaleClaims_FailedSweepExitsNonZero(t *testing.T) {
+	cfg := mixedClaims()
+	cfg.editFail = true
 	res := runStaleClaims(t, cfg, []string{"--apply"})
-
-	if res.code != 4 {
-		t.Errorf("a failed issue list gave exit %d, want 4 (gh unusable)\nstdout: %s", res.code, res.stdout)
+	if res.code == 0 {
+		t.Errorf("every label removal failed and the script still exited 0.\nstderr:\n%s", res.stderr)
 	}
-	if got := res.edits(); len(got) > 0 {
-		t.Errorf("mutated GitHub after a failed list: %v", got)
+	if res.code != 5 {
+		t.Errorf("exit %d; want 5 (op failed) per the documented exit codes", res.code)
 	}
-}
-
-// TestStaleClaims_UnrecognisedArgIsRejected -- and rejecting it must not run the
-// report, so a typo like `--aply` can never silently mean "report only" OR
-// silently mean "apply".
-func TestStaleClaims_UnrecognisedArgIsRejected(t *testing.T) {
-	res := runStaleClaims(t, mixedClaims(), []string{"--aply"})
-	if res.code != 2 {
-		t.Errorf("an unrecognised argument gave exit %d, want 2\nstderr: %s", res.code, res.stderr)
-	}
-	if got := res.edits(); len(got) > 0 {
-		t.Errorf("a typo'd flag mutated GitHub: %v", got)
+	if !strings.Contains(res.stderr, "FAILED") {
+		t.Errorf("a rejected removal was not reported on stderr:\n%s", res.stderr)
 	}
 }
 
-// TestStaleClaims_HelpDoesNotHitTheAPI -- `--help` must be free. The sibling
-// script's `main` never read $@, so `--help` ran a full live API sweep.
-func TestStaleClaims_HelpDoesNotHitTheAPI(t *testing.T) {
+// TestStaleClaims_MultipleLabelsAndIssuesAreEachHandled: the state a sweeper
+// most needs to get right. Two labels, several issues each.
+//
+// The stub deliberately does NOT drain stdin, and the script closes stdin on
+// every gh call: without that, a `gh` inside a `while read` loop consumes the
+// loop's input and only the first row is processed.
+func TestStaleClaims_MultipleLabelsAndIssuesAreEachHandled(t *testing.T) {
+	cfg := staleClaimsStub{labelIssues: map[string][]stubIssue{
+		"claimed:sA": {
+			{num: 4001, state: "CLOSED", title: "a1", claimedAt: hoursAgo(100)},
+			{num: 4002, state: "CLOSED", title: "a2", claimedAt: hoursAgo(100)},
+		},
+		"claimed:sB": {
+			{num: 4003, state: "CLOSED", title: "b1", claimedAt: hoursAgo(100)},
+		},
+	}}
+	res := runStaleClaims(t, cfg, []string{"--apply"})
+	if got := res.edits(); len(got) != 3 {
+		t.Fatalf("expected 3 removals across 2 labels, got %d:\n  %s\nIf only one landed, a gh call "+
+			"inside a read loop is eating the loop's stdin.", len(got), strings.Join(got, "\n  "))
+	}
+	for _, want := range []string{"4001", "4002", "4003"} {
+		found := false
+		for _, e := range res.edits() {
+			if strings.Contains(e, want) {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("#%s was never swept: %v", want, res.edits())
+		}
+	}
+}
+
+// TestStaleClaims_BadArgsAreRefusedBeforeAnyWork: a bad argument must exit 2
+// without touching the API, and must not leave --apply set.
+func TestStaleClaims_BadArgsAreRefusedBeforeAnyWork(t *testing.T) {
+	for _, args := range [][]string{
+		{"-apply"}, {"--apply=1"}, {"--APPLY"}, {"--aply"}, {"--bogus", "--apply"}, {"--apply", "--bogus"},
+	} {
+		res := runStaleClaims(t, mixedClaims(), args)
+		if res.code != 2 {
+			t.Errorf("args %v: exit %d, want 2", args, res.code)
+		}
+		if got := res.edits(); len(got) > 0 {
+			t.Errorf("args %v: made a write: %v", args, got)
+		}
+	}
+}
+
+// TestStaleClaims_BadThresholdIsRefused: IDLE_HOURS gates every sweep decision,
+// so an unusable value must stop the run rather than silently defaulting.
+func TestStaleClaims_BadThresholdIsRefused(t *testing.T) {
+	// "" is deliberately NOT in this list -- see the test below.
+	for _, v := range []string{"abc", "-1", "4.5", "4h", " 4", "0x4"} {
+		res := runStaleClaims(t, mixedClaims(), []string{"--apply"}, "IDLE_HOURS="+v)
+		if res.code != 2 {
+			t.Errorf("IDLE_HOURS=%q: exit %d, want 2", v, res.code)
+		}
+		if got := res.edits(); len(got) > 0 {
+			t.Errorf("IDLE_HOURS=%q: made a write: %v", v, got)
+		}
+	}
+}
+
+// TestStaleClaims_EmptyThresholdMeansDefault pins the one value that is NOT an
+// error. `${IDLE_HOURS:-4}` treats empty as unset, which is the conventional
+// shell reading and is safe in the direction that matters: it falls back to the
+// documented default rather than widening the sweep. Pinned rather than left
+// implicit, because "empty means 4" and "empty is refused" are both defensible
+// and a silent change between them moves what gets swept.
+func TestStaleClaims_EmptyThresholdMeansDefault(t *testing.T) {
+	empty := runStaleClaims(t, mixedClaims(), []string{"--apply"}, "IDLE_HOURS=")
+	unset := runStaleClaims(t, mixedClaims(), []string{"--apply"})
+
+	if empty.code != unset.code {
+		t.Errorf("IDLE_HOURS= exited %d, unset exited %d; they must agree", empty.code, unset.code)
+	}
+	if len(empty.edits()) != len(unset.edits()) {
+		t.Errorf("IDLE_HOURS= swept %v, unset swept %v; empty must behave exactly like unset",
+			empty.edits(), unset.edits())
+	}
+	// And it must be the DEFAULT of 4, not some other number: a 100h-old claim
+	// is cold, a 30min-old one is not.
+	if got := empty.rowFor(2998); !strings.Contains(got, "SUSPECT") {
+		t.Errorf("IDLE_HOURS=: #2998 (claimed 100h ago) = %q, want SUSPECT", got)
+	}
+	if got := empty.rowFor(2999); !strings.Contains(got, "FRESH") {
+		t.Errorf("IDLE_HOURS=: #2999 (claimed 30min ago) = %q, want FRESH", got)
+	}
+}
+
+// TestStaleClaims_HelpMakesNoApiCall: --help must not need credentials.
+func TestStaleClaims_HelpMakesNoApiCall(t *testing.T) {
 	res := runStaleClaims(t, mixedClaims(), []string{"--help"})
 	if res.code != 0 {
-		t.Errorf("--help gave exit %d, want 0", res.code)
+		t.Errorf("--help exited %d", res.code)
 	}
-	if !strings.Contains(res.stdout, "READ-ONLY") {
-		t.Errorf("--help did not print usage.\ngot:\n%s", res.stdout)
-	}
-	for _, c := range res.calls {
-		if strings.HasPrefix(c, "issue list") || strings.HasPrefix(c, "EDIT ") {
-			t.Errorf("--help hit the API: %q", c)
-		}
+	if len(res.calls) != 0 {
+		t.Errorf("--help invoked gh: %v", res.calls)
 	}
 }
 
-// TestStaleClaims_MultipleClaimsOnOneIssueAreEachHandled -- the race the loop
-// is supposed to prevent leaves TWO claim labels on one issue, which is the
-// state a sweeper most needs to get right.
-func TestStaleClaims_MultipleClaimsOnOneIssueAreEachHandled(t *testing.T) {
-	cfg := staleClaimsStub{issueList: tsv("3200", "CLOSED", "claimed:sA,bug,claimed:sB", "1000000000", "two claims")}
-	res := runStaleClaims(t, cfg, []string{"--apply"})
-
-	edits := res.edits()
-	if len(edits) != 2 {
-		t.Fatalf("expected TWO removals for two claim labels, got %d:\n  %s", len(edits), strings.Join(edits, "\n  "))
+// TestStaleClaims_NoClaimsIsAnHonestAllClear: with no claim labels the summary
+// must say so -- and must only be reachable after a SUCCESSFUL enumeration.
+func TestStaleClaims_NoClaimsIsAnHonestAllClear(t *testing.T) {
+	res := runStaleClaims(t, staleClaimsStub{labelIssues: map[string][]stubIssue{}}, []string{"--apply"})
+	if res.code != 0 {
+		t.Fatalf("exit %d\nstderr: %s", res.code, res.stderr)
 	}
-	joined := strings.Join(edits, " ")
-	for _, want := range []string{"claimed:sA", "claimed:sB"} {
-		if !strings.Contains(joined, want) {
-			t.Errorf("%s was not swept: %v", want, edits)
-		}
+	if !strings.Contains(res.stdout, "No claimed:* labels") {
+		t.Errorf("expected an all-clear, got:\n%s", res.stdout)
 	}
-	if strings.Contains(joined, "bug") {
-		t.Errorf("swept a non-claim label: %v", edits)
+	if got := res.edits(); len(got) > 0 {
+		t.Errorf("wrote something with no claims present: %v", got)
 	}
 }

@@ -434,11 +434,15 @@ prs-stalled:
 	bash scripts/dev/stalled-prs.sh
 
 ## Report claimed:* labels no live session is holding (memql#2834). READ-ONLY by
-## default. Pass APPLY=1 to remove the label from CLOSED issues, where an
-## abandoned claim is unambiguous and cannot race a live session; claims on OPEN
-## issues are always reported, never swept.
+## default. Pass APPLY=1 to remove the label from CLOSED issues whose claim has
+## also gone cold; claims on OPEN issues are always reported, never swept.
+##
+## $(filter ...), not a bare $(if $(APPLY),...): make's $(if) tests emptiness,
+## not truth, so APPLY=0 / APPLY=no / APPLY=false would all have passed --apply
+## and written to GitHub. On a target whose whole safety story is "mutation is
+## opt-in", APPLY=0 meaning yes inverts the operator's obvious intent.
 claims-stale:
-	bash scripts/dev/stale-claims.sh $(if $(APPLY),--apply,)
+	bash scripts/dev/stale-claims.sh $(if $(filter 1 true yes on,$(APPLY)),--apply,)
 
 ## Tidy go.mod dependencies
 tidy:
