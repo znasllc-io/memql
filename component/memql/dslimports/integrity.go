@@ -579,6 +579,15 @@ func (t *Tree) verifySignatureBindings(path string, f *languageAst.File, idx *de
 			errs = append(errs, fmt.Errorf(
 				"%s: signature concept %q is not declared anywhere in the DSL root", path, name))
 		case conceptAmbiguous:
+			// A candidate in the file's OWN domain is not ambiguous: #2617
+			// makes same-domain constructs ambient, so boot binds the local
+			// declaration without an import -- and TestNoSameDomainUse forbids
+			// the import that would otherwise silence this, so reporting it
+			// leaves the author no legal way to comply (memql#2805). Only a
+			// name whose candidates are ALL foreign is genuinely undecidable.
+			if sameDomainConceptDecl(path, f, idx, name) != nil {
+				continue
+			}
 			errs = append(errs, fmt.Errorf(
 				"%s: signature concept %q is not imported and is declared in %d places in the DSL root -- boot cannot disambiguate an unimported name; import it via a use declaration",
 				path, name, res.candidates))
@@ -1173,20 +1182,48 @@ func (t *Tree) resolveFilterConcept(path string, f *languageAst.File, idx *declI
 	if res := t.resolveConceptForFile(path, f, idx, name); res.state == conceptResolved && res.decl != nil {
 		return res.decl
 	}
-	// An EXPLICIT import wins over the ambient domain, matching boot:
-	// concept_resolver.go consults namespaceHintForName(file.Uses, ...) first
-	// and only falls back to the ambient domain when no import names the
-	// concept. Without this guard the fallback also fired for the documented
+	// The explicit-import guard and the same-domain preference both live in
+	// sameDomainConceptDecl now, so lane 2 and lane 5 cannot apply different
+	// rules. Without the guard the fallback also fired for the documented
 	// product-bundle case -- a file importing an engine concept from a
 	// namespace absent from the linted root -- and reported that namespace's
 	// properties as undeclared, i.e. red CI on legal DSL.
-	for _, u := range f.Uses {
-		if u == nil {
-			continue
-		}
-		for _, n := range u.Names {
-			if n == name {
-				return nil
+	return sameDomainConceptDecl(path, f, idx, name)
+}
+
+// sameDomainConceptDecl returns the UNIQUE declaration of `name` in the file's
+// OWN domain. It returns nil when the domain declares none, declares more than
+// one, or when an explicit import names the concept.
+//
+// This is the #2617 ambient rule in one place. Lane 5 has preferred the local
+// declaration since memql#2781; lane 2 did not, so it reported ambiguity for a
+// binding boot resolves fine -- and the import that would have silenced it is
+// the one TestNoSameDomainUse forbids, leaving an affected bundle no way to
+// pass the lint (memql#2805). Sharing the resolution rather than restating it
+// is the point: the two lanes disagreeing about what boot does is the defect.
+//
+// UNIQUENESS is load-bearing, not defensive. A domain declaring the same
+// concept twice is genuinely ambiguous -- boot silently last-wins and no
+// duplicate detector covers concepts -- so returning the first candidate would
+// convert lane 2's true positive into silence. That is the wrong direction for
+// a lint that gates product bundles, and an earlier cut of this change did
+// exactly that.
+//
+// An EXPLICIT import wins over the ambient domain, matching boot:
+// concept_resolver.go consults namespaceHintForName(file.Uses, ...) first and
+// only falls back to the ambient domain when no import names the concept.
+// Both lanes route through this, so neither can apply the guard the other
+// forgets.
+func sameDomainConceptDecl(path string, f *languageAst.File, idx *declIndex, name string) *languageAst.ConceptDecl {
+	if f != nil {
+		for _, u := range f.Uses {
+			if u == nil {
+				continue
+			}
+			for _, n := range u.Names {
+				if n == name {
+					return nil
+				}
 			}
 		}
 	}
@@ -1194,15 +1231,19 @@ func (t *Tree) resolveFilterConcept(path string, f *languageAst.File, idx *declI
 	if i := strings.IndexByte(path, '/'); i > 0 {
 		domain = path[:i]
 	}
+	var found *languageAst.ConceptDecl
 	for _, entry := range idx.concepts[name] {
 		if entry.decl == nil {
 			continue
 		}
 		if i := strings.IndexByte(entry.file, '/'); i > 0 && entry.file[:i] == domain {
-			return entry.decl
+			if found != nil {
+				return nil // Ambiguous WITHIN the domain -- not resolvable.
+			}
+			found = entry.decl
 		}
 	}
-	return nil
+	return found
 }
 
 // queryConceptBindings maps each struct-form query name in a file to the
