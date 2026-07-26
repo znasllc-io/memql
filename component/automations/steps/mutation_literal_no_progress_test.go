@@ -101,11 +101,14 @@ func TestRuntimeLiteralParsersTerminate(t *testing.T) {
 // sufficient: the dispatch must FAIL rather than quietly write a partial value
 // into the row.
 //
-// These inputs are the same MALFORMED literals the hang test feeds, so they go
-// through mustTerminate as well. Calling the parser directly would bypass the
-// `leaked` latch and, with the guard regressed, leak a second live spinner
-// next to the one the hang test already stopped on -- the exact unbounded
-// growth the latch exists to bound.
+// Every input here is malformed, so all of them go through mustTerminate.
+// Calling a parser directly with malformed input would bypass the `leaked`
+// latch and, with a guard regressed, leak a live spinner -- the exact
+// unbounded growth the latch exists to bound.
+//
+// (Three of the six are also fed by the hang test; `["abc]` and `[[1, 2]`
+// are not. An earlier version of this comment said all of them were, which
+// stopped being true the moment those two were added.)
 //
 // The list covers BOTH halves of the array loop's `!ok || newPos <= pos`
 // guard. It originally held only the first three, which are all NO-PROGRESS

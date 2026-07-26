@@ -1454,18 +1454,28 @@ func (e *MutationExecutor) parseAndEvaluateArrayLiteral(evaluator *automations.E
 //
 // All three ADVANCE pos to len(s) before reporting false. That matters to the
 // array caller's guard: `!ok || newPos <= pos` needs the `!ok` half, because
-// the position half alone cannot see a failure that advanced. The sibling in
-// component/memql is the opposite case -- its ok=false arms never advance *at
-// the positions its array loop calls from*, so there `!ok` is dead and
-// TestArrayOkImpliesNoProgress pins that. The two copies genuinely differ
-// here; do not "harmonise" one to the other without re-deriving which half is
-// doing the work.
+// the position half alone cannot see a failure that advanced.
 //
-// That qualifier is load-bearing, and dropping it is how three earlier
-// comments in this file became false. Unqualified the claim is simply wrong:
-// parseLiteralOrExpr skips leading whitespace internally and then returns the
-// advanced pos, so brute force finds 21,442 advancing ok=false cases across
-// all positions -- and 0 across the array-legal ones.
+// The sibling in component/memql differs, and the difference is NESTED, not
+// opposite -- an earlier version of this comment said "opposite halves", which
+// contradicted the guard's own comment forty lines up:
+//
+//	component/memql   load-bearing: {position}              `!ok` is dead
+//	this copy         load-bearing: {position, !ok}          both are live
+//
+// Verified by dropping each half in each copy: memql stays green without
+// `!ok` and hangs without the position check; this copy fails
+// TestRuntimeMalformedLiteralErrors without `!ok` and hangs without the
+// position check. So do not "harmonise" one to the other without re-deriving
+// which half does the work here.
+//
+// memql's ok=false arms never advance *at the positions its array loop calls
+// from* -- the qualifier matters, since parseLiteralOrExpr skips leading
+// whitespace internally and then returns the advanced pos. The counts live in
+// exactly one place, TestArrayOkImpliesNoProgress, which measures them rather
+// than asserting them. Deliberately not restated here: a previous version
+// quoted a figure 23x off the sibling's for the same measurement, in a comment
+// whose whole purpose was to stop this file's comments drifting false.
 func (e *MutationExecutor) parseValueFromString(s string, pos int) (string, int, bool) {
 	if pos >= len(s) {
 		return "", pos, true
