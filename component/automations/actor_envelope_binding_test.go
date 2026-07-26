@@ -3,6 +3,9 @@ package automations
 import (
 	"bytes"
 	"context"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"strings"
@@ -99,95 +102,201 @@ func TestBindNoCallerActorEnvelope_Denies(t *testing.T) {
 // and a helper-level test catches none of them -- removing a call site
 // leaves the suite green.
 //
-// So rather than one behavioural test per seam and a hole the next time
-// somebody adds a sixth evaluator, this asserts the invariant directly:
-// every NewEvaluator() in this package must bind an actor envelope.
-//
 // An unbound actor root is not neutral. The evaluator renders an
 // unresolved dotted path as its own path TEXT, so `actor.isClusterOwner`
 // is a non-empty (truthy) string and a negated gate reads TRUE with no
 // auth context.
+//
+// This walks the AST rather than the source text, and keys on the
+// CONSTRUCTED VARIABLE. A text scan proved to check the wrong thing: it
+// asked "does the word bindActorEnvelope appear nearby", which a decoy
+// binding, a commented-out call, an `if false` branch, a string literal,
+// or a nested closure all satisfy while the live evaluator escapes
+// unbound -- the exact bug class this is guarding (review round 4).
+// Closures matter concretely: the scheduler's real site is inside one.
 func TestEveryEvaluatorBindsAnActorEnvelope(t *testing.T) {
-	files, err := filepath.Glob("*.go")
+	fset := token.NewFileSet()
+	pkgs, err := parser.ParseDir(fset, ".", func(fi os.FileInfo) bool {
+		return !strings.HasSuffix(fi.Name(), "_test.go")
+	}, 0)
 	if err != nil {
-		t.Fatalf("glob: %v", err)
+		t.Fatalf("parse package: %v", err)
 	}
 
-	type site struct {
-		file string
-		fn   string
-		line int
+	type construction struct {
+		ident string
+		pos   token.Position
 	}
-	var unbound []site
+	// Keyed by the enclosing function body, so a binding in a sibling
+	// function cannot vouch for a construction over here.
+	built := map[ast.Node][]construction{}
+	bound := map[ast.Node]map[string]bool{}
+
+	// enclosing returns the innermost FuncDecl/FuncLit body containing pos.
+	var scopes []ast.Node
+	record := func(root ast.Node) {
+		ast.Inspect(root, func(n ast.Node) bool {
+			switch fn := n.(type) {
+			case *ast.FuncDecl:
+				if fn.Body != nil {
+					scopes = append(scopes, fn.Body)
+				}
+			case *ast.FuncLit:
+				scopes = append(scopes, fn.Body)
+			}
+			return true
+		})
+	}
+
+	for _, pkg := range pkgs {
+		for _, file := range pkg.Files {
+			scopes = nil
+			record(file)
+
+			// innermostScope finds the tightest body containing pos.
+			innermost := func(pos token.Pos) ast.Node {
+				var best ast.Node
+				for _, sc := range scopes {
+					if pos < sc.Pos() || pos > sc.End() {
+						continue
+					}
+					if best == nil || sc.Pos() > best.Pos() {
+						best = sc
+					}
+				}
+				return best
+			}
+
+			// Bindings inside a provably-dead branch do not count: an
+			// `if false { bindActorEnvelope(ctx, ev) }` is a real AST call
+			// with the right argument, and would otherwise vouch for an
+			// evaluator that is never actually bound at runtime.
+			var deadRanges [][2]token.Pos
+			ast.Inspect(file, func(n ast.Node) bool {
+				ifs, ok := n.(*ast.IfStmt)
+				if !ok {
+					return true
+				}
+				if id, ok := ifs.Cond.(*ast.Ident); ok && id.Name == "false" {
+					deadRanges = append(deadRanges, [2]token.Pos{ifs.Body.Pos(), ifs.Body.End()})
+				}
+				return true
+			})
+			inDeadBranch := func(pos token.Pos) bool {
+				for _, r := range deadRanges {
+					if pos >= r[0] && pos <= r[1] {
+						return true
+					}
+				}
+				return false
+			}
+
+			ast.Inspect(file, func(n ast.Node) bool {
+				switch node := n.(type) {
+				case *ast.AssignStmt:
+					// x := NewEvaluator()
+					for i, rhs := range node.Rhs {
+						call, ok := rhs.(*ast.CallExpr)
+						if !ok {
+							continue
+						}
+						id, ok := call.Fun.(*ast.Ident)
+						if !ok || id.Name != "NewEvaluator" {
+							continue
+						}
+						if i >= len(node.Lhs) {
+							continue
+						}
+						target, ok := node.Lhs[i].(*ast.Ident)
+						if !ok {
+							continue
+						}
+						sc := innermost(call.Pos())
+						built[sc] = append(built[sc], construction{target.Name, fset.Position(call.Pos())})
+					}
+				case *ast.CallExpr:
+					// bindActorEnvelope(ctx, x) / bindNoCallerActorEnvelope(x)
+					id, ok := node.Fun.(*ast.Ident)
+					if !ok {
+						return true
+					}
+					if id.Name != "bindActorEnvelope" && id.Name != "bindNoCallerActorEnvelope" {
+						return true
+					}
+					if inDeadBranch(node.Pos()) {
+						return true
+					}
+					for _, arg := range node.Args {
+						if a, ok := arg.(*ast.Ident); ok {
+							sc := innermost(node.Pos())
+							if bound[sc] == nil {
+								bound[sc] = map[string]bool{}
+							}
+							bound[sc][a.Name] = true
+						}
+					}
+				}
+				return true
+			})
+		}
+	}
+
 	checked := 0
-
-	for _, f := range files {
-		if strings.HasSuffix(f, "_test.go") || f == "actor_envelope_binding.go" {
-			continue
-		}
-		src, rerr := os.ReadFile(f)
-		if rerr != nil {
-			t.Fatalf("read %s: %v", f, rerr)
-		}
-		lines := strings.Split(string(src), "\n")
-
-		// Walk function-by-function: a construction and its binding can sit
-		// many lines apart (newEvaluatorForLogic seeds a dozen roots first),
-		// so a fixed line window both misses real pairs and invents false
-		// ones. The enclosing function is the honest unit.
-		fnStart, fnName := -1, ""
-		flush := func(end int) {
-			if fnStart < 0 {
-				return
-			}
-			body := strings.Join(lines[fnStart:end], "\n")
-			// The declaration of NewEvaluator itself is not a call site.
-			if fnName == "NewEvaluator" || !strings.Contains(body, "NewEvaluator()") {
-				fnStart = -1
-				return
-			}
+	for scope, sites := range built {
+		for _, c := range sites {
 			checked++
-			if !strings.Contains(body, "bindActorEnvelope(") &&
-				!strings.Contains(body, "bindNoCallerActorEnvelope(") {
-				unbound = append(unbound, site{f, fnName, fnStart + 1})
+			if bound[scope][c.ident] {
+				continue
 			}
-			fnStart = -1
+			t.Errorf("%s: evaluator %q is constructed but never passed to bindActorEnvelope / "+
+				"bindNoCallerActorEnvelope in the same scope -- an unbound actor.* read renders as "+
+				"its own path text and is TRUTHY, so a negated actor gate fails OPEN (memql#2801)",
+				c.pos, c.ident)
 		}
-		for i, line := range lines {
-			if strings.HasPrefix(line, "func ") {
-				flush(i)
-				fnStart = i
-				fnName = funcNameFrom(line)
-			}
-		}
-		flush(len(lines))
 	}
-
 	if checked == 0 {
-		t.Fatal("no NewEvaluator() call sites found; the scan must not pass vacuously")
+		t.Fatal("no NewEvaluator() constructions found; the scan must not pass vacuously")
 	}
-	for _, s := range unbound {
-		t.Errorf("%s:%d (%s) constructs an evaluator without binding an actor envelope -- "+
-			"an unbound actor.* read renders as its own path text and is TRUTHY, so a "+
-			"negated actor gate fails OPEN (memql#2801). Call bindActorEnvelope(ctx, ev), "+
-			"or bindNoCallerActorEnvelope(ev) where there is provably no caller.", s.file, s.line, s.fn)
-	}
-	t.Logf("checked %d function(s) constructing an evaluator", checked)
+	t.Logf("checked %d evaluator construction(s)", checked)
 }
 
-// funcNameFrom pulls the identifier out of a `func` declaration line,
-// handling both plain and method receivers.
-func funcNameFrom(line string) string {
-	rest := strings.TrimPrefix(line, "func ")
-	if strings.HasPrefix(rest, "(") {
-		if i := strings.Index(rest, ")"); i >= 0 {
-			rest = strings.TrimSpace(rest[i+1:])
+// No evaluator may be constructed outside this package, because the
+// binders are unexported -- a construction elsewhere could neither be
+// scanned by the invariant above nor use the helpers, and would have to
+// hand-roll the envelope. Zero such call sites exist today; this keeps
+// it that way rather than letting the guarantee quietly narrow.
+func TestNoEvaluatorConstructionOutsideThisPackage(t *testing.T) {
+	root := filepath.Join("..", "..")
+	var outside []string
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".go") {
+			return nil
 		}
+		if strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		slash := filepath.ToSlash(path)
+		if strings.Contains(slash, "/component/automations/") &&
+			!strings.Contains(slash, "/component/automations/steps/") {
+			return nil // the package the invariant above covers
+		}
+		src, rerr := os.ReadFile(path)
+		if rerr != nil {
+			return nil
+		}
+		if strings.Contains(string(src), "automations.NewEvaluator(") {
+			outside = append(outside, slash)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk: %v", err)
 	}
-	if i := strings.IndexAny(rest, "("); i >= 0 {
-		rest = rest[:i]
+	for _, f := range outside {
+		t.Errorf("%s constructs an Evaluator outside component/automations, where the actor-envelope "+
+			"binders are unexported and the binding invariant cannot see it (memql#2801). Either move "+
+			"the construction into the package or export a bound constructor.", f)
 	}
-	return strings.TrimSpace(rest)
 }
 
 // End-to-end at the seam the whole memql#2801 narrative is built around:
@@ -231,23 +340,35 @@ func TestScheduler_EventFilterOnActor_DoesNotFireWithoutAuth(t *testing.T) {
 	// actor-gated filter false. Before the binding, the unbound
 	// `actor.isClusterOwner` rendered as its own path text -- non-empty,
 	// therefore truthy -- and this admitted every event.
-	if !filterDeniedFor(log, gated.Name) {
+	if !schedulerLogged(log, "filter not satisfied", gated.Name) {
 		t.Errorf("the actor-gated @filter did NOT deny an event with no caller -- the actor root is "+
 			"unbound or resolving truthy (memql#2801). Scheduler log:\n%s", log)
 	}
-	// Control: the harness really does admit events, so the assertion above
-	// is meaningful rather than vacuous.
-	if filterDeniedFor(log, control.Name) {
-		t.Errorf("the control (non-actor) filter was denied too -- the harness is rejecting everything, "+
-			"so the assertion above proves nothing. Scheduler log:\n%s", log)
+
+	// The control asserts POSITIVELY that the harness fires. A negative
+	// "the control was not denied" is satisfied by any early return that
+	// skips the deny log -- a filter parse error, for instance -- which
+	// would leave the assertion above proving nothing (review round 4).
+	if !schedulerLogged(log, "event trigger fired", control.Name) {
+		t.Errorf("the control (non-actor) automation did not fire, so the harness admits nothing and "+
+			"the assertion above is vacuous. Scheduler log:\n%s", log)
 	}
 }
 
-// filterDeniedFor reports whether the scheduler logged a filter miss for
-// the named automation.
-func filterDeniedFor(log, automation string) bool {
+// schedulerLogged reports whether the scheduler logged the given message
+// for the named automation.
+//
+// The name is matched on the structured `automation=` field rather than
+// anywhere in the line: a bare substring match makes one automation's
+// name match another's when it is a prefix (review round 4).
+func schedulerLogged(log, msg, automation string) bool {
 	for _, line := range strings.Split(log, "\n") {
-		if strings.Contains(line, "filter not satisfied") && strings.Contains(line, automation) {
+		if !strings.Contains(line, msg) {
+			continue
+		}
+		if strings.Contains(line, "automation="+automation+" ") ||
+			strings.HasSuffix(line, "automation="+automation) ||
+			strings.Contains(line, `"automation":"`+automation+`"`) {
 			return true
 		}
 	}
