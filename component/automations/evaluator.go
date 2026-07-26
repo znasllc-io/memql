@@ -319,16 +319,73 @@ func (e *Evaluator) ContextFingerprint() map[string]any {
 		ctx["itemName"] = e.itemName
 	}
 
-	// Include custom variables
+	// Include custom variables, minus the wall-clock readings.
 	if len(e.custom) > 0 {
-		customCtx := make(map[string]any, len(e.custom))
-		for k, v := range e.custom {
-			customCtx[k] = v
-		}
-		ctx["custom"] = customCtx
+		ctx["custom"] = fingerprintCustoms(e.custom)
 	}
 
 	return ctx
+}
+
+// fingerprintCustoms copies the evaluator's customs for the cache key with the
+// WALL-CLOCK values removed (memql#2823).
+//
+// A clock reading is an ACCIDENTAL cache discriminator, not a designed one:
+// it differs on every evaluation by construction, so including one guarantees
+// a miss. Two seeds put one in the customs:
+//
+//	timestamp    executor.go, RFC3339 (second granularity)
+//	actor.now    auth.ActorEnvelopeMap, RFC3339 NANO
+//
+// The first only made hits improbable. #2801 then bound the actor envelope on
+// every evaluator, and a nanosecond field makes the function-step cache key a
+// guaranteed miss.
+//
+// The strip is deliberately SURGICAL rather than a recursive sweep for
+// clock-shaped keys. `event` is a custom too, so a recursive strip would also
+// drop `event.payload.timestamp` -- a real business field that SHOULD
+// discriminate a cached result. Removing a genuine input from a cache key is a
+// CORRECTNESS bug; leaving a clock in one is merely a slow one, so the
+// asymmetry decides the design.
+//
+// "Accidental" is exact, and worth stating because dropping `timestamp` is
+// not free: evaluationClock resolves the DSL's `now` from that same custom,
+// so for a function step whose body reads `now` -- e.g.
+// `logic revokeExpiredDelegations ( asOf: now )` -- the per-second key churn
+// WAS what kept it re-running. That is a cache-invalidation strategy made of
+// wall-clock granularity, which is not one: it narrows the window rather than
+// closing it, since the entry is TTL-bounded (default 5m) either way. The real
+// defect is that a side-effecting `logic` step is classified cacheable at all
+// (Step.IsCacheable), pre-existing and filed as memql#2869 -- this change unmasks
+// it rather than causing it, and the status quo it replaces is a cache that
+// provably can never hit.
+//
+// Only the function-step cache reads this (FingerprintStepInput), and it is
+// off by default behind MEMQL_STEP_CACHE_ENABLED -- set in no deploy overlay.
+// Dedup is unaffected: ComputeInitialChainHead keys on event data plus the
+// input fingerprint, not on evaluator customs.
+func fingerprintCustoms(custom map[string]any) map[string]any {
+	out := make(map[string]any, len(custom))
+	for k, v := range custom {
+		if k == "timestamp" {
+			continue
+		}
+		if k == "actor" {
+			if envelope, ok := v.(map[string]any); ok {
+				actor := make(map[string]any, len(envelope))
+				for ak, av := range envelope {
+					if ak == "now" {
+						continue
+					}
+					actor[ak] = av
+				}
+				out[k] = actor
+				continue
+			}
+		}
+		out[k] = v
+	}
+	return out
 }
 
 // Regular expressions for parsing expressions.
