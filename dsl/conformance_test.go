@@ -788,6 +788,8 @@ var userScopeFieldRe = regexp.MustCompile(`(^|[^.\w])(ownerUserId|userId|actorUs
 func rowSelectionSurface(body string) string {
 	var b strings.Builder
 	depth := 0
+	awaitingOpen := false
+
 	for _, line := range strings.Split(body, "\n") {
 		t := strings.TrimSpace(line)
 
@@ -798,18 +800,31 @@ func rowSelectionSurface(body string) string {
 		}
 
 		rest := t
-		if depth == 0 {
-			if idx := strings.Index(t, "update"); idx == 0 {
-				if open := strings.IndexByte(t, '{'); open >= 0 {
-					depth = 1
-					rest = strings.TrimSpace(t[open+1:])
-				} else {
-					// `update` on its own line; the `{` follows.
-					continue
-				}
+		switch {
+		case depth > 0:
+			// already inside the update block
+		case awaitingOpen:
+			open := strings.IndexByte(structureOf(t), '{')
+			if open < 0 {
+				continue // still between `update` and its `{`
+			}
+			awaitingOpen = false
+			depth = 1
+			rest = strings.TrimSpace(t[open+1:])
+		case strings.HasPrefix(t, "update"):
+			if open := strings.IndexByte(structureOf(t), '{'); open >= 0 {
+				depth = 1
+				rest = strings.TrimSpace(t[open+1:])
 			} else {
+				// `update` on its own line; the `{` is on a following line.
+				// The old helper handled this by flagging on the `update`
+				// line alone; dropping the flag made the new version WEAKER
+				// than the one it replaced (memql#2840 review round 2).
+				awaitingOpen = true
 				continue
 			}
+		default:
+			continue
 		}
 
 		// Inside the update block: collect every `id:` assignment, wherever it
@@ -821,12 +836,68 @@ func rowSelectionSurface(body string) string {
 				b.WriteByte('\n')
 			}
 		}
-		depth += strings.Count(rest, "{") - strings.Count(rest, "}")
+		// Braces are counted on the STRUCTURE of the line -- string literals
+		// blanked, comments dropped -- so `displayName: "}"` or a trailing
+		// `// ends with }` cannot close the block early. That is HIGH-1's
+		// failure mode reached through a different brace; matchingClose in
+		// this file has been string- and comment-aware all along.
+		s := structureOf(rest)
+		depth += strings.Count(s, "{") - strings.Count(s, "}")
 		if depth <= 0 {
 			depth = 0
 		}
 	}
 	return b.String()
+}
+
+// cutLineComment removes a `//` comment tail, ignoring `//` that falls inside a
+// double-quoted string literal.
+//
+// The naive `strings.Index(line, "//")` truncated a filter clause at the first
+// slashes in a URL: `displayName=="https://x/y" && requiresOwnerOrAdmin` lost
+// its gate term, so a properly-gated construct read as ungated (memql#2840
+// review round 2). filterClauseOf feeds TestPerRowAuthzClassification and
+// TestAdminGateIsATopLevelConjunct as well, so the truncation was never
+// specific to one gate.
+func cutLineComment(line string) string {
+	inString := false
+	for i := 0; i < len(line); i++ {
+		switch {
+		case inString && line[i] == '\\' && i+1 < len(line):
+			i++ // escaped byte inside a string is never a delimiter
+		case line[i] == '"':
+			inString = !inString
+		case !inString && line[i] == '/' && i+1 < len(line) && line[i+1] == '/':
+			return line[:i]
+		}
+	}
+	return line
+}
+
+// structureOf returns line with double-quoted string contents blanked and any
+// `//` comment tail removed, so brace counting and delimiter scans see only
+// structural punctuation.
+func structureOf(line string) string {
+	out := make([]byte, 0, len(line))
+	inString := false
+	for i := 0; i < len(line); i++ {
+		c := line[i]
+		switch {
+		case inString && c == '\\' && i+1 < len(line):
+			out = append(out, ' ', ' ')
+			i++
+		case c == '"':
+			inString = !inString
+			out = append(out, ' ')
+		case inString:
+			out = append(out, ' ')
+		case c == '/' && i+1 < len(line) && line[i+1] == '/':
+			return string(out)
+		default:
+			out = append(out, c)
+		}
+	}
+	return string(out)
 }
 
 // userScopeSelectionExemptions records constructs that select rows by a user-scope
@@ -1436,10 +1507,7 @@ func filterClauseOf(body string) string {
 	var out []string
 	inFilter := false
 	for _, raw := range strings.Split(body, "\n") {
-		line := raw
-		if i := strings.Index(line, "//"); i >= 0 {
-			line = line[:i]
-		}
+		line := cutLineComment(raw)
 		trim := strings.TrimSpace(line)
 		if !inFilter {
 			if rest, ok := strings.CutPrefix(trim, "filter"); ok && (rest == "" || rest[0] == ' ' || rest[0] == '\t') {

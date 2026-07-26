@@ -37,10 +37,17 @@ package dsl
 //
 // # What clears the gate
 //
-// Three things, and the middle one is the one worth explaining:
+// Two signals, tested STRUCTURALLY rather than by substring. The filter clause
+// is run through `clauseGuarantees` (#2832), which walks the boolean structure,
+// so `(row.id==args.userId || row.id==actor.userId)` does NOT clear -- one arm
+// returns rows the caller does not own -- while `requiresOwnerOrAdmin &&
+// (a || b)` DOES, because a top-level conjunct guarantees regardless of the
+// disjunction beside it. Comments are stripped from the clause first.
 //
-//   - an `actor.` term in the body -- the construct compares against its
-//     caller directly;
+// The signals `clauseGuarantees` looks for:
+//
+//   - an `actor.` term -- the construct compares against its caller
+//     directly;
 //   - a CONTEXT-SPEC reference. A spec bound to an `@actor` shape is the
 //     canonical spelling of a caller check, and it carries no literal `actor.`
 //     at the call site: `filter row.id==args.userId && requiresOwnerOrAdmin`
@@ -62,11 +69,12 @@ package dsl
 // classification for an open construct in general; it is not a reason to stop
 // asking the question about a row that identifies a PERSON.
 //
-// It catches two `@public` constructs, and they land in different places,
-// which is the point: `nodeTokenIdentityById` projects `identityFull` --
-// including `credentials` -- and is tracked as debt below, while
-// `userDisplayById` projects a name and an id and is recorded as accepted. A
-// rule that cleared both would have said nothing about either.
+// It catches three `@public` constructs, and they do NOT land in the same
+// place, which is the point of asking: `nodeTokenIdentityById` projects
+// `identityFull` -- including `credentials` -- and is tracked as debt below,
+// while `userDisplayById` (id + displayName) and `userActiveSpace` (id +
+// activePartitionId) are recorded as accepted. A rule that cleared all three
+// on sight would have said nothing about any of them.
 //
 // # Known limits, stated rather than implied
 //
@@ -154,7 +162,6 @@ var callerArgSelectionExemptions = map[string]string{
 	"identity/mutations.memql bumpUserDataExport":      "stamps the data-export marker on any userId.",
 	"identity/mutations.memql recordLegalAcceptance":   "records legal acceptance on behalf of any userId -- attributing consent to a person who did not give it.",
 	"identity/mutations.memql setUserActiveSpace":      "sets any userId's active space.",
-	"identity/queries.memql userActiveSpace":           "returns any userId's active space. #2860 landed @serverOnly and fixed its sibling userById (now gated by the requiresOwnerOrAdmin context-spec) but left this one ungated.",
 
 	// --- identity: the row is one person's credential ------------------------
 	"identity/mutations.memql rotateAuthSession":         "sets refreshTokenHash to a CALLER-SUPPLIED value on an arbitrary session id -- an attacker who can name a session can install a refresh token they control. The sharpest entry in this map after updateUser.",
@@ -186,21 +193,22 @@ var callerArgSelectionExemptions = map[string]string{
 // role does not qualify -- that is what the userById / userByIdSystem /
 // userDisplayById split exists for.
 var callerArgSelectionAccepted = map[string]string{
+	"identity/queries.memql userActiveSpace": "projects userActiveSpaceProjection, which is `row.id` + `activePartitionId` and nothing else -- no PII, as its own doc comment states. Carries @public deliberately. Review caught this one filed as debt with a description (\"ungated\") that described the caller check it lacks rather than the projection that makes it safe.",
 	"identity/queries.memql userDisplayById": "projects userDisplayCard, which is `row.id` + `displayName` and nothing else. #2860 introduced it precisely so a caller can render another user's name without userById's full row; cross-user display IS the construct's purpose, so caller-scoping it would defeat it.",
 }
 
-// stripLineComments blanks `//` comment tails so a clearance token mentioned in
-// a comment cannot pass for a caller check. Verified in review: a construct
-// with no gate at all, carrying only
-// `// TODO: gate with requiresOwnerOrAdmin later`, was cleared by the first
-// version of this gate.
+// stripLineComments removes `//` comment tails, ignoring `//` inside a string
+// literal. Both halves are load-bearing and both were learned the hard way:
+//
+//   - without stripping, a construct with NO gate at all was cleared by
+//     `// TODO: gate with requiresOwnerOrAdmin later`;
+//   - stripping naively, `avatarUrl=="https://x/y"` truncated the clause at
+//     the URL's `//` and threw away the real gate term after it, turning a
+//     properly-gated construct into a false flag.
 func stripLineComments(s string) string {
 	var b strings.Builder
 	for _, line := range strings.Split(s, "\n") {
-		if i := strings.Index(line, "//"); i >= 0 {
-			line = line[:i]
-		}
-		b.WriteString(line)
+		b.WriteString(cutLineComment(line))
 		b.WriteByte('\n')
 	}
 	return b.String()
@@ -334,34 +342,40 @@ func TestCallerSuppliedRowSelectionOnPersonScopedConcepts(t *testing.T) {
 			}
 			preamble := src[preambleStart:m[0]]
 
-			// A caller check only counts where it can actually constrain the
-			// selection, so this reads the SELECTION SURFACE with comments
-			// stripped -- not the whole body.
+			// A caller check counts only where it can actually constrain the
+			// selection, and only if the predicate's STRUCTURE guarantees it.
+			// Both halves are reused from the package rather than re-derived:
 			//
-			// Substring-testing the body clears three things that gate
-			// nothing, all demonstrated in review: a `// TODO: ... actor.userId
-			// ...` comment; an audit field like `credentials: { mintedBy:
-			// actor.userId }` on a write that still targets an arbitrary row;
-			// and `(row.id==args.userId || row.id==actor.userId)`, whose left
-			// arm returns rows the caller does not own. That last one is
-			// exactly what #2832 removed from TestPerRowAuthzClassification in
-			// this same file, so repeating it here would have re-imported a
-			// bug the package had already paid to learn.
+			//   - clauseGuarantees (#2832) walks the boolean structure, so
+			//     `(row.id==args.userId || row.id==actor.userId)` does not
+			//     clear -- one arm returns rows the caller does not own --
+			//     while `requiresOwnerOrAdmin && (a || b)` DOES, because a
+			//     top-level conjunct guarantees regardless of the disjunction
+			//     beside it. My first attempt refused to clear on any `||` at
+			//     all, which got the second case wrong and would have pushed
+			//     authors into writing bogus exemption entries.
+			//   - serverOnlyAnnotationRe is LINE-ANCHORED. Substring-testing
+			//     the preamble let `/// TODO: mark this @serverOnly` clear the
+			//     gate with no annotation present. The sibling gate already
+			//     carries that lesson in a comment; I repeated the mistake
+			//     anyway.
 			//
-			// The `||` case is handled by refusing to clear on a selection
-			// surface that contains one: a disjunct means SOME path through
-			// the predicate is ungated, and this gate should not certify that.
-			surface := stripLineComments(rowSelectionSurface(body))
-			gated := strings.Contains(preamble, "@serverOnly")
-			if !gated && !strings.Contains(surface, "||") {
-				gated = strings.Contains(surface, "actor.")
-				for _, ref := range specRefs {
-					if gated {
-						break
-					}
-					gated = ref.MatchString(surface)
+			// Comments are stripped from the clause first, so a gate term
+			// named only in a comment cannot clear.
+			leaf := func(pred string) bool {
+				if strings.Contains(pred, "actor.") {
+					return true
 				}
+				for _, ref := range specRefs {
+					if ref.MatchString(pred) {
+						return true
+					}
+				}
+				return false
 			}
+			clause := stripLineComments(filterClauseOf(body))
+			gated := serverOnlyAnnotationRe.MatchString(preamble) ||
+				(strings.TrimSpace(clause) != "" && clauseGuarantees(clause, leaf))
 			if gated {
 				continue
 			}
