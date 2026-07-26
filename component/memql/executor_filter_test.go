@@ -808,6 +808,18 @@ func TestCompileProvenanceComparison_SQLPath(t *testing.T) {
 // which is how these two queries came to filter a duplicated payload field
 // instead of the row id in the first place, justified by a comment claiming
 // the row id "would need partition+concept prefixing".
+//
+// Scope, stated precisely because it is narrower than the name suggests:
+// this covers the READ side only -- resolveFullId against id.BuildNodeId.
+// Concept.storageId is unexported in another package, so on its own this
+// test compares the read path against a function the write path might have
+// stopped calling. TestConceptStorageIdMatchesBuildNodeId
+// (component/database/memory-nodes/concept_storage_id_2784_test.go) pins
+// that remaining link, including the already-qualified branch which has no
+// analogue here. Neither is sufficient alone; together they chain.
+//
+// Neither one guards the .memql filters themselves -- reverting those is
+// caught only by the Postgres-gated tests in the db-tests CI lane.
 func TestRowIdFilterRoundTripsWithStorageId(t *testing.T) {
 	cases := []struct{ concept, bare string }{
 		// The two #2784 queries: deploymentById and oAuthClientByClientId.

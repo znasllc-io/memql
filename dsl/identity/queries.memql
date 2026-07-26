@@ -311,10 +311,16 @@ query authCode authCodeByCodeHash {
 // regardless of state so the handler can apply the redirect-URI matcher.
 //
 // Filters on the row id: createOAuthClient stamps `id: args.clientId`, so
-// the row intrinsic IS the clientId and it is the indexed column (PK is
-// (partition, id, createdAt)) rather than a JSON payload probe. The caller
-// still passes the bare clientId -- resolveFullId expands a colon-free id
-// against the query's bound concept (#2784).
+// the row intrinsic IS the clientId and it is the leading column of the
+// primary key -- PRIMARY KEY (id, "createdAt") -- rather than a JSON
+// payload probe. The caller still passes the bare clientId -- resolveFullId
+// expands a colon-free id against the query's bound concept (#2784).
+//
+// One behaviour change: a client_id containing a colon is now REJECTED by
+// resolveFullId (non-canonical id) where the payload probe silently matched
+// nothing. client_id is caller-supplied and unauthenticated here, but
+// ResolveClient swallows the error and returns nil, so the handler still
+// emits a clean invalid_client -- the only difference is one WARN log.
 //
 // The payload field stays: oauthClientFull projects it and the discovery /
 // client-resolver paths read it off the payload.

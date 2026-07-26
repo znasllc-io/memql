@@ -60,15 +60,22 @@ func TestQueryDeploymentById_FiltersOnRowIdNotThePayloadMirror(t *testing.T) {
 		"deploymentById(%q) MUST NOT return a different deployment; got %v", wantID, got)
 }
 
-// TestQueryDeploymentById_ReturnsTheWholeAppendOnlyTimeline covers the
-// property the query exists for: every status transition appends a new row
-// under the SAME concept id, and the query must return all of them so a
-// deployment's status is reconstructable asOf any point in time.
+// TestQueryDeploymentById_ReturnsTheLatestVersionAfterAnAppend pins the
+// behaviour across a status transition, which is where a by-id filter could
+// plausibly diverge from a payload filter: every transition APPENDS a new
+// row under the same concept id, so the filter must still find the row and
+// must surface the newest version.
 //
-// This is the half a naive migration would break -- filtering the row id is
-// only equivalent to filtering the payload mirror if every appended version
-// shares that id.
-func TestQueryDeploymentById_ReturnsTheWholeAppendOnlyTimeline(t *testing.T) {
+// An earlier draft of this test asserted the opposite -- that the query
+// returns every appended version -- because the DSL comment, the commit
+// message and component/deploycontrol/deploy.go all say so. The engine does
+// not do that. executeFilterQuery runs loadLatestNodes (DISTINCT ON (id)
+// ORDER BY id, "createdAt" DESC) plus a seen[id] skip, and nodesToMap /
+// intersectNodeSets are keyed by id, so a result set collapses to one row
+// per id whether or not asOf is present. The assertion below is what
+// actually holds; #1872's asOf-reconstructability criterion is a separate
+// gap, filed as its own issue.
+func TestQueryDeploymentById_ReturnsTheLatestVersionAfterAnAppend(t *testing.T) {
 	eng, _, _ := readMergeTestEngine(t)
 	ctx := clusterOwnerCtx("u-depltl-2784")
 	sfx := uniqueSuffix("depltl2784")
@@ -89,8 +96,17 @@ func TestQueryDeploymentById_ReturnsTheWholeAppendOnlyTimeline(t *testing.T) {
 	require.NotNil(t, res)
 	require.NotNil(t, res.Bundle)
 
-	require.GreaterOrEqual(t, len(res.Bundle.Nodes), 2,
-		"deploymentById must return EVERY appended version (create + status transition), got %d", len(res.Bundle.Nodes))
+	require.Len(t, res.Bundle.Nodes, 1,
+		"every query result collapses to one row per id; got %d", len(res.Bundle.Nodes))
+
+	// The surviving row must be the NEWEST append, not the create. This is
+	// the half that would break if the row-id filter and the version
+	// collapse disagreed about which id they key on.
+	payload := res.Bundle.Nodes[0].GetPayload().AsMap()
+	require.Equal(t, "in_progress", payload["status"],
+		"deploymentById must surface the latest appended version, not the original create")
+	require.Equal(t, "2.0.0", payload["version"],
+		"read-merge update must carry create-time metadata forward")
 }
 
 func TestQueryOAuthClientByClientId_FiltersOnRowIdNotThePayloadMirror(t *testing.T) {
