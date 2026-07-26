@@ -44,22 +44,58 @@ query deployment deploymentsForCluster {
 
 // ---- deploymentById ----
 
-// Full status-transition history for a single deployment (#1872).
-// Filters on payload.deploymentId (NOT the canonical row id, which would
-// need partition+concept prefixing) so the caller passes the bare
-// deploymentId. Returns EVERY appended row for that deployment -- the
-// complete lifecycle timeline -- so a deployment's status is
-// reconstructable asOf any point in time (acceptance criterion). No asOf
-// directive: the consumer wants all versions, not the latest.
+// Current state of a single deployment (#1872).
+// Filters on the row id: createDeployment stamps `id: args.deploymentId`,
+// so the row intrinsic IS the deploymentId and it is the leading column of
+// the primary key -- PRIMARY KEY (id, "createdAt") -- rather than a JSON
+// payload probe. The caller still passes the bare deploymentId --
+// resolveFullId (component/memql/executor_filter.go) expands a colon-free
+// id against the query's bound concept, which ensureBoundConceptFilter
+// folds into the filter of every signature-bound struct-form query.
+//
+// This previously filtered payload.deploymentId, justified by a comment
+// claiming the row id "would need partition+concept prefixing". That was
+// stale on both counts: the {partition}: prefix was retired in #56, and
+// the concept prefix is composed by the engine, not the caller (#2784).
+//
+// The payload field STAYS, on two verified readers: node/reconciler.go
+// reads deploymentId off the payload, and deploymentFull projects it. So
+// deleting it is a consumer-visible change this fix has no business
+// forcing. (An earlier draft of this comment also claimed
+// deploymentNodeSpec keys on it as an FK and that previousDeploymentId
+// points at it. Both were wrong -- deploymentNodeSpec composes its id
+// from its OWN args.deploymentId, and previousDeploymentId holds another
+// deployment's row id -- so neither would be affected by dropping the
+// mirror. Corrected in review rather than left to mislead the next
+// person deciding whether the field can go.)
+//
+// Querying THROUGH the mirror is the defect; storing it is not.
+// TestByIdQueriesFilterTheRowIdNotASelfMirror (dsl/row_id_mirror_test.go)
+// enforces exactly that distinction, across the tree rather than here.
+//
+// Returns ONE row: the latest version. The comment here previously
+// claimed this returned "EVERY appended row ... reconstructable asOf any
+// point in time". That is not what the engine does -- executeFilterQuery
+// runs loadLatestNodes (DISTINCT ON (id) ORDER BY id, "createdAt" DESC)
+// plus a seen[id] skip, and nodesToMap / intersectNodeSets are keyed by
+// id too, so every query result collapses to one row per id regardless of
+// asOf. Status transitions still APPEND (one row per transition under the
+// same id) and the history is in the table; there is simply no query mode
+// that returns more than the newest. #1872's asOf-reconstructability
+// criterion is tracked separately in #2880.
+//
+// Omitting `asOf latest` therefore changes nothing here; it is left off
+// because the collapse is unconditional.
 
-/// All status-transition rows for one deployment, by deploymentId, oldest-to-newest (full lifecycle
-/// history; reconstructable asOf any time). #1872.
+/// The CURRENT state of one deployment, by deploymentId. Returns at most one row -- the latest
+/// version. Status transitions append under the same id, but every query result collapses to one
+/// row per id, so this is not a timeline read; an all-versions mode is tracked in #2880.
 @unbounded("deployment by unique deploymentId -- bounded to a single row")
 query deployment deploymentById {
   args {
     deploymentId  string!
   }
-  filter  deploymentId == args.deploymentId
+  filter  row.id == args.deploymentId
   shape   deploymentFull
 }
 
