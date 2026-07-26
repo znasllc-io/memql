@@ -25,7 +25,11 @@
 // sharing the layer where they had actually drifted.
 package dslclause
 
-import "strings"
+import (
+	"strings"
+	"unicode"
+	"unicode/utf8"
+)
 
 // StructQueryDirectives is the set parseStructQueryBody recognises inside a
 // struct-form query body (component/language/parser/rewriter.go). Anything
@@ -69,9 +73,40 @@ var BodyKeywords = append(append([]string{}, StructQueryDirectives...),
 // read `sortOrder ...` as a `sort` directive -- a quirk worth not copying
 // into the gates, where it would silently reclassify a payload field named
 // after a directive.
+// WHITESPACE MEANS ANY UNICODE SPACE, not just ' ' and '\t' (memql#2863).
+// The engine's struct-query normaliser separates keyword from body with
+// strings.TrimSpace (component/language/parser/rewriter.go), and TrimSpace IS
+// unicode.IsSpace -- so `filter<NBSP>id == args.x` and every other unicode
+// separator is accepted by the engine. A gate written to the ASCII pair was
+// narrower than the grammar it polices: U+00A0, U+2003 and U+3000 all scored
+// zero hits.
+//
+// Testing rest[0] was additionally a BYTE comparison against a UTF-8 string,
+// so it could never have matched a multi-byte separator however the set was
+// spelled.
+//
+// This lives HERE rather than in one caller on purpose, and that is the whole
+// reason this package exists. Widening only the sense scanner produced a real
+// contradiction: a compliant `filter(row.id==args.x && ownerUserId==actor.userId)`
+// passed the widened scanner and FAILED TestPerRowAuthzClassification, whose
+// opener had not been widened, so the caller-check sitting in the clause was
+// invisible and the query was misclassified as unguarded.
+//
+// `(` is deliberately NOT a separator here even though the engine accepts
+// `filter(...)`. Accepting it would put the four openers in conflict again --
+// and the tree-convention gate TestClauseOpenerUsesAPlainSpace forbids the
+// spelling in authored .memql instead, which is how #2817 closed its sibling
+// shape. `sort(...)` is rejected by the grammar outright.
 func StartsWith(trimmed, keyword string) bool {
 	rest, ok := strings.CutPrefix(trimmed, keyword)
-	return ok && (rest == "" || rest[0] == ' ' || rest[0] == '\t')
+	if !ok {
+		return false
+	}
+	if rest == "" {
+		return true
+	}
+	r, _ := utf8.DecodeRuneInString(rest)
+	return unicode.IsSpace(r)
 }
 
 // StartsAnyOf reports whether a trimmed line opens any of the keywords.

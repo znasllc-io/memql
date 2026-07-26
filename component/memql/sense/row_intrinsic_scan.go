@@ -18,6 +18,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/znasllc-io/memql/component/language/dslclause"
 )
 
 // BareRowIntrinsic is one filter predicate naming a row intrinsic bare.
@@ -148,44 +150,29 @@ func ScanBareRowIntrinsics(source string) []BareRowIntrinsic {
 // isFilterClauseOpener reports whether a trimmed line opens a `filter` clause.
 // `@filter(...)` on an automation is a different surface with a different
 // evaluator and is deliberately excluded -- it does not start with `filter`.
-// The separator set is ANY UNICODE SPACE, plus `(`. It was `' '` or `'\t'`,
-// which let four spellings the engine accepts score zero hits and walk past
-// both row-intrinsic gates (memql#2863 / #2779 / #2786).
+// The separator set is ANY UNICODE SPACE, and it is owned by
+// dslclause.StartsWith rather than duplicated here (memql#2863 / #2815).
 //
-// Measured through NormaliseQuerySource -> ParseFile, which is the path a
-// struct query actually takes. ParseFile ALONE rejects all four and would have
-// argued the hole was already closed:
+// It was `' '` or `'\t'`, which let three unicode separators the engine accepts
+// score zero hits -- U+00A0, U+2003, U+3000 -- and `rest[0]` was a BYTE test
+// against a UTF-8 string, so it could never have matched a multi-byte separator
+// however the set was spelled.
 //
-//	sep     normalise  parse  hits BEFORE
-//	SPACE   ok         ok     1
-//	TAB     ok         ok     1
-//	NBSP    ok         ok     0   <- U+00A0
-//	EMSP    ok         ok     0   <- U+2003
-//	IDSP    ok         ok     0   <- U+3000, not named in the issue
-//	PAREN   ok         ok     0
+// Widening it HERE first was the wrong move and produced a real contradiction:
+// three other openers walk the same text (dsl/conformance_test.go,
+// component/language/pagination/checker.go, dslclause itself), so a compliant
+// `filter(row.id==args.x && ownerUserId==actor.userId)` passed this scanner and
+// FAILED TestPerRowAuthzClassification, whose opener had not moved -- the
+// caller-check sitting in the clause was invisible and the query was
+// misclassified as unguarded. dslclause exists precisely to stop that drift.
 //
-// Testing `rest[0]` was also a BYTE comparison against a UTF-8 string, so it
-// could never have matched a multi-byte separator however the set was spelled.
-//
-// `(` is included because the engine genuinely accepts `filter(...)`. The
-// sibling question was settled the other way by the same probe: `sort(...)` is
-// REJECTED -- "sort field must be a string literal ... (got \"(\")" -- so
-// isSortClauseOpener deliberately does NOT accept `(`. It already handles
-// unicode space, via its TrimLeftFunc(unicode.IsSpace).
-//
-// The lesson these gates keep re-teaching: the lexer admits unicode.IsLetter /
-// IsDigit and separators are not reliably ASCII, so a guard written to an ASCII
-// set is narrower than the grammar it polices.
+// `(` is NOT a separator, even though the engine accepts `filter(...)`.
+// Accepting it in one opener re-creates the conflict; the tree-convention gate
+// dsl.TestClauseOpenerUsesAPlainSpace forbids the spelling in authored .memql
+// instead, which is how #2817 closed its sibling shape. `sort(...)` the grammar
+// rejects outright.
 func isFilterClauseOpener(trimmed string) bool {
-	rest, ok := strings.CutPrefix(trimmed, "filter")
-	if !ok {
-		return false
-	}
-	if rest == "" {
-		return true
-	}
-	r, _ := utf8.DecodeRuneInString(rest)
-	return unicode.IsSpace(r) || r == '('
+	return dslclause.StartsWith(trimmed, "filter")
 }
 
 // isSortClauseOpener reports whether a trimmed line opens a `sort` clause.

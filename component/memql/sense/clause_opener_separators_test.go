@@ -43,16 +43,29 @@ import (
 var clauseSeparators = []struct {
 	name string
 	sep  string
-	// sortLegal records whether the SORT clause admits this separator. `(` is
-	// the one asymmetry: `filter(...)` parses, `sort(...)` does not.
+	// sortLegal records whether the SORT clause admits this separator.
 	sortLegal bool
+	// scannerSees records whether the OPENER is expected to recognise it.
+	//
+	// `(` is the asymmetry, and it is deliberate. The engine accepts
+	// `filter(...)`, but FOUR openers walk .memql text line by line -- this
+	// one, dsl/conformance_test.go, component/language/pagination/checker.go,
+	// and dslclause -- and teaching only some of them `(` puts them in
+	// conflict: a compliant `filter(row.id==args.x && ownerUserId==actor.userId)`
+	// passes this scanner and FAILS TestPerRowAuthzClassification, whose opener
+	// does not see the clause and so cannot see the caller-check inside it.
+	//
+	// So `(` is banned from authored .memql by the tree-convention gate
+	// dsl.TestClauseOpenerUsesAPlainSpace instead -- the same way #2817 closed
+	// its sibling shape -- and every opener stays correct simultaneously.
+	scannerSees bool
 }{
-	{"space", " ", true},
-	{"tab", "\t", true},
-	{"nbsp", " ", true},
-	{"em space", " ", true},
-	{"ideographic space", "　", true},
-	{"open paren", "(", false},
+	{"space", " ", true, true},
+	{"tab", "\t", true, true},
+	{"nbsp", " ", true, true},
+	{"em space", " ", true, true},
+	{"ideographic space", "　", true, true},
+	{"open paren", "(", false, false},
 }
 
 // TestClauseSeparatorFixturesAreNotAscii guards the fixtures themselves.
@@ -96,14 +109,15 @@ func engineAcceptsQuery(t *testing.T, src string) bool {
 func TestFilterClauseOpenerSeesEverySeparatorTheEngineAccepts(t *testing.T) {
 	for _, tc := range clauseSeparators {
 		t.Run(tc.name, func(t *testing.T) {
-			body := "row.id == args.x"
 			src := "query w q {\n  filter" + tc.sep + "id == args.x"
 			if tc.sep == "(" {
 				src += ")"
 			}
 			src += "\n  shape s\n}\n"
-			_ = body
 
+			// The engine-acceptance probe uses the `row.`-namespaced form so it
+			// tests the SEPARATOR, not the gate; `src` above is the BARE form,
+			// which is what the scanner must flag. Both parse.
 			legal := "query w q {\n  filter" + tc.sep + "row.id == args.x"
 			if tc.sep == "(" {
 				legal += ")"
@@ -115,12 +129,19 @@ func TestFilterClauseOpenerSeesEverySeparatorTheEngineAccepts(t *testing.T) {
 					"the other reading is that NormaliseQuerySource regressed.", tc.sep)
 			}
 
-			hits := ScanBareRowIntrinsics(src)
-			if len(hits) == 0 {
+			hits := len(ScanBareRowIntrinsics(src))
+			switch {
+			case tc.scannerSees && hits == 0:
 				t.Errorf("`filter%q` scored ZERO hits on a BARE row intrinsic the engine accepts, "+
 					"so it walks past TestFilterIntrinsicsUseRowNamespace (#2779) and "+
 					"TestSortKeysUseRowNamespace (#2786) -- a bare filter intrinsic compiles to a "+
 					"different predicate than the author wrote (memql#2863).", tc.sep)
+			case !tc.scannerSees && hits != 0:
+				t.Errorf("`filter%q` scored %d hit(s), but this separator is deliberately NOT "+
+					"recognised by the opener -- it is banned from authored .memql by "+
+					"dsl.TestClauseOpenerUsesAPlainSpace instead, so that all four openers stay "+
+					"consistent. Recognising it here re-creates the conflict described on "+
+					"clauseSeparators.", tc.sep, hits)
 			}
 		})
 	}
@@ -128,10 +149,12 @@ func TestFilterClauseOpenerSeesEverySeparatorTheEngineAccepts(t *testing.T) {
 
 // TestFilterClauseOpenerRejectsNonSeparators is the over-correction guard.
 //
-// Widening to "any unicode space or `(`" must not turn a longer identifier that
-// merely STARTS with `filter` into a clause opener -- an args field named
-// `filterMode`, or a payload property `filterable`, would otherwise have its
-// line scanned as a predicate.
+// Widening to "any unicode space" must not turn a longer identifier that merely
+// STARTS with `filter` into a clause opener -- an args field named `filterMode`,
+// or a payload property `filterable`, would otherwise have its line scanned as a
+// predicate. That boundary is the documented reason dslclause.StartsWith exists
+// rather than a bare HasPrefix: the parser itself would read `sortOrder ...` as a
+// `sort` directive, a quirk deliberately not copied into the gates.
 func TestFilterClauseOpenerRejectsNonSeparators(t *testing.T) {
 	for _, trimmed := range []string{
 		"filterMode string!",
@@ -147,10 +170,15 @@ func TestFilterClauseOpenerRejectsNonSeparators(t *testing.T) {
 				"as a predicate", trimmed)
 		}
 	}
-	// The bare keyword on its own line still opens a clause (the body follows
-	// on the next line), and that must keep working.
+	// The bare keyword alone still matches, and that is deliberate even though
+	// the ENGINE does not support it: `filter` with nothing after it normalises
+	// to a body with no filter clause at all, silently dropping it. The opener
+	// keeps matching so the scanner sees a construct an author plainly INTENDED
+	// as a filter; scoring zero there would be the same blindness this issue is
+	// about. (An earlier version of this comment claimed the body may continue on
+	// the following line -- it may not, and the file header says so.)
 	if !isFilterClauseOpener("filter") {
-		t.Error(`isFilterClauseOpener("filter") = false; the bare keyword opens a clause whose body is on the following line`)
+		t.Error(`isFilterClauseOpener("filter") = false; the bare keyword must still match`)
 	}
 }
 
