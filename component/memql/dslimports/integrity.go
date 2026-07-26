@@ -913,8 +913,165 @@ func (t *Tree) verifyQueryFilterFields(path string, f *languageAst.File, idx *de
 				"%s: query %q: filter compares field %q, which concept %q does not declare",
 				path, fd.Name, head, conceptName))
 		}
+
+		// Sibling of the head check above: a literal compared against an
+		// ENUM-typed property must be one of its declared members
+		// (memql#2827). An out-of-set literal is statically always-false, so
+		// the predicate silently matches nothing.
+		//
+		// agentInteractionCount shipped `utteranceType in ["speech",
+		// "agentGreeting"]` against the enum ("speech","text","action",
+		// "system"). "agentGreeting" is a `source.kind` value, so that arm
+		// matched nothing -- and since every writer stamping source.agentId
+		// writes "text", the "speech" arm excluded exactly the rows the
+		// agentId conjunct selected. The query returned ~0 rows for every
+		// agent, leaving agentIsKnownToUser permanently false and agents
+		// re-introducing themselves in every new space.
+		for _, v := range filterEnumViolations(fd.Body, conceptEnumValues(decl)) {
+			errs = append(errs, fmt.Errorf(
+				"%s: query %q: filter compares %q to %q, which is not a member of its enum (%s) -- %s",
+				path, fd.Name, v.field, v.value, strings.Join(v.allowed, ", "), v.consequence))
+		}
 	}
 	return errs
+}
+
+// conceptEnumValues maps each enum-typed property to its declared members.
+func conceptEnumValues(decl *languageAst.ConceptDecl) map[string][]string {
+	out := map[string][]string{}
+	for _, p := range decl.Properties {
+		if p == nil || p.Name == "" || p.Type == nil {
+			continue
+		}
+		if p.Type.Kind == "enum" && len(p.Type.EnumValues) > 0 {
+			out[p.Name] = p.Type.EnumValues
+		}
+	}
+	return out
+}
+
+type enumViolation struct {
+	field   string
+	value   string
+	allowed []string
+	// consequence states the ACTUAL failure mode, which flips with the
+	// operator's polarity: an out-of-set literal makes `==` / `in` match
+	// nothing, but makes `!=` / `not in` match EVERYTHING. Both are defects
+	// worth failing on, and both were originally reported as "always false" --
+	// which would send an author debugging an over-matching query in exactly
+	// the wrong direction.
+	consequence string
+}
+
+// enumConsequence describes what an out-of-set literal does to the predicate.
+func enumConsequence(op languageAst.ComparisonOperator) string {
+	switch op {
+	case languageAst.OpNe, languageAst.OpOut:
+		return "the predicate is always true, so the clause narrows nothing"
+	default:
+		return "the predicate is always false, so the query matches nothing"
+	}
+}
+
+// filterEnumViolations reports every literal compared against an enum-typed
+// property that is not one of its members.
+//
+// Only EQUALITY-shaped operators are inspected (`==`, `!=`, `in`, `not in`) --
+// those are where an out-of-set literal is provably always-false. Ordering
+// comparisons on an enum are not this lane's business.
+//
+// Only string LITERALS are inspected: a comparison against `args.x` or any
+// other expression is unknowable here and left alone, matching the
+// conservatism of the head check above. Only a single-segment field is
+// checked, so a nested path into an object property cannot be mistaken for
+// the enum itself.
+func filterEnumViolations(n languageAst.Node, enums map[string][]string) []enumViolation {
+	if len(enums) == 0 {
+		return nil
+	}
+	var out []enumViolation
+	var walk func(languageAst.Node)
+	walk = func(node languageAst.Node) {
+		switch v := node.(type) {
+		case *languageAst.QueryStmt:
+			walk(v.Expression)
+		case *languageAst.ComparisonExpr:
+			if len(v.Field.Parts) != 1 {
+				return
+			}
+			allowed, isEnum := enums[strings.TrimSpace(v.Field.Parts[0])]
+			if !isEnum {
+				return
+			}
+			switch v.Operator {
+			case languageAst.OpEq, languageAst.OpNe, languageAst.OpIn, languageAst.OpOut:
+			default:
+				return
+			}
+			member := make(map[string]bool, len(allowed))
+			for _, a := range allowed {
+				member[a] = true
+			}
+			for _, lit := range stringLiterals(v.Value) {
+				if !member[lit] {
+					out = append(out, enumViolation{
+						field:       v.Field.Parts[0],
+						value:       lit,
+						allowed:     allowed,
+						consequence: enumConsequence(v.Operator),
+					})
+				}
+			}
+		case *languageAst.LogicalExpr:
+			walk(v.Left)
+			walk(v.Right)
+		case *languageAst.ConditionalFilterExpr:
+			walk(v.Filter)
+		case *languageAst.NotExpr:
+			walk(v.Target)
+		case *languageAst.RelationshipExpr:
+			walk(v.Target)
+		case *languageAst.ShapeExpr:
+			walk(v.Target)
+		case *languageAst.SortExpr:
+			walk(v.Target)
+		case *languageAst.PaginateExpr:
+			walk(v.Target)
+		// The remaining directive wrappers are walked because the sibling
+		// filterFieldHeads walks them; a case set narrower than its sibling is
+		// how a gate quietly stops seeing part of the tree.
+		case *languageAst.SelectExpr:
+			walk(v.Target)
+		case *languageAst.TimestampExpr:
+			walk(v.Target)
+		case *languageAst.DepthExpr:
+			walk(v.Target)
+		case *languageAst.CountExpr:
+			walk(v.Target)
+		}
+	}
+	walk(n)
+	return out
+}
+
+// stringLiterals extracts the string literal(s) a comparison value carries --
+// one for `==` / `!=`, a list for `in`. A non-literal yields none.
+func stringLiterals(value any) []string {
+	switch v := value.(type) {
+	case string:
+		return []string{v}
+	case []string:
+		return v
+	case []any:
+		var out []string
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	}
+	return nil
 }
 
 // filterRowIntrinsics are the row intrinsics a FILTER may name, lower-cased.
