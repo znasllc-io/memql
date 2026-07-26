@@ -10706,11 +10706,10 @@ func StartPlanBuild(args StartPlanArgs) string {
 	return b.String()
 }
 
-// ToggleComputerUseEnabled -- Set User.preferences.computerUseEnabled.
+// ToggleComputerUseEnabled -- Set the CALLER's User.preferences.computerUseEnabled.
 //
 // Bound concept: v1:identity:user (machine-readable: BoundConcepts["toggleComputerUseEnabled"] in generated_concepts.go).
 type ToggleComputerUseEnabledArgs struct {
-	UserId  string
 	Enabled bool
 }
 
@@ -10723,11 +10722,6 @@ func (qc *QueryClient) ToggleComputerUseEnabled(ctx context.Context, args Toggle
 func ToggleComputerUseEnabledBuild(args ToggleComputerUseEnabledArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation toggleComputerUseEnabled(")
-	b.WriteString("userId: ")
-	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	if b.Len() > 34 {
-		b.WriteString(", ")
-	}
 	b.WriteString("enabled: ")
 	b.WriteString(fmt.Sprintf("%v", args.Enabled))
 	b.WriteString(")")

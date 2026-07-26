@@ -225,7 +225,7 @@ The agent node's registry checks `revokedAt` on every dispatch and
 on a periodic sweep — a revoked worker's stream is closed out-of-
 band so any in-flight calls fail with `worker_disconnected`.
 
-### Disable computer-use for a user (kill switch)
+### Disable computer-use for yourself (kill switch)
 
 UI: Floating shield widget in any space's chrome.
 
@@ -233,10 +233,18 @@ CLI:
 
 ```memql
 mutationToggleComputerUseEnabled({
-  userId: "user-jose-...",
   enabled: false
 })
 ```
+
+The switch always targets the **caller's own** user row -- the id is
+stamped from the auth context rather than passed in (memql#2840). There
+is deliberately no operator path to flip it for someone else, and passing
+a `userId` would be worse than an error: an undeclared argument is
+dropped silently on the gRPC path, so the command would appear to work
+while toggling your own switch. Walk the user through the shield widget
+instead. If an administrative override is genuinely needed it belongs in
+a separately-named mutation.
 
 ### Inspect invocations for a plan
 
