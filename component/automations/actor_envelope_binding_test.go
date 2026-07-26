@@ -141,20 +141,50 @@ func TestEveryEvaluatorBindsAnActorEnvelope(t *testing.T) {
 			// than silently uncounted.
 			all := map[*ast.CallExpr]bool{}
 			ast.Inspect(file, func(n ast.Node) bool {
-				if call, ok := n.(*ast.CallExpr); ok {
-					if id, ok := call.Fun.(*ast.Ident); ok && id.Name == "NewEvaluator" {
-						all[call] = true
+				switch node := n.(type) {
+				case *ast.CallExpr:
+					if id, ok := node.Fun.(*ast.Ident); ok && id.Name == "NewEvaluator" {
+						all[node] = true
+					}
+				case *ast.CompositeLit:
+					// `&Evaluator{}` / `Evaluator{}` sidesteps a scan keyed
+					// on the constructor name, and the zero value evaluates
+					// `actor.*` happily -- fail-open (review round 6).
+					//
+					// evaluator.go is exempt: NewEvaluator and Clone are the
+					// type's own constructors and necessarily build the
+					// struct literally. Everywhere else must call
+					// NewEvaluator so the binding rule applies.
+					if strings.HasSuffix(fset.Position(node.Pos()).Filename, "evaluator.go") {
+						return true
+					}
+					if id, ok := node.Type.(*ast.Ident); ok && id.Name == "Evaluator" {
+						t.Errorf("%s: Evaluator built as a composite literal. Use NewEvaluator() and "+
+							"bind it -- the zero value has no actor root, and an unbound actor.* read "+
+							"is TRUTHY (memql#2801).", fset.Position(node.Pos()))
 					}
 				}
 				return true
 			})
 
 			ast.Inspect(file, func(n ast.Node) bool {
-				block, ok := n.(*ast.BlockStmt)
-				if !ok {
+				// Statement lists come in three shapes: a block, and the
+				// bodies of switch/select clauses, which carry []ast.Stmt
+				// directly. Missing the latter two sent a construction
+				// there to the catch-all with a message stating the
+				// opposite of what the code did (review round 6).
+				var list []ast.Stmt
+				switch node := n.(type) {
+				case *ast.BlockStmt:
+					list = node.List
+				case *ast.CaseClause:
+					list = node.Body
+				case *ast.CommClause:
+					list = node.Body
+				default:
 					return true
 				}
-				for i, stmt := range block.List {
+				for i, stmt := range list {
 					assign, ok := stmt.(*ast.AssignStmt)
 					if !ok {
 						continue
@@ -182,12 +212,12 @@ func TestEveryEvaluatorBindsAnActorEnvelope(t *testing.T) {
 
 						boundAt := -1
 						usedAt := -1
-						for j := i + 1; j < len(block.List); j++ {
-							if binderCallOn(block.List[j], name) {
+						for j := i + 1; j < len(list); j++ {
+							if binderCallOn(list[j], name) {
 								boundAt = j
 								break
 							}
-							if usesIdent(block.List[j], name) {
+							if usesIdent(list[j], name) {
 								usedAt = j
 								break
 							}
@@ -199,7 +229,7 @@ func TestEveryEvaluatorBindsAnActorEnvelope(t *testing.T) {
 							t.Errorf("%s: evaluator %q is USED at %s before it is bound -- everything "+
 								"up to that point evaluates against an unbound actor root, which is "+
 								"TRUTHY and fails OPEN (memql#2801)",
-								pos, name, fset.Position(block.List[usedAt].Pos()))
+								pos, name, fset.Position(list[usedAt].Pos()))
 						default:
 							t.Errorf("%s: evaluator %q is never passed to bindActorEnvelope / "+
 								"bindNoCallerActorEnvelope as a top-level statement of its own block. "+
@@ -225,6 +255,24 @@ func TestEveryEvaluatorBindsAnActorEnvelope(t *testing.T) {
 	t.Logf("checked %d evaluator construction(s)", checked)
 }
 
+// evaluatorSetters is the closed set of Evaluator methods that only
+// STORE a root and never resolve a path, so appearing before the binding
+// is harmless. An allowlist rather than a `Set` name prefix: the prefix
+// waved through anything called Setup() or SetAndEvaluate(), and this is
+// the one place the invariant deliberately stops looking (review r6).
+var evaluatorSetters = map[string]bool{
+	"SetCanonicalIdResolver":    true,
+	"SetCustom":                 true,
+	"SetInput":                  true,
+	"SetItem":                   true,
+	"SetLogger":                 true,
+	"SetSecretResolver":         true,
+	"SetStepResult":             true,
+	"SetSystemSecretResolver":   true,
+	"SetSystemVariableResolver": true,
+	"SetVariableResolver":       true,
+}
+
 // binderCallOn reports whether stmt is a top-level call to one of the
 // actor-envelope binders passing the named identifier.
 func binderCallOn(stmt ast.Stmt, name string) bool {
@@ -238,6 +286,13 @@ func binderCallOn(stmt ast.Stmt, name string) bool {
 	}
 	fn, ok := call.Fun.(*ast.Ident)
 	if !ok || (fn.Name != "bindActorEnvelope" && fn.Name != "bindNoCallerActorEnvelope") {
+		return false
+	}
+	// Must be the package-level binder, not a local of the same name.
+	// `bindActorEnvelope := func(context.Context, *Evaluator) {}` is the
+	// round-1 decoy relocated from the argument to the callee: it
+	// compiles, reads like a binding, and binds nothing (review round 6).
+	if fn.Obj != nil {
 		return false
 	}
 	for _, arg := range call.Args {
@@ -283,7 +338,7 @@ func isSetterCallOn(stmt ast.Stmt, name string) bool {
 		return false
 	}
 	sel, ok := call.Fun.(*ast.SelectorExpr)
-	if !ok || !strings.HasPrefix(sel.Sel.Name, "Set") {
+	if !ok || !evaluatorSetters[sel.Sel.Name] {
 		return false
 	}
 	recv, ok := sel.X.(*ast.Ident)
@@ -360,18 +415,34 @@ func TestNoEvaluatorConstructionOutsideThisPackage(t *testing.T) {
 		}
 
 		ast.Inspect(file, func(n ast.Node) bool {
-			call, ok := n.(*ast.CallExpr)
-			if !ok {
-				return true
-			}
-			switch fn := call.Fun.(type) {
+			switch node := n.(type) {
 			case *ast.SelectorExpr:
-				if x, ok := fn.X.(*ast.Ident); ok && x.Name == local && fn.Sel.Name == "NewEvaluator" {
-					outside = append(outside, fset.Position(call.Pos()).String())
+				// The CONSTRUCTOR matched wherever it appears, not just in
+				// call position: `var f = automations.NewEvaluator; f()`
+				// is a construction the call-position scan never saw
+				// (review round 6). The TYPE is deliberately not matched
+				// here -- `func f(ev *automations.Evaluator)` is an
+				// ordinary parameter, not a construction.
+				if x, ok := node.X.(*ast.Ident); ok && x.Name == local && node.Sel.Name == "NewEvaluator" {
+					outside = append(outside, fset.Position(node.Pos()).String())
+				}
+			case *ast.CompositeLit:
+				// ...but a composite literal OF the type is a construction,
+				// and every field is unexported so the zero value compiles
+				// and evaluates actor.* as truthy.
+				if sel, ok := node.Type.(*ast.SelectorExpr); ok {
+					if x, ok := sel.X.(*ast.Ident); ok && x.Name == local && sel.Sel.Name == "Evaluator" {
+						outside = append(outside, fset.Position(node.Pos()).String())
+					}
+				}
+				if dot {
+					if id, ok := node.Type.(*ast.Ident); ok && id.Name == "Evaluator" {
+						outside = append(outside, fset.Position(node.Pos()).String())
+					}
 				}
 			case *ast.Ident:
-				if dot && fn.Name == "NewEvaluator" {
-					outside = append(outside, fset.Position(call.Pos()).String())
+				if dot && node.Name == "NewEvaluator" {
+					outside = append(outside, fset.Position(node.Pos()).String())
 				}
 			}
 			return true
@@ -462,4 +533,64 @@ func schedulerLogged(log, msg, automation string) bool {
 		}
 	}
 	return false
+}
+
+// The binding invariant checks that `actor` is bound before first use.
+// It says nothing about what happens AFTER, and the setter exemption
+// declares Set* calls uninteresting by construction -- so this passes it:
+//
+//	bindActorEnvelope(ctx, ev)
+//	ev.SetCustom("actor", map[string]any{})   // clobbered back to empty
+//
+// which is fail-open, and is precisely one of the four pre-fix
+// representations of "no actor" the binder's own doc enumerates. A normal
+// future edit lands on this, so it is asserted rather than reasoned about
+// (review round 6).
+func TestActorRootIsSetOnlyByTheBinder(t *testing.T) {
+	root := filepath.Join("..", "..")
+	var offenders []string
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		slash := filepath.ToSlash(path)
+		if strings.HasSuffix(slash, "component/automations/actor_envelope_binding.go") {
+			return nil // the binder is the one legitimate writer
+		}
+		src, rerr := os.ReadFile(path)
+		if rerr != nil {
+			return nil
+		}
+		fset := token.NewFileSet()
+		file, perr := parser.ParseFile(fset, path, src, 0)
+		if perr != nil {
+			return nil
+		}
+		ast.Inspect(file, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok || len(call.Args) == 0 {
+				return true
+			}
+			sel, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok || sel.Sel.Name != "SetCustom" {
+				return true
+			}
+			lit, ok := call.Args[0].(*ast.BasicLit)
+			if !ok || lit.Value != `"actor"` {
+				return true
+			}
+			offenders = append(offenders, fset.Position(call.Pos()).String())
+			return true
+		})
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk: %v", err)
+	}
+	for _, o := range offenders {
+		t.Errorf("%s sets the `actor` root directly. Only bindActorEnvelope / "+
+			"bindNoCallerActorEnvelope may do that -- a hand-rolled or empty envelope is one of the "+
+			"four representations of \"no actor\" that made the gate fail OPEN (memql#2801). "+
+			"Call a binder instead.", o)
+	}
 }
