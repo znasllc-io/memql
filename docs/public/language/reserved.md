@@ -152,7 +152,7 @@ Cross-file dependencies are declared with file-top `use` imports:
 
 ```memql
 use cognition.concepts.{ participant, space }
-use common.traits.{ traitIsActiveRecord }
+use common.traits.{ isActiveRecord }
 ```
 
 The dotted path maps to a file on disk (`cognition.concepts` →
@@ -222,7 +222,7 @@ is rejected at parse time. The canonical post-migration shape:
 
 - **File-top Form B imports** declare cross-file dependencies:
   `use cognition.concepts.{ participant }`,
-  `use common.traits.{ traitIsActiveRecord }`.
+  `use common.traits.{ isActiveRecord }`.
 - **Concept binding lives in the construct signature** for seeds /
   queries / mutations / shapes:
   `query <Concept> <name> { ... }`, `mutation <Concept> <name> { ... }`,

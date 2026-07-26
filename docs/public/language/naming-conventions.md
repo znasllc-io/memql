@@ -17,13 +17,27 @@ Use kind-specific prefixes so intent is obvious at call sites and in diffs.
 
 - Queries: `query*` (for example `queryActiveSpaces`)
 - Mutations: `mutation*` (for example `mutationCreateSpace`)
-- Specs: `spec*` (for example `specIsHumanParticipant`)
-- Traits: `trait*` (for example `traitIsActiveRecord`)
+- Specs and traits: named for the predicate they express, no kind prefix
+  (for example `isHumanParticipant`, `isActiveRecord`, `statusIsActive`).
+  The `spec` / `trait` keyword already marks the kind at the declaration,
+  and the call site reads better without it:
+  `filter spaceId==args.spaceId && isActiveRecord`.
 - Logic: `logic*` (for example `logicAutoJoinSI`)
 - Automations: verb-first names, no prefix (for example
   `bootstrapSession`, `autoJoinSI`)
 - Shapes: `<concept><Projection>`, no kind prefix (for example
   `participantFull`, `spaceCard`)
+
+> **Accuracy note (#2853).** The `query*` / `mutation*` / `logic*` prefixes
+> above are not what the shipped tree does: **no** construct carries them
+> (0 of 197 queries, 0 of 213 mutations, 0 of 35 logic functions -- the
+> real names are `activeHumanParticipants`, `addAgentToSpace`,
+> `bootstrapSession`). The spec / trait entry was corrected in #2806
+> because its examples named constructs that do not exist, so a reader who
+> copied them wrote an import that does not resolve. The remaining three
+> are a live convention question -- abandon the prefix, or rename the
+> corpus and gate it -- and are tracked separately rather than decided
+> here.
 
 Examples:
 
@@ -49,11 +63,11 @@ mutation user mutationArchiveUser {
   }
 }
 
-spec space specStatusIsActive {
+spec space statusIsActive {
   return status == "active"
 }
 
-trait traitIsActiveRecord {
+trait isActiveRecord {
   return active == true
 }
 ```

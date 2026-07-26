@@ -634,7 +634,7 @@ automation "test": dependency cycle among steps [a b]
 
 **Rule.** Query / mutation / spec / trait / logic constructs are
 named with a kind prefix: `queryActiveSpaces`, `mutationCreateSpace`,
-`specIsHumanParticipant`, `isActiveRecord`, `logicAutoJoinSI`.
+`isHumanParticipant`, `isActiveRecord`, `logicAutoJoinSI`.
 Constructs live in one consolidated file per kind per namespace
 (`dsl/<namespace>/<construct>s.memql`), so the file name never
 carries an individual construct's name.
@@ -642,7 +642,7 @@ carries an individual construct's name.
 ```
 dsl/cognition/queries.memql     query space queryActiveSpaces { ... }
 dsl/cognition/mutations.memql   mutation space mutationCreateSpace { ... }
-dsl/cognition/specs.memql       spec specIsHumanParticipant { ... }
+dsl/cognition/specs.memql       spec isHumanParticipant { ... }
 dsl/common/traits.memql         trait isActiveRecord { ... }
 dsl/cognition/logic.memql       logic logicAutoJoinSI { ... }
 ```
@@ -1087,7 +1087,7 @@ query space queryActiveSpaces {
 // the body returns a boolean over bare field names. No args.
 use cognition.concepts.{ participant }
 
-spec participant specIsHumanParticipant {
+spec participant isHumanParticipant {
   return participantType == "human"
 }
 ```

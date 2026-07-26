@@ -63,7 +63,7 @@ the call site).
 use cognition.concepts.{ participant }
 
 @description("Matches participants with human participantType")
-spec participant specIsHumanParticipant {
+spec participant isHumanParticipant {
   return participantType == "human"
 }
 
@@ -85,7 +85,7 @@ query participant queryHumanParticipants {
   args {
     spaceId  string  @required
   }
-  filter  spaceId==args.spaceId && specIsHumanParticipant
+  filter  spaceId==args.spaceId && isHumanParticipant
   shape   participantFull
 }
 ```

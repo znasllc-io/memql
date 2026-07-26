@@ -46,7 +46,7 @@ Function names use kind prefixes:
 
 - Query: `query*` (e.g. `queryActiveSpaces`)
 - Mutation: `mutation*` (e.g. `mutationCreateSpace`)
-- Spec: `spec*`; trait: `trait*`
+- Spec / trait: named for the predicate, no kind prefix (e.g. `isActiveRecord`)
 - Logic: `logic*`
 - Prompt: descriptive name (e.g. `agentReply`, `cognitionCompaction`)
 - Provider: provider name (e.g. `chat54Mini`, `streamClaudeSonnet`)
@@ -64,7 +64,7 @@ pulled into local scope:
 ```memql
 use cognition.concepts.{ participant, space }
 use cognition.shapes.{ participantFull }
-use common.traits.{ traitIsActiveRecord }
+use common.traits.{ isActiveRecord }
 ```
 
 The **concept a construct binds to is named in its signature**:
@@ -134,7 +134,7 @@ context:
 | `!=` | Not equal | `status!="archived"` |
 | `>` `>=` `<` `<=` | Comparisons | `count>=10` |
 | `in` | Membership | `kind in ["a", "b"]`, `args.x in list` |
-| `&&` | Logical AND | `spaceId==args.spaceId && traitIsActiveRecord` |
+| `&&` | Logical AND | `spaceId==args.spaceId && isActiveRecord` |
 | `\|\|` | Logical OR | `actor.role=="admin" \|\| actor.role=="owner"` |
 | `!` | Logical NOT | `!hidden` |
 | `( )` | Grouping (Go precedence: `!` > comparisons > `&&` > `\|\|`) | `(a \|\| b) && c` |
@@ -165,7 +165,7 @@ query participant queryActiveHumanParticipants {
   args {
     spaceId  string  @required
   }
-  filter  spaceId==args.spaceId && participantType=="human" && traitStatusIsActive && traitIsActiveRecord
+  filter  spaceId==args.spaceId && participantType=="human" && statusIsActive && isActiveRecord
   shape   participantFull
 }
 ```
@@ -185,9 +185,9 @@ Filter rules (enforced by `dsl/conformance_test.go`):
   filter  status == args.status    // a payload property (a JSONB path)
   ```
 - Named trait / spec predicates are called bare
-  (`traitIsActiveRecord`), and are **mandatory** where a trait covers
+  (`isActiveRecord`), and are **mandatory** where a trait covers
   the predicate -- inline `active==true` is rejected when
-  `traitIsActiveRecord` exists.
+  `isActiveRecord` exists.
 
 ### Optional Filters with `when()`
 
@@ -200,7 +200,7 @@ query space queryActiveSpaces {
   args {
     userId  string
   }
-  filter  traitIsActiveRecord && traitStatusIsActive && when(args.userId) { row.createdBy==args.userId }
+  filter  isActiveRecord && statusIsActive && when(args.userId) { row.createdBy==args.userId }
   shape   spaceFull
 }
 ```
@@ -240,7 +240,7 @@ server-side, instead of the rows themselves:
 
 ```memql
 query user queryUserCount {
-  filter  traitIsActiveRecord
+  filter  isActiveRecord
   count
 }
 ```
@@ -745,7 +745,7 @@ query participant querySpaceParticipants {
   args {
     spaceId  string  @required
   }
-  filter  spaceId==args.spaceId && traitIsActiveRecord
+  filter  spaceId==args.spaceId && isActiveRecord
   shape   participantFull
 }
 ```
