@@ -23,11 +23,14 @@ package automations_test
 // is not a comment.
 
 import (
+	"bytes"
+	"log/slog"
 	"strings"
 	"testing"
 	"testing/fstest"
 
 	"github.com/znasllc-io/memql/component/automations"
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	memqldsl "github.com/znasllc-io/memql/dsl"
 )
@@ -44,18 +47,32 @@ automation blockCommentControl {
 }
 `
 
-// loadFixtureDomain registers src as a throwaway domain -- the same
-// RegisterTree path a product DSL bundle mounts through -- and returns the
-// automation names LoadAll yields, plus its error.
-func loadFixtureDomain(t *testing.T, domain, src string) ([]string, error) {
+// loadFixtureAutomations registers src as a throwaway domain -- the same
+// RegisterTree path a product DSL bundle mounts through -- and returns
+// everything LoadAll yields, plus its error and the loader's log output.
+func loadFixtureAutomations(t *testing.T, domain, src string) ([]*automations.Automation, string, error) {
 	t.Helper()
 	t.Setenv(memql.AllowSkipsEnvVar, "") // strict regardless of ambient env
 
 	memqldsl.RegisterTree(domain, fstest.MapFS{"automations.memql": {Data: []byte(src)}})
 	t.Cleanup(func() { memqldsl.UnregisterTree(domain) })
 
-	loader := automations.NewLoader(automations.LoaderOptions{Registry: loadedRegistry(t)})
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	loader := automations.NewLoader(automations.LoaderOptions{
+		Registry: loadedRegistry(t),
+		Logger:   logger,
+	})
 	loaded, err := loader.LoadAll()
+	return loaded, logs.String(), err
+}
+
+// loadFixtureDomain is loadFixtureAutomations reduced to the names, for the
+// tests that only care about presence.
+func loadFixtureDomain(t *testing.T, domain, src string) ([]string, error) {
+	t.Helper()
+	loaded, _, err := loadFixtureAutomations(t, domain, src)
 	if err != nil {
 		return nil, err
 	}
@@ -64,6 +81,16 @@ func loadFixtureDomain(t *testing.T, domain, src string) ([]string, error) {
 		names = append(names, a.Name)
 	}
 	return names, nil
+}
+
+// findAutomation returns the loaded automation with the given name, or nil.
+func findAutomation(loaded []*automations.Automation, name string) *automations.Automation {
+	for _, a := range loaded {
+		if a.Name == name {
+			return a
+		}
+	}
+	return nil
 }
 
 func contains(names []string, want string) bool {
@@ -288,27 +315,248 @@ automation phantomHeader
 	}
 }
 
-// TestBlockCommentedTerseAutomationIsAbsent covers the terse spelling
-// (memql#2215), which matters because terse lowering runs over RAW source
-// BEFORE extraction masks anything. Measured: NormaliseTerseAutomationSource
-// leaves a commented-out terse declaration unchanged, so the masked extractor
-// is what decides -- and it must decide "absent", same as the longhand form.
-func TestBlockCommentedTerseAutomationIsAbsent(t *testing.T) {
-	src := `/*
+// TestCommentBetweenAnnotationsAndHeaderKeepsThem is the memql#2861 review
+// round 1 (D1) regression: the @-attribute preamble walk stopped at any line
+// that did not start with `@` or `//`, and a `/* ... */` line is exactly such
+// a line. Every annotation ABOVE the comment was cut out of the slice.
+//
+// Both directions are silent and neither is caught by any existing gate:
+// dropping @disabled runs an automation the author turned OFF, and dropping
+// @trigger loads an automation that is never subscribed but still counts
+// toward the loaded total.
+//
+// Pre-existing -- this shape behaves identically on the pre-fix extractor --
+// but the fix would have left it open while actively promoting block comments
+// as the way to disable an automation.
+func TestCommentBetweenAnnotationsAndHeaderKeepsThem(t *testing.T) {
+	t.Run("@disabled above a block comment still disables", func(t *testing.T) {
+		src := `@disabled
+/* why this is parked */
 @trigger(event="node.created", concept="v1:cluster:node")
-automation terseCommented => logic logicNoSuchThing
-*/
+automation disabledAboveComment {
+  step persist {
+    mutation createSpawnEvent (nodeId: "a", nodeType: "b", action: "stopped", reason: "r")
+  }
+}
+`
+		loaded, _, err := loadFixtureAutomations(t, "s2861fixturedisabledabove", src)
+		if err != nil {
+			t.Fatalf("LoadAll failed: %v", err)
+		}
+		a := findAutomation(loaded, "disabledAboveComment")
+		if a == nil {
+			t.Fatal("the automation must still load")
+		}
+		if a.IsEnabled() {
+			t.Error("@disabled sits above a block comment and was dropped from the slice, so a DISABLED automation is live and fires on every replica (#2861 review D1)")
+		}
+	})
 
-` + liveAutomation
+	t.Run("@trigger above a block comment survives", func(t *testing.T) {
+		src := `@enabled
+@trigger(event="node.created", concept="v1:cluster:node")
+/* @description("temporarily removed") */
+automation triggerAboveComment {
+  step persist {
+    mutation createSpawnEvent (nodeId: "a", nodeType: "b", action: "stopped", reason: "r")
+  }
+}
+`
+		loaded, _, err := loadFixtureAutomations(t, "s2861fixturetriggerabove", src)
+		if err != nil {
+			t.Fatalf("LoadAll failed: %v", err)
+		}
+		a := findAutomation(loaded, "triggerAboveComment")
+		if a == nil {
+			t.Fatal("the automation must still load")
+		}
+		if a.Trigger == nil || !a.IsEventTriggered() {
+			t.Error("@trigger sits above a block comment and was dropped from the slice: the automation loads and counts toward the loaded total but is never subscribed -- silent, and invisible to every #2830 problem channel (#2861 review D1)")
+		}
+	})
+
+	t.Run("a multi-line comment in the preamble does not truncate it", func(t *testing.T) {
+		src := `@disabled
+/* first line
+   second line */
+@trigger(event="node.created", concept="v1:cluster:node")
+automation disabledAboveMultiLineComment {
+  step persist {
+    mutation createSpawnEvent (nodeId: "a", nodeType: "b", action: "stopped", reason: "r")
+  }
+}
+`
+		loaded, _, err := loadFixtureAutomations(t, "s2861fixturemultiline", src)
+		if err != nil {
+			t.Fatalf("LoadAll failed: %v", err)
+		}
+		a := findAutomation(loaded, "disabledAboveMultiLineComment")
+		if a == nil {
+			t.Fatal("the automation must still load")
+		}
+		if a.IsEnabled() {
+			t.Error("a multi-line block comment in the preamble must be walked over, not stopped at (#2861 review D1)")
+		}
+	})
+
+	t.Run("live code still ends the preamble", func(t *testing.T) {
+		// The counterpart guard for the fix: stepping over COMMENT lines must
+		// not become stepping over everything. A preceding construct's closing
+		// brace is live code and must stop the walk, or one automation's slice
+		// would swallow the tail of the one above it.
+		//
+		// (A lone blank line does NOT end the preamble -- the walk's
+		// `k = lineStart - 1` plus the loop's own `k--` steps past a single
+		// `\n`. That predates this change and is left alone deliberately;
+		// widening a preamble boundary would alter shipped slices.)
+		src := liveAutomation + `
+@disabled
+@trigger(event="node.created", concept="v1:cluster:node")
+automation afterAnotherAutomation {
+  step persist {
+    mutation createSpawnEvent (nodeId: "a", nodeType: "b", action: "stopped", reason: "r")
+  }
+}
+`
+		loaded, _, err := loadFixtureAutomations(t, "s2861fixtureafterlive", src)
+		if err != nil {
+			t.Fatalf("LoadAll failed: %v", err)
+		}
+		control := findAutomation(loaded, "blockCommentControl")
+		if control == nil {
+			t.Fatal("the first automation must load")
+		}
+		if !control.IsEnabled() {
+			t.Error("the SECOND automation's @disabled leaked up into the first one's slice: the walk stepped over the closing brace of live code")
+		}
+		second := findAutomation(loaded, "afterAnotherAutomation")
+		if second == nil {
+			t.Fatal("the second automation must load")
+		}
+		if second.IsEnabled() {
+			t.Error("the second automation's own @disabled must reach it")
+		}
+	})
+}
+
+// TestBlockCommentedTerseAutomationIsAbsent covers the TERSE spelling
+// (memql#2215) -- `automation NAME @trigger(...) => logic X`, trigger inline.
+//
+// This matters because terse lowering runs over RAW source BEFORE extraction,
+// and measured, it DOES rewrite text inside a block comment (lowering it to
+// longhand in place). The comment survives the rewrite, so the blanked
+// extractor is what decides -- and it must decide "absent".
+//
+// The subtest asserting the fixture really is terse is deliberate: an earlier
+// version of this test put @trigger on its own line, which is not the terse
+// form at all, so it silently duplicated the loose-header case and passed for
+// the wrong reason (#2861 review D4).
+func TestBlockCommentedTerseAutomationIsAbsent(t *testing.T) {
+	const terse = `automation terseCommented @trigger(event="node.created", concept="v1:cluster:node") => logic logicNoSuchThing`
+
+	if !languageParser.LooksLikeTerseAutomation(terse) {
+		t.Fatalf("fixture is not a terse automation, so this test would silently cover something else: %q", terse)
+	}
+
+	src := "/*\n" + terse + "\n*/\n\n" + liveAutomation
 
 	names, err := loadFixtureDomain(t, "s2861fixtureterse", src)
 	if err != nil {
 		t.Fatalf("a commented-out terse automation must not refuse the boot, got: %v", err)
 	}
 	if contains(names, "terseCommented") {
-		t.Error("a commented-out TERSE automation must not load either (#2861)")
+		t.Error("a commented-out TERSE automation must not load (#2861)")
 	}
 	if !contains(names, "blockCommentControl") {
 		t.Error("the live control automation must still load")
+	}
+}
+
+// TestBlockCommentedTerseArgsBlockDoesNotRefuseBoot is memql#2861 review D3.
+//
+// rejectTerseAutomationArgsBlock (component/language/parser/rewriter.go) scans
+// RAW source and runs BEFORE extraction, so a commented-out args block plus
+// terse automation raised an authoring violation and REFUSED THE BOOT -- with
+// nothing outside the comment live. That is this issue's headline shape
+// ("commenting out an automation took the node down") surviving in the lane
+// the extraction fix does not reach.
+func TestBlockCommentedTerseArgsBlockDoesNotRefuseBoot(t *testing.T) {
+	src := `/*
+args {
+  x string @required
+}
+automation terseWithArgs @trigger(event="node.created", concept="v1:cluster:node") => logic logicNoSuchThing
+*/
+
+` + liveAutomation
+
+	names, err := loadFixtureDomain(t, "s2861fixtureterseargs", src)
+	if err != nil {
+		t.Fatalf("a commented-out args block + terse automation must not refuse the boot; got: %v", err)
+	}
+	if contains(names, "terseWithArgs") {
+		t.Error("the commented-out terse automation must not load")
+	}
+	if !contains(names, "blockCommentControl") {
+		t.Error("the live control automation must still load")
+	}
+}
+
+// TestUnterminatedBlockCommentWarns closes the silent-drop channel this fix
+// would otherwise open. An unterminated `/*` comments out the rest of the
+// file, so every automation below it goes absent -- correct per the lexer, but
+// #2830's doctrine is that a dropped automation is never silent. The input is
+// lexer-legal, so it warns rather than refusing the boot.
+func TestUnterminatedBlockCommentWarns(t *testing.T) {
+	src := liveAutomation + `
+/* unterminated -- everything past here is comment
+@trigger(event="node.created", concept="v1:cluster:node")
+automation swallowed {
+  step persist {
+    mutation createSpawnEvent (nodeId: "a", nodeType: "b", action: "stopped", reason: "r")
+  }
+}
+`
+
+	loaded, logs, err := loadFixtureAutomations(t, "s2861fixtureunterminatedwarn", src)
+	if err != nil {
+		t.Fatalf("an unterminated block comment is lexer-legal and must not refuse the boot, got: %v", err)
+	}
+	if findAutomation(loaded, "swallowed") != nil {
+		t.Error("an unterminated /* runs to EOF, so the automation below it must not load")
+	}
+	if !strings.Contains(logs, "unterminated block comment") {
+		t.Errorf("silently swallowing every automation below a typo'd /* is exactly what #2830 outlawed -- expected a WARN, got logs:\n%s", logs)
+	}
+	// liveAutomation is 8 lines + trailing newline, then a blank line, so the
+	// unterminated opener sits on line 10.
+	if !strings.Contains(logs, "line=10") {
+		t.Errorf("the WARN must name the line the comment opens on so the operator can find it, got logs:\n%s", logs)
+	}
+}
+
+// TestUnterminatedBlockCommentLineIgnoresNonOpeners guards the WARN against
+// false positives: a `/*` inside a string literal or inside a `//` line
+// comment is not an opener, and a closed comment is not unterminated. A
+// spurious warning on healthy files trains operators to ignore the real one.
+func TestUnterminatedBlockCommentLineIgnoresNonOpeners(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		src  string
+		want int
+	}{
+		{"closed comment", "/* fine */\nautomation a {}\n", 0},
+		{"marker in a string", "automation a { reason: \"/* not an opener\" }\n", 0},
+		{"marker in a line comment", "// see /* note\nautomation a {}\n", 0},
+		{"no comments at all", "automation a {}\n", 0},
+		{"unterminated on line 1", "/* opens and never closes\nautomation a {}\n", 1},
+		{"unterminated on line 3", "automation a {}\n\n/* opens\n", 3},
+		{"closed then unterminated", "/* one */\n/* two\n", 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := languageParser.UnterminatedBlockCommentLine(tc.src); got != tc.want {
+				t.Errorf("UnterminatedBlockCommentLine = %d, want %d", got, tc.want)
+			}
+		})
 	}
 }

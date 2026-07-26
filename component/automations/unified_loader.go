@@ -105,6 +105,17 @@ func (l *Loader) LoadFromUnifiedTree() ([]*Automation, error) {
 			return nil
 		}
 		source := string(data)
+		// An unterminated `/*` comments out the rest of the file, so every
+		// automation below it is ABSENT -- correct per the lexer, and now
+		// per the comment-blanked extractor, but silently absent is what
+		// #2830 outlawed. One typo'd opener would remove a workflow from the
+		// fleet with no diagnostic at all. Lexer-legal input, so this is a
+		// WARN naming the line rather than a load problem (memql#2861).
+		if line := languageParser.UnterminatedBlockCommentLine(source); line > 0 && l.logger != nil {
+			l.logger.Warn("unified automation loader: unterminated block comment",
+				"component", ComponentName, "path", path, "line", line,
+				"effect", "every automation below this line is commented out and will not load")
+		}
 		// Lower terse single-step automations (memql#2215) to their longhand
 		// block form so the slice extractor below (which keys off `automation
 		// NAME {`) discovers them. compileMemQL re-runs the rewriter, so this is
@@ -296,8 +307,11 @@ func extractAutomationSlicesReporting(source string) ([]automationSlice, []strin
 	//
 	// This mirrors ExtractFunctionSlices (component/memql/function_slices.go),
 	// which has blanked comments before header detection since memql#1074 --
-	// queries, mutations and logic were never exposed to this defect. The
-	// automation loader was the one extractor still scanning raw text.
+	// which is why queries, mutations and logic were never exposed to this
+	// defect, and why the fix reuses that helper instead of adding a second
+	// implementation. Other extractors still scan raw text and have the same
+	// blindness (component/actions/loader.go, component/memql/keyword_slices.go
+	// and capability_loader.go) -- tracked in memql#2868, not fixed here.
 	scan := languageParser.BlankComments(source)
 
 	matches := automationStructHeader.FindAllStringSubmatchIndex(scan, -1)
@@ -333,18 +347,34 @@ func extractAutomationSlicesReporting(source string) ([]automationSlice, []strin
 		}
 
 		// Walk backwards for the @-attribute + comment preamble.
+		//
+		// The walk runs on the ORIGINAL source -- `scan` has line comments
+		// blanked, and a `//` line is part of the preamble -- but it consults
+		// `scan` to tell a COMMENT line from an EMPTY one. A line that is
+		// blank on `scan` and non-blank on `source` is a pure comment, of
+		// either form, and the walk must step OVER it rather than stop.
+		//
+		// Stopping there cut every annotation above the comment out of the
+		// slice. `@disabled` above an explanatory `/* note */` was dropped and
+		// the automation ran anyway -- the same "the author turned it off and
+		// it runs" defect memql#2861 is about, reached through the comment
+		// mechanism this change sanctions. The mirror was worse: an annotation
+		// block above such a comment lost its `@trigger`, and an automation
+		// with a nil trigger loads, counts toward the loaded total, is never
+		// subscribed, and is invisible to every #2830 problem channel.
+		//
+		// A genuinely empty line still ends the preamble.
 		preambleStart := headerStart
 		for k := headerStart - 1; k >= 0; k-- {
 			lineStart := strings.LastIndexByte(source[:k], '\n') + 1
 			line := strings.TrimRight(source[lineStart:k+1], "\r\n")
 			trimmed := strings.TrimSpace(line)
-			if strings.HasPrefix(trimmed, "@") || strings.HasPrefix(trimmed, "//") {
+			blanked := strings.TrimSpace(strings.TrimRight(scan[lineStart:k+1], "\r\n"))
+			isCommentOnly := blanked == "" && trimmed != ""
+			if strings.HasPrefix(trimmed, "@") || strings.HasPrefix(trimmed, "//") || isCommentOnly {
 				preambleStart = lineStart
 				k = lineStart - 1
 				continue
-			}
-			if trimmed == "" {
-				break
 			}
 			break
 		}
