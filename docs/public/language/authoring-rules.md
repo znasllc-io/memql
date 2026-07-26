@@ -1639,9 +1639,11 @@ like `deleted != true`.
 already requires this wherever a trait exists (rule 22,
 `TestNoInlineTraitablePredicates`).
 
-**A misspelling is now caught before it ships.** Three referential
-lanes cover the three places the typo can hide, each verified by
-injecting it into a shipped construct:
+**A misspelled FIELD is now caught before it ships**, and so is a
+misspelled trait in a `use` line. Three referential lanes cover those
+three positions, each verified by injecting the typo into a shipped
+construct. A misspelled trait at a *call site* is the position they
+miss -- see below:
 
 | you misspell | reported as |
 |---|---|
