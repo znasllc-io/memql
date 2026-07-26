@@ -869,9 +869,39 @@ func TestPerRowAuthzClassification(t *testing.T) {
 			name := src[m[4]:m[5]]
 
 			hasPublic := strings.Contains(preamble, "@public")
+
+			// A QUERY's scoping lives in its filter's boolean STRUCTURE, so
+			// the gate evaluates the clause rather than substring-matching
+			// the body (memql#2832). A substring test reads
+			// `ownerUserId==actor.userId || visibility=="public"` as owned,
+			// even though the right arm returns rows the caller does not own
+			// -- and since `owned` is checked before the hard-failing
+			// `flagged` bucket, one permissive disjunct made the gate
+			// unreachable while reporting that authz had been classified.
+			//
+			// A MUTATION is not a filter: `actor.userId` there appears as a
+			// stamped VALUE (`ownerUserId: actor.userId`), which is exactly
+			// what makes the write caller-scoped, so the substring test is
+			// the right question for that kind.
+			isQuery := kind == "query"
+			clause := ""
+			if isQuery {
+				clause = filterClauseOf(body)
+			}
+			ownerLeaf := func(p string) bool { return strings.Contains(p, "actor.userId") }
+			adminLeaf := func(p string) bool {
+				return strings.Contains(p, "actor.isClusterOwner") || strings.Contains(p, "requiresClusterOwner")
+			}
+
 			hasAdmin := strings.Contains(body, "actor.isClusterOwner") ||
 				strings.Contains(body, "requiresClusterOwner")
 			hasOwner := strings.Contains(body, "actor.userId")
+			if isQuery {
+				// An empty filter guarantees nothing, so a query with no
+				// clause can never classify as owned/admin on this path.
+				hasAdmin = hasAdmin && clauseGuarantees(clause, adminLeaf)
+				hasOwner = hasOwner && clauseGuarantees(clause, ownerLeaf)
+			}
 			referencesUserScope := userScopeFieldRe.MatchString(rowSelectionSurface(body))
 			lineNo := strings.Count(src[:m[0]], "\n") + 1
 			exemptKey := p + " " + name
@@ -1208,6 +1238,163 @@ func splitTopLevelConnectives(s string) []string {
 	return append(raw, s[start:])
 }
 
+// splitTopLevelOn splits on ONE connective at paren/brace/bracket depth 0,
+// outside string literals -- the sibling of splitTopLevelConnectives, which
+// splits on both and so cannot tell a conjunct from a disjunct.
+//
+// That distinction is irrelevant to the violation-hunting gates (a bad
+// predicate is bad on either side of either connective) and load-bearing to
+// classification (memql#2832): a conjunct NARROWS what a query returns, a
+// disjunct WIDENS it.
+func splitTopLevelOn(s string, conn byte) []string {
+	var raw []string
+	depth := 0
+	inStr := false
+	start := 0
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		// An escaped quote does not end the literal. Without this, odd quote
+		// parity leaves inStr stuck true for the rest of the clause and a
+		// top-level connective after it goes unseen -- respelling the exact
+		// hole this gate closes (`name=="a\"b" || ownerUserId==actor.userId`).
+		// matchingClose in this file already handles the escape;
+		// splitTopLevelConnectives still does not.
+		case inStr && c == '\\' && i+1 < len(s):
+			i++
+		case c == '"':
+			inStr = !inStr
+		case inStr:
+			// skip
+		case c == '(' || c == '{' || c == '[':
+			depth++
+		case c == ')' || c == '}' || c == ']':
+			depth--
+		case depth == 0 && c == conn && i+1 < len(s) && s[i+1] == conn:
+			raw = append(raw, s[start:i])
+			i++
+			start = i + 1
+		}
+	}
+	return append(raw, s[start:])
+}
+
+// clauseGuarantees reports whether EVERY row a filter clause can admit
+// satisfies `leaf` -- i.e. whether the guarantee holds on all paths through
+// the clause's boolean structure, not merely somewhere in its text.
+//
+// The rules follow from what each connective does to a result set:
+//
+//   - DISJUNCTION widens. `A || B` guarantees the property only if BOTH arms
+//     do; one unscoped arm returns rows the property does not cover.
+//   - CONJUNCTION narrows. `A && B` guarantees it if EITHER conjunct does;
+//     the other can only remove rows.
+//   - NEGATION inverts. `!A` is never a guarantee -- `!(ownerUserId ==
+//     actor.userId)` is precisely "rows I do not own".
+//   - A `when(args.x) { A }` guard is CONDITIONAL: when the arg is absent the
+//     predicate is dropped as if never written, so it cannot guarantee
+//     anything on its own.
+//
+// Parens are peeled before each test so `(A || B) && C` is read as a
+// conjunction, not as text containing `||`.
+func clauseGuarantees(clause string, leaf func(string) bool) bool {
+	return clauseGuaranteesAt(clause, leaf, 0)
+}
+
+func clauseGuaranteesAt(clause string, leaf func(string) bool, depth int) bool {
+	if depth > maxPredicateNesting {
+		return false // Unreadable structure never counts as a guarantee.
+	}
+	s := strings.TrimSpace(clause)
+	// Refuse to reason about text that does not close cleanly. The
+	// struct-query parser rejects such a clause long before the gate sees it,
+	// so this is unreachable today -- but a depth counter with no floor reads
+	// `) || ownerUserId==actor.userId` as one scoped predicate, and failing
+	// OPEN is the wrong default for an authz gate.
+	if depth == 0 && !delimitersBalanced(s) {
+		return false
+	}
+	if inner, ok := stripOuterParens(s); ok {
+		return clauseGuaranteesAt(inner, leaf, depth+1)
+	}
+	if s == "" {
+		return false
+	}
+	if arms := splitTopLevelOn(s, '|'); len(arms) > 1 {
+		for _, a := range arms {
+			if !clauseGuaranteesAt(a, leaf, depth+1) {
+				return false
+			}
+		}
+		return true
+	}
+	if arms := splitTopLevelOn(s, '&'); len(arms) > 1 {
+		for _, a := range arms {
+			if clauseGuaranteesAt(a, leaf, depth+1) {
+				return true
+			}
+		}
+		return false
+	}
+	if _, isNot := stripLeadingNot(s); isNot {
+		return false
+	}
+	if inner := unwrapWhenPredicate(s); inner != s {
+		return false
+	}
+	return leaf(s)
+}
+
+// filterClauseOf returns a struct-form construct's `filter` clause with its
+// boolean structure intact, or "" when the construct has none.
+//
+// This is a SIXTH notion of "what is a filter clause" in this repo, and
+// memql#2815 tracks consolidating them -- recorded here rather than quietly
+// making that problem worse. Note the classifier now calls two of them on the
+// same body in the same switch: rowSelectionSurface (memql#2799) feeds the
+// user-scope regex, this feeds clauseGuarantees. They disagree about whether a
+// clause can span lines, and are only both correct because the grammar rejects
+// the shape they disagree on -- parseStructQueryBody hard-errors on a
+// continuation line.
+//
+// It exists separately because every other extractor FLATTENS the clause into
+// a predicate list, and flattening is exactly what classification cannot use:
+// see clauseGuarantees.
+func filterClauseOf(body string) string {
+	var out []string
+	inFilter := false
+	for _, raw := range strings.Split(body, "\n") {
+		line := raw
+		if i := strings.Index(line, "//"); i >= 0 {
+			line = line[:i]
+		}
+		trim := strings.TrimSpace(line)
+		if !inFilter {
+			if rest, ok := strings.CutPrefix(trim, "filter"); ok && (rest == "" || rest[0] == ' ' || rest[0] == '\t') {
+				inFilter = true
+				out = append(out, strings.TrimSpace(rest))
+			}
+			continue
+		}
+		if trim == "" || strings.HasPrefix(trim, "@") || strings.HasPrefix(trim, "}") || isClauseEndKeyword(trim) {
+			break
+		}
+		out = append(out, trim)
+	}
+	return strings.TrimSpace(strings.Join(out, " "))
+}
+
+// isClauseEndKeyword reports whether a line starts the next clause of a
+// struct-form body, terminating the filter.
+func isClauseEndKeyword(trim string) bool {
+	for _, kw := range []string{"shape", "sort", "paginate", "insert", "update", "return", "concept", "args", "use", "count", "asOf", "asof", "depth"} {
+		if rest, ok := strings.CutPrefix(trim, kw); ok && (rest == "" || rest[0] == ' ' || rest[0] == '\t' || rest[0] == '(') {
+			return true
+		}
+	}
+	return false
+}
+
 // stripLeadingNot removes a negation prefix. `!=` is a comparison operator,
 // never a leading negation, so it is left alone.
 func stripLeadingNot(p string) (string, bool) {
@@ -1251,7 +1438,13 @@ func stripOuterParens(p string) (string, bool) {
 // unwrapWhenPredicate returns the inner predicate of a `when(args.x) { <inner> }`
 // guard, or the predicate unchanged when it is not a guard.
 func unwrapWhenPredicate(p string) string {
-	if !strings.HasPrefix(p, "when(") {
+	// The lexer is token-based, so `when (args.x) { ... }` with a space is
+	// legal MemQL, and memqlfmt does not normalise it away (it is a lexical
+	// formatter). A HasPrefix(p, "when(") test missed that spelling entirely,
+	// which for the guard rule in clauseGuarantees silently turned a
+	// CONDITIONAL predicate back into a guarantee (memql#2832).
+	rest, isWhen := strings.CutPrefix(p, "when")
+	if !isWhen || !strings.HasPrefix(strings.TrimLeft(rest, " \t"), "(") {
 		return p
 	}
 	open := strings.Index(p, "{")
@@ -1593,3 +1786,29 @@ func TestPaginationAuthoringRule(t *testing.T) {
 
 // Compile-time guarantee that fs is referenced.
 var _ fs.FS = (fs.FS)(nil)
+
+// delimitersBalanced reports whether a clause's quotes and brackets close
+// cleanly. See clauseGuaranteesAt for why an authz gate must not reason about
+// text it cannot parse.
+func delimitersBalanced(s string) bool {
+	depth := 0
+	inStr := false
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; {
+		case inStr && c == '\\' && i+1 < len(s):
+			i++
+		case c == '"':
+			inStr = !inStr
+		case inStr:
+			// skip
+		case c == '(' || c == '{' || c == '[':
+			depth++
+		case c == ')' || c == '}' || c == ']':
+			depth--
+			if depth < 0 {
+				return false
+			}
+		}
+	}
+	return depth == 0 && !inStr
+}
