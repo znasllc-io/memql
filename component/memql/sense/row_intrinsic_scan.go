@@ -148,9 +148,44 @@ func ScanBareRowIntrinsics(source string) []BareRowIntrinsic {
 // isFilterClauseOpener reports whether a trimmed line opens a `filter` clause.
 // `@filter(...)` on an automation is a different surface with a different
 // evaluator and is deliberately excluded -- it does not start with `filter`.
+// The separator set is ANY UNICODE SPACE, plus `(`. It was `' '` or `'\t'`,
+// which let four spellings the engine accepts score zero hits and walk past
+// both row-intrinsic gates (memql#2863 / #2779 / #2786).
+//
+// Measured through NormaliseQuerySource -> ParseFile, which is the path a
+// struct query actually takes. ParseFile ALONE rejects all four and would have
+// argued the hole was already closed:
+//
+//	sep     normalise  parse  hits BEFORE
+//	SPACE   ok         ok     1
+//	TAB     ok         ok     1
+//	NBSP    ok         ok     0   <- U+00A0
+//	EMSP    ok         ok     0   <- U+2003
+//	IDSP    ok         ok     0   <- U+3000, not named in the issue
+//	PAREN   ok         ok     0
+//
+// Testing `rest[0]` was also a BYTE comparison against a UTF-8 string, so it
+// could never have matched a multi-byte separator however the set was spelled.
+//
+// `(` is included because the engine genuinely accepts `filter(...)`. The
+// sibling question was settled the other way by the same probe: `sort(...)` is
+// REJECTED -- "sort field must be a string literal ... (got \"(\")" -- so
+// isSortClauseOpener deliberately does NOT accept `(`. It already handles
+// unicode space, via its TrimLeftFunc(unicode.IsSpace).
+//
+// The lesson these gates keep re-teaching: the lexer admits unicode.IsLetter /
+// IsDigit and separators are not reliably ASCII, so a guard written to an ASCII
+// set is narrower than the grammar it polices.
 func isFilterClauseOpener(trimmed string) bool {
 	rest, ok := strings.CutPrefix(trimmed, "filter")
-	return ok && (rest == "" || rest[0] == ' ' || rest[0] == '\t')
+	if !ok {
+		return false
+	}
+	if rest == "" {
+		return true
+	}
+	r, _ := utf8.DecodeRuneInString(rest)
+	return unicode.IsSpace(r) || r == '('
 }
 
 // isSortClauseOpener reports whether a trimmed line opens a `sort` clause.
