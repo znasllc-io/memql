@@ -343,25 +343,22 @@ func TestPiiProjectionRequiresCallerGate(t *testing.T) {
 			}
 			scanned++
 
-			// The preamble walk runs on the ORIGINAL source: BlankComments
-			// blanks `//` lines too, and the walk treats a `//` line as part of
-			// the preamble, so walking the blanked view would stop at such a
-			// line and strip the annotations above it (memql#2868's trap).
-			preambleStart := m[0]
-			for k := m[0] - 1; k >= 0; k-- {
-				lineStart := strings.LastIndexByte(src[:k], '\n') + 1
-				line := strings.TrimSpace(strings.TrimRight(src[lineStart:k+1], "\r\n"))
-				if strings.HasPrefix(line, "@") || strings.HasPrefix(line, "//") || strings.HasPrefix(line, "///") {
-					preambleStart = lineStart
-					k = lineStart - 1
-					continue
-				}
-				break
-			}
-			preamble := src[preambleStart:m[0]]
+			// No preamble walk any more: the @serverOnly verdict comes from the
+			// parsed tree (memql#2875), so this gate no longer needs to read
+			// annotation text at all. The walk that used to be here -- on the
+			// ORIGINAL source rather than the blanked view, per memql#2868's
+			// trap -- went with the regex it fed.
 
 			clause := stripLineComments(filterClauseOf(body))
-			gated := serverOnlyAnnotationRe.MatchString(preamble) ||
+			// #2875: the @serverOnly verdict comes from the PARSED tree, not from a
+			// regex over the preamble. The regex could be satisfied by an
+			// `@serverOnly` inside a multi-line annotation string or a block
+			// comment opened on an `@`-line -- which EXEMPTED the construct from
+			// this gate while Function.ServerOnly stayed false and nothing was
+			// enforced at runtime. That exemption happens BEFORE the
+			// exemption-map bookkeeping below, so the construct was not even
+			// recorded in `seen`.
+			gated := serverOnlyConstructs(t)[serverOnlyKey{Path: p, Name: name}] ||
 				(strings.TrimSpace(clause) != "" && clauseGuarantees(clause, leaf))
 			if gated {
 				continue

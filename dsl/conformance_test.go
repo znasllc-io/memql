@@ -910,9 +910,21 @@ var userScopeSelectionExemptions = map[string]string{
 
 var userScopeExemptSeen = map[string]bool{}
 
-// serverOnlyAnnotationRe matches the @serverOnly ANNOTATION -- at line start,
-// so a comment mentioning it cannot be mistaken for the construct carrying it.
-var serverOnlyAnnotationRe = regexp.MustCompile(`(?m)^@serverOnly\b`)
+// serverOnlyAnnotationRe is GONE (memql#2875). All four dsl-side gates that
+// used to decide @serverOnly by regex over a preamble -- this file's
+// classification gate, server_only_authz_test.go's docs gate,
+// pii_projection_test.go and caller_arg_selection_test.go -- now read
+// serverOnlyConstructs(), which applies the loader's own rule
+// (hasFlagAttribute) to the same parse. A regex could be satisfied by an
+// `@serverOnly` inside a multi-line annotation string or a block comment
+// opened on an `@`-line, which EXEMPTED the construct while nothing enforced
+// it at runtime.
+//
+// The one remaining regex in this package is server_only_authz_test.go's, and
+// it is a LINE LOCATOR, not a verdict: it finds the annotation line so the
+// doc block can be found by walking up from it, and a location whose construct
+// is not in the parsed set is skipped. Its pattern is pinned by
+// component/memql's TestServerOnlyRegexPatternIsPinnedAtEverySiteThatStillUsesIt.
 
 func TestPerRowAuthzClassification(t *testing.T) {
 	type counts struct {
@@ -1003,7 +1015,15 @@ func TestPerRowAuthzClassification(t *testing.T) {
 			// justification above ("rests on a runtime guarantee rather than
 			// on a promise") is exactly what a prose mention does not buy.
 			// sdk/gen/gen.go's serverOnlyRe already had this right.
-			hasServerOnly := serverOnlyAnnotationRe.MatchString(preamble)
+			//
+			// #2875: the verdict now comes from the PARSED tree, not from this
+			// regex. serverOnlyConstructs applies the loader's own rule --
+			// hasFlagAttribute(attrs, "serverOnly") -- to the same parse, so the
+			// gate's answer and Function.ServerOnly cannot diverge. The regex
+			// could be satisfied by an `@serverOnly` inside a multi-line
+			// annotation string or a block comment opened on an `@`-line, which
+			// EXEMPTED the construct here while nothing enforced it at runtime.
+			hasServerOnly := serverOnlyConstructs(t)[serverOnlyKey{Path: p, Name: name}]
 
 			// A QUERY's scoping lives in its filter's boolean STRUCTURE, so
 			// the gate evaluates the clause rather than substring-matching

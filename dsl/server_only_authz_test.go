@@ -128,10 +128,29 @@ func TestServerOnlyConstructsAreDocumented(t *testing.T) {
 		t.Fatalf("WalkMemqlFiles: %v", err)
 	}
 
+	// #2875: which constructs ARE server-only comes from the PARSED tree, not
+	// from the regex. The regex is still used to LOCATE the annotation line
+	// within the file -- it has to be, because the doc block is found by walking
+	// up from that line -- but a location whose construct is not in the parsed
+	// set is skipped rather than required to carry a rationale. An `@serverOnly`
+	// inside a multi-line annotation string satisfies the regex and is NOT an
+	// annotation, so demanding docs for it would be demanding a rationale for a
+	// gate that is not applied.
+	parsed := serverOnlyConstructs(t)
+	parsedNames := map[string]bool{}
+	for k := range parsed {
+		parsedNames[k.Path+"\x00"+k.Name] = true
+	}
+
 	found := 0
 	for _, p := range paths {
 		src := readTreeFile(t, p)
 		for _, loc := range serverOnlyRe.FindAllStringIndex(src, -1) {
+			// Attribute the location to the construct whose header follows it,
+			// and skip locations the parser did not read as an annotation.
+			if name, ok := constructNameAfter(src, loc[1]); !ok || !parsedNames[p+"\x00"+name] {
+				continue
+			}
 			found++
 			// The doc block is the run of `///` lines immediately above.
 			before := src[:loc[0]]
@@ -172,3 +191,29 @@ func TestServerOnlyConstructsAreDocumented(t *testing.T) {
 	}
 	t.Logf("checked %d @serverOnly construct(s)", found)
 }
+
+// constructNameAfter returns the name of the first named construct header at or
+// after `from`, which is how a source LOCATION is attributed to the construct
+// the parsed set is keyed by.
+func constructNameAfter(src string, from int) (string, bool) {
+	m := namedConstructHeaderRe.FindStringSubmatch(src[from:])
+	if m == nil {
+		return "", false
+	}
+	return m[3], true
+}
+
+// namedConstructHeaderRe matches `<kind> [<Concept>] <name> {` for the kinds
+// that can carry @serverOnly.
+//
+// `automation` is in the list even though it is not a struct-query kind:
+// ParseFileSource runs NormaliseAll, which lowers an automation to a
+// FunctionDef, so a real @serverOnly on one DOES enter the parsed set. Omitting
+// it made the locator walk past `automation x {` to the NEXT header, attribute
+// the annotation to that construct, find it absent from the set, and silently
+// drop the docs requirement for a construct that was in it.
+//
+// `func` is deliberately absent -- the procedural author form is rejected at
+// parse, so no such header can reach a loading tree.
+var namedConstructHeaderRe = regexp.MustCompile(
+	`(?m)^[ \t]*(query|mutate|seed|logic|automation|concept|builtin|shape|spec|trait|tool|prompt|provider|action|capability)[ \t]+(?:([A-Za-z_][A-Za-z0-9_]*)[ \t]+)?([A-Za-z_][A-Za-z0-9_.-]*)[ \t]*\{`)
