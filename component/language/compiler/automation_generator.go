@@ -1624,10 +1624,25 @@ func (c *Compiler) compileMutationConfig(m *parser.MutationStmt) (map[string]any
 // no-progress guard stopped the hang by returning nil, but parseValue wrapped
 // that nil in a non-nil `any` and parseObjectLiteral stored it as the key's
 // value, so `{ k: [}{] }` compiled to `{"k": null}` with no error anywhere --
-// a silent wrong value, which is worse than the hang it replaced. The two
-// sibling copies of this parser (component/memql/mutation_templates.go at
-// load, component/automations/steps/mutation.go at dispatch) both surface the
-// failure; this one now matches them.
+// a silent wrong value, which is worse than the hang it replaced.
+//
+// HOW FAR THE ERROR ACTUALLY TRAVELS, precisely -- it is NOT a refused boot.
+// It reaches compileStep -> compileAutomation -> CompileFile ->
+// Loader.compileMemQL -> LoadFromUnifiedTree, and THAT frame logs a Warn and
+// `continue`s (component/automations/unified_loader.go). So the automation is
+// DROPPED, not loaded-with-a-null, and nothing fails the strict-boot gate:
+// component/memql/load_report.go takes no input from the automation loader.
+// The improvement here is real but bounded -- "silently wrong" became
+// "absent, with a WARN" rather than "absent, with a red boot". That the
+// loader swallows every compile error this way is a separate, pre-existing
+// defect affecting far more than payload literals; it is memql#2830, kept out
+// of this change because fixing it alters boot semantics for the whole
+// automation tree.
+//
+// The two sibling copies (component/memql/mutation_templates.go at load,
+// component/automations/steps/mutation.go at dispatch) both surface the
+// failure; this one now matches them on accept/reject for every case in the
+// cross-copy parity table.
 func (c *Compiler) parsePayloadRaw(raw string) (map[string]any, error) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
@@ -1887,23 +1902,55 @@ func (c *Compiler) parseValue(s string, pos int) (any, int, bool) {
 	}
 
 	// Nested object
+	//
+	// The brace scan MUST be string-aware. Without it a brace inside a quoted
+	// value closes the object early: `{ a: { b: "}" } }` matched the `}` in
+	// the string, handed parseObjectLiteral the truncated `{ b: "}` and got
+	// back `{"b":""}` -- a silent wrong value. Once malformation became an
+	// error (memql#2816) the same input turned into a hard rejection of a
+	// PERFECTLY VALID payload, which is worse still.
+	//
+	// The array arm 45 lines above always tracked inString/escaped, and both
+	// sibling parsers do too (component/memql's scanBalanced,
+	// component/automations/steps' parseValueFromString). This arm was the odd
+	// one out; all three now agree on the cases below.
 	if ch == '{' {
 		depth := 0
 		start := pos
+		inString := false
+		escaped := false
 		for pos < len(s) {
-			switch s[pos] {
-			case '{':
-				depth++
-			case '}':
-				depth--
-				if depth == 0 {
-					pos++
-					objStr := s[start:pos]
-					obj, ok := c.parseObjectLiteral(objStr)
-					if !ok {
-						return nil, pos, false
+			cur := s[pos]
+			if escaped {
+				escaped = false
+				pos++
+				continue
+			}
+			if inString && cur == '\\' {
+				escaped = true
+				pos++
+				continue
+			}
+			if cur == '"' {
+				inString = !inString
+				pos++
+				continue
+			}
+			if !inString {
+				switch cur {
+				case '{':
+					depth++
+				case '}':
+					depth--
+					if depth == 0 {
+						pos++
+						objStr := s[start:pos]
+						obj, ok := c.parseObjectLiteral(objStr)
+						if !ok {
+							return nil, pos, false
+						}
+						return obj, pos, true
 					}
-					return obj, pos, true
 				}
 			}
 			pos++
