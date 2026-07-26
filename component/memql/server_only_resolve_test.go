@@ -116,28 +116,6 @@ func TestServerOnlyQueriesRefuseClientOrigin(t *testing.T) {
 	}
 }
 
-// TestUserByEmailPassesInternalOrigin is the gate half for memql#2881: the
-// construct must still RESOLVE from internal origin, or magic-link completion
-// and the /login existing-user branch break.
-//
-// It asserts on ANY error, not just a "server-only" one. The first version
-// guarded with `err != nil && strings.Contains(err.Error(), "server-only")`,
-// which passed happily when the filter was made unresolvable -- the exact
-// #2800 dead-gate defect this file exists to catch, waved through by the test
-// written to catch it.
-//
-// The store's half of the contract -- that it STAMPS internal origin rather
-// than being handed it -- is not testable here, because this passes the origin
-// in by hand. That lives in
-// component/identity/server_only_origin_test.go.
-func TestUserByEmailPassesInternalOrigin(t *testing.T) {
-	fns, specs := loadRealTree(t)
-	if err := resolveAuthored(t, fns, specs, "userByEmail", auth.OriginInternal, emailArg()); err != nil {
-		t.Errorf("userByEmail did not resolve from internal origin: %v -- that is the "+
-			"path magic-link verification and the /login branch depend on", err)
-	}
-}
-
 // TestServerOnlyQueriesPassInternalOrigin is the other half: the server-side
 // callers must keep working, which is the entire reason @serverOnly exists
 // rather than @disabled.
@@ -145,9 +123,15 @@ func TestServerOnlyQueriesPassInternalOrigin(t *testing.T) {
 	fns, specs := loadRealTree(t)
 
 	for _, name := range []string{"userByIdSystem", "runningPlansForUser"} {
-		err := resolveAuthored(t, fns, specs, name, auth.OriginInternal, userIdArg())
-		if err != nil && strings.Contains(err.Error(), "server-only") {
-			t.Errorf("%s was refused from INTERNAL origin: %v -- this is the path "+
+		// Asserts on ANY error, not just a "server-only" one. Gating on the
+		// message let an UNRESOLVABLE construct pass -- the #2800 dead-gate
+		// defect this file exists to catch. Measured: mutating
+		// runningPlansForUser's filter to the `spec("...")` form left this
+		// test, ./dsl/... and ./component/automations all green.
+		// runningPlansForUser is not in TestAuthoredQueriesResolve, so this
+		// was its only coverage (memql#2881 review round 2).
+		if err := resolveAuthored(t, fns, specs, name, auth.OriginInternal, userIdArg()); err != nil {
+			t.Errorf("%s did not resolve from INTERNAL origin: %v -- this is the path "+
 				"authentication and the kill switch depend on", name, err)
 		}
 	}

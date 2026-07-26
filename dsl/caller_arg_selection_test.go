@@ -94,8 +94,10 @@ package dsl
 //     sharper one. `searchUsers` binds `userFull` behind a single
 //     `when(args.active)` guard, which is DROPPED when the arg is absent, so
 //     it returns EVERY user in the cluster and is exposed to agents as an MCP
-//     tool. Three siblings do the same. That is memql#2883, and no gate in
-//     this package sees any of them.
+//     tool. Three siblings (activeUsers, usersScheduledForDeletion,
+//     usersInDeletionCooldown) also bind userFull ungated, though none is a
+//     tool and each keeps a real predicate. That is memql#2883, and no gate
+//     in this package sees any of them.
 //
 // Widening this gate to "any column compared against args" is the
 // 122-construct corpus again; the projection axis is a different gate
