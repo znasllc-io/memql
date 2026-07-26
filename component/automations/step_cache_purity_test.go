@@ -7,23 +7,28 @@ import (
 // step_cache_purity_test.go -- memql#2869.
 //
 // Step.IsCacheable() made StepTypeFunction cacheable BY DEFAULT, on the
-// assumption that a "function step" is pure. Nothing checked that, and a DSL
-// `logic` call compiles to exactly this step type (logic_runner.go) -- so a
-// SIDE-EFFECTING logic was cacheable unless its author remembered
-// `cache.enabled = false`.
+// assumption that a "function step" is pure. Nothing checked that.
 //
-// The live example is `logic revokeExpiredDelegations ( asOf: now )` in
-// dsl/identity/automations.memql: a sweep that REVOKES rows, servable from cache
-// and therefore skippable for the entry's TTL.
+// THE HOLE WAS WIDER THAN THE ISSUE DESCRIBES. Every authored `mutate`
+// construct invoked as an automation step compiles to StepTypeFunction, not
+// StepTypeMutation -- compileStep has no mutation branch. Measured on the live
+// tree: 54 function steps and ZERO mutation steps, so the type the old comment
+// named as side-effecting was unused while the type carrying every mutation was
+// marked cacheable. Also zero query and zero shape steps, which is why the
+// "pure types stay cacheable" half of this change protects nothing real.
 //
-// Why it had not bitten, and why that was luck: the cache key carried a
-// per-second wall-clock reading, so it churned every second and an entry almost
-// never survived to be reused. #2867 removed wall-clock values from the key --
-// correctly, because a key changing every nanosecond is a cache that can never
-// hit -- which widened the window from under a second to the full TTL. The
-// protection was never the classification; it was key churn, and a
-// cache-invalidation strategy made of clock granularity narrows a window rather
-// than closing it.
+// AND THE ISSUE'S EXAMPLE IS WRONG, which is worth pinning because a first cut
+// of this test enshrined it. #2869 names `logic revokeExpiredDelegations` as "a
+// sweep that revokes rows"; its body is `return query
+// expiredActiveDelegations(...)` -- a pure READ. The write is a separate step,
+// `revokeDelegation`, inside expireDelegations.apply's forEach. Two stale DSL
+// comments said otherwise and the issue inherited them; both are corrected in
+// this change.
+//
+// So the live-tree test below asserts on steps that ACTUALLY WRITE, which is
+// also what the issue asked for -- "a test that a `logic` step with a mutation
+// in its body is not served from cache". Pinning the pure read would have been
+// the one shape that is genuinely safe to cache.
 
 // TestFunctionStepIsNotCacheableByDefault is the fix.
 func TestFunctionStepIsNotCacheableByDefault(t *testing.T) {
@@ -35,8 +40,13 @@ func TestFunctionStepIsNotCacheableByDefault(t *testing.T) {
 	}
 }
 
-// TestFunctionStepCachingIsOptIn keeps the escape hatch working: a genuinely
-// pure logic can still be cached, deliberately.
+// TestFunctionStepCachingIsOptIn covers the Go-level opt-in.
+//
+// SCOPE, because the PR body first overclaimed this: `cache.enabled = true`
+// works on a Step built in GO, and there is no `cache` clause in the DSL
+// grammar, so no AUTHOR can reach it. This is not an escape hatch an author
+// has; it is the mechanism a future `cache` clause would compile to. Plumbing
+// that through StepDef is tracked separately.
 func TestFunctionStepCachingIsOptIn(t *testing.T) {
 	yes := true
 	step := &Step{ID: "s1", Name: "pure", Type: StepTypeFunction, Cache: &CacheConfig{Enabled: &yes}}
@@ -71,11 +81,13 @@ func TestSideEffectingStepTypesStayUncacheable(t *testing.T) {
 	}
 }
 
-// TestExplicitDisableStillWinsOverAnOptIn pins the precedence order: an explicit
-// disable must beat an explicit enable is NOT the rule -- enable wins -- but an
-// explicit disable must beat the type default for every type. Both directions
-// are asserted because the two `if` blocks that implement them are adjacent and
-// easy to reorder.
+// TestExplicitDisableStillWinsOverTheTypeDefault pins that an explicit
+// `cache.enabled = false` beats the type default for EVERY step type -- including
+// the two that are cacheable by default.
+//
+// (An earlier comment here described a precedence conflict between an explicit
+// disable and an explicit enable. There is none: Enabled is a single *bool, so
+// the two branches are mutually exclusive by construction.)
 func TestExplicitDisableStillWinsOverTheTypeDefault(t *testing.T) {
 	no := false
 	for _, tt := range []StepType{StepTypeQuery, StepTypeShape, StepTypeFunction} {
@@ -86,34 +98,51 @@ func TestExplicitDisableStillWinsOverTheTypeDefault(t *testing.T) {
 	}
 }
 
-// TestTheLiveSweepLogicIsNotCacheable is the end-to-end half: the actual
-// authored automation that motivated the issue must not be cacheable.
+// TestNoWritingStepInTheLiveTreeIsCacheable is the end-to-end half, and it is
+// the assertion #2869 actually asked for.
 //
-// It resolves the step from the REAL tree rather than constructing a fixture,
-// because the claim being made is about a shipped construct -- and if
-// revokeExpiredDelegations ever stops compiling to a function step, a fixture
-// test would keep passing while the property it stands for silently moved.
-func TestTheLiveSweepLogicIsNotCacheable(t *testing.T) {
+// It resolves steps from the REAL tree rather than fixtures, because the claim
+// is about shipped constructs -- and it names WRITES specifically, not a logic
+// that happens to be invoked by a sweep. All three of these were cacheable
+// before this change:
+//
+//	revokeDelegation             a `mutate` -- soft-revokes a delegation row
+//	deleteUserHard               a `mutate` -- hard-deletes a user
+//	workbenchTeardownDirectory   a builtin  -- rm -rf-class directory teardown
+//
+// The walk includes OnComplete and OnError, which an earlier version missed.
+// No live automation uses them today, so the gap was latent -- but the whole
+// design rationale here is "resolve from the real tree so the property cannot
+// silently move", and moving a step into an onComplete is precisely such a move.
+func TestNoWritingStepInTheLiveTreeIsCacheable(t *testing.T) {
 	loader := NewLoader(LoaderOptions{Logger: nil})
 	all, err := loader.LoadAll()
 	if err != nil {
 		t.Fatalf("LoadAll: %v", err)
 	}
 
-	var found int
+	// Named writes that must never be served from cache. Each is a `mutate` or
+	// a side-effecting builtin reached as a function step.
+	writers := map[string]string{
+		"revokeDelegation":           "mutate -- soft-revokes a delegation row",
+		"deleteUserHard":             "mutate -- hard-deletes a user",
+		"workbenchTeardownDirectory": "builtin -- rm -rf-class directory teardown",
+	}
+
+	found := map[string]bool{}
 	var walk func(steps []*Step)
 	walk = func(steps []*Step) {
 		for _, s := range steps {
 			if s == nil {
 				continue
 			}
-			if s.Type == StepTypeFunction && s.Function != nil &&
-				s.Function.Name == "revokeExpiredDelegations" {
-				found++
-				if s.IsCacheable() {
-					t.Errorf("the live delegation-revocation sweep step is CACHEABLE. It revokes "+
-						"rows; served from cache it skips the sweep for the entry's TTL "+
-						"(memql#2869). cache=%+v", s.Cache)
+			if s.Type == StepTypeFunction && s.Function != nil {
+				if why, ok := writers[s.Function.Name]; ok {
+					found[s.Function.Name] = true
+					if s.IsCacheable() {
+						t.Errorf("step %q is CACHEABLE (%s). Served from cache it SKIPS the write "+
+							"for the entry's TTL (memql#2869). cache=%+v", s.Function.Name, why, s.Cache)
+					}
 				}
 			}
 			if s.Parallel != nil {
@@ -137,13 +166,21 @@ func TestTheLiveSweepLogicIsNotCacheable(t *testing.T) {
 		}
 	}
 	for _, a := range all {
-		if a != nil {
-			walk(a.Steps)
+		if a == nil {
+			continue
 		}
+		walk(a.Steps)
+		walk([]*Step{a.OnComplete})
+		walk([]*Step{a.OnError})
 	}
 
-	if found == 0 {
-		t.Skip("revokeExpiredDelegations is not a function step in the tree any more; this test " +
-			"stands for a shipped construct, so re-point it rather than deleting it")
+	// A t.Skip here would make the whole test vacuous, so it is a FAILURE.
+	// These are shipped constructs; if one is renamed or removed, the fixture
+	// must be re-pointed at whatever writes in its place, not silently dropped.
+	for name, why := range writers {
+		if !found[name] {
+			t.Errorf("%q (%s) was not found as a function step in the tree. Re-point this test at "+
+				"a step that still writes rather than letting it assert on nothing.", name, why)
+		}
 	}
 }

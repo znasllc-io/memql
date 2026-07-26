@@ -605,7 +605,8 @@ func RequestRouteStatusBuild(args RequestRouteStatusArgs) string {
 	return b.String()
 }
 
-// RevokeExpiredDelegations -- Find every expired active delegation and soft-revoke it with `system:expiry` as the revoker. Returns the count processed.
+// RevokeExpiredDelegations -- Find every expired active delegation. PURE READ -- returns the rows; it revokes nothing.
+// The revoke is a separate step: expireDelegations.apply forEaches these rows into `revokeDelegation`. An earlier version of this comment claimed this logic "soft-revokes each one" and "returns the count processed", and memql#2869 inherited that error and built a caching decision on it -- so the wording matters (memql#2869 review).
 type RevokeExpiredDelegationsArgs struct {
 	AsOf string
 }

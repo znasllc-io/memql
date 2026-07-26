@@ -177,12 +177,22 @@ automation auditEventRetentionSweep @trigger(schedule="0 0 2 * * *") => logic au
 // =================
 //
 // Scheduled automation: every 5 minutes, soft-revoke every delegation
-// whose expiresAt is past. The query + iteration + revoke loop lives
-// in `revokeExpiredDelegations`; the automation is just the
-// trigger + one step that calls it.
+// whose expiresAt is past.
+//
+// TWO steps, and the split matters. `decide` calls
+// `revokeExpiredDelegations`, which is a PURE READ -- it returns the
+// expired rows and revokes nothing. `apply` forEaches those rows into
+// `revokeDelegation`, which is the write.
+//
+// An earlier version of this comment said "the query + iteration +
+// revoke loop lives in revokeExpiredDelegations; the automation is just
+// the trigger + one step that calls it". Both halves were false, and
+// memql#2869 inherited the error -- it cited the pure read as "a sweep
+// that revokes rows" and built a step-caching decision on it. Corrected
+// in that issue's review.
 
-/// Soft-revoke expired delegations every 5 minutes. The query + revoke loop is in
-/// revokeExpiredDelegations.
+/// Soft-revoke expired delegations every 5 minutes. `decide` reads the expired rows (pure);
+/// `apply` forEaches them into revokeDelegation, which is the write.
 @trigger(schedule="0 */5 * * * *")
 automation expireDelegations {
   step decide {
