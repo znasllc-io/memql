@@ -199,8 +199,15 @@ type declIndex struct {
 	// domain's namespace.pin -- the third input the unified loader uses to
 	// assemble a concept id, alongside the decl and its directory. Reading a
 	// FILE is not the import cycle; CALLING component/memql's namespacePin
-	// would be. nil in a Tree built without a root, which only degrades the
-	// pin to "" (see candidateConceptId).
+	// would be.
+	//
+	// nil in a Tree built without a root, and the consequence is NOT uniform:
+	// an unpinned domain is unaffected (its pin was "" anyway), but a PINNED
+	// domain's concepts then fail assembly and are dropped as candidates
+	// entirely (see candidateConceptId). Load is the only constructor in-tree
+	// and always sets Root, but Tree is exported and memql-cockpit consumes
+	// this package, so a Root-less literal would silently stop resolving
+	// pinned-domain concepts.
 	root fs.FS
 }
 
@@ -1457,8 +1464,12 @@ func sameDomainConceptDecl(path string, f *languageAst.File, idx *declIndex, nam
 // site.
 //
 // An assembly ERROR returns "" rather than falling back to the decl's own
-// @namespace, and that is load-bearing. The error IS the #2614 moved-file
-// guard -- the case where the loader hard-refuses the entire tree. Trusting
+// @namespace, and that is load-bearing. The error means THE LOADER HARD-REFUSES
+// THE WHOLE TREE (unified_loader.go:126 returns on any idErr) -- most often
+// #2614's moved-file guard, but equally a malformed @version or @namespace, or
+// a directory name that is not a legal namespace (a hyphenated bundle domain
+// like `my-product` fails ValidateAssemblyInputs). The conclusion is the same
+// for all four, which is why the branch does not distinguish them. Trusting
 // the annotation there would resolve the binding against an id the engine
 // will never mint, so a bundle that cannot boot would lint clean; #2852's
 // review caught exactly that, on a nested declaration the engine-parity tier
