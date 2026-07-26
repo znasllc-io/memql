@@ -45,12 +45,28 @@ query deployment deploymentsForCluster {
 // ---- deploymentById ----
 
 // Full status-transition history for a single deployment (#1872).
-// Filters on payload.deploymentId (NOT the canonical row id, which would
-// need partition+concept prefixing) so the caller passes the bare
-// deploymentId. Returns EVERY appended row for that deployment -- the
-// complete lifecycle timeline -- so a deployment's status is
-// reconstructable asOf any point in time (acceptance criterion). No asOf
-// directive: the consumer wants all versions, not the latest.
+// Filters on the row id: createDeployment stamps `id: args.deploymentId`,
+// so the row intrinsic IS the deploymentId and it is the indexed column
+// (PK is (partition, id, createdAt)) rather than a JSON payload probe.
+// The caller still passes the bare deploymentId -- resolveFullId
+// (component/memql/executor_filter.go) expands a colon-free id against
+// the query's bound concept, which ensureBoundConceptFilter guarantees is
+// present on every struct-form query.
+//
+// This previously filtered payload.deploymentId, justified by a comment
+// claiming the row id "would need partition+concept prefixing". That was
+// stale on both counts: the {partition}: prefix was retired in #56, and
+// the concept prefix is composed by the engine, not the caller (#2784).
+//
+// The payload field stays. It is not merely a mirror: deploymentNodeSpec
+// keys on it as an FK (concat(deploymentId, ':', nodeType)),
+// previousDeploymentId points at it, node/reconciler.go reads it off the
+// payload, and deploymentFull projects it.
+//
+// Returns EVERY appended row for that deployment -- the complete
+// lifecycle timeline -- so a deployment's status is reconstructable asOf
+// any point in time (acceptance criterion). No asOf directive: the
+// consumer wants all versions, not the latest.
 
 /// All status-transition rows for one deployment, by deploymentId, oldest-to-newest (full lifecycle
 /// history; reconstructable asOf any time). #1872.
@@ -59,7 +75,7 @@ query deployment deploymentById {
   args {
     deploymentId  string!
   }
-  filter  deploymentId == args.deploymentId
+  filter  row.id == args.deploymentId
   shape   deploymentFull
 }
 

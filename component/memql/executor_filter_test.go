@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	coreid "github.com/znasllc-io/memql/core/id"
 )
 
 func TestCompilePayloadComparisonInOperatorString(t *testing.T) {
@@ -788,6 +789,50 @@ func TestCompileProvenanceComparison_SQLPath(t *testing.T) {
 			require.Contains(t, got.sql, tc.wantSQL)
 			require.Len(t, got.args, 1)
 			require.Equal(t, tc.value, got.args[0])
+		})
+	}
+}
+
+// TestRowIdFilterRoundTripsWithStorageId pins the invariant that makes a
+// by-id query work at all, and that #2784 relies on.
+//
+// A mutation that stamps `id: args.X` with a bare X does NOT store X. The
+// concept layer canonicalises it -- Concept.storageId -> id.BuildNodeId --
+// so the id column holds "{concept}:{X}". A query filtering `row.id ==
+// args.X` with the same bare X goes the other way, through resolveFullId.
+// The two compositions must agree exactly.
+//
+// This is worth pinning because the failure is SILENT: if either side
+// changes how it composes, every by-id query stops matching and returns
+// zero rows rather than erroring. Nothing else in the suite would notice --
+// which is how these two queries came to filter a duplicated payload field
+// instead of the row id in the first place, justified by a comment claiming
+// the row id "would need partition+concept prefixing".
+func TestRowIdFilterRoundTripsWithStorageId(t *testing.T) {
+	cases := []struct{ concept, bare string }{
+		// The two #2784 queries: deploymentById and oAuthClientByClientId.
+		{"v1:cluster:deployment", "d-9f3b7c2a"},
+		{"v1:identity:oauthClient", "cockpit"},
+		// The in-tree precedent this pattern was migrated toward.
+		{"v1:identity:clusterSettings", "cluster"},
+		// Shapes that could plausibly diverge.
+		{"v1:cluster:deployment", "UPPER-Case-Id"},
+		{"v1:cluster:deployment", "id.with.dots"},
+		{"v1:cluster:deployment", "id_with_underscores"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.concept+"/"+tc.bare, func(t *testing.T) {
+			// What a `filter row.id == args.X` compiles the bare arg to.
+			filterSide, err := resolveFullId(tc.bare, tc.concept)
+			require.NoError(t, err)
+
+			// What `insert { id: args.X }` actually persists.
+			storageSide := coreid.BuildNodeId(tc.concept, tc.bare)
+
+			require.Equal(t, storageSide, filterSide,
+				"a by-id filter must resolve to the same string the insert stored; "+
+					"if these diverge every by-id query silently matches nothing")
 		})
 	}
 }

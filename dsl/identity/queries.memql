@@ -310,9 +310,18 @@ query authCode authCodeByCodeHash {
 // POST /register (RFC 7591 dynamic client registration). Returns the row
 // regardless of state so the handler can apply the redirect-URI matcher.
 //
-// Filters on payload.clientId only -- registration + token redemption are
-// unauthenticated, so there is no caller scope to bind to (classifies as
-// 'other' in the per-row-authz audit, same as authCodeByCodeHash).
+// Filters on the row id: createOAuthClient stamps `id: args.clientId`, so
+// the row intrinsic IS the clientId and it is the indexed column (PK is
+// (partition, id, createdAt)) rather than a JSON payload probe. The caller
+// still passes the bare clientId -- resolveFullId expands a colon-free id
+// against the query's bound concept (#2784).
+//
+// The payload field stays: oauthClientFull projects it and the discovery /
+// client-resolver paths read it off the payload.
+//
+// No caller scope -- registration + token redemption are unauthenticated,
+// so there is nothing to bind to (classifies as 'other' in the per-row-authz
+// audit, same as authCodeByCodeHash).
 //
 // Arguments:
 //   clientId (string, required) - the public client_id issued at registration
@@ -328,7 +337,7 @@ query oauthClient oAuthClientByClientId {
   args {
     clientId  string!
   }
-  filter  clientId==args.clientId
+  filter  row.id==args.clientId
   shape   oauthClientFull
 }
 
