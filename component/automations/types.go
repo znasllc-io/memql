@@ -52,6 +52,25 @@ func loggerLevelKeys() []string {
 
 // Automation represents a complete automation definition.
 type Automation struct {
+	// Trusted reports that this automation's SOURCE came from the registered
+	// DSL tree rather than from a caller (memql#2800).
+	//
+	// It gates whether the automation's steps may reach @serverOnly
+	// constructs. That trust is a property of WHERE THE BODY CAME FROM, not
+	// of the dispatch call: an earlier fix stamped internal origin
+	// unconditionally in executeStep, reasoning that "executeStep is
+	// reachable only from automation execution". True, and not sufficient --
+	// automation execution includes automations whose body the CALLER
+	// SUPPLIED. RunBundleDryRun compiles submitted source and drives the real
+	// Executor, so MCP run_inline_automation and the planner's LLM-emitted
+	// bundle could each wrap a @serverOnly read in a step and have it run
+	// with internal origin.
+	//
+	// FALSE IS THE ZERO VALUE, deliberately: an automation built by any path
+	// that has not explicitly declared its source trusted is treated as
+	// caller-supplied. Only the unified tree loader sets it.
+	Trusted bool `json:"-"`
+
 	// Name is the unique identifier for this automation (camelCase).
 	Name string `json:"name"`
 
@@ -709,6 +728,12 @@ type StepResult struct {
 
 // AutomationExecution represents a complete automation run.
 type AutomationExecution struct {
+	// SourceTrusted mirrors Automation.Trusted onto the run, so the step
+	// dispatch can consult it without re-plumbing the automation record
+	// through every frame (memql#2800). False is the zero value; see
+	// Automation.Trusted for why that direction is deliberate.
+	SourceTrusted bool `json:"-"`
+
 	// ID is a unique identifier for this execution.
 	ID string `json:"id"`
 

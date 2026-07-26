@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/znasllc-io/memql/component/auth"
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 )
@@ -44,7 +45,11 @@ func (s *engineCapabilityStore) LoadEnvelope(ctx context.Context, ownerUserId st
 	env := AuthoredEnvelope{OwnerUserId: ownerUserId}
 
 	// Kill switch: v1:identity:user.preferences.computerUseEnabled.
-	userRes, err := s.engine.Execute(ctx, fmt.Sprintf(`query userById(userId:%q)`, ownerUserId))
+	// #2800: server-side read of another user's row (the computer-use kill
+	// switch is checked for the workspace OWNER, not the caller), so it uses
+	// the @serverOnly construct with an explicit internal stamp.
+	userRes, err := s.engine.Execute(auth.ContextWithInternalOrigin(ctx),
+		fmt.Sprintf(`query userByIdSystem(userId:%q)`, ownerUserId))
 	if err != nil {
 		return env, fmt.Errorf("query user: %w", err)
 	}

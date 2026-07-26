@@ -22,6 +22,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql/baseparser"
 )
 
@@ -51,6 +52,14 @@ func (e *MemQLEngine) Parse(query string) (*QueryPlan, error) {
 // gated server-side to the inline tier + owner/developer. Default false keeps the
 // sealed behaviour for every other caller.
 func (e *MemQLEngine) parseWithFunctions(query string, fns *FunctionRegistry, specOverlay map[string]*Spec, allowInline bool) (*QueryPlan, error) {
+	// No origin supplied: treat as an untrusted client call (memql#2800).
+	return e.parseWithFunctionsOrigin(query, fns, specOverlay, allowInline, auth.OriginClient)
+}
+
+// parseWithFunctionsOrigin is parseWithFunctions with the call origin made
+// explicit. The parse path is otherwise ctx-free, so the origin rides as a
+// parameter rather than dragging a context through the parser.
+func (e *MemQLEngine) parseWithFunctionsOrigin(query string, fns *FunctionRegistry, specOverlay map[string]*Spec, allowInline bool, origin auth.CallOrigin) (*QueryPlan, error) {
 	if !e.canResolve() {
 		return nil, ErrEngineNotInitialized
 	}
@@ -150,7 +159,7 @@ func (e *MemQLEngine) parseWithFunctions(query string, fns *FunctionRegistry, sp
 		return nil, err
 	}
 	// Resolve function calls after spec resolution
-	if err := resolvePlanFunctions(plan, fns, e.specs); err != nil {
+	if err := resolvePlanFunctionsWithOrigin(plan, fns, e.specs, origin); err != nil {
 		return nil, err
 	}
 	// Apply directive wrappers again after function resolution

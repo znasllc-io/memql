@@ -3437,37 +3437,6 @@ func RouterBudgetsBuild(args RouterBudgetsArgs) string {
 	return b.String()
 }
 
-// RunningPlansForUser -- List a user's running plans.
-//
-// Bound concept: v1:planner:plan (machine-readable: BoundConcepts["runningPlansForUser"] in generated_concepts.go).
-type RunningPlansForUserArgs struct {
-	WithComputerUseScope    bool
-	WithComputerUseScopeSet bool // set true to send withComputerUseScope; required because zero-value bool is ambiguous
-	UserId                  string
-}
-
-// RunningPlansForUser calls the engine query runningPlansForUser.
-func (qc *QueryClient) RunningPlansForUser(ctx context.Context, args RunningPlansForUserArgs) (*Result, error) {
-	call := RunningPlansForUserBuild(args)
-	return qc.executeNamed(ctx, "runningPlansForUser", call)
-}
-
-func RunningPlansForUserBuild(args RunningPlansForUserArgs) string {
-	var b strings.Builder
-	b.WriteString("query runningPlansForUser(")
-	if args.WithComputerUseScopeSet {
-		b.WriteString("withComputerUseScope: ")
-		b.WriteString(fmt.Sprintf("%v", args.WithComputerUseScope))
-	}
-	if b.Len() > 26 {
-		b.WriteString(", ")
-	}
-	b.WriteString("userId: ")
-	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	b.WriteString(")")
-	return b.String()
-}
-
 // SearchUsers -- Search users, optionally gated by active status. Omit `active` to list every user; pass true to return only active users or false for only deactivated ones. Backs the searchUsers tool.
 //
 // Bound concept: v1:identity:user (machine-readable: BoundConcepts["searchUsers"] in generated_concepts.go).
@@ -3952,7 +3921,9 @@ func UsableRecordsBuild(args UsableRecordsArgs) string {
 	return b.String()
 }
 
-// UserActiveSpace -- Returns a user's current activePartitionId. Empty when the user is not focused on any space.
+// UserActiveSpace -- Returns a user's current activePartitionId. Empty when the user is not focused on any space. memql#2800: deliberately cross-user, and acknowledged as such.
+// The frontend derives per-participant `isActive` from it (a participant is active iff User.activePartitionId == participant.partitionId), so resolving OTHER users is the entire purpose -- caller-scoping would break presence in every space. It is safe to leave open because the projection carries no PII: userActiveSpaceProjection is id + activePartitionId and nothing else.
+// The `when(args.userId)` guard was removed. userId is declared required, so the guard should be unreachable -- but it made "no argument" mean "no filter" rather than "no rows", i.e. an unfiltered dump of every user, on a query whose only predicate it was. That is the wrong failure direction to leave standing on the strength of a required-arg check elsewhere.
 //
 // Bound concept: v1:identity:user (machine-readable: BoundConcepts["userActiveSpace"] in generated_concepts.go).
 type UserActiveSpaceArgs struct {
@@ -3996,7 +3967,8 @@ func UserByEmailBuild(args UserByEmailArgs) string {
 	return b.String()
 }
 
-// UserById -- Get a user by id.
+// UserById -- Get a user by id -- FULL row, owner-or-admin only.
+// memql#2800: the filter keys on a caller-supplied id, so it is not a caller check. Reading someone else's full row now requires being them or holding admin/owner.
 //
 // Bound concept: v1:identity:user (machine-readable: BoundConcepts["userById"] in generated_concepts.go).
 type UserByIdArgs struct {
@@ -4050,6 +4022,29 @@ func (qc *QueryClient) UserDefaults(ctx context.Context, args UserDefaultsArgs) 
 func UserDefaultsBuild(args UserDefaultsArgs) string {
 	_ = args
 	return "query userDefaults()"
+}
+
+// UserDisplayById -- Resolve a user id to a display name. Client-callable for any user.
+// memql#2800: the cross-user read that rosters, mentions and participant lists actually need. Deliberately projects userDisplayCard (id + displayName) and nothing else, so a cross-user lookup cannot return PII.
+//
+// Bound concept: v1:identity:user (machine-readable: BoundConcepts["userDisplayById"] in generated_concepts.go).
+type UserDisplayByIdArgs struct {
+	UserId string
+}
+
+// UserDisplayById calls the engine query userDisplayById.
+func (qc *QueryClient) UserDisplayById(ctx context.Context, args UserDisplayByIdArgs) (*Result, error) {
+	call := UserDisplayByIdBuild(args)
+	return qc.executeNamed(ctx, "userDisplayById", call)
+}
+
+func UserDisplayByIdBuild(args UserDisplayByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query userDisplayById(")
+	b.WriteString("userId: ")
+	b.WriteString(fmt.Sprintf("%q", args.UserId))
+	b.WriteString(")")
+	return b.String()
 }
 
 // UsersActiveInSpace -- Returns users whose activePartitionId == arg(partitionId). Active-human roster per the activity model (Phase 4).

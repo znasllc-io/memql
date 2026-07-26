@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/znasllc-io/memql/component/auth"
 	"time"
 
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
@@ -70,7 +71,8 @@ func SaveCheckpoint(ctx context.Context, engine *memql.MemQLEngine, checkpoint *
 		string(payloadJSON),
 	)
 
-	_, err = engine.Execute(ctx, query)
+	// #2800: checkpoint bookkeeping is engine-internal, never client text.
+	_, err = engine.Execute(auth.ContextWithInternalOrigin(ctx), query)
 	if err != nil {
 		return fmt.Errorf("failed to save checkpoint: %w", err)
 	}
@@ -94,7 +96,11 @@ func LoadCheckpoint(ctx context.Context, engine *memql.MemQLEngine, executionId 
 		jsonString(executionId),
 	)
 
-	result, err := engine.Execute(ctx, query)
+	// #2800: symmetric with SaveCheckpoint above -- checkpoint bookkeeping is
+	// engine-internal, never client text. No @serverOnly construct is on this
+	// path today; the pair is stamped alike so a future one does not depend on
+	// which half of the read/write pair it landed in.
+	result, err := engine.Execute(auth.ContextWithInternalOrigin(ctx), query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query checkpoint: %w", err)
 	}

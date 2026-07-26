@@ -333,6 +333,7 @@ func (e *Executor) ExecuteWithEvent(ctx context.Context, automation *Automation,
 	ctx = provenance.ContextWithProvenance(ctx, provenance.Automation(automation.Name, trigger))
 
 	exec := NewExecution(automation.Name, triggeredBy)
+	exec.SourceTrusted = automation.Trusted
 
 	// Global execution budget (memql#1142). The storm WARN above is a
 	// SIGNAL; this is the STOP. A process-global, cross-executor ceiling
@@ -438,7 +439,14 @@ func (e *Executor) ExecuteWithEvent(ctx context.Context, automation *Automation,
 
 	// Execute input query if defined
 	if automation.Input != nil && automation.Input.Query != "" {
-		inputResult, err := e.executeInput(ctx, automation.Input)
+		// #2800: the input block reaches the engine exactly like a step, so
+		// it gets the same trust rule -- stamped only when the automation's
+		// SOURCE came from the registered tree.
+		inputCtx := ctx
+		if automation.Trusted {
+			inputCtx = auth.ContextWithInternalOrigin(ctx)
+		}
+		inputResult, err := e.executeInput(inputCtx, automation.Input)
 		if err != nil {
 			exec.Fail(fmt.Errorf("input query failed: %w", err))
 			e.handleAutomationError(ctx, automation, exec, triggeringEvent, err)
@@ -735,6 +743,11 @@ func (e *Executor) executeInput(ctx context.Context, input *AutomationInput) (an
 		query = fmt.Sprintf("paginate(%s, %d)", query, input.Limit)
 	}
 
+	// #2800: same trust rule as executeStep -- an inline automation's
+	// `input:` block is caller-supplied source too, so it cannot be stamped
+	// unconditionally. The automation is not threaded here, so the stamp is
+	// applied by the caller (executeAutomation) before dispatch; this frame
+	// deliberately does NOT stamp.
 	result, err := e.engine.Execute(ctx, query)
 	if err != nil {
 		return nil, err
@@ -801,8 +814,37 @@ func (e *Executor) executeStep(ctx context.Context, step *Step, stepCtx *StepCon
 		}
 	}
 
-	// Execute the step
-	result, err := e.stepRegistry.Execute(ctx, step, stepCtx)
+	// Execute the step.
+	//
+	// #2800: an automation step is server-side by construction -- the body is
+	// AUTHORED DSL dispatched from a graph event, not query text submitted by
+	// a caller -- so it may reach @serverOnly constructs. The kill-switch
+	// automation is the motivating case: killSwitchSuspendsRunningPlans reads
+	// the affected USER's running plans, and the actor is the automation's
+	// context rather than that user, so the construct cannot be scoped to
+	// actor.userId and must instead be barred from the wire.
+	//
+	// The stamp belongs HERE, not deeper. A first attempt put it on the
+	// `input:` block's engine call, which no step goes through -- every step
+	// type dispatches via stepRegistry.Execute and reached the engine with an
+	// unstamped context, so the kill switch was refused as a client call and
+	// silently suspended nothing. That is the failure the issue's own park
+	// comment predicted: a security control failing closed-looking but open.
+	//
+	// It also must not go any deeper. LogicRunner is shared with the
+	// client-callable `logic foo(...)` path, so stamping there would let any
+	// caller launder client origin into internal by wrapping a @serverOnly
+	// read in a logic. executeStep is reachable only from automation
+	// execution and resume, which is what makes it the correct seam.
+	//
+	// Note this marks who authored the CALL, not the data: a client can
+	// certainly cause an automation to fire, but it cannot choose which
+	// constructs the authored body invokes.
+	stepCtx2 := ctx
+	if stepCtx != nil && stepCtx.Execution != nil && stepCtx.Execution.SourceTrusted {
+		stepCtx2 = auth.ContextWithInternalOrigin(ctx)
+	}
+	result, err := e.stepRegistry.Execute(stepCtx2, step, stepCtx)
 
 	// Publish step completed/failed event
 	var stepTopic string

@@ -135,6 +135,21 @@ type Function struct {
 	// @disabled to opt out. @enabled is a no-op accepted for legacy DSL.
 	Enabled bool
 
+	// ServerOnly marks the construct as not callable by clients over the
+	// wire (memql#2800). Set by @serverOnly; default false = callable.
+	//
+	// Distinct from Enabled, which is binary and applies to EVERY caller:
+	// @disabled would also break the server-side Go that needs these
+	// constructs, which is exactly the case @serverOnly exists to serve --
+	// the auth path resolving `sub` -> user before an actor exists, the
+	// kill-switch automation acting on a user other than the actor.
+	//
+	// Enforced in functionValidator.expandFunctionCall and the engine's
+	// mutation/logic dispatch, against auth.OriginFromContext. Unlike the
+	// retired @internal (#2620 / #2708), which only hid a construct from
+	// discovery while leaving it callable, this one is checked at execution.
+	ServerOnly bool
+
 	// Deprecated contains deprecation message if set (empty = not deprecated)
 	Deprecated string
 
@@ -212,6 +227,7 @@ func (f *Function) clone() *Function {
 		ArgsSchema:       argsSchemaCopy,
 		// Attribute values
 		Enabled:           f.Enabled,
+		ServerOnly:        f.ServerOnly,
 		Deprecated:        f.Deprecated,
 		Version:           f.Version,
 		Timeout:           f.Timeout,

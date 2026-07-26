@@ -4,6 +4,7 @@
 // files cover the other construct kinds.
 
 use common.traits.{ identityIsApiKey, identityIsBadge, identityIsNodeToken, identityIsWorkerToken, isActiveRecord, isDeletionScheduled, statusIsPending }
+use common.specs.{ requiresOwnerOrAdmin }
 
 // ---- queries/v1/identity/accountEntitlement.memql ----
 
@@ -1024,12 +1025,26 @@ query auditEvent recentAuditEvents {
 // so the partition slot is _system; the rewriter handles that.
 
 /// Returns a user's current activePartitionId. Empty when the user is not focused on any space.
-@unbounded("the user's active-space projection by id (guarded) -- bounded to a single row")
+/// memql#2800: deliberately cross-user, and acknowledged as such.
+///
+/// The frontend derives per-participant `isActive` from it (a participant is
+/// active iff User.activePartitionId == participant.partitionId), so resolving
+/// OTHER users is the entire purpose -- caller-scoping would break presence in
+/// every space. It is safe to leave open because the projection carries no
+/// PII: userActiveSpaceProjection is id + activePartitionId and nothing else.
+///
+/// The `when(args.userId)` guard was removed. userId is declared required, so
+/// the guard should be unreachable -- but it made "no argument" mean "no
+/// filter" rather than "no rows", i.e. an unfiltered dump of every user, on a
+/// query whose only predicate it was. That is the wrong failure direction to
+/// leave standing on the strength of a required-arg check elsewhere.
+@public
+@unbounded("the user's active-space projection by id -- bounded to a single row")
 query user userActiveSpace {
   args {
     userId  string!
   }
-  filter  when(args.userId) { row.id==args.userId }
+  filter  row.id==args.userId && isActiveRecord
   shape   userActiveSpaceProjection
 }
 
@@ -1077,13 +1092,56 @@ query user userByEmail {
 // Returns:
 //   Array with 0 or 1 user record in userFull shape.
 
-/// Get a user by id.
+/// Get a user by id -- FULL row, owner-or-admin only.
+///
+/// memql#2800: the filter keys on a caller-supplied id, so it is not a caller
+/// check. Reading someone else's full row now requires being them or holding
+/// admin/owner.
 query user userById {
+  args {
+    userId  string!
+  }
+  filter  row.id==args.userId && isActiveRecord && requiresOwnerOrAdmin
+  shape   userFull
+}
+
+/// Get a user by id -- SERVER-SIDE ONLY, full row, no caller scoping.
+///
+/// memql#2800. This is the construct the authentication path itself calls:
+/// component/auth/identity_resolver.go resolves the JWT `sub` claim to a user
+/// row in order to BUILD the actor. Scoping it to actor.userId would be
+/// circular and would fail auth for everyone, which is why the exposure could
+/// not simply be closed by copying currentUser's filter.
+///
+/// @serverOnly is enforced at execution against auth.CallOrigin -- unlike the
+/// retired @internal (#2620 / #2708), which only hid a construct from
+/// discovery surfaces while leaving it callable. A client-originated call
+/// reaching this name is refused by name.
+///
+/// Callers must stamp auth.ContextWithInternalOrigin. Present ones: the
+/// identity resolver, the identity store, the identity admin app, the
+/// computer-use kill-switch reads, and the agent worker store.
+@serverOnly
+query user userByIdSystem {
   args {
     userId  string!
   }
   filter  row.id==args.userId && isActiveRecord
   shape   userFull
+}
+
+/// Resolve a user id to a display name. Client-callable for any user.
+///
+/// memql#2800: the cross-user read that rosters, mentions and participant
+/// lists actually need. Deliberately projects userDisplayCard (id +
+/// displayName) and nothing else, so a cross-user lookup cannot return PII.
+@public
+query user userDisplayById {
+  args {
+    userId  string!
+  }
+  filter  row.id==args.userId && isActiveRecord
+  shape   userDisplayCard
 }
 
 // ---- queries/v1/identity/currentUser.memql ----

@@ -79,7 +79,11 @@ func (f *ssoTokenFakeEngine) Execute(_ context.Context, q string) (*memqlengine.
 		node := &memqlv1.MemoryNode{Id: "v1:identity:authCode:sso1", Payload: &structpb.Struct{Fields: fields}}
 		return &memqlengine.ExecuteResult{Bundle: &memqlv1.GraphBundle{Nodes: []*memqlv1.MemoryNode{node}}}, nil
 
-	case strings.Contains(q, "userById("):
+	// #2800 renamed the server-side read to userByIdSystem. Match BOTH: the
+	// bare "userById(" no longer matches it, and a stub that silently stops
+	// matching falls through to an empty bundle, quietly dropping the user-row
+	// coverage these tests exist for.
+	case strings.Contains(q, "userByIdSystem(") || strings.Contains(q, "userById("):
 		node := &memqlv1.MemoryNode{
 			Id: "v1:identity:user:owner1",
 			Payload: &structpb.Struct{Fields: map[string]*structpb.Value{

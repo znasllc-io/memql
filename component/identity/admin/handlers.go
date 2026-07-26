@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/znasllc-io/memql/component/auth"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -923,8 +924,10 @@ func (s *AdminServer) queryUsers(ctx context.Context, q string) ([]userView, err
 const maxUserPageWalk = 1000
 
 func (s *AdminServer) userById(ctx context.Context, userId string) (*userView, error) {
-	q := fmt.Sprintf(`query userById(userId: %q)`, userId)
-	res, err := s.Engine.Execute(ctx, q)
+	// #2800: the admin app is server-side Go and is already gated at its own
+	// HTTP layer; it reads arbitrary users by design.
+	q := fmt.Sprintf(`query userByIdSystem(userId: %q)`, userId)
+	res, err := s.Engine.Execute(auth.ContextWithInternalOrigin(ctx), q)
 	if err != nil {
 		return nil, err
 	}

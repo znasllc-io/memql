@@ -75,6 +75,7 @@ func (e *Executor) ResumeFrom(
 	// Create new execution tracking the resume
 	triggeredBy := fmt.Sprintf("resumed:%s", checkpoint.ExecutionId)
 	exec := NewExecution(automation.Name, triggeredBy)
+	exec.SourceTrusted = automation.Trusted
 
 	// Set up evaluator
 	evaluator := NewEvaluator()

@@ -46,7 +46,8 @@ var ErrUserNotProvisioned = errors.New("auth: user not provisioned in database")
 //  1. `sub` must already be a canonical v1:identity:user id (every
 //     identity-service-issued JWT carries one). Anything else is
 //     rejected with ErrUserNotProvisioned.
-//  2. userById(userId) -> user row (for Role + email).
+//  2. userByIdSystem(userId) -> user row (for Role + email). @serverOnly:
+//     this is the call that makes caller-scoping circular (#2800).
 //
 // If step 2 returns no rows, ErrUserNotProvisioned is returned so the
 // caller can decide whether to short-circuit with a claims-based
@@ -65,10 +66,20 @@ func (r *IdentityResolver) LoadFromClaims(ctx context.Context, claims map[string
 	}
 	userId := subject
 
-	userQuery := fmt.Sprintf(`query userById(userId: %s)`, quoteJSON(userId))
-	user, err := r.Engine.ExecuteShaped(ctx, userQuery)
+	// #2800: userByIdSystem is @serverOnly -- it projects the full user row
+	// (primaryEmail, phone, birthdate, role, ...) and is resolved by a
+	// caller-supplied id, so it must not be reachable from the wire. THIS
+	// call is the reason it cannot simply be scoped to actor.userId: it runs
+	// inside ResolveAccessContext, i.e. it is how the actor gets built. A
+	// caller-scope filter here would be circular and would fail auth for
+	// everyone.
+	//
+	// The internal stamp goes on a context this code constructs, never on one
+	// handed in by a request handler -- see auth.ContextWithInternalOrigin.
+	userQuery := fmt.Sprintf(`query userByIdSystem(userId: %s)`, quoteJSON(userId))
+	user, err := r.Engine.ExecuteShaped(ContextWithInternalOrigin(ctx), userQuery)
 	if err != nil {
-		return nil, fmt.Errorf("userById: %w", err)
+		return nil, fmt.Errorf("userByIdSystem: %w", err)
 	}
 	userRow := firstRow(user)
 	if userRow == nil {
