@@ -62,6 +62,31 @@ func ExtractConceptDecls(source string) []*languageAst.ConceptDecl {
 // nested object bodies inside the concept's property declarations.
 func conceptSlices(source string) []string {
 	lines := strings.Split(source, "\n")
+
+	// Declaration detection and brace balancing run on a comment-BLANKED view;
+	// the preamble walk and the emitted slice are cut from the ORIGINAL
+	// (memql#2868).
+	//
+	// Concepts do NOT go through ExtractKeywordSlices -- they have this
+	// dedicated line-oriented slicer, which #2868's diagnosis missed. Fixing
+	// the keyword slicer alone left a block-commented concept REGISTERING; the
+	// end-to-end test in keyword_slices_e2e_test.go is what caught it. A
+	// commented-out schema is live: it validates writes and appears in the
+	// concepts API.
+	//
+	// BlankComments preserves byte offsets, so splitting the blanked source
+	// yields the same number of lines at the same indices as `lines` --
+	// scanLines[j] and lines[j] are the same line, one blanked and one not.
+	scanLines := strings.Split(languageParser.BlankComments(source), "\n")
+	if len(scanLines) != len(lines) {
+		// BlankComments stopped being length-preserving. Falling back to the
+		// raw view would silently restore the #2868 defect, so refuse to slice
+		// rather than mis-slice: the caller then reports zero concepts and the
+		// strict-boot gate surfaces it loudly instead of quietly loading a
+		// commented-out schema.
+		return nil
+	}
+
 	var slices []string
 
 	i := 0
@@ -69,7 +94,7 @@ func conceptSlices(source string) []string {
 		// Find the next `concept <name> {` declaration at column 0.
 		conceptLine := -1
 		for j := i; j < len(lines); j++ {
-			line := lines[j]
+			line := scanLines[j]
 			if isConceptDeclStart(line) {
 				conceptLine = j
 				break
@@ -109,9 +134,11 @@ func conceptSlices(source string) []string {
 		// find the closing `}` at indent 0.
 		depth := 0
 		endLine := -1
-		for k := conceptLine; k < len(lines); k++ {
-			depth += strings.Count(lines[k], "{")
-			depth -= strings.Count(lines[k], "}")
+		for k := conceptLine; k < len(scanLines); k++ {
+			// Blanked view: a `{` or `}` inside a comment must not move the
+			// depth, or the slice closes early and emits a truncated concept.
+			depth += strings.Count(scanLines[k], "{")
+			depth -= strings.Count(scanLines[k], "}")
 			if depth == 0 {
 				endLine = k
 				break
