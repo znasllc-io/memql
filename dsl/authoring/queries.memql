@@ -17,7 +17,7 @@ query bundle authoringBundlesForOwner {
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
-  sort     "createdAt", "desc"
+  sort     "row.createdAt", "desc"
   paginate 50
   shape   bundleFull
 }
@@ -41,7 +41,7 @@ query bundle activeAuthoringBundles {
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
-  sort     "createdAt", "desc"
+  sort     "row.createdAt", "desc"
   paginate 50
   shape   bundleFull
 }
@@ -71,7 +71,7 @@ query bundle systemActiveAuthoringBundles {
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
-  sort     "createdAt", "desc"
+  sort     "row.createdAt", "desc"
   paginate 50
   shape   bundleFull
 }
@@ -122,7 +122,7 @@ query construct cataloguedConstructsForOwner {
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
-  sort     "createdAt", "desc"
+  sort     "row.createdAt", "desc"
   paginate 50
   shape   constructFull
 }
@@ -160,7 +160,7 @@ query dependencyEdge dependencyEdgesForOwner {
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
-  sort     "createdAt", "desc"
+  sort     "row.createdAt", "desc"
   paginate 50
   shape   dependencyEdgeFull
 }

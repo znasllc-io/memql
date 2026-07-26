@@ -187,7 +187,7 @@ query context queryLatestSpaceContextForSpace {
     spaceId  string  @required
   }
   filter  spaceId == args.spaceId
-  sort    "createdAt", "desc"
+  sort    "row.createdAt", "desc"
   paginate 1
   shape   spaceContextFull
 }
@@ -1179,11 +1179,34 @@ the change. The gates, with their test names:
   filter  row.region == args.region     // rejected -- not a row intrinsic
   ```
 
-  Scope: **filter predicates only.** A spec/trait body reads its
+  Scope: **filter predicates.** A spec/trait body reads its
   signature-bound fields bare and rejects `row.*` outright (epic #2281) --
   the binding lives in the signature there. Mutation `insert` / `update`
   blocks write `id:` / `createdAt:` as target keys rather than
-  references, and are unaffected.
+  references, and are unaffected. Sort keys are covered by their own gate,
+  below.
+- **Sort keys use the `row.` namespace**
+  (`TestSortKeysUseRowNamespace`, memql#2786). The ordering half of the
+  rule above: in an authored sort clause the row envelope is addressed
+  through `row.`, and the bare spelling is retired.
+
+  Why: the same ambiguity. `sort "id"` can name the row id or a payload
+  property called `id`, and the two compile to completely different
+  `ORDER BY` expressions -- a table column vs `payload #>> '{id}'`.
+
+  ```memql
+  sort  "row.createdAt", "desc"   // correct -- the row envelope
+  sort  "createdAt", "desc"       // rejected -- bare intrinsic
+  sort  "version", "desc"         // correct -- payload property, bare
+  ```
+
+  `provenance` has no sort form: it is object-valued with no ordering, so
+  `row.provenance` is rejected outright.
+
+  Scope: **authored `.memql` only.** The runtime and SDK sort surfaces
+  keep accepting bare keys from callers -- `compileSortField` still
+  resolves them -- exactly as the filter gate leaves the runtime filter
+  surface alone.
 - **Mandatory trait specs** (`TestNoInlineTraitablePredicates`).
   When a trait in `dsl/common/traits.memql` covers a predicate, the
   filter must call the trait, not inline the comparison:

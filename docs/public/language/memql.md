@@ -427,7 +427,8 @@ Use `sort(<expr>, "<field>", "<direction>?", ...)` to order results. The functio
 - Requires at least one string literal field name; directions are optional (`"asc"` or `"desc"`, defaulting to `"desc"`).
 - Allows multiple field/direction pairs for deterministic tie-breaking.
 - Must wrap the entire query expression (i.e., `sort(...)` should be the outermost call).
-- Supported fields: `id`, `concept`, `createdAt`, `createdBy`, `type`, and bare payload properties (`status`, `metadata.tags`).
+- Supported fields: the row intrinsics `id`, `concept`, `createdAt`, `createdBy`, `type` -- each also addressable through the `row.` namespace (`"row.createdAt"`) -- and bare payload properties (`status`, `metadata.tags`).
+- In an authored `.memql` sort clause the namespaced spelling is required for intrinsics and enforced by CI (memql#2786), because a bare key cannot be told apart from a payload property of the same name. This runtime form still accepts either spelling, so existing SDK and API callers are unaffected.
 - Limits and offsets always apply **after** sorting. Sorting on payload properties may cause the engine to fetch up to `MEMORY_ENGINE_MAX_WINDOW` rows to guarantee correctness.
 
 Example:
@@ -833,7 +834,7 @@ query context queryLatestSpaceContextForSpace {
     spaceId  string  @required
   }
   filter  spaceId==args.spaceId
-  sort    "createdAt", "desc"
+  sort    "row.createdAt", "desc"
   paginate 1
   shape   spaceContextFull
 }

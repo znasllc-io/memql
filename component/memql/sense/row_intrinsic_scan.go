@@ -16,6 +16,7 @@ package sense
 import (
 	"regexp"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -134,6 +135,212 @@ func ScanBareRowIntrinsics(source string) []BareRowIntrinsic {
 func isFilterClauseOpener(trimmed string) bool {
 	rest, ok := strings.CutPrefix(trimmed, "filter")
 	return ok && (rest == "" || rest[0] == ' ' || rest[0] == '\t')
+}
+
+// isSortClauseOpener reports whether a trimmed line opens a `sort` clause.
+//
+// It requires the STRING LITERAL the grammar demands (parseSortFunction
+// rejects a sort whose first argument is not a string), not merely the word
+// `sort` followed by a boundary. That is stricter than isFilterClauseOpener
+// on purpose, and it closes two holes a boundary check leaves open:
+//
+//   - FALSE POSITIVE. Unlike the filter scanner, this one READS literal
+//     contents rather than blanking them, so a construct FIELD named `sort`
+//     would otherwise have its annotation literals read as sort keys --
+//     `sort string @enum("createdAt", "title")` in an args block, or a
+//     `@default("createdAt")` on a concept field, would fail CI pointing
+//     inside the annotation. A field named `sort` (letting a caller pick an
+//     ordering) is an ordinary shape, so this had to be a scanner-side fix
+//     rather than a tree convention. NOTE this covers the `name type
+//     @annotation` field shape, NOT the `key "value"` block shape that
+//     providers use (`voice "alloy"` in a `params` block): a `params` entry
+//     spelled `sort "createdAt"` is byte-identical to a directionless sort
+//     clause, so no line-local rule can separate them. Distinguishing it needs
+//     enclosing-construct state, which this scanner deliberately does not
+//     carry -- the filter sibling records why multi-line tracking was removed.
+//     Reaching it requires a `params` key named exactly `sort` whose value is
+//     exactly one of the five intrinsic names; the tree has none.
+//   - FALSE NEGATIVE. The rewriter opens the clause with a bare
+//     strings.HasPrefix(line, "sort") and no boundary at all
+//     (component/language/parser/rewriter.go), so `sort"createdAt"` with no
+//     space IS a sort clause to the engine. Skipping optional whitespace
+//     before the quote keeps the scanner and the rewriter agreeing.
+//
+// The whitespace skip is UNICODE-aware for the same reason: the rewriter
+// separates the keyword from the arguments with strings.TrimSpace, which is
+// unicode.IsSpace-based, so `sort<NBSP>"createdAt"` rewrites byte-identically
+// to the ASCII-space form and is a live clause. An ASCII-only TrimLeft here
+// would let it bypass the gate -- and NBSP is exactly the character the
+// rune-column fix in bareRowIntrinsicSortKeyRule exists to handle, so treating
+// it as unreachable one column to the left would contradict that.
+//
+// `sortOrder "x"` is still excluded -- after the `sort` prefix comes `O`,
+// which is neither whitespace nor a quote.
+func isSortClauseOpener(trimmed string) bool {
+	rest, ok := strings.CutPrefix(trimmed, "sort")
+	if !ok {
+		return false
+	}
+	return strings.HasPrefix(strings.TrimLeftFunc(rest, unicode.IsSpace), `"`)
+}
+
+// ScanBareRowIntrinsicSortKeys returns every sort KEY in source that names a
+// row intrinsic without the `row.` namespace (memql#2786) -- the ordering half
+// of the filter rule above.
+//
+// It is a sibling of ScanBareRowIntrinsics rather than a branch inside it
+// because the two read opposite halves of a line. A filter names fields as
+// CODE, so that scanner blanks string literals before matching; a sort names
+// them as STRING LITERALS (`sort "createdAt", "desc"`), so this one must read
+// literal contents and ignore the code around them. Folding both into one
+// regex pass would mean a scanner that both blanks and reads the same bytes.
+//
+// The ambiguity is identical to the filter case and so is the fix: in
+// `sort "id"` the key can be the row id or a payload property named `id`, and
+// the two compile to completely different ORDER BY expressions -- a table
+// column vs `payload #>> '{id}'` (component/memql compileSortField).
+//
+// Key-vs-direction classification mirrors parseSortFunction
+// (component/language/parser/parser.go) exactly: literals alternate
+// field [, direction] [, field [, direction]] ..., and a literal counts as a
+// direction only when it directly follows a field AND spells asc/desc. A first
+// literal spelled "desc" is therefore a FIELD here, as it is to the parser.
+//
+// Scope is the five SCALAR intrinsics compileSortField resolves under `row.`
+// (id / concept / type / createdAt / createdBy). `provenance` is deliberately
+// absent: it is object-valued with no ordering, and `row.provenance` is
+// rejected outright by compileSortField (locked by
+// TestRowNamespaceSortRejectsNonIntrinsic), so suggesting it would name a
+// spelling nothing accepts -- the same reasoning that gives provenance its
+// mandatory-leaf arm in the filter scanner.
+//
+// Comment and block-comment handling matches the filter scanner, including its
+// documented multi-line-string trade-off.
+//
+// KNOWN, ACCEPTED GAP: the scanner reads a literal's RAW text, while the lexer
+// resolves escapes -- so `sort "\u0063reatedAt"` is a bare intrinsic to the
+// engine and invisible here. Unescaping would mean reimplementing the lexer's
+// escape handling in a package that must not import it, to close a spelling
+// no author produces by accident. The gate's job is catching the ordinary
+// bare key, and it does that exactly.
+func ScanBareRowIntrinsicSortKeys(source string) []BareRowIntrinsic {
+	var found []BareRowIntrinsic
+
+	// Columns count against the ORIGINAL line for the same reason as the
+	// filter scanner: BlankBlockComments preserves byte offsets but not rune
+	// counts.
+	original := strings.Split(source, "\n")
+
+	for i, line := range strings.Split(BlankBlockComments(source), "\n") {
+		code := blankLineComments(line)
+		if !isSortClauseOpener(strings.TrimSpace(code)) {
+			continue
+		}
+		literals := stringLiterals(code)
+		for j := 0; j < len(literals); j++ {
+			key := literals[j]
+			// Consume an optional trailing direction so the NEXT iteration
+			// lands on a field, never on "asc"/"desc".
+			if j+1 < len(literals) && isSortDirectionLiteral(literals[j+1].value) {
+				j++
+			}
+			name, ok := canonicalScalarIntrinsic[strings.ToLower(strings.TrimSpace(key.value))]
+			if !ok {
+				continue
+			}
+			prefix := line[:key.start]
+			if i < len(original) && key.start <= len(original[i]) {
+				prefix = original[i][:key.start]
+			}
+			found = append(found, BareRowIntrinsic{
+				Line:   i + 1,
+				Column: utf8.RuneCountInString(prefix) + 1,
+				Text:   key.value,
+				Name:   name,
+			})
+		}
+	}
+	return found
+}
+
+// isSortDirectionLiteral mirrors the parser predicate of the same name
+// (component/language/parser/parser.go). Duplicated rather than imported for
+// the reason canonicalScalarIntrinsic is: sense is consumed by the editor AND
+// by the dsl conformance suite, and importing the parser from here would pull
+// the language package into both.
+func isSortDirectionLiteral(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "asc", "desc":
+		return true
+	}
+	return false
+}
+
+// sortLiteral is one string literal on a clause line: its contents and the
+// byte offset of the first CONTENT byte (past the opening quote), so a
+// diagnostic underlines the key itself rather than the quote.
+type sortLiteral struct {
+	value string
+	start int
+}
+
+// stringLiterals returns the double-quoted literals on a line in source order.
+// Escape pairs are skipped so `"a\"b"` is one literal, matching the lexer.
+// An unterminated literal is ignored rather than run to end-of-line: a sort
+// clause with an unbalanced quote does not parse, so there is no authored key
+// to report.
+func stringLiterals(line string) []sortLiteral {
+	var out []sortLiteral
+	for i := 0; i < len(line); i++ {
+		if line[i] != '"' {
+			continue
+		}
+		start := i + 1
+		j := start
+		closed := false
+		for ; j < len(line); j++ {
+			if line[j] == '\\' && j+1 < len(line) {
+				j++
+				continue
+			}
+			if line[j] == '"' {
+				closed = true
+				break
+			}
+		}
+		if !closed {
+			break
+		}
+		out = append(out, sortLiteral{value: line[start:j], start: start})
+		i = j
+	}
+	return out
+}
+
+// blankLineComments replaces a trailing `//` comment with spaces while
+// PRESERVING string-literal contents -- the inverse of
+// blankLineCommentsAndStrings, which the filter scanner needs and this one
+// must not use. Quote-awareness still matters: a `//` inside a literal is
+// content, not a comment.
+func blankLineComments(line string) string {
+	out := []byte(line)
+	inStr := false
+	for i := 0; i < len(out); i++ {
+		switch {
+		case inStr && out[i] == '\\' && i+1 < len(out):
+			i++
+		case out[i] == '"':
+			inStr = !inStr
+		case inStr:
+			// literal content -- preserved
+		case out[i] == '/' && i+1 < len(out) && out[i+1] == '/':
+			for j := i; j < len(out); j++ {
+				out[j] = ' '
+			}
+			return string(out)
+		}
+	}
+	return string(out)
 }
 
 // blankLineCommentsAndStrings replaces string-literal contents and any

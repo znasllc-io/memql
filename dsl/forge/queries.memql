@@ -92,7 +92,7 @@ query request myRequests {
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
-  sort     "createdAt", "desc"
+  sort     "row.createdAt", "desc"
   paginate 50
   shape   requestFull
 }
@@ -115,7 +115,7 @@ query request projectRequests {
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
-  sort     "createdAt", "desc"
+  sort     "row.createdAt", "desc"
   paginate 50
   shape   requestFull
 }
@@ -129,7 +129,7 @@ query request validationQueue {
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
-  sort     "createdAt", "desc"
+  sort     "row.createdAt", "desc"
   paginate 50
   shape   requestFull
 }
@@ -140,7 +140,7 @@ query request approvalQueue {
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
-  sort     "createdAt", "desc"
+  sort     "row.createdAt", "desc"
   paginate 50
   shape   requestFull
 }
@@ -154,7 +154,7 @@ query requestEvent requestEvents {
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
-  sort     "createdAt", "desc"
+  sort     "row.createdAt", "desc"
   paginate 50
   shape   requestEventFull
 }

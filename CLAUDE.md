@@ -1388,9 +1388,16 @@ concept id.
   entirely different SQL (a table column vs a JSONB path). `row.` names
   the envelope explicitly, matching `actor.X` / `args.X` / `config.X`
   and the shape bodies that have always projected `row.id`.
-  Filter predicates only: a spec/trait body reads its signature-bound
-  fields bare and rejects `row.*` (epic #2281), and mutation
-  `insert`/`update` blocks write `id:` as a target key, not a reference.
+  A spec/trait body reads its signature-bound fields bare and rejects
+  `row.*` (epic #2281), and mutation `insert`/`update` blocks write
+  `id:` as a target key, not a reference.
+- Sort keys take the same namespace — `sort "row.createdAt", "desc"`.
+  The bare spelling is retired in authored `.memql` (memql#2786) and
+  rejected by `TestSortKeysUseRowNamespace`; `sort "id"` was
+  indistinguishable from a payload property named `id` while compiling
+  to a different ORDER BY. Payload sort keys stay bare
+  (`sort "version", "desc"`), `provenance` has no sort form, and the
+  runtime/SDK sort surface still accepts either spelling.
 - **One Go boolean grammar** (operator standardization #971): `&&`
   (AND), `||` (OR), `!` (NOT), parens `( )` with Go precedence
   (`!` > comparisons > `&&` > `||`). The legacy `;`-AND and `,`-OR

@@ -64,7 +64,7 @@ query utterance agentInteractionCount {
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
-  sort     "createdAt", "desc"
+  sort     "row.createdAt", "desc"
   paginate 50
   shape   utteranceFull
 }
@@ -476,7 +476,7 @@ query utterance spaceUtterances {
   // (createdAt, id) instead of the full message-history pull. The append-only
   // utterance stream is the canonical keyset-eligible shape. Literal page size
   // -- struct-query paginate takes an integer literal only.
-  sort     "createdAt", "desc"
+  sort     "row.createdAt", "desc"
   paginate 50
   shape    utteranceFull
 }
