@@ -1649,23 +1649,35 @@ injecting it into a shipped construct:
 | a field inside a spec body (#2804) | `spec "requiresAdmin": body reads field "rolle", which shape "actorEnvelope" does not declare` |
 | a trait's name in a cross-domain `use` | `use common.traits: "isNotDeletd" is not declared in common/traits.memql` |
 
-**The trap worth knowing: `go test ./dsl/...` does NOT cover these.** All
-three injections leave that package's suite green and the engine booting.
-The lanes run in `memqllint` and in the real-tree test that drives them
+**Where these run matters.** The field lanes (rows 1 and 2) live in
+`memqllint` and in the real-tree test that drives them
 (`TestVerifyReferentialIntegrity_RealDSLTree`, in
-`component/memql/dslimports`), so a full `go test ./...` does catch them
--- but judging coverage from the `dsl` package's own tests, which is the
-natural place to look, tells you this is unguarded when it is not.
+`component/memql/dslimports`), so `go test ./...` catches them but
+`go test ./dsl/...` alone stays green -- and the `dsl` package is the
+natural place to look. Row 3 is caught by both, since the cross-domain
+import gate (rule 25) also runs in `./dsl/...`.
 
-**One typo shape is still silent: a same-domain trait referenced
-ambiently.** Rule 25 (#2617) makes same-domain constructs ambient, so
-`filter ... && isHumanParticipnt` inside `dsl/cognition/` carries no
-`use` line for the import lane to check. Verified: both `memqllint` and
-the referential tests stay green. It fails **closed** at query-parse on
-first call -- `unknown spec "isHumanParticipnt"` -- so it is a loud
-runtime error rather than a silent wrong answer, but it is not a
-build-time gate. Naming the trait in an explicit cross-domain `use` is
-what moves it to lint time.
+**The typo shape that is still silent is a misspelled trait at the CALL
+SITE.** Row 3 catches a name misspelled in the `use` line. It does not
+check that call sites match what was imported -- so this is silent:
+
+```memql
+use common.traits.{ isNotDeleted }        // correct
+
+filter  planId==args.planId && isNotDeletd    // typo -- nothing reports it
+filter  ownerUserId==args.ownerUserId && isNotDeleted   // sibling keeps the import "used"
+```
+
+Verified: `memqllint`, `go test ./dsl/...` and the referential tests all
+stay green. It surfaces only when the typo orphans the import entirely
+(every call site misspelled), which reports the import as never
+referenced. A same-domain trait is the same hole with no import at all
+to orphan -- rule 25 (#2617) makes it ambient, so there is nothing for
+the import lane to inspect.
+
+It does fail **closed**: at query-parse on first call the query errors
+`unknown spec "isNotDeletd"` rather than quietly returning every row. A
+loud runtime error, not a build-time gate.
 
 **What field validation structurally cannot see** is a field that is real
 and declared but scoped from the wrong *source*: `filter
