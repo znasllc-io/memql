@@ -294,20 +294,25 @@ func TestCompilerEmptyValueIsNullNotAnError(t *testing.T) {
 // of the round-4 review was exactly this: a valid nested payload newly
 // rejected, caught only because the accept net was widened.
 //
-// This corpus is synthetic on purpose, and the reason needs stating precisely
-// because an earlier version of this comment got it wrong. It claimed "zero
-// PayloadRaw sites across all 199 .memql files"; there are 213. What is zero
-// is the sites reachable from THIS parser:
+// This corpus is synthetic on purpose, and the reason is a ROUTING fact, not
+// a count -- an earlier version of this comment stated it as a count and got
+// the count wrong:
 //
-//	213  struct-form `insert {` / `update {` blocks. The rewriter turns these
-//	     into a non-empty PayloadRaw, but they route to component/memql's copy.
-//	  0  inline `mutation { ... }` steps inside an automation, which is the
-//	     only shape reaching compileMutationConfig -> parsePayloadRaw.
+//	struct-form `insert {` / `update {` blocks   -> component/memql's copy
+//	inline `mutation { ... }` automation steps   -> THIS copy
+//	                                                (compileMutationConfig
+//	                                                 -> parsePayloadRaw)
 //
-// So the compiler's payload parser is unreachable from authored DSL today --
-// the "latent" caveat memql#2816 carries -- and a corpus probe over the tree
-// proves nothing about THIS function. These hand-written shapes are the only
-// thing standing between a future authored payload and a silent rejection.
+// The tree is full of the first kind and, at the time of writing, carries
+// none of the second -- which is the "latent" caveat memql#2816 describes,
+// and why a corpus probe over dsl/ proves nothing about THIS function. The
+// live numbers are whatever `grep -c` says today; do not restate them here,
+// because the routing is the durable part and the counts are not.
+//
+// These hand-written shapes are therefore the only thing standing between a
+// future authored payload and a silent rejection. If inline mutation steps
+// ever appear in the tree, this parser goes live and everything memql#2816
+// calls latent stops being latent.
 func TestCompilerAcceptsRealisticPayloads(t *testing.T) {
 	c := New(Config{})
 	for _, src := range []string{

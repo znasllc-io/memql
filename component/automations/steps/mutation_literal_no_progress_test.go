@@ -110,7 +110,7 @@ func TestRuntimeLiteralParsersTerminate(t *testing.T) {
 // overlap it. Two earlier versions of this sentence were wrong -- first
 // claiming all of them were fed by the hang test, then miscounting the
 // overlap -- so it no longer states a count. If you need the overlap, read
-// the two lists; they are twenty lines apart.)
+// the two lists.)
 //
 // The list covers BOTH halves of the array loop's `!ok || newPos <= pos`
 // guard. It originally held only the first three, which are all NO-PROGRESS
@@ -123,11 +123,20 @@ func TestRuntimeLiteralParsersTerminate(t *testing.T) {
 //	[[1, 2]  with !ok -> error       without -> []any{""}, err=nil
 //
 // Those report ok=false HAVING ADVANCED to len(s), which is exactly what the
-// position half cannot see. Note the inversion against the sibling: in
-// component/memql `!ok` is DEAD and TestArrayOkImpliesNoProgress pins that it
-// stays dead; here it is LIVE and these rows pin that it stays live. Same
-// expression, opposite halves load-bearing -- a test in one copy is not
-// evidence about the other.
+// position half cannot see.
+//
+// The three copies are NOT mirror images of each other -- the load-bearing
+// sets are nested, and the position half carries every one of them:
+//
+//	component/memql              {position}          `!ok` is dead
+//	component/language/compiler  {position, !ok}     both live
+//	this copy                    {position, !ok}     both live
+//
+// So `!ok` needs pinning HERE and in the compiler, while memql needs the
+// opposite -- TestArrayOkImpliesNoProgress pins that its `!ok` stays dead. A
+// test in one copy is not evidence about another; an earlier version of this
+// comment called the relationship an "inversion" with "opposite halves",
+// which is wrong in both directions.
 func TestRuntimeMalformedLiteralErrors(t *testing.T) {
 	e := &MutationExecutor{}
 	ev := automations.NewEvaluator()

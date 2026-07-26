@@ -1458,10 +1458,11 @@ func (e *MutationExecutor) parseAndEvaluateArrayLiteral(evaluator *automations.E
 //
 // The sibling in component/memql differs, and the difference is NESTED, not
 // opposite -- an earlier version of this comment said "opposite halves", which
-// contradicted the guard's own comment forty lines up:
+// contradicted the array-loop guard's own comment in this same file:
 //
-//	component/memql   load-bearing: {position}              `!ok` is dead
-//	this copy         load-bearing: {position, !ok}          both are live
+//	component/memql              {position}          `!ok` is dead
+//	component/language/compiler  {position, !ok}     both live
+//	this copy                    {position, !ok}     both live
 //
 // Verified by dropping each half in each copy: memql stays green without
 // `!ok` and hangs without the position check; this copy fails
