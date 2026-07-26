@@ -159,30 +159,45 @@ require_valid_threshold() {
 # Enumerating from the LABEL side is what makes the report exact: the claim
 # labels are few and bounded, whereas the issues carrying them are spread over
 # the repo's entire history.
+# ONE call, not two. The first cut made a second identical request just to ask
+# for the page length, which is racy against the first and reports "not full"
+# when it fails. The RAW page length is emitted as a leading `#count <n>` line
+# instead. Matching is case-INSENSITIVE because `gh issue list --label` matches
+# case-insensitively, so a `Claimed:x` label would otherwise be enumerated by
+# neither side.
 claim_labels() {
   gh label list -R "$REPO" --limit "$LABEL_PAGE_LIMIT" --json name \
-    --jq '.[].name | select(startswith("claimed:"))' </dev/null
-}
-
-# label_page_full reports whether the label list came back at its cap, which
-# means labels beyond it were never examined.
-label_page_full() {
-  local n
-  n=$(gh label list -R "$REPO" --limit "$LABEL_PAGE_LIMIT" --json name --jq 'length' </dev/null) || return 1
-  [ -n "$n" ] && [ "$n" -ge "$LABEL_PAGE_LIMIT" ]
+    --jq '"#count \(length)", (.[].name | select(ascii_downcase | startswith("claimed:")))' </dev/null
 }
 
 # issues_with_label prints one TSV row per issue carrying the given label:
-# number, state, title. Both states are fetched -- the sweep needs CLOSED and
-# the report needs OPEN.
+# number, state, closedEpoch, title. Both states are fetched -- the sweep needs
+# CLOSED and the report needs OPEN.
+#
+# A null closedAt (every OPEN issue) is emitted as "-", NOT as the empty
+# string. Tab is an IFS *whitespace* character, so bash collapses a run of them
+# into one delimiter: an empty middle field silently shifts every later column
+# left, and `read num state closed title` put the TITLE into closed_epoch and
+# left title empty. It only showed up on a live run -- the fixtures had the same
+# shape but no test asserted the title column.
+#
+# closedAt is requested and converted with jq's fromdateiso8601, NOT with
+# `date -u -d`. Two reasons, both learned the hard way:
+#   - the CLOSING gate has to measure time since the issue CLOSED. Measuring
+#     claim age instead only shields sessions whose entire lifetime is under
+#     IDLE_HOURS, leaving every longer-running session with zero shutdown
+#     grace -- i.e. the race this gate exists to close, still open.
+#   - `date -u -d` is GNU-only. The sibling stalled-prs.sh rejects that exact
+#     call BY NAME because it fails on macOS, which CLAUDE.md names as the
+#     standard dev platform. Using it here reintroduces a hazard already
+#     written down in this directory, and CI (Linux) would never show it.
 #
 # The label is passed to --label, so matching is exact and a label name
-# containing a comma cannot be mis-split (the first cut joined names with
-# commas and re-split, which mis-identified `claimed:a,b` as `claimed:a`).
+# containing a comma cannot be mis-split.
 issues_with_label() {
   gh issue list -R "$REPO" --label "$1" --state all --limit "$ISSUE_PAGE_LIMIT" \
-    --json number,state,title \
-    --jq '.[] | [.number, .state, .title] | @tsv' </dev/null
+    --json number,state,closedAt,title \
+    --jq '.[] | [.number, .state, ((.closedAt // empty | fromdateiso8601?) // "-"), .title] | @tsv' </dev/null
 }
 
 # has_label reports whether an issue carries an exact label. Asked per issue via
@@ -194,38 +209,51 @@ has_label() {
   # first cut used --arg, so this lookup ALWAYS failed and every issue read as
   # not-parked. The stub accepted --arg, so the suite never noticed -- a stub
   # more permissive than the real tool tests nothing. It now refuses --arg too.
+  # Tri-state, not boolean: 0 has it, 1 does not, 2 LOOKUP FAILED. Collapsing
+  # the last two makes a transient API failure read as "not parked", which can
+  # then produce a SUSPECT finding -- contradicting this file's default-deny
+  # rule. The sibling models the same distinction (in_merge_queue tri-state).
   hit=$(STALE_CLAIMS_WANT="$want" gh issue view "$num" -R "$REPO" --json labels \
-    --jq '[.labels[].name] | index($ENV.STALE_CLAIMS_WANT) // empty' </dev/null 2>/dev/null) || return 1
+    --jq '[.labels[].name] | index($ENV.STALE_CLAIMS_WANT) // empty' </dev/null 2>/dev/null) || return 2
   [ -n "$hit" ]
 }
 
-# claim_age_hours prints whole hours since the label was last applied to the
-# issue, from the timeline's `labeled` event, or `unknown`.
+# claim_age_hours prints whole hours since the label was last applied, from the
+# timeline's `labeled` event, or `unknown`.
 #
 # The LAST matching event wins: a claim removed and re-applied is as old as the
 # re-application, not the original.
+#
+# jq's fromdateiso8601 does the parse -- see issues_with_label for why `date -d`
+# is not used.
 claim_age_hours() {
-  local num="$1" label="$2" at then now
-  # $ENV again -- `gh api` has no --arg either. Interpolating the label into
-  # the filter text would also work but needs jq-string escaping; $ENV needs
-  # none.
-  at=$(STALE_CLAIMS_LABEL="$label" gh api "repos/$REPO/issues/$num/timeline?per_page=$TIMELINE_PAGE_LIMIT" \
-    --jq '[.[] | select(.event=="labeled" and .label.name==$ENV.STALE_CLAIMS_LABEL) | .created_at] | last // empty' \
+  local num="$1" label="$2" then
+  # $ENV, not --arg: `gh api` takes exactly one positional and rejects
+  # `--arg l x` outright ("accepts 1 arg(s), received 4"). The first cut used
+  # --arg, so this lookup ALWAYS failed and every row reported UNKNOWN -- and
+  # the suite was green because the stub accepted a flag real gh rejects.
+  then=$(STALE_CLAIMS_LABEL="$label" gh api "repos/$REPO/issues/$num/timeline?per_page=$TIMELINE_PAGE_LIMIT" \
+    --jq '[.[] | select(.event=="labeled" and .label.name==$ENV.STALE_CLAIMS_LABEL) | .created_at] | last // empty | fromdateiso8601' \
     </dev/null 2>/dev/null) || {
     echo "unknown"
     return
   }
-  if [ -z "$at" ]; then
-    echo "unknown"
-    return
-  fi
-  then=$(date -u -d "$at" +%s 2>/dev/null) || {
-    echo "unknown"
-    return
-  }
-  now=$(date -u +%s)
+  hours_since "$then"
+}
+
+# hours_since prints whole hours between an epoch and now, or `unknown` for an
+# empty, non-numeric, or future value. Clock skew never manufactures a finding.
+hours_since() {
+  local then="$1" now
+  case "$then" in
+    '' | *[!0-9]*)
+      echo "unknown"
+      return
+      ;;
+  esac
+  now=$(date -u +%s) # +%s is portable; only `date -d` parsing is GNU-only
   if [ "$then" -gt "$now" ]; then
-    echo "unknown" # clock skew -- never manufacture a finding from it
+    echo "unknown"
     return
   fi
   echo $(((now - then) / 3600))
@@ -238,6 +266,17 @@ claim_age_hours() {
 # stdin is closed so the call cannot consume the caller's loop input.
 remove_claim() {
   local num="$1" label="$2"
+  # The write path re-checks the prefix itself rather than trusting the jq
+  # filter that selected it. Defence in depth: if that filter is ever widened
+  # or broken, this refuses rather than removing an unrelated label.
+  case "$label" in
+    claimed:* | CLAIMED:* | Claimed:*) ;;
+    *)
+      echo "  REFUSED #$num  $label (not a claimed:* label; nothing removed)" >&2
+      SWEEP_FAILED=1
+      return 1
+      ;;
+  esac
   if gh issue edit "$num" -R "$REPO" --remove-label "$label" </dev/null >/dev/null 2>&1; then
     echo "  swept  #$num  $label"
     return 0
@@ -248,7 +287,7 @@ remove_claim() {
 }
 
 row() {
-  printf '#%-6s %-9s %-8s %-22s  %s\n' "$1" "$2" "$3" "${4:0:22}" "${5:0:42}"
+  printf '#%-6s %-9s %-8s %-8s %-22s  %s\n' "$1" "$2" "$3" "$4" "${5:0:22}" "${6:0:40}"
 }
 
 main() {
@@ -262,13 +301,21 @@ main() {
     exit 4
   fi
 
-  if label_page_full; then
+  # The RAW page length rides in on the `#count` line, from the SAME call that
+  # produced the labels -- no second request, and nothing to race. The first
+  # cut compared the FILTERED count against the cap, so it could only fire if
+  # 100 issues carried a claim simultaneously; it never fired while the report
+  # was silently losing rows.
+  local label_count
+  label_count=$(sed -n 's/^#count //p' <<<"$labels")
+  labels=$(grep -v '^#count ' <<<"$labels")
+  if [ -n "$label_count" ] && [ "$label_count" -ge "$LABEL_PAGE_LIMIT" ]; then
     echo "WARNING: hit the ${LABEL_PAGE_LIMIT}-label page cap; labels beyond it were NOT examined." >&2
     echo "         This report is incomplete -- treat a clean result as unproven." >&2
   fi
 
-  printf '%-7s %-9s %-8s %-22s  %s\n' "ISSUE" "STATE" "CLAIMED" "CLAIM" "TITLE"
-  printf '%-7s %-9s %-8s %-22s  %s\n' "-------" "---------" "--------" "----------------------" "-----"
+  printf '%-7s %-9s %-8s %-8s %-22s  %s\n' "ISSUE" "STATE" "CLAIMED" "CLOSED" "CLAIM" "TITLE"
+  printf '%-7s %-9s %-8s %-8s %-22s  %s\n' "-------" "---------" "--------" "--------" "----------------------" "-----"
 
   local cold=0 open=0 total=0 unknown=0 swept=0 warm=0
   while read -r label; do
@@ -285,47 +332,75 @@ main() {
       echo "WARNING: label $label hit the ${ISSUE_PAGE_LIMIT}-issue page cap; some were NOT examined." >&2
     fi
 
-    while IFS=$'\t' read -r num state title; do
+    while IFS=$'\t' read -r num state closed_epoch title; do
       [ -z "${num:-}" ] && continue
       total=$((total + 1))
 
-      local age age_col
+      local age age_col closed_age closed_col
       age=$(claim_age_hours "$num" "$label")
       age_col="${age}h"
       [ "$age" = "unknown" ] && age_col="?"
+      closed_age=$(hours_since "$closed_epoch")
+      closed_col="${closed_age}h"
+      [ "$closed_age" = "unknown" ] && closed_col="-"
 
       case "$state" in
         CLOSED)
-          if [ "$age" = "unknown" ]; then
+          # The sweep gate is TIME SINCE CLOSE, not claim age. Gating on claim
+          # age only shields a session whose ENTIRE LIFETIME is under
+          # IDLE_HOURS: a session that held its claim for six hours and closed
+          # the issue one second ago got zero grace, so the race this branch
+          # exists to close was still open. Verified: two issues both claimed
+          # 9h ago, one closed 10 seconds ago and one closed 5 days ago, were
+          # indistinguishable and both swept.
+          if [ "$closed_age" = "unknown" ] || [ "$age" = "unknown" ]; then
+            # Default-deny, and BOTH signals must be readable. The gate itself
+            # only needs closedAt, but an unreadable claim age (a missing
+            # `labeled` event, clock skew) means the row is not fully
+            # understood -- and this file's rule is that a write happens only
+            # when every input is positively known. Nothing is lost by
+            # waiting: a genuinely abandoned claim is still there next run.
             unknown=$((unknown + 1))
-            row "$num" "UNKNOWN" "$age_col" "$label" "$title"
-          elif [ "$age" -ge "$IDLE_HOURS" ]; then
+            row "$num" "UNKNOWN" "$age_col" "$closed_col" "$label" "$title"
+          elif [ "$closed_age" -lt "$IDLE_HOURS" ]; then
+            # Closed recently: the normal window between a merge closing the
+            # issue and the session dropping its claim. Not a finding.
+            warm=$((warm + 1))
+            row "$num" "CLOSING" "$age_col" "$closed_col" "$label" "$title"
+          else
             cold=$((cold + 1))
-            row "$num" "ABANDONED" "$age_col" "$label" "$title"
+            row "$num" "ABANDONED" "$age_col" "$closed_col" "$label" "$title"
             if [ "$APPLY" -eq 1 ]; then
               remove_claim "$num" "$label" && swept=$((swept + 1))
             fi
-          else
-            # Closed moments ago: almost certainly a live session between
-            # "merge closed the issue" and "drop the claim". Not a finding.
-            warm=$((warm + 1))
-            row "$num" "CLOSING" "$age_col" "$label" "$title"
           fi
           ;;
         OPEN)
           # `parked` means a human already recorded why this is not moving; the
           # claim is not what is hiding it, so it is not a finding.
-          if has_label "$num" "parked"; then
-            row "$num" "PARKED" "$age_col" "$label" "$title"
-          elif [ "$age" = "unknown" ]; then
-            unknown=$((unknown + 1))
-            row "$num" "UNKNOWN" "$age_col" "$label" "$title"
-          elif [ "$age" -ge "$IDLE_HOURS" ]; then
-            open=$((open + 1))
-            row "$num" "SUSPECT" "$age_col" "$label" "$title"
-          else
-            row "$num" "FRESH" "$age_col" "$label" "$title"
-          fi
+          has_label "$num" "parked"
+          case $? in
+            0)
+              row "$num" "PARKED" "$age_col" "$closed_col" "$label" "$title"
+              ;;
+            2)
+              # The lookup FAILED -- not "it is not parked". Collapsing the two
+              # lets a transient API error produce a SUSPECT finding.
+              unknown=$((unknown + 1))
+              row "$num" "UNKNOWN" "$age_col" "$closed_col" "$label" "$title"
+              ;;
+            *)
+              if [ "$age" = "unknown" ]; then
+                unknown=$((unknown + 1))
+                row "$num" "UNKNOWN" "$age_col" "$closed_col" "$label" "$title"
+              elif [ "$age" -ge "$IDLE_HOURS" ]; then
+                open=$((open + 1))
+                row "$num" "SUSPECT" "$age_col" "$closed_col" "$label" "$title"
+              else
+                row "$num" "FRESH" "$age_col" "$closed_col" "$label" "$title"
+              fi
+              ;;
+          esac
           ;;
         *)
           # An unrecognised state is never swept. This arm is exercised by the
@@ -333,7 +408,7 @@ main() {
           # load-bearing property and this is the branch a future edit could
           # quietly break.
           unknown=$((unknown + 1))
-          row "$num" "UNKNOWN" "$age_col" "$label" "$title"
+          row "$num" "UNKNOWN" "$age_col" "$closed_col" "$label" "$title"
           ;;
       esac
     done <<<"$rows"
@@ -377,32 +452,42 @@ main() {
   fi
 }
 
-while [ $# -gt 0 ]; do
-  case "$1" in
-    -h | --help)
-      usage
-      exit 0
-      ;;
-    --apply)
-      APPLY=1
-      shift
-      ;;
-    *)
-      echo "ERROR: unrecognised argument: $1" >&2
-      usage >&2
-      exit 2
-      ;;
-  esac
-done
+# SOURCING defines the functions without running the report.
+#
+# remove_claim's claimed:* prefix check is defence in depth: it is unreachable
+# through the normal flow, because the jq filter already selected the label. An
+# unreachable guard is also an untested one -- deleting it left the suite green
+# -- and the honest way to test it is to call it directly rather than to fake a
+# path to it. This is the standard `if sourced, define only` idiom.
+if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -h | --help)
+        usage
+        exit 0
+        ;;
+      --apply)
+        APPLY=1
+        shift
+        ;;
+      *)
+        echo "ERROR: unrecognised argument: $1" >&2
+        usage >&2
+        exit 2
+        ;;
+    esac
+  done
 
-main
-status=$?
-if [ "$status" -ne 0 ]; then
-  exit "$status"
-fi
-# A sweep that failed must not look like a successful one. The capability
-# contract reserves 5 for "op failed"; without this an automated caller cannot
-# tell "swept everything" from "every removal was rejected".
-if [ "$SWEEP_FAILED" -ne 0 ]; then
-  exit 5
+  main
+  status=$?
+  if [ "$status" -ne 0 ]; then
+    exit "$status"
+  fi
+  # A sweep that failed must not look like a successful one. The capability
+  # contract reserves 5 for "op failed"; without this an automated caller cannot
+  # tell "swept everything" from "every removal was rejected".
+  if [ "$SWEEP_FAILED" -ne 0 ]; then
+    exit 5
+  fi
+
 fi

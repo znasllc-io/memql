@@ -440,7 +440,9 @@ prs-stalled:
 ## $(filter ...), not a bare $(if $(APPLY),...): make's $(if) tests emptiness,
 ## not truth, so APPLY=0 / APPLY=no / APPLY=false would all have passed --apply
 ## and written to GitHub. On a target whose whole safety story is "mutation is
-## opt-in", APPLY=0 meaning yes inverts the operator's obvious intent.
+## opt-in", APPLY=0 meaning yes inverts the operator's obvious intent. Anything
+## outside {1,true,yes,on} -- including APPLY=Y and APPLY=2 -- is read as false,
+## which is the fail-safe direction.
 claims-stale:
 	bash scripts/dev/stale-claims.sh $(if $(filter 1 true yes on,$(APPLY)),--apply,)
 

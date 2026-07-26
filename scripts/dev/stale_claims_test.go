@@ -1,6 +1,7 @@
 package dev
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -43,18 +44,27 @@ import (
 
 const staleClaimsScript = "stale-claims.sh"
 
-// stubIssue is one row the fake `gh issue list --label` returns.
+// stubIssue is one issue the fake `gh` serves.
 type stubIssue struct {
 	num   int
 	state string
 	title string
 	// claimedAt is what the timeline's `labeled` event reports for this
-	// issue's claim. Empty means "no readable event" -> the script must
+	// issue's claim. noEvent means "no readable event" -> the script must
 	// classify UNKNOWN and never sweep.
 	claimedAt time.Time
 	noEvent   bool
+	// closedAt is the issue's close time, which is what the sweep gate
+	// measures. It is SEPARATE from claimedAt on purpose: gating on claim age
+	// instead only shields a session whose entire lifetime is under
+	// IDLE_HOURS, so a long-running session that closed an issue one second
+	// ago got no grace at all. A fixture with no close-time field cannot
+	// express that difference, and the first one did not have it.
+	closedAt time.Time
 	// parked marks the issue as carrying the `parked` label.
 	parked bool
+	// extraLabels ride alongside on `gh issue view`.
+	extraLabels []string
 }
 
 // staleClaimsStub is the canned API surface the stub serves.
@@ -65,6 +75,10 @@ type staleClaimsStub struct {
 	labelIssues map[string][]stubIssue
 	labelFail   bool
 	editFail    bool
+	// padLabels adds this many NON-claim labels to the label list. The page-cap
+	// warning measures the RAW page length, so padding exercises it without
+	// inventing hundreds of claims (and without hundreds of issue-list calls).
+	padLabels int
 }
 
 func shQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
@@ -87,6 +101,34 @@ deny() {
   exit 1
 }
 
+# jq_arg extracts the value of --jq. THE STUB RUNS THE REAL FILTER.
+#
+# The first cut served canned bytes and threw the filter away, so not one jq
+# expression in the script was exercised: a typo'd startswith, a wrong event
+# name, a swapped @tsv column order and a last-vs-first were all TOTAL
+# production failures that left the suite green. That is the same shape as the
+# --arg bug -- a stub weaker than the real tool -- and refusing --arg only
+# closed one spelling of it. Running real jq over canned JSON closes the class.
+jq_arg() {
+  local prev=""
+  for a in "$@"; do
+    [ "$prev" = "--jq" ] && { printf '%s' "$a"; return 0; }
+    prev="$a"
+  done
+  return 1
+}
+
+run_jq() {
+  local file="$1"; shift
+  local expr
+  expr=$(jq_arg "$@") || { DENY_REASON="no --jq filter supplied" deny "$@"; }
+  [ -f "$file" ] || return 0
+  jq -r "$expr" "$file" 2>>"$STUB_LOG" || {
+    printf 'JQERROR %s\n' "$expr" >> "$STUB_LOG"
+    return 1
+  }
+}
+
 case "$1 $2" in
   "--version "*) echo 'gh version 2.45.0'; exit 0 ;;
   "auth status") exit 0 ;;
@@ -100,12 +142,8 @@ case "$1 $2" in
         *) ;;
       esac
     done
-    # 'length' is the page-cap probe; anything else is the name list.
-    case "$*" in
-      *length*) grep -c . "$STUB_DIR/labels.txt" 2>/dev/null || echo 0 ;;
-      *) cat "$STUB_DIR/labels.txt" 2>/dev/null ;;
-    esac
-    exit 0 ;;
+    run_jq "$STUB_DIR/labels.json" "$@"
+    exit $? ;;
 
   "issue list")
     want=""
@@ -119,10 +157,15 @@ case "$1 $2" in
         *) ;;
       esac
     done
-    cat "$STUB_DIR/issues-$want.tsv" 2>/dev/null
-    exit 0 ;;
+    run_jq "$STUB_DIR/issues-$want.json" "$@"
+    exit $? ;;
 
   "issue view")
+    # Drains stdin ON PURPOSE. Real gh does not, but a stub that never reads
+    # stdin makes the script's </dev/null unobservable -- stripping it left the
+    # suite green. With this, a gh call inside a read loop that forgets
+    # </dev/null eats the loop's input and the missing rows are visible.
+    cat >/dev/null
     num="$3"
     for a in "$@"; do
       case "$a" in
@@ -131,8 +174,8 @@ case "$1 $2" in
         *) ;;
       esac
     done
-    [ -f "$STUB_DIR/parked-$num" ] && echo 0
-    exit 0 ;;
+    run_jq "$STUB_DIR/view-$num.json" "$@"
+    exit $? ;;
 
   "api repos"*)
     num=$(printf '%s' "$2" | sed -n 's#.*/issues/\([0-9]*\)/timeline.*#\1#p')
@@ -145,10 +188,13 @@ case "$1 $2" in
         *) ;;
       esac
     done
-    cat "$STUB_DIR/claimedat-$num" 2>/dev/null
-    exit 0 ;;
+    run_jq "$STUB_DIR/timeline-$num.json" "$@"
+    exit $? ;;
 
   "issue edit")
+    # Also drains stdin, for the same reason: the sweep runs inside the inner
+    # read loop, so a missing </dev/null there loses every row after the first.
+    cat >/dev/null
     # The ONE tolerated mutation -- and still default-deny. The first cut
     # enumerated flags to refuse and had no catch-all, so every pflag attached
     # form walked straight through (memql#2873, re-broken and re-fixed).
@@ -180,24 +226,59 @@ func writeStaleClaimsStub(t *testing.T, cfg staleClaimsStub) (dir, logPath strin
 	dir = t.TempDir()
 	logPath = filepath.Join(dir, "calls.log")
 
-	var labels []string
+	// Canned data is real JSON in the shapes gh actually returns, because the
+	// stub runs the script's real --jq filters over it.
+	labels := []map[string]any{}
 	for label, issues := range cfg.labelIssues {
-		labels = append(labels, label)
-		var rows strings.Builder
+		labels = append(labels, map[string]any{"name": label})
+
+		issueRows := []map[string]any{}
 		for _, is := range issues {
-			fmt.Fprintf(&rows, "%d\t%s\t%s\n", is.num, is.state, is.title)
-			at := ""
+			row := map[string]any{"number": is.num, "state": is.state, "title": is.title}
+			if is.closedAt.IsZero() {
+				row["closedAt"] = nil // gh emits null for an open issue
+			} else {
+				row["closedAt"] = is.closedAt.UTC().Format(time.RFC3339)
+			}
+			issueRows = append(issueRows, row)
+
+			timeline := []map[string]any{
+				// A decoy: same label name, wrong event type.
+				{"event": "mentioned", "label": map[string]any{"name": label},
+					"created_at": is.claimedAt.UTC().Format(time.RFC3339)},
+				// A decoy: labeled, but a DIFFERENT label.
+				{"event": "labeled", "label": map[string]any{"name": "bug"},
+					"created_at": time.Now().UTC().Format(time.RFC3339)},
+			}
 			if !is.noEvent {
-				at = is.claimedAt.UTC().Format(time.RFC3339)
+				// An earlier application of the SAME label, so `last` vs
+				// `first` is observable: first would report this older one.
+				timeline = append(timeline, map[string]any{
+					"event": "labeled", "label": map[string]any{"name": label},
+					"created_at": is.claimedAt.Add(-500 * time.Hour).UTC().Format(time.RFC3339),
+				}, map[string]any{
+					"event": "labeled", "label": map[string]any{"name": label},
+					"created_at": is.claimedAt.UTC().Format(time.RFC3339),
+				})
 			}
-			write(t, filepath.Join(dir, fmt.Sprintf("claimedat-%d", is.num)), at)
+			writeJSON(t, filepath.Join(dir, fmt.Sprintf("timeline-%d.json", is.num)), timeline)
+
+			viewLabels := []map[string]any{{"name": "enhancement"}}
+			for _, l := range is.extraLabels {
+				viewLabels = append(viewLabels, map[string]any{"name": l})
+			}
 			if is.parked {
-				write(t, filepath.Join(dir, fmt.Sprintf("parked-%d", is.num)), "1")
+				viewLabels = append(viewLabels, map[string]any{"name": "parked"})
 			}
+			writeJSON(t, filepath.Join(dir, fmt.Sprintf("view-%d.json", is.num)),
+				map[string]any{"labels": viewLabels})
 		}
-		write(t, filepath.Join(dir, "issues-"+label+".tsv"), rows.String())
+		writeJSON(t, filepath.Join(dir, "issues-"+label+".json"), issueRows)
 	}
-	write(t, filepath.Join(dir, "labels.txt"), strings.Join(labels, "\n")+"\n")
+	for i := 0; i < cfg.padLabels; i++ {
+		labels = append(labels, map[string]any{"name": fmt.Sprintf("filler-%d", i)})
+	}
+	writeJSON(t, filepath.Join(dir, "labels.json"), labels)
 	if cfg.labelFail {
 		write(t, filepath.Join(dir, "labelfail"), "1")
 	}
@@ -209,6 +290,15 @@ func writeStaleClaimsStub(t *testing.T, cfg staleClaimsStub) (dir, logPath strin
 		t.Fatalf("chmod stub gh: %v", err)
 	}
 	return dir, logPath
+}
+
+func writeJSON(t *testing.T, path string, v any) {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("marshal %s: %v", path, err)
+	}
+	write(t, path, string(b))
 }
 
 func write(t *testing.T, path, content string) {
@@ -304,8 +394,18 @@ func hoursAgo(h int) time.Time { return time.Now().Add(-time.Duration(h) * time.
 func mixedClaims() staleClaimsStub {
 	return staleClaimsStub{labelIssues: map[string][]stubIssue{
 		"claimed:s4b9e2": {
-			{num: 2801, state: "CLOSED", title: "closed, claim went cold", claimedAt: hoursAgo(100)},
-			{num: 2802, state: "CLOSED", title: "just closed, session still finishing", claimedAt: hoursAgo(0)},
+			{num: 2801, state: "CLOSED", title: "closed long ago, claim left behind",
+				claimedAt: hoursAgo(100), closedAt: hoursAgo(90)},
+			// THE DISCRIMINATING ROW. Claimed 9h ago -- well past IDLE_HOURS --
+			// but closed ten seconds ago: a long-running session between "merge
+			// closed the issue" and "drop the claim". A gate on CLAIM age calls
+			// this ABANDONED and sweeps it; only a gate on CLOSE time does not.
+			{num: 2802, state: "CLOSED", title: "long session, just closed",
+				claimedAt: hoursAgo(9), closedAt: time.Now().Add(-10 * time.Second)},
+			// Closed, but with no readable closedAt -- the gate cannot be
+			// evaluated, so default-deny applies.
+			{num: 2803, state: "CLOSED", title: "closed, no readable closedAt",
+				claimedAt: hoursAgo(100)},
 		},
 		"claimed:s7c2e9": {
 			{num: 2999, state: "OPEN", title: "live work, claimed 30min ago", claimedAt: time.Now().Add(-30 * time.Minute)},
@@ -323,10 +423,23 @@ var branchExpectations = []struct {
 }{
 	{2801, "ABANDONED"},
 	{2802, "CLOSING"},
+	{2803, "UNKNOWN"},
 	{2999, "FRESH"},
 	{2998, "SUSPECT"},
 	{2997, "UNKNOWN"},
 	{2996, "UNKNOWN"},
+}
+
+// titleOf returns the fixture title for an issue, for the column assertion.
+func titleOf(issue int) string {
+	for _, issues := range mixedClaims().labelIssues {
+		for _, is := range issues {
+			if is.num == issue {
+				return is.title
+			}
+		}
+	}
+	return ""
 }
 
 // mustReachEveryBranch fails unless the report classified each fixture row into
@@ -340,6 +453,15 @@ func mustReachEveryBranch(t *testing.T, res staleClaimsResult) {
 			t.Errorf("issue #%d absent from the report; the %s branch is untested.\ngot:\n%s",
 				want.issue, want.state, res.stdout)
 			continue
+		}
+		// The TITLE column must survive too. An empty middle TSV field
+		// collapses (tab is IFS whitespace), which shifted every later column
+		// left and blanked the title -- visible only on a live run because no
+		// fixture assertion looked at it.
+		if !strings.Contains(line, titleOf(want.issue)) {
+			t.Errorf("issue #%d's row lost its title: %q\nwant it to contain %q. An empty middle "+
+				"TSV field collapses under IFS=tab and shifts the later columns left.",
+				want.issue, line, titleOf(want.issue))
 		}
 		if !strings.Contains(line, want.state) {
 			t.Errorf("issue #%d classified as %q, wanted %s -- that branch is not being exercised, "+
@@ -400,7 +522,8 @@ func TestStaleClaims_ApplySweepsOnlyColdClosedClaims(t *testing.T) {
 		{2998, "OPEN and idle -- may still be live work, the unsettled half of memql#2834"},
 		{2997, "OPEN with an unknown claim age"},
 		{2996, "an unrecognised state, which must never be swept"},
-		{2802, "CLOSED moments ago -- the window between a merge closing the issue and the session dropping its claim"},
+		{2802, "CLOSED ten seconds ago -- the window between a merge closing the issue and the session dropping its claim, which a CLAIM-age gate misses entirely"},
+		{2803, "CLOSED with no readable closedAt, so the gate cannot be evaluated"},
 	} {
 		for _, e := range edits {
 			if strings.Contains(e, fmt.Sprint(keep.issue)) {
@@ -494,7 +617,8 @@ func TestStaleClaims_ClaimAgeComesFromTheLabelEvent(t *testing.T) {
 			// finding and never swept.
 			{num: 3101, state: "OPEN", title: "future timestamp", claimedAt: time.Now().Add(48 * time.Hour)},
 			// Closed and skewed: must NOT be swept either.
-			{num: 3102, state: "CLOSED", title: "closed, skewed claim", claimedAt: time.Now().Add(48 * time.Hour)},
+			{num: 3102, state: "CLOSED", title: "closed, skewed claim",
+				claimedAt: time.Now().Add(48 * time.Hour), closedAt: hoursAgo(90)},
 		},
 	}}
 	res := runStaleClaims(t, cfg, []string{"--apply"})
@@ -521,7 +645,7 @@ func TestStaleClaims_IdleThresholdGatesBothSides(t *testing.T) {
 	cfg := staleClaimsStub{labelIssues: map[string][]stubIssue{
 		"claimed:sZ": {
 			{num: 3200, state: "OPEN", title: "open, 5h", claimedAt: hoursAgo(5)},
-			{num: 3201, state: "CLOSED", title: "closed, 5h", claimedAt: hoursAgo(5)},
+			{num: 3201, state: "CLOSED", title: "closed, 5h", claimedAt: hoursAgo(5), closedAt: hoursAgo(5)},
 		},
 	}}
 
@@ -608,11 +732,11 @@ func TestStaleClaims_FailedSweepExitsNonZero(t *testing.T) {
 func TestStaleClaims_MultipleLabelsAndIssuesAreEachHandled(t *testing.T) {
 	cfg := staleClaimsStub{labelIssues: map[string][]stubIssue{
 		"claimed:sA": {
-			{num: 4001, state: "CLOSED", title: "a1", claimedAt: hoursAgo(100)},
-			{num: 4002, state: "CLOSED", title: "a2", claimedAt: hoursAgo(100)},
+			{num: 4001, state: "CLOSED", title: "a1", claimedAt: hoursAgo(100), closedAt: hoursAgo(90)},
+			{num: 4002, state: "CLOSED", title: "a2", claimedAt: hoursAgo(100), closedAt: hoursAgo(90)},
 		},
 		"claimed:sB": {
-			{num: 4003, state: "CLOSED", title: "b1", claimedAt: hoursAgo(100)},
+			{num: 4003, state: "CLOSED", title: "b1", claimedAt: hoursAgo(100), closedAt: hoursAgo(90)},
 		},
 	}}
 	res := runStaleClaims(t, cfg, []string{"--apply"})
@@ -714,5 +838,121 @@ func TestStaleClaims_NoClaimsIsAnHonestAllClear(t *testing.T) {
 	}
 	if got := res.edits(); len(got) > 0 {
 		t.Errorf("wrote something with no claims present: %v", got)
+	}
+}
+
+// labelPageLimit mirrors LABEL_PAGE_LIMIT in the script. Deliberately NOT made
+// configurable there -- the script's comment says raising a cap silently is how
+// it stops being noticed -- so the test states the same number and
+// TestStaleClaims_PageCapConstantsMatchTheScript fails if they drift.
+const labelPageLimit = 300
+
+func TestStaleClaims_PageCapConstantsMatchTheScript(t *testing.T) {
+	src, err := os.ReadFile(staleClaimsScript)
+	if err != nil {
+		t.Fatalf("read script: %v", err)
+	}
+	want := fmt.Sprintf("LABEL_PAGE_LIMIT=%d", labelPageLimit)
+	if !strings.Contains(string(src), want) {
+		t.Fatalf("the script no longer sets %s, so TestStaleClaims_FullLabelPageWarns "+
+			"is padding to the wrong number and silently stopped testing the cap.", want)
+	}
+}
+
+// TestStaleClaims_FullLabelPageWarns pins the fix for round-1 BLOCKER 1.
+//
+// The original guard compared the FILTERED claim count against the cap, so it
+// could only fire if 100 issues carried a claim at once -- it never fired while
+// the report was silently dropping rows. It also had no test, so restoring that
+// exact bug stayed green. This pads the label page to the cap and requires the
+// warning.
+func TestStaleClaims_FullLabelPageWarns(t *testing.T) {
+	cfg := mixedClaims()
+	// mixedClaims defines 2 claim labels; pad the rest of the page.
+	cfg.padLabels = labelPageLimit - len(cfg.labelIssues)
+
+	res := runStaleClaims(t, cfg, nil)
+	if !strings.Contains(res.stderr, "page cap") {
+		t.Errorf("a FULL label page produced no warning.\nA clean report from a truncated "+
+			"enumeration is a false all-clear, which is the failure memql#2834 exists to "+
+			"prevent.\nstderr:\n%s", res.stderr)
+	}
+	if !strings.Contains(res.stderr, "incomplete") {
+		t.Errorf("the warning does not say the report is incomplete:\n%s", res.stderr)
+	}
+}
+
+// TestStaleClaims_ShortLabelPageDoesNotWarn is the other direction: the warning
+// must not cry wolf on every run, or it stops being read.
+func TestStaleClaims_ShortLabelPageDoesNotWarn(t *testing.T) {
+	res := runStaleClaims(t, mixedClaims(), nil)
+	if strings.Contains(res.stderr, "page cap") {
+		t.Errorf("a short label page warned anyway:\n%s", res.stderr)
+	}
+}
+
+// TestStaleClaims_RemoveClaimRefusesANonClaimLabel exercises remove_claim's
+// prefix guard DIRECTLY, by sourcing the script.
+//
+// The guard is unreachable through the normal flow -- the jq filter already
+// selected the label -- which is exactly why it needs this: deleting it left
+// the suite green. It is defence in depth for the case where that filter is
+// widened or broken, and the honest way to test an unreachable guard is to call
+// it, not to fake a path to it.
+func TestStaleClaims_RemoveClaimRefusesANonClaimLabel(t *testing.T) {
+	dir, logPath := writeStaleClaimsStub(t, mixedClaims())
+
+	run := func(label string) (int, string, []string) {
+		cmd := exec.Command("bash", "-c",
+			`source `+staleClaimsScript+`; remove_claim 7 "$1"`, "bash", label)
+		cmd.Env = staleClaimsEnv(dir, logPath)
+		var out, errb strings.Builder
+		cmd.Stdout, cmd.Stderr = &out, &errb
+		err := cmd.Run()
+		code := 0
+		if ee, ok := err.(*exec.ExitError); ok {
+			code = ee.ExitCode()
+		} else if err != nil {
+			t.Fatalf("source+call: %v", err)
+		}
+		raw, _ := os.ReadFile(logPath)
+		var calls []string
+		for _, l := range strings.Split(string(raw), "\n") {
+			if strings.TrimSpace(l) != "" {
+				calls = append(calls, l)
+			}
+		}
+		return code, errb.String(), calls
+	}
+
+	code, stderr, calls := run("bug")
+	if code == 0 {
+		t.Errorf("remove_claim accepted a non-claim label")
+	}
+	if !strings.Contains(stderr, "REFUSED") {
+		t.Errorf("no REFUSED diagnostic for a non-claim label: %q", stderr)
+	}
+	for _, c := range calls {
+		if strings.HasPrefix(c, "EDIT ") {
+			t.Errorf("remove_claim issued a write for a non-claim label: %q\nThe prefix check "+
+				"must refuse BEFORE calling gh, so a broken selection filter cannot delete an "+
+				"unrelated label.", c)
+		}
+	}
+
+	// And the legitimate label must still go through, or the guard is just
+	// breaking the feature.
+	code, _, calls = run("claimed:sX")
+	if code != 0 {
+		t.Errorf("remove_claim refused a legitimate claimed:* label (exit %d)", code)
+	}
+	found := false
+	for _, c := range calls {
+		if strings.HasPrefix(c, "EDIT ") && strings.Contains(c, "claimed:sX") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("the legitimate removal was not issued: %v", calls)
 	}
 }
