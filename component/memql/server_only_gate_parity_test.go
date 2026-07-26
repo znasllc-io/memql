@@ -4,255 +4,233 @@ import (
 	"log/slog"
 	"os"
 	"regexp"
-	"sort"
+	"strings"
 	"testing"
 
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
-	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql/baseloader"
 )
 
-// server_only_gate_parity_test.go -- memql#2875.
+// server_only_gate_parity_test.go -- memql#2875, the drift half.
 //
-// Three places decide whether a construct is `@serverOnly` by REGEX over source:
+// The REAL fix for #2875 lands in dsl/server_only_parsed_test.go: the audit
+// derives its `@serverOnly` verdict from the PARSED tree (via
+// `dslimports.Load`, which is importable from package `dsl` and already used
+// there), applying the loader's own rule -- `hasFlagAttribute(attrs,
+// "serverOnly")` -- to the same parse. So "the gate exempted it" and "the
+// runtime enforces it" cannot diverge by construction.
 //
-//	dsl/conformance_test.go        serverOnlyAnnotationRe  (the per-row-authz gate)
-//	dsl/server_only_authz_test.go  serverOnlyRe            (the docs gate)
-//	sdk/gen/gen.go                 serverOnlyRe            (the SDK skip)
+// This file covers what that cannot: `sdk/gen/gen.go` still decides by REGEX
+// over source, and it must, because it is a GENERATOR that runs over an
+// arbitrary `--dsl` root without booting an engine. Its regex is therefore the
+// last place the two verdicts can disagree.
 //
-// The LOADER decides by parsing, and sets Function.ServerOnly. Those two can
-// disagree, and the disagreement is FAIL-OPEN in the audit: a line beginning
-// `@serverOnly` inside a multi-line annotation string --
+// # Scope, stated rather than overclaimed
 //
-//	@description("...
-//	@serverOnly")
+// This asserts the PATTERN TEXT at the source-scanning site, not a verdict over
+// every construct kind. An earlier version of this file claimed to "cover all
+// three sites at once" via a tree-wide regex/registry comparison. Two problems
+// with that, both found in review:
 //
-// -- or inside a block comment satisfies the regex, so the audit EXEMPTS the
-// construct from per-row-authz classification and sdk/gen skips it, while
-// Function.ServerOnly stays false and NOTHING is enforced at runtime. #2861
-// (block comments in the DSL) made that more reachable.
+//   - it regexed the whole SLICE (preamble + body + prepended `use` lines)
+//     while the sites regex the PREAMBLE only, so an `@serverOnly` inside a
+//     body annotation string -- e.g. an args field's multi-line
+//     `@description` -- was reported as FAIL-OPEN with three false claims
+//     attached, on a construct nothing had exempted;
+//   - the registry only holds query / mutation / logic, so the comparison was
+//     blind to the 185 `seed` and 74 `builtin` constructs the source-scanning
+//     sites also read. The parsed set in dsl/ walks 650 named declarations and
+//     covers those.
 //
-// It is not attacker-reachable -- it requires authoring the construct in-repo.
-// The reason to close it is that the classification test is the backstop that
-// hard-fails on any new unclassified construct, and a construct that can slip
-// out of that gate while ALSO having no runtime enforcement is the one shape
-// the gate exists to make impossible.
-//
-// # Why this is a parity gate rather than a rewrite of the three sites
-//
-// The issue proposes having the audit read Function.ServerOnly off the loaded
-// registry. That cannot be done where the audit lives: `component/memql`
-// imports `github.com/znasllc-io/memql/dsl` (ai_prompts.go, capability_loader.go,
-// build_offline_sense.go), so package `dsl` cannot import back into
-// `component/memql` to load a registry. Only the leaf subpackages `dslfs` and
-// `sense` are importable from there, and neither loads functions.
-//
-// sdk/gen has the mirror problem from the other direction: it is a GENERATOR
-// that must run over an arbitrary `--dsl` root without booting an engine, so
-// making it registry-backed would couple codegen to engine Init.
-//
-// So this test sits where BOTH views are available and asserts they agree. The
-// divergence becomes unshippable rather than unrepresentable -- weaker than the
-// issue's phrasing ("cannot diverge by construction") but achievable without
-// moving an authz audit across a package boundary, and it fails on the exact
-// condition that matters.
-//
-// It also covers all three sites at once, because all three compile the SAME
-// pattern; the constant below is asserted to match each.
+// A genuine `@serverOnly` is rejected at parse on both seeds ("unknown seed
+// annotation") and builtins ("unknown annotation ... supported: @alias, @args,
+// ..."), so only the smuggled form is reachable there, and its blast radius is
+// an audit exemption or an SDK omission rather than a callable-with-no-scope
+// construct.
 
-// serverOnlyRegexSource is the pattern the three source-scanning sites use. It
-// is duplicated here deliberately -- the point is to detect drift between the
-// regex verdict and the loader verdict, so importing one of the three would
-// make the test blind to a change in the other two.
+// serverOnlyRegexSource is the pattern sdk/gen compiles. Duplicated here on
+// purpose: the point is to detect drift, so importing the site's variable would
+// make the test blind to a change in it.
 const serverOnlyRegexSource = `(?m)^@serverOnly\b`
 
-var serverOnlyParityRe = regexp.MustCompile(serverOnlyRegexSource)
-
-// TestServerOnlyRegexAgreesWithTheLoadedRegistry is the parity gate.
+// TestServerOnlyRegexPatternIsTheOneSdkGenUses guards the premise: this file is
+// only meaningful while the constant above is what the generator actually
+// compiles.
 //
-// For every function-registry construct, the regex verdict over its source must
-// equal Function.ServerOnly. A mismatch in either direction is a defect; the
-// FAIL-OPEN direction (regex says yes, loader says no) is called out separately
-// because that is the one that silently removes both the audit obligation and
-// the runtime enforcement at the same time.
-func TestServerOnlyRegexAgreesWithTheLoadedRegistry(t *testing.T) {
+// Read from source rather than imported, because the goal is to notice an edit
+// to that literal -- importing the variable would make any change invisible by
+// construction.
+func TestServerOnlyRegexPatternIsTheOneSdkGenUses(t *testing.T) {
+	const path = "../../sdk/gen/gen.go"
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v -- if the generator moved, move this check with it; without it "+
+			"the SDK's @serverOnly skip can drift from the parsed audit unnoticed", path, err)
+	}
+	decl := regexp.MustCompile(`serverOnlyRe\s*=\s*regexp\.MustCompile\(` + "`" + `([^` + "`" + `]*)` + "`" + `\)`)
+	m := decl.FindSubmatch(raw)
+	if m == nil {
+		t.Fatalf("%s: could not find `serverOnlyRe = regexp.MustCompile(...)`. If the generator "+
+			"now derives its verdict differently -- ideally from the parsed AST, which it can do "+
+			"without an engine -- this check should be replaced rather than repaired.", path)
+	}
+	if got := string(m[1]); got != serverOnlyRegexSource {
+		t.Errorf("%s compiles %q, this file expects %q. The generator's verdict has drifted from "+
+			"the parsed audit in dsl/server_only_parsed_test.go; reconcile them.", path, got, serverOnlyRegexSource)
+	}
+}
+
+// TestLoadedRegistryAgreesWithSdkGenOnTheRealTree is the narrow, honest version
+// of the tree-wide comparison: for every construct the registry knows, the
+// generator's regex over its PREAMBLE must match Function.ServerOnly.
+//
+// Preamble, not the whole slice -- that was review finding 2. The preamble is
+// the only text the generator reads, so it is the only text a comparison
+// against it may use.
+func TestLoadedRegistryAgreesWithSdkGenOnTheRealTree(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	if _, err := LoadUnifiedConcepts(logger); err != nil {
 		t.Fatalf("LoadUnifiedConcepts: %v", err)
 	}
+	// The concept registry and the LoadReport are both passed deliberately.
+	// Passing nil concepts loads FEWER functions (436 vs 445) -- a silent
+	// partial load that would narrow the comparison without failing it. The
+	// report is the instrument that catches a dropped slice, which the
+	// checked==0 tripwire cannot.
 	registry := newFunctionRegistry()
-	if _, _, err := LoadUnifiedFunctions(logger, registry, memoryNodes.DefaultRegistry()); err != nil {
+	report := newLoadReport()
+	_, counts, err := LoadUnifiedFunctions(logger, registry, memoryNodes.DefaultRegistry(), report)
+	if err != nil {
 		t.Fatalf("LoadUnifiedFunctions: %v", err)
 	}
+	if report.HasProblems() {
+		t.Fatalf("the function load reported problems, so the registry is incomplete and this "+
+			"comparison would silently cover fewer constructs than it claims: %+v", report.Skipped)
+	}
 
-	// Slice every file ONCE. Calling DSLConstructSource per construct re-reads
-	// and re-slices the whole tree each time -- O(constructs x files), which
-	// measured 26s for 445 constructs. Same inputs, ~0.5s.
+	re := regexp.MustCompile(serverOnlyRegexSource)
 	sources := allConstructSources(logger)
 
-	var (
-		failOpen   []string
-		failClosed []string
-		checked    int
-		loaderYes  int
-		regexYes   int
-	)
+	var mismatch []string
+	checked, skipped, loaderYes := 0, 0, 0
 
 	for _, fn := range registry.Snapshot() {
-		if fn == nil || fn.Name == "" {
+		if fn == nil || fn.Name == "" || fn.FunctionKind == "" {
 			continue
 		}
-		kind := fn.FunctionKind
-		if kind == "" {
-			continue
-		}
-		src, ok := sources[kind+"\x00"+fn.Name]
+		src, ok := sources[fn.FunctionKind+"\x00"+fn.Name]
 		if !ok {
-			// A construct with no recoverable source cannot be compared. That
-			// is not a pass -- it means the regex sites cannot see it either,
-			// which is worth knowing, so it is counted rather than skipped
-			// silently.
+			// Counted, and asserted on below. The previous version's comment
+			// claimed this was "counted rather than skipped silently" while
+			// providing no counter -- review finding 4.
+			skipped++
 			continue
 		}
 		checked++
-
-		byRegex := serverOnlyParityRe.MatchString(src)
-		byLoader := fn.ServerOnly
-		if byLoader {
+		if fn.ServerOnly {
 			loaderYes++
 		}
-		if byRegex {
-			regexYes++
-		}
-
-		switch {
-		case byRegex && !byLoader:
-			failOpen = append(failOpen, fn.Name+" ("+kind+")")
-		case byLoader && !byRegex:
-			failClosed = append(failClosed, fn.Name+" ("+kind+")")
+		if re.MatchString(preambleOf(src)) != fn.ServerOnly {
+			mismatch = append(mismatch, fn.Name+" ("+fn.FunctionKind+")")
 		}
 	}
 
 	if checked == 0 {
-		t.Fatal("compared 0 constructs -- this gate would then pass vacuously, which is the " +
-			"failure mode that made the previous user-scope detector report a meaningless zero " +
-			"(#2799). Check DSLConstructSource against FunctionKind values in the registry")
+		t.Fatal("compared 0 constructs -- this gate would pass vacuously (the #2799 meaningless-zero " +
+			"failure mode). Check allConstructSources against FunctionKind values in the registry")
+	}
+	if skipped != 0 {
+		t.Errorf("%d construct(s) in the registry had no recoverable source, so the generator's "+
+			"regex cannot see them either and this comparison silently skipped them. The "+
+			"checked==0 tripwire cannot detect a PARTIAL drop, which is why this is asserted.", skipped)
 	}
 	if loaderYes == 0 {
-		t.Fatal("the loaded registry reports ZERO @serverOnly constructs. Either the annotation " +
-			"has no live users -- in which case check whether the enforcement in " +
-			"function_validator.go is still exercised by anything -- or hasFlagAttribute stopped " +
-			"seeing it, which would silently disable the gate on every construct that carries it")
+		t.Fatal("the loaded registry reports ZERO @serverOnly constructs -- either the annotation " +
+			"has no live users, or hasFlagAttribute stopped seeing it, which would silently " +
+			"disable the gate on every construct that carries it")
+	}
+	for _, name := range mismatch {
+		t.Errorf("%s: sdk/gen's regex over the preamble disagrees with Function.ServerOnly.\n"+
+			"\tWhichever way it points, the generated SDK and the runtime now disagree about\n"+
+			"\twhether this construct is reachable from a client (memql#2875).", name)
 	}
 
-	sort.Strings(failOpen)
-	sort.Strings(failClosed)
-
-	for _, name := range failOpen {
-		t.Errorf("FAIL-OPEN: %s matches the @serverOnly regex but Function.ServerOnly is FALSE.\n"+
-			"\tThe audit gates (dsl/conformance_test.go, dsl/server_only_authz_test.go) therefore\n"+
-			"\tEXEMPT it from per-row-authz classification and sdk/gen drops it from the client\n"+
-			"\tsurface, while the runtime enforces NOTHING -- the construct is fully callable by\n"+
-			"\tany client with no caller-scope obligation. Usual cause: a line beginning\n"+
-			"\t`@serverOnly` inside a multi-line annotation string or a block comment (memql#2875).", name)
+	// Cross-check the comparison covered the whole registry, not a subset.
+	want := 0
+	for _, n := range counts {
+		want += n
 	}
-	for _, name := range failClosed {
-		t.Errorf("FAIL-CLOSED: %s has Function.ServerOnly TRUE but does not match the @serverOnly\n"+
-			"\tregex. Runtime refuses client calls while the audit gates still demand caller-scope\n"+
-			"\tclassification and sdk/gen still EXPORTS it to the client surface -- an advertised\n"+
-			"\tconstruct that is always refused (memql#2647's dishonest surface).", name)
+	if checked != want {
+		t.Errorf("compared %d constructs but the loader reported %d -- the comparison is covering "+
+			"a SUBSET, which narrows the gate without failing it", checked, want)
 	}
 
-	t.Logf("compared %d constructs: %d @serverOnly by loader, %d by regex", checked, loaderYes, regexYes)
+	t.Logf("compared %d constructs (%d @serverOnly, %d skipped, loader reported %d)", checked, loaderYes, skipped, want)
 }
 
-// TestServerOnlyRegexPatternIsTheOneTheGatesUse guards the premise of the test
-// above: it is only meaningful while the constant here is the pattern the three
-// source-scanning sites actually compile.
+// preambleOf returns the `@`-attribute / doc-comment run above a slice's
+// construct header -- the same text sdk/gen's attrPreamble hands to its regex.
 //
-// Checked by reading their source rather than importing their variables --
-// `dsl` and `sdk/gen` are not importable from here (see the file header), and
-// two of the three live in _test.go files that are not importable at all.
-func TestServerOnlyRegexPatternIsTheOneTheGatesUse(t *testing.T) {
-	for _, site := range []struct{ path, varName string }{
-		{"../../dsl/conformance_test.go", "serverOnlyAnnotationRe"},
-		{"../../dsl/server_only_authz_test.go", "serverOnlyRe"},
-		{"../../sdk/gen/gen.go", "serverOnlyRe"},
-	} {
-		raw, err := os.ReadFile(site.path)
-		if err != nil {
-			t.Errorf("read %s: %v -- if this file moved, move this check with it; without it the "+
-				"parity gate silently compares against a pattern nobody uses", site.path, err)
-			continue
-		}
-		decl := regexp.MustCompile(regexp.QuoteMeta(site.varName) + `\s*=\s*regexp\.MustCompile\(` + "`" + `([^` + "`" + `]*)` + "`" + `\)`)
-		m := decl.FindSubmatch(raw)
-		if m == nil {
-			t.Errorf("%s: could not find `%s = regexp.MustCompile(...)`. The parity gate assumes "+
-				"all three sites compile %q; if one now derives its pattern differently, this "+
-				"test must learn how.", site.path, site.varName, serverOnlyRegexSource)
-			continue
-		}
-		if got := string(m[1]); got != serverOnlyRegexSource {
-			t.Errorf("%s: %s compiles %q, parity gate uses %q -- the two have drifted, so the "+
-				"parity assertion no longer covers that site.", site.path, site.varName, got, serverOnlyRegexSource)
+// A slice starts AT its preamble, so this is "everything up to the first line
+// that is neither blank, an annotation, nor a comment". Matching the whole
+// slice instead was review finding 2: an `@serverOnly` inside a BODY
+// annotation string is text no gate ever reads, and reporting it as a
+// divergence attaches three false claims to a construct nothing exempted.
+func preambleOf(slice string) string {
+	lines := strings.Split(slice, "\n")
+
+	// Find the construct header. Everything before it is candidate preamble;
+	// everything at or after it is body. This cannot be "the first
+	// non-annotation line" -- ExtractFunctionSlices PREPENDS the file-top
+	// `use ...` declarations to every slice, so a naive scan breaks on line 0
+	// and returns an empty preamble, which silently reports every @serverOnly
+	// construct as a mismatch. (It did, first try.)
+	header := -1
+	for i, line := range lines {
+		if constructHeaderForPreamble.MatchString(line) {
+			header = i
+			break
 		}
 	}
+	if header < 0 {
+		return ""
+	}
+
+	// Walk back over the annotation / doc-comment run, exactly as sdk/gen's
+	// attrPreamble does -- including that it accepts `@` and `///` and steps
+	// over blank lines, but stops at anything else.
+	first := header
+	for i := header - 1; i >= 0; i-- {
+		trimmed := strings.TrimSpace(lines[i])
+		if trimmed == "" {
+			continue
+		}
+		if !strings.HasPrefix(trimmed, "@") && !strings.HasPrefix(trimmed, "///") {
+			break
+		}
+		first = i
+	}
+	return strings.Join(lines[first:header], "\n")
 }
 
-// allConstructSources returns every function-registry construct's source,
-// keyed "<kind>\x00<name>". One pass over the tree, mirroring exactly what
-// DSLConstructSource does per lookup.
+// constructHeaderForPreamble matches a top-level construct header inside a
+// slice, so preambleOf can tell preamble from body.
+var constructHeaderForPreamble = regexp.MustCompile(`^[ \t]*(query|mutate|seed|logic|func)\b`)
+
+// allConstructSources returns every function-registry construct's source, keyed
+// "<kind>\x00<name>". One pass over the tree: calling DSLConstructSource per
+// construct re-reads and re-slices the whole tree each time, measured at 25s
+// for 445 constructs against 0.2s here.
+//
+// Only ExtractFunctionSlices is run. The earlier version also ran
+// ExtractAutomationSlices, whose 31 entries can never be looked up because no
+// registry construct has kind "automation" -- review finding 6.
 func allConstructSources(logger *slog.Logger) map[string]string {
 	out := map[string]string{}
 	for _, raw := range baseloader.ReadAll(logger) {
 		for _, slice := range ExtractFunctionSlices(raw.Content) {
 			out[string(slice.Kind)+"\x00"+slice.Name] = slice.Source
 		}
-		for _, slice := range ExtractAutomationSlices(raw.Content) {
-			out[string(slice.Kind)+"\x00"+slice.Name] = slice.Source
-		}
 	}
 	return out
 }
-
-// TestServerOnlyRegexMatchesTheSmuggledShapes is the failing-first half: it
-// proves the FAIL-OPEN condition the parity gate exists to catch is real, on
-// the exact shapes #2875 names.
-//
-// No construct in the tree carries these today, so the tree-wide comparison
-// above passes and cannot demonstrate the hazard. These assert the regex side
-// of the divergence directly -- each of these SATISFIES the regex (so the audit
-// gates exempt the construct and sdk/gen drops it) while a parser would never
-// set Function.ServerOnly, because in each case `@serverOnly` is inside a
-// string literal or a comment rather than being an annotation.
-func TestServerOnlyRegexMatchesTheSmuggledShapes(t *testing.T) {
-	for _, tc := range []struct{ name, src string }{
-		{
-			"inside a multi-line annotation string",
-			"@description(\"note\n@serverOnly\")\nquery user q {\n  filter row.id==args.x\n}\n",
-		},
-		{
-			"inside a block comment",
-			"/*\n@serverOnly\n*/\nquery user q {\n  filter row.id==args.x\n}\n",
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			if !serverOnlyParityRe.MatchString(tc.src) {
-				t.Fatalf("the regex does NOT match %s.\nThat would mean #2875's fail-open shape is "+
-					"no longer reachable and the parity gate is guarding nothing -- verify against "+
-					"the current pattern before deleting either test.", tc.name)
-			}
-			// The construct itself declares no annotation, so a loader would
-			// report ServerOnly=false. Regex yes + loader no is exactly the
-			// mismatch the parity gate reports as FAIL-OPEN.
-			if hasFlagAttribute(nil, "serverOnly") {
-				t.Fatal("fixture: hasFlagAttribute(nil, ...) should be false")
-			}
-		})
-	}
-}
-
-// unusedLanguageParserGuard keeps the languageParser import honest if the
-// FunctionKind comparison above is ever refactored to use the typed constants.
-var _ = languageParser.FunctionTypeAutomation
