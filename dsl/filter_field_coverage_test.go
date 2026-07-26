@@ -65,3 +65,28 @@ func TestMutationFieldLaneCoversEveryMutation(t *testing.T) {
 		}
 	}
 }
+
+// TestSpecBodyLaneCoversEverySpec is the lane-6 counterpart (memql#2804).
+//
+// Lane 6 resolves its binding through a DIFFERENT path than lanes 3 and 5 --
+// shapes, not concepts -- so it needs its own guard rather than inheriting
+// the assumption that resolution works. A shape short-name colliding across
+// namespaces, or an import this root cannot see, would otherwise drop
+// coverage silently, which is exactly the failure #2795 found twice.
+func TestSpecBodyLaneCoversEverySpec(t *testing.T) {
+	tree, err := dslimports.Load(Tree())
+	if err != nil {
+		t.Fatalf("dslimports.Load: %v", err)
+	}
+
+	total, skipped := tree.SpecBodyCoverage()
+	if total == 0 {
+		t.Fatal("coverage reported zero specs -- the probe is broken, not the tree")
+	}
+	if len(skipped) > 0 {
+		t.Errorf("spec-body validation skipped %d of %d specs; each needs its signature binding to resolve (an explicit `use <ns>.shapes.{ <Shape> }`, or a same-domain declaration):", len(skipped), total)
+		for _, s := range skipped {
+			t.Errorf("  %s", s)
+		}
+	}
+}
