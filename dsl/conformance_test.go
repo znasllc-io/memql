@@ -11,6 +11,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/language/dslclause"
 	"github.com/znasllc-io/memql/component/language/pagination"
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql/dslfs"
 	"github.com/znasllc-io/memql/component/memql/sense"
 )
@@ -786,6 +787,7 @@ var userScopeFieldRe = regexp.MustCompile(`(^|[^.\w])(ownerUserId|userId|actorUs
 // the brace is scanned like any other line, so the one-line spelling is not an
 // escape hatch either.
 func rowSelectionSurface(body string) string {
+	body = blankComments(body)
 	var b strings.Builder
 	depth := 0
 	awaitingOpen := false
@@ -850,33 +852,25 @@ func rowSelectionSurface(body string) string {
 	return b.String()
 }
 
-// cutLineComment removes a `//` comment tail, ignoring `//` that falls inside a
-// double-quoted string literal.
+// blankComments removes BOTH comment forms -- `//` line and `/* */` block --
+// via the parser's own offset-preserving blanker, so a construct's structure
+// is read the way the lexer reads it.
 //
-// The naive `strings.Index(line, "//")` truncated a filter clause at the first
-// slashes in a URL: `displayName=="https://x/y" && requiresOwnerOrAdmin` lost
-// its gate term, so a properly-gated construct read as ungated (memql#2840
-// review round 2). filterClauseOf feeds TestPerRowAuthzClassification and
-// TestAdminGateIsATopLevelConjunct as well, so the truncation was never
-// specific to one gate.
-func cutLineComment(line string) string {
-	inString := false
-	for i := 0; i < len(line); i++ {
-		switch {
-		case inString && line[i] == '\\' && i+1 < len(line):
-			i++ // escaped byte inside a string is never a delimiter
-		case line[i] == '"':
-			inString = !inString
-		case !inString && line[i] == '/' && i+1 < len(line) && line[i+1] == '/':
-			return line[:i]
-		}
-	}
-	return line
-}
+// Three hand-rolled attempts preceded this, each blind to something the
+// previous one handled (memql#2840 review rounds 1-3): the first ended an
+// update block at a nested `}`, the second truncated a filter clause at the
+// `//` inside a URL, the third handled `//` but not `/* */`, so a gate term
+// commented out with `/* && requiresOwnerOrAdmin */` still read as live.
+// parser.BlankComments is string-, line-comment- AND block-comment-aware, is
+// documented for exactly this use ("the text-based header detectors that run
+// BEFORE the lexer/parser"), and preserves byte offsets so line-oriented
+// walkers keep working.
+func blankComments(s string) string { return languageParser.BlankComments(s) }
 
-// structureOf returns line with double-quoted string contents blanked and any
-// `//` comment tail removed, so brace counting and delimiter scans see only
-// structural punctuation.
+// structureOf returns line with double-quoted string contents blanked, so
+// brace counting sees only structural punctuation. Comments must already be
+// blanked by blankComments -- BlankComments deliberately preserves string
+// CONTENT, which is what a `}` inside a string literal hides behind.
 func structureOf(line string) string {
 	out := make([]byte, 0, len(line))
 	inString := false
@@ -891,8 +885,6 @@ func structureOf(line string) string {
 			out = append(out, ' ')
 		case inString:
 			out = append(out, ' ')
-		case c == '/' && i+1 < len(line) && line[i+1] == '/':
-			return string(out)
 		default:
 			out = append(out, c)
 		}
@@ -1506,8 +1498,7 @@ func clauseGuaranteesAt(clause string, leaf func(string) bool, depth int) bool {
 func filterClauseOf(body string) string {
 	var out []string
 	inFilter := false
-	for _, raw := range strings.Split(body, "\n") {
-		line := cutLineComment(raw)
+	for _, line := range strings.Split(blankComments(body), "\n") {
 		trim := strings.TrimSpace(line)
 		if !inFilter {
 			if rest, ok := strings.CutPrefix(trim, "filter"); ok && (rest == "" || rest[0] == ' ' || rest[0] == '\t') {

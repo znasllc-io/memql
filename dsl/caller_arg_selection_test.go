@@ -42,12 +42,18 @@ package dsl
 // so `(row.id==args.userId || row.id==actor.userId)` does NOT clear -- one arm
 // returns rows the caller does not own -- while `requiresOwnerOrAdmin &&
 // (a || b)` DOES, because a top-level conjunct guarantees regardless of the
-// disjunction beside it. Comments are stripped from the clause first.
+// disjunction beside it. BOTH comment forms -- `//` and `/* */` -- are blanked
+// from the clause first, via parser.BlankComments, so a gate term that is
+// commented out cannot clear.
 //
 // The signals `clauseGuarantees` looks for:
 //
-//   - an `actor.` term -- the construct compares against its caller
-//     directly;
+//   - an AFFIRMATIVE equality against an actor field, in either operand
+//     order. Polarity is load-bearing: `row.createdBy != actor.userId`
+//     mentions the caller and scopes nothing -- it returns every row the
+//     caller did NOT create -- so `!=` must not clear. adminGateLeaf makes
+//     the same point in this package; my first version was a bare
+//     strings.Contains and cleared exactly that shape;
 //   - a CONTEXT-SPEC reference. A spec bound to an `@actor` shape is the
 //     canonical spelling of a caller check, and it carries no literal `actor.`
 //     at the call site: `filter row.id==args.userId && requiresOwnerOrAdmin`
@@ -89,6 +95,13 @@ package dsl
 // The gate walks the EMBEDDED tree. A product bundle mounted at
 // MEMQL_DSL_PATH is never scanned, and cross-domain concept binding means such
 // a bundle can declare constructs against these very concepts.
+//
+// A context-spec clears the gate whatever it asserts, so a role predicate from
+// an unrelated domain (`forgeDeveloper`, `requiresDeveloperOrAbove`) counts as
+// a caller check here. That follows from treating "bound to an @actor shape"
+// as the definition, which is what keeps the set derivable from the tree
+// instead of hardcoded -- but it means the gate answers "is the caller
+// constrained at all", not "is the caller constrained to THIS person".
 
 import (
 	"fmt"
@@ -205,14 +218,7 @@ var callerArgSelectionAccepted = map[string]string{
 //   - stripping naively, `avatarUrl=="https://x/y"` truncated the clause at
 //     the URL's `//` and threw away the real gate term after it, turning a
 //     properly-gated construct into a false flag.
-func stripLineComments(s string) string {
-	var b strings.Builder
-	for _, line := range strings.Split(s, "\n") {
-		b.WriteString(cutLineComment(line))
-		b.WriteByte('\n')
-	}
-	return b.String()
-}
+func stripLineComments(s string) string { return blankComments(s) }
 
 // boundConceptOf returns the signature-bound concept from a construct header,
 // or "" when the signature omits one (`logic`, and the pre-signature forms).
@@ -227,6 +233,12 @@ func boundConceptOf(header string) string {
 	}
 	return ""
 }
+
+// actorEqualityRe matches an AFFIRMATIVE equality against an actor field, in
+// either operand order. `!=` is excluded deliberately: a negative comparison
+// against the caller widens the result set rather than narrowing it to the
+// caller's own rows.
+var actorEqualityRe = regexp.MustCompile(`(?:\bactor\.[A-Za-z_][A-Za-z0-9_.]*[ \t]*==)|(?:==[ \t]*actor\.[A-Za-z_])`)
 
 var (
 	// actorShapeDeclRe matches an `@actor` shape declaration -- the annotation,
@@ -362,8 +374,16 @@ func TestCallerSuppliedRowSelectionOnPersonScopedConcepts(t *testing.T) {
 			//
 			// Comments are stripped from the clause first, so a gate term
 			// named only in a comment cannot clear.
+			// POLARITY is load-bearing, and a bare strings.Contains does not
+			// carry it -- the same point adminGateLeaf makes in this package.
+			// `row.createdBy != actor.userId` mentions the actor and scopes
+			// NOTHING: it returns every user row the caller did not create.
+			// So the leaf demands an affirmative equality against an actor
+			// field, on a string-blanked predicate so `note=="actor.userId"`
+			// cannot pass either.
 			leaf := func(pred string) bool {
-				if strings.Contains(pred, "actor.") {
+				pred = structureOf(pred)
+				if actorEqualityRe.MatchString(pred) {
 					return true
 				}
 				for _, ref := range specRefs {
