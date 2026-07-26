@@ -12,7 +12,7 @@ package dslimports
 // documented standalone validation lane for no-Go product bundles, those
 // gaps shipped green through downstream CI.
 //
-// VerifyReferentialIntegrity closes them with five tree-local lanes:
+// VerifyReferentialIntegrity closes them with six tree-local lanes:
 //
 //  1. USE-DECL RESOLUTION -- every Form B `use ns.module.{ sym }` must map to
 //     a file in the tree (`ns/module.memql`, or the namespace-consolidated
@@ -57,6 +57,12 @@ package dslimports
 //     forever with no error anywhere. Bare trait/spec predicates are NOT field
 //     references -- the parser emits them as SpecReferenceExpr -- so the lane
 //     never has to guess whether a bare identifier is a property.
+//  6. SPEC BODY FIELDS -- every bare field a spec body reads must be
+//     declared by whatever its signature binds: a shape's projected keys,
+//     or a concept's properties. Lane 5 cannot see these, because a bare
+//     spec predicate parses as a construct reference rather than a field
+//     (memql#2804). Traits are deliberately unbound and stay out of scope.
+//
 //
 // CONSERVATISM. The verifier reports only what is provably broken relative
 // to the linted root. A product bundle lints standalone but imports engine
@@ -125,7 +131,7 @@ var signatureConceptRe = regexp.MustCompile(
 // tolerance). Lane 4 blanks these spans before scanning for symbol usage.
 var useDeclRe = regexp.MustCompile(`(?m)^[ \t]*use[ \t]+[A-Za-z_][A-Za-z0-9_.]*[ \t]*\.[ \t]*\{[^}]*\}`)
 
-// VerifyReferentialIntegrity runs the five lanes above over the loaded tree
+// VerifyReferentialIntegrity runs the six lanes above over the loaded tree
 // and returns per-finding diagnostics (empty when the tree is referentially
 // sound). Callers append these to the Load diagnostics for reporting; the
 // lint CLI (cmd/memqllint) is the primary consumer.
@@ -155,6 +161,7 @@ func (t *Tree) VerifyReferentialIntegrity() []error {
 		errs = append(errs, t.verifySignatureBindings(path, f, idx)...)
 		errs = append(errs, t.verifyMutationFields(path, f, idx)...)
 		errs = append(errs, t.verifyQueryFilterFields(path, f, idx)...)
+		errs = append(errs, t.verifySpecBodyFields(path, f, idx)...)
 		errs = append(errs, t.verifyImportsUsed(path, f, flagged)...)
 	}
 	return errs
@@ -169,6 +176,11 @@ type conceptEntry struct {
 	decl *languageAst.ConceptDecl
 }
 
+type shapeEntry struct {
+	file string
+	decl *languageAst.ShapeDecl
+}
+
 type declIndex struct {
 	// byFile[file][name] = construct kind ("concept", "logic", "capability", ...)
 	byFile map[string]map[string]string
@@ -176,6 +188,9 @@ type declIndex struct {
 	concepts map[string][]conceptEntry
 	// shapes[name] = true when a shape with that name is declared anywhere.
 	shapes map[string]bool
+	// shapeDecls[name] = every struct-form ShapeDecl with that name, across
+	// the tree. Lane 6 needs the projected paths, not just existence.
+	shapeDecls map[string][]shapeEntry
 	// namespaces[dir] = true when the tree has files under top-level dir.
 	namespaces map[string]bool
 }
@@ -185,6 +200,7 @@ func (t *Tree) buildDeclIndex() *declIndex {
 		byFile:     make(map[string]map[string]string, len(t.Files)),
 		concepts:   make(map[string][]conceptEntry),
 		shapes:     make(map[string]bool),
+		shapeDecls: make(map[string][]shapeEntry),
 		namespaces: make(map[string]bool),
 	}
 	for path, f := range t.Files {
@@ -206,6 +222,7 @@ func (t *Tree) buildDeclIndex() *declIndex {
 				idx.concepts[name] = append(idx.concepts[name], conceptEntry{file: path, decl: d})
 			case *languageAst.ShapeDecl:
 				idx.shapes[name] = true
+				idx.shapeDecls[name] = append(idx.shapeDecls[name], shapeEntry{file: path, decl: d})
 			case *languageAst.FunctionDef:
 				if d.Type == languageAst.FunctionTypeShape {
 					idx.shapes[name] = true
@@ -1262,4 +1279,225 @@ func (t *Tree) MutationFieldCoverage() (total int, skipped []string) {
 		}
 	}
 	return total, skipped
+}
+
+// ---------------------------------------------------------------------------
+// Lane 6: spec bodies are validated against their signature binding.
+// ---------------------------------------------------------------------------
+
+// verifySpecBodyFields checks that every bare field a SPEC body reads is
+// declared by whatever its signature binds (memql#2804).
+//
+// Lane 5 does this for a query `filter`, but a bare spec predicate parses as
+// a SpecReferenceExpr rather than a field reference -- which is what makes
+// lane 5 tractable, and also means the spec's own body was never walked. So
+// the same typo went silent the moment the predicate moved into a spec, and
+// a spec is where authorization predicates live.
+//
+// A spec binds one shape XOR concept in its signature (#2281):
+//
+//   - shape-bound  -> the shape's projected keys ONLY. The engine's
+//     shapeFieldMapper accepts nothing else -- no row intrinsics, no
+//     reserved heads, no dotted paths -- so this lane must not admit them
+//     either, or it lints clean and then refuses at boot.
+//   - concept-bound -> the concept's declared properties plus the intrinsics
+//     and reserved heads a row predicate may name, exactly as lane 5.
+//
+// TRAITS are out of scope by design: a trait is the one deliberately unbound
+// row predicate, validated at its call site against whichever concept calls
+// it. Checking a trait needs call-site analysis, the deferred harder half.
+//
+// Conservatism matches lane 5: when the binding does not resolve, skip --
+// lane 2 owns unresolved bindings, and guessing would fire on a product
+// bundle whose binding lives in a namespace absent from the linted root.
+func (t *Tree) verifySpecBodyFields(path string, f *languageAst.File, idx *declIndex) []error {
+	if f == nil {
+		return nil
+	}
+	var errs []error
+	for _, def := range f.Definitions {
+		spec, ok := def.(*languageAst.SpecDecl)
+		if !ok || spec.IsTrait || spec.BoundName == "" || spec.Body == nil {
+			continue
+		}
+		allowed, kind := t.resolveSpecBindingFields(path, f, idx, spec.BoundName)
+		if allowed == nil {
+			continue // unresolved -- lane 2 reports it
+		}
+		for _, head := range filterFieldHeads(spec.Body) {
+			if allowed[head] {
+				continue
+			}
+			// A concept-bound (row) spec may name the same intrinsics a
+			// filter may. A shape-bound spec may not: the mapper resolves
+			// projected keys and nothing else.
+			if kind == "concept" {
+				lowered := strings.ToLower(head)
+				if filterRowIntrinsics[lowered] || reservedFilterHeads[lowered] {
+					continue
+				}
+			}
+			errs = append(errs, fmt.Errorf(
+				"%s: spec %q: body reads field %q, which %s %q does not declare",
+				path, spec.Name, head, kind, spec.BoundName))
+		}
+	}
+	return errs
+}
+
+// SpecBodyCoverage reports how many specs lane 6 actually checks, and which
+// it skipped.
+//
+// Lanes 3 and 5 both grew a coverage guard after memql#2795 found them
+// silently skipping 19/197 and 21/213 constructs. Lane 6 resolves its
+// binding through a DIFFERENT path than either (shapes, not concepts), so it
+// gets its own guard rather than inheriting the assumption that resolution
+// works -- a shape short-name colliding across namespaces would otherwise
+// drop coverage with nothing reporting it.
+func (t *Tree) SpecBodyCoverage() (total int, skipped []string) {
+	if t == nil {
+		return 0, nil
+	}
+	idx := t.buildDeclIndex()
+
+	paths := make([]string, 0, len(t.Files))
+	for p := range t.Files {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+
+	for _, path := range paths {
+		f := t.Files[path]
+		if f == nil || t.ImportsOnly[path] {
+			continue
+		}
+		for _, def := range f.Definitions {
+			spec, ok := def.(*languageAst.SpecDecl)
+			if !ok || spec.IsTrait || spec.BoundName == "" {
+				continue
+			}
+			total++
+			if allowed, _ := t.resolveSpecBindingFields(path, f, idx, spec.BoundName); allowed == nil {
+				skipped = append(skipped, path+" "+spec.Name)
+			}
+		}
+	}
+	return total, skipped
+}
+
+// resolveSpecBindingFields resolves a spec's signature binding to the field
+// names its body may read, plus a label naming what it resolved to. Returns
+// (nil, "") when the binding does not resolve.
+//
+// Shape is tried before concept, matching the engine's own
+// resolveOneSpecBinding.
+func (t *Tree) resolveSpecBindingFields(path string, f *languageAst.File, idx *declIndex, name string) (map[string]bool, string) {
+	if decl := t.resolveSpecShape(path, f, idx, name); decl != nil {
+		keys := t.shapeProjectedKeys(path, f, idx, decl)
+		if keys == nil {
+			return nil, "" // default projection we could not expand -- skip
+		}
+		return keys, "shape"
+	}
+	if decl := t.resolveFilterConcept(path, f, idx, name); decl != nil {
+		return conceptPropertyNames(decl), "concept"
+	}
+	return nil, ""
+}
+
+// resolveSpecShape resolves a shape name to its declaration.
+//
+// An explicit `use` naming the shape wins and is followed to its target
+// file, matching boot; a name imported from a namespace absent from this
+// root is supplied externally (the product-bundle case) and stays
+// unresolved. Otherwise the file's own domain answers, since #2617 makes
+// same-domain constructs ambient.
+//
+// Deliberately NO "single declaration anywhere in the tree" fallback: lane 5
+// does not have one, and it would resolve a bundle's unrelated shape that
+// merely shares a short name -- reporting undeclared fields on legal DSL.
+func (t *Tree) resolveSpecShape(path string, f *languageAst.File, idx *declIndex, name string) *languageAst.ShapeDecl {
+	if name == "" {
+		return nil
+	}
+	for _, u := range f.Uses {
+		if u == nil {
+			continue
+		}
+		imported := false
+		for _, n := range u.Names {
+			if n == name {
+				imported = true
+				break
+			}
+		}
+		if !imported {
+			continue
+		}
+		parts := stripVersionPrefix(u.Parts)
+		if len(parts) == 0 || !idx.namespaces[parts[0]] {
+			return nil // supplied externally
+		}
+		target, ok := t.resolveUseModule(parts)
+		if !ok || t.ImportsOnly[target.file] {
+			return nil // lane 1 reports bad modules
+		}
+		for _, e := range idx.shapeDecls[name] {
+			if e.file == target.file {
+				return e.decl
+			}
+		}
+		return nil // imported but not declared there -- lane 2 reports
+	}
+	domain := path
+	if i := strings.IndexByte(path, '/'); i > 0 {
+		domain = path[:i]
+	}
+	for _, e := range idx.shapeDecls[name] {
+		if e.decl == nil {
+			continue
+		}
+		if i := strings.IndexByte(e.file, '/'); i > 0 && e.file[:i] == domain {
+			return e.decl
+		}
+	}
+	return nil
+}
+
+// shapeProjectedKeys returns the keys a shape projects, or nil when they
+// cannot be determined.
+//
+// Each body path is keyed by its TERMINAL segment, which is how
+// shapeDeclToShapeDefinition keys the projection: `actor.userId` projects
+// `userId`, `row.id` projects `id`.
+//
+// An EMPTY body is the default-projection form (#2035 C5): the loader
+// expands it at bootstrap to every projectable field of the bound concept.
+// Returning the empty set here would flag every field the spec reads, so the
+// concept is resolved and its properties used; if that fails, nil (skip).
+func (t *Tree) shapeProjectedKeys(path string, f *languageAst.File, idx *declIndex, decl *languageAst.ShapeDecl) map[string]bool {
+	if len(decl.Paths) == 0 {
+		if decl.SignatureConcept == "" {
+			return nil
+		}
+		conceptDecl := t.resolveFilterConcept(path, f, idx, decl.SignatureConcept)
+		if conceptDecl == nil {
+			return nil
+		}
+		return conceptPropertyNames(conceptDecl)
+	}
+	out := make(map[string]bool, len(decl.Paths))
+	for _, p := range decl.Paths {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if i := strings.LastIndexByte(p, '.'); i >= 0 && i+1 < len(p) {
+			p = p[i+1:]
+		}
+		if p != "" {
+			out[p] = true
+		}
+	}
+	return out
 }
