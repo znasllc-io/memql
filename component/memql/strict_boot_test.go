@@ -88,7 +88,7 @@ func TestStrictBoot_FixtureWithBadConstruct(t *testing.T) {
 	// registry per call.
 
 	t.Run("refuses to boot without escape hatch", func(t *testing.T) {
-		t.Setenv(allowSkipsEnvVar, "") // force strict regardless of ambient env
+		t.Setenv(AllowSkipsEnvVar, "") // force strict regardless of ambient env
 		registry := loadedConceptRegistry(t)
 		eng := newQuietEngine(t)
 		err := eng.Init(registry)
@@ -101,17 +101,17 @@ func TestStrictBoot_FixtureWithBadConstruct(t *testing.T) {
 		if !strings.Contains(err.Error(), "fixtureBadSpec") {
 			t.Fatalf("strict-boot error should name the skipped construct, got: %v", err)
 		}
-		if !strings.Contains(err.Error(), allowSkipsEnvVar) {
-			t.Fatalf("strict-boot error should point at the %s break-glass, got: %v", allowSkipsEnvVar, err)
+		if !strings.Contains(err.Error(), AllowSkipsEnvVar) {
+			t.Fatalf("strict-boot error should point at the %s break-glass, got: %v", AllowSkipsEnvVar, err)
 		}
 	})
 
 	t.Run("boots with escape hatch, skip reported", func(t *testing.T) {
-		t.Setenv(allowSkipsEnvVar, "1")
+		t.Setenv(AllowSkipsEnvVar, "1")
 		registry := loadedConceptRegistry(t)
 		eng := newQuietEngine(t)
 		if err := eng.Init(registry); err != nil {
-			t.Fatalf("engine.Init must SUCCEED with %s=1 (break-glass): %v", allowSkipsEnvVar, err)
+			t.Fatalf("engine.Init must SUCCEED with %s=1 (break-glass): %v", AllowSkipsEnvVar, err)
 		}
 		if eng.loadReport == nil || !eng.loadReport.HasProblems() {
 			t.Fatal("the load report must still record the skip even when booting via the escape hatch")

@@ -91,9 +91,9 @@ func TestDSLAllowSkips(t *testing.T) {
 	}
 	for v, want := range cases {
 		t.Run("val="+v, func(t *testing.T) {
-			t.Setenv(allowSkipsEnvVar, v)
-			if got := dslAllowSkips(); got != want {
-				t.Fatalf("dslAllowSkips() with %q = %v, want %v", v, got, want)
+			t.Setenv(AllowSkipsEnvVar, v)
+			if got := DSLAllowSkips(); got != want {
+				t.Fatalf("DSLAllowSkips() with %q = %v, want %v", v, got, want)
 			}
 		})
 	}

@@ -111,11 +111,12 @@ func TestCompilerParseObjectLiteralTerminates(t *testing.T) {
 // which had no error channel at all -- so a malformed payload became a silent
 // null in a compiled automation.
 //
-// What the error does NOT do is refuse the boot. LoadFromUnifiedTree logs a
-// Warn and continues, so the automation is dropped instead; see the note on
-// parsePayloadRaw for the exact frames. "Silently wrong" became "absent, with
-// a WARN" -- an improvement, but a bounded one, and worth stating plainly
-// because an earlier draft of this comment claimed the strict-boot gate.
+// As of memql#2830 the error DOES refuse the boot: LoadFromUnifiedTree records
+// the compile failure and returns it, and app/engine.go gates on that
+// synchronously, so the node refuses to start rather than running with the
+// automation silently absent. See the note on parsePayloadRaw for the exact
+// frames. The progression was "silently wrong" -> "absent, with a WARN"
+// (#2785/#2816) -> "red boot naming the automation" (#2830).
 func TestCompilerMalformedPayloadFailsLoudly(t *testing.T) {
 	c := &Compiler{}
 	for _, src := range []string{
@@ -288,9 +289,11 @@ func TestCompilerEmptyValueIsNullNotAnError(t *testing.T) {
 
 // TestCompilerAcceptsRealisticPayloads is the regression net for the ok
 // threading. Rejecting a VALID payload is the failure mode a fail-loudly
-// change invites, and it surfaces as an automation silently dropped at load
-// (LoadFromUnifiedTree warns and continues) rather than as a test failure, so
-// the accept side needs at least as much cover as the reject side. Finding F3
+// change invites. Since memql#2830 it surfaces as a REFUSED BOOT naming the
+// automation (LoadFromUnifiedTree returns the compile error and app/engine.go
+// gates on it) rather than as a silent drop -- louder than before, but still
+// not a failure of THIS test, so the accept side needs at least as much cover
+// as the reject side. Finding F3
 // of the round-4 review was exactly this: a valid nested payload newly
 // rejected, caught only because the accept net was widened.
 //

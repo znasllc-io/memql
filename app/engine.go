@@ -113,6 +113,18 @@ func (a *App) engineAndBus() {
 		Logger:   nil,
 		Registry: a.registry,
 	})
+
+	// Strict automation boot (memql#2830). The scheduler loads automations
+	// from its own goroutine, where a load error can only be LOGGED -- the
+	// node would come up green with the broken automation silently missing.
+	// So gate it here, synchronously, where a.fatal can still refuse the
+	// boot. This is the automation-tree half of the same strict-boot
+	// contract engine.Init enforces for every other construct kind;
+	// MEMQL_DSL_ALLOW_SKIPS is the shared operator break-glass.
+	if _, err := a.automationLoader.LoadAll(); err != nil {
+		a.fatal("automation tree failed to load", "error", err, "component", automations.ComponentName)
+	}
+
 	a.stepRegistry = automationSteps.NewRegistry()
 
 	// #561: elect one cluster-wide owner of SCHEDULED (cron) automations via
