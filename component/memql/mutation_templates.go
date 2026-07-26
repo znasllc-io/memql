@@ -421,23 +421,7 @@ func (e *mutationTemplateEvaluator) evalString(ctx context.Context, s string) (a
 	// component/memql/executor.go:resolveActorPath; supported paths
 	// are userId / identityId / role / primaryEmail / isOwner.
 	if strings.HasPrefix(trimmed, "actor.") {
-		path := strings.TrimSpace(strings.TrimPrefix(trimmed, "actor."))
-		if path == "" {
-			return nil, fmt.Errorf("actor: actor path is required")
-		}
-		for i := 0; i < len(path); i++ {
-			c := path[i]
-			if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '.' {
-				continue
-			}
-			return nil, fmt.Errorf("actor.<path>: invalid character %q in %q", c, trimmed)
-		}
-		ac, _ := auth.AccessFromContext(ctx)
-		// One canonical envelope (#2623): auth.ActorEnvelopeFields.
-		if v, ok := auth.ActorEnvelopeValue(ac, path); ok {
-			return v, nil
-		}
-		return nil, fmt.Errorf("unsupported actor reference path %q (valid: %s)", path, auth.ActorEnvelopeValidNames())
+		return resolveActorReference(ctx, trimmed)
 	}
 
 	// The clock. classifyScalarOrExpr rewrites a bare top-level `now` to the
@@ -623,6 +607,35 @@ func (e *mutationTemplateEvaluator) evalConcat(ctx context.Context, expr string)
 	return b.String(), nil
 }
 
+// resolveActorReference resolves an `actor.<path>` reference through the auth
+// envelope on ctx, NOT through caller-passed args.
+//
+// Shared by the string-operand path and the lowered-AST path. They resolved it
+// independently until memql#2840, and only the string one implemented it --
+// which is why `update { id: actor.userId }` silently selected nothing. One
+// implementation means a future position that reaches either path is already
+// correct.
+func resolveActorReference(ctx context.Context, ref string) (any, error) {
+	trimmed := strings.TrimSpace(ref)
+	path := strings.TrimSpace(strings.TrimPrefix(trimmed, "actor."))
+	if path == "" {
+		return nil, fmt.Errorf("actor: actor path is required")
+	}
+	for i := 0; i < len(path); i++ {
+		c := path[i]
+		if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '.' {
+			continue
+		}
+		return nil, fmt.Errorf("actor.<path>: invalid character %q in %q", c, trimmed)
+	}
+	ac, _ := auth.AccessFromContext(ctx)
+	// One canonical envelope (#2623): auth.ActorEnvelopeFields.
+	if v, ok := auth.ActorEnvelopeValue(ac, path); ok {
+		return v, nil
+	}
+	return nil, fmt.Errorf("unsupported actor reference path %q (valid: %s)", path, auth.ActorEnvelopeValidNames())
+}
+
 func (e *mutationTemplateEvaluator) evalParserExpression(ctx context.Context, expr languageParser.ExpressionNode) (any, error) {
 	switch t := expr.(type) {
 	case nil:
@@ -630,6 +643,23 @@ func (e *mutationTemplateEvaluator) evalParserExpression(ctx context.Context, ex
 	case *languageParser.LiteralExpr:
 		return t.Value, nil
 	case *languageParser.ArgRefExpr:
+		// The parser deliberately routes BOTH `args.X` and `actor.X` through
+		// ArgRefExpr, with the prefix as the only discriminator (see
+		// component/language/compiler/automation_generator.go). Resolving the
+		// path against the caller args unconditionally therefore looked up the
+		// literal key "actor.userId" in the args map, missed, and yielded an
+		// empty value -- so `update { id: actor.userId }` selected no row at
+		// all and the write failed with "update() requires an explicit id"
+		// (memql#2840).
+		//
+		// The string-operand path has handled this since memql#401; its own
+		// comment describes exactly this failure. The AST path never got the
+		// same treatment, and nothing caught it because until #2840 no
+		// construct in the tree put an actor reference in a lowered-AST slot.
+		// Both now share resolveActorReference so they cannot drift again.
+		if strings.HasPrefix(t.Path, "actor.") {
+			return resolveActorReference(ctx, t.Path)
+		}
 		val, ok := getNestedValue(e.args, t.Path)
 		if !ok {
 			return missingValue{}, nil

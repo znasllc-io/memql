@@ -222,15 +222,31 @@ mutate invocation softDeleteWorkerInvocation {
 // the operator-control settings on every kill-switch flip
 // (memql#1339). The annotation opts the preferences field into an
 // engine-side deep-merge so sibling keys survive.
-/// Set User.preferences.computerUseEnabled.
+// The row is selected by actor.userId, NOT by a caller-supplied userId
+// (memql#2840). computerUseEnabled is one of the three layers checked before
+// any computer-use dispatch -- the agent capability flag, the standing scope
+// grant, and this per-user kill switch
+// (component/memql/authoring_capability_gate.go) -- so a caller-supplied id let
+// anyone disable, or silently re-enable, another user's switch.
+//
+// Stamping the actor is the whole of the defence, because there is no other: a
+// mutation carries no executable guard (see the state-machine note in
+// dsl/forge/mutations.memql -- "the DSL cannot gate a transition on
+// actor.role"), and the request path consults no capability before running a
+// named mutation (memql#2802). Whatever the author writes here IS the
+// authorization.
+//
+// If an administrative override is ever wanted it belongs in a separately-named
+// mutation whose name says so, not in a second meaning for this one.
+/// Set the CALLER's User.preferences.computerUseEnabled.
+@actor
 @mergeFields("preferences")
 mutate user toggleComputerUseEnabled {
   args {
-    userId   string!
     enabled  bool!
   }
   update {
-    id: args.userId
+    id: actor.userId
     preferences: {
         computerUseEnabled: args.enabled
       }
