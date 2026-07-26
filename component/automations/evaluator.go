@@ -778,15 +778,34 @@ func splitCoalesceArgs(s string) ([]string, error) {
 // the common `payload.X` / `event.X` filter shapes is unchanged. A first
 // segment that merely matches a seeded custom key also qualifies so a logic
 // that seeds an extra root resolves it explicitly.
+// explicitPathRoots is THE list of path roots the evaluator resolves through
+// resolvePath's root switch, shared so it cannot be reimplemented per call site
+// (memql#2851).
+//
+// It was already duplicated: conditionRootSegment listed all ten, while
+// logic_runner's isCustomVarRoot listed only args/event/ctx/input/item. That
+// divergence is exactly why `$coalesce(var.missing, "FB")` and the logic-body
+// `var.missing ?? "FB"` behaved DIFFERENTLY -- the second fell through to a
+// step-reference lookup, which hands back the raw path text, so coalesce read
+// it as present and skipped the fallback.
+//
+// `event` is deliberately NOT here: conditionRootSegment excludes it (the
+// `event.`-prefix retry below owns that root) while isCustomVarRoot includes
+// it, so each keeps that rule locally rather than forcing one list to carry a
+// caveat.
+var explicitPathRoots = map[string]bool{
+	"args": true, "ctx": true, "input": true, "item": true, "steps": true,
+	"var": true, "systemVar": true, "secret": true, "systemSecret": true,
+	"automation": true,
+}
+
 func (e *Evaluator) conditionRootSegment(expr string) string {
 	dot := strings.Index(expr, ".")
 	if dot <= 0 {
 		return ""
 	}
 	root := expr[:dot]
-	switch root {
-	case "args", "ctx", "input", "item", "steps",
-		"var", "systemVar", "secret", "systemSecret", "automation":
+	if explicitPathRoots[root] {
 		return root
 	}
 	if root == e.itemName && e.item != nil {
@@ -985,8 +1004,38 @@ func (e *Evaluator) EvaluateFilterValue(expr string) (any, error) {
 			if val, err := e.resolvePath(expr); err == nil {
 				return val, nil
 			}
-			// Fall through to literal if the explicit-root path doesn't resolve.
-			return expr, nil
+			// UNRESOLVED means ABSENT, not "the literal text of the path"
+			// (memql#2851).
+			//
+			// This used to `return expr, nil`, and the returned text is
+			// non-empty and therefore TRUTHY -- the #2380 hazard. Two
+			// consequences, both silent:
+			//
+			//   - coalesce read the text as a PRESENT value, so its fallback
+			//     was never reached. `enabled := var.killSwitch ?? false`
+			//     yielded "var.killSwitch": a kill switch written to be safe
+			//     when its variable is missing was ON instead. Fail-OPEN.
+			//   - in a predicate the same text admits, for the same reason.
+			//
+			// The softness was ROOT-DEPENDENT, which is what made it hard to
+			// see: resolvePath returns (nil, nil) for a missing key in a
+			// map-backed root, so `actor.*` / `ctx.*` / `item.*` and a seeded
+			// `args.*` were already soft and behaved correctly. Only the
+			// resolver-backed roots (var / systemVar / secret / systemSecret /
+			// automation) and an unresolvable `steps.` sub-path took this
+			// branch. One spelling of coalesce therefore worked and another
+			// did not, depending on the root -- see
+			// coalesce_root_softness_test.go for the enumerated matrix.
+			//
+			// Scope of the change: this branch is reached ONLY for a path
+			// whose first segment conditionRootSegment recognises as an
+			// explicit root. A dotted token that is not one of those --
+			// "example.com", "v1.2.3", a concept id -- never enters here and
+			// still passes through as a literal, which
+			// TestNonPathLiteralsStillPassThrough pins. So nothing that was
+			// legitimately a literal becomes nil; only paths that name a real
+			// root and fail to resolve do.
+			return nil, nil
 		}
 
 		// Try resolving as $event.{path} first

@@ -1143,8 +1143,19 @@ func normalizeStepMethodCalls(expr string) string {
 // newEvaluatorForLogic is resolvable here automatically, rather than correct in
 // two places out of three.
 func isCustomVarRoot(evaluator *Evaluator, segment string) bool {
-	switch segment {
-	case "args", "event", "ctx", "input", "item":
+	// One list, shared with conditionRootSegment (memql#2851). This used to
+	// carry its own copy naming only args/event/ctx/input/item, so a coalesce
+	// arg rooted at `var.` / `secret.` / `steps.` / `automation.` missed the
+	// $-form upgrade and fell through to EvaluateStepReference, which returns
+	// the raw path TEXT for anything it cannot resolve. coalesce then read that
+	// non-empty string as a present value and skipped its fallback -- so
+	// `enabled := var.killSwitch ?? false` yielded "var.killSwitch", truthy,
+	// and the kill switch was ON when its variable was missing.
+	//
+	// `event` is this site's own addition: conditionRootSegment excludes it
+	// because the evaluator has a separate `event.`-prefix retry, but a logic
+	// body reads `event.X` directly.
+	if explicitPathRoots[segment] || segment == "event" {
 		return true
 	}
 	return evaluator.hasCustomRoot(segment)

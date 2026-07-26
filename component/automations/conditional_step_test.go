@@ -91,15 +91,55 @@ func TestEvaluateCondition_StepStatusReference(t *testing.T) {
 	}
 }
 
-// A path that merely starts with "steps." but names no recorded step keeps
-// the prior literal fall-through (no behavior change for non-step literals).
-func TestEvaluateFilterValue_UnknownStepKeepsLiteralFallthrough(t *testing.T) {
+// TestEvaluateFilterValue_UnknownStepIsAbsent replaces
+// TestEvaluateFilterValue_UnknownStepKeepsLiteralFallthrough, which asserted
+// the OPPOSITE and was itself the memql#2851 defect written down as a contract.
+//
+// That test's own comment explains how it got there: "no behavior change for
+// non-step literals". It was a compatibility assertion added alongside `steps.`
+// support, guarding that ordinary literals were not disturbed. But
+// `steps.nosuch.status` is not an ordinary literal -- it is a path with an
+// explicit root that fails to resolve, and returning its own source text made
+// it non-empty and therefore TRUTHY (the #2380 hazard). coalesce read that as a
+// present value and skipped its fallback.
+//
+// Nothing depended on the pass-through. In a COMPARISON the verdict is
+// unchanged -- "steps.nosuch.status" == "success" was false and nil ==
+// "success" is false -- which is asserted below so the replacement is provably
+// not a weakening. What changes is the value slot, where the old behaviour was
+// simply wrong.
+//
+// A dotted token that is NOT an explicit root is still a literal; that is
+// TestNonPathLiteralsStillPassThrough in coalesce_root_softness_test.go.
+func TestEvaluateFilterValue_UnknownStepIsAbsent(t *testing.T) {
 	e := NewEvaluator()
 	val, err := e.EvaluateFilterValue("steps.nosuch.status")
 	if err != nil {
 		t.Fatalf("EvaluateFilterValue: %v", err)
 	}
-	if val != "steps.nosuch.status" {
-		t.Fatalf("unknown step reference must keep the literal fall-through, got %v", val)
+	if val != nil {
+		t.Fatalf("an unresolved `steps.` path returned %#v; want nil. Returning the path's own "+
+			"text makes it truthy, so a coalesce fallback is skipped and a predicate fails OPEN "+
+			"(memql#2851 / #2380).", val)
+	}
+
+	// The comparison verdicts this replaces must be identical, or the change
+	// is a behaviour regression dressed up as a fix.
+	for _, tc := range []struct {
+		cond string
+		want bool
+	}{
+		{`steps.nosuch.status == "success"`, false},
+		{`steps.nosuch.status != "success"`, true},
+	} {
+		got, err := e.EvaluateCondition(tc.cond)
+		if err != nil {
+			t.Errorf("EvaluateCondition(%q): %v", tc.cond, err)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("EvaluateCondition(%q) = %v, want %v -- the comparison verdict must be "+
+				"unchanged from the literal-fallthrough era.", tc.cond, got, tc.want)
+		}
 	}
 }
