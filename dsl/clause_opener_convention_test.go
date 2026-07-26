@@ -61,6 +61,47 @@ import (
 // polices. Sourced from dslclause so a new directive is covered automatically.
 var clauseKeywords = dslclause.StructQueryDirectives
 
+// clauseOpenerVerdict classifies a trimmed line: which clause keyword it opens
+// (if any) and whether the separator is the convention.
+//
+// ONE function, called by both the tree gate and the fixture test. It was two
+// hand-copies, and review proved that duplication is not cosmetic: adding
+// `|| r == '('` to the gate's boundary skip -- which neuters `filter(` detection
+// entirely -- left BOTH tests passing. The companion test, whose whole purpose
+// is that "the tree is clean, so the gate cannot demonstrate it works", could
+// not detect a gate that had stopped working. That is the
+// test-re-implements-the-code defect in its purest form, and the comment
+// claiming "it re-implements nothing" was false.
+func clauseOpenerVerdict(trimmed string) (keyword, verdict string) {
+	for _, kw := range clauseKeywords {
+		rest, ok := strings.CutPrefix(trimmed, kw)
+		if !ok || rest == "" {
+			continue
+		}
+		r, _ := utf8.DecodeRuneInString(rest)
+		// An identifier that merely STARTS with the keyword (`filterMode`,
+		// `sortOrder`) is not an opener. That boundary rule is why
+		// dslclause.StartsWith exists rather than a bare HasPrefix.
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' {
+			continue
+		}
+		switch {
+		case r == ' ' || r == '\t':
+			return kw, "ok"
+		case r == '(':
+			return kw, "paren"
+		case unicode.IsSpace(r):
+			return kw, "unicode-space"
+		default:
+			// Anything else is not a clause opener at all (`filter:` as a
+			// mutation insert key, `filter}`). Deliberately tolerated -- this is
+			// a convention gate, not a syntax checker.
+			return kw, "not-an-opener"
+		}
+	}
+	return "", "not-an-opener"
+}
+
 // TestClauseOpenerUsesAPlainSpace is the convention gate.
 func TestClauseOpenerUsesAPlainSpace(t *testing.T) {
 	tree := Tree()
@@ -79,41 +120,30 @@ func TestClauseOpenerUsesAPlainSpace(t *testing.T) {
 			if trimmed == "" {
 				continue
 			}
-			// Longest keyword first so `paginate` is not read as a prefix of
-			// nothing and `count` does not shadow a longer match.
-			for _, kw := range clauseKeywords {
-				rest, ok := strings.CutPrefix(trimmed, kw)
-				if !ok || rest == "" {
-					continue
-				}
-				r, _ := utf8.DecodeRuneInString(rest)
-				// A letter/digit/underscore means this is an IDENTIFIER that
-				// merely starts with the keyword (`filterMode`, `sortOrder`),
-				// not a clause opener. Skip it -- that is the boundary rule,
-				// not a violation.
-				if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' {
-					continue
-				}
-				scanned++
-				switch {
-				case r == ' ' || r == '\t':
-					// The convention.
-				case r == '(':
-					findings = append(findings, fmt.Sprintf(
-						"%s:%d  `%s(` -- write `%s ` (a plain space). The engine accepts the paren "+
-							"form, but only some of the four clause openers do, so a construct "+
-							"written this way is invisible to TestPerRowAuthzClassification and to "+
-							"the pagination analysis while still being scanned by the IDE",
-						p, i+1, kw, kw))
-				case unicode.IsSpace(r):
-					findings = append(findings, fmt.Sprintf(
-						"%s:%d  `%s` is followed by U+%04X, not a plain space. The engine accepts "+
-							"it (its normaliser uses strings.TrimSpace), which is exactly why it "+
-							"is worth forbidding here -- it is almost always an invisible paste "+
-							"artifact rather than an intent",
-						p, i+1, kw, r))
-				}
-				break
+			kw, verdict := clauseOpenerVerdict(trimmed)
+			if kw == "" || verdict == "not-an-opener" {
+				continue
+			}
+			scanned++
+			switch verdict {
+			case "paren":
+				findings = append(findings, fmt.Sprintf(
+					"%s:%d  `%s(` -- for `filter`, write `filter ` (a plain space). The engine "+
+						"accepts the paren form, but only some of the four clause openers do, so "+
+						"a construct written this way is invisible to "+
+						"TestPerRowAuthzClassification and to the pagination analysis while still "+
+						"being scanned by the IDE. For `sort` the paren is rejected by the grammar "+
+						"outright, and a plain space alone does NOT fix it -- write "+
+						"`sort \"key\", \"dir\"`.",
+					p, i+1, kw))
+			case "unicode-space":
+				r, _ := utf8.DecodeRuneInString(strings.TrimPrefix(trimmed, kw))
+				findings = append(findings, fmt.Sprintf(
+					"%s:%d  `%s` is followed by U+%04X, not a plain space. The engine accepts it "+
+						"(its normaliser uses strings.TrimSpace), which is exactly why it is worth "+
+						"forbidding here -- it is almost always an invisible paste artifact rather "+
+						"than an intent",
+					p, i+1, kw, r))
 			}
 		}
 	}
@@ -137,47 +167,28 @@ func TestClauseOpenerUsesAPlainSpace(t *testing.T) {
 // It re-implements nothing -- it runs the same classification the gate runs, on
 // fixtures, so a change to the rule is visible in both places at once.
 func TestClauseOpenerGateCatchesTheForbiddenSpellings(t *testing.T) {
-	classify := func(trimmed string) string {
-		for _, kw := range clauseKeywords {
-			rest, ok := strings.CutPrefix(trimmed, kw)
-			if !ok || rest == "" {
-				continue
-			}
-			r, _ := utf8.DecodeRuneInString(rest)
-			if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' {
-				continue
-			}
-			switch {
-			case r == ' ' || r == '\t':
-				return "ok"
-			case r == '(':
-				return "paren"
-			case unicode.IsSpace(r):
-				return "unicode-space"
-			}
-		}
-		return "not-an-opener"
-	}
-
 	for _, tc := range []struct{ in, want string }{
 		{"filter row.id==args.x", "ok"},
 		{"filter\trow.id==args.x", "ok"},
 		{"filter(row.id==args.x)", "paren"},
 		{"sort(\"row.createdAt\", \"desc\")", "paren"},
-		{"filter row.id==args.x", "unicode-space"},
-		{"filter row.id==args.x", "unicode-space"},
-		{"filter　row.id==args.x", "unicode-space"},
-		// Identifiers that merely start with a keyword are NOT openers. This is
-		// the boundary rule, and getting it wrong would flag ordinary fields.
+		{"filter\u00a0row.id==args.x", "unicode-space"},
+		{"filter\u2003row.id==args.x", "unicode-space"},
+		{"filter\u3000row.id==args.x", "unicode-space"},
+		// Identifiers that merely start with a keyword are NOT openers -- the
+		// boundary rule. Getting it wrong would flag ordinary fields.
 		{"filterMode string!", "not-an-opener"},
 		{"sortOrder string", "not-an-opener"},
 		{"filterable boolean", "not-an-opener"},
 		{"filter_by string", "not-an-opener"},
 		{"count1 integer", "not-an-opener"},
 		{"shapeName string", "not-an-opener"},
+		// Not openers either, and deliberately tolerated rather than reported.
+		{"filter: args.filter", "not-an-opener"},
+		{"filter-mode string", "not-an-opener"},
 	} {
-		if got := classify(tc.in); got != tc.want {
-			t.Errorf("classify(%q) = %q, want %q", tc.in, got, tc.want)
+		if _, got := clauseOpenerVerdict(tc.in); got != tc.want {
+			t.Errorf("clauseOpenerVerdict(%q) = %q, want %q", tc.in, got, tc.want)
 		}
 	}
 }

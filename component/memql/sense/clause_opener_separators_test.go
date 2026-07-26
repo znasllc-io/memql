@@ -38,8 +38,9 @@ import (
 // scanner. A separator that stops being legal DSL fails loudly instead of
 // quietly widening the guard.
 
-// clauseSeparators is every separator the engine admits between a clause
-// keyword and its body.
+// clauseSeparators is every separator the engine admits between a clause keyword
+// and its body -- NOT every separator the scanner recognises. `(` is admitted by
+// the engine and deliberately not by the opener; see scannerSees.
 var clauseSeparators = []struct {
 	name string
 	sep  string
@@ -75,8 +76,10 @@ var clauseSeparators = []struct {
 // exactly how my first attempt concluded the unicode half was already fixed.
 func TestClauseSeparatorFixturesAreNotAscii(t *testing.T) {
 	for _, tc := range clauseSeparators {
-		switch tc.name {
-		case "space", "tab", "open paren":
+		// Derived from the data, not the name: renaming a fixture used to send
+		// the ASCII cases into the multi-byte assertion with a misleading
+		// message about collapsed bytes.
+		if len(tc.sep) == 1 {
 			continue
 		}
 		t.Run(tc.name, func(t *testing.T) {
@@ -106,7 +109,7 @@ func engineAcceptsQuery(t *testing.T, src string) bool {
 	return err == nil
 }
 
-func TestFilterClauseOpenerSeesEverySeparatorTheEngineAccepts(t *testing.T) {
+func TestFilterClauseOpenerSeesEveryUnicodeSpaceSeparator(t *testing.T) {
 	for _, tc := range clauseSeparators {
 		t.Run(tc.name, func(t *testing.T) {
 			src := "query w q {\n  filter" + tc.sep + "id == args.x"

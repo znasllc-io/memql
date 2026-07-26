@@ -1227,7 +1227,7 @@ func walkFilterPredicates(path, src string, emit func(file string, lineno int, p
 			inFilter = false
 			continue
 		}
-		if strings.HasPrefix(trim, "filter ") || strings.HasPrefix(trim, "filter\t") {
+		if dslclause.StartsWith(trim, "filter") {
 			inFilter = true
 			rest := strings.TrimSpace(strings.TrimPrefix(trim, "filter"))
 			for _, p := range splitPredicates(rest) {

@@ -86,8 +86,15 @@ var BodyKeywords = append(append([]string{}, StructQueryDirectives...),
 // spelled.
 //
 // This lives HERE rather than in one caller on purpose, and that is the whole
-// reason this package exists. Widening only the sense scanner produced a real
-// contradiction: a compliant `filter(row.id==args.x && ownerUserId==actor.userId)`
+// reason this package exists. All four openers now call it -- the sense scanner,
+// dsl/conformance_test.go's walkFilterPredicates, and
+// component/language/pagination/checker.go's filterClause -- so the widening
+// genuinely reaches every consumer. (An earlier revision claimed that while
+// leaving two of the four hand-rolling `HasPrefix(trim, "filter ")`; review
+// caught it, and a tree-wide diff over 26,836 lines proved the switch is a
+// behavioural no-op, since the tree carries no non-ASCII whitespace.)
+//
+// Widening only the sense scanner produced a real contradiction: a compliant `filter(row.id==args.x && ownerUserId==actor.userId)`
 // passed the widened scanner and FAILED TestPerRowAuthzClassification, whose
 // opener had not been widened, so the caller-check sitting in the clause was
 // invisible and the query was misclassified as unguarded.
