@@ -97,23 +97,33 @@ func TestBindNoCallerActorEnvelope_Denies(t *testing.T) {
 	}
 }
 
-// The structural invariant, and the reason it exists: three review rounds
+// The structural invariant, and the reason it exists: four review rounds
 // on memql#2801 each found ANOTHER evaluator that left `actor` unbound,
-// and a helper-level test catches none of them -- removing a call site
-// leaves the suite green.
+// and then a fifth found the test guarding that was itself checking a
+// proxy. Two proxies, in fact -- first "the word bindActorEnvelope
+// appears in this function", then "the identifier appears as an argument
+// to a binder somewhere in this function". Both are satisfied by code
+// that is still fail-open.
 //
-// An unbound actor root is not neutral. The evaluator renders an
+// An unbound actor root is not neutral: the evaluator renders an
 // unresolved dotted path as its own path TEXT, so `actor.isClusterOwner`
 // is a non-empty (truthy) string and a negated gate reads TRUE with no
 // auth context.
 //
-// This walks the AST rather than the source text, and keys on the
-// CONSTRUCTED VARIABLE. A text scan proved to check the wrong thing: it
-// asked "does the word bindActorEnvelope appear nearby", which a decoy
-// binding, a commented-out call, an `if false` branch, a string literal,
-// or a nested closure all satisfy while the live evaluator escapes
-// unbound -- the exact bug class this is guarding (review round 4).
-// Closures matter concretely: the scheduler's real site is inside one.
+// So this checks the property the binder's doc actually promises --
+// bound UNCONDITIONALLY, before first use -- with one rule:
+//
+//	every NewEvaluator() must be the RHS of a plain assignment to a
+//	local, and that local must be passed to a binder as a top-level
+//	statement of the SAME block, after the construction and before any
+//	other use of the variable.
+//
+// That subsumes the special cases the earlier versions accumulated. A
+// binding behind `if`/`switch`/`for` is not top-level, so conditional
+// binding fails without a dead-branch carve-out. A binding after first
+// use fails on ordering. A construction that is returned, stored in a
+// field, or dropped into a composite literal fails the assignment rule
+// rather than silently not being counted.
 func TestEveryEvaluatorBindsAnActorEnvelope(t *testing.T) {
 	fset := token.NewFileSet()
 	pkgs, err := parser.ParseDir(fset, ".", func(fi os.FileInfo) bool {
@@ -123,170 +133,249 @@ func TestEveryEvaluatorBindsAnActorEnvelope(t *testing.T) {
 		t.Fatalf("parse package: %v", err)
 	}
 
-	type construction struct {
-		ident string
-		pos   token.Position
-	}
-	// Keyed by the enclosing function body, so a binding in a sibling
-	// function cannot vouch for a construction over here.
-	built := map[ast.Node][]construction{}
-	bound := map[ast.Node]map[string]bool{}
-
-	// enclosing returns the innermost FuncDecl/FuncLit body containing pos.
-	var scopes []ast.Node
-	record := func(root ast.Node) {
-		ast.Inspect(root, func(n ast.Node) bool {
-			switch fn := n.(type) {
-			case *ast.FuncDecl:
-				if fn.Body != nil {
-					scopes = append(scopes, fn.Body)
-				}
-			case *ast.FuncLit:
-				scopes = append(scopes, fn.Body)
-			}
-			return true
-		})
-	}
-
+	checked := 0
 	for _, pkg := range pkgs {
 		for _, file := range pkg.Files {
-			scopes = nil
-			record(file)
-
-			// innermostScope finds the tightest body containing pos.
-			innermost := func(pos token.Pos) ast.Node {
-				var best ast.Node
-				for _, sc := range scopes {
-					if pos < sc.Pos() || pos > sc.End() {
-						continue
-					}
-					if best == nil || sc.Pos() > best.Pos() {
-						best = sc
+			// Every construction in the file, so one that never reaches
+			// the block-level assignment form below is reported rather
+			// than silently uncounted.
+			all := map[*ast.CallExpr]bool{}
+			ast.Inspect(file, func(n ast.Node) bool {
+				if call, ok := n.(*ast.CallExpr); ok {
+					if id, ok := call.Fun.(*ast.Ident); ok && id.Name == "NewEvaluator" {
+						all[call] = true
 					}
 				}
-				return best
-			}
+				return true
+			})
 
-			// Bindings inside a provably-dead branch do not count: an
-			// `if false { bindActorEnvelope(ctx, ev) }` is a real AST call
-			// with the right argument, and would otherwise vouch for an
-			// evaluator that is never actually bound at runtime.
-			var deadRanges [][2]token.Pos
 			ast.Inspect(file, func(n ast.Node) bool {
-				ifs, ok := n.(*ast.IfStmt)
+				block, ok := n.(*ast.BlockStmt)
 				if !ok {
 					return true
 				}
-				if id, ok := ifs.Cond.(*ast.Ident); ok && id.Name == "false" {
-					deadRanges = append(deadRanges, [2]token.Pos{ifs.Body.Pos(), ifs.Body.End()})
-				}
-				return true
-			})
-			inDeadBranch := func(pos token.Pos) bool {
-				for _, r := range deadRanges {
-					if pos >= r[0] && pos <= r[1] {
-						return true
-					}
-				}
-				return false
-			}
-
-			ast.Inspect(file, func(n ast.Node) bool {
-				switch node := n.(type) {
-				case *ast.AssignStmt:
-					// x := NewEvaluator()
-					for i, rhs := range node.Rhs {
-						call, ok := rhs.(*ast.CallExpr)
-						if !ok {
-							continue
-						}
-						id, ok := call.Fun.(*ast.Ident)
-						if !ok || id.Name != "NewEvaluator" {
-							continue
-						}
-						if i >= len(node.Lhs) {
-							continue
-						}
-						target, ok := node.Lhs[i].(*ast.Ident)
-						if !ok {
-							continue
-						}
-						sc := innermost(call.Pos())
-						built[sc] = append(built[sc], construction{target.Name, fset.Position(call.Pos())})
-					}
-				case *ast.CallExpr:
-					// bindActorEnvelope(ctx, x) / bindNoCallerActorEnvelope(x)
-					id, ok := node.Fun.(*ast.Ident)
+				for i, stmt := range block.List {
+					assign, ok := stmt.(*ast.AssignStmt)
 					if !ok {
-						return true
+						continue
 					}
-					if id.Name != "bindActorEnvelope" && id.Name != "bindNoCallerActorEnvelope" {
-						return true
-					}
-					if inDeadBranch(node.Pos()) {
-						return true
-					}
-					for _, arg := range node.Args {
-						if a, ok := arg.(*ast.Ident); ok {
-							sc := innermost(node.Pos())
-							if bound[sc] == nil {
-								bound[sc] = map[string]bool{}
+					for k, rhs := range assign.Rhs {
+						call, ok := rhs.(*ast.CallExpr)
+						if !ok || !all[call] {
+							continue
+						}
+						delete(all, call) // accounted for
+						checked++
+
+						pos := fset.Position(call.Pos())
+						if k >= len(assign.Lhs) {
+							t.Errorf("%s: NewEvaluator() result is discarded", pos)
+							continue
+						}
+						target, ok := assign.Lhs[k].(*ast.Ident)
+						if !ok {
+							t.Errorf("%s: NewEvaluator() must be assigned to a plain local so the "+
+								"binding can be verified; assign it and call bindActorEnvelope(ctx, ev)", pos)
+							continue
+						}
+						name := target.Name
+
+						boundAt := -1
+						usedAt := -1
+						for j := i + 1; j < len(block.List); j++ {
+							if binderCallOn(block.List[j], name) {
+								boundAt = j
+								break
 							}
-							bound[sc][a.Name] = true
+							if usesIdent(block.List[j], name) {
+								usedAt = j
+								break
+							}
+						}
+						switch {
+						case boundAt >= 0:
+							// correct
+						case usedAt >= 0:
+							t.Errorf("%s: evaluator %q is USED at %s before it is bound -- everything "+
+								"up to that point evaluates against an unbound actor root, which is "+
+								"TRUTHY and fails OPEN (memql#2801)",
+								pos, name, fset.Position(block.List[usedAt].Pos()))
+						default:
+							t.Errorf("%s: evaluator %q is never passed to bindActorEnvelope / "+
+								"bindNoCallerActorEnvelope as a top-level statement of its own block. "+
+								"The binding must be UNCONDITIONAL -- a call nested in an if/switch/for "+
+								"leaves the no-auth path unbound, which is the memql#2801 bug shape.", pos, name)
 						}
 					}
 				}
 				return true
 			})
+
+			for call := range all {
+				t.Errorf("%s: NewEvaluator() is not assigned to a local, so its binding cannot be "+
+					"verified (memql#2801). Assign it to a variable and bind that variable.",
+					fset.Position(call.Pos()))
+			}
 		}
 	}
 
-	checked := 0
-	for scope, sites := range built {
-		for _, c := range sites {
-			checked++
-			if bound[scope][c.ident] {
-				continue
-			}
-			t.Errorf("%s: evaluator %q is constructed but never passed to bindActorEnvelope / "+
-				"bindNoCallerActorEnvelope in the same scope -- an unbound actor.* read renders as "+
-				"its own path text and is TRUTHY, so a negated actor gate fails OPEN (memql#2801)",
-				c.pos, c.ident)
-		}
-	}
 	if checked == 0 {
 		t.Fatal("no NewEvaluator() constructions found; the scan must not pass vacuously")
 	}
 	t.Logf("checked %d evaluator construction(s)", checked)
 }
 
-// No evaluator may be constructed outside this package, because the
-// binders are unexported -- a construction elsewhere could neither be
-// scanned by the invariant above nor use the helpers, and would have to
-// hand-roll the envelope. Zero such call sites exist today; this keeps
-// it that way rather than letting the guarantee quietly narrow.
-func TestNoEvaluatorConstructionOutsideThisPackage(t *testing.T) {
-	root := filepath.Join("..", "..")
-	var outside []string
-	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".go") {
-			return nil
+// binderCallOn reports whether stmt is a top-level call to one of the
+// actor-envelope binders passing the named identifier.
+func binderCallOn(stmt ast.Stmt, name string) bool {
+	expr, ok := stmt.(*ast.ExprStmt)
+	if !ok {
+		return false
+	}
+	call, ok := expr.X.(*ast.CallExpr)
+	if !ok {
+		return false
+	}
+	fn, ok := call.Fun.(*ast.Ident)
+	if !ok || (fn.Name != "bindActorEnvelope" && fn.Name != "bindNoCallerActorEnvelope") {
+		return false
+	}
+	for _, arg := range call.Args {
+		if id, ok := arg.(*ast.Ident); ok && id.Name == name {
+			return true
 		}
-		if strings.HasSuffix(path, "_test.go") {
+	}
+	return false
+}
+
+// usesIdent reports whether the statement USES the identifier in a way
+// that could read `actor.*`.
+//
+// A `ev.SetX(...)` call is configuration, not evaluation -- it stores a
+// root, it never resolves a path -- so seeding a dozen roots before
+// binding the envelope is fine and is what newEvaluatorForLogic does.
+// Anything else counts: an Evaluate/EvaluateCondition call obviously,
+// but also passing the evaluator to another function or returning it,
+// since the binding can no longer be verified past that point.
+func usesIdent(stmt ast.Stmt, name string) bool {
+	if isSetterCallOn(stmt, name) {
+		return false
+	}
+	found := false
+	ast.Inspect(stmt, func(n ast.Node) bool {
+		if id, ok := n.(*ast.Ident); ok && id.Name == name {
+			found = true
+		}
+		return !found
+	})
+	return found
+}
+
+// isSetterCallOn reports whether stmt is exactly `name.SetX(...)`, with
+// the identifier appearing nowhere else in the statement.
+func isSetterCallOn(stmt ast.Stmt, name string) bool {
+	expr, ok := stmt.(*ast.ExprStmt)
+	if !ok {
+		return false
+	}
+	call, ok := expr.X.(*ast.CallExpr)
+	if !ok {
+		return false
+	}
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok || !strings.HasPrefix(sel.Sel.Name, "Set") {
+		return false
+	}
+	recv, ok := sel.X.(*ast.Ident)
+	if !ok || recv.Name != name {
+		return false
+	}
+	// The evaluator must not ALSO be handed to something in the args.
+	for _, arg := range call.Args {
+		leaked := false
+		ast.Inspect(arg, func(n ast.Node) bool {
+			if id, ok := n.(*ast.Ident); ok && id.Name == name {
+				leaked = true
+			}
+			return !leaked
+		})
+		if leaked {
+			return false
+		}
+	}
+	return true
+}
+
+// No evaluator may be constructed outside this package: the binders are
+// unexported, so a construction elsewhere could neither be seen by the
+// invariant above nor use them, and would hand-roll the envelope.
+//
+// Resolved through the AST with import-qualifier handling rather than a
+// substring scan -- a substring both MISSES an aliased or dot import and
+// FALSE-POSITIVES on a comment, which is the bug class this whole test
+// file exists to stop repeating (review round 5).
+func TestNoEvaluatorConstructionOutsideThisPackage(t *testing.T) {
+	const pkgPath = "github.com/znasllc-io/memql/component/automations"
+	root := filepath.Join("..", "..")
+	fset := token.NewFileSet()
+	var outside []string
+
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 			return nil
 		}
 		slash := filepath.ToSlash(path)
-		if strings.Contains(slash, "/component/automations/") &&
-			!strings.Contains(slash, "/component/automations/steps/") {
-			return nil // the package the invariant above covers
-		}
-		src, rerr := os.ReadFile(path)
-		if rerr != nil {
+		// The package itself is covered by the invariant above; its
+		// steps/ subpackage is a different package and IS checked.
+		if strings.Contains(slash, "/component/automations/") && !strings.Contains(slash, "/component/automations/steps/") {
 			return nil
 		}
-		if strings.Contains(string(src), "automations.NewEvaluator(") {
-			outside = append(outside, slash)
+		src, rerr := os.ReadFile(path)
+		if rerr != nil || !strings.Contains(string(src), "automations") {
+			return nil // cheap pre-filter; the AST below is the decision
 		}
+		file, perr := parser.ParseFile(fset, path, src, 0)
+		if perr != nil {
+			return nil
+		}
+
+		// How is the package named in THIS file? Default name, alias, or dot.
+		local, dot := "", false
+		for _, imp := range file.Imports {
+			if strings.Trim(imp.Path.Value, `"`) != pkgPath {
+				continue
+			}
+			switch {
+			case imp.Name == nil:
+				local = "automations"
+			case imp.Name.Name == ".":
+				dot = true
+			case imp.Name.Name == "_":
+			default:
+				local = imp.Name.Name
+			}
+		}
+		if local == "" && !dot {
+			return nil
+		}
+
+		ast.Inspect(file, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			switch fn := call.Fun.(type) {
+			case *ast.SelectorExpr:
+				if x, ok := fn.X.(*ast.Ident); ok && x.Name == local && fn.Sel.Name == "NewEvaluator" {
+					outside = append(outside, fset.Position(call.Pos()).String())
+				}
+			case *ast.Ident:
+				if dot && fn.Name == "NewEvaluator" {
+					outside = append(outside, fset.Position(call.Pos()).String())
+				}
+			}
+			return true
+		})
 		return nil
 	})
 	if err != nil {
