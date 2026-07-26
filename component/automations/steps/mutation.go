@@ -1484,7 +1484,12 @@ func (e *MutationExecutor) parseValueFromString(s string, pos int) (string, int,
 			}
 			pos++
 		}
-		return s[start:pos], pos, true
+		// Ran off the end with the bracket still open. Both sibling
+		// parsers reject an unbalanced nested literal, and returning the
+		// runoff text as a VALUE is how a malformed payload became a
+		// string where an object belongs -- including an unterminated
+		// string one level down, whose own ok=false this arm swallowed.
+		return "", pos, false
 	}
 
 	// Array
@@ -1521,7 +1526,12 @@ func (e *MutationExecutor) parseValueFromString(s string, pos int) (string, int,
 			}
 			pos++
 		}
-		return s[start:pos], pos, true
+		// Ran off the end with the bracket still open. Both sibling
+		// parsers reject an unbalanced nested literal, and returning the
+		// runoff text as a VALUE is how a malformed payload became a
+		// string where an object belongs -- including an unterminated
+		// string one level down, whose own ok=false this arm swallowed.
+		return "", pos, false
 	}
 
 	// String literal

@@ -145,6 +145,17 @@ func TestRuntimeCrossCopyParity(t *testing.T) {
 		{`{ a: { b: "a}b" }, c: 1 }`, true},
 		{`{ k: "abc }`, false},
 		{`{ k: [}{] }`, false},
+
+		// Unbalanced NESTED literals -- see the compiler-side table for why
+		// the third case matters (an unterminated string one level down,
+		// swallowed by the enclosing arm's runoff).
+		{`{ a: { b: 1 }`, false},
+		{`{ a: [ 1, 2 }`, false},
+		{`{ a: { b: """ } }`, false},
+
+		{`{ a: { b: 1 } }`, true},
+		{`{ a: [ 1, 2 ] }`, true},
+		{`{ name: "x", nested: { deep: { deeper: 1 } } }`, true},
 	} {
 		if !mustTerminate(t, "parseAndEvaluateObjectLiteral("+tc.src+")", func() {
 			_, err := e.parseAndEvaluateObjectLiteral(ev, tc.src)

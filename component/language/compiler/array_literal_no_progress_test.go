@@ -236,6 +236,21 @@ var crossCopyParityCases = []struct {
 	{`{ a: { b: "a}b" }, c: 1 }`, true},
 	{`{ k: "abc }`, false},
 	{`{ k: [}{] }`, false},
+
+	// Unbalanced NESTED literals. The runtime copy's nested-object and
+	// nested-array arms returned their runoff text as a VALUE, so a single
+	// missing brace produced a string where an object belongs. The third case
+	// is the sharp one: an unterminated string ONE LEVEL DOWN, whose own
+	// ok=false the enclosing arm swallowed -- the fix for unterminated
+	// strings did not hold under nesting.
+	{`{ a: { b: 1 }`, false},
+	{`{ a: [ 1, 2 }`, false},
+	{`{ a: { b: """ } }`, false},
+
+	// ...and the balanced counterparts, which must keep parsing.
+	{`{ a: { b: 1 } }`, true},
+	{`{ a: [ 1, 2 ] }`, true},
+	{`{ name: "x", nested: { deep: { deeper: 1 } } }`, true},
 }
 
 // TestCompilerCrossCopyParity pins this copy's half of the shared table.
