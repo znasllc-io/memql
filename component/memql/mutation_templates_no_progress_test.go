@@ -5,6 +5,14 @@ import (
 	"time"
 )
 
+// leaked latches once a case abandons a non-terminating goroutine. It is
+// package-level on purpose: a per-loop `break` bounds one loop, but the NEXT
+// Test function in the package still starts, so each would leak its own
+// spinner. Tests in a package run sequentially (nothing here calls
+// t.Parallel) and t.Run blocks until the subtest returns, so a plain bool
+// needs no synchronisation.
+var leaked bool
+
 // mustTerminate runs fn and reports whether it returned in time.
 //
 // It returns a bool rather than failing the test itself, and every caller
@@ -14,9 +22,19 @@ import (
 // range loop starts the next case immediately. A first cut did exactly that
 // and measured 8 concurrent spinners at 23 GiB peak RSS, so on a normal runner
 // a regressed guard produced an OOM-killed job with a truncated log instead of
-// a readable red test. Stopping the loop keeps at most one spinner alive.
+// a readable red test.
+//
+// Between the `leaked` latch and the callers' `break`, a regressed guard
+// leaves at most ONE live spinner in this package: the first case to blow the
+// deadline reports the failure, and every later case skips instead of adding
+// another goroutine to race the runner's memory limit.
 func mustTerminate(t *testing.T, name string, fn func()) bool {
 	t.Helper()
+	if leaked {
+		t.Skipf("skipped: an earlier case left a non-terminating goroutine running; "+
+			"fix that one first (%s)", name)
+		return false
+	}
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -26,6 +44,7 @@ func mustTerminate(t *testing.T, name string, fn func()) bool {
 	case <-done:
 		return true
 	case <-time.After(2 * time.Second):
+		leaked = true
 		t.Errorf("%s did not terminate within 2s -- the parser loop is not making progress", name)
 		return false
 	}
