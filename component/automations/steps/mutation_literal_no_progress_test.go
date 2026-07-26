@@ -106,9 +106,11 @@ func TestRuntimeLiteralParsersTerminate(t *testing.T) {
 // latch and, with a guard regressed, leak a live spinner -- the exact
 // unbounded growth the latch exists to bound.
 //
-// (Three of the six are also fed by the hang test; `["abc]` and `[[1, 2]`
-// are not. An earlier version of this comment said all of them were, which
-// stopped being true the moment those two were added.)
+// (`["abc]` and `[[1, 2]` are NOT among the hang test's inputs; the rest
+// overlap it. Two earlier versions of this sentence were wrong -- first
+// claiming all of them were fed by the hang test, then miscounting the
+// overlap -- so it no longer states a count. If you need the overlap, read
+// the two lists; they are twenty lines apart.)
 //
 // The list covers BOTH halves of the array loop's `!ok || newPos <= pos`
 // guard. It originally held only the first three, which are all NO-PROGRESS
