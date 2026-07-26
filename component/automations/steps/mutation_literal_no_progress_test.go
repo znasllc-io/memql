@@ -7,9 +7,17 @@ import (
 	"github.com/znasllc-io/memql/component/automations"
 )
 
-// mustTerminate bails on the first timeout: the leaked spinner is an unbounded
-// append, so letting sibling cases start would race the OOM killer.
-func mustTerminate(t *testing.T, name string, fn func()) {
+// mustTerminate runs fn and reports whether it returned in time.
+//
+// It returns a bool rather than failing the test itself, and every caller
+// STOPS its loop on false. That is load-bearing, not style: a leaked spinner
+// here is an unbounded `append` growing about a gigabyte a second, and
+// `t.Fatalf` inside a `t.Run` subtest aborts only that SUBTEST -- the parent's
+// range loop starts the next case immediately. A first cut did exactly that
+// and measured 8 concurrent spinners at 23 GiB peak RSS, so on a normal runner
+// a regressed guard produced an OOM-killed job with a truncated log instead of
+// a readable red test. Stopping the loop keeps at most one spinner alive.
+func mustTerminate(t *testing.T, name string, fn func()) bool {
 	t.Helper()
 	done := make(chan struct{})
 	go func() {
@@ -18,8 +26,10 @@ func mustTerminate(t *testing.T, name string, fn func()) {
 	}()
 	select {
 	case <-done:
+		return true
 	case <-time.After(2 * time.Second):
-		t.Fatalf("%s did not terminate within 2s -- the parser loop is not making progress", name)
+		t.Errorf("%s did not terminate within 2s -- the parser loop is not making progress", name)
+		return false
 	}
 }
 
@@ -36,23 +46,25 @@ func TestRuntimeLiteralParsersTerminate(t *testing.T) {
 
 	t.Run("array", func(t *testing.T) {
 		for _, src := range []string{"[}{]", "[}]", "[)(]", "[]]", "[{]", `["unterminated]`} {
-			src := src
-			t.Run(src, func(t *testing.T) {
+			if !t.Run(src, func(t *testing.T) {
 				mustTerminate(t, "parseAndEvaluateArrayLiteral("+src+")", func() {
 					_, _ = e.parseAndEvaluateArrayLiteral(ev, src)
 				})
-			})
+			}) {
+				break // one live spinner at a time -- see mustTerminate
+			}
 		}
 	})
 
 	t.Run("object", func(t *testing.T) {
 		for _, src := range []string{"{ k: [}{] }", "{ k: [)(] }", "{ a: 1, b: [}{] }"} {
-			src := src
-			t.Run(src, func(t *testing.T) {
+			if !t.Run(src, func(t *testing.T) {
 				mustTerminate(t, "parseAndEvaluateObjectLiteral("+src+")", func() {
 					_, _ = e.parseAndEvaluateObjectLiteral(ev, src)
 				})
-			})
+			}) {
+				break // one live spinner at a time -- see mustTerminate
+			}
 		}
 	})
 }

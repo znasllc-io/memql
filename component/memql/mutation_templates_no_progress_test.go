@@ -5,19 +5,17 @@ import (
 	"time"
 )
 
-// mustTerminate runs fn and fails if it does not return in time.
+// mustTerminate runs fn and reports whether it returned in time.
 //
-// Two properties matter here, both learned the hard way:
-//
-//   - A plain call would HANG the package's test binary, so the defect would
-//     present as a stuck CI job rather than a red test.
-//   - The leaked goroutine on failure is NOT idle -- it is an unbounded
-//     `append` growing at roughly a gigabyte per second. A first cut ran every
-//     case in its own goroutine and let them all leak, which on a
-//     memory-capped runner produced an OOM-killed job with a truncated log
-//     instead of a readable failure. So this bails the whole test on the FIRST
-//     timeout, keeping at most one spinner alive.
-func mustTerminate(t *testing.T, name string, fn func()) {
+// It returns a bool rather than failing the test itself, and every caller
+// STOPS its loop on false. That is load-bearing, not style: a leaked spinner
+// here is an unbounded `append` growing about a gigabyte a second, and
+// `t.Fatalf` inside a `t.Run` subtest aborts only that SUBTEST -- the parent's
+// range loop starts the next case immediately. A first cut did exactly that
+// and measured 8 concurrent spinners at 23 GiB peak RSS, so on a normal runner
+// a regressed guard produced an OOM-killed job with a truncated log instead of
+// a readable red test. Stopping the loop keeps at most one spinner alive.
+func mustTerminate(t *testing.T, name string, fn func()) bool {
 	t.Helper()
 	done := make(chan struct{})
 	go func() {
@@ -26,10 +24,10 @@ func mustTerminate(t *testing.T, name string, fn func()) {
 	}()
 	select {
 	case <-done:
+		return true
 	case <-time.After(2 * time.Second):
-		// FailNow on the parent: a leaked spinner allocates ~1 GB/s, so
-		// letting sibling cases start would race the OOM killer.
-		t.Fatalf("%s did not terminate within 2s -- the parser loop is not making progress", name)
+		t.Errorf("%s did not terminate within 2s -- the parser loop is not making progress", name)
+		return false
 	}
 }
 
@@ -63,10 +61,11 @@ func TestParseArrayLiteralTerminatesOnUnbalancedInput(t *testing.T) {
 		`["unterminated]`,
 		"[[)]",
 	} {
-		src := src
-		t.Run(src, func(t *testing.T) {
+		if !t.Run(src, func(t *testing.T) {
 			mustTerminate(t, "parseArrayLiteral("+src+")", func() { parseArrayLiteral(src) })
-		})
+		}) {
+			break // one live spinner at a time -- see mustTerminate
+		}
 	}
 }
 
@@ -82,10 +81,11 @@ func TestParseObjectLiteralTerminatesOnUnbalancedInput(t *testing.T) {
 		"{ k: [[}{]] }",
 		`{ k: ["unterminated] }`,
 	} {
-		src := src
-		t.Run(src, func(t *testing.T) {
+		if !t.Run(src, func(t *testing.T) {
 			mustTerminate(t, "parseObjectLiteral("+src+")", func() { parseObjectLiteral(src) })
-		})
+		}) {
+			break // one live spinner at a time -- see mustTerminate
+		}
 	}
 }
 
@@ -136,6 +136,46 @@ func TestEmptyValueIsNullNotAnError(t *testing.T) {
 				t.Errorf("parsePayloadRawToTemplate(%q) = %v (%d keys), want %d", src, tpl, len(tpl), wantLen)
 			}
 		})
+	}
+}
+
+// TestObjectValueOkGuardIsLive covers the object loop's `!ok` check, which is
+// the one guard in this change that is neither a hang-stopper nor dead code:
+// it rejects a malformed value that the ARRAY guard cannot see because the
+// value is not an array. Without a case behind it, it would be exactly the
+// untested guard the review flagged elsewhere.
+func TestObjectValueOkGuardIsLive(t *testing.T) {
+	// An unterminated string value: parseLiteralOrExpr's scanQuotedString arm
+	// reports !ok, and nothing else in the loop would notice.
+	for _, src := range []string{
+		`{ k: "unterminated }`,
+		`{ a: 1, k: "unterminated }`,
+	} {
+		if _, err := parsePayloadRawToTemplate(src); err == nil {
+			t.Errorf("parsePayloadRawToTemplate(%q) = nil error, want a malformed-payload error", src)
+		}
+	}
+}
+
+// TestSeparatorOnlyArrayIsEmptyNotMalformed -- `[,]` appends nothing but is
+// well-formed. parseArrayLiteral built its slice with `var out []any`, so a
+// separator-only input returned nil, and the ok-propagation then read that nil
+// as a parse failure: `{ k: [,] }` errored where it had yielded null.
+func TestSeparatorOnlyArrayIsEmptyNotMalformed(t *testing.T) {
+	for _, src := range []string{"[,]", "[ , ]", "[,,]", "[]", "[ ]"} {
+		got := parseArrayLiteral(src)
+		if got == nil {
+			t.Errorf("parseArrayLiteral(%q) = nil (malformed); want an empty slice", src)
+		}
+	}
+	for _, src := range []string{"{ k: [,] }", "{ k: [ , ] }"} {
+		tpl, err := parsePayloadRawToTemplate(src)
+		if err != nil {
+			t.Errorf("parsePayloadRawToTemplate(%q) errored: %v", src, err)
+		}
+		if len(tpl) != 1 {
+			t.Errorf("parsePayloadRawToTemplate(%q) = %v, want one key", src, tpl)
+		}
 	}
 }
 

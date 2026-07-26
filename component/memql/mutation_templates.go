@@ -1426,11 +1426,12 @@ func parseObjectLiteral(s string) map[string]any {
 		val, next, ok := parseLiteralOrExpr(inner, pos)
 		if !ok {
 			// Malformed value. Deliberately NO position check here: this loop
-			// cannot spin (after a non-advancing assignment the next
-			// iteration's leading skip consumes the comma, and otherwise
-			// parseObjectKey either advances or bails), and a position check
-			// WOULD change `{k:}` from a null value into a load error while
-			// leaving `{ k: }` -- the same input plus a space -- untouched.
+			// cannot spin, because parseObjectKey either advances or returns
+			// "" (which bails), so every iteration makes progress regardless of
+			// what the value scan returned. A position check WOULD change
+			// `{k:}` from a null value into a load error while leaving
+			// `{ k: }` -- the same input plus a space -- untouched, because
+			// parseLiteralOrExpr skips that space internally and so advances.
 			return nil
 		}
 		out[key] = val
@@ -1629,7 +1630,11 @@ func parseArrayLiteral(s string) []any {
 	if inner == "" {
 		return []any{}
 	}
-	var out []any
+	// Non-nil from the start: nil is this parser's "malformed" signal, and an
+	// input of only separators (`[,]`) appends nothing while being perfectly
+	// well-formed. Leaving it nil made the ok-propagation read it as a parse
+	// failure (memql#2785 review).
+	out := []any{}
 	pos := 0
 	for pos < len(inner) {
 		// skip whitespace/commas

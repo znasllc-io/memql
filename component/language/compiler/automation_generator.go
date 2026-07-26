@@ -1689,10 +1689,11 @@ func (c *Compiler) parseObjectLiteral(s string) map[string]any {
 		}
 
 		// Parse value
+		// No progress check here: this loop advances past a `:` before every
+		// value scan, so it cannot spin, and c.parseValue never returns a
+		// position below its input. The array loop below is the one that needs
+		// the guard (memql#2785).
 		value, newPos := c.parseValue(inner, pos)
-		if newPos < pos {
-			return nil // defensive: a value scan must never rewind
-		}
 		result[key] = value
 		pos = newPos
 

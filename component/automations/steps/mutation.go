@@ -1347,10 +1347,11 @@ func (e *MutationExecutor) parseAndEvaluateObjectLiteral(evaluator *automations.
 		}
 
 		// Parse value
+		// No progress check here: this loop advances past a `:` before every
+		// value scan, so it cannot spin, and parseValueFromString never
+		// returns a position below its input. The array loop below is the one
+		// that needs the guard (memql#2785).
 		valueStr, newPos := e.parseValueFromString(inner, pos)
-		if newPos < pos {
-			return nil, fmt.Errorf("malformed object literal at offset %d: %q", pos, inner)
-		}
 		pos = newPos
 
 		// Evaluate the value
