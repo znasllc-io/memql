@@ -18,11 +18,21 @@
 #
 # So this surfaces the queue and leaves the decision to a human or to a worker
 # that will review first. It is read-only: it makes no GitHub mutation at all,
-# which also means it can never race a live session. stalled_prs_test.go
-# enforces that by ALLOW-LISTING every `gh` invocation, rather than denying
-# known-bad ones -- a denylist missed `gh pr comment`, `gh api -f` (which POSTs
-# by default) and `gh api graphql -f query='mutation{...}'`, the last of which
-# is a one-word edit from a call this script already makes.
+# which also means it can never race a live session.
+#
+# HOW THAT IS CHECKED, and how far the check goes. stalled_prs_test.go RUNS
+# this script against a stub `gh` that refuses any non-read subcommand and
+# records every call, then asserts nothing forbidden was invoked. That is a
+# behavioural check: it sees what bash actually executed, so it does not care
+# how the command word was spelled.
+#
+# It replaced a static scan of this file, which three review rounds defeated in
+# three different ways -- the last simply by putting quotes around one token
+# (`"gh" pr merge`). Statically out-parsing shell quoting, expansion, eval,
+# sub-shells and indirection is not a winnable game, so the check no longer
+# tries. The trade is worth naming plainly: the behavioural check covers the
+# code paths the tests drive, not unreachable ones. A cheap scan for blatant
+# mutation verbs remains as defence in depth, NOT as a proof.
 #
 # DEFAULT-DENY. STALLED is a finding that invites a human to enqueue, so it is
 # reported ONLY when every input is positively known good. Anything unresolved
@@ -37,7 +47,8 @@
 #
 # Backs 'make prs-stalled'.
 #
-# Exit codes: 0 report produced (including "nothing stalled") | 4 gh unusable.
+# Exit codes: 0 report produced (including "nothing stalled") | 2 bad parameter
+#             | 4 gh unusable.
 #
 # Refs: #2833 #2834
 
@@ -75,6 +86,15 @@ require_valid_threshold() {
       exit 2
       ;;
   esac
+  # All-digits is NOT sufficient. `[ "$a" -lt "$b" ]` errors on a value that
+  # overflows int64 exactly as it does on "45m", and an errored test falls
+  # through to the next line -- so IDLE_MINUTES=99999999999999999999, a
+  # threshold meaning "show me nothing", reported EVERY pr as stalled. Cap
+  # well below 2^63 and well above any real use (10^9 minutes ~ 1900 years).
+  if [ "${#IDLE_MINUTES}" -gt 10 ]; then
+    echo "ERROR: IDLE_MINUTES=${IDLE_MINUTES} is implausibly large; use a value under 10 digits." >&2
+    exit 2
+  fi
 }
 
 # open_prs prints one TSV row per open PR: number, draft, mergeState,
@@ -142,7 +162,7 @@ check_state() {
   sha=$(gh pr view "$num" -R "$REPO" --json headRefOid --jq .headRefOid 2>/dev/null)
   [ -z "$sha" ] && { echo "unknown"; return; }
 
-  runs=$(gh api "repos/$REPO/commits/$sha/check-runs" --jq '.check_runs[] | (.conclusion // .status)' 2>/dev/null)
+  runs=$(gh api --paginate "repos/$REPO/commits/$sha/check-runs" --jq '.check_runs[] | (.conclusion // .status)' 2>/dev/null)
   if [ $? -ne 0 ]; then
     echo "unknown"
     return
@@ -190,7 +210,13 @@ classify() {
 
   case "$merge_state" in
     CLEAN) ;;
-    DIRTY | BLOCKED | BEHIND) echo "CONFLICT"; return ;;
+    DIRTY) echo "CONFLICT"; return ;;
+    BEHIND) echo "BEHIND"; return ;;
+    # Not a conflict: branch protection is unsatisfied, usually an awaited
+    # review. Reporting it as CONFLICT sends the operator to rebase a
+    # mergeable branch; it is also the population this tool targets, so it
+    # gets its own honest label rather than being folded into one.
+    BLOCKED) echo "BLOCKED"; return ;;
     *) echo "UNKNOWN"; return ;; # UNKNOWN / UNSTABLE / anything new
   esac
 
