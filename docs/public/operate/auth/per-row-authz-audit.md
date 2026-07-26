@@ -143,11 +143,23 @@ not require a caller-check."
 
 Examples of legitimate `@public` use:
 
-- `queryUserByEmail` — used by the magic-link login path before
-  the caller is authenticated.
 - `queryCluster*` — needs to be readable on the unauthenticated
   cluster bootstrap path.
 - `queryActiveAgentRoles` — role catalog; no per-user data.
+
+`userByEmail` used to head this list, as the login-path lookup that
+runs before the caller is authenticated. That reasoning was right
+about *when* it runs and wrong about what follows: it projects
+`userFull` — every `@pii` field plus the cluster-wide auth `role` —
+so "there is no caller to check yet" left it readable by every
+caller, forever. It is `@serverOnly` as of memql#2881, which keeps
+the login path working while removing it from the wire.
+
+The lesson generalises, and it is the one to take from this section:
+**"the caller is not authenticated yet" is an argument for
+`@serverOnly`, not for `@public`.** `@public` carries no runtime
+semantics at all, so on a construct returning personal data it
+records an intention and enforces nothing.
 
 If you find yourself reaching for `@public` to "just make the
 validator happy" without a clear reason, the construct probably

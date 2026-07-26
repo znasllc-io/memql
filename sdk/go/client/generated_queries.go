@@ -3945,28 +3945,6 @@ func UserActiveSpaceBuild(args UserActiveSpaceArgs) string {
 	return b.String()
 }
 
-// UserByEmail -- Look up a user by primary email (the dedup key during bootstrap).
-//
-// Bound concept: v1:identity:user (machine-readable: BoundConcepts["userByEmail"] in generated_concepts.go).
-type UserByEmailArgs struct {
-	PrimaryEmail string
-}
-
-// UserByEmail calls the engine query userByEmail.
-func (qc *QueryClient) UserByEmail(ctx context.Context, args UserByEmailArgs) (*Result, error) {
-	call := UserByEmailBuild(args)
-	return qc.executeNamed(ctx, "userByEmail", call)
-}
-
-func UserByEmailBuild(args UserByEmailArgs) string {
-	var b strings.Builder
-	b.WriteString("query userByEmail(")
-	b.WriteString("primaryEmail: ")
-	b.WriteString(fmt.Sprintf("%q", args.PrimaryEmail))
-	b.WriteString(")")
-	return b.String()
-}
-
 // UserById -- Get a user by id -- FULL row, owner-or-admin only.
 // memql#2800: the filter keys on a caller-supplied id, so it is not a caller check. Reading someone else's full row now requires being them or holding admin/owner.
 //

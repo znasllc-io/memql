@@ -1076,11 +1076,19 @@ query user userActiveSpace {
 /// `primaryEmail==actor.primaryEmail` is circular in exactly the way
 /// `id==actor.userId` was on userById (memql#2800).
 ///
-/// Left open, this was the sharpest read in the tree: it projects userFull --
-/// every @pii field, plus the cluster-wide auth role -- keyed on the one
-/// identifier an attacker is most likely to already have, so no id enumeration
-/// is needed. userByIdSystem returns the identical shape and was gated by
-/// #2860; this one was missed (memql#2881).
+/// Left open it projected userFull -- every @pii field, plus the cluster-wide
+/// auth role -- keyed on the one identifier an attacker is most likely to
+/// already have, so no id enumeration was needed. userByIdSystem returns the
+/// identical shape and was gated by #2860; this one was missed (memql#2881).
+///
+/// It is NOT the worst reader of this shape, and saying so here because the
+/// next person to gate one should start from the right end: searchUsers,
+/// activeUsers, usersScheduledForDeletion and usersInDeletionCooldown all
+/// return userFull and are all reachable from the wire today. searchUsers is
+/// the extreme -- its only predicate is `when(args.active) { ... }`, which is
+/// DROPPED when the arg is absent, so calling it with no arguments returns
+/// every user in the cluster, and it is exposed to agents as an MCP tool.
+/// Tracked in memql#2883.
 @serverOnly
 @unbounded("user by unique primaryEmail -- bounded to a single row")
 query user userByEmail {

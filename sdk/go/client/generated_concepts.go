@@ -500,7 +500,6 @@ var BoundConcepts = map[string]string{
 	"updateWorkerLastSeen":                  "v1:worker:registration",
 	"usableRecords":                         "v1:data:record",
 	"userActiveSpace":                       "v1:identity:user",
-	"userByEmail":                           "v1:identity:user",
 	"userById":                              "v1:identity:user",
 	"userCount":                             "v1:identity:user",
 	"userDefaults":                          "v1:platform:globalVariable",

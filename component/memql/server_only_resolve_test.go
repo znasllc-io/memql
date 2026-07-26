@@ -76,10 +76,15 @@ func TestAuthoredQueriesResolve(t *testing.T) {
 
 	for _, name := range []string{
 		"userById", "userByIdSystem", "userDisplayById", "userActiveSpace", "currentUser",
+		"userByEmail", // memql#2881
 	} {
+		args := userIdArg()
+		if name == "userByEmail" {
+			args = emailArg()
+		}
 		// Internal origin, so @serverOnly is not what fails here and any
 		// error is a genuine resolution problem.
-		if err := resolveAuthored(t, fns, specs, name, auth.OriginInternal, userIdArg()); err != nil {
+		if err := resolveAuthored(t, fns, specs, name, auth.OriginInternal, args); err != nil {
 			t.Errorf("%s did not resolve: %v", name, err)
 		}
 	}
@@ -111,14 +116,24 @@ func TestServerOnlyQueriesRefuseClientOrigin(t *testing.T) {
 	}
 }
 
-// TestUserByEmailPassesInternalOrigin is the other half for memql#2881: the
-// identity store's login-path lookup must keep working, or magic-link
-// completion and the /login existing-user branch break.
+// TestUserByEmailPassesInternalOrigin is the gate half for memql#2881: the
+// construct must still RESOLVE from internal origin, or magic-link completion
+// and the /login existing-user branch break.
+//
+// It asserts on ANY error, not just a "server-only" one. The first version
+// guarded with `err != nil && strings.Contains(err.Error(), "server-only")`,
+// which passed happily when the filter was made unresolvable -- the exact
+// #2800 dead-gate defect this file exists to catch, waved through by the test
+// written to catch it.
+//
+// The store's half of the contract -- that it STAMPS internal origin rather
+// than being handed it -- is not testable here, because this passes the origin
+// in by hand. That lives in
+// component/identity/server_only_origin_test.go.
 func TestUserByEmailPassesInternalOrigin(t *testing.T) {
 	fns, specs := loadRealTree(t)
-	if err := resolveAuthored(t, fns, specs, "userByEmail", auth.OriginInternal, emailArg()); err != nil &&
-		strings.Contains(err.Error(), "server-only") {
-		t.Errorf("userByEmail was refused from INTERNAL origin: %v -- that is the "+
+	if err := resolveAuthored(t, fns, specs, "userByEmail", auth.OriginInternal, emailArg()); err != nil {
+		t.Errorf("userByEmail did not resolve from internal origin: %v -- that is the "+
 			"path magic-link verification and the /login branch depend on", err)
 	}
 }
