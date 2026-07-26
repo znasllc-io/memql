@@ -201,7 +201,7 @@ func filterClause(body string) string {
 		line := stripComment(raw)
 		trim := strings.TrimSpace(line)
 		if !inFilter {
-			if strings.HasPrefix(trim, "filter ") || strings.HasPrefix(trim, "filter\t") {
+			if dslclause.StartsWith(trim, "filter") {
 				inFilter = true
 				sb.WriteString(" ")
 				sb.WriteString(strings.TrimSpace(strings.TrimPrefix(trim, "filter")))
