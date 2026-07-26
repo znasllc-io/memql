@@ -348,33 +348,35 @@ func extractAutomationSlicesReporting(source string) ([]automationSlice, []strin
 
 		// Walk backwards for the @-attribute + comment preamble.
 		//
-		// The walk runs on the ORIGINAL source -- `scan` has line comments
-		// blanked, and a `//` line is part of the preamble -- but it consults
-		// `scan` to tell a COMMENT line from an EMPTY one. A line that is
-		// blank on `scan` and non-blank on `source` is a pure comment, of
-		// either form, and the walk must step OVER it rather than stop.
+		// This walk runs on the ORIGINAL source and stops at any line that is
+		// not `@`- or `//`-prefixed -- including a `/* ... */` line. So an
+		// annotation ABOVE a block comment is cut out of the slice: `@disabled`
+		// is dropped and the automation runs, `@trigger` is dropped and the
+		// automation loads with a nil trigger that is never subscribed. Both
+		// are silent.
 		//
-		// Stopping there cut every annotation above the comment out of the
-		// slice. `@disabled` above an explanatory `/* note */` was dropped and
-		// the automation ran anyway -- the same "the author turned it off and
-		// it runs" defect memql#2861 is about, reached through the comment
-		// mechanism this change sanctions. The mirror was worse: an annotation
-		// block above such a comment lost its `@trigger`, and an automation
-		// with a nil trigger loads, counts toward the loaded total, is never
-		// subscribed, and is invisible to every #2830 problem channel.
-		//
-		// A genuinely empty line still ends the preamble.
+		// That is a REAL defect, it predates this change, and it is NOT fixed
+		// here -- tracked in memql#2872. Two attempts inside this PR made
+		// things worse rather than better, and the evidence is on that issue:
+		// stepping over comment lines pulls the comment body INTO the slice,
+		// where compileMemQL's raw-text gates then scan it, so an ordinary
+		// comment mentioning `$steps.` or containing an `@`-annotation or a
+		// commented-out `automation` header either refuses the boot or
+		// silently disables the #2712 annotation gate. Fixing it needs a
+		// comment-SPAN-aware walk plus a decision about those raw-text gates,
+		// which is design work, not a drive-by in an extraction fix.
 		preambleStart := headerStart
 		for k := headerStart - 1; k >= 0; k-- {
 			lineStart := strings.LastIndexByte(source[:k], '\n') + 1
 			line := strings.TrimRight(source[lineStart:k+1], "\r\n")
 			trimmed := strings.TrimSpace(line)
-			blanked := strings.TrimSpace(strings.TrimRight(scan[lineStart:k+1], "\r\n"))
-			isCommentOnly := blanked == "" && trimmed != ""
-			if strings.HasPrefix(trimmed, "@") || strings.HasPrefix(trimmed, "//") || isCommentOnly {
+			if strings.HasPrefix(trimmed, "@") || strings.HasPrefix(trimmed, "//") {
 				preambleStart = lineStart
 				k = lineStart - 1
 				continue
+			}
+			if trimmed == "" {
+				break
 			}
 			break
 		}

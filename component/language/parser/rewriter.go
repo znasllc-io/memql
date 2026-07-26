@@ -1320,16 +1320,6 @@ func NormaliseTerseAutomationSource(source string) (string, error) {
 // preceding a full-form automation (or any other construct) is legal and
 // binds normally.
 func rejectTerseAutomationArgsBlock(source string) error {
-	// Scan a comment-blanked copy: commented-out text declares nothing, so it
-	// must not raise an authoring violation. Scanning raw, a `/* */`-commented
-	// args-block-plus-terse-automation REFUSED THE BOOT even though nothing
-	// outside the comment was live -- commenting an automation out took the
-	// node down, which is the defect memql#2861 exists to remove, surviving in
-	// the terse lane because this check runs BEFORE slice extraction.
-	//
-	// BlankComments preserves offsets and this function returns only an error,
-	// so scanning the blanked copy throughout is safe.
-	source = BlankComments(source)
 	for _, loc := range fileTopArgsHeader.FindAllStringIndex(source, -1) {
 		openIdx := strings.IndexByte(source[loc[0]:], '{')
 		if openIdx < 0 {

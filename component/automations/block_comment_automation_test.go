@@ -21,6 +21,12 @@ package automations_test
 // lexer.go, skipBlockComment): block comments do NOT nest -- the first `*/`
 // closes -- an unterminated `/*` runs to EOF, and `/*` inside a string literal
 // is not a comment.
+//
+// NOT covered here, deliberately: an annotation ABOVE a block comment is still
+// cut out of the slice by the @-attribute preamble walk, so `@disabled` and
+// `@trigger` are silently dropped. That defect predates this file and is
+// tracked in memql#2872 -- see the note on the walk in unified_loader.go for
+// why fixing it is not a drive-by.
 
 import (
 	"bytes"
@@ -315,130 +321,6 @@ automation phantomHeader
 	}
 }
 
-// TestCommentBetweenAnnotationsAndHeaderKeepsThem is the memql#2861 review
-// round 1 (D1) regression: the @-attribute preamble walk stopped at any line
-// that did not start with `@` or `//`, and a `/* ... */` line is exactly such
-// a line. Every annotation ABOVE the comment was cut out of the slice.
-//
-// Both directions are silent and neither is caught by any existing gate:
-// dropping @disabled runs an automation the author turned OFF, and dropping
-// @trigger loads an automation that is never subscribed but still counts
-// toward the loaded total.
-//
-// Pre-existing -- this shape behaves identically on the pre-fix extractor --
-// but the fix would have left it open while actively promoting block comments
-// as the way to disable an automation.
-func TestCommentBetweenAnnotationsAndHeaderKeepsThem(t *testing.T) {
-	t.Run("@disabled above a block comment still disables", func(t *testing.T) {
-		src := `@disabled
-/* why this is parked */
-@trigger(event="node.created", concept="v1:cluster:node")
-automation disabledAboveComment {
-  step persist {
-    mutation createSpawnEvent (nodeId: "a", nodeType: "b", action: "stopped", reason: "r")
-  }
-}
-`
-		loaded, _, err := loadFixtureAutomations(t, "s2861fixturedisabledabove", src)
-		if err != nil {
-			t.Fatalf("LoadAll failed: %v", err)
-		}
-		a := findAutomation(loaded, "disabledAboveComment")
-		if a == nil {
-			t.Fatal("the automation must still load")
-		}
-		if a.IsEnabled() {
-			t.Error("@disabled sits above a block comment and was dropped from the slice, so a DISABLED automation is live and fires on every replica (#2861 review D1)")
-		}
-	})
-
-	t.Run("@trigger above a block comment survives", func(t *testing.T) {
-		src := `@enabled
-@trigger(event="node.created", concept="v1:cluster:node")
-/* @description("temporarily removed") */
-automation triggerAboveComment {
-  step persist {
-    mutation createSpawnEvent (nodeId: "a", nodeType: "b", action: "stopped", reason: "r")
-  }
-}
-`
-		loaded, _, err := loadFixtureAutomations(t, "s2861fixturetriggerabove", src)
-		if err != nil {
-			t.Fatalf("LoadAll failed: %v", err)
-		}
-		a := findAutomation(loaded, "triggerAboveComment")
-		if a == nil {
-			t.Fatal("the automation must still load")
-		}
-		if a.Trigger == nil || !a.IsEventTriggered() {
-			t.Error("@trigger sits above a block comment and was dropped from the slice: the automation loads and counts toward the loaded total but is never subscribed -- silent, and invisible to every #2830 problem channel (#2861 review D1)")
-		}
-	})
-
-	t.Run("a multi-line comment in the preamble does not truncate it", func(t *testing.T) {
-		src := `@disabled
-/* first line
-   second line */
-@trigger(event="node.created", concept="v1:cluster:node")
-automation disabledAboveMultiLineComment {
-  step persist {
-    mutation createSpawnEvent (nodeId: "a", nodeType: "b", action: "stopped", reason: "r")
-  }
-}
-`
-		loaded, _, err := loadFixtureAutomations(t, "s2861fixturemultiline", src)
-		if err != nil {
-			t.Fatalf("LoadAll failed: %v", err)
-		}
-		a := findAutomation(loaded, "disabledAboveMultiLineComment")
-		if a == nil {
-			t.Fatal("the automation must still load")
-		}
-		if a.IsEnabled() {
-			t.Error("a multi-line block comment in the preamble must be walked over, not stopped at (#2861 review D1)")
-		}
-	})
-
-	t.Run("live code still ends the preamble", func(t *testing.T) {
-		// The counterpart guard for the fix: stepping over COMMENT lines must
-		// not become stepping over everything. A preceding construct's closing
-		// brace is live code and must stop the walk, or one automation's slice
-		// would swallow the tail of the one above it.
-		//
-		// (A lone blank line does NOT end the preamble -- the walk's
-		// `k = lineStart - 1` plus the loop's own `k--` steps past a single
-		// `\n`. That predates this change and is left alone deliberately;
-		// widening a preamble boundary would alter shipped slices.)
-		src := liveAutomation + `
-@disabled
-@trigger(event="node.created", concept="v1:cluster:node")
-automation afterAnotherAutomation {
-  step persist {
-    mutation createSpawnEvent (nodeId: "a", nodeType: "b", action: "stopped", reason: "r")
-  }
-}
-`
-		loaded, _, err := loadFixtureAutomations(t, "s2861fixtureafterlive", src)
-		if err != nil {
-			t.Fatalf("LoadAll failed: %v", err)
-		}
-		control := findAutomation(loaded, "blockCommentControl")
-		if control == nil {
-			t.Fatal("the first automation must load")
-		}
-		if !control.IsEnabled() {
-			t.Error("the SECOND automation's @disabled leaked up into the first one's slice: the walk stepped over the closing brace of live code")
-		}
-		second := findAutomation(loaded, "afterAnotherAutomation")
-		if second == nil {
-			t.Fatal("the second automation must load")
-		}
-		if second.IsEnabled() {
-			t.Error("the second automation's own @disabled must reach it")
-		}
-	})
-}
-
 // TestBlockCommentedTerseAutomationIsAbsent covers the TERSE spelling
 // (memql#2215) -- `automation NAME @trigger(...) => logic X`, trigger inline.
 //
@@ -558,5 +440,78 @@ func TestUnterminatedBlockCommentLineIgnoresNonOpeners(t *testing.T) {
 				t.Errorf("UnterminatedBlockCommentLine = %d, want %d", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestBlockCommentAboveAutomationDoesNotDisturbTheLoad pins the blast radius
+// of this change at the preamble boundary.
+//
+// Two rejected attempts at the memql#2872 preamble defect made the walk step
+// OVER comment lines, which pulled the comment body INTO the emitted slice.
+// compileMemQL then ran its raw-text gates over commented-out text, so an
+// ordinary explanatory comment could refuse the node's boot. These cases are
+// all valid MemQL (memqllint-clean) and must load cleanly; each one refused
+// the boot under those attempts.
+func TestBlockCommentAboveAutomationDoesNotDisturbTheLoad(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		comment string
+	}{
+		{"mentions $steps.", "/* the old form used $steps.foo -- do not reintroduce */"},
+		{"contains an annotation", "/*\n@public\n*/"},
+		{"contains a retired annotation", "/*\n@useConcept(node)\n*/"},
+		{"contains a direct mutation call", "/*\n  x := mutation(concept: \"v1:cluster:node\")\n*/"},
+		{"has two blank lines", "/* para one\n\n\npara two\n*/"},
+		{"is a parked copy of the automation", "/*\n@enabled\n@trigger(event=\"node.created\", concept=\"v1:cluster:node\")\nautomation parkedCopy {\n  step s { logic x { v: $steps.prev.result } }\n}\n*/"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			src := tc.comment + "\n" + liveAutomation
+			names, err := loadFixtureDomain(t, "s2861fixtureabove"+strings.Map(func(r rune) rune {
+				if r >= 'a' && r <= 'z' {
+					return r
+				}
+				return -1
+			}, tc.name), src)
+			if err != nil {
+				t.Fatalf("an ordinary block comment above an automation must not affect the load, got: %v", err)
+			}
+			if !contains(names, "blockCommentControl") {
+				t.Error("the automation below the comment must load")
+			}
+		})
+	}
+}
+
+// TestAnnotationGateStillSeesTheLiveAutomation guards the memql#2712
+// annotation gate against the same over-step. ValidateConstructAnnotations
+// cuts its header scan at the first `automation ... {`; if a commented-out
+// automation above reaches the slice, the cut lands on the COMMENTED header
+// and the live automation's annotations are never inspected -- silently
+// re-opening the gap #2712 closed.
+func TestAnnotationGateStillSeesTheLiveAutomation(t *testing.T) {
+	src := `/*
+@enabled
+@trigger(event="node.created", concept="v1:cluster:node")
+automation parkedOne {
+  step persist {
+    mutation createSpawnEvent (nodeId: "a", nodeType: "b", action: "stopped", reason: "r")
+  }
+}
+*/
+@public
+@enabled
+@trigger(event="node.created", concept="v1:cluster:node")
+automation gatedAutomation {
+  step persist {
+    mutation createSpawnEvent (nodeId: "a", nodeType: "b", action: "stopped", reason: "r")
+  }
+}
+`
+	_, err := loadFixtureDomain(t, "s2861fixturegate", src)
+	if err == nil {
+		t.Fatal("@public is not valid on an automation and the #2712 gate must still reject it -- a commented-out automation above must not become the header the gate scans (#2861 review round 2, F3)")
+	}
+	if !strings.Contains(err.Error(), "gatedAutomation") && !strings.Contains(err.Error(), "@public") {
+		t.Errorf("the refusal must name the live automation or the offending annotation, got: %v", err)
 	}
 }
