@@ -1187,6 +1187,56 @@ func (p *Parser) parseGoStyleEmptyOrCommentBody() (Node, error) {
 	return nil, nil
 }
 
+// parseOrPipeOnly parses at OR precedence but consumes ONLY the `||` operator,
+// never the legacy `,`-as-OR separator (memql#2796).
+//
+// Used where the expression is followed by a STRUCTURAL comma: the
+// `return <value>, <error>` separator, a directive's `sort(<target>, "field")`
+// boundary, and contains()'s substring argument. All of these stopped at
+// parseLogicalAnd -- one level below parseLogicalOr, the only level that
+// consumes `||` -- which made a top-level unparenthesized `||` unparseable,
+// while the grammar documents `&&` and `||` with Go precedence (a relationship
+// that only means something if both can appear at the same level without
+// parens). The `||` was simply left unconsumed, so the parser then reported
+// whatever it wanted next and never named the operator.
+//
+// Written as its own loop rather than by setting suppressCommaOr around
+// parseLogicalOr, which is what an earlier cut of this did. That flag is
+// dual-purpose: it also selects the object-literal value grammar (parseObject),
+// so setting it here silently changed how `{a: 1}` parses inside a query body
+// or directive target, and it propagates into nested parseGrouped /
+// parseWhenGuard, where it would have turned the still-supported `(a, b)` OR
+// form into a parse error. A local loop touches neither -- this is a strict
+// superset of parseLogicalAnd, adding `||` consumption and nothing else.
+//
+// Mirrors parseShapeLogicalOr, which resolves the same comma-vs-OR ambiguity
+// locally rather than through parser state.
+func (p *Parser) parseOrPipeOnly() (ExpressionNode, error) {
+	left, err := p.parseLogicalAnd()
+	if err != nil {
+		return nil, err
+	}
+	if left == nil {
+		return nil, nil
+	}
+	for p.check(TokenPipePipe) {
+		p.advance()
+		right, err := p.parseLogicalAnd()
+		if err != nil {
+			return nil, err
+		}
+		if right == nil {
+			break
+		}
+		left = &LogicalExpr{
+			Op:    LogicalOr,
+			Left:  left,
+			Right: right,
+		}
+	}
+	return left, nil
+}
+
 // parseGoStyleQueryBody enforces:
 //
 //	return <expr>, <errExpr>
@@ -1198,7 +1248,7 @@ func (p *Parser) parseGoStyleQueryBody() (Node, error) {
 	}
 	p.advance() // consume return
 
-	valueExpr, err := p.parseLogicalAnd()
+	valueExpr, err := p.parseOrPipeOnly()
 	if err != nil {
 		return nil, err
 	}
@@ -5890,14 +5940,20 @@ func (p *Parser) parseShapeLogicalOr() (ExpressionNode, error) {
 
 // parseDirectiveTarget parses the leading expression argument of a
 // modern single-paren directive call (paginate / sort / select / asOf
-// / withDepth). It accepts `;` and `&&` AND-joined comparisons via
-// parseLogicalAnd but STOPS at the bare comma that separates the
-// target from the directive's tail args. The OR-via-comma precedence
-// level (parseLogicalOr) is intentionally NOT used here -- the memql
-// runtime parser likewise treats the directive boundary as a hard
-// stop.
+// / withDepth). It STOPS at the bare comma separating the target from
+// the directive's tail args -- the memql runtime parser treats that
+// boundary as a hard stop too.
+//
+// The comma stop and the OR precedence level are separable concerns, and
+// this used to conflate them (memql#2796): it called parseLogicalAnd, so
+// the comma stopped correctly but `||` was never consumed either. A
+// struct query lowers its filter into this position whenever it carries
+// a directive, so `filter a || b` + `sort "createdAt", "desc"` failed to
+// parse while the same filter without a sort clause was fine. Suppressing
+// the comma keeps the hard stop exactly as it was while letting the
+// target reach full OR precedence.
 func (p *Parser) parseDirectiveTarget() (ExpressionNode, error) {
-	return p.parseLogicalAnd()
+	return p.parseOrPipeOnly()
 }
 
 // parsePaginateFunction parses the modern single-paren form
@@ -7062,13 +7118,15 @@ func (p *Parser) parseContainsFunction() (ExpressionNode, error) {
 	if p.check(TokenParenClose) {
 		return nil, newParseErrorf(&p.current, "contains() requires at least one argument")
 	}
-	// First argument: parse with the AND-level helper so a runtime
-	// `contains(concept==X; payload.y=="z")` relationship invocation
-	// picks up the full `;`-joined filter expression. parseLogicalAnd
-	// reduces to parsePrimary when the input is a single value
-	// reference (the existing string-search 2-arg form), so the
-	// legacy DSL surface continues to work unchanged.
-	target, err := p.parseLogicalAnd()
+	// First argument: parse at OR precedence so a runtime
+	// `contains(concept==X; payload.y=="z")` relationship invocation picks up
+	// the full filter expression, including a top-level `||` (memql#2796 --
+	// this shared the query body's too-low entry point and produced the same
+	// operator-blind error). parseOrPipeOnly leaves the comma alone, which is
+	// what separates this target from the substring argument of the two-arg
+	// string-search form, and it reduces to parsePrimary for a single value
+	// reference, so that legacy surface is unchanged.
+	target, err := p.parseOrPipeOnly()
 	if err != nil {
 		return nil, err
 	}
