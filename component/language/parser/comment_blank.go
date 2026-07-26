@@ -39,3 +39,8 @@ func CommentSpans(source string) []CommentSpan { return baseparser.CommentSpans(
 func OffsetInComment(spans []CommentSpan, off int) bool {
 	return baseparser.OffsetInComment(spans, off)
 }
+
+// CommentSpanContaining returns the span containing off, if any.
+func CommentSpanContaining(spans []CommentSpan, off int) (CommentSpan, bool) {
+	return baseparser.CommentSpanContaining(spans, off)
+}

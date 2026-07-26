@@ -261,3 +261,202 @@ automation live ` + bodyStub
 		t.Errorf("refused, but not for the right reason: %v", err)
 	}
 }
+
+// TestSliceNeverStartsInsideAComment is BLOCKER 1 from the #2872 review.
+//
+// The preamble walk is per-line, so it could stop with preambleStart already
+// INSIDE a comment span. The shape is a block comment whose OPENER shares a
+// line with real code, directly above the next automation's preamble: on the
+// opener's line the code before `/*` survives blanking, so the stop test sees a
+// non-empty line and breaks -- but preambleStart has already advanced onto the
+// comment's LAST line.
+//
+// The emitted slice then begins with dangling comment text and parses as code.
+// Because the strict gate is all-or-nothing, that ONE ordinary comment refuses
+// the whole tree: every shipped automation fails to load. It is the documented
+// "slice starts mid-comment" failure that sank both earlier attempts, reached
+// by a route no column-0 fixture can hit.
+func TestSliceNeverStartsInsideAComment(t *testing.T) {
+	for _, tc := range []struct{ name, src string }{
+		{
+			name: "block comment opener shares a line with code",
+			src: `@enabled
+@trigger(event="node.created", concept="v1:cluster:node")
+automation firstOne ` + bodyStub + ` /* parked 2026-07-01, see #123
+     second line of the note */
+@enabled
+@trigger(event="node.updated", concept="v1:cluster:node")
+automation secondOne ` + bodyStub,
+		},
+		{
+			name: "opener shares a line, comment spans three lines",
+			src: `@enabled
+@trigger(event="node.created", concept="v1:cluster:node")
+automation firstOne ` + bodyStub + ` /* one
+   two
+   three */
+@enabled
+@trigger(event="node.updated", concept="v1:cluster:node")
+automation secondOne ` + bodyStub,
+		},
+		{
+			name: "blank line inside the block comment",
+			src: `@disabled
+/* parked
+
+   see #123 */
+@trigger(event="node.created", concept="v1:cluster:node")
+automation withBlank ` + bodyStub,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			slices, unextracted := extractAutomationSlicesReporting(tc.src)
+			if len(unextracted) > 0 {
+				t.Fatalf("headers went unextracted: %v", unextracted)
+			}
+			l := &Loader{}
+			for _, s := range slices {
+				if _, err := l.compileMemQL(s.Source, "test:"+s.Name); err != nil {
+					t.Errorf("slice %q does not compile: %v\n\nslice:\n%s\n\n"+
+						"The slice starts inside a comment, so the dangling comment text parses "+
+						"as code. The strict automation gate is all-or-nothing, so one ordinary "+
+						"comment like this refuses the WHOLE tree -- every shipped automation "+
+						"fails to load (memql#2872).", s.Name, err, s.Source)
+				}
+			}
+		})
+	}
+}
+
+// TestCommentedOutPreconditionIsNotLive is BLOCKER 2 from the review.
+//
+// extractPreconditions scanned RAW slice text and STRIPPED what it matched. It
+// was unreachable from above the automation header until the preamble walk
+// started carrying comment bodies into the slice -- after which a COMMENTED-OUT
+// precondition became a live one, silently.
+//
+// It fails CLOSED: a precondition miss aborts the automation before any step
+// runs and emits healing.precondition.missed. So commenting a precondition out
+// ENFORCED it, which is worse than either direction of the original bug.
+func TestCommentedOutPreconditionIsNotLive(t *testing.T) {
+	src := `/*
+precondition envIsStaging {
+  check: $config.MEMQL_ENV == "staging"
+  literal: MEMQL_ENV
+  description: "Only drive the staging deploy spine in staging."
+}
+*/
+@enabled
+@trigger(event="node.created", concept="v1:cluster:node")
+automation live ` + bodyStub
+
+	l := &Loader{}
+	auto, err := l.compileMemQL(src, "test:commented-precondition")
+	if err != nil {
+		t.Fatalf("compileMemQL: %v", err)
+	}
+	if len(auto.Preconditions) != 0 {
+		t.Errorf("a COMMENTED-OUT precondition loaded as live: %d precondition(s), first=%+v\n\n"+
+			"extractPreconditions scans slice text and strips what it matches. A precondition "+
+			"fails CLOSED -- a miss aborts the automation before any step runs -- so commenting "+
+			"one out ENFORCED it (memql#2872).", len(auto.Preconditions), auto.Preconditions[0])
+	}
+}
+
+// TestRealPreconditionStillLoads is the honesty direction for the above.
+func TestRealPreconditionStillLoads(t *testing.T) {
+	src := `@enabled
+@trigger(event="node.created", concept="v1:cluster:node")
+automation live {
+  precondition envIsStaging {
+    check: $config.MEMQL_ENV == "staging"
+    literal: MEMQL_ENV
+    description: "Only drive the staging deploy spine in staging."
+  }
+  step s {
+    logic someLogic ( event: event )
+  }
+}`
+	l := &Loader{}
+	auto, err := l.compileMemQL(src, "test:real-precondition")
+	if err != nil {
+		t.Fatalf("compileMemQL: %v", err)
+	}
+	if len(auto.Preconditions) != 1 || auto.Preconditions[0].ID != "envIsStaging" {
+		t.Fatalf("a REAL precondition did not load: %+v\nBlanking comments must not blank live "+
+			"source.", auto.Preconditions)
+	}
+}
+
+// TestIndentedCommentKeepsThePreamble covers the `original != ""` half of the
+// walk's condition, which the review found completely untested: dropping it
+// went undetected by the whole suite.
+//
+// It matters for an INDENTED comment. `  // parked` has its lineStart BEFORE
+// the comment span begins, so the span check says "not in a comment" and only
+// `original != ""` keeps the walk going.
+func TestIndentedCommentKeepsThePreamble(t *testing.T) {
+	for _, tc := range []struct{ name, src, want string }{
+		{
+			name: "indented line comment",
+			src: `@disabled
+  // parked, see #123
+@trigger(event="node.created", concept="v1:cluster:node")
+automation x ` + bodyStub,
+			want: "@disabled",
+		},
+		{
+			name: "indented block comment",
+			src: `@disabled
+    /* parked, see #123 */
+@trigger(event="node.created", concept="v1:cluster:node")
+automation y ` + bodyStub,
+			want: "@disabled",
+		},
+		{
+			name: "tab-indented comment",
+			src:  "@disabled\n\t/* parked */\n@trigger(event=\"node.created\", concept=\"v1:cluster:node\")\nautomation z " + bodyStub,
+			want: "@disabled",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			name := strings.Fields(strings.TrimSpace(tc.src[strings.LastIndex(tc.src, "automation ")+len("automation "):]))[0]
+			got := sliceFor(t, tc.src, name)
+			if !strings.Contains(got, tc.want) {
+				t.Errorf("an INDENTED comment cut the preamble: slice lost %s\n\nsource:\n%s\n\nslice:\n%s",
+					tc.want, tc.src, got)
+			}
+		})
+	}
+}
+
+// TestRegexGatesStillFireOnRealCode covers the two REGEX gates.
+// TestGatesStillFireOnRealCode only reached the `$steps.` substring gate and
+// the annotation gate, so blanking could have neutered these two unnoticed.
+func TestRegexGatesStillFireOnRealCode(t *testing.T) {
+	l := &Loader{}
+	for _, tc := range []struct{ name, body, wantErr string }{
+		{
+			name:    "direct mutation call",
+			body:    `  step s {` + "\n" + `    x := mutation(concept: "v1:cluster:node")` + "\n" + `  }`,
+			wantErr: "direct query() and mutation() calls",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// With a comment present, so the blanked path is the one exercised.
+			src := `/* an ordinary note */
+@enabled
+@trigger(event="node.created", concept="v1:cluster:node")
+automation bad {
+` + tc.body + `
+}`
+			_, err := l.compileMemQL(src, "test:"+tc.name)
+			if err == nil {
+				t.Fatalf("the regex gate did not fire on REAL code:\n%s", src)
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("wrong refusal: %v (want %q)", err, tc.wantErr)
+			}
+		})
+	}
+}

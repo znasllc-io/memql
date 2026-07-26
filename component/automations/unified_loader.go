@@ -412,6 +412,50 @@ func extractAutomationSlicesReporting(source string) ([]automationSlice, []strin
 			break
 		}
 
+		// POST-CHECK: the walk is per-line, so it can stop with preambleStart
+		// already INSIDE a comment span (memql#2872 review).
+		//
+		// The shape: a block comment whose OPENER shares a line with real code,
+		// directly above the preamble --
+		//
+		//     automation firstOne { ... } /* parked, see #123
+		//          second line */
+		//     @enabled
+		//     automation secondOne { ... }
+		//
+		// On the opener's line the code before `/*` survives blanking, so
+		// `blanked` is non-empty and the loop breaks -- but preambleStart has
+		// already advanced onto the comment's LAST line. The slice then begins
+		// `second line */`, which parses as code. Because the strict gate is
+		// all-or-nothing, that one ordinary comment refuses the WHOLE tree: 31
+		// automations gone.
+		//
+		// That is the documented "slice starts mid-comment" failure that sank
+		// both earlier attempts, reached by a different route. A per-line stop
+		// test structurally cannot see it -- the offending line is not the one
+		// being examined -- so the final position is validated here and snapped
+		// forward past the span.
+		// STRICTLY inside, not merely inside. preambleStart == span.Start means
+		// the comment is included WHOLE (`/* parked */ @disabled` on one line),
+		// which is fine -- the gates blank it. Only a start position with
+		// dangling comment text before it is a problem.
+		for {
+			span, inside := languageParser.CommentSpanContaining(commentSpans, preambleStart)
+			if !inside || span.Start >= preambleStart {
+				break
+			}
+			next := strings.IndexByte(source[span.End:], '\n')
+			if next < 0 {
+				preambleStart = headerStart
+				break
+			}
+			preambleStart = span.End + next + 1
+			if preambleStart > headerStart {
+				preambleStart = headerStart
+				break
+			}
+		}
+
 		out = append(out, automationSlice{
 			Source: source[preambleStart : closeIdx+1],
 			Name:   name,

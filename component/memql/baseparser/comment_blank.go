@@ -257,13 +257,27 @@ type CommentSpan struct{ Start, End int }
 // OffsetInComment reports whether off lies inside one of spans. spans must be
 // ascending, as returned by CommentSpans.
 func OffsetInComment(spans []CommentSpan, off int) bool {
-	for _, s := range spans {
-		if off < s.Start {
-			return false // ascending: no later span can contain it
-		}
-		if off < s.End {
-			return true
+	_, ok := CommentSpanContaining(spans, off)
+	return ok
+}
+
+// CommentSpanContaining returns the span containing off, if any. spans must be
+// ascending, as returned by CommentSpans.
+//
+// Binary search: the ascending contract is documented, so a linear scan just
+// wastes it.
+func CommentSpanContaining(spans []CommentSpan, off int) (CommentSpan, bool) {
+	lo, hi := 0, len(spans)-1
+	for lo <= hi {
+		mid := (lo + hi) / 2
+		switch {
+		case off < spans[mid].Start:
+			hi = mid - 1
+		case off >= spans[mid].End:
+			lo = mid + 1
+		default:
+			return spans[mid], true
 		}
 	}
-	return false
+	return CommentSpan{}, false
 }
