@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/znasllc-io/memql/component/language/dslclause"
 	"github.com/znasllc-io/memql/component/language/pagination"
 	"github.com/znasllc-io/memql/component/memql/dslfs"
 	"github.com/znasllc-io/memql/component/memql/sense"
@@ -1103,17 +1104,15 @@ func walkFilterPredicates(path, src string, emit func(file string, lineno int, p
 		if !inFilter {
 			continue
 		}
-		end := false
-		for _, kw := range []string{"shape", "insert", "update", "return", "concept", "args", "use", "}", ")"} {
-			if strings.HasPrefix(trim, kw+" ") || trim == kw || strings.HasPrefix(trim, kw+"\t") {
-				end = true
-				break
-			}
-		}
-		if strings.HasPrefix(trim, "@") {
-			end = true
-		}
-		if end {
+		// The keyword set is shared with the pagination checker and pinned
+		// against parseStructQueryBody's own switch (memql#2815). This list
+		// used to be local, and it had drifted: it omitted sort / paginate /
+		// asOf / count, so 22 directive lines in the shipped corpus were
+		// emitted to the gates below as pseudo-predicates. Over-inclusive
+		// rather than a miss, so nothing false-fired -- but the safe
+		// direction was luck, and a gate that REJECTED rather than
+		// classified would have started firing on `sort "createdAt", "desc"`.
+		if dslclause.TerminatesFilterClause(trim) {
 			inFilter = false
 			continue
 		}
@@ -1386,13 +1385,26 @@ func filterClauseOf(body string) string {
 
 // isClauseEndKeyword reports whether a line starts the next clause of a
 // struct-form body, terminating the filter.
+//
+// Delegates to the shared set (memql#2815). This was a THIRD local copy --
+// added by #2832 a few hours before the consolidation -- which is the pattern
+// the shared package exists to stop: each new gate spelled the list again,
+// slightly differently, and nothing compared them.
+//
+// This is a NARROWING, not a pure delegation. The three things it drops were
+// each checked against the corpus rather than assumed:
+//
+//	depth   never a parseStructQueryBody directive; zero lines in dsl/
+//	asof    lowercase -- the parser accepts only `asOf`, so this spelling
+//	        parse-errors before any gate sees it
+//	`(`     the old list also ended a clause on `shape(` / `count(`, an
+//	        artifact of the retired procedural form; zero such lines in dsl/
+//
+// If `depth` ever becomes a real directive it has to be added to the parser,
+// and TestStructQueryDirectivesMatchTheParser then fails until the shared list
+// learns it -- which is the point of routing through it.
 func isClauseEndKeyword(trim string) bool {
-	for _, kw := range []string{"shape", "sort", "paginate", "insert", "update", "return", "concept", "args", "use", "count", "asOf", "asof", "depth"} {
-		if rest, ok := strings.CutPrefix(trim, kw); ok && (rest == "" || rest[0] == ' ' || rest[0] == '\t' || rest[0] == '(') {
-			return true
-		}
-	}
-	return false
+	return dslclause.StartsAnyOf(trim, dslclause.BodyKeywords)
 }
 
 // stripLeadingNot removes a negation prefix. `!=` is a comparison operator,
