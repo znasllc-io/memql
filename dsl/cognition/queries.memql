@@ -60,7 +60,17 @@ query utterance agentInteractionCount {
   args {
     agentId  string!
   }
-  filter  source.agentId==args.agentId && utteranceType in ["speech", "agentGreeting"] && isActiveRecord
+  // No utteranceType clause: `source.agentId` IS the agent filter (memql#2827).
+  // The old predicate was `utteranceType in ["speech", "agentGreeting"]`, which
+  // matched ~0 rows for every agent. "agentGreeting" is not a member of that
+  // enum -- it is a `source.kind` value -- and every writer that stamps
+  // source.agentId writes utteranceType "text" (insertAIResponse,
+  // createGreetingUtterance, sendTextUtterance), so the "speech" arm excluded
+  // exactly the rows the first conjunct selected. Re-adding a type constraint
+  // would break it again the day an agent produces speech, which
+  // sendSpeechUtterance already permits: it passes `args.source` through
+  // verbatim, so an agent-stamped speech row is possible today.
+  filter  source.agentId==args.agentId && isActiveRecord
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
