@@ -45,11 +45,10 @@ func extractCapabilitySlices(source string) []string {
 	// Comment-blanked view for header detection and brace balancing, offsets
 	// preserved so the slice is still cut from the ORIGINAL (memql#2868).
 	//
-	// #2868 named this the highest-stakes instance of the raw-source defect and
-	// explicitly left it unverified. Capabilities back DSL `action`s and deploy
-	// scripts, so a commented-out capability that still loads is a
-	// deploy-surface concern rather than a schema one. Confirmed structurally
-	// identical to ExtractKeywordSlices and fixed the same way.
+	// Capabilities back DSL `action`s and deploy scripts, so a commented-out
+	// capability that still loads is a deploy-surface concern rather than a
+	// schema one -- which is why #2868 flagged this as its highest-stakes
+	// instance.
 	scan := languageParser.BlankComments(source)
 	matches := capabilityHeaderRe.FindAllStringSubmatchIndex(scan, -1)
 	if len(matches) == 0 {

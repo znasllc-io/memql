@@ -74,18 +74,32 @@ func conceptSlices(source string) []string {
 	// commented-out schema is live: it validates writes and appears in the
 	// concepts API.
 	//
-	// BlankComments preserves byte offsets, so splitting the blanked source
-	// yields the same number of lines at the same indices as `lines` --
-	// scanLines[j] and lines[j] are the same line, one blanked and one not.
+	// BlankComments preserves byte offsets -- it overwrites comment bytes with
+	// spaces IN PLACE, never inserting or deleting, and never writing a newline
+	// -- so splitting the blanked source yields the same number of lines at the
+	// same indices as `lines`. scanLines[j] and lines[j] are the same line, one
+	// blanked and one not.
+	//
+	// That invariant is asserted by TestBlankCommentsIsLengthPreserving rather
+	// than re-checked here. An earlier version DID check it and bailed to nil,
+	// under a comment claiming the caller "reports zero concepts and the
+	// strict-boot gate surfaces it loudly". Measured false: LoadUnifiedConcepts
+	// does `if len(decls) == 0 { continue }` with no warning and no report
+	// entry, so the bail-out would have SILENTLY DROPPED a whole namespace's
+	// schema -- the opposite of loud, and a worse failure than the one it
+	// guarded. A promise the code does not keep is worse than no guard.
+	//
+	// KNOWN LIMIT, pre-existing and unchanged by this fix: the brace count
+	// below is string-BLIND, so `concept x { a string @description("a }
+	// brace") }` closes the slice early and the concept is silently dropped.
+	// The sibling ExtractKeywordSlices does not have this, because it balances
+	// through the string-aware findMatchingCloseBraceRune. Converting this
+	// line-oriented slicer onto that offset-based walker is a real refactor
+	// rather than a comment fix, and it is latent today -- the tree has 42
+	// brace-bearing string literals and zero unbalanced ones.
+	// TestConceptSlicesIsStringBlind pins the current behaviour so that
+	// refactor has a before/after to work against.
 	scanLines := strings.Split(languageParser.BlankComments(source), "\n")
-	if len(scanLines) != len(lines) {
-		// BlankComments stopped being length-preserving. Falling back to the
-		// raw view would silently restore the #2868 defect, so refuse to slice
-		// rather than mis-slice: the caller then reports zero concepts and the
-		// strict-boot gate surfaces it loudly instead of quietly loading a
-		// commented-out schema.
-		return nil
-	}
 
 	var slices []string
 
