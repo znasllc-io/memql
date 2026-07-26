@@ -727,6 +727,82 @@ func TestRelationshipTargetsUseImports(t *testing.T) {
 // (`actor.userId` reference, or an `isClusterOwner` admin gate)
 // or carry an explicit `@public` annotation acknowledging the
 // intent.
+// constructHeaderRe matches a top-level query / mutate / seed declaration.
+//
+// It said `(query|mutation)` until memql#2799. memql#2041 renamed the write
+// keyword `mutation` -> `mutate`, so the corpus carries 213 `mutate` and 25
+// `seed` declarations and ZERO `mutation` ones -- this classifier was walking
+// 197 of 435 constructs, and every mutation and seed in the tree was invisible
+// to it. component/language/dslspec already hard-fails if `mutation` is still a
+// construct keyword; this test never got the memo.
+//
+// That is the same defect as the field-spelling one below, on a second axis: a
+// security gate matching a form the language retired, and reporting a clean
+// result because it was looking for something that no longer exists.
+var constructHeaderRe = regexp.MustCompile(`(?m)^[ \t]*(query|mutate|seed)[ \t]+(?:[A-Za-z_][A-Za-z0-9_]*[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
+
+// userScopeFieldRe matches a user-scope payload field referenced BARE.
+//
+// The detector this replaces looked for the `payload.`-prefixed spelling
+// (`payload.ownerUserId`, ...), which epic #2292 retired -- payload properties
+// are referenced bare in filters now. So it was searching for a spelling the
+// corpus had migrated off, reported 0 flagged across ~198 constructs, and that
+// zero read as "audited and clean" rather than "not measuring what its name
+// says" (memql#2799).
+//
+// The leading `(^|[^.\w])` group is what keeps `actor.userId`, `args.userId`
+// and `row.createdBy` out: a dotted reference is a caller/envelope/intrinsic
+// read, not the row's own user-scope column. Go's RE2 has no lookbehind, so the
+// boundary is a consumed group rather than `(?<![.\w])`.
+var userScopeFieldRe = regexp.MustCompile(`(^|[^.\w])(ownerUserId|userId|actorUserId|targetId|createdBy|requestedBy)\b`)
+
+// rowSelectionSurface returns only the parts of a body that SELECT rows: the
+// `filter` clause, and an `update { }` block's `id:` line.
+//
+// Scope matters as much as spelling. Matching the WHOLE body flags every
+// `create*` mutation that stamps an owner on insert (`ownerUserId:
+// args.ownerUserId`) -- 43 constructs tree-wide, almost all of them writes that
+// legitimately record who owns the new row. That is a different question from
+// the one this gate asks, which is row SELECTION: does this construct pick rows
+// by a user-scope column without checking the caller? Restricting to the filter
+// clause asks exactly that, and takes the corpus from 43 matches to 1.
+//
+// A struct-form filter is a single line -- the parser rejects a multi-line
+// clause -- so line extraction is sufficient here.
+func rowSelectionSurface(body string) string {
+	var b strings.Builder
+	inUpdate := false
+	for _, line := range strings.Split(body, "\n") {
+		t := strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(t, "filter"):
+			b.WriteString(t)
+			b.WriteByte('\n')
+		case strings.HasPrefix(t, "update"):
+			inUpdate = true
+		case inUpdate && t == "}":
+			inUpdate = false
+		case inUpdate && strings.HasPrefix(t, "id:"):
+			b.WriteString(t)
+			b.WriteByte('\n')
+		}
+	}
+	return b.String()
+}
+
+// userScopeSelectionExemptions records constructs that select rows by a user-scope
+// column without a caller check, and are known-outstanding rather than
+// accepted. Keyed "<file> <constructName>".
+//
+// An entry here is DEBT, not a blessing: it keeps the gate green for a finding
+// already tracked elsewhere while still failing on anything new. Removing the
+// entry is part of closing the issue it names.
+var userScopeSelectionExemptions = map[string]string{
+	"worker/queries.memql runningPlansForUser": "scopes on the caller-supplied args.userId rather than actor.userId; tracked in #2800 (parked pending the repo-owner decision on the userById split). Called internally from worker/logic.memql with an event node id, but it is also on the generated SDK surface, so a client can pass any userId.",
+}
+
+var userScopeExemptSeen = map[string]bool{}
+
 func TestPerRowAuthzClassification(t *testing.T) {
 	type counts struct {
 		owned   int
@@ -749,7 +825,7 @@ func TestPerRowAuthzClassification(t *testing.T) {
 	if err != nil {
 		t.Fatalf("WalkMemqlFiles: %v", err)
 	}
-	headerRe := regexp.MustCompile(`(?m)^[ \t]*(query|mutation)[ \t]+(?:[A-Za-z_][A-Za-z0-9_]*[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
+	headerRe := constructHeaderRe
 
 	for _, p := range paths {
 		file, openErr := tree.Open(p)
@@ -796,12 +872,9 @@ func TestPerRowAuthzClassification(t *testing.T) {
 			hasAdmin := strings.Contains(body, "actor.isClusterOwner") ||
 				strings.Contains(body, "requiresClusterOwner")
 			hasOwner := strings.Contains(body, "actor.userId")
-			referencesUserScope := strings.Contains(body, "payload.ownerUserId") ||
-				strings.Contains(body, "payload.userId") ||
-				strings.Contains(body, "payload.actorUserId") ||
-				strings.Contains(body, "payload.targetId") ||
-				strings.Contains(body, "payload.createdBy")
+			referencesUserScope := userScopeFieldRe.MatchString(rowSelectionSurface(body))
 			lineNo := strings.Count(src[:m[0]], "\n") + 1
+			exemptKey := p + " " + name
 
 			switch {
 			case hasPublic:
@@ -811,6 +884,11 @@ func TestPerRowAuthzClassification(t *testing.T) {
 			case hasAdmin:
 				byDomain[domain].admin++
 			case referencesUserScope:
+				if _, ok := userScopeSelectionExemptions[exemptKey]; ok {
+					userScopeExemptSeen[exemptKey] = true
+					byDomain[domain].other++
+					break
+				}
 				byDomain[domain].flagged++
 				flagged = append(flagged, flag{p, lineNo, name, kind})
 			default:
@@ -833,8 +911,17 @@ func TestPerRowAuthzClassification(t *testing.T) {
 			d, c.owned, c.admin, c.public, c.flagged, c.other)
 	}
 	t.Logf("")
+	// Keep the exemption table honest: an entry whose construct no longer
+	// matches (fixed, renamed, removed) should be pruned, not left to rot into
+	// a blanket the gate silently applies to nothing.
+	for key := range userScopeSelectionExemptions {
+		if !userScopeExemptSeen[key] {
+			t.Errorf("stale userScopeSelectionExemptions entry %q -- the construct no longer selects rows by a user-scope column without a caller check (fixed / renamed / removed?); prune it", key)
+		}
+	}
+
 	if len(flagged) > 0 {
-		t.Errorf("found %d flagged constructs that reference user-scope fields without a caller-check or @public annotation:", len(flagged))
+		t.Errorf("found %d flagged constructs that select rows by a user-scope column without a caller-check or @public annotation:", len(flagged))
 		for _, f := range flagged {
 			t.Errorf("  %s:%d  %s %s", f.file, f.line, f.kind, f.name)
 		}
