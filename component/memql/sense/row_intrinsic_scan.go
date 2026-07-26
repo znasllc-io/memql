@@ -76,6 +76,22 @@ var canonicalScalarIntrinsic = map[string]string{
 // protected a grammar the parser rejects while giving a block comment a way
 // to escape the single-line bound.
 //
+// One shape that DOES reach the engine is excluded by a gate rather than by
+// the grammar (memql#2817): the language accepts a clause on the same line as
+// its opening brace -- `query w q { filter id == args.x }` normalises cleanly
+// -- and a line-oriented scanner cannot see it, so a bare intrinsic written
+// that way passed both gates in silence.
+// dsl.TestClauseDoesNotShareTheOpeningBraceLine pins that shape out of
+// authored .memql. Do not relax it without first giving these scanners a way
+// to see the shape it excludes.
+//
+// That gate closes the BRACE-LINE shape, not every spelling this opener
+// misses. isFilterClauseOpener still requires the keyword be followed by a
+// space or tab at the start of a line, so `filter(id == args.x)` and
+// `filter<NBSP>id == args.x` on their OWN line both score zero hits and no
+// gate covers them today (memql#2863). Recorded because it would be easy to
+// read the gate above as making the opener airtight; it does not.
+//
 // KNOWN, ACCEPTED GAP: BlankBlockComments ends a string literal at a newline
 // rather than letting it span lines, so the second line of a multi-line string
 // is treated as code -- if it happens to begin `filter ` and contain a bare
