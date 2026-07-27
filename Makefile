@@ -365,6 +365,31 @@ sdk-gen:
 sdk-gen-check:
 	$(GO) run ./scripts/sdk-gen --check --dsl=dsl --out=sdk/go/client --ts-out=
 
+## Regenerate the checked-in architecture model
+## (component/architecture/embedded/topology.model.json), which the cockpit's
+## Topology tab consumes.
+##
+## THE FLAGS ARE LOAD-BEARING (memql#2844). --calls is not a default, and the
+## artifact contains the call graph: 121k edges with it, 21k without. Before
+## this target nothing recorded that, so `go run ./cmd/memql-arch` -- the
+## documented command -- produced a file 100k edges smaller than the one in
+## git, and the resulting 900k-line diff made refreshing the model impossible
+## in practice. --reproducible blanks generated_at and the absolute workspace
+## path so the output depends only on the code.
+arch-model:
+	$(GO) run ./cmd/memql-arch --root . --types --calls --cluster memql \
+		--reproducible --out component/architecture/embedded/topology.model.json
+
+## CI gate: regenerate the architecture model and diff against the checked-in
+## copy. Fails if the code changed without the model being refreshed -- the
+## drift that left ToggleComputerUseEnabledArgs.UserId in the model in 13
+## places after #2840 removed it. Pair with `make arch-model` locally to fix.
+##
+## Also enforced by TestArchitectureModelIsCurrent so it runs in the ordinary
+## `go test ./...` lane, which needs no workflow change.
+arch-model-check:
+	$(GO) test -count=1 -run TestArchitectureModelIsCurrent ./component/architecture/
+
 ## DSL lint: load the embedded DSL tree through the same
 ## dslimports.Load pipeline the engine runs at boot and fail on any
 ## parse / import / build diagnostics. Mirrors the CI gate so authors
@@ -414,7 +439,7 @@ test-polyphon:
 # ---------------------------------------------------------------------------
 
 ##@ Quality & codegen
-.PHONY: vet fmt lint tidy generate proto-gen proto-gen-check prs-stalled claims-stale
+.PHONY: vet fmt lint tidy generate proto-gen proto-gen-check prs-stalled claims-stale arch-model arch-model-check
 
 ## Run go vet on all packages
 vet:
