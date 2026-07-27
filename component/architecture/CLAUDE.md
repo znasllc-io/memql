@@ -120,7 +120,14 @@ disagree. Regenerating by hand is not supported; there is no shorter form that
 produces the committed artifact.
 
 Wall time is ~6s on the full workspace. Regenerate it LAST in any change that
-touches Go, since the model describes the code.
+touches Go, since the model describes the code. (Test-only changes need no
+regeneration -- all three extractor passes set `Tests: false`.)
+
+**A Go toolchain bump also invalidates it.** The model encodes stdlib-derived
+facts -- promoted methods from embedded stdlib types, `implements` edges against
+stdlib interfaces, signatures rendered with stdlib type names -- so a minor or
+patch bump can move them. CI pins `go-version`, so this bites exactly on the PR
+that raises it: regenerate there.
 
 `make arch-model-check` (or plain `go test ./...`) verifies the committed model
 matches the code.

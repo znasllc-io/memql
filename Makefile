@@ -12,6 +12,13 @@
 # ---------------------------------------------------------------------------
 
 GO          := go
+# GOFLAGS is REASSIGNED here, not appended to, and that is load-bearing beyond
+# verbosity: GNU make re-exports a variable it reassigns, so every recipe runs
+# with exactly this value regardless of what the caller exported. That is what
+# keeps `make arch-model` -- and therefore the reproducibility gate -- immune to
+# a stray `GOFLAGS=-tags=...` in the environment, which changes the extracted
+# model (20186 nodes / 108689 edges under -tags=voice, vs 20182 / 121609).
+# Do not add `export` or change this to `+=` without re-checking that gate.
 GOFLAGS     := -v
 CGO_ENABLED := 0
 BIN_DIR     := bin

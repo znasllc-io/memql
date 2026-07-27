@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/znasllc-io/memql/component/architecture/model"
@@ -80,10 +81,25 @@ func TestArchitectureModelIsCurrent(t *testing.T) {
 	// `--cluster memqlPRODUCTION` besides. A guard narrower than the thing it
 	// guards -- which is the exact defect class this gate is for. There is no
 	// second copy to keep in step now.
+	before := sumFile(t, checkedIn)
 	cmd := exec.Command("make", "arch-model", "ARCH_MODEL_OUT="+regenerated)
 	cmd.Dir = root
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("regenerating the model failed: %v\n%s", err, out)
+	}
+
+	// The target's DEFAULT output is the tracked artifact, so this test sits
+	// one variable-substitution away from rewriting 42MB of tracked source.
+	// Demonstrated: hardcode --out in the recipe and `go test ./...` leaves the
+	// working tree dirty. It still FAILS, so nothing passes vacuously -- but a
+	// test that mutates the repo is its own problem.
+	if _, err := os.Stat(regenerated); err != nil {
+		t.Fatalf("`make arch-model` exited 0 but wrote nothing to %s -- did the target lose its "+
+			"recipe, or stop honouring ARCH_MODEL_OUT? (%v)", regenerated, err)
+	}
+	if sumFile(t, checkedIn) != before {
+		t.Fatalf("regenerating wrote into the WORKING TREE (%s). ARCH_MODEL_OUT is not being "+
+			"honoured, so this test just modified tracked source.", checkedIn)
 	}
 
 	if sumFile(t, checkedIn) == sumFile(t, regenerated) {
@@ -190,4 +206,41 @@ func join(ss []string) string {
 		out += s
 	}
 	return out
+}
+
+// TestNoSourceRefEscapesTheWorkspace is the cheap, permanent stand-in for the
+// two-worktree check.
+//
+// That check -- regenerate from a copy at a different directory DEPTH and
+// compare -- is the only thing that catches an escaping path, and it is how the
+// #2910 review found 27 of them. It is far too heavy to run here. But its
+// INVARIANT is a millisecond scan of the committed artifact: no source path may
+// be absolute or start with "..", because such a path encodes how deep the
+// checkout sits on the generating machine's disk and makes the whole gate
+// unsatisfiable everywhere else.
+//
+// Requires no regeneration, so it also runs under -short.
+func TestNoSourceRefEscapesTheWorkspace(t *testing.T) {
+	root := workspaceRoot(t)
+	m := loadModel(t, filepath.Join(root, "component", "architecture", "embedded", model.CanonicalFilename))
+
+	bad := 0
+	for _, n := range m.Nodes {
+		if n.Source == nil {
+			continue
+		}
+		f := n.Source.File
+		if filepath.IsAbs(f) || f == ".." || strings.HasPrefix(f, ".."+string(filepath.Separator)) {
+			if bad < 5 {
+				t.Errorf("node %s has a source path outside the workspace: %q", n.ID, f)
+			}
+			bad++
+		}
+	}
+	if bad > 0 {
+		t.Errorf("%d source path(s) escape the workspace.\n\nSuch a path is a `../../..` chain "+
+			"whose LENGTH encodes the generating machine's directory depth, so the artifact "+
+			"differs between two checkouts of the same commit and the drift gate goes red "+
+			"everywhere but the machine that regenerated (memql#2844).", bad)
+	}
 }
