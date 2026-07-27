@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"unicode"
+	"unicode/utf8"
 
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql/dslfs"
@@ -21,7 +23,7 @@ import (
 //
 // WHY IT NEEDS ENFORCING AT ALL. The docs mandated the OPPOSITE rule for
 // months -- "Use kind-specific prefixes so intent is obvious" -- while 0 of
-// 1081 shipped declarations followed it. Nothing noticed, because a convention
+// 1091 shipped declarations followed it. Nothing noticed, because a convention
 // stated only in prose is checked by nobody. #2806 found the spec/trait half
 // was worse than aspirational: its examples named constructs that do not exist
 // (traitIsActiveRecord, specIsHumanParticipant), so a reader copying them wrote
@@ -65,28 +67,82 @@ import (
 // from real TokenBraceOpen/Close rather than from character matching. A gate
 // that re-implements the grammar will keep drifting from it; one that reuses the
 // grammar cannot.
+//
+// AND THEN THE TOKEN VERSION WAS NARROWER THAN THE GRAMMAR TOO. Review of the
+// rewrite found three more, which is the whole lesson of this file:
+//
+//  5. The TERSE single-step automation form (#2619) has NO BRACE --
+//     `automation X @trigger(...) => logic X` -- and 10 of the tree's 31
+//     automations use it. Anchoring on `{` had simply been carried over from
+//     the regex without asking whether a declaration must have a body.
+//  6. `mutate` was mapped to the single prefix `mutation`, so `mutateArchiveUser`
+//     -- the keyword's own name -- passed. A keyword can forbid more than one
+//     prefix.
+//  7. The word boundary was an ASCII byte range and camelCase only, so a
+//     kebab-case prefix (`seed-workbench-baseline`, the spelling 160 of the 185
+//     seeds actually use) and a non-ASCII uppercase letter both evaded.
+//
+// TestNoKindPrefixGateIsLive pins every one of these seven shapes. Read it
+// before changing the scan: "0 prefixed" is worthless without proof the gate
+// can still say anything else.
 
-// declKeywordPrefixes maps every declaration keyword to the prefix that is now
+// rewriterLoweredKeywords are the struct forms the rewriter lowers to the
+// internal procedural shape BEFORE the parser's token dispatch ever sees them,
+// so they are absent from TopLevelDeclKeywords and must be named here.
+//
+// Hand-maintained, and therefore drift-guarded by
+// TestDeclKeywordSetMatchesTheParser rather than trusted.
+var rewriterLoweredKeywords = []string{"query", "mutate", "logic", "automation"}
+
+// declKeywordPrefixes maps every declaration keyword to the prefixes now
 // forbidden on its declarations.
 //
-// Derived from parser.TopLevelDeclKeywords (the parser's own authoritative
-// dispatch table, so a new construct keyword extends this gate automatically)
-// plus the four struct forms the rewriter lowers before the token dispatch ever
-// sees them -- query / mutate / logic / automation.
+// The token-dispatched twelve are derived from parser.TopLevelDeclKeywords --
+// the parser's own authoritative dispatch table -- so adding a construct kind
+// there extends this gate automatically. The four rewriter-lowered forms cannot
+// be derived (the parser exports no list for them) and are pinned above.
 //
-// `mutate` is the keyword but `mutation` was the documented prefix, which is
-// exactly the sort of mismatch that makes a prose rule hard to follow.
-var declKeywordPrefixes = func() map[string]string {
-	m := map[string]string{}
+// `mutate` carries TWO forbidden prefixes. `mutation` was the documented one,
+// but the keyword itself is `mutate`, so `mutateArchiveUser` is the same
+// mistake and a map of one prefix per keyword let it through. Every other
+// keyword forbids only itself.
+var declKeywordPrefixes = func() map[string][]string {
+	m := map[string][]string{}
 	for _, kw := range languageParser.TopLevelDeclKeywords {
-		m[kw] = kw
+		m[kw] = []string{kw}
 	}
-	for _, kw := range []string{"query", "logic", "automation"} {
-		m[kw] = kw
+	for _, kw := range rewriterLoweredKeywords {
+		m[kw] = []string{kw}
 	}
-	m["mutate"] = "mutation"
+	m["mutate"] = []string{"mutate", "mutation"}
 	return m
 }()
+
+// TestDeclKeywordSetMatchesTheParser is the drift guard on the hand-maintained
+// half of the keyword set.
+//
+// "Derived from the parser so it cannot drift" is only true for the twelve
+// token-dispatched kinds. If the language gains a construct keyword, or moves a
+// rewriter-lowered form into the dispatch table, this fails and someone updates
+// the gate deliberately -- instead of the gate quietly covering less than the
+// docs claim, which is the defect this whole file exists to prevent.
+func TestDeclKeywordSetMatchesTheParser(t *testing.T) {
+	for _, kw := range rewriterLoweredKeywords {
+		for _, dispatched := range languageParser.TopLevelDeclKeywords {
+			if kw == dispatched {
+				t.Errorf("%q is now in parser.TopLevelDeclKeywords -- remove it from "+
+					"rewriterLoweredKeywords so the set is derived rather than duplicated", kw)
+			}
+		}
+	}
+	want := len(languageParser.TopLevelDeclKeywords) + len(rewriterLoweredKeywords)
+	if len(declKeywordPrefixes) != want {
+		t.Errorf("declKeywordPrefixes covers %d keywords, expected %d (%d dispatched + %d "+
+			"rewriter-lowered) -- the language gained or lost a construct kind and this gate "+
+			"has not been updated", len(declKeywordPrefixes), want,
+			len(languageParser.TopLevelDeclKeywords), len(rewriterLoweredKeywords))
+	}
+}
 
 // declaration is one top-level construct declaration found in the tree.
 type declaration struct {
@@ -172,6 +228,30 @@ func TestNoKindPrefixGateIsLive(t *testing.T) {
 			wantHit: true,
 		},
 		{
+			name:    "terse automation -- has no brace, so the token rewrite missed it too",
+			src:     "automation automationPurgeThings @trigger(schedule=\"0 0 2 * * *\") => logic purgeThings\n",
+			want:    "automationPurgeThings",
+			wantHit: true,
+		},
+		{
+			name:    "kebab-case prefix -- the spelling 160 of 185 seeds actually use",
+			src:     "seed skill seed-workbench-baseline {\n  title: \"x\"\n}\n",
+			want:    "seed-workbench-baseline",
+			wantHit: true,
+		},
+		{
+			name:    "the keyword itself as prefix -- `mutate`, not just the documented `mutation`",
+			src:     "mutate user mutateArchiveUser {\n  update { id: args.id }\n}\n",
+			want:    "mutateArchiveUser",
+			wantHit: true,
+		},
+		{
+			name:    "non-ASCII uppercase boundary -- the lexer admits unicode identifiers",
+			src:     "query user queryÉlève {\n  filter id == args.id\n}\n",
+			want:    "queryÉlève",
+			wantHit: true,
+		},
+		{
 			name:    "unprefixed name is fine",
 			src:     "query user userById {\n  filter id == args.id\n}\n",
 			wantHit: false,
@@ -184,6 +264,12 @@ func TestNoKindPrefixGateIsLive(t *testing.T) {
 		{
 			name:    "commented-out example must not be reported",
 			src:     "// query user queryFooBar {\n/// mutate user mutationFooBar {\nquery user userById {\n  filter id == args.id\n}\n",
+			wantHit: false,
+		},
+		{
+			name: "a terse automation's `=> logic X` tail is a CALL SITE, not a declaration",
+			src: "automation purgeThings @trigger(schedule=\"0 0 2 * * *\") => logic logicPurgeThings\n" +
+				"query user userById {\n  filter id == args.id\n}\n",
 			wantHit: false,
 		},
 	}
@@ -216,16 +302,29 @@ func TestNoKindPrefixGateIsLive(t *testing.T) {
 	}
 }
 
-// hasKindPrefix reports whether name carries keyword's forbidden prefix. A name
-// is prefixed only if the next character is uppercase -- `queryable` is a fine
-// query name, `queryUserById` is not.
+// hasKindPrefix reports whether name carries any prefix forbidden for keyword.
+//
+// A name counts as prefixed only when the prefix ends at a WORD BOUNDARY, so
+// `queryable` stays a fine query name while `queryUserById` is not. Two spellings
+// of that boundary are recognised, because the tree uses both:
+//
+//   - camelCase -- `queryUserById`. Tested with unicode.IsUpper on the decoded
+//     rune, not an ASCII byte range: the lexer admits unicode identifiers, so a
+//     byte test lets a non-ASCII uppercase letter through.
+//   - kebab-case -- `seed-workbench-baseline`. 160 of the 185 seeds are
+//     kebab-named, so this is the likeliest place a prefixed name would actually
+//     land, and a camelCase-only boundary check would scan it and then pass it.
 func hasKindPrefix(keyword, name string) bool {
-	prefix, ok := declKeywordPrefixes[keyword]
-	if !ok {
-		return false
+	for _, prefix := range declKeywordPrefixes[keyword] {
+		if len(name) <= len(prefix) || !strings.HasPrefix(name, prefix) {
+			continue
+		}
+		r, _ := utf8.DecodeRuneInString(name[len(prefix):])
+		if unicode.IsUpper(r) || r == '-' {
+			return true
+		}
 	}
-	return len(name) > len(prefix) && strings.HasPrefix(name, prefix) &&
-		name[len(prefix)] >= 'A' && name[len(prefix)] <= 'Z'
+	return false
 }
 
 // scanShippedDeclarations returns every top-level declaration in the tree the
@@ -302,6 +401,25 @@ func declarationsIn(path, src string) ([]declaration, error) {
 			tokens[i+2].Type == languageParser.TokenIdentifier &&
 			tokens[i+3].Type == languageParser.TokenBraceOpen:
 			name, skip = tokens[i+2].Literal, 2
+
+		// The TERSE single-step automation form (#2619) has NO BRACE at all:
+		//
+		//	automation purgeExpiredOutputScreenings @trigger(schedule="...") => logic purgeExpiredOutputScreenings
+		//
+		// 10 of the tree's 31 automations are written this way, and a
+		// brace-anchored scan cannot see any of them -- the same "gate narrower
+		// than the grammar" defect this file was rewritten to eliminate, missed
+		// once more because the rewrite reasoned about identifiers and whitespace
+		// and never asked whether a declaration must have a body.
+		//
+		// The trailing `=> logic <name>` is a CALL SITE, not a declaration, and is
+		// correctly not counted: a logic declaration requires a brace, so the
+		// `logic` keyword there matches no arm above.
+		case tokens[i].Literal == "automation" &&
+			i+2 < len(tokens) &&
+			tokens[i+1].Type == languageParser.TokenIdentifier &&
+			tokens[i+2].Type == languageParser.TokenAt:
+			name, skip = tokens[i+1].Literal, 1
 		}
 		if name == "" {
 			continue
@@ -341,12 +459,17 @@ func TestNamingDocsDoNotMandateAPrefix(t *testing.T) {
 		"../docs/public/language/functions.md",
 		"../docs/public/language/memql.md",
 		"../docs/public/concepts/concept-seeding.md",
+		// authoring-rules.md §14 states the rule too, and was missed by the
+		// first two versions of this list. It was still teaching the retired
+		// prefix AND the retired `mutation` declaration keyword, while claiming
+		// "Enforcement: none on the spelling" -- which had stopped being true.
+		"../docs/public/language/authoring-rules.md",
 	} {
 		src := readDocForNamingTest(t, doc)
 		for _, b := range banned {
 			if strings.Contains(src, b.pattern) {
 				t.Errorf("%s contains %q -- %s.\n\nThe prefix convention was abandoned in "+
-					"memql#2853 after measuring 0 of 1081 shipped declarations following it. If the "+
+					"memql#2853 after measuring 0 of 1091 shipped declarations following it. If the "+
 					"decision is being reversed, that is a corpus rename plus "+
 					"TestNoKindPrefixInConstructNames, not a doc edit.", doc, b.pattern, b.why)
 			}

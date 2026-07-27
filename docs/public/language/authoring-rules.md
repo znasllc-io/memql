@@ -115,7 +115,7 @@ logic grantOwnerOnPartitionCreate {
 }
 ```
 
-The product calls `mutationCreatePartition` once. The automation
+The product calls `createPartition` once. The automation
 takes care of the second write. The user gets one product action;
 the engine gets two atomic rows with clean audit trails.
 
@@ -214,15 +214,15 @@ strings, numbers, booleans, null, nested objects, arrays).
 
 **Canonical:**
 ```memql
-mutationCreatePartition({name: "test", partitionType: "standard"})
-querySpaceParticipants({spaceId: "space-123", participantType: "si"})
+createPartition({name: "test", partitionType: "standard"})
+spaceParticipants({spaceId: "space-123", participantType: "si"})
 ```
 
 Quoted string keys are also accepted so JSON-serialized tool calls
 that arrive through the same parser path keep working:
 
 ```memql
-mutationCreatePartition({"name": "test", "partitionType": "standard"})
+createPartition({"name": "test", "partitionType": "standard"})
 ```
 
 Both forms parse identically. Mixed is fine too. The public RPC
@@ -635,20 +635,24 @@ automation "test": dependency cycle among steps [a b]
 **Rule.** A construct is named for what it does, not for its kind --
 the declaration keyword already carries that: `activeHumanParticipants`,
 `addAgentToSpace`, `isHumanParticipant`, `isActiveRecord`,
-`bootstrapSession`. (See naming-conventions.md; #2853 tracks the
-`query*` / `mutation*` / `logic*` entries that still describe a prefix
-no construct carries.)
+`bootstrapSession`. No `query*` / `mutation*` / `logic*` / `spec*` /
+`trait*` / `seed*` prefix -- settled in #2853, which measured 0 of 1091
+shipped declarations carrying one. (See naming-conventions.md.)
 Constructs live in one consolidated file per kind per namespace
 (`dsl/<namespace>/<construct>s.memql`), so the file name never
 carries an individual construct's name.
 
 ```
-dsl/cognition/queries.memql     query space queryActiveSpaces { ... }
-dsl/cognition/mutations.memql   mutation space mutationCreateSpace { ... }
+dsl/cognition/queries.memql     query space activeSpaces { ... }
+dsl/cognition/mutations.memql   mutate space createSpace { ... }
 dsl/common/specs.memql          spec actorEnvelope requiresAdmin { ... }
 dsl/common/traits.memql         trait isActiveRecord { ... }
 dsl/cognition/logic.memql       logic bootstrapSession { ... }
 ```
+
+Note the declaration keyword on the mutation line: it is `mutate`.
+`mutation` is the *invocation* verb used inside a logic body, and the
+parser's own tests call that pair "the canonical footgun distance".
 
 **Why it bites you.** Callers (the product frontend, automations, Go
 integration code) name constructs as a string, so a name is a wire
@@ -658,12 +662,16 @@ tree mixed prefixed and unprefixed names and the frontend hit runtime
 "function not found" errors as a result -- the fix was consistency, not
 a particular prefix.
 
-Enforcement: none on the spelling. The naming-prefix lint was retired in
-epic #2031 (C2/#2042) -- `component/language/compiler/linter.go` records
-this in its header, and `TestCompileSource_NoNamingWarnings` fails the
-build if any `naming.*` warning is emitted. References resolve
-structurally instead: the dependency-tree validator (C3/#2043) fails a
-reference that does not exist at load time.
+Enforcement: `TestNoKindPrefixInConstructNames`
+(`dsl/naming_conventions_test.go`) fails on any declaration named with
+its own kind as a prefix, across all 16 declaration keywords.
+
+The old *opposite* lint, which REQUIRED the prefix, was retired in epic
+#2031 (C2/#2042) -- `component/language/compiler/linter.go` records this
+in its header, and `TestCompileSource_NoNamingWarnings` fails the build
+if any `naming.*` warning is emitted. References resolve structurally:
+the dependency-tree validator (C3/#2043) fails a reference that does not
+exist at load time.
 
 An automation step calls a logic construct by the same name the
 file-top import names -- `step decide { logic bootstrapSession ( event )
@@ -960,7 +968,7 @@ This bit hard in 2026-04-29: a partition concept added a `createdBy`
 payload field, which made the loader refuse the entire concept set.
 Cognition / agent / planner all dropped off the mesh because the
 primary couldn't serve queries. The fix was a one-line concept-schema
-delete plus dropping the matching `mutationCreatePartition` arg.
+delete plus dropping the matching `createPartition` arg.
 
 ---
 
