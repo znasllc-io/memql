@@ -74,7 +74,7 @@ The canonical worked example is **workspace creation**:
 
 ```memql
 use platform.concepts.{ partition }
-use identity.mutations.{ mutationGrantPartitionAccess }
+use identity.mutations.{ grantPartitionAccess }
 
 // 1. The product calls this mutation. (`@default` is not valid on
 //    an args field -- apply defaults in the body via coalesce().)
@@ -106,7 +106,7 @@ automation autoBootstrapWorkspaceOwnerAccess {
 logic grantOwnerOnPartitionCreate {
   args { event object @required }
   body {
-    return mutationGrantPartitionAccess({
+    return grantPartitionAccess({
       userId:      args.event.payload.createdBy,
       partitionId: args.event.payload.id,
       role:        "owner"
@@ -160,13 +160,13 @@ can't attach. Whole cluster bricked.
 **Wrong:**
 
 ```memql
-use cognition.queries.{ queryActiveSpaceIds }
+use cognition.queries.{ activeSpaceIds }
 
 // `sort` is not a registered function -- engine init fails.
 logic listSpacesSorted {
   args { event object @required }
   body {
-    return sort(queryActiveSpaceIds({}), "name", "asc")
+    return sort(activeSpaceIds({}), "name", "asc")
   }
 }
 ```
@@ -174,8 +174,8 @@ logic listSpacesSorted {
 **Right -- struct queries have dedicated clauses.** Sorting,
 windowing, and latest-per-id snapshots are `sort` / `paginate` /
 `asOf` clauses on the struct query itself, not directive calls
-(live examples: `queryLatestSpaceContextForSpace` in
-`dsl/cognition/queries.memql`, `queryStaleClusterNodes` in
+(live examples: `spaceUtterances` in
+`dsl/cognition/queries.memql`, `staleClusterNodes` in
 `dsl/cluster/queries.memql`):
 
 ```memql
@@ -298,7 +298,7 @@ new version becomes the visible one, the old version is invisible
 to plain queries. Use `asOf("2026-01-01T00:00:00Z")` from the
 top-level parser if you need a historical snapshot; struct queries
 carry an `asOf latest` clause for explicit latest-per-id reads (see
-`queryStaleClusterNodes` in `dsl/cluster/queries.memql`).
+`staleClusterNodes` in `dsl/cluster/queries.memql`).
 
 Consumers should still dedupe defensively -- the engine might
 surface multiple historical rows in some shape paths.
@@ -1035,7 +1035,7 @@ Affected mutations (audit done 2026-05-06; all live under
 
 The historical `concat("ga-", hash(actor))` pattern in the auto-join
 path is gone entirely: the logic (`dsl/cognition/logic.memql`) now
-resolves the assistant via `queryAssistantAgentForUser` + the space
+resolves the assistant via `assistantAgentForUser` + the space
 row's `ownerUserId` (memql#273, locked in by
 `TestAutoJoinSILocksInOwnerUserIdResolution`), and shortId prefixes
 like `ga-` are banned by `TestNoShortIdConceptPrefix`.

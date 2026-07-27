@@ -82,11 +82,18 @@ use <namespace>.<conceptName>   ->   create<ConceptName>
 ```
 
 **Not** `mutationCreate<ConceptName>`. This page and five comments in
-`component/memql/seed_materializer.go` said that, while the code has always
-built `"create" + ucFirst(conceptName)`. A seed author following the old
-wording named their mutation `mutationCreateFoo`, the materializer looked for
-`createFoo`, and the write failed at runtime -- the same class as #2806, where
-docs named constructs that do not exist. Corrected in memql#2853.
+`component/memql/seed_materializer.go` said that, and it was accurate until
+memql#2036 ("C6: de-prefix construct names + migrate mutation->mutate"), which
+changed the builder from `"mutationCreate" + ucFirst(conceptName)` to `"create"
++ ucFirst(conceptName)` and renamed the corpus to match -- while sweeping
+neither this page nor those comments. In the months since, a seed author
+following the stale wording named their mutation `mutationCreateFoo`, the
+materializer looked for `createFoo`, and the write failed at runtime.
+
+That is a sharper version of the #2806 lesson, and the reason the naming rule is
+now gated rather than merely written down: the rename was deliberate and
+correct, and its own documentation still drifted, because nothing was checking.
+Corrected in memql#2853.
 
 Each seed body field maps to a same-named mutation arg, and the concept's
 id arg follows the case-corrected `<conceptName>Id` pattern (`agent` ->

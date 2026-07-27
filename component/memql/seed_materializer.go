@@ -88,12 +88,15 @@ func systemActorContext(ctx context.Context) context.Context {
 //	use <namespace>.<conceptName>   ->  create<ConceptName>
 //
 // NOT mutationCreate<ConceptName>. Five comments in this file said that, and
-// the code has always built `"create" + ucFirst(conceptName)` (see
-// invokeCreateMutation). A seed author following the old wording would name
-// their mutation mutationCreateFoo, and the materializer would look for
-// createFoo and fail at runtime -- the same class as #2806, where docs named
-// constructs that do not exist. Kind prefixes were abandoned in memql#2853;
-// this convention never used one.
+// they were accurate until memql#2036 ("C6: de-prefix construct names +
+// migrate mutation->mutate") changed invokeCreateMutation from
+// `"mutationCreate" + ucFirst(conceptName)` to `"create" + ucFirst(conceptName)`
+// and renamed the corpus to match -- without sweeping these comments or
+// docs/public/concepts/concept-seeding.md. In the months since, a seed author
+// following the stale wording would name their mutation mutationCreateFoo, the
+// materializer would look for createFoo, and the write would fail at runtime.
+// Kind prefixes were abandoned outright in memql#2853; this convention has not
+// used one since #2036.
 //
 // Each seed body field maps to a same-named mutation arg. The
 // concept's id field name follows the same case-corrected pattern:

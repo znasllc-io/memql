@@ -214,6 +214,14 @@ func constructNameAfter(src string, from int) (string, bool) {
 // drop the docs requirement for a construct that was in it.
 //
 // `func` is deliberately absent -- the procedural author form is rejected at
-// parse, so no such header can reach a loading tree.
+// LOAD (component/memql's tryParseNewFunctionSyntax calls
+// parser.RejectLegacyProceduralAuthorForm), so no such header can reach a
+// loading tree. Note "at LOAD", not "at parse": parser.ParseFile accepts the
+// form cleanly. And until memql#2853 that premise was false in practice --
+// the rejection's regex was pinned to column 0 with exactly one space after
+// `func`, while the slicer that extracts these declarations allows leading
+// whitespace and flexible spacing, so an indented `func (Query) ...` loaded
+// and registered. Widening the guard to match the slicer is what makes this
+// comment's premise actually true.
 var namedConstructHeaderRe = regexp.MustCompile(
 	`(?m)^[ \t]*(query|mutate|seed|logic|automation|concept|builtin|shape|spec|trait|tool|prompt|provider|action|capability)[ \t]+(?:([A-Za-z_][A-Za-z0-9_]*)[ \t]+)?([A-Za-z_][A-Za-z0-9_.-]*)[ \t]*\{`)

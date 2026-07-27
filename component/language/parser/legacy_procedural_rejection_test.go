@@ -40,6 +40,59 @@ func TestRejectLegacyProceduralAuthorForm_AllReceivers(t *testing.T) {
 	}
 }
 
+// TestRejectLegacyProceduralAuthorForm_SpellingVariants pins the spellings that
+// used to dodge the rejection entirely.
+//
+// The pattern was `^func \(Receiver\)` -- column 0, exactly one space after
+// `func`, no space inside the parens. The slicer that actually EXTRACTS these
+// declarations (component/memql's functionSliceHeader) is
+// `func[ \t]*\([ \t]*(Query|...)[ \t]*\)`, which allows leading indentation and
+// flexible spacing. Everything in that gap was rejected by nothing and
+// registered by the loader: a retired author form kept loading, and a
+// kind-prefixed construct written that way shipped with the whole suite green
+// (memql#2853 round-3 review).
+//
+// A rejection gate must be at least as permissive as the matcher it guards.
+func TestRejectLegacyProceduralAuthorForm_SpellingVariants(t *testing.T) {
+	for _, tc := range []struct{ name, src string }{
+		{"column 0, one space", "func (Query) queryFoo(ctx any) (any, error) {\n  return ctx, nil\n}\n"},
+		{"indented with spaces", "  func (Query) queryFoo(ctx any) (any, error) {\n  return ctx, nil\n}\n"},
+		{"indented with a tab", "\tfunc (Query) queryFoo(ctx any) (any, error) {\n  return ctx, nil\n}\n"},
+		{"two spaces after func", "func  (Query) queryFoo(ctx any) (any, error) {\n  return ctx, nil\n}\n"},
+		{"no space after func", "func(Query) queryFoo(ctx any) (any, error) {\n  return ctx, nil\n}\n"},
+		{"spaces inside the parens", "func ( Query ) queryFoo(ctx any) (any, error) {\n  return ctx, nil\n}\n"},
+		{"tab inside the parens", "func (\tQuery\t) queryFoo(ctx any) (any, error) {\n  return ctx, nil\n}\n"},
+		{"indented logic", "  func (Logic) logicFoo(ctx any) (any, error) {\n  return ctx, nil\n}\n"},
+		{"preceded by another line", "@description(\"x\")\n  func (Mutation) mutationFoo(ctx any) (any, error) {\n  return ctx, nil\n}\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := RejectLegacyProceduralAuthorForm(tc.src); err == nil {
+				t.Fatalf("spelling %q was NOT rejected -- the guard is narrower than the "+
+					"slicer, so this form loads and registers.\nSource:\n%s", tc.name, tc.src)
+			}
+		})
+	}
+}
+
+// TestRejectLegacyProceduralAuthorForm_NotTrippedByLookalikes keeps the widened
+// pattern from over-matching: a Go func in a comment, or a receiver name that
+// merely starts with a retired one, must still pass.
+func TestRejectLegacyProceduralAuthorForm_NotTrippedByLookalikes(t *testing.T) {
+	for _, tc := range []struct{ name, src string }{
+		{"commented out", "// func (Query) queryFoo(ctx any) (any, error) {}\n"},
+		{"block comment", "/*\nfunc (Query) queryFoo(ctx any) (any, error) {}\n*/\n"},
+		{"receiver is a longer word", "func (QueryBuilder) build(ctx any) (any, error) {\n  return ctx, nil\n}\n"},
+		{"not a receiver at all", "func (r *Runner) Run(ctx any) (any, error) {\n  return ctx, nil\n}\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := RejectLegacyProceduralAuthorForm(tc.src); err != nil {
+				t.Fatalf("spelling %q should NOT be rejected; got %v\nSource:\n%s",
+					tc.name, err, tc.src)
+			}
+		})
+	}
+}
+
 // TestRejectLegacyProceduralAuthorForm_StructFormPasses locks the
 // happy path: struct-form input does NOT trip the rejection. Even
 // though the rewriter will later synthesise a `func (Query) ...`

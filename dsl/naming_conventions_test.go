@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -82,25 +83,56 @@ import (
 //     kebab-case prefix (`seed-workbench-baseline`, the spelling 160 of the 185
 //     seeds actually use) and a non-ASCII uppercase letter both evaded.
 //
-// TestNoKindPrefixGateIsLive pins every one of these seven shapes. Read it
-// before changing the scan: "0 prefixed" is worthless without proof the gate
-// can still say anything else.
+// AND THEN ROUND 3 FOUND THREE MORE -- this time in the guardrails around the
+// scan rather than the scan itself:
+//
+//  8. The drift guard was a TAUTOLOGY. It asserted
+//     len(declKeywordPrefixes) == len(TopLevelDeclKeywords)+len(rewriterLoweredKeywords)
+//     while declKeywordPrefixes is BUILT by iterating exactly those two slices.
+//     It could never fail, and had zero signal on the hand-maintained half it
+//     existed to guard. Worse, that half did not need to be hand-maintained:
+//     parser.StructFormKeywords was exported all along, and the comment saying
+//     otherwise was asserted from a reading rather than a probe.
+//  9. The DOC gate was inert for one of its five pages. authoring-rules.md had
+//     just been ADDED to the list, and not one of the nine banned substrings
+//     can occur in that page's shape. It was also blind to the
+//     logic*/spec*/trait*/seed* half of the rule on ALL five pages -- a
+//     blocklist of nine sentences catches nine sentences.
+//  10. The `func (Receiver) NAME` form still LOADED. The rejection guard
+//     (parser.RejectLegacyProceduralAuthorForm) was `^func \(` -- column 0,
+//     one space -- while the slicer that extracts declarations allows leading
+//     whitespace and flexible spacing. An indented `func (Logic) logicFoo(`
+//     was rejected by nothing, registered by the loader, and invisible to
+//     every gate in the repo. That is defect #2 above, one layer down.
+//
+// TestNoKindPrefixGateIsLive pins the seven scan shapes;
+// TestNamingDocGateIsLive pins the doc gate's claim shapes; and
+// parser/legacy_procedural_rejection_test.go pins the spellings from #10. Read
+// them before changing anything here: "0 prefixed" is worthless without proof
+// the gate can still say anything else.
 
 // rewriterLoweredKeywords are the struct forms the rewriter lowers to the
 // internal procedural shape BEFORE the parser's token dispatch ever sees them,
 // so they are absent from TopLevelDeclKeywords and must be named here.
 //
-// Hand-maintained, and therefore drift-guarded by
-// TestDeclKeywordSetMatchesTheParser rather than trusted.
-var rewriterLoweredKeywords = []string{"query", "mutate", "logic", "automation"}
+// Derived from parser.StructFormKeywords -- the rewriter's own list, built
+// from structFormSteps so it cannot drift from the actual rewrite chain.
+//
+// Round 3 of this gate's review found this list hand-pinned, under a comment
+// asserting "the parser exports no list for them". That was false, and it was
+// asserted from a reading rather than a probe: StructFormKeywords has been
+// exported at rewriter.go:557 the whole time, and is already the source of
+// truth for the #2124 drift test. Hand-copying it reproduced, inside the drift
+// guard itself, the exact defect this file exists to prevent.
+var rewriterLoweredKeywords = languageParser.StructFormKeywords
 
 // declKeywordPrefixes maps every declaration keyword to the prefixes now
 // forbidden on its declarations.
 //
-// The token-dispatched twelve are derived from parser.TopLevelDeclKeywords --
-// the parser's own authoritative dispatch table -- so adding a construct kind
-// there extends this gate automatically. The four rewriter-lowered forms cannot
-// be derived (the parser exports no list for them) and are pinned above.
+// BOTH halves are derived from the parser: the token-dispatched twelve from
+// parser.TopLevelDeclKeywords (its dispatch table) and the four rewriter-lowered
+// struct forms from parser.StructFormKeywords (its rewrite chain). Adding a
+// construct kind to either extends this gate automatically.
 //
 // `mutate` carries TWO forbidden prefixes. `mutation` was the documented one,
 // but the keyword itself is `mutate`, so `mutateArchiveUser` is the same
@@ -118,28 +150,65 @@ var declKeywordPrefixes = func() map[string][]string {
 	return m
 }()
 
-// TestDeclKeywordSetMatchesTheParser is the drift guard on the hand-maintained
-// half of the keyword set.
+// declKeywordsPinned is the declaration-keyword set this gate covers and
+// docs/public/language/naming-conventions.md publishes.
 //
-// "Derived from the parser so it cannot drift" is only true for the twelve
-// token-dispatched kinds. If the language gains a construct keyword, or moves a
-// rewriter-lowered form into the dispatch table, this fails and someone updates
-// the gate deliberately -- instead of the gate quietly covering less than the
-// docs claim, which is the defect this whole file exists to prevent.
+// DERIVED vs PINNED, and why both. declKeywordPrefixes DERIVES its coverage
+// from the parser, so a new kind is scanned automatically and the gate can
+// never cover less than the language has. This list PINS the expected result,
+// so the change is still noticed rather than absorbed silently. Deriving alone
+// would leave the published count and the docs drifting unchallenged; pinning
+// alone is what round 3 caught (a hand-copy masquerading as a source). A rename
+// is the case a count alone misses -- `mutation` -> `mutate` actually happened
+// (#2036), and would move no total.
+var declKeywordsPinned = []string{
+	"action", "automation", "builtin", "capability", "concept", "logic",
+	"mutate", "policy", "prompt", "provider", "query", "seed", "shape",
+	"spec", "tool", "trait",
+}
+
+// TestDeclKeywordSetMatchesTheParser is the drift guard on the keyword set.
+//
+// WHAT THE PREVIOUS VERSION GOT WRONG. It asserted
+//
+//	len(declKeywordPrefixes) == len(TopLevelDeclKeywords) + len(rewriterLoweredKeywords)
+//
+// which is a tautology: declKeywordPrefixes is BUILT by iterating exactly those
+// two slices, so the equality holds by construction and the assertion could
+// never fail. It had zero signal on the only half that was hand-maintained --
+// the half it existed to guard. Round 3 review caught it.
+//
+// Both halves are derived from the parser now, so the remaining drift risk is
+// the language gaining a kind neither list reports, or the docs publishing a
+// count the gate no longer covers. Pinning the literal is what catches that:
+// add a construct kind and this fails, forcing a deliberate doc update instead
+// of the gate quietly covering less than it claims.
 func TestDeclKeywordSetMatchesTheParser(t *testing.T) {
 	for _, kw := range rewriterLoweredKeywords {
 		for _, dispatched := range languageParser.TopLevelDeclKeywords {
 			if kw == dispatched {
-				t.Errorf("%q is now in parser.TopLevelDeclKeywords -- remove it from "+
-					"rewriterLoweredKeywords so the set is derived rather than duplicated", kw)
+				t.Errorf("%q is in BOTH parser.StructFormKeywords and "+
+					"parser.TopLevelDeclKeywords -- the map dedupes them, so the "+
+					"covered-keyword count silently drops by one", kw)
 			}
 		}
 	}
-	want := len(languageParser.TopLevelDeclKeywords) + len(rewriterLoweredKeywords)
-	if len(declKeywordPrefixes) != want {
-		t.Errorf("declKeywordPrefixes covers %d keywords, expected %d (%d dispatched + %d "+
-			"rewriter-lowered) -- the language gained or lost a construct kind and this gate "+
-			"has not been updated", len(declKeywordPrefixes), want,
+	covered := make([]string, 0, len(declKeywordPrefixes))
+	for kw := range declKeywordPrefixes {
+		covered = append(covered, kw)
+	}
+	sort.Strings(covered)
+	pinned := append([]string(nil), declKeywordsPinned...)
+	sort.Strings(pinned)
+	if strings.Join(covered, " ") != strings.Join(pinned, " ") {
+		t.Errorf("the parser's declaration keywords have changed.\n"+
+			"  gate covers (derived): %s\n"+
+			"  pinned expectation:    %s\n"+
+			"%d dispatched via parser.TopLevelDeclKeywords + %d rewriter-lowered via "+
+			"parser.StructFormKeywords. The gate already scans the new set; update "+
+			"declKeywordsPinned AND the count published in "+
+			"docs/public/language/naming-conventions.md to match.",
+			strings.Join(covered, " "), strings.Join(pinned, " "),
 			len(languageParser.TopLevelDeclKeywords), len(rewriterLoweredKeywords))
 	}
 }
@@ -484,4 +553,234 @@ func readDocForNamingTest(t *testing.T, path string) string {
 		t.Fatalf("read %s: %v", path, err)
 	}
 	return string(b)
+}
+
+// namingDocPages are the pages both doc tests cover. Shared so the two cannot
+// drift apart -- the substring test above catches a mandate stated in PROSE,
+// this list feeds the stronger check below.
+var namingDocPages = []string{
+	"../docs/public/language/naming-conventions.md",
+	"../docs/public/language/functions.md",
+	"../docs/public/language/memql.md",
+	"../docs/public/concepts/concept-seeding.md",
+	"../docs/public/language/authoring-rules.md",
+}
+
+// docImportLine matches a file-top import: `use cognition.queries.{ a, b }`.
+var docImportLine = regexp.MustCompile(`(?m)^\s*use\s+[a-zA-Z0-9_.]+\.\{([^}]*)\}`)
+
+// docLocatedClaim matches prose asserting a construct exists at a path:
+// "`queryStaleClusterNodes` in `dsl/cluster/queries.memql`".
+var docLocatedClaim = regexp.MustCompile("`([A-Za-z_][A-Za-z0-9_-]*)`\\s+in\\s+`(dsl/[A-Za-z0-9_/-]+\\.memql)`")
+
+// docsCitingNonexistentConstructs is the deliberate-exception list: names the
+// prose cites precisely BECAUSE they do not exist.
+//
+// naming-conventions.md's whole argument rests on #2806, where the docs named
+// traitIsActiveRecord / specIsHumanParticipant and a reader copying them got an
+// import that silently failed. Naming them is the point. mutationCreateCanvasState
+// is cited as supplied by a product bundle at runtime, not declared in this tree.
+var docsCitingNonexistentConstructs = map[string]bool{
+	"traitIsActiveRecord":       true,
+	"specIsHumanParticipant":    true,
+	"mutationCreateCanvasState": true,
+	"mutateArchiveUser":         true, // §"7 evasion shapes", an offender by construction
+	"queryFoo":                  true, // legacy-procedural-form example
+	"queryBar":                  true, // ditto
+	"mutationCreateFoo":         true, // concept-seeding's <ConceptName> illustration
+	"actionTYPO":                true, // an explicit "this is wrong" example
+}
+
+// TestNamingDocsNameOnlyConstructsThatExist is the strong half of the doc gate.
+//
+// WHY THE SUBSTRING LIST ABOVE IS NOT ENOUGH. Round 3 review found it inert for
+// authoring-rules.md -- the page had just been ADDED to the list, and not one of
+// its nine banned patterns can occur in that page's shape (a file-map table and
+// §14 prose). It was also blind to the logic* / spec* / trait* / seed* half of
+// the rule on all five pages. A blocklist of nine sentences only catches the
+// nine sentences someone already thought of.
+//
+// So this checks the thing that actually harms a reader, against ground truth
+// instead of a wordlist: a page must not CLAIM a construct exists when it does
+// not. That is the #2783 / #2806 failure mode this PR cites as its own
+// justification -- copy the name, write the `use` import, and it silently fails
+// to resolve until the query first runs. Three claim shapes are checked:
+//
+//	A. a `use ns.kind.{ name }` import          -- the exact copy-paste path
+//	B. "`name` in `dsl/<ns>/<file>.memql`"      -- prose asserting a location
+//	C. a declaration header inside a memql fence -- teaching by example
+//
+// C is what makes the logic/spec/trait/seed half enforceable: a reinstated
+// mandate has to show an example, and a kind-prefixed example fails here.
+func TestNamingDocsNameOnlyConstructsThatExist(t *testing.T) {
+	exists := map[string]bool{}
+	for _, d := range scanShippedDeclarations(t) {
+		exists[d.name] = true
+	}
+
+	for _, doc := range namingDocPages {
+		for _, v := range namingDocViolations(doc, readDocForNamingTest(t, doc), exists) {
+			t.Error(v)
+		}
+	}
+}
+
+// namingDocViolations is the pure core of the doc gate: it takes one page's
+// source plus the set of real declaration names and returns every violation.
+//
+// Split out from the test so TestNamingDocGateIsLive can drive it with
+// synthetic pages. A gate nobody has watched FIRE is indistinguishable from a
+// gate that scans nothing -- which is exactly what round 3 found the substring
+// list to be for authoring-rules.md.
+func namingDocViolations(doc, src string, exists map[string]bool) []string {
+	var out []string
+
+	cite := func(name, shape string) {
+		if exists[name] || docsCitingNonexistentConstructs[name] {
+			return
+		}
+		// Only KIND-PREFIXED citations are in scope here. A doc may legitimately
+		// name a construct this tree does not declare -- `space`, `partition`,
+		// `context` and friends are product-DSL concepts mounted at runtime via
+		// MEMQL_DSL_PATH, not engine declarations. Those are real doc debt but a
+		// different question, tracked in #2914. What THIS PR is responsible for is
+		// the prefixed spelling: a name that is prefixed AND absent is a leftover
+		// from the retired convention, and it is the shape that silently fails to
+		// resolve for a reader who copies it.
+		if !hasAnyKindPrefix(name) {
+			return
+		}
+		out = append(out, fmt.Sprintf("%s cites %q (%s), which is not a declaration "+
+			"in the tree.\n\nA reader who copies it writes an import that silently fails "+
+			"to resolve until the construct is first called -- the #2783 / #2806 failure "+
+			"mode memql#2853 exists to stop. Use the real name, or add it to "+
+			"docsCitingNonexistentConstructs if the point is that it does NOT exist.",
+			doc, name, shape))
+	}
+
+	// A. import lists
+	for _, m := range docImportLine.FindAllStringSubmatch(src, -1) {
+		for _, raw := range strings.Split(m[1], ",") {
+			if name := strings.TrimSpace(raw); name != "" {
+				cite(name, "a `use` import")
+			}
+		}
+	}
+
+	// B. prose asserting a construct lives at a path
+	for _, m := range docLocatedClaim.FindAllStringSubmatch(src, -1) {
+		cite(m[1], "claimed live in "+m[2])
+	}
+
+	// C. declaration headers inside memql fences. Reuses the corpus scanner, so
+	// the doc and the tree are held to ONE definition of what a declaration is
+	// and what a forbidden prefix is.
+	for _, fence := range memqlFencesIn(src) {
+		decls, err := declarationsIn(doc, fence)
+		if err != nil {
+			continue // prose fences are not required to parse
+		}
+		for _, d := range decls {
+			if hasKindPrefix(d.keyword, d.name) && !docsCitingNonexistentConstructs[d.name] {
+				out = append(out, fmt.Sprintf("%s declares %s %q in an example -- a kind "+
+					"prefix the corpus abandoned in memql#2853 (0 of 1091 declarations carry "+
+					"one). Teaching it here is how the docs and the tree drifted apart for "+
+					"months.", doc, d.keyword, d.name))
+			}
+		}
+	}
+	return out
+}
+
+// TestNamingDocGateIsLive proves the doc gate FIRES on each claim shape.
+//
+// The substring half of this gate shipped inert for a whole page and nobody
+// noticed, because "no violations" reads identically to "scanned nothing". Every
+// shape below must produce a violation, and the negative cases must not.
+func TestNamingDocGateIsLive(t *testing.T) {
+	exists := map[string]bool{"staleClusterNodes": true, "space": true}
+
+	for _, tc := range []struct {
+		name string
+		src  string
+		want bool
+	}{
+		// A -- the copy-paste path
+		{"prefixed name in a use import", "use cluster.queries.{ queryStaleClusterNodes }", true},
+		{"prefixed name among several", "use cluster.queries.{ space, queryStaleClusterNodes }", true},
+		// B -- prose asserting a location
+		{"prefixed name claimed live at a path",
+			"see `queryStaleClusterNodes` in `dsl/cluster/queries.memql` for this", true},
+		// C -- teaching by example, across the half the substring list was blind to
+		{"prefixed query declaration in a fence",
+			"```memql\nquery user queryUserById {\n  filter row.id == args.id\n}\n```", true},
+		{"prefixed logic declaration in a fence",
+			"```memql\nlogic logicBootstrapSession {\n  body { return true }\n}\n```", true},
+		{"prefixed spec declaration in a fence",
+			"```memql\nspec participant specIsGuest {\n  return isGuest == true\n}\n```", true},
+		{"prefixed trait declaration in a fence",
+			"```memql\ntrait traitIsActive {\n  return active == true\n}\n```", true},
+		{"prefixed seed declaration in a fence",
+			"```memql\nseed skill seedWorkbenchBaseline {\n  name: \"x\"\n}\n```", true},
+		{"kebab-prefixed seed declaration in a fence",
+			"```memql\nseed skill seed-workbench-baseline {\n  name: \"x\"\n}\n```", true},
+		{"terse prefixed automation in a fence",
+			"```memql\nautomation automationPurgeExpired @trigger(schedule=\"0 * * * * *\") => logic purgeExpired\n```", true},
+
+		// Negatives -- must NOT fire
+		{"real un-prefixed name in an import", "use cluster.queries.{ staleClusterNodes }", false},
+		{"real un-prefixed name claimed live",
+			"see `staleClusterNodes` in `dsl/cluster/queries.memql`", false},
+		{"un-prefixed declaration in a fence",
+			"```memql\nquery user userById {\n  filter row.id == args.id\n}\n```", false},
+		{"absent but UN-prefixed name (product DSL, out of scope)",
+			"use cognition.concepts.{ canvasState }", false},
+		{"deliberate does-not-exist citation",
+			"use common.traits.{ traitIsActiveRecord }", false},
+		{"prefixed name only in prose, no location claim",
+			"the retired spelling was `queryStaleClusterNodes` in older docs", false},
+		{"a non-memql fence is not scanned",
+			"```go\nquery := queryUserById\n```", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := namingDocViolations("synthetic.md", tc.src, exists)
+			if tc.want && len(got) == 0 {
+				t.Errorf("the doc gate did NOT fire on %q -- it is blind to this shape.\n"+
+					"Source:\n%s", tc.name, tc.src)
+			}
+			if !tc.want && len(got) > 0 {
+				t.Errorf("the doc gate fired on %q, which is legitimate.\nSource:\n%s\nGot: %v",
+					tc.name, tc.src, got)
+			}
+		})
+	}
+}
+
+// hasAnyKindPrefix reports whether a name carries ANY declaration keyword as a
+// prefix. Used at citation sites, where the doc names a construct without
+// necessarily stating its kind.
+func hasAnyKindPrefix(name string) bool {
+	for keyword := range declKeywordPrefixes {
+		if hasKindPrefix(keyword, name) {
+			return true
+		}
+	}
+	return false
+}
+
+// memqlFencesIn returns the body of every ```memql fenced block.
+func memqlFencesIn(src string) []string {
+	var out []string
+	lines := strings.Split(src, "\n")
+	for i := 0; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) != "```memql" {
+			continue
+		}
+		var body []string
+		for i++; i < len(lines) && !strings.HasPrefix(strings.TrimSpace(lines[i]), "```"); i++ {
+			body = append(body, lines[i])
+		}
+		out = append(out, strings.Join(body, "\n"))
+	}
+	return out
 }

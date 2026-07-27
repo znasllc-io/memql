@@ -125,14 +125,27 @@ its own kind as a prefix. That is what stops this page and the tree
 drifting apart again -- the previous rule was documented for months while
 nothing in the corpus followed it, and nothing noticed.
 
-It covers **all 16 declaration keywords**. Twelve are derived from
-`parser.TopLevelDeclKeywords` -- the parser's own dispatch table -- so
-adding a construct kind there extends the gate automatically. The four
-struct forms the rewriter lowers (`query` / `mutate` / `logic` /
-`automation`) cannot be derived, because the parser exports no list for
-them; they are pinned by hand and drift-guarded by
-`TestDeclKeywordSetMatchesTheParser`, which fails if the language gains a
-kind or moves one of the four into the dispatch table.
+It covers **all 16 declaration keywords**, and both halves are derived
+from the parser: twelve from `parser.TopLevelDeclKeywords` (its dispatch
+table) and the four struct forms the rewriter lowers -- `query` /
+`mutate` / `logic` / `automation` -- from `parser.StructFormKeywords`
+(built from `structFormSteps`, the rewrite chain itself). Adding a
+construct kind to either list extends the gate automatically.
+
+`TestDeclKeywordSetMatchesTheParser` then pins the resulting set by name,
+so a kind that is added, removed, or *renamed* fails the test and forces a
+deliberate update here. A rename is the case a count alone misses --
+`mutation` became `mutate` in #2036 without moving any total.
+
+> **This part was wrong in the first published version**, which pinned the
+> four rewriter forms by hand under the claim that "the parser exports no
+> list for them." `parser.StructFormKeywords` had been exported the whole
+> time. Worse, the drift guard asserted
+> `len(declKeywordPrefixes) == len(TopLevelDeclKeywords) + len(rewriterLoweredKeywords)`
+> -- a tautology, because the map is built by iterating exactly those two
+> slices, so it could never fail on the hand-maintained half it existed to
+> guard. Round-3 review caught both. The lesson is the one this page keeps
+> re-learning: an assertion about the grammar needs a probe, not a reading.
 
 It finds declarations by walking the **lexer's token stream**, not by
 matching a regex over the source. That is deliberate: the first version
