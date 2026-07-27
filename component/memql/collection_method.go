@@ -247,6 +247,21 @@ func evalCollScalar(expr ExpressionNode, args map[string]any, locals map[string]
 		}
 		return nil, nil
 	case *SpecReferenceExpression:
+		// The bare literals first (#2870). `true` / `false` / `nil` written in
+		// value position reach here as a bare reference, because the converter
+		// has no bare-boolean case -- so `return args.gate.passed ?? false`
+		// evaluated its fallback via resolveLambdaPath, which returns nil for an
+		// unknown name. deployGateGreen therefore answered `nil` instead of
+		// `false` for an absent gate result, which is the exact opposite of the
+		// fail-closed contract stated in its own doc comment.
+		switch node.Name {
+		case "true":
+			return true, nil
+		case "false":
+			return false, nil
+		case "nil":
+			return nil, nil
+		}
 		// A bare reference inside a lambda body (`m`, `m.active`,
 		// `m.profile.age`). The first dotted segment names a bound lambda
 		// param; the remainder walks into the element.
@@ -269,6 +284,19 @@ func evalCollScalar(expr ExpressionNode, args map[string]any, locals map[string]
 			// g.key, "none"))`) and a single-return `return cond(...)` both
 			// drive their chain operands through this evaluator.
 			return evalCollCond(node, args, locals)
+		}
+		// coalesce / concat (#2870). The converter emits these positionally
+		// alongside cond and the date builtins -- the comment directly above
+		// even says so -- but this evaluator only ever knew the latter two. So
+		// an argument spelled `args.x ?? ""` had nowhere to fold and reached
+		// argument validation still an AST node. That is the computer-use kill
+		// switch, the workbench release sweep and the magic-link expiry sweep,
+		// none of which had ever run.
+		if node.Name == "coalesce" {
+			return evalCollCoalesce(node, args, locals)
+		}
+		if node.Name == "concat" {
+			return evalCollConcat(node, args, locals)
 		}
 		return nil, fmt.Errorf("unsupported expression %T inside a collection lambda", expr)
 	case *ComparisonExpression:
@@ -391,6 +419,86 @@ func evalCollCond(node *FunctionCallExpression, args, locals map[string]any) (an
 		return nil, err
 	}
 	return evalCollScalar(chosen, args, locals)
+}
+
+// evalCollPositionalOperand evaluates ONE positionally-keyed operand ("0",
+// "1", ...) of a converter-normalised builtin call.
+//
+// One at a time rather than all at once, so coalesce can stop at the first
+// operand that is present -- matching mutationTemplateEvaluator.evalCoalesce
+// and MutationExecutor.evaluateCoalesce, which parse and evaluate lazily. An
+// operand that is already a plain value (a literal) is returned as-is.
+func evalCollPositionalOperand(node *FunctionCallExpression, name string, i int, args, locals map[string]any) (any, error) {
+	raw, ok := node.Args[strconv.Itoa(i)]
+	if !ok {
+		return nil, fmt.Errorf("%s() is missing positional arg %d", name, i)
+	}
+	expr, isExpr := raw.(ExpressionNode)
+	if !isExpr {
+		return raw, nil
+	}
+	val, err := evalCollScalar(expr, args, locals)
+	if err != nil {
+		return nil, fmt.Errorf("%s() arg %d: %w", name, i, err)
+	}
+	return val, nil
+}
+
+// evalCollCoalesce evaluates coalesce(a, b, ...) (#2870).
+//
+// Semantics are RuntimeEvaluator.EvaluateCoalesce's, deliberately -- the same
+// `??` must not mean two different things depending on which evaluator a
+// construct happens to route through. So: the FINAL operand is the ultimate
+// fallback and is returned unconditionally, even when it is an empty string
+// (memql#1614, which makes `coalesce(absent, "")` -> `""` expressible); any
+// EARLIER operand that is nil or "" is treated as missing and skipped.
+//
+// Unlike EvaluateCoalesce -- which receives already-evaluated values and so
+// cannot short-circuit -- this evaluates operands lazily and stops at the first
+// one that is present, matching the two lazy evaluators named above.
+func evalCollCoalesce(node *FunctionCallExpression, args, locals map[string]any) (any, error) {
+	n := len(node.Args)
+	if n == 0 {
+		return nil, fmt.Errorf("coalesce() requires at least one argument")
+	}
+	for i := 0; i < n; i++ {
+		val, err := evalCollPositionalOperand(node, "coalesce", i, args, locals)
+		if err != nil {
+			return nil, err
+		}
+		if i == n-1 {
+			return val, nil // the ultimate fallback, empty or not
+		}
+		if val == nil {
+			continue
+		}
+		if s, isStr := val.(string); isStr && s == "" {
+			continue
+		}
+		return val, nil
+	}
+	return nil, nil
+}
+
+// evalCollConcat evaluates concat(a, b, ...) by stringifying every operand in
+// order.
+//
+// Matches RuntimeEvaluator.EvaluateConcat exactly, including that a nil operand
+// renders as "<nil>" through %v rather than being skipped. Skipping nils reads
+// better, but it would make the same concat() produce different output
+// depending on which evaluator ran it, and a silent divergence between the two
+// is worse than an ugly rendering of a value the author probably did not mean
+// to pass.
+func evalCollConcat(node *FunctionCallExpression, args, locals map[string]any) (any, error) {
+	var sb strings.Builder
+	for i := 0; i < len(node.Args); i++ {
+		val, err := evalCollPositionalOperand(node, "concat", i, args, locals)
+		if err != nil {
+			return nil, err
+		}
+		sb.WriteString(fmt.Sprintf("%v", val))
+	}
+	return sb.String(), nil
 }
 
 // resolveLiteralValue unwraps the engine literal wrapper, resolving the

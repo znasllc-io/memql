@@ -559,8 +559,19 @@ func (v *functionValidator) substituteArgRefsAndCallArgs(expr ExpressionNode, ar
 		return expr, nil
 	}
 	newArgs := make(map[string]any, len(call.Args))
-	for k, v := range call.Args {
-		newArgs[k] = substituteArgRefValue(v, args)
+	for k, val := range call.Args {
+		// memql#2870: fold here too. This is a FOURTH dispatch point that
+		// reaches a construct without going through expandExpressionWithArgs, so
+		// it inherits none of that path's argument handling -- exactly the
+		// asymmetry that let `args.x ?? ""` reach validation as an AST node in
+		// the first place. No shipped logic currently returns a mutation leaf,
+		// so this is not a live failure; it is the next instance of the class,
+		// pre-empted rather than left for whoever writes that construct.
+		folded, err := foldArgExpression(substituteArgRefValue(val, args), args)
+		if err != nil {
+			return nil, fmt.Errorf("argument %q of mutation-leaf call %q: %w", k, call.Name, err)
+		}
+		newArgs[k] = folded
 	}
 	if len(newArgs) == 1 {
 		if inner, ok := newArgs["0"].(map[string]any); ok {
@@ -568,6 +579,63 @@ func (v *functionValidator) substituteArgRefsAndCallArgs(expr ExpressionNode, ar
 		}
 	}
 	return &FunctionCallExpression{Name: call.Name, Args: newArgs}, nil
+}
+
+// foldArgExpression evaluates an argument that is still an engine expression
+// node down to a concrete value, so it reaches argument validation (and then a
+// Go executor or SQL builder) as the value the author wrote rather than as the
+// AST of that value. memql#2870.
+//
+// It routes through evalCollScalar rather than growing a fourth evaluator.
+// There are already three -- MutationExecutor.evaluateValue for the string step
+// path, evalCollScalar for engine AST, and a scatter of one-off special cases
+// bolted onto this file (IsDateBuiltin, cond, and the *ast.ArgRefExpr case in
+// substituteArgRefValue added for the #1840 outage). Adding a fifth is how that
+// scatter got here.
+//
+// DELIBERATELY NARROW. Only node kinds that are self-contained VALUE
+// expressions are folded. A sub-call to a user function or a builtin is left
+// alone for expandFunctionCall to expand, because folding it here would need
+// the whole function registry and would change what "an argument" means. An
+// unrecognised node is returned untouched, so any behaviour this does not
+// explicitly claim is exactly what it was before.
+func foldArgExpression(v any, args map[string]any) (any, error) {
+	node, ok := v.(ExpressionNode)
+	if !ok {
+		return v, nil // already a concrete value
+	}
+	if !foldableArgExpression(node) {
+		return v, nil
+	}
+	folded, err := evalCollScalar(node, args, nil)
+	if err != nil {
+		return nil, err
+	}
+	return folded, nil
+}
+
+// foldableArgExpression reports whether node is a self-contained value
+// expression evalCollScalar can evaluate without a function registry.
+func foldableArgExpression(node ExpressionNode) bool {
+	switch n := node.(type) {
+	case *FunctionCallExpression:
+		// The converter-normalised positional builtins, and only those: a call
+		// to anything else is a construct invocation that must be expanded, not
+		// evaluated.
+		if n == nil {
+			return false
+		}
+		return n.Name == "coalesce" || n.Name == "concat" || n.Name == "cond" || IsDateBuiltin(n.Name)
+	case *LiteralValueNode:
+		// Covers bare `now`, which the converter wraps as a literal carrying an
+		// *ast.TimestampExprFunc (ast_converter.go). resolveLiteralValue is what
+		// turns it into a timestamp.
+		return true
+	case *ArithmeticExpression, *ComparisonExpression, *BinaryComparisonExpression, *LogicalExpression:
+		return true
+	default:
+		return false
+	}
 }
 
 // substituteArgRefValue walks a value (which may be a nested map /
@@ -709,7 +777,13 @@ func (v *functionValidator) expandExpressionWithArgs(expr ExpressionNode, args m
 		// substitutes a top-level arg ref, not a chain receiver), then keep it a
 		// cond call for the evaluator. Without this the call is looked up as a
 		// user function and fails "function not found".
-		if node.Name == "cond" {
+		//
+		// coalesce / concat (#2870) are the same shape and belong in the same
+		// branch: converter-normalised positional builtins with no DSL body. The
+		// allowlist here named only cond, so `return args.gate.passed ?? false`
+		// -- a coalesce in ROOT position rather than in an argument -- was looked
+		// up as a user function and failed `function "coalesce" not found`.
+		if node.Name == "cond" || node.Name == "coalesce" || node.Name == "concat" {
 			expanded := make(map[string]any, len(node.Args))
 			for k, val := range node.Args {
 				if en, ok := val.(ExpressionNode); ok {
@@ -723,6 +797,40 @@ func (v *functionValidator) expandExpressionWithArgs(expr ExpressionNode, args m
 				expanded[k] = val
 			}
 			return &FunctionCallExpression{Name: node.Name, Args: expanded}, nil
+		}
+
+		// memql#2870: substituting an arg REF is not the same as evaluating an
+		// arg EXPRESSION, and only the former was happening above.
+		// `args.event.node.id ?? ""` is a coalesce node, not an arg ref, so it
+		// passed through untouched and reached validateFunctionArgs as an AST
+		// node --
+		//
+		//	argument "userId": expected string, got *ast.CoalesceExpr
+		//
+		// -- which is the computer-use kill switch, the workbench release sweep
+		// and the magic-link expiry sweep, all three of which had never run.
+		// (`magicLinkExpirySweep` passes a bare `now`, which is what proves the
+		// shape is "any expression in an argument", not a coalesce bug.)
+		//
+		// THIS MUST RUN AFTER THE SHORT-CIRCUITS ABOVE, NOT WITH THE
+		// SUBSTITUTION. Folding in the substitution block reached the operands
+		// of cond / coalesce / concat / the date builtins as well, and those
+		// keep their operands as expression nodes ON PURPOSE -- their own
+		// evaluators need them. It broke cond outright (`cond() arg 0 is not an
+		// expression (bool)`) and would have evaluated cond's untaken branch.
+		// Only a call heading for expandFunctionCall -- a real construct
+		// invocation, whose arguments must be VALUES by the time
+		// validateFunctionArgs sees them -- gets folded.
+		if args != nil && len(node.Args) > 0 {
+			folded := make(map[string]any, len(node.Args))
+			for k, val := range node.Args {
+				fv, err := foldArgExpression(val, args)
+				if err != nil {
+					return nil, fmt.Errorf("argument %q of call %q: %w", k, node.Name, err)
+				}
+				folded[k] = fv
+			}
+			node = &FunctionCallExpression{Name: node.Name, Args: folded}
 		}
 		// Resolve, validate, and expand the function with its arguments
 		return v.expandFunctionCall(node)
