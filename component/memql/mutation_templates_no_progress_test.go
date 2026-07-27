@@ -1,9 +1,17 @@
 package memql
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
+
+	"github.com/znasllc-io/memql/component/memql/literalparity"
 )
+
+// parserDeadline is the shared watchdog window; see
+// literalparity.ParserDeadline for the value and the measurements behind
+// it. Declared once there rather than three times here.
+const parserDeadline = literalparity.ParserDeadline
 
 // leaked latches once a case abandons a non-terminating goroutine. It is
 // package-level on purpose: a per-loop `break` bounds one loop, but the NEXT
@@ -32,11 +40,24 @@ var leaked bool
 // What that does and does NOT buy, stated exactly. The spinner is not
 // cancellable -- these parsers take no context -- so it keeps growing until
 // the process exits, and its peak therefore tracks how much memory the box
-// will hand out, NOT any fixed bound. What the latch guarantees is that the
-// actionable `--- FAIL` line is printed at the 2s deadline, long before any
-// later OOM can truncate the log. That ordering is the whole point: a run that
-// dies at 6 GiB having already said which guard regressed is debuggable, and
-// one that dies without saying is not.
+// will hand out, NOT any fixed bound. The latch makes the actionable
+// `--- FAIL` line the FIRST thing printed in the common case, which is the
+// difference between a run that says which guard regressed and one that does
+// not.
+//
+// It is NOT a guarantee, and an earlier version of this comment claimed it was
+// (memql#2835). Measured with the array guard neutralised under
+// `ulimit -v 6000000`: the process died of OOM at 1.89s with ZERO `--- FAIL`
+// lines -- before the old 2s deadline. #2828 saw the FAIL print first only
+// because it measured under a 10 GiB cap; at a tighter cap, or on a
+// memory-limited CI runner, the race inverts.
+//
+// The deadline is 500ms, and the margin is MEASURED rather than guessed: mean
+// parse is 757ns / 821ns / 2.15us across the three copies, so 500ms is
+// ~240,000-660,000x, and the worst full round trip observed under `-race` with
+// a 5% CPU quota on one core -- an absurd configuration -- was 195ms. So the
+// window an allocation storm has to beat is far smaller than at 2s, but "far
+// smaller" is the honest claim, not "cannot happen".
 func mustTerminate(t *testing.T, name string, fn func()) bool {
 	t.Helper()
 	if leaked {
@@ -52,9 +73,9 @@ func mustTerminate(t *testing.T, name string, fn func()) bool {
 	select {
 	case <-done:
 		return true
-	case <-time.After(2 * time.Second):
+	case <-time.After(parserDeadline):
 		leaked = true
-		t.Errorf("%s did not terminate within 2s -- the parser loop is not making progress", name)
+		t.Errorf("%s did not terminate within %s -- the parser loop is not making progress", name, parserDeadline)
 		return false
 	}
 }
@@ -233,41 +254,30 @@ func TestSeparatorOnlyArrayIsEmptyNotMalformed(t *testing.T) {
 }
 
 // TestLoadCrossCopyParity pins the LOAD copy's half of the shared
-// accept/reject table. The list is duplicated verbatim in
-// component/language/compiler and component/automations/steps -- see the
-// comment on crossCopyParityCases there for why the three must agree.
+// accept/reject table.
+//
+// The corpus itself lives in component/memql/literalparity (memql#2835). It
+// used to be duplicated verbatim in all three files under a comment reading
+// "keep the three tables identical", with nothing enforcing it -- protection
+// against drift that was itself three copies kept in step by a comment.
 func TestLoadCrossCopyParity(t *testing.T) {
-	for _, tc := range []struct {
-		src    string
-		accept bool
-	}{
-		{`{ k: "ok" }`, true},
-		{`{ k: }`, true},
-		{`{k:}`, true},
-		{`{ k: [,] }`, true},
-		{`{ k: ["a", "b"] }`, true},
-		{`{ punct: "commas, braces } brackets ]" }`, true},
-		{`{ a: { b: "}" } }`, true},
-		{`{ a: { b: "a}b" }, c: 1 }`, true},
-		{`{ k: "abc }`, false},
-		{`{ k: [}{] }`, false},
-
-		// Unbalanced NESTED literals -- see the compiler-side table for why
-		// the third case matters (an unterminated string one level down,
-		// swallowed by the enclosing arm's runoff).
-		{`{ a: { b: 1 }`, false},
-		{`{ a: [ 1, 2 }`, false},
-		{`{ a: { b: """ } }`, false},
-
-		{`{ a: { b: 1 } }`, true},
-		{`{ a: [ 1, 2 ] }`, true},
-		{`{ name: "x", nested: { deep: { deeper: 1 } } }`, true},
-	} {
-		if !mustTerminate(t, "parsePayloadRawToTemplate("+tc.src+")", func() {
-			_, err := parsePayloadRawToTemplate(tc.src)
-			if got := err == nil; got != tc.accept {
-				t.Errorf("parsePayloadRawToTemplate(%q): accepted=%v, want %v (err=%v)",
-					tc.src, got, tc.accept, err)
+	for _, tc := range literalparity.Cases {
+		if !mustTerminate(t, "parsePayloadRawToTemplate("+tc.Src+")", func() {
+			v, err := parsePayloadRawToTemplate(tc.Src)
+			got := "ERR"
+			if err == nil {
+				b, mErr := json.Marshal(v)
+				if mErr != nil {
+					t.Fatalf("marshal %q: %v", tc.Src, mErr)
+				}
+				got = string(b)
+			}
+			if got != tc.MemQL {
+				t.Errorf("parsePayloadRawToTemplate(%q):\n  got  %s\n  want %s\n\n"+
+					"The corpus records what each of the three copies produces, MEASURED. A "+
+					"mismatch means this copy drifted -- or that a divergence was fixed, in "+
+					"which case update component/memql/literalparity and check whether the row "+
+					"is now agreed (memql#2835).", tc.Src, got, tc.MemQL)
 			}
 		}) {
 			break
@@ -360,10 +370,10 @@ func TestArrayOkImpliesNoProgress(t *testing.T) {
 	t.Logf("array-legal: checked %d (input, position) pairs; %d violations", checked, violations)
 	t.Logf("unfiltered:  checked %d (input, position) pairs; %d violations", allChecked, allViolations)
 	if allViolations == 0 {
-		t.Errorf("unfiltered violations = 0, want > 0: the precondition filter is "+
-			"supposed to be what makes this invariant hold, so if the unscoped "+
-			"population is ALSO clean, either the enumeration stopped covering "+
-			"whitespace positions or parseLiteralOrExpr changed. Either way the "+
+		t.Errorf("unfiltered violations = 0, want > 0: the precondition filter is " +
+			"supposed to be what makes this invariant hold, so if the unscoped " +
+			"population is ALSO clean, either the enumeration stopped covering " +
+			"whitespace positions or parseLiteralOrExpr changed. Either way the " +
 			"scoping comment above is no longer describing reality.")
 	}
 }

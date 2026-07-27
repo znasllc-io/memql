@@ -1,12 +1,20 @@
 package compiler
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/znasllc-io/memql/component/memql/literalparity"
+
 	"github.com/znasllc-io/memql/component/language/parser"
 )
+
+// parserDeadline is the shared watchdog window; see
+// literalparity.ParserDeadline for the value and the measurements behind
+// it. Declared once there rather than three times here.
+const parserDeadline = literalparity.ParserDeadline
 
 // leaked latches once a case abandons a non-terminating goroutine. It is
 // package-level on purpose: a per-loop `break` bounds one loop, but the NEXT
@@ -35,13 +43,24 @@ var leaked bool
 // What that does and does NOT buy, stated exactly. The spinner is not
 // cancellable -- these parsers take no context -- so it keeps growing until
 // the process exits, and its peak therefore tracks how much memory the box
-// will hand out, NOT any fixed bound. What the latch guarantees is that the
-// actionable `--- FAIL` line is printed at the 2s deadline, long before any
-// later OOM can truncate the log. That ordering is the whole point: a run that
-// dies at 6 GiB having already said which guard regressed is debuggable, and
-// one that dies without saying is not. Every test in this file
-// that touches a parser goes through here -- a direct call would sidestep the
-// latch and leak a second spinner.
+// will hand out, NOT any fixed bound. The latch makes the actionable
+// `--- FAIL` line the FIRST thing printed in the common case, which is the
+// difference between a run that says which guard regressed and one that does
+// not.
+//
+// It is NOT a guarantee, and an earlier version of this comment claimed it was
+// (memql#2835). Measured with the array guard neutralised under
+// `ulimit -v 6000000`: the process died of OOM at 1.89s with ZERO `--- FAIL`
+// lines -- before the old 2s deadline. #2828 saw the FAIL print first only
+// because it measured under a 10 GiB cap; at a tighter cap, or on a
+// memory-limited CI runner, the race inverts.
+//
+// The deadline is 500ms, and the margin is MEASURED rather than guessed: mean
+// parse is 757ns / 821ns / 2.15us across the three copies, so 500ms is
+// ~240,000-660,000x, and the worst full round trip observed under `-race` with
+// a 5% CPU quota on one core -- an absurd configuration -- was 195ms. So the
+// window an allocation storm has to beat is far smaller than at 2s, but "far
+// smaller" is the honest claim, not "cannot happen".
 func mustTerminate(t *testing.T, name string, fn func()) bool {
 	t.Helper()
 	if leaked {
@@ -57,9 +76,9 @@ func mustTerminate(t *testing.T, name string, fn func()) bool {
 	select {
 	case <-done:
 		return true
-	case <-time.After(2 * time.Second):
+	case <-time.After(parserDeadline):
 		leaked = true
-		t.Errorf("%s did not terminate within 2s -- the parser loop is not making progress", name)
+		t.Errorf("%s did not terminate within %s -- the parser loop is not making progress", name, parserDeadline)
 		return false
 	}
 }
@@ -212,56 +231,33 @@ func TestCompilerParsesValidLiteralsUnchanged(t *testing.T) {
 	}
 }
 
-// crossCopyParityCases is the shared accept/reject table for the THREE
-// near-duplicate payload parsers: this one, component/memql's
-// parsePayloadRawToTemplate (load), and component/automations/steps'
-// parseAndEvaluateObjectLiteral (runtime dispatch).
-//
-// They are copies, so they drift, and a drift means the same literal is
-// accepted at compile time and rejected at dispatch (or the reverse) -- a bug
-// class no single-copy test can see. Two live divergences were found this way:
-// nested string-braces (only this copy rejected) and unterminated strings
-// (only the runtime copy accepted). Keep the three tables identical; the
-// package-local test in each of the other two packages carries the same list.
-var crossCopyParityCases = []struct {
-	src    string
-	accept bool
-}{
-	{`{ k: "ok" }`, true},
-	{`{ k: }`, true},
-	{`{k:}`, true},
-	{`{ k: [,] }`, true},
-	{`{ k: ["a", "b"] }`, true},
-	{`{ punct: "commas, braces } brackets ]" }`, true},
-	{`{ a: { b: "}" } }`, true},
-	{`{ a: { b: "a}b" }, c: 1 }`, true},
-	{`{ k: "abc }`, false},
-	{`{ k: [}{] }`, false},
-
-	// Unbalanced NESTED literals. The runtime copy's nested-object and
-	// nested-array arms returned their runoff text as a VALUE, so a single
-	// missing brace produced a string where an object belongs. The third case
-	// is the sharp one: an unterminated string ONE LEVEL DOWN, whose own
-	// ok=false the enclosing arm swallowed -- the fix for unterminated
-	// strings did not hold under nesting.
-	{`{ a: { b: 1 }`, false},
-	{`{ a: [ 1, 2 }`, false},
-	{`{ a: { b: """ } }`, false},
-
-	// ...and the balanced counterparts, which must keep parsing.
-	{`{ a: { b: 1 } }`, true},
-	{`{ a: [ 1, 2 ] }`, true},
-	{`{ name: "x", nested: { deep: { deeper: 1 } } }`, true},
-}
+// The cross-copy accept/reject corpus lives in
+// component/memql/literalparity (memql#2835). It used to be duplicated
+// verbatim in this file and two others under a comment reading "keep the three
+// tables identical", with nothing enforcing it -- protection against drift that
+// was itself three copies kept in step by a comment. Sharing the package makes
+// the drift impossible instead of merely detectable.
 
 // TestCompilerCrossCopyParity pins this copy's half of the shared table.
 func TestCompilerCrossCopyParity(t *testing.T) {
 	c := New(Config{})
-	for _, tc := range crossCopyParityCases {
-		if !mustTerminate(t, "parsePayloadRaw("+tc.src+")", func() {
-			_, err := c.parsePayloadRaw(tc.src)
-			if got := err == nil; got != tc.accept {
-				t.Errorf("parsePayloadRaw(%q): accepted=%v, want %v (err=%v)", tc.src, got, tc.accept, err)
+	for _, tc := range literalparity.Cases {
+		if !mustTerminate(t, "parsePayloadRaw("+tc.Src+")", func() {
+			v, err := c.parsePayloadRaw(tc.Src)
+			got := "ERR"
+			if err == nil {
+				b, mErr := json.Marshal(v)
+				if mErr != nil {
+					t.Fatalf("marshal %q: %v", tc.Src, mErr)
+				}
+				got = string(b)
+			}
+			if got != tc.Compiler {
+				t.Errorf("parsePayloadRaw(%q):\n  got  %s\n  want %s\n\n"+
+					"The corpus records what each of the three copies produces, MEASURED. A "+
+					"mismatch means this copy drifted -- or that a divergence was fixed, in "+
+					"which case update component/memql/literalparity and check whether the row "+
+					"is now agreed (memql#2835).", tc.Src, got, tc.Compiler)
 			}
 		}) {
 			break
