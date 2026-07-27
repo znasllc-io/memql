@@ -31,10 +31,28 @@ func NewModel(workspace string) *Model {
 	}
 }
 
-// WriteJSON serializes the model with stable indentation AND a stable
-// element order. Output is pretty-printed because the file is meant to be
-// diffable in PRs -- architectural change should show up in code review the
-// same way any other source change does.
+// WriteJSON serializes the model COMPACT, with a stable element order.
+//
+// Compact, not pretty-printed, and the reason is measured (memql#2844). The
+// artifact is ~40MB pretty / 1,261,197 lines, and GitHub's diff API cannot
+// generate a patch for a change that touches all of them:
+//
+//	Server Error: Sorry, this diff is taking too long to generate.
+//	{"resource":"PullRequest","field":"diff","code":"not_available"}
+//
+// dorny/paths-filter reads that diff to decide which CI lanes run, so the
+// `changes` job fails, `ci-required` fails, and the PR is unmergeable. The
+// sort had to reorder every line once, so this was not avoidable by deferring;
+// `.gitattributes -diff` did not help either, since the server still computes
+// the patch. Compact makes it one line: 31.6MB, and every future diff is
+// trivially generatable.
+//
+// What that gives up, stated plainly: the file is no longer readable as a
+// diff. It never really was -- nobody reviews 40MB of JSON -- and correctness
+// is established by TestArchitectureModelIsCurrent regenerating and comparing
+// byte-for-byte, not by reading the artifact. The ORDER still matters and is
+// still enforced: it is what makes that byte-for-byte comparison possible at
+// all.
 //
 // The sort is what makes that true (memql#2844). Without it, two runs over an
 // IDENTICAL tree on the SAME machine emitted the same 121,601 edges in a
@@ -64,7 +82,6 @@ func (m *Model) WriteJSON(w io.Writer) error {
 	}
 	out.sortForStableOutput()
 	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
 	enc.SetEscapeHTML(false)
 	return enc.Encode(out)
 }

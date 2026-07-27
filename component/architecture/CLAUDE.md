@@ -132,6 +132,12 @@ that raises it: regenerate there.
 `make arch-model-check` (or plain `go test ./...`) verifies the committed model
 matches the code.
 
+The artifact is written **compact, on one line**. Pretty-printing it produced a
+1.26M-line file whose one-time reorder GitHub could not diff at all -- the API
+returned *"this diff is taking too long to generate"*, which fails the `changes`
+job and blocks the PR. So do not read it as a diff; the gate above is what
+tells you whether it is right.
+
 ### Consume the model from another component
 
 ```go
