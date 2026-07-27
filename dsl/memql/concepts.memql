@@ -7,7 +7,7 @@
 concept checkpoint {
   automationFingerprint  string  @description("Content-addressed hash of the automation definition for change detection.")
   automationName  string!  @description("Name of the automation that was running.")
-  callerSuppliedPayload  boolean  @description("The checkpointed run's trigger payload came from a caller, so a resume must NOT restore internal origin to it (memql#2888). Absent means server-originated.")
+  callerSuppliedPayload  bool  @description("The checkpointed run's trigger payload came from a caller, so a resume must NOT restore internal origin to it (memql#2888). Absent means server-originated.")
   chainHead  string  @description("Chain state before the failed step.")
   executionId  string!  @description("Unique identifier for this execution instance.")
   expiresAt  datetime!  @description("When the checkpoint becomes invalid (ISO 8601).")
