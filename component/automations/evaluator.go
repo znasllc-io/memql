@@ -1764,7 +1764,19 @@ func renderedAsOwnText(condition string, resolved any) bool {
 // still hand back their input.
 func (e *Evaluator) resolveBarePathOnce(condition string) (any, bool, error) {
 	condition = strings.TrimSpace(condition)
-	if e.conditionRootSegment(condition) != "" {
+	// looksLikePath as well as the root check. isBareDottedPath tolerates
+	// whitespace around the dots (the `forEach ... where` rebuilder emits
+	// `a . b`), but EvaluateFilterValue gates its explicit-root branch on
+	// looksLikePath, whose isPathChar excludes space. Calling resolvePath
+	// without that gate let a space-bearing spelling through that
+	// EvaluateFilterValue would have treated as a literal -- and for a
+	// map-backed root the space-bearing key is a quiet MISS, so
+	// `@filter(args. typo)` went from a loud error to a silently never-firing
+	// filter. Same fail-quiet class this whole change exists to close, so it is
+	// closed here rather than filed. (Asymmetric spacing only; the symmetric
+	// `a . b` the rebuilder actually emits was never affected, and the spelling
+	// has zero hits in dsl/.)
+	if e.conditionRootSegment(condition) != "" && looksLikePath(condition) {
 		val, err := e.resolvePath(condition)
 		if err != nil {
 			// Unresolved. Deliberately NOT an error return: the caller owns

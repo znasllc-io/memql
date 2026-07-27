@@ -534,3 +534,30 @@ func TestUnseededMapRootFailsLoud(t *testing.T) {
 			"missing KEY in a root that IS present.")
 	}
 }
+
+// TestSpaceBearingPathStaysLoud closes the last fail-quiet edge.
+//
+// isBareDottedPath tolerates whitespace around dots, but EvaluateFilterValue's
+// explicit-root branch is gated on looksLikePath, whose isPathChar excludes
+// space. Resolving without that gate let `args. typo` reach resolvePath, where
+// a map-backed root treats the space-bearing key as a quiet MISS -- turning a
+// loud error into a silently never-firing filter, which is the exact class this
+// change exists to close.
+//
+// Malformed input either way; the point is that a malformed filter must not
+// fail QUIET.
+func TestSpaceBearingPathStaysLoud(t *testing.T) {
+	for _, cond := range []string{
+		"args. present", "args. missing", "args . present", "args .present",
+		"var. missing", "var . missing", "steps. nope",
+	} {
+		t.Run(cond, func(t *testing.T) {
+			e := softnessEvaluator(t)
+			if _, err := e.EvaluateCondition(cond); err == nil {
+				t.Errorf("EvaluateCondition(%q) returned no error.\n\nA space-bearing path is "+
+					"malformed, and a malformed filter must fail LOUD -- a quiet false is a gate "+
+					"that never fires, with no diagnostic (memql#2819).", cond)
+			}
+		})
+	}
+}
