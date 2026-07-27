@@ -1,6 +1,7 @@
 package memql
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log/slog"
@@ -9,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/uptrace/bun"
 
 	"github.com/znasllc-io/memql/component/auth"
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
@@ -418,5 +421,173 @@ func concreteArgValue(v any) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+// engineForSeamTest builds a MemQLEngine wired well enough to reach the
+// plan-root in-memory evaluation branch in executeWith.
+//
+// canResolve() needs db != nil && concepts != nil, and every plan-root
+// in-memory branch returns its value BEFORE any database access -- so a
+// non-nil placeholder handle is enough and no Postgres is required.
+func engineForSeamTest(t *testing.T) *MemQLEngine {
+	t.Helper()
+	functions, _ := loadTreeForNestedArgTest(t)
+	return &MemQLEngine{
+		initialized: true,
+		db:          &bun.DB{},
+		concepts:    memoryNodes.DefaultRegistry(),
+		functions:   functions,
+		shapes:      newShapeRegistry(),
+	}
+}
+
+// TestPositionalBuiltinsEvaluateThroughEngineExecute covers the engine.go half
+// of the fix -- the plan-root allowlist that decides whether a resolved
+// positional builtin gets evaluated in memory or is handed to the database.
+//
+// WHY THIS EXISTS. Review found the seam had ZERO coverage: reverting
+// engine.go's allowlist to origin/main left `go test ./component/memql/` fully
+// green, because every other test in this file reimplements the engine's
+// dispatch (calling evalCollScalar directly) instead of calling the engine.
+// A test that re-derives the code path it is meant to protect cannot notice
+// that path being deleted.
+//
+// So this drives MemQLEngine.Execute -- the real entry point -- and asserts the
+// VALUE. With the allowlist reverted it fails with
+// `function "coalesce" was not expanded during parsing; this is a bug`.
+func TestPositionalBuiltinsEvaluateThroughEngineExecute(t *testing.T) {
+	engine := engineForSeamTest(t)
+	ctx := auth.ContextWithInternalOrigin(context.Background())
+
+	for _, tc := range []struct {
+		name  string
+		query string
+		want  any
+	}{
+		// deployGateGreen is the construct the #2870 defect actually broke:
+		// a deploy gate that must FAIL CLOSED when the flag is absent.
+		{"coalesce, flag true", `logic deployGateGreen(gate: {"passed": true})`, true},
+		{"coalesce, flag false", `logic deployGateGreen(gate: {"passed": false})`, false},
+		{"coalesce, flag absent -- must fail CLOSED", `logic deployGateGreen(gate: {})`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			res, err := engine.Execute(ctx, tc.query)
+			if err != nil {
+				t.Fatalf("Execute(%s): %v\n\nIf this is \"function ... was not expanded "+
+					"during parsing\", the plan-root allowlist in engine.go no longer "+
+					"covers this builtin.", tc.query, err)
+			}
+			got := seamResultValue(res)
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("Execute(%s) = %#v, want %#v", tc.query, got, tc.want)
+			}
+		})
+	}
+}
+
+// seamResultValue pulls the scalar out of an ExecuteResult regardless of which
+// envelope shape the engine used for an in-memory plan root.
+func seamResultValue(res *ExecuteResult) any {
+	if res == nil {
+		return nil
+	}
+	out, ok := res.FlatOutput()
+	if !ok {
+		return nil
+	}
+	return out
+}
+
+// TestPositionalBuiltinEvaluatorsAgree pins the fn.Expr evaluators against the
+// canonical ones.
+//
+// WHY. memQL evaluates `??` and `concat(...)` on two different paths depending
+// on a property of the DSL that has nothing to do with meaning: a logic body
+// with an intermediate `name := ...` step runs through the LogicRunner and
+// RuntimeEvaluator; a single-statement body runs through fn.Expr and the
+// evalColl* functions added here. The same source must produce the same value
+// either way, or adding a throwaway second statement changes the answer -- the
+// mirror image of the #2870 defect, where REMOVING one was the "fix".
+//
+// Review found this alignment protected by nothing: a plausible "cleanup" to
+// evalCollConcat (skip nil operands instead of rendering them) left the entire
+// suite green while silently making concat mean two different things. This test
+// fails on that edit.
+func TestPositionalBuiltinEvaluatorsAgree(t *testing.T) {
+	canonical := NewRuntimeEvaluator(nil)
+
+	t.Run("concat", func(t *testing.T) {
+		for _, operands := range [][]any{
+			{"P-", "mid", "-S"},
+			{"P-", nil, "-S"},   // the divergence the cleanup would introduce
+			{nil, nil},          // all-nil
+			{"", "x"},           // empty string is not nil
+			{"n=", 42, " ok", true},
+		} {
+			args := map[string]any{}
+			node := &FunctionCallExpression{Name: "concat", Args: map[string]any{}}
+			for i, op := range operands {
+				node.Args[fmt.Sprint(i)] = &LiteralValueNode{Value: op}
+			}
+			got, err := evalCollConcat(node, args, nil)
+			if err != nil {
+				t.Fatalf("evalCollConcat(%#v): %v", operands, err)
+			}
+			want := canonical.EvaluateConcat(operands...)
+			if got != want {
+				t.Errorf("concat%v: fn.Expr path = %q, RuntimeEvaluator = %q.\n\n"+
+					"The same concat() must not mean two different strings depending on "+
+					"whether the logic body has one statement or two.", operands, got, want)
+			}
+		}
+	})
+
+	t.Run("coalesce", func(t *testing.T) {
+		for _, operands := range [][]any{
+			{nil, "fallback"},
+			{"", "fallback"},        // empty non-final is treated as missing
+			{"first", "second"},
+			{nil, nil, ""},          // final operand wins even when empty (memql#1614)
+			{nil, ""},               // ditto, two operands
+			{"only"},
+		} {
+			node := &FunctionCallExpression{Name: "coalesce", Args: map[string]any{}}
+			for i, op := range operands {
+				node.Args[fmt.Sprint(i)] = &LiteralValueNode{Value: op}
+			}
+			got, err := evalCollCoalesce(node, map[string]any{}, nil)
+			if err != nil {
+				t.Fatalf("evalCollCoalesce(%#v): %v", operands, err)
+			}
+			want := canonical.EvaluateCoalesce(operands...)
+			if !reflect.DeepEqual(got, want) {
+				t.Errorf("coalesce%v: fn.Expr path = %#v, RuntimeEvaluator = %#v.\n\n"+
+					"The ?? operator must not depend on the logic body's statement count.",
+					operands, got, want)
+			}
+		}
+	})
+}
+
+// TestCoalesceShortCircuits pins that ?? does not evaluate operands it does not
+// need. An eager fold turns `a ?? (b / 0)` into a hard error where the correct
+// answer is `a` -- which is how the first attempt at the #2870 fix broke cond().
+func TestCoalesceShortCircuits(t *testing.T) {
+	node := &FunctionCallExpression{Name: "coalesce", Args: map[string]any{
+		"0": &LiteralValueNode{Value: "present"},
+		"1": &ArithmeticExpression{
+			Left:  &LiteralValueNode{Value: 1},
+			Op:    "/",
+			Right: &LiteralValueNode{Value: 0},
+		},
+	}}
+	got, err := evalCollCoalesce(node, map[string]any{}, nil)
+	if err != nil {
+		t.Fatalf("coalesce short-circuit: the first operand is present, so the "+
+			"division-by-zero fallback must never be evaluated; got %v", err)
+	}
+	if got != "present" {
+		t.Fatalf("coalesce = %#v, want %q", got, "present")
 	}
 }
