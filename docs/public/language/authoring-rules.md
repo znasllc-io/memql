@@ -40,7 +40,7 @@ use cognition.concepts.{ space }
 
 // Right -- one bare insert. The target concept comes from the
 // `mutation <Concept> <name>` signature; restating it is retired.
-mutation space mutationCreateSpace {
+mutate space createSpace {
   args { name string @required }
   insert {
     name: args.name
@@ -51,7 +51,7 @@ mutation space mutationCreateSpace {
 }
 
 // Wrong -- two writes in one body. The parser rejects it.
-mutation space mutationCreateSpaceAndGrantOwner {
+mutate space createSpaceAndGrantOwner {
   args { name string @required }
   insert { ... }                  // ERROR -- only one write allowed
   insert { ... }
@@ -74,11 +74,11 @@ The canonical worked example is **workspace creation**:
 
 ```memql
 use platform.concepts.{ partition }
-use identity.mutations.{ mutationGrantPartitionAccess }
+use identity.mutations.{ grantPartitionAccess }
 
 // 1. The product calls this mutation. (`@default` is not valid on
 //    an args field -- apply defaults in the body via coalesce().)
-mutation partition mutationCreatePartition {
+mutate partition createPartition {
   args {
     name      string  @required
     type      string
@@ -103,10 +103,10 @@ automation autoBootstrapWorkspaceOwnerAccess {
   }
 }
 
-logic logicGrantOwnerOnPartitionCreate {
+logic grantOwnerOnPartitionCreate {
   args { event object @required }
   body {
-    return mutationGrantPartitionAccess({
+    return grantPartitionAccess({
       userId:      args.event.payload.createdBy,
       partitionId: args.event.payload.id,
       role:        "owner"
@@ -115,7 +115,7 @@ logic logicGrantOwnerOnPartitionCreate {
 }
 ```
 
-The product calls `mutationCreatePartition` once. The automation
+The product calls `createPartition` once. The automation
 takes care of the second write. The user gets one product action;
 the engine gets two atomic rows with clean audit trails.
 
@@ -160,13 +160,13 @@ can't attach. Whole cluster bricked.
 **Wrong:**
 
 ```memql
-use cognition.queries.{ queryActiveSpaceIds }
+use cognition.queries.{ activeSpaceIds }
 
 // `sort` is not a registered function -- engine init fails.
-logic logicListSpacesSorted {
+logic listSpacesSorted {
   args { event object @required }
   body {
-    return sort(queryActiveSpaceIds({}), "name", "asc")
+    return sort(activeSpaceIds({}), "name", "asc")
   }
 }
 ```
@@ -174,15 +174,15 @@ logic logicListSpacesSorted {
 **Right -- struct queries have dedicated clauses.** Sorting,
 windowing, and latest-per-id snapshots are `sort` / `paginate` /
 `asOf` clauses on the struct query itself, not directive calls
-(live examples: `queryLatestSpaceContextForSpace` in
-`dsl/cognition/queries.memql`, `queryStaleClusterNodes` in
+(live examples: `spaceUtterances` in
+`dsl/cognition/queries.memql`, `staleClusterNodes` in
 `dsl/cluster/queries.memql`):
 
 ```memql
 use cognition.concepts.{ context }
 
 /// Latest space-context row for a space.
-query context queryLatestSpaceContextForSpace {
+query context latestSpaceContextForSpace {
   args {
     spaceId  string  @required
   }
@@ -214,15 +214,15 @@ strings, numbers, booleans, null, nested objects, arrays).
 
 **Canonical:**
 ```memql
-mutationCreatePartition({name: "test", partitionType: "standard"})
-querySpaceParticipants({spaceId: "space-123", participantType: "si"})
+createPartition({name: "test", partitionType: "standard"})
+spaceParticipants({spaceId: "space-123", participantType: "si"})
 ```
 
 Quoted string keys are also accepted so JSON-serialized tool calls
 that arrive through the same parser path keep working:
 
 ```memql
-mutationCreatePartition({"name": "test", "partitionType": "standard"})
+createPartition({"name": "test", "partitionType": "standard"})
 ```
 
 Both forms parse identically. Mixed is fine too. The public RPC
@@ -298,7 +298,7 @@ new version becomes the visible one, the old version is invisible
 to plain queries. Use `asOf("2026-01-01T00:00:00Z")` from the
 top-level parser if you need a historical snapshot; struct queries
 carry an `asOf latest` clause for explicit latest-per-id reads (see
-`queryStaleClusterNodes` in `dsl/cluster/queries.memql`).
+`staleClusterNodes` in `dsl/cluster/queries.memql`).
 
 Consumers should still dedupe defensively -- the engine might
 surface multiple historical rows in some shape paths.
@@ -635,20 +635,24 @@ automation "test": dependency cycle among steps [a b]
 **Rule.** A construct is named for what it does, not for its kind --
 the declaration keyword already carries that: `activeHumanParticipants`,
 `addAgentToSpace`, `isHumanParticipant`, `isActiveRecord`,
-`bootstrapSession`. (See naming-conventions.md; #2853 tracks the
-`query*` / `mutation*` / `logic*` entries that still describe a prefix
-no construct carries.)
+`bootstrapSession`. No `query*` / `mutation*` / `logic*` / `spec*` /
+`trait*` / `seed*` prefix -- settled in #2853, which measured 0 of 1091
+shipped declarations carrying one. (See naming-conventions.md.)
 Constructs live in one consolidated file per kind per namespace
 (`dsl/<namespace>/<construct>s.memql`), so the file name never
 carries an individual construct's name.
 
 ```
-dsl/cognition/queries.memql     query space queryActiveSpaces { ... }
-dsl/cognition/mutations.memql   mutation space mutationCreateSpace { ... }
+dsl/cognition/queries.memql     query space activeSpaces { ... }
+dsl/cognition/mutations.memql   mutate space createSpace { ... }
 dsl/common/specs.memql          spec actorEnvelope requiresAdmin { ... }
 dsl/common/traits.memql         trait isActiveRecord { ... }
 dsl/cognition/logic.memql       logic bootstrapSession { ... }
 ```
+
+Note the declaration keyword on the mutation line: it is `mutate`.
+`mutation` is the *invocation* verb used inside a logic body, and the
+parser's own tests call that pair "the canonical footgun distance".
 
 **Why it bites you.** Callers (the product frontend, automations, Go
 integration code) name constructs as a string, so a name is a wire
@@ -658,12 +662,16 @@ tree mixed prefixed and unprefixed names and the frontend hit runtime
 "function not found" errors as a result -- the fix was consistency, not
 a particular prefix.
 
-Enforcement: none on the spelling. The naming-prefix lint was retired in
-epic #2031 (C2/#2042) -- `component/language/compiler/linter.go` records
-this in its header, and `TestCompileSource_NoNamingWarnings` fails the
-build if any `naming.*` warning is emitted. References resolve
-structurally instead: the dependency-tree validator (C3/#2043) fails a
-reference that does not exist at load time.
+Enforcement: `TestNoKindPrefixInConstructNames`
+(`dsl/naming_conventions_test.go`) fails on any declaration named with
+its own kind as a prefix, across all 16 declaration keywords.
+
+The old *opposite* lint, which REQUIRED the prefix, was retired in epic
+#2031 (C2/#2042) -- `component/language/compiler/linter.go` records this
+in its header, and `TestCompileSource_NoNamingWarnings` fails the build
+if any `naming.*` warning is emitted. References resolve structurally:
+the dependency-tree validator (C3/#2043) fails a reference that does not
+exist at load time.
 
 An automation step calls a logic construct by the same name the
 file-top import names -- `step decide { logic bootstrapSession ( event )
@@ -960,7 +968,7 @@ This bit hard in 2026-04-29: a partition concept added a `createdBy`
 payload field, which made the loader refuse the entire concept set.
 Cognition / agent / planner all dropped off the mesh because the
 primary couldn't serve queries. The fix was a one-line concept-schema
-delete plus dropping the matching `mutationCreatePartition` arg.
+delete plus dropping the matching `createPartition` arg.
 
 ---
 
@@ -1027,7 +1035,7 @@ Affected mutations (audit done 2026-05-06; all live under
 
 The historical `concat("ga-", hash(actor))` pattern in the auto-join
 path is gone entirely: the logic (`dsl/cognition/logic.memql`) now
-resolves the assistant via `queryAssistantAgentForUser` + the space
+resolves the assistant via `assistantAgentForUser` + the space
 row's `ownerUserId` (memql#273, locked in by
 `TestAutoJoinSILocksInOwnerUserIdResolution`), and shortId prefixes
 like `ga-` are banned by `TestNoShortIdConceptPrefix`.
@@ -1065,7 +1073,7 @@ use cognition.concepts.{ utterance, space }
 use common.traits.{ isActiveRecord }
 
 /// Insert a chat utterance
-mutation utterance mutationSendUtterance {
+mutate utterance sendUtterance {
   args {
     spaceId  string  @required
     content  string  @required
@@ -1079,7 +1087,7 @@ mutation utterance mutationSendUtterance {
 }
 
 /// Active spaces visible to caller
-query space queryActiveSpaces {
+query space activeSpaces {
   args {
     ownerId  string  @required
   }
@@ -1118,7 +1126,7 @@ func (Spec) example(ctx any) bool {
 }
 
 // args.X is the only way to reach caller-passed fields.
-mutation space mutationExample {
+mutate space example {
   args { x string @required }
   insert {
     field: ctx.x   // ctx is not in scope inside struct-form bodies
@@ -1297,14 +1305,14 @@ A query is list-returning when its `shape` projects a row set
 
 ```memql
 // Single-row read — exempt (row.id == equality).
-query space querySpaceMeta {
+query space spaceMeta {
   args { spaceId string @required }
   filter  row.id==args.spaceId
   shape   spaceFull
 }
 
 // Bounded list — compliant (paginate window).
-query space queryFirstTenSpaces {
+query space firstTenSpaces {
   filter  active==true
   paginate 10
   shape   spaceFull
@@ -1312,13 +1320,13 @@ query space queryFirstTenSpaces {
 
 // Legitimate full-set read — compliant, marked + auditable.
 @unbounded("provider catalog is a small bounded set — never more than a handful of rows")
-query provider queryAllProviders {
+query provider allProviders {
   filter  isActiveRecord
   shape   providerFull
 }
 
 // VIOLATION — list read with no bound. Pulls the whole table.
-query widget queryAllWidgets {
+query widget allWidgets {
   filter  ownerUserId==args.ownerUserId
   shape   widgetFull
 }
@@ -1374,7 +1382,7 @@ explicit "never cache" escape.
 
 ```memql
 @cache(ttl="300")
-query agentRole queryActiveAgentRoles {
+query agentRole activeAgentRoles {
   filter  isActiveRecord
   shape   agentRoleFull
 }

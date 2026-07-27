@@ -70,7 +70,7 @@ Accepted explicit no-op: definitions are enabled by default (functions since
 
 ```memql
 @enabled
-query user queryActiveUsers { ... }
+query user activeUsers { ... }
 ```
 
 #### `@disabled`
@@ -125,7 +125,7 @@ nothing), not the misleading "no capability declaration found".
 
 ```memql
 @disabled
-query user queryLegacyUsers { ... }
+query user legacyUsers { ... }
 ```
 
 #### `@deprecated` (removed)
@@ -162,14 +162,14 @@ redundant long form where `///` suffices; downstream trees convert with
 
 ```memql
 /// Returns all active user profiles with optional filters.
-query user queryActiveUsers { ... }
+query user activeUsers { ... }
 ```
 
 The fallback form stays valid wherever it parses today:
 
 ```memql
 @description("Returns all active user profiles with optional filters")
-query user queryActiveUsers { ... }
+query user activeUsers { ... }
 ```
 
 ---
@@ -197,7 +197,7 @@ fails CI unless it carries `@public` with a comment explaining why.
 ```memql
 // Concept catalog -- no per-user rows, safe to expose unscoped.
 @public
-query nodeType queryNodeTypes { ... }
+query nodeType nodeTypes { ... }
 ```
 
 #### `@role` (buried)
@@ -240,7 +240,7 @@ doc drift -- the engine reads whole seconds.
 
 ```memql
 @cache(300)
-query nodeType queryNodeTypeCatalog { ... }
+query nodeType nodeTypeCatalog { ... }
 ```
 
 ---
@@ -264,7 +264,7 @@ would otherwise wipe sibling keys (memql#1339).
 
 ```memql
 @mergeFields("preferences")
-mutation user mutationToggleComputerUseEnabled { ... }
+mutate user toggleComputerUseEnabled { ... }
 ```
 
 #### `@appendFields("...")`
@@ -279,7 +279,7 @@ element yields a duplicate).
 
 ```memql
 @appendFields("attachmentIds")
-mutation request attachToRequest { ... }
+mutate request attachToRequest { ... }
 ```
 
 #### `@createOnly("...")`
@@ -297,7 +297,7 @@ row, so a create-only field could never be written).
 
 ```memql
 @createOnly("status", "attempts")
-mutation outboundRequest stageOutboundRequest { ... }
+mutate outboundRequest stageOutboundRequest { ... }
 ```
 
 ---
@@ -366,7 +366,7 @@ use cognition.concepts.{ participant }
 use common.traits.{ isActiveRecord }
 
 @description("Get active human participants in a space")
-query participant queryActiveHumanParticipants {
+query participant activeHumanParticipants {
   args {
     spaceId  string  @required
   }
@@ -381,7 +381,7 @@ query participant queryActiveHumanParticipants {
 use cognition.concepts.{ space }
 
 @description("Create a cognition space")
-mutation space mutationCreateSpace {
+mutate space createSpace {
   args {
     spaceId  string  @required
     name     string  @required

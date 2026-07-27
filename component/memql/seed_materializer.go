@@ -85,7 +85,18 @@ func systemActorContext(ctx context.Context) context.Context {
 // (createAgent for v1:agents:agent, etc.) so the platform
 // has a single canonical write path. The convention is:
 //
-//	use <namespace>.<conceptName>   ->  mutationCreate<ConceptName>
+//	use <namespace>.<conceptName>   ->  create<ConceptName>
+//
+// NOT mutationCreate<ConceptName>. Five comments in this file said that, and
+// they were accurate until memql#2036 ("C6: de-prefix construct names +
+// migrate mutation->mutate") changed invokeCreateMutation from
+// `"mutationCreate" + ucFirst(conceptName)` to `"create" + ucFirst(conceptName)`
+// and renamed the corpus to match -- without sweeping these comments or
+// docs/public/concepts/concept-seeding.md. In the months since, a seed author
+// following the stale wording would name their mutation mutationCreateFoo, the
+// materializer would look for createFoo, and the write would fail at runtime.
+// Kind prefixes were abandoned outright in memql#2853; this convention has not
+// used one since #2036.
 //
 // Each seed body field maps to a same-named mutation arg. The
 // concept's id field name follows the same case-corrected pattern:
@@ -313,7 +324,7 @@ func (m *SeedMaterializer) Stop(ctx context.Context) error {
 
 // materializeGlobal writes one row for a @scope("global") seed. The
 // seed body's `id` field provides the row id; remaining body fields
-// flow through to the concept's mutationCreate<ConceptName>. The
+// flow through to the concept's create<ConceptName>. The
 // per-seed provenance is stamped on ctx here so the engine's row-
 // construction layer can persist {kind: "seed", name: <seedName>}
 // as the row's intrinsic provenance field.
@@ -651,8 +662,8 @@ func deterministicPerUserSeedId(def *SeedDefinition, userId string) string {
 	return def.Name + "-" + bare
 }
 
-// invokeCreateMutation builds the canonical `mutationCreate<Concept>`
-// invocation string and dispatches it through the engine.
+// invokeCreateMutation builds the canonical `create<Concept>` invocation
+// string and dispatches it through the engine.
 //
 // MemQL mutation calls accept object-literal args with BARE identifier
 // keys (`{key: value, ...}`), not JSON-style quoted keys. Earlier
@@ -872,7 +883,7 @@ func (m *SeedMaterializer) listUserIds(ctx context.Context) ([]string, error) {
 //     value below.
 //   - Top-level nested blocks  -> object args (recursively walked).
 //   - The synthetic id is stamped at `<conceptName>Id` (the convention
-//     mutationCreate<X> uses).
+//     create<X> uses).
 //   - When `ownerUserId` is supplied (perUser scope), it's added to
 //     the args map regardless of whether the body already has one --
 //     for perUser seeds the user context wins.
@@ -998,7 +1009,7 @@ func extractRowIds(result any) []string {
 
 // ucFirst returns the input string with its first rune upper-cased.
 // Used to convert concept names ("agent" -> "Agent") for the
-// mutation-name convention (mutationCreate<Concept>).
+// mutation-name convention (create<Concept>).
 func ucFirst(s string) string {
 	if s == "" {
 		return ""
