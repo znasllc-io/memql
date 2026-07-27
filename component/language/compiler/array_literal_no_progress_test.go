@@ -12,7 +12,7 @@ import (
 )
 
 // parserDeadline is the shared watchdog window; see
-// literalparity.ParserDeadlineMillis for the value and the measurements behind
+// literalparity.ParserDeadline for the value and the measurements behind
 // it. Declared once there rather than three times here.
 const parserDeadline = literalparity.ParserDeadline
 

@@ -1,6 +1,9 @@
 package literalparity
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 // corpus_test.go -- memql#2835.
 //
@@ -15,8 +18,24 @@ import "testing"
 // A number in a comment is a claim, and this package's whole purpose is that
 // unenforced claims drift.
 
-// wantDivergentRows is the count the package doc states.
-const wantDivergentRows = 8
+// wantDivergentRows and wantRows are the counts the package prose states.
+//
+// BOTH, because pinning the numerator alone is defeatable: converging one row
+// while adding another divergent one keeps the divergent count at 8 while the
+// doc still reads "eight of the SEVENTEEN". Narrow -- the realistic version of
+// that edit reds a per-package parity test first -- but a half-pinned number is
+// the shape this whole package exists to remove.
+const (
+	wantDivergentRows = 8
+	wantRows          = 17
+)
+
+func TestRowCountMatchesTheDoc(t *testing.T) {
+	if len(Cases) != wantRows {
+		t.Errorf("the corpus has %d rows, but the prose says %d. Update both, or the divergent "+
+			"count below is a fraction with an unpinned denominator.", len(Cases), wantRows)
+	}
+}
 
 func TestDivergentRowCountMatchesTheDoc(t *testing.T) {
 	got := 0
@@ -34,9 +53,14 @@ func TestDivergentRowCountMatchesTheDoc(t *testing.T) {
 	}
 }
 
-// TestAcceptedAgreesWithTheRecordedValues keeps the exported Accepted helper
-// honest against the data it reads. It was dead code until this test; an
-// exported helper nothing calls is a helper nothing checks.
+// TestAcceptedAgreesWithTheRecordedValues exercises the exported Accepted
+// helper.
+//
+// Stated accurately, because the first version of this comment overclaimed: it
+// compares the function against an inline copy of its own one-line body, so it
+// validates nothing about the corpus DATA -- it is a change-detector. The
+// justification is the second sentence, not the first: Accepted was exported
+// dead code, and an exported helper nothing calls is a helper nothing checks.
 func TestAcceptedAgreesWithTheRecordedValues(t *testing.T) {
 	for _, c := range Cases {
 		for _, v := range []struct {
@@ -57,6 +81,13 @@ func TestEveryRowRecordsAllThreeCopies(t *testing.T) {
 	for _, c := range Cases {
 		if c.Src == "" {
 			t.Error("a row has no Src")
+		}
+		for _, v := range []string{c.MemQL, c.Compiler, c.Steps} {
+			if v != "ERR" && !json.Valid([]byte(v)) {
+				t.Errorf("row %q records %q, which is not valid JSON. A corrupted value would "+
+					"otherwise surface as a confusing divergent-count failure rather than here.",
+					c.Src, v)
+			}
 		}
 		if c.MemQL == "" || c.Compiler == "" || c.Steps == "" {
 			t.Errorf("row %q is missing a recorded value (memql=%q compiler=%q steps=%q); "+

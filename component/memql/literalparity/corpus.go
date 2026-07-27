@@ -54,9 +54,11 @@ import "time"
 // Case is one literal and what each copy does with it.
 //
 // The value strings are canonical JSON of the parsed result, or "ERR" when the
-// copy rejects the input.
+// copy rejects the input. They are MEASURED, not intended: several rows record
+// behaviour that is plainly wrong (see Divergent), and recording it is the
+// point -- an undocumented divergence is indistinguishable from agreement.
 //
-// Canonical JSON is therefore BLIND TO NUMERIC KIND: int64(1), float64(1) and
+// Canonical JSON is BLIND TO NUMERIC KIND: int64(1), float64(1) and
 // json.Number("1") all marshal to 1. Verified today that no row hides a
 // divergence that way -- every type difference across the three copies also
 // shows in the JSON -- but if one copy ever changes numeric kind alone, this
