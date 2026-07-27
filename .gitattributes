@@ -3,3 +3,20 @@
 
 # Ensure shell scripts use LF to avoid /bin/sh carriage-return errors in devcontainers
 *.sh text eol=lf
+
+# The architecture model is a 42MB generated artifact (memql#2844).
+#
+# -diff: GitHub's diff API times out generating a patch for it -- measured, on
+# the PR that first sorted it, which reordered all 1.26M lines. That failed the
+# `changes` job (dorny/paths-filter reads the diff), which fails `ci-required`,
+# which blocks the PR. Marking it non-diffable makes GitHub report a binary
+# change instead of computing the patch.
+#
+# This costs nothing a reviewer wanted: nobody reads a 42MB JSON diff, and
+# correctness is established by TestArchitectureModelIsCurrent, which
+# regenerates and compares. `git diff --text` still shows the real change
+# locally when you want it -- and thanks to the sort, that is now ~37 lines for
+# a one-function change rather than 903,237.
+#
+# linguist-generated: keeps it out of language stats and collapses it in review.
+component/architecture/embedded/topology.model.json -diff linguist-generated=true
