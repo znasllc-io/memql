@@ -2,10 +2,11 @@ package automations
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/znasllc-io/memql/component/auth"
@@ -578,13 +579,28 @@ func TestResumeStillGrantsInternalOriginToAServerOriginatedRun(t *testing.T) {
 }
 
 // TestCheckpointCarriesTheCallerSuppliedFlag pins the SAVE half, through the
-// real constructor.
+// real constructor AND the real concept schema.
 //
-// My first version of this test round-tripped a hand-built ExecutionCheckpoint
-// through JSON. It passed while both mutations that drop the flag on the real
-// save path -- zeroing it in the constructor, and never setting it on the
-// execution -- left the whole suite GREEN. Asserting a struct I filled in
-// myself proves nothing about the code that fills it in.
+// Two rounds of this test were green for the wrong reason:
+//
+//  1. it round-tripped a hand-built ExecutionCheckpoint through JSON, so both
+//     mutations that drop the flag on the real save path left the suite green.
+//     Fixed by extracting newCheckpointFromExecution.
+//  2. it then round-tripped the CONSTRUCTOR's output through encoding/json --
+//     which is still not the persistence layer. Checkpoints are stored as
+//     v1:memql:checkpoint graph rows, and every concept schema is CLOSED
+//     (noAdditional defaults true). The field was not declared, so
+//     Concept.Create REJECTED the row.
+//
+// The second one was almost invisible, because `omitempty` drops the field
+// when false: a server-originated checkpoint saved fine and only the
+// SECURITY-CRITICAL one was refused, leaving a WARN and no checkpoint. The
+// posture happened to be closed -- no checkpoint, nothing to resume -- but by
+// schema rejection, not by the mechanism, and the mechanism never ran.
+//
+// So the schema declaration is asserted here directly. It is the input the
+// persistence layer actually validates against, and a future edit that drops
+// the field silently reopens the laundering path with everything else green.
 func TestCheckpointCarriesTheCallerSuppliedFlag(t *testing.T) {
 	auto := &Automation{Name: "zzAuto", Trusted: true,
 		Steps: []*Step{{ID: "s1", Name: "decide", Type: StepTypeFunction}}}
@@ -609,30 +625,37 @@ func TestCheckpointCarriesTheCallerSuppliedFlag(t *testing.T) {
 					"that drops it hands a caller-parameterised run full trust on replay "+
 					"(memql#2888).", cp.CallerSuppliedPayload, tc.callerPayload)
 			}
-
-			// And it must survive persistence -- the checkpoint is stored as a
-			// graph row, so a field that does not serialize is one resume
-			// never sees.
-			blob, err := json.Marshal(cp)
-			if err != nil {
-				t.Fatalf("marshal: %v", err)
-			}
-			var round ExecutionCheckpoint
-			if err := json.Unmarshal(blob, &round); err != nil {
-				t.Fatalf("unmarshal: %v", err)
-			}
-			if round.CallerSuppliedPayload != tc.callerPayload {
-				t.Errorf("CallerSuppliedPayload did not survive the JSON round trip (want %v)",
-					tc.callerPayload)
-			}
-			// The attacker payload really is in there -- which is why the flag
+			// The attacker payload really is captured -- which is why the flag
 			// has to be too.
 			if cp.TriggerContext == nil || cp.TriggerContext.Event["payload"] == nil {
 				t.Error("the checkpoint did not capture the trigger payload; if that ever stops " +
-					"being true this whole laundering path closes for a different reason and " +
-					"these tests should be revisited rather than deleted")
+					"being true this laundering path closes for a different reason and these " +
+					"tests should be revisited rather than deleted")
 			}
 		})
+	}
+}
+
+// TestCheckpointConceptDeclaresTheFlag is the persistence half.
+//
+// v1:memql:checkpoint is a CLOSED schema (noAdditional defaults to true for
+// every concept), so an undeclared field does not round-trip -- it makes
+// Concept.Create reject the entire row. Combined with `omitempty`, that meant
+// only the caller-supplied case was refused: the mechanism was dead in
+// production and no test could see it, because encoding/json is not the
+// validator.
+func TestCheckpointConceptDeclaresTheFlag(t *testing.T) {
+	src, err := os.ReadFile(filepath.Join("..", "..", "dsl", "memql", "concepts.memql"))
+	if err != nil {
+		t.Fatalf("read the checkpoint concept: %v", err)
+	}
+	if !strings.Contains(string(src), "callerSuppliedPayload") {
+		t.Fatal("v1:memql:checkpoint does not declare callerSuppliedPayload.\n\n" +
+			"Concept schemas are closed, so the field is not merely dropped -- SaveCheckpoint's " +
+			"Concept.Create REJECTS the whole row, and because the field is `omitempty` that " +
+			"happens only for a CALLER-SUPPLIED run. Resume then has no checkpoint at all for " +
+			"exactly the case the flag exists to mark, and the designed mechanism never runs " +
+			"(memql#2888).")
 	}
 }
 
