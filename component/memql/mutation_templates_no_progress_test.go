@@ -1,11 +1,17 @@
 package memql
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
 	"github.com/znasllc-io/memql/component/memql/literalparity"
 )
+
+// parserDeadline is the shared watchdog window; see
+// literalparity.ParserDeadlineMillis for the value and the measurements behind
+// it. Declared once there rather than three times here.
+const parserDeadline = literalparity.ParserDeadlineMillis * time.Millisecond
 
 // leaked latches once a case abandons a non-terminating goroutine. It is
 // package-level on purpose: a per-loop `break` bounds one loop, but the NEXT
@@ -13,12 +19,6 @@ import (
 // spinner. Tests in a package run sequentially (nothing here calls
 // t.Parallel) and t.Run blocks until the subtest returns, so a plain bool
 // needs no synchronisation.
-// parserDeadline is the watchdog window. 500ms, not 2s (memql#2835): these are
-// microsecond-scale literal parses, so the margin is still ~5,000x, and a
-// shorter window gives a runaway allocation far less room to OOM the process
-// before the FAIL line is printed.
-const parserDeadline = 500 * time.Millisecond
-
 var leaked bool
 
 // mustTerminate runs fn and reports whether it returned in time.
@@ -54,6 +54,14 @@ var leaked bool
 // is ~5,000x the actual parse time for these microsecond-scale literals, so the
 // window an allocation storm has to beat it is far smaller -- but "far smaller"
 // is the honest claim, not "cannot happen".
+//
+// The margin, measured rather than guessed: mean parse is 757ns / 821ns /
+// 2.15us across the three copies, so 500ms is ~240,000-660,000x, and the worst
+// full round trip observed under `-race` with a 5% CPU quota on one core --
+// an absurd configuration -- was 195ms. An earlier draft of this comment said
+// "~5,000x", which was wrong by two orders of magnitude AND self-contradicting
+// (microseconds x 5,000 is 5ms, not 500ms), in a comment whose whole purpose is
+// numeric honesty.
 func mustTerminate(t *testing.T, name string, fn func()) bool {
 	t.Helper()
 	if leaked {
@@ -250,18 +258,31 @@ func TestSeparatorOnlyArrayIsEmptyNotMalformed(t *testing.T) {
 }
 
 // TestLoadCrossCopyParity pins the LOAD copy's half of the shared
-// accept/reject table.//
+// accept/reject table.
+//
 // The corpus itself lives in component/memql/literalparity (memql#2835). It
 // used to be duplicated verbatim in all three files under a comment reading
 // "keep the three tables identical", with nothing enforcing it -- protection
 // against drift that was itself three copies kept in step by a comment.
 func TestLoadCrossCopyParity(t *testing.T) {
 	for _, tc := range literalparity.Cases {
+		tc := tc
 		if !mustTerminate(t, "parsePayloadRawToTemplate("+tc.Src+")", func() {
-			_, err := parsePayloadRawToTemplate(tc.Src)
-			if got := err == nil; got != tc.Accept {
-				t.Errorf("parsePayloadRawToTemplate(%q): accepted=%v, want %v (err=%v)",
-					tc.Src, got, tc.Accept, err)
+			v, err := parsePayloadRawToTemplate(tc.Src)
+			got := "ERR"
+			if err == nil {
+				b, mErr := json.Marshal(v)
+				if mErr != nil {
+					t.Fatalf("marshal %q: %v", tc.Src, mErr)
+				}
+				got = string(b)
+			}
+			if got != tc.MemQL {
+				t.Errorf("parsePayloadRawToTemplate(%q):\n  got  %s\n  want %s\n\n"+
+					"The corpus records what each of the three copies produces, MEASURED. A "+
+					"mismatch means this copy drifted -- or that a divergence was fixed, in "+
+					"which case update component/memql/literalparity and check whether the row "+
+					"is now agreed (memql#2835).", tc.Src, got, tc.MemQL)
 			}
 		}) {
 			break
@@ -403,26 +424,5 @@ func TestParseLiteralsStillAcceptValidInput(t *testing.T) {
 	}
 	if _, ok := obj["nested"].(map[string]any); !ok {
 		t.Errorf("parseObjectLiteral nested object mismatch: %#v", obj["nested"])
-	}
-}
-
-// TestLoadKnownDivergences pins THIS copy's answer for every literal the three
-// parsers disagree on.
-//
-// These are recorded, not fixed. The value is that an omitted divergence looks
-// exactly like agreement -- the parity table was a 10-row spot check, and a
-// broader sweep found the three copies disagreeing on thousands of inputs, one
-// of which is a shorthand the compiler's own realistic-payload test uses. A
-// pinned divergence fails the moment any copy's answer moves, which forces the
-// person who moved it to either finish the fix or update the record on purpose.
-func TestLoadKnownDivergences(t *testing.T) {
-	for _, d := range literalparity.KnownDivergences {
-		_, err := parsePayloadRawToTemplate(d.Src)
-		if got := err == nil; got != d.MemQL {
-			t.Errorf("parsePayloadRawToTemplate(%q): accepted=%v, recorded=%v (err=%v)\n\n%s\n\n"+
-				"If this copy's behaviour changed deliberately, update MemQL in "+
-				"component/memql/literalparity -- and check whether the divergence is now "+
-				"CLOSED, in which case the row moves into Cases.", d.Src, got, d.MemQL, err, d.Note)
-		}
 	}
 }

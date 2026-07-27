@@ -1,6 +1,7 @@
 package steps
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -9,18 +10,17 @@ import (
 	"github.com/znasllc-io/memql/component/automations"
 )
 
+// parserDeadline is the shared watchdog window; see
+// literalparity.ParserDeadlineMillis for the value and the measurements behind
+// it. Declared once there rather than three times here.
+const parserDeadline = literalparity.ParserDeadlineMillis * time.Millisecond
+
 // leaked latches once a case abandons a non-terminating goroutine. It is
 // package-level on purpose: a per-loop `break` bounds one loop, but the NEXT
 // group or the next Test function in the package still starts, so each would
 // leak its own spinner. Tests in a package run sequentially (nothing here
 // calls t.Parallel) and t.Run blocks until the subtest returns, so a plain
 // bool needs no synchronisation.
-// parserDeadline is the watchdog window. 500ms, not 2s (memql#2835): these are
-// microsecond-scale literal parses, so the margin is still ~5,000x, and a
-// shorter window gives a runaway allocation far less room to OOM the process
-// before the FAIL line is printed.
-const parserDeadline = 500 * time.Millisecond
-
 var leaked bool
 
 // mustTerminate runs fn and reports whether it returned in time.
@@ -56,6 +56,14 @@ var leaked bool
 // is ~5,000x the actual parse time for these microsecond-scale literals, so the
 // window an allocation storm has to beat it is far smaller -- but "far smaller"
 // is the honest claim, not "cannot happen".
+//
+// The margin, measured rather than guessed: mean parse is 757ns / 821ns /
+// 2.15us across the three copies, so 500ms is ~240,000-660,000x, and the worst
+// full round trip observed under `-race` with a 5% CPU quota on one core --
+// an absurd configuration -- was 195ms. An earlier draft of this comment said
+// "~5,000x", which was wrong by two orders of magnitude AND self-contradicting
+// (microseconds x 5,000 is 5ms, not 500ms), in a comment whose whole purpose is
+// numeric honesty.
 func mustTerminate(t *testing.T, name string, fn func()) bool {
 	t.Helper()
 	if leaked {
@@ -174,7 +182,8 @@ func TestRuntimeMalformedLiteralErrors(t *testing.T) {
 }
 
 // TestRuntimeCrossCopyParity pins the RUNTIME copy's half of the shared
-// accept/reject table.//
+// accept/reject table.
+//
 // The corpus itself lives in component/memql/literalparity (memql#2835). It
 // used to be duplicated verbatim in all three files under a comment reading
 // "keep the three tables identical", with nothing enforcing it -- protection
@@ -187,11 +196,23 @@ func TestRuntimeCrossCopyParity(t *testing.T) {
 	e := &MutationExecutor{}
 	ev := automations.NewEvaluator()
 	for _, tc := range literalparity.Cases {
+		tc := tc
 		if !mustTerminate(t, "parseAndEvaluateObjectLiteral("+tc.Src+")", func() {
-			_, err := e.parseAndEvaluateObjectLiteral(ev, tc.Src)
-			if got := err == nil; got != tc.Accept {
-				t.Errorf("parseAndEvaluateObjectLiteral(%q): accepted=%v, want %v (err=%v)",
-					tc.Src, got, tc.Accept, err)
+			v, err := e.parseAndEvaluateObjectLiteral(ev, tc.Src)
+			got := "ERR"
+			if err == nil {
+				b, mErr := json.Marshal(v)
+				if mErr != nil {
+					t.Fatalf("marshal %q: %v", tc.Src, mErr)
+				}
+				got = string(b)
+			}
+			if got != tc.Steps {
+				t.Errorf("parseAndEvaluateObjectLiteral(%q):\n  got  %s\n  want %s\n\n"+
+					"The corpus records what each of the three copies produces, MEASURED. A "+
+					"mismatch means this copy drifted -- or that a divergence was fixed, in "+
+					"which case update component/memql/literalparity and check whether the row "+
+					"is now agreed (memql#2835).", tc.Src, got, tc.Steps)
 			}
 		}) {
 			break
@@ -219,26 +240,5 @@ func TestRuntimeValidLiteralsUnchanged(t *testing.T) {
 	}
 	if len(obj) != 2 {
 		t.Errorf("object = %#v, want 2 keys", obj)
-	}
-}
-
-// TestRuntimeKnownDivergences pins THIS copy's answer for every literal the
-// three parsers disagree on. See TestLoadKnownDivergences in component/memql
-// for why the divergences are recorded rather than omitted.
-//
-// This is the copy whose answer is worst on the recorded case: it invents a key
-// from the bare path text -- trailing comma included -- and gives it the NEXT
-// field's value, so a payload that compiles cleanly dispatches with different
-// data than the compiler produced.
-func TestRuntimeKnownDivergences(t *testing.T) {
-	e := &MutationExecutor{}
-	ev := automations.NewEvaluator()
-	for _, d := range literalparity.KnownDivergences {
-		_, err := e.parseAndEvaluateObjectLiteral(ev, d.Src)
-		if got := err == nil; got != d.Steps {
-			t.Errorf("parseAndEvaluateObjectLiteral(%q): accepted=%v, recorded=%v (err=%v)\n\n%s\n\n"+
-				"If this copy's behaviour changed deliberately, update Steps in "+
-				"component/memql/literalparity.", d.Src, got, d.Steps, err, d.Note)
-		}
 	}
 }
