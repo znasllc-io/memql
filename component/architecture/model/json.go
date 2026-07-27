@@ -94,13 +94,29 @@ func (m *Model) WriteJSON(w io.Writer) error {
 // leaves ties in map order. The serialized Attrs are folded in as the final
 // tiebreak, which makes the order total: two edges equal on all four fields are
 // indistinguishable in the output anyway.
+// IsSortedForStableOutput reports whether Nodes and Edges are already in the
+// order WriteJSON emits.
+//
+// Exported so a test can assert the COMMITTED artifact is sorted without
+// re-implementing the comparator -- one comparator, two callers (memql#2844).
+// The subset drift gate cannot see order at all, and byte-for-byte was the only
+// thing enforcing it before; a shuffled model passed.
+func (m *Model) IsSortedForStableOutput() bool {
+	return sort.SliceIsSorted(m.Nodes, m.nodeLess) && sort.SliceIsSorted(m.Edges, m.edgeLess)
+}
+
 func (m *Model) sortForStableOutput() {
 	// Total, like the edge key below. (ID, Kind) alone left two nodes equal on
 	// both but differing in Doc/Source/Attrs in unstable sort.Slice order. No
 	// such pair exists in the real model today -- 0 duplicate IDs, 0 duplicate
 	// (ID, Kind) -- but an undefended asymmetry between the two keys is how the
 	// next one gets in.
-	sort.Slice(m.Nodes, func(i, j int) bool {
+	sort.Slice(m.Nodes, m.nodeLess)
+	sort.Slice(m.Edges, m.edgeLess)
+}
+
+func (m *Model) nodeLess(i, j int) bool {
+	{
 		a, b := m.Nodes[i], m.Nodes[j]
 		switch {
 		case a.ID != b.ID:
@@ -117,8 +133,11 @@ func (m *Model) sortForStableOutput() {
 			return sourceKey(a.Source) < sourceKey(b.Source)
 		}
 		return attrsKey(a.Attrs) < attrsKey(b.Attrs)
-	})
-	sort.Slice(m.Edges, func(i, j int) bool {
+	}
+}
+
+func (m *Model) edgeLess(i, j int) bool {
+	{
 		a, b := m.Edges[i], m.Edges[j]
 		switch {
 		case a.From != b.From:
@@ -129,7 +148,7 @@ func (m *Model) sortForStableOutput() {
 			return a.Kind < b.Kind
 		}
 		return attrsKey(a.Attrs) < attrsKey(b.Attrs)
-	})
+	}
 }
 
 // sourceKey renders a SourceRef deterministically for tiebreaking.

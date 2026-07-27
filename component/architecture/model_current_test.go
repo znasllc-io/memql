@@ -224,3 +224,106 @@ func TestNoSourceRefEscapesTheWorkspace(t *testing.T) {
 			"everywhere but the machine that regenerated (memql#2844).", bad)
 	}
 }
+
+// The four assertions below cover what BYTE-FOR-BYTE was silently enforcing and
+// the subset gate is not (memql#2844 follow-up).
+//
+// Replacing the byte-for-byte comparison was necessary -- it cannot hold under a
+// merge queue -- but it quietly dropped four guarantees, and the review found
+// every one by doctoring the committed artifact and watching the suite stay
+// green:
+//
+//	generated_at + a developer's home path restored  -> PASSED
+//	nodes and edges shuffled                          -> PASSED
+//	8,562 signatures corrupted, every source.file     -> PASSED
+//	Makefile drops --calls (~100k edges lost)         -> PASSED
+//
+// The first is the defect this issue OPENS by describing. The second means the
+// sort -- the single load-bearing change -- was unverified by anything.
+//
+// All four are properties of the COMMITTED FILE ALONE. That is what makes them
+// safe: they need no regeneration, so a concurrent merge can never trip them,
+// which is the exact problem that forced the subset design. They also run under
+// -short.
+
+// committedModel loads the checked-in artifact.
+func committedModel(t *testing.T) *model.Model {
+	t.Helper()
+	return loadModel(t, filepath.Join(workspaceRoot(t), "component", "architecture", "embedded",
+		model.CanonicalFilename))
+}
+
+// TestCommittedModelIsReproducible pins --reproducible.
+func TestCommittedModelIsReproducible(t *testing.T) {
+	m := committedModel(t)
+	if m.GeneratedAt != "" {
+		t.Errorf("generated_at is %q, want empty.\n\nThe committed artifact must be generated with "+
+			"--reproducible (via `make arch-model`). A wall clock makes it differ on every run, "+
+			"which is half of why this file could not be gated at all.", m.GeneratedAt)
+	}
+	if m.Workspace != "" {
+		t.Errorf("workspace is %q, want empty.\n\nThat is the generating machine's ABSOLUTE PATH -- "+
+			"the artifact used to carry /Users/znas/... from a worktree that no longer existed. "+
+			"It commits a developer's home directory and makes the file machine-specific.",
+			m.Workspace)
+	}
+}
+
+// TestCommittedModelClusterIsPinned pins --cluster. Without it the cluster
+// node's name comes from the checkout's FOLDER, so the artifact recorded
+// "cluster:wt-2724".
+func TestCommittedModelClusterIsPinned(t *testing.T) {
+	var ids []model.ID
+	for _, n := range committedModel(t).Nodes {
+		if n.Kind == "cluster" {
+			ids = append(ids, n.ID)
+		}
+	}
+	if len(ids) != 1 || ids[0] != "cluster:memql" {
+		t.Errorf("cluster nodes = %v, want exactly [cluster:memql].\n\nWithout --cluster the name "+
+			"is taken from the workspace folder, so whoever regenerated it stamps their directory "+
+			"into the artifact.", ids)
+	}
+}
+
+// TestCommittedModelIsSorted pins the sort -- the one change everything else
+// rests on, and the one the subset gate is blindest to.
+func TestCommittedModelIsSorted(t *testing.T) {
+	if !committedModel(t).IsSortedForStableOutput() {
+		t.Error("the committed model is not in WriteJSON's order.\n\nThe sort is what makes the " +
+			"artifact reproducible at all: before it, two runs over an identical tree on the same " +
+			"machine emitted the same 121,601 edges in a different sequence. A shuffled model " +
+			"passes the drift gate, which compares node IDs and cannot see order.")
+	}
+}
+
+// TestCommittedModelIsNotGutted stops the subset gate being satisfied by
+// deletion.
+//
+// Subset is trivially true for an empty model: measured, a committed artifact
+// truncated to 3 nodes -- and one with "nodes": [] -- both PASS. Nothing would
+// stop silent rot, or a bad regeneration that dropped most of the tree, from
+// staying green forever.
+//
+// An absolute floor rather than a ratio, so it needs no regeneration and is
+// merge-immune by construction. Set well below the current size: a 4-day-old
+// model across many merges was only 0.76% behind, so this is years of slack
+// while still firing instantly on a gutted file.
+func TestCommittedModelIsNotGutted(t *testing.T) {
+	const minNodes, minEdges = 15000, 90000
+	m := committedModel(t)
+	if len(m.Nodes) < minNodes {
+		t.Errorf("the committed model has %d nodes, floor is %d. Either the tree shrank "+
+			"dramatically or a regeneration dropped most of it -- the drift gate cannot tell, "+
+			"because a subset check is trivially satisfied by deletion.", len(m.Nodes), minNodes)
+	}
+	// Edges carry the call graph, so this also pins --calls: dropping it takes
+	// the model from ~121k edges to ~21k while leaving the node set identical,
+	// which the subset gate passes.
+	if len(m.Edges) < minEdges {
+		t.Errorf("the committed model has %d edges, floor is %d. The most likely cause is "+
+			"regeneration WITHOUT --calls, which drops the CHA call graph (~121k edges to ~21k) "+
+			"and leaves the node set unchanged, so the drift gate stays green.",
+			len(m.Edges), minEdges)
+	}
+}
