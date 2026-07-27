@@ -1091,7 +1091,18 @@ func evaluateScalarArg(raw string, evaluator *Evaluator) (any, error) {
 	// OPEN. The two sites that already had this guard (collection_chain.go and
 	// the chain branch above) are why the hazard was invisible at these two.
 	if isCustomVarRoot(evaluator, firstSegment) && !evaluator.HasStep(firstSegment) {
-		val, err := evaluator.EvaluateValue("$" + raw)
+		// normalizeStepMethodCalls FIRST (memql#2851 review). Widening this
+		// branch to cover `steps.` routed method-call paths down the $-form
+		// path, which does not understand `first()` / `last()` / `count()` --
+		// so `coalesce(steps.rows.first().id, "FB")` interpolated the step
+		// value and appended the leftover accessor, yielding
+		// `{"id":"row-1"}().id`: a serialized row object embedded in a string
+		// that coalesce STILL reads as present. That is worse than the path
+		// text it replaced, and it is the identical hazard the comment above
+		// this guard warns about. The normalizer collapses the call form to
+		// the dotted form resolvePath already navigates; it only touches the
+		// known accessor names, so a non-steps root is unaffected.
+		val, err := evaluator.EvaluateValue("$" + normalizeStepMethodCalls(raw))
 		if err != nil {
 			return nil, nil //nolint:nilerr // soft-fail for coalesce
 		}

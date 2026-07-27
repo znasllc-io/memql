@@ -778,6 +778,7 @@ func splitCoalesceArgs(s string) ([]string, error) {
 // the common `payload.X` / `event.X` filter shapes is unchanged. A first
 // segment that merely matches a seeded custom key also qualifies so a logic
 // that seeds an extra root resolves it explicitly.
+
 // explicitPathRoots is THE list of path roots the evaluator resolves through
 // resolvePath's root switch, shared so it cannot be reimplemented per call site
 // (memql#2851).
@@ -1672,7 +1673,7 @@ func (e *Evaluator) evaluateAtomicCondition(condition string) (bool, error) {
 	// the truthiness; only a path that genuinely does not resolve errors.
 	if isBareDottedPath(condition) {
 		resolved, rerr := e.EvaluateFilterValue(condition)
-		if rerr != nil || renderedAsOwnText(condition, resolved) {
+		if rerr != nil || renderedAsOwnText(condition, resolved) || e.explicitRootDidNotResolve(condition) {
 			return false, fmt.Errorf("condition %q is a bare path that does not resolve: it renders as its own text, and a non-empty string is truthy, so this filter would match EVERYTHING. Write the comparison explicitly (%s == true) or use exists(%s)",
 				condition, condition, condition)
 		}
@@ -1706,11 +1707,47 @@ func isBareDottedPath(condition string) bool {
 }
 
 // renderedAsOwnText reports whether resolution handed back the expression
-// itself -- the signature of a path that did not resolve, since the resolvers
-// in this file fall back to returning their input rather than nil.
+// itself -- the signature of a path that did not resolve, for the roots that
+// still fall back to returning their input rather than nil.
+//
+// It is no longer sufficient on its own: an EXPLICIT-root path now returns nil
+// when it does not resolve (memql#2851), and nil is not a string, so this
+// sniff can never fire for those. explicitRootDidNotResolve is the companion
+// that keeps memql#2819's fail-loud posture intact for them.
 func renderedAsOwnText(condition string, resolved any) bool {
 	s, ok := resolved.(string)
 	return ok && strings.TrimSpace(s) == strings.TrimSpace(condition)
+}
+
+// explicitRootDidNotResolve reports whether condition is an explicit-root path
+// whose resolution FAILED, as opposed to one that resolved to a nil/absent
+// value.
+//
+// This exists because #2851 and #2819 pull in opposite directions and both are
+// right. #2851 wants an unresolved path to be ABSENT so a coalesce fallback is
+// reached. #2819 wants an unresolved BARE-PATH CONDITION to be a LOUD ERROR --
+// its test says so explicitly: "a silent false would trade a filter that always
+// fires for one that never fires -- equally wrong and harder to notice."
+//
+// Returning nil satisfied the first and silently broke the second, because
+// #2819's guard detects non-resolution by sniffing for the path's own text.
+// Measured: `@filter(var.killSwitch)` went from a boot-time error naming the
+// trap to a silent false, so a typo'd variable produced a never-firing gate.
+//
+// The distinction the two need is resolvability, not the value, so the guard
+// asks resolvePath directly. Note this deliberately does NOT fire for a
+// map-backed root: resolvePath returns (nil, nil) for a missing key, so
+// `actor.nonexistent` and `args.missing` stay silent -- exactly as they were
+// before #2851, since #2819's text sniff never caught them either. Widening to
+// those is a real question, but it is #2819's to answer, not a side effect of
+// this change.
+func (e *Evaluator) explicitRootDidNotResolve(condition string) bool {
+	condition = strings.TrimSpace(condition)
+	if e.conditionRootSegment(condition) == "" {
+		return false
+	}
+	_, err := e.resolvePath(condition)
+	return err != nil
 }
 
 // matchSingleArgCall reports whether expr is a single-argument call of the

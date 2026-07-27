@@ -64,8 +64,11 @@ func softnessEvaluator(t *testing.T) *Evaluator {
 	// Seeded exactly as the executor seeds it.
 	e.SetCustom("args", map[string]any{"present": "yes"})
 	e.SetCustom("ctx", map[string]any{"input": map[string]any{}})
+	e.SetInput(map[string]any{"seeded": "yes"})
 	e.SetStepResult("real", &StepResult{StepId: "real", Status: "success",
 		Result: map[string]any{"x": "v"}})
+	e.SetStepResult("rows", &StepResult{StepId: "rows", Status: "success",
+		Result: []any{map[string]any{"id": "row-1"}, map[string]any{"id": "row-2"}}})
 	return e
 }
 
@@ -83,6 +86,10 @@ var unresolvablePaths = []struct{ name, path string }{
 	{"missing key in a map-backed root", "args.missing"},
 	{"missing actor field", "actor.nonexistent"},
 	{"missing ctx key", "ctx.nosuchkey"},
+	{"missing input key", "input.nosuchkey"},
+	// `item` is the forEach loop variable. Unbound outside a loop, which is
+	// the state a coalesce in a non-loop position sees.
+	{"missing item key", "item.nosuchkey"},
 }
 
 // TestUnresolvedPathIsAbsentNotItsOwnText is the property, stated once.
@@ -166,6 +173,7 @@ func TestResolvedPathsAreUnaffected(t *testing.T) {
 		{"seeded arg", "args.present", "yes"},
 		{"actor field", "actor.role", "owner"},
 		{"coalesce takes the resolved value", `$coalesce(steps.real.result.x, "FB")`, "v"},
+		{"step method call resolves", "steps.rows.first.id", "row-1"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e := softnessEvaluator(t)
@@ -211,20 +219,62 @@ func TestNonPathLiteralsStillPassThrough(t *testing.T) {
 // TestUnresolvedPathIsFalsyInAPredicate is why this is a security bug rather
 // than a correctness nit. The truthy-source-text behaviour makes a guard
 // fail OPEN.
-func TestUnresolvedPathIsFalsyInAPredicate(t *testing.T) {
-	e := softnessEvaluator(t)
-	for _, expr := range []string{"var.killSwitch", "secret.missing", "steps.nope.enabled"} {
-		got, err := e.EvaluateCondition(expr)
-		if err != nil {
-			// An error is an acceptable outcome -- it is not fail-open.
-			continue
-		}
-		if got {
-			t.Errorf("EvaluateCondition(%q) = true for an UNRESOLVED path.\n\nThat is fail-OPEN: "+
-				"the path renders as its own non-empty source text, which is truthy, so a guard "+
-				"written to be safe when a value is missing admits instead (memql#2380 / #2851).",
-				expr)
-		}
+// TestUnresolvedBarePathConditionIsALoudError replaces a test that swallowed
+// errors with `continue` and therefore PASSED against the unfixed code -- the
+// review confirmed it would have stayed green through a full revert. It was the
+// test the commit called "the predicate case that makes it a security bug",
+// and it proved nothing.
+//
+// The real requirement is not "falsy". It is LOUD, and it belongs to memql#2819:
+// an unresolved bare-path condition must ERROR, because "a silent false would
+// trade a filter that always fires for one that never fires -- equally wrong
+// and harder to notice."
+//
+// #2851 and #2819 pull opposite ways and both are right. Returning nil for an
+// unresolved path (so coalesce reaches its fallback) silently defeated #2819's
+// guard, which detects non-resolution by sniffing for the path's own text and
+// cannot see a nil. explicitRootDidNotResolve is the companion that keeps the
+// error.
+func TestUnresolvedBarePathConditionIsALoudError(t *testing.T) {
+	for _, expr := range []string{
+		"var.killSwitch", "systemVar.missing", "secret.missing", "systemSecret.missing",
+		"automation.bogus", "steps.nope.enabled", "steps.real.nosuchfield",
+	} {
+		t.Run(expr, func(t *testing.T) {
+			e := softnessEvaluator(t)
+			got, err := e.EvaluateCondition(expr)
+			if err == nil {
+				t.Errorf("EvaluateCondition(%q) = %v with NO error.\n\nAn unresolved bare-path "+
+					"condition must fail LOUD (memql#2819). A silent false trades a filter that "+
+					"always fires for one that never fires -- equally wrong and harder to notice. "+
+					"Making the path resolve to nil for coalesce's sake must not cost this error.",
+					expr, got)
+			}
+		})
+	}
+}
+
+// TestMapBackedRootsStayQuietInAPredicate records the boundary deliberately.
+//
+// A missing key in a MAP-backed root resolves to (nil, nil) -- not a failure --
+// so it stays silent, exactly as it was before #2851. #2819's text sniff never
+// caught these either. Whether it SHOULD is a real question, but it is #2819's
+// to answer; pinning the current boundary here stops #2851 from moving it by
+// accident in either direction.
+func TestMapBackedRootsStayQuietInAPredicate(t *testing.T) {
+	for _, expr := range []string{"actor.nonexistent", "args.missing", "ctx.nosuchkey"} {
+		t.Run(expr, func(t *testing.T) {
+			e := softnessEvaluator(t)
+			got, err := e.EvaluateCondition(expr)
+			if err != nil {
+				t.Errorf("EvaluateCondition(%q) errored: %v\nA missing key in a map-backed root "+
+					"is a resolved absence, not a resolution failure; it was quiet before #2851 "+
+					"and must stay quiet.", expr, err)
+			}
+			if got {
+				t.Errorf("EvaluateCondition(%q) = true -- fail-OPEN", expr)
+			}
+		})
 	}
 }
 
@@ -232,19 +282,174 @@ func TestUnresolvedPathIsFalsyInAPredicate(t *testing.T) {
 // the thing #2851 actually asked for: the resolver-backed roots belong in the
 // enumerated matrix, not in a one-off test that the next root can skip.
 func TestUnresolvedRootsAppearInTheResolutionMatrix(t *testing.T) {
-	roots := map[string]bool{}
+	covered := map[string]bool{}
 	for _, tc := range unresolvablePaths {
 		if i := strings.IndexByte(tc.path, '.'); i > 0 {
-			roots[tc.path[:i]] = true
+			covered[tc.path[:i]] = true
 		}
 	}
-	for _, want := range []string{
-		"var", "systemVar", "secret", "systemSecret", "automation", "steps", "args", "actor", "ctx",
-	} {
-		if !roots[want] {
-			t.Errorf("root %q is not covered by unresolvablePaths. Every explicit root "+
-				"conditionRootSegment recognises must be enumerated here, or the next root added "+
-				"to that switch silently reintroduces memql#2851.", want)
+	// Derived from explicitPathRoots, NOT a hardcoded list. The first version
+	// hardcoded the nine roots that existed and therefore COULD NOT FAIL:
+	// adding "brandNewRoot" to the shared map left this test -- and the whole
+	// package -- green. It was the one thing memql#2851 explicitly asked for,
+	// and it was decorative.
+	for root := range explicitPathRoots {
+		if !covered[root] {
+			t.Errorf("root %q is in explicitPathRoots but has no row in unresolvablePaths.\n\n"+
+				"Every explicit root must be enumerated in the matrix, or the next root added to "+
+				"the shared list silently reintroduces memql#2851 for itself. Add a "+
+				"`%s.<missing>` row.", root, root)
 		}
+	}
+	// `actor` is not in explicitPathRoots (it resolves by a different route)
+	// but is the root the whole #2380 family is about, so it is required
+	// explicitly rather than left to the loop above.
+	if !covered["actor"] {
+		t.Error("the matrix must keep an actor.* row: it is the map-backed control that proves " +
+			"the resolver-backed roots are being compared against something that already works.")
+	}
+}
+
+// TestComparisonVerdictsThatCHANGE is the honest record of what this change
+// costs, and it exists because the commit first claimed the opposite.
+//
+// I verified `== "success"` / `!= "success"` -- the ONE operand pair that
+// happens to be invariant -- and generalised that to "both comparison verdicts
+// are unchanged, provably not a weakening." Review enumerated all six
+// operators in both positions and found FOUR that flip. Only `==` / `!=`
+// against a NON-EMPTY literal are actually invariant.
+//
+// The flips are all the same shape: nil compares as absent/zero where the path
+// text compared as a non-empty string. Every one moves from a verdict computed
+// on a MEANINGLESS string ("steps.nosuch.status" is not data) to one computed
+// on absence, so the new answers are the correct ones -- but they ARE changes,
+// and pinning them here is the difference between a documented semantics change
+// and an undocumented one.
+func TestComparisonVerdictsThatCHANGE(t *testing.T) {
+	for _, tc := range []struct {
+		cond string
+		want bool
+		note string
+	}{
+		// The invariant pair -- the only one the original claim covered.
+		{`steps.nosuch.status == "success"`, false, "invariant"},
+		{`steps.nosuch.status != "success"`, true, "invariant"},
+
+		// Empty-literal comparisons flip. This is the #2257 kill-switch shape.
+		{`steps.nosuch.status == ""`, true, "FLIPPED from false"},
+		{`steps.nosuch.status != ""`, false, "FLIPPED from true"},
+
+		// Ordering flips: compareOrdered reads nil as 0 rather than
+		// lexicographically comparing the path text.
+		{`steps.nosuch.status > "success"`, false, "FLIPPED from true"},
+		{`steps.nosuch.status <= "success"`, true, "FLIPPED from false"},
+		{`5 > var.missing`, true, "FLIPPED from false"},
+	} {
+		t.Run(tc.cond, func(t *testing.T) {
+			e := softnessEvaluator(t)
+			got, err := e.EvaluateCondition(tc.cond)
+			if err != nil {
+				t.Fatalf("EvaluateCondition(%q): %v", tc.cond, err)
+			}
+			if got != tc.want {
+				t.Errorf("EvaluateCondition(%q) = %v, want %v (%s)", tc.cond, got, tc.want, tc.note)
+			}
+		})
+	}
+}
+
+// TestShippedTreeGateThatChanges pins the one live construct this change
+// affects, which the PR claimed did not exist.
+//
+// `dsl/cognition/automations.memql` generateResponse gates two chat inserts on
+// `steps.decide.result != ""`. When the decide step never ran, that read as
+// "steps.decide.result" != "" -> TRUE, so the automation posted a chat
+// utterance whose visible body was the literal string "steps.decide.result".
+// The gate is now false and nothing is posted.
+//
+// I checked for exposure by grepping for `$coalesce` in dsl/, which was the
+// wrong instrument entirely -- the exposure is through comparison operands. The
+// resolver-backed roots do have zero live uses, so that half of the claim held;
+// the `steps.` half did not.
+func TestShippedTreeGateThatChanges(t *testing.T) {
+	const gate = `steps.decide.result != ""`
+
+	unrun := softnessEvaluator(t)
+	got, err := unrun.EvaluateCondition(gate)
+	if err != nil {
+		t.Fatalf("EvaluateCondition(%q): %v", gate, err)
+	}
+	if got {
+		t.Errorf("the generateResponse gate is TRUE with no `decide` step.\n\nThat is how a chat "+
+			"utterance whose body was the literal text %q reached users: the unresolved path was "+
+			"a non-empty string, so `!= \"\"` passed (memql#2851).", "steps.decide.result")
+	}
+
+	// And it must still fire when the step DID produce text, or the fix has
+	// silenced a working feature rather than a bug.
+	ran := softnessEvaluator(t)
+	ran.SetStepResult("decide", &StepResult{StepId: "decide", Status: "success", Result: "hello"})
+	got, err = ran.EvaluateCondition(gate)
+	if err != nil {
+		t.Fatalf("EvaluateCondition(%q) with a real result: %v", gate, err)
+	}
+	if !got {
+		t.Error("the generateResponse gate is FALSE for a step that produced text -- the fix has " +
+			"disabled a working chat path, not just the empty case.")
+	}
+}
+
+// TestStepMethodCallInACoalesceArg is the memql#2851-review blocker.
+//
+// Adding `steps` to the shared root list routed method-call paths down the
+// $-form path, which does not understand first() / last() / count(). The
+// evaluator interpolated the step value and appended the leftover accessor:
+//
+//	coalesce(steps.rows.first().id, "FB")  ->  `{"id":"row-1"}().id`
+//
+// A serialized row object embedded in a string that coalesce still reads as
+// PRESENT -- worse than the path text it replaced, and the identical hazard the
+// comment above that guard already warned about.
+//
+// The CALL form is the point. My first fixture used the already-normalized
+// dotted spelling (`steps.rows.first.id`), which never reaches the normalizer,
+// so removing it left the suite green -- caught only by re-running the
+// mutation.
+func TestStepMethodCallInACoalesceArg(t *testing.T) {
+	for _, tc := range []struct {
+		name, path string
+		want       any
+	}{
+		{"first() then field", "steps.rows.first().id", "row-1"},
+		{"last() then field", "steps.rows.last().id", "row-2"},
+		{"count()", "steps.rows.count", 2},
+		{"already-normalized dotted form still works", "steps.rows.first.id", "row-1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := softnessEvaluator(t)
+			got, err := evaluateCoalesceArgs([]string{tc.path, `"FB"`}, e)
+			if err != nil {
+				t.Fatalf("evaluateCoalesceArgs(%q): %v", tc.path, err)
+			}
+			if fmt.Sprint(got) != fmt.Sprint(tc.want) {
+				t.Errorf("coalesce(%s, \"FB\") = %#v, want %#v.\n\nA method-call path sent down "+
+					"the $-form path without normalization interpolates the step VALUE and "+
+					"appends the leftover accessor, producing a serialized object inside a "+
+					"string -- still truthy, so the fallback is still skipped (memql#2851).",
+					tc.path, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestUnresolvedStepMethodCallStillFallsBack is the same shape, unresolved.
+func TestUnresolvedStepMethodCallStillFallsBack(t *testing.T) {
+	e := softnessEvaluator(t)
+	got, err := evaluateCoalesceArgs([]string{"steps.nope.first().id", `"FB"`}, e)
+	if err != nil {
+		t.Fatalf("evaluateCoalesceArgs: %v", err)
+	}
+	if got != "FB" {
+		t.Errorf("coalesce(steps.nope.first().id, \"FB\") = %#v, want \"FB\"", got)
 	}
 }
