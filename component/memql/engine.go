@@ -644,7 +644,11 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 	// (#2542 item 2): expandExpressionWithArgs short-circuits the cond call and
 	// folds its branch operands, so a cond wrapping a collection chain resolves
 	// in-memory here.
-	if callExpr, ok := plan.Root.(*FunctionCallExpression); ok && (IsDateBuiltin(callExpr.Name) || callExpr.Name == "cond") {
+	// coalesce / concat (#2870) join cond here for the same reason: a logic body
+	// whose single statement is `return args.gate.passed ?? false` leaves a
+	// coalesce call at plan.Root and evaluates in-memory exactly as cond does.
+	if callExpr, ok := plan.Root.(*FunctionCallExpression); ok && (IsDateBuiltin(callExpr.Name) ||
+		callExpr.Name == "cond" || callExpr.Name == "coalesce" || callExpr.Name == "concat") {
 		val, err := evalCollScalar(callExpr, nil, nil)
 		if err != nil {
 			return nil, err
