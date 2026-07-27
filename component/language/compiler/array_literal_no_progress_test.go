@@ -14,7 +14,7 @@ import (
 // parserDeadline is the shared watchdog window; see
 // literalparity.ParserDeadlineMillis for the value and the measurements behind
 // it. Declared once there rather than three times here.
-const parserDeadline = literalparity.ParserDeadlineMillis * time.Millisecond
+const parserDeadline = literalparity.ParserDeadline
 
 // leaked latches once a case abandons a non-terminating goroutine. It is
 // package-level on purpose: a per-loop `break` bounds one loop, but the NEXT
@@ -53,18 +53,14 @@ var leaked bool
 // `ulimit -v 6000000`: the process died of OOM at 1.89s with ZERO `--- FAIL`
 // lines -- before the old 2s deadline. #2828 saw the FAIL print first only
 // because it measured under a 10 GiB cap; at a tighter cap, or on a
-// memory-limited CI runner, the race inverts. The deadline is 500ms now, which
-// is ~5,000x the actual parse time for these microsecond-scale literals, so the
-// window an allocation storm has to beat it is far smaller -- but "far smaller"
-// is the honest claim, not "cannot happen".
+// memory-limited CI runner, the race inverts.
 //
-// The margin, measured rather than guessed: mean parse is 757ns / 821ns /
-// 2.15us across the three copies, so 500ms is ~240,000-660,000x, and the worst
-// full round trip observed under `-race` with a 5% CPU quota on one core --
-// an absurd configuration -- was 195ms. An earlier draft of this comment said
-// "~5,000x", which was wrong by two orders of magnitude AND self-contradicting
-// (microseconds x 5,000 is 5ms, not 500ms), in a comment whose whole purpose is
-// numeric honesty.
+// The deadline is 500ms, and the margin is MEASURED rather than guessed: mean
+// parse is 757ns / 821ns / 2.15us across the three copies, so 500ms is
+// ~240,000-660,000x, and the worst full round trip observed under `-race` with
+// a 5% CPU quota on one core -- an absurd configuration -- was 195ms. So the
+// window an allocation storm has to beat is far smaller than at 2s, but "far
+// smaller" is the honest claim, not "cannot happen".
 func mustTerminate(t *testing.T, name string, fn func()) bool {
 	t.Helper()
 	if leaked {
@@ -246,7 +242,6 @@ func TestCompilerParsesValidLiteralsUnchanged(t *testing.T) {
 func TestCompilerCrossCopyParity(t *testing.T) {
 	c := New(Config{})
 	for _, tc := range literalparity.Cases {
-		tc := tc
 		if !mustTerminate(t, "parsePayloadRaw("+tc.Src+")", func() {
 			v, err := c.parsePayloadRaw(tc.Src)
 			got := "ERR"

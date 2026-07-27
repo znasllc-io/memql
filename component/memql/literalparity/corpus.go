@@ -9,7 +9,7 @@
 // differently at compile time and at dispatch -- a bug class no single-copy
 // test can see.
 //
-// WHY THIS IS A PACKAGE AND NOT THREE TABLES (memql#2844... memql#2835). The
+// WHY THIS IS A PACKAGE AND NOT THREE TABLES (memql#2835). The
 // corpus used to be duplicated verbatim in three _test.go files under a comment
 // reading "keep the three tables identical", with nothing enforcing it. The
 // founding premise of this line of work is that duplicated copies drift, so the
@@ -33,9 +33,12 @@
 // each package asserts its own. A divergence is not a separate list: it is a
 // row whose three values differ, which Divergent() reports.
 //
-// Stdlib-only and dependency-free on purpose (it has zero imports, not even
-// stdlib): all three consumers must be able to import it, and two of them sit
-// on either side of component/memql's own import graph.
+// No MODULE-INTERNAL imports, on purpose: all three consumers must be able to
+// import it, and two of them sit on either side of component/memql's own
+// import graph. `time` is fine -- stdlib cannot create a cycle back into this
+// module, and an earlier version of this doc claimed "zero imports, not even
+// stdlib" as if that were the load-bearing property. It is not; the absence of
+// module-internal imports is.
 //
 // A note on the cited precedent, since the first version overstated it:
 // dslfs.DomainFromFilePath (#2852) and BlankComments (#2872) are PRODUCTION
@@ -46,10 +49,18 @@
 // loses compile-time typing and needs brittle relative paths.
 package literalparity
 
+import "time"
+
 // Case is one literal and what each copy does with it.
 //
 // The value strings are canonical JSON of the parsed result, or "ERR" when the
-// copy rejects the input. They are MEASURED, not intended: several rows record
+// copy rejects the input.
+//
+// Canonical JSON is therefore BLIND TO NUMERIC KIND: int64(1), float64(1) and
+// json.Number("1") all marshal to 1. Verified today that no row hides a
+// divergence that way -- every type difference across the three copies also
+// shows in the JSON -- but if one copy ever changes numeric kind alone, this
+// corpus would report agreement. They are MEASURED, not intended: several rows record
 // behaviour that is plainly wrong (see Divergent), and recording it is the
 // point -- an undocumented divergence is indistinguishable from agreement.
 type Case struct {
@@ -177,6 +188,11 @@ var Cases = []Case{
 
 // ParserDeadline is the watchdog window the three no-progress test files share.
 //
+// A time.Duration, not a bare number of milliseconds. The untyped form made
+// each of the three call sites remember `* time.Millisecond`, and
+// `ParserDeadlineMillis * time.Second` compiles cleanly to 8m20s -- a
+// mini-duplication of exactly the class this package exists to remove.
+//
 // 500ms, not 2s (memql#2835). These parse in well under a microsecond, so the
 // margin is enormous either way; a shorter window gives a runaway allocation
 // far less room to OOM the process before the FAIL line is printed. Measured
@@ -187,4 +203,4 @@ var Cases = []Case{
 // Shared here because the first version of this change DECLARED IT THREE TIMES,
 // in a PR whose entire thesis is that duplicated copies drift. Nothing pinned
 // the three values equal.
-const ParserDeadlineMillis = 500
+const ParserDeadline = 500 * time.Millisecond
