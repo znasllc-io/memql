@@ -2,11 +2,17 @@ package automations
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/memql"
 	"log/slog"
 	"os"
+	"sort"
 	"testing"
 
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/events"
 )
 
 // originCapturingRegistry records the origin of the context each step is
@@ -25,8 +31,13 @@ type originCapturingRegistry struct {
 }
 
 func (r *originCapturingRegistry) Execute(ctx context.Context, step *Step, stepCtx *StepContext) (*StepResult, error) {
-	r.got = auth.OriginFromContext(ctx)
-	r.called = true
+	// FIRST dispatch only. Overwriting on every call meant a fixture with two
+	// steps silently asserted on the LAST one -- and the resume tests below run
+	// a multi-step loop. The app-side twin already did this; the two disagreed.
+	if !r.called {
+		r.got = auth.OriginFromContext(ctx)
+		r.called = true
+	}
 	return &StepResult{Status: "success"}, nil
 }
 
@@ -357,3 +368,377 @@ automation zzAttackerSubmitted {
 			"an untrusted body inherited internal origin from its parent context", reg.got)
 	}
 }
+
+// TestExecuteWithClientEventDoesNotGrantInternalOrigin is the memql#2888 rule,
+// pinned at the executor rather than at the MCP runner.
+//
+// THAT PLACEMENT IS THE POINT. The seam the bug lives on is
+// app/mcp_automation_runner.go, behind `//go:build mcp`, and CI never EXECUTES
+// that file: the tagged test lane runs `-tags agent` and `-tags voice` only.
+//
+// Precisely: it is COMPILED and type-check-gated -- ci.yml's build-node-tags
+// matrix includes mcp and runs `go vet -tags mcp ./...`, which type-checks test
+// files -- but no `go test -tags mcp` ever runs. An earlier version of this
+// comment said the file "is never compiled by CI", which was false and is
+// corrected here rather than quietly dropped. A test that compiles but never
+// runs asserts nothing, so the conclusion stands: this one runs untagged, on
+// the function that actually computes the trust, so it holds for every caller
+// of ExecuteWithClientEvent rather than for the one that exists today. The lane
+// gap is tracked in memql#2903.
+func TestExecuteWithClientEventDoesNotGrantInternalOrigin(t *testing.T) {
+	reg := &originCapturingRegistry{}
+	e := NewExecutor(ExecutorOptions{
+		Logger:       slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})),
+		StepRegistry: reg,
+	})
+
+	// Trusted: loaded from the registered DSL tree, exactly as LoadByName
+	// returns it on the MCP run_automation path.
+	auto := &Automation{
+		Name:    "zzTreeLoadedAutomation",
+		Trusted: true,
+		Steps:   []*Step{{ID: "s1", Name: "decide", Type: StepTypeFunction}},
+	}
+	// The half the caller controls.
+	ev := &events.Event{Topic: "mcp.run.zzTreeLoadedAutomation", Payload: map[string]any{
+		"node": map[string]any{"id": "v1:identity:user:victim"},
+	}}
+
+	if _, err := e.ExecuteWithClientEvent(context.Background(), auto, "mcp", ev); err != nil {
+		t.Fatalf("ExecuteWithClientEvent: %v", err)
+	}
+	if !reg.called {
+		t.Fatal("no step was dispatched, so this asserts nothing -- OriginClient is the zero " +
+			"value, so a negative origin check passes when nothing ran")
+	}
+	if reg.got.IsInternal() {
+		t.Fatalf("a caller-parameterised run of a TRUSTED automation dispatched with origin %v, "+
+			"want client.\n\nThe client cannot choose which construct the authored body invokes, "+
+			"but it chooses that construct's ARGUMENT -- and @serverOnly exempts a construct from "+
+			"carrying any caller-scope filter, so origin is the entire authorization decision. "+
+			"Live chain: run_automation(killSwitchSuspendsRunningPlans, {node:{id:<victim>}}) "+
+			"reaches runningPlansForUser under an attacker-chosen userId and then transitions the "+
+			"plans it returns via updatePlanStatus, which stamps id: args.planId with no owner "+
+			"predicate (memql#2888).", reg.got)
+	}
+}
+
+// TestExecuteWithEventStillGrantsInternalOriginForTrustedSource is the other
+// direction, and it matters as much: #2800's first attempt shipped a BROKEN
+// KILL SWITCH by getting this wrong. A server-originated trigger -- a graph
+// event, a cron tick -- must still reach @serverOnly constructs, or
+// killSwitchSuspendsRunningPlans silently suspends nothing when a user trips
+// the computer-use kill switch.
+func TestExecuteWithEventStillGrantsInternalOriginForTrustedSource(t *testing.T) {
+	reg := &originCapturingRegistry{}
+	e := NewExecutor(ExecutorOptions{
+		Logger:       slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})),
+		StepRegistry: reg,
+	})
+	auto := &Automation{
+		Name:    "zzTreeLoadedAutomation",
+		Trusted: true,
+		Steps:   []*Step{{ID: "s1", Name: "decide", Type: StepTypeFunction}},
+	}
+	ev := &events.Event{Topic: "graph.node.updated.v1:identity:user"}
+
+	if _, err := e.ExecuteWithEvent(context.Background(), auto, "event", ev); err != nil {
+		t.Fatalf("ExecuteWithEvent: %v", err)
+	}
+	if !reg.called {
+		t.Fatal("no step was dispatched")
+	}
+	if !reg.got.IsInternal() {
+		t.Fatalf("a graph-event-triggered run of a TRUSTED automation dispatched with origin %v, "+
+			"want internal. Downgrading this path breaks the computer-use kill switch: its decide "+
+			"step reads runningPlansForUser (@serverOnly) and would be refused as a client call, "+
+			"suspending nothing (memql#2800).", reg.got)
+	}
+}
+
+// TestExecuteWithClientEventOnUntrustedSourceIsStillClient closes the
+// combination: caller-supplied source AND caller-supplied payload. Without it,
+// the && could be written as either operand alone and one of the two tests
+// above would still pass.
+func TestExecuteWithClientEventOnUntrustedSourceIsStillClient(t *testing.T) {
+	reg := &originCapturingRegistry{}
+	e := NewExecutor(ExecutorOptions{
+		Logger:       slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})),
+		StepRegistry: reg,
+	})
+	auto := &Automation{ // Trusted false: compiled from submitted source.
+		Name:  "zzCallerSubmitted",
+		Steps: []*Step{{ID: "s1", Name: "steal", Type: StepTypeFunction}},
+	}
+	if _, err := e.ExecuteWithClientEvent(context.Background(), auto, "mcp", &events.Event{Topic: "t"}); err != nil {
+		t.Fatalf("ExecuteWithClientEvent: %v", err)
+	}
+	if !reg.called {
+		t.Fatal("no step was dispatched")
+	}
+	if reg.got.IsInternal() {
+		t.Fatalf("caller-supplied source AND caller-supplied payload dispatched with origin %v, "+
+			"want client", reg.got)
+	}
+}
+
+// TestResumeDoesNotLaunderClientOriginBackToInternal closes the bypass the
+// #2902 review found, which is sharper than the original bug because the fix
+// itself handed the attacker the token.
+//
+//  1. MCP run_automation with a chosen payload -> client origin. Correct.
+//  2. The body reaches a @serverOnly construct -> refused -> the step errors.
+//  3. ErrorStrategyStop saves a CHECKPOINT, and the checkpoint persists
+//     TriggerContext.Event -- the attacker's payload.
+//  4. POST /automations/resume replays it. resume.go read automation.Trusted
+//     alone and restored SourceTrusted = true.
+//  5. Every remaining step re-dispatches at INTERNAL origin with that payload,
+//     and the resume loop runs to the end, so the WRITE step executes too.
+//
+// So the refusal produced in (2) is what mints the token used in (3). The
+// checkpoint now carries CallerSuppliedPayload and resume applies the same rule
+// as the live path.
+func TestResumeDoesNotLaunderClientOriginBackToInternal(t *testing.T) {
+	reg := &originCapturingRegistry{}
+	e := NewExecutor(ExecutorOptions{
+		Logger:       slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})),
+		StepRegistry: reg,
+	})
+	auto := &Automation{
+		Name:    "zzTreeLoadedAutomation",
+		Trusted: true, // tree-loaded, exactly as LoadByName returns it
+		Steps:   []*Step{{ID: "s1", Name: "decide", Type: StepTypeFunction}},
+	}
+
+	// A checkpoint written by a run whose payload the CALLER supplied.
+	cp := &ExecutionCheckpoint{
+		ExecutionId:           "exec-1",
+		AutomationName:        auto.Name,
+		AutomationFingerprint: auto.DefinitionFingerprint(fingerprintEngine),
+		StepIndex:             0,
+		CallerSuppliedPayload: true,
+		FailedAt:              &StepFailure{StepId: "s1", Error: "refused: @serverOnly"},
+		StepResults:           map[string]*MinimalStepResult{},
+		TriggerContext: &TriggerContext{
+			Event: map[string]any{
+				"topic":   "mcp.run.zzTreeLoadedAutomation",
+				"payload": map[string]any{"node": map[string]any{"id": "v1:identity:user:victim"}},
+			},
+		},
+	}
+
+	if _, err := e.ResumeFrom(context.Background(), cp, auto, &ResumeOptions{FromStep: "s1"}); err != nil {
+		t.Fatalf("ResumeFrom: %v", err)
+	}
+	if !reg.called {
+		t.Fatal("no step was dispatched on resume, so this asserts nothing")
+	}
+	if reg.got.IsInternal() {
+		t.Fatalf("RESUME re-granted INTERNAL origin (%v) to a run whose payload the caller "+
+			"supplied.\n\nThat makes the whole origin downgrade bypassable, and the fix supplies "+
+			"the bypass: the @serverOnly refusal is what causes the checkpoint to be written, and "+
+			"the checkpoint carries the attacker's payload straight back in through "+
+			"POST /automations/resume (memql#2888).", reg.got)
+	}
+}
+
+// TestResumeStillGrantsInternalOriginToAServerOriginatedRun is the other
+// direction. A checkpoint from a graph-event or cron run must resume at
+// internal origin, or every legitimate retry silently loses access to the
+// @serverOnly constructs its body reads.
+func TestResumeStillGrantsInternalOriginToAServerOriginatedRun(t *testing.T) {
+	reg := &originCapturingRegistry{}
+	e := NewExecutor(ExecutorOptions{
+		Logger:       slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})),
+		StepRegistry: reg,
+	})
+	auto := &Automation{
+		Name:    "zzTreeLoadedAutomation",
+		Trusted: true,
+		Steps:   []*Step{{ID: "s1", Name: "decide", Type: StepTypeFunction}},
+	}
+	cp := &ExecutionCheckpoint{
+		ExecutionId:           "exec-2",
+		AutomationName:        auto.Name,
+		AutomationFingerprint: auto.DefinitionFingerprint(fingerprintEngine),
+		StepIndex:             0,
+		CallerSuppliedPayload: false, // graph event / cron
+		FailedAt:              &StepFailure{StepId: "s1", Error: "transient"},
+		StepResults:           map[string]*MinimalStepResult{},
+	}
+
+	if _, err := e.ResumeFrom(context.Background(), cp, auto, &ResumeOptions{FromStep: "s1"}); err != nil {
+		t.Fatalf("ResumeFrom: %v", err)
+	}
+	if !reg.called {
+		t.Fatal("no step was dispatched on resume")
+	}
+	if !reg.got.IsInternal() {
+		t.Fatalf("resume of a SERVER-originated run dispatched at %v, want internal -- every "+
+			"legitimate retry would lose access to the @serverOnly constructs its body reads.",
+			reg.got)
+	}
+}
+
+// TestCheckpointCarriesTheCallerSuppliedFlag pins the SAVE half, through the
+// real constructor AND the real concept schema.
+//
+// Two rounds of this test were green for the wrong reason:
+//
+//  1. it round-tripped a hand-built ExecutionCheckpoint through JSON, so both
+//     mutations that drop the flag on the real save path left the suite green.
+//     Fixed by extracting newCheckpointFromExecution.
+//  2. it then round-tripped the CONSTRUCTOR's output through encoding/json --
+//     which is still not the persistence layer. Checkpoints are stored as
+//     v1:memql:checkpoint graph rows, and every concept schema is CLOSED
+//     (noAdditional defaults true). The field was not declared, so
+//     Concept.Create REJECTED the row.
+//
+// The second one was almost invisible, because `omitempty` drops the field
+// when false: a server-originated checkpoint saved fine and only the
+// SECURITY-CRITICAL one was refused, leaving a WARN and no checkpoint. The
+// posture happened to be closed -- no checkpoint, nothing to resume -- but by
+// schema rejection, not by the mechanism, and the mechanism never ran.
+//
+// So the schema declaration is asserted here directly. It is the input the
+// persistence layer actually validates against, and a future edit that drops
+// the field silently reopens the laundering path with everything else green.
+func TestCheckpointCarriesTheCallerSuppliedFlag(t *testing.T) {
+	auto := &Automation{Name: "zzAuto", Trusted: true,
+		Steps: []*Step{{ID: "s1", Name: "decide", Type: StepTypeFunction}}}
+	step := auto.Steps[0]
+	ev := &events.Event{Topic: "mcp.run.zzAuto", Payload: map[string]any{"node": "victim"}}
+
+	for _, tc := range []struct {
+		name          string
+		callerPayload bool
+	}{
+		{"caller-supplied payload", true},
+		{"server-originated", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			exec := NewExecution(auto.Name, "mcp")
+			exec.CallerSuppliedPayload = tc.callerPayload
+
+			cp := newCheckpointFromExecution(auto, exec, step, 0, "", errTestStepFailed, ev)
+			if cp.CallerSuppliedPayload != tc.callerPayload {
+				t.Fatalf("checkpoint.CallerSuppliedPayload = %v, want %v.\n\nResume reads this "+
+					"field to decide whether internal origin may be restored, so a checkpoint "+
+					"that drops it hands a caller-parameterised run full trust on replay "+
+					"(memql#2888).", cp.CallerSuppliedPayload, tc.callerPayload)
+			}
+			// The attacker payload really is captured -- which is why the flag
+			// has to be too.
+			if cp.TriggerContext == nil || cp.TriggerContext.Event["payload"] == nil {
+				t.Error("the checkpoint did not capture the trigger payload; if that ever stops " +
+					"being true this laundering path closes for a different reason and these " +
+					"tests should be revisited rather than deleted")
+			}
+		})
+	}
+}
+
+// TestCheckpointConceptDeclaresTheFlag is the persistence half.
+//
+// v1:memql:checkpoint is a CLOSED schema (noAdditional defaults to true for
+// every concept), so an undeclared field does not merely fail to round-trip --
+// Concept.Create REJECTS the whole row. Combined with `omitempty`, that meant
+// only the caller-supplied case was refused: the mechanism was dead in
+// production and no test could see it, because encoding/json is not the
+// validator.
+//
+// ASSERTED AGAINST THE LOADED REGISTRY, not the .memql source text. The first
+// version grepped the file for the property name, and its doc claimed that was
+// "the input the persistence layer actually validates against". It is not --
+// the validator reads the LOADER-GENERATED schema. Measured consequences of
+// that gap, and it is the third green-for-the-wrong-reason on this change:
+//
+//	field deleted       -> grep RED     (the only case it caught)
+//	field COMMENTED OUT -> grep PASSES, whole suite green, defect fully back
+//	type bool->boolean  -> grep PASSES; the loader drops the entire concept
+//
+// Going through the registry catches all three, because it asks the same
+// question the persistence layer does.
+func TestCheckpointConceptDeclaresTheFlag(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	if _, err := memql.LoadUnifiedConcepts(logger); err != nil {
+		t.Fatalf("loading concepts: %v", err)
+	}
+	cm, err := memoryNodes.DefaultRegistry().Get(memoryNodes.ConceptMemQLCheckpoint)
+	if err != nil {
+		t.Fatalf("v1:memql:checkpoint is not registered -- the loader DROPPED it, which is what a "+
+			"bad property type does (a `boolean` instead of `bool` takes the whole concept out "+
+			"and every query bound to it fails at runtime): %v", err)
+	}
+	raw, err := cm.SchemaVariant("definition")
+	if err != nil {
+		t.Fatalf("checkpoint schema: %v", err)
+	}
+	var schema struct {
+		Properties map[string]any `json:"properties"`
+		Required   []string       `json:"required"`
+	}
+	if err := json.Unmarshal(raw, &schema); err != nil {
+		t.Fatalf("parse checkpoint schema: %v", err)
+	}
+	if _, ok := schema.Properties["callerSuppliedPayload"]; !ok {
+		t.Fatalf("the LOADED v1:memql:checkpoint schema has no callerSuppliedPayload.\n\n"+
+			"Concept schemas are closed, so SaveCheckpoint's Concept.Create rejects the whole "+
+			"row -- and because the field is `omitempty`, that happens only for a "+
+			"CALLER-SUPPLIED run. Resume then has no checkpoint for exactly the case the flag "+
+			"exists to mark, and the laundering guard never runs (memql#2888).\n\n"+
+			"declared properties: %v", keysOf(schema.Properties))
+	}
+	// Must stay OPTIONAL: `omitempty` drops it on a server-originated run, and
+	// every checkpoint written before this change has no such field.
+	for _, r := range schema.Required {
+		if r == "callerSuppliedPayload" {
+			t.Error("callerSuppliedPayload is REQUIRED. It must not be: omitempty drops it for a " +
+				"server-originated run, and pre-existing rows do not carry it, so requiring it " +
+				"breaks both.")
+		}
+	}
+}
+
+func keysOf(m map[string]any) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// TestExecutionRecordsTheCallerSuppliedFlag pins the other half: the flag has
+// to be ON the execution before the checkpoint can copy it.
+func TestExecutionRecordsTheCallerSuppliedFlag(t *testing.T) {
+	reg := &originCapturingRegistry{}
+	e := NewExecutor(ExecutorOptions{
+		Logger:       slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})),
+		StepRegistry: reg,
+	})
+	auto := &Automation{Name: "zzAuto", Trusted: true,
+		Steps: []*Step{{ID: "s1", Name: "decide", Type: StepTypeFunction}}}
+	ev := &events.Event{Topic: "mcp.run.zzAuto"}
+
+	client, err := e.ExecuteWithClientEvent(context.Background(), auto, "mcp", ev)
+	if err != nil {
+		t.Fatalf("ExecuteWithClientEvent: %v", err)
+	}
+	if !client.CallerSuppliedPayload {
+		t.Error("a caller-parameterised run did not record CallerSuppliedPayload, so any " +
+			"checkpoint it writes resumes at internal origin (memql#2888)")
+	}
+
+	server, err := e.ExecuteWithEvent(context.Background(), auto, "event", ev)
+	if err != nil {
+		t.Fatalf("ExecuteWithEvent: %v", err)
+	}
+	if server.CallerSuppliedPayload {
+		t.Error("a server-originated run recorded CallerSuppliedPayload, which would downgrade " +
+			"every legitimate resume")
+	}
+}
+
+// errTestStepFailed is the stand-in failure a checkpoint is built from.
+var errTestStepFailed = errors.New("refused: @serverOnly")

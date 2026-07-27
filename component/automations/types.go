@@ -798,6 +798,16 @@ type AutomationExecution struct {
 	// Automation.Trusted for why that direction is deliberate.
 	SourceTrusted bool `json:"-"`
 
+	// CallerSuppliedPayload records that this run's TRIGGER PAYLOAD came from a
+	// caller, independently of where the automation's body came from.
+	//
+	// Kept as its own field rather than re-derived from
+	// (automation.Trusted && !SourceTrusted) because it has to survive into a
+	// CHECKPOINT and back out through resume, and a derived value silently
+	// becomes wrong the moment either input is reconstructed differently --
+	// which is exactly how memql#2888's first fix was bypassable.
+	CallerSuppliedPayload bool `json:"-"`
+
 	// ID is a unique identifier for this execution.
 	ID string `json:"id"`
 
@@ -939,6 +949,18 @@ type ExecutionCheckpoint struct {
 
 	// TriggerContext captures the original trigger for event replay.
 	TriggerContext *TriggerContext `json:"triggerContext,omitempty"`
+
+	// CallerSuppliedPayload records that the checkpointed run's trigger payload
+	// came from a caller, so a resume cannot restore internal origin to a run
+	// that never had it (memql#2888).
+	//
+	// This field is the whole reason the fix is not bypassable. The checkpoint
+	// PERSISTS TriggerContext.Event -- the attacker's payload -- and resume
+	// replays it; without this flag resume re-derived trust from
+	// automation.Trusted alone and handed that payload internal origin. The
+	// refusal that the origin downgrade produces is itself what triggers the
+	// checkpoint write, so the fix was minting its own laundering token.
+	CallerSuppliedPayload bool `json:"callerSuppliedPayload,omitempty"`
 
 	// SavedAt is when the checkpoint was saved.
 	SavedAt time.Time `json:"savedAt"`

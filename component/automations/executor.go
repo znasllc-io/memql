@@ -288,8 +288,47 @@ func buildEventEnvelope(triggeringEvent *events.Event, triggeredBy, trigger stri
 	}
 }
 
-// ExecuteWithEvent runs an automation with an optional triggering event.
+// ExecuteWithEvent runs an automation with an optional triggering event, from a
+// SERVER-ORIGINATED trigger: a graph event, a cron tick, a sub-automation. The
+// automation's source decides whether its steps reach the engine with internal
+// origin.
 func (e *Executor) ExecuteWithEvent(ctx context.Context, automation *Automation, triggeredBy string, triggeringEvent *events.Event) (*AutomationExecution, error) {
+	return e.executeWithEvent(ctx, automation, triggeredBy, triggeringEvent, false)
+}
+
+// ExecuteWithClientEvent runs an automation whose TRIGGER PAYLOAD came from a
+// caller, and therefore never grants internal origin however trusted the
+// automation's source is (memql#2888).
+//
+// The #2800 rule -- "trust rides on the automation's SOURCE, not on which
+// function does the dispatching" -- is right and is not sufficient. Its earlier
+// phrasing carried the half that explains why:
+//
+//	a client can certainly cause an automation to fire, but it cannot choose
+//	which constructs the authored body invokes.
+//
+// On the MCP run_automation path the client still cannot choose the CONSTRUCT,
+// but it chooses the ARGUMENT -- and for a @serverOnly construct the argument
+// IS the authorization decision, because dsl/conformance_test.go treats
+// @serverOnly as the bucket that EXEMPTS a construct from carrying any
+// caller-scope filter. Origin is the only gate, so an unchecked argument is an
+// unchecked query.
+//
+// Concretely, before this existed: run_automation("killSwitchSuspendsRunningPlans",
+// {node:{id: <any user>}}) reached runningPlansForUser (@serverOnly) with an
+// attacker-chosen userId and then transitioned every plan it returned through
+// updatePlanStatus, which stamps `id: args.planId` with no owner predicate --
+// a cross-user write, not just a read leak. @filter does not help: the
+// scheduler evaluates it on the event-bus path, not here, and the caller
+// supplies the payload it would test.
+//
+// So the rule is: internal origin requires BOTH a trusted source AND a trigger
+// payload the caller did not supply.
+func (e *Executor) ExecuteWithClientEvent(ctx context.Context, automation *Automation, triggeredBy string, triggeringEvent *events.Event) (*AutomationExecution, error) {
+	return e.executeWithEvent(ctx, automation, triggeredBy, triggeringEvent, true)
+}
+
+func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation, triggeredBy string, triggeringEvent *events.Event, callerSuppliedPayload bool) (*AutomationExecution, error) {
 	if automation == nil {
 		return nil, fmt.Errorf("automation is nil")
 	}
@@ -333,7 +372,11 @@ func (e *Executor) ExecuteWithEvent(ctx context.Context, automation *Automation,
 	ctx = provenance.ContextWithProvenance(ctx, provenance.Automation(automation.Name, trigger))
 
 	exec := NewExecution(automation.Name, triggeredBy)
-	exec.SourceTrusted = automation.Trusted
+	// Internal origin requires a trusted SOURCE and a trigger payload the
+	// caller did not supply. See ExecuteWithClientEvent for why the source
+	// alone is not enough (memql#2888).
+	exec.SourceTrusted = automation.Trusted && !callerSuppliedPayload
+	exec.CallerSuppliedPayload = callerSuppliedPayload
 
 	// Global execution budget (memql#1142). The storm WARN above is a
 	// SIGNAL; this is the STOP. A process-global, cross-executor ceiling
@@ -442,7 +485,16 @@ func (e *Executor) ExecuteWithEvent(ctx context.Context, automation *Automation,
 		// #2800: the input block reaches the engine exactly like a step, so
 		// it gets the same trust rule -- stamped only when the automation's
 		// SOURCE came from the registered tree.
-		inputResult, err := e.executeInput(originForSource(ctx, automation.Trusted), automation.Input)
+		// exec.SourceTrusted, not automation.Trusted (memql#2888 review): the
+		// `input:` block kept the OLD rule, so the caller-payload downgrade
+		// never reached it and the two origin decisions could drift.
+		//
+		// UNTESTED, deliberately stated: executeInput returns early without an
+		// engine and nothing populates Automation.Input today, so a mutation
+		// here stays green. The alignment is for the drift, not for a
+		// reachable exploit -- if `input:` ever becomes live, it inherits the
+		// right rule instead of the one that was already wrong.
+		inputResult, err := e.executeInput(originForSource(ctx, exec.SourceTrusted), automation.Input)
 		if err != nil {
 			exec.Fail(fmt.Errorf("input query failed: %w", err))
 			e.handleAutomationError(ctx, automation, exec, triggeringEvent, err)
@@ -920,6 +972,58 @@ func (e *Executor) executeStep(ctx context.Context, step *Step, stepCtx *StepCon
 }
 
 // saveCheckpointOnFailure persists a checkpoint when an automation fails.
+// newCheckpointFromExecution builds the checkpoint a failed run is resumed
+// from.
+//
+// Extracted from saveCheckpointOnFailure so the FIELD MAPPING is assertable
+// (memql#2888). The security-relevant field is CallerSuppliedPayload: resume
+// reads it to decide whether internal origin may be restored, so a checkpoint
+// that drops it hands a caller-parameterised run full trust on replay. Inside
+// saveCheckpointOnFailure that mapping was unreachable from a test -- the
+// function needs a live *memql.MemQLEngine and returns nothing -- and both
+// mutations that dropped the flag left the suite GREEN. Same reason
+// originForSource was extracted in #2800: a decision you cannot reach is a
+// decision you cannot defend.
+func newCheckpointFromExecution(
+	automation *Automation,
+	exec *AutomationExecution,
+	failedStep *Step,
+	stepIndex int,
+	chainHead string,
+	stepErr error,
+	triggeringEvent *events.Event,
+) *ExecutionCheckpoint {
+	checkpoint := &ExecutionCheckpoint{
+		ExecutionId:           exec.ID,
+		AutomationName:        automation.Name,
+		AutomationFingerprint: automation.DefinitionFingerprint(fingerprintEngine),
+		StepIndex:             stepIndex,
+		ChainHead:             chainHead,
+		InitialChainHead:      exec.InitialChainHead,
+		CallerSuppliedPayload: exec.CallerSuppliedPayload,
+		StepResults:           ToMinimalStepResults(exec.Steps),
+		StepOrder:             exec.StepOrder, // tracked order, not map iteration
+		FailedAt: &StepFailure{
+			StepId:    failedStep.ID,
+			Error:     stepErr.Error(),
+			Timestamp: time.Now().UTC(),
+		},
+		Input:            exec.Input,
+		InputFingerprint: exec.InputFingerprint,
+	}
+	if triggeringEvent != nil {
+		checkpoint.TriggerContext = &TriggerContext{
+			TriggeredBy: exec.TriggeredBy,
+			Event: map[string]any{
+				"topic":   triggeringEvent.Topic,
+				"kind":    triggeringEvent.Kind.String(),
+				"payload": triggeringEvent.Payload,
+			},
+		}
+	}
+	return checkpoint
+}
+
 // This enables resuming the automation from the failed step later.
 func (e *Executor) saveCheckpointOnFailure(
 	ctx context.Context,
@@ -935,35 +1039,7 @@ func (e *Executor) saveCheckpointOnFailure(
 		return
 	}
 
-	checkpoint := &ExecutionCheckpoint{
-		ExecutionId:           exec.ID,
-		AutomationName:        automation.Name,
-		AutomationFingerprint: automation.DefinitionFingerprint(fingerprintEngine),
-		StepIndex:             stepIndex,
-		ChainHead:             chainHead,
-		InitialChainHead:      exec.InitialChainHead,
-		StepResults:           ToMinimalStepResults(exec.Steps),
-		StepOrder:             exec.StepOrder, // Use tracked order, not map iteration
-		FailedAt: &StepFailure{
-			StepId:    failedStep.ID,
-			Error:     stepErr.Error(),
-			Timestamp: time.Now().UTC(),
-		},
-		Input:            exec.Input,
-		InputFingerprint: exec.InputFingerprint,
-	}
-
-	// Capture trigger context for event-driven automations
-	if triggeringEvent != nil {
-		checkpoint.TriggerContext = &TriggerContext{
-			TriggeredBy: exec.TriggeredBy,
-			Event: map[string]any{
-				"topic":   triggeringEvent.Topic,
-				"kind":    triggeringEvent.Kind.String(),
-				"payload": triggeringEvent.Payload,
-			},
-		}
-	}
+	checkpoint := newCheckpointFromExecution(automation, exec, failedStep, stepIndex, chainHead, stepErr, triggeringEvent)
 
 	if err := SaveCheckpoint(ctx, e.engine, checkpoint); err != nil {
 		if e.logger != nil {

@@ -17,7 +17,7 @@ package conformance
 //
 // This dimension drives EACH of the five logics through the genuine
 // run_automation paths -- the LIVE path (Loader.LoadByName + Executor
-// .ExecuteWithEvent, byte-for-byte what the MCP runner does) AND the DRY-RUN
+// .ExecuteWithClientEvent, byte-for-byte what the MCP runner does) AND the DRY-RUN
 // path (DSLConstructSource + RunBundleDryRun, the sandbox preview) -- with a
 // representative event, and asserts the binding resolves: no step fails because
 // an event.* reference came back null. It FAILS against the pre-#1727 sandbox
@@ -130,8 +130,15 @@ func runEventDryRunBinding(t *testing.T, e *Env) {
 
 		// LIVE path -- exactly what the MCP run_automation runner does (#1706 fixed
 		// this; lock it from the run_automation surface).
+		//
+		// ExecuteWithClientEvent, not ExecuteWithEvent (memql#2888). The runner
+		// switched when the caller-supplied-payload downgrade landed, and this
+		// test kept calling the trusted variant -- so it ran at INTERNAL origin
+		// where production runs at CLIENT, and quietly stopped covering the
+		// surface its own comment claims. It would not have gone red: none of
+		// the five logics reaches a @serverOnly construct.
 		ev := &events.Event{Topic: "mcp.run." + auto.Name, Kind: events.KindNodeCreated, Payload: c.event, Timestamp: time.Now().UTC()}
-		execn, liveErr := exec.ExecuteWithEvent(e.Ctx, auto, "mcp", ev)
+		execn, liveErr := exec.ExecuteWithClientEvent(e.Ctx, auto, "mcp", ev)
 		liveMsg := ""
 		if liveErr != nil {
 			liveMsg = liveErr.Error()
