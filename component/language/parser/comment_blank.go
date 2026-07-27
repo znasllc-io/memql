@@ -1,171 +1,46 @@
 package parser
 
-import "strings"
+import "github.com/znasllc-io/memql/component/memql/baseparser"
 
-// comment_blank.go provides an offset-preserving comment scrubber used
-// by the text-based header detectors that run BEFORE the lexer/parser
-// see the source: the struct-form rewriter (rewriter.go), the
-// legacy-procedural rejection gate, and the per-construct function
-// slicer (component/memql/function_slices.go).
+// comment_blank.go -- thin re-exports.
 //
-// Those detectors match `func (Receiver) ...` / `<kind> <name> {`
-// headers with line-anchored regexes and brace-depth scans. A
-// procedural `func (Query)` token that appears inside a `// ...` line
-// comment or a `/* ... */` block comment is NOT a real header, but the
-// naive scanners treated it as one and then mis-parsed the FOLLOWING
-// struct construct (memql#1074). BlankComments replaces the BYTES of
-// every comment with spaces (newlines preserved) so the detectors scan
-// a comment-free view whose byte offsets and line numbers still line up
-// 1:1 with the original source. Callers detect against the blanked copy
-// and splice/slice against the original, so authored comments survive
-// in the emitted output.
+// The implementation moved to component/memql/baseparser (memql#2872).
+// baseparser is a LEAF -- it imports only fmt/sort/strings -- and it hosts
+// ValidateConstructAnnotations, which is one of the raw-text gates that has to
+// scan a comment-blanked view. This package imports baseparser, so the helper
+// could not stay here without a cycle.
+//
+// Moved rather than duplicated for the reason #2815 / #2863 / #2852 all record:
+// two implementations of one lexical answer agree right up until they do not,
+// and this file has already been the source of that bug class twice (#1074,
+// #2868). Existing callers keep spelling it `parser.BlankComments`.
 
-// BlankComments returns a copy of source in which every `//` line
-// comment and `/* ... */` block comment has its content replaced by
-// spaces. Newlines inside block comments are preserved so line numbers
-// are unchanged, and the returned string has exactly the same length as
-// the input so byte offsets remain valid. Comment markers that appear
-// inside a double-quoted string literal are left untouched, mirroring
-// the tokenizer: a `"// not a comment"` literal keeps its `//`.
-//
-// Escape handling inside strings matches the brace scanners
-// (findMatchingCloseBraceRune / braceDepthBefore): a backslash escapes
-// the next byte. Raw backtick strings are treated as string literals
-// too (the rewriter emits backtick-wrapped expressions), so a `//`
-// inside a backtick span is preserved.
-func BlankComments(source string) string {
-	out := []byte(source)
-	n := len(out)
-	const (
-		stateCode = iota
-		stateString
-		stateBacktick
-		stateLineComment
-		stateBlockComment
-	)
-	state := stateCode
-	for i := 0; i < n; i++ {
-		c := out[i]
-		switch state {
-		case stateString:
-			if c == '\\' && i+1 < n {
-				i++ // skip escaped byte
-				continue
-			}
-			if c == '"' {
-				state = stateCode
-			}
-		case stateBacktick:
-			if c == '`' {
-				state = stateCode
-			}
-		case stateLineComment:
-			if c == '\n' {
-				state = stateCode
-				continue // keep the newline
-			}
-			out[i] = ' '
-		case stateBlockComment:
-			if c == '*' && i+1 < n && out[i+1] == '/' {
-				out[i] = ' '
-				out[i+1] = ' '
-				i++
-				state = stateCode
-				continue
-			}
-			if c != '\n' {
-				out[i] = ' '
-			}
-		default: // stateCode
-			switch {
-			case c == '"':
-				state = stateString
-			case c == '`':
-				state = stateBacktick
-			case c == '/' && i+1 < n && out[i+1] == '/':
-				out[i] = ' '
-				out[i+1] = ' '
-				i++
-				state = stateLineComment
-			case c == '/' && i+1 < n && out[i+1] == '*':
-				out[i] = ' '
-				out[i+1] = ' '
-				i++
-				state = stateBlockComment
-			}
-		}
-	}
-	return string(out)
-}
+// BlankComments returns a copy of source in which every `//` line comment and
+// `/* ... */` block comment has its content replaced by spaces, preserving
+// newlines and total byte length so offsets and line numbers still line up 1:1
+// with the original. See baseparser.BlankComments for the full contract.
+func BlankComments(source string) string { return baseparser.BlankComments(source) }
 
 // UnterminatedBlockCommentLine returns the 1-based line on which an
-// unterminated `/*` opens, or 0 when every block comment in source is closed.
-//
-// It shares BlankComments' state machine, so it agrees with it exactly on what
-// counts as a comment opener: a `/*` inside a string, a backtick span, or a
-// `//` line comment is not one.
-//
-// The motivating case is memql#2861. An unterminated block comment comments
-// out the rest of the file -- that is what the lexer does, and what the
-// comment-blanked header detectors now do -- so every construct below it goes
-// ABSENT. Silently absent is exactly what memql#2830 outlawed for automations:
-// one typo'd `/*` removes a workflow from the fleet with no diagnostic. The
-// input is lexer-legal, so this is a WARN-grade signal, not a load failure;
-// callers decide.
+// unterminated `/*` opens, or 0 when every block comment is closed. See
+// baseparser.UnterminatedBlockCommentLine.
 func UnterminatedBlockCommentLine(source string) int {
-	const (
-		stateCode = iota
-		stateString
-		stateBacktick
-		stateLineComment
-		stateBlockComment
-	)
-	state := stateCode
-	n := len(source)
-	openedAt := -1
-	for i := 0; i < n; i++ {
-		c := source[i]
-		switch state {
-		case stateString:
-			if c == '\\' && i+1 < n {
-				i++
-				continue
-			}
-			if c == '"' {
-				state = stateCode
-			}
-		case stateBacktick:
-			if c == '`' {
-				state = stateCode
-			}
-		case stateLineComment:
-			if c == '\n' {
-				state = stateCode
-			}
-		case stateBlockComment:
-			if c == '*' && i+1 < n && source[i+1] == '/' {
-				i++
-				state = stateCode
-				openedAt = -1
-			}
-		default: // stateCode
-			switch {
-			case c == '"':
-				state = stateString
-			case c == '`':
-				state = stateBacktick
-			case c == '/' && i+1 < n && source[i+1] == '/':
-				i++
-				state = stateLineComment
-			case c == '/' && i+1 < n && source[i+1] == '*':
-				openedAt = i
-				i++
-				state = stateBlockComment
-			}
-		}
-	}
-	if state == stateBlockComment && openedAt >= 0 {
-		return strings.Count(source[:openedAt], "\n") + 1
-	}
-	return 0
+	return baseparser.UnterminatedBlockCommentLine(source)
+}
+
+// CommentSpan re-exports baseparser.CommentSpan.
+type CommentSpan = baseparser.CommentSpan
+
+// CommentSpans returns the byte ranges of every comment in source. See
+// baseparser.CommentSpans for why a blanked copy is not a substitute.
+func CommentSpans(source string) []CommentSpan { return baseparser.CommentSpans(source) }
+
+// OffsetInComment reports whether an offset lies inside one of spans.
+func OffsetInComment(spans []CommentSpan, off int) bool {
+	return baseparser.OffsetInComment(spans, off)
+}
+
+// CommentSpanContaining returns the span containing off, if any.
+func CommentSpanContaining(spans []CommentSpan, off int) (CommentSpan, bool) {
+	return baseparser.CommentSpanContaining(spans, off)
 }
