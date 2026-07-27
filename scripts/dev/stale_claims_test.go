@@ -226,7 +226,12 @@ case "$1 $2" in
         issue|edit|-R|*/*) ;;
         [0-9]*) ;;
         --remove-label) seen_remove=1 ;;
-        claimed:*) ;;
+        # Case-INSENSITIVE, like real gh. The stub was stricter than the real
+        # tool here, which made the mixed-case sweep path unverifiable and left
+        # a narrowed remove_claim guard undetectable. "Stub differs from real
+        # gh" is the class that bit this file twice; it pointed the safe way
+        # this time, which is not a reason to leave it.
+        claimed:* | CLAIMED:* | Claimed:*) ;;
         -*) DENY_REASON="unexpected edit flag $a" deny "$@" ;;
         *) DENY_REASON="unexpected edit operand $a" deny "$@" ;;
       esac
@@ -977,6 +982,12 @@ func TestStaleClaims_FullLabelPageWarns(t *testing.T) {
 	if !strings.Contains(res.stderr, "incomplete") {
 		t.Errorf("the warning does not say the report is incomplete:\n%s", res.stderr)
 	}
+	// Name the LABEL cap specifically. Comparing against a DIFFERENT constant
+	// (ISSUE_PAGE_LIMIT, 200) went undetected: a 300-label fixture trips a 200
+	// threshold too, so only the over-warning direction was uncovered.
+	if !strings.Contains(res.stderr, fmt.Sprintf("%d-label page cap", labelPageLimit)) {
+		t.Errorf("the warning does not name the label cap (%d):\n%s", labelPageLimit, res.stderr)
+	}
 }
 
 // TestStaleClaims_ShortLabelPageDoesNotWarn is the other direction: the warning
@@ -985,6 +996,31 @@ func TestStaleClaims_ShortLabelPageDoesNotWarn(t *testing.T) {
 	res := runStaleClaims(t, mixedClaims(), nil)
 	if strings.Contains(res.stderr, "page cap") {
 		t.Errorf("a short label page warned anyway:\n%s", res.stderr)
+	}
+}
+
+// TestStaleClaims_LabelWarningUsesTheLabelCap pins WHICH constant the label
+// comparison reads.
+//
+// Padding between the two caps is what discriminates. Comparing against
+// ISSUE_PAGE_LIMIT (200) instead of LABEL_PAGE_LIMIT (300) went undetected,
+// because the full-page fixture pads to 300 -- which trips a 200 threshold too
+// -- and the short fixture uses 3, which trips neither. Only a count in the gap
+// tells them apart. Asserting the warning TEXT does not help either: the
+// message interpolates LABEL_PAGE_LIMIT regardless of what the comparison read.
+func TestStaleClaims_LabelWarningUsesTheLabelCap(t *testing.T) {
+	if issuePageLimit >= labelPageLimit {
+		t.Skip("caps no longer straddle; this test needs LABEL > ISSUE to discriminate")
+	}
+	cfg := mixedClaims()
+	// Above the ISSUE cap, below the LABEL cap.
+	cfg.padLabels = issuePageLimit + (labelPageLimit-issuePageLimit)/2 - len(cfg.labelIssues)
+
+	res := runStaleClaims(t, cfg, nil)
+	if strings.Contains(res.stderr, "label page cap") {
+		t.Errorf("a label page of ~%d warned, but the cap is %d.\nThe comparison is reading the "+
+			"wrong constant -- most likely ISSUE_PAGE_LIMIT (%d).\nstderr:\n%s",
+			cfg.padLabels+len(cfg.labelIssues), labelPageLimit, issuePageLimit, res.stderr)
 	}
 }
 
@@ -1156,8 +1192,16 @@ func TestStaleClaims_MixedCaseClaimLabelIsEnumerated(t *testing.T) {
 				claimedAt: hoursAgo(100), closedAt: hoursAgo(90)},
 		},
 	}}
-	res := runStaleClaims(t, cfg, nil)
+	res := runStaleClaims(t, cfg, []string{"--apply"})
 
+	// --apply, so the SWEEP path is exercised for a mixed-case label too, not
+	// just the enumeration. remove_claim's prefix guard accepts Claimed:/CLAIMED:
+	// precisely because gh matches case-insensitively; without a sweeping
+	// fixture, narrowing that guard to lowercase-only went undetected.
+	if got := res.edits(); len(got) != 1 || !strings.Contains(got[0], "Claimed:sMixed") {
+		t.Errorf("the mixed-case claim was not swept: %v\nremove_claim's prefix guard must accept "+
+			"the same label spellings gh does, or a real abandoned claim is refused.", got)
+	}
 	if got := res.rowFor(7100); !strings.Contains(got, "ABANDONED") {
 		t.Errorf("a mixed-case `Claimed:` label was not enumerated and classified.\ngh issue list --label matches "+
 			"case-insensitively, so dropping ascii_downcase makes the enumeration and the sweep "+
