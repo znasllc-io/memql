@@ -1091,7 +1091,18 @@ func evaluateScalarArg(raw string, evaluator *Evaluator) (any, error) {
 	// OPEN. The two sites that already had this guard (collection_chain.go and
 	// the chain branch above) are why the hazard was invisible at these two.
 	if isCustomVarRoot(evaluator, firstSegment) && !evaluator.HasStep(firstSegment) {
-		val, err := evaluator.EvaluateValue("$" + raw)
+		// normalizeStepMethodCalls FIRST (memql#2851 review). Widening this
+		// branch to cover `steps.` routed method-call paths down the $-form
+		// path, which does not understand `first()` / `last()` / `count()` --
+		// so `coalesce(steps.rows.first().id, "FB")` interpolated the step
+		// value and appended the leftover accessor, yielding
+		// `{"id":"row-1"}().id`: a serialized row object embedded in a string
+		// that coalesce STILL reads as present. That is worse than the path
+		// text it replaced, and it is the identical hazard the comment above
+		// this guard warns about. The normalizer collapses the call form to
+		// the dotted form resolvePath already navigates; it only touches the
+		// known accessor names, so a non-steps root is unaffected.
+		val, err := evaluator.EvaluateValue("$" + normalizeStepMethodCalls(raw))
 		if err != nil {
 			return nil, nil //nolint:nilerr // soft-fail for coalesce
 		}
@@ -1143,8 +1154,19 @@ func normalizeStepMethodCalls(expr string) string {
 // newEvaluatorForLogic is resolvable here automatically, rather than correct in
 // two places out of three.
 func isCustomVarRoot(evaluator *Evaluator, segment string) bool {
-	switch segment {
-	case "args", "event", "ctx", "input", "item":
+	// One list, shared with conditionRootSegment (memql#2851). This used to
+	// carry its own copy naming only args/event/ctx/input/item, so a coalesce
+	// arg rooted at `var.` / `secret.` / `steps.` / `automation.` missed the
+	// $-form upgrade and fell through to EvaluateStepReference, which returns
+	// the raw path TEXT for anything it cannot resolve. coalesce then read that
+	// non-empty string as a present value and skipped its fallback -- so
+	// `enabled := var.killSwitch ?? false` yielded "var.killSwitch", truthy,
+	// and the kill switch was ON when its variable was missing.
+	//
+	// `event` is this site's own addition: conditionRootSegment excludes it
+	// because the evaluator has a separate `event.`-prefix retry, but a logic
+	// body reads `event.X` directly.
+	if explicitPathRoots[segment] || segment == "event" {
 		return true
 	}
 	return evaluator.hasCustomRoot(segment)
