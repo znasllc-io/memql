@@ -86,14 +86,6 @@ func (m *Model) WriteJSON(w io.Writer) error {
 	return enc.Encode(out)
 }
 
-// sortForStableOutput orders nodes and edges by a total key.
-//
-// Edges are a deliberate MULTI-SET -- the doc on Edge says duplicates are
-// allowed when they carry different attributes, e.g. two call sites on one
-// call-graph edge -- so (From, To, Kind) is not unique and sorting on it alone
-// leaves ties in map order. The serialized Attrs are folded in as the final
-// tiebreak, which makes the order total: two edges equal on all four fields are
-// indistinguishable in the output anyway.
 // IsSortedForStableOutput reports whether Nodes and Edges are already in the
 // order WriteJSON emits.
 //
@@ -105,6 +97,14 @@ func (m *Model) IsSortedForStableOutput() bool {
 	return sort.SliceIsSorted(m.Nodes, m.nodeLess) && sort.SliceIsSorted(m.Edges, m.edgeLess)
 }
 
+// sortForStableOutput orders nodes and edges by a total key.
+//
+// Edges are a deliberate MULTI-SET -- the doc on Edge says duplicates are
+// allowed when they carry different attributes, e.g. two call sites on one
+// call-graph edge -- so (From, To, Kind) is not unique and sorting on it alone
+// leaves ties in map order. The serialized Attrs are folded in as the final
+// tiebreak, which makes the order total: two edges equal on all four fields are
+// indistinguishable in the output anyway.
 func (m *Model) sortForStableOutput() {
 	// Total, like the edge key below. (ID, Kind) alone left two nodes equal on
 	// both but differing in Doc/Source/Attrs in unstable sort.Slice order. No
@@ -116,39 +116,35 @@ func (m *Model) sortForStableOutput() {
 }
 
 func (m *Model) nodeLess(i, j int) bool {
-	{
-		a, b := m.Nodes[i], m.Nodes[j]
-		switch {
-		case a.ID != b.ID:
-			return a.ID < b.ID
-		case a.Kind != b.Kind:
-			return a.Kind < b.Kind
-		case a.Name != b.Name:
-			return a.Name < b.Name
-		case a.Parent != b.Parent:
-			return a.Parent < b.Parent
-		case a.Doc != b.Doc:
-			return a.Doc < b.Doc
-		case sourceKey(a.Source) != sourceKey(b.Source):
-			return sourceKey(a.Source) < sourceKey(b.Source)
-		}
-		return attrsKey(a.Attrs) < attrsKey(b.Attrs)
+	a, b := m.Nodes[i], m.Nodes[j]
+	switch {
+	case a.ID != b.ID:
+		return a.ID < b.ID
+	case a.Kind != b.Kind:
+		return a.Kind < b.Kind
+	case a.Name != b.Name:
+		return a.Name < b.Name
+	case a.Parent != b.Parent:
+		return a.Parent < b.Parent
+	case a.Doc != b.Doc:
+		return a.Doc < b.Doc
+	case sourceKey(a.Source) != sourceKey(b.Source):
+		return sourceKey(a.Source) < sourceKey(b.Source)
 	}
+	return attrsKey(a.Attrs) < attrsKey(b.Attrs)
 }
 
 func (m *Model) edgeLess(i, j int) bool {
-	{
-		a, b := m.Edges[i], m.Edges[j]
-		switch {
-		case a.From != b.From:
-			return a.From < b.From
-		case a.To != b.To:
-			return a.To < b.To
-		case a.Kind != b.Kind:
-			return a.Kind < b.Kind
-		}
-		return attrsKey(a.Attrs) < attrsKey(b.Attrs)
+	a, b := m.Edges[i], m.Edges[j]
+	switch {
+	case a.From != b.From:
+		return a.From < b.From
+	case a.To != b.To:
+		return a.To < b.To
+	case a.Kind != b.Kind:
+		return a.Kind < b.Kind
 	}
+	return attrsKey(a.Attrs) < attrsKey(b.Attrs)
 }
 
 // sourceKey renders a SourceRef deterministically for tiebreaking.

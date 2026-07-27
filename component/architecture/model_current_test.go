@@ -1,6 +1,7 @@
 package architecture
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/znasllc-io/memql/component/architecture/embedded"
 	"github.com/znasllc-io/memql/component/architecture/model"
 )
 
@@ -325,5 +327,67 @@ func TestCommittedModelIsNotGutted(t *testing.T) {
 			"regeneration WITHOUT --calls, which drops the CHA call graph (~121k edges to ~21k) "+
 			"and leaves the node set unchanged, so the drift gate stays green.",
 			len(m.Edges), minEdges)
+	}
+}
+
+// TestCommittedModelLoadsThroughTheRealDecoder is the FIFTH thing byte-for-byte
+// was enforcing, and the one with the worst failure mode.
+//
+// embedded.Load() is the artifact's only consumer path, and it goes through
+// model.ReadJSON, which does two things plain json.Unmarshal does not:
+// DisallowUnknownFields and a SchemaVersion check. Every other test here --
+// including the drift gate -- uses plain Unmarshal, and NOTHING in the repo
+// called embedded.Load() at all; the embedded package had no tests.
+//
+// Byte-for-byte covered this transitively: the committed file equalled the
+// generator's output, and that output is decodable by construction. Measured
+// once that guarantee went away:
+//
+//	schema_version: "0.9"   -> every committed-file test PASSES,
+//	                           embedded.Load() -> "schema version mismatch"
+//	one extra top-level key -> every committed-file test PASSES,
+//	                           embedded.Load() -> "unknown field"
+//
+// That is worse than staleness: the cockpit loads NOTHING and CI is green. It
+// is also the exact case ReadJSON's own doc anticipates -- "in practice that
+// only happens if someone hand-edits the generated file" -- which is how #2844
+// says the artifact drifted in the first place.
+func TestCommittedModelLoadsThroughTheRealDecoder(t *testing.T) {
+	if _, err := embedded.Load(); err != nil {
+		t.Fatalf("the committed artifact does not decode through model.ReadJSON, the strict "+
+			"decoder embedded.Load() uses: %v\n\nIt has DisallowUnknownFields and a schema-version "+
+			"check that plain json.Unmarshal does not, so every other test here can pass while "+
+			"the cockpit loads nothing at all (memql#2844).", err)
+	}
+}
+
+// TestCommittedModelIsCompact is the SIXTH, and it re-arms a CI failure that
+// already cost this change a full cycle.
+//
+// Pretty-printed, the artifact is ~1.26M lines, and GitHub cannot generate a
+// diff for a change that touches all of them:
+//
+//	Server Error: Sorry, this diff is taking too long to generate.
+//	{"resource":"PullRequest","field":"diff","code":"not_available"}
+//
+// dorny/paths-filter reads that diff, so `changes` fails and `ci-required`
+// fails and the PR is unmergeable -- measured on 55fae413. Byte-for-byte was
+// enforcing single-line output. Without this, re-adding SetIndent, or anyone
+// running the file through jq or a formatter, silently re-arms it and the whole
+// suite stays green; you rediscover it as an unmergeable PR rather than a test
+// failure.
+func TestCommittedModelIsCompact(t *testing.T) {
+	root := workspaceRoot(t)
+	raw, err := os.ReadFile(filepath.Join(root, "component", "architecture", "embedded",
+		model.CanonicalFilename))
+	if err != nil {
+		t.Fatalf("read the committed model: %v", err)
+	}
+	// json.Encoder.Encode appends exactly one trailing newline.
+	if n := bytes.Count(raw, []byte("\n")); n > 1 {
+		t.Errorf("the committed artifact spans %d lines; it must be compact (one line).\n\n"+
+			"Pretty-printed, GitHub cannot generate its diff and the `changes` job fails, which "+
+			"fails ci-required and makes the PR unmergeable -- measured on 55fae413. Regenerate "+
+			"with `make arch-model`; do not run the file through a formatter (memql#2844).", n+1)
 	}
 }
