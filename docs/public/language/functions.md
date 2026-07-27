@@ -57,8 +57,8 @@ Gated by `TestNoKindPrefixInConstructNames` in `dsl/naming_conventions_test.go`.
 Full rationale and history: [naming-conventions.md](naming-conventions.md).
 
 This page previously mandated kind prefixes and claimed the compiler emitted
-naming diagnostics for mismatches. Both were false: 0 of 506 shipped
-constructs carried a prefix, and the naming lint was retired in epic #2031 --
+naming diagnostics for mismatches. Both were false: 0 of 1081 shipped
+declarations carried a prefix, and the naming lint was retired in epic #2031 --
 `TestCompileSource_NoNamingWarnings` now fails the build if any `naming.*`
 diagnostic is emitted at all.
 

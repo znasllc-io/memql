@@ -43,10 +43,19 @@ step decide { logic bootstrapSession ( event: event ) }
 ```
 
 This is also what the codebase has always done. Measured across the shipped
-tree (excluding the non-embedded `_reference/` skeletons), **0 of 506
-construct DECLARATIONS carry a kind prefix** -- 0/199 queries, 0/213
-mutations, 0/33 logic, 0/30 traits, 0/25 seeds, 0/6 specs. The prefix rule
-this document used to state was never followed by anything.
+tree (excluding the non-embedded `_reference/` skeletons), **0 of 1081
+construct DECLARATIONS carry a kind prefix**, across all 16 declaration
+keywords. The six kinds the retired rule actually named account for 666 of
+those: 0/199 queries, 0/213 mutations, 0/33 logic, 0/30 traits, 0/185 seeds,
+0/6 specs. The prefix rule this document used to state was never followed by
+anything.
+
+Those counts come from the gate itself, which reads the lexer's token stream.
+An earlier draft counted with a regex and reported 506 / 25 seeds -- it could
+not see the 160 seeds whose names contain `-` (a legal identifier character),
+so both the corpus size and the seed population were understated. The
+measurement and the enforcement are now the same code path, which is the only
+way the number stays true.
 
 Declarations, precisely: a handful of *call sites* still name prefixed
 constructs that do not exist in this tree (`dsl/cognition/logic.memql` calls
@@ -114,6 +123,24 @@ The no-prefix rule IS gated: `TestNoKindPrefixInConstructNames`
 its own kind as a prefix. That is what stops this page and the tree
 drifting apart again -- the previous rule was documented for months while
 nothing in the corpus followed it, and nothing noticed.
+
+It covers **all 16 declaration keywords**, and the keyword set is derived
+from `parser.TopLevelDeclKeywords` -- the parser's own dispatch table --
+plus the four struct forms the rewriter lowers (`query` / `mutate` /
+`logic` / `automation`). Adding a construct kind to the language therefore
+extends the gate automatically.
+
+It finds declarations by walking the **lexer's token stream**, not by
+matching a regex over the source. That is deliberate: the first version
+used a regex and was narrower than the grammar in four ways at once --
+it could not see names containing `-` (legal, and used by 160 of the 185
+seeds), it required the keyword at column 0 though the parser accepts
+leading whitespace, it covered 6 keywords rather than 16, and it counted
+braces inside string literals and comments as real syntax. A gate that
+re-implements the grammar drifts from it; one that reuses the grammar
+cannot. `TestNoKindPrefixGateIsLive` pins that the gate actually fires on
+each of those shapes, so "0 prefixed" can never again be a synonym for
+"scanned nothing".
 
 The old *opposite* lint (`naming.query-prefix` / `naming.mutation-prefix`
 / `naming.spec-prefix`), which required the prefix, was **retired** in the
