@@ -138,7 +138,7 @@ does not hard-delete; an `accountDeletionSweep` cron runs after
   tombstoned (`<deleted:hash>`) rather than removed, preserving
   the audit trail
 
-The user can call `mutationCancelScheduledDeletion` any time
+The user can call `cancelScheduledDeletion` any time
 during the cooldown to abort the deletion.
 
 ## Related
