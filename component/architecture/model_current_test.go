@@ -28,8 +28,8 @@ import (
 // #2903 for the build-tag lane with the same constraint). `make
 // arch-model-check` just runs this test.
 //
-// WHY IT COULD NOT HAVE EXISTED BEFORE. Three things made the artifact
-// unreproducible, and all three had to be fixed first:
+// WHY IT COULD NOT HAVE EXISTED BEFORE. FOUR things made the artifact
+// unreproducible, and all four had to be fixed first:
 //
 //  1. generated_at was a wall clock and workspace was the generating machine's
 //     absolute path -- the checked-in file carried "/Users/znas/..." from a
@@ -39,6 +39,14 @@ import (
 //  3. edge order was Go map order: two runs over an identical tree on the same
 //     machine emitted the same 121,601 edges in a different sequence.
 //     Model.WriteJSON sorts now.
+//  4. 27 SourceRefs pointed OUTSIDE the workspace -- GOROOT and the module
+//     cache -- as `../../..` chains whose LENGTH encoded how deep the checkout
+//     sat on that disk. Two checkouts of the same commit on the same machine
+//     produced different files, and on CI the GOROOT path additionally baked
+//     in the Go PATCH VERSION. extract.workspaceRelative drops them.
+//
+// (4) was found only by regenerating from a second checkout at a different
+// depth, which is why this test's sibling below does exactly that.
 //
 // Until those landed, "regenerate and diff" produced a ~900k-line diff on an
 // unchanged tree, which is why the artifact was refreshed by hand -- and hand
@@ -62,12 +70,17 @@ func TestArchitectureModelIsCurrent(t *testing.T) {
 	}
 
 	regenerated := filepath.Join(t.TempDir(), model.CanonicalFilename)
-	// EXACTLY the flags `make arch-model` uses. If these drift from the
-	// Makefile the gate silently starts comparing against a different
-	// artifact, so TestArchModelFlagsMatchTheMakefile pins them together.
-	cmd := exec.Command("go", "run", "./cmd/memql-arch",
-		"--root", root, "--types", "--calls", "--cluster", "memql",
-		"--reproducible", "--out", regenerated)
+	// Regenerate through `make arch-model` ITSELF, so the flag set exists in
+	// exactly one place (memql#2844 review).
+	//
+	// The first version duplicated the flags here and "pinned" them with a
+	// test that substring-grepped the whole Makefile. That guard was satisfied
+	// by the COMMENT above the target: deleting --calls and --reproducible
+	// from the recipe left it green, and `--cluster memql` matched
+	// `--cluster memqlPRODUCTION` besides. A guard narrower than the thing it
+	// guards -- which is the exact defect class this gate is for. There is no
+	// second copy to keep in step now.
+	cmd := exec.Command("make", "arch-model", "ARCH_MODEL_OUT="+regenerated)
 	cmd.Dir = root
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("regenerating the model failed: %v\n%s", err, out)
@@ -87,41 +100,6 @@ func TestArchitectureModelIsCurrent(t *testing.T) {
 		model.CanonicalFilename,
 		len(want.Nodes), len(want.Edges), len(got.Nodes), len(got.Edges),
 		firstNodeDelta(want, got))
-}
-
-// TestArchModelFlagsMatchTheMakefile keeps this test and `make arch-model`
-// generating the same artifact.
-//
-// Two copies of a flag set drift -- that is the defect class this repo keeps
-// hitting (#2815, #2852, #2872). If the Makefile gains a flag and this test
-// does not, the gate compares the checked-in file against a DIFFERENT model
-// and either fails forever or passes vacuously.
-func TestArchModelFlagsMatchTheMakefile(t *testing.T) {
-	root := workspaceRoot(t)
-	mk, err := os.ReadFile(filepath.Join(root, "Makefile"))
-	if err != nil {
-		t.Fatalf("read Makefile: %v", err)
-	}
-	for _, flag := range []string{"--types", "--calls", "--cluster memql", "--reproducible"} {
-		if !contains(string(mk), flag) {
-			t.Errorf("`make arch-model` no longer passes %q, but TestArchitectureModelIsCurrent "+
-				"still does. The gate would compare the checked-in artifact against a model "+
-				"generated differently. Update both, or neither.", flag)
-		}
-	}
-}
-
-func contains(hay, needle string) bool {
-	return len(needle) > 0 && len(hay) >= len(needle) && stringsIndex(hay, needle) >= 0
-}
-
-func stringsIndex(hay, needle string) int {
-	for i := 0; i+len(needle) <= len(hay); i++ {
-		if hay[i:i+len(needle)] == needle {
-			return i
-		}
-	}
-	return -1
 }
 
 // workspaceRoot walks up from the test's directory to the module root.

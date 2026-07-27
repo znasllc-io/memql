@@ -100,17 +100,30 @@ The architecture framework gives you the static map; `component/observe` is the 
 ### Regenerate the model after code changes
 
 ```bash
-cd memql/component/architecture/embedded
-go generate
+make arch-model
 ```
 
-The directive runs `memql-arch --calls`, which is the heavyweight pass (CHA call graph). Wall-time on the full workspace is around 5 seconds; output is ~12k nodes / 75k edges. Don't run this in a tight loop; it's a build-time pass.
+**This is the only supported way** (memql#2844). The flag set is load-bearing
+and lives in exactly one place, the `arch-model` target:
 
-For a quicker iteration (no call graph), regenerate by hand:
+- `--calls` is NOT a default, and the artifact contains the call graph --
+  121k edges with it, 21k without. Regenerating without it silently drops
+  100k edges.
+- `--reproducible` blanks `generated_at` and the absolute workspace path, and
+  `--cluster memql` pins the cluster node's name, which otherwise comes from
+  your checkout's FOLDER name. Without these the output differs on every run
+  and on every machine, and `TestArchitectureModelIsCurrent` fails for
+  everyone but you.
 
-```bash
-go run ./cmd/memql-arch --root .. --out component/architecture/embedded/topology.model.json
-```
+`go generate` in `embedded/` now shells out to this target, so the two cannot
+disagree. Regenerating by hand is not supported; there is no shorter form that
+produces the committed artifact.
+
+Wall time is ~6s on the full workspace. Regenerate it LAST in any change that
+touches Go, since the model describes the code.
+
+`make arch-model-check` (or plain `go test ./...`) verifies the committed model
+matches the code.
 
 ### Consume the model from another component
 

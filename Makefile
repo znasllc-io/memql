@@ -365,6 +365,12 @@ sdk-gen:
 sdk-gen-check:
 	$(GO) run ./scripts/sdk-gen --check --dsl=dsl --out=sdk/go/client --ts-out=
 
+# ARCH_MODEL_OUT lets the drift gate regenerate to a temp file through THIS
+# target, so the flag set exists exactly once in the repo. Declared above the
+# doc block so it does not separate the '## ' summary from its target, which
+# would drop arch-model out of `make help` (TestMakeHelpCompleteness).
+ARCH_MODEL_OUT ?= component/architecture/embedded/topology.model.json
+
 ## Regenerate the checked-in architecture model
 ## (component/architecture/embedded/topology.model.json), which the cockpit's
 ## Topology tab consumes.
@@ -378,7 +384,7 @@ sdk-gen-check:
 ## path so the output depends only on the code.
 arch-model:
 	$(GO) run ./cmd/memql-arch --root . --types --calls --cluster memql \
-		--reproducible --out component/architecture/embedded/topology.model.json
+		--reproducible --out $(ARCH_MODEL_OUT)
 
 ## CI gate: regenerate the architecture model and diff against the checked-in
 ## copy. Fails if the code changed without the model being refreshed -- the

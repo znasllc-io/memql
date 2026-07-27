@@ -110,9 +110,9 @@ Behavior diagrams ride on top:
 
 - **`model/`** -- `Node`, `Edge`, `Kind`, `EdgeKind`, `Model`, `Index`. The IR. JSON read/write with schema versioning.
 - **`extract/`** -- the analyzer. `Run(Options) -> *Model` is the public entry. Composes the workspace walker, per-module arch.yaml loader, L2/L3 import-graph pass, L4 types pass, `//memql:observe` source-marker parser, CHA call-graph pass, and synthetic cluster root.
-- **`embedded/`** -- `//go:embed topology.model.json` + a `//go:generate` directive pointing at `cmd/memql-arch`. The model is committed; the embed package's `Load()` is the only consumer hook anyone else needs.
+- **`embedded/`** -- `//go:embed topology.model.json` + a `//go:generate` directive that shells out to `make arch-model`. The model is committed; the embed package's `Load()` is the only consumer hook anyone else needs. Regenerate with **`make arch-model`** only -- the flag set is load-bearing and lives solely in that target (memql#2844), and `make arch-model-check` gates the committed artifact against the code.
 
-CLI: `cmd/memql-arch` -- flags `--root`, `--out`, `--cluster`, `--types`, `--calls`.
+CLI: `cmd/memql-arch` -- flags `--root`, `--out`, `--cluster`, `--types`, `--calls`, `--reproducible`. Do not invoke it directly to refresh the committed model; use `make arch-model`, which pins the combination (memql#2844).
 
 ### Runtime side (`component/observe/`)
 
