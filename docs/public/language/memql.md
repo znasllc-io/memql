@@ -732,7 +732,7 @@ Named mutations live in `dsl/<namespace>/mutations.memql`. The concept binding l
 use cognition.concepts.{ space }
 
 /// Insert a new version of a space record (typically used to archive a space).
-mutation space mutationArchiveSpace {
+mutate space archiveSpace {
   args {
     spaceId  string  @required
     payload  object  @required
@@ -811,7 +811,7 @@ use cognition.shapes.{ participantFull }
 use common.traits.{ isActiveRecord }
 
 /// Get space participants
-query participant querySpaceParticipants {
+query participant spaceParticipants {
   args {
     spaceId          string
     status           string  @enum("active", "idle", "left")
@@ -829,7 +829,7 @@ Body directives: `filter` (the predicate), `shape` (named projection), and optio
 
 ```memql
 /// Returns the latest space-context row for a given spaceId
-query context queryLatestSpaceContextForSpace {
+query context latestSpaceContextForSpace {
   args {
     spaceId  string  @required
   }
@@ -846,13 +846,13 @@ Time-travel is a **query-only** clause (alongside `filter` / `shape` / `sort` / 
 
 ```memql
 @latestMode    // surfaced on the contract: this query is time-dependent
-query node queryLiveNodes {
+query node liveNodes {
   asOf latest
   filter  row.type == "node"
   shape   nodeCard
 }
 
-query node queryNodesAt {        // asOf <ts> -> deterministic, no marker
+query node nodesAt {        // asOf <ts> -> deterministic, no marker
   args { at string @required }
   asOf args.at
   shape nodeCard
@@ -975,7 +975,7 @@ Example validation errors:
 
 ### Function Rules
 
-- One consolidated `queries.memql` / `mutations.memql` file per namespace; the declaration name carries the `query` / `mutation` prefix (`queryActiveSpaces`, `mutationCreateSpace`).
+- One consolidated `queries.memql` / `mutations.memql` file per namespace. The declaration name carries **no kind prefix** (memql#2853) -- name it for what it does (`activeSpaces`, `createSpace`); the `query` / `mutate` keyword already marks the kind. See [naming-conventions.md](naming-conventions.md).
 - Functions can reference specs and traits (loaded after specs) and call other functions; circular dependencies are detected and rejected at load time.
 - Comments use `//`; construct descriptions come from `@description("...")`.
 
@@ -991,7 +991,7 @@ Logic constructs are imperative procedures called from automation steps (or othe
 use common.builtins.{ ensureDailySpaceForUser }
 
 /// On user creation, ensure today's daily space exists.
-logic logicProvisionDailySpaceOnUserCreate {
+logic provisionDailySpaceOnUserCreate {
   args {
     event object @required
   }
@@ -1005,7 +1005,7 @@ Multi-statement bodies use `name := <call>` steps followed by a trailing `return
 
 ```memql
 /// Daily sweep that hard-deletes archived spaces whose retention window has elapsed.
-logic logicPurgeExpiredArchivedSpaces {
+logic purgeExpiredArchivedSpaces {
   args {
     event object @required
   }
@@ -1802,13 +1802,13 @@ use cognition.concepts.{ participant }
 use cognition.shapes.{ participantFull }
 use common.traits.{ isActiveRecord }
 
-query participant queryX {
+query participant x {
   args { spaceId string @required }
   filter spaceId==args.spaceId && isActiveRecord
   shape participantFull
 }
 
-mutation space mutationCreateSpace {
+mutate space createSpace {
   args { spaceId string @required  name string @required }
   insert { id: args.spaceId  name: args.name  status: "active"  createdAt: now  createdBy: actor.userId }
 }

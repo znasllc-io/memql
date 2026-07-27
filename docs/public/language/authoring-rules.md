@@ -40,7 +40,7 @@ use cognition.concepts.{ space }
 
 // Right -- one bare insert. The target concept comes from the
 // `mutation <Concept> <name>` signature; restating it is retired.
-mutation space mutationCreateSpace {
+mutate space createSpace {
   args { name string @required }
   insert {
     name: args.name
@@ -51,7 +51,7 @@ mutation space mutationCreateSpace {
 }
 
 // Wrong -- two writes in one body. The parser rejects it.
-mutation space mutationCreateSpaceAndGrantOwner {
+mutate space createSpaceAndGrantOwner {
   args { name string @required }
   insert { ... }                  // ERROR -- only one write allowed
   insert { ... }
@@ -78,7 +78,7 @@ use identity.mutations.{ mutationGrantPartitionAccess }
 
 // 1. The product calls this mutation. (`@default` is not valid on
 //    an args field -- apply defaults in the body via coalesce().)
-mutation partition mutationCreatePartition {
+mutate partition createPartition {
   args {
     name      string  @required
     type      string
@@ -103,7 +103,7 @@ automation autoBootstrapWorkspaceOwnerAccess {
   }
 }
 
-logic logicGrantOwnerOnPartitionCreate {
+logic grantOwnerOnPartitionCreate {
   args { event object @required }
   body {
     return mutationGrantPartitionAccess({
@@ -163,7 +163,7 @@ can't attach. Whole cluster bricked.
 use cognition.queries.{ queryActiveSpaceIds }
 
 // `sort` is not a registered function -- engine init fails.
-logic logicListSpacesSorted {
+logic listSpacesSorted {
   args { event object @required }
   body {
     return sort(queryActiveSpaceIds({}), "name", "asc")
@@ -182,7 +182,7 @@ windowing, and latest-per-id snapshots are `sort` / `paginate` /
 use cognition.concepts.{ context }
 
 /// Latest space-context row for a space.
-query context queryLatestSpaceContextForSpace {
+query context latestSpaceContextForSpace {
   args {
     spaceId  string  @required
   }
@@ -1065,7 +1065,7 @@ use cognition.concepts.{ utterance, space }
 use common.traits.{ isActiveRecord }
 
 /// Insert a chat utterance
-mutation utterance mutationSendUtterance {
+mutate utterance sendUtterance {
   args {
     spaceId  string  @required
     content  string  @required
@@ -1079,7 +1079,7 @@ mutation utterance mutationSendUtterance {
 }
 
 /// Active spaces visible to caller
-query space queryActiveSpaces {
+query space activeSpaces {
   args {
     ownerId  string  @required
   }
@@ -1118,7 +1118,7 @@ func (Spec) example(ctx any) bool {
 }
 
 // args.X is the only way to reach caller-passed fields.
-mutation space mutationExample {
+mutate space example {
   args { x string @required }
   insert {
     field: ctx.x   // ctx is not in scope inside struct-form bodies
@@ -1297,14 +1297,14 @@ A query is list-returning when its `shape` projects a row set
 
 ```memql
 // Single-row read — exempt (row.id == equality).
-query space querySpaceMeta {
+query space spaceMeta {
   args { spaceId string @required }
   filter  row.id==args.spaceId
   shape   spaceFull
 }
 
 // Bounded list — compliant (paginate window).
-query space queryFirstTenSpaces {
+query space firstTenSpaces {
   filter  active==true
   paginate 10
   shape   spaceFull
@@ -1312,13 +1312,13 @@ query space queryFirstTenSpaces {
 
 // Legitimate full-set read — compliant, marked + auditable.
 @unbounded("provider catalog is a small bounded set — never more than a handful of rows")
-query provider queryAllProviders {
+query provider allProviders {
   filter  isActiveRecord
   shape   providerFull
 }
 
 // VIOLATION — list read with no bound. Pulls the whole table.
-query widget queryAllWidgets {
+query widget allWidgets {
   filter  ownerUserId==args.ownerUserId
   shape   widgetFull
 }
@@ -1374,7 +1374,7 @@ explicit "never cache" escape.
 
 ```memql
 @cache(ttl="300")
-query agentRole queryActiveAgentRoles {
+query agentRole activeAgentRoles {
   filter  isActiveRecord
   shape   agentRoleFull
 }

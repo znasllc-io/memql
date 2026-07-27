@@ -78,8 +78,15 @@ The materializer delegates row writes to the concept's existing canonical
 create mutation, so the platform has a single write path. The convention:
 
 ```
-use <namespace>.<conceptName>   ->   mutationCreate<ConceptName>
+use <namespace>.<conceptName>   ->   create<ConceptName>
 ```
+
+**Not** `mutationCreate<ConceptName>`. This page and five comments in
+`component/memql/seed_materializer.go` said that, while the code has always
+built `"create" + ucFirst(conceptName)`. A seed author following the old
+wording named their mutation `mutationCreateFoo`, the materializer looked for
+`createFoo`, and the write failed at runtime -- the same class as #2806, where
+docs named constructs that do not exist. Corrected in memql#2853.
 
 Each seed body field maps to a same-named mutation arg, and the concept's
 id arg follows the case-corrected `<conceptName>Id` pattern (`agent` ->
