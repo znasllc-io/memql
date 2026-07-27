@@ -75,7 +75,26 @@ func (e *Executor) ResumeFrom(
 	// Create new execution tracking the resume
 	triggeredBy := fmt.Sprintf("resumed:%s", checkpoint.ExecutionId)
 	exec := NewExecution(automation.Name, triggeredBy)
-	exec.SourceTrusted = automation.Trusted
+	// The SAME rule as executeWithEvent: internal origin requires a trusted
+	// SOURCE and a trigger payload the caller did not supply (memql#2888).
+	//
+	// Reading automation.Trusted alone here made the origin downgrade
+	// BYPASSABLE, and the bypass was handed to the attacker by the fix itself:
+	//
+	//   1. MCP run_automation with a chosen payload -> client origin (correct)
+	//   2. the body hits a @serverOnly construct -> refused -> the step errors
+	//   3. ErrorStrategyStop saves a CHECKPOINT, which persists
+	//      TriggerContext.Event -- the attacker's payload
+	//   4. POST /automations/resume replays it, and this line restored
+	//      SourceTrusted = true
+	//   5. the steps re-dispatch at INTERNAL origin, with the attacker's
+	//      payload, and the loop runs to the end so the write step executes too
+	//
+	// Measured end to end: leg 1 origins=[client client], leg 2
+	// origins=[internal internal] carrying the same event. The refusal in step
+	// 2 is what MINTS the token in step 3.
+	exec.SourceTrusted = automation.Trusted && !checkpoint.CallerSuppliedPayload
+	exec.CallerSuppliedPayload = checkpoint.CallerSuppliedPayload
 
 	// Set up evaluator
 	evaluator := NewEvaluator()
