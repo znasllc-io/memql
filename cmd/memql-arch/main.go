@@ -13,6 +13,14 @@
 //	memql-arch --out custom.json              # alternate output path
 //	memql-arch --cluster "local"              # name the synthetic L1 root
 //	memql-arch --types                        # also include the L4 class graph
+//	memql-arch --calls                        # also include the CHA call graph
+//	memql-arch --reproducible                 # omit generated_at + workspace
+//
+// The checked-in component/architecture/embedded/topology.model.json is
+// produced by `make arch-model`, which pins the flag set. Do not regenerate it
+// by hand: the flags are load-bearing (the artifact includes the call graph,
+// which the defaults do not) and `make arch-model-check` compares against
+// exactly that command.
 //
 // Exit codes: 0 success, 1 hard failure (workspace not found, etc.).
 // Per-package errors are printed as warnings and do not change the
@@ -36,6 +44,7 @@ func main() {
 		cluster   = flag.String("cluster", "", "cluster name (default: workspace folder name)")
 		withType  = flag.Bool("types", true, "include the L4 type pass (structs, interfaces, methods)")
 		withCalls = flag.Bool("calls", false, "include the CHA call-graph pass (requires --types)")
+		repro     = flag.Bool("reproducible", false, "blank generated_at and workspace so the output depends only on the code (used by `make arch-model`)")
 	)
 	flag.Parse()
 
@@ -51,6 +60,23 @@ func main() {
 	})
 	if err != nil {
 		fail("%v", err)
+	}
+
+	// --reproducible strips the two fields that make the output depend on WHO
+	// ran it and WHEN (memql#2844).
+	//
+	// The checked-in artifact carried `"workspace": "/Users/znas/..."` -- an
+	// absolute path from a different machine, on a worktree that no longer
+	// exists -- and a wall-clock `generated_at`. Both change on every run, so a
+	// byte-for-byte drift gate was impossible no matter which flags were used,
+	// which is why nobody could tell how the file had been produced.
+	//
+	// Workspace has ZERO in-repo consumers; its own doc says the cockpit uses
+	// it "only for display". Blanking it also stops a developer's home
+	// directory being committed.
+	if *repro {
+		m.GeneratedAt = ""
+		m.Workspace = ""
 	}
 
 	outPath := *out

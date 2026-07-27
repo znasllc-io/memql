@@ -1,0 +1,226 @@
+package architecture
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/znasllc-io/memql/component/architecture/model"
+)
+
+// model_current_test.go -- memql#2844.
+//
+// component/architecture/embedded/topology.model.json is a generated artifact
+// with NO gate. It drifted silently: #2840 removed the userId argument from
+// toggleComputerUseEnabled, the Go SDK regenerated correctly and
+// `make sdk-gen-check` reported no drift, but the architecture model kept
+// ToggleComputerUseEnabledArgs.UserId in 13 places. The cockpit's Topology tab
+// reads this file, so what it renders could disagree with the code
+// indefinitely.
+//
+// WHY THIS IS A GO TEST AND NOT A CI STEP. It gates inside the ordinary
+// `go test ./...` lane, so it needs no workflow edit -- which matters because
+// the same session that found this could not modify .github/workflows (see
+// #2903 for the build-tag lane with the same constraint). `make
+// arch-model-check` just runs this test.
+//
+// WHY IT COULD NOT HAVE EXISTED BEFORE. FOUR things made the artifact
+// unreproducible, and all four had to be fixed first:
+//
+//  1. generated_at was a wall clock and workspace was the generating machine's
+//     absolute path -- the checked-in file carried "/Users/znas/..." from a
+//     worktree that no longer exists. --reproducible blanks both.
+//  2. the cluster node's name came from the workspace FOLDER name, so the file
+//     recorded "cluster:wt-2724". --cluster pins it.
+//  3. edge order was Go map order: two runs over an identical tree on the same
+//     machine emitted the same 121,601 edges in a different sequence.
+//     Model.WriteJSON sorts now.
+//  4. 27 SourceRefs pointed OUTSIDE the workspace -- GOROOT and the module
+//     cache -- as `../../..` chains whose LENGTH encoded how deep the checkout
+//     sat on that disk. Two checkouts of the same commit on the same machine
+//     produced different files, and on CI the GOROOT path additionally baked
+//     in the Go PATCH VERSION. extract.workspaceRelative drops them.
+//
+// (4) was found only by regenerating from a second checkout at a different
+// depth, which is why this test's sibling below does exactly that.
+//
+// Until those landed, "regenerate and diff" produced a ~900k-line diff on an
+// unchanged tree, which is why the artifact was refreshed by hand -- and hand
+// editing is how it fell out of sync.
+
+// TestArchitectureModelIsNotStale asserts the committed model is not WRONG.
+//
+// WHY NOT BYTE-FOR-BYTE. That was the first design, and it cannot work in this
+// repo. The model describes the WHOLE tree, so any PR that merges while yours
+// is open makes yours stale -- and with a merge queue it is worse than
+// friction, it is unwinnable: the queue tests a merge commit against a moving
+// main, so any PR behind another is stale by construction. Measured: this
+// branch regenerated to 20182 nodes locally and CI's merge commit produced
+// 20191, purely because #2905 and #2907 landed in between. A gate that fails on
+// somebody else's merge blocks unrelated work, which is worse than the staleness
+// it was meant to catch.
+//
+// WHAT IT CHECKS INSTEAD. Every node in the COMMITTED model must still exist in
+// the regenerated one. That is exactly the defect #2844 reported --
+// ToggleComputerUseEnabledArgs.UserId survived in the model in 13 places after
+// #2840 removed the argument -- and it is immune to concurrent merges, which
+// only ADD nodes.
+//
+// The asymmetry is deliberate and is the whole point:
+//
+//	node removed from the code, still in the model  -> the model LIES. FAIL.
+//	node added to the code, not yet in the model    -> the model is behind. OK.
+//
+// A missing node makes the cockpit render something that no longer exists. An
+// absent one makes it render slightly less than exists, which is what any
+// committed snapshot does between refreshes. Run `make arch-model` to catch up.
+//
+// Skipped under -short: it shells out to the extractor over the whole
+// workspace (~6s). CI runs the suite without -short, so the gate is live there.
+func TestArchitectureModelIsNotStale(t *testing.T) {
+	if testing.Short() {
+		t.Skip("regenerates the whole architecture model; skipped in -short")
+	}
+
+	root := workspaceRoot(t)
+	checkedIn := filepath.Join(root, "component", "architecture", "embedded", model.CanonicalFilename)
+	if _, err := os.Stat(checkedIn); err != nil {
+		t.Fatalf("checked-in model not found at %s: %v", checkedIn, err)
+	}
+
+	regenerated := filepath.Join(t.TempDir(), model.CanonicalFilename)
+	// Through `make arch-model` ITSELF, so the flag set exists in exactly one
+	// place. A previous version duplicated the flags here and "pinned" them
+	// with a test that substring-grepped the Makefile -- which its own comment
+	// block satisfied.
+	before := sumFile(t, checkedIn)
+	cmd := exec.Command("make", "arch-model", "ARCH_MODEL_OUT="+regenerated)
+	cmd.Dir = root
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("regenerating the model failed: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(regenerated); err != nil {
+		t.Fatalf("`make arch-model` exited 0 but wrote nothing to %s -- did the target lose its "+
+			"recipe, or stop honouring ARCH_MODEL_OUT? (%v)", regenerated, err)
+	}
+	if sumFile(t, checkedIn) != before {
+		t.Fatalf("regenerating wrote into the WORKING TREE (%s). ARCH_MODEL_OUT is not being "+
+			"honoured, so this test just modified tracked source.", checkedIn)
+	}
+
+	want, got := loadModel(t, checkedIn), loadModel(t, regenerated)
+	live := make(map[model.ID]bool, len(got.Nodes))
+	for _, n := range got.Nodes {
+		live[n.ID] = true
+	}
+
+	var gone []string
+	for _, n := range want.Nodes {
+		if !live[n.ID] {
+			if len(gone) < 10 {
+				gone = append(gone, string(n.ID))
+			}
+		}
+	}
+	if len(gone) > 0 {
+		t.Errorf("the committed architecture model references %d symbol(s) that NO LONGER EXIST "+
+			"in the code:\n  %s\n\nThe cockpit's Topology tab reads this file, so it is rendering "+
+			"things that are gone. Run `make arch-model` and commit the result (memql#2844).",
+			len(gone), join(gone))
+	}
+}
+
+// workspaceRoot walks up from the test's directory to the module root.
+func workspaceRoot(t *testing.T) string {
+	t.Helper()
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Fatalf("no go.mod above %s", dir)
+		}
+		dir = parent
+	}
+}
+
+func sumFile(t *testing.T, path string) string {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
+}
+
+func loadModel(t *testing.T, path string) *model.Model {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	var m model.Model
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatalf("parse %s: %v", path, err)
+	}
+	return &m
+}
+
+func join(ss []string) string {
+	out := ""
+	for i, s := range ss {
+		if i > 0 {
+			out += ", "
+		}
+		out += s
+	}
+	return out
+}
+
+// TestNoSourceRefEscapesTheWorkspace is the cheap, permanent stand-in for the
+// two-worktree check.
+//
+// That check -- regenerate from a copy at a different directory DEPTH and
+// compare -- is the only thing that catches an escaping path, and it is how the
+// #2910 review found 27 of them. It is far too heavy to run here. But its
+// INVARIANT is a millisecond scan of the committed artifact: no source path may
+// be absolute or start with "..", because such a path encodes how deep the
+// checkout sits on the generating machine's disk and makes the whole gate
+// unsatisfiable everywhere else.
+//
+// Requires no regeneration, so it also runs under -short.
+func TestNoSourceRefEscapesTheWorkspace(t *testing.T) {
+	root := workspaceRoot(t)
+	m := loadModel(t, filepath.Join(root, "component", "architecture", "embedded", model.CanonicalFilename))
+
+	bad := 0
+	for _, n := range m.Nodes {
+		if n.Source == nil {
+			continue
+		}
+		f := n.Source.File
+		if filepath.IsAbs(f) || f == ".." || strings.HasPrefix(f, ".."+string(filepath.Separator)) {
+			if bad < 5 {
+				t.Errorf("node %s has a source path outside the workspace: %q", n.ID, f)
+			}
+			bad++
+		}
+	}
+	if bad > 0 {
+		t.Errorf("%d source path(s) escape the workspace.\n\nSuch a path is a `../../..` chain "+
+			"whose LENGTH encodes the generating machine's directory depth, so the artifact "+
+			"differs between two checkouts of the same commit and the drift gate goes red "+
+			"everywhere but the machine that regenerated (memql#2844).", bad)
+	}
+}
