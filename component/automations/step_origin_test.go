@@ -2,11 +2,13 @@ package automations
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/memql"
 	"log/slog"
 	"os"
-	"path/filepath"
-	"strings"
+	"sort"
 	"testing"
 
 	"github.com/znasllc-io/memql/component/auth"
@@ -639,24 +641,72 @@ func TestCheckpointCarriesTheCallerSuppliedFlag(t *testing.T) {
 // TestCheckpointConceptDeclaresTheFlag is the persistence half.
 //
 // v1:memql:checkpoint is a CLOSED schema (noAdditional defaults to true for
-// every concept), so an undeclared field does not round-trip -- it makes
-// Concept.Create reject the entire row. Combined with `omitempty`, that meant
+// every concept), so an undeclared field does not merely fail to round-trip --
+// Concept.Create REJECTS the whole row. Combined with `omitempty`, that meant
 // only the caller-supplied case was refused: the mechanism was dead in
 // production and no test could see it, because encoding/json is not the
 // validator.
+//
+// ASSERTED AGAINST THE LOADED REGISTRY, not the .memql source text. The first
+// version grepped the file for the property name, and its doc claimed that was
+// "the input the persistence layer actually validates against". It is not --
+// the validator reads the LOADER-GENERATED schema. Measured consequences of
+// that gap, and it is the third green-for-the-wrong-reason on this change:
+//
+//	field deleted       -> grep RED     (the only case it caught)
+//	field COMMENTED OUT -> grep PASSES, whole suite green, defect fully back
+//	type bool->boolean  -> grep PASSES; the loader drops the entire concept
+//
+// Going through the registry catches all three, because it asks the same
+// question the persistence layer does.
 func TestCheckpointConceptDeclaresTheFlag(t *testing.T) {
-	src, err := os.ReadFile(filepath.Join("..", "..", "dsl", "memql", "concepts.memql"))
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	if _, err := memql.LoadUnifiedConcepts(logger); err != nil {
+		t.Fatalf("loading concepts: %v", err)
+	}
+	cm, err := memoryNodes.DefaultRegistry().Get(memoryNodes.ConceptMemQLCheckpoint)
 	if err != nil {
-		t.Fatalf("read the checkpoint concept: %v", err)
+		t.Fatalf("v1:memql:checkpoint is not registered -- the loader DROPPED it, which is what a "+
+			"bad property type does (a `boolean` instead of `bool` takes the whole concept out "+
+			"and every query bound to it fails at runtime): %v", err)
 	}
-	if !strings.Contains(string(src), "callerSuppliedPayload") {
-		t.Fatal("v1:memql:checkpoint does not declare callerSuppliedPayload.\n\n" +
-			"Concept schemas are closed, so the field is not merely dropped -- SaveCheckpoint's " +
-			"Concept.Create REJECTS the whole row, and because the field is `omitempty` that " +
-			"happens only for a CALLER-SUPPLIED run. Resume then has no checkpoint at all for " +
-			"exactly the case the flag exists to mark, and the designed mechanism never runs " +
-			"(memql#2888).")
+	raw, err := cm.SchemaVariant("definition")
+	if err != nil {
+		t.Fatalf("checkpoint schema: %v", err)
 	}
+	var schema struct {
+		Properties map[string]any `json:"properties"`
+		Required   []string       `json:"required"`
+	}
+	if err := json.Unmarshal(raw, &schema); err != nil {
+		t.Fatalf("parse checkpoint schema: %v", err)
+	}
+	if _, ok := schema.Properties["callerSuppliedPayload"]; !ok {
+		t.Fatalf("the LOADED v1:memql:checkpoint schema has no callerSuppliedPayload.\n\n"+
+			"Concept schemas are closed, so SaveCheckpoint's Concept.Create rejects the whole "+
+			"row -- and because the field is `omitempty`, that happens only for a "+
+			"CALLER-SUPPLIED run. Resume then has no checkpoint for exactly the case the flag "+
+			"exists to mark, and the laundering guard never runs (memql#2888).\n\n"+
+			"declared properties: %v", keysOf(schema.Properties))
+	}
+	// Must stay OPTIONAL: `omitempty` drops it on a server-originated run, and
+	// every checkpoint written before this change has no such field.
+	for _, r := range schema.Required {
+		if r == "callerSuppliedPayload" {
+			t.Error("callerSuppliedPayload is REQUIRED. It must not be: omitempty drops it for a " +
+				"server-originated run, and pre-existing rows do not carry it, so requiring it " +
+				"breaks both.")
+		}
+	}
+}
+
+func keysOf(m map[string]any) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // TestExecutionRecordsTheCallerSuppliedFlag pins the other half: the flag has
