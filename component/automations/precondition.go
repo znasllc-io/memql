@@ -94,7 +94,26 @@ func extractPreconditions(source string) ([]*Precondition, string, error) {
 			return nil, source, fmt.Errorf("precondition %q: missing closing brace", name)
 		}
 
-		body := source[openIdx+1 : closeIdx]
+		// FIELDS are matched on the blanked view too (memql#2872 review).
+		// parsePreconditionBody assigns on every regex match, so LAST MATCH
+		// WINS -- a commented-out `check:` AFTER the live one silently
+		// replaced it:
+		//
+		//	precondition p {
+		//	  check: config.MEMQL_ENV == "staging"
+		//	  /*
+		//	  check: config.MEMQL_ENV == "PARKED"
+		//	  */
+		//	}
+		//
+		// measured as check="...PARKED". Ordering-dependent, so a commented
+		// block BEFORE the live line was harmless and one AFTER it won. This
+		// half is pre-existing (body comments were always inside the slice),
+		// but it is the same defect in the same function and fixing only the
+		// detection half would leave it half-done. Blanked lines cannot match
+		// the anchored field pattern; captured VALUES are unaffected because
+		// blanking never touches live source.
+		body := scan[openIdx+1 : closeIdx]
 		pc, err := parsePreconditionBody(name, body)
 		if err != nil {
 			return nil, source, err

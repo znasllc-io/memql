@@ -161,6 +161,13 @@ func TestOrdinaryCommentContentDoesNotRefuseBoot(t *testing.T) {
 		{"contains a direct mutation call", "/*\n x := mutation(concept: \"v1:cluster:node\")\n*/"},
 		{"contains an inline step block", "/*\n step s { query: \"x\" }\n*/"},
 		{"line comment mentions $steps", `// the old form used $steps.foo`},
+		// The G5 retirement gate (#2367) is a FIFTH raw-text scan --
+		// scrubSourceForPayloadScan blanked string literals and `//` comments
+		// but had no `/*` arm, so this note refused the whole tree and the
+		// diagnostic blamed the automation for a read that exists only in a
+		// comment.
+		{"mentions a retired event.payload read", `/* before #2367 this read event.payload.status directly */`},
+		{"line comment mentions event.payload", `// before #2367 this read event.payload.status directly`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			src := tc.comment + `
@@ -458,5 +465,51 @@ automation bad {
 				t.Errorf("wrong refusal: %v (want %q)", err, tc.wantErr)
 			}
 		})
+	}
+}
+
+// TestCommentedOutPreconditionFieldDoesNotWin covers the other half of the
+// precondition scan.
+//
+// parsePreconditionBody assigns on every regex match, so LAST MATCH WINS. A
+// commented-out `check:` AFTER the live one silently replaced it -- and it is
+// ordering-dependent, so the same comment above the live line was harmless.
+// Pre-existing (body comments were always in the slice), but the same defect in
+// the same function whose detection half this PR fixed.
+func TestCommentedOutPreconditionFieldDoesNotWin(t *testing.T) {
+	src := `@enabled
+@trigger(event="node.created", concept="v1:cluster:node")
+automation live {
+  precondition p {
+    check: $config.MEMQL_ENV == "staging"
+    description: "live"
+    /*
+    check: $config.MEMQL_ENV == "PARKED"
+    description: "parked"
+    */
+  }
+  step s {
+    logic someLogic ( event: event )
+  }
+}`
+	l := &Loader{}
+	auto, err := l.compileMemQL(src, "test:precondition-field-shadow")
+	if err != nil {
+		t.Fatalf("compileMemQL: %v", err)
+	}
+	if len(auto.Preconditions) != 1 {
+		t.Fatalf("expected 1 precondition, got %d", len(auto.Preconditions))
+	}
+	pc := auto.Preconditions[0]
+	if strings.Contains(pc.Check, "PARKED") {
+		t.Errorf("a COMMENTED-OUT check replaced the live one: check=%q\n\n"+
+			"parsePreconditionBody assigns on every match, so the last one wins and a commented "+
+			"block AFTER the live line silently takes over (memql#2872).", pc.Check)
+	}
+	if pc.Description == "parked" {
+		t.Errorf("a COMMENTED-OUT description replaced the live one: %q", pc.Description)
+	}
+	if !strings.Contains(pc.Check, "staging") {
+		t.Errorf("the LIVE check was lost: %q -- blanking must not blank live source", pc.Check)
 	}
 }
