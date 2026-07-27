@@ -4,10 +4,13 @@ package automations
 // domain-first DSL tree (dsl/<domain>/automations.memql) and feeds
 // each one through the existing compileMemQL pipeline.
 //
-// The legacy walker (LoadAll → Loader.fsys.WalkDir) handles
-// `automation.memql` single-file declarations. The unified tree
-// instead bundles multiple automations + their logic blocks per
-// file (`<domain>/automations.memql`), so we extract each
+// This is the ONLY automation loading path. A legacy walker over a
+// `Loader.fsys` field once handled `automation.memql` single-file
+// declarations; it was unreachable and was deleted in memql#2858, so
+// LoadAll is now a thin wrapper over LoadFromUnifiedTree.
+//
+// The unified tree bundles multiple automations + their logic blocks
+// per file (`<domain>/automations.memql`), so we extract each
 // automation slice from the bundled source and compile each in
 // isolation.
 
@@ -32,15 +35,15 @@ var automationStructHeader = regexp.MustCompile(`(?m)^[ \t]*automation[ \t]+([A-
 // regex above misses is an automation that would silently vanish, so the
 // loose form is used only to DETECT and report those -- never to extract.
 //
-// Neither regex understands `/* */` block comments, so a block-commented
-// automation whose `{` is on the HEADER line is extracted and loaded as a
-// live automation today (verified: it raises the loaded count). That is a
-// pre-existing slice-extraction defect, tracked in memql#2861 -- not introduced
-// here. The one case this detection adds is the mirror: a block-commented
-// automation whose `{` is on the NEXT line is now reported rather than
-// ignored. Given the former already treats block-commented automations as
-// live code, reporting the latter is the consistent behaviour; the shipped
-// tree contains no block comments in any automations.memql.
+// Neither regex understands `/* */`, so both are run over a comment-blanked
+// copy of the source (languageParser.BlankComments, memql#2861) rather than
+// the raw text. Scanning raw, a commented-out automation matched here and loaded
+// LIVE, and -- once a dropped automation became a refused boot (#2830) -- a
+// commented-out automation whose `{` sat on the next line was reported
+// unextractable and took the node down instead.
+//
+// Both regexes anchor at `^[ \t]*automation`, so a `//` line-commented
+// automation can never match them; line comments need no masking.
 var automationLooseHeader = regexp.MustCompile(`(?m)^[ \t]*automation[ \t]+([A-Za-z_][A-Za-z0-9_]*)`)
 
 // LoadFromUnifiedTree walks dsl.Tree() looking for
@@ -105,6 +108,17 @@ func (l *Loader) LoadFromUnifiedTree() ([]*Automation, error) {
 			return nil
 		}
 		source := string(data)
+		// An unterminated `/*` comments out the rest of the file, so every
+		// automation below it is ABSENT -- correct per the lexer, and now
+		// per the comment-blanked extractor, but silently absent is what
+		// #2830 outlawed. One typo'd opener would remove a workflow from the
+		// fleet with no diagnostic at all. Lexer-legal input, so this is a
+		// WARN naming the line rather than a load problem (memql#2861).
+		if line := languageParser.UnterminatedBlockCommentLine(source); line > 0 && l.logger != nil {
+			l.logger.Warn("unified automation loader: unterminated block comment",
+				"component", ComponentName, "path", path, "line", line,
+				"effect", "every automation below this line is commented out and will not load")
+		}
 		// Lower terse single-step automations (memql#2215) to their longhand
 		// block form so the slice extractor below (which keys off `automation
 		// NAME {`) discovers them. compileMemQL re-runs the rewriter, so this is
@@ -178,6 +192,10 @@ func (l *Loader) LoadFromUnifiedTree() ([]*Automation, error) {
 				continue
 			}
 			automation.Origin = origin
+			// #2800: this is the ONLY place trust is granted. These bodies
+			// come from the embedded/registered DSL tree, so they are
+			// authored, reviewed and not caller-supplied.
+			automation.Trusted = true
 			out = append(out, automation)
 		}
 		return nil
@@ -288,14 +306,32 @@ func extractAutomationSlices(source string) []automationSlice {
 func extractAutomationSlicesReporting(source string) ([]automationSlice, []string) {
 	var unextracted []string
 
-	matches := automationStructHeader.FindAllStringSubmatchIndex(source, -1)
+	// Detect headers on a comment-blanked view so a commented-out automation
+	// is ABSENT rather than live (memql#2861). BlankComments preserves byte
+	// offsets, so every offset below indexes the original text identically:
+	// headers and braces are found on `scan`, the slice is cut from `source`,
+	// and the emitted slice keeps its authored comments verbatim.
+	//
+	// This mirrors ExtractFunctionSlices (component/memql/function_slices.go),
+	// which has blanked comments before header detection since memql#1074 --
+	// which is why queries, mutations and logic were never exposed to this
+	// defect, and why the fix reuses that helper instead of adding a second
+	// implementation. Other extractors still scan raw text and have the same
+	// blindness (component/actions/loader.go, component/memql/keyword_slices.go
+	// and capability_loader.go) -- tracked in memql#2868, not fixed here.
+	scan := languageParser.BlankComments(source)
+	// Spans, not just the blanked copy: see the preamble walk below for why a
+	// blank line inside a block comment is indistinguishable without them.
+	commentSpans := languageParser.CommentSpans(source)
+
+	matches := automationStructHeader.FindAllStringSubmatchIndex(scan, -1)
 
 	// A header the strict regex missed is a silent loss, so find those too.
 	matchedAt := make(map[int]bool, len(matches))
 	for _, m := range matches {
 		matchedAt[m[0]] = true
 	}
-	for _, lm := range automationLooseHeader.FindAllStringSubmatchIndex(source, -1) {
+	for _, lm := range automationLooseHeader.FindAllStringSubmatchIndex(scan, -1) {
 		if !matchedAt[lm[0]] {
 			unextracted = append(unextracted, source[lm[2]:lm[3]])
 		}
@@ -314,27 +350,110 @@ func extractAutomationSlicesReporting(source string) ([]automationSlice, []strin
 		name := source[nameStart:nameEnd]
 
 		openIdx := headerEnd - 1 // position of `{`
-		closeIdx := findMatchingBrace(source, openIdx)
+		closeIdx := findMatchingBrace(scan, openIdx)
 		if closeIdx < 0 {
 			unextracted = append(unextracted, name)
 			continue
 		}
 
 		// Walk backwards for the @-attribute + comment preamble.
+		//
+		// The walk runs on `scan` -- the COMMENT-BLANKED view -- and the slice
+		// is cut from `source`, so authored comments (including semantic `///`
+		// doc comments) survive verbatim in the emitted text.
+		//
+		// Blanking is what makes the walk correct (memql#2872). It previously
+		// ran on the original and stopped at any line not starting with `@` or
+		// `//`, which a `/* ... */` line is -- so EVERY annotation above a
+		// block comment was cut out of the slice. Both directions were silent:
+		// a dropped `@disabled` means the automation loads ENABLED and fires on
+		// every replica; a dropped `@trigger` means it loads with a nil trigger,
+		// registered and counted but never subscribed, and invisible to the
+		// shipped-count guard because IsEventTriggered() is false for nil.
+		//
+		// On the blanked view a comment line is all spaces, so the rule is:
+		//
+		//   - blanked line starts with `@`            -> annotation, include
+		//   - blanked line empty, and the line is a
+		//     comment (original non-empty, OR the
+		//     line sits INSIDE a comment span)        -> include, keep going
+		//   - blanked line empty and genuinely blank  -> real blank line, STOP
+		//   - anything else                           -> real code, STOP
+		//
+		// The span check is not redundant with the blanked comparison, and
+		// leaving it out is how the first cut of this fix broke: a BLANK LINE
+		// INSIDE a block comment is byte-identical in both views (newlines are
+		// preserved and there is nothing else on the line to blank), so the
+		// walk stopped mid-comment and the slice started inside it -- the
+		// remaining comment text and its `*/` then parsed as code. That is
+		// verbatim the documented "2+ consecutive blank lines refuses boot"
+		// failure that sank the two earlier attempts, and the pre-existing
+		// TestBlockCommentAboveAutomationDoesNotDisturbTheLoad caught it.
+		//
+		// The last two matter: without them the walk would swallow the previous
+		// construct, so parking one automation would silently disable its
+		// neighbour. TestSlicePreambleStopsAtRealCode pins that direction.
+		//
+		// Two earlier attempts at this were reverted because pulling the
+		// comment body into the slice made compileMemQL's raw-text gates fire
+		// on ordinary comments. Those gates now scan a blanked view too
+		// (loader.go), which is the half that makes this safe.
 		preambleStart := headerStart
 		for k := headerStart - 1; k >= 0; k-- {
 			lineStart := strings.LastIndexByte(source[:k], '\n') + 1
-			line := strings.TrimRight(source[lineStart:k+1], "\r\n")
-			trimmed := strings.TrimSpace(line)
-			if strings.HasPrefix(trimmed, "@") || strings.HasPrefix(trimmed, "//") {
+			blanked := strings.TrimSpace(strings.TrimRight(scan[lineStart:k+1], "\r\n"))
+			original := strings.TrimSpace(strings.TrimRight(source[lineStart:k+1], "\r\n"))
+			inComment := languageParser.OffsetInComment(commentSpans, lineStart)
+			if strings.HasPrefix(blanked, "@") || (blanked == "" && (original != "" || inComment)) {
 				preambleStart = lineStart
 				k = lineStart - 1
 				continue
 			}
-			if trimmed == "" {
+			break
+		}
+
+		// POST-CHECK: the walk is per-line, so it can stop with preambleStart
+		// already INSIDE a comment span (memql#2872 review).
+		//
+		// The shape: a block comment whose OPENER shares a line with real code,
+		// directly above the preamble --
+		//
+		//     automation firstOne { ... } /* parked, see #123
+		//          second line */
+		//     @enabled
+		//     automation secondOne { ... }
+		//
+		// On the opener's line the code before `/*` survives blanking, so
+		// `blanked` is non-empty and the loop breaks -- but preambleStart has
+		// already advanced onto the comment's LAST line. The slice then begins
+		// `second line */`, which parses as code. Because the strict gate is
+		// all-or-nothing, that one ordinary comment refuses the WHOLE tree: 31
+		// automations gone.
+		//
+		// That is the documented "slice starts mid-comment" failure that sank
+		// both earlier attempts, reached by a different route. A per-line stop
+		// test structurally cannot see it -- the offending line is not the one
+		// being examined -- so the final position is validated here and snapped
+		// forward past the span.
+		// STRICTLY inside, not merely inside. preambleStart == span.Start means
+		// the comment is included WHOLE (`/* parked */ @disabled` on one line),
+		// which is fine -- the gates blank it. Only a start position with
+		// dangling comment text before it is a problem.
+		for {
+			span, inside := languageParser.CommentSpanContaining(commentSpans, preambleStart)
+			if !inside || span.Start >= preambleStart {
 				break
 			}
-			break
+			next := strings.IndexByte(source[span.End:], '\n')
+			if next < 0 {
+				preambleStart = headerStart
+				break
+			}
+			preambleStart = span.End + next + 1
+			if preambleStart > headerStart {
+				preambleStart = headerStart
+				break
+			}
 		}
 
 		out = append(out, automationSlice{
@@ -346,8 +465,9 @@ func extractAutomationSlicesReporting(source string) ([]automationSlice, []strin
 }
 
 // findMatchingBrace returns the index of the `}` matching the `{`
-// at openIdx. String + line-comment aware. Returns -1 if
-// unbalanced.
+// at openIdx. String + line-comment aware. Callers pass a
+// BlankComments'd source so a brace inside a `/* */` comment does
+// not close a block early (memql#2861). Returns -1 if unbalanced.
 func findMatchingBrace(source string, openIdx int) int {
 	if openIdx < 0 || openIdx >= len(source) || source[openIdx] != '{' {
 		return -1

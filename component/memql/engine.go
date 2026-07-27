@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/znasllc-io/memql/component/auth"
 	"strings"
 	"sync"
 	"time"
@@ -457,7 +458,13 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 		return nil, fmt.Errorf("memory engine database not configured")
 	}
 
-	plan, err := e.parseWithFunctions(query, fns, specOverlay, allowInline)
+	// #2800: the origin is read ONCE here, from the context, and handed to
+	// the (ctx-free) parse path. auth.OriginFromContext defaults to
+	// OriginClient for an unstamped context, so every existing caller keeps
+	// the restricted treatment until it explicitly opts in.
+	origin := auth.OriginFromContext(ctx)
+
+	plan, err := e.parseWithFunctionsOrigin(query, fns, specOverlay, allowInline, origin)
 	if err != nil {
 		return nil, err
 	}
@@ -637,7 +644,11 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 	// (#2542 item 2): expandExpressionWithArgs short-circuits the cond call and
 	// folds its branch operands, so a cond wrapping a collection chain resolves
 	// in-memory here.
-	if callExpr, ok := plan.Root.(*FunctionCallExpression); ok && (IsDateBuiltin(callExpr.Name) || callExpr.Name == "cond") {
+	// coalesce / concat (#2870) join cond here for the same reason: a logic body
+	// whose single statement is `return args.gate.passed ?? false` leaves a
+	// coalesce call at plan.Root and evaluates in-memory exactly as cond does.
+	if callExpr, ok := plan.Root.(*FunctionCallExpression); ok && (IsDateBuiltin(callExpr.Name) ||
+		callExpr.Name == "cond" || callExpr.Name == "coalesce" || callExpr.Name == "concat") {
 		val, err := evalCollScalar(callExpr, nil, nil)
 		if err != nil {
 			return nil, err
@@ -879,6 +890,13 @@ func (e *MemQLEngine) executeLogicFunctionCall(ctx context.Context, call *Functi
 	if !fn.Enabled {
 		return nil, fmt.Errorf("function %q is disabled", call.Name)
 	}
+	// #2800: @serverOnly bars client-originated calls. Mutations and logic
+	// dispatch here rather than through the query expansion path, so the gate
+	// is repeated at each entry point the same way @disabled is -- a single
+	// check in one of the three would leave the other two open.
+	if fn.ServerOnly && !auth.OriginFromContext(ctx).IsInternal() {
+		return nil, fmt.Errorf("function %q is server-only and cannot be called by a client", call.Name)
+	}
 	if fn.LogicSteps == nil {
 		return nil, fmt.Errorf("function %q has no multi-step body (LogicSteps unset)", call.Name)
 	}
@@ -927,6 +945,13 @@ func (e *MemQLEngine) executeMutationFunctionCall(ctx context.Context, call *Fun
 	}
 	if !fn.Enabled {
 		return nil, fmt.Errorf("function %q is disabled", call.Name)
+	}
+	// #2800: @serverOnly bars client-originated calls. Mutations and logic
+	// dispatch here rather than through the query expansion path, so the gate
+	// is repeated at each entry point the same way @disabled is -- a single
+	// check in one of the three would leave the other two open.
+	if fn.ServerOnly && !auth.OriginFromContext(ctx).IsInternal() {
+		return nil, fmt.Errorf("function %q is server-only and cannot be called by a client", call.Name)
 	}
 	if fn.MutationTemplate == nil {
 		return nil, fmt.Errorf("function %q has no mutation template", call.Name)

@@ -100,17 +100,43 @@ The architecture framework gives you the static map; `component/observe` is the 
 ### Regenerate the model after code changes
 
 ```bash
-cd memql/component/architecture/embedded
-go generate
+make arch-model
 ```
 
-The directive runs `memql-arch --calls`, which is the heavyweight pass (CHA call graph). Wall-time on the full workspace is around 5 seconds; output is ~12k nodes / 75k edges. Don't run this in a tight loop; it's a build-time pass.
+**This is the only supported way** (memql#2844). The flag set is load-bearing
+and lives in exactly one place, the `arch-model` target:
 
-For a quicker iteration (no call graph), regenerate by hand:
+- `--calls` is NOT a default, and the artifact contains the call graph --
+  121k edges with it, 21k without. Regenerating without it silently drops
+  100k edges.
+- `--reproducible` blanks `generated_at` and the absolute workspace path, and
+  `--cluster memql` pins the cluster node's name, which otherwise comes from
+  your checkout's FOLDER name. Without these the output differs on every run
+  and on every machine, and `TestArchitectureModelIsCurrent` fails for
+  everyone but you.
 
-```bash
-go run ./cmd/memql-arch --root .. --out component/architecture/embedded/topology.model.json
-```
+`go generate` in `embedded/` now shells out to this target, so the two cannot
+disagree. Regenerating by hand is not supported; there is no shorter form that
+produces the committed artifact.
+
+Wall time is ~6s on the full workspace. Regenerate it LAST in any change that
+touches Go, since the model describes the code. (Test-only changes need no
+regeneration -- all three extractor passes set `Tests: false`.)
+
+**A Go toolchain bump also invalidates it.** The model encodes stdlib-derived
+facts -- promoted methods from embedded stdlib types, `implements` edges against
+stdlib interfaces, signatures rendered with stdlib type names -- so a minor or
+patch bump can move them. CI pins `go-version`, so this bites exactly on the PR
+that raises it: regenerate there.
+
+`make arch-model-check` (or plain `go test ./...`) verifies the committed model
+matches the code.
+
+The artifact is written **compact, on one line**. Pretty-printing it produced a
+1.26M-line file whose one-time reorder GitHub could not diff at all -- the API
+returned *"this diff is taking too long to generate"*, which fails the `changes`
+job and blocks the PR. So do not read it as a diff; the gate above is what
+tells you whether it is right.
 
 ### Consume the model from another component
 

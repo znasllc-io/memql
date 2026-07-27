@@ -12,6 +12,13 @@
 # ---------------------------------------------------------------------------
 
 GO          := go
+# GOFLAGS is REASSIGNED here, not appended to, and that is load-bearing beyond
+# verbosity: GNU make re-exports a variable it reassigns, so every recipe runs
+# with exactly this value regardless of what the caller exported. That is what
+# keeps `make arch-model` -- and therefore the reproducibility gate -- immune to
+# a stray `GOFLAGS=-tags=...` in the environment, which changes the extracted
+# model (20186 nodes / 108689 edges under -tags=voice, vs 20182 / 121609).
+# Do not add `export` or change this to `+=` without re-checking that gate.
 GOFLAGS     := -v
 CGO_ENABLED := 0
 BIN_DIR     := bin
@@ -365,6 +372,37 @@ sdk-gen:
 sdk-gen-check:
 	$(GO) run ./scripts/sdk-gen --check --dsl=dsl --out=sdk/go/client --ts-out=
 
+# ARCH_MODEL_OUT lets the drift gate regenerate to a temp file through THIS
+# target, so the flag set exists exactly once in the repo. Declared above the
+# doc block so it does not separate the '## ' summary from its target, which
+# would drop arch-model out of `make help` (TestMakeHelpCompleteness).
+ARCH_MODEL_OUT ?= component/architecture/embedded/topology.model.json
+
+## Regenerate the checked-in architecture model
+## (component/architecture/embedded/topology.model.json), which the cockpit's
+## Topology tab consumes.
+##
+## THE FLAGS ARE LOAD-BEARING (memql#2844). --calls is not a default, and the
+## artifact contains the call graph: 121k edges with it, 21k without. Before
+## this target nothing recorded that, so `go run ./cmd/memql-arch` -- the
+## documented command -- produced a file 100k edges smaller than the one in
+## git, and the resulting 900k-line diff made refreshing the model impossible
+## in practice. --reproducible blanks generated_at and the absolute workspace
+## path so the output depends only on the code.
+arch-model:
+	$(GO) run ./cmd/memql-arch --root . --types --calls --cluster memql \
+		--reproducible --out $(ARCH_MODEL_OUT)
+
+## CI gate: regenerate the architecture model and diff against the checked-in
+## copy. Fails if the code changed without the model being refreshed -- the
+## drift that left ToggleComputerUseEnabledArgs.UserId in the model in 13
+## places after #2840 removed it. Pair with `make arch-model` locally to fix.
+##
+## Also enforced by TestArchitectureModelIsCurrent so it runs in the ordinary
+## `go test ./...` lane, which needs no workflow change.
+arch-model-check:
+	$(GO) test -count=1 -run TestArchitectureModelIsCurrent ./component/architecture/
+
 ## DSL lint: load the embedded DSL tree through the same
 ## dslimports.Load pipeline the engine runs at boot and fail on any
 ## parse / import / build diagnostics. Mirrors the CI gate so authors
@@ -414,7 +452,7 @@ test-polyphon:
 # ---------------------------------------------------------------------------
 
 ##@ Quality & codegen
-.PHONY: vet fmt lint tidy generate proto-gen proto-gen-check
+.PHONY: vet fmt lint tidy generate proto-gen proto-gen-check prs-stalled claims-stale arch-model arch-model-check
 
 ## Run go vet on all packages
 vet:
@@ -426,6 +464,25 @@ fmt:
 
 ## Run vet + fmt (quick lint)
 lint: fmt vet
+
+## Report open PRs that are green + mergeable but nobody is advancing
+## (memql#2833). READ-ONLY: it never enqueues, because green is not reviewed.
+## IDLE_MINUTES=15 tightens the idle threshold; REPO=owner/name retargets.
+prs-stalled:
+	bash scripts/dev/stalled-prs.sh
+
+## Report claimed:* labels no live session is holding (memql#2834). READ-ONLY by
+## default. Pass APPLY=1 to remove the label from CLOSED issues whose claim has
+## also gone cold; claims on OPEN issues are always reported, never swept.
+##
+## $(filter ...), not a bare $(if $(APPLY),...): make's $(if) tests emptiness,
+## not truth, so APPLY=0 / APPLY=no / APPLY=false would all have passed --apply
+## and written to GitHub. On a target whose whole safety story is "mutation is
+## opt-in", APPLY=0 meaning yes inverts the operator's obvious intent. Anything
+## outside {1,true,yes,on} -- including APPLY=Y and APPLY=2 -- is read as false,
+## which is the fail-safe direction.
+claims-stale:
+	bash scripts/dev/stale-claims.sh $(if $(filter 1 true yes on,$(APPLY)),--apply,)
 
 ## Tidy go.mod dependencies
 tidy:

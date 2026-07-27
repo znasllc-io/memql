@@ -476,8 +476,8 @@ func argNamesFromArgsText(argsText string) map[string]bool {
 // Public chain: NormaliseAll
 // =============================================================================
 
-// legacyProceduralAuthorForm matches `func (Receiver) name(...)` at
-// column 0. Pinned to the 12 receiver names the engine has ever
+// legacyProceduralAuthorForm matches `func (Receiver) name(...)`.
+// Pinned to the 12 receiver names the engine has ever
 // accepted as author-written procedural form. memql#303 retired the
 // author-facing procedural surface: the DSL-load entry point
 // (component/memql.tryParseNewFunctionSyntax) calls
@@ -494,7 +494,22 @@ func argNamesFromArgsText(argsText string) map[string]bool {
 // NormaliseAll on whatever source the caller hands it; its unit
 // tests historically use procedural source as compiler-IR fixtures,
 // which remains supported.
-var legacyProceduralAuthorForm = regexp.MustCompile(`(?m)^func \((Query|Mutation|Logic|Spec|Automation|Builtin|Prompt|Provider|Shape|Tool|Policy|Seed)\)`)
+// The whitespace here must be AT LEAST as permissive as the slicer that
+// actually extracts these declarations (component/memql's
+// functionSliceHeader: `func[ \t]*\([ \t]*(Query|...)[ \t]*\)`). It was not.
+// This pattern required column 0, exactly one space after `func`, and no space
+// inside the parens, while the slicer allowed leading indentation and flexible
+// spacing. Every spelling in that gap -- `  func (Query) queryFoo(`,
+// `func  (Query) ...`, `func ( Query ) ...` -- sailed past the rejection,
+// got sliced, parsed and REGISTERED. A retired author form kept loading, and
+// because the naming gate has no `func` arm either, a kind-prefixed construct
+// could ship with every test green (memql#2853 round-3 review).
+//
+// A rejection gate narrower than the thing it guards is not a gate. This is
+// the same defect as #2 in dsl/naming_conventions_test.go's header (`^` pinned
+// to column 0 while the real matcher accepts leading whitespace), one layer
+// down.
+var legacyProceduralAuthorForm = regexp.MustCompile(`(?m)^[ \t]*func[ \t]*\([ \t]*(Query|Mutation|Logic|Spec|Automation|Builtin|Prompt|Provider|Shape|Tool|Policy|Seed)[ \t]*\)`)
 
 // RejectLegacyProceduralAuthorForm returns an error when the source
 // contains author-written procedural form (`func (Receiver) name(ctx
@@ -1320,6 +1335,16 @@ func NormaliseTerseAutomationSource(source string) (string, error) {
 // preceding a full-form automation (or any other construct) is legal and
 // binds normally.
 func rejectTerseAutomationArgsBlock(source string) error {
+	// Scan a comment-blanked copy: commented-out text declares nothing, so it
+	// must not raise an authoring violation. Scanning raw, a `/* */`-commented
+	// args-block-plus-terse-automation REFUSED THE BOOT even though nothing
+	// outside the comment was live -- commenting an automation out took the
+	// node down, which is the defect memql#2861 exists to remove, surviving in
+	// the terse lane because this check runs BEFORE slice extraction.
+	//
+	// BlankComments preserves offsets and this function returns only an error,
+	// so scanning the blanked copy throughout is safe.
+	source = BlankComments(source)
 	for _, loc := range fileTopArgsHeader.FindAllStringIndex(source, -1) {
 		openIdx := strings.IndexByte(source[loc[0]:], '{')
 		if openIdx < 0 {

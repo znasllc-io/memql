@@ -37,6 +37,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/znasllc-io/memql/component/language/dslclause"
 )
 
 // Classification is the bucket a single query falls into.
@@ -199,7 +201,7 @@ func filterClause(body string) string {
 		line := stripComment(raw)
 		trim := strings.TrimSpace(line)
 		if !inFilter {
-			if strings.HasPrefix(trim, "filter ") || strings.HasPrefix(trim, "filter\t") {
+			if dslclause.StartsWith(trim, "filter") {
 				inFilter = true
 				sb.WriteString(" ")
 				sb.WriteString(strings.TrimSpace(strings.TrimPrefix(trim, "filter")))
@@ -228,17 +230,17 @@ func stripWhenGuards(filter string) string {
 	return whenGuardRe.ReplaceAllString(filter, " ")
 }
 
-// directiveKeywords are the struct-query body directives that terminate
-// a multi-line filter continuation.
-var directiveKeywords = []string{"shape", "sort", "paginate", "asOf", "count", "args", "use", "filter"}
-
+// startsWithDirective reports whether a trimmed line opens the next clause,
+// terminating a multi-line filter continuation.
+//
+// The keyword set lives in component/language/dslclause, shared with the
+// conformance gates and pinned against parseStructQueryBody's own switch
+// (memql#2815). It used to be a local list here and a DIFFERENT local list in
+// the gates, and the two had already drifted: the gates' copy omitted
+// sort / paginate / asOf / count, so 22 directive lines in the shipped corpus
+// reached them as pseudo-predicates.
 func startsWithDirective(trim string) bool {
-	for _, kw := range directiveKeywords {
-		if trim == kw || strings.HasPrefix(trim, kw+" ") || strings.HasPrefix(trim, kw+"\t") {
-			return true
-		}
-	}
-	return false
+	return dslclause.StartsAnyOf(trim, dslclause.BodyKeywords)
 }
 
 // hasDirective reports whether the query body has a directive line

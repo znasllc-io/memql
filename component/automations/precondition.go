@@ -26,6 +26,7 @@ package automations
 
 import (
 	"fmt"
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"regexp"
 	"strings"
 )
@@ -45,7 +46,26 @@ var preconditionFieldPattern = regexp.MustCompile(`(?m)^[ \t]*(check|literal|des
 // sees them). Source with no precondition blocks is returned unchanged
 // with a nil slice -- the common case carries zero overhead.
 func extractPreconditions(source string) ([]*Precondition, string, error) {
-	matches := preconditionBlockHeader.FindAllStringSubmatchIndex(source, -1)
+	// Detect on a COMMENT-BLANKED view (memql#2872). This is the fourth
+	// raw-text scan on the automation path, and it was the one missed when the
+	// other three were fixed -- the commit that fixed them claimed "every gate
+	// that scans raw construct text scans a comment-blanked view", and that
+	// claim was false because of this function.
+	//
+	// It was unreachable from above the automation header until the preamble
+	// walk started carrying comment bodies into the slice. After that, a
+	// COMMENTED-OUT precondition became a LIVE one: measured end to end, a
+	// `/* precondition envIsStaging { check: ... } */` above the automation
+	// loaded with preconditions=1, no WARN. And it fails CLOSED -- a
+	// precondition miss aborts the automation before any step runs -- so
+	// commenting a precondition out ENFORCED it. The stripped source was left
+	// as `/*\n\n*/`, still brace-balanced, so nothing downstream complained.
+	//
+	// BlankComments preserves byte offsets, so every index below indexes the
+	// original identically: headers and braces are found on `scan`, bodies and
+	// the stripped output are cut from `source`.
+	scan := languageParser.BlankComments(source)
+	matches := preconditionBlockHeader.FindAllStringSubmatchIndex(scan, -1)
 	if len(matches) == 0 {
 		return nil, source, nil
 	}
@@ -64,17 +84,36 @@ func extractPreconditions(source string) ([]*Precondition, string, error) {
 		nameEnd := m[3]
 		name := source[nameStart:nameEnd]
 
-		openIdx := strings.IndexByte(source[headerStart:headerEnd], '{')
+		openIdx := strings.IndexByte(scan[headerStart:headerEnd], '{')
 		if openIdx < 0 {
 			return nil, source, fmt.Errorf("precondition %q: missing opening brace", name)
 		}
 		openIdx += headerStart
-		closeIdx := matchingCloseBrace(source, openIdx)
+		closeIdx := matchingCloseBrace(scan, openIdx)
 		if closeIdx < 0 {
 			return nil, source, fmt.Errorf("precondition %q: missing closing brace", name)
 		}
 
-		body := source[openIdx+1 : closeIdx]
+		// FIELDS are matched on the blanked view too (memql#2872 review).
+		// parsePreconditionBody assigns on every regex match, so LAST MATCH
+		// WINS -- a commented-out `check:` AFTER the live one silently
+		// replaced it:
+		//
+		//	precondition p {
+		//	  check: config.MEMQL_ENV == "staging"
+		//	  /*
+		//	  check: config.MEMQL_ENV == "PARKED"
+		//	  */
+		//	}
+		//
+		// measured as check="...PARKED". Ordering-dependent, so a commented
+		// block BEFORE the live line was harmless and one AFTER it won. This
+		// half is pre-existing (body comments were always inside the slice),
+		// but it is the same defect in the same function and fixing only the
+		// detection half would leave it half-done. Blanked lines cannot match
+		// the anchored field pattern; captured VALUES are unaffected because
+		// blanking never touches live source.
+		body := scan[openIdx+1 : closeIdx]
 		pc, err := parsePreconditionBody(name, body)
 		if err != nil {
 			return nil, source, err

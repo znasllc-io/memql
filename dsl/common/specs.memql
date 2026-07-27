@@ -11,3 +11,16 @@
 spec actorEnvelope requiresAdmin {
   return role == "admin"
 }
+
+/// Caller must hold the owner or admin role.
+///
+/// Moved here from dsl/deployment/specs.memql in memql#2800: it is a generic
+/// role predicate, not a deployment concept, and identity needs it to gate the
+/// full-PII user read. It was defined-but-unused there (referenced only in
+/// comments), so nothing changed behaviourally in the move.
+///
+/// Originally the legacy Deployment Console gate (#728): DeployStaging /
+/// Promote / Rollback / RolloutAction / GetDeploymentStatus.
+spec actorEnvelope requiresOwnerOrAdmin {
+  return role == "admin" || role == "owner"
+}

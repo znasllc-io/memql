@@ -52,6 +52,25 @@ func loggerLevelKeys() []string {
 
 // Automation represents a complete automation definition.
 type Automation struct {
+	// Trusted reports that this automation's SOURCE came from the registered
+	// DSL tree rather than from a caller (memql#2800).
+	//
+	// It gates whether the automation's steps may reach @serverOnly
+	// constructs. That trust is a property of WHERE THE BODY CAME FROM, not
+	// of the dispatch call: an earlier fix stamped internal origin
+	// unconditionally in executeStep, reasoning that "executeStep is
+	// reachable only from automation execution". True, and not sufficient --
+	// automation execution includes automations whose body the CALLER
+	// SUPPLIED. RunBundleDryRun compiles submitted source and drives the real
+	// Executor, so MCP run_inline_automation and the planner's LLM-emitted
+	// bundle could each wrap a @serverOnly read in a step and have it run
+	// with internal origin.
+	//
+	// FALSE IS THE ZERO VALUE, deliberately: an automation built by any path
+	// that has not explicitly declared its source trusted is treated as
+	// caller-supplied. Only the unified tree loader sets it.
+	Trusted bool `json:"-"`
+
 	// Name is the unique identifier for this automation (camelCase).
 	Name string `json:"name"`
 
@@ -399,7 +418,13 @@ type Step struct {
 // CacheConfig controls step-level caching behavior.
 type CacheConfig struct {
 	// Enabled controls whether this step is cached.
-	// If nil, defaults based on step type (query/shape/function are cacheable).
+	//
+	// If nil, the default comes from the step type: query and shape are
+	// cacheable, everything else -- including FUNCTION, which is every authored
+	// `logic`, `mutate` and builtin call -- is not (memql#2869).
+	//
+	// Settable from Go only. There is no `cache` clause in the DSL grammar, so
+	// an author cannot reach this field; see IsCacheable's doc.
 	Enabled *bool `json:"enabled,omitempty"`
 
 	// TTL is how long to cache the result (e.g., "5m", "1h").
@@ -409,6 +434,52 @@ type CacheConfig struct {
 
 // IsCacheable returns true if this step can be cached.
 // Returns false for side-effecting steps (mutation, webhook, event).
+//
+// StepTypeFunction is NOT cacheable by default (memql#2869). It used to be, on
+// the assumption that a "function step" is pure -- and nothing checked that.
+//
+// The hole was far wider than #2869 describes. EVERY authored `mutate`
+// construct invoked as an automation step compiles to StepTypeFunction, not
+// StepTypeMutation: compileStep has no mutation branch
+// (component/language/compiler/automation_generator.go). Measured on the live
+// tree: 54 function steps, among them revokeDelegation, deleteUserHard and
+// workbenchTeardownDirectory (an rm -rf-class directory teardown) -- all
+// cacheable before this change. StepTypeMutation, the type the old comment
+// named as side-effecting, has ZERO live instances. The classification was
+// inverted against reality.
+//
+// #2869's own motivating example is wrong, and it is worth recording why so the
+// next reader does not re-derive it. It names `logic revokeExpiredDelegations`
+// as "a sweep that revokes rows"; the body is
+// `return query expiredActiveDelegations(...)` -- a pure READ. The write is a
+// SEPARATE step, `revokeDelegation` inside expireDelegations.apply's forEach.
+// Two stale DSL comments say otherwise (dsl/identity/logic.memql and
+// dsl/identity/automations.memql, both corrected in this change), and the issue
+// inherited them.
+//
+// Why it had not bitten, and why that was luck: the cache key carried a
+// per-second wall-clock reading, so it churned every second and an entry almost
+// never survived to be reused. #2867 removed wall-clock values from the key --
+// correctly, since a key changing every nanosecond is a cache that can never
+// hit -- which widened the window from under a second to the full TTL (default
+// 5m). The protection was never the classification; it was key churn, and a
+// cache-invalidation strategy made of clock granularity narrows a window rather
+// than closing it.
+//
+// OPT-IN IS GO-ONLY TODAY, and that is a real limitation rather than an
+// escape hatch. `cache.enabled = true` works on a Step built in Go, but there
+// is no `cache` clause in the DSL grammar (ast.StepDef has no Cache field) and
+// compileStep emits none -- so no AUTHOR can opt a step back in. Combined with
+// zero live query/shape steps, the practical effect is that
+// MEMQL_STEP_CACHE_ENABLED now caches nothing at all. That is the right
+// direction for a latent correctness hole on a flag that is off everywhere, but
+// it means the step cache is currently inert machinery; plumbing `cache`
+// through StepDef is tracked separately.
+//
+// The alternative considered was classifying by the callee -- a function step
+// resolving to a `mutate`, or to a side-effecting builtin, is not cacheable --
+// which is more precise and needs a purity analysis the loader does not have.
+// That is the shape to reach for if the cache is ever made live again.
 func (s *Step) IsCacheable() bool {
 	if s == nil {
 		return false
@@ -424,12 +495,24 @@ func (s *Step) IsCacheable() bool {
 		return true
 	}
 
-	// Default by type: pure steps are cacheable
+	// Default by type. `query` and `shape` remain cacheable; a function step
+	// dispatches arbitrary authored code, so it is opt-in.
+	//
+	// NOT because query/shape are provably pure -- they are not, and the doc
+	// above should not be read as claiming it. A `shape` template may contain
+	// `ai("templateId", ...)`, which is a billable non-deterministic LLM call
+	// (steps/shape.go), and a `query` step runs an arbitrary evaluated string
+	// through Engine.Execute with nothing constraining it to reads
+	// (steps/query.go). Both are left cacheable because neither has a live
+	// instance in the tree (measured: 0 and 0), so narrowing them now would be
+	// an unmeasurable change; the honest gate for `query` would mirror
+	// engine.go's own `len(plan.Mutations) == 0`.
 	switch s.Type {
-	case StepTypeQuery, StepTypeShape, StepTypeFunction:
+	case StepTypeQuery, StepTypeShape:
 		return true
 	default:
-		// Mutations, webhooks, events have side effects - not cacheable
+		// Mutations, webhooks, events and function steps may have side
+		// effects - not cacheable without an explicit opt-in.
 		return false
 	}
 }
@@ -709,6 +792,22 @@ type StepResult struct {
 
 // AutomationExecution represents a complete automation run.
 type AutomationExecution struct {
+	// SourceTrusted mirrors Automation.Trusted onto the run, so the step
+	// dispatch can consult it without re-plumbing the automation record
+	// through every frame (memql#2800). False is the zero value; see
+	// Automation.Trusted for why that direction is deliberate.
+	SourceTrusted bool `json:"-"`
+
+	// CallerSuppliedPayload records that this run's TRIGGER PAYLOAD came from a
+	// caller, independently of where the automation's body came from.
+	//
+	// Kept as its own field rather than re-derived from
+	// (automation.Trusted && !SourceTrusted) because it has to survive into a
+	// CHECKPOINT and back out through resume, and a derived value silently
+	// becomes wrong the moment either input is reconstructed differently --
+	// which is exactly how memql#2888's first fix was bypassable.
+	CallerSuppliedPayload bool `json:"-"`
+
 	// ID is a unique identifier for this execution.
 	ID string `json:"id"`
 
@@ -850,6 +949,18 @@ type ExecutionCheckpoint struct {
 
 	// TriggerContext captures the original trigger for event replay.
 	TriggerContext *TriggerContext `json:"triggerContext,omitempty"`
+
+	// CallerSuppliedPayload records that the checkpointed run's trigger payload
+	// came from a caller, so a resume cannot restore internal origin to a run
+	// that never had it (memql#2888).
+	//
+	// This field is the whole reason the fix is not bypassable. The checkpoint
+	// PERSISTS TriggerContext.Event -- the attacker's payload -- and resume
+	// replays it; without this flag resume re-derived trust from
+	// automation.Trusted alone and handed that payload internal origin. The
+	// refusal that the origin downgrade produces is itself what triggers the
+	// checkpoint write, so the fix was minting its own laundering token.
+	CallerSuppliedPayload bool `json:"callerSuppliedPayload,omitempty"`
 
 	// SavedAt is when the checkpoint was saved.
 	SavedAt time.Time `json:"savedAt"`

@@ -7,6 +7,7 @@ import (
 
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/component/memql/dslfs"
 )
 
 // ConceptResolver resolves symbolic concept references in a parsed .memql file
@@ -525,60 +526,18 @@ func (r *ConceptResolver) resolveConceptRef(ref string, symbols map[string]*symb
 	return "", fmt.Errorf("unresolved concept reference %q (not declared in any 'use' statement)", ref)
 }
 
-// VersionFromFilePath extracts the version directory from a file path.
-// Examples:
+// VersionFromFilePath and DomainFromFilePath are thin re-exports of the
+// canonical implementations in component/memql/dslfs (memql#2852).
 //
-//	"v1/mutationJoinSpace.memql" -> "v1"
-//	"mutations/v1/mutationJoinSpace.memql" -> "v1"
-//	"automations/v1/cognition/autoJoinAI/automation.memql" -> "v1"
+// They moved there because dslimports needs the SAME answer and cannot import
+// this package -- component/memql imports component/memql/dslimports, so the
+// dependency only runs one way. Two copies is exactly what #2852 reports: boot
+// walked from the last directory segment, the lint took the first, and
+// agents/tools/askSpecialist.memql resolved to "tools" in one and "agents" in
+// the other.
 //
-// Returns empty string if no version directory is found.
-func VersionFromFilePath(path string) string {
-	parts := strings.Split(path, "/")
-	for _, part := range parts {
-		if len(part) >= 2 && part[0] == 'v' && part[1] >= '0' && part[1] <= '9' {
-			// Validate it's purely v<digits>
-			allDigits := true
-			for _, ch := range part[1:] {
-				if ch < '0' || ch > '9' {
-					allDigits = false
-					break
-				}
-			}
-			if allDigits {
-				return part
-			}
-		}
-	}
-	return ""
-}
+// Kept as wrappers rather than updating every call site, because the names are
+// used across this package and the indirection costs nothing.
+func VersionFromFilePath(path string) string { return dslfs.VersionFromFilePath(path) }
 
-// DomainFromFilePath returns the domain directory containing a mounted
-// .memql file -- the last path segment before the filename that is not
-// a legacy v<digits> version directory. This is the file's ambient
-// namespace under the #2617 same-domain scope rule ("planner" for
-// planner/queries.memql). Loader origin decorations are tolerated: the
-// unified loader stamps slice origins as
-// "unified:<path>:<sliceName>" (unified_kinds_loader.go), and the
-// prefix would otherwise pollute the leading directory segment.
-// Returns "" when the path carries no directory.
-func DomainFromFilePath(path string) string {
-	// Strip a loader origin decoration ("unified:", "dryrun:", ...):
-	// a colon-terminated prefix before the first slash is never part
-	// of the mounted path.
-	if idx := strings.Index(path, ":"); idx >= 0 && !strings.Contains(path[:idx], "/") && strings.Contains(path[idx+1:], "/") {
-		path = path[idx+1:]
-	}
-	parts := strings.Split(path, "/")
-	for i := len(parts) - 2; i >= 0; i-- {
-		part := parts[i]
-		if part == "" || part == "." {
-			continue
-		}
-		if VersionFromFilePath(part) == part {
-			continue // legacy v<digits> layout segment, not a domain
-		}
-		return part
-	}
-	return ""
-}
+func DomainFromFilePath(path string) string { return dslfs.DomainFromFilePath(path) }

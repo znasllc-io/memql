@@ -42,17 +42,29 @@ keyword header -- and lives in a per-namespace, per-construct file
 
 ## Naming Convention
 
-Function names use kind prefixes:
+**Construct names carry no kind prefix** (memql#2853). Name a construct for
+what it does; the keyword already states what it is.
 
-- Query: `query*` (e.g. `queryActiveSpaces`)
-- Mutation: `mutation*` (e.g. `mutationCreateSpace`)
-- Spec / trait: named for the predicate, no kind prefix (e.g. `isActiveRecord`)
-- Logic: `logic*`
+- Query: what it returns (e.g. `activeSpaces`, `userById`)
+- Mutation: the verb (e.g. `createSpace`, `archiveUser`)
+- Logic: the verb (e.g. `bootstrapSession`, `generateResponse`)
+- Spec / trait: the predicate (e.g. `isActiveRecord`, `requiresOwnerOrAdmin`)
 - Prompt: descriptive name (e.g. `agentReply`, `cognitionCompaction`)
 - Provider: provider name (e.g. `chat54Mini`, `streamClaudeSonnet`)
-- Shape: descriptive name (e.g. `spaceCard`, `participantFull`)
+- Shape: `<concept><Projection>` (e.g. `spaceCard`, `participantFull`)
 
-The compiler emits naming diagnostics for mismatches.
+Gated by `TestNoKindPrefixInConstructNames` in `dsl/naming_conventions_test.go`.
+Full rationale and history: [naming-conventions.md](naming-conventions.md).
+
+This page previously mandated kind prefixes and claimed the compiler emitted
+naming diagnostics for mismatches. Both were false: 0 of 1091 shipped
+declarations carried a prefix, and the naming lint was retired in epic #2031 --
+`TestCompileSource_NoNamingWarnings` now fails the build if any `naming.*`
+diagnostic is emitted at all.
+
+(Deliberately paraphrased rather than quoted: `TestNamingDocsDoNotMandateAPrefix`
+blocks the old mandate as a plain substring, so quoting it verbatim here would
+trip the gate on this very page.)
 
 ## Imports and Concept Binding
 
@@ -161,7 +173,7 @@ directives, and a `shape` projection.
 use cognition.concepts.{ participant }
 
 @description("Get active human participants in a space")
-query participant queryActiveHumanParticipants {
+query participant activeHumanParticipants {
   args {
     spaceId  string  @required
   }
@@ -196,7 +208,7 @@ argument is provided:
 
 ```memql
 @description("Active spaces, optionally narrowed to a creator")
-query space queryActiveSpaces {
+query space activeSpaces {
   args {
     userId  string
   }
@@ -207,14 +219,14 @@ query space queryActiveSpaces {
 
 **Calling patterns:**
 ```memql
-queryActiveSpaces()                      -- No optional filter applied
-queryActiveSpaces({"userId": "u-1"})     -- Creator filter applied
+activeSpaces()                      -- No optional filter applied
+activeSpaces({"userId": "u-1"})     -- Creator filter applied
 ```
 
 ### Sorting and Pagination
 
 ```memql
-query context queryLatestSpaceContextForSpace {
+query context latestSpaceContextForSpace {
   args {
     spaceId  string  @required
   }
@@ -239,7 +251,7 @@ matching set as a self-describing `{count: N}` aggregate computed
 server-side, instead of the rows themselves:
 
 ```memql
-query user queryUserCount {
+query user userCount {
   filter  isActiveRecord
   count
 }
@@ -275,7 +287,7 @@ Mutations write exactly one row of their signature-bound concept.
 use cognition.concepts.{ space }
 
 @description("Create a cognition space")
-mutation space mutationCreateSpace {
+mutate space createSpace {
   args {
     spaceId  string  @required
     name     string  @required
@@ -337,7 +349,7 @@ named statements ending in `return <expr>`.
 use common.builtins.{ ensureDailySpaceForUser }
 
 @description("On user creation, ensure today's daily space exists.")
-logic logicProvisionDailySpaceOnUserCreate {
+logic provisionDailySpaceOnUserCreate {
   args {
     event object @required
   }
@@ -356,14 +368,14 @@ only fires when the condition holds:
 
 ```memql
 body {
-  getUser := queryUserById({ userId: args.event.payload.ownerUserId })
+  getUser := userById({ userId: args.event.payload.ownerUserId })
   activeAssistantId := coalesce(getUser.first().payload.preferences.activeAssistantId, "")
 
   getActiveGA := if activeAssistantId != "" {
-    queryAgentById({ agentId: activeAssistantId })
+    agentById({ agentId: activeAssistantId })
   }
   getFallbackGA := if activeAssistantId == "" {
-    queryAssistantAgentForUser({ ownerUserId: args.event.payload.ownerUserId })
+    assistantAgentForUser({ ownerUserId: args.event.payload.ownerUserId })
   }
 
   return coalesce(getActiveGA, getFallbackGA)
@@ -660,7 +672,7 @@ builtins, declared in `dsl/<namespace>/tools.memql`. The body is the
 tool's input schema; `@handler` binds it to the operation it runs:
 
 ```memql
-@handler(type="query", query="queryFindEvents({\"title\": \"$args.title\"})")
+@handler(type="query", query="findEvents({\"title\": \"$args.title\"})")
 @executionTime("fast")
 @description("Find the caller's calendar events by exact title.")
 tool calendarFind {
@@ -740,7 +752,7 @@ shape space spaceCardAlias {
 Struct queries reference a shape by name in their `shape` clause:
 
 ```memql
-query participant querySpaceParticipants {
+query participant spaceParticipants {
   args {
     spaceId  string  @required
   }

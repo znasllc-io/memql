@@ -62,6 +62,45 @@ func ExtractConceptDecls(source string) []*languageAst.ConceptDecl {
 // nested object bodies inside the concept's property declarations.
 func conceptSlices(source string) []string {
 	lines := strings.Split(source, "\n")
+
+	// Declaration detection and brace balancing run on a comment-BLANKED view;
+	// the preamble walk and the emitted slice are cut from the ORIGINAL
+	// (memql#2868).
+	//
+	// Concepts do NOT go through ExtractKeywordSlices -- they have this
+	// dedicated line-oriented slicer, which #2868's diagnosis missed. Fixing
+	// the keyword slicer alone left a block-commented concept REGISTERING; the
+	// end-to-end test in keyword_slices_e2e_test.go is what caught it. A
+	// commented-out schema is live: it validates writes and appears in the
+	// concepts API.
+	//
+	// BlankComments preserves byte offsets -- it overwrites comment bytes with
+	// spaces IN PLACE, never inserting or deleting, and never writing a newline
+	// -- so splitting the blanked source yields the same number of lines at the
+	// same indices as `lines`. scanLines[j] and lines[j] are the same line, one
+	// blanked and one not.
+	//
+	// That invariant is asserted by TestBlankCommentsIsLengthPreserving rather
+	// than re-checked here. An earlier version DID check it and bailed to nil,
+	// under a comment claiming the caller "reports zero concepts and the
+	// strict-boot gate surfaces it loudly". Measured false: LoadUnifiedConcepts
+	// does `if len(decls) == 0 { continue }` with no warning and no report
+	// entry, so the bail-out would have SILENTLY DROPPED a whole namespace's
+	// schema -- the opposite of loud, and a worse failure than the one it
+	// guarded. A promise the code does not keep is worse than no guard.
+	//
+	// KNOWN LIMIT, pre-existing and unchanged by this fix: the brace count
+	// below is string-BLIND, so `concept x { a string @description("a }
+	// brace") }` closes the slice early and the concept is silently dropped.
+	// The sibling ExtractKeywordSlices does not have this, because it balances
+	// through the string-aware findMatchingCloseBraceRune. Converting this
+	// line-oriented slicer onto that offset-based walker is a real refactor
+	// rather than a comment fix, and it is latent today -- the tree has 42
+	// brace-bearing string literals and zero unbalanced ones.
+	// TestConceptSlicesIsStringBlind pins the current behaviour so that
+	// refactor has a before/after to work against.
+	scanLines := strings.Split(languageParser.BlankComments(source), "\n")
+
 	var slices []string
 
 	i := 0
@@ -69,7 +108,7 @@ func conceptSlices(source string) []string {
 		// Find the next `concept <name> {` declaration at column 0.
 		conceptLine := -1
 		for j := i; j < len(lines); j++ {
-			line := lines[j]
+			line := scanLines[j]
 			if isConceptDeclStart(line) {
 				conceptLine = j
 				break
@@ -109,9 +148,11 @@ func conceptSlices(source string) []string {
 		// find the closing `}` at indent 0.
 		depth := 0
 		endLine := -1
-		for k := conceptLine; k < len(lines); k++ {
-			depth += strings.Count(lines[k], "{")
-			depth -= strings.Count(lines[k], "}")
+		for k := conceptLine; k < len(scanLines); k++ {
+			// Blanked view: a `{` or `}` inside a comment must not move the
+			// depth, or the slice closes early and emits a truncated concept.
+			depth += strings.Count(scanLines[k], "{")
+			depth -= strings.Count(scanLines[k], "}")
 			if depth == 0 {
 				endLine = k
 				break

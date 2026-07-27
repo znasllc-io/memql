@@ -325,8 +325,25 @@ func checkExprIdentifiers(a *Automation, where, expr string, fields, stepIDs, lo
 // `$event.payload.<field>` dollar form) read in authored automation source.
 var eventPayloadReadPattern = regexp.MustCompile(`[$]?\bevent\.payload\.[A-Za-z_]`)
 
-// scrubSourceForPayloadScan blanks string literals and line comments so the
-// retirement scan never fires on prose (@description text, header comments).
+// scrubSourceForPayloadScan blanks string literals AND both comment forms so
+// the retirement scan never fires on prose (@description text, header
+// comments).
+//
+// The `/*` arm was missing (memql#2872 review). It went unreachable-from-above
+// until the preamble walk started carrying block-comment bodies into the slice;
+// after that, an ordinary note like
+//
+//	/* before #2367 this read event.payload.status directly */
+//
+// above an automation refused the whole tree -- and the diagnostic blamed the
+// automation for a read that exists only in a comment. Byte-for-byte the class
+// the $steps. gate fix closed.
+//
+// NOT replaced with BlankComments: this scrubber deliberately also blanks
+// STRING LITERALS, which BlankComments leaves intact by design (it exists so
+// header detectors see a comment-free view, not a literal-free one). The two
+// answer different questions, so this keeps its own scan and just grows the
+// missing arm.
 func scrubSourceForPayloadScan(s string) string {
 	var out strings.Builder
 	i := 0
@@ -348,6 +365,23 @@ func scrubSourceForPayloadScan(s string) string {
 				j = len(s) - i
 			}
 			out.WriteString(strings.Repeat(" ", j))
+			i += j
+		case strings.HasPrefix(s[i:], "/*"):
+			// Newlines are preserved so the scan's line accounting is
+			// unchanged; everything else in the span becomes a space. An
+			// unterminated block comment runs to EOF, matching the lexer.
+			end := strings.Index(s[i+2:], "*/")
+			j := len(s) - i
+			if end >= 0 {
+				j = end + 4
+			}
+			for k := i; k < i+j; k++ {
+				if s[k] == '\n' {
+					out.WriteByte('\n')
+				} else {
+					out.WriteByte(' ')
+				}
+			}
 			i += j
 		default:
 			out.WriteByte(s[i])

@@ -9,7 +9,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/znasllc-io/memql/component/language/dslclause"
 	"github.com/znasllc-io/memql/component/language/pagination"
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql/dslfs"
 	"github.com/znasllc-io/memql/component/memql/sense"
 )
@@ -769,25 +771,125 @@ var userScopeFieldRe = regexp.MustCompile(`(^|[^.\w])(ownerUserId|userId|actorUs
 //
 // A struct-form filter is a single line -- the parser rejects a multi-line
 // clause -- so line extraction is sufficient here.
+// The update block is tracked by BRACE DEPTH, not by the first line that
+// trims to `}`. A nested object closes with its own `}`, so the naive version
+// left the block early and every `id:` after a nested field became invisible
+// (memql#2840 review). That is not a corner case: it is the shape of
+// `toggleComputerUseEnabled`, the construct that opened #2840, with two lines
+// swapped --
+//
+//	update {
+//	  preferences: { computerUseEnabled: args.enabled }
+//	  id: args.userId          // <- was not part of the selection surface
+//	}
+//
+// A same-line `update { id: args.x` opener is handled too: the remainder after
+// the brace is scanned like any other line, so the one-line spelling is not an
+// escape hatch either.
 func rowSelectionSurface(body string) string {
+	body = blankComments(body)
 	var b strings.Builder
-	inUpdate := false
+	depth := 0
+	awaitingOpen := false
+
 	for _, line := range strings.Split(body, "\n") {
 		t := strings.TrimSpace(line)
+
+		if strings.HasPrefix(t, "filter") {
+			b.WriteString(t)
+			b.WriteByte('\n')
+			continue
+		}
+
+		rest := t
 		switch {
-		case strings.HasPrefix(t, "filter"):
-			b.WriteString(t)
-			b.WriteByte('\n')
+		case depth > 0:
+			// already inside the update block
+		case awaitingOpen:
+			open := strings.IndexByte(structureOf(t), '{')
+			if open < 0 {
+				continue // still between `update` and its `{`
+			}
+			awaitingOpen = false
+			depth = 1
+			rest = strings.TrimSpace(t[open+1:])
 		case strings.HasPrefix(t, "update"):
-			inUpdate = true
-		case inUpdate && t == "}":
-			inUpdate = false
-		case inUpdate && strings.HasPrefix(t, "id:"):
-			b.WriteString(t)
-			b.WriteByte('\n')
+			if open := strings.IndexByte(structureOf(t), '{'); open >= 0 {
+				depth = 1
+				rest = strings.TrimSpace(t[open+1:])
+			} else {
+				// `update` on its own line; the `{` is on a following line.
+				// The old helper handled this by flagging on the `update`
+				// line alone; dropping the flag made the new version WEAKER
+				// than the one it replaced (memql#2840 review round 2).
+				awaitingOpen = true
+				continue
+			}
+		default:
+			continue
+		}
+
+		// Inside the update block: collect every `id:` assignment, wherever it
+		// sits, then account for this line's braces.
+		for _, seg := range strings.Split(rest, ",") {
+			seg = strings.TrimSpace(seg)
+			if strings.HasPrefix(seg, "id:") {
+				b.WriteString(seg)
+				b.WriteByte('\n')
+			}
+		}
+		// Braces are counted on the STRUCTURE of the line -- string literals
+		// blanked, comments dropped -- so `displayName: "}"` or a trailing
+		// `// ends with }` cannot close the block early. That is HIGH-1's
+		// failure mode reached through a different brace; matchingClose in
+		// this file has been string- and comment-aware all along.
+		s := structureOf(rest)
+		depth += strings.Count(s, "{") - strings.Count(s, "}")
+		if depth <= 0 {
+			depth = 0
 		}
 	}
 	return b.String()
+}
+
+// blankComments removes BOTH comment forms -- `//` line and `/* */` block --
+// via the parser's own offset-preserving blanker, so a construct's structure
+// is read the way the lexer reads it.
+//
+// Three hand-rolled attempts preceded this, each blind to something the
+// previous one handled (memql#2840 review rounds 1-3): the first ended an
+// update block at a nested `}`, the second truncated a filter clause at the
+// `//` inside a URL, the third handled `//` but not `/* */`, so a gate term
+// commented out with `/* && requiresOwnerOrAdmin */` still read as live.
+// parser.BlankComments is string-, line-comment- AND block-comment-aware, is
+// documented for exactly this use ("the text-based header detectors that run
+// BEFORE the lexer/parser"), and preserves byte offsets so line-oriented
+// walkers keep working.
+func blankComments(s string) string { return languageParser.BlankComments(s) }
+
+// structureOf returns line with double-quoted string contents blanked, so
+// brace counting sees only structural punctuation. Comments must already be
+// blanked by blankComments -- BlankComments deliberately preserves string
+// CONTENT, which is what a `}` inside a string literal hides behind.
+func structureOf(line string) string {
+	out := make([]byte, 0, len(line))
+	inString := false
+	for i := 0; i < len(line); i++ {
+		c := line[i]
+		switch {
+		case inString && c == '\\' && i+1 < len(line):
+			out = append(out, ' ', ' ')
+			i++
+		case c == '"':
+			inString = !inString
+			out = append(out, ' ')
+		case inString:
+			out = append(out, ' ')
+		default:
+			out = append(out, c)
+		}
+	}
+	return string(out)
 }
 
 // userScopeSelectionExemptions records constructs that select rows by a user-scope
@@ -798,18 +900,40 @@ func rowSelectionSurface(body string) string {
 // already tracked elsewhere while still failing on anything new. Removing the
 // entry is part of closing the issue it names.
 var userScopeSelectionExemptions = map[string]string{
-	"worker/queries.memql runningPlansForUser": "scopes on the caller-supplied args.userId rather than actor.userId; tracked in #2800 (parked pending the repo-owner decision on the userById split). Called internally from worker/logic.memql with an event node id, but it is also on the generated SDK surface, so a client can pass any userId.",
+	// Empty on purpose. runningPlansForUser was the last entry; #2800 resolved
+	// it by marking the construct @serverOnly rather than by exempting it, so
+	// the debt is paid rather than deferred. Both halves of the old rationale
+	// are now false: it is no longer on the generated SDK surface (the
+	// generator skips @serverOnly), and a client can no longer pass any
+	// userId because a client cannot call it at all.
 }
 
 var userScopeExemptSeen = map[string]bool{}
 
+// serverOnlyAnnotationRe is GONE (memql#2875). All four dsl-side gates that
+// used to decide @serverOnly by regex over a preamble -- this file's
+// classification gate, server_only_authz_test.go's docs gate,
+// pii_projection_test.go and caller_arg_selection_test.go -- now read
+// serverOnlyConstructs(), which applies the loader's own rule
+// (hasFlagAttribute) to the same parse. A regex could be satisfied by an
+// `@serverOnly` inside a multi-line annotation string or a block comment
+// opened on an `@`-line, which EXEMPTED the construct while nothing enforced
+// it at runtime.
+//
+// The one remaining regex in this package is server_only_authz_test.go's, and
+// it is a LINE LOCATOR, not a verdict: it finds the annotation line so the
+// doc block can be found by walking up from it, and a location whose construct
+// is not in the parsed set is skipped. Its pattern is pinned by
+// component/memql's TestServerOnlyRegexPatternIsPinnedAtEverySiteThatStillUsesIt.
+
 func TestPerRowAuthzClassification(t *testing.T) {
 	type counts struct {
-		owned   int
-		admin   int
-		public  int
-		flagged int
-		other   int
+		owned      int
+		admin      int
+		public     int
+		serverOnly int
+		flagged    int
+		other      int
 	}
 	byDomain := map[string]*counts{}
 	type flag struct {
@@ -870,6 +994,37 @@ func TestPerRowAuthzClassification(t *testing.T) {
 
 			hasPublic := strings.Contains(preamble, "@public")
 
+			// @serverOnly resolves the same question @public does, from the
+			// other direction (memql#2800). @public says "callable by anyone
+			// and that is intended"; @serverOnly says "not callable by a
+			// client at all", which is why a caller-scope filter is neither
+			// present nor meaningful -- there is no client caller to scope to.
+			//
+			// Unlike @public it is not merely an author's acknowledgement: it
+			// is ENFORCED at every dispatch point against auth.CallOrigin, so
+			// accepting it here rests on a runtime guarantee rather than on a
+			// promise. Constructs carrying it are the ones where scoping is
+			// impossible -- the auth path resolving `sub` -> user before an
+			// actor exists, an automation acting on a user other than the
+			// actor.
+			//
+			// Matched at LINE START, not by substring. A substring test let a
+			// COMMENT merely mentioning the annotation silence the gate --
+			// and in that shape there is no annotation, so Function.ServerOnly
+			// stays false and there is no runtime guarantee at all. The
+			// justification above ("rests on a runtime guarantee rather than
+			// on a promise") is exactly what a prose mention does not buy.
+			// sdk/gen/gen.go's serverOnlyRe already had this right.
+			//
+			// #2875: the verdict now comes from the PARSED tree, not from this
+			// regex. serverOnlyConstructs applies the loader's own rule --
+			// hasFlagAttribute(attrs, "serverOnly") -- to the same parse, so the
+			// gate's answer and Function.ServerOnly cannot diverge. The regex
+			// could be satisfied by an `@serverOnly` inside a multi-line
+			// annotation string or a block comment opened on an `@`-line, which
+			// EXEMPTED the construct here while nothing enforced it at runtime.
+			hasServerOnly := serverOnlyConstructs(t)[serverOnlyKey{Path: p, Name: name}]
+
 			// A QUERY's scoping lives in its filter's boolean STRUCTURE, so
 			// the gate evaluates the clause rather than substring-matching
 			// the body (memql#2832). A substring test reads
@@ -907,6 +1062,8 @@ func TestPerRowAuthzClassification(t *testing.T) {
 			exemptKey := p + " " + name
 
 			switch {
+			case hasServerOnly:
+				byDomain[domain].serverOnly++
 			case hasPublic:
 				byDomain[domain].public++
 			case hasOwner:
@@ -933,12 +1090,12 @@ func TestPerRowAuthzClassification(t *testing.T) {
 	}
 	sort.Strings(domains)
 	t.Logf("\n=== Per-row authz classification (informational; see docs/public/operate/auth/per-row-authz-audit.md) ===")
-	t.Logf("%-15s %5s %5s %5s %5s %5s",
-		"domain", "owned", "admin", "public", "FLAG", "other")
+	t.Logf("%-15s %5s %5s %5s %6s %5s %5s",
+		"domain", "owned", "admin", "public", "srvOnly", "FLAG", "other")
 	for _, d := range domains {
 		c := byDomain[d]
-		t.Logf("%-15s %5d %5d %5d %5d %5d",
-			d, c.owned, c.admin, c.public, c.flagged, c.other)
+		t.Logf("%-15s %5d %5d %5d %6d %5d %5d",
+			d, c.owned, c.admin, c.public, c.serverOnly, c.flagged, c.other)
 	}
 	t.Logf("")
 	// Keep the exemption table honest: an entry whose construct no longer
@@ -1090,7 +1247,7 @@ func walkFilterPredicates(path, src string, emit func(file string, lineno int, p
 			inFilter = false
 			continue
 		}
-		if strings.HasPrefix(trim, "filter ") || strings.HasPrefix(trim, "filter\t") {
+		if dslclause.StartsWith(trim, "filter") {
 			inFilter = true
 			rest := strings.TrimSpace(strings.TrimPrefix(trim, "filter"))
 			for _, p := range splitPredicates(rest) {
@@ -1103,17 +1260,15 @@ func walkFilterPredicates(path, src string, emit func(file string, lineno int, p
 		if !inFilter {
 			continue
 		}
-		end := false
-		for _, kw := range []string{"shape", "insert", "update", "return", "concept", "args", "use", "}", ")"} {
-			if strings.HasPrefix(trim, kw+" ") || trim == kw || strings.HasPrefix(trim, kw+"\t") {
-				end = true
-				break
-			}
-		}
-		if strings.HasPrefix(trim, "@") {
-			end = true
-		}
-		if end {
+		// The keyword set is shared with the pagination checker and pinned
+		// against parseStructQueryBody's own switch (memql#2815). This list
+		// used to be local, and it had drifted: it omitted sort / paginate /
+		// asOf / count, so 22 directive lines in the shipped corpus were
+		// emitted to the gates below as pseudo-predicates. Over-inclusive
+		// rather than a miss, so nothing false-fired -- but the safe
+		// direction was luck, and a gate that REJECTED rather than
+		// classified would have started firing on `sort "createdAt", "desc"`.
+		if dslclause.TerminatesFilterClause(trim) {
 			inFilter = false
 			continue
 		}
@@ -1363,11 +1518,7 @@ func clauseGuaranteesAt(clause string, leaf func(string) bool, depth int) bool {
 func filterClauseOf(body string) string {
 	var out []string
 	inFilter := false
-	for _, raw := range strings.Split(body, "\n") {
-		line := raw
-		if i := strings.Index(line, "//"); i >= 0 {
-			line = line[:i]
-		}
+	for _, line := range strings.Split(blankComments(body), "\n") {
 		trim := strings.TrimSpace(line)
 		if !inFilter {
 			if rest, ok := strings.CutPrefix(trim, "filter"); ok && (rest == "" || rest[0] == ' ' || rest[0] == '\t') {
@@ -1386,13 +1537,26 @@ func filterClauseOf(body string) string {
 
 // isClauseEndKeyword reports whether a line starts the next clause of a
 // struct-form body, terminating the filter.
+//
+// Delegates to the shared set (memql#2815). This was a THIRD local copy --
+// added by #2832 a few hours before the consolidation -- which is the pattern
+// the shared package exists to stop: each new gate spelled the list again,
+// slightly differently, and nothing compared them.
+//
+// This is a NARROWING, not a pure delegation. The three things it drops were
+// each checked against the corpus rather than assumed:
+//
+//	depth   never a parseStructQueryBody directive; zero lines in dsl/
+//	asof    lowercase -- the parser accepts only `asOf`, so this spelling
+//	        parse-errors before any gate sees it
+//	`(`     the old list also ended a clause on `shape(` / `count(`, an
+//	        artifact of the retired procedural form; zero such lines in dsl/
+//
+// If `depth` ever becomes a real directive it has to be added to the parser,
+// and TestStructQueryDirectivesMatchTheParser then fails until the shared list
+// learns it -- which is the point of routing through it.
 func isClauseEndKeyword(trim string) bool {
-	for _, kw := range []string{"shape", "sort", "paginate", "insert", "update", "return", "concept", "args", "use", "count", "asOf", "asof", "depth"} {
-		if rest, ok := strings.CutPrefix(trim, kw); ok && (rest == "" || rest[0] == ' ' || rest[0] == '\t' || rest[0] == '(') {
-			return true
-		}
-	}
-	return false
+	return dslclause.StartsAnyOf(trim, dslclause.BodyKeywords)
 }
 
 // stripLeadingNot removes a negation prefix. `!=` is a comparison operator,

@@ -17,6 +17,8 @@ package conformance
 //     length of the activeUsers row set.
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -60,9 +62,24 @@ func TestConf1730UserCountReturnsNumericAggregate(t *testing.T) {
 	// aggregate must equal len(activeUsers). (activeUsers pages at
 	// MaxResults=500; only assert equality below that ceiling so the check
 	// stays correct on a large shared DB.)
-	activeRows := asArray(t, e.runQuery(t, "activeUsers", map[string]any{}))
-	if len(activeRows) < 500 && before != len(activeRows) {
-		t.Fatalf("#1730: userCount=%d must match the active-user total len(activeUsers)=%d", before, len(activeRows))
+	//
+	// activeUsers became @serverOnly in memql#2883 -- both its args are
+	// optional, so a bare client call returned every active user in userFull
+	// (every @pii field plus the cluster-wide auth role). It is read
+	// server-side here because the property under test is the ROW COUNT, not
+	// reachability; the refusal itself is asserted immediately below.
+	activeRowCount := e.runQueryServerSide(t, "query activeUsers()")
+	if activeRowCount < 500 && before != activeRowCount {
+		t.Fatalf("#1730: userCount=%d must match the active-user total len(activeUsers)=%d", before, activeRowCount)
+	}
+
+	// memql#2883, the conformance half: run_query IS the MCP client surface,
+	// so a @serverOnly construct reaching it would be exactly the leak the
+	// gate exists to close.
+	if out, isErr := e.toolCall(t, "run_query", map[string]any{"name": "activeUsers", "args": map[string]any{}}); !isErr {
+		t.Fatalf("#2883: run_query activeUsers must be REFUSED on the MCP client surface, got: %v", out)
+	} else if !strings.Contains(fmt.Sprint(out), "server-only") {
+		t.Fatalf("#2883: run_query activeUsers was refused for the wrong reason: %v", out)
 	}
 
 	// Create K active users; the count must rise by exactly K.

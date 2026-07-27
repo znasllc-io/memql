@@ -203,11 +203,20 @@ func asyncRollbackAck(toID, newID string) string {
 }
 
 // loadDeployment reads a deployment's current state via deploymentById.
-// The query returns the full append-only timeline oldest-to-newest; a
-// status-only transition (updateDeploymentStatus) is a read-merge
-// update that re-stamps every field, so the latest row carries the
-// complete current state. We fold across the timeline (last non-empty
-// wins per field, last row's status wins) to be robust regardless.
+//
+// The query returns AT MOST ONE row -- the latest version. This comment
+// used to claim it returned "the full append-only timeline
+// oldest-to-newest", which is not what the engine does: every query
+// result collapses to one row per id (loadLatestNodes' DISTINCT ON, plus
+// the id-keyed maps downstream), unconditionally of asOf. Corrected in
+// #2784; an all-versions read mode is tracked in #2880.
+//
+// The fold below is therefore over a one-element slice. It is kept
+// because it costs nothing and stays correct if #2880 lands a timeline
+// mode -- but it is not load-bearing today, and nobody should read it as
+// evidence that the query returns a timeline. A status-only transition
+// (updateDeploymentStatus) is a read-merge update that re-stamps every
+// field, so the single latest row already carries the complete state.
 func (s *Service) loadDeployment(ctx context.Context, deploymentID string) (deploymentRecord, error) {
 	if s == nil || s.engine == nil {
 		return deploymentRecord{}, fmt.Errorf("no engine wired: cannot read deployment %s", deploymentID)

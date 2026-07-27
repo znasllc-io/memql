@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"go/token"
 	"go/types"
-	"path/filepath"
 	"strings"
 
 	"golang.org/x/tools/go/packages"
@@ -352,9 +351,11 @@ func posToSourceRef(p *packages.Package, pos token.Pos, workspaceRoot string) *m
 	if tp.Filename == "" {
 		return nil
 	}
-	rel, err := filepath.Rel(workspaceRoot, tp.Filename)
-	if err != nil {
-		rel = tp.Filename
+	rel, ok := workspaceRelative(workspaceRoot, tp.Filename)
+	if !ok {
+		// Outside the workspace -- GOROOT or the module cache. See
+		// workspaceRelative for why these are dropped rather than recorded.
+		return nil
 	}
 	return &model.SourceRef{File: rel, Line: tp.Line}
 }

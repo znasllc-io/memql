@@ -231,9 +231,9 @@ func firstSource(p *packages.Package, workspaceRoot string) *model.SourceRef {
 	if len(p.GoFiles) == 0 {
 		return nil
 	}
-	rel, err := filepath.Rel(workspaceRoot, p.GoFiles[0])
-	if err != nil {
-		rel = p.GoFiles[0]
+	rel, ok := workspaceRelative(workspaceRoot, p.GoFiles[0])
+	if !ok {
+		return nil
 	}
 	return &model.SourceRef{File: rel}
 }
@@ -275,4 +275,38 @@ func pruneEmpty(m map[string]string) map[string]string {
 		return nil
 	}
 	return m
+}
+
+// workspaceRelative renders path relative to workspaceRoot, reporting false
+// when it falls OUTSIDE the workspace.
+//
+// This is what makes the model reproducible across machines (memql#2844).
+// filepath.Rel happily walks upwards, so a file in GOROOT or the module cache
+// came out as a `../../..` chain whose LENGTH encodes how deep the checkout
+// sits on that particular disk:
+//
+//	/home/znas/memql-projects/wt-2844  ->  ../../../../usr/local/go/src/sync/mutex.go
+//	/home/znas/depthtest               ->  ../../../usr/local/go/src/sync/mutex.go
+//
+// Twenty-seven nodes carried such paths -- promoted methods from embedded
+// stdlib and dependency types -- so the artifact differed between two
+// checkouts of the SAME COMMIT on the same machine, and differed again if
+// GOMODCACHE moved. On CI the GOROOT path additionally embeds the Go PATCH
+// VERSION. A drift gate over that is unsatisfiable: it goes green on the
+// machine that regenerated and red everywhere else.
+//
+// Dropped rather than symbolised. These are files the cockpit cannot open
+// anyway -- they are not in the workspace it has checked out -- so a SourceRef
+// pointing at them is a click target that cannot work. A node keeps its
+// identity, kind, name and parent; it just has no source position, which is
+// the honest answer for code that lives outside the tree being modelled.
+func workspaceRelative(workspaceRoot, path string) (string, bool) {
+	rel, err := filepath.Rel(workspaceRoot, path)
+	if err != nil {
+		return "", false
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return rel, true
 }

@@ -38,7 +38,12 @@ import (
 // embed sibling product repos' topology (engine/product decoupling,
 // memql#2428). A product pack contributes its own model to the cockpit's
 // drill-down via its own arch pass -- see memql#2432.
-//go:generate go run ../../../cmd/memql-arch --root ../../.. --out topology.model.json --calls
+// Regeneration goes through `make arch-model`, which is the ONE place the flag
+// set lives (memql#2844). This directive used to carry its own copy, missing
+// --reproducible and --cluster, so `make generate` silently reintroduced the
+// wall clock, the absolute workspace path and the folder-derived cluster name
+// that the gate exists to prevent -- and then the gate red.
+//go:generate sh -c "cd ../../.. && make arch-model"
 
 //go:embed topology.model.json
 var ModelJSON []byte

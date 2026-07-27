@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/znasllc-io/memql/component/auth"
 	"strings"
 	"time"
 
@@ -32,8 +33,10 @@ func (s *EngineStore) UserPreferences(ctx context.Context, userId string) (Prefe
 	if strings.TrimSpace(userId) == "" {
 		return Preferences{ComputerUseEnabled: true}, nil
 	}
-	query := fmt.Sprintf(`query userById(userId:%q)`, userId)
-	res, err := s.Engine.Execute(ctx, query)
+	// #2800: reads the owning user's preferences server-side (worker
+	// kill-switch), not the caller's.
+	query := fmt.Sprintf(`query userByIdSystem(userId:%q)`, userId)
+	res, err := s.Engine.Execute(auth.ContextWithInternalOrigin(ctx), query)
 	if err != nil {
 		return Preferences{ComputerUseEnabled: true}, fmt.Errorf("user lookup: %w", err)
 	}

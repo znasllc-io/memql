@@ -512,38 +512,6 @@ func ActiveSkillsFullBuild(args ActiveSkillsFullArgs) string {
 	return "query activeSkillsFull()"
 }
 
-// ActiveUsers -- Active users in the cluster, optionally filtered by role or group membership. Both args are optional -- omit them to list all active users (the identity admin portal's user-list view).
-//
-// Bound concept: v1:identity:user (machine-readable: BoundConcepts["activeUsers"] in generated_concepts.go).
-type ActiveUsersArgs struct {
-	Role    string
-	GroupId string
-}
-
-// ActiveUsers calls the engine query activeUsers.
-func (qc *QueryClient) ActiveUsers(ctx context.Context, args ActiveUsersArgs) (*Result, error) {
-	call := ActiveUsersBuild(args)
-	return qc.executeNamed(ctx, "activeUsers", call)
-}
-
-func ActiveUsersBuild(args ActiveUsersArgs) string {
-	var b strings.Builder
-	b.WriteString("query activeUsers(")
-	if args.Role != "" {
-		b.WriteString("role: ")
-		b.WriteString(fmt.Sprintf("%q", args.Role))
-	}
-	if args.GroupId != "" {
-		if b.Len() > 18 {
-			b.WriteString(", ")
-		}
-		b.WriteString("groupId: ")
-		b.WriteString(fmt.Sprintf("%q", args.GroupId))
-	}
-	b.WriteString(")")
-	return b.String()
-}
-
 // AgentAuthorizationsForUser -- All active standing authorizations granted by a user, across all agents and plan kinds.
 //
 // Bound concept: v1:agents:agentAuthorization (machine-readable: BoundConcepts["agentAuthorizationsForUser"] in generated_concepts.go).
@@ -1625,7 +1593,7 @@ func DependentsOfConstructBuild(args DependentsOfConstructArgs) string {
 	return b.String()
 }
 
-// DeploymentById -- All status-transition rows for one deployment, by deploymentId, oldest-to-newest (full lifecycle history; reconstructable asOf any time). #1872.
+// DeploymentById -- The CURRENT state of one deployment, by deploymentId. Returns at most one row -- the latest version. Status transitions append under the same id, but every query result collapses to one row per id, so this is not a timeline read; an all-versions mode is tracked in #2880.
 //
 // Bound concept: v1:cluster:deployment (machine-readable: BoundConcepts["deploymentById"] in generated_concepts.go).
 type DeploymentByIdArgs struct {
@@ -3437,38 +3405,9 @@ func RouterBudgetsBuild(args RouterBudgetsArgs) string {
 	return b.String()
 }
 
-// RunningPlansForUser -- List a user's running plans.
-//
-// Bound concept: v1:planner:plan (machine-readable: BoundConcepts["runningPlansForUser"] in generated_concepts.go).
-type RunningPlansForUserArgs struct {
-	WithComputerUseScope    bool
-	WithComputerUseScopeSet bool // set true to send withComputerUseScope; required because zero-value bool is ambiguous
-	UserId                  string
-}
-
-// RunningPlansForUser calls the engine query runningPlansForUser.
-func (qc *QueryClient) RunningPlansForUser(ctx context.Context, args RunningPlansForUserArgs) (*Result, error) {
-	call := RunningPlansForUserBuild(args)
-	return qc.executeNamed(ctx, "runningPlansForUser", call)
-}
-
-func RunningPlansForUserBuild(args RunningPlansForUserArgs) string {
-	var b strings.Builder
-	b.WriteString("query runningPlansForUser(")
-	if args.WithComputerUseScopeSet {
-		b.WriteString("withComputerUseScope: ")
-		b.WriteString(fmt.Sprintf("%v", args.WithComputerUseScope))
-	}
-	if b.Len() > 26 {
-		b.WriteString(", ")
-	}
-	b.WriteString("userId: ")
-	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	b.WriteString(")")
-	return b.String()
-}
-
-// SearchUsers -- Search users, optionally gated by active status. Omit `active` to list every user; pass true to return only active users or false for only deactivated ones. Backs the searchUsers tool.
+// SearchUsers -- Search users, optionally gated by active status. Omit `active` to list active and deactivated users alike; pass true to return only active users or false for only deactivated ones. Owner-or-admin only. Backs the searchUsers tool.
+// memql#2883: `when(args.active)` is DROPPED when the arg is absent (authoring rules), so before this gate `searchUsers()` with no arguments applied no predicate at all and returned every user in the cluster in userFull -- every @pii field plus the cluster-wide auth role. It is also on the agent tool surface (dsl/memql/tools.memql), so a prompt-injected or over-eager agent could pull the whole user table.
+// requiresOwnerOrAdmin rather than @serverOnly, because unlike its three siblings this one has a genuine client caller: the MCP tool. Gating by origin would delete the tool; gating by role keeps it working for the administrators it was built for. This is the same gate #2860 put on userById.
 //
 // Bound concept: v1:identity:user (machine-readable: BoundConcepts["searchUsers"] in generated_concepts.go).
 type SearchUsersArgs struct {
@@ -3952,7 +3891,9 @@ func UsableRecordsBuild(args UsableRecordsArgs) string {
 	return b.String()
 }
 
-// UserActiveSpace -- Returns a user's current activePartitionId. Empty when the user is not focused on any space.
+// UserActiveSpace -- Returns a user's current activePartitionId. Empty when the user is not focused on any space. memql#2800: deliberately cross-user, and acknowledged as such.
+// The frontend derives per-participant `isActive` from it (a participant is active iff User.activePartitionId == participant.partitionId), so resolving OTHER users is the entire purpose -- caller-scoping would break presence in every space. It is safe to leave open because the projection carries no PII: userActiveSpaceProjection is id + activePartitionId and nothing else.
+// The `when(args.userId)` guard was removed. userId is declared required, so the guard should be unreachable -- but it made "no argument" mean "no filter" rather than "no rows", i.e. an unfiltered dump of every user, on a query whose only predicate it was. That is the wrong failure direction to leave standing on the strength of a required-arg check elsewhere.
 //
 // Bound concept: v1:identity:user (machine-readable: BoundConcepts["userActiveSpace"] in generated_concepts.go).
 type UserActiveSpaceArgs struct {
@@ -3974,29 +3915,8 @@ func UserActiveSpaceBuild(args UserActiveSpaceArgs) string {
 	return b.String()
 }
 
-// UserByEmail -- Look up a user by primary email (the dedup key during bootstrap).
-//
-// Bound concept: v1:identity:user (machine-readable: BoundConcepts["userByEmail"] in generated_concepts.go).
-type UserByEmailArgs struct {
-	PrimaryEmail string
-}
-
-// UserByEmail calls the engine query userByEmail.
-func (qc *QueryClient) UserByEmail(ctx context.Context, args UserByEmailArgs) (*Result, error) {
-	call := UserByEmailBuild(args)
-	return qc.executeNamed(ctx, "userByEmail", call)
-}
-
-func UserByEmailBuild(args UserByEmailArgs) string {
-	var b strings.Builder
-	b.WriteString("query userByEmail(")
-	b.WriteString("primaryEmail: ")
-	b.WriteString(fmt.Sprintf("%q", args.PrimaryEmail))
-	b.WriteString(")")
-	return b.String()
-}
-
-// UserById -- Get a user by id.
+// UserById -- Get a user by id -- FULL row, owner-or-admin only.
+// memql#2800: the filter keys on a caller-supplied id, so it is not a caller check. Reading someone else's full row now requires being them or holding admin/owner.
 //
 // Bound concept: v1:identity:user (machine-readable: BoundConcepts["userById"] in generated_concepts.go).
 type UserByIdArgs struct {
@@ -4052,6 +3972,29 @@ func UserDefaultsBuild(args UserDefaultsArgs) string {
 	return "query userDefaults()"
 }
 
+// UserDisplayById -- Resolve a user id to a display name. Client-callable for any user.
+// memql#2800: the cross-user read that rosters, mentions and participant lists actually need. Deliberately projects userDisplayCard (id + displayName) and nothing else, so a cross-user lookup cannot return PII.
+//
+// Bound concept: v1:identity:user (machine-readable: BoundConcepts["userDisplayById"] in generated_concepts.go).
+type UserDisplayByIdArgs struct {
+	UserId string
+}
+
+// UserDisplayById calls the engine query userDisplayById.
+func (qc *QueryClient) UserDisplayById(ctx context.Context, args UserDisplayByIdArgs) (*Result, error) {
+	call := UserDisplayByIdBuild(args)
+	return qc.executeNamed(ctx, "userDisplayById", call)
+}
+
+func UserDisplayByIdBuild(args UserDisplayByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query userDisplayById(")
+	b.WriteString("userId: ")
+	b.WriteString(fmt.Sprintf("%q", args.UserId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // UsersActiveInSpace -- Returns users whose activePartitionId == arg(partitionId). Active-human roster per the activity model (Phase 4).
 //
 // Bound concept: v1:identity:user (machine-readable: BoundConcepts["usersActiveInSpace"] in generated_concepts.go).
@@ -4070,47 +4013,6 @@ func UsersActiveInSpaceBuild(args UsersActiveInSpaceArgs) string {
 	b.WriteString("query usersActiveInSpace(")
 	b.WriteString("partitionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
-	b.WriteString(")")
-	return b.String()
-}
-
-// UsersInDeletionCooldown -- Active users with a pending deletionScheduledAt; consumers per-row check cooldown windows via addDuration.
-//
-// Bound concept: v1:identity:user (machine-readable: BoundConcepts["usersInDeletionCooldown"] in generated_concepts.go).
-type UsersInDeletionCooldownArgs struct {
-}
-
-// UsersInDeletionCooldown calls the engine query usersInDeletionCooldown.
-func (qc *QueryClient) UsersInDeletionCooldown(ctx context.Context, args UsersInDeletionCooldownArgs) (*Result, error) {
-	call := UsersInDeletionCooldownBuild(args)
-	return qc.executeNamed(ctx, "usersInDeletionCooldown", call)
-}
-
-func UsersInDeletionCooldownBuild(args UsersInDeletionCooldownArgs) string {
-	_ = args
-	return "query usersInDeletionCooldown()"
-}
-
-// UsersScheduledForDeletion -- Active users whose deletionScheduledAt is set. When scheduledBefore is supplied, restricts to rows whose deletionScheduledAt is strictly before it -- the deletion sweep's logic computes the cutoff (now - MEMQL_IDENTITY_DELETION_COOLDOWN_DAYS) and pushes it down (#2369).
-//
-// Bound concept: v1:identity:user (machine-readable: BoundConcepts["usersScheduledForDeletion"] in generated_concepts.go).
-type UsersScheduledForDeletionArgs struct {
-	ScheduledBefore string
-}
-
-// UsersScheduledForDeletion calls the engine query usersScheduledForDeletion.
-func (qc *QueryClient) UsersScheduledForDeletion(ctx context.Context, args UsersScheduledForDeletionArgs) (*Result, error) {
-	call := UsersScheduledForDeletionBuild(args)
-	return qc.executeNamed(ctx, "usersScheduledForDeletion", call)
-}
-
-func UsersScheduledForDeletionBuild(args UsersScheduledForDeletionArgs) string {
-	var b strings.Builder
-	b.WriteString("query usersScheduledForDeletion(")
-	if args.ScheduledBefore != "" {
-		b.WriteString("scheduledBefore: ")
-		b.WriteString(fmt.Sprintf("%q", args.ScheduledBefore))
-	}
 	b.WriteString(")")
 	return b.String()
 }

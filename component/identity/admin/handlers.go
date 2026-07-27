@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/znasllc-io/memql/component/auth"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -889,7 +890,10 @@ func (s *AdminServer) queryUsers(ctx context.Context, q string) ([]userView, err
 	needle := strings.ToLower(strings.TrimSpace(q))
 	cursor := ""
 	for i := 0; i < maxUserPageWalk; i++ {
-		res, err := s.Engine.Execute(memqlengine.ContextWithCursor(ctx, cursor), `query activeUsers()`)
+		// #2883: activeUsers is @serverOnly. The admin app is server-side Go
+		// gated at its own HTTP layer and reads arbitrary users by design --
+		// the same reasoning userById below already records for userByIdSystem.
+		res, err := s.Engine.Execute(auth.ContextWithInternalOrigin(memqlengine.ContextWithCursor(ctx, cursor)), `query activeUsers()`)
 		if err != nil {
 			return nil, err
 		}
@@ -923,8 +927,10 @@ func (s *AdminServer) queryUsers(ctx context.Context, q string) ([]userView, err
 const maxUserPageWalk = 1000
 
 func (s *AdminServer) userById(ctx context.Context, userId string) (*userView, error) {
-	q := fmt.Sprintf(`query userById(userId: %q)`, userId)
-	res, err := s.Engine.Execute(ctx, q)
+	// #2800: the admin app is server-side Go and is already gated at its own
+	// HTTP layer; it reads arbitrary users by design.
+	q := fmt.Sprintf(`query userByIdSystem(userId: %q)`, userId)
+	res, err := s.Engine.Execute(auth.ContextWithInternalOrigin(ctx), q)
 	if err != nil {
 		return nil, err
 	}

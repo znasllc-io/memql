@@ -242,7 +242,7 @@ Most mutations pass a **bare shortId** in the `insert` block (the target
 concept comes from the `mutation <Concept> <name>` signature):
 
 ```memql
-mutation utterance mutationCreateUtterance {
+mutate utterance createUtterance {
   args {
     utteranceId  string  @required
   }

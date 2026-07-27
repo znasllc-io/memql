@@ -143,9 +143,20 @@ type Edge struct {
 // (topology.model.json) at the workspace root by the extractor and
 // loaded by the cockpit at startup.
 //
-// SchemaVersion is checked before unmarshaling. GeneratedAt is RFC3339.
-// Workspace is the absolute path the extractor was run from, used by
-// the cockpit only for display ("topology generated from <path>").
+// SchemaVersion is checked before unmarshaling.
+//
+// GeneratedAt is RFC3339, OR EMPTY when the model was produced with
+// --reproducible -- which is how the committed
+// component/architecture/embedded/topology.model.json is generated
+// (memql#2844). Workspace is the absolute path the extractor was run from,
+// and is likewise EMPTY in that artifact; the cockpit used it only for display
+// ("topology generated from <path>").
+//
+// Consumers must treat both as "unknown" when empty and must not parse
+// GeneratedAt unconditionally. Both fields carried machine-specific data --
+// a wall clock and a developer's absolute home path -- which made the artifact
+// differ on every run and every machine, so a drift gate over it was
+// impossible. Blanking them is what makes the committed model reproducible.
 type Model struct {
 	SchemaVersion string `json:"schema_version"`
 	GeneratedAt   string `json:"generated_at"`

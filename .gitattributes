@@ -3,3 +3,16 @@
 
 # Ensure shell scripts use LF to avoid /bin/sh carriage-return errors in devcontainers
 *.sh text eol=lf
+
+# The architecture model is a 31.6MB generated artifact on ONE line (memql#2844).
+#
+# linguist-generated keeps it out of language stats and collapses it in review,
+# which is right for something no human reads.
+#
+# -diff is NOT set. It was tried when the file was pretty-printed and it did
+# NOT fix the problem -- GitHub still computed the patch and still timed out
+# ("this diff is taking too long to generate"), failing the `changes` job and
+# therefore ci-required. Writing the artifact compact is what actually fixed
+# it, so the marker would now be doing nothing except hiding a one-line diff
+# that is already unreadable.
+component/architecture/embedded/topology.model.json linguist-generated=true

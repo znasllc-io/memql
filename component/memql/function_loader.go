@@ -457,6 +457,11 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 		// @mcp promotion (epic memql#1529 Phase 4 #1534) is a flag attribute the
 		// langparser surfaces on Attributes rather than a typed FunctionDef field.
 		MCPPromoted: hasFlagAttribute(funcDef.Attributes, "mcp"),
+		// @serverOnly (memql#2800) -- same flag-attribute shape. Bars the
+		// construct from client-originated calls while leaving server-side Go
+		// free to call it; see auth.CallOrigin for why that distinction needed
+		// a new signal rather than the retired @internal.
+		ServerOnly: hasFlagAttribute(funcDef.Attributes, "serverOnly"),
 	}
 
 	// Handle rate limit

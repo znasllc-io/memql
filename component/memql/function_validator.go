@@ -8,6 +8,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/language/ast"
 )
 
@@ -17,14 +18,27 @@ type functionValidator struct {
 	specs     *SpecRegistry
 	resolved  map[string]ExpressionNode
 	resolving map[string]struct{}
+
+	// origin is where the call came from (memql#2800). The parse path is
+	// ctx-free by design, so the engine reads auth.OriginFromContext once in
+	// executeWith and hands the result down rather than threading a context
+	// through the parser. The ZERO VALUE is auth.OriginClient -- a validator
+	// built without an explicit origin (tests, internal tooling) is treated as
+	// untrusted, so forgetting to pass it denies rather than grants.
+	origin auth.CallOrigin
 }
 
 func newFunctionValidator(functions map[string]*Function, specs *SpecRegistry) *functionValidator {
+	return newFunctionValidatorWithOrigin(functions, specs, auth.OriginClient)
+}
+
+func newFunctionValidatorWithOrigin(functions map[string]*Function, specs *SpecRegistry, origin auth.CallOrigin) *functionValidator {
 	return &functionValidator{
 		functions: functions,
 		specs:     specs,
 		resolved:  make(map[string]ExpressionNode),
 		resolving: make(map[string]struct{}),
+		origin:    origin,
 	}
 }
 
@@ -380,6 +394,17 @@ func (v *functionValidator) expandFunctionCall(call *FunctionCallExpression) (Ex
 	if !fn.Enabled {
 		return nil, fmt.Errorf("function %q is disabled", key)
 	}
+	// #2800: @serverOnly bars client-originated calls while leaving
+	// server-side Go free to call the construct. This sits beside the
+	// @disabled gate because it is the same kind of check at the same depth
+	// -- the resolved *Function is in hand -- but it is NOT the same
+	// property: @disabled stops every caller, which would break the very
+	// server-side paths @serverOnly exists to keep working (the auth path
+	// resolving `sub` -> user before an actor exists; the kill-switch
+	// automation acting on a user other than the actor).
+	if fn.ServerOnly && !v.origin.IsInternal() {
+		return nil, fmt.Errorf("function %q is server-only and cannot be called by a client", key)
+	}
 
 	// Validate arguments against schema. Normalise positional
 	// object-literal wrapping first: the language parser produces
@@ -466,6 +491,25 @@ func (v *functionValidator) expandFunctionCallAllowMutationLeaf(call *FunctionCa
 	if !strings.EqualFold(strings.TrimSpace(fn.FunctionKind), "logic") {
 		return nil, nil
 	}
+	// This is the F.6 single-mutation-leaf hoist, and it is a FOURTH dispatch
+	// point -- it reaches a construct without going through
+	// expandFunctionCall, so it inherits none of that function's gates. It
+	// checked neither, which meant a @disabled logic still hoisted, and a
+	// @serverOnly one would have hoisted for a client (memql#2800).
+	//
+	// @serverOnly is not currently registrable on Logic
+	// (annotations/registry.go offers it on Query and Mutation only), so the
+	// second half is defence rather than a live hole today. It is checked
+	// anyway: the reason the other three points are all gated is that a
+	// missing one is invisible until someone finds it, and "the annotation
+	// cannot be applied here yet" is a fact about a registry that can change
+	// in one line.
+	if !fn.Enabled {
+		return nil, fmt.Errorf("function %q is disabled", key)
+	}
+	if fn.ServerOnly && !v.origin.IsInternal() {
+		return nil, fmt.Errorf("function %q is server-only and cannot be called by a client", key)
+	}
 	if fn.Expr == nil {
 		return nil, nil
 	}
@@ -515,8 +559,19 @@ func (v *functionValidator) substituteArgRefsAndCallArgs(expr ExpressionNode, ar
 		return expr, nil
 	}
 	newArgs := make(map[string]any, len(call.Args))
-	for k, v := range call.Args {
-		newArgs[k] = substituteArgRefValue(v, args)
+	for k, val := range call.Args {
+		// memql#2870: fold here too. This is a FOURTH dispatch point that
+		// reaches a construct without going through expandExpressionWithArgs, so
+		// it inherits none of that path's argument handling -- exactly the
+		// asymmetry that let `args.x ?? ""` reach validation as an AST node in
+		// the first place. No shipped logic currently returns a mutation leaf,
+		// so this is not a live failure; it is the next instance of the class,
+		// pre-empted rather than left for whoever writes that construct.
+		folded, err := foldArgExpression(substituteArgRefValue(val, args), args)
+		if err != nil {
+			return nil, fmt.Errorf("argument %q of mutation-leaf call %q: %w", k, call.Name, err)
+		}
+		newArgs[k] = folded
 	}
 	if len(newArgs) == 1 {
 		if inner, ok := newArgs["0"].(map[string]any); ok {
@@ -524,6 +579,63 @@ func (v *functionValidator) substituteArgRefsAndCallArgs(expr ExpressionNode, ar
 		}
 	}
 	return &FunctionCallExpression{Name: call.Name, Args: newArgs}, nil
+}
+
+// foldArgExpression evaluates an argument that is still an engine expression
+// node down to a concrete value, so it reaches argument validation (and then a
+// Go executor or SQL builder) as the value the author wrote rather than as the
+// AST of that value. memql#2870.
+//
+// It routes through evalCollScalar rather than growing a fourth evaluator.
+// There are already three -- MutationExecutor.evaluateValue for the string step
+// path, evalCollScalar for engine AST, and a scatter of one-off special cases
+// bolted onto this file (IsDateBuiltin, cond, and the *ast.ArgRefExpr case in
+// substituteArgRefValue added for the #1840 outage). Adding a fifth is how that
+// scatter got here.
+//
+// DELIBERATELY NARROW. Only node kinds that are self-contained VALUE
+// expressions are folded. A sub-call to a user function or a builtin is left
+// alone for expandFunctionCall to expand, because folding it here would need
+// the whole function registry and would change what "an argument" means. An
+// unrecognised node is returned untouched, so any behaviour this does not
+// explicitly claim is exactly what it was before.
+func foldArgExpression(v any, args map[string]any) (any, error) {
+	node, ok := v.(ExpressionNode)
+	if !ok {
+		return v, nil // already a concrete value
+	}
+	if !foldableArgExpression(node) {
+		return v, nil
+	}
+	folded, err := evalCollScalar(node, args, nil)
+	if err != nil {
+		return nil, err
+	}
+	return folded, nil
+}
+
+// foldableArgExpression reports whether node is a self-contained value
+// expression evalCollScalar can evaluate without a function registry.
+func foldableArgExpression(node ExpressionNode) bool {
+	switch n := node.(type) {
+	case *FunctionCallExpression:
+		// The converter-normalised positional builtins, and only those: a call
+		// to anything else is a construct invocation that must be expanded, not
+		// evaluated.
+		if n == nil {
+			return false
+		}
+		return n.Name == "coalesce" || n.Name == "concat" || n.Name == "cond" || IsDateBuiltin(n.Name)
+	case *LiteralValueNode:
+		// Covers bare `now`, which the converter wraps as a literal carrying an
+		// *ast.TimestampExprFunc (ast_converter.go). resolveLiteralValue is what
+		// turns it into a timestamp.
+		return true
+	case *ArithmeticExpression, *ComparisonExpression, *BinaryComparisonExpression, *LogicalExpression:
+		return true
+	default:
+		return false
+	}
 }
 
 // substituteArgRefValue walks a value (which may be a nested map /
@@ -665,7 +777,13 @@ func (v *functionValidator) expandExpressionWithArgs(expr ExpressionNode, args m
 		// substitutes a top-level arg ref, not a chain receiver), then keep it a
 		// cond call for the evaluator. Without this the call is looked up as a
 		// user function and fails "function not found".
-		if node.Name == "cond" {
+		//
+		// coalesce / concat (#2870) are the same shape and belong in the same
+		// branch: converter-normalised positional builtins with no DSL body. The
+		// allowlist here named only cond, so `return args.gate.passed ?? false`
+		// -- a coalesce in ROOT position rather than in an argument -- was looked
+		// up as a user function and failed `function "coalesce" not found`.
+		if node.Name == "cond" || node.Name == "coalesce" || node.Name == "concat" {
 			expanded := make(map[string]any, len(node.Args))
 			for k, val := range node.Args {
 				if en, ok := val.(ExpressionNode); ok {
@@ -679,6 +797,40 @@ func (v *functionValidator) expandExpressionWithArgs(expr ExpressionNode, args m
 				expanded[k] = val
 			}
 			return &FunctionCallExpression{Name: node.Name, Args: expanded}, nil
+		}
+
+		// memql#2870: substituting an arg REF is not the same as evaluating an
+		// arg EXPRESSION, and only the former was happening above.
+		// `args.event.node.id ?? ""` is a coalesce node, not an arg ref, so it
+		// passed through untouched and reached validateFunctionArgs as an AST
+		// node --
+		//
+		//	argument "userId": expected string, got *ast.CoalesceExpr
+		//
+		// -- which is the computer-use kill switch, the workbench release sweep
+		// and the magic-link expiry sweep, all three of which had never run.
+		// (`magicLinkExpirySweep` passes a bare `now`, which is what proves the
+		// shape is "any expression in an argument", not a coalesce bug.)
+		//
+		// THIS MUST RUN AFTER THE SHORT-CIRCUITS ABOVE, NOT WITH THE
+		// SUBSTITUTION. Folding in the substitution block reached the operands
+		// of cond / coalesce / concat / the date builtins as well, and those
+		// keep their operands as expression nodes ON PURPOSE -- their own
+		// evaluators need them. It broke cond outright (`cond() arg 0 is not an
+		// expression (bool)`) and would have evaluated cond's untaken branch.
+		// Only a call heading for expandFunctionCall -- a real construct
+		// invocation, whose arguments must be VALUES by the time
+		// validateFunctionArgs sees them -- gets folded.
+		if args != nil && len(node.Args) > 0 {
+			folded := make(map[string]any, len(node.Args))
+			for k, val := range node.Args {
+				fv, err := foldArgExpression(val, args)
+				if err != nil {
+					return nil, fmt.Errorf("argument %q of call %q: %w", k, node.Name, err)
+				}
+				folded[k] = fv
+			}
+			node = &FunctionCallExpression{Name: node.Name, Args: folded}
 		}
 		// Resolve, validate, and expand the function with its arguments
 		return v.expandFunctionCall(node)
@@ -979,6 +1131,14 @@ func (*LiteralValueNode) isExpressionNode() {}
 // resolvePlanFunctions resolves all function calls in a query plan.
 // This should be called after spec resolution but before execution.
 func resolvePlanFunctions(plan *QueryPlan, functions *FunctionRegistry, specs *SpecRegistry) error {
+	return resolvePlanFunctionsWithOrigin(plan, functions, specs, auth.OriginClient)
+}
+
+// resolvePlanFunctionsWithOrigin is resolvePlanFunctions with the call origin
+// made explicit (memql#2800). The no-origin wrapper defaults to OriginClient
+// so any caller that has not been taught about origin gets the restricted
+// treatment.
+func resolvePlanFunctionsWithOrigin(plan *QueryPlan, functions *FunctionRegistry, specs *SpecRegistry, origin auth.CallOrigin) error {
 	if plan == nil || plan.Root == nil {
 		return nil
 	}
@@ -987,7 +1147,7 @@ func resolvePlanFunctions(plan *QueryPlan, functions *FunctionRegistry, specs *S
 	if functions != nil {
 		snapshot = functions.Snapshot()
 	}
-	validator := newFunctionValidator(snapshot, specs)
+	validator := newFunctionValidatorWithOrigin(snapshot, specs, origin)
 
 	// Special case: top-level mutation function call.
 	// We don't expand it to an expression; Execute will evaluate it into an insert.

@@ -319,16 +319,73 @@ func (e *Evaluator) ContextFingerprint() map[string]any {
 		ctx["itemName"] = e.itemName
 	}
 
-	// Include custom variables
+	// Include custom variables, minus the wall-clock readings.
 	if len(e.custom) > 0 {
-		customCtx := make(map[string]any, len(e.custom))
-		for k, v := range e.custom {
-			customCtx[k] = v
-		}
-		ctx["custom"] = customCtx
+		ctx["custom"] = fingerprintCustoms(e.custom)
 	}
 
 	return ctx
+}
+
+// fingerprintCustoms copies the evaluator's customs for the cache key with the
+// WALL-CLOCK values removed (memql#2823).
+//
+// A clock reading is an ACCIDENTAL cache discriminator, not a designed one:
+// it differs on every evaluation by construction, so including one guarantees
+// a miss. Two seeds put one in the customs:
+//
+//	timestamp    executor.go, RFC3339 (second granularity)
+//	actor.now    auth.ActorEnvelopeMap, RFC3339 NANO
+//
+// The first only made hits improbable. #2801 then bound the actor envelope on
+// every evaluator, and a nanosecond field makes the function-step cache key a
+// guaranteed miss.
+//
+// The strip is deliberately SURGICAL rather than a recursive sweep for
+// clock-shaped keys. `event` is a custom too, so a recursive strip would also
+// drop `event.payload.timestamp` -- a real business field that SHOULD
+// discriminate a cached result. Removing a genuine input from a cache key is a
+// CORRECTNESS bug; leaving a clock in one is merely a slow one, so the
+// asymmetry decides the design.
+//
+// "Accidental" is exact, and worth stating because dropping `timestamp` is
+// not free: evaluationClock resolves the DSL's `now` from that same custom,
+// so for a function step whose body reads `now` -- e.g.
+// `logic revokeExpiredDelegations ( asOf: now )` -- the per-second key churn
+// WAS what kept it re-running. That is a cache-invalidation strategy made of
+// wall-clock granularity, which is not one: it narrows the window rather than
+// closing it, since the entry is TTL-bounded (default 5m) either way. The real
+// defect is that a side-effecting `logic` step is classified cacheable at all
+// (Step.IsCacheable), pre-existing and filed as memql#2869 -- this change unmasks
+// it rather than causing it, and the status quo it replaces is a cache that
+// provably can never hit.
+//
+// Only the function-step cache reads this (FingerprintStepInput), and it is
+// off by default behind MEMQL_STEP_CACHE_ENABLED -- set in no deploy overlay.
+// Dedup is unaffected: ComputeInitialChainHead keys on event data plus the
+// input fingerprint, not on evaluator customs.
+func fingerprintCustoms(custom map[string]any) map[string]any {
+	out := make(map[string]any, len(custom))
+	for k, v := range custom {
+		if k == "timestamp" {
+			continue
+		}
+		if k == "actor" {
+			if envelope, ok := v.(map[string]any); ok {
+				actor := make(map[string]any, len(envelope))
+				for ak, av := range envelope {
+					if ak == "now" {
+						continue
+					}
+					actor[ak] = av
+				}
+				out[k] = actor
+				continue
+			}
+		}
+		out[k] = v
+	}
+	return out
 }
 
 // Regular expressions for parsing expressions.
@@ -721,15 +778,35 @@ func splitCoalesceArgs(s string) ([]string, error) {
 // the common `payload.X` / `event.X` filter shapes is unchanged. A first
 // segment that merely matches a seeded custom key also qualifies so a logic
 // that seeds an extra root resolves it explicitly.
+
+// explicitPathRoots is THE list of path roots the evaluator resolves through
+// resolvePath's root switch, shared so it cannot be reimplemented per call site
+// (memql#2851).
+//
+// It was already duplicated: conditionRootSegment listed all ten, while
+// logic_runner's isCustomVarRoot listed only args/event/ctx/input/item. That
+// divergence is exactly why `$coalesce(var.missing, "FB")` and the logic-body
+// `var.missing ?? "FB"` behaved DIFFERENTLY -- the second fell through to a
+// step-reference lookup, which hands back the raw path text, so coalesce read
+// it as present and skipped the fallback.
+//
+// `event` is deliberately NOT here: conditionRootSegment excludes it (the
+// `event.`-prefix retry below owns that root) while isCustomVarRoot includes
+// it, so each keeps that rule locally rather than forcing one list to carry a
+// caveat.
+var explicitPathRoots = map[string]bool{
+	"args": true, "ctx": true, "input": true, "item": true, "steps": true,
+	"var": true, "systemVar": true, "secret": true, "systemSecret": true,
+	"automation": true,
+}
+
 func (e *Evaluator) conditionRootSegment(expr string) string {
 	dot := strings.Index(expr, ".")
 	if dot <= 0 {
 		return ""
 	}
 	root := expr[:dot]
-	switch root {
-	case "args", "ctx", "input", "item", "steps",
-		"var", "systemVar", "secret", "systemSecret", "automation":
+	if explicitPathRoots[root] {
 		return root
 	}
 	if root == e.itemName && e.item != nil {
@@ -928,8 +1005,38 @@ func (e *Evaluator) EvaluateFilterValue(expr string) (any, error) {
 			if val, err := e.resolvePath(expr); err == nil {
 				return val, nil
 			}
-			// Fall through to literal if the explicit-root path doesn't resolve.
-			return expr, nil
+			// UNRESOLVED means ABSENT, not "the literal text of the path"
+			// (memql#2851).
+			//
+			// This used to `return expr, nil`, and the returned text is
+			// non-empty and therefore TRUTHY -- the #2380 hazard. Two
+			// consequences, both silent:
+			//
+			//   - coalesce read the text as a PRESENT value, so its fallback
+			//     was never reached. `enabled := var.killSwitch ?? false`
+			//     yielded "var.killSwitch": a kill switch written to be safe
+			//     when its variable is missing was ON instead. Fail-OPEN.
+			//   - in a predicate the same text admits, for the same reason.
+			//
+			// The softness was ROOT-DEPENDENT, which is what made it hard to
+			// see: resolvePath returns (nil, nil) for a missing key in a
+			// map-backed root, so `actor.*` / `ctx.*` / `item.*` and a seeded
+			// `args.*` were already soft and behaved correctly. Only the
+			// resolver-backed roots (var / systemVar / secret / systemSecret /
+			// automation) and an unresolvable `steps.` sub-path took this
+			// branch. One spelling of coalesce therefore worked and another
+			// did not, depending on the root -- see
+			// coalesce_root_softness_test.go for the enumerated matrix.
+			//
+			// Scope of the change: this branch is reached ONLY for a path
+			// whose first segment conditionRootSegment recognises as an
+			// explicit root. A dotted token that is not one of those --
+			// "example.com", "v1.2.3", a concept id -- never enters here and
+			// still passes through as a literal, which
+			// TestNonPathLiteralsStillPassThrough pins. So nothing that was
+			// legitimately a literal becomes nil; only paths that name a real
+			// root and fail to resolve do.
+			return nil, nil
 		}
 
 		// Try resolving as $event.{path} first
@@ -1565,8 +1672,8 @@ func (e *Evaluator) evaluateAtomicCondition(condition string) (bool, error) {
 	// resolver the comparison operands use, and its resolved value decides
 	// the truthiness; only a path that genuinely does not resolve errors.
 	if isBareDottedPath(condition) {
-		resolved, rerr := e.EvaluateFilterValue(condition)
-		if rerr != nil || renderedAsOwnText(condition, resolved) {
+		resolved, ok, rerr := e.resolveBarePathOnce(condition)
+		if rerr != nil || !ok {
 			return false, fmt.Errorf("condition %q is a bare path that does not resolve: it renders as its own text, and a non-empty string is truthy, so this filter would match EVERYTHING. Write the comparison explicitly (%s == true) or use exists(%s)",
 				condition, condition, condition)
 		}
@@ -1600,11 +1707,87 @@ func isBareDottedPath(condition string) bool {
 }
 
 // renderedAsOwnText reports whether resolution handed back the expression
-// itself -- the signature of a path that did not resolve, since the resolvers
-// in this file fall back to returning their input rather than nil.
+// itself -- the signature of a path that did not resolve, for the roots that
+// still fall back to returning their input rather than nil.
+//
+// It is no longer sufficient on its own: an EXPLICIT-root path now returns nil
+// when it does not resolve (memql#2851), and nil is not a string, so this
+// sniff can never fire for those. explicitRootDidNotResolve is the companion
+// that keeps memql#2819's fail-loud posture intact for them.
 func renderedAsOwnText(condition string, resolved any) bool {
 	s, ok := resolved.(string)
 	return ok && strings.TrimSpace(s) == strings.TrimSpace(condition)
+}
+
+// explicitRootDidNotResolve reports whether condition is an explicit-root path
+// whose resolution FAILED, as opposed to one that resolved to a nil/absent
+// value.
+//
+// This exists because #2851 and #2819 pull in opposite directions and both are
+// right. #2851 wants an unresolved path to be ABSENT so a coalesce fallback is
+// reached. #2819 wants an unresolved BARE-PATH CONDITION to be a LOUD ERROR --
+// its test says so explicitly: "a silent false would trade a filter that always
+// fires for one that never fires -- equally wrong and harder to notice."
+//
+// Returning nil satisfied the first and silently broke the second, because
+// #2819's guard detects non-resolution by sniffing for the path's own text.
+// Measured: `@filter(var.killSwitch)` went from a boot-time error naming the
+// trap to a silent false, so a typo'd variable produced a never-firing gate.
+//
+// The distinction the two need is resolvability, not the value, so the guard
+// asks resolvePath directly. Note this deliberately does NOT fire for a
+// map-backed root: resolvePath returns (nil, nil) for a missing key, so
+// `actor.nonexistent` and `args.missing` stay silent -- exactly as they were
+// before #2851, since #2819's text sniff never caught them either. Widening to
+// those is a real question, but it is #2819's to answer, not a side effect of
+// this change.
+// resolveBarePathOnce resolves a bare-path condition and reports whether it
+// RESOLVED, in a single pass.
+//
+// Single pass is the point. The first cut asked EvaluateFilterValue for the
+// value and then asked resolvePath again for the resolvability, which was
+// wrong twice over (memql#2851 review):
+//
+//   - COST. resolvePath invokes the variable/secret resolvers with a real
+//     context and no caching at that site, so every `@filter(secret.X)` did
+//     TWO secret-store reads -- double the audit trail and double the KMS/DB
+//     hit. `||` short-circuits after success, so the happy path paid it too.
+//   - CORRECTNESS. The two reads are independent and can disagree. With a
+//     transient store error between them, "call 1 OK, call 2 fails" hard-errors
+//     a condition that actually resolved, and "call 1 fails, call 2 OK" returns
+//     a silent false -- which is #2819's fail-quiet reintroduced by the very
+//     guard added to prevent it. Neither is reachable when you resolve once.
+//
+// For an EXPLICIT root, resolvability is exactly "resolvePath did not error";
+// that is the signal #2819 needs and #2851 took away by returning nil. For any
+// other shape the older text sniff still applies, since those resolvers do
+// still hand back their input.
+func (e *Evaluator) resolveBarePathOnce(condition string) (any, bool, error) {
+	condition = strings.TrimSpace(condition)
+	// looksLikePath as well as the root check. isBareDottedPath tolerates
+	// whitespace around the dots (the `forEach ... where` rebuilder emits
+	// `a . b`), but EvaluateFilterValue gates its explicit-root branch on
+	// looksLikePath, whose isPathChar excludes space. Calling resolvePath
+	// without that gate let a space-bearing spelling through that
+	// EvaluateFilterValue would have treated as a literal -- and for a
+	// map-backed root the space-bearing key is a quiet MISS, so
+	// `@filter(args. typo)` went from a loud error to a silently never-firing
+	// filter. Same fail-quiet class this whole change exists to close, so it is
+	// closed here rather than filed. (Asymmetric spacing only; the symmetric
+	// `a . b` the rebuilder actually emits was never affected, and the spelling
+	// has zero hits in dsl/.)
+	if e.conditionRootSegment(condition) != "" && looksLikePath(condition) {
+		val, err := e.resolvePath(condition)
+		if err != nil {
+			// Unresolved. Deliberately NOT an error return: the caller owns
+			// the diagnostic, and a map-backed root reaching here with
+			// (nil, nil) is a resolved ABSENCE, which stays quiet.
+			return nil, false, nil
+		}
+		return val, true, nil
+	}
+	val, err := e.EvaluateFilterValue(condition)
+	return val, !renderedAsOwnText(condition, val), err
 }
 
 // matchSingleArgCall reports whether expr is a single-argument call of the

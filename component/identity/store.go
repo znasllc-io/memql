@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/znasllc-io/memql/component/auth"
 	"log/slog"
 	"strings"
 	"time"
@@ -373,8 +374,9 @@ func (s *Store) LookupUserById(ctx context.Context, userId string) (*UserRow, er
 	if strings.TrimSpace(userId) == "" {
 		return nil, nil
 	}
-	query := fmt.Sprintf(`query userById(userId: %s)`, dslJSONString(userId))
-	nodes, err := s.executeAndExtract(ctx, query)
+	// #2800: identity-store lookup by id, server-side only.
+	query := fmt.Sprintf(`query userByIdSystem(userId: %s)`, dslJSONString(userId))
+	nodes, err := s.executeAndExtractInternal(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("identity.store: lookup user by id: %w", err)
 	}
@@ -398,8 +400,12 @@ func dslJSONString(s string) string {
 }
 
 func (s *Store) LookupUserByEmail(ctx context.Context, email string) (*UserRow, error) {
+	// #2881: userByEmail is @serverOnly -- it projects userFull (every @pii
+	// field plus the cluster-wide auth role) keyed on an email address. This is
+	// the trusted server-side caller, so it stamps internal origin, exactly as
+	// the by-id lookup above does for userByIdSystem.
 	query := fmt.Sprintf(`query userByEmail(primaryEmail: %s)`, dslJSONString(email))
-	nodes, err := s.executeAndExtract(ctx, query)
+	nodes, err := s.executeAndExtractInternal(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("identity.store: lookup user by email: %w", err)
 	}
@@ -1014,7 +1020,10 @@ func (s *Store) RevokeAuthSession(
 // full row set and the count is a Go-side len. Cheap on a small
 // user base.
 func (s *Store) CountActiveUsers(ctx context.Context) (int, error) {
-	nodes, err := s.executeAndExtract(ctx, `query activeUsers()`)
+	// #2883: activeUsers is @serverOnly. This call runs during first-run setup,
+	// before any actor exists -- which is exactly why the construct is gated by
+	// ORIGIN rather than caller-scoped.
+	nodes, err := s.executeAndExtractInternal(ctx, `query activeUsers()`)
 	if err != nil {
 		return 0, fmt.Errorf("identity.store: count active users: %w", err)
 	}
@@ -1085,7 +1094,9 @@ func (s *Store) IsClusterBootstrappedE(ctx context.Context) (bool, error) {
 // not be silently swallowed into "no owner", so the caller can
 // fail-safe (do not send) rather than re-spam the owner.
 func (s *Store) HasOwnerUser(ctx context.Context) (bool, error) {
-	nodes, err := s.executeAndExtract(ctx, `query activeUsers(role: "owner")`)
+	// #2883: activeUsers is @serverOnly. Like CountActiveUsers this answers a
+	// bootstrap question that precedes any actor.
+	nodes, err := s.executeAndExtractInternal(ctx, `query activeUsers(role: "owner")`)
 	if err != nil {
 		return false, fmt.Errorf("identity.store: has owner user: %w", err)
 	}
@@ -1156,6 +1167,16 @@ func (s *Store) executeAndExtract(ctx context.Context, query string) ([]*memqlv1
 		out = append(out, node)
 	}
 	return out, nil
+}
+
+// executeAndExtractInternal is executeAndExtract for a @serverOnly construct
+// (memql#2800). The stamp lives here rather than at each call site so the
+// trusted marking is visible in one place and greppable.
+//
+// Keep the caller list short and deliberate: everything routed through here
+// can reach constructs that are barred from the wire.
+func (s *Store) executeAndExtractInternal(ctx context.Context, query string) ([]*memqlv1.MemoryNode, error) {
+	return s.executeAndExtract(auth.ContextWithInternalOrigin(ctx), query)
 }
 
 // fieldGetter wraps a MemoryNode with typed accessors. Mirrors the
