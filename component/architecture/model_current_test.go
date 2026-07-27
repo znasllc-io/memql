@@ -53,13 +53,36 @@ import (
 // unchanged tree, which is why the artifact was refreshed by hand -- and hand
 // editing is how it fell out of sync.
 
-// TestArchitectureModelIsCurrent regenerates the model and compares it with the
-// checked-in copy.
+// TestArchitectureModelIsNotStale asserts the committed model is not WRONG.
+//
+// WHY NOT BYTE-FOR-BYTE. That was the first design, and it cannot work in this
+// repo. The model describes the WHOLE tree, so any PR that merges while yours
+// is open makes yours stale -- and with a merge queue it is worse than
+// friction, it is unwinnable: the queue tests a merge commit against a moving
+// main, so any PR behind another is stale by construction. Measured: this
+// branch regenerated to 20182 nodes locally and CI's merge commit produced
+// 20191, purely because #2905 and #2907 landed in between. A gate that fails on
+// somebody else's merge blocks unrelated work, which is worse than the staleness
+// it was meant to catch.
+//
+// WHAT IT CHECKS INSTEAD. Every node in the COMMITTED model must still exist in
+// the regenerated one. That is exactly the defect #2844 reported --
+// ToggleComputerUseEnabledArgs.UserId survived in the model in 13 places after
+// #2840 removed the argument -- and it is immune to concurrent merges, which
+// only ADD nodes.
+//
+// The asymmetry is deliberate and is the whole point:
+//
+//	node removed from the code, still in the model  -> the model LIES. FAIL.
+//	node added to the code, not yet in the model    -> the model is behind. OK.
+//
+// A missing node makes the cockpit render something that no longer exists. An
+// absent one makes it render slightly less than exists, which is what any
+// committed snapshot does between refreshes. Run `make arch-model` to catch up.
 //
 // Skipped under -short: it shells out to the extractor over the whole
-// workspace (~6s) and writes a 42MB temp file. CI runs the suite without
-// -short, so the gate is live there.
-func TestArchitectureModelIsCurrent(t *testing.T) {
+// workspace (~6s). CI runs the suite without -short, so the gate is live there.
+func TestArchitectureModelIsNotStale(t *testing.T) {
 	if testing.Short() {
 		t.Skip("regenerates the whole architecture model; skipped in -short")
 	}
@@ -71,28 +94,16 @@ func TestArchitectureModelIsCurrent(t *testing.T) {
 	}
 
 	regenerated := filepath.Join(t.TempDir(), model.CanonicalFilename)
-	// Regenerate through `make arch-model` ITSELF, so the flag set exists in
-	// exactly one place (memql#2844 review).
-	//
-	// The first version duplicated the flags here and "pinned" them with a
-	// test that substring-grepped the whole Makefile. That guard was satisfied
-	// by the COMMENT above the target: deleting --calls and --reproducible
-	// from the recipe left it green, and `--cluster memql` matched
-	// `--cluster memqlPRODUCTION` besides. A guard narrower than the thing it
-	// guards -- which is the exact defect class this gate is for. There is no
-	// second copy to keep in step now.
+	// Through `make arch-model` ITSELF, so the flag set exists in exactly one
+	// place. A previous version duplicated the flags here and "pinned" them
+	// with a test that substring-grepped the Makefile -- which its own comment
+	// block satisfied.
 	before := sumFile(t, checkedIn)
 	cmd := exec.Command("make", "arch-model", "ARCH_MODEL_OUT="+regenerated)
 	cmd.Dir = root
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("regenerating the model failed: %v\n%s", err, out)
 	}
-
-	// The target's DEFAULT output is the tracked artifact, so this test sits
-	// one variable-substitution away from rewriting 42MB of tracked source.
-	// Demonstrated: hardcode --out in the recipe and `go test ./...` leaves the
-	// working tree dirty. It still FAILS, so nothing passes vacuously -- but a
-	// test that mutates the repo is its own problem.
 	if _, err := os.Stat(regenerated); err != nil {
 		t.Fatalf("`make arch-model` exited 0 but wrote nothing to %s -- did the target lose its "+
 			"recipe, or stop honouring ARCH_MODEL_OUT? (%v)", regenerated, err)
@@ -102,20 +113,26 @@ func TestArchitectureModelIsCurrent(t *testing.T) {
 			"honoured, so this test just modified tracked source.", checkedIn)
 	}
 
-	if sumFile(t, checkedIn) == sumFile(t, regenerated) {
-		return
+	want, got := loadModel(t, checkedIn), loadModel(t, regenerated)
+	live := make(map[model.ID]bool, len(got.Nodes))
+	for _, n := range got.Nodes {
+		live[n.ID] = true
 	}
 
-	// Differ. Say WHAT differs -- a 42MB dump helps nobody.
-	got, want := loadModel(t, regenerated), loadModel(t, checkedIn)
-	t.Errorf("component/architecture/embedded/%s is STALE.\n\n"+
-		"  checked in: %d nodes, %d edges\n"+
-		"  regenerated: %d nodes, %d edges\n%s\n"+
-		"Run `make arch-model` and commit the result. The cockpit's Topology tab reads this\n"+
-		"file, so while it is stale the topology it renders disagrees with the code.",
-		model.CanonicalFilename,
-		len(want.Nodes), len(want.Edges), len(got.Nodes), len(got.Edges),
-		firstNodeDelta(want, got))
+	var gone []string
+	for _, n := range want.Nodes {
+		if !live[n.ID] {
+			if len(gone) < 10 {
+				gone = append(gone, string(n.ID))
+			}
+		}
+	}
+	if len(gone) > 0 {
+		t.Errorf("the committed architecture model references %d symbol(s) that NO LONGER EXIST "+
+			"in the code:\n  %s\n\nThe cockpit's Topology tab reads this file, so it is rendering "+
+			"things that are gone. Run `make arch-model` and commit the result (memql#2844).",
+			len(gone), join(gone))
+	}
 }
 
 // workspaceRoot walks up from the test's directory to the module root.
@@ -158,43 +175,6 @@ func loadModel(t *testing.T, path string) *model.Model {
 		t.Fatalf("parse %s: %v", path, err)
 	}
 	return &m
-}
-
-// firstNodeDelta names a few nodes present in one model and not the other, so
-// the failure points at the change instead of just asserting one exists.
-func firstNodeDelta(want, got *model.Model) string {
-	inWant := map[model.ID]bool{}
-	for _, n := range want.Nodes {
-		inWant[n.ID] = true
-	}
-	inGot := map[model.ID]bool{}
-	for _, n := range got.Nodes {
-		inGot[n.ID] = true
-	}
-
-	var added, removed []string
-	for _, n := range got.Nodes {
-		if !inWant[n.ID] && len(added) < 5 {
-			added = append(added, string(n.ID))
-		}
-	}
-	for _, n := range want.Nodes {
-		if !inGot[n.ID] && len(removed) < 5 {
-			removed = append(removed, string(n.ID))
-		}
-	}
-
-	out := ""
-	if len(added) > 0 {
-		out += "\n  in the code but NOT the model (first few): " + join(added)
-	}
-	if len(removed) > 0 {
-		out += "\n  in the model but NOT the code (first few): " + join(removed)
-	}
-	if out == "" {
-		out = "\n  node sets match; the difference is in edges or node contents"
-	}
-	return out
 }
 
 func join(ss []string) string {
