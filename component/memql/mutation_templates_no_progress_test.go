@@ -3,6 +3,8 @@ package memql
 import (
 	"testing"
 	"time"
+
+	"github.com/znasllc-io/memql/component/memql/literalparity"
 )
 
 // leaked latches once a case abandons a non-terminating goroutine. It is
@@ -11,6 +13,12 @@ import (
 // spinner. Tests in a package run sequentially (nothing here calls
 // t.Parallel) and t.Run blocks until the subtest returns, so a plain bool
 // needs no synchronisation.
+// parserDeadline is the watchdog window. 500ms, not 2s (memql#2835): these are
+// microsecond-scale literal parses, so the margin is still ~5,000x, and a
+// shorter window gives a runaway allocation far less room to OOM the process
+// before the FAIL line is printed.
+const parserDeadline = 500 * time.Millisecond
+
 var leaked bool
 
 // mustTerminate runs fn and reports whether it returned in time.
@@ -32,11 +40,20 @@ var leaked bool
 // What that does and does NOT buy, stated exactly. The spinner is not
 // cancellable -- these parsers take no context -- so it keeps growing until
 // the process exits, and its peak therefore tracks how much memory the box
-// will hand out, NOT any fixed bound. What the latch guarantees is that the
-// actionable `--- FAIL` line is printed at the 2s deadline, long before any
-// later OOM can truncate the log. That ordering is the whole point: a run that
-// dies at 6 GiB having already said which guard regressed is debuggable, and
-// one that dies without saying is not.
+// will hand out, NOT any fixed bound. The latch makes the actionable
+// `--- FAIL` line the FIRST thing printed in the common case, which is the
+// difference between a run that says which guard regressed and one that does
+// not.
+//
+// It is NOT a guarantee, and an earlier version of this comment claimed it was
+// (memql#2835). Measured with the array guard neutralised under
+// `ulimit -v 6000000`: the process died of OOM at 1.89s with ZERO `--- FAIL`
+// lines -- before the old 2s deadline. #2828 saw the FAIL print first only
+// because it measured under a 10 GiB cap; at a tighter cap, or on a
+// memory-limited CI runner, the race inverts. The deadline is 500ms now, which
+// is ~5,000x the actual parse time for these microsecond-scale literals, so the
+// window an allocation storm has to beat it is far smaller -- but "far smaller"
+// is the honest claim, not "cannot happen".
 func mustTerminate(t *testing.T, name string, fn func()) bool {
 	t.Helper()
 	if leaked {
@@ -52,9 +69,9 @@ func mustTerminate(t *testing.T, name string, fn func()) bool {
 	select {
 	case <-done:
 		return true
-	case <-time.After(2 * time.Second):
+	case <-time.After(parserDeadline):
 		leaked = true
-		t.Errorf("%s did not terminate within 2s -- the parser loop is not making progress", name)
+		t.Errorf("%s did not terminate within %s -- the parser loop is not making progress", name, parserDeadline)
 		return false
 	}
 }
@@ -233,41 +250,18 @@ func TestSeparatorOnlyArrayIsEmptyNotMalformed(t *testing.T) {
 }
 
 // TestLoadCrossCopyParity pins the LOAD copy's half of the shared
-// accept/reject table. The list is duplicated verbatim in
-// component/language/compiler and component/automations/steps -- see the
-// comment on crossCopyParityCases there for why the three must agree.
+// accept/reject table.//
+// The corpus itself lives in component/memql/literalparity (memql#2835). It
+// used to be duplicated verbatim in all three files under a comment reading
+// "keep the three tables identical", with nothing enforcing it -- protection
+// against drift that was itself three copies kept in step by a comment.
 func TestLoadCrossCopyParity(t *testing.T) {
-	for _, tc := range []struct {
-		src    string
-		accept bool
-	}{
-		{`{ k: "ok" }`, true},
-		{`{ k: }`, true},
-		{`{k:}`, true},
-		{`{ k: [,] }`, true},
-		{`{ k: ["a", "b"] }`, true},
-		{`{ punct: "commas, braces } brackets ]" }`, true},
-		{`{ a: { b: "}" } }`, true},
-		{`{ a: { b: "a}b" }, c: 1 }`, true},
-		{`{ k: "abc }`, false},
-		{`{ k: [}{] }`, false},
-
-		// Unbalanced NESTED literals -- see the compiler-side table for why
-		// the third case matters (an unterminated string one level down,
-		// swallowed by the enclosing arm's runoff).
-		{`{ a: { b: 1 }`, false},
-		{`{ a: [ 1, 2 }`, false},
-		{`{ a: { b: """ } }`, false},
-
-		{`{ a: { b: 1 } }`, true},
-		{`{ a: [ 1, 2 ] }`, true},
-		{`{ name: "x", nested: { deep: { deeper: 1 } } }`, true},
-	} {
-		if !mustTerminate(t, "parsePayloadRawToTemplate("+tc.src+")", func() {
-			_, err := parsePayloadRawToTemplate(tc.src)
-			if got := err == nil; got != tc.accept {
+	for _, tc := range literalparity.Cases {
+		if !mustTerminate(t, "parsePayloadRawToTemplate("+tc.Src+")", func() {
+			_, err := parsePayloadRawToTemplate(tc.Src)
+			if got := err == nil; got != tc.Accept {
 				t.Errorf("parsePayloadRawToTemplate(%q): accepted=%v, want %v (err=%v)",
-					tc.src, got, tc.accept, err)
+					tc.Src, got, tc.Accept, err)
 			}
 		}) {
 			break
@@ -360,10 +354,10 @@ func TestArrayOkImpliesNoProgress(t *testing.T) {
 	t.Logf("array-legal: checked %d (input, position) pairs; %d violations", checked, violations)
 	t.Logf("unfiltered:  checked %d (input, position) pairs; %d violations", allChecked, allViolations)
 	if allViolations == 0 {
-		t.Errorf("unfiltered violations = 0, want > 0: the precondition filter is "+
-			"supposed to be what makes this invariant hold, so if the unscoped "+
-			"population is ALSO clean, either the enumeration stopped covering "+
-			"whitespace positions or parseLiteralOrExpr changed. Either way the "+
+		t.Errorf("unfiltered violations = 0, want > 0: the precondition filter is " +
+			"supposed to be what makes this invariant hold, so if the unscoped " +
+			"population is ALSO clean, either the enumeration stopped covering " +
+			"whitespace positions or parseLiteralOrExpr changed. Either way the " +
 			"scoping comment above is no longer describing reality.")
 	}
 }
@@ -409,5 +403,26 @@ func TestParseLiteralsStillAcceptValidInput(t *testing.T) {
 	}
 	if _, ok := obj["nested"].(map[string]any); !ok {
 		t.Errorf("parseObjectLiteral nested object mismatch: %#v", obj["nested"])
+	}
+}
+
+// TestLoadKnownDivergences pins THIS copy's answer for every literal the three
+// parsers disagree on.
+//
+// These are recorded, not fixed. The value is that an omitted divergence looks
+// exactly like agreement -- the parity table was a 10-row spot check, and a
+// broader sweep found the three copies disagreeing on thousands of inputs, one
+// of which is a shorthand the compiler's own realistic-payload test uses. A
+// pinned divergence fails the moment any copy's answer moves, which forces the
+// person who moved it to either finish the fix or update the record on purpose.
+func TestLoadKnownDivergences(t *testing.T) {
+	for _, d := range literalparity.KnownDivergences {
+		_, err := parsePayloadRawToTemplate(d.Src)
+		if got := err == nil; got != d.MemQL {
+			t.Errorf("parsePayloadRawToTemplate(%q): accepted=%v, recorded=%v (err=%v)\n\n%s\n\n"+
+				"If this copy's behaviour changed deliberately, update MemQL in "+
+				"component/memql/literalparity -- and check whether the divergence is now "+
+				"CLOSED, in which case the row moves into Cases.", d.Src, got, d.MemQL, err, d.Note)
+		}
 	}
 }

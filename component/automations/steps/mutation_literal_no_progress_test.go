@@ -4,6 +4,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/znasllc-io/memql/component/memql/literalparity"
+
 	"github.com/znasllc-io/memql/component/automations"
 )
 
@@ -13,6 +15,12 @@ import (
 // leak its own spinner. Tests in a package run sequentially (nothing here
 // calls t.Parallel) and t.Run blocks until the subtest returns, so a plain
 // bool needs no synchronisation.
+// parserDeadline is the watchdog window. 500ms, not 2s (memql#2835): these are
+// microsecond-scale literal parses, so the margin is still ~5,000x, and a
+// shorter window gives a runaway allocation far less room to OOM the process
+// before the FAIL line is printed.
+const parserDeadline = 500 * time.Millisecond
+
 var leaked bool
 
 // mustTerminate runs fn and reports whether it returned in time.
@@ -34,11 +42,20 @@ var leaked bool
 // What that does and does NOT buy, stated exactly. The spinner is not
 // cancellable -- these parsers take no context -- so it keeps growing until
 // the process exits, and its peak therefore tracks how much memory the box
-// will hand out, NOT any fixed bound. What the latch guarantees is that the
-// actionable `--- FAIL` line is printed at the 2s deadline, long before any
-// later OOM can truncate the log. That ordering is the whole point: a run that
-// dies at 6 GiB having already said which guard regressed is debuggable, and
-// one that dies without saying is not.
+// will hand out, NOT any fixed bound. The latch makes the actionable
+// `--- FAIL` line the FIRST thing printed in the common case, which is the
+// difference between a run that says which guard regressed and one that does
+// not.
+//
+// It is NOT a guarantee, and an earlier version of this comment claimed it was
+// (memql#2835). Measured with the array guard neutralised under
+// `ulimit -v 6000000`: the process died of OOM at 1.89s with ZERO `--- FAIL`
+// lines -- before the old 2s deadline. #2828 saw the FAIL print first only
+// because it measured under a 10 GiB cap; at a tighter cap, or on a
+// memory-limited CI runner, the race inverts. The deadline is 500ms now, which
+// is ~5,000x the actual parse time for these microsecond-scale literals, so the
+// window an allocation storm has to beat it is far smaller -- but "far smaller"
+// is the honest claim, not "cannot happen".
 func mustTerminate(t *testing.T, name string, fn func()) bool {
 	t.Helper()
 	if leaked {
@@ -54,9 +71,9 @@ func mustTerminate(t *testing.T, name string, fn func()) bool {
 	select {
 	case <-done:
 		return true
-	case <-time.After(2 * time.Second):
+	case <-time.After(parserDeadline):
 		leaked = true
-		t.Errorf("%s did not terminate within 2s -- the parser loop is not making progress", name)
+		t.Errorf("%s did not terminate within %s -- the parser loop is not making progress", name, parserDeadline)
 		return false
 	}
 }
@@ -157,9 +174,11 @@ func TestRuntimeMalformedLiteralErrors(t *testing.T) {
 }
 
 // TestRuntimeCrossCopyParity pins the RUNTIME copy's half of the shared
-// accept/reject table. The list is duplicated verbatim in
-// component/language/compiler and component/memql -- see the comment on
-// crossCopyParityCases there for why the three must agree.
+// accept/reject table.//
+// The corpus itself lives in component/memql/literalparity (memql#2835). It
+// used to be duplicated verbatim in all three files under a comment reading
+// "keep the three tables identical", with nothing enforcing it -- protection
+// against drift that was itself three copies kept in step by a comment.
 //
 // This copy is the one that diverged on `{ k: "abc }`: parseValueFromString
 // returned the partial text on an unterminated string, so a literal that
@@ -167,37 +186,12 @@ func TestRuntimeMalformedLiteralErrors(t *testing.T) {
 func TestRuntimeCrossCopyParity(t *testing.T) {
 	e := &MutationExecutor{}
 	ev := automations.NewEvaluator()
-	for _, tc := range []struct {
-		src    string
-		accept bool
-	}{
-		{`{ k: "ok" }`, true},
-		{`{ k: }`, true},
-		{`{k:}`, true},
-		{`{ k: [,] }`, true},
-		{`{ k: ["a", "b"] }`, true},
-		{`{ punct: "commas, braces } brackets ]" }`, true},
-		{`{ a: { b: "}" } }`, true},
-		{`{ a: { b: "a}b" }, c: 1 }`, true},
-		{`{ k: "abc }`, false},
-		{`{ k: [}{] }`, false},
-
-		// Unbalanced NESTED literals -- see the compiler-side table for why
-		// the third case matters (an unterminated string one level down,
-		// swallowed by the enclosing arm's runoff).
-		{`{ a: { b: 1 }`, false},
-		{`{ a: [ 1, 2 }`, false},
-		{`{ a: { b: """ } }`, false},
-
-		{`{ a: { b: 1 } }`, true},
-		{`{ a: [ 1, 2 ] }`, true},
-		{`{ name: "x", nested: { deep: { deeper: 1 } } }`, true},
-	} {
-		if !mustTerminate(t, "parseAndEvaluateObjectLiteral("+tc.src+")", func() {
-			_, err := e.parseAndEvaluateObjectLiteral(ev, tc.src)
-			if got := err == nil; got != tc.accept {
+	for _, tc := range literalparity.Cases {
+		if !mustTerminate(t, "parseAndEvaluateObjectLiteral("+tc.Src+")", func() {
+			_, err := e.parseAndEvaluateObjectLiteral(ev, tc.Src)
+			if got := err == nil; got != tc.Accept {
 				t.Errorf("parseAndEvaluateObjectLiteral(%q): accepted=%v, want %v (err=%v)",
-					tc.src, got, tc.accept, err)
+					tc.Src, got, tc.Accept, err)
 			}
 		}) {
 			break
@@ -225,5 +219,26 @@ func TestRuntimeValidLiteralsUnchanged(t *testing.T) {
 	}
 	if len(obj) != 2 {
 		t.Errorf("object = %#v, want 2 keys", obj)
+	}
+}
+
+// TestRuntimeKnownDivergences pins THIS copy's answer for every literal the
+// three parsers disagree on. See TestLoadKnownDivergences in component/memql
+// for why the divergences are recorded rather than omitted.
+//
+// This is the copy whose answer is worst on the recorded case: it invents a key
+// from the bare path text -- trailing comma included -- and gives it the NEXT
+// field's value, so a payload that compiles cleanly dispatches with different
+// data than the compiler produced.
+func TestRuntimeKnownDivergences(t *testing.T) {
+	e := &MutationExecutor{}
+	ev := automations.NewEvaluator()
+	for _, d := range literalparity.KnownDivergences {
+		_, err := e.parseAndEvaluateObjectLiteral(ev, d.Src)
+		if got := err == nil; got != d.Steps {
+			t.Errorf("parseAndEvaluateObjectLiteral(%q): accepted=%v, recorded=%v (err=%v)\n\n%s\n\n"+
+				"If this copy's behaviour changed deliberately, update Steps in "+
+				"component/memql/literalparity.", d.Src, got, d.Steps, err, d.Note)
+		}
 	}
 }
