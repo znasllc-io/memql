@@ -1672,8 +1672,8 @@ func (e *Evaluator) evaluateAtomicCondition(condition string) (bool, error) {
 	// resolver the comparison operands use, and its resolved value decides
 	// the truthiness; only a path that genuinely does not resolve errors.
 	if isBareDottedPath(condition) {
-		resolved, rerr := e.EvaluateFilterValue(condition)
-		if rerr != nil || renderedAsOwnText(condition, resolved) || e.explicitRootDidNotResolve(condition) {
+		resolved, ok, rerr := e.resolveBarePathOnce(condition)
+		if rerr != nil || !ok {
 			return false, fmt.Errorf("condition %q is a bare path that does not resolve: it renders as its own text, and a non-empty string is truthy, so this filter would match EVERYTHING. Write the comparison explicitly (%s == true) or use exists(%s)",
 				condition, condition, condition)
 		}
@@ -1741,13 +1741,41 @@ func renderedAsOwnText(condition string, resolved any) bool {
 // before #2851, since #2819's text sniff never caught them either. Widening to
 // those is a real question, but it is #2819's to answer, not a side effect of
 // this change.
-func (e *Evaluator) explicitRootDidNotResolve(condition string) bool {
+// resolveBarePathOnce resolves a bare-path condition and reports whether it
+// RESOLVED, in a single pass.
+//
+// Single pass is the point. The first cut asked EvaluateFilterValue for the
+// value and then asked resolvePath again for the resolvability, which was
+// wrong twice over (memql#2851 review):
+//
+//   - COST. resolvePath invokes the variable/secret resolvers with a real
+//     context and no caching at that site, so every `@filter(secret.X)` did
+//     TWO secret-store reads -- double the audit trail and double the KMS/DB
+//     hit. `||` short-circuits after success, so the happy path paid it too.
+//   - CORRECTNESS. The two reads are independent and can disagree. With a
+//     transient store error between them, "call 1 OK, call 2 fails" hard-errors
+//     a condition that actually resolved, and "call 1 fails, call 2 OK" returns
+//     a silent false -- which is #2819's fail-quiet reintroduced by the very
+//     guard added to prevent it. Neither is reachable when you resolve once.
+//
+// For an EXPLICIT root, resolvability is exactly "resolvePath did not error";
+// that is the signal #2819 needs and #2851 took away by returning nil. For any
+// other shape the older text sniff still applies, since those resolvers do
+// still hand back their input.
+func (e *Evaluator) resolveBarePathOnce(condition string) (any, bool, error) {
 	condition = strings.TrimSpace(condition)
-	if e.conditionRootSegment(condition) == "" {
-		return false
+	if e.conditionRootSegment(condition) != "" {
+		val, err := e.resolvePath(condition)
+		if err != nil {
+			// Unresolved. Deliberately NOT an error return: the caller owns
+			// the diagnostic, and a map-backed root reaching here with
+			// (nil, nil) is a resolved ABSENCE, which stays quiet.
+			return nil, false, nil
+		}
+		return val, true, nil
 	}
-	_, err := e.resolvePath(condition)
-	return err != nil
+	val, err := e.EvaluateFilterValue(condition)
+	return val, !renderedAsOwnText(condition, val), err
 }
 
 // matchSingleArgCall reports whether expr is a single-argument call of the

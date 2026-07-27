@@ -344,6 +344,11 @@ func TestComparisonVerdictsThatCHANGE(t *testing.T) {
 		{`steps.nosuch.status > "success"`, false, "FLIPPED from true"},
 		{`steps.nosuch.status <= "success"`, true, "FLIPPED from false"},
 		{`5 > var.missing`, true, "FLIPPED from false"},
+
+		// The natural "is it absent" spelling, and a distinct author idiom
+		// from the empty-string pair above.
+		{`steps.nosuch.status == null`, true, "FLIPPED from false"},
+		{`steps.nosuch.status != null`, false, "FLIPPED from true"},
 	} {
 		t.Run(tc.cond, func(t *testing.T) {
 			e := softnessEvaluator(t)
@@ -451,5 +456,81 @@ func TestUnresolvedStepMethodCallStillFallsBack(t *testing.T) {
 	}
 	if got != "FB" {
 		t.Errorf("coalesce(steps.nope.first().id, \"FB\") = %#v, want \"FB\"", got)
+	}
+}
+
+// TestBarePathConditionResolvesExactlyOnce pins the single-pass property.
+//
+// The first cut of the #2819 guard asked EvaluateFilterValue for the value and
+// then asked resolvePath AGAIN for resolvability. resolvePath calls the
+// variable/secret resolvers for real, so every `@filter(secret.X)` did two
+// secret-store reads -- and because the two reads are independent, a transient
+// failure between them could hard-error a condition that resolved, or return a
+// silent false for one that did not. The second is #2819's fail-quiet
+// reintroduced by the guard added to prevent it.
+//
+// Counting resolver calls is the only way to see this: every value-level
+// assertion passes either way.
+func TestBarePathConditionResolvesExactlyOnce(t *testing.T) {
+	for _, tc := range []struct {
+		name, cond string
+		resolves   bool
+	}{
+		{"resolving variable", "var.enabled", true},
+		{"resolving secret", "secret.apiKey", true},
+		{"missing variable", "var.missing", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var varCalls, secretCalls int
+			e := NewEvaluator()
+			e.SetVariableResolver(func(ctx context.Context, name string) (string, error) {
+				varCalls++
+				if name == "enabled" {
+					return "yes", nil
+				}
+				return "", fmt.Errorf("no variable %q", name)
+			})
+			e.SetSecretResolver(func(ctx context.Context, name string) (string, error) {
+				secretCalls++
+				if name == "apiKey" {
+					return "k", nil
+				}
+				return "", fmt.Errorf("no secret %q", name)
+			})
+
+			_, err := e.EvaluateCondition(tc.cond)
+			if tc.resolves && err != nil {
+				t.Fatalf("EvaluateCondition(%q): %v", tc.cond, err)
+			}
+			if !tc.resolves && err == nil {
+				t.Fatalf("EvaluateCondition(%q) did not error for an unresolved path", tc.cond)
+			}
+
+			if got := varCalls + secretCalls; got != 1 {
+				t.Errorf("EvaluateCondition(%q) invoked the resolvers %d times, want exactly 1.\n\n"+
+					"Resolving twice doubles every secret-store read a filter performs, and the "+
+					"two reads can disagree: a transient failure between them either hard-errors "+
+					"a condition that resolved or silently returns false for one that did not "+
+					"(memql#2851 / #2819).", tc.cond, got)
+			}
+		})
+	}
+}
+
+// TestUnseededMapRootFailsLoud records the asymmetry the review surfaced: which
+// side of the loud/quiet line a map-backed root lands on is decided at RUNTIME,
+// not by its name.
+//
+// With `args` seeded -- which the executor always does -- `args.typo` is a
+// resolved absence and stays quiet. With no args block at all the root does not
+// exist, resolution FAILS, and the same condition is a loud error. Identical to
+// baseline, so this is a record rather than a change; pinning both sides keeps
+// it from drifting unnoticed in either direction.
+func TestUnseededMapRootFailsLoud(t *testing.T) {
+	e := NewEvaluator() // no SetCustom("args", ...)
+	if _, err := e.EvaluateCondition("args.typo"); err == nil {
+		t.Error("with `args` UNSEEDED, args.typo resolved quietly. The root does not exist, so " +
+			"resolution fails and the condition must be loud -- the quiet side is only for a " +
+			"missing KEY in a root that IS present.")
 	}
 }
