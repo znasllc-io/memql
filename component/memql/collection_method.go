@@ -421,78 +421,82 @@ func evalCollCond(node *FunctionCallExpression, args, locals map[string]any) (an
 	return evalCollScalar(chosen, args, locals)
 }
 
-// evalCollPositionalOperands evaluates a positionally-keyed builtin call's
-// operands ("0", "1", ...) left to right. Shared by coalesce and concat, which
-// -- unlike cond -- have no branch selection and so always want every operand.
-func evalCollPositionalOperands(node *FunctionCallExpression, name string, args, locals map[string]any) ([]any, error) {
-	out := make([]any, 0, len(node.Args))
-	for i := 0; i < len(node.Args); i++ {
-		raw, ok := node.Args[strconv.Itoa(i)]
-		if !ok {
-			return nil, fmt.Errorf("%s() is missing positional arg %d", name, i)
-		}
-		expr, ok := raw.(ExpressionNode)
-		if !ok {
-			// Already a folded value (a plain literal operand).
-			out = append(out, raw)
-			continue
-		}
-		val, err := evalCollScalar(expr, args, locals)
-		if err != nil {
-			return nil, fmt.Errorf("%s() arg %d: %w", name, i, err)
-		}
-		out = append(out, val)
+// evalCollPositionalOperand evaluates ONE positionally-keyed operand ("0",
+// "1", ...) of a converter-normalised builtin call.
+//
+// One at a time rather than all at once, so coalesce can stop at the first
+// operand that is present -- matching mutationTemplateEvaluator.evalCoalesce
+// and MutationExecutor.evaluateCoalesce, which parse and evaluate lazily. An
+// operand that is already a plain value (a literal) is returned as-is.
+func evalCollPositionalOperand(node *FunctionCallExpression, name string, i int, args, locals map[string]any) (any, error) {
+	raw, ok := node.Args[strconv.Itoa(i)]
+	if !ok {
+		return nil, fmt.Errorf("%s() is missing positional arg %d", name, i)
 	}
-	return out, nil
+	expr, isExpr := raw.(ExpressionNode)
+	if !isExpr {
+		return raw, nil
+	}
+	val, err := evalCollScalar(expr, args, locals)
+	if err != nil {
+		return nil, fmt.Errorf("%s() arg %d: %w", name, i, err)
+	}
+	return val, nil
 }
 
-// evalCollCoalesce evaluates coalesce(a, b, ...) to the first operand that is
-// neither nil nor an empty string (#2870).
+// evalCollCoalesce evaluates coalesce(a, b, ...) (#2870).
 //
-// Empty string counts as absent deliberately: every shipped use is of the shape
-// `args.event.node.id ?? ""`, guarding a path that may resolve to nothing, and
-// getNestedValue returns "" as readily as nil for a missing leaf. Treating ""
-// as present would make the guard a no-op in exactly the case it exists for.
+// Semantics are RuntimeEvaluator.EvaluateCoalesce's, deliberately -- the same
+// `??` must not mean two different things depending on which evaluator a
+// construct happens to route through. So: the FINAL operand is the ultimate
+// fallback and is returned unconditionally, even when it is an empty string
+// (memql#1614, which makes `coalesce(absent, "")` -> `""` expressible); any
+// EARLIER operand that is nil or "" is treated as missing and skipped.
+//
+// Unlike EvaluateCoalesce -- which receives already-evaluated values and so
+// cannot short-circuit -- this evaluates operands lazily and stops at the first
+// one that is present, matching the two lazy evaluators named above.
 func evalCollCoalesce(node *FunctionCallExpression, args, locals map[string]any) (any, error) {
-	if len(node.Args) == 0 {
+	n := len(node.Args)
+	if n == 0 {
 		return nil, fmt.Errorf("coalesce() requires at least one argument")
 	}
-	vals, err := evalCollPositionalOperands(node, "coalesce", args, locals)
-	if err != nil {
-		return nil, err
-	}
-	for _, v := range vals {
-		if v == nil {
+	for i := 0; i < n; i++ {
+		val, err := evalCollPositionalOperand(node, "coalesce", i, args, locals)
+		if err != nil {
+			return nil, err
+		}
+		if i == n-1 {
+			return val, nil // the ultimate fallback, empty or not
+		}
+		if val == nil {
 			continue
 		}
-		if s, isStr := v.(string); isStr && s == "" {
+		if s, isStr := val.(string); isStr && s == "" {
 			continue
 		}
-		return v, nil
+		return val, nil
 	}
-	// Every operand was absent: return the last one so the caller sees the
-	// author's declared fallback ("" rather than nil) and downstream type
-	// validation gets the type the DSL promised.
-	return vals[len(vals)-1], nil
+	return nil, nil
 }
 
-// evalCollConcat evaluates concat(a, b, ...) by stringifying each operand in
-// order. A nil operand contributes nothing rather than the literal "<nil>".
+// evalCollConcat evaluates concat(a, b, ...) by stringifying every operand in
+// order.
+//
+// Matches RuntimeEvaluator.EvaluateConcat exactly, including that a nil operand
+// renders as "<nil>" through %v rather than being skipped. Skipping nils reads
+// better, but it would make the same concat() produce different output
+// depending on which evaluator ran it, and a silent divergence between the two
+// is worse than an ugly rendering of a value the author probably did not mean
+// to pass.
 func evalCollConcat(node *FunctionCallExpression, args, locals map[string]any) (any, error) {
-	vals, err := evalCollPositionalOperands(node, "concat", args, locals)
-	if err != nil {
-		return nil, err
-	}
 	var sb strings.Builder
-	for _, v := range vals {
-		if v == nil {
-			continue
+	for i := 0; i < len(node.Args); i++ {
+		val, err := evalCollPositionalOperand(node, "concat", i, args, locals)
+		if err != nil {
+			return nil, err
 		}
-		if s, isStr := v.(string); isStr {
-			sb.WriteString(s)
-			continue
-		}
-		sb.WriteString(fmt.Sprintf("%v", v))
+		sb.WriteString(fmt.Sprintf("%v", val))
 	}
 	return sb.String(), nil
 }
