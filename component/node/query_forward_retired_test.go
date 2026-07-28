@@ -4,17 +4,20 @@ package node
 // was removed in memql#2814, and these tests keep it removed on the WIRE.
 //
 // Deleting a Go handler is self-enforcing: the code is gone and nothing
-// compiles against it. Deleting a proto field is not. Tags 60 (query_forward /
-// query_response) were live on NodeClientMessage / NodeServerMessage, so a
-// node built before the removal still puts a QueryForward on tag 60. If a
-// later change assigns tag 60 to a different message, those two nodes parse
-// the same bytes as different types during any rolling upgrade -- the classic
-// wire-compat failure, and the reason the repo reserves retired numbers
-// instead of just deleting them (see the #984 precedent in
-// component/grpc/memql.proto).
+// compiles against it. Deleting a proto field is not -- the tag stays
+// meaningful on the wire long after the Go symbol disappears.
 //
-// These assert the reservation itself, which is the thing a future edit can
-// silently undo.
+// To be exact about the risk, because overstating it is how the last attempt
+// at this path went wrong: NO node ever sent tag 60. The sending half was
+// never built (see the retirement note in node.proto), so this is not a
+// rolling-upgrade rescue. What these tests protect is the RESERVATION, which
+// is the thing a future edit can silently undo: if a later change assigns tag
+// 60 to a different message, any peer still emitting the old bytes -- a
+// replayed capture, a third-party or hand-rolled client, a resurrected branch
+// like issue-2814-queryforward-actor -- is parsed as the wrong type rather
+// than ignored. Reserving the number is what makes that impossible, and the
+// repo's convention is to reserve retired numbers rather than free them (see
+// the #984 precedent in component/grpc/memql.proto).
 
 import (
 	"testing"
@@ -88,11 +91,12 @@ func TestQueryForwardFieldsAreGone(t *testing.T) {
 	}
 }
 
-// legacyQueryForwardEnvelope hand-encodes the bytes a PRE-#2814 node puts on
-// the wire: a NodeClientMessage whose payload oneof carries QueryForward on
-// tag 60. It is built with protowire rather than the generated types because
-// the generated types no longer have the field -- which is the whole point.
-func legacyQueryForwardEnvelope() []byte {
+// retiredTag60Envelope hand-encodes a NodeClientMessage whose payload oneof
+// carries QueryForward on tag 60 -- the bytes the removed sender WOULD have
+// produced, had one ever been written. Built with protowire rather than the
+// generated types because the generated types no longer have the field, which
+// is the whole point.
+func retiredTag60Envelope() []byte {
 	// Inner QueryForward{request_id: "req-legacy", query: "query allNumbers"}.
 	var inner []byte
 	inner = protowire.AppendTag(inner, 1, protowire.BytesType)
@@ -109,17 +113,17 @@ func legacyQueryForwardEnvelope() []byte {
 	return outer
 }
 
-// TestLegacyQueryForwardEnvelopeIsIgnoredNotFatal is the rolling-upgrade
-// guard. During any upgrade a pre-#2814 node still sends tag 60 to a post-
-// #2814 node. Removing a proto field does not stop those bytes arriving, so
-// the receiving node must treat them as an unknown field and carry on -- not
-// fail the unmarshal and not tear down the peer stream.
-func TestLegacyQueryForwardEnvelopeIsIgnoredNotFatal(t *testing.T) {
+// TestRetiredTag60EnvelopeIsIgnoredNotFatal pins the behavioural half of the
+// reservation: reserving a number is only worth anything if a receiver treats
+// it as an unknown field and carries on. A peer that emits tag 60 -- a
+// replayed capture, a hand-rolled client, a resurrected branch -- must be
+// ignored, not met with a failed unmarshal or a torn-down stream.
+func TestRetiredTag60EnvelopeIsIgnoredNotFatal(t *testing.T) {
 	var msg nodev1.NodeClientMessage
-	if err := proto.Unmarshal(legacyQueryForwardEnvelope(), &msg); err != nil {
-		t.Fatalf("a legacy peer's tag-60 envelope failed to unmarshal: %v -- "+
-			"reserving the tag must keep it parseable-and-ignored, otherwise every "+
-			"pre-#2814 peer breaks the stream during a rolling upgrade", err)
+	if err := proto.Unmarshal(retiredTag60Envelope(), &msg); err != nil {
+		t.Fatalf("a tag-60 envelope failed to unmarshal: %v -- reserving the tag must "+
+			"keep it parseable-and-ignored, otherwise a peer still emitting those bytes "+
+			"breaks the stream instead of being ignored", err)
 	}
 
 	// The retired field must not resolve to any payload: it is unknown now.

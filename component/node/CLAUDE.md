@@ -38,7 +38,7 @@ component/node/
 ├── CLAUDE.md              # This file
 ├── identity.go            # NodeType enum, Identity struct, env var parsing
 ├── lifecycle.go           # NodeLifecycle state machine (Starting/Ready/Draining/Stopped, #1268)
-├── node.proto             # NodeService proto (11 message types)
+├── node.proto             # NodeService proto (20 message types)
 ├── generate.go            # protoc go:generate directive
 ├── gen/                   # Generated gRPC code
 │   ├── node.pb.go
@@ -320,12 +320,19 @@ PeerIntroduction, AiForwardResponse, etc.).
 | AiForwardRequest / AiForwardResponse / AiForwardCancel | C->S / S->C / C->S | BFF->worker AI/voice forwarding (see `component/grpc/ai_forward.go`) |
 | NodeShutdown | Server -> Client | Graceful shutdown |
 
-`QueryForward` / `QueryResponse` (tags 60) carried cross-node MemQL query
-routing. **Removed in memql#2814** and the tags reserved: the receive side was
-the only side that ever existed, and the identity propagation needed to make it
-safe could not be expressed with the current forwarded-claims shape (a badge
-grant's `class` / `role_ceiling` could not cross the hop, so a forwarded badge
-session resolved an unclamped role). The mesh authority-propagation contract is
-being designed once on memql#2876, against the live AiForward path. Concept
-ownership is decided by routing rules plus build tags, not by a forwarding
-registry -- see `docs/internal/design/extension-points.md`.
+`QueryForward` / `QueryResponse` (tags 60) were the receive half of cross-node
+MemQL query routing. **Removed in memql#2814** and the tags reserved.
+
+The receive side is the only side that ever existed -- nothing in this repo's
+history constructs a `QueryForward`, and the routing stub that would have driven
+one (`query_proxy.go`, with `RegisterConceptOwnership`) was log-only and was
+deleted in `ac3a751e`. It was removed rather than repaired because the identity
+propagation needed to make it safe could not be expressed with the current
+forwarded-claims shape: a badge grant's `class` / `role_ceiling` cannot cross the
+hop, so a forwarded badge session resolved an *unclamped* role.
+
+The mesh authority-propagation contract belongs on memql#2876, against the live
+AiForward path -- parked as of this removal, with its one attempt reverted, so
+treat it as an open design problem. Concept ownership is decided by routing rules
+plus build tags, not by a forwarding registry -- see
+`docs/internal/design/extension-points.md`.

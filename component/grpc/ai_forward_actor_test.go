@@ -34,10 +34,10 @@ import (
 // fix needs. These tests pin what is TRUE today so the next attempt starts from
 // evidence rather than from the same wrong assumption.
 //
-// Unlike #2814's QueryForward -- which has zero producers and is dead
-// receive-side machinery -- this path is LIVE: every BFF -> Voice / BFF ->
-// Agent forward goes through it (handleAiChat, handleCallTool,
-// handleAgentGenerateTurn).
+// Unlike #2814's QueryForward -- receive-side machinery that never had a
+// producer, and was removed outright rather than repaired -- this path is
+// LIVE: every BFF -> Voice / BFF -> Agent forward goes through it
+// (handleAiChat, handleCallTool, handleAgentGenerateTurn).
 //
 // # Why these tests assert what they assert
 //

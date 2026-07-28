@@ -200,14 +200,18 @@ message CapabilityResponse {
 // for execution, for the case where a client queried a node that did not own
 // the target concept.
 //
-// The send side was already gone. ac3a751e ("simplify: drop per-node
-// @visibility filtering + concept-ownership routing", 2026-05-16) deleted
-// query_proxy.go and RegisterConceptOwnership deliberately, as over-engineered
-// for this stage of the project. That left this receive side orphaned: zero
-// producers anywhere in the tree including tests, no production caller of the
-// SetQueryExecutor seam, and no registry left to decide which node owns a
-// concept -- ownership is routing rules plus build tags now (see
-// docs/internal/design/extension-points.md).
+// The receive side is the only side that ever existed. No commit in this
+// repo's history constructs a QueryForward -- the sending half was always
+// deferred. The routing stub that would have driven it (query_proxy.go, with
+// RegisterConceptOwnership) only ever resolved a target and logged the
+// decision; ac3a751e ("simplify: drop per-node @visibility filtering +
+// concept-ownership routing", 2026-05-16) deleted that stub as over-engineered,
+// describing it as "log-only ... a no-op behaviorally".
+//
+// So this handler had no caller it could ever have had, no production caller of
+// the SetQueryExecutor seam, and -- since ac3a751e -- no registry to decide
+// which node owns a concept. Ownership is routing rules plus build tags now
+// (see docs/internal/design/extension-points.md).
 //
 // It was removed rather than repaired because the repair was unsafe to
 // publish. The handler executed forwarded DSL on context.Background(), so it
@@ -219,9 +223,12 @@ message CapabilityResponse {
 // into a reader kiosk came back isClusterOwner=true on a surface that
 // dispatches mutations and logic.
 //
-// The mesh authority-propagation contract is being designed once, on #2876,
-// against the AiForward path -- which unlike this one is live in production.
-// See component/auth/forward.go for the constraints any such contract must
+// The mesh authority-propagation contract belongs on #2876 -- the AiForward
+// path, which unlike this one is live in production and carries the same
+// missing-actor defect. That issue is PARKED as of this removal, and its one
+// attempt was reverted for reintroducing the ceiling loss described above, so
+// treat it as an open design problem rather than work in flight. See
+// component/auth/forward.go for the constraints any such contract must
 // satisfy. If concept-ownership routing is ever built, it needs that contract
 // first, not this machinery back.
 
