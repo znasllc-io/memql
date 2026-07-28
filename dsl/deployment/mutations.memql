@@ -20,6 +20,12 @@
 // `use deployment.mutations.{ ... }`; component/deploycontrol invokes them by
 // name through the engine, unaffected by the relocation.
 
+// `deployment` is imported for canonicalId() in the deploymentNodeSpec id
+// derivation (#2885). It is the concept this file also writes, but the
+// canonicalId concept argument resolves against file-top imports, not
+// against the mutate target.
+use deployment.concepts.{ deployment }
+
 // ---- createDeployment ----
 
 // Write a new deployment record at deploy start (#1872). The
@@ -112,12 +118,27 @@ mutate deployment updateDeploymentStatus {
 // ---- createDeploymentNodeSpec ----
 
 // Write a per-node-type spec for a deployment (Epic 2 / #2094). The
-// concept id is the composite concat(deploymentId, ":", nodeType) so
+// concept id is the HASHED composite of (deploymentId, nodeType), so
 // every later re-pin (updateDeploymentNodeSpec) appends a new payload
 // version under the SAME time-series timeline -- one record per
 // (deployment, nodeType), reconstructable asOf any time. deploymentId
 // + nodeType are ALSO stamped as payload fields so nodeSpecsForDeployment
 // can filter on the bare deploymentId without canonical-id prefixing.
+//
+// Why hashed rather than joined (#2885): a raw
+// concat(deploymentId, ":", nodeType) is a colon-bearing shortId, and
+// Concept.Create runs core/id ValidateShortId BEFORE it touches the
+// store -- that admits only a colon-free shortId or the concept-prefixed
+// form, so the raw join was rejected on every call and this mutation
+// could never write a row. hash() yields 64 hex chars, which is bare.
+//
+// Why canonicalId() first (authoring-rules section 20): the hash is
+// byte-level, so a caller passing a bare deploymentId and one passing the
+// canonical "v1:cluster:deployment:<short>" form would otherwise hash to
+// different ids and mint TWO timelines for the same (deployment,
+// nodeType). canonicalId() collapses both shapes to one string.
+// nodeType is a plain discriminator, not a concept reference, so it is
+// hashed as written.
 //
 // Engine-as-spine: version coalesces to "" -- an empty version means
 // "resolve against the deployment's engine version", a non-empty value
@@ -126,8 +147,8 @@ mutate deployment updateDeploymentStatus {
 // Admin action: the deploy pack gates the write path; the DSL mirror
 // is spec("requiresOwnerOrAdmin") on the cut-version/rollback effects
 // (Epic 2.6). Additive: no existing overlay or query is affected.
-/// Create a v1:cluster:deploymentNodeSpec row for a (deploymentId, nodeType) pair. Uses
-/// concat(deploymentId, ':', nodeType) as the concept id so re-pins append to one timeline.
+/// Create a v1:cluster:deploymentNodeSpec row for a (deploymentId, nodeType) pair. The concept id
+/// is hash(canonicalId(deploymentId) + ':' + nodeType) so re-pins append to one timeline.
 /// Engine-as-spine: empty version resolves against the deployment engine version. Epic 2 / #2094.
 mutate deploymentNodeSpec createDeploymentNodeSpec {
   args {
@@ -140,7 +161,10 @@ mutate deploymentNodeSpec createDeploymentNodeSpec {
   insert {
     accept { deploymentId, nodeType }
     stamp {
-      id: concat(args.deploymentId, ":", args.nodeType)
+      id: hash(concat(
+        canonicalId(args.deploymentId, deployment), ":",
+        args.nodeType
+      ))
       version: args.version ?? ""
       replicas: args.replicas ?? 1
       imageDigest: args.imageDigest ?? ""
@@ -155,15 +179,19 @@ mutate deploymentNodeSpec createDeploymentNodeSpec {
 // Read-merge update form (mirrors updateDeploymentStatus): only
 // version + replicas + imageDigest + updatedAt change; deploymentId +
 // nodeType inherit from the persisted row, so a re-pin never re-keys
-// the spec. The append writes a new row under the same concept id
-// (concat(deploymentId, ":", nodeType)), and the CDC path emits
+// the spec. The append writes a new row under the same concept id, and
+// the CDC path emits
 // graph.node.updated.<partition>.v1:cluster:deploymentNodeSpec.
 //
 // The caller passes deploymentId + nodeType (NOT the composite id) so
-// the mutation re-derives the same concept id the create used.
+// the mutation re-derives the same concept id the create used. That id
+// expression MUST stay byte-identical to createDeploymentNodeSpec's
+// (#2885): the two are the only thing keeping a re-pin on the create's
+// timeline, and a divergence would silently fork a second one rather
+// than fail.
 /// Re-pin a v1:cluster:deploymentNodeSpec's version / replicas / imageDigest by (deploymentId,
 /// nodeType). Read-merge update: deploymentId + nodeType inherit, only the spec fields + updatedAt
-/// change. Append under the same composite concept id. Epic 2 / #2094.
+/// change. Append under the same hashed composite concept id. Epic 2 / #2094.
 mutate deploymentNodeSpec updateDeploymentNodeSpec {
   args {
     deploymentId  string!
@@ -173,7 +201,10 @@ mutate deploymentNodeSpec updateDeploymentNodeSpec {
     imageDigest   string
   }
   update {
-    id: concat(args.deploymentId, ":", args.nodeType)
+    id: hash(concat(
+      canonicalId(args.deploymentId, deployment), ":",
+      args.nodeType
+    ))
     version: args.version ?? ""
     replicas: args.replicas ?? 1
     imageDigest: args.imageDigest ?? ""
