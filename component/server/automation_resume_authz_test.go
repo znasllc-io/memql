@@ -34,16 +34,38 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 )
 
-// resumeRequest is the minimal well-formed body. executionId is non-empty so a
-// 400 cannot be mistaken for the 403 under test -- the authorization check runs
-// BEFORE the body validation, and these tests must not depend on that order.
+// resumeRequest is the minimal well-formed body. executionId is non-empty and
+// Body is non-nil so neither of the 400 paths ahead of the gate
+// (request.Body == nil, empty executionId) can be mistaken for the 403 under
+// test.
 func resumeRequest() PostAutomationResumeRequestObject {
 	return PostAutomationResumeRequestObject{
 		Body: &PostAutomationResumeJSONRequestBody{ExecutionId: "exec-2908-probe"},
 	}
 }
 
-func ctxWithRole(role auth.Role) context.Context {
+// ctxWithClaims builds the context shape the REAL HTTP path produces.
+//
+// This is the load-bearing detail. verifier.AttachToContext calls
+// ContextWithClaims + ContextWithToken and NOT ContextWithAccess, and no HTTP
+// middleware anywhere calls ContextWithAccess -- so on the wire
+// auth.AccessFromContext is nil for every caller, cluster owners included.
+//
+// An earlier revision of this test built its context with ContextWithAccess, a
+// call nothing on the HTTP path makes. It passed green while a real owner JWT
+// got 403: the gate did not secure the endpoint, it killed it. Tests that
+// fabricate a context shape production never produces prove only that the
+// function compiles.
+func ctxWithClaims(role auth.Role) context.Context {
+	return auth.ContextWithClaims(context.Background(), map[string]any{
+		"sub":  "v1:identity:user:probe-2908",
+		"role": string(role),
+	})
+}
+
+// ctxWithAccess is the OTHER shape the handler must still honour: a caller that
+// arrives with an AccessContext already resolved (as the gRPC path does).
+func ctxWithAccess(role auth.Role) context.Context {
 	return auth.ContextWithAccess(context.Background(), &auth.AccessContext{
 		UserId: "v1:identity:user:probe-2908",
 		Role:   role,
@@ -59,9 +81,11 @@ func TestPostAutomationResume_RefusesWithoutOwnerOrAdmin(t *testing.T) {
 		name string
 		ctx  context.Context
 	}{
-		{"no AccessContext at all (unauthenticated node, memql#2937)", context.Background()},
-		{"reader", ctxWithRole(auth.RoleReader)},
-		{"writer", ctxWithRole(auth.RoleWriter)},
+		{"nothing at all (unauthenticated node, memql#2937)", context.Background()},
+		{"claims: reader", ctxWithClaims(auth.RoleReader)},
+		{"claims: writer", ctxWithClaims(auth.RoleWriter)},
+		{"claims: no role", auth.ContextWithClaims(context.Background(), map[string]any{"sub": "v1:identity:user:x"})},
+		{"AccessContext: reader", ctxWithAccess(auth.RoleReader)},
 	}
 
 	// A server with NO scheduler wired. Any of these cases reaching past the
@@ -95,20 +119,35 @@ func TestPostAutomationResume_RefusesWithoutOwnerOrAdmin(t *testing.T) {
 func TestPostAutomationResume_AdmitsOwnerAndAdmin(t *testing.T) {
 	s := &Server{}
 
-	for _, role := range []auth.Role{auth.RoleOwner, auth.RoleAdmin} {
-		t.Run(string(role), func(t *testing.T) {
-			resp, err := s.PostAutomationResume(ctxWithRole(role), resumeRequest())
-			if err != nil {
-				t.Fatalf("handler returned a transport error: %v", err)
-			}
-			if _, refused := resp.(PostAutomationResume403JSONResponse); refused {
-				t.Fatalf("role %q was refused; owner and admin must be able to resume (memql#2908)", role)
-			}
-			if _, ok := resp.(PostAutomationResume404JSONResponse); !ok {
-				t.Fatalf("role %q: got %T, want the scheduler-not-configured 404 that proves the "+
-					"request passed authorization", role, resp)
-			}
-		})
+	shapes := []struct {
+		name string
+		mk   func(auth.Role) context.Context
+	}{
+		// The one that matters: claims-only is what the HTTP middleware
+		// actually attaches. If this regresses, owner and admin are locked out
+		// of the endpoint on every node.
+		{"claims (the real HTTP shape)", ctxWithClaims},
+		{"pre-resolved AccessContext", ctxWithAccess},
+	}
+
+	for _, sh := range shapes {
+		for _, role := range []auth.Role{auth.RoleOwner, auth.RoleAdmin} {
+			t.Run(sh.name+"/"+string(role), func(t *testing.T) {
+				resp, err := s.PostAutomationResume(sh.mk(role), resumeRequest())
+				if err != nil {
+					t.Fatalf("handler returned a transport error: %v", err)
+				}
+				if _, refused := resp.(PostAutomationResume403JSONResponse); refused {
+					t.Fatalf("%s role %q was REFUSED. Owner and admin must be able to resume; "+
+						"a gate that refuses everyone has killed the endpoint, not secured it "+
+						"(memql#2908)", sh.name, role)
+				}
+				if _, ok := resp.(PostAutomationResume404JSONResponse); !ok {
+					t.Fatalf("%s role %q: got %T, want the scheduler-not-configured 404 that proves "+
+						"the request passed authorization", sh.name, role, resp)
+				}
+			})
+		}
 	}
 }
 
