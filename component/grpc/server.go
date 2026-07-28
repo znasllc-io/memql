@@ -299,7 +299,10 @@ func (s *Server) prepareForRun(ctx context.Context) (context.Context, context.Ca
 	// metadata.
 	const maxWorkerMessageSize = 32 * 1024 * 1024
 	serverOpts := []grpc.ServerOption{
-		grpc.StreamInterceptor(s.streamInterceptor),
+		// withClientOrigin wraps whichever auth chain app/transport.go
+		// installed, so the stamp applies to EVERY request-derived handler
+		// rather than to the one that happened to carry it (memql#2889).
+		grpc.StreamInterceptor(withClientOrigin(s.streamInterceptor)),
 		grpc.MaxRecvMsgSize(maxWorkerMessageSize),
 		grpc.MaxSendMsgSize(maxWorkerMessageSize),
 	}
@@ -425,6 +428,64 @@ func (s *Server) SetSTTProvider(provider stt.StreamingProvider) {
 	}
 	s.sttProvider = provider
 }
+
+// withClientOrigin wraps a stream interceptor so every handler beneath it sees
+// a context explicitly marked as having come off the wire (memql#2889).
+//
+// WHY HERE AND NOT IN A HANDLER. #2800 stamped exactly one handler --
+// ExecuteQuery -- and #2889 asked the obvious question: if that stamp is
+// needed, why is it not on the other ~32 engine entry points, and if it is not
+// needed, why is it there at all?
+//
+// The answer to the first half is that it was never a per-handler concern.
+// This whole service is ONE bidirectional RPC (memql.proto `rpc Stream`) behind
+// ONE interceptor, so the wire boundary is a single frame. Stamping it here
+// covers every request-derived handler in one place, cannot be forgotten by
+// the next handler someone adds, and holds whichever of the three chains
+// app/transport.go installed. The alternative -- 32 more copies of one line --
+// would have been 32 more places to forget.
+//
+// WHAT IT IS FOR, HONESTLY. OriginClient is the zero value, so an unstamped
+// context is ALREADY untrusted; this is not what makes the wire untrusted.
+// What it provides is OVERRIDE: an inherited internal mark does not survive
+// the boundary. Today nothing on this path can supply one -- component/grpc
+// and component/node contain no ContextWithInternalOrigin at all, verified by
+// the conformance gate in call_origin_conformance_test.go -- so the stamp
+// changes no behaviour on this tree. It is here so that a future interceptor,
+// a shared helper, or a change to how ensureAccess builds its context cannot
+// silently open all ~33 entry points at once. The gate is what keeps that
+// claim true; this is what makes it safe when it stops being.
+//
+// Handlers that run on context.Background() rather than the stream context --
+// the voice-agent and polyphon paths -- are deliberately NOT covered. They are
+// not request-derived, so there is no wire boundary to mark, and no
+// interceptor can reach them.
+func withClientOrigin(next grpc.StreamServerInterceptor) grpc.StreamServerInterceptor {
+	if next == nil {
+		return nil
+	}
+	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+		// The stamp is applied to the handler's stream, INSIDE next, so it
+		// lands after the auth chain has built its context rather than being
+		// discarded by it. Wrapping the other way round would put it on a
+		// context the interceptor then replaces.
+		return next(srv, ss, info, func(inner any, innerStream grpc.ServerStream) error {
+			return handler(inner, &clientOriginStream{
+				ServerStream: innerStream,
+				ctx:          auth.ContextWithClientOrigin(innerStream.Context()),
+			})
+		})
+	}
+}
+
+// clientOriginStream overrides Context() so the handler sees the stamped one.
+// Mirrors the authenticatedStream pattern in component/identity/verifier.
+type clientOriginStream struct {
+	grpc.ServerStream
+	ctx context.Context
+}
+
+func (s *clientOriginStream) Context() context.Context { return s.ctx }
 
 // SetStreamInterceptor sets a custom stream interceptor for authentication.
 // When set, this interceptor will be used instead of the default Authorizer interceptor.
@@ -1519,13 +1580,13 @@ func (s *streamSession) handleExecuteQuery(envelope *memqlv1.MemqlClientMessage,
 	// query/mutation silently no-ops (zero rows). See memql#216.
 	ctx = auth.ContextWithAccess(ctx, s.ensureAccess(ctx))
 
-	// #2800: mark the wire explicitly. OriginClient is the zero value, so this
-	// is not what makes an unstamped context untrusted -- it is a positive
-	// assertion at the one frame that knows the call came off the wire, and it
-	// OVERRIDES any inherited internal stamp. That matters if this handler
-	// ever runs on a context derived from server-side Go: without it, origin
-	// would launder inward silently, and the failure would be invisible.
-	ctx = auth.ContextWithClientOrigin(ctx)
+	// The client-origin stamp that used to live here (#2800) moved to the
+	// stream interceptor -- see withClientOrigin. It was never a property of
+	// this handler: #2889 asked why 1 of ~33 engine entry points carried it,
+	// and the answer was that the wire boundary is a single frame, so it
+	// belongs at that frame. Every request-derived handler is stamped now,
+	// this one included, and a test proves it rather than a comment asserting
+	// it.
 
 	s.activeRequests.Store(requestId, cancel)
 
