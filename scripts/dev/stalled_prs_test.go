@@ -27,6 +27,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 const stalledPRsScript = "stalled-prs.sh"
@@ -41,13 +42,25 @@ func readScript(t *testing.T) string {
 }
 
 // ghStub configures the fake gh for one run.
+//
+// There is no headSHA field any more: the head SHA rides in the prList row, so
+// `gh pr view` is not called at all (memql#2887). Deleting the field rather
+// than leaving it unused is deliberate -- the stub's `pr view` arm went with
+// it, so if the call ever comes back it lands in the default-deny case and
+// fails loudly instead of being quietly served.
 type ghStub struct {
-	prList     string // TSV rows for `gh pr list`; "" means no rows
-	prListFail bool   // `gh pr list` exits non-zero
-	queue      string // `gh api graphql` result: true / false / "" (fail)
-	headSHA    string // `gh pr view` result; "" means empty output
+	prList     string // TSV rows for `gh pr list --state open`; "" means no rows
+	prListFail bool   // that call exits non-zero
+	liveness   string // pr_liveness graphql result: "<queued>\t<oid>\t<epoch>"; "" means fail
 	checkRuns  string // `gh api ...check-runs` newline list; "" means no runs
 	checksFail bool   // the check-runs call exits non-zero
+
+	// The closed-unmerged sweep (memql#2887). Both default to empty, which
+	// means "no closed-unmerged PRs" -- so every pre-existing test keeps
+	// exercising exactly the open sweep it was written for.
+	closedList     string // TSV rows for `gh pr list --state closed`
+	closedListFail bool   // that call exits non-zero
+	closedFacts    string // closed_pr_facts graphql result: "<branch>\t<openIssues>"; "" means fail
 }
 
 // writeGhStub installs a fake `gh` on PATH.
@@ -67,9 +80,36 @@ func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''
 // (the header, the rules, the summary prose) is skipped. Parsing the column
 // rather than substring-matching stdout keeps the assertions about what the
 // classifier DECIDED instead of about how the summary happens to be worded.
-func bucketColumn(stdout string) []string {
+// It is scoped to the OPEN-PR table. The closed-unmerged sweep (memql#2887)
+// prints rows in the same `#<num> <STATE> ...` shape below it, so an unscoped
+// scan folded both sections into one list -- and every "no STALLED anywhere"
+// assertion in this file would then be answered partly by rows the case under
+// test never configured.
+func bucketColumn(stdout string) []string { return bucketsIn(openSection(stdout)) }
+
+// closedSectionHeading is the divider between the two reports. Kept as a
+// constant because both openSection and the closed-sweep tests key on it, and
+// a reworded heading must break them together rather than silently rescope
+// bucketColumn to the whole report.
+const closedSectionHeading = "CLOSED WITHOUT MERGING"
+
+func openSection(stdout string) string {
+	if i := strings.Index(stdout, closedSectionHeading); i >= 0 {
+		return stdout[:i]
+	}
+	return stdout
+}
+
+func closedSection(stdout string) string {
+	if i := strings.Index(stdout, closedSectionHeading); i >= 0 {
+		return stdout[i:]
+	}
+	return ""
+}
+
+func bucketsIn(section string) []string {
 	var out []string
-	for _, line := range strings.Split(stdout, "\n") {
+	for _, line := range strings.Split(section, "\n") {
 		if !strings.HasPrefix(line, "#") {
 			continue
 		}
@@ -208,12 +248,33 @@ if [ -n "${FORBID:-}" ]; then
   exit 1
 fi
 
+# pr list is called TWICE now -- once for open PRs, once for the
+# closed-unmerged sweep -- and api graphql is called with two different
+# documents. Dispatching on "$1 $2" alone served the same canned bytes to
+# both, which fed open-PR rows into the closed sweep and made its assertions
+# meaningless. Each arm is selected by something only its caller sends.
+#
+# No backticks anywhere in this template: it is a Go raw string literal, and a
+# backtick in a shell comment terminates it.
+if [ "$1 $2" = "pr list" ]; then
+  case "$*" in
+    *"--state open"*)   printf '%%s' %s; %s ;;
+    *"--state closed"*) printf '%%s' %s; %s ;;
+    *) echo "stub gh: pr list with no recognised --state: $*" >&2; exit 1 ;;
+  esac
+fi
+
+if [ "$1 $2" = "api graphql" ]; then
+  case "$*" in
+    *isInMergeQueue*) printf '%%s' %s; [ -n %s ] || exit 1; exit 0 ;;
+    *headRef*)        printf '%%s' %s; [ -n %s ] || exit 1; exit 0 ;;
+    *) echo "stub gh: unrecognised graphql document: $*" >&2; exit 1 ;;
+  esac
+fi
+
 case "$1 $2" in
   "--version "*)  echo 'gh version 2.45.0'; exit 0 ;;
   "auth status")  exit 0 ;;
-  "pr list")      printf '%%s' %s; %s ;;
-  "pr view")      printf '%%s' %s; exit 0 ;;
-  "api graphql")  printf '%%s' %s; [ -n %s ] || exit 1; exit 0 ;;
 esac
 case "$1" in
   api) printf '%%s' %s; %s ;;
@@ -228,8 +289,9 @@ exit 1
 		logPath,
 		logPath,
 		shellQuote(cfg.prList), fail(cfg.prListFail),
-		shellQuote(cfg.headSHA),
-		shellQuote(cfg.queue), shellQuote(cfg.queue),
+		shellQuote(cfg.closedList), fail(cfg.closedListFail),
+		shellQuote(cfg.liveness), shellQuote(cfg.liveness),
+		shellQuote(cfg.closedFacts), shellQuote(cfg.closedFacts),
 		shellQuote(cfg.checkRuns), fail(cfg.checksFail),
 		logPath,
 	)
@@ -287,10 +349,14 @@ func runScript(t *testing.T, cfg ghStub, env ...string) runResult {
 
 // oneStalledPR is the happy path: green, mergeable, unqueued, long idle.
 // Epoch 1000000000 is 2001, so it is unambiguously stale.
+//
+// The head SHA now travels in the prList row (column 5), and the liveness
+// response repeats it -- pr_liveness cross-checks the two and resolves to
+// `unknown` on a mismatch, so a fixture whose oids disagree would classify
+// UNKNOWN rather than STALLED.
 var oneStalledPR = ghStub{
-	prList:    "7\tfalse\tCLEAN\t1000000000\tan abandoned green pr\n",
-	queue:     "false",
-	headSHA:   "deadbeef",
+	prList:    "7\tfalse\tCLEAN\t1000000000\tdeadbeef\tan abandoned green pr\n",
+	liveness:  "false\tdeadbeef\t1000000000",
 	checkRuns: "success\nskipped\n",
 }
 
@@ -397,24 +463,44 @@ func TestStalledPRs_FailuresNeverBecomeFindings(t *testing.T) {
 		mutate  func(*ghStub)
 		wantCol string
 	}{
-		{"merge-queue lookup fails", func(c *ghStub) { c.queue = "" }, "UNKNOWN"},
+		{"liveness lookup fails", func(c *ghStub) { c.liveness = "" }, "UNKNOWN"},
 		{"check-runs lookup fails", func(c *ghStub) { c.checksFail = true }, "UNKNOWN"},
-		{"head sha unreadable", func(c *ghStub) { c.headSHA = "" }, "UNKNOWN"},
+		{"head sha unreadable", func(c *ghStub) {
+			// open_prs emits "-" for a missing headRefOid rather than an empty
+			// field: tab is IFS whitespace, so an empty MIDDLE column would
+			// collapse and shift the title left instead of being read as blank.
+			c.prList = "7\tfalse\tCLEAN\t1000000000\t-\ta pr\n"
+		}, "UNKNOWN"},
 		{"no check runs at all", func(c *ghStub) { c.checkRuns = "" }, "NO-CI"},
 		{"unreadable timestamp", func(c *ghStub) {
-			c.prList = "7\tfalse\tCLEAN\tnot-a-number\ta pr\n"
+			c.prList = "7\tfalse\tCLEAN\tnot-a-number\tdeadbeef\ta pr\n"
+			c.liveness = "false\tdeadbeef\tnot-a-number"
+		}, "UNKNOWN"},
+		{"head commit date unreadable", func(c *ghStub) {
+			c.liveness = "false\tdeadbeef\t"
+		}, "UNKNOWN"},
+		{"head moved mid-sweep", func(c *ghStub) {
+			// The oid the liveness call returns disagrees with the one the list
+			// gave us: the head moved between the two requests, so the clock is
+			// not this PR's and the check-runs already fetched are for a SHA
+			// that is no longer the head.
+			c.liveness = "false\tcafebabe\t1000000000"
+		}, "UNKNOWN"},
+		{"head commit in the future", func(c *ghStub) {
+			// committedDate is a clock this script does not control.
+			c.liveness = "false\tdeadbeef\t99999999999"
 		}, "UNKNOWN"},
 		{"mergeability still computing", func(c *ghStub) {
-			c.prList = "7\tfalse\tUNKNOWN\t1000000000\ta pr\n"
+			c.prList = "7\tfalse\tUNKNOWN\t1000000000\tdeadbeef\ta pr\n"
 		}, "UNKNOWN"},
-		{"already in the merge queue", func(c *ghStub) { c.queue = "true" }, "QUEUED"},
+		{"already in the merge queue", func(c *ghStub) { c.liveness = "true\tdeadbeef\t1000000000" }, "QUEUED"},
 		{"failing checks", func(c *ghStub) { c.checkRuns = "failure\nsuccess\n" }, "RED"},
 		{"checks still running", func(c *ghStub) { c.checkRuns = "in_progress\n" }, "PENDING"},
 		{"draft", func(c *ghStub) {
-			c.prList = "7\ttrue\tCLEAN\t1000000000\ta draft\n"
+			c.prList = "7\ttrue\tCLEAN\t1000000000\tdeadbeef\ta draft\n"
 		}, "DRAFT"},
 		{"draft flag unrecognised", func(c *ghStub) {
-			c.prList = "7\tTRUE\tCLEAN\t1000000000\ta pr\n"
+			c.prList = "7\tTRUE\tCLEAN\t1000000000\tdeadbeef\ta pr\n"
 		}, "UNKNOWN"},
 	}
 
@@ -460,7 +546,7 @@ func TestStalledPRs_FailuresNeverBecomeFindings(t *testing.T) {
 // TestStalledPRs_ListFailureIsLoud covers the worst possible output for a
 // watchdog: learning nothing and reporting all-clear. It must exit 4.
 func TestStalledPRs_ListFailureIsLoud(t *testing.T) {
-	res := runScript(t, ghStub{prListFail: true, queue: "false"})
+	res := runScript(t, ghStub{prListFail: true, liveness: "false\tdeadbeef\t1000000000"})
 
 	if res.code != 4 {
 		t.Errorf("exit = %d, want 4 when the PR list cannot be read", res.code)
@@ -515,20 +601,26 @@ func TestStalledPRs_BadThresholdIsRejected(t *testing.T) {
 func TestStalledPRs_QueriesGitHubCorrectly(t *testing.T) {
 	res := runScript(t, oneStalledPR)
 
-	var list string
+	// There are TWO `pr list` calls now (memql#2887), so selecting "the last
+	// one" silently retargeted every assertion below onto the closed sweep.
+	// Each is picked by its own --state.
+	var list, closedList string
 	for _, c := range res.calls {
-		if strings.HasPrefix(c, "pr list") {
+		switch {
+		case strings.HasPrefix(c, "pr list") && strings.Contains(c, "--state open"):
 			list = c
+		case strings.HasPrefix(c, "pr list") && strings.Contains(c, "--state closed"):
+			closedList = c
 		}
 	}
 	if list == "" {
-		t.Fatal("no `gh pr list` call recorded")
+		t.Fatal("no `gh pr list --state open` call recorded")
 	}
 
 	// The --jq array order must match the `read` destructuring in main().
-	wantOrder := ".number, .isDraft, .mergeStateStatus, (.updatedAt|fromdateiso8601), .title"
+	wantOrder := `.number, .isDraft, .mergeStateStatus, (.updatedAt|fromdateiso8601), (.headRefOid // "-"), .title`
 	if !strings.Contains(list, wantOrder) {
-		t.Errorf("the --jq array order must stay in lockstep with `read -r num draft merge_state updated_epoch title`.\nwant substring: %s\ngot: %s", wantOrder, list)
+		t.Errorf("the --jq array order must stay in lockstep with `read -r num draft merge_state updated_epoch head_sha title`.\nwant substring: %s\ngot: %s", wantOrder, list)
 	}
 	// fromdateiso8601 is what removed the GNU-only `date -u -d`, under which
 	// macOS silently reported every PR FRESH forever.
@@ -538,9 +630,32 @@ func TestStalledPRs_QueriesGitHubCorrectly(t *testing.T) {
 	if !strings.Contains(list, "--state open") {
 		t.Error("must list only OPEN prs")
 	}
-	for _, field := range []string{"number", "isDraft", "mergeStateStatus", "updatedAt", "title"} {
+	// headRefOid is what removed the per-PR `gh pr view` (memql#2887). Losing
+	// it from --json would not fail any behavioural test -- the stub serves
+	// canned rows -- it would just make every PR UNKNOWN against real GitHub.
+	for _, field := range []string{"number", "isDraft", "mergeStateStatus", "updatedAt", "headRefOid", "title"} {
 		if !strings.Contains(list, field) {
 			t.Errorf("--json is missing %q, which the report reads", field)
+		}
+	}
+
+	// The closed-unmerged sweep. Its `select(.mergedAt == null)` cannot be
+	// exercised behaviourally -- the stub serves canned bytes and discards the
+	// --jq filter -- so the filter is pinned here as a string. That is a weaker
+	// guarantee than the rest of this file and is called out rather than left
+	// looking equivalent.
+	if closedList == "" {
+		t.Fatal("no `gh pr list --state closed` call recorded; the closed-unmerged sweep never ran")
+	}
+	if !strings.Contains(closedList, "is:unmerged") {
+		t.Error("the closed sweep must push is:unmerged SERVER-side: `--state closed` returns MERGED PRs too, so an unfiltered page is almost all merged PRs and the sweep finds nothing while looking exhaustive")
+	}
+	if !strings.Contains(closedList, `select(.state == "CLOSED" and .mergedAt == null)`) {
+		t.Error("the mergedAt filter must survive in jq as well as in the search: two independent filters, so neither one becoming a no-op turns a merged PR into a LOST-WORK finding")
+	}
+	for _, field := range []string{"number", "state", "mergedAt", "headRefName", "closedAt"} {
+		if !strings.Contains(closedList, field) {
+			t.Errorf("the closed sweep's --json is missing %q", field)
 		}
 	}
 
@@ -675,5 +790,193 @@ func TestStalledPRs_CollapseRuns(t *testing.T) {
 				t.Errorf("collapse_runs(%q) = %q, want %q", tc.runs, got, tc.want)
 			}
 		})
+	}
+}
+
+// --- memql#2887 -------------------------------------------------------------
+
+// TestStalledPRs_HeadShaComesFromTheListCall pins finding 1: the head SHA must
+// arrive in the `gh pr list` row, not in a per-PR `gh pr view`.
+//
+// Three assertions, because the obvious one is not sufficient. "No pr view" is
+// satisfied just as well by dropping the check-run lookup altogether, which
+// would make every PR UNKNOWN and the tool useless while this test stayed
+// green -- so the third assertion follows the SHA from the list row all the
+// way into the check-runs URL.
+func TestStalledPRs_HeadShaComesFromTheListCall(t *testing.T) {
+	res := runScript(t, oneStalledPR)
+
+	for _, c := range res.calls {
+		if strings.HasPrefix(c, "pr view") {
+			t.Errorf("`gh pr view` is back: %q.\nThe head SHA is already served by `gh pr list`; fetching it per PR was a third of this tool's entire API budget (memql#2887).", c)
+		}
+	}
+
+	// Exactly two per-PR calls: the liveness graphql and the check-runs fetch.
+	perPR := 0
+	for _, c := range res.calls {
+		if strings.HasPrefix(c, "api") {
+			perPR++
+		}
+	}
+	if perPR != 2 {
+		t.Errorf("got %d per-PR api calls, want 2 (liveness graphql + check-runs).\ncalls:\n  %s", perPR, strings.Join(res.calls, "\n  "))
+	}
+
+	// The SHA from the list row must be the one actually queried.
+	wantURL := "commits/deadbeef/check-runs"
+	found := false
+	for _, c := range res.calls {
+		if strings.Contains(c, wantURL) {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("no call fetched %q.\nThe SHA from the list row must reach the check-runs URL -- otherwise 'no pr view' is satisfied by not looking up checks at all.\ncalls:\n  %s",
+			wantURL, strings.Join(res.calls, "\n  "))
+	}
+}
+
+// TestStalledPRs_IdlenessKeysOnTheHeadSha pins finding 3, and it is the one
+// test here whose pre-fix failure is a WRONG CLASSIFICATION rather than a stub
+// refusal: under `updatedAt` the first case reads FRESH.
+//
+// The two cases are deliberately inverse, so that no cheaper rule passes both:
+// keying on updatedAt fails the first, max(commit, updated) fails the first
+// too, and min(commit, updated) fails the second. Only the commit date alone
+// satisfies both.
+func TestStalledPRs_IdlenessKeysOnTheHeadSha(t *testing.T) {
+	now := time.Now().Unix()
+	recent := fmt.Sprintf("%d", now-60) // one minute ago
+	ancient := "1000000000"             // 2001
+
+	cases := []struct {
+		name        string
+		updatedAt   string
+		commitEpoch string
+		want        string
+		why         string
+	}{
+		{
+			name: "stale commit, fresh comment", updatedAt: recent, commitEpoch: ancient, want: "STALLED",
+			why: "a dying session that posts a review summary before it stops must not reset its own clock -- that is the exact failure memql#2887 exists to close",
+		},
+		{
+			name: "fresh commit, stale everything else", updatedAt: ancient, commitEpoch: recent, want: "FRESH",
+			why: "a PR pushed a minute ago is being worked on, whatever its updatedAt says",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := ghStub{
+				prList:    "7\tfalse\tCLEAN\t" + tc.updatedAt + "\tdeadbeef\ta pr\n",
+				liveness:  "false\tdeadbeef\t" + tc.commitEpoch,
+				checkRuns: "success\n",
+			}
+			res := runScript(t, cfg)
+			buckets := bucketColumn(res.stdout)
+			if len(buckets) != 1 || buckets[0] != tc.want {
+				t.Errorf("got %v, want [%s].\n%s\nstdout:\n%s", buckets, tc.want, tc.why, res.stdout)
+			}
+		})
+	}
+}
+
+// TestStalledPRs_ClosedUnmergedIsSwept pins finding 2, one case per decision
+// branch.
+//
+// Every branch is covered on purpose: a fixture set that only ever reached one
+// outcome would leave the others unexercised while the suite stayed green,
+// which is how the sibling stale-claims suite once shipped a sweep that could
+// not report anything at all.
+func TestStalledPRs_ClosedUnmergedIsSwept(t *testing.T) {
+	closedRow := "11\tissue/11-thing\t1000000000\ta closed pr\n"
+
+	cases := []struct {
+		name        string
+		facts       string
+		wantBucket  string
+		wantPrinted bool
+		why         string
+	}{
+		{
+			name: "branch alive and issue open is a finding", facts: "present\t101",
+			wantBucket: "LOST-WORK", wantPrinted: true,
+			why: "closed without merging, branch still on the remote, issue back in the pool -- the work is written and about to be rebuilt",
+		},
+		{
+			name: "branch deleted is not a finding", facts: "gone\t-",
+			wantBucket: "BRANCH-GONE", wantPrinted: false,
+			why: "nothing is recoverable, so there is nothing to tell anyone",
+		},
+		{
+			name: "issue already closed is not a finding", facts: "present\t-",
+			wantBucket: "NO-OPEN-ISSUE", wantPrinted: false,
+			why: "the ordinary end of a PR's life; printing it would bury the real findings under every abandoned experiment in the repo",
+		},
+		{
+			name: "lookup failure is UNKNOWN, never silence", facts: "",
+			wantBucket: "UNKNOWN", wantPrinted: true,
+			why: "default-deny cuts both ways: an unresolved input must not manufacture a finding, and must not vanish either",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := oneStalledPR
+			cfg.closedList = closedRow
+			cfg.closedFacts = tc.facts
+
+			res := runScript(t, cfg)
+			if res.code != 0 {
+				t.Fatalf("exit = %d, want 0\nstderr: %s", res.code, res.stderr)
+			}
+
+			buckets := bucketsIn(closedSection(res.stdout))
+			if tc.wantPrinted {
+				if len(buckets) != 1 || buckets[0] != tc.wantBucket {
+					t.Errorf("closed-sweep buckets = %v, want [%s].\n%s\nstdout:\n%s", buckets, tc.wantBucket, tc.why, res.stdout)
+				}
+			} else if len(buckets) != 0 {
+				t.Errorf("closed-sweep printed %v; this case must not be reported.\n%s\nstdout:\n%s", buckets, tc.why, res.stdout)
+			}
+
+			// The open-PR report must be unaffected in every case.
+			if open := bucketColumn(res.stdout); len(open) != 1 || open[0] != "STALLED" {
+				t.Errorf("the open-PR table changed to %v; the second sweep must not disturb the first", open)
+			}
+		})
+	}
+}
+
+// TestStalledPRs_ClosedSweepFailureIsNotAnAllClear: if the closed list cannot
+// be fetched, the tool must say that half of the report is MISSING rather than
+// print nothing and let a reader infer there is nothing to find.
+func TestStalledPRs_ClosedSweepFailureIsNotAnAllClear(t *testing.T) {
+	cfg := oneStalledPR
+	cfg.closedListFail = true
+
+	res := runScript(t, cfg)
+
+	// The open report is still good, so the run still succeeds.
+	if res.code != 0 {
+		t.Errorf("exit = %d, want 0: a failed SECOND sweep must not discard a good first one", res.code)
+	}
+	if !strings.Contains(res.stderr, "MISSING") {
+		t.Errorf("a failed closed sweep must say so on stderr; got:\n%s", res.stderr)
+	}
+	if open := bucketColumn(res.stdout); len(open) != 1 || open[0] != "STALLED" {
+		t.Errorf("the open-PR table = %v, want [STALLED]; it is unaffected by the closed sweep failing", open)
+	}
+}
+
+// TestStalledPRs_ScriptIsValidBash is a cheap parse gate. The rest of this file
+// executes the script, so a syntax error surfaces as a confusing exit code in
+// whichever test happens to run first; this one names it.
+func TestStalledPRs_ScriptIsValidBash(t *testing.T) {
+	cmd := exec.Command("bash", "-n", stalledPRsScript)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Errorf("bash -n %s failed: %v\n%s", stalledPRsScript, err, out)
 	}
 }
