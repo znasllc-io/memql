@@ -43,6 +43,30 @@ import (
 // internal origin is small, stable, and known; anything joining it is a change
 // worth a reviewer looking at deliberately. A new package that starts stamping
 // fails here by default, which is the direction the failure should point.
+//
+// WHAT THIS DOES NOT CATCH. Stated precisely, because an over-claimed
+// guarantee is worse than a modest one. These limits were enumerated in PR
+// #2933, a parallel solution to memql#2889 by session saa954c that did not
+// land; they are its work, carried over because they are true of this gate too
+// and were the better half of that PR.
+//
+//   - A new caller INSIDE an already-allowlisted package. Granularity is
+//     per-package, and component/memql and app are large. Within those, this
+//     is documentation rather than a gate.
+//   - Laundering through an exported, context-returning wrapper in an
+//     allowlisted package. None exists today -- component/automations'
+//     originForSource is unexported -- but exporting one would open a hole
+//     this cannot see.
+//   - It does not assert that component/identity/admin's HTTP gate stays in
+//     place. That gate is the only thing making its allowlist entry safe; see
+//     memql#2934.
+//
+// WHY IT CATCHES MORE THAN THE COMPILER WOULD. go/parser ignores build
+// constraints, so this sees files no CI lane compiles. app/integrations_identity.go
+// is `//go:build identity` and does stamp internal origin (line 622); per
+// memql#2903 the tagged lanes only `go build`, never `go test`, so a violation
+// added to a tagged file would otherwise reach main unexamined. That is not
+// hypothetical -- memql#2903 exists because a tagged test file had never run.
 func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 	// Directory -> why that package may stamp internal origin.
 	//
@@ -165,6 +189,19 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 				pkg, isIdent := ref.X.(*ast.Ident)
 				matched = isIdent && local[pkg.Name] && ref.Sel.Name == "ContextWithInternalOrigin"
 				pos = ref.Pos()
+				if matched {
+					// Stop descending. Sel is an *ast.Ident with the same
+					// name, so in a file that ALSO dot-imports component/auth
+					// (making local[""] true) the Ident arm below would record
+					// the same reference a second time. Not reachable on this
+					// tree -- no file both aliases and dot-imports -- but the
+					// double-count is silent, and a doubled position list
+					// reads as two violations where there is one. Credit
+					// PR #2933, which guarded this from the start.
+					dir := filepath.Dir(rel)
+					seen[dir] = append(seen[dir], fset.Position(pos).String())
+					return false
+				}
 			case *ast.Ident:
 				matched = local[""] && ref.Name == "ContextWithInternalOrigin" && !declIdent[ref]
 				pos = ref.Pos()
