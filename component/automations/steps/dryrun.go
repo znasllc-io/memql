@@ -111,8 +111,8 @@ func runBundleDryRun(ctx context.Context, engine *memql.MemQLEngine, req memql.D
 	// automation. Concurrency is irrelevant for a single run.
 	executor := automations.NewExecutor(automations.ExecutorOptions{
 		// No checkpoint from a preview (memql#2932): nothing resumes a
-		// dry-run, and SaveCheckpoint is the one write that bypasses the
-		// sandbox registry and reaches the live graph.
+		// dry-run, and SaveCheckpoint bypasses the sandbox registry to reach
+		// the live graph -- the only escaping write that is a RESUMABLE token.
 		SandboxRun:   true,
 		Logger:       discardLogger(),
 		Engine:       engine,

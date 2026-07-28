@@ -62,6 +62,16 @@ Worker tokens are revoked by flipping `active=false` on the identity row; expiry
 | `/setup` | GET, POST | bootstrap gate | one-time owner-creation flow |
 | `/spaces/{id}/attachments` | POST | Bearer + explicit space-owner check (F10) | file upload; ownership re-enforced by DSL mutation |
 | `/api/concepts` | GET | Bearer | concept schema feed (intentionally readable to any authenticated caller) |
+| `/automations/{name}/trigger` | POST | Bearer + **owner/admin** (memql#2937) | runs an automation's action chain server-side; returns `executionId` |
+| `/automations/resume` | POST | Bearer + **owner/admin** (memql#2908) | re-executes a checkpoint's remaining steps under the automation's system actor |
+
+Both automation routes were **absent from this inventory** until memql#2908/#2937,
+and were unauthorized in code the whole time. The omission is plausibly why: a
+surface nobody has enumerated is a surface nobody gates. Note also that the
+authorization is enforced **in the handler**, not by middleware -- the identity
+binary mounts these routes against a real scheduler while installing no
+verifier middleware (see #2939), so a middleware-level reading of this table
+overstates the protection on that node.
 
 ### 1.5 WebSocket
 

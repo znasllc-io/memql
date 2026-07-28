@@ -138,11 +138,17 @@ type ExecutorOptions struct {
 	// SandboxRun marks this executor as driving a Gate-2 behavioural dry-run.
 	//
 	// A sandboxed run mints NO resume checkpoint (memql#2932). A preview has
-	// nothing to resume, and the checkpoint was the one write that escaped the
-	// sandbox: SaveCheckpoint goes straight to the engine, never through the
-	// interception layer, so a "dry-run" left a durable, resumable row in the
-	// LIVE graph -- contradicting the guarantee in
-	// component/automations/steps/dryrun.go that zero rows land there.
+	// nothing to resume, and the checkpoint escaped the sandbox: SaveCheckpoint
+	// goes straight to the engine, never through the interception layer, so a
+	// "dry-run" left a durable, RESUMABLE row in the live graph.
+	//
+	// It is not the only write that escapes -- sandbox_registry intercepts
+	// mutation / webhook / mutating-function steps and forwards everything else
+	// to the production executors, and executeInput bypasses the step registry
+	// entirely -- so dryrun.go's "zero rows land in the live graph" remains
+	// overstated after this change (tracked separately). The checkpoint is the
+	// one that mattered for #2890 / #2908, because it is the only escaping write
+	// that is a RESUMABLE TOKEN.
 	//
 	// The failing preview was the one that wrote: saveCheckpointOnFailure
 	// fires on step failure, so the refusal a preview exists to REPORT was
@@ -1057,10 +1063,10 @@ func (e *Executor) saveCheckpointOnFailure(
 		return
 	}
 	// A sandboxed dry-run mints no checkpoint (memql#2932). Nothing resumes a
-	// preview, and this write is the only one that bypasses the sandbox's
-	// interception layer -- it goes straight to the engine, landing a durable,
-	// resumable row in the LIVE graph and contradicting dryrun.go's "zero rows
-	// land in the live graph".
+	// preview, and this write bypasses the sandbox's interception layer --
+	// straight to the engine, landing a durable RESUMABLE row in the live
+	// graph. (Other writes escape the sandbox too; this is the only one that is
+	// a resumable token. See the ExecutorOptions.SandboxRun doc.)
 	//
 	// Returning here also removes the token entirely rather than merely making
 	// it unpromotable, which is the stronger half of memql#2890: that fix marks

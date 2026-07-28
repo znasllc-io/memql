@@ -46,8 +46,6 @@ package steps
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
-	"errors"
 	"io"
 	"log/slog"
 	"os"
@@ -98,97 +96,17 @@ func dryRunTrustTestEngine(t *testing.T) (*memql.MemQLEngine, *bun.DB) {
 	return eng, db
 }
 
-// TestDryRunCheckpointIsMarkedCallerSupplied is the guard memql#2890 needed.
+// memql#2890's guard -- that a dry-run's minted checkpoint is marked
+// caller-supplied so resume cannot promote it -- lived here and has been
+// REMOVED, not weakened: memql#2932's fix means a dry-run mints no checkpoint
+// at all, so that assertion has no subject on this path and would pass
+// unconditionally. A test that cannot fail is worse than no test.
 //
-// It drives a real dry-run of a tree automation whose step hits a @serverOnly
-// function -- the failure that mints a checkpoint -- and asserts the checkpoint
-// records the payload as CALLER-SUPPLIED, so resume.go computes
-// SourceTrusted=false and cannot promote it to internal origin.
-func TestDryRunCheckpointIsMarkedCallerSupplied(t *testing.T) {
-	eng, db := dryRunTrustTestEngine(t)
-	ctx := context.Background()
-
-	src, ok := memql.DSLConstructSource(slog.New(slog.NewTextHandler(io.Discard, nil)), "automation", trustProbeAutomation)
-	if !ok {
-		t.Skipf("automation %q is not in the tree in this build; nothing to assert", trustProbeAutomation)
-	}
-
-	// Timestamp the run so the checkpoint lookup below cannot pick up a row
-	// left by an earlier run (this DB is shared and accumulates them).
-	var mark string
-	if err := db.NewSelect().ColumnExpr("now()::text").Scan(ctx, &mark); err != nil {
-		t.Fatalf("clock read: %v", err)
-	}
-
-	report, err := runBundleDryRun(ctx, eng, memql.DryRunRequest{
-		AutomationName:   trustProbeAutomation,
-		AutomationSource: src,
-		TriggerEvent: &memql.DryRunTriggerEvent{
-			Topic:   "mcp.run." + trustProbeAutomation,
-			Kind:    "manual",
-			Payload: map[string]any{"node": map[string]any{"id": callerChosenSentinel}},
-		},
-		Mode: memql.DryRunModeIsolated,
-	})
-	if err != nil {
-		t.Fatalf("runBundleDryRun: %v", err)
-	}
-
-	// Precondition: the run must have failed AT THE @serverOnly GATE, not for
-	// some other reason. runBundleDryRun returns (report, nil) on a compile
-	// failure too, so report.OK==false alone does not identify why -- a parser
-	// tightening that stopped this source compiling would otherwise turn this
-	// security test into a silent no-op. Deliberately fatal rather than
-	// t.Skipf, matching step_origin_test.go: if the probe stops working the
-	// fixture needs updating, not muting.
-	if report.OK || !strings.Contains(strings.ToLower(report.FailureReason), "server-only") {
-		t.Fatalf("dry-run of %q did not fail at the @serverOnly gate, so this guard is not "+
-			"exercising the path it exists to protect. ok=%v reason=%q",
-			trustProbeAutomation, report.OK, report.FailureReason)
-	}
-
-	// Find the checkpoint THIS run minted. Time-bounded AND keyed on the
-	// sentinel payload above: BundleDryRunReport surfaces no execution id, and
-	// the db-tests lane runs component/memql, component/automations/steps and
-	// examples/referencepack CONCURRENTLY against one Postgres -- and
-	// component/memql has its own RunBundleDryRun caller. "Newest since mark"
-	// alone can therefore return a stranger's checkpoint, which would fail this
-	// test with a message accusing the fix of a hole it does not have.
-	var raw string
-	err = db.NewSelect().Table("MemoryNodes").ColumnExpr("payload::text").
-		Where("concept = ?", "v1:memql:checkpoint").
-		Where("\"createdAt\" >= ?::timestamptz", mark).
-		Where("payload::text LIKE ?", "%"+callerChosenSentinel+"%").
-		Order("createdAt DESC").Limit(1).Scan(ctx, &raw)
-	switch {
-	case errors.Is(err, sql.ErrNoRows) || (err == nil && strings.TrimSpace(raw) == ""):
-		// No checkpoint is a PASS: nothing to resume, nothing to promote. That
-		// is the stronger outcome, and the one #2932 asks the sandbox for.
-		t.Logf("dry-run minted no resumable checkpoint -- nothing to promote, which is the stronger outcome")
-		return
-	case err != nil:
-		// A real query error must NOT be read as "no checkpoint". Reporting the
-		// stronger outcome while having asserted nothing is how a security test
-		// goes quietly green.
-		t.Fatalf("checkpoint lookup failed: %v", err)
-	}
-
-	var ckpt map[string]any
-	if err := json.Unmarshal([]byte(raw), &ckpt); err != nil {
-		t.Fatalf("checkpoint payload is not JSON: %v", err)
-	}
-
-	got, _ := ckpt["callerSuppliedPayload"].(bool)
-	if !got {
-		t.Fatalf("dry-run minted a checkpoint with callerSuppliedPayload=%v.\n"+
-			"resume.go computes `SourceTrusted = automation.Trusted && !checkpoint.CallerSuppliedPayload`, "+
-			"and POST /automations/resume loads this automation from the tree (Trusted=true), so this "+
-			"checkpoint re-dispatches a CALLER-CHOSEN payload at INTERNAL origin. That is the replay "+
-			"memql#2888 documents, with the dry-run as leg 1 (memql#2890).\n"+
-			"The dry-run must drive the run through ExecuteWithClientEvent, not ExecuteWithEvent.\n"+
-			"checkpoint: %s", ckpt["callerSuppliedPayload"], raw)
-	}
-}
+// The underlying property is still defended in two places: dryrun.go still
+// drives the run through ExecuteWithClientEvent (defence in depth, should
+// SandboxRun ever be unset), and the checkpoint field mapping itself is
+// asserted at the executor level by the memql#2888 tests over
+// newCheckpointFromExecution.
 
 // TestDryRunMintsNoCheckpoint is the stronger property memql#2932 asked for,
 // now that it holds: a preview writes NOTHING resumable.
@@ -213,10 +131,15 @@ func TestDryRunMintsNoCheckpoint(t *testing.T) {
 		t.Skipf("automation %q is not in the tree in this build", trustProbeAutomation)
 	}
 
-	var before int
-	if err := db.NewSelect().Table("MemoryNodes").ColumnExpr("count(*)").
-		Where("concept = ?", "v1:memql:checkpoint").Scan(ctx, &before); err != nil {
-		t.Fatalf("count before: %v", err)
+	// Time-mark the run. A GLOBAL count would be racy: test/conformance's
+	// conf_1727 builds a NON-sandbox executor against this same DB and mints a
+	// checkpoint when its automation fails, and `go test ./...` runs those
+	// packages concurrently. An unscoped count blames SandboxRun for a row the
+	// dry-run did not write. The sibling test above already solved this; this
+	// one has to as well.
+	var mark string
+	if err := db.NewSelect().ColumnExpr("now()::text").Scan(ctx, &mark); err != nil {
+		t.Fatalf("clock read: %v", err)
 	}
 
 	report, err := runBundleDryRun(ctx, eng, memql.DryRunRequest{
@@ -241,17 +164,22 @@ func TestDryRunMintsNoCheckpoint(t *testing.T) {
 			report.OK, report.FailureReason)
 	}
 
-	var after int
+	// Count only checkpoints minted since the mark that carry THIS run's
+	// sentinel payload, so a concurrent package's checkpoint cannot be
+	// attributed to the dry-run.
+	var mine int
 	if err := db.NewSelect().Table("MemoryNodes").ColumnExpr("count(*)").
-		Where("concept = ?", "v1:memql:checkpoint").Scan(ctx, &after); err != nil {
+		Where("concept = ?", "v1:memql:checkpoint").
+		Where("\"createdAt\" >= ?::timestamptz", mark).
+		Where("payload::text LIKE ?", "%"+callerChosenSentinel+"%").
+		Scan(ctx, &mine); err != nil {
 		t.Fatalf("count after: %v", err)
 	}
 
-	if after != before {
-		t.Fatalf("a FAILING dry-run wrote %d checkpoint row(s) into the LIVE graph (before=%d after=%d).\n"+
-			"Gate-2 promises zero rows land there (component/automations/steps/dryrun.go), a preview has "+
-			"nothing to resume, and the row is a durable resumable token naming a real tree automation "+
-			"(memql#2932). ExecutorOptions.SandboxRun must suppress saveCheckpointOnFailure.",
-			after-before, before, after)
+	if mine != 0 {
+		t.Fatalf("a FAILING dry-run wrote %d checkpoint row(s) carrying its own payload into the "+
+			"LIVE graph. A preview has nothing to resume, and the row is a durable resumable token "+
+			"naming a real tree automation (memql#2932). ExecutorOptions.SandboxRun must suppress "+
+			"saveCheckpointOnFailure.", mine)
 	}
 }

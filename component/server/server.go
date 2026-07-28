@@ -204,11 +204,6 @@ func (s *Server) PostAutomationTrigger(ctx context.Context, request PostAutomati
 
 // PostAutomationResume resumes a failed automation from a checkpoint.
 func (s *Server) PostAutomationResume(ctx context.Context, request PostAutomationResumeRequestObject) (PostAutomationResumeResponseObject, error) {
-	if request.Body == nil {
-		return PostAutomationResume400JSONResponse{
-			Error: "request body required",
-		}, nil
-	}
 
 	// AUTHORIZATION (memql#2908). Resuming re-executes a checkpoint's
 	// remaining steps through the PRODUCTION step registry, under the
@@ -228,12 +223,22 @@ func (s *Server) PostAutomationResume(ctx context.Context, request PostAutomatio
 	//
 	// Per-execution ownership ("you may resume what YOU triggered") is not
 	// expressible today: the checkpoint records triggerContext.triggeredBy as
-	// a KIND ("schedule" / "event" / "manual"), and the row's createdBy is
-	// the automation's own system actor, not the human. Narrowing this to the
-	// triggering principal needs a field first -- noted on memql#2908.
+	// a KIND ("schedule" / "event" / "manual" / "http-trigger" /
+	// "sub-automation"), and the row's createdBy is the automation's own system
+	// actor, not the human. Narrowing this to the triggering principal needs a
+	// field first -- noted on memql#2908.
 	if !callerIsOwnerOrAdmin(ctx) {
 		return PostAutomationResume403JSONResponse{
 			Error: "resuming an automation execution requires the owner or admin role",
+		}, nil
+	}
+
+	// Gate-first, matching PostAutomationTrigger. Validating the body ahead of
+	// the gate let an unauthorized caller distinguish "request body required"
+	// from a refusal -- a small oracle, but a free one to remove.
+	if request.Body == nil {
+		return PostAutomationResume400JSONResponse{
+			Error: "request body required",
 		}, nil
 	}
 

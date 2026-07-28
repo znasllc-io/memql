@@ -34,10 +34,10 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 )
 
-// resumeRequest is the minimal well-formed body. executionId is non-empty and
-// Body is non-nil so neither of the 400 paths ahead of the gate
-// (request.Body == nil, empty executionId) can be mistaken for the 403 under
-// test.
+// resumeRequest is the minimal well-formed body. Body is non-nil so the one
+// 400 path AHEAD of the gate (request.Body == nil) cannot be mistaken for the
+// 403 under test, and executionId is non-empty so the 400 path BEHIND it is
+// not reached either.
 func resumeRequest() PostAutomationResumeRequestObject {
 	return PostAutomationResumeRequestObject{
 		Body: &PostAutomationResumeJSONRequestBody{ExecutionId: "exec-2908-probe"},
