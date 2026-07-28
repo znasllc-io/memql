@@ -332,8 +332,6 @@ type NodeClientMessage_CapabilityResponse struct {
 }
 
 type NodeClientMessage_AiForwardRequest struct {
-	// 60 (query_forward) retired with the cross-node query-forwarding
-	// machinery, #2814; the number is reserved at the message level above.
 	AiForwardRequest *AiForwardRequest `protobuf:"bytes,70,opt,name=ai_forward_request,json=aiForwardRequest,proto3,oneof"`
 }
 
@@ -610,8 +608,6 @@ type NodeServerMessage_NodeShutdown struct {
 }
 
 type NodeServerMessage_AiForwardResponse struct {
-	// 60 (query_response) retired with the cross-node query-forwarding
-	// machinery, #2814; the number is reserved at the message level above.
 	AiForwardResponse *AiForwardResponse `protobuf:"bytes,70,opt,name=ai_forward_response,json=aiForwardResponse,proto3,oneof"`
 }
 

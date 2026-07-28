@@ -37,8 +37,6 @@ message NodeClientMessage {
     EventAck event_ack = 31;
     CapabilityQuery capability_query = 40;
     CapabilityResponse capability_response = 41;
-    // 60 (query_forward) retired with the cross-node query-forwarding
-    // machinery, #2814; the number is reserved at the message level above.
     AiForwardRequest ai_forward_request = 70;
     AiForwardCancel ai_forward_cancel = 71;
     WorkbenchForwardRequest workbench_forward_request = 80;
@@ -66,8 +64,6 @@ message NodeServerMessage {
     CapabilityQuery capability_query = 40;
     CapabilityResponse capability_response = 41;
     NodeShutdown node_shutdown = 50;
-    // 60 (query_response) retired with the cross-node query-forwarding
-    // machinery, #2814; the number is reserved at the message level above.
     AiForwardResponse ai_forward_response = 70;
     WorkbenchForwardResponse workbench_forward_response = 80;
   }
@@ -202,11 +198,16 @@ message CapabilityResponse {
 //
 // QueryForward / QueryResponse carried a MemQL query from one node to another
 // for execution, for the case where a client queried a node that did not own
-// the target concept. The receive side was the only side that ever existed:
-// there were zero producers anywhere in the tree including tests, the
-// SetQueryExecutor seam had no production caller, and neither the QueryProxy
-// nor the RegisterConceptOwnership registry the design depended on was ever
-// built (see docs/internal/design/extension-points.md).
+// the target concept.
+//
+// The send side was already gone. ac3a751e ("simplify: drop per-node
+// @visibility filtering + concept-ownership routing", 2026-05-16) deleted
+// query_proxy.go and RegisterConceptOwnership deliberately, as over-engineered
+// for this stage of the project. That left this receive side orphaned: zero
+// producers anywhere in the tree including tests, no production caller of the
+// SetQueryExecutor seam, and no registry left to decide which node owns a
+// concept -- ownership is routing rules plus build tags now (see
+// docs/internal/design/extension-points.md).
 //
 // It was removed rather than repaired because the repair was unsafe to
 // publish. The handler executed forwarded DSL on context.Background(), so it

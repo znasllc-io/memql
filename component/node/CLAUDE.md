@@ -57,7 +57,6 @@ component/node/
 ├── bootstrap_agent.go
 ├── bootstrap_planner.go
 ├── capability_router.go   # Route capability lookups across the mesh
-├── query_proxy.go         # Forward queries to concept-owning nodes
 ├── parent_connector.go    # ParentConnector -- child dials its MEMQL_PARENT_ADDRESS
 └── worker_dialer.go       # WorkerDialer -- BFF opens outbound streams to workers
                             # (seeded by MEMQL_WORKER_PEERS, reconciled via v1:cluster:node
