@@ -87,6 +87,12 @@ type (
 		InitialChainHead string `json:"initialChainHead,omitempty"`
 		ChainHead        string `json:"chainHead,omitempty"`
 	}
+	// PostAutomationTrigger403JSONResponse is the authorization refusal
+	// (memql#2937). Triggering runs an automation's action chain
+	// server-side; it is an operator action, gated like resume.
+	PostAutomationTrigger403JSONResponse struct {
+		Error string `json:"error"`
+	}
 	PostAutomationTrigger404JSONResponse struct {
 		Error string `json:"error"`
 	}
@@ -148,6 +154,12 @@ func (resp GetHealthz503JSONResponse) VisitGetHealthzResponse(w http.ResponseWri
 func (resp PostAutomationTrigger202JSONResponse) VisitPostAutomationTriggerResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
+	return json.NewEncoder(w).Encode(resp)
+}
+
+func (resp PostAutomationTrigger403JSONResponse) VisitPostAutomationTriggerResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusForbidden)
 	return json.NewEncoder(w).Encode(resp)
 }
 

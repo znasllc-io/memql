@@ -107,6 +107,24 @@ func (s *Server) SetMemoryEngine(engine *memql.MemQLEngine) {
 }
 
 func (s *Server) PostAutomationTrigger(ctx context.Context, request PostAutomationTriggerRequestObject) (PostAutomationTriggerResponseObject, error) {
+	// AUTHORIZATION (memql#2937). Triggering runs an automation's action chain
+	// server-side under the automation's own actor. It is the SHARPER of the
+	// two automation endpoints: unlike resume it needs no unguessable id, just
+	// a name, and it returns executionId in the 202 body -- which is precisely
+	// the disclosure oracle memql#2908's threat model assumed an attacker
+	// would have to go find.
+	//
+	// Same handler-level placement and the same reasoning as resume: the
+	// identity binary mounts this route against a real scheduler while
+	// installing no verifier middleware, and it is the publicly fronted
+	// listener. See callerIsOwnerOrAdmin for why the caller is resolved
+	// from CLAIMS rather than read from an AccessContext.
+	if !callerIsOwnerOrAdmin(ctx) {
+		return PostAutomationTrigger403JSONResponse{
+			Error: "triggering an automation requires the owner or admin role",
+		}, nil
+	}
+
 	name := request.AutomationName
 	if name == "" {
 		return PostAutomationTrigger404JSONResponse{
@@ -213,7 +231,7 @@ func (s *Server) PostAutomationResume(ctx context.Context, request PostAutomatio
 	// a KIND ("schedule" / "event" / "manual"), and the row's createdBy is
 	// the automation's own system actor, not the human. Narrowing this to the
 	// triggering principal needs a field first -- noted on memql#2908.
-	if !resumeCallerIsOwnerOrAdmin(ctx) {
+	if !callerIsOwnerOrAdmin(ctx) {
 		return PostAutomationResume403JSONResponse{
 			Error: "resuming an automation execution requires the owner or admin role",
 		}, nil
@@ -338,7 +356,7 @@ func (s *Server) ComponentName() common.ComponentName {
 	return ComponentName
 }
 
-// resumeCallerIsOwnerOrAdmin resolves the HTTP caller and reports whether they
+// callerIsOwnerOrAdmin resolves the HTTP caller and reports whether they
 // may resume (memql#2908).
 //
 // # Why this resolves rather than just reading AccessFromContext
@@ -377,7 +395,7 @@ func (s *Server) ComponentName() common.ComponentName {
 // steps -- actor.isClusterOwner included -- resolve to the resuming operator,
 // inside the exact replay path memql#2888 / #2890 hardened. Resolution stays
 // local to this check.
-func resumeCallerIsOwnerOrAdmin(ctx context.Context) bool {
+func callerIsOwnerOrAdmin(ctx context.Context) bool {
 	if ac, ok := auth.AccessFromContext(ctx); ok && ac != nil {
 		return isOwnerOrAdmin(ac)
 	}

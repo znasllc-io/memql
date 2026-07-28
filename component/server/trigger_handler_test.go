@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+
+	"github.com/znasllc-io/memql/component/auth"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -60,7 +62,7 @@ func TestPostAutomationTriggerSuccess(t *testing.T) {
 		automationScheduler: sched,
 	}
 
-	resp, err := s.PostAutomationTrigger(context.Background(), PostAutomationTriggerRequestObject{AutomationName: "demo"})
+	resp, err := s.PostAutomationTrigger(ownerCtx(), PostAutomationTriggerRequestObject{AutomationName: "demo"})
 	require.NoError(t, err)
 
 	success, ok := resp.(PostAutomationTrigger202JSONResponse)
@@ -85,7 +87,7 @@ func TestPostAutomationTriggerDisabled(t *testing.T) {
 		automationLoader:    loader,
 	}
 
-	resp, err := s.PostAutomationTrigger(context.Background(), PostAutomationTriggerRequestObject{AutomationName: "demo"})
+	resp, err := s.PostAutomationTrigger(ownerCtx(), PostAutomationTriggerRequestObject{AutomationName: "demo"})
 	require.NoError(t, err)
 
 	disabledResp, ok := resp.(PostAutomationTrigger409JSONResponse)
@@ -108,7 +110,7 @@ func TestPostAutomationTriggerNotFound(t *testing.T) {
 		automationLoader:    loader,
 	}
 
-	resp, err := s.PostAutomationTrigger(context.Background(), PostAutomationTriggerRequestObject{AutomationName: "missing"})
+	resp, err := s.PostAutomationTrigger(ownerCtx(), PostAutomationTriggerRequestObject{AutomationName: "missing"})
 	require.NoError(t, err)
 
 	notFound, ok := resp.(PostAutomationTrigger404JSONResponse)
@@ -136,7 +138,7 @@ func TestPostAutomationTriggerExecutionFailedReturns202(t *testing.T) {
 		automationLoader:    loader,
 	}
 
-	resp, err := s.PostAutomationTrigger(context.Background(), PostAutomationTriggerRequestObject{AutomationName: "demo"})
+	resp, err := s.PostAutomationTrigger(ownerCtx(), PostAutomationTriggerRequestObject{AutomationName: "demo"})
 	require.NoError(t, err)
 
 	// Should still return 202 because the automation was found and triggered
@@ -150,7 +152,7 @@ func TestPostAutomationTriggerExecutionFailedReturns202(t *testing.T) {
 func TestPostAutomationTriggerMissingName(t *testing.T) {
 	s := &Server{}
 
-	resp, err := s.PostAutomationTrigger(context.Background(), PostAutomationTriggerRequestObject{})
+	resp, err := s.PostAutomationTrigger(ownerCtx(), PostAutomationTriggerRequestObject{})
 	require.NoError(t, err)
 
 	notFound, ok := resp.(PostAutomationTrigger404JSONResponse)
@@ -244,9 +246,34 @@ func TestAutomationTriggerRouteIntegration(t *testing.T) {
 		BaseURL: "", // Empty = root
 	})
 
-	// Create test server
-	ts := httptest.NewServer(handler)
-	defer ts.Close()
+	// Two servers: one that injects an authorized caller the way the verifier
+	// middleware would, and one raw (no credential at all).
+	//
+	// The raw one is the end-to-end proof of memql#2937: these routes are
+	// mounted on the identity binary, which installs NO verifier middleware and
+	// is the publicly fronted listener, so "no credential" is a real wire state
+	// and not a hypothetical.
+	authed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handler.ServeHTTP(w, r.WithContext(ownerCtx()))
+	}))
+	defer authed.Close()
+
+	ts := authed
+
+	rawTS := httptest.NewServer(handler)
+	defer rawTS.Close()
+
+	t.Run("unauthenticated request is refused (memql#2937)", func(t *testing.T) {
+		req, err := http.NewRequest("POST", rawTS.URL+"/automations/demo/trigger", nil)
+		require.NoError(t, err)
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(resp.Body)
+		assert.Equal(t, http.StatusForbidden, resp.StatusCode,
+			"a request with no credential must be refused; triggering runs an automation's "+
+				"action chain server-side. got %d: %s", resp.StatusCode, string(body))
+	})
 
 	// Test POST /automations/{name}/trigger
 	t.Run("POST /automations/example-email-query-automation/trigger", func(t *testing.T) {
@@ -278,5 +305,21 @@ func TestAutomationTriggerRouteIntegration(t *testing.T) {
 		t.Logf("Response status: %d, body: %s", resp.StatusCode, string(body))
 
 		assert.Equal(t, http.StatusAccepted, resp.StatusCode, "Expected 202 Accepted, got %d: %s", resp.StatusCode, string(body))
+	})
+}
+
+// ownerCtx is an authorized caller in the shape the real HTTP middleware
+// produces -- CLAIMS, not a pre-resolved AccessContext (memql#2937).
+//
+// These tests predate the authorization gate and asserted the endpoint's
+// behaviour for an ANONYMOUS caller. Triggering runs an automation's action
+// chain server-side, so it is now owner-or-admin only; the cases below are
+// about trigger's own semantics (found / disabled / missing name), which is
+// what they were always testing. The refusal itself is covered by
+// automation_resume_authz_test.go.
+func ownerCtx() context.Context {
+	return auth.ContextWithClaims(context.Background(), map[string]any{
+		"sub":  "v1:identity:user:trigger-test",
+		"role": string(auth.RoleOwner),
 	})
 }

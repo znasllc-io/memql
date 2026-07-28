@@ -189,3 +189,69 @@ func TestDryRunCheckpointIsMarkedCallerSupplied(t *testing.T) {
 			"checkpoint: %s", ckpt["callerSuppliedPayload"], raw)
 	}
 }
+
+// TestDryRunMintsNoCheckpoint is the stronger property memql#2932 asked for,
+// now that it holds: a preview writes NOTHING resumable.
+//
+// SaveCheckpoint went straight to the engine rather than through the sandbox
+// step registry, so it was the one write that escaped Gate-2's isolation and
+// landed a durable row in the LIVE graph -- contradicting dryrun.go's "zero
+// rows land in the live graph". Measured before the fix: one v1:memql:checkpoint
+// row per failing dry-run, accumulating without bound.
+//
+// This supersedes the callerSuppliedPayload assertion above rather than
+// replacing it: memql#2890's fix made a minted checkpoint unpromotable, and
+// this removes the mint. Both are kept because they fail for different reasons
+// -- if checkpointing is ever re-enabled for sandbox runs, THIS test catches
+// it, and the one above catches it being promotable.
+func TestDryRunMintsNoCheckpoint(t *testing.T) {
+	eng, db := dryRunTrustTestEngine(t)
+	ctx := context.Background()
+
+	src, ok := memql.DSLConstructSource(slog.New(slog.NewTextHandler(io.Discard, nil)), "automation", trustProbeAutomation)
+	if !ok {
+		t.Skipf("automation %q is not in the tree in this build", trustProbeAutomation)
+	}
+
+	var before int
+	if err := db.NewSelect().Table("MemoryNodes").ColumnExpr("count(*)").
+		Where("concept = ?", "v1:memql:checkpoint").Scan(ctx, &before); err != nil {
+		t.Fatalf("count before: %v", err)
+	}
+
+	report, err := runBundleDryRun(ctx, eng, memql.DryRunRequest{
+		AutomationName:   trustProbeAutomation,
+		AutomationSource: src,
+		TriggerEvent: &memql.DryRunTriggerEvent{
+			Topic:   "mcp.run." + trustProbeAutomation,
+			Kind:    "manual",
+			Payload: map[string]any{"node": map[string]any{"id": callerChosenSentinel}},
+		},
+		Mode: memql.DryRunModeIsolated,
+	})
+	if err != nil {
+		t.Fatalf("runBundleDryRun: %v", err)
+	}
+
+	// The run must actually have FAILED -- saveCheckpointOnFailure only fires
+	// on step failure, so a passing run would make this vacuous.
+	if report.OK || !strings.Contains(strings.ToLower(report.FailureReason), "server-only") {
+		t.Fatalf("dry-run did not fail at the @serverOnly gate, so it would not have checkpointed "+
+			"even before the fix; this guard is not exercising anything. ok=%v reason=%q",
+			report.OK, report.FailureReason)
+	}
+
+	var after int
+	if err := db.NewSelect().Table("MemoryNodes").ColumnExpr("count(*)").
+		Where("concept = ?", "v1:memql:checkpoint").Scan(ctx, &after); err != nil {
+		t.Fatalf("count after: %v", err)
+	}
+
+	if after != before {
+		t.Fatalf("a FAILING dry-run wrote %d checkpoint row(s) into the LIVE graph (before=%d after=%d).\n"+
+			"Gate-2 promises zero rows land there (component/automations/steps/dryrun.go), a preview has "+
+			"nothing to resume, and the row is a durable resumable token naming a real tree automation "+
+			"(memql#2932). ExecutorOptions.SandboxRun must suppress saveCheckpointOnFailure.",
+			after-before, before, after)
+	}
+}

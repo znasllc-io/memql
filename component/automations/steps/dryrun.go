@@ -110,6 +110,10 @@ func runBundleDryRun(ctx context.Context, engine *memql.MemQLEngine, req memql.D
 	// a dry-run is a one-shot, and dedup would skip a re-run of the same
 	// automation. Concurrency is irrelevant for a single run.
 	executor := automations.NewExecutor(automations.ExecutorOptions{
+		// No checkpoint from a preview (memql#2932): nothing resumes a
+		// dry-run, and SaveCheckpoint is the one write that bypasses the
+		// sandbox registry and reaches the live graph.
+		SandboxRun:   true,
 		Logger:       discardLogger(),
 		Engine:       engine,
 		EventBus:     engine.EventBus(),
