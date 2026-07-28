@@ -40,6 +40,69 @@
 # no check runs -- lands in UNKNOWN instead. The first cut made STALLED the
 # fallthrough, so one transient 502 manufactured a finding.
 #
+# IDLENESS IS HEAD-SHA STABILITY, NOT `updatedAt` (memql#2887). A PR is idle
+# when no new CODE has arrived, not when nobody has typed. `updatedAt` bumps on
+# every comment, label, review and re-run, so a dying session that posts its
+# review summary before it stops resets its own clock -- and the tool then
+# prints the one thing it must never print: an all-clear over abandoned work.
+# Measured on a 49-PR sample of a live repository, `updatedAt` understated
+# head-commit age by up to 128,356 minutes -- 89 days. The sibling
+# stale-claims.sh reached the same conclusion about issues and paid an extra
+# call per issue for it; this costs nothing.
+#
+# THE CLOCK IS THE HEAD COMMIT'S `committedDate`, read from the SAME per-PR
+# GraphQL call that already asks `isInMergeQueue`. Zero extra requests.
+#
+# Adding `commits` to `gh pr list` instead is NOT an option, and the failure is
+# total rather than gradual. gh's `commits` selection nests an
+# `authors(first:100)` connection, so at PR_PAGE_LIMIT=100 GitHub refuses the
+# whole query:
+#
+#   GraphQL: By the time this query traverses to the authors connection, it is
+#   requesting up to 1,000,000 possible nodes which exceeds the maximum limit
+#   of 500,000.
+#
+# `gh pr list` then exits non-zero and main() exits 4 -- the tool stops working
+# entirely, on the first run. The ceiling is 49 PRs (49 x 10101 = 494,949
+# nodes; 50 fails at 505,050), so taking that route would silently halve the
+# page limit, which is exactly what PR_PAGE_LIMIT exists to prevent.
+#
+# WHAT `committedDate` DOES AND DOES NOT MEAN. It is the git COMMITTER date of
+# the head commit. Git rewrites it on rebase, amend and cherry-pick, and GitHub
+# sets it on an "Update branch" merge, so every way a head SHA moves forward
+# moves this clock forward too. Nothing that is not a code change touches it.
+#
+# It is NOT push time, and two gaps follow. Both are named here rather than
+# hidden:
+#   - a commit made locally at T and pushed at T+30m reads 30 minutes idler
+#     than it is, so a live PR can reach STALLED early;
+#   - a force-push BACK to an older commit moves the SHA while moving this
+#     clock backwards.
+# The true "SHA last changed" instant lies somewhere in
+# [committedDate, updatedAt]; narrowing it needs a timeline query per PR -- a
+# third round-trip for a report whose only action is to ask a human to look.
+# This end of the interval is chosen deliberately: it errs toward showing a
+# human a PR that turns out to be live, never toward silence over one that is
+# not. It does not weaken DEFAULT-DENY above, which exists to stop UNRESOLVED
+# inputs manufacturing findings; this input is resolved, with a skew equal to
+# the worker's commit-to-push lag, which in this repo's checkpoint-push
+# workflow is seconds.
+#
+# `Commit.pushedDate` is not the answer either: GitHub deprecated it and it
+# returns null for anything pushed after mid-2020, which would turn every PR
+# UNKNOWN and leave the report a permanent no-op that still exits 0.
+#
+# `updatedAt` is still fetched and still shown, in the TOUCHED column, because
+# a reader who sees IDLE 7d on a PR commented on yesterday will otherwise
+# assume the tool is broken. It gates nothing.
+#
+# THE SECOND SWEEP: CLOSED WITHOUT MERGING (memql#2887, asked for in #2833).
+# `--delete-branch` on a close, or a stray `gh pr close`, drops written work on
+# the floor and nothing notices: the PR is closed with mergedAt null, its issue
+# silently returns to the pool, and the work is rebuilt from scratch -- or not,
+# if a claimed:* label was stranded too. That is the failure mode that loses
+# work outright, so it is reported alongside the stalled-green one.
+#
 # Usage:
 #   bash scripts/dev/stalled-prs.sh                  # human table on stdout
 #   IDLE_MINUTES=15 bash scripts/dev/stalled-prs.sh  # tighter idle threshold
@@ -62,6 +125,29 @@ IDLE_MINUTES="${IDLE_MINUTES:-45}"
 # One page of PRs. Not configurable on purpose -- raising it silently is how a
 # cap stops being noticed. main() warns when the page comes back full.
 PR_PAGE_LIMIT=100
+# Cap on the closed-unmerged sweep. Separate from PR_PAGE_LIMIT because the two
+# populations grow differently: open PRs are bounded by how much is in flight,
+# closed-unmerged ones accumulate forever.
+CLOSED_PAGE_LIMIT=100
+
+# How far back the closed-unmerged sweep looks. Anything older is listed but
+# NOT examined, because examining it costs a GraphQL call each.
+#
+# This bound is load-bearing, not tidiness. Without it the sweep spends one
+# call per closed-unmerged PR in the repo's entire history on EVERY run:
+# measured on this repo at 40 such PRs, a run went from 10 API calls to 48 --
+# so the second sweep would have cost about five times what the first sweep's
+# optimisation saved, and 38 of those 40 were branch-deleted and unreportable.
+#
+# 14 days is chosen because a branch nobody has touched in a fortnight is
+# past the window where "the next session will rebuild this" is the live
+# risk; by then it either landed another way or was abandoned deliberately.
+# Raise it when investigating something specific.
+#
+# The arithmetic is portable: `date -u +%s` (which idle_minutes already uses)
+# works on BSD and GNU alike. This bound needs no `date -d` / `date -r`, which
+# are the flags open_prs rejects.
+CLOSED_MAX_AGE_MINUTES="${CLOSED_MAX_AGE_MINUTES:-20160}"
 
 require_gh() {
   # `gh --version` rather than `command -v gh`: it covers missing AND broken in
@@ -82,7 +168,29 @@ require_gh() {
 # finding. `[ "$x" -lt "$y" ]` ERRORS on a non-integer rather than evaluating
 # false, so an unvalidated `IDLE_MINUTES=45m` made every comparison fail and
 # every PR -- including one-minute-old ones -- fall through to STALLED.
+# require_whole_minutes applies that rule to one named knob. Split out of
+# require_valid_threshold when CLOSED_MAX_AGE_MINUTES arrived (memql#2887):
+# the second knob shipped unvalidated, and `CLOSED_MAX_AGE_MINUTES=14d`
+# silently DISABLED its age gate -- `[ "$age" -gt "14d" ]` errors, execution
+# falls through, every candidate is examined again, and the operator sees a
+# normal report with a bound they believe is in force and is not. Exactly the
+# failure this function already existed to prevent, one knob over.
+require_whole_minutes() {
+  local name="$1" value="$2"
+  case "$value" in
+    '' | *[!0-9]*)
+      echo "ERROR: ${name} must be a whole number of minutes; got '${value}'." >&2
+      exit 2
+      ;;
+  esac
+  if [ "${#value}" -gt 10 ]; then
+    echo "ERROR: ${name}=${value} is implausibly large; use a value under 10 digits." >&2
+    exit 2
+  fi
+}
+
 require_valid_threshold() {
+  require_whole_minutes CLOSED_MAX_AGE_MINUTES "$CLOSED_MAX_AGE_MINUTES"
   case "$IDLE_MINUTES" in
     '' | *[!0-9]*)
       echo "ERROR: IDLE_MINUTES must be a whole number of minutes; got '${IDLE_MINUTES}'." >&2
@@ -101,30 +209,157 @@ require_valid_threshold() {
 }
 
 # open_prs prints one TSV row per open PR: number, draft, mergeState,
-# updatedEpoch, title.
+# updatedEpoch, headSha, title.
 #
 # updatedAt is converted to epoch by jq (fromdateiso8601) rather than by
 # `date -u -d`, which is GNU-only: on macOS -- the platform CLAUDE.md names as
 # standard -- that flag fails, and the first cut swallowed the error into an
 # idle of 0, so every PR reported FRESH and the tool said "no stalled PRs"
 # forever without a word.
+#
+# headRefOid rides along here rather than being fetched per PR (memql#2887).
+# check_state used to spend a whole `gh pr view` on it, which was a third of
+# the tool's entire API budget for a value the list call already serves.
+#
+# `.title` MUST stay last. `IFS=$'\t' read -r ... title` gives the final
+# variable everything remaining, which is what lets a tab-bearing title through
+# without shifting columns. A new field always goes before it.
+#
+# The `// "-"` on headRefOid is not decoration: tab is an IFS WHITESPACE
+# character, so an EMPTY middle field collapses with its neighbour and shifts
+# every later column left. A placeholder keeps the row shape fixed, and "-"
+# fails check_state's emptiness guard exactly as "" would have.
 open_prs() {
   gh pr list -R "$REPO" --state open --limit "$PR_PAGE_LIMIT" \
-    --json number,isDraft,mergeStateStatus,updatedAt,title \
-    --jq '.[] | [.number, .isDraft, .mergeStateStatus, (.updatedAt|fromdateiso8601), .title] | @tsv'
+    --json number,isDraft,mergeStateStatus,updatedAt,headRefOid,headRefName,title \
+    --jq '.[] | [.number, .isDraft, .mergeStateStatus, (.updatedAt|fromdateiso8601), (.headRefOid // "-"), (.headRefName // "-"), .title] | @tsv'
 }
 
-# in_merge_queue echoes true / false / unknown. The REST PR payload does not
-# carry this, so it needs GraphQL. `unknown` is load-bearing: without it a
-# failed call reported an already-queued PR as needing to be enqueued.
-in_merge_queue() {
-  local num="$1" out
-  out=$(gh api graphql -f query="{repository(owner:\"${REPO%%/*}\",name:\"${REPO##*/}\"){pullRequest(number:${num}){isInMergeQueue}}}" \
-    --jq '.data.repository.pullRequest.isInMergeQueue' 2>/dev/null)
-  case "$out" in
-    true | false) echo "$out" ;;
-    *) echo "unknown" ;;
+# closed_unmerged_prs prints one TSV row per PR CLOSED WITHOUT MERGING:
+# number, headRefName, closedEpoch, title.
+#
+# `is:unmerged` is pushed SERVER-SIDE deliberately. `gh pr list --state closed`
+# returns merged PRs too -- gh maps that state to {CLOSED, MERGED} -- so on a
+# repo with thousands of merges an unfiltered page of 100 is almost entirely
+# merged PRs, and the sweep would find nothing while looking exhaustive. The jq
+# `select` stays as well: two independent filters, so neither one silently
+# becoming a no-op turns a merged PR into a finding.
+#
+# NOT `linked:issue`, which would also be a valid server-side filter and would
+# halve the candidate set. It drops exactly the PRs whose "Closes #N" link
+# never formed -- the ones most worth seeing. Narrowing a watchdog's input by
+# the thing it is watching for is how this repo has lost rows before.
+closed_unmerged_prs() {
+  gh pr list -R "$REPO" --state closed --search "is:unmerged sort:updated-desc" \
+    --limit "$CLOSED_PAGE_LIMIT" \
+    --json number,state,mergedAt,headRefName,closedAt,title \
+    --jq '.[] | select(.state == "CLOSED" and .mergedAt == null)
+              | [.number, (.headRefName // "-"), ((.closedAt // empty | fromdateiso8601) // "-"), .title] | @tsv'
+}
+
+# pr_liveness makes the ONE per-PR GraphQL call and prints two TSV fields:
+#
+#   <queued>     true | false | unknown
+#   <headEpoch>  epoch seconds of the head commit's committedDate, or unknown
+#
+# They ride together because they come from one request. The REST PR payload
+# carries neither, and asking for the commit date separately would be a third
+# round-trip per PR -- see the header for why `gh pr list --json commits` is
+# not an option at all.
+#
+# `unknown` is load-bearing on both. Without it a failed call reported an
+# already-queued PR as needing to be enqueued, and a missing date fell straight
+# through to a finding.
+#
+# The returned oid is cross-checked against the head SHA `gh pr list` gave us.
+# commits(last:1) IS the head commit -- but being wrong here yields a wrong
+# CLOCK rather than an error, which is invisible in the output, so it is
+# asserted rather than assumed. The check doubles as a mid-sweep race detector:
+# a mismatch means the head moved between the two calls, so the PR is
+# demonstrably being worked AND the check-runs already fetched describe a SHA
+# that is no longer the head. Both point at UNKNOWN, never STALLED.
+pr_liveness() {
+  local num="$1" head_sha="$2" out queued oid epoch
+  # Assignment and the status check on separate lines: `local out=$(...)` would
+  # report local's own status, which is always 0.
+  out=$(gh api graphql -f query="{repository(owner:\"${REPO%%/*}\",name:\"${REPO##*/}\"){pullRequest(number:${num}){isInMergeQueue commits(last:1){nodes{commit{oid committedDate}}}}}}" \
+    --jq '.data.repository.pullRequest
+          | [ (.isInMergeQueue | tostring)
+            , (.commits.nodes[0].commit.oid // "")
+            , ((.commits.nodes[0].commit.committedDate // empty | fromdateiso8601 | tostring) // "")
+            ] | @tsv' 2>/dev/null)
+
+  # Herestring, not a bare `read`: reading from stdin here would eat rows out
+  # of main()'s `while ... <<<"$rows"` loop and silently halve the report.
+  IFS=$'\t' read -r queued oid epoch <<<"$out"
+
+  case "${queued:-}" in
+    true | false) ;;
+    *) queued="unknown" ;;
   esac
+  if [ -z "${oid:-}" ] || [ "$oid" != "$head_sha" ]; then
+    epoch="unknown"
+  fi
+  case "${epoch:-}" in
+    '' | *[!0-9]*) epoch="unknown" ;;
+  esac
+  printf '%s\t%s\n' "$queued" "$epoch"
+}
+
+# closed_pr_facts prints one TSV line for a closed-unmerged PR:
+#
+#   <branch>       present | gone | unknown
+#   <openIssues>   comma-separated issue numbers still OPEN, or "-"
+#
+# ONE GraphQL call answers both questions. `headRef` is null exactly when the
+# branch has been deleted, and closingIssuesReferences carries each linked
+# issue's state -- so this replaces what would otherwise be a REST branch probe
+# plus an issue lookup per PR. Neither field exists on `gh pr list --json` or
+# `gh pr view --json` in gh 2.45.0, which is why this is GraphQL and not
+# another --json column.
+#
+# Empty lists are emitted as "-" and never as "", for the IFS-whitespace reason
+# open_prs documents: an empty middle field shifts every later column left.
+closed_pr_facts() {
+  local num="$1" out branch open_issues
+  out=$(gh api graphql -f query="{repository(owner:\"${REPO%%/*}\",name:\"${REPO##*/}\"){pullRequest(number:${num}){headRef{name} closingIssuesReferences(first:20){nodes{number state}}}}}" \
+    --jq '.data.repository.pullRequest
+          | [ (if .headRef == null then "gone" else "present" end)
+            , ([.closingIssuesReferences.nodes[]? | select(.state == "OPEN") | .number | tostring] | join(","))
+            ] | @tsv' 2>/dev/null)
+
+  IFS=$'\t' read -r branch open_issues <<<"$out"
+
+  case "${branch:-}" in
+    present | gone) ;;
+    *) branch="unknown" ;;
+  esac
+  [ -z "${open_issues:-}" ] && open_issues="-"
+  printf '%s\t%s\n' "$branch" "$open_issues"
+}
+
+# classify_closed returns the bucket for one closed-unmerged PR.
+#
+# LOST-WORK is the finding, and like STALLED it is reached only when every
+# input is positively known: the branch definitely still exists AND at least
+# one linked issue is definitely still open. A failed lookup lands in UNKNOWN,
+# never in a finding and never in silence.
+classify_closed() {
+  local branch="$1" open_issues="$2"
+
+  case "$branch" in
+    present) ;;
+    gone) echo "BRANCH-GONE"; return ;;
+    *) echo "UNKNOWN"; return ;;
+  esac
+
+  # No open linked issue: either the issue was closed anyway (the work landed
+  # some other way, or was abandoned deliberately), or the PR never carried a
+  # "Closes #N" link. Neither is the loss this sweep exists to catch, and
+  # neither is a failure -- "-" is what closed_pr_facts emits for both.
+  [ "$open_issues" = "-" ] && { echo "NO-OPEN-ISSUE"; return; }
+
+  echo "LOST-WORK"
 }
 
 # check_state collapses a PR head's check runs to: green, failing, pending,
@@ -175,10 +410,16 @@ collapse_runs() {
   echo "green"
 }
 
+# check_state takes the head SHA rather than a PR number: open_prs already
+# carries it, so the `gh pr view` this used to spend is gone (memql#2887).
+# That is a third of the tool's per-PR budget -- measured at ~2.3s/PR, so ~4
+# minutes per run at the 100-PR page ceiling, for a tool #2833 wants on a loop.
 check_state() {
-  local num="$1" sha runs
-  sha=$(gh pr view "$num" -R "$REPO" --json headRefOid --jq .headRefOid 2>/dev/null)
-  [ -z "$sha" ] && { echo "unknown"; return; }
+  local sha="$1" runs
+  # "-" is open_prs' placeholder for a missing headRefOid, and it must fail
+  # this guard exactly as "" does -- otherwise it reaches the API as a literal
+  # ref name and the 404 becomes UNKNOWN by a longer route.
+  { [ -z "$sha" ] || [ "$sha" = "-" ]; } && { echo "unknown"; return; }
 
   runs=$(gh api --paginate "repos/$REPO/commits/$sha/check-runs" --jq '.check_runs[] | (.conclusion // .status)' 2>/dev/null)
   if [ $? -ne 0 ]; then
@@ -188,13 +429,31 @@ check_state() {
   collapse_runs "$runs"
 }
 
+# idle_minutes prints whole minutes between an epoch and now, or `unknown` for
+# an empty, non-numeric or FUTURE value.
+#
+# The future guard is not theoretical now that the clock is a commit date this
+# script does not control: GIT_COMMITTER_DATE, a skewed runner, or a hand-set
+# date puts it ahead of now and `(now - then)/60` goes negative. A negative
+# value already reached UNKNOWN via classify's digit check -- the leading `-`
+# is not a digit -- but only by accident, and only as long as that check keeps
+# its exact shape. Refusing it here says so on purpose.
 idle_minutes() {
-  local updated_epoch="$1" now
-  case "$updated_epoch" in
+  local epoch="$1" now
+  case "$epoch" in
     '' | *[!0-9]*) echo "unknown"; return ;;
   esac
+  # All-digits is NOT sufficient, for the same reason require_valid_threshold
+  # gives: `[ "$a" -gt "$b" ]` ERRORS rather than evaluating false on a value
+  # that overflows int64, and an errored test falls through to the next line
+  # under `set -uo pipefail` with no -e. Verified: without this cap,
+  # idle_minutes 18446744073709551616 returns 29754455 -- all digits, positive,
+  # larger than any threshold, so it sails through classify's digit guard and
+  # lands on STALLED.
+  [ "${#epoch}" -gt 11 ] && { echo "unknown"; return; }
   now=$(date -u +%s)
-  echo $(( (now - updated_epoch) / 60 ))
+  [ "$epoch" -gt "$now" ] && { echo "unknown"; return; }
+  echo $(( (now - epoch) / 60 ))
 }
 
 # classify returns the bucket for one PR.
@@ -269,23 +528,32 @@ main() {
     echo "         This report is incomplete -- treat a clean result as unproven." >&2
   fi
 
-  printf '%-7s %-9s %-7s %-7s  %s\n' "PR" "STATE" "IDLE" "CHECKS" "TITLE"
-  printf '%-7s %-9s %-7s %-7s  %s\n' "-------" "---------" "-------" "-------" "-----"
+  printf '%-7s %-9s %-8s %-8s %-7s  %s\n' "PR" "STATE" "IDLE" "TOUCHED" "CHECKS" "TITLE"
+  printf '%-7s %-9s %-8s %-8s %-7s  %s\n' "-------" "---------" "--------" "--------" "-------" "-----"
 
-  local stalled=0 total=0 unknown=0
-  while IFS=$'\t' read -r num draft merge_state updated_epoch title; do
+  # open_branches accumulates the head branch of every open PR, newline
+  # separated. The closed sweep needs it to tell "this work was lost" from
+  # "this work was superseded by a PR that is open right now" -- without it a
+  # closed-and-replaced PR reads as a finding, which is the one thing a
+  # watchdog must not get wrong.
+  local stalled=0 total=0 unknown=0 open_branches=""
+  while IFS=$'\t' read -r num draft merge_state updated_epoch head_sha head_branch title; do
     [ -z "${num:-}" ] && continue
     total=$((total + 1))
-    local queued checks idle bucket
-    queued=$(in_merge_queue "$num")
-    checks=$(check_state "$num")
-    idle=$(idle_minutes "$updated_epoch")
+    open_branches="${open_branches}${head_branch}"$'\n'
+    local facts queued head_epoch checks idle touched bucket
+    facts=$(pr_liveness "$num" "$head_sha")
+    IFS=$'\t' read -r queued head_epoch <<<"$facts"
+    checks=$(check_state "$head_sha")
+    idle=$(idle_minutes "$head_epoch")       # the gate: head-SHA stability
+    touched=$(idle_minutes "$updated_epoch") # display only: last activity of any kind
     bucket=$(classify "$draft" "$merge_state" "$queued" "$checks" "$idle")
     [ "$bucket" = "STALLED" ] && stalled=$((stalled + 1))
     [ "$bucket" = "UNKNOWN" ] && unknown=$((unknown + 1))
-    local idle_col="${idle}m"
+    local idle_col="${idle}m" touched_col="${touched}m"
     [ "$idle" = "unknown" ] && idle_col="?"
-    printf '#%-6s %-9s %-7s %-7s  %s\n' "$num" "$bucket" "$idle_col" "$checks" "${title:0:56}"
+    [ "$touched" = "unknown" ] && touched_col="?"
+    printf '#%-6s %-9s %-8s %-8s %-7s  %s\n' "$num" "$bucket" "$idle_col" "$touched_col" "$checks" "${title:0:48}"
   done <<<"$rows"
 
   echo
@@ -299,7 +567,9 @@ main() {
     # that lists the wrong set reads as an all-clear over PRs that need work.
     echo "No stalled PRs. ${total} open PR(s) are in some other state -- see the table above."
   else
-    echo "${stalled} of ${total} open PR(s) are STALLED -- green, mergeable, and nobody is advancing them."
+    echo "${stalled} of ${total} open PR(s) are STALLED -- green, mergeable, and no new commit for ${IDLE_MINUTES}+ minutes."
+    echo "IDLE is head-commit age; TOUCHED is last activity of any kind. A comment or review moves"
+    echo "TOUCHED and not IDLE, which is the point (memql#2887)."
     echo "Review before enqueuing: green is not reviewed (memql#2833). A dead session may also"
     echo "have left a claimed:* label behind on its issue (memql#2834)."
   fi
@@ -314,11 +584,174 @@ main() {
     echo "  - a check-run conclusion this script has not been taught -- needs a code change."
     echo "They are deliberately NOT reported as stalled either way."
   fi
+
+  report_closed_unmerged "$open_branches"
+}
+
+# report_closed_unmerged is the second sweep (memql#2887): PRs closed WITHOUT
+# merging whose branch still exists and whose linked issue is still open.
+#
+# It prints its own section rather than folding into the table above, because
+# the populations answer different questions -- the first is "what is ready and
+# waiting", this is "what was thrown away". A reader scanning for one must not
+# have to filter out the other.
+#
+# A failure here degrades to a loud note, not to an exit: the open-PR report
+# above is already printed and is still true. Exiting non-zero would discard a
+# good report because a secondary sweep failed.
+report_closed_unmerged() {
+  local open_branches="$1" rows
+  rows=$(closed_unmerged_prs)
+  if [ $? -ne 0 ]; then
+    echo
+    echo "WARNING: could not list closed-unmerged PRs for $REPO; that half of this report is MISSING," >&2
+    echo "         not clean. The open-PR table above is unaffected." >&2
+    return
+  fi
+
+  # No candidates at all is the common case and deserves no section.
+  local candidates
+  candidates=$(grep -c . <<<"$rows")
+  [ "$candidates" -eq 0 ] && return
+
+  if [ "$candidates" -ge "$CLOSED_PAGE_LIMIT" ]; then
+    echo
+    echo "WARNING: hit the ${CLOSED_PAGE_LIMIT}-PR cap on the closed-unmerged sweep; older ones were NOT examined." >&2
+  fi
+
+  local lost=0 orphan=0 examined=0 skipped=0 superseded=0 unknown=0 printed=0
+  while IFS=$'\t' read -r num branch_name closed_epoch title; do
+    [ -z "${num:-}" ] && continue
+
+    # AGE GATE FIRST, before any API call. Each candidate below costs a
+    # GraphQL request, and without this bound the sweep re-examines every
+    # closed-unmerged PR in the repo's history on every run -- measured at 40
+    # such PRs here, five times the cost the open sweep's optimisation saved,
+    # to report nothing. Skips are counted and named below, never silent.
+    local age age_col
+    age=$(idle_minutes "$closed_epoch")
+    # An unresolvable age stays IN the sweep: default-deny means an unknown
+    # input must not silently exclude a PR from a watchdog any more than it
+    # may manufacture a finding.
+    if [ "$age" != "unknown" ] && [ "$age" -gt "$CLOSED_MAX_AGE_MINUTES" ]; then
+      skipped=$((skipped + 1))
+      continue
+    fi
+
+    examined=$((examined + 1))
+    local facts branch open_issues bucket
+    facts=$(closed_pr_facts "$num")
+    IFS=$'\t' read -r branch open_issues <<<"$facts"
+    bucket=$(classify_closed "$branch" "$open_issues")
+
+    # SUPERSEDED beats every other bucket. A closed PR whose head branch is
+    # also the head of a PR that is open RIGHT NOW was replaced, not lost --
+    # reporting it would send someone to rescue work that is already back in
+    # flight, which is worse than saying nothing.
+    #
+    # The emptiness guard is not redundant with the "-" one. open_branches is
+    # built by appending a newline per row, and the herestring adds another, so
+    # it ALWAYS contains at least one empty line -- and `grep -Fxq -- ""`
+    # matches an empty line. Without `-n`, a closed PR whose branch_name came
+    # through empty would match every time and its LOST-WORK finding would
+    # vanish with no row and no count.
+    #
+    # KNOWN LIMIT: headRefName carries no repository, so a closed PR from one
+    # fork can match an open PR from another on a common branch name
+    # (patch-1, main). That suppresses a real finding. Narrow here -- this
+    # repo's branches are issue/<N>-<slug> and cross-fork PRs are not the
+    # workflow -- but it is a false NEGATIVE in a watchdog, so it is named
+    # rather than left for someone to discover.
+    if [ "$branch" = "present" ] && [ -n "$branch_name" ] && [ "$branch_name" != "-" ] &&
+      grep -Fxq -- "$branch_name" <<<"$open_branches"; then
+      bucket="SUPERSEDED"
+    fi
+
+    [ "$bucket" = "UNKNOWN" ] && unknown=$((unknown + 1))
+    # Counted, not just skipped. A suppression a reader cannot see is
+    # indistinguishable from "the check found nothing", and this one hides
+    # rows that would otherwise be findings.
+    [ "$bucket" = "SUPERSEDED" ] && superseded=$((superseded + 1))
+
+    # A branch that is gone is unrecoverable, and a superseded one is already
+    # being worked: neither is worth a reader's attention. Everything else is
+    # printed -- including NO-OPEN-ISSUE, whose branch is demonstrably still
+    # there. The candidate set is deliberately NOT narrowed with
+    # `linked:issue` (see closed_unmerged_prs) precisely to catch PRs whose
+    # "Closes #N" link never formed, so discarding them here would have made
+    # that widening buy nothing.
+    case "$bucket" in
+      LOST-WORK | NO-OPEN-ISSUE | UNKNOWN) ;;
+      *) continue ;;
+    esac
+
+    if [ "$printed" -eq 0 ]; then
+      echo
+      # The heading does not assert what the rows show -- UNKNOWN rows appear
+      # here precisely because their branch and issue state could NOT be
+      # resolved, and NO-OPEN-ISSUE rows have no open issue by definition.
+      # The STATE column carries the distinction.
+      echo "CLOSED WITHOUT MERGING -- branch still on the remote (STATE says how recoverable):"
+      printf '%-7s %-14s %-8s %-11s %-44s  %s\n' "PR" "STATE" "CLOSED" "OPEN ISS" "BRANCH" "TITLE"
+      printf '%-7s %-14s %-8s %-11s %-44s  %s\n' "-------" "--------------" "--------" "-----------" "--------------------------------------------" "-----"
+      printed=1
+    fi
+    [ "$bucket" = "LOST-WORK" ] && lost=$((lost + 1))
+    [ "$bucket" = "NO-OPEN-ISSUE" ] && orphan=$((orphan + 1))
+    age_col="${age}m"
+    [ "$age" = "unknown" ] && age_col="?"
+    # BRANCH is the one COPY-PASTEABLE field here -- the summary tells the
+    # reader to go check the branch -- so it is given room, and a truncation
+    # is MARKED. A silently shortened ref is worse than a long line: it looks
+    # like a branch name and `git fetch` fails on it. A truncated title is
+    # merely less informative, which is why title absorbs the width.
+    local branch_col="$branch_name"
+    [ "${#branch_col}" -gt 44 ] && branch_col="${branch_col:0:41}..."
+    printf '#%-6s %-14s %-8s %-11s %-44s  %s\n' "$num" "$bucket" "$age_col" "$open_issues" "$branch_col" "${title:0:32}"
+  done <<<"$rows"
+
+  # These notes come BEFORE the early return: a run where everything was
+  # skipped or superseded prints no rows at all, and that is exactly the case
+  # where silence would be read as an all-clear.
+  if [ "$skipped" -gt 0 ]; then
+    echo
+    echo "NOTE: ${skipped} closed-unmerged PR(s) older than ${CLOSED_MAX_AGE_MINUTES} minutes were listed but NOT examined."
+    echo "      Each costs an API call. Raise CLOSED_MAX_AGE_MINUTES to include them."
+  fi
+  if [ "$superseded" -gt 0 ]; then
+    echo
+    echo "NOTE: ${superseded} closed-unmerged PR(s) are SUPERSEDED -- their branch is the head of a PR that is"
+    echo "      open right now, so the work is back in flight rather than lost. Not listed."
+  fi
+
+  [ "$printed" -eq 0 ] && return
+
+  echo
+  if [ "$lost" -gt 0 ]; then
+    echo "${lost} of ${examined} examined closed-unmerged PR(s) may have LOST WORK: closed without merging,"
+    echo "branch still on the remote, linked issue still open. The issue has returned to the pool, so a"
+    echo "session may rebuild what is already written on that branch. Check whether a replacement PR is"
+    echo "already open before acting: a replacement on the SAME branch is detected and counted above as"
+    echo "superseded, but a replacement on a DIFFERENT branch is not detected at all."
+  fi
+  if [ "$orphan" -gt 0 ]; then
+    echo "${orphan} have a live branch but no open linked issue. Weaker signal -- the work may have been"
+    echo "abandoned deliberately, or the \"Closes #N\" link may never have formed. The branch is still there."
+  fi
+  if [ "$unknown" -gt 0 ]; then
+    echo "${unknown} closed-unmerged PR(s) are UNKNOWN -- a lookup failed. Deliberately not reported as"
+    echo "findings; re-run to resolve."
+  fi
 }
 
 usage() {
   cat <<'USAGE'
-stalled-prs.sh -- report open PRs that are green, mergeable, and un-enqueued.
+stalled-prs.sh -- report PRs nobody is advancing.
+
+Two sweeps:
+  STALLED    open PRs that are green, mergeable and un-enqueued
+  LOST-WORK  PRs closed WITHOUT merging whose branch still exists and whose
+             linked issue is still open -- work that was written and dropped
 
 READ-ONLY. Makes no GitHub mutation of any kind; that is enforced by
 TestStalledPRs_MakesNoMutatingCall, which runs the script against a stub `gh`
@@ -330,8 +763,18 @@ Usage:
 
 Environment:
   REPO           owner/name to report on (default: znasllc-io/memql)
-  IDLE_MINUTES   how long a green PR must sit before it counts as STALLED
-                 (default: 45)
+  IDLE_MINUTES   how long a green PR's HEAD COMMIT must sit unchanged before it
+                 counts as STALLED (default: 45). Comments, labels and reviews
+                 do not reset it; only a new head SHA does.
+  CLOSED_MAX_AGE_MINUTES
+                 how far back the closed-without-merging sweep looks
+                 (default: 20160 = 14 days). Older PRs are listed but not
+                 examined, because examining one costs an API call. Whatever
+                 is skipped is counted and announced.
+
+Columns:
+  IDLE     head-commit age -- the gate
+  TOUCHED  last activity of any kind -- display only, gates nothing
 
 Exit codes: 0 report produced, 2 bad parameter, 4 gh unusable.
 USAGE

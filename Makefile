@@ -465,9 +465,12 @@ fmt:
 ## Run vet + fmt (quick lint)
 lint: fmt vet
 
-## Report open PRs that are green + mergeable but nobody is advancing
-## (memql#2833). READ-ONLY: it never enqueues, because green is not reviewed.
-## IDLE_MINUTES=15 tightens the idle threshold; REPO=owner/name retargets.
+## Report PRs nobody is advancing: green + mergeable + un-enqueued (memql#2833),
+## and closed-without-merging whose branch and issue are both still live
+## (memql#2887). READ-ONLY: it never enqueues, because green is not reviewed.
+## IDLE_MINUTES=15 tightens the idle threshold -- head-commit age, not last
+## activity. CLOSED_MAX_AGE_MINUTES=43200 widens the closed-PR lookback from its
+## 14-day default. REPO=owner/name retargets.
 prs-stalled:
 	bash scripts/dev/stalled-prs.sh
 
