@@ -22,6 +22,10 @@ message NodeClientMessage {
   string message_id = 1;
   string correlate_to = 2;
   map<string, string> metadata = 3;
+  // 60 (query_forward) retired with the cross-node query-forwarding
+  // machinery, #2814.
+  reserved 60;
+  reserved "query_forward";
 
   oneof payload {
     NodeHello node_hello = 10;
@@ -33,7 +37,8 @@ message NodeClientMessage {
     EventAck event_ack = 31;
     CapabilityQuery capability_query = 40;
     CapabilityResponse capability_response = 41;
-    QueryForward query_forward = 60;
+    // 60 (query_forward) retired with the cross-node query-forwarding
+    // machinery, #2814; the number is reserved at the message level above.
     AiForwardRequest ai_forward_request = 70;
     AiForwardCancel ai_forward_cancel = 71;
     WorkbenchForwardRequest workbench_forward_request = 80;
@@ -45,6 +50,10 @@ message NodeServerMessage {
   string message_id = 1;
   string correlate_to = 2;
   map<string, string> metadata = 3;
+  // 60 (query_response) retired with the cross-node query-forwarding
+  // machinery, #2814.
+  reserved 60;
+  reserved "query_response";
 
   oneof payload {
     NodeWelcome node_welcome = 10;
@@ -57,7 +66,8 @@ message NodeServerMessage {
     CapabilityQuery capability_query = 40;
     CapabilityResponse capability_response = 41;
     NodeShutdown node_shutdown = 50;
-    QueryResponse query_response = 60;
+    // 60 (query_response) retired with the cross-node query-forwarding
+    // machinery, #2814; the number is reserved at the message level above.
     AiForwardResponse ai_forward_response = 70;
     WorkbenchForwardResponse workbench_forward_response = 80;
   }
@@ -187,28 +197,32 @@ message CapabilityResponse {
 }
 
 // ---------------------------------------------------------------------------
-// Query Forwarding
+// Query Forwarding -- RETIRED (#2814)
 // ---------------------------------------------------------------------------
-
-// QueryForward carries a MemQL query from one node to another for
-// execution. Used when a client sends a query to a node that doesn't
-// own the target concept. The receiving node executes the query
-// locally and returns a QueryResponse.
-message QueryForward {
-  string request_id = 1;
-  string query = 2;
-  reserved 3;
-  reserved "partition";
-}
-
-// QueryResponse carries the result of a forwarded query back to the
-// requesting node. result_json is the JSON-encoded query result.
-message QueryResponse {
-  string request_id = 1;
-  bool success = 2;
-  bytes result_json = 3;
-  string error = 4;
-}
+//
+// QueryForward / QueryResponse carried a MemQL query from one node to another
+// for execution, for the case where a client queried a node that did not own
+// the target concept. The receive side was the only side that ever existed:
+// there were zero producers anywhere in the tree including tests, the
+// SetQueryExecutor seam had no production caller, and neither the QueryProxy
+// nor the RegisterConceptOwnership registry the design depended on was ever
+// built (see docs/internal/design/extension-points.md).
+//
+// It was removed rather than repaired because the repair was unsafe to
+// publish. The handler executed forwarded DSL on context.Background(), so it
+// ran with no actor at all; propagating the caller's claims to fix that meant
+// prescribing auth.ForwardedClaimsFromIdentity as the producer recipe, and
+// that recipe cannot carry a badge grant's `class` / `role_ceiling`. Since
+// applyBadgeRoleCeiling clamps only when class=="badge", a forwarded badge
+// session resolved the operator's UNCLAMPED stored role -- an owner badged
+// into a reader kiosk came back isClusterOwner=true on a surface that
+// dispatches mutations and logic.
+//
+// The mesh authority-propagation contract is being designed once, on #2876,
+// against the AiForward path -- which unlike this one is live in production.
+// See component/auth/forward.go for the constraints any such contract must
+// satisfy. If concept-ownership routing is ever built, it needs that contract
+// first, not this machinery back.
 
 // ---------------------------------------------------------------------------
 // AI / voice request forwarding
