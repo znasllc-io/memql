@@ -120,22 +120,41 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 			continue
 		}
 
+		// Match any REFERENCE to the symbol, not only a call in Fun position.
+		//
+		// Matching calls was the obvious implementation and it was trivially
+		// defeatable: `f := auth.ContextWithInternalOrigin` and then `f(ctx)`
+		// is not a CallExpr naming the symbol, so four separate bypass forms
+		// placed in component/grpc produced no output at all from this gate.
+		// A gate on a security invariant that a function value walks past is
+		// not a gate.
+		//
+		// The anti-grep rationale survives intact: comments and string
+		// literals are neither SelectorExpr nor Ident, so the three prose
+		// cases in the header are still not matched. The one thing that must
+		// be skipped is the declaration itself, or component/auth reports its
+		// own definition.
 		ast.Inspect(file, func(n ast.Node) bool {
-			call, ok := n.(*ast.CallExpr)
-			if !ok {
+			if fn, isDecl := n.(*ast.FuncDecl); isDecl && fn.Name.Name == "ContextWithInternalOrigin" {
+				// The definition, not a use of it.
 				return true
 			}
-			var matched bool
-			switch fn := call.Fun.(type) {
+			var (
+				matched bool
+				pos     token.Pos
+			)
+			switch ref := n.(type) {
 			case *ast.SelectorExpr:
-				pkg, isIdent := fn.X.(*ast.Ident)
-				matched = isIdent && local[pkg.Name] && fn.Sel.Name == "ContextWithInternalOrigin"
+				pkg, isIdent := ref.X.(*ast.Ident)
+				matched = isIdent && local[pkg.Name] && ref.Sel.Name == "ContextWithInternalOrigin"
+				pos = ref.Pos()
 			case *ast.Ident:
-				matched = local[""] && fn.Name == "ContextWithInternalOrigin"
+				matched = local[""] && ref.Name == "ContextWithInternalOrigin"
+				pos = ref.Pos()
 			}
 			if matched {
 				dir := filepath.Dir(rel)
-				seen[dir] = append(seen[dir], fset.Position(call.Pos()).String())
+				seen[dir] = append(seen[dir], fset.Position(pos).String())
 			}
 			return true
 		})

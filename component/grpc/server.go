@@ -106,15 +106,21 @@ type Server struct {
 	eventBus          *events.Bus
 	sttProvider       stt.StreamingProvider
 	streamInterceptor grpc.StreamServerInterceptor
-	readyCh           chan struct{}
-	wiring            *bus.Wiring
-	sense             *sense.Service
-	scoreEngine       *polyphon.ScoreEngine
-	roomProvider      polyphon.RoomProvider
-	conceptRegistry   memoryNodes.Registry
-	aiForwarder       *AiForwardRouter
-	agentReplier      AgentTurnHandler
-	agentPauseHook    func(requestId string)
+	// installedInterceptor is what prepareForRun actually handed to
+	// grpc.NewServer. Recorded for the wiring assertion in
+	// TestPrepareForRunInstallsTheClientOriginWrapper (memql#2889): a test
+	// on the helper alone cannot tell a wrapped install from an unwrapped
+	// one, which is how the wrapper could have shipped as dead code.
+	installedInterceptor grpc.StreamServerInterceptor
+	readyCh              chan struct{}
+	wiring               *bus.Wiring
+	sense                *sense.Service
+	scoreEngine          *polyphon.ScoreEngine
+	roomProvider         polyphon.RoomProvider
+	conceptRegistry      memoryNodes.Registry
+	aiForwarder          *AiForwardRouter
+	agentReplier         AgentTurnHandler
+	agentPauseHook       func(requestId string)
 	// nodeMaintenanceHandler drives THIS node's lifecycle for the operator
 	// maintenance trigger (memql#1270). Set by app bootstrap on mesh
 	// binaries (app wires it to the App's RequestOperatorDrain via a narrow
@@ -298,11 +304,12 @@ func (s *Server) prepareForRun(ctx context.Context) (context.Context, context.Ca
 	// 6K screen capture (~28 MiB base64) with headroom for envelope
 	// metadata.
 	const maxWorkerMessageSize = 32 * 1024 * 1024
+	// Recorded so a test can assert what was ACTUALLY installed rather than
+	// what a helper would have returned if called. See
+	// TestPrepareForRunInstallsTheClientOriginWrapper.
+	s.installedInterceptor = s.installedStreamInterceptor()
 	serverOpts := []grpc.ServerOption{
-		// withClientOrigin wraps whichever auth chain app/transport.go
-		// installed, so the stamp applies to EVERY request-derived handler
-		// rather than to the one that happened to carry it (memql#2889).
-		grpc.StreamInterceptor(withClientOrigin(s.streamInterceptor)),
+		grpc.StreamInterceptor(s.installedInterceptor),
 		grpc.MaxRecvMsgSize(maxWorkerMessageSize),
 		grpc.MaxSendMsgSize(maxWorkerMessageSize),
 	}
@@ -429,6 +436,19 @@ func (s *Server) SetSTTProvider(provider stt.StreamingProvider) {
 	s.sttProvider = provider
 }
 
+// installedStreamInterceptor returns the interceptor this server actually
+// installs: the configured auth chain, wrapped so every handler beneath it is
+// stamped client-origin.
+//
+// This exists as a named seam rather than being inlined into the ServerOption
+// list so that a test can assert the WIRING, not just the wrapper. Without it,
+// deleting the wrap from prepareForRun left every test in the repo green --
+// which is precisely the defect memql#2889 was filed about, one level up:
+// withClientOrigin would have been thoroughly tested and never installed.
+func (s *Server) installedStreamInterceptor() grpc.StreamServerInterceptor {
+	return withClientOrigin(s.streamInterceptor)
+}
+
 // withClientOrigin wraps a stream interceptor so every handler beneath it sees
 // a context explicitly marked as having come off the wire (memql#2889).
 //
@@ -438,12 +458,31 @@ func (s *Server) SetSTTProvider(provider stt.StreamingProvider) {
 // needed, why is it there at all?
 //
 // The answer to the first half is that it was never a per-handler concern.
-// This whole service is ONE bidirectional RPC (memql.proto `rpc Stream`) behind
-// ONE interceptor, so the wire boundary is a single frame. Stamping it here
-// covers every request-derived handler in one place, cannot be forgotten by
-// the next handler someone adds, and holds whichever of the three chains
-// app/transport.go installed. The alternative -- 32 more copies of one line --
-// would have been 32 more places to forget.
+// The MemqlService surface is ONE bidirectional RPC (memql.proto `rpc Stream`)
+// behind ONE interceptor, so its wire boundary is a single frame. Stamping it
+// here covers every request-derived handler on this listener in one place,
+// cannot be forgotten by the next handler someone adds, and holds whichever of
+// the three chains app/transport.go installed. The alternative -- 32 more
+// copies of one line -- would have been 32 more places to forget.
+//
+// WHAT THIS DOES NOT COVER, stated precisely because a half-true invariant is
+// worse than none:
+//
+//   - The NodeService listener (component/node/server.go) is a SECOND gRPC
+//     server with its own interceptor and no wrapper. It is peer-to-peer
+//     traffic gated on class="node", it installs no interceptor at all in
+//     single-node mode, and its forward path reaches some component/grpc
+//     handlers via the synthetic stream in ai_forward.go -- but NOT
+//     handleExecuteQuery, so it never reached the stamp this replaced either.
+//     Wrapping it would mean stamping unconditionally in a deployment mode
+//     that has no auth chain to wrap, which is a different change.
+//   - Handlers that run on context.Background() rather than the stream context
+//     -- the voice-agent and polyphon paths. They are not request-derived, so
+//     there is no wire boundary to mark, and no interceptor can reach them.
+//
+// Neither is a live exposure: TestOnlyAllowlistedPackagesStampInternalOrigin
+// proves component/grpc and component/node stamp internal origin nowhere, so
+// there is nothing for either path to inherit.
 //
 // WHAT IT IS FOR, HONESTLY. OriginClient is the zero value, so an unstamped
 // context is ALREADY untrusted; this is not what makes the wire untrusted.
@@ -455,11 +494,6 @@ func (s *Server) SetSTTProvider(provider stt.StreamingProvider) {
 // a shared helper, or a change to how ensureAccess builds its context cannot
 // silently open all ~33 entry points at once. The gate is what keeps that
 // claim true; this is what makes it safe when it stops being.
-//
-// Handlers that run on context.Background() rather than the stream context --
-// the voice-agent and polyphon paths -- are deliberately NOT covered. They are
-// not request-derived, so there is no wire boundary to mark, and no
-// interceptor can reach them.
 func withClientOrigin(next grpc.StreamServerInterceptor) grpc.StreamServerInterceptor {
 	if next == nil {
 		return nil
