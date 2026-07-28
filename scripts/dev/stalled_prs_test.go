@@ -1203,3 +1203,33 @@ func TestStalledPRs_TruncatedBranchIsMarked(t *testing.T) {
 		t.Errorf("a truncated branch name must be marked; an unmarked one is indistinguishable from a real, shorter ref.\nstdout:\n%s", sec)
 	}
 }
+
+// TestStalledPRs_EmptyBranchIsNotSuperseded pins the emptiness half of the
+// SUPERSEDED guard.
+//
+// open_branches is built by appending a newline per row and is then fed to
+// grep through a herestring, so it ALWAYS carries a trailing empty line -- and
+// `grep -Fxq -- ""` matches an empty line. Without the `-n` test, a closed PR
+// whose branch_name came through empty matches every time and its LOST-WORK
+// finding disappears into the superseded count with no row.
+//
+// Verified by mutation: removing `[ -n "$branch_name" ] &&` turns the expected
+// LOST-WORK row into a bare "1 ... SUPERSEDED" note.
+func TestStalledPRs_EmptyBranchIsNotSuperseded(t *testing.T) {
+	cfg := oneStalledPR
+	// One field only: branch_name, closed_epoch and title all read empty.
+	// An empty closed_epoch means an unknown age, which keeps the PR in the
+	// sweep, so this drives the guard rather than the age gate.
+	cfg.closedList = "11\n"
+	cfg.closedFacts = "present\t101"
+
+	res := runScript(t, cfg)
+
+	got := bucketsIn(closedSection(res.stdout))
+	if len(got) != 1 || got[0] != "LOST-WORK" {
+		t.Errorf("closed-sweep buckets = %v, want [LOST-WORK].\nAn empty branch name must not match the trailing blank line in open_branches and vanish as SUPERSEDED.\nstdout:\n%s", got, res.stdout)
+	}
+	if strings.Contains(res.stdout, "SUPERSEDED") {
+		t.Errorf("an empty branch name was counted as superseded; the guard is not holding.\nstdout:\n%s", res.stdout)
+	}
+}
