@@ -115,10 +115,18 @@ func (r *mcpAutomationRunner) RunAutomation(ctx context.Context, owner, name str
 		// dry-run sandbox re-parses the source, and resolving via LoadByName
 		// first guarantees the same construct the live path would execute.
 		//
-		// Same construct is not by itself same behaviour: re-compiling drops
-		// the tree loader's trust stamp, so the two paths agreed on WHICH
-		// automation to run and disagreed on whether its steps could reach
-		// @serverOnly constructs (memql#2890). SourceTrusted below closes that.
+		// Trust is NOT carried across: CompileSource leaves Automation.Trusted
+		// at its false zero value, so the dry-run's steps run with client
+		// origin. That is correct, and it MATCHES the live branch below, which
+		// uses ExecuteWithClientEvent -- caller-supplied payload, so
+		// SourceTrusted resolves false there too however trusted the tree
+		// source is (memql#2888). Both paths therefore agree: untrusted.
+		//
+		// Do not "fix" the dry-run to compile as trusted. memql#2890 reported
+		// the two paths diverging, and they did when it was filed -- #2888
+		// landed hours later and closed the gap from the live side. Restoring
+		// trust here now would re-open it in the DANGEROUS direction: a preview
+		// more permissive than the run it predicts.
 		src, ok := memql.DSLConstructSource(r.logger, "automation", auto.Name)
 		if !ok {
 			return nil, fmt.Errorf("automation %q resolved but its source was not found in the DSL tree (dry-run needs its source)", auto.Name)
@@ -128,12 +136,6 @@ func (r *mcpAutomationRunner) RunAutomation(ctx context.Context, owner, name str
 			AutomationSource: src,
 			TriggerEvent:     &memql.DryRunTriggerEvent{Topic: "mcp.run." + auto.Name, Kind: "manual", Payload: input},
 			Mode:             memql.DryRunModeIsolated,
-			// The source above came out of the REGISTERED TREE, resolved by the
-			// canonical name LoadByName returned, so it is the same body the
-			// live branch below executes and earns the same trust. This is the
-			// only dry-run caller that may set it: the planner's Gate-2 path
-			// compiles an LLM-emitted bundle and correctly leaves it false.
-			SourceTrusted: true,
 		}
 		report, err := memql.RunBundleDryRun(ctx, r.engine, req)
 		if err != nil {

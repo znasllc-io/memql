@@ -71,22 +71,6 @@ type DryRunRequest struct {
 	// against the bundle's overlay registry the same way Gate 1 compiled it.
 	AutomationSource string `json:"automationSource"`
 
-	// SourceTrusted declares that AutomationSource was read out of the
-	// REGISTERED DSL TREE rather than submitted by a caller, so the compiled
-	// automation may reach @serverOnly constructs exactly as the live path
-	// would (memql#2890).
-	//
-	// FALSE IS THE ZERO VALUE, deliberately, mirroring Automation.Trusted: a
-	// caller that has not declared tree provenance gets the untrusted,
-	// caller-supplied treatment. The planner's Gate-2 path compiles an
-	// LLM-emitted bundle and must never set this.
-	//
-	// Set it ONLY when the source was resolved from the tree BY CANONICAL NAME
-	// -- i.e. it is the same construct the live path would execute. Setting it
-	// for caller-submitted source would hand a submitted body internal origin,
-	// which is precisely what Automation.Trusted exists to prevent.
-	SourceTrusted bool `json:"-"`
-
 	// TriggerEvent is the synthetic or replayed event that drives the run. Its
 	// topic / kind / payload are bound as the automation's `event` envelope --
 	// exactly how a real graph-CDC event would be seen. Nil drives the run as a

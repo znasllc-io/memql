@@ -1,25 +1,33 @@
 package steps
 
-// dryrun_source_trust_2890_db_test.go -- a dry-run of a TREE automation must
-// run with the same trust as the live run of that same automation (memql#2890).
+// dryrun_source_trust_2890_db_test.go -- the two run_automation paths must
+// agree on TRUST, and the agreement they must hold is "both untrusted"
+// (memql#2890).
 //
-// The two run_automation paths agreed on WHICH construct to run -- both resolve
-// through loader.LoadByName -- and disagreed on whether its steps could reach
-// @serverOnly constructs. Live used the tree-loaded Automation (Trusted=true,
-// internal origin); dry-run re-compiled the source via CompileSource, which
-// leaves Trusted at its false zero value, so steps ran with client origin. A
-// dry-run of killSwitchSuspendsRunningPlans therefore reported a @serverOnly
-// refusal the live run never hits.
+// # What #2890 reported, and why the obvious fix is wrong
 //
-// The direction matters. A preview that is WRONGLY pessimistic is not merely
-// noisy: it teaches an operator that dry-run refusals are background noise, and
-// the next refusal they wave through is a real one.
+// #2890 (filed 2026-07-26T18:06Z) observed that live resolved the automation
+// through the tree loader (Trusted=true -> internal origin) while dry-run
+// re-compiled the source via CompileSource (Trusted=false -> client origin), so
+// a dry-run of killSwitchSuspendsRunningPlans reported a @serverOnly refusal
+// the live run would not hit. That was accurate when written.
 //
-// Trust is provenance, not caution level -- Automation.Trusted documents itself
-// as "this automation's SOURCE came from the registered DSL tree rather than
-// from a caller". Source fetched from the tree by canonical name HAS tree
-// provenance, so it earns tree trust. Caller-submitted source does not, and the
-// false zero value keeps it that way.
+// #2888 landed the same day, ~4h later (9b355bfb), and closed the gap FROM THE
+// LIVE SIDE: app/mcp_automation_runner.go now drives the live run through
+// ExecuteWithClientEvent, because `input` is caller-supplied. Executor computes
+//
+//	exec.SourceTrusted = automation.Trusted && !callerSuppliedPayload
+//
+// so live resolves SourceTrusted=false however trusted the tree source is. Both
+// paths are now untrusted, and they agree.
+//
+// The trap this file exists to close: reading #2890 today and "fixing" the
+// dry-run to compile as trusted re-opens the divergence in the INVERSE and
+// DANGEROUS direction -- a preview MORE permissive than the run it predicts,
+// which is the case #2890 itself calls out as the bad one. A dry-run that
+// passes and a live run that then refuses is worse than a noisy preview.
+//
+// So the assertion is deliberately "the dry-run does NOT get internal origin".
 //
 // Postgres-gated: skips cleanly when no DB is reachable.
 
@@ -41,9 +49,9 @@ import (
 	"github.com/znasllc-io/memql/component/memql"
 )
 
-// trustProbeAutomation is the automation memql#2890 cites. It is read from the
-// tree rather than hand-written so this test exercises the real construct whose
-// dry-run diverged, not a fixture that merely resembles it.
+// trustProbeAutomation is the automation #2890 cites. Read from the tree rather
+// than hand-written, so this exercises the real construct whose dry-run was
+// reported as diverging.
 const trustProbeAutomation = "killSwitchSuspendsRunningPlans"
 
 func dryRunTrustTestEngine(t *testing.T) *memql.MemQLEngine {
@@ -72,15 +80,14 @@ func dryRunTrustTestEngine(t *testing.T) *memql.MemQLEngine {
 	return eng
 }
 
-// dryRunReport runs one dry-run of the tree automation at the given trust and
-// returns the report plus a flattened view of everything that could carry a
-// refusal, so the assertion does not depend on which field the executor chose.
-func dryRunReport(t *testing.T, eng *memql.MemQLEngine, src string, trusted bool) (memql.BundleDryRunReport, string) {
+// dryRunSurface runs one dry-run of the tree automation and flattens everything
+// that could carry a refusal, so the assertion does not depend on which field
+// the executor chose to record it in.
+func dryRunSurface(t *testing.T, eng *memql.MemQLEngine, src string) string {
 	t.Helper()
 	report, err := runBundleDryRun(context.Background(), eng, memql.DryRunRequest{
 		AutomationName:   trustProbeAutomation,
 		AutomationSource: src,
-		SourceTrusted:    trusted,
 		TriggerEvent: &memql.DryRunTriggerEvent{
 			Topic:   "mcp.run." + trustProbeAutomation,
 			Kind:    "manual",
@@ -89,7 +96,7 @@ func dryRunReport(t *testing.T, eng *memql.MemQLEngine, src string, trusted bool
 		Mode: memql.DryRunModeIsolated,
 	})
 	if err != nil {
-		t.Fatalf("runBundleDryRun(trusted=%v): %v", trusted, err)
+		t.Fatalf("runBundleDryRun: %v", err)
 	}
 	var b strings.Builder
 	b.WriteString(report.FailureReason)
@@ -99,22 +106,28 @@ func dryRunReport(t *testing.T, eng *memql.MemQLEngine, src string, trusted bool
 		b.WriteString(" ")
 		b.WriteString(s.Status)
 	}
-	return report, b.String()
+	return b.String()
 }
 
 // serverOnlyRefused reports whether a dry-run surface mentions the @serverOnly
-// gate. The gate's message is matched loosely on purpose: the assertion is
-// about WHETHER the gate fired, and pinning its exact wording would make this
-// test fail on a message reword rather than on a trust regression.
+// gate. Matched loosely on purpose: the assertion is about WHETHER the gate
+// fired, and pinning exact wording would fail on a message reword rather than
+// on a trust regression.
 func serverOnlyRefused(surface string) bool {
 	l := strings.ToLower(surface)
 	return strings.Contains(l, "serveronly") || strings.Contains(l, "server-only")
 }
 
-// TestDryRunOfTreeAutomationRunsTrusted is the parity assertion memql#2890
-// asked for: a dry-run of a tree-resolved automation must not report a
-// @serverOnly refusal that the live run of the same construct cannot hit.
-func TestDryRunOfTreeAutomationRunsTrusted(t *testing.T) {
+// TestDryRunDoesNotCompileTreeSourceAsTrusted is the guard. A dry-run compiles
+// its source through CompileSource, which leaves Automation.Trusted false, so
+// its steps must run with client origin -- matching the live path, which is
+// caller-driven and therefore untrusted too (#2888).
+//
+// If this fails, someone has made the dry-run trusted. That looks like a fix
+// for #2890 and is not one: the live run of the same automation is still
+// untrusted, so the preview would now be MORE permissive than the thing it
+// previews.
+func TestDryRunDoesNotCompileTreeSourceAsTrusted(t *testing.T) {
 	eng := dryRunTrustTestEngine(t)
 
 	src, ok := memql.DSLConstructSource(slog.New(slog.NewTextHandler(io.Discard, nil)), "automation", trustProbeAutomation)
@@ -122,48 +135,12 @@ func TestDryRunOfTreeAutomationRunsTrusted(t *testing.T) {
 		t.Skipf("automation %q is not in the tree in this build; nothing to assert", trustProbeAutomation)
 	}
 
-	// UNTRUSTED is the pre-fix behaviour, asserted first so the test proves the
-	// gate is reachable at all on this automation. Without this, the trusted
-	// assertion below would pass just as happily against an automation that
-	// never touches a @serverOnly construct -- i.e. vacuously.
-	_, untrustedSurface := dryRunReport(t, eng, src, false)
-	if !serverOnlyRefused(untrustedSurface) {
-		t.Skipf("automation %q no longer trips the @serverOnly gate when untrusted, so this "+
-			"test can no longer distinguish trusted from untrusted. Point it at an automation "+
-			"that does, or drop it. Surface was: %s", trustProbeAutomation, untrustedSurface)
-	}
-
-	// TRUSTED: the same source, declared as tree provenance, must not trip it.
-	_, trustedSurface := dryRunReport(t, eng, src, true)
-	if serverOnlyRefused(trustedSurface) {
-		t.Fatalf("dry-run of tree automation %q reported a @serverOnly refusal while SourceTrusted=true. "+
-			"The live path loads this same construct through the tree loader (Trusted=true) and does not "+
-			"hit the gate, so the preview is predicting a failure that cannot happen (memql#2890).\n"+
-			"surface: %s", trustProbeAutomation, trustedSurface)
-	}
-}
-
-// TestDryRunOfCallerSuppliedSourceStaysUntrusted is the half that must NOT
-// change. SourceTrusted defaults false, and the planner's Gate-2 path compiles
-// an LLM-emitted bundle without setting it -- so submitted source keeps running
-// with client origin. Losing this would hand a caller-authored body internal
-// origin, which is the defect Automation.Trusted exists to prevent (memql#2800).
-func TestDryRunOfCallerSuppliedSourceStaysUntrusted(t *testing.T) {
-	eng := dryRunTrustTestEngine(t)
-
-	src, ok := memql.DSLConstructSource(slog.New(slog.NewTextHandler(io.Discard, nil)), "automation", trustProbeAutomation)
-	if !ok {
-		t.Skipf("automation %q is not in the tree in this build", trustProbeAutomation)
-	}
-
-	// Same source, no provenance declaration -- the zero value. Even though
-	// these bytes happen to come from the tree, a caller that does not declare
-	// it gets the untrusted treatment, because the field is the declaration.
-	_, surface := dryRunReport(t, eng, src, false)
+	surface := dryRunSurface(t, eng, src)
 	if !serverOnlyRefused(surface) {
-		t.Fatalf("a dry-run with SourceTrusted unset (the zero value) did NOT hit the @serverOnly "+
-			"gate. Submitted source must never reach @serverOnly constructs: that is what "+
-			"Automation.Trusted's false-by-default exists to guarantee (memql#2800, #2890).\n"+
-			"surface: %s", surface)
+		t.Fatalf("dry-run of %q did NOT hit the @serverOnly gate, so it ran with internal origin. "+
+			"The live path runs this same automation through ExecuteWithClientEvent -- caller-supplied "+
+			"payload, so SourceTrusted resolves false there (memql#2888) -- which means the preview is "+
+			"now more permissive than the run it predicts. That is the inverse of the divergence "+
+			"memql#2890 reported, and the dangerous direction.\nsurface: %s", trustProbeAutomation, surface)
 	}
 }
