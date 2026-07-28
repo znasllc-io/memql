@@ -20,12 +20,6 @@
 // `use deployment.mutations.{ ... }`; component/deploycontrol invokes them by
 // name through the engine, unaffected by the relocation.
 
-// `deployment` is imported for canonicalId() in the deploymentNodeSpec id
-// derivation (#2885). It is the concept this file also writes, but the
-// canonicalId concept argument resolves against file-top imports, not
-// against the mutate target.
-use deployment.concepts.{ deployment }
-
 // ---- createDeployment ----
 
 // Write a new deployment record at deploy start (#1872). The
@@ -132,11 +126,26 @@ mutate deployment updateDeploymentStatus {
 // form, so the raw join was rejected on every call and this mutation
 // could never write a row. hash() yields 64 hex chars, which is bare.
 //
-// Why canonicalId() first (authoring-rules section 20): the hash is
-// byte-level, so a caller passing a bare deploymentId and one passing the
-// canonical "v1:cluster:deployment:<short>" form would otherwise hash to
-// different ids and mint TWO timelines for the same (deployment,
-// nodeType). canonicalId() collapses both shapes to one string.
+// NOT normalised, and that is a known gap -- see #2925. authoring-rules
+// section 20 says a hashed FK arg should be normalised first, because the
+// hash is byte-level: a caller passing a bare deploymentId and one passing
+// the canonical "v1:cluster:deployment:<short>" form hash to different ids
+// and would mint TWO timelines for the same (deployment, nodeType).
+//
+// Both spellings of that normalisation are currently blocked in this
+// position, which is why it is deferred rather than skipped: the
+// canonical-id builtin needs a concept argument that resolves via a
+// file-top import or an ambient same-domain concept (#2617), and these
+// concepts declare @namespace("cluster") while living in deployment/, so
+// the ambient hint misses and neither import spelling both resolves and
+// survives TestNoSameDomainUse; shortId() parses here but the mutation-
+// template id evaluator has no ShortIdExpr case, so it fails at render.
+//
+// Reachable today? No in-tree producer passes a canonical deploymentId --
+// component/deploycontrol mints a bare id and the deploy pack forwards the
+// bare payload field -- and no rows exist to migrate, so nothing is at risk
+// now. It is reachable through the generated SDK by an external caller.
+//
 // nodeType is a plain discriminator, not a concept reference, so it is
 // hashed as written.
 //
@@ -148,7 +157,7 @@ mutate deployment updateDeploymentStatus {
 // is spec("requiresOwnerOrAdmin") on the cut-version/rollback effects
 // (Epic 2.6). Additive: no existing overlay or query is affected.
 /// Create a v1:cluster:deploymentNodeSpec row for a (deploymentId, nodeType) pair. The concept id
-/// is hash(canonicalId(deploymentId) + ':' + nodeType) so re-pins append to one timeline.
+/// is hash(deploymentId + ':' + nodeType) so re-pins append to one timeline.
 /// Engine-as-spine: empty version resolves against the deployment engine version. Epic 2 / #2094.
 mutate deploymentNodeSpec createDeploymentNodeSpec {
   args {
@@ -162,7 +171,7 @@ mutate deploymentNodeSpec createDeploymentNodeSpec {
     accept { deploymentId, nodeType }
     stamp {
       id: hash(concat(
-        canonicalId(args.deploymentId, deployment), ":",
+        args.deploymentId, ":",
         args.nodeType
       ))
       version: args.version ?? ""
@@ -202,7 +211,7 @@ mutate deploymentNodeSpec updateDeploymentNodeSpec {
   }
   update {
     id: hash(concat(
-      canonicalId(args.deploymentId, deployment), ":",
+      args.deploymentId, ":",
       args.nodeType
     ))
     version: args.version ?? ""

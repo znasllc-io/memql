@@ -451,8 +451,8 @@ func TestNoCanonicalPatternOnArgs(t *testing.T) {
 //     @relationship to it. These flip in A2 (#2441, incl. the partition_id ->
 //     space_id rename) once the wire owns both id directions.
 //   - plain-fk-by-design: the field's own @description already declares it a
-//     "plain string FK, not a @relationship" -- typically part of a composite
-//     id (concat(deploymentId, ':', nodeType)) or a cross-concept grouping key
+//     "plain string FK, not a @relationship" -- typically hashed into a
+//     composite id, or a cross-concept grouping key
 //     the parent/contains/alias/equals relationship types don't model.
 //   - bare-by-contract-A0: fixed as a deliberate bare id in A0 (#2439).
 //   - bare-raw-sql-reader: a live raw-SQL reader compares payload->>'field'
@@ -491,7 +491,7 @@ var idBearingFieldExemptions = map[string]string{
 	"cognition/utterance.feedbackAnnouncePlanId": "nested-subfield-of-source; dedup key for feedbackAnnouncementForPlan, not a graph edge (#2794)",
 	// --- plain string FK by design (own @description says so) ---
 	"deployment/deployment.clusterId":            "plain-fk-by-design (@description declares plain string FK)",
-	"deployment/deploymentNodeSpec.deploymentId": "plain-fk-by-design; part of composite id concat(deploymentId, ':', nodeType)",
+	"deployment/deploymentNodeSpec.deploymentId": "plain-fk-by-design; hashed into the composite concept id (#2885)",
 	"cluster/node.deploymentId":                  "plain-fk-by-design (@description declares plain string FK)",
 	"library/documentVersion.documentId":         "plain-fk-by-design; cross-concept content-history grouping key (@description declares NOT an @relationship)",
 	// --- non-node correlation ids (description mentions a concept but value is a random UUID) ---

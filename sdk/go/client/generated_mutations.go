@@ -3121,7 +3121,7 @@ func CreateDeploymentBuild(args CreateDeploymentArgs) string {
 	return b.String()
 }
 
-// CreateDeploymentNodeSpec -- Create a v1:cluster:deploymentNodeSpec row for a (deploymentId, nodeType) pair. Uses concat(deploymentId, ':', nodeType) as the concept id so re-pins append to one timeline. Engine-as-spine: empty version resolves against the deployment engine version. Epic 2 / #2094.
+// CreateDeploymentNodeSpec -- Create a v1:cluster:deploymentNodeSpec row for a (deploymentId, nodeType) pair. The concept id is hash(deploymentId + ':' + nodeType) so re-pins append to one timeline. Engine-as-spine: empty version resolves against the deployment engine version. Epic 2 / #2094.
 //
 // Bound concept: v1:cluster:deploymentNodeSpec (machine-readable: BoundConcepts["createDeploymentNodeSpec"] in generated_concepts.go).
 type CreateDeploymentNodeSpecArgs struct {
@@ -11139,7 +11139,7 @@ func UpdateClusterSettingsBuild(args UpdateClusterSettingsArgs) string {
 	return b.String()
 }
 
-// UpdateDeploymentNodeSpec -- Re-pin a v1:cluster:deploymentNodeSpec's version / replicas / imageDigest by (deploymentId, nodeType). Read-merge update: deploymentId + nodeType inherit, only the spec fields + updatedAt change. Append under the same composite concept id. Epic 2 / #2094.
+// UpdateDeploymentNodeSpec -- Re-pin a v1:cluster:deploymentNodeSpec's version / replicas / imageDigest by (deploymentId, nodeType). Read-merge update: deploymentId + nodeType inherit, only the spec fields + updatedAt change. Append under the same hashed composite concept id. Epic 2 / #2094.
 //
 // Bound concept: v1:cluster:deploymentNodeSpec (machine-readable: BoundConcepts["updateDeploymentNodeSpec"] in generated_concepts.go).
 type UpdateDeploymentNodeSpecArgs struct {
