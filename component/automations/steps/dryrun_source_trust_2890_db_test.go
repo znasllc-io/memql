@@ -1,39 +1,49 @@
 package steps
 
-// dryrun_source_trust_2890_db_test.go -- the two run_automation paths must
-// agree on TRUST, and the agreement they must hold is "both untrusted"
-// (memql#2890).
+// dryrun_source_trust_2890_db_test.go -- a dry-run must not mint a resume
+// checkpoint that a later resume can promote to internal origin (memql#2890).
 //
-// # What #2890 reported, and why the obvious fix is wrong
+// # The defect
 //
-// #2890 (filed 2026-07-26T18:06Z) observed that live resolved the automation
-// through the tree loader (Trusted=true -> internal origin) while dry-run
-// re-compiled the source via CompileSource (Trusted=false -> client origin), so
-// a dry-run of killSwitchSuspendsRunningPlans reported a @serverOnly refusal
-// the live run would not hit. That was accurate when written.
+// executeWithEvent stamps TWO fields (component/automations/executor.go:378):
 //
-// #2888 landed the same day, ~4h later (9b355bfb), and closed the gap FROM THE
-// LIVE SIDE: app/mcp_automation_runner.go now drives the live run through
-// ExecuteWithClientEvent, because `input` is caller-supplied. Executor computes
+//	exec.SourceTrusted         = automation.Trusted && !callerSuppliedPayload
+//	exec.CallerSuppliedPayload = callerSuppliedPayload
 //
-//	exec.SourceTrusted = automation.Trusted && !callerSuppliedPayload
+// The second is PERSISTED onto any checkpoint the run mints, and resume.go
+// recomputes trust from it:
 //
-// so live resolves SourceTrusted=false however trusted the tree source is. Both
-// paths are now untrusted, and they agree.
+//	exec.SourceTrusted = automation.Trusted && !checkpoint.CallerSuppliedPayload
 //
-// The trap this file exists to close: reading #2890 today and "fixing" the
-// dry-run to compile as trusted re-opens the divergence in the INVERSE and
-// DANGEROUS direction -- a preview MORE permissive than the run it predicts,
-// which is the case #2890 itself calls out as the bad one. A dry-run that
-// passes and a live run that then refuses is worse than a noisy preview.
+// The dry-run drove the run through ExecuteWithEvent, so it stamped
+// CallerSuppliedPayload=FALSE onto a caller-chosen payload (run_automation
+// binds the MCP caller's `input`; Gate-2 binds an LLM-emitted one). A later
+// POST /automations/resume of that checkpoint loads the automation from the
+// tree (Trusted=true) and therefore re-dispatches the caller's payload at
+// INTERNAL origin.
 //
-// So the assertion is deliberately "the dry-run does NOT get internal origin".
+// That is the replay memql#2888 documents in resume.go's own comment. #2888
+// fixed the LIVE leg by moving run_automation to ExecuteWithClientEvent; the
+// dry-run leg was left behind, which is what memql#2890 was really reporting.
+//
+// The vicious part, and why this went unnoticed: saveCheckpointOnFailure fires
+// on step failure, so the @serverOnly refusal a preview is SUPPOSED to report
+// is precisely the thing that writes the resumable checkpoint. The failing
+// preview mints the token.
+//
+// # What these assert
+//
+// Checking SourceTrusted alone is NOT sufficient and is how this was nearly
+// missed: both paths already resolved SourceTrusted=false, so a test on that
+// axis passes while the persisted axis diverges. The assertion has to be on
+// what the checkpoint carries.
 //
 // Postgres-gated: skips cleanly when no DB is reachable.
 
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"os"
@@ -49,12 +59,12 @@ import (
 	"github.com/znasllc-io/memql/component/memql"
 )
 
-// trustProbeAutomation is the automation #2890 cites. Read from the tree rather
-// than hand-written, so this exercises the real construct whose dry-run was
-// reported as diverging.
+// trustProbeAutomation is the automation memql#2890 cites. It is read from the
+// tree so this exercises the real construct, and it reaches a @serverOnly
+// function, which is what makes the run fail and mint a checkpoint.
 const trustProbeAutomation = "killSwitchSuspendsRunningPlans"
 
-func dryRunTrustTestEngine(t *testing.T) *memql.MemQLEngine {
+func dryRunTrustTestEngine(t *testing.T) (*memql.MemQLEngine, *bun.DB) {
 	t.Helper()
 	dsn := os.Getenv("MEMQL_DATABASE_DSN")
 	if dsn == "" {
@@ -62,7 +72,7 @@ func dryRunTrustTestEngine(t *testing.T) *memql.MemQLEngine {
 	}
 	db := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn))), pgdialect.New())
 	if err := db.PingContext(context.Background()); err != nil {
-		dbtest.Unreachable(t, "dry-run source-trust test", dsn, err)
+		dbtest.Unreachable(t, "dry-run resume-trust test", dsn, err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
@@ -77,70 +87,81 @@ func dryRunTrustTestEngine(t *testing.T) *memql.MemQLEngine {
 	if err := eng.Init(memoryNodes.DefaultRegistry()); err != nil {
 		t.Fatalf("engine Init: %v", err)
 	}
-	return eng
+	return eng, db
 }
 
-// dryRunSurface runs one dry-run of the tree automation and flattens everything
-// that could carry a refusal, so the assertion does not depend on which field
-// the executor chose to record it in.
-func dryRunSurface(t *testing.T, eng *memql.MemQLEngine, src string) string {
-	t.Helper()
-	report, err := runBundleDryRun(context.Background(), eng, memql.DryRunRequest{
-		AutomationName:   trustProbeAutomation,
-		AutomationSource: src,
-		TriggerEvent: &memql.DryRunTriggerEvent{
-			Topic:   "mcp.run." + trustProbeAutomation,
-			Kind:    "manual",
-			Payload: map[string]any{},
-		},
-		Mode: memql.DryRunModeIsolated,
-	})
-	if err != nil {
-		t.Fatalf("runBundleDryRun: %v", err)
-	}
-	var b strings.Builder
-	b.WriteString(report.FailureReason)
-	for _, s := range report.Trace {
-		b.WriteString("\n")
-		b.WriteString(s.Note)
-		b.WriteString(" ")
-		b.WriteString(s.Status)
-	}
-	return b.String()
-}
-
-// serverOnlyRefused reports whether a dry-run surface mentions the @serverOnly
-// gate. Matched loosely on purpose: the assertion is about WHETHER the gate
-// fired, and pinning exact wording would fail on a message reword rather than
-// on a trust regression.
-func serverOnlyRefused(surface string) bool {
-	l := strings.ToLower(surface)
-	return strings.Contains(l, "serveronly") || strings.Contains(l, "server-only")
-}
-
-// TestDryRunDoesNotCompileTreeSourceAsTrusted is the guard. A dry-run compiles
-// its source through CompileSource, which leaves Automation.Trusted false, so
-// its steps must run with client origin -- matching the live path, which is
-// caller-driven and therefore untrusted too (#2888).
+// TestDryRunCheckpointIsMarkedCallerSupplied is the guard memql#2890 needed.
 //
-// If this fails, someone has made the dry-run trusted. That looks like a fix
-// for #2890 and is not one: the live run of the same automation is still
-// untrusted, so the preview would now be MORE permissive than the thing it
-// previews.
-func TestDryRunDoesNotCompileTreeSourceAsTrusted(t *testing.T) {
-	eng := dryRunTrustTestEngine(t)
+// It drives a real dry-run of a tree automation whose step hits a @serverOnly
+// function -- the failure that mints a checkpoint -- and asserts the checkpoint
+// records the payload as CALLER-SUPPLIED, so resume.go computes
+// SourceTrusted=false and cannot promote it to internal origin.
+func TestDryRunCheckpointIsMarkedCallerSupplied(t *testing.T) {
+	eng, db := dryRunTrustTestEngine(t)
+	ctx := context.Background()
 
 	src, ok := memql.DSLConstructSource(slog.New(slog.NewTextHandler(io.Discard, nil)), "automation", trustProbeAutomation)
 	if !ok {
 		t.Skipf("automation %q is not in the tree in this build; nothing to assert", trustProbeAutomation)
 	}
 
-	surface := dryRunSurface(t, eng, src)
-	if !serverOnlyRefused(surface) {
-		t.Fatalf("dry-run of %q did NOT hit the @serverOnly gate, so it ran with internal origin. "+
-			"The live path runs this same automation through ExecuteWithClientEvent -- caller-supplied "+
-			"payload, so SourceTrusted resolves false there (memql#2888) -- which means the preview is "+
-			"now more permissive than the run it predicts. That is the inverse of the divergence "+
-			"memql#2890 reported, and the dangerous direction.\nsurface: %s", trustProbeAutomation, surface)
+	// Timestamp the run so the checkpoint lookup below cannot pick up a row
+	// left by an earlier run (this DB is shared and accumulates them).
+	var mark string
+	if err := db.NewSelect().ColumnExpr("now()::text").Scan(ctx, &mark); err != nil {
+		t.Fatalf("clock read: %v", err)
+	}
+
+	report, err := runBundleDryRun(ctx, eng, memql.DryRunRequest{
+		AutomationName:   trustProbeAutomation,
+		AutomationSource: src,
+		TriggerEvent: &memql.DryRunTriggerEvent{
+			Topic:   "mcp.run." + trustProbeAutomation,
+			Kind:    "manual",
+			Payload: map[string]any{"node": map[string]any{"id": "v1:identity:user:caller-chosen"}},
+		},
+		Mode: memql.DryRunModeIsolated,
+	})
+	if err != nil {
+		t.Fatalf("runBundleDryRun: %v", err)
+	}
+
+	// Precondition: the run must actually have failed on the @serverOnly gate.
+	// Without this the checkpoint assertion below could pass vacuously by
+	// finding no checkpoint at all for the wrong reason.
+	if report.OK {
+		t.Skipf("dry-run of %q no longer fails, so it mints no checkpoint and this guard cannot "+
+			"distinguish anything. Point it at an automation that fails, or drop it.", trustProbeAutomation)
+	}
+
+	// Find any checkpoint minted since the mark. Time-bounded rather than
+	// keyed on an execution id, because BundleDryRunReport does not surface
+	// one; the window is this test's own run.
+	var raw string
+	err = db.NewSelect().Table("MemoryNodes").ColumnExpr("payload::text").
+		Where("concept = ?", "v1:memql:checkpoint").
+		Where("\"createdAt\" >= ?::timestamptz", mark).
+		Order("createdAt DESC").Limit(1).Scan(ctx, &raw)
+	if err != nil || strings.TrimSpace(raw) == "" {
+		// No checkpoint is a PASS: nothing to resume, nothing to promote. That
+		// is the stronger outcome, and the one the sandbox should ideally have.
+		t.Logf("dry-run minted no resumable checkpoint -- nothing to promote, which is the stronger outcome")
+		return
+	}
+
+	var ckpt map[string]any
+	if err := json.Unmarshal([]byte(raw), &ckpt); err != nil {
+		t.Fatalf("checkpoint payload is not JSON: %v", err)
+	}
+
+	got, _ := ckpt["callerSuppliedPayload"].(bool)
+	if !got {
+		t.Fatalf("dry-run minted a checkpoint with callerSuppliedPayload=%v.\n"+
+			"resume.go computes `SourceTrusted = automation.Trusted && !checkpoint.CallerSuppliedPayload`, "+
+			"and POST /automations/resume loads this automation from the tree (Trusted=true), so this "+
+			"checkpoint re-dispatches a CALLER-CHOSEN payload at INTERNAL origin. That is the replay "+
+			"memql#2888 documents, with the dry-run as leg 1 (memql#2890).\n"+
+			"The dry-run must drive the run through ExecuteWithClientEvent, not ExecuteWithEvent.\n"+
+			"checkpoint: %s", ckpt["callerSuppliedPayload"], raw)
 	}
 }

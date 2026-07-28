@@ -118,7 +118,39 @@ func runBundleDryRun(ctx context.Context, engine *memql.MemQLEngine, req memql.D
 	defer executor.Close()
 
 	triggerEvent := toTriggerEvent(req.TriggerEvent)
-	exec, runErr := executor.ExecuteWithEvent(ctx, automation, "dryrun", triggerEvent)
+	// ExecuteWithClientEvent, NOT ExecuteWithEvent (memql#2890, mirroring
+	// memql#2888 on the preview side).
+	//
+	// A dry-run's trigger payload is caller-chosen: run_automation binds the
+	// MCP caller's `input`, and the planner's Gate-2 path binds an LLM-emitted
+	// one. Neither is a payload the server produced.
+	//
+	// This matters beyond the in-run origin. executeWithEvent stamps TWO
+	// fields, and the second is PERSISTED onto any checkpoint the run mints:
+	//
+	//	exec.SourceTrusted         = automation.Trusted && !callerSuppliedPayload
+	//	exec.CallerSuppliedPayload = callerSuppliedPayload
+	//
+	// and resume.go recomputes trust from the checkpoint:
+	//
+	//	exec.SourceTrusted = automation.Trusted && !checkpoint.CallerSuppliedPayload
+	//
+	// So with ExecuteWithEvent the preview stamped CallerSuppliedPayload=false
+	// onto a caller-chosen payload, and a later POST /automations/resume of
+	// that checkpoint re-dispatched the attacker's payload at INTERNAL origin
+	// against the tree-loaded (Trusted=true) automation. That is exactly the
+	// replay #2888's comment describes -- with the dry-run as leg 1, which
+	// #2888 fixed only on the live leg.
+	//
+	// The refusal is what mints the token: saveCheckpointOnFailure fires on
+	// step failure, so the @serverOnly refusal a preview is SUPPOSED to report
+	// is the thing that writes the resumable checkpoint.
+	//
+	// SourceTrusted itself is unchanged by this (CompileSource already leaves
+	// Trusted false, so it was false either way). The change is strictly more
+	// restrictive: it marks the checkpoint caller-supplied so resume cannot
+	// promote it.
+	exec, runErr := executor.ExecuteWithClientEvent(ctx, automation, "dryrun", triggerEvent)
 
 	// Assemble the trace from the execution's step results + the sandbox
 	// registry's interception annotations.
