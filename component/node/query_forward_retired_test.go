@@ -10,14 +10,14 @@ package node
 // To be exact about the risk, because overstating it is how the last attempt
 // at this path went wrong: NO node ever sent tag 60. The sending half was
 // never built (see the retirement note in node.proto), so this is not a
-// rolling-upgrade rescue. What these tests protect is the RESERVATION, which
-// is the thing a future edit can silently undo: if a later change assigns tag
-// 60 to a different message, any peer still emitting the old bytes -- a
-// replayed capture, a third-party or hand-rolled client, a resurrected branch
-// like issue-2814-queryforward-actor -- is parsed as the wrong type rather
-// than ignored. Reserving the number is what makes that impossible, and the
-// repo's convention is to reserve retired numbers rather than free them (see
-// the #984 precedent in component/grpc/memql.proto).
+// rolling-upgrade rescue and these tests are not protecting live traffic.
+//
+// What they protect is the RESERVATION, which a future edit can silently undo.
+// Reserving a retired number is the repo's convention (see the #984 precedent
+// in component/grpc/memql.proto) and it is what keeps the number from being
+// handed to an unrelated message later. These tests pin both halves of that:
+// the reservation exists, and a receiver treats an unknown tag 60 as an
+// unknown field rather than an error.
 
 import (
 	"testing"
@@ -57,9 +57,9 @@ func TestQueryForwardTagsStayReserved(t *testing.T) {
 	for _, rf := range retiredQueryForwardFields() {
 		t.Run(string(rf.desc.Name())+"/"+string(rf.name), func(t *testing.T) {
 			if !rf.desc.ReservedRanges().Has(rf.tag) {
-				t.Errorf("tag %d is not reserved on %s -- a future field could be assigned it, "+
-					"and a pre-#2814 node still sends %s on that tag (memql#2814)",
-					rf.tag, rf.desc.FullName(), rf.name)
+				t.Errorf("tag %d is not reserved on %s -- retired with %s in memql#2814, "+
+					"so leaving it unreserved lets a later change hand the number to an "+
+					"unrelated message", rf.tag, rf.desc.FullName(), rf.name)
 			}
 			if !rf.desc.ReservedNames().Has(rf.name) {
 				t.Errorf("name %q is not reserved on %s (memql#2814)", rf.name, rf.desc.FullName())
@@ -69,9 +69,14 @@ func TestQueryForwardTagsStayReserved(t *testing.T) {
 }
 
 // TestQueryForwardFieldsAreGone pins the removal itself: no field may occupy
-// the retired tag or name. Reserving a tag while a field still uses it is a
-// state protoc rejects, but the NAME check also catches a re-add under a
-// different tag, which protoc would happily accept.
+// the retired tag or name.
+//
+// protoc already enforces this while the reservations are in place -- it
+// rejects a field on a reserved number, and rejects the reserved NAME at any
+// number ("Field name \"query_forward\" is reserved."). So this is belt and
+// braces, and deliberately so: it still fails on a hand-edited node.pb.go, and
+// on a change that drops the reservation and re-adds the field together, which
+// protoc accepts and which is the likeliest way this path comes back.
 func TestQueryForwardFieldsAreGone(t *testing.T) {
 	for _, rf := range retiredQueryForwardFields() {
 		t.Run(string(rf.desc.Name())+"/"+string(rf.name), func(t *testing.T) {
@@ -82,9 +87,9 @@ func TestQueryForwardFieldsAreGone(t *testing.T) {
 			}
 			if f := fields.ByName(rf.name); f != nil {
 				t.Errorf("%s reintroduced %q on tag %d -- the query-forwarding path was removed "+
-					"because propagating caller identity across it could not be done safely; "+
-					"the mesh authority contract is being designed on memql#2876, and this path "+
-					"must not come back without it",
+					"in memql#2814 because propagating caller identity across it could not be "+
+					"done safely; it must not come back without the mesh authority contract "+
+					"(memql#2876, open)",
 					rf.desc.FullName(), rf.name, f.Number())
 			}
 		})
