@@ -1,0 +1,217 @@
+package memql
+
+import (
+	"context"
+	"io"
+	"log/slog"
+	"testing"
+
+	"google.golang.org/grpc"
+
+	"github.com/znasllc-io/memql/component/auth"
+)
+
+// Tests for the wire-boundary client-origin stamp (memql#2889).
+//
+// Before this, the stamp lived in one handler and NOTHING asserted it. The
+// three tests that executed that line built a service with a nil engine, so
+// executeQuery returned Unavailable before anything could observe the context:
+// the line was covered and entirely unasserted, and deleting it broke no test
+// in the repo. These are the tests that make deleting it fail.
+
+// fakeStream is a grpc.ServerStream that carries a context of our choosing.
+// Only Context() is exercised; the rest of the interface is never called.
+type fakeStream struct {
+	grpc.ServerStream
+	ctx context.Context
+}
+
+func (f *fakeStream) Context() context.Context { return f.ctx }
+
+// passthroughInterceptor stands in for whichever auth chain app/transport.go
+// installs. It does what those chains do -- derive a context and hand the
+// handler a stream carrying it -- without needing any of their machinery.
+func passthroughInterceptor(derive func(context.Context) context.Context) grpc.StreamServerInterceptor {
+	return func(srv any, ss grpc.ServerStream, _ *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+		return handler(srv, &fakeStream{ServerStream: ss, ctx: derive(ss.Context())})
+	}
+}
+
+// TestWithClientOriginStampsTheWireBoundary: every handler beneath the
+// interceptor sees a context explicitly marked client-origin.
+func TestWithClientOriginStampsTheWireBoundary(t *testing.T) {
+	var got auth.CallOrigin
+	wrapped := withClientOrigin(passthroughInterceptor(func(ctx context.Context) context.Context { return ctx }))
+
+	err := wrapped(nil, &fakeStream{ctx: context.Background()}, &grpc.StreamServerInfo{},
+		func(_ any, ss grpc.ServerStream) error {
+			got = auth.OriginFromContext(ss.Context())
+			return nil
+		})
+	if err != nil {
+		t.Fatalf("interceptor returned %v", err)
+	}
+	if got.IsInternal() {
+		t.Error("a handler on the wire path saw INTERNAL origin; the stamp is not being applied")
+	}
+}
+
+// TestWithClientOriginOverridesAnInheritedInternalMark is the one that matters.
+//
+// OriginClient is the zero value, so the test above would pass even with no
+// stamp at all -- an unstamped context is already untrusted. The property the
+// stamp actually provides is OVERRIDE: an inherited internal mark must not
+// survive the wire boundary.
+//
+// Nothing on this path can supply such a mark today (component/grpc and
+// component/node contain no ContextWithInternalOrigin, enforced by
+// TestOnlyAllowlistedPackagesStampInternalOrigin). This drives the case
+// directly so the guarantee holds the day that stops being true -- which is
+// exactly how memql#2879's live hole arose one package over.
+func TestWithClientOriginOverridesAnInheritedInternalMark(t *testing.T) {
+	var got auth.CallOrigin
+	wrapped := withClientOrigin(passthroughInterceptor(func(ctx context.Context) context.Context { return ctx }))
+
+	// A stream whose context descends from server-side Go.
+	poisoned := auth.ContextWithInternalOrigin(context.Background())
+	if !auth.OriginFromContext(poisoned).IsInternal() {
+		t.Fatal("fixture is wrong: the parent context is not internal, so this test would pass vacuously")
+	}
+
+	err := wrapped(nil, &fakeStream{ctx: poisoned}, &grpc.StreamServerInfo{},
+		func(_ any, ss grpc.ServerStream) error {
+			got = auth.OriginFromContext(ss.Context())
+			return nil
+		})
+	if err != nil {
+		t.Fatalf("interceptor returned %v", err)
+	}
+	if got.IsInternal() {
+		t.Error("an inherited INTERNAL origin survived the wire boundary.\n" +
+			"Internal origin is the only thing that opens the @serverOnly gate, so this would let a " +
+			"wire caller read userByIdSystem / userByEmail / activeUsers -- full directory PII for any " +
+			"user they name, and enumeration of the whole active-user table.")
+	}
+}
+
+// TestWithClientOriginStampsAfterTheAuthChain: the stamp must land on the
+// context the auth chain produced, not on one the chain then replaces.
+//
+// Wrapping in the other order -- stamping ss.Context() before calling next --
+// looks equivalent and is not: an interceptor that derives its own context
+// from the stream would discard the stamp entirely, and every test above would
+// still pass because the zero value is client.
+func TestWithClientOriginStampsAfterTheAuthChain(t *testing.T) {
+	type key struct{}
+	var (
+		sawClaim any
+		got      auth.CallOrigin
+	)
+
+	// A chain that both adds a value AND poisons the origin, so this test
+	// fails if the stamp is applied before the chain rather than after.
+	chain := passthroughInterceptor(func(ctx context.Context) context.Context {
+		return auth.ContextWithInternalOrigin(context.WithValue(ctx, key{}, "claims"))
+	})
+
+	err := withClientOrigin(chain)(nil, &fakeStream{ctx: context.Background()}, &grpc.StreamServerInfo{},
+		func(_ any, ss grpc.ServerStream) error {
+			sawClaim = ss.Context().Value(key{})
+			got = auth.OriginFromContext(ss.Context())
+			return nil
+		})
+	if err != nil {
+		t.Fatalf("interceptor returned %v", err)
+	}
+	if sawClaim != "claims" {
+		t.Errorf("the auth chain's context did not reach the handler (got %v); the stamp must wrap the handler, not replace the chain's context", sawClaim)
+	}
+	if got.IsInternal() {
+		t.Error("the stamp landed BEFORE the auth chain, so the chain's context overwrote it")
+	}
+}
+
+// TestWithClientOriginPassesNilThrough: Server.Start refuses to run without an
+// interceptor, so nil here means a caller wired something wrong. Returning a
+// non-nil wrapper around nil would turn that into a nil-deref at the first RPC
+// instead of the existing explicit error at startup.
+func TestWithClientOriginPassesNilThrough(t *testing.T) {
+	if withClientOrigin(nil) != nil {
+		t.Error("withClientOrigin(nil) must stay nil so Server.Start's 'authentication interceptor not configured' check still fires")
+	}
+}
+
+// TestPrepareForRunInstallsTheClientOriginWrapper asserts the WIRING, which is
+// the half the tests above cannot reach.
+//
+// Four independent review lenses converged on the same gap: every test in this
+// file exercised withClientOrigin in isolation, so deleting the wrap from
+// prepareForRun left the entire repo green and the wrapper shipped as dead
+// code. That is precisely the defect memql#2889 was filed about -- a stamp
+// nothing asserted -- reproduced one level up.
+//
+// This drives the real prepareForRun against a :0 listener and then exercises
+// the interceptor it actually handed to grpc.NewServer, with a chain that
+// deliberately poisons the context, so the assertion covers both that the wrap
+// happened and that it still overrides.
+//
+// RESIDUAL GAP, stated rather than glossed. This asserts on the value
+// prepareForRun RECORDED. A change that recorded the wrapped interceptor but
+// passed the unwrapped one to grpc.NewServer would still pass -- confirmed by
+// mutation. Closing that needs an end-to-end test through a real dialled
+// stream, which needs a live engine. What this does cover is the realistic
+// regression: someone removing the wrap, in which case the recorded and
+// installed values are the same unwrapped one and this fails.
+func TestPrepareForRunInstallsTheClientOriginWrapper(t *testing.T) {
+	// prepareForRun reads the TLS env pair and fails if a cert path is set but
+	// unreadable. Without this the test inherits the developer's environment
+	// and fails for a reason that has nothing to do with what it asserts --
+	// the hazard scripts/dev's hermeticEnv exists for, one package over.
+	t.Setenv("MEMQL_GRPC_TLS_CERT_FILE", "")
+	t.Setenv("MEMQL_GRPC_TLS_KEY_FILE", "")
+
+	srv := NewServer("127.0.0.1:0", slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	// A chain that marks the context internal, standing in for the hazard the
+	// wrapper exists to defeat. If prepareForRun installs this unwrapped, the
+	// handler below sees INTERNAL and the test fails.
+	srv.SetStreamInterceptor(func(s any, ss grpc.ServerStream, _ *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+		return handler(s, &fakeStream{ServerStream: ss, ctx: auth.ContextWithInternalOrigin(ss.Context())})
+	})
+
+	_, cancel, err := srv.prepareForRun(context.Background())
+	// Cleanup is registered BEFORE the error check: prepareForRun binds the
+	// listener first and can fail after, so returning early on err would leak
+	// a bound port for the rest of the run.
+	if cancel != nil {
+		defer cancel()
+	}
+	if srv.listener != nil {
+		defer func() { _ = srv.listener.Close() }()
+	}
+	if srv.grpcServer != nil {
+		defer srv.grpcServer.Stop()
+	}
+	if err != nil {
+		t.Fatalf("prepareForRun: %v", err)
+	}
+
+	if srv.installedInterceptor == nil {
+		t.Fatal("prepareForRun installed no stream interceptor at all")
+	}
+
+	var got auth.CallOrigin
+	err = srv.installedInterceptor(nil, &fakeStream{ctx: context.Background()}, &grpc.StreamServerInfo{},
+		func(_ any, ss grpc.ServerStream) error {
+			got = auth.OriginFromContext(ss.Context())
+			return nil
+		})
+	if err != nil {
+		t.Fatalf("installed interceptor returned %v", err)
+	}
+	if got.IsInternal() {
+		t.Error("the interceptor prepareForRun installed does NOT stamp client origin.\n" +
+			"withClientOrigin is present but not wired, so every request-derived handler would " +
+			"inherit whatever origin the auth chain left behind.")
+	}
+}

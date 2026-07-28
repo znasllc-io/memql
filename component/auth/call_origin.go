@@ -75,6 +75,22 @@ const callOriginKey contextKey = "callOrigin"
 // on a context that code controls. Never call it in a request handler on a
 // context derived from an inbound request: that would launder client origin
 // into internal for everything downstream.
+//
+// THAT RULE IS ENFORCED, not merely stated (memql#2889).
+// TestOnlyAllowlistedPackagesStampInternalOrigin at the repo root parses every
+// git-tracked non-test .go file, resolves import aliases, and fails if this
+// function is called from a package outside a small allowlist -- and
+// unconditionally if it is called from component/grpc or component/node, where
+// every context descends from an inbound request. Adding a call in a new
+// package is a deliberate act that a reviewer sees, rather than a line nobody
+// notices.
+//
+// Prefer keeping the stamp INLINE as the argument to the one Execute that
+// needs it, as almost every caller here does. Then the marked context dies at
+// that call and its blast radius is one query. Binding it to a variable that
+// flows on is what made memql#2879's hole reachable: a trusted frame stamped
+// internal, and a later frame in the same tree ran caller-submitted source on
+// the inherited context.
 func ContextWithInternalOrigin(ctx context.Context) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
