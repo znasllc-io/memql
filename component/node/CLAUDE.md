@@ -38,7 +38,7 @@ component/node/
 ├── CLAUDE.md              # This file
 ├── identity.go            # NodeType enum, Identity struct, env var parsing
 ├── lifecycle.go           # NodeLifecycle state machine (Starting/Ready/Draining/Stopped, #1268)
-├── node.proto             # NodeService proto (11 message types)
+├── node.proto             # NodeService proto (20 message types)
 ├── generate.go            # protoc go:generate directive
 ├── gen/                   # Generated gRPC code
 │   ├── node.pb.go
@@ -57,7 +57,6 @@ component/node/
 ├── bootstrap_agent.go
 ├── bootstrap_planner.go
 ├── capability_router.go   # Route capability lookups across the mesh
-├── query_proxy.go         # Forward queries to concept-owning nodes
 ├── parent_connector.go    # ParentConnector -- child dials its MEMQL_PARENT_ADDRESS
 └── worker_dialer.go       # WorkerDialer -- BFF opens outbound streams to workers
                             # (seeded by MEMQL_WORKER_PEERS, reconciled via v1:cluster:node
@@ -305,9 +304,9 @@ directions once the mesh is up.
 ## NodeService Proto
 
 Single bidirectional stream. `NodeClientMessage` envelopes flow client->server
-(NodeHello, NodeHeartbeat, QueryForward, AiForwardRequest, AiForwardCancel,
-etc.); `NodeServerMessage` envelopes flow server->client (NodeWelcome,
-NodeHeartbeat, PeerIntroduction, QueryResponse, AiForwardResponse, etc.).
+(NodeHello, NodeHeartbeat, AiForwardRequest, AiForwardCancel, etc.);
+`NodeServerMessage` envelopes flow server->client (NodeWelcome, NodeHeartbeat,
+PeerIntroduction, AiForwardResponse, etc.).
 
 | Message | Direction | Purpose |
 |---------|-----------|---------|
@@ -318,6 +317,25 @@ NodeHeartbeat, PeerIntroduction, QueryResponse, AiForwardResponse, etc.).
 | SpawnRequest/Result | Bidirectional | Node spawning |
 | EventForward/Ack | Bidirectional | Distributed events |
 | CapabilityQuery/Response | Bidirectional | Capability discovery |
-| QueryForward / QueryResponse | C->S / S->C | Cross-node MemQL query routing |
 | AiForwardRequest / AiForwardResponse / AiForwardCancel | C->S / S->C / C->S | BFF->worker AI/voice forwarding (see `component/grpc/ai_forward.go`) |
 | NodeShutdown | Server -> Client | Graceful shutdown |
+
+`QueryForward` / `QueryResponse` (tags 60) were the receive half of cross-node
+MemQL query routing. **Removed in memql#2814** and the tags reserved.
+
+The receive side is the only side that ever existed -- nothing in this repo's
+history constructs a `QueryForward`, and the routing stub that would have driven
+one (`query_proxy.go`, with `RegisterConceptOwnership`) was log-only and was
+deleted in `ac3a751e`. It was removed rather than repaired because the repair on
+offer was unsafe: it prescribed `auth.ForwardedClaimsFromIdentity` as the
+producer recipe, and that recipe carries no `class` / `role_ceiling`, so
+`applyBadgeRoleCeiling` (which clamps only when `class == "badge"`) never fired
+and a forwarded badge session resolved an *unclamped* role. Carrying those two
+claims is possible -- `auth.WithForwardedAuthorityContext` exists for it -- but
+it is deliberately unwired, because sourcing them correctly is the unsolved part.
+
+The mesh authority-propagation contract belongs on memql#2876, against the live
+AiForward path -- parked as of this removal, with its one attempt reverted, so
+treat it as an open design problem. Concept ownership is decided by routing rules
+plus build tags, not by a forwarding registry -- see
+`docs/internal/design/extension-points.md`.

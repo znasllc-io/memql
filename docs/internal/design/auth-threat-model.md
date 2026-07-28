@@ -34,7 +34,7 @@ Authorization inside handlers is per-row, enforced by the DSL query/mutation lay
 
 ### 1.2 gRPC — `NodeService.Stream`
 
-Inter-node mesh. Same interceptor stack as `MemqlService.Stream`. Used for `NodeHello`, `NodeHeartbeat`, `PeerIntroduction`, `EventForward`, `QueryForward`, `AiForwardRequest`, `WorkbenchForwardRequest`.
+Inter-node mesh. Same interceptor stack as `MemqlService.Stream`. Used for `NodeHello`, `NodeHeartbeat`, `PeerIntroduction`, `EventForward`, `AiForwardRequest`, `WorkbenchForwardRequest`.
 
 **Trust assumption:** any binary that holds a valid identity-issued JWT is treated as a peer. See §5.1.
 
@@ -145,7 +145,7 @@ Single-node dev (the default BFF-only run) doesn't open inter-node streams; the 
 
 
 
-`NodeService.Stream` validates the inbound JWT but does **not** require a per-node service-account credential. Any binary that holds a valid identity-issued JWT is treated as a peer and may call `NodeHello`, `PeerIntroduction`, `EventForward`, `QueryForward`, `AiForwardRequest`, or `WorkbenchForwardRequest`.
+`NodeService.Stream` validates the inbound JWT but does **not** require a per-node service-account credential. Any binary that holds a valid identity-issued JWT is treated as a peer and may call `NodeHello`, `PeerIntroduction`, `EventForward`, `AiForwardRequest`, or `WorkbenchForwardRequest`.
 
 **Trust assumption:** the cluster runs inside a trusted network boundary (private VPC, Kubernetes namespace, mTLS-terminated load balancer). An attacker who can reach `NodeService.Stream` from outside the boundary AND who holds a valid JWT is by design out of model — the JWT alone shouldn't be enough to reach this surface.
 

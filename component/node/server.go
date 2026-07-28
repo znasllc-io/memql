@@ -44,7 +44,6 @@ type NodeServer struct {
 	identity                 *Identity
 	peerManager              *PeerManager
 	readyCh                  chan struct{}
-	queryExecutor            QueryExecutor
 	aiForwardHandler         AiForwardHandler
 	aiForwardResponse        AiForwardResponseSink
 	workbenchForwardHandler  WorkbenchForwardHandler
@@ -69,16 +68,6 @@ func (s *NodeServer) SetAuthInterceptor(i grpc.StreamServerInterceptor) {
 		return
 	}
 	s.authInterceptor = i
-}
-
-// SetQueryExecutor installs the executor consulted for inbound
-// QueryForward messages. Called during bootstrap on nodes that own
-// concepts the BFF routes to.
-func (s *NodeServer) SetQueryExecutor(e QueryExecutor) {
-	if s == nil {
-		return
-	}
-	s.queryExecutor = e
 }
 
 // SetAiForwardHandler installs the worker-side AI/voice request handler.
@@ -246,7 +235,6 @@ func (s *NodeServer) prepareForRun(ctx context.Context) (context.Context, contex
 		logger:                   s.logger,
 		identity:                 s.identity,
 		peerManager:              s.peerManager,
-		queryExecutor:            s.queryExecutor,
 		aiForwardHandler:         s.aiForwardHandler,
 		aiForwardResponse:        s.aiForwardResponse,
 		workbenchForwardHandler:  s.workbenchForwardHandler,

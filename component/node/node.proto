@@ -22,6 +22,10 @@ message NodeClientMessage {
   string message_id = 1;
   string correlate_to = 2;
   map<string, string> metadata = 3;
+  // 60 (query_forward) retired with the cross-node query-forwarding
+  // machinery, #2814.
+  reserved 60;
+  reserved "query_forward";
 
   oneof payload {
     NodeHello node_hello = 10;
@@ -33,7 +37,6 @@ message NodeClientMessage {
     EventAck event_ack = 31;
     CapabilityQuery capability_query = 40;
     CapabilityResponse capability_response = 41;
-    QueryForward query_forward = 60;
     AiForwardRequest ai_forward_request = 70;
     AiForwardCancel ai_forward_cancel = 71;
     WorkbenchForwardRequest workbench_forward_request = 80;
@@ -45,6 +48,10 @@ message NodeServerMessage {
   string message_id = 1;
   string correlate_to = 2;
   map<string, string> metadata = 3;
+  // 60 (query_response) retired with the cross-node query-forwarding
+  // machinery, #2814.
+  reserved 60;
+  reserved "query_response";
 
   oneof payload {
     NodeWelcome node_welcome = 10;
@@ -57,7 +64,6 @@ message NodeServerMessage {
     CapabilityQuery capability_query = 40;
     CapabilityResponse capability_response = 41;
     NodeShutdown node_shutdown = 50;
-    QueryResponse query_response = 60;
     AiForwardResponse ai_forward_response = 70;
     WorkbenchForwardResponse workbench_forward_response = 80;
   }
@@ -187,28 +193,47 @@ message CapabilityResponse {
 }
 
 // ---------------------------------------------------------------------------
-// Query Forwarding
+// Query Forwarding -- RETIRED (#2814)
 // ---------------------------------------------------------------------------
-
-// QueryForward carries a MemQL query from one node to another for
-// execution. Used when a client sends a query to a node that doesn't
-// own the target concept. The receiving node executes the query
-// locally and returns a QueryResponse.
-message QueryForward {
-  string request_id = 1;
-  string query = 2;
-  reserved 3;
-  reserved "partition";
-}
-
-// QueryResponse carries the result of a forwarded query back to the
-// requesting node. result_json is the JSON-encoded query result.
-message QueryResponse {
-  string request_id = 1;
-  bool success = 2;
-  bytes result_json = 3;
-  string error = 4;
-}
+//
+// QueryForward / QueryResponse carried a MemQL query from one node to another
+// for execution, for the case where a client queried a node that did not own
+// the target concept.
+//
+// The receive side is the only side that ever existed. No producer was ever
+// built: nothing in this repo's history puts a QueryForward on a stream, and
+// the sending half was always deferred. (Test fixtures on the abandoned
+// issue-2814-queryforward-actor branch construct the message to drive this
+// handler directly; none of them send it.) The routing stub that would have
+// driven a real producer -- query_proxy.go, with RegisterConceptOwnership --
+// resolved a target for the call site to log, and nothing more. ac3a751e
+// ("simplify: drop per-node @visibility filtering + concept-ownership
+// routing", 2026-05-16) deleted that stub as over-engineered, calling the
+// proxy "log-only" and its deletion "a no-op behaviorally".
+//
+// So this handler had no caller it could ever have had, no production caller of
+// the SetQueryExecutor seam, and -- since ac3a751e -- no registry to decide
+// which node owns a concept. Ownership is routing rules plus build tags now
+// (see docs/internal/design/extension-points.md).
+//
+// It was removed rather than repaired because the repair was unsafe to
+// publish. The handler executed forwarded DSL on context.Background(), so it
+// ran with no actor at all; propagating the caller's claims to fix that meant
+// prescribing auth.ForwardedClaimsFromIdentity as the producer recipe, and
+// that recipe cannot carry a badge grant's `class` / `role_ceiling`. Since
+// applyBadgeRoleCeiling clamps only when class=="badge", a forwarded badge
+// session resolved the operator's UNCLAMPED stored role -- an owner badged
+// into a reader kiosk came back isClusterOwner=true on a surface that
+// dispatches mutations and logic.
+//
+// The mesh authority-propagation contract belongs on #2876 -- the AiForward
+// path, which unlike this one is live in production and carries the same
+// missing-actor defect. That issue is PARKED as of this removal, and its one
+// attempt was reverted for reintroducing the ceiling loss described above, so
+// treat it as an open design problem rather than work in flight. See
+// component/auth/forward.go for the constraints any such contract must
+// satisfy. If concept-ownership routing is ever built, it needs that contract
+// first, not this machinery back.
 
 // ---------------------------------------------------------------------------
 // AI / voice request forwarding

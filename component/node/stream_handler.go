@@ -2,22 +2,14 @@ package node
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 	"log/slog"
 	"time"
 
-	memqlengine "github.com/znasllc-io/memql/component/memql"
 	nodev1 "github.com/znasllc-io/memql/component/node/gen"
 	"github.com/znasllc-io/memql/core/id"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
-
-// QueryExecutor is the interface for executing MemQL queries.
-// Satisfied by *memqlengine.MemQLEngine.
-type QueryExecutor interface {
-	Execute(ctx context.Context, query string) (*memqlengine.ExecuteResult, error)
-}
 
 // AiForwardHandler is the worker-side entry point for a forwarded AI /
 // voice request. The nodeService invokes it when an inbound
@@ -84,7 +76,6 @@ type nodeService struct {
 	logger                   *slog.Logger
 	identity                 *Identity
 	peerManager              *PeerManager
-	queryExecutor            QueryExecutor                // set via SetQueryExecutor for cross-node query forwarding
 	aiForwardHandler         AiForwardHandler             // worker-side handler; nil on BFF binaries
 	aiForwardResponse        AiForwardResponseSink        // BFF-side response sink; nil on worker binaries
 	workbenchForwardHandler  WorkbenchForwardHandler      // workbench-side handler; nil on non-workbench binaries
@@ -329,9 +320,6 @@ func (s *nodeService) handleMessage(peerId string, msg *nodev1.NodeClientMessage
 	case *nodev1.NodeClientMessage_CapabilityQuery:
 		s.handleCapabilityQuery(peerId, payload.CapabilityQuery, stream)
 
-	case *nodev1.NodeClientMessage_QueryForward:
-		s.handleQueryForward(peerId, payload.QueryForward, stream)
-
 	case *nodev1.NodeClientMessage_AiForwardRequest:
 		s.handleAiForwardRequest(peerId, payload.AiForwardRequest, stream)
 
@@ -466,13 +454,6 @@ func (s *nodeService) broadcastPeerIntroduction(peers []*nodev1.PeerInfo, remova
 	}
 }
 
-// buildHeartbeatMessage constructs a NodeHeartbeat envelope for the given
-// SetQueryExecutor configures the engine used to execute forwarded queries.
-// Called during bootstrap to wire the engine into the NodeService handler.
-func (s *nodeService) SetQueryExecutor(executor QueryExecutor) {
-	s.queryExecutor = executor
-}
-
 // SetAiForwardHandler installs the worker-side handler invoked for
 // inbound AiForwardRequest messages. Left nil on BFF binaries (they
 // don't execute forwards locally; they only originate them).
@@ -576,69 +557,7 @@ func (s *nodeService) handleWorkbenchForwardCancel(peerId string, cancel *nodev1
 	s.workbenchForwardHandler.CancelForwardedRequest(context.Background(), cancel.GetRequestId())
 }
 
-// handleQueryForward executes a forwarded query locally and sends the
-// result back to the requesting node. This is the server-side handler
-// for cross-node query routing: the requesting node's QueryProxy
-// determined that this node owns the target concept, forwarded the
-// query, and now we execute it and return the result.
-func (s *nodeService) handleQueryForward(peerId string, req *nodev1.QueryForward, stream nodev1.NodeService_StreamServer) {
-	if s.queryExecutor == nil {
-		s.logger.Warn("query forward received but no query executor configured",
-			"peer_id", peerId,
-			"request_id", req.RequestId,
-		)
-		_ = stream.Send(&nodev1.NodeServerMessage{
-			CorrelateTo: req.RequestId,
-			Payload: &nodev1.NodeServerMessage_QueryResponse{
-				QueryResponse: &nodev1.QueryResponse{
-					RequestId: req.RequestId,
-					Success:   false,
-					Error:     "query executor not configured on this node",
-				},
-			},
-		})
-		return
-	}
-
-	s.logger.Debug("executing forwarded query",
-		"peer_id", peerId,
-		"request_id", req.RequestId,
-		"query", req.Query,
-	)
-
-	result, err := s.queryExecutor.Execute(context.Background(), req.Query)
-	if err != nil {
-		_ = stream.Send(&nodev1.NodeServerMessage{
-			CorrelateTo: req.RequestId,
-			Payload: &nodev1.NodeServerMessage_QueryResponse{
-				QueryResponse: &nodev1.QueryResponse{
-					RequestId: req.RequestId,
-					Success:   false,
-					Error:     err.Error(),
-				},
-			},
-		})
-		return
-	}
-
-	// Serialize the result to JSON for transport.
-	var resultJSON []byte
-	if result != nil && result.Bundle != nil {
-		resultJSON, _ = json.Marshal(result.Bundle)
-	}
-
-	_ = stream.Send(&nodev1.NodeServerMessage{
-		CorrelateTo: req.RequestId,
-		Payload: &nodev1.NodeServerMessage_QueryResponse{
-			QueryResponse: &nodev1.QueryResponse{
-				RequestId:  req.RequestId,
-				Success:    true,
-				ResultJson: resultJSON,
-			},
-		},
-	})
-}
-
+// buildHeartbeatMessage constructs a NodeHeartbeat envelope for the given
 // health status, stamped with the current time. Used by the connection's
 // heartbeat loop to enqueue heartbeats on the existing send channel.
 func buildHeartbeatMessage(health nodev1.NodeHealthStatus) *nodev1.NodeClientMessage {
