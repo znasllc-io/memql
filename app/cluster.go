@@ -108,12 +108,6 @@ func (a *App) cluster() {
 	}
 	a.Dependencies = append(a.Dependencies, nodeDeps...)
 
-	// Wire QueryProxy for cross-node query routing. The proxy maps
-	// concept domain prefixes to owning node types. When the gRPC
-	// handler receives a query for a concept not in the local registry,
-	// it logs the routing target (actual forwarding via NodeService is
-	// a follow-up).
-	//
 	// Wire AI/voice forwarding across the cluster:
 	//   * On BFF binaries: install the outbound AiForwardRouter on the
 	//     gRPC server (so AI handlers proxy to workers), the

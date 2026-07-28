@@ -305,9 +305,9 @@ directions once the mesh is up.
 ## NodeService Proto
 
 Single bidirectional stream. `NodeClientMessage` envelopes flow client->server
-(NodeHello, NodeHeartbeat, QueryForward, AiForwardRequest, AiForwardCancel,
-etc.); `NodeServerMessage` envelopes flow server->client (NodeWelcome,
-NodeHeartbeat, PeerIntroduction, QueryResponse, AiForwardResponse, etc.).
+(NodeHello, NodeHeartbeat, AiForwardRequest, AiForwardCancel, etc.);
+`NodeServerMessage` envelopes flow server->client (NodeWelcome, NodeHeartbeat,
+PeerIntroduction, AiForwardResponse, etc.).
 
 | Message | Direction | Purpose |
 |---------|-----------|---------|
@@ -318,6 +318,15 @@ NodeHeartbeat, PeerIntroduction, QueryResponse, AiForwardResponse, etc.).
 | SpawnRequest/Result | Bidirectional | Node spawning |
 | EventForward/Ack | Bidirectional | Distributed events |
 | CapabilityQuery/Response | Bidirectional | Capability discovery |
-| QueryForward / QueryResponse | C->S / S->C | Cross-node MemQL query routing |
 | AiForwardRequest / AiForwardResponse / AiForwardCancel | C->S / S->C / C->S | BFF->worker AI/voice forwarding (see `component/grpc/ai_forward.go`) |
 | NodeShutdown | Server -> Client | Graceful shutdown |
+
+`QueryForward` / `QueryResponse` (tags 60) carried cross-node MemQL query
+routing. **Removed in memql#2814** and the tags reserved: the receive side was
+the only side that ever existed, and the identity propagation needed to make it
+safe could not be expressed with the current forwarded-claims shape (a badge
+grant's `class` / `role_ceiling` could not cross the hop, so a forwarded badge
+session resolved an unclamped role). The mesh authority-propagation contract is
+being designed once on memql#2876, against the live AiForward path. Concept
+ownership is decided by routing rules plus build tags, not by a forwarding
+registry -- see `docs/internal/design/extension-points.md`.
