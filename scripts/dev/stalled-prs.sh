@@ -168,7 +168,29 @@ require_gh() {
 # finding. `[ "$x" -lt "$y" ]` ERRORS on a non-integer rather than evaluating
 # false, so an unvalidated `IDLE_MINUTES=45m` made every comparison fail and
 # every PR -- including one-minute-old ones -- fall through to STALLED.
+# require_whole_minutes applies that rule to one named knob. Split out of
+# require_valid_threshold when CLOSED_MAX_AGE_MINUTES arrived (memql#2887):
+# the second knob shipped unvalidated, and `CLOSED_MAX_AGE_MINUTES=14d`
+# silently DISABLED its age gate -- `[ "$age" -gt "14d" ]` errors, execution
+# falls through, every candidate is examined again, and the operator sees a
+# normal report with a bound they believe is in force and is not. Exactly the
+# failure this function already existed to prevent, one knob over.
+require_whole_minutes() {
+  local name="$1" value="$2"
+  case "$value" in
+    '' | *[!0-9]*)
+      echo "ERROR: ${name} must be a whole number of minutes; got '${value}'." >&2
+      exit 2
+      ;;
+  esac
+  if [ "${#value}" -gt 10 ]; then
+    echo "ERROR: ${name}=${value} is implausibly large; use a value under 10 digits." >&2
+    exit 2
+  fi
+}
+
 require_valid_threshold() {
+  require_whole_minutes CLOSED_MAX_AGE_MINUTES "$CLOSED_MAX_AGE_MINUTES"
   case "$IDLE_MINUTES" in
     '' | *[!0-9]*)
       echo "ERROR: IDLE_MINUTES must be a whole number of minutes; got '${IDLE_MINUTES}'." >&2
@@ -597,7 +619,7 @@ report_closed_unmerged() {
     echo "WARNING: hit the ${CLOSED_PAGE_LIMIT}-PR cap on the closed-unmerged sweep; older ones were NOT examined." >&2
   fi
 
-  local lost=0 orphan=0 examined=0 skipped=0 unknown=0 printed=0
+  local lost=0 orphan=0 examined=0 skipped=0 superseded=0 unknown=0 printed=0
   while IFS=$'\t' read -r num branch_name closed_epoch title; do
     [ -z "${num:-}" ] && continue
 
@@ -626,12 +648,30 @@ report_closed_unmerged() {
     # also the head of a PR that is open RIGHT NOW was replaced, not lost --
     # reporting it would send someone to rescue work that is already back in
     # flight, which is worse than saying nothing.
-    if [ "$branch" = "present" ] && [ "$branch_name" != "-" ] &&
+    #
+    # The emptiness guard is not redundant with the "-" one. open_branches is
+    # built by appending a newline per row, and the herestring adds another, so
+    # it ALWAYS contains at least one empty line -- and `grep -Fxq -- ""`
+    # matches an empty line. Without `-n`, a closed PR whose branch_name came
+    # through empty would match every time and its LOST-WORK finding would
+    # vanish with no row and no count.
+    #
+    # KNOWN LIMIT: headRefName carries no repository, so a closed PR from one
+    # fork can match an open PR from another on a common branch name
+    # (patch-1, main). That suppresses a real finding. Narrow here -- this
+    # repo's branches are issue/<N>-<slug> and cross-fork PRs are not the
+    # workflow -- but it is a false NEGATIVE in a watchdog, so it is named
+    # rather than left for someone to discover.
+    if [ "$branch" = "present" ] && [ -n "$branch_name" ] && [ "$branch_name" != "-" ] &&
       grep -Fxq -- "$branch_name" <<<"$open_branches"; then
       bucket="SUPERSEDED"
     fi
 
     [ "$bucket" = "UNKNOWN" ] && unknown=$((unknown + 1))
+    # Counted, not just skipped. A suppression a reader cannot see is
+    # indistinguishable from "the check found nothing", and this one hides
+    # rows that would otherwise be findings.
+    [ "$bucket" = "SUPERSEDED" ] && superseded=$((superseded + 1))
 
     # A branch that is gone is unrecoverable, and a superseded one is already
     # being worked: neither is worth a reader's attention. Everything else is
@@ -652,21 +692,36 @@ report_closed_unmerged() {
       # resolved, and NO-OPEN-ISSUE rows have no open issue by definition.
       # The STATE column carries the distinction.
       echo "CLOSED WITHOUT MERGING -- branch still on the remote (STATE says how recoverable):"
-      printf '%-7s %-14s %-9s %-13s %-26s  %s\n' "PR" "STATE" "CLOSED" "OPEN ISSUES" "BRANCH" "TITLE"
-      printf '%-7s %-14s %-9s %-13s %-26s  %s\n' "-------" "--------------" "---------" "-------------" "--------------------------" "-----"
+      printf '%-7s %-14s %-8s %-11s %-44s  %s\n' "PR" "STATE" "CLOSED" "OPEN ISS" "BRANCH" "TITLE"
+      printf '%-7s %-14s %-8s %-11s %-44s  %s\n' "-------" "--------------" "--------" "-----------" "--------------------------------------------" "-----"
       printed=1
     fi
     [ "$bucket" = "LOST-WORK" ] && lost=$((lost + 1))
     [ "$bucket" = "NO-OPEN-ISSUE" ] && orphan=$((orphan + 1))
     age_col="${age}m"
     [ "$age" = "unknown" ] && age_col="?"
-    printf '#%-6s %-14s %-9s %-13s %-26s  %s\n' "$num" "$bucket" "$age_col" "$open_issues" "${branch_name:0:26}" "${title:0:40}"
+    # BRANCH is the one COPY-PASTEABLE field here -- the summary tells the
+    # reader to go check the branch -- so it is given room, and a truncation
+    # is MARKED. A silently shortened ref is worse than a long line: it looks
+    # like a branch name and `git fetch` fails on it. A truncated title is
+    # merely less informative, which is why title absorbs the width.
+    local branch_col="$branch_name"
+    [ "${#branch_col}" -gt 44 ] && branch_col="${branch_col:0:41}..."
+    printf '#%-6s %-14s %-8s %-11s %-44s  %s\n' "$num" "$bucket" "$age_col" "$open_issues" "$branch_col" "${title:0:32}"
   done <<<"$rows"
 
+  # These notes come BEFORE the early return: a run where everything was
+  # skipped or superseded prints no rows at all, and that is exactly the case
+  # where silence would be read as an all-clear.
   if [ "$skipped" -gt 0 ]; then
     echo
     echo "NOTE: ${skipped} closed-unmerged PR(s) older than ${CLOSED_MAX_AGE_MINUTES} minutes were listed but NOT examined."
     echo "      Each costs an API call. Raise CLOSED_MAX_AGE_MINUTES to include them."
+  fi
+  if [ "$superseded" -gt 0 ]; then
+    echo
+    echo "NOTE: ${superseded} closed-unmerged PR(s) are SUPERSEDED -- their branch is the head of a PR that is"
+    echo "      open right now, so the work is back in flight rather than lost. Not listed."
   fi
 
   [ "$printed" -eq 0 ] && return
@@ -676,8 +731,8 @@ report_closed_unmerged() {
     echo "${lost} of ${examined} examined closed-unmerged PR(s) may have LOST WORK: closed without merging,"
     echo "branch still on the remote, linked issue still open. The issue has returned to the pool, so a"
     echo "session may rebuild what is already written on that branch. Check whether a replacement PR is"
-    echo "already open before acting -- a same-branch replacement is detected and shown as SUPERSEDED, but"
-    echo "a replacement on a DIFFERENT branch is not."
+    echo "already open before acting: a replacement on the SAME branch is detected and counted above as"
+    echo "superseded, but a replacement on a DIFFERENT branch is not detected at all."
   fi
   if [ "$orphan" -gt 0 ]; then
     echo "${orphan} have a live branch but no open linked issue. Weaker signal -- the work may have been"
@@ -711,6 +766,11 @@ Environment:
   IDLE_MINUTES   how long a green PR's HEAD COMMIT must sit unchanged before it
                  counts as STALLED (default: 45). Comments, labels and reviews
                  do not reset it; only a new head SHA does.
+  CLOSED_MAX_AGE_MINUTES
+                 how far back the closed-without-merging sweep looks
+                 (default: 20160 = 14 days). Older PRs are listed but not
+                 examined, because examining one costs an API call. Whatever
+                 is skipped is counted and announced.
 
 Columns:
   IDLE     head-commit age -- the gate

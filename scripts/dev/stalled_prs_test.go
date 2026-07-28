@@ -1111,3 +1111,95 @@ func TestStalledPRs_ScriptIsValidBash(t *testing.T) {
 		t.Errorf("bash -n %s failed: %v\n%s", stalledPRsScript, err, out)
 	}
 }
+
+// TestStalledPRs_UnknownCloseDateStaysInTheSweep pins the age gate's
+// default-deny half, which was previously asserted only by a comment.
+//
+// Mutating the gate from `age != unknown && age > max` to
+// `age == unknown || age > max` -- so a failed date parse DELETES a PR from a
+// watchdog -- passed the entire suite before this test existed.
+func TestStalledPRs_UnknownCloseDateStaysInTheSweep(t *testing.T) {
+	for _, closedAt := range []string{"-", ""} {
+		t.Run("closedAt="+closedAt, func(t *testing.T) {
+			cfg := oneStalledPR
+			cfg.closedList = "11\tissue/11-thing\t" + closedAt + "\ta closed pr\n"
+			cfg.closedFacts = "present\t101"
+
+			res := runScript(t, cfg)
+
+			got := bucketsIn(closedSection(res.stdout))
+			if len(got) != 1 || got[0] != "LOST-WORK" {
+				t.Errorf("closed-sweep buckets = %v, want [LOST-WORK].\nAn unresolvable close date must keep the PR IN the sweep -- excluding it silently is the same class of failure as manufacturing a finding.\nstdout:\n%s", got, res.stdout)
+			}
+		})
+	}
+}
+
+// TestStalledPRs_ClosedMaxAgeIsValidated: the knob that gates the sweep must
+// be validated like IDLE_MINUTES is.
+//
+// Unvalidated, CLOSED_MAX_AGE_MINUTES=14d made `[ "$age" -gt "14d" ]` error,
+// execution fell through, every candidate was examined anyway, and the
+// operator saw a normal report believing a 14-day bound was in force.
+func TestStalledPRs_ClosedMaxAgeIsValidated(t *testing.T) {
+	// "" is NOT in this list: `${CLOSED_MAX_AGE_MINUTES:-20160}` treats
+	// set-but-empty as unset, so an empty value means "use the default" --
+	// the same contract IDLE_MINUTES has. Rejecting it would break
+	// `CLOSED_MAX_AGE_MINUTES= make prs-stalled`.
+	for _, bad := range []string{"14d", "99999999999999999999", " 60", "-5"} {
+		t.Run("CLOSED_MAX_AGE_MINUTES="+bad, func(t *testing.T) {
+			res := runScript(t, oneStalledPR, "CLOSED_MAX_AGE_MINUTES="+bad)
+			if res.code != 2 {
+				t.Errorf("exit = %d, want 2 for CLOSED_MAX_AGE_MINUTES=%q.\nSilently ignoring it disables the age gate while the report still looks normal.\nstderr: %s",
+					res.code, bad, res.stderr)
+			}
+			if !strings.Contains(res.stderr, "CLOSED_MAX_AGE_MINUTES") {
+				t.Errorf("the error must name the offending knob; got: %s", res.stderr)
+			}
+		})
+	}
+
+	// A valid value still works, so the guard cannot be satisfied by rejecting
+	// everything.
+	if res := runScript(t, oneStalledPR, "CLOSED_MAX_AGE_MINUTES=60"); res.code != 0 {
+		t.Errorf("a valid CLOSED_MAX_AGE_MINUTES must still run; exit=%d stderr=%s", res.code, res.stderr)
+	}
+}
+
+// TestStalledPRs_SupersededIsCounted: suppressing a row without saying so
+// leaves a reader unable to tell "found nothing" from "hid five findings".
+func TestStalledPRs_SupersededIsCounted(t *testing.T) {
+	cfg := oneStalledPR
+	cfg.closedList = fmt.Sprintf("11\tissue/7-x\t%d\ta superseded pr\n", time.Now().Unix()-3600)
+	cfg.closedFacts = "present\t101"
+
+	res := runScript(t, cfg)
+
+	if !strings.Contains(res.stdout, "SUPERSEDED") {
+		t.Errorf("a suppressed superseded PR must be counted and announced -- every other suppression in this script is.\nstdout:\n%s", res.stdout)
+	}
+	if got := bucketsIn(closedSection(res.stdout)); len(got) != 0 {
+		t.Errorf("it must be counted, not listed as a finding; got rows %v", got)
+	}
+}
+
+// TestStalledPRs_TruncatedBranchIsMarked: BRANCH is the copy-pasteable field
+// and the summary tells the reader to go check it, so a silently shortened ref
+// is worse than a long line -- it looks like a branch name and `git fetch`
+// fails on it.
+func TestStalledPRs_TruncatedBranchIsMarked(t *testing.T) {
+	long := "issue/11-" + strings.Repeat("x", 60)
+	cfg := oneStalledPR
+	cfg.closedList = fmt.Sprintf("11\t%s\t%d\ta closed pr\n", long, time.Now().Unix()-3600)
+	cfg.closedFacts = "present\t101"
+
+	res := runScript(t, cfg)
+	sec := closedSection(res.stdout)
+
+	if strings.Contains(sec, long) {
+		return // not truncated at all: nothing to mark
+	}
+	if !strings.Contains(sec, "...") {
+		t.Errorf("a truncated branch name must be marked; an unmarked one is indistinguishable from a real, shorter ref.\nstdout:\n%s", sec)
+	}
+}
