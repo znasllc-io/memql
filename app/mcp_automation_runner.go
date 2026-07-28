@@ -85,7 +85,12 @@ func (r *mcpAutomationRunner) RunAutomation(ctx context.Context, owner, name str
 
 	// Resolve the requested name to a runnable automation through the SAME
 	// canonical resolver on BOTH the dry-run and live paths (memql#1663), so
-	// they cannot diverge. LoadByName accepts the automation name or a wrapped
+	// they cannot diverge ON WHICH CONSTRUCT RUNS.
+	//
+	// That is narrower than it used to read. Shared resolution does not by
+	// itself make the two paths behave alike: they also have to agree on the
+	// construct's TRUST, and for a while they did not -- see the dry-run branch
+	// below and memql#2890. LoadByName accepts the automation name or a wrapped
 	// logic construct's name (full `logicXxx` or bare form) and returns a clear
 	// "not a runnable entry point" error for an internal-only logic construct.
 	auto, err := r.loader.LoadByName(name)
