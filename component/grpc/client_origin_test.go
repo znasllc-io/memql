@@ -154,7 +154,22 @@ func TestWithClientOriginPassesNilThrough(t *testing.T) {
 // the interceptor it actually handed to grpc.NewServer, with a chain that
 // deliberately poisons the context, so the assertion covers both that the wrap
 // happened and that it still overrides.
+//
+// RESIDUAL GAP, stated rather than glossed. This asserts on the value
+// prepareForRun RECORDED. A change that recorded the wrapped interceptor but
+// passed the unwrapped one to grpc.NewServer would still pass -- confirmed by
+// mutation. Closing that needs an end-to-end test through a real dialled
+// stream, which needs a live engine. What this does cover is the realistic
+// regression: someone removing the wrap, in which case the recorded and
+// installed values are the same unwrapped one and this fails.
 func TestPrepareForRunInstallsTheClientOriginWrapper(t *testing.T) {
+	// prepareForRun reads the TLS env pair and fails if a cert path is set but
+	// unreadable. Without this the test inherits the developer's environment
+	// and fails for a reason that has nothing to do with what it asserts --
+	// the hazard scripts/dev's hermeticEnv exists for, one package over.
+	t.Setenv("MEMQL_GRPC_TLS_CERT_FILE", "")
+	t.Setenv("MEMQL_GRPC_TLS_KEY_FILE", "")
+
 	srv := NewServer("127.0.0.1:0", slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	// A chain that marks the context internal, standing in for the hazard the
@@ -165,9 +180,9 @@ func TestPrepareForRunInstallsTheClientOriginWrapper(t *testing.T) {
 	})
 
 	_, cancel, err := srv.prepareForRun(context.Background())
-	if err != nil {
-		t.Fatalf("prepareForRun: %v", err)
-	}
+	// Cleanup is registered BEFORE the error check: prepareForRun binds the
+	// listener first and can fail after, so returning early on err would leak
+	// a bound port for the rest of the run.
 	if cancel != nil {
 		defer cancel()
 	}
@@ -176,6 +191,9 @@ func TestPrepareForRunInstallsTheClientOriginWrapper(t *testing.T) {
 	}
 	if srv.grpcServer != nil {
 		defer srv.grpcServer.Stop()
+	}
+	if err != nil {
+		t.Fatalf("prepareForRun: %v", err)
 	}
 
 	if srv.installedInterceptor == nil {

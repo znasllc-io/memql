@@ -134,11 +134,28 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// cases in the header are still not matched. The one thing that must
 		// be skipped is the declaration itself, or component/auth reports its
 		// own definition.
-		ast.Inspect(file, func(n ast.Node) bool {
-			if fn, isDecl := n.(*ast.FuncDecl); isDecl && fn.Name.Name == "ContextWithInternalOrigin" {
-				// The definition, not a use of it.
-				return true
+		// The declaring identifier, by POINTER identity.
+		//
+		// The obvious spelling -- returning true from ast.Inspect on the
+		// FuncDecl -- is a no-op: true means "descend into children", and
+		// FuncDecl.Name is a child, so the declaration matched anyway. That
+		// was not cosmetic. It made component/auth permanently present in
+		// `seen`, so the stale-allowlist check below could never fire for it
+		// (verified: deleting component/auth's only real use still passed),
+		// and it propped up the len(seen)==0 vacuity guard with a match that
+		// exists as long as the function does.
+		//
+		// Returning false would skip the declaration AND its body, which is
+		// wrong in general -- a function may legitimately reference the symbol
+		// inside itself.
+		declIdent := map[*ast.Ident]bool{}
+		for _, d := range file.Decls {
+			if fn, isFunc := d.(*ast.FuncDecl); isFunc && fn.Name.Name == "ContextWithInternalOrigin" {
+				declIdent[fn.Name] = true
 			}
+		}
+
+		ast.Inspect(file, func(n ast.Node) bool {
 			var (
 				matched bool
 				pos     token.Pos
@@ -149,7 +166,7 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 				matched = isIdent && local[pkg.Name] && ref.Sel.Name == "ContextWithInternalOrigin"
 				pos = ref.Pos()
 			case *ast.Ident:
-				matched = local[""] && ref.Name == "ContextWithInternalOrigin"
+				matched = local[""] && ref.Name == "ContextWithInternalOrigin" && !declIdent[ref]
 				pos = ref.Pos()
 			}
 			if matched {
