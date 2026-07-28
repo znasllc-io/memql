@@ -355,25 +355,52 @@ func runScript(t *testing.T, cfg ghStub, env ...string) runResult {
 // `unknown` on a mismatch, so a fixture whose oids disagree would classify
 // UNKNOWN rather than STALLED.
 var oneStalledPR = ghStub{
-	prList:    "7\tfalse\tCLEAN\t1000000000\tdeadbeef\tan abandoned green pr\n",
+	prList:    "7\tfalse\tCLEAN\t1000000000\tdeadbeef\tissue/7-x\tan abandoned green pr\n",
 	liveness:  "false\tdeadbeef\t1000000000",
 	checkRuns: "success\nskipped\n",
 }
 
 // TestStalledPRs_MakesNoMutatingCall is the load-bearing test.
+//
+// It runs BOTH sweeps. The closed-unmerged fixture is not optional decoration:
+// with an empty closedList, report_closed_unmerged returns before its per-PR
+// loop, so its ~65 lines never execute and the read-only guarantee the script
+// header, the usage text and this file's header all claim is enforced
+// behaviourally would not have covered them at all.
 func TestStalledPRs_MakesNoMutatingCall(t *testing.T) {
-	res := runScript(t, oneStalledPR)
+	bothSweeps := oneStalledPR
+	bothSweeps.closedList = fmt.Sprintf("11\tissue/11-thing\t%d\ta closed pr\n", time.Now().Unix()-3600)
+	bothSweeps.closedFacts = "present\t101"
 
-	if got := res.forbidden(); len(got) > 0 {
-		t.Errorf("the reporter invoked gh in a way the stub refuses:\n  %s\nit must stay read-only -- enqueuing green-but-unreviewed work unattended is the failure it exists to avoid (memql#2833)",
-			strings.Join(got, "\n  "))
+	for _, tc := range []struct {
+		name string
+		cfg  ghStub
+	}{
+		{"open sweep only", oneStalledPR},
+		{"both sweeps", bothSweeps},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			res := runScript(t, tc.cfg)
+
+			if got := res.forbidden(); len(got) > 0 {
+				t.Errorf("the reporter invoked gh in a way the stub refuses:\n  %s\nit must stay read-only -- enqueuing green-but-unreviewed work unattended is the failure it exists to avoid (memql#2833)",
+					strings.Join(got, "\n  "))
+			}
+			if len(res.calls) == 0 {
+				t.Fatal("the stub recorded no gh calls at all; this test would pass vacuously")
+			}
+			// Guard the guard: the stub must actually refuse a write.
+			if res.code != 0 {
+				t.Fatalf("expected a clean run, got exit %d\nstderr: %s", res.code, res.stderr)
+			}
+		})
 	}
-	if len(res.calls) == 0 {
-		t.Fatal("the stub recorded no gh calls at all; this test would pass vacuously")
-	}
-	// Guard the guard: the stub must actually refuse a write.
-	if res.code != 0 {
-		t.Fatalf("expected a clean run, got exit %d\nstderr: %s", res.code, res.stderr)
+
+	// Prove the second case genuinely drove the closed sweep, rather than
+	// passing because the section was never reached.
+	res := runScript(t, bothSweeps)
+	if !strings.Contains(res.stdout, closedSectionHeading) {
+		t.Errorf("the `both sweeps` fixture did not actually produce a closed section, so it added no coverage.\ngot:\n%s", res.stdout)
 	}
 }
 
@@ -469,11 +496,11 @@ func TestStalledPRs_FailuresNeverBecomeFindings(t *testing.T) {
 			// open_prs emits "-" for a missing headRefOid rather than an empty
 			// field: tab is IFS whitespace, so an empty MIDDLE column would
 			// collapse and shift the title left instead of being read as blank.
-			c.prList = "7\tfalse\tCLEAN\t1000000000\t-\ta pr\n"
+			c.prList = "7\tfalse\tCLEAN\t1000000000\t-\tissue/7-x\ta pr\n"
 		}, "UNKNOWN"},
 		{"no check runs at all", func(c *ghStub) { c.checkRuns = "" }, "NO-CI"},
 		{"unreadable timestamp", func(c *ghStub) {
-			c.prList = "7\tfalse\tCLEAN\tnot-a-number\tdeadbeef\ta pr\n"
+			c.prList = "7\tfalse\tCLEAN\tnot-a-number\tdeadbeef\tissue/7-x\ta pr\n"
 			c.liveness = "false\tdeadbeef\tnot-a-number"
 		}, "UNKNOWN"},
 		{"head commit date unreadable", func(c *ghStub) {
@@ -491,16 +518,16 @@ func TestStalledPRs_FailuresNeverBecomeFindings(t *testing.T) {
 			c.liveness = "false\tdeadbeef\t99999999999"
 		}, "UNKNOWN"},
 		{"mergeability still computing", func(c *ghStub) {
-			c.prList = "7\tfalse\tUNKNOWN\t1000000000\tdeadbeef\ta pr\n"
+			c.prList = "7\tfalse\tUNKNOWN\t1000000000\tdeadbeef\tissue/7-x\ta pr\n"
 		}, "UNKNOWN"},
 		{"already in the merge queue", func(c *ghStub) { c.liveness = "true\tdeadbeef\t1000000000" }, "QUEUED"},
 		{"failing checks", func(c *ghStub) { c.checkRuns = "failure\nsuccess\n" }, "RED"},
 		{"checks still running", func(c *ghStub) { c.checkRuns = "in_progress\n" }, "PENDING"},
 		{"draft", func(c *ghStub) {
-			c.prList = "7\ttrue\tCLEAN\t1000000000\tdeadbeef\ta draft\n"
+			c.prList = "7\ttrue\tCLEAN\t1000000000\tdeadbeef\tissue/7-x\ta draft\n"
 		}, "DRAFT"},
 		{"draft flag unrecognised", func(c *ghStub) {
-			c.prList = "7\tTRUE\tCLEAN\t1000000000\tdeadbeef\ta pr\n"
+			c.prList = "7\tTRUE\tCLEAN\t1000000000\tdeadbeef\tissue/7-x\ta pr\n"
 		}, "UNKNOWN"},
 	}
 
@@ -618,9 +645,9 @@ func TestStalledPRs_QueriesGitHubCorrectly(t *testing.T) {
 	}
 
 	// The --jq array order must match the `read` destructuring in main().
-	wantOrder := `.number, .isDraft, .mergeStateStatus, (.updatedAt|fromdateiso8601), (.headRefOid // "-"), .title`
+	wantOrder := `.number, .isDraft, .mergeStateStatus, (.updatedAt|fromdateiso8601), (.headRefOid // "-"), (.headRefName // "-"), .title`
 	if !strings.Contains(list, wantOrder) {
-		t.Errorf("the --jq array order must stay in lockstep with `read -r num draft merge_state updated_epoch head_sha title`.\nwant substring: %s\ngot: %s", wantOrder, list)
+		t.Errorf("the --jq array order must stay in lockstep with `read -r num draft merge_state updated_epoch head_sha head_branch title`.\nwant substring: %s\ngot: %s", wantOrder, list)
 	}
 	// fromdateiso8601 is what removed the GNU-only `date -u -d`, under which
 	// macOS silently reported every PR FRESH forever.
@@ -633,7 +660,7 @@ func TestStalledPRs_QueriesGitHubCorrectly(t *testing.T) {
 	// headRefOid is what removed the per-PR `gh pr view` (memql#2887). Losing
 	// it from --json would not fail any behavioural test -- the stub serves
 	// canned rows -- it would just make every PR UNKNOWN against real GitHub.
-	for _, field := range []string{"number", "isDraft", "mergeStateStatus", "updatedAt", "headRefOid", "title"} {
+	for _, field := range []string{"number", "isDraft", "mergeStateStatus", "updatedAt", "headRefOid", "headRefName", "title"} {
 		if !strings.Contains(list, field) {
 			t.Errorf("--json is missing %q, which the report reads", field)
 		}
@@ -870,7 +897,7 @@ func TestStalledPRs_IdlenessKeysOnTheHeadSha(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := ghStub{
-				prList:    "7\tfalse\tCLEAN\t" + tc.updatedAt + "\tdeadbeef\ta pr\n",
+				prList:    "7\tfalse\tCLEAN\t" + tc.updatedAt + "\tdeadbeef\tissue/7-x\ta pr\n",
 				liveness:  "false\tdeadbeef\t" + tc.commitEpoch,
 				checkRuns: "success\n",
 			}
@@ -879,7 +906,46 @@ func TestStalledPRs_IdlenessKeysOnTheHeadSha(t *testing.T) {
 			if len(buckets) != 1 || buckets[0] != tc.want {
 				t.Errorf("got %v, want [%s].\n%s\nstdout:\n%s", buckets, tc.want, tc.why, res.stdout)
 			}
+
+			// The IDLE and TOUCHED columns are the user-visible half of this
+			// finding, and without asserting them both swapping the two and
+			// deleting TOUCHED outright leave the suite green.
+			//
+			// Row shape: #<num> <STATE> <IDLE> <TOUCHED> <CHECKS> <TITLE...>
+			var row []string
+			for _, line := range strings.Split(openSection(res.stdout), "\n") {
+				if strings.HasPrefix(line, "#") {
+					row = strings.Fields(line)
+				}
+			}
+			if len(row) < 5 {
+				t.Fatalf("could not parse a report row from:\n%s", res.stdout)
+			}
+			idleCol, touchedCol := row[2], row[3]
+			// The commit is the gate, so IDLE tracks it; TOUCHED tracks
+			// updatedAt. In both cases exactly one of them is ~1 minute.
+			if tc.want == "STALLED" && !strings.HasPrefix(touchedCol, "1m") {
+				t.Errorf("TOUCHED = %q, want ~1m: updatedAt is recent in this case and TOUCHED is what displays it", touchedCol)
+			}
+			if tc.want == "FRESH" && !strings.HasPrefix(idleCol, "1m") {
+				t.Errorf("IDLE = %q, want ~1m: the head commit is recent in this case and IDLE is what displays it", idleCol)
+			}
+			if idleCol == touchedCol {
+				t.Errorf("IDLE and TOUCHED are both %q; this case was built so they differ, so one of them is not reading what it claims", idleCol)
+			}
 		})
+	}
+
+	// The header must name both columns, in order.
+	res := runScript(t, ghStub{
+		prList:    "7\tfalse\tCLEAN\t1000000000\tdeadbeef\tissue/7-x\ta pr\n",
+		liveness:  "false\tdeadbeef\t1000000000",
+		checkRuns: "success\n",
+	})
+	iIdle := strings.Index(res.stdout, "IDLE")
+	iTouched := strings.Index(res.stdout, "TOUCHED")
+	if iIdle < 0 || iTouched < 0 || iIdle > iTouched {
+		t.Errorf("the header must carry IDLE then TOUCHED; got idle=%d touched=%d in:\n%s", iIdle, iTouched, res.stdout)
 	}
 }
 
@@ -891,7 +957,11 @@ func TestStalledPRs_IdlenessKeysOnTheHeadSha(t *testing.T) {
 // which is how the sibling stale-claims suite once shipped a sweep that could
 // not report anything at all.
 func TestStalledPRs_ClosedUnmergedIsSwept(t *testing.T) {
-	closedRow := "11\tissue/11-thing\t1000000000\ta closed pr\n"
+	// RECENT, not the 2001 epoch the open fixtures use. The sweep has an age
+	// gate (CLOSED_MAX_AGE_MINUTES, 14 days) that skips old PRs BEFORE
+	// spending an API call on them, so a 2001 closedAt would be skipped and
+	// every case here would assert against an empty section.
+	closedRow := fmt.Sprintf("11\tissue/11-thing\t%d\ta closed pr\n", time.Now().Unix()-3600)
 
 	cases := []struct {
 		name        string
@@ -911,9 +981,9 @@ func TestStalledPRs_ClosedUnmergedIsSwept(t *testing.T) {
 			why: "nothing is recoverable, so there is nothing to tell anyone",
 		},
 		{
-			name: "issue already closed is not a finding", facts: "present\t-",
-			wantBucket: "NO-OPEN-ISSUE", wantPrinted: false,
-			why: "the ordinary end of a PR's life; printing it would bury the real findings under every abandoned experiment in the repo",
+			name: "live branch with no open issue is a weaker finding", facts: "present\t-",
+			wantBucket: "NO-OPEN-ISSUE", wantPrinted: true,
+			why: "the branch is demonstrably still there, and the candidate set is deliberately NOT narrowed with `linked:issue` precisely to catch PRs whose \"Closes #N\" link never formed -- discarding them here would make that widening buy nothing",
 		},
 		{
 			name: "lookup failure is UNKNOWN, never silence", facts: "",
@@ -946,7 +1016,68 @@ func TestStalledPRs_ClosedUnmergedIsSwept(t *testing.T) {
 			if open := bucketColumn(res.stdout); len(open) != 1 || open[0] != "STALLED" {
 				t.Errorf("the open-PR table changed to %v; the second sweep must not disturb the first", open)
 			}
+
+			// The read-only guarantee covers the SECOND sweep too. Without
+			// this the ~65 lines of report_closed_unmerged sat entirely
+			// outside the property the script header claims is enforced
+			// behaviourally -- TestStalledPRs_MakesNoMutatingCall's fixture
+			// has no closed rows, so its per-PR loop never ran.
+			if got := res.forbidden(); len(got) > 0 {
+				t.Errorf("the closed-unmerged sweep invoked gh in a way the stub refuses:\n  %s", strings.Join(got, "\n  "))
+			}
 		})
+	}
+}
+
+// TestStalledPRs_ClosedSweepSkipsAncientPRsWithoutCallingOut pins the age gate.
+//
+// Without it the sweep spends one GraphQL call per closed-unmerged PR in the
+// repo's entire history on EVERY run: measured at 40 such PRs on this repo, a
+// run went from 10 API calls to 48 -- roughly five times what finding 1's
+// optimisation saved, to report nothing, since 38 of the 40 were already
+// branch-deleted.
+//
+// The skip must be LOUD. A silently truncated watchdog is the failure mode
+// this script's header spends a paragraph rejecting.
+func TestStalledPRs_ClosedSweepSkipsAncientPRsWithoutCallingOut(t *testing.T) {
+	cfg := oneStalledPR
+	// 2001: far outside any sane CLOSED_MAX_AGE_MINUTES.
+	cfg.closedList = "11\tissue/11-thing\t1000000000\tan ancient closed pr\n"
+	cfg.closedFacts = "present\t101" // would be LOST-WORK if it were examined
+
+	res := runScript(t, cfg)
+
+	if got := bucketsIn(closedSection(res.stdout)); len(got) != 0 {
+		t.Errorf("an ancient closed PR was examined and reported as %v; the age gate must skip it before spending an API call", got)
+	}
+	// Match closingIssuesReferences, not "headRef": both `pr list` calls carry
+	// headRefOid / headRefName in their --json, so the looser pattern matched
+	// them and this assertion failed on calls the gate has nothing to do with.
+	// closingIssuesReferences appears only in closed_pr_facts' document.
+	for _, c := range res.calls {
+		if strings.Contains(c, "closingIssuesReferences") {
+			t.Errorf("closed_pr_facts was called for a PR past the age gate: %q.\nThe gate exists to avoid exactly this call.", c)
+		}
+	}
+	if !strings.Contains(res.stdout, "NOT examined") {
+		t.Errorf("the skip must be announced -- a silently truncated sweep reads as an all-clear.\ngot:\n%s", res.stdout)
+	}
+}
+
+// TestStalledPRs_SupersededIsNotLostWork: a closed PR whose head branch is
+// also the head of a PR that is open RIGHT NOW was replaced, not lost.
+// Reporting it would send someone to rescue work that is already back in
+// flight, which is worse than saying nothing.
+func TestStalledPRs_SupersededIsNotLostWork(t *testing.T) {
+	cfg := oneStalledPR
+	// The open fixture's head branch is issue/7-x; the closed PR shares it.
+	cfg.closedList = fmt.Sprintf("11\tissue/7-x\t%d\ta superseded pr\n", time.Now().Unix()-3600)
+	cfg.closedFacts = "present\t101" // branch alive, issue open: LOST-WORK but for the match
+
+	res := runScript(t, cfg)
+
+	if got := bucketsIn(closedSection(res.stdout)); len(got) != 0 {
+		t.Errorf("a closed PR whose branch is the head of a LIVE open PR was reported as %v; it was superseded, not lost", got)
 	}
 }
 

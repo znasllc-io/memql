@@ -127,11 +127,27 @@ IDLE_MINUTES="${IDLE_MINUTES:-45}"
 PR_PAGE_LIMIT=100
 # Cap on the closed-unmerged sweep. Separate from PR_PAGE_LIMIT because the two
 # populations grow differently: open PRs are bounded by how much is in flight,
-# closed-unmerged ones accumulate forever. Newest-first ordering plus a loud
-# warning is the same bargain the open sweep makes. There is deliberately no
-# date bound: computing "14 days ago" portably needs `date -d` (GNU) or
-# `date -r` (BSD), and this file rejects both by name -- see open_prs.
+# closed-unmerged ones accumulate forever.
 CLOSED_PAGE_LIMIT=100
+
+# How far back the closed-unmerged sweep looks. Anything older is listed but
+# NOT examined, because examining it costs a GraphQL call each.
+#
+# This bound is load-bearing, not tidiness. Without it the sweep spends one
+# call per closed-unmerged PR in the repo's entire history on EVERY run:
+# measured on this repo at 40 such PRs, a run went from 10 API calls to 48 --
+# so the second sweep would have cost about five times what the first sweep's
+# optimisation saved, and 38 of those 40 were branch-deleted and unreportable.
+#
+# 14 days is chosen because a branch nobody has touched in a fortnight is
+# past the window where "the next session will rebuild this" is the live
+# risk; by then it either landed another way or was abandoned deliberately.
+# Raise it when investigating something specific.
+#
+# The arithmetic is portable: `date -u +%s` (which idle_minutes already uses)
+# works on BSD and GNU alike. This bound needs no `date -d` / `date -r`, which
+# are the flags open_prs rejects.
+CLOSED_MAX_AGE_MINUTES="${CLOSED_MAX_AGE_MINUTES:-20160}"
 
 require_gh() {
   # `gh --version` rather than `command -v gh`: it covers missing AND broken in
@@ -193,8 +209,8 @@ require_valid_threshold() {
 # fails check_state's emptiness guard exactly as "" would have.
 open_prs() {
   gh pr list -R "$REPO" --state open --limit "$PR_PAGE_LIMIT" \
-    --json number,isDraft,mergeStateStatus,updatedAt,headRefOid,title \
-    --jq '.[] | [.number, .isDraft, .mergeStateStatus, (.updatedAt|fromdateiso8601), (.headRefOid // "-"), .title] | @tsv'
+    --json number,isDraft,mergeStateStatus,updatedAt,headRefOid,headRefName,title \
+    --jq '.[] | [.number, .isDraft, .mergeStateStatus, (.updatedAt|fromdateiso8601), (.headRefOid // "-"), (.headRefName // "-"), .title] | @tsv'
 }
 
 # closed_unmerged_prs prints one TSV row per PR CLOSED WITHOUT MERGING:
@@ -405,6 +421,14 @@ idle_minutes() {
   case "$epoch" in
     '' | *[!0-9]*) echo "unknown"; return ;;
   esac
+  # All-digits is NOT sufficient, for the same reason require_valid_threshold
+  # gives: `[ "$a" -gt "$b" ]` ERRORS rather than evaluating false on a value
+  # that overflows int64, and an errored test falls through to the next line
+  # under `set -uo pipefail` with no -e. Verified: without this cap,
+  # idle_minutes 18446744073709551616 returns 29754455 -- all digits, positive,
+  # larger than any threshold, so it sails through classify's digit guard and
+  # lands on STALLED.
+  [ "${#epoch}" -gt 11 ] && { echo "unknown"; return; }
   now=$(date -u +%s)
   [ "$epoch" -gt "$now" ] && { echo "unknown"; return; }
   echo $(( (now - epoch) / 60 ))
@@ -485,10 +509,16 @@ main() {
   printf '%-7s %-9s %-8s %-8s %-7s  %s\n' "PR" "STATE" "IDLE" "TOUCHED" "CHECKS" "TITLE"
   printf '%-7s %-9s %-8s %-8s %-7s  %s\n' "-------" "---------" "--------" "--------" "-------" "-----"
 
-  local stalled=0 total=0 unknown=0
-  while IFS=$'\t' read -r num draft merge_state updated_epoch head_sha title; do
+  # open_branches accumulates the head branch of every open PR, newline
+  # separated. The closed sweep needs it to tell "this work was lost" from
+  # "this work was superseded by a PR that is open right now" -- without it a
+  # closed-and-replaced PR reads as a finding, which is the one thing a
+  # watchdog must not get wrong.
+  local stalled=0 total=0 unknown=0 open_branches=""
+  while IFS=$'\t' read -r num draft merge_state updated_epoch head_sha head_branch title; do
     [ -z "${num:-}" ] && continue
     total=$((total + 1))
+    open_branches="${open_branches}${head_branch}"$'\n'
     local facts queued head_epoch checks idle touched bucket
     facts=$(pr_liveness "$num" "$head_sha")
     IFS=$'\t' read -r queued head_epoch <<<"$facts"
@@ -533,7 +563,7 @@ main() {
     echo "They are deliberately NOT reported as stalled either way."
   fi
 
-  report_closed_unmerged
+  report_closed_unmerged "$open_branches"
 }
 
 # report_closed_unmerged is the second sweep (memql#2887): PRs closed WITHOUT
@@ -548,7 +578,7 @@ main() {
 # above is already printed and is still true. Exiting non-zero would discard a
 # good report because a secondary sweep failed.
 report_closed_unmerged() {
-  local rows
+  local open_branches="$1" rows
   rows=$(closed_unmerged_prs)
   if [ $? -ne 0 ]; then
     echo
@@ -567,46 +597,91 @@ report_closed_unmerged() {
     echo "WARNING: hit the ${CLOSED_PAGE_LIMIT}-PR cap on the closed-unmerged sweep; older ones were NOT examined." >&2
   fi
 
-  local lost=0 examined=0 unknown=0 printed=0
+  local lost=0 orphan=0 examined=0 skipped=0 unknown=0 printed=0
   while IFS=$'\t' read -r num branch_name closed_epoch title; do
     [ -z "${num:-}" ] && continue
+
+    # AGE GATE FIRST, before any API call. Each candidate below costs a
+    # GraphQL request, and without this bound the sweep re-examines every
+    # closed-unmerged PR in the repo's history on every run -- measured at 40
+    # such PRs here, five times the cost the open sweep's optimisation saved,
+    # to report nothing. Skips are counted and named below, never silent.
+    local age age_col
+    age=$(idle_minutes "$closed_epoch")
+    # An unresolvable age stays IN the sweep: default-deny means an unknown
+    # input must not silently exclude a PR from a watchdog any more than it
+    # may manufacture a finding.
+    if [ "$age" != "unknown" ] && [ "$age" -gt "$CLOSED_MAX_AGE_MINUTES" ]; then
+      skipped=$((skipped + 1))
+      continue
+    fi
+
     examined=$((examined + 1))
-    local facts branch open_issues bucket age
+    local facts branch open_issues bucket
     facts=$(closed_pr_facts "$num")
     IFS=$'\t' read -r branch open_issues <<<"$facts"
     bucket=$(classify_closed "$branch" "$open_issues")
+
+    # SUPERSEDED beats every other bucket. A closed PR whose head branch is
+    # also the head of a PR that is open RIGHT NOW was replaced, not lost --
+    # reporting it would send someone to rescue work that is already back in
+    # flight, which is worse than saying nothing.
+    if [ "$branch" = "present" ] && [ "$branch_name" != "-" ] &&
+      grep -Fxq -- "$branch_name" <<<"$open_branches"; then
+      bucket="SUPERSEDED"
+    fi
+
     [ "$bucket" = "UNKNOWN" ] && unknown=$((unknown + 1))
 
-    # Only the finding and the unresolved are worth a reader's attention. A
-    # closed PR whose branch is gone, or whose issue is closed too, is the
-    # ordinary end of a PR's life and printing it would bury the two rows that
-    # matter under every abandoned experiment in the repo's history.
+    # A branch that is gone is unrecoverable, and a superseded one is already
+    # being worked: neither is worth a reader's attention. Everything else is
+    # printed -- including NO-OPEN-ISSUE, whose branch is demonstrably still
+    # there. The candidate set is deliberately NOT narrowed with
+    # `linked:issue` (see closed_unmerged_prs) precisely to catch PRs whose
+    # "Closes #N" link never formed, so discarding them here would have made
+    # that widening buy nothing.
     case "$bucket" in
-      LOST-WORK | UNKNOWN) ;;
+      LOST-WORK | NO-OPEN-ISSUE | UNKNOWN) ;;
       *) continue ;;
     esac
 
     if [ "$printed" -eq 0 ]; then
       echo
-      echo "CLOSED WITHOUT MERGING -- branch still exists, issue still open:"
-      printf '%-7s %-11s %-9s %-14s  %s\n' "PR" "STATE" "CLOSED" "OPEN ISSUES" "BRANCH"
-      printf '%-7s %-11s %-9s %-14s  %s\n' "-------" "-----------" "---------" "--------------" "------"
+      # The heading does not assert what the rows show -- UNKNOWN rows appear
+      # here precisely because their branch and issue state could NOT be
+      # resolved, and NO-OPEN-ISSUE rows have no open issue by definition.
+      # The STATE column carries the distinction.
+      echo "CLOSED WITHOUT MERGING -- branch still on the remote (STATE says how recoverable):"
+      printf '%-7s %-14s %-9s %-13s %-26s  %s\n' "PR" "STATE" "CLOSED" "OPEN ISSUES" "BRANCH" "TITLE"
+      printf '%-7s %-14s %-9s %-13s %-26s  %s\n' "-------" "--------------" "---------" "-------------" "--------------------------" "-----"
       printed=1
     fi
     [ "$bucket" = "LOST-WORK" ] && lost=$((lost + 1))
-    age=$(idle_minutes "$closed_epoch")
-    local age_col="${age}m"
+    [ "$bucket" = "NO-OPEN-ISSUE" ] && orphan=$((orphan + 1))
+    age_col="${age}m"
     [ "$age" = "unknown" ] && age_col="?"
-    printf '#%-6s %-11s %-9s %-14s  %s\n' "$num" "$bucket" "$age_col" "$open_issues" "${branch_name:0:40}"
+    printf '#%-6s %-14s %-9s %-13s %-26s  %s\n' "$num" "$bucket" "$age_col" "$open_issues" "${branch_name:0:26}" "${title:0:40}"
   done <<<"$rows"
+
+  if [ "$skipped" -gt 0 ]; then
+    echo
+    echo "NOTE: ${skipped} closed-unmerged PR(s) older than ${CLOSED_MAX_AGE_MINUTES} minutes were listed but NOT examined."
+    echo "      Each costs an API call. Raise CLOSED_MAX_AGE_MINUTES to include them."
+  fi
 
   [ "$printed" -eq 0 ] && return
 
   echo
   if [ "$lost" -gt 0 ]; then
-    echo "${lost} of ${examined} closed-unmerged PR(s) may have LOST WORK: closed without merging, branch still"
-    echo "on the remote, linked issue still open. The issue has silently returned to the pool, so the next"
-    echo "session will rebuild what is already written on that branch. Check the branch before it is pruned."
+    echo "${lost} of ${examined} examined closed-unmerged PR(s) may have LOST WORK: closed without merging,"
+    echo "branch still on the remote, linked issue still open. The issue has returned to the pool, so a"
+    echo "session may rebuild what is already written on that branch. Check whether a replacement PR is"
+    echo "already open before acting -- a same-branch replacement is detected and shown as SUPERSEDED, but"
+    echo "a replacement on a DIFFERENT branch is not."
+  fi
+  if [ "$orphan" -gt 0 ]; then
+    echo "${orphan} have a live branch but no open linked issue. Weaker signal -- the work may have been"
+    echo "abandoned deliberately, or the \"Closes #N\" link may never have formed. The branch is still there."
   fi
   if [ "$unknown" -gt 0 ]; then
     echo "${unknown} closed-unmerged PR(s) are UNKNOWN -- a lookup failed. Deliberately not reported as"
