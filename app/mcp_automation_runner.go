@@ -85,7 +85,12 @@ func (r *mcpAutomationRunner) RunAutomation(ctx context.Context, owner, name str
 
 	// Resolve the requested name to a runnable automation through the SAME
 	// canonical resolver on BOTH the dry-run and live paths (memql#1663), so
-	// they cannot diverge. LoadByName accepts the automation name or a wrapped
+	// they cannot diverge ON WHICH CONSTRUCT RUNS.
+	//
+	// That is narrower than it used to read. Shared resolution does not by
+	// itself make the two paths behave alike: they also have to agree on the
+	// construct's TRUST, and for a while they did not -- see the dry-run branch
+	// below and memql#2890. LoadByName accepts the automation name or a wrapped
 	// logic construct's name (full `logicXxx` or bare form) and returns a clear
 	// "not a runnable entry point" error for an internal-only logic construct.
 	auto, err := r.loader.LoadByName(name)
@@ -109,6 +114,23 @@ func (r *mcpAutomationRunner) RunAutomation(ctx context.Context, owner, name str
 		// Fetch the resolved automation's source by its CANONICAL name -- the
 		// dry-run sandbox re-parses the source, and resolving via LoadByName
 		// first guarantees the same construct the live path would execute.
+		//
+		// Trust is NOT carried across: CompileSource leaves Automation.Trusted
+		// at its false zero value, so the dry-run's steps run with client
+		// origin, matching the live branch below (ExecuteWithClientEvent, per
+		// memql#2888). Do not "fix" the dry-run to compile as trusted -- that
+		// would make the preview MORE permissive than the run it predicts.
+		//
+		// In-run origin is not the whole story, and checking it alone is how
+		// memql#2890 was nearly closed as a non-issue. executeWithEvent also
+		// PERSISTS exec.CallerSuppliedPayload onto any checkpoint the run
+		// mints, and resume.go recomputes trust from that flag -- so a preview
+		// that stamped it false handed POST /automations/resume a token it
+		// could promote to INTERNAL origin with this caller's `input`. That is
+		// closed in component/automations/steps/dryrun.go, which drives the
+		// dry-run through ExecuteWithClientEvent for exactly this reason
+		// (memql#2890). If that call is ever changed back, this path is
+		// exploitable again and nothing here will show it.
 		src, ok := memql.DSLConstructSource(r.logger, "automation", auto.Name)
 		if !ok {
 			return nil, fmt.Errorf("automation %q resolved but its source was not found in the DSL tree (dry-run needs its source)", auto.Name)
