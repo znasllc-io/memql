@@ -20,6 +20,8 @@ import (
 	"testing"
 
 	nodev1 "github.com/znasllc-io/memql/component/node/gen"
+	"google.golang.org/protobuf/encoding/protowire"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
@@ -83,6 +85,63 @@ func TestQueryForwardFieldsAreGone(t *testing.T) {
 					rf.desc.FullName(), rf.name, f.Number())
 			}
 		})
+	}
+}
+
+// legacyQueryForwardEnvelope hand-encodes the bytes a PRE-#2814 node puts on
+// the wire: a NodeClientMessage whose payload oneof carries QueryForward on
+// tag 60. It is built with protowire rather than the generated types because
+// the generated types no longer have the field -- which is the whole point.
+func legacyQueryForwardEnvelope() []byte {
+	// Inner QueryForward{request_id: "req-legacy", query: "query allNumbers"}.
+	var inner []byte
+	inner = protowire.AppendTag(inner, 1, protowire.BytesType)
+	inner = protowire.AppendString(inner, "req-legacy")
+	inner = protowire.AppendTag(inner, 2, protowire.BytesType)
+	inner = protowire.AppendString(inner, "query allNumbers")
+
+	// Outer NodeClientMessage{message_id: "msg-legacy", query_forward: inner}.
+	var outer []byte
+	outer = protowire.AppendTag(outer, 1, protowire.BytesType)
+	outer = protowire.AppendString(outer, "msg-legacy")
+	outer = protowire.AppendTag(outer, 60, protowire.BytesType)
+	outer = protowire.AppendBytes(outer, inner)
+	return outer
+}
+
+// TestLegacyQueryForwardEnvelopeIsIgnoredNotFatal is the rolling-upgrade
+// guard. During any upgrade a pre-#2814 node still sends tag 60 to a post-
+// #2814 node. Removing a proto field does not stop those bytes arriving, so
+// the receiving node must treat them as an unknown field and carry on -- not
+// fail the unmarshal and not tear down the peer stream.
+func TestLegacyQueryForwardEnvelopeIsIgnoredNotFatal(t *testing.T) {
+	var msg nodev1.NodeClientMessage
+	if err := proto.Unmarshal(legacyQueryForwardEnvelope(), &msg); err != nil {
+		t.Fatalf("a legacy peer's tag-60 envelope failed to unmarshal: %v -- "+
+			"reserving the tag must keep it parseable-and-ignored, otherwise every "+
+			"pre-#2814 peer breaks the stream during a rolling upgrade", err)
+	}
+
+	// The retired field must not resolve to any payload: it is unknown now.
+	if msg.Payload != nil {
+		t.Fatalf("tag 60 resolved to a payload (%T); it must be an unknown field", msg.Payload)
+	}
+	// The rest of the envelope still decodes.
+	if got := msg.GetMessageId(); got != "msg-legacy" {
+		t.Errorf("message_id = %q, want %q -- unrelated fields must survive", got, "msg-legacy")
+	}
+
+	// And dispatch must be a no-op rather than a panic or a peer-visible error.
+	svc := &nodeService{logger: testLogger(), identity: testIdentity()}
+	stream := newFakeStream()
+	svc.handleMessage("peer-legacy", &msg, stream)
+
+	stream.mu.Lock()
+	sent := len(stream.sent)
+	stream.mu.Unlock()
+	if sent != 0 {
+		t.Errorf("handleMessage sent %d message(s) for a retired payload; expected silence "+
+			"(the default branch logs at Debug and returns)", sent)
 	}
 }
 
