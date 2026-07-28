@@ -72,9 +72,14 @@ func TestQueryDeploymentById_FiltersOnRowIdNotThePayloadMirror(t *testing.T) {
 // not do that. executeFilterQuery runs loadLatestNodes (DISTINCT ON (id)
 // ORDER BY id, "createdAt" DESC) plus a seen[id] skip, and nodesToMap /
 // intersectNodeSets are keyed by id, so a result set collapses to one row
-// per id whether or not asOf is present. The assertion below is what
-// actually holds; #1872's asOf-reconstructability criterion is a separate
-// gap, filed as its own issue.
+// per id. The assertion below is what actually holds.
+//
+// The collapse is per-id AT THE ASOF INSTANT, though -- an earlier revision
+// of this comment said "whether or not asOf is present" and called #1872's
+// asOf-reconstructability criterion a separate gap. That was wrong on both
+// counts: with a timestamp the read returns the state at that instant, and
+// the criterion is met. What is absent is a one-query all-versions read.
+// See asof_reconstructability_1872_db_test.go (#2880).
 func TestQueryDeploymentById_ReturnsTheLatestVersionAfterAnAppend(t *testing.T) {
 	eng, _, _ := readMergeTestEngine(t)
 	ctx := clusterOwnerCtx("u-depltl-2784")

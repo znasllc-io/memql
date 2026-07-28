@@ -1593,7 +1593,7 @@ func DependentsOfConstructBuild(args DependentsOfConstructArgs) string {
 	return b.String()
 }
 
-// DeploymentById -- The CURRENT state of one deployment, by deploymentId. Returns at most one row -- the latest version. Status transitions append under the same id, but every query result collapses to one row per id, so this is not a timeline read; an all-versions mode is tracked in #2880.
+// DeploymentById -- The CURRENT state of one deployment, by deploymentId. Returns at most one row -- the latest version. Status transitions append under the same id and a result collapses to one row per id, so this is not a timeline read; for the state at an earlier instant, wrap it in `asOf(deploymentById(...), "<rfc3339>")`. A one-query all-versions mode does not exist (#2880).
 //
 // Bound concept: v1:cluster:deployment (machine-readable: BoundConcepts["deploymentById"] in generated_concepts.go).
 type DeploymentByIdArgs struct {
