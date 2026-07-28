@@ -7,10 +7,10 @@ package node
 // compiles against it. Deleting a proto field is not -- the tag stays
 // meaningful on the wire long after the Go symbol disappears.
 //
-// To be exact about the risk, because overstating it is how the last attempt
-// at this path went wrong: NO node ever sent tag 60. The sending half was
-// never built (see the retirement note in node.proto), so this is not a
-// rolling-upgrade rescue and these tests are not protecting live traffic.
+// To be exact about the risk rather than overstate it: NO node ever sent tag
+// 60. The sending half was never built (see the retirement note in
+// node.proto), so this is not a rolling-upgrade rescue and these tests are not
+// protecting live traffic.
 //
 // What they protect is the RESERVATION, which a future edit can silently undo.
 // Reserving a retired number is the repo's convention (see the #984 precedent

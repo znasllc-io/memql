@@ -326,10 +326,13 @@ MemQL query routing. **Removed in memql#2814** and the tags reserved.
 The receive side is the only side that ever existed -- nothing in this repo's
 history constructs a `QueryForward`, and the routing stub that would have driven
 one (`query_proxy.go`, with `RegisterConceptOwnership`) was log-only and was
-deleted in `ac3a751e`. It was removed rather than repaired because the identity
-propagation needed to make it safe could not be expressed with the current
-forwarded-claims shape: a badge grant's `class` / `role_ceiling` cannot cross the
-hop, so a forwarded badge session resolved an *unclamped* role.
+deleted in `ac3a751e`. It was removed rather than repaired because the repair on
+offer was unsafe: it prescribed `auth.ForwardedClaimsFromIdentity` as the
+producer recipe, and that recipe carries no `class` / `role_ceiling`, so
+`applyBadgeRoleCeiling` (which clamps only when `class == "badge"`) never fired
+and a forwarded badge session resolved an *unclamped* role. Carrying those two
+claims is possible -- `auth.WithForwardedAuthorityContext` exists for it -- but
+it is deliberately unwired, because sourcing them correctly is the unsolved part.
 
 The mesh authority-propagation contract belongs on memql#2876, against the live
 AiForward path -- parked as of this removal, with its one attempt reverted, so
