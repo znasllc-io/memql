@@ -109,6 +109,11 @@ func (r *mcpAutomationRunner) RunAutomation(ctx context.Context, owner, name str
 		// Fetch the resolved automation's source by its CANONICAL name -- the
 		// dry-run sandbox re-parses the source, and resolving via LoadByName
 		// first guarantees the same construct the live path would execute.
+		//
+		// Same construct is not by itself same behaviour: re-compiling drops
+		// the tree loader's trust stamp, so the two paths agreed on WHICH
+		// automation to run and disagreed on whether its steps could reach
+		// @serverOnly constructs (memql#2890). SourceTrusted below closes that.
 		src, ok := memql.DSLConstructSource(r.logger, "automation", auto.Name)
 		if !ok {
 			return nil, fmt.Errorf("automation %q resolved but its source was not found in the DSL tree (dry-run needs its source)", auto.Name)
@@ -118,6 +123,12 @@ func (r *mcpAutomationRunner) RunAutomation(ctx context.Context, owner, name str
 			AutomationSource: src,
 			TriggerEvent:     &memql.DryRunTriggerEvent{Topic: "mcp.run." + auto.Name, Kind: "manual", Payload: input},
 			Mode:             memql.DryRunModeIsolated,
+			// The source above came out of the REGISTERED TREE, resolved by the
+			// canonical name LoadByName returned, so it is the same body the
+			// live branch below executes and earns the same trust. This is the
+			// only dry-run caller that may set it: the planner's Gate-2 path
+			// compiles an LLM-emitted bundle and correctly leaves it false.
+			SourceTrusted: true,
 		}
 		report, err := memql.RunBundleDryRun(ctx, r.engine, req)
 		if err != nil {

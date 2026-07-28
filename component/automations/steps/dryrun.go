@@ -102,6 +102,20 @@ func runBundleDryRun(ctx context.Context, engine *memql.MemQLEngine, req memql.D
 		return report, nil
 	}
 
+	// CompileSource leaves Trusted at its false zero value: it cannot know
+	// where the source came from, only the caller can. Carry the caller's
+	// declaration across (memql#2890).
+	//
+	// Without this, a dry-run of a TREE automation ran with client origin while
+	// a live run of the same construct ran with internal origin, so the dry-run
+	// reported @serverOnly refusals the live run would never hit. A preview
+	// whose purpose is to predict the live run predicted it wrongly, in the
+	// direction that teaches an operator to ignore refusals.
+	//
+	// Unconditional rather than `if req.SourceTrusted`: false must keep
+	// overwriting false, so this can never be read as "trust is sticky".
+	automation.Trusted = req.SourceTrusted
+
 	// The sandbox registry wraps the real one: it intercepts write-bearing +
 	// webhook steps and delegates reads. It collects the manifest as it runs.
 	sandbox := newSandboxStepRegistry(NewRegistry(), engine, partition, req.Mode, req.CaptureSinkUrl)
