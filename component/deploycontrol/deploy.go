@@ -208,8 +208,16 @@ func asyncRollbackAck(toID, newID string) string {
 // used to claim it returned "the full append-only timeline
 // oldest-to-newest", which is not what the engine does: every query
 // result collapses to one row per id (loadLatestNodes' DISTINCT ON, plus
-// the id-keyed maps downstream), unconditionally of asOf. Corrected in
-// #2784; an all-versions read mode is tracked in #2880.
+// the id-keyed maps downstream). Corrected in #2784.
+//
+// That collapse is per-id AT THE ASOF INSTANT, not unconditional: given a
+// timestamp the scan carries `createdAt <= T` and loadLatestNodes picks the
+// newest version at-or-before T, so `asOf(deploymentById(...), "<rfc3339>")`
+// reads the state at T. What does not exist is a ONE-QUERY all-versions read
+// (#2880). An earlier revision of this comment said "unconditionally of
+// asOf", which is what led #2880 to conclude #1872's asOf-reconstructability
+// criterion was unmet; it is met. See
+// component/memql/asof_reconstructability_1872_db_test.go.
 //
 // The fold below is therefore over a one-element slice. It is kept
 // because it costs nothing and stays correct if #2880 lands a timeline

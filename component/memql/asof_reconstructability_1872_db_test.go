@@ -65,7 +65,11 @@ func deploymentStatusAsOf(t *testing.T, eng *MemQLEngine, ctx context.Context, d
 // what makes the history reconstructable at all.
 func seedThreeVersions(t *testing.T, eng *MemQLEngine, ctx context.Context, sfx string) string {
 	t.Helper()
-	depID := fmt.Sprintf("asof-%s", sfx)
+	// uniqueSuffix is name+pid, which survives a rerun under the same pid --
+	// and these tests assert an EXACT history, so a second run would append
+	// three more versions to the same row and see six. Add a per-run
+	// component so `go test -count=N`, the standard flake hunt, stays usable.
+	depID := fmt.Sprintf("asof-%s-%d", sfx, time.Now().UnixNano())
 	runMutation(t, ctx, eng, "createDeployment", map[string]any{
 		"deploymentId": depID,
 		"status":       "pending",
@@ -101,16 +105,21 @@ func TestDeploymentStateIsQueryableAsOfAnyTime(t *testing.T) {
 	// rather than any out-of-band read of the table.
 	var stamps []time.Time
 	var statuses []string
+	walkedOff := false
 	probe := time.Now().UTC().Add(time.Minute)
 	for i := 0; i < 8; i++ {
 		status, createdAt, found := deploymentStatusAsOf(t, eng, ctx, depID, probe)
 		if !found {
+			walkedOff = true
 			break
 		}
 		stamps = append(stamps, createdAt)
 		statuses = append(statuses, status)
 		probe = createdAt.Add(-time.Microsecond)
 	}
+	require.True(t, walkedOff,
+		"the walk must terminate by running out of history, not by exhausting its loop bound -- "+
+			"otherwise it is asserting on a truncated prefix")
 
 	require.Equal(t, []string{"succeeded", "in_progress", "pending"}, statuses,
 		"reading at each version's own createdAt, then just before it, must walk the "+
@@ -125,9 +134,15 @@ func TestDeploymentStateIsQueryableAsOfAnyTime(t *testing.T) {
 			"asOf %s must return the state current at that instant, not the newest overall", ts)
 	}
 
-	// Before the first append there is nothing to see. Without this the
-	// assertions above would also pass against a read that ignored asOf and
-	// always returned the latest row.
+	// Before the first append there is nothing to see.
+	//
+	// This is NOT what catches a read that ignores asOf entirely -- the walk
+	// above already does that on its own (an always-latest read yields
+	// ["succeeded", "succeeded", ...], which fails the require.Equal). What
+	// this adds is the narrower case where the candidate scan drops its
+	// `createdAt <= T` filter while loadLatestNodes keeps its own: the walk
+	// still succeeds there, and only a probe before the row existed reveals
+	// that the bound is no longer being applied end to end.
 	_, _, found := deploymentStatusAsOf(t, eng, ctx, depID, stamps[len(stamps)-1].Add(-time.Second))
 	require.False(t, found,
 		"a read before the deployment existed must return nothing; returning a row would mean "+
@@ -148,9 +163,11 @@ func TestDeploymentAllVersionsInOneReadIsStillAbsent(t *testing.T) {
 	require.NotNil(t, res)
 	require.NotNil(t, res.Bundle)
 	require.Len(t, res.Bundle.Nodes, 1,
-		"three versions are on disk, but a query result collapses to one row per id -- "+
-			"there is no all-versions read mode (memql#2880). Reconstruction is by repeated "+
-			"point-in-time reads instead; see TestDeploymentStateIsQueryableAsOfAnyTime")
+		"got %d rows for a deployment with three versions on disk. If a timeline read mode "+
+			"has landed, that is GOOD and this test has done its job: delete it, and update the "+
+			"retirement note in dsl/deployment/queries.memql plus the sibling comment in "+
+			"component/deploycontrol/deploy.go, which both say no such mode exists (memql#2880)",
+		len(res.Bundle.Nodes))
 	require.Equal(t, "succeeded", res.Bundle.Nodes[0].GetPayload().AsMap()["status"],
 		"the surviving row is the newest append")
 }
@@ -161,8 +178,9 @@ func TestDeploymentAllVersionsInOneReadIsStillAbsent(t *testing.T) {
 // A query that DECLARES its own asOf clause cannot be wrapped by a caller's
 // asOf -- the parser rejects it with "multiple asOf() directives are not
 // supported". deploymentById declares none, which is why the reads above
-// work. Its siblings deploymentsForCluster and supersededDeployments do
-// declare `asOf latest`, so they cannot be time-travelled by a caller.
+// work. Its siblings in the same file -- deploymentsForCluster,
+// supersededDeployments and nodeSpecsForDeployment -- all declare
+// `asOf latest`, so none of them can be time-travelled by a caller.
 //
 // Adding `asOf latest` to deploymentById would look like a harmless
 // clarification -- it changes nothing about what the query returns -- while
