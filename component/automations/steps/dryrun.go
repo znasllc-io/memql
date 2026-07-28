@@ -122,8 +122,11 @@ func runBundleDryRun(ctx context.Context, engine *memql.MemQLEngine, req memql.D
 	// memql#2888 on the preview side).
 	//
 	// A dry-run's trigger payload is caller-chosen: run_automation binds the
-	// MCP caller's `input`, and the planner's Gate-2 path binds an LLM-emitted
-	// one. Neither is a payload the server produced.
+	// MCP caller's `input`, and RunInlineAutomation takes the automation NAME
+	// from caller-submitted source. (The planner's Gate-2 path passes no
+	// trigger at all -- what is caller-influenced there is the SOURCE, and an
+	// LLM-authored bundle is exactly what should not mint a promotable token.)
+	// None of them is a payload the server produced.
 	//
 	// This matters beyond the in-run origin. executeWithEvent stamps TWO
 	// fields, and the second is PERSISTED onto any checkpoint the run mints:

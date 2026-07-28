@@ -117,16 +117,20 @@ func (r *mcpAutomationRunner) RunAutomation(ctx context.Context, owner, name str
 		//
 		// Trust is NOT carried across: CompileSource leaves Automation.Trusted
 		// at its false zero value, so the dry-run's steps run with client
-		// origin. That is correct, and it MATCHES the live branch below, which
-		// uses ExecuteWithClientEvent -- caller-supplied payload, so
-		// SourceTrusted resolves false there too however trusted the tree
-		// source is (memql#2888). Both paths therefore agree: untrusted.
+		// origin, matching the live branch below (ExecuteWithClientEvent, per
+		// memql#2888). Do not "fix" the dry-run to compile as trusted -- that
+		// would make the preview MORE permissive than the run it predicts.
 		//
-		// Do not "fix" the dry-run to compile as trusted. memql#2890 reported
-		// the two paths diverging, and they did when it was filed -- #2888
-		// landed hours later and closed the gap from the live side. Restoring
-		// trust here now would re-open it in the DANGEROUS direction: a preview
-		// more permissive than the run it predicts.
+		// In-run origin is not the whole story, and checking it alone is how
+		// memql#2890 was nearly closed as a non-issue. executeWithEvent also
+		// PERSISTS exec.CallerSuppliedPayload onto any checkpoint the run
+		// mints, and resume.go recomputes trust from that flag -- so a preview
+		// that stamped it false handed POST /automations/resume a token it
+		// could promote to INTERNAL origin with this caller's `input`. That is
+		// closed in component/automations/steps/dryrun.go, which drives the
+		// dry-run through ExecuteWithClientEvent for exactly this reason
+		// (memql#2890). If that call is ever changed back, this path is
+		// exploitable again and nothing here will show it.
 		src, ok := memql.DSLConstructSource(r.logger, "automation", auto.Name)
 		if !ok {
 			return nil, fmt.Errorf("automation %q resolved but its source was not found in the DSL tree (dry-run needs its source)", auto.Name)
