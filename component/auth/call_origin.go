@@ -76,11 +76,15 @@ const callOriginKey contextKey = "callOrigin"
 // context derived from an inbound request: that would launder client origin
 // into internal for everything downstream.
 //
-// That prohibition is ENFORCED, not advisory:
-// internal_origin_callers_test.go allowlists the packages that may call this and
-// fails on any other, so a new caller is a red test rather than a silent
-// privilege grant (memql#2889). Adding yourself to that list is a security
-// decision -- the bar is the paragraph above.
+// internal_origin_callers_test.go allowlists the packages that may reference
+// this and fails on any other, so a new caller in a new package is a red test
+// rather than a silent privilege grant (memql#2889). Adding yourself to that
+// list is a security decision -- the bar is the paragraph above.
+//
+// Note the limit, stated so the guarantee is not over-read: the allowlist is
+// per-PACKAGE. A new call added inside a package that is already listed does not
+// fail it, and component/memql and app are large. Read that test's header for
+// exactly what it does and does not cover.
 func ContextWithInternalOrigin(ctx context.Context) context.Context {
 	if ctx == nil {
 		ctx = context.Background()

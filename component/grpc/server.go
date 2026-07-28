@@ -1534,10 +1534,13 @@ func (s *streamSession) handleExecuteQuery(envelope *memqlv1.MemqlClientMessage,
 	//
 	// Those handlers do not need it. OriginClient is the zero value, so they are
 	// already untrusted, and the inheritance this defends against cannot reach
-	// them -- every ContextWithInternalOrigin in the tree stamps at the point of
-	// calling Execute, downstream of a handler, and none wraps a handler
-	// invocation. A gRPC handler's context comes from the gRPC server, not from
-	// server-side Go. Stamping them would add no security property.
+	// them: none of the 13 ContextWithInternalOrigin sites in the tree wraps a
+	// handler invocation. They stamp while invoking downstream execution --
+	// engine.Execute, stepRegistry.Execute via originForSource in
+	// component/automations, executeAndExtract in component/identity -- which is
+	// already inside or below server-side Go, not upstream of a handler. A gRPC
+	// handler's context comes from s.stream.Context(), i.e. the gRPC server.
+	// Stamping the other handlers would add no security property.
 	//
 	// This one stays as cheap insurance at the widest entry point, not because
 	// it is load-bearing today. The rule that IS load-bearing runs in the other
