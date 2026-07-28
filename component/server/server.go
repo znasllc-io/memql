@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/automations"
 	"github.com/znasllc-io/memql/component/bus"
 	"github.com/znasllc-io/memql/component/events"
@@ -106,6 +107,24 @@ func (s *Server) SetMemoryEngine(engine *memql.MemQLEngine) {
 }
 
 func (s *Server) PostAutomationTrigger(ctx context.Context, request PostAutomationTriggerRequestObject) (PostAutomationTriggerResponseObject, error) {
+	// AUTHORIZATION (memql#2937). Triggering runs an automation's action chain
+	// server-side under the automation's own actor. It is the SHARPER of the
+	// two automation endpoints: unlike resume it needs no unguessable id, just
+	// a name, and it returns executionId in the 202 body -- which is precisely
+	// the disclosure oracle memql#2908's threat model assumed an attacker
+	// would have to go find.
+	//
+	// Same handler-level placement and the same reasoning as resume: the
+	// identity binary mounts this route against a real scheduler while
+	// installing no verifier middleware, and it is the publicly fronted
+	// listener. See callerIsOwnerOrAdmin for why the caller is resolved
+	// from CLAIMS rather than read from an AccessContext.
+	if !callerIsOwnerOrAdmin(ctx) {
+		return PostAutomationTrigger403JSONResponse{
+			Error: "triggering an automation requires the owner or admin role",
+		}, nil
+	}
+
 	name := request.AutomationName
 	if name == "" {
 		return PostAutomationTrigger404JSONResponse{
@@ -185,6 +204,38 @@ func (s *Server) PostAutomationTrigger(ctx context.Context, request PostAutomati
 
 // PostAutomationResume resumes a failed automation from a checkpoint.
 func (s *Server) PostAutomationResume(ctx context.Context, request PostAutomationResumeRequestObject) (PostAutomationResumeResponseObject, error) {
+
+	// AUTHORIZATION (memql#2908). Resuming re-executes a checkpoint's
+	// remaining steps through the PRODUCTION step registry, under the
+	// automation's system actor -- ResumeFrom calls contextWithSystemActor,
+	// which REPLACES whatever caller identity reached this handler. So the
+	// caller's identity is not merely unchecked downstream; it is discarded.
+	// That makes resume an operator action, and it is gated as one, matching
+	// component/grpc/node_maintenance_handlers.go's owner-or-admin gate.
+	//
+	// The check lives HERE, not only in middleware, and that is deliberate
+	// (memql#2937): the identity binary skips the verifier middleware
+	// entirely (app/config.go's early return on !verifierRequired) while
+	// still registering these routes against a real scheduler, so a
+	// middleware-only gate leaves the behaviour dependent on per-binary
+	// wiring. With no AccessContext there is no actor, isOwnerOrAdmin is
+	// false, and this fails closed on every tier.
+	//
+	// Per-execution ownership ("you may resume what YOU triggered") is not
+	// expressible today: the checkpoint records triggerContext.triggeredBy as
+	// a KIND ("schedule" / "event" / "manual" / "http-trigger" /
+	// "sub-automation"), and the row's createdBy is the automation's own system
+	// actor, not the human. Narrowing this to the triggering principal needs a
+	// field first -- noted on memql#2908.
+	if !callerIsOwnerOrAdmin(ctx) {
+		return PostAutomationResume403JSONResponse{
+			Error: "resuming an automation execution requires the owner or admin role",
+		}, nil
+	}
+
+	// Gate-first, matching PostAutomationTrigger. Validating the body ahead of
+	// the gate let an unauthorized caller distinguish "request body required"
+	// from a refusal -- a small oracle, but a free one to remove.
 	if request.Body == nil {
 		return PostAutomationResume400JSONResponse{
 			Error: "request body required",
@@ -308,4 +359,65 @@ func (s *Server) Order() int {
 
 func (s *Server) ComponentName() common.ComponentName {
 	return ComponentName
+}
+
+// callerIsOwnerOrAdmin resolves the HTTP caller and reports whether they
+// may resume (memql#2908).
+//
+// # Why this resolves rather than just reading AccessFromContext
+//
+// The HTTP middleware chain attaches CLAIMS + TokenInfo and NOT an
+// AccessContext: verifier.AttachToContext calls ContextWithClaims +
+// ContextWithToken, and no HTTP middleware anywhere calls ContextWithAccess.
+// So auth.AccessFromContext is nil on this path for EVERY caller, including a
+// cluster owner. Gating on it directly would not secure the endpoint -- it
+// would 403 everyone, owner included.
+//
+// The gRPC side does the resolution step separately: streamSession.ensureAccess
+// turns claims into an AccessContext (IdentityResolver.LoadFromClaims, else
+// auth.FallbackFromClaims). This is the HTTP analogue of that half. It uses the
+// claims fallback only -- no DB round-trip on an authorization refusal path --
+// which is sufficient here because the predicate is a ROLE, and the role rides
+// in the verified claims.
+//
+// # Fail-closed
+//
+// FallbackFromClaims(nil) yields Role=reader, so a request with no claims at
+// all -- the identity binary, which registers this route but installs no
+// verifier middleware (memql#2937) -- is refused, as is any node running with
+// MEMQL_IDENTITY_ENABLED=false. That mode's documented contract is "every
+// request is treated as cluster owner", which HTTP does not implement (there is
+// no HTTP analogue of local_dev_stream_interceptor.go); resume is therefore
+// unavailable under that troubleshooting toggle. Refusing is the right side to
+// err on for an operator endpoint.
+//
+// # The AccessContext is deliberately NOT put on ctx
+//
+// contextWithSystemActor (component/automations/executor.go) replaces claims +
+// TokenInfo but does NOT clear an AccessContext, and ResumeFrom binds the actor
+// envelope from auth.AccessFromContext. Attaching a resolved AccessContext to
+// the ctx handed to the scheduler would make every actor.* read in the REPLAYED
+// steps -- actor.isClusterOwner included -- resolve to the resuming operator,
+// inside the exact replay path memql#2888 / #2890 hardened. Resolution stays
+// local to this check.
+func callerIsOwnerOrAdmin(ctx context.Context) bool {
+	if ac, ok := auth.AccessFromContext(ctx); ok && ac != nil {
+		return isOwnerOrAdmin(ac)
+	}
+	claims, _ := auth.ClaimsFromContext(ctx)
+	return isOwnerOrAdmin(auth.FallbackFromClaims(claims))
+}
+
+// isOwnerOrAdmin reports whether a resolved AccessContext is a cluster owner or
+// admin. Byte-identical to component/grpc/node_maintenance_handlers.go's gate
+// for operator actions.
+//
+// NIL IS FALSE, and that is load-bearing (memql#2908, #2937): a node that
+// installs no auth middleware supplies nothing to authorize, and this must
+// refuse rather than wave the request through.
+func isOwnerOrAdmin(ac *auth.AccessContext) bool {
+	if ac == nil {
+		return false
+	}
+	return ac.Role == auth.RoleOwner || ac.Role == auth.RoleAdmin
 }

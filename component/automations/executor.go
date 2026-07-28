@@ -41,6 +41,9 @@ type Executor struct {
 	stepRegistry      StepExecutorRegistry
 	automationTrigger AutomationTrigger
 
+	// sandboxRun suppresses checkpointing for Gate-2 dry-runs (memql#2932)
+	sandboxRun bool
+
 	// Chain tracking (enabled via ExecutorOptions.ChainTrackingEnabled)
 	chainTrackingEnabled bool
 
@@ -132,6 +135,26 @@ type ExecutorOptions struct {
 	StepRegistry      StepExecutorRegistry
 	AutomationTrigger AutomationTrigger
 
+	// SandboxRun marks this executor as driving a Gate-2 behavioural dry-run.
+	//
+	// A sandboxed run mints NO resume checkpoint (memql#2932). A preview has
+	// nothing to resume, and the checkpoint escaped the sandbox: SaveCheckpoint
+	// goes straight to the engine, never through the interception layer, so a
+	// "dry-run" left a durable, RESUMABLE row in the live graph.
+	//
+	// It is not the only write that escapes -- sandbox_registry intercepts
+	// mutation / webhook / mutating-function steps and forwards everything else
+	// to the production executors, and executeInput bypasses the step registry
+	// entirely -- so dryrun.go's "zero rows land in the live graph" remains
+	// overstated after this change (tracked separately). The checkpoint is the
+	// one that mattered for #2890 / #2908, because it is the only escaping write
+	// that is a RESUMABLE TOKEN.
+	//
+	// The failing preview was the one that wrote: saveCheckpointOnFailure
+	// fires on step failure, so the refusal a preview exists to REPORT was
+	// what produced the row.
+	SandboxRun bool
+
 	// ChainTrackingEnabled enables content-addressed chain tracking for executions.
 	// When enabled, each step produces a deterministic fingerprint that chains to
 	// the previous state, enabling replay verification.
@@ -188,6 +211,7 @@ func NewExecutor(opts ExecutorOptions) *Executor {
 		eventBus:             opts.EventBus,
 		stepRegistry:         opts.StepRegistry,
 		automationTrigger:    opts.AutomationTrigger,
+		sandboxRun:           opts.SandboxRun,
 		chainTrackingEnabled: opts.ChainTrackingEnabled,
 		dedupEnabled:         opts.DedupEnabled,
 		clusterGuard:         opts.ClusterGuard,
@@ -1036,6 +1060,19 @@ func (e *Executor) saveCheckpointOnFailure(
 	triggeringEvent *events.Event,
 ) {
 	if e.engine == nil {
+		return
+	}
+	// A sandboxed dry-run mints no checkpoint (memql#2932). Nothing resumes a
+	// preview, and this write bypasses the sandbox's interception layer --
+	// straight to the engine, landing a durable RESUMABLE row in the live
+	// graph. (Other writes escape the sandbox too; this is the only one that is
+	// a resumable token. See the ExecutorOptions.SandboxRun doc.)
+	//
+	// Returning here also removes the token entirely rather than merely making
+	// it unpromotable, which is the stronger half of memql#2890: that fix marks
+	// a dry-run checkpoint caller-supplied so resume cannot restore internal
+	// origin; this one means there is nothing to resume at all.
+	if e.sandboxRun {
 		return
 	}
 

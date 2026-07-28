@@ -87,6 +87,12 @@ type (
 		InitialChainHead string `json:"initialChainHead,omitempty"`
 		ChainHead        string `json:"chainHead,omitempty"`
 	}
+	// PostAutomationTrigger403JSONResponse is the authorization refusal
+	// (memql#2937). Triggering runs an automation's action chain
+	// server-side; it is an operator action, gated like resume.
+	PostAutomationTrigger403JSONResponse struct {
+		Error string `json:"error"`
+	}
 	PostAutomationTrigger404JSONResponse struct {
 		Error string `json:"error"`
 	}
@@ -113,6 +119,13 @@ type (
 		ChainHead    string `json:"chainHead,omitempty"`
 	}
 	PostAutomationResume400JSONResponse struct {
+		Error string `json:"error"`
+	}
+	// PostAutomationResume403JSONResponse is the authorization refusal
+	// (memql#2908). Resuming re-executes a checkpoint's remaining steps
+	// through the PRODUCTION step registry under the automation's system
+	// actor, so it is an operator action, not a caller action.
+	PostAutomationResume403JSONResponse struct {
 		Error string `json:"error"`
 	}
 	PostAutomationResume404JSONResponse struct {
@@ -144,6 +157,12 @@ func (resp PostAutomationTrigger202JSONResponse) VisitPostAutomationTriggerRespo
 	return json.NewEncoder(w).Encode(resp)
 }
 
+func (resp PostAutomationTrigger403JSONResponse) VisitPostAutomationTriggerResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusForbidden)
+	return json.NewEncoder(w).Encode(resp)
+}
+
 func (resp PostAutomationTrigger404JSONResponse) VisitPostAutomationTriggerResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusNotFound)
@@ -165,6 +184,12 @@ func (resp PostAutomationResume202JSONResponse) VisitPostAutomationResumeRespons
 func (resp PostAutomationResume400JSONResponse) VisitPostAutomationResumeResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusBadRequest)
+	return json.NewEncoder(w).Encode(resp)
+}
+
+func (resp PostAutomationResume403JSONResponse) VisitPostAutomationResumeResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusForbidden)
 	return json.NewEncoder(w).Encode(resp)
 }
 
