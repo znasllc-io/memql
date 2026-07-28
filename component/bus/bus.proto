@@ -242,6 +242,15 @@ message EventNotify {
 // ---------------------------------------------------------------------------
 
 message ConfigSnapshot {
+  // The automation step cache was removed in memql#2899: it had no DSL surface
+  // (ast.StepDef carried no Cache field and compileStep emitted none), the two
+  // step types still cacheable by default had zero live instances, and
+  // MEMQL_STEP_CACHE_ENABLED was set in no deploy overlay -- so the flag it
+  // carried could not cache anything. Reserved rather than deleted so the
+  // number and name can never be silently reused for a different meaning.
+  reserved 12;
+  reserved "engine_step_cache_enabled";
+
   // Database
   string db_dsn = 1;
   int32 db_max_open_conns = 2;
@@ -250,7 +259,6 @@ message ConfigSnapshot {
   // Engine
   int32 engine_max_results = 10;
   int32 engine_max_window = 11;
-  bool engine_step_cache_enabled = 12;
 
   // AI
   string si_openai_api_key = 20;

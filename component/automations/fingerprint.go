@@ -355,6 +355,12 @@ func (s *Step) DefinitionId(engine *id.Engine) id.ID {
 
 // FingerprintStepInput creates a deterministic ID from the step's input data.
 // The input is resolved from the evaluator based on step type.
+//
+// UNUSED SINCE memql#2899 -- its only caller was the automation step cache's key
+// computation, which went with the cache. Kept for now rather than deleted in the
+// same change, because it is the head of a chain that reaches
+// ContextFingerprint and its clock-stripping tests; whether that whole chain goes
+// is its own decision. Do not add a caller without reading #2899 first.
 func FingerprintStepInput(step *Step, evaluator *Evaluator) id.ID {
 	if step == nil || evaluator == nil {
 		return ""

@@ -358,7 +358,6 @@ delivery).
 
 | Variable                                        | Default | Purpose                                                                                  |
 |-------------------------------------------------|---------|------------------------------------------------------------------------------------------|
-| `MEMQL_STEP_CACHE_ENABLED`                      | `false` | Cache automation step results.                                                           |
 | `MEMQL_DEMO_MODE`                               | `false` | Affects webhook step behavior; used by demo deployments.                                 |
 | `MEMQL_COGNITION_FIT_THRESHOLD`                 | `0.4`   | Float in `[0,1]`; cognition turn-fit cutoff. Higher = stricter "should I respond?" gate. |
 | `MEMQL_CLASSIFICATION_SHORTCIRCUIT`             | `true`  | Deterministic messageClassification short-circuit (#1329): in a 1-human/1-agent space, a TEXT turn with no ambiguous @-addressing skips the classification LLM call and dispatches to the single agent. Set `false`/`0`/`off` to force every turn through the LLM classifier (A/B latency measurement, or to restore text-ack suppression in 1:1 spaces). Voice turns always use the LLM classifier regardless. |

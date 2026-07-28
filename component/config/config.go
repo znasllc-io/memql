@@ -72,9 +72,6 @@ func loadFromEnv() *busv1.ConfigSnapshot {
 		// Database
 		DbDsn: envStr("MEMQL_DATABASE_DSN"),
 
-		// Engine
-		EngineStepCacheEnabled: envBool("MEMQL_STEP_CACHE_ENABLED"),
-
 		// AI
 		SiOpenaiApiKey:    envStr("MEMQL_AI_OPENAI_API_KEY"),
 		SiOpenaiProjectId: envStr("MEMQL_AI_OPENAI_PROJECT_ID"),

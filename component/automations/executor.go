@@ -56,11 +56,6 @@ type Executor struct {
 	// single-replica behaviour (no cross-replica claim).
 	clusterGuard executionClaimer
 
-	// Step-level caching (enabled via ExecutorOptions.StepCacheEnabled)
-	stepCacheEnabled    bool
-	stepCache           *StepCache
-	stepCacheDefaultTTL time.Duration
-
 	// Concurrency control (limits concurrent automation executions)
 	concurrencySem chan struct{}
 
@@ -150,17 +145,6 @@ type ExecutorOptions struct {
 	// Defaults to 10 minutes if DedupEnabled is true and this is zero.
 	DedupTTL time.Duration
 
-	// StepCacheEnabled enables step-level memoization.
-	// When true, pure steps (query, shape, function) cache their results.
-	StepCacheEnabled bool
-
-	// StepCacheMaxBytes limits cache memory. Defaults to 256MB.
-	StepCacheMaxBytes int64
-
-	// StepCacheDefaultTTL is the default TTL when not specified per-step.
-	// Defaults to 5 minutes if StepCacheEnabled is true and this is zero.
-	StepCacheDefaultTTL time.Duration
-
 	// MaxConcurrentExecutions limits how many automations can run simultaneously.
 	// Prevents database connection exhaustion during event storms.
 	// Defaults to 10 if not set (0 means use default, not unlimited).
@@ -191,8 +175,6 @@ func NewExecutor(opts ExecutorOptions) *Executor {
 		chainTrackingEnabled: opts.ChainTrackingEnabled,
 		dedupEnabled:         opts.DedupEnabled,
 		clusterGuard:         opts.ClusterGuard,
-		stepCacheEnabled:     opts.StepCacheEnabled,
-		stepCacheDefaultTTL:  opts.StepCacheDefaultTTL,
 	}
 
 	// Initialize dedup tracker if dedup is enabled
@@ -204,19 +186,6 @@ func NewExecutor(opts ExecutorOptions) *Executor {
 			ttl = 10 * time.Minute // default TTL
 		}
 		e.dedup = newExecutionDedup(ttl)
-	}
-
-	// Initialize step cache if enabled
-	if opts.StepCacheEnabled {
-		maxBytes := opts.StepCacheMaxBytes
-		if maxBytes == 0 {
-			maxBytes = 256 * 1024 * 1024 // 256MB default
-		}
-		e.stepCache = NewStepCache(maxBytes)
-
-		if e.stepCacheDefaultTTL == 0 {
-			e.stepCacheDefaultTTL = 5 * time.Minute // default TTL
-		}
 	}
 
 	// Initialize concurrency limiter
@@ -838,19 +807,6 @@ func (e *Executor) executeStep(ctx context.Context, step *Step, stepCtx *StepCon
 		return nil, fmt.Errorf("step registry not configured")
 	}
 
-	// Compute cache key if caching enabled for this step
-	// Skip cache entirely when SkipCache is set (e.g., during resume to ensure fresh data)
-	var cacheKey id.ID
-	var cacheEnabled bool
-	if e.stepCacheEnabled && e.stepCache != nil && step.IsCacheable() && !stepCtx.SkipCache {
-		cacheEnabled = true
-		actor := auth.ActorFromContext(ctx)
-		scopeId := e.stepCache.Engine().FromString(actor)
-		stepDefId := step.DefinitionId(e.stepCache.Engine())
-		inputId := FingerprintStepInput(step, stepCtx.Evaluator)
-		cacheKey = e.stepCache.Key(scopeId, stepDefId, inputId)
-	}
-
 	// Publish step started event (always, even for cache hits)
 	e.publishEvent(events.TopicAutomationStepStarted, events.KindAutomationStepStarted, map[string]any{
 		"automationName": stepCtx.Execution.AutomationName,
@@ -858,37 +814,6 @@ func (e *Executor) executeStep(ctx context.Context, step *Step, stepCtx *StepCon
 		"stepId":         step.ID,
 		"stepType":       string(step.Type),
 	})
-
-	// Check cache for existing result
-	if cacheEnabled {
-		if cached, ok := e.stepCache.Get(cacheKey); ok {
-			// Update timing to reflect this execution (instant cache hit)
-			now := time.Now()
-			cached.StartedAt = now
-			cached.CompletedAt = now
-			cached.Duration = 0
-
-			if e.logger != nil {
-				e.logger.Debug("step cache hit",
-					"component", ComponentName,
-					"step", step.ID,
-					"cacheKey", string(cacheKey),
-				)
-			}
-
-			// Publish completed event for cache hit
-			e.publishEvent(events.TopicAutomationStepCompleted, events.KindAutomationStepCompleted, map[string]any{
-				"automationName": stepCtx.Execution.AutomationName,
-				"executionId":    stepCtx.Execution.ID,
-				"stepId":         step.ID,
-				"stepType":       string(step.Type),
-				"duration":       int64(0),
-				"cached":         true,
-			})
-
-			return cached, nil
-		}
-	}
 
 	// Execute the step.
 	//
@@ -949,24 +874,6 @@ func (e *Executor) executeStep(ctx context.Context, step *Step, stepCtx *StepCon
 		"stepType":       string(step.Type),
 		"duration":       result.Duration.Milliseconds(),
 	})
-
-	// Cache successful result
-	if cacheEnabled && err == nil {
-		ttl := step.CacheTTL()
-		if ttl == 0 {
-			ttl = e.stepCacheDefaultTTL
-		}
-		e.stepCache.Put(cacheKey, result, ttl)
-
-		if e.logger != nil {
-			e.logger.Debug("step result cached",
-				"component", ComponentName,
-				"step", step.ID,
-				"cacheKey", string(cacheKey),
-				"ttl", ttl.String(),
-			)
-		}
-	}
 
 	return result, err
 }

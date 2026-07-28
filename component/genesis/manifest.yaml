@@ -503,13 +503,6 @@ variables:
     optional: true
     description: "Repository root used to locate scripts/secrets/manifest.yaml when MEMQL_MANIFEST_PATH is unset."
 
-  - name: MEMQL_STEP_CACHE_ENABLED
-    component: engine
-    scope: node
-    default: "false"
-    optional: true
-    description: "Enables caching of automation step results."
-
   - name: MEMQL_TASKSTAMP_SELF_PLANNING_TOOLS
     component: engine
     scope: node

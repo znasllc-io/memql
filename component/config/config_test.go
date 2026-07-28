@@ -48,15 +48,11 @@ func TestConfigImplementsDependency(t *testing.T) {
 
 func TestLoadFromEnv(t *testing.T) {
 	// Set a test env var
-	t.Setenv("MEMQL_STEP_CACHE_ENABLED", "true")
 	t.Setenv("MEMQL_DEMO_MODE", "false")
 	t.Setenv("VERSION", "test-v1.0")
 
 	snap := loadFromEnv()
 
-	if !snap.EngineStepCacheEnabled {
-		t.Error("expected EngineStepCacheEnabled=true")
-	}
 	if snap.DemoMode {
 		t.Error("expected DemoMode=false")
 	}
