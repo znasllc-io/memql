@@ -238,7 +238,6 @@ The heart of the system - executes all MemQL queries.
 
 ### Performance Optimizations
 
-- **Step Cache** - Cache intermediate query results
 - **Concept Cache** - Cache concept schemas
 - **Function Compilation** - Compile functions once
 - **Query Planning** - Optimize execution plans

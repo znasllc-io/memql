@@ -313,6 +313,11 @@ func fingerprintGenericResult(result any) map[string]any {
 }
 
 // DefinitionId computes a content-addressed ID for the step definition.
+//
+// UNUSED SINCE memql#2899 -- like FingerprintStepInput below, its only caller was
+// the deleted step cache's key computation. Unlike that one it heads no chain and
+// nothing downstream depends on it, so it is a straightforward removal whenever
+// memql#2941 is picked up. Do not add a caller without reading #2899 first.
 // The ID includes all fields that affect output, ensuring cache key
 // changes when the step definition changes.
 func (s *Step) DefinitionId(engine *id.Engine) id.ID {

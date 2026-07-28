@@ -184,7 +184,9 @@ func (e *Executor) ResumeFrom(
 	}
 
 	// Set up step context
-	// SkipCache ensures resumed steps fetch fresh data instead of stale cached results
+	// SkipCache records the intent that a resumed step should not read a cached
+	// result. It is inert since memql#2899 removed the step cache -- nothing reads
+	// it. Left in place so the intent is not lost, not because it does anything.
 	stepCtx := &StepContext{
 		Logger:               e.logger,
 		Engine:               e.engine,

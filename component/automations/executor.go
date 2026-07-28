@@ -114,8 +114,11 @@ type StepContext struct {
 	// Propagated from ExecutorOptions to child contexts.
 	ChainTrackingEnabled bool
 
-	// SkipCache bypasses step-level caching when true.
-	// Used during resume to ensure fresh data is fetched instead of stale cached results.
+	// SkipCache is INERT since memql#2899, which deleted the step cache: it is
+	// written by the resume path and read by nothing. Kept so the resume path's
+	// intent survives if a cache is ever reintroduced, but it guarantees nothing
+	// today -- do not rely on it for freshness. Tracked with the rest of the
+	// orphaned cache plumbing in memql#2941.
 	SkipCache bool
 }
 
@@ -807,7 +810,7 @@ func (e *Executor) executeStep(ctx context.Context, step *Step, stepCtx *StepCon
 		return nil, fmt.Errorf("step registry not configured")
 	}
 
-	// Publish step started event (always, even for cache hits)
+	// Publish step started event
 	e.publishEvent(events.TopicAutomationStepStarted, events.KindAutomationStepStarted, map[string]any{
 		"automationName": stepCtx.Execution.AutomationName,
 		"executionId":    stepCtx.Execution.ID,
