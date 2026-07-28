@@ -1525,6 +1525,26 @@ func (s *streamSession) handleExecuteQuery(envelope *memqlv1.MemqlClientMessage,
 	// OVERRIDES any inherited internal stamp. That matters if this handler
 	// ever runs on a context derived from server-side Go: without it, origin
 	// would launder inward silently, and the failure would be invisible.
+	//
+	// #2889 asked why this stamp is here and not on the ~29 other handlers that
+	// reach the engine (guest_handlers, voice_agent_handlers,
+	// auth_session_handlers, polyphon_handlers, client_tool_relay_voice), since
+	// either the hazard is real everywhere or this line is decoration. The
+	// asymmetry is deliberate, and this is the answer so it is not re-litigated:
+	//
+	// Those handlers do not need it. OriginClient is the zero value, so they are
+	// already untrusted, and the inheritance this defends against cannot reach
+	// them -- every ContextWithInternalOrigin in the tree stamps at the point of
+	// calling Execute, downstream of a handler, and none wraps a handler
+	// invocation. A gRPC handler's context comes from the gRPC server, not from
+	// server-side Go. Stamping them would add no security property.
+	//
+	// This one stays as cheap insurance at the widest entry point, not because
+	// it is load-bearing today. The rule that IS load-bearing runs in the other
+	// direction -- who may stamp INTERNAL -- and is enforced by
+	// component/auth/internal_origin_callers_test.go, added for #2889. If you are
+	// tempted to fan this line out across the other handlers, read that test
+	// first: the hole it guards is real, and this one is not.
 	ctx = auth.ContextWithClientOrigin(ctx)
 
 	s.activeRequests.Store(requestId, cancel)

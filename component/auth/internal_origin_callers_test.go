@@ -66,7 +66,7 @@ var allowedInternalOriginCallers = map[string]string{
 		"on contexts they construct",
 	"component/automations": "the executor decides per-automation trust and " +
 		"checkpoints run as the system; #2888 established the trust rule here",
-	"app": "integrations_identity wires a server-side identity lookup",
+	"app":                     "integrations_identity wires a server-side identity lookup",
 	"integrations/dailyspace": "a server-side integration acting as the system",
 	"integrations/agent/worker": "the agent worker is server-side Go with no " +
 		"inbound request context",
