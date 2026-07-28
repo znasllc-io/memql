@@ -128,34 +128,25 @@ var capabilityDeclHeaderRe = regexp.MustCompile(`(?m)^[ \t]*capability[ \t]+([A-
 
 // extractCapabilityDeclSlices returns each top-level `capability NAME { ... }`
 // declaration (its @-attribute / comment preamble + brace-balanced body) as an
-// independently-parseable source slice. Reuses matchingCloseBrace for string-
-// and comment-aware brace balancing.
+// independently-parseable source slice.
+//
+// Delegates to the shared comment-safe slicer (memql#2896). This used to scan
+// RAW source, which made it a SECOND capability slicer disagreeing with the
+// comment-aware one in component/memql: a block-commented capability was
+// extracted here and dropped there, so an authored bundle importing it failed
+// Gate-1 with "unresolved reference" while this catalog still held it and would
+// dispatch. That falsified the invariant asserted at
+// component/memql/capability_loader.go -- "the actions catalog applies the same
+// filter ... so validation and dispatch stay in sync" -- which is now true
+// because both go through one implementation.
 func extractCapabilityDeclSlices(source string) []string {
-	matches := capabilityDeclHeaderRe.FindAllStringSubmatchIndex(source, -1)
-	if len(matches) == 0 {
+	slices := languageParser.ExtractDeclarationSlices(source, capabilityDeclHeaderRe)
+	if len(slices) == 0 {
 		return nil
 	}
-	var out []string
-	for _, m := range matches {
-		headerStart, headerEnd := m[0], m[1]
-		openIdx := headerEnd - 1 // index of '{'
-		closeIdx := matchingCloseBrace(source, openIdx)
-		if closeIdx < 0 {
-			continue
-		}
-		preambleStart := headerStart
-		for k := headerStart - 1; k >= 0; k-- {
-			lineStart := strings.LastIndexByte(source[:k], '\n') + 1
-			line := strings.TrimRight(source[lineStart:k+1], "\r\n")
-			trimmed := strings.TrimSpace(line)
-			if strings.HasPrefix(trimmed, "@") || strings.HasPrefix(trimmed, "//") {
-				preambleStart = lineStart
-				k = lineStart - 1
-				continue
-			}
-			break
-		}
-		out = append(out, source[preambleStart:closeIdx+1])
+	out := make([]string, 0, len(slices))
+	for _, s := range slices {
+		out = append(out, s.Source)
 	}
 	return out
 }

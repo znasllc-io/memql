@@ -44,6 +44,7 @@ import (
 	"strings"
 	"sync"
 
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	memqldsl "github.com/znasllc-io/memql/dsl"
 )
 
@@ -249,13 +250,30 @@ var (
 // declaration's name -> its governing @executor capability. The governing
 // executor is the LAST @executor annotation appearing between the previous
 // builtin header (or the file start) and this builtin's header.
+//
+// Both scans run on the comment-blanked view (memql#2896). This one needs the
+// blanked VIEW rather than the shared slicer -- it does no brace matching at
+// all, so routing it through a slice extractor would be the wrong shape -- but
+// it had the same root cause and the worst consequence of the three:
+//
+//	@executor("integration.workbench.dispatchHost")   // meant for zzLive
+//	/* builtin zzParked { } */                        // absorbed it
+//	builtin zzLive { }                                // got ""
+//
+// A stolen executor is an UNKNOWN executor, and SideEffecting reports false for
+// unknown, so an exec-class builtin classified as read-only in the actions
+// side-effect classifier. Blanking makes the commented header invisible, so the
+// region between the previous real header and zzLive still contains the
+// annotation. Offsets are preserved by BlankComments, so names are still cut
+// from the original source.
 func builtinExecutors(source string) map[string]string {
+	scan := languageParser.BlankComments(source)
 	out := map[string]string{}
-	headers := builtinHeaderRE.FindAllStringSubmatchIndex(source, -1)
+	headers := builtinHeaderRE.FindAllStringSubmatchIndex(scan, -1)
 	prev := 0
 	for _, h := range headers {
 		name := source[h[2]:h[3]]
-		region := source[prev:h[0]]
+		region := scan[prev:h[0]]
 		execs := executorRE.FindAllStringSubmatch(region, -1)
 		if len(execs) > 0 {
 			out[name] = execs[len(execs)-1][1]
