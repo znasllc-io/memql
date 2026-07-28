@@ -115,6 +115,13 @@ type (
 	PostAutomationResume400JSONResponse struct {
 		Error string `json:"error"`
 	}
+	// PostAutomationResume403JSONResponse is the authorization refusal
+	// (memql#2908). Resuming re-executes a checkpoint's remaining steps
+	// through the PRODUCTION step registry under the automation's system
+	// actor, so it is an operator action, not a caller action.
+	PostAutomationResume403JSONResponse struct {
+		Error string `json:"error"`
+	}
 	PostAutomationResume404JSONResponse struct {
 		Error string `json:"error"`
 	}
@@ -165,6 +172,12 @@ func (resp PostAutomationResume202JSONResponse) VisitPostAutomationResumeRespons
 func (resp PostAutomationResume400JSONResponse) VisitPostAutomationResumeResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusBadRequest)
+	return json.NewEncoder(w).Encode(resp)
+}
+
+func (resp PostAutomationResume403JSONResponse) VisitPostAutomationResumeResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusForbidden)
 	return json.NewEncoder(w).Encode(resp)
 }
 
