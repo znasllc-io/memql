@@ -3121,7 +3121,7 @@ func CreateDeploymentBuild(args CreateDeploymentArgs) string {
 	return b.String()
 }
 
-// CreateDeploymentNodeSpec -- Create a v1:cluster:deploymentNodeSpec row for a (deploymentId, nodeType) pair. The concept id is hash(deploymentId + ':' + nodeType) so re-pins append to one timeline. Engine-as-spine: empty version resolves against the deployment engine version. Epic 2 / #2094.
+// CreateDeploymentNodeSpec -- Create a v1:cluster:deploymentNodeSpec row for a (deploymentId, nodeType) pair. The concept id is hash(concat(deploymentId, ':', nodeType)) so re-pins append to one timeline. Engine-as-spine: empty version resolves against the deployment engine version. Epic 2 / #2094.
 //
 // Bound concept: v1:cluster:deploymentNodeSpec (machine-readable: BoundConcepts["createDeploymentNodeSpec"] in generated_concepts.go).
 type CreateDeploymentNodeSpecArgs struct {

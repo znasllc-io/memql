@@ -64,8 +64,8 @@ concept deployment {
 /// deploymentNodeSpec with the same deploymentId.
 @namespace("cluster")
 concept deploymentNodeSpec {
-  deploymentId  string! @description("FK to v1:cluster:deployment.deploymentId this spec belongs to. Plain string FK (not a @relationship -- cross-concept references use FK fields). Hashed into the composite concept id; pass it in the same (bare) form every caller uses -- see #2925.")
-  nodeType      string! @description("Node role this spec targets: bff, voice, cognition, agent, planner, identity, mcp, workbench. Hashed into the composite concept id alongside deploymentId so each (deployment, nodeType) pin appends to one timeline.")
+  deploymentId  string! @minLength(1) @description("FK to v1:cluster:deployment.deploymentId this spec belongs to. Plain string FK (not a @relationship -- cross-concept references use FK fields). Hashed into the composite concept id; pass it in the same (bare) form every caller uses -- see #2925. @minLength(1) because hashing makes an empty key indistinguishable from a real one (#2885).")
+  nodeType      string! @minLength(1) @description("Node role this spec targets: bff, voice, cognition, agent, planner, identity, mcp, workbench. Hashed into the composite concept id alongside deploymentId so each (deployment, nodeType) pin appends to one timeline. @minLength(1) for the same reason as deploymentId (#2885).")
   version       string  @description("memQL version this node type is pinned to (e.g. '2026.6.21'). Empty means engine-as-spine: resolve against the parent deployment's engine version (the release lockfile's engineVersion) rather than a per-node pin. A non-empty value overrides the spine for this node type only.")
   replicas      int     @default("1") @description("Desired replica count for this node type under this deployment. Staging/prod parity defaults to 2 via the overlay; the concept default is 1 for a single-node baseline.")
   imageDigest   string  @description("Resolved container image digest for this node type (sha256:...). Empty until the build/lockfile resolves it. Mirrors the per-component digest in releases/<version>.yaml.")

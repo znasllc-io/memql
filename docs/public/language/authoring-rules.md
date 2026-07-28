@@ -1026,12 +1026,30 @@ queries work with canonical-stored values. But the id derivation
 runs BEFORE the payload auto-canon, so `canonicalId()` in the id
 template is still required for stable deterministic ids.
 
-Affected mutations (audit done 2026-05-06; all live under
-`dsl/cognition/mutations.memql` today):
+Compliant mutations (audit done 2026-05-06), in
+`dsl/cognition/mutations.memql`:
 `joinSpaceAsHuman`, `joinSpaceAsSI`, `createGreetingUtterance`,
 `createSessionForParticipant`, `sendTextUtterance`,
 `sendSpeechUtterance`, `sendActionUtterance`,
 `sendRealtimeTranscriptUtterance`.
+
+**Known exceptions — hashed FK id derivations that do NOT normalise.**
+Nothing enforces this rule automatically, so it is listed here or it is
+invisible:
+
+- `createDeploymentNodeSpec` / `updateDeploymentNodeSpec`
+  (`dsl/deployment/mutations.memql`) — every spelling of the
+  normalisation is currently blocked in an `id:` position for this pack:
+  the `canonicalId()` concept argument does not resolve for a concept
+  declaring `@namespace("cluster")` while living in `dsl/deployment/`,
+  and `shortId()` has no evaluator case in an id template. Tracked in
+  memql#2925; the mutation's own comment block carries the detail.
+- `createAccountEntitlement` (`dsl/identity/mutations.memql`) — hashes
+  `args.accountId`, which is an FK. Pre-dates this list rather than
+  being a deliberate carve-out; not yet triaged.
+
+If you add a hashed FK id derivation that cannot normalise, add it here
+with the reason. A rule with no gate and a stale roster is not a rule.
 
 The historical `concat("ga-", hash(actor))` pattern in the auto-join
 path is gone entirely: the logic (`dsl/cognition/logic.memql`) now

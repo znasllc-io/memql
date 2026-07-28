@@ -163,3 +163,47 @@ func TestCreateDeploymentNodeSpecRowReachesTheStore(t *testing.T) {
 	require.Equal(t, "d-abc123", payload["deploymentId"])
 	require.Equal(t, "bff", payload["nodeType"])
 }
+
+// Hashing launders a degenerate key into a valid-looking id, which the old
+// expression rejected by accident: an empty deploymentId rendered ":bff",
+// which the colon gate refused, but hash(":bff") is a perfectly good 64-hex
+// shortId that ValidateShortId accepts. Required-arg validation does not
+// close this -- it only rejects an ABSENT or nil arg, not "" -- so both key
+// fields carry @minLength(1) and the schema check rejects the row before
+// the id is ever considered.
+func TestNodeSpecRejectsEmptyKeyParts(t *testing.T) {
+	eng, registry := nodeSpec2885Engine(t)
+	for _, tc := range []struct {
+		name         string
+		deploymentID string
+		nodeType     string
+	}{
+		{"empty deploymentId", "", "bff"},
+		{"empty nodeType", "d-abc123", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			args := nodeSpecArgs(tc.deploymentID)
+			args["nodeType"] = tc.nodeType
+			mutation := renderNodeSpecMutation(t, eng, "createDeploymentNodeSpec", args)
+
+			c, err := registry.Get(mutation.Concept)
+			require.NoError(t, err)
+			var payload map[string]any
+			require.NoError(t, json.Unmarshal([]byte(mutation.PayloadRaw), &payload))
+
+			ctx := provenance.ContextWithProvenance(context.Background(), provenance.Provenance{
+				Kind: provenance.KindMutation,
+				Name: "createDeploymentNodeSpec",
+			})
+			store := &fakeConceptStore{}
+			_, err = c.Create(ctx, store, memorynodes.CreateParams{
+				Actor:   "system:nodespec-2885",
+				ID:      mutation.ID,
+				Payload: payload,
+			})
+			require.Error(t, err,
+				"an empty key part must not produce an insertable row; hashing made it look valid as id %q", mutation.ID)
+			require.Empty(t, store.inserted, "nothing may reach the store for a degenerate key")
+		})
+	}
+}

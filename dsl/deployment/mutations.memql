@@ -132,14 +132,30 @@ mutate deployment updateDeploymentStatus {
 // the canonical "v1:cluster:deployment:<short>" form hash to different ids
 // and would mint TWO timelines for the same (deployment, nodeType).
 //
-// Both spellings of that normalisation are currently blocked in this
-// position, which is why it is deferred rather than skipped: the
-// canonical-id builtin needs a concept argument that resolves via a
-// file-top import or an ambient same-domain concept (#2617), and these
-// concepts declare @namespace("cluster") while living in deployment/, so
-// the ambient hint misses and neither import spelling both resolves and
-// survives TestNoSameDomainUse; shortId() parses here but the mutation-
-// template id evaluator has no ShortIdExpr case, so it fails at render.
+// Every spelling of that normalisation is blocked in this position today,
+// which is why it is deferred rather than skipped. Each was tried:
+//
+//   - ambient, no import: canonical_id_refs.go accepts the ambient path
+//     only when the concept id contains ":"+domain+":". The directory
+//     domain here is `deployment` but these concepts declare
+//     @namespace("cluster"), so the id is v1:cluster:deployment and the
+//     check fails -- "concept ... is neither imported nor a same-domain
+//     concept".
+//   - `use deployment.concepts.{ deployment }`: resolves, but it is an
+//     import of the file's own directory domain, which TestNoSameDomainUse
+//     rejects (#2617).
+//   - `use cluster.concepts.{ deployment }`: memqllint rejects it --
+//     "deployment" is not declared in cluster/concepts.memql -- because the
+//     concept lives here, not there. The engine's own resolver does accept
+//     it on a unique trailing-segment match, and that divergence is itself
+//     worth knowing; but adding ANY explicit import for the concept
+//     suppresses the same-domain fallback in dslimports, which then drops
+//     createDeployment and updateDeploymentStatus out of
+//     TestMutationFieldLaneCoversEveryMutation.
+//   - shortId(): parses in an id: slot and would give the same invariant
+//     from the other direction, but the mutation-template id evaluator has
+//     no ShortIdExpr case, so it dies at render with "unsupported
+//     expression in mutation template".
 //
 // Reachable today? No in-tree producer passes a canonical deploymentId --
 // component/deploycontrol mints a bare id and the deploy pack forwards the
@@ -147,7 +163,12 @@ mutate deployment updateDeploymentStatus {
 // now. It is reachable through the generated SDK by an external caller.
 //
 // nodeType is a plain discriminator, not a concept reference, so it is
-// hashed as written.
+// hashed as written. One assumption that rides on that: the ":" separator
+// makes the pair unambiguous only because deploymentId is colon-free by
+// construction (id.NewShortId mints a bare uuid). A colon-bearing
+// deploymentId would alias with a colon-bearing nodeType -- ("d:x", "y")
+// and ("d", "x:y") hash identically. Same external-caller surface as the
+// normalisation gap above, tracked in the same issue.
 //
 // Engine-as-spine: version coalesces to "" -- an empty version means
 // "resolve against the deployment's engine version", a non-empty value
@@ -157,7 +178,7 @@ mutate deployment updateDeploymentStatus {
 // is spec("requiresOwnerOrAdmin") on the cut-version/rollback effects
 // (Epic 2.6). Additive: no existing overlay or query is affected.
 /// Create a v1:cluster:deploymentNodeSpec row for a (deploymentId, nodeType) pair. The concept id
-/// is hash(deploymentId + ':' + nodeType) so re-pins append to one timeline.
+/// is hash(concat(deploymentId, ':', nodeType)) so re-pins append to one timeline.
 /// Engine-as-spine: empty version resolves against the deployment engine version. Epic 2 / #2094.
 mutate deploymentNodeSpec createDeploymentNodeSpec {
   args {
