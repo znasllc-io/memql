@@ -166,21 +166,24 @@ func TestCond_TruthinessIsPinnedIndependently(t *testing.T) {
 		{"non-empty string is truthy", "nonempty", "yes"},
 		{"zero is falsy", 0, "no"},
 		{"one is truthy", 1, "yes"},
-		// The two inputs where this evaluator and the multi-statement path
-		// DISAGREE, pinned deliberately rather than left implicit.
+		// Pinned deliberately: memql#2915 makes cond evaluate a
+		// caller-supplied predicate for the first time -- before, it errored
+		// -- so the STRING "false", which is what a JSON, HTTP or MCP caller
+		// sends for a boolean it stringified, now reaches this isTruthy and is
+		// truthy because it is non-empty. MEASURED through Execute: a logic
+		// body `return cond(args.allowed, "Y", "N")` given `allowed: "false"`
+		// returns "Y".
 		//
-		// memql#2915 makes cond evaluate a caller-supplied predicate for the
-		// first time -- before it errored -- so the STRING "false", which is
-		// what a JSON, HTTP or MCP caller sends for a boolean it stringified,
-		// now reaches this isTruthy and is truthy because it is non-empty.
-		// component/automations' evaluateCondPredicate switches on the raw
-		// text and returns false for exactly "false" and "" (its own isTruthy
-		// additionally excludes "0"), so `x := cond(args.allowed, ...)` and
-		// `return cond(args.allowed, ...)` disagree on the same input.
+		// So a gate written `return cond(args.allowed, true, false)` and handed
+		// the string "false" currently OPENS. Whether that is the right answer
+		// is memql#2963; this test only states what this path does.
 		//
-		// This test states what THIS path does. Whether it is the right answer
-		// is memql#2963: a gate written `cond(args.allowed, true, false)` and
-		// handed "false" currently opens.
+		// Deliberately NOT asserting anything about the multi-statement path
+		// here. component/automations' evaluateCondPredicate takes the raw
+		// SOURCE TEXT of the predicate, not a resolved value, so its
+		// `case "false"` matches a literal `false` in source rather than an
+		// arg that resolves to "false" -- a different question that this
+		// harness cannot reach, since engineForSeamTest wires no LogicRunner.
 		{`the string "false" is truthy here -- see memql#2963`, "false", "yes"},
 		{`the string "0" is truthy here -- see memql#2963`, "0", "yes"},
 	} {
