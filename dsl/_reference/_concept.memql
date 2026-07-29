@@ -241,7 +241,8 @@ concept fieldTypes {
 //   @required           Field must be present on insert. No default.
 //   @default("value")   Auto-fill on insert when caller omits the field.
 //                       Value is parsed -- numbers as numbers, "true"/"false"
-//                       as bools, RFC3339 strings as datetimes.
+//                       as bools. Anything else stays a string; there is no
+//                       datetime coercion.
 //                                                          [see memql#2959]
 //   @description("..."  Human-readable description.
 //   @unique             Engine enforces uniqueness across rows. [see memql#2959]
@@ -253,6 +254,15 @@ concept fieldTypes {
 //   @immutable          Field cannot change after insert.  [see memql#2959]
 //   @secret             Field is redacted from logs + non-elevated readers.
 //                                                          [see memql#2959]
+//   @pii                Marks the field for the @scrubPii mutation path. NOT
+//                       a general redaction: scrubPIIFields runs only for a
+//                       mutation carrying @scrubPii, which is load-rejected
+//                       on anything but an update, so on an insert the value
+//                       is stored verbatim. See memql#2959.
+//   @internal           Field is rejected as a mutation caller arg
+//                       (validateMutationCallerArgs). Enforced.
+//   @serverSet          Same gate as @internal: server populates it, a caller
+//                       may not pass it. Enforced.
 //   @variant(discriminator="field")  Discriminated-union field. See section 9.
 //
 // Unknown @-annotations on a field are rejected at load time with
@@ -265,9 +275,12 @@ concept fieldTypes {
 //   the wrapper where JSON Schema ignores them. Either way there is no
 //   element-level check. See the NOTE in section 7 and memql#2951.
 //
-//   ENFORCEMENT. @unique, @immutable, @secret and @default lower to schema
-//   keys that nothing on the concept write path reads today, so those four
-//   lines describe intent rather than current behaviour. See memql#2959.
+//   ENFORCEMENT. @unique, @immutable and @secret lower to x-unique /
+//   x-immutable / x-secret, and each of those strings occurs exactly once in
+//   the tree -- the emit site. Nothing reads them on ANY path, so @secret
+//   redacts nothing, on reads or in logs. @default is emitted and never
+//   applied on insert; only the parsing half of its description above holds
+//   (a numeric or boolean literal really is coerced). See memql#2959.
 
 @namespace("reference")
 @description("Every field-level annotation in use.")

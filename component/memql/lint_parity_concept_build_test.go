@@ -651,19 +651,26 @@ func TestConceptPropertyTypes_FieldAnnotationsAreNotCarriedIntoElementPosition(t
 // asserts more strictly. A test named for a behaviour must exercise the
 // behaviour, or the docs' one claim with teeth is gated by proxy.
 //
-// Each case gets a DISTINCT concept id: compileSchema caches by cache key, so
-// reusing one id would silently validate every case against the first one's
-// schema.
+// Ids are distinct per case only for readable failure output -- this path
+// builds its own compiler per subtest and never reaches memoryNodes'
+// compileSchema, so no cache is involved. (An earlier version of this comment
+// claimed the distinct ids were dodging that cache. They are not; the cache is
+// on (*Concept).validate, which this test does not call.)
 func TestConceptPropertyTypes_WrappedElementsRejectConformingData(t *testing.T) {
+	strArr := []any{"s"}
+	strMap := map[string]any{"k": "s"}
 	for i, c := range []struct {
-		decl    string
+		decl string
+		// payload CONFORMS to the declaration and must be refused
 		payload any
+		// control has string elements and must be accepted
+		control any
 	}{
-		{"[]boolean", []any{true}},
-		{"[]any", []any{3}},
-		{"map[string]any", map[string]any{"count": 3}},
-		{"[]map[string]string", []any{map[string]any{"a": "b"}}},
-		{"map[string]map[string]string", map[string]any{"a": map[string]any{"b": "c"}}},
+		{"[]boolean", []any{true}, strArr},
+		{"[]any", []any{3}, strArr},
+		{"map[string]any", map[string]any{"count": 3}, strMap},
+		{"[]map[string]string", []any{map[string]any{"a": "b"}}, strArr},
+		{"map[string]map[string]string", map[string]any{"a": map[string]any{"b": "c"}}, strMap},
 	} {
 		t.Run(c.decl, func(t *testing.T) {
 			id := fmt.Sprintf("v1:aud:probe%d", i)
@@ -696,11 +703,31 @@ func TestConceptPropertyTypes_WrappedElementsRejectConformingData(t *testing.T) 
 			}
 
 			payload := map[string]any{"label": "l", "f": c.payload}
-			if err := schema.Validate(payload); err == nil {
+			err = schema.Validate(payload)
+			if err == nil {
 				t.Errorf("`%s` now ACCEPTS a payload that conforms to its declaration. If elements "+
 					"are honoured now, memql#2951 has landed -- drop the note from "+
 					"docs/public/language/memql.md and dsl/_reference/_concept.memql in the same "+
 					"change.\n  payload: %v\n  schema:  %s", c.decl, payload, string(raw))
+				return
+			}
+			// It must be refused BECAUSE of the element schema. Without this a
+			// change that honours elements while adding any unrelated required
+			// field keeps the test green -- rejected, but for the wrong reason,
+			// which is the failure this whole PR keeps finding in its own work.
+			if loc := err.Error(); !strings.Contains(loc, "/properties/f/items") &&
+				!strings.Contains(loc, "/properties/f/additionalProperties") {
+				t.Errorf("`%s` was refused, but not by its element schema, so this proves nothing "+
+					"about memql#2951.\n  error: %v", c.decl, err)
+			}
+			// Free positive control: the same declaration accepts a STRING
+			// element, which is what makes the refusal above a type mismatch
+			// rather than a broken fixture.
+			ctl := map[string]any{"label": "l", "f": c.control}
+			if err := schema.Validate(ctl); err != nil {
+				t.Errorf("control for `%s` must be accepted -- elements lower to string, so a string "+
+					"element conforms. If this fails the fixture is broken and the case above is "+
+					"passing for the wrong reason.\n  control: %v\n  error: %v", c.decl, ctl, err)
 			}
 		})
 	}
