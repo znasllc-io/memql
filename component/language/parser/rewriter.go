@@ -344,7 +344,12 @@ func rewriteEachBlock(
 			return "", fmt.Errorf("%s: missing closing brace", kindLabel)
 		}
 
-		headerLine := out[h[0]:h[1]]
+		// From `scan`, not `out`: the header was LOCATED on the blanked view and
+		// this regex's whitespace runs can match blanked comment bytes, so
+		// re-matching against raw text makes the two passes disagree whenever a
+		// comment sits in the header region (memql#2906). Name bytes are
+		// non-space and identical in both views.
+		headerLine := scan[h[0]:h[1]]
 		nameMatch := header.FindStringSubmatch(headerLine)
 		if len(nameMatch) < 2 {
 			return "", fmt.Errorf("%s: could not extract name", kindLabel)
@@ -784,10 +789,7 @@ func parseStructQueryBody(body string) (*structQueryBody, error) {
 	// the rest line-by-line. Stripping rather than line-skipping
 	// keeps the line accounting simple.
 	rest := body
-	// Blanked view, for the reason extractArgsBlock documents: matchBraceInBody
-	// blanks, so locating the header on raw text lets a commented-out `args {`
-	// be matched and then fail brace matching (memql#2906).
-	if loc := argsBlockHeader.FindStringIndex(BlankComments(body)); loc != nil {
+	if loc := argsBlockHeader.FindStringIndex(body); loc != nil {
 		openOffset := strings.LastIndex(body[loc[0]:loc[1]], "{")
 		open := loc[0] + openOffset
 		close := matchBraceInBody(body, open)

@@ -130,18 +130,26 @@ automation a {
 	}
 
 	variants := map[string]string{
-		"before step keyword": "  /*c*/step s {",
-		"after step keyword":  "  step /*c*/ s {",
-		"before brace":        "  step s /*c*/ {",
-		"before args keyword": "  /*c*/args {",
-		"after args keyword":  "  args /*c*/ {",
+		// The OUTER automation header, framed by rewriteEachBlock, which
+		// locates on the blanked view and re-extracts the name -- the same
+		// two-pass disagreement as the step header one level down.
+		"after automation keyword": "automation /*c*/ a {",
+		"before automation brace":  "automation a /*c*/ {",
+		"before step keyword":      "  /*c*/step s {",
+		"after step keyword":       "  step /*c*/ s {",
+		"before brace":             "  step s /*c*/ {",
+		"before args keyword":      "  /*c*/args {",
+		"after args keyword":       "  args /*c*/ {",
 	}
 	for name, header := range variants {
 		t.Run(name, func(t *testing.T) {
 			var src string
-			if strings.Contains(header, "args") {
+			switch {
+			case strings.HasPrefix(header, "automation"):
+				src = strings.Replace(ctl, "automation a {", header, 1)
+			case strings.Contains(header, "args"):
 				src = strings.Replace(ctl, "  args {", header, 1)
-			} else {
+			default:
 				src = strings.Replace(ctl, "  step s {", header, 1)
 			}
 			got, err := NormaliseAutomationSource(src)
@@ -193,6 +201,43 @@ automation a {
 			if compiledForm(got) != compiledForm(want) {
 				t.Errorf("a non-ASCII leading space changed the compiled automation -- the forEach "+
 					"dispatch silently fell through to the plain-call translator.\n  got:\n%s\n  control:\n%s", got, want)
+			}
+		})
+	}
+}
+
+// TestAutomationSource_NonASCIIWhitespaceAtTheTRAILINGEdge pins the half of
+// trimCommentEdges the leading-edge test cannot reach.
+//
+// Review found that reverting ONLY TrimRightFunc to an ASCII class survived
+// all 126 packages, because every existing case varies the LEADING edge. Both
+// halves are load-bearing: strings.TrimSpace, which this replaced, trimmed
+// unicode.IsSpace from both ends.
+func TestAutomationSource_NonASCIIWhitespaceAtTheTRAILINGEdge(t *testing.T) {
+	const ctl = `@trigger(event="e", concept="v1:a:b", partition="*")
+automation a {
+  step s {
+    logic l { x: 1 }
+  }
+}`
+	want, err := NormaliseAutomationSource(ctl)
+	if err != nil {
+		t.Fatalf("control: %v", err)
+	}
+	for _, sp := range []struct{ name, ch string }{
+		{"U+00A0", " "},
+		{"U+2003", " "},
+	} {
+		t.Run(sp.name, func(t *testing.T) {
+			// Trailing edge of the step body, after the call.
+			src := strings.Replace(ctl, "logic l { x: 1 }\n", "logic l { x: 1 }\n"+sp.ch, 1)
+			got, err := NormaliseAutomationSource(src)
+			if err != nil {
+				t.Fatalf("a non-ASCII TRAILING space refused the load; strings.TrimSpace accepted it "+
+					"before (memql#2906).\n  error: %v", err)
+			}
+			if compiledForm(got) != compiledForm(want) {
+				t.Errorf("a non-ASCII trailing space changed the compiled automation.\n  got:\n%s\n  control:\n%s", got, want)
 			}
 		})
 	}
