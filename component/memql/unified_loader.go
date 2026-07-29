@@ -68,8 +68,13 @@ type ConceptSkip struct {
 	Err     error  // why the schema build failed
 }
 
+// String leads with the CONSEQUENCE rather than the cause. The wrapped error
+// already names the concept and the offending property; what it does not say,
+// and what the author needs first, is that the whole concept is gone -- not
+// the property (memql#2909).
 func (s ConceptSkip) String() string {
-	return fmt.Sprintf("concept %q (build): %v", s.Concept, s.Err)
+	return fmt.Sprintf("concept DROPPED, so every query, mutation and shape bound to it "+
+		"will fail at runtime: %v", s.Err)
 }
 
 // LoadUnifiedConcepts loads every concept in the mounted tree and
