@@ -173,7 +173,7 @@ concept audioOverride {
 
 **Concept-level annotations:** `@version`, `@namespace`, `@description` (required so humans and AI systems can reason about the dataset).
 
-**Field annotations:** `@required`, `@default("...")`, `@description("...")`. Note that `@default` is **not** applied on insert today -- the value is parsed into the emitted schema and nothing on the concept write path reads it back (memql#2959).
+**Field annotations:** `@required`, `@default("...")`, `@description("...")`.
 
 **Field types are a closed set:** `string`, `bool`, `int`, `float`, `datetime`, `object`, `any`, `array`, plus the parameterised forms `[]<type>` (`[]string`, `[]object`), `map[string]<type>`, and inline `enum("a", "b", ...)` value sets. Map keys must be `string`.
 
@@ -193,11 +193,7 @@ The JSON Schema spellings are the ones people reach for, because that is what th
 
 `memqllint` rejects each of these by name in property position, at any nesting depth, and points at the right spelling — so it is caught before boot rather than at it.
 
-> **Inside `[]<type>` and `map[string]<type>`, none of this applies (memql#2951).** Element types are not checked and not corrected — `[]boolean` and `[]frobnicate` both lint clean and build a field validating as `[]string`, and `[]datetime` emits a schema byte-identical to `[]string`, so the RFC3339 check is silently absent. Value-constraining annotations are inert there too: `@variant` is dropped entirely, and `@pattern`, `@minLength`, `@maxLength`, `@minimum` and `@maximum` land on the array or map itself, where JSON Schema ignores them — so `blocks []object @variant(...)` validates nothing and `tags []string @minLength(1)` is not the non-empty check it looks like.
->
-> The wrong schema is not reliably a *looser* schema, so "it may not be validated" is the wrong mental model. The emitted element type is frequently `string` regardless of what was written, which **rejects conforming data**: `[]boolean` refuses `[true]`, `[]any` and `map[string]any` refuse any non-string element, and `[]map[string]string` refuses `[{"a":"b"}]`. Unless the element type is on the dependable list below, assume the element schema is not the one you wrote.
->
-> Treat `[]<type>` and `map[string]<type>` as dependable only for `string`, `bool`, `int`, `float` and a bare `object`, with no value-constraining annotation on the field. #2951 carries the measured behaviour case by case.
+> **Inside `[]<type>` and `map[string]<type>` none of this applies.** The element type is not checked and not corrected — `[]boolean` and `[]frobnicate` both lint clean and build a field validating as `[]string`, and `[]datetime` emits a schema byte-identical to `[]string`. The wrong schema rejects conforming data as readily as it accepts wrong data, so a wrapped type does not mean what it says. Value-constraining annotations are inert there too. Measured case by case in memql#2951.
 
 **Cross-concept references** are plain string fields holding the target's id (e.g. `spaceId string`), optionally paired with an `@relationship` annotation so the engine can traverse the edge.
 
@@ -938,7 +934,7 @@ SDK-generated Go/TS docs (construct and arg), and sense hover.
 
 `args { ... }` field syntax: `<name> <type>[!] [@maxLength(N)] [@pattern("re")]`. The `!` sigil marks the field required (#2618; the `@required` annotation keeps parsing); omitting it makes the field optional. `enum("a", "b")` is a first-class type -- the self-contained spelling of the legacy `string @enum(...)` pair. Do not write `@description` on an args field -- the parser accepts and DISCARDS it (#2615); per-field documentation is a `///` doc comment on the line(s) immediately above the field (#2633). The declaration-level `@description` on the construct itself is load-bearing.
 
-> **`@default` is not valid on an args field** (rejected at load, #991). Apply a default in the body via `coalesce(args.X, <default>)`. A concept-field `@default` is **not** a substitute: it is emitted into the schema and never applied on insert (memql#2959), so `coalesce` is the only mechanism that actually fills a value.
+> **`@default` is not valid on an args field** (rejected at load, #991). Apply a default in the body with the `??` null-coalescing operator (`args.X ?? <default>`). A concept-field `@default` is **not** a substitute — it is emitted into the schema and never applied on insert (memql#2960).
 
 How names resolve inside a body:
 

@@ -403,7 +403,7 @@ func TestConceptPropertyTypes_ElementSafeListCarriesTheSameConstraints(t *testin
 // exactly one occurrence, the emit site. So "survives wrapping" here means the
 // emitted schema is unchanged, NOT that the annotation is enforced. @pii is
 // the exception that is genuinely live (concept.go PIIFields -> scrubPIIFields).
-// Filed as memql#2959.
+// Filed as memql#2960.
 func TestConceptPropertyTypes_AnnotationsSplitIntoValueConstraintsAndFieldMarkers(t *testing.T) {
 	fieldOf := func(t *testing.T, decl string) map[string]any {
 		t.Helper()

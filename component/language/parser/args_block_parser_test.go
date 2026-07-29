@@ -102,15 +102,23 @@ func parseArgsSafe(src string) (*ArgsSchema, error) {
 
 // TestParseArgsBlockField_RejectsDefault locks in the #991 de-overload: an
 // `@default` on an args-block field is rejected (it was silently discarded and
-// never applied; authors use coalesce(args.X, <default>) or a concept-field
-// @default instead). @default thus means one thing -- a honored field default.
+// never applied; authors use the `??` shorthand in the body instead. A
+// concept-field @default is NOT the alternative -- it is emitted into the
+// schema and never applied on insert either (memql#2960).
 func TestParseArgsBlockField_RejectsDefault(t *testing.T) {
 	_, err := parseArgsSafe(`args { kind string @default("a") }`)
 	if err == nil {
 		t.Fatal("expected @default on an args field to be rejected, got nil")
 	}
-	if !contains(err.Error(), "retired") || !contains(err.Error(), "coalesce") {
-		t.Fatalf("error should explain the migration to coalesce; got %q", err.Error())
+	// The message must name the `??` shorthand, not `coalesce(...)`:
+	// dsl/no_coalesce_longhand_test.go gates the corpus on the shorthand, so
+	// an author following the longhand advice writes a construct the tree
+	// rejects (memql#2909 review).
+	if !contains(err.Error(), "retired") || !contains(err.Error(), "??") {
+		t.Fatalf("error should explain the migration to the `??` shorthand; got %q", err.Error())
+	}
+	if contains(err.Error(), "coalesce(") {
+		t.Errorf("the message must not send authors to the longhand the corpus gate rejects; got %q", err.Error())
 	}
 }
 
