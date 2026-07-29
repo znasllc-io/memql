@@ -277,9 +277,11 @@ func TestConceptPropertyTypes_ElementTypesAreNotValidated(t *testing.T) {
 	}
 }
 
-// TestConceptPropertyTypes_ElementSafeListCarriesTheSameConstraints gates the
-// one sentence in docs/public/language/memql.md an author will act on: which
-// element types are dependable inside []<type> and map[string]<type>.
+// TestConceptPropertyTypes_ElementSafeListCarriesTheSameConstraints pins which
+// element types are dependable inside []<type> and map[string]<type>. That
+// list lived in docs/public/language/memql.md until memql#2909 scoped its docs
+// back to the type gate; it is memql#2951's to state now, and this keeps it
+// measured either way.
 //
 // The invariant is not "it lowers to the right JSON type" -- that is too weak,
 // and I first wrote it that way and it passed for `datetime`, which is exactly
@@ -402,7 +404,9 @@ func TestConceptPropertyTypes_ElementSafeListCarriesTheSameConstraints(t *testin
 // the tree reads today -- `x-unique`, `x-immutable`, `x-secret` each have
 // exactly one occurrence, the emit site. So "survives wrapping" here means the
 // emitted schema is unchanged, NOT that the annotation is enforced. @pii is
-// the exception that is genuinely live (concept.go PIIFields -> scrubPIIFields).
+// the exception that is genuinely live, and it has TWO consumers: the
+// @scrubPii mutation path (concept.go PIIFields -> scrubPIIFields) and the
+// projection authorization gate in dsl/pii_projection_test.go (memql#2883).
 // Filed as memql#2960.
 func TestConceptPropertyTypes_AnnotationsSplitIntoValueConstraintsAndFieldMarkers(t *testing.T) {
 	fieldOf := func(t *testing.T, decl string) map[string]any {
@@ -456,9 +460,7 @@ func TestConceptPropertyTypes_AnnotationsSplitIntoValueConstraintsAndFieldMarker
 					elems, _ := wrapped[w.elemKey].(map[string]any)
 					if _, onElems := elems[c.key]; onElems {
 						t.Errorf("%s now constrains the elements of `%s`. That is the memql#2951 fix "+
-							"-- remove this annotation from the inert list in "+
-							"docs/public/language/memql.md and dsl/_reference/_concept.memql in the "+
-							"same change.", c.key, w.form)
+							"-- update that issue's measured table in the same change.", c.key, w.form)
 					}
 					if _, onWrapper := wrapped[c.key]; !onWrapper {
 						t.Errorf("%s is no longer emitted on the wrapper of `%s` either. The docs say "+
@@ -614,8 +616,7 @@ func TestConceptPropertyTypes_FieldAnnotationsAreNotCarriedIntoElementPosition(t
 			elems, _ := schemaFor(t, w.form)[w.elemKey].(map[string]any)
 			if _, ok := elems["oneOf"]; ok {
 				t.Errorf("`%s` now carries its discriminated union. That is the fix memql#2951 "+
-					"wants -- delete the annotation caveat from docs/public/language/memql.md "+
-					"and dsl/_reference/_concept.memql in the same change.", w.form)
+					"wants -- update that issue's measured table in the same change.", w.form)
 			}
 		}
 	})

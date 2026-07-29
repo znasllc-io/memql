@@ -245,7 +245,7 @@ concept fieldTypes {
 //   @maximum(N)         Max numeric value (int / float).
 //   @immutable          Field cannot change after insert.
 //   @secret             Field is redacted from logs + non-elevated readers.
-//   @variant(discriminator="field")  Discriminated-union field. See section 10.
+//   @variant(discriminator="field")  Discriminated-union field. See section 9.
 //
 // Unknown @-annotations on a field are rejected at load time with
 //   `unknown property annotation @<name> on field "<field>"`.
