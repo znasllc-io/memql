@@ -213,8 +213,9 @@ concept referenceExample {
 //   value-constraining annotations are inert -- []datetime loses its RFC3339
 //   check, []boolean silently becomes []string, @variant is dropped, and
 //   @pattern/@minLength/@maxLength/@minimum/@maximum land on the array or map
-//   where JSON Schema ignores them. map[string]any is the one case that fails
-//   the OTHER way: it constrains values to string, so it rejects {"count":3}.
+//   where JSON Schema ignores them. []any and map[string]any are the two cases
+//   that fail the OTHER way: both constrain elements to string, so they reject
+//   {"count":3}.
 //   Dependable only for string/bool/int/float/bare object with no
 //   value-constraining annotation.
 //   See memql#2951 for the measured behaviour case by case.
@@ -241,6 +242,7 @@ concept fieldTypes {
 //   @default("value")   Auto-fill on insert when caller omits the field.
 //                       Value is parsed -- numbers as numbers, "true"/"false"
 //                       as bools, RFC3339 strings as datetimes.
+//                                                          [see memql#2959]
 //   @description("..."  Human-readable description.
 //   @unique             Engine enforces uniqueness across rows. [see memql#2959]
 //   @pattern("regex")   String pattern (only valid on string fields).
@@ -251,25 +253,21 @@ concept fieldTypes {
 //   @immutable          Field cannot change after insert.  [see memql#2959]
 //   @secret             Field is redacted from logs + non-elevated readers.
 //                                                          [see memql#2959]
-//   @variant(discriminator="field")  Discriminated-union field. See section 10.
+//   @variant(discriminator="field")  Discriminated-union field. See section 9.
 //
 // Unknown @-annotations on a field are rejected at load time with
 //   `unknown property annotation @<name> on field "<field>"`.
 //
 // TWO CAVEATS on the list above, both measured:
 //
-//   WRAPPING. @pattern, @minLength, @maxLength, @minimum, @maximum and
-//   @variant describe a VALUE, so on []T and map[string]T they are emitted on
-//   the wrapper and do nothing -- there is no element-count, element-pattern
-//   or element-variant check. See the NOTE in section 3 and memql#2951.
+//   WRAPPING. On []T and map[string]T, @variant is DROPPED entirely, and
+//   @pattern, @minLength, @maxLength, @minimum and @maximum are emitted on
+//   the wrapper where JSON Schema ignores them. Either way there is no
+//   element-level check. See the NOTE in section 7 and memql#2951.
 //
-//   ENFORCEMENT. @unique, @immutable and @secret lower to x-unique /
-//   x-immutable / x-secret, and nothing in the tree reads those keys today --
-//   uniqueness is not enforced, immutability is enforced per-construct rather
-//   than by the annotation, and redaction is keyed on field NAME
-//   (component/safety/redact.go), not on @secret. @pii is the one in this
-//   group that genuinely runs. Tracked in memql#2959; the lines above describe
-//   the intent, not current behaviour.
+//   ENFORCEMENT. @unique, @immutable, @secret and @default lower to schema
+//   keys that nothing on the concept path reads today, so the lines above
+//   describe intent rather than current behaviour. See memql#2959.
 
 @namespace("reference")
 @description("Every field-level annotation in use.")

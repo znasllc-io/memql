@@ -200,8 +200,11 @@ func TestConceptPropertyTypes_ElementTypesAreNotValidated(t *testing.T) {
 	str := map[string]any{"type": "string"}
 	wantElementSchema := map[string]map[string]any{
 		"[]boolean": str, "[]frobnicate": str, "map[string]boolean": str,
-		"map[string]any": str, "map[string]map[string]string": str,
-		"[]map[string]string": str,
+		// the two OVER-constraining cases: `any` is unconstrained as a property
+		// and string-typed as an element, so both of these reject {"count":3}
+		"[]any": str, "map[string]any": str,
+		"map[string]map[string]string": str,
+		"[]map[string]string":          str,
 		// inner type discarded entirely, not coerced
 		"[][]frobnicate": {"type": "array"},
 		// byte-identical to []string: no `format`, which is the whole defect
@@ -215,7 +218,7 @@ func TestConceptPropertyTypes_ElementTypesAreNotValidated(t *testing.T) {
 	// widen to match, and so does this.
 	for _, ty := range []string{
 		"[]boolean", "[]frobnicate", "map[string]boolean",
-		"map[string]any", "map[string]map[string]string", "[]map[string]string", "[][]frobnicate",
+		"[]any", "map[string]any", "map[string]map[string]string", "[]map[string]string", "[][]frobnicate",
 		// datetime is RECOGNISED and lowers to a bare string with no
 		// `format`, so the RFC3339 check the scalar position enforces is
 		// silently dropped. Review round 3 found it on the docs' safe-list,
@@ -592,7 +595,8 @@ func TestConceptPropertyTypes_FieldAnnotationsAreNotCarriedIntoElementPosition(t
 		}
 		// memql#2951 records BOTH halves, so both are asserted.
 		if _, ok := got["x-discriminator"]; !ok {
-			t.Errorf("the docs say a scalar `object @variant` emits oneOf AND x-discriminator; "+
+			t.Errorf("memql#2951 records a scalar `object @variant` as emitting oneOf AND "+
+				"x-discriminator; "+
 				"the discriminator is missing.\n  got: %v", got)
 		}
 	})
