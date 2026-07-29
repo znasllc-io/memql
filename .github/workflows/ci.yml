@@ -147,11 +147,12 @@ jobs:
       # CI-invisible without an explicit -tags run.
       #
       # This used to carry a hand-maintained audit of which tags have test
-      # files and which lane covers each. It drifted on THREE tags at once
-      # (mcp omitted entirely, identity and voice both described as having no
-      # tagged test files when each has one), which is how three mcp-tagged
-      # suites went their whole life without executing -- including the file
-      # the #2888 vulnerability lives in.
+      # files and which lane covers each. It drifted on FOUR tags at once (mcp
+      # omitted entirely with three files; identity, telnyx_live and voice all
+      # covered by a closing "no other build tag carries test files today" that
+      # was false of each), which is how three mcp-tagged suites went their
+      # whole life without executing -- including the file the #2888
+      # vulnerability lives in.
       #
       # The audit is now EXECUTABLE: cmd/citags/scan reads the tags actually
       # present on *_test.go files and the `go test -tags ...` invocations
@@ -164,8 +165,11 @@ jobs:
       - name: go test -tags agent (build-tagged suites)
         if: ${{ env.RUN_GO == 'true' }}
         run: go test -tags agent -count=1 -timeout=300s ./integrations/agent/worker/
+      # RUN_GO or RUN_DSL: component/mcp/real_engine_surface_test.go pins DSL
+      # contracts (e.g. @mcp on readyHarnessStep), so a DSL-only change can red
+      # this lane. Mirrors the engine-load-check step's gating.
       - name: go test -tags mcp (build-tagged suites)
-        if: ${{ env.RUN_GO == 'true' }}
+        if: ${{ env.RUN_GO == 'true' || env.RUN_DSL == 'true' }}
         run: go test -tags mcp -count=1 -timeout=300s ./app/ ./component/mcp/
       - name: go test -tags identity (build-tagged suites)
         if: ${{ env.RUN_GO == 'true' }}

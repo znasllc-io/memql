@@ -373,18 +373,18 @@ automation zzAttackerSubmitted {
 // pinned at the executor rather than at the MCP runner.
 //
 // THAT PLACEMENT IS THE POINT. The seam the bug lives on is
-// app/mcp_automation_runner.go, behind `//go:build mcp`, and CI never EXECUTES
-// that file: the tagged test lane runs `-tags agent` and `-tags voice` only.
+// app/mcp_automation_runner.go, behind `//go:build mcp`.
 //
-// Precisely: it is COMPILED and type-check-gated -- ci.yml's build-node-tags
-// matrix includes mcp and runs `go vet -tags mcp ./...`, which type-checks test
-// files -- but no `go test -tags mcp` ever runs. An earlier version of this
-// comment said the file "is never compiled by CI", which was false and is
-// corrected here rather than quietly dropped. A test that compiles but never
-// runs asserts nothing, so the conclusion stands: this one runs untagged, on
-// the function that actually computes the trust, so it holds for every caller
-// of ExecuteWithClientEvent rather than for the one that exists today. The lane
-// gap is tracked in memql#2903.
+// When this was written CI did not EXECUTE that file -- it was compiled and
+// type-check-gated (build-node-tags runs `go vet -tags mcp ./...`, which
+// type-checks test files) but no `go test -tags mcp` ever ran. memql#2903 has
+// since added that lane, and a gate (scripts/citags) that fails the build if a
+// tagged suite ever loses its lane again.
+//
+// The placement still stands on its own merits, which is why it is unchanged:
+// this test runs UNTAGGED, against the function that actually computes the
+// trust, so it holds for every caller of ExecuteWithClientEvent rather than for
+// the one that happens to exist today.
 func TestExecuteWithClientEventDoesNotGrantInternalOrigin(t *testing.T) {
 	reg := &originCapturingRegistry{}
 	e := NewExecutor(ExecutorOptions{
