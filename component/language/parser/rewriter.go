@@ -41,6 +41,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 // =============================================================================
@@ -123,6 +124,45 @@ func matchBraceStrAware(s string, openIdx int) int {
 // consistent with the outer frame (rewriteEachBlock) and scanMutationBlocks.
 func matchBraceInBody(body string, openIdx int) int {
 	return matchBraceStrAware(BlankComments(body), openIdx)
+}
+
+// trimCommentEdges strips leading and trailing comment runs (and the
+// whitespace around them) from a block body, slicing from the ORIGINAL so
+// interior comments survive into the emitted output (memql#2906).
+//
+// BlankComments turns comment content into spaces without changing length, so
+// trimming spaces off the blanked view yields offsets that still index the
+// original. That is the same detect-on-blanked / slice-from-original split
+// matchBraceInBody above uses, and the one comment_blank.go's header
+// prescribes.
+//
+// This exists because a step body reached the call translator as RAW text: a
+// single explanatory comment inside any `step { }` made splitLeadingIdent see
+// `/`, which is not an identifier byte, and the load was refused with
+// `expected identifier at start of call`. The same comment below the call
+// tripped the trailing-text guard instead. Neither depended on what the
+// comment SAID -- a prose sentence failed exactly as a commented-out
+// construct did, which is why fixing only construct-shaped payloads would
+// have missed almost all of it.
+func trimCommentEdges(body string) string {
+	blanked := BlankComments(body)
+	// unicode.IsSpace, NOT an ASCII-only class. This replaced a
+	// strings.TrimSpace call, and TrimSpace trims U+00A0, U+2003, U+3000,
+	// U+0085 and U+202F too. Hand-rolling ASCII here made a step body whose
+	// first byte was one of those compile on main and hard-error here --
+	// parseAutomationSteps dispatches forEach/switch on the leading token of
+	// this result, so an untrimmed leading rune sent it to the plain-call
+	// translator instead (memql#2906 review).
+	//
+	// Decoding runes from the blanked view is safe: comment bytes are all
+	// ASCII spaces and every other byte is identical to the original, so the
+	// offsets still index `body` and can never split a rune.
+	start := len(blanked) - len(strings.TrimLeftFunc(blanked, unicode.IsSpace))
+	end := len(strings.TrimRightFunc(blanked, unicode.IsSpace))
+	if end < start {
+		end = start
+	}
+	return body[start:end]
 }
 
 // mutBodyBlock is a top-level `<keyword> { ... }` block located by
@@ -304,7 +344,12 @@ func rewriteEachBlock(
 			return "", fmt.Errorf("%s: missing closing brace", kindLabel)
 		}
 
-		headerLine := out[h[0]:h[1]]
+		// From `scan`, not `out`: the header was LOCATED on the blanked view and
+		// this regex's whitespace runs can match blanked comment bytes, so
+		// re-matching against raw text makes the two passes disagree whenever a
+		// comment sits in the header region (memql#2906). Name bytes are
+		// non-space and identical in both views.
+		headerLine := scan[h[0]:h[1]]
 		nameMatch := header.FindStringSubmatch(headerLine)
 		if len(nameMatch) < 2 {
 			return "", fmt.Errorf("%s: could not extract name", kindLabel)
@@ -390,7 +435,14 @@ func emitFuncHeader(sb *strings.Builder, receiver, name, argsText, returns strin
 var argsBlockHeader = regexp.MustCompile(`(^|[\n\r])[ \t]*args[ \t]*\{`)
 
 func extractArgsBlock(body string) (string, error) {
-	loc := argsBlockHeader.FindStringIndex(body)
+	// Located on the BLANKED view so a commented-out `args {` header is not
+	// matched (memql#2906). matchBraceInBody below already blanks, so
+	// matching the header on raw text made the two disagree: the header was
+	// found in a comment, its brace was sought in a blanked view where that
+	// `{` is a space, and the load failed with "missing closing brace" naming
+	// a block that does not exist. Offsets are preserved, so every slice
+	// below still indexes `body`.
+	loc := argsBlockHeader.FindStringIndex(BlankComments(body))
 	if loc == nil {
 		return "", nil
 	}
@@ -1448,15 +1500,28 @@ func emitAutomation(name, _conceptId, body, _preamble string) (string, error) {
 
 func parseAutomationSteps(body string) ([]automationStep, error) {
 	var out []automationStep
+	// Headers are located on the BLANKED view for the same reason
+	// extractArgsBlock does it: a commented-out `step X {` would otherwise be
+	// matched here and then fail brace matching, which blanks (memql#2906).
+	// Blanked once rather than per iteration -- it is offset-preserving, so
+	// every slice below still indexes `body`.
+	scan := BlankComments(body)
 	pos := 0
 	for pos < len(body) {
-		loc := stepBlockHeader.FindStringIndex(body[pos:])
+		loc := stepBlockHeader.FindStringIndex(scan[pos:])
 		if loc == nil {
 			break
 		}
 		stepStart := pos + loc[0]
 		stepHeaderEnd := pos + loc[1]
-		header := body[stepStart:stepHeaderEnd]
+		// From `scan`, not `body`: the header was LOCATED on the blanked view,
+		// and the regex's [ \t]* runs can match blanked comment bytes. Re-running
+		// it against raw text made the two passes disagree whenever a comment sat
+		// inside the header region, yielding "step block: missing name" for a step
+		// whose name is right there (memql#2906 review). Identifier bytes are
+		// non-space and byte-identical in both views, so the extracted name is
+		// unchanged for every input that already worked.
+		header := scan[stepStart:stepHeaderEnd]
 		nameMatch := stepBlockHeader.FindStringSubmatch(header)
 		if len(nameMatch) < 2 {
 			return nil, fmt.Errorf("step block: missing name")
@@ -1467,7 +1532,10 @@ func parseAutomationSteps(body string) ([]automationStep, error) {
 		if closeIdx < 0 {
 			return nil, fmt.Errorf("step %q: missing closing brace", stepName)
 		}
-		stepBody := strings.TrimSpace(body[openIdx+1 : closeIdx])
+		// trimCommentEdges, not TrimSpace: a leading or trailing comment here
+		// reaches splitLeadingIdent / the trailing-text guard as raw text and
+		// refuses the load (memql#2906).
+		stepBody := trimCommentEdges(body[openIdx+1 : closeIdx])
 		if stepBody == "" {
 			return nil, fmt.Errorf("step %q: body is empty", stepName)
 		}
