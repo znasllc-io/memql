@@ -10,7 +10,6 @@
 /// A provisioned PSTN phone number (DID). Bound to a partition; inbound calls to this DID route to
 /// a partition-scoped room. Carrier identifiers are opaque (providerId). Compliance state (E911,
 /// consent) is layered by the compliance slice.
-@rowAuthz(clusterOwner)
 concept number {
   e164          string! @description("Canonical +<countrycode><number> address, e.g. '+14155550100'.")
   carrier       string! @description("Owning carrier name ('telnyx', ...).")

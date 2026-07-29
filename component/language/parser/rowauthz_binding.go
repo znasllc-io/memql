@@ -236,15 +236,28 @@ func FormatRowAuthz(d RowAuthzDecl) (string, error) {
 	}
 }
 
-// rowAuthzDeclPattern matches an `@rowAuthz` annotation line.
-var rowAuthzDeclPattern = regexp.MustCompile(`(?m)^[ \t]*@` + RowAuthzAnnotation + `\b`)
+// rowAuthzDeclPattern matches an `@rowAuthz` annotation.
+//
+// NOT line-anchored, unlike the sibling actor-binding detector. The
+// parser accepts several annotations on one line, so
+// `@description("d") @rowAuthz(public)` is a real declaration that a
+// `^[ \t]*@rowAuthz` pattern does not see -- and not seeing it made
+// the codemod insert a SECOND declaration above a concept that already
+// had one, silently replacing a hand-authored tier. False positives
+// from prose are handled by blanking rather than by anchoring, which
+// is the stronger guard: `@` cannot appear inside an identifier, so
+// there is nothing else for `@rowAuthz` to be.
+var rowAuthzDeclPattern = regexp.MustCompile(`@` + RowAuthzAnnotation + `\b`)
 
 // RowAuthzDeclaredInSource reports whether the source carries an
-// @rowAuthz annotation line. Used for the codemod's idempotency check
-// -- a concept that already declares a tier is never rewritten, so a
-// re-run is a no-op and a hand-authored declaration is never clobbered.
+// @rowAuthz annotation. Used for the codemod's idempotency check -- a
+// concept that already declares a tier is never rewritten, so a re-run
+// is a no-op and a hand-authored declaration is never clobbered.
+//
+// Scanned on the comment- and string-blanked view so a doc comment
+// that MENTIONS the annotation does not read as a declaration.
 func RowAuthzDeclaredInSource(source string) bool {
-	return rowAuthzDeclPattern.MatchString(source)
+	return rowAuthzDeclPattern.MatchString(blankCommentsAndStrings(source))
 }
 
 // conceptHeaderRe matches a concept declaration line. Group 1 is the
@@ -363,6 +376,13 @@ func RewriteRowAuthz(src []byte, tiers map[string]RowAuthzDecl) ([]byte, error) 
 	}
 	b.WriteString(text[prev:])
 	return []byte(b.String()), nil
+}
+
+// BlankCommentsAndStrings is the exported form of the blanker, for the
+// memqlmigrate codemod, which has to scan construct bodies in the same
+// coordinate space this package's header location uses.
+func BlankCommentsAndStrings(source string) string {
+	return blankCommentsAndStrings(source)
 }
 
 // blankCommentsAndStrings replaces the contents of line comments,

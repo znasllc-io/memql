@@ -48,6 +48,14 @@ var useConceptsRe = regexp.MustCompile(`(?m)^[ \t]*use[ \t]+([\p{L}_][\p{L}\p{Nd
 
 // filterClauseRe captures a struct-form `filter` clause. The parser
 // rejects a multi-line clause, so one line is the whole clause.
+//
+// It is only ever run over the comment- and string-blanked view. On
+// raw source a trailing `// && ownerUserId==actor.userId` would be
+// captured as part of the clause and split into a conjunct by
+// topLevelConjuncts, so a COMMENT could manufacture a tier the query
+// does not have -- the #2875 "silenced by a sentence" class, running
+// in the direction that fabricates a claim rather than suppressing
+// one.
 var filterClauseRe = regexp.MustCompile(`(?m)^[ \t]*filter[ \t]+(.*)$`)
 
 // Line-anchored, not substring: a comment merely mentioning
@@ -75,10 +83,25 @@ type conceptKey struct {
 	Name   string
 }
 
-// vote is one query's evidence about the concept it binds.
+// verdict is what one query says about the concept it binds.
+type verdictKind int
+
+const (
+	// votes for a tier: its filter guarantees that tier's predicate.
+	verdictVote verdictKind = iota
+	// blocks any tier: the query reads rows the tier would exclude, so
+	// declaring the tier would assert something this query disproves.
+	verdictBlocks
+	// neither: @serverOnly, which is not a client read at all.
+	verdictExempt
+)
+
+// vote is one query's verdict about the concept it binds.
 type vote struct {
-	Decl   langparser.RowAuthzDecl
-	Source string // "<domain>/<file> <constructName>", for the report
+	Kind   verdictKind
+	Decl   langparser.RowAuthzDecl // set only when Kind == verdictVote
+	Reason string                  // set only when Kind == verdictBlocks
+	Source string                  // "<domain>/<file> <constructName>", for the report
 }
 
 // rowAuthzInference is the whole-tree result: what each concept should
@@ -146,12 +169,21 @@ func inferRowAuthz(dslRoot string) (*rowAuthzInference, error) {
 		}
 	}
 
-	// Pass 2: collect each query's evidence about the concept it binds.
+	// Pass 2: collect each query's verdict about the concept it binds.
 	for _, f := range files {
 		imports := conceptImports(f.src)
-		for _, m := range queryHeaderRe.FindAllStringSubmatchIndex(f.src, -1) {
-			conceptName := f.src[m[2]:m[3]]
-			constructName := f.src[m[4]:m[5]]
+		// Headers are located, and bodies sliced, on the comment- and
+		// string-blanked view. The blanker is length-preserving, so
+		// offsets index the raw source unchanged. Scanning raw source
+		// let a `{` inside a string or a comment unbalance the brace
+		// walk and run one construct's body into the next -- the same
+		// locate-on-one-view/slice-on-another class ConceptHeaders
+		// avoids (#2948), and here it would mean a query voting with a
+		// DIFFERENT construct's filter.
+		blanked := langparser.BlankCommentsAndStrings(f.src)
+		for _, m := range queryHeaderRe.FindAllStringSubmatchIndex(blanked, -1) {
+			conceptName := blanked[m[2]:m[3]]
+			constructName := blanked[m[4]:m[5]]
 
 			key := conceptKey{Domain: f.domain, Name: conceptName}
 			if ns, ok := imports[conceptName]; ok {
@@ -164,15 +196,13 @@ func inferRowAuthz(dslRoot string) (*rowAuthzInference, error) {
 				continue
 			}
 
-			body := constructBody(f.src, m[0])
-			preamble := constructPreamble(f.src, m[0])
+			body := constructBody(blanked, m[0])
+			preamble := constructPreamble(blanked, m[0])
 			source := fmt.Sprintf("%s/%s %s", f.domain, filepath.Base(f.path), constructName)
 
-			decl, ok := classifyQuery(preamble, body)
-			if !ok {
-				continue
-			}
-			votes[key] = append(votes[key], vote{Decl: decl, Source: source})
+			v := classifyQuery(preamble, body)
+			v.Source = source
+			votes[key] = append(votes[key], v)
 		}
 	}
 
@@ -182,30 +212,63 @@ func inferRowAuthz(dslRoot string) (*rowAuthzInference, error) {
 		Counts:    map[langparser.RowAuthzTier]int{},
 	}
 
+	// A tier is a FLOOR: the predicate that will eventually be AND-ed
+	// into every access of the concept. So a tier is only true of the
+	// concept if EVERY query over it already satisfies that predicate.
+	//
+	// The consequence is the rule below, and it is the whole
+	// correctness of this codemod: a query that carries no evidence is
+	// not a neutral bystander, it is a COUNTEREXAMPLE. It reads rows
+	// the floor would exclude, so declaring the floor would assert
+	// something that query disproves. Counting only the positive votes
+	// -- "one caller-scoped query, therefore the concept is owned" --
+	// declares `planner.plan` owned off 2 of 10 queries while the
+	// primary user-facing read is space-scoped, and declares
+	// `library.artifact` owned when `libraryWorkspaceLiveSources`
+	// documents its rows as having no owner at all.
+	//
+	// Only @serverOnly is exempt: it is not a client-callable read, and
+	// #2803's design decision 4 reserves an explicit system actor for
+	// exactly that path.
 	for key := range declared {
 		vs := votes[key]
-		if len(vs) == 0 {
-			abstained[key] = "no query over this concept carries unambiguous evidence"
-			continue
-		}
-		agreed := vs[0].Decl
-		conflict := ""
-		for _, v := range vs[1:] {
-			if v.Decl != agreed {
-				conflict = fmt.Sprintf("queries disagree: %s says %s, %s says %s",
-					vs[0].Source, describe(agreed), v.Source, describe(v.Decl))
-				break
+		var agreed langparser.RowAuthzDecl
+		var agreedSource string
+		haveVote := false
+		reason := ""
+
+		for _, v := range vs {
+			switch v.Kind {
+			case verdictExempt:
+				continue
+			case verdictBlocks:
+				if reason == "" {
+					reason = fmt.Sprintf("%s %s", v.Source, v.Reason)
+				}
+			case verdictVote:
+				if !haveVote {
+					agreed, agreedSource, haveVote = v.Decl, v.Source, true
+					continue
+				}
+				if v.Decl != agreed && reason == "" {
+					reason = fmt.Sprintf("queries disagree: %s says %s, %s says %s",
+						agreedSource, describe(agreed), v.Source, describe(v.Decl))
+				}
 			}
 		}
-		if conflict != "" {
-			abstained[key] = conflict
-			continue
+
+		switch {
+		case reason != "":
+			abstained[key] = reason
+		case !haveVote:
+			abstained[key] = "no query over this concept establishes a tier"
+		default:
+			if out.Tiers[key.Domain] == nil {
+				out.Tiers[key.Domain] = map[string]langparser.RowAuthzDecl{}
+			}
+			out.Tiers[key.Domain][key.Name] = agreed
+			out.Counts[agreed.Tier]++
 		}
-		if out.Tiers[key.Domain] == nil {
-			out.Tiers[key.Domain] = map[string]langparser.RowAuthzDecl{}
-		}
-		out.Tiers[key.Domain][key.Name] = agreed
-		out.Counts[agreed.Tier]++
 	}
 
 	return out, nil
@@ -245,13 +308,17 @@ func describe(d langparser.RowAuthzDecl) string {
 //
 // Both stay undeclared, which is a visible state Phase 2 measures, not
 // a silent one.
-func classifyQuery(preamble, body string) (langparser.RowAuthzDecl, bool) {
+func classifyQuery(preamble, body string) vote {
 	// @serverOnly says "not callable by a client at all", so a
 	// caller-scope filter is neither present nor meaningful there
-	// (#2800). It is evidence about the CALL SURFACE, not about who
-	// may see the rows, so it abstains rather than voting.
-	if serverOnlyAnnotationRe.MatchString(preamble) || publicAnnotationRe.MatchString(preamble) {
-		return langparser.RowAuthzDecl{}, false
+	// (#2800). It is the one verdict that neither votes nor blocks.
+	if serverOnlyAnnotationRe.MatchString(preamble) {
+		return vote{Kind: verdictExempt}
+	}
+	// @public says this call is intentionally unscoped, which is a
+	// direct counterexample to any floor that narrows rows.
+	if publicAnnotationRe.MatchString(preamble) {
+		return vote{Kind: verdictBlocks, Reason: "is @public, so it reads rows any narrowing tier would exclude"}
 	}
 
 	clause := ""
@@ -259,7 +326,7 @@ func classifyQuery(preamble, body string) (langparser.RowAuthzDecl, bool) {
 		clause = strings.TrimSpace(m[1])
 	}
 	if clause == "" {
-		return langparser.RowAuthzDecl{}, false
+		return vote{Kind: verdictBlocks, Reason: "has no filter, so it reads every row of the concept"}
 	}
 
 	// Only a TOP-LEVEL CONJUNCT establishes anything. A term inside a
@@ -267,21 +334,22 @@ func classifyQuery(preamble, body string) (langparser.RowAuthzDecl, bool) {
 	// other arm still returns rows the term would exclude, which is
 	// the memql#2832 defect where one permissive disjunct made a gate
 	// read as scoped.
-	for _, conjunct := range topLevelConjuncts(clause) {
+	conjuncts := topLevelConjuncts(clause)
+	for _, conjunct := range conjuncts {
 		if m := ownerLeafRe.FindStringSubmatch(conjunct); m != nil {
 			field := m[1]
 			if field == "" {
 				field = m[2]
 			}
-			return langparser.RowAuthzDecl{Tier: langparser.RowAuthzOwned, Owner: field}, true
+			return vote{Kind: verdictVote, Decl: langparser.RowAuthzDecl{Tier: langparser.RowAuthzOwned, Owner: field}}
 		}
 	}
-	for _, conjunct := range topLevelConjuncts(clause) {
+	for _, conjunct := range conjuncts {
 		if adminLeafRe.MatchString(conjunct) {
-			return langparser.RowAuthzDecl{Tier: langparser.RowAuthzClusterOwner}, true
+			return vote{Kind: verdictVote, Decl: langparser.RowAuthzDecl{Tier: langparser.RowAuthzClusterOwner}}
 		}
 	}
-	return langparser.RowAuthzDecl{}, false
+	return vote{Kind: verdictBlocks, Reason: fmt.Sprintf("filters on %q, which does not gate on the caller", clause)}
 }
 
 // topLevelConjuncts splits a filter clause on `&&` at paren depth 0 and

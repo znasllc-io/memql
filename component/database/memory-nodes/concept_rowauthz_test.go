@@ -108,6 +108,28 @@ func TestConceptRejectsMalformedRowAuthz(t *testing.T) {
 	}
 }
 
+// Two declarations on one concept must refuse to load rather than
+// silently last-win. The parser folds attributes in source order, so
+// without this a reader scanning top-down sees a tier the engine does
+// not use.
+func TestConceptRejectsTwoRowAuthzDeclarations(t *testing.T) {
+	sources := []string{
+		"@rowAuthz(public)\n@rowAuthz(owner=\"ownerUserId\")\nconcept" + rowAuthzProbeBody,
+		"@rowAuthz(public)\n@rowAuthz(public)\nconcept" + rowAuthzProbeBody,
+		// Same line -- the parser accepts several annotations per line.
+		"@description(\"d\") @rowAuthz(public)\n@rowAuthz(clusterOwner)\nconcept" + rowAuthzProbeBody,
+	}
+	for _, src := range sources {
+		_, err := buildConcept(t, src)
+		if err == nil {
+			t.Fatalf("two declarations loaded without error:\n%s", src)
+		}
+		if !strings.Contains(err.Error(), "more than once") {
+			t.Fatalf("error = %q, want it to say the annotation was declared more than once", err)
+		}
+	}
+}
+
 // The `owner=` field-existence check must name the fields that DO
 // exist, so an author can fix a typo without opening the concept.
 func TestRowAuthzOwnerErrorListsDeclaredFields(t *testing.T) {
@@ -262,8 +284,12 @@ func TestRowAuthzIsInert(t *testing.T) {
 			return err
 		}
 		if d.IsDir() {
+			// `sdk/` is deliberately NOT skipped: sdk/gen is the
+			// concept emitter, so it is one of the likeliest places
+			// for the tier to start being read without anyone
+			// noticing.
 			switch d.Name() {
-			case ".git", "node_modules", "vendor", "sdk":
+			case ".git", "node_modules", "vendor":
 				return filepath.SkipDir
 			}
 			return nil

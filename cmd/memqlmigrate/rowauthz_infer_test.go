@@ -171,6 +171,153 @@ func TestConjunctAlongsideDisjunctionStillInfersOwned(t *testing.T) {
 	}
 }
 
+// THE RULE THAT MAKES THE INFERENCE SOUND.
+//
+// A tier is a FLOOR -- the predicate that will eventually be AND-ed
+// into every access. So a query carrying no caller-scope term is not a
+// neutral bystander, it is a COUNTEREXAMPLE: it reads rows the floor
+// would exclude. Counting only the positive votes declared
+// planner.plan owned off 2 of its 10 queries while the primary
+// user-facing read was space-scoped.
+func TestAnUnscopedQueryBlocksTheTier(t *testing.T) {
+	got := inferOne(t, map[string]string{
+		"planner/concepts.memql": "concept plan {\n  ownerUserId string\n  spaceId string\n}\n",
+		"planner/queries.memql": `query plan myPlans {
+  filter  ownerUserId==actor.userId
+  shape   planFull
+}
+
+query plan plansForSpace {
+  filter  spaceId==args.spaceId
+  shape   planFull
+}
+`,
+	})
+	if decl, ok := got.Tiers["planner"]["plan"]; ok {
+		t.Fatalf("inferred %+v; plansForSpace reads other users' rows, so `owned` is not a floor this concept satisfies", decl)
+	}
+	reason := got.Abstained[conceptKey{Domain: "planner", Name: "plan"}]
+	if !strings.Contains(reason, "plansForSpace") {
+		t.Fatalf("abstention reason = %q, want it to name the counterexample query", reason)
+	}
+}
+
+// A query with no filter at all reads every row, which blocks any
+// narrowing tier just as surely.
+func TestAnUnfilteredQueryBlocksTheTier(t *testing.T) {
+	got := inferOne(t, map[string]string{
+		"notes/concepts.memql": "concept note {\n  ownerUserId string\n}\n",
+		"notes/queries.memql": `query note myNotes {
+  filter  ownerUserId==actor.userId
+  shape   noteFull
+}
+
+query note allNotes {
+  shape   noteFull
+}
+`,
+	})
+	if decl, ok := got.Tiers["notes"]["note"]; ok {
+		t.Fatalf("inferred %+v despite an unfiltered query over the same concept", decl)
+	}
+}
+
+// The composite case that shipped wrong: owned queries PLUS a @public
+// query. library.artifact's `libraryWorkspaceLiveSources` documents its
+// rows as having no owner at all, so declaring the concept owned
+// asserts something that query disproves.
+func TestAPublicQueryBlocksAnOwnedTier(t *testing.T) {
+	got := inferOne(t, map[string]string{
+		"library/concepts.memql": "concept artifact {\n  ownerUserId string\n}\n",
+		"library/queries.memql": `query artifact myArtifacts {
+  filter  ownerUserId==actor.userId
+  shape   artifactFull
+}
+
+@public
+query artifact workspaceLiveSources {
+  filter  ownerUserId==""
+  shape   artifactFull
+}
+`,
+	})
+	if decl, ok := got.Tiers["library"]["artifact"]; ok {
+		t.Fatalf("inferred %+v; the @public sibling reads rows the tier would exclude", decl)
+	}
+	if !strings.Contains(got.Abstained[conceptKey{Domain: "library", Name: "artifact"}], "@public") {
+		t.Fatalf("abstention reason should name the @public query: %q",
+			got.Abstained[conceptKey{Domain: "library", Name: "artifact"}])
+	}
+}
+
+// @serverOnly is the ONE exempt verdict: not a client-callable read, so
+// it neither votes nor blocks (#2803 design decision 4 reserves an
+// explicit system actor for that path).
+func TestServerOnlyQueryDoesNotBlock(t *testing.T) {
+	got := inferOne(t, map[string]string{
+		"identity/concepts.memql": "concept user {\n  ownerUserId string\n}\n",
+		"identity/queries.memql": `query user myUser {
+  filter  ownerUserId==actor.userId
+  shape   userFull
+}
+
+@serverOnly
+query user userById {
+  filter  row.id==args.id
+  shape   userFull
+}
+`,
+	})
+	want := langparser.RowAuthzDecl{Tier: langparser.RowAuthzOwned, Owner: "ownerUserId"}
+	if got.Tiers["identity"]["user"] != want {
+		t.Fatalf("inferred %+v, want %+v -- a @serverOnly query must not block",
+			got.Tiers["identity"]["user"], want)
+	}
+}
+
+// A trailing comment must not be read as part of the filter clause. On
+// raw source `filter a==b // && ownerUserId==actor.userId` splits into
+// two conjuncts and MANUFACTURES a tier the query does not have.
+func TestACommentCannotManufactureATier(t *testing.T) {
+	got := inferOne(t, map[string]string{
+		"notes/concepts.memql": "concept note {\n  ownerUserId string\n  a string\n}\n",
+		"notes/queries.memql": `query note sneaky {
+  filter  a=="b" // && ownerUserId==actor.userId
+  shape   noteFull
+}
+`,
+	})
+	if decl, ok := got.Tiers["notes"]["note"]; ok {
+		t.Fatalf("inferred %+v from a conjunct that lives inside a comment", decl)
+	}
+}
+
+// A brace inside a string must not run one construct's body into the
+// next, or a query votes with a different construct's filter.
+func TestABraceInAStringDoesNotMergeBodies(t *testing.T) {
+	got := inferOne(t, map[string]string{
+		"notes/concepts.memql": "concept note {\n  ownerUserId string\n  pattern string\n}\n",
+		"notes/queries.memql": `query note first {
+  filter  pattern=="{"
+  shape   noteFull
+}
+
+query note second {
+  filter  ownerUserId==actor.userId
+  shape   noteFull
+}
+`,
+	})
+	// `first` is unscoped, so it blocks -- which it can only do if its
+	// body was sliced correctly rather than swallowing `second`.
+	if decl, ok := got.Tiers["notes"]["note"]; ok {
+		t.Fatalf("inferred %+v; the unscoped `first` must block, and it can only be seen if bodies slice correctly", decl)
+	}
+	if !strings.Contains(got.Abstained[conceptKey{Domain: "notes", Name: "note"}], "first") {
+		t.Fatalf("abstention should name `first`: %q", got.Abstained[conceptKey{Domain: "notes", Name: "note"}])
+	}
+}
+
 // Disagreement is recorded, not resolved. Picking a winner would
 // launder the conflict into a declaration Phase 2 then trusts.
 func TestDisagreeingQueriesAbstainWithAReason(t *testing.T) {

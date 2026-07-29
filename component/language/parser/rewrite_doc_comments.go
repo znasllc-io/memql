@@ -500,7 +500,6 @@ func descriptionsEquivalent(before, after string) bool {
 	return true
 }
 
-
 // hasAttachedDocBlock reports whether the lines emitted so far end in an
 // annotation block whose transparent walk-up reaches a /// block -- i.e.
 // the construct this @description belongs to is already ///-documented.

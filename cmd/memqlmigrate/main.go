@@ -34,6 +34,16 @@
 //	                    domain is the file's containing directory, so this
 //	                    rewrite is path-aware.
 //
+//	row-authz           seed @rowAuthz(...) on each concept from how its
+//	                    existing queries filter (#2920). Whole-tree, so it
+//	                    is path-aware and only targets concepts.memql.
+//	                    Declares ONLY the tiers a top-level filter conjunct
+//	                    proves, and only when EVERY query over the concept
+//	                    clears that floor -- an unscoped sibling blocks the
+//	                    declaration rather than being ignored. Never infers
+//	                    `public` or `granted`. Re-runnable; a concept that
+//	                    already declares a tier is left alone.
+//
 //	null-coalesce       coalesce(a, b, c) → a ?? b ?? c (#2766; the
 //	                    operator shipped by #2611). Skips what the
 //	                    Swift-tight precedence would re-associate --

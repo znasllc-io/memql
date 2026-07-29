@@ -75,8 +75,10 @@ concept call { ... }
 
 Rules:
 
-- **One tier per concept.** Two tiers in one annotation is a load
-  error; a concept declares a single floor.
+- **One tier per concept.** Two different tiers inside one annotation
+  is a load error, and so is a second `@rowAuthz` on the same concept
+  (the parser folds attributes in source order, so without that check a
+  reader scanning top-down would see a tier the engine does not use).
 - **`owner="<field>"` must name a field the concept declares.**
   Checked at load, against the parsed property set, with the declared
   fields listed in the diagnostic.
@@ -108,8 +110,20 @@ memqlmigrate --rewrite=row-authz -w dsl/*/concepts.memql
 The codemod infers a tier from how a concept's existing queries filter,
 and it is deliberately conservative — it declares **only** `owned` and
 `clusterOwner`, the two tiers evidenced by a top-level filter conjunct
-that demonstrably narrows the row set. It abstains when a concept's
-queries disagree, and it never infers:
+that demonstrably narrows the row set.
+
+**A tier is a floor, so every query has to clear it.** The predicate
+will eventually be AND-ed into *every* access of the concept, which
+means a sibling query carrying no caller-scope term is not a neutral
+bystander — it is a counterexample, reading rows the floor would
+exclude. One such query blocks the declaration. (Counting only the
+positive votes declares `planner.plan` owned off 2 of its 10 queries
+while the primary user-facing read is space-scoped, and declares
+`library.artifact` owned when `libraryWorkspaceLiveSources` documents
+its rows as having no owner at all.) The single exception is
+`@serverOnly`, which is not a client-callable read.
+
+It never infers:
 
 - **`public`**, because no filter can evidence a widening claim. The
   nearest candidate, a construct-level `@public`, answers a different
@@ -124,9 +138,14 @@ the Phase 2 shadow-mode measurement (#2921) has to cover, and a guessed
 tier would launder an absence of evidence into a declaration the
 measurement then treats as ground truth.
 
-Current distribution over `dsl/`: 16 `owned`, 2 `clusterOwner`, 82
-undeclared (80 with no query carrying unambiguous evidence, 2 where
-queries disagree).
+Current distribution over `dsl/`: 12 `owned`, 1 `clusterOwner`, 87
+undeclared. The undeclared break down as 50 blocked by a query whose
+filter does not gate on the caller, 26 with no queries at all, 6
+blocked by a `@public` sibling, 4 blocked by an unfiltered query, and
+1 where two queries disagree (`authoring.bundle`:
+`authoringBundlesForOwner` is caller-scoped, `systemActiveAuthoringBundles`
+is admin-gated — the concrete instance of the per-concept-floor vs
+per-construct-override question).
 
 ### The constraint carried forward, not solved
 

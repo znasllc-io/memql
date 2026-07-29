@@ -516,6 +516,18 @@ func applyConceptAttribute(c *parsedConcept, attr *parser.Attribute) error {
 		//   the SAME function the memqlmigrate codemod renders
 		//   against -- so the loader and the codemod cannot disagree
 		//   about what a declaration means (#2621's lesson).
+		//
+		//   A SECOND @rowAuthz is a load error, not a silent
+		//   overwrite. The parser folds attributes in source order, so
+		//   without this a concept carrying two declarations loaded
+		//   with the LAST one winning -- a reader scanning top-down
+		//   sees a tier the engine does not use. "One tier per
+		//   concept" has to be enforced for the declaration to mean
+		//   anything.
+		if c.rowAuthz != nil {
+			return fmt.Errorf("@%s declared more than once -- a concept declares exactly one tier",
+				parser.RowAuthzAnnotation)
+		}
 		decl, err := parser.ParseRowAuthz(attr)
 		if err != nil {
 			return err

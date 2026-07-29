@@ -296,6 +296,52 @@ concept node {
 	}
 }
 
+// A declaration sharing a line with another annotation is still a
+// declaration. A line-anchored idempotency check does not see it, and
+// the codemod then inserts a SECOND one -- silently replacing a
+// hand-authored tier with an inferred one.
+func TestRewriteRowAuthzSeesASameLineDeclaration(t *testing.T) {
+	src := []byte(`@description("d") @rowAuthz(public)
+concept node {
+  ownerUserId string
+}
+`)
+	out, err := RewriteRowAuthz(src, map[string]RowAuthzDecl{
+		"node": {Tier: RowAuthzOwned, Owner: "ownerUserId"},
+	})
+	if err != nil {
+		t.Fatalf("RewriteRowAuthz: %v", err)
+	}
+	if string(out) != string(src) {
+		t.Fatalf("a same-line declaration was not detected, so a second one was inserted:\n%s", out)
+	}
+}
+
+// A doc comment or a string MENTIONING the annotation is prose, not a
+// declaration -- dropping the line anchor must not cost that.
+func TestRowAuthzDeclaredInSourceIgnoresProse(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		want bool
+	}{
+		{"doc comment", "/// remember to add @rowAuthz(public) here\nconcept a {}\n", false},
+		{"line comment", "// @rowAuthz(public)\nconcept a {}\n", false},
+		{"block comment", "/*\n@rowAuthz(public)\n*/\nconcept a {}\n", false},
+		{"description string", "@description(\"use @rowAuthz(public)\")\nconcept a {}\n", false},
+		{"real declaration", "@rowAuthz(public)\nconcept a {}\n", true},
+		{"real, sharing a line", "@description(\"d\") @rowAuthz(public)\nconcept a {}\n", true},
+		{"real, indented", "  @rowAuthz(public)\n  concept a {}\n", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := RowAuthzDeclaredInSource(tc.src); got != tc.want {
+				t.Fatalf("RowAuthzDeclaredInSource(%q) = %v, want %v", tc.src, got, tc.want)
+			}
+		})
+	}
+}
+
 // A concept the inference had no evidence for stays undeclared. It
 // must not be guessed at, because an undeclared concept is exactly the
 // signal Phase 2 needs.

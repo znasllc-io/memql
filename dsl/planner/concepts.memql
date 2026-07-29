@@ -14,7 +14,6 @@ use identity.concepts.{ user }
 /// incremental strategy: the Plan's `phases` array carries the coarse outline, Tasks emerge per
 /// phase with a phase tag.
 @displayCard(primary="goal", secondary="kind", tertiary="partitionId", status="status")
-@rowAuthz(owner="requestedBy")
 concept plan {
   partitionId             string! @description("v1:cognition:space.id this Plan belongs to. Tasks page is per-space; estimation buckets and budget rollups scope to the space.")
   parentPlanId        string  @description("When set, this Plan is a CHILD Plan -- spawned by a parent Plan's running agent via requestSubPlan, OR spawned as a refinement of a completed Plan via the user's [Refine ...] action on the plan.completed card. Sub-plans inherit parent's authorization (Q4) and carved-out token allocations (Q6). Cancelling a parent cancels all running children; cancelling a child does NOT cancel the parent.")
@@ -66,7 +65,6 @@ concept plan {
 /// the loop). Replaces the retired standingTask concept -- recurring directives carry the same cron
 /// schedule + soft-disable + last-run bookkeeping standingTask had.
 @displayCard(primary="statement", secondary="trigger", tertiary="scopePartitionId", status="status")
-@rowAuthz(owner="ownerUserId")
 concept responsibility {
   ownerUserId       string! @description("v1:identity:user.id who authored this responsibility. Per-row authz owner; output posts into this user's surfaces. Server-stamped from actor.userId at create -- never caller-supplied.")
   statement         string! @description("Human-readable directive the agent acts on (e.g. 'Every Monday morning summarize last week's marketing performance'). The user's words; shown on cards + settings UIs and fed into the agent's prompt at evaluation/run time.")
