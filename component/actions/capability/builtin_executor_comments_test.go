@@ -51,7 +51,7 @@ import (
 //
 // Whether an @executor above a `*/` SHOULD attach to the builtin below is a
 // real question about the loader's preamble rule, not about this scanner. It is
-// filed separately rather than settled by an assertion here.
+// filed as memql#2965 rather than settled by an assertion here.
 //
 // The fixtures below are therefore split:
 //
