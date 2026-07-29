@@ -270,26 +270,33 @@ a `.memql` file between domain directories casually -- file location is
 id-bearing and the load guard errors on an unpinned mismatch -- see
 [#7](#7-annotations-on-concepts-where-to-put-new-ones).
 
-**A pinned domain must keep its concept names globally unique.** This is a
-real constraint, not a style preference (memql#2901). When `namespace.pin`
-or `@namespace` sends a directory's concepts to a different namespace --
-`dsl/deployment` declaring `deployment`, which assembles to
-`v1:cluster:deployment` -- that domain **cannot participate in
-ambiguous-name resolution at all**. If a second `deployment` is declared
-anywhere in the tree, no import spelling fixes it:
+**Importing a concept from a pinned domain: use the PIN, not the directory**
+(memql#2901). When `namespace.pin` or `@namespace` sends a directory's
+concepts to a different namespace -- `dsl/deployment` declaring `deployment`,
+which assembles to `v1:cluster:deployment` -- and that name is declared more
+than once in the tree, the directory-named import does not work:
 
 - **no import** -- boot's namespace hint is the file's own directory
-  (`deployment`), which cannot match `:cluster:`. That is the ambiguity;
+  (`deployment`), which cannot match `:cluster:`. That is the ambiguity being
+  reported;
 - **`use deployment.concepts.{ deployment }`** -- an import of the file's own
-  domain, stripped by the same-domain-use gate (#2617). Worse, it silences
-  the lint while boot still cannot bind, so a green CI ships a tree that
-  fails at startup;
-- **`use cluster.concepts.{ deployment }`** -- resolves against `cluster/`,
-  which declares no `deployment`.
+  domain. For a file sitting directly in `deployment/` the same-domain-use
+  gate (#2617) strips it, and worse, it silences the lint while boot still
+  cannot bind -- a green CI shipping a tree that fails at startup;
+- **`use cluster.concepts.{ deployment }`** -- **this is the one that works**,
+  when no `cluster/` directory exists in the root. A use path is a *namespace
+  hint* matched against canonical ids, not a directory lookup, so the import
+  lints clean and binds correctly. This is the ordinary product-bundle case: a
+  pin usually targets a namespace the bundle does not own.
 
-The only fixes are to rename one of the colliding concepts, or to unpin the
-domain and re-key its ids onto the directory. Lane 2's diagnostic says so
-directly for a pinned domain rather than offering the generic import remedy.
+If the pin *does* name a directory in the root and that directory declares no
+such concept, lane 1 rejects the import -- and then the only fixes are to
+rename one of the colliding concepts, or to unpin the domain and re-key its
+ids onto the directory.
+
+Lane 2's diagnostic distinguishes these two cases and names whichever remedy
+is actually true, rather than offering the generic "import it via a use
+declaration" that points at the spelling which does not work.
 
 (Unrelated: **seed** constructs have their own `@scope("perUser")`
 annotation -- see `dsl/agents/assistant.memql`. That is a seed

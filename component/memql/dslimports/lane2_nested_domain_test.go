@@ -153,29 +153,9 @@ func TestLane2_SharedSubdirectoryNameIsNotSharedNamespace(t *testing.T) {
 // carries on disk; with it the assembly succeeds and yields v1:cluster:widget,
 // which is the input this test means to exercise.
 func TestLane2_PinnedNamespaceDivergenceFollowsTheDecl(t *testing.T) {
-	root := fstest.MapFS{
-		"deployment/namespace.pin": file("cluster\n"),
-		"deployment/concepts.memql": file(`@version("1.0.0")
-@namespace("cluster")
-@description("Declared under deployment/, namespaced to cluster.")
-concept widget {
-  label  string  @required @description("Label.")
-}`),
-		"other/concepts.memql": file(`@version("1.0.0")
-@namespace("other")
-@description("A second widget so the name is ambiguous.")
-concept widget {
-  name  string  @required @description("Name.")
-}`),
-		"deployment/queries.memql": file(`@enabled
-@description("Binds ` + "`widget`" + ` with no import from deployment/.")
-query widget deploymentWidgets {
-  args {
-    label  string  @required
-  }
-  filter  label == args.label
-}`),
-	}
+	// Fixture shared with TestLane2_PinnedDomainDiagnosticNamesAnActionableFix so
+	// both tests provably exercise the identical shape.
+	root := pinnedNamespaceTree()
 	tree := loadTree(t, root)
 
 	var reported bool
@@ -266,18 +246,107 @@ func TestLane2_PinnedDomainDiagnosticNamesAnActionableFix(t *testing.T) {
 			"(memql#2901).\n  got: %s", got)
 	}
 
-	// Each of these is a fact the author needs to act. Asserted individually
-	// so a reworded message says which part went missing.
+	// This fixture has NO cluster/ directory, and that is the point of this
+	// case. A use path is a NAMESPACE hint matched against canonical ids, not
+	// a directory lookup, so `use cluster.concepts.{ widget }` lints clean and
+	// binds correctly at boot. An earlier version of this diagnostic asserted
+	// the opposite -- that the import "resolves against cluster/, which
+	// declares no widget", naming a directory that does not exist -- and sent
+	// the author to re-key ids instead of adding one line. That is the same
+	// defect memql#2901 was filed about, one level up, so it is pinned here.
 	for _, want := range []string{
-		"namespace.pin",                        // names the mechanism
-		`"cluster"`,                            // names the pin value
-		"v1:cluster:widget",                    // names what the concept actually assembles to
-		`"deployment"`,                         // names the ambient hint that fails to match
-		"Rename one of the colliding concepts", // the actionable fix
+		"namespace.pin",        // names the mechanism
+		`"cluster"`,            // names the pin value
+		"v1:cluster:widget",    // what the concept actually assembles to
+		`"deployment"`,         // the ambient hint that cannot match
+		"use cluster.concepts", // the fix that actually works here
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("pinned-domain diagnostic does not mention %q, which the author needs in order "+
 				"to act on it.\n  got: %s", want, got)
 		}
+	}
+	if strings.Contains(got, "Rename one of the colliding concepts") {
+		t.Errorf("the diagnostic told the author to rename a concept, but this tree has no cluster/ "+
+			"directory, so `use cluster.concepts.{ widget }` works and is a ONE-LINE fix. Sending "+
+			"someone to re-key ids when an import would do is worse than the message this "+
+			"replaced.\n  got: %s", got)
+	}
+}
+
+// TestLane2_PinnedDomainRenameRemedyWhenTheImportIsRejected is the other half.
+//
+// When the pin DOES name a directory in this root and that directory declares
+// no such concept, lane 1 rejects `use <pin>.concepts.{ X }` with "is not
+// declared in" -- so rename-or-unpin really are the only fixes, and the
+// message must say that instead.
+//
+// The two tests together are what stop the diagnostic collapsing back into a
+// single claim that is false for half its inputs, which is exactly how the
+// first cut of this fix went wrong.
+func TestLane2_PinnedDomainRenameRemedyWhenTheImportIsRejected(t *testing.T) {
+	root := pinnedNamespaceTree()
+	// Give the pin a real directory that declares something ELSE, so lane 1
+	// would reject an import of `widget` from it.
+	root["cluster/concepts.memql"] = file(`@version("1.0.0")
+@namespace("cluster")
+@description("The pin target exists but declares no widget.")
+concept gadget {
+  label  string  @required @description("Label.")
+}`)
+	tree := loadTree(t, root)
+
+	var got string
+	for _, e := range tree.VerifyReferentialIntegrity() {
+		if strings.Contains(e.Error(), "cannot disambiguate") {
+			got = e.Error()
+		}
+	}
+	if got == "" {
+		t.Fatal("lane 2 stopped reporting the pinned-domain ambiguity once the pin directory existed")
+	}
+	if !strings.Contains(got, "Rename one of the colliding concepts") {
+		t.Errorf("cluster/ exists and declares no widget, so lane 1 rejects "+
+			"`use cluster.concepts.{ widget }` and rename-or-unpin ARE the only fixes -- the "+
+			"message must say so.\n  got: %s", got)
+	}
+	if strings.Contains(got, "Import it by its PINNED namespace") {
+		t.Errorf("the diagnostic recommended an import that lane 1 rejects: cluster/ exists and "+
+			"declares no widget.\n  got: %s", got)
+	}
+}
+
+// TestLane2_PinnedDomainWithTwoOwnCandidatesFallsBackToTheGenericRemedy pins
+// the multi-candidate guard.
+//
+// The pinned message names a SINGLE assembled id. When the pinned domain
+// declares the name twice, naming one of the two would be a guess, so the
+// helper declines and the generic remedy is emitted instead. Without the
+// guard the message confidently reports whichever candidate the map iteration
+// reached first, which is not deterministic.
+func TestLane2_PinnedDomainWithTwoOwnCandidatesFallsBackToTheGenericRemedy(t *testing.T) {
+	root := pinnedNamespaceTree()
+	// A SECOND widget inside the pinned domain, in its own file.
+	root["deployment/more.memql"] = file(`@version("1.0.0")
+@namespace("cluster")
+@description("A second widget inside the pinned domain.")
+concept widget {
+  other  string  @required @description("Other.")
+}`)
+	tree := loadTree(t, root)
+
+	var got string
+	for _, e := range tree.VerifyReferentialIntegrity() {
+		if strings.Contains(e.Error(), "cannot disambiguate") {
+			got = e.Error()
+		}
+	}
+	if got == "" {
+		t.Fatal("lane 2 stopped reporting the ambiguity when the pinned domain declared the name twice")
+	}
+	if !strings.Contains(got, "import it via a use declaration") {
+		t.Errorf("with TWO own-domain candidates the helper must decline and the GENERIC remedy "+
+			"must be emitted -- the pinned message names a single assembled id, and picking one of "+
+			"two would be a guess decided by map iteration order.\n  got: %s", got)
 	}
 }
