@@ -409,9 +409,11 @@ func evalCollCond(node *FunctionCallExpression, args, locals map[string]any) (an
 	if len(node.Args) != 3 {
 		return nil, fmt.Errorf("cond() requires three arguments: cond(predicate, thenValue, elseValue)")
 	}
+	// evalCollPositionalOperand already prefixes `cond() arg 0: `, so wrapping
+	// again would stutter. The operand index IS the predicate here.
 	condVal, err := evalCollPositionalOperand(node, "cond", 0, args, locals)
 	if err != nil {
-		return nil, fmt.Errorf("cond() predicate: %w", err)
+		return nil, err
 	}
 	branch := 2
 	if isTruthy(condVal) {
