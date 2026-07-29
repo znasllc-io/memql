@@ -126,84 +126,42 @@ func preambleStartOf(source string, headerStart int) int {
 // MatchingCloseBrace returns the index of the `}` matching the `{` at openIdx,
 // or -1 if openIdx is not a `{` or the braces never balance.
 //
-// String-aware, and line-comment-aware so that a `//` line inside a body cannot
-// unbalance the count. It is NOT block-comment aware, by design: pass the
-// comment-blanked view (see BlankComments), which is what makes it block-comment
-// safe without a second comment state machine here.
+// It is NOT block-comment aware, by design: pass the comment-blanked view (see
+// BlankComments), which is what makes it block-comment safe without a second
+// comment state machine here.
+//
+// This is a thin export over matchBraceStrAware rather than its own walk. An
+// earlier version of this function WAS its own walk, and that reintroduced a
+// hole the package had already closed: it tracked double-quoted literals only,
+// so a brace inside a BACKTICK literal ran the depth count away and returned
+// -1 -- silently dropping that declaration and every one below it, on all five
+// load paths at once. matchBraceStrAware routes both quote forms through
+// skipStringLiteral and does not have that hole.
+//
+// Pinned by TestMatchingCloseBraceHandlesBacktickLiterals. Do not re-inline a
+// second walk here: one matcher, one set of escape rules, fixed in one place.
 func MatchingCloseBrace(scan string, openIdx int) int {
-	if openIdx < 0 || openIdx >= len(scan) || scan[openIdx] != '{' {
-		return -1
-	}
-	depth := 0
-	inString := false
-	for i := openIdx; i < len(scan); i++ {
-		c := scan[i]
-		if inString {
-			if c == '\\' && i+1 < len(scan) {
-				i++
-				continue
-			}
-			if c == '"' {
-				inString = false
-			}
-			continue
-		}
-		switch c {
-		case '"':
-			inString = true
-		case '/':
-			if i+1 < len(scan) && scan[i+1] == '/' {
-				nl := strings.IndexByte(scan[i:], '\n')
-				if nl < 0 {
-					return -1
-				}
-				i += nl
-			}
-		case '{':
-			depth++
-		case '}':
-			depth--
-			if depth == 0 {
-				return i
-			}
-		}
-	}
-	return -1
+	return matchBraceStrAware(scan, openIdx)
 }
 
 // BraceDepthBefore returns the brace nesting depth immediately before pos.
 // Zero means pos is at file top level.
 //
 // Same contract as MatchingCloseBrace: pass the comment-blanked view.
+//
+// Shares skipStringLiteral with MatchingCloseBrace for the same reason -- a
+// brace inside a backtick literal must not move the depth. The two must agree
+// about what counts as a brace, or the top-level guard and the brace match
+// disagree about the same source.
 func BraceDepthBefore(scan string, pos int) int {
 	if pos > len(scan) {
 		pos = len(scan)
 	}
 	depth := 0
-	inString := false
 	for i := 0; i < pos; i++ {
-		c := scan[i]
-		if inString {
-			if c == '\\' && i+1 < pos {
-				i++
-				continue
-			}
-			if c == '"' {
-				inString = false
-			}
-			continue
-		}
-		switch c {
-		case '"':
-			inString = true
-		case '/':
-			if i+1 < len(scan) && scan[i+1] == '/' {
-				nl := strings.IndexByte(scan[i:], '\n')
-				if nl < 0 {
-					return depth
-				}
-				i += nl
-			}
+		switch scan[i] {
+		case '"', '`':
+			i = skipStringLiteral(scan, i)
 		case '{':
 			depth++
 		case '}':
