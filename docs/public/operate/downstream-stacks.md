@@ -168,8 +168,8 @@ data-only DSL bundle image and client image.
    engine at **runtime** through the DSL bundle (`MEMQL_DSL_PATH`), never
    compiled in. The rare bespoke-Go plugin still registers through the
    narrow seams (`memql.RegisterPlugin`, `node.RegisterRoutingRule`,
-   `node.RegisterConceptOwnership`, suggest-domain registration); image
-   names and hostnames come through the override flags above.
+   suggest-domain registration); image names and hostnames come through
+   the override flags above.
 2. Every new engine ↔ product seam must pass the template test: *could a
    second product plug in without editing the engine repo?*
 3. Overrides are flags/vars with env defaults -- never hardcoded paths to
