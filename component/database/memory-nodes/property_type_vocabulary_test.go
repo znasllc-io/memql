@@ -13,9 +13,14 @@ import (
 	"testing"
 )
 
-// acceptedPropertyTypes is the vocabulary buildPropertySchema accepts. `enum`
-// and `map` are exercised through the loader tests rather than here, because
-// both need extra declaration syntax to parse at all.
+// acceptedPropertyTypes is the set an AUTHOR can actually write, which is not
+// the same as buildPropertySchema's case labels. `map` is a case there but no
+// property syntax produces it, and `enum` is reachable only in its
+// parenthesised `enum("a", "b")` form -- both measured in
+// component/memql's TestConceptPropertyTypes_AcceptedAndRejectedSets.
+//
+// Listing the case labels here instead would document a vocabulary nobody can
+// use, which is the same failure this issue is about pointed the other way.
 var acceptedPropertyTypes = []string{
 	"string", "bool", "int", "float", "datetime", "array", "object", "any", "",
 }
@@ -41,7 +46,7 @@ func TestPropertyTypeSuggestion_CorrectsEveryPlausibleMisspelling(t *testing.T) 
 					ok = true
 				}
 			}
-			if !ok && want != "enum" && want != "map" {
+			if !ok {
 				t.Errorf("%q is suggested for %q but is not itself an accepted type", want, wrong)
 			}
 		})
@@ -56,7 +61,7 @@ func TestPropertyTypeSuggestion_UnknownSpellingListsTheVocabulary(t *testing.T) 
 	if strings.Contains(got, "did you mean") {
 		t.Errorf("an unrecognised spelling must not claim a correction: %q", got)
 	}
-	for _, want := range []string{"string", "bool", "int", "float", "datetime", "enum", "array", "map", "object", "any"} {
+	for _, want := range []string{"string", "bool", "int", "float", "datetime", "object", "any", "array", "enum"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the fallback must list %q as accepted; got %q", want, got)
 		}

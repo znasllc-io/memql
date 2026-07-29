@@ -115,7 +115,7 @@ func TestConceptPropertyTypes_AcceptedAndRejectedSets(t *testing.T) {
 			"number": "float", "double": "float",
 			"text": "string", "uuid": "string",
 			"date": "datetime", "timestamp": "datetime",
-			"list": "array", "dict": "map", "json": "object",
+			"list": "array", "dict": "object", "json": "object",
 		} {
 			err := build(t, wrong)
 			if err == nil {

@@ -173,7 +173,25 @@ concept audioOverride {
 
 **Concept-level annotations:** `@version`, `@namespace`, `@description` (required so humans and AI systems can reason about the dataset).
 
-**Field annotations:** `@required`, `@default("...")` (honored on insert), `@description("...")`. Field types include `string`, `bool`, `int`, `float`, `object`, `datetime`, `[]object`, and inline `enum("a", "b", ...)` value sets.
+**Field annotations:** `@required`, `@default("...")` (honored on insert), `@description("...")`.
+
+**Field types are a closed set:** `string`, `bool`, `int`, `float`, `datetime`, `object`, `any`, `array`, the `[]<type>` form (`[]string`, `[]object`), and inline `enum("a", "b", ...)` value sets.
+
+Nothing else is accepted, and the failure is worth knowing about: an unrecognised type makes the concept's schema fail to build, and the loader drops **the whole concept**, not the offending field. Every query, mutation and shape bound to it then fails at runtime.
+
+The JSON Schema spellings are the ones people reach for, because that is what the engine *emits* — but they are not what it *reads*:
+
+| write this | not this |
+|---|---|
+| `bool` | `boolean` |
+| `int` | `integer`, `int64` |
+| `float` | `number`, `double` |
+| `string` | `text`, `uuid` |
+| `datetime` | `date`, `timestamp` |
+| `array` | `list` |
+| `object` | `json`, `dict` |
+
+`memqllint` rejects all of them by name and points at the right spelling, so this is caught before boot rather than at it.
 
 **Cross-concept references** are plain string fields holding the target's id (e.g. `spaceId string`), optionally paired with an `@relationship` annotation so the engine can traverse the edge.
 
