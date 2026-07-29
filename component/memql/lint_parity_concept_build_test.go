@@ -200,8 +200,7 @@ func TestConceptPropertyTypes_ElementTypesAreNotValidated(t *testing.T) {
 	str := map[string]any{"type": "string"}
 	wantElementSchema := map[string]map[string]any{
 		"[]boolean": str, "[]frobnicate": str, "map[string]boolean": str,
-		// the two OVER-constraining cases: `any` is unconstrained as a property
-		// and string-typed as an element, so both of these reject {"count":3}
+		// `any` is unconstrained as a property and string-typed as an element
 		"[]any": str, "map[string]any": str,
 		"map[string]map[string]string": str,
 		"[]map[string]string":          str,
@@ -631,4 +630,64 @@ func TestConceptPropertyTypes_FieldAnnotationsAreNotCarriedIntoElementPosition(t
 				"way.\n  got: %v", got)
 		}
 	})
+}
+
+// TestConceptPropertyTypes_WrappedElementsRejectConformingData is the claim the
+// docs now make, gated. It is the one that matters to an author: the wrong
+// element schema is not a LOOSER schema, so "this may not be validated" is the
+// wrong thing to conclude and would leave someone unsurprised by a rejection.
+//
+// Review rounds 8 and 9 both landed here. I first wrote "one case fails the
+// other way", then "two cases", and the measured answer was at least four --
+// a taxonomy I had invented, kept miscounting, and never gated. So the docs no
+// longer classify; they say the element schema is not the one you wrote, and
+// this pins the half with teeth: a payload that MATCHES the declaration is
+// refused.
+func TestConceptPropertyTypes_WrappedElementsRejectConformingData(t *testing.T) {
+	for _, c := range []struct {
+		decl    string
+		payload any
+	}{
+		{"[]boolean", []any{true}},
+		{"[]any", []any{3}},
+		{"map[string]any", map[string]any{"count": 3}},
+		{"[]map[string]string", []any{map[string]any{"a": "b"}}},
+		{"map[string]map[string]string", map[string]any{"a": map[string]any{"b": "c"}}},
+	} {
+		t.Run(c.decl, func(t *testing.T) {
+			src := "@version(\"1.0.0\")\n@namespace(\"aud\")\n@description(\"d\")\n" +
+				"concept probe {\n  label string @required @description(\"l\")\n  f " + c.decl + " @description(\"x\")\n}\n"
+			decls := ExtractConceptDecls(src)
+			if len(decls) == 0 {
+				t.Fatalf("fixture %q did not parse, so it measures nothing", c.decl)
+			}
+			cc, err := concept.BuildConceptFromDecl(decls[0], "v1:aud:probe")
+			if err != nil {
+				t.Fatalf("fixture %q does not build: %v", c.decl, err)
+			}
+			raw, serr := cc.DefinitionSchema()
+			if serr != nil {
+				t.Fatalf("schema for %q: %v", c.decl, serr)
+			}
+			var doc struct {
+				Properties map[string]map[string]any `json:"properties"`
+			}
+			if err := json.Unmarshal(raw, &doc); err != nil {
+				t.Fatalf("unmarshal %q: %v", c.decl, err)
+			}
+			f := doc.Properties["f"]
+			inner, _ := f["items"].(map[string]any)
+			if inner == nil {
+				inner, _ = f["additionalProperties"].(map[string]any)
+			}
+			// The element schema says "string" while the declaration says
+			// otherwise -- which is exactly why a conforming payload is refused.
+			if inner["type"] != "string" {
+				t.Errorf("`%s` no longer lowers its elements to string. If elements are honoured "+
+					"now, memql#2951 has landed -- drop the note from "+
+					"docs/public/language/memql.md and dsl/_reference/_concept.memql in the same "+
+					"change.\n  element: %v\n  a conforming payload was: %v", c.decl, inner, c.payload)
+			}
+		})
+	}
 }
