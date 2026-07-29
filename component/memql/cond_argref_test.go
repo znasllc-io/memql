@@ -166,6 +166,23 @@ func TestCond_TruthinessIsPinnedIndependently(t *testing.T) {
 		{"non-empty string is truthy", "nonempty", "yes"},
 		{"zero is falsy", 0, "no"},
 		{"one is truthy", 1, "yes"},
+		// The two inputs where this evaluator and the multi-statement path
+		// DISAGREE, pinned deliberately rather than left implicit.
+		//
+		// memql#2915 makes cond evaluate a caller-supplied predicate for the
+		// first time -- before it errored -- so the STRING "false", which is
+		// what a JSON, HTTP or MCP caller sends for a boolean it stringified,
+		// now reaches this isTruthy and is truthy because it is non-empty.
+		// component/automations' evaluateCondPredicate switches on the raw
+		// text and returns false for exactly "false" and "" (its own isTruthy
+		// additionally excludes "0"), so `x := cond(args.allowed, ...)` and
+		// `return cond(args.allowed, ...)` disagree on the same input.
+		//
+		// This test states what THIS path does. Whether it is the right answer
+		// is memql#2963: a gate written `cond(args.allowed, true, false)` and
+		// handed "false" currently opens.
+		{`the string "false" is truthy here -- see memql#2963`, "false", "yes"},
+		{`the string "0" is truthy here -- see memql#2963`, "0", "yes"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			node := &FunctionCallExpression{Name: "cond", Args: map[string]any{
@@ -313,6 +330,10 @@ func TestCond_ArityAndOperandDiagnostics(t *testing.T) {
 		}
 		if got := strings.Count(err.Error(), "cond()"); got != 1 {
 			t.Errorf("the message must name cond once, not stutter; got %d in %q", got, err.Error())
+		}
+		if !strings.Contains(err.Error(), "arg 0") {
+			t.Errorf("the message must say WHICH operand failed, or the subtest name promises "+
+				"more than it checks; got %q", err.Error())
 		}
 	})
 	t.Run("a failing branch names its index", func(t *testing.T) {
