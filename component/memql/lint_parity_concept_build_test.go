@@ -13,6 +13,7 @@ package memql
 
 import (
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"sort"
 	"strings"
@@ -193,6 +194,15 @@ func TestConceptPropertyTypes_NestedBlockPropertiesAreValidated(t *testing.T) {
 // fail, which is the intended signal: whoever closes it must also delete the
 // caveat from the docs.
 func TestConceptPropertyTypes_ElementTypesAreNotValidated(t *testing.T) {
+	// The element type each row of the docs table claims. Asserted, so a
+	// change to the lowering breaks the test rather than the documentation.
+	wantElementType := map[string]any{
+		"[]boolean": "string", "[]frobnicate": "string", "map[string]boolean": "string",
+		"map[string]any": "string", "map[string]map[string]string": "string",
+		"[]map[string]string": "string", "[][]frobnicate": "array",
+		"[]datetime": "string", "map[string]datetime": "string",
+	}
+
 	// Includes RECOGNISED types, not just unrecognised ones: review round 2
 	// found `map[string]any` produces a string constraint, so `any` means
 	// "unconstrained" as a property and "must be a string" as an element, and
@@ -213,10 +223,42 @@ func TestConceptPropertyTypes_ElementTypesAreNotValidated(t *testing.T) {
 		if len(decls) == 0 {
 			t.Fatalf("fixture for %q did not parse, so it measures nothing", ty)
 		}
-		if _, err := concept.BuildConceptFromDecl(decls[0], "v1:aud:probe"); err != nil {
+		c, err := concept.BuildConceptFromDecl(decls[0], "v1:aud:probe")
+		if err != nil {
 			t.Errorf("%q is now REJECTED. That is an improvement, but the caveat in "+
 				"docs/public/language/memql.md still tells authors element types are "+
 				"unvalidated -- delete it in the same change.\n  got: %v", ty, err)
+			continue
+		}
+		// Assert what it EMITS, not merely that it builds. Review round 5
+		// found the build-only check too weak: reverting the datetime fix, or
+		// lowering unknown elements to `object` instead of `string`, both left
+		// this green while contradicting the docs table row for row.
+		raw, serr := c.DefinitionSchema()
+		if serr != nil {
+			t.Fatalf("schema for %q: %v", ty, serr)
+		}
+		var doc struct {
+			Properties map[string]map[string]any `json:"properties"`
+		}
+		if err := json.Unmarshal(raw, &doc); err != nil {
+			t.Fatalf("unmarshal %q: %v", ty, err)
+		}
+		f := doc.Properties["f"]
+		var inner map[string]any
+		if items, ok := f["items"].(map[string]any); ok {
+			inner = items
+		} else if vals, ok := f["additionalProperties"].(map[string]any); ok {
+			inner = vals
+		}
+		if inner == nil {
+			t.Errorf("%q emitted no element schema at all: %v", ty, f)
+			continue
+		}
+		if got, want := inner["type"], wantElementType[ty]; got != want {
+			t.Errorf("%q must emit an element typed %q -- that is the row the docs table "+
+				"states. Emitting %q means the table is now wrong.\n  element: %v",
+				ty, want, got, inner)
 		}
 	}
 }
@@ -319,6 +361,152 @@ func TestConceptPropertyTypes_ElementSafeListCarriesTheSameConstraints(t *testin
 	}
 }
 
+// TestConceptPropertyTypes_AnnotationsSplitIntoValueConstraintsAndFieldMarkers
+// pins the WHOLE annotation matrix the docs state, in both directions.
+//
+// Review round 4 got me to write "no constraining annotation", and round 5
+// showed that is over-broad in a way that matters: `@required` on `[]string!`
+// works exactly as it does on a scalar, and 17 shipped fields in dsl/ use that
+// form. Telling authors to hand-check them is its own defect -- the same shape
+// as round 1, where I called `map` unwritable.
+//
+// The real split is what the annotation is ABOUT:
+//
+//	VALUE constraints  describe the value, so landing on the array/map makes
+//	                   them inert -- JSON Schema does not apply `pattern` or
+//	                   `minLength` to an array, and `@variant` is dropped.
+//	FIELD markers      describe the field, so the wrapper is the correct
+//	                   place and nothing is lost.
+//
+// Both lists are asserted, because getting either wrong costs an author
+// something: a false negative loses validation, a false positive loses a
+// working construct.
+func TestConceptPropertyTypes_AnnotationsSplitIntoValueConstraintsAndFieldMarkers(t *testing.T) {
+	fieldOf := func(t *testing.T, decl string) map[string]any {
+		t.Helper()
+		src := "@version(\"1.0.0\")\n@namespace(\"aud\")\n@description(\"d\")\n" +
+			"concept probe {\n  label string @required @description(\"l\")\n  " + decl + "\n}\n"
+		decls := ExtractConceptDecls(src)
+		if len(decls) == 0 {
+			t.Fatalf("fixture %q did not parse, so it measures nothing", decl)
+		}
+		c, err := concept.BuildConceptFromDecl(decls[0], "v1:aud:probe")
+		if err != nil {
+			t.Fatalf("fixture %q does not build: %v", decl, err)
+		}
+		raw, serr := c.DefinitionSchema()
+		if serr != nil {
+			t.Fatalf("schema for %q: %v", decl, serr)
+		}
+		var doc struct {
+			Properties map[string]map[string]any `json:"properties"`
+		}
+		if err := json.Unmarshal(raw, &doc); err != nil {
+			t.Fatalf("unmarshal %q: %v", decl, err)
+		}
+		return doc.Properties["f"]
+	}
+
+	// VALUE CONSTRAINTS: the key must land on the WRAPPER and NOT on the
+	// elements. That IS the defect -- on the wrapper it is inert.
+	t.Run("value constraints are inert when wrapped", func(t *testing.T) {
+		for _, c := range []struct{ base, ann, key string }{
+			{"string", `@pattern("^[a-z]+$")`, "pattern"},
+			{"string", "@minLength(3)", "minLength"},
+			{"string", "@maxLength(9)", "maxLength"},
+			{"int", "@minimum(10)", "minimum"},
+			{"int", "@maximum(99)", "maximum"},
+		} {
+			t.Run(c.key, func(t *testing.T) {
+				scalar := fieldOf(t, "f "+c.base+" "+c.ann+` @description("x")`)
+				if _, ok := scalar[c.key]; !ok {
+					t.Fatalf("control broken: a scalar %s must carry %q.\n  got: %v", c.base, c.key, scalar)
+				}
+				arr := fieldOf(t, "f []"+c.base+" "+c.ann+` @description("x")`)
+				items, _ := arr["items"].(map[string]any)
+				if _, onItems := items[c.key]; onItems {
+					t.Errorf("%s now constrains its ELEMENTS. That is the memql#2951 fix -- remove "+
+						"this annotation from the inert list in docs/public/language/memql.md and "+
+						"dsl/_reference/_concept.memql in the same change.", c.key)
+				}
+				if _, onWrapper := arr[c.key]; !onWrapper {
+					t.Errorf("%s is no longer emitted on the array either. The docs say it lands "+
+						"there and is ignored; if it is now dropped outright, say so instead.\n  got: %v",
+						c.key, arr)
+				}
+			})
+		}
+	})
+
+	// FIELD MARKERS: scalar and wrapped must be INDISTINGUISHABLE apart from
+	// the type itself. These are the ones the docs promise still work.
+	t.Run("field markers survive wrapping", func(t *testing.T) {
+		for _, c := range []struct{ name, ann string }{
+			{"description", `@description("x")`},
+			{"default", `@description("x") @default("z")`},
+			{"unique", `@description("x") @unique`},
+			{"immutable", `@description("x") @immutable`},
+			{"secret", `@description("x") @secret`},
+			{"pii", `@description("x") @pii`},
+			{"internal", `@description("x") @internal`},
+			{"serverSet", `@description("x") @serverSet`},
+		} {
+			t.Run(c.name, func(t *testing.T) {
+				scalar := fieldOf(t, "f string "+c.ann)
+				arr := fieldOf(t, "f []string "+c.ann)
+				delete(scalar, "type")
+				delete(arr, "type")
+				delete(arr, "items")
+				if !reflect.DeepEqual(scalar, arr) {
+					t.Errorf("%s is documented as unaffected by wrapping, but the schemas differ -- "+
+						"so the docs promise a guarantee that is not there.\n  scalar: %v\n  array:  %v",
+						c.name, scalar, arr)
+				}
+			})
+		}
+	})
+
+	// @required is separate: it does not live on the field schema at all, it
+	// enters the concept-level `required` list. Wrapping must not change that.
+	t.Run("required survives wrapping", func(t *testing.T) {
+		requiredOf := func(decl string) []any {
+			src := "@version(\"1.0.0\")\n@namespace(\"aud\")\n@description(\"d\")\n" +
+				"concept probe {\n  label string @required @description(\"l\")\n  " + decl + "\n}\n"
+			decls := ExtractConceptDecls(src)
+			if len(decls) == 0 {
+				t.Fatalf("fixture %q did not parse", decl)
+			}
+			c, err := concept.BuildConceptFromDecl(decls[0], "v1:aud:probe")
+			if err != nil {
+				t.Fatalf("fixture %q does not build: %v", decl, err)
+			}
+			raw, _ := c.DefinitionSchema()
+			var doc struct {
+				Required []any `json:"required"`
+			}
+			if err := json.Unmarshal(raw, &doc); err != nil {
+				t.Fatalf("unmarshal %q: %v", decl, err)
+			}
+			sort.Slice(doc.Required, func(i, j int) bool {
+				return fmt.Sprint(doc.Required[i]) < fmt.Sprint(doc.Required[j])
+			})
+			return doc.Required
+		}
+		scalar := requiredOf(`f string @required @description("x")`)
+		for _, form := range []string{
+			`f []string @required @description("x")`,
+			`f []string! @description("x")`,
+			`f map[string]string @required @description("x")`,
+		} {
+			if got := requiredOf(form); !reflect.DeepEqual(got, scalar) {
+				t.Errorf("`%s` must be as required as a scalar -- 17 shipped fields in dsl/ use "+
+					"the []T! form, and the docs say it is dependable.\n  got: %v\n  scalar: %v",
+					form, got, scalar)
+			}
+		}
+	})
+}
+
 // TestConceptPropertyTypes_FieldAnnotationsAreNotCarriedIntoElementPosition
 // pins the half of the element gap that is not about TYPES at all.
 //
@@ -370,6 +558,11 @@ func TestConceptPropertyTypes_FieldAnnotationsAreNotCarriedIntoElementPosition(t
 		if _, ok := got["oneOf"]; !ok {
 			t.Fatalf("the control is broken: a scalar `object @variant` must emit oneOf.\n  got: %v", got)
 		}
+		// The docs row claims BOTH halves, so both are asserted.
+		if _, ok := got["x-discriminator"]; !ok {
+			t.Errorf("the docs say a scalar `object @variant` emits oneOf AND x-discriminator; "+
+				"the discriminator is missing.\n  got: %v", got)
+		}
 	})
 
 	t.Run("variant is DROPPED on an array", func(t *testing.T) {
@@ -390,7 +583,9 @@ func TestConceptPropertyTypes_FieldAnnotationsAreNotCarriedIntoElementPosition(t
 				"caveat has to go with it.")
 		}
 		if _, onArray := got["pattern"]; !onArray {
-			t.Logf("note: @pattern no longer emitted at the array level either; got %v", got)
+			t.Errorf("the docs say @pattern lands on the ARRAY and is ignored there. It is now on "+
+				"neither the array nor its items, so the documented behaviour is wrong either "+
+				"way.\n  got: %v", got)
 		}
 	})
 }

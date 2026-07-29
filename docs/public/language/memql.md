@@ -209,16 +209,22 @@ The JSON Schema spellings are the ones people reach for, because that is what th
 > | `[]datetime` | items typed `string`, no `format` | **recognised, but unconstrained** — the RFC3339 check the scalar position enforces is dropped, so `["not-a-date"]` validates |
 > | `map[string]datetime` | values typed `string`, no `format` | same |
 >
-> **Field annotations are dropped too**, which is a separate half of the same gap — the type can be on the safe list and the field still lose its meaning:
+> **Some field annotations stop working too**, which is a separate half of the same gap — the type can be on the safe list and the field still lose its meaning. The split is whether the annotation constrains the *value* or marks the *field*:
+>
+> **Silently inert when wrapped** — these describe a value, and they land on the array/map instead of on its elements, where JSON Schema ignores them:
 >
 > | written | scalar | wrapped |
 > |---|---|---|
-> | `object @variant(...)` | `oneOf` + `x-discriminator` | `items: {type: object}` — **the whole discriminated union is gone** |
-> | `string @pattern(...)` | `pattern` on the value | `pattern` on the **array**, where JSON Schema ignores it |
+> | `@variant(...)` | `oneOf` + `x-discriminator` | **dropped entirely** — `items: {type: object}` |
+> | `@pattern(...)` | `pattern` on the value | `pattern` on the array — ignored |
+> | `@minLength` / `@maxLength` | character count of the value | on the array — ignored (`minItems`/`maxItems` is what an array needs) |
+> | `@minimum` / `@maximum` | bound on the value | on the array — ignored |
 >
-> So a concept modelling "a post is a list of `text`\|`image` blocks" as `blocks []object @variant(...)` lints clean and validates nothing.
+> **Still fully dependable when wrapped** — these mark the field, so the wrapper is the right place for them and nothing is lost: `@required` (and the `!` sigil), `@description`, `@default`, `@unique`, `@immutable`, `@secret`, `@pii`, `@internal`, `@serverSet`. `capabilities []string!` behaves exactly as a scalar would.
 >
-> **Dependable, then, means all of:** `<type>` is `string`, `bool`, `int`, `float`, or a **bare** `object`, *and* the field carries no constraining annotation. `datetime` is not on that list — `[]datetime` emits a schema byte-identical to `[]string`, so the RFC3339 check an author reaches for `datetime` to get is silently absent. Anything else lints clean and builds a schema that does not mean what was written. Check element spellings and annotations by hand until this is closed.
+> So a concept modelling "a post is a list of text or image blocks" as `blocks []object @variant(...)` lints clean and validates nothing, and `tags []string @minLength(1)` is not the non-empty check it looks like.
+>
+> **Dependable, then, means all of:** `<type>` is `string`, `bool`, `int`, `float`, or a **bare** `object`, *and* the field carries none of the six value-constraining annotations above. `datetime` is not on that list — `[]datetime` emits a schema byte-identical to `[]string`, so the RFC3339 check an author reaches for `datetime` to get is silently absent. Anything else lints clean and builds a schema that does not mean what was written.
 
 **Cross-concept references** are plain string fields holding the target's id (e.g. `spaceId string`), optionally paired with an `@relationship` annotation so the engine can traverse the edge.
 

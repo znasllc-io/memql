@@ -214,8 +214,11 @@ concept referenceExample {
 //   check, map[string]any constrains values to string, nested composites
 //   collapse, []object @variant drops the whole discriminated union, and
 //   []string @pattern puts the pattern on the array where it does nothing.
-//   Dependable only for string/bool/int/float/bare object, with no
-//   constraining annotation on the field (memql#2951).
+//   Dependable only for string/bool/int/float/bare object, and only when the
+//   field carries none of @variant @pattern @minLength @maxLength @minimum
+//   @maximum -- those land on the wrapper and do nothing. Field MARKERS
+//   (@required/!, @description, @default, @unique, @immutable, @secret, @pii,
+//   @internal, @serverSet) are unaffected and work as usual (memql#2951).
 
 @namespace("reference")
 @description("Every supported field type, one of each.")
@@ -242,8 +245,10 @@ concept fieldTypes {
 //   @description("..."  Human-readable description.
 //   @unique             Engine enforces uniqueness across rows.
 //   @pattern("regex")   String pattern (only valid on string fields).
-//   @minLength(N)       Min character count (string) / element count (array).
-//   @maxLength(N)       Max character count (string) / element count (array).
+//   @minLength(N)       Min character count (string only -- on []T it is
+//                       emitted on the ARRAY, where JSON Schema ignores it.
+//                       There is no working element-count check; memql#2951).
+//   @maxLength(N)       Max character count (string only -- same caveat).
 //   @minimum(N)         Min numeric value (int / float).
 //   @maximum(N)         Max numeric value (int / float).
 //   @immutable          Field cannot change after insert.
