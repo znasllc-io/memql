@@ -194,8 +194,9 @@ func TestConceptPropertyTypes_NestedBlockPropertiesAreValidated(t *testing.T) {
 // fail, which is the intended signal: whoever closes it must also delete the
 // caveat from the docs.
 func TestConceptPropertyTypes_ElementTypesAreNotValidated(t *testing.T) {
-	// The exact element schema each row claims. Asserted whole, so a change to
-	// the lowering breaks the test rather than the documentation.
+	// The exact element schema memql#2951 records for each form. Asserted
+	// whole, so a change to the lowering breaks this test rather than silently
+	// outdating the issue.
 	str := map[string]any{"type": "string"}
 	wantElementSchema := map[string]map[string]any{
 		"[]boolean": str, "[]frobnicate": str, "map[string]boolean": str,
@@ -589,20 +590,27 @@ func TestConceptPropertyTypes_FieldAnnotationsAreNotCarriedIntoElementPosition(t
 		if _, ok := got["oneOf"]; !ok {
 			t.Fatalf("the control is broken: a scalar `object @variant` must emit oneOf.\n  got: %v", got)
 		}
-		// The docs row claims BOTH halves, so both are asserted.
+		// memql#2951 records BOTH halves, so both are asserted.
 		if _, ok := got["x-discriminator"]; !ok {
 			t.Errorf("the docs say a scalar `object @variant` emits oneOf AND x-discriminator; "+
 				"the discriminator is missing.\n  got: %v", got)
 		}
 	})
 
-	t.Run("variant is DROPPED on an array", func(t *testing.T) {
-		got := schemaFor(t, "f []object"+variantBody)
-		items, _ := got["items"].(map[string]any)
-		if _, ok := items["oneOf"]; ok {
-			t.Errorf("`[]object @variant` now carries its discriminated union. That is the fix " +
-				"memql#2951 wants -- delete the annotation caveat from " +
-				"docs/public/language/memql.md and dsl/_reference/_concept.memql in the same change.")
+	// BOTH wrapped forms: the docs claim covers []T and map[string]T alike,
+	// and review round 7 caught the map half ungated -- carrying @variant into
+	// map values left the whole suite green while the claim stayed broad.
+	t.Run("variant is DROPPED when wrapped", func(t *testing.T) {
+		for _, w := range []struct{ form, elemKey string }{
+			{"f []object" + variantBody, "items"},
+			{"f map[string]object" + variantBody, "additionalProperties"},
+		} {
+			elems, _ := schemaFor(t, w.form)[w.elemKey].(map[string]any)
+			if _, ok := elems["oneOf"]; ok {
+				t.Errorf("`%s` now carries its discriminated union. That is the fix memql#2951 "+
+					"wants -- delete the annotation caveat from docs/public/language/memql.md "+
+					"and dsl/_reference/_concept.memql in the same change.", w.form)
+			}
 		}
 	})
 

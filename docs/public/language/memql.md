@@ -195,6 +195,8 @@ The JSON Schema spellings are the ones people reach for, because that is what th
 
 > **Inside `[]<type>` and `map[string]<type>`, none of this applies (memql#2951).** Element types are not checked and not corrected — `[]boolean` and `[]frobnicate` both lint clean and build a field validating as `[]string`, and `[]datetime` emits a schema byte-identical to `[]string`, so the RFC3339 check is silently absent. Value-constraining annotations are inert there too: `@variant` is dropped entirely, and `@pattern`, `@minLength`, `@maxLength`, `@minimum` and `@maximum` land on the array or map itself, where JSON Schema ignores them — so `blocks []object @variant(...)` validates nothing and `tags []string @minLength(1)` is not the non-empty check it looks like.
 >
+> One case fails the *other* way and is worth knowing separately: **`map[string]any` constrains its values to `string`**. `any` means "unconstrained" in property position and "must be a string" one level in, so the obvious freeform-metadata-bag declaration rejects `{"count": 3}` at runtime. Everything else in this note accepts too much; that one accepts too little.
+>
 > Treat `[]<type>` and `map[string]<type>` as dependable only for `string`, `bool`, `int`, `float` and a bare `object`, with no value-constraining annotation on the field. #2951 carries the measured behaviour case by case.
 
 **Cross-concept references** are plain string fields holding the target's id (e.g. `spaceId string`), optionally paired with an `@relationship` annotation so the engine can traverse the edge.

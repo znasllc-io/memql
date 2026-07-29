@@ -213,8 +213,10 @@ concept referenceExample {
 //   value-constraining annotations are inert -- []datetime loses its RFC3339
 //   check, []boolean silently becomes []string, @variant is dropped, and
 //   @pattern/@minLength/@maxLength/@minimum/@maximum land on the array or map
-//   where JSON Schema ignores them. Dependable only for
-//   string/bool/int/float/bare object with no value-constraining annotation.
+//   where JSON Schema ignores them. map[string]any is the one case that fails
+//   the OTHER way: it constrains values to string, so it rejects {"count":3}.
+//   Dependable only for string/bool/int/float/bare object with no
+//   value-constraining annotation.
 //   See memql#2951 for the measured behaviour case by case.
 
 @namespace("reference")
@@ -240,20 +242,34 @@ concept fieldTypes {
 //                       Value is parsed -- numbers as numbers, "true"/"false"
 //                       as bools, RFC3339 strings as datetimes.
 //   @description("..."  Human-readable description.
-//   @unique             Engine enforces uniqueness across rows.
+//   @unique             Engine enforces uniqueness across rows. [see memql#2959]
 //   @pattern("regex")   String pattern (only valid on string fields).
-//   @minLength(N)       Min character count. STRING ONLY -- on []T it is
-//                       emitted on the ARRAY, where JSON Schema ignores it,
-//                       so there is no working element-count check (#2951).
-//   @maxLength(N)       Max character count. STRING ONLY -- same caveat.
+//   @minLength(N)       Min character count (string).
+//   @maxLength(N)       Max character count (string).
 //   @minimum(N)         Min numeric value (int / float).
 //   @maximum(N)         Max numeric value (int / float).
-//   @immutable          Field cannot change after insert.
+//   @immutable          Field cannot change after insert.  [see memql#2959]
 //   @secret             Field is redacted from logs + non-elevated readers.
+//                                                          [see memql#2959]
 //   @variant(discriminator="field")  Discriminated-union field. See section 10.
 //
 // Unknown @-annotations on a field are rejected at load time with
 //   `unknown property annotation @<name> on field "<field>"`.
+//
+// TWO CAVEATS on the list above, both measured:
+//
+//   WRAPPING. @pattern, @minLength, @maxLength, @minimum, @maximum and
+//   @variant describe a VALUE, so on []T and map[string]T they are emitted on
+//   the wrapper and do nothing -- there is no element-count, element-pattern
+//   or element-variant check. See the NOTE in section 3 and memql#2951.
+//
+//   ENFORCEMENT. @unique, @immutable and @secret lower to x-unique /
+//   x-immutable / x-secret, and nothing in the tree reads those keys today --
+//   uniqueness is not enforced, immutability is enforced per-construct rather
+//   than by the annotation, and redaction is keyed on field NAME
+//   (component/safety/redact.go), not on @secret. @pii is the one in this
+//   group that genuinely runs. Tracked in memql#2959; the lines above describe
+//   the intent, not current behaviour.
 
 @namespace("reference")
 @description("Every field-level annotation in use.")
