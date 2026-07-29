@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/core/id"
 )
 
@@ -72,6 +73,23 @@ type (
 		// declared via `@displayCard(...)`. Nil when the concept
 		// did not declare the annotation. See memql#160.
 		DisplayCard *DisplayCard `json:"displayCard,omitempty"`
+
+		// RowAuthz carries the row-authorization tier declared via
+		// `@rowAuthz(...)`: who may see this concept's rows, stated
+		// once on the concept instead of as an `actor.*` term each
+		// author must remember to type into every filter over it.
+		// Nil when the concept declared no tier.
+		//
+		// PHASE 1 IS INERT (memql#2920). Nothing on the query path
+		// reads this field -- no predicate is injected and no result
+		// set changes. It exists so #2803's Phase 2 shadow mode has a
+		// declared tier to compute against, and TestRowAuthzIsInert
+		// gates that nothing starts reading it by accident.
+		//
+		// The type is the parser's own, not a local mirror, so the
+		// loader and the memqlmigrate codemod cannot drift in what a
+		// declaration means.
+		RowAuthz *parser.RowAuthzDecl `json:"rowAuthz,omitempty"`
 
 		contentIdSalt string // server-side salt for content-addressed ID derivation
 	}
