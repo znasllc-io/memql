@@ -15,6 +15,7 @@ package memoryNodes
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -106,6 +107,14 @@ func BuildConceptFromDecl(decl *parser.ConceptDecl, conceptName string) (*Concep
 		}
 	}
 
+	// Same late pass, same reason: `@rowAuthz(owner="<field>")` names
+	// a payload field, and the property set only exists now.
+	if parsed.rowAuthz != nil {
+		if err := validateRowAuthz(conceptName, parsed.rowAuthz, parsed.properties); err != nil {
+			return nil, err
+		}
+	}
+
 	version := parsed.version
 	if version == "" {
 		// Absent @version means 1.0.0 (#2613), stored in the same
@@ -123,7 +132,38 @@ func BuildConceptFromDecl(decl *parser.ConceptDecl, conceptName string) (*Concep
 		Version:       version,
 		Relationships: parsed.relationships,
 		DisplayCard:   parsed.displayCard,
+		RowAuthz:      parsed.rowAuthz,
 	}, nil
+}
+
+// validateRowAuthz checks the half of a row-authz declaration that can
+// only be checked once the property set is known: an `owner="<field>"`
+// tier must name a field the concept actually declares.
+//
+// The other tiers need no late pass. `public` and `clusterOwner` take
+// no parameter, and `via="<spec>"` names a spec in another file, which
+// this package cannot see -- resolving that is Phase 2's problem,
+// where the predicate is actually computed. Declaring it here without
+// resolving it is deliberate: the vocabulary has to be able to EXPRESS
+// the granted tier before anything can measure it.
+//
+// See memql#2920.
+func validateRowAuthz(conceptName string, decl *parser.RowAuthzDecl, props []parsedProperty) error {
+	if decl == nil || decl.Tier != parser.RowAuthzOwned {
+		return nil
+	}
+	for _, p := range props {
+		if p.name == decl.Owner {
+			return nil
+		}
+	}
+	declared := make([]string, 0, len(props))
+	for _, p := range props {
+		declared = append(declared, p.name)
+	}
+	sort.Strings(declared)
+	return fmt.Errorf("@%s(owner=%q) on concept %q references a field the concept does not declare (declared: %s)",
+		parser.RowAuthzAnnotation, decl.Owner, conceptName, strings.Join(declared, ", "))
 }
 
 // validateDisplayCard checks that every slot in the parsed card
@@ -230,6 +270,14 @@ type parsedConcept struct {
 	// the property pass (named fields must exist + be displayable).
 	// See memql#160.
 	displayCard *DisplayCard
+
+	// rowAuthz is the optional row-authorization tier declared via
+	// `@rowAuthz(...)`. Like displayCard, the `owner="<field>"` form
+	// is validated against the property list AFTER the property pass,
+	// because attributes are folded before properties on this path.
+	// Nil means the concept declared no tier -- a warning in Phase 1
+	// and nothing more. See memql#2920.
+	rowAuthz *parser.RowAuthzDecl
 }
 
 // parsedProperty mirrors the legacy internal type so the JSON-Schema
@@ -454,6 +502,37 @@ func applyConceptAttribute(c *parsedConcept, attr *parser.Attribute) error {
 			return err
 		}
 		c.displayCard = card
+	case parser.RowAuthzAnnotation:
+		// @rowAuthz(public) / @rowAuthz(clusterOwner) /
+		// @rowAuthz(owner="<field>") / @rowAuthz(via="<spec>")
+		//   -- the declared row-authorization tier (memql#2920).
+		//   PHASE 1 IS INERT: the tier is parsed, validated and
+		//   carried on the Concept, and nothing reads it at query
+		//   time. The `owner=` field-existence check runs in
+		//   BuildConceptFromDecl AFTER the property pass, for the
+		//   same reason @displayCard's does.
+		//
+		//   The declaration is read through parser.ParseRowAuthz --
+		//   the SAME function the memqlmigrate codemod renders
+		//   against -- so the loader and the codemod cannot disagree
+		//   about what a declaration means (#2621's lesson).
+		//
+		//   A SECOND @rowAuthz is a load error, not a silent
+		//   overwrite. The parser folds attributes in source order, so
+		//   without this a concept carrying two declarations loaded
+		//   with the LAST one winning -- a reader scanning top-down
+		//   sees a tier the engine does not use. "One tier per
+		//   concept" has to be enforced for the declaration to mean
+		//   anything.
+		if c.rowAuthz != nil {
+			return fmt.Errorf("@%s declared more than once -- a concept declares exactly one tier",
+				parser.RowAuthzAnnotation)
+		}
+		decl, err := parser.ParseRowAuthz(attr)
+		if err != nil {
+			return err
+		}
+		c.rowAuthz = decl
 	default:
 		return fmt.Errorf("unknown concept annotation @%s", attr.Name)
 	}

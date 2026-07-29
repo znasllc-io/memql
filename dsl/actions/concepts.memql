@@ -28,6 +28,7 @@ use identity.concepts.{ user }
 /// graduates it into a library action. This is the foundation record of the action library (epic
 /// #1734) -- no replay yet.
 @displayCard(primary="stepId", secondary="status", tertiary="ownerUserId", status="status")
+@rowAuthz(owner="ownerUserId")
 concept candidate {
   ownerUserId   string!  @description("v1:identity:user.id of the owner. The per-row authz key (owned tier), stamped from actor.userId by recordActionCandidate.")
   planId        string!  @description("v1:harness:plan.id the trace was captured under.")
@@ -67,6 +68,7 @@ concept candidate {
 /// replays them token-free on identical input against the default surface. Reliability rises on
 /// verified replay; mismatches fall back to the LLM.
 @displayCard(primary="slug", secondary="status", tertiary="ownerUserId", status="status")
+@rowAuthz(owner="ownerUserId")
 concept action {
   ownerUserId       string!  @description("v1:identity:user.id of the owner. The per-row authz key (owned tier), stamped from actor.userId by mintAction.")
   slug              string!  @description("Human-readable name (e.g. the dominant capability slug). Not unique on its own; (ownerUserId, inputFingerprint) is the replay key.")
@@ -118,6 +120,7 @@ concept action {
 /// availability. The resolver binds capability->surface per world group with explicit > policy >
 /// availability precedence (decision A pins coupled actions to one surface).
 @displayCard(primary="slug", secondary="kind", tertiary="ownerUserId", status="status")
+@rowAuthz(owner="ownerUserId")
 concept surface {
   ownerUserId   string!  @description("v1:identity:user.id of the owner. Per-row authz key (owned tier); computer-use machines + workbenches are per-user. Stamped from actor.userId by registerSurface.")
   slug          string!  @description("Stable surface identifier used in bindings/policies: 'workbench', 'computer-use:<machineId>', 'mcp:<server>'. (ownerUserId, slug) is the registry key.")

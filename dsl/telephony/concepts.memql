@@ -41,6 +41,7 @@ concept trunk {
 /// An append-only PSTN call record: one row per call, written on connect and updated on disconnect.
 /// Powers billing, observability, and per-call cost attribution. Bound to a partition + a
 /// partition-scoped room (Amendment A).
+@rowAuthz(clusterOwner)
 concept call {
   direction       enum("inbound", "outbound")! @description("Call direction.")
   fromE164        string! @description("Calling party E.164.")

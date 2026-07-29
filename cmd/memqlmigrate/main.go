@@ -34,6 +34,16 @@
 //	                    domain is the file's containing directory, so this
 //	                    rewrite is path-aware.
 //
+//	row-authz           seed @rowAuthz(...) on each concept from how its
+//	                    existing queries filter (#2920). Whole-tree, so it
+//	                    is path-aware and only targets concepts.memql.
+//	                    Declares ONLY the tiers a top-level filter conjunct
+//	                    proves, and only when EVERY query over the concept
+//	                    clears that floor -- an unscoped sibling blocks the
+//	                    declaration rather than being ignored. Never infers
+//	                    `public` or `granted`. Re-runnable; a concept that
+//	                    already declares a tier is left alone.
+//
 //	null-coalesce       coalesce(a, b, c) → a ?? b ?? c (#2766; the
 //	                    operator shipped by #2611). Skips what the
 //	                    Swift-tight precedence would re-associate --
@@ -59,6 +69,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	langparser "github.com/znasllc-io/memql/component/language/parser"
@@ -87,6 +98,7 @@ var rewriters = map[string]rewriter{
 var pathRewriters = map[string]pathRewriter{
 	"same-domain-use":   rewriteSameDomainUse,
 	"namespace-default": rewriteNamespaceDefault,
+	"row-authz":         rewriteRowAuthz,
 }
 
 // rewriteNamespaceDefault strips @namespace annotations that restate the
@@ -122,6 +134,41 @@ func domainForDSLPath(path string) string {
 // conformance gate also runs.
 func rewriteSameDomainUse(path string, src []byte) ([]byte, error) {
 	return langparser.RewriteSameDomainUse(filepath.Base(filepath.Dir(path)), src)
+}
+
+// rowAuthzInferenceCache memoises the whole-tree inference per dsl
+// root. Unlike every other rewrite here, `row-authz` cannot decide a
+// file from the file: a concept's tier is inferred from the QUERIES
+// over it, which live in sibling files. The walk therefore happens
+// once per root and every concepts.memql reads its slice out.
+var rowAuthzInferenceCache = map[string]*rowAuthzInference{}
+
+// rewriteRowAuthz seeds `@rowAuthz(...)` on the concepts declared in
+// this file, from the tiers inferred across the whole tree (#2920).
+//
+// Only `<domain>/concepts.memql` is a target -- concepts are declared
+// nowhere else, and running the header scan over queries.memql would
+// find nothing while costing a tree walk per file.
+func rewriteRowAuthz(path string, src []byte) ([]byte, error) {
+	if filepath.Base(path) != "concepts.memql" {
+		return src, nil
+	}
+	domain := filepath.Base(filepath.Dir(path))
+	root := filepath.Dir(filepath.Dir(path))
+
+	inference, ok := rowAuthzInferenceCache[root]
+	if !ok {
+		var err error
+		inference, err = inferRowAuthz(root)
+		if err != nil {
+			return nil, err
+		}
+		rowAuthzInferenceCache[root] = inference
+		// The run states what it inferred AND what it left alone, on
+		// stderr so it never lands in a -w diff or a piped file.
+		fmt.Fprint(os.Stderr, inference.Report())
+	}
+	return langparser.RewriteRowAuthz(src, inference.Tiers[domain])
 }
 
 type opts struct {
@@ -274,19 +321,23 @@ func printUsage(w io.Writer) {
 }
 
 func listRewriters(w io.Writer) {
+	// DERIVED from the two registries, not hand-listed. The hand-written
+	// version silently omitted `null-coalesce` and `row-authz` -- a usage
+	// message that denies a rewrite exists is worse than none, because the
+	// docs tell operators to run it.
+	names := make([]string, 0, len(rewriters)+len(pathRewriters))
+	for n := range rewriters {
+		names = append(names, n)
+	}
+	for n := range pathRewriters {
+		names = append(names, n)
+	}
+	sort.Strings(names)
 	fmt.Fprintln(w, "available rewrites:")
-	fmt.Fprintln(w, "  result-navigation   .empty/.first/.last/.count/.nodes → method forms")
-	fmt.Fprintln(w, "  slice-syntax        array(T) → []T")
-	fmt.Fprintln(w, "  args-description    strip parser-discarded @description from args{} fields")
-	fmt.Fprintln(w, "  accept-stamp        collapse arg-mirror runs into accept{}/stamp{} (#2616)")
-	fmt.Fprintln(w, "  same-domain-use     delete use imports of the file's own domain (#2617)")
-	fmt.Fprintln(w, "  required-sigil      @required -> the `type!` sigil (#2618)")
-	fmt.Fprintln(w, "  enum-type           args `string @enum(...)` -> the enum(...) type (#2618)")
-	fmt.Fprintln(w, "  cache-positional    @cache(ttl=\"N\") -> @cache(N) (#2618)")
-	fmt.Fprintln(w, "  terse-automation    longhand single-step automations -> the => form (#2619)")
-	fmt.Fprintln(w, "  actor-binding       insert @actor above constructs reading actor.* (#2621)")
-	fmt.Fprintln(w, "  doc-comment-descriptions  construct @description -> /// doc comments; dedup restating headers + Arguments/Returns (#2635)")
-	fmt.Fprintln(w, "  namespace-default   strip @namespace restating the containing domain directory (#2614)")
+	for _, n := range names {
+		fmt.Fprintf(w, "  %s\n", n)
+	}
+	fmt.Fprintln(w, "\nSee the package doc comment in cmd/memqlmigrate/main.go for what each one does.")
 }
 
 func applyPipeline(path string, src []byte, pipeline []pathRewriter) ([]byte, error) {

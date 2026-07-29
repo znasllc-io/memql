@@ -18,6 +18,7 @@ use identity.concepts.{ user }
 /// the assistant manages on the user's behalf. Per-row authz: owned -- ownerUserId is stamped from
 /// actor.userId on every write and every read gates on ownerUserId==actor.userId.
 @displayCard(primary="title", secondary="priority", tertiary="dueAt", status="done")
+@rowAuthz(owner="ownerUserId")
 concept todo {
   ownerUserId  string!  @description("v1:identity:user.id that owns this to-do. Stamped from actor.userId at create time; re-stamped from actor.userId on every update so ownership can never be reassigned by a caller. The load-bearing per-row authz key.")
   title        string!  @description("Short human-readable description of the task. The primary display field.")

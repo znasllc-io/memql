@@ -26,14 +26,36 @@
 // =============================================================================
 //
 // Every annotation goes above the `concept` keyword. The full author surface
-// is four annotations -- nothing else is recognized.
+// is five annotations -- nothing else is recognized.
 //
 //   @description("text")        Human-readable description.
 //   @version("MAJOR.MINOR.PATCH") Strict semver. Major flows into ID prefix.
 //   @namespace("foo[:bar:baz]")  Colon-separated lowercase identifiers.
 //   @type("object"|"collection"|"reference")  Default: object.
+//   @rowAuthz(<tier>)           Who may see this concept's rows -- see below.
 //
 // (`@scope` was retired in #56 -- see section 5.)
+//
+// @rowAuthz declares the row-authorization tier ONCE on the concept, instead
+// of as an `actor.*` term every filter over it has to remember to carry.
+// Exactly one tier per concept; a second @rowAuthz is a load error.
+//
+//   @rowAuthz(public)            Globally readable by intent. Spelled
+//                                explicitly -- "no annotation" and "declared
+//                                public" are different states.
+//   @rowAuthz(clusterOwner)      Administrative rows.
+//   @rowAuthz(owner="<field>")   Rows belong to a user; <field> must be a
+//                                field this concept declares, and it is
+//                                compared against actor.userId.
+//   @rowAuthz(via="<spec>")      A relationship spec grants visibility.
+//
+// PHASE 1 IS INERT (memql#2920): the tier is parsed, validated and carried on
+// the concept, and nothing reads it at query time -- no predicate is injected
+// and no query returns a different row set. A concept with no declaration
+// still loads; it produces a boot warning, not an error. Seed the ones an
+// existing query filter can prove with
+// `memqlmigrate --rewrite=row-authz -w dsl/*/concepts.memql`.
+// See docs/public/operate/auth/per-row-authz-audit.md.
 //
 // Other annotations are rejected at load time with
 //   `unknown concept annotation @<name>`.

@@ -46,6 +46,137 @@ runtime effect. Adding `@public` to a construct is the author's
 explicit acknowledgement that "yes, this is meant to be visible to
 unauthenticated callers / cross-user reads / etc."
 
+## Declaring the tier: `@rowAuthz` on the concept
+
+The four buckets above are inferred, per construct, by a regex. That
+is the defect #2803 rules on: a construct's caller-check lives in a
+term the author has to remember to type, and deleting it leaves a
+construct that still loads, still passes every gate, and returns
+every row. **Absence has no syntax**, so review cannot catch it.
+
+`@rowAuthz(...)` moves the bucket onto the **concept**, declared once,
+where a new query over that concept inherits it instead of having to
+restate it:
+
+| Bucket | Declaration | Predicate it will eventually inject |
+|---|---|---|
+| owned | `@rowAuthz(owner="<field>")` | `<field> == actor.userId` |
+| admin | `@rowAuthz(clusterOwner)` | `actor.isClusterOwner == true` |
+| public | `@rowAuthz(public)` | none — explicit and greppable |
+| granted | `@rowAuthz(via="<spec>")` | the relationship spec, gated on `actor.userId` |
+
+```memql
+@rowAuthz(owner="requestedBy")
+concept plan { ... }
+
+@rowAuthz(clusterOwner)
+concept call { ... }
+```
+
+Rules:
+
+- **One tier per concept.** Two different tiers inside one annotation
+  is a load error, and so is a second `@rowAuthz` on the same concept
+  (the parser folds attributes in source order, so without that check a
+  reader scanning top-down would see a tier the engine does not use).
+- **`owner="<field>"` must name a field the concept declares.**
+  Checked at load, against the parsed property set, with the declared
+  fields listed in the diagnostic.
+- **`public` is spelled explicitly.** "No annotation" and "declared
+  public" are different states — making absence stop being silently
+  permissive is the entire point.
+- The parameterised tiers use `=` and a quoted value, matching every
+  other keyword-arg annotation (`@relationship(field="x")`,
+  `@displayCard(primary="name")`).
+
+### Status: Phase 1 is inert (memql#2920)
+
+**Nothing is enforced.** The tier is parsed, validated, and carried on
+the concept; no predicate is injected anywhere and no query returns a
+different row set than it did before. `TestRowAuthzIsInert` enforces
+that by walking the Go tree and failing if any file outside the
+detector / loader / codemod reads the row-authz surface.
+
+A concept with no declaration still loads. It produces one aggregated
+boot **warning** naming every undeclared concept; escalation to a load
+error is a later phase, once the tree is clean.
+
+### Seeding the tree
+
+```bash
+memqlmigrate --rewrite=row-authz -w dsl/*/concepts.memql
+```
+
+The codemod infers a tier from how a concept's existing queries filter,
+and it is deliberately conservative — it declares **only** `owned` and
+`clusterOwner`, the two tiers evidenced by a top-level filter conjunct
+that demonstrably narrows the row set.
+
+**A tier is a floor, so every query has to clear it.** The predicate
+will eventually be AND-ed into *every* access of the concept, which
+means a sibling query carrying no caller-scope term is not a neutral
+bystander — it is a counterexample, reading rows the floor would
+exclude. One such query blocks the declaration. (Counting only the
+positive votes declares `planner.plan` owned off 2 of its 10 queries
+while the primary user-facing read is space-scoped, and declares
+`library.artifact` owned when `libraryWorkspaceLiveSources` documents
+its rows as having no owner at all.) The single exception is
+`@serverOnly`, which is not a client-callable read.
+
+It never infers:
+
+- **`public`**, because no filter can evidence a widening claim. The
+  nearest candidate, a construct-level `@public`, answers a different
+  question ("this *call* is intentionally unscoped") and carries no
+  runtime semantics, so promoting it would re-create exactly the silent
+  permissiveness this tier exists to end.
+- **`granted`**, because resolving the relationship spec is the phase
+  that actually computes predicates.
+
+**What it does not examine, stated rather than silent.** The inference
+reads *queries*. A mutation cannot vote — `actor.userId` there is a
+stamped value (`ownerUserId: actor.userId`), recording who owns a new
+row rather than which rows the construct may reach — and it must not
+block either: an ungated `update { id: args.x }` is the gap #2803
+exists to close, not evidence that a concept's rows are unowned. (That
+asymmetry with queries is the point. An unscoped *query* returns other
+users' rows by design; an ungated *update* just says "update the row I
+name.") #2803 sequences mutations after reads for the same reason. So a
+concept whose mutations contradict its queries is not detected here;
+measuring that is Phase 2's job. The codemod prints this limit at the
+end of every run.
+
+An undeclared concept is a **visible state**, not a gap: it is what
+the Phase 2 shadow-mode measurement (#2921) has to cover, and a guessed
+tier would launder an absence of evidence into a declaration the
+measurement then treats as ground truth.
+
+Current distribution over `dsl/`: 12 `owned`, 1 `clusterOwner`, 87
+undeclared. The undeclared break down as 50 blocked by a query whose
+filter does not gate on the caller, 26 with no queries at all, 6
+blocked by a `@public` sibling, 4 blocked by an unfiltered query, and
+1 where two queries disagree (`authoring.bundle`:
+`authoringBundlesForOwner` is caller-scoped, `systemActiveAuthoringBundles`
+is admin-gated — the concrete instance of the per-concept-floor vs
+per-construct-override question).
+
+### The constraint carried forward, not solved
+
+`userById` **bootstraps the actor**:
+`component/auth/identity_resolver.go` calls it to resolve `sub` → user
+in order to *build* the `AccessContext`. So `actor.userId` is circular
+for the one construct that creates the actor, and any rule assuming
+"every user-scoped read is expressible as a filter over the actor" is
+false there.
+
+Phase 1 needs no answer, because nothing is enforced. It does need the
+grammar to be **able** to express one, and it is: bare-flag tiers
+(`public`, `clusterOwner`) and keyword tiers (`owner=`, `via=`) occupy
+separate namespaces inside the argument list, so a fifth tier is a new
+flag or a new keyword and disturbs neither. See #2803's thread for why
+the escape hatch must be argued from Phase 2 data rather than granted
+as an exemption knob.
+
 ## Validator
 
 `dsl.TestPerRowAuthzClassification` walks every query and mutation
@@ -170,3 +301,8 @@ needs a real caller-check instead.
 - #55 — JWT claims → caller envelope contract
 - #56 — Remove partitioning (blocked on this audit completing)
 - #57 — id cleanup (independent; already in flight)
+- #2803 — the ruling that concept-declared row authz is worth building,
+  scoped to Phases 1–2 with the enforcement decision deferred until the
+  measurement exists
+- #2920 — Phase 1: this section's vocabulary + loader validation, inert
+- #2921 — Phase 2: shadow mode, measuring what enforcement would change

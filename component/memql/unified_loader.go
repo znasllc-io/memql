@@ -24,6 +24,7 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"sort"
 	"strings"
 
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
@@ -201,9 +202,45 @@ func LoadUnifiedConceptsWithSkips(logger *slog.Logger) (int, []ConceptSkip, erro
 		logger.Info("unified loader: registered concepts",
 			"component", "memql.unifiedLoader",
 			"count", len(concepts))
+		warnUndeclaredRowAuthz(logger, concepts)
 	}
 
 	return len(concepts), skips, nil
+}
+
+// warnUndeclaredRowAuthz reports every concept that entered the tree
+// without declaring who may see its rows (memql#2920 Phase 1).
+//
+// A WARNING, not an error, and deliberately so: the escalation to a
+// load error is a later phase, once the codemod has been run and the
+// tree is clean. Until then a concept with no `@rowAuthz(...)` still
+// loads and still returns exactly the rows it always did -- Phase 1
+// changes no behaviour.
+//
+// Emitted ONCE with the full list rather than once per concept. The
+// list is the actionable part -- it is precisely what a Phase 2
+// measurement has to cover -- and 80-odd separate warning lines at
+// every boot is how a signal gets filtered out of the log and stops
+// being read at all.
+func warnUndeclaredRowAuthz(logger *slog.Logger, concepts map[string]*memoryNodes.Concept) {
+	undeclared := make([]string, 0)
+	for id, c := range concepts {
+		if c != nil && c.RowAuthz == nil {
+			undeclared = append(undeclared, id)
+		}
+	}
+	if len(undeclared) == 0 {
+		return
+	}
+	sort.Strings(undeclared)
+	logger.Warn("unified loader: concepts with no declared row-authz tier",
+		"component", "memql.unifiedLoader",
+		"count", len(undeclared),
+		"total", len(concepts),
+		"concepts", strings.Join(undeclared, ", "),
+		"hint", `declare a tier with @rowAuthz(public|clusterOwner|owner="<field>"|via="<spec>"), `+
+			"or run `memqlmigrate --rewrite=row-authz -w dsl/*/concepts.memql` to seed the ones an "+
+			"existing query filter can prove. Nothing is enforced yet (memql#2920).")
 }
 
 // firstPathSegment returns the leading path component of a unified-tree

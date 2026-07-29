@@ -21,6 +21,7 @@ use identity.concepts.{ user }
 /// upstream event id). recurrence is an optional RFC-5545 RRULE string carried verbatim for v1 --
 /// expansion into concrete occurrences is a downstream concern, not stored here.
 @displayCard(primary="title", secondary="startsAt", tertiary="location", status="source")
+@rowAuthz(owner="ownerUserId")
 concept calendarEvent {
   ownerUserId  string! @description("v1:identity:user.id who owns this event. Stamped from actor.userId at create time. Every read self-scopes on this field; it is the load-bearing per-row authz guard.")
   title        string! @description("Human-readable event title, e.g. 'Karate class' or 'Dentist'. Shown as the primary line on the event card and in agent-facing listings.")
