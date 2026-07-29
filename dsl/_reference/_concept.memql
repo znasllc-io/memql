@@ -209,10 +209,13 @@ concept referenceExample {
 //   The escape hatch:
 //     any         -- accepts any JSON value; no validation
 //
-//   NOTE: element types inside []T and map[string]T are NOT validated, and
-//   composite element types do not work -- []datetime loses its RFC3339
-//   check, map[string]any constrains values to string, and nested composites
-//   collapse. Dependable only for string/bool/int/float/object (memql#2951).
+//   NOTE: inside []T and map[string]T, element types are NOT validated and
+//   field annotations are NOT carried in -- []datetime loses its RFC3339
+//   check, map[string]any constrains values to string, nested composites
+//   collapse, []object @variant drops the whole discriminated union, and
+//   []string @pattern puts the pattern on the array where it does nothing.
+//   Dependable only for string/bool/int/float/bare object, with no
+//   constraining annotation on the field (memql#2951).
 
 @namespace("reference")
 @description("Every supported field type, one of each.")

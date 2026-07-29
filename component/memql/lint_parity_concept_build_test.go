@@ -13,7 +13,7 @@ package memql
 
 import (
 	"encoding/json"
-	"slices"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -261,16 +261,29 @@ func TestConceptPropertyTypes_ElementSafeListCarriesTheSameConstraints(t *testin
 		return doc.Properties["f"]
 	}
 
-	// constraintKeys are the schema keys that actually constrain a value.
-	// `description` is annotation, not constraint, and is not carried inward.
-	constraintKeys := func(m map[string]any) []string {
-		var out []string
-		for k := range m {
+	// constraints strips the keys that annotate rather than constrain, so
+	// what remains is comparable between a scalar and an element.
+	constraints := func(m map[string]any) map[string]any {
+		out := map[string]any{}
+		for k, v := range m {
 			switch k {
 			case "description":
 			default:
-				out = append(out, k)
+				out[k] = v
 			}
+		}
+		return out
+	}
+	// Compared by VALUE, not by key set. Review round 4 found the key-set
+	// version too weak: every safe-list entry collapses to the single key
+	// "type", so mutating bool's lowering to emit `items:{"type":"string"}`
+	// left this test -- and all 127 packages -- green. The keys matched; the
+	// guarantee did not.
+	same := func(a, b map[string]any) bool { return reflect.DeepEqual(a, b) }
+	keysOf := func(m map[string]any) []string {
+		var out []string
+		for k := range m {
+			out = append(out, k)
 		}
 		sort.Strings(out)
 		return out
@@ -278,17 +291,18 @@ func TestConceptPropertyTypes_ElementSafeListCarriesTheSameConstraints(t *testin
 
 	for _, base := range []string{"string", "bool", "int", "float", "object"} {
 		t.Run(base, func(t *testing.T) {
-			scalar := constraintKeys(build(t, base))
+			scalar := constraints(build(t, base))
 
 			arr := build(t, "[]"+base)
 			items, _ := arr["items"].(map[string]any)
 			if items == nil {
 				t.Fatalf("[]%s emitted no items schema: %+v", base, arr)
 			}
-			if got := constraintKeys(items); !slices.Equal(got, scalar) {
-				t.Errorf("[]%s is on the docs' dependable list, but its element carries %v where a "+
-					"scalar %s carries %v -- the docs promise a guarantee the schema does not make.",
-					base, got, base, scalar)
+			if got := constraints(items); !same(got, scalar) {
+				t.Errorf("[]%s is on the docs' dependable list, but its element does not carry what a "+
+					"scalar %s carries -- the docs promise a guarantee the schema does not make.\n"+
+					"  element: %v (keys %v)\n  scalar:  %v (keys %v)",
+					base, base, got, keysOf(got), scalar, keysOf(scalar))
 			}
 
 			m := build(t, "map[string]"+base)
@@ -296,10 +310,87 @@ func TestConceptPropertyTypes_ElementSafeListCarriesTheSameConstraints(t *testin
 			if vals == nil {
 				t.Fatalf("map[string]%s emitted no additionalProperties schema: %+v", base, m)
 			}
-			if got := constraintKeys(vals); !slices.Equal(got, scalar) {
-				t.Errorf("map[string]%s is on the docs' dependable list, but its value carries %v "+
-					"where a scalar %s carries %v.", base, got, base, scalar)
+			if got := constraints(vals); !same(got, scalar) {
+				t.Errorf("map[string]%s is on the docs' dependable list, but its value does not carry "+
+					"what a scalar %s carries.\n  value:  %v (keys %v)\n  scalar: %v (keys %v)",
+					base, base, got, keysOf(got), scalar, keysOf(scalar))
 			}
 		})
 	}
+}
+
+// TestConceptPropertyTypes_FieldAnnotationsAreNotCarriedIntoElementPosition
+// pins the half of the element gap that is not about TYPES at all.
+//
+// Review round 4 found `object` on the docs' dependable list while
+// `[]object @variant(...)` silently drops the entire discriminated union. The
+// type is fine -- a bare `object` wraps correctly -- so a type-only safe-list
+// cannot express the problem. What is dropped is the ANNOTATION that gives the
+// field its structure, and the same is true of `@pattern`:
+//
+//	object @variant     -> oneOf + x-discriminator     []object @variant  -> items:{type:object}
+//	string @pattern     -> pattern + type              []string @pattern  -> pattern on the ARRAY,
+//	                                                                        where JSON Schema
+//	                                                                        ignores it for strings
+//
+// So a bundle modelling "a post is a list of text|image blocks" ships with no
+// validation at all and lints clean. Asserted as CURRENT behaviour; this fails
+// when memql#2951 lands, which is the reminder to update the docs with it.
+func TestConceptPropertyTypes_FieldAnnotationsAreNotCarriedIntoElementPosition(t *testing.T) {
+	schemaFor := func(t *testing.T, decl string) map[string]any {
+		t.Helper()
+		src := "@version(\"1.0.0\")\n@namespace(\"aud\")\n@description(\"d\")\n" +
+			"concept probe {\n  label string @required @description(\"l\")\n  " + decl + "\n}\n"
+		decls := ExtractConceptDecls(src)
+		if len(decls) == 0 {
+			t.Fatalf("fixture %q did not parse, so it measures nothing", decl)
+		}
+		c, err := concept.BuildConceptFromDecl(decls[0], "v1:aud:probe")
+		if err != nil {
+			t.Fatalf("fixture %q does not build: %v", decl, err)
+		}
+		raw, serr := c.DefinitionSchema()
+		if serr != nil {
+			t.Fatalf("schema for %q: %v", decl, serr)
+		}
+		var doc struct {
+			Properties map[string]map[string]any `json:"properties"`
+		}
+		if err := json.Unmarshal(raw, &doc); err != nil {
+			t.Fatalf("unmarshal %q: %v", decl, err)
+		}
+		return doc.Properties["f"]
+	}
+
+	const variantBody = " @variant(discriminator=\"kind\") @description(\"x\") {\n" +
+		"    text { body string }\n    image { url string }\n  }"
+
+	t.Run("variant survives on a scalar", func(t *testing.T) {
+		got := schemaFor(t, "f object"+variantBody)
+		if _, ok := got["oneOf"]; !ok {
+			t.Fatalf("the control is broken: a scalar `object @variant` must emit oneOf.\n  got: %v", got)
+		}
+	})
+
+	t.Run("variant is DROPPED on an array", func(t *testing.T) {
+		got := schemaFor(t, "f []object"+variantBody)
+		items, _ := got["items"].(map[string]any)
+		if _, ok := items["oneOf"]; ok {
+			t.Errorf("`[]object @variant` now carries its discriminated union. That is the fix " +
+				"memql#2951 wants -- delete the annotation caveat from " +
+				"docs/public/language/memql.md and dsl/_reference/_concept.memql in the same change.")
+		}
+	})
+
+	t.Run("pattern lands on the array, not its items", func(t *testing.T) {
+		got := schemaFor(t, `f []string @pattern("^[a-z]+$") @description("x")`)
+		items, _ := got["items"].(map[string]any)
+		if _, onItems := items["pattern"]; onItems {
+			t.Errorf("`[]string @pattern` now constrains its items. Same as above -- the docs " +
+				"caveat has to go with it.")
+		}
+		if _, onArray := got["pattern"]; !onArray {
+			t.Logf("note: @pattern no longer emitted at the array level either; got %v", got)
+		}
+	})
 }

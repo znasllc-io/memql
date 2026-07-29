@@ -209,7 +209,16 @@ The JSON Schema spellings are the ones people reach for, because that is what th
 > | `[]datetime` | items typed `string`, no `format` | **recognised, but unconstrained** — the RFC3339 check the scalar position enforces is dropped, so `["not-a-date"]` validates |
 > | `map[string]datetime` | values typed `string`, no `format` | same |
 >
-> So `[]<type>` and `map[string]<type>` are dependable only when `<type>` is `string`, `bool`, `int`, `float`, or `object`. **`datetime` is not on that list**: `[]datetime` emits a schema byte-identical to `[]string`, so the format constraint an author reaches for `datetime` to get is silently absent. Anything outside the list lints clean and builds a schema that does not mean what was written. Check element spellings by hand until this is closed.
+> **Field annotations are dropped too**, which is a separate half of the same gap — the type can be on the safe list and the field still lose its meaning:
+>
+> | written | scalar | wrapped |
+> |---|---|---|
+> | `object @variant(...)` | `oneOf` + `x-discriminator` | `items: {type: object}` — **the whole discriminated union is gone** |
+> | `string @pattern(...)` | `pattern` on the value | `pattern` on the **array**, where JSON Schema ignores it |
+>
+> So a concept modelling "a post is a list of `text`\|`image` blocks" as `blocks []object @variant(...)` lints clean and validates nothing.
+>
+> **Dependable, then, means all of:** `<type>` is `string`, `bool`, `int`, `float`, or a **bare** `object`, *and* the field carries no constraining annotation. `datetime` is not on that list — `[]datetime` emits a schema byte-identical to `[]string`, so the RFC3339 check an author reaches for `datetime` to get is silently absent. Anything else lints clean and builds a schema that does not mean what was written. Check element spellings and annotations by hand until this is closed.
 
 **Cross-concept references** are plain string fields holding the target's id (e.g. `spaceId string`), optionally paired with an `@relationship` annotation so the engine can traverse the edge.
 
