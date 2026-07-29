@@ -418,7 +418,16 @@ The constructs outside this matrix carry their own closed annotation
 sets; unknown annotations are rejected at load time:
 
 - **Concepts**: `@description`, `@version`, `@namespace`, `@type`,
-  `@displayCard`. (`@scope` is retired, #56.) `@version` is strict
+  `@displayCard`, `@rowAuthz`. (`@scope` is retired, #56.)
+  `@rowAuthz(public|clusterOwner|owner="<field>"|via="<spec>")` declares
+  WHO MAY SEE the concept's rows, once on the concept, instead of as an
+  `actor.*` term every filter over it must remember to carry. Exactly
+  one tier; `owner=` must name a field the concept declares. PHASE 1 IS
+  INERT (memql#2920) -- the tier is parsed, validated and carried, and
+  nothing reads it at query time, so no result set changes. Undeclared
+  is a boot warning, not yet an error. See
+  [per-row-authz-audit.md](../operate/auth/per-row-authz-audit.md).
+  `@version` is strict
   semver and absent means 1.0.0 (#2613) -- annotate only genuine
   non-defaults; the same default applies to seeds. `@namespace` absent
   DEFAULTS to the containing `dsl/<domain>/` directory (#2614): write it
