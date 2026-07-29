@@ -274,9 +274,17 @@ not require a caller-check."
 
 Examples of legitimate `@public` use:
 
-- `queryCluster*` — needs to be readable on the unauthenticated
-  cluster bootstrap path.
-- `queryActiveAgentRoles` — role catalog; no per-user data.
+- the cluster-topology queries in `dsl/cluster/queries.memql` — need to
+  be readable on the unauthenticated cluster bootstrap path.
+- `activeAgentRoles` — role catalog; no per-user data.
+
+This list has drifted from the tree: neither bullet currently carries
+`@public` (`activeAgentRoles` at `dsl/agents/queries.memql` does not, and
+`dsl/cluster/queries.memql` has no `@public` at all). Take them as
+illustrations of the argument below, not as an inventory of annotated
+constructs. Reconciling the list — in either direction, per construct —
+is memql#2918; note that the lesson at the end of this section cuts
+against `@public` for anything reachable pre-auth.
 
 `userByEmail` used to head this list, as the login-path lookup that
 runs before the caller is authenticated. That reasoning was right

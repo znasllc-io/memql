@@ -86,24 +86,24 @@ Audit trail for state transitions:
 
 | Query | Purpose |
 |-------|---------|
-| `queryRecordsByState` | Filter records by validation state, space, type |
-| `queryUsableRecords` | Get records usable per policy (confirmed + optionally checked) |
-| `queryValidationLog` | Audit trail for a record or space |
-| `queryDetectConflicts` | Find confirmed records with matching natural keys |
-| `queryPolicy` | Get the validation policy for a record type |
+| `recordsByState` | Filter records by validation state, space, type |
+| `usableRecords` | Get records usable per policy (confirmed + optionally checked) |
+| `validationLog` | Audit trail for a record or space |
+| `detectConflicts` | Find confirmed records with matching natural keys |
+| `policy` | Get the validation policy for a record type |
 
 ## Mutations
 
 | Mutation | Purpose |
 |----------|---------|
-| `mutationCreateRecord` | Create a new record in draft state |
-| `mutationCreateRecordBatch` | Create a single record in draft state as part of a batch import (one call per record) |
-| `mutationUpdateRecord` | Update record data (resets to draft) |
-| `mutationDeleteRecord` | Soft-delete a record |
-| `mutationCheckRecord` | Synthetic check (increments count, may transition to checked) |
-| `mutationConfirmRecord` | Human confirm (increments count, may transition to confirmed) |
-| `mutationRevertRecord` | Revert to a previous state |
-| `mutationSetPolicy` | Create or update a validation policy |
+| `createRecord` | Create a new record in draft state |
+| `createRecordBatch` | Create a single record in draft state as part of a batch import (one call per record) |
+| `updateRecord` | Update record data (resets to draft) |
+| `deleteRecord` | Soft-delete a record |
+| `checkRecord` | Synthetic check (increments count, may transition to checked) |
+| `confirmRecord` | Human confirm (increments count, may transition to confirmed) |
+| `revertRecord` | Revert to a previous state |
+| `setPolicy` | Create or update a validation policy |
 
 ## Events
 

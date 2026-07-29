@@ -105,7 +105,7 @@ orchestration lives in the `library` Go integration
 | Surface | Purpose | Issue |
 |---------|---------|-------|
 | `editDocument` (builtin / SDK) | User edit: append a version (`authorKind=user`), bump the number, update the latest pointer. Optimistic concurrency via `expectedVersion`. | memql#1229 |
-| `queryDocumentVersions` / `queryDocumentVersionById` (query / SDK) | Read the ordered history / a single version's full content. | memql#1230 |
+| `documentVersions` / `documentVersionById` (query / SDK) | Read the ordered history / a single version's full content. | memql#1230 |
 | `restoreDocumentVersion` (builtin / SDK) | Append-as-latest restore of a chosen version. Non-destructive. | memql#1230 |
 | `editDocument` (agent tool) | Assistant edit: append a version (`authorKind=assistant`, `authorId=agentId`) with planner provenance. | memql#1231 |
 

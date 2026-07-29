@@ -118,8 +118,9 @@ substrate is wired, a human or Claude carries implementation from the queue.
 ### Routing logic
 
 The `routeRequest` automation fires on `node.created` for every
-`v1:forge:request` and calls `logicRouteRequest`. The logic reads the
-`submitterRole` stamped at insert time and picks exactly one transition:
+`v1:forge:request` and calls `requestRouteStatus`, passing it the
+`submitterRole` stamped at insert time. The logic reads no graph state — it
+receives that role as its only argument and picks exactly one transition:
 
 | Submitter role | Next status | Rationale |
 |---|---|---|
@@ -127,7 +128,7 @@ The `routeRequest` automation fires on `node.created` for every
 | `admin` or `writer` | `needs_approval` | Developer's own report skips first-line validation. |
 | `reader` | `needs_validation` | Non-developer requests must be validated by a developer first, then approved by the owner. |
 
-The trigger is `node.created`; `mutationAdvanceRequest` is an `update`
+The trigger is `node.created`; `advanceRequest` is an `update`
 (emits `node.updated`), so the automation does not re-fire — no loop risk.
 
 ---
@@ -257,9 +258,13 @@ User: "Approve <id>."
 Claude: calls forgeApproveRequest → status advances to queued
 ```
 
-A request submitted by an `owner` fast-tracks: `logicRouteRequest` sets status
-directly to `queued` at submission time, skipping both the validation and
-approval queues.
+A request submitted by an `owner` fast-tracks: `requestRouteStatus` returns
+`queued`, which the `routeRequest` automation stamps via `advanceRequest` at
+submission time, skipping both the validation and approval queues. That branch
+also stamps `approvedByUserId` with the submitter — an owner fast-track is
+recorded as self-approved, so `approvedByUserId` being set does not by itself
+mean a second person reviewed the request. The logic itself only decides; it
+performs no graph write.
 
 ### 6. Event trail
 
@@ -293,9 +298,9 @@ All forge constructs live under `dsl/forge/`:
 |---|---|
 | `concepts.memql` | `project`, `request`, `requestEvent` concept schemas |
 | `shapes.memql` | `projectFull`, `requestFull`, `requestEventFull` projections |
-| `mutations.memql` | `mutationCreateProject`, `mutationCreateRequest`, `mutationAdvanceRequest`, `mutationValidateRequest`, `mutationApproveRequest`, `mutationRequestChanges`, `mutationRecordRequestEvent` |
-| `queries.memql` | `queryActiveProjects`, `queryMyRequests`, `queryRequestById`, `queryProjectRequests`, `queryValidationQueue`, `queryApprovalQueue`, `queryRequestEvents` |
-| `logic.memql` | `logicRouteRequest` — role-based pipeline router |
-| `automations.memql` | `routeRequest` — fires on `node.created` for `v1:forge:request` |
+| `mutations.memql` | `createProject`, `createRequest`, `advanceRequest`, `validateRequest`, `approveRequest`, `requestChanges`, `recordRequestEvent` |
+| `queries.memql` | `activeProjects`, `myRequests`, `requestById`, `projectRequests`, `validationQueue`, `approvalQueue`, `requestEvents` |
+| `logic.memql` | `requestRouteStatus` — role-based pipeline router; `transitionEventKind` — status → `requestEvent` kind |
+| `automations.memql` | `routeRequest` — fires on `node.created` for `v1:forge:request`; `recordTransition` — fires on `node.updated` |
 | `tools.memql` | All `@mcp`-annotated tools (the team's Claude-facing surface) |
 | `specs.memql` | `forgeDeveloper`, `forgeApprover` — actor-bound role gates |

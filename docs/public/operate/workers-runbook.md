@@ -213,7 +213,7 @@ UI: Workers panel (`?panel=workers`) → Revoke per row.
 CLI: `memql-cockpit` → connect → run mutation:
 
 ```memql
-mutationRevokeWorker({
+revokeWorker({
   registrationId: "wkr-abc...",
   revokedAt: "2026-05-05T12:00:00Z",
   revokedBy: "user-jose-...",
@@ -232,7 +232,7 @@ UI: Floating shield widget in any space's chrome.
 CLI:
 
 ```memql
-mutationToggleComputerUseEnabled({
+toggleComputerUseEnabled({
   enabled: false
 })
 ```
@@ -249,7 +249,7 @@ a separately-named mutation.
 ### Inspect invocations for a plan
 
 ```memql
-queryInvocationsForPlan({ planId: "plan-..." })
+invocationsForPlan({ planId: "plan-..." })
 ```
 
 ### Force a token rotation
