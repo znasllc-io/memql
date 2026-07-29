@@ -44,8 +44,13 @@ import (
 // is uniform across all node types.
 //
 // Returns the number of concepts loaded + any errors accumulated
-// across files. Concepts that fail to build are skipped with a
-// warning log; the loader is best-effort to keep startup robust.
+// across files. Concepts that fail to build are skipped so that one
+// bad concept cannot stop a node booting -- but the skip is RETURNED
+// as well as logged (memql#2909). A dropped concept takes every query,
+// mutation and shape bound to it with it, and a caller that only sees
+// a log line cannot gate on that: memqllint's engine-parity pass ran
+// this very code and discarded the answer, so a product bundle with a
+// mistyped property linted clean and lost a concept at boot.
 //
 // Implementation note: instead of going through dslimports.Load
 // (which runs the full struct-form rewriter chain and gets
@@ -54,11 +59,37 @@ import (
 // file's source text for `concept ... { }` blocks and parses each
 // in isolation. This bypasses the rewriter limitation and gets
 // us to full concept coverage from the new tree.
+// ConceptSkip is one concept the unified loader could not build and
+// therefore did not register. It exists so a caller can gate on a
+// dropped concept rather than having to scrape a log (memql#2909).
+type ConceptSkip struct {
+	File    string // origin path in the DSL tree
+	Concept string // canonical id the concept would have had
+	Err     error  // why the schema build failed
+}
+
+func (s ConceptSkip) String() string {
+	return fmt.Sprintf("concept %q (build): %v", s.Concept, s.Err)
+}
+
+// LoadUnifiedConcepts loads every concept in the mounted tree and
+// registers it. See LoadUnifiedConceptsWithSkips for the variant that
+// also reports which concepts were dropped.
 func LoadUnifiedConcepts(logger *slog.Logger) (int, error) {
+	n, _, err := LoadUnifiedConceptsWithSkips(logger)
+	return n, err
+}
+
+// LoadUnifiedConceptsWithSkips is LoadUnifiedConcepts plus the list of
+// concepts that failed to build. Boot ignores the list (a skip must not
+// stop a node starting); memqllint turns each entry into a diagnostic,
+// which is the only pre-boot gate a product bundle has.
+func LoadUnifiedConceptsWithSkips(logger *slog.Logger) (int, []ConceptSkip, error) {
+	var skips []ConceptSkip
 	tree := memqldsl.Tree()
 	paths, err := dslfs.WalkMemqlFiles(tree)
 	if err != nil {
-		return 0, fmt.Errorf("walk unified DSL tree: %w", err)
+		return 0, nil, fmt.Errorf("walk unified DSL tree: %w", err)
 	}
 
 	// Pass 1: read + parse every concept file, cache its decls + `use`
@@ -130,13 +161,17 @@ func LoadUnifiedConcepts(logger *slog.Logger) (int, error) {
 				// mis-namespaced concept changes canonical ids, so boot,
 				// the memqllint parity tier, and the sense build must all
 				// fail loudly here.
-				return 0, fmt.Errorf("%s: %w", cf.path, idErr)
+				return 0, skips, fmt.Errorf("%s: %w", cf.path, idErr)
 			}
 
 			resolveRelationshipTargets(decl, cf.dir, cf.uses, index, id, logger)
 
 			concept, buildErr := memoryNodes.BuildConceptFromDecl(decl, id)
 			if buildErr != nil {
+				// Recorded as well as logged: this skip drops the WHOLE
+				// concept, so every construct bound to it fails at runtime
+				// (memql#2909).
+				skips = append(skips, ConceptSkip{File: cf.path, Concept: id, Err: buildErr})
 				if logger != nil {
 					logger.Warn("unified loader: skipping concept that failed to build",
 						"component", "memql.unifiedLoader",
@@ -162,7 +197,7 @@ func LoadUnifiedConcepts(logger *slog.Logger) (int, error) {
 			"count", len(concepts))
 	}
 
-	return len(concepts), nil
+	return len(concepts), skips, nil
 }
 
 // firstPathSegment returns the leading path component of a unified-tree
