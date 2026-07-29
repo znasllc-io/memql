@@ -3,10 +3,16 @@ package memoryNodes
 // memql#2909 item 3: "worth auditing which other property types the two
 // disagree on. I only measured `boolean`."
 //
-// The audit found twelve. This file is that audit, kept executable so it stays
+// The audit found sixteen. This file is that audit, kept executable so it stays
 // true: the accepted set and the corrected set are both pinned, and adding a
 // type to the builder without deciding what it means for authors now fails
 // here rather than being discovered by a bundle at boot.
+//
+// It said "twelve" until review round 14 counted. The table had sixteen
+// entries and four of them -- long, decimal, str, time -- were in no docs
+// table and driven by no test. An asserted count, in the PR whose whole
+// subject is vocabularies asserted rather than measured. The size assertion
+// below exists so the next entry cannot drift the same way.
 
 import (
 	"strings"
@@ -31,7 +37,7 @@ var acceptedPropertyTypes = []string{
 }
 
 // TestPropertyTypeSuggestion_CorrectsEveryPlausibleMisspelling pins the
-// twelve. Each was verified to be REJECTED by the schema builder, so each one
+// sixteen. Each was verified to be REJECTED by the schema builder, so each one
 // silently dropped a whole concept before memql#2909.
 func TestPropertyTypeSuggestion_CorrectsEveryPlausibleMisspelling(t *testing.T) {
 	for wrong, want := range propertyTypeSuggestions {
@@ -90,5 +96,24 @@ func TestAcceptedPropertyTypes_AreNotAlsoSuggestions(t *testing.T) {
 		if want, bad := propertyTypeSuggestions[a]; bad {
 			t.Errorf("%q is accepted by the builder but the table corrects it to %q", a, want)
 		}
+	}
+}
+
+// TestPropertyTypeSuggestions_SizeIsPinned is a drift gate, not a behaviour
+// test. The correction table is restated in three places a test cannot reach
+// from here -- the table in docs/public/language/memql.md, and the independent
+// rejected-spelling map in component/memql's
+// TestConceptPropertyTypes_AcceptedAndRejectedSets -- so adding an entry here
+// silently leaves those two behind. That is exactly what happened: the table
+// grew to sixteen while both restatements stayed at twelve.
+func TestPropertyTypeSuggestions_SizeIsPinned(t *testing.T) {
+	const want = 16
+	if got := len(propertyTypeSuggestions); got != want {
+		t.Errorf("the correction table has %d entries, not %d. If you added or removed a "+
+			"spelling, update BOTH restatements in the same change:\n"+
+			"  - the correction table in docs/public/language/memql.md\n"+
+			"  - the rejected map in TestConceptPropertyTypes_AcceptedAndRejectedSets "+
+			"(component/memql/lint_parity_concept_build_test.go)\n"+
+			"then update `want` here.", got, want)
 	}
 }

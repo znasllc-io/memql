@@ -184,10 +184,10 @@ The JSON Schema spellings are the ones people reach for, because that is what th
 | write this | not this |
 |---|---|
 | `bool` | `boolean` |
-| `int` | `integer`, `int64` |
-| `float` | `number`, `double` |
-| `string` | `text`, `uuid` |
-| `datetime` | `date`, `timestamp` |
+| `int` | `integer`, `int64`, `long` |
+| `float` | `number`, `double`, `decimal` |
+| `string` | `text`, `str`, `uuid` |
+| `datetime` | `date`, `time`, `timestamp` |
 | `array` | `list` |
 | `object` | `json`, `dict` |
 

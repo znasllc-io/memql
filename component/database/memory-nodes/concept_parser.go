@@ -865,8 +865,8 @@ func propertyToJSONSchema(prop parsedProperty) (map[string]any, error) {
 // They are corrected rather than accepted (memql#2909). Aliasing would give
 // the DSL two spellings for one type, which is the same "two implementations
 // of one answer" this was filed about, and it would close exactly one of the
-// twelve plausible spellings this builder rejects. A message that names the
-// right one closes all twelve.
+// sixteen plausible spellings this builder rejects. A message that names the
+// right one closes all sixteen.
 var propertyTypeSuggestions = map[string]string{
 	"boolean":   "bool",
 	"integer":   "int",

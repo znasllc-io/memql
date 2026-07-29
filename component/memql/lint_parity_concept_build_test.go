@@ -125,12 +125,17 @@ func TestConceptPropertyTypes_AcceptedAndRejectedSets(t *testing.T) {
 
 	t.Run("rejected with a correction", func(t *testing.T) {
 		// wrong -> the spelling the author wanted.
+		// All SIXTEEN. Review round 14 found this map had twelve while the
+		// table it independently checks had sixteen, so long/decimal/str/time
+		// were corrected in the error an author sees and driven by no test.
 		for wrong, want := range map[string]string{
-			"boolean": "bool", "integer": "int", "int64": "int",
-			"number": "float", "double": "float",
-			"text": "string", "uuid": "string",
-			"date": "datetime", "timestamp": "datetime",
-			"list": "array", "dict": "object", "json": "object",
+			"boolean": "bool",
+			"integer": "int", "int64": "int", "long": "int",
+			"number": "float", "double": "float", "decimal": "float",
+			"text": "string", "str": "string", "uuid": "string",
+			"date": "datetime", "time": "datetime", "timestamp": "datetime",
+			"list": "array",
+			"dict": "object", "json": "object",
 		} {
 			err := build(t, wrong)
 			if err == nil {
@@ -460,7 +465,10 @@ func TestConceptPropertyTypes_AnnotationsSplitIntoValueConstraintsAndFieldMarker
 					elems, _ := wrapped[w.elemKey].(map[string]any)
 					if _, onElems := elems[c.key]; onElems {
 						t.Errorf("%s now constrains the elements of `%s`. That is the memql#2951 fix "+
-							"-- update that issue's measured table in the same change.", c.key, w.form)
+							"-- the claims it falsifies are docs/public/language/memql.md's "+
+							"element-position paragraph and dsl/_reference/_concept.memql's NOTE "+
+							"plus its @minLength/@maxLength entries. Update those and memql#2951's "+
+							"table in the same change.", c.key, w.form)
 					}
 					if _, onWrapper := wrapped[c.key]; !onWrapper {
 						t.Errorf("%s is no longer emitted on the wrapper of `%s` either. The docs say "+
@@ -616,7 +624,9 @@ func TestConceptPropertyTypes_FieldAnnotationsAreNotCarriedIntoElementPosition(t
 			elems, _ := schemaFor(t, w.form)[w.elemKey].(map[string]any)
 			if _, ok := elems["oneOf"]; ok {
 				t.Errorf("`%s` now carries its discriminated union. That is the fix memql#2951 "+
-					"wants -- update that issue's measured table in the same change.", w.form)
+					"wants -- update docs/public/language/memql.md's element-position paragraph, "+
+					"dsl/_reference/_concept.memql's NOTE, and memql#2951's table in the same "+
+					"change.", w.form)
 			}
 		}
 	})
