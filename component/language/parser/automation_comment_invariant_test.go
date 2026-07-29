@@ -206,39 +206,83 @@ automation a {
 	}
 }
 
-// TestAutomationSource_NonASCIIWhitespaceAtTheTRAILINGEdge pins the half of
-// trimCommentEdges the leading-edge test cannot reach.
+// TestTrimCommentEdges_TrimsUnicodeWhitespaceAtBOTHEdges gates trimCommentEdges
+// at the function level, because one of its two edges cannot be reached from
+// the public API.
 //
-// Review found that reverting ONLY TrimRightFunc to an ASCII class survived
-// all 126 packages, because every existing case varies the LEADING edge. Both
-// halves are load-bearing: strings.TrimSpace, which this replaced, trimmed
-// unicode.IsSpace from both ends.
-func TestAutomationSource_NonASCIIWhitespaceAtTheTRAILINGEdge(t *testing.T) {
-	const ctl = `@trigger(event="e", concept="v1:a:b", partition="*")
-automation a {
-  step s {
-    logic l { x: 1 }
-  }
-}`
-	want, err := NormaliseAutomationSource(ctl)
-	if err != nil {
-		t.Fatalf("control: %v", err)
-	}
+// trimCommentEdges replaced a strings.TrimSpace call, which trims
+// unicode.IsSpace from BOTH ends. The leading edge is observable end to end --
+// parseAutomationSteps dispatches forEach/switch on the first token of the
+// trimmed result, so a leading U+00A0 that survives silently mis-dispatches,
+// and TestAutomationSource_NonASCIIWhitespaceAtAStepBodyEdge catches it.
+//
+// The trailing edge is NOT observable. Review established this by execution:
+// mutating only TrimRightFunc to an ASCII class leaves trailing whitespace on
+// the returned step body, and no caller of that result behaves differently --
+// an end-to-end test at that edge passes under the mutant, whatever the
+// placement. Rather than ship a test that looks like a gate and is not, the
+// contract is pinned here directly.
+//
+// It is worth pinning rather than dropping: the symmetry with TrimSpace is what
+// makes trimCommentEdges a safe substitution at every future call site, and an
+// asymmetric one would be a trap for the next caller who assumes it behaves
+// like the function it replaced.
+func TestTrimCommentEdges_TrimsUnicodeWhitespaceAtBOTHEdges(t *testing.T) {
+	const core = "logic l { x: 1 }"
 	for _, sp := range []struct{ name, ch string }{
-		{"U+00A0", " "},
-		{"U+2003", " "},
+		{"U+00A0 no-break space", "\u00a0"},
+		{"U+2003 em space", "\u2003"},
+		{"U+3000 ideographic space", "\u3000"},
 	} {
 		t.Run(sp.name, func(t *testing.T) {
-			// Trailing edge of the step body, after the call.
-			src := strings.Replace(ctl, "logic l { x: 1 }\n", "logic l { x: 1 }\n"+sp.ch, 1)
-			got, err := NormaliseAutomationSource(src)
-			if err != nil {
-				t.Fatalf("a non-ASCII TRAILING space refused the load; strings.TrimSpace accepted it "+
-					"before (memql#2906).\n  error: %v", err)
-			}
-			if compiledForm(got) != compiledForm(want) {
-				t.Errorf("a non-ASCII trailing space changed the compiled automation.\n  got:\n%s\n  control:\n%s", got, want)
+			for _, edge := range []struct{ name, in string }{
+				{"leading", sp.ch + "\n  " + core},
+				{"trailing", core + "\n  " + sp.ch},
+				{"both", sp.ch + " " + core + " " + sp.ch},
+			} {
+				got := trimCommentEdges(edge.in)
+				if got != core {
+					t.Errorf("%s edge: trimCommentEdges kept unicode whitespace that strings.TrimSpace "+
+						"would have removed. The two must agree, or substituting it changes behaviour "+
+						"(memql#2906).\n  in:   %q\n  got:  %q\n  want: %q", edge.name, edge.in, got, core)
+				}
 			}
 		})
+	}
+
+	// The all-whitespace body: both edges trim past each other, and the
+	// `if end < start` guard is what stops the slice panicking.
+	if got := trimCommentEdges("\u00a0\n\u2003 \n"); got != "" {
+		t.Errorf("an all-whitespace body must trim to empty, got %q", got)
+	}
+
+	// A body whose only content is a COMMENT trims to empty, deliberately.
+	// The scan is the blanked view, so a comment is not content -- and that is
+	// what lets parseAutomationSteps report "body is empty" for a step
+	// containing only a note. main, trimming raw text, hands the comment to
+	// the call parser instead and refuses the whole load with `expected
+	// identifier at start of call, got "// TODO..."` -- memql#2906 class A.
+	//
+	// Nothing authored is lost by this: a step body is re-emitted as parsed
+	// calls, never echoed verbatim, so comments inside one were never carried
+	// to the output on either side.
+	for _, only := range []string{
+		"\u00a0// TODO: fill this in\u00a0",
+		"\n  /* nothing here yet */\n",
+		"/*\n multi\n line\n*/",
+	} {
+		if got := trimCommentEdges(only); got != "" {
+			t.Errorf("a comment-only body must trim to empty so the caller can report it as such; "+
+				"leaving the comment makes it look like code (memql#2906).\n  in:  %q\n  got: %q", only, got)
+		}
+	}
+
+	// But a comment BETWEEN the edges is sliced from the ORIGINAL and survives
+	// verbatim -- the detect-on-blanked / slice-from-original split the whole
+	// fix rests on. Blanking must never reach the returned bytes.
+	const withInner = "\u00a0logic l { /* keep me */ x: 1 }\u00a0"
+	if got := trimCommentEdges(withInner); got != "logic l { /* keep me */ x: 1 }" {
+		t.Errorf("trimCommentEdges must slice from the original, not the blanked view, so an "+
+			"authored comment between the edges survives.\n  got: %q", got)
 	}
 }
