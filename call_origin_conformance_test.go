@@ -64,9 +64,13 @@ import (
 // WHY IT CATCHES MORE THAN THE COMPILER WOULD. go/parser ignores build
 // constraints, so this sees files no CI lane compiles. app/integrations_identity.go
 // is `//go:build identity` and does stamp internal origin (line 622); per
-// memql#2903 the tagged lanes only `go build`, never `go test`, so a violation
-// added to a tagged file would otherwise reach main unexamined. That is not
-// hypothetical -- memql#2903 exists because a tagged test file had never run.
+// memql#2903 the tagged lanes did not `go test` at all, so a violation added to
+// a tagged file would have reached main unexamined. That gap is closed --
+// #2903 added the mcp and identity lanes plus scripts/citags, a gate that fails
+// the build if a tagged suite ever loses its lane again -- but this check is
+// still the broader one: it sees files under EVERY tag, including tags no lane
+// will ever run (clustere2e, telnyx_live), because go/parser ignores build
+// constraints entirely.
 func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 	// Directory -> why that package may stamp internal origin.
 	//
