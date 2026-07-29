@@ -41,6 +41,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 // =============================================================================
@@ -145,18 +146,23 @@ func matchBraceInBody(body string, openIdx int) int {
 // have missed almost all of it.
 func trimCommentEdges(body string) string {
 	blanked := BlankComments(body)
-	start, end := 0, len(blanked)
-	for start < end && isASCIISpace(blanked[start]) {
-		start++
-	}
-	for end > start && isASCIISpace(blanked[end-1]) {
-		end--
+	// unicode.IsSpace, NOT an ASCII-only class. This replaced a
+	// strings.TrimSpace call, and TrimSpace trims U+00A0, U+2003, U+3000,
+	// U+0085 and U+202F too. Hand-rolling ASCII here made a step body whose
+	// first byte was one of those compile on main and hard-error here --
+	// parseAutomationSteps dispatches forEach/switch on the leading token of
+	// this result, so an untrimmed leading rune sent it to the plain-call
+	// translator instead (memql#2906 review).
+	//
+	// Decoding runes from the blanked view is safe: comment bytes are all
+	// ASCII spaces and every other byte is identical to the original, so the
+	// offsets still index `body` and can never split a rune.
+	start := len(blanked) - len(strings.TrimLeftFunc(blanked, unicode.IsSpace))
+	end := len(strings.TrimRightFunc(blanked, unicode.IsSpace))
+	if end < start {
+		end = start
 	}
 	return body[start:end]
-}
-
-func isASCIISpace(c byte) bool {
-	return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\v' || c == '\f'
 }
 
 // mutBodyBlock is a top-level `<keyword> { ... }` block located by
@@ -778,7 +784,10 @@ func parseStructQueryBody(body string) (*structQueryBody, error) {
 	// the rest line-by-line. Stripping rather than line-skipping
 	// keeps the line accounting simple.
 	rest := body
-	if loc := argsBlockHeader.FindStringIndex(body); loc != nil {
+	// Blanked view, for the reason extractArgsBlock documents: matchBraceInBody
+	// blanks, so locating the header on raw text lets a commented-out `args {`
+	// be matched and then fail brace matching (memql#2906).
+	if loc := argsBlockHeader.FindStringIndex(BlankComments(body)); loc != nil {
 		openOffset := strings.LastIndex(body[loc[0]:loc[1]], "{")
 		open := loc[0] + openOffset
 		close := matchBraceInBody(body, open)
@@ -1503,7 +1512,14 @@ func parseAutomationSteps(body string) ([]automationStep, error) {
 		}
 		stepStart := pos + loc[0]
 		stepHeaderEnd := pos + loc[1]
-		header := body[stepStart:stepHeaderEnd]
+		// From `scan`, not `body`: the header was LOCATED on the blanked view,
+		// and the regex's [ \t]* runs can match blanked comment bytes. Re-running
+		// it against raw text made the two passes disagree whenever a comment sat
+		// inside the header region, yielding "step block: missing name" for a step
+		// whose name is right there (memql#2906 review). Identifier bytes are
+		// non-space and byte-identical in both views, so the extracted name is
+		// unchanged for every input that already worked.
+		header := scan[stepStart:stepHeaderEnd]
 		nameMatch := stepBlockHeader.FindStringSubmatch(header)
 		if len(nameMatch) < 2 {
 			return nil, fmt.Errorf("step block: missing name")

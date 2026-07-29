@@ -56,7 +56,11 @@ func TestAutomationSource_CommentContentNeverChangesTheCompiledAutomation(t *tes
 	// class A actually broke on, alongside the construct-shaped ones #2906
 	// reported.
 	payloads := map[string]string{
-		"prose":            "only forward deploys are allowed",
+		"prose": "only forward deploys are allowed",
+		// Earns the */ skip guard below. Without a payload that actually
+		// contains */ the guard never fires, and its comment reads as if
+		// cases were being excluded when none were.
+		"closer":           "a note ending with */ inside it",
 		"args header":      "args {\n  ghost string\n}",
 		"step header":      "step ghost {\n  logic g { a: 1 }\n}",
 		"logic header":     "logic ghost { a: 1 }",
@@ -98,5 +102,98 @@ func TestAutomationSource_CommentContentNeverChangesTheCompiledAutomation(t *tes
 				})
 			}
 		}
+	}
+}
+
+// TestAutomationSource_CommentsInsideAHeaderLine covers the axis the sweep
+// above cannot reach: it splices every comment onto its own LINE, so nothing
+// ever places one INSIDE a `step X {` or `args {` header.
+//
+// That gap was not theoretical. The first cut of the memql#2906 fix located
+// step headers on the blanked view but re-extracted the name from raw text, so
+// any comment adjacent to a header produced `step block: missing name` for a
+// step whose name is plainly present -- and the 105-case sweep stayed green
+// throughout, because line-granularity positions cannot express it.
+func TestAutomationSource_CommentsInsideAHeaderLine(t *testing.T) {
+	const ctl = `@trigger(event="e", concept="v1:a:b", partition="*")
+automation a {
+  args {
+    x string @required
+  }
+  step s {
+    logic l { x: args.x }
+  }
+}`
+	want, err := NormaliseAutomationSource(ctl)
+	if err != nil {
+		t.Fatalf("control: %v", err)
+	}
+
+	variants := map[string]string{
+		"before step keyword": "  /*c*/step s {",
+		"after step keyword":  "  step /*c*/ s {",
+		"before brace":        "  step s /*c*/ {",
+		"before args keyword": "  /*c*/args {",
+		"after args keyword":  "  args /*c*/ {",
+	}
+	for name, header := range variants {
+		t.Run(name, func(t *testing.T) {
+			var src string
+			if strings.Contains(header, "args") {
+				src = strings.Replace(ctl, "  args {", header, 1)
+			} else {
+				src = strings.Replace(ctl, "  step s {", header, 1)
+			}
+			got, err := NormaliseAutomationSource(src)
+			if err != nil {
+				t.Fatalf("a comment inside the header line refused the load (memql#2906).\n  error: %v", err)
+			}
+			if compiledForm(got) != compiledForm(want) {
+				t.Errorf("a comment inside the header line changed the compiled automation.\n  got:\n%s\n  control:\n%s", got, want)
+			}
+		})
+	}
+}
+
+// TestAutomationSource_NonASCIIWhitespaceAtAStepBodyEdge covers the other axis
+// the sweep misses: it never varies the whitespace at a step body's leading
+// edge.
+//
+// trimCommentEdges replaced a strings.TrimSpace call, and TrimSpace trims
+// unicode.IsSpace -- U+00A0, U+2003 and friends -- not just ASCII. A first cut
+// that hand-rolled an ASCII-only class made these compile on main and error
+// here, because parseAutomationSteps dispatches forEach/switch on the leading
+// token of the trimmed result (memql#2906 review).
+func TestAutomationSource_NonASCIIWhitespaceAtAStepBodyEdge(t *testing.T) {
+	for _, sp := range []struct{ name, ch string }{
+		{"U+00A0 no-break space", " "},
+		{"U+2003 em space", " "},
+		{"U+3000 ideographic space", "　"},
+	} {
+		t.Run(sp.name, func(t *testing.T) {
+			ctl := `@trigger(event="e", concept="v1:a:b", partition="*")
+automation a {
+  step s {
+    forEach item in args.x {
+      logic l { x: item }
+    }
+  }
+}`
+			want, err := NormaliseAutomationSource(ctl)
+			if err != nil {
+				t.Fatalf("control: %v", err)
+			}
+			// Same source, but the step body starts with a non-ASCII space.
+			src := strings.Replace(ctl, "  step s {\n", "  step s {\n"+sp.ch, 1)
+			got, err := NormaliseAutomationSource(src)
+			if err != nil {
+				t.Fatalf("a non-ASCII leading space refused the load; strings.TrimSpace accepted it "+
+					"before, so this is a regression not a hardening (memql#2906).\n  error: %v", err)
+			}
+			if compiledForm(got) != compiledForm(want) {
+				t.Errorf("a non-ASCII leading space changed the compiled automation -- the forEach "+
+					"dispatch silently fell through to the plain-call translator.\n  got:\n%s\n  control:\n%s", got, want)
+			}
+		})
 	}
 }
