@@ -313,8 +313,8 @@ is rejected (`TestNoRetiredBindingForms`).
 
 > **Retired: `@default` on args fields.** It was never applied and is
 > rejected at load time. Apply a default in the body with the `??`
-> null-coalescing operator, or use a concept-field `@default`
-> (those ARE honored on insert):
+> null-coalescing operator. A concept-field `@default` is NOT a
+> substitute -- it is never applied on insert either (memql#2960):
 
 ```memql
 insert {

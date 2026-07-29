@@ -296,19 +296,28 @@ mutate widget createWidget {
 }
 
 // TestLintParity_ShapeBarePayloadFieldIsClean covers the unifiedShapeLoader
-// parse-time checks and pins the removed-payload-prefix rule: a concept with a
-// field literally named "payload", projected by BARE name in a shape, must
-// mount clean. The check fires only on the removed `payload.<prop>` prefix
-// (with the dot), not on a dotless bare field named "payload". Lint and the
+// parse-time checks and pins the removed-payload-prefix rule: a shape
+// projecting a dotless bare name "payload" must mount clean. The check fires
+// only on the removed `payload.<prop>` prefix (with the dot). Lint and the
 // loader share the one convertShapeDecl code path, so they stay in lockstep.
+//
+// The concept here deliberately does NOT declare a top-level property named
+// "payload". It used to, and that made this test pass for the wrong reason:
+// ensureReservedFieldsNotDeclared rejects a reserved top-level "payload", the
+// concept failed to build, and the unified loader dropped it with nothing but
+// a log line -- so `lint` returned zero diagnostics and the shape rule under
+// test was never exercised at all. memql#2909 made that skip a diagnostic,
+// which is what surfaced it.
+//
+// The scenario the old fixture described is unreachable: no concept can
+// declare a top-level "payload", so no shape can project one that exists.
 func TestLintParity_ShapeBarePayloadFieldIsClean(t *testing.T) {
 	root := fstest.MapFS{
 		"lintpayload/concepts.memql": {Data: []byte(`@version("1.0.0")
 @namespace("lintpayload")
-@description("A record carrying a field literally named payload.")
+@description("A record.")
 concept record {
-  payload  string  @required  @description("A field literally named payload.")
-  label    string  @description("Another field.")
+  label    string  @required  @description("A field.")
 }
 `)},
 		"lintpayload/shapes.memql": {Data: []byte(`use lintpayload.concepts.{ record }

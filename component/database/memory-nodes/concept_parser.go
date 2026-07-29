@@ -850,10 +850,59 @@ func propertyToJSONSchema(prop parsedProperty) (map[string]any, error) {
 	case "any", "":
 		// Free-form -- no type constraint.
 	default:
-		return nil, fmt.Errorf("unknown type %q", prop.typeName)
+		return nil, fmt.Errorf("unknown type %q%s", prop.typeName, suggestPropertyType(prop.typeName))
 	}
 
 	return schema, nil
+}
+
+// propertyTypeSuggestions maps the spellings authors actually reach for onto
+// the one this builder accepts. The JSON Schema names dominate the list on
+// purpose: memqlTypeToJSONType below EMITS "boolean", "integer" and "number",
+// so an author who has read the emitted schema -- or who knows any other
+// config language in this stack -- has every reason to type them back in.
+//
+// They are corrected rather than accepted (memql#2909). Aliasing would give
+// the DSL two spellings for one type, which is the same "two implementations
+// of one answer" this was filed about, and it would close exactly one of the
+// sixteen plausible spellings this builder rejects. A message that names the
+// right one closes all sixteen.
+var propertyTypeSuggestions = map[string]string{
+	"boolean":   "bool",
+	"integer":   "int",
+	"int64":     "int",
+	"long":      "int",
+	"number":    "float",
+	"double":    "float",
+	"decimal":   "float",
+	"text":      "string",
+	"str":       "string",
+	"uuid":      "string",
+	"date":      "datetime",
+	"timestamp": "datetime",
+	"time":      "datetime",
+	"list":      "array",
+	"dict":      "object",
+	"json":      "object",
+}
+
+// suggestPropertyType returns a " -- did you mean ..." clause for a known
+// mis-spelling, or a clause listing the accepted set for anything else. It is
+// always a suffix to an "unknown type" error, never an error on its own.
+//
+// The vocabulary is small and closed, so listing it in full is cheaper for the
+// reader than making them find the docs -- and this error is frequently the
+// FIRST thing a bundle author sees from the loader.
+func suggestPropertyType(name string) string {
+	if want, ok := propertyTypeSuggestions[strings.ToLower(strings.TrimSpace(name))]; ok {
+		return fmt.Sprintf(" -- did you mean %q?", want)
+	}
+	// The author-facing spellings, which are NOT the same as this switch's
+	// case labels: `map` and `enum` are cases here, but neither is writable
+	// bare -- they are reached only through `map[string]<type>` and
+	// `enum("a", "b")`, which the parser lowers to those kinds.
+	return ` -- accepted: string, bool, int, float, datetime, object, any, array, ` +
+		`[]<type>, map[string]<type>, enum("a", "b")`
 }
 
 func memqlTypeToJSONType(t string) string {

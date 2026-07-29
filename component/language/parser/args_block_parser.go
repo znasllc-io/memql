@@ -148,11 +148,13 @@ func (p *Parser) parseArgsBlockField() (*ArgsField, error) {
 			// `default` lexes as a keyword token, not an identifier, so an
 			// `@default` on an args field lands here. It is retired (#991):
 			// it was never applied at arg resolution (a silent footgun).
-			// Apply the default explicitly in the body via
-			// `coalesce(args.X, <default>)`, or use a concept-field @default
-			// (those ARE honored on insert). @default thus means one thing.
+			// Apply the default explicitly in the body with the `??`
+			// shorthand, which is the spelling dsl/no_coalesce_longhand_test.go
+			// gates the corpus on. A concept-field @default is NOT a
+			// substitute -- it is emitted into the schema and never applied on
+			// insert either (memql#2960).
 			if p.current.Literal == "default" {
-				return nil, newParseErrorf(&p.current, "@default on an args field %q is retired -- it is never applied; use `coalesce(args.%s, <default>)` in the body, or a concept-field @default", name, name)
+				return nil, newParseErrorf(&p.current, "@default on an args field %q is retired -- it is never applied; use `args.%s ?? <default>` in the body", name, name)
 			}
 			return nil, newParseErrorf(&p.current, "expected annotation name after `@` on args field %q", name)
 		}

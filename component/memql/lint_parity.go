@@ -76,22 +76,42 @@ func LintUnifiedTree(logger *slog.Logger, root fs.FS) ([]LintDiagnostic, []strin
 		_, _ = LoadUnifiedConcepts(logger)
 	}()
 
-	if _, err := LoadUnifiedConcepts(logger); err != nil {
-		return nil, skippedCore, fmt.Errorf("loading concepts from merged tree: %w", err)
+	_, conceptSkips, err := LoadUnifiedConceptsWithSkips(logger)
+	if err != nil {
+		// Report the skips gathered before the hard error too. A tree can
+		// hold a build-skip in one file and a fatal id error in a later one,
+		// and returning only the second sends the author back for a second
+		// round over a problem already measured (memql#2909).
+		var diags []LintDiagnostic
+		for _, cs := range conceptSkips {
+			diags = append(diags, LintDiagnostic{File: cs.File, Message: cs.String()})
+		}
+		return diags, skippedCore, fmt.Errorf("loading concepts from merged tree: %w", err)
 	}
 	registry := concept.DefaultRegistry()
 
 	// Route the constructor's own log line to io.Discard so the lint tool
 	// stays quiet; Init-time logs go through eng.Logger, set below.
-	eng, err := New(nil, (&component.Component{}).WithLoggerWriter(io.Discard))
-	if err != nil {
-		return nil, skippedCore, fmt.Errorf("constructing lint engine: %w", err)
+	eng, engErr := New(nil, (&component.Component{}).WithLoggerWriter(io.Discard))
+	if engErr != nil {
+		return nil, skippedCore, fmt.Errorf("constructing lint engine: %w", engErr)
 	}
 	eng.Logger = logger
 
 	initErr := eng.Init(registry)
 
 	var diags []LintDiagnostic
+
+	// Concepts the unified loader could not build (memql#2909). These never
+	// reach the registry, so they leave no trace in eng.loadReport -- that
+	// report covers CONSTRUCT-phase skips. Without this the parity pass runs
+	// the engine's own schema build and throws the result away, which is how
+	// a bundle with a property typed `boolean` linted clean and dropped the
+	// concept at boot. A dropped concept is not a dropped property: every
+	// query, mutation and shape bound to it fails at runtime.
+	for _, cs := range conceptSkips {
+		diags = append(diags, LintDiagnostic{File: cs.File, Message: cs.String()})
+	}
 
 	// Per-construct skips + duplicate registrations from the load report.
 	// These are collected even when Init succeeds -- they only fail Init via

@@ -164,7 +164,7 @@ Options. Concept-level: `@version("M.M.P")` (req, semver), `@namespace("a:b:c")`
 requires a `contains` relationship; reference requires `alias`/`equals`),
 `@displayCard(primary=,secondary=,tertiary=,status=)` (real, 23x). Field types:
 `string bool int float datetime any`, `[]T`, `enum(...)`, `object`,
-`map(string,T)`, nested `field { ... }`. Field annotations: `@required`
+`map[string]T`, nested `field { ... }`. Field annotations: `@required`
 `@default` `@description` `@unique` `@pattern` `@minLength` `@maxLength`
 `@minimum` `@maximum` `@immutable` `@secret` `@variant(discriminator="f")`.
 Body decorator: `@relationship(type="parent"|"contains"|"alias"|"equals"|

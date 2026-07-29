@@ -1427,8 +1427,9 @@ name collides with one of those is rejected at load time.
 - `@description("...")`, `@maxLength(N)`, `@pattern("re")`
 - `@default` is **not** valid on an args field (it was never applied —
   rejected at load, #991). Apply a default in the body with the `??`
-  null-coalescing operator (`args.X ?? <default>`), or use a
-  concept-field `@default` (those ARE honored on insert). `a ?? b ?? c`
+  null-coalescing operator (`args.X ?? <default>`). A concept-field
+  `@default` is NOT a substitute — it is never applied on insert either
+  (memql#2960), so `??` is the only mechanism that fills a value. `a ?? b ?? c`
   folds to exactly what `coalesce(a, b, c)` produces; the shorthand is
   the authored form and `dsl/no_coalesce_longhand_test.go` gates the
   corpus on it (`memqlmigrate --rewrite=null-coalesce` converts).
