@@ -15,6 +15,8 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+
+	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
 
 // TestLintParity_ConceptWithUnknownPropertyType is the witness. `boolean` is
@@ -74,4 +76,57 @@ concept gadget {
 	if !found {
 		t.Errorf("the diagnostic must carry the origin file of the dropped concept (memql#2909).\n  got: %+v", diags)
 	}
+}
+
+// TestConceptPropertyTypes_AcceptedAndRejectedSets is memql#2909 item 3 -- the
+// audit, executable. It drives BuildConceptFromDecl (the function the loader
+// itself calls) once per spelling, so the two sets are measured rather than
+// asserted.
+//
+// The rejected column is the point: every one of these silently dropped a
+// whole concept before this change, and each is a spelling an author has a
+// reason to reach for -- the JSON Schema names because memqlTypeToJSONType
+// emits them, the rest because every neighbouring language accepts them.
+func TestConceptPropertyTypes_AcceptedAndRejectedSets(t *testing.T) {
+	build := func(t *testing.T, ty string) error {
+		t.Helper()
+		src := "@version(\"1.0.0\")\n@namespace(\"aud\")\n@description(\"d\")\n" +
+			"concept probe {\n  label string @required @description(\"l\")\n  f " + ty + " @description(\"x\")\n}\n"
+		decls := ExtractConceptDecls(src)
+		if len(decls) == 0 {
+			t.Fatalf("fixture for %q did not parse into a concept decl, so it measures nothing", ty)
+		}
+		_, err := concept.BuildConceptFromDecl(decls[0], "v1:aud:probe")
+		return err
+	}
+
+	t.Run("accepted", func(t *testing.T) {
+		for _, ty := range []string{"string", "bool", "int", "float", "datetime", "array", "object", "any"} {
+			if err := build(t, ty); err != nil {
+				t.Errorf("%q must be an accepted property type; the builder rejected it: %v", ty, err)
+			}
+		}
+	})
+
+	t.Run("rejected with a correction", func(t *testing.T) {
+		// wrong -> the spelling the author wanted.
+		for wrong, want := range map[string]string{
+			"boolean": "bool", "integer": "int", "int64": "int",
+			"number": "float", "double": "float",
+			"text": "string", "uuid": "string",
+			"date": "datetime", "timestamp": "datetime",
+			"list": "array", "dict": "map", "json": "object",
+		} {
+			err := build(t, wrong)
+			if err == nil {
+				t.Errorf("%q is accepted by the builder but the vocabulary table lists it as a "+
+					"misspelling of %q -- one of the two is wrong", wrong, want)
+				continue
+			}
+			if !strings.Contains(err.Error(), "did you mean") || !strings.Contains(err.Error(), want) {
+				t.Errorf("rejecting %q must point at %q, or the author is left guessing "+
+					"why a whole concept vanished.\n  got: %v", wrong, want, err)
+			}
+		}
+	})
 }
