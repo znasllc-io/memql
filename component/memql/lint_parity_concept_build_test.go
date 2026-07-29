@@ -12,6 +12,9 @@ package memql
 // product bundle has, so the bundle lints clean and loses a concept at boot.
 
 import (
+	"encoding/json"
+	"slices"
+	"sort"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -198,6 +201,11 @@ func TestConceptPropertyTypes_ElementTypesAreNotValidated(t *testing.T) {
 	for _, ty := range []string{
 		"[]boolean", "[]frobnicate", "map[string]boolean",
 		"map[string]any", "map[string]map[string]string", "[]map[string]string", "[][]frobnicate",
+		// datetime is RECOGNISED and lowers to a bare string with no
+		// `format`, so the RFC3339 check the scalar position enforces is
+		// silently dropped. Review round 3 found it on the docs' safe-list,
+		// which is the one sentence an author acts on.
+		"[]datetime", "map[string]datetime",
 	} {
 		src := "@version(\"1.0.0\")\n@namespace(\"aud\")\n@description(\"d\")\n" +
 			"concept probe {\n  label string @required @description(\"l\")\n  f " + ty + " @description(\"x\")\n}\n"
@@ -210,5 +218,88 @@ func TestConceptPropertyTypes_ElementTypesAreNotValidated(t *testing.T) {
 				"docs/public/language/memql.md still tells authors element types are "+
 				"unvalidated -- delete it in the same change.\n  got: %v", ty, err)
 		}
+	}
+}
+
+// TestConceptPropertyTypes_ElementSafeListCarriesTheSameConstraints gates the
+// one sentence in docs/public/language/memql.md an author will act on: which
+// element types are dependable inside []<type> and map[string]<type>.
+//
+// The invariant is not "it lowers to the right JSON type" -- that is too weak,
+// and I first wrote it that way and it passed for `datetime`, which is exactly
+// the type it needed to catch. `datetime` DOES lower to `"type":"string"`; what
+// it loses is `"format":"date-time"`, so `[]datetime` is byte-identical to
+// `[]string` and an author who writes `auditTimes []datetime` for the RFC3339
+// check gets an array accepting ["hello"].
+//
+// So the invariant is: THE ELEMENT SCHEMA CARRIES EVERY CONSTRAINT THE SCALAR
+// SCHEMA CARRIES. A type belongs on the dependable list only if wrapping it
+// costs nothing.
+func TestConceptPropertyTypes_ElementSafeListCarriesTheSameConstraints(t *testing.T) {
+	build := func(t *testing.T, decl string) map[string]any {
+		t.Helper()
+		src := "@version(\"1.0.0\")\n@namespace(\"aud\")\n@description(\"d\")\n" +
+			"concept probe {\n  label string @required @description(\"l\")\n  f " + decl + " @description(\"x\")\n}\n"
+		decls := ExtractConceptDecls(src)
+		if len(decls) == 0 {
+			t.Fatalf("fixture for %q did not parse, so it measures nothing", decl)
+		}
+		c, err := concept.BuildConceptFromDecl(decls[0], "v1:aud:probe")
+		if err != nil {
+			t.Fatalf("%q does not build: %v", decl, err)
+		}
+		raw, serr := c.DefinitionSchema()
+		if serr != nil {
+			t.Fatalf("schema for %q: %v", decl, serr)
+		}
+		var doc struct {
+			Properties map[string]map[string]any `json:"properties"`
+		}
+		if err := json.Unmarshal(raw, &doc); err != nil {
+			t.Fatalf("unmarshal schema for %q: %v", decl, err)
+		}
+		return doc.Properties["f"]
+	}
+
+	// constraintKeys are the schema keys that actually constrain a value.
+	// `description` is annotation, not constraint, and is not carried inward.
+	constraintKeys := func(m map[string]any) []string {
+		var out []string
+		for k := range m {
+			switch k {
+			case "description":
+			default:
+				out = append(out, k)
+			}
+		}
+		sort.Strings(out)
+		return out
+	}
+
+	for _, base := range []string{"string", "bool", "int", "float", "object"} {
+		t.Run(base, func(t *testing.T) {
+			scalar := constraintKeys(build(t, base))
+
+			arr := build(t, "[]"+base)
+			items, _ := arr["items"].(map[string]any)
+			if items == nil {
+				t.Fatalf("[]%s emitted no items schema: %+v", base, arr)
+			}
+			if got := constraintKeys(items); !slices.Equal(got, scalar) {
+				t.Errorf("[]%s is on the docs' dependable list, but its element carries %v where a "+
+					"scalar %s carries %v -- the docs promise a guarantee the schema does not make.",
+					base, got, base, scalar)
+			}
+
+			m := build(t, "map[string]"+base)
+			vals, _ := m["additionalProperties"].(map[string]any)
+			if vals == nil {
+				t.Fatalf("map[string]%s emitted no additionalProperties schema: %+v", base, m)
+			}
+			if got := constraintKeys(vals); !slices.Equal(got, scalar) {
+				t.Errorf("map[string]%s is on the docs' dependable list, but its value carries %v "+
+					"where a scalar %s carries %v.", base, got, base, scalar)
+			}
+		})
 	}
 }

@@ -204,10 +204,15 @@ concept referenceExample {
 //     []<type>            -- array of T (shorthand for array(T))
 //     enum("a", "b", ...) -- closed value set
 //     object              -- arbitrary nested object (with body fields)
-//     map(string, T)      -- string-keyed map
+//     map[string]T        -- string-keyed map (map keys must be string)
 //
 //   The escape hatch:
 //     any         -- accepts any JSON value; no validation
+//
+//   NOTE: element types inside []T and map[string]T are NOT validated, and
+//   composite element types do not work -- []datetime loses its RFC3339
+//   check, map[string]any constrains values to string, and nested composites
+//   collapse. Dependable only for string/bool/int/float/object (memql#2951).
 
 @namespace("reference")
 @description("Every supported field type, one of each.")

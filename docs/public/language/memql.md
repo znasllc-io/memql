@@ -206,8 +206,10 @@ The JSON Schema spellings are the ones people reach for, because that is what th
 > | `map[string]map[string]string` | values typed `string` | composite element collapsed |
 > | `[]map[string]string` | items typed `string` | composite element collapsed |
 > | `[][]frobnicate` | items typed `array`, inner discarded | composite element collapsed |
+> | `[]datetime` | items typed `string`, no `format` | **recognised, but unconstrained** — the RFC3339 check the scalar position enforces is dropped, so `["not-a-date"]` validates |
+> | `map[string]datetime` | values typed `string`, no `format` | same |
 >
-> So `[]<type>` and `map[string]<type>` are dependable only when `<type>` is one of the simple scalars — `string`, `bool`, `int`, `float`, `datetime` — or `object`. Anything else lints clean and builds a schema that does not mean what was written. Check element spellings by hand until this is closed.
+> So `[]<type>` and `map[string]<type>` are dependable only when `<type>` is `string`, `bool`, `int`, `float`, or `object`. **`datetime` is not on that list**: `[]datetime` emits a schema byte-identical to `[]string`, so the format constraint an author reaches for `datetime` to get is silently absent. Anything outside the list lints clean and builds a schema that does not mean what was written. Check element spellings by hand until this is closed.
 
 **Cross-concept references** are plain string fields holding the target's id (e.g. `spaceId string`), optionally paired with an `@relationship` annotation so the engine can traverse the edge.
 
