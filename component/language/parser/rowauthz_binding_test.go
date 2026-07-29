@@ -317,6 +317,56 @@ concept node {
 	}
 }
 
+// The parser attaches an annotation separated from its header by a
+// blank line. Missing that made the codemod insert a SECOND
+// declaration -- and a duplicate is a load error, so a re-run turned a
+// loadable tree into one that refuses to boot.
+func TestRewriteRowAuthzSeesABlankLineSeparatedDeclaration(t *testing.T) {
+	src := []byte(`@rowAuthz(public)
+
+concept thing {
+  ownerUserId string
+}
+`)
+	out, err := RewriteRowAuthz(src, map[string]RowAuthzDecl{
+		"thing": {Tier: RowAuthzOwned, Owner: "ownerUserId"},
+	})
+	if err != nil {
+		t.Fatalf("RewriteRowAuthz: %v", err)
+	}
+	if string(out) != string(src) {
+		t.Fatalf("a blank-line-separated declaration was not detected, so a second one was inserted:\n%s", out)
+	}
+}
+
+// The widened idempotency region must not reach back into the PREVIOUS
+// concept and read its declaration as this one's.
+func TestRewriteRowAuthzDoesNotInheritTheNeighboursDeclaration(t *testing.T) {
+	src := []byte(`@rowAuthz(public)
+concept first {
+  ownerUserId string
+}
+
+concept second {
+  ownerUserId string
+}
+`)
+	out, err := RewriteRowAuthz(src, map[string]RowAuthzDecl{
+		"first":  {Tier: RowAuthzOwned, Owner: "ownerUserId"},
+		"second": {Tier: RowAuthzOwned, Owner: "ownerUserId"},
+	})
+	if err != nil {
+		t.Fatalf("RewriteRowAuthz: %v", err)
+	}
+	got := string(out)
+	if !strings.Contains(got, `@rowAuthz(owner="ownerUserId")`+"\nconcept second") {
+		t.Fatalf("second did not get its declaration -- it inherited first's:\n%s", got)
+	}
+	if strings.Count(got, "@rowAuthz") != 2 {
+		t.Fatalf("expected exactly 2 declarations (first's original + second's new):\n%s", got)
+	}
+}
+
 // A doc comment or a string MENTIONING the annotation is prose, not a
 // declaration -- dropping the line anchor must not cost that.
 func TestRowAuthzDeclaredInSourceIgnoresProse(t *testing.T) {

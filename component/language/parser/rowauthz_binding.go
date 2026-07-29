@@ -349,15 +349,38 @@ func RewriteRowAuthz(src []byte, tiers map[string]RowAuthzDecl) ([]byte, error) 
 	var b strings.Builder
 	prev := 0
 	changed := false
+	// prevEnd is where the previous concept's body closed. Everything
+	// from there to this concept's header belongs to THIS concept --
+	// annotations, comments, and blank lines between them.
+	prevEnd := 0
 	for _, h := range headers {
+		region := text[prevEnd:h.End]
+		prevEnd = h.End
+
 		decl, want := tiers[h.Name]
 		if !want {
 			continue
 		}
-		// The preamble (annotations + comments above the header)
-		// belongs to this concept; a declaration anywhere in it, or
-		// in the body, means this concept is already spoken for.
-		if RowAuthzDeclaredInSource(text[h.PreambleStart:h.End]) {
+		// A declaration anywhere in that region means this concept is
+		// already spoken for.
+		//
+		// The region runs from the previous concept's closing brace,
+		// NOT from h.PreambleStart. preambleStart stops at the first
+		// blank line, and the parser happily attaches an annotation
+		// separated from its header by one:
+		//
+		//	@rowAuthz(public)
+		//
+		//	concept thing { ... }
+		//
+		// loads as a real `public` declaration. Bounding at the
+		// preamble made that invisible, so the codemod inserted a
+		// SECOND declaration -- and since a duplicate is a load error,
+		// a re-run turned a loadable tree into one that refuses to
+		// boot. Everything between two concepts is whitespace,
+		// comments or annotations belonging to the following one, so
+		// the wider region cannot pick up a neighbour's declaration.
+		if RowAuthzDeclaredInSource(region) {
 			continue
 		}
 		line, err := FormatRowAuthz(decl)

@@ -32,14 +32,15 @@ import (
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
-// queryHeaderRe matches a top-level `query <Concept> <name> {`
-// declaration, capturing the bound concept and the construct name.
+// constructHeaderRe matches a top-level `query <Concept> <name> {` or
+// `mutate <Concept> <name> {` declaration, capturing the kind, the
+// bound concept, and the construct name.
 //
 // The bound concept is the whole point here, so unlike the conformance
-// test's constructHeaderRe (which makes it a non-capturing optional
-// group) this requires it: a query with no signature concept binds
+// test's own header regex (which makes it a non-capturing optional
+// group) this requires it: a construct with no signature concept binds
 // nothing and cannot be evidence about a concept.
-var queryHeaderRe = regexp.MustCompile(`(?m)^[ \t]*query[ \t]+([\p{L}_][\p{L}\p{Nd}_]*)[ \t]+([\p{L}_][\p{L}\p{Nd}_]*)[ \t]*\{`)
+var constructHeaderRe = regexp.MustCompile(`(?m)^[ \t]*(query|mutate)[ \t]+([\p{L}_][\p{L}\p{Nd}_]*)[ \t]+([\p{L}_][\p{L}\p{Nd}_]*)[ \t]*\{`)
 
 // useConceptsRe matches a file-top concepts import,
 // `use <ns>.concepts.{ a, b }`, capturing the namespace and the brace
@@ -87,12 +88,18 @@ type conceptKey struct {
 type verdictKind int
 
 const (
+	// blocks any tier: the construct reaches rows the tier would
+	// exclude, so declaring the tier would assert something this
+	// construct disproves.
+	//
+	// FIRST, so it is the zero value. Under a "block unless proven"
+	// rule the safe default has to be the blocking one -- a future
+	// `vote{Source: ...}` literal that forgets to set Kind must fail
+	// closed, not silently become a vote for the empty tier.
+	verdictBlocks verdictKind = iota
 	// votes for a tier: its filter guarantees that tier's predicate.
-	verdictVote verdictKind = iota
-	// blocks any tier: the query reads rows the tier would exclude, so
-	// declaring the tier would assert something this query disproves.
-	verdictBlocks
-	// neither: @serverOnly, which is not a client read at all.
+	verdictVote
+	// neither: @serverOnly, which is not a client-callable read.
 	verdictExempt
 )
 
@@ -142,20 +149,34 @@ func inferRowAuthz(dslRoot string) (*rowAuthzInference, error) {
 			continue
 		}
 		domain := d.Name()
-		entries, readErr := os.ReadDir(filepath.Join(dslRoot, domain))
-		if readErr != nil {
-			return nil, fmt.Errorf("read domain %s: %w", domain, readErr)
-		}
-		for _, e := range entries {
-			if e.IsDir() || !strings.HasSuffix(e.Name(), ".memql") {
-				continue
+		// RECURSIVE, because the loader is. A query under
+		// dsl/<domain>/<sub>/*.memql belongs to <domain> (the unified
+		// loader's firstPathSegment), so a depth-1 read would silently
+		// drop its evidence -- and dropped evidence here means a tier
+		// gets declared that a nested query disproves.
+		walkErr := filepath.WalkDir(filepath.Join(dslRoot, domain), func(path string, e os.DirEntry, err error) error {
+			if err != nil {
+				return err
 			}
-			path := filepath.Join(dslRoot, domain, e.Name())
+			if e.IsDir() {
+				if path != filepath.Join(dslRoot, domain) &&
+					(strings.HasPrefix(e.Name(), "_") || strings.HasPrefix(e.Name(), ".")) {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if !strings.HasSuffix(e.Name(), ".memql") {
+				return nil
+			}
 			raw, readErr := os.ReadFile(path)
 			if readErr != nil {
-				return nil, fmt.Errorf("read %s: %w", path, readErr)
+				return readErr
 			}
 			files = append(files, domainFile{domain: domain, path: path, src: string(raw)})
+			return nil
+		})
+		if walkErr != nil {
+			return nil, fmt.Errorf("walk domain %s: %w", domain, walkErr)
 		}
 	}
 
@@ -169,9 +190,9 @@ func inferRowAuthz(dslRoot string) (*rowAuthzInference, error) {
 		}
 	}
 
-	// Pass 2: collect each query's verdict about the concept it binds.
+	// Pass 2: collect each construct's verdict about the concept it
+	// binds.
 	for _, f := range files {
-		imports := conceptImports(f.src)
 		// Headers are located, and bodies sliced, on the comment- and
 		// string-blanked view. The blanker is length-preserving, so
 		// offsets index the raw source unchanged. Scanning raw source
@@ -181,9 +202,15 @@ func inferRowAuthz(dslRoot string) (*rowAuthzInference, error) {
 		// avoids (#2948), and here it would mean a query voting with a
 		// DIFFERENT construct's filter.
 		blanked := langparser.BlankCommentsAndStrings(f.src)
-		for _, m := range queryHeaderRe.FindAllStringSubmatchIndex(blanked, -1) {
-			conceptName := blanked[m[2]:m[3]]
-			constructName := blanked[m[4]:m[5]]
+		// Imports are read off the blanked view too: a `use` inside a
+		// block comment is not an import, and treating it as one
+		// re-homes every vote in the file to the wrong domain.
+		imports := conceptImports(blanked)
+
+		for _, m := range constructHeaderRe.FindAllStringSubmatchIndex(blanked, -1) {
+			kind := blanked[m[2]:m[3]]
+			conceptName := blanked[m[4]:m[5]]
+			constructName := blanked[m[6]:m[7]]
 
 			key := conceptKey{Domain: f.domain, Name: conceptName}
 			if ns, ok := imports[conceptName]; ok {
@@ -196,12 +223,16 @@ func inferRowAuthz(dslRoot string) (*rowAuthzInference, error) {
 				continue
 			}
 
-			body := constructBody(blanked, m[0])
+			bodyStart, bodyEnd := constructBodyRange(blanked, m[0])
 			preamble := constructPreamble(blanked, m[0])
-			source := fmt.Sprintf("%s/%s %s", f.domain, filepath.Base(f.path), constructName)
-
-			v := classifyQuery(preamble, body)
-			v.Source = source
+			// The blanker is length-preserving, so one offset pair
+			// indexes both views. Classification reads the BLANKED
+			// body (a `&&` inside a string must not split a clause);
+			// diagnostics quote the RAW body, so the author sees their
+			// own text rather than a filter with its string literals
+			// blanked to runs of spaces.
+			v := classifyConstruct(kind, preamble, blanked[bodyStart:bodyEnd], f.src[bodyStart:bodyEnd])
+			v.Source = fmt.Sprintf("%s/%s %s", f.domain, filepath.Base(f.path), constructName)
 			votes[key] = append(votes[key], v)
 		}
 	}
@@ -308,7 +339,7 @@ func describe(d langparser.RowAuthzDecl) string {
 //
 // Both stay undeclared, which is a visible state Phase 2 measures, not
 // a silent one.
-func classifyQuery(preamble, body string) vote {
+func classifyConstruct(kind, preamble, body, rawBody string) vote {
 	// @serverOnly says "not callable by a client at all", so a
 	// caller-scope filter is neither present nor meaningful there
 	// (#2800). It is the one verdict that neither votes nor blocks.
@@ -321,9 +352,40 @@ func classifyQuery(preamble, body string) vote {
 		return vote{Kind: verdictBlocks, Reason: "is @public, so it reads rows any narrowing tier would exclude"}
 	}
 
+	// A MUTATION neither votes nor blocks, and the asymmetry with
+	// queries is deliberate.
+	//
+	// It cannot vote: `actor.userId` in a mutation is a stamped VALUE
+	// (`ownerUserId: actor.userId`), which records who owns a NEW row
+	// rather than which rows the construct may reach.
+	//
+	// It must not block either, and this is the subtle half. An
+	// `update { id: args.x }` does select an existing row, so it looks
+	// like a counterexample -- but it is not one. An unscoped QUERY
+	// reads other users' rows BY DESIGN (`plansForSpace` is
+	// space-scoped because the product needs it that way), which is
+	// what makes it evidence against a floor. An ungated update says
+	// nothing about intent: it is simply "update the row I name," and
+	// the missing owner check is exactly the gap #2803 exists to
+	// close. #2803 sequences mutations after reads for that reason --
+	// the update path needs a read-then-check that does not exist yet.
+	// Treating it as a blocker inverts the argument and would have
+	// dropped 6 of 13 correct declarations, including `telephony.call`,
+	// #2803's own worked example.
+	//
+	// The honest consequence is a stated LIMIT rather than a silent
+	// one: this inference reads queries, so a concept whose mutations
+	// contradict its queries is not detected here. Recorded in the
+	// report and in the audit doc; measuring it is Phase 2's job.
+	if kind == "mutate" {
+		return vote{Kind: verdictExempt}
+	}
+
 	clause := ""
-	if m := filterClauseRe.FindStringSubmatch(body); m != nil {
-		clause = strings.TrimSpace(m[1])
+	rawClause := ""
+	if m := filterClauseRe.FindStringSubmatchIndex(body); m != nil {
+		clause = strings.TrimSpace(body[m[2]:m[3]])
+		rawClause = strings.TrimSpace(rawBody[m[2]:m[3]])
 	}
 	if clause == "" {
 		return vote{Kind: verdictBlocks, Reason: "has no filter, so it reads every row of the concept"}
@@ -349,7 +411,7 @@ func classifyQuery(preamble, body string) vote {
 			return vote{Kind: verdictVote, Decl: langparser.RowAuthzDecl{Tier: langparser.RowAuthzClusterOwner}}
 		}
 	}
-	return vote{Kind: verdictBlocks, Reason: fmt.Sprintf("filters on %q, which does not gate on the caller", clause)}
+	return vote{Kind: verdictBlocks, Reason: fmt.Sprintf("filters on %q, which does not gate on the caller", rawClause)}
 }
 
 // topLevelConjuncts splits a filter clause on `&&` at paren depth 0 and
@@ -430,26 +492,33 @@ func conceptImports(src string) map[string]string {
 	return out
 }
 
-// constructBody returns the source of the construct whose header
-// starts at headerStart, from its opening brace to the matching close.
-func constructBody(src string, headerStart int) string {
-	braceIdx := strings.IndexByte(src[headerStart:], '{')
+// constructBodyRange returns the byte range of the construct whose
+// header starts at headerStart, from its opening brace to the matching
+// close. Offsets rather than a substring, so the caller can slice the
+// blanked view for analysis and the raw view for diagnostics.
+//
+// Must be given the BLANKED view: a brace inside a string or a comment
+// would otherwise unbalance the walk and run one construct's body into
+// the next.
+func constructBodyRange(blanked string, headerStart int) (int, int) {
+	braceIdx := strings.IndexByte(blanked[headerStart:], '{')
 	if braceIdx < 0 {
-		return ""
+		return headerStart, headerStart
 	}
+	start := headerStart + braceIdx
 	depth := 0
-	for i := headerStart + braceIdx; i < len(src); i++ {
-		switch src[i] {
+	for i := start; i < len(blanked); i++ {
+		switch blanked[i] {
 		case '{':
 			depth++
 		case '}':
 			depth--
 			if depth == 0 {
-				return src[headerStart+braceIdx : i+1]
+				return start, i + 1
 			}
 		}
 	}
-	return src[headerStart+braceIdx:]
+	return start, len(blanked)
 }
 
 // constructPreamble returns the contiguous run of annotation and
@@ -504,5 +573,17 @@ func (r *rowAuthzInference) Report() string {
 			fmt.Fprintf(&b, "  %s.%s -- %s\n", k.Domain, k.Name, r.Abstained[k])
 		}
 	}
+
+	// State the limit. A run that reports only what it covered reads as
+	// full coverage, and this one deliberately does not look at
+	// mutations or at the granted tier.
+	fmt.Fprintln(&b, "\nNOT examined by this inference (stated, not silent):")
+	fmt.Fprintln(&b, "  - mutations. `actor.userId` in a mutation is a stamped value, not a row")
+	fmt.Fprintln(&b, "    selection, so it cannot establish a tier; and an ungated `update` is the")
+	fmt.Fprintln(&b, "    gap #2803 exists to close rather than evidence against a tier. A concept")
+	fmt.Fprintln(&b, "    whose mutations contradict its queries is not detected here -- #2803")
+	fmt.Fprintln(&b, "    sequences mutations after reads for the same reason.")
+	fmt.Fprintln(&b, "  - the `granted` tier, which needs a relationship spec resolved across files.")
+	fmt.Fprintln(&b, "  - the `public` tier, which no filter can evidence and which is never inferred.")
 	return b.String()
 }

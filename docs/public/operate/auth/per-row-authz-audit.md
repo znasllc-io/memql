@@ -133,6 +133,19 @@ It never infers:
 - **`granted`**, because resolving the relationship spec is the phase
   that actually computes predicates.
 
+**What it does not examine, stated rather than silent.** The inference
+reads *queries*. A mutation cannot vote — `actor.userId` there is a
+stamped value (`ownerUserId: actor.userId`), recording who owns a new
+row rather than which rows the construct may reach — and it must not
+block either: an ungated `update { id: args.x }` is the gap #2803
+exists to close, not evidence that a concept's rows are unowned. (That
+asymmetry with queries is the point. An unscoped *query* returns other
+users' rows by design; an ungated *update* just says "update the row I
+name.") #2803 sequences mutations after reads for the same reason. So a
+concept whose mutations contradict its queries is not detected here;
+measuring that is Phase 2's job. The codemod prints this limit at the
+end of every run.
+
 An undeclared concept is a **visible state**, not a gap: it is what
 the Phase 2 shadow-mode measurement (#2921) has to cover, and a guessed
 tier would launder an absence of evidence into a declaration the

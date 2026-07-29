@@ -69,6 +69,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	langparser "github.com/znasllc-io/memql/component/language/parser"
@@ -320,19 +321,23 @@ func printUsage(w io.Writer) {
 }
 
 func listRewriters(w io.Writer) {
+	// DERIVED from the two registries, not hand-listed. The hand-written
+	// version silently omitted `null-coalesce` and `row-authz` -- a usage
+	// message that denies a rewrite exists is worse than none, because the
+	// docs tell operators to run it.
+	names := make([]string, 0, len(rewriters)+len(pathRewriters))
+	for n := range rewriters {
+		names = append(names, n)
+	}
+	for n := range pathRewriters {
+		names = append(names, n)
+	}
+	sort.Strings(names)
 	fmt.Fprintln(w, "available rewrites:")
-	fmt.Fprintln(w, "  result-navigation   .empty/.first/.last/.count/.nodes → method forms")
-	fmt.Fprintln(w, "  slice-syntax        array(T) → []T")
-	fmt.Fprintln(w, "  args-description    strip parser-discarded @description from args{} fields")
-	fmt.Fprintln(w, "  accept-stamp        collapse arg-mirror runs into accept{}/stamp{} (#2616)")
-	fmt.Fprintln(w, "  same-domain-use     delete use imports of the file's own domain (#2617)")
-	fmt.Fprintln(w, "  required-sigil      @required -> the `type!` sigil (#2618)")
-	fmt.Fprintln(w, "  enum-type           args `string @enum(...)` -> the enum(...) type (#2618)")
-	fmt.Fprintln(w, "  cache-positional    @cache(ttl=\"N\") -> @cache(N) (#2618)")
-	fmt.Fprintln(w, "  terse-automation    longhand single-step automations -> the => form (#2619)")
-	fmt.Fprintln(w, "  actor-binding       insert @actor above constructs reading actor.* (#2621)")
-	fmt.Fprintln(w, "  doc-comment-descriptions  construct @description -> /// doc comments; dedup restating headers + Arguments/Returns (#2635)")
-	fmt.Fprintln(w, "  namespace-default   strip @namespace restating the containing domain directory (#2614)")
+	for _, n := range names {
+		fmt.Fprintf(w, "  %s\n", n)
+	}
+	fmt.Fprintln(w, "\nSee the package doc comment in cmd/memqlmigrate/main.go for what each one does.")
 }
 
 func applyPipeline(path string, src []byte, pipeline []pathRewriter) ([]byte, error) {

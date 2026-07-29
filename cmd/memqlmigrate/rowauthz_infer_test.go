@@ -318,6 +318,140 @@ query note second {
 	}
 }
 
+// A mutation neither votes nor blocks. It cannot vote (actor.userId
+// there is a stamped value, not a row selection) and it must not block
+// (an ungated `update { id: args.x }` is the gap #2803 exists to
+// close, not evidence that the concept's rows are unowned). Blocking
+// on it dropped 6 of 13 correct declarations, `telephony.call`
+// included.
+func TestAMutationNeitherVotesNorBlocks(t *testing.T) {
+	got := inferOne(t, map[string]string{
+		"notes/concepts.memql": "concept note {\n  ownerUserId string\n}\n",
+		"notes/queries.memql": `query note myNotes {
+  filter  ownerUserId==actor.userId
+  shape   noteFull
+}
+`,
+		"notes/mutations.memql": `mutate note updateNote {
+  args {
+    noteId  string!
+  }
+  update {
+    id: args.noteId
+  }
+}
+`,
+	})
+	want := langparser.RowAuthzDecl{Tier: langparser.RowAuthzOwned, Owner: "ownerUserId"}
+	if got.Tiers["notes"]["note"] != want {
+		t.Fatalf("inferred %+v, want %+v -- an ungated update must not block (abstained: %v)",
+			got.Tiers["notes"]["note"], want, got.Abstained)
+	}
+}
+
+// A mutation whose stamped value happens to mention actor.userId must
+// not be read as establishing a tier on its own.
+func TestAMutationCannotEstablishATier(t *testing.T) {
+	got := inferOne(t, map[string]string{
+		"notes/concepts.memql": "concept note {\n  ownerUserId string\n}\n",
+		"notes/mutations.memql": `mutate note createNote {
+  insert {
+    ownerUserId: actor.userId
+  }
+}
+`,
+	})
+	if decl, ok := got.Tiers["notes"]["note"]; ok {
+		t.Fatalf("a mutation established %+v; only queries may vote", decl)
+	}
+}
+
+// A query in a nested directory belongs to the same domain and must be
+// seen. Dropping its evidence means declaring a tier it disproves.
+func TestNestedFilesAreWalked(t *testing.T) {
+	got := inferOne(t, map[string]string{
+		"notes/concepts.memql": "concept note {\n  ownerUserId string\n  kind string\n}\n",
+		"notes/queries.memql": `query note myNotes {
+  filter  ownerUserId==actor.userId
+  shape   noteFull
+}
+`,
+		"notes/extra/more.memql": `query note allNotesByKind {
+  filter  kind==args.kind
+  shape   noteFull
+}
+`,
+	})
+	if decl, ok := got.Tiers["notes"]["note"]; ok {
+		t.Fatalf("inferred %+v; the nested unscoped query must block", decl)
+	}
+	if !strings.Contains(got.Abstained[conceptKey{Domain: "notes", Name: "note"}], "allNotesByKind") {
+		t.Fatalf("abstention should name the nested query: %q",
+			got.Abstained[conceptKey{Domain: "notes", Name: "note"}])
+	}
+}
+
+// The abstention reason is the human-facing product and Phase 2's
+// worklist. Quoting the blanked view prints string literals as runs of
+// spaces, which makes the "why" unreadable.
+func TestAbstentionReasonQuotesTheAuthorsText(t *testing.T) {
+	got := inferOne(t, map[string]string{
+		"telephony/concepts.memql": "concept consent {\n  status string\n}\n",
+		"telephony/queries.memql": `query consent optedOut {
+  filter  status=="opted_out"
+  shape   consentFull
+}
+`,
+	})
+	reason := got.Abstained[conceptKey{Domain: "telephony", Name: "consent"}]
+	// The literal's CONTENTS must survive. Quoting the blanked view
+	// would print `status=="        "`, which says nothing.
+	if !strings.Contains(reason, "opted_out") {
+		t.Fatalf("reason = %q, want the string literal's contents, not a run of spaces", reason)
+	}
+	if strings.Contains(reason, `"          "`) || strings.Contains(reason, "==\\\"    ") {
+		t.Fatalf("reason = %q, want the author's text rather than a blanked clause", reason)
+	}
+}
+
+// A `use` inside a block comment is not an import, and treating it as
+// one re-homes every vote in the file to the wrong domain.
+func TestACommentedOutImportDoesNotRehomeVotes(t *testing.T) {
+	got := inferOne(t, map[string]string{
+		"identity/concepts.memql": "concept thing {\n  ownerUserId string\n}\n",
+		"notes/concepts.memql":    "concept thing {\n  ownerUserId string\n  kind string\n}\n",
+		"notes/queries.memql": `/*
+use identity.concepts.{ thing }
+*/
+
+query thing unscoped {
+  filter  kind==args.kind
+  shape   thingFull
+}
+`,
+	})
+	// The blocker must land on notes.thing, not identity.thing.
+	if !strings.Contains(got.Abstained[conceptKey{Domain: "notes", Name: "thing"}], "unscoped") {
+		t.Fatalf("notes.thing lost its blocker: %q", got.Abstained[conceptKey{Domain: "notes", Name: "thing"}])
+	}
+	if strings.Contains(got.Abstained[conceptKey{Domain: "identity", Name: "thing"}], "unscoped") {
+		t.Fatal("identity.thing absorbed a vote from a commented-out import")
+	}
+}
+
+// The report has to say what it did NOT examine, or it reads as full
+// coverage.
+func TestReportStatesWhatItDidNotExamine(t *testing.T) {
+	report := inferOne(t, map[string]string{
+		"notes/concepts.memql": "concept note {\n  x string\n}\n",
+	}).Report()
+	for _, want := range []string{"NOT examined", "mutations", "granted", "public"} {
+		if !strings.Contains(report, want) {
+			t.Fatalf("report = %q, want it to state that %q is not examined", report, want)
+		}
+	}
+}
+
 // Disagreement is recorded, not resolved. Picking a winner would
 // launder the conflict into a declaration Phase 2 then trusts.
 func TestDisagreeingQueriesAbstainWithAReason(t *testing.T) {
