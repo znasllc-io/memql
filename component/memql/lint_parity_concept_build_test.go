@@ -12,6 +12,7 @@ package memql
 // product bundle has, so the bundle lints clean and loses a concept at boot.
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -19,6 +20,8 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+
+	"github.com/santhosh-tekuri/jsonschema/v5"
 
 	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
@@ -633,18 +636,26 @@ func TestConceptPropertyTypes_FieldAnnotationsAreNotCarriedIntoElementPosition(t
 }
 
 // TestConceptPropertyTypes_WrappedElementsRejectConformingData is the claim the
-// docs now make, gated. It is the one that matters to an author: the wrong
-// element schema is not a LOOSER schema, so "this may not be validated" is the
-// wrong thing to conclude and would leave someone unsurprised by a rejection.
+// docs now make, gated by actually VALIDATING a payload rather than by
+// inspecting a schema.
 //
-// Review rounds 8 and 9 both landed here. I first wrote "one case fails the
-// other way", then "two cases", and the measured answer was at least four --
+// Review rounds 8-10 all landed on this sentence. I first wrote "one case fails
+// the other way", then "two cases", and the measured answer was at least four --
 // a taxonomy I had invented, kept miscounting, and never gated. So the docs no
-// longer classify; they say the element schema is not the one you wrote, and
-// this pins the half with teeth: a payload that MATCHES the declaration is
-// refused.
+// longer classify; they say the wrong element schema REJECTS conforming data,
+// and this drives that end to end.
+//
+// The first version of this test did not: it carried a payload field that was
+// only ever printed in the failure message, and asserted the emitted element
+// type -- which TestConceptPropertyTypes_ElementTypesAreNotValidated already
+// asserts more strictly. A test named for a behaviour must exercise the
+// behaviour, or the docs' one claim with teeth is gated by proxy.
+//
+// Each case gets a DISTINCT concept id: compileSchema caches by cache key, so
+// reusing one id would silently validate every case against the first one's
+// schema.
 func TestConceptPropertyTypes_WrappedElementsRejectConformingData(t *testing.T) {
-	for _, c := range []struct {
+	for i, c := range []struct {
 		decl    string
 		payload any
 	}{
@@ -655,13 +666,15 @@ func TestConceptPropertyTypes_WrappedElementsRejectConformingData(t *testing.T) 
 		{"map[string]map[string]string", map[string]any{"a": map[string]any{"b": "c"}}},
 	} {
 		t.Run(c.decl, func(t *testing.T) {
+			id := fmt.Sprintf("v1:aud:probe%d", i)
 			src := "@version(\"1.0.0\")\n@namespace(\"aud\")\n@description(\"d\")\n" +
-				"concept probe {\n  label string @required @description(\"l\")\n  f " + c.decl + " @description(\"x\")\n}\n"
+				"concept probe" + fmt.Sprint(i) + " {\n  label string @required @description(\"l\")\n" +
+				"  f " + c.decl + " @description(\"x\")\n}\n"
 			decls := ExtractConceptDecls(src)
 			if len(decls) == 0 {
 				t.Fatalf("fixture %q did not parse, so it measures nothing", c.decl)
 			}
-			cc, err := concept.BuildConceptFromDecl(decls[0], "v1:aud:probe")
+			cc, err := concept.BuildConceptFromDecl(decls[0], id)
 			if err != nil {
 				t.Fatalf("fixture %q does not build: %v", c.decl, err)
 			}
@@ -669,24 +682,25 @@ func TestConceptPropertyTypes_WrappedElementsRejectConformingData(t *testing.T) 
 			if serr != nil {
 				t.Fatalf("schema for %q: %v", c.decl, serr)
 			}
-			var doc struct {
-				Properties map[string]map[string]any `json:"properties"`
+
+			// Compiled exactly as the engine compiles it -- Draft2019, same
+			// library -- so this measures what a real insert would hit.
+			compiler := jsonschema.NewCompiler()
+			compiler.Draft = jsonschema.Draft2019
+			if err := compiler.AddResource(id, bytes.NewReader(raw)); err != nil {
+				t.Fatalf("register schema for %q: %v", c.decl, err)
 			}
-			if err := json.Unmarshal(raw, &doc); err != nil {
-				t.Fatalf("unmarshal %q: %v", c.decl, err)
+			schema, err := compiler.Compile(id)
+			if err != nil {
+				t.Fatalf("compile schema for %q: %v", c.decl, err)
 			}
-			f := doc.Properties["f"]
-			inner, _ := f["items"].(map[string]any)
-			if inner == nil {
-				inner, _ = f["additionalProperties"].(map[string]any)
-			}
-			// The element schema says "string" while the declaration says
-			// otherwise -- which is exactly why a conforming payload is refused.
-			if inner["type"] != "string" {
-				t.Errorf("`%s` no longer lowers its elements to string. If elements are honoured "+
-					"now, memql#2951 has landed -- drop the note from "+
+
+			payload := map[string]any{"label": "l", "f": c.payload}
+			if err := schema.Validate(payload); err == nil {
+				t.Errorf("`%s` now ACCEPTS a payload that conforms to its declaration. If elements "+
+					"are honoured now, memql#2951 has landed -- drop the note from "+
 					"docs/public/language/memql.md and dsl/_reference/_concept.memql in the same "+
-					"change.\n  element: %v\n  a conforming payload was: %v", c.decl, inner, c.payload)
+					"change.\n  payload: %v\n  schema:  %s", c.decl, payload, string(raw))
 			}
 		})
 	}

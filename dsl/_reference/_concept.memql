@@ -253,10 +253,6 @@ concept fieldTypes {
 //   @immutable          Field cannot change after insert.  [see memql#2959]
 //   @secret             Field is redacted from logs + non-elevated readers.
 //                                                          [see memql#2959]
-//   @pii                Field is scrubbed from mutation payloads at execution
-//                       (Concept.PIIFields -> scrubPIIFields).
-//   @internal           Field is hidden from caller-facing arg surfaces.
-//   @serverSet          Field is populated server-side, never by the caller.
 //   @variant(discriminator="field")  Discriminated-union field. See section 9.
 //
 // Unknown @-annotations on a field are rejected at load time with
@@ -269,12 +265,9 @@ concept fieldTypes {
 //   the wrapper where JSON Schema ignores them. Either way there is no
 //   element-level check. See the NOTE in section 7 and memql#2951.
 //
-//   ENFORCEMENT. @unique, @immutable and @secret lower to schema keys that
-//   nothing on the concept path reads today, and @default is emitted but never
-//   applied on insert (its value IS parsed, so the parsing half of its
-//   description holds). Those four describe intent rather than current
-//   behaviour. @pii, @internal and @serverSet above them do run. See
-//   memql#2959.
+//   ENFORCEMENT. @unique, @immutable, @secret and @default lower to schema
+//   keys that nothing on the concept write path reads today, so those four
+//   lines describe intent rather than current behaviour. See memql#2959.
 
 @namespace("reference")
 @description("Every field-level annotation in use.")
