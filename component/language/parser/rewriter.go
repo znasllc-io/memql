@@ -125,6 +125,40 @@ func matchBraceInBody(body string, openIdx int) int {
 	return matchBraceStrAware(BlankComments(body), openIdx)
 }
 
+// trimCommentEdges strips leading and trailing comment runs (and the
+// whitespace around them) from a block body, slicing from the ORIGINAL so
+// interior comments survive into the emitted output (memql#2906).
+//
+// BlankComments turns comment content into spaces without changing length, so
+// trimming spaces off the blanked view yields offsets that still index the
+// original. That is the same detect-on-blanked / slice-from-original split
+// matchBraceInBody above uses, and the one comment_blank.go's header
+// prescribes.
+//
+// This exists because a step body reached the call translator as RAW text: a
+// single explanatory comment inside any `step { }` made splitLeadingIdent see
+// `/`, which is not an identifier byte, and the load was refused with
+// `expected identifier at start of call`. The same comment below the call
+// tripped the trailing-text guard instead. Neither depended on what the
+// comment SAID -- a prose sentence failed exactly as a commented-out
+// construct did, which is why fixing only construct-shaped payloads would
+// have missed almost all of it.
+func trimCommentEdges(body string) string {
+	blanked := BlankComments(body)
+	start, end := 0, len(blanked)
+	for start < end && isASCIISpace(blanked[start]) {
+		start++
+	}
+	for end > start && isASCIISpace(blanked[end-1]) {
+		end--
+	}
+	return body[start:end]
+}
+
+func isASCIISpace(c byte) bool {
+	return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\v' || c == '\f'
+}
+
 // mutBodyBlock is a top-level `<keyword> { ... }` block located by
 // scanMutationBlocks. `inner` is the raw content between the braces (comments
 // and strings intact -- taken from the original body, not the blanked view).
@@ -390,7 +424,14 @@ func emitFuncHeader(sb *strings.Builder, receiver, name, argsText, returns strin
 var argsBlockHeader = regexp.MustCompile(`(^|[\n\r])[ \t]*args[ \t]*\{`)
 
 func extractArgsBlock(body string) (string, error) {
-	loc := argsBlockHeader.FindStringIndex(body)
+	// Located on the BLANKED view so a commented-out `args {` header is not
+	// matched (memql#2906). matchBraceInBody below already blanks, so
+	// matching the header on raw text made the two disagree: the header was
+	// found in a comment, its brace was sought in a blanked view where that
+	// `{` is a space, and the load failed with "missing closing brace" naming
+	// a block that does not exist. Offsets are preserved, so every slice
+	// below still indexes `body`.
+	loc := argsBlockHeader.FindStringIndex(BlankComments(body))
 	if loc == nil {
 		return "", nil
 	}
@@ -1448,9 +1489,15 @@ func emitAutomation(name, _conceptId, body, _preamble string) (string, error) {
 
 func parseAutomationSteps(body string) ([]automationStep, error) {
 	var out []automationStep
+	// Headers are located on the BLANKED view for the same reason
+	// extractArgsBlock does it: a commented-out `step X {` would otherwise be
+	// matched here and then fail brace matching, which blanks (memql#2906).
+	// Blanked once rather than per iteration -- it is offset-preserving, so
+	// every slice below still indexes `body`.
+	scan := BlankComments(body)
 	pos := 0
 	for pos < len(body) {
-		loc := stepBlockHeader.FindStringIndex(body[pos:])
+		loc := stepBlockHeader.FindStringIndex(scan[pos:])
 		if loc == nil {
 			break
 		}
@@ -1467,7 +1514,10 @@ func parseAutomationSteps(body string) ([]automationStep, error) {
 		if closeIdx < 0 {
 			return nil, fmt.Errorf("step %q: missing closing brace", stepName)
 		}
-		stepBody := strings.TrimSpace(body[openIdx+1 : closeIdx])
+		// trimCommentEdges, not TrimSpace: a leading or trailing comment here
+		// reaches splitLeadingIdent / the trailing-text guard as raw text and
+		// refuses the load (memql#2906).
+		stepBody := trimCommentEdges(body[openIdx+1 : closeIdx])
 		if stepBody == "" {
 			return nil, fmt.Errorf("step %q: body is empty", stepName)
 		}
