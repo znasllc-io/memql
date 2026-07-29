@@ -1786,8 +1786,8 @@ neither stays local.
 
 There is no concept-ownership registry. `node.RegisterConceptOwnership`
 existed once and was deleted with `component/node/query_proxy.go` in
-`ac3a751e` ("drop per-node @visibility filtering + concept-ownership
-routing"). Which node does a concept's work is now decided by routing
+`ac3a751e` ("simplify: drop per-node @visibility filtering +
+concept-ownership routing", 2026-05-16). Which node does a concept's work is now decided by routing
 rules plus which binary's build tags compile the subscriber -- there is
 no per-concept dispatch table to register into.
 

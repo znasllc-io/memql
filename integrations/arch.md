@@ -61,8 +61,9 @@ caller deciding which binaries register them. See the product pack's
 routing registration file for an example.
 
 There is no concept-ownership counterpart. `node.RegisterConceptOwnership`
-was deleted in `ac3a751e`; which node does a concept's work follows from
-routing rules plus build tags.
+was deleted in `ac3a751e` ("simplify: drop per-node @visibility filtering
++ concept-ownership routing", 2026-05-16); which node does a concept's work
+follows from routing rules plus build tags.
 
 ## IntegrationProvider contract
 
