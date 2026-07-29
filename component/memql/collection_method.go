@@ -384,41 +384,42 @@ func evalCollLiteralValue(v any, args, locals map[string]any) (any, error) {
 }
 
 // evalCollCond evaluates a positional cond(predicate, then, else) builtin
-// (#2542 item 2) inside the collection-lambda subset. Each positional operand
-// is an ExpressionNode ("0","1","2"); the predicate is evaluated for
-// truthiness, then only the chosen branch is evaluated (short-circuit).
+// (#2542 item 2) inside the collection-lambda subset. The predicate is
+// evaluated for truthiness, then only the chosen branch is evaluated
+// (short-circuit).
+//
+// Operands go through evalCollPositionalOperand, the same helper coalesce and
+// concat use, because an operand is NOT always still an ExpressionNode by the
+// time it gets here. expandExpressionWithArgs rewrites every arg through
+// substituteArgRefValue before the cond short-circuit runs, so
+// `cond(args.flag, args.a, args.b)` arrives with three plain Go values --
+// and cond's own operand reader demanded an ExpressionNode and rejected them
+// with `cond() arg 0 is not an expression (bool)`. Step one guaranteed step
+// two failed, so cond with arg-ref operands had never worked (memql#2915).
+//
+// Not fixed by exempting these builtins from the substitution instead: that
+// substitution is what lets a MISSING arg ref resolve to nil so coalesce can
+// return its default, and removing it breaks the fail-closed cases #2870
+// exists for -- `coalesce(args.gate.passed, false)` on an absent flag starts
+// erroring instead of denying. Measured, not assumed: that change turns
+// TestDeployGateGreenFailsClosed and
+// TestPositionalBuiltinsEvaluateThroughEngineExecute red on exactly their
+// absent-argument subtests.
 func evalCollCond(node *FunctionCallExpression, args, locals map[string]any) (any, error) {
 	if len(node.Args) != 3 {
 		return nil, fmt.Errorf("cond() requires three arguments: cond(predicate, thenValue, elseValue)")
 	}
-	operand := func(i int) (ExpressionNode, error) {
-		raw, ok := node.Args[strconv.Itoa(i)]
-		if !ok {
-			return nil, fmt.Errorf("cond() is missing positional arg %d", i)
-		}
-		expr, ok := raw.(ExpressionNode)
-		if !ok {
-			return nil, fmt.Errorf("cond() arg %d is not an expression (%T)", i, raw)
-		}
-		return expr, nil
-	}
-	condExpr, err := operand(0)
+	// evalCollPositionalOperand already prefixes `cond() arg 0: `, so wrapping
+	// again would stutter. The operand index IS the predicate here.
+	condVal, err := evalCollPositionalOperand(node, "cond", 0, args, locals)
 	if err != nil {
 		return nil, err
-	}
-	condVal, err := evalCollScalar(condExpr, args, locals)
-	if err != nil {
-		return nil, fmt.Errorf("cond() predicate: %w", err)
 	}
 	branch := 2
 	if isTruthy(condVal) {
 		branch = 1
 	}
-	chosen, err := operand(branch)
-	if err != nil {
-		return nil, err
-	}
-	return evalCollScalar(chosen, args, locals)
+	return evalCollPositionalOperand(node, "cond", branch, args, locals)
 }
 
 // evalCollPositionalOperand evaluates ONE positionally-keyed operand ("0",
