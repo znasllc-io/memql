@@ -605,6 +605,24 @@ func (t *Tree) verifySignatureBindings(path string, f *languageAst.File, idx *de
 			if sameDomainConceptDecl(path, f, idx, name) != nil {
 				continue
 			}
+			// A PINNED domain cannot follow the generic remedy, so it gets a
+			// message naming what it can actually do (memql#2901). The finding
+			// itself stays: boot really does refuse this binding -- verified
+			// against the real resolver, which reports `ambiguous concept name
+			// "deployment" matches 2 concepts: v1:cluster:deployment,
+			// v1:rollout:deployment`. Suppressing it here would take memqllint
+			// green on a bundle that crash-loops every node at boot, and
+			// memqllint is the only pre-boot gate a product bundle has.
+			if id, pin := pinnedDomainAmbiguity(idx, path, name); id != "" {
+				errs = append(errs, fmt.Errorf(
+					"%s: signature concept %q is not imported and is declared in %d places in the DSL root -- boot cannot disambiguate an unimported name, and NO use declaration can fix this one. %s/ is pinned (%s/namespace.pin = %q), so its %q assembles to %s while this file's ambient namespace hint is %q. An import of this file's own domain is stripped by the same-domain-use gate (memql#2617), and one naming %q resolves against %s/, which declares no %q. Rename one of the colliding concepts, or remove %s/namespace.pin and re-key the ids onto the directory",
+					path, name, res.candidates,
+					firstSegment(path), firstSegment(path), pin,
+					name, id, dslfs.DomainFromFilePath(path),
+					pin, pin, name,
+					firstSegment(path)))
+				continue
+			}
 			errs = append(errs, fmt.Errorf(
 				"%s: signature concept %q is not imported and is declared in %d places in the DSL root -- boot cannot disambiguate an unimported name; import it via a use declaration",
 				path, name, res.candidates))
@@ -1491,6 +1509,77 @@ func candidateConceptId(root fs.FS, entry conceptEntry) string {
 		return ""
 	}
 	return id
+}
+
+// firstSegment returns the leading path component -- the directory a concept's
+// canonical id is assembled under. Deliberately NOT dslfs.DomainFromFilePath,
+// which returns the LAST segment: that LEFT/RIGHT distinction is what memql#2852
+// was filed about, and mixing them up here would re-open the hole it closed.
+// Matches unified_loader.firstPathSegment and candidateConceptId byte for byte.
+func firstSegment(p string) string {
+	if i := strings.IndexByte(p, '/'); i >= 0 {
+		return p[:i]
+	}
+	return ""
+}
+
+// pinnedDomainAmbiguity reports whether an ambiguous name is unresolvable by
+// ANY import, because the reporting file's own domain is pinned to a different
+// namespace. It returns the own-domain concept's assembled id and the pin, or
+// ("", "") when the generic remedy is still followable.
+//
+// WHY THE GENERIC REMEDY FAILS HERE, and all three spellings with it:
+//
+//   - no import: boot's hint is the file's LAST path segment, which cannot
+//     match ":"+pin+":" -- that is the ambiguity being reported;
+//   - `use <ownDomain>.concepts.{ X }`: stripped by the same-domain-use gate
+//     (memql#2617), and worse, it silences THIS lane while boot still cannot
+//     bind -- see the note in verifySignatureBindings;
+//   - `use <pin>.concepts.{ X }`: resolves against the pin's own directory,
+//     which does not declare X.
+//
+// So the author is told to rename or unpin, which are the two things that
+// actually work.
+//
+// Returns nothing when more than one own-domain candidate survives assembly:
+// the message names a single id, and naming one of two would be a guess.
+func pinnedDomainAmbiguity(idx *declIndex, path, name string) (id, pin string) {
+	if idx == nil {
+		return "", ""
+	}
+	dir := firstSegment(path)
+	if dir == "" {
+		return "", "" // root-level file: no domain, so no pin
+	}
+	pin = treeNamespacePin(idx.root, dir)
+	if pin == "" {
+		return "", "" // unpinned: the generic remedy applies
+	}
+	if pin == dslfs.DomainFromFilePath(path) {
+		// Pinned to the same name the ambient hint already yields, so an
+		// import is not required and this is not the #2901 shape.
+		return "", ""
+	}
+	for _, entry := range idx.concepts[name] {
+		if firstSegment(entry.file) != dir {
+			continue
+		}
+		// "" means assembly refused; such an entry is dropped as a candidate
+		// everywhere else too (see candidateConceptId), so it cannot be the
+		// one the message names.
+		cid := candidateConceptId(idx.root, entry)
+		if cid == "" {
+			continue
+		}
+		if id != "" {
+			return "", ""
+		}
+		id = cid
+	}
+	if id == "" {
+		return "", ""
+	}
+	return id, pin
 }
 
 // treeNamespacePin reads a domain's namespace.pin off the tree's own fs.FS.

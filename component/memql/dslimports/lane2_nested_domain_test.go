@@ -192,3 +192,92 @@ query widget deploymentWidgets {
 			"lint assert an ambient resolution the engine cannot perform (memql#2852).")
 	}
 }
+
+// pinnedNamespaceTree is the fixture TestLane2_PinnedNamespaceDivergenceFollowsTheDecl
+// builds, extracted so the diagnostic test below exercises the identical shape.
+// deployment/ is pinned to cluster, so `widget` assembles to v1:cluster:widget
+// while the file's ambient hint is "deployment"; other/ declares a second
+// widget so the name is ambiguous.
+func pinnedNamespaceTree() fstest.MapFS {
+	return fstest.MapFS{
+		"deployment/namespace.pin": file("cluster\n"),
+		"deployment/concepts.memql": file(`@version("1.0.0")
+@namespace("cluster")
+@description("Declared under deployment/, namespaced to cluster.")
+concept widget {
+  label  string  @required @description("Label.")
+}`),
+		"other/concepts.memql": file(`@version("1.0.0")
+@namespace("other")
+@description("A second widget so the name is ambiguous.")
+concept widget {
+  name  string  @required @description("Name.")
+}`),
+		"deployment/queries.memql": file(`@enabled
+@description("Binds ` + "`widget`" + ` with no import from deployment/.")
+query widget deploymentWidgets {
+  args {
+    label  string  @required
+  }
+  filter  label == args.label
+}`),
+	}
+}
+
+// TestLane2_PinnedDomainDiagnosticNamesAnActionableFix pins memql#2901.
+//
+// The sibling test above asserts the diagnostic FIRES for a pinned domain.
+// This asserts it says something the author can act on, which it previously
+// did not: the generic remedy is "import it via a use declaration", and for a
+// pinned domain there is no import spelling that works.
+//
+//   - no import -- boot's hint is the file's last path segment, which cannot
+//     match ":"+pin+":"; that IS the reported ambiguity;
+//   - `use deployment.concepts.{ widget }` -- stripped by the same-domain-use
+//     gate (memql#2617). Worse, it silences THIS lane while boot still cannot
+//     bind, turning a loud boot failure into a green lint;
+//   - `use cluster.concepts.{ widget }` -- resolves against cluster/, which
+//     declares no widget.
+//
+// So the only real fixes are rename or unpin, and the message must say so.
+//
+// The finding itself must survive: boot genuinely refuses this binding, so
+// suppressing it would take memqllint green on a bundle that crash-loops at
+// boot. The first assertion below is what stops a future "fix" doing that.
+func TestLane2_PinnedDomainDiagnosticNamesAnActionableFix(t *testing.T) {
+	tree := loadTree(t, pinnedNamespaceTree())
+
+	var got string
+	for _, e := range tree.VerifyReferentialIntegrity() {
+		if strings.Contains(e.Error(), "cannot disambiguate") {
+			got = e.Error()
+		}
+	}
+	if got == "" {
+		t.Fatal("lane 2 did not report the pinned-domain ambiguity at all. The finding is a TRUE " +
+			"POSITIVE -- boot refuses this binding -- so it must not be suppressed; only its remedy " +
+			"was wrong. See TestLane2_PinnedNamespaceDivergenceFollowsTheDecl (memql#2901).")
+	}
+
+	if strings.Contains(got, "import it via a use declaration") {
+		t.Errorf("lane 2 offered the generic import remedy for a PINNED domain, where no import "+
+			"spelling exists: the same-domain form is stripped by the same-domain-use gate and the "+
+			"pinned-namespace form resolves against a directory that does not declare the concept "+
+			"(memql#2901).\n  got: %s", got)
+	}
+
+	// Each of these is a fact the author needs to act. Asserted individually
+	// so a reworded message says which part went missing.
+	for _, want := range []string{
+		"namespace.pin",                        // names the mechanism
+		`"cluster"`,                            // names the pin value
+		"v1:cluster:widget",                    // names what the concept actually assembles to
+		`"deployment"`,                         // names the ambient hint that fails to match
+		"Rename one of the colliding concepts", // the actionable fix
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("pinned-domain diagnostic does not mention %q, which the author needs in order "+
+				"to act on it.\n  got: %s", want, got)
+		}
+	}
+}

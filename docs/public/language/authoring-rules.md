@@ -270,6 +270,27 @@ a `.memql` file between domain directories casually -- file location is
 id-bearing and the load guard errors on an unpinned mismatch -- see
 [#7](#7-annotations-on-concepts-where-to-put-new-ones).
 
+**A pinned domain must keep its concept names globally unique.** This is a
+real constraint, not a style preference (memql#2901). When `namespace.pin`
+or `@namespace` sends a directory's concepts to a different namespace --
+`dsl/deployment` declaring `deployment`, which assembles to
+`v1:cluster:deployment` -- that domain **cannot participate in
+ambiguous-name resolution at all**. If a second `deployment` is declared
+anywhere in the tree, no import spelling fixes it:
+
+- **no import** -- boot's namespace hint is the file's own directory
+  (`deployment`), which cannot match `:cluster:`. That is the ambiguity;
+- **`use deployment.concepts.{ deployment }`** -- an import of the file's own
+  domain, stripped by the same-domain-use gate (#2617). Worse, it silences
+  the lint while boot still cannot bind, so a green CI ships a tree that
+  fails at startup;
+- **`use cluster.concepts.{ deployment }`** -- resolves against `cluster/`,
+  which declares no `deployment`.
+
+The only fixes are to rename one of the colliding concepts, or to unpin the
+domain and re-key its ids onto the directory. Lane 2's diagnostic says so
+directly for a pinned domain rather than offering the generic import remedy.
+
 (Unrelated: **seed** constructs have their own `@scope("perUser")`
 annotation -- see `dsl/agents/assistant.memql`. That is a seed
 materialization mode, not the retired concept-level scope.)
