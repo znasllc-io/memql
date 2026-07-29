@@ -249,25 +249,36 @@ func TestRowAuthzSurvivesConceptJSON(t *testing.T) {
 	}
 }
 
-// TestRowAuthzIsInert is the gate that keeps Phase 1 a vocabulary.
+// TestRowAuthzIsInert is the gate that keeps row-authz from enforcing
+// anything before someone decides it should.
 //
-// #2920 is explicit that no predicate is injected and no query result
-// changes. The way that stops being true by accident is somebody
-// reading Concept.RowAuthz (or the parser's tier constants) from the
-// execution path. This walks the Go tree and requires every reference
-// to live in a file that is allowed to have one: the detector, the
-// loader that fills the field, the codemod, and tests.
+// #2920 and #2921 are both explicit that no predicate is injected and
+// no query result changes. The way that stops being true by accident is
+// somebody reading Concept.RowAuthz from the execution path. This walks
+// the Go tree and requires every reference to live in a file that is
+// allowed to have one.
 //
-// When Phase 3 lands, the fix is to move the enforcing file into the
-// allow-list in the same commit that makes the change deliberate --
-// which is exactly the review moment this test exists to create.
+// The list GREW in #2921, and that growth is the mechanism working
+// rather than the gate weakening: shadow mode necessarily reads the
+// tier (that is what measuring means) and necessarily hooks the
+// executor (that is where reads happen), so the files were moved on
+// deliberately, in the commit that made the change. Phase 3 lands the
+// same way.
+//
+// Reading is therefore no longer the invariant. The invariant that
+// survives is that the tier never becomes part of a query, and it is
+// asserted behaviourally elsewhere: `TestShadowHookDoesNotTouchTheExpression`
+// (the hook does not mutate what it is handed) and
+// `TestShadowModeChangesNoExpression` (the analyzer is pure).
 func TestRowAuthzIsInert(t *testing.T) {
 	root := repoRootForRowAuthz(t)
 
 	// Files permitted to reference the row-authz surface: the shared
 	// detector, the loader that fills the field, the boot-time
-	// undeclared warning, the codemod, and the annotation registry.
-	// Anything else that names it is enforcement leaking into Phase 1.
+	// undeclared warning, the codemod, the annotation registry, and
+	// (#2921) shadow mode's analyzer plus the two executor hook sites
+	// that feed it. Anything else that names it is enforcement
+	// arriving without a decision.
 	allowed := map[string]bool{
 		"component/language/parser/rowauthz_binding.go":     true,
 		"component/database/memory-nodes/concept_parser.go": true,
@@ -276,6 +287,11 @@ func TestRowAuthzIsInert(t *testing.T) {
 		"component/memql/unified_loader.go":                 true,
 		"cmd/memqlmigrate/rowauthz_infer.go":                true,
 		"cmd/memqlmigrate/main.go":                          true,
+		// #2921 shadow mode: the analyzer, and the two hook sites that
+		// feed it. The executor is on this list ONLY because it calls
+		// recordShadow, which returns nothing and cannot alter a query.
+		"component/memql/rowauthz_shadow.go": true,
+		"component/memql/executor.go":        true,
 	}
 
 	var offenders []string

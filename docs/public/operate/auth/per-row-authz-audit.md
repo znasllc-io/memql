@@ -101,6 +101,73 @@ A concept with no declaration still loads. It produces one aggregated
 boot **warning** naming every undeclared concept; escalation to a load
 error is a later phase, once the tree is clean.
 
+### Shadow mode (memql#2921)
+
+Phase 2 computes the predicate a declaration *would* inject, decides
+whether the author's filter already implies it, and records a verdict.
+It still enforces nothing.
+
+```bash
+# The measurement. Prints the full table; changes nothing.
+go test ./component/memql/ -run TestRowAuthzShadowReport -v
+
+# Runtime instrumentation on a live node. Off by default.
+MEMQL_ROWAUTHZ_SHADOW=1 <node>
+```
+
+Three verdicts, and `undecidable` is a first-class one:
+
+| verdict | meaning |
+|---|---|
+| `already-implied` | the filter already guarantees the predicate; enforcement is a no-op here |
+| `would-narrow` | enforcement would remove rows this access returns today |
+| `undecidable` | implication cannot be decided statically — enforcement would change this blindly |
+
+Implication is decided on **top-level conjuncts of the parsed AST**. A
+term under a top-level `||` does not imply the predicate (memql#2832),
+and anything the analyzer does not positively understand — an
+unexpanded spec, a relationship traversal, a builtin — is `undecidable`
+rather than assumed. An overstated blast radius misleads a ruling as
+badly as an understated one.
+
+Two implementation constraints worth knowing before changing it:
+
+- **The analyzer must run before `resolveActorReferences`.** That
+  function substitutes `actor.userId` with the caller's concrete id, so
+  measuring the resolved form reports `would-narrow` for every
+  construct that already hand-writes the term — inverting the whole
+  measurement. `TestShadowMustSeeUnresolvedActorReferences` fails if
+  the hook moves.
+- **A loaded query's `Expr` is the whole read pipeline**,
+  `shape(paginate(sort(<filter>)))`, not the filter. The analyzer peels
+  those wrappers; they change projection, ordering and windowing, never
+  which rows match.
+
+**Graph expansion has its own hook**, because `expandGraph` traverses
+relationships from a row the caller already has and never reaches the
+filter path at all (#2803 design decision 3). It has no filter, so a
+traversal into a narrowing-tier concept is `would-narrow` by
+construction.
+
+#### What the measurement currently says, and its limit
+
+Over the declared set the result is **33 of 33 already-implied**, and
+that is **tautological**: Phase 1's codemod declared a tier only where
+every query over the concept already carried the term as a top-level
+conjunct, and shadow mode asks the same question. It is still worth
+having as a **cross-validation** — Phase 1 decided textually on blanked
+source before load, this analyzer decides structurally on the AST after
+load, and the two agreeing on all 33 is evidence they encode one rule.
+`TestRowAuthzShadowReport` fails on any `would-narrow` over the
+declared set for exactly that reason: it would mean the two disagree.
+
+What it does **not** produce is a blast radius. That lives in the 166
+constructs over the 87 concepts that declare nothing, and shadow mode
+cannot compute a predicate where no tier is declared. The concepts
+graph expansion actually walks into — `v1:identity:user` (46 inbound
+relationships), `v1:agents:agent` (19), `v1:planner:plan` (11) — are
+all in that undeclared set.
+
 ### Seeding the tree
 
 ```bash

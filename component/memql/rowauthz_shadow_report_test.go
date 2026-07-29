@@ -185,6 +185,59 @@ func TestRowAuthzShadowReport(t *testing.T) {
 		fmt.Fprintf(&b, "  %-34s %-16s %s\n", name, verdict, reason)
 	}
 
+	// --- the blast radius the declared set cannot produce ---
+	//
+	// The measured set above is tautological (see the note at the end),
+	// so on its own this phase hands back no blast radius. Rather than
+	// report that as "unknown", hypothesise a tier for each UNDECLARED
+	// concept from its own queries and measure against that. Nothing is
+	// written to the tree -- these are hypotheses used to compute a
+	// number, which is exactly what shadow mode is for.
+	fmt.Fprintf(&b, "\n=== HYPOTHETICAL TIERS: the blast radius over the undeclared set ===\n\n")
+	fmt.Fprintf(&b, "Not declarations. A tier is guessed per concept from the most common\n")
+	fmt.Fprintf(&b, "caller-scope term among its own queries, purely so enforcement's cost\n")
+	fmt.Fprintf(&b, "can be counted before anyone rules on it.\n\n")
+
+	hypoCounts := map[ShadowVerdict]int{}
+	type hypoRow struct{ construct, concept, tier, reason string }
+	var hypoNarrow []hypoRow
+	hypoConcepts := 0
+
+	for _, conceptName := range undeclaredConceptsWithQueries(registry) {
+		hypo := hypothesiseTier(registry, conceptName)
+		if hypo == nil {
+			continue
+		}
+		hypoConcepts++
+		for _, fn := range registry.List() {
+			if fn == nil || fn.FunctionKind != "query" || fn.BoundConcept != conceptName {
+				continue
+			}
+			verdict, reason := AnalyzeShadow(fn.Expr, hypo)
+			hypoCounts[verdict]++
+			if verdict == ShadowWouldNarrow {
+				hypoNarrow = append(hypoNarrow, hypoRow{fn.Name, conceptName, string(hypo.Tier), reason})
+			}
+		}
+	}
+
+	fmt.Fprintf(&b, "concepts with a hypothesised tier   %d\n", hypoConcepts)
+	for _, v := range []ShadowVerdict{ShadowAlreadyImplied, ShadowWouldNarrow, ShadowUndecidable} {
+		fmt.Fprintf(&b, "  %-16s %d\n", v, hypoCounts[v])
+	}
+	sort.Slice(hypoNarrow, func(i, j int) bool {
+		if hypoNarrow[i].concept != hypoNarrow[j].concept {
+			return hypoNarrow[i].concept < hypoNarrow[j].concept
+		}
+		return hypoNarrow[i].construct < hypoNarrow[j].construct
+	})
+	fmt.Fprintf(&b, "\n--- WOULD-NARROW under a hypothesised tier (%d constructs) ---\n", len(hypoNarrow))
+	fmt.Fprintf(&b, "Each is either a latent authorization bug or a legitimate broader read\n")
+	fmt.Fprintf(&b, "that needs an explicit declaration. Which one CANNOT be read off the count.\n")
+	for _, r := range hypoNarrow {
+		fmt.Fprintf(&b, "  %-44s %s (%s)\n", r.construct, r.concept, r.tier)
+	}
+
 	declared, total := declaredConceptCounts()
 	fmt.Fprintf(&b, "\nconcepts declaring a tier: %d of %d\n", declared, total)
 
@@ -365,4 +418,100 @@ func topRelationshipTargets(n int) []targetCount {
 		out = out[:n]
 	}
 	return out
+}
+
+// undeclaredConceptsWithQueries returns every concept that has at least
+// one query bound to it and declares no tier, sorted.
+func undeclaredConceptsWithQueries(registry *FunctionRegistry) []string {
+	seen := map[string]bool{}
+	for _, fn := range registry.List() {
+		if fn == nil || fn.FunctionKind != "query" || strings.TrimSpace(fn.BoundConcept) == "" {
+			continue
+		}
+		c, err := memoryNodes.Get(fn.BoundConcept)
+		if err != nil || c == nil || c.RowAuthz != nil {
+			continue
+		}
+		seen[fn.BoundConcept] = true
+	}
+	out := make([]string, 0, len(seen))
+	for name := range seen {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// hypothesiseTier guesses what a concept WOULD declare, from the
+// caller-scope terms its own queries already carry.
+//
+// This is not the Phase 1 codemod's rule and must not be confused with
+// it. The codemod refuses to declare unless every query clears the
+// floor, precisely so a guess never becomes a declaration. This
+// function guesses ON PURPOSE, because the whole point is to count what
+// enforcement would cost -- and a hypothesis used to compute a number,
+// never written to the tree, cannot mislead a future author the way a
+// wrong declaration would.
+//
+// Returns nil when no query over the concept carries any caller-scope
+// term, since there is then nothing to hypothesise from.
+func hypothesiseTier(registry *FunctionRegistry, conceptName string) *langparser.RowAuthzDecl {
+	ownerVotes := map[string]int{}
+	adminVotes := 0
+
+	for _, fn := range registry.List() {
+		if fn == nil || fn.FunctionKind != "query" || fn.BoundConcept != conceptName {
+			continue
+		}
+		for _, c := range flattenForHypothesis(fn.Expr) {
+			cmp, ok := c.(*ComparisonExpression)
+			if !ok || cmp.Operator != OpEq {
+				continue
+			}
+			if ref, isActor := cmp.Value.(*ActorReference); isActor &&
+				strings.EqualFold(strings.TrimSpace(ref.Path), "userId") {
+				ownerVotes[leafFieldName(cmp.Field)]++
+			}
+			if isClusterOwnerLeaf(cmp) {
+				adminVotes++
+			}
+		}
+	}
+
+	// The most-nominated owner field wins; ties break alphabetically so
+	// the report is reproducible.
+	best, bestN := "", 0
+	fields := make([]string, 0, len(ownerVotes))
+	for f := range ownerVotes {
+		fields = append(fields, f)
+	}
+	sort.Strings(fields)
+	for _, f := range fields {
+		if ownerVotes[f] > bestN {
+			best, bestN = f, ownerVotes[f]
+		}
+	}
+	switch {
+	case bestN > 0:
+		return &langparser.RowAuthzDecl{Tier: langparser.RowAuthzOwned, Owner: best}
+	case adminVotes > 0:
+		return &langparser.RowAuthzDecl{Tier: langparser.RowAuthzClusterOwner}
+	default:
+		return nil
+	}
+}
+
+// flattenForHypothesis unwraps the read pipeline and flattens the AND
+// chain, tolerating disjunctions (a term inside one is still evidence
+// of what the author considers this concept's owner field, even though
+// it does not IMPLY the predicate).
+func flattenForHypothesis(expr ExpressionNode) []ExpressionNode {
+	expr = unwrapToFilter(expr)
+	if expr == nil {
+		return nil
+	}
+	if logical, ok := expr.(*LogicalExpression); ok {
+		return append(flattenForHypothesis(logical.Left), flattenForHypothesis(logical.Right)...)
+	}
+	return []ExpressionNode{expr}
 }
