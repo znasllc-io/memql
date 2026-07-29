@@ -194,13 +194,17 @@ func TestConceptPropertyTypes_NestedBlockPropertiesAreValidated(t *testing.T) {
 // fail, which is the intended signal: whoever closes it must also delete the
 // caveat from the docs.
 func TestConceptPropertyTypes_ElementTypesAreNotValidated(t *testing.T) {
-	// The element type each row of the docs table claims. Asserted, so a
-	// change to the lowering breaks the test rather than the documentation.
-	wantElementType := map[string]any{
-		"[]boolean": "string", "[]frobnicate": "string", "map[string]boolean": "string",
-		"map[string]any": "string", "map[string]map[string]string": "string",
-		"[]map[string]string": "string", "[][]frobnicate": "array",
-		"[]datetime": "string", "map[string]datetime": "string",
+	// The exact element schema each row claims. Asserted whole, so a change to
+	// the lowering breaks the test rather than the documentation.
+	str := map[string]any{"type": "string"}
+	wantElementSchema := map[string]map[string]any{
+		"[]boolean": str, "[]frobnicate": str, "map[string]boolean": str,
+		"map[string]any": str, "map[string]map[string]string": str,
+		"[]map[string]string": str,
+		// inner type discarded entirely, not coerced
+		"[][]frobnicate": {"type": "array"},
+		// byte-identical to []string: no `format`, which is the whole defect
+		"[]datetime": str, "map[string]datetime": str,
 	}
 
 	// Includes RECOGNISED types, not just unrecognised ones: review round 2
@@ -255,10 +259,14 @@ func TestConceptPropertyTypes_ElementTypesAreNotValidated(t *testing.T) {
 			t.Errorf("%q emitted no element schema at all: %v", ty, f)
 			continue
 		}
-		if got, want := inner["type"], wantElementType[ty]; got != want {
-			t.Errorf("%q must emit an element typed %q -- that is the row the docs table "+
-				"states. Emitting %q means the table is now wrong.\n  element: %v",
-				ty, want, got, inner)
+		// The WHOLE element schema, not just its type. Review round 6 showed the
+		// type-only check still missed the case it was added for: actually
+		// FIXING datetime -- attaching `format: date-time` to elements -- left
+		// the suite green while the docs still said []datetime is byte-identical
+		// to []string.
+		if want := wantElementSchema[ty]; !reflect.DeepEqual(inner, want) {
+			t.Errorf("%q must emit exactly %v -- that is what the docs and memql#2951 state. "+
+				"Emitting %v means one of them is now wrong.", ty, want, inner)
 		}
 	}
 }
@@ -366,9 +374,10 @@ func TestConceptPropertyTypes_ElementSafeListCarriesTheSameConstraints(t *testin
 //
 // Review round 4 got me to write "no constraining annotation", and round 5
 // showed that is over-broad in a way that matters: `@required` on `[]string!`
-// works exactly as it does on a scalar, and 17 shipped fields in dsl/ use that
-// form. Telling authors to hand-check them is its own defect -- the same shape
-// as round 1, where I called `map` unwritable.
+// works exactly as it does on a scalar, and shipped concept fields in dsl/ use
+// that form (dsl/worker/concepts.memql:55, dsl/actions/concepts.memql:36,:80,
+// :126, dsl/harness/concepts.memql:146). Telling authors to hand-check them is
+// its own defect -- the same shape as round 1, where I called `map` unwritable.
 //
 // The real split is what the annotation is ABOUT:
 //
@@ -381,6 +390,14 @@ func TestConceptPropertyTypes_ElementSafeListCarriesTheSameConstraints(t *testin
 // Both lists are asserted, because getting either wrong costs an author
 // something: a false negative loses validation, a false positive loses a
 // working construct.
+//
+// One caveat the docs no longer make and neither does this test: several
+// markers (@unique, @immutable, @secret, @default) lower to keys NOTHING in
+// the tree reads today -- `x-unique`, `x-immutable`, `x-secret` each have
+// exactly one occurrence, the emit site. So "survives wrapping" here means the
+// emitted schema is unchanged, NOT that the annotation is enforced. @pii is
+// the exception that is genuinely live (concept.go PIIFields -> scrubPIIFields).
+// Filed as memql#2959.
 func TestConceptPropertyTypes_AnnotationsSplitIntoValueConstraintsAndFieldMarkers(t *testing.T) {
 	fieldOf := func(t *testing.T, decl string) map[string]any {
 		t.Helper()
@@ -422,17 +439,26 @@ func TestConceptPropertyTypes_AnnotationsSplitIntoValueConstraintsAndFieldMarker
 				if _, ok := scalar[c.key]; !ok {
 					t.Fatalf("control broken: a scalar %s must carry %q.\n  got: %v", c.base, c.key, scalar)
 				}
-				arr := fieldOf(t, "f []"+c.base+" "+c.ann+` @description("x")`)
-				items, _ := arr["items"].(map[string]any)
-				if _, onItems := items[c.key]; onItems {
-					t.Errorf("%s now constrains its ELEMENTS. That is the memql#2951 fix -- remove "+
-						"this annotation from the inert list in docs/public/language/memql.md and "+
-						"dsl/_reference/_concept.memql in the same change.", c.key)
-				}
-				if _, onWrapper := arr[c.key]; !onWrapper {
-					t.Errorf("%s is no longer emitted on the array either. The docs say it lands "+
-						"there and is ignored; if it is now dropped outright, say so instead.\n  got: %v",
-						c.key, arr)
+				// BOTH wrapped forms. Review round 6 found the map half of this
+				// claim untested: making these constrain map VALUES left the
+				// whole suite green while the docs said they were inert there.
+				for _, w := range []struct{ form, elemKey string }{
+					{"f []" + c.base + " " + c.ann + ` @description("x")`, "items"},
+					{"f map[string]" + c.base + " " + c.ann + ` @description("x")`, "additionalProperties"},
+				} {
+					wrapped := fieldOf(t, w.form)
+					elems, _ := wrapped[w.elemKey].(map[string]any)
+					if _, onElems := elems[c.key]; onElems {
+						t.Errorf("%s now constrains the elements of `%s`. That is the memql#2951 fix "+
+							"-- remove this annotation from the inert list in "+
+							"docs/public/language/memql.md and dsl/_reference/_concept.memql in the "+
+							"same change.", c.key, w.form)
+					}
+					if _, onWrapper := wrapped[c.key]; !onWrapper {
+						t.Errorf("%s is no longer emitted on the wrapper of `%s` either. The docs say "+
+							"it lands there and is ignored; if it is now dropped outright, say so "+
+							"instead.\n  got: %v", c.key, w.form, wrapped)
+					}
 				}
 			})
 		}
@@ -453,14 +479,20 @@ func TestConceptPropertyTypes_AnnotationsSplitIntoValueConstraintsAndFieldMarker
 		} {
 			t.Run(c.name, func(t *testing.T) {
 				scalar := fieldOf(t, "f string "+c.ann)
-				arr := fieldOf(t, "f []string "+c.ann)
 				delete(scalar, "type")
-				delete(arr, "type")
-				delete(arr, "items")
-				if !reflect.DeepEqual(scalar, arr) {
-					t.Errorf("%s is documented as unaffected by wrapping, but the schemas differ -- "+
-						"so the docs promise a guarantee that is not there.\n  scalar: %v\n  array:  %v",
-						c.name, scalar, arr)
+				for _, w := range []struct{ form, elemKey string }{
+					{"f []string " + c.ann, "items"},
+					{"f map[string]string " + c.ann, "additionalProperties"},
+				} {
+					wrapped := fieldOf(t, w.form)
+					delete(wrapped, "type")
+					delete(wrapped, w.elemKey)
+					if !reflect.DeepEqual(scalar, wrapped) {
+						t.Errorf("%s is emitted identically on a scalar and on `%s` today; if that "+
+							"changes, memql#2951's note about which annotations survive wrapping "+
+							"needs updating with it.\n  scalar:  %v\n  wrapped: %v",
+							c.name, w.form, scalar, wrapped)
+					}
 				}
 			})
 		}
@@ -499,9 +531,8 @@ func TestConceptPropertyTypes_AnnotationsSplitIntoValueConstraintsAndFieldMarker
 			`f map[string]string @required @description("x")`,
 		} {
 			if got := requiredOf(form); !reflect.DeepEqual(got, scalar) {
-				t.Errorf("`%s` must be as required as a scalar -- 17 shipped fields in dsl/ use "+
-					"the []T! form, and the docs say it is dependable.\n  got: %v\n  scalar: %v",
-					form, got, scalar)
+				t.Errorf("`%s` must be as required as a scalar -- shipped concept fields in dsl/ "+
+					"use the []T! form.\n  got: %v\n  scalar: %v", form, got, scalar)
 			}
 		}
 	})
