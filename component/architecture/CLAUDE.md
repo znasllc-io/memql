@@ -112,7 +112,7 @@ and lives in exactly one place, the `arch-model` target:
 - `--reproducible` blanks `generated_at` and the absolute workspace path, and
   `--cluster memql` pins the cluster node's name, which otherwise comes from
   your checkout's FOLDER name. Without these the output differs on every run
-  and on every machine, and `TestArchitectureModelIsCurrent` fails for
+  and on every machine, and `TestArchitectureModelIsNotStale` fails for
   everyone but you.
 
 `go generate` in `embedded/` now shells out to this target, so the two cannot

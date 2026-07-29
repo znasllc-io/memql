@@ -398,10 +398,10 @@ arch-model:
 ## drift that left ToggleComputerUseEnabledArgs.UserId in the model in 13
 ## places after #2840 removed it. Pair with `make arch-model` locally to fix.
 ##
-## Also enforced by TestArchitectureModelIsCurrent so it runs in the ordinary
+## Also enforced by TestArchitectureModelIsNotStale so it runs in the ordinary
 ## `go test ./...` lane, which needs no workflow change.
 arch-model-check:
-	$(GO) test -count=1 -run TestArchitectureModelIsCurrent ./component/architecture/
+	$(GO) test -count=1 -run TestArchitectureModelIsNotStale ./component/architecture/
 
 ## DSL lint: load the embedded DSL tree through the same
 ## dslimports.Load pipeline the engine runs at boot and fail on any
