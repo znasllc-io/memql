@@ -37,10 +37,11 @@ var capabilityHeaderRe = regexp.MustCompile(`(?m)^[ \t]*capability[ \t]+([A-Za-z
 
 // extractCapabilitySlices returns each top-level `capability NAME { ... }`
 // declaration (its @-attribute / comment preamble + brace-balanced body)
-// as an independently-parseable source slice. Mirrors the action loader's
-// slice extraction, dot-aware for the namespaced capability name, and
-// reuses findMatchingCloseBraceRune (function_slices.go) for string- and
-// comment-aware brace balancing.
+// as an independently-parseable source slice. Dot-aware for the namespaced
+// capability name via capabilityHeaderRe; the slicing itself is the shared
+// comment-safe implementation in component/language/parser, which the actions
+// catalog also uses (memql#2896) -- so this no longer merely "mirrors" the
+// action loader's extraction, it IS the same code.
 func extractCapabilitySlices(source string) []string {
 	// Comment-blanked view for header detection and brace balancing, offsets
 	// preserved so the slice is still cut from the ORIGINAL (memql#2868).
@@ -49,32 +50,17 @@ func extractCapabilitySlices(source string) []string {
 	// capability that still loads is a deploy-surface concern rather than a
 	// schema one -- which is why #2868 flagged this as its highest-stakes
 	// instance.
-	scan := languageParser.BlankComments(source)
-	matches := capabilityHeaderRe.FindAllStringSubmatchIndex(scan, -1)
-	if len(matches) == 0 {
+	// One shared implementation across every offset-based slicer (memql#2896).
+	// The actions catalog slices capabilities through the same helper now, so
+	// the "validation and dispatch stay in sync" claim below is true by
+	// construction rather than by two copies happening to agree.
+	slices := languageParser.ExtractDeclarationSlices(source, capabilityHeaderRe)
+	if len(slices) == 0 {
 		return nil
 	}
-	var out []string
-	for _, m := range matches {
-		headerStart, headerEnd := m[0], m[1]
-		openIdx := headerEnd - 1 // index of '{'
-		closeIdx := findMatchingCloseBraceRune(scan, openIdx)
-		if closeIdx < 0 {
-			continue
-		}
-		preambleStart := headerStart
-		for k := headerStart - 1; k >= 0; k-- {
-			lineStart := strings.LastIndexByte(source[:k], '\n') + 1
-			line := strings.TrimRight(source[lineStart:k+1], "\r\n")
-			trimmed := strings.TrimSpace(line)
-			if strings.HasPrefix(trimmed, "@") || strings.HasPrefix(trimmed, "//") {
-				preambleStart = lineStart
-				k = lineStart - 1
-				continue
-			}
-			break
-		}
-		out = append(out, source[preambleStart:closeIdx+1])
+	out := make([]string, 0, len(slices))
+	for _, s := range slices {
+		out = append(out, s.Source)
 	}
 	return out
 }

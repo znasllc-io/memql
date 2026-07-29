@@ -13,7 +13,6 @@ package memql
 
 import (
 	"regexp"
-	"strings"
 
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
@@ -61,47 +60,16 @@ func ExtractKeywordSlices(source, keyword string) []KeywordSlice {
 	// close a slice early and emit a truncated construct. Only BLOCK comments
 	// were affected: the header pattern is anchored at `^[ \t]*<keyword>`, so a
 	// `// concept x {` line never matched.
-	scan := languageParser.BlankComments(source)
-	matches := headerRe.FindAllStringSubmatchIndex(scan, -1)
-	if len(matches) == 0 {
+	// One shared implementation across every offset-based slicer (memql#2896);
+	// the blanked-scan / original-cut split described above lives there now.
+	slices := languageParser.ExtractDeclarationSlices(source, headerRe)
+	if len(slices) == 0 {
 		return nil
 	}
 
-	var out []KeywordSlice
-	for _, m := range matches {
-		headerStart := m[0]
-		headerEnd := m[1]
-		nameStart := m[2]
-		nameEnd := m[3]
-		name := source[nameStart:nameEnd]
-
-		openIdx := headerEnd - 1 // index of `{`
-		closeIdx := findMatchingCloseBraceRune(scan, openIdx)
-		if closeIdx < 0 {
-			continue
-		}
-
-		// Walk backwards for the @-attribute + comment preamble.
-		preambleStart := headerStart
-		for k := headerStart - 1; k >= 0; k-- {
-			lineStart := strings.LastIndexByte(source[:k], '\n') + 1
-			line := strings.TrimRight(source[lineStart:k+1], "\r\n")
-			trimmed := strings.TrimSpace(line)
-			if strings.HasPrefix(trimmed, "@") || strings.HasPrefix(trimmed, "//") {
-				preambleStart = lineStart
-				k = lineStart - 1
-				continue
-			}
-			if trimmed == "" {
-				break
-			}
-			break
-		}
-
-		out = append(out, KeywordSlice{
-			Source: source[preambleStart : closeIdx+1],
-			Name:   name,
-		})
+	out := make([]KeywordSlice, 0, len(slices))
+	for _, s := range slices {
+		out = append(out, KeywordSlice{Source: s.Source, Name: s.Name})
 	}
 	return out
 }

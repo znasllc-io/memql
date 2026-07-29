@@ -317,80 +317,21 @@ var actionHeaderRe = regexp.MustCompile(`(?m)^[ \t]*action[ \t]+([A-Za-z_][A-Za-
 
 // extractActionSlices returns each top-level action declaration (preamble of
 // @-attribute / comment lines + the brace-balanced body) as a self-contained,
-// independently-parseable source slice. Mirrors the unified-kinds loader's
-// ExtractKeywordSlices, kept local so this package stays a leaf.
+// independently-parseable source slice.
+//
+// Delegates to the shared comment-safe slicer (memql#2896). The local copy this
+// replaces scanned RAW source with a brace walk that was string- and
+// line-comment aware but NOT block-comment aware, so it carried both bugs
+// #2868 fixed one package over: a block-commented action still loaded, and a
+// `}` inside a block comment in an action body truncated the slice mid-body.
 func extractActionSlices(source string) []actionSlice {
-	matches := actionHeaderRe.FindAllStringSubmatchIndex(source, -1)
-	if len(matches) == 0 {
+	slices := languageParser.ExtractDeclarationSlices(source, actionHeaderRe)
+	if len(slices) == 0 {
 		return nil
 	}
-	var out []actionSlice
-	for _, m := range matches {
-		headerStart, headerEnd := m[0], m[1]
-		name := source[m[2]:m[3]]
-		openIdx := headerEnd - 1 // index of '{'
-		closeIdx := matchingCloseBrace(source, openIdx)
-		if closeIdx < 0 {
-			continue
-		}
-		preambleStart := headerStart
-		for k := headerStart - 1; k >= 0; k-- {
-			lineStart := strings.LastIndexByte(source[:k], '\n') + 1
-			line := strings.TrimRight(source[lineStart:k+1], "\r\n")
-			trimmed := strings.TrimSpace(line)
-			if strings.HasPrefix(trimmed, "@") || strings.HasPrefix(trimmed, "//") {
-				preambleStart = lineStart
-				k = lineStart - 1
-				continue
-			}
-			break
-		}
-		out = append(out, actionSlice{source: source[preambleStart : closeIdx+1], name: name})
+	out := make([]actionSlice, 0, len(slices))
+	for _, s := range slices {
+		out = append(out, actionSlice{source: s.Source, name: s.Name})
 	}
 	return out
-}
-
-// matchingCloseBrace returns the index of the '}' matching the '{' at openIdx,
-// or -1. String- and line-comment-aware so braces inside argTemplate strings /
-// comments don't unbalance the scan.
-func matchingCloseBrace(source string, openIdx int) int {
-	depth := 0
-	inString := false
-	inLineComment := false
-	for i := openIdx; i < len(source); i++ {
-		c := source[i]
-		if inLineComment {
-			if c == '\n' {
-				inLineComment = false
-			}
-			continue
-		}
-		if inString {
-			if c == '\\' {
-				i++ // skip escaped char
-				continue
-			}
-			if c == '"' {
-				inString = false
-			}
-			continue
-		}
-		switch c {
-		case '"':
-			inString = true
-		case '/':
-			if i+1 < len(source) && source[i+1] == '/' {
-				inLineComment = true
-				i++
-			}
-		case '{':
-			depth++
-		case '}':
-			depth--
-			if depth == 0 {
-				return i
-			}
-		}
-	}
-	return -1
 }

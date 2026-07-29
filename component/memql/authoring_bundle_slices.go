@@ -79,55 +79,25 @@ func extractCapabilityBundleSlices(source string) []KeywordSlice {
 // inherits the file-top `use ... .{ ... }` imports. headerRe MUST capture the
 // declaration name in group 1.
 func extractKeywordSlicesWithImports(source string, headerRe *regexp.Regexp) []KeywordSlice {
-	scan := languageParser.BlankComments(source)
-	matches := headerRe.FindAllStringSubmatchIndex(scan, -1)
-	if len(matches) == 0 {
+	// The slicing itself is the shared implementation (memql#2896) -- this
+	// function was its model, and the top-level guard + blanked-scan split it
+	// contributed now live in component/language/parser. What stays here is the
+	// only part that is authoring-bundle-specific: prepending the file-top `use`
+	// imports, which the actions call sites must NOT inherit.
+	slices := languageParser.ExtractDeclarationSlices(source, headerRe)
+	if len(slices) == 0 {
 		return nil
 	}
 
 	usePreamble := extractUseDeclarations(source)
 
-	var out []KeywordSlice
-	for _, m := range matches {
-		headerStart := m[0]
-		headerEnd := m[1]
-
-		// Only extract top-level declarations -- a header nested inside another
-		// construct's braces is not a standalone declaration.
-		if braceDepthBefore(scan, headerStart) != 0 {
-			continue
-		}
-
-		name := source[m[2]:m[3]]
-
-		// The opening `{` is the last char of the header match. Brace matching
-		// runs on the comment-blanked scan so braces inside comments in the body
-		// do not perturb the depth count.
-		openIdx := headerEnd - 1
-		closeIdx := findMatchingCloseBraceRune(scan, openIdx)
-		if closeIdx < 0 {
-			continue
-		}
-
-		// Walk backwards for the @-attribute / comment preamble.
-		preambleStart := headerStart
-		for k := headerStart - 1; k >= 0; k-- {
-			lineStart := strings.LastIndexByte(source[:k], '\n') + 1
-			line := strings.TrimRight(source[lineStart:k+1], "\r\n")
-			trimmed := strings.TrimSpace(line)
-			if strings.HasPrefix(trimmed, "@") || strings.HasPrefix(trimmed, "//") {
-				preambleStart = lineStart
-				k = lineStart - 1
-				continue
-			}
-			break
-		}
-
-		body := source[preambleStart : closeIdx+1]
+	out := make([]KeywordSlice, 0, len(slices))
+	for _, s := range slices {
+		body := s.Source
 		if usePreamble != "" {
 			body = usePreamble + body
 		}
-		out = append(out, KeywordSlice{Source: body, Name: name})
+		out = append(out, KeywordSlice{Source: body, Name: s.Name})
 	}
 	return out
 }
