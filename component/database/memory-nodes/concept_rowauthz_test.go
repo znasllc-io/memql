@@ -242,13 +242,16 @@ func TestRowAuthzSurvivesConceptJSON(t *testing.T) {
 func TestRowAuthzIsInert(t *testing.T) {
 	root := repoRootForRowAuthz(t)
 
-	// Files permitted to reference the row-authz surface. Anything
-	// else that names it is enforcement leaking into Phase 1.
+	// Files permitted to reference the row-authz surface: the shared
+	// detector, the loader that fills the field, the boot-time
+	// undeclared warning, the codemod, and the annotation registry.
+	// Anything else that names it is enforcement leaking into Phase 1.
 	allowed := map[string]bool{
 		"component/language/parser/rowauthz_binding.go":     true,
 		"component/database/memory-nodes/concept_parser.go": true,
 		"component/database/memory-nodes/concept.go":        true,
 		"component/language/annotations/registry.go":        true,
+		"component/memql/unified_loader.go":                 true,
 		"cmd/memqlmigrate/rowauthz_infer.go":                true,
 		"cmd/memqlmigrate/main.go":                          true,
 	}
