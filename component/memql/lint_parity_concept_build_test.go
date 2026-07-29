@@ -743,3 +743,47 @@ func TestConceptPropertyTypes_WrappedElementsRejectConformingData(t *testing.T) 
 		})
 	}
 }
+
+// TestLintParity_SkipsSurviveAHardLoadError closes the last ungated path in
+// memql#2909 (review round 15): LintUnifiedTree returns the concept skips it
+// already gathered alongside a fatal load error, instead of discarding them.
+//
+// Without it a tree holding both problems reports only the second, so an
+// author fixes the id error, re-runs, and only then learns about the dropped
+// concept. Additive, but it is the difference between one lint round-trip and
+// two -- and deleting the block left every test in this package green, which
+// is why it needed one of its own.
+func TestLintParity_SkipsSurviveAHardLoadError(t *testing.T) {
+	root := fstest.MapFS{
+		// Builds, but its schema fails -- a recoverable skip.
+		"zzaaa/concepts.memql": {Data: []byte(`@version("1.0.0")
+@namespace("zzaaa")
+@description("A widget with a mistyped property type.")
+concept widget {
+  label    string   @required  @description("Widget label.")
+  enabled  boolean             @description("Mistyped.")
+}
+`)},
+		// @namespace disagreeing with the directory is a hard load ERROR
+		// (the moved-file guard, #2614), not a warn-skip.
+		"zzzzz/concepts.memql": {Data: []byte(`@version("1.0.0")
+@namespace("somewhereelse")
+@description("A gadget in the wrong place.")
+concept gadget {
+  label string @required @description("Gadget label.")
+}
+`)},
+	}
+	diags, _, err := LintUnifiedTree(nil, root)
+	if err == nil {
+		t.Fatal("the fixture must still produce a hard load error, or this proves nothing")
+	}
+	if len(diags) == 0 {
+		t.Fatalf("the skip gathered before the hard error was discarded, so an author sees only "+
+			"the id error and needs a second lint round to find the dropped concept "+
+			"(memql#2909).\n  error: %v", err)
+	}
+	if !diagsContain(diags, "widget") {
+		t.Errorf("the surviving diagnostic must name the dropped concept.\n  got: %+v", diags)
+	}
+}
