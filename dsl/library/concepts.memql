@@ -37,6 +37,7 @@ use worker.concepts.{ registration }
 /// projection. Per-row authz: owned -- ownerUserId is stamped from actor.userId on every write and
 /// every read gates on ownerUserId==actor.userId.
 @displayCard(primary="title", secondary="summary", tertiary="updatedAt", status="lens")
+@rowAuthz(owner="ownerUserId")
 concept artifact {
   ownerUserId      string!  @description("v1:identity:user.id that owns this index row. Stamped from actor.userId at create time and re-stamped on every update so ownership can never be reassigned. The load-bearing per-row authz key.")
 
@@ -102,6 +103,7 @@ concept artifact {
 /// by indexGeneratedOutput on creation. Per-row authz: owned -- ownerUserId is the producing user;
 /// reads gate on ownerUserId==actor.userId.
 @displayCard(primary="title", secondary="summary", tertiary="createdAt")
+@rowAuthz(owner="ownerUserId")
 concept generatedOutput {
   ownerUserId       string!  @description("v1:identity:user.id this output belongs to (the user the producing agent / plan acts for). The per-row authz key for Library reads.")
   title             string!  @description("Display title for the output, e.g. 'Ten most beautiful birds'.")
@@ -169,6 +171,7 @@ concept generatedOutput {
 /// ownerUserId is threaded from the document's owner on append; reads gate on
 /// ownerUserId==actor.userId.
 @displayCard(primary="documentId", secondary="note", tertiary="createdAt")
+@rowAuthz(owner="ownerUserId")
 concept documentVersion {
   ownerUserId      string!  @description("v1:identity:user.id that owns the logical document this version belongs to. Threaded from the backing document's owner on every append (edits run server-side on the owner's behalf, not as the owner); the load-bearing per-row authz key for every history read.")
 
@@ -221,6 +224,7 @@ concept documentVersion {
 /// the Library's Records lens. Per-row authz: owned -- ownerUserId stamped from actor.userId; reads
 /// gate on ownerUserId==actor.userId.
 @displayCard(primary="title", secondary="content", tertiary="createdAt")
+@rowAuthz(owner="ownerUserId")
 concept memory {
   ownerUserId       string!  @description("v1:identity:user.id this memory is about / belongs to. Stamped from actor.userId at create time. The per-row authz key.")
   title             string!  @description("Short label for the memory, e.g. 'Prefers concise replies'. The primary display line.")

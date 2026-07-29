@@ -87,6 +87,7 @@ concept project {
 /// validators/approvers can read it. Every transition is recorded as a v1:forge:requestEvent for a
 /// full time-series audit trail.
 @displayCard(primary="title", secondary="requestType", tertiary="status", status="status")
+@rowAuthz(owner="submitterUserId")
 concept request {
   projectId      string!  @description("v1:forge:project.id this request targets.")
   requestType    enum("bug", "feature", "chore", "question", "timeOff", "checkIn")!  @default("bug")  @description("Request kind (named requestType because `type` is a reserved row intrinsic). Drives which pipeline applies. First slice centers bug/feature; HR types are modelled so they ride the same spine.")

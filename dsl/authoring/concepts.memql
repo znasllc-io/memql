@@ -58,6 +58,7 @@ concept bundle {
 /// per-owner reusable catalog (catalogued=true) so later bundles compose it -- the catalog match
 /// key lives in catalogKey (#957).
 @displayCard(primary="name", secondary="kind", tertiary="bundleId", status="status")
+@rowAuthz(owner="ownerUserId")
 concept construct {
   ownerUserId       string! @description("v1:identity:user.id who owns this construct (same as the parent bundle's owner). Per-row authz owner; server-stamped from actor.userId at create.")
   bundleId          string! @description("v1:authoring:bundle.id this construct belongs to. Every authored construct is a member of exactly one bundle.")
@@ -87,6 +88,7 @@ concept construct {
 /// construct changes. This is the reuse-coupling mitigation from the design doc: editing a
 /// cataloged construct re-validates its dependents.
 @displayCard(primary="fromConstruct", secondary="toName", tertiary="bundleId", status="toSource")
+@rowAuthz(owner="ownerUserId")
 concept dependencyEdge {
   ownerUserId    string! @description("v1:identity:user.id who owns this edge (the bundle owner). Per-row authz owner; server-stamped from actor.userId.")
   bundleId       string! @description("v1:authoring:bundle.id whose construct declares this dependency.")

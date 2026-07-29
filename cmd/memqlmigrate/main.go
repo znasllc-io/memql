@@ -87,6 +87,7 @@ var rewriters = map[string]rewriter{
 var pathRewriters = map[string]pathRewriter{
 	"same-domain-use":   rewriteSameDomainUse,
 	"namespace-default": rewriteNamespaceDefault,
+	"row-authz":         rewriteRowAuthz,
 }
 
 // rewriteNamespaceDefault strips @namespace annotations that restate the
@@ -122,6 +123,41 @@ func domainForDSLPath(path string) string {
 // conformance gate also runs.
 func rewriteSameDomainUse(path string, src []byte) ([]byte, error) {
 	return langparser.RewriteSameDomainUse(filepath.Base(filepath.Dir(path)), src)
+}
+
+// rowAuthzInferenceCache memoises the whole-tree inference per dsl
+// root. Unlike every other rewrite here, `row-authz` cannot decide a
+// file from the file: a concept's tier is inferred from the QUERIES
+// over it, which live in sibling files. The walk therefore happens
+// once per root and every concepts.memql reads its slice out.
+var rowAuthzInferenceCache = map[string]*rowAuthzInference{}
+
+// rewriteRowAuthz seeds `@rowAuthz(...)` on the concepts declared in
+// this file, from the tiers inferred across the whole tree (#2920).
+//
+// Only `<domain>/concepts.memql` is a target -- concepts are declared
+// nowhere else, and running the header scan over queries.memql would
+// find nothing while costing a tree walk per file.
+func rewriteRowAuthz(path string, src []byte) ([]byte, error) {
+	if filepath.Base(path) != "concepts.memql" {
+		return src, nil
+	}
+	domain := filepath.Base(filepath.Dir(path))
+	root := filepath.Dir(filepath.Dir(path))
+
+	inference, ok := rowAuthzInferenceCache[root]
+	if !ok {
+		var err error
+		inference, err = inferRowAuthz(root)
+		if err != nil {
+			return nil, err
+		}
+		rowAuthzInferenceCache[root] = inference
+		// The run states what it inferred AND what it left alone, on
+		// stderr so it never lands in a -w diff or a piped file.
+		fmt.Fprint(os.Stderr, inference.Report())
+	}
+	return langparser.RewriteRowAuthz(src, inference.Tiers[domain])
 }
 
 type opts struct {

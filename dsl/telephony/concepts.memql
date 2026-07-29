@@ -10,6 +10,7 @@
 /// A provisioned PSTN phone number (DID). Bound to a partition; inbound calls to this DID route to
 /// a partition-scoped room. Carrier identifiers are opaque (providerId). Compliance state (E911,
 /// consent) is layered by the compliance slice.
+@rowAuthz(clusterOwner)
 concept number {
   e164          string! @description("Canonical +<countrycode><number> address, e.g. '+14155550100'.")
   carrier       string! @description("Owning carrier name ('telnyx', ...).")
@@ -41,6 +42,7 @@ concept trunk {
 /// An append-only PSTN call record: one row per call, written on connect and updated on disconnect.
 /// Powers billing, observability, and per-call cost attribution. Bound to a partition + a
 /// partition-scoped room (Amendment A).
+@rowAuthz(clusterOwner)
 concept call {
   direction       enum("inbound", "outbound")! @description("Call direction.")
   fromE164        string! @description("Calling party E.164.")
