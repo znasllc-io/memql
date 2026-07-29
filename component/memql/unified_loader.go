@@ -33,7 +33,33 @@ import (
 	memqldsl "github.com/znasllc-io/memql/dsl"
 )
 
-// LoadUnifiedConcepts walks the unified DSL tree at dsl.Tree(),
+// ConceptSkip is one concept the unified loader could not build and
+// therefore did not register. It exists so a caller can gate on a
+// dropped concept rather than having to scrape a log (memql#2909).
+type ConceptSkip struct {
+	File    string // origin path in the DSL tree
+	Concept string // canonical id the concept would have had
+	Err     error  // why the schema build failed
+}
+
+// String leads with the CONSEQUENCE rather than the cause. The wrapped error
+// already names the concept and the offending property; what it does not say,
+// and what the author needs first, is that the whole concept is gone -- not
+// the property (memql#2909).
+func (s ConceptSkip) String() string {
+	return fmt.Sprintf("concept %q DROPPED, so every query, mutation and shape bound to it "+
+		"will fail at runtime: %v", s.Concept, s.Err)
+}
+
+// LoadUnifiedConcepts loads every concept in the mounted tree and
+// registers it. See LoadUnifiedConceptsWithSkips for the variant that
+// also reports which concepts were dropped.
+func LoadUnifiedConcepts(logger *slog.Logger) (int, error) {
+	n, _, err := LoadUnifiedConceptsWithSkips(logger)
+	return n, err
+}
+
+// LoadUnifiedConceptsWithSkips walks the unified DSL tree at dsl.Tree(),
 // finds every ConceptDecl in every file, assembles each concept's
 // ID from its @version + @namespace + declaration name, and
 // registers them in the supplied memoryNodes registry.
@@ -59,32 +85,7 @@ import (
 // file's source text for `concept ... { }` blocks and parses each
 // in isolation. This bypasses the rewriter limitation and gets
 // us to full concept coverage from the new tree.
-// ConceptSkip is one concept the unified loader could not build and
-// therefore did not register. It exists so a caller can gate on a
-// dropped concept rather than having to scrape a log (memql#2909).
-type ConceptSkip struct {
-	File    string // origin path in the DSL tree
-	Concept string // canonical id the concept would have had
-	Err     error  // why the schema build failed
-}
-
-// String leads with the CONSEQUENCE rather than the cause. The wrapped error
-// already names the concept and the offending property; what it does not say,
-// and what the author needs first, is that the whole concept is gone -- not
-// the property (memql#2909).
-func (s ConceptSkip) String() string {
-	return fmt.Sprintf("concept DROPPED, so every query, mutation and shape bound to it "+
-		"will fail at runtime: %v", s.Err)
-}
-
-// LoadUnifiedConcepts loads every concept in the mounted tree and
-// registers it. See LoadUnifiedConceptsWithSkips for the variant that
-// also reports which concepts were dropped.
-func LoadUnifiedConcepts(logger *slog.Logger) (int, error) {
-	n, _, err := LoadUnifiedConceptsWithSkips(logger)
-	return n, err
-}
-
+//
 // LoadUnifiedConceptsWithSkips is LoadUnifiedConcepts plus the list of
 // concepts that failed to build. Boot ignores the list (a skip must not
 // stop a node starting); memqllint turns each entry into a diagnostic,

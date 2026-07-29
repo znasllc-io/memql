@@ -898,9 +898,11 @@ func suggestPropertyType(name string) string {
 		return fmt.Sprintf(" -- did you mean %q?", want)
 	}
 	// The author-facing spellings, which are NOT the same as this switch's
-	// case labels: `map` is a case here but no property syntax produces it,
-	// and `enum` is only writable in its parenthesised form.
-	return ` -- accepted: string, bool, int, float, datetime, object, any, array, []<type>, enum("a", "b")`
+	// case labels: `map` and `enum` are cases here, but neither is writable
+	// bare -- they are reached only through `map[string]<type>` and
+	// `enum("a", "b")`, which the parser lowers to those kinds.
+	return ` -- accepted: string, bool, int, float, datetime, object, any, array, ` +
+		`[]<type>, map[string]<type>, enum("a", "b")`
 }
 
 func memqlTypeToJSONType(t string) string {

@@ -175,9 +175,9 @@ concept audioOverride {
 
 **Field annotations:** `@required`, `@default("...")` (honored on insert), `@description("...")`.
 
-**Field types are a closed set:** `string`, `bool`, `int`, `float`, `datetime`, `object`, `any`, `array`, the `[]<type>` form (`[]string`, `[]object`), and inline `enum("a", "b", ...)` value sets.
+**Field types are a closed set:** `string`, `bool`, `int`, `float`, `datetime`, `object`, `any`, `array`, plus the parameterised forms `[]<type>` (`[]string`, `[]object`), `map[string]<type>`, and inline `enum("a", "b", ...)` value sets.
 
-Nothing else is accepted, and the failure is worth knowing about: an unrecognised type makes the concept's schema fail to build, and the loader drops **the whole concept**, not the offending field. Every query, mutation and shape bound to it then fails at runtime.
+Nothing else is accepted **in top-level property position**, and the failure is worth knowing about: an unrecognised type makes the concept's schema fail to build, and the loader drops **the whole concept**, not the offending field. Every query, mutation and shape bound to it then fails at runtime.
 
 The JSON Schema spellings are the ones people reach for, because that is what the engine *emits* — but they are not what it *reads*:
 
@@ -191,7 +191,9 @@ The JSON Schema spellings are the ones people reach for, because that is what th
 | `array` | `list` |
 | `object` | `json`, `dict` |
 
-`memqllint` rejects all of them by name and points at the right spelling, so this is caught before boot rather than at it.
+`memqllint` rejects each of these by name in top-level position and points at the right spelling, so it is caught before boot rather than at it.
+
+> **Element types are not validated yet.** Inside `[]<type>` and `map[string]<type>`, an unrecognised element type is neither rejected nor corrected — it is silently treated as `string`. So `[]boolean` lints clean and builds a field that validates as `[]string`, and `[]frobnicate` does the same. The table above applies to the outer property; check element spellings by hand until this is closed (memql#2951).
 
 **Cross-concept references** are plain string fields holding the target's id (e.g. `spaceId string`), optionally paired with an `@relationship` annotation so the engine can traverse the edge.
 

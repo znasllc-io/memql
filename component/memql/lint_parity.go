@@ -78,7 +78,15 @@ func LintUnifiedTree(logger *slog.Logger, root fs.FS) ([]LintDiagnostic, []strin
 
 	_, conceptSkips, err := LoadUnifiedConceptsWithSkips(logger)
 	if err != nil {
-		return nil, skippedCore, fmt.Errorf("loading concepts from merged tree: %w", err)
+		// Report the skips gathered before the hard error too. A tree can
+		// hold a build-skip in one file and a fatal id error in a later one,
+		// and returning only the second sends the author back for a second
+		// round over a problem already measured (memql#2909).
+		var diags []LintDiagnostic
+		for _, cs := range conceptSkips {
+			diags = append(diags, LintDiagnostic{File: cs.File, Message: cs.String()})
+		}
+		return diags, skippedCore, fmt.Errorf("loading concepts from merged tree: %w", err)
 	}
 	registry := concept.DefaultRegistry()
 

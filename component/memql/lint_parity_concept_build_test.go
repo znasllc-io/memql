@@ -101,7 +101,15 @@ func TestConceptPropertyTypes_AcceptedAndRejectedSets(t *testing.T) {
 	}
 
 	t.Run("accepted", func(t *testing.T) {
-		for _, ty := range []string{"string", "bool", "int", "float", "datetime", "array", "object", "any"} {
+		// Includes the PARAMETERISED forms the docs now claim are writable.
+		// Review found the first version of those docs wrong precisely
+		// because the vocabulary was read off buildPropertySchema's case
+		// labels instead of measured: `map` and `enum` are cases there but
+		// are reachable only as `map[string]<type>` and `enum("a", "b")`.
+		for _, ty := range []string{
+			"string", "bool", "int", "float", "datetime", "array", "object", "any",
+			"[]string", "[]object", `enum("a", "b")`, "map[string]string", "map[string]int",
+		} {
 			if err := build(t, ty); err != nil {
 				t.Errorf("%q must be an accepted property type; the builder rejected it: %v", ty, err)
 			}
@@ -129,4 +137,38 @@ func TestConceptPropertyTypes_AcceptedAndRejectedSets(t *testing.T) {
 			}
 		}
 	})
+}
+
+// TestConceptPropertyTypes_ElementTypesAreNotValidated pins the KNOWN GAP that
+// docs/public/language/memql.md now warns about, so the warning and the code
+// cannot drift apart.
+//
+// memqlTypeToJSONType ends in `default: return "string"`, and the array/map
+// branches never consult suggestPropertyType -- so inside `[]<type>` and
+// `map[string]<type>` an unrecognised element type is neither rejected nor
+// corrected, it silently becomes `string`. `[]boolean` therefore builds a
+// field that validates as `[]string`.
+//
+// Deliberately NOT fixed in memql#2909: that issue is about types the loader
+// REJECTS (which drop a concept), and these are types it ACCEPTS. Closing the
+// gap would reject DSL that loads today, which is a behaviour change for
+// existing bundles rather than a lint fix. Filed as memql#2951.
+//
+// This test asserts the CURRENT behaviour. When the gap is closed it will
+// fail, which is the intended signal: whoever closes it must also delete the
+// caveat from the docs.
+func TestConceptPropertyTypes_ElementTypesAreNotValidated(t *testing.T) {
+	for _, ty := range []string{"[]boolean", "[]frobnicate", "map[string]boolean"} {
+		src := "@version(\"1.0.0\")\n@namespace(\"aud\")\n@description(\"d\")\n" +
+			"concept probe {\n  label string @required @description(\"l\")\n  f " + ty + " @description(\"x\")\n}\n"
+		decls := ExtractConceptDecls(src)
+		if len(decls) == 0 {
+			t.Fatalf("fixture for %q did not parse, so it measures nothing", ty)
+		}
+		if _, err := concept.BuildConceptFromDecl(decls[0], "v1:aud:probe"); err != nil {
+			t.Errorf("%q is now REJECTED. That is an improvement, but the caveat in "+
+				"docs/public/language/memql.md still tells authors element types are "+
+				"unvalidated -- delete it in the same change.\n  got: %v", ty, err)
+		}
+	}
 }
