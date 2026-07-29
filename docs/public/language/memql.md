@@ -175,9 +175,9 @@ concept audioOverride {
 
 **Field annotations:** `@required`, `@default("...")` (honored on insert), `@description("...")`.
 
-**Field types are a closed set:** `string`, `bool`, `int`, `float`, `datetime`, `object`, `any`, `array`, plus the parameterised forms `[]<type>` (`[]string`, `[]object`), `map[string]<type>`, and inline `enum("a", "b", ...)` value sets.
+**Field types are a closed set:** `string`, `bool`, `int`, `float`, `datetime`, `object`, `any`, `array`, plus the parameterised forms `[]<type>` (`[]string`, `[]object`), `map[string]<type>`, and inline `enum("a", "b", ...)` value sets. Map keys must be `string`.
 
-Nothing else is accepted **in top-level property position**, and the failure is worth knowing about: an unrecognised type makes the concept's schema fail to build, and the loader drops **the whole concept**, not the offending field. Every query, mutation and shape bound to it then fails at runtime.
+Nothing else is accepted **in property position** — that includes properties nested inside a block, which are validated to the same standard. The failure is worth knowing about: an unrecognised type makes the concept's schema fail to build, and the loader drops **the whole concept**, not the offending field. Every query, mutation and shape bound to it then fails at runtime.
 
 The JSON Schema spellings are the ones people reach for, because that is what the engine *emits* — but they are not what it *reads*:
 
@@ -191,9 +191,23 @@ The JSON Schema spellings are the ones people reach for, because that is what th
 | `array` | `list` |
 | `object` | `json`, `dict` |
 
-`memqllint` rejects each of these by name in top-level position and points at the right spelling, so it is caught before boot rather than at it.
+`memqllint` rejects each of these by name in property position, at any nesting depth, and points at the right spelling — so it is caught before boot rather than at it.
 
-> **Element types are not validated yet.** Inside `[]<type>` and `map[string]<type>`, an unrecognised element type is neither rejected nor corrected — it is silently treated as `string`. So `[]boolean` lints clean and builds a field that validates as `[]string`, and `[]frobnicate` does the same. The table above applies to the outer property; check element spellings by hand until this is closed (memql#2951).
+> **Element types are not validated, and composite element types do not work (memql#2951).**
+>
+> The rules above stop at the *outside* of `[]<type>` and `map[string]<type>`. Inside them nothing is checked and nothing is corrected:
+>
+> | written | actual schema | |
+> |---|---|---|
+> | `[]boolean` | `[]string` | unrecognised, silently coerced |
+> | `[]frobnicate` | `[]string` | unrecognised, silently coerced |
+> | `map[string]boolean` | values typed `string` | unrecognised, silently coerced |
+> | `map[string]any` | values typed `string` | **recognised, but constrained** — `any` means "unconstrained" as a property and "must be a string" as an element |
+> | `map[string]map[string]string` | values typed `string` | composite element collapsed |
+> | `[]map[string]string` | items typed `string` | composite element collapsed |
+> | `[][]frobnicate` | items typed `array`, inner discarded | composite element collapsed |
+>
+> So `[]<type>` and `map[string]<type>` are dependable only when `<type>` is one of the simple scalars — `string`, `bool`, `int`, `float`, `datetime` — or `object`. Anything else lints clean and builds a schema that does not mean what was written. Check element spellings by hand until this is closed.
 
 **Cross-concept references** are plain string fields holding the target's id (e.g. `spaceId string`), optionally paired with an `@relationship` annotation so the engine can traverse the edge.
 

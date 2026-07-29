@@ -13,14 +13,19 @@ import (
 	"testing"
 )
 
-// acceptedPropertyTypes is the set an AUTHOR can actually write, which is not
-// the same as buildPropertySchema's case labels. `map` is a case there but no
-// property syntax produces it, and `enum` is reachable only in its
-// parenthesised `enum("a", "b")` form -- both measured in
-// component/memql's TestConceptPropertyTypes_AcceptedAndRejectedSets.
+// acceptedPropertyTypes is the set an AUTHOR can write BARE, which is not the
+// same as buildPropertySchema's case labels: `map` and `enum` are cases there
+// but neither is writable bare -- they are reached only through
+// `map[string]<type>` and `enum("a", "b")`, which the parser lowers to those
+// kinds. The parameterised forms are measured in component/memql's
+// TestConceptPropertyTypes_AcceptedAndRejectedSets, which is where a decl can
+// be built.
 //
-// Listing the case labels here instead would document a vocabulary nobody can
-// use, which is the same failure this issue is about pointed the other way.
+// An earlier version of this comment claimed no property syntax produces
+// `map` at all. It does -- `map[string]string` builds fine -- and the claim
+// reached the author-facing error text and the docs before review caught it.
+// Kept as a note because the mistake is the one this whole issue is about:
+// a vocabulary asserted from reading a switch rather than measured.
 var acceptedPropertyTypes = []string{
 	"string", "bool", "int", "float", "datetime", "array", "object", "any", "",
 }

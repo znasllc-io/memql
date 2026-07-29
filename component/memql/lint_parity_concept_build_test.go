@@ -139,6 +139,38 @@ func TestConceptPropertyTypes_AcceptedAndRejectedSets(t *testing.T) {
 	})
 }
 
+// TestConceptPropertyTypes_NestedBlockPropertiesAreValidated pins the boundary
+// the docs state. Review round 2 caught that boundary written as "top-level
+// property position", which is wrong: propertyToJSONSchema recurses through a
+// block property's `case "object"` and validates nested properties to the same
+// standard, correction message included.
+//
+// The real line is property position (at ANY depth) versus element-type
+// position inside []<type> / map[string]<type>. Getting it wrong told authors a
+// nested `boolean` was in the harmless zone when it drops the whole concept --
+// the exact failure this issue exists to prevent.
+func TestConceptPropertyTypes_NestedBlockPropertiesAreValidated(t *testing.T) {
+	src := "@version(\"1.0.0\")\n@namespace(\"aud\")\n@description(\"d\")\n" +
+		"concept probe {\n  label string @required @description(\"l\")\n" +
+		"  cfg {\n    inner boolean @description(\"x\")\n  }\n}\n"
+	decls := ExtractConceptDecls(src)
+	if len(decls) == 0 {
+		t.Fatal("fixture did not parse into a concept decl, so it measures nothing")
+	}
+	_, err := concept.BuildConceptFromDecl(decls[0], "v1:aud:probe")
+	if err == nil {
+		t.Fatal("a nested block property typed `boolean` must be rejected. The docs say " +
+			"validation reaches any nesting depth in property position; if that stops being " +
+			"true, an author following them loses a whole concept (memql#2909)")
+	}
+	if !strings.Contains(err.Error(), "did you mean") || !strings.Contains(err.Error(), `"bool"`) {
+		t.Errorf("a nested property must get the same correction a top-level one does.\n  got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "inner") {
+		t.Errorf("the diagnostic must name the nested property.\n  got: %v", err)
+	}
+}
+
 // TestConceptPropertyTypes_ElementTypesAreNotValidated pins the KNOWN GAP that
 // docs/public/language/memql.md now warns about, so the warning and the code
 // cannot drift apart.
@@ -158,7 +190,15 @@ func TestConceptPropertyTypes_AcceptedAndRejectedSets(t *testing.T) {
 // fail, which is the intended signal: whoever closes it must also delete the
 // caveat from the docs.
 func TestConceptPropertyTypes_ElementTypesAreNotValidated(t *testing.T) {
-	for _, ty := range []string{"[]boolean", "[]frobnicate", "map[string]boolean"} {
+	// Includes RECOGNISED types, not just unrecognised ones: review round 2
+	// found `map[string]any` produces a string constraint, so `any` means
+	// "unconstrained" as a property and "must be a string" as an element, and
+	// composite element types collapse entirely. The caveat in the docs had to
+	// widen to match, and so does this.
+	for _, ty := range []string{
+		"[]boolean", "[]frobnicate", "map[string]boolean",
+		"map[string]any", "map[string]map[string]string", "[]map[string]string", "[][]frobnicate",
+	} {
 		src := "@version(\"1.0.0\")\n@namespace(\"aud\")\n@description(\"d\")\n" +
 			"concept probe {\n  label string @required @description(\"l\")\n  f " + ty + " @description(\"x\")\n}\n"
 		decls := ExtractConceptDecls(src)
