@@ -185,7 +185,9 @@ func (e *MemQLEngine) evaluateExpressionSet(ctx context.Context, expr Expression
 	//     `ownerUserId==actor.userId`, and report would-narrow for
 	//     every construct that already carries the term -- inverting
 	//     the measurement this phase exists to produce.
-	recordShadow("", extractConceptFromExpression(expr), ShadowPathFilter, expr)
+	if ShadowEnabled() {
+		recordShadow("", extractConceptFromExpression(expr), ShadowPathFilter, expr)
+	}
 
 	// Resolve any caller.X references using the AccessContext on ctx
 	// before we start compiling SQL. This substitutes *ActorReference
@@ -943,6 +945,31 @@ func (e *MemQLEngine) expandGraph(ctx context.Context, node memorynodes.MemoryNo
 	}
 	builder.addNode(apiNode)
 
+	// Row-authz SHADOW MODE, graph-expansion path (memql#2921).
+	//
+	// This is the path #2803 design decision 3 warns gets missed, and
+	// it needs its own hook because traversal never reaches
+	// evaluateExpressionSet -- it walks relationship definitions from a
+	// row the caller already has.
+	//
+	// PLACED BEFORE the `depth == 0` return, and that placement is the
+	// whole point. The default expansion depth is 1, so a child is
+	// visited with depth 0 and returns immediately below. A hook after
+	// that return therefore only ever sees the ROOT -- the row the
+	// filter path already measured -- and never a row traversal walked
+	// INTO, which is the only thing this hook exists to observe.
+	//
+	// The expression passed is nil, and that is the finding rather than
+	// a gap in the instrumentation: an expansion has NO filter, so it
+	// cannot imply any narrowing predicate. A traversal from a visible
+	// row into a row of an owned/clusterOwner/granted concept reaches a
+	// row the tier would exclude.
+	if ShadowEnabled() {
+		if conceptMeta, cErr := e.conceptForNode(node); cErr == nil && conceptMeta != nil {
+			recordShadow("", conceptMeta.Name, ShadowPathGraphExpansion, nil)
+		}
+	}
+
 	if depth == 0 {
 		return nil
 	}
@@ -956,21 +983,6 @@ func (e *MemQLEngine) expandGraph(ctx context.Context, node memorynodes.MemoryNo
 	if err != nil {
 		return err
 	}
-
-	// Row-authz SHADOW MODE, graph-expansion path (memql#2921).
-	//
-	// This is the path #2803 design decision 3 warns gets missed, and
-	// it needs its own hook because traversal never reaches
-	// evaluateExpressionSet -- it walks relationship definitions from a
-	// row the caller already has.
-	//
-	// The expression passed is nil, and that is the finding rather than
-	// a gap in the instrumentation: an expansion has NO filter, so it
-	// cannot imply any narrowing predicate. A traversal from a visible
-	// row into a row of an owned/clusterOwner/granted concept reaches a
-	// row the tier would exclude. A measurement covering only named
-	// queries would report a clean bill of health it has not earned.
-	recordShadow("", conceptMeta.Name, ShadowPathGraphExpansion, nil)
 
 	defs := e.relationshipDefinitionsForConcept(conceptMeta.Name)
 	if len(defs) == 0 {

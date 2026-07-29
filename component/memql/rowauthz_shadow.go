@@ -163,7 +163,17 @@ func AnalyzeShadow(expr ExpressionNode, decl *langparser.RowAuthzDecl) (ShadowVe
 		// (memql#2832).
 		conjuncts, ok := topLevelConjunctsOf(expr)
 		if !ok {
-			return ShadowWouldNarrow, "filter is a top-level disjunction, so the tier's term is not guaranteed"
+			// A top-level disjunction. `(owner && a) || (owner && b)`
+			// DOES imply the predicate even though no single top-level
+			// conjunct exists, so reporting would-narrow here would be a
+			// confident wrong answer -- and this file's doctrine is that
+			// an overstated blast radius misleads a ruling as badly as an
+			// understated one. Every disjunct implying it is implied;
+			// anything else is undecidable, not narrowed.
+			if allDisjunctsImply(expr, decl) {
+				return ShadowAlreadyImplied, ""
+			}
+			return ShadowUndecidable, "filter is a top-level disjunction and not every arm guarantees the tier's term"
 		}
 		for _, c := range conjuncts {
 			switch {
@@ -196,10 +206,13 @@ func AnalyzeShadow(expr ExpressionNode, decl *langparser.RowAuthzDecl) (ShadowVe
 //
 // A loaded query construct's `Expr` is the full pipeline the struct
 // form compiles to -- `shape(paginate(sort(<filter>), 50), "xFull")` --
-// and every one of those wrappers is a single-target node that changes
-// projection, ordering or windowing, never which rows match. So peeling
-// them is meaning-preserving for this analysis, and NOT peeling them
-// means the analyzer never sees a filter at all.
+// and each of those wrappers is a single-target node. Peeling is sound
+// for THIS analysis -- not because the wrappers cannot affect the
+// result (paginate windows it and asOf pins it in time, both of which
+// do), but because none of them can SUPPLY the tier's term. Peeling can
+// therefore never manufacture an `already-implied`, which is the only
+// direction that would matter. Not peeling means the analyzer never
+// sees a filter at all.
 //
 // CountExpression is deliberately not peeled: #2803 lists aggregates as
 // something row-authz does not solve, and a count over rows you cannot
@@ -274,7 +287,11 @@ func isOwnerScopeLeaf(node ExpressionNode, ownerField string) bool {
 	if !isActor || !strings.EqualFold(strings.TrimSpace(ref.Path), "userId") {
 		return false
 	}
-	return strings.EqualFold(leafFieldName(cmp.Field), strings.TrimSpace(ownerField))
+	field := topLevelPayloadField(cmp.Field)
+	if field == "" {
+		return false
+	}
+	return strings.EqualFold(field, strings.TrimSpace(ownerField))
 }
 
 // isClusterOwnerLeaf reports whether a conjunct is the cluster-owner gate,
@@ -289,10 +306,30 @@ func isClusterOwnerLeaf(node ExpressionNode) bool {
 		!strings.EqualFold(strings.TrimSpace(cmp.Field.Parts[len(cmp.Field.Parts)-1]), "isClusterOwner") {
 		return false
 	}
-	if cmp.Operator != OpEq {
+	switch cmp.Operator {
+	case OpEq:
+		return isTrueLiteral(cmp.Value)
+	case OpNe:
+		// `actor.isClusterOwner != false` is the same gate spelled
+		// inside out. Accepted because the codemod's adminLeafRe
+		// tolerates the equivalent forms and the two detectors must not
+		// disagree about what a cluster-owner gate looks like.
+		return isFalseLiteral(cmp.Value)
+	default:
 		return false
 	}
-	return isTrueLiteral(cmp.Value)
+}
+
+func isFalseLiteral(v any) bool {
+	switch t := v.(type) {
+	case bool:
+		return !t
+	case string:
+		parsed, err := strconv.ParseBool(strings.TrimSpace(t))
+		return err == nil && !parsed
+	default:
+		return false
+	}
 }
 
 func isTrueLiteral(v any) bool {
@@ -307,13 +344,40 @@ func isTrueLiteral(v any) bool {
 	}
 }
 
-// leafFieldName returns the payload property a field reference names,
-// tolerating both the bare spelling and a `payload.`-prefixed one.
-func leafFieldName(f FieldReference) string {
-	if len(f.Parts) == 0 {
+// topLevelPayloadField returns the TOP-LEVEL payload property a field
+// reference names, or "" when the reference is a nested path.
+//
+// The nested case is why this is not simply "the last Part". A tier's
+// predicate compares the concept's own top-level column, so
+// `input.ownerUserId == actor.userId` does NOT imply
+// `ownerUserId == actor.userId` -- it constrains a key inside a nested
+// object that happens to share the name. Taking the last Part accepted
+// it and reported `already-implied`, which under-reports the blast
+// radius: the dangerous direction for a measurement that feeds an
+// enforcement ruling. Nested paths are real here --
+// `plansForResponsibility` filters on `input.responsibilityId`.
+//
+// Phase 1's codemod excludes dotted left-hand sides for the same reason
+// (`ownerLeafRe`, cmd/memqlmigrate/rowauthz_infer.go), so this also
+// keeps the two detectors saying the same thing.
+//
+// `payload.` is accepted as an explicit prefix for the top-level
+// payload object, which is the one dotted spelling that does name a
+// top-level property.
+func topLevelPayloadField(f FieldReference) string {
+	switch len(f.Parts) {
+	case 0:
 		return strings.TrimSpace(f.Raw)
+	case 1:
+		return strings.TrimSpace(f.Parts[0])
+	case 2:
+		if strings.EqualFold(strings.TrimSpace(f.Parts[0]), "payload") {
+			return strings.TrimSpace(f.Parts[1])
+		}
+		return ""
+	default:
+		return ""
 	}
-	return strings.TrimSpace(f.Parts[len(f.Parts)-1])
 }
 
 // firstOpaqueConjunct names the first conjunct whose contribution this
@@ -366,10 +430,9 @@ type shadowCollector struct {
 }
 
 var (
-	shadowOnce      sync.Once
-	shadowEnabled   bool
-	shadowRecordsMu sync.Mutex
-	shadowStore     = &shadowCollector{records: map[string]ShadowRecord{}}
+	shadowOnce    sync.Once
+	shadowEnabled bool
+	shadowStore   = &shadowCollector{records: map[string]ShadowRecord{}}
 )
 
 // ShadowEnabled reports whether shadow mode is on.
@@ -389,7 +452,7 @@ func ShadowEnabled() bool {
 func (c *shadowCollector) add(r ShadowRecord) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.records[r.Construct+"\x00"+r.Concept+"\x00"+r.Path] = r
+	c.records[r.Construct+"\x00"+r.Concept+"\x00"+r.Path+"\x00"+string(r.Verdict)+"\x00"+r.Reason] = r
 }
 
 // ShadowRecords returns everything shadow mode has observed in this
@@ -472,4 +535,44 @@ func recordShadow(construct, conceptName, path string, expr ExpressionNode) {
 // set it to 0".
 func lookupShadowEnv() (string, bool) {
 	return os.LookupEnv("MEMQL_ROWAUTHZ_SHADOW")
+}
+
+// isRowIntrinsicName reports whether a field reference names a row
+// intrinsic (`row.id`, `row.createdBy`, ...) rather than a payload
+// property. The two live in one filter surface but compile to entirely
+// different SQL -- a table column versus a JSONB path -- so a tier can
+// never be hypothesised from an intrinsic.
+func isRowIntrinsicName(f FieldReference) bool {
+	if len(f.Parts) >= 2 && strings.EqualFold(strings.TrimSpace(f.Parts[0]), "row") {
+		return true
+	}
+	switch strings.ToLower(strings.TrimSpace(f.Raw)) {
+	case "id", "concept", "type", "createdat", "createdby", "schema":
+		return true
+	}
+	return false
+}
+
+// allDisjunctsImply reports whether EVERY arm of a top-level
+// disjunction guarantees the tier's predicate. When they all do, the
+// disjunction as a whole does too, even though no single top-level
+// conjunct carries it.
+func allDisjunctsImply(expr ExpressionNode, decl *langparser.RowAuthzDecl) bool {
+	logical, ok := expr.(*LogicalExpression)
+	if !ok || logical.Op != LogicalOr {
+		return false
+	}
+	for _, arm := range []ExpressionNode{logical.Left, logical.Right} {
+		if inner, isOr := arm.(*LogicalExpression); isOr && inner.Op == LogicalOr {
+			if !allDisjunctsImply(arm, decl) {
+				return false
+			}
+			continue
+		}
+		verdict, _ := AnalyzeShadow(arm, decl)
+		if verdict != ShadowAlreadyImplied {
+			return false
+		}
+	}
+	return true
 }

@@ -2,6 +2,9 @@ package memql
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -199,7 +202,7 @@ func TestRowAuthzShadowReport(t *testing.T) {
 	fmt.Fprintf(&b, "can be counted before anyone rules on it.\n\n")
 
 	hypoCounts := map[ShadowVerdict]int{}
-	type hypoRow struct{ construct, concept, tier, reason string }
+	type hypoRow struct{ construct, concept, tier, predicate, reason string }
 	var hypoNarrow []hypoRow
 	hypoConcepts := 0
 
@@ -216,7 +219,7 @@ func TestRowAuthzShadowReport(t *testing.T) {
 			verdict, reason := AnalyzeShadow(fn.Expr, hypo)
 			hypoCounts[verdict]++
 			if verdict == ShadowWouldNarrow {
-				hypoNarrow = append(hypoNarrow, hypoRow{fn.Name, conceptName, string(hypo.Tier), reason})
+				hypoNarrow = append(hypoNarrow, hypoRow{fn.Name, conceptName, string(hypo.Tier), InjectedPredicate(hypo), reason})
 			}
 		}
 	}
@@ -234,8 +237,19 @@ func TestRowAuthzShadowReport(t *testing.T) {
 	fmt.Fprintf(&b, "\n--- WOULD-NARROW under a hypothesised tier (%d constructs) ---\n", len(hypoNarrow))
 	fmt.Fprintf(&b, "Each is either a latent authorization bug or a legitimate broader read\n")
 	fmt.Fprintf(&b, "that needs an explicit declaration. Which one CANNOT be read off the count.\n")
+	fmt.Fprintf(&b, "Entries marked [@public] carry an explicit unscoped-by-intent annotation --\n")
+	fmt.Fprintf(&b, "Phase 1's codemod treats that as a hard blocker, so they are the ones most\n")
+	fmt.Fprintf(&b, "likely to be legitimate rather than defective.\n")
 	for _, r := range hypoNarrow {
-		fmt.Fprintf(&b, "  %-44s %s (%s)\n", r.construct, r.concept, r.tier)
+		// The PREDICATE, not just the tier. A would-narrow list offered
+		// as evidence for an authorization ruling that omits what it
+		// measured against is not checkable by the person ruling.
+		marker := ""
+		if isPublicConstruct(r.construct) {
+			marker = "  [@public]"
+		}
+		fmt.Fprintf(&b, "  %s%s\n      concept   %s (%s)\n      injects   %s\n",
+			r.construct, marker, r.concept, r.tier, r.predicate)
 	}
 
 	declared, total := declaredConceptCounts()
@@ -311,9 +325,15 @@ no filter.
 	for _, r := range measured {
 		if r.verdict == ShadowWouldNarrow {
 			t.Errorf("%s (%s, tier %s) reports would-narrow, but Phase 1 only declared this concept "+
-				"because every query over it already carried %q as a top-level conjunct. "+
-				"The textual inference and this AST analyzer disagree; fix the disagreement before "+
-				"reading this as a blast radius. Reason given: %s",
+				"because every query over it already carried %q as a top-level conjunct.\n"+
+				"Two causes are possible and they need different fixes:\n"+
+				"  (a) a NEW query was added over an already-declared concept. If it carries "+
+				"@serverOnly, the codemod exempts it and this analyzer does not know about the "+
+				"annotation -- teach the analyzer, or re-run the codemod, which would now decline "+
+				"to declare the concept at all.\n"+
+				"  (b) the textual inference and this AST analyzer genuinely disagree about what "+
+				"the term is, which is a defect in one of them.\n"+
+				"Either way this is NOT a blast-radius finding. Reason given: %s",
 				r.construct, r.concept, r.tier, r.predicate, r.reason)
 		}
 	}
@@ -470,7 +490,14 @@ func hypothesiseTier(registry *FunctionRegistry, conceptName string) *langparser
 			}
 			if ref, isActor := cmp.Value.(*ActorReference); isActor &&
 				strings.EqualFold(strings.TrimSpace(ref.Path), "userId") {
-				ownerVotes[leafFieldName(cmp.Field)]++
+				// Only a TOP-LEVEL payload property is a candidate owner
+				// field. A `row.id==actor.userId` term votes for nothing:
+				// `id` is a row intrinsic, and hypothesising the bare
+				// spelling would propose a predicate that compiles to a
+				// JSONB lookup rather than the id column (memql#2779).
+				if f := topLevelPayloadField(cmp.Field); f != "" && !isRowIntrinsicName(cmp.Field) {
+					ownerVotes[f]++
+				}
 			}
 			if isClusterOwnerLeaf(cmp) {
 				adminVotes++
@@ -514,4 +541,45 @@ func flattenForHypothesis(expr ExpressionNode) []ExpressionNode {
 		return append(flattenForHypothesis(logical.Left), flattenForHypothesis(logical.Right)...)
 	}
 	return []ExpressionNode{expr}
+}
+
+// isPublicConstruct reports whether a construct carries `@public` in
+// the authored tree.
+//
+// Read from source rather than from the loaded Function, because
+// `@public` has no field on it -- the annotation is parsed and then
+// consulted by nothing at runtime, which is itself the observation
+// #2918 is open on. Line-anchored so a comment mentioning the
+// annotation is not mistaken for it (memql#2875).
+func isPublicConstruct(name string) bool {
+	paths, err := filepath.Glob(filepath.Join("..", "..", "dsl", "*", "queries.memql"))
+	if err != nil {
+		return false
+	}
+	header := regexp.MustCompile(`(?m)^[ \t]*query[ \t]+[\p{L}_][\p{L}\p{Nd}_]*[ \t]+` + regexp.QuoteMeta(name) + `[ \t]*\{`)
+	public := regexp.MustCompile(`(?m)^[ \t]*@public\b`)
+	for _, path := range paths {
+		raw, readErr := os.ReadFile(path)
+		if readErr != nil {
+			continue
+		}
+		src := string(raw)
+		loc := header.FindStringIndex(src)
+		if loc == nil {
+			continue
+		}
+		// Scan back over the contiguous annotation/comment preamble.
+		start := loc[0]
+		for start > 0 {
+			prevEnd := start - 1
+			ps := strings.LastIndexByte(src[:prevEnd], '\n') + 1
+			trimmed := strings.TrimSpace(src[ps:prevEnd])
+			if trimmed == "" || (!strings.HasPrefix(trimmed, "@") && !strings.HasPrefix(trimmed, "//")) {
+				break
+			}
+			start = ps
+		}
+		return public.MatchString(src[start:loc[0]])
+	}
+	return false
 }

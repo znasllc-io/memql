@@ -1,7 +1,11 @@
 package memql
 
 import (
+	"os"
+	"sort"
+
 	"fmt"
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"strings"
 	"testing"
 
@@ -60,6 +64,14 @@ func TestShadowAlreadyImplied(t *testing.T) {
 		{"public injects nothing", fieldCmp("status", OpEq, "active"), &langparser.RowAuthzDecl{Tier: langparser.RowAuthzPublic}},
 		{"granted, spec named as a conjunct", and(&SpecReferenceExpression{Name: "spaceMember"}, fieldCmp("k", OpEq, "v")),
 			&langparser.RowAuthzDecl{Tier: langparser.RowAuthzGranted, Spec: "spaceMember"}},
+		// Every arm of the disjunction carries the term, so the whole
+		// expression guarantees it even with no top-level conjunct.
+		{"every disjunct carries the term",
+			or(and(ownerScoped("ownerUserId"), fieldCmp("kind", OpEq, "doc")),
+				and(ownerScoped("ownerUserId"), fieldCmp("kind", OpEq, "sheet"))),
+			ownedTier("ownerUserId")},
+		{"admin gate spelled != false", fieldCmp("actor.isClusterOwner", OpNe, false),
+			&langparser.RowAuthzDecl{Tier: langparser.RowAuthzClusterOwner}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -79,15 +91,18 @@ func TestShadowWouldNarrow(t *testing.T) {
 		decl *langparser.RowAuthzDecl
 	}{
 		{"no caller term at all", fieldCmp("spaceId", OpEq, "s1"), ownedTier("ownerUserId")},
+		// A nested path whose LEAF happens to match is not the concept's
+		// top-level column. Reading it as the owner term reported
+		// already-implied for filters enforcement WOULD narrow -- the
+		// dangerous direction for a measurement feeding a ruling.
+		{"nested path with a matching leaf", ownerScoped("input.ownerUserId"), ownedTier("ownerUserId")},
+		{"deeply nested path", ownerScoped("a.b.c.ownerUserId"), ownedTier("ownerUserId")},
+		{"row intrinsic, not a payload field", ownerScoped("row.ownerUserId"), ownedTier("ownerUserId")},
 		{"different owner field", ownerScoped("requestedBy"), ownedTier("ownerUserId")},
 		{"no filter at all", nil, ownedTier("ownerUserId")},
 		{"admin tier, unrelated filter", fieldCmp("status", OpEq, "open"), &langparser.RowAuthzDecl{Tier: langparser.RowAuthzClusterOwner}},
 		// memql#2832: a term under a top-level `||` guarantees nothing --
 		// the other arm still returns rows the caller does not own.
-		{"owner term under a top-level disjunction", or(ownerScoped("ownerUserId"), fieldCmp("visibility", OpEq, "public")), ownedTier("ownerUserId")},
-		{"owner term under a disjunction, && binding tighter",
-			or(and(ownerScoped("ownerUserId"), fieldCmp("kind", OpEq, "doc")), fieldCmp("shared", OpEq, true)),
-			ownedTier("ownerUserId")},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -119,6 +134,14 @@ func TestShadowUndecidable(t *testing.T) {
 			and(&BuiltinFunctionExpression{Name: "concepts"}, fieldCmp("k", OpEq, "v")), ownedTier("ownerUserId")},
 		{"granted tier needs relationship semantics",
 			fieldCmp("spaceId", OpEq, "s1"), &langparser.RowAuthzDecl{Tier: langparser.RowAuthzGranted, Spec: "spaceMember"}},
+		// memql#2832 in the honest direction: one arm carries the term
+		// and the other does not, so the disjunction guarantees nothing
+		// -- but it is not a CONFIDENT narrowing either.
+		{"owner term is only one arm of a disjunction",
+			or(ownerScoped("ownerUserId"), fieldCmp("visibility", OpEq, "public")), ownedTier("ownerUserId")},
+		{"owner term under a disjunction, && binding tighter",
+			or(and(ownerScoped("ownerUserId"), fieldCmp("kind", OpEq, "doc")), fieldCmp("shared", OpEq, true)),
+			ownedTier("ownerUserId")},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -222,26 +245,148 @@ func TestShadowOffByDefault(t *testing.T) {
 	}
 }
 
-// The gate must not change what a read returns. This runs the same
-// analysis path the hook runs, with the gate on, and asserts the
-// expression handed onward is byte-identical -- the hook's only effect
-// is an append to the collector.
-func TestShadowHookDoesNotTouchTheExpression(t *testing.T) {
-	t.Setenv("MEMQL_ROWAUTHZ_SHADOW", "1")
-	// ShadowEnabled memoises, so force the gate for this test rather
-	// than relying on env ordering.
-	shadowOnce.Do(func() {})
+// forceShadow turns the gate on for one test without touching the
+// sync.Once. Doing `shadowOnce.Do(func(){})` instead PERMANENTLY
+// poisons the gate: if the Once had not already fired, the no-op
+// leaves shadowEnabled false for the rest of the process, and every
+// later gate-on assertion silently measures nothing.
+func forceShadow(t *testing.T) {
+	t.Helper()
 	prev := shadowEnabled
 	shadowEnabled = true
 	t.Cleanup(func() { shadowEnabled = prev })
+}
 
+// The gate must not change what a read returns, and the hook must not
+// touch the expression it is handed.
+//
+// It uses a REAL declared concept. Passing an unknown one made this
+// vacuous: recordShadow returns before reaching the analyzer for an
+// undeclared concept (which TestShadowSkipsUndeclaredConcepts proves),
+// so it asserted that a code path doing nothing changed nothing.
+func TestShadowHookDoesNotTouchTheExpression(t *testing.T) {
+	if _, err := LoadUnifiedConcepts(nil); err != nil {
+		t.Fatalf("LoadUnifiedConcepts: %v", err)
+	}
+	declared := aDeclaredConcept(t)
+
+	forceShadow(t)
 	ResetShadowRecords()
+
 	expr := and(ownerScoped("ownerUserId"), fieldCmp("status", OpEq, "active"))
 	before := fmt.Sprintf("%#v %#v", expr.Left, expr.Right)
 
-	recordShadow("probe", "v1:nope:missing", ShadowPathFilter, expr)
+	recordShadow("probe", declared, ShadowPathFilter, expr)
 
 	if after := fmt.Sprintf("%#v %#v", expr.Left, expr.Right); after != before {
 		t.Fatalf("the hook mutated the expression:\n before %s\n after  %s", before, after)
+	}
+	// And it must actually have measured something, or the assertion
+	// above is worthless.
+	if n := len(ShadowRecords()); n != 1 {
+		t.Fatalf("recorded %d entries for a DECLARED concept, want 1 -- the test is vacuous otherwise", n)
+	}
+}
+
+// aDeclaredConcept returns the name of a concept that carries a tier,
+// so a test can exercise the path that actually runs the analyzer.
+func aDeclaredConcept(t *testing.T) string {
+	t.Helper()
+	names := make([]string, 0)
+	for name, c := range memorynodes.All() {
+		if c != nil && c.RowAuthz != nil {
+			names = append(names, name)
+		}
+	}
+	if len(names) == 0 {
+		t.Skip("no concept in the tree declares a tier")
+	}
+	sort.Strings(names)
+	return names[0]
+}
+
+// THE GUARD THE DOCS PROMISED.
+//
+// The analyzer must see the expression BEFORE resolveActorReferences.
+// TestShadowMustSeeUnresolvedActorReferences proves the ANALYZER
+// distinguishes the two forms, but it builds its own expressions and is
+// completely uncoupled from the call site -- moving the hook after
+// resolution left the whole package green.
+//
+// This reads the executor's source and asserts the call ordering
+// directly. Structural rather than behavioural, because the behavioural
+// version needs a live database; and the failure it guards against is
+// silent and total (every construct that hand-writes the term flips to
+// would-narrow, inverting the measurement).
+func TestShadowHookRunsBeforeActorResolution(t *testing.T) {
+	src, err := os.ReadFile("executor.go")
+	if err != nil {
+		t.Fatalf("read executor.go: %v", err)
+	}
+	text := string(src)
+
+	fnStart := strings.Index(text, "func (e *MemQLEngine) evaluateExpressionSet(")
+	if fnStart < 0 {
+		t.Fatal("evaluateExpressionSet not found -- this guard needs re-aiming")
+	}
+	// Bound the search at the next top-level func so a later call
+	// cannot satisfy it.
+	fnEnd := strings.Index(text[fnStart+1:], "\nfunc ")
+	if fnEnd < 0 {
+		fnEnd = len(text) - fnStart - 1
+	}
+	body := text[fnStart : fnStart+1+fnEnd]
+
+	hook := strings.Index(body, "recordShadow(")
+	resolve := strings.Index(body, "resolveActorReferences(")
+	if hook < 0 {
+		t.Fatal("evaluateExpressionSet no longer calls recordShadow -- the filter read path is unmeasured")
+	}
+	if resolve < 0 {
+		t.Fatal("evaluateExpressionSet no longer calls resolveActorReferences -- this guard needs re-aiming")
+	}
+	if hook > resolve {
+		t.Fatal("the shadow hook now runs AFTER resolveActorReferences. That function substitutes " +
+			"actor.userId with the caller's concrete id, so the analyzer would see " +
+			"`ownerUserId==\"u_123\"` where the author wrote `ownerUserId==actor.userId` and report " +
+			"would-narrow for every construct that already carries the term -- inverting the whole " +
+			"measurement, silently. Move the hook back above resolveActorReferences.")
+	}
+}
+
+// The graph-expansion hook must run BEFORE the depth==0 early return.
+// The default expansion depth is 1, so a child is visited with depth 0;
+// a hook below that return only ever sees the root, which the filter
+// path already measured, and never a row traversal walked INTO.
+func TestGraphShadowHookRunsBeforeTheDepthGuard(t *testing.T) {
+	src, err := os.ReadFile("executor.go")
+	if err != nil {
+		t.Fatalf("read executor.go: %v", err)
+	}
+	text := string(src)
+
+	fnStart := strings.Index(text, "func (e *MemQLEngine) expandGraph(")
+	if fnStart < 0 {
+		t.Fatal("expandGraph not found -- this guard needs re-aiming")
+	}
+	fnEnd := strings.Index(text[fnStart+1:], "\nfunc ")
+	if fnEnd < 0 {
+		fnEnd = len(text) - fnStart - 1
+	}
+	body := text[fnStart : fnStart+1+fnEnd]
+
+	hook := strings.Index(body, "ShadowPathGraphExpansion")
+	depthGuard := strings.Index(body, "if depth == 0 {")
+	if hook < 0 {
+		t.Fatal("expandGraph no longer records a graph-expansion verdict -- the traversal path is unmeasured")
+	}
+	if depthGuard < 0 {
+		t.Fatal("expandGraph's depth guard not found -- this guard needs re-aiming")
+	}
+	if hook > depthGuard {
+		t.Fatal("the graph-expansion hook now runs after the `depth == 0` return. The default depth " +
+			"is 1, so children are visited with depth 0 and return before reaching it -- the hook " +
+			"would only ever see the root row, which the filter path already measured, and never a " +
+			"row traversal walked into. That is the only thing this hook exists to observe.")
 	}
 }
