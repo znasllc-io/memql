@@ -56,11 +56,6 @@ type SchedulerOptions struct {
 	EventBus     *events.Bus
 	StepRegistry StepExecutorRegistry
 
-	// Step-level caching options
-	StepCacheEnabled    bool
-	StepCacheMaxBytes   int64
-	StepCacheDefaultTTL time.Duration
-
 	// LeaderGate, when set, restricts SCHEDULED (cron) automation execution
 	// to the one cluster-wide leader node (#561). nil = every node runs
 	// crons (pre-#561 / single-node default). Typically CronLeader.IsLeader.
@@ -118,10 +113,7 @@ func NewScheduler(opts SchedulerOptions) (*Scheduler, error) {
 		ChainTrackingEnabled:    true,
 		DedupEnabled:            true,              // Idempotency for event-triggered runs
 		ClusterGuard:            opts.ClusterGuard, // cross-replica idempotency (#561)
-		StepCacheEnabled:        opts.StepCacheEnabled,
-		StepCacheMaxBytes:       opts.StepCacheMaxBytes,
-		StepCacheDefaultTTL:     opts.StepCacheDefaultTTL,
-		MaxConcurrentExecutions: 10, // Limit concurrent event-triggered automations
+		MaxConcurrentExecutions: 10,                // Limit concurrent event-triggered automations
 	})
 
 	// Create executor for scheduled/manual automations
@@ -136,28 +128,8 @@ func NewScheduler(opts SchedulerOptions) (*Scheduler, error) {
 		AutomationTrigger:       s,
 		ChainTrackingEnabled:    true,
 		DedupEnabled:            false, // Scheduled/manual runs always execute
-		StepCacheEnabled:        opts.StepCacheEnabled,
-		StepCacheMaxBytes:       opts.StepCacheMaxBytes,
-		StepCacheDefaultTTL:     opts.StepCacheDefaultTTL,
-		MaxConcurrentExecutions: 5, // Limit concurrent scheduled automations
+		MaxConcurrentExecutions: 5,     // Limit concurrent scheduled automations
 	})
-
-	// Log cache configuration
-	if opts.StepCacheEnabled {
-		effectiveMaxBytes := opts.StepCacheMaxBytes
-		if effectiveMaxBytes == 0 {
-			effectiveMaxBytes = 256 * 1024 * 1024 // Default from step_cache.go
-		}
-		effectiveTTL := opts.StepCacheDefaultTTL
-		if effectiveTTL == 0 {
-			effectiveTTL = 5 * time.Minute // Default from executor.go
-		}
-		logger.Info("step cache enabled",
-			"component", ComponentName,
-			"maxBytes", effectiveMaxBytes,
-			"defaultTTL", effectiveTTL,
-		)
-	}
 
 	return s, nil
 }

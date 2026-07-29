@@ -355,15 +355,21 @@ func (e *Evaluator) ContextFingerprint() map[string]any {
 // WAS what kept it re-running. That is a cache-invalidation strategy made of
 // wall-clock granularity, which is not one: it narrows the window rather than
 // closing it, since the entry is TTL-bounded (default 5m) either way. The real
-// defect is that a side-effecting `logic` step is classified cacheable at all
-// (Step.IsCacheable), pre-existing and filed as memql#2869 -- this change unmasks
-// it rather than causing it, and the status quo it replaces is a cache that
-// provably can never hit.
+// defect was that a side-effecting `logic` step was classified cacheable at all,
+// filed as memql#2869 -- this change unmasked it rather than causing it. Both are
+// now moot: memql#2899 deleted the step cache outright, so the classifier
+// (Step.IsCacheable) and the cache it fed no longer exist.
 //
-// Only the function-step cache reads this (FingerprintStepInput), and it is
-// off by default behind MEMQL_STEP_CACHE_ENABLED -- set in no deploy overlay.
-// Dedup is unaffected: ComputeInitialChainHead keys on event data plus the
-// input fingerprint, not on evaluator customs.
+// UNUSED SINCE memql#2899. Its only consumer was the automation step cache,
+// which was deleted: it had no DSL surface, no live cacheable steps, and its
+// env flag was set in no overlay. The chain FingerprintStepInput ->
+// ContextFingerprint -> fingerprintCustoms is now reachable only from tests.
+// Left in place rather than deleted with the cache, because
+// fingerprint_clock_test.go encodes the #2823/#2867 lesson about clock-shaped
+// cache keys and removing it is a separate decision -- see the follow-up issue.
+//
+// Dedup is unaffected either way: ComputeInitialChainHead keys on event data
+// plus FingerprintInput, neither of which touches evaluator customs.
 func fingerprintCustoms(custom map[string]any) map[string]any {
 	out := make(map[string]any, len(custom))
 	for k, v := range custom {

@@ -171,15 +171,13 @@ func (a *App) engineAndBus() {
 	a.Dependencies = append(a.Dependencies, outboundWorker)
 
 	a.automationScheduler, err = automations.NewScheduler(automations.SchedulerOptions{
-		Logger:              nil,
-		Loader:              a.automationLoader,
-		Engine:              a.engine,
-		EventBus:            a.eventBus,
-		StepRegistry:        a.stepRegistry,
-		StepCacheEnabled:    os.Getenv("MEMQL_STEP_CACHE_ENABLED") == "true",
-		StepCacheDefaultTTL: 5 * time.Minute,
-		LeaderGate:          cronLeader.IsLeader,
-		ClusterGuard:        clusterGuard,
+		Logger:       nil,
+		Loader:       a.automationLoader,
+		Engine:       a.engine,
+		EventBus:     a.eventBus,
+		StepRegistry: a.stepRegistry,
+		LeaderGate:   cronLeader.IsLeader,
+		ClusterGuard: clusterGuard,
 	})
 	if err != nil {
 		a.fatal("failed to create automation scheduler", "error", err, "component", automations.ComponentName)

@@ -2078,9 +2078,8 @@ type ConfigSnapshot struct {
 	DbMaxOpenConns int32  `protobuf:"varint,2,opt,name=db_max_open_conns,json=dbMaxOpenConns,proto3" json:"db_max_open_conns,omitempty"`
 	DbMaxIdleConns int32  `protobuf:"varint,3,opt,name=db_max_idle_conns,json=dbMaxIdleConns,proto3" json:"db_max_idle_conns,omitempty"`
 	// Engine
-	EngineMaxResults       int32 `protobuf:"varint,10,opt,name=engine_max_results,json=engineMaxResults,proto3" json:"engine_max_results,omitempty"`
-	EngineMaxWindow        int32 `protobuf:"varint,11,opt,name=engine_max_window,json=engineMaxWindow,proto3" json:"engine_max_window,omitempty"`
-	EngineStepCacheEnabled bool  `protobuf:"varint,12,opt,name=engine_step_cache_enabled,json=engineStepCacheEnabled,proto3" json:"engine_step_cache_enabled,omitempty"`
+	EngineMaxResults int32 `protobuf:"varint,10,opt,name=engine_max_results,json=engineMaxResults,proto3" json:"engine_max_results,omitempty"`
+	EngineMaxWindow  int32 `protobuf:"varint,11,opt,name=engine_max_window,json=engineMaxWindow,proto3" json:"engine_max_window,omitempty"`
 	// AI
 	SiOpenaiApiKey    string `protobuf:"bytes,20,opt,name=si_openai_api_key,json=siOpenaiApiKey,proto3" json:"si_openai_api_key,omitempty"`
 	SiOpenaiProjectId string `protobuf:"bytes,21,opt,name=si_openai_project_id,json=siOpenaiProjectId,proto3" json:"si_openai_project_id,omitempty"`
@@ -2189,13 +2188,6 @@ func (x *ConfigSnapshot) GetEngineMaxWindow() int32 {
 		return x.EngineMaxWindow
 	}
 	return 0
-}
-
-func (x *ConfigSnapshot) GetEngineStepCacheEnabled() bool {
-	if x != nil {
-		return x.EngineStepCacheEnabled
-	}
-	return false
 }
 
 func (x *ConfigSnapshot) GetSiOpenaiApiKey() string {
@@ -2929,15 +2921,14 @@ const file_bus_proto_rawDesc = "" +
 	"\x0fsubscription_id\x18\x01 \x01(\tR\x0esubscriptionId\"u\n" +
 	"\vEventNotify\x12'\n" +
 	"\x0fsubscription_id\x18\x01 \x01(\tR\x0esubscriptionId\x12=\n" +
-	"\x05event\x18\x02 \x01(\v2'.znasllc.memql.internal.v1.EventPublishR\x05event\"\xef\v\n" +
+	"\x05event\x18\x02 \x01(\v2'.znasllc.memql.internal.v1.EventPublishR\x05event\"\xd5\v\n" +
 	"\x0eConfigSnapshot\x12\x15\n" +
 	"\x06db_dsn\x18\x01 \x01(\tR\x05dbDsn\x12)\n" +
 	"\x11db_max_open_conns\x18\x02 \x01(\x05R\x0edbMaxOpenConns\x12)\n" +
 	"\x11db_max_idle_conns\x18\x03 \x01(\x05R\x0edbMaxIdleConns\x12,\n" +
 	"\x12engine_max_results\x18\n" +
 	" \x01(\x05R\x10engineMaxResults\x12*\n" +
-	"\x11engine_max_window\x18\v \x01(\x05R\x0fengineMaxWindow\x129\n" +
-	"\x19engine_step_cache_enabled\x18\f \x01(\bR\x16engineStepCacheEnabled\x12)\n" +
+	"\x11engine_max_window\x18\v \x01(\x05R\x0fengineMaxWindow\x12)\n" +
 	"\x11si_openai_api_key\x18\x14 \x01(\tR\x0esiOpenaiApiKey\x12/\n" +
 	"\x14si_openai_project_id\x18\x15 \x01(\tR\x11siOpenaiProjectId\x12.\n" +
 	"\x13si_default_provider\x18\x16 \x01(\tR\x11siDefaultProvider\x12!\n" +
@@ -2969,7 +2960,7 @@ const file_bus_proto_rawDesc = "" +
 	"\x17cognition_fit_threshold\x18n \x01(\x01R\x15cognitionFitThreshold\x1a?\n" +
 	"\x11FeatureFlagsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"R\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01J\x04\b\f\x10\rR\x19engine_step_cache_enabled\"R\n" +
 	"\fConfigUpdate\x12\x14\n" +
 	"\x05field\x18\x01 \x01(\tR\x05field\x12,\n" +
 	"\x05value\x18\x02 \x01(\v2\x16.google.protobuf.ValueR\x05value\"\x82\x02\n" +
