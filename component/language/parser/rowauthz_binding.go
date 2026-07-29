@@ -354,8 +354,33 @@ func RewriteRowAuthz(src []byte, tiers map[string]RowAuthzDecl) ([]byte, error) 
 	// annotations, comments, and blank lines between them.
 	prevEnd := 0
 	for _, h := range headers {
-		region := text[prevEnd:h.End]
-		prevEnd = h.End
+		// Header STARTS are monotonic (the regex scans forward), but
+		// header ENDS are not: a spurious header -- a field named
+		// `concept`, or a real one in a file whose braces do not
+		// balance -- closes on the first `{...}` after it, which can
+		// be before the enclosing construct's close. So `prevEnd` can
+		// overshoot this header, and `text[prevEnd:h.End]` would slice
+		// backwards and panic on input this function is supposed to
+		// merely decline to rewrite.
+		//
+		// Clamping to the preamble bound restores the invariant
+		// (PreambleStart <= Start <= End) and does the right thing for
+		// the silent-corruption variant too: when a spurious header
+		// pushes prevEnd past a REAL following concept, that concept's
+		// region would otherwise be empty, its existing declaration
+		// invisible, and a duplicate inserted.
+		regionStart := prevEnd
+		if regionStart > h.Start {
+			regionStart = h.PreambleStart
+		}
+		regionEnd := h.End
+		if regionEnd < h.Start {
+			regionEnd = h.Start
+		}
+		region := text[regionStart:regionEnd]
+		if h.End > prevEnd {
+			prevEnd = h.End
+		}
 
 		decl, want := tiers[h.Name]
 		if !want {

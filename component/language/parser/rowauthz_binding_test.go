@@ -367,6 +367,68 @@ concept second {
 	}
 }
 
+// Header ends are not monotonic: a spurious header (a field named
+// `concept`, or a file whose braces do not balance) closes on the
+// first block after it, which can be BEFORE the enclosing construct's
+// close. The rewrite must decline such input, not panic on it.
+func TestRewriteRowAuthzSurvivesNonMonotonicHeaders(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+	}{
+		{"unclosed concept", "concept note {\n  ownerUserId string\n\nconcept tag {\n  ownerUserId string\n}\n"},
+		{"field named concept", "concept a {\n  concept  string\n}\n\nconcept b {\n  ownerUserId string\n}\n"},
+		{"nested concept-looking line", "concept a {\n  x object {\n    concept  string\n  }\n}\n"},
+	}
+	tiers := map[string]RowAuthzDecl{
+		"note": {Tier: RowAuthzOwned, Owner: "ownerUserId"},
+		"tag":  {Tier: RowAuthzOwned, Owner: "ownerUserId"},
+		"a":    {Tier: RowAuthzPublic},
+		"b":    {Tier: RowAuthzOwned, Owner: "ownerUserId"},
+		"x":    {Tier: RowAuthzPublic},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// The contract is "returns", not "returns unchanged" -- a
+			// panic is the defect.
+			if _, err := RewriteRowAuthz([]byte(tc.src), tiers); err != nil {
+				t.Logf("declined with an error, which is fine: %v", err)
+			}
+		})
+	}
+}
+
+// The silent-corruption half of the same root cause: a spurious header
+// between two real concepts must not make the second concept's
+// existing declaration invisible, or a duplicate gets inserted and the
+// tree stops loading.
+func TestRewriteRowAuthzDoesNotDoubleDeclareAfterASpuriousHeader(t *testing.T) {
+	src := []byte(`concept a {
+  concept  string
+}
+
+@rowAuthz(public)
+concept b {
+  ownerUserId string
+}
+`)
+	out, err := RewriteRowAuthz(src, map[string]RowAuthzDecl{
+		"a": {Tier: RowAuthzPublic},
+		"b": {Tier: RowAuthzOwned, Owner: "ownerUserId"},
+	})
+	if err != nil {
+		t.Fatalf("RewriteRowAuthz: %v", err)
+	}
+	if n := strings.Count(string(out), "@rowAuthz"); n > 2 {
+		t.Fatalf("concept b was declared twice (%d @rowAuthz lines):\n%s", n, out)
+	}
+	// Specifically: b must not gain a second one on top of its own.
+	if strings.Contains(string(out), "@rowAuthz(owner=\"ownerUserId\")\n@rowAuthz(public)") ||
+		strings.Contains(string(out), "@rowAuthz(public)\n@rowAuthz(owner=\"ownerUserId\")") {
+		t.Fatalf("two declarations stacked on one concept:\n%s", out)
+	}
+}
+
 // A doc comment or a string MENTIONING the annotation is prose, not a
 // declaration -- dropping the line anchor must not cost that.
 func TestRowAuthzDeclaredInSourceIgnoresProse(t *testing.T) {

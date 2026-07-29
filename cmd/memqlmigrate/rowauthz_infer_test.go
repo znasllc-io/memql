@@ -349,20 +349,71 @@ func TestAMutationNeitherVotesNorBlocks(t *testing.T) {
 	}
 }
 
-// A mutation whose stamped value happens to mention actor.userId must
-// not be read as establishing a tier on its own.
-func TestAMutationCannotEstablishATier(t *testing.T) {
+// The verdict itself, asserted directly. Going through inferRowAuthz
+// here would be vacuous: a mutation has no `filter` line, so it
+// abstains via the no-clause path whether or not the exempt branch
+// exists, and the test would pass against an implementation that
+// blocks on every mutation.
+func TestClassifyConstructVerdicts(t *testing.T) {
+	cases := []struct {
+		name     string
+		kind     string
+		preamble string
+		body     string
+		want     verdictKind
+	}{
+		{"mutation stamping the actor", "mutate", "", "{\n  insert {\n    ownerUserId: actor.userId\n  }\n}", verdictExempt},
+		{"mutation updating by arg", "mutate", "", "{\n  update {\n    id: args.noteId\n  }\n}", verdictExempt},
+		{"serverOnly query", "query", "@serverOnly\n", "{\n  filter  row.id==args.id\n}", verdictExempt},
+		{"public query", "query", "@public\n", "{\n  filter  active==true\n}", verdictBlocks},
+		{"query with no filter", "query", "", "{\n  shape noteFull\n}", verdictBlocks},
+		{"unscoped query", "query", "", "{\n  filter  spaceId==args.spaceId\n}", verdictBlocks},
+		{"caller-scoped query", "query", "", "{\n  filter  ownerUserId==actor.userId\n}", verdictVote},
+		{"admin-gated query", "query", "", "{\n  filter  actor.isClusterOwner==true\n}", verdictVote},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := classifyConstruct(tc.kind, tc.preamble, tc.body, tc.body)
+			if got.Kind != tc.want {
+				t.Fatalf("classifyConstruct(%s) Kind = %v, want %v (reason %q, decl %+v)",
+					tc.kind, got.Kind, tc.want, got.Reason, got.Decl)
+			}
+			if got.Kind == verdictBlocks && got.Reason == "" {
+				t.Fatal("a blocking verdict must carry a reason")
+			}
+			if got.Kind == verdictVote {
+				if _, err := langparser.FormatRowAuthz(got.Decl); err != nil {
+					t.Fatalf("a vote must carry a formattable decl: %v", err)
+				}
+			}
+		})
+	}
+}
+
+// An @serverOnly separated from its header by a comment line must
+// still be seen. Computing the preamble boundary on the blanked view
+// stops at the comment (it trims to ""), which silently reclassifies
+// the construct as a blocker.
+func TestPreambleReachesPastACommentLine(t *testing.T) {
 	got := inferOne(t, map[string]string{
-		"notes/concepts.memql": "concept note {\n  ownerUserId string\n}\n",
-		"notes/mutations.memql": `mutate note createNote {
-  insert {
-    ownerUserId: actor.userId
-  }
+		"identity/concepts.memql": "concept user {\n  ownerUserId string\n}\n",
+		"identity/queries.memql": `query user myUser {
+  filter  ownerUserId==actor.userId
+  shape   userFull
+}
+
+@serverOnly
+// Resolves sub -> user before an actor exists.
+query user userById {
+  filter  row.id==args.id
+  shape   userFull
 }
 `,
 	})
-	if decl, ok := got.Tiers["notes"]["note"]; ok {
-		t.Fatalf("a mutation established %+v; only queries may vote", decl)
+	want := langparser.RowAuthzDecl{Tier: langparser.RowAuthzOwned, Owner: "ownerUserId"}
+	if got.Tiers["identity"]["user"] != want {
+		t.Fatalf("inferred %+v, want %+v -- the @serverOnly above a comment line was lost (abstained: %v)",
+			got.Tiers["identity"]["user"], want, got.Abstained)
 	}
 }
 
@@ -445,9 +496,17 @@ func TestReportStatesWhatItDidNotExamine(t *testing.T) {
 	report := inferOne(t, map[string]string{
 		"notes/concepts.memql": "concept note {\n  x string\n}\n",
 	}).Report()
-	for _, want := range []string{"NOT examined", "mutations", "granted", "public"} {
-		if !strings.Contains(report, want) {
-			t.Fatalf("report = %q, want it to state that %q is not examined", report, want)
+	idx := strings.Index(report, "NOT examined")
+	if idx < 0 {
+		t.Fatalf("report = %q, want a section stating what was not examined", report)
+	}
+	// Assert against THAT section only -- "public" and "granted" also
+	// appear in the tier table above it, which would make this pass
+	// regardless.
+	limits := report[idx:]
+	for _, want := range []string{"mutations", "granted", "public"} {
+		if !strings.Contains(limits, want) {
+			t.Fatalf("the not-examined section = %q, want it to name %q", limits, want)
 		}
 	}
 }

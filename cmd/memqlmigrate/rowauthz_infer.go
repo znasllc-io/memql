@@ -224,7 +224,11 @@ func inferRowAuthz(dslRoot string) (*rowAuthzInference, error) {
 			}
 
 			bodyStart, bodyEnd := constructBodyRange(blanked, m[0])
-			preamble := constructPreamble(blanked, m[0])
+			// Boundary from the raw view (a blanked comment line is
+			// indistinguishable from a blank one), content from the
+			// blanked view (so a `@public` inside a block comment is
+			// prose, not an annotation).
+			preamble := blanked[constructPreambleStart(f.src, m[0]):m[0]]
 			// The blanker is length-preserving, so one offset pair
 			// indexes both views. Classification reads the BLANKED
 			// body (a `&&` inside a string must not split a clause);
@@ -521,20 +525,28 @@ func constructBodyRange(blanked string, headerStart int) (int, int) {
 	return start, len(blanked)
 }
 
-// constructPreamble returns the contiguous run of annotation and
-// comment lines immediately above a construct header.
-func constructPreamble(src string, headerStart int) string {
+// constructPreambleStart walks back from a construct header over the
+// contiguous run of annotation and comment lines that belong to it,
+// and returns where that run begins.
+//
+// It must be given the RAW source. On the blanked view a comment line
+// is all spaces, so it trims to "" and the walk stops there -- which
+// made the `//` branch dead code and, worse, hid an `@serverOnly`
+// sitting above a comment line. The annotation MATCHING still happens
+// on the blanked view (see the caller), so a `@public` inside a block
+// comment is still prose; only the boundary is computed on raw text.
+func constructPreambleStart(raw string, headerStart int) int {
 	lineStart := headerStart
 	for lineStart > 0 {
 		prevEnd := lineStart - 1
-		ps := strings.LastIndexByte(src[:prevEnd], '\n') + 1
-		trimmed := strings.TrimSpace(src[ps:prevEnd])
+		ps := strings.LastIndexByte(raw[:prevEnd], '\n') + 1
+		trimmed := strings.TrimSpace(raw[ps:prevEnd])
 		if trimmed == "" || (!strings.HasPrefix(trimmed, "@") && !strings.HasPrefix(trimmed, "//")) {
 			break
 		}
 		lineStart = ps
 	}
-	return src[lineStart:headerStart]
+	return lineStart
 }
 
 // Report renders the run's tier distribution and the abstentions, so a
