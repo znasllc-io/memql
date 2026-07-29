@@ -456,6 +456,13 @@ variables:
     optional: true
     description: "Repository root the deploy-control executor is anchored at; defaults to the process working directory."
 
+  - name: MEMQL_ROWAUTHZ_SHADOW
+    component: engine
+    scope: node
+    default: "false"
+    optional: true
+    description: "Row-authz SHADOW MODE (memql#2921). When true, the engine computes the predicate each concept's @rowAuthz declaration WOULD inject, decides whether the author's filter already implies it, and records a verdict (already-implied / would-narrow / undecidable). It INJECTS NOTHING: no predicate is added and no query returns a different row set with this on. A measurement tool for the #2803 Phase 3 enforcement ruling, not a production code path -- leave unset. The tree-wide measurement does not need this var at all; run `go test ./component/memql/ -run TestRowAuthzShadowReport -v`."
+
   - name: MEMQL_DSL_ALLOW_SKIPS
     component: engine
     scope: node
