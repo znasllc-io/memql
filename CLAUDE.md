@@ -1777,11 +1777,19 @@ Three ways to extend memQL, in preference order:
    whose dependencies don't fit `PluginContext` (cognition, agent,
    stt). Lives in `app/integrations_*.go` with build tags.
 
-Routing + concept ownership are also plug-in-registerable:
-`node.RegisterRoutingRule(...)` for event routing patterns,
-`node.RegisterConceptOwnership(prefix, nodeType)` for which node type
-handles queries against a given concept prefix. Both called from
-`init()` (see the product pack's routing registration file for an example).
+Event routing is also plug-in-registerable: `node.RegisterRoutingRule(...)`
+declares forwarding patterns from `init()`, and build tags on the caller
+decide which binaries include the registration (see the product pack's
+routing registration file for an example). Forwarding is default-deny --
+block rules evaluate first, then forward rules, and an event matching
+neither stays local.
+
+There is no concept-ownership registry. `node.RegisterConceptOwnership`
+existed once and was deleted with `component/node/query_proxy.go` in
+`ac3a751e` ("drop per-node @visibility filtering + concept-ownership
+routing"). Which node does a concept's work is now decided by routing
+rules plus which binary's build tags compile the subscriber -- there is
+no per-concept dispatch table to register into.
 
 ### MemQL Sense (Language Intelligence)
 Language service for .memql files, exposed via gRPC on `MemqlService.Stream`:

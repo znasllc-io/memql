@@ -41,15 +41,18 @@ order. None of the three core services adds a fifth.
 
 Two facts up front, because they shape the conclusion:
 
-- **There is no `RegisterConceptOwnership`.** The 2.1-era note in the
-  repo `CLAUDE.md` mentions a `node.RegisterConceptOwnership(prefix,
-  nodeType)` primitive. It does not exist in the tree -- a
-  whole-repo `grep -rni 'RegisterConceptOwnership' --include='*.go'`
-  returns nothing. Which node owns a concept's work is decided
-  entirely by **routing rules** (mechanism 3) plus which binary's
-  build tags compile the subscriber. The `CLAUDE.md` line is stale and
-  should be corrected separately (out of scope for this audit; tracked
-  as a doc follow-up).
+- **There is no `RegisterConceptOwnership`.** A whole-repo
+  `grep -rni 'RegisterConceptOwnership' --include='*.go'` returns
+  nothing. Which node owns a concept's work is decided entirely by
+  **routing rules** (mechanism 3) plus which binary's build tags
+  compile the subscriber.
+
+  It is not a primitive that was never built: it existed, and was
+  deleted with `component/node/query_proxy.go` in `ac3a751e` ("drop
+  per-node @visibility filtering + concept-ownership routing"). The
+  stale prose this audit flagged in `CLAUDE.md`, `integrations/arch.md`
+  and `docs/public/operate/downstream-stacks.md` outlived that removal
+  by 74 days; corrected in memql#2922.
 - **`AgentForwarder` is internal transport, not a pack hook.** Both
   cognition (`integrations/cognition/agent_forward.go:21`
   `AgentForwarder`) and planner (`integrations/planner/integration.go:72`

@@ -55,10 +55,14 @@ memQL has two registration paths for integration providers:
    stt). Lives in `app/integrations_<nodeType>.go` with build tags;
    `engine.RegisterIntegration(provider)` is called directly.
 
-Routing + concept-ownership rules are also plug-in-registerable:
-`node.RegisterRoutingRule(...)` and
-`node.RegisterConceptOwnership(prefix, nodeType)` from `init()`. See
-the product pack's routing registration file for an example.
+Event routing rules are also plug-in-registerable:
+`node.RegisterRoutingRule(...)` from `init()`, with build tags on the
+caller deciding which binaries register them. See the product pack's
+routing registration file for an example.
+
+There is no concept-ownership counterpart. `node.RegisterConceptOwnership`
+was deleted in `ac3a751e`; which node does a concept's work follows from
+routing rules plus build tags.
 
 ## IntegrationProvider contract
 
