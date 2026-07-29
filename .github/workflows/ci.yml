@@ -142,27 +142,34 @@ jobs:
       - name: go test
         if: ${{ env.RUN_GO == 'true' }}
         run: go test -count=1 -timeout=300s ./...
-      # Build-tagged test lane (#1338). The untagged `go test ./...` above
-      # never compiles //go:build-tagged test files, so tagged suites are
-      # CI-invisible without an explicit -tags run. Audit of the tree
-      # (grep -rl "^//go:build" --include='*_test.go'):
-      #   - agent      -> integrations/agent/worker (scope / safety-descriptor
-      #                   / list-workers / generated-output tables). Covered
-      #                   HERE; CGO-free, so it rides the warm go-checks cache.
-      #   - clustere2e -> test/clustere2e. Covered by the parity-cluster e2e
-      #                   workflow (now owned by the downstream product pack),
-      #                   which provisions the parity cluster the suite needs
-      #                   -- NOT runnable here.
-      #   - voice      -> no tagged *_test.go files; the untagged
-      #                   integrations/voice/agent tests run in the step above,
-      #                   and the build-voice (CGO) job below already runs
-      #                   `go test -tags voice ./integrations/voice/...`.
-      # No other build tag (cognition / planner / bff / workbench / identity)
-      # carries test files today. If you add a tagged test elsewhere, add its
-      # directory to this step (or a new lane if it needs system deps).
+      # Build-tagged test lanes (#1338, #2903). The untagged `go test ./...`
+      # above never RUNS a //go:build-tagged test file, so a tagged suite is
+      # CI-invisible without an explicit -tags run.
+      #
+      # This used to carry a hand-maintained audit of which tags have test
+      # files and which lane covers each. It drifted on THREE tags at once
+      # (mcp omitted entirely, identity and voice both described as having no
+      # tagged test files when each has one), which is how three mcp-tagged
+      # suites went their whole life without executing -- including the file
+      # the #2888 vulnerability lives in.
+      #
+      # The audit is now EXECUTABLE: cmd/citags/scan reads the tags actually
+      # present on *_test.go files and the `go test -tags ...` invocations
+      # actually present in this directory, and fails the untagged lane when
+      # they disagree. Add a tagged suite without a lane and CI goes red with
+      # the file list. Do not reintroduce a prose audit here; a second
+      # hand-maintained copy is the defect that gate exists to prevent.
+      #
+      # These lanes are CGO-free, so they ride the warm go-checks cache.
       - name: go test -tags agent (build-tagged suites)
         if: ${{ env.RUN_GO == 'true' }}
         run: go test -tags agent -count=1 -timeout=300s ./integrations/agent/worker/
+      - name: go test -tags mcp (build-tagged suites)
+        if: ${{ env.RUN_GO == 'true' }}
+        run: go test -tags mcp -count=1 -timeout=300s ./app/ ./component/mcp/
+      - name: go test -tags identity (build-tagged suites)
+        if: ${{ env.RUN_GO == 'true' }}
+        run: go test -tags identity -count=1 -timeout=300s ./app/
       # Harness eval gate (#589). Fixture-driven regression tripwire over an
       # in-memory graph (NO Postgres, NO LLM) -- catches a harness change
       # that reorders dispatch, mis-fails a plan, or makes the loop chattier.
