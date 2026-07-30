@@ -38,7 +38,7 @@ use cognition.shapes.{ participantFull }
 use common.traits.{ traitIsActiveRecord }
 
 @description("Get space participants")
-query participant querySpaceParticipants {
+query participant spaceParticipants {
   args   { spaceId string @required }
   filter payload.spaceId == args.spaceId; traitIsActiveRecord
   shape  participantFull

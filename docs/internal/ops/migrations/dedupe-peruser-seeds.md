@@ -18,7 +18,7 @@ script: [`scripts/dedupe-peruser-seeds/README.md`](../../../../scripts/dedupe-pe
 - Daily-space participant panel shows two or more entries for the
   same agent role (e.g. three "Assistant" rows that share a display
   name and gender).
-- `queryActiveAgents` / `queryActiveAgentsForUser` returns multiple
+- `activeAgents` / `activeAgentsForUser` returns multiple
   rows with the same `(ownerUserId, role)` pair.
 - The Roster / Team tab on the product frontend or the cockpit's equivalent
   surface lists more rows than the user has ever created.

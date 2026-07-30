@@ -129,7 +129,7 @@ final goes to memql as `VoiceAgentFinalTranscript` (see
 executor, the same final additionally becomes a
 `conversation.item.create`. memql ingestion is unchanged -- the
 transcript still lands as `v1:cognition:utterance` via
-`mutationSendTextUtterance` (see `handleVoiceAgentFinalTranscript` in
+`sendTextUtterance` (see `handleVoiceAgentFinalTranscript` in
 `component/grpc/voice_agent_handlers.go`), so conductor scoring,
 citations, and chat parity are preserved.
 

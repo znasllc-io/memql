@@ -602,10 +602,10 @@ clear compile-time error.
 Example of a typo that surfaces at compile time:
 
 ```memql
-checkUser := queryUserById({ userId: args.event.payload.userId })
+checkUser := userById({ userId: args.event.payload.userId })
 
 result := if cehckUser.empty() {   // typo: cehckUser -> checkUser
-  mutationCreateUser({...})
+  createUser({...})
 }
 ```
 
@@ -888,10 +888,10 @@ insert {
 }
 
 // Correct -- step-call args in an automation / logic body
-mutationCreateUser({ userId: args.event.payload.subject, email: args.event.payload.email })
+createUser({ userId: args.event.payload.subject, email: args.event.payload.email })
 
 // Wrong -- unnecessary quotes on simple-identifier keys
-mutationCreateUser({ "userId": args.event.payload.subject, "email": args.event.payload.email })
+createUser({ "userId": args.event.payload.subject, "email": args.event.payload.email })
 ```
 
 **Why it bites you.** Mixed quoting styles in the same codebase make

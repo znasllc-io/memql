@@ -123,7 +123,7 @@ memQL's authorization model is **per-row, classified, and tested at load time.**
 | Bucket | Filter shape | Example |
 |---|---|---|
 | **Owned** | `payload.ownerUserId == actor.userId` | `queryActiveSpaces`, `queryOwnedSpaceById` (F10) |
-| **Granted** | relationship predicate gates on `actor.userId` | `querySpaceParticipants` |
+| **Granted** | relationship predicate gates on `actor.userId` | `spaceParticipants` |
 | **Admin** | `spec("requiresClusterOwner")` | admin-only mutations |
 | **Public** | `@public` annotation | `/.well-known/jwks.json`, `/api/concepts` schemas |
 
@@ -176,7 +176,7 @@ Session revocation is now checked at stream-open time AND on a periodic in-strea
 - `v1:identity:user.revocationEpoch` is a monotonic counter on every user row (default 0).
 - The JWT issuer stamps the user's current epoch into every fresh access token as the `revocation_epoch` claim.
 - The per-node verifier resolves the user's current epoch on stream-open via an `EpochResolver` and rejects when `token.epoch < current`. Same check runs on a per-stream ticker (`StreamInterceptorWithEpoch` + `runEpochRecheck`); when the bump happens mid-stream, the derived context cancels and downstream handlers see `ctx.Err() == context.Canceled`.
-- Bulk-revoke = call `Store.BumpUserRevocationEpoch(userId)`, which reads + increments + writes via `mutationBumpUserRevocationEpoch`. Every pre-bump token is now stale at the verifier; every post-bump token mints with the new epoch.
+- Bulk-revoke = call `Store.BumpUserRevocationEpoch(userId)`, which reads + increments + writes via `bumpUserRevocationEpoch`. Every pre-bump token is now stale at the verifier; every post-bump token mints with the new epoch.
 
 **Trust assumption:** JWT short-expiry remains the primary defense against compromised credentials; the epoch closes the gap between "operator hits the bulk-revoke button" and "token reaches its natural expiry."
 

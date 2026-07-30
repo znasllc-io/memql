@@ -33,10 +33,10 @@ Root cause was mechanical:
 3. The frontend's agent-queries use `shape(…, "agentFull")`. So
    `Agent.role` arrived as `undefined` on the client.
 4. Every update path (toggle-active, color-index backfill, Edit+Save)
-   re-sends the whole payload via `mutationUpdateAgent`, wiring
+   re-sends the whole payload via `updateAgent`, wiring
    `role: agent.role`. Undefined.
 5. `deepStripNulls` + JSON serialization dropped the field.
-6. `mutationUpdateAgent` does `insert({ id, payload: args.payload })`
+6. `updateAgent` does `insert({ id, payload: args.payload })`
    — **full replace**, append-only. The new version had no `role`.
 7. On the next read, cognition's `agentPayload.Role = ""`. AllowedRoles
    rejected everything. Silent data loss, loud failure.
@@ -124,7 +124,7 @@ version instead of overwriting the whole record.
 
 ```memql
 // the product pack's updateAgent mutation
-func (Mutation) mutationUpdateAgent(args any) error {
+func (Mutation) updateAgent(args any) error {
   return insert({
     id: args.agentId,
     args.payload                 // full replace
@@ -135,7 +135,7 @@ func (Mutation) mutationUpdateAgent(args any) error {
 **Patch alternative:**
 
 ```memql
-func (Mutation) mutationUpdateAgent(args any) error {
+func (Mutation) updateAgent(args any) error {
   current := get(args.agentId)   // latest version's payload
   return insert({
     id: args.agentId,
@@ -148,7 +148,7 @@ func (Mutation) mutationUpdateAgent(args any) error {
 line:
 
 ```memql
-func (Mutation) mutationUpdateAgent(args any) error {
+func (Mutation) updateAgent(args any) error {
   return patch(args.agentId, args.payload)
 }
 ```

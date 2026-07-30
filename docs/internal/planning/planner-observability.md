@@ -166,14 +166,14 @@ func (l *PlannerAgentLoop) recordPlanUsage(
     ctx context.Context, planId string, u *memql.CallUsage,
 ) {
     // Read current spent / cost, add, write back via
-    // mutationUpdatePlanStatus. Optimistic write -- a concurrent
+    // updatePlanStatus. Optimistic write -- a concurrent
     // status update wins is acceptable since the next call's
     // accumulator picks up the merged value on next read.
     plan, _ := l.loadPlan(ctx, planId)
     spent := getInt(plan, "tokenSpent") + u.InputTokens + u.OutputTokens
     cost  := getFloat(plan, "costSpentUSD") + u.TotalCostUSD
     q := fmt.Sprintf(
-        `mutationUpdatePlanStatus({planId:%q, tokenSpent:%d, costSpentUSD:%f})`,
+        `updatePlanStatus({planId:%q, tokenSpent:%d, costSpentUSD:%f})`,
         planId, spent, cost,
     )
     _, _ = l.engine.Execute(systemActorContext(ctx), q)
@@ -182,7 +182,7 @@ func (l *PlannerAgentLoop) recordPlanUsage(
 
 Concept change: add `costSpentUSD float` next to the existing
 `tokenSpent int` field on `v1:planner:plan`. Update
-`mutationUpdatePlanStatus`'s `args` block + `update` body and
+`updatePlanStatus`'s `args` block + `update` body and
 `planFull` shape.
 
 ### 4. Cockpit display
@@ -236,7 +236,7 @@ pass; flag for the next conversation.
 ## Order of operations for the follow-up session
 
 1. Concept change: add `costSpentUSD` to `v1:planner:plan` +
-   plumb through `mutationUpdatePlanStatus` args + `planFull` shape.
+   plumb through `updatePlanStatus` args + `planFull` shape.
 2. `UsageReporter` interface in `component/memql`, optional opt-in.
 3. Implement `LastUsage()` on `anthropicStreamProvider` (data already
    captured; just expose). OpenAI variants implement next; placeholders

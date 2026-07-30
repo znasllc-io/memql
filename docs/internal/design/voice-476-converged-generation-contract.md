@@ -278,7 +278,7 @@ The row is already versioned three ways, which the contract inherits for free:
    (`concepts.memql:10`). A breaking field change bumps this; the
    SeedMaterializer re-materializes against the new shape on a fresh DB
    (the `_agent.memql:24` "pre-prod, seed regen" note).
-2. **Row mutation lineage.** Edits flow through `mutationUpdateAgent` (the
+2. **Row mutation lineage.** Edits flow through `updateAgent` (the
    skill-cap enforcement is server-side, `concepts.memql:45`), and the row
    carries `lineage` (`concepts.memql:89`) + the engine-stamped
    `createdBy`/`updatedAt` columns. A turn's author is pinned to the row state

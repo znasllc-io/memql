@@ -58,7 +58,7 @@ Tier C is the load-bearing call. We're explicitly choosing not to ship malpracti
 │      Accepted chunks proceed; rejected chunks logged + dropped   │
 │                                                                  │
 │ 5. Storage phase:                                                │
-│      Each accepted chunk -> mutationCreateDocumentChunk          │
+│      Each accepted chunk -> createDocumentChunk          │
 │      chunkId = sha256(domainId + recipeVersion + chunkIndex)     │
 │      Carries seedSource, seedTier, recipeVersion in payload      │
 │      Vector embedded into node_vectors at insert time            │

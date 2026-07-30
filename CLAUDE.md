@@ -479,11 +479,11 @@ this via the graph event bus:
 
 1. Cognition intercepts `ClientToolCall` in `consumeAgentTurnStream`
    and inserts a `v1:cognition:client:tool:request` node (via
-   `mutationEmitClientToolRequest`).
+   `emitClientToolRequest`).
 2. Browsers subscribed to the space pick the event up, dispatch the
    tool locally, and insert a matching
    `v1:cognition:client:tool:response` (via
-   `mutationEmitClientToolResponse`).
+   `emitClientToolResponse`).
 3. Cognition subscribes to those responses, wraps the payload in a
    `ClientToolResult` envelope, and calls
    `AgentForwarder.ForwardContinuation` so the agent's
@@ -739,9 +739,9 @@ session overrides written by the PresencePanel orb-corner overlay
 (`AgentOrbChannelToggle` -- click to toggle, long-press for the three-
 mode menu). The voice-agent's avatar-gating path consults override ->
 default for video at session start; audio mirrors the user's mic state
-under `mirror_user`. Mutations: `mutationSetAgentAudioOverride`,
-`mutationSetAgentVideoOverride`. Queries: `queryAudioOverridesForSpace`,
-`queryVideoOverridesForSpace`.
+under `mirror_user`. Mutations: `setAgentAudioOverride`,
+`setAgentVideoOverride`. Queries: `audioOverridesForSpace`,
+`videoOverridesForSpace`.
 
 **Avatar persona.** `v1:agents:agent.avatarPersonaId` +
 `avatarVendor` carry the vendor-issued persona / face id minted from a
@@ -1441,7 +1441,7 @@ use cognition.shapes.{ participantFull }
 use common.traits.{ isActiveRecord }
 
 @description("Get space participants")
-query participant querySpaceParticipants {
+query participant spaceParticipants {
   args {
     spaceId  string  @required
   }
@@ -1455,7 +1455,7 @@ Mutations:
 use cognition.concepts.{ space }
 
 @description("Create a cognition space")
-mutation space mutationCreateSpace {
+mutate space createSpace {
   args {
     spaceId  string  @required
     name     string  @required
@@ -1971,10 +1971,10 @@ gains scope (workspace + private per Q21) + ownerId;
 **Wiring path (v0.x synchronous)**: HTTP attachment upload ->
 existing TextExtractor + AISummarizer -> `EnginePlanStore.
 CreateAndCompleteAnalyzePlan` chains:
-  1. mutationCreatePlan (queued)
+  1. createPlan (queued)
   2. mutationCreateCanvasState (plan.created card)
-  3. mutationCreateTask (queued)
-  4. mutationUpdatePlanStatus + mutationUpdateTaskStatus to
+  3. createTask (queued)
+  4. updatePlanStatus + updateTaskStatus to
      running, then succeeded with output payloads
   5. mutationCreateDocument (the v1:knowledge:document container)
   6. mutationCreateCanvasState (plan.completed card with
@@ -2004,7 +2004,7 @@ LLM-backed re-analysis ships with the async planner integration.
   strip renders immediately. LLM-backed estimate via the
   `planEstimate` prompt template ships when the planner integration
   consumes it. Historical bucket query
-  `queryHistoricalPlanMetrics` backs the blending logic.
+  `historicalPlanMetrics` backs the blending logic.
 
 - **LLM-backed refinement** -- the `refineAnalysis` prompt
   + handleRefinementPlan automation rewritten to call
@@ -2028,7 +2028,7 @@ LLM-backed re-analysis ships with the async planner integration.
   individual rows…" toggle.
 
 - **Pause / Resume / Cancel** -- Tasks-page row controls wired
-  to mutationUpdatePlanStatus.
+  to updatePlanStatus.
 
 - **Container-executor registry** -- `component/planner/executor.go`
   ships the `RegisterContainerExecutor` / `LookupContainerExecutor`

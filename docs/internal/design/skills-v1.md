@@ -78,7 +78,7 @@ fail boot. This is the deliberate carve-out documented inline: Phase 1
 ships catalog rows whose domain prerequisites some namespaces don't
 yet seed, and hard-failing on those would block this PR from landing
 additively. Phase 2 closes the gap by running the same check at
-`mutationCreateSkill` time, where the universe of valid ids includes
+`createSkill` time, where the universe of valid ids includes
 user-created domains.
 
 ## Knowledge domain prerequisites (Phase 2 backlog)

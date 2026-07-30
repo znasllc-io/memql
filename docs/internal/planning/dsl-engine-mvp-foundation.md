@@ -656,7 +656,7 @@ deployed state to migrate.
 
 - Error message must include the suggested rename, e.g.:
   `function "getUserById" violates naming.query-prefix: Query
-  functions must use "query" prefix; rename to "queryUserById"`.
+  functions must use "query" prefix; rename to "userById"`.
 
 ---
 
