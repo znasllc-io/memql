@@ -700,8 +700,9 @@ func (e *mutationTemplateEvaluator) evalParserExpression(ctx context.Context, ex
 		// The inverse of CanonicalIdExpr below, and the normaliser
 		// authoring-rules.md §20 asks for on a hashed FK arg: canonical or
 		// bare in, bare out (#1859). Idempotent for the normal shape, but
-		// NOT in general -- a value with more than one v<digits> segment
-		// strips further on a second application (memql#2981).
+		// NOT in general -- it strips again on a second application whenever
+		// its own RESULT still holds a v<digits> segment with >=3 segments
+		// after it (memql#2981).
 		//
 		// Missing from this switch until memql#2925, which made the builtin
 		// lint clean in an `id:` slot and then die at render with

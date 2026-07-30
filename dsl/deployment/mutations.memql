@@ -133,9 +133,11 @@ mutate deployment updateDeploymentStatus {
 // shortId() is canonical-or-bare in, bare out (#1859), so both shapes derive
 // one id for the ids this pack actually sees -- a colon-free uuid from
 // id.NewShortId and the canonical form around it. It is NOT idempotent in
-// general: a value carrying more than one v<digits> segment strips further on
-// a second application, and such a bare/canonical pair still forks. See
-// memql#2981; the measured behaviour is below.
+// general: it strips again on a second application whenever its own RESULT
+// still holds a v<digits> segment with >=3 segments after it, and such a
+// bare/canonical pair still forks. (Carrying more than one v<digits> segment
+// is necessary for that but not sufficient -- "v1:v1" and "v2:v3:v4:v5" are
+// both idempotent.) See memql#2981; the measured behaviour is below.
 //
 // It took #2925 to make that spelling usable: shortId() parsed in an id: slot
 // and then died at render, because the mutation-template id evaluator had no
