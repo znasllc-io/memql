@@ -299,7 +299,7 @@ to plain queries. Use the two-argument
 `asOf(<expr>, "2026-01-01T00:00:00Z")` from the top-level parser
 if you need a historical snapshot -- the one-argument form does not
 parse, and the wrapped query must declare no `asOf` of its own
-(memql#2927); struct queries
+(memql#2992); struct queries
 carry an `asOf latest` clause for explicit latest-per-id reads (see
 `staleClusterNodes` in `dsl/cluster/queries.memql`).
 
