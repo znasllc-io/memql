@@ -349,7 +349,9 @@ with `asOf args.at`. That does not parse -- `asOf` takes an RFC3339 literal or
 bare `latest`, never `args.X` -- so a declared query cannot take a
 caller-chosen instant. Tracked as memql#2992. (Names here keep this ADR's
 pre-memql#2853 `query*`/`logic*`/`spec*` style, as the rest of the document
-does; the prefix sweep is memql#2979.)
+does. No sweep will reach them: memql#2979 excludes `*.md`, and the doc gates
+only flag a prefixed name when the unprefixed one is declared in the tree --
+none of this ADR's are.)
 
 ## 5. Migration plan (epic #2298)
 
