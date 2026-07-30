@@ -10890,7 +10890,7 @@ func UpdateAgentAuthorizationBuild(args UpdateAgentAuthorizationArgs) string {
 	return b.String()
 }
 
-// UpdateCalendarEvent -- Partial update of a calendarEvent. Only the fields passed in `payload` change; everything else inherits from the prior row. Backs editing an event (reschedule, rename, change location / notes / recurrence). The calendar tool reads the row via the owner-scoped calendarEventById before calling this, so cross-user edits are impossible.
+// UpdateCalendarEvent -- Partial update of a calendarEvent. Only the fields passed in `payload` change; everything else inherits from the prior row. Backs editing an event (reschedule, rename, change location / notes / recurrence). The owner is re-stamped from the actor on every write, so a caller cannot reassign an event by passing `ownerUserId` in the payload.
 //
 // Bound concept: v1:calendar:calendarEvent (machine-readable: BoundConcepts["updateCalendarEvent"] in generated_concepts.go).
 type UpdateCalendarEventArgs struct {
