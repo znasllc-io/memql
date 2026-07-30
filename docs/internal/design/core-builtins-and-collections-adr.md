@@ -338,7 +338,7 @@ query node queryLiveNodes {
   shape   nodeCard
 }
 
-query node nodesAt {            // asOf <ts> -> deterministic, no marker
+query node queryNodesAt {       // asOf <ts> -> deterministic, no marker
   asOf "2026-01-01T00:00:00Z"
   shape nodeCard
 }
@@ -347,8 +347,9 @@ query node nodesAt {            // asOf <ts> -> deterministic, no marker
 NOTE (memql#2927): this block originally showed `args { at string @required }`
 with `asOf args.at`. That does not parse -- `asOf` takes an RFC3339 literal or
 bare `latest`, never `args.X` -- so a declared query cannot take a
-caller-chosen instant. Tracked as memql#2992. (The `query*` name prefix was
-also retired by memql#2853.)
+caller-chosen instant. Tracked as memql#2992. (Names here keep this ADR's
+pre-memql#2853 `query*`/`logic*`/`spec*` style, as the rest of the document
+does; the prefix sweep is memql#2979.)
 
 ## 5. Migration plan (epic #2298)
 
