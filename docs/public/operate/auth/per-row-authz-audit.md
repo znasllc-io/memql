@@ -10,11 +10,18 @@ owner: znas
 # Per-row authorization audit
 
 > **Status:** Framework + initial gap closure shipped 2026-05-20.
-> All 11 flagged constructs are now classified via `@public` with
-> per-construct comments documenting the intent + the follow-up
+> The 11 constructs flagged *at that time* were closed via `@public`
+> with per-construct comments documenting the intent + the follow-up
 > tightening path. The classification test
 > (`dsl.TestPerRowAuthzClassification`) hard-fails on any new
 > flagged construct.
+>
+> That "11" is history, not an inventory. The live figures are **23
+> `@public`** and **6 `@serverOnly`**, and they move; regenerate with
+> `go test ./dsl/ -run TestPerRowAuthzClassification -v` rather than
+> trusting a number written here. Several other counts and tables
+> further down this document are `#54`-era and have drifted — see
+> memql#2983.
 
 ## Context
 
@@ -339,19 +346,25 @@ Parser-recognised. Carries no runtime semantics. The validator
 treats it as "author explicitly acknowledges this construct does
 not require a caller-check."
 
-Examples of legitimate `@public` use:
+The test is **what the construct returns** — does every caller get the
+same rows? — not *when it runs*. Examples of legitimate `@public` use,
+each verified against the tree (`TestPublicExamplesAreAnnotated` keeps
+them that way):
 
-- the cluster-topology queries in `dsl/cluster/queries.memql` — need to
-  be readable on the unauthenticated cluster bootstrap path.
-- `activeAgentRoles` — role catalog; no per-user data.
+- the catalog reads in `dsl/rbac/queries.memql` — global, immutable,
+  deployment-wide configuration. That file's header is the doctrine and
+  the reference case.
+- `activeAgentRoles` (`dsl/agents/queries.memql`) — the agentRole
+  catalog: `concept agentRole` declares no owner field and no `@pii`
+  field, and `agentRoleFull` omits `row.createdBy`, so there is no
+  per-caller dimension to scope by.
 
-This list has drifted from the tree: neither bullet currently carries
-`@public` (`activeAgentRoles` at `dsl/agents/queries.memql` does not, and
-`dsl/cluster/queries.memql` has no `@public` at all). Take them as
-illustrations of the argument below, not as an inventory of annotated
-constructs. Reconciling the list — in either direction, per construct —
-is memql#2918; note that the lesson at the end of this section cuts
-against `@public` for anything reachable pre-auth.
+**Same marker, two meanings — read the comment before extending this
+list.** The other three `@public` queries in `dsl/agents/queries.memql`
+are the opposite kind: they take a caller-supplied `userId` /
+`ownerUserId`, return per-user rows, and carry #54 follow-up comments
+explaining the debt. A construct belongs on the list above only if it
+is unscoped *because it has nothing to scope by*.
 
 `userByEmail` used to head this list, as the login-path lookup that
 runs before the caller is authenticated. That reasoning was right
@@ -366,6 +379,29 @@ The lesson generalises, and it is the one to take from this section:
 `@serverOnly`, not for `@public`.** `@public` carries no runtime
 semantics at all, so on a construct returning personal data it
 records an intention and enforces nothing.
+
+### The converse: a construct that is never flagged needs no marker
+
+This list used to name the cluster-topology queries, on the strength of
+an "unauthenticated cluster bootstrap path". **That path does not
+exist.** Boot-time peer discovery reads `v1:cluster:node` through an
+in-process raw concept filter (`component/node/bootstrap.go`), not
+through any named query, so nothing in `dsl/cluster/queries.memql`
+serves it.
+
+The bullet was retired for a narrower and sufficient reason: those
+constructs reference no user-scope field, so the classifier never flags
+them and `@public` has nothing to acknowledge. **`@public` is an
+acknowledgement of a flag, not a grant of access** — adding it where
+nothing was flagged spends a real suppressor (it is matched ahead of the
+flagged bucket, and it blocks memql#2920 tier inference) to silence
+nothing.
+
+Nor is `@serverOnly` the answer there: it is runtime-enforced against
+`auth.CallOrigin`, so it would break the topology reconciler
+(`component/node/reconciler.go` calls with a plain context), and that
+break could not be repaired in place — `call_origin_conformance_test.go`
+forbids `component/node` from stamping internal origin.
 
 If you find yourself reaching for `@public` to "just make the
 validator happy" without a clear reason, the construct probably

@@ -181,9 +181,33 @@ query agentRole agentRoleBySlug {
 // with the @-annotation block below -- the SDK generator's description
 // preamble walker stops at the first non-@ line, so a comment between the
 // annotations and the `query` header would drop the SDK doc string.
+//
+// `@public` below is the REFERENCE-DATA kind, not the #54-debt kind the
+// three @public queries earlier in this file carry. Those take a
+// caller-supplied userId/ownerUserId and return per-user rows; this one
+// has no per-caller dimension at all -- `concept agentRole` declares no
+// owner field and no @pii field, and `agentRoleFull` omits
+// row.createdBy. dsl/rbac/queries.memql's header is the doctrine and the
+// reference case. Same marker, two meanings: read this before adding the
+// construct to a list of the other kind (memql#2918).
+//
+// Justified by WHAT IT RETURNS, not by when it runs. "There is no caller
+// yet" is the argument the audit doc says leads to @serverOnly, and it
+// would be wrong here twice over: a pending-invite guest and a
+// MEMQL_IDENTITY_ENABLED=false caller can both reach this, and
+// @serverOnly is runtime-enforced so it would break the live SDK and
+// cockpit callers.
+//
+// COSTS ONE SUPPRESSOR, deliberately. @public is matched ahead of the
+// flagged bucket in dsl/conformance_test.go, and it is a hard blocker on
+// memql#2920 tier inference (cmd/memqlmigrate/rowauthz_infer.go). It
+// suppresses nothing today only because `agentRoleBySlug` already blocks
+// v1:agents:agentRole from being declared. If that query ever becomes
+// caller-gated, this annotation silently keeps the concept undeclared.
 /// List every active agentRole row. Backs the role picker on the cockpit's agent-creation surface
 /// and on the role-management view. predefined rows render with a lock icon; user-created rows are
 /// fully editable.
+@public
 @unbounded("agent role catalog -- a small admin-defined bounded set consumed whole")
 @cache(300)
 query agentRole activeAgentRoles {
