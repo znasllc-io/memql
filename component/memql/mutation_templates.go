@@ -696,6 +696,34 @@ func (e *mutationTemplateEvaluator) evalParserExpression(ctx context.Context, ex
 		}
 		sum := sha256.Sum256([]byte(fmt.Sprintf("%v", ev)))
 		return hex.EncodeToString(sum[:]), nil
+	case *languageParser.ShortIdExpr:
+		// The inverse of CanonicalIdExpr below, and the normaliser
+		// authoring-rules.md §20 asks for on a hashed FK arg: canonical or
+		// bare in, bare out (#1859). A fixed point for every id this tree
+		// mints, but NOT idempotent in general; memql#2981 carries the
+		// measured condition.
+		//
+		// Missing from this switch until memql#2925, which made the builtin
+		// lint clean in an `id:` slot and then die at render with
+		// "unsupported expression in mutation template" -- so it worked in
+		// payload positions and not in the id derivation, the one position §20
+		// is about.
+		//
+		// Delegates to engine.shortIdValue, the same entry point the string
+		// path (evalShortId) and RuntimeEvaluator.EvaluateShortId both use, so
+		// this is not a third implementation of the same normalisation.
+		ev, err := e.evalParserExpression(ctx, t.Target)
+		if err != nil {
+			return nil, err
+		}
+		if ev == nil || isMissing(ev) {
+			return "", nil
+		}
+		raw := strings.TrimSpace(fmt.Sprintf("%v", ev))
+		if raw == "" {
+			return "", nil
+		}
+		return e.engine.shortIdValue(raw), nil
 	case *languageParser.CanonicalIdExpr:
 		ev, err := e.evalParserExpression(ctx, t.Value)
 		if err != nil {

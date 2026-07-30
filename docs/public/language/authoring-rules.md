@@ -972,11 +972,13 @@ delete plus dropping the matching `createPartition` arg.
 
 ---
 
-## 20. Foreign-key id derivation: use `canonicalId()` before hashing
+## 20. Foreign-key id derivation: normalise before hashing
 
 When a mutation derives a deterministic id by hashing foreign-key
 args (the participant id pattern: `id = hash(spaceId + ":" + userId)`),
-the args MUST go through `canonicalId(value, "<conceptType>")` first.
+the args MUST be normalised first, with `canonicalId(value, <concept>)`
+by default -- see below for when `shortId(value)` is the right choice
+instead, and what it does not give you.
 The hash is byte-level, so two callers passing the same logical
 reference under different shapes (`"user-abc"` vs
 `"_system:v1:identity:user:user-abc"`) hash to different strings and
@@ -1026,6 +1028,29 @@ queries work with canonical-stored values. But the id derivation
 runs BEFORE the payload auto-canon, so `canonicalId()` in the id
 template is still required for stable deterministic ids.
 
+**`shortId(value)` also satisfies this rule, with two caveats.** It maps
+the canonical and bare forms of a normal id onto the bare form, and it
+takes no concept argument — so it has none of `canonicalId()`'s
+resolution prerequisites (see memql#2976 for a pack where those cannot
+be met). Use it when `canonicalId()` will not resolve. Otherwise prefer
+`canonicalId()`, because:
+
+- **`shortId()` cannot catch a wrong concept tag.** `canonicalId()`
+  errors loudly when handed an id tagged for another concept (the bullet
+  above); `shortId()` strips the tag and returns a plausible bare value,
+  so a `user` id passed where a `deployment` id belongs derives a valid
+  row. That check is a feature of `canonicalId()`, not an inconvenience.
+- **`shortId()` is not idempotent on every input**, so it does not
+  collapse *every* bare/canonical pair. Measured:
+  `shortId("v1:cluster:deployment:v2:x:y:z")` is `"v2:x:y:z"` while
+  `shortId("v2:x:y:z")` is `"z"` — the pair still forks. Tracked in
+  memql#2981, which carries the measured condition -- it turns on
+  whitespace and on empty segments, not on segment counts alone, and two
+  attempts to state it more precisely than this were wrong. What holds:
+  every SHORT id this tree mints is colon- and whitespace-free, so
+  `shortId()` is exact for those and for the canonical forms built
+  around them.
+
 Compliant mutations (audit done 2026-05-06), in
 `dsl/cognition/mutations.memql`:
 `joinSpaceAsHuman`, `joinSpaceAsSI`, `createGreetingUtterance`,
@@ -1033,23 +1058,32 @@ Compliant mutations (audit done 2026-05-06), in
 `sendSpeechUtterance`, `sendActionUtterance`,
 `sendRealtimeTranscriptUtterance`.
 
+Compliant via `shortId()` (memql#2925), in
+`dsl/deployment/mutations.memql`: `createDeploymentNodeSpec`,
+`updateDeploymentNodeSpec`. `create` also **stamps** the normalised
+value into the payload field rather than accepting it raw, because
+`nodeSpecsForDeployment` filters on that field — a normalised key over a
+raw payload value would collapse two shapes onto one timeline whose
+stored value is whichever was written last. `update` is a read-merge and
+does not write the field at all, so it inherits whatever `create`
+stamped.
+
 **Known exceptions — hashed FK id derivations that do NOT normalise.**
 Nothing enforces this rule automatically, so it is listed here or it is
 invisible:
 
-- `createDeploymentNodeSpec` / `updateDeploymentNodeSpec`
-  (`dsl/deployment/mutations.memql`) — every spelling of the
-  normalisation is currently blocked in an `id:` position for this pack:
-  the `canonicalId()` concept argument does not resolve for a concept
-  declaring `@namespace("cluster")` while living in `dsl/deployment/`,
-  and `shortId()` has no evaluator case in an id template. Tracked in
-  memql#2925; the mutation's own comment block carries the detail.
 - `createAccountEntitlement` (`dsl/identity/mutations.memql`) — hashes
   `args.accountId`, which is an FK. Pre-dates this list rather than
   being a deliberate carve-out; not yet triaged.
 
 If you add a hashed FK id derivation that cannot normalise, add it here
 with the reason. A rule with no gate and a stale roster is not a rule.
+
+**A separate hazard this rule does not address.** Normalising an FK does
+not make it safe as a hash component. Neither normaliser guarantees a
+colon-free result — `shortId("d:x")` is `"d:x"` — so
+`hash(concat(a, ":", b))` still aliases: `("d:x", "y")` and
+`("d", "x:y")` derive the same id. Tracked in memql#2980.
 
 The historical `concat("ga-", hash(actor))` pattern in the auto-join
 path is gone entirely: the logic (`dsl/cognition/logic.memql`) now
@@ -1249,7 +1283,7 @@ the change. The gates, with their test names:
 - **No concept-name shortId prefixes** (`TestNoShortIdConceptPrefix`).
   Derived ids are the bare unique part (uuid / hash / slug) — never
   `concat("agent-", ...)` or another concept-name / sub-type prefix.
-  See [#20](#20-foreign-key-id-derivation-use-canonicalid-before-hashing).
+  See [#20](#20-foreign-key-id-derivation-normalise-before-hashing).
 - **Typed @relationship targets** (`TestRelationshipTargetsUseImports`,
   memql#1067). `@relationship(..., target=user, ...)` names an
   imported concept; the `target="v1:..."` canonical-string form is

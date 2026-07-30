@@ -38,10 +38,12 @@ import (
 // database (component/memql/engine.go) before it parses anything, so a
 // DB-free test must render the template directly.
 //
-// NOT asserted here, deliberately: that a bare and a canonical deploymentId
-// derive the same id. They do not -- the hash is byte-level and the arg is
-// not normalised first. That gap is #2925; it is unreachable in-tree today
-// (every producer passes a bare id) and there are no rows to migrate.
+// Asserted since #2925: a bare and a canonical deploymentId derive the SAME
+// id, because the FK now goes through shortId() first. Before that the hash
+// was byte-level over an un-normalised arg, so the two shapes minted two
+// timelines for one (deployment, nodeType). See
+// TestNodeSpecNormalisesTheDeploymentIdFromTheDSL below -- it loads the real
+// tree, so it fails if the shortId() call is removed from the .memql.
 
 // fakeConceptStore satisfies memorynodes.Store. Create only ever calls
 // InsertMemoryNode; QueryMemoryNodes is present to satisfy the interface.
@@ -206,4 +208,50 @@ func TestNodeSpecRejectsEmptyKeyParts(t *testing.T) {
 			require.Empty(t, store.inserted, "nothing may reach the store for a degenerate key")
 		})
 	}
+}
+
+// TestNodeSpecNormalisesTheDeploymentIdFromTheDSL is the test memql#2925 asked
+// for, in the file it named, driving the REAL DSL.
+//
+// Review of PR #2978 found the .memql half of that fix ungated: reverting both
+// `shortId(args.deploymentId)` calls to `args.deploymentId` left the entire
+// suite green, because every new test hand-built a ShortIdExpr and called
+// evalParserExpression directly. A test that constructs the AST it is meant to
+// protect cannot notice the DSL stopping to produce it -- the same proxy-gating
+// this session hit in memql#2961.
+//
+// So this goes through eng.renderMutationTemplate over the loaded tree.
+func TestNodeSpecNormalisesTheDeploymentIdFromTheDSL(t *testing.T) {
+	eng, _ := nodeSpec2885Engine(t)
+
+	const bare = "d-abc123"
+	canonical := "v1:cluster:deployment:" + bare
+
+	for _, name := range []string{"createDeploymentNodeSpec", "updateDeploymentNodeSpec"} {
+		t.Run(name, func(t *testing.T) {
+			fromBare := renderNodeSpecMutation(t, eng, name, nodeSpecArgs(bare))
+			fromCanonical := renderNodeSpecMutation(t, eng, name, nodeSpecArgs(canonical))
+			require.Equal(t, fromBare.ID, fromCanonical.ID,
+				"memql#2925: the same logical deployment under two shapes must derive ONE id, or "+
+					"the pair gets two timelines and nodeSpecsForDeployment returns both. If this "+
+					"fails, shortId() has been removed from the id: derivation in "+
+					"dsl/deployment/mutations.memql")
+		})
+	}
+
+	// The payload field too, not only the key. nodeSpecsForDeployment filters
+	// on payload.deploymentId with `asOf latest`, so a normalised id over an
+	// un-normalised payload would collapse both shapes onto one timeline whose
+	// stored value is whichever was stamped last -- making the spec invisible
+	// to a bare lookup after a canonical re-pin (#2925 review).
+	t.Run("payload deploymentId is normalised too", func(t *testing.T) {
+		for _, in := range []string{bare, canonical} {
+			mutation := renderNodeSpecMutation(t, eng, "createDeploymentNodeSpec", nodeSpecArgs(in))
+			var payload map[string]any
+			require.NoError(t, json.Unmarshal([]byte(mutation.PayloadRaw), &payload))
+			require.Equal(t, bare, payload["deploymentId"],
+				"the stored deploymentId must be the normalised form for input %q, or the row's "+
+					"key and its queryable field disagree", in)
+		}
+	})
 }
