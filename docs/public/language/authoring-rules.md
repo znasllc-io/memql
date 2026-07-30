@@ -976,8 +976,9 @@ delete plus dropping the matching `createPartition` arg.
 
 When a mutation derives a deterministic id by hashing foreign-key
 args (the participant id pattern: `id = hash(spaceId + ":" + userId)`),
-the args MUST be normalised first -- `canonicalId(value, <concept>)` or
-`shortId(value)`; see "Either normaliser" below.
+the args MUST be normalised first, with `canonicalId(value, <concept>)`
+by default -- see below for when `shortId(value)` is the right choice
+instead, and what it does not give you.
 The hash is byte-level, so two callers passing the same logical
 reference under different shapes (`"user-abc"` vs
 `"_system:v1:identity:user:user-abc"`) hash to different strings and
@@ -1043,8 +1044,10 @@ be met). Use it when `canonicalId()` will not resolve. Otherwise prefer
   collapse *every* bare/canonical pair. Measured:
   `shortId("v1:cluster:deployment:v2:x:y:z")` is `"v2:x:y:z"` while
   `shortId("v2:x:y:z")` is `"z"` — the pair still forks. Tracked in
-  memql#2981. It is exact for ids of the normal one-`v<digits>` shape,
-  which is every id `id.NewShortId()` mints.
+  memql#2981. It is exact for the normal shape -- a bare slug with no
+  `v<digits>` segment, and the canonical form built around it, which has
+  exactly one. `id.NewShortId()` mints a colon-free UUID, so every
+  in-tree id is that shape.
 
 Compliant mutations (audit done 2026-05-06), in
 `dsl/cognition/mutations.memql`:

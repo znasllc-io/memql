@@ -130,8 +130,12 @@ mutate deployment updateDeploymentStatus {
 // it because the hash is byte-level: a caller passing a bare deploymentId and
 // one passing the canonical "v1:cluster:deployment:<short>" form would hash to
 // different ids and mint TWO timelines for the same (deployment, nodeType).
-// shortId() is canonical-or-bare in, bare out, and idempotent (#1859), so both
-// shapes now derive one id.
+// shortId() is canonical-or-bare in, bare out (#1859), so both shapes derive
+// one id for the ids this pack actually sees -- a colon-free uuid from
+// id.NewShortId and the canonical form around it. It is NOT idempotent in
+// general: a value carrying more than one v<digits> segment strips further on
+// a second application, and such a bare/canonical pair still forks. See
+// memql#2981; the measured behaviour is below.
 //
 // It took #2925 to make that spelling usable: shortId() parsed in an id: slot
 // and then died at render, because the mutation-template id evaluator had no
