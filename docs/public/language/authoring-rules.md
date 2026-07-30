@@ -972,11 +972,12 @@ delete plus dropping the matching `createPartition` arg.
 
 ---
 
-## 20. Foreign-key id derivation: use `canonicalId()` before hashing
+## 20. Foreign-key id derivation: normalise before hashing
 
 When a mutation derives a deterministic id by hashing foreign-key
 args (the participant id pattern: `id = hash(spaceId + ":" + userId)`),
-the args MUST go through `canonicalId(value, "<conceptType>")` first.
+the args MUST be normalised first -- `canonicalId(value, <concept>)` or
+`shortId(value)`; see "Either normaliser" below.
 The hash is byte-level, so two callers passing the same logical
 reference under different shapes (`"user-abc"` vs
 `"_system:v1:identity:user:user-abc"`) hash to different strings and
@@ -1026,12 +1027,28 @@ queries work with canonical-stored values. But the id derivation
 runs BEFORE the payload auto-canon, so `canonicalId()` in the id
 template is still required for stable deterministic ids.
 
+**Either normaliser satisfies this rule.** `canonicalId(value, concept)`
+maps both shapes onto the canonical form; `shortId(value)` maps both onto
+the bare form. Both are idempotent, so either collapses "bare vs
+canonical" into one derived id. Prefer `shortId()` for a plain FK: it
+takes no concept argument, so it has none of `canonicalId()`'s
+resolution prerequisites — see memql#2976 for a pack where those
+prerequisites cannot be met.
+
 Compliant mutations (audit done 2026-05-06), in
-`dsl/cognition/mutations.memql`:
+`dsl/cognition/mutations.memql`, all via `canonicalId()`:
 `joinSpaceAsHuman`, `joinSpaceAsSI`, `createGreetingUtterance`,
 `createSessionForParticipant`, `sendTextUtterance`,
 `sendSpeechUtterance`, `sendActionUtterance`,
 `sendRealtimeTranscriptUtterance`.
+
+Compliant via `shortId()` (memql#2925), in
+`dsl/deployment/mutations.memql`: `createDeploymentNodeSpec`,
+`updateDeploymentNodeSpec`. Both also stamp the normalised value into
+the payload field, not only into the id — `nodeSpecsForDeployment`
+filters on that field, so a normalised key over a raw payload value
+would collapse two shapes onto one timeline whose stored value is
+whichever was written last.
 
 **Known exceptions — hashed FK id derivations that do NOT normalise.**
 Nothing enforces this rule automatically, so it is listed here or it is
@@ -1044,20 +1061,11 @@ invisible:
 If you add a hashed FK id derivation that cannot normalise, add it here
 with the reason. A rule with no gate and a stale roster is not a rule.
 
-`createDeploymentNodeSpec` / `updateDeploymentNodeSpec` were on this list
-until memql#2925 and now normalise with `shortId()`. Their `canonicalId()`
-spelling is still blocked — the concept argument does not resolve for a
-concept declaring `@namespace("cluster")` while living in `dsl/deployment/`
-(memql#2976) — but `shortId()` needs no concept argument and satisfies the
-rule, so they are compliant rather than excepted. Prefer `shortId()` for a
-plain FK for that reason: it is the spelling with the fewest resolution
-prerequisites.
-
-One thing `shortId()` does not give you: it strips only a recognisable
-canonical id, so it does not make a colon-bearing arg safe as a hash
-component. If your separator is `":"`, the pair `("d:x", "y")` and
-`("d", "x:y")` still hash identically — that is a distinct hazard from the
-one this rule is about.
+**A separate hazard this rule does not address.** Normalising an FK does
+not make it safe as a hash component. Neither normaliser guarantees a
+colon-free result — `shortId("d:x")` is `"d:x"` — so
+`hash(concat(a, ":", b))` still aliases: `("d:x", "y")` and
+`("d", "x:y")` derive the same id. Tracked in memql#2980.
 
 The historical `concat("ga-", hash(actor))` pattern in the auto-join
 path is gone entirely: the logic (`dsl/cognition/logic.memql`) now

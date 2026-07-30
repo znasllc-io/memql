@@ -147,24 +147,37 @@ mutate deployment updateDeploymentStatus {
 //   - `use cluster.concepts.{ deployment }`: memqllint rejects it while the
 //     engine's resolver accepts it on a unique trailing-segment match (that
 //     divergence is #2945), AND adding any explicit import for the concept
-//     suppresses the same-domain fallback in dslimports, which silently drops
-//     createDeployment and updateDeploymentStatus out of
-//     TestMutationFieldLaneCoversEveryMutation. Filed as #2977.
+//     suppresses the same-domain fallback in dslimports, which drops
+//     createDeployment and updateDeploymentStatus out of lane-3 field
+//     validation. TestMutationFieldLaneCoversEveryMutation catches that and
+//     names both mutations, so the coverage loss is loud rather than silent --
+//     but it is still caused by an edit that looks unrelated to either. Filed
+//     as #2977.
 //
-// What shortId() does NOT fix, measured rather than assumed: BareShortId
-// strips only a RECOGNISABLE canonical id, so "d:x" and "x:y:z" pass through
-// unchanged. The ":" separator therefore still aliases -- ("d:x", "y") and
-// ("d", "x:y") hash identically -- and that stays safe only because
-// id.NewShortId mints a colon-free uuid. Still reachable through the generated
-// SDK by an external caller, still tracked in #2925.
+// What shortId() does NOT fix, measured input by input rather than reasoned
+// about. BareShortId does not simply strip a canonical prefix:
+//
+//   "  d-abc123  "        -> "d-abc123"           (it TrimSpaces)
+//   "foo:v1:bar:baz:qux"  -> "qux"                (any v<digits>-shaped id)
+//   "d:x", "x:y:z"        -> unchanged
+//
+// So the ":" separator still aliases: ("d:x", "y") and ("d", "x:y") hash
+// identically. That stays safe only because id.NewShortId mints a colon-free
+// uuid, and is reachable through the generated SDK, which forwards the arg
+// verbatim. Tracked in #2980 -- not in #2925, which this closes.
 //
 // nodeType is a plain discriminator, not a concept reference, so it is hashed
 // as written.
 //
-// No migration: adding shortId() is a no-op for every in-tree producer, since
-// component/deploycontrol mints a bare id and the deploy pack forwards the
-// bare payload field. Only a canonical input changes, and no in-tree caller
-// sends one -- pinned by TestShortId_IsANoOpForEveryInTreeProducer.
+// No migration. The only in-tree producer of THIS mutation is
+// examples/deploypack, whose argString trims and forwards a bare id minted by
+// id.NewShortId -- so the derived id is byte-identical to before. (Not
+// component/deploycontrol: it calls createDeployment and updateDeploymentStatus,
+// which this does not touch.) Inputs that DO change are canonical ids,
+// whitespace-padded ids, and any v<digits>-shaped string -- none of which an
+// in-tree caller sends, and no rows exist to migrate since this mutation could
+// not write at all until #2885. Pinned by
+// TestShortId_IsANoOpForEveryInTreeProducer.
 //
 // Engine-as-spine: version coalesces to "" -- an empty version means
 // "resolve against the deployment's engine version", a non-empty value
@@ -174,7 +187,8 @@ mutate deployment updateDeploymentStatus {
 // is spec("requiresOwnerOrAdmin") on the cut-version/rollback effects
 // (Epic 2.6). Additive: no existing overlay or query is affected.
 /// Create a v1:cluster:deploymentNodeSpec row for a (deploymentId, nodeType) pair. The concept id
-/// is hash(concat(deploymentId, ':', nodeType)) so re-pins append to one timeline.
+/// is hash(concat(shortId(deploymentId), ':', nodeType)) so re-pins append to one timeline and a
+/// bare or canonical deploymentId derive the same row.
 /// Engine-as-spine: empty version resolves against the deployment engine version. Epic 2 / #2094.
 mutate deploymentNodeSpec createDeploymentNodeSpec {
   args {
@@ -185,8 +199,16 @@ mutate deploymentNodeSpec createDeploymentNodeSpec {
     imageDigest   string
   }
   insert {
-    accept { deploymentId, nodeType }
+    accept { nodeType }
     stamp {
+      // deploymentId is STAMPED, not accepted, so the payload field carries
+      // the same normalised value the id is derived from. Accepting it raw
+      // while normalising the id would collapse a bare and a canonical caller
+      // onto one timeline whose payload holds whichever shape was stamped
+      // last -- and nodeSpecsForDeployment filters on this field with
+      // `asOf latest`, so a canonical re-pin would make the spec invisible to
+      // a bare lookup (#2925 review).
+      deploymentId: shortId(args.deploymentId)
       id: hash(concat(
         shortId(args.deploymentId), ":",
         args.nodeType
