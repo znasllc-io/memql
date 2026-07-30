@@ -1027,16 +1027,27 @@ queries work with canonical-stored values. But the id derivation
 runs BEFORE the payload auto-canon, so `canonicalId()` in the id
 template is still required for stable deterministic ids.
 
-**Either normaliser satisfies this rule.** `canonicalId(value, concept)`
-maps both shapes onto the canonical form; `shortId(value)` maps both onto
-the bare form. Both are idempotent, so either collapses "bare vs
-canonical" into one derived id. Prefer `shortId()` for a plain FK: it
-takes no concept argument, so it has none of `canonicalId()`'s
-resolution prerequisites — see memql#2976 for a pack where those
-prerequisites cannot be met.
+**`shortId(value)` also satisfies this rule, with two caveats.** It maps
+the canonical and bare forms of a normal id onto the bare form, and it
+takes no concept argument — so it has none of `canonicalId()`'s
+resolution prerequisites (see memql#2976 for a pack where those cannot
+be met). Use it when `canonicalId()` will not resolve. Otherwise prefer
+`canonicalId()`, because:
+
+- **`shortId()` cannot catch a wrong concept tag.** `canonicalId()`
+  errors loudly when handed an id tagged for another concept (the bullet
+  above); `shortId()` strips the tag and returns a plausible bare value,
+  so a `user` id passed where a `deployment` id belongs derives a valid
+  row. That check is a feature of `canonicalId()`, not an inconvenience.
+- **`shortId()` is not idempotent on every input**, so it does not
+  collapse *every* bare/canonical pair. Measured:
+  `shortId("v1:cluster:deployment:v2:x:y:z")` is `"v2:x:y:z"` while
+  `shortId("v2:x:y:z")` is `"z"` — the pair still forks. Tracked in
+  memql#2981. It is exact for ids of the normal one-`v<digits>` shape,
+  which is every id `id.NewShortId()` mints.
 
 Compliant mutations (audit done 2026-05-06), in
-`dsl/cognition/mutations.memql`, all via `canonicalId()`:
+`dsl/cognition/mutations.memql`:
 `joinSpaceAsHuman`, `joinSpaceAsSI`, `createGreetingUtterance`,
 `createSessionForParticipant`, `sendTextUtterance`,
 `sendSpeechUtterance`, `sendActionUtterance`,
@@ -1044,11 +1055,13 @@ Compliant mutations (audit done 2026-05-06), in
 
 Compliant via `shortId()` (memql#2925), in
 `dsl/deployment/mutations.memql`: `createDeploymentNodeSpec`,
-`updateDeploymentNodeSpec`. Both also stamp the normalised value into
-the payload field, not only into the id — `nodeSpecsForDeployment`
-filters on that field, so a normalised key over a raw payload value
-would collapse two shapes onto one timeline whose stored value is
-whichever was written last.
+`updateDeploymentNodeSpec`. `create` also **stamps** the normalised
+value into the payload field rather than accepting it raw, because
+`nodeSpecsForDeployment` filters on that field — a normalised key over a
+raw payload value would collapse two shapes onto one timeline whose
+stored value is whichever was written last. `update` is a read-merge and
+does not write the field at all, so it inherits whatever `create`
+stamped.
 
 **Known exceptions — hashed FK id derivations that do NOT normalise.**
 Nothing enforces this rule automatically, so it is listed here or it is
@@ -1265,7 +1278,7 @@ the change. The gates, with their test names:
 - **No concept-name shortId prefixes** (`TestNoShortIdConceptPrefix`).
   Derived ids are the bare unique part (uuid / hash / slug) — never
   `concat("agent-", ...)` or another concept-name / sub-type prefix.
-  See [#20](#20-foreign-key-id-derivation-use-canonicalid-before-hashing).
+  See [#20](#20-foreign-key-id-derivation-normalise-before-hashing).
 - **Typed @relationship targets** (`TestRelationshipTargetsUseImports`,
   memql#1067). `@relationship(..., target=user, ...)` names an
   imported concept; the `target="v1:..."` canonical-string form is

@@ -158,7 +158,9 @@ mutate deployment updateDeploymentStatus {
 // about. BareShortId does not simply strip a canonical prefix:
 //
 //   "  d-abc123  "        -> "d-abc123"           (it TrimSpaces)
-//   "foo:v1:bar:baz:qux"  -> "qux"                (any v<digits>-shaped id)
+//   "foo:v1:bar:baz:qux"  -> "qux"                (first v<digits> segment,
+//                                                  when >=3 segments follow)
+//   "a:v1:b:c"            -> unchanged             (only 2 follow)
 //   "d:x", "x:y:z"        -> unchanged
 //
 // So the ":" separator still aliases: ("d:x", "y") and ("d", "x:y") hash
