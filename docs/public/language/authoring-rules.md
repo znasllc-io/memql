@@ -39,7 +39,7 @@ parse-time error.
 use cognition.concepts.{ space }
 
 // Right -- one bare insert. The target concept comes from the
-// `mutation <Concept> <name>` signature; restating it is retired.
+// `mutate <Concept> <name>` signature; restating it is retired.
 mutate space createSpace {
   args { name string @required }
   insert {
@@ -369,7 +369,7 @@ the storage id as:
 ```
 
 Where:
-- `concept` = the concept bound by the `mutation <Concept> <name>`
+- `concept` = the concept bound by the `mutate <Concept> <name>`
   signature
 - `id-segment` = the trimmed value of the `id:` field
 
@@ -602,10 +602,10 @@ clear compile-time error.
 Example of a typo that surfaces at compile time:
 
 ```memql
-checkUser := queryUserById({ userId: args.event.payload.userId })
+checkUser := userById({ userId: args.event.payload.userId })
 
 result := if cehckUser.empty() {   // typo: cehckUser -> checkUser
-  mutationCreateUser({...})
+  createUser({...})
 }
 ```
 
@@ -888,10 +888,10 @@ insert {
 }
 
 // Correct -- step-call args in an automation / logic body
-mutationCreateUser({ userId: args.event.payload.subject, email: args.event.payload.email })
+createUser({ userId: args.event.payload.subject, email: args.event.payload.email })
 
 // Wrong -- unnecessary quotes on simple-identifier keys
-mutationCreateUser({ "userId": args.event.payload.subject, "email": args.event.payload.email })
+createUser({ "userId": args.event.payload.subject, "email": args.event.payload.email })
 ```
 
 **Why it bites you.** Mixed quoting styles in the same codebase make
@@ -1285,7 +1285,7 @@ grammar:
 - `TestNoRetiredBindingForms` (#988, `dsl/no_named_writes_test.go`):
   named writes (`insert <concept> {` / `update <concept> {`) are
   rejected — the write target comes from the
-  `mutation <Concept> <name>` signature, the block is bare
+  `mutate <Concept> <name>` signature, the block is bare
   `insert {` / `update {`. `canonicalId(x, "v1:ns:name")` string
   literals and `concat("v1:ns:concept:", id)` are rejected — pass
   the imported concept short-name.

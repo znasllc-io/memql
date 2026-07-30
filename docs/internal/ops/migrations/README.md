@@ -21,7 +21,7 @@ new contract a code fix has just introduced.
 
 | Migration | Issue | When to run | Symptoms it fixes |
 |---|---|---|---|
-| [dedupe-peruser-seeds](dedupe-peruser-seeds.md) | [#275](https://github.com/znasllc-io/memql/issues/275) | Any environment cluster-booted **before PR #274 merged** | A user's daily-space participant panel shows 2+ "Assistant" entries; `queryActiveAgents` returns multiple agent rows for the same `(ownerUserId, role)` pair. |
+| [dedupe-peruser-seeds](dedupe-peruser-seeds.md) | [#275](https://github.com/znasllc-io/memql/issues/275) | Any environment cluster-booted **before PR #274 merged** | A user's daily-space participant panel shows 2+ "Assistant" entries; `activeAgents` returns multiple agent rows for the same `(ownerUserId, role)` pair. |
 
 ## Convention
 

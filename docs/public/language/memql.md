@@ -746,7 +746,7 @@ concept==v1:lead && classification==nil
 
 ### DSL Mutations (Struct Form)
 
-Named mutations live in `dsl/<namespace>/mutations.memql`. The concept binding lives in the signature (`mutation <Concept> <name>`); the body carries an `args { ... }` block plus exactly one `insert { ... }` **or** `update { ... }` block (one write per body):
+Named mutations live in `dsl/<namespace>/mutations.memql`. The concept binding lives in the signature (`mutate <Concept> <name>`); the body carries an `args { ... }` block plus exactly one `insert { ... }` **or** `update { ... }` block (one write per body):
 
 ```memql
 use cognition.concepts.{ space }
@@ -961,10 +961,10 @@ Named queries and mutations are invoked from runtime query strings as function c
 queryActiveSpaces()
 
 -- With filters
-querySpaceParticipants({"spaceId": "space-456", "status": "active"})
+spaceParticipants({"spaceId": "space-456", "status": "active"})
 
 -- Combine with directives
-sort(querySpaceUtterances({"spaceId": "s-1"}), "createdAt", "desc")
+sort(spaceUtterances({"spaceId": "s-1"}), "createdAt", "desc")
 paginate(queryActiveSpaces({"userId": "u-1"}), 10)
 ```
 
@@ -989,7 +989,7 @@ Example validation errors:
 
 ```json
 {
-  "error": "function 'querySpaceParticipants': argument validation failed: participantType: value must be one of \"human\", \"si\""
+  "error": "function 'spaceParticipants': argument validation failed: participantType: value must be one of \"human\", \"si\""
 }
 ```
 
@@ -1852,7 +1852,7 @@ concept==v1:user && active==true
 concept==v1:user && createdAt>"2025-01-01T00:00:00Z"
 
 # Call a DSL-defined query with args
-querySpaceParticipants({"spaceId": "space-123", "status": "active"})
+spaceParticipants({"spaceId": "space-123", "status": "active"})
 
 # Sorted, paginated function call
 sort(paginate(queryActiveSpaces(), 10), "createdAt", "desc")

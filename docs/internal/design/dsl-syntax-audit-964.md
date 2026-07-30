@@ -32,7 +32,7 @@ backed by a file:line in the source tree at the time of writing.
 in the signature and then named again in the body:
 
 ```
-mutation participant mutationAddAgentToSpace {   // concept bound here
+mutate participant addAgentToSpace {             // concept bound here
   ...
   insert participant { ... }                     // and restated here (redundant)
 }
@@ -285,7 +285,7 @@ trait traitIsChecked {
 
 ### 5. mutation
 
-Options. Signature `mutation <Concept> <name>`. Annotations: `@enabled`/
+Options. Signature `mutate <Concept> <name>`. Annotations: `@enabled`/
 `@disabled`, `@description`, `@public`/`@internal` (authz markers). `args { <name>
 <type> [@required] [@enum(...)] [@default(...)] [@description] }`. Exactly ONE
 body: `insert <Concept> { ... }` OR `update <Concept> { ... }` (concept currently
@@ -294,7 +294,7 @@ restated — Part 1a). Body forms: explicit `key: <expr>`; payload shorthand
 `actor.userId`, `timestamp()`, `now`, `nil`; `coalesce(args.X, default)`; object
 `{}` literals.
 
-Richest real: `mutationCreateAuditEvent` (`dsl/identity/mutations.memql:336`,
+Richest real: `createAuditEvent` (`dsl/identity/mutations.memql:336`,
 17-arg insert); update `:84`.
 
 ```
@@ -303,7 +303,7 @@ use crm.concepts.{ lead }
 @enabled
 @description("Create a lead.")
 @public                                        // authz marker (owned|granted|admin|public)
-mutation lead mutationCreateLead {
+mutate lead mutationCreateLead {
   args {
     name    string @required @description("Full name")
     email   string @required
@@ -322,7 +322,7 @@ mutation lead mutationCreateLead {
 }
 
 @description("Bump a timestamp (partial update).")
-mutation lead mutationTouchLead {
+mutate lead mutationTouchLead {
   args { leadId string @required }
   update lead { id: args.leadId; lastTouchedAt: timestamp() }
 }
@@ -377,7 +377,7 @@ Options. `logic <name> { args { ... } body { ... } }`. Annotations: `@enabled`/
 `ctx.output`. NOTE: use `&&`/`||` in conditions — the English `and`/`or` forms
 silently misevaluate (Part 1).
 
-Richest real: `logicAccessRequestExpirySweep` (`dsl/identity/logic.memql:36`);
+Richest real: `accessRequestExpirySweep` (`dsl/identity/logic.memql:36`);
 `publishEvent` example `:272`.
 
 ```

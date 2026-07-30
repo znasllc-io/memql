@@ -153,7 +153,7 @@ the spec's `ConceptInSignature` flag and `SuggestImportWhenMissing`
 legal-next rule:
 
 - **Concept-after-construct.** Concept-binding constructs name their
-  bound concept in the signature: `mutation <Concept> <name>`,
+  bound concept in the signature: `mutate <Concept> <name>`,
   `query <Concept> <name>`, `seed <Concept> <name>`, and the `@row`
   form of `shape <Concept> <name>`. Right after the keyword, completion
   suggests a concept (filtered by the partial prefix), with

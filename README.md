@@ -296,7 +296,7 @@ MemQL DSL is a domain-specific query language for time-series memory graphs.
 ### Example Query
 ```memql
 // Find active human participants in a space
-queryActiveHumanParticipants({
+activeHumanParticipants({
   "spaceId": "space_123"
 })
 ```

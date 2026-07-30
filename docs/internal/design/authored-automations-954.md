@@ -247,12 +247,12 @@ runDesignPass (goal = design statement)               [reuse-or-author]
    v
 emitAndRepairBundle (GATE 1 + repair loop)            [validated | failed]
    v
-persist: mutationCreateAuthoringBundle (sourcePlanId) [v1:authoring:bundle]
-         + mutationCreateAuthoringConstruct (per dep)
-         + mutationRecordBundleValidation
+persist: createAuthoringBundle (sourcePlanId)         [v1:authoring:bundle]
+         + createAuthoringConstruct (per dep)
+         + recordBundleValidation
    v
 handoffToGate2 (GATE 2 behavioral dry-run)            [dryRunPassed | failed]
-         + mutationRecordBundleDryRun
+         + recordBundleDryRun
    v
 TERMINAL = dryRunPassed   (NOT activated -- GATE 3 approval + activation are a
                            later user action via the #1162 surface)
@@ -268,7 +268,7 @@ Design decisions (owner):
 - **Default-on for every task**, gated by `MEMQL_AUTHORING_CAPTURE_ENABLED`
   (default on; an ops kill-switch) and bounded by the same process-wide LLM
   ceiling + latching kill-switch (#1141) and the per-plan repair budget (#819).
-- **Idempotent**: `sourcePlanId` on the bundle + `queryAuthoringBundleForPlan`
+- **Idempotent**: `sourcePlanId` on the bundle + `authoringBundleForPlan`
   skip a re-delivered terminal event (belt-and-suspenders with the in-process
   claim across restarts / cross-node re-delivery, #1155). `sourcePlanId` is also
   the lookup key for the #1162 view/edit/export surface.
@@ -359,7 +359,7 @@ sections through a serial decompose chain:
 
 The bundle (sections + assemble + headline + a small logic closure) compiles
 through the SAME Gate-1 sandbox the authoring pipeline uses, then is persisted
-through the authoring-bundle pipeline (`mutationCreateAuthoringBundle` +
+through the authoring-bundle pipeline (`createAuthoringBundle` +
 per-construct rows + a validated record), stamped with `sourcePlanId`. The LLM
 only decides sectionability + the section list; the parallel STRUCTURE is
 deterministic Go (so it can't be fumbled and is unit-testable without an engine,

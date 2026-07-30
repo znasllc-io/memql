@@ -115,41 +115,37 @@ func TestDocsDoNotReferencePrefixedConstructNames(t *testing.T) {
 		}
 	}
 
-	// Files open PR #2912 (issue #2853) is rewriting. It owns the prose in
-	// these seven, and editing them from here would conflict on documentation,
-	// where a bad merge resolution corrupts the lesson silently. Against main
-	// they hold 27 more sites this gate would otherwise flag.
+	// Police GIT-TRACKED markdown REPO-WIDE (#2917), not just docs/public.
+	// A local scratch note is not repo content, hence git-tracked only; the
+	// house convention is that a hit anywhere is a regression
+	// (product_neutrality_test.go:20-23), and the sibling gates
+	// TestEngineIsProductNeutral and TestLifecycleDocsMatchRuling both sweep
+	// the whole repo.
 	//
-	// DELETE THIS LIST once #2912 lands, then fix what it left. Two things to
-	// know before you do: naming-conventions.md carries a counter-example
-	// (`query user queryUserById {`) whose bare form IS declared, so it needs
-	// the escape hatch above rather than a rename; and several of the residual
-	// sites are `querySpaceParticipants`, which is a genuine core violation.
-	// This is a boundary against in-flight work, not an exemption on the
-	// merits. #2912's own gate, TestNamingDocsDoNotMandateAPrefix, bans prose
-	// that MANDATES the prefix and never resolves a name against the tree, so
-	// it and this gate cover different halves and neither subsumes the other.
-	contestedByPR2912 := map[string]bool{
-		"docs/public/concepts/concept-seeding.md":    true,
-		"docs/public/concepts/identifiers.md":        true,
-		"docs/public/language/attribute-matrix.md":   true,
-		"docs/public/language/authoring-rules.md":    true,
-		"docs/public/language/functions.md":          true,
-		"docs/public/language/memql.md":              true,
-		"docs/public/language/naming-conventions.md": true,
-	}
-
-	// Police GIT-TRACKED docs only, matching the sibling gates: a local scratch
-	// note is not repo content. Scoped to docs/public/ because that is #2914's
-	// scope; the 58 further sites outside it (13 in CLAUDE.md) are #2917, which
-	// proposes widening this sweep repo-wide rather than adding a second gate.
-	out, err := exec.Command("git", "ls-files", "-z", "docs/public").Output()
+	// Widening rather than adding a second gate is deliberate: two sweeps for
+	// one class means two resolvers to keep in step, which is the drift this
+	// gate exists to catch, one level up.
+	//
+	// CLAUDE.md is the highest-value file in scope despite being 13 of the
+	// 66 sites. It is what every Claude Code session reads as its standing
+	// instructions for this repo, so a worked example there teaching the
+	// retired convention is self-reinforcing: the instructions produce the
+	// drift that the gates then reject.
+	//
+	// The `contestedByPR2912` exemption list that used to sit here is GONE.
+	// It was a boundary against in-flight work -- seven docs/public files PR
+	// #2912 was rewriting -- and #2912 merged 2026-07-27. It was hiding 8
+	// live violations in authoring-rules.md and memql.md, all of them worked
+	// examples rather than the counter-examples that need the escape hatch
+	// above (naming-conventions.md, the file that comment warned about,
+	// reports clean).
+	out, err := exec.Command("git", "ls-files", "-z").Output()
 	if err != nil {
 		t.Fatalf("git ls-files: %v", err)
 	}
 	prefixedRef := regexp.MustCompile(`\b(?:query|mutation|logic)[A-Z][A-Za-z0-9_]*`)
 	for _, rel := range strings.Split(string(out), "\x00") {
-		if rel == "" || filepath.Ext(rel) != ".md" || contestedByPR2912[rel] {
+		if rel == "" || filepath.Ext(rel) != ".md" {
 			continue
 		}
 		data, err := os.ReadFile(rel)

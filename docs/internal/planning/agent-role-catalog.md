@@ -46,16 +46,16 @@ convention.
   (LLM content generation, Wikipedia fetch for Tier C); the catalog
   capability is the right shape for that.
 - DSL surface: `dsl/agents/mutations.memql` carries
-  `mutationCreateAgentRole` (the seed materializer's write path);
-  `dsl/agents/queries.memql` carries `queryAgentRoleBySlug` and
-  `queryActiveAgentRoles`; `dsl/agents/shapes.memql` carries
+  `createAgentRole` (the seed materializer's write path);
+  `dsl/agents/queries.memql` carries `agentRoleBySlug` and
+  `activeAgentRoles`; `dsl/agents/shapes.memql` carries
   `agentRoleFull`.
 
 What is NOT in Phase 1:
 
 - The GA-driven auto-create flow (the agent factory that consumes the
   catalog when no fitting specialist exists).
-- Server-side lock enforcement in `mutationUpdateAgent`.
+- Server-side lock enforcement in `updateAgent`.
 - The cockpit / product UI surfaces that render locked vs default
   vs available with the right affordances.
 - The "expand the agent's knowledge / capabilities" flow that
@@ -93,17 +93,17 @@ different role.
 builtin which calls into `integrations/agents.handleEnsureForGoal`.
 That handler:
 
-1. Loads existing agents via `queryActiveAgentsForUser` + the role
-   catalog via `queryActiveAgentRoles`.
+1. Loads existing agents via `activeAgentsForUser` + the role
+   catalog via `activeAgentRoles`.
 2. Runs the `agentFactoryAnalyze` structured-output prompt
    (`dsl/agents/prompts/agentFactoryAnalyze.tmpl`) which returns
    `{action: match|extend|create, targetAgentId?, roleSlug,
    domainIds, liveSourceIds, toolSlugs, reasoning}`.
 3. Dispatches: `match` returns the existing id; `extend` unions
    missing capabilities into the target and writes via
-   `mutationUpdateAgent`; `create` composes from role.locked +
+   `updateAgent`; `create` composes from role.locked +
    role.default + analysis additions and writes via
-   `mutationCreateAgent`.
+   `createAgent`.
 
 The locked-set composition (no dedicated `mutationCreateAgentFromRole`)
 runs in the factory's Go executor rather than a procedural mutation;
@@ -171,7 +171,7 @@ acting-agent role to exercise the post-gate code path.
 `dsl/agents/builtins.memql`'s `agent` builtin changed contract:
 `agent(name, prompt, spaceId) -> {planId, agent: {name, role,
 roleSlug}}`. Always async -- mints a `v1:planner:plan` with
-`kind=agentInvocation` in `queued` status via `mutationCreatePlan`
+`kind=agentInvocation` in `queued` status via `createPlan`
 and returns the planId. Callers subscribe to plan events or
 poll-query for completion.
 
