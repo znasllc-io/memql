@@ -10,11 +10,18 @@ owner: znas
 # Per-row authorization audit
 
 > **Status:** Framework + initial gap closure shipped 2026-05-20.
-> All 11 flagged constructs are now classified via `@public` with
-> per-construct comments documenting the intent + the follow-up
+> The 11 constructs flagged *at that time* were closed via `@public`
+> with per-construct comments documenting the intent + the follow-up
 > tightening path. The classification test
 > (`dsl.TestPerRowAuthzClassification`) hard-fails on any new
 > flagged construct.
+>
+> That "11" is history, not an inventory. The live figures are **23
+> `@public`** and **6 `@serverOnly`**, and they move; regenerate with
+> `go test ./dsl/ -run TestPerRowAuthzClassification -v` rather than
+> trusting a number written here. Several other counts and tables
+> further down this document are `#54`-era and have drifted — see
+> memql#2983.
 
 ## Context
 
@@ -339,19 +346,27 @@ Parser-recognised. Carries no runtime semantics. The validator
 treats it as "author explicitly acknowledges this construct does
 not require a caller-check."
 
-Examples of legitimate `@public` use:
+The test is **what the construct returns** — does every caller get the
+same rows? — not *when it runs*. Examples of legitimate `@public` use.
+Each **named construct** below is gated against the tree by
+`dsl.TestPublicExamplesAreAnnotated` — it must be declared, in the file
+named, carrying a real `@public` attribute. The reasons given are prose
+and are not gated; they were true when written:
 
-- the cluster-topology queries in `dsl/cluster/queries.memql` — need to
-  be readable on the unauthenticated cluster bootstrap path.
-- `activeAgentRoles` — role catalog; no per-user data.
+- the catalog reads in `dsl/rbac/queries.memql` — global, immutable,
+  deployment-wide configuration. That file's header is the doctrine and
+  the reference case.
+- `activeAgentRoles` (`dsl/agents/queries.memql`) — the agentRole
+  catalog: `concept agentRole` declares no owner field and no `@pii`
+  field, and `agentRoleFull` omits `row.createdBy`, so there is no
+  per-caller dimension to scope by.
 
-This list has drifted from the tree: neither bullet currently carries
-`@public` (`activeAgentRoles` at `dsl/agents/queries.memql` does not, and
-`dsl/cluster/queries.memql` has no `@public` at all). Take them as
-illustrations of the argument below, not as an inventory of annotated
-constructs. Reconciling the list — in either direction, per construct —
-is memql#2918; note that the lesson at the end of this section cuts
-against `@public` for anything reachable pre-auth.
+**Same marker, two meanings — read the comment before extending this
+list.** The other three `@public` queries in `dsl/agents/queries.memql`
+are the opposite kind: they take a caller-supplied `userId` /
+`ownerUserId`, return per-user rows, and carry #54 follow-up comments
+explaining the debt. A construct belongs on the list above only if it
+is unscoped *because it has nothing to scope by*.
 
 `userByEmail` used to head this list, as the login-path lookup that
 runs before the caller is authenticated. That reasoning was right
@@ -366,6 +381,52 @@ The lesson generalises, and it is the one to take from this section:
 `@serverOnly`, not for `@public`.** `@public` carries no runtime
 semantics at all, so on a construct returning personal data it
 records an intention and enforces nothing.
+
+### `@public` has two jobs, and only one of them is an apology
+
+Conflating them is what made the old list unreadable, so state them
+apart:
+
+1. **Acknowledging a flag.** The construct selects rows by a user-scope
+   column without a caller-check, the classifier flags it, and `@public`
+   is the author saying "yes, intentionally" — with a comment explaining
+   why. This is the `#54`-debt kind. The three `@public` queries in
+   `dsl/agents/queries.memql` other than `activeAgentRoles` are these.
+2. **Documenting intent on reference data.** The construct is *never*
+   flagged — it references no user-scope field at all — and `@public`
+   records that the global surface is deliberate rather than an
+   oversight. `dsl/rbac/queries.memql`'s header states this outright:
+   *"None of these queries reference a user-scope payload field, so the
+   per-row-authz classifier does not flag them; they are nonetheless
+   explicitly `@public` to document the intent."* `activeAgentRoles` is
+   this kind too.
+
+Use (2) sparingly and never reflexively: `@public` is matched **ahead of**
+the flagged bucket and it hard-blocks memql#2920 tier inference, so every
+one spends a suppressor. Spend it where a reader would otherwise
+reasonably ask "is this global on purpose?" — a catalog every principal
+resolves against — and not merely to decorate a construct nobody
+questions.
+
+### Why the cluster-topology bullet was retired
+
+It named constructs that **do not carry the annotation** (`dsl/cluster/queries.memql`
+has zero `@public`), and its stated justification was false. There is no
+"unauthenticated cluster bootstrap path": boot-time peer discovery reads
+`v1:cluster:node` through an in-process raw concept filter
+(`component/node/bootstrap.go`), not through any named query, so nothing
+in that file serves it.
+
+Whether those queries *should* carry `@public` under sense (2) above is a
+live question, not one this list settles — they are unflagged reference
+data much like the rbac catalog. What is settled is that the list must
+not claim they already do.
+
+`@serverOnly` is definitely not the answer there: it is runtime-enforced
+against `auth.CallOrigin`, so it would break the topology reconciler
+(`component/node/reconciler.go` calls with a plain context), and that
+break could not be repaired in place — `call_origin_conformance_test.go`
+forbids `component/node` from stamping internal origin.
 
 If you find yourself reaching for `@public` to "just make the
 validator happy" without a clear reason, the construct probably

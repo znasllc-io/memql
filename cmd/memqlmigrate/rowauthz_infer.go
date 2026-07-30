@@ -337,7 +337,9 @@ func describe(d langparser.RowAuthzDecl) string {
 //     would do so unreviewed. Inferring it from `@public` on
 //     `dsl/identity/queries.memql` would have declared `identity.user`
 //     -- email, phone, birthdate -- publicly readable. That those
-//     `@public` claims are not reliable is separately filed as #2918.
+//     `@public` claims are not reliable is separately filed as #2987.
+//     (#2918 corrected the audit doc's example LIST and gated it; the
+//     reliability of the identity claims themselves is #2987.)
 //   - `granted` needs a relationship spec resolved across files, which
 //     is Phase 2's job, where the predicate is actually computed.
 //
