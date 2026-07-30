@@ -95,11 +95,12 @@ semantic-cache eval.
 `TestSearchUsers_ActiveAndLimitApplied` failed: the `searchUsers` MCP tool
 errored `multiple paginate() directives are not supported` on **every** call.
 Root cause: the 5.3 backfill (commit `8874f917`) added `sort` + `paginate 50`
-to `searchUsers`, but the `searchUsers` tool handler in `dsl/memql/tools.memql`
-already wrapped it in an outer `paginate(searchUsers(...), $args.limit)` —
+to the `searchUsers` **query**, but the same-named tool handler in
+`dsl/memql/tools.memql` already wrapped it in an outer
+`paginate(searchUsers(...), $args.limit)` —
 two nested `paginate()` directives, which the engine rejects. Single-node test
 runs without a DB skipped this path, so the break shipped silently. **Fix:** the
-inner `searchUsers` now declares only `sort "createdAt","desc"` (no inner
+inner `searchUsers` query now declares only `sort "createdAt","desc"` (no inner
 `paginate`); the tool handler's outer `paginate($args.limit)` remains the single,
 caller-driven window. Audit stays at 0 unmarked (the query is bounded-list via
 `sort`); the test passes; whole module green.
@@ -182,8 +183,8 @@ concepts are denylisted from default-on caching entirely
 - Live Postgres: `timescale/timescaledb:latest-pg16`, all `.up.sql` migrations
   applied, DSN `postgres://memql:memql_local_dev@localhost:5432/memql`.
 - One reusable load test added (`keyset_pagination_db_test.go`,
-  Postgres-gated/hermetic). One real regression fixed (`searchUsers` +
-  `searchUsers` tool, above).
+  Postgres-gated/hermetic). One real regression fixed (the
+  `searchUsers` query nested inside the same-named tool, above).
 
 ### Epic disposition
 

@@ -32,7 +32,7 @@ backed by a file:line in the source tree at the time of writing.
 in the signature and then named again in the body:
 
 ```
-mutate participant addAgentToSpace {   // concept bound here
+mutate participant addAgentToSpace {             // concept bound here
   ...
   insert participant { ... }                     // and restated here (redundant)
 }
@@ -285,7 +285,7 @@ trait traitIsChecked {
 
 ### 5. mutation
 
-Options. Signature `mutation <Concept> <name>`. Annotations: `@enabled`/
+Options. Signature `mutate <Concept> <name>`. Annotations: `@enabled`/
 `@disabled`, `@description`, `@public`/`@internal` (authz markers). `args { <name>
 <type> [@required] [@enum(...)] [@default(...)] [@description] }`. Exactly ONE
 body: `insert <Concept> { ... }` OR `update <Concept> { ... }` (concept currently

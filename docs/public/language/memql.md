@@ -746,7 +746,7 @@ concept==v1:lead && classification==nil
 
 ### DSL Mutations (Struct Form)
 
-Named mutations live in `dsl/<namespace>/mutations.memql`. The concept binding lives in the signature (`mutation <Concept> <name>`); the body carries an `args { ... }` block plus exactly one `insert { ... }` **or** `update { ... }` block (one write per body):
+Named mutations live in `dsl/<namespace>/mutations.memql`. The concept binding lives in the signature (`mutate <Concept> <name>`); the body carries an `args { ... }` block plus exactly one `insert { ... }` **or** `update { ... }` block (one write per body):
 
 ```memql
 use cognition.concepts.{ space }

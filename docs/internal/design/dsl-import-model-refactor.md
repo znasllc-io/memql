@@ -17,7 +17,7 @@ The canonical post-migration shape is the only one the engine accepts:
   where the dotted path maps to `dsl/<a>/<b>.memql` and the
   brace-list names the constructs pulled into local scope.
 - **Concept binding in the signature:** `query <Concept> <name>`,
-  `mutation <Concept> <name>`, `shape <Concept> <name>`,
+  `mutate <Concept> <name>`, `shape <Concept> <name>`,
   `seed <Concept> <name>`.
 - **No `@use*` annotations.** The legacy `@useConcept`, `@useShape`,
   `@useQuery`, `@useMutation`, `@useLogic`, `@useBuiltin` family is
@@ -35,12 +35,12 @@ The canonical post-migration shape is the only one the engine accepts:
 ```memql
 use cognition.concepts.{ participant }
 use cognition.shapes.{ participantFull }
-use common.traits.{ traitIsActiveRecord }
+use common.traits.{ isActiveRecord }
 
 @description("Get space participants")
 query participant spaceParticipants {
   args   { spaceId string @required }
-  filter payload.spaceId == args.spaceId; traitIsActiveRecord
+  filter spaceId == args.spaceId && isActiveRecord
   shape  participantFull
 }
 ```

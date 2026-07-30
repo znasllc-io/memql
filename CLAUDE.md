@@ -1344,7 +1344,7 @@ only as the internal rewriter target (see "Procedural form
 **Concept binding lives in the construct signature** (locked in
 2026-05 via the import-model pivot; PR #47 / #48 / #49). The
 two-identifier signature `query <Concept> <name>`,
-`mutation <Concept> <name>`, `seed <Concept> <name>`, and
+`mutate <Concept> <name>`, `seed <Concept> <name>`, and
 `shape <Concept> <name>` names the bound concept directly; the
 loader resolves the concept name through the file's file-top
 imports. The legacy per-construct `@useConcept(<name>)` annotation
@@ -1455,7 +1455,7 @@ Mutations:
 use cognition.concepts.{ space }
 
 @description("Create a cognition space")
-mutate space createSpace {
+mutate space mutationCreateSpace {
   args {
     spaceId  string  @required
     name     string  @required

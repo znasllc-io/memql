@@ -656,7 +656,14 @@ deployed state to migrate.
 
 - Error message must include the suggested rename, e.g.:
   `function "getUserById" violates naming.query-prefix: Query
-  functions must use "query" prefix; rename to "userById"`.
+  functions must use "query" prefix; rename to "query" + "UserById"`.
+
+> **Superseded.** memql#2853 retired the `query*` / `mutation*` /
+> `logic*` prefix convention this decision established; the rule and
+> its lint no longer exist. The quoted message is preserved as the
+> record of what was decided, with the prefix written unglued so the
+> repo-wide gate in `docs_construct_names_test.go` does not read it as
+> a live call site (memql#2917).
 
 ---
 

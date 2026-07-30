@@ -247,7 +247,7 @@ runDesignPass (goal = design statement)               [reuse-or-author]
    v
 emitAndRepairBundle (GATE 1 + repair loop)            [validated | failed]
    v
-persist: createAuthoringBundle (sourcePlanId) [v1:authoring:bundle]
+persist: createAuthoringBundle (sourcePlanId)         [v1:authoring:bundle]
          + createAuthoringConstruct (per dep)
          + recordBundleValidation
    v

@@ -225,7 +225,7 @@ is rejected at parse time. The canonical post-migration shape:
   `use common.traits.{ isActiveRecord }`.
 - **Concept binding lives in the construct signature** for seeds /
   queries / mutations / shapes:
-  `query <Concept> <name> { ... }`, `mutation <Concept> <name> { ... }`,
+  `query <Concept> <name> { ... }`, `mutate <Concept> <name> { ... }`,
   `shape <Concept> <name> { ... }`, `seed <Concept> <name> { ... }`.
 
 The legacy `@input` wrapper and `@template` body annotation are also

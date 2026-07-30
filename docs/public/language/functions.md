@@ -80,7 +80,7 @@ use common.traits.{ isActiveRecord }
 ```
 
 The **concept a construct binds to is named in its signature**:
-`query <Concept> <name>`, `mutation <Concept> <name>`,
+`query <Concept> <name>`, `mutate <Concept> <name>`,
 `shape <Concept> <name>`, `seed <Concept> <name>`. The short concept
 name resolves through the file's `use ...concepts.{ ... }` import.
 
