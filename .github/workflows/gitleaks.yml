@@ -30,10 +30,27 @@ permissions:
 #   - Pull requests run a FAST working-tree scan (`gitleaks dir .`) on a
 #     shallow checkout -- it inspects the current file contents the PR
 #     would merge, with no full-history clone or history walk.
-#   - Pushes to main and the weekly schedule run the heavy FULL-HISTORY
-#     scan (`gitleaks git .`) on a fetch-depth:0 checkout, the
+#   - Pushes to main, the merge queue, and the weekly schedule run the heavy
+#     FULL-HISTORY scan (`gitleaks git .`) on a fetch-depth:0 checkout, the
 #     authoritative pass that also catches secrets added-then-removed
 #     across commits.
+#
+# The full-history lane is pinned to the HEAD ancestry (memql#2996). A
+# fetch-depth:0 checkout fetches EVERY branch, and `gitleaks git .` defaults to
+# walking every ref it can reach -- not just the commit under test. So two
+# synthetic test fixtures on one open, unmerged branch failed every merge
+# candidate AND every push to main, whatever their own diffs contained. That
+# wedged the queue repo-wide: six consecutive candidates across three unrelated
+# PRs were evicted and main stayed red, none of them containing the branch at
+# fault.
+#
+# Scoping the walk to HEAD keeps it a FULL-history walk -- every commit
+# reachable from the candidate is still read, so added-then-removed secrets are
+# still caught -- it just stops walking refs that are not the candidate.
+# Measured when this landed: unscoped 2145 commits, scoped 2124, the delta being
+# exactly the unmerged branch. Do not drop the flag on the run step below:
+# without it one unmerged branch blocks every merge in the repo.
+# `scripts/dev/gitleaks_scan_scope_test.go` enforces that it stays.
 
 jobs:
   scan:
@@ -43,7 +60,8 @@ jobs:
       # PR lane: shallow checkout (default fetch-depth: 1) -- fast.
       - if: github.event_name == 'pull_request'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # main / schedule lane: full history required for `gitleaks git .`.
+      # main / merge queue / schedule lane: full history required for
+      # `gitleaks git .`.
       - if: github.event_name != 'pull_request'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -59,6 +77,8 @@ jobs:
       - name: scan working tree (PR, fast incremental)
         if: github.event_name == 'pull_request'
         run: gitleaks dir . --no-banner
-      - name: scan full history (main / schedule)
+      - name: scan full history (main / merge queue / schedule)
         if: github.event_name != 'pull_request'
-        run: gitleaks git . --no-banner
+        # Scoped to the candidate's own ancestry -- see the header comment.
+        # Without this, an unmerged branch fails every merge candidate.
+        run: gitleaks git . --no-banner --log-opts="HEAD"

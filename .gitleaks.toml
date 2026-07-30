@@ -59,3 +59,15 @@ regexes        = ['''encryption-secret-16b''']
 paths = [
   '''^component/identity/.*_test\.go$''',
 ]
+
+[[allowlists]]
+description    = "Synthetic 64-char hex fixtures in the k3d seed-secrets master-key guard tests (memql#2958). Not credentials -- the guard asserts seed-secrets.sh only ever seeds a key matching ^[0-9a-fA-F]{64}$, so the test must carry literals of exactly that shape. Their entropy tripped generic-api-key on the full-history pass and wedged the merge queue repo-wide (memql#2996). Keyed on the SHAPE rather than the literals, so no fixture value is copied into this config; AND-scoped to the test path, so the same shape in a non-test file still trips the scanner (verified: identical value flagged in a non-test path, allowlisted in a _test.go one)."
+condition      = "AND"
+# Deliberately NO regexTarget: the pattern must apply to the extracted SECRET.
+# Against "match" it would be tested against the surrounding `name = "..."`
+# span, where an anchored shape regex can never fire -- the allowlist would
+# silently do nothing.
+regexes        = ['''^[0-9a-fA-F]{64}$''']
+paths = [
+  '''^scripts/k3d/.*_test\.go$''',
+]
