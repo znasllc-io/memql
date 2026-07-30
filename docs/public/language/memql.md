@@ -873,14 +873,20 @@ query node liveNodes {
 }
 
 query node nodesAt {        // asOf <ts> -> deterministic, no marker
-  args { at string @required }
-  asOf args.at
+  asOf "2026-01-01T00:00:00Z"
   shape nodeCard
 }
 ```
 
 - `asOf latest` reads current (clock-dependent) state. Mark the query `@latestMode` so consumers see on its contract that the result is time-dependent.
 - `asOf <explicit timestamp>` reads immutable historical state — deterministic, so it needs no marker.
+- **The timestamp must be a literal.** `asOf` in a struct-form query takes an RFC3339 string literal or bare `latest` — not `args.X`. A declared query therefore cannot offer a *caller-chosen* point in time; `asOf args.at` is rejected at load with `asOf second argument must be an RFC3339 string or latest`. To read at a caller-supplied instant, wrap a call at the top level instead:
+
+  ```
+  asOf(nodesAt(), "2026-07-28T12:00:00Z")
+  ```
+
+  which means composing that string at the call site. Making it declarable is memql#2992.
 
 ### Imports
 
