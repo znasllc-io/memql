@@ -38,10 +38,27 @@ mutate calendarEvent createCalendarEvent {
   }
 }
 
+// `ownerUserId: actor.userId` is NOT redundant with the create-time
+// stamp, and removing it reopens memql#2988.
+//
+// `args.payload` is splatted whole, so without an explicit re-stamp a
+// caller passing `payload: {ownerUserId: "<someone-else>"}` reassigns
+// the row -- the field this concept declares as its @rowAuthz owner and
+// whose own doc calls it "the load-bearing per-row authz guard".
+//
+// The engine's protection against exactly this (memql#401, overlay-wins)
+// is populated ONLY from explicit block fields. With just `id` (hoisted
+// to IDTemplate) and the splat, the overlay map was EMPTY and nothing
+// engaged. Naming the field here puts it in the overlay, where it wins
+// over the caller's payload. `updateNote` has always done this; the two
+// mutations were otherwise near-identical, which is why the gap was
+// invisible on inspection.
+//
 /// Partial update of a calendarEvent. Only the fields passed in `payload` change; everything else
 /// inherits from the prior row. Backs editing an event (reschedule, rename, change location / notes
-/// / recurrence). The calendar tool reads the row via the owner-scoped calendarEventById before
-/// calling this, so cross-user edits are impossible.
+/// / recurrence). The owner is re-stamped from the actor on every write, so a caller cannot
+/// reassign an event by passing `ownerUserId` in the payload.
+@actor
 mutate calendarEvent updateCalendarEvent {
   args {
     eventId  string!
@@ -49,6 +66,7 @@ mutate calendarEvent updateCalendarEvent {
   }
   update {
     id: args.eventId
+    ownerUserId: actor.userId
     args.payload
   }
 }

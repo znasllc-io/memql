@@ -175,6 +175,43 @@ graph expansion actually walks into — `v1:identity:user` (46 inbound
 relationships), `v1:agents:agent` (19), `v1:planner:plan` (11) — are
 all in that undeclared set.
 
+### The write path: a declared owner tier is gated (memql#2982)
+
+`@rowAuthz(owner="F")` asserts that F identifies the row's owner. That
+assertion is worthless if a caller can write F — and worse than
+worthless, because it is false in the direction that reads as safe: an
+auditor who sees a declared owner stops looking.
+
+`TestDeclaredOwnerFieldsAreServerStamped` gates it. Every concept
+declaring an owner tier must have that field stamped from
+`actor.userId` and unwritable from caller args through **any** mutation.
+
+The check derives from the **loaded `MutationTemplate`**, not from
+scanning `accept { ... }` blocks, because the source spelling and the
+runtime behaviour are different questions:
+
+- `appendDocumentVersion` writes a bare `args.ownerUserId` mirror with
+  no `accept` block anywhere.
+- `updateCalendarEvent` splatted `args.payload` with **no overlay**, so
+  the field was caller-writable without appearing near an `accept`
+  block. That was **memql#2988**, a live defect on a concept that
+  declared the tier and whose field doc called it "the load-bearing
+  per-row authz guard". Fixed by re-stamping the owner in the update
+  block, which is what puts it in `PayloadOverlayTemplate` where
+  memql#401's overlay-wins precedence engages.
+
+`updateNote` and `updateCalendarEvent` were near-identical in source and
+differed entirely in whether that protection engaged. **If a mutation
+splats a caller-supplied payload, it must re-stamp every authz-relevant
+field explicitly** — the create-time stamp does not carry over.
+
+Two concepts are grandfathered with named exemptions (memql#2989). Both
+claim in their field docs that edits "run server-side on the owner's
+behalf", and nothing enforces that: the tree has zero `@serverOnly`
+mutations, so "handler-invoked only" is not expressible on a write. The
+gate deliberately over-rejects rather than guess, and the exemption list
+is meant to shrink to empty.
+
 ### Seeding the tree
 
 ```bash

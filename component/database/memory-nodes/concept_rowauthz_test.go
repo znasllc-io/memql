@@ -291,7 +291,10 @@ func TestRowAuthzIsInert(t *testing.T) {
 		// feed it. The executor is on this list ONLY because it calls
 		// recordShadow, which returns nothing and cannot alter a query.
 		"component/memql/rowauthz_shadow.go": true,
-		"component/memql/executor.go":        true,
+		// #2982: owner-field provenance. Reads the tier to check the
+		// WRITE path against it; injects nothing into a query.
+		"component/memql/rowauthz_owner_provenance.go": true,
+		"component/memql/executor.go":                  true,
 	}
 
 	var offenders []string
