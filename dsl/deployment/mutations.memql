@@ -189,7 +189,8 @@ mutate deployment updateDeploymentStatus {
 // id.NewShortId -- so the derived id is byte-identical to before. (Not
 // component/deploycontrol: it calls createDeployment and updateDeploymentStatus,
 // which this does not touch.) Inputs that DO change are canonical ids,
-// whitespace-padded ids, and any v<digits>-shaped string -- none of which an
+// whitespace-padded ids, and some v<digits>-shaped strings (see the table
+// above -- "a:v1:b:c" is unchanged) -- none of which an
 // in-tree caller sends, and no rows exist to migrate since this mutation could
 // not write at all until #2885. Pinned by
 // TestShortId_IsANoOpForEveryInTreeProducer.
