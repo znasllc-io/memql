@@ -116,8 +116,9 @@ mutate deployment updateDeploymentStatus {
 // every later re-pin (updateDeploymentNodeSpec) appends a new payload
 // version under the SAME time-series timeline -- one record per
 // (deployment, nodeType), reconstructable asOf any time. deploymentId
-// + nodeType are ALSO stamped as payload fields so nodeSpecsForDeployment
-// can filter on the bare deploymentId without canonical-id prefixing.
+// is ALSO written as a payload field -- stamped, normalised, see below -- and
+// nodeType is accepted as given, so nodeSpecsForDeployment can filter on the
+// bare deploymentId without canonical-id prefixing.
 //
 // Why hashed rather than joined (#2885): a raw
 // concat(deploymentId, ":", nodeType) is a colon-bearing shortId, and
@@ -132,12 +133,16 @@ mutate deployment updateDeploymentStatus {
 // different ids and mint TWO timelines for the same (deployment, nodeType).
 // shortId() is canonical-or-bare in, bare out (#1859), so both shapes derive
 // one id for the ids this pack actually sees -- a colon-free uuid from
-// id.NewShortId and the canonical form around it. It is NOT idempotent in
-// general: it strips again on a second application whenever its own RESULT
-// still holds a v<digits> segment with >=3 segments after it, and such a
-// bare/canonical pair still forks. (Carrying more than one v<digits> segment
-// is necessary for that but not sufficient -- "v1:v1" and "v2:v3:v4:v5" are
-// both idempotent.) See memql#2981; the measured behaviour is below.
+// id.NewShortId and the canonical form around it -- every id this tree mints
+// is colon- and whitespace-free, so shortId() is a fixed point on all of them.
+//
+// It is NOT idempotent in general, and the exact condition is subtle enough
+// that two attempts to state it here were wrong: it turns on trailing empty
+// segments and on whitespace inside the value, not just on segment counts.
+// memql#2981 carries the measured predicate and its counterexamples. What
+// matters here: an SDK caller can supply a value for which a bare and a
+// canonical form still derive DIFFERENT ids, which is section 20's own
+// prohibited outcome.
 //
 // It took #2925 to make that spelling usable: shortId() parsed in an id: slot
 // and then died at render, because the mutation-template id evaluator had no

@@ -168,7 +168,7 @@ func TestShortId_DoesNotMakeAColonBearingArgSafe(t *testing.T) {
 	if a, b := derive("d:x", "y"), derive("d", "x:y"); a != b {
 		t.Errorf("the separator aliasing appears CLOSED: (\"d:x\",\"y\") and (\"d\",\"x:y\") now "+
 			"derive different ids. That is an improvement, but the comment block in "+
-			"dsl/deployment/mutations.memql still documents the aliasing as live and memql#2925 "+
+			"dsl/deployment/mutations.memql still documents the aliasing as live and memql#2980 "+
 			"still tracks it -- update both in the same change.\n  (\"d:x\",\"y\") -> %v\n"+
 			"  (\"d\",\"x:y\") -> %v", a, b)
 	}
