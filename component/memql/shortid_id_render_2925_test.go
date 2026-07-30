@@ -99,8 +99,9 @@ func TestShortId_CanonicalAndBareDeriveTheSameId(t *testing.T) {
 // point on a bare id, so the derived id for that caller is byte-identical
 // before and after.
 //
-// Inputs that DO change are canonical ids, whitespace-padded ids, and
-// v<digits>-shaped strings -- not canonical ids alone, which is what this
+// Inputs that DO change are canonical ids, whitespace-padded ids, and SOME
+// v<digits>-shaped strings ("foo:v1:bar:baz:qux" strips to "qux";
+// "a:v1:b:c" is unchanged) -- not canonical ids alone, which is what this
 // comment claimed until review round 6 caught it standing after the same claim
 // had been corrected in dsl/deployment/mutations.memql and the PR body. None
 // is sent by an in-tree caller, and no rows exist to migrate (the mutation
