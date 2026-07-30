@@ -126,49 +126,45 @@ mutate deployment updateDeploymentStatus {
 // form, so the raw join was rejected on every call and this mutation
 // could never write a row. hash() yields 64 hex chars, which is bare.
 //
-// NOT normalised, and that is a known gap -- see #2925. authoring-rules
-// section 20 says a hashed FK arg should be normalised first, because the
-// hash is byte-level: a caller passing a bare deploymentId and one passing
-// the canonical "v1:cluster:deployment:<short>" form hash to different ids
-// and would mint TWO timelines for the same (deployment, nodeType).
+// NORMALISED with shortId() since #2925. authoring-rules section 20 requires
+// it because the hash is byte-level: a caller passing a bare deploymentId and
+// one passing the canonical "v1:cluster:deployment:<short>" form would hash to
+// different ids and mint TWO timelines for the same (deployment, nodeType).
+// shortId() is canonical-or-bare in, bare out, and idempotent (#1859), so both
+// shapes now derive one id.
 //
-// Every spelling of that normalisation is blocked in this position today,
-// which is why it is deferred rather than skipped. Each was tried:
+// It took #2925 to make that spelling usable: shortId() parsed in an id: slot
+// and then died at render, because the mutation-template id evaluator had no
+// ShortIdExpr case. The other two spellings are still blocked, and their
+// blockers are real defects rather than authoring mistakes:
 //
-//   - ambient, no import: canonical_id_refs.go accepts the ambient path
-//     only when the concept id contains ":"+domain+":". The directory
-//     domain here is `deployment` but these concepts declare
-//     @namespace("cluster"), so the id is v1:cluster:deployment and the
-//     check fails -- "concept ... is neither imported nor a same-domain
-//     concept".
-//   - `use deployment.concepts.{ deployment }`: resolves, but it is an
-//     import of the file's own directory domain, which TestNoSameDomainUse
-//     rejects (#2617).
-//   - `use cluster.concepts.{ deployment }`: memqllint rejects it --
-//     "deployment" is not declared in cluster/concepts.memql -- because the
-//     concept lives here, not there. The engine's own resolver does accept
-//     it on a unique trailing-segment match, and that divergence is itself
-//     worth knowing; but adding ANY explicit import for the concept
-//     suppresses the same-domain fallback in dslimports, which then drops
+//   - ambient canonicalId, no import: canonical_id_refs.go accepts the
+//     ambient path only when the concept id contains ":"+domain+":". The
+//     directory domain here is `deployment` but these concepts declare
+//     @namespace("cluster"), so the id is v1:cluster:deployment and the check
+//     fails -- "concept ... is neither imported nor a same-domain concept".
+//     Filed as #2976.
+//   - `use cluster.concepts.{ deployment }`: memqllint rejects it while the
+//     engine's resolver accepts it on a unique trailing-segment match (that
+//     divergence is #2945), AND adding any explicit import for the concept
+//     suppresses the same-domain fallback in dslimports, which silently drops
 //     createDeployment and updateDeploymentStatus out of
-//     TestMutationFieldLaneCoversEveryMutation.
-//   - shortId(): parses in an id: slot and would give the same invariant
-//     from the other direction, but the mutation-template id evaluator has
-//     no ShortIdExpr case, so it dies at render with "unsupported
-//     expression in mutation template".
+//     TestMutationFieldLaneCoversEveryMutation. Filed as #2977.
 //
-// Reachable today? No in-tree producer passes a canonical deploymentId --
+// What shortId() does NOT fix, measured rather than assumed: BareShortId
+// strips only a RECOGNISABLE canonical id, so "d:x" and "x:y:z" pass through
+// unchanged. The ":" separator therefore still aliases -- ("d:x", "y") and
+// ("d", "x:y") hash identically -- and that stays safe only because
+// id.NewShortId mints a colon-free uuid. Still reachable through the generated
+// SDK by an external caller, still tracked in #2925.
+//
+// nodeType is a plain discriminator, not a concept reference, so it is hashed
+// as written.
+//
+// No migration: adding shortId() is a no-op for every in-tree producer, since
 // component/deploycontrol mints a bare id and the deploy pack forwards the
-// bare payload field -- and no rows exist to migrate, so nothing is at risk
-// now. It is reachable through the generated SDK by an external caller.
-//
-// nodeType is a plain discriminator, not a concept reference, so it is
-// hashed as written. One assumption that rides on that: the ":" separator
-// makes the pair unambiguous only because deploymentId is colon-free by
-// construction (id.NewShortId mints a bare uuid). A colon-bearing
-// deploymentId would alias with a colon-bearing nodeType -- ("d:x", "y")
-// and ("d", "x:y") hash identically. Same external-caller surface as the
-// normalisation gap above, tracked in the same issue.
+// bare payload field. Only a canonical input changes, and no in-tree caller
+// sends one -- pinned by TestShortId_IsANoOpForEveryInTreeProducer.
 //
 // Engine-as-spine: version coalesces to "" -- an empty version means
 // "resolve against the deployment's engine version", a non-empty value
@@ -192,7 +188,7 @@ mutate deploymentNodeSpec createDeploymentNodeSpec {
     accept { deploymentId, nodeType }
     stamp {
       id: hash(concat(
-        args.deploymentId, ":",
+        shortId(args.deploymentId), ":",
         args.nodeType
       ))
       version: args.version ?? ""
@@ -232,7 +228,7 @@ mutate deploymentNodeSpec updateDeploymentNodeSpec {
   }
   update {
     id: hash(concat(
-      args.deploymentId, ":",
+      shortId(args.deploymentId), ":",
       args.nodeType
     ))
     version: args.version ?? ""

@@ -1037,19 +1037,27 @@ Compliant mutations (audit done 2026-05-06), in
 Nothing enforces this rule automatically, so it is listed here or it is
 invisible:
 
-- `createDeploymentNodeSpec` / `updateDeploymentNodeSpec`
-  (`dsl/deployment/mutations.memql`) — every spelling of the
-  normalisation is currently blocked in an `id:` position for this pack:
-  the `canonicalId()` concept argument does not resolve for a concept
-  declaring `@namespace("cluster")` while living in `dsl/deployment/`,
-  and `shortId()` has no evaluator case in an id template. Tracked in
-  memql#2925; the mutation's own comment block carries the detail.
 - `createAccountEntitlement` (`dsl/identity/mutations.memql`) — hashes
   `args.accountId`, which is an FK. Pre-dates this list rather than
   being a deliberate carve-out; not yet triaged.
 
 If you add a hashed FK id derivation that cannot normalise, add it here
 with the reason. A rule with no gate and a stale roster is not a rule.
+
+`createDeploymentNodeSpec` / `updateDeploymentNodeSpec` were on this list
+until memql#2925 and now normalise with `shortId()`. Their `canonicalId()`
+spelling is still blocked — the concept argument does not resolve for a
+concept declaring `@namespace("cluster")` while living in `dsl/deployment/`
+(memql#2976) — but `shortId()` needs no concept argument and satisfies the
+rule, so they are compliant rather than excepted. Prefer `shortId()` for a
+plain FK for that reason: it is the spelling with the fewest resolution
+prerequisites.
+
+One thing `shortId()` does not give you: it strips only a recognisable
+canonical id, so it does not make a colon-bearing arg safe as a hash
+component. If your separator is `":"`, the pair `("d:x", "y")` and
+`("d", "x:y")` still hash identically — that is a distinct hazard from the
+one this rule is about.
 
 The historical `concat("ga-", hash(actor))` pattern in the auto-join
 path is gone entirely: the logic (`dsl/cognition/logic.memql`) now
