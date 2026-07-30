@@ -49,7 +49,7 @@ func NewModel(workspace string) *Model {
 //
 // What that gives up, stated plainly: the file is no longer readable as a
 // diff. It never really was -- nobody reviews 40MB of JSON -- and correctness
-// is established by TestArchitectureModelIsCurrent regenerating and comparing
+// is established by TestArchitectureModelIsNotStale regenerating and comparing
 // byte-for-byte, not by reading the artifact. The ORDER still matters and is
 // still enforced: it is what makes that byte-for-byte comparison possible at
 // all.
