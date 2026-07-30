@@ -1044,10 +1044,12 @@ be met). Use it when `canonicalId()` will not resolve. Otherwise prefer
   collapse *every* bare/canonical pair. Measured:
   `shortId("v1:cluster:deployment:v2:x:y:z")` is `"v2:x:y:z"` while
   `shortId("v2:x:y:z")` is `"z"` — the pair still forks. Tracked in
-  memql#2981. It is exact for the normal shape -- a bare slug with no
-  `v<digits>` segment, and the canonical form built around it, which has
-  exactly one. `id.NewShortId()` mints a colon-free UUID, so every
-  in-tree id is that shape.
+  memql#2981, which carries the measured condition -- it turns on
+  whitespace and on empty segments, not on segment counts alone, and two
+  attempts to state it more precisely than this were wrong. What holds:
+  every SHORT id this tree mints is colon- and whitespace-free, so
+  `shortId()` is exact for those and for the canonical forms built
+  around them.
 
 Compliant mutations (audit done 2026-05-06), in
 `dsl/cognition/mutations.memql`:

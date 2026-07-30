@@ -133,8 +133,10 @@ mutate deployment updateDeploymentStatus {
 // different ids and mint TWO timelines for the same (deployment, nodeType).
 // shortId() is canonical-or-bare in, bare out (#1859), so both shapes derive
 // one id for the ids this pack actually sees -- a colon-free uuid from
-// id.NewShortId and the canonical form around it -- every id this tree mints
-// is colon- and whitespace-free, so shortId() is a fixed point on all of them.
+// id.NewShortId and the canonical form around it. Every SHORT id this tree
+// mints is colon- and whitespace-free -- NewShortId, Slugify, the system-node
+// helpers and hash() all are -- so shortId() is a fixed point on each, and
+// maps the canonical form built around one back onto it.
 //
 // It is NOT idempotent in general, and the exact condition is subtle enough
 // that two attempts to state it here were wrong: it turns on trailing empty

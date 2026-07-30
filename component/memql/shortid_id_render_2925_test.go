@@ -92,13 +92,19 @@ func TestShortId_CanonicalAndBareDeriveTheSameId(t *testing.T) {
 // TestShortId_IsANoOpForEveryInTreeProducer is the safety argument for adding
 // shortId() to dsl/deployment/mutations.memql, asserted rather than assumed.
 //
-// Every in-tree producer passes a BARE deploymentId --
-// component/deploycontrol/deployment_store.go mints one with id.NewShortId(),
-// and examples/deploypack forwards the bare payload field. shortId() is
-// idempotent on a bare value, so the derived id for those callers is
-// byte-identical before and after. The behaviour only changes for a canonical
-// input, which no in-tree producer sends and for which no rows exist (the
-// mutation could not write at all until memql#2885).
+// The only in-tree producer of these mutations is examples/deploypack, whose
+// argString trims and forwards a bare id minted by id.NewShortId. (Not
+// component/deploycontrol -- it calls createDeployment and
+// updateDeploymentStatus, which this does not touch.) shortId() is a fixed
+// point on a bare id, so the derived id for that caller is byte-identical
+// before and after.
+//
+// Inputs that DO change are canonical ids, whitespace-padded ids, and
+// v<digits>-shaped strings -- not canonical ids alone, which is what this
+// comment claimed until review round 6 caught it standing after the same claim
+// had been corrected in dsl/deployment/mutations.memql and the PR body. None
+// is sent by an in-tree caller, and no rows exist to migrate (the mutation
+// could not write at all until memql#2885).
 func TestShortId_IsANoOpForEveryInTreeProducer(t *testing.T) {
 	derive := func(t *testing.T, normalise bool) any {
 		t.Helper()
