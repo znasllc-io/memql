@@ -54,12 +54,38 @@ import (
 // and no query result changes (memql#2920/#2921 remain inert). It
 // gates the CONSISTENCY of a declaration against the write path.
 func TestDeclaredOwnerFieldsAreServerStamped(t *testing.T) {
-	if _, err := LoadUnifiedConcepts(nil); err != nil {
-		t.Fatalf("LoadUnifiedConcepts: %v", err)
+	// Load SKIPS are load-bearing here, and discarding them is the
+	// mistake memql#2909 was filed to fix -- "memqllint's engine-parity
+	// pass ran this very code and discarded the answer, so a product
+	// bundle with a mistyped property linted clean and lost a concept at
+	// boot."
+	//
+	// Concretely: delete the `@actor` line from updateCalendarEvent and
+	// #2621's validateActorBinding fails the parse, so the mutation is
+	// silently skipped, the gate sees only the stamping create, and the
+	// concept PASSES. A gate that cannot see a construct cannot judge
+	// it, and silence must not read as a pass.
+	conceptCount, conceptSkips, err := LoadUnifiedConceptsWithSkips(nil)
+	if err != nil {
+		t.Fatalf("LoadUnifiedConceptsWithSkips: %v", err)
 	}
+	if len(conceptSkips) > 0 {
+		t.Fatalf("%d concept(s) failed to load, so this gate cannot see them: %v",
+			len(conceptSkips), conceptSkips)
+	}
+	if conceptCount == 0 {
+		t.Fatal("no concepts loaded")
+	}
+
 	registry := newFunctionRegistry()
-	if _, _, err := LoadUnifiedFunctions(nil, registry, memoryNodes.DefaultRegistry()); err != nil {
+	report := newLoadReport()
+	if _, _, err := LoadUnifiedFunctions(nil, registry, memoryNodes.DefaultRegistry(), report); err != nil {
 		t.Fatalf("LoadUnifiedFunctions: %v", err)
+	}
+	if len(report.Skipped) > 0 {
+		t.Fatalf("%d construct(s) were skipped at load, so this gate cannot see them and would "+
+			"report a PASS on a concept whose forging mutation simply failed to parse:\n  %v",
+			len(report.Skipped), report.Skipped)
 	}
 
 	declared := map[string]string{}
@@ -146,20 +172,31 @@ each carry an issue number for exactly that reason.`,
 // on anything new.
 //
 // This list is meant to shrink to empty. Each entry carries the issue
-// tracking its decision -- and the decision is genuinely open, not
-// paperwork: both concepts' field docs claim edits "run server-side on
-// the owner's behalf", and NOTHING ENFORCES THAT. The tree has zero
-// `@serverOnly` mutations, so "handler-invoked only" is not expressible
-// on a write at all. The gate therefore cannot tell "handler-invoked,
-// safe" from "client-callable, forgeable", and deliberately
-// over-rejects rather than guess.
+// tracking its decision, and the decision is genuinely open: both
+// concepts' field docs claim edits "run server-side on the owner's
+// behalf", and nothing currently enforces that -- neither mutation
+// carries `@serverOnly`, so both are on the generated client surface
+// like any other.
+//
+// `@serverOnly` IS available and enforced on mutations
+// (annotations/registry.go offers it on Mutation; function_loader.go
+// sets ServerOnly kind-agnostically; engine.go gates
+// executeMutationFunctionCall on it). An earlier version of this
+// comment claimed the opposite. So the remediation is likely a one-line
+// annotation per mutation rather than a language change -- pending
+// confirmation that every caller is internal, since annotating drops
+// them from the generated SDK.
+//
+// Until that is confirmed, the gate cannot tell "handler-invoked, safe"
+// from "client-callable, forgeable" and deliberately over-rejects
+// rather than guess.
 //
 // Adding an entry here without filing the decision is how a gate turns
 // into decoration.
 var ownerGateExemptions = map[string]string{
 	"v1:library:generatedOutput": "memql#2989 -- createGeneratedOutput/updateGeneratedOutputContent " +
-		"accept ownerUserId from caller args; the field doc claims handler-invoked, which " +
-		"@serverOnly cannot express on a mutation today",
+		"accept ownerUserId from caller args; the field doc claims handler-invoked but neither " +
+		"mutation carries @serverOnly, so both are client-callable",
 	"v1:library:documentVersion": "memql#2989 -- appendDocumentVersion writes a bare args.ownerUserId " +
-		"mirror; same unenforceable 'server-side on the owner's behalf' claim",
+		"mirror; same unannotated 'server-side on the owner's behalf' claim",
 }

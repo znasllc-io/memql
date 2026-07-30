@@ -31,6 +31,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // OwnerProvenance is the verdict on one (concept, field) pair.
@@ -106,15 +108,71 @@ func classifyTemplateValue(v any) valueProvenance {
 		})
 	case bool, int, int64, float64:
 		return provNone
+	case langparser.ExpressionNode:
+		return classifyParserExpression(t)
 	default:
-		// An AST node the evaluator understands and this classifier does
-		// not. Rendering it back to text is the honest fallback; if that
-		// yields nothing recognisable, say so rather than guessing.
-		text := strings.TrimSpace(fmt.Sprintf("%v", t))
-		if text == "" {
-			return provUnknown
+		// FAIL CLOSED. An earlier version rendered the value with
+		// fmt.Sprintf("%v") and classified the result as text, which is
+		// fail-OPEN in the one case that matters: a lowered
+		// *ast.ArgRefExpr{Path:"ownerUserId"} prints as `&{ownerUserId}`,
+		// which contains neither "args." nor "actor.userId", so a value
+		// that IS a caller reference classified as provNone -- it then
+		// contributed to neither StampedBy nor WritableBy, and a sibling
+		// mutation that stamped the field carried the concept to a PASS.
+		//
+		// AST nodes in a value slot are a supported runtime shape:
+		// evalValue has an explicit `case languageParser.ExpressionNode`
+		// arm, IDTemplate is a lowered node for most mutations today, and
+		// memql#2840 was precisely an actor reference landing in one.
+		return provUnknown
+	}
+}
+
+// classifyParserExpression walks a lowered expression node.
+//
+// It mirrors evalParserExpression's arms rather than re-deriving them:
+// what this needs to know is exactly what that function resolves from,
+// so the two must agree about which nodes read caller args and which
+// read the actor. Anything it does not recognise returns provUnknown,
+// so a new node kind surfaces as "could not classify" instead of
+// silently reading as "no reference".
+func classifyParserExpression(expr langparser.ExpressionNode) valueProvenance {
+	switch t := expr.(type) {
+	case nil:
+		return provNone
+	case *langparser.LiteralExpr:
+		return provNone
+	case *langparser.ArgRefExpr:
+		// The parser routes BOTH `args.X` and `actor.X` through
+		// ArgRefExpr with the prefix as the only discriminator, which is
+		// the memql#2840 trap. Read the prefix the same way
+		// evalParserExpression does.
+		if strings.HasPrefix(t.Path, "actor.") {
+			if strings.TrimPrefix(t.Path, "actor.") == "userId" {
+				return provStamp
+			}
+			// Some other actor field: server-derived, but not the owner
+			// identity. Not a caller reference either.
+			return provNone
 		}
-		return classifyExpressionText(text)
+		return provAccept
+	case *langparser.VarRefExpr:
+		// An engine variable: server-side, and not the actor.
+		return provNone
+	case *langparser.TimestampExprFunc:
+		return provNone
+	case *langparser.ConcatExpr:
+		return foldProvenance(func(yield func(valueProvenance)) {
+			for _, a := range t.Args {
+				yield(classifyParserExpression(a))
+			}
+		})
+	case *langparser.HashExpr:
+		return classifyParserExpression(t.Target)
+	case *langparser.CanonicalIdExpr:
+		return classifyParserExpression(t.Value)
+	default:
+		return provUnknown
 	}
 }
 
@@ -241,17 +299,14 @@ func ownerProvenanceFor(concept, field string, mutations []*Function) OwnerProve
 		tmpl := fn.MutationTemplate
 		name := fn.Name
 
-		// Clause 4: the row id as owner field needs the id itself stamped.
-		if field == "id" {
-			if classifyTemplateValue(tmpl.IDTemplate) != provStamp {
-				res.WritableBy = append(res.WritableBy, name)
-				if res.Reason == "" {
-					res.Reason = fmt.Sprintf("%s derives the row id from caller input, and the "+
-						"owner field IS the id", name)
-				}
-			}
-			continue
-		}
+		// NOTE: there is deliberately no `field == "id"` clause. An
+		// earlier draft had one, on the theory that an owner field which
+		// IS the row id needs IDTemplate stamped. It is unreachable:
+		// validateRowAuthz requires the owner to name a DECLARED
+		// property, and `id` is a reserved row intrinsic that a concept
+		// cannot declare -- so `@rowAuthz(owner="id")` fails to load by
+		// both routes. A clause that cannot fire is not a safeguard, it
+		// is a claim in the shape of one.
 
 		explicit, hasExplicit := templateFieldValue(tmpl.PayloadTemplate, field)
 		overlay, hasOverlay := tmpl.PayloadOverlayTemplate[field]

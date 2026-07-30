@@ -200,17 +200,29 @@ runtime behaviour are different questions:
   block, which is what puts it in `PayloadOverlayTemplate` where
   memql#401's overlay-wins precedence engages.
 
-`updateNote` and `updateCalendarEvent` were near-identical in source and
-differed entirely in whether that protection engaged. **If a mutation
-splats a caller-supplied payload, it must re-stamp every authz-relevant
-field explicitly** — the create-time stamp does not carry over.
+**If a mutation splats a caller-supplied payload, it must re-stamp every
+authz-relevant field explicitly.** The hazard is not that the
+create-time stamp fails to carry over — on an `update`, a partial
+read-merge preserves any field the payload omits. It is that a splat
+lets the caller *explicitly name* the field, and only an overlay entry
+displaces what they named.
+
+`updateNote` is the contrast, and the difference is narrower than it
+looks: it is an `insert`-kind mutation where the caller threads the full
+merged payload, while `updateCalendarEvent` is an `update`-kind partial
+read-merge. What matters is not the kind but that `updateNote` carries
+an explicit `ownerUserId: actor.userId` line, which is what puts the
+field in the overlay.
 
 Two concepts are grandfathered with named exemptions (memql#2989). Both
 claim in their field docs that edits "run server-side on the owner's
-behalf", and nothing enforces that: the tree has zero `@serverOnly`
-mutations, so "handler-invoked only" is not expressible on a write. The
-gate deliberately over-rejects rather than guess, and the exemption list
-is meant to shrink to empty.
+behalf", and nothing currently enforces that — neither mutation carries
+`@serverOnly`, so both sit on the generated client surface like any
+other. `@serverOnly` **is** available and enforced on mutations, so the
+remediation is likely a one-line annotation each rather than a language
+change; it is pending confirmation that every caller is internal, since
+annotating drops them from the generated SDK. The gate over-rejects
+rather than guess, and the list is meant to shrink to empty.
 
 ### Seeding the tree
 

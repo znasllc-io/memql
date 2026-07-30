@@ -1,6 +1,7 @@
 package memql
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -275,3 +276,84 @@ func TestUpdateCalendarEventReStampsTheOwner(t *testing.T) {
 			"overlay that reads from caller args reopens memql#2988 while looking fixed", got)
 	}
 }
+
+// THE FAIL-OPEN THIS ANALYZER SHIPPED WITH, AND MUST NOT AGAIN.
+//
+// An earlier version's default arm rendered unrecognised values with
+// fmt.Sprintf("%v") and classified the text. A lowered
+// *ArgRefExpr{Path:"ownerUserId"} prints as `&{ownerUserId}` -- which
+// contains neither "args." nor "actor.userId" -- so a value that IS a
+// caller reference classified as "mentions neither", contributed to
+// neither StampedBy nor WritableBy, and let a sibling stamping mutation
+// carry the concept to a PASS.
+//
+// Not hypothetical: IDTemplate is a lowered node for most mutations
+// today, evalValue has an explicit ExpressionNode arm, and memql#2840
+// was an actor reference landing in exactly such a slot.
+func TestLoweredAstNodesAreClassifiedNotRenderedToText(t *testing.T) {
+	caller := &langparser.ArgRefExpr{Path: "ownerUserId"}
+	if got := classifyTemplateValue(caller); got != provAccept {
+		t.Fatalf("classifyTemplateValue(*ArgRefExpr{ownerUserId}) = %v, want provAccept. "+
+			"Sprintf renders it as %q, which is why text classification failed open here.",
+			got, fmtValue(caller))
+	}
+	actor := &langparser.ArgRefExpr{Path: "actor.userId"}
+	if got := classifyTemplateValue(actor); got != provStamp {
+		t.Fatalf("classifyTemplateValue(*ArgRefExpr{actor.userId}) = %v, want provStamp -- the "+
+			"parser routes BOTH args.X and actor.X through ArgRefExpr, so the prefix is the only "+
+			"discriminator (memql#2840)", got)
+	}
+}
+
+// An unrecognised value must fail CLOSED. This is clause 5, and it was
+// unreachable while the default arm rendered to text: every input
+// produced a non-empty string and landed on provNone.
+func TestUnrecognisedValueFailsClosed(t *testing.T) {
+	type unknownShape struct{ X int }
+	for _, v := range []any{unknownShape{1}, &unknownShape{2}, uint(3), float32(4)} {
+		if got := classifyTemplateValue(v); got != provUnknown {
+			t.Fatalf("classifyTemplateValue(%#v) = %v, want provUnknown. Anything this analyzer "+
+				"cannot classify must fail closed -- treating it as 'no reference' is how a "+
+				"forgeable field passes.", v, got)
+		}
+	}
+}
+
+// End to end: a forging mutation whose value is an AST node, beside a
+// stamping sibling. Under the fail-open version the concept PASSED.
+func TestAstNodeForgeryIsVisibleBesideAStampingSibling(t *testing.T) {
+	reg := newFunctionRegistry()
+	for _, fn := range []*Function{
+		{
+			Name: "zzStampThing", FunctionKind: "mutation", BoundConcept: "v1:probe:thing",
+			MutationTemplate: &FunctionMutationTemplate{
+				Concept:         "v1:probe:thing",
+				PayloadTemplate: map[string]any{"ownerUserId": "actor.userId"},
+			},
+		},
+		{
+			Name: "zzForgeThing", FunctionKind: "mutation", BoundConcept: "v1:probe:thing",
+			MutationTemplate: &FunctionMutationTemplate{
+				Concept: "v1:probe:thing",
+				PayloadTemplate: map[string]any{
+					"ownerUserId": &langparser.ArgRefExpr{Path: "ownerUserId"},
+				},
+			},
+		},
+	} {
+		if err := reg.Upsert(fn); err != nil {
+			t.Fatalf("seed %s: %v", fn.Name, err)
+		}
+	}
+	got := provenanceOf(t, reg, "v1:probe:thing", "ownerUserId")
+	if got.ServerStamped {
+		t.Fatal("a caller reference in a lowered AST node was invisible, and a stamping sibling " +
+			"carried the concept to a pass. That is the fail-open shape this analyzer shipped with.")
+	}
+	if len(got.WritableBy) != 1 || got.WritableBy[0] != "zzForgeThing" {
+		t.Fatalf("writableBy = %v, want exactly [zzForgeThing] so the diagnostic names the "+
+			"mutation to fix", got.WritableBy)
+	}
+}
+
+func fmtValue(v any) string { return strings.TrimSpace(fmt.Sprintf("%v", v)) }

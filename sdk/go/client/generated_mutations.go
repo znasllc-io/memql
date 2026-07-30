@@ -6078,7 +6078,7 @@ func DeleteAgentBuild(args DeleteAgentArgs) string {
 	return b.String()
 }
 
-// DeleteCalendarEvent -- Soft-delete a calendarEvent by stamping deleted=true. The time-series row survives for history + so a future external-sync reconciler can propagate the deletion upstream; queries hide it via isNotDeleted. The calendar tool reads the row via the owner-scoped calendarEventById before calling this, so a caller can only delete their own events.
+// DeleteCalendarEvent -- Soft-delete a calendarEvent by stamping deleted=true. The time-series row survives for history + so a future external-sync reconciler can propagate the deletion upstream; queries hide it via isNotDeleted. Writes a field map, not a payload splat, so it carries no memql#2988-style forging hole. It is NOT ownership-gated on the target row, though: the calendar tool reads through the owner-scoped calendarEventById first, but a direct SDK caller does not (memql#2991).
 //
 // Bound concept: v1:calendar:calendarEvent (machine-readable: BoundConcepts["deleteCalendarEvent"] in generated_concepts.go).
 type DeleteCalendarEventArgs struct {
