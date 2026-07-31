@@ -19,11 +19,30 @@ package steps
 //
 //   - reads (queries, ai(), similarTo, webSearch, fetchUrl) DELEGATE to the
 //     real executors -> real engine.Execute -> real + metered.
-//   - mutations (a direct mutation step, or a function step whose function is a
-//     mutation) are ISOLATED: the would-be write is evaluated + recorded into
-//     the manifest under the run's ephemeral sandbox partition, and never
-//     reaches engine.Execute, so zero rows land in the live graph.
+//   - WRITE-BEARING steps are ISOLATED: the would-be write is evaluated +
+//     recorded into the manifest under the run's ephemeral sandbox partition,
+//     and never reaches engine.Execute, so zero rows land in the live graph.
+//     That covers a direct mutation step, a function step whose function is a
+//     mutation or logic, emitConceptCard, event, action, automation, and a
+//     `query:` step whose text performs a write -- query.go runs its text
+//     through engine.Execute, which does mutations too, so the step TYPE does
+//     not settle it.
 //   - webhooks / external POSTs are RECORDED-AND-BLOCKED.
+//   - a step type with NO classification is REFUSED, not forwarded.
+//
+// That last point is load-bearing, and was not true until memql#2943. This
+// comment claimed "zero rows land in the live graph" while the sandbox
+// registry's default arm forwarded every unclassified step to the production
+// executors -- so emitConceptCard, event and action wrote for real, and a
+// mutation nested inside forEach / parallel / switch did too, because those
+// containers resolved children against the concrete registry rather than the
+// sandbox. The claim is a security argument other issues cite (#2932, #2908),
+// so it now fails closed: an unclassified step type stops the dry-run rather
+// than quietly escaping. See sandbox_registry.go and child_dispatch.go.
+//
+// Known limit, stated rather than glossed: the automation Executor evaluates
+// an automation's `input:` block outside the step registry entirely
+// (executor.go executeInput), so it is not covered by this interception layer.
 //
 // Increment 1 (this file + sandbox_registry.go) covers the ephemeral sandbox
 // partition + mutation isolation + webhook block + the behavioral trace. AI/web

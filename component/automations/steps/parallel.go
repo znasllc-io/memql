@@ -14,6 +14,12 @@ import (
 // ParallelExecutor executes multiple steps concurrently.
 type ParallelExecutor struct {
 	Registry *Registry
+
+	// Dispatch, when set, resolves NESTED steps instead of Registry.
+	// The Gate-2 dry-run sandbox sets it to its own Execute so children
+	// re-enter the interception layer; without it they reached the
+	// production executors directly (memql#2943). Nil in production.
+	Dispatch StepDispatchFunc
 }
 
 // Execute runs a parallel step.
@@ -140,7 +146,7 @@ func (e *ParallelExecutor) Execute(ctx context.Context, step *automations.Step, 
 			}
 
 			// Execute the branch
-			executor, ok := e.Registry.Get(branchStep.Type)
+			executor, ok := resolveChild(e.Dispatch, e.Registry, branchStep.Type)
 			if !ok {
 				resultsChan <- branchResult{
 					index: idx,

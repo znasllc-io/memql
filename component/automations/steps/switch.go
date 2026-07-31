@@ -12,6 +12,12 @@ import (
 // SwitchExecutor provides conditional branching.
 type SwitchExecutor struct {
 	Registry *Registry
+
+	// Dispatch, when set, resolves NESTED steps instead of Registry.
+	// The Gate-2 dry-run sandbox sets it to its own Execute so children
+	// re-enter the interception layer; without it they reached the
+	// production executors directly (memql#2943). Nil in production.
+	Dispatch StepDispatchFunc
 }
 
 // Execute runs a switch step.
@@ -125,7 +131,7 @@ func (e *SwitchExecutor) Execute(ctx context.Context, step *automations.Step, st
 		caseStepCopy := *caseStep
 		caseStepCopy.ID = caseStepId
 
-		executor, ok := e.Registry.Get(caseStep.Type)
+		executor, ok := resolveChild(e.Dispatch, e.Registry, caseStep.Type)
 		if !ok {
 			childResult := &automations.StepResult{
 				StepId:      caseStepId,
