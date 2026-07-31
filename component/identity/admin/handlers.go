@@ -893,6 +893,7 @@ func (s *AdminServer) queryUsers(ctx context.Context, q string) ([]userView, err
 		// #2883: activeUsers is @serverOnly. The admin app is server-side Go
 		// gated at its own HTTP layer and reads arbitrary users by design --
 		// the same reasoning userById below already records for userByIdSystem.
+		// #2934 made that gate enforced rather than assumed; see the note there.
 		res, err := s.Engine.Execute(auth.ContextWithInternalOrigin(memqlengine.ContextWithCursor(ctx, cursor)), `query activeUsers()`)
 		if err != nil {
 			return nil, err
@@ -929,6 +930,14 @@ const maxUserPageWalk = 1000
 func (s *AdminServer) userById(ctx context.Context, userId string) (*userView, error) {
 	// #2800: the admin app is server-side Go and is already gated at its own
 	// HTTP layer; it reads arbitrary users by design.
+	//
+	// That gate is this stamp's whole safety argument. userId is caller-supplied
+	// and userByIdSystem is @serverOnly, so a route reaching here without
+	// `gated` would turn this into a cross-user read of any user row. #2934
+	// made the precondition enforced rather than assumed:
+	// route_gate_test.go asserts every mounted route goes through `gated`, and
+	// that `gated` turns away a caller who is not owner or admin. Do not call
+	// this from a path that is not so gated.
 	q := fmt.Sprintf(`query userByIdSystem(userId: %q)`, userId)
 	res, err := s.Engine.Execute(auth.ContextWithInternalOrigin(ctx), q)
 	if err != nil {

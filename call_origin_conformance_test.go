@@ -57,9 +57,13 @@ import (
 //     allowlisted package. None exists today -- component/automations'
 //     originForSource is unexported -- but exporting one would open a hole
 //     this cannot see.
-//   - It does not assert that component/identity/admin's HTTP gate stays in
-//     place. That gate is the only thing making its allowlist entry safe; see
-//     memql#2934.
+//     (component/identity/admin's HTTP gate was listed here as a third gap: the
+//     gate is the only thing making its allowlist entry safe, and nothing
+//     asserted it. memql#2934 closed that --
+//     component/identity/admin/route_gate_test.go now asserts both that every
+//     mounted route goes through `gated` and that `gated` actually turns away a
+//     caller who is not owner or admin. It is no longer an unasserted
+//     precondition, so it is no longer a gap here.)
 //
 // WHY IT CATCHES MORE THAN THE COMPILER WOULD. go/parser ignores build
 // constraints, so this sees files no CI lane compiles. app/integrations_identity.go
@@ -90,7 +94,7 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		"component/auth":            "defines the stamp, and resolves an identity from claims before any actor exists",
 		"component/automations":     "trusted automation dispatch; the untrusted branch stamps CLIENT (memql#2879)",
 		"component/identity":        "identity store internals, server-initiated",
-		"component/identity/admin":  "admin HTTP handler -- REQUEST-DERIVED and the one exception here; tracked in memql#2934",
+		"component/identity/admin":  "admin HTTP handler -- REQUEST-DERIVED and the one exception here; its precondition (every route behind requireAdmin) is asserted by component/identity/admin/route_gate_test.go, memql#2934",
 		"component/identity/pat":    "personal-access-token store, server-initiated",
 		"component/memql":           "seed materialiser and authoring capability store, both boot-time",
 		"integrations/agent/worker": "worker store, server-initiated",
