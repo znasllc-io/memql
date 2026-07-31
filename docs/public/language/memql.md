@@ -873,14 +873,22 @@ query node liveNodes {
 }
 
 query node nodesAt {        // asOf <ts> -> deterministic, no marker
-  args { at string @required }
-  asOf args.at
+  asOf "2026-01-01T00:00:00Z"
   shape nodeCard
 }
 ```
 
 - `asOf latest` reads current (clock-dependent) state. Mark the query `@latestMode` so consumers see on its contract that the result is time-dependent.
 - `asOf <explicit timestamp>` reads immutable historical state — deterministic, so it needs no marker.
+- **The timestamp must be a literal.** `asOf` in a struct-form query takes an RFC3339 string literal or bare `latest` — not `args.X`. A declared query therefore cannot offer a *caller-chosen* point in time; `asOf args.at` is rejected at load with `asOf second argument must be an RFC3339 string or latest`.
+
+  To read at a caller-supplied instant, wrap the query in a **runtime query string** composed by the caller (Go/SDK/MCP) — not in `.memql`, where `asOf` is a query-only clause and a body using it is rejected:
+
+  ```
+  asOf(deploymentById(deploymentId:"d-abc"), "2026-07-28T12:00:00Z")
+  ```
+
+  **The wrapped query must declare no `asOf` clause of its own** — otherwise this fails with `multiple asOf() directives are not supported`. That rules out any query declaring `asOf` at all — `latest` or a literal — so both `liveNodes` and `nodesAt` above are unwrappable; `deploymentById` is the tree's worked example precisely because it declares none, and `TestDeploymentByIdRemainsWrappableInAsOf` guards that. Making a caller-chosen instant declarable is memql#2992.
 
 ### Imports
 

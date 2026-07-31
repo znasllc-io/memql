@@ -323,8 +323,11 @@ is preserved in the database but not surfaced.
 
 **Implication.** Re-inserting the same id appends a new row; the
 new version becomes the visible one, the old version is invisible
-to plain queries. Use `asOf("2026-01-01T00:00:00Z")` from the
-top-level parser if you need a historical snapshot; struct queries
+to plain queries. Use the two-argument
+`asOf(<expr>, "2026-01-01T00:00:00Z")` from the top-level parser
+if you need a historical snapshot -- the one-argument form does not
+parse, and the wrapped query must declare no `asOf` of its own
+(memql#2992); struct queries
 carry an `asOf latest` clause for explicit latest-per-id reads (see
 `staleClusterNodes` in `dsl/cluster/queries.memql`).
 
