@@ -15,7 +15,7 @@
 // a handler reused from an ungated path, nothing failed -- and the blast radius
 // is a cross-user read of any user row through an @serverOnly query.
 //
-// These tests are that missing link, from both directions:
+// These tests are that missing link, closing each of the three:
 //
 //   - behavioural: `gated` really does reject an unauthenticated caller and a
 //     caller whose role is neither owner nor admin, WITHOUT reaching the
@@ -23,8 +23,16 @@
 //   - structural: every route Mount registers goes through `gated`, bar the
 //     three auth-establishment routes that cannot require a session to work.
 //     Registering a new route with `wrap` fails here.
+//   - structural: those three ungated routes pin their HANDLER too, so the
+//     list is an allowlist rather than an escape hatch. Pointing an ungated
+//     route at a gated handler -- or adding a new ungated entry -- would
+//     otherwise serve the stamp to unauthenticated callers with everything
+//     above still green.
 //
-// Note the gate admits owner OR admin (auth.go:62), not cluster-owner only.
+// The gate admits owner OR admin (auth.go:62). Note "owner" IS the
+// cluster-owner role (auth.RoleOwner; AccessContext.IsClusterOwner is
+// role == RoleOwner), so this is cluster-owner or admin -- not cluster-owner
+// alone, which is what a test pinned to "cluster-owner" would wrongly encode.
 package admin
 
 import (
@@ -37,6 +45,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -122,45 +131,58 @@ func routeGateToken(t *testing.T, iss *identity.JWTIssuer, role string) string {
 type adminRoute struct {
 	method string
 	path   string
+	// handler pins the expected handler method name. Only meaningful for
+	// ungatedRoutes, where it is the difference between an allowlist and an
+	// escape hatch; gated routes are covered behaviourally instead, so any
+	// gated handler may serve any gated route.
+	handler string
 }
 
 // gatedRoutes is every route Mount registers behind `gated`.
 // TestMountRegistersOnlyKnownRoutes keeps this in step with server.go, so a
 // route added there without being added here fails rather than going untested.
 var gatedRoutes = []adminRoute{
-	{"GET", "/admin/"},
-	{"GET", "/admin/users"},
-	{"GET", "/admin/users/detail"},
-	{"POST", "/admin/users/profile"},
-	{"POST", "/admin/users/role"},
-	{"POST", "/admin/users/suspend"},
-	{"POST", "/admin/users/unsuspend"},
-	{"GET", "/admin/audit"},
-	{"GET", "/admin/deployments"},
-	{"POST", "/admin/deployments/deploy-staging"},
-	{"POST", "/admin/deployments/promote"},
-	{"POST", "/admin/deployments/rollback"},
-	{"POST", "/admin/deployments/rollout"},
-	{"GET", "/admin/tokens"},
-	{"POST", "/admin/tokens/revoke"},
-	{"POST", "/admin/tokens/node/revoke"},
-	{"GET", "/admin/jwks"},
-	{"POST", "/admin/jwks/rotate"},
-	{"GET", "/admin/settings"},
-	{"POST", "/admin/settings"},
-	{"GET", "/admin/sessions"},
-	{"GET", "/admin/invitations"},
-	{"GET", "/admin/partition-grants"},
-	{"GET", "/admin/access-requests"},
+	{method: "GET", path: "/admin/"},
+	{method: "GET", path: "/admin/users"},
+	{method: "GET", path: "/admin/users/detail"},
+	{method: "POST", path: "/admin/users/profile"},
+	{method: "POST", path: "/admin/users/role"},
+	{method: "POST", path: "/admin/users/suspend"},
+	{method: "POST", path: "/admin/users/unsuspend"},
+	{method: "GET", path: "/admin/audit"},
+	{method: "GET", path: "/admin/deployments"},
+	{method: "POST", path: "/admin/deployments/deploy-staging"},
+	{method: "POST", path: "/admin/deployments/promote"},
+	{method: "POST", path: "/admin/deployments/rollback"},
+	{method: "POST", path: "/admin/deployments/rollout"},
+	{method: "GET", path: "/admin/tokens"},
+	{method: "POST", path: "/admin/tokens/revoke"},
+	{method: "POST", path: "/admin/tokens/node/revoke"},
+	{method: "GET", path: "/admin/jwks"},
+	{method: "POST", path: "/admin/jwks/rotate"},
+	{method: "GET", path: "/admin/settings"},
+	{method: "POST", path: "/admin/settings"},
+	{method: "GET", path: "/admin/sessions"},
+	{method: "GET", path: "/admin/invitations"},
+	{method: "GET", path: "/admin/partition-grants"},
+	{method: "GET", path: "/admin/access-requests"},
 }
 
 // ungatedRoutes cannot require a session: they are how one is established.
 // handleEstablish does its own token validation, and /admin/establish is the
 // sole CSRF-exempt path for the same reason.
+//
+// Each pins its HANDLER, not just its pattern. Without that, this list is an
+// escape hatch rather than an allowlist: pointing an ungated route at a
+// gated route's handler (`wrap(s.handleUsersList)`) reaches the
+// internal-origin stamp unauthenticated, and so does adding a new entry here
+// -- which is precisely what this file's own "add it to ungatedRoutes" advice
+// would otherwise invite. The three names below are the only handlers that may
+// ever run without auth.
 var ungatedRoutes = []adminRoute{
-	{"GET", "/admin/login"},
-	{"POST", "/admin/establish"},
-	{"POST", "/admin/logout"},
+	{"GET", "/admin/login", "handleLoginGet"},
+	{"POST", "/admin/establish", "handleEstablish"},
+	{"POST", "/admin/logout", "handleLogout"},
 }
 
 // routeGateRequest builds a request that isolates the AUTH gate as the thing
@@ -251,7 +273,9 @@ func TestAdminGateAdmitsAdminRole(t *testing.T) {
 			srv.Mount(mux)
 
 			rec := httptest.NewRecorder()
-			mux.ServeHTTP(rec, routeGateRequest(adminRoute{"GET", "/admin/users"}, routeGateToken(t, iss, role)))
+			mux.ServeHTTP(rec, routeGateRequest(
+				adminRoute{method: "GET", path: "/admin/users"},
+				routeGateToken(t, iss, role)))
 
 			if rec.Code == http.StatusUnauthorized || rec.Code == http.StatusForbidden {
 				t.Fatalf("role=%q was rejected with %d; the gate must admit owner and admin, "+
@@ -275,45 +299,68 @@ func TestMountRegistersOnlyKnownRoutes(t *testing.T) {
 		t.Fatalf("parse server.go: %v", err)
 	}
 
-	want := map[string]string{}
+	type registration struct{ wrapper, handler string }
+
+	want := map[string]registration{}
 	for _, r := range gatedRoutes {
 		p := r.path
 		if p == "/admin/" {
 			p = "/admin/{$}" // the registered pattern; "/admin/" is what a client requests
 		}
-		want[r.method+" "+p] = "gated"
+		want[r.method+" "+p] = registration{wrapper: "gated"}
 	}
 	for _, r := range ungatedRoutes {
-		want[r.method+" "+r.path] = "wrap"
+		want[r.method+" "+r.path] = registration{wrapper: "wrap", handler: r.handler}
 	}
 
-	found := map[string]string{}
+	found := map[string]registration{}
 	ast.Inspect(file, func(n ast.Node) bool {
 		call, ok := n.(*ast.CallExpr)
 		if !ok || len(call.Args) != 2 {
 			return true
 		}
 		sel, ok := call.Fun.(*ast.SelectorExpr)
-		if !ok || sel.Sel.Name != "HandleFunc" {
+		// Handle as well as HandleFunc: `mux.Handle(pattern,
+		// http.HandlerFunc(...))` is ordinary stdlib and would otherwise
+		// register a route this gate never sees.
+		if !ok || (sel.Sel.Name != "HandleFunc" && sel.Sel.Name != "Handle") {
 			return true
 		}
 		lit, ok := call.Args[0].(*ast.BasicLit)
 		if !ok || lit.Kind != token.STRING {
+			// Fail loud rather than skipping. A computed pattern (a loop
+			// variable, a const) is invisible to this gate, so silently
+			// ignoring it is how a route escapes review entirely.
+			t.Errorf("route registered with a non-literal pattern at %s -- this gate "+
+				"can only see string literals, so the route would escape it. Register "+
+				"it with a literal pattern, or extend this test to resolve the value.",
+				fset.Position(call.Pos()))
 			return true
 		}
 		pattern, err := strconv.Unquote(lit.Value)
 		if err != nil {
 			return true
 		}
-		// The wrapper is the identifier being applied to the handler:
-		// gated(s.handleX) / wrap(s.handleX).
-		wrapper := "<none>"
+		// The wrapper is the identifier applied to the handler --
+		// gated(s.handleX) / wrap(s.handleX) -- and the handler is the method
+		// selected off the receiver inside it.
+		reg := registration{wrapper: "<none>"}
 		if w, ok := call.Args[1].(*ast.CallExpr); ok {
 			if id, ok := w.Fun.(*ast.Ident); ok {
-				wrapper = id.Name
+				reg.wrapper = id.Name
+			}
+			if len(w.Args) == 1 {
+				switch h := w.Args[0].(type) {
+				case *ast.SelectorExpr: // s.handleX
+					reg.handler = h.Sel.Name
+				case *ast.CallExpr: // s.handlePlaceholder(...)
+					if hs, ok := h.Fun.(*ast.SelectorExpr); ok {
+						reg.handler = hs.Sel.Name
+					}
+				}
 			}
 		}
-		found[pattern] = wrapper
+		found[pattern] = reg
 		return true
 	})
 
@@ -322,18 +369,28 @@ func TestMountRegistersOnlyKnownRoutes(t *testing.T) {
 			"stopped resolving routes and would now pass vacuously")
 	}
 
-	for pattern, wrapper := range found {
+	for pattern, reg := range found {
 		expected, known := want[pattern]
 		if !known {
 			t.Errorf("route %q is registered but not covered by this test. Add it to "+
-				"gatedRoutes (and it will be checked against the auth gate), or to "+
-				"ungatedRoutes with a reason it cannot require a session.", pattern)
+				"gatedRoutes, which checks it against the auth gate. Adding it to "+
+				"ungatedRoutes instead means it serves UNAUTHENTICATED callers -- only "+
+				"the session-establishment routes qualify, and each pins its handler.",
+				pattern)
 			continue
 		}
-		if wrapper != expected {
+		if reg.wrapper != expected.wrapper {
 			t.Errorf("route %q is registered with %s(...), want %s(...). Routes reaching "+
 				"the internal-origin stamp are safe only behind `gated`; `wrap` applies "+
-				"CSRF and headers but NO auth (#2934).", pattern, wrapper, expected)
+				"CSRF and headers but NO auth (#2934).", pattern, reg.wrapper, expected.wrapper)
+		}
+		// Pinned only for ungated routes -- see ungatedRoutes. Repointing one at
+		// a gated route's handler would otherwise serve the internal-origin
+		// stamp to unauthenticated callers with every assertion still green.
+		if expected.handler != "" && reg.handler != expected.handler {
+			t.Errorf("ungated route %q serves handler %q, want %q. An ungated route runs "+
+				"with NO auth, so it may only serve the session-establishment handler it "+
+				"was allowlisted for (#2934).", pattern, reg.handler, expected.handler)
 		}
 	}
 	for pattern := range want {
@@ -342,4 +399,26 @@ func TestMountRegistersOnlyKnownRoutes(t *testing.T) {
 				"server.go -- remove it here too", pattern)
 		}
 	}
+
+	// Mount logs a hand-written route count that had already drifted to 19
+	// against 27 registered. Pin it, so the log line stays usable as
+	// confirmation that a route landed.
+	wantCount := len(gatedRoutes) + len(ungatedRoutes)
+	if len(found) != wantCount {
+		t.Errorf("server.go registers %d routes, but this test enumerates %d",
+			len(found), wantCount)
+	}
+	if !strings.Contains(repoRelFile(t, "server.go"), "slog.Int(\"routes\", "+strconv.Itoa(wantCount)+")") {
+		t.Errorf("Mount's logged route count is stale: it must read %d to match the "+
+			"routes actually registered", wantCount)
+	}
+}
+
+func repoRelFile(t *testing.T, name string) string {
+	t.Helper()
+	raw, err := os.ReadFile(name)
+	if err != nil {
+		t.Fatalf("read %s: %v", name, err)
+	}
+	return string(raw)
 }
