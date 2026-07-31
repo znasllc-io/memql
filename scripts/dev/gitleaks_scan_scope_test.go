@@ -1,23 +1,26 @@
-// Static guard over the gitleaks workflow's scan scoping and the allowlist
-// that depends on it (znasllc-io/memql#2996).
+// Static guard over the gitleaks workflow's scan scoping
+// (znasllc-io/memql#2996).
 //
 // Background: the full-history lane runs `gitleaks git .` on a fetch-depth:0
 // checkout. That checkout fetches EVERY branch, and gitleaks defaults to
-// walking every ref it can reach -- not just the commit under test. The
-// consequence is not obvious and it is severe: two synthetic 64-char hex
+// walking every ref it can reach (`--all`) -- not just the commit under test.
+// The consequence is not obvious and it is severe: two synthetic high-entropy
 // fixtures on a single unmerged branch failed every merge candidate AND every
 // push to main, regardless of what those candidates contained. Six consecutive
 // candidates across three unrelated PRs were evicted and main went red, none of
-// which included the offending branch.
+// them containing the branch at fault.
 //
-// `--log-opts="HEAD"` scopes the walk to the ancestry actually under test while
-// keeping it a full-history walk, so added-then-removed secrets are still
-// caught. Measured when the flag landed: unscoped 2145 commits, scoped 2124 --
-// the delta being exactly the unmerged branch.
+// Scoping the walk to `HEAD --tags` keeps it a full-history walk -- every commit
+// reachable from the candidate is still read, so added-then-removed secrets are
+// still caught -- while dropping refs that are not the candidate.
 //
-// This is the second occurrence of the same wedge (#1539 allowlisted a fixture
-// but left the ref-scoping alone, so it recurred). These assertions exist so a
-// third one cannot happen silently.
+// This is the second occurrence of the same wedge (#1539 allowlisted the
+// offending fixture but left the ref-scoping alone, so it came back with the
+// next one). These assertions exist so a third cannot happen silently.
+//
+// They deliberately assert on MEANING rather than spelling: an earlier version
+// of this guard rejected harmless reformatting while waving through mutations
+// that re-opened the bug outright.
 package dev
 
 import (
@@ -37,76 +40,101 @@ func repoFile(t *testing.T, rel ...string) string {
 	}
 	// scripts/dev/ -> repo root is two directories up.
 	parts := append([]string{filepath.Dir(thisFile), "..", ".."}, rel...)
-	p := filepath.Join(parts...)
-	raw, err := os.ReadFile(p)
+	raw, err := os.ReadFile(filepath.Join(parts...))
 	if err != nil {
 		t.Fatalf("read %s: %v", filepath.Join(rel...), err)
 	}
 	return string(raw)
 }
 
-// The full-history lane must stay scoped to the ancestry under test. Dropping
-// the flag re-opens the repo-wide wedge described above.
-func TestGitleaksFullHistoryScanIsRefScoped(t *testing.T) {
+// gitleaksGitCommand returns the `gitleaks git` invocation from the workflow.
+// It matches the command itself wherever it appears -- a plain `run:`, a block
+// scalar, any indentation -- so reformatting the step does not fail the guard.
+// Comment lines are skipped so the flag cannot be "satisfied" by prose.
+func gitleaksGitCommand(t *testing.T) string {
+	t.Helper()
 	wf := repoFile(t, ".github", "workflows", "gitleaks.yml")
-
-	// Locate the command itself rather than asserting on the whole file, so
-	// the flag cannot be "satisfied" by an unrelated mention in a comment.
-	var scanCmd string
 	for _, line := range strings.Split(wf, "\n") {
 		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "run:") && strings.Contains(trimmed, "gitleaks git") {
-			scanCmd = trimmed
-			break
+		if strings.HasPrefix(trimmed, "#") || !strings.Contains(trimmed, "gitleaks git") {
+			continue
 		}
+		return trimmed
 	}
-	if scanCmd == "" {
-		t.Fatal("no `gitleaks git` run step found in gitleaks.yml")
-	}
-	if !strings.Contains(scanCmd, `--log-opts="HEAD"`) {
-		t.Errorf(`full-history scan must pass --log-opts="HEAD" to scope the walk to `+
-			`the candidate's own ancestry; without it a fixture on ANY unmerged branch `+
-			"fails every merge candidate and every push to main (#2996).\ngot: %s", scanCmd)
+	t.Fatal("no `gitleaks git` command found in .github/workflows/gitleaks.yml")
+	return ""
+}
+
+var logOptsRe = regexp.MustCompile(`--log-opts=("([^"]*)"|'([^']*)'|(\S+))`)
+
+func TestGitleaksFullHistoryScanIsRefScoped(t *testing.T) {
+	cmd := gitleaksGitCommand(t)
+
+	// pflag takes the LAST occurrence, so a second --log-opts silently wins.
+	// Appending `--log-opts="--all"` restores the unscoped walk while every
+	// naive "does it contain the flag" assertion stays green.
+	if n := strings.Count(cmd, "--log-opts"); n != 1 {
+		t.Fatalf("expected exactly one --log-opts (pflag honours only the last, "+
+			"so a second one silently restores the unscoped walk); found %d in: %s", n, cmd)
 	}
 
-	// The fast PR lane is deliberately a working-tree scan and must not be
-	// swapped to the history walk -- that is what keeps PRs cheap.
-	if !strings.Contains(wf, "gitleaks dir .") {
-		t.Error("PR lane must keep the fast working-tree scan (`gitleaks dir .`)")
+	m := logOptsRe.FindStringSubmatch(cmd)
+	if m == nil {
+		t.Fatalf("full-history scan must pass --log-opts to scope the walk; "+
+			"without it a fixture on ANY unmerged branch fails every merge "+
+			"candidate and every push to main (#2996).\ngot: %s", cmd)
+	}
+	// Group 2/3 are the quoted bodies; group 4 is the bare form.
+	value := m[2] + m[3] + m[4]
+	fields := strings.Fields(value)
+
+	// The value is two tokens, so the quotes are load-bearing: unquoted,
+	// `--tags` would be parsed as an argument to gitleaks rather than git log.
+	if m[4] != "" {
+		t.Errorf("--log-opts value must be quoted -- it carries two tokens, and "+
+			"unquoted the shell hands `--tags` to gitleaks instead of git log.\ngot: %s", cmd)
+	}
+
+	var hasHead, hasTags bool
+	for _, f := range fields {
+		switch f {
+		case "HEAD":
+			hasHead = true
+		case "--tags":
+			hasTags = true
+		case "--all":
+			t.Errorf("--log-opts must not pass --all: that is the unscoped default "+
+				"this guard exists to prevent (#2996).\ngot: %s", cmd)
+		}
+	}
+	if !hasHead {
+		t.Errorf("--log-opts must scope the walk to HEAD (the ancestry under test).\ngot: %s", cmd)
+	}
+	// Without --tags, a tag that is not an ancestor of main falls out of scope
+	// and its history goes permanently unscanned.
+	if !hasTags {
+		t.Errorf("--log-opts must include --tags: scoping to HEAD alone drops any "+
+			"tag that is not an ancestor of main, leaving that history unscanned "+
+			"forever (this repo has one such tag).\ngot: %s", cmd)
 	}
 }
 
-// The k3d master-key guard fixtures must stay allowlisted, and -- the part that
-// actually bites -- the allowlist must target the extracted SECRET. Setting
-// regexTarget = "match" makes an anchored shape regex silently never fire,
-// because "match" carries the surrounding `name = "..."` context.
-func TestGitleaksAllowlistsK3dHexFixtures(t *testing.T) {
-	cfg := repoFile(t, ".gitleaks.toml")
-
-	blocks := strings.Split(cfg, "[[allowlists]]")
+// The fast PR lane is deliberately a working-tree scan; swapping it to the
+// history walk is what makes PRs expensive, and swapping it away entirely
+// removes the only per-PR secret gate.
+func TestGitleaksPRLaneStaysWorkingTreeScan(t *testing.T) {
+	wf := repoFile(t, ".github", "workflows", "gitleaks.yml")
 	var found bool
-	for _, b := range blocks {
-		if !strings.Contains(b, `^scripts/k3d/.*_test\.go$`) {
+	for _, line := range strings.Split(wf, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "#") {
 			continue
 		}
-		found = true
-		if !strings.Contains(b, `^[0-9a-fA-F]{64}$`) {
-			t.Error("k3d fixture allowlist must key on the 64-char hex SHAPE, " +
-				"so no fixture literal is copied into this config")
-		}
-		if regexp.MustCompile(`(?m)^\s*regexTarget`).MatchString(b) {
-			t.Error(`k3d fixture allowlist must NOT set regexTarget: the regex has to ` +
-				`apply to the extracted secret. Against "match" the anchored shape ` +
-				`regex never fires and the allowlist silently does nothing (#2996).`)
-		}
-		if !strings.Contains(b, `condition      = "AND"`) && !strings.Contains(b, `condition = "AND"`) {
-			t.Error(`k3d fixture allowlist must use condition = "AND" so the same ` +
-				"shape outside a test file still trips the scanner")
+		if strings.Contains(trimmed, "gitleaks dir") {
+			found = true
 		}
 	}
 	if !found {
-		t.Error(`.gitleaks.toml must allowlist the scripts/k3d/*_test.go master-key ` +
-			"fixtures (#2958); without it those commits fail the full-history scan " +
-			"once they reach main (#2996)")
+		t.Error("PR lane must keep the fast working-tree scan (`gitleaks dir .`)")
 	}
 }

@@ -44,13 +44,24 @@ permissions:
 # PRs were evicted and main stayed red, none of them containing the branch at
 # fault.
 #
-# Scoping the walk to HEAD keeps it a FULL-history walk -- every commit
-# reachable from the candidate is still read, so added-then-removed secrets are
-# still caught -- it just stops walking refs that are not the candidate.
-# Measured when this landed: unscoped 2145 commits, scoped 2124, the delta being
-# exactly the unmerged branch. Do not drop the flag on the run step below:
-# without it one unmerged branch blocks every merge in the repo.
-# `scripts/dev/gitleaks_scan_scope_test.go` enforces that it stays.
+# Scoping the walk keeps it a FULL-history walk -- every commit reachable from
+# the candidate is still read, so added-then-removed secrets are still caught --
+# it just stops walking refs that are not the candidate.
+#
+# `--tags` is part of the scope, not decoration. The default gitleaks walk is
+# `--all`, which covers refs/tags/* as well; scoping to HEAD alone would drop
+# any tag that is not an ancestor of main and leave that history permanently
+# unscanned. This repo has exactly one such tag today (v0.1.0, 6 commits).
+# Counts on the commit that introduced this: HEAD 3690, HEAD --tags 3696,
+# --all 3711 -- so `--tags` recovers those 6 while still excluding the 15
+# commits that live only on unmerged branches, which is the whole point.
+#
+# The quoting is load-bearing: the value is two tokens, so an unquoted
+# --log-opts=HEAD --tags would pass `--tags` to gitleaks itself rather than to
+# git log. Do not weaken the flag on the run step below -- without it one
+# unmerged branch blocks every merge in the repo, and a second --log-opts would
+# silently win over the first (pflag takes the last occurrence).
+# `scripts/dev/gitleaks_scan_scope_test.go` enforces all of this.
 
 jobs:
   scan:
@@ -79,6 +90,6 @@ jobs:
         run: gitleaks dir . --no-banner
       - name: scan full history (main / merge queue / schedule)
         if: github.event_name != 'pull_request'
-        # Scoped to the candidate's own ancestry -- see the header comment.
-        # Without this, an unmerged branch fails every merge candidate.
-        run: gitleaks git . --no-banner --log-opts="HEAD"
+        # Scoped to the candidate's ancestry plus tags -- see the header
+        # comment. Without this, an unmerged branch fails every merge candidate.
+        run: gitleaks git . --no-banner --log-opts="HEAD --tags"
