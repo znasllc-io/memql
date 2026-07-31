@@ -191,9 +191,13 @@ func (s *AdminServer) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /admin/access-requests", gated(s.handlePlaceholder("Access requests",
 		"Review the waitlist queue: approve, reject, or defer. Tracked for a follow-up commit.")))
 
+	// 24 gated + 3 session-establishment. Hand-maintained and it had already
+	// drifted -- this read 19 while Mount registered 27, so anyone using the
+	// log line to confirm a route landed was misled. route_gate_test.go now
+	// pins it against the routes actually registered.
 	s.Logger.Info("admin web routes mounted",
 		slog.String("base_url", s.Cfg.BaseURL),
-		slog.Int("routes", 19),
+		slog.Int("routes", 27),
 	)
 }
 
