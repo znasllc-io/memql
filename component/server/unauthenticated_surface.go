@@ -72,13 +72,29 @@ func HandlerAuthorizedPaths() []string {
 // uniformly by joinPath at registration and by PublicPaths at comparison, so it
 // cannot change whether a route is declared.
 func ContractRoutes() []string {
-	return []string{
-		"/healthz",
-		"/readyz",
-		"/livez",
-		"/automations/",
-		"/automations/resume",
-	}
+	return append([]string(nil), contractRoutes...)
+}
+
+var contractRoutes = []string{
+	"/healthz",
+	"/readyz",
+	"/livez",
+	"/automations/",
+	"/automations/resume",
+}
+
+// SetContractRoutesForTest substitutes the declared route set and returns a
+// restore func.
+//
+// Exported deliberately: the boot assertion lives in package app, so app's
+// wiring test cannot reach an unexported seam. Without it that test can only
+// confirm a well-declared tree boots -- which stays true if the assertion is
+// deleted outright, or downgraded from fatal to a log line. Both are the exact
+// regressions worth catching, so the seam earns its export.
+func SetContractRoutesForTest(routes []string) func() {
+	prev := contractRoutes
+	contractRoutes = append([]string(nil), routes...)
+	return func() { contractRoutes = prev }
 }
 
 // AssertUnauthenticatedSurfaceDeclared reports whether every contract route is
