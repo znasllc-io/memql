@@ -61,7 +61,11 @@ permissions:
 # git log. Do not weaken the flag on the run step below -- without it one
 # unmerged branch blocks every merge in the repo, and a second --log-opts would
 # silently win over the first (pflag takes the last occurrence).
-# `scripts/dev/gitleaks_scan_scope_test.go` enforces all of this.
+#
+# `scripts/dev/gitleaks_scan_scope_test.go` guards the mechanical parts: the
+# scope value, a single invocation, fetch-depth: 0, and the event gate. It
+# cannot police everything a workflow edit could do -- treat it as a tripwire,
+# not a proof.
 
 jobs:
   scan:

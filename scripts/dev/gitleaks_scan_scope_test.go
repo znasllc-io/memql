@@ -47,22 +47,40 @@ func repoFile(t *testing.T, rel ...string) string {
 	return string(raw)
 }
 
-// gitleaksGitCommand returns the `gitleaks git` invocation from the workflow.
-// It matches the command itself wherever it appears -- a plain `run:`, a block
-// scalar, any indentation -- so reformatting the step does not fail the guard.
-// Comment lines are skipped so the flag cannot be "satisfied" by prose.
+// gitleaksGitCommand returns the workflow's single `gitleaks git` invocation.
+// It matches the command wherever it appears -- a plain `run:`, a block scalar,
+// any indentation -- so reformatting the step does not fail the guard, and
+// comment lines are skipped so no assertion can be satisfied by prose.
+//
+// It collects EVERY occurrence rather than the first. Returning the first would
+// miss a second invocation on a later line of a block scalar:
+//
+//	run: |
+//	  gitleaks git . --no-banner --log-opts="HEAD --tags"
+//	  gitleaks git . --no-banner --log-opts="--all"
+//
+// Both run, the second restores the unscoped walk, and every per-line assertion
+// below would still pass.
 func gitleaksGitCommand(t *testing.T) string {
 	t.Helper()
 	wf := repoFile(t, ".github", "workflows", "gitleaks.yml")
+	var found []string
 	for _, line := range strings.Split(wf, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "#") || !strings.Contains(trimmed, "gitleaks git") {
 			continue
 		}
-		return trimmed
+		found = append(found, trimmed)
 	}
-	t.Fatal("no `gitleaks git` command found in .github/workflows/gitleaks.yml")
-	return ""
+	switch len(found) {
+	case 0:
+		t.Fatal("no `gitleaks git` command found in .github/workflows/gitleaks.yml")
+	case 1:
+	default:
+		t.Fatalf("expected exactly one `gitleaks git` invocation; a second one "+
+			"restores the unscoped walk regardless of how the first is scoped.\ngot: %v", found)
+	}
+	return found[0]
 }
 
 var logOptsRe = regexp.MustCompile(`--log-opts=("([^"]*)"|'([^']*)'|(\S+))`)
@@ -95,27 +113,68 @@ func TestGitleaksFullHistoryScanIsRefScoped(t *testing.T) {
 			"unquoted the shell hands `--tags` to gitleaks instead of git log.\ngot: %s", cmd)
 	}
 
-	var hasHead, hasTags bool
+	// Allow-list the value rather than blacklisting --all. A blacklist stops
+	// only the narrowing it happens to name: --log-opts="HEAD --tags -n 1"
+	// scans a single commit and would sail past a check that merely rejects
+	// --all and requires HEAD.
+	want := map[string]bool{"HEAD": true, "--tags": true}
+	seen := map[string]bool{}
 	for _, f := range fields {
-		switch f {
-		case "HEAD":
-			hasHead = true
-		case "--tags":
-			hasTags = true
-		case "--all":
-			t.Errorf("--log-opts must not pass --all: that is the unscoped default "+
-				"this guard exists to prevent (#2996).\ngot: %s", cmd)
+		if !want[f] {
+			t.Errorf("unexpected token %q in --log-opts. The walk must be scoped to "+
+				"exactly `HEAD --tags`; anything else either widens it back to the "+
+				"unscoped default or narrows how much history is read (#2996).\ngot: %s", f, cmd)
+			continue
 		}
+		seen[f] = true
 	}
-	if !hasHead {
+	if !seen["HEAD"] {
 		t.Errorf("--log-opts must scope the walk to HEAD (the ancestry under test).\ngot: %s", cmd)
 	}
 	// Without --tags, a tag that is not an ancestor of main falls out of scope
 	// and its history goes permanently unscanned.
-	if !hasTags {
+	if !seen["--tags"] {
 		t.Errorf("--log-opts must include --tags: scoping to HEAD alone drops any "+
 			"tag that is not an ancestor of main, leaving that history unscanned "+
 			"forever (this repo has one such tag).\ngot: %s", cmd)
+	}
+
+	// Shell expansion would let the effective flags differ from the literal
+	// ones: `... --log-opts="HEAD --tags" $EXTRA` with EXTRA=--log-opts=--all
+	// reads as correctly scoped here while running unscoped.
+	if strings.Contains(cmd, "$") {
+		t.Errorf("gitleaks command must not interpolate shell variables -- the "+
+			"effective scope would no longer be readable from the workflow.\ngot: %s", cmd)
+	}
+	// A scan whose failure is swallowed is not a gate.
+	for _, esc := range []string{"|| true", "--exit-code 0", "--exit-code=0"} {
+		if strings.Contains(cmd, esc) {
+			t.Errorf("gitleaks command must not suppress its failure exit (%q).\ngot: %s", esc, cmd)
+		}
+	}
+}
+
+// The scope flags are meaningless if the checkout has no history to walk.
+// Flipping fetch-depth to 1 leaves every assertion above green while the scan
+// covers exactly one commit and reports success -- the same class of silent
+// under-coverage this guard exists to prevent, and invisible in review.
+func TestGitleaksFullHistoryCheckoutIsUnshallow(t *testing.T) {
+	wf := repoFile(t, ".github", "workflows", "gitleaks.yml")
+	if !regexp.MustCompile(`(?m)^\s*fetch-depth:\s*0\s*$`).MatchString(wf) {
+		t.Error("the non-PR checkout must set `fetch-depth: 0`; without full history " +
+			"`gitleaks git` scans a single commit and passes trivially (#2996)")
+	}
+}
+
+// The full-history lane must actually run on the events it claims to cover.
+// `scan` is a required check, so a step gated off by a narrowed `if:` reports
+// green having scanned nothing.
+func TestGitleaksFullHistoryLaneRunsOnAllNonPREvents(t *testing.T) {
+	wf := repoFile(t, ".github", "workflows", "gitleaks.yml")
+	if !strings.Contains(wf, "if: github.event_name != 'pull_request'") {
+		t.Error("the full-history lane must stay gated on " +
+			"`github.event_name != 'pull_request'` so it covers push, merge_group " +
+			"and schedule; narrowing it silently drops merge-queue coverage (#2996)")
 	}
 }
 
