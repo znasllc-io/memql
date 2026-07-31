@@ -99,3 +99,36 @@ func TestNewAppDefaultsToTheRealSurfaceAssertion(t *testing.T) {
 		t.Errorf("the default assertion must be the real one and must pass on this tree: %v", err)
 	}
 }
+
+// The whole-mux branch is chosen from verifierRequired, a build-tag const, so
+// in this binary only the contract-only branch would ever execute. Testing the
+// assembly directly covers the identity path -- the one where an undeclared
+// mux route is actually reachable.
+func TestUnauthenticatedSurfaceRoutesIncludeMuxRoutesForIdentity(t *testing.T) {
+	a := &App{registeredRoutes: []string{"POST /internal/dump-secrets"}}
+
+	contractOnly := a.unauthenticatedSurfaceRoutes(false)
+	for _, r := range contractOnly {
+		if strings.Contains(r, "/internal/dump-secrets") {
+			t.Fatal("the contract-only branch must not pull in mux routes")
+		}
+	}
+
+	whole := a.unauthenticatedSurfaceRoutes(true)
+	var found bool
+	for _, r := range whole {
+		if strings.Contains(r, "/internal/dump-secrets") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("the identity branch must include routes registered on the mux -- " +
+			"otherwise a route mounted there is reachable unauthenticated and " +
+			"invisible to the check (#2939)")
+	}
+
+	// ...and such a route must actually fail the assertion.
+	if err := server.AssertUnauthenticatedSurfaceDeclared(whole); err == nil {
+		t.Fatal("an undeclared mux route must fail the surface assertion")
+	}
+}

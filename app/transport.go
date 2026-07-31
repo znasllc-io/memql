@@ -189,10 +189,7 @@ func (a *App) createHTTPServer() {
 	// Fail-fast rather than warn: a boot warning is exactly the signal that went
 	// unread when the automations routes were added.
 	if a.identityVerifier == nil {
-		routes := server.ContractRoutes()
-		if !verifierRequired {
-			routes = append(routes, a.registeredRoutes...)
-		}
+		routes := a.unauthenticatedSurfaceRoutes(!verifierRequired)
 		if err := a.overrides.AssertUnauthenticatedSurface(routes); err != nil {
 			a.fatal("undeclared unauthenticated HTTP surface", "error", err)
 		}
@@ -218,4 +215,19 @@ func (a *App) createHTTPServer() {
 	}
 
 	a.httpServer = httpServer
+}
+
+// unauthenticatedSurfaceRoutes assembles the routes the boot check must account
+// for (memql#2939).
+//
+// Split out because the caller decides wholeMux from `verifierRequired`, a
+// build-tag const -- so inside one test binary only one branch would ever run,
+// and the identity-only branch (the one that matters in production) would go
+// unexercised. Taking it as a parameter lets both be tested.
+func (a *App) unauthenticatedSurfaceRoutes(wholeMux bool) []string {
+	routes := server.ContractRoutes()
+	if wholeMux {
+		routes = append(routes, a.registeredRoutes...)
+	}
+	return routes
 }
