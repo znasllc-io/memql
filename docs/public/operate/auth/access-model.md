@@ -195,9 +195,9 @@ would become the default with no opt-out. That is how
 `POST /automations/{name}/trigger` and `POST /automations/resume`
 became unauthenticated on identity (memql#2937, memql#2908).
 
-Every route the HTTP contract registers must therefore be accounted for
-by one of two declarations, and `createHTTPServer` **refuses to boot**
-when one is in neither:
+Every route such a binary serves must therefore be accounted for by one
+of two declarations, and `createHTTPServer` **refuses to boot** when one
+is in neither:
 
 | declaration | meaning |
 |---|---|
@@ -209,12 +209,26 @@ owner-or-admin checks added in memql#2938. They are deliberately **not**
 in `PublicPaths()`: that list is consulted on every verifier-consuming
 node, so listing them there would make them unauthenticated everywhere.
 
+`/memql/ws` is also declared there, on narrower grounds: the upgrade
+itself performs no auth check, but on a verifier-less binary it tunnels
+to a gRPC chain of `OperatorAware(RejectAll)`, so it fails closed at the
+next hop rather than in the handler.
+
+**Scope differs between the two binaries, deliberately.** The identity
+binary asserts its WHOLE registered surface -- the contract plus
+everything app code mounts through `a.handleRoute`. A node running
+`MEMQL_IDENTITY_ENABLED=false` asserts the contract routes only: that
+mode admits every request as the cluster owner by design, so requiring
+"safe unauthenticated" declarations for attachments / audio / voice would
+demand paperwork for a deliberate, loudly-warned troubleshooting posture.
+
 This authenticates nothing new. It makes leaving a route unauthenticated
-an explicit, reviewable act rather than an omission. Adding a route to
-the contract without classifying it fails a test first --
-`ContractRoutes()` is verified against the routes actually registered --
-and the boot assertion second. See
-`component/server/unauthenticated_surface.go` (memql#2939).
+an explicit, reviewable act rather than an omission. Registering a route
+directly on the mux instead of through `a.handleRoute` fails an AST gate;
+adding one to the contract without classifying it fails the
+`ContractRoutes()` drift check; and either way the boot assertion is the
+backstop. See `component/server/unauthenticated_surface.go` and
+`app/mux_registration_test.go` (memql#2939).
 
 ### Stream lifecycle
 

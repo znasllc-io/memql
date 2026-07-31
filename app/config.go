@@ -100,7 +100,8 @@ func (a *App) configAndAuth() {
 		// went unauthenticated unnoticed (#2937, #2908).
 		//
 		// That surface is now declared rather than incidental: createHTTPServer
-		// asserts every contract route is in PublicPaths() or
+		// asserts EVERY route this binary registers -- the OpenAPI contract plus
+		// everything app code mounts via a.handleRoute -- is in PublicPaths() or
 		// HandlerAuthorizedPaths(), and refuses to boot otherwise (#2939).
 		a.Logger.Info("identity binary: per-node verifier intentionally disabled (identity is the JWKS authority); no HTTP auth middleware -- unauthenticated surface asserted in createHTTPServer")
 		return
@@ -117,9 +118,13 @@ func (a *App) configAndAuth() {
 	//
 	// This takes the SAME early return as the identity binary above, so it has
 	// the same consequence: no HTTP auth middleware, PublicPaths() never
-	// consulted, contract routes reachable unauthenticated. createHTTPServer's
-	// assertion covers this path too (#2939) -- it keys off a nil verifier, not
-	// off the build tag.
+	// consulted, routes reachable unauthenticated. createHTTPServer's assertion
+	// covers this path too (#2939), but over the CONTRACT routes only -- not the
+	// whole mux as on identity. This mode admits every request as the cluster
+	// owner by design, so requiring "safe unauthenticated" declarations for
+	// attachments / audio / voice would demand paperwork for a deliberate,
+	// loudly-warned troubleshooting posture and fail-fast a config that is
+	// meant to work.
 	if !config.IdentityAuthEnabled() {
 		a.authDisabled = true
 		metrics.SetAuthEnabled(false)
