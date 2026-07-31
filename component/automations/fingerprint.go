@@ -2,6 +2,7 @@ package automations
 
 import (
 	"fmt"
+	"github.com/znasllc-io/memql/component/events"
 	"sort"
 
 	"github.com/znasllc-io/memql/core/id"
@@ -200,7 +201,48 @@ func extractNodeIds(nodes []any) []string {
 	return ids
 }
 
+// eventFingerprintData projects a triggering event down to the fields that may
+// enter the execution's chain head. Returns nil for a schedule/manual run.
+//
+// # WHAT MUST NOT GO IN HERE, AND WHY (memql#2823 / #2867)
+//
+// events.Event carries a Timestamp (time.Now().UTC()). It is deliberately NOT
+// projected, and this function exists so that omission is a named, testable
+// decision instead of four lines inlined in ExecuteWithEvent.
+//
+// A WALL-CLOCK READING IS AN ACCIDENTAL DISCRIMINATOR, NOT A DESIGNED ONE. It
+// differs on every evaluation by construction, so any key containing one is
+// unique every time. That was merely slow for the (now deleted) step cache. It
+// is a CORRECTNESS failure here: this value flows into ComputeInitialChainHead
+// -> the per-process dedup check AND clusterGuard.Claim, the cross-replica
+// gate that stops two replicas running the same automation. Add the timestamp
+// and every event-triggered automation executes once per replica, silently, in
+// exactly the 2-replica topology this project runs everywhere.
+//
+// The corollary, learned the expensive way: strip clock fields SURGICALLY,
+// never with a recursive sweep for clock-shaped keys. `payload` legitimately
+// contains business fields like `payload.timestamp` that SHOULD discriminate.
+// Dropping a real input from a key is a correctness bug; leaving a clock in
+// one is merely a slow one -- that asymmetry, not tidiness, decides the design.
+//
+// Pinned by TestEventFingerprintDataExcludesTheWallClock.
+func eventFingerprintData(triggeringEvent *events.Event) map[string]any {
+	if triggeringEvent == nil {
+		return nil
+	}
+	return map[string]any{
+		"topic":   triggeringEvent.Topic,
+		"kind":    triggeringEvent.Kind.String(),
+		"payload": triggeringEvent.Payload,
+	}
+}
+
 // ComputeInitialChainHead creates the starting chain state for an execution.
+//
+// Feeds execution dedup and the cross-replica cluster guard, so it must be a
+// pure function of the automation identity plus real inputs. See
+// eventFingerprintData above for the wall-clock rule and what it costs to
+// break it.
 func ComputeInitialChainHead(automationName, triggeredBy string, triggeringEvent map[string]any, inputFingerprint string) string {
 	fp := map[string]any{
 		"automation":  automationName,
@@ -225,6 +267,13 @@ func ComputeInitialChainHead(automationName, triggeredBy string, triggeringEvent
 }
 
 // FingerprintInput creates a deterministic hash of input query results.
+//
+// Reached only when automation.Input is set, which nothing populates today
+// (see the note at its call site in executor.go). The wall-clock rule that
+// governs every key in this file lives on eventFingerprintData above, next to
+// the key that IS live -- an earlier revision of this change put it here, on
+// the strength of "whoever builds the next key will start at the surviving
+// helper", which was wrong: a reader of running code never lands here.
 func FingerprintInput(input any) string {
 	return string(fingerprintEngine.MustFromMap(map[string]any{
 		"input": fingerprintQueryResult(input),
@@ -310,100 +359,4 @@ func fingerprintGenericResult(result any) map[string]any {
 	}
 
 	return fp
-}
-
-// DefinitionId computes a content-addressed ID for the step definition.
-//
-// UNUSED SINCE memql#2899 -- like FingerprintStepInput below, its only caller was
-// the deleted step cache's key computation. Unlike that one it heads no chain and
-// nothing downstream depends on it, so it is a straightforward removal whenever
-// memql#2941 is picked up. Do not add a caller without reading #2899 first.
-// The ID includes all fields that affect output, ensuring cache key
-// changes when the step definition changes.
-func (s *Step) DefinitionId(engine *id.Engine) id.ID {
-	if s == nil || engine == nil {
-		return ""
-	}
-
-	def := map[string]any{
-		"id":   s.ID,
-		"type": string(s.Type),
-	}
-
-	switch s.Type {
-	case StepTypeQuery:
-		if s.Query != nil {
-			def["query"] = s.Query.Query
-		}
-	case StepTypeShape:
-		if s.Shape != nil {
-			def["source"] = s.Shape.Source
-			def["template"] = string(s.Shape.Template)
-		}
-	case StepTypeMutation:
-		if s.Mutation != nil {
-			def["concept"] = s.Mutation.Concept
-		}
-	case StepTypeFunction:
-		if s.Function != nil {
-			def["name"] = s.Function.Name
-		}
-	case StepTypeForEach:
-		if s.ForEach != nil {
-			def["source"] = s.ForEach.Source
-			def["filter"] = s.ForEach.Filter
-		}
-	}
-
-	return engine.MustFromMap(def)
-}
-
-// FingerprintStepInput creates a deterministic ID from the step's input data.
-// The input is resolved from the evaluator based on step type.
-//
-// UNUSED SINCE memql#2899 -- its only caller was the automation step cache's key
-// computation, which went with the cache. Kept for now rather than deleted in the
-// same change, because it is the head of a chain that reaches
-// ContextFingerprint and its clock-stripping tests; whether that whole chain goes
-// is its own decision. Do not add a caller without reading #2899 first.
-func FingerprintStepInput(step *Step, evaluator *Evaluator) id.ID {
-	if step == nil || evaluator == nil {
-		return ""
-	}
-
-	var input any
-
-	switch step.Type {
-	case StepTypeShape:
-		if step.Shape != nil {
-			input, _ = evaluator.EvaluateValue(step.Shape.Source)
-		}
-	case StepTypeForEach:
-		if step.ForEach != nil {
-			input, _ = evaluator.EvaluateValue(step.ForEach.Source)
-		}
-	case StepTypeQuery:
-		// For queries, evaluate using EvaluateStringForQuery to match actual execution
-		// This ensures proper quoting of values and identical cache keys
-		if step.Query != nil {
-			evaluatedQuery, err := evaluator.EvaluateStringForQuery(step.Query.Query)
-			if err != nil {
-				// Fall back to raw query if evaluation fails
-				input = step.Query.Query
-			} else {
-				input = evaluatedQuery
-			}
-		}
-	case StepTypeFunction:
-		// Functions can read any evaluator state ($input, $steps.*, $item, custom vars)
-		// so we must fingerprint the entire context to ensure cache correctness
-		input = evaluator.ContextFingerprint()
-	default:
-		// Use $input to get the automation input data
-		input, _ = evaluator.EvaluateValue("$input")
-	}
-
-	return fingerprintEngine.MustFromMap(map[string]any{
-		"input": input,
-	})
 }
