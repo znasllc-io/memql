@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"io"
 	"log/slog"
 	"strings"
@@ -38,6 +39,8 @@ func newSurfaceWiringApp(t *testing.T) (*App, *[]string) {
 	a.overrides.NewHTTPServer = func(...server.ServerArg) (*server.Server, error) {
 		return nil, nil
 	}
+	// Mirror newApp's defaulting; individual tests substitute their own.
+	a.overrides.AssertUnauthenticatedSurface = server.AssertUnauthenticatedSurfaceDeclared
 	return a, &fatals
 }
 
@@ -65,11 +68,11 @@ func TestCreateHTTPServerRejectsUndeclaredSurface(t *testing.T) {
 	a, fatals := newSurfaceWiringApp(t)
 	a.identityVerifier = nil
 
-	// Substitute a route set that is not fully declared, so this exercises the
-	// error path rather than merely confirming a good tree boots -- which stays
-	// true if the assertion is deleted or downgraded to a log line.
-	restore := server.SetContractRoutesForTest([]string{"/healthz", "/internal/undeclared"})
-	defer restore()
+	// Drive the error path rather than merely confirming a good tree boots --
+	// that stays true if the assertion is deleted or downgraded to a log line.
+	a.overrides.AssertUnauthenticatedSurface = func() error {
+		return errors.New("undeclared: /internal/undeclared")
+	}
 
 	a.createHTTPServer()
 
@@ -80,5 +83,19 @@ func TestCreateHTTPServerRejectsUndeclaredSurface(t *testing.T) {
 	joined := strings.Join(*fatals, " | ")
 	if !strings.Contains(joined, "/internal/undeclared") {
 		t.Errorf("the fatal must name the offending route so the fix is obvious; got: %s", joined)
+	}
+}
+
+// The injected seam only proves the wiring if the real assertion is what gets
+// injected by default. Without this, replacing the default with a no-op would
+// leave every test above green.
+func TestNewAppDefaultsToTheRealSurfaceAssertion(t *testing.T) {
+	a := newApp(slog.New(slog.NewTextHandler(io.Discard, nil)), "test", Overrides{})
+	if a.overrides.AssertUnauthenticatedSurface == nil {
+		t.Fatal("newApp must default AssertUnauthenticatedSurface; a nil default would " +
+			"panic at boot or, if guarded, skip the check entirely")
+	}
+	if err := a.overrides.AssertUnauthenticatedSurface(); err != nil {
+		t.Errorf("the default assertion must be the real one and must pass on this tree: %v", err)
 	}
 }

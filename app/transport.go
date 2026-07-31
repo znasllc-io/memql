@@ -183,7 +183,7 @@ func (a *App) createHTTPServer() {
 	// Fail-fast rather than warn: a warning at boot is exactly the signal that
 	// went unread the first time.
 	if a.identityVerifier == nil {
-		if err := server.AssertUnauthenticatedSurfaceDeclared(); err != nil {
+		if err := a.overrides.AssertUnauthenticatedSurface(); err != nil {
 			a.fatal("undeclared unauthenticated HTTP surface", "error", err)
 		}
 		a.Logger.Info("no HTTP auth middleware on this binary; unauthenticated surface verified against declarations",

@@ -181,12 +181,16 @@ func TestAssertSurfaceDeclaredCatchesUndeclaredRoutes(t *testing.T) {
 // verifier middleware on every verifier-consuming node, so listing them there
 // would make them unauthenticated everywhere -- the opposite of the fix.
 func TestHandlerAuthorizedPathsAreNotPublic(t *testing.T) {
-	public := map[string]bool{}
+	// Prefix matching, not equality: verifier.shouldBypassAuth bypasses on
+	// strings.HasPrefix(path, allowed+"/"), so an exact-equality guard would
+	// report clean while a PublicPaths entry of "/internal" made a
+	// handler-authorized "/internal/deploy" public on every verifier node.
+	var public []string
 	for _, p := range PublicPaths() {
-		public[normalizeSurfacePath(p)] = true
+		public = append(public, normalizeSurfacePath(p))
 	}
 	for _, p := range HandlerAuthorizedPaths() {
-		if public[normalizeSurfacePath(p)] {
+		if surfaceDeclaredBy(normalizeSurfacePath(p), public) {
 			t.Errorf("%q is in both HandlerAuthorizedPaths() and PublicPaths(). PublicPaths "+
 				"makes it unauthenticated on EVERY node; a handler-authorized route is meant "+
 				"to stay behind the verifier where one runs (memql#2939).", p)

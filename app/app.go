@@ -47,6 +47,11 @@ type Overrides struct {
 	NewEngine         func(db *bun.DB, args ...component.Arg) (*memql.MemQLEngine, error)
 	FatalWithLogger   func(logger *slog.Logger, msg string, args ...any)
 	LoadServiceEnvOpt func() (service.ServiceEnvOptions, error)
+	// AssertUnauthenticatedSurface is the boot check that every route
+	// reachable without auth middleware is declared (memql#2939). Injectable
+	// so the wiring test can drive its error path without a mutable global or
+	// an exported test mutator in the shipped binary.
+	AssertUnauthenticatedSurface func() error
 }
 
 // App holds the shared state accumulated across bootstrap phases.
@@ -223,6 +228,9 @@ func newApp(serviceLogger *slog.Logger, version string, overrides Overrides) *Ap
 	}
 	if a.overrides.LoadServiceEnvOpt == nil {
 		a.overrides.LoadServiceEnvOpt = service.LoadDefaultServiceEnvOptions
+	}
+	if a.overrides.AssertUnauthenticatedSurface == nil {
+		a.overrides.AssertUnauthenticatedSurface = server.AssertUnauthenticatedSurfaceDeclared
 	}
 
 	return a
