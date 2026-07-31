@@ -179,6 +179,43 @@ middleware (`component/identity/verifier`). On each gRPC stream open:
    `auth.ContextWithClaims` + `auth.BuildTokenInfo`, exactly as the
    legacy auth path did.
 
+### The unauthenticated HTTP surface is declared, not inherited
+
+The verifier middleware is installed with `server.PublicPaths()`, an
+explicit allowlist (health probes, JWKS, auth endpoints, metrics,
+Polyphon service-to-service, the concept API). On a verifier-consuming
+node **public is opt-in**: a route is unauthenticated only because
+someone put it on that list.
+
+Two binaries install no HTTP auth middleware at all -- the `identity`
+binary (it is the JWKS authority and must not verify against itself)
+and any node running `MEMQL_IDENTITY_ENABLED=false`. On those,
+`PublicPaths()` is never consulted, so without a further check "public"
+would become the default with no opt-out. That is how
+`POST /automations/{name}/trigger` and `POST /automations/resume`
+became unauthenticated on identity (memql#2937, memql#2908).
+
+Every route the HTTP contract registers must therefore be accounted for
+by one of two declarations, and `createHTTPServer` **refuses to boot**
+when one is in neither:
+
+| declaration | meaning |
+|---|---|
+| `server.PublicPaths()` | genuinely public on every node |
+| `server.HandlerAuthorizedPaths()` | not public, but authorizes inside the handler and fails closed with no credentials, so it is safe where no middleware runs ahead of it |
+
+The automations routes sit in the second list, justified by the
+owner-or-admin checks added in memql#2938. They are deliberately **not**
+in `PublicPaths()`: that list is consulted on every verifier-consuming
+node, so listing them there would make them unauthenticated everywhere.
+
+This authenticates nothing new. It makes leaving a route unauthenticated
+an explicit, reviewable act rather than an omission. Adding a route to
+the contract without classifying it fails a test first --
+`ContractRoutes()` is verified against the routes actually registered --
+and the boot assertion second. See
+`component/server/unauthenticated_surface.go` (memql#2939).
+
 ### Stream lifecycle
 
 1. gRPC stream opens. The verifier middleware validates the JWT and
