@@ -69,8 +69,41 @@ func TestConf1730UserCountReturnsNumericAggregate(t *testing.T) {
 	// server-side here because the property under test is the ROW COUNT, not
 	// reachability; the refusal itself is asserted immediately below.
 	activeRowCount := e.runQueryServerSide(t, "query activeUsers()")
-	if activeRowCount < 500 && before != activeRowCount {
-		t.Fatalf("#1730: userCount=%d must match the active-user total len(activeUsers)=%d", before, activeRowCount)
+
+	// GROUND TRUTH, read straight off the append-only table (memql#2929).
+	//
+	// The guard above used to be `activeRowCount < 500`, and that 500 was
+	// not an arbitrary wrong number -- it is defaultMaxResults. It was the
+	// wrong ceiling OF TWO: activeUsers declares `paginate 50`, and the
+	// effective cap is min(declared, MaxResults). So above 50 active users
+	// the row set saturated at 50, the guard never fired, and the assertion
+	// compared a population against a page size.
+	//
+	// Deriving the declared `paginate` instead is NOT a fix: it swaps one
+	// ceiling for the other and reproduces the bug whenever the declared
+	// value exceeds MaxResults, MEMORY_ENGINE_MAX_RESULTS is lowered, or the
+	// query is @unbounded.
+	//
+	// Ground truth has no ceiling, so there is nothing to get wrong and this
+	// holds at any database size. That matters because the paged comparison
+	// was silently DISABLED on exactly the machines the bug was reported
+	// from: above the cap it degenerates to `before >= 50`, and a userCount
+	// that had dropped its isActiveRecord filter entirely still passed.
+	groundTruth := activeUserCountFromDB(t, e)
+	if before != groundTruth {
+		t.Fatalf("#1730: userCount=%d but the table holds %d active users -- the aggregate and "+
+			"its filter must agree with the rows (isActiveRecord over the latest version of each "+
+			"v1:identity:user)", before, groundTruth)
+	}
+
+	// activeUsers is the same filter through the paged read path, so its row
+	// set can never exceed the population. It may be smaller, and this test
+	// deliberately does not care which ceiling binds -- caring about that is
+	// what made the original guard wrong.
+	if activeRowCount > groundTruth {
+		t.Fatalf("#1730: activeUsers returned %d rows but only %d active users exist -- the two "+
+			"share one filter (isActiveRecord), so the paged read cannot exceed the population",
+			activeRowCount, groundTruth)
 	}
 
 	// memql#2883, the conformance half: run_query IS the MCP client surface,
@@ -105,4 +138,35 @@ func TestConf1730UserCountReturnsNumericAggregate(t *testing.T) {
 
 func uniqueUserID(sfx string, i int) string {
 	return "user-1730-" + sfx + "-" + string(rune('a'+i))
+}
+
+// activeUserCountFromDB counts active users straight off the append-only
+// MemoryNodes table: one row per id, latest version wins, `active == true`.
+//
+// This is the ground truth memql#2929 needed. Every in-engine read is capped
+// at min(declared paginate, MaxResults), so no query result can serve as the
+// population on a database larger than that cap -- which is exactly how the
+// old guard came to compare a count against a page size, and why deriving the
+// declared paginate would only have moved the failure threshold rather than
+// removed it.
+//
+// It restates `isActiveRecord` (active == true) in SQL, and that coupling is
+// deliberate: a ground-truth check that reuses the thing under test proves
+// nothing. If the trait's definition changes this must change with it, so the
+// failure message names the trait to make the connection findable.
+func activeUserCountFromDB(t *testing.T, e *Env) int {
+	t.Helper()
+	const q = `
+		SELECT count(*) FROM (
+			SELECT DISTINCT ON (id) id, payload
+			FROM "MemoryNodes"
+			WHERE concept = ?
+			ORDER BY id, "createdAt" DESC
+		) latest
+		WHERE latest.payload->>'active' = 'true'`
+	var n int
+	if err := e.DB.NewRaw(q, "v1:identity:user").Scan(e.Ctx, &n); err != nil {
+		t.Fatalf("ground-truth active-user count failed: %v", err)
+	}
+	return n
 }
