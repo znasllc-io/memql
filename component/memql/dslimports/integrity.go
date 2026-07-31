@@ -605,6 +605,36 @@ func (t *Tree) verifySignatureBindings(path string, f *languageAst.File, idx *de
 			if sameDomainConceptDecl(path, f, idx, name) != nil {
 				continue
 			}
+			// A PINNED domain cannot follow the generic remedy, so it gets a
+			// message naming what it can actually do (memql#2901). The finding
+			// itself stays: boot really does refuse this binding -- verified
+			// against the real resolver, which reports `ambiguous concept name
+			// "deployment" matches 2 concepts: v1:cluster:deployment,
+			// v1:rollout:deployment`. Suppressing it here would take memqllint
+			// green on a bundle that crash-loops every node at boot, and
+			// memqllint is the only pre-boot gate a product bundle has.
+			if id, pin, pinImportWorks := pinnedDomainAmbiguity(idx, path, name); id != "" {
+				dir := firstSegment(path)
+				if pinImportWorks {
+					// The fix is one line. Say so, rather than sending the
+					// author to re-key ids -- which is a data migration.
+					errs = append(errs, fmt.Errorf(
+						"%s: signature concept %q is not imported and is declared in %d places in the DSL root -- boot cannot disambiguate an unimported name. %s/ is pinned (%s/namespace.pin = %q), so its %q assembles to %s while this file's ambient namespace hint is %q, which cannot match. Import it by its PINNED namespace: use %s.concepts.{ %q }. An import of this file's own domain would be stripped by the same-domain-use gate (memql#2617), so it is not an alternative",
+						path, name, res.candidates,
+						dir, dir, pin,
+						name, id, dir,
+						pin, name))
+					continue
+				}
+				errs = append(errs, fmt.Errorf(
+					"%s: signature concept %q is not imported and is declared in %d places in the DSL root -- boot cannot disambiguate an unimported name, and NO use declaration can fix this one. %s/ is pinned (%s/namespace.pin = %q), so its %q assembles to %s while this file's ambient namespace hint is %q. An import of this file's own domain is stripped by the same-domain-use gate (memql#2617), and one naming %q is rejected because %s/ exists and declares no %q. Rename one of the colliding concepts, or remove %s/namespace.pin and re-key the ids onto the directory",
+					path, name, res.candidates,
+					dir, dir, pin,
+					name, id, dir,
+					pin, pin, name,
+					dir))
+				continue
+			}
 			errs = append(errs, fmt.Errorf(
 				"%s: signature concept %q is not imported and is declared in %d places in the DSL root -- boot cannot disambiguate an unimported name; import it via a use declaration",
 				path, name, res.candidates))
@@ -1491,6 +1521,124 @@ func candidateConceptId(root fs.FS, entry conceptEntry) string {
 		return ""
 	}
 	return id
+}
+
+// firstSegment returns the leading path component -- the directory a concept's
+// canonical id is assembled under. Deliberately NOT dslfs.DomainFromFilePath,
+// which returns the LAST segment: that LEFT/RIGHT distinction is what memql#2852
+// was filed about. Matches unified_loader.firstPathSegment and
+// candidateConceptId byte for byte.
+//
+// Honest note on how much that is worth HERE: pinnedDomainAmbiguity now bails
+// unless DomainFromFilePath(path) == dir, so by the time the candidate loop
+// runs the two derivations have coincided. Swapping one for the other is
+// therefore unobservable in this file -- verified by mutation, no test fails.
+// It stays spelled correctly because the function is the right one for what it
+// means, not because a test is holding it in place.
+func firstSegment(p string) string {
+	if i := strings.IndexByte(p, '/'); i >= 0 {
+		return p[:i]
+	}
+	return ""
+}
+
+// pinnedDomainAmbiguity classifies an ambiguous name declared in a domain
+// pinned to a different namespace, and reports which remedy is actually true
+// for it (memql#2901).
+//
+// It returns the own-domain concept's assembled id, the pin, and whether
+// `use <pin>.concepts.{ name }` is a WORKING fix. An empty id means the
+// generic "import it via a use declaration" remedy still applies.
+//
+// EVERY CONDITION BELOW IS A FACT THE MESSAGE ASSERTS. The first cut of this
+// gate asserted three things without checking them, and adversarial review
+// found two were false -- which is the same defect memql#2901 was filed
+// about, one level up. So each claim is now a guard:
+//
+//   - the pin must actually DIVERGE from the directory. A pin naming its own
+//     directory produces exactly the ids an unpinned domain would, so there is
+//     nothing to explain. Comparing against the file's LAST path segment
+//     instead misclassified a no-op pin as divergent for any binding file in a
+//     subdirectory.
+//
+//   - the binding file must sit DIRECTLY in the pinned directory. The
+//     same-domain-use gate derives its domain as the file's LAST directory
+//     segment, so for `deployment/sub/queries.memql` that domain is "sub" and
+//     `use deployment.concepts.{ X }` survives it -- a one-line fix the
+//     message would otherwise deny, sending the author to re-key ids instead.
+//
+//   - the pin must name a real directory in this root that does NOT declare
+//     the name. Boot resolves a use path as a NAMESPACE hint matched against
+//     canonical ids, not as a directory lookup, so when the pin names no
+//     directory `use <pin>.concepts.{ X }` both lints clean and binds
+//     correctly. That is the common shape in a product bundle, where a pin
+//     routinely targets a namespace the bundle does not own -- and it is the
+//     opposite of what the first cut told the author.
+//
+// Returns nothing when more than one own-domain candidate survives assembly:
+// the message names a single id, and naming one of two would be a guess.
+func pinnedDomainAmbiguity(idx *declIndex, path, name string) (id, pin string, pinImportWorks bool) {
+	if idx == nil {
+		return "", "", false
+	}
+	dir := firstSegment(path)
+	if dir == "" {
+		return "", "", false // root-level file: no domain, so no pin
+	}
+	pin = treeNamespacePin(idx.root, dir)
+	if pin == "" || pin == dir {
+		// Unpinned, or pinned to its own directory name: the ids are what an
+		// unpinned domain would produce, so this is not the #2901 shape.
+		return "", "", false
+	}
+	if dslfs.DomainFromFilePath(path) != dir {
+		// A subdirectory file. The same-domain-use gate keys on the LAST
+		// segment, so the own-domain import survives for this file and the
+		// generic remedy is followable after all.
+		return "", "", false
+	}
+	for _, entry := range idx.concepts[name] {
+		if firstSegment(entry.file) != dir {
+			continue
+		}
+		// "" means assembly refused; such an entry is dropped as a candidate
+		// everywhere else too (see candidateConceptId), so it cannot be the
+		// one the message names.
+		cid := candidateConceptId(idx.root, entry)
+		if cid == "" {
+			continue
+		}
+		if id != "" {
+			return "", "", false
+		}
+		id = cid
+	}
+	if id == "" {
+		return "", "", false
+	}
+
+	// Does `use <pin>.concepts.{ name }` actually work? Two cases, and they
+	// give opposite remedies.
+	if !idx.namespaces[pin] {
+		// The pin names no directory in this root. A use path is a NAMESPACE
+		// hint matched as ":"+hint+":" against canonical ids, not a directory
+		// lookup, so lane 1 treats this as an external namespace and boot
+		// binds it correctly. This is the common product-bundle shape: a pin
+		// routinely targets a namespace the bundle does not own.
+		return id, pin, true
+	}
+	for _, entry := range idx.concepts[name] {
+		if firstSegment(entry.file) == pin {
+			// The pin's own directory declares this name too, so both
+			// assemble under ":"+pin+":" -- a duplicate-id situation this
+			// message is not equipped to explain. Generic remedy.
+			return "", "", false
+		}
+	}
+	// Directory exists and does not declare the name: lane 1 rejects the
+	// import with `%q is not declared in %s`. Rename or unpin really are the
+	// only fixes.
+	return id, pin, false
 }
 
 // treeNamespacePin reads a domain's namespace.pin off the tree's own fs.FS.
