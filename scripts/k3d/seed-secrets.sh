@@ -21,7 +21,10 @@
 #   - The memql namespace already exists (created by ArgoCD / `make up`).
 #   - ~/.memql/genesis.znas exists (the sealed genesis envelope) -- OR
 #     MEMQL_GENESIS_B64 is already in the environment.
-#   - MEMQL_MASTER_KEY is in the environment (or falls back to a dev default).
+#   - MEMQL_MASTER_KEY is in the environment. When unset, the key already in
+#     memql-secrets is REUSED if valid; only a cluster with no usable key
+#     falls back to the dev default. A re-run therefore never replaces a
+#     working key with a placeholder (memql#2958).
 #
 # The Azurite connection string is always the well-known Azurite dev constant
 # (account: devstoreaccount1, key: Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq
@@ -94,37 +97,248 @@ function check_prerequisites() {
 }
 
 #=============================================================================
+# READING WHAT THE CLUSTER ALREADY HAS
+#=============================================================================
+#
+# memql#2958: this script is documented idempotent and `make up` calls it, so
+# every field it writes UNCONDITIONALLY is a field an ordinary re-run destroys.
+# The incident was the master key; MEMQL_GENESIS_B64 sits three lines away in
+# the same write and had exactly the same shape. Both now read the live value
+# back and preserve it when the environment supplies nothing.
+#
+# The reads below are deliberately fail-CLOSED. A guard whose only job is "do
+# not destroy something irreplaceable" must never map "I could not tell" onto
+# "there is nothing there" -- that is the original bug reached by a different
+# route, and it would print a false explanation while doing it.
+
+# BSD/macOS base64 spells decode -D; GNU spells it -d/--decode. macOS is this
+# project's stated dev platform (docs/public/overview/tech-stack.md), so
+# probing rather than assuming is load-bearing: guessing wrong makes every read
+# below look like "no value", which is the fail-open this section exists to
+# prevent.
+function b64_decode() {
+    if printf '' | base64 --decode >/dev/null 2>&1; then
+        base64 --decode
+    else
+        base64 -D
+    fi
+}
+
+# Trim leading/trailing whitespace only, matching strings.TrimSpace -- which is
+# what the runtime applies before validating (component/secret/encryption.go).
+# A key stored with a stray newline IS usable by every node, so judging it
+# garbage and replacing it would destroy a working key. Interior whitespace is
+# left alone so it still fails validation rather than being silently repaired.
+function trim_space() {
+    local s="$1"
+    s="${s#"${s%%[![:space:]]*}"}"
+    s="${s%"${s##*[![:space:]]}"}"
+    printf '%s' "$s"
+}
+
+# Prints: absent | present | error:<detail>
+#
+# "absent" (NotFound) is the ordinary first-boot case and is NOT an error.
+# Anything else -- API timeout, RBAC denial, unreachable control plane -- is,
+# and the caller must refuse to seed rather than assume an empty cluster.
+function memql_secrets_state() {
+    local err
+    if err="$(kubectl get secret memql-secrets --namespace="$NAMESPACE" -o name 2>&1 >/dev/null)"; then
+        printf 'present'
+        return 0
+    fi
+    case "$err" in
+        *NotFound*|*"not found"*|*"NotFound"*) printf 'absent' ;;
+        *) printf 'error:%s' "$(printf '%s' "$err" | tr '\n' ' ')" ;;
+    esac
+}
+
+# Populated by load_cluster_secret_snapshot. Globals because the loader must
+# run in the MAIN shell so cap_fail can reach the real stdout.
+CLUSTER_SECRET_STATE=""
+CLUSTER_MASTER_KEY=""
+CLUSTER_GENESIS_B64=""
+
+function load_cluster_secret_snapshot() {
+    local state
+    state="$(memql_secrets_state)"
+    case "$state" in
+        error:*)
+            cap_fail 5 "cannot read the existing memql-secrets to check what this run would overwrite: ${state#error:}. Refusing to seed: if the cluster holds a working MEMQL_MASTER_KEY or genesis envelope, writing over it blind is how #2958 bricked a shared cluster. Fix cluster access and re-run, or export MEMQL_MASTER_KEY to seed deliberately."
+            ;;
+        absent)
+            CLUSTER_SECRET_STATE="absent"
+            return
+            ;;
+    esac
+    CLUSTER_SECRET_STATE="present"
+
+    local raw
+    raw="$(kubectl get secret memql-secrets --namespace="$NAMESPACE" \
+              -o 'jsonpath={.data.MEMQL_MASTER_KEY}' 2>/dev/null)" \
+        || cap_fail 5 "memql-secrets exists but its MEMQL_MASTER_KEY could not be read; refusing to overwrite it blind."
+    if [ -n "$raw" ]; then
+        CLUSTER_MASTER_KEY="$(trim_space "$(printf '%s' "$raw" | b64_decode 2>/dev/null || true)")"
+        [ -n "$CLUSTER_MASTER_KEY" ] \
+            || cap_fail 5 "memql-secrets holds a MEMQL_MASTER_KEY that could not be base64-decoded; refusing to overwrite it blind."
+    fi
+
+    raw="$(kubectl get secret memql-secrets --namespace="$NAMESPACE" \
+              -o 'jsonpath={.data.MEMQL_GENESIS_B64}' 2>/dev/null)" \
+        || cap_fail 5 "memql-secrets exists but its MEMQL_GENESIS_B64 could not be read; refusing to overwrite it blind."
+    if [ -n "$raw" ]; then
+        CLUSTER_GENESIS_B64="$(trim_space "$(printf '%s' "$raw" | b64_decode 2>/dev/null || true)")"
+    fi
+}
+
+#=============================================================================
 # RESOLVE GENESIS B64
 #=============================================================================
 
+RESOLVED_GENESIS_B64=""
+
+# Same precedence as the master key: environment, then the envelope already in
+# the cluster, then nothing. The cluster branch is memql#2958's sibling -- a
+# re-run with no genesis file on THIS machine used to blank the envelope every
+# other node was running on.
 function resolve_genesis_b64() {
     if [ -n "${MEMQL_GENESIS_B64:-}" ]; then
-        echo "$MEMQL_GENESIS_B64"
+        RESOLVED_GENESIS_B64="$MEMQL_GENESIS_B64"
+        GENESIS_SOURCE="envelope"
         return
     fi
     local genesis_file="${MEMQL_GENESIS_FILE:-$HOME/.memql/genesis.znas}"
     if [ -f "$genesis_file" ]; then
-        base64 < "$genesis_file"
+        RESOLVED_GENESIS_B64="$(base64 < "$genesis_file")"
+        GENESIS_SOURCE="file"
+        return
+    fi
+    if [ -n "$CLUSTER_GENESIS_B64" ]; then
+        warn "no genesis file at $genesis_file and MEMQL_GENESIS_B64 is unset;"
+        warn "  KEEPING the envelope already in memql-secrets. Nothing is overwritten."
+        RESOLVED_GENESIS_B64="$CLUSTER_GENESIS_B64"
+        GENESIS_SOURCE="cluster"
         return
     fi
     warn "no genesis file at $genesis_file and MEMQL_GENESIS_B64 is unset"
     warn "memql-secrets will be seeded WITHOUT the genesis envelope."
     warn "identity will fail to start without MEMQL_GENESIS_B64."
-    echo ""
+    RESOLVED_GENESIS_B64=""
+    GENESIS_SOURCE="none"
 }
 
 #=============================================================================
 # RESOLVE MASTER KEY
 #=============================================================================
 
+# The runtime requires EXACTLY 64 hex characters (32 bytes): see
+# component/secret/encryption.go masterKey(), and genesis.ValidateMasterKeyHex
+# which encodes the same rule on the sealing side. A value that misses it is
+# not a weak key, it is an unusable one -- every node that reads it dies at
+# boot with "MEMQL_MASTER_KEY is not valid hex".
+readonly MASTER_KEY_HEX_CHARS=64
+
+# Last-resort key for a cluster that has no usable one. Valid hex, so a
+# from-nothing bring-up actually boots instead of crash-looping.
+#
+# FIXED rather than random, and the honest reason is reproducibility of the
+# VALUE, not of any data: `make up-refresh` nukes the cluster and wipes the
+# in-cluster Postgres by construction (scripts/k3d/bringup.sh), so there is no
+# prior data to strand either way. A constant means two operators comparing a
+# broken local cluster are looking at the same key, and a wrong-key symptom is
+# recognisable on sight.
+#
+# TREAT ANY CLUSTER RUNNING THIS AS FULLY OPEN. It is not only an encryption
+# key: component/grpc/operator_stream_interceptor.go admits it verbatim as an
+# "Authorization: Operator" synthetic CLUSTER OWNER, bypassing per-row authz.
+# It is printed in a public repository. Local dev only, never anywhere reachable.
+#
+# It cannot decrypt a genesis envelope sealed under a real key. That is why the
+# reuse branch below exists and runs FIRST.
+readonly DEV_MASTER_KEY="deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+
+# Outputs of resolve_master_key. Globals rather than stdout because these
+# resolvers can cap_fail, and a failure must be attributable.
+#
+# Being precise about what a $(...) would actually cost, because an earlier
+# version of this comment overstated it: capability.sh installs an exit trap,
+# so even from inside a subshell an envelope DOES reach real stdout and the
+# exit code is right -- and `set -e` aborts the assignment, so no empty key is
+# ever seeded. What is lost is the specific cap_fail MESSAGE, replaced by the
+# trap's generic "aborted without an explicit result". That is reason enough
+# (a key rejected for being 63 chars should say so), but it is a diagnostics
+# argument, not a correctness one.
+RESOLVED_MASTER_KEY=""
+RESOLVED_MASTER_KEY_SOURCE=""
+
+function is_valid_master_key() {
+    local candidate="$1"
+    [ "${#candidate}" -eq "$MASTER_KEY_HEX_CHARS" ] || return 1
+    [[ "$candidate" =~ ^[0-9a-fA-F]+$ ]] || return 1
+    return 0
+}
+
+# Resolve the master key to seed, in strict precedence: environment, then the
+# key already in the cluster, then the dev default.
+#
+# The middle branch is the one that matters (memql#2958). This script is
+# documented idempotent and `make up` calls it, but it used to seed a
+# non-hex placeholder whenever MEMQL_MASTER_KEY was unset -- so an ordinary
+# re-run REPLACED a working key with one the runtime rejects, and took the
+# whole mesh into CrashLoopBackOff. If the genesis envelope was sealed under
+# the replaced key and no pod still held it in memory, it was unrecoverable.
+# Reading the live key first makes that re-run a genuine no-op.
+#
+# Requires load_cluster_secret_snapshot to have run.
 function resolve_master_key() {
     if [ -n "${MEMQL_MASTER_KEY:-}" ]; then
-        echo "$MEMQL_MASTER_KEY"
+        local from_env
+        from_env="$(trim_space "$MEMQL_MASTER_KEY")"
+        if ! is_valid_master_key "$from_env"; then
+            cap_fail 2 "MEMQL_MASTER_KEY is set but is not ${MASTER_KEY_HEX_CHARS} hex characters (got ${#from_env} after trimming). The runtime rejects it at boot, so seeding it would take every node down. Generate one with: openssl rand -hex 32"
+        fi
+        # The only branch that can rotate a LIVE key. Shape validation cannot
+        # tell a deliberate rotation from a stale value someone still has
+        # exported, so say what is about to happen rather than doing it mutely.
+        if [ -n "$CLUSTER_MASTER_KEY" ] && [ "$CLUSTER_MASTER_KEY" != "$from_env" ]; then
+            warn "MEMQL_MASTER_KEY differs from the key currently in memql-secrets."
+            warn "  This run ROTATES it. Anything sealed under the old key (the genesis"
+            warn "  envelope, stored secrets) stops decrypting unless it is re-sealed."
+            warn "  Unset MEMQL_MASTER_KEY to keep the cluster's existing key instead."
+        fi
+        RESOLVED_MASTER_KEY="$from_env"
+        RESOLVED_MASTER_KEY_SOURCE="env"
         return
     fi
-    warn "MEMQL_MASTER_KEY is unset; using insecure dev placeholder."
-    warn "Override by setting MEMQL_MASTER_KEY in your environment."
-    echo "local-dev-placeholder-not-for-production"
+
+    if is_valid_master_key "$CLUSTER_MASTER_KEY"; then
+        warn "MEMQL_MASTER_KEY is unset; KEEPING the key already in memql-secrets."
+        warn "  Nothing is overwritten -- this run does not change the master key."
+        warn "  Export MEMQL_MASTER_KEY to rotate it deliberately."
+        RESOLVED_MASTER_KEY="$CLUSTER_MASTER_KEY"
+        RESOLVED_MASTER_KEY_SOURCE="cluster"
+        return
+    fi
+
+    # Nothing usable anywhere. Replacing a stored key that is not 64 hex chars
+    # loses nothing: the runtime rejects it, so it decrypts nothing either.
+    # Note this is judged AFTER trim_space, so a well-formed key stored with a
+    # stray newline reaches the branch above and is preserved.
+    if [ -n "$CLUSTER_MASTER_KEY" ]; then
+        warn "the MEMQL_MASTER_KEY already in memql-secrets is not valid hex; replacing it."
+        warn "  (A key the runtime rejects cannot decrypt anything, so nothing is lost.)"
+    fi
+    warn "MEMQL_MASTER_KEY is unset and the cluster has no usable key; using the dev default."
+    warn "  This key is PUBLIC and in the repository -- never use it outside local dev."
+    warn "  It is also accepted as an 'Authorization: Operator' cluster-owner credential"
+    warn "  (component/grpc/operator_stream_interceptor.go), so treat any cluster running"
+    warn "  it as fully open to anyone who can reach it."
+    if [ -n "$CLUSTER_GENESIS_B64" ] || [ -n "${MEMQL_GENESIS_B64:-}" ] || [ -f "${MEMQL_GENESIS_FILE:-$HOME/.memql/genesis.znas}" ]; then
+        warn "  A genesis envelope IS present. If it was sealed under a real key, the dev"
+        warn "  default will NOT decrypt it -- export the real MEMQL_MASTER_KEY and re-run."
+    fi
+    RESOLVED_MASTER_KEY="$DEV_MASTER_KEY"
+    RESOLVED_MASTER_KEY_SOURCE="dev-default"
 }
 
 
@@ -207,9 +421,11 @@ function seed_db_creds() {
 #=============================================================================
 
 function seed_memql_secrets() {
+    # Both values were resolved in main BEFORE any mutation -- see the note
+    # there. This function only writes.
     local genesis_b64 master_key db_dsn db_direct_dsn
-    genesis_b64="$(resolve_genesis_b64)"
-    master_key="$(resolve_master_key)"
+    genesis_b64="$RESOLVED_GENESIS_B64"
+    master_key="$RESOLVED_MASTER_KEY"
     # Database DSN: local in-cluster Postgres.
     # The connection string uses 'disable' sslmode because the local Postgres
     # container does not have TLS configured (dev only).
@@ -358,17 +574,22 @@ function main() {
         cap_ok
     fi
 
-    # Genesis source for the result envelope (computed here -- the resolver
-    # runs in a $(...) subshell and cannot mutate this global).
-    if [ -n "${MEMQL_GENESIS_B64:-}" ]; then
-        GENESIS_SOURCE="envelope"
-    elif [ -f "${MEMQL_GENESIS_FILE:-$HOME/.memql/genesis.znas}" ]; then
-        GENESIS_SOURCE="file"
-    else
-        GENESIS_SOURCE="none"
-    fi
-
     check_prerequisites
+
+    # Resolve EVERYTHING that can be rejected before the first mutation.
+    #
+    # These three run in the main shell, not a $(...), for two reasons. The
+    # cheap one: they set globals. The load-bearing one: they can cap_fail, and
+    # a bad MEMQL_MASTER_KEY must abort while the cluster is still untouched.
+    # Previously resolution happened inside seed_memql_secrets -- the fourth
+    # seeding step -- so a rejected key aborted a run that had already applied
+    # the CA, the front-door TLS and the DB credentials, and then reported
+    # changed:false. GENESIS_SOURCE is set by resolve_genesis_b64 itself now,
+    # rather than being recomputed here to dodge the old subshell.
+    load_cluster_secret_snapshot
+    resolve_master_key
+    resolve_genesis_b64
+
     seed_internal_ca
     seed_front_door_tls
     seed_db_creds
@@ -384,6 +605,9 @@ function main() {
     cap_result_set     namespace "$NAMESPACE"
     cap_result_set_raw secretsSeeded "$SEEDED_COUNT"
     cap_result_set     source "$GENESIS_SOURCE"
+    # env | cluster | dev-default -- so a caller can tell a deliberate rotation
+    # from a run that preserved the cluster's existing key (memql#2958).
+    cap_result_set     masterKeySource "$RESOLVED_MASTER_KEY_SOURCE"
     cap_ok
 }
 
