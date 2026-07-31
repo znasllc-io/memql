@@ -5,7 +5,6 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -58,7 +57,11 @@ func TestRoutesRegisterThroughRecordingHelpers(t *testing.T) {
 			continue // build-tagged files that do not parse standalone are not this gate's business
 		}
 		inspected++
+		enclosingFunc := ""
 		ast.Inspect(file, func(n ast.Node) bool {
+			if fd, ok := n.(*ast.FuncDecl); ok {
+				enclosingFunc = fd.Name.Name
+			}
 			call, ok := n.(*ast.CallExpr)
 			if !ok {
 				return true
@@ -72,13 +75,14 @@ func TestRoutesRegisterThroughRecordingHelpers(t *testing.T) {
 			if !ok || recv.Sel.Name != "mux" {
 				return true
 			}
-			// app.go defines the helpers themselves; they are the sanctioned
-			// place for a direct call.
-			if name == "app.go" {
+			// Only the helper bodies may call the mux directly -- exempting
+			// app.go wholesale would let any other function in that file
+			// register a route the boot check never sees.
+			if name == "app.go" && enclosingFunc != "" &&
+				(enclosingFunc == "handleRoute" || enclosingFunc == "handleRouteFunc") {
 				return true
 			}
-			offenders = append(offenders,
-				filepath.Join("app", name)+":"+fset.Position(call.Pos()).String())
+			offenders = append(offenders, fset.Position(call.Pos()).String())
 			return true
 		})
 	}

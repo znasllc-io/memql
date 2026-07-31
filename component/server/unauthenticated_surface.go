@@ -124,17 +124,14 @@ func stripMethod(pattern string) string {
 // prove the current tree is clean without proving the check would catch a route
 // that is not.
 func assertSurfaceDeclared(routes, public, handlerAuthorized []string) error {
-	declared := make([]string, 0, len(public)+len(handlerAuthorized))
-	for _, p := range public {
-		declared = append(declared, normalizeSurfacePath(p))
-	}
-	for _, p := range handlerAuthorized {
-		declared = append(declared, normalizeSurfacePath(p))
+	declared := make([]string, 0, 2*(len(public)+len(handlerAuthorized)))
+	for _, p := range append(append([]string(nil), public...), handlerAuthorized...) {
+		declared = append(declared, surfacePathForms(p)...)
 	}
 
 	var undeclared []string
 	for _, route := range routes {
-		if !surfaceDeclaredBy(normalizeSurfacePath(stripMethod(route)), declared) {
+		if !surfaceDeclaredBy(surfacePathForms(stripMethod(route)), declared) {
 			undeclared = append(undeclared, route)
 		}
 	}
@@ -164,35 +161,49 @@ func assertSurfaceDeclared(routes, public, handlerAuthorized []string) error {
 // route -- the most obvious next route on that subtree -- inherited a blessing
 // whose justification is the trigger handler's owner-or-admin check, which it
 // does not have. It passed every gate.
-func surfaceDeclaredBy(route string, declarations []string) bool {
-	for _, d := range declarations {
-		if d == route {
-			return true
-		}
-		if strings.HasSuffix(d, "/") && strings.HasPrefix(route, d) {
-			return true
+func surfaceDeclaredBy(routeForms []string, declarations []string) bool {
+	for _, route := range routeForms {
+		for _, d := range declarations {
+			if d == route {
+				return true
+			}
+			if strings.HasSuffix(d, "/") && strings.HasPrefix(route, d) {
+				return true
+			}
 		}
 	}
 	return false
 }
 
-// normalizeSurfacePath strips any configured base path so a route and its
-// declaration compare on the same footing. Trailing slashes are PRESERVED --
-// they carry the prefix-vs-exact distinction (see surfaceDeclaredBy).
+// surfacePathForms returns every spelling a path may legitimately take: as
+// written, and with a configured base path stripped.
+//
+// BOTH forms are kept rather than reducing to one. An earlier version stripped
+// the base from declarations as well as routes, which silently broke whenever
+// the base was a path-prefix of a declared path: with SERVER_PUBLIC_PATH=/memql
+// the declaration "/memql/ws" reduced to "/ws" while the registered route
+// "/memql/memql/ws" reduced to "/memql/ws", so they no longer matched and the
+// identity binary fatally refused to boot. Comparing every form against every
+// form cannot produce that mismatch.
 //
 // The base is trimmed as a path SEGMENT, not a substring: trimming "/heal" off
-// "/healthz" would otherwise yield "thz".
-func normalizeSurfacePath(p string) string {
+// "/healthz" would otherwise yield "thz". Trailing slashes are PRESERVED --
+// they carry the prefix-vs-exact distinction (see surfaceDeclaredBy).
+func surfacePathForms(p string) []string {
 	p = strings.TrimSpace(p)
+	if p == "" {
+		return []string{"/"}
+	}
+	forms := []string{p}
 	if base := sanitizeBaseURLFromEnv(); base != "" {
-		if p == base {
-			p = "/"
-		} else if rest := strings.TrimPrefix(p, base+"/"); rest != p {
-			p = "/" + rest
+		switch {
+		case p == base:
+			forms = append(forms, "/")
+		default:
+			if rest := strings.TrimPrefix(p, base+"/"); rest != p {
+				forms = append(forms, "/"+rest)
+			}
 		}
 	}
-	if p == "" {
-		return "/"
-	}
-	return p
+	return forms
 }

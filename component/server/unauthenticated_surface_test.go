@@ -181,19 +181,63 @@ func TestAssertSurfaceDeclaredCatchesUndeclaredRoutes(t *testing.T) {
 // verifier middleware on every verifier-consuming node, so listing them there
 // would make them unauthenticated everywhere -- the opposite of the fix.
 func TestHandlerAuthorizedPathsAreNotPublic(t *testing.T) {
-	// Prefix matching, not equality: verifier.shouldBypassAuth bypasses on
-	// strings.HasPrefix(path, allowed+"/"), so an exact-equality guard would
-	// report clean while a PublicPaths entry of "/internal" made a
-	// handler-authorized "/internal/deploy" public on every verifier node.
-	var public []string
-	for _, p := range PublicPaths() {
-		public = append(public, normalizeSurfacePath(p))
+	// This must mirror verifier.shouldBypassAuth, NOT surfaceDeclaredBy. The
+	// verifier treats EVERY PublicPaths entry as a prefix -- HasPrefix(path,
+	// allowed+"/") -- with the trailing slash irrelevant, whereas
+	// surfaceDeclaredBy only treats a declaration as a prefix when it ends in
+	// one. Using the latter here left the guard green while a PublicPaths entry
+	// of "/automations" (no slash) bypassed auth for /automations/resume and
+	// /automations/{name}/trigger on every verifier-consuming node -- verbatim
+	// the scenario this test claims to catch.
+	bypassed := func(path string) bool {
+		for _, allowed := range PublicPaths() {
+			for _, a := range surfacePathForms(allowed) {
+				a = strings.TrimSuffix(a, "/")
+				if a == "" {
+					continue
+				}
+				if path == a || strings.HasPrefix(path, a+"/") {
+					return true
+				}
+			}
+		}
+		return false
 	}
 	for _, p := range HandlerAuthorizedPaths() {
-		if surfaceDeclaredBy(normalizeSurfacePath(p), public) {
+		if bypassed(strings.TrimSuffix(p, "/")) {
 			t.Errorf("%q is in both HandlerAuthorizedPaths() and PublicPaths(). PublicPaths "+
 				"makes it unauthenticated on EVERY node; a handler-authorized route is meant "+
 				"to stay behind the verifier where one runs (memql#2939).", p)
 		}
+	}
+}
+
+// A configured base path must not change any verdict. An earlier version
+// stripped the base from declarations as well as routes, so with
+// SERVER_PUBLIC_PATH=/memql the declaration "/memql/ws" became "/ws" while the
+// registered route "/memql/memql/ws" became "/memql/ws" -- they stopped
+// matching and the identity binary fatally refused to boot. Nothing tested it,
+// because the existing base-path case ran with the variable unset.
+func TestBasePathDoesNotChangeTheVerdict(t *testing.T) {
+	identitySurface := func() []string {
+		routes := ContractRoutes()
+		for _, p := range MetricsPaths() {
+			routes = append(routes, "GET "+p)
+		}
+		for _, p := range MemqlWebsocketPaths() {
+			routes = append(routes, "GET "+p)
+		}
+		return routes
+	}
+
+	for _, base := range []string{"", "/api", "/memql", "/heal"} {
+		t.Run("base="+base, func(t *testing.T) {
+			t.Setenv("SERVER_PUBLIC_PATH", base)
+			if err := AssertUnauthenticatedSurfaceDeclared(identitySurface()); err != nil {
+				t.Errorf("the identity binary's surface must stay declared under "+
+					"SERVER_PUBLIC_PATH=%q, otherwise the node crash-loops on boot: %v",
+					base, err)
+			}
+		})
 	}
 }
