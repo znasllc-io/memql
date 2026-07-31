@@ -2,6 +2,7 @@ package automations
 
 import (
 	"fmt"
+	"github.com/znasllc-io/memql/component/events"
 	"sort"
 
 	"github.com/znasllc-io/memql/core/id"
@@ -200,7 +201,48 @@ func extractNodeIds(nodes []any) []string {
 	return ids
 }
 
+// eventFingerprintData projects a triggering event down to the fields that may
+// enter the execution's chain head. Returns nil for a schedule/manual run.
+//
+// # WHAT MUST NOT GO IN HERE, AND WHY (memql#2823 / #2867)
+//
+// events.Event carries a Timestamp (time.Now().UTC()). It is deliberately NOT
+// projected, and this function exists so that omission is a named, testable
+// decision instead of four lines inlined in ExecuteWithEvent.
+//
+// A WALL-CLOCK READING IS AN ACCIDENTAL DISCRIMINATOR, NOT A DESIGNED ONE. It
+// differs on every evaluation by construction, so any key containing one is
+// unique every time. That was merely slow for the (now deleted) step cache. It
+// is a CORRECTNESS failure here: this value flows into ComputeInitialChainHead
+// -> the per-process dedup check AND clusterGuard.Claim, the cross-replica
+// gate that stops two replicas running the same automation. Add the timestamp
+// and every event-triggered automation executes once per replica, silently, in
+// exactly the 2-replica topology this project runs everywhere.
+//
+// The corollary, learned the expensive way: strip clock fields SURGICALLY,
+// never with a recursive sweep for clock-shaped keys. `payload` legitimately
+// contains business fields like `payload.timestamp` that SHOULD discriminate.
+// Dropping a real input from a key is a correctness bug; leaving a clock in
+// one is merely a slow one -- that asymmetry, not tidiness, decides the design.
+//
+// Pinned by TestEventFingerprintDataExcludesTheWallClock.
+func eventFingerprintData(triggeringEvent *events.Event) map[string]any {
+	if triggeringEvent == nil {
+		return nil
+	}
+	return map[string]any{
+		"topic":   triggeringEvent.Topic,
+		"kind":    triggeringEvent.Kind.String(),
+		"payload": triggeringEvent.Payload,
+	}
+}
+
 // ComputeInitialChainHead creates the starting chain state for an execution.
+//
+// Feeds execution dedup and the cross-replica cluster guard, so it must be a
+// pure function of the automation identity plus real inputs. See
+// eventFingerprintData above for the wall-clock rule and what it costs to
+// break it.
 func ComputeInitialChainHead(automationName, triggeredBy string, triggeringEvent map[string]any, inputFingerprint string) string {
 	fp := map[string]any{
 		"automation":  automationName,
@@ -226,40 +268,12 @@ func ComputeInitialChainHead(automationName, triggeredBy string, triggeringEvent
 
 // FingerprintInput creates a deterministic hash of input query results.
 //
-// # IF YOU ARE BUILDING A CACHE KEY, READ THIS FIRST (memql#2823 / #2867)
-//
-// This note outlives the code it was learned from. memql#2899 deleted the
-// automation step cache, and memql#2941 deleted the key-computation chain that
-// fed it (FingerprintStepInput -> Evaluator.ContextFingerprint ->
-// fingerprintCustoms) together with the tests that pinned this behaviour. The
-// lesson is kept here, on the surviving fingerprint helper, because it is
-// about cache keys in general and whoever builds the next one will start
-// somewhere near this function.
-//
-// A WALL-CLOCK READING IS AN ACCIDENTAL CACHE DISCRIMINATOR, NOT A DESIGNED
-// ONE. It differs on every evaluation by construction, so a key containing one
-// guarantees a miss. Two seeds put one into the automation evaluator's
-// customs: `timestamp` (executor.go, RFC3339, second granularity) and
-// `actor.now` (auth.ActorEnvelopeMap, RFC3339 NANO). The first only made hits
-// improbable; once #2801 bound the actor envelope onto every evaluator, the
-// nanosecond field made the function-step key a guaranteed miss.
-//
-// Two consequences that cost real time to work out, neither obvious:
-//
-//   - Strip such fields SURGICALLY, never with a recursive sweep for
-//     clock-shaped keys. `event` is a custom too, so a recursive strip also
-//     drops `event.payload.timestamp` -- a genuine business field that SHOULD
-//     discriminate a cached result. Dropping a real input from a key is a
-//     CORRECTNESS bug; leaving a clock in one is merely a slow one. That
-//     asymmetry, not tidiness, is what decides the design.
-//   - Removing the clock is not free, and pretending otherwise hides a second
-//     defect. The DSL's `now` resolves from that same `timestamp` custom, so
-//     for a step whose body reads `now` the per-second key churn WAS what kept
-//     it re-running. That is not a cache-invalidation strategy -- it narrows
-//     the window rather than closing it, since entries were TTL-bounded
-//     regardless. The real defect was that a side-effecting `logic` step was
-//     classified cacheable at all (memql#2869). A clock in the key MASKS a
-//     misclassification; fix the classification, do not keep the clock.
+// Reached only when automation.Input is set, which nothing populates today
+// (see the note at its call site in executor.go). The wall-clock rule that
+// governs every key in this file lives on eventFingerprintData above, next to
+// the key that IS live -- an earlier revision of this change put it here, on
+// the strength of "whoever builds the next key will start at the surviving
+// helper", which was wrong: a reader of running code never lands here.
 func FingerprintInput(input any) string {
 	return string(fingerprintEngine.MustFromMap(map[string]any{
 		"input": fingerprintQueryResult(input),

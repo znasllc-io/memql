@@ -524,14 +524,7 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 		exec.StepOrder = make([]string, 0, len(automation.Steps))
 
 		// Build event data for fingerprinting
-		var eventData map[string]any
-		if triggeringEvent != nil {
-			eventData = map[string]any{
-				"topic":   triggeringEvent.Topic,
-				"kind":    triggeringEvent.Kind.String(),
-				"payload": triggeringEvent.Payload,
-			}
-		}
+		eventData := eventFingerprintData(triggeringEvent)
 
 		// Fingerprint input if present
 		if exec.Input != nil {
