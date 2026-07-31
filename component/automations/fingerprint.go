@@ -225,6 +225,41 @@ func ComputeInitialChainHead(automationName, triggeredBy string, triggeringEvent
 }
 
 // FingerprintInput creates a deterministic hash of input query results.
+//
+// # IF YOU ARE BUILDING A CACHE KEY, READ THIS FIRST (memql#2823 / #2867)
+//
+// This note outlives the code it was learned from. memql#2899 deleted the
+// automation step cache, and memql#2941 deleted the key-computation chain that
+// fed it (FingerprintStepInput -> Evaluator.ContextFingerprint ->
+// fingerprintCustoms) together with the tests that pinned this behaviour. The
+// lesson is kept here, on the surviving fingerprint helper, because it is
+// about cache keys in general and whoever builds the next one will start
+// somewhere near this function.
+//
+// A WALL-CLOCK READING IS AN ACCIDENTAL CACHE DISCRIMINATOR, NOT A DESIGNED
+// ONE. It differs on every evaluation by construction, so a key containing one
+// guarantees a miss. Two seeds put one into the automation evaluator's
+// customs: `timestamp` (executor.go, RFC3339, second granularity) and
+// `actor.now` (auth.ActorEnvelopeMap, RFC3339 NANO). The first only made hits
+// improbable; once #2801 bound the actor envelope onto every evaluator, the
+// nanosecond field made the function-step key a guaranteed miss.
+//
+// Two consequences that cost real time to work out, neither obvious:
+//
+//   - Strip such fields SURGICALLY, never with a recursive sweep for
+//     clock-shaped keys. `event` is a custom too, so a recursive strip also
+//     drops `event.payload.timestamp` -- a genuine business field that SHOULD
+//     discriminate a cached result. Dropping a real input from a key is a
+//     CORRECTNESS bug; leaving a clock in one is merely a slow one. That
+//     asymmetry, not tidiness, is what decides the design.
+//   - Removing the clock is not free, and pretending otherwise hides a second
+//     defect. The DSL's `now` resolves from that same `timestamp` custom, so
+//     for a step whose body reads `now` the per-second key churn WAS what kept
+//     it re-running. That is not a cache-invalidation strategy -- it narrows
+//     the window rather than closing it, since entries were TTL-bounded
+//     regardless. The real defect was that a side-effecting `logic` step was
+//     classified cacheable at all (memql#2869). A clock in the key MASKS a
+//     misclassification; fix the classification, do not keep the clock.
 func FingerprintInput(input any) string {
 	return string(fingerprintEngine.MustFromMap(map[string]any{
 		"input": fingerprintQueryResult(input),
@@ -310,100 +345,4 @@ func fingerprintGenericResult(result any) map[string]any {
 	}
 
 	return fp
-}
-
-// DefinitionId computes a content-addressed ID for the step definition.
-//
-// UNUSED SINCE memql#2899 -- like FingerprintStepInput below, its only caller was
-// the deleted step cache's key computation. Unlike that one it heads no chain and
-// nothing downstream depends on it, so it is a straightforward removal whenever
-// memql#2941 is picked up. Do not add a caller without reading #2899 first.
-// The ID includes all fields that affect output, ensuring cache key
-// changes when the step definition changes.
-func (s *Step) DefinitionId(engine *id.Engine) id.ID {
-	if s == nil || engine == nil {
-		return ""
-	}
-
-	def := map[string]any{
-		"id":   s.ID,
-		"type": string(s.Type),
-	}
-
-	switch s.Type {
-	case StepTypeQuery:
-		if s.Query != nil {
-			def["query"] = s.Query.Query
-		}
-	case StepTypeShape:
-		if s.Shape != nil {
-			def["source"] = s.Shape.Source
-			def["template"] = string(s.Shape.Template)
-		}
-	case StepTypeMutation:
-		if s.Mutation != nil {
-			def["concept"] = s.Mutation.Concept
-		}
-	case StepTypeFunction:
-		if s.Function != nil {
-			def["name"] = s.Function.Name
-		}
-	case StepTypeForEach:
-		if s.ForEach != nil {
-			def["source"] = s.ForEach.Source
-			def["filter"] = s.ForEach.Filter
-		}
-	}
-
-	return engine.MustFromMap(def)
-}
-
-// FingerprintStepInput creates a deterministic ID from the step's input data.
-// The input is resolved from the evaluator based on step type.
-//
-// UNUSED SINCE memql#2899 -- its only caller was the automation step cache's key
-// computation, which went with the cache. Kept for now rather than deleted in the
-// same change, because it is the head of a chain that reaches
-// ContextFingerprint and its clock-stripping tests; whether that whole chain goes
-// is its own decision. Do not add a caller without reading #2899 first.
-func FingerprintStepInput(step *Step, evaluator *Evaluator) id.ID {
-	if step == nil || evaluator == nil {
-		return ""
-	}
-
-	var input any
-
-	switch step.Type {
-	case StepTypeShape:
-		if step.Shape != nil {
-			input, _ = evaluator.EvaluateValue(step.Shape.Source)
-		}
-	case StepTypeForEach:
-		if step.ForEach != nil {
-			input, _ = evaluator.EvaluateValue(step.ForEach.Source)
-		}
-	case StepTypeQuery:
-		// For queries, evaluate using EvaluateStringForQuery to match actual execution
-		// This ensures proper quoting of values and identical cache keys
-		if step.Query != nil {
-			evaluatedQuery, err := evaluator.EvaluateStringForQuery(step.Query.Query)
-			if err != nil {
-				// Fall back to raw query if evaluation fails
-				input = step.Query.Query
-			} else {
-				input = evaluatedQuery
-			}
-		}
-	case StepTypeFunction:
-		// Functions can read any evaluator state ($input, $steps.*, $item, custom vars)
-		// so we must fingerprint the entire context to ensure cache correctness
-		input = evaluator.ContextFingerprint()
-	default:
-		// Use $input to get the automation input data
-		input, _ = evaluator.EvaluateValue("$input")
-	}
-
-	return fingerprintEngine.MustFromMap(map[string]any{
-		"input": input,
-	})
 }

@@ -183,10 +183,14 @@ func (e *Executor) ResumeFrom(
 		}
 	}
 
-	// Set up step context
-	// SkipCache records the intent that a resumed step should not read a cached
-	// result. It is inert since memql#2899 removed the step cache -- nothing reads
-	// it. Left in place so the intent is not lost, not because it does anything.
+	// Set up step context.
+	//
+	// A resumed step must not read a stale cached result. That requirement is
+	// recorded here as prose rather than as a StepContext.SkipCache field
+	// (removed in memql#2941): the field was written here and read nowhere
+	// once memql#2899 deleted the step cache, and an inert flag on a struct
+	// invites the next reader to believe it still guarantees freshness. If a
+	// step cache is ever reintroduced, this is the site that needs the opt-out.
 	stepCtx := &StepContext{
 		Logger:               e.logger,
 		Engine:               e.engine,
@@ -195,7 +199,6 @@ func (e *Executor) ResumeFrom(
 		Execution:            exec,
 		AutomationTrigger:    e.automationTrigger,
 		ChainTrackingEnabled: e.chainTrackingEnabled,
-		SkipCache:            true,
 	}
 
 	// Execute steps starting from resumeIndex

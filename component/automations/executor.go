@@ -116,13 +116,6 @@ type StepContext struct {
 	// ChainTrackingEnabled indicates whether chain tracking is active.
 	// Propagated from ExecutorOptions to child contexts.
 	ChainTrackingEnabled bool
-
-	// SkipCache is INERT since memql#2899, which deleted the step cache: it is
-	// written by the resume path and read by nothing. Kept so the resume path's
-	// intent survives if a cache is ever reintroduced, but it guarantees nothing
-	// today -- do not rely on it for freshness. Tracked with the rest of the
-	// orphaned cache plumbing in memql#2941.
-	SkipCache bool
 }
 
 // ExecutorOptions configures the automation executor.
