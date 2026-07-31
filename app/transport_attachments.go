@@ -63,8 +63,8 @@ func (a *App) mountAttachmentEndpoints() (server.FileUploader, string) {
 		PlanStore:  server.NewEnginePlanStore(engineAdapter),
 	})
 	for _, path := range server.SpaceAttachmentPaths() {
-		a.mux.Handle("POST "+path, handler) // upload
-		a.mux.Handle("GET "+path, handler)  // download (memql#804/#888)
+		a.handleRoute("POST "+path, handler) // upload
+		a.handleRoute("GET "+path, handler)  // download (memql#804/#888)
 	}
 	return uploader, container
 }

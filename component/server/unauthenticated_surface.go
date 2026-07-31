@@ -58,6 +58,21 @@ func HandlerAuthorizedPaths() []string {
 		// POST /automations/resume -- owner-or-admin enforced in the handler
 		// (#2908, #2938).
 		"/automations/resume",
+		// GET /memql/ws -- the WebSocket upgrade itself performs no auth check,
+		// and it is deliberately NOT in PublicPaths(): on a verifier-consuming
+		// node the middleware gates it, extracting the bearer from the WS
+		// subprotocol. It is listed here because this list is consulted ONLY on
+		// a binary with no verifier, and there the bridge tunnels to
+		// MemqlService.Stream, whose interceptor is OperatorAware(RejectAll)
+		// (app/transport.go) -- every stream without an operator credential is
+		// refused, so the surface fails closed at the next hop rather than in
+		// the handler.
+		//
+		// Recorded plainly because it is weaker than the two entries above:
+		// this declares a known posture, not a claim that the upgrade
+		// authenticates. If identity's gRPC chain ever stops rejecting by
+		// default, this entry stops being true.
+		"/memql/ws",
 	}
 }
 
@@ -83,13 +98,25 @@ var contractRoutes = []string{
 	"/automations/resume",
 }
 
-// AssertUnauthenticatedSurfaceDeclared reports whether every contract route is
+// AssertUnauthenticatedSurfaceDeclared reports whether every supplied route is
 // accounted for by PublicPaths() or HandlerAuthorizedPaths().
 //
-// Call it on any binary that installs no auth middleware. It authenticates
-// nothing; it refuses to let a route be unauthenticated by omission.
-func AssertUnauthenticatedSurfaceDeclared() error {
-	return assertSurfaceDeclared(ContractRoutes(), PublicPaths(), HandlerAuthorizedPaths())
+// Call it on a binary that installs no auth middleware, passing the routes that
+// binary actually serves. It authenticates nothing; it refuses to let a route
+// be unauthenticated by omission.
+//
+// Patterns may carry a leading method verb ("GET /memql/ws"); it is stripped
+// before comparison, since the declarations are about paths.
+func AssertUnauthenticatedSurfaceDeclared(routes []string) error {
+	return assertSurfaceDeclared(routes, PublicPaths(), HandlerAuthorizedPaths())
+}
+
+// stripMethod removes a leading HTTP verb from a ServeMux pattern.
+func stripMethod(pattern string) string {
+	if i := strings.IndexByte(strings.TrimSpace(pattern), ' '); i >= 0 {
+		return strings.TrimSpace(strings.TrimSpace(pattern)[i+1:])
+	}
+	return strings.TrimSpace(pattern)
 }
 
 // assertSurfaceDeclared holds the rule itself, separated from the live lists so
@@ -107,7 +134,7 @@ func assertSurfaceDeclared(routes, public, handlerAuthorized []string) error {
 
 	var undeclared []string
 	for _, route := range routes {
-		if !surfaceDeclaredBy(normalizeSurfacePath(route), declared) {
+		if !surfaceDeclaredBy(normalizeSurfacePath(stripMethod(route)), declared) {
 			undeclared = append(undeclared, route)
 		}
 	}

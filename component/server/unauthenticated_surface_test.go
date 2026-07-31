@@ -84,7 +84,7 @@ func TestContractRoutesMatchesRegistration(t *testing.T) {
 // The live tree must satisfy the rule -- otherwise the identity binary cannot
 // boot once the assertion is wired in.
 func TestLiveUnauthenticatedSurfaceIsDeclared(t *testing.T) {
-	if err := AssertUnauthenticatedSurfaceDeclared(); err != nil {
+	if err := AssertUnauthenticatedSurfaceDeclared(ContractRoutes()); err != nil {
 		t.Errorf("the routes registered today are not fully declared: %v", err)
 	}
 }

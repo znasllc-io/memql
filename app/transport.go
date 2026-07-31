@@ -165,7 +165,7 @@ func (a *App) transportBase() {
 		a.fatal("failed to initialize memql websocket handler", "error", err)
 	}
 	for _, path := range server.MemqlWebsocketPaths() {
-		a.mux.HandleFunc("GET "+path, wsBridge.ServeHTTP)
+		a.handleRouteFunc("GET "+path, wsBridge.ServeHTTP)
 	}
 }
 
@@ -173,22 +173,32 @@ func (a *App) transportBase() {
 // Called at the end of each tag-specific transport method after endpoints are wired.
 func (a *App) createHTTPServer() {
 	// No verifier means no HTTP auth middleware ran, so PublicPaths() is never
-	// consulted and every contract route is reachable unauthenticated. Two
-	// binaries take that path: the identity binary (verifierRequired=false) and
-	// any node with MEMQL_IDENTITY_ENABLED=false. This does not authenticate
-	// anything; it refuses to let a route be unauthenticated by OMISSION, which
-	// is how the automations routes got there (#2937, #2908) and how the next
-	// one would (memql#2939).
+	// consulted and the routes below are reachable unauthenticated. Two binaries
+	// take that path, and they get different scopes on purpose (memql#2939):
 	//
-	// Fail-fast rather than warn: a warning at boot is exactly the signal that
-	// went unread the first time.
+	//   - identity binary (verifierRequired=false): assert the WHOLE surface app
+	//     code registers, not just the OpenAPI contract. This is the binary that
+	//     runs this way in production, and the silence worth removing is a bare
+	//     a.mux.HandleFunc landing here unnoticed.
+	//   - MEMQL_IDENTITY_ENABLED=false: contract routes only. That mode admits
+	//     EVERY request as the cluster owner by design, so requiring "this is
+	//     safe unauthenticated" declarations for attachments/audio/voice would
+	//     demand paperwork for a deliberate, loudly-warned troubleshooting
+	//     posture -- and fail-fast a config that is supposed to work.
+	//
+	// Fail-fast rather than warn: a boot warning is exactly the signal that went
+	// unread when the automations routes were added.
 	if a.identityVerifier == nil {
-		if err := a.overrides.AssertUnauthenticatedSurface(); err != nil {
+		routes := server.ContractRoutes()
+		if !verifierRequired {
+			routes = append(routes, a.registeredRoutes...)
+		}
+		if err := a.overrides.AssertUnauthenticatedSurface(routes); err != nil {
 			a.fatal("undeclared unauthenticated HTTP surface", "error", err)
 		}
 		a.Logger.Info("no HTTP auth middleware on this binary; unauthenticated surface verified against declarations",
-			"routes", len(server.ContractRoutes()),
-			"handler_authorized", len(server.HandlerAuthorizedPaths()))
+			"routes", len(routes),
+			"whole_mux", !verifierRequired)
 	}
 
 	if len(a.middlewares) > 0 {

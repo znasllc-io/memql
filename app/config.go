@@ -60,7 +60,7 @@ func (a *App) configAndAuth() {
 	// server.MetricsPaths(), so the verifier HTTP middleware below does
 	// not gate it -- an in-cluster scrape can't present a bearer token.
 	for _, p := range server.MetricsPaths() {
-		a.mux.Handle("GET "+p, metrics.Handler())
+		a.handleRoute("GET "+p, metrics.Handler())
 	}
 	a.middlewares = make([]server.MiddlewareFunc, 0, 4)
 	// Panic recovery is the outermost layer of the HTTP chain. A panic

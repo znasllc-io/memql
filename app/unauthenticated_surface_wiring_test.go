@@ -61,7 +61,7 @@ func TestCreateHTTPServerAcceptsDeclaredSurface(t *testing.T) {
 // undeclared route set proves createHTTPServer consults the declarations rather
 // than merely containing a call that never fires.
 func TestCreateHTTPServerRejectsUndeclaredSurface(t *testing.T) {
-	if err := server.AssertUnauthenticatedSurfaceDeclared(); err != nil {
+	if err := server.AssertUnauthenticatedSurfaceDeclared(server.ContractRoutes()); err != nil {
 		t.Fatalf("precondition: the live surface should be declared, got %v", err)
 	}
 
@@ -70,7 +70,7 @@ func TestCreateHTTPServerRejectsUndeclaredSurface(t *testing.T) {
 
 	// Drive the error path rather than merely confirming a good tree boots --
 	// that stays true if the assertion is deleted or downgraded to a log line.
-	a.overrides.AssertUnauthenticatedSurface = func() error {
+	a.overrides.AssertUnauthenticatedSurface = func([]string) error {
 		return errors.New("undeclared: /internal/undeclared")
 	}
 
@@ -95,7 +95,7 @@ func TestNewAppDefaultsToTheRealSurfaceAssertion(t *testing.T) {
 		t.Fatal("newApp must default AssertUnauthenticatedSurface; a nil default would " +
 			"panic at boot or, if guarded, skip the check entirely")
 	}
-	if err := a.overrides.AssertUnauthenticatedSurface(); err != nil {
+	if err := a.overrides.AssertUnauthenticatedSurface(server.ContractRoutes()); err != nil {
 		t.Errorf("the default assertion must be the real one and must pass on this tree: %v", err)
 	}
 }

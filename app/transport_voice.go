@@ -51,16 +51,16 @@ func (a *App) wirePolyphonEndpoints() {
 	}
 
 	for _, path := range server.PolyphonRoomTokenPaths() {
-		a.mux.Handle("POST "+path, http.HandlerFunc(handler.ServeRoomToken))
+		a.handleRoute("POST "+path, http.HandlerFunc(handler.ServeRoomToken))
 	}
 	for _, path := range server.PolyphonStatusPaths() {
-		a.mux.Handle("GET "+path, http.HandlerFunc(handler.ServeStatus))
+		a.handleRoute("GET "+path, http.HandlerFunc(handler.ServeStatus))
 	}
 	for _, path := range server.PolyphonUtterancePaths() {
-		a.mux.Handle("POST "+path, http.HandlerFunc(handler.ServeUtterance))
+		a.handleRoute("POST "+path, http.HandlerFunc(handler.ServeUtterance))
 	}
 	for _, path := range server.PolyphonPreloadPaths() {
-		a.mux.Handle("POST "+path, http.HandlerFunc(handler.ServePreload))
+		a.handleRoute("POST "+path, http.HandlerFunc(handler.ServePreload))
 	}
 
 	if cfg.LiveKitConfigured() {

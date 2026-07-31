@@ -51,7 +51,7 @@ type Overrides struct {
 	// reachable without auth middleware is declared (memql#2939). Injectable
 	// so the wiring test can drive its error path without a mutable global or
 	// an exported test mutator in the shipped binary.
-	AssertUnauthenticatedSurface func() error
+	AssertUnauthenticatedSurface func(routes []string) error
 }
 
 // App holds the shared state accumulated across bootstrap phases.
@@ -63,7 +63,11 @@ type App struct {
 	overrides Overrides
 
 	// Phase 1: config
-	mux              *http.ServeMux
+	mux *http.ServeMux
+	// registeredRoutes records every route app code mounts on mux, so the
+	// identity binary can assert its unauthenticated surface is declared
+	// (memql#2939). Populated only via handleRoute/handleRouteFunc.
+	registeredRoutes []string
 	httpArgs         []server.ServerArg
 	middlewares      []server.MiddlewareFunc
 	identityVerifier *verifier.Verifier
@@ -277,3 +281,21 @@ func (a *App) IdentityService() any { return a.identityService }
 // *deploycontrol.Service for in-process calls. Nil on binaries built
 // without -tags identity.
 func (a *App) DeployControlService() any { return a.deployControlService }
+
+// handleRoute mounts an HTTP route and records it, so the identity binary's
+// boot check can see the whole surface app code registers -- not just the
+// OpenAPI contract's five routes (memql#2939).
+//
+// Register through this rather than a.mux directly. A bare a.mux.HandleFunc is
+// invisible to the check, which is precisely the silence #2939 exists to
+// remove; app/mux_registration_test.go enforces it.
+func (a *App) handleRoute(pattern string, handler http.Handler) {
+	a.registeredRoutes = append(a.registeredRoutes, pattern)
+	a.mux.Handle(pattern, handler)
+}
+
+// handleRouteFunc is handleRoute for a HandlerFunc.
+func (a *App) handleRouteFunc(pattern string, handler http.HandlerFunc) {
+	a.registeredRoutes = append(a.registeredRoutes, pattern)
+	a.mux.HandleFunc(pattern, handler)
+}
