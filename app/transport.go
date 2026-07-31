@@ -172,6 +172,25 @@ func (a *App) transportBase() {
 // createHTTPServer finalizes middleware and creates the HTTP server.
 // Called at the end of each tag-specific transport method after endpoints are wired.
 func (a *App) createHTTPServer() {
+	// No verifier means no HTTP auth middleware ran, so PublicPaths() is never
+	// consulted and every contract route is reachable unauthenticated. Two
+	// binaries take that path: the identity binary (verifierRequired=false) and
+	// any node with MEMQL_IDENTITY_ENABLED=false. This does not authenticate
+	// anything; it refuses to let a route be unauthenticated by OMISSION, which
+	// is how the automations routes got there (#2937, #2908) and how the next
+	// one would (memql#2939).
+	//
+	// Fail-fast rather than warn: a warning at boot is exactly the signal that
+	// went unread the first time.
+	if a.identityVerifier == nil {
+		if err := server.AssertUnauthenticatedSurfaceDeclared(); err != nil {
+			a.fatal("undeclared unauthenticated HTTP surface", "error", err)
+		}
+		a.Logger.Info("no HTTP auth middleware on this binary; unauthenticated surface verified against declarations",
+			"routes", len(server.ContractRoutes()),
+			"handler_authorized", len(server.HandlerAuthorizedPaths()))
+	}
+
 	if len(a.middlewares) > 0 {
 		a.httpArgs = append(a.httpArgs, server.WithStandardMiddlewares(a.middlewares...))
 	}

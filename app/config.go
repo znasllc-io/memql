@@ -80,14 +80,29 @@ func (a *App) configAndAuth() {
 	a.middlewares = append(a.middlewares, server.SecurityHeadersMiddleware)
 
 	if !verifierRequired {
-		// Identity binary path: no per-node verifier; identity is
-		// the JWKS authority and authenticates HTTP requests via
-		// its own magic-link / OAuth / admin-session middleware
-		// (wired in transportIdentity). Setting
+		// Identity binary path: no per-node verifier, because identity is
+		// the JWKS authority and must not verify against itself. Setting
 		// MEMQL_IDENTITY_VERIFIER_BASE_URL on the identity binary is a
 		// no-op -- short-circuit before the verifier-construction
 		// path so identity does not try to fetch its own JWKS.
-		a.Logger.Info("identity binary: per-node verifier intentionally disabled (identity is the JWKS authority)")
+		//
+		// Returning here means NO HTTP auth middleware is installed, so
+		// server.PublicPaths() is never consulted on this binary and every
+		// route HandlerWithOptions registers is reachable unauthenticated.
+		//
+		// This comment used to say identity "authenticates HTTP requests via
+		// its own magic-link / OAuth / admin-session middleware (wired in
+		// transportIdentity)". That is true of identity's OWN routes and false
+		// as a statement about the binary's HTTP surface: transportIdentity
+		// calls svc.RegisterRoutes(a.mux) and wraps nothing. A reader checking
+		// whether identity was authenticated found a comment saying yes, in a
+		// function that does not do it -- which is how two automations routes
+		// went unauthenticated unnoticed (#2937, #2908).
+		//
+		// That surface is now declared rather than incidental: createHTTPServer
+		// asserts every contract route is in PublicPaths() or
+		// HandlerAuthorizedPaths(), and refuses to boot otherwise (#2939).
+		a.Logger.Info("identity binary: per-node verifier intentionally disabled (identity is the JWKS authority); no HTTP auth middleware -- unauthenticated surface asserted in createHTTPServer")
 		return
 	}
 
@@ -99,6 +114,12 @@ func (a *App) configAndAuth() {
 	// in staging/production. The verifier URL stays configured (so fail-fast
 	// env validation still passes); the toggle, not a blanked URL, is the
 	// off switch.
+	//
+	// This takes the SAME early return as the identity binary above, so it has
+	// the same consequence: no HTTP auth middleware, PublicPaths() never
+	// consulted, contract routes reachable unauthenticated. createHTTPServer's
+	// assertion covers this path too (#2939) -- it keys off a nil verifier, not
+	// off the build tag.
 	if !config.IdentityAuthEnabled() {
 		a.authDisabled = true
 		metrics.SetAuthEnabled(false)
