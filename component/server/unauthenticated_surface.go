@@ -111,17 +111,17 @@ func AssertUnauthenticatedSurfaceDeclared() error {
 // prove the current tree is clean without proving the check would catch a route
 // that is not.
 func assertSurfaceDeclared(routes, public, handlerAuthorized []string) error {
-	declared := map[string]bool{}
+	declared := make([]string, 0, len(public)+len(handlerAuthorized))
 	for _, p := range public {
-		declared[normalizeSurfacePath(p)] = true
+		declared = append(declared, normalizeSurfacePath(p))
 	}
 	for _, p := range handlerAuthorized {
-		declared[normalizeSurfacePath(p)] = true
+		declared = append(declared, normalizeSurfacePath(p))
 	}
 
 	var undeclared []string
 	for _, route := range routes {
-		if !declared[normalizeSurfacePath(route)] {
+		if !surfaceDeclaredBy(normalizeSurfacePath(route), declared) {
 			undeclared = append(undeclared, route)
 		}
 	}
@@ -138,19 +138,45 @@ func assertSurfaceDeclared(routes, public, handlerAuthorized []string) error {
 		strings.Join(undeclared, ", "))
 }
 
-// normalizeSurfacePath strips any configured base path and trailing slash so a
-// route and its declaration compare equal regardless of how each was spelled.
-// "/" is preserved, since trimming it would make every path match it.
+// surfaceDeclaredBy reports whether route is covered by any declaration.
+//
+// A trailing slash makes a declaration a PREFIX -- it covers the path and
+// everything beneath it -- matching how registerAutomationTriggerRoute mounts
+// "/automations/" and how verifier.shouldBypassAuth matches. Without one the
+// declaration is EXACT.
+//
+// The distinction is load-bearing. An earlier version normalized trailing
+// slashes away, which conflated the two: the prefix declaration "/automations/"
+// then also covered the exact path "/automations", so a new `GET /automations`
+// route -- the most obvious next route on that subtree -- inherited a blessing
+// whose justification is the trigger handler's owner-or-admin check, which it
+// does not have. It passed every gate.
+func surfaceDeclaredBy(route string, declarations []string) bool {
+	for _, d := range declarations {
+		if d == route {
+			return true
+		}
+		if strings.HasSuffix(d, "/") && strings.HasPrefix(route, d) {
+			return true
+		}
+	}
+	return false
+}
+
+// normalizeSurfacePath strips any configured base path so a route and its
+// declaration compare on the same footing. Trailing slashes are PRESERVED --
+// they carry the prefix-vs-exact distinction (see surfaceDeclaredBy).
+//
+// The base is trimmed as a path SEGMENT, not a substring: trimming "/heal" off
+// "/healthz" would otherwise yield "thz".
 func normalizeSurfacePath(p string) string {
 	p = strings.TrimSpace(p)
 	if base := sanitizeBaseURLFromEnv(); base != "" {
-		p = strings.TrimPrefix(p, base)
-	}
-	if p == "" {
-		return "/"
-	}
-	if p != "/" {
-		p = strings.TrimSuffix(p, "/")
+		if p == base {
+			p = "/"
+		} else if rest := strings.TrimPrefix(p, base+"/"); rest != p {
+			p = "/" + rest
+		}
 	}
 	if p == "" {
 		return "/"

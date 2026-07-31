@@ -126,9 +126,36 @@ func TestAssertSurfaceDeclaredCatchesUndeclaredRoutes(t *testing.T) {
 			wantMentions: "/automations/resume",
 		},
 		{
-			name:    "trailing slash does not change the verdict",
+			// The case an earlier version got wrong: normalizing trailing
+			// slashes away made the PREFIX declaration "/automations/" also
+			// cover the EXACT path "/automations", so a new GET /automations
+			// route inherited a blessing justified by the trigger handler's
+			// owner-or-admin check, which it does not have.
+			name:              "exact path is NOT covered by a prefix declaration",
+			routes:            []string{"/automations"},
+			handlerAuthorized: []string{"/automations/"},
+			wantErr:           true,
+			wantMentions:      "/automations",
+		},
+		{
+			name:              "a path beneath a prefix declaration IS covered",
+			routes:            []string{"/automations/resume"},
+			handlerAuthorized: []string{"/automations/"},
+			wantErr:           false,
+		},
+		{
+			// The converse: an exact declaration must not bless a route that
+			// serves an entire subtree.
+			name:    "prefix route is NOT covered by an exact declaration",
 			routes:  []string{"/automations/"},
 			public:  []string{"/automations"},
+			wantErr: true,
+		},
+		{
+			// TrimPrefix on a raw substring would turn "/healthz" into "thz".
+			name:    "base path is trimmed by segment, not substring",
+			routes:  []string{"/healthz"},
+			public:  []string{"/healthz"},
 			wantErr: false,
 		},
 	}
