@@ -400,6 +400,28 @@ func TestMountRegistersOnlyKnownRoutes(t *testing.T) {
 		}
 	}
 
+	// The set of handlers permitted to run with NO auth is closed. Pinning each
+	// ungated route's handler stops an existing entry being repointed, but on
+	// its own it still lets a NEW ungated route be added -- exactly what the
+	// "add it to ungatedRoutes" path invites. Enumerating the permitted
+	// handlers means widening the unauthenticated surface requires editing this
+	// line: a deliberate act visible in review, not a plausible-looking table
+	// entry.
+	sessionHandlers := map[string]bool{
+		"handleLoginGet":  true,
+		"handleEstablish": true,
+		"handleLogout":    true,
+	}
+	for _, r := range ungatedRoutes {
+		if !sessionHandlers[r.handler] {
+			t.Errorf("ungated route %s %s serves %q, which is not a session-establishment "+
+				"handler. Only establishing a session justifies running without auth; "+
+				"anything else reaching handlers.go's internal-origin stamp is a "+
+				"cross-user read by any anonymous caller (#2934).",
+				r.method, r.path, r.handler)
+		}
+	}
+
 	// Mount logs a hand-written route count that had already drifted to 19
 	// against 27 registered. Pin it, so the log line stays usable as
 	// confirmation that a route landed.
