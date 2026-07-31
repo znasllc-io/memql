@@ -215,8 +215,10 @@ to a gRPC chain of `OperatorAware(RejectAll)`, so it fails closed at the
 next hop rather than in the handler.
 
 **Scope differs between the two binaries, deliberately.** The identity
-binary asserts its WHOLE registered surface -- the contract plus
-everything app code mounts through `a.handleRoute`. A node running
+binary asserts the contract routes plus everything app code mounts
+through `a.handleRoute` (7 paths today). Routes mounted by middleware
+ahead of the mux, or registered via an aliased copy of it, are not yet
+covered -- see memql#3004. A node running
 `MEMQL_IDENTITY_ENABLED=false` asserts the contract routes only: that
 mode admits every request as the cluster owner by design, so requiring
 "safe unauthenticated" declarations for attachments / audio / voice would
