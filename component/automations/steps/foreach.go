@@ -13,6 +13,12 @@ import (
 // ForEachExecutor iterates over collections.
 type ForEachExecutor struct {
 	Registry *Registry
+
+	// Dispatch, when set, resolves NESTED steps instead of Registry.
+	// The Gate-2 dry-run sandbox sets it to its own Execute so children
+	// re-enter the interception layer; without it they reached the
+	// production executors directly (memql#2943). Nil in production.
+	Dispatch StepDispatchFunc
 }
 
 // Execute runs a forEach step.
@@ -384,7 +390,7 @@ func (e *ForEachExecutor) executeForItem(
 			}
 		}
 
-		executor, ok := e.Registry.Get(nestedStep.Type)
+		executor, ok := resolveChild(e.Dispatch, e.Registry, nestedStep.Type)
 		if !ok {
 			nestedResult := &automations.StepResult{
 				StepId:      iteratedStepId,
