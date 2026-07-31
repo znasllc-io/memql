@@ -788,21 +788,43 @@ func parseStructQueryBody(body string) (*structQueryBody, error) {
 	// Pull the args block out of the body if present, then iterate
 	// the rest line-by-line. Stripping rather than line-skipping
 	// keeps the line accounting simple.
-	rest := body
-	if loc := argsBlockHeader.FindStringIndex(body); loc != nil {
-		openOffset := strings.LastIndex(body[loc[0]:loc[1]], "{")
+	// Locate on the COMMENT-BLANKED view, slice from the original (memql#2948).
+	// The header regexp ran on raw source while matchBraceInBody matches on the
+	// blanked view, and the two can never agree about a header inside a
+	// comment: the header IS in the raw text, its `{` is NOT in the blanked
+	// view. So a commented-out `args {` refused the load while naming a block
+	// the file does not have. BlankComments is byte- and newline-preserving, so
+	// every offset below indexes `body` correctly. #2906 fixed this same shape
+	// in the helpers every lane shares; this lane kept its own locator.
+	scan := BlankComments(body)
+
+	restScan := scan
+	if loc := argsBlockHeader.FindStringIndex(scan); loc != nil {
+		openOffset := strings.LastIndex(scan[loc[0]:loc[1]], "{")
 		open := loc[0] + openOffset
 		close := matchBraceInBody(body, open)
 		if close < 0 {
 			return nil, fmt.Errorf("`args { ... }` block missing closing brace")
 		}
 		out.argsText = body[open+1 : close]
-		rest = body[:loc[0]] + body[close+1:]
+		restScan = scan[:loc[0]] + scan[close+1:]
 	}
 
-	for _, raw := range strings.Split(rest, "\n") {
+	// Iterate the BLANKED view. The default arm below rejects any line it does
+	// not recognise, and a comment is not a recognised field -- so one
+	// explanatory sentence anywhere in a struct-form query failed the load with
+	// `unknown struct-query field on line "/*"`. That is a SEPARATE defect from
+	// the locator above, and it hits ordinary prose rather than only
+	// commented-out constructs.
+	//
+	// Reading field values from the blanked view rather than the raw line is
+	// deliberate and safe: BlankComments is string- and backtick-aware, so a
+	// `//` inside a string literal survives untouched, while a trailing comment
+	// on a real field (`filter id==args.id // note`) becomes trailing
+	// whitespace that TrimSpace removes -- which is what the author meant.
+	for _, raw := range strings.Split(restScan, "\n") {
 		line := strings.TrimSpace(raw)
-		if line == "" || strings.HasPrefix(line, "//") {
+		if line == "" {
 			continue
 		}
 		switch {
@@ -1253,13 +1275,20 @@ func emitLogic(name, _conceptId, body, _preamble string) (string, error) {
 		return "", err
 	}
 
-	loc := logicBodyBlockHeader.FindStringIndex(body)
+	// Locate on the COMMENT-BLANKED view, slice from the original (memql#2948)
+	// -- same reasoning as parseStructQueryBody: this regexp ran on raw source
+	// while matchBraceInBody matches on the blanked view, so a `body {` inside
+	// a comment was found as a header whose brace could not be matched.
+	// BlankComments preserves byte offsets, so `loc` indexes `body` correctly.
+	scan := BlankComments(body)
+
+	loc := logicBodyBlockHeader.FindStringIndex(scan)
 	if loc == nil {
 		// ADR Decision 5: `body { }` is mandatory on logic (always, even
 		// one-liners). Its absence is a hard parse error.
 		return "", fmt.Errorf("logic %q must wrap its procedural code in a `body { }` block (mandatory on logic; ADR Decision 5)", name)
 	}
-	openOffset := strings.LastIndex(body[loc[0]:loc[1]], "{")
+	openOffset := strings.LastIndex(scan[loc[0]:loc[1]], "{")
 	open := loc[0] + openOffset
 	close := matchBraceInBody(body, open)
 	if close < 0 {
