@@ -30,10 +30,42 @@ permissions:
 #   - Pull requests run a FAST working-tree scan (`gitleaks dir .`) on a
 #     shallow checkout -- it inspects the current file contents the PR
 #     would merge, with no full-history clone or history walk.
-#   - Pushes to main and the weekly schedule run the heavy FULL-HISTORY
-#     scan (`gitleaks git .`) on a fetch-depth:0 checkout, the
+#   - Pushes to main, the merge queue, and the weekly schedule run the heavy
+#     FULL-HISTORY scan (`gitleaks git .`) on a fetch-depth:0 checkout, the
 #     authoritative pass that also catches secrets added-then-removed
 #     across commits.
+#
+# The full-history lane is pinned to the HEAD ancestry (memql#2996). A
+# fetch-depth:0 checkout fetches EVERY branch, and `gitleaks git .` defaults to
+# walking every ref it can reach -- not just the commit under test. So two
+# synthetic test fixtures on one open, unmerged branch failed every merge
+# candidate AND every push to main, whatever their own diffs contained. That
+# wedged the queue repo-wide: six consecutive candidates across three unrelated
+# PRs were evicted and main stayed red, none of them containing the branch at
+# fault.
+#
+# Scoping the walk keeps it a FULL-history walk -- every commit reachable from
+# the candidate is still read, so added-then-removed secrets are still caught --
+# it just stops walking refs that are not the candidate.
+#
+# `--tags` is part of the scope, not decoration. The default gitleaks walk is
+# `--all`, which covers refs/tags/* as well; scoping to HEAD alone would drop
+# any tag that is not an ancestor of main and leave that history permanently
+# unscanned. This repo has exactly one such tag today (v0.1.0, 6 commits).
+# Counts on the commit that introduced this: HEAD 3690, HEAD --tags 3696,
+# --all 3711 -- so `--tags` recovers those 6 while still excluding the 15
+# commits that live only on unmerged branches, which is the whole point.
+#
+# The quoting is load-bearing: the value is two tokens, so an unquoted
+# --log-opts=HEAD --tags would pass `--tags` to gitleaks itself rather than to
+# git log. Do not weaken the flag on the run step below -- without it one
+# unmerged branch blocks every merge in the repo, and a second --log-opts would
+# silently win over the first (pflag takes the last occurrence).
+#
+# `scripts/dev/gitleaks_scan_scope_test.go` guards the mechanical parts: the
+# scope value, a single invocation, fetch-depth: 0, and the event gate. It
+# cannot police everything a workflow edit could do -- treat it as a tripwire,
+# not a proof.
 
 jobs:
   scan:
@@ -43,7 +75,8 @@ jobs:
       # PR lane: shallow checkout (default fetch-depth: 1) -- fast.
       - if: github.event_name == 'pull_request'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # main / schedule lane: full history required for `gitleaks git .`.
+      # main / merge queue / schedule lane: full history required for
+      # `gitleaks git .`.
       - if: github.event_name != 'pull_request'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -59,6 +92,8 @@ jobs:
       - name: scan working tree (PR, fast incremental)
         if: github.event_name == 'pull_request'
         run: gitleaks dir . --no-banner
-      - name: scan full history (main / schedule)
+      - name: scan full history (main / merge queue / schedule)
         if: github.event_name != 'pull_request'
-        run: gitleaks git . --no-banner
+        # Scoped to the candidate's ancestry plus tags -- see the header
+        # comment. Without this, an unmerged branch fails every merge candidate.
+        run: gitleaks git . --no-banner --log-opts="HEAD --tags"
