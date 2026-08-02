@@ -1,0 +1,101 @@
+name: mirror-fixture-images
+
+# Mirrors the third-party CI TEST FIXTURE images into this org's GHCR, so the
+# test lanes do not pull them from Docker Hub at job-setup time (memql#2793).
+#
+# Why this exists: `ci.yml` declares `timescale/timescaledb` as a `services:`
+# container in `mcp-conformance` and `db-tests`. Those pulls were unauthenticated
+# and unmirrored, so a Docker Hub blip took the lane down before a single test
+# ran -- and because the lanes feed `ci-required`, the merge queue EVICTED the
+# candidate. Measured twice in roughly nine hours (#2777 in `mcp-conformance`,
+# #2826 in `db-tests`), both silent: nothing notifies you, `isInMergeQueue` just
+# flips back to false and the PR sits at CLEAN looking healthy.
+#
+# Why GHCR and not ACR: a `services:` container is pulled by the runner at JOB
+# SETUP, before the first step executes, so no `azure/login` step can ever
+# authenticate it -- that is why `services.<id>.credentials` exists as a field.
+# It therefore needs a STATIC credential, and `GITHUB_TOKEN` is one that already
+# exists for every job. The Azure federated credential is additionally pinned to
+# `repo:znasllc-io/memql:ref:refs/heads/main` (see build-engine-images.yml), so
+# it could not authenticate a `pull_request` or `merge_group` run regardless.
+#
+# This is not in tension with CLAUDE.md's "build server is the source of truth
+# for deployable images, which live in ACR". These are test fixtures: never
+# deployed, never pinned by an overlay, never part of a release. The rule is
+# about the engine node images a release names.
+#
+# The pushed image is pinned BY DIGEST in ci.yml. Re-running this workflow
+# publishes a new digest but changes nothing until someone updates that pin,
+# which is deliberate: the fixture must not move under a PR silently. Read the
+# new digest from this workflow's summary and update ci.yml in a normal PR.
+
+on:
+  # Bootstrap and refresh are both manual: the digest pin in ci.yml has to be
+  # updated by hand afterwards, so an automatic push would only ever produce an
+  # unreferenced package version.
+  workflow_dispatch:
+    inputs:
+      source:
+        description: 'Source image to mirror (repo:tag)'
+        required: true
+        default: 'timescale/timescaledb:latest-pg16'
+        type: string
+      target:
+        description: 'Target package name under ghcr.io/<org>/'
+        required: true
+        default: 'ci-timescaledb'
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  mirror:
+    name: mirror ${{ inputs.source }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # push the mirrored fixture to GHCR
+    steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull, retag and push
+        id: mirror
+        env:
+          SOURCE: ${{ inputs.source }}
+          TARGET: ghcr.io/${{ github.repository_owner }}/${{ inputs.target }}
+        run: |
+          set -euo pipefail
+          echo "mirroring $SOURCE -> $TARGET"
+          docker pull "$SOURCE"
+
+          # Record what upstream tag this came from, so the mirror is traceable
+          # back to its source without consulting this workflow's run history.
+          src_digest="$(docker inspect --format='{{index .RepoDigests 0}}' "$SOURCE")"
+
+          docker tag "$SOURCE" "$TARGET:latest"
+          docker push "$TARGET:latest"
+
+          # The digest of what we just pushed -- this is the value ci.yml pins.
+          digest="$(docker inspect --format='{{index .RepoDigests 0}}' "$TARGET:latest" | cut -d@ -f2)"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "## Mirrored fixture image"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| source | \`$SOURCE\` |"
+            echo "| source digest | \`$src_digest\` |"
+            echo "| target | \`$TARGET\` |"
+            echo "| **pin this in ci.yml** | \`$TARGET@$digest\` |"
+            echo
+            echo "Update both \`services:\` blocks in \`.github/workflows/ci.yml\`"
+            echo "(\`mcp-conformance\` and \`db-tests\`) to that digest in a normal PR."
+            echo "Nothing changes until you do -- the pin is what ci.yml reads."
+          } >> "$GITHUB_STEP_SUMMARY"
