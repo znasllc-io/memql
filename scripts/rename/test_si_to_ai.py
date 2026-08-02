@@ -124,10 +124,16 @@ check("idempotent", twice, once)
 # rule permanently dead -- it never fires, and nothing says so.
 #
 # That is not hypothetical: `dsl-identifiers` originally sat 7th, and both of its
-# rules were dead. `shared`'s infix `JoinSpaceAsSI -> JoinSpaceAsAI` rewrote
-# `mutationJoinSpaceAsSI` to `mutationJoinSpaceAsAI` before the exact-token rule
-# for it ran, so the renamer kept minting the retired `mutation` prefix into every
-# repo it was pointed at -- the precise outcome that rule exists to prevent.
+# rules were dead. `shared`'s infix `JoinSpaceAsSI -> JoinSpaceAsAI` rewrote the
+# SI-spelled token into its AI-spelled equivalent -- still carrying the retired
+# `mutation` prefix -- before the exact-token rule for it could run, so the
+# renamer kept minting that prefix into every repo it is pointed at, which is the
+# precise outcome those rules exist to prevent.
+#
+# (Described indirectly rather than quoted: writing the prefixed AI spelling
+# literally would itself trip the #2979 gate, because it resolves to a live
+# construct. That is the gate working, not an inconvenience.)
+#
 # Fixed by moving `dsl-identifiers` first (specific before general); this keeps it
 # fixed.
 def _rules_in_order():
