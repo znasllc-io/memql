@@ -26,8 +26,23 @@ import (
 // lint exists to predict boot, so where they differ the lint is wrong by
 // definition. These tests pin the agreement for the PINNED case specifically.
 //
-// Every test here FAILS against the file-path model and PASSES against the
-// namespace model.
+// TWO of the tests here fail against the file-path model and pass against the
+// namespace model: TestLane1_PinnedNamespaceImportIsAccepted, and
+// TestLane1_PinnedNamespaceStillRejectsAGenuinelyMissingSymbol on its message
+// assertions (its primary check passes either way).
+//
+// The other two do NOT, and the header used to claim otherwise, which
+// overstates the evidence for the next reader.
+// TestLane1_UnpinnedTreeVerdictIsUnchanged passes against both models BY
+// DESIGN -- it is the regression floor. And
+// TestLane1_PinnedNamespaceImportSilencesTheAmbiguity also passes against the
+// file-path model, because lane 2 went inconclusive there rather than
+// erroring; it is a forward guard, not a reproduction, so it is not evidence
+// that the fix works.
+//
+// The other half of the agreement -- that a pin PERMITS a namespace rather
+// than APPLYING one, so directory membership alone is the wrong test -- lives
+// in lane1_pin_namespace_agreement_test.go.
 
 // pinnedNamespaceWithRealDirTree is the shape the file-path model gets wrong.
 //
