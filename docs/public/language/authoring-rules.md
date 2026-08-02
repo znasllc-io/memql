@@ -270,6 +270,20 @@ a `.memql` file between domain directories casually -- file location is
 id-bearing and the load guard errors on an unpinned mismatch -- see
 [#7](#7-annotations-on-concepts-where-to-put-new-ones).
 
+**A `use` path's leading segment is a NAMESPACE, not a directory**
+(memql#2945). This is the rule the whole import system turns on, and it is
+worth stating plainly because for most domains the distinction is invisible:
+an unpinned domain's directory name and its namespace are the same string, so
+either model gives the same answer.
+
+They come apart under `namespace.pin`. The engine never consults the
+filesystem to resolve an import -- it takes the leading segment as a hint and
+matches it as `:<segment>:` against canonical ids. So a segment names every
+domain that *assembles* under it: the directory of that name, plus any
+directory whose `namespace.pin` points there. `memqllint` resolves it the same
+way, because a lint exists to predict boot; where the two disagreed, the lint
+was wrong.
+
 **Importing a concept from a pinned domain: use the PIN, not the directory**
 (memql#2901). When `namespace.pin` or `@namespace` sends a directory's
 concepts to a different namespace -- `dsl/deployment` declaring `deployment`,
@@ -283,20 +297,26 @@ than once in the tree, the directory-named import does not work:
   domain. For a file sitting directly in `deployment/` the same-domain-use
   gate (#2617) strips it, and worse, it silences the lint while boot still
   cannot bind -- a green CI shipping a tree that fails at startup;
-- **`use cluster.concepts.{ deployment }`** -- **this is the one that works**,
-  when no `cluster/` directory exists in the root. A use path is a *namespace
-  hint* matched against canonical ids, not a directory lookup, so the import
-  lints clean and binds correctly. This is the ordinary product-bundle case: a
-  pin usually targets a namespace the bundle does not own.
+- **`use cluster.concepts.{ deployment }`** -- **this is the one that works.**
+  The path names the namespace the concept assembles under, so boot binds it
+  and the lint accepts it. It works whether or not a `cluster/` directory
+  exists: with one, the namespace simply covers both directories.
 
-If the pin *does* name a directory in the root and that directory declares no
-such concept, lane 1 rejects the import -- and then the only fixes are to
-rename one of the colliding concepts, or to unpin the domain and re-key its
-ids onto the directory.
+That last point is the #2945 correction. This section previously said the
+import worked *only* when no `cluster/` directory existed, and that if one
+existed and declared no such concept the only fixes were to rename a concept
+or unpin the domain and re-key its ids. That was a description of a lint bug,
+not of the language: `memqllint` was doing a directory lookup where boot does
+a namespace match, so it rejected a spelling the engine accepts -- and the
+remedy it prescribed was a data migration in place of a one-line import.
 
-Lane 2's diagnostic distinguishes these two cases and names whichever remedy
-is actually true, rather than offering the generic "import it via a use
-declaration" that points at the spelling which does not work.
+The one case that still has no import spelling is a genuine collision: the
+pin's own directory declaring the *same* name, so two concepts assemble to the
+same canonical id. Fix that by renaming one of them.
+
+Lane 2's diagnostic names the pinned-namespace import as the remedy, rather
+than the generic "import it via a use declaration" that points at the spelling
+which does not work.
 
 (Unrelated: **seed** constructs have their own `@scope("perUser")`
 annotation -- see `dsl/agents/assistant.memql`. That is a seed

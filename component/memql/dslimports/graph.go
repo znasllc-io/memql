@@ -4,7 +4,7 @@ package dslimports
 // reusable, read-only Index -- the resolution source the MemQL Sense language
 // service consumes for import/reference diagnostics and segment-aware
 // completion. It reuses the exact in-package resolution the referential-
-// integrity lanes use (buildDeclIndex, resolveUseModule), so the editor agrees
+// integrity lanes use (buildDeclIndex, resolveUseModules), so the editor agrees
 // with what `memqllint` (and, transitively, engine boot) would accept.
 //
 // Every "does X exist" answer is deliberately framed so a caller can tell
@@ -30,7 +30,7 @@ import (
 // engine module. Multi-segment consolidated-capability paths
 // (`capabilities.integration.github` -> the consolidated
 // capabilities/capabilities.memql with a dotted construct prefix, which
-// resolveUseModule handles) are NOT representable through the (ns, kind) shape;
+// resolveUseModules handles) are NOT representable through the (ns, kind) shape;
 // a consumer that must resolve those handles them separately. Callers also pass
 // an UNVERSIONED namespace -- a leading version segment (`v1.cognition.concepts`)
 // is the caller's to strip (cf. stripVersionPrefix). An unstripped "v1"

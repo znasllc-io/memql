@@ -209,17 +209,23 @@ query widget deploymentWidgets {
 // The sibling test above asserts the diagnostic FIRES for a pinned domain.
 // This asserts it says something the author can act on, which it previously
 // did not: the generic remedy is "import it via a use declaration", and for a
-// pinned domain there is no import spelling that works.
+// pinned domain two of the three spellings do not work.
 //
 //   - no import -- boot's hint is the file's last path segment, which cannot
 //     match ":"+pin+":"; that IS the reported ambiguity;
 //   - `use deployment.concepts.{ widget }` -- stripped by the same-domain-use
 //     gate (memql#2617). Worse, it silences THIS lane while boot still cannot
 //     bind, turning a loud boot failure into a green lint;
-//   - `use cluster.concepts.{ widget }` -- resolves against cluster/, which
-//     declares no widget.
+//   - `use cluster.concepts.{ widget }` -- the one that works. It names the
+//     namespace the concept assembles under, which is what boot matches.
 //
-// So the only real fixes are rename or unpin, and the message must say so.
+// So the message must name the pinned-namespace import specifically.
+//
+// This comment used to end "the only real fixes are rename or unpin", because
+// lane 1 resolved that third spelling against the cluster/ DIRECTORY and
+// rejected it whenever such a directory existed. memql#2945 ruled that model
+// wrong -- a use path's leading segment is a namespace -- so the import is now
+// always available and the sibling test below asserts exactly that.
 //
 // The finding itself must survive: boot genuinely refuses this binding, so
 // suppressing it would take memqllint green on a bundle that crash-loops at
@@ -246,14 +252,20 @@ func TestLane2_PinnedDomainDiagnosticNamesAnActionableFix(t *testing.T) {
 			"(memql#2901).\n  got: %s", got)
 	}
 
-	// This fixture has NO cluster/ directory, and that is the point of this
-	// case. A use path is a NAMESPACE hint matched against canonical ids, not
-	// a directory lookup, so `use cluster.concepts.{ widget }` lints clean and
-	// binds correctly at boot. An earlier version of this diagnostic asserted
-	// the opposite -- that the import "resolves against cluster/, which
-	// declares no widget", naming a directory that does not exist -- and sent
-	// the author to re-key ids instead of adding one line. That is the same
-	// defect memql#2901 was filed about, one level up, so it is pinned here.
+	// This fixture has NO cluster/ directory. A use path is a NAMESPACE hint
+	// matched against canonical ids, not a directory lookup, so
+	// `use cluster.concepts.{ widget }` lints clean and binds correctly at
+	// boot. An earlier version of this diagnostic asserted the opposite --
+	// that the import "resolves against cluster/, which declares no widget",
+	// naming a directory that does not exist -- and sent the author to re-key
+	// ids instead of adding one line. That is the same defect memql#2901 was
+	// filed about, one level up, so it is pinned here.
+	//
+	// Since memql#2945 the absence of cluster/ is no longer what makes the
+	// import work -- the sibling test proves it works with the directory
+	// present too. The fixture keeps its shape because these two tests are a
+	// matched pair on one fixture; what it isolates now is that the diagnostic
+	// says the same thing either way.
 	for _, want := range []string{
 		"namespace.pin",        // names the mechanism
 		`"cluster"`,            // names the pin value
@@ -267,10 +279,10 @@ func TestLane2_PinnedDomainDiagnosticNamesAnActionableFix(t *testing.T) {
 		}
 	}
 	if strings.Contains(got, "Rename one of the colliding concepts") {
-		t.Errorf("the diagnostic told the author to rename a concept, but this tree has no cluster/ "+
-			"directory, so `use cluster.concepts.{ widget }` works and is a ONE-LINE fix. Sending "+
-			"someone to re-key ids when an import would do is worse than the message this "+
-			"replaced.\n  got: %s", got)
+		t.Errorf("the diagnostic told the author to rename a concept, but `use cluster.concepts.{ "+
+			"widget }` binds this and is a ONE-LINE fix -- with or without a cluster/ directory "+
+			"(memql#2945). Sending someone to re-key ids when an import would do is worse than "+
+			"the message this replaced.\n  got: %s", got)
 	}
 }
 

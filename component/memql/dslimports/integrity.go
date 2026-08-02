@@ -358,7 +358,14 @@ func stripVersionPrefix(parts []string) []string {
 	return parts
 }
 
-// resolveUseModule maps a Form B dotted module path to a file in the tree.
+// resolveUseModule maps a Form B dotted module path to a file in the tree,
+// treating the leading segment as a DIRECTORY.
+//
+// Callers verifying an author's `use` path want resolveUseModules below, which
+// treats that segment as a NAMESPACE (memql#2945) and calls this once per
+// directory belonging to it. This is the per-directory step; on its own it is
+// the file-path model that disagreed with boot.
+//
 // Primary: parts joined as a path (`demo.concepts` -> demo/concepts.memql).
 // Fallback: the namespace-consolidated file (`capabilities.integration.github`
 // -> capabilities/capabilities.memql with construct-name prefix
