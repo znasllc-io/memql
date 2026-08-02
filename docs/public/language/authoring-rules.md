@@ -1188,8 +1188,8 @@ at least one is not safe: `sendActionUtterance`
 (`dsl/cognition/mutations.memql`) hashes `args.action.type` and
 `args.action.idempotencyKey`, which live inside an untyped `object!` and
 therefore **cannot** carry `@pattern` at all, so `("chat", "k:1")` and
-`("chat:k", "1")` derive one id from client-supplied input. Tracked
-separately; do not read this section as a statement that the tree
+`("chat:k", "1")` derive one id from client-supplied input. Tracked in
+memql#3009; do not read this section as a statement that the tree
 complies with it.
 
 A shape detector — find every `id: hash(concat(...))` and require its
