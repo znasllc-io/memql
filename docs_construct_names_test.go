@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -11,7 +12,6 @@ import (
 	"strings"
 	"testing"
 	"unicode"
-	"unicode/utf8"
 )
 
 // TestDocsDoNotReferencePrefixedConstructNames is the call-site half of the
@@ -169,6 +169,7 @@ func TestDocsDoNotReferencePrefixedConstructNames(t *testing.T) {
 		t.Fatalf("git ls-files: %v", err)
 	}
 	prefixedRef := regexp.MustCompile(`\b(?:query|mutation|logic)[A-Z][A-Za-z0-9_]*`)
+	var scanned int
 	for _, rel := range strings.Split(string(out), "\x00") {
 		if rel == "" || prefixNameGateExempt(rel) {
 			continue
@@ -178,13 +179,22 @@ func TestDocsDoNotReferencePrefixedConstructNames(t *testing.T) {
 			// git-tracked but locally absent (partial checkout); not drift.
 			continue
 		}
-		if !utf8.Valid(data) {
+		if isBinaryForGate(data) {
 			// A binary blob (an image, a fixture archive) can contain the byte
 			// sequence by coincidence, and reporting a line number into it is
 			// meaningless. Now that the sweep is not extension-scoped, this is
 			// the thing standing between the gate and a nonsense diagnostic.
+			//
+			// Deliberately a NUL-byte heuristic and NOT utf8.Valid. An encoding
+			// check is whole-file: ONE stray byte anywhere -- a latin-1 accent
+			// in a comment, a vendored minified bundle after an upstream bump --
+			// silently removed that entire file from the gate with no signal.
+			// That is precisely the quietly-stops-covering shape this sweep was
+			// widened to end, so the guard must not reintroduce it. NUL in the
+			// head is what `git grep -I` itself uses to call a file binary.
 			continue
 		}
+		scanned++
 		content := string(data)
 		for _, loc := range prefixedRef.FindAllStringIndex(content, -1) {
 			written := content[loc[0]:loc[1]]
@@ -197,6 +207,26 @@ func TestDocsDoNotReferencePrefixedConstructNames(t *testing.T) {
 				rel, line, written, bare, origin)
 		}
 	}
+
+	// Mirrors the declaration half's zero-guard above. A sweep that scans
+	// nothing passes, and a passing gate that covered no files is
+	// indistinguishable from a clean tree -- the failure this whole test
+	// exists to make impossible. The repo tracks thousands of files, so any
+	// figure this low means the sweep broke, not that the tree got clean.
+	if scanned < 100 {
+		t.Fatalf("the file sweep scanned only %d files -- the sweep is broken, not the tree", scanned)
+	}
+}
+
+// isBinaryForGate reports whether data should be treated as binary: a NUL byte
+// in the head, the same heuristic `git grep -I` uses. Scoped to the head rather
+// than the whole file so a large text file is not walked twice.
+func isBinaryForGate(data []byte) bool {
+	head := data
+	if len(head) > 8000 {
+		head = head[:8000]
+	}
+	return bytes.IndexByte(head, 0) >= 0
 }
 
 // prefixNameGateExempt reports whether a path is outside the sweep.
