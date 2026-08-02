@@ -717,16 +717,46 @@ func AuthPaths() []string {
 // http://identity:8085/.well-known/jwks.json) before it holds any token
 // of its own. Gating this path deadlocks cross-node auth.
 func JWKSPaths() []string {
+	return withBasePath("/.well-known/jwks.json")
+}
+
+// IdentityDiscoveryPaths returns the identity service's public discovery
+// documents. Both are mounted by identity's Service.RegisterRoutes and both
+// MUST be reachable without auth to do their job: the memql-config document is
+// what `memql-cockpit authorize <url>` reads to learn which gRPC endpoint and
+// client_id to use, and the RFC 8414 metadata is how an OAuth client discovers
+// the authorize/token/registration endpoints before it holds any credential.
+// Neither carries user data.
+//
+// Declared here because #2939 is about the unauthenticated surface being
+// DECLARED rather than incidental. These two were unauthenticated by
+// deliberate design and named in no list at all -- and the handoff exemption
+// in app/mux_registration_test.go justified itself by asserting identity's
+// well-knowns were already in PublicPaths(), which was true of jwks.json and
+// false of these. component/identity/wellknown_declared_test.go keeps the
+// declaration in step with what identity actually mounts.
+func IdentityDiscoveryPaths() []string {
+	return withBasePath(
+		"/.well-known/memql-config.json",
+		"/.well-known/oauth-authorization-server",
+	)
+}
+
+// withBasePath returns each path as written, plus its base-prefixed spelling
+// when SERVER_PUBLIC_PATH is configured and that spelling differs.
+func withBasePath(paths ...string) []string {
 	base := sanitizeBaseURLFromEnv()
-	jwks := "/.well-known/jwks.json"
-	paths := []string{jwks}
-	if base != "" {
-		p := base + jwks
-		if p != jwks {
-			paths = append(paths, p)
+	out := make([]string, 0, len(paths)*2)
+	for _, p := range paths {
+		out = append(out, p)
+		if base == "" {
+			continue
+		}
+		if prefixed := base + p; prefixed != p {
+			out = append(out, prefixed)
 		}
 	}
-	return paths
+	return out
 }
 
 // MetricsPaths returns the public Prometheus scrape endpoint(s). The
@@ -754,7 +784,9 @@ func PublicPaths() []string {
 	paths = append(paths, LivezPaths()...)   // pure process-liveness probe (#1117)
 	paths = append(paths, MetricsPaths()...) // prometheus scrape (#1523)
 	paths = append(paths, JWKSPaths()...)    // public keyset (cross-node verifier fetch)
-	paths = append(paths, AuthPaths()...)    // identity-service auth endpoints
+	// identity's public discovery documents (cockpit authorize + RFC 8414)
+	paths = append(paths, IdentityDiscoveryPaths()...)
+	paths = append(paths, AuthPaths()...) // identity-service auth endpoints
 	// Polyphon Bridge Agent internal endpoints (service-to-service, no user auth)
 	paths = append(paths, PolyphonUtterancePaths()...)
 	paths = append(paths, PolyphonPreloadPaths()...)

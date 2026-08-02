@@ -24,10 +24,19 @@ import (
 //   - server.RegisterConceptsEndpoint -- mounts /api/concepts*, already in
 //     PublicPaths().
 //   - identity Service.RegisterRoutes -- identity's OWN auth surface
-//     (magic-link, OAuth, JWKS, admin). The admin routes carry their own
-//     cluster-role gate (see component/identity/admin, memql#2934); the auth
-//     and JWKS endpoints are in PublicPaths() and must be reachable
-//     unauthenticated to function.
+//     (magic-link, OAuth, JWKS, discovery, admin). The admin routes carry their
+//     own cluster-role gate (see component/identity/admin, memql#2934); the
+//     auth, JWKS and discovery endpoints are in PublicPaths() -- the last via
+//     IdentityDiscoveryPaths() -- and must be reachable unauthenticated to
+//     function.
+//
+//     This rationale used to read "the auth and JWKS endpoints are in
+//     PublicPaths()". True of jwks.json, false of
+//     /.well-known/memql-config.json and
+//     /.well-known/oauth-authorization-server: both are mounted here, both are
+//     unauthenticated by design, and neither appeared in any declaration. An
+//     exemption is only as good as the reason written beside it, so the reason
+//     was made true rather than the exemption quietly narrowed.
 var muxHandoffCallees = map[string]bool{
 	"RegisterConceptsEndpoint": true,
 	"RegisterRoutes":           true,

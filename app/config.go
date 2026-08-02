@@ -100,9 +100,17 @@ func (a *App) configAndAuth() {
 		// went unauthenticated unnoticed (#2937, #2908).
 		//
 		// That surface is now declared rather than incidental: createHTTPServer
-		// asserts EVERY route this binary registers -- the OpenAPI contract plus
-		// everything app code mounts via a.handleRoute -- is in PublicPaths() or
-		// HandlerAuthorizedPaths(), and refuses to boot otherwise (#2939).
+		// asserts the OpenAPI contract plus everything app code mounts via
+		// a.handleRoute is in PublicPaths() or HandlerAuthorizedPaths(), and
+		// refuses to boot otherwise (#2939). Seven paths on identity today.
+		//
+		// That is NOT every route this binary serves, and the difference is
+		// exactly what the next reader needs: routes handed to the mux through
+		// one of the enumerated handoffs -- svc.RegisterRoutes named above,
+		// server.RegisterConceptsEndpoint -- are not covered, nor are routes
+		// mounted by middleware ahead of the mux. See memql#3004. Overstating
+		// the coverage here would repeat, in the same spot, the mistake this
+		// very comment was rewritten to correct.
 		a.Logger.Info("identity binary: per-node verifier intentionally disabled (identity is the JWKS authority); no HTTP auth middleware -- unauthenticated surface asserted in createHTTPServer")
 		return
 	}
@@ -120,11 +128,17 @@ func (a *App) configAndAuth() {
 	// the same consequence: no HTTP auth middleware, PublicPaths() never
 	// consulted, routes reachable unauthenticated. createHTTPServer's assertion
 	// covers this path too (#2939), but over the CONTRACT routes only -- not the
-	// whole mux as on identity. This mode admits every request as the cluster
-	// owner by design, so requiring "safe unauthenticated" declarations for
-	// attachments / audio / voice would demand paperwork for a deliberate,
-	// loudly-warned troubleshooting posture and fail-fast a config that is
-	// meant to work.
+	// helper-registered routes as on identity.
+	//
+	// The reason is narrower than "everything is the cluster owner here", which
+	// is true of gRPC and not of HTTP: the local-dev admit path transportBase
+	// installs is a gRPC STREAM interceptor, so HTTP requests on this path carry
+	// no claims at all and the handlers fail closed on the missing actor (see
+	// the 401 in component/server/attachment_handler.go). Demanding "safe
+	// unauthenticated" declarations for attachments / audio / voice would
+	// therefore fail-fast a deliberate, loudly-warned troubleshooting posture
+	// that is meant to work, without buying any coverage those handlers do not
+	// already provide themselves.
 	if !config.IdentityAuthEnabled() {
 		a.authDisabled = true
 		metrics.SetAuthEnabled(false)
