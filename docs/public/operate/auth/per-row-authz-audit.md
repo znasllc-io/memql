@@ -16,37 +16,88 @@ owner: znas
 > (`dsl.TestPerRowAuthzClassification`) hard-fails on any new
 > flagged construct.
 >
-> That "11" is history, not an inventory. The live figures are **23
-> `@public`** and **6 `@serverOnly`**, and they move; regenerate with
-> `go test ./dsl/ -run TestPerRowAuthzClassification -v` rather than
-> trusting a number written here. Several other counts and tables
-> further down this document are `#54`-era and have drifted — see
-> memql#2983.
+> That "11" is history, not an inventory. The live figures move, and
+> this document does not carry them: regenerate with
+> `go test ./dsl/ -run TestPerRowAuthzClassification -v`. The `#54`-era
+> counts and tables that
+> used to sit further down have been **deleted rather than corrected**
+> (memql#2983) — see "Counts: regenerate, do not read".
 
 ## Context
 
-memQL currently relies on **partition-as-isolation-boundary** for
-defense-in-depth: a request authenticated as user X can only read
-rows under partition X (enforced by `PartitionACL` middleware in
-`component/auth/access/middleware.go`). If a DSL query has a bug
-that allows reading rows it shouldn't, the partition boundary
-still catches the worst leaks.
+This framework was written while memQL still relied on
+**partition-as-isolation-boundary** for defense-in-depth: a request
+authenticated as user X could only read rows under partition X, so a
+DSL query with a bug still had the partition boundary under it.
 
-Issue #56 removes partitioning. Before that lands, every read +
-write path in the DSL needs an explicit caller-check so the
-removal doesn't demote defense-in-depth to a single point of
-failure.
+**That boundary is gone.** Issue #56 removed partitioning; only its
+phase-8 cleanup remains. So the per-row check in the DSL is not a
+belt-and-braces addition ahead of a future change — it is the *only*
+gate, which is what the rest of this document is about.
 
-## The four buckets
+The `PartitionACL` middleware this section used to cite, in
+`component/auth/access/middleware.go`, no longer exists: neither the
+symbol nor that directory is in the tree. Nothing derives scope from
+the request envelope any more — the `partition` wire field is
+`reserved` in `component/grpc/memql.proto`.
 
-Every query and mutation in the DSL falls into exactly one of these:
+## The buckets
+
+Conceptually there are four. The classifier reports **six states**, and
+it checks `serverOnly` **first** — a `@serverOnly` construct is not
+client-callable, so no caller-check applies and it is never flagged.
 
 | Bucket | Definition | Required gating |
 |---|---|---|
-| **owned** | Row carries `payload.ownerUserId` (or `payload.userId` for identity-domain concepts) | `filter` must include `payload.ownerUserId == actor.userId` (the caller can only read rows they own) |
+| **owned** | Row carries `ownerUserId` (or `userId` for identity-domain concepts) | `filter` must include `ownerUserId == actor.userId` (the caller can only read rows they own) |
 | **granted** | Row visible via a relationship (e.g. space participant, group member) | Filter must reference a relationship spec that gates on `actor.userId` |
-| **admin** | Cluster-owner-only (e.g. audit log, identity admin views) | Compose `spec("requiresClusterOwner")` or equivalent |
+| **admin** | Cluster-owner-only (e.g. audit log, identity admin views) | A top-level conjunct `actor.isClusterOwner == true`, or an admin context-spec |
 | **public** | Globally readable by intent (concept catalogs, role registry, public lookup tables) | `@public` annotation on the construct |
+
+The two reported states that are not buckets: **`srvOnly`**, checked
+first as above, and **`other`** — everything the classifier did not
+place. `other` is by far the largest column and is not a finding.
+
+> **Payload fields are BARE.** The `payload.` prefix this table used to
+> prescribe was retired by memql#2292 and is hard-failed by
+> `dsl/conformance_test.go`; a filter written that way does not load.
+> Row intrinsics take the `row.` namespace (`row.id`, `row.createdAt`).
+
+> **`granted` is not implemented.** The classifier has no counter for it
+> and does not resolve relationship specs, so a granted construct lands
+> in `owned` or `other` depending on its filter. The row above is the
+> authoring rule, not something the gate measures.
+
+> **There is no `requiresClusterOwner` spec.** This table used to say
+> "compose `spec("requiresClusterOwner")`", and neither half was live:
+> the spec is declared nowhere in `dsl/` (`dsl/admin_gate_test.go` says
+> so outright), and `spec("...")` is the retired stringly form. The
+> engine rejects it in `component/memql/ast_converter.go`, naming the
+> replacement as the predicate form `spec <name>` — no quotes, no
+> parens — which in a filter is the spec written as a top-level
+> conjunct.
+>
+> **Do not take the list of live context-specs from here.** That is the
+> kind of hand-written inventory the rest of this document was rewritten
+> to stop carrying, and it drifts the same way. Read it off the tree:
+>
+> ```
+> grep -rn '^spec actorEnvelope ' dsl/
+> ```
+>
+> Worth knowing why that is not a formality: the pairing is not the
+> obvious one. `requiresOwnerOrAdmin` lives in `dsl/common/specs.memql`
+> beside `requiresAdmin` — not in `dsl/deployment/specs.memql` beside
+> `requiresOwner` — having moved there in memql#2800. #2983 asserted the
+> deployment pairing, the first correction copied it unchecked, and both
+> were wrong. `requiresDeveloperOrAbove` is a fourth live
+> `actorEnvelope` spec that neither list mentioned; note it is absent
+> from the admin recogniser, so it is a role gate the admin classifier
+> does not see.
+>
+> `requiresClusterOwner` survives inside that recogniser as a #54
+> placeholder, which is why the retired spelling still reads as real
+> from the outside.
 
 The `@public` annotation is a marker for the validator — it has no
 runtime effect. Adding `@public` to a construct is the author's
@@ -55,8 +106,11 @@ unauthenticated callers / cross-user reads / etc."
 
 ## Declaring the tier: `@rowAuthz` on the concept
 
-The four buckets above are inferred, per construct, by a regex. That
-is the defect #2803 rules on: a construct's caller-check lives in a
+The buckets above are inferred, per construct, by a text scanner
+**plus** a boolean-structure check on the filter clause — not by a
+regex alone; a bare pattern match would accept a caller-check sitting
+under a top-level `||`, which gates nothing. That is the defect #2803
+rules on: a construct's caller-check lives in a
 term the author has to remember to type, and deleting it leaves a
 construct that still loads, still passes every gate, and returns
 every row. **Absence has no syntax**, so review cannot catch it.
@@ -302,62 +356,78 @@ as an exemption knob.
 
 ## Validator
 
-`dsl.TestPerRowAuthzClassification` walks every query and mutation
-in the tree and classifies each one. The test logs counts per
-bucket and emits a flagged list of constructs that look user-scoped
-but lack an actor-check (the `actor.userId == ...` reference or a
-known actor-scope spec).
+`dsl.TestPerRowAuthzClassification` walks every `query`, `mutate`
+**and `seed`** in the tree and classifies each one.
 
-The test is **informational** today (logs findings; does not fail
-the build). Once each domain's gaps are closed (follow-up PRs per
-issue #54), the test flips to hard-fail.
+It does not merely scan for a substring. Flagging evaluates the
+**boolean structure** of the filter over the row-selection surface —
+a caller-check has to hold on every path, so an admin gate that is a
+top-level conjunct counts and the same term as a disjunct does not
+(memql#2832, memql#2840). A text scan alone would accept
+`ownerUserId == actor.userId || status == "open"`, which gates nothing.
 
-## Snapshot at audit time (2026-05-20)
+**What fails the build, and what does not.** The document used to say
+the test is "informational (does not fail the build)", and the status
+banner at the top says it hard-fails. Both are half right, which is
+worse than either:
 
-Aggregate counts across the DSL tree:
+- the **per-domain table is informational** — it is `t.Logf`, and the
+  test prints the word "informational" in its own banner;
+- a **flagged construct is a hard failure** — `t.Errorf`, one line per
+  construct, plus the resolution options;
+- a **stale exemption is a hard failure** too — an entry in
+  `userScopeSelectionExemptions` whose construct no longer matches must
+  be pruned rather than left to rot into a blanket that covers nothing.
 
-| Domain | Queries | Mutations | Notes |
-|---|---|---|---|
-| agents | 18 | 6 | `ownerUserId` on the row; most queries take `ownerUserId` as an arg without cross-checking `actor.userId`. Owner-only and admin-only paths both present. |
-| cluster | 8 | 6 | Cluster topology — admin-only by intent. |
-| cognition | 28 | 29 | Space + participant + utterance. Mixed: some owner-only, some space-participant-granted. |
-| common | 0 | 0 | (no queries / mutations) |
-| data | 10 | 8 | Data domain — needs classification pass. |
-| identity | 76 | 36 | Largest domain. Mix of admin (audit events), owner (user preferences), and public (JWKS, login pages). |
-| knowledge | 26 | 16 | Knowledge domains + documents — mix of workspace-scoped + private-per-user. |
-| memql | 0 | 0 | (no queries / mutations) |
-| planner | 17 | 11 | Per-user plans + tasks. |
-| platform | 16 | 11 | Platform metadata. Some admin-only, some public. |
-| router | 2 | 2 | Router ledger — admin/internal. |
-| workbench | 4 | 3 | Per-Plan workspace. |
-| worker | 12 | 7 | Per-user worker invocations. |
+So: counts to read, findings that fail.
 
-**Total:** 217 queries + 135 mutations across 11 domains.
+## Counts: regenerate, do not read
 
-## Per-domain gap closure (shipped)
+This document used to carry two hand-written tables here — a
+per-domain query/mutation snapshot ("**Total:** 217 queries + 135
+mutations across 11 domains") and a post-sweep classification
+breakdown. **Both are deleted rather than corrected.**
 
-The 11 flagged constructs identified by the classification test
-have been classified via `@public` with per-construct comments
-documenting the intent. The classification breakdown after the
-sweep:
+They were hand-copied from what the classifier already prints, so they
+began drifting the day they were written. Measured against the tree
+while this was being fixed, almost every row of the snapshot was
+numerically wrong, it used the retired `mutation` keyword (the surface
+keyword is `mutate`, memql#2041), it had no Seeds column, and many live
+namespaces were missing from it entirely. The classification block was
+worse — a fraction of the live namespaces, no `srvOnly` column, and it
+reported no `owned` constructs outside cognition when the tree is full
+of them.
 
+The counts that sentence originally quoted are gone from it on purpose.
+Describing a stale table by writing down today's figures replaces one
+hand-maintained number with another and re-lights the same fuse; the
+argument for deleting the tables does not need them, and the classifier
+prints them on demand.
+
+A hand-maintained count in a document is a defect with a delay fuse.
+This page has now produced three (memql#2914's call sites, memql#2918's
+`@public` list, and these), so the fix is to stop asserting the numbers
+in prose at all: a table that does not exist cannot drift.
+
+**To get the live figures:**
+
+```bash
+go test ./dsl/ -run TestPerRowAuthzClassification -v
 ```
-domain          owned admin public  FLAG other
-agents              0     0     2     0    13
-cluster             0     0     0     0    10
-cognition           2     0     0     0    41
-data                0     0     0     0    13
-identity            0     0     6     0    68
-knowledge           0     0     1     0    28
-planner             0     0     0     0    19
-platform            0     0     0     0    19
-router              0     0     0     0     3
-workbench           0     0     0     0     5
-worker              0     0     2     0    11
+
+That prints the per-domain table across all six states — `owned`,
+`admin`, `public`, `srvOnly`, `FLAG`, `other` — and it is the same
+computation the gate fails on, so it cannot disagree with the gate.
+
+For construct totals per kind:
+
+```bash
+grep -rhoE '^(query|mutate|seed)[ \t]+([A-Za-z_][A-Za-z0-9_]*[ \t]+)?[A-Za-z_][A-Za-z0-9_]*[ \t]*\{' \
+  --include='*.memql' dsl/ | awk '{print $1}' | sort | uniq -c
 ```
 
-11 flagged → 0 flagged. The classification test hard-fails on any
-new flagged construct going forward.
+The one number worth stating in prose is the one that must stay put:
+**`FLAG` is 0, and the gate hard-fails if it ever is not.**
 
 ## Why `@public` (and not "no caller-check")
 
@@ -372,12 +442,16 @@ emerged from the initial sweep:
    gated. Follow-up tightening: split into system-only +
    user-self variants; the user-self variant drops the `arg.userId`
    and derives from `actor.userId`.
-2. **Going-away-with-#56** — `queryAccessForUser`,
-   `queryPartitionsForUser`. Tied to the partition concept that
-   #56 removes wholesale; no point caller-scoping them now.
-3. **Admin-only paths** — audit-event queries. The proper fix is
-   composing a `requiresClusterOwner` spec; tracked under #54 once
-   the admin surface is consolidated.
+2. ~~**Going-away-with-#56**~~ — **this category is now empty.** It
+   held `queryAccessForUser` and `queryPartitionsForUser`; both are
+   gone along with the partition concept they were tied to. Kept as a
+   numbered entry so the categories below keep their numbers.
+3. **Admin-only paths** — audit-event queries. Tracked under #54 once
+   the admin surface is consolidated. The fix here used to be written
+   as "composing a `requiresClusterOwner` spec", which does not exist —
+   see the note under "The buckets"; the live context-specs are
+   `requiresAdmin`, `requiresOwner` and `requiresOwnerOrAdmin`, named
+   as a bare top-level conjunct rather than through `spec("...")`.
 4. **Web-authenticated user-self** — PAT + worker-token list
    queries backing the `/me/...` pages. The web handler authenticates
    the caller and supplies their own userId as the arg. Proper

@@ -1423,8 +1423,9 @@ the change. The gates, with their test names:
   Every query / mutation that touches a user-scope field
   (`ownerUserId`, `userId`, `createdBy`, ...)
   must either carry a caller-scope check (`actor.userId` in the
-  filter / write), an admin gate (`actor.isClusterOwner` or a
-  `requiresClusterOwner` spec), or an explicit `@public` annotation
+  filter / write), an admin gate (`actor.isClusterOwner == true`, or an admin
+  context-spec such as `requiresAdmin` / `requiresOwnerOrAdmin`, named
+  as a bare top-level conjunct), or an explicit `@public` annotation
   acknowledging the intent. Anything else hard-fails.
 - **Actor vocabulary** (`TestNoCallerVocabulary`, #221). `caller.X`
   and `@caller` are retired; write `actor.X` and `@actor`.
