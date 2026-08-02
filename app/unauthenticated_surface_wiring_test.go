@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -130,5 +131,46 @@ func TestUnauthenticatedSurfaceRoutesIncludeMuxRoutesForIdentity(t *testing.T) {
 	// ...and such a route must actually fail the assertion.
 	if err := server.AssertUnauthenticatedSurfaceDeclared(whole); err == nil {
 		t.Fatal("an undeclared mux route must fail the surface assertion")
+	}
+}
+
+// Being recorded is not enough -- being recorded IN TIME is the requirement.
+//
+// createHTTPServer reads a.registeredRoutes once, and every Build runs later
+// phases after it (a.cluster() follows it in build_identity, build_default and
+// build_cognition). A route mounted after that point is served by the same mux
+// having never been checked, and because a compliant a.handleRoute call
+// satisfies the AST gate in mux_registration_test.go, nothing else catches it:
+// adding one to cluster.go left the whole suite green on both builds. The gate
+// constrained HOW a route registers but not WHEN.
+func TestRouteRegisteredAfterTheAssertionIsRefused(t *testing.T) {
+	a, fatals := newSurfaceWiringApp(t)
+	a.identityVerifier = nil
+	a.mux = http.NewServeMux()
+
+	noop := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
+
+	// Before the assertion: the ordinary path, and it must stay quiet.
+	a.handleRoute("GET /metrics", noop)
+	a.createHTTPServer()
+	if len(*fatals) != 0 {
+		t.Fatalf("registering before the assertion must be accepted; got fatal(s): %v", *fatals)
+	}
+
+	// After it: refused, by both spellings.
+	a.handleRoute("GET /internal/late", noop)
+	if len(*fatals) == 0 {
+		t.Fatal("a route registered after the surface assertion must be refused -- it is " +
+			"served by the same mux and the check has already run")
+	}
+	if !strings.Contains((*fatals)[0], "/internal/late") {
+		t.Errorf("the fatal must name the offending route so it can be found, got: %v", *fatals)
+	}
+
+	before := len(*fatals)
+	a.handleRouteFunc("GET /internal/later", func(http.ResponseWriter, *http.Request) {})
+	if len(*fatals) == before {
+		t.Error("handleRouteFunc must refuse a late registration too -- otherwise the seal " +
+			"is a one-spelling gate and the other spelling walks around it")
 	}
 }

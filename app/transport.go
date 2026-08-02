@@ -176,15 +176,20 @@ func (a *App) createHTTPServer() {
 	// consulted and the routes below are reachable unauthenticated. Two binaries
 	// take that path, and they get different scopes on purpose (memql#2939):
 	//
-	//   - identity binary (verifierRequired=false): assert the WHOLE surface app
-	//     code registers, not just the OpenAPI contract. This is the binary that
-	//     runs this way in production, and the silence worth removing is a bare
-	//     a.mux.HandleFunc landing here unnoticed.
+	//   - identity binary (verifierRequired=false): assert the OpenAPI contract
+	//     PLUS every route app code mounts through a.handleRoute. This is the
+	//     binary that runs this way in production, and the silence worth removing
+	//     is a bare a.mux.HandleFunc landing here unnoticed. It is NOT the whole
+	//     surface: routes reaching the mux through one of the enumerated handoffs
+	//     (server.RegisterConceptsEndpoint, identity's svc.RegisterRoutes) are not
+	//     covered -- see app/mux_registration_test.go and memql#3004.
 	//   - MEMQL_IDENTITY_ENABLED=false: contract routes only. That mode admits
-	//     EVERY request as the cluster owner by design, so requiring "this is
-	//     safe unauthenticated" declarations for attachments/audio/voice would
-	//     demand paperwork for a deliberate, loudly-warned troubleshooting
-	//     posture -- and fail-fast a config that is supposed to work.
+	//     every gRPC STREAM as the cluster owner by design -- the local-dev admit
+	//     path is a gRPC stream interceptor, not HTTP middleware, so HTTP requests
+	//     there carry no claims and the handlers fail closed on the missing actor.
+	//     Demanding "this is safe unauthenticated" declarations for
+	//     attachments/audio/voice would fail-fast a deliberate, loudly-warned
+	//     troubleshooting posture that is supposed to work.
 	//
 	// Fail-fast rather than warn: a boot warning is exactly the signal that went
 	// unread when the automations routes were added.
@@ -197,6 +202,13 @@ func (a *App) createHTTPServer() {
 			"routes", len(routes),
 			"whole_mux", !verifierRequired)
 	}
+
+	// Seal the registered set: it has now been asserted (or deliberately not, on
+	// a verifier-consuming binary), and later phases still run after this one --
+	// a.cluster() follows createHTTPServer in every Build. A route mounted from
+	// here on would be served by the same mux having never been checked, so
+	// handleRoute/handleRouteFunc refuse it.
+	a.surfaceSealed = true
 
 	if len(a.middlewares) > 0 {
 		a.httpArgs = append(a.httpArgs, server.WithStandardMiddlewares(a.middlewares...))
