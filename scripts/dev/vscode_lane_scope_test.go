@@ -349,7 +349,18 @@ func TestVSCodeLaneTestStepDoesNotSuppressFailure(t *testing.T) {
 			t.Errorf("the lane's `go test` step sets continue-on-error=%v; its "+
 				"failure would not fail the lane (#2792).\nstep: %s", s.ContinueOnError, s.Name)
 		}
-		pipefail := strings.Contains(s.Run, "pipefail")
+		// Read pipefail from the COMMANDS, not the raw payload: a `# pipefail is
+		// handled by the runner` comment must not satisfy it. Checking a string
+		// against the wrong surface is the defect this file has now made three
+		// times (continue-on-error against command text, patterns against whole
+		// lines); the commandLines pass is the surface that means "shell ran it".
+		pipefail := false
+		for _, line := range commandLines(s.Run) {
+			if strings.Contains(line, "pipefail") {
+				pipefail = true
+				break
+			}
+		}
 		for _, line := range commandLines(s.Run) {
 			for _, esc := range []string{"|| true", "|| :", "|| exit 0"} {
 				if strings.Contains(line, esc) {
@@ -369,20 +380,32 @@ func TestVSCodeLaneTestStepDoesNotSuppressFailure(t *testing.T) {
 	}
 }
 
-// hasPipe reports whether the line contains a shell pipe, ignoring `||`.
+// hasPipe reports whether the line contains a shell pipe, ignoring `||` and
+// any `|` inside quotes.
+//
+// The quote tracking mirrors stripComment: a `|` in `-args "a|b"` is data, not
+// a pipeline, and flagging it would red a correct lane.
 func hasPipe(line string) bool {
+	var quote byte
 	for i := 0; i < len(line); i++ {
-		if line[i] != '|' {
-			continue
+		c := line[i]
+		switch {
+		case quote != 0:
+			if c == quote {
+				quote = 0
+			}
+		case c == '\'' || c == '"':
+			quote = c
+		case c == '|':
+			if i+1 < len(line) && line[i+1] == '|' {
+				i++ // `||` is a logical OR, handled separately above
+				continue
+			}
+			if i > 0 && line[i-1] == '|' {
+				continue
+			}
+			return true
 		}
-		if i+1 < len(line) && line[i+1] == '|' {
-			i++ // `||` is a logical OR, handled separately above
-			continue
-		}
-		if i > 0 && line[i-1] == '|' {
-			continue
-		}
-		return true
 	}
 	return false
 }
