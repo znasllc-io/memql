@@ -1,63 +1,73 @@
 package auth
 
 import (
-	"os"
-	"regexp"
+	"context"
 	"strings"
 	"testing"
 )
 
 // The actor bootstrap query name is a documented design constraint, and it
-// drifted into SIX documents before anyone noticed (memql#2984).
+// drifted into six places before anyone noticed (memql#2984).
 //
-// The claim is: the read that BUILDS the actor cannot itself be filtered on
-// the actor, so the one construct creating the actor needs an escape hatch
-// from caller-scoping. That constraint is real and load-bearing -- it is the
-// stated reason the `@rowAuthz` grammar has an escape hatch at all.
+// The constraint is real and load-bearing: the read that BUILDS the actor
+// cannot itself be filtered on the actor, which is the stated reason the
+// `@rowAuthz` grammar has an escape hatch at all. What drifted was the NAME.
+// The resolver calls `userByIdSystem`, which is `@serverOnly`. `userById` is
+// a different query gated by `requiresOwnerOrAdmin`, so a reader who followed
+// the wrong citation landed on an owner-or-admin gate and could only conclude
+// the circularity constraint was imaginary.
 //
-// What drifted was the NAME. The resolver calls `userByIdSystem`, which is
-// `@serverOnly`. `userById` is a different query gated by
-// `requiresOwnerOrAdmin`. Documents naming `userById` sent readers to an
-// owner-or-admin-gated query, from which the honest conclusion is that the
-// circularity constraint is imaginary. It reached
-// component/language/parser/rowauthz_binding.go, dsl/identity/queries.memql,
-// docs/public/operate/auth/{per-row-authz-audit,access-model}.md,
-// docs/internal/planning/roadmap.md and component/identity/pat/verifier.go.
+// Correcting six copies does not stop a seventh, so this pins the fact they
+// describe.
 //
-// Correcting six copies does not stop a seventh. This pins the FACT the
-// copies describe: if the bootstrap query is ever renamed, this fails and
-// names the documents that must move with it. That is the cheapest available
-// gate -- the prose itself cannot be checked mechanically, but the thing the
-// prose is about can.
-func TestActorBootstrapQueryIsUserByIdSystem(t *testing.T) {
-	const path = "identity_resolver.go"
+// It asserts on the query the resolver ACTUALLY EXECUTES, through the
+// QueryRunner seam, rather than on the text of the source file. The first
+// version of this gate grepped the file, and that was defeated in review by
+// moving the name into a constant -- the resolver issued the caller-scoped
+// query and the gate stayed green. A gate that a rename defeats is worse than
+// none, because its failure message promises coverage it does not have.
+func TestActorBootstrapExecutesUserByIdSystem(t *testing.T) {
+	const canonicalSub = "v1:identity:user:abc123"
 
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read %s: %v", path, err)
+	spy := &recordingQueryRunner{}
+	r := &IdentityResolver{Engine: spy}
+
+	// The row shape is irrelevant here; nil output is enough to exercise the
+	// call. Whatever LoadFromClaims returns, it must have asked for the right
+	// query first.
+	_, _ = r.LoadFromClaims(context.Background(), map[string]any{"sub": canonicalSub})
+
+	if len(spy.queries) == 0 {
+		t.Fatal("LoadFromClaims executed no query at all. If the bootstrap stopped going " +
+			"through QueryRunner, this gate no longer covers it and the six places that name " +
+			"the bootstrap query in prose are unpinned again (memql#2984).")
 	}
-	src := string(data)
 
-	if !strings.Contains(src, "userByIdSystem") {
-		t.Fatalf("%s no longer mentions userByIdSystem. If the actor bootstrap query was "+
-			"renamed, these all describe it by name and must be updated in the same change:\n"+
+	for _, q := range spy.queries {
+		if strings.Contains(q, "userByIdSystem") {
+			continue
+		}
+		if strings.Contains(q, "userById") {
+			t.Errorf("the actor bootstrap executed %q. It must use userByIdSystem "+
+				"(@serverOnly): this is a PRE-ACTOR read, so a caller-scoped filter over the "+
+				"actor it is about to build cannot be satisfied (#2800). `userById` is the "+
+				"requiresOwnerOrAdmin-gated query and is not the bootstrap.", q)
+			continue
+		}
+		t.Errorf("the actor bootstrap executed an unrecognised query %q. If it was renamed, "+
+			"these describe it by name and must move in the same change:\n"+
 			"  component/language/parser/rowauthz_binding.go\n"+
 			"  component/identity/pat/verifier.go\n"+
 			"  dsl/identity/queries.memql\n"+
 			"  docs/public/operate/auth/per-row-authz-audit.md\n"+
 			"  docs/public/operate/auth/access-model.md\n"+
-			"  docs/internal/planning/roadmap.md", path)
+			"  docs/internal/planning/roadmap.md", q)
 	}
+}
 
-	// The bootstrap must not be spelled as the caller-scoped query. Matches
-	// `query userById(` but not `query userByIdSystem(` -- \b does not fire
-	// between "d" and "S", both word characters.
-	callerScoped := regexp.MustCompile(`query\s+userById\b`)
-	if loc := callerScoped.FindStringIndex(src); loc != nil {
-		line := 1 + strings.Count(src[:loc[0]], "\n")
-		t.Errorf("%s:%d issues `query userById`, the requiresOwnerOrAdmin-gated query. The "+
-			"actor bootstrap must use userByIdSystem (@serverOnly): it is a PRE-ACTOR read, so "+
-			"a caller-scoped filter over the actor it is about to build cannot be satisfied "+
-			"(#2800).", path, line)
-	}
+type recordingQueryRunner struct{ queries []string }
+
+func (s *recordingQueryRunner) ExecuteShaped(_ context.Context, query string) (any, error) {
+	s.queries = append(s.queries, query)
+	return nil, nil
 }
