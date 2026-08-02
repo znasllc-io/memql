@@ -120,9 +120,14 @@ make vscode-package   # build the darwin-arm64 binary, compile the client, vsce 
 
 The offline LSP embeds the engine, so the binary is bundled per platform;
 darwin-arm64 (standardized dev hardware) is built first. The `vscode-extension`
-CI lane guards the grammar against drift and runs this packaging flow. Release
-targets the VS Code Marketplace and OpenVSX; version the extension in lockstep
-with `GrammarVersion`.
+CI lane runs every drift guard under `cmd/memql-lsp` -- the grammar against
+`dslspec`, `language-configuration.json`, and `package.json`'s `engines.vscode`
+/ `engines.node` floors -- then runs this packaging flow. It gates on the
+`vscode` bucket, and because `go-checks` gates on the `go` bucket instead, an
+`editors/vscode`-only change (the shape every dependabot bump to the extension
+takes) skips `go-checks` entirely and this lane is the only place those guards
+fire (memql#2792). Release targets the VS Code Marketplace and OpenVSX; version
+the extension in lockstep with `GrammarVersion`.
 
 Nothing bundled is tracked in git: `editors/vscode/bin/` and `*.vsix` are
 ignored (editors/vscode/.gitignore), so the platform binary is cross-built
