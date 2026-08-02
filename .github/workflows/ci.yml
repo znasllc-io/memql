@@ -439,11 +439,12 @@ jobs:
       - name: db-gated suites (seeded test DB)
         run: go test -count=1 -timeout=300s ./component/memql/... ./component/automations/steps/... ./examples/referencepack/...
 
-  # VS Code extension lane: guard the checked-in grammar against dslspec drift,
-  # then build the offline LSP binary (darwin-arm64, the standardized dev
-  # target), compile the TypeScript client, and package the VSIX. The Go server
-  # tests run in go-checks (go test ./...); this lane proves the extension
-  # compiles and packages with its bundled binary. Gates on the vscode bucket
+  # VS Code extension lane: run every cmd/memql-lsp drift guard over the
+  # checked-in editors/vscode assets, then build the offline LSP binary
+  # (darwin-arm64, the standardized dev target), compile the TypeScript client,
+  # and package the VSIX. go-checks also runs these tests via `go test ./...`,
+  # but it gates on the `go` bucket, so an editors/vscode-only PR skips it and
+  # this lane is the only coverage those guards get. Gates on the vscode bucket
   # (editors/vscode, cmd/memql-lsp, scripts/vscode); push + merge_group run it.
   vscode-extension:
     name: vscode-extension
@@ -459,8 +460,14 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v4
         with:
           node-version: '20'
-      - name: grammar drift check (checked-in grammar matches dslspec)
-        run: go test -count=1 ./cmd/memql-lsp/internal/grammar/...
+      # Every drift guard over a checked-in editors/vscode asset lives under
+      # cmd/memql-lsp (grammar, language configuration, extension manifest).
+      # Run the whole tree, not just the grammar package: an editors/vscode-only
+      # PR -- the shape every dependabot bump takes -- path-skips `go-checks`,
+      # so this lane is the ONLY place those guards get to fire (memql#2792).
+      # scripts/dev/vscode_lane_scope_test.go fails if this narrows again.
+      - name: editors/vscode drift checks (grammar, language config, manifest)
+        run: go test -count=1 ./cmd/memql-lsp/...
       - name: package extension (build binary + compile + vsce package)
         run: bash scripts/vscode/package.sh --out="$RUNNER_TEMP/memql.vsix"
 
