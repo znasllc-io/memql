@@ -209,17 +209,23 @@ query widget deploymentWidgets {
 // The sibling test above asserts the diagnostic FIRES for a pinned domain.
 // This asserts it says something the author can act on, which it previously
 // did not: the generic remedy is "import it via a use declaration", and for a
-// pinned domain there is no import spelling that works.
+// pinned domain two of the three spellings do not work.
 //
 //   - no import -- boot's hint is the file's last path segment, which cannot
 //     match ":"+pin+":"; that IS the reported ambiguity;
 //   - `use deployment.concepts.{ widget }` -- stripped by the same-domain-use
 //     gate (memql#2617). Worse, it silences THIS lane while boot still cannot
 //     bind, turning a loud boot failure into a green lint;
-//   - `use cluster.concepts.{ widget }` -- resolves against cluster/, which
-//     declares no widget.
+//   - `use cluster.concepts.{ widget }` -- the one that works. It names the
+//     namespace the concept assembles under, which is what boot matches.
 //
-// So the only real fixes are rename or unpin, and the message must say so.
+// So the message must name the pinned-namespace import specifically.
+//
+// This comment used to end "the only real fixes are rename or unpin", because
+// lane 1 resolved that third spelling against the cluster/ DIRECTORY and
+// rejected it whenever such a directory existed. memql#2945 ruled that model
+// wrong -- a use path's leading segment is a namespace -- so the import is now
+// always available and the sibling test below asserts exactly that.
 //
 // The finding itself must survive: boot genuinely refuses this binding, so
 // suppressing it would take memqllint green on a bundle that crash-loops at
@@ -246,14 +252,20 @@ func TestLane2_PinnedDomainDiagnosticNamesAnActionableFix(t *testing.T) {
 			"(memql#2901).\n  got: %s", got)
 	}
 
-	// This fixture has NO cluster/ directory, and that is the point of this
-	// case. A use path is a NAMESPACE hint matched against canonical ids, not
-	// a directory lookup, so `use cluster.concepts.{ widget }` lints clean and
-	// binds correctly at boot. An earlier version of this diagnostic asserted
-	// the opposite -- that the import "resolves against cluster/, which
-	// declares no widget", naming a directory that does not exist -- and sent
-	// the author to re-key ids instead of adding one line. That is the same
-	// defect memql#2901 was filed about, one level up, so it is pinned here.
+	// This fixture has NO cluster/ directory. A use path is a NAMESPACE hint
+	// matched against canonical ids, not a directory lookup, so
+	// `use cluster.concepts.{ widget }` lints clean and binds correctly at
+	// boot. An earlier version of this diagnostic asserted the opposite --
+	// that the import "resolves against cluster/, which declares no widget",
+	// naming a directory that does not exist -- and sent the author to re-key
+	// ids instead of adding one line. That is the same defect memql#2901 was
+	// filed about, one level up, so it is pinned here.
+	//
+	// Since memql#2945 the absence of cluster/ is no longer what makes the
+	// import work -- the sibling test proves it works with the directory
+	// present too. The fixture keeps its shape because these two tests are a
+	// matched pair on one fixture; what it isolates now is that the diagnostic
+	// says the same thing either way.
 	for _, want := range []string{
 		"namespace.pin",        // names the mechanism
 		`"cluster"`,            // names the pin value
@@ -267,27 +279,35 @@ func TestLane2_PinnedDomainDiagnosticNamesAnActionableFix(t *testing.T) {
 		}
 	}
 	if strings.Contains(got, "Rename one of the colliding concepts") {
-		t.Errorf("the diagnostic told the author to rename a concept, but this tree has no cluster/ "+
-			"directory, so `use cluster.concepts.{ widget }` works and is a ONE-LINE fix. Sending "+
-			"someone to re-key ids when an import would do is worse than the message this "+
-			"replaced.\n  got: %s", got)
+		t.Errorf("the diagnostic told the author to rename a concept, but `use cluster.concepts.{ "+
+			"widget }` binds this and is a ONE-LINE fix -- with or without a cluster/ directory "+
+			"(memql#2945). Sending someone to re-key ids when an import would do is worse than "+
+			"the message this replaced.\n  got: %s", got)
 	}
 }
 
-// TestLane2_PinnedDomainRenameRemedyWhenTheImportIsRejected is the other half.
+// TestLane2_PinnedDomainImportRemedyHoldsWhenThePinDirectoryExists is the
+// other half, and memql#2945 INVERTED it.
 //
-// When the pin DOES name a directory in this root and that directory declares
-// no such concept, lane 1 rejects `use <pin>.concepts.{ X }` with "is not
-// declared in" -- so rename-or-unpin really are the only fixes, and the
-// message must say that instead.
+// It used to assert the opposite. When the pin named a real directory that
+// declared no such concept, lane 1 rejected `use <pin>.concepts.{ X }`, so the
+// message said rename the concept or remove the pin and re-key every id under
+// it -- a data migration. #2945 ruled that lane 1 was wrong to reject: a use
+// path's leading segment is a NAMESPACE, boot binds the import, and a lint
+// exists to predict boot. With lane 1 resolving a namespace to every domain
+// that assembles under it, the import works here too and the one-line remedy
+// is the only remedy.
 //
-// The two tests together are what stop the diagnostic collapsing back into a
-// single claim that is false for half its inputs, which is exactly how the
-// first cut of this fix went wrong.
-func TestLane2_PinnedDomainRenameRemedyWhenTheImportIsRejected(t *testing.T) {
+// So the pair of tests still does the job it was written for -- stopping the
+// diagnostic from collapsing into a claim that is false for half its inputs --
+// except the two halves now agree on the remedy and differ only in whether the
+// pin directory exists. That difference must stay invisible to the author,
+// which is what the final assertion checks.
+func TestLane2_PinnedDomainImportRemedyHoldsWhenThePinDirectoryExists(t *testing.T) {
 	root := pinnedNamespaceTree()
-	// Give the pin a real directory that declares something ELSE, so lane 1
-	// would reject an import of `widget` from it.
+	// Give the pin a real directory that declares something ELSE. Before
+	// #2945 this alone flipped the remedy from "add one import line" to
+	// "re-key every canonical id in the domain".
 	root["cluster/concepts.memql"] = file(`@version("1.0.0")
 @namespace("cluster")
 @description("The pin target exists but declares no widget.")
@@ -305,14 +325,36 @@ concept gadget {
 	if got == "" {
 		t.Fatal("lane 2 stopped reporting the pinned-domain ambiguity once the pin directory existed")
 	}
-	if !strings.Contains(got, "Rename one of the colliding concepts") {
-		t.Errorf("cluster/ exists and declares no widget, so lane 1 rejects "+
-			"`use cluster.concepts.{ widget }` and rename-or-unpin ARE the only fixes -- the "+
-			"message must say so.\n  got: %s", got)
+	if !strings.Contains(got, "Import it by its PINNED namespace") {
+		t.Errorf("the diagnostic did not offer the pinned-namespace import even though lane 1 now "+
+			"accepts it: `widget` is declared in deployment/, which assembles under \":cluster:\", "+
+			"so `use cluster.concepts.{ widget }` resolves whether or not cluster/ declares it "+
+			"(memql#2945).\n  got: %s", got)
 	}
-	if strings.Contains(got, "Import it by its PINNED namespace") {
-		t.Errorf("the diagnostic recommended an import that lane 1 rejects: cluster/ exists and "+
-			"declares no widget.\n  got: %s", got)
+	if strings.Contains(got, "Rename one of the colliding concepts") {
+		t.Errorf("the diagnostic prescribed rename-or-unpin -- re-keying every canonical id in the "+
+			"domain -- for a case a one-line import fixes. That remedy was correct only while lane "+
+			"1 wrongly rejected the import, and memql#2945 overturned that.\n  got: %s", got)
+	}
+
+	// The load-bearing assertion: following the advice must actually work.
+	// A message that recommends an import the lint then rejects is the exact
+	// defect #2945 was filed about, so assert the END STATE rather than the
+	// wording.
+	root["deployment/queries.memql"] = file(`use cluster.concepts.{ widget }
+
+@enabled
+@description("Binds widget by its PINNED namespace, as the diagnostic advises.")
+query widget deploymentWidgets {
+  args {
+    label  string  @required
+  }
+  filter  label == args.label
+}`)
+	for _, e := range loadTree(t, root).VerifyReferentialIntegrity() {
+		t.Errorf("the tree still does not lint clean after following the diagnostic's own remedy. "+
+			"The message and the lanes must agree, or the author is sent in a circle "+
+			"(memql#2945).\n  got: %s", e)
 	}
 }
 

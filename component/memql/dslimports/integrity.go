@@ -85,6 +85,7 @@ import (
 	"io"
 	"io/fs"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -195,6 +196,17 @@ type declIndex struct {
 	shapeDecls map[string][]shapeEntry
 	// namespaces[dir] = true when the tree has files under top-level dir.
 	namespaces map[string]bool
+	// pinnedTo[ns] = the top-level directories whose namespace.pin names ns,
+	// sorted. This is what makes a `use` path's leading segment a NAMESPACE
+	// rather than a directory (memql#2945): boot matches that segment as
+	// ":"+seg+":" against canonical ids, so EVERY domain assembling under seg
+	// can supply the imported symbol, not just the directory literally named
+	// seg.
+	//
+	// A domain pinned to its own name is omitted: its ids are exactly what an
+	// unpinned domain would produce, so the literal directory already covers
+	// it and listing it again would only add a duplicate to dedupe.
+	pinnedTo map[string][]string
 	// root is the tree's fs.FS, carried so candidateConceptId can read a
 	// domain's namespace.pin -- the third input the unified loader uses to
 	// assemble a concept id, alongside the decl and its directory. Reading a
@@ -218,6 +230,7 @@ func (t *Tree) buildDeclIndex() *declIndex {
 		shapes:     make(map[string]bool),
 		shapeDecls: make(map[string][]shapeEntry),
 		namespaces: make(map[string]bool),
+		pinnedTo:   make(map[string][]string),
 		root:       t.Root,
 	}
 	for path, f := range t.Files {
@@ -254,7 +267,53 @@ func (t *Tree) buildDeclIndex() *declIndex {
 		entries := idx.concepts[name]
 		sort.Slice(entries, func(i, j int) bool { return entries[i].file < entries[j].file })
 	}
+	// Namespace pins, read once per domain. Deliberately AFTER the walk above:
+	// idx.namespaces is only complete when every file has been seen.
+	for dir := range idx.namespaces {
+		pin := treeNamespacePin(idx.root, dir)
+		if pin == "" || pin == dir {
+			continue
+		}
+		// Enrol under the whole pin AND each of its colon segments. Boot's
+		// needle is ":"+hint+":" tested against the canonical id, so a domain
+		// pinned to "cluster:rollout" assembles v1:cluster:rollout:widget --
+		// which contains ":cluster:" and ":rollout:" -- and boot binds the
+		// import under either segment as well as under the full pin. Enrolling
+		// on the full string alone left a colon-scoped pin diverging from boot
+		// in exactly the way memql#2945 was filed about.
+		//
+		// This only decides which directories are CANDIDATES. Whether a given
+		// declaration actually assembles under the namespace is decided
+		// per-declaration by declSuppliesNamespace.
+		for _, ns := range namespaceKeysForPin(pin, dir) {
+			idx.pinnedTo[ns] = append(idx.pinnedTo[ns], dir)
+		}
+	}
+	for ns := range idx.pinnedTo {
+		sort.Strings(idx.pinnedTo[ns])
+		idx.pinnedTo[ns] = slices.Compact(idx.pinnedTo[ns])
+	}
 	return idx
+}
+
+// domainsForNamespace returns the tree directories that can supply a module
+// imported under the namespace ns: the directory literally named ns, followed
+// by every domain whose namespace.pin names it.
+//
+// The literal directory is ALWAYS first and ALWAYS present, even when the tree
+// has no such directory -- resolveUseModule answers "no file" for it, which is
+// exactly today's behaviour. That is what makes this a pure widening: on a
+// tree where nothing is pinned to ns the slice is one element long and every
+// caller behaves byte-for-byte as it did before memql#2945.
+func (idx *declIndex) domainsForNamespace(ns string) []string {
+	pinned := idx.pinnedTo[ns]
+	if len(pinned) == 0 {
+		return []string{ns}
+	}
+	out := make([]string, 0, len(pinned)+1)
+	out = append(out, ns)
+	out = append(out, pinned...)
+	return out
 }
 
 // declNameAndKind returns the top-level declaration name + construct kind
@@ -314,7 +373,14 @@ func stripVersionPrefix(parts []string) []string {
 	return parts
 }
 
-// resolveUseModule maps a Form B dotted module path to a file in the tree.
+// resolveUseModule maps a Form B dotted module path to a file in the tree,
+// treating the leading segment as a DIRECTORY.
+//
+// Callers verifying an author's `use` path want resolveUseModules below, which
+// treats that segment as a NAMESPACE (memql#2945) and calls this once per
+// directory belonging to it. This is the per-directory step; on its own it is
+// the file-path model that disagreed with boot.
+//
 // Primary: parts joined as a path (`demo.concepts` -> demo/concepts.memql).
 // Fallback: the namespace-consolidated file (`capabilities.integration.github`
 // -> capabilities/capabilities.memql with construct-name prefix
@@ -329,6 +395,167 @@ func (t *Tree) resolveUseModule(parts []string) (moduleTarget, bool) {
 		return moduleTarget{file: consolidated, prefix: strings.Join(parts[1:], ".")}, true
 	}
 	return moduleTarget{}, false
+}
+
+// resolveUseModules maps a Form B dotted module path to EVERY file that can
+// supply it -- one per directory belonging to the leading segment's namespace.
+//
+// This is the memql#2945 rule, and it exists because resolveUseModule alone
+// models a `use` path as a FILE PATH while boot models it as a NAMESPACE hint.
+// For an unpinned domain the two coincide (the directory name and the
+// namespace are the same string), which is why the divergence went unnoticed;
+// under a namespace.pin they are different strings and the lint rejected an
+// import boot binds. A lint exists to predict boot, so where they differed the
+// lint was wrong.
+//
+// Concretely, with deployment/namespace.pin = "cluster", the concept declared
+// in deployment/concepts.memql assembles to v1:cluster:widget, so boot binds
+// `use cluster.concepts.{ widget }`. resolveUseModule looks only in cluster/
+// and reports the symbol missing. This looks in cluster/ AND deployment/.
+//
+// It cannot narrow. domainsForNamespace always yields the literal directory
+// first, so every target the single-file form found is still found; a pin can
+// only append. The verdict changes in one direction only, on one shape only:
+// an import naming a namespace some domain has pinned itself to.
+//
+// Targets are deduped on (file, prefix) because two directories can resolve to
+// the same file only if they are the same directory -- but a domain pinned to
+// its own name would produce exactly that, and domainsForNamespace drops that
+// case rather than relying on the dedupe. Belt and braces: the dedupe is what
+// keeps the guarantee if that filter is ever relaxed.
+func (t *Tree) resolveUseModules(idx *declIndex, parts []string) ([]moduleTarget, bool) {
+	if len(parts) == 0 {
+		return nil, false
+	}
+	dirs := []string{parts[0]}
+	if idx != nil {
+		dirs = idx.domainsForNamespace(parts[0])
+	}
+	var out []moduleTarget
+	seen := make(map[moduleTarget]bool, len(dirs))
+	for _, dir := range dirs {
+		alt := make([]string, 0, len(parts))
+		alt = append(alt, dir)
+		alt = append(alt, parts[1:]...)
+		target, ok := t.resolveUseModule(alt)
+		if !ok || seen[target] {
+			continue
+		}
+		seen[target] = true
+		out = append(out, target)
+	}
+	return out, len(out) > 0
+}
+
+// qualifyName renders an imported leaf as the target file declares it --
+// prefixed for a consolidated-capability module, bare otherwise.
+func qualifyName(target moduleTarget, name string) string {
+	if target.prefix == "" {
+		return name
+	}
+	return target.prefix + "." + name
+}
+
+// declaredInAny reports whether name is declared in any of the targets a
+// namespace resolved to. Each target applies its OWN prefix: the same
+// namespace can be served by a per-construct file and a consolidated one, and
+// a leaf's spelling differs between them.
+func declaredInAny(idx *declIndex, targets []moduleTarget, ns, name string) bool {
+	for _, target := range targets {
+		if _, ok := idx.byFile[target.file][qualifyName(target, name)]; !ok {
+			continue
+		}
+		if idx.declSuppliesNamespace(target, ns, name) {
+			return true
+		}
+	}
+	return false
+}
+
+// namespaceKeysForPin returns every namespace a pinned directory can supply:
+// the whole pin, plus each colon segment of it. Mirrors boot, which tests
+// ":"+hint+":" as a substring of the canonical id and therefore matches any
+// interior segment. The directory's own name is never returned -- the literal
+// directory is always a candidate anyway (domainsForNamespace), and returning
+// it would add a duplicate to compact away.
+func namespaceKeysForPin(pin, dir string) []string {
+	keys := make([]string, 0, 3)
+	add := func(k string) {
+		if k == "" || k == dir {
+			return
+		}
+		for _, existing := range keys {
+			if existing == k {
+				return
+			}
+		}
+		keys = append(keys, k)
+	}
+	add(pin)
+	for _, seg := range strings.Split(pin, ":") {
+		add(seg)
+	}
+	return keys
+}
+
+// declSuppliesNamespace reports whether target's declaration of name actually
+// assembles under ns.
+//
+// Directory membership (domainsForNamespace) is decided by the pin FILE alone,
+// which is not the same question. A namespace.pin only PERMITS an explicit
+// @namespace; it never APPLIES one -- ast.AssembleConceptIdFromDeclInDir gives
+// an un-annotated decl the DIRECTORY as its namespace. So a pinned directory
+// routinely holds both: decls that assemble under the pin, and decls that
+// assemble under the directory. Only the former belong to ns.
+//
+// Without this check the lint accepted `use cluster.concepts.{ widget }` for an
+// un-annotated widget in a directory merely pinned to cluster -- a binding boot
+// REFUSES, because its ":cluster:" needle does not match v1:deploy:widget. That
+// is the one direction the widening was documented as unable to take, and it is
+// worse than the bug memql#2945 fixed: green lint over a tree that fails at boot.
+//
+// Non-concept kinds have no canonical id, so they are not filtered here.
+func (idx *declIndex) declSuppliesNamespace(target moduleTarget, ns, name string) bool {
+	full := qualifyName(target, name)
+	if idx.byFile[target.file][full] != "concept" {
+		return true
+	}
+	// Boot consults the namespace hint ONLY as a tiebreaker.
+	// resolveBareConceptNameWithNamespace matches the trailing segment first and
+	// returns immediately when exactly one concept carries the name -- the
+	// ":"+hint+":" needle is never even built. So a unique bare name binds
+	// regardless of the hint, and filtering it here would reject an import boot
+	// ACCEPTS. Index.ConceptDeclared states the same rule in this package ("a
+	// unique bare name resolves regardless of the hint"); a hard filter here
+	// would put two contradictory models of one boot rule in one package.
+	entries := idx.concepts[full]
+	if len(entries) <= 1 {
+		return true
+	}
+	needle := ":" + ns + ":"
+	for _, e := range entries {
+		if e.file != target.file {
+			continue
+		}
+		if id := candidateConceptId(idx.root, e); id != "" && strings.Contains(id, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+// moduleTargetFiles renders the files a namespace resolved to, for a
+// diagnostic. One target prints as the bare path, so the single-directory
+// message -- every message on an unpinned tree -- is unchanged.
+func moduleTargetFiles(targets []moduleTarget) string {
+	if len(targets) == 1 {
+		return targets[0].file
+	}
+	files := make([]string, 0, len(targets))
+	for _, target := range targets {
+		files = append(files, target.file)
+	}
+	return "any of " + strings.Join(files, ", ")
 }
 
 // verifyUseDecls returns the lane-1 diagnostics plus the set of imported
@@ -351,7 +578,9 @@ func (t *Tree) verifyUseDecls(path string, f *languageAst.File, idx *declIndex) 
 			// against.
 			continue
 		}
-		target, ok := t.resolveUseModule(parts)
+		// Every file the namespace can supply, not just the directory
+		// literally named by the leading segment (memql#2945).
+		targets, ok := t.resolveUseModules(idx, parts)
 		if !ok {
 			errs = append(errs, fmt.Errorf(
 				"%s: use %s: module does not resolve to a file in the DSL root (expected %s)",
@@ -361,28 +590,35 @@ func (t *Tree) verifyUseDecls(path string, f *languageAst.File, idx *declIndex) 
 			}
 			continue
 		}
-		if t.ImportsOnly[target.file] {
-			// The target file's declarations are not visible (imports-only
-			// parse projection) -- absence of a symbol proves nothing.
+		// One inconclusive target makes the whole import inconclusive: a
+		// symbol absent from the files we CAN read may be declared in the one
+		// we cannot, so reporting it missing would be a false positive.
+		inconclusive := false
+		for _, target := range targets {
+			if t.ImportsOnly[target.file] {
+				// The target file's declarations are not visible (imports-only
+				// parse projection) -- absence of a symbol proves nothing.
+				inconclusive = true
+				break
+			}
+			if target.prefix != "" && openCapabilityNamespaces[strings.SplitN(target.prefix, ".", 2)[0]] {
+				// Open capability namespace (runtime-dynamic verbs, never
+				// declared in the catalog) -- boot binds these textually.
+				inconclusive = true
+				break
+			}
+		}
+		if inconclusive {
 			continue
 		}
-		if target.prefix != "" && openCapabilityNamespaces[strings.SplitN(target.prefix, ".", 2)[0]] {
-			// Open capability namespace (runtime-dynamic verbs, never
-			// declared in the catalog) -- boot binds these textually.
-			continue
-		}
-		decls := idx.byFile[target.file]
 		for _, n := range u.Names {
-			full := n
-			if target.prefix != "" {
-				full = target.prefix + "." + n
+			if declaredInAny(idx, targets, parts[0], n) {
+				continue
 			}
-			if _, declared := decls[full]; !declared {
-				errs = append(errs, fmt.Errorf(
-					"%s: use %s: %q is not declared in %s",
-					path, u.Path, full, target.file))
-				flagged[n] = true
-			}
+			errs = append(errs, fmt.Errorf(
+				"%s: use %s: %q is not declared in %s",
+				path, u.Path, qualifyName(targets[0], n), moduleTargetFiles(targets)))
+			flagged[n] = true
 		}
 	}
 	return errs, flagged
@@ -530,24 +766,39 @@ func (t *Tree) resolveConceptForFile(path string, f *languageAst.File, idx *decl
 		if len(parts) == 0 || !idx.namespaces[parts[0]] {
 			return conceptResolution{state: conceptInconclusive} // supplied externally
 		}
-		target, ok := t.resolveUseModule(parts)
-		if !ok || t.ImportsOnly[target.file] {
+		// Every file the namespace can supply (memql#2945). Without this a
+		// pinned domain's import resolved to the pin's own directory alone,
+		// found nothing, and went inconclusive -- so the binding lane fell
+		// through to the ambiguity report for a name the import had already
+		// disambiguated at boot.
+		targets, ok := t.resolveUseModules(idx, parts)
+		if !ok {
 			return conceptResolution{state: conceptInconclusive} // lane 1 reports bad modules
 		}
-		full := name
-		if target.prefix != "" {
-			full = target.prefix + "." + name
+		var hit *moduleTarget
+		for i, target := range targets {
+			if t.ImportsOnly[target.file] {
+				return conceptResolution{state: conceptInconclusive} // lane 1 reports bad modules
+			}
+			if _, declared := idx.byFile[target.file][qualifyName(target, name)]; declared && hit == nil {
+				// Same per-declaration namespace test lane 1 applies: a
+				// pinned directory supplies ns only for decls that actually
+				// assemble under it (see declSuppliesNamespace).
+				if idx.declSuppliesNamespace(target, parts[0], name) {
+					hit = &targets[i]
+				}
+			}
 		}
-		kind, declared := idx.byFile[target.file][full]
-		if !declared {
+		if hit == nil {
 			return conceptResolution{state: conceptInconclusive} // lane 1 reports the missing symbol
 		}
-		if kind != "concept" {
+		full := qualifyName(*hit, name)
+		if kind := idx.byFile[hit.file][full]; kind != "concept" {
 			kindHit = kind
 			continue // not a shadow at boot -- keep resolving
 		}
 		for _, e := range idx.concepts[full] {
-			if e.file == target.file {
+			if e.file == hit.file {
 				return conceptResolution{state: conceptResolved, decl: e.decl}
 			}
 		}
@@ -613,26 +864,23 @@ func (t *Tree) verifySignatureBindings(path string, f *languageAst.File, idx *de
 			// v1:rollout:deployment`. Suppressing it here would take memqllint
 			// green on a bundle that crash-loops every node at boot, and
 			// memqllint is the only pre-boot gate a product bundle has.
-			if id, pin, pinImportWorks := pinnedDomainAmbiguity(idx, path, name); id != "" {
+			// The fix is one line, and since memql#2945 it is one line
+			// UNCONDITIONALLY. This message used to have a second branch for
+			// the case where the pin named a real directory that declared no
+			// such concept: lane 1 rejected the import, so the message sent
+			// the author to rename the concept or remove the pin and re-key
+			// every id under it -- a data migration, prescribed because the
+			// LINT was wrong. Lane 1 now resolves a namespace to every domain
+			// that assembles under it, so the pinned import works whether or
+			// not a same-named directory exists, and the branch is gone.
+			if id, pin := pinnedDomainAmbiguity(idx, path, name); id != "" {
 				dir := firstSegment(path)
-				if pinImportWorks {
-					// The fix is one line. Say so, rather than sending the
-					// author to re-key ids -- which is a data migration.
-					errs = append(errs, fmt.Errorf(
-						"%s: signature concept %q is not imported and is declared in %d places in the DSL root -- boot cannot disambiguate an unimported name. %s/ is pinned (%s/namespace.pin = %q), so its %q assembles to %s while this file's ambient namespace hint is %q, which cannot match. Import it by its PINNED namespace: use %s.concepts.{ %q }. An import of this file's own domain would be stripped by the same-domain-use gate (memql#2617), so it is not an alternative",
-						path, name, res.candidates,
-						dir, dir, pin,
-						name, id, dir,
-						pin, name))
-					continue
-				}
 				errs = append(errs, fmt.Errorf(
-					"%s: signature concept %q is not imported and is declared in %d places in the DSL root -- boot cannot disambiguate an unimported name, and NO use declaration can fix this one. %s/ is pinned (%s/namespace.pin = %q), so its %q assembles to %s while this file's ambient namespace hint is %q. An import of this file's own domain is stripped by the same-domain-use gate (memql#2617), and one naming %q is rejected because %s/ exists and declares no %q. Rename one of the colliding concepts, or remove %s/namespace.pin and re-key the ids onto the directory",
+					"%s: signature concept %q is not imported and is declared in %d places in the DSL root -- boot cannot disambiguate an unimported name. %s/ is pinned (%s/namespace.pin = %q), so its %q assembles to %s while this file's ambient namespace hint is %q, which cannot match. Import it by its PINNED namespace: use %s.concepts.{ %s }. An import of this file's own domain would be stripped by the same-domain-use gate (memql#2617), so it is not an alternative",
 					path, name, res.candidates,
 					dir, dir, pin,
 					name, id, dir,
-					pin, pin, name,
-					dir))
+					pin, name))
 				continue
 			}
 			errs = append(errs, fmt.Errorf(
@@ -1577,25 +1825,25 @@ func firstSegment(p string) string {
 //
 // Returns nothing when more than one own-domain candidate survives assembly:
 // the message names a single id, and naming one of two would be a guess.
-func pinnedDomainAmbiguity(idx *declIndex, path, name string) (id, pin string, pinImportWorks bool) {
+func pinnedDomainAmbiguity(idx *declIndex, path, name string) (id, pin string) {
 	if idx == nil {
-		return "", "", false
+		return "", ""
 	}
 	dir := firstSegment(path)
 	if dir == "" {
-		return "", "", false // root-level file: no domain, so no pin
+		return "", "" // root-level file: no domain, so no pin
 	}
 	pin = treeNamespacePin(idx.root, dir)
 	if pin == "" || pin == dir {
 		// Unpinned, or pinned to its own directory name: the ids are what an
 		// unpinned domain would produce, so this is not the #2901 shape.
-		return "", "", false
+		return "", ""
 	}
 	if dslfs.DomainFromFilePath(path) != dir {
 		// A subdirectory file. The same-domain-use gate keys on the LAST
 		// segment, so the own-domain import survives for this file and the
 		// generic remedy is followable after all.
-		return "", "", false
+		return "", ""
 	}
 	for _, entry := range idx.concepts[name] {
 		if firstSegment(entry.file) != dir {
@@ -1609,36 +1857,29 @@ func pinnedDomainAmbiguity(idx *declIndex, path, name string) (id, pin string, p
 			continue
 		}
 		if id != "" {
-			return "", "", false
+			return "", ""
 		}
 		id = cid
 	}
 	if id == "" {
-		return "", "", false
+		return "", ""
 	}
 
-	// Does `use <pin>.concepts.{ name }` actually work? Two cases, and they
-	// give opposite remedies.
-	if !idx.namespaces[pin] {
-		// The pin names no directory in this root. A use path is a NAMESPACE
-		// hint matched as ":"+hint+":" against canonical ids, not a directory
-		// lookup, so lane 1 treats this as an external namespace and boot
-		// binds it correctly. This is the common product-bundle shape: a pin
-		// routinely targets a namespace the bundle does not own.
-		return id, pin, true
-	}
+	// `use <pin>.concepts.{ name }` now works in every remaining case, so
+	// there is one remedy rather than two (memql#2945). A use path's leading
+	// segment is a NAMESPACE, and resolveUseModules maps it to every domain
+	// assembling under it -- this file's own dir included -- so the import
+	// resolves whether or not the pin also names a directory.
+	//
+	// The one shape that still bails is the pin's directory declaring the
+	// SAME name: both then assemble under ":"+pin+":", which is a duplicate-id
+	// situation this message is not equipped to explain. Generic remedy.
 	for _, entry := range idx.concepts[name] {
 		if firstSegment(entry.file) == pin {
-			// The pin's own directory declares this name too, so both
-			// assemble under ":"+pin+":" -- a duplicate-id situation this
-			// message is not equipped to explain. Generic remedy.
-			return "", "", false
+			return "", ""
 		}
 	}
-	// Directory exists and does not declare the name: lane 1 rejects the
-	// import with `%q is not declared in %s`. Rename or unpin really are the
-	// only fixes.
-	return id, pin, false
+	return id, pin
 }
 
 // treeNamespacePin reads a domain's namespace.pin off the tree's own fs.FS.
@@ -1925,13 +2166,24 @@ func (t *Tree) resolveSpecShape(path string, f *languageAst.File, idx *declIndex
 		if len(parts) == 0 || !idx.namespaces[parts[0]] {
 			return nil, "" // supplied externally
 		}
-		target, ok := t.resolveUseModule(parts)
-		if !ok || t.ImportsOnly[target.file] {
+		// Every file the namespace can supply (memql#2945). A shape still has
+		// no canonical namespaced id and gets no namespace hint -- the change
+		// here is only to WHICH FILES the module path names, which is the same
+		// question for a shape as for a concept.
+		targets, ok := t.resolveUseModules(idx, parts)
+		if !ok {
 			return nil, "" // lane 1 reports bad modules
 		}
-		for _, e := range idx.shapeDecls[name] {
-			if e.file == target.file {
-				return e.decl, e.file
+		for _, target := range targets {
+			if t.ImportsOnly[target.file] {
+				return nil, "" // lane 1 reports bad modules
+			}
+		}
+		for _, target := range targets {
+			for _, e := range idx.shapeDecls[name] {
+				if e.file == target.file {
+					return e.decl, e.file
+				}
 			}
 		}
 		return nil, "" // imported but not declared there -- lane 2 reports

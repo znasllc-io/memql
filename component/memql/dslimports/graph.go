@@ -4,7 +4,7 @@ package dslimports
 // reusable, read-only Index -- the resolution source the MemQL Sense language
 // service consumes for import/reference diagnostics and segment-aware
 // completion. It reuses the exact in-package resolution the referential-
-// integrity lanes use (buildDeclIndex, resolveUseModule), so the editor agrees
+// integrity lanes use (buildDeclIndex, resolveUseModules), so the editor agrees
 // with what `memqllint` (and, transitively, engine boot) would accept.
 //
 // Every "does X exist" answer is deliberately framed so a caller can tell
@@ -30,7 +30,7 @@ import (
 // engine module. Multi-segment consolidated-capability paths
 // (`capabilities.integration.github` -> the consolidated
 // capabilities/capabilities.memql with a dotted construct prefix, which
-// resolveUseModule handles) are NOT representable through the (ns, kind) shape;
+// resolveUseModules handles) are NOT representable through the (ns, kind) shape;
 // a consumer that must resolve those handles them separately. Callers also pass
 // an UNVERSIONED namespace -- a leading version segment (`v1.cognition.concepts`)
 // is the caller's to strip (cf. stripVersionPrefix). An unstripped "v1"
@@ -97,37 +97,51 @@ func (ix *Index) Kinds(ns string) []string {
 }
 
 // ModuleResolves reports whether the dotted module <ns>.<kind> resolves to a
-// file in the workspace tree, mirroring resolveUseModule (the Lane-1 rule).
+// file in the workspace tree, mirroring resolveUseModules (the Lane-1 rule).
 func (ix *Index) ModuleResolves(ns, kind string) bool {
-	_, ok := ix.tree.resolveUseModule([]string{ns, kind})
+	_, ok := ix.tree.resolveUseModules(ix.idx, []string{ns, kind})
 	return ok
 }
 
 // ModuleSymbols returns the declared symbol names importable from module
-// <ns>.<kind>, sorted. importsOnly is true when the target file parsed only to
+// <ns>.<kind>, sorted. importsOnly is true when any target file parsed only to
 // its imports projection (its declarations are not visible), in which case an
 // empty list proves nothing. ok is false when the module does not resolve.
+//
+// A namespace can be served by more than one directory -- its own, plus any
+// domain pinned to it (memql#2945) -- so the returned set is the union, which
+// is what the editor must offer: every one of those names is importable under
+// this path and binds at boot.
 func (ix *Index) ModuleSymbols(ns, kind string) (names []string, importsOnly bool, ok bool) {
-	target, resolved := ix.tree.resolveUseModule([]string{ns, kind})
+	targets, resolved := ix.tree.resolveUseModules(ix.idx, []string{ns, kind})
 	if !resolved {
 		return nil, false, false
 	}
-	if ix.tree.ImportsOnly[target.file] {
-		return nil, true, true
-	}
-	decls := ix.idx.byFile[target.file]
-	out := make([]string, 0, len(decls))
-	for name := range decls {
-		if target.prefix != "" {
-			// Consolidated capability files carry dotted names under a prefix;
-			// project them back to the importable leaf for this module.
-			if !strings.HasPrefix(name, target.prefix+".") {
+	seen := make(map[string]bool)
+	var out []string
+	for _, target := range targets {
+		if ix.tree.ImportsOnly[target.file] {
+			return nil, true, true
+		}
+		for name := range ix.idx.byFile[target.file] {
+			leaf := name
+			if target.prefix != "" {
+				// Consolidated capability files carry dotted names under a prefix;
+				// project them back to the importable leaf for this module.
+				if !strings.HasPrefix(name, target.prefix+".") {
+					continue
+				}
+				leaf = strings.TrimPrefix(name, target.prefix+".")
+			}
+			if seen[leaf] {
 				continue
 			}
-			out = append(out, strings.TrimPrefix(name, target.prefix+"."))
-			continue
+			seen[leaf] = true
+			out = append(out, leaf)
 		}
-		out = append(out, name)
+	}
+	if out == nil {
+		out = []string{}
 	}
 	sort.Strings(out)
 	return out, false, true
@@ -139,22 +153,19 @@ func (ix *Index) ModuleSymbols(ns, kind string) (names []string, importsOnly boo
 // at boot, never cataloged) -- in every such case the caller stays silent
 // rather than flagging a false positive.
 func (ix *Index) SymbolDeclared(ns, kind, id string) (declared bool, decidable bool) {
-	target, resolved := ix.tree.resolveUseModule([]string{ns, kind})
+	targets, resolved := ix.tree.resolveUseModules(ix.idx, []string{ns, kind})
 	if !resolved {
 		return false, false
 	}
-	if ix.tree.ImportsOnly[target.file] {
-		return false, false
+	for _, target := range targets {
+		if ix.tree.ImportsOnly[target.file] {
+			return false, false
+		}
+		if target.prefix != "" && openCapabilityNamespaces[strings.SplitN(target.prefix, ".", 2)[0]] {
+			return false, false
+		}
 	}
-	if target.prefix != "" && openCapabilityNamespaces[strings.SplitN(target.prefix, ".", 2)[0]] {
-		return false, false
-	}
-	full := id
-	if target.prefix != "" {
-		full = target.prefix + "." + id
-	}
-	_, ok := ix.idx.byFile[target.file][full]
-	return ok, true
+	return declaredInAny(ix.idx, targets, ns, id), true
 }
 
 // ConceptDeclared reports whether a concept named `name` is declared in the
