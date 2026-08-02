@@ -4,6 +4,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -41,9 +42,31 @@ import (
 // here would make this test about everything and therefore about nothing.
 func TestWellKnownRoutesAreDeclaredPublic(t *testing.T) {
 	mounted := wellKnownRoutesMountedBy(t, "identity.go", "RegisterRoutes")
-	if len(mounted) == 0 {
-		t.Fatal("parsed no /.well-known/ registrations out of RegisterRoutes -- the parse " +
-			"has drifted from the source and this test is no longer checking anything")
+
+	// Pinned by exact set, not by "at least one". A zero-route guard only fires
+	// when the parse breaks completely; turning ONE literal into a named
+	// constant drops just that route from the parse, and a route that is not
+	// parsed cannot be reported as undeclared -- so removing its declaration at
+	// the same time left the suite green. An exact set makes both directions an
+	// explicit act: a new well-known route fails here until it is added to this
+	// list AND declared, and a route that stops being parsed fails as missing.
+	expected := []string{
+		"/.well-known/jwks.json",
+		"/.well-known/memql-config.json",
+		"/.well-known/oauth-authorization-server",
+	}
+
+	got := append([]string(nil), mounted...)
+	sort.Strings(got)
+	want := append([]string(nil), expected...)
+	sort.Strings(want)
+
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("the /.well-known/ routes parsed out of RegisterRoutes have changed.\n"+
+			"parsed:   %v\nexpected: %v\n\nIf a route was added, add it here and declare it. "+
+			"If one vanished from the parse -- a literal became a constant, or the "+
+			"registration moved behind a helper -- this test silently stopped covering it, "+
+			"which is the failure mode it exists to prevent (#2939).", got, want)
 	}
 
 	declared := map[string]bool{}

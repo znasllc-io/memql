@@ -183,13 +183,19 @@ func (a *App) createHTTPServer() {
 	//     surface: routes reaching the mux through one of the enumerated handoffs
 	//     (server.RegisterConceptsEndpoint, identity's svc.RegisterRoutes) are not
 	//     covered -- see app/mux_registration_test.go and memql#3004.
-	//   - MEMQL_IDENTITY_ENABLED=false: contract routes only. That mode admits
-	//     every gRPC STREAM as the cluster owner by design -- the local-dev admit
-	//     path is a gRPC stream interceptor, not HTTP middleware, so HTTP requests
-	//     there carry no claims and the handlers fail closed on the missing actor.
-	//     Demanding "this is safe unauthenticated" declarations for
-	//     attachments/audio/voice would fail-fast a deliberate, loudly-warned
-	//     troubleshooting posture that is supposed to work.
+	//     Registration is sealed below once this has run, because being declared
+	//     is only half of it -- a route mounted by a later phase would be served
+	//     having never been checked.
+	//   - MEMQL_IDENTITY_ENABLED=false: contract routes only, and NOT because
+	//     the rest are safe there. That mode disables authentication outright:
+	//     the local-dev admit path is a gRPC stream interceptor rather than HTTP
+	//     middleware, attachments and audio 401 on the missing actor but
+	//     polyphon's room-token and status check nothing, and the gateway
+	//     middleware ahead of the mux admits POST /memql/query as the synthetic
+	//     cluster owner. A per-route "safe unauthenticated" declaration would
+	//     assert something false by construction in a mode where nothing is
+	//     authenticated, so it stays a floor rather than a full scope. See the
+	//     longer note at the same early return in app/config.go.
 	//
 	// Fail-fast rather than warn: a boot warning is exactly the signal that went
 	// unread when the automations routes were added.

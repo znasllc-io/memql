@@ -231,9 +231,15 @@ func TestBasePathDoesNotChangeTheVerdict(t *testing.T) {
 	}
 
 	// The bases below are not arbitrary. The first four are ordinary mount
-	// points. The rest are every base that is ITSELF a declared path, or a
-	// prefix declaration minus its trailing slash -- the shape that used to
-	// reduce a declaration to "/" and make the whole check pass vacuously.
+	// points. The rest are declared paths, or a prefix declaration minus its
+	// trailing slash -- the shape that used to reduce a declaration to "/" and
+	// make the whole check pass vacuously.
+	//
+	// Not exhaustive over the declarations, and deliberately not claiming to
+	// be: PublicPaths() also carries the /auth/*, /polyphon/*, /api/concepts,
+	// /si/* and /.well-known/* entries. These are the ones whose failure mode
+	// differs; the unit tests below pin the two guards directly, which is what
+	// makes exhaustiveness here unnecessary rather than merely unclaimed.
 	bases := []string{
 		"", "/api", "/memql", "/heal",
 		"/metrics", "/healthz", "/readyz", "/livez", "/memql/ws", "/automations",
@@ -269,5 +275,66 @@ func TestBasePathDoesNotChangeTheVerdict(t *testing.T) {
 				t.Errorf("the error must name the undeclared route, got: %v", err)
 			}
 		})
+	}
+}
+
+// The two guards against the "/" fail-open are redundant with each other, so
+// the integration-shaped test above passes with EITHER one present. That means
+// it covers neither: a future simplification of one leaves half the fail-open
+// restored and the suite green. These pin them one at a time.
+
+// Guard 1: surfaceDeclaredBy must never honour "/" as a PREFIX declaration.
+// Exact equality against "/" is still a match -- a genuinely declared root
+// route is unaffected.
+func TestSurfaceDeclaredByRefusesRootAsPrefix(t *testing.T) {
+	if surfaceDeclaredBy([]string{"/internal/dump-secrets"}, []string{"/"}) {
+		t.Error(`"/" must not act as a prefix declaration: it prefixes every absolute path, ` +
+			`so honouring it blesses the entire surface from one entry and the boot ` +
+			`assertion becomes vacuous`)
+	}
+	if !surfaceDeclaredBy([]string{"/"}, []string{"/"}) {
+		t.Error(`"/" must still match "/" exactly -- refusing it as a prefix should not ` +
+			`stop a genuinely declared root route from being declared`)
+	}
+	// The ordinary prefix case must keep working.
+	if !surfaceDeclaredBy([]string{"/automations/resume"}, []string{"/automations/"}) {
+		t.Error("a trailing-slash declaration must still cover the subtree beneath it")
+	}
+}
+
+// Guard 2: surfacePathForms must not emit a stripped form that reduces to "/",
+// for either spelling that produced one.
+func TestSurfacePathFormsNeverYieldsRoot(t *testing.T) {
+	for _, tc := range []struct {
+		base, path, why string
+	}{
+		{"/metrics", "/metrics", "path equal to the base"},
+		{"/automations", "/automations/", "prefix declaration one slash past the base"},
+		{"/memql/ws", "/memql/ws", "multi-segment base equal to the path"},
+	} {
+		t.Run(tc.base+" "+tc.path, func(t *testing.T) {
+			t.Setenv("SERVER_PUBLIC_PATH", tc.base)
+			for _, form := range surfacePathForms(tc.path) {
+				if form == "/" {
+					t.Fatalf("%s produced the form \"/\", which surfaceDeclaredBy would honour "+
+						"as a prefix of everything (%s)", tc.path, tc.why)
+				}
+			}
+		})
+	}
+
+	// ...while a real stripped form is still produced, so the base handling
+	// this guard sits inside has not been disabled outright.
+	t.Setenv("SERVER_PUBLIC_PATH", "/memql")
+	var found bool
+	for _, form := range surfacePathForms("/memql/ws") {
+		if form == "/ws" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("the base-stripped form must still be emitted when something remains " +
+			"below the base -- otherwise base-prefixed routes stop matching their " +
+			"declarations and the identity binary refuses to boot")
 	}
 }

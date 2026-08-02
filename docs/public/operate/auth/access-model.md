@@ -227,14 +227,23 @@ binary asserts the contract routes plus everything app code mounts
 through `a.handleRoute` (7 paths today). Routes mounted by middleware
 ahead of the mux, or registered via an aliased copy of it, are not yet
 covered -- see memql#3004. A node running
-`MEMQL_IDENTITY_ENABLED=false` asserts the contract routes only. The
-reason is narrower than "everything is the cluster owner there", which is
-true of gRPC and not of HTTP: the local-dev admit path is a gRPC *stream*
-interceptor, so HTTP requests on that node carry no claims at all and the
-handlers fail closed on the missing actor. Demanding "safe
-unauthenticated" declarations for attachments / audio / voice would
-fail-fast a deliberate, loudly-warned troubleshooting posture without
-buying coverage those handlers do not already provide.
+`MEMQL_IDENTITY_ENABLED=false` asserts the contract routes only -- and
+**not** because the other routes are safe on that node. They are not.
+That mode disables authentication outright, and the details matter if you
+are tempted to rely on it: "everything is the cluster owner" is true of
+gRPC and not of HTTP (the local-dev admit path is a *stream*
+interceptor); attachments and audio return 401 on the missing actor, but
+the Polyphon room-token and status handlers check nothing at all; and the
+gateway middleware sits *ahead* of the mux and admits
+`POST /memql/query` as the synthetic cluster owner. That is the toggle's
+documented meaning, which is why it is loudly warned and must never be
+set in staging or production.
+
+The scope is a floor rather than a full check because a per-route "safe
+unauthenticated" declaration would assert something false by construction
+in a mode where nothing is authenticated. The identity binary gets the
+wider scope because there the declarations mean something: that node
+serves an unauthenticated HTTP surface **in production**.
 
 **Being declared is not enough on its own -- it has to be declared in
 time.** `createHTTPServer` reads the registered set once, and later build

@@ -102,7 +102,8 @@ func (a *App) configAndAuth() {
 		// That surface is now declared rather than incidental: createHTTPServer
 		// asserts the OpenAPI contract plus everything app code mounts via
 		// a.handleRoute is in PublicPaths() or HandlerAuthorizedPaths(), and
-		// refuses to boot otherwise (#2939). Seven paths on identity today.
+		// refuses to boot otherwise (#2939). Seven paths on identity with no base
+		// path configured; nine when SERVER_PUBLIC_PATH adds prefixed spellings.
 		//
 		// That is NOT every route this binary serves, and the difference is
 		// exactly what the next reader needs: routes handed to the mux through
@@ -130,15 +131,28 @@ func (a *App) configAndAuth() {
 	// covers this path too (#2939), but over the CONTRACT routes only -- not the
 	// helper-registered routes as on identity.
 	//
-	// The reason is narrower than "everything is the cluster owner here", which
-	// is true of gRPC and not of HTTP: the local-dev admit path transportBase
-	// installs is a gRPC STREAM interceptor, so HTTP requests on this path carry
-	// no claims at all and the handlers fail closed on the missing actor (see
-	// the 401 in component/server/attachment_handler.go). Demanding "safe
-	// unauthenticated" declarations for attachments / audio / voice would
-	// therefore fail-fast a deliberate, loudly-warned troubleshooting posture
-	// that is meant to work, without buying any coverage those handlers do not
-	// already provide themselves.
+	// The reason is NOT that the undeclared routes are safe here. They are not,
+	// and it is worth being exact, because a comfortable half-truth at this
+	// return is what #2939 is about:
+	//
+	//   - "everything is the cluster owner" is true of gRPC and not of HTTP --
+	//     the local-dev admit path is a STREAM interceptor.
+	//   - attachments and audio do 401 on the missing actor, but polyphon's
+	//     room-token and status handlers check nothing at all, and the gateway
+	//     middleware sits AHEAD of the mux and admits POST /memql/query as the
+	//     synthetic cluster owner.
+	//
+	// So on this node the HTTP surface is simply unauthenticated. That is the
+	// toggle's documented meaning, which is why it is loudly warned and must
+	// never be set in staging or production.
+	//
+	// The scope is contract-only because a per-route "this is safe
+	// unauthenticated" declaration asserts a property that is false here by
+	// construction -- nothing is authenticated in this mode -- and demanding it
+	// would fail-fast a posture whose whole purpose is to run without auth. The
+	// contract check still runs as a floor. The identity binary gets the wider
+	// scope because there the declarations mean something: that node serves an
+	// unauthenticated HTTP surface in PRODUCTION.
 	if !config.IdentityAuthEnabled() {
 		a.authDisabled = true
 		metrics.SetAuthEnabled(false)

@@ -735,6 +735,16 @@ func JWKSPaths() []string {
 // well-knowns were already in PublicPaths(), which was true of jwks.json and
 // false of these. component/identity/wellknown_declared_test.go keeps the
 // declaration in step with what identity actually mounts.
+//
+// Know what declaring them costs, because PublicPaths() is not only read by
+// this package's boot check: verifier.shouldBypassAuth treats EVERY entry as a
+// prefix regardless of trailing slash, so on every verifier-consuming node
+// these entries also bypass auth for anything mounted BENEATH them --
+// /.well-known/oauth-authorization-server/<issuer>, the RFC 8414
+// issuer-suffixed form, being the realistic one. Nothing is mounted there
+// today on any binary. Anything added there later inherits the bypass without
+// a further decision, so it is a decision to make then, not an accident to
+// discover.
 func IdentityDiscoveryPaths() []string {
 	return withBasePath(
 		"/.well-known/memql-config.json",

@@ -208,14 +208,24 @@ func surfaceDeclaredBy(routeForms []string, declarations []string) bool {
 // "/healthz" would otherwise yield "thz". Trailing slashes are PRESERVED --
 // they carry the prefix-vs-exact distinction (see surfaceDeclaredBy).
 //
-// A stripped form that reduces to "/" is DROPPED rather than emitted. It arose
-// whenever the operator set the base to a path that is itself declared --
-// SERVER_PUBLIC_PATH=/metrics, /healthz, /readyz, /livez, /memql/ws -- or to a
-// prefix declaration minus its trailing slash (/automations). The declaration
-// then produced the form "/", which surfaceDeclaredBy honoured as a prefix
-// covering every route, so the entire boot assertion passed vacuously and an
-// undeclared route sailed through. Nothing is lost by dropping it: the
-// as-written form is kept on both sides and still matches.
+// A stripped form that reduces to "/" is DROPPED rather than emitted, because
+// surfaceDeclaredBy honours a trailing-slash declaration as a prefix and "/"
+// prefixes every absolute path -- one such declaration blessed the entire
+// surface and the whole assertion passed vacuously.
+//
+// Two spellings produced it, and they were fixed by two different edits:
+//
+//	p == base            -> "/"   e.g. base=/metrics, /healthz, /readyz,
+//	                              /livez, /memql/ws. Fixed by deleting the
+//	                              p == base branch that appended "/" outright.
+//	p == base + "/"      -> "/"   e.g. base=/automations against the prefix
+//	                              declaration "/automations/". Fixed by the
+//	                              rest != "" guard below.
+//
+// Nothing is lost by dropping the form: the as-written spelling is kept on
+// both sides and still matches. surfaceDeclaredBy independently refuses "/" as
+// a prefix, so the two are belt-and-braces; each is tested on its own, since a
+// guard whose only coverage comes from the other guard is not covered at all.
 func surfacePathForms(p string) []string {
 	p = strings.TrimSpace(p)
 	if p == "" {
