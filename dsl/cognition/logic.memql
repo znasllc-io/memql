@@ -182,6 +182,20 @@ logic voiceMigrationOnSecondHuman {
   // 2. ANY OTHER count is a no-op (single user = first to focus the
   // space; 3+ = already migrated; 0 wouldn't appear here because the
   // event filter required a non-empty activePartitionId on the writer).
+  //
+  // `mutationCreateCanvasState` is NOT a #2853 leftover -- do not "fix" the
+  // prefix off it (memql#2979). The canvas-state mutation is declared in the
+  // PRODUCT BUNDLE, under that literal name, and nothing in this repo declares
+  // it: `integrations/planner/plan_execution.go` records the runtime failure
+  // `function "mutationCreateCanvasState" not found` from when the planner core
+  // build tried to load it, and Go calls it by the same string in
+  // component/server/plan_store.go, integrations/planner/mint_skill_handler.go
+  // and agent_loop_specialist_gate.go. Renaming here alone breaks the call;
+  // renaming it properly is a cross-repo change in lockstep with the bundle.
+  //
+  // TestDocsDoNotReferencePrefixedConstructNames stays silent on it by design
+  // rather than by exemption -- it only fires when THIS tree declares the
+  // unprefixed form under the asserted kind, and it does not.
   publishGroupCard := if active.count() == 2 {
     mutation mutationCreateCanvasState(
       stateId: concat("voice-migrated-public-", hash(args.event.payload.activePartitionId)),

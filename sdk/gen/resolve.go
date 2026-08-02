@@ -11,7 +11,7 @@ import (
 )
 
 // This file resolves a construct's signature-bound concept SHORT NAME
-// (e.g. `space` in `query space querySpaceParticipants`) to its canonical
+// (e.g. `space` in `query space spaceParticipants`) to its canonical
 // concept id (e.g. `v1:cognition:space`), mirroring the engine's
 // component/memql.LoadUnifiedConcepts resolution model:
 //

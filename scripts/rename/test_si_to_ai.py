@@ -115,6 +115,54 @@ once = transform(once, ".memql")
 twice = transform(transform(once, ".go"), ".memql")
 check("idempotent", twice, once)
 
+
+# --- reachability: no rule may be shadowed by an earlier one ---
+#
+# Groups are applied in FILE ORDER (si_to_ai.py: `for name in data["groups"]`)
+# and sorted by length only WITHIN a group. So an earlier group's infix rule can
+# consume a token an later group's rule was written to match, leaving that later
+# rule permanently dead -- it never fires, and nothing says so.
+#
+# That is not hypothetical: `dsl-identifiers` originally sat 7th, and both of its
+# rules were dead. `shared`'s infix `JoinSpaceAsSI -> JoinSpaceAsAI` rewrote the
+# SI-spelled token into its AI-spelled equivalent -- still carrying the retired
+# `mutation` prefix -- before the exact-token rule for it could run, so the
+# renamer kept minting that prefix into every repo it is pointed at, which is the
+# precise outcome those rules exist to prevent.
+#
+# (Described indirectly rather than quoted: writing the prefixed AI spelling
+# literally would itself trip the #2979 gate, because it resolves to a live
+# construct. That is the gate working, not an inconvenience.)
+#
+# Fixed by moving `dsl-identifiers` first (specific before general); this keeps it
+# fixed.
+def _rules_in_order():
+    out = []
+    for gname, rules in DATA["groups"].items():
+        for rule in rules:
+            out.append((gname, rule))
+    return out
+
+
+_seen = []
+for _gname, _rule in _rules_in_order():
+    _old = _rule["old"]
+    _exts = set(_rule.get("exts") or [])
+    for _pg, _prev in _seen:
+        _pold = _prev["old"]
+        if _pold == _old:
+            continue
+        _pexts = set(_prev.get("exts") or [])
+        if _exts and _pexts and not (_exts & _pexts):
+            continue
+        if _prev.get("mode") == "infix" and _pold in _old:
+            FAILS.append(
+                f"rule {_gname}.{_old!r} is SHADOWED by earlier {_pg}.{_pold!r} "
+                f"(infix, overlapping exts) -- the earlier rule rewrites the token first, "
+                f"so {_old!r} can never match and its replacement is never written"
+            )
+    _seen.append((_gname, _rule))
+
 if FAILS:
     print("FAIL:")
     for f in FAILS:

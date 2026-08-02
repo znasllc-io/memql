@@ -10,6 +10,24 @@
     "SCREAMING telemetry/enum strings (SI_COMPLETION_*, SUBSCRIPTION_KIND_SI_STREAM) -- wire/observability data contracts; reviewed per-issue (1.3/1.4), not auto-renamed here."
   ],
   "groups": {
+    "dsl-identifiers": [
+      {
+        "old": "queryHasSIResponseForReply",
+        "new": "hasAIResponseForReply",
+        "mode": "token",
+        "exts": [
+          ".memql"
+        ]
+      },
+      {
+        "old": "mutationJoinSpaceAsSI",
+        "new": "joinSpaceAsAI",
+        "mode": "token",
+        "exts": [
+          ".memql"
+        ]
+      }
+    ],
     "go-grammar": [
       {
         "old": "SIExpr",
@@ -822,24 +840,6 @@
           ".go"
         ],
         "_note": "Hardcoded `si(` string literals in Go that PARSE/SERIALIZE the keyword (shape.go funcCall[:3]==\"si(\", canonical.go, shape_template.go WriteString) + the si()-keyword error messages/comments. The participant data value \"si\" has no paren and is untouched (deferred #1918)."
-      }
-    ],
-    "dsl-identifiers": [
-      {
-        "old": "queryHasSIResponseForReply",
-        "new": "queryHasAIResponseForReply",
-        "mode": "token",
-        "exts": [
-          ".memql"
-        ]
-      },
-      {
-        "old": "mutationJoinSpaceAsSI",
-        "new": "mutationJoinSpaceAsAI",
-        "mode": "token",
-        "exts": [
-          ".memql"
-        ]
       }
     ],
     "frontend": [
