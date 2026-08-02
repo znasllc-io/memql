@@ -140,7 +140,7 @@ concept participant {
 `)
 	writeFixture(t, root, "cognition/queries.memql", `
 @description("List participants")
-query participant querySpaceParticipants {
+query participant spaceParticipants {
   args { spaceId string @required }
   filter spaceId==args.spaceId
   shape participantCard
@@ -161,7 +161,7 @@ query participant querySpaceParticipants {
 
 	for _, want := range []string{
 		`"COGNITION_PARTICIPANT": "v1:cognition:participant"`,
-		`"querySpaceParticipants": "v1:cognition:participant"`,
+		`"spaceParticipants": "v1:cognition:participant"`,
 		`"COGNITION_PARTICIPANT_CREATED": "graph.node.created.v1:cognition:participant"`,
 		`"COGNITION_PARTICIPANT_UPDATED": "graph.node.updated.v1:cognition:participant"`,
 		`"COGNITION_PARTICIPANT_DELETED": "graph.node.deleted.v1:cognition:participant"`,
@@ -176,7 +176,7 @@ query participant querySpaceParticipants {
 	}
 	for _, want := range []string{
 		`COGNITION_PARTICIPANT: "v1:cognition:participant"`,
-		`querySpaceParticipants: "v1:cognition:participant"`,
+		`spaceParticipants: "v1:cognition:participant"`,
 		`COGNITION_PARTICIPANT_CREATED: "graph.node.created.v1:cognition:participant"`,
 		`export const topicFor =`,
 		`export const filterFor =`,
@@ -260,7 +260,7 @@ concept participant { spaceId string @required }
 `)
 	writeFixture(t, root, "cognition/queries.memql", `
 @description("List participants for a space.")
-query participant querySpaceParticipants {
+query participant spaceParticipants {
   args { spaceId string @required @description("The space id.") }
   filter spaceId==args.spaceId
   shape participantCard

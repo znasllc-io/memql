@@ -40,7 +40,7 @@
 --   * Base hypertable:  20260324000000_initial_setup.up.sql ("MemoryNodes")
 
 -- Version-history access index. documentVersion rows are read as
--- "every version of one logical document" (queryDocumentVersions) +
+-- "every version of one logical document" (documentVersions) +
 -- "the latest version" (the edit/restore handlers). The logical
 -- document id lives in payload->>'documentId'; ordering is by
 -- versionNumber. A partial index keyed on (documentId, versionNumber DESC),

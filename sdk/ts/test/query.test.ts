@@ -77,7 +77,7 @@ test("executeNamed -- forwards opts.cursor onto ExecuteQueryMsg.cursor", async (
   const mock = new MockDispatcher();
   const qc = new QueryClient(mock.asDispatcher());
 
-  const promise = qc.executeNamed("querySpaceUtterances", 'querySpaceUtterances({"partitionId":"s1"})', {
+  const promise = qc.executeNamed("spaceUtterances", 'spaceUtterances({"partitionId":"s1"})', {
     cursor: "opaque-cursor-token",
   });
   mock.reply({
@@ -126,7 +126,7 @@ test("executeNamed -- exhausted page mints no nextCursor (meta cursor empty)", a
   const mock = new MockDispatcher();
   const qc = new QueryClient(mock.asDispatcher());
 
-  const promise = qc.executeNamed("querySpaceUtterances", 'querySpaceUtterances({"partitionId":"s1"})', {
+  const promise = qc.executeNamed("spaceUtterances", 'spaceUtterances({"partitionId":"s1"})', {
     cursor: "last-page-cursor",
   });
   mock.reply({
@@ -147,7 +147,7 @@ test("executeRaw -- forwards opts.cursor onto the wire", async () => {
   const mock = new MockDispatcher();
   const qc = new QueryClient(mock.asDispatcher());
 
-  const promise = qc.executeRaw('paginate(sort(querySpaceUtterances({"partitionId":"s1"}), "createdAt", "desc"), 50)', {
+  const promise = qc.executeRaw('paginate(sort(spaceUtterances({"partitionId":"s1"}), "createdAt", "desc"), 50)', {
     cursor: "raw-cursor",
   });
   mock.reply({

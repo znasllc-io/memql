@@ -11,19 +11,31 @@ import (
 	"strings"
 	"testing"
 	"unicode"
+	"unicode/utf8"
 )
 
 // TestDocsDoNotReferencePrefixedConstructNames is the call-site half of the
 // kind-prefix ruling (#2914). #2853 abandoned the `query*` / `mutation*` /
 // `logic*` naming convention and gated the DECLARATIONS; the tree is clean.
-// This gate covers the other direction: docs under docs/public/ that name a
+// This gate covers the other direction: any git-tracked file that names a
 // construct by a prefixed spelling the tree declares unprefixed.
 //
-// What earns this a gate is that the docs are WRONG in the plainest sense: a
-// reference table saying dsl/forge/mutations.memql contains
-// `mutationCreateProject` is a false statement about this repo -- that file
-// declares `createProject`. Nothing on our side flags it, so the cost lands on
-// the reader.
+// The name says "Docs" for its history. Scope grew docs/public -> all tracked
+// markdown (#2917) -> every tracked file (#2979); it is kept because the name
+// is cited from several places and a rename buys nothing the doc comment does
+// not already say.
+//
+// What earns this a gate is that the reference is WRONG in the plainest sense:
+// a table saying dsl/forge/mutations.memql contains `mutationCreateProject` is
+// a false statement about this repo -- that file declares `createProject`.
+// Nothing on our side flags it, so the cost lands on the reader.
+//
+// The non-markdown half (#2979) is not merely cosmetic either. It held five
+// TypeScript wire strings passing `"querySpaceUtterances"` to `executeNamed`
+// -- a query that does not exist; they pass only because the test's
+// MockDispatcher replies from a canned payload and never resolves a name.
+// It also held a rename tool's REPLACEMENT values (scripts/rename/rules.json),
+// which would have re-minted the retired spelling on the next run.
 //
 // Be precise about how it lands, because #2914's body overstates it. Inside a
 // lint root that CONTAINS the imported namespace, `make dsl-lint`
@@ -115,10 +127,10 @@ func TestDocsDoNotReferencePrefixedConstructNames(t *testing.T) {
 		}
 	}
 
-	// Police GIT-TRACKED markdown REPO-WIDE (#2917), not just docs/public.
-	// A local scratch note is not repo content, hence git-tracked only; the
-	// house convention is that a hit anywhere is a regression
-	// (product_neutrality_test.go:20-23), and the sibling gates
+	// Police GIT-TRACKED files REPO-WIDE (#2917 markdown, #2979 the rest), not
+	// just docs/public. A local scratch note is not repo content, hence
+	// git-tracked only; the house convention is that a hit anywhere is a
+	// regression (product_neutrality_test.go:20-23), and the sibling gates
 	// TestEngineIsProductNeutral and TestLifecycleDocsMatchRuling both sweep
 	// the whole repo.
 	//
@@ -139,18 +151,38 @@ func TestDocsDoNotReferencePrefixedConstructNames(t *testing.T) {
 	// examples rather than the counter-examples that need the escape hatch
 	// above (naming-conventions.md, the file that comment warned about,
 	// reports clean).
+	// EVERY git-tracked file, not just markdown (#2979). Markdown was the
+	// original scope because #2914/#2917 were documentation sweeps; the
+	// spelling is equally wrong everywhere else, and the non-markdown half held
+	// 20 provable sites -- a live SDK doc comment, a rename tool's replacement
+	// values, seven duplicated operator-facing deploy comments, a migration
+	// comment and five TypeScript wire strings naming a query that does not
+	// exist.
+	//
+	// Sweeping by "not excluded" rather than by an allowlist of extensions is
+	// deliberate. An extension allowlist is silently incomplete the moment
+	// somebody adds a `.tsx`, a `.sh` or a `.tf` -- and a gate that quietly
+	// stops covering new file types is the same silent-disable shape the
+	// resolver self-check above exists to catch.
 	out, err := exec.Command("git", "ls-files", "-z").Output()
 	if err != nil {
 		t.Fatalf("git ls-files: %v", err)
 	}
 	prefixedRef := regexp.MustCompile(`\b(?:query|mutation|logic)[A-Z][A-Za-z0-9_]*`)
 	for _, rel := range strings.Split(string(out), "\x00") {
-		if rel == "" || filepath.Ext(rel) != ".md" {
+		if rel == "" || prefixNameGateExempt(rel) {
 			continue
 		}
 		data, err := os.ReadFile(rel)
 		if err != nil {
 			// git-tracked but locally absent (partial checkout); not drift.
+			continue
+		}
+		if !utf8.Valid(data) {
+			// A binary blob (an image, a fixture archive) can contain the byte
+			// sequence by coincidence, and reporting a line number into it is
+			// meaningless. Now that the sweep is not extension-scoped, this is
+			// the thing standing between the gate and a nonsense diagnostic.
 			continue
 		}
 		content := string(data)
@@ -165,6 +197,46 @@ func TestDocsDoNotReferencePrefixedConstructNames(t *testing.T) {
 				rel, line, written, bare, origin)
 		}
 	}
+}
+
+// prefixNameGateExempt reports whether a path is outside the sweep.
+//
+// The list is TWO FILES and should stay that way. Both are gates about naming,
+// so both must write the retired spelling to say what they forbid -- exempting
+// them is not a carve-out for drift, it is the only way the rule can be stated
+// at all. Everything else in the repo is in scope, including generated files,
+// fixtures and comments.
+//
+// What does NOT belong here: a file that merely happens to contain a
+// violation. The escape hatch for a legitimate mention elsewhere is the one in
+// this gate's header -- write the kind so the prefix is not glued to the name
+// ("the old `query*` form of recordsByState"). Adding a path here instead
+// buys silence on every future violation in that file too, which is how a
+// gate rots.
+//
+// Deliberately NOT exempt, though both were candidates:
+//
+//   - dsl/**/*.memql comments. ~50 carry a prefixed spelling, and NONE is in
+//     the provable class -- dsl/knowledge/mutations.memql:8 says
+//     `mutationCreateDocument` where the tree declares `createDocumentChunk`,
+//     so the intended target is a guess, not a derivation. The resolver is
+//     already silent on them for the right reason; an exemption would also
+//     hide a future .memql site that IS provable.
+//   - dsl/cognition/logic.memql's `mutationCreateCanvasState` calls. Silent
+//     for the same structural reason (bundle-owned, undeclared here), and the
+//     call site now carries a comment saying so.
+func prefixNameGateExempt(rel string) bool {
+	switch rel {
+	case "docs_construct_names_test.go":
+		// This file. Its header quotes the retired form to explain the ruling,
+		// and its resolver self-check is built from known-bad spellings.
+		return true
+	case "dsl/naming_conventions_test.go":
+		// The declaration half of the same ruling (#2853). Its counter-examples
+		// are the retired form by construction.
+		return true
+	}
+	return false
 }
 
 // docsDeclaredConstructs maps "<kind> <name>" to the file:line declaring it,

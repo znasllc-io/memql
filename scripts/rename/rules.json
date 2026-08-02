@@ -827,7 +827,7 @@
     "dsl-identifiers": [
       {
         "old": "queryHasSIResponseForReply",
-        "new": "queryHasAIResponseForReply",
+        "new": "hasAIResponseForReply",
         "mode": "token",
         "exts": [
           ".memql"
@@ -835,7 +835,7 @@
       },
       {
         "old": "mutationJoinSpaceAsSI",
-        "new": "mutationJoinSpaceAsAI",
+        "new": "joinSpaceAsAI",
         "mode": "token",
         "exts": [
           ".memql"
