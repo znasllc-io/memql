@@ -8,15 +8,6 @@ import (
 	"testing"
 )
 
-var (
-	// -run is only a flag when it stands alone. Anchoring on the preceding
-	// whitespace boundary is what keeps the word "Re-run" in Makefile prose
-	// (:354 today) from being read as a broken target.
-	makeRunFlag = regexp.MustCompile(`(?:^|\s)-run[\s=]+['"]?([^\s'"]+)`)
-	makePkgRef  = regexp.MustCompile(`\./[\w./-]*`)
-	goTestDecl  = regexp.MustCompile(`(?m)^func (Test\w+)\s*\(`)
-)
-
 // TestMakefileRunPatternsMatchARealTest closes the class of defect that #2923
 // is one instance of: a `go test -run <Pattern>` recipe whose pattern matches
 // no test in the package it targets. `go test` exits 0 on that with
@@ -49,51 +40,90 @@ var (
 //     fires only when no file in the package declares a matching name at all.
 //     A gate that blocks valid work is worse than the invisible target it
 //     replaces.
+//
+// runFinding is one problem the scan found, kept as data so the table test can
+// assert on it without a Makefile on disk (memql#3003).
+type runFinding struct {
+	lineNo  int
+	pattern string
+	pkgs    []string
+	kind    string // "bad-regexp" | "no-tests" | "no-match"
+}
+
+// scanMakefileRunPatterns is the whole rule, separated from the filesystem so
+// it can be driven by synthetic Makefiles.
+//
+// namesFor resolves package references to declared test names; the real gate
+// reads them off disk, the table test supplies them directly. checked counts
+// the patterns actually resolved, which is what the "this gate has stopped
+// guarding anything" assertion keys on.
+func scanMakefileRunPatterns(raw string, namesFor func(pkgs []string) []string) (findings []runFinding, checked int) {
+	for _, ll := range foldMakeContinuations(raw) {
+		if strings.HasPrefix(strings.TrimLeft(ll.text, " \t"), "#") {
+			continue // prose, not a recipe
+		}
+		// Segment first, so a pattern is scored only against the packages of
+		// its own command (memql#3003 M4).
+		for _, cmd := range splitShellCommands(ll.text) {
+			rawPattern, ok := lastRunPattern(cmd)
+			if !ok {
+				continue
+			}
+			pattern, resolvable := resolveMakePattern(rawPattern)
+			if !resolvable {
+				continue
+			}
+			if _, cerr := regexp.Compile(pattern); cerr != nil {
+				findings = append(findings, runFinding{ll.lineNo, pattern, nil, "bad-regexp"})
+				continue
+			}
+
+			pkgs, unresolvable := commandPackages(cmd)
+			if unresolvable {
+				continue // a Make variable or module path in package position
+			}
+			if len(pkgs) == 0 {
+				pkgs = []string{"."} // go test with no package argument means the current dir
+			}
+
+			names := namesFor(pkgs)
+			if len(names) == 0 {
+				findings = append(findings, runFinding{ll.lineNo, pattern, pkgs, "no-tests"})
+				continue
+			}
+
+			checked++
+			if !matchesTopLevel(pattern, names) {
+				findings = append(findings, runFinding{ll.lineNo, pattern, pkgs, "no-match"})
+			}
+		}
+	}
+	return findings, checked
+}
+
 func TestMakefileRunPatternsMatchARealTest(t *testing.T) {
 	raw, err := os.ReadFile("Makefile")
 	if err != nil {
 		t.Fatalf("read Makefile: %v", err)
 	}
 
-	checked := 0
-	for i, line := range strings.Split(string(raw), "\n") {
-		lineNo := i + 1
-		if strings.HasPrefix(strings.TrimLeft(line, " \t"), "#") {
-			continue // prose, not a recipe
-		}
-		m := makeRunFlag.FindStringSubmatch(line)
-		if m == nil {
-			continue
-		}
-		pattern := m[1]
-		if strings.Contains(pattern, "$") {
-			continue // a Make variable; nothing to resolve at this layer
-		}
+	findings, checked := scanMakefileRunPatterns(string(raw), func(pkgs []string) []string {
+		return testNamesInPackages(t, pkgs)
+	})
 
-		re, err := regexp.Compile(pattern)
-		if err != nil {
-			t.Errorf("Makefile:%d: -run %s is not a valid regexp: %v", lineNo, pattern, err)
-			continue
-		}
-
-		pkgs := makePkgRef.FindAllString(line, -1)
-		if len(pkgs) == 0 {
-			pkgs = []string{"."} // go test with no package argument means the current dir
-		}
-
-		names := testNamesInPackages(t, pkgs)
-		if len(names) == 0 {
+	for _, f := range findings {
+		switch f.kind {
+		case "bad-regexp":
+			t.Errorf("Makefile:%d: -run %s is not a valid regexp", f.lineNo, f.pattern)
+		case "no-tests":
 			t.Errorf("Makefile:%d: -run %s targets %s, which declares no Go tests at all",
-				lineNo, pattern, strings.Join(pkgs, " "))
-			continue
-		}
-
-		checked++
-		if !matchesAny(re, names) {
+				f.lineNo, f.pattern, strings.Join(f.pkgs, " "))
+		case "no-match":
+			names := testNamesInPackages(t, f.pkgs)
 			t.Errorf("Makefile:%d: -run %s matches none of the %d tests declared in %s, "+
 				"so this target exits 0 with \"[no tests to run]\" and reports success "+
 				"without running anything. Declared there: %s",
-				lineNo, pattern, len(names), strings.Join(pkgs, " "), strings.Join(names, ", "))
+				f.lineNo, f.pattern, len(names), strings.Join(f.pkgs, " "), strings.Join(names, ", "))
 		}
 	}
 
@@ -152,12 +182,21 @@ func testNamesInFile(path string) []string {
 	return names
 }
 
-// matchesAny applies -run semantics: the pattern is an unanchored regexp
-// tested against each test name.
-func matchesAny(re *regexp.Regexp, names []string) bool {
-	for _, n := range names {
-		if re.MatchString(n) {
+// matchesTopLevel applies -run semantics against TOP-LEVEL test names: the
+// pattern is split the way testing.splitRegexp splits it, and any alternative
+// whose first element matches any declared name is a match (memql#3003 M3).
+func matchesTopLevel(pattern string, names []string) bool {
+	for _, alt := range topLevelAlternatives(pattern) {
+		re, err := regexp.Compile(alt)
+		if err != nil {
+			// Unrepresentable at this layer -- stay permissive rather than
+			// report a recipe broken on the strength of a parse we got wrong.
 			return true
+		}
+		for _, n := range names {
+			if re.MatchString(n) {
+				return true
+			}
 		}
 	}
 	return false
