@@ -242,17 +242,26 @@ query widget consumerWidgets {
 }`),
 	}
 
+	// Assert the SPECIFIC diagnostic. Matching on the symbol name alone is not
+	// enough: with the gate closed the import is never checked, but an
+	// unrelated lane still reports `imported symbol "nonesuch" is never
+	// referenced`, which also contains the name. That message means the import
+	// was ignored; "is not declared in alpha/concepts.memql" means it was
+	// resolved against the namespace and genuinely found absent.
 	var got string
 	for _, err := range loadTree(t, root).VerifyReferentialIntegrity() {
-		if strings.Contains(err.Error(), "nonesuch") {
+		if strings.Contains(err.Error(), "nonesuch") && strings.Contains(err.Error(), "is not declared in") {
 			got = err.Error()
 		}
 	}
 	if got == "" {
 		t.Fatal("`use cluster.concepts.{ nonesuch }` was ignored rather than checked. The " +
 			"cluster namespace exists in this tree -- alpha/ pins itself into it and assembles " +
-			"v1:cluster:widget -- so the lint must verify the import instead of assuming the " +
-			"namespace is supplied from outside the linted root.")
+			"v1:cluster:widget -- so the lint must resolve the import against that namespace " +
+			"instead of assuming it is supplied from outside the linted root.")
+	}
+	if !strings.Contains(got, "alpha/concepts.memql") {
+		t.Errorf("the diagnostic must name the file(s) actually searched, got: %s", got)
 	}
 
 	// ...and the legal import in the same namespace is still accepted.
