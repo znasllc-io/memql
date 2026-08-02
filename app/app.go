@@ -47,6 +47,11 @@ type Overrides struct {
 	NewEngine         func(db *bun.DB, args ...component.Arg) (*memql.MemQLEngine, error)
 	FatalWithLogger   func(logger *slog.Logger, msg string, args ...any)
 	LoadServiceEnvOpt func() (service.ServiceEnvOptions, error)
+	// AssertUnauthenticatedSurface is the boot check that every route
+	// reachable without auth middleware is declared (memql#2939). Injectable
+	// so the wiring test can drive its error path without a mutable global or
+	// an exported test mutator in the shipped binary.
+	AssertUnauthenticatedSurface func(routes []string) error
 }
 
 // App holds the shared state accumulated across bootstrap phases.
@@ -58,7 +63,16 @@ type App struct {
 	overrides Overrides
 
 	// Phase 1: config
-	mux              *http.ServeMux
+	mux *http.ServeMux
+	// registeredRoutes records every route app code mounts on mux, so the
+	// identity binary can assert its unauthenticated surface is declared
+	// (memql#2939). Populated only via handleRoute/handleRouteFunc.
+	registeredRoutes []string
+	// surfaceSealed is set once createHTTPServer has asserted the
+	// unauthenticated surface. Registering after that point would mount a
+	// route the assertion never saw, so handleRoute/handleRouteFunc refuse
+	// it. See the comment on handleRoute.
+	surfaceSealed bool
 	httpArgs         []server.ServerArg
 	middlewares      []server.MiddlewareFunc
 	identityVerifier *verifier.Verifier
@@ -224,6 +238,9 @@ func newApp(serviceLogger *slog.Logger, version string, overrides Overrides) *Ap
 	if a.overrides.LoadServiceEnvOpt == nil {
 		a.overrides.LoadServiceEnvOpt = service.LoadDefaultServiceEnvOptions
 	}
+	if a.overrides.AssertUnauthenticatedSurface == nil {
+		a.overrides.AssertUnauthenticatedSurface = server.AssertUnauthenticatedSurfaceDeclared
+	}
 
 	return a
 }
@@ -269,3 +286,46 @@ func (a *App) IdentityService() any { return a.identityService }
 // *deploycontrol.Service for in-process calls. Nil on binaries built
 // without -tags identity.
 func (a *App) DeployControlService() any { return a.deployControlService }
+
+// handleRoute mounts an HTTP route and records it, so the identity binary's
+// boot check can account for the routes app code mounts -- not just the
+// OpenAPI contract's five (memql#2939).
+//
+// Register through this rather than a.mux directly. A bare a.mux.HandleFunc is
+// invisible to the check, which is precisely the silence #2939 exists to
+// remove; app/mux_registration_test.go enforces it.
+//
+// Registering here is also only half of what the check needs. createHTTPServer
+// reads a.registeredRoutes ONCE and every Build runs later phases after it
+// (a.cluster()), so a route mounted after that point would be served by the
+// same mux while the assertion never saw it -- a compliant handleRoute call in
+// a late phase passed every gate green. Being recorded is not enough; being
+// recorded IN TIME is the requirement, so the set seals when it is asserted
+// and registering afterwards is fatal rather than silent.
+func (a *App) handleRoute(pattern string, handler http.Handler) {
+	a.requireUnsealedSurface(pattern)
+	a.registeredRoutes = append(a.registeredRoutes, pattern)
+	a.mux.Handle(pattern, handler)
+}
+
+// handleRouteFunc is handleRoute for a HandlerFunc.
+func (a *App) handleRouteFunc(pattern string, handler http.HandlerFunc) {
+	a.requireUnsealedSurface(pattern)
+	a.registeredRoutes = append(a.registeredRoutes, pattern)
+	a.mux.HandleFunc(pattern, handler)
+}
+
+// requireUnsealedSurface refuses a route registered after the unauthenticated
+// surface has been asserted. Fail-fast for the same reason the assertion
+// itself is fatal rather than a warning: the failure it guards against is one
+// nobody would notice, and a boot warning is exactly the signal that went
+// unread when the automations routes were added.
+func (a *App) requireUnsealedSurface(pattern string) {
+	if a.surfaceSealed {
+		a.fatal("HTTP route registered after the unauthenticated surface was asserted",
+			"pattern", pattern,
+			"detail", "createHTTPServer has already checked the registered surface, so this "+
+				"route would be served without ever being declared. Register it before "+
+				"createHTTPServer runs (see app/build_<tag>.go for the phase order).")
+	}
+}

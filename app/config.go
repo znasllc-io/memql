@@ -60,7 +60,7 @@ func (a *App) configAndAuth() {
 	// server.MetricsPaths(), so the verifier HTTP middleware below does
 	// not gate it -- an in-cluster scrape can't present a bearer token.
 	for _, p := range server.MetricsPaths() {
-		a.mux.Handle("GET "+p, metrics.Handler())
+		a.handleRoute("GET "+p, metrics.Handler())
 	}
 	a.middlewares = make([]server.MiddlewareFunc, 0, 4)
 	// Panic recovery is the outermost layer of the HTTP chain. A panic
@@ -80,14 +80,39 @@ func (a *App) configAndAuth() {
 	a.middlewares = append(a.middlewares, server.SecurityHeadersMiddleware)
 
 	if !verifierRequired {
-		// Identity binary path: no per-node verifier; identity is
-		// the JWKS authority and authenticates HTTP requests via
-		// its own magic-link / OAuth / admin-session middleware
-		// (wired in transportIdentity). Setting
+		// Identity binary path: no per-node verifier, because identity is
+		// the JWKS authority and must not verify against itself. Setting
 		// MEMQL_IDENTITY_VERIFIER_BASE_URL on the identity binary is a
 		// no-op -- short-circuit before the verifier-construction
 		// path so identity does not try to fetch its own JWKS.
-		a.Logger.Info("identity binary: per-node verifier intentionally disabled (identity is the JWKS authority)")
+		//
+		// Returning here means NO HTTP auth middleware is installed, so
+		// server.PublicPaths() is never consulted on this binary and every
+		// route HandlerWithOptions registers is reachable unauthenticated.
+		//
+		// This comment used to say identity "authenticates HTTP requests via
+		// its own magic-link / OAuth / admin-session middleware (wired in
+		// transportIdentity)". That is true of identity's OWN routes and false
+		// as a statement about the binary's HTTP surface: transportIdentity
+		// calls svc.RegisterRoutes(a.mux) and wraps nothing. A reader checking
+		// whether identity was authenticated found a comment saying yes, in a
+		// function that does not do it -- which is how two automations routes
+		// went unauthenticated unnoticed (#2937, #2908).
+		//
+		// That surface is now declared rather than incidental: createHTTPServer
+		// asserts the OpenAPI contract plus everything app code mounts via
+		// a.handleRoute is in PublicPaths() or HandlerAuthorizedPaths(), and
+		// refuses to boot otherwise (#2939). Seven paths on identity with no base
+		// path configured; nine when SERVER_PUBLIC_PATH adds prefixed spellings.
+		//
+		// That is NOT every route this binary serves, and the difference is
+		// exactly what the next reader needs: routes handed to the mux through
+		// one of the enumerated handoffs -- svc.RegisterRoutes named above,
+		// server.RegisterConceptsEndpoint -- are not covered, nor are routes
+		// mounted by middleware ahead of the mux. See memql#3004. Overstating
+		// the coverage here would repeat, in the same spot, the mistake this
+		// very comment was rewritten to correct.
+		a.Logger.Info("identity binary: per-node verifier intentionally disabled (identity is the JWKS authority); no HTTP auth middleware -- unauthenticated surface asserted in createHTTPServer")
 		return
 	}
 
@@ -99,6 +124,35 @@ func (a *App) configAndAuth() {
 	// in staging/production. The verifier URL stays configured (so fail-fast
 	// env validation still passes); the toggle, not a blanked URL, is the
 	// off switch.
+	//
+	// This takes the SAME early return as the identity binary above, so it has
+	// the same consequence: no HTTP auth middleware, PublicPaths() never
+	// consulted, routes reachable unauthenticated. createHTTPServer's assertion
+	// covers this path too (#2939), but over the CONTRACT routes only -- not the
+	// helper-registered routes as on identity.
+	//
+	// The reason is NOT that the undeclared routes are safe here. They are not,
+	// and it is worth being exact, because a comfortable half-truth at this
+	// return is what #2939 is about:
+	//
+	//   - "everything is the cluster owner" is true of gRPC and not of HTTP --
+	//     the local-dev admit path is a STREAM interceptor.
+	//   - attachments and audio do 401 on the missing actor, but polyphon's
+	//     room-token and status handlers check nothing at all, and the gateway
+	//     middleware sits AHEAD of the mux and admits POST /memql/query as the
+	//     synthetic cluster owner.
+	//
+	// So on this node the HTTP surface is simply unauthenticated. That is the
+	// toggle's documented meaning, which is why it is loudly warned and must
+	// never be set in staging or production.
+	//
+	// The scope is contract-only because a per-route "this is safe
+	// unauthenticated" declaration asserts a property that is false here by
+	// construction -- nothing is authenticated in this mode -- and demanding it
+	// would fail-fast a posture whose whole purpose is to run without auth. The
+	// contract check still runs as a floor. The identity binary gets the wider
+	// scope because there the declarations mean something: that node serves an
+	// unauthenticated HTTP surface in PRODUCTION.
 	if !config.IdentityAuthEnabled() {
 		a.authDisabled = true
 		metrics.SetAuthEnabled(false)

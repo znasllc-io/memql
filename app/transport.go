@@ -165,13 +165,57 @@ func (a *App) transportBase() {
 		a.fatal("failed to initialize memql websocket handler", "error", err)
 	}
 	for _, path := range server.MemqlWebsocketPaths() {
-		a.mux.HandleFunc("GET "+path, wsBridge.ServeHTTP)
+		a.handleRouteFunc("GET "+path, wsBridge.ServeHTTP)
 	}
 }
 
 // createHTTPServer finalizes middleware and creates the HTTP server.
 // Called at the end of each tag-specific transport method after endpoints are wired.
 func (a *App) createHTTPServer() {
+	// No verifier means no HTTP auth middleware ran, so PublicPaths() is never
+	// consulted and the routes below are reachable unauthenticated. Two binaries
+	// take that path, and they get different scopes on purpose (memql#2939):
+	//
+	//   - identity binary (verifierRequired=false): assert the OpenAPI contract
+	//     PLUS every route app code mounts through a.handleRoute. This is the
+	//     binary that runs this way in production, and the silence worth removing
+	//     is a bare a.mux.HandleFunc landing here unnoticed. It is NOT the whole
+	//     surface: routes reaching the mux through one of the enumerated handoffs
+	//     (server.RegisterConceptsEndpoint, identity's svc.RegisterRoutes) are not
+	//     covered -- see app/mux_registration_test.go and memql#3004.
+	//     Registration is sealed below once this has run, because being declared
+	//     is only half of it -- a route mounted by a later phase would be served
+	//     having never been checked.
+	//   - MEMQL_IDENTITY_ENABLED=false: contract routes only, and NOT because
+	//     the rest are safe there. That mode disables authentication outright:
+	//     the local-dev admit path is a gRPC stream interceptor rather than HTTP
+	//     middleware, attachments and audio 401 on the missing actor but
+	//     polyphon's room-token and status check nothing, and the gateway
+	//     middleware ahead of the mux admits POST /memql/query as the synthetic
+	//     cluster owner. A per-route "safe unauthenticated" declaration would
+	//     assert something false by construction in a mode where nothing is
+	//     authenticated, so it stays a floor rather than a full scope. See the
+	//     longer note at the same early return in app/config.go.
+	//
+	// Fail-fast rather than warn: a boot warning is exactly the signal that went
+	// unread when the automations routes were added.
+	if a.identityVerifier == nil {
+		routes := a.unauthenticatedSurfaceRoutes(!verifierRequired)
+		if err := a.overrides.AssertUnauthenticatedSurface(routes); err != nil {
+			a.fatal("undeclared unauthenticated HTTP surface", "error", err)
+		}
+		a.Logger.Info("no HTTP auth middleware on this binary; unauthenticated surface verified against declarations",
+			"routes", len(routes),
+			"whole_mux", !verifierRequired)
+	}
+
+	// Seal the registered set: it has now been asserted (or deliberately not, on
+	// a verifier-consuming binary), and later phases still run after this one --
+	// a.cluster() follows createHTTPServer in every Build. A route mounted from
+	// here on would be served by the same mux having never been checked, so
+	// handleRoute/handleRouteFunc refuse it.
+	a.surfaceSealed = true
+
 	if len(a.middlewares) > 0 {
 		a.httpArgs = append(a.httpArgs, server.WithStandardMiddlewares(a.middlewares...))
 	}
@@ -189,4 +233,19 @@ func (a *App) createHTTPServer() {
 	}
 
 	a.httpServer = httpServer
+}
+
+// unauthenticatedSurfaceRoutes assembles the routes the boot check must account
+// for (memql#2939).
+//
+// Split out because the caller decides wholeMux from `verifierRequired`, a
+// build-tag const -- so inside one test binary only one branch would ever run,
+// and the identity-only branch (the one that matters in production) would go
+// unexercised. Taking it as a parameter lets both be tested.
+func (a *App) unauthenticatedSurfaceRoutes(wholeMux bool) []string {
+	routes := server.ContractRoutes()
+	if wholeMux {
+		routes = append(routes, a.registeredRoutes...)
+	}
+	return routes
 }

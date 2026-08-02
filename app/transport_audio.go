@@ -44,7 +44,7 @@ func (a *App) setupAudioWebsocket() {
 	}
 
 	for _, path := range server.AudioWebsocketPaths() {
-		a.mux.Handle("GET "+path, http.HandlerFunc(audioHandler.ServeHTTP))
+		a.handleRoute("GET "+path, http.HandlerFunc(audioHandler.ServeHTTP))
 	}
 	a.Logger.Info("audio websocket enabled",
 		"paths", server.AudioWebsocketPaths(),
