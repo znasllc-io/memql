@@ -85,6 +85,7 @@ import (
 	"io"
 	"io/fs"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -273,10 +274,24 @@ func (t *Tree) buildDeclIndex() *declIndex {
 		if pin == "" || pin == dir {
 			continue
 		}
-		idx.pinnedTo[pin] = append(idx.pinnedTo[pin], dir)
+		// Enrol under the whole pin AND each of its colon segments. Boot's
+		// needle is ":"+hint+":" tested against the canonical id, so a domain
+		// pinned to "cluster:rollout" assembles v1:cluster:rollout:widget --
+		// which contains ":cluster:" and ":rollout:" -- and boot binds the
+		// import under either segment as well as under the full pin. Enrolling
+		// on the full string alone left a colon-scoped pin diverging from boot
+		// in exactly the way memql#2945 was filed about.
+		//
+		// This only decides which directories are CANDIDATES. Whether a given
+		// declaration actually assembles under the namespace is decided
+		// per-declaration by declSuppliesNamespace.
+		for _, ns := range namespaceKeysForPin(pin, dir) {
+			idx.pinnedTo[ns] = append(idx.pinnedTo[ns], dir)
+		}
 	}
 	for ns := range idx.pinnedTo {
 		sort.Strings(idx.pinnedTo[ns])
+		idx.pinnedTo[ns] = slices.Compact(idx.pinnedTo[ns])
 	}
 	return idx
 }
@@ -445,9 +460,72 @@ func qualifyName(target moduleTarget, name string) string {
 // namespace resolved to. Each target applies its OWN prefix: the same
 // namespace can be served by a per-construct file and a consolidated one, and
 // a leaf's spelling differs between them.
-func declaredInAny(idx *declIndex, targets []moduleTarget, name string) bool {
+func declaredInAny(idx *declIndex, targets []moduleTarget, ns, name string) bool {
 	for _, target := range targets {
-		if _, ok := idx.byFile[target.file][qualifyName(target, name)]; ok {
+		if _, ok := idx.byFile[target.file][qualifyName(target, name)]; !ok {
+			continue
+		}
+		if idx.declSuppliesNamespace(target, ns, name) {
+			return true
+		}
+	}
+	return false
+}
+
+// namespaceKeysForPin returns every namespace a pinned directory can supply:
+// the whole pin, plus each colon segment of it. Mirrors boot, which tests
+// ":"+hint+":" as a substring of the canonical id and therefore matches any
+// interior segment. The directory's own name is never returned -- the literal
+// directory is always a candidate anyway (domainsForNamespace), and returning
+// it would add a duplicate to compact away.
+func namespaceKeysForPin(pin, dir string) []string {
+	keys := make([]string, 0, 3)
+	add := func(k string) {
+		if k == "" || k == dir {
+			return
+		}
+		for _, existing := range keys {
+			if existing == k {
+				return
+			}
+		}
+		keys = append(keys, k)
+	}
+	add(pin)
+	for _, seg := range strings.Split(pin, ":") {
+		add(seg)
+	}
+	return keys
+}
+
+// declSuppliesNamespace reports whether target's declaration of name actually
+// assembles under ns.
+//
+// Directory membership (domainsForNamespace) is decided by the pin FILE alone,
+// which is not the same question. A namespace.pin only PERMITS an explicit
+// @namespace; it never APPLIES one -- ast.AssembleConceptIdFromDeclInDir gives
+// an un-annotated decl the DIRECTORY as its namespace. So a pinned directory
+// routinely holds both: decls that assemble under the pin, and decls that
+// assemble under the directory. Only the former belong to ns.
+//
+// Without this check the lint accepted `use cluster.concepts.{ widget }` for an
+// un-annotated widget in a directory merely pinned to cluster -- a binding boot
+// REFUSES, because its ":cluster:" needle does not match v1:deploy:widget. That
+// is the one direction the widening was documented as unable to take, and it is
+// worse than the bug memql#2945 fixed: green lint over a tree that fails at boot.
+//
+// Non-concept kinds have no canonical id, so they are not filtered here.
+func (idx *declIndex) declSuppliesNamespace(target moduleTarget, ns, name string) bool {
+	full := qualifyName(target, name)
+	if idx.byFile[target.file][full] != "concept" {
+		return true
+	}
+	needle := ":" + ns + ":"
+	for _, e := range idx.concepts[full] {
+		if e.file != target.file {
+			continue
+		}
+		if id := candidateConceptId(idx.root, e); id != "" && strings.Contains(id, needle) {
 			return true
 		}
 	}
@@ -522,7 +600,7 @@ func (t *Tree) verifyUseDecls(path string, f *languageAst.File, idx *declIndex) 
 			continue
 		}
 		for _, n := range u.Names {
-			if declaredInAny(idx, targets, n) {
+			if declaredInAny(idx, targets, parts[0], n) {
 				continue
 			}
 			errs = append(errs, fmt.Errorf(
@@ -691,7 +769,12 @@ func (t *Tree) resolveConceptForFile(path string, f *languageAst.File, idx *decl
 				return conceptResolution{state: conceptInconclusive} // lane 1 reports bad modules
 			}
 			if _, declared := idx.byFile[target.file][qualifyName(target, name)]; declared && hit == nil {
-				hit = &targets[i]
+				// Same per-declaration namespace test lane 1 applies: a
+				// pinned directory supplies ns only for decls that actually
+				// assemble under it (see declSuppliesNamespace).
+				if idx.declSuppliesNamespace(target, parts[0], name) {
+					hit = &targets[i]
+				}
 			}
 		}
 		if hit == nil {
@@ -781,7 +864,7 @@ func (t *Tree) verifySignatureBindings(path string, f *languageAst.File, idx *de
 			if id, pin := pinnedDomainAmbiguity(idx, path, name); id != "" {
 				dir := firstSegment(path)
 				errs = append(errs, fmt.Errorf(
-					"%s: signature concept %q is not imported and is declared in %d places in the DSL root -- boot cannot disambiguate an unimported name. %s/ is pinned (%s/namespace.pin = %q), so its %q assembles to %s while this file's ambient namespace hint is %q, which cannot match. Import it by its PINNED namespace: use %s.concepts.{ %q }. An import of this file's own domain would be stripped by the same-domain-use gate (memql#2617), so it is not an alternative",
+					"%s: signature concept %q is not imported and is declared in %d places in the DSL root -- boot cannot disambiguate an unimported name. %s/ is pinned (%s/namespace.pin = %q), so its %q assembles to %s while this file's ambient namespace hint is %q, which cannot match. Import it by its PINNED namespace: use %s.concepts.{ %s }. An import of this file's own domain would be stripped by the same-domain-use gate (memql#2617), so it is not an alternative",
 					path, name, res.candidates,
 					dir, dir, pin,
 					name, id, dir,

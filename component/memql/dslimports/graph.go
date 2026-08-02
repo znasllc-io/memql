@@ -165,7 +165,7 @@ func (ix *Index) SymbolDeclared(ns, kind, id string) (declared bool, decidable b
 			return false, false
 		}
 	}
-	return declaredInAny(ix.idx, targets, id), true
+	return declaredInAny(ix.idx, targets, ns, id), true
 }
 
 // ConceptDeclared reports whether a concept named `name` is declared in the
