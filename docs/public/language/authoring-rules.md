@@ -1091,16 +1091,36 @@ be met). Use it when `canonicalId()` will not resolve. Otherwise prefer
   above); `shortId()` strips the tag and returns a plausible bare value,
   so a `user` id passed where a `deployment` id belongs derives a valid
   row. That check is a feature of `canonicalId()`, not an inconvenience.
-- **`shortId()` is not idempotent on every input**, so it does not
-  collapse *every* bare/canonical pair. Measured:
+- **`shortId()` is not idempotent on every input**, so on its own it does
+  not collapse *every* bare/canonical pair. Measured:
   `shortId("v1:cluster:deployment:v2:x:y:z")` is `"v2:x:y:z"` while
-  `shortId("v2:x:y:z")` is `"z"` — the pair still forks. Tracked in
-  memql#2981, which carries the measured condition -- it turns on
-  whitespace and on empty segments, not on segment counts alone, and two
-  attempts to state it more precisely than this were wrong. What holds:
-  every SHORT id this tree mints is colon- and whitespace-free, so
-  `shortId()` is exact for those and for the canonical forms built
-  around them.
+  `shortId("v2:x:y:z")` is `"z"` — the pair forks. It strips exactly ONE
+  canonical prefix, and the residual class turns on whitespace and on
+  empty segments, not on segment counts alone (two attempts to state it
+  more precisely than this were wrong; memql#2981 carries the measured
+  predicate).
+
+  **The rule that follows.** A bare `B` and its canonical form derive one
+  id exactly when `B` is already a **fixed point** of `shortId()`. So
+  where a hashed id is derived from a caller-supplied FK, constrain the
+  arg to a bare short id or the canonical form of one — colon- and
+  whitespace-free after at most one prefix:
+
+  ```memql
+  deploymentId  string! @pattern("^(?:v[0-9]+:[a-z0-9]+:[A-Za-z0-9_]+:)?[^[:space:]:]+$")
+  ```
+
+  That is one expression covering both halves of the residual class, and
+  it keeps the canonical form this section recommends. Prefer it to
+  making `shortId()` idempotent: the same primitive is the wire-egress
+  bare-ifier (memql#2441), so looping it to a fixpoint changes every id
+  handed to a client, and destroys more of a genuinely-bare colon-bearing
+  value. Landed in memql#2981; gated by
+  `TestDeploymentIDPatternClosesTheBareCanonicalFork`.
+
+  What holds without any constraint: every SHORT id this tree mints is
+  colon- and whitespace-free, so `shortId()` is exact for those and for
+  the canonical forms built around them.
 
 Compliant mutations (audit done 2026-05-06), in
 `dsl/cognition/mutations.memql`:

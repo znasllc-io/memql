@@ -95,7 +95,14 @@ func walkScanTree(t *testing.T, label, key string, v any, exempt map[string]stru
 
 // --- mechanism tests (no DB; always run) -------------------------------------
 
-func TestWireBareShortId_TotalIdempotent(t *testing.T) {
+// TestWireBareShortId_TotalAndFixedPointOnRealIds -- renamed from
+// ...TotalIdempotent by memql#2981. BareShortId is TOTAL, and it is a
+// fixed point on every id shape this tree mints, which is what these cases
+// cover and what the wire seam relies on. It is NOT idempotent in general:
+// it strips ONE canonical prefix, so "v1:a:b:v2:c:d:e" -> "v2:c:d:e" -> "e".
+// The old name asserted the general property in the one place a reader is
+// most likely to take it as settled.
+func TestWireBareShortId_TotalAndFixedPointOnRealIds(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"v1:agents:agent:a9f3b7c2", "a9f3b7c2"},          // canonical -> bare
 		{"a9f3b7c2", "a9f3b7c2"},                          // already bare -> unchanged
@@ -109,9 +116,13 @@ func TestWireBareShortId_TotalIdempotent(t *testing.T) {
 		if got := memqlengine.BareShortId(c.in); got != c.want {
 			t.Errorf("BareShortId(%q) = %q, want %q", c.in, got, c.want)
 		}
-		// Idempotence: bare-ifying the output again is a no-op.
+		// A second application is a no-op ON THESE INPUTS -- every id this
+		// tree mints is colon- and whitespace-free, so its short id is a
+		// fixed point. Not a claim about arbitrary input (memql#2981).
 		if again := memqlengine.BareShortId(memqlengine.BareShortId(c.in)); again != c.want {
-			t.Errorf("BareShortId not idempotent for %q: %q", c.in, again)
+			t.Errorf("BareShortId(BareShortId(%q)) = %q, want %q -- the short id of a real "+
+				"tree id must be a fixed point even though the function is not idempotent "+
+				"in general (memql#2981)", c.in, again, c.want)
 		}
 	}
 }

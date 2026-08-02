@@ -77,9 +77,18 @@ func WireConceptCarrierKeys() map[string]struct{} {
 // BareShortId strips the `{concept}:` prefix from a canonical node id and
 // returns the bare trailing short id. It is the single outbound id
 // primitive (#2441): every wire seam funnels id-position values through
-// it. Total + idempotent: a value with no version-tagged concept prefix
-// (already bare, or a 3-segment concept type) is returned unchanged, an
+// it. TOTAL: a value with no version-tagged concept prefix (already
+// bare, or a 3-segment concept type) is returned unchanged, an
 // unparseable value is returned unchanged, and empty in yields empty out.
+//
+// NOT idempotent in general (memql#2981): it strips ONE
+// canonical prefix, so a value whose own result is not already a fixed
+// point strips again on a second application --
+// "v1:a:b:v2:c:d:e" -> "v2:c:d:e" -> "e", and
+// "v1:cluster:deployment: abc" -> " abc" -> "abc" (it trims its INPUT,
+// not its output). Callers that need a bare/canonical pair to collapse
+// onto one value must constrain the input; see the @pattern on
+// createDeploymentNodeSpec's deploymentId.
 // Needs no engine state -- the split is purely structural via core/id.
 func BareShortId(value string) string {
 	value = strings.TrimSpace(value)
