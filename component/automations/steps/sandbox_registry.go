@@ -27,6 +27,7 @@ package steps
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -92,11 +93,129 @@ func (s *sandboxStepRegistry) Execute(ctx context.Context, step *automations.Ste
 			s.meterRead(step, stepCtx)
 			return s.real.Execute(ctx, step, stepCtx)
 		}
-	default:
-		// Reads + pure compute (query, shape, switch, forEach, parallel, ...)
-		// run for real through the production executors.
+	// Write-bearing step types that used to fall through to the production
+	// executors (memql#2943). Each reaches a real side effect:
+	//   emitConceptCard -> stepCtx.Engine.Execute(insert ...)
+	//   event           -> stepCtx.EventBus.Publish, on the LIVE bus
+	//   action          -> engine.ExecuteToolByName, a real capability call
+	//   automation      -> triggers another automation, unbounded
+	case automations.StepTypeEmitConceptCard,
+		automations.StepTypeEvent,
+		automations.StepTypeAction,
+		automations.StepTypeAutomation:
+		return s.interceptSideEffect(step, stepCtx)
+
+	// Containers. Delegating these to the real registry is what let a nested
+	// write escape: the production container executors resolve children
+	// through the concrete *Registry, not through this sandbox. Build the
+	// container here with Dispatch pointed back at Execute so every nested
+	// step -- to any depth -- re-enters this switch. See child_dispatch.go.
+	case automations.StepTypeForEach:
+		return (&ForEachExecutor{Registry: s.real, Dispatch: s.Execute}).Execute(ctx, step, stepCtx)
+	case automations.StepTypeParallel:
+		return (&ParallelExecutor{Registry: s.real, Dispatch: s.Execute}).Execute(ctx, step, stepCtx)
+	case automations.StepTypeSwitch:
+		return (&SwitchExecutor{Registry: s.real, Dispatch: s.Execute}).Execute(ctx, step, stepCtx)
+
+	// Genuinely read-only / pure compute. Named EXPLICITLY rather than left to
+	// a default arm -- which is the point of this change: a step type reaches
+	// production because someone decided it reads, not because nobody
+	// classified it.
+	//
+	// query carries a caveat that is checked rather than assumed: the engine's
+	// Execute runs mutations too (query.go's own doc says so), so a `query:`
+	// step carrying a write is a real escape. isWriteBearingQuery inspects the
+	// evaluated text and routes it to interception instead.
+	case automations.StepTypeQuery:
+		if s.isWriteBearingQuery(step, stepCtx) {
+			return s.interceptSideEffect(step, stepCtx)
+		}
 		return s.real.Execute(ctx, step, stepCtx)
+	case automations.StepTypeShape, automations.StepTypeDetectLeadSignal:
+		return s.real.Execute(ctx, step, stepCtx)
+
+	default:
+		// FAIL CLOSED. This arm used to forward every unclassified step to the
+		// production executors, which is how emitConceptCard / event / action
+		// reached the live graph while dryrun.go promised "zero rows land in
+		// the live graph".
+		//
+		// Refusing is the conservative answer for a preview whose OUTPUT is an
+		// approval artifact: an operator reading the manifest has to be able to
+		// treat it as complete. A step type nobody has classified might write,
+		// and a manifest that silently omits a write is worse than a preview
+		// that declines to run one. A newly added step type therefore fails
+		// loudly here until it is classified above.
+		return s.refuseUnclassified(step)
 	}
+}
+
+// interceptSideEffect records a write-bearing step into the manifest and
+// returns a synthetic success without letting it reach the real executor, so
+// later steps that reference this one still see a result.
+func (s *sandboxStepRegistry) interceptSideEffect(step *automations.Step, stepCtx *automations.StepContext) (*automations.StepResult, error) {
+	started := time.Now()
+	s.recordMutation(memql.RecordedMutation{
+		StepId:    step.ID,
+		Concept:   sandboxConceptForStep(step),
+		Partition: s.partition,
+	})
+	s.note(step.ID, string(step.Type)+" step intercepted: side effect recorded, not performed")
+	return s.syntheticSuccess(step.ID, started, map[string]any{
+		"dryRun":      true,
+		"intercepted": true,
+		"stepType":    string(step.Type),
+	}), nil
+}
+
+// refuseUnclassified fails a step whose type has no sandbox disposition.
+func (s *sandboxStepRegistry) refuseUnclassified(step *automations.Step) (*automations.StepResult, error) {
+	s.note(step.ID, "step type "+string(step.Type)+" has no sandbox classification; refused")
+	return nil, fmt.Errorf(
+		"dry-run refused step %q: step type %q has no sandbox classification, so it "+
+			"cannot be shown to be side-effect free. Classify it in "+
+			"sandboxStepRegistry.Execute (component/automations/steps/sandbox_registry.go) "+
+			"before authoring it into a previewable automation (memql#2943)",
+		step.ID, step.Type)
+}
+
+// isWriteBearingQuery reports whether a `query:` step's text performs a write.
+//
+// query.go executes its text through engine.Execute, which runs mutations as
+// well as reads -- its own doc comment says "executes MemQL queries and
+// mutations". So the step TYPE does not settle whether it writes; the text
+// does. Deliberately conservative: anything that looks like a write, or that
+// cannot be evaluated to a string to be examined, counts as write-bearing.
+// Being wrong in that direction costs a metered read; being wrong the other
+// way puts a row in the live graph and leaves it out of the manifest.
+func (s *sandboxStepRegistry) isWriteBearingQuery(step *automations.Step, stepCtx *automations.StepContext) bool {
+	if step.Query == nil || strings.TrimSpace(step.Query.Query) == "" {
+		return false
+	}
+	text := step.Query.Query
+	if stepCtx != nil && stepCtx.Evaluator != nil {
+		evaluated, err := stepCtx.Evaluator.EvaluateString(step.Query.Query)
+		if err != nil {
+			// Cannot see what it will run -> assume the dangerous case.
+			return true
+		}
+		text = evaluated
+	}
+	lowered := strings.ToLower(text)
+	for _, verb := range []string{"insert(", "update(", "delete(", "upsert(", "mutate("} {
+		if strings.Contains(lowered, verb) {
+			return true
+		}
+	}
+	return false
+}
+
+// sandboxConceptForStep is a best-effort label for the manifest entry.
+func sandboxConceptForStep(step *automations.Step) string {
+	if step.Mutation != nil && step.Mutation.Concept != "" {
+		return step.Mutation.Concept
+	}
+	return string(step.Type)
 }
 
 // note records a side-effect-layer annotation for a step id (for the trace).

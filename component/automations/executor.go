@@ -116,13 +116,6 @@ type StepContext struct {
 	// ChainTrackingEnabled indicates whether chain tracking is active.
 	// Propagated from ExecutorOptions to child contexts.
 	ChainTrackingEnabled bool
-
-	// SkipCache is INERT since memql#2899, which deleted the step cache: it is
-	// written by the resume path and read by nothing. Kept so the resume path's
-	// intent survives if a cache is ever reintroduced, but it guarantees nothing
-	// today -- do not rely on it for freshness. Tracked with the rest of the
-	// orphaned cache plumbing in memql#2941.
-	SkipCache bool
 }
 
 // ExecutorOptions configures the automation executor.
@@ -531,14 +524,7 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 		exec.StepOrder = make([]string, 0, len(automation.Steps))
 
 		// Build event data for fingerprinting
-		var eventData map[string]any
-		if triggeringEvent != nil {
-			eventData = map[string]any{
-				"topic":   triggeringEvent.Topic,
-				"kind":    triggeringEvent.Kind.String(),
-				"payload": triggeringEvent.Payload,
-			}
-		}
+		eventData := eventFingerprintData(triggeringEvent)
 
 		// Fingerprint input if present
 		if exec.Input != nil {
