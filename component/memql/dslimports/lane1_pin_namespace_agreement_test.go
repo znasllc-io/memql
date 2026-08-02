@@ -214,3 +214,62 @@ query widget deployWidgets {
 			"(`use common.traits.{ isActiveRecord }`): %s", remedy)
 	}
 }
+
+// A namespace that exists ONLY because domains pinned themselves into it is
+// still a namespace this tree supplies, and boot binds imports of it. The
+// entry gate was directory-keyed, so the lint waved such an import through as
+// "external, supplied elsewhere" without checking it -- the third arm of the
+// accepted / rejected / silently-ignored split #2945 was filed about. Widening
+// module resolution without widening the gate left that arm in place.
+func TestLane1_NamespaceExistingOnlyViaPinsIsChecked(t *testing.T) {
+	root := fstest.MapFS{
+		"alpha/namespace.pin": file("cluster\n"),
+		"alpha/concepts.memql": file(`@version("1.0.0")
+@namespace("cluster")
+@description("There is no cluster/ directory; the namespace exists only via pins.")
+concept widget {
+  label  string  @required @description("Label.")
+}`),
+		"consumer/queries.memql": file(`use cluster.concepts.{ nonesuch }
+
+@enabled
+@description("Imports a symbol no domain in the namespace declares.")
+query widget consumerWidgets {
+  args {
+    label  string  @required
+  }
+  filter  label == args.label
+}`),
+	}
+
+	var got string
+	for _, err := range loadTree(t, root).VerifyReferentialIntegrity() {
+		if strings.Contains(err.Error(), "nonesuch") {
+			got = err.Error()
+		}
+	}
+	if got == "" {
+		t.Fatal("`use cluster.concepts.{ nonesuch }` was ignored rather than checked. The " +
+			"cluster namespace exists in this tree -- alpha/ pins itself into it and assembles " +
+			"v1:cluster:widget -- so the lint must verify the import instead of assuming the " +
+			"namespace is supplied from outside the linted root.")
+	}
+
+	// ...and the legal import in the same namespace is still accepted.
+	ok := root
+	ok["consumer/queries.memql"] = file(`use cluster.concepts.{ widget }
+
+@enabled
+@description("Imports a symbol the namespace does declare.")
+query widget consumerWidgets {
+  args {
+    label  string  @required
+  }
+  filter  label == args.label
+}`)
+	for _, err := range loadTree(t, ok).VerifyReferentialIntegrity() {
+		if strings.Contains(err.Error(), "use cluster.concepts") {
+			t.Fatalf("checking a pin-only namespace must not reject a legal import: %v", err)
+		}
+	}
+}
