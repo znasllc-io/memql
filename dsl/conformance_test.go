@@ -1058,8 +1058,24 @@ func TestPerRowAuthzClassification(t *testing.T) {
 			ownerLeaf := ownerScopeLeaf
 			adminLeaf := adminGateLeaf
 
-			hasAdmin := strings.Contains(body, "actor.isClusterOwner") ||
-				strings.Contains(body, "requiresClusterOwner")
+			// Presence test over the SAME leaf vocabulary adminLeaf uses, for
+			// the reason stated two lines above: these two gates must not
+			// drift about what counts as a gate term. They had. This was a
+			// pair of hand-inlined Contains checks naming `actor.isClusterOwner`
+			// and `requiresClusterOwner` -- the latter a spec declared nowhere
+			// in the tree, the former one of four real terms -- so a construct
+			// gated by `requiresOwnerOrAdmin` or `requiresAdmin` satisfied
+			// TestAdminGateIsATopLevelConjunct and was still reported `other`
+			// here. dsl/identity/queries.memql:204 and :1172 are exactly that:
+			// correctly admin-gated, counted as ungated. It also made the
+			// remediation this test's own failure text prescribes not work
+			// (memql#2983 landing review).
+			//
+			// adminGateMentionRe rather than adminGateRe: this is the
+			// polarity-BLIND mention test, matching hasOwner's shape. The
+			// affirmative-polarity requirement is enforced where it belongs,
+			// by clauseGuarantees(clause, adminLeaf) below.
+			hasAdmin := adminGateMentionRe.MatchString(body)
 			hasOwner := strings.Contains(body, "actor.userId")
 			if isQuery {
 				// An empty filter guarantees nothing, so a query with no

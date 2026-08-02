@@ -51,7 +51,7 @@ client-callable, so no caller-check applies and it is never flagged.
 |---|---|---|
 | **owned** | Row carries `ownerUserId` (or `userId` for identity-domain concepts) | `filter` must include `ownerUserId == actor.userId` (the caller can only read rows they own) |
 | **granted** | Row visible via a relationship (e.g. space participant, group member) | Filter must reference a relationship spec that gates on `actor.userId` |
-| **admin** | Cluster-owner-only (e.g. audit log, identity admin views) | A top-level conjunct naming `actor.isClusterOwner`, or an admin context-spec |
+| **admin** | Cluster-owner-only (e.g. audit log, identity admin views) | A top-level conjunct `actor.isClusterOwner == true`, or an admin context-spec |
 | **public** | Globally readable by intent (concept catalogs, role registry, public lookup tables) | `@public` annotation on the construct |
 
 The two reported states that are not buckets: **`srvOnly`**, checked

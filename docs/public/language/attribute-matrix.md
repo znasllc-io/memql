@@ -190,7 +190,7 @@ Declares that the construct intentionally carries **no caller-scope
 check**. The per-row authorization gate
 (`TestPerRowAuthzClassification` in `dsl/conformance_test.go`)
 classifies every query / mutation as owned (`actor.userId` reference),
-admin (`actor.isClusterOwner`, or an admin context-spec -- the
+admin (`actor.isClusterOwner == true`, or an admin context-spec -- the
 recogniser also lists `requiresClusterOwner`, a #54 placeholder that is
 not declared anywhere in `dsl/`), or public --
 a construct that references user-scope fields without one of those
