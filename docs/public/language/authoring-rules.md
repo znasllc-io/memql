@@ -1110,11 +1110,60 @@ invisible:
 If you add a hashed FK id derivation that cannot normalise, add it here
 with the reason. A rule with no gate and a stale roster is not a rule.
 
-**A separate hazard this rule does not address.** Normalising an FK does
-not make it safe as a hash component. Neither normaliser guarantees a
-colon-free result — `shortId("d:x")` is `"d:x"` — so
-`hash(concat(a, ":", b))` still aliases: `("d:x", "y")` and
-`("d", "x:y")` derive the same id. Tracked in memql#2980.
+**A separate rule normalisation does not give you: the separator.**
+Normalising an FK makes the same logical reference hash to one string.
+It does nothing about the *composite*. Neither normaliser guarantees a
+colon-free result — `shortId("d:x")` is `"d:x"` — so an unconstrained
+`hash(concat(a, ":", b))` is not injective:
+
+```
+("d:x", "y")   and   ("d", "x:y")   ->   hash("d:x:y")
+```
+
+Two different pairs, one id, one timeline. Whichever wrote last wins and
+the reader silently gets the wrong row.
+
+**The rule: in `hash(concat(a, sep, b))`, every part after the first must
+be free of `sep`.** The *leading* part may contain it freely. With the
+trailing part separator-free the split at the last `sep` is unique, so
+equal concatenations force equal parts — that is the whole of the
+argument, and it generalises to any number of parts.
+
+This matters because the leading part is usually the one you cannot
+constrain. `createDeploymentNodeSpec` accepts a canonical
+`v1:cluster:deployment:<short>` id on purpose, and `@pattern` validates
+the **raw** arg — before `shortId()` runs — so a colon ban there would
+reject the exact shape the normalisation exists to support. Constraining
+the trailing part alone is both sufficient and compatible:
+
+```memql
+args {
+  deploymentId  string!                        // canonical or bare, normalised below
+  nodeType      string! @pattern("^[^:]+$")    // trailing part: no separator
+}
+insert {
+  id: hash(concat(shortId(args.deploymentId), ":", args.nodeType))
+  ...
+}
+```
+
+Prefer this over changing the separator or length-prefixing the parts.
+Those close the hazard by construction, but they change `hash(...)` for
+**every** existing row — colon-bearing or not — so they are a migration.
+Constraining the trailing part rejects input nobody sends and leaves
+every derived id byte-identical.
+
+`@pattern` on an args field is genuinely enforced, unlike some of the
+concept-field annotations: it is compiled at load (`convertArgsField`),
+matched on every call (`validateArgsField`), and
+`executeMutationFunctionCall` validates before rendering the template —
+so no call path reaches the hash unchecked, the generated SDK included.
+
+Landed in memql#2980. Gated by
+`TestCompositeHashedIdTrailingPartRejectsTheSeparator` (`dsl/`), which
+checks the two known composite-hashed-id mutations **by name** — it is
+not a tree-wide detector, so a third such mutation will not trip it. If
+you add one, constrain its trailing parts and add it there.
 
 The historical `concat("ga-", hash(actor))` pattern in the auto-join
 path is gone entirely: the logic (`dsl/cognition/logic.memql`) now
