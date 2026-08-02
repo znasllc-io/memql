@@ -17,8 +17,6 @@
 // (each added a `.go` file, so `go` matched) and would then have gone quiet
 // forever.
 //
-// This guard exists so the lane cannot silently narrow again.
-//
 // WHY IT LIVES HERE AND NOT IN cmd/memql-lsp: a guard in the root lsp package
 // would be run by the lane it asserts on. Narrowing the lane back to
 // `internal/grammar` would stop the guard running, so it would go silent at
@@ -30,6 +28,15 @@
 // (#2996, the same defect class -- a CI lane whose scope silently under-covers):
 // assert on MEANING rather than spelling, so reformatting the step is fine and
 // only a real narrowing fails.
+//
+// The workflow is parsed with yaml.v3 rather than scanned line by line, the way
+// scripts/citags/tags_test.go does it. That is not a stylistic preference: an
+// adversarial review of the first version of this guard defeated it twice over
+// by exploiting line-scanning. Putting the correct pattern in the step's `name:`
+// while leaving `run:` narrow satisfied a scan that harvested patterns from the
+// whole line -- reinstating the exact bug this file exists to prevent, green.
+// A trailing `# was ./cmd/memql-lsp/...` comment did the same. Reading `Run`
+// from a parsed step makes both unrepresentable rather than merely tested for.
 package dev
 
 import (
@@ -39,10 +46,27 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 // lspCmdDir is the tree whose packages the vscode-extension lane must cover.
 const lspCmdDir = "cmd/memql-lsp"
+
+// vscodeLaneJob is the job key this guard asserts on.
+const vscodeLaneJob = "vscode-extension"
+
+type ciWorkflow struct {
+	Jobs map[string]struct {
+		If    string `yaml:"if"`
+		Steps []struct {
+			Name            string `yaml:"name"`
+			Run             string `yaml:"run"`
+			If              string `yaml:"if"`
+			ContinueOnError any    `yaml:"continue-on-error"`
+		} `yaml:"steps"`
+	} `yaml:"jobs"`
+}
 
 // repoRoot returns the repository root, resolved from this file's own location
 // rather than the working directory, so the test is runnable from anywhere.
@@ -56,66 +80,104 @@ func repoRoot(t *testing.T) string {
 	return filepath.Join(filepath.Dir(thisFile), "..", "..")
 }
 
-// vscodeLaneBody returns the `vscode-extension:` job block from ci.yml.
-//
-// The block runs from the job key to the next key at the same indentation,
-// which is how a lane is delimited in this workflow. Taking the whole file
-// instead would let a `go test` in an unrelated lane satisfy the assertions.
-func vscodeLaneBody(t *testing.T) string {
+func ciYAML(t *testing.T) []byte {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join(repoRoot(t), ".github", "workflows", "ci.yml"))
 	if err != nil {
 		t.Fatalf("read .github/workflows/ci.yml: %v", err)
 	}
-	lines := strings.Split(string(raw), "\n")
-
-	jobKey := regexp.MustCompile(`^  [A-Za-z0-9_-]+:\s*$`)
-	start := -1
-	for i, line := range lines {
-		if strings.TrimSpace(line) == "vscode-extension:" && jobKey.MatchString(line) {
-			start = i
-			break
-		}
-	}
-	if start < 0 {
-		t.Fatal("no `vscode-extension:` job found in .github/workflows/ci.yml; " +
-			"if the lane was renamed, retarget this guard rather than deleting it (#2792)")
-	}
-	end := len(lines)
-	for i := start + 1; i < len(lines); i++ {
-		if jobKey.MatchString(lines[i]) {
-			end = i
-			break
-		}
-	}
-	return strings.Join(lines[start:end], "\n")
+	return raw
 }
 
-// goTestLines returns the lane's `go test` invocations, comments excluded so no
-// assertion can be satisfied by prose.
-func goTestLines(t *testing.T) []string {
+// vscodeLane returns the parsed vscode-extension job.
+func vscodeLane(t *testing.T) struct {
+	If    string `yaml:"if"`
+	Steps []struct {
+		Name            string `yaml:"name"`
+		Run             string `yaml:"run"`
+		If              string `yaml:"if"`
+		ContinueOnError any    `yaml:"continue-on-error"`
+	} `yaml:"steps"`
+} {
 	t.Helper()
-	var found []string
-	for _, line := range strings.Split(vscodeLaneBody(t), "\n") {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "#") || !strings.Contains(trimmed, "go test") {
-			continue
-		}
-		found = append(found, trimmed)
+	var wf ciWorkflow
+	if err := yaml.Unmarshal(ciYAML(t), &wf); err != nil {
+		t.Fatalf("parse .github/workflows/ci.yml: %v", err)
 	}
-	return found
+	job, ok := wf.Jobs[vscodeLaneJob]
+	if !ok {
+		t.Fatalf("no %q job in .github/workflows/ci.yml; if the lane was renamed, "+
+			"retarget this guard rather than deleting it (#2792)", vscodeLaneJob)
+	}
+	return job
+}
+
+// goTestSteps returns the lane's steps whose `run:` invokes `go test`.
+//
+// Only the parsed `Run` scalar is ever considered. A pattern in the step's
+// `name:`, or in a `#` comment inside a block scalar, is not a command and
+// cannot satisfy any assertion here.
+func goTestSteps(t *testing.T) []struct {
+	Name            string `yaml:"name"`
+	Run             string `yaml:"run"`
+	If              string `yaml:"if"`
+	ContinueOnError any    `yaml:"continue-on-error"`
+} {
+	t.Helper()
+	var out []struct {
+		Name            string `yaml:"name"`
+		Run             string `yaml:"run"`
+		If              string `yaml:"if"`
+		ContinueOnError any    `yaml:"continue-on-error"`
+	}
+	for _, s := range vscodeLane(t).Steps {
+		for _, line := range commandLines(s.Run) {
+			if strings.Contains(line, "go test") {
+				out = append(out, s)
+				break
+			}
+		}
+	}
+	return out
+}
+
+// commandLines splits a `run:` payload into shell command lines, dropping
+// comments so no assertion can be satisfied -- or defeated -- by prose.
+func commandLines(run string) []string {
+	var out []string
+	for _, line := range strings.Split(run, "\n") {
+		if i := strings.Index(line, "#"); i >= 0 {
+			line = line[:i]
+		}
+		line = strings.TrimSpace(line)
+		if line != "" {
+			out = append(out, line)
+		}
+	}
+	return out
 }
 
 // pkgPatternRe matches a Go package pattern argument: a relative path, with or
-// without a `/...` suffix. Flag values are excluded by requiring a leading `.`.
+// without a `/...` suffix. Quotes are stripped before matching, so a correctly
+// quoted pattern is not a false alarm -- quoting is reformatting, and this file
+// asserts on meaning.
 var pkgPatternRe = regexp.MustCompile(`(^|\s)(\./\S*|\.\.\.)`)
+
+// runSelectorRe matches the flags that narrow which TESTS run, as opposed to
+// which packages. `-skip` is included because it is the natural way to silence
+// a specific failing drift guard, and `--` / `-test.` spellings because Go's
+// flag package accepts them identically.
+var runSelectorRe = regexp.MustCompile(`(^|[\s=])--?(test\.)?(run|skip)[\s=]`)
 
 // coveredBy reports whether the package directory `dir` (repo-relative, slash
 // separated) is matched by the `go test` package pattern `pat`.
 //
 // This mirrors `go help packages`: a trailing `...` matches the prefix and
 // everything beneath it, and any other pattern matches exactly one directory.
+// The `prefix+"/"` form matters -- a plain string prefix would let the pattern
+// `./cmd/memql-ls/...` claim to cover `cmd/memql-lsp`.
 func coveredBy(dir, pat string) bool {
+	pat = strings.Trim(pat, `"'`)
 	pat = strings.TrimPrefix(pat, "./")
 	pat = strings.TrimSuffix(pat, "/")
 	if pat == "..." {
@@ -134,6 +196,11 @@ func coveredBy(dir, pat string) bool {
 // cmd/memql-lsp later is automatically required to be covered, without anyone
 // remembering to update this list. That is the property that makes the guard
 // outlive the change it was written for.
+//
+// `testdata` and `_`/`.`-prefixed directories are skipped because the Go
+// toolchain ignores them: `go test ./x/...` never selects a package there, so
+// requiring the lane to cover one would be an assertion the toolchain cannot
+// satisfy.
 func testBearingLSPPackages(t *testing.T) []string {
 	t.Helper()
 	root := repoRoot(t)
@@ -142,7 +209,14 @@ func testBearingLSPPackages(t *testing.T) []string {
 		if err != nil {
 			return err
 		}
-		if info.IsDir() || !strings.HasSuffix(path, "_test.go") {
+		if info.IsDir() {
+			base := filepath.Base(path)
+			if base == "testdata" || strings.HasPrefix(base, "_") || strings.HasPrefix(base, ".") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, "_test.go") {
 			return nil
 		}
 		rel, err := filepath.Rel(root, filepath.Dir(path))
@@ -174,22 +248,27 @@ func testBearingLSPPackages(t *testing.T) []string {
 // The lane must run the tests of EVERY package under cmd/memql-lsp, not just
 // one subtree. This is the assertion that fails against the pre-#2792 recipe.
 func TestVSCodeLaneCoversEveryLSPPackage(t *testing.T) {
-	cmds := goTestLines(t)
-	if len(cmds) == 0 {
+	steps := goTestSteps(t)
+	if len(steps) == 0 {
 		t.Fatal("the vscode-extension lane runs no `go test` at all; the " +
 			"editors/vscode drift guards in cmd/memql-lsp would never run on an " +
 			"editors/vscode-only PR, because go-checks path-skips it (#2792)")
 	}
 
 	var patterns []string
-	for _, cmd := range cmds {
-		for _, m := range pkgPatternRe.FindAllStringSubmatch(cmd, -1) {
-			patterns = append(patterns, m[2])
+	for _, s := range steps {
+		for _, line := range commandLines(s.Run) {
+			if !strings.Contains(line, "go test") {
+				continue
+			}
+			for _, m := range pkgPatternRe.FindAllStringSubmatch(strings.ReplaceAll(strings.ReplaceAll(line, `"`, " "), `'`, " "), -1) {
+				patterns = append(patterns, m[2])
+			}
 		}
 	}
 	if len(patterns) == 0 {
-		t.Fatalf("no package pattern found in the lane's `go test` invocation(s); "+
-			"a bare `go test` tests only the current directory.\ngot: %v", cmds)
+		t.Fatal("no package pattern found in the lane's `go test` invocation(s); " +
+			"a bare `go test` tests only the current directory (#2792)")
 	}
 
 	for _, dir := range testBearingLSPPackages(t) {
@@ -211,27 +290,108 @@ func TestVSCodeLaneCoversEveryLSPPackage(t *testing.T) {
 	}
 }
 
-// A `-run` selector would narrow the scope back WITHIN the packages, which the
-// coverage assertion above cannot see. This repo has been bitten by exactly
-// that: `make arch-model-check` ran `-run` against a test that did not exist
-// and reported success having run nothing (#2923, #3003).
+// A `-run` or `-skip` selector would narrow the scope WITHIN the packages,
+// which the coverage assertion above cannot see. This repo has been bitten by
+// exactly that: `make arch-model-check` ran `-run` against a test that did not
+// exist and reported success having run nothing (#2923, #3003).
+//
+// GOFLAGS is checked too: `GOFLAGS=-run=TestNothing go test ./...` applies the
+// selector without the flag ever appearing as an argument.
 func TestVSCodeLaneTestStepSelectsNoSubsetOfTests(t *testing.T) {
-	for _, cmd := range goTestLines(t) {
-		if regexp.MustCompile(`(^|\s)--?(test\.)?run[\s=]`).MatchString(cmd) {
-			t.Errorf("the lane's `go test` must not pass -run: it narrows the scope "+
-				"within the packages, invisibly to the coverage check, and a pattern "+
-				"matching nothing exits 0 reporting success (#2923).\ngot: %s", cmd)
+	for _, s := range goTestSteps(t) {
+		for _, line := range commandLines(s.Run) {
+			if !strings.Contains(line, "go test") && !strings.Contains(line, "GOFLAGS") {
+				continue
+			}
+			if runSelectorRe.MatchString(line) {
+				t.Errorf("the lane's `go test` must not narrow which tests run "+
+					"(-run/-skip, including via GOFLAGS): it is invisible to the "+
+					"package-coverage check, and a -run pattern matching nothing "+
+					"exits 0 reporting success (#2923).\ngot: %s", line)
+			}
 		}
 	}
 }
 
 // A gate whose failure is swallowed is not a gate.
+//
+// `continue-on-error` is a step KEY, never part of the command, so it is read
+// from the parsed step rather than from the command text. The first version of
+// this guard looked for it in the command line, where it can never appear --
+// an adversarial review defeated the gate by setting it as a sibling key while
+// this test stayed green.
 func TestVSCodeLaneTestStepDoesNotSuppressFailure(t *testing.T) {
-	for _, cmd := range goTestLines(t) {
-		for _, esc := range []string{"|| true", "|| :", "continue-on-error"} {
-			if strings.Contains(cmd, esc) {
-				t.Errorf("the lane's `go test` must not suppress its failure exit (%q).\ngot: %s", esc, cmd)
+	for _, s := range goTestSteps(t) {
+		if s.ContinueOnError != nil && s.ContinueOnError != false {
+			t.Errorf("the lane's `go test` step sets continue-on-error=%v; its "+
+				"failure would not fail the lane (#2792).\nstep: %s", s.ContinueOnError, s.Name)
+		}
+		for _, line := range commandLines(s.Run) {
+			for _, esc := range []string{"|| true", "|| :", "|| exit 0"} {
+				if strings.Contains(line, esc) {
+					t.Errorf("the lane's `go test` must not suppress its failure exit (%q).\ngot: %s", esc, line)
+				}
 			}
 		}
 	}
+}
+
+// Coverage of the tests is worthless if the STEP never executes. A step-level
+// `if:` that evaluates false leaves every assertion above green while the lane
+// runs nothing -- the same silent under-coverage one level up.
+func TestVSCodeLaneTestStepIsUnconditional(t *testing.T) {
+	for _, s := range goTestSteps(t) {
+		if strings.TrimSpace(s.If) != "" {
+			t.Errorf("the lane's `go test` step is gated on `if: %s`. The step must "+
+				"run whenever the lane does; a false condition reports green having "+
+				"run nothing (#2792).\nstep: %s", s.If, s.Name)
+		}
+	}
+}
+
+// And coverage is worthless if the LANE never runs on the PRs that need it.
+// Narrowing the `vscode` path filter to, say, `editors/vscode/src/**` makes a
+// package.json-only dependabot bump path-skip the lane entirely -- restoring
+// #2792's failure end to end, with every assertion above still green.
+//
+// This reads the filter; it does not own it. Widening the bucket is fine and
+// keeps this green; only dropping `editors/vscode` coverage fails.
+func TestVSCodeBucketStillCoversTheExtensionTree(t *testing.T) {
+	var doc struct {
+		Jobs map[string]struct {
+			Steps []struct {
+				With struct {
+					Filters string `yaml:"filters"`
+				} `yaml:"with"`
+			} `yaml:"steps"`
+		} `yaml:"jobs"`
+	}
+	if err := yaml.Unmarshal(ciYAML(t), &doc); err != nil {
+		t.Fatalf("parse .github/workflows/ci.yml: %v", err)
+	}
+	var filters string
+	for _, s := range doc.Jobs["changes"].Steps {
+		if s.With.Filters != "" {
+			filters = s.With.Filters
+		}
+	}
+	if filters == "" {
+		t.Fatal("no path filters found on the `changes` job; this guard cannot " +
+			"pass vacuously (#2792)")
+	}
+
+	var parsed map[string][]string
+	if err := yaml.Unmarshal([]byte(filters), &parsed); err != nil {
+		t.Fatalf("parse the `changes` filters block: %v", err)
+	}
+	want := "editors/vscode/**"
+	for _, p := range parsed["vscode"] {
+		if p == want {
+			return
+		}
+	}
+	t.Errorf("the `vscode` bucket no longer contains %q (got %v). A PR touching "+
+		"only editors/vscode/package.json would path-skip the vscode-extension "+
+		"lane, and go-checks skips it too -- so the drift guards would not run "+
+		"anywhere, which is #2792 restored end to end.", want, parsed["vscode"])
 }
