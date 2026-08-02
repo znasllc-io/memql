@@ -2,9 +2,12 @@ package memql
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 
+	languageAst "github.com/znasllc-io/memql/component/language/ast"
+	languageCompiler "github.com/znasllc-io/memql/component/language/compiler"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
 
@@ -252,5 +255,74 @@ func TestNodeTypePatternClosesTheSeparatorAliasing(t *testing.T) {
 				"trailing part of a hashed composite key must be free of the SEPARATOR -- "+
 				"tightening it further is a different decision and not this one.", plausible, ":")
 		}
+	}
+}
+
+// The test above builds the ArgsField by hand, so it proves the MECHANISM
+// works -- a compiled @pattern rejects a colon -- and not that the authored
+// file carries one. The AST-level check in dsl/composite_hashed_id_test.go is
+// the mirror image: it proves the annotation is written and never drives it
+// through the validator. Either could pass while the other's half was broken:
+// a parser that dropped @pattern on the inline `string! @pattern(...)` form
+// would leave both green and the hazard open.
+//
+// This closes them into one assertion: read the REAL dsl/deployment file,
+// parse it, convert its args schema, and drive a colon-bearing nodeType
+// through the same validator the mutation path reaches.
+func TestAuthoredNodeTypePatternRejectsAColonEndToEnd(t *testing.T) {
+	src, err := os.ReadFile("../../dsl/deployment/mutations.memql")
+	if err != nil {
+		t.Fatalf("read the authored mutations file: %v", err)
+	}
+	parsed, err := languageCompiler.ParseFileSource(string(src))
+	if err != nil {
+		t.Fatalf("parse the authored mutations file: %v", err)
+	}
+
+	var checked int
+	for _, def := range parsed.Definitions {
+		fn, ok := def.(*languageAst.FunctionDef)
+		if !ok {
+			continue
+		}
+		if fn.Name != "createDeploymentNodeSpec" && fn.Name != "updateDeploymentNodeSpec" {
+			continue
+		}
+		var authored *languageParser.ArgsField
+		if fn.ArgsSchema != nil {
+			for _, a := range fn.ArgsSchema.Fields {
+				if a != nil && a.Name == "nodeType" {
+					authored = a
+				}
+			}
+		}
+		if authored == nil {
+			t.Fatalf("%s: no nodeType arg", fn.Name)
+		}
+		field, err := convertArgsField(authored)
+		if err != nil {
+			t.Fatalf("%s: the authored @pattern does not compile: %v", fn.Name, err)
+		}
+		if field.patternRegex == nil {
+			t.Fatalf("%s: nodeType carries no COMPILED @pattern. The annotation is either "+
+				"absent from the file or the parser dropped it on the inline form -- either way "+
+				"the composite id is aliasable again (memql#2980).", fn.Name)
+		}
+
+		if err := validateArgsField(map[string]any{"nodeType": "bff"}, field, ""); err != nil {
+			t.Errorf("%s: a plain nodeType must be accepted, got %v", fn.Name, err)
+		}
+		for _, bad := range []string{"x:y", ":y", "x:", "y\n:z"} {
+			if err := validateArgsField(map[string]any{"nodeType": bad}, field, ""); err == nil {
+				t.Errorf("%s: nodeType %q was accepted -- the trailing key part must be "+
+					"separator-free or ('d:x','y') and ('d','x:y') derive one id", fn.Name, bad)
+			}
+		}
+		checked++
+	}
+
+	if checked != 2 {
+		t.Fatalf("expected to check both composite-id mutations, checked %d -- if one was "+
+			"renamed this test silently stopped covering it", checked)
 	}
 }

@@ -1147,23 +1147,54 @@ insert {
 }
 ```
 
-Prefer this over changing the separator or length-prefixing the parts.
-Those close the hazard by construction, but they change `hash(...)` for
-**every** existing row — colon-bearing or not — so they are a migration.
-Constraining the trailing part rejects input nobody sends and leaves
-every derived id byte-identical.
+This is not the only way to close it, and the choice is a trade rather
+than a rule. Changing the separator, or length-prefixing the parts,
+closes the hazard **by construction** — the derivation stops being
+ambiguous instead of the input being forbidden — but both change
+`hash(...)` for every existing row, colon-bearing or not, so both are a
+migration. Constraining the trailing part rejects input nobody currently
+sends and leaves every derived id byte-identical, at the cost of leaving
+the derivation itself non-injective and permanently dependent on the
+guard.
+
+memql#2980 took the constraint because it needed no migration. That is a
+statement about what shipped, not a ruling that construction is the
+wrong answer: how much an id migration costs depends on how many rows
+exist, which is a question about the deployment rather than the code.
 
 `@pattern` on an args field is genuinely enforced, unlike some of the
 concept-field annotations: it is compiled at load (`convertArgsField`),
 matched on every call (`validateArgsField`), and
 `executeMutationFunctionCall` validates before rendering the template —
-so no call path reaches the hash unchecked, the generated SDK included.
+`engine.go`'s call is the only non-test caller of
+`renderMutationTemplate`, so no call path reaches the hash unchecked.
+
+It is enforced **server-side only**. The generated SDK carries no arg
+constraints — `CreateDeploymentNodeSpecArgs.NodeType` is a bare `string`
+— so a client learns about the rule from a call-time error, not from its
+own types. `make sdk-gen-check` reporting no drift says nothing about
+this, because the SDK has never expressed arg constraints at all.
 
 Landed in memql#2980. Gated by
 `TestCompositeHashedIdTrailingPartRejectsTheSeparator` (`dsl/`), which
-checks the two known composite-hashed-id mutations **by name** — it is
-not a tree-wide detector, so a third such mutation will not trip it. If
-you add one, constrain its trailing parts and add it there.
+checks two mutations **by name** and is not a tree-wide detector.
+
+**The tree carries other instances of this shape, and some of them are
+live examples of the hazard rather than of the fix.** `grep -rn
+"hash(concat(" dsl/` finds around a dozen. Several are safe only
+incidentally — the trailing part is a `canonicalId()` result whose fixed
+`v1:<ns>:<concept>:` prefix happens to make the split recoverable — and
+at least one is not safe: `sendActionUtterance`
+(`dsl/cognition/mutations.memql`) hashes `args.action.type` and
+`args.action.idempotencyKey`, which live inside an untyped `object!` and
+therefore **cannot** carry `@pattern` at all, so `("chat", "k:1")` and
+`("chat:k", "1")` derive one id from client-supplied input. Tracked
+separately; do not read this section as a statement that the tree
+complies with it.
+
+A shape detector — find every `id: hash(concat(...))` and require its
+trailing parts to be constrained — is the gate that would make the rule
+true tree-wide. It does not exist yet.
 
 The historical `concat("ga-", hash(actor))` pattern in the auto-join
 path is gone entirely: the logic (`dsl/cognition/logic.memql`) now
