@@ -195,9 +195,10 @@ would become the default with no opt-out. That is how
 `POST /automations/{name}/trigger` and `POST /automations/resume`
 became unauthenticated on identity (memql#2937, memql#2908).
 
-Every route such a binary serves must therefore be accounted for by one
-of two declarations, and `createHTTPServer` **refuses to boot** when one
-is in neither:
+Every route such a binary serves through a path the check can see (the
+"Scope" paragraph below states exactly which those are) must therefore be
+accounted for by one of two declarations, and `createHTTPServer`
+**refuses to boot** when one is in neither:
 
 | declaration | meaning |
 |---|---|
@@ -214,22 +215,51 @@ itself performs no auth check, but on a verifier-less binary it tunnels
 to a gRPC chain of `OperatorAware(RejectAll)`, so it fails closed at the
 next hop rather than in the handler.
 
+Identity's own discovery documents -- `/.well-known/memql-config.json`
+and `/.well-known/oauth-authorization-server` -- are declared in
+`PublicPaths()` via `server.IdentityDiscoveryPaths()`. They reach the mux
+through `Service.RegisterRoutes`, which the assertion does not see, so a
+test reads their registration out of the source and fails if either stops
+being declared.
+
 **Scope differs between the two binaries, deliberately.** The identity
 binary asserts the contract routes plus everything app code mounts
 through `a.handleRoute` (7 paths today). Routes mounted by middleware
 ahead of the mux, or registered via an aliased copy of it, are not yet
 covered -- see memql#3004. A node running
-`MEMQL_IDENTITY_ENABLED=false` asserts the contract routes only: that
-mode admits every request as the cluster owner by design, so requiring
-"safe unauthenticated" declarations for attachments / audio / voice would
-demand paperwork for a deliberate, loudly-warned troubleshooting posture.
+`MEMQL_IDENTITY_ENABLED=false` asserts the contract routes only. The
+reason is narrower than "everything is the cluster owner there", which is
+true of gRPC and not of HTTP: the local-dev admit path is a gRPC *stream*
+interceptor, so HTTP requests on that node carry no claims at all and the
+handlers fail closed on the missing actor. Demanding "safe
+unauthenticated" declarations for attachments / audio / voice would
+fail-fast a deliberate, loudly-warned troubleshooting posture without
+buying coverage those handlers do not already provide.
+
+**Being declared is not enough on its own -- it has to be declared in
+time.** `createHTTPServer` reads the registered set once, and later build
+phases still run after it, so a route mounted afterwards would be served
+having never been checked. The set is sealed when it is asserted, and
+registering after that point is fatal.
 
 This authenticates nothing new. It makes leaving a route unauthenticated
 an explicit, reviewable act rather than an omission. Registering a route
 directly on the mux instead of through `a.handleRoute` fails an AST gate;
 adding one to the contract without classifying it fails the
-`ContractRoutes()` drift check; and either way the boot assertion is the
-backstop. See `component/server/unauthenticated_surface.go` and
+`ContractRoutes()` drift check; registering one too late fails the seal;
+and either way the boot assertion is the backstop.
+
+One thing the machinery deliberately does **not** do: stop you choosing
+the wrong list. Putting a new route in `PublicPaths()` makes it
+unauthenticated on every verifier-consuming node, and nothing fails,
+because that is a legitimate classification -- it is how the health
+probes and the JWKS feed are declared. The boot error names both lists
+and states the test for each; picking between them is a review decision,
+not a mechanical one. `HandlerAuthorizedPaths()` entries are guarded
+against appearing in `PublicPaths()` as well, since for those two routes
+the answer is already known.
+
+See `component/server/unauthenticated_surface.go` and
 `app/mux_registration_test.go` (memql#2939).
 
 ### Stream lifecycle
