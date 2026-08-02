@@ -1130,11 +1130,91 @@ invisible:
 If you add a hashed FK id derivation that cannot normalise, add it here
 with the reason. A rule with no gate and a stale roster is not a rule.
 
-**A separate hazard this rule does not address.** Normalising an FK does
-not make it safe as a hash component. Neither normaliser guarantees a
-colon-free result — `shortId("d:x")` is `"d:x"` — so
-`hash(concat(a, ":", b))` still aliases: `("d:x", "y")` and
-`("d", "x:y")` derive the same id. Tracked in memql#2980.
+**A separate rule normalisation does not give you: the separator.**
+Normalising an FK makes the same logical reference hash to one string.
+It does nothing about the *composite*. Neither normaliser guarantees a
+colon-free result — `shortId("d:x")` is `"d:x"` — so an unconstrained
+`hash(concat(a, ":", b))` is not injective:
+
+```
+("d:x", "y")   and   ("d", "x:y")   ->   hash("d:x:y")
+```
+
+Two different pairs, one id, one timeline. Whichever wrote last wins and
+the reader silently gets the wrong row.
+
+**The rule: in `hash(concat(a, sep, b))`, every part after the first must
+be free of `sep`.** The *leading* part may contain it freely. With the
+trailing part separator-free the split at the last `sep` is unique, so
+equal concatenations force equal parts — that is the whole of the
+argument, and it generalises to any number of parts.
+
+This matters because the leading part is usually the one you cannot
+constrain. `createDeploymentNodeSpec` accepts a canonical
+`v1:cluster:deployment:<short>` id on purpose, and `@pattern` validates
+the **raw** arg — before `shortId()` runs — so a colon ban there would
+reject the exact shape the normalisation exists to support. Constraining
+the trailing part alone is both sufficient and compatible:
+
+```memql
+args {
+  deploymentId  string!                        // canonical or bare, normalised below
+  nodeType      string! @pattern("^[^:]+$")    // trailing part: no separator
+}
+insert {
+  id: hash(concat(shortId(args.deploymentId), ":", args.nodeType))
+  ...
+}
+```
+
+This is not the only way to close it, and the choice is a trade rather
+than a rule. Changing the separator, or length-prefixing the parts,
+closes the hazard **by construction** — the derivation stops being
+ambiguous instead of the input being forbidden — but both change
+`hash(...)` for every existing row, colon-bearing or not, so both are a
+migration. Constraining the trailing part rejects input nobody currently
+sends and leaves every derived id byte-identical, at the cost of leaving
+the derivation itself non-injective and permanently dependent on the
+guard.
+
+memql#2980 took the constraint because it needed no migration. That is a
+statement about what shipped, not a ruling that construction is the
+wrong answer: how much an id migration costs depends on how many rows
+exist, which is a question about the deployment rather than the code.
+
+`@pattern` on an args field is genuinely enforced, unlike some of the
+concept-field annotations: it is compiled at load (`convertArgsField`),
+matched on every call (`validateArgsField`), and
+`executeMutationFunctionCall` validates before rendering the template —
+`engine.go`'s call is the only non-test caller of
+`renderMutationTemplate`, so no call path reaches the hash unchecked.
+
+It is enforced **server-side only**. The generated SDK carries no arg
+constraints — `CreateDeploymentNodeSpecArgs.NodeType` is a bare `string`
+— so a client learns about the rule from a call-time error, not from its
+own types. `make sdk-gen-check` reporting no drift says nothing about
+this, because the SDK has never expressed arg constraints at all.
+
+Landed in memql#2980. Gated by
+`TestCompositeHashedIdTrailingPartRejectsTheSeparator` (`dsl/`), which
+checks two mutations **by name** and is not a tree-wide detector.
+
+**The tree carries other instances of this shape, and some of them are
+live examples of the hazard rather than of the fix.** `grep -rn
+"hash(concat(" dsl/` finds around a dozen. Several are safe only
+incidentally — the trailing part is a `canonicalId()` result whose fixed
+`v1:<ns>:<concept>:` prefix happens to make the split recoverable — and
+at least one is not safe: `sendActionUtterance`
+(`dsl/cognition/mutations.memql`) hashes `args.action.type` and
+`args.action.idempotencyKey`, which live inside an untyped `object!` and
+therefore **cannot** carry `@pattern` at all, so `("chat", "k:1")` and
+`("chat:k", "1")` derive one id from client-supplied input. Tracked in
+memql#3009; do not read this section as a statement that the tree
+complies with it.
+
+A shape detector — find every `id: hash(concat(...))` and require its
+trailing parts to be constrained — is the gate that would make the rule
+true tree-wide. It does not exist yet.
 
 The historical `concat("ga-", hash(actor))` pattern in the auto-join
 path is gone entirely: the logic (`dsl/cognition/logic.memql`) now

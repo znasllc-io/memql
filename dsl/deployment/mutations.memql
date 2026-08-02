@@ -176,13 +176,40 @@ mutate deployment updateDeploymentStatus {
 //   "a:v1:b:c"            -> unchanged             (only 2 follow)
 //   "d:x", "x:y:z"        -> unchanged
 //
-// So the ":" separator still aliases: ("d:x", "y") and ("d", "x:y") hash
-// identically. That stays safe only because id.NewShortId mints a colon-free
-// uuid, and is reachable through the generated SDK, which forwards the arg
-// verbatim. Tracked in #2980 -- not in #2925, which this closes.
+// So normalising the FK cannot make the ":" separator unambiguous on its own,
+// and #2980 closes that from the other end instead.
 //
 // nodeType is a plain discriminator, not a concept reference, so it is hashed
-// as written.
+// as written -- but it carries @pattern("^[^:]+$") (#2980), and THAT is what
+// makes the composite key injective. With the trailing part colon-free the
+// split at the last colon is unique, so
+//
+//   shortId(d1) + ":" + n1  ==  shortId(d2) + ":" + n2
+//
+// forces n1 == n2 and shortId(d1) == shortId(d2) -- the same logical pair.
+// #2980's witness dies on it: ("d", "x:y") is rejected at the arg boundary,
+// while ("d:x", "y") is still admitted and still derives what it always did.
+//
+// The constraint is on nodeType and deliberately NOT on deploymentId. This
+// mutation accepts the CANONICAL "v1:cluster:deployment:<short>" form on
+// purpose -- that is what the shortId() normalisation above exists for -- and
+// @pattern validates the RAW arg, before shortId() runs. Forbidding colons
+// there would reject the exact shape #2925 landed to support. Constraining the
+// trailing part alone is both sufficient and compatible. authoring-rules
+// section 20 states the general form.
+//
+// Enforcement is real, not decorative: convertArgsField compiles @pattern into
+// a cached regexp (function_loader.go), validateArgsField matches it on every
+// call (function_validator.go), and executeMutationFunctionCall runs
+// validateFunctionArgs BEFORE renderMutationTemplate (engine.go) -- so nothing
+// reaches the hash without passing the check, the generated SDK path included,
+// which is the reachability #2980 flagged.
+//
+// No id changes: no in-tree caller passes a colon-bearing nodeType (deploypack
+// sends "bff"), so this rejects input nobody sends rather than re-keying
+// anything. Changing the SEPARATOR would not have that property -- it rewrites
+// every derived id, colon-bearing or not -- which is why #2980's option 2 was
+// not taken despite the issue listing it as migration-free.
 //
 // No migration. The only in-tree producer of THIS mutation is
 // examples/deploypack, whose argString trims and forwards a bare id minted by
@@ -209,7 +236,9 @@ mutate deployment updateDeploymentStatus {
 mutate deploymentNodeSpec createDeploymentNodeSpec {
   args {
     deploymentId  string!
-    nodeType      string!
+    // ^[^:]+$ -- the trailing part of the hashed composite key must be free of
+    // the ":" separator, or two distinct pairs alias onto one id (#2980).
+    nodeType      string! @pattern("^[^:]+$")
     version       string
     replicas      int
     imageDigest   string
@@ -259,7 +288,9 @@ mutate deploymentNodeSpec createDeploymentNodeSpec {
 mutate deploymentNodeSpec updateDeploymentNodeSpec {
   args {
     deploymentId  string!
-    nodeType      string!
+    // ^[^:]+$ -- the trailing part of the hashed composite key must be free of
+    // the ":" separator, or two distinct pairs alias onto one id (#2980).
+    nodeType      string! @pattern("^[^:]+$")
     version       string
     replicas      int
     imageDigest   string
