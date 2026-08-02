@@ -682,6 +682,53 @@ func substituteArgRefValue(v any, args map[string]any) any {
 			return val
 		}
 		return nil
+	case *ComparisonExpression:
+		// A comparison PREDICATE over an arg (memql#2962).
+		//
+		// `cond(args.role == "owner", ...)` parses to this node with
+		// Field = FieldReference{Raw: "args.role"} -- a field reference, not
+		// an *ArgRefExpression -- so none of the arg-ref cases above fire and
+		// the default below used to return it untouched. The evaluator then
+		// resolved "args.role" against the lambda scope, found nothing, and
+		// compared nil: the cond took the else branch for EVERY input,
+		// silently, and any gate written that way was open or closed by
+		// accident rather than by its condition.
+		//
+		// Resolving it HERE rather than at evaluation time is what makes the
+		// Execute path work. Execute substitutes args during expansion and
+		// then evaluates the plan root with no args map at all, so a fix that
+		// only taught the evaluator to consult args would work through the
+		// seam and still fail end to end -- which is exactly what the first
+		// cut of this fix did, and what the Execute-level test in
+		// cond_comparison_predicate_2962_test.go caught.
+		//
+		// Only an `args.`-rooted field is rewritten. Any other field
+		// reference is a row/lambda reference that must stay lazy, so it falls
+		// through untouched and this cannot change how an existing comparison
+		// resolves.
+		if t == nil {
+			return nil
+		}
+		parts := t.Field.Parts
+		if len(parts) == 0 {
+			parts = strings.Split(t.Field.Raw, ".")
+		}
+		if len(parts) < 2 || parts[0] != "args" {
+			return t
+		}
+		resolved, ok := getNestedValue(args, strings.Join(parts[1:], "."))
+		if !ok {
+			return t
+		}
+		// Expression-led form, so both sides are plain operands the
+		// evaluator compares with the same runtimeCompareValues the
+		// field-led path uses. The RHS is recursively substituted so
+		// `args.a == args.b` resolves on both sides.
+		return &BinaryComparisonExpression{
+			Left:     &LiteralValueNode{Value: resolved},
+			Operator: t.Operator,
+			Right:    asExpressionOperand(substituteArgRefValue(t.Value, args)),
+		}
 	case map[string]any:
 		out := make(map[string]any, len(t))
 		for k, val := range t {
@@ -697,6 +744,18 @@ func substituteArgRefValue(v any, args map[string]any) any {
 	default:
 		return v
 	}
+}
+
+// asExpressionOperand wraps a substituted comparison operand so the
+// expression-led evaluator can take it. A value that is already an
+// ExpressionNode is used as-is; anything else is a resolved Go value and
+// becomes a literal. Companion to the *ComparisonExpression case above
+// (memql#2962).
+func asExpressionOperand(v any) ExpressionNode {
+	if node, ok := v.(ExpressionNode); ok {
+		return node
+	}
+	return &LiteralValueNode{Value: v}
 }
 
 // getNestedValue retrieves a value from a nested map using dot-separated path.
