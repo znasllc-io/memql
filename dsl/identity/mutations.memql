@@ -1830,7 +1830,23 @@ mutate identity updateIdentity {
 // behaves identically to insert(), so the admin path is unchanged.
 
 /// Partial update of a v1:identity:user row. Only the fields you pass are changed; other fields
-/// inherit from the prior row.
+/// inherit from the prior row. SERVER-ONLY: the caller supplies both the target id and the payload,
+/// and the payload can carry `role`, so this is an administrative write gated in Go rather than a
+/// client-callable one.
+///
+/// memql#2991. `update { id: args.userId; args.payload }` relates the target to nothing: no
+/// predicate ties args.userId to actor.userId, `role` is a plain settable enum carrying no
+/// @internal / @serverSet, and a payload SPLAT names no fields at all -- so
+/// validateMutationCallerArgs is structurally blind to it and would be even if `role` were
+/// annotated. Row-authz enforcement is inert by construction (TestRowAuthzIsInert, memql#2920), so
+/// nothing else covered it either. A client could name any user id and any role.
+///
+/// @serverOnly is the right gate rather than a stop-gap, because this mutation has exactly one
+/// legitimate caller: the identity admin server (component/identity/admin/handlers.go), which
+/// already authorizes through admin/auth.go. The authorization genuinely lives in Go; this puts the
+/// boundary where it already is. The general update-by-id class -- an owner predicate checked
+/// before the write -- is memql#2803 Phase 5 and is deliberately NOT attempted here.
+@serverOnly
 mutate user updateUser {
   args {
     userId   string!

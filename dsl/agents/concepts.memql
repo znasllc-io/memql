@@ -113,6 +113,7 @@ concept agent {
 /// & always allow this' button on the suggestion card. The grant is per (agentId, planKind,
 /// spaceScope) and carries a per-grant token budget cap + an expiry so autonomy is bounded by
 /// default.
+@rowAuthz(owner="userId")
 concept agentAuthorization {
   agentId         string! @description("v1:agents:agent.id this grant authorizes.")
   userId          string! @description("v1:identity:user.id of the user who granted the authorization. Only the granting user can revoke.")

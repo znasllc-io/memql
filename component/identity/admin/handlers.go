@@ -981,7 +981,11 @@ func (s *AdminServer) updateUser(ctx context.Context, u *userView) error {
 		return err
 	}
 	q := fmt.Sprintf(`mutation updateUser(userId: %q, payload: %s)`, u.ID, string(payloadJSON))
-	if _, err := s.Engine.Execute(ctx, q); err != nil {
+	// Internal origin, because updateUser is @serverOnly as of memql#2991. This
+	// call site was the ONLY one not stamping it -- its sibling at :933, the PAT
+	// store and the identity store all did -- so the omission was an
+	// inconsistency before it was a blocker.
+	if _, err := s.Engine.Execute(auth.ContextWithInternalOrigin(ctx), q); err != nil {
 		return fmt.Errorf("admin: update user: %w", err)
 	}
 	return nil
