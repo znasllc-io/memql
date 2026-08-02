@@ -110,12 +110,23 @@ Rules:
 the concept; no predicate is injected anywhere and no query returns a
 different row set than it did before. `TestRowAuthzIsInert` enforces
 that by walking the Go tree and failing if any file outside the
-allow-list reads the row-authz surface. That list is the detector, the
-loader and the codemod, **plus** the shadow analyzer and the two
-executor hook sites added deliberately by #2921
-(`component/database/memory-nodes/concept_rowauthz_test.go`). The
-gate's own comment is the authority; this sentence trailed it by a
-phase until memql#2984.
+allow-list reads the row-authz surface.
+
+**The allow-list is not reproduced here.** Read it from the gate:
+
+```
+sed -n '/allowed := map\[string\]bool{/,/^\t}/p' \
+  component/database/memory-nodes/concept_rowauthz_test.go
+```
+
+It is longer than a sentence suggests, and every entry carries its own
+justification in the comment above it -- which a paraphrase drops. This
+document twice carried a hand-written version of that list: once a phase
+behind (it named only the detector, loader and codemod), and once
+corrected to a version that was still three files short on the day it
+shipped. The second is why this points at the source instead
+(memql#2984). Enforcement arriving without a decision is what the gate
+exists to catch, so what counts as permitted is the gate's to state.
 
 A concept with no declaration still loads. It produces one aggregated
 boot **warning** naming every undeclared concept; escalation to a load

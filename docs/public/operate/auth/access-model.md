@@ -276,14 +276,24 @@ See `component/server/unauthenticated_surface.go` and
 1. gRPC stream opens. The verifier middleware validates the JWT and
    attaches claims to the stream context.
 2. First message reaches `handleMessage`. The access middleware
-   calls `ensureAccess(ctx)`, which runs `LoadAccessFromClaims`:
-   - If `sub` is already a canonical `v1:identity:user:<...>` id
-     (the identity-service path), the lookup skips straight to
-     `userById(sub)` and `accessForUser(sub)`.
-   - For legacy external subjects, it walks
-     `identityBySubject(sub)` -> `userById(userId)` ->
-     `accessForUser(userId)`.
+   calls `ensureAccess(ctx)` (`component/grpc/server.go`), which
+   resolves the actor through `IdentityResolver.LoadFromClaims`
+   (`component/auth/identity_resolver.go`):
+   - `sub` must already be a canonical `v1:identity:user:<...>` id;
+     every identity-service-issued JWT carries one, and anything else
+     is rejected with `ErrUserNotProvisioned`.
+   - It then runs **`userByIdSystem(userId)`** for the row that supplies
+     Role and email. That query is `@serverOnly`, and it is the call
+     that makes caller-scoping circular (#2800) -- the read that builds
+     the actor cannot itself be filtered on the actor.
    The resolved `AccessContext` is cached on the stream.
+
+   Note the query name. **`userById` is a different query**, gated by
+   `requiresOwnerOrAdmin`, and it is NOT the bootstrap. Naming it here
+   was wrong for long enough that three other documents copied it
+   (memql#2984); a reader who follows the citation to an
+   owner-or-admin-gated query concludes the circularity constraint is
+   imaginary.
 3. Per message: `CheckPartition(ctx, accessCtx, envelope.partition,
    messageId)`:
    - Reject `_system` unconditionally.
