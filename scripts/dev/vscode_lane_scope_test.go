@@ -143,18 +143,41 @@ func goTestSteps(t *testing.T) []struct {
 
 // commandLines splits a `run:` payload into shell command lines, dropping
 // comments so no assertion can be satisfied -- or defeated -- by prose.
+//
+// A `#` only begins a comment at the start of a word and outside quotes, which
+// is what the shell does. Truncating at the first `#` unconditionally reddens a
+// correct lane whose command contains one in a string (`echo "### drift" &&
+// go test ./cmd/memql-lsp/...` parsed as no command at all).
 func commandLines(run string) []string {
 	var out []string
 	for _, line := range strings.Split(run, "\n") {
-		if i := strings.Index(line, "#"); i >= 0 {
-			line = line[:i]
-		}
-		line = strings.TrimSpace(line)
-		if line != "" {
-			out = append(out, line)
+		out = append(out, stripComment(line))
+	}
+	var kept []string
+	for _, line := range out {
+		if line = strings.TrimSpace(line); line != "" {
+			kept = append(kept, line)
 		}
 	}
-	return out
+	return kept
+}
+
+// stripComment removes a trailing shell comment, respecting quoting.
+func stripComment(line string) string {
+	var quote rune
+	for i, r := range line {
+		switch {
+		case quote != 0:
+			if r == quote {
+				quote = 0
+			}
+		case r == '\'' || r == '"':
+			quote = r
+		case r == '#' && (i == 0 || line[i-1] == ' ' || line[i-1] == '\t'):
+			return line[:i]
+		}
+	}
+	return line
 }
 
 // pkgPatternRe matches a Go package pattern argument: a relative path, with or
@@ -326,14 +349,42 @@ func TestVSCodeLaneTestStepDoesNotSuppressFailure(t *testing.T) {
 			t.Errorf("the lane's `go test` step sets continue-on-error=%v; its "+
 				"failure would not fail the lane (#2792).\nstep: %s", s.ContinueOnError, s.Name)
 		}
+		pipefail := strings.Contains(s.Run, "pipefail")
 		for _, line := range commandLines(s.Run) {
 			for _, esc := range []string{"|| true", "|| :", "|| exit 0"} {
 				if strings.Contains(line, esc) {
 					t.Errorf("the lane's `go test` must not suppress its failure exit (%q).\ngot: %s", esc, line)
 				}
 			}
+			// A pipeline reports the LAST command's status. GitHub runs `bash -e`
+			// without `pipefail`, so `go test ... | tee out.txt` exits with tee's
+			// status and a failing drift guard goes green -- the same swallowed
+			// failure as `|| true`, wearing different punctuation.
+			if strings.Contains(line, "go test") && !pipefail && hasPipe(line) {
+				t.Errorf("the lane's `go test` is piped, and the step does not set "+
+					"`pipefail`; the step would exit with the LAST command's status, "+
+					"so a failing drift guard reports green (#2792).\ngot: %s", line)
+			}
 		}
 	}
+}
+
+// hasPipe reports whether the line contains a shell pipe, ignoring `||`.
+func hasPipe(line string) bool {
+	for i := 0; i < len(line); i++ {
+		if line[i] != '|' {
+			continue
+		}
+		if i+1 < len(line) && line[i+1] == '|' {
+			i++ // `||` is a logical OR, handled separately above
+			continue
+		}
+		if i > 0 && line[i-1] == '|' {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 // Coverage of the tests is worthless if the STEP never executes. A step-level
@@ -349,6 +400,30 @@ func TestVSCodeLaneTestStepIsUnconditional(t *testing.T) {
 	}
 }
 
+// ...and worthless if the JOB never runs on the PRs that need it. This is the
+// rung above the step-level check, and the realistic one: dropping
+// `needs.changes.outputs.vscode` from the job's `if:` leaves a condition that
+// still reads plausibly (`ci` plus the non-PR events) while an
+// editors/vscode-only PR -- every dependabot bump to the extension -- stops
+// selecting the lane at all. Every other assertion in this file stays green,
+// and #2792 is restored end to end.
+//
+// Like TestVSCodeBucketStillCoversTheExtensionTree this READS the condition
+// without owning its shape: any `if:` that still consults the vscode bucket
+// passes, however it is otherwise rewritten.
+func TestVSCodeLaneRunsOnExtensionOnlyChanges(t *testing.T) {
+	cond := vscodeLane(t).If
+	if strings.TrimSpace(cond) == "" {
+		return // unconditional: the lane always runs, which is stronger still
+	}
+	if !strings.Contains(cond, "needs.changes.outputs.vscode") {
+		t.Errorf("the vscode-extension job's `if:` no longer consults the `vscode` "+
+			"path bucket, so an editors/vscode-only PR -- the shape every dependabot "+
+			"bump takes -- would not select this lane. go-checks skips that PR too, "+
+			"so the drift guards would run nowhere (#2792).\ngot if: %s", cond)
+	}
+}
+
 // And coverage is worthless if the LANE never runs on the PRs that need it.
 // Narrowing the `vscode` path filter to, say, `editors/vscode/src/**` makes a
 // package.json-only dependabot bump path-skip the lane entirely -- restoring
@@ -359,7 +434,9 @@ func TestVSCodeLaneTestStepIsUnconditional(t *testing.T) {
 func TestVSCodeBucketStillCoversTheExtensionTree(t *testing.T) {
 	var doc struct {
 		Jobs map[string]struct {
-			Steps []struct {
+			Outputs map[string]string `yaml:"outputs"`
+			Steps   []struct {
+				Id   string `yaml:"id"`
 				With struct {
 					Filters string `yaml:"filters"`
 				} `yaml:"with"`
@@ -369,15 +446,36 @@ func TestVSCodeBucketStillCoversTheExtensionTree(t *testing.T) {
 	if err := yaml.Unmarshal(ciYAML(t), &doc); err != nil {
 		t.Fatalf("parse .github/workflows/ci.yml: %v", err)
 	}
+
+	// The lane consults `needs.changes.outputs.vscode`, which the `changes` job
+	// wires from ONE step's outputs. Find that step by the id the output
+	// expression names, rather than taking the last step that happens to carry
+	// filters: with two paths-filter steps present, "last wins" reads the wrong
+	// block in both directions -- a decoy step can mask a narrowed real one, and
+	// an unrelated second filter reddens a lane that is perfectly correct.
+	wiring := doc.Jobs["changes"].Outputs["vscode"]
+	m := regexp.MustCompile(`steps\.([A-Za-z0-9_-]+)\.outputs`).FindStringSubmatch(wiring)
+	if m == nil {
+		t.Fatalf("cannot tell which step supplies the `changes` job's `vscode` "+
+			"output (got %q); this guard cannot pass vacuously (#2792)", wiring)
+	}
+	stepID := m[1]
+
 	var filters string
+	var found bool
 	for _, s := range doc.Jobs["changes"].Steps {
-		if s.With.Filters != "" {
-			filters = s.With.Filters
+		if s.Id == stepID {
+			filters, found = s.With.Filters, true
+			break
 		}
 	}
+	if !found {
+		t.Fatalf("the `changes` job's `vscode` output names step %q, which has no "+
+			"matching step in the job (#2792)", stepID)
+	}
 	if filters == "" {
-		t.Fatal("no path filters found on the `changes` job; this guard cannot " +
-			"pass vacuously (#2792)")
+		t.Fatalf("step %q on the `changes` job declares no path filters; this "+
+			"guard cannot pass vacuously (#2792)", stepID)
 	}
 
 	var parsed map[string][]string
