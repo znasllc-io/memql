@@ -126,9 +126,39 @@ func (r *ConceptResolver) ResolveCanonicalIdConceptRefsInDomain(content, domain 
 		nsHint, ok := imports[secondArg]
 		if !ok && domain != "" {
 			// Ambient same-domain scope (#2617): accept the bare name when
-			// it resolves INTO the file's own domain.
-			if id, aerr := r.resolveBareConceptNameWithNamespace(secondArg, domain); aerr == nil && strings.Contains(id, ":"+domain+":") {
-				nsHint, ok = domain, true
+			// boot would bind it without an import.
+			//
+			// The test used to be `strings.Contains(id, ":"+domain+":")` --
+			// the id against the containing DIRECTORY. That is wrong for any
+			// pack whose directory differs from its @namespace, which is a
+			// supported shape (@namespace exists precisely so a directory need
+			// not dictate the canonical id). dsl/deployment declares
+			// @namespace("cluster"), so its concepts assemble to
+			// v1:cluster:deployment while the ambient hint is "deployment" --
+			// ":deployment:" is not in that id, and the loader told the author
+			// to import a concept declared in the very same domain. Worse,
+			// there was no spelling that worked: the same-domain import
+			// TestNoSameDomainUse forbids was the one the error asked for
+			// (memql#2976).
+			//
+			// Uniqueness is the honest condition, and it is what boot already
+			// uses. resolveBareConceptNameWithNamespace returns a unique
+			// trailing-segment match BEFORE it ever consults the hint, so
+			// signature-concept binding has always accepted these names
+			// ambiently -- only canonicalId carried the extra directory test.
+			// Removing that asymmetry is the fix.
+			//
+			// An AMBIGUOUS name still requires an import unless the directory
+			// really does name the namespace: two concepts sharing a trailing
+			// segment is exactly the case #2617's rule protects, and dropping
+			// the guard entirely would let a cross-domain collision bind
+			// silently to whichever the hint happened to favour.
+			if id, aerr := r.resolveBareConceptNameWithNamespace(secondArg, domain); aerr == nil {
+				if _, uerr := r.resolveBareConceptNameWithNamespace(secondArg, ""); uerr == nil {
+					nsHint, ok = domain, true // unique in the tree
+				} else if strings.Contains(id, ":"+domain+":") {
+					nsHint, ok = domain, true // ambiguous, but same-domain by directory
+				}
 			}
 		}
 		if !ok {

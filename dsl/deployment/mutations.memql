@@ -148,15 +148,20 @@ mutate deployment updateDeploymentStatus {
 //
 // It took #2925 to make that spelling usable: shortId() parsed in an id: slot
 // and then died at render, because the mutation-template id evaluator had no
-// ShortIdExpr case. The other two spellings are still blocked, and their
-// blockers are real defects rather than authoring mistakes:
+// ShortIdExpr case. Of the other two spellings, the ambient one now WORKS:
 //
-//   - ambient canonicalId, no import: canonical_id_refs.go accepts the
-//     ambient path only when the concept id contains ":"+domain+":". The
-//     directory domain here is `deployment` but these concepts declare
-//     @namespace("cluster"), so the id is v1:cluster:deployment and the check
-//     fails -- "concept ... is neither imported nor a same-domain concept".
-//     Filed as #2976.
+//   - ambient canonicalId, no import: FIXED by #2976. canonical_id_refs.go
+//     used to accept the ambient path only when the concept id contained
+//     ":"+domain+":" -- the DIRECTORY. The directory here is `deployment`
+//     while these concepts declare @namespace("cluster"), so the id is
+//     v1:cluster:deployment, the check never matched, and the loader asked for
+//     an import that TestNoSameDomainUse bans. The ambient rule now turns on
+//     UNIQUENESS, which is what boot itself uses, so the bare ambient form
+//     resolves here with no import at all.
+//
+//     Do NOT write the call form in a comment across a line break: the
+//     canonicalId rewriter scans comment text too, so a wrapped occurrence is
+//     read as a real call with a concept named "//     deployment".
 //   - `use cluster.concepts.{ deployment }`: memqllint rejects it while the
 //     engine's resolver accepts it on a unique trailing-segment match (that
 //     divergence is #2945), AND adding any explicit import for the concept
