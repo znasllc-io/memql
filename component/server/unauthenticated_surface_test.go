@@ -230,13 +230,43 @@ func TestBasePathDoesNotChangeTheVerdict(t *testing.T) {
 		return routes
 	}
 
-	for _, base := range []string{"", "/api", "/memql", "/heal"} {
-		t.Run("base="+base, func(t *testing.T) {
+	// The bases below are not arbitrary. The first four are ordinary mount
+	// points. The rest are every base that is ITSELF a declared path, or a
+	// prefix declaration minus its trailing slash -- the shape that used to
+	// reduce a declaration to "/" and make the whole check pass vacuously.
+	bases := []string{
+		"", "/api", "/memql", "/heal",
+		"/metrics", "/healthz", "/readyz", "/livez", "/memql/ws", "/automations",
+	}
+
+	for _, base := range bases {
+		t.Run("declared/base="+base, func(t *testing.T) {
 			t.Setenv("SERVER_PUBLIC_PATH", base)
 			if err := AssertUnauthenticatedSurfaceDeclared(identitySurface()); err != nil {
 				t.Errorf("the identity binary's surface must stay declared under "+
 					"SERVER_PUBLIC_PATH=%q, otherwise the node crash-loops on boot: %v",
 					base, err)
+			}
+		})
+	}
+
+	// The positive arm above cannot catch a check that blesses EVERYTHING --
+	// a vacuous check passes it trivially. This is the arm that can. With the
+	// base set to a declared path the declaration used to yield the form "/",
+	// which surfaceDeclaredBy honoured as a prefix of every absolute path, so
+	// an undeclared route was accepted and the assertion failed OPEN.
+	for _, base := range bases {
+		t.Run("undeclared-still-rejected/base="+base, func(t *testing.T) {
+			t.Setenv("SERVER_PUBLIC_PATH", base)
+			surface := append(identitySurface(), "POST /internal/dump-secrets")
+			err := AssertUnauthenticatedSurfaceDeclared(surface)
+			if err == nil {
+				t.Fatalf("SERVER_PUBLIC_PATH=%q made the boot check vacuous: an undeclared "+
+					"route was accepted. A security assertion must not fail open on an "+
+					"operator config value.", base)
+			}
+			if !strings.Contains(err.Error(), "/internal/dump-secrets") {
+				t.Errorf("the error must name the undeclared route, got: %v", err)
 			}
 		})
 	}

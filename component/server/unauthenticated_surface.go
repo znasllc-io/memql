@@ -152,8 +152,16 @@ func assertSurfaceDeclared(routes, public, handlerAuthorized []string) error {
 //
 // A trailing slash makes a declaration a PREFIX -- it covers the path and
 // everything beneath it -- matching how registerAutomationTriggerRoute mounts
-// "/automations/" and how verifier.shouldBypassAuth matches. Without one the
-// declaration is EXACT.
+// "/automations/". Without one the declaration is EXACT.
+//
+// This is deliberately STRICTER than verifier.shouldBypassAuth, which is not
+// the same rule: normalizePath strips the trailing slash from both the request
+// path and every declaration, so the verifier treats EVERY PublicPaths() entry
+// as a prefix whether or not it ends in one. What this function covers is
+// therefore a strict subset of what the verifier bypasses. The asymmetry is
+// safe in the only direction that matters -- this check can refuse to bless a
+// route the verifier would let through, never the reverse -- so it fails
+// closed, as a loud boot fatal rather than a silent exposure.
 //
 // The distinction is load-bearing. An earlier version normalized trailing
 // slashes away, which conflated the two: the prefix declaration "/automations/"
@@ -161,11 +169,21 @@ func assertSurfaceDeclared(routes, public, handlerAuthorized []string) error {
 // route -- the most obvious next route on that subtree -- inherited a blessing
 // whose justification is the trigger handler's owner-or-admin check, which it
 // does not have. It passed every gate.
+//
+// Root is never a prefix declaration. "/" is a prefix of every absolute path,
+// so honouring it here would bless the entire surface from a single declaration
+// and make this whole check pass vacuously -- it would fail OPEN, which is the
+// one direction a security assertion must not fail. verifier.shouldBypassAuth
+// skips `allowed == "/"` for the same reason; this mirrors it. Exact equality
+// against "/" still matches, so a genuinely-declared root route is unaffected.
 func surfaceDeclaredBy(routeForms []string, declarations []string) bool {
 	for _, route := range routeForms {
 		for _, d := range declarations {
 			if d == route {
 				return true
+			}
+			if d == "/" {
+				continue
 			}
 			if strings.HasSuffix(d, "/") && strings.HasPrefix(route, d) {
 				return true
@@ -189,6 +207,15 @@ func surfaceDeclaredBy(routeForms []string, declarations []string) bool {
 // The base is trimmed as a path SEGMENT, not a substring: trimming "/heal" off
 // "/healthz" would otherwise yield "thz". Trailing slashes are PRESERVED --
 // they carry the prefix-vs-exact distinction (see surfaceDeclaredBy).
+//
+// A stripped form that reduces to "/" is DROPPED rather than emitted. It arose
+// whenever the operator set the base to a path that is itself declared --
+// SERVER_PUBLIC_PATH=/metrics, /healthz, /readyz, /livez, /memql/ws -- or to a
+// prefix declaration minus its trailing slash (/automations). The declaration
+// then produced the form "/", which surfaceDeclaredBy honoured as a prefix
+// covering every route, so the entire boot assertion passed vacuously and an
+// undeclared route sailed through. Nothing is lost by dropping it: the
+// as-written form is kept on both sides and still matches.
 func surfacePathForms(p string) []string {
 	p = strings.TrimSpace(p)
 	if p == "" {
@@ -196,13 +223,8 @@ func surfacePathForms(p string) []string {
 	}
 	forms := []string{p}
 	if base := sanitizeBaseURLFromEnv(); base != "" {
-		switch {
-		case p == base:
-			forms = append(forms, "/")
-		default:
-			if rest := strings.TrimPrefix(p, base+"/"); rest != p {
-				forms = append(forms, "/"+rest)
-			}
+		if rest := strings.TrimPrefix(p, base+"/"); rest != p && rest != "" {
+			forms = append(forms, "/"+rest)
 		}
 	}
 	return forms
