@@ -50,7 +50,7 @@ Summary of what landed:
   (`owner / admin / writer / reader`).
 - The gRPC middleware (`component/auth/access/`) loads the caller's
   `PartitionACL` on the first message of a stream (via
-  `identityBySubject` -> `userById` -> `accessForUser`) and rejects any
+  `userByIdSystem` -- NOT `userById`, see memql#2984) and rejects any
   request whose envelope partition is not in the ACL. Cluster-wide
   owners bypass. `_system` is never addressable on the wire.
 - `listPartitions` is server-filtered by ACL. The Cockpit Settings tab

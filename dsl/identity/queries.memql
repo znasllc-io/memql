@@ -1152,10 +1152,18 @@ query user userByEmail {
 // userById - Get user by id
 // ==============================
 //
-// Returns a v1:identity:user record by its id. Used on the auth hot
-// path: identity-service-issued JWTs put the canonical user id in the
-// `sub` claim, so the access middleware reads sub -> userById in one
-// hop.
+// Returns a v1:identity:user record by its id.
+//
+// NOT the auth hot path. This comment used to say the access middleware
+// reads `sub -> userById` to build the actor; it does not, and has not
+// since #2800 (memql#2984). The bootstrap read is `userByIdSystem`,
+// which is @serverOnly for exactly that circularity --
+// component/auth/identity_resolver.go:79.
+//
+// This query is the caller-facing one and is gated by
+// requiresOwnerOrAdmin: its filter keys on a caller-supplied id, so
+// reading someone else's full row requires being them or holding
+// admin/owner.
 //
 // Arguments:
 //   userId (string, required) - the v1:identity:user id

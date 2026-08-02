@@ -127,12 +127,20 @@ restate it:
 | granted | `@rowAuthz(via="<spec>")` | the relationship spec, gated on `actor.userId` |
 
 ```memql
-@rowAuthz(owner="requestedBy")
-concept plan { ... }
+@rowAuthz(owner="ownerUserId")
+concept note { ... }        // dsl/notes/concepts.memql
 
 @rowAuthz(clusterOwner)
-concept call { ... }
+concept call { ... }        // dsl/telephony/concepts.memql
 ```
+
+Both examples are tree-true. The first used to read
+`@rowAuthz(owner="requestedBy") concept plan`, and `planner.plan` is
+**undeclared** — deliberately, because `requestedBy` is caller-supplied
+by `createPlan`, which is the write-path hazard #2982 is about and the
+reason this same document argues at length that declaring it `owned`
+would be wrong. Illustrating the annotation with the one concept the
+rest of the page uses as a counter-example was memql#2984.
 
 Rules:
 
@@ -156,7 +164,27 @@ Rules:
 the concept; no predicate is injected anywhere and no query returns a
 different row set than it did before. `TestRowAuthzIsInert` enforces
 that by walking the Go tree and failing if any file outside the
-detector / loader / codemod reads the row-authz surface.
+allow-list reads the row-authz surface.
+
+**The allow-list is not reproduced here.** Read it from the gate:
+
+```
+sed -n '/Files permitted to reference/,/^\t}/p' \
+  component/database/memory-nodes/concept_rowauthz_test.go
+```
+
+It is longer than a sentence suggests, and the block comment the range
+starts at is the justification for the whole list -- which a paraphrase
+drops. (The range deliberately starts at that comment, not at the map
+literal: a version of this command that started at `allowed :=` printed
+the entries and discarded the reasoning, which is the very thing this
+paragraph says a paraphrase loses.) This
+document twice carried a hand-written version of that list: once a phase
+behind (it named only the detector, loader and codemod), and once
+corrected to a version that was still three files short on the day it
+shipped. The second is why this points at the source instead
+(memql#2984). Enforcement arriving without a decision is what the gate
+exists to catch, so what counts as permitted is the gate's to state.
 
 A concept with no declaration still loads. It produces one aggregated
 boot **warning** naming every undeclared concept; escalation to a load
@@ -222,9 +250,14 @@ load, and the two agreeing on all 33 is evidence they encode one rule.
 `TestRowAuthzShadowReport` fails on any `would-narrow` over the
 declared set for exactly that reason: it would mean the two disagree.
 
-What it does **not** produce is a blast radius. That lives in the 166
-constructs over the 87 concepts that declare nothing, and shadow mode
-cannot compute a predicate where no tier is declared. The concepts
+What the **declared** set does not produce is a blast radius — over
+those concepts the analyzer agrees with Phase 1 by construction, so the
+answer is tautological. The blast radius lives in the constructs over
+the concepts that declare nothing, where no predicate can be computed
+from a tier that was never stated. That is what the report's
+`HYPOTHETICAL TIERS` section exists to estimate, so "shadow mode gives
+you no blast radius" is too strong and this paragraph used to say it
+(memql#2984). The concepts
 graph expansion actually walks into — `v1:identity:user` (46 inbound
 relationships), `v1:agents:agent` (19), `v1:planner:plan` (11) — are
 all in that undeclared set.
@@ -339,12 +372,21 @@ per-construct-override question).
 
 ### The constraint carried forward, not solved
 
-`userById` **bootstraps the actor**:
+`userByIdSystem` **bootstraps the actor**:
 `component/auth/identity_resolver.go` calls it to resolve `sub` → user
 in order to *build* the `AccessContext`. So `actor.userId` is circular
 for the one construct that creates the actor, and any rule assuming
 "every user-scoped read is expressible as a filter over the actor" is
-false there.
+false there. The query is `@serverOnly` for precisely that reason
+(#2800).
+
+> **It is `userByIdSystem`, not `userById`.** This section named the
+> latter until memql#2984. `userById` (`dsl/identity/queries.memql`) is
+> a different query, gated by `requiresOwnerOrAdmin` — so anyone who
+> followed the citation found a *gated* construct and reasonably
+> concluded the constraint was imaginary. The constraint is real and
+> unchanged; only the name was wrong, in this section, in the
+> `@rowAuthz` grammar comment, and above `userById` itself.
 
 Phase 1 needs no answer, because nothing is enforced. It does need the
 grammar to be **able** to express one, and it is: bare-flag tiers
