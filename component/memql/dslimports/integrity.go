@@ -1969,11 +1969,47 @@ func (t *Tree) MutationFieldCoverage() (total int, skipped []string) {
 			}
 			total++
 			if t.resolveFilterConcept(path, f, idx, ms.Concept) == nil {
-				skipped = append(skipped, fmt.Sprintf("%s: mutation %q (concept %q)", path, fd.Name, ms.Concept))
+				skipped = append(skipped, fmt.Sprintf("%s: mutation %q (concept %q)%s",
+					path, fd.Name, ms.Concept, conceptSkipCause(f, idx, ms.Concept)))
 			}
 		}
 	}
 	return total, skipped
+}
+
+// conceptSkipCause explains WHY a concept did not resolve, when the reason is
+// one a reader cannot see from the construct they are looking at. Returns ""
+// when there is nothing non-obvious to say.
+//
+// memql#2977. The reach of an explicit import is the thing that needs saying.
+// sameDomainConceptDecl bails as soon as ANY file-top `use` names the concept,
+// and that suppression is FILE-WIDE: adding one import to the top of
+// dsl/deployment/mutations.memql dropped createDeployment and
+// updateDeploymentStatus -- two mutations the edit never touched -- out of
+// lane-3 field validation. The gate reported them by name and said nothing
+// about the import, so the failure pointed at two innocent constructs and left
+// the actual cause invisible.
+//
+// The mechanism is deliberate (an explicit import must win over an ambient
+// same-domain match, or the two would disagree about which declaration binds),
+// so this explains rather than changes it.
+func conceptSkipCause(f *languageAst.File, idx *declIndex, name string) string {
+	if f == nil || name == "" {
+		return ""
+	}
+	for _, u := range f.Uses {
+		if u == nil || !slices.Contains(u.Names, name) {
+			continue
+		}
+		return fmt.Sprintf(
+			" -- the file-top `use %s` import names %q, which suppresses the same-domain"+
+				" fallback for that name across THIS WHOLE FILE (not just the construct that"+
+				" needs it), and the import does not itself resolve to a declaration. Fix the"+
+				" import or remove it; the mutation above may be untouched by whatever edit"+
+				" introduced it (memql#2977)",
+			u.Path, name)
+	}
+	return ""
 }
 
 // ---------------------------------------------------------------------------
