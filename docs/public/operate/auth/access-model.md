@@ -290,8 +290,8 @@ See `component/server/unauthenticated_surface.go` and
 
    Note the query name. **`userById` is a different query**, gated by
    `requiresOwnerOrAdmin`, and it is NOT the bootstrap. Naming it here
-   was wrong for long enough that three other documents copied it
-   (memql#2984); a reader who follows the citation to an
+   was wrong for long enough that it spread to five other places -- two
+   documents and three code comments (memql#2984); a reader who follows the citation to an
    owner-or-admin-gated query concludes the circularity constraint is
    imaginary.
 3. Per message: `CheckPartition(ctx, accessCtx, envelope.partition,

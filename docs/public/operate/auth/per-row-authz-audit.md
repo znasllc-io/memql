@@ -115,12 +115,16 @@ allow-list reads the row-authz surface.
 **The allow-list is not reproduced here.** Read it from the gate:
 
 ```
-sed -n '/allowed := map\[string\]bool{/,/^\t}/p' \
+sed -n '/Files permitted to reference/,/^\t}/p' \
   component/database/memory-nodes/concept_rowauthz_test.go
 ```
 
-It is longer than a sentence suggests, and every entry carries its own
-justification in the comment above it -- which a paraphrase drops. This
+It is longer than a sentence suggests, and the block comment the range
+starts at is the justification for the whole list -- which a paraphrase
+drops. (The range deliberately starts at that comment, not at the map
+literal: a version of this command that started at `allowed :=` printed
+the entries and discarded the reasoning, which is the very thing this
+paragraph says a paraphrase loses.) This
 document twice carried a hand-written version of that list: once a phase
 behind (it named only the detector, loader and codemod), and once
 corrected to a version that was still three files short on the day it

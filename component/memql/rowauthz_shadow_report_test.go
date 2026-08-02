@@ -277,8 +277,10 @@ What the DECLARED set does not give you is a blast radius: over those
 concepts this analyzer agrees with Phase 1 by construction, so the
 answer there is tautological. Enforcement's blast radius lives in the
 %d constructs over the %d concepts that declare nothing, where no
-predicate can be computed from a tier nobody stated -- which is exactly
-what the HYPOTHETICAL TIERS section above estimates.
+predicate can be computed from a tier nobody stated. The HYPOTHETICAL
+TIERS section above estimates over PART of that set -- only the concepts
+a tier can be guessed for, which is far fewer -- so read it as a sample,
+not as the whole radius.
 
 Read the two together. This paragraph used to open "what it does NOT
 give you is a blast radius", flatly, while a section printed ~77 lines
