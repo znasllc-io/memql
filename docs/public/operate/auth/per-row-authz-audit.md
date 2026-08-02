@@ -16,10 +16,10 @@ owner: znas
 > (`dsl.TestPerRowAuthzClassification`) hard-fails on any new
 > flagged construct.
 >
-> That "11" is history, not an inventory. The live figures are **23
-> `@public`** and **6 `@serverOnly`**, and they move; regenerate with
-> `go test ./dsl/ -run TestPerRowAuthzClassification -v` rather than
-> trusting a number written here. The `#54`-era counts and tables that
+> That "11" is history, not an inventory. The live figures move, and
+> this document does not carry them: regenerate with
+> `go test ./dsl/ -run TestPerRowAuthzClassification -v`. The `#54`-era
+> counts and tables that
 > used to sit further down have been **deleted rather than corrected**
 > (memql#2983) — see "Counts: regenerate, do not read".
 
@@ -71,13 +71,33 @@ place. `other` is by far the largest column and is not a finding.
 > **There is no `requiresClusterOwner` spec.** This table used to say
 > "compose `spec("requiresClusterOwner")`", and neither half was live:
 > the spec is declared nowhere in `dsl/` (`dsl/admin_gate_test.go` says
-> so outright), and `spec("...")` is the retired stringly form,
-> superseded by naming the spec as a bare top-level conjunct. The live
-> context-specs are **`requiresAdmin`** (`dsl/common/specs.memql`),
-> **`requiresOwner`** and **`requiresOwnerOrAdmin`**
-> (`dsl/deployment/specs.memql`). The name survives inside the
-> classifier's recogniser as a #54 placeholder, which is why it reads
-> as real from the outside.
+> so outright), and `spec("...")` is the retired stringly form. The
+> engine rejects it in `component/memql/ast_converter.go`, naming the
+> replacement as the predicate form `spec <name>` — no quotes, no
+> parens — which in a filter is the spec written as a top-level
+> conjunct.
+>
+> **Do not take the list of live context-specs from here.** That is the
+> kind of hand-written inventory the rest of this document was rewritten
+> to stop carrying, and it drifts the same way. Read it off the tree:
+>
+> ```
+> grep -rn '^spec actorEnvelope ' dsl/
+> ```
+>
+> Worth knowing why that is not a formality: the pairing is not the
+> obvious one. `requiresOwnerOrAdmin` lives in `dsl/common/specs.memql`
+> beside `requiresAdmin` — not in `dsl/deployment/specs.memql` beside
+> `requiresOwner` — having moved there in memql#2800. #2983 asserted the
+> deployment pairing, the first correction copied it unchecked, and both
+> were wrong. `requiresDeveloperOrAbove` is a fourth live
+> `actorEnvelope` spec that neither list mentioned; note it is absent
+> from the admin recogniser, so it is a role gate the admin classifier
+> does not see.
+>
+> `requiresClusterOwner` survives inside that recogniser as a #54
+> placeholder, which is why the retired spelling still reads as real
+> from the outside.
 
 The `@public` annotation is a marker for the validator — it has no
 runtime effect. Adding `@public` to a construct is the author's
@@ -370,12 +390,19 @@ breakdown. **Both are deleted rather than corrected.**
 
 They were hand-copied from what the classifier already prints, so they
 began drifting the day they were written. Measured against the tree
-while this was being fixed: 12 of the snapshot's 13 rows were
+while this was being fixed, almost every row of the snapshot was
 numerically wrong, it used the retired `mutation` keyword (the surface
-keyword is `mutate`, memql#2041), it had no Seeds column, and 17 live
+keyword is `mutate`, memql#2041), it had no Seeds column, and many live
 namespaces were missing from it entirely. The classification block was
-worse — 11 domains against 30 live, no `srvOnly` column, and it
-reported 0 `owned` outside cognition where the tree has 93.
+worse — a fraction of the live namespaces, no `srvOnly` column, and it
+reported no `owned` constructs outside cognition when the tree is full
+of them.
+
+The counts that sentence originally quoted are gone from it on purpose.
+Describing a stale table by writing down today's figures replaces one
+hand-maintained number with another and re-lights the same fuse; the
+argument for deleting the tables does not need them, and the classifier
+prints them on demand.
 
 A hand-maintained count in a document is a defect with a delay fuse.
 This page has now produced three (memql#2914's call sites, memql#2918's

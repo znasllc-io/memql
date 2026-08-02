@@ -235,9 +235,12 @@ query user searchUsers {
 
 // `@public` marks this query as intentionally not caller-scoped.
 // Admin-only audit view (no Go callers; consumed by the admin
-// UI under elevated context). Proper admin gating via a
-// `requiresClusterOwner` spec is a #54 follow-up once the admin
-// surface is consolidated.
+// UI under elevated context). Proper admin gating is a #54 follow-up
+// once the admin surface is consolidated -- via one of the live
+// actorEnvelope specs (`grep -rn '^spec actorEnvelope ' dsl/`) named as
+// a top-level conjunct, NOT via a `requiresClusterOwner` spec, which is
+// declared nowhere and only survives inside the classifier's recogniser
+// as a #54 placeholder (memql#2983).
 /// Audit events where actorUserId equals the supplied userId. Pair with auditEventsByTarget for
 /// full per-user history (no OR operator in the filter grammar yet).
 @public
