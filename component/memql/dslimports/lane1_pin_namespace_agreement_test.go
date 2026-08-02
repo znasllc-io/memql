@@ -215,26 +215,37 @@ query widget deployWidgets {
 	}
 }
 
-// A namespace that exists ONLY because domains pinned themselves into it is
-// still a namespace this tree supplies, and boot binds imports of it. The
-// entry gate was directory-keyed, so the lint waved such an import through as
-// "external, supplied elsewhere" without checking it -- the third arm of the
-// accepted / rejected / silently-ignored split #2945 was filed about. Widening
-// module resolution without widening the gate left that arm in place.
-func TestLane1_NamespaceExistingOnlyViaPinsIsChecked(t *testing.T) {
+// The namespace test is a TIEBREAKER, not a hard filter -- and getting that
+// wrong is how the first cut of this review over-corrected.
+//
+// resolveBareConceptNameWithNamespace matches the trailing segment first and
+// returns immediately when exactly one concept in the tree carries the name;
+// the ":"+hint+":" needle is never built. So a UNIQUE bare name binds
+// regardless of the hint, and a lint that filters it rejects an import boot
+// accepts. Index.ConceptDeclared states the same rule in this package ("a
+// unique bare name resolves regardless of the hint"), so a hard filter here
+// would put two contradictory models of one boot rule in one package.
+func TestLane1_UniqueBareNameBindsRegardlessOfNamespace(t *testing.T) {
 	root := fstest.MapFS{
-		"alpha/namespace.pin": file("cluster\n"),
-		"alpha/concepts.memql": file(`@version("1.0.0")
-@namespace("cluster")
-@description("There is no cluster/ directory; the namespace exists only via pins.")
+		"deploy/namespace.pin": file("cluster\n"),
+		// No @namespace, so this assembles v1:deploy:widget -- and it is the
+		// ONLY widget in the tree, so boot binds it under any hint.
+		"deploy/concepts.memql": file(`@version("1.0.0")
+@description("Un-annotated decl in a pinned directory; unique in the tree.")
 concept widget {
   label  string  @required @description("Label.")
 }`),
-		"consumer/queries.memql": file(`use cluster.concepts.{ nonesuch }
+		"cluster/concepts.memql": file(`@version("1.0.0")
+@namespace("cluster")
+@description("The pin target exists but declares no widget.")
+concept gadget {
+  label  string  @required @description("Label.")
+}`),
+		"deploy/queries.memql": file(`use cluster.concepts.{ widget }
 
 @enabled
-@description("Imports a symbol no domain in the namespace declares.")
-query widget consumerWidgets {
+@description("Boot binds this: widget is unique, so the hint is not consulted.")
+query widget deployWidgets {
   args {
     label  string  @required
   }
@@ -242,43 +253,13 @@ query widget consumerWidgets {
 }`),
 	}
 
-	// Assert the SPECIFIC diagnostic. Matching on the symbol name alone is not
-	// enough: with the gate closed the import is never checked, but an
-	// unrelated lane still reports `imported symbol "nonesuch" is never
-	// referenced`, which also contains the name. That message means the import
-	// was ignored; "is not declared in alpha/concepts.memql" means it was
-	// resolved against the namespace and genuinely found absent.
-	var got string
 	for _, err := range loadTree(t, root).VerifyReferentialIntegrity() {
-		if strings.Contains(err.Error(), "nonesuch") && strings.Contains(err.Error(), "is not declared in") {
-			got = err.Error()
-		}
-	}
-	if got == "" {
-		t.Fatal("`use cluster.concepts.{ nonesuch }` was ignored rather than checked. The " +
-			"cluster namespace exists in this tree -- alpha/ pins itself into it and assembles " +
-			"v1:cluster:widget -- so the lint must resolve the import against that namespace " +
-			"instead of assuming it is supplied from outside the linted root.")
-	}
-	if !strings.Contains(got, "alpha/concepts.memql") {
-		t.Errorf("the diagnostic must name the file(s) actually searched, got: %s", got)
-	}
-
-	// ...and the legal import in the same namespace is still accepted.
-	ok := root
-	ok["consumer/queries.memql"] = file(`use cluster.concepts.{ widget }
-
-@enabled
-@description("Imports a symbol the namespace does declare.")
-query widget consumerWidgets {
-  args {
-    label  string  @required
-  }
-  filter  label == args.label
-}`)
-	for _, err := range loadTree(t, ok).VerifyReferentialIntegrity() {
 		if strings.Contains(err.Error(), "use cluster.concepts") {
-			t.Fatalf("checking a pin-only namespace must not reject a legal import: %v", err)
+			t.Fatalf("the lint rejected an import boot BINDS. widget is unique in this tree, so "+
+				"resolveBareConceptNameWithNamespace returns it on the trailing-segment match "+
+				"without ever consulting the hint. The per-declaration namespace test must apply "+
+				"only when the name is ambiguous -- otherwise it is a hard filter boot does not "+
+				"have, and it contradicts Index.ConceptDeclared: %v", err)
 		}
 	}
 }

@@ -305,19 +305,6 @@ func (t *Tree) buildDeclIndex() *declIndex {
 // exactly today's behaviour. That is what makes this a pure widening: on a
 // tree where nothing is pinned to ns the slice is one element long and every
 // caller behaves byte-for-byte as it did before memql#2945.
-// knownNamespace reports whether ns is a namespace THIS tree supplies.
-//
-// idx.namespaces is DIRECTORY-keyed, so testing it alone missed a namespace
-// that exists only because domains pinned themselves into it: the tree
-// supplies it and boot binds imports of it, but the lint waved the import
-// through as "external, supplied elsewhere" rather than checking it. That is
-// the silently-ignored arm of the accepted / rejected / ignored split
-// memql#2945 was filed about, and widening resolveUseModules without widening
-// this gate left it in place.
-func (idx *declIndex) knownNamespace(ns string) bool {
-	return idx.namespaces[ns] || len(idx.pinnedTo[ns]) > 0
-}
-
 func (idx *declIndex) domainsForNamespace(ns string) []string {
 	pinned := idx.pinnedTo[ns]
 	if len(pinned) == 0 {
@@ -533,8 +520,20 @@ func (idx *declIndex) declSuppliesNamespace(target moduleTarget, ns, name string
 	if idx.byFile[target.file][full] != "concept" {
 		return true
 	}
+	// Boot consults the namespace hint ONLY as a tiebreaker.
+	// resolveBareConceptNameWithNamespace matches the trailing segment first and
+	// returns immediately when exactly one concept carries the name -- the
+	// ":"+hint+":" needle is never even built. So a unique bare name binds
+	// regardless of the hint, and filtering it here would reject an import boot
+	// ACCEPTS. Index.ConceptDeclared states the same rule in this package ("a
+	// unique bare name resolves regardless of the hint"); a hard filter here
+	// would put two contradictory models of one boot rule in one package.
+	entries := idx.concepts[full]
+	if len(entries) <= 1 {
+		return true
+	}
 	needle := ":" + ns + ":"
-	for _, e := range idx.concepts[full] {
+	for _, e := range entries {
 		if e.file != target.file {
 			continue
 		}
@@ -573,7 +572,7 @@ func (t *Tree) verifyUseDecls(path string, f *languageAst.File, idx *declIndex) 
 		if len(parts) == 0 {
 			continue
 		}
-		if !idx.knownNamespace(parts[0]) {
+		if !idx.namespaces[parts[0]] {
 			// External namespace (e.g. an engine domain while linting a
 			// product bundle standalone) -- nothing in this root to check
 			// against.
@@ -638,7 +637,7 @@ func fileHasExternalImports(f *languageAst.File, idx *declIndex) bool {
 			continue
 		}
 		parts := stripVersionPrefix(u.Parts)
-		if len(parts) > 0 && !idx.knownNamespace(parts[0]) {
+		if len(parts) > 0 && !idx.namespaces[parts[0]] {
 			return true
 		}
 	}
@@ -764,7 +763,7 @@ func (t *Tree) resolveConceptForFile(path string, f *languageAst.File, idx *decl
 			continue
 		}
 		parts := stripVersionPrefix(u.Parts)
-		if len(parts) == 0 || !idx.knownNamespace(parts[0]) {
+		if len(parts) == 0 || !idx.namespaces[parts[0]] {
 			return conceptResolution{state: conceptInconclusive} // supplied externally
 		}
 		// Every file the namespace can supply (memql#2945). Without this a
@@ -2164,7 +2163,7 @@ func (t *Tree) resolveSpecShape(path string, f *languageAst.File, idx *declIndex
 			continue
 		}
 		parts := stripVersionPrefix(u.Parts)
-		if len(parts) == 0 || !idx.knownNamespace(parts[0]) {
+		if len(parts) == 0 || !idx.namespaces[parts[0]] {
 			return nil, "" // supplied externally
 		}
 		// Every file the namespace can supply (memql#2945). A shape still has
