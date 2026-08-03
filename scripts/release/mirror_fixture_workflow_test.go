@@ -17,6 +17,7 @@
 package release
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -51,8 +52,10 @@ func mirrorWorkflow(t *testing.T) string {
 // moment someone later swaps the pin for a floating tag, that becomes the
 // silent-drift half of #2793 rebuilt inside the fix for it.
 func TestMirrorWorkflowIsManualOnly(t *testing.T) {
-	// Keys are `any`: YAML 1.1 reads a bare `on` as the boolean true, and which
-	// spelling a parser produces is not something this guard should depend on.
+	// Keys are `any` so a parser that reads a bare `on` as the YAML 1.1 boolean
+	// true is handled too. yaml.v3 follows YAML 1.2 and yields the string "on",
+	// which is the path actually taken here; the boolean arm is belt-and-braces
+	// for a parser swap, not a case this repo hits today.
 	var doc map[any]any
 	if err := yaml.Unmarshal([]byte(mirrorWorkflow(t)), &doc); err != nil {
 		t.Fatalf("parse mirror-fixture-images.yml: %v", err)
@@ -64,14 +67,30 @@ func TestMirrorWorkflowIsManualOnly(t *testing.T) {
 	if !ok {
 		t.Fatal("mirror workflow declares no triggers; this guard cannot pass vacuously (#2793)")
 	}
-	triggers, ok := raw.(map[string]any)
-	if !ok {
-		t.Fatalf("unexpected `on:` shape %T; expected a mapping of trigger names (#2793)", raw)
+
+	// `on:` has three legal shapes and all three can express manual-only:
+	// a mapping, a list, or a bare string. Normalise to a name set rather than
+	// rejecting the forms this file does not happen to use -- a guard that
+	// fatals on a legitimate rewrite is noise, not safety.
+	names := map[string]bool{}
+	switch v := raw.(type) {
+	case map[string]any:
+		for name := range v {
+			names[name] = true
+		}
+	case []any:
+		for _, item := range v {
+			names[fmt.Sprint(item)] = true
+		}
+	case string:
+		names[v] = true
+	default:
+		t.Fatalf("unexpected `on:` shape %T; expected a mapping, list or string (#2793)", raw)
 	}
-	if len(triggers) == 0 {
+	if len(names) == 0 {
 		t.Fatal("mirror workflow declares no triggers; this guard cannot pass vacuously (#2793)")
 	}
-	for name := range triggers {
+	for name := range names {
 		if name != "workflow_dispatch" {
 			t.Errorf("mirror workflow must be workflow_dispatch-only; found trigger %q. "+
 				"An automatic push publishes a new digest that nothing references, and "+
@@ -210,13 +229,55 @@ func TestMirrorWorkflowCopiesTheManifestRatherThanRepushing(t *testing.T) {
 // credential dependency this approach was chosen to avoid (#2793): a
 // `services:` container is pulled before any step runs, so it can only ever use
 // a credential that already exists for the job.
+// Asserts on the PARSED login `with.registry` and the step's `env.TARGET`, not
+// on the file text. An earlier version did `strings.Contains` over the whole
+// file and was satisfied by the word `ghcr.io` appearing in an input
+// `description:` and in a rationale comment -- so swapping the workflow wholesale
+// to ACR left it green. That is the same "right check, wrong surface" defect
+// caught twice in the #2792 guard; the file text is not the configuration.
 func TestMirrorWorkflowTargetsGHCRWithTheAutomaticToken(t *testing.T) {
-	wf := mirrorWorkflow(t)
-	for _, want := range []string{"ghcr.io", "secrets.GITHUB_TOKEN"} {
-		if !strings.Contains(wf, want) {
-			t.Errorf("mirror workflow must reference %q: GHCR with the automatic "+
-				"token is the only registry a `services:` pull can authenticate "+
-				"against without a new secret (#2793)", want)
+	var doc struct {
+		Jobs map[string]struct {
+			Steps []struct {
+				With map[string]string `yaml:"with"`
+				Env  map[string]string `yaml:"env"`
+			} `yaml:"steps"`
+		} `yaml:"jobs"`
+	}
+	if err := yaml.Unmarshal([]byte(mirrorWorkflow(t)), &doc); err != nil {
+		t.Fatalf("parse mirror-fixture-images.yml: %v", err)
+	}
+
+	var sawRegistry, sawTarget bool
+	for _, job := range doc.Jobs {
+		for _, step := range job.Steps {
+			if reg, ok := step.With["registry"]; ok {
+				sawRegistry = true
+				if reg != "ghcr.io" {
+					t.Errorf("the mirror logs in to %q; it must be ghcr.io. GHCR with "+
+						"the automatic token is the only registry a `services:` pull can "+
+						"authenticate against without a new secret, because that pull "+
+						"happens at job setup before any login step runs (#2793)", reg)
+				}
+				if pw := step.With["password"]; !strings.Contains(pw, "secrets.GITHUB_TOKEN") {
+					t.Errorf("the mirror authenticates with %q; it must use the automatic "+
+						"GITHUB_TOKEN. A static secret is the dependency this approach was "+
+						"chosen to avoid (#2793)", pw)
+				}
+			}
+			if tgt, ok := step.Env["TARGET"]; ok {
+				sawTarget = true
+				if !strings.HasPrefix(tgt, "ghcr.io/") {
+					t.Errorf("the mirror pushes to %q; the target must be under ghcr.io/ "+
+						"(#2793)", tgt)
+				}
+			}
 		}
+	}
+	if !sawRegistry {
+		t.Fatal("no login step with a `registry:` found; this guard cannot pass vacuously (#2793)")
+	}
+	if !sawTarget {
+		t.Fatal("no step declaring `env.TARGET` found; this guard cannot pass vacuously (#2793)")
 	}
 }

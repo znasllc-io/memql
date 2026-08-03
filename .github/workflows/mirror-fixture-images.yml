@@ -123,4 +123,16 @@ jobs:
             echo "Update both \`services:\` blocks in \`.github/workflows/ci.yml\`"
             echo "(\`mcp-conformance\` and \`db-tests\`) to that digest in a normal PR."
             echo "Nothing changes until you do -- the pin is what ci.yml reads."
+            echo
+            echo "### BEFORE pinning it: make the package PUBLIC"
+            echo
+            echo "A new GHCR package defaults to **private**, and \`memql\` is a public"
+            echo "repo. A pull request from a FORK gets a read-only \`GITHUB_TOKEN\` that"
+            echo "cannot pull a private org package, so \`mcp-conformance\` and \`db-tests\`"
+            echo "would fail on every fork PR -- trading an intermittent Docker Hub"
+            echo "outage for a deterministic fork-PR outage."
+            echo
+            echo "Set it at: Org -> Packages -> \`$(basename "$TARGET")\` -> Package"
+            echo "settings -> Change visibility -> Public. Nothing is secret here; it"
+            echo "is a verbatim copy of a public upstream image."
           } >> "$GITHUB_STEP_SUMMARY"
