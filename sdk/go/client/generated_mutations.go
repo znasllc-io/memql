@@ -12189,34 +12189,6 @@ func UpdateTodoBuild(args UpdateTodoArgs) string {
 	return b.String()
 }
 
-// UpdateUser -- Partial update of a v1:identity:user row. Only the fields you pass are changed; other fields inherit from the prior row.
-//
-// Bound concept: v1:identity:user (machine-readable: BoundConcepts["updateUser"] in generated_concepts.go).
-type UpdateUserArgs struct {
-	UserId  string
-	Payload map[string]any
-}
-
-// UpdateUser calls the engine mutation updateUser.
-func (qc *QueryClient) UpdateUser(ctx context.Context, args UpdateUserArgs) (*Result, error) {
-	call := UpdateUserBuild(args)
-	return qc.executeNamed(ctx, "updateUser", call)
-}
-
-func UpdateUserBuild(args UpdateUserArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation updateUser(")
-	b.WriteString("userId: ")
-	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	if b.Len() > 20 {
-		b.WriteString(", ")
-	}
-	b.WriteString("payload: ")
-	b.WriteString(renderMemQLValue(args.Payload))
-	b.WriteString(")")
-	return b.String()
-}
-
 // UpdateWorkerLastSeen -- Bump lastSeenAt + lastConnectedFromIP on a worker registration.
 //
 // Bound concept: v1:worker:registration (machine-readable: BoundConcepts["updateWorkerLastSeen"] in generated_concepts.go).

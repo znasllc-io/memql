@@ -173,6 +173,19 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "identity/queries.memql", Name: "usersInDeletionCooldown"}:   true,
 		{Path: "identity/queries.memql", Name: "usersScheduledForDeletion"}: true,
 		{Path: "worker/queries.memql", Name: "runningPlansForUser"}:         true,
+		// memql#2991. Caller-scoping is not merely hard here, it is
+		// INEXPRESSIBLE: `update { id: args.userId; args.payload }` relates the
+		// target to nothing, and no mutation in the tree carries a filter --
+		// the grammar has no way to say "and the row is mine". An owner
+		// predicate on the update's row selection is memql#2803 Phase 5.
+		//
+		// Meanwhile the row holds the caller's own cluster-wide `role`, which
+		// is a plain settable enum, and a payload SPLAT names no fields so
+		// validateMutationCallerArgs cannot see it. The one legitimate caller
+		// is the identity admin server, which already authorizes in
+		// admin/auth.go -- so origin gating puts the boundary where the
+		// authorization already lives.
+		{Path: "identity/mutations.memql", Name: "updateUser"}: true,
 	}
 	for k := range want {
 		if !set[k] {

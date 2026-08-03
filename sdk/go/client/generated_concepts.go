@@ -495,7 +495,6 @@ var BoundConcepts = map[string]string{
 	"updateSessionStreams":                  "v1:cognition:session",
 	"updateTaskStatus":                      "v1:planner:task",
 	"updateTodo":                            "v1:todos:todo",
-	"updateUser":                            "v1:identity:user",
 	"updateWorkerLastSeen":                  "v1:worker:registration",
 	"usableRecords":                         "v1:data:record",
 	"userActiveSpace":                       "v1:identity:user",

@@ -149,10 +149,15 @@ func TestAccountDeletionSweep_HardDeletesExpiredUser_DBAcceptance(t *testing.T) 
 	canonicalID := created.Bundle.Nodes[0].Id
 
 	scheduledAt := time.Now().Add(-60 * 24 * time.Hour).UTC().Format(time.RFC3339)
-	call("updateUser", map[string]any{
-		"userId":  uid,
-		"payload": map[string]any{"deletionScheduledAt": scheduledAt},
-	})
+	// updateUser is @serverOnly as of memql#2991, so this setup call has to
+	// carry an internal origin the way its real caller (the identity admin
+	// server) does. The sweep itself never calls updateUser -- this is test
+	// scaffolding standing in for an admin having scheduled the deletion.
+	if _, err := eng.Execute(auth.ContextWithInternalOrigin(ctx), fmt.Sprintf(
+		`mutation updateUser(payload: {"deletionScheduledAt": %q}, userId: %q)`,
+		scheduledAt, uid)); err != nil {
+		t.Fatalf("seed deletionScheduledAt via updateUser: %v", err)
+	}
 
 	// Sanity: the user is active before the sweep.
 	if got := userActive(t, ctx, db, canonicalID); got != true {

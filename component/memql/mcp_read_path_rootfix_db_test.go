@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/znasllc-io/memql/component/auth"
 	"strings"
 	"testing"
 
@@ -138,8 +139,10 @@ func TestSearchUsers_ActiveAndLimitApplied(t *testing.T) {
 			"primaryEmail": fmt.Sprintf("su-%d-%s@example.com", i, sfx),
 		})
 	}
-	// Deactivate the third via partial read-merge update.
-	runMutation(t, ctx, eng, "updateUser", map[string]any{
+	// Deactivate the third via partial read-merge update. updateUser is
+	// @serverOnly as of memql#2991, so this drives it with an internal origin
+	// the way the identity admin server does.
+	runMutation(t, auth.ContextWithInternalOrigin(ctx), eng, "updateUser", map[string]any{
 		"userId": inactive, "payload": map[string]any{"active": false},
 	})
 
