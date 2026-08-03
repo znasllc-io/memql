@@ -286,12 +286,12 @@ type parsedConcept struct {
 // @maxLength, @minimum, @maximum, @immutable, @secret) and for
 // discriminated-union variants (@variant).
 type parsedProperty struct {
-	name          string
-	typeName      string
-	description   string
-	defaultValue  any
-	required      bool
-	enumValues []string
+	name         string
+	typeName     string
+	description  string
+	defaultValue any
+	required     bool
+	enumValues   []string
 	// element is the lowered element type of a WRAPPED property -- the item
 	// type of []T and the value type of map[string]T. Recursive, so
 	// [][]string and map[string]map[string]int lower all the way down.
@@ -1080,4 +1080,3 @@ func suggestPropertyType(name string) string {
 	return ` -- accepted: string, bool, int, float, datetime, object, any, array, ` +
 		`[]<type>, map[string]<type>, enum("a", "b")`
 }
-

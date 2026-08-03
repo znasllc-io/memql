@@ -183,55 +183,27 @@ func TestConceptPropertyTypes_NestedBlockPropertiesAreValidated(t *testing.T) {
 	}
 }
 
-// TestConceptPropertyTypes_ElementTypesAreNotValidated pins the KNOWN GAP that
-// docs/public/language/memql.md now warns about, so the warning and the code
-// cannot drift apart.
+// TestConceptPropertyTypes_ElementTypesAreValidated is the memql#2951 fix, and
+// it is the inverse of the test that stood here: this file used to pin the gap
+// as CURRENT behaviour so the docs and the code could not drift apart, with a
+// note saying whoever closed it must delete the caveat. Both happened together.
 //
-// memqlTypeToJSONType ends in `default: return "string"`, and the array/map
-// branches never consult suggestPropertyType -- so inside `[]<type>` and
-// `map[string]<type>` an unrecognised element type is neither rejected nor
-// corrected, it silently becomes `string`. `[]boolean` therefore builds a
-// field that validates as `[]string`.
+// The gap was a second lowering. memqlTypeToJSONType ended in
+// `default: return "string"` and never consulted suggestPropertyType, so inside
+// `[]<type>` and `map[string]<type>` an unrecognised element type was neither
+// rejected nor corrected -- `[]boolean` built a field validating as `[]string`.
+// The element now goes through propertyToJSONSchema itself, so there is no
+// second answer to diverge.
 //
-// Deliberately NOT fixed in memql#2909: that issue is about types the loader
-// REJECTS (which drop a concept), and these are types it ACCEPTS. Closing the
-// gap would reject DSL that loads today, which is a behaviour change for
-// existing bundles rather than a lint fix. Filed as memql#2951.
-//
-// This test asserts the CURRENT behaviour. When the gap is closed it will
-// fail, which is the intended signal: whoever closes it must also delete the
-// caveat from the docs.
-func TestConceptPropertyTypes_ElementTypesAreNotValidated(t *testing.T) {
-	// The exact element schema memql#2951 records for each form. Asserted
-	// whole, so a change to the lowering breaks this test rather than silently
-	// outdating the issue.
-	str := map[string]any{"type": "string"}
-	wantElementSchema := map[string]map[string]any{
-		"[]boolean": str, "[]frobnicate": str, "map[string]boolean": str,
-		// `any` is unconstrained as a property and string-typed as an element
-		"[]any": str, "map[string]any": str,
-		"map[string]map[string]string": str,
-		"[]map[string]string":          str,
-		// inner type discarded entirely, not coerced
-		"[][]frobnicate": {"type": "array"},
-		// byte-identical to []string: no `format`, which is the whole defect
-		"[]datetime": str, "map[string]datetime": str,
-	}
-
-	// Includes RECOGNISED types, not just unrecognised ones: review round 2
-	// found `map[string]any` produces a string constraint, so `any` means
-	// "unconstrained" as a property and "must be a string" as an element, and
-	// composite element types collapse entirely. The caveat in the docs had to
-	// widen to match, and so does this.
-	for _, ty := range []string{
-		"[]boolean", "[]frobnicate", "map[string]boolean",
-		"[]any", "map[string]any", "map[string]map[string]string", "[]map[string]string", "[][]frobnicate",
-		// datetime is RECOGNISED and lowers to a bare string with no
-		// `format`, so the RFC3339 check the scalar position enforces is
-		// silently dropped. Review round 3 found it on the docs' safe-list,
-		// which is the one sentence an author acts on.
-		"[]datetime", "map[string]datetime",
-	} {
+// Both halves are asserted, because each fails differently:
+//   - REJECTED with the same `did you mean` correction property position gets.
+//   - ACCEPTED, emitting the exact element schema the declaration describes --
+//     asserted whole rather than by type, because the case this most needs to
+//     catch is `[]datetime` silently losing `format` while still lowering to
+//     `"type":"string"`.
+func TestConceptPropertyTypes_ElementTypesAreValidated(t *testing.T) {
+	buildField := func(t *testing.T, ty string) (map[string]any, error) {
+		t.Helper()
 		src := "@version(\"1.0.0\")\n@namespace(\"aud\")\n@description(\"d\")\n" +
 			"concept probe {\n  label string @required @description(\"l\")\n  f " + ty + " @description(\"x\")\n}\n"
 		decls := ExtractConceptDecls(src)
@@ -240,18 +212,11 @@ func TestConceptPropertyTypes_ElementTypesAreNotValidated(t *testing.T) {
 		}
 		c, err := concept.BuildConceptFromDecl(decls[0], "v1:aud:probe")
 		if err != nil {
-			t.Errorf("%q is now REJECTED. That is an improvement, but the caveat in "+
-				"docs/public/language/memql.md still tells authors element types are "+
-				"unvalidated -- delete it in the same change.\n  got: %v", ty, err)
-			continue
+			return nil, err
 		}
-		// Assert what it EMITS, not merely that it builds. Review round 5
-		// found the build-only check too weak: reverting the datetime fix, or
-		// lowering unknown elements to `object` instead of `string`, both left
-		// this green while contradicting the docs table row for row.
 		raw, serr := c.DefinitionSchema()
 		if serr != nil {
-			t.Fatalf("schema for %q: %v", ty, serr)
+			return nil, serr
 		}
 		var doc struct {
 			Properties map[string]map[string]any `json:"properties"`
@@ -259,27 +224,88 @@ func TestConceptPropertyTypes_ElementTypesAreNotValidated(t *testing.T) {
 		if err := json.Unmarshal(raw, &doc); err != nil {
 			t.Fatalf("unmarshal %q: %v", ty, err)
 		}
-		f := doc.Properties["f"]
-		var inner map[string]any
-		if items, ok := f["items"].(map[string]any); ok {
-			inner = items
-		} else if vals, ok := f["additionalProperties"].(map[string]any); ok {
-			inner = vals
-		}
-		if inner == nil {
-			t.Errorf("%q emitted no element schema at all: %v", ty, f)
-			continue
-		}
-		// The WHOLE element schema, not just its type. Review round 6 showed the
-		// type-only check still missed the case it was added for: actually
-		// FIXING datetime -- attaching `format: date-time` to elements -- left
-		// the suite green while the docs still said []datetime is byte-identical
-		// to []string.
-		if want := wantElementSchema[ty]; !reflect.DeepEqual(inner, want) {
-			t.Errorf("%q must emit exactly %v -- that is what the docs and memql#2951 state. "+
-				"Emitting %v means one of them is now wrong.", ty, want, inner)
-		}
+		return doc.Properties["f"], nil
 	}
+
+	// An unrecognised element type is refused, and the message carries the same
+	// correction. Asserting the CORRECTION and not merely the refusal is the
+	// point: rejecting `[]boolean` with "unknown type" alone would leave the
+	// author exactly where memql#2909 found them in property position.
+	t.Run("unrecognised element types are rejected with a correction", func(t *testing.T) {
+		for _, c := range []struct{ ty, want string }{
+			{"[]boolean", `did you mean "bool"?`},
+			{"map[string]boolean", `did you mean "bool"?`},
+			{"[]integer", `did you mean "int"?`},
+			{"map[string]number", `did you mean "float"?`},
+			// No suggestion exists, so the accepted set is listed instead.
+			{"[]frobnicate", "accepted: string, bool, int, float, datetime"},
+			// Two levels in: the inner type is REACHED, not discarded. Before
+			// the fix `[][]frobnicate` built happily as `items:{type:array}`.
+			{"[][]frobnicate", "accepted: string, bool, int, float, datetime"},
+		} {
+			t.Run(c.ty, func(t *testing.T) {
+				_, err := buildField(t, c.ty)
+				if err == nil {
+					t.Fatalf("`%s` still builds. An unrecognised element type must be refused the "+
+						"same way property position refuses it (memql#2951).", c.ty)
+				}
+				if !strings.Contains(err.Error(), c.want) {
+					t.Errorf("`%s` is refused, but without the correction an author acts on.\n"+
+						"  want the message to contain: %s\n  got: %v", c.ty, c.want, err)
+				}
+			})
+		}
+	})
+
+	// Recognised element types emit the schema the declaration describes,
+	// asserted WHOLE. A type-only check passes for `[]datetime` -- which does
+	// lower to `"type":"string"` -- while the RFC3339 check that is the entire
+	// reason to write `datetime` is missing.
+	t.Run("recognised element types emit their real schema", func(t *testing.T) {
+		str := map[string]any{"type": "string"}
+		dt := map[string]any{"type": "string", "format": "date-time"}
+		obj := map[string]any{"type": "object"}
+		strMap := map[string]any{"type": "object", "additionalProperties": str}
+		for _, c := range []struct {
+			ty      string
+			elemKey string
+			want    map[string]any
+		}{
+			{"[]string", "items", str},
+			{"[]bool", "items", map[string]any{"type": "boolean"}},
+			{"[]int", "items", map[string]any{"type": "integer"}},
+			{"[]float", "items", map[string]any{"type": "number"}},
+			{"[]object", "items", obj},
+			// `any` means "unconstrained" as a property, and now means the same
+			// one level in. It used to mean "must be a string", which is the
+			// exact opposite of what the author wrote.
+			{"[]any", "items", map[string]any{}},
+			{"map[string]any", "additionalProperties", map[string]any{}},
+			// The defect that motivated asserting whole schemas.
+			{"[]datetime", "items", dt},
+			{"map[string]datetime", "additionalProperties", dt},
+			// Composites keep their inner type instead of collapsing.
+			{"map[string]map[string]string", "additionalProperties", strMap},
+			{"[]map[string]string", "items", strMap},
+			{"[][]string", "items", map[string]any{"type": "array", "items": str}},
+			{"map[string][]int", "additionalProperties", map[string]any{
+				"type": "array", "items": map[string]any{"type": "integer"}}},
+		} {
+			t.Run(c.ty, func(t *testing.T) {
+				f, err := buildField(t, c.ty)
+				if err != nil {
+					t.Fatalf("`%s` no longer builds: %v", c.ty, err)
+				}
+				inner, ok := f[c.elemKey].(map[string]any)
+				if !ok {
+					t.Fatalf("`%s` emitted no %s schema at all: %v", c.ty, c.elemKey, f)
+				}
+				if !reflect.DeepEqual(inner, c.want) {
+					t.Errorf("`%s` must emit exactly %v.\n  got: %v", c.ty, c.want, inner)
+				}
+			})
+		}
+	})
 }
 
 // TestConceptPropertyTypes_ElementSafeListCarriesTheSameConstraints pins which
@@ -352,7 +378,10 @@ func TestConceptPropertyTypes_ElementSafeListCarriesTheSameConstraints(t *testin
 		return out
 	}
 
-	for _, base := range []string{"string", "bool", "int", "float", "object"} {
+	// `any` joins the list with memql#2951 -- it used to mean "unconstrained"
+	// as a property and "must be a string" as an element. `datetime` is the one
+	// type this equality cannot express, and it gets its own subtest below.
+	for _, base := range []string{"string", "bool", "int", "float", "object", "any"} {
 		t.Run(base, func(t *testing.T) {
 			scalar := constraints(build(t, base))
 
@@ -379,6 +408,83 @@ func TestConceptPropertyTypes_ElementSafeListCarriesTheSameConstraints(t *testin
 					base, base, got, keysOf(got), scalar, keysOf(scalar))
 			}
 		})
+	}
+
+	// datetime is the one type where element and scalar are DELIBERATELY not
+	// equal, so it cannot ride the loop above -- and stating that here is the
+	// point, because "not equal" is also what the memql#2951 defect looked like.
+	//
+	// An OPTIONAL scalar datetime accepts the unset sentinels "" and null
+	// (memql#1629), because an optional field has to be clearable. An ELEMENT
+	// is never unset -- you omit it from the array instead -- so the sentinels
+	// have no meaning one level in and the element is the strict RFC3339 form.
+	// It is therefore at least as strict as the scalar, which is the invariant
+	// that actually matters; what memql#2951 fixed was the element being
+	// strictly WEAKER (a bare string, so `["hello"]` was accepted).
+	t.Run("datetime elements are strict RFC3339", func(t *testing.T) {
+		want := map[string]any{"type": "string", "format": "date-time"}
+		for _, c := range []struct{ decl, elemKey string }{
+			{"[]datetime", "items"},
+			{"map[string]datetime", "additionalProperties"},
+		} {
+			got, _ := build(t, c.decl)[c.elemKey].(map[string]any)
+			if !reflect.DeepEqual(got, want) {
+				t.Errorf("`%s` must constrain each entry to RFC3339 -- that check is the entire "+
+					"reason to write datetime rather than string.\n  want: %v\n  got:  %v",
+					c.decl, want, got)
+			}
+		}
+		// The consequence, driven rather than inspected: a garbage entry is
+		// refused. Before memql#2951 this array accepted ["hello"].
+		mustReject(t, "f []datetime", []any{"hello"}, []any{"2026-01-02T03:04:05Z"})
+	})
+}
+
+// mustReject compiles the concept schema for a single-field declaration exactly
+// as the engine compiles it, and asserts the bad payload is refused BY THE
+// ELEMENT SCHEMA while the good one is accepted.
+//
+// The positive control is not decoration: without it a declaration that refuses
+// everything -- or a fixture that never parsed the field at all -- passes the
+// rejection half and proves nothing.
+func mustReject(t *testing.T, decl string, bad, good any) {
+	t.Helper()
+	id := "v1:aud:probeReject"
+	src := "@version(\"1.0.0\")\n@namespace(\"aud\")\n@description(\"d\")\n" +
+		"concept probeReject {\n  label string @required @description(\"l\")\n  " + decl + "\n}\n"
+	decls := ExtractConceptDecls(src)
+	if len(decls) == 0 {
+		t.Fatalf("fixture %q did not parse, so it measures nothing", decl)
+	}
+	cc, err := concept.BuildConceptFromDecl(decls[0], id)
+	if err != nil {
+		t.Fatalf("fixture %q does not build: %v", decl, err)
+	}
+	raw, serr := cc.DefinitionSchema()
+	if serr != nil {
+		t.Fatalf("schema for %q: %v", decl, serr)
+	}
+	compiler := jsonschema.NewCompiler()
+	compiler.Draft = jsonschema.Draft2019
+	if err := compiler.AddResource(id, bytes.NewReader(raw)); err != nil {
+		t.Fatalf("register schema for %q: %v", decl, err)
+	}
+	schema, err := compiler.Compile(id)
+	if err != nil {
+		t.Fatalf("compile schema for %q: %v", decl, err)
+	}
+	if err := schema.Validate(map[string]any{"label": "l", "f": bad}); err == nil {
+		t.Errorf("`%s` ACCEPTS %v, which does not conform to the declaration.\n  schema: %s",
+			decl, bad, string(raw))
+	} else if loc := err.Error(); !strings.Contains(loc, "/properties/f/items") &&
+		!strings.Contains(loc, "/properties/f/additionalProperties") {
+		t.Errorf("`%s` refused %v, but not by its element schema, so this proves nothing.\n  error: %v",
+			decl, bad, err)
+	}
+	if err := schema.Validate(map[string]any{"label": "l", "f": good}); err != nil {
+		t.Errorf("control for `%s` must be accepted -- %v conforms to the declaration. If this "+
+			"fails the fixture is broken and the rejection above passes for the wrong reason.\n"+
+			"  error: %v", decl, good, err)
 	}
 }
 
@@ -439,9 +545,13 @@ func TestConceptPropertyTypes_AnnotationsSplitIntoValueConstraintsAndFieldMarker
 		return doc.Properties["f"]
 	}
 
-	// VALUE CONSTRAINTS: the key must land on the WRAPPER and NOT on the
-	// elements. That IS the defect -- on the wrapper it is inert.
-	t.Run("value constraints are inert when wrapped", func(t *testing.T) {
+	// VALUE CONSTRAINTS: the key must land on the ELEMENT and NOT on the
+	// wrapper. On the wrapper JSON Schema ignores it -- `pattern` does nothing
+	// to an array -- which was the memql#2951 defect. Both directions are
+	// asserted: leaving it on the wrapper is the old bug, emitting it in BOTH
+	// places would make the array's own validation depend on a keyword meant
+	// for its items.
+	t.Run("value constraints apply to the element when wrapped", func(t *testing.T) {
 		for _, c := range []struct{ base, ann, key string }{
 			{"string", `@pattern("^[a-z]+$")`, "pattern"},
 			{"string", "@minLength(3)", "minLength"},
@@ -454,30 +564,37 @@ func TestConceptPropertyTypes_AnnotationsSplitIntoValueConstraintsAndFieldMarker
 				if _, ok := scalar[c.key]; !ok {
 					t.Fatalf("control broken: a scalar %s must carry %q.\n  got: %v", c.base, c.key, scalar)
 				}
-				// BOTH wrapped forms. Review round 6 found the map half of this
-				// claim untested: making these constrain map VALUES left the
-				// whole suite green while the docs said they were inert there.
+				// BOTH wrapped forms. Review round 6 of the original found the
+				// map half of this claim untested, and it stays gated here.
 				for _, w := range []struct{ form, elemKey string }{
 					{"f []" + c.base + " " + c.ann + ` @description("x")`, "items"},
 					{"f map[string]" + c.base + " " + c.ann + ` @description("x")`, "additionalProperties"},
 				} {
 					wrapped := fieldOf(t, w.form)
 					elems, _ := wrapped[w.elemKey].(map[string]any)
-					if _, onElems := elems[c.key]; onElems {
-						t.Errorf("%s now constrains the elements of `%s`. That is the memql#2951 fix "+
-							"-- the claims it falsifies are docs/public/language/memql.md's "+
-							"element-position paragraph and dsl/_reference/_concept.memql's NOTE "+
-							"plus its @minLength/@maxLength entries. Update those and memql#2951's "+
-							"table in the same change.", c.key, w.form)
+					if got, onElems := elems[c.key]; !onElems {
+						t.Errorf("%s does not constrain the elements of `%s`, so the annotation is "+
+							"inert -- JSON Schema does not apply it to the wrapper.\n  element: %v",
+							c.key, w.form, elems)
+					} else if want := scalar[c.key]; !reflect.DeepEqual(got, want) {
+						t.Errorf("%s reaches the elements of `%s` with a different value than the "+
+							"scalar carries.\n  want: %v\n  got:  %v", c.key, w.form, want, got)
 					}
-					if _, onWrapper := wrapped[c.key]; !onWrapper {
-						t.Errorf("%s is no longer emitted on the wrapper of `%s` either. The docs say "+
-							"it lands there and is ignored; if it is now dropped outright, say so "+
-							"instead.\n  got: %v", c.key, w.form, wrapped)
+					if _, onWrapper := wrapped[c.key]; onWrapper {
+						t.Errorf("%s is emitted on the WRAPPER of `%s` as well. It belongs only on the "+
+							"element; on an array it constrains nothing and reads as though it "+
+							"did.\n  got: %v", c.key, w.form, wrapped)
 					}
 				}
 			})
 		}
+
+		// Driven end to end, not merely inspected. The schema-shape assertions
+		// above would all pass on a `pattern` the validator never reaches.
+		mustReject(t, `f []string @pattern("^[a-z]+$")`, []any{"ZZZ"}, []any{"abc"})
+		mustReject(t, `f map[string]string @pattern("^[a-z]+$")`,
+			map[string]any{"k": "ZZZ"}, map[string]any{"k": "abc"})
+		mustReject(t, "f []int @minimum(10)", []any{3}, []any{11})
 	})
 
 	// FIELD MARKERS: scalar and wrapped must be INDISTINGUISHABLE apart from
@@ -554,24 +671,22 @@ func TestConceptPropertyTypes_AnnotationsSplitIntoValueConstraintsAndFieldMarker
 	})
 }
 
-// TestConceptPropertyTypes_FieldAnnotationsAreNotCarriedIntoElementPosition
-// pins the half of the element gap that is not about TYPES at all.
+// TestConceptPropertyTypes_ValueAnnotationsAreCarriedIntoElementPosition pins
+// the half of the element gap that was not about TYPES at all.
 //
-// Review round 4 found `object` on the docs' dependable list while
-// `[]object @variant(...)` silently drops the entire discriminated union. The
-// type is fine -- a bare `object` wraps correctly -- so a type-only safe-list
-// cannot express the problem. What is dropped is the ANNOTATION that gives the
-// field its structure, and the same is true of `@pattern`:
+// A type-only safe-list could not express it: `object` wraps correctly, and yet
+// `[]object @variant(...)` dropped the entire discriminated union. What was
+// lost is the ANNOTATION that gives the field its structure --
 //
 //	object @variant     -> oneOf + x-discriminator     []object @variant  -> items:{type:object}
 //	string @pattern     -> pattern + type              []string @pattern  -> pattern on the ARRAY,
 //	                                                                        where JSON Schema
 //	                                                                        ignores it for strings
 //
-// So a bundle modelling "a post is a list of text|image blocks" ships with no
-// validation at all and lints clean. Asserted as CURRENT behaviour; this fails
-// when memql#2951 lands, which is the reminder to update the docs with it.
-func TestConceptPropertyTypes_FieldAnnotationsAreNotCarriedIntoElementPosition(t *testing.T) {
+// -- so a bundle modelling "a post is a list of text|image blocks" shipped with
+// no validation at all and linted clean. Both now land on the element
+// (memql#2951), which is where JSON Schema actually reads them.
+func TestConceptPropertyTypes_ValueAnnotationsAreCarriedIntoElementPosition(t *testing.T) {
 	schemaFor := func(t *testing.T, decl string) map[string]any {
 		t.Helper()
 		src := "@version(\"1.0.0\")\n@namespace(\"aud\")\n@description(\"d\")\n" +
@@ -616,131 +731,123 @@ func TestConceptPropertyTypes_FieldAnnotationsAreNotCarriedIntoElementPosition(t
 	// BOTH wrapped forms: the docs claim covers []T and map[string]T alike,
 	// and review round 7 caught the map half ungated -- carrying @variant into
 	// map values left the whole suite green while the claim stayed broad.
-	t.Run("variant is DROPPED when wrapped", func(t *testing.T) {
+	t.Run("variant applies to each element when wrapped", func(t *testing.T) {
 		for _, w := range []struct{ form, elemKey string }{
 			{"f []object" + variantBody, "items"},
 			{"f map[string]object" + variantBody, "additionalProperties"},
 		} {
 			elems, _ := schemaFor(t, w.form)[w.elemKey].(map[string]any)
-			if _, ok := elems["oneOf"]; ok {
-				t.Errorf("`%s` now carries its discriminated union. That is the fix memql#2951 "+
-					"wants -- update docs/public/language/memql.md's element-position paragraph, "+
-					"dsl/_reference/_concept.memql's NOTE, and memql#2951's table in the same "+
-					"change.", w.form)
+			if _, ok := elems["oneOf"]; !ok {
+				t.Errorf("`%s` drops its discriminated union, so a concept modelling \"a post is a "+
+					"list of text|image blocks\" validates nothing.\n  element: %v", w.form, elems)
+			}
+			// BOTH halves, as on the scalar: the discriminator is what tells a
+			// form generator or Sense hover which sibling picks the branch.
+			if _, ok := elems["x-discriminator"]; !ok {
+				t.Errorf("`%s` carries oneOf but not x-discriminator; a scalar `object @variant` "+
+					"emits both.\n  element: %v", w.form, elems)
+			}
+			// And it must not ALSO sit on the wrapper, where it means nothing.
+			if _, onWrapper := schemaFor(t, w.form)["oneOf"]; onWrapper {
+				t.Errorf("`%s` emits oneOf on the wrapper as well as the element.", w.form)
 			}
 		}
-	})
 
-	t.Run("pattern lands on the array, not its items", func(t *testing.T) {
-		got := schemaFor(t, `f []string @pattern("^[a-z]+$") @description("x")`)
-		items, _ := got["items"].(map[string]any)
-		if _, onItems := items["pattern"]; onItems {
-			t.Errorf("`[]string @pattern` now constrains its items. Same as above -- the docs " +
-				"caveat has to go with it.")
-		}
-		if _, onArray := got["pattern"]; !onArray {
-			t.Errorf("the docs say @pattern lands on the ARRAY and is ignored there. It is now on "+
-				"neither the array nor its items, so the documented behaviour is wrong either "+
-				"way.\n  got: %v", got)
+		// The claim with teeth: an element that matches no variant is refused,
+		// and one that matches a variant is accepted.
+		mustReject(t, "f []object"+variantBody,
+			[]any{map[string]any{"nonsense": 1}},
+			[]any{map[string]any{"body": "hello"}})
+	})
+}
+
+// TestConceptPropertyTypes_WrappedElementsAcceptConformingData is the inverse
+// of the test that stood here, and it is the claim with teeth: a payload that
+// conforms to the DECLARATION is now accepted, and one that does not is refused
+// by the element schema.
+//
+// It drives the compiled schema rather than inspecting the emitted one, because
+// the emitted-shape assertions elsewhere in this file would all pass on an
+// element schema the validator never reaches. The bad/good pairs are chosen so
+// the refusal can only come from the element: before memql#2951 every one of
+// these declarations lowered its element to `string`, so the conforming payload
+// in each row was REJECTED and the string control was accepted -- exactly
+// backwards.
+func TestConceptPropertyTypes_WrappedElementsAcceptConformingData(t *testing.T) {
+	for _, c := range []struct {
+		decl string
+		// good CONFORMS to the declaration and must be accepted
+		good any
+		// bad does NOT conform and must be refused by the element schema
+		bad any
+	}{
+		{"f []bool", []any{true}, []any{"s"}},
+		{"f []int", []any{3}, []any{"s"}},
+		{"f []datetime", []any{"2026-01-02T03:04:05Z"}, []any{"hello"}},
+		{"f map[string]int", map[string]any{"count": 3}, map[string]any{"count": "s"}},
+		{"f map[string]datetime", map[string]any{"at": "2026-01-02T03:04:05Z"},
+			map[string]any{"at": "hello"}},
+		// Composites: the inner type is reached, not collapsed to the outer one.
+		{"f []map[string]string", []any{map[string]any{"a": "b"}}, []any{"s"}},
+		{"f map[string]map[string]string", map[string]any{"a": map[string]any{"b": "c"}},
+			map[string]any{"a": "s"}},
+		{"f [][]int", []any{[]any{1, 2}}, []any{[]any{"s"}}},
+		// `any` is unconstrained one level in, as it is in property position.
+		// Only the accept half is meaningful here -- nothing is refusable --
+		// so it is asserted on its own below rather than through the pair.
+	} {
+		t.Run(c.decl, func(t *testing.T) {
+			mustReject(t, c.decl, c.bad, c.good)
+		})
+	}
+
+	// `any` used to mean "must be a string" in element position, which is the
+	// exact opposite of what it means as a property. Every JSON value conforms
+	// now, so this asserts acceptance only.
+	t.Run("any accepts every JSON value", func(t *testing.T) {
+		for _, decl := range []struct {
+			decl    string
+			payload any
+		}{
+			{"f []any", []any{3, "s", true, nil, map[string]any{"k": "v"}}},
+			{"f map[string]any", map[string]any{"n": 3, "s": "s", "b": true, "o": map[string]any{}}},
+		} {
+			mustAccept(t, decl.decl, decl.payload)
 		}
 	})
 }
 
-// TestConceptPropertyTypes_WrappedElementsRejectConformingData is the claim the
-// docs now make, gated by actually VALIDATING a payload rather than by
-// inspecting a schema.
-//
-// Review rounds 8-10 all landed on this sentence. I first wrote "one case fails
-// the other way", then "two cases", and the measured answer was at least four --
-// a taxonomy I had invented, kept miscounting, and never gated. So the docs no
-// longer classify; they say the wrong element schema REJECTS conforming data,
-// and this drives that end to end.
-//
-// The first version of this test did not: it carried a payload field that was
-// only ever printed in the failure message, and asserted the emitted element
-// type -- which TestConceptPropertyTypes_ElementTypesAreNotValidated already
-// asserts more strictly. A test named for a behaviour must exercise the
-// behaviour, or the docs' one claim with teeth is gated by proxy.
-//
-// Ids are distinct per case only for readable failure output -- this path
-// builds its own compiler per subtest and never reaches memoryNodes'
-// compileSchema, so no cache is involved. (An earlier version of this comment
-// claimed the distinct ids were dodging that cache. They are not; the cache is
-// on (*Concept).validate, which this test does not call.)
-func TestConceptPropertyTypes_WrappedElementsRejectConformingData(t *testing.T) {
-	strArr := []any{"s"}
-	strMap := map[string]any{"k": "s"}
-	for i, c := range []struct {
-		decl string
-		// payload CONFORMS to the declaration and must be refused
-		payload any
-		// control has string elements and must be accepted
-		control any
-	}{
-		{"[]boolean", []any{true}, strArr},
-		{"[]any", []any{3}, strArr},
-		{"map[string]any", map[string]any{"count": 3}, strMap},
-		{"[]map[string]string", []any{map[string]any{"a": "b"}}, strArr},
-		{"map[string]map[string]string", map[string]any{"a": map[string]any{"b": "c"}}, strMap},
-	} {
-		t.Run(c.decl, func(t *testing.T) {
-			id := fmt.Sprintf("v1:aud:probe%d", i)
-			src := "@version(\"1.0.0\")\n@namespace(\"aud\")\n@description(\"d\")\n" +
-				"concept probe" + fmt.Sprint(i) + " {\n  label string @required @description(\"l\")\n" +
-				"  f " + c.decl + " @description(\"x\")\n}\n"
-			decls := ExtractConceptDecls(src)
-			if len(decls) == 0 {
-				t.Fatalf("fixture %q did not parse, so it measures nothing", c.decl)
-			}
-			cc, err := concept.BuildConceptFromDecl(decls[0], id)
-			if err != nil {
-				t.Fatalf("fixture %q does not build: %v", c.decl, err)
-			}
-			raw, serr := cc.DefinitionSchema()
-			if serr != nil {
-				t.Fatalf("schema for %q: %v", c.decl, serr)
-			}
-
-			// Compiled exactly as the engine compiles it -- Draft2019, same
-			// library -- so this measures what a real insert would hit.
-			compiler := jsonschema.NewCompiler()
-			compiler.Draft = jsonschema.Draft2019
-			if err := compiler.AddResource(id, bytes.NewReader(raw)); err != nil {
-				t.Fatalf("register schema for %q: %v", c.decl, err)
-			}
-			schema, err := compiler.Compile(id)
-			if err != nil {
-				t.Fatalf("compile schema for %q: %v", c.decl, err)
-			}
-
-			payload := map[string]any{"label": "l", "f": c.payload}
-			err = schema.Validate(payload)
-			if err == nil {
-				t.Errorf("`%s` now ACCEPTS a payload that conforms to its declaration. If elements "+
-					"are honoured now, memql#2951 has landed -- drop the note from "+
-					"docs/public/language/memql.md and dsl/_reference/_concept.memql in the same "+
-					"change.\n  payload: %v\n  schema:  %s", c.decl, payload, string(raw))
-				return
-			}
-			// It must be refused BECAUSE of the element schema. Without this a
-			// change that honours elements while adding any unrelated required
-			// field keeps the test green -- rejected, but for the wrong reason,
-			// which is the failure this whole PR keeps finding in its own work.
-			if loc := err.Error(); !strings.Contains(loc, "/properties/f/items") &&
-				!strings.Contains(loc, "/properties/f/additionalProperties") {
-				t.Errorf("`%s` was refused, but not by its element schema, so this proves nothing "+
-					"about memql#2951.\n  error: %v", c.decl, err)
-			}
-			// Free positive control: the same declaration accepts a STRING
-			// element, which is what makes the refusal above a type mismatch
-			// rather than a broken fixture.
-			ctl := map[string]any{"label": "l", "f": c.control}
-			if err := schema.Validate(ctl); err != nil {
-				t.Errorf("control for `%s` must be accepted -- elements lower to string, so a string "+
-					"element conforms. If this fails the fixture is broken and the case above is "+
-					"passing for the wrong reason.\n  control: %v\n  error: %v", c.decl, ctl, err)
-			}
-		})
+// mustAccept is mustReject's other half, for declarations with nothing
+// refusable to pair against.
+func mustAccept(t *testing.T, decl string, payload any) {
+	t.Helper()
+	id := "v1:aud:probeAccept"
+	src := "@version(\"1.0.0\")\n@namespace(\"aud\")\n@description(\"d\")\n" +
+		"concept probeAccept {\n  label string @required @description(\"l\")\n  " + decl + "\n}\n"
+	decls := ExtractConceptDecls(src)
+	if len(decls) == 0 {
+		t.Fatalf("fixture %q did not parse, so it measures nothing", decl)
+	}
+	cc, err := concept.BuildConceptFromDecl(decls[0], id)
+	if err != nil {
+		t.Fatalf("fixture %q does not build: %v", decl, err)
+	}
+	raw, serr := cc.DefinitionSchema()
+	if serr != nil {
+		t.Fatalf("schema for %q: %v", decl, serr)
+	}
+	compiler := jsonschema.NewCompiler()
+	compiler.Draft = jsonschema.Draft2019
+	if err := compiler.AddResource(id, bytes.NewReader(raw)); err != nil {
+		t.Fatalf("register schema for %q: %v", decl, err)
+	}
+	schema, err := compiler.Compile(id)
+	if err != nil {
+		t.Fatalf("compile schema for %q: %v", decl, err)
+	}
+	if err := schema.Validate(map[string]any{"label": "l", "f": payload}); err != nil {
+		t.Errorf("`%s` REFUSES %v, which conforms to the declaration.\n  schema: %s\n  error: %v",
+			decl, payload, string(raw), err)
 	}
 }
 
