@@ -113,7 +113,16 @@ func TestBareShortIdIsNotIdempotent(t *testing.T) {
 func TestDeploymentIDPatternClosesTheBareCanonicalFork(t *testing.T) {
 	re := regexp.MustCompile(deploymentIDPattern(t))
 
-	alphabet := []string{"v1", "v10", "", "v", " ", "A_b", " x", "cluster", "deployment", "z"}
+	// The alphabet IS the measurement. #2981's closing argument is that #2978
+	// "verified" its formulation over 349,524 values and was still wrong,
+	// because its alphabet carried no empty and no whitespace segments. This
+	// one adds those -- and NON-ASCII whitespace, which the first fix's own
+	// alphabet still lacked, which is exactly how it shipped a guard that
+	// closed the fork for U+0020 and left it open for U+00A0.
+	alphabet := []string{
+		"v1", "v10", "", "v", " ", "A_b", " x", "cluster", "deployment", "z",
+		"\u00a0", "\u3000", "\u2028", "\u00a0x",
+	}
 	var values []string
 	var build func(parts []string, depth int)
 	build = func(parts []string, depth int) {
