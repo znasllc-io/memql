@@ -832,6 +832,34 @@ func (p *Parser) parseAttribute() (*Attribute, error) {
 			argName := p.current.Literal
 			p.advance()
 
+			// A repeated key USED to collapse last-wins, before any
+			// per-annotation validator could see it was written twice
+			// (memql#2968). A reader scanning left to right saw the first
+			// value; the engine used the last. Worst on the annotations whose
+			// argument is a boundary -- @rowAuthz(owner=...) names the field
+			// compared against actor.userId, @relationship(target=...) decides
+			// what an edge canonicalizes against, @handler(query=...) decides
+			// what a tool runs.
+			//
+			// It also defeated arity validation done on the parsed attribute:
+			// ParseRowAuthz rejects "more than one tier" with len(attr.Args) > 1,
+			// which catches @rowAuthz(public, clusterOwner) and was blind to
+			// @rowAuthz(public, public) -- the two arrived indistinguishable.
+			// Every validator written against attr.Args inherited that, so this
+			// is rejected HERE rather than per annotation.
+			//
+			// Covers bare flags as well as key=value: a bare name lands in the
+			// same map as `true`, so @allowedRoles(owner, owner) collapsed the
+			// same way. Nothing in the tree repeats one -- verified by the
+			// corpus load, which is what makes this a clean error rather than a
+			// migration.
+			if _, dup := attr.Args[argName]; dup {
+				return nil, newParseErrorf(&p.current,
+					"duplicate argument %q in @%s -- it was written more than once, and only the "+
+						"LAST value would take effect. Delete the one you did not mean.",
+					argName, name)
+			}
+
 			// Expect = or :
 			if !p.check(TokenOperator) || (p.current.Literal != "=" && p.current.Literal != ":") {
 				// Just a name without value (flag)
