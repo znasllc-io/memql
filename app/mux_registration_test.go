@@ -23,6 +23,7 @@ import (
 //
 //   - server.RegisterConceptsEndpoint -- mounts /api/concepts*, already in
 //     PublicPaths().
+//
 //   - identity Service.RegisterRoutes -- identity's OWN auth surface
 //     (magic-link, OAuth, JWKS, discovery, admin). The admin routes carry their
 //     own cluster-role gate (see component/identity/admin, memql#2934); the
