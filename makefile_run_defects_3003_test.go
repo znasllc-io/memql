@@ -269,3 +269,47 @@ func TestMakefileRunGuard_CatchesIssue2923Verbatim(t *testing.T) {
 			"today.\n  findings: %+v", findings)
 	}
 }
+
+// A `$$` that introduces an identifier is a SHELL variable, not a literal
+// dollar (memql#3003 landing review).
+//
+// The M1 fix unescaped every `$$` to `$`, which is right for the end anchor it
+// was written for -- `-run '^TestFoo$$'` -- and wrong for `-run $$PAT`, where
+// Make hands the shell `$PAT` and the shell substitutes it at run time.
+// Unescaping that yields the regexp `$PAT`: an end anchor followed by
+// literals, matching nothing, so the gate fails a recipe that works.
+//
+// That is the direction this gate's own header calls worse than the target it
+// replaces -- a gate that blocks valid work. The merged guard was silent here
+// only by accident, because it skipped everything containing `$` at all.
+func TestResolveMakePattern_ShellVariableIsUnresolvable(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		pattern string
+		wantOK  bool
+		want    string
+	}{
+		{"shell var bare", "$$PAT", false, ""},
+		{"shell var lowercase", "$$pat", false, ""},
+		{"shell var underscore", "$$_PAT", false, ""},
+		{"shell var braced", "$${PAT}", false, ""},
+		{"shell var suffixed", "^Test$$PAT", false, ""},
+		{"end anchor", "^TestFoo$$", true, "^TestFoo$"},
+		{"end anchor in alternation", "^TestA$$|^TestB$$", true, "^TestA$|^TestB$"},
+		{"anchor then slash", "^TestFoo$$/sub", true, "^TestFoo$/sub"},
+		{"no dollar", "TestFoo", true, "TestFoo"},
+		{"make variable", "$(PAT)", false, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := resolveMakePattern(tc.pattern)
+			if ok != tc.wantOK {
+				t.Fatalf("resolveMakePattern(%q) ok = %v, want %v -- a shell variable must be "+
+					"unresolvable (skipped), and a literal end anchor must resolve",
+					tc.pattern, ok, tc.wantOK)
+			}
+			if ok && got != tc.want {
+				t.Errorf("resolveMakePattern(%q) = %q, want %q", tc.pattern, got, tc.want)
+			}
+		})
+	}
+}

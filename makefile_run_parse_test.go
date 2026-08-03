@@ -146,9 +146,25 @@ func lastRunPattern(cmd string) (string, bool) {
 // The mirror is a false positive: a Makefile whose `-run` patterns all contain
 // `$` resolves none of them, and the gate's own `checked == 0` assertion then
 // fails the build with "this gate has stopped guarding anything".
+// A `$$` is NOT always a literal dollar either. Make passes `$$` to the shell
+// as a single `$`, so `$$PAT` is a SHELL variable reference -- and unescaping
+// it to `$PAT` yields an end-anchor followed by literals, which matches
+// nothing, so the gate reports a working parameterised recipe as broken. That
+// is the false positive this gate's own header calls worse than the invisible
+// target it replaces (memql#3003 landing review), so a `$$` that introduces an
+// identifier is unresolvable rather than literal.
 func resolveMakePattern(pattern string) (string, bool) {
 	if strings.Contains(pattern, "$(") || strings.Contains(pattern, "${") {
 		return "", false // a Make variable; nothing to resolve at this layer
+	}
+	for i := 0; i+2 < len(pattern); i++ {
+		if pattern[i] != '$' || pattern[i+1] != '$' {
+			continue
+		}
+		if c := pattern[i+2]; c == '_' || c == '{' ||
+			(c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') {
+			return "", false // `$$IDENT` -- a shell variable, resolved at run time
+		}
 	}
 	return strings.ReplaceAll(pattern, "$$", "$"), true
 }
