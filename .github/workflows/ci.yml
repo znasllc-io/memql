@@ -398,14 +398,22 @@ jobs:
   # silently rotted (referencing constructs that later migrations renamed).
   # This lane mirrors the conformance job's seeded-DB setup and runs the
   # remaining DB-gated suites so that whole class of test can't rot unseen
-  # again. Keep this list in sync with the packages that carry `*_db_test.go`
-  # files (component/memql, component/automations/steps, examples/referencepack).
+  # again.
+  #
+  # The selector below is no longer kept in sync BY HAND -- scripts/cidb does it
+  # executably (memql#2886). The old rule written here, "keep this list in sync
+  # with the packages that carry `*_db_test.go` files", was already wrong when
+  # it was written: examples/referencepack carries none, and four of the seven
+  # db-gated packages in the tree carry none either. The real rule, and the one
+  # the gate asserts, is that every package with a TestMain calling
+  # dbtest.EnsureSchema must appear below.
+  #
   # These per-package binaries run as PARALLEL processes against this ONE shared
-  # DB, so each such package must migrate the schema through a TestMain that
-  # calls dbtest.EnsureSchema (a cross-process advisory lock serializes it);
-  # otherwise the suites race on a half-created schema and fail with
-  # `relation "MemoryNodes" does not exist` (memql#2551). A new db-gated package
-  # needs both an entry above AND that TestMain.
+  # DB, so each such package must migrate the schema through that TestMain (a
+  # cross-process advisory lock serializes it); otherwise the suites race on a
+  # half-created schema and fail with `relation "MemoryNodes" does not exist`
+  # (memql#2551). A new db-gated package needs both an entry below AND that
+  # TestMain -- and adding the TestMain without the entry now fails the gate.
   db-tests:
     name: db-tests
     needs: changes
@@ -434,6 +442,22 @@ jobs:
           --health-retries 12
     env:
       MEMQL_DATABASE_DSN: postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable
+      # Without this the whole point of the lane is optional (memql#2886). Every
+      # db-gated test self-skips when it cannot reach Postgres, so a service
+      # container that is slow to become healthy, unhealthy, or pulled from an
+      # unreachable registry (memql#2793) degrades the entire DB-gated suite to
+      # GREEN SKIPS rather than a red build -- and the PRs that rest their only
+      # end-to-end evidence on this lane merge on a signal that never fired.
+      #
+      # MEMQL_REQUIRE_DB=1 converts every such skip into a failure
+      # (component/database/dbtest.Unreachable). It is set HERE rather than
+      # globally on purpose: a local `go test ./...` leaves it unset and keeps
+      # the skip behaviour, which is the intended split.
+      #
+      # Do not remove it. scripts/cidb asserts this key is present and truthy,
+      # and that this lane's package selector still matches at least one
+      # db-gated test -- the "executed zero of them" failure one level up.
+      MEMQL_REQUIRE_DB: '1'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
