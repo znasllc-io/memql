@@ -189,9 +189,17 @@ mutate request attachToRequest {
 //   - tool path (recordMentoredEvent) passes the SHORT tool arg (r-...).
 // Without normalization the audit trail splits across both forms and
 // forgeRequestHistory(<shortId>) finds only the tool-written events.
-// shortId() strips the `v1:forge:request:` concept prefix; it is idempotent
-// (a no-op on an already-short id), so the tool path is unaffected. This single
-// write-side point keeps every requestEvent.requestId in one short form.
+// shortId() strips the `v1:forge:request:` concept prefix; it is a no-op on an
+// already-short id, so the tool path is unaffected. This single write-side
+// point keeps every requestEvent.requestId in one short form.
+//
+// The argument holds HERE, but not because shortId() is idempotent in general
+// -- it is not (memql#2981). It holds because both inputs are colon-free short
+// ids or the canonical form of one: `r-...` comes from the tool path and
+// `v1:forge:request:r-...` from the automation path, and a colon-free value is
+// a fixed point. A caller who could supply an arbitrary colon-bearing string
+// would break the argument, which is the hazard #2981 closes at the boundary
+// for the deployment pack's hashed composite id.
 // ---------------------------------------------------------------------------
 /// Append a v1:forge:requestEvent (the time-series audit trail). actorUserId + actorRole stamped
 /// from actor. requestId is normalized to the short id form (shortId()) so the trail keys

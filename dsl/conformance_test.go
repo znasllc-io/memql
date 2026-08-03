@@ -706,19 +706,29 @@ func TestRelationshipTargetsUseImports(t *testing.T) {
 	}
 }
 
-// TestPerRowAuthzClassification scans every query / mutation in the
-// tree and classifies it into one of four buckets:
+// TestPerRowAuthzClassification scans every query / mutate / seed in
+// the tree and classifies it into one of SIX reported states. Four are
+// the authorization buckets the audit doc defines; `srvOnly` and
+// `other` are not buckets. `granted` IS a bucket in the doc but has no
+// counter here -- it would need relationship-spec resolution, so a
+// granted construct lands in `owned` or `other` (memql#2983).
 //
+//   - srvOnly: carries `@serverOnly`, checked FIRST -- not
+//     client-callable, so no caller-check applies
 //   - owned:   filter references `actor.userId` (caller-scoped read)
 //     or mutation insert/update stamps `ownerUserId`/`userId`
 //     from `actor.userId` (caller-scoped write)
-//   - admin:   filter or body references `actor.isClusterOwner` or
-//     the equivalent `requiresClusterOwner` spec call
+//   - admin:   filter or body references `actor.isClusterOwner` or an
+//     admin context-spec. The recogniser also accepts
+//     `requiresClusterOwner`, which is NOT declared in dsl/ --
+//     it is a #54 placeholder kept so the gate does not go
+//     blind the first time such a spec lands (memql#2983).
 //   - public:  carries the `@public` annotation
 //   - flagged: none of the above AND the construct references a
-//     user-scope field (`payload.ownerUserId`,
-//     `payload.userId`, etc.) -- a candidate for caller-
-//     scoping that the author forgot
+//     user-scope field (`ownerUserId`, `userId`, etc. --
+//     BARE, the `payload.` prefix was retired by memql#2292)
+//     -- a candidate for caller-scoping that the author
+//     forgot
 //   - other:   none of the above, no user-scope field referenced
 //     (e.g. concept catalogs, cluster topology, system
 //     metadata reads)
@@ -1048,8 +1058,24 @@ func TestPerRowAuthzClassification(t *testing.T) {
 			ownerLeaf := ownerScopeLeaf
 			adminLeaf := adminGateLeaf
 
-			hasAdmin := strings.Contains(body, "actor.isClusterOwner") ||
-				strings.Contains(body, "requiresClusterOwner")
+			// Presence test over the SAME leaf vocabulary adminLeaf uses, for
+			// the reason stated two lines above: these two gates must not
+			// drift about what counts as a gate term. They had. This was a
+			// pair of hand-inlined Contains checks naming `actor.isClusterOwner`
+			// and `requiresClusterOwner` -- the latter a spec declared nowhere
+			// in the tree, the former one of four real terms -- so a construct
+			// gated by `requiresOwnerOrAdmin` or `requiresAdmin` satisfied
+			// TestAdminGateIsATopLevelConjunct and was still reported `other`
+			// here. dsl/identity/queries.memql:204 and :1172 are exactly that:
+			// correctly admin-gated, counted as ungated. It also made the
+			// remediation this test's own failure text prescribes not work
+			// (memql#2983 landing review).
+			//
+			// adminGateMentionRe rather than adminGateRe: this is the
+			// polarity-BLIND mention test, matching hasOwner's shape. The
+			// affirmative-polarity requirement is enforced where it belongs,
+			// by clauseGuarantees(clause, adminLeaf) below.
+			hasAdmin := adminGateMentionRe.MatchString(body)
 			hasOwner := strings.Contains(body, "actor.userId")
 			if isQuery {
 				// An empty filter guarantees nothing, so a query with no
@@ -1114,7 +1140,7 @@ func TestPerRowAuthzClassification(t *testing.T) {
 		}
 		t.Logf("\nResolution options:\n" +
 			"  (1) add a caller-scope filter: `args.X == actor.userId` (or the canonical caller-id check for the domain)\n" +
-			"  (2) add an admin gate: reference `actor.isClusterOwner` or a `requiresClusterOwner` spec\n" +
+			"  (2) add an admin gate: reference `actor.isClusterOwner`, or name an admin context-spec (`requiresAdmin` / `requiresOwner` / `requiresOwnerOrAdmin`) as a top-level conjunct\n" +
 			"  (3) add `@public` to the construct's annotations with a comment explaining why no caller-check applies\n" +
 			"See docs/public/operate/auth/per-row-authz-audit.md for the bucket definitions + the audit history.")
 	}

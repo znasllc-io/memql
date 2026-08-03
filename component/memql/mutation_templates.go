@@ -1036,9 +1036,11 @@ func (e *mutationTemplateEvaluator) evalHash(ctx context.Context, expr string) (
 }
 
 // evalShortId resolves shortId(value) into the bare short id, stripping
-// any `<concept>:` prefix. The inverse of evalCanonicalId. Idempotent:
-// an already-bare value passes through unchanged. Empty/missing input
-// yields "". Single argument, mirrors evalHash. See #1859.
+// any `<concept>:` prefix. The inverse of evalCanonicalId. An
+// already-bare value passes through unchanged; empty/missing input
+// yields "". NOT idempotent in general -- it strips ONE prefix
+// ("v1:a:b:v2:c:d:e" -> "v2:c:d:e" -> "e", memql#2981). Single
+// argument, mirrors evalHash. See #1859.
 func (e *mutationTemplateEvaluator) evalShortId(ctx context.Context, expr string) (string, error) {
 	arg, ok, err := parseSingleArg(expr, "shortId")
 	if err != nil {

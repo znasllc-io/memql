@@ -51,7 +51,10 @@ type Claims struct {
 
 // UserLookup is the narrow interface the PAT path uses to materialize
 // claims after the keyHash lookup. The wiring layer satisfies this
-// with a closure that runs userById against the engine.
+// with a closure that runs userByIdSystem against the engine under
+// ContextWithInternalOrigin (app/integrations_identity.go) -- NOT
+// userById, which is a different, requiresOwnerOrAdmin-gated query. This
+// is a pre-actor read, so it cannot be caller-scoped (#2800, #2984).
 type UserLookup interface {
 	UserById(ctx context.Context, userId string) (*UserSummary, error)
 }

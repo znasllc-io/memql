@@ -1091,16 +1091,61 @@ be met). Use it when `canonicalId()` will not resolve. Otherwise prefer
   above); `shortId()` strips the tag and returns a plausible bare value,
   so a `user` id passed where a `deployment` id belongs derives a valid
   row. That check is a feature of `canonicalId()`, not an inconvenience.
-- **`shortId()` is not idempotent on every input**, so it does not
-  collapse *every* bare/canonical pair. Measured:
+- **`shortId()` is not idempotent on every input**, so on its own it does
+  not collapse *every* bare/canonical pair. Measured:
   `shortId("v1:cluster:deployment:v2:x:y:z")` is `"v2:x:y:z"` while
-  `shortId("v2:x:y:z")` is `"z"` — the pair still forks. Tracked in
-  memql#2981, which carries the measured condition -- it turns on
-  whitespace and on empty segments, not on segment counts alone, and two
-  attempts to state it more precisely than this were wrong. What holds:
-  every SHORT id this tree mints is colon- and whitespace-free, so
-  `shortId()` is exact for those and for the canonical forms built
-  around them.
+  `shortId("v2:x:y:z")` is `"z"` — the pair forks. It strips exactly ONE
+  canonical prefix, and the residual class turns on whitespace and on
+  empty segments, not on segment counts alone (two attempts to state it
+  more precisely than this were wrong; memql#2981 carries the measured
+  predicate).
+
+  **The rule that follows.** A bare `B` and its canonical form derive one
+  id **when** `B` is a fixed point of `shortId()`. That is sufficient, not
+  a biconditional, and stating it as "exactly when" is false in both
+  directions: `"v1:v1:v1: "` is not a fixed point yet both spellings
+  collapse to the same value anyway, and `""` IS a fixed point yet
+  `shortId("v1:cluster:deployment:")` is not `""`, so the pair forks. The
+  empty case is exactly the class the two earlier formulations missed;
+  saying "exactly when" here would be the third.
+
+  So where a hashed id is derived from a caller-supplied FK, constrain the
+  arg with an **allowlist** — pin the prefix to that concept's own
+  canonical form, and permit only characters a short id can contain:
+
+  ```memql
+  deploymentId  string! @pattern("^(?:v[0-9]+:cluster:deployment:)?[A-Za-z0-9_.-]+$")
+  ```
+
+  An allowlist rather than "not whitespace, not colon", for two reasons
+  found the hard way. A denylist has to enumerate `unicode.IsSpace`
+  exactly, and RE2's `[[:space:]]` is **ASCII only** while `shortId()`
+  trims with `strings.TrimSpace` — a guard written that way closes the
+  fork for U+0020 and leaves it open for U+00A0, U+2028 and four others.
+  And the `\x{...}` class that would enumerate them correctly **cannot be
+  authored**: the DSL lexer rejects `\x` escapes, so that pattern parses
+  as text and fails at load.
+
+  Pin the prefix to the concept. An unpinned `v<digits>:<lower>:<word>:`
+  accepts `v1:ns:Name:x`, which strips to the same short id as `x` — two
+  distinct arguments on one composite id, the §20 collision this section
+  is about, on the leading part instead of the trailing one.
+
+  This is stricter than "is a fixed point", deliberately. It rejects
+  values whose `shortId` is a fixed point (`"v1:v1"`, `"v1:a:b:"`) and
+  that is the safe direction to be wrong in.
+
+  That is one expression covering both halves of the residual class, and
+  it keeps the canonical form this section recommends. Prefer it to
+  making `shortId()` idempotent: the same primitive is the wire-egress
+  bare-ifier (memql#2441), so looping it to a fixpoint changes every id
+  handed to a client, and destroys more of a genuinely-bare colon-bearing
+  value. Landed in memql#2981; gated by
+  `TestDeploymentIDPatternClosesTheBareCanonicalFork`.
+
+  What holds without any constraint: every SHORT id this tree mints is
+  colon- and whitespace-free, so `shortId()` is exact for those and for
+  the canonical forms built around them.
 
 Compliant mutations (audit done 2026-05-06), in
 `dsl/cognition/mutations.memql`:
@@ -1423,8 +1468,9 @@ the change. The gates, with their test names:
   Every query / mutation that touches a user-scope field
   (`ownerUserId`, `userId`, `createdBy`, ...)
   must either carry a caller-scope check (`actor.userId` in the
-  filter / write), an admin gate (`actor.isClusterOwner` or a
-  `requiresClusterOwner` spec), or an explicit `@public` annotation
+  filter / write), an admin gate (`actor.isClusterOwner == true`, or an admin
+  context-spec such as `requiresAdmin` / `requiresOwnerOrAdmin`, named
+  as a bare top-level conjunct), or an explicit `@public` annotation
   acknowledging the intent. Anything else hard-fails.
 - **Actor vocabulary** (`TestNoCallerVocabulary`, #221). `caller.X`
   and `@caller` are retired; write `actor.X` and `@actor`.

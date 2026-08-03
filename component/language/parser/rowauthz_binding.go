@@ -86,9 +86,16 @@ type RowAuthzDecl struct {
 // The flag tiers and the keyword tiers occupy separate namespaces
 // inside the argument list, which is what leaves room for the escape
 // hatch #2920 requires the grammar to be ABLE to express without
-// implementing: the pre-actor bootstrap path (`userById` resolves
-// `sub` -> user in order to BUILD the actor, so `actor.userId` is
-// circular there -- component/auth/identity_resolver.go). A fifth tier
+// implementing: the pre-actor bootstrap path. `userByIdSystem`
+// resolves `sub` -> user in order to BUILD the actor, so `actor.userId`
+// is circular there -- component/auth/identity_resolver.go:79, and the
+// query is @serverOnly for exactly that reason (#2800).
+//
+// NOT `userById`, which this comment named until memql#2984. That is a
+// different query, gated by requiresOwnerOrAdmin, and a reader who
+// followed the citation found a gated construct and concluded the
+// constraint was imaginary. The constraint is real; only the name was
+// wrong. A fifth tier
 // is a new flag name or a new keyword; neither disturbs the four here.
 const (
 	rowAuthzArgOwner = "owner"

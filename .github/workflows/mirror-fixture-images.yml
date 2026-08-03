@@ -1,0 +1,138 @@
+name: mirror-fixture-images
+
+# Mirrors the third-party CI TEST FIXTURE images into this org's GHCR, so the
+# test lanes do not pull them from Docker Hub at job-setup time (memql#2793).
+#
+# Why this exists: `ci.yml` declares `timescale/timescaledb` as a `services:`
+# container in `mcp-conformance` and `db-tests`. Those pulls were unauthenticated
+# and unmirrored, so a Docker Hub blip took the lane down before a single test
+# ran -- and because the lanes feed `ci-required`, the merge queue EVICTED the
+# candidate. Measured twice in roughly nine hours (#2777 in `mcp-conformance`,
+# #2826 in `db-tests`), both silent: nothing notifies you, `isInMergeQueue` just
+# flips back to false and the PR sits at CLEAN looking healthy.
+#
+# Why GHCR and not ACR: a `services:` container is pulled by the runner at JOB
+# SETUP, before the first step executes, so no `azure/login` step can ever
+# authenticate it -- that is why `services.<id>.credentials` exists as a field.
+# It therefore needs a STATIC credential, and `GITHUB_TOKEN` is one that already
+# exists for every job. The Azure federated credential is additionally pinned to
+# `repo:znasllc-io/memql:ref:refs/heads/main` (see build-engine-images.yml), so
+# it could not authenticate a `pull_request` or `merge_group` run regardless.
+#
+# This is not in tension with CLAUDE.md's "build server is the source of truth
+# for deployable images, which live in ACR". These are test fixtures: never
+# deployed, never pinned by an overlay, never part of a release. The rule is
+# about the engine node images a release names.
+#
+# The pushed image is pinned BY DIGEST in ci.yml. Re-running this workflow
+# publishes a new digest but changes nothing until someone updates that pin,
+# which is deliberate: the fixture must not move under a PR silently. Read the
+# new digest from this workflow's summary and update ci.yml in a normal PR.
+
+on:
+  # Bootstrap and refresh are both manual: the digest pin in ci.yml has to be
+  # updated by hand afterwards, so an automatic push would only ever produce an
+  # unreferenced package version.
+  workflow_dispatch:
+    inputs:
+      source:
+        description: 'Source image to mirror (repo:tag)'
+        required: true
+        default: 'timescale/timescaledb:latest-pg16'
+        type: string
+      target:
+        description: 'Target package name under ghcr.io/<org>/'
+        required: true
+        default: 'ci-timescaledb'
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  mirror:
+    name: mirror ${{ inputs.source }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # push the mirrored fixture to GHCR
+    steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Same SHA already vetted and pinned in deploy-gate-image.yml. Note that
+      # file labels it `# v3`; the commit is actually tagged v4.2.0 (verified
+      # against docker/setup-buildx-action's tag list). The pin is what binds --
+      # the comment there is simply stale.
+      - name: Set up buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Copy the manifest into GHCR
+        id: mirror
+        env:
+          SOURCE: ${{ inputs.source }}
+          TARGET: ghcr.io/${{ github.repository_owner }}/${{ inputs.target }}
+        run: |
+          set -euo pipefail
+          echo "mirroring $SOURCE -> $TARGET"
+
+          # `imagetools create` copies the manifest registry-to-registry. Do NOT
+          # replace this with pull / tag / push, which was the first attempt and
+          # is wrong twice over (memql#2793):
+          #
+          #  1. It FLATTENS a multi-arch image. `timescale/timescaledb:latest-pg16`
+          #     is an OCI image index carrying 386/amd64/arm64; `docker pull` on
+          #     the runner resolves ONE platform, so the mirror would silently
+          #     become amd64-only.
+          #  2. The digest it reports is not the mirror's. After a tag, the image
+          #     carries a RepoDigests entry per repository, and
+          #     `{{index .RepoDigests 0}}` is the SOURCE's -- measured:
+          #     ["alpine@sha256:d9e853...", "ghcr.io/.../probe@sha256:d9e853..."].
+          #     Because the source is an index and a pushed single-platform image
+          #     is not, those digests genuinely differ, so the summary would print
+          #     a digest that does not exist in the mirror and whoever pinned it
+          #     would get an unpullable image.
+          docker buildx imagetools create --tag "$TARGET:latest" "$SOURCE"
+
+          # Read the digest back FROM THE TARGET, so what is printed is what was
+          # published rather than what we believe we published.
+          digest="$(docker buildx imagetools inspect "$TARGET:latest" --format '{{.Manifest.Digest}}')"
+          case "$digest" in
+            sha256:*) ;;
+            *) echo "unexpected digest from the mirror: '$digest'" >&2; exit 1 ;;
+          esac
+
+          # Traceability: what upstream index this copy came from.
+          src_digest="$(docker buildx imagetools inspect "$SOURCE" --format '{{.Manifest.Digest}}')"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "## Mirrored fixture image"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| source | \`$SOURCE\` |"
+            echo "| source index digest | \`$src_digest\` |"
+            echo "| target | \`$TARGET\` |"
+            echo "| **pin this in ci.yml** | \`$TARGET@$digest\` |"
+            echo
+            echo "Update both \`services:\` blocks in \`.github/workflows/ci.yml\`"
+            echo "(\`mcp-conformance\` and \`db-tests\`) to that digest in a normal PR."
+            echo "Nothing changes until you do -- the pin is what ci.yml reads."
+            echo
+            echo "### BEFORE pinning it: make the package PUBLIC"
+            echo
+            echo "A new GHCR package defaults to **private**, and \`memql\` is a public"
+            echo "repo. A pull request from a FORK gets a read-only \`GITHUB_TOKEN\` that"
+            echo "cannot pull a private org package, so \`mcp-conformance\` and \`db-tests\`"
+            echo "would fail on every fork PR -- trading an intermittent Docker Hub"
+            echo "outage for a deterministic fork-PR outage."
+            echo
+            echo "Set it at: Org -> Packages -> \`$(basename "$TARGET")\` -> Package"
+            echo "settings -> Change visibility -> Public. Nothing is secret here; it"
+            echo "is a verbatim copy of a public upstream image."
+          } >> "$GITHUB_STEP_SUMMARY"

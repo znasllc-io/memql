@@ -20,8 +20,11 @@ import (
 // DUPLICATE rows with distinct ids.
 //
 // shortId() is the documented normaliser for exactly that (#1859): no concept
-// argument, canonical-or-bare in and bare out, and idempotent for the ids this
-// tree mints -- though not in general, see memql#2981. It passes memqllint
+// argument, canonical-or-bare in and bare out, and a fixed point for the ids
+// this tree mints -- though NOT idempotent in general. memql#2981 measured the
+// residual class and closed it at the argument boundary rather than by changing
+// the primitive, which stays on the wire-egress path untouched; see
+// shortid_fixpoint_2981_test.go. It passes memqllint
 // in the `id:` position, then fails at render with
 //
 //	evaluate id: unsupported expression in mutation template: *ast.ShortIdExpr

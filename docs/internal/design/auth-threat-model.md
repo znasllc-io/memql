@@ -122,9 +122,9 @@ memQL's authorization model is **per-row, classified, and tested at load time.**
 
 | Bucket | Filter shape | Example |
 |---|---|---|
-| **Owned** | `payload.ownerUserId == actor.userId` | `queryActiveSpaces`, `queryOwnedSpaceById` (F10) |
+| **Owned** | `ownerUserId == actor.userId` | the bundle's owned-space reads (F10) |
 | **Granted** | relationship predicate gates on `actor.userId` | `spaceParticipants` |
-| **Admin** | `spec("requiresClusterOwner")` | admin-only mutations |
+| **Admin** | `actor.isClusterOwner == true`, or `requiresAdmin` / `requiresOwner` / `requiresOwnerOrAdmin` as a top-level conjunct | admin-only mutations |
 | **Public** | `@public` annotation | `/.well-known/jwks.json`, `/api/concepts` schemas |
 
 The conformance test `dsl.TestPerRowAuthzClassification` hard-fails on any new unclassified construct, so the classification doesn't drift.

@@ -141,14 +141,20 @@ mutate deployment updateDeploymentStatus {
 // It is NOT idempotent in general, and the exact condition is subtle enough
 // that two attempts to state it here were wrong: it turns on trailing empty
 // segments and on whitespace inside the value, not just on segment counts.
-// memql#2981 carries the measured predicate and its counterexamples. What
-// matters here: an SDK caller can supply a value for which a bare and a
-// canonical form still derive DIFFERENT ids, which is section 20's own
-// prohibited outcome.
+//
+// CLOSED at the boundary by memql#2981, not by changing shortId(). The
+// @pattern on deploymentId below admits a bare short id, or the canonical form
+// of one, and nothing else -- so whatever survives normalisation is already a
+// fixed point and the bare/canonical pair cannot diverge. The primitive stays
+// exactly as it was, which matters because it is also the wire-egress
+// bare-ifier (memql#2441) and looping it to a fixpoint would change every id
+// handed to a client.
 //
 // It took #2925 to make that spelling usable: shortId() parsed in an id: slot
 // and then died at render, because the mutation-template id evaluator had no
-// ShortIdExpr case. Of the other two spellings, the ambient one now WORKS:
+// ShortIdExpr case. Both of the other two spellings now work, each fixed by
+// a different issue -- this comment carried a stale half of each until the
+// two landed within an hour of one another:
 //
 //   - ambient canonicalId, no import: FIXED by #2976. canonical_id_refs.go
 //     used to accept the ambient path only when the concept id contained
@@ -162,15 +168,21 @@ mutate deployment updateDeploymentStatus {
 //     Do NOT write the call form in a comment across a line break: the
 //     canonicalId rewriter scans comment text too, so a wrapped occurrence is
 //     read as a real call with a concept named "//     deployment".
-//   - `use cluster.concepts.{ deployment }`: memqllint rejects it while the
-//     engine's resolver accepts it on a unique trailing-segment match (that
-//     divergence is #2945), AND adding any explicit import for the concept
-//     suppresses the same-domain fallback in dslimports, which drops
-//     createDeployment and updateDeploymentStatus out of lane-3 field
-//     validation. TestMutationFieldLaneCoversEveryMutation catches that and
-//     names both mutations, so the coverage loss is loud rather than silent --
-//     but it is still caused by an edit that looks unrelated to either. Filed
-//     as #2977.
+//   - `use cluster.concepts.{ deployment }`: works too (#2945, #2977). This
+//     bullet used to record two reasons it did not, and both are gone.
+//     memqllint no longer rejects it -- a `use` path's leading segment is a
+//     NAMESPACE, so it reaches every domain assembling under it, this pinned
+//     one included. And because the import now RESOLVES, it no longer
+//     suppresses the same-domain fallback into a hole: createDeployment and
+//     updateDeploymentStatus keep their lane-3 field validation instead of
+//     being dropped by an edit that looks unrelated to either.
+//     TestLane3_PinnedDomainImportKeepsFieldCoverage pins that, and the
+//     lane-3 skip message now names an import as the cause when one does
+//     cost coverage (#2977).
+//
+//     Prefer the ambient form above: it needs no import, so it cannot cost a
+//     sibling construct its field-lane coverage the way an explicit import
+//     can.
 //
 // What shortId() does NOT fix, measured input by input rather than reasoned
 // about. BareShortId does not simply strip a canonical prefix:
@@ -240,7 +252,12 @@ mutate deployment updateDeploymentStatus {
 /// Engine-as-spine: empty version resolves against the deployment engine version. Epic 2 / #2094.
 mutate deploymentNodeSpec createDeploymentNodeSpec {
   args {
-    deploymentId  string!
+    // Bare short id, or the canonical form of one -- and nothing else
+    // (#2981). shortId() strips ONE canonical prefix, so the bare/canonical
+    // pair collapses onto one id only when what remains is already a fixed
+    // point. Colon- and whitespace-free is exactly that condition, and it
+    // covers both of #2981's clauses in one expression.
+    deploymentId  string! @pattern("^(?:v[0-9]+:cluster:deployment:)?[A-Za-z0-9_.-]+$")
     // ^[^:]+$ -- the trailing part of the hashed composite key must be free of
     // the ":" separator, or two distinct pairs alias onto one id (#2980).
     nodeType      string! @pattern("^[^:]+$")
@@ -292,7 +309,12 @@ mutate deploymentNodeSpec createDeploymentNodeSpec {
 /// change. Append under the same hashed composite concept id. Epic 2 / #2094.
 mutate deploymentNodeSpec updateDeploymentNodeSpec {
   args {
-    deploymentId  string!
+    // Bare short id, or the canonical form of one -- and nothing else
+    // (#2981). shortId() strips ONE canonical prefix, so the bare/canonical
+    // pair collapses onto one id only when what remains is already a fixed
+    // point. Colon- and whitespace-free is exactly that condition, and it
+    // covers both of #2981's clauses in one expression.
+    deploymentId  string! @pattern("^(?:v[0-9]+:cluster:deployment:)?[A-Za-z0-9_.-]+$")
     // ^[^:]+$ -- the trailing part of the hashed composite key must be free of
     // the ":" separator, or two distinct pairs alias onto one id (#2980).
     nodeType      string! @pattern("^[^:]+$")
