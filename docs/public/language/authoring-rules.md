@@ -428,6 +428,51 @@ dedicated retirement error (see
 
 ---
 
+## 7b. Parking a declaration with `/* */` detaches the annotations above it
+
+**Rule.** A declaration's `@`-annotation preamble is the run of contiguous
+`@` and `//` lines directly above it. A block comment ends that run, so
+annotations sitting above a parked declaration belong to **nothing**:
+
+```memql
+@executor("integration.workbench.dispatchHost")
+@description("does real work")
+/*
+builtin zzParked {
+  a string
+}
+*/
+builtin zzLive {          // <- loads with NO @executor
+  b string
+}
+```
+
+`zzLive` is registered without the executor and cannot be dispatched. The cost
+depends on the annotation: a builtin loses its ability to run at all, while a
+query losing `@public` or a concept losing `@rowAuthz` loses the declaration its
+authorization is read from — and for those the loader raises nothing else.
+
+**Park the annotations with the declaration**, inside the comment:
+
+```memql
+/*
+@executor("integration.workbench.dispatchHost")
+@description("does real work")
+builtin zzParked {
+  a string
+}
+*/
+```
+
+...or move them below the comment if they were written for the live one.
+
+`memqllint` reports this as an error naming both lines and quoting the orphaned
+run (memql#2965). It is reported rather than repaired on purpose: which
+declaration the annotations were written for is a question only the author can
+answer, and in the shape above they sit directly on top of the parked one.
+
+---
+
 ## 8. The `_system` partition is reserved
 
 **Rule.** Partition names starting with `_` are reserved. The
