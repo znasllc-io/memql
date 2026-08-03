@@ -165,8 +165,10 @@ func cloneExpressionNode(expr ExpressionNode) ExpressionNode {
 		}
 	case *TimestampExpression:
 		clone := &TimestampExpression{
-			Target:    cloneExpressionNode(node.Target),
-			UseLatest: node.UseLatest,
+			Target:         cloneExpressionNode(node.Target),
+			UseLatest:      node.UseLatest,
+			ArgPath:        node.ArgPath,
+			FallbackLatest: node.FallbackLatest,
 		}
 		if node.Timestamp != nil {
 			ts := *node.Timestamp

@@ -445,6 +445,26 @@ func applyDirectiveWrappers(plan *QueryPlan) (ExpressionNode, error) {
 			if plan.Timestamp != nil || plan.UseLatest {
 				return nil, fmt.Errorf("multiple asOf() directives are not supported")
 			}
+			// An UNRESOLVED caller-arg asOf must not reach here. This copies
+			// Timestamp and UseLatest only, so an ArgPath node would be
+			// silently DISCARDED -- the plan would carry no asOf at all, the
+			// caller would get a live-tip read having asked for a point in
+			// time, and nothing would say so.
+			//
+			// A declared query cannot reach this state: resolveAsOfArg runs at
+			// argument expansion and replaces the node. A RAW RUNTIME QUERY
+			// STRING can, because it parses through the same entry point with
+			// no args to expand against -- so `asOf(concept==..., args.at)`
+			// parsed clean and lost its directive. asof_arg_resolve.go's design
+			// note says "the unresolved form never escapes"; this is the path
+			// where it did (memql#2992 landing review).
+			if node.ArgPath != "" {
+				return nil, fmt.Errorf(
+					"asOf(args.%s) is not available in a raw query string: there are no declared "+
+						"arguments to resolve it against. Use a literal RFC3339 instant or `latest` "+
+						"here, or call a declared query that offers the caller-chosen form (memql#2992)",
+					node.ArgPath)
+			}
 			plan.Timestamp = node.Timestamp
 			plan.UseLatest = node.UseLatest
 			expr = node.Target

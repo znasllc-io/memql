@@ -79,3 +79,42 @@ spec specReadsAsOf {
 		t.Fatalf("expected query-only error, got: %v", err)
 	}
 }
+
+// The ruling that authorised `asOf args.X ?? latest` rested on one property:
+// omit the argument and behaviour is byte-identical to `asOf latest`, so the
+// six queries carrying that clause adopt the form with no migration and no
+// behaviour change (memql#2992).
+//
+// LatestMode is part of that behaviour. It is the consumer-facing statement
+// that a result is clock-dependent and NOT reproducible, and it is computed at
+// LOAD time from the UNEXPANDED node -- long before resolveAsOfArg decides
+// which branch a given call takes. So it must describe what the query MAY do.
+// Reading only UseLatest flipped deploymentsForCluster's marker from
+// time-dependent to deterministic while it still read the live tip for every
+// caller that omits the argument, which is all of them today.
+//
+// This pins the equivalence directly, so the remaining five queries can adopt
+// the form without each silently dropping its contract marker.
+func TestAsOfArgWithLatestFallbackKeepsTheLatestContract(t *testing.T) {
+	literal := loadTemporalQuery(t, "qLiteralLatest", "asOf    latest")
+	fallback := loadTemporalQuery(t, "qArgFallbackLatest", "asOf    args.asOf ?? latest")
+
+	if !literal.LatestMode {
+		t.Fatal("baseline broken: `asOf latest` must mark the contract time-dependent")
+	}
+	if fallback.LatestMode != literal.LatestMode {
+		t.Errorf("`asOf args.asOf ?? latest` has LatestMode=%v but `asOf latest` has %v.\n"+
+			"With the argument omitted the two are the same read -- the live tip -- so the "+
+			"contract marker must agree. It is computed at load from the unexpanded node, so it "+
+			"has to describe what the query MAY do, not what one call did. A consumer reading "+
+			"the loaded contract would be told this result is reproducible when it is not "+
+			"(memql#2992).", fallback.LatestMode, literal.LatestMode)
+	}
+
+	// ...and an explicit instant is still deterministic, so the fix cannot be
+	// satisfied by marking everything time-dependent.
+	pinned := loadTemporalQuery(t, "qPinnedInstant", `asOf    "2026-07-28T12:00:00Z"`)
+	if pinned.LatestMode {
+		t.Error("`asOf <explicit timestamp>` is reproducible and must NOT be marked time-dependent")
+	}
+}

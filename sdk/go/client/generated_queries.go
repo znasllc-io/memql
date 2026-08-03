@@ -1620,6 +1620,7 @@ func DeploymentByIdBuild(args DeploymentByIdArgs) string {
 // Bound concept: v1:cluster:deployment (machine-readable: BoundConcepts["deploymentsForCluster"] in generated_concepts.go).
 type DeploymentsForClusterArgs struct {
 	ClusterId string
+	AsOf      string
 }
 
 // DeploymentsForCluster calls the engine query deploymentsForCluster.
@@ -1633,6 +1634,11 @@ func DeploymentsForClusterBuild(args DeploymentsForClusterArgs) string {
 	b.WriteString("query deploymentsForCluster(")
 	b.WriteString("clusterId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ClusterId))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("asOf: ")
+	b.WriteString(fmt.Sprintf("%q", args.AsOf))
 	b.WriteString(")")
 	return b.String()
 }
