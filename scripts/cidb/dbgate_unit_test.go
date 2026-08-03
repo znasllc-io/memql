@@ -942,3 +942,73 @@ func TestParseDBTestsJob_WorkingDirectoryIsCaptured(t *testing.T) {
 		t.Errorf("job defaults.run.working-directory = %q, want it captured", job.workingDir)
 	}
 }
+
+// TestJobIfIsPathRouting pins the job-level `if:` predicate directly. The gate
+// assertion that uses it had no unit test at all: weakening it, or disabling it
+// outright, was caught by nothing.
+func TestJobIfIsPathRouting(t *testing.T) {
+	cases := []struct {
+		name string
+		cond string
+		want bool
+	}{
+		{"absent", "", true},
+		{"the real routing expression",
+			"${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' }}", true},
+		{"constant false", "${{ false }}", false},
+		{"false ANDed with real routing", "${{ false && needs.changes.outputs.go == 'true' }}", false},
+		{"no routing reference at all", "${{ github.event_name == 'push' }}", false},
+		{"unrelated condition", "${{ success() }}", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := jobIfIsPathRouting(tc.cond); got != tc.want {
+				t.Errorf("jobIfIsPathRouting(%q) = %v, want %v -- a job `if:` that can never be "+
+					"true disables the lane, and ci-required reads the skip as a pass", tc.cond, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestDeclaresEnsureSchemaTestMain_Negatives gives the invariant's matcher the
+// negative coverage it lacked: every case below would otherwise let a mutation
+// through (a method named TestMain, any Test* function, any X.EnsureSchema).
+func TestDeclaresEnsureSchemaTestMain_Negatives(t *testing.T) {
+	imports := "import (\n\t\"testing\"\n\t\"github.com/znasllc-io/memql/component/database/dbtest\"\n)\n"
+	cases := []struct {
+		name string
+		src  string
+		want bool
+	}{
+		{"plain TestMain", "package x\n" + imports + "func TestMain(m *testing.M) { dbtest.EnsureSchema(nil) }", true},
+		{"a METHOD named TestMain", "package x\n" + imports + "type S struct{}\nfunc (S) TestMain(m *testing.M) { dbtest.EnsureSchema(nil) }", false},
+		{"an ordinary test calling EnsureSchema", "package x\n" + imports + "func TestThing(t *testing.T) { dbtest.EnsureSchema(nil) }", false},
+		{"a DIFFERENT package's EnsureSchema", "package x\n" + imports + "func TestMain(m *testing.M) { other.EnsureSchema(nil) }", false},
+		{"TestMain without EnsureSchema", "package x\n" + imports + "func TestMain(m *testing.M) { m.Run() }", false},
+		{"EnsureSchema in a string literal", "package x\n" + imports + "func TestMain(m *testing.M) { _ = \"dbtest.EnsureSchema\" }", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := declaresEnsureSchemaTestMain(parseSrc(t, tc.src)); got != tc.want {
+				t.Errorf("declaresEnsureSchemaTestMain = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestDeclaresEnsureSchemaTestMain_AliasedImport pins alias resolution: a
+// package using `dbt "…/dbtest"` is just as provisioned for the lane, and
+// hardcoding the identifier "dbtest" silently dropped it from the invariant.
+func TestDeclaresEnsureSchemaTestMain_AliasedImport(t *testing.T) {
+	src := `package x
+import (
+	"testing"
+	dbt "github.com/znasllc-io/memql/component/database/dbtest"
+)
+func TestMain(m *testing.M) { dbt.EnsureSchema(nil) }
+`
+	if !declaresEnsureSchemaTestMain(parseSrc(t, src)) {
+		t.Error("an aliased dbtest import was not recognised; the package is provisioned for the " +
+			"lane just the same, and missing it drops a real package out of the invariant")
+	}
+}

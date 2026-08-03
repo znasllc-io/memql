@@ -167,6 +167,32 @@ func (s goTestStep) zeroExecutionFlag() string {
 	return ""
 }
 
+// jobIfIsPathRouting reports whether a job-level `if:` is (only) path routing.
+//
+// A job `if:` decides whether the lane runs at all, and ci-required treats a
+// SKIPPED job as a pass -- so a constant-false condition disables the db-gated
+// suites with no visible failure. Path routing is legitimate and expected here;
+// anything that could evaluate false regardless of the diff is not.
+//
+// Requiring a `needs.changes.outputs` mention is necessary but not sufficient,
+// so a bare `false` literal is rejected outright: `${{ false && needs.changes.
+// outputs.go == 'true' }}` mentions the right thing and never runs.
+func jobIfIsPathRouting(cond string) bool {
+	cond = strings.TrimSpace(cond)
+	if cond == "" {
+		return true // no condition: the lane always runs
+	}
+	if !strings.Contains(cond, "needs.changes.outputs") {
+		return false
+	}
+	for _, f := range strings.Fields(strings.NewReplacer("(", " ", ")", " ", "!", " ").Replace(cond)) {
+		if f == "false" {
+			return false
+		}
+	}
+	return true
+}
+
 // goflagsDisablesTests reports whether a GOFLAGS value smuggles a
 // zero-execution flag in through the environment, where none of the
 // command-line checks would ever see it.
@@ -682,7 +708,10 @@ func provisionedPkgs(t *testing.T, root string) []string {
 			return nil
 		}
 		built, mErr := build.Default.MatchFile(filepath.Dir(path), d.Name())
-		if mErr != nil || !built {
+		if mErr != nil {
+			t.Fatalf("MatchFile(%s, %s): %v", filepath.Dir(path), d.Name(), mErr)
+		}
+		if !built {
 			return nil
 		}
 		f, pErr := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
@@ -719,13 +748,14 @@ func declaresEnsureSchemaTestMain(f *ast.File) bool {
 		if !ok || fn.Recv != nil || fn.Name == nil || fn.Name.Name != "TestMain" || fn.Body == nil {
 			continue
 		}
+		local := dbtestLocalName(f)
 		found := false
 		ast.Inspect(fn.Body, func(n ast.Node) bool {
 			sel, ok := n.(*ast.SelectorExpr)
 			if !ok || sel.Sel == nil || sel.Sel.Name != "EnsureSchema" {
 				return true
 			}
-			if ident, ok := sel.X.(*ast.Ident); ok && ident.Name == "dbtest" {
+			if ident, ok := sel.X.(*ast.Ident); ok && local != "" && ident.Name == local {
 				found = true
 				return false
 			}
@@ -736,6 +766,23 @@ func declaresEnsureSchemaTestMain(f *ast.File) bool {
 		}
 	}
 	return false
+}
+
+// dbtestLocalName returns the identifier the file refers to the dbtest package
+// by -- its alias when aliased, otherwise "dbtest" -- or "" if it does not
+// import it. Hardcoding "dbtest" would miss `dbt "…/dbtest"`.
+func dbtestLocalName(f *ast.File) string {
+	for _, spec := range f.Imports {
+		p, err := strconv.Unquote(spec.Path.Value)
+		if err != nil || p != dbtestImport {
+			continue
+		}
+		if spec.Name != nil {
+			return spec.Name.Name // aliased, including "." and "_"
+		}
+		return "dbtest"
+	}
+	return ""
 }
 
 // importsDBTest reports whether the parsed file imports the dbtest package.
@@ -862,8 +909,7 @@ func TestDBTestsLaneCannotPassWithoutRunning(t *testing.T) {
 	// so require it to BE path routing rather than forbidding it outright:
 	// `if: ${{ false }}`, or a routing expression narrowed to a bucket that
 	// never matches, would otherwise disable the whole lane invisibly.
-	if cond := strings.TrimSpace(lane.jobIf); cond != "" &&
-		!strings.Contains(cond, "needs.changes.outputs") {
+	if cond := strings.TrimSpace(lane.jobIf); !jobIfIsPathRouting(cond) {
 		t.Errorf("the %q job's `if:` does not reference needs.changes.outputs:\n\n  %s\n\n"+
 			"A job-level condition decides whether the lane runs at all, and ci-required "+
 			"treats a SKIPPED job as a pass -- so a constant-false or mis-typed condition "+

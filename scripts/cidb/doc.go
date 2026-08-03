@@ -65,6 +65,35 @@
 // "at least one" to full coverage -- the uncovered set is already computed, so
 // it is one t.Logf becoming a t.Errorf.
 //
+// # What it can and cannot prove
+//
+// Be precise about this, because a gate that overstates its guarantee is worse
+// than no gate: it invites people to stop looking.
+//
+//   - AIRTIGHT: MEMQL_REQUIRE_DB is present and truthy at the step that runs
+//     the suite. That is a YAML field read, with Actions' step-over-job
+//     precedence modelled, and it is what makes an unreachable database a
+//     failure instead of a green skip. This is the issue's actual fix.
+//   - STRUCTURAL: every package with an EnsureSchema TestMain is in the
+//     selector. Pure Go AST on both sides, no shell involved.
+//   - BEST-EFFORT: that the lane's command actually executes those packages.
+//     This is read off `run:` text, and text cannot prove execution. The gate
+//     narrows the gap by REFUSING anything it cannot read plainly -- shell
+//     control flow, exit-status suppression (`|| true`, backgrounding, an
+//     unguarded pipe), `cd`/`exec`/`alias`, a working-directory, a `./...`
+//     wildcard, a zero-execution flag on the command line or in GOFLAGS -- so
+//     the residual is exotic rather than everyday. It is not a sandbox, and a
+//     determined edit can still defeat it.
+//
+// The authoritative version of the third bullet is a RUNTIME count: pipe `go
+// test -json` through a checker that fails when zero db-gated tests actually
+// ran. That observes execution instead of reasoning about text, and it is the
+// natural next step if this ever proves insufficient. It is deliberately not
+// done here -- the static form catches the drift that actually happens
+// (a renamed package, an emptied selector, a deleted entry, a dropped env key)
+// and runs on EVERY pull request, including the many where the db-tests lane
+// itself is skipped.
+//
 // Untagged on purpose: it must run in the default `go test ./...`, which the
 // `ci` path filter reaches on any .github/workflows/** edit -- so a PR that
 // removes the env key it guards is the PR that goes red.
