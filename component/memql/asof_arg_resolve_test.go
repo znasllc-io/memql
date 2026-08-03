@@ -254,3 +254,58 @@ query deployment probeDeployments {
 		}
 	})
 }
+
+// A raw runtime query string has no declared arguments to resolve against, so
+// the caller-arg form must be REFUSED rather than silently dropped
+// (memql#2992 landing review).
+//
+// It parses: runtime strings go through the same parser entry point as a
+// declared query. But applyDirectiveWrappers copied only Timestamp and
+// UseLatest, so an ArgPath node lost its directive entirely -- the plan came
+// out with NO asOf, the caller got a live-tip read having asked for a point in
+// time, and nothing reported it. asof_arg_resolve.go's design note says the
+// unresolved form never escapes; this was the path where it did.
+//
+// Asserted against applyDirectiveWrappers directly: it is the seam that drops
+// the directive, and driving it needs no initialised engine.
+func TestAsOfArg_UnresolvedFormIsRefusedByDirectiveWrappers(t *testing.T) {
+	base := &ComparisonExpression{Field: FieldReference{Raw: "concept"}, Operator: "==", Value: "v1:cluster:node"}
+
+	for _, tc := range []struct{ name, argPath string }{
+		{"bare arg", "at"},
+		{"arg with latest fallback", "asOf"},
+		{"nested arg path", "window.start"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			plan := &QueryPlan{Root: &TimestampExpression{Target: base, ArgPath: tc.argPath}}
+			_, err := applyDirectiveWrappers(plan)
+			if err == nil {
+				t.Fatalf("an unresolved asOf(args.%s) was accepted. There are no declared "+
+					"arguments to resolve it against here, and the wrapper copies only Timestamp "+
+					"and UseLatest -- so the directive is DROPPED and the read silently becomes a "+
+					"live-tip read. The caller asked for a point in time and got 'now', with no "+
+					"error (memql#2992).", tc.argPath)
+			}
+			if !strings.Contains(err.Error(), "2992") {
+				t.Errorf("the refusal should cite the issue so the reason is findable, got: %v", err)
+			}
+		})
+	}
+
+	// The literal forms must still pass through -- that is how #1872's
+	// reconstructability proof reads the graph at an instant.
+	ts := time.Date(2026, 7, 28, 12, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name string
+		node *TimestampExpression
+	}{
+		{"explicit instant", &TimestampExpression{Target: base, Timestamp: &ts}},
+		{"latest", &TimestampExpression{Target: base, UseLatest: true}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := applyDirectiveWrappers(&QueryPlan{Root: tc.node}); err != nil {
+				t.Errorf("%s must still pass through: %v", tc.name, err)
+			}
+		})
+	}
+}
