@@ -103,6 +103,21 @@ The merge queue is **live** on the `default` ruleset (id 16630577). The
 Required status checks are `ci-required`, `scan`, and `Analyze (go)` —
 all three trigger on `merge_group`, so a queued candidate always gets a
 result and never stalls. The queue has merged PRs end-to-end (each
-spawns a `gh-readonly-queue/main/...` candidate, runs the full suite on
-it, and merges only when green). This doc itself landed through the
-queue.
+spawns a `gh-readonly-queue/main/...` candidate and merges only when
+green). This doc itself landed through the queue.
+
+**`Analyze (go)` is a deliberate no-op on `merge_group`.** It reports the
+required context green without analysing the candidate: a SARIF upload
+keyed to the torn-down `gh-readonly-queue` ref wedges the queue (#1539),
+so `.github/workflows/codeql.yml` gates checkout, init, autobuild and
+analyze on `github.event_name != 'merge_group'` and runs a single `echo`
+instead. CodeQL coverage comes from the `pull_request`, `push: main` and
+weekly `schedule` triggers instead, and
+`scripts/dev/codeql_merge_group_coverage_test.go` fails the build if any
+of those is removed while the no-op remains.
+
+This paragraph previously said the queue "runs the full suite on it",
+which was read as covering all three contexts and is not true of
+`Analyze (go)` (corrected in memql#2973). The guard's own header cited
+this page as the authority for the no-op, which pointed a reader at a
+page that contradicted it.

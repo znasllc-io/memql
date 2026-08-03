@@ -6,9 +6,15 @@
 // `.github/workflows/codeql.yml` runs a single `echo` on `merge_group` and
 // skips checkout / init / autobuild / analyze. The job reports success and
 // satisfies the required `Analyze (go)` status context without analysing
-// anything. That is DELIBERATE and documented (#1539,
-// docs/internal/ops/merge-queue.md): a SARIF upload keyed to the torn-down
-// `gh-readonly-queue` ref wedges the queue.
+// anything. That is DELIBERATE and documented in the workflow itself
+// (.github/workflows/codeql.yml) and in #1539: a SARIF upload keyed to the
+// torn-down `gh-readonly-queue` ref wedges the queue.
+//
+// NOT documented in docs/internal/ops/merge-queue.md, which this comment used
+// to cite (memql#2973 landing review). That page says the opposite -- that all
+// three required contexts "trigger on merge_group" and the queue "runs the
+// full suite on it" -- so citing it as the authority for the no-op pointed a
+// reader at a page that contradicts it. The page has been corrected too.
 //
 // It is a DEFERRAL rather than a hole only because three other triggers cover
 // the same code: `pull_request`, `push: [main]`, and the weekly `schedule`.
@@ -163,7 +169,7 @@ func TestCodeQLMergeGroupNoOpKeepsItsCompensatingTriggers(t *testing.T) {
 			"unguarded while it holds.", "push: main, schedule, pull_request")
 	}
 
-	// The no-op is present. Both compensating triggers must be too.
+	// The no-op is present. Every compensating trigger must be too.
 	for _, trig := range []struct{ key, why string }{
 		{"push",
 			"the MEASURED recovery path. For the 14 merge-queue candidates in #2973's window " +
@@ -174,6 +180,13 @@ func TestCodeQLMergeGroupNoOpKeepsItsCompensatingTriggers(t *testing.T) {
 			"the backstop for anything the push lane misses. It was not the recovery path for " +
 				"any candidate #2973 measured, but it is the only trigger that fires without a " +
 				"PR or a push at all"},
+		{"pull_request",
+			"the LARGEST source of the compensating coverage -- 43 of the 58 go analyses in " +
+				"#2973's window are refs/pull/*/merge -- and the one the no-op step's own name " +
+				"claims: \"merge-queue no-op (CodeQL already ran on the PR)\". Remove this and " +
+				"that sentence becomes false while the guard stays green. This file's header " +
+				"named all three compensating triggers and the gate covered two of them " +
+				"(memql#2973 landing review)"},
 	} {
 		if _, ok := wf.On[trig.key]; !ok {
 			t.Errorf("codeql.yml keeps the merge_group no-op but has dropped its `%s` trigger.\n"+
@@ -201,6 +214,20 @@ func TestCodeQLMergeGroupNoOpKeepsItsCompensatingTriggers(t *testing.T) {
 				"The merge_group no-op's recovery path is specifically the analysis that runs "+
 				"when the candidate's tree lands on main; a push trigger on another branch "+
 				"does not provide it (#2973).", branches)
+		}
+		// A `paths` / `paths-ignore` filter removes the coverage exactly as
+		// completely as narrowing the branch list, and satisfies both the
+		// presence check and the branch check. It is the same class the branch
+		// check exists for (memql#2973 landing review).
+		for _, k := range []string{"paths", "paths-ignore"} {
+			if v, has := push[k]; has {
+				t.Errorf("codeql.yml's `push` trigger carries a `%s` filter (%v).\n"+
+					"The merge_group no-op's recovery path is the analysis of the candidate's "+
+					"tree when it lands on main, and a path filter means some trees never get "+
+					"one -- the required context stays green having analysed nothing, with no "+
+					"recovery. Narrowing by path removes the coverage as completely as "+
+					"narrowing by branch (#2973).", k, v)
+			}
 		}
 	}
 }
