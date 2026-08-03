@@ -614,6 +614,17 @@ func covers(pkgs []string, dir string) bool {
 	return false
 }
 
+// wholeModuleWildcard returns a `./...` argument from the selector, if any.
+// It makes every coverage assertion vacuous, so it is never right in this lane.
+func wholeModuleWildcard(pkgs []string) (string, bool) {
+	for _, p := range pkgs {
+		if strings.TrimSuffix(strings.TrimPrefix(strings.TrimSpace(p), "./"), "/") == "..." {
+			return p, true
+		}
+	}
+	return "", false
+}
+
 // dbGatedTest is one Test function in a _test.go file that imports dbtest.
 type dbGatedTest struct {
 	dir  string // repo-relative, e.g. "component/memql"
@@ -894,74 +905,73 @@ func TestDBTestsLaneMakesAnUnreachableDatabaseFail(t *testing.T) {
 // continue-on-error job as a pass, so each of these is a silent hole rather
 // than a visible one (memql#2886).
 func TestDBTestsLaneCannotPassWithoutRunning(t *testing.T) {
-	root := repoRoot(t)
-	lane := loadDBTestsJob(t, root)
+	for _, f := range laneRunFindings(loadDBTestsJob(t, repoRoot(t))) {
+		t.Error(f)
+	}
+}
 
+// laneRunFindings returns one message per way the lane could report a
+// non-failure while executing nothing.
+//
+// Pure, and separate from the test that calls it, so every check below can be
+// table-tested against a synthetic laneSpec. When these lived inline they were
+// only ever evaluated against the real ci.yml -- which is correct -- so
+// deleting any one of them reded nothing at all. An assertion no test can
+// distinguish from its own absence is the same defect this package exists to
+// catch, one level up.
+func laneRunFindings(lane laneSpec) []string {
+	var out []string
+
+	if !jobIfIsPathRouting(lane.jobIf) {
+		out = append(out, fmt.Sprintf("the %q job's `if:` is not path routing:\n\n  %s\n\n"+
+			"A job-level condition decides whether the lane runs at all, and ci-required treats "+
+			"a SKIPPED job as a pass -- so a constant-false or mis-typed condition disables the "+
+			"db-gated suites with no visible failure (memql#2886).", dbTestsJob, lane.jobIf))
+	}
 	if !isFalsy(lane.continueOnError) {
-		t.Errorf("the %q job in %s sets continue-on-error: %v.\n\n"+
-			"The lane could then fail without failing the build, and ci-required would still "+
-			"report green -- which is the bug this lane exists to prevent, one level up.",
-			dbTestsJob, ciWorkflow, lane.continueOnError)
+		out = append(out, fmt.Sprintf("the %q job sets continue-on-error: %v -- the lane could "+
+			"fail without failing the build, and ci-required would still report green "+
+			"(memql#2886).", dbTestsJob, lane.continueOnError))
 	}
-
-	// The JOB's `if:` decides whether the lane runs at all, and a skipped job
-	// is a pass to ci-required. Path routing there is legitimate and expected,
-	// so require it to BE path routing rather than forbidding it outright:
-	// `if: ${{ false }}`, or a routing expression narrowed to a bucket that
-	// never matches, would otherwise disable the whole lane invisibly.
-	if cond := strings.TrimSpace(lane.jobIf); !jobIfIsPathRouting(cond) {
-		t.Errorf("the %q job's `if:` does not reference needs.changes.outputs:\n\n  %s\n\n"+
-			"A job-level condition decides whether the lane runs at all, and ci-required "+
-			"treats a SKIPPED job as a pass -- so a constant-false or mis-typed condition "+
-			"disables the db-gated suites with no visible failure. Only path routing belongs "+
-			"here (memql#2886).", dbTestsJob, cond)
-	}
-
 	if lane.workingDir != "" {
-		t.Errorf("the %q job sets working-directory: %q.\n\n"+
+		out = append(out, fmt.Sprintf("the %q job sets working-directory: %q.\n\n"+
 			"That relocates every relative package argument without appearing in the shell at "+
-			"all, so the selector this gate reads is not the set of packages that actually "+
-			"run. Keep the lane at the repository root (memql#2886).", dbTestsJob, lane.workingDir)
+			"all, so the selector this gate reads is not the set of packages that actually run "+
+			"(memql#2886).", dbTestsJob, lane.workingDir))
 	}
-
 	for _, line := range lane.nonPlainRun {
-		t.Errorf("a `run:` block in the %q job is not a plain sequence of commands:\n\n  %s\n\n"+
-			"This gate refuses to scan such a block rather than guess, because `go test` can "+
-			"be the first word of a line that never executes -- inside `if`/`while`/`case`, a "+
-			"function body, or below an `exit`. This lane must run UNCONDITIONALLY, so a "+
-			"conditional in it is a defect whether or not it was meant as one. If the block "+
-			"genuinely needs this, update runBlockIsPlain deliberately (memql#2886).", dbTestsJob, line)
+		out = append(out, fmt.Sprintf("a `run:` block in the %q job is not a plain sequence of "+
+			"commands:\n\n  %s\n\n"+
+			"This gate refuses to scan such a block rather than guess: `go test` can be the "+
+			"first word of a line that never executes, and an exit status can be suppressed by "+
+			"`|| true`, backgrounding, or an unguarded pipe. This lane must run "+
+			"UNCONDITIONALLY and must fail when the suite fails (memql#2886).", dbTestsJob, line))
 	}
-
 	for i, s := range lane.steps {
 		if strings.TrimSpace(s.ifCond) != "" {
-			t.Errorf("`go test` step %d of the %q job carries `if: %s`.\n\n"+
-				"A step-level condition can skip the suite entirely while the job still "+
-				"succeeds. Path routing belongs on the JOB's `if:`, which is where it already "+
-				"is (memql#2886).", i, dbTestsJob, s.ifCond)
+			out = append(out, fmt.Sprintf("`go test` step %d of the %q job carries `if: %s` -- a "+
+				"step condition can skip the suite while the job still succeeds (memql#2886).",
+				i, dbTestsJob, s.ifCond))
 		}
 		if !isFalsy(s.continueOnError) {
-			t.Errorf("`go test` step %d of the %q job sets continue-on-error: %v -- the suite "+
-				"could fail without failing the lane (memql#2886).",
-				i, dbTestsJob, s.continueOnError)
+			out = append(out, fmt.Sprintf("`go test` step %d of the %q job sets "+
+				"continue-on-error: %v (memql#2886).", i, dbTestsJob, s.continueOnError))
 		}
 		if raw, ok := lane.effectiveEnv(s, "GOFLAGS"); ok {
 			if f := goflagsDisablesTests(raw); f != "" {
-				t.Errorf("`go test` step %d of the %q job resolves GOFLAGS=%q, which carries %q.\n\n"+
-					"GOFLAGS reaches the toolchain without appearing on the command line, so it "+
-					"disables the suite somewhere no command-line check would look (memql#2886).",
-					i, dbTestsJob, fmt.Sprintf("%v", raw), f)
+				out = append(out, fmt.Sprintf("`go test` step %d of the %q job resolves "+
+					"GOFLAGS=%q, which carries %q. GOFLAGS reaches the toolchain without "+
+					"appearing on the command line (memql#2886).",
+					i, dbTestsJob, fmt.Sprintf("%v", raw), f))
 			}
 		}
 		if f := s.zeroExecutionFlag(); f != "" {
-			t.Errorf("`go test` step %d of the %q job passes %q, which can make the suite exit "+
-				"0 having run NOTHING.\n\n"+
-				"A -run or -skip pattern matching nothing, or -count=0, executes zero tests and "+
-				"still reports ok -- the silent-nothing failure this lane exists to prevent. "+
-				"Note -count=0 is a one-character edit to the -count=1 already there. This lane "+
-				"must run its packages unfiltered (memql#2886).", i, dbTestsJob, f)
+			out = append(out, fmt.Sprintf("`go test` step %d of the %q job passes %q, which can "+
+				"make the suite exit 0 having run NOTHING. Note -count=0 is a one-character "+
+				"edit to the -count=1 already there (memql#2886).", i, dbTestsJob, f))
 		}
 	}
+	return out
 }
 
 // TestDBTestsLaneRunsAtLeastOneDBGatedTest is the count assertion memql#2886
@@ -1023,13 +1033,11 @@ func TestDBTestsLaneRunsAtLeastOneDBGatedTest(t *testing.T) {
 	// so every db-gated package reports as covered no matter what the lane
 	// actually runs -- including after a `cd`. This lane names its packages
 	// explicitly, so the wildcard is always wrong here.
-	for _, p := range pkgs {
-		if strings.TrimSuffix(strings.TrimPrefix(strings.TrimSpace(p), "./"), "/") == "..." {
-			t.Fatalf("the %q job's selector contains %q.\n\n"+
-				"A whole-module wildcard makes every coverage assertion in this gate vacuous -- "+
-				"each db-gated package reports as covered regardless of what the lane runs. This "+
-				"lane must name its packages explicitly (memql#2886).", dbTestsJob, p)
-		}
+	if p, found := wholeModuleWildcard(pkgs); found {
+		t.Fatalf("the %q job's selector contains %q.\n\n"+
+			"A whole-module wildcard makes every coverage assertion in this gate vacuous -- each "+
+			"db-gated package reports as covered regardless of what the lane runs. This lane "+
+			"must name its packages explicitly (memql#2886).", dbTestsJob, p)
 	}
 
 	// Per-argument, so a selector entry that has silently gone to zero is

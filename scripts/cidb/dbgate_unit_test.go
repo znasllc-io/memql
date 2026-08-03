@@ -1012,3 +1012,83 @@ func TestMain(m *testing.M) { dbt.EnsureSchema(nil) }
 			"lane just the same, and missing it drops a real package out of the invariant")
 	}
 }
+
+// --- laneRunFindings: every check, table-tested ------------------------------
+
+// TestLaneRunFindings covers each way the lane can report a non-failure while
+// executing nothing. These previously lived inline in the gate test and were
+// only ever evaluated against the real ci.yml, so deleting any one of them
+// reded nothing.
+func TestLaneRunFindings(t *testing.T) {
+	okStep := goTestStep{pkgs: []string{"./component/memql/..."}, flags: []string{"-count=1"}}
+	base := laneSpec{
+		jobEnv: map[string]any{"MEMQL_REQUIRE_DB": "1"},
+		jobIf:  "${{ needs.changes.outputs.go == 'true' }}",
+		steps:  []goTestStep{okStep},
+	}
+
+	if got := laneRunFindings(base); len(got) != 0 {
+		t.Fatalf("a healthy lane produced findings: %v", got)
+	}
+
+	cases := []struct {
+		name   string
+		mutate func(l *laneSpec)
+	}{
+		{"job if: constant false", func(l *laneSpec) { l.jobIf = "${{ false }}" }},
+		{"job if: no routing reference", func(l *laneSpec) { l.jobIf = "${{ success() }}" }},
+		{"job continue-on-error", func(l *laneSpec) { l.continueOnError = true }},
+		{"working-directory set", func(l *laneSpec) { l.workingDir = "examples/referencepack" }},
+		{"a refused run block", func(l *laneSpec) { l.nonPlainRun = []string{"if [ x ]; then"} }},
+		{"step if:", func(l *laneSpec) { l.steps[0].ifCond = "${{ false }}" }},
+		{"step continue-on-error", func(l *laneSpec) { l.steps[0].continueOnError = true }},
+		{"zero-execution flag", func(l *laneSpec) { l.steps[0].flags = []string{"-count=0"} }},
+		{"zero-execution flag, space form", func(l *laneSpec) { l.steps[0].flags = []string{"-count", "0"} }},
+		{"GOFLAGS disables tests", func(l *laneSpec) { l.jobEnv["GOFLAGS"] = "-count=0" }},
+		{"GOFLAGS via step env", func(l *laneSpec) { l.steps[0].env = map[string]any{"GOFLAGS": "-run=NONE"} }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			l := laneSpec{
+				jobEnv: map[string]any{"MEMQL_REQUIRE_DB": "1"},
+				jobIf:  base.jobIf,
+				steps:  []goTestStep{{pkgs: okStep.pkgs, flags: []string{"-count=1"}}},
+			}
+			tc.mutate(&l)
+			if got := laneRunFindings(l); len(got) == 0 {
+				t.Errorf("no finding reported; this lane can report a non-failure having run nothing")
+			}
+		})
+	}
+}
+
+// TestWholeModuleWildcard pins the vacuity check: `./...` covers every package,
+// so every coverage assertion passes regardless of what the lane runs.
+func TestWholeModuleWildcard(t *testing.T) {
+	for _, pkgs := range [][]string{{"./..."}, {"./component/memql/...", "./..."}, {"..."}, {"./"}} {
+		_, found := wholeModuleWildcard(pkgs)
+		want := pkgs[len(pkgs)-1] == "./..." || pkgs[len(pkgs)-1] == "..."
+		if found != want {
+			t.Errorf("wholeModuleWildcard(%v) = %v, want %v", pkgs, found, want)
+		}
+	}
+}
+
+// TestParseDBTestsJob_CommentMentioningGoTestDoesNotArmRefusal pins the CALL
+// SITE, not just mentionsGoTest itself: the extensions step legitimately loops
+// over pg_isready, and a comment above it must not make the gate refuse it.
+func TestParseDBTestsJob_CommentMentioningGoTestDoesNotArmRefusal(t *testing.T) {
+	spec := mustParse(t, "jobs:\n  db-tests:\n    steps:\n"+
+		"      - name: create required Postgres extensions\n        run: |\n"+
+		"          # wait for postgres before go test runs\n"+
+		"          for i in $(seq 1 30); do\n            pg_isready\n          done\n"+
+		"      - run: go test -count=1 ./component/memql/...\n")
+	if len(spec.nonPlainRun) != 0 {
+		t.Errorf("nonPlainRun = %v; a COMMENT mentioning `go test` armed the refusal on a block "+
+			"that runs no tests -- keying a gate on prose is the defect this package criticises "+
+			"elsewhere", spec.nonPlainRun)
+	}
+	if len(spec.steps) != 1 {
+		t.Errorf("steps = %d, want 1 (the real invocation)", len(spec.steps))
+	}
+}
