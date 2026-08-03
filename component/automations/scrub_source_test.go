@@ -69,9 +69,9 @@ c: also kept`
 	got := scrubSourceForPayloadScan(src)
 
 	if !strings.Contains(got, "b: kept") || !strings.Contains(got, "c: also kept") {
-		t.Errorf("a single unbalanced quote swallowed the rest of the file -- the string "+
-			"arm must stop at a newline like the comment arm does, because the grammar "+
-			"does not permit a literal to span lines.\nsource:\n%s\n\nscrubbed:\n%s", src, got)
+		t.Errorf("a single unbalanced quote swallowed the rest of the file -- when NO closing "+
+			"quote exists anywhere before EOF the arm must stop at the newline, so one stray "+
+			"quote costs its own line and not the whole file.\nsource:\n%s\n\nscrubbed:\n%s", src, got)
 	}
 	if strings.Contains(got, "unterminated") {
 		t.Errorf("the unterminated literal's body survived on its own line:\n%s", got)
@@ -215,6 +215,19 @@ status: event.payload.status`,
 			name: "read after an unterminated literal",
 			src: `path: "oops
 status: event.payload.status`,
+			want: true,
+		},
+		{
+			// An ODD number of escaped quotes. This is what pins the escape
+			// branch itself: with `if c == '\\' { escaped = true }` deleted,
+			// an EVEN number of `\"` simply re-pairs and every other test
+			// still passes coincidentally (mutation-tested -- that mutant
+			// survived the whole suite until this case existed). One unpaired
+			// escaped quote breaks the symmetry: the mutant ends the literal
+			// early, blanks the live source after it, and the gate fails OPEN
+			// on a genuine retired read.
+			name: "read after a literal containing an ODD number of escaped quotes",
+			src:  `note: "it\"s fine" status: event.payload.x`,
 			want: true,
 		},
 		{
