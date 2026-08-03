@@ -79,10 +79,19 @@ func resolveAsOfArg(node *TimestampExpression, args map[string]any) (*TimestampE
 
 // isBlankAsOfArg reports whether a supplied value should be treated as absent.
 //
-// An empty string is the shape an optional arg takes when a client sends the
-// field but leaves it unset, and treating it as "not supplied" is what makes
-// `?? latest` behave the way an author reading it expects. A non-string is
-// never blank -- it is either parseable below or a reportable error.
+// This is load-bearing for the entire SDK path, not a convenience. The
+// generated client builder emits the arg UNCONDITIONALLY:
+//
+//	b.WriteString("asOf: ")
+//	b.WriteString(fmt.Sprintf("%q", args.AsOf))
+//
+// so every caller who leaves the field unset sends `asOf: ""`. Without this,
+// each of them would get "invalid RFC3339 timestamp" instead of the latest
+// version -- which would make adopting the form a breaking change for exactly
+// the callers it was supposed to leave untouched.
+//
+// A non-string is never blank: it is either parseable below or a reportable
+// error.
 func isBlankAsOfArg(v any) bool {
 	s, ok := v.(string)
 	return ok && strings.TrimSpace(s) == ""

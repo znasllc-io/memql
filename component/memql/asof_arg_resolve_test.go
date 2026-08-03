@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
 
 // asof_arg_resolve_test.go -- memql#2992, the resolution half.
@@ -183,4 +185,72 @@ func TestAsOfArg_DottedPath(t *testing.T) {
 	if got.Timestamp == nil || !got.Timestamp.Equal(want) {
 		t.Errorf("Timestamp = %v, want %v", got.Timestamp, want)
 	}
+}
+
+// TestAsOfArg_EndToEndThroughAStructQuery is memql#2992's definition-of-done
+// item 2: a caller-supplied instant driven through the real chain rather than
+// through resolveAsOfArg directly.
+//
+// It parses a struct-form query carrying `asOf args.asOf ?? latest` exactly as
+// the tree now declares it, runs the same argument expansion a call performs,
+// and reads the resolved directive off the result. The seam tests above cannot
+// see a break between the rewriter, the parser and expansion; this one can.
+func TestAsOfArg_EndToEndThroughAStructQuery(t *testing.T) {
+	const src = `use deployment.concepts.{ deployment }
+
+@enabled
+@description("memql#2992 end-to-end probe")
+query deployment probeDeployments {
+  args {
+    clusterId  string!
+    asOf       datetime
+  }
+  filter  clusterId == args.clusterId
+  asOf    args.asOf ?? latest
+}
+`
+	fn, err := tryParseNewFunctionSyntax("probeDeployments", "query", src, "memql#2992-test", memorynodes.DefaultRegistry())
+	if err != nil {
+		t.Fatalf("the struct-form query carrying `asOf args.asOf ?? latest` must parse: %v", err)
+	}
+
+	resolve := func(t *testing.T, args map[string]any) *TimestampExpression {
+		t.Helper()
+		v := newFunctionValidatorWithOrigin(nil, nil, 0)
+		out, expErr := v.expandExpressionWithArgs(fn.Expr, args)
+		if expErr != nil {
+			t.Fatalf("expanding with args %v: %v", args, expErr)
+		}
+		te, ok := out.(*TimestampExpression)
+		if !ok {
+			t.Fatalf("expansion produced %T, not a *TimestampExpression -- the asOf directive is "+
+				"no longer the root and this probe needs updating", out)
+		}
+		if te.ArgPath != "" {
+			t.Errorf("the expanded node still carries ArgPath %q; an unresolved asOf must never "+
+				"reach the plan (memql#2992)", te.ArgPath)
+		}
+		return te
+	}
+
+	t.Run("omitted arg behaves as asOf latest", func(t *testing.T) {
+		te := resolve(t, map[string]any{"clusterId": "c1"})
+		if !te.UseLatest || te.Timestamp != nil {
+			t.Errorf("got {UseLatest:%v Timestamp:%v}, want exactly UseLatest. This is what lets "+
+				"the existing `asOf latest` queries adopt the form with no migration -- if it "+
+				"fails, adopting it is a breaking change (memql#2992).", te.UseLatest, te.Timestamp)
+		}
+	})
+
+	t.Run("supplied instant pins the read", func(t *testing.T) {
+		te := resolve(t, map[string]any{"clusterId": "c1", "asOf": "2026-07-28T12:00:00Z"})
+		want := mustParseTime(t, "2026-07-28T12:00:00Z")
+		if te.UseLatest {
+			t.Error("a supplied instant resolved to UseLatest -- the caller's point in time was " +
+				"discarded, which is the defect memql#2992 exists to fix")
+		}
+		if te.Timestamp == nil || !te.Timestamp.Equal(want) {
+			t.Errorf("Timestamp = %v, want %v", te.Timestamp, want)
+		}
+	})
 }

@@ -495,6 +495,27 @@ paginate(concept==v1:examples:module && worldId=="v1:examples:world:world-aurora
 asOf(concept==v1:assistant && active==true, "2025-11-01T00:00:00Z")
 ```
 
+In a **declared** query the clause also takes the caller's instant
+(memql#2992) -- `args.<name>`, optionally with a `?? latest` fallback so an
+omitted value means the latest version:
+
+```memql
+query deployment deploymentsForCluster {
+  args {
+    clusterId  string!
+    asOf       datetime
+  }
+  filter  clusterId == args.clusterId
+  asOf    args.asOf ?? latest
+}
+```
+
+Before this a declared query could offer only a fixed instant or `latest`, and
+a caller-chosen point in time was reachable solely by hand-building a runtime
+query string -- so a consumer that calls named queries could not reach it at
+all. The value is validated as RFC3339 at call time, so a malformed instant is
+an error rather than a silent fall back to `latest`.
+
 ### Depth Overrides
 
 `withDepth(<expr>, depth)` customizes relationship traversal depth. Depth must be a positive integer:

@@ -36,10 +36,11 @@
 query deployment deploymentsForCluster {
   args {
     clusterId  string!
+    asOf       datetime
   }
   filter  clusterId == args.clusterId
   shape   deploymentFull
-  asOf    latest
+  asOf    args.asOf ?? latest
 }
 
 // ---- deploymentById ----

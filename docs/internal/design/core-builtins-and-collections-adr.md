@@ -224,9 +224,16 @@ lint warns when a `where()` / etc. runs over an **unfiltered full-concept fetch*
 
 ### 2.3 Temporal access (`asOf`) stays a query clause
 
-- `asOf latest` / `asOf <ts>` is a **query-only clause** (alongside `filter` /
-  `shape` / `sort` / `paginate`); it compiles to time-travel against the graph.
-  It is **rejected** in logic / automation / spec bodies.
+- `asOf latest` / `asOf <ts>` / `asOf args.<name> [?? latest]` is a
+  **query-only clause** (alongside `filter` / `shape` / `sort` / `paginate`);
+  it compiles to time-travel against the graph. It is **rejected** in logic /
+  automation / spec bodies.
+- The `args.<name>` form (memql#2992) lets a declared query offer the point in
+  time to its CALLER rather than fixing it at authoring time. It does not
+  weaken this section: the clause is still query-only, and the caller-supplied
+  instant is resolved during argument expansion, before the plan is built --
+  `TestAsOf_CallerInstantStaysQueryOnly` pins that the new spelling is refused
+  in logic and automation bodies exactly as the literal forms are.
 - It is **not** an importable `core` construct -- `latest` is a temporal
   *coordinate*, not a callable. The temporal dependency is declared **through the
   query** a body imports (queries are the CQRS read side; logic/automation never

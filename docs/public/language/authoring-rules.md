@@ -178,6 +178,38 @@ windowing, and latest-per-id snapshots are `sort` / `paginate` /
 `dsl/cognition/queries.memql`, `staleClusterNodes` in
 `dsl/cluster/queries.memql`):
 
+**`asOf` takes a caller-chosen instant, not only a literal** (memql#2992).
+The clause accepts an RFC3339 string, the bare word `latest`, or
+`args.<name>` — optionally with a `?? latest` fallback:
+
+```memql
+query deployment deploymentsForCluster {
+  args {
+    clusterId  string!
+    asOf       datetime
+  }
+  filter  clusterId == args.clusterId
+  shape   deploymentFull
+  asOf    args.asOf ?? latest
+}
+```
+
+**Prefer the `?? latest` spelling.** One clause serves both callers: omit
+the argument and the behaviour is byte-identical to `asOf latest`, so an
+existing query can adopt the form without changing anything for callers
+that pass nothing. Write the bare `asOf args.at` only where an omitted
+value should be an error — without a fallback it is one.
+
+This matters because a declared `asOf latest` cannot be time-travelled by
+wrapping either (`asOf(...)` over a query that declares its own reports
+*"multiple asOf() directives are not supported"*), so before memql#2992 a
+point-in-time read was reachable **only** by hand-building a runtime query
+string. A consumer that calls named queries — `component/deploycontrol` —
+could not reach it at all.
+
+Note the value is validated as RFC3339 at call time, so a malformed
+instant is an error rather than a silent fall back to `latest`.
+
 ```memql
 use cognition.concepts.{ context }
 
