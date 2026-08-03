@@ -111,7 +111,7 @@ var shellControlKeywords = map[string]bool{
 // one-liner `go(){ …; }` which can shadow the toolchain itself.
 var funcDefinition = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*\s*\(\s*\)`)
 
-var suppressors = regexp.MustCompile(`(\|\|\s*(true|:)\s*$|&\s*$|\|[^|]*$)`)
+var suppressors = regexp.MustCompile(`(\|\|\s*(true|:)\s*$|[^&]&\s*$|[^|]\|[^|]*$)`)
 
 // workflowDoc is the sliver of the GitHub Actions schema this gate reads.
 //
@@ -614,6 +614,72 @@ func covers(pkgs []string, dir string) bool {
 	return false
 }
 
+// coverageFindings returns one message per way the lane's SELECTOR fails to tie
+// the job to the packages that actually carry db-gated tests.
+//
+// Pure, for the same reason laneRunFindings is: inline, these were evaluated
+// only against the real tree, so deleting one changed nothing observable.
+func coverageFindings(pkgs []string, all []dbGatedTest, provisioned []string) []string {
+	var out []string
+
+	if len(pkgs) == 0 {
+		return append(out, fmt.Sprintf("parsed no `go test ./...` package arguments from the %q "+
+			"job. Either the test step was removed, or this gate's parsing broke -- neither "+
+			"leaves anything running the db-gated suites (memql#2886).", dbTestsJob))
+	}
+	if p, found := wholeModuleWildcard(pkgs); found {
+		return append(out, fmt.Sprintf("the %q job's selector contains %q. A whole-module "+
+			"wildcard makes every coverage assertion vacuous -- each db-gated package reports "+
+			"as covered regardless of what the lane runs (memql#2886).", dbTestsJob, p))
+	}
+
+	dirs := map[string]bool{}
+	for _, dbt := range all {
+		dirs[dbt.dir] = true
+	}
+	known := make([]string, 0, len(dirs))
+	for d := range dirs {
+		known = append(known, d)
+	}
+	sort.Strings(known)
+
+	covered := 0
+	for _, dbt := range all {
+		if covers(pkgs, dbt.dir) {
+			covered++
+		}
+	}
+	if covered == 0 {
+		out = append(out, fmt.Sprintf("the %q job runs %v, which covers NONE of the %d db-gated "+
+			"tests in the tree. The lane would provision Postgres and execute zero DB "+
+			"assertions. Packages that carry them: %v (memql#2886).",
+			dbTestsJob, pkgs, len(all), known))
+	}
+	for _, p := range pkgs {
+		n := 0
+		for _, dbt := range all {
+			if coversOne(p, dbt.dir) {
+				n++
+			}
+		}
+		if n == 0 {
+			out = append(out, fmt.Sprintf("the %q job's package argument %q matches NO db-gated "+
+				"test -- it contributes nothing to the lane. Packages that do: %v (memql#2886).",
+				dbTestsJob, p, known))
+		}
+	}
+	for _, dir := range provisioned {
+		if !covers(pkgs, dir) {
+			out = append(out, fmt.Sprintf("package %q has a TestMain calling dbtest.EnsureSchema "+
+				"but the %q job's selector %v does not cover it. That TestMain exists so the "+
+				"package can migrate the shared schema and run in this lane (memql#2551); not "+
+				"being in the selector means its DB assertions run nowhere (memql#2886).",
+				dir, dbTestsJob, pkgs))
+		}
+	}
+	return out
+}
+
 // wholeModuleWildcard returns a `./...` argument from the selector, if any.
 // It makes every coverage assertion vacuous, so it is never right in this lane.
 func wholeModuleWildcard(pkgs []string) (string, bool) {
@@ -994,20 +1060,18 @@ func laneRunFindings(lane laneSpec) []string {
 // catches drift, and it passes on the tree today.
 func TestDBTestsLaneRunsAtLeastOneDBGatedTest(t *testing.T) {
 	root := repoRoot(t)
-	pkgs := loadDBTestsJob(t, root).pkgs()
-
-	if len(pkgs) == 0 {
-		t.Fatalf("parsed no `go test ./...` package arguments from the %q job in %s.\n\n"+
-			"Either the test step was removed, or this gate's YAML parsing broke -- both are "+
-			"failures, because neither leaves anything running the db-gated suites (memql#2886).",
-			dbTestsJob, ciWorkflow)
-	}
+	lane := loadDBTestsJob(t, root)
+	pkgs := lane.pkgs()
 
 	all := scanDBGatedTests(t, root)
 	if len(all) == 0 {
 		t.Fatalf("found no _test.go file importing %s anywhere in the tree.\n\n"+
 			"That is the scanner being broken, not the tree: the db-gated suites are what the "+
 			"%q lane exists to run (memql#2886).", dbtestImport, dbTestsJob)
+	}
+
+	for _, f := range coverageFindings(pkgs, all, provisionedPkgs(t, root)) {
+		t.Error(f)
 	}
 
 	var covered, uncovered []dbGatedTest
@@ -1017,78 +1081,6 @@ func TestDBTestsLaneRunsAtLeastOneDBGatedTest(t *testing.T) {
 		} else {
 			uncovered = append(uncovered, dbt)
 		}
-	}
-
-	dbGatedDirs := map[string]bool{}
-	for _, dbt := range all {
-		dbGatedDirs[dbt.dir] = true
-	}
-	knownDirs := make([]string, 0, len(dbGatedDirs))
-	for d := range dbGatedDirs {
-		knownDirs = append(knownDirs, d)
-	}
-	sort.Strings(knownDirs)
-
-	// `./...` makes every assertion below vacuous: it covers the whole module,
-	// so every db-gated package reports as covered no matter what the lane
-	// actually runs -- including after a `cd`. This lane names its packages
-	// explicitly, so the wildcard is always wrong here.
-	if p, found := wholeModuleWildcard(pkgs); found {
-		t.Fatalf("the %q job's selector contains %q.\n\n"+
-			"A whole-module wildcard makes every coverage assertion in this gate vacuous -- each "+
-			"db-gated package reports as covered regardless of what the lane runs. This lane "+
-			"must name its packages explicitly (memql#2886).", dbTestsJob, p)
-	}
-
-	// Per-argument, so a selector entry that has silently gone to zero is
-	// caught even while its siblings still carry tests.
-	for _, p := range pkgs {
-		n := 0
-		for _, dbt := range all {
-			if coversOne(p, dbt.dir) {
-				n++
-			}
-		}
-		if n == 0 {
-			t.Errorf("the %q job's package argument %q matches NO db-gated test.\n\n"+
-				"That argument contributes nothing to the lane: it provisions Postgres and then "+
-				"executes zero DB assertions under it, reporting `ok`. Packages that do carry "+
-				"db-gated tests: %v.\n\n"+
-				"Either drop the argument or point it at a db-gated package, remembering that a "+
-				"new one also needs a TestMain calling dbtest.EnsureSchema before it can share "+
-				"the lane's one database (memql#2551, memql#2886).",
-				dbTestsJob, p, knownDirs)
-		}
-	}
-
-	// The structural tie, and the one that catches a selector entry being
-	// DELETED -- which the per-argument check above cannot see, because a
-	// deleted argument is not there to be checked.
-	//
-	// A package earns a TestMain calling dbtest.EnsureSchema for exactly one
-	// reason: so it can migrate the shared schema and join this lane's parallel
-	// run (memql#2551). Having one and not being in the selector is therefore
-	// always drift. It holds exactly today -- the three packages with such a
-	// TestMain are the three the lane names -- and it is self-maintaining: the
-	// per-package work in memql#3030 adds a TestMain, which then REQUIRES the
-	// selector entry rather than merely inviting it.
-	for _, dir := range provisionedPkgs(t, root) {
-		if !covers(pkgs, dir) {
-			t.Errorf("package %q has a TestMain calling dbtest.EnsureSchema but the %q job's "+
-				"selector %v does not cover it.\n\n"+
-				"That TestMain exists so the package can migrate the shared schema and run in "+
-				"this lane (memql#2551). Not being in the selector means its DB assertions run "+
-				"nowhere in CI -- the exact silent gap this gate exists to catch. Add it to the "+
-				"selector, or remove the TestMain if the package is genuinely no longer "+
-				"db-gated (memql#2886).", dir, dbTestsJob, pkgs)
-		}
-	}
-
-	if len(covered) == 0 {
-		t.Fatalf("the %q job runs %v, which covers NONE of the %d db-gated tests in the tree.\n\n"+
-			"The lane would provision Postgres and then execute zero DB assertions against it, "+
-			"reporting `ok`. Packages that do carry db-gated tests: %v (memql#2886).",
-			dbTestsJob, pkgs, len(all), knownDirs)
 	}
 
 	// Not an assertion -- the four uncovered packages are a known, separately

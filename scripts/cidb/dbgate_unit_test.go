@@ -1092,3 +1092,56 @@ func TestParseDBTestsJob_CommentMentioningGoTestDoesNotArmRefusal(t *testing.T) 
 		t.Errorf("steps = %d, want 1 (the real invocation)", len(spec.steps))
 	}
 }
+
+// TestCoverageFindings covers each way the selector can fail to tie the job to
+// the packages that carry db-gated tests. Inline, these ran only against the
+// real tree, so deleting one changed nothing observable.
+func TestCoverageFindings(t *testing.T) {
+	all := []dbGatedTest{
+		{dir: "component/memql", name: "TestA"},
+		{dir: "examples/referencepack", name: "TestB"},
+	}
+	pkgs := []string{"./component/memql/...", "./examples/referencepack/..."}
+	provisioned := []string{"component/memql", "examples/referencepack"}
+
+	if got := coverageFindings(pkgs, all, provisioned); len(got) != 0 {
+		t.Fatalf("a healthy selector produced findings: %v", got)
+	}
+
+	cases := []struct {
+		name        string
+		pkgs        []string
+		provisioned []string
+	}{
+		{"empty selector", nil, provisioned},
+		{"whole-module wildcard", []string{"./..."}, provisioned},
+		{"covers nothing", []string{"./core/..."}, nil},
+		{"an argument matching no db-gated test", append(append([]string{}, pkgs...), "./core/..."), provisioned},
+		{"a provisioned package left out", []string{"./component/memql/..."}, provisioned},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := coverageFindings(tc.pkgs, all, tc.provisioned); len(got) == 0 {
+				t.Error("no finding reported; the lane's selector does not tie it to the " +
+					"packages that actually carry db-gated tests")
+			}
+		})
+	}
+}
+
+// TestSuppressors_DoNotSwallowConnectives keeps the two checks independent.
+// A regex loose enough to match `&&` and `||` made the trailing-connective
+// check redundant, and therefore impossible to test as necessary.
+func TestSuppressors_DoNotSwallowConnectives(t *testing.T) {
+	for _, line := range []string{"go test ./x/... || true", "go test ./x/... &", "go test ./x/... | tee out.log"} {
+		if !suppressors.MatchString(line) {
+			t.Errorf("suppressors missed %q -- that form swallows a non-zero exit", line)
+		}
+	}
+	for _, line := range []string{"true ||", "false &&"} {
+		if suppressors.MatchString(line) {
+			t.Errorf("suppressors matched %q -- that is a CONNECTIVE, handled by its own check; "+
+				"conflating them makes that check untestable", line)
+		}
+	}
+}
