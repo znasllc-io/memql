@@ -244,7 +244,7 @@ mutate deploymentNodeSpec createDeploymentNodeSpec {
     // pair collapses onto one id only when what remains is already a fixed
     // point. Colon- and whitespace-free is exactly that condition, and it
     // covers both of #2981's clauses in one expression.
-    deploymentId  string! @pattern("^(?:v[0-9]+:[a-z0-9]+:[A-Za-z0-9_]+:)?[^[:space:]:]+$")
+    deploymentId  string! @pattern("^(?:v[0-9]+:cluster:deployment:)?[A-Za-z0-9_.-]+$")
     // ^[^:]+$ -- the trailing part of the hashed composite key must be free of
     // the ":" separator, or two distinct pairs alias onto one id (#2980).
     nodeType      string! @pattern("^[^:]+$")
@@ -301,7 +301,7 @@ mutate deploymentNodeSpec updateDeploymentNodeSpec {
     // pair collapses onto one id only when what remains is already a fixed
     // point. Colon- and whitespace-free is exactly that condition, and it
     // covers both of #2981's clauses in one expression.
-    deploymentId  string! @pattern("^(?:v[0-9]+:[a-z0-9]+:[A-Za-z0-9_]+:)?[^[:space:]:]+$")
+    deploymentId  string! @pattern("^(?:v[0-9]+:cluster:deployment:)?[A-Za-z0-9_.-]+$")
     // ^[^:]+$ -- the trailing part of the hashed composite key must be free of
     // the ":" separator, or two distinct pairs alias onto one id (#2980).
     nodeType      string! @pattern("^[^:]+$")

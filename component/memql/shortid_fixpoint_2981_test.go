@@ -1,6 +1,7 @@
 package memql
 
 import (
+	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -37,12 +38,38 @@ import (
 //
 //	shortId(arg) must be a FIXED POINT
 //
-// because canonical `v1:ns:name:B` strips once to `B` while bare `B` strips to
-// `shortId(B)`, so the two agree exactly when `B == shortId(B)`. "Colon- and
-// whitespace-free, after at most one canonical prefix" is precisely that
-// condition, and it covers both of the issue's clauses in one expression --
-// the whitespace clause is the one a `v<digits>`-counting rule misses entirely.
-const deploymentIDPattern2981 = `^(?:v[0-9]+:[a-z0-9]+:[A-Za-z0-9_]+:)?[^[:space:]:]+$`
+// because canonical `v1:cluster:deployment:B` strips once to `B` while bare `B`
+// strips to `shortId(B)`, so the two agree when `B == shortId(B)`.
+//
+// The pattern is SUFFICIENT for that, not equivalent to it: it rejects plenty
+// of values whose shortId is a fixed point (`"v1:v1"`, `"v1:a:b:"`). It is
+// deliberately conservative in the safe direction, and calling it "precisely
+// that condition" would be the third imprecise restatement in this issue's
+// history -- see the landing-review note in the authoring rules.
+//
+// READ FROM THE DSL, never hand-copied. A Go const holding a second copy of
+// the authored pattern is a drift seam: the two could disagree and every test
+// here would stay green while the shipped mutation carried the weaker one.
+// That is the same class of defect as the runtime_evaluator fallback this PR
+// documents (memql#2981 landing review).
+func deploymentIDPattern(t *testing.T) string {
+	t.Helper()
+	src, err := os.ReadFile("../../dsl/deployment/mutations.memql")
+	if err != nil {
+		t.Fatalf("read the authored mutations file: %v", err)
+	}
+	re := regexp.MustCompile(`deploymentId\s+string!\s+@pattern\("([^"]+)"\)`)
+	all := re.FindAllStringSubmatch(string(src), -1)
+	if len(all) != 2 {
+		t.Fatalf("expected the @pattern on deploymentId in BOTH composite-id mutations, found %d. "+
+			"createDeploymentNodeSpec and updateDeploymentNodeSpec share one hashed id, so a "+
+			"constraint on only one of them forks the timeline it exists to keep single.", len(all))
+	}
+	if all[0][1] != all[1][1] {
+		t.Fatalf("the two deploymentId patterns differ:\n  %s\n  %s", all[0][1], all[1][1])
+	}
+	return all[0][1]
+}
 
 // TestBareShortIdIsNotIdempotent pins the behaviour itself, so a future change
 // that quietly makes it a fixpoint is caught rather than silently widening what
@@ -84,7 +111,7 @@ func TestBareShortIdIsNotIdempotent(t *testing.T) {
 // its alphabet `{v1, a, b, v2}` contained no EMPTY and no WHITESPACE segment --
 // the two classes its formulation missed. Both are present below.
 func TestDeploymentIDPatternClosesTheBareCanonicalFork(t *testing.T) {
-	re := regexp.MustCompile(deploymentIDPattern2981)
+	re := regexp.MustCompile(deploymentIDPattern(t))
 
 	alphabet := []string{"v1", "v10", "", "v", " ", "A_b", " x", "cluster", "deployment", "z"}
 	var values []string
@@ -173,7 +200,7 @@ func TestDeploymentIDPatternClosesTheBareCanonicalFork(t *testing.T) {
 // only in-tree producer is examples/deploypack, which forwards a bare uuid from
 // id.NewShortId; the canonical form is what memql#2925 landed to support.
 func TestDeploymentIDPatternAdmitsWhatTheTreeSends(t *testing.T) {
-	re := regexp.MustCompile(deploymentIDPattern2981)
+	re := regexp.MustCompile(deploymentIDPattern(t))
 	for _, ok := range []string{
 		"9f8e7d6c-1234-4abc-9def-000000000001", // id.NewShortId shape
 		"v1:cluster:deployment:9f8e7d6c-1234-4abc-9def-000000000001",
