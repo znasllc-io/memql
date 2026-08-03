@@ -1,9 +1,6 @@
 package dsl
 
 import (
-	"os"
-	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -28,9 +25,22 @@ import (
 //     memql#2920).
 //
 // The fix is `@serverOnly`, and it is the right gate rather than a stop-gap:
-// this mutation has exactly one legitimate caller, the identity admin server,
+// this mutation has exactly one production caller, the identity admin server,
 // which already authorizes through `admin/auth.go`. The boundary now sits where
 // the authorization already lived.
+//
+// THE GATE HAS THREE HALVES, in three packages, and each covers a failure the
+// others cannot see:
+//
+//  1. this file -- the annotation is present in the PARSED tree;
+//  2. component/memql/server_only_mutation_resolve_test.go -- the LOADER agrees
+//     and the mutation dispatch path actually refuses a client-origin call;
+//  3. component/identity/admin/server_only_origin_test.go -- the one production
+//     caller stamps an internal origin, so the gate does not break the admin UI.
+//
+// (2) and (3) are not redundant with (1). An annotation the parser reads but
+// the loader drops is not a gate (memql#2875), and a gate nobody can call is an
+// outage.
 
 // TestUpdateUserIsServerOnly is the regression guard.
 //
@@ -38,62 +48,31 @@ import (
 // because a `@serverOnly` that the parser does not read as an annotation is not
 // a gate -- memql#2875's lesson, and the reason
 // TestServerOnlyConstructsAreDocumented switched to the same source.
+//
+// Matched on the FULL key (path AND name), not the name alone. A name-only
+// match is satisfied by any construct called `updateUser` anywhere in the tree
+// -- including a different declaration KIND in a different domain -- so it can
+// report green while the mutation this issue is about carries no annotation at
+// all. That is the same "collapsing the key defeats its purpose" rule
+// server_only_parsed_test.go states for its own expected set.
+//
+// This test and `TestServerOnlyParsedSetMatchesTheTree` are complementary
+// rather than duplicates: that one is an author-editable expectation list, so
+// deleting the annotation AND its entry leaves it green. This one is a ratchet
+// with no escape hatch, and under that edit it is the only failure in the
+// package.
 func TestUpdateUserIsServerOnly(t *testing.T) {
 	parsed := serverOnlyConstructs(t)
 
-	var found bool
-	for k := range parsed {
-		if k.Name == "updateUser" {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Error("`updateUser` is not @serverOnly in the parsed tree.\n" +
-			"It takes a caller-supplied user id AND a caller-supplied payload splat, and " +
-			"v1:identity:user.role is a plain settable enum -- so without this gate a client " +
-			"can name any user and any role. Nothing else covers it: the mutation grammar " +
-			"cannot express an owner predicate, the payload splat is invisible to " +
-			"validateMutationCallerArgs, and row-authz is inert by construction. If this " +
-			"annotation is being removed, the owner-predicate mechanism (memql#2803 Phase 5) " +
-			"has to be in place first (memql#2991).")
-	}
-}
-
-// TestAdminUpdateUserStampsInternalOrigin is the other half of the fix, and the
-// one that fails silently if it regresses.
-//
-// `@serverOnly` is enforced as `fn.ServerOnly && !auth.OriginFromContext(ctx).IsInternal()`.
-// The admin server's updateUser call site was the ONLY one in the identity
-// package not stamping an internal origin -- its sibling in the same file, the
-// PAT store and the identity store all did. Adding the annotation without the
-// stamp would have broken every admin user edit, and the failure would surface
-// as a runtime error in the admin UI rather than at build or test time.
-//
-// A source scan rather than a behavioural test: exercising it needs a live
-// engine and database, and the thing worth protecting is one token at one call
-// site.
-func TestAdminUpdateUserStampsInternalOrigin(t *testing.T) {
-	path := filepath.Join("..", "component", "identity", "admin", "handlers.go")
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Skipf("cannot read %s: %v", path, err)
-	}
-	src := string(raw)
-
-	idx := strings.Index(src, "mutation updateUser(userId:")
-	if idx < 0 {
-		t.Skip("the admin server no longer builds a `mutation updateUser` call -- if it moved, " +
-			"this gate should move with it")
-	}
-	// The Execute call is within a few lines of the query construction.
-	window := src[idx:min(idx+600, len(src))]
-	if !strings.Contains(window, "auth.ContextWithInternalOrigin") {
-		t.Error("the admin server calls the @serverOnly `updateUser` mutation without stamping " +
-			"an internal origin.\nThat call will be REFUSED at runtime -- @serverOnly is " +
-			"enforced as `fn.ServerOnly && !auth.OriginFromContext(ctx).IsInternal()` -- and it " +
-			"fails in the admin UI rather than in any test. Wrap the context the way the " +
-			"sibling call in this same file, the PAT store and the identity store all do " +
-			"(memql#2991).")
+	want := serverOnlyKey{Path: "identity/mutations.memql", Name: "updateUser"}
+	if !parsed[want] {
+		t.Errorf("`updateUser` is not @serverOnly in the parsed tree (looked for %+v).\n"+
+			"It takes a caller-supplied user id AND a caller-supplied payload splat, and "+
+			"v1:identity:user.role is a plain settable enum -- so without this gate a client "+
+			"can name any user and any role. Nothing else covers it: the mutation grammar "+
+			"cannot express an owner predicate, the payload splat is invisible to "+
+			"validateMutationCallerArgs, and row-authz is inert by construction. If this "+
+			"annotation is being removed, the owner-predicate mechanism (memql#2803 Phase 5) "+
+			"has to be in place first (memql#2991).", want)
 	}
 }

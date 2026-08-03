@@ -982,9 +982,15 @@ func (s *AdminServer) updateUser(ctx context.Context, u *userView) error {
 	}
 	q := fmt.Sprintf(`mutation updateUser(userId: %q, payload: %s)`, u.ID, string(payloadJSON))
 	// Internal origin, because updateUser is @serverOnly as of memql#2991. This
-	// call site was the ONLY one not stamping it -- its sibling at :933, the PAT
-	// store and the identity store all did -- so the omission was an
-	// inconsistency before it was a blocker.
+	// call site was the ONLY one not stamping it -- its siblings in this file
+	// (:897 and :942), the PAT store and the identity store all did -- so the
+	// omission was an inconsistency before it was a blocker.
+	//
+	// TestAdminUpdateUserStampsInternalOrigin, in this package, asserts the
+	// stamp behaviourally at the Engine seam. Do not replace it with a source
+	// scan: an earlier version grepped this file for the helper name, and a
+	// reordered fmt arg, a second call site, or a mere comment naming the
+	// helper all defeated it silently (memql#2991 review).
 	if _, err := s.Engine.Execute(auth.ContextWithInternalOrigin(ctx), q); err != nil {
 		return fmt.Errorf("admin: update user: %w", err)
 	}
