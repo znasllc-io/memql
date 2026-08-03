@@ -173,7 +173,7 @@ concept deploymentNote {
 	tree := loadTree(t, root)
 	_, skipped := tree.MutationFieldCoverage()
 	if len(skipped) == 0 {
-		t.Skip("nothing skipped in this fixture -- the resolver reaches the concept by some path " +
+		t.Fatalf("nothing skipped in this fixture -- the resolver reaches the concept by some path " +
 			"this test did not anticipate, so there is no message to assert on")
 	}
 

@@ -1592,7 +1592,16 @@ func (t *Tree) QueryFilterCoverage() (total int, skipped []string) {
 			}
 			total++
 			if dupNames[fd.Name] || t.resolveFilterConcept(path, f, idx, conceptFor[fd.Name]) == nil {
-				skipped = append(skipped, fmt.Sprintf("%s: query %q (concept %q)", path, fd.Name, conceptFor[fd.Name]))
+				// Same cause, same lane-symmetric explanation (memql#2977).
+				// The query lane shares resolveFilterConcept and therefore
+				// shares the file-wide import suppression; explaining it in
+				// only one of the two leaves the other pointing at innocent
+				// constructs -- and the query harness's own advice is to ADD
+				// an import, which is the opposite of the fix when an import
+				// is what suppressed the fallback.
+				skipped = append(skipped, fmt.Sprintf("%s: query %q (concept %q)%s",
+					path, fd.Name, conceptFor[fd.Name],
+					conceptSkipCause(f, idx, conceptFor[fd.Name])))
 			}
 		}
 	}
@@ -2001,13 +2010,26 @@ func conceptSkipCause(f *languageAst.File, idx *declIndex, name string) string {
 		if u == nil || !slices.Contains(u.Names, name) {
 			continue
 		}
+		// Say what is KNOWN, and no more. The suppression is certain -- it is
+		// why we are here. Whether the import is WRONG is not: a file
+		// importing an engine concept from a namespace absent from the linted
+		// root resolves fine at boot and is legal DSL, which is the case
+		// resolveFilterConcept's own comment exists to protect. Telling that
+		// author to "fix the import or remove it" would prescribe breaking a
+		// correct binding, so the resolution state decides the wording.
+		external := idx != nil && !idx.knownNamespaceForCause(u.Path)
+		remedy := "Fix the import or remove it"
+		if external {
+			remedy = "If `" + u.Path + "` is supplied from outside this root the import is " +
+				"probably correct and only its REACH is the problem -- move it to the file " +
+				"that needs it, or declare the concept locally"
+		}
 		return fmt.Sprintf(
 			" -- the file-top `use %s` import names %q, which suppresses the same-domain"+
 				" fallback for that name across THIS WHOLE FILE (not just the construct that"+
-				" needs it), and the import does not itself resolve to a declaration. Fix the"+
-				" import or remove it; the mutation above may be untouched by whatever edit"+
+				" needs it). %s; the construct above may be untouched by whatever edit"+
 				" introduced it (memql#2977)",
-			u.Path, name)
+			u.Path, name, remedy)
 	}
 	return ""
 }
@@ -2298,4 +2320,20 @@ func (t *Tree) shapeProjectedKeys(path string, f *languageAst.File, idx *declInd
 		}
 	}
 	return out
+}
+
+// knownNamespaceForCause reports whether the leading segment of a use path
+// names a namespace THIS root supplies. Used only to word the skip cause: an
+// import of a namespace the root does not carry is the documented
+// product-bundle shape (resolved at boot, supplied externally), so the message
+// must not tell that author to delete it.
+func (idx *declIndex) knownNamespaceForCause(usePath string) bool {
+	if idx == nil || usePath == "" {
+		return false
+	}
+	seg := usePath
+	if i := strings.IndexByte(usePath, '.'); i >= 0 {
+		seg = usePath[:i]
+	}
+	return idx.namespaces[seg] || len(idx.pinnedTo[seg]) > 0
 }
