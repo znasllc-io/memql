@@ -42,7 +42,8 @@ var digestPinned = regexp.MustCompile(`@sha256:[0-9a-f]{64}$`)
 
 type ciServices struct {
 	Jobs map[string]struct {
-		Services map[string]struct {
+		Permissions map[string]string `yaml:"permissions"`
+		Services    map[string]struct {
 			Image       string            `yaml:"image"`
 			Credentials map[string]string `yaml:"credentials"`
 		} `yaml:"services"`
@@ -137,18 +138,63 @@ func TestCIServiceImagesCarryRegistryCredentials(t *testing.T) {
 // The token only carries package scope if the workflow asks for it. Without
 // `packages: read` the credentials above authenticate as a token that cannot
 // pull, and the failure lands at job setup looking like a registry problem.
+//
+// Checked as the EFFECTIVE permission of each job that owns a mirrored service,
+// not merely at workflow scope. A job-level `permissions:` block REPLACES the
+// workflow's rather than extending it -- GitHub's docs: "If you specify the
+// access for any of these permissions, all of those that are not specified are
+// set to none." So adding an ordinary least-privilege `permissions: {contents:
+// read}` to db-tests silently strips `packages` from that job's token, the
+// service pull 401s at job setup, and a workflow-scope-only assertion stays
+// green. That is not hypothetical: the `changes` job in this same file already
+// declares job-level permissions, so a tidy-up pass extending the pattern is
+// exactly the reasonable-looking diff this guard exists to catch.
 func TestCIRequestsPackagesReadPermission(t *testing.T) {
-	perms := parseCI(t).Permissions
-	switch perms["packages"] {
-	case "read":
-		// correct
-	case "write":
-		t.Error("ci.yml must not hold `packages: write`; it only consumes the " +
-			"mirror. Publishing is mirror-fixture-images.yml's job (#2793)")
-	default:
-		t.Errorf("ci.yml must declare `packages: read` at workflow scope (got %q). "+
-			"The service-container credentials use GITHUB_TOKEN, which cannot pull an "+
-			"org package without that scope, and the failure lands at job setup "+
-			"before any step runs (#2793)", perms["packages"])
+	doc := parseCI(t)
+
+	// Workflow scope is the default every job inherits when it declares none.
+	if got := doc.Permissions["packages"]; got == "write" {
+		t.Error("ci.yml must not hold `packages: write` at workflow scope; it only " +
+			"consumes the mirror. Publishing is mirror-fixture-images.yml's job (#2793)")
+	}
+
+	var checked int
+	for jobName, job := range doc.Jobs {
+		mirrored := false
+		for _, svc := range job.Services {
+			if strings.HasPrefix(svc.Image, mirrorPrefix) {
+				mirrored = true
+				break
+			}
+		}
+		if !mirrored {
+			continue
+		}
+		checked++
+
+		// Effective scope: the job's own block if it declares one, else the
+		// workflow's.
+		effective, scope := doc.Permissions, "workflow"
+		if len(job.Permissions) > 0 {
+			effective, scope = job.Permissions, "job"
+		}
+		switch effective["packages"] {
+		case "read", "write":
+			if effective["packages"] == "write" && scope == "job" {
+				t.Errorf("job %q holds `packages: write`; read is sufficient to pull "+
+					"the mirror (#2793)", jobName)
+			}
+		default:
+			t.Errorf("job %q pulls a mirrored service container, but its EFFECTIVE "+
+				"permissions (%s scope: %v) do not grant `packages`. A job-level "+
+				"`permissions:` block REPLACES the workflow's -- everything unlisted "+
+				"becomes none -- so the GITHUB_TOKEN in its service credentials cannot "+
+				"pull, and the lane 401s at job setup before any step runs, which reads "+
+				"as a registry flake (#2793).", jobName, scope, effective)
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no job owns a mirrored service container; this guard cannot pass " +
+			"vacuously (#2793)")
 	}
 }
