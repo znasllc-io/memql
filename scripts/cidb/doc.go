@@ -16,6 +16,12 @@
 //     lane provisioning a database and then executing zero tests against it --
 //     the same silent-nothing failure one level up.
 //
+// It also guards the ways the lane can report a non-failure while executing
+// nothing at all -- a step-level env override of MEMQL_REQUIRE_DB (Actions
+// gives step env precedence over job env), a `-run` selector that matches
+// nothing, a step-level `if:`, or `continue-on-error` -- because ci-required
+// treats a skipped or continue-on-error job as a pass, so each is silent.
+//
 // Both are now executable assertions rather than prose. The precedent is
 // scripts/citags, which does exactly this job for build-tagged suites, and
 // scripts/lib/capability_contract_test.go: a test-only gate beside the thing it
