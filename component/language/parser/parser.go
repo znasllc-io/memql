@@ -6127,8 +6127,10 @@ func (p *Parser) parseAsOfFunction() (ExpressionNode, error) {
 	p.advance()
 
 	var (
-		timestamp *time.Time
-		useLatest bool
+		timestamp      *time.Time
+		useLatest      bool
+		argPath        string
+		fallbackLatest bool
 	)
 	switch {
 	case p.check(TokenString):
@@ -6143,13 +6145,39 @@ func (p *Parser) parseAsOfFunction() (ExpressionNode, error) {
 		timestamp = &parsed
 		p.advance()
 	case p.check(TokenIdentifier):
-		if !strings.EqualFold(strings.TrimSpace(p.current.Literal), "latest") {
-			return nil, newParseErrorf(&p.current, "asOf second argument must be an RFC3339 string or latest")
+		lit := strings.TrimSpace(p.current.Literal)
+		switch {
+		case strings.EqualFold(lit, "latest"):
+			useLatest = true
+			p.advance()
+		case lit == "args" || strings.HasPrefix(lit, "args."):
+			// The caller-chosen instant (memql#2992). `args.<path>`, optionally
+			// with `?? latest` so an omitted arg behaves exactly as `asOf
+			// latest` -- which is what lets the existing `asOf latest` queries
+			// adopt this form without changing behaviour for any caller.
+			//
+			// The lexer emits a dotted reference as ONE identifier token
+			// (`args.window.start`), so the path is a string split rather than
+			// a token walk.
+			argPath = strings.TrimPrefix(lit, "args")
+			argPath = strings.TrimPrefix(argPath, ".")
+			if argPath == "" {
+				return nil, newParseErrorf(&p.current, "asOf: expected `args.<name>`, got a bare `args`")
+			}
+			p.advance()
+			if p.check(TokenQuestionQuestion) {
+				p.advance()
+				if !p.check(TokenIdentifier) || !strings.EqualFold(strings.TrimSpace(p.current.Literal), "latest") {
+					return nil, newParseErrorf(&p.current, "asOf: the only supported `??` fallback is `latest`, got %q", p.current.Literal)
+				}
+				fallbackLatest = true
+				p.advance()
+			}
+		default:
+			return nil, newParseErrorf(&p.current, "asOf second argument must be an RFC3339 string, `latest`, or `args.<name>` (optionally `?? latest`)")
 		}
-		useLatest = true
-		p.advance()
 	default:
-		return nil, newParseErrorf(&p.current, "asOf second argument must be an RFC3339 string or latest")
+		return nil, newParseErrorf(&p.current, "asOf second argument must be an RFC3339 string, `latest`, or `args.<name>` (optionally `?? latest`)")
 	}
 
 	if err := p.expect(TokenParenClose); err != nil {
@@ -6157,9 +6185,11 @@ func (p *Parser) parseAsOfFunction() (ExpressionNode, error) {
 	}
 
 	return &TimestampExpr{
-		Target:    target,
-		Timestamp: timestamp,
-		UseLatest: useLatest,
+		Target:         target,
+		Timestamp:      timestamp,
+		UseLatest:      useLatest,
+		ArgPath:        argPath,
+		FallbackLatest: fallbackLatest,
 	}, nil
 }
 

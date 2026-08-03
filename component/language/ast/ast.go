@@ -207,10 +207,25 @@ func (*SelectExpr) node()           {}
 func (*SelectExpr) expressionNode() {}
 
 // TimestampExpr pins execution to a given point in time.
+//
+// Exactly one of the three is set. Timestamp and UseLatest are the literal
+// forms, resolved at parse time. ArgPath is the caller-chosen form
+// (`asOf args.at`, memql#2992): the instant is not known until the caller
+// supplies it, so the node carries the arg NAME and is resolved during
+// argument expansion, before the plan is built. A resolved node never carries
+// an ArgPath, so nothing downstream of expansion has to know this form exists.
 type TimestampExpr struct {
 	Target    ExpressionNode
 	Timestamp *time.Time
 	UseLatest bool
+	// ArgPath is the caller-arg name for `asOf args.<path>`, without the
+	// `args.` prefix. Empty for the literal forms.
+	ArgPath string
+	// FallbackLatest is set by `asOf args.<path> ?? latest`: when the caller
+	// omits the arg, behave exactly as `asOf latest`. This is what lets an
+	// existing `asOf latest` query adopt the caller-chosen form with no
+	// behaviour change for callers that pass nothing.
+	FallbackLatest bool
 }
 
 func (*TimestampExpr) node()           {}

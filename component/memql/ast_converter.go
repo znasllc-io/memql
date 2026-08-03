@@ -557,9 +557,11 @@ func (c *ASTConverter) convertTimestampExpr(expr *languageParser.TimestampExpr) 
 	}
 
 	return &TimestampExpression{
-		Target:    target,
-		Timestamp: expr.Timestamp,
-		UseLatest: expr.UseLatest,
+		Target:         target,
+		Timestamp:      expr.Timestamp,
+		UseLatest:      expr.UseLatest,
+		ArgPath:        expr.ArgPath,
+		FallbackLatest: expr.FallbackLatest,
 	}, nil
 }
 

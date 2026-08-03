@@ -964,11 +964,17 @@ func (v *functionValidator) expandExpressionWithArgs(expr ExpressionNode, args m
 		if err != nil {
 			return nil, err
 		}
-		return &TimestampExpression{
-			Target:    target,
-			Timestamp: node.Timestamp,
-			UseLatest: node.UseLatest,
-		}, nil
+		// Resolve a caller-chosen instant HERE (memql#2992), which is the
+		// first point where args are known. Everything downstream --
+		// applyDirectiveWrappers, the SQL builder, the shadow analyzer -- then
+		// sees only the two literal forms it already handled, so this feature
+		// adds no case anywhere else.
+		resolved, err := resolveAsOfArg(node, args)
+		if err != nil {
+			return nil, err
+		}
+		resolved.Target = target
+		return resolved, nil
 
 	case *DepthExpression:
 		target, err := v.expandExpressionWithArgs(node.Target, args)
