@@ -62,6 +62,11 @@ import (
 type codeqlWorkflow struct {
 	On   map[string]any `yaml:"on"`
 	Jobs map[string]struct {
+		// A job-level `if` gates every step in the job, so a workflow can be
+		// split into a merge_group no-op job and a real analyze job with no
+		// step-level condition anywhere. Reading only steps made that shape
+		// invisible (memql#2973 landing review).
+		If    string `yaml:"if"`
 		Steps []struct {
 			Name string `yaml:"name"`
 			Run  string `yaml:"run"`
@@ -99,18 +104,32 @@ func codeqlYAML(t *testing.T) codeqlWorkflow {
 func hasMergeGroupNoOp(wf codeqlWorkflow) bool {
 	var gatedOnMergeGroup, analysisSkipped bool
 	for _, job := range wf.Jobs {
+		jobCond := normalizeWorkflowCond(job.If)
+		if strings.Contains(jobCond, "github.event_name=='merge_group'") {
+			gatedOnMergeGroup = true
+		}
+		jobExcludesMergeGroup := strings.Contains(jobCond, "github.event_name!='merge_group'")
 		for _, s := range job.Steps {
-			cond := strings.ReplaceAll(s.If, " ", "")
+			cond := normalizeWorkflowCond(s.If)
 			switch {
 			case strings.Contains(cond, "github.event_name=='merge_group'"):
 				gatedOnMergeGroup = true
-			case strings.Contains(cond, "github.event_name!='merge_group'") &&
+			case (strings.Contains(cond, "github.event_name!='merge_group'") || jobExcludesMergeGroup) &&
 				strings.Contains(s.Uses, "codeql-action/analyze"):
 				analysisSkipped = true
 			}
 		}
 	}
 	return gatedOnMergeGroup && analysisSkipped
+}
+
+// normalizeWorkflowCond strips whitespace and any `${{ }}` wrapper so the
+// condition can be matched as text.
+func normalizeWorkflowCond(cond string) string {
+	c := strings.ReplaceAll(cond, " ", "")
+	c = strings.TrimPrefix(c, "${{")
+	c = strings.TrimSuffix(c, "}}")
+	return c
 }
 
 // TestCodeQLMergeGroupNoOpKeepsItsCompensatingTriggers is the guard.
@@ -122,9 +141,26 @@ func TestCodeQLMergeGroupNoOpKeepsItsCompensatingTriggers(t *testing.T) {
 			"compensate for and nothing for this guard to require (#2973)")
 	}
 	if !hasMergeGroupNoOp(wf) {
-		t.Skip("codeql.yml subscribes to merge_group but no longer short-circuits on it -- the " +
-			"candidate is presumably analysed for real now (#2973 option 2), so the " +
-			"compensating triggers are no longer load-bearing")
+		// FAIL, not skip. The workflow still subscribes to merge_group, so
+		// either the candidate is genuinely analysed now -- in which case
+		// delete this guard and say so -- or the no-op moved into a shape this
+		// detector does not read, and skipping would disarm the guard silently
+		// while the thing it protects against is intact.
+		//
+		// That is not hypothetical: the detector originally read only
+		// STEP-level `if`, so splitting the workflow into a merge_group no-op
+		// job and a real analyze job -- a behaviour-preserving refactor that
+		// keeps the required context green -- made this branch fire and the
+		// whole guard reported ok with both compensating triggers deleted
+		// (memql#2973 landing review). Failing on unrecognised, and skipping
+		// only on provably absent, is what makes the guard hard to disarm by
+		// accident.
+		t.Fatalf("codeql.yml still subscribes to merge_group, but this guard cannot find the "+
+			"no-op shape it compensates for. Either the merge_group candidate is now analysed "+
+			"for real -- in which case remove this file and the workflow comment that cites it "+
+			"-- or the no-op was restructured and hasMergeGroupNoOp needs teaching about the new "+
+			"shape. Do not leave it in this state: the compensating triggers (%s) are "+
+			"unguarded while it holds.", "push: main, schedule, pull_request")
 	}
 
 	// The no-op is present. Both compensating triggers must be too.
