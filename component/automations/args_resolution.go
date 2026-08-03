@@ -350,12 +350,34 @@ func scrubSourceForPayloadScan(s string) string {
 	for i < len(s) {
 		switch {
 		case s[i] == '"':
+			// Escape state is TRACKED, not inferred from the preceding byte
+			// (memql#2949). A one-byte lookback cannot tell an escaped quote
+			// from a quote that follows a COMPLETED `\\` escape, so a literal
+			// ending in a backslash pair read its own closing quote as escaped
+			// and consumed on to the next quote -- blanking source that was
+			// never inside a literal and failing the G5 scan OPEN.
+			//
+			// The arm also stops at a newline, matching the `//` arm and the
+			// grammar: a literal may not span lines, so one unbalanced quote
+			// must cost its own line rather than the rest of the file. The
+			// newline is left for the default arm, so line accounting is
+			// unchanged.
 			j := i + 1
-			for j < len(s) && (s[j] != '"' || s[j-1] == '\\') {
+			escaped := false
+			for j < len(s) && s[j] != '\n' {
+				c := s[j]
 				j++
-			}
-			if j < len(s) {
-				j++
+				if escaped {
+					escaped = false
+					continue
+				}
+				if c == '\\' {
+					escaped = true
+					continue
+				}
+				if c == '"' {
+					break // closing quote, consumed above
+				}
 			}
 			out.WriteString(strings.Repeat(" ", j-i))
 			i = j
