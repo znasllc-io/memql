@@ -141,6 +141,9 @@ type laneSpec struct {
 	// nonPlainRun holds the offending line of each run block this gate
 	// refused to scan. See runBlockIsPlain -- refusing is how it fails closed.
 	nonPlainRun []string
+	// unparsedRun holds run blocks that mention `go test` but not as the first
+	// word of a line, so the scanner could not read their packages.
+	unparsedRun []string
 }
 
 // pkgs returns every package argument across the lane's `go test` steps.
@@ -369,6 +372,15 @@ func parseDBTestsJob(data []byte) (laneSpec, error) {
 		}
 		args := goTestArgs(step.Run)
 		if len(args) == 0 {
+			// The block mentions `go test` -- checked above -- but not as the
+			// first word of its own line, so the scanner cannot read its
+			// packages. Record it: reporting this as "no go test step" would
+			// send a maintainer looking for a step that is plainly right
+			// there. `set -e; go test …` and `GOFLAGS=… go test …` both land
+			// here, and both are legitimate; the gate asks for the invocation
+			// on its own line rather than trying to parse around them, because
+			// accepting `X && go test` would also accept `false && go test`.
+			spec.unparsedRun = append(spec.unparsedRun, strings.TrimSpace(step.Run))
 			continue
 		}
 		gs := goTestStep{ifCond: step.If, env: step.Env, continueOnError: step.ContinueOnError}
@@ -665,8 +677,23 @@ func TestDBTestsLaneMakesAnUnreachableDatabaseFail(t *testing.T) {
 	}
 
 	if len(lane.steps) == 0 {
-		t.Fatalf("the %q job in %s has no `go test` step, so the env key it sets guards nothing "+
-			"(memql#2886).", dbTestsJob, ciWorkflow)
+		switch {
+		case len(lane.nonPlainRun) > 0:
+			t.Fatalf("the %q job's only `go test` block is not a plain sequence of commands "+
+				"(first offending line: %q), so this gate refused to scan it. See "+
+				"TestDBTestsLaneCannotPassWithoutRunning for why (memql#2886).",
+				dbTestsJob, lane.nonPlainRun[0])
+		case len(lane.unparsedRun) > 0:
+			t.Fatalf("the %q job in %s runs `go test`, but not as the FIRST WORD of its own "+
+				"line, so this gate cannot read which packages it runs:\n\n  %s\n\n"+
+				"Put the invocation on its own line (`set -o pipefail` or an env assignment on "+
+				"a preceding line is fine). The gate deliberately does not parse around `;` or "+
+				"`&&`, because accepting `make deps && go test` would also accept "+
+				"`false && go test` (memql#2886).", dbTestsJob, ciWorkflow, lane.unparsedRun[0])
+		default:
+			t.Fatalf("the %q job in %s has no `go test` step, so the env key it sets guards "+
+				"nothing (memql#2886).", dbTestsJob, ciWorkflow)
+		}
 	}
 
 	// The EFFECTIVE value per step, not just the job-level one: Actions gives

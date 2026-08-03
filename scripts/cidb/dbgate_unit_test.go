@@ -756,3 +756,26 @@ func TestThing(t *testing.T) { _ = dbtest.DSN() }
 			"EnsureSchema TestMain are set up to share the lane's database", got)
 	}
 }
+
+// TestParseDBTestsJob_UnparsedRunIsDistinguished pins the diagnosis quality.
+// `set -e; go test …` and `GOFLAGS=… go test …` are legitimate edits the
+// scanner deliberately does not parse around; reporting them as "no go test
+// step" sends a maintainer looking for a step that is plainly right there.
+func TestParseDBTestsJob_UnparsedRunIsDistinguished(t *testing.T) {
+	for _, run := range []string{
+		"set -e; go test -count=1 ./component/memql/...",
+		"GOFLAGS=-mod=mod go test -count=1 ./component/memql/...",
+	} {
+		spec := mustParse(t, "jobs:\n  db-tests:\n    steps:\n      - run: "+run+"\n")
+		if len(spec.steps) != 0 {
+			t.Errorf("run %q yielded a parsed step; the scanner cannot read its packages", run)
+		}
+		if len(spec.unparsedRun) != 1 {
+			t.Errorf("run %q: unparsedRun = %v, want it recorded so the gate can say WHY",
+				run, spec.unparsedRun)
+		}
+		if len(spec.nonPlainRun) != 0 {
+			t.Errorf("run %q was recorded as non-plain; it has no shell construct", run)
+		}
+	}
+}
