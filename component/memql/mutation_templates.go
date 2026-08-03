@@ -759,7 +759,7 @@ func (e *mutationTemplateEvaluator) evalParserExpression(ctx context.Context, ex
 				// corner; not observable here, since evalStringMaybe maps
 				// nil and missingValue{} alike to "" for these slots.)
 				// The normalisation matters because
-				// isTruthy(missingValue{}) is TRUE, so leaking the
+				// IsTruthy(missingValue{}) is TRUE, so leaking the
 				// sentinel would make an all-missing coalesce read as
 				// truthy inside And/Or/Not.
 				if isMissing(ev) {
@@ -781,7 +781,7 @@ func (e *mutationTemplateEvaluator) evalParserExpression(ctx context.Context, ex
 		if err != nil {
 			return nil, err
 		}
-		if cond != nil && !isMissing(cond) && isTruthy(cond) {
+		if cond != nil && !isMissing(cond) && IsTruthy(cond) {
 			return e.evalParserExpression(ctx, t.Then)
 		}
 		return e.evalParserExpression(ctx, t.Else)
@@ -791,7 +791,7 @@ func (e *mutationTemplateEvaluator) evalParserExpression(ctx context.Context, ex
 			if err != nil {
 				return nil, err
 			}
-			if !isTruthy(ev) {
+			if !IsTruthy(ev) {
 				return false, nil
 			}
 		}
@@ -802,7 +802,7 @@ func (e *mutationTemplateEvaluator) evalParserExpression(ctx context.Context, ex
 			if err != nil {
 				return nil, err
 			}
-			if isTruthy(ev) {
+			if IsTruthy(ev) {
 				return true, nil
 			}
 		}
@@ -812,7 +812,7 @@ func (e *mutationTemplateEvaluator) evalParserExpression(ctx context.Context, ex
 		if err != nil {
 			return nil, err
 		}
-		return !isTruthy(ev), nil
+		return !IsTruthy(ev), nil
 	case *languageParser.BinaryComparisonExpr:
 		// The one comparison shape the builtin-arg grammar emits since
 		// memql#2654 (relationals before it, ==/!= joined by the

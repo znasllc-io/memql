@@ -526,6 +526,15 @@ Verified author-surface helpers (see `component/language/parser`):
 | `coalesce(a, b, ...)` | First non-null | `coalesce(args.name, "default")` |
 | `cond(pred, then, else)` | Conditional value | `cond(args.flag, "yes", "no")` |
 
+**What counts as true.** One rule, everywhere a value is used as a condition — `cond`, `&&`, `||`, `!`, `.any()`, `.all()` (memql#2963):
+
+| falsy | truthy |
+|---|---|
+| `null` / absent, `false`, `0`, `""` | `true`, any non-zero number, any other non-empty string |
+| the strings `"false"` and `"0"` | a non-empty list or object |
+
+The two string cases are called out because they are the ones that bite: a JSON, HTTP or MCP caller sends `"false"` for a boolean it stringified, and a gate written `cond(args.allowed, true, false)` has to read that as false. It does.
+
 ### Strings and Ids
 
 | Function | Description | Example |

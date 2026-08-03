@@ -786,7 +786,7 @@ func evaluateCondPredicate(raw string, evaluator *Evaluator) (bool, error) {
 		if val, handled, err := tryEvaluateCollectionChainLocally(raw, evaluator); err != nil {
 			return false, err
 		} else if handled {
-			return isTruthy(val), nil
+			return memql.IsTruthy(val), nil
 		}
 	}
 	return evaluator.EvaluateCondition(raw)
@@ -834,7 +834,7 @@ func tryEvaluateChainComparison(raw string, evaluator *Evaluator) (bool, bool, e
 	if err != nil {
 		return false, false, err
 	}
-	return isTruthy(res), true, nil
+	return memql.IsTruthy(res), true, nil
 }
 
 // resolveCondComparisonOperand resolves one operand of a cond-predicate

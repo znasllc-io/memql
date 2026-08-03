@@ -1576,7 +1576,7 @@ func (e *Evaluator) evaluateAtomicCondition(condition string) (bool, error) {
 			return false, fmt.Errorf("condition %q is a bare path that does not resolve: it renders as its own text, and a non-empty string is truthy, so this filter would match EVERYTHING. Write the comparison explicitly (%s == true) or use exists(%s)",
 				condition, condition, condition)
 		}
-		return isTruthy(resolved), nil
+		return memql.IsTruthy(resolved), nil
 	}
 
 	// Try to evaluate as a truthy value
@@ -1584,7 +1584,7 @@ func (e *Evaluator) evaluateAtomicCondition(condition string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return isTruthy(val), nil
+	return memql.IsTruthy(val), nil
 }
 
 // bareDottedPathRe matches a dotted reference and nothing else -- no
@@ -2613,29 +2613,6 @@ func compareValues(a, b any) bool {
 }
 
 // isTruthy determines if a value is truthy.
-func isTruthy(v any) bool {
-	if v == nil {
-		return false
-	}
-	switch val := v.(type) {
-	case bool:
-		return val
-	case string:
-		return val != "" && val != "false" && val != "0"
-	case int:
-		return val != 0
-	case int64:
-		return val != 0
-	case float64:
-		return val != 0
-	case []any:
-		return len(val) > 0
-	case map[string]any:
-		return len(val) > 0
-	default:
-		return true
-	}
-}
 
 // toNumber converts a value to a float64.
 func toNumber(v any) float64 {
