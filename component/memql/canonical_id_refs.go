@@ -49,12 +49,36 @@ func (r *ConceptResolver) ResolveCanonicalIdConceptRefs(content string) (string,
 }
 
 // ResolveCanonicalIdConceptRefsInDomain is ResolveCanonicalIdConceptRefs with
-// the #2617 ambient-domain rule: when no file-top import names the concept,
-// the file's own domain directory is tried as the namespace hint, and the
-// resolution is accepted only when the resolved id actually lives in that
-// domain -- cross-domain concepts still require the explicit import, so the
-// import discipline stays enforceable at lint. An explicit import always
-// wins (the import map is consulted first).
+// the #2617 ambient rule: when no file-top import names the concept, the bare
+// name is resolved against the registry and accepted when it is UNAMBIGUOUS.
+// An explicit import always wins (the import map is consulted first).
+//
+// Read that carefully, because it is wider than the rule this comment used to
+// describe (memql#2976). It said resolution was "accepted only when the
+// resolved id actually lives in that domain -- cross-domain concepts still
+// require the explicit import". That is no longer true: a concept declared
+// ONLY in a foreign domain now binds ambiently, with no import, provided its
+// trailing segment is unique tree-wide. `canonicalId(x, user)` in an unrelated
+// pack rewrites to v1:identity:user rather than failing.
+//
+// That matches how boot binds a signature concept -- resolveBareConceptName-
+// WithNamespace returns a unique trailing-segment match before it consults the
+// hint at all -- so the two agree, which is what #2976 was about. But it is
+// NOT what #2976 asked for. It asked for the check to test the concept's
+// DECLARED NAMESPACE rather than its containing directory, which would have
+// fixed the remapped pack without widening cross-domain binding at all. The
+// declared namespace is not reachable here (it needs the tree FS for
+// namespace.pin, which the loader does not thread this far), so uniqueness
+// shipped instead. Consequences, tracked in memql#3026:
+//
+//   - a namespace-remapped pack whose concept name is AMBIGUOUS is still in
+//     the original deadlock -- ambient refuses, and the import the error asks
+//     for is the one TestNoSameDomainUse bans;
+//   - a product bundle mounted at MEMQL_DSL_PATH that declares a name this
+//     tree also declares can retroactively make an ambient reference
+//     ambiguous, so the failure arrives from an unrelated repository.
+//
+// An ambiguous name still errors, and a name declared nowhere still errors.
 func (r *ConceptResolver) ResolveCanonicalIdConceptRefsInDomain(content, domain string) (string, error) {
 	imports := importedConceptHints(content)
 

@@ -52,6 +52,21 @@ import (
 // Built by construction rather than by pointing at dsl/deployment, so the
 // coverage does not depend on that one pack continuing to exist (memql#2976
 // definition-of-done item 3).
+// NOTE ON WHAT THIS FIXTURE CAN AND CANNOT PROVE (landing review, memql#2976).
+//
+// The registry below holds a SINGLE concept, so every assertion that resolves
+// through it resolves by UNIQUENESS. That is the rule that shipped, so the
+// tests are honest about the code -- but it means none of them distinguishes
+// "the ambient rule became namespace-aware" from "the ambient rule became
+// uniqueness-based", and a flat (non-remapped) fixture would pass them
+// identically.
+//
+// The distinction matters because #2976 asked for namespace-awareness, and
+// the two rules diverge exactly where the issue's consistency requirement
+// bites: a remapped pack whose name is AMBIGUOUS is still deadlocked under
+// uniqueness and would not be under the declared-namespace rule. Pinning that
+// needs a two-concept fixture and the namespace plumbed through the loader;
+// tracked in memql#3026.
 func remappedPackResolver(extra ...string) *ConceptResolver {
 	all := map[string]*memoryNodes.Concept{
 		"v1:zcluster:widget": {Name: "v1:zcluster:widget"},
