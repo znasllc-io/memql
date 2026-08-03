@@ -273,9 +273,22 @@ encode the same rule. A would-narrow here would have meant they
 disagree, which is a defect in one of them rather than a finding about
 authorization.
 
-What it does NOT give you is a blast radius. Enforcement's blast radius
-lives in the %d constructs over the %d concepts that declare nothing --
-and shadow mode cannot compute a predicate where no tier is declared.
+What the DECLARED set does not give you is a blast radius: over those
+concepts this analyzer agrees with Phase 1 by construction, so the
+answer there is tautological. Enforcement's blast radius lives in the
+%d constructs over the %d concepts that declare nothing, where no
+predicate can be computed from a tier nobody stated. The HYPOTHETICAL
+TIERS section above estimates over PART of that set -- only the concepts
+a tier can be guessed for, which is far fewer -- so read it as a sample,
+not as the whole radius.
+
+Read the two together. This paragraph used to open "what it does NOT
+give you is a blast radius", flatly, while a section printed ~77 lines
+earlier in this same report was headed "the blast radius over the
+undeclared set" (memql#2984). The report does produce one; it is an
+estimate over hypothetical tiers rather than a measurement over
+declared ones, and that distinction is the whole of it.
+
 So the Phase 3 question is not "how many constructs would narrow" but
 "how do the undeclared concepts get a tier", and neither this issue nor
 #2920 answers that. Options worth putting to the owner: declare the

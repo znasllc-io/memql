@@ -141,10 +141,14 @@ mutate deployment updateDeploymentStatus {
 // It is NOT idempotent in general, and the exact condition is subtle enough
 // that two attempts to state it here were wrong: it turns on trailing empty
 // segments and on whitespace inside the value, not just on segment counts.
-// memql#2981 carries the measured predicate and its counterexamples. What
-// matters here: an SDK caller can supply a value for which a bare and a
-// canonical form still derive DIFFERENT ids, which is section 20's own
-// prohibited outcome.
+//
+// CLOSED at the boundary by memql#2981, not by changing shortId(). The
+// @pattern on deploymentId below admits a bare short id, or the canonical form
+// of one, and nothing else -- so whatever survives normalisation is already a
+// fixed point and the bare/canonical pair cannot diverge. The primitive stays
+// exactly as it was, which matters because it is also the wire-egress
+// bare-ifier (memql#2441) and looping it to a fixpoint would change every id
+// handed to a client.
 //
 // It took #2925 to make that spelling usable: shortId() parsed in an id: slot
 // and then died at render, because the mutation-template id evaluator had no
@@ -237,7 +241,12 @@ mutate deployment updateDeploymentStatus {
 /// Engine-as-spine: empty version resolves against the deployment engine version. Epic 2 / #2094.
 mutate deploymentNodeSpec createDeploymentNodeSpec {
   args {
-    deploymentId  string!
+    // Bare short id, or the canonical form of one -- and nothing else
+    // (#2981). shortId() strips ONE canonical prefix, so the bare/canonical
+    // pair collapses onto one id only when what remains is already a fixed
+    // point. Colon- and whitespace-free is exactly that condition, and it
+    // covers both of #2981's clauses in one expression.
+    deploymentId  string! @pattern("^(?:v[0-9]+:cluster:deployment:)?[A-Za-z0-9_.-]+$")
     // ^[^:]+$ -- the trailing part of the hashed composite key must be free of
     // the ":" separator, or two distinct pairs alias onto one id (#2980).
     nodeType      string! @pattern("^[^:]+$")
@@ -289,7 +298,12 @@ mutate deploymentNodeSpec createDeploymentNodeSpec {
 /// change. Append under the same hashed composite concept id. Epic 2 / #2094.
 mutate deploymentNodeSpec updateDeploymentNodeSpec {
   args {
-    deploymentId  string!
+    // Bare short id, or the canonical form of one -- and nothing else
+    // (#2981). shortId() strips ONE canonical prefix, so the bare/canonical
+    // pair collapses onto one id only when what remains is already a fixed
+    // point. Colon- and whitespace-free is exactly that condition, and it
+    // covers both of #2981's clauses in one expression.
+    deploymentId  string! @pattern("^(?:v[0-9]+:cluster:deployment:)?[A-Za-z0-9_.-]+$")
     // ^[^:]+$ -- the trailing part of the hashed composite key must be free of
     // the ":" separator, or two distinct pairs alias onto one id (#2980).
     nodeType      string! @pattern("^[^:]+$")

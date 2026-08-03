@@ -331,9 +331,17 @@ func (e *RuntimeEvaluator) EvaluateHash(str any) string {
 
 // EvaluateShortId resolves shortId(value) to the bare short id by
 // stripping any `<concept>:` prefix. The inverse of EvaluateCanonicalId.
-// Idempotent (an already-bare value passes through unchanged); empty /
-// nil input yields "". Mirrors the mutation-template builtin so
-// automations + queries normalize ids to one short form. See #1859.
+// An already-bare value passes through unchanged; empty / nil input
+// yields "". NOT idempotent in general -- it strips ONE prefix, so
+// "v1:a:b:v2:c:d:e" -> "v2:c:d:e" -> "e" (memql#2981). Mirrors the
+// mutation-template builtin so automations + queries normalize ids to
+// one short form. See #1859.
+//
+// NOTE: the no-engine fallback below re-implements the structural split
+// inline rather than calling BareShortId. The two agree today because
+// both strip exactly once; if the primitive is ever changed to loop to a
+// fixpoint, THIS is the path that silently keeps the old behaviour
+// (memql#2981).
 func (e *RuntimeEvaluator) EvaluateShortId(value any) string {
 	if value == nil {
 		return ""

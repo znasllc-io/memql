@@ -235,9 +235,12 @@ query user searchUsers {
 
 // `@public` marks this query as intentionally not caller-scoped.
 // Admin-only audit view (no Go callers; consumed by the admin
-// UI under elevated context). Proper admin gating via a
-// `requiresClusterOwner` spec is a #54 follow-up once the admin
-// surface is consolidated.
+// UI under elevated context). Proper admin gating is a #54 follow-up
+// once the admin surface is consolidated -- via one of the live
+// actorEnvelope specs (`grep -rn '^spec actorEnvelope ' dsl/`) named as
+// a top-level conjunct, NOT via a `requiresClusterOwner` spec, which is
+// declared nowhere and only survives inside the classifier's recogniser
+// as a #54 placeholder (memql#2983).
 /// Audit events where actorUserId equals the supplied userId. Pair with auditEventsByTarget for
 /// full per-user history (no OR operator in the filter grammar yet).
 @public
@@ -1149,10 +1152,18 @@ query user userByEmail {
 // userById - Get user by id
 // ==============================
 //
-// Returns a v1:identity:user record by its id. Used on the auth hot
-// path: identity-service-issued JWTs put the canonical user id in the
-// `sub` claim, so the access middleware reads sub -> userById in one
-// hop.
+// Returns a v1:identity:user record by its id.
+//
+// NOT the auth hot path. This comment used to say the access middleware
+// reads `sub -> userById` to build the actor; it does not, and has not
+// since #2800 (memql#2984). The bootstrap read is `userByIdSystem`,
+// which is @serverOnly for exactly that circularity --
+// component/auth/identity_resolver.go:79.
+//
+// This query is the caller-facing one and is gated by
+// requiresOwnerOrAdmin: its filter keys on a caller-supplied id, so
+// reading someone else's full row requires being them or holding
+// admin/owner.
 //
 // Arguments:
 //   userId (string, required) - the v1:identity:user id

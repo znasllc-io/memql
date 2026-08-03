@@ -24,6 +24,9 @@ concurrency:
 
 permissions:
   contents: read
+  # Pull the GHCR-mirrored Postgres fixture the DB-gated lanes run as a
+  # service container (memql#2793).
+  packages: read
 
 # Affected-lane routing (Tier 1, #856) + warm-cache consolidation (Tier 2, #857)
 # -----------------------------------------------------------------------------
@@ -340,8 +343,19 @@ jobs:
     services:
       # Same image the dev cluster uses; bundles TimescaleDB +
       # pgvector so the memory-nodes migrations (hypertable + vector) apply.
+      #
+      # Pulled from our GHCR MIRROR, pinned by digest (memql#2793). Docker Hub
+      # pulls here are unauthenticated and happen at job setup, before any step
+      # runs -- a Hub blip took this lane down before a test executed, and
+      # because it feeds ci-required the merge queue EVICTED the candidate
+      # (twice in ~9h: #2777, #2826). Refresh with the mirror-fixture-images
+      # workflow, then update this digest in a PR; a floating tag here would
+      # reintroduce the silent-drift half of #2793.
       postgres:
-        image: timescale/timescaledb:latest-pg16
+        image: ghcr.io/znasllc-io/ci-timescaledb@sha256:d8336a5c9cc49bdbf1e935234e8c87ab64b6d6d195fd2ecedff7b00185557631
+        credentials:
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
         env:
           POSTGRES_USER: memql
           POSTGRES_PASSWORD: memql_dev
@@ -400,9 +414,13 @@ jobs:
     services:
       # Same image the dev cluster + conformance use; bundles
       # TimescaleDB + pgvector so the memory-nodes migrations (hypertable +
-      # vector) apply.
+      # vector) apply. GHCR mirror, pinned by digest -- see the note on the
+      # mcp-conformance service above (memql#2793).
       postgres:
-        image: timescale/timescaledb:latest-pg16
+        image: ghcr.io/znasllc-io/ci-timescaledb@sha256:d8336a5c9cc49bdbf1e935234e8c87ab64b6d6d195fd2ecedff7b00185557631
+        credentials:
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
         env:
           POSTGRES_USER: memql
           POSTGRES_PASSWORD: memql_dev
@@ -439,11 +457,12 @@ jobs:
       - name: db-gated suites (seeded test DB)
         run: go test -count=1 -timeout=300s ./component/memql/... ./component/automations/steps/... ./examples/referencepack/...
 
-  # VS Code extension lane: guard the checked-in grammar against dslspec drift,
-  # then build the offline LSP binary (darwin-arm64, the standardized dev
-  # target), compile the TypeScript client, and package the VSIX. The Go server
-  # tests run in go-checks (go test ./...); this lane proves the extension
-  # compiles and packages with its bundled binary. Gates on the vscode bucket
+  # VS Code extension lane: run every cmd/memql-lsp drift guard over the
+  # checked-in editors/vscode assets, then build the offline LSP binary
+  # (darwin-arm64, the standardized dev target), compile the TypeScript client,
+  # and package the VSIX. go-checks also runs these tests via `go test ./...`,
+  # but it gates on the `go` bucket, so an editors/vscode-only PR skips it and
+  # this lane is the only coverage those guards get. Gates on the vscode bucket
   # (editors/vscode, cmd/memql-lsp, scripts/vscode); push + merge_group run it.
   vscode-extension:
     name: vscode-extension
@@ -459,8 +478,14 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v4
         with:
           node-version: '20'
-      - name: grammar drift check (checked-in grammar matches dslspec)
-        run: go test -count=1 ./cmd/memql-lsp/internal/grammar/...
+      # Every drift guard over a checked-in editors/vscode asset lives under
+      # cmd/memql-lsp (grammar, language configuration, extension manifest).
+      # Run the whole tree, not just the grammar package: an editors/vscode-only
+      # PR -- the shape every dependabot bump takes -- path-skips `go-checks`,
+      # so this lane is the ONLY place those guards get to fire (memql#2792).
+      # scripts/dev/vscode_lane_scope_test.go fails if this narrows again.
+      - name: editors/vscode drift checks (grammar, language config, manifest)
+        run: go test -count=1 ./cmd/memql-lsp/...
       - name: package extension (build binary + compile + vsce package)
         run: bash scripts/vscode/package.sh --out="$RUNNER_TEMP/memql.vsix"
 
