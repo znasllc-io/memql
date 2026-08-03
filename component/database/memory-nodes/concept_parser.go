@@ -291,10 +291,25 @@ type parsedProperty struct {
 	description   string
 	defaultValue  any
 	required      bool
-	enumValues    []string
-	arrayItemType string
-	nested        []parsedProperty
-	format        string
+	enumValues []string
+	// element is the lowered element type of a WRAPPED property -- the item
+	// type of []T and the value type of map[string]T. Recursive, so
+	// [][]string and map[string]map[string]int lower all the way down.
+	//
+	// It replaces the old `arrayItemType string`, which kept only the
+	// element's outermost Kind (memql#2951). That flattening threw away
+	// every composite element's inner type, and because the builder lowered
+	// the surviving string through a switch ending in `default: "string"`,
+	// an element type the vocabulary does not know became `string` in
+	// silence -- `[]boolean` built a field validating as `[]string`.
+	//
+	// The element is a parsedProperty rather than a bare type so it can
+	// carry the parts of the declaration that describe the VALUE (@pattern,
+	// @minLength, a nested block, @variant branches). Those are moved down
+	// onto it in propertyDeclToParsed; field MARKERS stay on the wrapper.
+	element *parsedProperty
+	nested  []parsedProperty
+	format  string
 	// Phase 3 constraints
 	unique    bool
 	pattern   string
@@ -381,16 +396,6 @@ func propertyDeclToParsed(prop *parser.PropertyDecl) (parsedProperty, error) {
 		if prop.Type.Kind == "enum" {
 			out.enumValues = append(out.enumValues, prop.Type.EnumValues...)
 		}
-		if prop.Type.Kind == "array" && prop.Type.ArrayItem != nil {
-			out.arrayItemType = prop.Type.ArrayItem.Kind
-		}
-		if prop.Type.Kind == "map" && prop.Type.ArrayItem != nil {
-			// Reuse arrayItemType for the value-type of a map since
-			// the JSON-Schema builder treats both array items and
-			// map values as a single "element type". The "map"
-			// typeName differentiates at build time.
-			out.arrayItemType = prop.Type.ArrayItem.Kind
-		}
 	}
 
 	for _, nested := range prop.Nested {
@@ -431,7 +436,70 @@ func propertyDeclToParsed(prop *parser.PropertyDecl) (parsedProperty, error) {
 			out.variants = append(out.variants, variant)
 		}
 	}
+
+	// A WRAPPED property lowers its element from the full element TypeRef,
+	// and the parts of the declaration that describe the VALUE move down onto
+	// that element (memql#2951).
+	//
+	// The split is what the annotation is ABOUT. @pattern, @minLength/
+	// @maxLength, @minimum/@maximum, a nested block and @variant branches all
+	// describe the value, and JSON Schema ignores every one of them on an
+	// array -- `[]string @pattern` emitted `pattern` on the array, where it
+	// constrains nothing, and `[]object @variant` dropped the discriminated
+	// union outright. On the element they mean what the author wrote: each
+	// item matches the pattern, each item is one of the variants.
+	//
+	// Field MARKERS (@required and the `!` sigil, @description, @default,
+	// @unique, @immutable, @secret, @pii, @internal, @serverSet) describe the
+	// FIELD, so the wrapper is already the right place for them and they stay
+	// put -- `capabilities []string!` keeps behaving exactly as it does today.
+	if out.typeName == "array" || out.typeName == "map" {
+		var itemRef *parser.TypeRef
+		if prop.Type != nil {
+			itemRef = prop.Type.ArrayItem
+		}
+		elem := elementFromTypeRef(itemRef)
+
+		elem.pattern, out.pattern = out.pattern, ""
+		elem.minLength, out.minLength = out.minLength, nil
+		elem.maxLength, out.maxLength = out.maxLength, nil
+		elem.minimum, out.minimum = out.minimum, nil
+		elem.maximum, out.maximum = out.maximum, nil
+		elem.nested, out.nested = out.nested, nil
+		elem.variants, out.variants = out.variants, nil
+		elem.variantDiscriminator, out.variantDiscriminator = out.variantDiscriminator, ""
+
+		out.element = elem
+	}
+
 	return out, nil
+}
+
+// elementFromTypeRef lowers an element TypeRef into the parsedProperty the
+// schema builder consumes, recursing so a composite element ([][]string,
+// map[string]map[string]int) keeps its inner type instead of collapsing to its
+// outermost kind.
+//
+// The element is marked `required` because an element is always PRESENT: there
+// is no such thing as an unset entry in an array, so the empty-string / null
+// sentinels an optional scalar `datetime` has to accept (memql#1629) do not
+// apply one level in. That is what makes `[]datetime` enforce RFC3339 on each
+// entry, which is the whole reason an author writes `datetime` rather than
+// `string`.
+//
+// A nil ref is the legacy bare `array` form, whose parser default is `string`.
+func elementFromTypeRef(ref *parser.TypeRef) *parsedProperty {
+	if ref == nil {
+		return &parsedProperty{typeName: "string", required: true}
+	}
+	elem := &parsedProperty{typeName: ref.Kind, format: ref.Format, required: true}
+	if ref.Kind == "enum" {
+		elem.enumValues = append(elem.enumValues, ref.EnumValues...)
+	}
+	if ref.Kind == "array" || ref.Kind == "map" {
+		elem.element = elementFromTypeRef(ref.ArrayItem)
+	}
+	return elem
 }
 
 // applyConceptAttribute folds an @annotation into the intermediate
@@ -860,21 +928,21 @@ func propertyToJSONSchema(prop parsedProperty) (map[string]any, error) {
 		}
 	case "array":
 		schema["type"] = "array"
-		itemType := prop.arrayItemType
-		if itemType == "" {
-			itemType = "string"
+		items, err := elementToJSONSchema(prop.element)
+		if err != nil {
+			return nil, err
 		}
-		schema["items"] = map[string]any{"type": memqlTypeToJSONType(itemType)}
+		schema["items"] = items
 	case "map":
 		// map[string]T -> {type: object, additionalProperties: {type: T}}.
 		// Lets authors express typed string-keyed maps without falling
 		// back to unconstrained `object`.
 		schema["type"] = "object"
-		valueType := prop.arrayItemType
-		if valueType == "" {
-			valueType = "string"
+		values, err := elementToJSONSchema(prop.element)
+		if err != nil {
+			return nil, err
 		}
-		schema["additionalProperties"] = map[string]any{"type": memqlTypeToJSONType(valueType)}
+		schema["additionalProperties"] = values
 	case "object":
 		schema["type"] = "object"
 		if len(prop.nested) > 0 {
@@ -935,11 +1003,40 @@ func propertyToJSONSchema(prop parsedProperty) (map[string]any, error) {
 	return schema, nil
 }
 
+// elementToJSONSchema lowers the element of a wrapped property through the SAME
+// builder a scalar of that type goes through, which is the whole of memql#2951.
+//
+// The old path had a builder of its own -- a switch ending in
+// `default: return "string"` -- so element position had a second, weaker answer
+// to "what does this type mean" that never consulted suggestPropertyType. An
+// unrecognised element type was neither rejected nor corrected, and a
+// recognised one lost whatever its scalar form constrains: `[]datetime` came
+// out byte-identical to `[]string`, dropping the RFC3339 check that is the only
+// reason to write `datetime`. Sharing the builder makes both impossible by
+// construction rather than by a parallel table someone has to remember to
+// update.
+//
+// The error is prefixed rather than replaced so the reader gets the same
+// `-- did you mean` correction property position gets, plus where it applies.
+func elementToJSONSchema(elem *parsedProperty) (map[string]any, error) {
+	if elem == nil {
+		// Defensive: propertyDeclToParsed populates element for every array
+		// and map. A programmatically-built parsedProperty might not, and the
+		// legacy bare `array` default is string.
+		elem = &parsedProperty{typeName: "string", required: true}
+	}
+	schema, err := propertyToJSONSchema(*elem)
+	if err != nil {
+		return nil, fmt.Errorf("element type: %w", err)
+	}
+	return schema, nil
+}
+
 // propertyTypeSuggestions maps the spellings authors actually reach for onto
 // the one this builder accepts. The JSON Schema names dominate the list on
-// purpose: memqlTypeToJSONType below EMITS "boolean", "integer" and "number",
-// so an author who has read the emitted schema -- or who knows any other
-// config language in this stack -- has every reason to type them back in.
+// purpose: the builder EMITS "boolean", "integer" and "number", so an author
+// who has read the emitted schema -- or who knows any other config language in
+// this stack -- has every reason to type them back in.
 //
 // They are corrected rather than accepted (memql#2909). Aliasing would give
 // the DSL two spellings for one type, which is the same "two implementations
@@ -984,21 +1081,3 @@ func suggestPropertyType(name string) string {
 		`[]<type>, map[string]<type>, enum("a", "b")`
 }
 
-func memqlTypeToJSONType(t string) string {
-	switch t {
-	case "string", "datetime":
-		return "string"
-	case "bool":
-		return "boolean"
-	case "int":
-		return "integer"
-	case "float":
-		return "number"
-	case "object":
-		return "object"
-	case "array":
-		return "array"
-	default:
-		return "string"
-	}
-}
