@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -201,5 +202,50 @@ func TestVerifySchemeNoneAcceptsAndReportsUnverified(t *testing.T) {
 	if verified {
 		t.Error("scheme=none must report the request as UNVERIFIED -- the row's " +
 			"signatureVerified field is how an operator finds sources running unsigned")
+	}
+}
+
+// TestCheckTimestampDoesNotLeakTheHeaderValue pins the taint CodeQL flagged on
+// memql#2957 (go/clear-text-logging, component/inbound/handler.go:99 and :125).
+//
+// checkTimestamp's error is LOGGED by the handler, and its input is a request
+// header value on an unauthenticated endpoint -- so quoting the value wrote
+// caller-controlled bytes straight into the log. The header NAME and the
+// measured delta diagnose a real sender just as well.
+//
+// Failing-first: put %q of `raw` back in the parse error and the first subtest
+// fails.
+func TestCheckTimestampDoesNotLeakTheHeaderValue(t *testing.T) {
+	const header = "X-Timestamp"
+	now := time.Unix(1_700_000_000, 0).UTC()
+
+	for _, tc := range []struct {
+		name string
+		raw  string
+	}{
+		{"unparseable", "not-a-timestamp-9f8e7d"},
+		{"injection-shaped", "\" evil=1 secret=hunter2"},
+		// Parseable but far outside the window, so it takes the OTHER error
+		// branch. Deliberately a long distinctive string: a short value like
+		// "1" appears incidentally inside the rendered delta ("471166h39m59s"),
+		// which would make a containment check fire for a reason that is not a
+		// leak.
+		{"stale but parseable", "2020-04-05T06:07:08Z"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := checkTimestamp(header, tc.raw, now, time.Minute)
+			if err == nil {
+				t.Fatalf("checkTimestamp(%q) unexpectedly succeeded", tc.raw)
+			}
+			if strings.Contains(err.Error(), tc.raw) {
+				t.Errorf("the error quotes the caller-supplied header VALUE, which the handler "+
+					"logs verbatim:\n  err:   %v\n  value: %q\n"+
+					"Name the header, not its contents (memql#2957).", err, tc.raw)
+			}
+			if !strings.Contains(err.Error(), header) {
+				t.Errorf("the error must still name WHICH header failed, or it cannot be "+
+					"diagnosed:\n  %v", err)
+			}
+		})
 	}
 }

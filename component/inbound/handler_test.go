@@ -320,3 +320,55 @@ func TestRenderedLiteralsParseBackThroughTheRealLexer(t *testing.T) {
 		}
 	}
 }
+
+// TestHandlerDedupeFailureLeaksNothingToTheCaller pins the invariant this
+// feature's security notes state and that every OTHER arm of ServeHTTP already
+// kept: the caller learns nothing.
+//
+// The dedupe arm was the one exception -- it answered `http.Error(w,
+// err.Error(), ...)`, echoing handler-internal error text to a caller that is
+// unauthenticated by construction. CodeQL did not flag it; the author found it
+// while handing the PR off (memql#2957), and it is fixed on the branch.
+//
+// Failing-first: restore `err.Error()` in the dedupe arm and the exact-match
+// assertion fails, because the internal text names the header and its limit.
+func TestHandlerDedupeFailureLeaksNothingToTheCaller(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		value string
+	}{
+		{"over the length limit", strings.Repeat("a", 300)},
+		{"contains a control character", "abc\x01def"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			src := hexSource()
+			src.DedupeHeader = "X-Dedupe"
+
+			body := `{"event":"order.created"}`
+			r := signedRequest(t, body)
+			r.Header.Set("X-Dedupe", tc.value)
+
+			eng := &fakeEngine{}
+			rec := httptest.NewRecorder()
+			testHandler(t, eng, src).ServeHTTP(rec, r)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("answered %d, want 400: %s", rec.Code, rec.Body)
+			}
+			if got := strings.TrimSpace(rec.Body.String()); got != "invalid dedupe header" {
+				t.Errorf("the 400 body must be a fixed string that tells the caller nothing.\n"+
+					"  got:  %q\n  want: %q\n"+
+					"Echoing err.Error() here hands an unauthenticated caller the handler's "+
+					"internal diagnostics, which is what the 401 arm above deliberately avoids.",
+					got, "invalid dedupe header")
+			}
+			// The header VALUE must never come back either, whatever the wording.
+			if strings.Contains(rec.Body.String(), tc.value) {
+				t.Errorf("the response echoed the caller's own header value back:\n%s", rec.Body.String())
+			}
+			if len(eng.calls) != 0 {
+				t.Errorf("a refused request must not stage a row, got %d calls", len(eng.calls))
+			}
+		})
+	}
+}

@@ -53,7 +53,7 @@ func verify(src SourceConfig, header http.Header, body []byte, now time.Time, to
 			return false, fmt.Errorf("%w: timestamp header %q is absent or empty",
 				errUnverified, src.TimestampHeader)
 		}
-		if err := checkTimestamp(ts, now, tolerance); err != nil {
+		if err := checkTimestamp(src.TimestampHeader, ts, now, tolerance); err != nil {
 			return false, err
 		}
 		// "<timestamp>.<body>" -- the shape every timestamped webhook scheme
@@ -111,18 +111,30 @@ func decodeSignature(scheme, provided string) ([]byte, error) {
 // attacker cared to backdate it.
 //
 // Unix seconds and RFC3339 are both accepted because senders use both.
-func checkTimestamp(raw string, now time.Time, tolerance time.Duration) error {
+//
+// `header` is the header NAME and `raw` is its value. The value never reaches
+// the error text: it is attacker-controlled on an unauthenticated endpoint, and
+// these errors are logged, so quoting it writes caller-supplied bytes into the
+// log (CodeQL go/clear-text-logging on this PR). The header name and the
+// measured delta are enough to diagnose a real sender -- an operator who needs
+// the offending value can read it from the sender's own logs.
+func checkTimestamp(header, raw string, now time.Time, tolerance time.Duration) error {
 	var ts time.Time
 	if secs, err := strconv.ParseInt(raw, 10, 64); err == nil {
 		ts = time.Unix(secs, 0)
 	} else if parsed, err := time.Parse(time.RFC3339, raw); err == nil {
 		ts = parsed
 	} else {
-		return fmt.Errorf("%w: timestamp %q is neither unix seconds nor RFC3339", errUnverified, raw)
+		return fmt.Errorf("%w: timestamp header %q is neither unix seconds nor RFC3339",
+			errUnverified, header)
 	}
 	if delta := now.Sub(ts); delta > tolerance || delta < -tolerance {
-		return fmt.Errorf("%w: timestamp is %s outside the %s replay window",
-			errUnverified, delta.Round(time.Second), tolerance)
+		// Names the header for the same reason the parse branch does: with two
+		// timestamp-bearing headers configured, "outside the window" alone does
+		// not say which one. The delta is derived, not caller text, so it is
+		// safe to log.
+		return fmt.Errorf("%w: timestamp header %q is %s outside the %s replay window",
+			errUnverified, header, delta.Round(time.Second), tolerance)
 	}
 	return nil
 }

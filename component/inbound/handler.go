@@ -103,8 +103,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	dedupeKey, err := dedupeKeyFor(src, r.Header, body)
 	if err != nil {
+		// Logged with the reason, answered without it -- the same split every
+		// other arm in this handler makes. This was the ONE arm that echoed
+		// err.Error() back to the caller, which contradicts the "the caller
+		// learns nothing" invariant this feature's own security notes claim,
+		// on an endpoint that is unauthenticated by construction. Caught by
+		// the author during the memql#2957 handoff; CodeQL did not flag it.
 		h.logger.Warn("inbound receiver: request refused", "source", name, "error", err)
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, "invalid dedupe header", http.StatusBadRequest)
 		return
 	}
 
