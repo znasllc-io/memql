@@ -49,10 +49,22 @@ func NewModel(workspace string) *Model {
 //
 // What that gives up, stated plainly: the file is no longer readable as a
 // diff. It never really was -- nobody reviews 40MB of JSON -- and correctness
-// is established by TestArchitectureModelIsNotStale regenerating and comparing
-// byte-for-byte, not by reading the artifact. The ORDER still matters and is
-// still enforced: it is what makes that byte-for-byte comparison possible at
-// all.
+// is established by TestArchitectureModelIsNotStale, which regenerates the
+// model and reports committed node IDs that no longer exist in the code: a
+// dangling-symbol SUBSET check, not a byte comparison.
+//
+// This paragraph used to say "comparing byte-for-byte" (corrected in
+// memql#3003). It was true when written; ffe395da wrote it, and 83967b21
+// replaced the checksum gate with the subset gate thirteen minutes later
+// without updating the prose. A byte comparison could not be what runs: a
+// fresh regeneration of this exact tree differs from the committed file by
+// ~169KB and the named test still passes. Reversing Nodes and Edges in the
+// committed artifact -- same node-ID set, different sha256 -- likewise leaves
+// it green.
+//
+// The ORDER still matters and is still enforced, but by
+// TestCommittedModelIsSorted (via IsSortedForStableOutput below), NOT by this
+// test. The subset gate cannot see order at all.
 //
 // The sort is what makes that true (memql#2844). Without it, two runs over an
 // IDENTICAL tree on the SAME machine emitted the same 121,601 edges in a
