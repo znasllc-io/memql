@@ -46,10 +46,21 @@ z: kept`
 	}
 }
 
-// TestScrubStringArmStopsAtNewline covers the second arm. A string literal may
-// not span lines anywhere else in the grammar, and the line-comment arm already
-// stops at `\n`. The string arm did not, so one unbalanced quote blanked the
-// rest of the file.
+// TestScrubStringArmStopsAtNewline covers the second arm: an UNBALANCED quote
+// -- one with no closing quote anywhere before EOF -- must cost its own line
+// rather than blanking the rest of the file.
+//
+// It is deliberately scoped to the unbalanced case. A literal that DOES close,
+// even several lines later, is valid and must be consumed whole; see
+// TestScrubConsumesMultiLineLiteral. An earlier version of this test asserted
+// the string arm stops at a newline unconditionally, on the stated grounds that
+// "a string literal may not span lines anywhere else in the grammar". That is
+// false -- the lexer's scanString has no newline case -- and the arm built on it
+// regressed the gate in both directions (memql#2949 review).
+//
+// Note the lexer refuses unterminated source outright, so compileMemQL never
+// reaches the scan with input like this; the behaviour is belt-and-braces for
+// callers scanning source the parser has not accepted.
 func TestScrubStringArmStopsAtNewline(t *testing.T) {
 	src := `a: "unterminated
 b: kept
@@ -65,6 +76,68 @@ c: also kept`
 	if strings.Contains(got, "unterminated") {
 		t.Errorf("the unterminated literal's body survived on its own line:\n%s", got)
 	}
+}
+
+// TestScrubConsumesMultiLineLiteral pins the regression a newline-stopping
+// string arm introduced, in BOTH directions (memql#2949 review).
+//
+// The lexer accepts a literal spanning lines -- `scanString` in
+// component/language/parser/lexer.go has no newline case, so `"one<NL>two"` is
+// ONE string token. An arm that stopped at `\n` therefore:
+//
+//   - scanned the literal's 2nd..nth lines as CODE, so prose in a wrapped
+//     @description tripped the G5 gate and the diagnostic blamed the automation
+//     for a read that exists only inside a string (false refusal -- byte-for-byte
+//     the class the `/*` arm was added to fix, memql#2872); and
+//   - re-read the literal's real closing quote as an OPENING quote, blanking the
+//     genuine source after it, so a real retired read went UNSEEN (fail-open --
+//     the very thing this scrubber exists to prevent).
+//
+// Both are asserted here through eventPayloadReadPattern, the actual consumer,
+// because the consequence is what matters rather than the intermediate bytes.
+func TestScrubConsumesMultiLineLiteral(t *testing.T) {
+	t.Run("prose inside a wrapped literal is not scanned as code", func(t *testing.T) {
+		src := "@description(\"before #2367 this read\nevent.payload.status directly\")\nautomation a { }"
+
+		got := scrubSourceForPayloadScan(src)
+
+		if eventPayloadReadPattern.MatchString(got) {
+			t.Errorf("the G5 scan fired on prose inside a MULTI-LINE literal.\n"+
+				"The lexer accepts a literal spanning lines, so the whole literal must be "+
+				"blanked; stopping at the newline leaks its tail as code and refuses an "+
+				"automation for a read that only exists inside a string.\nsource:\n%s\n\nscrubbed:\n%s",
+				src, got)
+		}
+		if !strings.Contains(got, "automation a { }") {
+			t.Errorf("source after the multi-line literal was consumed:\n%s", got)
+		}
+	})
+
+	t.Run("a real read after a wrapped literal is still seen", func(t *testing.T) {
+		src := "d: \"one\ntwo\" status: event.payload.x"
+
+		got := scrubSourceForPayloadScan(src)
+
+		if !eventPayloadReadPattern.MatchString(got) {
+			t.Errorf("the G5 scan MISSED a genuine retired read following a multi-line "+
+				"literal -- the gate failed OPEN.\nStopping at the newline makes the "+
+				"literal's real closing quote read as an OPENING quote, so the live code "+
+				"after it is blanked.\nsource:\n%s\n\nscrubbed:\n%s", src, got)
+		}
+	})
+
+	t.Run("line accounting survives a wrapped literal", func(t *testing.T) {
+		src := "a: \"one\ntwo\nthree\"\nz: kept\n"
+
+		got := scrubSourceForPayloadScan(src)
+
+		if want, have := strings.Count(src, "\n"), strings.Count(got, "\n"); want != have {
+			t.Errorf("line count changed from %d to %d across a multi-line literal:\n%s", want, have, got)
+		}
+		if len(got) != len(src) {
+			t.Errorf("length changed from %d to %d, so the view is no longer a positional overlay", len(src), len(got))
+		}
+	})
 }
 
 // TestScrubKeepsEscapedQuotesInsideLiterals is the direction that keeps the fix
