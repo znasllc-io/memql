@@ -39,20 +39,21 @@ import (
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 )
 
-// updateUserOriginRecorder captures the origin of the context each mutation is
-// executed with, keyed by the construct named in the query text.
+// updateUserOriginRecorder captures the origin of EVERY context an updateUser
+// mutation is executed with.
+//
+// A slice, not a map keyed by construct name. A map is last-write-wins, so an
+// unstamped call placed BEFORE the stamped one is overwritten and vanishes --
+// the mirror image of the `strings.Index` "only sees the first" flaw this file
+// was written to replace, and it was in the first version of this recorder
+// (caught in review). Recording every call means order cannot hide one.
 type updateUserOriginRecorder struct {
-	seen map[string]auth.CallOrigin
+	seen []auth.CallOrigin
 }
 
 func (r *updateUserOriginRecorder) Execute(ctx context.Context, query string) (*memqlengine.ExecuteResult, error) {
-	if r.seen == nil {
-		r.seen = map[string]auth.CallOrigin{}
-	}
-	for _, name := range []string{"updateUser"} {
-		if strings.Contains(query, name+"(") {
-			r.seen[name] = auth.OriginFromContext(ctx)
-		}
+	if strings.Contains(query, "updateUser(") {
+		r.seen = append(r.seen, auth.OriginFromContext(ctx))
 	}
 	return nil, nil
 }
@@ -63,9 +64,9 @@ func (r *updateUserOriginRecorder) Execute(ctx context.Context, query string) (*
 // Failing-first: drop the auth.ContextWithInternalOrigin wrapper in
 // (*AdminServer).updateUser and this reports OriginClient. Unlike the source
 // scan it replaces, it is indifferent to argument order, to how the query
-// string is built, and to comments -- and a second unstamped call site inside
-// updateUser would overwrite the recorded origin rather than hide behind the
-// first match.
+// string is built, and to comments -- and because it asserts over EVERY
+// recorded call rather than one, a second unstamped call site cannot hide
+// behind position.
 func TestAdminUpdateUserStampsInternalOrigin(t *testing.T) {
 	rec := &updateUserOriginRecorder{}
 	s := &AdminServer{Engine: rec}
@@ -80,16 +81,19 @@ func TestAdminUpdateUserStampsInternalOrigin(t *testing.T) {
 		t.Fatalf("updateUser: %v", err)
 	}
 
-	got, ok := rec.seen["updateUser"]
-	if !ok {
+	if len(rec.seen) == 0 {
 		t.Fatal("(*AdminServer).updateUser never executed a query naming `updateUser` -- " +
 			"if the mutation was renamed, move this guard with it (memql#2991)")
 	}
-	if !got.IsInternal() {
+	for i, got := range rec.seen {
+		if got.IsInternal() {
+			continue
+		}
 		t.Errorf("the admin server executed the @serverOnly `updateUser` mutation with origin %v, "+
-			"not internal.\nThat call is REFUSED at runtime -- @serverOnly is enforced as "+
-			"`fn.ServerOnly && !auth.OriginFromContext(ctx).IsInternal()` -- and it fails in the "+
-			"admin UI rather than in any test. Wrap the context the way the sibling calls in "+
-			"handlers.go, the PAT store and the identity store all do (memql#2991).", got)
+			"not internal (call %d of %d).\nThat call is REFUSED at runtime -- @serverOnly is "+
+			"enforced as `fn.ServerOnly && !auth.OriginFromContext(ctx).IsInternal()` -- and it "+
+			"fails in the admin UI rather than in any test. Wrap the context the way the sibling "+
+			"calls in handlers.go, the PAT store and the identity store all do (memql#2991).",
+			got, i+1, len(rec.seen))
 	}
 }

@@ -46,6 +46,22 @@ func TestServerOnlyMutationRefusesClientOrigin(t *testing.T) {
 	fns, _ := loadRealTree(t)
 	e := &MemQLEngine{}
 
+	// Every construct this test names must actually be in the tree, asserted
+	// UP FRONT rather than inside a subtest. Without it a RENAMED construct
+	// returns `function "X" not found`, which does not contain "server-only" --
+	// so the control subtest below would pass while guarding nothing (caught in
+	// review). resolveAuthored in server_only_resolve_test.go does the same
+	// check for the same reason.
+	//
+	// Hoisted out of the subtests deliberately: t.Fatalf on the parent's *T from
+	// inside a subtest goroutine does not reliably stop the run.
+	for _, name := range []string{"updateUser", "setUserActiveSpace"} {
+		if fn, err := fns.Get(name); err != nil || fn == nil {
+			t.Fatalf("construct %q is not in the loaded tree (%v) -- if it was renamed, move "+
+				"this guard with it rather than letting the assertion pass vacuously", name, err)
+		}
+	}
+
 	call := func(name string) *FunctionCallExpression {
 		return &FunctionCallExpression{
 			Name: name,
