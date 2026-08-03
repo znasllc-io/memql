@@ -24,6 +24,9 @@ concurrency:
 
 permissions:
   contents: read
+  # Pull the GHCR-mirrored Postgres fixture the DB-gated lanes run as a
+  # service container (memql#2793).
+  packages: read
 
 # Affected-lane routing (Tier 1, #856) + warm-cache consolidation (Tier 2, #857)
 # -----------------------------------------------------------------------------
@@ -340,8 +343,19 @@ jobs:
     services:
       # Same image the dev cluster uses; bundles TimescaleDB +
       # pgvector so the memory-nodes migrations (hypertable + vector) apply.
+      #
+      # Pulled from our GHCR MIRROR, pinned by digest (memql#2793). Docker Hub
+      # pulls here are unauthenticated and happen at job setup, before any step
+      # runs -- a Hub blip took this lane down before a test executed, and
+      # because it feeds ci-required the merge queue EVICTED the candidate
+      # (twice in ~9h: #2777, #2826). Refresh with the mirror-fixture-images
+      # workflow, then update this digest in a PR; a floating tag here would
+      # reintroduce the silent-drift half of #2793.
       postgres:
-        image: timescale/timescaledb:latest-pg16
+        image: ghcr.io/znasllc-io/ci-timescaledb@sha256:d8336a5c9cc49bdbf1e935234e8c87ab64b6d6d195fd2ecedff7b00185557631
+        credentials:
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
         env:
           POSTGRES_USER: memql
           POSTGRES_PASSWORD: memql_dev
@@ -400,9 +414,13 @@ jobs:
     services:
       # Same image the dev cluster + conformance use; bundles
       # TimescaleDB + pgvector so the memory-nodes migrations (hypertable +
-      # vector) apply.
+      # vector) apply. GHCR mirror, pinned by digest -- see the note on the
+      # mcp-conformance service above (memql#2793).
       postgres:
-        image: timescale/timescaledb:latest-pg16
+        image: ghcr.io/znasllc-io/ci-timescaledb@sha256:d8336a5c9cc49bdbf1e935234e8c87ab64b6d6d195fd2ecedff7b00185557631
+        credentials:
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
         env:
           POSTGRES_USER: memql
           POSTGRES_PASSWORD: memql_dev
