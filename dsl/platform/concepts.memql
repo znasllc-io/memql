@@ -120,3 +120,19 @@ concept outboundRequest {
   dedupeKey     string  @description("Optional caller idempotency key, passed through to the receiver (webhook: X-Memql-Dedupe-Key header) so external systems can deduplicate at-least-once redelivery.")
   requestedBy   string  @description("Provenance: which product automation/logic staged this row. Free-form; surfaces in delivery audit queries.")
 }
+
+// ---- concepts/v1/platform/inboundRequest/concept.memql ----
+
+@description("A verified inbound delivery (memql#2957): the durable inbox row the engine's inbound receiver stages when a third party POSTs to /inbound/{source} and the request passes the deployment's source allowlist and signature check. Product DSL reacts with an ordinary automation on node.created -- no product Go. The counterpart to v1:platform:outboundRequest: outbound is the outbox a product stages and the engine drains, inbound is the inbox the engine stages and a product drains. Credentials are NEVER on this row -- the signing secret lives in env/globalSecret and only the verdict is recorded. See docs/internal/design/inbound-delivery-adr.md.")
+concept inboundRequest {
+  source        string! @description("Which allowlisted sender this arrived from -- the {source} path segment, matched against MEMQL_INBOUND_SOURCE_ALLOWLIST. Products filter their automation on it. Never caller-chosen beyond the allowlist: an unlisted source is refused before a row exists.")
+  medium        enum("webhook")! @default("webhook") @description("How it arrived. Only 'webhook' exists today; the enum is here so a second inbound transport does not need a concept change.")
+  body          string! @description("The verified raw request body, exactly as signed. Capped by MEMQL_INBOUND_MAX_BODY_BYTES at receive time -- a larger request is refused with 413 and no row is staged. Never secret material. (Named body, not payload: shape paths reserve the payload prefix.)")
+  contentType   string  @description("The request's Content-Type, so a product automation can branch on JSON vs form-encoded without re-sniffing the body.")
+  status        enum("received", "processing", "processed", "failed") @default("received") @description("Product-side handling lifecycle, NOT delivery state -- the delivery already succeeded by the time a row exists. 'received' = staged, awaiting the product automation. 'processing'/'processed'/'failed' are stamped by the product as it works the row.")
+  dedupeKey     string  @description("Idempotency key for at-least-once redelivery: the sender's own key when it supplies one via MEMQL_INBOUND_SOURCE_<NAME>_DEDUPE_HEADER, otherwise the SHA-256 of the raw body. Re-delivery of the same event collapses onto the same row instead of staging a duplicate.")
+  signatureVerified bool @default("false") @description("Whether the HMAC signature was checked and matched. Only ever true, or false for a source explicitly configured scheme='none'; a FAILED check is refused at the edge and never staged, so this records which sources are running unverified rather than which requests failed.")
+  receivedAt    datetime @description("When the receiver accepted the request.")
+  processedAt   datetime @description("When the product finished handling the row.")
+  lastError     string  @description("Most recent product-side handling error, truncated to 4KB. Empty on success.")
+}
