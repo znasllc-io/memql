@@ -643,18 +643,10 @@ func coverageFindings(pkgs []string, all []dbGatedTest, provisioned []string) []
 	}
 	sort.Strings(known)
 
-	covered := 0
-	for _, dbt := range all {
-		if covers(pkgs, dbt.dir) {
-			covered++
-		}
-	}
-	if covered == 0 {
-		out = append(out, fmt.Sprintf("the %q job runs %v, which covers NONE of the %d db-gated "+
-			"tests in the tree. The lane would provision Postgres and execute zero DB "+
-			"assertions. Packages that carry them: %v (memql#2886).",
-			dbTestsJob, pkgs, len(all), known))
-	}
+	// No separate "covers nothing at all" check: it is strictly implied by the
+	// per-argument one below. If every argument matches at least one db-gated
+	// test then the total cannot be zero, and the empty-selector case returned
+	// above. A redundant assertion is one no test can show to be necessary.
 	for _, p := range pkgs {
 		n := 0
 		for _, dbt := range all {
