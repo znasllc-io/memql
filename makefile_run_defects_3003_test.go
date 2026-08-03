@@ -313,3 +313,45 @@ func TestResolveMakePattern_ShellVariableIsUnresolvable(t *testing.T) {
 		})
 	}
 }
+
+// Two false positives this gate INTRODUCED, both measured clean on the guard
+// it replaces (memql#3003 landing review).
+//
+// The gate's own header states the standard they violate: a gate that blocks
+// valid work is worse than the invisible target it replaces. Both would have
+// failed CI on a recipe that runs correctly.
+func TestMakefileRunGuard_DoesNotFlagNonTestCommands(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		line string
+	}{
+		{
+			// The widened flag pattern reads `--run` out of prose, and the new
+			// shell-command splitter gives the echo its own segment with no
+			// package -- which the caller then defaulted to the ROOT package.
+			name: "echo mentioning a run flag",
+			line: "\t@echo 'pass --run TestPhantomNoSuchTest for one test'",
+		},
+		{
+			name: "echo after a real test command",
+			line: "\tgo test -run TestReal ./pkg/ && echo \"narrow with -run TestPhantomNoSuchTest\"",
+		},
+		{
+			// A quoted shell-out: the operand scan took `./pkg/'` verbatim,
+			// including the trailing quote, so the directory read failed and
+			// the recipe was reported as declaring no tests at all.
+			name: "quoted shell-out",
+			line: "\tbash -c 'go test -run TestReal ./pkg/'",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			findings, _ := scanSynthetic(t, "target:\n"+tc.line+"\n")
+			if len(findings) != 0 {
+				t.Errorf("the gate flagged a line that is not a failing go-test recipe: %v\n"+
+					"line: %s\nA false positive here is a hard CI failure on working work, which "+
+					"this gate's own header calls worse than the target it replaces.",
+					findings, tc.line)
+			}
+		})
+	}
+}

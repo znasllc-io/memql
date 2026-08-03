@@ -193,11 +193,30 @@ func commandPackages(cmd string) (pkgs []string, unresolvable bool) {
 		}
 	}
 	if i >= len(fields) {
-		return nil, false // not a `go test` command shape we understand
+		// NOT a `go test` command at all. This must be UNRESOLVABLE, not
+		// "no packages" -- the caller turns "no packages" into {"."}, so
+		// returning false here scores a stray `-run` against the ROOT package
+		// and fails the build on text that is not a go-test invocation.
+		//
+		// Measured: `@echo 'pass --run TestPhantom for one test'` and
+		// `... && echo "narrow with -run TestPhantom"` were both clean on the
+		// guard this replaces and flagged by it -- a hard CI failure on a HELP
+		// STRING. The widened flag pattern and the new shell-command splitter
+		// each make that reachable (memql#3003 landing review).
+		return nil, true
 	}
 
 	for ; i < len(fields); i++ {
-		f := fields[i]
+		// Strip surrounding quotes before classifying. A quoted shell-out --
+		// `bash -c 'go test -run X ./pkg/'` -- otherwise yields the operand
+		// `./pkg/'` with the quote attached, the directory read fails, and a
+		// working recipe is reported as declaring no tests at all. The guard
+		// this replaces got that right by accident, because its package regexp
+		// stopped at the quote.
+		f := strings.Trim(fields[i], "'\"")
+		if f == "" {
+			continue
+		}
 		if strings.HasPrefix(f, "-") {
 			name := strings.TrimLeft(f, "-")
 			if eq := strings.IndexByte(name, '='); eq >= 0 {
