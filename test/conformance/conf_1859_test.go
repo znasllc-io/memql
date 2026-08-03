@@ -17,7 +17,10 @@ package conformance
 //
 // The fix normalizes on the WRITE side: `recordRequestEvent` stores
 // `requestId: shortId(args.requestId)`. shortId() strips the
-// `v1:forge:request:` concept prefix and is idempotent, so:
+// `v1:forge:request:` concept prefix. It is NOT idempotent in general
+// (memql#2981 -- a multi-`v<digits>` or whitespace-bearing value changes
+// again on a second application), but it is a no-op on the colon-free
+// short ids this path deals with, so:
 //   - the automation path (canonical payload.id) is reduced to the short id;
 //   - the tool path (already short) is unchanged (no-op strip).
 // Every requestEvent.requestId then lands in one short form and

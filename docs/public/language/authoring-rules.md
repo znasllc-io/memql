@@ -1101,14 +1101,39 @@ be met). Use it when `canonicalId()` will not resolve. Otherwise prefer
   predicate).
 
   **The rule that follows.** A bare `B` and its canonical form derive one
-  id exactly when `B` is already a **fixed point** of `shortId()`. So
-  where a hashed id is derived from a caller-supplied FK, constrain the
-  arg to a bare short id or the canonical form of one — colon- and
-  whitespace-free after at most one prefix:
+  id **when** `B` is a fixed point of `shortId()`. That is sufficient, not
+  a biconditional, and stating it as "exactly when" is false in both
+  directions: `"v1:v1:v1: "` is not a fixed point yet both spellings
+  collapse to the same value anyway, and `""` IS a fixed point yet
+  `shortId("v1:cluster:deployment:")` is not `""`, so the pair forks. The
+  empty case is exactly the class the two earlier formulations missed;
+  saying "exactly when" here would be the third.
+
+  So where a hashed id is derived from a caller-supplied FK, constrain the
+  arg with an **allowlist** — pin the prefix to that concept's own
+  canonical form, and permit only characters a short id can contain:
 
   ```memql
-  deploymentId  string! @pattern("^(?:v[0-9]+:[a-z0-9]+:[A-Za-z0-9_]+:)?[^[:space:]:]+$")
+  deploymentId  string! @pattern("^(?:v[0-9]+:cluster:deployment:)?[A-Za-z0-9_.-]+$")
   ```
+
+  An allowlist rather than "not whitespace, not colon", for two reasons
+  found the hard way. A denylist has to enumerate `unicode.IsSpace`
+  exactly, and RE2's `[[:space:]]` is **ASCII only** while `shortId()`
+  trims with `strings.TrimSpace` — a guard written that way closes the
+  fork for U+0020 and leaves it open for U+00A0, U+2028 and four others.
+  And the `\x{...}` class that would enumerate them correctly **cannot be
+  authored**: the DSL lexer rejects `\x` escapes, so that pattern parses
+  as text and fails at load.
+
+  Pin the prefix to the concept. An unpinned `v<digits>:<lower>:<word>:`
+  accepts `v1:ns:Name:x`, which strips to the same short id as `x` — two
+  distinct arguments on one composite id, the §20 collision this section
+  is about, on the leading part instead of the trailing one.
+
+  This is stricter than "is a fixed point", deliberately. It rejects
+  values whose `shortId` is a fixed point (`"v1:v1"`, `"v1:a:b:"`) and
+  that is the safe direction to be wrong in.
 
   That is one expression covering both halves of the residual class, and
   it keeps the canonical form this section recommends. Prefer it to
