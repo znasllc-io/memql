@@ -10550,6 +10550,79 @@ func SoftDeleteWorkerInvocationBuild(args SoftDeleteWorkerInvocationArgs) string
 	return b.String()
 }
 
+// StageInboundRequest -- Stage a verified inbound delivery (memql#2957): insert a v1:platform:inboundRequest row with status='received' for a product automation to drain. Called by the engine inbound receiver once the source allowlist and signature check have passed; the signing secret is never part of the row. Idempotent by requestId: a redelivery preserves the product-owned handling state (@createOnly) instead of replaying it.
+//
+// Bound concept: v1:platform:inboundRequest (machine-readable: BoundConcepts["stageInboundRequest"] in generated_concepts.go).
+type StageInboundRequestArgs struct {
+	RequestId            string
+	Source               string
+	Medium               string
+	Body                 string
+	ContentType          string
+	DedupeKey            string
+	SignatureVerified    bool
+	SignatureVerifiedSet bool // set true to send signatureVerified; required because zero-value bool is ambiguous
+	ReceivedAt           string
+}
+
+// StageInboundRequest calls the engine mutation stageInboundRequest.
+func (qc *QueryClient) StageInboundRequest(ctx context.Context, args StageInboundRequestArgs) (*Result, error) {
+	call := StageInboundRequestBuild(args)
+	return qc.executeNamed(ctx, "stageInboundRequest", call)
+}
+
+func StageInboundRequestBuild(args StageInboundRequestArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation stageInboundRequest(")
+	b.WriteString("requestId: ")
+	b.WriteString(fmt.Sprintf("%q", args.RequestId))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("source: ")
+	b.WriteString(fmt.Sprintf("%q", args.Source))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("medium: ")
+	b.WriteString(fmt.Sprintf("%q", args.Medium))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("body: ")
+	b.WriteString(fmt.Sprintf("%q", args.Body))
+	if args.ContentType != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("contentType: ")
+		b.WriteString(fmt.Sprintf("%q", args.ContentType))
+	}
+	if args.DedupeKey != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("dedupeKey: ")
+		b.WriteString(fmt.Sprintf("%q", args.DedupeKey))
+	}
+	if args.SignatureVerifiedSet {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("signatureVerified: ")
+		b.WriteString(fmt.Sprintf("%v", args.SignatureVerified))
+	}
+	if args.ReceivedAt != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("receivedAt: ")
+		b.WriteString(fmt.Sprintf("%q", args.ReceivedAt))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // StageOutboundRequest -- Stage an outbound delivery (memql#2521): insert a v1:platform:outboundRequest row with status='pending' for the engine outbound worker to drain. Credentials are never part of the row; targets must satisfy the deployment's per-medium allowlist or the worker fails the row fast. Idempotent by requestId: a re-stage onto an existing row preserves the worker-owned status/attempts (@createOnly, fylo#63) rather than resetting delivery state.
 //
 // Bound concept: v1:platform:outboundRequest (machine-readable: BoundConcepts["stageOutboundRequest"] in generated_concepts.go).
@@ -11350,6 +11423,50 @@ func UpdateIdentityBuild(args UpdateIdentityArgs) string {
 	}
 	b.WriteString("payload: ")
 	b.WriteString(renderMemQLValue(args.Payload))
+	b.WriteString(")")
+	return b.String()
+}
+
+// UpdateInboundRequestStatus -- Stamp a handling transition on a v1:platform:inboundRequest row (memql#2957). Called by the product automation draining the row (processing/processed/failed); the engine receiver only ever writes the initial 'received'.
+//
+// Bound concept: v1:platform:inboundRequest (machine-readable: BoundConcepts["updateInboundRequestStatus"] in generated_concepts.go).
+type UpdateInboundRequestStatusArgs struct {
+	RequestId   string
+	Status      string
+	LastError   string
+	ProcessedAt string
+}
+
+// UpdateInboundRequestStatus calls the engine mutation updateInboundRequestStatus.
+func (qc *QueryClient) UpdateInboundRequestStatus(ctx context.Context, args UpdateInboundRequestStatusArgs) (*Result, error) {
+	call := UpdateInboundRequestStatusBuild(args)
+	return qc.executeNamed(ctx, "updateInboundRequestStatus", call)
+}
+
+func UpdateInboundRequestStatusBuild(args UpdateInboundRequestStatusArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation updateInboundRequestStatus(")
+	b.WriteString("requestId: ")
+	b.WriteString(fmt.Sprintf("%q", args.RequestId))
+	if b.Len() > 36 {
+		b.WriteString(", ")
+	}
+	b.WriteString("status: ")
+	b.WriteString(fmt.Sprintf("%q", args.Status))
+	if args.LastError != "" {
+		if b.Len() > 36 {
+			b.WriteString(", ")
+		}
+		b.WriteString("lastError: ")
+		b.WriteString(fmt.Sprintf("%q", args.LastError))
+	}
+	if args.ProcessedAt != "" {
+		if b.Len() > 36 {
+			b.WriteString(", ")
+		}
+		b.WriteString("processedAt: ")
+		b.WriteString(fmt.Sprintf("%q", args.ProcessedAt))
+	}
 	b.WriteString(")")
 	return b.String()
 }
