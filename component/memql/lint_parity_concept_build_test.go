@@ -56,6 +56,50 @@ concept widget {
 	}
 }
 
+// TestLintParity_ConceptWithUnknownElementType is the wrapped-position twin of
+// the test above, and it is the one that pins memql#2951's headline repro:
+//
+//	$ go run ./cmd/memqllint <bundle declaring `flags []boolean`>
+//	OK: 1 file(s) loaded, no diagnostics.
+//
+// That was the issue's opening complaint, and every OTHER element assertion in
+// this file calls BuildConceptFromDecl directly -- which proves the builder
+// rejects it, not that the LINT GATE ever sees it. memql#2909's whole lesson
+// was that those are different claims: the loader can drop a concept while the
+// pre-boot gate a product bundle actually runs stays silent. Added in the
+// memql#2951 review, where the gap was that the file named `lint_parity_*`
+// had lint parity for scalar bad types and none for wrapped ones.
+func TestLintParity_ConceptWithUnknownElementType(t *testing.T) {
+	root := fstest.MapFS{
+		"lintbadelem/concepts.memql": {Data: []byte(`@version("1.0.0")
+@namespace("lintbadelem")
+@description("A widget whose ELEMENT type is mistyped.")
+concept widget {
+  label  string     @required  @description("Widget label.")
+  flags  []boolean  @description("Element type is not a real type.")
+}
+`)},
+	}
+	diags := lint(t, root)
+	if len(diags) == 0 {
+		t.Fatal("a concept whose ELEMENT type fails to build must produce a diagnostic. " +
+			"`[]boolean` lowering silently to `[]string` with no diagnostic is memql#2951's " +
+			"opening repro, and memqllint is the only pre-boot gate a product bundle has")
+	}
+	if !diagsContain(diags, "widget") {
+		t.Errorf("the diagnostic must name the dropped concept.\n  got: %+v", diags)
+	}
+	if !diagsContain(diags, "flags") {
+		t.Errorf("the diagnostic must name the offending property.\n  got: %+v", diags)
+	}
+	// The correction is the difference between a dead end and a fix: an author
+	// who wrote `boolean` needs to be told the spelling is `bool`.
+	if !diagsContain(diags, "bool") {
+		t.Errorf("the diagnostic must carry the `did you mean` correction for the ELEMENT "+
+			"type, not just report a failure.\n  got: %+v", diags)
+	}
+}
+
 // TestLintParity_UnknownPropertyTypeNamesItsFile pins the attribution. A
 // bundle can hold hundreds of concepts; a diagnostic that cannot say which
 // file to open costs more than it saves.
@@ -92,8 +136,8 @@ concept gadget {
 //
 // The rejected column is the point: every one of these silently dropped a
 // whole concept before this change, and each is a spelling an author has a
-// reason to reach for -- the JSON Schema names because memqlTypeToJSONType
-// emits them, the rest because every neighbouring language accepts them.
+// reason to reach for -- the JSON Schema names because the builder EMITS them,
+// the rest because every neighbouring language accepts them.
 func TestConceptPropertyTypes_AcceptedAndRejectedSets(t *testing.T) {
 	build := func(t *testing.T, ty string) error {
 		t.Helper()
@@ -284,6 +328,14 @@ func TestConceptPropertyTypes_ElementTypesAreValidated(t *testing.T) {
 			// The defect that motivated asserting whole schemas.
 			{"[]datetime", "items", dt},
 			{"map[string]datetime", "additionalProperties", dt},
+			// enum is the same class as datetime -- a VALUE constraint that the
+			// old lowering dropped one level in, leaving `{"type":"string"}`
+			// with the permitted set silently gone. Caught by the memql#2951
+			// review: the fix ships this behaviour and nothing pinned it.
+			{"[]enum(\"a\", \"b\")", "items", map[string]any{
+				"type": "string", "enum": []any{"a", "b"}}},
+			{"map[string]enum(\"a\", \"b\")", "additionalProperties", map[string]any{
+				"type": "string", "enum": []any{"a", "b"}}},
 			// Composites keep their inner type instead of collapsing.
 			{"map[string]map[string]string", "additionalProperties", strMap},
 			{"[]map[string]string", "items", strMap},
@@ -768,11 +820,17 @@ func TestConceptPropertyTypes_ValueAnnotationsAreCarriedIntoElementPosition(t *t
 //
 // It drives the compiled schema rather than inspecting the emitted one, because
 // the emitted-shape assertions elsewhere in this file would all pass on an
-// element schema the validator never reaches. The bad/good pairs are chosen so
-// the refusal can only come from the element: before memql#2951 every one of
-// these declarations lowered its element to `string`, so the conforming payload
-// in each row was REJECTED and the string control was accepted -- exactly
-// backwards.
+// element schema the validator never reaches.
+//
+// NOT every row proves the fix, and the distinction matters when reading a
+// failure. `[]bool`, `[]int` and `map[string]int` lowered CORRECTLY before
+// memql#2951 -- the old `memqlTypeToJSONType` mapped bool->boolean and
+// int->integer -- so those three pass against the pre-change parser too and are
+// regression guards, not evidence. The rows that were genuinely backwards
+// before the change, i.e. the ones whose conforming payload was REJECTED
+// because the element had been flattened to `string`, are the datetime, the
+// composite and the `any` rows. (An earlier version of this comment claimed all
+// of them; corrected in the memql#2951 review, which measured it.)
 func TestConceptPropertyTypes_WrappedElementsAcceptConformingData(t *testing.T) {
 	for _, c := range []struct {
 		decl string

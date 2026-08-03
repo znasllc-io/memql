@@ -483,9 +483,23 @@ func propertyDeclToParsed(prop *parser.PropertyDecl) (parsedProperty, error) {
 // The element is marked `required` because an element is always PRESENT: there
 // is no such thing as an unset entry in an array, so the empty-string / null
 // sentinels an optional scalar `datetime` has to accept (memql#1629) do not
-// apply one level in. That is what makes `[]datetime` enforce RFC3339 on each
-// entry, which is the whole reason an author writes `datetime` rather than
-// `string`.
+// apply one level in.
+//
+// That gives the element the plain `{type: string, format: date-time}` shape
+// rather than the sentinel `oneOf`, and the reason that matters is NOT format
+// enforcement. `format` is annotation-only here: the concept-schema compiler
+// leaves Draft2019's default alone and never sets AssertFormat (see
+// concept_schema.go), and nothing in this repo sets it -- so `[]datetime`
+// validates byte-equivalently to `[]string` at runtime. An earlier version of
+// this comment claimed the opposite; corrected in the memql#2951 review.
+//
+// What `required` actually buys is soundness of the sentinel union: the
+// optional-scalar `oneOf` carries both `{type: string, format: date-time}` and
+// `{type: string, maxLength: 0}`, and with format unasserted BOTH match `""` --
+// so `oneOf`'s exactly-one rule would REJECT an empty-string entry. Marking the
+// element required routes around that. (That double-match looks like a live
+// defect for optional SCALAR datetime fields too; it predates this change and
+// is tracked separately.)
 //
 // A nil ref is the legacy bare `array` form, whose parser default is `string`.
 func elementFromTypeRef(ref *parser.TypeRef) *parsedProperty {
