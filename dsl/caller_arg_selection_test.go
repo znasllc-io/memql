@@ -178,7 +178,6 @@ var callerArgIdSelection = regexp.MustCompile(`(?m)(?:^[ \t]*id:[ \t]*args\.|(?:
 // context-spec, as `userById` got.
 var callerArgSelectionExemptions = map[string]string{
 	// --- user: the row IS a person ------------------------------------------
-	"identity/mutations.memql updateUser":              "writes an UNRESTRICTED caller-supplied payload to any userId -- `role` is in scope, so this is the sharpest entry here. Admin-app caller only; see #2840 for the reachability analysis.",
 	"identity/mutations.memql deleteUserHard":          "hard-deletes any userId. Administrative by nature; needs origin gating, not caller scoping.",
 	"identity/mutations.memql scheduleAccountDeletion": "schedules deletion of any userId. Same shape as deleteUserHard.",
 	"identity/mutations.memql cancelScheduledDeletion": "cancels deletion for any userId.",

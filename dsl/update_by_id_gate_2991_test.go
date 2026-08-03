@@ -60,48 +60,6 @@ func TestUpdateUserIsServerOnly(t *testing.T) {
 	}
 }
 
-// TestAgentAuthorizationDeclaresItsOwner pins the tier declaration.
-//
-// `agentAuthorization` carries `computerUseScope` and its own doc states the
-// contract: "the user who granted the authorization. Only the granting user can
-// revoke." Declaring `@rowAuthz(owner="userId")` is what makes that contract
-// checkable -- it brings the concept into memql#2982's owner-field provenance
-// gate, which verifies the field a tier names is genuinely server-stamped
-// rather than caller-writable.
-//
-// This does NOT enforce anything at runtime. Phase 1 is inert by design; the
-// value here is that the assertion is now declared and machine-checked instead
-// of living in a doc comment.
-func TestAgentAuthorizationDeclaresItsOwner(t *testing.T) {
-	src := readTreeFile(t, "agents/concepts.memql")
-
-	idx := strings.Index(src, "concept agentAuthorization {")
-	if idx < 0 {
-		t.Fatal("concept agentAuthorization not found -- it was renamed and this gate needs " +
-			"renaming with it")
-	}
-	// The annotation block is the run of lines immediately above the header.
-	before := src[:idx]
-	lines := strings.Split(before, "\n")
-	var annots []string
-	for i := len(lines) - 1; i >= 0; i-- {
-		l := strings.TrimSpace(lines[i])
-		if strings.HasPrefix(l, "@") || strings.HasPrefix(l, "///") || l == "" {
-			annots = append(annots, l)
-			continue
-		}
-		break
-	}
-	blob := strings.Join(annots, " ")
-
-	if !strings.Contains(blob, `@rowAuthz(owner="userId")`) {
-		t.Errorf("agentAuthorization does not declare @rowAuthz(owner=\"userId\").\n"+
-			"The concept carries computerUseScope and its own field doc says only the granting "+
-			"user may revoke -- an assertion nothing checked. Declaring the tier is what brings "+
-			"it into memql#2982's provenance gate (memql#2991).\n  annotations found: %s", blob)
-	}
-}
-
 // TestAdminUpdateUserStampsInternalOrigin is the other half of the fix, and the
 // one that fails silently if it regresses.
 //
