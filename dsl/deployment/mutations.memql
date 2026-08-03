@@ -152,24 +152,26 @@ mutate deployment updateDeploymentStatus {
 //
 // It took #2925 to make that spelling usable: shortId() parsed in an id: slot
 // and then died at render, because the mutation-template id evaluator had no
-// ShortIdExpr case. The other two spellings are still blocked, and their
-// blockers are real defects rather than authoring mistakes:
+// ShortIdExpr case. Of the other two spellings, one is now available and one
+// is still blocked:
 //
 //   - ambient canonicalId, no import: canonical_id_refs.go accepts the
 //     ambient path only when the concept id contains ":"+domain+":". The
 //     directory domain here is `deployment` but these concepts declare
 //     @namespace("cluster"), so the id is v1:cluster:deployment and the check
 //     fails -- "concept ... is neither imported nor a same-domain concept".
-//     Filed as #2976.
-//   - `use cluster.concepts.{ deployment }`: memqllint rejects it while the
-//     engine's resolver accepts it on a unique trailing-segment match (that
-//     divergence is #2945), AND adding any explicit import for the concept
-//     suppresses the same-domain fallback in dslimports, which drops
-//     createDeployment and updateDeploymentStatus out of lane-3 field
-//     validation. TestMutationFieldLaneCoversEveryMutation catches that and
-//     names both mutations, so the coverage loss is loud rather than silent --
-//     but it is still caused by an edit that looks unrelated to either. Filed
-//     as #2977.
+//     STILL BLOCKED. Filed as #2976.
+//   - `use cluster.concepts.{ deployment }`: NOW WORKS (#2945, #2977). This
+//     bullet used to record two reasons it did not, and both are gone.
+//     memqllint no longer rejects it -- a `use` path's leading segment is a
+//     NAMESPACE, so it reaches every domain assembling under it, this pinned
+//     one included. And because the import now RESOLVES, it no longer
+//     suppresses the same-domain fallback into a hole: createDeployment and
+//     updateDeploymentStatus keep their lane-3 field validation instead of
+//     being dropped by an edit that looks unrelated to either.
+//     TestLane3_PinnedDomainImportKeepsFieldCoverage pins that, and the
+//     lane-3 skip message now names an import as the cause when one does
+//     cost coverage (#2977).
 //
 // What shortId() does NOT fix, measured input by input rather than reasoned
 // about. BareShortId does not simply strip a canonical prefix:

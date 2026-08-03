@@ -36,7 +36,7 @@ func TestQueryFilterLaneCoversEveryQuery(t *testing.T) {
 		t.Fatal("coverage reported zero queries -- the probe is broken, not the tree")
 	}
 	if len(skipped) > 0 {
-		t.Errorf("filter-field validation skipped %d of %d queries; add the missing `use <ns>.concepts.{ <Concept> }` import to each file:", len(skipped), total)
+		t.Errorf("filter-field validation skipped %d of %d queries. Usually a MISSING `use <ns>.concepts.{ <Concept> }` import -- but read each line: an import that names the concept and does not resolve SUPPRESSES the same-domain fallback file-wide, in which case adding another import is the opposite of the fix (memql#2977). Each line below says which case it is:", len(skipped), total)
 		for _, s := range skipped {
 			t.Errorf("  %s", s)
 		}
