@@ -1803,31 +1803,36 @@ mutate identity updateIdentity {
 //
 // Partial-update of a v1:identity:user record. Uses update() (which
 // reads the latest existing row, splats the supplied fields on top,
-// and writes the merged payload) so callers don't have to re-pass
-// every field on the user concept just to flip ONE preference.
+// and writes the merged payload) so a caller doesn't have to re-pass
+// every field on the user concept just to change ONE.
 //
-// Why this matters: memQL's `insert()` is a full-replace -- any
-// field the caller omits gets dropped. The frontend's preferences-
-// sync helpers (UserThemeSync, UserLanguageSync, OperatorSettingsBridge,
-// SpacesPreferences) only carry a small subset of fields
-// (`primaryEmail`, `displayName`, `role`, `active`, `preferences`)
-// because they don't load the user's directory fields (firstName,
-// lastName, phone, primaryRole, gender, birthdate, etc.). Under the
-// old insert() semantics, every theme toggle wiped those fields and
-// dropped the user back to the frontend ProfileCompletenessGuard's
-// "Account Setup Required" wall.
+// Why update() and not insert(): memQL's `insert()` is a full-replace
+// -- any field the caller omits gets dropped. A partial write carrying
+// only a handful of fields would silently wipe the user's directory
+// fields (firstName, lastName, phone, primaryRole, gender, birthdate,
+// ...) on every call.
 //
 // update() does a SHALLOW merge: top-level fields in the partial
-// replace those in the prior; nested objects (like `preferences`)
-// are replaced whole, not deep-merged. The frontend's
-// updateUserPreferences helper already does the preferences spread
-// client-side (`{...memqlUser.preferences, theme: next}`) so this
-// is the right semantic -- nothing on the user concept needs deep
-// merge today.
+// replace those in the prior; nested objects (like `preferences`) are
+// replaced whole, not deep-merged. Nothing on the user concept needs
+// deep merge today -- a caller changing one key of `preferences` sends
+// the whole spread.
 //
-// The admin handler still passes the full payload (it queries the
-// user first and stitches every field). update() with a full payload
-// behaves identically to insert(), so the admin path is unchanged.
+// CALLERS: exactly one in production, the identity admin server
+// (component/identity/admin/handlers.go), which queries the user first
+// and stitches the full payload. update() with a full payload behaves
+// identically to insert(), so that path is unchanged. Two DB acceptance
+// tests also drive it as setup scaffolding, and both stamp an internal
+// origin.
+//
+// An earlier version of this comment named four frontend preferences-sync
+// helpers as callers. They belonged to an SPA that has since been retired:
+// none of those identifiers exists in any current client -- checked across
+// the org when @serverOnly landed, covering both the product client and the
+// Go SDK consumer. The claim is DELETED rather than softened, because it
+// contradicted the annotation immediately below it, and a stale caller list
+// on a security-gated mutation is the exact pattern memql#2991 was filed to
+// punish ("true of the tool path, and only of the tool path").
 
 /// Partial update of a v1:identity:user row. Only the fields you pass are changed; other fields
 /// inherit from the prior row. SERVER-ONLY: the caller supplies both the target id and the payload,
