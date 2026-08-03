@@ -28,9 +28,15 @@ import (
 )
 
 // bareID strips a canonical `{concept}:` prefix to the trailing bare short id,
-// mirroring the SPA's stripConceptPrefix. Idempotent: a value with no colon
-// (already bare) is returned unchanged, so comparisons wrapped in bareID stay
-// correct whether the wire delivered a bare or (pre-cutover) canonical id.
+// mirroring the SPA's stripConceptPrefix. Idempotent: it cuts at the LAST
+// colon, so its result never contains one and a second call is a no-op --
+// comparisons wrapped in bareID stay correct whether the wire delivered a bare
+// or (pre-cutover) canonical id.
+//
+// That idempotence is a property of THIS helper and does not transfer to the
+// engine's BareShortId, which is a different algorithm (it splits on the first
+// v<digits> segment via core/id.ParseNodeId) and is NOT idempotent in general
+// (memql#2981). Do not cite this comment as evidence about that one.
 func bareID(s string) string {
 	if i := strings.LastIndex(s, ":"); i >= 0 {
 		return s[i+1:]

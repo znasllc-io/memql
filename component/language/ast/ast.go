@@ -553,9 +553,12 @@ func (*HashExpr) expressionNode() {}
 // ShortIdExpr extracts the bare short id from an id-shaped value:
 // shortId(value). The inverse of canonicalId -- it strips the
 // `<partition>:<concept>:` prefix from a canonical node id and returns
-// the trailing bare slug. Idempotent: a value that is already bare (no
+// the trailing bare slug. A value that is already bare (no
 // version-tagged concept prefix) is returned unchanged, so calling it
-// on a tool-path short id is a no-op. Used to normalize a foreign-key /
+// on a tool-path short id is a no-op -- but it is NOT idempotent in
+// general (memql#2981): it strips ONE prefix, so a value whose own
+// result is not already a fixed point strips again
+// (`v1:a:b:v2:c:d:e` -> `v2:c:d:e` -> `e`). Used to normalize a foreign-key /
 // audit field to one consistent (short) id form regardless of whether
 // the caller passes a canonical or bare id (#1859).
 type ShortIdExpr struct {

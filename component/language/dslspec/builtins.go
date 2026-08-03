@@ -232,8 +232,11 @@ func builtins() []Builtin {
 			Doc: "Extract the bare short id from an id-shaped value -- the inverse of canonicalId.\n\n" +
 				"Strips the `<partition>:<concept>:` prefix from a canonical node id (e.g. " +
 				"`v1:forge:request:r-001` -> `r-001`) and returns the trailing bare slug. " +
-				"Idempotent: a value that is already bare (no version-tagged concept prefix) is " +
-				"returned unchanged, so calling it on an already-short id is a no-op.\n\n" +
+				"A value that is already bare (no version-tagged concept prefix) is " +
+				"returned unchanged, so calling it on an already-short id is a no-op. It is NOT " +
+				"idempotent in general (memql#2981): it strips ONE prefix, so a value whose own " +
+				"result is not already a fixed point strips again -- " +
+				"`v1:a:b:v2:c:d:e` -> `v2:c:d:e` -> `e`.\n\n" +
 				"Use it to normalize a foreign-key / audit field to one consistent (short) id form " +
 				"regardless of whether the caller passes a canonical node id or a bare slug -- e.g. " +
 				"`requestId: shortId(args.requestId)` so the audit trail keys consistently across the " +

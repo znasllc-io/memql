@@ -125,6 +125,67 @@ func TestCompositeHashedIdTrailingPartRejectsTheSeparator(t *testing.T) {
 				"(\"d:x\",\"y\") and the two pairs share one timeline (memql#2980).",
 				fn.Name, nodeType.Pattern)
 		}
+
+		// --- the LEADING part (memql#2981) ---
+		//
+		// #2980 constrained only the trailing part, because the leading one
+		// legitimately accepts a canonical id and so cannot ban colons
+		// outright. It still cannot accept ANY colon-bearing value: shortId()
+		// strips exactly one canonical prefix, so bare `B` and canonical
+		// `v1:cluster:deployment:B` derive one id only when `B` is already a
+		// fixed point. Colon- and whitespace-free is exactly that condition,
+		// and it covers both of memql#2981's clauses at once.
+		var deploymentID *languageAst.ArgsField
+		if fn.ArgsSchema != nil {
+			for _, arg := range fn.ArgsSchema.Fields {
+				if arg != nil && arg.Name == "deploymentId" {
+					deploymentID = arg
+				}
+			}
+		}
+		if deploymentID == nil {
+			t.Errorf("%s: no `deploymentId` arg -- the leading key part was renamed and this "+
+				"gate needs renaming with it (memql#2981).", fn.Name)
+			continue
+		}
+		if deploymentID.Pattern == "" {
+			t.Errorf("%s: `deploymentId` carries no @pattern. Without one, `v2:x:y:z` and "+
+				"`v1:cluster:deployment:v2:x:y:z` derive DIFFERENT ids for one logical "+
+				"deployment -- section 20's own prohibited outcome (memql#2981).", fn.Name)
+			continue
+		}
+		dre, compileErr := regexp.Compile(deploymentID.Pattern)
+		if compileErr != nil {
+			t.Errorf("%s: `deploymentId` @pattern %q does not compile: %v",
+				fn.Name, deploymentID.Pattern, compileErr)
+			continue
+		}
+		// Behaviour, not spelling. Every case carries why it is on the list.
+		for _, c := range []struct {
+			in   string
+			want bool
+			why  string
+		}{
+			{"9f8e7d6c-1234-4abc-9def-000000000001", true,
+				"the id.NewShortId uuid -- the only shape any in-tree caller sends"},
+			{"v1:cluster:deployment:abc123", true,
+				"the canonical form memql#2925 landed to support; rejecting it undoes that"},
+			{"abc123", true, "a bare short id"},
+			{"v1:cluster:deployment:v2:x:y:z", false,
+				"forks against bare `v2:x:y:z` -- memql#2981 clause 2"},
+			{"a:v9:b:c:d", false, "memql#2981's third measured fork witness"},
+			{"v1:cluster:deployment: abc", false,
+				"forks against bare ` abc` -- clause 1, the whitespace class that a " +
+					"v<digits>-counting rule does not catch"},
+			{"  d-abc123  ", false, "padded: BareShortId trims its input but not its output"},
+			{"v1:cluster:deployment:", false,
+				"empty short id -- BareShortId returns its input unchanged here"},
+		} {
+			if got := dre.MatchString(c.in); got != c.want {
+				t.Errorf("%s: `deploymentId` @pattern %q accepts(%q) = %v, want %v -- %s",
+					fn.Name, deploymentID.Pattern, c.in, got, c.want, c.why)
+			}
+		}
 	}
 
 	for name, seen := range want {
