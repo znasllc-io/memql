@@ -614,8 +614,14 @@ func TestRunBlockIsPlain_RefusesShellConstructs(t *testing.T) {
 		{"exit above", "exit 0\ngo test ./component/memql/..."},
 		{"function body", "run_it() {\ngo test ./component/memql/...\n}"},
 		{"function keyword", "function run_it {\ngo test ./component/memql/...\n}"},
-		{"line continuation", "echo hi \\\ngo test ./component/memql/..."},
 		{"eval", "eval go test ./component/memql/..."},
+		{"cd changes what ./... means", "cd examples/referencepack\ngo test ./..."},
+		{"exit-status suppression: || true", "go test ./component/memql/... || true"},
+		{"exit-status suppression: backgrounded", "go test ./component/memql/... &\nwait"},
+		{"exit-status suppression: piped", "go test ./component/memql/... | tee out.log"},
+		{"trailing || continuation", "true ||\ngo test ./component/memql/..."},
+		{"trailing && continuation", "false &&\ngo test ./component/memql/..."},
+		{"no-space function shadowing go", "go(){ echo skip; }\ngo test ./component/memql/..."},
 		{"multi-line subshell", "X=$(\ngo test ./component/memql/...\n)"},
 	}
 	for _, tc := range cases {
@@ -831,5 +837,108 @@ func TestScanDBGatedTests_SkipsToolchainIgnoredDirs(t *testing.T) {
 	if len(dirs) != 1 || dirs[0] != "pkg/real" {
 		t.Errorf("scanDBGatedTests = %v, want only [pkg/real] -- testdata/, _-prefixed and "+
 			"dot-prefixed directories are invisible to the Go toolchain", dirs)
+	}
+}
+
+// TestJoinContinuations_FoldsWrappedInvocations pins the fix for the likeliest
+// future edit to this lane: the selector grows and someone wraps the line.
+// Joining first makes the wrapped form simply work, which beats any error
+// message -- and it also defeats `echo hi \` + `go test …`, which folds into an
+// `echo` line and is therefore correctly not counted rather than refused.
+func TestJoinContinuations_FoldsWrappedInvocations(t *testing.T) {
+	wrapped := "go test -count=1 -timeout=300s \\\n  ./component/memql/... \\\n  ./examples/referencepack/..."
+	if line, ok := runBlockIsPlain(wrapped); !ok {
+		t.Errorf("a wrapped invocation was refused at %q; wrapping is a legitimate edit", line)
+	}
+	got := goTestArgs(wrapped)
+	if len(got) != 1 {
+		t.Fatalf("goTestArgs = %v, want one joined invocation", got)
+	}
+	for _, want := range []string{"./component/memql/...", "./examples/referencepack/..."} {
+		if !strings.Contains(got[0], want) {
+			t.Errorf("joined invocation %q lost %q", got[0], want)
+		}
+	}
+
+	// A continuation whose FIRST word is not `go test` must stay uncounted.
+	if got := goTestArgs("echo hi \\\ngo test ./component/memql/..."); len(got) != 0 {
+		t.Errorf("goTestArgs = %v; `echo hi \\` folds the next line into the echo command", got)
+	}
+}
+
+// TestMentionsGoTest_IgnoresComments pins that the plainness probe is not keyed
+// on prose. A comment saying "before go test runs" above the extensions step's
+// legitimate `for` loop must not arm the refusal on a block that runs no tests.
+func TestMentionsGoTest_IgnoresComments(t *testing.T) {
+	if mentionsGoTest("# wait for postgres before go test runs\nfor i in $(seq 1 30); do\n  pg_isready\ndone") {
+		t.Error("a COMMENT mentioning `go test` armed the probe; keying a gate on prose is the " +
+			"exact defect this package criticises elsewhere")
+	}
+	if !mentionsGoTest("# a note\ngo test ./x/...") {
+		t.Error("a real invocation below a comment was missed")
+	}
+}
+
+// TestHeredocDelimiter_HereStringAndTrailingRedirect covers two shapes that
+// each swallowed the rest of a block.
+func TestHeredocDelimiter_HereStringAndTrailingRedirect(t *testing.T) {
+	if got := heredocDelimiter("grep -q x <<<$out"); got != "" {
+		t.Errorf("heredocDelimiter(here-string) = %q, want \"\" -- `<<<` has no terminator, so "+
+			"treating it as a heredoc skips every line below it", got)
+	}
+	if got := heredocDelimiter("psql <<'SQL' >/dev/null"); got != "SQL" {
+		t.Errorf("heredocDelimiter with a trailing redirect = %q, want SQL -- bash permits "+
+			"redirections after the delimiter word", got)
+	}
+}
+
+// TestZeroExecutionFlag_SpaceSeparatedCount pins the form the `=`-only regex
+// missed. `-count 1` -> `-count 0` is the same one-character edit the comment
+// warns about, and `go test -count 0 ./...` exits 0 with "[no tests to run]".
+func TestZeroExecutionFlag_SpaceSeparatedCount(t *testing.T) {
+	cases := []struct {
+		flags []string
+		want  bool
+	}{
+		{[]string{"-count", "0"}, true},
+		{[]string{"-test.count", "0"}, true},
+		{[]string{"-count", "1"}, false},
+		{[]string{"-count"}, false},
+	}
+	for _, tc := range cases {
+		got := (goTestStep{flags: tc.flags}).zeroExecutionFlag() != ""
+		if got != tc.want {
+			t.Errorf("zeroExecutionFlag(%v) = %v, want %v", tc.flags, got, tc.want)
+		}
+	}
+}
+
+// TestGoflagsDisablesTests pins the environment route. GOFLAGS never appears on
+// the command line, so no command-line check would ever see it.
+func TestGoflagsDisablesTests(t *testing.T) {
+	for _, v := range []any{"-count=0", "-run=NONE", "-mod=mod -skip=.*"} {
+		if goflagsDisablesTests(v) == "" {
+			t.Errorf("goflagsDisablesTests(%q) found nothing; that GOFLAGS disables the suite", v)
+		}
+	}
+	for _, v := range []any{"-mod=mod", "", "-count=1"} {
+		if f := goflagsDisablesTests(v); f != "" {
+			t.Errorf("goflagsDisablesTests(%q) flagged %q; that value is harmless", v, f)
+		}
+	}
+}
+
+// TestParseDBTestsJob_WorkingDirectoryIsCaptured pins the YAML route to the
+// same vacuity `cd` produces, with no shell involved at all.
+func TestParseDBTestsJob_WorkingDirectoryIsCaptured(t *testing.T) {
+	step := mustParse(t, "jobs:\n  db-tests:\n    steps:\n"+
+		"      - working-directory: examples/referencepack\n        run: go test ./...\n")
+	if step.workingDir != "examples/referencepack" {
+		t.Errorf("step working-directory = %q, want it captured", step.workingDir)
+	}
+	job := mustParse(t, "jobs:\n  db-tests:\n    defaults:\n      run:\n        working-directory: examples/referencepack\n"+
+		"    steps:\n      - run: go test ./...\n")
+	if job.workingDir != "examples/referencepack" {
+		t.Errorf("job defaults.run.working-directory = %q, want it captured", job.workingDir)
 	}
 }

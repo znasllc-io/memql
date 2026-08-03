@@ -89,7 +89,29 @@ var shellControlKeywords = map[string]bool{
 	"for": true, "while": true, "until": true, "do": true, "done": true,
 	"case": true, "esac": true, "function": true, "exit": true, "trap": true,
 	"return": true, "eval": true, "source": true, ".": true,
+	// cd/exec/alias change what every LATER line means: `cd examples/x` then
+	// `go test ./...` runs one package while the gate reads ./... as the whole
+	// module and reports every db-gated package covered.
+	"cd": true, "exec": true, "alias": true,
 }
+
+// suppressors are trailing shell forms that swallow a non-zero exit, making the
+// step succeed even when the suite failed.
+//
+// Forbidding YAML `continue-on-error` while accepting `|| true` -- which is
+// shorter to write and the first thing anyone reaches for on a flaky lane --
+// was incoherent. All three below were confirmed to exit 0 under `bash -e`,
+// which is Actions' default shell:
+//
+//	go test … || true          exit 0
+//	go test … &  + wait        exit 0  (bare `wait` always returns 0)
+//	go test … | tee out.log    exit 0  (no pipefail by default)
+//
+// funcDefinition matches a shell function definition, including the no-space
+// one-liner `go(){ …; }` which can shadow the toolchain itself.
+var funcDefinition = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*\s*\(\s*\)`)
+
+var suppressors = regexp.MustCompile(`(\|\|\s*(true|:)\s*$|&\s*$|\|[^|]*$)`)
 
 // workflowDoc is the sliver of the GitHub Actions schema this gate reads.
 //
@@ -103,11 +125,17 @@ type workflowDoc struct {
 		Env             map[string]any `yaml:"env"`
 		If              string         `yaml:"if"`
 		ContinueOnError any            `yaml:"continue-on-error"`
-		Steps           []struct {
-			Run             string         `yaml:"run"`
-			If              string         `yaml:"if"`
-			Env             map[string]any `yaml:"env"`
-			ContinueOnError any            `yaml:"continue-on-error"`
+		Defaults        struct {
+			Run struct {
+				WorkingDirectory string `yaml:"working-directory"`
+			} `yaml:"run"`
+		} `yaml:"defaults"`
+		Steps []struct {
+			Run              string         `yaml:"run"`
+			If               string         `yaml:"if"`
+			Env              map[string]any `yaml:"env"`
+			ContinueOnError  any            `yaml:"continue-on-error"`
+			WorkingDirectory string         `yaml:"working-directory"`
 		} `yaml:"steps"`
 	} `yaml:"jobs"`
 }
@@ -124,7 +152,26 @@ type goTestStep struct {
 // zeroExecutionFlag returns the first flag on this step that makes `go test`
 // exit 0 having run nothing, or "".
 func (s goTestStep) zeroExecutionFlag() string {
-	for _, f := range s.flags {
+	for i, f := range s.flags {
+		if zeroExecutionFlags.MatchString(f) {
+			return f
+		}
+		// The SPACE-separated form. `-run`/`-skip` already match bare above,
+		// but `-count` only disables when its value is 0 -- and `-count 1` ->
+		// `-count 0` is the same one-character edit the `=` form warns about.
+		if (f == "-count" || f == "-test.count") && i+1 < len(s.flags) &&
+			strings.TrimSpace(s.flags[i+1]) == "0" {
+			return f + " " + s.flags[i+1]
+		}
+	}
+	return ""
+}
+
+// goflagsDisablesTests reports whether a GOFLAGS value smuggles a
+// zero-execution flag in through the environment, where none of the
+// command-line checks would ever see it.
+func goflagsDisablesTests(v any) string {
+	for _, f := range strings.Fields(fmt.Sprintf("%v", v)) {
 		if zeroExecutionFlags.MatchString(f) {
 			return f
 		}
@@ -138,6 +185,9 @@ type laneSpec struct {
 	jobIf           string
 	continueOnError any
 	steps           []goTestStep
+	// workingDir is any job- or step-level working-directory. It relocates
+	// every relative package argument without appearing in the shell at all.
+	workingDir string
 	// nonPlainRun holds the offending line of each run block this gate
 	// refused to scan. See runBlockIsPlain -- refusing is how it fails closed.
 	nonPlainRun []string
@@ -209,6 +259,12 @@ func heredocDelimiter(line string) string {
 	if i < 0 {
 		return ""
 	}
+	// `<<<` is a HERE-STRING, not a heredoc: it has no terminator, so treating
+	// it as one skips the entire rest of the block looking for a delimiter that
+	// never arrives -- hiding both constructs and invocations below it.
+	if strings.HasPrefix(line[i:], "<<<") {
+		return ""
+	}
 	rest := strings.TrimSpace(line[i+2:])
 	rest = strings.TrimPrefix(rest, "-") // <<-EOF
 	rest = strings.TrimSpace(rest)
@@ -221,8 +277,16 @@ func heredocDelimiter(line string) string {
 	if q := rest[0]; q == '\'' || q == '"' {
 		body := rest[1:]
 		end := strings.IndexByte(body, q)
-		if end < 0 || strings.TrimSpace(body[end+1:]) != "" {
-			return "" // unbalanced, or trailing text: not a heredoc opener
+		if end < 0 {
+			return "" // unbalanced: not a heredoc opener
+		}
+		// Bash permits redirections and pipes AFTER the delimiter word
+		// (`psql <<'SQL' >/dev/null`), so only ordinary trailing text
+		// disqualifies it.
+		if tail := strings.TrimSpace(body[end+1:]); tail != "" &&
+			!strings.HasPrefix(tail, ">") && !strings.HasPrefix(tail, "|") &&
+			!strings.HasPrefix(tail, "2>") {
+			return ""
 		}
 		return body[:end]
 	}
@@ -231,6 +295,54 @@ func heredocDelimiter(line string) string {
 		return ""
 	}
 	return rest
+}
+
+// joinContinuations folds backslash-continued lines into one logical line.
+//
+// Wrapping a long invocation is the single likeliest future edit to this lane
+// -- the selector grows past three packages and someone breaks the line. That
+// used to produce three failures, two of them misdiagnosed ("the test step was
+// removed"). Joining first makes the wrapped form simply work, which is better
+// than any error message.
+func joinContinuations(run string) string {
+	var out []string
+	var cur strings.Builder
+	for _, raw := range strings.Split(run, "\n") {
+		line := strings.TrimRight(raw, " \t\r")
+		if strings.HasSuffix(line, `\`) {
+			cur.WriteString(strings.TrimSuffix(line, `\`))
+			cur.WriteString(" ")
+			continue
+		}
+		cur.WriteString(line)
+		out = append(out, cur.String())
+		cur.Reset()
+	}
+	if cur.Len() > 0 {
+		out = append(out, cur.String())
+	}
+	return strings.Join(out, "\n")
+}
+
+// mentionsGoTest reports whether a run block invokes `go test` anywhere,
+// ignoring comment lines.
+//
+// The probe must ignore comments for the same reason both scanners do: keying a
+// gate on prose is the defect this package criticises twice. A comment reading
+// "wait for postgres before go test runs" above the extensions step's `for`
+// loop otherwise armed the plainness check on a block that cannot hide
+// anything.
+func mentionsGoTest(run string) bool {
+	for _, raw := range strings.Split(run, "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if strings.Contains(line, "go test") {
+			return true
+		}
+	}
+	return false
 }
 
 // runBlockIsPlain reports whether a `run:` block is a plain sequence of
@@ -249,7 +361,7 @@ func heredocDelimiter(line string) string {
 // that friction is the feature.
 func runBlockIsPlain(run string) (string, bool) {
 	var heredocEnd string
-	for _, raw := range strings.Split(run, "\n") {
+	for _, raw := range strings.Split(joinContinuations(run), "\n") {
 		line := strings.TrimSpace(raw)
 		if heredocEnd != "" {
 			if line == heredocEnd {
@@ -264,14 +376,20 @@ func runBlockIsPlain(run string) (string, bool) {
 		if len(fields) > 0 && shellControlKeywords[strings.TrimSuffix(fields[0], ";")] {
 			return line, false
 		}
-		// A function definition, or a brace/subshell group opening a scope.
+		// A function definition (with or without a space before the brace), or
+		// a brace/subshell group opening a scope. `go(){ echo skip; }` shadows
+		// the toolchain outright, so the no-space form matters.
 		if strings.HasSuffix(line, "{") || strings.HasSuffix(line, "(") ||
-			strings.Contains(line, "() {") {
+			strings.Contains(line, "() {") || funcDefinition.MatchString(line) {
 			return line, false
 		}
-		// A line continuation makes the NEXT line an argument to this command
-		// rather than a command of its own.
-		if strings.HasSuffix(line, `\`) {
+		// A trailing connective makes the NEXT line part of this command, so
+		// `true ||` above a `go test` line means the invocation never runs.
+		if strings.HasSuffix(line, "&&") || strings.HasSuffix(line, "||") {
+			return line, false
+		}
+		// Exit-status suppression: the shell equivalent of continue-on-error.
+		if suppressors.MatchString(line) {
 			return line, false
 		}
 		heredocEnd = heredocDelimiter(line)
@@ -294,7 +412,7 @@ func goTestArgs(run string) []string {
 	var out []string
 	var heredocEnd string
 
-	for _, raw := range strings.Split(run, "\n") {
+	for _, raw := range strings.Split(joinContinuations(run), "\n") {
 		line := strings.TrimSpace(raw)
 
 		// Inside a heredoc body: text, not commands, until the delimiter.
@@ -356,14 +474,19 @@ func parseDBTestsJob(data []byte) (laneSpec, error) {
 		return laneSpec{}, fmt.Errorf("no %q job (jobs: %v)", dbTestsJob, keys)
 	}
 
-	spec := laneSpec{jobEnv: job.Env, jobIf: job.If, continueOnError: job.ContinueOnError}
+	spec := laneSpec{
+		jobEnv:          job.Env,
+		jobIf:           job.If,
+		continueOnError: job.ContinueOnError,
+		workingDir:      strings.TrimSpace(job.Defaults.Run.WorkingDirectory),
+	}
 	for _, step := range job.Steps {
 		// Only blocks that MENTION `go test` are policed. The fail-closed
 		// check exists to stop a `go test` hiding inside a construct, and the
 		// lane's "create required Postgres extensions" step legitimately loops
 		// over pg_isready -- refusing that would red the lane over a shape that
 		// cannot hide anything.
-		if !strings.Contains(step.Run, "go test") {
+		if !mentionsGoTest(step.Run) {
 			continue
 		}
 		if offending, ok := runBlockIsPlain(step.Run); !ok {
@@ -382,6 +505,9 @@ func parseDBTestsJob(data []byte) (laneSpec, error) {
 			// accepting `X && go test` would also accept `false && go test`.
 			spec.unparsedRun = append(spec.unparsedRun, strings.TrimSpace(step.Run))
 			continue
+		}
+		if wd := strings.TrimSpace(step.WorkingDirectory); wd != "" {
+			spec.workingDir = wd
 		}
 		gs := goTestStep{ifCond: step.If, env: step.Env, continueOnError: step.ContinueOnError}
 		for _, a := range args {
@@ -745,6 +871,13 @@ func TestDBTestsLaneCannotPassWithoutRunning(t *testing.T) {
 			"here (memql#2886).", dbTestsJob, cond)
 	}
 
+	if lane.workingDir != "" {
+		t.Errorf("the %q job sets working-directory: %q.\n\n"+
+			"That relocates every relative package argument without appearing in the shell at "+
+			"all, so the selector this gate reads is not the set of packages that actually "+
+			"run. Keep the lane at the repository root (memql#2886).", dbTestsJob, lane.workingDir)
+	}
+
 	for _, line := range lane.nonPlainRun {
 		t.Errorf("a `run:` block in the %q job is not a plain sequence of commands:\n\n  %s\n\n"+
 			"This gate refuses to scan such a block rather than guess, because `go test` can "+
@@ -765,6 +898,14 @@ func TestDBTestsLaneCannotPassWithoutRunning(t *testing.T) {
 			t.Errorf("`go test` step %d of the %q job sets continue-on-error: %v -- the suite "+
 				"could fail without failing the lane (memql#2886).",
 				i, dbTestsJob, s.continueOnError)
+		}
+		if raw, ok := lane.effectiveEnv(s, "GOFLAGS"); ok {
+			if f := goflagsDisablesTests(raw); f != "" {
+				t.Errorf("`go test` step %d of the %q job resolves GOFLAGS=%q, which carries %q.\n\n"+
+					"GOFLAGS reaches the toolchain without appearing on the command line, so it "+
+					"disables the suite somewhere no command-line check would look (memql#2886).",
+					i, dbTestsJob, fmt.Sprintf("%v", raw), f)
+			}
 		}
 		if f := s.zeroExecutionFlag(); f != "" {
 			t.Errorf("`go test` step %d of the %q job passes %q, which can make the suite exit "+
@@ -831,6 +972,19 @@ func TestDBTestsLaneRunsAtLeastOneDBGatedTest(t *testing.T) {
 		knownDirs = append(knownDirs, d)
 	}
 	sort.Strings(knownDirs)
+
+	// `./...` makes every assertion below vacuous: it covers the whole module,
+	// so every db-gated package reports as covered no matter what the lane
+	// actually runs -- including after a `cd`. This lane names its packages
+	// explicitly, so the wildcard is always wrong here.
+	for _, p := range pkgs {
+		if strings.TrimSuffix(strings.TrimPrefix(strings.TrimSpace(p), "./"), "/") == "..." {
+			t.Fatalf("the %q job's selector contains %q.\n\n"+
+				"A whole-module wildcard makes every coverage assertion in this gate vacuous -- "+
+				"each db-gated package reports as covered regardless of what the lane runs. This "+
+				"lane must name its packages explicitly (memql#2886).", dbTestsJob, p)
+		}
+	}
 
 	// Per-argument, so a selector entry that has silently gone to zero is
 	// caught even while its siblings still carry tests.
