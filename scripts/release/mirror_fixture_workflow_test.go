@@ -154,6 +154,57 @@ func TestMirrorWorkflowPinsActionsBySHA(t *testing.T) {
 	}
 }
 
+// The mirror must copy the manifest registry-to-registry, not pull/tag/push.
+//
+// This is a regression guard over a bug that was in this workflow and was caught
+// before merge. `docker pull` + `docker tag` + `docker push` is wrong twice:
+//
+//   - it FLATTENS a multi-arch source. `timescale/timescaledb:latest-pg16` is an
+//     OCI image index (386 / amd64 / arm64 confirmed via `docker manifest
+//     inspect`); a pull resolves one platform, so the mirror silently loses the
+//     rest.
+//   - `{{index .RepoDigests 0}}` on the tagged image returns the SOURCE repo's
+//     digest, not the mirror's. Measured locally: after tagging alpine into a
+//     second repo, RepoDigests is
+//     ["alpine@sha256:d9e853...", "ghcr.io/.../probe@sha256:d9e853..."] and
+//     index 0 is the source. Since the source is an index and a pushed
+//     single-platform image is not, the two digests genuinely differ -- so the
+//     run summary would advertise a digest that does not exist in the mirror,
+//     and whoever pinned it in ci.yml would get an unpullable image.
+//
+// The failure mode is the reason this is a test rather than a comment: both
+// halves are silent. The workflow would report success.
+func TestMirrorWorkflowCopiesTheManifestRatherThanRepushing(t *testing.T) {
+	wf := mirrorWorkflow(t)
+	var cmds []string
+	for _, line := range strings.Split(wf, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "#") {
+			continue // the rationale above quotes the wrong form on purpose
+		}
+		cmds = append(cmds, trimmed)
+	}
+	body := strings.Join(cmds, "\n")
+
+	if !strings.Contains(body, "imagetools create") {
+		t.Error("the mirror must use `docker buildx imagetools create`, which copies " +
+			"the manifest registry-to-registry and preserves a multi-arch index (#2793)")
+	}
+	for _, banned := range []string{"docker push", "docker tag", "RepoDigests"} {
+		if strings.Contains(body, banned) {
+			t.Errorf("the mirror must not use %q: pull/tag/push flattens a multi-arch "+
+				"source, and RepoDigests[0] is the SOURCE repo's digest, so the "+
+				"published digest would be misreported. Both fail silently (#2793).", banned)
+		}
+	}
+	// The digest must be read back from the TARGET, so what is advertised is
+	// what was published rather than what we believe was published.
+	if !strings.Contains(body, "imagetools inspect") {
+		t.Error("the mirror must read its digest back with `imagetools inspect` on " +
+			"the target, rather than inferring it locally (#2793)")
+	}
+}
+
 // The mirror must push to GHCR and authenticate with the automatic token.
 // Switching it to a registry needing a static secret reintroduces the
 // credential dependency this approach was chosen to avoid (#2793): a
