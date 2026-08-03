@@ -317,7 +317,8 @@ concept fieldTypes {
 // Declared metadata is still worth writing where it records real intent: @pii
 // began exactly there and is now enforced in two places, with no schema change
 // needed to get from one to the other. Enforcing the other four is tracked
-// separately rather than abandoned.
+// rather than abandoned -- memql#3036 (@secret), memql#3037 (@unique and
+// @immutable), memql#3038 (@default).
 //
 // Unknown @-annotations on a field are rejected at load time with
 //   `unknown property annotation @<name> on field "<field>"`.
