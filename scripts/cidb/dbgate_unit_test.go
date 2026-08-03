@@ -779,3 +779,57 @@ func TestParseDBTestsJob_UnparsedRunIsDistinguished(t *testing.T) {
 		}
 	}
 }
+
+// --- remaining mutation survivors from the second review ---------------------
+
+// TestIsFalsy_UnknownTypeIsNotFalsy exercises the default arm, which no
+// nil/bool/string case reaches. A YAML value of an unexpected type must not be
+// read as "continue-on-error is off".
+func TestIsFalsy_UnknownTypeIsNotFalsy(t *testing.T) {
+	for _, v := range []any{1, 0, []any{"x"}, map[string]any{"a": 1}} {
+		if isFalsy(v) {
+			t.Errorf("isFalsy(%#v) = true; an unrecognised value must not read as off", v)
+		}
+	}
+}
+
+// TestImportsDBTest_SuffixIsNotEnough pins the full-path match. A suffix test
+// passes the `dbtesthelper` fixture too, so only an exact comparison
+// distinguishes a genuinely different package that merely ends in "dbtest".
+func TestImportsDBTest_SuffixIsNotEnough(t *testing.T) {
+	src := `package x
+import "github.com/someone/else/internal/dbtest"
+func TestA() {}
+`
+	if importsDBTest(parseSrc(t, src)) {
+		t.Error("a DIFFERENT package whose path ends in \"dbtest\" must not count; " +
+			"the match is on the full import path")
+	}
+}
+
+// TestGoTestCmd_WordBoundary pins the \b: `go testify` is not `go test`.
+func TestGoTestCmd_WordBoundary(t *testing.T) {
+	if got := goTestArgs("go testify ./component/memql/..."); len(got) != 0 {
+		t.Errorf("goTestArgs counted `go testify` as `go test`: %v", got)
+	}
+}
+
+// TestScanDBGatedTests_SkipsToolchainIgnoredDirs pins the walk exclusions.
+// testdata/ and _-prefixed directories are not compiled by the Go toolchain, so
+// a db-gated file inside one runs nowhere and must not count as coverage.
+func TestScanDBGatedTests_SkipsToolchainIgnoredDirs(t *testing.T) {
+	root := fixtureRoot(t)
+	for _, dir := range []string{"pkg/testdata", "pkg/_ignored", "pkg/.hidden"} {
+		writeFixturePkg(t, root, dir, "ignored")
+	}
+	writeFixturePkg(t, root, "pkg/real", "real")
+
+	var dirs []string
+	for _, dbt := range scanDBGatedTests(t, root) {
+		dirs = append(dirs, dbt.dir)
+	}
+	if len(dirs) != 1 || dirs[0] != "pkg/real" {
+		t.Errorf("scanDBGatedTests = %v, want only [pkg/real] -- testdata/, _-prefixed and "+
+			"dot-prefixed directories are invisible to the Go toolchain", dirs)
+	}
+}
