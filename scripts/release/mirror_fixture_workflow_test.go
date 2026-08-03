@@ -142,6 +142,14 @@ func TestMirrorWorkflowScopesPackagesWriteToTheJob(t *testing.T) {
 // the supply-chain shape worth being strict about.
 var sha40 = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
+// allowedActionOwners are the actions this workflow may run. Deliberately tiny:
+// the job holds `packages: write`, so every addition is a new party trusted with
+// publishing under the org.
+var allowedActionOwners = map[string]bool{
+	"docker/login-action":        true,
+	"docker/setup-buildx-action": true,
+}
+
 func TestMirrorWorkflowPinsActionsBySHA(t *testing.T) {
 	var doc struct {
 		Jobs map[string]struct {
@@ -160,10 +168,19 @@ func TestMirrorWorkflowPinsActionsBySHA(t *testing.T) {
 				continue
 			}
 			checked++
-			_, ref, found := strings.Cut(step.Uses, "@")
+			owner, ref, found := strings.Cut(step.Uses, "@")
 			if !found || !sha40.MatchString(ref) {
 				t.Errorf("action %q must be pinned to a 40-hex commit SHA, not a "+
 					"mutable tag: this workflow's job holds `packages: write` (#2793)", step.Uses)
+			}
+			// A valid-looking SHA under a DIFFERENT owner passes the shape check
+			// while running someone else's code with a registry-write token.
+			// Pinning the shape without the identity is half a supply-chain
+			// control.
+			if !allowedActionOwners[owner] {
+				t.Errorf("action %q is not on this workflow's allow-list %v. The job "+
+					"holds `packages: write`, so which action runs matters as much as "+
+					"which commit of it (#2793).", step.Uses, allowedActionOwners)
 			}
 		}
 	}
@@ -238,7 +255,9 @@ func TestMirrorWorkflowCopiesTheManifestRatherThanRepushing(t *testing.T) {
 func TestMirrorWorkflowTargetsGHCRWithTheAutomaticToken(t *testing.T) {
 	var doc struct {
 		Jobs map[string]struct {
+			Env   map[string]string `yaml:"env"`
 			Steps []struct {
+				Run  string            `yaml:"run"`
 				With map[string]string `yaml:"with"`
 				Env  map[string]string `yaml:"env"`
 			} `yaml:"steps"`
@@ -250,7 +269,33 @@ func TestMirrorWorkflowTargetsGHCRWithTheAutomaticToken(t *testing.T) {
 
 	var sawRegistry, sawTarget bool
 	for _, job := range doc.Jobs {
+		// TARGET is equally valid at job scope; only reading step scope would
+		// red a semantically identical refactor, which is the false-positive
+		// class this file removed from the `on:` guard.
+		if tgt, ok := job.Env["TARGET"]; ok {
+			sawTarget = true
+			if !strings.HasPrefix(tgt, "ghcr.io/") {
+				t.Errorf("the mirror pushes to %q; the target must be under ghcr.io/ (#2793)", tgt)
+			}
+		}
 		for _, step := range job.Steps {
+			// The env var must be what the command actually uses. Declaring
+			// TARGET as ghcr.io and then passing a literal registry to
+			// `imagetools create` would satisfy every assertion below while
+			// publishing somewhere else entirely.
+			if strings.Contains(step.Run, "imagetools create") {
+				for _, line := range strings.Split(step.Run, "\n") {
+					if !strings.Contains(line, "imagetools create") || strings.HasPrefix(strings.TrimSpace(line), "#") {
+						continue
+					}
+					if !strings.Contains(line, `"$TARGET`) {
+						t.Errorf("`imagetools create` must publish to $TARGET, not to a "+
+							"literal: the registry assertions read the env var, so a "+
+							"hardcoded destination would bypass all of them (#2793).\ngot: %s",
+							strings.TrimSpace(line))
+					}
+				}
+			}
 			if reg, ok := step.With["registry"]; ok {
 				sawRegistry = true
 				if reg != "ghcr.io" {
