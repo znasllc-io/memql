@@ -48,25 +48,48 @@ const ciWorkflow = "ci.yml"
 // never as a prefix, so it hides that one directory and nothing near it.
 const selfPkg = "scripts/cidb"
 
-// goTestCmd matches a `go test` invocation. Applied only to the text of a
-// step's `run:` block, never to the whole file -- the mistake scripts/citags
-// records is a gate satisfied by a step's `name:` label -- and only at the
-// START of a comment-stripped line, so the same mistake cannot recur one layer
-// down inside the shell. `echo go test ./x/`, `false && go test ./x/` and a
-// heredoc body are all text this gate must not count, and a `# go test ./x/`
-// left behind by someone debugging the lane is the likeliest of them.
+// goTestCmd matches a `go test` invocation at the START of a comment-stripped
+// line, applied only to the text of a step's `run:` block and never to the
+// whole file -- the mistake scripts/citags records is a gate satisfied by a
+// step's `name:` label.
+//
+// The anchor is NOT sufficient on its own, and it is important to be honest
+// about why: `go test` can be the first word of a line that never executes,
+// inside `if`/`while`/`case`, a shell function body, or after `exit`. Regex
+// cannot see that, and this gate is not a shell parser. runBlockIsPlain closes
+// the gap from the other side -- it REFUSES a run block containing any such
+// construct -- so what remains here only has to be right for a plain sequence
+// of commands.
 var goTestCmd = regexp.MustCompile(`^go test\b(.*)$`)
 
-// runFlag matches a -run selector. The lane must not carry one: a -run pattern
-// that matches nothing executes zero tests while the step still reports ok,
-// which is precisely the silent-nothing failure this gate exists to prevent.
-var runFlag = regexp.MustCompile(`^-{1,2}run(=|$)`)
+// zeroExecutionFlags are `go test` flags that make it exit 0 having run nothing.
+//
+// `-run` was the only one guarded originally, which read as though the category
+// were closed. It is not, and the cheapest bypass is the nastiest: the lane
+// already carries `-count=1`, so `-count=0` is a ONE CHARACTER edit that runs
+// zero tests and still reports ok. `-test.`-prefixed spellings are accepted by
+// the compiled test binary and bypass a guard that only knows the short form.
+var zeroExecutionFlags = regexp.MustCompile(`^-{1,2}(test\.)?(run|skip|count=0)(=|$)`)
 
-// heredocStart matches a heredoc redirection and captures its delimiter,
-// covering the `<<EOF`, `<<-EOF`, `<<'EOF'` and `<<"EOF"` spellings. The lane's
-// own "create required Postgres extensions" step uses `<<'SQL'`, so heredocs
-// are not hypothetical in this file.
-var heredocStart = regexp.MustCompile(`<<-?\s*['"]?([A-Za-z_][A-Za-z0-9_]*)['"]?`)
+// valueTakingFlags take their value as the NEXT argument, so that argument is
+// not a package even when it starts with "./". `go test -coverprofile
+// ./cover.out ./pkg/...` otherwise reports ./cover.out as a package matching no
+// db-gated test, and reds the lane for a legitimate edit.
+var valueTakingFlags = map[string]bool{
+	"-coverprofile": true, "-o": true, "-outputdir": true, "-cpuprofile": true,
+	"-memprofile": true, "-blockprofile": true, "-mutexprofile": true,
+	"-trace": true, "-tags": true, "-run": true, "-skip": true, "-count": true,
+	"-timeout": true, "-exec": true, "-gcflags": true, "-ldflags": true,
+}
+
+// shellControlKeywords are line-initial words that mean the block is more than
+// a plain sequence of commands. See runBlockIsPlain.
+var shellControlKeywords = map[string]bool{
+	"if": true, "then": true, "else": true, "elif": true, "fi": true,
+	"for": true, "while": true, "until": true, "do": true, "done": true,
+	"case": true, "esac": true, "function": true, "exit": true, "trap": true,
+	"return": true, "eval": true, "source": true, ".": true,
+}
 
 // workflowDoc is the sliver of the GitHub Actions schema this gate reads.
 //
@@ -78,6 +101,7 @@ var heredocStart = regexp.MustCompile(`<<-?\s*['"]?([A-Za-z_][A-Za-z0-9_]*)['"]?
 type workflowDoc struct {
 	Jobs map[string]struct {
 		Env             map[string]any `yaml:"env"`
+		If              string         `yaml:"if"`
 		ContinueOnError any            `yaml:"continue-on-error"`
 		Steps           []struct {
 			Run             string         `yaml:"run"`
@@ -97,21 +121,26 @@ type goTestStep struct {
 	flags           []string
 }
 
-// hasRunFilter reports whether the step passes a -run selector to `go test`.
-func (s goTestStep) hasRunFilter() bool {
+// zeroExecutionFlag returns the first flag on this step that makes `go test`
+// exit 0 having run nothing, or "".
+func (s goTestStep) zeroExecutionFlag() string {
 	for _, f := range s.flags {
-		if runFlag.MatchString(f) {
-			return true
+		if zeroExecutionFlags.MatchString(f) {
+			return f
 		}
 	}
-	return false
+	return ""
 }
 
 // laneSpec is everything the gates need to know about the db-tests job.
 type laneSpec struct {
 	jobEnv          map[string]any
+	jobIf           string
 	continueOnError any
 	steps           []goTestStep
+	// nonPlainRun holds the offending line of each run block this gate
+	// refused to scan. See runBlockIsPlain -- refusing is how it fails closed.
+	nonPlainRun []string
 }
 
 // pkgs returns every package argument across the lane's `go test` steps.
@@ -163,6 +192,90 @@ func isFalsy(v any) bool {
 	}
 }
 
+// heredocDelimiter returns the delimiter of a heredoc opened on this line, if
+// any.
+//
+// Hand-parsed rather than regex'd because the delimiter must be the LAST thing
+// on the line for this to be a heredoc at all. A regex that merely looks for
+// `<<` fires on `echo "redirect is a << b"`, captures `b`, and then swallows
+// every following line -- which silently hides the real `go test` below it.
+// Bash also permits `<<\EOF` and digit-leading delimiters like `<<1SQL`, so the
+// delimiter charset is deliberately loose.
+func heredocDelimiter(line string) string {
+	i := strings.Index(line, "<<")
+	if i < 0 {
+		return ""
+	}
+	rest := strings.TrimSpace(line[i+2:])
+	rest = strings.TrimPrefix(rest, "-") // <<-EOF
+	rest = strings.TrimSpace(rest)
+	rest = strings.TrimPrefix(rest, `\`) // <<\EOF
+	if rest == "" {
+		return ""
+	}
+
+	// An opening quote must be matched by a closing one at end of line.
+	if q := rest[0]; q == '\'' || q == '"' {
+		body := rest[1:]
+		end := strings.IndexByte(body, q)
+		if end < 0 || strings.TrimSpace(body[end+1:]) != "" {
+			return "" // unbalanced, or trailing text: not a heredoc opener
+		}
+		return body[:end]
+	}
+	// Unquoted: the delimiter is the whole remainder, and nothing may follow.
+	if strings.ContainsAny(rest, " \t'\"") {
+		return ""
+	}
+	return rest
+}
+
+// runBlockIsPlain reports whether a `run:` block is a plain sequence of
+// commands, and names the first line that says otherwise.
+//
+// This is the gate failing CLOSED, and it is what makes the line-oriented scan
+// trustworthy rather than merely plausible. `go test` as the first word of a
+// line inside `if [ "$X" = 1 ]; then … fi`, a `while false` loop, a `case` arm,
+// an uncalled function body, or below an `exit 0` is text that never runs, and
+// no regex over lines can tell. Rather than pretend otherwise, refuse the whole
+// block: this lane must run unconditionally, so a conditional in it is a defect
+// whether or not it was meant as one.
+//
+// A legitimate future need for a conditional therefore has to update this gate
+// deliberately. For a lane whose entire purpose is that it always executes,
+// that friction is the feature.
+func runBlockIsPlain(run string) (string, bool) {
+	var heredocEnd string
+	for _, raw := range strings.Split(run, "\n") {
+		line := strings.TrimSpace(raw)
+		if heredocEnd != "" {
+			if line == heredocEnd {
+				heredocEnd = ""
+			}
+			continue
+		}
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) > 0 && shellControlKeywords[strings.TrimSuffix(fields[0], ";")] {
+			return line, false
+		}
+		// A function definition, or a brace/subshell group opening a scope.
+		if strings.HasSuffix(line, "{") || strings.HasSuffix(line, "(") ||
+			strings.Contains(line, "() {") {
+			return line, false
+		}
+		// A line continuation makes the NEXT line an argument to this command
+		// rather than a command of its own.
+		if strings.HasSuffix(line, `\`) {
+			return line, false
+		}
+		heredocEnd = heredocDelimiter(line)
+	}
+	return "", true
+}
+
 // goTestArgs extracts the argument string of every `go test` invocation in one
 // `run:` block.
 //
@@ -171,6 +284,9 @@ func isFalsy(v any) bool {
 // Every case it declines to count means fewer packages found, which reds the
 // coverage gate -- the safe direction for a gate whose whole purpose is to
 // refuse to be satisfied by something that never executes.
+//
+// Correct ONLY for a plain sequence of commands; runBlockIsPlain is what
+// guarantees it is only ever asked about one.
 func goTestArgs(run string) []string {
 	var out []string
 	var heredocEnd string
@@ -191,9 +307,7 @@ func goTestArgs(run string) []string {
 		if m := goTestCmd.FindStringSubmatch(line); m != nil {
 			out = append(out, m[1])
 		}
-		if m := heredocStart.FindStringSubmatch(line); m != nil {
-			heredocEnd = m[1]
-		}
+		heredocEnd = heredocDelimiter(line)
 	}
 	return out
 }
@@ -239,15 +353,36 @@ func parseDBTestsJob(data []byte) (laneSpec, error) {
 		return laneSpec{}, fmt.Errorf("no %q job (jobs: %v)", dbTestsJob, keys)
 	}
 
-	spec := laneSpec{jobEnv: job.Env, continueOnError: job.ContinueOnError}
+	spec := laneSpec{jobEnv: job.Env, jobIf: job.If, continueOnError: job.ContinueOnError}
 	for _, step := range job.Steps {
+		// Only blocks that MENTION `go test` are policed. The fail-closed
+		// check exists to stop a `go test` hiding inside a construct, and the
+		// lane's "create required Postgres extensions" step legitimately loops
+		// over pg_isready -- refusing that would red the lane over a shape that
+		// cannot hide anything.
+		if !strings.Contains(step.Run, "go test") {
+			continue
+		}
+		if offending, ok := runBlockIsPlain(step.Run); !ok {
+			spec.nonPlainRun = append(spec.nonPlainRun, offending)
+			continue
+		}
 		args := goTestArgs(step.Run)
 		if len(args) == 0 {
 			continue
 		}
 		gs := goTestStep{ifCond: step.If, env: step.Env, continueOnError: step.ContinueOnError}
 		for _, a := range args {
-			for _, f := range strings.Fields(a) {
+			fields := strings.Fields(a)
+			for i := 0; i < len(fields); i++ {
+				f := fields[i]
+				// A value-taking flag consumes the next argument, which is
+				// therefore not a package even when it starts with "./".
+				if valueTakingFlags[f] && i+1 < len(fields) {
+					gs.flags = append(gs.flags, f, fields[i+1])
+					i++
+					continue
+				}
 				// ONLY a ./-prefixed argument is a package. Loosening this to
 				// "contains a slash" swallows flags carrying paths, and each
 				// one silently becomes a package argument matching nothing.
@@ -285,7 +420,7 @@ func loadDBTestsJob(t *testing.T, root string) laneSpec {
 // coversOne reports whether a single package argument covers dir, a
 // repo-relative directory such as "component/memql". The root package is ".".
 func coversOne(pkg, dir string) bool {
-	p := strings.TrimSuffix(strings.TrimPrefix(strings.TrimSpace(pkg), "./"), "/")
+	p := strings.TrimSuffix(strings.TrimPrefix(pkg, "./"), "/")
 	switch {
 	case p == "...":
 		// `./...` -- the whole module.
@@ -382,6 +517,87 @@ func scanDBGatedTests(t *testing.T, root string) []dbGatedTest {
 		t.Fatalf("walking the tree: %v", err)
 	}
 	return out
+}
+
+// provisionedPkgs returns the repo-relative directories of packages that
+// declare a TestMain calling dbtest.EnsureSchema -- i.e. packages explicitly
+// provisioned to share this lane's one database (memql#2551).
+func provisionedPkgs(t *testing.T, root string) []string {
+	t.Helper()
+
+	seen := map[string]bool{}
+	fset := token.NewFileSet()
+
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			n := d.Name()
+			if path != root && (n == "testdata" || n == "node_modules" || n == "vendor" ||
+				strings.HasPrefix(n, ".") || strings.HasPrefix(n, "_")) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(d.Name(), "_test.go") {
+			return nil
+		}
+		built, mErr := build.Default.MatchFile(filepath.Dir(path), d.Name())
+		if mErr != nil || !built {
+			return nil
+		}
+		f, pErr := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
+		if pErr != nil {
+			t.Fatalf("parsing %s: %v", path, pErr)
+		}
+		if !importsDBTest(f) || !declaresEnsureSchemaTestMain(f) {
+			return nil
+		}
+		rel, _ := filepath.Rel(root, path)
+		relDir := filepath.ToSlash(filepath.Dir(rel))
+		if relDir != selfPkg {
+			seen[relDir] = true
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walking the tree: %v", err)
+	}
+
+	out := make([]string, 0, len(seen))
+	for d := range seen {
+		out = append(out, d)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// declaresEnsureSchemaTestMain reports whether the file declares a TestMain
+// whose body calls dbtest.EnsureSchema.
+func declaresEnsureSchemaTestMain(f *ast.File) bool {
+	for _, decl := range f.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Recv != nil || fn.Name == nil || fn.Name.Name != "TestMain" || fn.Body == nil {
+			continue
+		}
+		found := false
+		ast.Inspect(fn.Body, func(n ast.Node) bool {
+			sel, ok := n.(*ast.SelectorExpr)
+			if !ok || sel.Sel == nil || sel.Sel.Name != "EnsureSchema" {
+				return true
+			}
+			if ident, ok := sel.X.(*ast.Ident); ok && ident.Name == "dbtest" {
+				found = true
+				return false
+			}
+			return true
+		})
+		if found {
+			return true
+		}
+	}
+	return false
 }
 
 // importsDBTest reports whether the parsed file imports the dbtest package.
@@ -488,6 +704,29 @@ func TestDBTestsLaneCannotPassWithoutRunning(t *testing.T) {
 			dbTestsJob, ciWorkflow, lane.continueOnError)
 	}
 
+	// The JOB's `if:` decides whether the lane runs at all, and a skipped job
+	// is a pass to ci-required. Path routing there is legitimate and expected,
+	// so require it to BE path routing rather than forbidding it outright:
+	// `if: ${{ false }}`, or a routing expression narrowed to a bucket that
+	// never matches, would otherwise disable the whole lane invisibly.
+	if cond := strings.TrimSpace(lane.jobIf); cond != "" &&
+		!strings.Contains(cond, "needs.changes.outputs") {
+		t.Errorf("the %q job's `if:` does not reference needs.changes.outputs:\n\n  %s\n\n"+
+			"A job-level condition decides whether the lane runs at all, and ci-required "+
+			"treats a SKIPPED job as a pass -- so a constant-false or mis-typed condition "+
+			"disables the db-gated suites with no visible failure. Only path routing belongs "+
+			"here (memql#2886).", dbTestsJob, cond)
+	}
+
+	for _, line := range lane.nonPlainRun {
+		t.Errorf("a `run:` block in the %q job is not a plain sequence of commands:\n\n  %s\n\n"+
+			"This gate refuses to scan such a block rather than guess, because `go test` can "+
+			"be the first word of a line that never executes -- inside `if`/`while`/`case`, a "+
+			"function body, or below an `exit`. This lane must run UNCONDITIONALLY, so a "+
+			"conditional in it is a defect whether or not it was meant as one. If the block "+
+			"genuinely needs this, update runBlockIsPlain deliberately (memql#2886).", dbTestsJob, line)
+	}
+
 	for i, s := range lane.steps {
 		if strings.TrimSpace(s.ifCond) != "" {
 			t.Errorf("`go test` step %d of the %q job carries `if: %s`.\n\n"+
@@ -500,11 +739,13 @@ func TestDBTestsLaneCannotPassWithoutRunning(t *testing.T) {
 				"could fail without failing the lane (memql#2886).",
 				i, dbTestsJob, s.continueOnError)
 		}
-		if s.hasRunFilter() {
-			t.Errorf("`go test` step %d of the %q job passes a -run selector (%v).\n\n"+
-				"A -run pattern that matches nothing executes ZERO tests and still reports ok. "+
-				"This lane must run its packages unfiltered (memql#2886).",
-				i, dbTestsJob, s.flags)
+		if f := s.zeroExecutionFlag(); f != "" {
+			t.Errorf("`go test` step %d of the %q job passes %q, which can make the suite exit "+
+				"0 having run NOTHING.\n\n"+
+				"A -run or -skip pattern matching nothing, or -count=0, executes zero tests and "+
+				"still reports ok -- the silent-nothing failure this lane exists to prevent. "+
+				"Note -count=0 is a one-character edit to the -count=1 already there. This lane "+
+				"must run its packages unfiltered (memql#2886).", i, dbTestsJob, f)
 		}
 	}
 }
@@ -582,6 +823,29 @@ func TestDBTestsLaneRunsAtLeastOneDBGatedTest(t *testing.T) {
 				"new one also needs a TestMain calling dbtest.EnsureSchema before it can share "+
 				"the lane's one database (memql#2551, memql#2886).",
 				dbTestsJob, p, knownDirs)
+		}
+	}
+
+	// The structural tie, and the one that catches a selector entry being
+	// DELETED -- which the per-argument check above cannot see, because a
+	// deleted argument is not there to be checked.
+	//
+	// A package earns a TestMain calling dbtest.EnsureSchema for exactly one
+	// reason: so it can migrate the shared schema and join this lane's parallel
+	// run (memql#2551). Having one and not being in the selector is therefore
+	// always drift. It holds exactly today -- the three packages with such a
+	// TestMain are the three the lane names -- and it is self-maintaining: the
+	// per-package work in memql#3030 adds a TestMain, which then REQUIRES the
+	// selector entry rather than merely inviting it.
+	for _, dir := range provisionedPkgs(t, root) {
+		if !covers(pkgs, dir) {
+			t.Errorf("package %q has a TestMain calling dbtest.EnsureSchema but the %q job's "+
+				"selector %v does not cover it.\n\n"+
+				"That TestMain exists so the package can migrate the shared schema and run in "+
+				"this lane (memql#2551). Not being in the selector means its DB assertions run "+
+				"nowhere in CI -- the exact silent gap this gate exists to catch. Add it to the "+
+				"selector, or remove the TestMain if the package is genuinely no longer "+
+				"db-gated (memql#2886).", dir, dbTestsJob, pkgs)
 		}
 	}
 

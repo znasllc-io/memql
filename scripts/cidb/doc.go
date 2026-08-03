@@ -29,22 +29,37 @@
 //
 // # Why the import, not the filename
 //
-// ci.yml's hand-maintained comment binds the selector to "packages that carry
-// *_db_test.go files". That is under-specified -- three of the seven packages
-// holding db-gated tests keep them in files not matching that name -- so this
-// gate keys on the thing that actually makes a test db-gated: an import of
-// component/database/dbtest from a _test.go file.
+// ci.yml's hand-maintained comment bound the selector to "packages that carry
+// *_db_test.go files". That is under-specified: FOUR of the seven packages
+// holding db-gated tests carry no such file at all (component/grpc,
+// integrations/cognition, integrations/planner, and -- though it is in the
+// selector -- examples/referencepack). So this gate keys on the thing that
+// actually makes a test db-gated: an import of component/database/dbtest from a
+// _test.go file.
+//
+// Membership of the lane keys on something stricter still: a TestMain calling
+// dbtest.EnsureSchema. A package earns one only so it can migrate the shared
+// schema and join this lane's parallel run (memql#2551), so having one and not
+// being in the selector is always drift -- and unlike a per-argument check,
+// that catches a selector entry being DELETED.
 //
 // # What this gate deliberately does NOT assert
 //
 // It does not require every db-gated package to be in the lane. Four are not
 // (component/automations, component/grpc, integrations/cognition,
-// integrations/planner), hiding 19 assertions that have never run in CI. That
-// is real and is tracked in memql#3030, separately because closing it is
+// integrations/planner), and their DB assertions have never run in CI. That is
+// real and is tracked in memql#3030, separately because closing it is
 // per-package work rather than a ci.yml edit: each package needs a TestMain
 // calling dbtest.EnsureSchema before it can share the lane's one database
 // (memql#2551). Asserting full coverage here would red the tree on a defect
 // this change does not fix.
+//
+// Two different numbers describe that gap, and they do not disagree. memql#3030
+// counts 19 DB ASSERTIONS -- individual tests measured as skipping against a
+// dead DSN. This gate's log prints 31 TEST FUNCTIONS in dbtest-importing files,
+// which is a coarser proxy: it over-counts non-DB tests that happen to sit in
+// such a file and under-counts db-gated tests that reach dbtest through a
+// helper in a sibling file. Neither number feeds a pass/fail decision.
 //
 // When memql#3030 lands, tighten TestDBTestsLaneRunsAtLeastOneDBGatedTest from
 // "at least one" to full coverage -- the uncovered set is already computed, so

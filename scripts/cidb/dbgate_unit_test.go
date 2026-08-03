@@ -239,12 +239,15 @@ func TestParseDBTestsJob_CapturesStepGuardsAndJobContinueOnError(t *testing.T) {
 	if isFalsy(s.continueOnError) {
 		t.Error("step continue-on-error: true was not captured")
 	}
-	if !s.hasRunFilter() {
+	if s.zeroExecutionFlag() == "" {
 		t.Error("a -run selector was not detected; -run matching nothing executes zero tests and reports ok")
 	}
 }
 
-func TestHasRunFilter(t *testing.T) {
+// TestZeroExecutionFlag covers every flag that makes `go test` exit 0 having
+// run nothing. Guarding only -run read as though the category were closed; the
+// lane already carries -count=1, so -count=0 is a one-character bypass.
+func TestZeroExecutionFlag(t *testing.T) {
 	cases := []struct {
 		flags []string
 		want  bool
@@ -252,13 +255,20 @@ func TestHasRunFilter(t *testing.T) {
 		{[]string{"-run", "TestX"}, true},
 		{[]string{"-run=TestX"}, true},
 		{[]string{"--run=TestX"}, true},
+		{[]string{"-test.run=TestX"}, true},
+		{[]string{"-skip=.*"}, true},
+		{[]string{"-test.skip=.*"}, true},
+		{[]string{"-count=0"}, true},
+		{[]string{"-test.count=0"}, true},
 		{[]string{"-count=1", "-timeout=300s"}, false},
 		{[]string{"-runtime"}, false},
+		{[]string{"-skipper"}, false},
 		{nil, false},
 	}
 	for _, tc := range cases {
-		if got := (goTestStep{flags: tc.flags}).hasRunFilter(); got != tc.want {
-			t.Errorf("hasRunFilter(%v) = %v, want %v", tc.flags, got, tc.want)
+		got := (goTestStep{flags: tc.flags}).zeroExecutionFlag() != ""
+		if got != tc.want {
+			t.Errorf("zeroExecutionFlag(%v) = %v, want %v", tc.flags, got, tc.want)
 		}
 	}
 }
@@ -585,5 +595,164 @@ func TestRequireDBTruthiness(t *testing.T) {
 				t.Errorf("RequireDB() with %s=%q = %v, want %v", dbtest.RequireDBEnv, tc.value, got, tc.want)
 			}
 		})
+	}
+}
+
+// --- runBlockIsPlain: the fail-closed half ----------------------------------
+
+// TestRunBlockIsPlain_RefusesShellConstructs is what makes the line-oriented
+// scan trustworthy. `go test` as the first word of a line inside a conditional
+// never executes, and no regex over lines can tell -- so the gate refuses the
+// block instead of guessing. Each case below was CONFIRMED to leave the gate
+// green before this existed.
+func TestRunBlockIsPlain_RefusesShellConstructs(t *testing.T) {
+	cases := []struct{ name, run string }{
+		{"if/then/fi", "if [ \"$X\" = 1 ]; then\ngo test ./component/memql/...\nfi"},
+		{"while false", "while false; do\ngo test ./component/memql/...\ndone"},
+		{"for loop", "for x in a b; do\ngo test ./component/memql/...\ndone"},
+		{"case arm", "case $X in\na)\ngo test ./component/memql/...\n;;\nesac"},
+		{"exit above", "exit 0\ngo test ./component/memql/..."},
+		{"function body", "run_it() {\ngo test ./component/memql/...\n}"},
+		{"function keyword", "function run_it {\ngo test ./component/memql/...\n}"},
+		{"line continuation", "echo hi \\\ngo test ./component/memql/..."},
+		{"eval", "eval go test ./component/memql/..."},
+		{"multi-line subshell", "X=$(\ngo test ./component/memql/...\n)"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, ok := runBlockIsPlain(tc.run); ok {
+				t.Errorf("runBlockIsPlain accepted a block containing a shell construct:\n%s\n\n"+
+					"`go test` there may never execute, and the gate would report the lane's "+
+					"packages as covered while it runs nothing", tc.run)
+			}
+		})
+	}
+
+	// Positive controls: the real lane's shapes must remain acceptable, or the
+	// fail-closed check would red the lane it is meant to protect.
+	for _, run := range []string{
+		"go test -count=1 -timeout=300s ./component/memql/... ./examples/referencepack/...",
+		"set -o pipefail\ngo test -count=1 ./component/memql/...",
+		"# a comment\ngo test -count=1 ./component/memql/...",
+		"psql -v ON_ERROR_STOP=1 <<'SQL'\nCREATE EXTENSION vector;\nSQL",
+	} {
+		if line, ok := runBlockIsPlain(run); !ok {
+			t.Errorf("runBlockIsPlain rejected a legitimate block at %q:\n%s", line, run)
+		}
+	}
+}
+
+// TestHeredocDelimiter pins the hand-parse. A regex that merely looks for `<<`
+// fires on `echo "a << b"`, captures `b`, and swallows every following line --
+// silently hiding the real invocation below it.
+func TestHeredocDelimiter(t *testing.T) {
+	cases := []struct{ line, want string }{
+		{"cat <<'SQL'", "SQL"},
+		{"cat <<\"SQL\"", "SQL"},
+		{"cat <<SQL", "SQL"},
+		{"cat <<-SQL", "SQL"},
+		{`cat <<\SQL`, "SQL"},
+		{"psql -v ON_ERROR_STOP=1 <<'SQL'", "SQL"},
+		{"cat <<'1SQL'", "1SQL"},          // digit-leading is valid bash
+		{`echo "redirect is a << b"`, ""}, // not a heredoc
+		{"echo a << b c", ""},             // trailing text
+		{"go test ./x/...", ""},
+	}
+	for _, tc := range cases {
+		if got := heredocDelimiter(tc.line); got != tc.want {
+			t.Errorf("heredocDelimiter(%q) = %q, want %q", tc.line, got, tc.want)
+		}
+	}
+}
+
+// TestParseDBTestsJob_ValueTakingFlagIsNotAPackage pins F5: a space-separated
+// flag value starting with "./" is the flag's value, not a package argument.
+func TestParseDBTestsJob_ValueTakingFlagIsNotAPackage(t *testing.T) {
+	spec := mustParse(t, "jobs:\n  db-tests:\n    steps:\n"+
+		"      - run: go test -coverprofile ./cover.out ./component/memql/...\n")
+	got := spec.pkgs()
+	if len(got) != 1 || got[0] != "./component/memql/..." {
+		t.Errorf("pkgs = %v, want [./component/memql/...] -- ./cover.out is -coverprofile's value", got)
+	}
+}
+
+// TestParseDBTestsJob_NonPlainRunIsRecordedNotScanned pins that a refused block
+// contributes no packages AND is reported, rather than silently vanishing.
+func TestParseDBTestsJob_NonPlainRunIsRecordedNotScanned(t *testing.T) {
+	spec := mustParse(t, "jobs:\n  db-tests:\n    steps:\n"+
+		"      - run: |\n          if [ \"$X\" = 1 ]; then\n          go test ./component/memql/...\n          fi\n")
+	if len(spec.pkgs()) != 0 {
+		t.Errorf("pkgs = %v from a conditional block; it must contribute nothing", spec.pkgs())
+	}
+	if len(spec.nonPlainRun) != 1 {
+		t.Fatalf("nonPlainRun = %v, want exactly one recorded offending line", spec.nonPlainRun)
+	}
+}
+
+// TestParseDBTestsJob_NonGoTestStepsAreExcluded pins that steps without a `go
+// test` never enter spec.steps -- the per-step if:/continue-on-error/flag
+// assertions are scoped by that, so including them would red the lane for the
+// checkout and extension steps.
+func TestParseDBTestsJob_NonGoTestStepsAreExcluded(t *testing.T) {
+	spec := mustParse(t, laneYAML)
+	if len(spec.steps) != 1 {
+		t.Errorf("steps = %d, want 1 -- only the `go test` step, not checkout or psql", len(spec.steps))
+	}
+}
+
+// TestLaneSpecPkgs_SpansEveryStep pins that a second `go test` step is not
+// dropped; taking only the first step's packages would hide a whole suite.
+func TestLaneSpecPkgs_SpansEveryStep(t *testing.T) {
+	spec := mustParse(t, "jobs:\n  db-tests:\n    steps:\n"+
+		"      - run: go test ./component/memql/...\n"+
+		"      - run: go test ./examples/referencepack/...\n")
+	if got := spec.pkgs(); len(got) != 2 {
+		t.Errorf("pkgs = %v, want both steps' packages", got)
+	}
+}
+
+// TestParseDBTestsJob_JobLevelIfIsRead pins F3: the job's `if:` decides whether
+// the lane runs at all, and ci-required treats a skipped job as a pass.
+func TestParseDBTestsJob_JobLevelIfIsRead(t *testing.T) {
+	spec := mustParse(t, "jobs:\n  db-tests:\n    if: ${{ false }}\n    steps:\n      - run: go test ./x/...\n")
+	if strings.TrimSpace(spec.jobIf) == "" {
+		t.Error("the job-level `if:` was not captured; a constant-false condition would disable " +
+			"the whole lane with no visible failure")
+	}
+}
+
+// TestProvisionedPkgs_FindsEnsureSchemaTestMains pins the structural tie: a
+// package earns an EnsureSchema TestMain precisely so it can join this lane.
+func TestProvisionedPkgs_FindsEnsureSchemaTestMains(t *testing.T) {
+	root := fixtureRoot(t)
+
+	withMain := `package p
+
+import (
+	"os"
+	"testing"
+	"github.com/znasllc-io/memql/component/database/dbtest"
+)
+
+func TestMain(m *testing.M) {
+	_, _ = dbtest.EnsureSchema(nil)
+	os.Exit(m.Run())
+}
+
+func TestThing(t *testing.T) { _ = dbtest.DSN() }
+`
+	if err := os.MkdirAll(filepath.Join(root, "provisioned"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "provisioned", "main_test.go"), []byte(withMain), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A db-gated package WITHOUT a TestMain is not provisioned for the lane.
+	writeFixturePkg(t, root, "unprovisioned", "unprovisioned")
+
+	got := provisionedPkgs(t, root)
+	if len(got) != 1 || got[0] != "provisioned" {
+		t.Errorf("provisionedPkgs = %v, want [provisioned] -- only packages with an "+
+			"EnsureSchema TestMain are set up to share the lane's database", got)
 	}
 }

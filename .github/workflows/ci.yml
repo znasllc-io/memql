@@ -398,14 +398,22 @@ jobs:
   # silently rotted (referencing constructs that later migrations renamed).
   # This lane mirrors the conformance job's seeded-DB setup and runs the
   # remaining DB-gated suites so that whole class of test can't rot unseen
-  # again. Keep this list in sync with the packages that carry `*_db_test.go`
-  # files (component/memql, component/automations/steps, examples/referencepack).
+  # again.
+  #
+  # The selector below is no longer kept in sync BY HAND -- scripts/cidb does it
+  # executably (memql#2886). The old rule written here, "keep this list in sync
+  # with the packages that carry `*_db_test.go` files", was already wrong when
+  # it was written: examples/referencepack carries none, and four of the seven
+  # db-gated packages in the tree carry none either. The real rule, and the one
+  # the gate asserts, is that every package with a TestMain calling
+  # dbtest.EnsureSchema must appear below.
+  #
   # These per-package binaries run as PARALLEL processes against this ONE shared
-  # DB, so each such package must migrate the schema through a TestMain that
-  # calls dbtest.EnsureSchema (a cross-process advisory lock serializes it);
-  # otherwise the suites race on a half-created schema and fail with
-  # `relation "MemoryNodes" does not exist` (memql#2551). A new db-gated package
-  # needs both an entry above AND that TestMain.
+  # DB, so each such package must migrate the schema through that TestMain (a
+  # cross-process advisory lock serializes it); otherwise the suites race on a
+  # half-created schema and fail with `relation "MemoryNodes" does not exist`
+  # (memql#2551). A new db-gated package needs both an entry below AND that
+  # TestMain -- and adding the TestMain without the entry now fails the gate.
   db-tests:
     name: db-tests
     needs: changes
