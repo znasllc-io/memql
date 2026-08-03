@@ -21,6 +21,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -482,28 +483,56 @@ func TestScanDBGatedTests_FindsAnUntaggedDBGatedTest(t *testing.T) {
 	}
 }
 
-// TestScanDBGatedTests_ExcludesOnlyTheGatesOwnPackage pins selfPkg as an EXACT
-// directory match. Two mutations must be caught: dropping the exclusion (the
-// gate then reports itself as an uncovered db-gated suite, which it is not),
-// and widening it to "scripts" (which would hide any future db-gated package
-// under scripts/ from the coverage assertion).
+// TestSelfPkgNamesThisPackage pins selfPkg to the directory this file actually
+// lives in.
+//
+// Without it, every assertion about the exclusion is written in terms of the
+// constant and therefore MOVES WITH IT: widening selfPkg to "scripts" leaves a
+// fixture-based test green while the gate silently stops excluding itself and
+// starts excluding whatever sits directly under scripts/. A test that reads the
+// value it is meant to be checking cannot catch that value changing -- which is
+// the same shape as the bug this whole package exists to prevent.
+func TestSelfPkgNamesThisPackage(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	rel, err := filepath.Rel(repoRoot(t), filepath.Dir(file))
+	if err != nil {
+		t.Fatalf("locating this package: %v", err)
+	}
+	if got := filepath.ToSlash(rel); got != selfPkg {
+		t.Errorf("selfPkg = %q but this package lives at %q.\n\n"+
+			"selfPkg must name EXACTLY this directory. Point it elsewhere and the gate counts "+
+			"itself as a db-gated suite the lane fails to run; widen it and it hides sibling "+
+			"packages from the coverage assertion (memql#2886).", selfPkg, got)
+	}
+}
+
+// TestScanDBGatedTests_ExcludesOnlyTheGatesOwnPackage pins the exclusion as an
+// EXACT directory match, using LITERAL paths rather than the selfPkg constant
+// so the assertions cannot drift along with it (see TestSelfPkgNamesThisPackage).
 func TestScanDBGatedTests_ExcludesOnlyTheGatesOwnPackage(t *testing.T) {
 	root := fixtureRoot(t)
-	writeFixturePkg(t, root, selfPkg, "cidb")
+	writeFixturePkg(t, root, "scripts/cidb", "cidb")
 	writeFixturePkg(t, root, "scripts/cidbx", "cidbx")
+	writeFixturePkg(t, root, "scripts", "scripts")
 	writeFixturePkg(t, root, "component/thing", "thing")
 
 	got := map[string]bool{}
 	for _, dbt := range scanDBGatedTests(t, root) {
 		got[dbt.dir] = true
 	}
-	if got[selfPkg] {
-		t.Errorf("%s was scanned; it imports dbtest for the predicate, not to reach a database, "+
-			"so counting it reports the gate as a db-gated suite the lane fails to run", selfPkg)
+	if got["scripts/cidb"] {
+		t.Error("scripts/cidb was scanned; it imports dbtest for the predicate, not to reach a " +
+			"database, so counting it reports the gate as a db-gated suite the lane fails to run")
 	}
 	if !got["scripts/cidbx"] {
-		t.Error("scripts/cidbx was excluded; the selfPkg exclusion must be an EXACT directory " +
-			"match, not a prefix, or it hides packages it was never meant to")
+		t.Error("scripts/cidbx was excluded; the exclusion must be an EXACT directory match, " +
+			"not a prefix, or it hides packages it was never meant to")
+	}
+	if !got["scripts"] {
+		t.Error("scripts/ itself was excluded; only the gate's own package may be")
 	}
 	if !got["component/thing"] {
 		t.Error("an ordinary db-gated package was not scanned -- the scanner is inert")
