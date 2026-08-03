@@ -174,6 +174,25 @@ func TestGoTestArgs_IgnoresCommandsThatDoNotRun(t *testing.T) {
 	}
 }
 
+// TestGoTestArgs_CommentedHeredocDoesNotSwallowTheRealCommand is what makes the
+// comment-skip load-bearing rather than merely redundant with the `^` anchor.
+//
+// The anchor alone already rejects `# go test ...`. But a COMMENTED-OUT heredoc
+// opener still matches heredocStart, so without the comment-skip it would arm
+// the heredoc state and consume every following line -- including the real
+// invocation -- leaving the lane looking like it runs no packages at all.
+func TestGoTestArgs_CommentedHeredocDoesNotSwallowTheRealCommand(t *testing.T) {
+	run := "# psql <<'SQL'\ngo test -count=1 ./component/memql/..."
+	got := goTestArgs(run)
+	if len(got) != 1 {
+		t.Fatalf("goTestArgs(%q) = %v, want exactly one invocation -- a commented-out heredoc "+
+			"opener must not arm heredoc tracking and eat the command below it", run, got)
+	}
+	if !strings.Contains(got[0], "./component/memql/...") {
+		t.Errorf("goTestArgs returned %q, want the real invocation's arguments", got[0])
+	}
+}
+
 // --- the lane cannot pass without running ------------------------------------
 
 func TestEffectiveEnv_StepOverridesJob(t *testing.T) {
