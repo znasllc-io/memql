@@ -376,9 +376,9 @@ func TestDBTestsLaneRunsAtLeastOneDBGatedTest(t *testing.T) {
 		sort.Strings(names)
 		t.Logf("Test functions in dbtest-importing files NOT covered by the %q lane, so their DB "+
 			"assertions never run in CI: %v. (A count of functions in such files, which is an "+
-			"upper bound on the DB assertions among them.) Tracked separately -- each package "+
+			"upper bound on the DB assertions among them.) Tracked in memql#3030 -- each package "+
 			"needs a TestMain calling dbtest.EnsureSchema (memql#2551) before it can join the "+
-			"lane.", dbTestsJob, names)
+			"lane. This is a log and not a failure on purpose; see doc.go.", dbTestsJob, names)
 	}
 	t.Logf("%q covers %d Test functions in dbtest-importing files across the selector %v",
 		dbTestsJob, len(covered), pkgs)

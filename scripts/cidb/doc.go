@@ -34,11 +34,15 @@
 // It does not require every db-gated package to be in the lane. Four are not
 // (component/automations, component/grpc, integrations/cognition,
 // integrations/planner), hiding 19 assertions that have never run in CI. That
-// is real, and it is tracked separately, because closing it is per-package work
-// rather than a ci.yml edit: each package needs a TestMain calling
-// dbtest.EnsureSchema before it can share the lane's one database (memql#2551).
-// Asserting full coverage here would red the tree on a defect this change does
-// not fix.
+// is real and is tracked in memql#3030, separately because closing it is
+// per-package work rather than a ci.yml edit: each package needs a TestMain
+// calling dbtest.EnsureSchema before it can share the lane's one database
+// (memql#2551). Asserting full coverage here would red the tree on a defect
+// this change does not fix.
+//
+// When memql#3030 lands, tighten TestDBTestsLaneRunsAtLeastOneDBGatedTest from
+// "at least one" to full coverage -- the uncovered set is already computed, so
+// it is one t.Logf becoming a t.Errorf.
 //
 // Untagged on purpose: it must run in the default `go test ./...`, which the
 // `ci` path filter reaches on any .github/workflows/** edit -- so a PR that
