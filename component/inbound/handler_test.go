@@ -1,9 +1,12 @@
 package inbound
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -370,5 +373,58 @@ func TestHandlerDedupeFailureLeaksNothingToTheCaller(t *testing.T) {
 				t.Errorf("a refused request must not stage a row, got %d calls", len(eng.calls))
 			}
 		})
+	}
+}
+
+// TestStagingFailureLogsNoCallerData pins the memql#2957 CodeQL ruling: the
+// staging-failure log line must not carry the engine error, because the
+// mutation it came from embeds the webhook BODY by string interpolation and the
+// parser quotes source text in its errors (`unexpected token after expression:
+// %q`). A webhook body routinely carries PII and bearer tokens, so a single
+// engine parse failure would copy third-party payload bytes into our log.
+//
+// The requestID IS logged and is the correlation handle -- sha256(source,
+// dedupeKey) truncated, so it identifies the row while revealing nothing the
+// caller sent.
+//
+// Failing-first: put `"error", err` back on that call and the marker appears.
+func TestStagingFailureLogsNoCallerData(t *testing.T) {
+	const marker = "s3cret-payload-marker-9f8e7d"
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	// The fake engine's error quotes the query, which is what a parser error
+	// does -- this is the shape the alert is about, not a contrived one.
+	body := `{"token":"` + marker + `"}`
+	eng := &fakeEngine{err: errors.New(`parse: unexpected token after expression: "` + marker + `"`)}
+
+	h := NewHandler(Config{
+		Enabled:      true,
+		MaxBodyBytes: 1024,
+		Tolerance:    5 * time.Minute,
+		Sources:      map[string]SourceConfig{"acme": func() SourceConfig { s := hexSource(); s.Name = "acme"; return s }()},
+	}, eng, logger)
+	h.now = func() time.Time { return time.Unix(1_700_000_000, 0).UTC() }
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, signedRequest(t, body))
+
+	if rec.Code < 500 {
+		t.Fatalf("expected a 5xx staging failure, got %d", rec.Code)
+	}
+	if strings.Contains(buf.String(), marker) {
+		t.Errorf("the staging-failure log carries caller-supplied payload bytes.\n"+
+			"The mutation embeds the webhook body, and engine errors quote source text, so "+
+			"logging the engine error copies third-party data into our log (memql#2957).\n"+
+			"log:\n%s", buf.String())
+	}
+	// It must still be diagnosable: the line has to name the source and the row.
+	if !strings.Contains(buf.String(), "staging failed") || !strings.Contains(buf.String(), "acme") {
+		t.Errorf("the staging failure must still be logged with its source, or an outage is "+
+			"invisible:\n%s", buf.String())
+	}
+	if !strings.Contains(buf.String(), "inb") {
+		t.Errorf("the log must carry the requestID, which is the safe correlation handle:\n%s", buf.String())
 	}
 }

@@ -128,7 +128,26 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// honest answer -- every sender in the story's list retries on 5xx, and
 		// the staging mutation is idempotent by requestId, so the retry lands
 		// on the same row rather than duplicating the event.
-		h.logger.Error("inbound receiver: staging failed", "source", name, "error", err)
+		//
+		// The engine ERROR is deliberately NOT logged here, and the reason is
+		// not squeamishness (CodeQL go/clear-text-logging, memql#2957). The
+		// mutation is built by string interpolation and embeds the webhook
+		// BODY, so any engine error that quotes the offending source -- and the
+		// parser does, e.g. `unexpected token after expression: %q` -- copies
+		// third-party payload bytes into our application log. A webhook body
+		// routinely carries PII and bearer tokens.
+		//
+		// requestID is safe to log and is the correlation handle: it is
+		// sha256(source, dedupeKey) truncated, so it identifies the row without
+		// revealing anything the caller sent. An operator who needs the engine's
+		// own reason has it in the engine's server-side log for the same
+		// request.
+		//
+		// memqlString JSON-encodes the body precisely so it always renders a
+		// valid literal, so reaching a parse error takes an engine bug rather
+		// than a crafted payload -- but "needs a bug" is not "cannot happen",
+		// and this endpoint is unauthenticated by construction.
+		h.logger.Error("inbound receiver: staging failed", "source", name, "id", requestID)
 		http.Error(w, "could not stage request", http.StatusServiceUnavailable)
 		return
 	}
