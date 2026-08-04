@@ -655,6 +655,21 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 			return nil, meta, err
 		}
 	}
+	// Agent-role predefined-lock guard (memql#2985): a predefined
+	// v1:agents:agentRole is seeded from dsl/agents/roles/*.memql on every
+	// startup, and the concept documents such a row as LOCKED -- but
+	// `predefined` was a UI hint with no enforcement, so any caller could
+	// rename, re-categorise, re-skill or deactivate a catalog row through the
+	// mutation surface. Mirrors the rbac guard above, including its shape: a
+	// whole-row lock with a system-actor carve-out for the SeedMaterializer.
+	// The field-scoped variant that shipped for review is gone -- it was inert
+	// and the one field it would have unlocked steers the AI router. See
+	// agent_role_predefined_validation.go.
+	if conceptMeta.Name == conceptAgentsAgentRole {
+		if err := e.validateAgentRolePredefinedLock(ctx, payload, meta.priorPredefined, actor); err != nil {
+			return nil, meta, err
+		}
+	}
 	// Identity credential-row actor-scope guard (memql#2513): a
 	// v1:identity:identity row of a machine-credential identityType
 	// (badge / worker_token / node_token / voice_agent_token /
