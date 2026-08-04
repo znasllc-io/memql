@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+
+	"github.com/znasllc-io/memql/component/auth"
 )
 
 func TestDeriveGeneratedOutputId_Deterministic(t *testing.T) {
@@ -43,14 +45,33 @@ func TestStringField(t *testing.T) {
 // captureEngine is a minimal MemQLEngine that records Execute queries.
 // Only Execute is exercised by promoteCanvasOutput; the rest of the
 // interface is a nil embed.
+//
+// It records the ACTOR alongside each query: since memql#2989
+// createGeneratedOutput stamps `ownerUserId: actor.userId` instead of
+// taking it as an argument, the owner is no longer visible in the query
+// string, so asserting on the string alone would no longer prove
+// anything about ownership.
 type captureEngine struct {
 	MemQLEngine
 	queries []string
+	actors  []string
 }
 
-func (c *captureEngine) Execute(_ context.Context, q string) (any, error) {
+func (c *captureEngine) Execute(ctx context.Context, q string) (any, error) {
 	c.queries = append(c.queries, q)
+	c.actors = append(c.actors, actorUserId(ctx))
 	return nil, nil
+}
+
+// actorUserId reads the acting user off the context the way the engine
+// resolves `actor.userId` -- from the claims withUserActor stamps.
+func actorUserId(ctx context.Context) string {
+	claims, ok := auth.ClaimsFromContext(ctx)
+	if !ok {
+		return ""
+	}
+	sub, _ := claims["sub"].(string)
+	return sub
 }
 
 func newTestReplier(e MemQLEngine) *Replier {
@@ -104,11 +125,20 @@ func TestPromoteCanvasOutput_PromotesRealCard(t *testing.T) {
 	if len(ce.queries) != 1 {
 		t.Fatalf("expected one insert, got %d: %v", len(ce.queries), ce.queries)
 	}
+	// The owner arrives on the ACTOR, not in the query (memql#2989).
+	if ce.actors[0] != "user-1" {
+		t.Errorf("promotion ran under actor %q, want user-1 -- createGeneratedOutput stamps "+
+			"ownerUserId from actor.userId, so the wrong actor silently misattributes the row",
+			ce.actors[0])
+	}
 	q := ce.queries[0]
+	if strings.Contains(q, "ownerUserId:") {
+		t.Errorf("query still passes ownerUserId as an argument; it is stamped from actor.userId "+
+			"(memql#2989)\n  got: %s", q)
+	}
 	for _, want := range []string{
 		"createGeneratedOutput(",
 		`source:"agent_generated"`,
-		`ownerUserId:"user-1"`,
 		`title:"Report"`,
 		`producedByAgentId:"agent-1"`,
 		`producedByPlanId:"plan-1"`,

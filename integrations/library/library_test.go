@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/memql"
@@ -102,12 +103,20 @@ func (s *stubEngine) Execute(ctx context.Context, query string) (*memql.ExecuteR
 			row[k] = v
 		}
 		row["id"] = args["versionId"]
+		// Model the engine's stamp, not the args: appendDocumentVersion
+		// writes `ownerUserId: actor.userId` (memql#2989), so the value
+		// comes off the CONTEXT. Reading it from args here would let a
+		// regression that reintroduces a caller-supplied owner pass.
+		row["ownerUserId"] = actorUserId(ctx)
 		s.versions = append(s.versions, row)
 		return bundleOf(nil), nil
 	case "updateGeneratedOutputContent":
 		id := args["outputId"].(string)
 		if d, ok := s.doc[id]; ok {
 			d["body"] = args["body"]
+			// Same stamp as above: the re-inserted row's owner comes off
+			// the context actor, never the caller's args.
+			d["ownerUserId"] = actorUserId(ctx)
 			if av, ok := args["attachmentId"]; ok {
 				d["attachmentId"] = av
 			}
@@ -117,6 +126,21 @@ func (s *stubEngine) Execute(ctx context.Context, query string) (*memql.ExecuteR
 		return bundleOf(nil), nil
 	}
 	return bundleOf(nil), nil
+}
+
+// actorUserId reads the acting user off the context the way the engine
+// resolves `actor.userId` -- from the claims withUserActor stamps.
+// Returns "" when no actor is bound, which is the case the handlers must
+// refuse to reach: withUserActor passes the context through unchanged
+// for a blank owner, so a write on that path would be attributed to
+// whoever the inbound caller happened to be.
+func actorUserId(ctx context.Context) string {
+	claims, ok := auth.ClaimsFromContext(ctx)
+	if !ok {
+		return ""
+	}
+	sub, _ := claims["sub"].(string)
+	return sub
 }
 
 // bundleOf wraps rows in an *ExecuteResult whose Bundle holds matching
@@ -403,6 +427,14 @@ func TestRestore_AppendsNewLatestEqualToChosen(t *testing.T) {
 // TestEditDocument_OwnerThreadedFromRow proves ownerUserId on the
 // appended version is taken from the document row, not from any caller-
 // supplied value.
+//
+// The MECHANISM changed in memql#2989 and the guarantee did not. The
+// handler used to pass `ownerUserId` as a mutation argument; it now runs
+// the write under the row owner's actor and the mutation stamps
+// `actor.userId`. The stub models that (see actorUserId), so this still
+// asserts the same thing -- an attacker-supplied owner does not land --
+// and additionally proves the value now arrives by the un-forgeable
+// route.
 func TestEditDocument_OwnerThreadedFromRow(t *testing.T) {
 	eng := newStubEngine()
 	doc := seededDoc()
@@ -417,7 +449,82 @@ func TestEditDocument_OwnerThreadedFromRow(t *testing.T) {
 		t.Fatalf("edit: %v", err)
 	}
 	if got := eng.versions[0]["ownerUserId"]; got != "real-owner" {
-		t.Fatalf("version ownerUserId = %v, want real-owner (threaded from row)", got)
+		t.Fatalf("version ownerUserId = %v, want real-owner (stamped from the owner actor)", got)
+	}
+	if got := eng.doc["doc-1"]["ownerUserId"]; got != "real-owner" {
+		t.Fatalf("backing row ownerUserId = %v, want real-owner -- the re-insert must not "+
+			"reassign ownership", got)
+	}
+	// The owner must not appear as an ARGUMENT to the two mutations that
+	// now stamp it. Leaving it there would put a forgeable field back on
+	// the generated client surface even though the engine ignores it.
+	//
+	// Scoped to those two by name on purpose: createArtifact still takes
+	// an ownerUserId arg, and legitimately -- v1:library:artifact declares
+	// no @rowAuthz tier, so it is one of the concepts memql#2803 has yet
+	// to reach, not a miss here.
+	for _, q := range eng.calls {
+		name, _ := parseCall(q)
+		switch name {
+		case "appendDocumentVersion", "updateGeneratedOutputContent":
+			if strings.Contains(q, "ownerUserId:") {
+				t.Fatalf("%s still passes ownerUserId as an argument (memql#2989 stamps it "+
+					"from actor.userId): %s", name, q)
+			}
+		}
+	}
+}
+
+// TestEditDocument_RefusesOwnerlessDocument covers the edge memql#2989's
+// ruling flagged: withUserActor returns the context UNCHANGED for a
+// blank owner, so a write on that path would be stamped with whatever
+// actor the INBOUND caller carried -- silently attributing another
+// user's document to them. The handler must refuse instead.
+func TestEditDocument_RefusesOwnerlessDocument(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		call func(*Integration, context.Context) error
+	}{
+		{
+			name: "editDocument",
+			call: func(i *Integration, ctx context.Context) error {
+				_, err := i.handleEditDocument(ctx, map[string]any{
+					"documentId": "doc-1", "content": "x",
+				}, 0)
+				return err
+			},
+		},
+		{
+			name: "restoreDocumentVersion",
+			call: func(i *Integration, ctx context.Context) error {
+				_, err := i.handleRestoreDocumentVersion(ctx, map[string]any{
+					"documentId": "doc-1", "versionId": "v-1",
+				}, 0)
+				return err
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			eng := newStubEngine()
+			doc := seededDoc()
+			doc["ownerUserId"] = "" // no resolvable owner
+			eng.seedDocument(doc)
+			i := NewIntegration(eng)
+
+			// An inbound caller who is NOT the document owner. If the
+			// handler proceeded, the stamp would land on this identity.
+			ctx := auth.ContextWithClaims(context.Background(), map[string]any{
+				"sub": "inbound-caller", "role": "user",
+			})
+
+			if err := tc.call(i, ctx); err == nil {
+				t.Fatal("handler accepted an ownerless document; it must refuse rather than " +
+					"attribute the write to the inbound caller")
+			}
+			if len(eng.versions) != 0 {
+				t.Fatalf("wrote %d version(s) for an ownerless document, want 0", len(eng.versions))
+			}
+		})
 	}
 }
 

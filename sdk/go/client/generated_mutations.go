@@ -226,13 +226,12 @@ func AdvanceRequestBuild(args AdvanceRequestArgs) string {
 	return b.String()
 }
 
-// AppendDocumentVersion -- Append an immutable document-version snapshot to a logical document's history. Handler-invoked (integration.library.editDocument / restoreDocumentVersion) -- ownerUserId is threaded from the backing document's owner, versionNumber + versionId are computed server-side from the current latest. Append-only: every call inserts a new immutable row; nothing is overwritten.
+// AppendDocumentVersion -- Append an immutable document-version snapshot to a logical document's history. Handler-invoked (integration.library.editDocument / restoreDocumentVersion) -- ownerUserId is stamped from actor.userId (the handlers run the append under the backing document's owner), versionNumber + versionId are computed server-side from the current latest. Append-only: every call inserts a new immutable row; nothing is overwritten.
 //
 // Bound concept: v1:library:documentVersion (machine-readable: BoundConcepts["appendDocumentVersion"] in generated_concepts.go).
 type AppendDocumentVersionArgs struct {
 	VersionId     string
 	DocumentId    string
-	OwnerUserId   string
 	VersionNumber int
 	Content       string
 	AttachmentId  string
@@ -261,11 +260,6 @@ func AppendDocumentVersionBuild(args AppendDocumentVersionArgs) string {
 	}
 	b.WriteString("documentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.DocumentId))
-	if b.Len() > 31 {
-		b.WriteString(", ")
-	}
-	b.WriteString("ownerUserId: ")
-	b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
 	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
@@ -3261,12 +3255,11 @@ func CreateDocumentChunkBuild(args CreateDocumentChunkArgs) string {
 	return b.String()
 }
 
-// CreateGeneratedOutput -- Create a generated-output row -- a deliverable PRODUCED through the app (workbench result, computer-use output, or standalone agent output). System / agent-invoked: ownerUserId is the producing user. indexGeneratedOutput folds the new row into the Library index automatically. body carries inline text outputs; attachmentId references file bytes for file-backed outputs.
+// CreateGeneratedOutput -- Create a generated-output row -- a deliverable PRODUCED through the app (workbench result, computer-use output, or standalone agent output). Owned: ownerUserId is stamped from actor.userId, so the row can only ever be created for the acting user. Every Go call site runs the mutation under the producing user's actor (withUserActor), so the stamped value is the producing user. indexGeneratedOutput folds the new row into the Library index automatically. body carries inline text outputs; attachmentId references file bytes for file-backed outputs.
 //
 // Bound concept: v1:library:generatedOutput (machine-readable: BoundConcepts["createGeneratedOutput"] in generated_concepts.go).
 type CreateGeneratedOutputArgs struct {
 	OutputId     string
-	OwnerUserId  string
 	Title        string
 	Summary      string
 	Body         string
@@ -3294,11 +3287,6 @@ func CreateGeneratedOutputBuild(args CreateGeneratedOutputArgs) string {
 	b.WriteString("mutation createGeneratedOutput(")
 	b.WriteString("outputId: ")
 	b.WriteString(fmt.Sprintf("%q", args.OutputId))
-	if b.Len() > 31 {
-		b.WriteString(", ")
-	}
-	b.WriteString("ownerUserId: ")
-	b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
 	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
@@ -11220,12 +11208,11 @@ func UpdateDeploymentStatusBuild(args UpdateDeploymentStatusArgs) string {
 	return b.String()
 }
 
-// UpdateGeneratedOutputContent -- Re-insert a generatedOutput row (same id, new version) carrying the latest edited content so the Library viewer + artifact index reflect the most recent document version. Append-only by (id, createdAt): a new node version, reads return the latest. Handler-invoked by integration.library.editDocument / restoreDocumentVersion; ownerUserId is threaded from the existing row.
+// UpdateGeneratedOutputContent -- Re-insert a generatedOutput row (same id, new version) carrying the latest edited content so the Library viewer + artifact index reflect the most recent document version. Append-only by (id, createdAt): a new node version, reads return the latest. Handler-invoked by integration.library.editDocument / restoreDocumentVersion; ownerUserId is stamped from actor.userId, and both handlers run the write under the existing row's owner.
 //
 // Bound concept: v1:library:generatedOutput (machine-readable: BoundConcepts["updateGeneratedOutputContent"] in generated_concepts.go).
 type UpdateGeneratedOutputContentArgs struct {
 	OutputId     string
-	OwnerUserId  string
 	Title        string
 	Summary      string
 	Body         string
@@ -11251,11 +11238,6 @@ func UpdateGeneratedOutputContentBuild(args UpdateGeneratedOutputContentArgs) st
 	b.WriteString("mutation updateGeneratedOutputContent(")
 	b.WriteString("outputId: ")
 	b.WriteString(fmt.Sprintf("%q", args.OutputId))
-	if b.Len() > 38 {
-		b.WriteString(", ")
-	}
-	b.WriteString("ownerUserId: ")
-	b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
 	if b.Len() > 38 {
 		b.WriteString(", ")
 	}
