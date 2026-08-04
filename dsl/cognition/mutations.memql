@@ -17,8 +17,8 @@ mutate participant addAgentToSpace {
   }
   insert {
     id: concat("si-", hash(concat(
-      canonicalId(args.agentId, agent), ":",
-      args.partitionId
+      hash(canonicalId(args.agentId, agent)),
+      hash(args.partitionId)
     )))
     args.partitionId
     args.agentId
@@ -361,8 +361,8 @@ mutate participant joinSpaceAsHuman {
     // land on the same participant id. The caller does not supply the
     // id (memql#213 dropped the ignored participantId arg).
     id: concat("participant-", hash(concat(
-      args.partitionId, ":",
-      canonicalId(args.userId, user)
+      hash(args.partitionId),
+      hash(canonicalId(args.userId, user))
     )))
     args.partitionId
     args.userId
@@ -416,8 +416,8 @@ mutate participant joinSpaceAsAI {
     // other AI-join mutations. The caller does not supply the id
     // (memql#213 dropped the ignored participantId arg).
     id: concat("si-", hash(concat(
-      canonicalId(args.agentId, agent), ":",
-      args.partitionId
+      hash(canonicalId(args.agentId, agent)),
+      hash(args.partitionId)
     )))
     args.partitionId
     args.agentId
@@ -484,8 +484,8 @@ mutate participant removeAgentFromSpace {
   }
   update {
     id: concat("si-", hash(concat(
-      canonicalId(args.agentId, agent), ":",
-      args.partitionId
+      hash(canonicalId(args.agentId, agent)),
+      hash(args.partitionId)
     )))
     status: "left"
     leftAt: now
@@ -565,19 +565,45 @@ mutate utterance sendActionUtterance {
     action           object!
   }
   insert {
+    // PER-PART HASHING, no separator (memql#3009).
+    //
+    // This was `hash(concat(a, ":", b, ":", c, ":", d))`, which keys four
+    // values into one string and is injective only if the split is
+    // recoverable. It was not: `args.action.type` and
+    // `args.action.idempotencyKey` are both client-supplied, so
+    // ("chat", "k:1") and ("chat:k", "1") derived ONE utterance id, and two
+    // distinct actions collapsed onto one row.
+    //
+    // memql#2980's remedy -- `@pattern("^[^:]+$")` on the trailing arg -- is
+    // both unavailable and unwanted here. Unavailable because `action` is
+    // declared `object!`, so `type` and `idempotencyKey` are nested inside an
+    // unstructured object with nowhere to hang an annotation. Unwanted
+    // because idempotencyKey is a caller-chosen opaque string: banning a
+    // colon would reject "order:123" to work around an internal encoding
+    // choice, pushing the engine's problem into the caller's key space.
+    //
+    // hash() is sha256-hex, so every part hashes to exactly 64 characters. A
+    // concatenation of fixed-width digests has exactly ONE decomposition,
+    // which makes the id injective by CONSTRUCTION rather than by
+    // constraining what a caller may send. No separator, nothing to alias on.
+    //
+    // This re-keys existing utt- ids, deliberately: memQL is pre-release and
+    // CLAUDE.md forbids migration shims.
     id: coalesce(
       args.utteranceId,
       cond(
         args.action.idempotencyKey,
         concat("utt-", hash(concat(
-          args.partitionId, ":",
-          canonicalId(args.participantId, participant), ":",
-          args.action.type, ":", args.action.idempotencyKey
+          hash(args.partitionId),
+          hash(canonicalId(args.participantId, participant)),
+          hash(args.action.type),
+          hash(args.action.idempotencyKey)
         ))),
         concat("utt-", hash(concat(
-          args.partitionId, ":",
-          canonicalId(args.participantId, participant), ":",
-          args.createdAt ?? now, ":", args.action.type
+          hash(args.partitionId),
+          hash(canonicalId(args.participantId, participant)),
+          hash(args.createdAt ?? now),
+          hash(args.action.type)
         )))
       )
     )
@@ -627,14 +653,15 @@ mutate utterance sendRealtimeTranscriptUtterance {
       cond(
         args.idempotencyKey,
         concat("utt-", hash(concat(
-          args.partitionId, ":",
-          canonicalId(args.participantId, participant), ":",
-          args.idempotencyKey
+          hash(args.partitionId),
+          hash(canonicalId(args.participantId, participant)),
+          hash(args.idempotencyKey)
         ))),
         concat("utt-", hash(concat(
-          args.partitionId, ":",
-          canonicalId(args.participantId, participant), ":",
-          now, ":", args.text ?? ""
+          hash(args.partitionId),
+          hash(canonicalId(args.participantId, participant)),
+          hash(now),
+          hash(args.text ?? "")
         )))
       )
     )
@@ -686,9 +713,9 @@ mutate utterance sendSpeechUtterance {
     id: coalesce(
       args.utteranceId,
       concat("utt-", hash(concat(
-        args.partitionId, ":",
-        canonicalId(args.participantId, participant), ":",
-        now
+        hash(args.partitionId),
+        hash(canonicalId(args.participantId, participant)),
+        hash(now)
       )))
     )
     args.partitionId
@@ -768,8 +795,8 @@ mutate audioOverride setAgentAudioOverride {
   }
   insert {
     id: concat("audioOverride-", hash(concat(
-      args.partitionId, ":",
-      canonicalId(args.agentId, agent)
+      hash(args.partitionId),
+      hash(canonicalId(args.agentId, agent))
     )))
     args.partitionId
     args.agentId
@@ -823,8 +850,8 @@ mutate videoOverride setAgentVideoOverride {
   }
   insert {
     id: concat("videoOverride-", hash(concat(
-      args.partitionId, ":",
-      canonicalId(args.agentId, agent)
+      hash(args.partitionId),
+      hash(canonicalId(args.agentId, agent))
     )))
     args.partitionId
     args.agentId
