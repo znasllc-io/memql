@@ -159,6 +159,12 @@ func (a *App) transportBase() {
 		a.fatal("failed to initialize memql gateway", "error", err)
 	}
 	a.middlewares = append(a.middlewares, memqlGateway.Middleware())
+	// Record the gateway's intercepted paths so the boot assertion can see
+	// them (memql#3004). This middleware sits AHEAD of the mux and claims
+	// POST /memql/query before any route matches, so it reaches neither
+	// a.registeredRoutes nor ContractRoutes() -- it was served on the
+	// verifier-less identity binary while appearing in no declaration at all.
+	a.middlewareRoutes = append(a.middlewareRoutes, memqlgrpc.InterceptedPaths()...)
 
 	wsBridge, err := memqlws.New(wsOptions)
 	if err != nil {
@@ -244,6 +250,17 @@ func (a *App) createHTTPServer() {
 // unexercised. Taking it as a parameter lets both be tested.
 func (a *App) unauthenticatedSurfaceRoutes(wholeMux bool) []string {
 	routes := server.ContractRoutes()
+	// Middleware-served paths are included UNCONDITIONALLY, not under
+	// wholeMux (memql#3004). wholeMux distinguishes "assert the whole mux" from
+	// "assert the contract floor", and a middleware path is in neither
+	// category -- it bypasses the mux entirely, so gating it on a mux-scope
+	// flag would reproduce the invisibility this fixes. The MEMQL_IDENTITY_
+	// ENABLED=false mode is the case that matters: it takes the contract-only
+	// branch precisely BECAUSE nothing is authenticated there, and the gateway
+	// admitting POST /memql/query as the synthetic cluster owner is called out
+	// by name in the note above as a reason that mode is a floor. Declaring the
+	// path is what makes that note checkable instead of prose.
+	routes = append(routes, a.middlewareRoutes...)
 	if wholeMux {
 		routes = append(routes, a.registeredRoutes...)
 	}

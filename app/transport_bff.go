@@ -24,5 +24,10 @@ func (a *App) transportBFF() {
 	// live here, not only on the agent. Shared with the agent build in
 	// transport_attachments.go. (memql#888)
 	a.mountAttachmentEndpoints()
+	// Inbound-delivery receiver (POST /inbound/{source}, memql#2957). The
+	// counterpart to the outbound worker: a third party dials US, so it is HTTP
+	// on the frontend-facing node. Deny-by-default -- with no
+	// MEMQL_INBOUND_SOURCE_ALLOWLIST it answers 404 to everything.
+	a.mountInboundEndpoints()
 	a.createHTTPServer()
 }
