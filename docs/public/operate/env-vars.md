@@ -30,8 +30,14 @@ sealing.
 
 A var read in code but absent from the registry — or a registry entry that
 appears nowhere in the repo — fails CI via `make env-registry-check`
-(`go run ./cmd/envscan -check`). After editing the registry, regenerate the
-embedded snapshot with `make env-registry-sync`.
+(`go run ./cmd/envscan -check`). "Nowhere in the repo" means outside the
+registry itself: the check excludes **both** copies of the manifest (the
+authored one and the embedded `component/genesis/manifest.yaml` snapshot),
+because an entry's own row is not a reference to it. Missing the second copy is
+what left the reverse direction unsatisfiable until memql#2971 — with both in
+the scan every name appeared at least twice, so the staleness threshold could
+never select. After editing the registry, regenerate the embedded snapshot with
+`make env-registry-sync`.
 
 ## TL;DR
 
