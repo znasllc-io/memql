@@ -280,19 +280,63 @@ func CheckDrift(root string) (Result, error) {
 		RegistrySize: len(manifest.AllEntries()),
 	}
 
-	corpus, err := repoCorpus(absRoot)
+	corpus, excluded, err := repoCorpus(absRoot)
 	if err != nil {
 		return Result{}, fmt.Errorf("build corpus: %w", err)
+	}
+	// The exclusion IS the reverse-drift check, so a miss has to be loud.
+	//
+	// If a registry file is moved or renamed it silently re-enters the
+	// corpus, every entry regains a self-reference, and the entire reverse
+	// direction goes quiet with the gate still green -- memql#2971
+	// returning by a different route. Erroring here turns that into a
+	// build failure naming the file it could not find.
+	//
+	// Compared as a SET rather than a count: `len(excluded) != len(registryFiles)`
+	// is satisfied by any two exclusions, so it would pass while excluding the
+	// wrong files. The predicate has to name what is missing, not how much.
+	if missing := missingRegistryFiles(excluded); len(missing) > 0 {
+		return Result{}, fmt.Errorf(
+			"reverse-drift corpus did not exclude registry file(s) %v (excluded %v of want %v): "+
+				"every registry file must be excluded or a stale entry references itself and "+
+				"this check goes silent. If a manifest moved, update registryFiles",
+			missing, excluded, registryFiles)
 	}
 	for _, e := range manifest.AllEntries() {
 		if isExternal(e.Name) {
 			continue
 		}
 		// A registry entry is "used" if its name appears anywhere in the
-		// repo (code reads, k8s overlays, .env templates, dsl). This
-		// tolerates env.NewEnvReader prefix-composed full keys and
-		// k8s-only injection targets that no Go literal reads directly.
-		if strings.Count(corpus, e.Name) < 2 { // 1 = the manifest row itself
+		// repo OUTSIDE the registry itself (code reads, k8s overlays,
+		// .env templates, dsl). This tolerates env.NewEnvReader
+		// prefix-composed full keys and k8s-only injection targets that no
+		// Go literal reads directly.
+		//
+		// The corpus excludes every copy of the registry, so an occurrence
+		// is a real reference and the threshold needs no off-by-one
+		// allowance to explain. It read `< 2` with the comment
+		// "1 = the manifest row itself", which stopped being true when the
+		// embedded snapshot was added: two identical copies gave every
+		// entry a corpus floor of 2, so the condition could never select
+		// and reverse drift was dead in every state CI could reach
+		// (memql#2971).
+		//
+		// The occurrence must be WHOLE-WORD. A plain substring match is not
+		// enough here, and this is the second way #2971's defect survived
+		// rather than a refinement: 87 of the 299 entries are proper
+		// substrings of another entry, and every one of them is a legacy
+		// alias whose own manifest row says "DEPRECATED legacy alias for
+		// MEMQL_X; remove after operators migrate". Deleting that alias is
+		// exactly the edit this gate exists to catch, and under a substring
+		// match the surviving MEMQL_X kept the alias looking referenced
+		// forever -- measured by dropping one alias row from
+		// component/genesis/legacyalias.go, which left that name with zero
+		// real references while the gate still reported no drift.
+		//
+		// Deliberately no live registry name in this comment: repoCorpus
+		// ingests .go files, this file included, so naming one here would
+		// itself count as the reference and keep it out of Stale forever.
+		if !referencedWholeWord(corpus, e.Name) {
 			res.Stale = append(res.Stale, e.Name)
 		}
 	}
@@ -300,11 +344,98 @@ func CheckDrift(root string) (Result, error) {
 	return res, nil
 }
 
+// referencedWholeWord reports whether name occurs in corpus as a whole
+// token -- not as part of a longer env-var name.
+//
+// Env keys are [A-Z0-9_], so the boundary test is simply that the
+// character on either side of a hit is not one of those (and not a
+// lowercase letter, so a Go identifier like myMEMQL_FOOBar is not a
+// reference either).
+//
+// This is what makes the reverse check satisfiable for the 87 entries
+// that are proper substrings of another entry. All of them are legacy
+// aliases queued for removal, so they are precisely the rows whose
+// staleness the gate is meant to report (memql#2971).
+func referencedWholeWord(corpus, name string) bool {
+	if name == "" {
+		return false
+	}
+	for i := 0; ; {
+		j := strings.Index(corpus[i:], name)
+		if j < 0 {
+			return false
+		}
+		start := i + j
+		end := start + len(name)
+		if !isEnvNameByte(corpus, start-1) && !isEnvNameByte(corpus, end) {
+			return true
+		}
+		i = start + 1
+	}
+}
+
+// isEnvNameByte reports whether the byte at idx could be part of an env
+// key or a surrounding identifier. Out-of-range counts as a boundary.
+func isEnvNameByte(s string, idx int) bool {
+	if idx < 0 || idx >= len(s) {
+		return false
+	}
+	c := s[idx]
+	return c == '_' ||
+		(c >= 'A' && c <= 'Z') ||
+		(c >= 'a' && c <= 'z') ||
+		(c >= '0' && c <= '9')
+}
+
+// missingRegistryFiles returns the registryFiles entries absent from
+// excluded. Set difference rather than a length compare, so the caller
+// can name what went missing instead of only that something did.
+func missingRegistryFiles(excluded []string) []string {
+	got := make(map[string]bool, len(excluded))
+	for _, e := range excluded {
+		got[e] = true
+	}
+	var missing []string
+	for _, want := range registryFiles {
+		if !got[want] {
+			missing = append(missing, want)
+		}
+	}
+	return missing
+}
+
+// registryFiles are every copy of the registry itself, repo-relative and
+// slash-separated. They are excluded from the reverse-drift corpus,
+// because an entry's own row is not a reference to it.
+//
+// There are TWO copies and they carry identical rows: the authored
+// scripts/secrets/manifest.yaml (the source of truth) and the
+// //go:embed snapshot component/genesis/manifest.yaml, which
+// scripts/secrets/sync-embedded-manifest.sh regenerates verbatim and
+// TestEmbeddedManifestInSync keeps in step. Missing the second one is
+// what made the reverse check unsatisfiable (memql#2971), so CheckDrift
+// hard-fails rather than proceeding if any entry here goes unmatched.
+var registryFiles = []string{
+	"scripts/secrets/manifest.yaml",
+	"component/genesis/manifest.yaml",
+}
+
 // repoCorpus concatenates the text of every config-bearing file
 // (.go / .memql / .yaml / .yml / .env*) so reverse-drift can check
 // whether a registered name is referenced anywhere.
-func repoCorpus(root string) (string, error) {
+//
+// It returns the registry files it EXCLUDED alongside the corpus. That
+// second value is not bookkeeping: the caller compares it against
+// registryFiles, because an exclusion that silently stops matching is
+// indistinguishable from a clean tree.
+func repoCorpus(root string) (string, []string, error) {
+	registry := make(map[string]bool, len(registryFiles))
+	for _, rel := range registryFiles {
+		registry[rel] = true
+	}
+
 	var b strings.Builder
+	var excluded []string
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -314,6 +445,22 @@ func repoCorpus(root string) (string, error) {
 				return filepath.SkipDir
 			}
 			return nil
+		}
+		if rel, relErr := filepath.Rel(root, path); relErr == nil {
+			slash := filepath.ToSlash(rel)
+			if registry[slash] {
+				excluded = append(excluded, slash)
+				return nil
+			}
+			// The scanner's own source is not a reference, for the same
+			// reason scannable() already skips it on the read side: this
+			// package names env vars in comments and denylist literals.
+			// Measured while fixing memql#2971 -- a var named in a comment
+			// HERE kept itself out of Stale, which is the defect wearing
+			// the reviewer's clothes.
+			if strings.HasPrefix(slash, "cmd/envscan/") {
+				return nil
+			}
 		}
 		base := filepath.Base(path)
 		switch {
@@ -332,5 +479,6 @@ func repoCorpus(root string) (string, error) {
 		}
 		return nil
 	})
-	return b.String(), err
+	sort.Strings(excluded)
+	return b.String(), excluded, err
 }
