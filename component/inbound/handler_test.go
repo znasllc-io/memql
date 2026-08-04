@@ -221,7 +221,8 @@ func TestHandlerAnswers5xxWhenStagingFails(t *testing.T) {
 	}
 }
 
-// Idempotency is structural: the id is derived from (source, dedupeKey), so a
+// Idempotency is structural: the id is derived from (source, digest of the
+// SIGNED payload), so a
 // redelivery renders the same id and @createOnly protects the product's
 // handling state. If the id ever became time- or nonce-derived, a redelivery
 // would stage a second row and the product would process the event twice.

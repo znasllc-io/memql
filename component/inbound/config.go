@@ -49,7 +49,7 @@ const (
 // sourceNamePattern bounds a source name to what can appear in a single URL
 // path segment and in an env var name. It also guarantees the name is free of
 // the NUL byte requestIdFor uses as its separator, which is what makes the
-// (source, dedupeKey) composition injective -- see requestIdFor.
+// (source, identityKey) composition injective -- see requestIdFor.
 var sourceNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 
 // SourceConfig is one allowlisted sender's verification policy, resolved from

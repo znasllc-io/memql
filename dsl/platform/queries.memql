@@ -219,7 +219,7 @@ query inboundRequest inboundRequestsByStatus {
 
 /// Idempotency lookup the inbound receiver runs before staging (memql#2957): at-least-once
 /// redelivery of the same event must collapse onto the existing row rather than stage a duplicate.
-@unbounded("inbound request by (source, dedupeKey) -- bounded to a single row")
+@unbounded("inbound request by the sender's dedupe key -- bounded to a single row")
 query inboundRequest inboundRequestByDedupeKey {
   args {
     source     string!

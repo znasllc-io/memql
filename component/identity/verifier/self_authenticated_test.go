@@ -118,3 +118,43 @@ func TestSelfAuthenticatedPathsAreNotPublicPaths(t *testing.T) {
 			"re-read; if it is accidental, other routes have silently become gated.")
 	}
 }
+
+// An encoded separator makes the decoded path and the escaped path disagree,
+// and this function decides on the decoded one while the mux routes on the
+// escaped one. "/inbound%2Fx" decodes to the one-segment "/inbound/x" -- which
+// the segment rule would exempt -- while the mux sees the single literal
+// segment "inbound%2Fx" and dispatches somewhere else entirely.
+//
+// It 404s today only because no binary registers a "/" catch-all. That is a
+// property of the current route table rather than of this matcher, so it is
+// closed here instead: where the two spellings differ, the request is not
+// exempted.
+func TestEncodedSeparatorInTheMountSegmentIsNotExempt(t *testing.T) {
+	opts := MiddlewareOptions{SelfAuthenticatedPaths: []string{"/inbound/"}}
+	selfAuth := normalizeSelfAuthSet(opts.SelfAuthenticatedPaths)
+
+	req := httptest.NewRequest(http.MethodPost, "/inbound%2Fx", nil)
+	if req.URL.RawPath == "" || req.URL.RawPath == req.URL.Path {
+		t.Skipf("control: this Go version did not keep a distinct RawPath for %q (path=%q, raw=%q)",
+			"/inbound%2Fx", req.URL.Path, req.URL.RawPath)
+	}
+	if isSelfAuthenticated(req, selfAuth) {
+		t.Errorf("%q was exempted. Its decoded path (%q) satisfies the one-segment rule, but the "+
+			"mux routes on the escaped form (%q) and would dispatch elsewhere -- so the exemption "+
+			"would apply to a request this route never handles.",
+			"/inbound%2Fx", req.URL.Path, req.URL.RawPath)
+	}
+}
+
+// And the ordinary encoded-separator case, which was already safe because
+// decoding only adds separators: the decoded view is the stricter one.
+func TestEncodedSeparatorInsideTheSourceSegmentIsNotExempt(t *testing.T) {
+	opts := MiddlewareOptions{SelfAuthenticatedPaths: []string{"/inbound/"}}
+	selfAuth := normalizeSelfAuthSet(opts.SelfAuthenticatedPaths)
+
+	req := httptest.NewRequest(http.MethodPost, "/inbound/a%2Fb", nil)
+	if isSelfAuthenticated(req, selfAuth) {
+		t.Errorf("%q was exempted; it decodes to two segments under the mount and must be gated",
+			"/inbound/a%2Fb")
+	}
+}

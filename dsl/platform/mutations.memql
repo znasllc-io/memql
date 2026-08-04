@@ -340,12 +340,22 @@ mutate outboundRequest updateOutboundRequestStatus {
 // either is refused at the edge and never reaches this mutation, so a
 // row existing IS the record that it was accepted.
 //
-// Idempotent by requestId, which the receiver derives from
-// (source, dedupeKey): a redelivery of the same event re-stages onto
-// the same row and @createOnly preserves the product-owned status /
-// processedAt / lastError rather than resetting handling state back to
-// 'received' and making the product work it twice. Same shape as
+// Idempotent by requestId, which the receiver derives from (source,
+// digest of the SIGNED payload): a redelivery of the same event
+// re-stages onto the same row and @createOnly preserves the
+// product-owned status / processedAt / lastError rather than resetting
+// handling state back to 'received'. Same shape as
 // stageOutboundRequest's protection of the worker-owned fields.
+//
+// NOT the sender's dedupe header. That header is not covered by the
+// vendor's HMAC, so deriving identity from it let one captured
+// delivery mint unbounded rows (memql#2957 landing review). It is
+// still recorded on the row; it just does not decide the id.
+//
+// @createOnly stops the STATUS being reset. It does not stop the
+// second node.created firing -- this is at-least-once delivery with a
+// stable idempotency key, not exactly-once processing, and a product
+// automation has to branch on status before doing work.
 
 @createOnly("status", "processedAt", "lastError")
 @description("Stage a verified inbound delivery (memql#2957): insert a v1:platform:inboundRequest row with status='received' for a product automation to drain. Called by the engine inbound receiver once the source allowlist and signature check have passed; the signing secret is never part of the row. Idempotent by requestId: a redelivery preserves the product-owned handling state (@createOnly) instead of replaying it.")

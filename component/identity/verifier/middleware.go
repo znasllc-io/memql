@@ -191,6 +191,22 @@ func isSelfAuthenticated(r *http.Request, selfAuthPaths map[string]bool) bool {
 	if r == nil || r.URL == nil || len(selfAuthPaths) == 0 {
 		return false
 	}
+	// This decision is made on the DECODED path (r.URL.Path); the mux routes on
+	// the ESCAPED one. Where the two differ, refuse to exempt rather than reason
+	// about which way the difference cuts.
+	//
+	// Decoding only ever ADDS separators, so for a segment-counting rule the
+	// decoded view is the stricter one and every %2F-inside-a-segment case
+	// already fails closed. The inverted case is an encoded separator in the
+	// MOUNT segment: "/inbound%2Fx" decodes to the one-segment "/inbound/x" and
+	// would be exempted, while the mux sees the single literal segment
+	// "inbound%2Fx" and dispatches elsewhere. Today that 404s because no binary
+	// registers a "/" catch-all -- but that is a property of the current route
+	// table, not of this function, and nobody re-checks it when the next route
+	// lands. Closing it here makes the exemption depend on nothing external.
+	if r.URL.RawPath != "" && r.URL.RawPath != r.URL.Path {
+		return false
+	}
 	path := normalizePath(r.URL.Path)
 	for allowed, isMount := range selfAuthPaths {
 		if allowed == "" || allowed == "/" {
