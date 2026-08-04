@@ -282,10 +282,13 @@ concept fieldTypes {
 //                       projectable, so a shape's default projection still
 //                       renders it.
 //                       NOT to be confused with the reserved row intrinsics
-//                       (id / createdAt / createdBy / ...). Those ARE stamped
-//                       for you, by the engine, from params.Actor -- and they
-//                       are table columns, not payload properties, so you must
-//                       not declare them at all. See section 12.
+//                       (id / createdAt / createdBy / ...). Those are table
+//                       COLUMNS rather than payload properties, and you must
+//                       not declare them at all -- the engine supplies each
+//                       from its own source: createdBy from the acting
+//                       identity, createdAt from the insert clock, id from the
+//                       insert's own id (or a content hash when none is
+//                       given). See section 12.
 //   @pii                Marks personally-identifying data, and it is
 //                       load-bearing in two places: the @scrubPii update path
 //                       zeroes every @pii field via Concept.PIIFields(), and
@@ -298,9 +301,10 @@ concept fieldTypes {
 //   @description("...") Human-readable description. Emitted into the concept
 //                       schema, so it reaches sense hover -- write it as
 //                       documentation, not as a note. (It does NOT reach the
-//                       generated SDK: sdk/gen scans query / mutate / logic /
-//                       builtin signatures only, never a concept body, and
-//                       emits concepts as a bare id map.)
+//                       generated SDK. sdk/gen does read concept declarations,
+//                       but only their @version / @namespace preamble, to
+//                       assemble canonical ids; it never reads the field list
+//                       in the body, and emits no field metadata.)
 //
 // DECLARED METADATA -- parsed and emitted, acted on by NOTHING (memql#2960):
 //   @unique             Emits `x-unique`. There is no uniqueness check
@@ -327,9 +331,17 @@ concept fieldTypes {
 //
 // Declared metadata is still worth writing where it records real intent: @pii
 // began exactly there and is now enforced in two places, with no schema change
-// needed to get from one to the other. Enforcing the other four is tracked
-// rather than abandoned -- memql#3036 (@secret), memql#3037 (@unique and
-// @immutable), memql#3038 (@default).
+// needed to get from one to the other.
+//
+// Where the other four stand, which is NOT one answer for all of them:
+//   - @secret   enforcement approved, scoped to logs -- memql#3036 (open).
+//   - @default  open -- memql#3038.
+//   - @unique / @immutable  DECIDED, and the decision is no. memql#3037 was
+//     closed not-planned: uniqueness over an append-only hypertable means
+//     "unique among current rows", which is an epic with a migration story,
+//     and @immutable's cost is defining which read-merge-write rewrites are
+//     legitimate. Neither has a forcing case. Treat both as permanent declared
+//     metadata; reopen only with a concrete failure that one would have caught.
 //
 // Unknown @-annotations on a field are rejected at load time with
 //   `unknown property annotation @<name> on field "<field>"`.

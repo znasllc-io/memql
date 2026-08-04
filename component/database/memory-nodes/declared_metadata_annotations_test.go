@@ -3,6 +3,9 @@ package memoryNodes
 import (
 	"context"
 	"encoding/json"
+	"go/ast"
+	goparser "go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -160,18 +163,34 @@ const emitSite = "component/database/memory-nodes/concept_parser.go"
 
 // The half that makes the documentation true, and the tripwire on it.
 //
-// Counted rather than asserted absent, because the emit site is itself an
-// occurrence: exactly one means "written, never read". A second occurrence is
-// a reader, which is enforcement, which means the docs are now wrong.
+// The assertion is not "the key appears once". It is the stronger, and actually
+// load-bearing, "the key appears once AND that one appearance is a WRITE" --
+// the literal used as the index of an assignment target, `schema[key] = ...`.
+// That is what "emitted, read by nothing" means, stated as something a machine
+// can check.
 //
-// The single hit is ALSO pinned to the emit site's path, and that is not
-// belt-and-braces -- a bare count is defeated by the most ordinary refactor
-// anyone adding enforcement would perform. Hoisting the key into a named
-// constant (`const schemaKeySecret = "x-secret"`) and pointing the emitter at
-// it leaves the literal count at exactly 1 while a real reader goes live. The
-// path check catches that (the surviving hit is no longer in concept_parser.go)
-// and catches concatenation (`"x-"+"secret"` matches nothing, so the count
-// drops to 0) in the same assertion.
+// It is deliberately an AST scan rather than a grep, because a textual count is
+// the wrong instrument for this question and can be defeated three ways, each
+// of which was demonstrated against an earlier draft of this test:
+//
+//   - hoist the key into a named constant and point the emitter at the
+//     identifier. The literal count stays at exactly 1 -- it is now the const
+//     declaration -- while any number of readers reference the name. Declaring
+//     that constant in THIS file also defeats a check that merely pins the
+//     path, and this file is precisely where anyone would put it.
+//   - build the key by concatenation (`"x-" + "secret"`). No literal matches at
+//     all, so a count-based gate reads 0 and reports the emitter missing rather
+//     than the reader added.
+//   - mention the key in a comment. A grep counts prose as code and fails,
+//     telling its author to go and edit three documents that are correct -- and
+//     the likeliest author of such a comment is someone documenting the very
+//     non-enforcement this test exists to pin.
+//
+// Walking the AST answers all three: a const declaration is a ValueSpec and not
+// an assignment index, so it fails wherever it is written; a concatenation
+// yields no matching literal, so the write disappears and the count fails; and
+// comments are not AST expressions at all, so they are structurally invisible
+// instead of specially-cased.
 func TestDeclaredMetadataKeysAreReadByNothing(t *testing.T) {
 	root := repoRoot(t)
 	for _, key := range []string{"x-unique", "x-immutable", "x-secret"} {
@@ -183,18 +202,25 @@ func TestDeclaredMetadataKeysAreReadByNothing(t *testing.T) {
 				"  - docs/public/language/attribute-matrix.md\n" +
 				"  - docs/public/language/reserved.md"
 
-			hits := grepNonTestGo(t, root, `"`+key+`"`)
+			hits := keyLiteralsInNonTestGo(t, root, key)
 			if len(hits) != 1 {
-				t.Errorf("%q now appears in %d non-test Go locations, not 1 (the emit site).\n  %s%s",
-					key, len(hits), strings.Join(hits, "\n  "), remedy)
+				t.Errorf("%q appears as a literal in %d non-test Go locations, not 1 (the emit site).\n  %s%s",
+					key, len(hits), joinHits(hits), remedy)
 				return
 			}
-			if !strings.HasPrefix(filepath.ToSlash(hits[0]), emitSite+":") {
-				t.Errorf("the sole occurrence of %q moved off the emit site: %s (expected %s).\n\n"+
-					"A count of 1 no longer means \"written, never read\" -- the key may now be a "+
-					"named constant with any number of readers referencing it, which is "+
-					"enforcement.%s",
-					key, hits[0], emitSite, remedy)
+			hit := hits[0]
+			if !hit.isWriteIndex {
+				t.Errorf("the sole literal %q at %s is NOT a write (`schema[%q] = ...`).\n\n"+
+					"That means the key is no longer merely emitted. The usual cause is hoisting it "+
+					"into a named constant -- the literal count stays at 1 while readers reference "+
+					"the identifier, which is enforcement.%s",
+					key, hit, key, remedy)
+				return
+			}
+			if !strings.HasPrefix(hit.path, emitSite) {
+				t.Errorf("the emit of %q moved off %s to %s. If the emitter genuinely moved, update "+
+					"emitSite in this test; if a second writer appeared, the docs describe one.%s",
+					key, emitSite, hit, remedy)
 			}
 		})
 	}
@@ -343,23 +369,57 @@ func repoRoot(t *testing.T) string {
 	return ""
 }
 
-// grepNonTestGo returns "path:line" for every occurrence of needle in a
-// non-test .go file under root, skipping .git, vendor and node_modules.
+// keyHit is one string-literal occurrence of a schema key in non-test Go.
+type keyHit struct {
+	path string // repo-relative, slash-separated
+	line int
+	// isWriteIndex is true when the literal is the index of an assignment
+	// TARGET -- `schema[key] = ...` -- i.e. the emit, as opposed to any read.
+	isWriteIndex bool
+}
+
+func (h keyHit) String() string { return h.path + ":" + strconv.Itoa(h.line) }
+
+func joinHits(hits []keyHit) string {
+	parts := make([]string, 0, len(hits))
+	for _, h := range hits {
+		s := h.String()
+		if h.isWriteIndex {
+			s += " (write)"
+		} else {
+			s += " (READ or declaration)"
+		}
+		parts = append(parts, s)
+	}
+	return strings.Join(parts, "\n  ")
+}
+
+// keyLiteralsInNonTestGo returns every string-literal occurrence of key in a
+// non-test .go file under root, each flagged with whether it is the emit write.
 //
-// Two limits of scope, stated because the failure message above asserts three
+// Comments are invisible here by construction: they are not expressions, so
+// ast.Inspect never yields one. That is the point -- documenting a key is not
+// reading it, and a scan that cannot tell those apart punishes the person
+// writing the documentation this test exists to protect.
+//
+// Two limits of scope, stated because the failure messages above assert three
 // documents are wrong on the strength of this scan:
 //
 //   - Go only. A consumer of these keys in sdk/ts or the cockpit would pass
 //     unnoticed. The definition schema does reach clients, so the docs' claim is
 //     broader than what is mechanically enforced here.
-//   - Comment lines are skipped, so documenting a key without enforcing it does
-//     not trip the gate. Without this, a comment reading `the "x-secret" key is
-//     read by nothing` fails the test and tells its author to go and edit three
-//     documents -- and the likeliest author of such a comment is someone
-//     documenting exactly the non-enforcement this file exists to pin.
-func grepNonTestGo(t *testing.T, root, needle string) []string {
+//   - A file that does not parse is skipped rather than failing the run (there
+//     is deliberately-invalid Go under testdata trees). A live reader lives in
+//     compiling code, so this cannot hide one -- but the count of parsed files
+//     is asserted non-zero below, so a scan that silently reached nothing fails
+//     instead of passing.
+func keyLiteralsInNonTestGo(t *testing.T, root, key string) []keyHit {
 	t.Helper()
-	var hits []string
+
+	quoted := strconv.Quote(key)
+	var hits []keyHit
+	parsed := 0
+
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil // an unreadable path is not this test's business
@@ -374,23 +434,54 @@ func grepNonTestGo(t *testing.T, root, needle string) []string {
 		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 			return nil
 		}
-		data, readErr := os.ReadFile(path)
-		if readErr != nil {
-			return nil
+
+		fset := token.NewFileSet()
+		file, parseErr := goparser.ParseFile(fset, path, nil, goparser.SkipObjectResolution)
+		if parseErr != nil {
+			return nil // not valid Go; cannot contain a live reader
 		}
+		parsed++
+
+		// First pass: every literal used as the index of an assignment target.
+		writes := map[*ast.BasicLit]bool{}
+		ast.Inspect(file, func(n ast.Node) bool {
+			assign, ok := n.(*ast.AssignStmt)
+			if !ok {
+				return true
+			}
+			for _, lhs := range assign.Lhs {
+				idx, ok := lhs.(*ast.IndexExpr)
+				if !ok {
+					continue
+				}
+				if lit, ok := idx.Index.(*ast.BasicLit); ok && lit.Kind == token.STRING && lit.Value == quoted {
+					writes[lit] = true
+				}
+			}
+			return true
+		})
+
+		// Second pass: every occurrence of the literal, anywhere.
 		rel, _ := filepath.Rel(root, path)
-		for i, line := range strings.Split(string(data), "\n") {
-			if strings.HasPrefix(strings.TrimSpace(line), "//") {
-				continue // a comment about the key is not a reader of it
+		ast.Inspect(file, func(n ast.Node) bool {
+			lit, ok := n.(*ast.BasicLit)
+			if !ok || lit.Kind != token.STRING || lit.Value != quoted {
+				return true
 			}
-			if strings.Contains(line, needle) {
-				hits = append(hits, filepath.ToSlash(rel)+":"+strconv.Itoa(i+1))
-			}
-		}
+			hits = append(hits, keyHit{
+				path:         filepath.ToSlash(rel),
+				line:         fset.Position(lit.Pos()).Line,
+				isWriteIndex: writes[lit],
+			})
+			return true
+		})
 		return nil
 	})
 	if err != nil {
 		t.Fatalf("walk: %v", err)
+	}
+	if parsed == 0 {
+		t.Fatal("no non-test Go files parsed, so this scan measures nothing")
 	}
 	return hits
 }
