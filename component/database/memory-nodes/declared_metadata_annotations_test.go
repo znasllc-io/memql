@@ -451,8 +451,10 @@ func joinHits(hits []keyHit) string {
 // reading it, and a scan that cannot tell those apart punishes the person
 // writing the documentation this test exists to protect.
 //
-// Two limits of scope, stated because the failure messages above assert three
-// documents are wrong on the strength of this scan:
+// FOUR limits of scope, listed in full because the failure messages above
+// assert three documents are wrong on the strength of this scan, and because
+// this list said "two" while a third and fourth existed -- which is the same
+// shape of defect the scan is built to catch:
 //
 //   - Go only. A consumer of these keys in sdk/ts or the cockpit would pass
 //     unnoticed. The definition schema does reach clients, so the docs' claim is
@@ -462,6 +464,19 @@ func joinHits(hits []keyHit) string {
 //     compiling code, so this cannot hide one -- but the count of parsed files
 //     is asserted non-zero below, so a scan that silently reached nothing fails
 //     instead of passing.
+//   - A READER that builds the key by concatenation (`"x-" + "secret"`) adds no
+//     matching literal and is invisible. Note the asymmetry with the emit: a
+//     concatenated EMIT is caught, because the literal count drops to zero and
+//     the assertion is on an exact count. A concatenated reader simply adds
+//     nothing to count.
+//   - A reader that never names the key at all -- a generic scan such as
+//     `strings.HasPrefix(k, "x-")` over the schema's properties -- is likewise
+//     invisible.
+//
+// The last two are inherent to any key-literal scan and are the price of
+// choosing an exact matcher over a heuristic one. They are recorded rather than
+// closed; a gate whose limits are written down can be trusted at its edges,
+// which is the whole argument this file makes about documentation.
 func keyLiteralsInNonTestGo(t *testing.T, root, key string) []keyHit {
 	t.Helper()
 
@@ -545,7 +560,18 @@ func keyLiteralsInNonTestGo(t *testing.T, root, key string) []keyHit {
 			if !ok || field.Tag == nil {
 				return true
 			}
-			if !strings.Contains(field.Tag.Value, quoted) {
+			// Both the bare key and the key carrying tag OPTIONS. Matching
+			// only `"x-secret"` requires the closing quote immediately after
+			// the name, so `json:"x-secret,omitempty"` slips through -- and
+			// on a bool field `,omitempty` is the reflexive Go spelling, so
+			// that is the MORE likely form of the reader this arm exists to
+			// catch, not a contrived one. Missing it would have reproduced
+			// the defect that parked this PR, one grammar level down.
+			//
+			// The trailing quote/comma is what keeps it precise:
+			// `json:"x-secret-other"` matches neither and must not fire.
+			if !strings.Contains(field.Tag.Value, quoted) &&
+				!strings.Contains(field.Tag.Value, `"`+key+`,`) {
 				return true
 			}
 			hits = append(hits, keyHit{
