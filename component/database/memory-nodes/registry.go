@@ -12,6 +12,23 @@ type Registry interface {
 }
 
 // MemoryRegistry maintains a thread-safe map of concept names to Concept definitions.
+//
+// # Known gap: duplicate canonical ids last-win SILENTLY (memql#3008)
+//
+// The map is keyed by canonical id, so two declarations that assemble to the
+// same id collapse to one entry and whichever registers last wins. Nothing on
+// the boot path reports it -- there is no duplicate detector for concepts
+// anywhere in loading.
+//
+// Recorded rather than fixed, deliberately. Boot also loads product bundles
+// delivered at runtime through MEMQL_DSL_PATH, so turning last-wins into a
+// refusal here could stop a deployed product from starting, and that call
+// needs visibility into bundles outside this repo. The LINT closes the half
+// that can be closed safely: component/memql/dslimports reports a same-id
+// collision as a hard error naming both files and the id (see
+// duplicateConceptCollision), so a tree in THIS repo cannot reach boot
+// carrying one. Closing the boot half deserves its own issue and its own
+// blast-radius measurement.
 type MemoryRegistry struct {
 	mu       sync.RWMutex
 	concepts map[string]*Concept

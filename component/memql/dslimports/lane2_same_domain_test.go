@@ -111,13 +111,38 @@ concept widget {
 }`)
 	tree := loadTree(t, root)
 
-	var ambiguous []string
+	// memql#3008 SHARPENED this, and the anti-silence invariant is unchanged:
+	// the binding must still be reported. What changed is WHICH report.
+	//
+	// Two decls of `widget` in domain `alpha` both assemble to `v1:alpha:widget`,
+	// so this was never an ambiguity -- it is a same-id COLLISION. The old
+	// "cannot disambiguate ... import it via a use declaration" wording gave
+	// advice that cannot work here: an import selects a namespace, and these
+	// two already share one. Naming both files and the colliding id is the
+	// actionable form.
+	var reported []string
 	for _, e := range tree.VerifyReferentialIntegrity() {
-		if strings.Contains(e.Error(), "cannot disambiguate") {
-			ambiguous = append(ambiguous, e.Error())
+		msg := e.Error()
+		if strings.Contains(msg, "same canonical id") || strings.Contains(msg, "cannot disambiguate") {
+			reported = append(reported, msg)
 		}
 	}
-	if len(ambiguous) == 0 {
-		t.Error("lane 2 accepted a binding whose own domain declares the concept twice; that is ambiguous at boot (last-wins, silently) and must still be reported")
+	if len(reported) == 0 {
+		t.Fatal("lane 2 accepted a binding whose own domain declares the concept twice; that is " +
+			"silently last-wins at boot and must still be reported. An earlier cut of the " +
+			"same-domain fix traded this true positive for silence, which is why the assertion " +
+			"exists at all.")
+	}
+	joined := strings.Join(reported, "\n")
+	for _, want := range []string{
+		"alpha/concepts.memql", // BOTH files, so the author knows what to reconcile
+		"alpha/more.memql",
+		"v1:alpha:widget", // and the id they collide on
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("the duplicate report does not name %q. Naming both declarations and the "+
+				"assembled id is the whole difference between an actionable diagnostic and "+
+				"'something was ambiguous' (memql#3008).\n  got: %s", want, joined)
+		}
 	}
 }
