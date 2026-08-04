@@ -135,12 +135,16 @@ func (s *Store) ListForUser(ctx context.Context, userId string) ([]Row, error) {
 	// sit on the wire. The annotation is enforced against
 	// auth.CallOrigin, so this read has to say it is server-initiated.
 	//
-	// Stamped HERE, on a context used for this query and nothing else, rather
-	// than on the caller's: internal origin opens every @serverOnly construct
-	// for as long as the context lives, which is the escalation memql#2989
-	// refused. Confining it to the call is what keeps the blast radius one
-	// query wide. component/identity/pat does the same for the same reason.
-	ctx = auth.ContextWithInternalOrigin(ctx)
+	// Stamped HERE, into a SEPARATE context used for this query and nothing
+	// else, rather than onto the caller's: internal origin opens every
+	// @serverOnly construct for as long as the context lives, which is the
+	// escalation memql#2989 refused. Confining it to the call is what keeps
+	// the blast radius one query wide. component/identity/pat does the same
+	// for the same reason. The distinct name is deliberate -- reassigning
+	// `ctx` would read as if the caller's context had been widened, and this
+	// package's line in call_origin_conformance_test.go's allowlist claims
+	// otherwise in as many words.
+	internalCtx := auth.ContextWithInternalOrigin(ctx)
 
 	out := []Row{}
 	cursor := ""
@@ -151,7 +155,7 @@ func (s *Store) ListForUser(ctx context.Context, userId string) ([]Row, error) {
 	// so walk the keyset cursor to assemble the full list. maxPageWalk
 	// is a runaway backstop.
 	for i := 0; i < maxPageWalk; i++ {
-		nodes, next, err := s.executeAndExtractPage(ctx, q, cursor)
+		nodes, next, err := s.executeAndExtractPage(internalCtx, q, cursor)
 		if err != nil {
 			return nil, fmt.Errorf("workertoken.Store.ListForUser: %w", err)
 		}

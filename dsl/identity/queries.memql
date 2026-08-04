@@ -961,13 +961,16 @@ query magicLinkRequest magicLinkRequestByTokenHash {
 //
 //   - badgesForUser projects identitySummary, which omits credentials. Same
 //     shape as this one in the sense that matters.
-//   - workerTokensForUser projects **identityFull**, which DOES project
+//   - workerTokensForUser projected **identityFull**, which DOES project
 //     `credentials` -- and for the worker_token variant that object carries
 //     keyHash, registeredBy, lastSeenAt and lastConnectedFromIP. So that query
-//     is materially identical to nodeTokenIdentityById, which this same audit
-//     GATED: caller-supplied id, no actor check, credentials on the wire. It is
-//     the worst item in this deferred group rather than a peer of the other
-//     two, and memql#3063 is ranked accordingly.
+//     was materially identical to nodeTokenIdentityById, which this same audit
+//     GATED: caller-supplied id, no actor check, credentials on the wire. It
+//     was the worst item in this deferred group rather than a peer of the
+//     other two, and memql#3063 was ranked accordingly. It is NO LONGER in the
+//     group: memql#3063 took it off the wire outright (@serverOnly). What
+//     remains deferred is this query and badgesForUser -- both identitySummary,
+//     no credential material, which is why they could wait and it could not.
 //
 // The obviously-right filter is `userId==actor.userId` ("your own
 // credentials"). It is not a one-line change: the Go caller
@@ -1533,9 +1536,10 @@ query identity workerTokenByKeyHash {
 // Arguments:
 //   userId (string, required) - v1:identity:user.id
 
-// AUDIT 2026-08-04 (memql#2987, closed by memql#3063): was @public, now
-// @serverOnly. This was the worst item in that audit's deferred group; it is
-// no longer deferred -- operator ruling during the memql#3064 landing.
+// AUDIT 2026-08-04 (memql#2987, landed by PR memql#3064; this query deferred
+// out of it as memql#3063): was @public, now @serverOnly. This was the worst
+// item in that audit's deferred group; it is no longer deferred -- operator
+// ruling during the memql#3064 landing.
 //
 // What was exposed: the filter keys on a CALLER-SUPPLIED userId with no check
 // that the caller is that user, and identityFull projects `credentials`, which
@@ -1632,8 +1636,14 @@ query identity badgeByKeyHash {
 //   userId (string, required) - v1:identity:user.id
 
 // `@public` marks this query as intentionally not caller-scoped.
-// Same auth shape as workerTokensForUser above (web-layer
-// authentication; userId is the authenticated subject). Tightening
+// Same auth shape as patIdentitiesForUser above (web-layer
+// authentication; userId is the authenticated subject). That pointer
+// USED to name workerTokensForUser, which stopped being a valid
+// comparison when memql#3063 made it @serverOnly -- it is off the wire
+// now, so "same auth shape as" it would mean this query should be too.
+// patIdentitiesForUser is the real peer: still @public, still deferred
+// on the same unresolved decision, and identitySummary like this one.
+// Tightening
 // tracked under #54.
 /// List badge identities owned by a user. Projects identitySummary (id / userId / label / active)
 /// -- NEVER credentials, so the badge keyHash (a low-entropy physical id's hash) is never exposed
