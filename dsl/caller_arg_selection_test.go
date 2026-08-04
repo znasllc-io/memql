@@ -75,12 +75,19 @@ package dsl
 // classification for an open construct in general; it is not a reason to stop
 // asking the question about a row that identifies a PERSON.
 //
-// It catches three `@public` constructs, and they do NOT land in the same
-// place, which is the point of asking: `nodeTokenIdentityById` projects
-// `identityFull` -- including `credentials` -- and is tracked as debt below,
-// while `userDisplayById` (id + displayName) and `userActiveSpace` (id +
+// It caught three `@public` constructs, and they did NOT land in the same
+// place, which was the point of asking: `nodeTokenIdentityById` projected
+// `identityFull` -- including `credentials` -- and was tracked as debt, while
+// `userDisplayById` (id + displayName) and `userActiveSpace` (id +
 // activePartitionId) are recorded as accepted. A rule that cleared all three
 // on sight would have said nothing about any of them.
+//
+// memql#2987's audit resolved the first: `nodeTokenIdentityById` is
+// `@serverOnly` now, so this detector no longer reaches it (the gate
+// short-circuits on hasServerOnly) and its exemption entry is gone. The two
+// accepted ones remain, re-audited and unchanged. That the list shrank by
+// exactly the entry whose note said it "should be reconsidered rather than
+// inherited" is the mechanism working.
 //
 // # Known limits, stated rather than implied
 //
@@ -203,7 +210,11 @@ var callerArgSelectionExemptions = map[string]string{
 	"identity/mutations.memql touchBadgeLastUsed":        "MISNAMED, and sharper than its name: it takes `credentials object!` and spreads it, so it overwrites the ENTIRE credentials block -- keyHash included -- of an arbitrary identity from caller input. Badge-credential substitution, not a timestamp stamp.",
 	"identity/mutations.memql stampNodeTokenBootstrap":   "stamps bootstrap state on any node token identity; server-side node path.",
 	"identity/queries.memql patIdentityById":             "returns a PAT identity row by id; server-side token verification path.",
-	"identity/queries.memql nodeTokenIdentityById":       "returns a node token identity row by id; server-side node auth path. Additionally marked @public while projecting identityFull, which includes `credentials` -- a credential row classified as intentionally open. @public carries no runtime semantics, so the classification is the defect rather than the exposure, but it should be reconsidered rather than inherited.",
+	// nodeTokenIdentityById's entry is GONE, and deliberately not replaced:
+	// memql#2987 moved it to @serverOnly, so this detector no longer reaches
+	// it and a lingering entry would fail the stale-exemption check. Its note
+	// said the @public classification "should be reconsidered rather than
+	// inherited"; it was.
 }
 
 // callerArgSelectionAccepted records constructs that select a person-scoped row

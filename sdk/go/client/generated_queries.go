@@ -869,7 +869,7 @@ func AudioOverridesForSpaceBuild(args AudioOverridesForSpaceArgs) string {
 	return b.String()
 }
 
-// AuditEventsByActor -- Audit events where actorUserId equals the supplied userId. Pair with auditEventsByTarget for full per-user history (no OR operator in the filter grammar yet).
+// AuditEventsByActor -- Audit events where actorUserId equals the supplied userId, restricted to the owner or an admin. Pair with auditEventsByTarget for full per-user history (no OR operator in the filter grammar yet).
 //
 // Bound concept: v1:identity:auditEvent (machine-readable: BoundConcepts["auditEventsByActor"] in generated_concepts.go).
 type AuditEventsByActorArgs struct {
@@ -891,7 +891,7 @@ func AuditEventsByActorBuild(args AuditEventsByActorArgs) string {
 	return b.String()
 }
 
-// AuditEventsByTarget -- Audit events where targetId equals the supplied targetId. Pair with auditEventsByActor for full per-user history (no OR operator in the filter grammar yet).
+// AuditEventsByTarget -- Audit events where targetId equals the supplied targetId, restricted to the owner or an admin. Pair with auditEventsByActor for full per-user history (no OR operator in the filter grammar yet).
 //
 // Bound concept: v1:identity:auditEvent (machine-readable: BoundConcepts["auditEventsByTarget"] in generated_concepts.go).
 type AuditEventsByTargetArgs struct {
@@ -1215,6 +1215,7 @@ func BadgeByKeyHashBuild(args BadgeByKeyHashArgs) string {
 }
 
 // BadgesForUser -- List badge identities owned by a user. Projects identitySummary (id / userId / label / active) -- NEVER credentials, so the badge keyHash (a low-entropy physical id's hash) is never exposed on this public surface.
+// AUDIT 2026-08-04 (memql#2987): re-audited, KEPT @public for now. Same group and same unresolved decision as patIdentitiesForUser -- see the note there. component/identity/badge is likewise absent from the internal-origin allowlist. Re-verified that the shape is still identitySummary and still omits credentials, which is what keeps this the least urgent of the three.
 //
 // Bound concept: v1:identity:identity (machine-readable: BoundConcepts["badgesForUser"] in generated_concepts.go).
 type BadgesForUserArgs struct {
@@ -2540,73 +2541,6 @@ func NodeSpecsForDeploymentBuild(args NodeSpecsForDeploymentArgs) string {
 	return b.String()
 }
 
-// NodeTokenIdentities -- List every node_token identity across the cluster (active + inactive). memql#343.
-//
-// Bound concept: v1:identity:identity (machine-readable: BoundConcepts["nodeTokenIdentities"] in generated_concepts.go).
-type NodeTokenIdentitiesArgs struct {
-}
-
-// NodeTokenIdentities calls the engine query nodeTokenIdentities.
-func (qc *QueryClient) NodeTokenIdentities(ctx context.Context, args NodeTokenIdentitiesArgs) (*Result, error) {
-	call := NodeTokenIdentitiesBuild(args)
-	return qc.executeNamed(ctx, "nodeTokenIdentities", call)
-}
-
-func NodeTokenIdentitiesBuild(args NodeTokenIdentitiesArgs) string {
-	_ = args
-	return "query nodeTokenIdentities()"
-}
-
-// NodeTokenIdentityByBinding -- Lookup a node_token identity by its (nodeType, nodeId) binding. memql#343.
-//
-// Bound concept: v1:identity:identity (machine-readable: BoundConcepts["nodeTokenIdentityByBinding"] in generated_concepts.go).
-type NodeTokenIdentityByBindingArgs struct {
-	NodeType string
-	NodeId   string
-}
-
-// NodeTokenIdentityByBinding calls the engine query nodeTokenIdentityByBinding.
-func (qc *QueryClient) NodeTokenIdentityByBinding(ctx context.Context, args NodeTokenIdentityByBindingArgs) (*Result, error) {
-	call := NodeTokenIdentityByBindingBuild(args)
-	return qc.executeNamed(ctx, "nodeTokenIdentityByBinding", call)
-}
-
-func NodeTokenIdentityByBindingBuild(args NodeTokenIdentityByBindingArgs) string {
-	var b strings.Builder
-	b.WriteString("query nodeTokenIdentityByBinding(")
-	b.WriteString("nodeType: ")
-	b.WriteString(fmt.Sprintf("%q", args.NodeType))
-	if b.Len() > 33 {
-		b.WriteString(", ")
-	}
-	b.WriteString("nodeId: ")
-	b.WriteString(fmt.Sprintf("%q", args.NodeId))
-	b.WriteString(")")
-	return b.String()
-}
-
-// NodeTokenIdentityById -- Lookup a single node_token identity row by id (bare shortId; the signature-bound filter resolves it server-side). Drives the admin revoke path. memql#350.
-//
-// Bound concept: v1:identity:identity (machine-readable: BoundConcepts["nodeTokenIdentityById"] in generated_concepts.go).
-type NodeTokenIdentityByIdArgs struct {
-	IdentityId string
-}
-
-// NodeTokenIdentityById calls the engine query nodeTokenIdentityById.
-func (qc *QueryClient) NodeTokenIdentityById(ctx context.Context, args NodeTokenIdentityByIdArgs) (*Result, error) {
-	call := NodeTokenIdentityByIdBuild(args)
-	return qc.executeNamed(ctx, "nodeTokenIdentityById", call)
-}
-
-func NodeTokenIdentityByIdBuild(args NodeTokenIdentityByIdArgs) string {
-	var b strings.Builder
-	b.WriteString("query nodeTokenIdentityById(")
-	b.WriteString("identityId: ")
-	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
-	b.WriteString(")")
-	return b.String()
-}
-
 // NodesForDeployment -- Latest-per-id cluster node rows for one deploymentId -- the live topology of that deployment (#1873). asOf latest collapses the append-only node stream to current state per node.
 //
 // Bound concept: v1:cluster:node (machine-readable: BoundConcepts["nodesForDeployment"] in generated_concepts.go).
@@ -3900,6 +3834,7 @@ func UsableRecordsBuild(args UsableRecordsArgs) string {
 // UserActiveSpace -- Returns a user's current activePartitionId. Empty when the user is not focused on any space. memql#2800: deliberately cross-user, and acknowledged as such.
 // The frontend derives per-participant `isActive` from it (a participant is active iff User.activePartitionId == participant.partitionId), so resolving OTHER users is the entire purpose -- caller-scoping would break presence in every space. It is safe to leave open because the projection carries no PII: userActiveSpaceProjection is id + activePartitionId and nothing else.
 // The `when(args.userId)` guard was removed. userId is declared required, so the guard should be unreachable -- but it made "no argument" mean "no filter" rather than "no rows", i.e. an unfiltered dump of every user, on a query whose only predicate it was. That is the wrong failure direction to leave standing on the strength of a required-arg check elsewhere.
+// AUDIT 2026-08-04 (memql#2987): re-audited and KEPT @public. Re-verified that userActiveSpaceProjection still projects id + activePartitionId and nothing else -- the "shapes drift" risk that moved userByEmail to @serverOnly in memql#2881 has not materialised here. Cross-user resolution is load-bearing for presence, so this is the second kind of @public in this repo (documenting intent) rather than the first (acknowledging a flag).
 //
 // Bound concept: v1:identity:user (machine-readable: BoundConcepts["userActiveSpace"] in generated_concepts.go).
 type UserActiveSpaceArgs struct {
@@ -3980,6 +3915,7 @@ func UserDefaultsBuild(args UserDefaultsArgs) string {
 
 // UserDisplayById -- Resolve a user id to a display name. Client-callable for any user.
 // memql#2800: the cross-user read that rosters, mentions and participant lists actually need. Deliberately projects userDisplayCard (id + displayName) and nothing else, so a cross-user lookup cannot return PII.
+// AUDIT 2026-08-04 (memql#2987): re-audited and KEPT @public. Re-verified that userDisplayCard is still id + displayName -- this is the narrow counterpart deliberately carved out of userByIdSystem above, and its whole value is that a caller can resolve a name WITHOUT reaching userFull. The pairing is the point: the wide read is @serverOnly, the narrow one is open.
 //
 // Bound concept: v1:identity:user (machine-readable: BoundConcepts["userDisplayById"] in generated_concepts.go).
 type UserDisplayByIdArgs struct {
