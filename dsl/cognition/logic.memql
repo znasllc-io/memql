@@ -214,7 +214,7 @@ logic voiceMigrationOnSecondHuman {
   publishPrivateCard := if active.count() == 2 {
     mutation mutationCreateCanvasState(
       stateId: concat("voice-migrated-private-", hash(concat(
-        args.event.payload.activePartitionId, ":", args.event.payload.id
+        hash(args.event.payload.activePartitionId), hash(args.event.payload.id)
       ))),
       space: args.event.payload.activePartitionId,
       kind: "card",
