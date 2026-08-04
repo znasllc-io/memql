@@ -72,7 +72,7 @@ type App struct {
 	// unauthenticated surface. Registering after that point would mount a
 	// route the assertion never saw, so handleRoute/handleRouteFunc refuse
 	// it. See the comment on handleRoute.
-	surfaceSealed bool
+	surfaceSealed    bool
 	httpArgs         []server.ServerArg
 	middlewares      []server.MiddlewareFunc
 	identityVerifier *verifier.Verifier

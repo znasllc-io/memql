@@ -74,3 +74,23 @@ shape outboundRequest outboundRequestFull {
   requestedBy
   row.createdAt
 }
+
+// ---- shapes/v1/platform/inboundRequestFull.memql ----
+
+/// Full inbound-request projection (memql#2957). Backs the product automation's read of a staged
+/// row and any operator surface auditing what arrived.
+@row
+shape inboundRequest inboundRequestFull {
+  row.id
+  source
+  medium
+  body
+  contentType
+  status
+  dedupeKey
+  signatureVerified
+  receivedAt
+  processedAt
+  lastError
+  row.createdAt
+}

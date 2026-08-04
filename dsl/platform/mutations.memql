@@ -328,3 +328,80 @@ mutate outboundRequest updateOutboundRequestStatus {
     }
   }
 }
+
+// ---- mutations/v1/platform/stageInboundRequest.memql ----
+
+// stageInboundRequest
+// ===================
+//
+// Receiver-side staging for inbound delivery (memql#2957). The engine's
+// inbound receiver is the intended caller, after the source allowlist
+// and the signature check have both passed -- a request that fails
+// either is refused at the edge and never reaches this mutation, so a
+// row existing IS the record that it was accepted.
+//
+// Idempotent by requestId, which the receiver derives from (source,
+// digest of the SIGNED payload): a redelivery of the same event
+// re-stages onto the same row and @createOnly preserves the
+// product-owned status / processedAt / lastError rather than resetting
+// handling state back to 'received'. Same shape as
+// stageOutboundRequest's protection of the worker-owned fields.
+//
+// NOT the sender's dedupe header. That header is not covered by the
+// vendor's HMAC, so deriving identity from it let one captured
+// delivery mint unbounded rows (memql#2957 landing review). It is
+// still recorded on the row; it just does not decide the id.
+//
+// @createOnly stops the STATUS being reset. It does not stop the
+// second node.created firing -- this is at-least-once delivery with a
+// stable idempotency key, not exactly-once processing, and a product
+// automation has to branch on status before doing work.
+
+@createOnly("status", "processedAt", "lastError")
+@description("Stage a verified inbound delivery (memql#2957): insert a v1:platform:inboundRequest row with status='received' for a product automation to drain. Called by the engine inbound receiver once the source allowlist and signature check have passed; the signing secret is never part of the row. Idempotent by requestId: a redelivery preserves the product-owned handling state (@createOnly) instead of replaying it.")
+mutate inboundRequest stageInboundRequest {
+  args {
+    requestId          string!
+    source             string!
+    medium             string!
+    body               string!
+    contentType        string
+    dedupeKey          string
+    signatureVerified  bool
+    receivedAt         string
+  }
+  insert {
+    accept { source, medium, body, contentType, dedupeKey, signatureVerified, receivedAt }
+    stamp {
+      id: args.requestId
+      status: "received"
+    }
+  }
+}
+
+// ---- mutations/v1/platform/updateInboundRequestStatus.memql ----
+
+// updateInboundRequestStatus
+// ==========================
+//
+// Product-side handling stamps for inbound delivery (memql#2957). The
+// mirror of updateOutboundRequestStatus, with the ownership inverted:
+// there the engine stamps and products read, here the PRODUCT stamps as
+// it works the row and the engine only ever writes the initial
+// 'received'.
+
+@description("Stamp a handling transition on a v1:platform:inboundRequest row (memql#2957). Called by the product automation draining the row (processing/processed/failed); the engine receiver only ever writes the initial 'received'.")
+mutate inboundRequest updateInboundRequestStatus {
+  args {
+    requestId    string!
+    status       string!
+    lastError    string
+    processedAt  string
+  }
+  update {
+    accept { status, lastError, processedAt }
+    stamp {
+      id: args.requestId
+    }
+  }
+}

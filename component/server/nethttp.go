@@ -890,6 +890,25 @@ func SpaceAttachmentPaths() []string {
 	return pathsWithBase("/spaces/")
 }
 
+// InboundWebhookPaths returns the path prefix the inbound-delivery receiver
+// mounts under (POST /inbound/{source}, memql#2957).
+//
+// HTTP rather than gRPC because the caller is a third party that dials US --
+// Shopify, Amazon SP-API, a POS -- so the endpoint-protocol policy's
+// external-requirement exception applies exactly as it does to the OAuth
+// callbacks.
+//
+// Declared in HandlerAuthorizedPaths(), NOT PublicPaths(): the receiver
+// authorizes every request itself against a deny-by-default source allowlist
+// plus a per-source HMAC check, and refuses with 404/401 when either is
+// missing. Listing it in PublicPaths() would bypass the verifier for
+// /inbound/* on every verifier-consuming node -- unnecessary (the handler
+// wants no memQL identity) and strictly worse, since the prefix would then
+// bless anything mounted beneath it later.
+func InboundWebhookPaths() []string {
+	return pathsWithBase("/inbound/")
+}
+
 func normalizeOrigins(origins []string) []string {
 	if len(origins) == 0 {
 		return []string{"*"}
