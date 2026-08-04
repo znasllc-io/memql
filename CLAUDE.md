@@ -1147,7 +1147,7 @@ How the DSL constructs lean on each other. Each layer can only depend
   - concept or `@row` shape binding → row-spec, compiles to a SQL
     `WHERE` fragment.
   - `@actor` shape binding → context-spec, evaluates in-process against
-    the auth envelope (invoked via `spec("name")`).
+    the auth envelope (named as a bare conjunct, e.g. `requiresAdmin`).
   A spec body never reads `actor.*` / `row.*` directly. A `trait` is the
   one deliberately-unbound row predicate (bare payload fields).
 - **Mutations** write to concepts via the bare `insert { ... }` /
@@ -1173,7 +1173,7 @@ How the DSL constructs lean on each other. Each layer can only depend
   (`@primary` / `@fallback` / `@maxLatencyMs` / `@preferredRole`),
   consumed by the AI Router to resolve a provider chain. (The
   retired decision-policy tier — caller-based authz / feature-gating
-  decisions — is gone, #984; use **specs** via `spec("name")` for
+  decisions — is gone, #984; use **specs** as bare filter conjuncts for
   caller-context boolean checks.)
 
 **Construct files live under `dsl/<namespace>/<construct>s.memql`**
@@ -1261,7 +1261,7 @@ core/bff tiering) was documented + wired but carried **zero live
 constructs** across the entire tree, so it has been retired. Auth /
 feature-gating / vendor decisions live in Go (`component/safety`
 ships the #231 risk×scope decision matrix) and in **specs** — use
-`spec("name")` for caller-based boolean checks (admin / owner /
+a bare spec conjunct for caller-based boolean checks (admin / owner /
 permission), which run as in-process context-specs and compile to
 SQL or evaluate against the auth envelope.
 
@@ -1672,7 +1672,7 @@ picks the evaluation strategy:
 - **Row-specs** bind a concept or a `@row` shape. They compile into a
   SQL `WHERE` fragment and push down to the database for filtering.
 - **Context-specs** bind an `@actor` shape (the only gateway to the auth
-  envelope). They evaluate in-process; invoked via `spec("name")` for
+  envelope). They evaluate in-process; named as a bare conjunct for
   actor-based checks like "is admin," "owns partition," etc.
 
 A spec body never reads `actor.*` / `row.*` directly (bind a shape that
@@ -1713,7 +1713,7 @@ rejected at parse time.
 **Caller-context checks use specs, not policies.** The decision-policy
 tier that once hosted caller-based boolean predicates is retired
 (#984). Author the predicate as a context-spec in
-`dsl/<namespace>/specs.memql` and call it via `spec("name")`; the live
+`dsl/<namespace>/specs.memql` and name it as a bare conjunct; the live
 `policy` construct is provider-selection only.
 
 ### Tools

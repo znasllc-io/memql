@@ -38,7 +38,7 @@
 //
 // Admin action: the Deployment Console gates this path to owner/admin
 // in Go (deploycontrol.authorize -> auth.AtLeastAdmin); the DSL mirror
-// is spec("requiresOwnerOrAdmin") in dsl/deployment/specs.memql.
+// is requiresOwnerOrAdmin in dsl/deployment/specs.memql.
 //
 // Every field is bound with an explicit key + coalesce to a valid value
 // (mirroring createNode #1643/#1671): status defaults to
@@ -93,7 +93,7 @@ mutate deployment createDeployment {
 // cockpit Deployments view subscribes to.
 //
 // Admin action: gated to owner/admin in Go (deploycontrol.authorize);
-// DSL mirror spec("requiresOwnerOrAdmin").
+// DSL mirror requiresOwnerOrAdmin.
 /// Transition a v1:cluster:deployment's status (pending -> in_progress -> succeeded|failed;
 /// succeeded -> superseded; any -> rolled_back). Read-merge update: only status + updatedAt change,
 /// deploy metadata inherits. #1872.
@@ -244,7 +244,7 @@ mutate deployment updateDeploymentStatus {
 // pins this node type. replicas defaults to the concept @default(1).
 //
 // Admin action: the deploy pack gates the write path; the DSL mirror
-// is spec("requiresOwnerOrAdmin") on the cut-version/rollback effects
+// is requiresOwnerOrAdmin on the cut-version/rollback effects
 // (Epic 2.6). Additive: no existing overlay or query is affected.
 /// Create a v1:cluster:deploymentNodeSpec row for a (deploymentId, nodeType) pair. The concept id
 /// is hash(concat(shortId(deploymentId), ':', nodeType)) so re-pins append to one timeline and a

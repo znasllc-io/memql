@@ -30,13 +30,18 @@ func ownerScopeLeaf(pred string) bool { return strings.Contains(pred, "actor.use
 // different identifier, and a substring test accepted it as the gate.
 //
 // The spec alternatives are ordered longest-first so `requiresOwnerOrAdmin`
-// cannot be consumed as `requiresOwner`. NOTE `requiresClusterOwner` is not
-// defined anywhere in dsl/ today -- it is the name the per-row-authz audit doc
-// uses and a #54 follow-up; the live context-spec gates are requiresAdmin /
-// requiresOwner / requiresOwnerOrAdmin (dsl/common/specs.memql,
-// dsl/deployment/specs.memql). None is currently used in a filter, so listing
-// them is inert on the corpus and stops the gate going blind the first time
-// one is.
+// cannot be consumed as `requiresOwner`.
+//
+// Which of these names is DECLARED, and which the corpus actually uses, is no
+// longer written here (memql#3016). Both statements went stale: this comment
+// and its twin in the table below claimed "none is currently used in a filter"
+// long after `requiresOwnerOrAdmin` was gating live identity queries. A stale
+// claim in the file that defines the vocabulary is how the classifier drifted
+// from it in the first place.
+//
+// Both facts are now COMPUTED, by TestAdminGateNamesAreDeclaredOrRecorded
+// below, which reads the tree instead of describing it -- so there is nothing
+// left that can go stale.
 var adminGateRe = regexp.MustCompile(
 	`(^|[^A-Za-z0-9_.])(?:actor\.isClusterOwner[ \t]*==[ \t]*true|requiresOwnerOrAdmin|requiresClusterOwner|requiresAdmin|requiresOwner)([^A-Za-z0-9_]|$)`)
 
@@ -172,8 +177,10 @@ func TestAdminGateCompositionRules(t *testing.T) {
 		{"identifier containing the spec name", `x==args.x && requiresClusterOwnerXyz`, false},
 		{"identifier prefixed by the spec name", `x==args.x && myRequiresAdmin`, false},
 
-		// The live context-spec gates, none of which the corpus filters use
-		// yet -- listed so the gate does not go blind the first time one does.
+		// The live context-spec gates. Which of them the corpus uses is
+		// computed by TestAdminGateNamesAreDeclaredOrRecorded rather than
+		// claimed here -- the claim that used to sit on this line said "none
+		// of which the corpus filters use yet" and was false (memql#3016).
 		{"requiresAdmin as a conjunct", `statusIsActive && requiresAdmin`, true},
 		{"requiresOwnerOrAdmin as a conjunct", `statusIsActive && requiresOwnerOrAdmin`, true},
 		{"requiresOwnerOrAdmin is not requiresOwner", `statusIsActive && requiresOwnerOrAdmin`, true},
@@ -188,5 +195,106 @@ func TestAdminGateCompositionRules(t *testing.T) {
 				t.Errorf("clauseGuarantees(%q, adminGateLeaf) = %v, want %v", tc.clause, got, tc.want)
 			}
 		})
+	}
+}
+
+// adminGateNamesDeliberatelyUndeclared records recogniser alternatives that no
+// `spec` in dsl/ declares, and why that is on purpose (memql#3016).
+//
+// The recognisers above are the vocabulary the per-row-authz classifier gates
+// on. A name listed there but declared nowhere reads as real from the outside,
+// and that is not hypothetical: it is exactly how `spec("requiresClusterOwner")`
+// survived in six documents (memql#2983) before anyone checked whether the
+// spec existed.
+//
+// Keeping the alternative and recording its status beats deleting it. Deleting
+// makes the recogniser silently stop matching the day someone declares the
+// spec -- the gate would go blind at the moment it started mattering. The
+// entry costs one line and the reason is the thing that keeps it honest.
+var adminGateNamesDeliberatelyUndeclared = map[string]string{
+	"requiresClusterOwner": "no `spec ... requiresClusterOwner` exists in dsl/. It is the name the " +
+		"per-row-authz audit doc uses and a #54 follow-up placeholder. Kept in the recognisers so " +
+		"the gate does not go blind the first time someone declares it (memql#3016).",
+}
+
+// adminGateSpecNames are the spec-name alternatives the recognisers match --
+// the actor.isClusterOwner comparison is a field reference, not a spec, and is
+// excluded.
+//
+// Derived from the recogniser SOURCE rather than restated, so a name added to
+// the pattern is automatically required to be declared or recorded. A hand-kept
+// second copy is the drift this whole test is about.
+func adminGateSpecNames(t *testing.T) []string {
+	t.Helper()
+	src := adminGateRe.String()
+	found := regexp.MustCompile(`requires[A-Za-z]+`).FindAllString(src, -1)
+	if len(found) == 0 {
+		t.Fatal("no spec names extracted from the admin-gate recogniser -- the pattern shape " +
+			"changed and this check would now pass vacuously (memql#3016)")
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, n := range found {
+		if !seen[n] {
+			seen[n] = true
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// Every name the admin-gate recognisers match must be declared in dsl/ or
+// recorded as deliberately undeclared. This is the check that replaces the two
+// stale prose claims (memql#3016).
+//
+// It also reports which names the corpus actually FILTERS on, so the fact the
+// old comments got wrong is computed instead of written down. Reported rather
+// than asserted: a name going from unused to used is normal and must not need
+// a test edit -- the failure this guards against is a name nothing declares,
+// not a name nothing uses yet.
+func TestAdminGateNamesAreDeclaredOrRecorded(t *testing.T) {
+	declared := map[string]bool{}
+	specDecl := regexp.MustCompile(`(?m)^spec\s+\S+\s+([A-Za-z_][A-Za-z0-9_]*)\s*\{`)
+
+	tree := Tree()
+	paths, err := dslfs.WalkMemqlFiles(tree)
+	if err != nil {
+		t.Fatalf("WalkMemqlFiles: %v", err)
+	}
+	var specFiles int
+	for _, path := range paths {
+		if !strings.HasSuffix(path, "specs.memql") {
+			continue
+		}
+		specFiles++
+		for _, m := range specDecl.FindAllStringSubmatch(readTreeFile(t, path), -1) {
+			declared[m[1]] = true
+		}
+	}
+	if specFiles == 0 {
+		t.Fatal("found no specs.memql files -- the sweep has stopped resolving them and every " +
+			"name would report as undeclared")
+	}
+	if len(declared) == 0 {
+		t.Fatal("parsed no spec declarations at all -- the declaration pattern has stopped " +
+			"matching and this check would fail on every name for the wrong reason")
+	}
+
+	for _, name := range adminGateSpecNames(t) {
+		if declared[name] {
+			if reason, recorded := adminGateNamesDeliberatelyUndeclared[name]; recorded {
+				t.Errorf("%q is recorded as deliberately undeclared (%q) but dsl/ now declares it. "+
+					"Remove the entry -- a stale record is worse than none, because the next "+
+					"reader believes it.", name, reason)
+			}
+			continue
+		}
+		if _, recorded := adminGateNamesDeliberatelyUndeclared[name]; !recorded {
+			t.Errorf("the admin-gate recogniser matches %q, but no `spec ... %s {` is declared "+
+				"anywhere in dsl/. A name gated on but declared nowhere reads as real from the "+
+				"outside -- that is how spec(\"requiresClusterOwner\") survived in six documents "+
+				"(memql#2983). Declare it, or add it to adminGateNamesDeliberatelyUndeclared "+
+				"with the reason (memql#3016).", name, name)
+		}
 	}
 }
