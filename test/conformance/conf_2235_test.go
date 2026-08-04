@@ -97,8 +97,12 @@ func runLibraryIndexPromotion(t *testing.T, e *Env) {
 		{
 			label:     "generatedOutput",
 			createMut: "createGeneratedOutput",
+			// No ownerUserId: createGeneratedOutput stamps it from
+			// actor.userId (memql#2989), same as createMemory / createNote /
+			// createTodo above. The suite acts as ownerUID, so that is the
+			// value the stamp lands -- asserted below.
 			createArgs: map[string]any{
-				"outputId": "gout-" + suffix, "ownerUserId": ownerUID, "title": "kdim output",
+				"outputId": "gout-" + suffix, "title": "kdim output",
 				"source": "agent_generated", "format": "markdown", "summary": "out summary",
 			},
 			byIdQuery: "generatedOutputById", byIdArgKey: "outputId", idValue: "gout-" + suffix,
@@ -121,6 +125,26 @@ func runLibraryIndexPromotion(t *testing.T, e *Env) {
 			canonicalId := asStr(row["id"])
 			if canonicalId == "" {
 				t.Fatalf("#2235: %s row has no canonical id; row=%#v", c.byIdQuery, row)
+			}
+
+			// Every backing concept here declares
+			// @rowAuthz(owner="ownerUserId") and stamps it from
+			// actor.userId. This is the one place in the suite where that
+			// stamp is EXECUTED rather than analyzed statically, so assert
+			// the value the engine actually wrote (memql#2989). The suite
+			// acts as ownerUID throughout.
+			//
+			// The read returns the CANONICAL form: ownerUserId carries an
+			// @relationship to v1:identity:user, so it comes back as
+			// `v1:identity:user:<id>` rather than the bare id the stamp
+			// wrote. Compare against both spellings rather than pinning one
+			// -- which of the two a read returns is a separate contract
+			// (docs/public/concepts/identifiers.md) and not what this
+			// assertion is about.
+			gotOwner := asStr(row["ownerUserId"])
+			if gotOwner != ownerUID && gotOwner != "v1:identity:user:"+ownerUID {
+				t.Fatalf("#2989: %s row ownerUserId = %q, want %q (bare or canonical) -- the "+
+					"mutation must stamp the owner from actor.userId", c.byIdQuery, gotOwner, ownerUID)
 			}
 
 			// Fire the REAL index automation with a node.created event whose
