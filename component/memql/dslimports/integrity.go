@@ -2337,3 +2337,72 @@ func (idx *declIndex) knownNamespaceForCause(usePath string) bool {
 	}
 	return idx.namespaces[seg] || len(idx.pinnedTo[seg]) > 0
 }
+
+// ---------------------------------------------------------------------------
+// Lane 7: orphaned @-attribute preambles (memql#2965)
+// ---------------------------------------------------------------------------
+
+// VerifyPreambleAttachment reports every `@`-attribute run a block comment
+// separates from the declaration below it.
+//
+// The loader's preamble walk stops at a `*/` (it accepts only `@` and `//`
+// lines), so annotations above a parked declaration are left OUT of the slice
+// that follows. The declaration below is then registered without them -- a
+// builtin loses its @executor and simply cannot dispatch, with nothing logged.
+// It is the silent-absence class memql#2830 outlawed.
+//
+// Reported rather than repaired, deliberately. Reattaching the annotations
+// across the comment has to guess which declaration they were written for, and
+// in the shape that motivated this they sit directly on top of the PARKED one.
+// Guessing wrong hands a live declaration an executor its author never wrote --
+// over-attribution, which review already rejected once on memql#2896. The rule
+// itself lives in component/language/parser (OrphanedPreambles), next to the
+// preamble walk it describes.
+//
+// Separate from VerifyReferentialIntegrity because it reads RAW SOURCE rather
+// than the parsed AST: by the time a file is an *ast.File the annotations are
+// already gone, which is the whole problem.
+func (t *Tree) VerifyPreambleAttachment() []error {
+	if t == nil || t.Root == nil {
+		return nil
+	}
+	paths := make([]string, 0, len(t.Files))
+	for p := range t.Files {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+
+	var errs []error
+	for _, path := range paths {
+		raw, err := fs.ReadFile(t.Root, path)
+		if err != nil {
+			// Unreadable here means the loader already reported it; a second
+			// diagnostic about the same file helps nobody.
+			continue
+		}
+		for _, orphan := range languageParser.OrphanedPreambles(string(raw)) {
+			errs = append(errs, fmt.Errorf(
+				"%s:%d: these annotations are attached to nothing -- the block comment opened on "+
+					"line %d ends the preamble walk, so whatever follows the comment loads "+
+					"WITHOUT them, silently. What that costs depends on the annotation: a query "+
+					"loses the @public its caller scope is read from, a concept loses its "+
+					"@rowAuthz, a file header loses the @version / @namespace its declarations "+
+					"register under, and a builtin loses the @executor it is dispatched by. Move "+
+					"them below the comment if they belong to the declaration under it, or inside "+
+					"the comment if they belong to the one that was parked; a blank line above "+
+					"the comment also ends the run cleanly when they are a file header:\n%s",
+				path, orphan.Line, orphan.CommentLine, indentBlock(orphan.Attributes)))
+		}
+	}
+	return errs
+}
+
+// indentBlock indents a multi-line diagnostic fragment so it reads as a quoted
+// block rather than running into the surrounding prose.
+func indentBlock(s string) string {
+	lines := strings.Split(s, "\n")
+	for i, l := range lines {
+		lines[i] = "    " + l
+	}
+	return strings.Join(lines, "\n")
+}

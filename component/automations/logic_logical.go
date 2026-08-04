@@ -1,6 +1,10 @@
 package automations
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/znasllc-io/memql/component/memql"
+)
 
 // tryEvaluateLogicalLocally resolves a logic-body terminal return whose top
 // node is a boolean connective (`&&` / `||`, with optional leading `!` groups)
@@ -95,7 +99,7 @@ func evalLogicalString(s string, evaluator *Evaluator) (bool, error) {
 	if val, handled, err := EvaluateLocalExpr(atom, evaluator); err != nil {
 		return false, err
 	} else if handled {
-		return isTruthy(val), nil
+		return memql.IsTruthy(val), nil
 	}
 	return evaluator.EvaluateCondition(atom)
 }

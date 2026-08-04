@@ -246,7 +246,7 @@ func containsMalformedSentinel(v any) bool {
 }
 
 // The FINAL arm resolving to missing must come back as nil, not the
-// missingValue{} sentinel: isTruthy(missingValue{}) is true, so leaking
+// missingValue{} sentinel: IsTruthy(missingValue{}) is true, so leaking
 // it would make an all-missing coalesce read as truthy.
 func TestIdTemplateCoalesce_MissingFinalArmIsNil(t *testing.T) {
 	eval := &mutationTemplateEvaluator{args: map[string]any{}}
