@@ -256,6 +256,18 @@ func declaredGoFuncNames(t *testing.T) map[string]bool {
 		if rel == "" {
 			continue
 		}
+		// A symbol declared ONLY in a _test.go is not an extension point, and a
+		// doc presenting one as registerable is exactly the "reads as
+		// authoritative because its neighbour is" failure this gate exists to
+		// catch -- resolving against test files would green-light it.
+		//
+		// This also closes the resolver's one over-matching seam. goFuncDeclRE
+		// is line-based, so a `func Foo()` written inside a raw-string fixture
+		// reads as a declaration; every such phantom in this tree lives in a
+		// _test.go, so the two arms close together.
+		if strings.HasSuffix(rel, "_test.go") || strings.HasPrefix(rel, "vendor/") {
+			continue
+		}
 		data, readErr := os.ReadFile(rel)
 		if readErr != nil {
 			t.Logf("skipping unreadable tracked file %s: %v", rel, readErr)
@@ -311,6 +323,16 @@ func TestRetiredGoSymbolsAreActuallyGone(t *testing.T) {
 		if entry.removedIn == "" {
 			t.Errorf("retiredGoSymbols[%q] names no removing commit. The commit IS the "+
 				"mechanism -- without it the entry is an exemption rather than a record.", symbol)
+		} else if err := exec.Command("git", "cat-file", "-e", entry.removedIn+"^{commit}").Run(); err != nil {
+			// Non-empty is not the same as real. Three places in this file say
+			// naming the commit is "the whole mechanism"; checking only for the
+			// empty string means `removedIn: "TODO"` or `"see #2966"` ships and
+			// the mechanism is decorative. This is the line that makes the
+			// prose true.
+			t.Errorf("retiredGoSymbols[%q].removedIn is %q, which is not a commit in this "+
+				"repository. An entry that cannot be justified with a real commit is an "+
+				"exemption wearing a record's clothes -- which is the failure memql#2967 was "+
+				"filed about, one level up.", symbol, entry.removedIn)
 		}
 		if declared[symbol] {
 			stale = append(stale, symbol)
