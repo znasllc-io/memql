@@ -358,15 +358,26 @@ query widget deploymentWidgets {
 	}
 }
 
-// TestLane2_PinnedDomainWithTwoOwnCandidatesFallsBackToTheGenericRemedy pins
-// the multi-candidate guard.
+// TestLane2_PinnedDomainWithTwoOwnCandidatesReportsTheSameIdCollision pins the
+// multi-candidate case.
 //
-// The pinned message names a SINGLE assembled id. When the pinned domain
-// declares the name twice, naming one of the two would be a guess, so the
-// helper declines and the generic remedy is emitted instead. Without the
-// guard the message confidently reports whichever candidate the map iteration
-// reached first, which is not deterministic.
-func TestLane2_PinnedDomainWithTwoOwnCandidatesFallsBackToTheGenericRemedy(t *testing.T) {
+// The rationale this comment used to carry was: "naming one of the two would be
+// a guess, so the helper declines and the generic remedy is emitted instead."
+// That is true when the candidates assemble to DIFFERENT ids -- naming one
+// would report whichever the map reached first. It is false here, and the
+// distinction is the whole of memql#3008: these two decls assemble to the SAME
+// canonical id, so there is nothing to guess. What was an unnameable choice is
+// a nameable fact, and the id belongs in the message.
+//
+// The generic remedy is now wrong rather than merely vague. It says "import it
+// via a use declaration", and an import selects a NAMESPACE -- these decls
+// already share one, so following that advice changes nothing and sends the
+// author in a circle. The assertion below therefore requires the collision
+// message AND requires the generic remedy to be absent.
+//
+// The invariant this test has always protected is unchanged: the duplicate must
+// be REPORTED, never silently resolved.
+func TestLane2_PinnedDomainWithTwoOwnCandidatesReportsTheSameIdCollision(t *testing.T) {
 	root := pinnedNamespaceTree()
 	// A SECOND widget inside the pinned domain, in its own file.
 	root["deployment/more.memql"] = file(`@version("1.0.0")
@@ -377,18 +388,45 @@ concept widget {
 }`)
 	tree := loadTree(t, root)
 
+	// memql#3008 REPLACED the guard this test was written for, and the reason
+	// is worth stating rather than just editing the assertion: the old rule
+	// declined to name an id because "picking one of two would be a guess
+	// decided by map iteration order". That is true when the two candidates
+	// assemble to DIFFERENT ids. Here they do not -- both decls sit under the
+	// pinned `cluster` namespace and both assemble to `v1:cluster:widget` --
+	// so there is nothing to guess. What was an unnameable choice is a
+	// nameable fact.
+	//
+	// The invariant this test protects is unchanged: a pinned domain declaring
+	// the name twice must still be REPORTED, never silently resolved.
 	var got string
 	for _, e := range tree.VerifyReferentialIntegrity() {
-		if strings.Contains(e.Error(), "cannot disambiguate") {
-			got = e.Error()
+		msg := e.Error()
+		if strings.Contains(msg, "same canonical id") || strings.Contains(msg, "cannot disambiguate") {
+			got = msg
 		}
 	}
 	if got == "" {
-		t.Fatal("lane 2 stopped reporting the ambiguity when the pinned domain declared the name twice")
+		t.Fatal("lane 2 stopped reporting anything when the pinned domain declared the name twice")
 	}
-	if !strings.Contains(got, "import it via a use declaration") {
-		t.Errorf("with TWO own-domain candidates the helper must decline and the GENERIC remedy "+
-			"must be emitted -- the pinned message names a single assembled id, and picking one of "+
-			"two would be a guess decided by map iteration order.\n  got: %s", got)
+	// And the generic remedy must be ABSENT, not merely superseded. It says
+	// "import it via a use declaration"; an import selects a namespace and
+	// these decls already share one, so emitting it alongside the collision
+	// would hand the author a step that cannot work.
+	if strings.Contains(got, "import it via a use declaration") {
+		t.Errorf("the generic import remedy was emitted for a same-id collision, where following "+
+			"it changes nothing.\n  got: %s", got)
+	}
+	if !strings.Contains(got, "same canonical id") {
+		t.Errorf("two decls in ONE pinned domain collide on a single assembled id, so the report "+
+			"must say so rather than offering the generic 'import it via a use declaration' "+
+			"remedy -- an import cannot separate two decls that already share a namespace "+
+			"(memql#3008).\n  got: %s", got)
+	}
+	for _, want := range []string{"v1:cluster:widget"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the duplicate report does not name %q; the author needs the id as well as "+
+				"the files.\n  got: %s", want, got)
+		}
 	}
 }

@@ -50,7 +50,7 @@ import (
 // admitted (#2908, #2938). "The handler looks at the actor" is not sufficient;
 // it has to reject when there is no actor.
 func HandlerAuthorizedPaths() []string {
-	return []string{
+	paths := []string{
 		// POST /automations/{name}/trigger -- registered as a prefix by
 		// registerAutomationTriggerRoute; owner-or-admin enforced in the
 		// handler (#2937, #2938).
@@ -73,7 +73,67 @@ func HandlerAuthorizedPaths() []string {
 		// authenticates. If identity's gRPC chain ever stops rejecting by
 		// default, this entry stops being true.
 		"/memql/ws",
+		// POST /memql/query -- the gRPC gateway, served from MIDDLEWARE ahead
+		// of the mux (component/grpc/gateway.go, memqlgrpc.InterceptedPaths).
+		// Declared as of memql#3004; before that it was a registration channel
+		// nothing modelled, so it appeared in no list and failed no check.
+		//
+		// Same posture as /memql/ws above and recorded with the same honesty:
+		// the middleware performs no auth check of its own. It forwards the
+		// request's Authorization header into gRPC metadata, so on identity the
+		// call lands on MemqlService.Stream behind OperatorAware(RejectAll)
+		// (app/transport.go) -- a request with no operator credential is
+		// refused at the next hop rather than in the handler.
+		//
+		// This is a known posture, not a claim that the gateway authenticates.
+		// If identity's gRPC chain ever stops rejecting by default, this entry
+		// stops being true -- exactly as the /memql/ws entry says of itself.
+		"/memql/query",
 	}
+	// POST /inbound/{source} -- the inbound-delivery receiver (memql#2957).
+	// Appended rather than written inline because the prefix has to agree with
+	// what the mount uses, base path included, and InboundWebhookPaths() is the
+	// one place that is decided.
+	//
+	// It qualifies under the rule above: with no credentials it fails CLOSED
+	// twice over. An unlisted source is 404 (the allowlist is empty unless an
+	// operator populates it), and a listed one without a matching HMAC
+	// signature is 401. There is no path through the handler that reaches the
+	// graph on an unauthorized request -- component/inbound's
+	// TestHandlerRefusesWithoutStaging asserts exactly that, for every refusal
+	// branch, by checking nothing was executed.
+	//
+	// The credential is a per-source shared secret rather than a memQL
+	// identity, which is why this cannot be an ordinary authenticated route:
+	// the caller is a third party and has no user.
+	return append(paths, InboundWebhookPaths()...)
+}
+
+// SelfAuthenticatedPaths returns routes that must remain reachable on a
+// verifier-consuming node because they authenticate themselves with a
+// credential that is NOT a memQL identity (memql#3062).
+//
+// This is the third tier, and it exists because the first two cannot express
+// this route:
+//
+//   - PublicPaths() is consulted by the verifier middleware, but it is matched
+//     with an open PREFIX walk, so "/inbound/" there would exempt anything
+//     mounted beneath it later -- and it would make the route unauthenticated
+//     rather than differently-authenticated.
+//   - HandlerAuthorizedPaths() is consulted ONLY on a binary with no verifier,
+//     so on the bff -- which installs one -- it never runs, and a third-party
+//     webhook is 401'd before the handler's allowlist and HMAC execute.
+//
+// Membership means the bearer middleware steps aside, NOT that the route is
+// unauthenticated. A route qualifies only if it fails CLOSED with no
+// credentials, exactly as HandlerAuthorizedPaths() requires, and the matching
+// is bounded to one path segment (see verifier.isSelfAuthenticated).
+func SelfAuthenticatedPaths() []string {
+	// POST /inbound/{source} -- verified by a per-source HMAC over the body.
+	// Fails closed twice with no credentials: an unlisted source is 404 (the
+	// allowlist is empty unless an operator populates it) and a listed one
+	// without a matching signature is 401.
+	return InboundWebhookPaths()
 }
 
 // ContractRoutes returns the request paths HandlerWithOptions registers.

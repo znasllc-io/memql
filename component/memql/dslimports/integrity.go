@@ -724,6 +724,13 @@ type conceptResolution struct {
 	kindHit string
 	// candidates is the ambiguous-candidate count (state == conceptAmbiguous).
 	candidates int
+	// dupID and dupFiles describe a same-canonical-id collision
+	// (state == conceptDuplicate): the id two or more declarations assemble
+	// to, and the files declaring them, sorted. Both are needed in the
+	// diagnostic -- "ambiguous" tells an author nothing actionable, whereas
+	// "these two files both assemble to this id" names the edit (memql#3008).
+	dupID    string
+	dupFiles []string
 }
 
 type conceptState int
@@ -733,7 +740,67 @@ const (
 	conceptInconclusive
 	conceptMissing
 	conceptAmbiguous
+	// conceptDuplicate -- two or more declarations of the name assemble to
+	// the SAME canonical id. Distinct from conceptAmbiguous, which is 2+
+	// candidates in DIFFERENT namespaces (a real choice boot cannot make).
+	// A same-id collision is not a choice at all: boot's MemoryRegistry is
+	// keyed by canonical id, so the decls collapse to one entry and the last
+	// registration silently wins (memql#3008).
+	conceptDuplicate
 )
+
+// duplicateConceptCollision reports the canonical id that two or more of the
+// supplied entries assemble to, and the files declaring them.
+//
+// Returns ("", nil) when every entry assembles to a distinct id -- that is
+// ambiguity, a different condition with a different diagnostic -- or when an
+// id cannot be computed, since a guess here would name innocent files.
+func duplicateConceptCollision(root fs.FS, entries []conceptEntry) (string, []string) {
+	byID := map[string]map[string]bool{}
+	for _, e := range entries {
+		id := candidateConceptId(root, e)
+		if id == "" {
+			continue
+		}
+		if byID[id] == nil {
+			byID[id] = map[string]bool{}
+		}
+		byID[id][e.file] = true
+	}
+	// Deterministic: iterate ids in sorted order so two colliding groups
+	// (vanishingly unlikely, but a map range would make the diagnostic
+	// non-reproducible) always report the same one.
+	ids := make([]string, 0, len(byID))
+	for id := range byID {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		// Keyed by FILE, not by entry: counting entries would report a
+		// cross-file collision that does not exist when one file happens to
+		// declare the name twice.
+		//
+		// Being accurate about that case rather than crediting someone else
+		// with it: two `concept widget` blocks in ONE file are caught by
+		// NOTHING today -- not the parser, not this lane -- and reach boot as
+		// the same silent last-wins collision this function exists to surface.
+		// It is out of scope here because the fix is a different shape (a
+		// per-file duplicate check at parse time), not because it is handled.
+		// An earlier draft of this comment said "the parser's problem", which
+		// is exactly the kind of stale justification the correction at
+		// pinnedDomainAmbiguity below was written to stop.
+		if len(byID[id]) < 2 {
+			continue
+		}
+		files := make([]string, 0, len(byID[id]))
+		for f := range byID[id] {
+			files = append(files, f)
+		}
+		sort.Strings(files)
+		return id, files
+	}
+	return "", nil
+}
 
 // resolveConceptForFile resolves a bare signature-concept name from the
 // perspective of `path`, mirroring the boot resolver: the file's own Form B
@@ -775,23 +842,69 @@ func (t *Tree) resolveConceptForFile(path string, f *languageAst.File, idx *decl
 		if !ok {
 			return conceptResolution{state: conceptInconclusive} // lane 1 reports bad modules
 		}
-		var hit *moduleTarget
+		// EVERY hit, not the first (memql#3008). First-hit-wins made the
+		// choice positional -- whichever directory `domainsForNamespace`
+		// happened to return first -- and lanes 3/5/6 then validated fields
+		// against that arbitrary decl. The visible symptom was worse than a
+		// wrong pick: an author with a correct query got told their field
+		// "does not exist" because it existed on the OTHER declaration.
+		var hits []moduleTarget
 		for i, target := range targets {
 			if t.ImportsOnly[target.file] {
 				return conceptResolution{state: conceptInconclusive} // lane 1 reports bad modules
 			}
-			if _, declared := idx.byFile[target.file][qualifyName(target, name)]; declared && hit == nil {
+			if _, declared := idx.byFile[target.file][qualifyName(target, name)]; declared {
 				// Same per-declaration namespace test lane 1 applies: a
 				// pinned directory supplies ns only for decls that actually
 				// assemble under it (see declSuppliesNamespace).
 				if idx.declSuppliesNamespace(target, parts[0], name) {
-					hit = &targets[i]
+					hits = append(hits, targets[i])
 				}
 			}
 		}
-		if hit == nil {
+		if len(hits) == 0 {
 			return conceptResolution{state: conceptInconclusive} // lane 1 reports the missing symbol
 		}
+		if len(hits) > 1 {
+			// Collect the declarations behind the hits and ask whether they
+			// COLLIDE (same assembled id) rather than merely differ. Only a
+			// collision is reportable here: distinct ids under one namespace
+			// are what the import is for, and the first hit remains the right
+			// answer for those.
+			var candidates []conceptEntry
+			for _, h := range hits {
+				full := qualifyName(h, name)
+				for _, e := range idx.concepts[full] {
+					if e.file == h.file {
+						candidates = append(candidates, e)
+					}
+				}
+			}
+			if id, files := duplicateConceptCollision(idx.root, candidates); id != "" {
+				return conceptResolution{state: conceptDuplicate, dupID: id, dupFiles: files}
+			}
+		}
+		// First-hit-wins SURVIVES here, deliberately and with a known residue.
+		//
+		// The collision check above only fires when the candidates assemble to
+		// the SAME canonical id -- the shape memql#3008 ruled on, where boot
+		// last-wins silently and there is a nameable fact to report. When two
+		// directories in one namespace declare the name with DIFFERENT ids (a
+		// differing @version is enough), no collision is detected, this line
+		// picks positionally, and lanes 3/5/6 then validate against whichever
+		// directory sorted first. That still reproduces memql#3008's original
+		// symptom verbatim: one spelling gets a confident "field X, which
+		// concept Y does not declare" and the mirror gets zero diagnostics,
+		// decided by sort order rather than by the tree being wrong.
+		//
+		// Out of scope rather than overlooked: #3008's ruling and every one of
+		// its DoD items are scoped to same-canonical-id. The different-id case
+		// is a genuine ambiguity with a real remedy (an import DOES separate
+		// them, because they are in different namespaces), so it wants the
+		// ambiguity path rather than this one -- which is a change to when
+		// hits are treated as ambiguous, with its own blast radius. Filed
+		// rather than smuggled in here.
+		hit := &hits[0]
 		full := qualifyName(*hit, name)
 		if kind := idx.byFile[hit.file][full]; kind != "concept" {
 			kindHit = kind
@@ -829,6 +942,14 @@ func (t *Tree) resolveConceptForFile(path string, f *languageAst.File, idx *decl
 			// tree should stay quiet beyond its parse diagnostics.
 			return conceptResolution{state: conceptInconclusive}
 		}
+		// A same-id collision is checked BEFORE ambiguity, because it is the
+		// stronger and more specific finding (memql#3008). "Ambiguous across
+		// namespaces" tells an author to add an import; that advice is wrong
+		// here, since an import cannot separate two decls that assemble to one
+		// id -- boot's registry collapses them whatever the caller writes.
+		if id, files := duplicateConceptCollision(idx.root, entries); id != "" {
+			return conceptResolution{state: conceptDuplicate, dupID: id, dupFiles: files}
+		}
 		return conceptResolution{state: conceptAmbiguous, candidates: len(entries)}
 	}
 }
@@ -846,6 +967,25 @@ func (t *Tree) verifySignatureBindings(path string, f *languageAst.File, idx *de
 			}
 			errs = append(errs, fmt.Errorf(
 				"%s: signature concept %q is not declared anywhere in the DSL root", path, name))
+		case conceptDuplicate:
+			// The tree defect nothing else reports (memql#3008). Boot's
+			// MemoryRegistry is keyed by canonical id, so two decls assembling
+			// to one id collapse to a single entry and the LAST registration
+			// silently wins -- there is no duplicate detector for concepts
+			// anywhere on the boot path.
+			//
+			// Names both files and the id rather than saying "ambiguous",
+			// because the author needs to know WHICH two declarations to
+			// reconcile. Adding an import -- the remedy the ambiguity branch
+			// below offers -- cannot help: an import selects a namespace, and
+			// these decls already share one.
+			errs = append(errs, fmt.Errorf(
+				"%s: concept %q is declared in %s, and every declaration assembles to the same "+
+					"canonical id %q. Boot's registry is keyed by that id, so the declarations "+
+					"collapse to one row and whichever loads last silently wins; nothing on the "+
+					"boot path reports it. Rename one declaration, or move it to a namespace that "+
+					"assembles a different id (memql#3008).",
+				path, name, strings.Join(res.dupFiles, " and "), res.dupID))
 		case conceptAmbiguous:
 			// A candidate in the file's OWN domain is not ambiguous: #2617
 			// makes same-domain constructs ambient, so boot binds the local
@@ -1834,6 +1974,21 @@ func firstSegment(p string) string {
 //
 // Returns nothing when more than one own-domain candidate survives assembly:
 // the message names a single id, and naming one of two would be a guess.
+//
+// # Reachability, corrected (memql#3008)
+//
+// This has exactly ONE production caller, inside the `case conceptAmbiguous`
+// branch of verifySignatureBindings. It was previously cited as the guard that
+// made cross-directory same-name declarations safe. It is not, and never was:
+// for that shape step 1 of resolveConceptForFile returns conceptResolved, so
+// the ambiguous branch is never reached -- and called directly on the fixture
+// it bails on its own same-name check and returns ("", ""). Dead for that
+// shape twice over.
+//
+// The record is corrected here rather than made true by adding a caller.
+// Building machinery so a stale justification becomes accurate is backwards;
+// the collision that justification was covering for is now detected directly,
+// by duplicateConceptCollision, before the ambiguity branch runs.
 func pinnedDomainAmbiguity(idx *declIndex, path, name string) (id, pin string) {
 	if idx == nil {
 		return "", ""

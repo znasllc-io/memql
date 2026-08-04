@@ -68,11 +68,21 @@ type App struct {
 	// identity binary can assert its unauthenticated surface is declared
 	// (memql#2939). Populated only via handleRoute/handleRouteFunc.
 	registeredRoutes []string
+	// middlewareRoutes records paths served from MIDDLEWARE, ahead of the mux,
+	// so the same assertion can see them (memql#3004).
+	//
+	// A middleware that claims a request never touches the mux, so such a path
+	// reaches neither registeredRoutes nor ContractRoutes() -- it was a third
+	// registration channel the model did not cover, and POST /memql/query was
+	// served on the verifier-less identity binary while appearing in no
+	// declaration. The producer declares its paths (memqlgrpc.InterceptedPaths)
+	// and they are folded in here.
+	middlewareRoutes []string
 	// surfaceSealed is set once createHTTPServer has asserted the
 	// unauthenticated surface. Registering after that point would mount a
 	// route the assertion never saw, so handleRoute/handleRouteFunc refuse
 	// it. See the comment on handleRoute.
-	surfaceSealed bool
+	surfaceSealed    bool
 	httpArgs         []server.ServerArg
 	middlewares      []server.MiddlewareFunc
 	identityVerifier *verifier.Verifier

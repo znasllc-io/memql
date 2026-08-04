@@ -275,3 +275,18 @@ func (a *OutboundEngineAdapter) Execute(ctx context.Context, query string) (any,
 	}
 	return result, nil
 }
+
+// InboundEngineAdapter wraps MemQLEngine to satisfy inbound.Engine
+// (memql#2957). Mirrors OutboundEngineAdapter: the receiver wants the
+// (any, error) seam so its tests drive the staging call without a database.
+type InboundEngineAdapter struct {
+	Engine *memql.MemQLEngine
+}
+
+func (a *InboundEngineAdapter) Execute(ctx context.Context, query string) (any, error) {
+	result, err := a.Engine.Execute(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}

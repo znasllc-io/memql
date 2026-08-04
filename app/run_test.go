@@ -21,14 +21,14 @@ import (
 // Stop calls. Lets Run-level tests observe the lifecycle ordering
 // without standing up a real engine or transport.
 type fakeDep struct {
-	name        common.ComponentName
-	order       int
-	startCalls  int64
-	stopCalls   int64
-	startOrder  *[]string // optional shared slice that captures the order Starts fire in
-	stopOrder   *[]string // optional shared slice that captures the order Stops fire in
-	readyCh     chan struct{}
-	running     atomic.Bool
+	name       common.ComponentName
+	order      int
+	startCalls int64
+	stopCalls  int64
+	startOrder *[]string // optional shared slice that captures the order Starts fire in
+	stopOrder  *[]string // optional shared slice that captures the order Stops fire in
+	readyCh    chan struct{}
+	running    atomic.Bool
 }
 
 func newFakeDep(name string, order int) *fakeDep {
@@ -57,10 +57,10 @@ func (d *fakeDep) Stop(_ context.Context) {
 	}
 }
 
-func (d *fakeDep) IsRunning() bool                  { return d.running.Load() }
-func (d *fakeDep) Order() int                       { return d.order }
+func (d *fakeDep) IsRunning() bool                     { return d.running.Load() }
+func (d *fakeDep) Order() int                          { return d.order }
 func (d *fakeDep) ComponentName() common.ComponentName { return d.name }
-func (d *fakeDep) Ready() <-chan struct{}           { return d.readyCh }
+func (d *fakeDep) Ready() <-chan struct{}              { return d.readyCh }
 
 // TestDefaultStartDependencies_CallsAllInOrder pins the documented
 // contract: registration order is preserved, every dep gets Started.

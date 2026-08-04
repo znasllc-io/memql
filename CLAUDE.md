@@ -546,6 +546,7 @@ These endpoints **must** remain HTTP due to external protocol requirements:
 | **Health check** | `/healthz` | Docker and Kubernetes health probes expect HTTP GET |
 | **WebSocket upgrades** | `/memql/ws`, `/memql/audio` | Browser clients need HTTP upgrade to establish WebSocket |
 | **File uploads** | `/spaces/{id}/attachments` | Multipart form-data uploads map poorly to gRPC |
+| **Inbound webhooks** | `POST /inbound/{source}` (bff only) | The third party dials US -- Shopify, Amazon SP-API, a POS will POST to a URL and nothing else, so there is no gRPC version of this capability (memql#2957). Deny-by-default source allowlist + per-source HMAC; declared in `server.HandlerAuthorizedPaths()`, not `PublicPaths()`. See [inbound-delivery.md](docs/public/operate/inbound-delivery.md) |
 
 ### gRPC-Only Endpoints (HTTP Retired)
 
