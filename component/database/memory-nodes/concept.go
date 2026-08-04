@@ -609,11 +609,18 @@ func (c *Concept) DeclaredFields() []string {
 // ProjectableFields returns the names of every top-level payload field
 // a shape's default projection should expose: all declared fields
 // EXCEPT those marked @internal (x-internal). @serverSet fields ARE
-// projectable (createdAt / createdBy / status are commonly rendered),
-// so the default projection includes public + serverSet fields and
+// projectable (a `status` a mutation stamps is routinely rendered), so
+// the default projection includes public + serverSet fields and
 // excludes only the server-only @internal set. Names are returned in
 // ascending order for deterministic shape templates. Backs the C5
 // empty-shape default projection (memql#2035).
+//
+// NOTE createdAt / createdBy are NOT examples of this: they are
+// reserved row intrinsics (see reservedPayloadFields), rejected as
+// declared payload fields by ensureReservedFieldsNotDeclared, so they
+// can never be @serverSet at all. They were cited here as examples
+// until memql#2960, and the same error reached the authoring
+// reference from this comment.
 func (c *Concept) ProjectableFields() []string {
 	out := make([]string, 0)
 	for _, f := range c.classifyFields() {

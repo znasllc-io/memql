@@ -253,13 +253,14 @@ concept fieldTypes {
 //   8. Field-level annotations
 // =============================================================================
 //
-// Every field accepts a subset of:
-//   @required           Field must be present on insert. No default.
-//   @default("value")   Auto-fill on insert when caller omits the field.
-//                       Value is parsed -- numbers as numbers, "true"/"false"
-//                       as bools, RFC3339 strings as datetimes.
-//   @description("..."  Human-readable description.
-//   @unique             Engine enforces uniqueness across rows.
+// This section says what each annotation DOES, which is not always what its
+// name suggests. Four of the fifteen are DECLARED METADATA: they parse, they
+// reach the emitted schema, and nothing in the engine acts on them
+// (memql#2960). They are listed as such rather than quietly omitted, because
+// an author who believes @secret redacts will put a credential in a field.
+//
+// ENFORCED -- the engine acts on these:
+//   @required           Field must be present on insert.
 //   @pattern("regex")   String pattern (only valid on string fields). On
 //                       []T / map[string]T it constrains each ELEMENT.
 //   @minLength(N)       Min character count. STRING ONLY, and on []T it is a
@@ -268,9 +269,79 @@ concept fieldTypes {
 //   @maxLength(N)       Max character count. STRING ONLY -- same (memql#2951).
 //   @minimum(N)         Min numeric value (int / float).
 //   @maximum(N)         Max numeric value (int / float).
-//   @immutable          Field cannot change after insert.
-//   @secret             Field is redacted from logs + non-elevated readers.
 //   @variant(discriminator="field")  Discriminated-union field. See section 9.
+//   @internal           TWO gates. The field is rejected from a mutation's
+//                       caller args, AND excluded from a shape's default
+//                       projection (Concept.ProjectableFields). Server-only in
+//                       both directions.
+//   @serverSet          ONE gate, and it is a REJECTION rather than a stamp:
+//                       the field is refused from caller args, and YOUR
+//                       mutation must set it in its `stamp { }` block. Nothing
+//                       populates it for you -- the name is the misleading
+//                       part. Unlike @internal, a @serverSet field IS
+//                       projectable, so a shape's default projection still
+//                       renders it.
+//                       NOT to be confused with the reserved row intrinsics
+//                       (id / createdAt / createdBy / ...). Those are table
+//                       COLUMNS rather than payload properties, and you must
+//                       not declare them at all -- the engine supplies each
+//                       from its own source: createdBy from the acting
+//                       identity, createdAt from the insert clock, id from the
+//                       insert's own id (or a content hash when none is
+//                       given). See section 12.
+//   @pii                Marks personally-identifying data, and it is
+//                       load-bearing in two places: the @scrubPii update path
+//                       zeroes every @pii field via Concept.PIIFields(), and
+//                       the projection-authorization gate (memql#2883,
+//                       dsl/pii_projection_test.go) requires a query
+//                       projecting a shape that carries a @pii field to
+//                       constrain its caller. ADDING @pii TO A FIELD CAN FAIL
+//                       THE BUILD. That is the intent, and it is the working
+//                       template for what "enforced" looks like here.
+//   @description("...") Human-readable description. Emitted into the concept
+//                       schema, so it reaches sense hover -- write it as
+//                       documentation, not as a note. (It does NOT reach the
+//                       generated SDK. sdk/gen does read concept declarations,
+//                       but only their @version / @namespace preamble, to
+//                       assemble canonical ids; it never reads the field list
+//                       in the body, and emits no field metadata.)
+//
+// DECLARED METADATA -- parsed and emitted, acted on by NOTHING (memql#2960):
+//   @unique             Emits `x-unique`. There is no uniqueness check
+//                       anywhere in the engine or the database; two rows may
+//                       carry the same value and nothing objects.
+//   @immutable          Emits `x-immutable`. Nothing prevents an update. The
+//                       immutability that does exist in the tree is bespoke
+//                       per construct (validateRbacBaseRoleImmutable,
+//                       validateHealingBaseImmutable) and is not driven by
+//                       this annotation.
+//   @secret             Emits `x-secret`. NOTHING IS REDACTED -- not logs, not
+//                       query results, not non-elevated readers. Do not rely
+//                       on it to keep a value out of anything.
+//                       (component/safety/redact.go is a different surface: it
+//                       takes tool / HTTP payloads, never a concept row.)
+//   @default("value")   Emits `default` into the schema and is NEVER APPLIED
+//                       on insert -- Concept.Create validates and marshals the
+//                       payload verbatim. Fill a value with the `??`
+//                       null-coalescing operator in the mutation body instead.
+//                       The value IS parsed (ints as ints, floats as floats,
+//                       "true"/"false" as bools) but there is no datetime
+//                       branch, so a `datetime` field takes a bool default
+//                       without complaint.
+//
+// Declared metadata is still worth writing where it records real intent: @pii
+// began exactly there and is now enforced in two places, with no schema change
+// needed to get from one to the other.
+//
+// Where the other four stand, which is NOT one answer for all of them:
+//   - @secret   enforcement approved, scoped to logs -- memql#3036 (open).
+//   - @default  open -- memql#3038.
+//   - @unique / @immutable  DECIDED, and the decision is no. memql#3037 was
+//     closed not-planned: uniqueness over an append-only hypertable means
+//     "unique among current rows", which is an epic with a migration story,
+//     and @immutable's cost is defining which read-merge-write rewrites are
+//     legitimate. Neither has a forcing case. Treat both as permanent declared
+//     metadata; reopen only with a concrete failure that one would have caught.
 //
 // Unknown @-annotations on a field are rejected at load time with
 //   `unknown property annotation @<name> on field "<field>"`.
@@ -281,20 +352,35 @@ concept fieldAnnotations {
   // String constraints
   slug         string! @pattern("^[a-z][a-z0-9-]{0,49}$") @description("URL slug.")
   shortText    string @minLength(1) @maxLength(280) @description("Tweet-shaped string.")
-  uniqueKey    string! @unique @description("Engine-enforced unique key.")
+  uniqueKey    string! @unique @description("Intended to be unique. NOT enforced -- @unique is declared metadata (memql#2960).")
 
   // Numeric constraints
   ratingScore  int    @minimum(1) @maximum(5) @description("1-5 rating scale.")
   priceUsd     float  @minimum(0.0) @maximum(999999.99) @description("Currency.")
 
-  // Defaults
-  status       enum("draft", "published") @default("draft")
-  createdYear  int    @default("2026") @description("Year for legacy backfill.")
-  isPinned     bool   @default("false")
+  // Defaults. NONE of these is ever filled in for you -- @default is declared
+  // metadata (memql#2960). A row inserted without `status` has no `status`.
+  // Fill it in the mutation body with `??` instead.
+  status       enum("draft", "published") @default("draft") @description("Declared default only. NOT applied on insert -- use `?? \"draft\"` in the mutation (memql#2960).")
+  createdYear  int    @default("2026") @description("Declared default only. NOT applied on insert -- nothing backfills this (memql#2960).")
+  isPinned     bool   @default("false") @description("Declared default only. NOT applied on insert (memql#2960).")
 
   // Immutability + secrecy
-  externalId   string! @immutable @description("Foreign-system id; never changes.")
-  apiKey       string @secret @description("Redacted from logs + reads.")
+  externalId   string! @immutable @description("Foreign-system id, intended never to change. NOT enforced -- @immutable is declared metadata (memql#2960).")
+  apiKey       string @secret @description("Intended to be sensitive. NOT redacted anywhere -- @secret is declared metadata (memql#2960).")
+
+  // Server-owned fields. @internal is server-only in BOTH directions;
+  // @serverSet is refused from caller args but still projected, which is why
+  // approvedBy can be rendered and internalNote cannot.
+  // NOTE both names are deliberately non-reserved: createdBy / createdAt / id
+  // are row intrinsics and declaring one here is rejected at build. Section 12.
+  internalNote string @internal   @description("Server-only. Never accepted from caller args, never in a default projection.")
+  approvedBy   string @serverSet  @description("Refused from caller args; your mutation stamps it in `stamp { }`. Projectable.")
+
+  // Sensitivity. Unlike @secret above, this one is enforced: @scrubPii zeroes
+  // it, and a query projecting a shape that carries it must constrain its
+  // caller (memql#2883).
+  ownerEmail   string @pii        @description("Personally-identifying. Scrubbed by @scrubPii; gates projection authorization.")
 
   // Description-only (no constraint)
   notes        string @description("Free-form notes.")

@@ -182,8 +182,18 @@ Construct-level `@internal` was hard-retired under the 2026.08 epoch
 surfaces (tool listing, `@mcp` promotion) while leaving it callable --
 one corpus use in its lifetime. The load gate now rejects it with a
 migration hint; delete the annotation. Field-level `@internal` on
-concept PROPERTIES (the `@secret` / `@pii` sensitivity family) is a
-different surface and remains fully supported.
+concept PROPERTIES is a different surface and remains fully supported --
+and genuinely enforced: the field is rejected from caller args *and*
+excluded from a shape's default projection.
+
+Do not read that as a statement about the whole sensitivity family,
+because it is not one (memql#2960). `@pii` is enforced in two places
+(the `@scrubPii` update path, and the projection-authorization gate of
+memql#2883). `@secret` is **declared metadata**: it emits `x-secret`,
+nothing reads it, and no value is redacted from logs, query results, or
+non-elevated readers. `@unique`, `@immutable` and `@default` sit in the
+same position. Section 8 of `dsl/_reference/_concept.memql` carries the
+per-annotation split.
 
 #### `@public`
 Declares that the construct intentionally carries **no caller-scope
