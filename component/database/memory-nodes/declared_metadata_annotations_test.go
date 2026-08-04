@@ -1,13 +1,16 @@
 package memoryNodes
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/component/provenance"
 )
 
 // declared_metadata_annotations_test.go -- memql#2960.
@@ -105,26 +108,93 @@ func TestDeclaredMetadataAnnotationsAreStillEmitted(t *testing.T) {
 	}
 }
 
+// The reference sheet this issue rewrites is the page an author copies from,
+// and NOTHING was building it. dsl/_reference/ is absent from dsl/embed.go's
+// embed list and underscore-skipped by dslfs.WalkMemqlFiles, so every corpus
+// gate structurally excludes it; the one test that does read it
+// (component/memql/sense.TestDiagnose_ReferenceFiles_NoErrors) gates lex, parse
+// and rewrite with a registry-less service and never reaches concept build.
+//
+// So a worked example could declare a reserved field, or misspell an
+// annotation, and ship green -- teaching the author something the engine
+// rejects. That is the same defect class memql#2960 exists to delete, one level
+// up: the reference asserting behaviour that is not behaviour.
+//
+// This gate closes it by putting every concept in the sheet through
+// BuildConceptFromDecl, which is the check that runs on a real domain.
+func TestReferenceConceptSheetActuallyBuilds(t *testing.T) {
+	path := filepath.Join(repoRoot(t), "dsl", "_reference", "_concept.memql")
+	src, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read reference sheet: %v", err)
+	}
+	file, err := parser.ParseFile(string(src))
+	if err != nil {
+		t.Fatalf("dsl/_reference/_concept.memql did not parse: %v", err)
+	}
+
+	built := 0
+	for _, def := range file.Definitions {
+		decl, ok := def.(*parser.ConceptDecl)
+		if !ok {
+			continue
+		}
+		built++
+		if _, err := BuildConceptFromDecl(decl, "v1:ref:"+decl.Name); err != nil {
+			t.Errorf("concept %q in dsl/_reference/_concept.memql does not build: %v\n\n"+
+				"The reference sheet is what an author copies from, so an example the engine "+
+				"refuses teaches a rule that does not exist. Common causes: declaring a "+
+				"reserved row intrinsic (id / createdAt / createdBy / concept / type / "+
+				"partition / payload / schema -- see section 12) as a payload field, or an "+
+				"annotation the parser does not accept.", decl.Name, err)
+		}
+	}
+	if built == 0 {
+		t.Fatal("no concepts found in the reference sheet, so this gate measures nothing")
+	}
+}
+
+// emitSite is the one non-test Go location allowed to spell a declared-metadata
+// key: the emitter that puts it into the schema.
+const emitSite = "component/database/memory-nodes/concept_parser.go"
+
 // The half that makes the documentation true, and the tripwire on it.
 //
 // Counted rather than asserted absent, because the emit site is itself an
 // occurrence: exactly one means "written, never read". A second occurrence is
 // a reader, which is enforcement, which means the docs are now wrong.
+//
+// The single hit is ALSO pinned to the emit site's path, and that is not
+// belt-and-braces -- a bare count is defeated by the most ordinary refactor
+// anyone adding enforcement would perform. Hoisting the key into a named
+// constant (`const schemaKeySecret = "x-secret"`) and pointing the emitter at
+// it leaves the literal count at exactly 1 while a real reader goes live. The
+// path check catches that (the surviving hit is no longer in concept_parser.go)
+// and catches concatenation (`"x-"+"secret"` matches nothing, so the count
+// drops to 0) in the same assertion.
 func TestDeclaredMetadataKeysAreReadByNothing(t *testing.T) {
 	root := repoRoot(t)
 	for _, key := range []string{"x-unique", "x-immutable", "x-secret"} {
 		t.Run(key, func(t *testing.T) {
+			const remedy = "\n\nIf enforcement landed, that is good news and three documents are now WRONG. " +
+				"Update all of them in the same change:\n" +
+				"  - dsl/_reference/_concept.memql section 8 (move it out of DECLARED METADATA, " +
+				"and fix the @description on its worked example -- that string ships in the schema)\n" +
+				"  - docs/public/language/attribute-matrix.md\n" +
+				"  - docs/public/language/reserved.md"
+
 			hits := grepNonTestGo(t, root, `"`+key+`"`)
 			if len(hits) != 1 {
-				t.Errorf("%q now appears in %d non-test Go locations, not 1 (the emit site).\n"+
-					"  %s\n\n"+
-					"If enforcement landed, that is good news and three documents are now WRONG. "+
-					"Update all of them in the same change:\n"+
-					"  - dsl/_reference/_concept.memql section 8 (move it out of DECLARED METADATA, "+
-					"and fix the @description on its worked example -- that string ships in the schema)\n"+
-					"  - docs/public/language/attribute-matrix.md\n"+
-					"  - docs/public/language/reserved.md",
-					key, len(hits), strings.Join(hits, "\n  "))
+				t.Errorf("%q now appears in %d non-test Go locations, not 1 (the emit site).\n  %s%s",
+					key, len(hits), strings.Join(hits, "\n  "), remedy)
+				return
+			}
+			if !strings.HasPrefix(filepath.ToSlash(hits[0]), emitSite+":") {
+				t.Errorf("the sole occurrence of %q moved off the emit site: %s (expected %s).\n\n"+
+					"A count of 1 no longer means \"written, never read\" -- the key may now be a "+
+					"named constant with any number of readers referencing it, which is "+
+					"enforcement.%s",
+					key, hits[0], emitSite, remedy)
 			}
 		})
 	}
@@ -152,6 +222,13 @@ func TestDefaultIsEmittedButNeverApplied(t *testing.T) {
 			"does not describe")
 	}
 
+	// The write path itself, because the two assertions above are exactly the
+	// schema-inspection failure memql#2960 names ("asserting x-unique is present
+	// is what makes this look covered today"). Neither of them changes if
+	// Concept.Create starts filling defaults tomorrow, so on their own they are a
+	// false PASS on the one behaviour this test is named for.
+	assertDefaultNotAppliedOnInsert(t)
+
 	// The parsing half is real but narrower than the reference used to claim:
 	// numbers and booleans are coerced, and there is NO datetime branch -- so a
 	// datetime field takes a bool default without complaint. Pinned so the
@@ -169,6 +246,63 @@ func TestDefaultIsEmittedButNeverApplied(t *testing.T) {
 			t.Errorf("parseDefaultValue(%q) = %#v, want %#v -- section 8 describes exactly this "+
 				"set, including that RFC3339 is left as a string", tc.name, got, tc.want)
 		}
+	}
+}
+
+// capturingStore is the whole Store surface Concept.Create touches: it keeps
+// the node that was actually written so the test can read the payload the
+// engine produced rather than the schema it validated against.
+type capturingStore struct{ written *MemoryNode }
+
+func (s *capturingStore) InsertMemoryNode(_ context.Context, node *MemoryNode) error {
+	s.written = node
+	return nil
+}
+
+func (s *capturingStore) QueryMemoryNodes(_ context.Context, _ QueryParams) ([]MemoryNode, error) {
+	return nil, nil
+}
+
+// assertDefaultNotAppliedOnInsert drives the real write path and asserts the
+// defaulted field is absent from the stored payload.
+//
+// This is the assertion the reference sentence actually rests on -- "@default
+// ... is NEVER APPLIED on insert -- Concept.Create validates and marshals the
+// payload verbatim" -- and the one CLAUDE.md's "?? is the only mechanism that
+// fills a value" depends on. Patch Concept.Create to copy schema defaults into
+// the payload and this fails; without it, that patch is invisible.
+func assertDefaultNotAppliedOnInsert(t *testing.T) {
+	t.Helper()
+
+	c := buildFixtureConcept(t, declaredMetadataFixture)
+	store := &capturingStore{}
+	ctx := provenance.ContextWithProvenance(
+		context.Background(),
+		provenance.Provenance{Kind: provenance.KindDirect, Name: "declared-metadata-test"},
+	)
+
+	// `tier` carries @default("bronze") and is deliberately omitted.
+	if _, err := c.Create(ctx, store, CreateParams{
+		Actor:   "tester",
+		ID:      "probe1",
+		Payload: map[string]any{"label": "x"},
+	}); err != nil {
+		t.Fatalf("control broken: insert omitting the defaulted field must succeed, got %v", err)
+	}
+	if store.written == nil {
+		t.Fatal("control broken: nothing was written, so this measures nothing")
+	}
+
+	var stored map[string]any
+	if err := json.Unmarshal(store.written.Payload, &stored); err != nil {
+		t.Fatalf("unmarshal stored payload: %v", err)
+	}
+	if got, present := stored["tier"]; present {
+		t.Errorf("@default WAS applied on insert: stored payload carries tier=%v.\n\n"+
+			"That is enforcement, and it makes two documents WRONG. Update both in the same change:\n"+
+			"  - dsl/_reference/_concept.memql section 8 (move @default out of DECLARED METADATA, "+
+			"and fix the @description on its three worked examples -- those strings ship in the schema)\n"+
+			"  - CLAUDE.md, which states that `??` is the only mechanism that fills a value", got)
 	}
 }
 
@@ -210,7 +344,19 @@ func repoRoot(t *testing.T) string {
 }
 
 // grepNonTestGo returns "path:line" for every occurrence of needle in a
-// non-test .go file under root, skipping vendor and the SDK (generated).
+// non-test .go file under root, skipping .git, vendor and node_modules.
+//
+// Two limits of scope, stated because the failure message above asserts three
+// documents are wrong on the strength of this scan:
+//
+//   - Go only. A consumer of these keys in sdk/ts or the cockpit would pass
+//     unnoticed. The definition schema does reach clients, so the docs' claim is
+//     broader than what is mechanically enforced here.
+//   - Comment lines are skipped, so documenting a key without enforcing it does
+//     not trip the gate. Without this, a comment reading `the "x-secret" key is
+//     read by nothing` fails the test and tells its author to go and edit three
+//     documents -- and the likeliest author of such a comment is someone
+//     documenting exactly the non-enforcement this file exists to pin.
 func grepNonTestGo(t *testing.T, root, needle string) []string {
 	t.Helper()
 	var hits []string
@@ -234,8 +380,11 @@ func grepNonTestGo(t *testing.T, root, needle string) []string {
 		}
 		rel, _ := filepath.Rel(root, path)
 		for i, line := range strings.Split(string(data), "\n") {
+			if strings.HasPrefix(strings.TrimSpace(line), "//") {
+				continue // a comment about the key is not a reader of it
+			}
 			if strings.Contains(line, needle) {
-				hits = append(hits, rel+":"+itoa(i+1))
+				hits = append(hits, filepath.ToSlash(rel)+":"+strconv.Itoa(i+1))
 			}
 		}
 		return nil
@@ -244,16 +393,4 @@ func grepNonTestGo(t *testing.T, root, needle string) []string {
 		t.Fatalf("walk: %v", err)
 	}
 	return hits
-}
-
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var b []byte
-	for n > 0 {
-		b = append([]byte{byte('0' + n%10)}, b...)
-		n /= 10
-	}
-	return string(b)
 }

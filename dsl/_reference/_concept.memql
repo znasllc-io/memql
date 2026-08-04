@@ -279,8 +279,13 @@ concept fieldTypes {
 //                       mutation must set it in its `stamp { }` block. Nothing
 //                       populates it for you -- the name is the misleading
 //                       part. Unlike @internal, a @serverSet field IS
-//                       projectable (createdAt / createdBy / status are
-//                       routinely rendered).
+//                       projectable, so a shape's default projection still
+//                       renders it.
+//                       NOT to be confused with the reserved row intrinsics
+//                       (id / createdAt / createdBy / ...). Those ARE stamped
+//                       for you, by the engine, from params.Actor -- and they
+//                       are table columns, not payload properties, so you must
+//                       not declare them at all. See section 12.
 //   @pii                Marks personally-identifying data, and it is
 //                       load-bearing in two places: the @scrubPii update path
 //                       zeroes every @pii field via Concept.PIIFields(), and
@@ -291,8 +296,11 @@ concept fieldTypes {
 //                       THE BUILD. That is the intent, and it is the working
 //                       template for what "enforced" looks like here.
 //   @description("...") Human-readable description. Emitted into the concept
-//                       schema, so it reaches sense hover and the generated
-//                       SDK docs -- write it as documentation, not as a note.
+//                       schema, so it reaches sense hover -- write it as
+//                       documentation, not as a note. (It does NOT reach the
+//                       generated SDK: sdk/gen scans query / mutate / logic /
+//                       builtin signatures only, never a concept body, and
+//                       emits concepts as a bare id map.)
 //
 // DECLARED METADATA -- parsed and emitted, acted on by NOTHING (memql#2960):
 //   @unique             Emits `x-unique`. There is no uniqueness check
@@ -338,10 +346,12 @@ concept fieldAnnotations {
   ratingScore  int    @minimum(1) @maximum(5) @description("1-5 rating scale.")
   priceUsd     float  @minimum(0.0) @maximum(999999.99) @description("Currency.")
 
-  // Defaults
-  status       enum("draft", "published") @default("draft")
-  createdYear  int    @default("2026") @description("Year for legacy backfill.")
-  isPinned     bool   @default("false")
+  // Defaults. NONE of these is ever filled in for you -- @default is declared
+  // metadata (memql#2960). A row inserted without `status` has no `status`.
+  // Fill it in the mutation body with `??` instead.
+  status       enum("draft", "published") @default("draft") @description("Declared default only. NOT applied on insert -- use `?? \"draft\"` in the mutation (memql#2960).")
+  createdYear  int    @default("2026") @description("Declared default only. NOT applied on insert -- nothing backfills this (memql#2960).")
+  isPinned     bool   @default("false") @description("Declared default only. NOT applied on insert (memql#2960).")
 
   // Immutability + secrecy
   externalId   string! @immutable @description("Foreign-system id, intended never to change. NOT enforced -- @immutable is declared metadata (memql#2960).")
@@ -349,9 +359,11 @@ concept fieldAnnotations {
 
   // Server-owned fields. @internal is server-only in BOTH directions;
   // @serverSet is refused from caller args but still projected, which is why
-  // createdBy can be rendered and internalNote cannot.
+  // approvedBy can be rendered and internalNote cannot.
+  // NOTE both names are deliberately non-reserved: createdBy / createdAt / id
+  // are row intrinsics and declaring one here is rejected at build. Section 12.
   internalNote string @internal   @description("Server-only. Never accepted from caller args, never in a default projection.")
-  createdBy    string @serverSet  @description("Refused from caller args; the mutation stamps it. Projectable.")
+  approvedBy   string @serverSet  @description("Refused from caller args; your mutation stamps it in `stamp { }`. Projectable.")
 
   // Sensitivity. Unlike @secret above, this one is enforced: @scrubPii zeroes
   // it, and a query projecting a shape that carries it must constrain its
