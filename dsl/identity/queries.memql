@@ -968,7 +968,7 @@ query magicLinkRequest magicLinkRequestByTokenHash {
 // Deliberately NOT guessed. The node-token trio and the two audit-event
 // queries in this same change were unambiguous and shipped; this group needs
 // its call sites walked, and getting it wrong either leaves the hole open or
-// breaks a live surface. Filed as its own story with this analysis attached.
+// breaks a live surface. Filed as memql#3063 with this analysis attached.
 @public
 query identity patIdentitiesForUser {
   args {
