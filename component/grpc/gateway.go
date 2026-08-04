@@ -70,6 +70,32 @@ func NewGateway(opts GatewayOptions) (*Gateway, error) {
 	}, nil
 }
 
+// InterceptedPaths returns the request paths this gateway serves from
+// MIDDLEWARE, ahead of the mux (memql#3004).
+//
+// # Why this exists
+//
+// Middleware-mounted routes were a registration channel nothing modelled.
+// Everything memql#2939's boot assertion knows about arrives either through
+// `a.handleRoute` (recorded in `a.registeredRoutes`) or through
+// `server.ContractRoutes()`. This gateway is neither: `Middleware()` is
+// appended on EVERY binary including identity, and `shouldHandle` claims the
+// request before it ever reaches the mux. So `POST /memql/query` was served on
+// a verifier-less binary while appearing in no declaration and failing no
+// check -- not because it was judged safe, but because nothing was looking.
+//
+// Declaring it here puts the channel INTO the model: unauthenticatedSurface-
+// Routes folds this in, so the path must appear in PublicPaths() or
+// HandlerAuthorizedPaths() or the identity binary refuses to boot. A future
+// middleware-mounted route inherits that, which is the actual fix -- the
+// specific path was never the problem.
+//
+// Verified rather than trusted: TestInterceptedPathsMatchShouldHandle drives
+// the real predicate, so this list cannot drift from what is actually claimed.
+func InterceptedPaths() []string {
+	return []string{GatewayPath}
+}
+
 // Middleware returns an http middleware that intercepts /memql/query POSTs.
 func (g *Gateway) Middleware() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
