@@ -29,13 +29,26 @@ on:
         required: true
         type: string
 
+# Default the whole workflow to read-only; the one job that attaches an asset
+# narrows UP to contents:write locally, so the elevated token is never granted
+# at the top level (Scorecard Token-Permissions #415) -- the same shape
+# dispatch-engine-images-on-release.yml uses.
 permissions:
-  contents: write # gh release upload
+  contents: read
+
+# One publish per tag at a time. Two rapid dispatches for the same version
+# would otherwise race on `gh release upload --clobber`.
+concurrency:
+  group: publish-docs-bundle-${{ github.event.inputs.version || github.event.release.tag_name }}
+  cancel-in-progress: false
 
 jobs:
   publish:
     name: build + attach docs bundle
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write # gh release upload
     steps:
       - name: resolve target tag
         id: target
@@ -51,7 +64,20 @@ jobs:
           # The site resolves bundles by bare X.Y.Z. Other tags in this repo do
           # cut releases (e.g. memql-sdk-core-v*) and have no docs bundle -- skip
           # those quietly rather than failing the run on an unrelated release.
-          if ! printf '%s' "$TAG" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+          #
+          # `[[ =~ ]]` rather than `grep -Eq`, and the difference is a security
+          # boundary rather than a style preference: grep anchors ^ and $ PER
+          # LINE, so a multi-line value whose FIRST line is a valid version
+          # passes it. `echo "tag=$TAG" >> $GITHUB_OUTPUT` would then write two
+          # lines, and last-wins parsing hands the caller an arbitrary `tag`
+          # output -- which is interpolated into a shell body below, in a job
+          # holding `contents: write`. bash's [[ =~ ]] matches the whole string,
+          # newlines included, so the same input is rejected.
+          #
+          # Not reachable from the `release` trigger (a git ref cannot contain a
+          # newline), but reachable from workflow_dispatch by anyone with repo
+          # write -- which is below the code-owner bar /.github/ is gated at.
+          if [[ ! "$TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "INFO: '$TAG' is not a bare X.Y.Z engine release; nothing to publish"
             echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
@@ -72,7 +98,13 @@ jobs:
 
       - name: build bundle
         if: steps.target.outputs.skip != 'true'
-        run: bash scripts/docs/build-docs-bundle.sh --version="${{ steps.target.outputs.tag }}"
+        # Through `env:` rather than interpolated into the run body, matching
+        # every other step here. An `${{ }}` expansion is substituted into the
+        # script BEFORE bash sees it, so the value is code; via env it is data.
+        # This was the one step that did it the other way.
+        env:
+          TAG: ${{ steps.target.outputs.tag }}
+        run: bash scripts/docs/build-docs-bundle.sh --version="$TAG"
 
       - name: verify bundle
         if: steps.target.outputs.skip != 'true'
