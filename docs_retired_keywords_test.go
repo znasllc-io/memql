@@ -83,8 +83,8 @@ import (
 //     proposal -- prescriptive, not historical quotation. They are NOT gated
 //     here: the receiver form is a different declaration shape than the
 //     two-identifier one this table can express, and gating it means rewriting
-//     a planning document's proposal blocks. Tracked separately rather than
-//     done halfway.
+//     a planning document's proposal blocks. Tracked as memql#3053, with the
+//     measurement, rather than done halfway.
 //   - PR-TIME COVERAGE. .github/workflows/ci.yml routes lanes by changed-path
 //     bucket for `pull_request` events, and no bucket matches `**/*.md`, so a
 //     docs-only PR skips go-checks and never runs this gate. Drift still cannot
@@ -93,7 +93,7 @@ import (
 //     it -- but the feedback arrives at the queue rather than on the PR. The
 //     sibling name gate has the identical hole, and widening the filter makes
 //     every docs-only PR pay the full Go suite, which is a CI-spend call rather
-//     than this gate's to make.
+//     than this gate's to make. Tracked as memql#3054.
 func TestDocsDoNotTeachRetiredDeclarationKeywords(t *testing.T) {
 	out, err := exec.Command("git", "ls-files", "-z", "*.md").Output()
 	if err != nil {
