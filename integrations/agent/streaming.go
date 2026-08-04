@@ -1226,7 +1226,7 @@ func (r *Replier) promoteCanvasOutput(ctx context.Context, turnCtx turnContext, 
 		return
 	}
 	ownerUserId := strings.TrimSpace(turnCtx.OwnerUserId)
-	if ownerUserId == "" {
+	if strings.TrimSpace(ownerUserId) == "" {
 		return
 	}
 	data, _ := args["data"].(map[string]any)
@@ -1422,15 +1422,5 @@ func deriveGeneratedOutputId(source, ownerUserId, stableKey string) string {
 // automations/executor.go's contextWithSystemActor pattern, but scoped
 // to a real user.
 func withUserActor(ctx context.Context, ownerUserId string) context.Context {
-	if strings.TrimSpace(ownerUserId) == "" {
-		return ctx
-	}
-	claims := map[string]any{
-		"sub":   ownerUserId,
-		"email": ownerUserId,
-		"role":  "user",
-	}
-	token := auth.BuildTokenInfo(claims)
-	ctx = auth.ContextWithClaims(ctx, claims)
-	return auth.ContextWithToken(ctx, token)
+	return auth.ContextWithUserActor(ctx, ownerUserId)
 }

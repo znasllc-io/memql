@@ -179,7 +179,7 @@ func (i *Integration) handleEditDocument(ctx context.Context, args map[string]an
 		return nil, fmt.Errorf("library.editDocument: document %q not found", documentId)
 	}
 	ownerUserId := stringField(doc, "ownerUserId")
-	if ownerUserId == "" {
+	if strings.TrimSpace(ownerUserId) == "" {
 		return nil, fmt.Errorf("library.editDocument: document %q has no owner -- cannot attribute the edit", documentId)
 	}
 
@@ -293,7 +293,7 @@ func (i *Integration) handleRestoreDocumentVersion(ctx context.Context, args map
 		return nil, fmt.Errorf("library.restoreDocumentVersion: document %q not found", documentId)
 	}
 	ownerUserId := stringField(doc, "ownerUserId")
-	if ownerUserId == "" {
+	if strings.TrimSpace(ownerUserId) == "" {
 		return nil, fmt.Errorf("library.restoreDocumentVersion: document %q has no owner", documentId)
 	}
 	ownerCtx := withUserActor(ctx, ownerUserId)
@@ -521,17 +521,7 @@ func wrapResult(r editResult) ([]memorynodes.MemoryNode, error) {
 // writes are attributed to (and authorized for) the document's owner.
 // Mirrors integrations/agents/integration.go's withUserActor.
 func withUserActor(ctx context.Context, ownerUserId string) context.Context {
-	if strings.TrimSpace(ownerUserId) == "" {
-		return ctx
-	}
-	claims := map[string]any{
-		"sub":   ownerUserId,
-		"email": ownerUserId,
-		"role":  "user",
-	}
-	token := auth.BuildTokenInfo(claims)
-	ctx = auth.ContextWithClaims(ctx, claims)
-	return auth.ContextWithToken(ctx, token)
+	return auth.ContextWithUserActor(ctx, ownerUserId)
 }
 
 // systemActorContext wraps ctx with a synthetic system actor for the

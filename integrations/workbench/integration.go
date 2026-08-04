@@ -441,7 +441,7 @@ func (i *Integration) promoteWorkbenchOutput(ctx context.Context, planId, agentI
 	}
 
 	ownerUserId, partitionId := i.resolvePlanOwner(ctx, planId)
-	if ownerUserId == "" {
+	if strings.TrimSpace(ownerUserId) == "" {
 		if i.logger != nil {
 			i.logger.Warn("workbench: generatedOutput promotion skipped -- could not resolve plan owner",
 				slog.String("planId", planId), slog.String("path", path))
@@ -908,15 +908,5 @@ func outputPayloadRows(payload any) []map[string]any {
 // automations/executor.go's contextWithSystemActor pattern, scoped to a
 // real user.
 func withUserActor(ctx context.Context, ownerUserId string) context.Context {
-	if strings.TrimSpace(ownerUserId) == "" {
-		return ctx
-	}
-	claims := map[string]any{
-		"sub":   ownerUserId,
-		"email": ownerUserId,
-		"role":  "user",
-	}
-	token := auth.BuildTokenInfo(claims)
-	ctx = auth.ContextWithClaims(ctx, claims)
-	return auth.ContextWithToken(ctx, token)
+	return auth.ContextWithUserActor(ctx, ownerUserId)
 }

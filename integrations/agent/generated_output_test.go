@@ -64,14 +64,18 @@ func (c *captureEngine) Execute(ctx context.Context, q string) (any, error) {
 }
 
 // actorUserId reads the acting user off the context the way the engine
-// resolves `actor.userId` -- from the claims withUserActor stamps.
+// actually resolves `actor.userId`: from the ACCESS CONTEXT
+// (auth.AccessFromContext), which is what resolveActorReference reads.
+//
+// It read the CLAIMS until memql#2989's review -- a different context key, and
+// modelling it here is what let this assertion pass while the stamp resolved to
+// the inbound caller.
 func actorUserId(ctx context.Context) string {
-	claims, ok := auth.ClaimsFromContext(ctx)
-	if !ok {
+	ac, ok := auth.AccessFromContext(ctx)
+	if !ok || ac == nil {
 		return ""
 	}
-	sub, _ := claims["sub"].(string)
-	return sub
+	return ac.UserId
 }
 
 func newTestReplier(e MemQLEngine) *Replier {

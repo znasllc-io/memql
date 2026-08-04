@@ -353,7 +353,7 @@ func (i *Integration) promoteWorkerOutput(ctx context.Context, req Request) {
 		return
 	}
 	ownerUserId := strings.TrimSpace(req.OwnerUserId)
-	if ownerUserId == "" {
+	if strings.TrimSpace(ownerUserId) == "" {
 		return
 	}
 
@@ -604,7 +604,7 @@ func (i *Integration) handleRequestScope(ctx context.Context, args map[string]an
 	default:
 		return nil, fmt.Errorf("worker integration: requestedScope must be observe or full (got %q)", scope)
 	}
-	if agentId == "" || ownerUserId == "" {
+	if agentId == "" || strings.TrimSpace(ownerUserId) == "" {
 		return nil, fmt.Errorf("worker integration: agentId and ownerUserId required (auto-injection failed)")
 	}
 
@@ -740,17 +740,7 @@ func outputPayloadRows(payload any) []map[string]any {
 // contextWithSystemActor pattern but scoped to a real user
 // instead of a system identifier.
 func withUserActor(ctx context.Context, ownerUserId string) context.Context {
-	if strings.TrimSpace(ownerUserId) == "" {
-		return ctx
-	}
-	claims := map[string]any{
-		"sub":   ownerUserId,
-		"email": ownerUserId,
-		"role":  "user",
-	}
-	token := auth.BuildTokenInfo(claims)
-	ctx = auth.ContextWithClaims(ctx, claims)
-	return auth.ContextWithToken(ctx, token)
+	return auth.ContextWithUserActor(ctx, ownerUserId)
 }
 
 func asString(v any) string {

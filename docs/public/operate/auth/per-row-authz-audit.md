@@ -320,17 +320,43 @@ gate at all, so stamping it there would open *every* server-only
 construct for the remainder of that request.
 `TestOnlyAllowlistedPackagesStampInternalOrigin` catches exactly this.
 
-The actual fix was three `stamp { ownerUserId: actor.userId }` lines.
-Every call site already ran the mutation under the owner's actor
-(`withUserActor` stamps `sub: ownerUserId`), so `actor.userId` already
-equalled the value being passed: **no written value changed, and the
-field simply stopped being forgeable.**
+The actual fix was three `stamp { ownerUserId: actor.userId }` lines
+**plus a correction to the synthetic-actor helper they depend on**, and
+the second half is the part worth reading.
 
-One edge is load-bearing and now asserted: `withUserActor` returns the
-context **unchanged** for a blank owner, so a write on that path would be
-stamped with whatever actor the inbound caller carried. All five sites
-refuse before reaching the mutation — the two library handlers error, the
-three promotion paths return early.
+The original change rested on the claim that every call site already ran
+the mutation under the owner's actor, because `withUserActor` stamps
+`sub: ownerUserId`. That claim was false, and the review measured it:
+`actor.userId` does not resolve from claims. It resolves from the
+**AccessContext** (`resolveActorReference` -> `auth.AccessFromContext`),
+and `withUserActor` set only claims + TokenInfo. So the stamp resolved to
+the **inbound caller** — or to `""` on a detached context, because
+`ActorEnvelopeValue` returns `("", true)` for a nil AccessContext rather
+than an error, meaning the row was written and the call SUCCEEDED.
+
+That is the same failure `contextWithSystemActor` is warned about at
+`component/server/server.go:396-402`, reached from the other direction.
+
+The five byte-identical copies of `withUserActor` are now one helper,
+`auth.ContextWithUserActor`, which binds all three surfaces — claims and
+TokenInfo (read by `createdBy` and the mutation-actor check) **and** the
+AccessContext (read by `actor.*`). With that in place the original claim
+holds: no written value changes, and the field stops being forgeable.
+
+**Scope of that guarantee.** It covers the named-mutation surface. It
+does not cover raw `insert(...)`, which short-circuits the planner
+(`component/memql/parser.go:520`) and bypasses `args` / `accept` /
+`stamp` entirely; only three concepts carry a per-concept Go guard on
+that path, and neither library concept is one of them. Tracked as
+**memql#3059**.
+
+One edge is load-bearing and now asserted: `auth.ContextWithUserActor`
+returns the context **unchanged** for a blank owner, so a write on that
+path would be stamped with whatever actor the inbound caller carried. All
+five sites refuse before reaching the mutation — the two library handlers
+error, the three promotion paths return early — and every one of those
+guards now trims whitespace, matching the helper, so a whitespace-only
+owner cannot slip past the guard and then no-op inside it.
 
 An empty exemption map means every declared owner tier in the tree is
 server-stamped. That is the precondition **memql#2803** records for

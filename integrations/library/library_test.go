@@ -129,18 +129,25 @@ func (s *stubEngine) Execute(ctx context.Context, query string) (*memql.ExecuteR
 }
 
 // actorUserId reads the acting user off the context the way the engine
-// resolves `actor.userId` -- from the claims withUserActor stamps.
-// Returns "" when no actor is bound, which is the case the handlers must
-// refuse to reach: withUserActor passes the context through unchanged
-// for a blank owner, so a write on that path would be attributed to
+// actually resolves `actor.userId`: from the ACCESS CONTEXT
+// (auth.AccessFromContext), which is what resolveActorReference reads.
+//
+// It read the CLAIMS until memql#2989's review. That is a different context
+// key, and modelling it here is what let the whole suite stay green while the
+// stamp resolved to the inbound caller -- a stub that models the engine
+// wrongly proves only that the stub agrees with itself. Keep this reading the
+// same surface the engine does, or these tests stop being evidence.
+//
+// Returns "" when no access context is bound, which is the case the handlers
+// must refuse to reach: ContextWithUserActor passes the context through
+// unchanged for a blank owner, so a write on that path would be attributed to
 // whoever the inbound caller happened to be.
 func actorUserId(ctx context.Context) string {
-	claims, ok := auth.ClaimsFromContext(ctx)
-	if !ok {
+	ac, ok := auth.AccessFromContext(ctx)
+	if !ok || ac == nil {
 		return ""
 	}
-	sub, _ := claims["sub"].(string)
-	return sub
+	return ac.UserId
 }
 
 // bundleOf wraps rows in an *ExecuteResult whose Bundle holds matching
@@ -476,18 +483,27 @@ func TestEditDocument_OwnerThreadedFromRow(t *testing.T) {
 }
 
 // TestEditDocument_RefusesOwnerlessDocument covers the edge memql#2989's
-// ruling flagged: withUserActor returns the context UNCHANGED for a
-// blank owner, so a write on that path would be stamped with whatever
-// actor the INBOUND caller carried -- silently attributing another
-// user's document to them. The handler must refuse instead.
+// ruling flagged: ContextWithUserActor returns the context UNCHANGED for a
+// blank owner, so a write on that path would be stamped with whatever actor
+// the INBOUND caller carried -- silently attributing another user's document
+// to them. The handler must refuse instead.
+//
+// Both cases build REAL prior state before blanking the owner, and that is the
+// point rather than set dressing. The restore case originally passed
+// `versionId: "v-1"` against a document with no such version, so the handler
+// bailed at the version lookup and the subtest went green with BOTH owner
+// guards deleted -- it asserted nothing. Seeding a genuine version leaves the
+// owner guard as the only thing that can refuse.
 func TestEditDocument_RefusesOwnerlessDocument(t *testing.T) {
 	for _, tc := range []struct {
 		name string
-		call func(*Integration, context.Context) error
+		// call receives a versionId that really exists on the document, so a
+		// refusal can only come from the owner guard.
+		call func(*Integration, context.Context, string) error
 	}{
 		{
 			name: "editDocument",
-			call: func(i *Integration, ctx context.Context) error {
+			call: func(i *Integration, ctx context.Context, _ string) error {
 				_, err := i.handleEditDocument(ctx, map[string]any{
 					"documentId": "doc-1", "content": "x",
 				}, 0)
@@ -496,9 +512,9 @@ func TestEditDocument_RefusesOwnerlessDocument(t *testing.T) {
 		},
 		{
 			name: "restoreDocumentVersion",
-			call: func(i *Integration, ctx context.Context) error {
+			call: func(i *Integration, ctx context.Context, versionId string) error {
 				_, err := i.handleRestoreDocumentVersion(ctx, map[string]any{
-					"documentId": "doc-1", "versionId": "v-1",
+					"documentId": "doc-1", "versionId": versionId,
 				}, 0)
 				return err
 			},
@@ -507,22 +523,36 @@ func TestEditDocument_RefusesOwnerlessDocument(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			eng := newStubEngine()
 			doc := seededDoc()
-			doc["ownerUserId"] = "" // no resolvable owner
 			eng.seedDocument(doc)
 			i := NewIntegration(eng)
 
-			// An inbound caller who is NOT the document owner. If the
-			// handler proceeded, the stamp would land on this identity.
-			ctx := auth.ContextWithClaims(context.Background(), map[string]any{
-				"sub": "inbound-caller", "role": "user",
-			})
+			// Real history, written while the document still HAS an owner.
+			if _, err := i.handleEditDocument(context.Background(), map[string]any{
+				"documentId": "doc-1", "content": "apple", "authorId": "user-a",
+			}, 0); err != nil {
+				t.Fatalf("seeding a version: %v", err)
+			}
+			versionId, _ := eng.versions[0]["id"].(string)
+			if versionId == "" {
+				t.Fatal("seeded version has no id; the guard below would be untested")
+			}
+			before := len(eng.versions)
 
-			if err := tc.call(i, ctx); err == nil {
+			// Now the document loses its owner. seedDocument stores by
+			// reference, so this is the same row the handler will load.
+			doc["ownerUserId"] = ""
+
+			// An inbound caller who is NOT the document owner. If the handler
+			// proceeded, the stamp would land on this identity.
+			ctx := auth.ContextWithUserActor(context.Background(), "inbound-caller")
+
+			if err := tc.call(i, ctx, versionId); err == nil {
 				t.Fatal("handler accepted an ownerless document; it must refuse rather than " +
 					"attribute the write to the inbound caller")
 			}
-			if len(eng.versions) != 0 {
-				t.Fatalf("wrote %d version(s) for an ownerless document, want 0", len(eng.versions))
+			if len(eng.versions) != before {
+				t.Fatalf("wrote %d version(s) for an ownerless document, want %d",
+					len(eng.versions)-before, 0)
 			}
 		})
 	}

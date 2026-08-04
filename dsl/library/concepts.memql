@@ -104,7 +104,7 @@ concept artifact {
 @displayCard(primary="title", secondary="summary", tertiary="createdAt")
 @rowAuthz(owner="ownerUserId")
 concept generatedOutput {
-  ownerUserId       string!  @description("v1:identity:user.id this output belongs to (the user the producing agent / plan acts for). Stamped from actor.userId on every write and never accepted from caller args, so ownership cannot be forged or reassigned; the producing integrations run the mutation under that user's actor (withUserActor). The per-row authz key for Library reads.")
+  ownerUserId       string!  @description("v1:identity:user.id this output belongs to (the user the producing agent / plan acts for). Stamped from actor.userId on every write and never accepted as a mutation arg; the producing integrations run the mutation under that user's actor (auth.ContextWithUserActor), which binds the AccessContext actor.userId resolves from. NOTE the scope of that guarantee: it covers the named mutations, not the raw insert() surface, which bypasses accept/stamp entirely (memql#3059). The per-row authz key for Library reads.")
   title             string!  @description("Display title for the output, e.g. 'Ten most beautiful birds'.")
   summary           string  @description("Optional short description / preview of the output.")
   body              string  @description("Inline text content for text-style outputs (markdown / plain text) produced directly without a file. File-backed outputs leave this empty and carry bytes on the attachment.")
