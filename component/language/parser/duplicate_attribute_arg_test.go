@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -77,16 +78,29 @@ func TestDuplicateAttributeArgumentIsRejected(t *testing.T) {
 // a nicety -- but an author staring at a long annotation is exactly who this
 // message is for, and this repo gates diagnostic positions elsewhere.
 func TestDuplicateArgumentErrorPointsAtTheRepeatedName(t *testing.T) {
-	//                     1234567890123456789012345678901234
 	src := "@displayCard(primary=\"x\", primary=\"y\")\nconcept probe {\n  a string\n}\n"
 	_, err := ParseFile(src)
 	if err == nil {
 		t.Fatal("control broken: the duplicate must be rejected")
 	}
-	// The second `primary` starts at column 27; the `=` after it is column 34.
-	if !strings.Contains(err.Error(), "column 27") {
-		t.Errorf("the caret must land on the repeated argument name (column 27), not the `=` "+
-			"that follows it (column 34).\n  got: %v", err)
+
+	// Assert the TOKEN, not a hard-coded column. The rendered error carries the
+	// offending token -- `(got "primary")` when the caret is right, `(got "=")`
+	// when it is one token late -- so this expresses the property directly and
+	// survives any edit to the fixture. A literal `column 27` would fail with
+	// "the caret must land on column 27, got column 21" after an unrelated
+	// rename, which reads as a caret regression when it is a fixture move.
+	if !strings.Contains(err.Error(), `(got "primary")`) {
+		t.Errorf("the caret must land on the repeated argument NAME, not the `=` that follows "+
+			"it. The rendered token says which.\n  got: %v", err)
+	}
+
+	// And the column, derived from the fixture rather than written down, so the
+	// two assertions cannot disagree with each other.
+	wantCol := strings.LastIndex(strings.SplitN(src, "\n", 2)[0], "primary") + 1
+	if !strings.Contains(err.Error(), "column "+strconv.Itoa(wantCol)) {
+		t.Errorf("the caret must be at column %d, where the repeated `primary` starts.\n  got: %v",
+			wantCol, err)
 	}
 }
 
