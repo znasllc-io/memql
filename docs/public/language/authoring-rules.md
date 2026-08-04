@@ -428,6 +428,72 @@ dedicated retirement error (see
 
 ---
 
+## 7b. Parking a declaration with `/* */` detaches the annotations above it
+
+**Rule.** A declaration's `@`-annotation preamble is the run of contiguous
+`@` and `//` lines directly above it. A block comment ends that run, so
+annotations sitting above a parked declaration belong to **nothing**:
+
+```memql
+@executor("integration.workbench.dispatchHost")
+@description("does real work")
+/*
+builtin zzParked {
+  a string
+}
+*/
+builtin zzLive {          // <- loads with NO @executor
+  b string
+}
+```
+
+`zzLive` is registered without the executor and cannot be dispatched.
+
+The cost depends on the annotation, and the builtin above is the **least** bad
+case: the loader does at least say `@executor is required for builtin
+functions`, though that points you at writing a *second* executor rather than at
+moving the one you already wrote. The cases with teeth are the silent ones — a
+query losing `@public`, or a concept losing `@rowAuthz`, loses the declaration
+its authorization is read from, and there the loader raises **nothing at all**.
+
+The same rule catches a **file header** that a banner comment detaches:
+
+```memql
+@version("1.0.0")
+@namespace("knowledge")
+/* ------------------------- concepts ------------------------- */
+@description("A trained document.")
+concept document {
+  title string @required
+}
+```
+
+`@version` and `@namespace` here belong to nothing, and the declarations below
+register under the defaults instead. A blank line between the header and the
+banner ends the run before the comment does — which is why the engine's own tree
+is unaffected, and it is the fix for this shape.
+
+**Park the annotations with the declaration**, inside the comment:
+
+```memql
+/*
+@executor("integration.workbench.dispatchHost")
+@description("does real work")
+builtin zzParked {
+  a string
+}
+*/
+```
+
+...or move them below the comment if they were written for the live one.
+
+`memqllint` reports this as an error naming both lines and quoting the orphaned
+run (memql#2965). It is reported rather than repaired on purpose: which
+declaration the annotations were written for is a question only the author can
+answer, and in the shape above they sit directly on top of the parked one.
+
+---
+
 ## 8. The `_system` partition is reserved
 
 **Rule.** Partition names starting with `_` are reserved. The
