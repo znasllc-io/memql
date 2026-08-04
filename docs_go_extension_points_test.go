@@ -234,6 +234,11 @@ var qualifiedRegisterRE = regexp.MustCompile(
 // The optional receiver group is not cosmetic: `RegisterIntegration` and
 // `RegisterRoutes` are methods, and a pattern without it reports both as
 // deleted. That is the crying-wolf failure memql#2967 called out by name.
+// shaShapedRE is the always-available half of the removedIn check: a commit
+// id is hex and at least 7 characters, which rejects "TODO" / "see #2966" /
+// "unknown" even on a shallow clone where history cannot be consulted.
+var shaShapedRE = regexp.MustCompile(`^[0-9a-fA-F]{7,40}$`)
+
 var goFuncDeclRE = regexp.MustCompile(
 	`^func\s+(?:\([^)]*\)\s*)?([A-Z][A-Za-z0-9_]*)\s*(?:\[[^\]]*\]\s*)?\(`)
 
@@ -318,21 +323,44 @@ var retiredGoSymbols = map[string]struct{ removedIn, note string }{
 func TestRetiredGoSymbolsAreActuallyGone(t *testing.T) {
 	declared := declaredGoFuncNames(t)
 
+	// Non-empty is not the same as real. Three places in this file say naming
+	// the commit is "the whole mechanism"; checking only for the empty string
+	// lets `removedIn: "TODO"` or `"see #2966"` ship, and the mechanism is then
+	// decorative. Two checks, because they hold in different places:
+	//
+	//   shape   -- always. A SHA is hex and at least 7 characters, so the
+	//              prose spellings are rejected everywhere, including CI.
+	//   history -- only where history exists. CI checks out with actions/
+	//              checkout's default fetch-depth of 1, so a SHALLOW clone has
+	//              exactly one commit and `git cat-file -e` fails for every
+	//              real SHA. Verifying unconditionally does not tighten the
+	//              gate there, it just makes it fail on a correct entry -- so
+	//              the existence check is skipped when the clone is shallow,
+	//              loudly, rather than turning a true record into a red build.
+	shallow := false
+	if out, err := exec.Command("git", "rev-parse", "--is-shallow-repository").Output(); err == nil {
+		shallow = strings.TrimSpace(string(out)) == "true"
+	}
+	if shallow {
+		t.Logf("shallow clone: verifying removedIn SHAs by shape only, not against history")
+	}
+
 	var stale []string
 	for symbol, entry := range retiredGoSymbols {
-		if entry.removedIn == "" {
+		switch {
+		case entry.removedIn == "":
 			t.Errorf("retiredGoSymbols[%q] names no removing commit. The commit IS the "+
 				"mechanism -- without it the entry is an exemption rather than a record.", symbol)
-		} else if err := exec.Command("git", "cat-file", "-e", entry.removedIn+"^{commit}").Run(); err != nil {
-			// Non-empty is not the same as real. Three places in this file say
-			// naming the commit is "the whole mechanism"; checking only for the
-			// empty string means `removedIn: "TODO"` or `"see #2966"` ships and
-			// the mechanism is decorative. This is the line that makes the
-			// prose true.
-			t.Errorf("retiredGoSymbols[%q].removedIn is %q, which is not a commit in this "+
-				"repository. An entry that cannot be justified with a real commit is an "+
-				"exemption wearing a record's clothes -- which is the failure memql#2967 was "+
-				"filed about, one level up.", symbol, entry.removedIn)
+		case !shaShapedRE.MatchString(entry.removedIn):
+			t.Errorf("retiredGoSymbols[%q].removedIn is %q, which is not shaped like a commit "+
+				"(hex, at least 7 characters). An entry that cannot be justified with a real "+
+				"commit is an exemption wearing a record's clothes -- which is the failure "+
+				"memql#2967 was filed about, one level up.", symbol, entry.removedIn)
+		case !shallow:
+			if err := exec.Command("git", "cat-file", "-e", entry.removedIn+"^{commit}").Run(); err != nil {
+				t.Errorf("retiredGoSymbols[%q].removedIn is %q, which is hex-shaped but is not a "+
+					"commit in this repository.", symbol, entry.removedIn)
+			}
 		}
 		if declared[symbol] {
 			stale = append(stale, symbol)
