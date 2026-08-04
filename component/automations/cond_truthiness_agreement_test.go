@@ -11,6 +11,9 @@ import (
 	"github.com/znasllc-io/memql/component/memql"
 )
 
+// memqlRoot is the package that owns the shared rule, relative to this one.
+const memqlRoot = "../memql"
+
 // singleCall reports the sole call expression on the right-hand side of an
 // assignment, if that is what it is.
 func singleCall(rhs []ast.Expr) (*ast.CallExpr, bool) {
@@ -180,7 +183,12 @@ func TestCondTruthinessPathMatchesTheSharedRule(t *testing.T) {
 // site in the package with no compile error -- which is how the divergence
 // survived long enough to be filed.
 func TestThereIsOnlyOneTruthinessRuleImplementation(t *testing.T) {
-	roots := []string{".", "./steps"}
+	// component/memql is in the root set deliberately. It is the package that
+	// OWNS the shared rule, and it hosted one of the two duplicates this issue
+	// removed (mutation_templates.go's evalCondition arm) -- so a scan that
+	// covers only the consumer packages leaves the likeliest home for the next
+	// duplicate unwatched.
+	roots := []string{".", "./steps", memqlRoot}
 	var offenders []string
 	scanned := 0
 
@@ -199,10 +207,24 @@ func TestThereIsOnlyOneTruthinessRuleImplementation(t *testing.T) {
 				ast.Inspect(file, func(n ast.Node) bool {
 					switch d := n.(type) {
 					case *ast.FuncDecl:
-						if strings.EqualFold(d.Name.Name, "isTruthy") {
-							offenders = append(offenders,
-								fmt.Sprintf("%s:%d func %s", path, fset.Position(d.Pos()).Line, d.Name.Name))
+						if !strings.EqualFold(d.Name.Name, "isTruthy") {
+							return true
 						}
+						// The one permitted declaration is the shared rule
+						// itself. Matched exactly, package-qualified, and only
+						// as a plain function: a lowercase `isTruthy` beside it
+						// is still a duplicate, an `IsTruthy` anywhere else is
+						// still a duplicate, and a METHOD of either spelling is
+						// a duplicate wherever it lives.
+						if d.Name.Name == "IsTruthy" && root == memqlRoot && d.Recv == nil {
+							return true
+						}
+						kind := "func"
+						if d.Recv != nil {
+							kind = "method"
+						}
+						offenders = append(offenders,
+							fmt.Sprintf("%s:%d %s %s", path, fset.Position(d.Pos()).Line, kind, d.Name.Name))
 					case *ast.AssignStmt:
 						// `isTruthy := ...` -- the inline spelling that carried
 						// its own rule in steps/mutation.go, complete with a

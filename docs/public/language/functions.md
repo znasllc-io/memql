@@ -549,9 +549,10 @@ knowing before you lean on truthiness as a gate:
   zero or empty**.
 - Anything else — a struct, a timestamp, a decoder-specific wrapper — is true.
 
-Where a condition is a **security** gate, prefer an explicit comparison,
-`cond(args.allowed == true, ...)`, over relying on truthiness. Every gate in the
-shipped DSL does exactly that.
+Where a condition is a **security** gate, prefer an explicit comparison —
+`cond(args.allowed == true, ...)`, `cond(role == "admin", ...)` — over relying
+on truthiness. Every `cond` in the shipped DSL uses an explicit comparison
+except two id-derivation branches, which are not gates.
 
 ### Strings and Ids
 
