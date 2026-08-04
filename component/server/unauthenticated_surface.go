@@ -73,6 +73,22 @@ func HandlerAuthorizedPaths() []string {
 		// authenticates. If identity's gRPC chain ever stops rejecting by
 		// default, this entry stops being true.
 		"/memql/ws",
+		// POST /memql/query -- the gRPC gateway, served from MIDDLEWARE ahead
+		// of the mux (component/grpc/gateway.go, memqlgrpc.InterceptedPaths).
+		// Declared as of memql#3004; before that it was a registration channel
+		// nothing modelled, so it appeared in no list and failed no check.
+		//
+		// Same posture as /memql/ws above and recorded with the same honesty:
+		// the middleware performs no auth check of its own. It forwards the
+		// request's Authorization header into gRPC metadata, so on identity the
+		// call lands on MemqlService.Stream behind OperatorAware(RejectAll)
+		// (app/transport.go) -- a request with no operator credential is
+		// refused at the next hop rather than in the handler.
+		//
+		// This is a known posture, not a claim that the gateway authenticates.
+		// If identity's gRPC chain ever stops rejecting by default, this entry
+		// stops being true -- exactly as the /memql/ws entry says of itself.
+		"/memql/query",
 	}
 	// POST /inbound/{source} -- the inbound-delivery receiver (memql#2957).
 	// Appended rather than written inline because the prefix has to agree with
