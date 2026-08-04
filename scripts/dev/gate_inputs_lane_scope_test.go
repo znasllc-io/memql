@@ -79,6 +79,13 @@ var gateInputs = []struct {
 	{"component/architecture/embedded/topology.model.json", "component/architecture", "TestArchitectureModelIsNotStale"},
 	{"scripts/make/help.sh", "scripts/make", "TestHelpScript"},
 	{"scripts/lib/capability.sh", "scripts/lib", "the capability-script contract test"},
+	// The `**/*.memql` glob had NO row at all until the memql#3060 review,
+	// so the guard asserted nothing in either direction for it -- it could
+	// neither notice the glob missing from the bucket nor notice the step
+	// lacking the package that reads it. Both of these are outside dsl/
+	// (which has its own bucket) and outside the root package.
+	{"examples/referencepack/dsl/concepts.memql", "examples/referencepack", "TestReferencePackLoadsAndExtends"},
+	{"docs/public/operate/auth/per-row-authz-audit.md", "dsl", "TestPublicExamplesAreAnnotated"},
 }
 
 // changesFilters returns the parsed filter block the `changes` job wires its
@@ -113,10 +120,30 @@ func changesFilters(t *testing.T, output string) map[string][]string {
 			"bucket, so every non-Go gate input is back in no bucket and ci-required goes green "+
 			"over an unverified diff (memql#2972)", output)
 	}
-	m := regexp.MustCompile(`steps\.([A-Za-z0-9_-]+)\.outputs`).FindStringSubmatch(wiring)
+	// Capture the output KEY as well as the step id, and require the key to
+	// be the bucket we asked for.
+	//
+	// Matching only the step id was a hole big enough to restore memql#2972
+	// in one line, found by the adversarial review of this PR: rewiring
+	//
+	//	gates: ${{ steps.filter.outputs.go }}
+	//
+	// left every assertion in this file GREEN -- the id still resolved to the
+	// `filter` step, whose filters block still contains a `gates` key, and the
+	// two `if:` assertions still found the string
+	// "needs.changes.outputs.gates". Meanwhile at runtime a docs-only PR read
+	// the `go` bucket, got false, and the lane skipped. The guard has to check
+	// what the output is wired TO, not merely which step it came from.
+	m := regexp.MustCompile(`steps\.([A-Za-z0-9_-]+)\.outputs\.([A-Za-z0-9_-]+)`).FindStringSubmatch(wiring)
 	if m == nil {
 		t.Fatalf("cannot tell which step supplies the `changes` job's %q output (got %q); this "+
 			"guard cannot pass vacuously", output, wiring)
+	}
+	if m[2] != output {
+		t.Fatalf("the `changes` job's %q output is wired to the %q filter (%q). The name and the "+
+			"bucket must match, or the job advertises one bucket and routes on another: a "+
+			"docs-only PR would read the wrong filter, the lane would skip, and memql#2972 would "+
+			"be back with every guard in this file still green.", output, m[2], wiring)
 	}
 
 	var filters string

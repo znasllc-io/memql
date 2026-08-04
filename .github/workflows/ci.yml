@@ -193,14 +193,37 @@ jobs:
       # is the #856 routing win and the stated intent in this file's header.
       # It pays the gates that actually read what it changed.
       #
+      # Be exact about what that saves, because it is less than it reads:
+      # the saving is in TEST time (~35s here against the full suite), not in
+      # COMPILE time. The root package imports app, which pulls in most of the
+      # module, so a docs-only PR now pays a near-full build it previously
+      # skipped entirely -- measured at ~6min wall on a cold cache against
+      # ~35s of actual test execution (memql#3060 review). That is the price
+      # of the bucket, and it is worth paying against a green tick over an
+      # unverified diff; it is not free.
+      #
       # No `-run` / `-skip`: a selector matching nothing exits 0 having tested
       # nothing, which is the defect class this bucket is part of (#2923,
       # #3003). scripts/dev/gate_inputs_lane_scope_test.go pins that, pins the
       # package list against the bucket's globs, and pins the bucket against
       # the paths those packages read.
+      #
+      # ./dsl and ./examples are here because the `**/*.memql` glob would
+      # otherwise promise coverage this step does not deliver -- the bucket
+      # comment cites the referencepack tests, and they live in
+      # examples/referencepack, not in any package above. dsl/ also hosts
+      # TestPublicExamplesAreAnnotated, which reads a docs/public `.md`.
+      # Together they cost ~2s (memql#3060 review).
+      #
+      # STATED BOUNDARY: component/memql also reads bucket files -- its
+      # reference-pack load test and sense's walk of the dsl/ tree -- and is
+      # deliberately NOT here. That package costs ~90s, which is most of a
+      # docs-only PR's budget, and its gates are covered whenever RUN_GO or
+      # RUN_DSL fires. Adding it belongs with a decision about what a
+      # docs-only PR should pay, not with closing this bucket.
       - name: go test (gate inputs)
         if: ${{ env.RUN_GATES == 'true' }}
-        run: go test -count=1 -timeout=300s ./ ./cmd/envscan/... ./component/architecture/... ./component/genesis/... ./scripts/...
+        run: go test -count=1 -timeout=300s ./ ./cmd/envscan/... ./component/architecture/... ./component/genesis/... ./scripts/... ./dsl/... ./examples/...
 
       # --- pure-Go lanes (go bucket) -- build first to warm the cache ---
       - name: go build
