@@ -830,6 +830,9 @@ func (p *Parser) parseAttribute() (*Attribute, error) {
 				return nil, newParseErrorf(&p.current, "expected argument name in attribute, got %q", p.current.Literal)
 			}
 			argName := p.current.Literal
+			// Captured BEFORE the advance, so a duplicate is reported at the
+			// repeated NAME rather than at the `=` that follows it.
+			argTok := p.current
 			p.advance()
 
 			// A repeated key USED to collapse last-wins, before any
@@ -854,7 +857,7 @@ func (p *Parser) parseAttribute() (*Attribute, error) {
 			// corpus load, which is what makes this a clean error rather than a
 			// migration.
 			if _, dup := attr.Args[argName]; dup {
-				return nil, newParseErrorf(&p.current,
+				return nil, newParseErrorf(&argTok,
 					"duplicate argument %q in @%s -- it was written more than once, and only the "+
 						"LAST value would take effect. Delete the one you did not mean.",
 					argName, name)

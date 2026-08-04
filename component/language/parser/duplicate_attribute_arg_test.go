@@ -33,8 +33,18 @@ func TestDuplicateAttributeArgumentIsRejected(t *testing.T) {
 			wantArg: "primary",
 		},
 		{
+			// The declaration under the annotation is deliberately a concept
+			// rather than an automation. `automation probe { steps { } }` does
+			// NOT parse through ParseFile at all -- struct-form automations
+			// reach the parser only via the rewriter -- so a fixture built on
+			// one fails with `unexpected token "automation"` whether or not the
+			// duplicate is caught, and would pass here only because
+			// parseAttribute happens to run first. That is an ordering
+			// coincidence, not coverage. The check is annotation-agnostic, so
+			// the annotation is what this row is about; the body only has to
+			// parse.
 			name:    "trigger event -- decides what fires the automation",
-			src:     "@trigger(event=\"a\", event=\"b\")\nautomation probe {\n  steps { }\n}\n",
+			src:     "@trigger(event=\"a\", event=\"b\")\nconcept probe {\n  a string\n}\n",
 			wantArg: "event",
 		},
 		{
@@ -59,6 +69,27 @@ func TestDuplicateAttributeArgumentIsRejected(t *testing.T) {
 	}
 }
 
+// The reported position must be the repeated NAME, not the `=` after it.
+//
+// Worth pinning rather than trusting: the natural way to write this check is
+// after `p.advance()` has already consumed the name, which anchors the caret one
+// token late. The line is right either way, so the error is findable and this is
+// a nicety -- but an author staring at a long annotation is exactly who this
+// message is for, and this repo gates diagnostic positions elsewhere.
+func TestDuplicateArgumentErrorPointsAtTheRepeatedName(t *testing.T) {
+	//                     1234567890123456789012345678901234
+	src := "@displayCard(primary=\"x\", primary=\"y\")\nconcept probe {\n  a string\n}\n"
+	_, err := ParseFile(src)
+	if err == nil {
+		t.Fatal("control broken: the duplicate must be rejected")
+	}
+	// The second `primary` starts at column 27; the `=` after it is column 34.
+	if !strings.Contains(err.Error(), "column 27") {
+		t.Errorf("the caret must land on the repeated argument name (column 27), not the `=` "+
+			"that follows it (column 34).\n  got: %v", err)
+	}
+}
+
 // The bare-flag form goes through the SAME map, so it collapsed the same way.
 // memql#2968 asked for this to be confirmed against the corpus before making it
 // an error; the corpus loads clean, so it is one.
@@ -70,8 +101,9 @@ func TestDuplicateBareFlagArgumentIsRejected(t *testing.T) {
 			"a key=value argument, so it collapses the same way and is invisible to any arity " +
 			"check written against the map.")
 	}
-	if !strings.Contains(err.Error(), "duplicate argument") {
-		t.Errorf("got: %v", err)
+	if !strings.Contains(err.Error(), "duplicate argument") || !strings.Contains(err.Error(), "owner") {
+		t.Errorf("the error must say it is a duplicate AND name the repeated argument, or the "+
+			"author cannot find it in a long annotation.\n  got: %v", err)
 	}
 }
 
@@ -107,9 +139,9 @@ func TestRepeatedIdenticalTierIsNoLongerInvisible(t *testing.T) {
 				"entry, so ParseRowAuthz's len(attr.Args) > 1 check never saw it -- the arity " +
 				"gate was blind to exactly one of the two spellings (memql#2968).")
 		}
-		if !strings.Contains(err.Error(), "duplicate argument") {
-			t.Errorf("refused, but not as a duplicate, so this proves nothing about the "+
-				"collapse: %v", err)
+		if !strings.Contains(err.Error(), "duplicate argument") || !strings.Contains(err.Error(), "public") {
+			t.Errorf("refused, but not as a duplicate naming the repeated tier, so this proves "+
+				"nothing about the collapse: %v", err)
 		}
 	})
 }
@@ -153,9 +185,21 @@ func TestDistinctAttributeArgumentsStillParse(t *testing.T) {
 // out of parseAttribute would break every construct carrying two annotations
 // that happen to share an argument name.
 func TestSameArgumentNameOnTwoAnnotationsIsFine(t *testing.T) {
-	src := "@trigger(event=\"a\")\n@precondition(event=\"b\")\nautomation probe {\n  steps { }\n}\n"
-	if _, err := ParseFile(src); err != nil && strings.Contains(err.Error(), "duplicate argument") {
+	// `err == nil`, not "the error is not a duplicate-argument error".
+	//
+	// The weaker assertion is worth naming, because this test shipped with it
+	// and it is a trap: it tolerates ANY other parse failure, so a fixture that
+	// stops parsing for an unrelated reason leaves the test green while
+	// asserting nothing. This one did exactly that -- it was built on
+	// `automation probe { steps { } }`, which ParseFile cannot parse at all, so
+	// it was passing on a file that never parsed and pinning the per-annotation
+	// scoping only by the accident that parseAttribute runs before the
+	// declaration keyword is read.
+	src := "@trigger(event=\"a\")\n@precondition(event=\"b\")\nconcept probe {\n  a string\n}\n"
+	if _, err := ParseFile(src); err != nil {
 		t.Errorf("two different annotations may each carry an argument of the same name; the "+
-			"duplicate check is per-annotation.\n  got: %v", err)
+			"duplicate check is per-annotation, because attr.Args is allocated fresh per @. "+
+			"A fix that hoisted the seen-set out of parseAttribute would break every construct "+
+			"carrying two annotations that happen to share an argument name.\n  got: %v", err)
 	}
 }
