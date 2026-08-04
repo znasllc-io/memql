@@ -186,6 +186,27 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// admin/auth.go -- so origin gating puts the boundary where the
 		// authorization already lives.
 		{Path: "identity/mutations.memql", Name: "updateUser"}: true,
+		// memql#2987, the node-token trio. All three were @public while
+		// projecting identityFull -- which includes `credentials` -- and
+		// nodeTokenIdentities had NO filter at all, so one unparameterised call
+		// returned every node credential in the cluster to any authenticated
+		// caller. @public enforces nothing; it only suppressed the classifier.
+		//
+		// Caller-scoping here does not merely fail, it names nobody: a
+		// node_token row belongs to a cluster NODE, and its `userId` is the
+		// synthetic bootstrap user the mint ran as, never a reader's id. So
+		// `userId==actor.userId` returns zero rows for every real caller -- the
+		// human admin on /admin/tokens, and the bootstrap handler, which has no
+		// resolved actor at all because it runs BEFORE the node has an identity.
+		// Origin is the only boundary that exists.
+		//
+		// Every caller is component/identity/store.go, allowlisted in
+		// call_origin_conformance_test.go as server-initiated, so the internal
+		// stamp these now require is legitimate rather than the request-derived
+		// stamp refuted on memql#2989.
+		{Path: "identity/queries.memql", Name: "nodeTokenIdentityByBinding"}: true,
+		{Path: "identity/queries.memql", Name: "nodeTokenIdentities"}:        true,
+		{Path: "identity/queries.memql", Name: "nodeTokenIdentityById"}:      true,
 	}
 	for k := range want {
 		if !set[k] {

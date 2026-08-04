@@ -233,22 +233,31 @@ query user searchUsers {
 //   Zero or more audit-event rows in auditEventFull shape.
 //
 
-// `@public` marks this query as intentionally not caller-scoped.
-// Admin-only audit view (no Go callers; consumed by the admin
-// UI under elevated context). Proper admin gating is a #54 follow-up
-// once the admin surface is consolidated -- via one of the live
-// actorEnvelope specs (`grep -rn '^spec actorEnvelope ' dsl/`) named as
-// a top-level conjunct, NOT via a `requiresClusterOwner` spec, which is
-// declared nowhere and only survives inside the classifier's recogniser
-// as a #54 placeholder (memql#2983).
-/// Audit events where actorUserId equals the supplied userId. Pair with auditEventsByTarget for
-/// full per-user history (no OR operator in the filter grammar yet).
-@public
+// AUDIT 2026-08-04 (memql#2987): was @public, now admin-gated. This does what
+// the comment that used to sit here said should be done.
+//
+// The debt was real and worse than "not caller-scoped": auditEventFull
+// projects actorEmail, targetEmail, sourceIP and userAgent, and the filter was
+// a caller-supplied userId with no check that the caller IS that user. Any
+// authenticated client could walk another user's audit history, PII included,
+// by passing their id. @public enforced nothing -- it only suppressed the
+// classifier.
+//
+// requiresOwnerOrAdmin as a top-level conjunct is the searchUsers precedent
+// (memql#2883 / #2860), and it is the right shape here rather than
+// @serverOnly: the admin UI consumes this over the wire, and admins hold the
+// role, so the surface keeps working while everyone else is refused. It is a
+// live actorEnvelope context-spec, evaluated in-process against the auth
+// envelope -- not the `requiresClusterOwner` placeholder the old comment
+// warned about, which is declared nowhere (memql#2983).
+/// Audit events where actorUserId equals the supplied userId, restricted to the owner or an admin.
+/// Pair with auditEventsByTarget for full per-user history (no OR operator in the filter grammar
+/// yet).
 query auditEvent auditEventsByActor {
   args {
     userId  string!
   }
-  filter  actorUserId==args.userId
+  filter  actorUserId==args.userId && requiresOwnerOrAdmin
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -280,17 +289,19 @@ query auditEvent auditEventsByActor {
 //   Zero or more audit-event rows in auditEventFull shape.
 //
 
-// `@public` marks this query as intentionally not caller-scoped.
-// Companion of `auditEventsByActor`; same admin-only audit
-// view. Proper admin gating is a #54 follow-up.
-/// Audit events where targetId equals the supplied targetId. Pair with auditEventsByActor for full
-/// per-user history (no OR operator in the filter grammar yet).
-@public
+// AUDIT 2026-08-04 (memql#2987): was @public, now admin-gated. Companion of
+// auditEventsByActor and identical in every way that matters -- same
+// auditEventFull shape (actorEmail / targetEmail / sourceIP / userAgent), same
+// caller-supplied id with no check, same fix. See that query for the full
+// rationale.
+/// Audit events where targetId equals the supplied targetId, restricted to the owner or an admin.
+/// Pair with auditEventsByActor for full per-user history (no OR operator in the filter grammar
+/// yet).
 query auditEvent auditEventsByTarget {
   args {
     targetId  string!
   }
-  filter  targetId==args.targetId
+  filter  targetId==args.targetId && requiresOwnerOrAdmin
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -935,6 +946,29 @@ query magicLinkRequest magicLinkRequestByTokenHash {
 // handler to stop accepting an explicit userId and let the
 // query derive it from the actor instead.
 /// List PAT (api_key) identities owned by a user, in patSummary shape (no credentials).
+// AUDIT 2026-08-04 (memql#2987): re-audited, KEPT @public for now, and the
+// reason is recorded rather than left implicit -- this is the one group of the
+// ten where the audit did NOT reach a conclusion it could ship.
+//
+// The debt is real: the filter keys on a caller-supplied userId with no check
+// that the caller IS that user, so any authenticated client can enumerate
+// another user's PAT metadata (patSummary -- no credential material, but names,
+// creation and last-used times). Same shape on workerTokensForUser and
+// badgesForUser.
+//
+// The obviously-right filter is `userId==actor.userId` ("your own
+// credentials"). It is not a one-line change: the Go caller
+// (component/identity/pat/store.go ListForUser) passes a userId argument, and
+// whether every call site is the owner acting on themselves -- as /me/tokens
+// is -- or an admin listing somebody else's, decides whether that filter
+// breaks an admin surface. @serverOnly is the other candidate and is worse
+// here: /me/tokens is a wire consumer, so removing it from the wire would
+// break the settings UI.
+//
+// Deliberately NOT guessed. The node-token trio and the two audit-event
+// queries in this same change were unambiguous and shipped; this group needs
+// its call sites walked, and getting it wrong either leaves the hole open or
+// breaks a live surface. Filed as its own story with this analysis attached.
 @public
 query identity patIdentitiesForUser {
   args {
@@ -1086,6 +1120,13 @@ query auditEvent recentAuditEvents {
 /// filter" rather than "no rows", i.e. an unfiltered dump of every user, on a
 /// query whose only predicate it was. That is the wrong failure direction to
 /// leave standing on the strength of a required-arg check elsewhere.
+///
+/// AUDIT 2026-08-04 (memql#2987): re-audited and KEPT @public. Re-verified
+/// that userActiveSpaceProjection still projects id + activePartitionId and
+/// nothing else -- the "shapes drift" risk that moved userByEmail to
+/// @serverOnly in memql#2881 has not materialised here. Cross-user resolution
+/// is load-bearing for presence, so this is the second kind of @public in this
+/// repo (documenting intent) rather than the first (acknowledging a flag).
 @public
 @unbounded("the user's active-space projection by id -- bounded to a single row")
 query user userActiveSpace {
@@ -1214,6 +1255,12 @@ query user userByIdSystem {
 /// memql#2800: the cross-user read that rosters, mentions and participant
 /// lists actually need. Deliberately projects userDisplayCard (id +
 /// displayName) and nothing else, so a cross-user lookup cannot return PII.
+///
+/// AUDIT 2026-08-04 (memql#2987): re-audited and KEPT @public. Re-verified
+/// that userDisplayCard is still id + displayName -- this is the narrow
+/// counterpart deliberately carved out of userByIdSystem above, and its whole
+/// value is that a caller can resolve a name WITHOUT reaching userFull. The
+/// pairing is the point: the wide read is @serverOnly, the narrow one is open.
 @public
 query user userDisplayById {
   args {
@@ -1468,6 +1515,12 @@ query identity workerTokenByKeyHash {
 // cockpit Workers tab). Same auth shape as the PAT list above
 // (web-layer authentication; userId is the authenticated
 // subject). Tightening tracked under #54.
+// AUDIT 2026-08-04 (memql#2987): re-audited, KEPT @public for now. Same group
+// and same unresolved decision as patIdentitiesForUser above -- see the note
+// there. One extra wrinkle specific to this one: component/identity/workertoken
+// is NOT in call_origin_conformance_test.go's internal-origin allowlist, so
+// @serverOnly would additionally require an allowlist entry and the argument
+// for it, which is a second decision on top of the first.
 /// List worker-token identities owned by a user.
 @public
 query identity workerTokensForUser {
@@ -1534,6 +1587,12 @@ query identity badgeByKeyHash {
 /// List badge identities owned by a user. Projects identitySummary (id / userId / label / active)
 /// -- NEVER credentials, so the badge keyHash (a low-entropy physical id's hash) is never exposed
 /// on this public surface.
+///
+/// AUDIT 2026-08-04 (memql#2987): re-audited, KEPT @public for now. Same group
+/// and same unresolved decision as patIdentitiesForUser -- see the note there.
+/// component/identity/badge is likewise absent from the internal-origin
+/// allowlist. Re-verified that the shape is still identitySummary and still
+/// omits credentials, which is what keeps this the least urgent of the three.
 @public
 query identity badgesForUser {
   args {
@@ -1568,8 +1627,34 @@ query identity badgesForUser {
 // Returns:
 //   Zero or one identity row in identityFull shape.
 
+// AUDIT 2026-08-04 (memql#2987): was @public, now @serverOnly.
+//
+// identityFull projects `credentials`, and the filter keys on a
+// caller-supplied (nodeType, nodeId) pair with no caller check -- so any
+// authenticated client could read a node's bootstrap credential row by
+// guessing a binding that is not secret (the node types are published in
+// CLAUDE.md and the ids are pod names). @public enforced nothing; the
+// annotation only suppressed the classifier.
+//
+// @serverOnly IS runtime-enforced, against auth.CallOrigin
+// (component/memql/engine.go). Every caller is component/identity/store.go,
+// which is allowlisted in call_origin_conformance_test.go as "identity store
+// internals, server-initiated", so the origin stamp is legitimate here rather
+// than the request-derived stamp that was refuted on memql#2989.
+//
+// This is the userByEmail precedent from memql#2881: keep the server path
+// working, remove the query from the wire.
 /// Lookup a node_token identity by its (nodeType, nodeId) binding. memql#343.
-@public
+///
+/// Why actor.userId scoping is not the fix: a node_token row belongs to a
+/// cluster NODE, not to a person. Its `userId` is the synthetic bootstrap user
+/// the mint ran as (component/identity/http/node_bootstrap.go), never the id of
+/// anyone who reads it -- so `userId==actor.userId` would match zero rows for
+/// every real caller: the admin listing tokens is a human, and the bootstrap
+/// handler resolving a binding has no resolved actor at all, since this runs
+/// BEFORE the node has an identity. There is no caller to scope to, which is
+/// what makes origin the only boundary that exists here.
+@serverOnly
 @unbounded("node-token identity by unique (nodeType,nodeId) binding -- bounded to a single row")
 query identity nodeTokenIdentityByBinding {
   args {
@@ -1593,8 +1678,27 @@ query identity nodeTokenIdentityByBinding {
 // Returns rows even when active=false so the admin UI can show
 // revoked tokens explicitly (rather than ghosting them).
 
+// AUDIT 2026-08-04 (memql#2987): was @public, now @serverOnly. The sharpest
+// of the ten.
+//
+// It has NO filter at all -- `identityIsNodeToken` and nothing else -- and
+// projects identityFull, which includes `credentials`. As a @public query
+// that made every node credential in the cluster readable by any
+// authenticated caller, in one unparameterised call.
+//
+// Same reasoning as nodeTokenIdentityByBinding above: the only caller is
+// ListNodeTokenIdentities in component/identity/store.go (the /admin/tokens
+// section), the package is allowlisted as server-initiated, and @serverOnly
+// is enforced at runtime where @public was not.
 /// List every node_token identity across the cluster (active + inactive). memql#343.
-@public
+///
+/// Why actor.userId scoping is not the fix: same as nodeTokenIdentityByBinding
+/// above -- a node_token row's `userId` is the synthetic bootstrap user, not
+/// any reader, so `userId==actor.userId` returns nothing for the admin who
+/// consumes this. It is also a deliberate cluster-wide SWEEP: the /admin/tokens
+/// section exists precisely to show every node's credential row, so a
+/// per-caller filter would empty the surface it backs.
+@serverOnly
 @unbounded("all node-token identities -- a bounded cluster-node credential set consumed whole for verification")
 query identity nodeTokenIdentities {
   filter  identityIsNodeToken
@@ -1615,9 +1719,21 @@ query identity nodeTokenIdentities {
 // whole-replace revokeNodeTokenIdentity restating every
 // credentials field.
 
+// AUDIT 2026-08-04 (memql#2987): was @public, now @serverOnly. Third of the
+// node-token trio, same reasoning -- identityFull projects `credentials` and
+// the filter keys on a caller-supplied id. Its only caller is
+// GetNodeTokenIdentityById in component/identity/store.go (the /admin/tokens
+// revoke flow), which now runs under an internal origin.
 /// Lookup a single node_token identity row by id (bare shortId; the signature-bound filter resolves
 /// it server-side). Drives the admin revoke path. memql#350.
-@public
+///
+/// Why actor.userId scoping is not the fix: same as its two siblings -- a
+/// node_token row's `userId` is the synthetic bootstrap user rather than any
+/// reader, so `userId==actor.userId` matches nothing for the admin driving the
+/// revoke flow. The authorization that does apply is the admin gate on the
+/// route (component/identity/admin/route_gate_test.go, memql#2934); origin
+/// gating puts the DSL-side boundary where that authorization already lives.
+@serverOnly
 query identity nodeTokenIdentityById {
   args {
     identityId  string!

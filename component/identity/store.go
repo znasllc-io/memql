@@ -628,7 +628,13 @@ func (s *Store) LookupNodeTokenIdentityByBinding(
 	writeKVString(&sb, "nodeType", b.NodeType, true)
 	writeKVString(&sb, "nodeId", b.NodeId, false)
 	sb.WriteString(`)`)
-	result, err := s.Engine.Execute(ctx, sb.String())
+	// Internal origin: nodeTokenIdentityByBinding is @serverOnly as of
+	// memql#2987 (identityFull projects `credentials`, and the binding is
+	// guessable -- node types are published and node ids are pod names).
+	// This is the bootstrap-minted identity persistence path: server-
+	// initiated, no caller in scope, which is exactly why this package is
+	// allowlisted in call_origin_conformance_test.go.
+	result, err := s.Engine.Execute(auth.ContextWithInternalOrigin(ctx), sb.String())
 	if err != nil {
 		return nil, fmt.Errorf("identity.store: lookup node_token identity: %w", err)
 	}
@@ -747,7 +753,12 @@ type NodeTokenRow struct {
 // rows explicitly rather than ghosting them. Backs the
 // `/admin/tokens` Node-tokens section per memql#350.
 func (s *Store) ListNodeTokenIdentities(ctx context.Context) ([]NodeTokenRow, error) {
-	nodes, err := s.executeAndExtract(ctx, `query nodeTokenIdentities()`)
+	// Internal: @serverOnly as of memql#2987. This query has NO filter and
+	// projects `credentials`, so as @public it exposed every node credential
+	// in the cluster to any authenticated caller in one unparameterised call.
+	// Reached from the /admin/tokens section, whose routes are all behind
+	// requireAdmin (asserted by component/identity/admin/route_gate_test.go).
+	nodes, err := s.executeAndExtractInternal(ctx, `query nodeTokenIdentities()`)
 	if err != nil {
 		return nil, fmt.Errorf("identity.store: list node_token identities: %w", err)
 	}
@@ -774,7 +785,9 @@ func (s *Store) LookupNodeTokenIdentityById(ctx context.Context, identityId stri
 		return nil, nil
 	}
 	q := fmt.Sprintf(`query nodeTokenIdentityById(identityId: "%s")`, escapeMemQLString(identityId))
-	nodes, err := s.executeAndExtract(ctx, q)
+	// Internal: @serverOnly as of memql#2987 -- identityFull projects
+	// `credentials`. Same admin revoke path as ListNodeTokenIdentities above.
+	nodes, err := s.executeAndExtractInternal(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("identity.store: lookup node_token identity %q: %w", identityId, err)
 	}
