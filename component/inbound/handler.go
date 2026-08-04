@@ -115,7 +115,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	received := h.now().UTC()
-	requestID := requestIDFor(name, dedupeKey)
+	requestID := requestIDFor(name, identityKeyFor(src, r.Header, body))
 	mutation := fmt.Sprintf(
 		`mutation stageInboundRequest(requestId: %s, source: %s, medium: "webhook", body: %s, `+
 			`contentType: %s, dedupeKey: %s, signatureVerified: %t, receivedAt: %s)`,
@@ -138,7 +138,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// routinely carries PII and bearer tokens.
 		//
 		// requestID is safe to log and is the correlation handle: it is
-		// sha256(source, dedupeKey) truncated, so it identifies the row without
+		// sha256(source, signed-payload digest) truncated, so it identifies the row without
 		// revealing anything the caller sent. An operator who needs the engine's
 		// own reason has it in the engine's server-side log for the same
 		// request.
@@ -218,7 +218,55 @@ func dedupeKeyFor(src SourceConfig, header http.Header, body []byte) (string, er
 	return key, nil
 }
 
-// requestIDFor derives the row id from (source, dedupeKey), which is what makes
+// identityKeyFor produces the half of the row id that stands for "which
+// delivery is this", and it is derived from SIGNED material only.
+//
+// This is a security boundary, not a naming choice (memql#2957 landing review).
+// The vendor signs the BODY -- and the timestamp too, where a TimestampHeader
+// is configured -- but it does not sign our DedupeHeader, because that header
+// is our configuration and not part of its scheme. Deriving the row id from an
+// unsigned header therefore let ONE captured, still-valid request mint
+// unbounded distinct rows: the signature stays valid because the body is
+// unchanged, while varying the unsigned header varies the id. Storage
+// amplification from a single replay, with no forged signature required.
+//
+// So identity is the digest of exactly what was signed, and NOTHING else. The
+// sender's dedupe key is still recorded on the row -- a product automation can
+// read it -- but it does not participate in the id.
+//
+// Folding it in as a subordinate distinguisher was considered and is wrong: if
+// the key contributes to the id at all, varying it still varies the id, and one
+// captured signature still mints unbounded rows. Any unsigned input in an
+// identity is attacker-multipliable; the only sound identity is signed
+// material.
+//
+// The cost, stated because it is a real behaviour change for a configured
+// source: two deliveries whose signed bytes are IDENTICAL now collapse onto one
+// row, where the sender's key would previously have separated them. Where a
+// sender re-delivers the same event that is exactly the wanted behaviour and
+// what this feature promises. Where a sender legitimately emits two distinct
+// events with byte-identical payloads, it distinguishes them with a timestamp
+// header -- which IS signed, and which is already how every timestamped webhook
+// scheme in the wild avoids the same ambiguity. Configure TimestampHeader for
+// such a source; without one, byte-identical is indistinguishable to anybody,
+// including the receiver.
+//
+// For an unverified source (scheme "none") there is no signed material and no
+// signature to replay, so the body digest stands in: identity is content, which
+// is the strongest statement available when nothing is authenticated.
+func identityKeyFor(src SourceConfig, header http.Header, body []byte) string {
+	signed := body
+	if src.Scheme != SchemeNone && src.TimestampHeader != "" {
+		// Mirrors verify(): "<timestamp>.<body>" is what the HMAC covered, so
+		// it is what identity must be taken over.
+		ts := strings.TrimSpace(header.Get(src.TimestampHeader))
+		signed = append(append([]byte(ts), '.'), body...)
+	}
+	sum := sha256.Sum256(signed)
+	return hex.EncodeToString(sum[:])
+}
+
+// requestIDFor derives the row id from (source, identityKey), which is what makes
 // staging idempotent without a read-then-write race: a redelivery renders the
 // same id and @createOnly on the mutation preserves the product's handling
 // state.
@@ -227,11 +275,11 @@ func dedupeKeyFor(src SourceConfig, header http.Header, body []byte) (string, er
 // row -- the memql#2980 class. It is, because the parts cannot forge the
 // separator: a source name is drawn from the allowlist and matched against
 // sourceNamePattern (lowercase alnum, '_' and '-' only), and a dedupe key is
-// either a hex digest we produced or a header value dedupeKeyFor has already
-// rejected control characters in. NUL therefore appears in neither part, so the
-// split at the first NUL is unique and equal concatenations force equal parts.
-func requestIDFor(source, dedupeKey string) string {
-	sum := sha256.Sum256([]byte(source + "\x00" + dedupeKey))
+// always a hex digest we produced (identityKeyFor). NUL therefore appears in
+// neither part, so the split at the first NUL is unique and equal concatenations
+// force equal parts.
+func requestIDFor(source, identityKey string) string {
+	sum := sha256.Sum256([]byte(source + "\x00" + identityKey))
 	return "inb" + hex.EncodeToString(sum[:16])
 }
 

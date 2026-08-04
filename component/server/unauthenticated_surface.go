@@ -93,6 +93,33 @@ func HandlerAuthorizedPaths() []string {
 	return append(paths, InboundWebhookPaths()...)
 }
 
+// SelfAuthenticatedPaths returns routes that must remain reachable on a
+// verifier-consuming node because they authenticate themselves with a
+// credential that is NOT a memQL identity (memql#3062).
+//
+// This is the third tier, and it exists because the first two cannot express
+// this route:
+//
+//   - PublicPaths() is consulted by the verifier middleware, but it is matched
+//     with an open PREFIX walk, so "/inbound/" there would exempt anything
+//     mounted beneath it later -- and it would make the route unauthenticated
+//     rather than differently-authenticated.
+//   - HandlerAuthorizedPaths() is consulted ONLY on a binary with no verifier,
+//     so on the bff -- which installs one -- it never runs, and a third-party
+//     webhook is 401'd before the handler's allowlist and HMAC execute.
+//
+// Membership means the bearer middleware steps aside, NOT that the route is
+// unauthenticated. A route qualifies only if it fails CLOSED with no
+// credentials, exactly as HandlerAuthorizedPaths() requires, and the matching
+// is bounded to one path segment (see verifier.isSelfAuthenticated).
+func SelfAuthenticatedPaths() []string {
+	// POST /inbound/{source} -- verified by a per-source HMAC over the body.
+	// Fails closed twice with no credentials: an unlisted source is 404 (the
+	// allowlist is empty unless an operator populates it) and a listed one
+	// without a matching signature is 401.
+	return InboundWebhookPaths()
+}
+
 // ContractRoutes returns the request paths HandlerWithOptions registers.
 //
 // Hand-maintained lists drift, so this one is verified rather than trusted:

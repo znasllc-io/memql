@@ -12,10 +12,29 @@ import (
 
 // MiddlewareOptions configures HTTPMiddleware.
 type MiddlewareOptions struct {
-	Logger              *slog.Logger
-	PublicPaths         []string
-	UnauthorizedHandler func(http.ResponseWriter, *http.Request)
-	DelegationResolver  auth.DelegationResolver
+	Logger      *slog.Logger
+	PublicPaths []string
+	// SelfAuthenticatedPaths are routes this middleware must SKIP even on a
+	// verifier-consuming node, because they authenticate themselves with a
+	// credential that is not a memQL identity -- today a per-source vendor
+	// HMAC over the request body (memql#2957, memql#3062).
+	//
+	// Deliberately NOT PublicPaths, and the difference is a security boundary
+	// rather than bookkeeping. That set is matched with an OPEN PREFIX WALK
+	// (shouldBypassAuth below), so putting "/inbound/" there would exempt
+	// everything mounted under it later, including routes nobody has written
+	// yet. This set is matched exactly, or at most ONE further path segment
+	// under a trailing-slash entry -- never deeper. The bound is the point:
+	// "/inbound/shopify" is exempt, "/inbound/shopify/anything" is not.
+	//
+	// Skipping the middleware is not the same as being unauthenticated. The
+	// handler still has to fail closed with no credentials, which is the bar
+	// server.HandlerAuthorizedPaths() states and which the inbound receiver
+	// meets twice over: an unlisted source is 404, and a listed one without a
+	// matching signature is 401.
+	SelfAuthenticatedPaths []string
+	UnauthorizedHandler    func(http.ResponseWriter, *http.Request)
+	DelegationResolver     auth.DelegationResolver
 }
 
 // HTTPMiddleware wraps an HTTP handler with bearer-token verification.
@@ -33,10 +52,11 @@ func HTTPMiddleware(v *Verifier, opts MiddlewareOptions) func(http.Handler) http
 	}
 	logger := opts.Logger
 	publicPaths := normalizePublicPathSet(opts.PublicPaths)
+	selfAuthPaths := normalizeSelfAuthSet(opts.SelfAuthenticatedPaths)
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if shouldBypassAuth(r, publicPaths) {
+			if shouldBypassAuth(r, publicPaths) || isSelfAuthenticated(r, selfAuthPaths) {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -150,6 +170,78 @@ func shouldBypassAuth(r *http.Request, publicPaths map[string]struct{}) bool {
 		}
 	}
 	return false
+}
+
+// isSelfAuthenticated reports whether the request is one of the routes that
+// carries its own non-memQL credential, and is therefore exempt from bearer
+// verification on a verifier-consuming node.
+//
+// The matching rule is the entire security argument, so it is written out
+// rather than shared with shouldBypassAuth:
+//
+//   - an exact match, or
+//   - EXACTLY ONE further path segment under a trailing-slash entry.
+//
+// "/inbound/shopify" matches "/inbound/". "/inbound/shopify/anything" does
+// NOT, and neither does "/inbound/" itself -- an empty source is not a route.
+// That is what makes this safe where an open prefix walk is not: a route
+// mounted deeper later cannot inherit the exemption, so adding one stays an
+// explicit act rather than a silent consequence.
+func isSelfAuthenticated(r *http.Request, selfAuthPaths map[string]bool) bool {
+	if r == nil || r.URL == nil || len(selfAuthPaths) == 0 {
+		return false
+	}
+	path := normalizePath(r.URL.Path)
+	for allowed, isMount := range selfAuthPaths {
+		if allowed == "" || allowed == "/" {
+			continue
+		}
+		if !isMount {
+			// Declared without a trailing slash: an exact route, matched exactly.
+			if allowed == path {
+				return true
+			}
+			continue
+		}
+		// Declared WITH a trailing slash: a mount taking exactly one segment.
+		//
+		// The bare form is deliberately not a match. normalizePath strips the
+		// trailing slash, so "/inbound/" and the entry "/inbound/" both reduce
+		// to "/inbound" and an exact-match arm would admit a request naming no
+		// source at all. The handler 404s that, but the middleware should not
+		// be the layer that waves it through -- and a test asserting the bound
+		// would pass for the wrong reason.
+		if allowed == path {
+			continue
+		}
+		prefix := allowed + "/"
+		if !strings.HasPrefix(path, prefix) {
+			continue
+		}
+		// Exactly one further segment, and it must be non-empty.
+		if rest := path[len(prefix):]; rest != "" && !strings.Contains(rest, "/") {
+			return true
+		}
+	}
+	return false
+}
+
+// normalizeSelfAuthSet keeps what normalizePath throws away: whether an entry
+// was declared as a MOUNT (trailing slash, takes one segment) or as an exact
+// route. The distinction decides the matching rule, so it cannot be recovered
+// after normalization.
+func normalizeSelfAuthSet(paths []string) map[string]bool {
+	set := make(map[string]bool, len(paths))
+	for _, p := range paths {
+		isMount := strings.HasSuffix(strings.TrimSpace(p), "/")
+		if n := normalizePath(p); n != "" {
+			// A path declared both ways stays a mount: the wider of the two
+			// readings is still bounded to one segment, and silently dropping
+			// the mount form would gate a live route.
+			set[n] = set[n] || isMount
+		}
+	}
+	return set
 }
 
 func normalizePublicPathSet(paths []string) map[string]struct{} {

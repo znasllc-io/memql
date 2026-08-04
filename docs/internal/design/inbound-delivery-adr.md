@@ -94,28 +94,61 @@ via `updateInboundRequestStatus`.
 ### 3.2 At-least-once, and the idempotency key
 
 Every sender in scope retries, so redelivery is normal rather than
-exceptional. The row id is **derived** from `(source, dedupeKey)`:
+exceptional. The row id is **derived** from `(source, identityKey)`:
 
 ```
-id = "inb" + hex(sha256(source + NUL + dedupeKey))[:32]
+id          = "inb" + hex(sha256(source + NUL + identityKey))[:32]
+identityKey = hex(sha256(signed))            # signed = body,
+                                             #   or timestamp + "." + body
 ```
 
-`dedupeKey` is the sender's own idempotency header when one is configured
-(`MEMQL_INBOUND_SOURCE_<NAME>_DEDUPE_HEADER`), otherwise the SHA-256 of the
-body. A redelivery therefore renders the *same id*, and `@createOnly("status",
+`identityKey` is the digest of exactly what the HMAC covered, and **only** that.
+A redelivery therefore renders the *same id*, and `@createOnly("status",
 "processedAt", "lastError")` on `stageInboundRequest` preserves the product's
-handling state instead of resetting it to `received` and making the product work
-the event twice.
+handling state instead of resetting it to `received`.
+
+**Why not the sender's dedupe header.** It was, and that was a defect found in
+the landing review. The vendor signs the body -- and the timestamp where one is
+configured -- but it does not sign `..._DEDUPE_HEADER`, because that header is
+our configuration and not part of its scheme. Deriving identity from an unsigned
+header meant ONE captured, still-valid request minted unbounded distinct rows:
+the signature stays valid because the body is unchanged, while varying the
+header varies the id. No forged signature required.
+
+Folding the header in as a subordinate distinguisher does not fix it either --
+if it contributes to the id at all, varying it still varies the id. Any unsigned
+input in an identity is attacker-multipliable, so identity is signed material
+alone. The header is still recorded on the row; it simply does not decide the
+id. `component/inbound/identity_test.go` pins the attack and the three
+properties that make dropping it affordable.
+
+The cost is real and bounded: two deliveries whose signed bytes are identical
+now collapse onto one row. For a redelivery that is the wanted behaviour. For a
+sender legitimately emitting two distinct events with byte-identical payloads,
+`..._TIMESTAMP_HEADER` separates them -- and being signed, it cannot be forged.
 
 Deriving the id rather than looking up an existing row is deliberate: a
 read-then-write has a race between two replicas receiving the same redelivery,
 and the derived id has none.
 
 The composition must be **injective** or two distinct events collapse onto one
-row -- the memql#2980 class. It is, because neither part can forge the
-separator: a source name is matched against `^[a-z0-9][a-z0-9_-]{0,63}$`, and a
-sender-supplied dedupe key is rejected if it carries any control character. NUL
-appears in neither, so the split at the first NUL is unique.
+row -- the memql#2980 class. It is, and the argument is now simpler than it was:
+a source name is matched against `^[a-z0-9][a-z0-9_-]{0,63}$`, and `identityKey`
+is always a hex digest this receiver produced. Neither can contain NUL, so the
+split at the first NUL is unique and equal concatenations force equal parts.
+
+### 3.2.1 At-least-once means the EVENT fires again
+
+The row collapses; the event does not. Staging a redelivery is still a write,
+and a write publishes `node.created`, so a product automation triggering on it
+**fires again**. `@createOnly` prevents the status being reset -- it does not
+prevent the second firing.
+
+This is at-least-once delivery with a stable idempotency key, not exactly-once
+processing, and the operator doc says so in those words. Making it exactly-once
+would need the engine to publish conditionally on first insert, which is an
+engine-wide change to event semantics and out of scope here. The contract a
+product codes against is: branch on `status` before doing work.
 
 ### 3.3 What the response codes mean
 

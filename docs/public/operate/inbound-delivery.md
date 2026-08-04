@@ -106,11 +106,34 @@ The row also carries `contentType`, `dedupeKey`, `signatureVerified` and
 
 ## Redelivery
 
-Every sender in scope retries, so redelivery is normal. The row id is derived
-from `(source, dedupeKey)` -- the sender's key when one is configured,
-otherwise the SHA-256 of the body -- so a redelivery lands on the **same row**,
-and the mutation preserves your handling state rather than resetting it to
-`received`. You will not process the same event twice because it arrived twice.
+Every sender in scope retries, so redelivery is normal.
+
+The row id is derived from `(source, <digest of the signed payload>)` -- the
+body, or `timestamp + "." + body` where the source configures a timestamp
+header. So a redelivery lands on the **same row**, and the staging mutation
+preserves your handling state rather than resetting it to `received`.
+
+**The row collapses. The event does not.** Staging a redelivery is still a
+write, and a write still publishes `node.created`, so an automation triggering
+on that event **fires again**. What this gives you is at-least-once delivery
+with a stable idempotency key -- not exactly-once processing.
+
+That distinction is the contract, so write your automation to be idempotent
+against it. The row id is the key to be idempotent *with*: branch on `status`
+before doing work, and stamp it as you go, so a second firing is a no-op.
+
+Why identity is the signed digest rather than the sender's dedupe header: the
+vendor signs the body, not our header. A row id derived from that header could
+be varied freely by anyone replaying one captured delivery -- minting a row per
+value while the signature stayed valid. Identity therefore comes from signed
+material only. The sender's key is still recorded on the row for you to read;
+it just does not decide the id.
+
+The practical consequence: two deliveries whose **signed bytes are identical**
+collapse onto one row. For a redelivery that is exactly what you want. For a
+sender that legitimately emits two distinct events with byte-identical
+payloads, configure `..._TIMESTAMP_HEADER` -- the timestamp is part of the
+signed payload, so it separates them and cannot be forged.
 
 ## Reading the response codes
 
