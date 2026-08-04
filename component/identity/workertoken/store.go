@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/znasllc-io/memql/component/auth"
 	"log/slog"
 	"strings"
 	"time"
@@ -126,6 +127,21 @@ func (s *Store) ListForUser(ctx context.Context, userId string) ([]Row, error) {
 		return nil, errors.New("workertoken.Store: engine not wired")
 	}
 	q := fmt.Sprintf(`query workerTokensForUser(userId:%q)`, userId)
+
+	// workerTokensForUser is @serverOnly (memql#3063). It projects
+	// identityFull, so the row carries `credentials` -- keyHash,
+	// registeredBy, lastSeenAt, lastConnectedFromIP -- and its filter keys on
+	// a caller-supplied userId with no actor check, which is why it may not
+	// sit on the wire. The annotation is enforced against
+	// auth.CallOrigin, so this read has to say it is server-initiated.
+	//
+	// Stamped HERE, on a context used for this query and nothing else, rather
+	// than on the caller's: internal origin opens every @serverOnly construct
+	// for as long as the context lives, which is the escalation memql#2989
+	// refused. Confining it to the call is what keeps the blast radius one
+	// query wide. component/identity/pat does the same for the same reason.
+	ctx = auth.ContextWithInternalOrigin(ctx)
+
 	out := []Row{}
 	cursor := ""
 	// workerTokensForUser is `paginate 50` (5.2 / epic #1964), so a

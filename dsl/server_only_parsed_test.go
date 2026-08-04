@@ -207,6 +207,18 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "identity/queries.memql", Name: "nodeTokenIdentityByBinding"}: true,
 		{Path: "identity/queries.memql", Name: "nodeTokenIdentities"}:        true,
 		{Path: "identity/queries.memql", Name: "nodeTokenIdentityById"}:      true,
+		// memql#3063. The item memql#2987 deferred and then closed: same shape
+		// as the trio above -- caller-supplied id, no actor check, identityFull
+		// projecting `credentials` (keyHash, registeredBy, lastSeenAt,
+		// lastConnectedFromIP) -- so it was on the wire for any authenticated
+		// caller who guessed a userId. Narrowing the projection was not
+		// available (the Go parser reads the nested credentials struct and a
+		// shape keys paths by their terminal segment), and userId==actor.userId
+		// was not either (the revoke ownership check runs under
+		// contextWithSystemActor). Its only caller is
+		// component/identity/workertoken, allowlisted for the same reason
+		// component/identity/pat is.
+		{Path: "identity/queries.memql", Name: "workerTokensForUser"}: true,
 	}
 	for k := range want {
 		if !set[k] {

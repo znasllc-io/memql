@@ -4121,28 +4121,6 @@ func WorkerTokenByKeyHashBuild(args WorkerTokenByKeyHashArgs) string {
 	return b.String()
 }
 
-// WorkerTokensForUser -- List worker-token identities owned by a user.
-//
-// Bound concept: v1:identity:identity (machine-readable: BoundConcepts["workerTokensForUser"] in generated_concepts.go).
-type WorkerTokensForUserArgs struct {
-	UserId string
-}
-
-// WorkerTokensForUser calls the engine query workerTokensForUser.
-func (qc *QueryClient) WorkerTokensForUser(ctx context.Context, args WorkerTokensForUserArgs) (*Result, error) {
-	call := WorkerTokensForUserBuild(args)
-	return qc.executeNamed(ctx, "workerTokensForUser", call)
-}
-
-func WorkerTokensForUserBuild(args WorkerTokensForUserArgs) string {
-	var b strings.Builder
-	b.WriteString("query workerTokensForUser(")
-	b.WriteString("userId: ")
-	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	b.WriteString(")")
-	return b.String()
-}
-
 // WorkersForUser -- List all workers owned by a user.
 //
 // Bound concept: v1:worker:registration (machine-readable: BoundConcepts["workersForUser"] in generated_concepts.go).

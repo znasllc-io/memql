@@ -1533,23 +1533,47 @@ query identity workerTokenByKeyHash {
 // Arguments:
 //   userId (string, required) - v1:identity:user.id
 
-// `@public` marks this query as intentionally not caller-scoped.
-// Backs the per-user worker-token list (`/me/workers` and the
-// cockpit Workers tab). Same auth shape as the PAT list above
-// (web-layer authentication; userId is the authenticated
-// subject). Tightening tracked under #54.
-// AUDIT 2026-08-04 (memql#2987): re-audited, KEPT @public for now -- but see
-// the correction above: this is the WORST item in the deferred group, not a
-// peer of the other two, because it puts credentials on the wire behind a
-// caller-supplied id. memql#3063 is ranked accordingly (memql#3064 review).
-// Same group
-// and same unresolved decision as patIdentitiesForUser above -- see the note
-// there. One extra wrinkle specific to this one: component/identity/workertoken
-// is NOT in call_origin_conformance_test.go's internal-origin allowlist, so
-// @serverOnly would additionally require an allowlist entry and the argument
-// for it, which is a second decision on top of the first.
-/// List worker-token identities owned by a user.
-@public
+// AUDIT 2026-08-04 (memql#2987, closed by memql#3063): was @public, now
+// @serverOnly. This was the worst item in that audit's deferred group; it is
+// no longer deferred -- operator ruling during the memql#3064 landing.
+//
+// What was exposed: the filter keys on a CALLER-SUPPLIED userId with no check
+// that the caller is that user, and identityFull projects `credentials`, which
+// for the worker_token variant carries keyHash, registeredBy, lastSeenAt and
+// lastConnectedFromIP. So any authenticated caller could read another user's
+// worker-token digest and last-connect IP by passing their id. The keyHash is
+// a SHA-256 rather than the token, so not directly replayable -- but
+// lastConnectedFromIP is exactly the signal the audit queries in this same
+// file were gated to protect. That made it materially identical to
+// nodeTokenIdentityById, which memql#2987 GATED; it was deferred instead on a
+// shape claim that had not been checked.
+//
+// The note that used to sit here said @serverOnly "would additionally require
+// an allowlist entry and the argument for it, which is a second decision on
+// top of the first". The entry is added, and the argument is the one already
+// accepted for component/identity/pat: a credential store whose reads are
+// server-initiated by construction. component/identity/workertoken is the same
+// kind of package doing the same kind of work.
+/// List worker-token identities owned by a user. memql#3063.
+///
+/// Why actor.userId scoping is not the fix: the one caller that matters is the
+/// revoke ownership check in component/grpc/worker_token_handlers.go, and it
+/// runs under contextWithSystemActor -- so `userId==actor.userId` would compare
+/// against the SYSTEM actor and return zero rows for every real request. It
+/// already passes the caller's own id as the argument; the problem was never
+/// that the Go path was unscoped, it was that the query was reachable from the
+/// wire with any id at all.
+///
+/// Narrowing the projection instead is not available either: the shape is
+/// identityFull because the Go parser reads the nested `credentials` struct
+/// (name, keyHash, registeredBy, expiresAt, capabilities, labels), and a shape
+/// keys each projected path by its terminal segment -- so `credentials.keyHash`
+/// would flatten to `keyHash` and the reader would stop finding the struct.
+/// Dropping credentials outright removes registeredBy and expiresAt, which the
+/// same parser needs.
+///
+/// So the boundary is origin, as it is for the node_token trio this mirrors.
+@serverOnly
 query identity workerTokensForUser {
   args {
     userId  string!

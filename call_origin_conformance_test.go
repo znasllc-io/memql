@@ -90,15 +90,25 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 	// stamps client explicitly on the untrusted branch rather than passing the
 	// parent through.
 	allowed := map[string]string{
-		"app":                       "identity integration wiring at boot; no request in scope",
-		"component/auth":            "defines the stamp, and resolves an identity from claims before any actor exists",
-		"component/automations":     "trusted automation dispatch; the untrusted branch stamps CLIENT (memql#2879)",
-		"component/identity":        "identity store internals, server-initiated",
-		"component/identity/admin":  "admin HTTP handler -- REQUEST-DERIVED and the one exception here; its precondition (every route behind requireAdmin) is asserted by component/identity/admin/route_gate_test.go, memql#2934",
-		"component/identity/pat":    "personal-access-token store, server-initiated",
-		"component/memql":           "seed materialiser and authoring capability store, both boot-time",
-		"integrations/agent/worker": "worker store, server-initiated",
-		"integrations/dailyspace":   "scheduled space provisioning, no caller in scope",
+		"app":                      "identity integration wiring at boot; no request in scope",
+		"component/auth":           "defines the stamp, and resolves an identity from claims before any actor exists",
+		"component/automations":    "trusted automation dispatch; the untrusted branch stamps CLIENT (memql#2879)",
+		"component/identity":       "identity store internals, server-initiated",
+		"component/identity/admin": "admin HTTP handler -- REQUEST-DERIVED and the one exception here; its precondition (every route behind requireAdmin) is asserted by component/identity/admin/route_gate_test.go, memql#2934",
+		"component/identity/pat":   "personal-access-token store, server-initiated",
+		// Same kind of package doing the same kind of work as the pat entry
+		// above: a credential store whose reads are server-initiated by
+		// construction. Added when workerTokensForUser became @serverOnly
+		// (memql#3063) -- it projects identityFull, so the row carries
+		// keyHash and lastConnectedFromIP, and its filter keys on a
+		// caller-supplied userId with no actor check. The stamp is applied
+		// inside ListForUser on a context used for that one query, not on the
+		// caller's, so it cannot open other @serverOnly constructs for the
+		// remainder of a request (the memql#2989 escalation).
+		"component/identity/workertoken": "worker-token store, server-initiated",
+		"component/memql":                "seed materialiser and authoring capability store, both boot-time",
+		"integrations/agent/worker":      "worker store, server-initiated",
+		"integrations/dailyspace":        "scheduled space provisioning, no caller in scope",
 	}
 
 	// The wire path. These must never appear, allowlist or not: every handler
