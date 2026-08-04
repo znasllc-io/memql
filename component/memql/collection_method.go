@@ -416,7 +416,7 @@ func evalCollCond(node *FunctionCallExpression, args, locals map[string]any) (an
 		return nil, err
 	}
 	branch := 2
-	if isTruthy(condVal) {
+	if IsTruthy(condVal) {
 		branch = 1
 	}
 	return evalCollPositionalOperand(node, "cond", branch, args, locals)
@@ -648,23 +648,23 @@ func evalCollLogical(node *LogicalExpression, args, locals map[string]any) (any,
 	}
 	switch node.Op {
 	case LogicalAnd:
-		if !isTruthy(lhs) {
+		if !IsTruthy(lhs) {
 			return false, nil
 		}
 		rhs, err := evalCollScalar(node.Right, args, locals)
 		if err != nil {
 			return nil, err
 		}
-		return isTruthy(rhs), nil
+		return IsTruthy(rhs), nil
 	case LogicalOr:
-		if isTruthy(lhs) {
+		if IsTruthy(lhs) {
 			return true, nil
 		}
 		rhs, err := evalCollScalar(node.Right, args, locals)
 		if err != nil {
 			return nil, err
 		}
-		return isTruthy(rhs), nil
+		return IsTruthy(rhs), nil
 	default:
 		return nil, fmt.Errorf("unsupported logical operator %q inside a collection lambda", node.Op)
 	}
@@ -710,7 +710,7 @@ func evalCollectionMethod(node *CollectionMethodExpression, args, locals map[str
 			if err != nil {
 				return nil, err
 			}
-			if isTruthy(v) {
+			if IsTruthy(v) {
 				out = append(out, e)
 			}
 		}
@@ -738,7 +738,7 @@ func evalCollectionMethod(node *CollectionMethodExpression, args, locals map[str
 				if err != nil {
 					return nil, err
 				}
-				if isTruthy(v) {
+				if IsTruthy(v) {
 					return e, nil
 				}
 			}
@@ -763,7 +763,7 @@ func evalCollectionMethod(node *CollectionMethodExpression, args, locals map[str
 				if err != nil {
 					return nil, err
 				}
-				if isTruthy(v) {
+				if IsTruthy(v) {
 					match = append(match, e)
 				}
 			}
@@ -782,7 +782,7 @@ func evalCollectionMethod(node *CollectionMethodExpression, args, locals map[str
 				if err != nil {
 					return nil, err
 				}
-				if isTruthy(v) {
+				if IsTruthy(v) {
 					return true, nil
 				}
 			}
@@ -800,7 +800,7 @@ func evalCollectionMethod(node *CollectionMethodExpression, args, locals map[str
 			if err != nil {
 				return nil, err
 			}
-			if !isTruthy(v) {
+			if !IsTruthy(v) {
 				return false, nil
 			}
 		}
@@ -814,7 +814,7 @@ func evalCollectionMethod(node *CollectionMethodExpression, args, locals map[str
 				if err != nil {
 					return nil, err
 				}
-				if isTruthy(v) {
+				if IsTruthy(v) {
 					n++
 				}
 			}

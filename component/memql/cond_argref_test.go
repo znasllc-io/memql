@@ -144,15 +144,15 @@ func TestCond_ShortCircuitsTheUnchosenBranch(t *testing.T) {
 //
 // The first version of this test compared evalCollCond against
 // RuntimeEvaluator.EvaluateIf and asserted nothing: EvaluateIf is
-// `if isTruthy(cond) {...}` over the SAME package-level isTruthy that
-// evalCollCond calls, so both sides move together. Review proved it -- making
-// "" and 0 truthy left the comparison green while two other tests caught it.
+// `if IsTruthy(cond) {...}` over the SAME truthiness rule that evalCollCond
+// calls, so both sides move together. Review proved it -- making "" and 0
+// truthy left the comparison green while two other tests caught it.
 //
 // Its premise was wrong too. That comment claimed the multi-statement logic
 // body runs cond through EvaluateIf; EvaluateIf has no production callers at
-// all. The other evaluator is component/automations' evaluateCondLocally, over
-// that package's own separate isTruthy -- unexported and unreachable from
-// here, so the genuine cross-package divergence is filed rather than faked.
+// all. The other evaluator is component/automations' evaluateCondLocally,
+// which used to carry its own separate isTruthy -- the divergence memql#2963
+// measured and closed. Both now call memql.IsTruthy.
 func TestCond_TruthinessIsPinnedIndependently(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -166,26 +166,27 @@ func TestCond_TruthinessIsPinnedIndependently(t *testing.T) {
 		{"non-empty string is truthy", "nonempty", "yes"},
 		{"zero is falsy", 0, "no"},
 		{"one is truthy", 1, "yes"},
-		// Pinned deliberately: memql#2915 makes cond evaluate a
-		// caller-supplied predicate for the first time -- before, it errored
-		// -- so the STRING "false", which is what a JSON, HTTP or MCP caller
-		// sends for a boolean it stringified, now reaches this isTruthy and is
-		// truthy because it is non-empty. MEASURED through Execute: a logic
-		// body `return cond(args.allowed, "Y", "N")` given `allowed: "false"`
-		// returns "Y".
+		// These two rows used to expect "yes", recording that this path read
+		// any non-empty string as truthy while component/automations' copy did
+		// not. memql#2963 measured both ends and confirmed the divergence was
+		// real: the same `cond(args.allowed, "Y", "N")` returned "Y" here and
+		// "N" there -- for these two inputs and no others.
 		//
-		// So a gate written `return cond(args.allowed, true, false)` and handed
-		// the string "false" currently OPENS. Whether that is the right answer
-		// is memql#2963; this test only states what this path does.
+		// The ruling is that the STRICT rule is canonical, and there is now one
+		// implementation of it (memql.IsTruthy). The reason is that the
+		// divergence only ever mattered on a gate, and the permissive side is
+		// the one that fails OPEN: `return cond(args.allowed, true, false)`
+		// handed the string "false" -- exactly what a JSON, HTTP or MCP caller
+		// sends for a stringified boolean -- used to open it.
 		//
-		// Deliberately NOT asserting anything about the multi-statement path
-		// here. component/automations' evaluateCondPredicate takes the raw
-		// SOURCE TEXT of the predicate, not a resolved value, so its
-		// `case "false"` matches a literal `false` in source rather than an
-		// arg that resolves to "false" -- a different question that this
-		// harness cannot reach, since engineForSeamTest wires no LogicRunner.
-		{`the string "false" is truthy here -- see memql#2963`, "false", "yes"},
-		{`the string "0" is truthy here -- see memql#2963`, "0", "yes"},
+		// This test pins the single-statement half. The multi-statement half
+		// is pinned in component/automations by
+		// TestCondTruthinessMultiStatementPath, and
+		// TestCondTruthinessPathMatchesTheSharedRule there asserts that
+		// path's OUTPUT equals memql.IsTruthy's -- so the two cannot drift
+		// apart without a failure naming which side moved.
+		{`the string "false" is falsy -- the memql#2963 ruling`, "false", "no"},
+		{`the string "0" is falsy -- the memql#2963 ruling`, "0", "no"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			node := &FunctionCallExpression{Name: "cond", Args: map[string]any{

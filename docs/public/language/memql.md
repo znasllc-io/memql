@@ -193,7 +193,28 @@ The JSON Schema spellings are the ones people reach for, because that is what th
 
 `memqllint` rejects each of these by name in property position, at any nesting depth, and points at the right spelling — so it is caught before boot rather than at it.
 
-> **Inside `[]<type>` and `map[string]<type>` none of this applies.** The element type is not checked and not corrected — `[]boolean` and `[]frobnicate` both lint clean and build a field validating as `[]string`, and `[]datetime` emits a schema byte-identical to `[]string`. The wrong schema rejects conforming data as readily as it accepts wrong data, so a wrapped type does not mean what it says. Value-constraining annotations are inert there too. Measured case by case in memql#2951.
+**Inside `[]<type>` and `map[string]<type>` type checking applies too**, at any nesting depth (memql#2951). An element type goes through the same builder a property type does, so `[]boolean` is rejected with the same `did you mean "bool"?` correction, `[]datetime` carries `format: date-time` on every entry, and `[][]string` / `map[string][]int` keep their inner type instead of collapsing to the outer one.
+
+Annotations split by what they are *about*:
+
+| kind | annotations | on `[]T` / `map[string]T` |
+|---|---|---|
+| **value constraints** | `@pattern`, `@minLength`, `@maxLength`, `@minimum`, `@maximum`, `@variant` | apply to each **element** |
+| **field markers** | `@required` (and `!`), `@description`, `@default`, `@unique`, `@immutable`, `@secret`, `@pii`, `@internal`, `@serverSet` | apply to the **field**, unchanged |
+
+So `blocks []object @variant(discriminator="kind") { … }` validates every block against the union, and `tags []string @pattern("^[a-z]+$")` constrains every tag. `capabilities []string!` still means "the field is required", not "the elements are".
+
+> **The annotation table is ONE level deep.** Unlike type checking above, a value
+> constraint moves onto the immediate element only. On a *composite* element --
+> `[][]T`, `[]map[string]T`, `map[string][]T` -- it lands on the inner array or
+> map, where JSON Schema ignores it, so `[][]string @pattern(…)` accepts
+> `[["ZZZ"]]` and `[][]object @variant(…)` drops the union entirely. It fails
+> silently rather than loudly, which is the wrong direction; memql#3049 tracks
+> either recursing to the leaf or rejecting the declaration. No construct in the
+> tree hits this today. Type checking is unaffected -- `[][]frobnicate` is still
+> rejected at the inner level.
+
+> `@minLength` / `@maxLength` remain a **character** count on the element, not an element count. There is still no way to bound the length of an array itself.
 
 **Cross-concept references** are plain string fields holding the target's id (e.g. `spaceId string`), optionally paired with an `@relationship` annotation so the engine can traverse the edge.
 

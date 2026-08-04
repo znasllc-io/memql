@@ -254,7 +254,7 @@ func (e *RuntimeEvaluator) EvaluateCoalesce(args ...any) any {
 
 // EvaluateIf resolves an if(cond, then, else) expression.
 func (e *RuntimeEvaluator) EvaluateIf(cond, thenVal, elseVal any) any {
-	if isTruthy(cond) {
+	if IsTruthy(cond) {
 		return thenVal
 	}
 	return elseVal
@@ -398,7 +398,7 @@ func (e *RuntimeEvaluator) EvaluateContains(str, substr any) bool {
 // Returns true if all arguments are truthy.
 func (e *RuntimeEvaluator) EvaluateAnd(args ...any) bool {
 	for _, arg := range args {
-		if !isTruthy(arg) {
+		if !IsTruthy(arg) {
 			return false
 		}
 	}
@@ -409,7 +409,7 @@ func (e *RuntimeEvaluator) EvaluateAnd(args ...any) bool {
 // Returns true if any argument is truthy.
 func (e *RuntimeEvaluator) EvaluateOr(args ...any) bool {
 	for _, arg := range args {
-		if isTruthy(arg) {
+		if IsTruthy(arg) {
 			return true
 		}
 	}
@@ -419,7 +419,7 @@ func (e *RuntimeEvaluator) EvaluateOr(args ...any) bool {
 // EvaluateNot resolves a not(value) expression.
 // Returns the boolean negation.
 func (e *RuntimeEvaluator) EvaluateNot(value any) bool {
-	return !isTruthy(value)
+	return !IsTruthy(value)
 }
 
 // EvaluateEq resolves an eq(a, b) expression.
@@ -639,8 +639,39 @@ func parseISO8601Duration(s string) (time.Duration, error) {
 	return d, nil
 }
 
-// isTruthy determines if a value is truthy.
-func isTruthy(v any) bool {
+// IsTruthy is THE truthiness rule for the language: one implementation, used
+// by every path that has to decide whether a value counts as true (memql#2963).
+//
+// It used to be two. This package's copy read a string as truthy whenever it
+// was non-empty; component/automations' copy also excluded "false" and "0". The
+// same authored source therefore produced different answers depending on the
+// shape of the body it sat in -- measured through both paths with
+// `cond(args.allowed, "Y", "N")`:
+//
+//	input        single-statement   multi-statement
+//	"false"      "Y"                "N"     <- diverged
+//	"0"          "Y"                "N"     <- diverged
+//	nil "" false 0                  agreed (falsy)
+//	true 1 2.5 "true" "nonempty"    agreed (truthy)
+//
+// The STRICT rule is canonical, for two reasons that point the same way.
+//
+// The safety one: the divergence only ever appeared on a gate, and the
+// permissive rule is the one that fails OPEN. `return cond(args.allowed, true,
+// false)` handed the string "false" -- exactly what a JSON, HTTP or MCP caller
+// sends for a boolean it stringified -- opened the gate. When two
+// implementations disagree and one of them fails open, the closed one wins.
+//
+// The plain one: an author who writes `"false"` means false. Reading it as true
+// because the string is non-empty is a Go type-switch artifact, not a language
+// decision anyone made.
+//
+// The cost is stated rather than hidden: a string value of literally "false" or
+// "0" is now falsy everywhere this is consulted -- `.any()`, `.all()`, `&&`,
+// `||`, `!`, the mutation-template conditionals -- not only in cond. That is
+// the point of having one rule, and it is the direction that surprises fewer
+// people.
+func IsTruthy(v any) bool {
 	if v == nil {
 		return false
 	}
@@ -648,7 +679,7 @@ func isTruthy(v any) bool {
 	case bool:
 		return val
 	case string:
-		return val != ""
+		return val != "" && val != "false" && val != "0"
 	case int:
 		return val != 0
 	case int64:

@@ -526,6 +526,34 @@ Verified author-surface helpers (see `component/language/parser`):
 | `coalesce(a, b, ...)` | First non-null | `coalesce(args.name, "default")` |
 | `cond(pred, then, else)` | Conditional value | `cond(args.flag, "yes", "no")` |
 
+**What counts as true.** One rule, everywhere a value is used as a condition — `cond`, `&&`, `||`, `!`, `.any()`, `.all()` (memql#2963):
+
+| falsy | truthy |
+|---|---|
+| `null` / absent, `false`, `0`, `""` | `true`, any non-zero number, any other non-empty string |
+| the strings `"false"` and `"0"` | a non-empty list or object |
+
+The two string cases are called out because they are the ones that bite: a JSON, HTTP or MCP caller sends `"false"` for a boolean it stringified, and a gate written `cond(args.allowed, true, false)` has to read that as false. It does.
+
+**Anything the table does not name is true.** That is a deliberate fail-open on
+values the language has no opinion about, and three consequences are worth
+knowing before you lean on truthiness as a gate:
+
+- The string comparison is **exact**. `"FALSE"`, `"False"`, `" false"` and
+  `"0.0"` are all **true** — only `"false"` and `"0"` are falsy. Normalise a
+  stringified boolean before it reaches a condition rather than expecting this
+  rule to catch every spelling of it.
+- `0` and "a non-empty list or object" mean the shapes a decoded JSON document
+  actually produces. A number or collection that reached the engine as some
+  other Go kind falls into the catch-all and is read as **true even when it is
+  zero or empty**.
+- Anything else — a struct, a timestamp, a decoder-specific wrapper — is true.
+
+Where a condition is a **security** gate, prefer an explicit comparison —
+`cond(args.allowed == true, ...)`, `cond(role == "admin", ...)` — over relying
+on truthiness. Every `cond` in the shipped DSL uses an explicit comparison
+except two id-derivation branches, which are not gates.
+
 ### Strings and Ids
 
 | Function | Description | Example |

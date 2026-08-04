@@ -350,14 +350,67 @@ func scrubSourceForPayloadScan(s string) string {
 	for i < len(s) {
 		switch {
 		case s[i] == '"':
+			// Escape state is TRACKED, not inferred from the preceding byte
+			// (memql#2949). A one-byte lookback cannot tell an escaped quote
+			// from a quote that follows a COMPLETED `\\` escape, so a literal
+			// ending in a backslash pair read its own closing quote as escaped
+			// and consumed on to the next quote -- blanking source that was
+			// never inside a literal and failing the G5 scan OPEN.
+			//
+			// A literal MAY span lines, so this does NOT stop at a newline.
+			// The lexer's scanString (component/language/parser/lexer.go) has
+			// no newline case: it writes `\n` into the literal like any other
+			// byte, so `"one<NL>two"` is ONE valid string token. An earlier
+			// version of this arm stopped at `\n` on the belief that the
+			// grammar forbade multi-line literals; it does not, and that guard
+			// broke the gate in BOTH directions -- prose in a wrapped
+			// @description was scanned as code (false refusal), and the
+			// literal's real closing quote was re-read as an OPENING quote,
+			// blanking a genuine retired read after it (the very fail-open
+			// this function exists to prevent). memql#2949 review.
+			//
+			// An UNBALANCED quote -- no closing quote anywhere before EOF --
+			// still costs only its own line rather than the rest of the file,
+			// which is what memql#2949 asked for. Note the lexer refuses such
+			// source outright ("unterminated string"), so compileMemQL aborts
+			// before this scan ever runs; the fallback is belt-and-braces for
+			// callers that scan source the parser has not accepted.
+			//
+			// Newlines inside the consumed span are PRESERVED, exactly as the
+			// `/*` arm below does, so line accounting is unchanged.
 			j := i + 1
-			for j < len(s) && (s[j] != '"' || s[j-1] == '\\') {
+			escaped := false
+			closed := false
+			firstNL := -1
+			for j < len(s) {
+				c := s[j]
+				if c == '\n' && firstNL < 0 {
+					firstNL = j
+				}
 				j++
+				if escaped {
+					escaped = false
+					continue
+				}
+				if c == '\\' {
+					escaped = true
+					continue
+				}
+				if c == '"' {
+					closed = true
+					break // closing quote, consumed above
+				}
 			}
-			if j < len(s) {
-				j++
+			if !closed && firstNL >= 0 {
+				j = firstNL // unbalanced: stop at the newline, leave it to the default arm
 			}
-			out.WriteString(strings.Repeat(" ", j-i))
+			for k := i; k < j; k++ {
+				if s[k] == '\n' {
+					out.WriteByte('\n')
+				} else {
+					out.WriteByte(' ')
+				}
+			}
 			i = j
 		case strings.HasPrefix(s[i:], "//"):
 			j := strings.IndexByte(s[i:], '\n')
