@@ -356,6 +356,64 @@ concept thing {
 	}
 }
 
+// Inside a declaration body nothing is orphaned: the whole declaration is one
+// slice and the real parser sees every annotation in it. Reporting there is a
+// false alarm, and this lane is wired as an ERROR -- so the guard is the
+// difference between a clean build and a red one on a source that is fine.
+//
+// Gated on BraceDepthBefore over the blanked view, exactly as
+// ExtractDeclarationSlices gates its own headers.
+func TestOrphanedPreamblesIgnoresAnnotationsInsideADeclarationBody(t *testing.T) {
+	src := `builtin zzLive {
+  @description("d")
+  /* parked
+     b string
+  */
+  a string
+}
+`
+	// The premise: the slicer keeps the annotation INSIDE the declaration, so
+	// there is nothing detached to report.
+	slices := ExtractDeclarationSlices(src, builtinHeaderRe)
+	if len(slices) != 1 || !strings.Contains(slices[0].Source, "@description") {
+		t.Fatalf("premise gone -- the slicer no longer carries the inner annotation: %+v", slices)
+	}
+	if got := OrphanedPreambles(src); len(got) != 0 {
+		t.Errorf("annotations inside a declaration body are not orphaned; reporting them is the "+
+			"false alarm that gets an error-severity lane suppressed: %+v", got)
+	}
+}
+
+// A KNOWN GAP, pinned so it is recorded rather than rediscovered.
+//
+// `@description("d") /*` opens a block comment on a line that STARTS with `@`.
+// preambleStartOf keeps walking across that line, so the loader really does
+// orphan the run -- but the rule only considers a comment that opens its own
+// line, and reports nothing. Closing it means deciding whether an annotation
+// line that opens a comment terminates its own run, which is a judgement about
+// what the author meant rather than a lexing question; memql#2965 chose
+// reporting over guessing for exactly that reason.
+//
+// If this test ever fails because the count became 1, that is the gap being
+// closed deliberately -- update it rather than reverting.
+func TestOrphanedPreamblesDoesNotSeeATrailingCommentOpener(t *testing.T) {
+	src := `@executor("integration.x.y")
+@description("d") /* parked
+builtin zzParked { a string }
+*/
+builtin zzLive { b string }
+`
+	slices := ExtractDeclarationSlices(src, builtinHeaderRe)
+	if len(slices) != 1 || strings.Contains(slices[0].Source, "@executor") {
+		t.Fatalf("premise gone -- the loader no longer orphans this run: %+v", slices)
+	}
+	if got := OrphanedPreambles(src); len(got) != 0 {
+		t.Errorf("this shape is a documented gap, not a supported case. If it is now detected "+
+			"deliberately, update this test and the scope comment in orphaned_preamble.go "+
+			"together; got %+v", got)
+	}
+}
+
 // Multiple orphans in one file are each reported -- a file with two parked
 // declarations should not report only the first.
 func TestOrphanedPreamblesReportsEachOccurrence(t *testing.T) {

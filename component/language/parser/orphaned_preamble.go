@@ -99,6 +99,12 @@ func OrphanedPreambles(source string) []OrphanedPreamble {
 		off += len(line) + 1
 	}
 
+	// The comment-blanked view answers two questions without a second scan --
+	// "is there real code after this comment" and "how deep are the braces
+	// here". Blanking preserves byte offsets and total length, so an offset
+	// into source indexes the same place here.
+	blanked := BlankComments(source)
+
 	// Block-comment state per line, taken from the lexer's own view. inBlock[i]
 	// reports whether line i BEGINS inside a block comment; opens[i] whether a
 	// block comment opens the line; openEnd[i] is the offset just past the `*/`
@@ -113,22 +119,33 @@ func OrphanedPreambles(source string) []OrphanedPreamble {
 			continue
 		}
 		openLine := sort.SearchInts(lineStart, span.Start+1) - 1
-		// Only a comment that OPENS its line. A `/*` trailing real code does
-		// not end a preamble run, because that line is code rather than an
-		// annotation, and preambleStartOf would have stopped on it anyway.
+		for i := openLine + 1; i < len(lines) && lineStart[i] < span.End; i++ {
+			inBlock[i] = true
+		}
+		// Top-level comments only, counted on the blanked view exactly as
+		// ExtractDeclarationSlices gates its headers. Inside a declaration
+		// body nothing is orphaned -- the whole declaration is one slice and
+		// the real parser sees every annotation in it -- so reporting there is
+		// a false alarm, and this lane is wired as an error.
+		if BraceDepthBefore(blanked, span.Start) != 0 {
+			continue
+		}
+		// Only a comment that OPENS its line.
+		//
+		// A `/*` that TRAILS an annotation on the same line is a known gap,
+		// not an impossibility: `@description("d") /*` keeps the preamble walk
+		// going (the line starts with `@`), so the loader really does orphan
+		// the run, and this reports nothing. Closing it means deciding whether
+		// an annotation line that opens a comment ends its own run, which is a
+		// judgement about author intent rather than a lexing question -- the
+		// same reason memql#2965 chose reporting over reattachment. Pinned by
+		// TestOrphanedPreamblesDoesNotSeeATrailingCommentOpener so the limit is
+		// recorded rather than rediscovered.
 		if strings.TrimSpace(lines[openLine][:span.Start-lineStart[openLine]]) == "" {
 			opens[openLine] = true
 			openEnd[openLine] = span.End
 		}
-		for i := openLine + 1; i < len(lines) && lineStart[i] < span.End; i++ {
-			inBlock[i] = true
-		}
 	}
-
-	// The comment-blanked view answers "is there real code after this
-	// comment" without a second scan: blanking preserves byte offsets and
-	// total length, so an offset into source indexes the same place here.
-	blanked := BlankComments(source)
 
 	var out []OrphanedPreamble
 	for i := range lines {
