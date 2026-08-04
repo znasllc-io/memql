@@ -213,3 +213,75 @@ func TestRegistryFilesExistInThisRepo(t *testing.T) {
 		}
 	}
 }
+
+// TestReverseDriftCatchesAStaleNameShadowedByALongerOne is the second half of
+// memql#2971, found by the adversarial review of the first fix.
+//
+// Excluding the registry copies makes the threshold honest, but the match was
+// still `strings.Contains`, and 87 of the 299 real entries are proper
+// SUBSTRINGS of another entry -- every one of them a legacy alias whose own
+// manifest row says "DEPRECATED legacy alias for MEMQL_X; remove after
+// operators migrate". Deleting that alias row is precisely the edit this gate
+// exists to catch, and under a substring match the surviving longer name kept
+// the short one looking referenced forever.
+//
+// Measured on the real tree: removing one alias from
+// component/genesis/legacyalias.go left that name with zero genuine
+// references, and the substring build still reported `no drift`, exit 0. The
+// whole-word build reports it and exits 1.
+//
+// So this fixture is the shape that matters, and the ORDER of the two names is
+// the whole point: the stale one must be a strict prefix of the live one.
+func TestReverseDriftCatchesAStaleNameShadowedByALongerOne(t *testing.T) {
+	const (
+		stale = "MEMQL_FIXTURE_TOKEN"      // the legacy alias being retired
+		live  = "MEMQL_FIXTURE_TOKEN_FILE" // the survivor that contains it
+	)
+	if !strings.HasPrefix(live, stale) {
+		t.Fatalf("fixture is not the shadowing shape: %q must be a prefix of %q", stale, live)
+	}
+
+	root := newDriftFixture(t, []string{stale, live}, []string{live})
+
+	res, err := CheckDrift(root)
+	if err != nil {
+		t.Fatalf("CheckDrift: %v", err)
+	}
+	if len(res.Unregistered) != 0 {
+		t.Fatalf("forward drift reported %v; the fixture registers what it reads", res.Unregistered)
+	}
+	if len(res.Stale) != 1 || res.Stale[0] != stale {
+		t.Fatalf("reverse drift reported %v, want exactly [%s].\n"+
+			"An EMPTY result means the match is substring rather than whole-word: %q occurs in "+
+			"the corpus only inside %q, which is not a reference to it. That is memql#2971 "+
+			"surviving in the 87 entries that are substrings of another entry.",
+			res.Stale, stale, stale, live)
+	}
+}
+
+// The scanner's own source must not count as a reference.
+//
+// repoCorpus ingests .go files, and this package names env vars in comments
+// and in the `external` denylist. Without the cmd/envscan exclusion a var
+// mentioned in a comment HERE keeps itself out of Stale forever -- which
+// happened while writing the whole-word fix above, and is the defect wearing
+// the reviewer's clothes. scannable() already skips this directory on the read
+// side for the same reason; the corpus side now matches it.
+func TestReverseDriftIgnoresTheScannersOwnSource(t *testing.T) {
+	const stale = "MEMQL_FIXTURE_MENTIONED_IN_SCANNER"
+
+	root := newDriftFixture(t, []string{stale}, nil)
+	// A mention inside cmd/envscan, exactly as a doc-comment or denylist
+	// literal in this package would appear.
+	writeFixtureFile(t, root, "cmd/envscan/scan/notes.go",
+		"package scan\n\n// "+stale+" is named here in a comment.\n")
+
+	res, err := CheckDrift(root)
+	if err != nil {
+		t.Fatalf("CheckDrift: %v", err)
+	}
+	if len(res.Stale) != 1 || res.Stale[0] != stale {
+		t.Fatalf("reverse drift reported %v, want exactly [%s]: a mention inside cmd/envscan is "+
+			"the scanner talking about a var, not the repo using one", res.Stale, stale)
+	}
+}

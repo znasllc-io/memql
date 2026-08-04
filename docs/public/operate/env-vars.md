@@ -36,8 +36,24 @@ authored one and the embedded `component/genesis/manifest.yaml` snapshot),
 because an entry's own row is not a reference to it. Missing the second copy is
 what left the reverse direction unsatisfiable until memql#2971 — with both in
 the scan every name appeared at least twice, so the staleness threshold could
-never select. After editing the registry, regenerate the embedded snapshot with
+never select. A name also has to appear as a **whole word**: 87 entries are
+legacy aliases that are substrings of their `MEMQL_`-prefixed replacement, and a
+substring match kept each one looking referenced by the very name that replaced
+it. After editing the registry, regenerate the embedded snapshot with
 `make env-registry-sync`.
+
+Two limits worth knowing before you trust a green result:
+
+- **The scan reads `.go`, `.memql`, `.yaml`, `.yml` and `.env*` only.** A var
+  referenced solely from a `.md`, a `.sh`, the `Makefile`, a `Dockerfile`, or
+  TypeScript counts as **stale** and will red CI. Register it somewhere the scan
+  reads, or drop it. (No entry is in that position today.)
+- **It excludes a fixed list of registry copies**, not "any file that looks like
+  the registry". A third copy of the manifest added anywhere would give every
+  entry a self-reference again and silence the reverse direction, exactly as the
+  embedded snapshot did. The check hard-fails if a listed copy goes missing, but
+  it cannot see an unlisted one — so if you add a copy, add it to
+  `registryFiles` in `cmd/envscan/scan/scan.go`.
 
 ## TL;DR
 
