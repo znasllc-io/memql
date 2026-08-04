@@ -322,8 +322,29 @@ func (e *RuntimeEvaluator) EvaluateTrim(str any) string {
 
 // EvaluateHash resolves a hash(str) expression (SHA256).
 func (e *RuntimeEvaluator) EvaluateHash(str any) string {
+	// A nil/absent input hashes the EMPTY STRING rather than returning "",
+	// so hash() is fixed-width for every input on every path (memql#3009).
+	//
+	// Two reasons, and the first is a live correctness bug rather than tidiness:
+	//
+	//  1. Composite ids are now derived as hash(concat(hash(a), hash(b))) --
+	//     injective because a concatenation of 64-char digests has exactly one
+	//     decomposition. A zero-width part destroys that: (absent, X) and
+	//     (X, absent) concatenate to the same string and derive one id, which
+	//     is the aliasing memql#3009 exists to close, one layer down. The
+	//     reachable site is dsl/cognition/logic.memql, whose id parts are
+	//     event-payload fields that CAN be absent -- and logic evaluates
+	//     through here, not through the mutation-template evaluator.
+	//  2. The two evaluators disagreed. mutationTemplateEvaluator.evalHash
+	//     already normalises nil/missing to "" and returns 64 chars, so the
+	//     same authored `hash(x)` yielded different widths depending on which
+	//     construct it sat in. One rule for one builtin.
+	//
+	// Empty-in-empty-out is deliberately NOT the convention here, unlike
+	// canonicalId/shortId: those pass a value through, while hash is a digest
+	// and "no digest" is not a meaningful value to concatenate.
 	if str == nil {
-		return ""
+		str = ""
 	}
 	hash := sha256.Sum256([]byte(fmt.Sprintf("%v", str)))
 	return hex.EncodeToString(hash[:])

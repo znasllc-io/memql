@@ -2198,6 +2198,56 @@ func HistoricalPlanMetricsBuild(args HistoricalPlanMetricsArgs) string {
 	return b.String()
 }
 
+// InboundRequestByDedupeKey -- Idempotency lookup the inbound receiver runs before staging (memql#2957): at-least-once redelivery of the same event must collapse onto the existing row rather than stage a duplicate.
+//
+// Bound concept: v1:platform:inboundRequest (machine-readable: BoundConcepts["inboundRequestByDedupeKey"] in generated_concepts.go).
+type InboundRequestByDedupeKeyArgs struct {
+	Source    string
+	DedupeKey string
+}
+
+// InboundRequestByDedupeKey calls the engine query inboundRequestByDedupeKey.
+func (qc *QueryClient) InboundRequestByDedupeKey(ctx context.Context, args InboundRequestByDedupeKeyArgs) (*Result, error) {
+	call := InboundRequestByDedupeKeyBuild(args)
+	return qc.executeNamed(ctx, "inboundRequestByDedupeKey", call)
+}
+
+func InboundRequestByDedupeKeyBuild(args InboundRequestByDedupeKeyArgs) string {
+	var b strings.Builder
+	b.WriteString("query inboundRequestByDedupeKey(")
+	b.WriteString("source: ")
+	b.WriteString(fmt.Sprintf("%q", args.Source))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("dedupeKey: ")
+	b.WriteString(fmt.Sprintf("%q", args.DedupeKey))
+	b.WriteString(")")
+	return b.String()
+}
+
+// InboundRequestsByStatus -- Inbound requests in a given handling status, oldest first (memql#2957). Products drain 'received' through this when they prefer a sweep to the node.created automation; operators use it to audit what arrived. Bounded first page, same as the outbound counterpart.
+//
+// Bound concept: v1:platform:inboundRequest (machine-readable: BoundConcepts["inboundRequestsByStatus"] in generated_concepts.go).
+type InboundRequestsByStatusArgs struct {
+	Status string
+}
+
+// InboundRequestsByStatus calls the engine query inboundRequestsByStatus.
+func (qc *QueryClient) InboundRequestsByStatus(ctx context.Context, args InboundRequestsByStatusArgs) (*Result, error) {
+	call := InboundRequestsByStatusBuild(args)
+	return qc.executeNamed(ctx, "inboundRequestsByStatus", call)
+}
+
+func InboundRequestsByStatusBuild(args InboundRequestsByStatusArgs) string {
+	var b strings.Builder
+	b.WriteString("query inboundRequestsByStatus(")
+	b.WriteString("status: ")
+	b.WriteString(fmt.Sprintf("%q", args.Status))
+	b.WriteString(")")
+	return b.String()
+}
+
 // InvitationById -- Returns the invitation with the given id. Zero or one result.
 //
 // Bound concept: v1:identity:invitation (machine-readable: BoundConcepts["invitationById"] in generated_concepts.go).

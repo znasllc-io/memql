@@ -1140,16 +1140,26 @@ insert {
   ...
 }
 
-// Right -- canonicalId() collapses both forms to the same string. The
-// second argument is the imported concept short-name (resolved against
-// the file-top `use ...concepts.{ space, user }` imports).
+// Right -- canonicalId() collapses both forms to the same string, AND
+// each part is hashed before concatenation so the composite cannot
+// alias. The second argument is the imported concept short-name
+// (resolved against the file-top `use ...concepts.{ space, user }`
+// imports).
 insert {
   id: hash(concat(
-    canonicalId(args.spaceId, space), ":",
-    canonicalId(args.userId,  user)
+    hash(canonicalId(args.spaceId, space)),
+    hash(canonicalId(args.userId,  user))
   ))
   ...
 }
+
+// Wrong -- joining with a separator first. `hash(concat(a, ":", b))`
+// ALIASES whenever a part can contain the separator: ("chat", "k:1")
+// and ("chat:k", "1") derive one id, so two distinct rows collapse into
+// one. A canonicalId() part happens to be safe today only because its
+// fixed `v1:ns:concept:` prefix makes the split recoverable -- that is a
+// property of the data shape, not a constraint, and it stops holding the
+// moment a part is caller-supplied (memql#3009).
 ```
 
 (Don't prefix the hash with the concept name -- `id:
@@ -1324,6 +1334,50 @@ memql#2980 took the constraint because it needed no migration. That is a
 statement about what shipped, not a ruling that construction is the
 wrong answer: how much an id migration costs depends on how many rows
 exist, which is a question about the deployment rather than the code.
+
+**memql#3009 took the other side of that trade, and the split between
+them is the useful rule.** Reach for the constraint when the trailing
+part is drawn from a **known set** — a `nodeType`, an enum — where
+forbidding a character costs the caller nothing. Reach for construction
+when it is not:
+
+```memql
+id: concat("utt-", hash(concat(
+  hash(args.partitionId),
+  hash(canonicalId(args.participantId, participant)),
+  hash(args.action.type),
+  hash(args.action.idempotencyKey)
+)))
+```
+
+`hash()` is sha256-hex, so every part renders to exactly 64 characters
+and the concatenation has exactly one decomposition. No separator, no
+constraint on what a caller may send, injective by construction.
+
+`sendActionUtterance` needed it because the constraint was **both
+unavailable and wrong**. Unavailable: `action` is declared `object!`, so
+`type` and `idempotencyKey` are nested in an unstructured object and
+`validateArgsField` only matches `patternRegex` on *declared* fields —
+there is nowhere to hang the annotation and nothing would enforce it.
+Wrong: `idempotencyKey` is a caller-chosen opaque string, so banning a
+colon rejects `"order:123"` to work around an internal encoding choice.
+**Do not push the engine's hashing problem into the caller's key space.**
+
+Construction is also the only answer when a part is engine-derived but
+separator-bearing. `hash(concat(args.nodeType, ":", now))` aliased with
+no caller involvement at all, because an RFC3339 timestamp always
+carries colons.
+
+**Where the tree stands.** Every composite id derivation in
+`dsl/cognition/` and `dsl/cluster/` uses construction (memql#3009); the
+two in `dsl/deployment/` use the constraint (memql#2980). Both are
+gated — `TestConvertedIdDerivationsKeepPerPartHashing` and
+`TestCompositeHashedIdTrailingPartRejectsTheSeparator` — and **both
+gates check by path, not by shape**. A new file adopting the separator
+form trips neither. The tree-wide shape detector (find every
+`id: hash(concat(...))`, require its parts constrained or digested) is
+the durable answer, has its own false-positive design problem, and is
+not built.
 
 `@pattern` on an args field is genuinely enforced, unlike some of the
 concept-field annotations: it is compiled at load (`convertArgsField`),

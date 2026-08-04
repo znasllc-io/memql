@@ -93,7 +93,13 @@ mutate node createNode {
     region        string
   }
   insert {
-    id: args.id ?? concat("node-", hash(concat(args.nodeType, ":", now)))
+    // Per-part hashing, no separator (memql#3009). The old form was
+    // `hash(concat(args.nodeType, ":", now))`: a caller-supplied leading part
+    // with no constraint, and an RFC3339 `now` trailing part that ALWAYS
+    // carries colons -- so ("bff", "2026-01-01T00:00:00Z") and
+    // ("bff:2026-01-01T00", "00:00Z") derived one node id. Fixed-width sha256
+    // digests concatenate unambiguously, so there is nothing to alias on.
+    id: args.id ?? concat("node-", hash(concat(hash(args.nodeType), hash(now))))
     args.nodeType
     address: args.address ?? ""
     parentId: ""

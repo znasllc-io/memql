@@ -251,7 +251,8 @@ func builtins() []Builtin {
 			Signature: `canonicalId(value, concept)`,
 			Doc: "Normalize an id-shaped value to canonical form (`<partition>:<concept>:<bareSlug>`).\n\n" +
 				"Use in mutation id derivations that hash foreign-key args, so the derived id stays stable whether the caller passes a bare slug or an already-canonical id.\n\n" +
-				"Example: `id = concat(\"participant-\", hash(concat(canonicalId(args.partitionId, space), \":\", canonicalId(args.userId, user))))`\n\n" +
+				"Example: `id = concat(\"participant-\", hash(concat(hash(canonicalId(args.partitionId, space)), hash(canonicalId(args.userId, user)))))`\n\n" +
+				"Hash each part, then concatenate the digests -- do NOT join the parts with a separator first. `hash(concat(a, \":\", b))` ALIASES: a colon inside a part makes two different tuples derive one id (`(\"chat\", \"k:1\")` and `(\"chat:k\", \"1\")`). Fixed-width digests have exactly one decomposition, so this is injective by construction rather than by a constraint on what a caller may send (memql#3009).\n\n" +
 				"The second argument is a concept short-name -- resolved against the file-top `use ...concepts.{ ... }` imports, or ambient when the concept lives in the file's own domain (#2617: same-domain constructs need no import); the stringly-typed `\"v1:ns:name\"` literal is retired. The engine reads the named concept's @scope to pick the right partition prefix (`_system` for global, otherwise the request envelope's partition). Errors when the concept name isn't imported / registered or when the value is already canonical for a different concept (catches type-tag typos).",
 			Params: []BuiltinParam{
 				{Name: "value", Doc: "Id-shaped value (bare slug or canonical). Empty input returns empty."},
