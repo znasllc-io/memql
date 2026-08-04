@@ -953,8 +953,21 @@ query magicLinkRequest magicLinkRequestByTokenHash {
 // The debt is real: the filter keys on a caller-supplied userId with no check
 // that the caller IS that user, so any authenticated client can enumerate
 // another user's PAT metadata (patSummary -- no credential material, but names,
-// creation and last-used times). Same shape on workerTokensForUser and
-// badgesForUser.
+// creation and last-used times).
+//
+// The other two in the group are NOT the same shape, and saying so was wrong
+// (corrected in the memql#3064 review, where the claim was checked rather than
+// carried forward):
+//
+//   - badgesForUser projects identitySummary, which omits credentials. Same
+//     shape as this one in the sense that matters.
+//   - workerTokensForUser projects **identityFull**, which DOES project
+//     `credentials` -- and for the worker_token variant that object carries
+//     keyHash, registeredBy, lastSeenAt and lastConnectedFromIP. So that query
+//     is materially identical to nodeTokenIdentityById, which this same audit
+//     GATED: caller-supplied id, no actor check, credentials on the wire. It is
+//     the worst item in this deferred group rather than a peer of the other
+//     two, and memql#3063 is ranked accordingly.
 //
 // The obviously-right filter is `userId==actor.userId` ("your own
 // credentials"). It is not a one-line change: the Go caller
@@ -1505,7 +1518,17 @@ query identity workerTokenByKeyHash {
 //
 // Lists every worker_token identity owned by the user. Backs the
 // admin / per-user device list used to surface "who minted what
-// token, when, with which scope" without exposing the keyHash.
+// token, when, with which scope".
+//
+// CORRECTION (memql#3064 review): this block used to end "without exposing the
+// keyHash". That was false and had been for as long as the shape was
+// identityFull -- identityFull projects `credentials`, and the worker_token
+// variant of that object carries keyHash, registeredBy, lastSeenAt and
+// lastConnectedFromIP. The keyHash is a SHA-256 digest rather than the token
+// itself, but it is credential material and lastConnectedFromIP is exactly the
+// class of signal the audit queries in this same file were gated to protect.
+// Recorded here rather than only in the tracker because the sentence that was
+// wrong lived here, and someone reading the query is the person it misled.
 //
 // Arguments:
 //   userId (string, required) - v1:identity:user.id
@@ -1515,7 +1538,11 @@ query identity workerTokenByKeyHash {
 // cockpit Workers tab). Same auth shape as the PAT list above
 // (web-layer authentication; userId is the authenticated
 // subject). Tightening tracked under #54.
-// AUDIT 2026-08-04 (memql#2987): re-audited, KEPT @public for now. Same group
+// AUDIT 2026-08-04 (memql#2987): re-audited, KEPT @public for now -- but see
+// the correction above: this is the WORST item in the deferred group, not a
+// peer of the other two, because it puts credentials on the wire behind a
+// caller-supplied id. memql#3063 is ranked accordingly (memql#3064 review).
+// Same group
 // and same unresolved decision as patIdentitiesForUser above -- see the note
 // there. One extra wrinkle specific to this one: component/identity/workertoken
 // is NOT in call_origin_conformance_test.go's internal-origin allowlist, so
@@ -1722,7 +1749,7 @@ query identity nodeTokenIdentities {
 // AUDIT 2026-08-04 (memql#2987): was @public, now @serverOnly. Third of the
 // node-token trio, same reasoning -- identityFull projects `credentials` and
 // the filter keys on a caller-supplied id. Its only caller is
-// GetNodeTokenIdentityById in component/identity/store.go (the /admin/tokens
+// LookupNodeTokenIdentityById in component/identity/store.go (the /admin/tokens
 // revoke flow), which now runs under an internal origin.
 /// Lookup a single node_token identity row by id (bare shortId; the signature-bound filter resolves
 /// it server-side). Drives the admin revoke path. memql#350.

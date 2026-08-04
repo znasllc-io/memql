@@ -190,3 +190,98 @@ func TestAdminGateCompositionRules(t *testing.T) {
 		})
 	}
 }
+
+// TestNamedQueriesKeepTheirAdminGate pins, BY NAME, the queries whose only
+// caller-scope protection is an admin gate in the filter.
+//
+// TestAdminGateIsATopLevelConjunct above checks the SHAPE of every gate it
+// finds -- that a gate present is a gate that holds. It cannot check that a
+// gate is present at all, so deleting one is invisible to it: the query simply
+// stops being one of the clauses it inspects.
+//
+// Measured during the memql#3064 review: dropping `&& requiresOwnerOrAdmin`
+// from BOTH audit queries left the entire dsl suite green. Nothing else
+// reaches them either -- `grep auditEventsByActor dsl/*_test.go` was empty,
+// and dsl/conformance_test.go's classifier accepts the remaining
+// `actorUserId==args.userId` as caller-scoped even though `args.userId` is
+// caller-supplied (its own note at the caller-arg regex says `args.userId` is
+// deliberately excluded from the `actor.userId` match). So memql#2987 gated
+// five queries and pinned three of them; these are the other two.
+//
+// These project actorEmail, targetEmail, sourceIP and userAgent. An ungated
+// filter keyed on a caller-supplied userId hands that to anyone who guesses an
+// id, which is the disclosure memql#2987 exists to close.
+func TestNamedQueriesKeepTheirAdminGate(t *testing.T) {
+	// path -> query name. Add a row when a query's caller-scope protection is
+	// an admin gate rather than an actor-keyed filter or @serverOnly.
+	want := map[string]map[string]bool{
+		"identity/queries.memql": {
+			"auditEventsByActor":  true,
+			"auditEventsByTarget": true,
+		},
+	}
+
+	found := map[string]map[string]bool{}
+	tree := Tree()
+	paths, err := dslfs.WalkMemqlFiles(tree)
+	if err != nil {
+		t.Fatalf("WalkMemqlFiles: %v", err)
+	}
+	for _, p := range paths {
+		names, ok := want[p]
+		if !ok {
+			continue
+		}
+		f, openErr := tree.Open(p)
+		if openErr != nil {
+			t.Fatalf("open %s: %v", p, openErr)
+		}
+		raw, readErr := io.ReadAll(f)
+		f.Close()
+		if readErr != nil {
+			t.Fatalf("read %s: %v", p, readErr)
+		}
+		src := string(raw)
+
+		for _, m := range constructHeaderRe.FindAllStringSubmatchIndex(src, -1) {
+			name := src[m[4]:m[5]]
+			if !names[name] {
+				continue
+			}
+			closeIdx := matchingClose(src, m[1]-1)
+			if closeIdx < 0 {
+				t.Errorf("%s: %s has no closing brace", p, name)
+				continue
+			}
+			if found[p] == nil {
+				found[p] = map[string]bool{}
+			}
+			found[p][name] = true
+
+			clause := filterClauseOf(src[m[1]:closeIdx])
+			if !mentionsAdminGate(clause) {
+				lineNo := strings.Count(src[:m[0]], "\n") + 1
+				t.Errorf("%s:%d  %s: the admin gate is GONE from this query's filter.\n"+
+					"    filter  %s\n"+
+					"It projects caller PII (actorEmail / targetEmail / sourceIP / userAgent) and "+
+					"its filter keys on a CALLER-SUPPLIED userId, so without the gate anyone who "+
+					"guesses an id reads another user's audit trail. If this query is now protected "+
+					"some other way -- @serverOnly, or an actor-keyed filter -- move it out of this "+
+					"table and say which in the same change (memql#2987, memql#3064).",
+					p, lineNo, name, clause)
+			}
+		}
+	}
+
+	// Anti-vacuity: a renamed or deleted query must fail loudly rather than
+	// silently dropping out of the sweep, which is how a by-name pin rots.
+	for p, names := range want {
+		for name := range names {
+			if !found[p][name] {
+				t.Errorf("%s: %s was not found in the tree. If it was renamed or removed, update "+
+					"this table in the same change -- an entry that matches nothing protects "+
+					"nothing and this test would otherwise pass vacuously.", p, name)
+			}
+		}
+	}
+}
