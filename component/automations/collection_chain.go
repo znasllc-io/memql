@@ -162,7 +162,7 @@ func (e *Evaluator) EvaluateForEachFilter(filter string) (bool, error) {
 		if val, handled, err := tryEvaluateCollectionChainLocally(filter, e); err != nil {
 			return false, err
 		} else if handled {
-			return isTruthy(val), nil
+			return memql.IsTruthy(val), nil
 		}
 	}
 	return e.EvaluateCondition(filter)

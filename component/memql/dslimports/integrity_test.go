@@ -780,6 +780,15 @@ func TestVerifyReferentialIntegrity_RealDSLTree(t *testing.T) {
 	if errs := tree.VerifyAllSymbolReferences(); len(errs) != 0 {
 		t.Errorf("engine dsl/ tree has %d legacy symbol-ref findings:\n%s", len(errs), joinErrs(errs))
 	}
+	// memql#2965's lane belongs beside its two siblings for the same reason
+	// they are here: it is wired into memqllint as an ERROR, and that severity
+	// is only defensible while the in-tree corpus is clean. Without this line
+	// the corpus is defended by the `dsl lint` CI step alone, so `go test ./...`
+	// could stay green while `dsl/` went red -- and the shape is one blank line
+	// away from every file carrying a `@version` header above a banner comment.
+	if errs := tree.VerifyPreambleAttachment(); len(errs) != 0 {
+		t.Errorf("engine dsl/ tree has %d orphaned-preamble findings:\n%s", len(errs), joinErrs(errs))
+	}
 }
 
 // TestSignatureConceptRegexMatchesBootLoader locks the lint-side signature

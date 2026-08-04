@@ -41,11 +41,21 @@ order. None of the three core services adds a fifth.
 
 Two facts up front, because they shape the conclusion:
 
-- **There is no `RegisterConceptOwnership`.** A whole-repo
-  `grep -rni 'RegisterConceptOwnership' --include='*.go'` returns
-  nothing. Which node owns a concept's work is decided entirely by
-  **routing rules** (mechanism 3) plus which binary's build tags
+- **There is no `RegisterConceptOwnership`.** Nothing in the repo
+  declares it, as a function or as a method:
+  `grep -rnE '^func (\([^)]*\) )?RegisterConceptOwnership' --include='*.go'`
+  returns nothing. Which node owns a concept's work is decided entirely
+  by **routing rules** (mechanism 3) plus which binary's build tags
   compile the subscriber.
+
+  The command is narrowed to *declarations* on purpose. A bare
+  `grep -rni 'RegisterConceptOwnership' --include='*.go'` returned
+  nothing when this was written, but `docs_go_extension_points_test.go`
+  now names the symbol in its retired allowlist, so the bare form
+  returns hits -- and a reader running it would conclude the primitive
+  exists. That is the exact inversion of the confusion the gate was
+  built to prevent (memql#2967), so the doc has to hand over a command
+  that stays true.
 
   It is not a primitive that was never built: it existed, and was
   deleted with `component/node/query_proxy.go` in `ac3a751e`

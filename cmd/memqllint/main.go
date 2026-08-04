@@ -155,6 +155,10 @@ func run(args []string) int {
 	if tree != nil {
 		integrityErrs = append(integrityErrs, tree.VerifyReferentialIntegrity()...)
 		integrityErrs = append(integrityErrs, tree.VerifyAllSymbolReferences()...)
+		// memql#2965: an @-preamble a block comment separates from the
+		// declaration below it. Raw-source lane -- by the time a file is an AST
+		// the annotations are already gone, which is the defect.
+		integrityErrs = append(integrityErrs, tree.VerifyPreambleAttachment()...)
 	}
 
 	// Engine-parity pass (#2520): dslimports models parse + import-graph

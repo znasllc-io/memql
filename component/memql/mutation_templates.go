@@ -759,7 +759,7 @@ func (e *mutationTemplateEvaluator) evalParserExpression(ctx context.Context, ex
 				// corner; not observable here, since evalStringMaybe maps
 				// nil and missingValue{} alike to "" for these slots.)
 				// The normalisation matters because
-				// isTruthy(missingValue{}) is TRUE, so leaking the
+				// IsTruthy(missingValue{}) is TRUE, so leaking the
 				// sentinel would make an all-missing coalesce read as
 				// truthy inside And/Or/Not.
 				if isMissing(ev) {
@@ -781,7 +781,7 @@ func (e *mutationTemplateEvaluator) evalParserExpression(ctx context.Context, ex
 		if err != nil {
 			return nil, err
 		}
-		if cond != nil && !isMissing(cond) && isTruthy(cond) {
+		if cond != nil && !isMissing(cond) && IsTruthy(cond) {
 			return e.evalParserExpression(ctx, t.Then)
 		}
 		return e.evalParserExpression(ctx, t.Else)
@@ -791,7 +791,7 @@ func (e *mutationTemplateEvaluator) evalParserExpression(ctx context.Context, ex
 			if err != nil {
 				return nil, err
 			}
-			if !isTruthy(ev) {
+			if !IsTruthy(ev) {
 				return false, nil
 			}
 		}
@@ -802,7 +802,7 @@ func (e *mutationTemplateEvaluator) evalParserExpression(ctx context.Context, ex
 			if err != nil {
 				return nil, err
 			}
-			if isTruthy(ev) {
+			if IsTruthy(ev) {
 				return true, nil
 			}
 		}
@@ -812,7 +812,7 @@ func (e *mutationTemplateEvaluator) evalParserExpression(ctx context.Context, ex
 		if err != nil {
 			return nil, err
 		}
-		return !isTruthy(ev), nil
+		return !IsTruthy(ev), nil
 	case *languageParser.BinaryComparisonExpr:
 		// The one comparison shape the builtin-arg grammar emits since
 		// memql#2654 (relationals before it, ==/!= joined by the
@@ -1261,7 +1261,15 @@ func (e *mutationTemplateEvaluator) evalCondition(ctx context.Context, raw strin
 		}
 		return fmt.Sprintf("%v", left) != fmt.Sprintf("%v", right), nil
 	}
-	// Fallback: evaluate expression and treat truthy strings/bools.
+	// Fallback: evaluate the expression and read it under THE truthiness
+	// rule -- IsTruthy, the one canonical implementation (memql#2963).
+	//
+	// This arm used to carry a rule of its own, and it disagreed on four
+	// inputs: with no numeric, slice or map case, everything non-bool and
+	// non-string fell to `ev != nil`, so 0 / [] / {} read TRUE here and
+	// FALSE under IsTruthy; and it TrimSpace'd, so "   " read FALSE here
+	// and TRUE under IsTruthy. That mattered because this is the arm a
+	// bare-predicate cond() in a mutation template reaches.
 	ev, err := e.evalString(ctx, raw)
 	if err != nil {
 		return false, err
@@ -1269,14 +1277,7 @@ func (e *mutationTemplateEvaluator) evalCondition(ctx context.Context, raw strin
 	if isMissing(ev) {
 		return false, nil
 	}
-	switch v := ev.(type) {
-	case bool:
-		return v, nil
-	case string:
-		return strings.TrimSpace(v) != "" && v != "0" && v != "false", nil
-	default:
-		return ev != nil, nil
-	}
+	return IsTruthy(ev), nil
 }
 
 // mutationMergeFields extracts the @mergeFields("a", "b") annotation

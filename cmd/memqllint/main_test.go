@@ -328,3 +328,53 @@ concept shadowed {
 		}
 	})
 }
+
+// The orphaned-preamble lane (memql#2965) must reach the CLI's exit code.
+//
+// This exists because the lane's own unit tests call Tree.VerifyPreambleAttachment
+// directly, so deleting the one line in run() that calls it left the ENTIRE repo
+// green -- measured during the memql#3041 review. A correct rule that nothing
+// invokes is the same silent-absence shape memql#2965 is itself an instance of,
+// which makes the wiring worth a test of its own rather than an assumption.
+func TestRun_OrphanedPreambleFindingExitsOne(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"demo/concepts.memql": testConcepts,
+		// The @public is orphaned by the block comment: the loader registers
+		// queryItems WITHOUT it, and nothing else in the toolchain says so.
+		"demo/queries.memql": `use demo.concepts.{ item }
+
+@public
+@description("intentionally caller-scope-free")
+/*
+@enabled
+query item queryParked {
+  args {
+    name  string  @required
+  }
+  filter  name == args.name
+}
+*/
+@enabled
+query item queryItems {
+  args {
+    name  string  @required
+  }
+  filter  name == args.name
+}`,
+	})
+
+	code, out := captureRun(t, []string{root})
+	if code != 1 {
+		t.Fatalf("an orphaned preamble must fail the lint; run() = %d, want 1; output:\n%s", code, out)
+	}
+	if !strings.Contains(out, "attached to nothing") {
+		t.Errorf("the report must carry the orphaned-preamble diagnostic; output:\n%s", out)
+	}
+	if !strings.Contains(out, "@public") {
+		t.Errorf("the report must quote what was orphaned, or the author cannot tell what was "+
+			"lost; output:\n%s", out)
+	}
+	if !strings.Contains(out, "demo/queries.memql") {
+		t.Errorf("the report must name the file; output:\n%s", out)
+	}
+}

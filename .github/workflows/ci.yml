@@ -56,6 +56,7 @@ jobs:
       contents: read
       pull-requests: read
     outputs:
+      gates: ${{ steps.filter.outputs.gates }}
       go: ${{ steps.filter.outputs.go }}
       dsl: ${{ steps.filter.outputs.dsl }}
       sdkts: ${{ steps.filter.outputs.sdkts }}
@@ -74,6 +75,46 @@ jobs:
             ci:
               - '.github/workflows/**'
               - 'Makefile'
+            # Non-Go files that are INPUTS to a Go-hosted gate (memql#2972).
+            #
+            # Kept separate from `go` on purpose: "this is Go source" and "this
+            # is something a Go gate reads" are different claims, and collapsing
+            # them makes the filter unreadable at exactly the point where a
+            # future narrowing needs to be obvious.
+            #
+            # Without this bucket a PR touching only these files matched NO
+            # bucket, every lane skipped, and `ci-required` reported success
+            # over a diff nothing verified -- while the gate that would have
+            # caught it sat in the skipped `go test` step. Measured at the time:
+            # 383 of 2936 tracked files matched no filter, and 18 of the last
+            # 400 non-merge commits had a whole diff in that set.
+            #
+            # Each entry below is a file some Go test actually READS:
+            #   *.md                          -> the docs gates in the root
+            #                                    package (construct names,
+            #                                    retired keywords, deleted Go
+            #                                    extension points, product
+            #                                    neutrality, lifecycle docs).
+            #                                    Repo-wide, NOT docs/** -- they
+            #                                    sweep `git ls-files`, and
+            #                                    CLAUDE.md is the file two of
+            #                                    them name as the sharp edge.
+            #   *.memql outside dsl/          -> docs_construct_names_test.go
+            #                                    and the referencepack tests.
+            #                                    `dsl/**` already has a bucket.
+            #   the two manifest copies       -> TestEmbeddedManifestInSync and
+            #                                    cmd/envscan's registry.
+            #   architecture/embedded/**      -> TestArchitectureModelIsNotStale.
+            #   scripts/**                    -> the capability-script contract
+            #                                    test, help.sh, seed-secrets.sh
+            #                                    and release.sh guards.
+            gates:
+              - '**/*.md'
+              - '**/*.memql'
+              - 'scripts/secrets/manifest.yaml'
+              - 'component/genesis/manifest.yaml'
+              - 'component/architecture/embedded/**'
+              - 'scripts/**'
             # Any Go source or the module graph. Voice + generator + sdk/go
             # are Go too, so they are a subset of this.
             go:
@@ -122,18 +163,67 @@ jobs:
   go-checks:
     name: go-checks
     needs: changes
-    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' || needs.changes.outputs.dsl == 'true' || needs.changes.outputs.proto == 'true' }}
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' || needs.changes.outputs.dsl == 'true' || needs.changes.outputs.proto == 'true' || needs.changes.outputs.gates == 'true' }}
     runs-on: ubuntu-latest
     env:
       RUN_GO: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' }}
       RUN_DSL: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' || needs.changes.outputs.dsl == 'true' }}
       RUN_PROTO: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' || needs.changes.outputs.proto == 'true' }}
+      # Only when the FULL suite is not already running. `go test ./...` under
+      # RUN_GO covers every gate package, so firing both would just run them
+      # twice (memql#2972).
+      RUN_GATES: ${{ github.event_name == 'pull_request' && needs.changes.outputs.ci != 'true' && needs.changes.outputs.go != 'true' && needs.changes.outputs.gates == 'true' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.26.5'
           cache: true
+
+      # --- gate inputs (gates bucket) -- a non-Go change a Go test reads ---
+      #
+      # Runs the packages that host repo-sweeping gates, and ONLY when the
+      # full suite is not already running. A PR touching only `.md`, a
+      # manifest, the architecture model or a shell script used to match no
+      # bucket at all: every lane skipped and `ci-required` went green over a
+      # diff nothing verified, while the test that would have caught it sat in
+      # the skipped step below (memql#2972).
+      #
+      # A docs-only PR deliberately does NOT pay the whole suite here -- that
+      # is the #856 routing win and the stated intent in this file's header.
+      # It pays the gates that actually read what it changed.
+      #
+      # Be exact about what that saves, because it is less than it reads:
+      # the saving is in TEST time (~35s here against the full suite), not in
+      # COMPILE time. The root package imports app, which pulls in most of the
+      # module, so a docs-only PR now pays a near-full build it previously
+      # skipped entirely -- measured at ~6min wall on a cold cache against
+      # ~35s of actual test execution (memql#3060 review). That is the price
+      # of the bucket, and it is worth paying against a green tick over an
+      # unverified diff; it is not free.
+      #
+      # No `-run` / `-skip`: a selector matching nothing exits 0 having tested
+      # nothing, which is the defect class this bucket is part of (#2923,
+      # #3003). scripts/dev/gate_inputs_lane_scope_test.go pins that, pins the
+      # package list against the bucket's globs, and pins the bucket against
+      # the paths those packages read.
+      #
+      # ./dsl and ./examples are here because the `**/*.memql` glob would
+      # otherwise promise coverage this step does not deliver -- the bucket
+      # comment cites the referencepack tests, and they live in
+      # examples/referencepack, not in any package above. dsl/ also hosts
+      # TestPublicExamplesAreAnnotated, which reads a docs/public `.md`.
+      # Together they cost ~2s (memql#3060 review).
+      #
+      # STATED BOUNDARY: component/memql also reads bucket files -- its
+      # reference-pack load test and sense's walk of the dsl/ tree -- and is
+      # deliberately NOT here. That package costs ~90s, which is most of a
+      # docs-only PR's budget, and its gates are covered whenever RUN_GO or
+      # RUN_DSL fires. Adding it belongs with a decision about what a
+      # docs-only PR should pay, not with closing this bucket.
+      - name: go test (gate inputs)
+        if: ${{ env.RUN_GATES == 'true' }}
+        run: go test -count=1 -timeout=300s ./ ./cmd/envscan/... ./component/architecture/... ./component/genesis/... ./scripts/... ./dsl/... ./examples/...
 
       # --- pure-Go lanes (go bucket) -- build first to warm the cache ---
       - name: go build
@@ -398,14 +488,22 @@ jobs:
   # silently rotted (referencing constructs that later migrations renamed).
   # This lane mirrors the conformance job's seeded-DB setup and runs the
   # remaining DB-gated suites so that whole class of test can't rot unseen
-  # again. Keep this list in sync with the packages that carry `*_db_test.go`
-  # files (component/memql, component/automations/steps, examples/referencepack).
+  # again.
+  #
+  # The selector below is no longer kept in sync BY HAND -- scripts/cidb does it
+  # executably (memql#2886). The old rule written here, "keep this list in sync
+  # with the packages that carry `*_db_test.go` files", was already wrong when
+  # it was written: examples/referencepack carries none, and four of the seven
+  # db-gated packages in the tree carry none either. The real rule, and the one
+  # the gate asserts, is that every package with a TestMain calling
+  # dbtest.EnsureSchema must appear below.
+  #
   # These per-package binaries run as PARALLEL processes against this ONE shared
-  # DB, so each such package must migrate the schema through a TestMain that
-  # calls dbtest.EnsureSchema (a cross-process advisory lock serializes it);
-  # otherwise the suites race on a half-created schema and fail with
-  # `relation "MemoryNodes" does not exist` (memql#2551). A new db-gated package
-  # needs both an entry above AND that TestMain.
+  # DB, so each such package must migrate the schema through that TestMain (a
+  # cross-process advisory lock serializes it); otherwise the suites race on a
+  # half-created schema and fail with `relation "MemoryNodes" does not exist`
+  # (memql#2551). A new db-gated package needs both an entry below AND that
+  # TestMain -- and adding the TestMain without the entry now fails the gate.
   db-tests:
     name: db-tests
     needs: changes
@@ -434,6 +532,22 @@ jobs:
           --health-retries 12
     env:
       MEMQL_DATABASE_DSN: postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable
+      # Without this the whole point of the lane is optional (memql#2886). Every
+      # db-gated test self-skips when it cannot reach Postgres, so a service
+      # container that is slow to become healthy, unhealthy, or pulled from an
+      # unreachable registry (memql#2793) degrades the entire DB-gated suite to
+      # GREEN SKIPS rather than a red build -- and the PRs that rest their only
+      # end-to-end evidence on this lane merge on a signal that never fired.
+      #
+      # MEMQL_REQUIRE_DB=1 converts every such skip into a failure
+      # (component/database/dbtest.Unreachable). It is set HERE rather than
+      # globally on purpose: a local `go test ./...` leaves it unset and keeps
+      # the skip behaviour, which is the intended split.
+      #
+      # Do not remove it. scripts/cidb asserts this key is present and truthy,
+      # and that this lane's package selector still matches at least one
+      # db-gated test -- the "executed zero of them" failure one level up.
+      MEMQL_REQUIRE_DB: '1'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
