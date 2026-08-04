@@ -226,6 +226,55 @@ func TestDeclaredMetadataKeysAreReadByNothing(t *testing.T) {
 	}
 }
 
+// The positive control on the scan itself, and the reason it exists is that the
+// gate above can only ever report an ABSENCE. "No reader found" is the same
+// output whether there is genuinely no reader or the scan cannot see the kind
+// of reader that is there -- so a gate with no positive control is a gate that
+// cannot distinguish working from broken.
+//
+// x-pii is the right control precisely because it is NOT declared metadata: it
+// is enforced today, read by Concept.PIIFields through a struct tag. So the
+// scan run against it MUST find that reader. If this test starts passing
+// vacuously -- or if the tag arm is simplified away -- the three keys above go
+// on reporting "read by nothing" whether or not it is still true.
+//
+// This is the acceptance criterion this PR was parked on, written as a test
+// rather than as a claim.
+func TestTheScanSeesAStructTagReader(t *testing.T) {
+	const (
+		enforcedKey = "x-pii"
+		readerFile  = "component/database/memory-nodes/concept.go"
+	)
+
+	hits := keyLiteralsInNonTestGo(t, repoRoot(t), enforcedKey)
+
+	var tagReader *keyHit
+	for i := range hits {
+		if !hits[i].isWriteIndex && strings.HasPrefix(hits[i].path, readerFile) {
+			tagReader = &hits[i]
+			break
+		}
+	}
+	if tagReader == nil {
+		t.Fatalf("the scan found no struct-tag reader of %q in %s, but Concept.PIIFields reads it "+
+			"there via `json:\"%s\"`.\n  found: %s\n\n"+
+			"The scan is therefore blind to the struct-tag form -- which is the idiom this repo "+
+			"reads these keys with, and the one memql#3036 will use when it implements @secret "+
+			"redaction by copying PIIFields. While that is true, the gate above reports "+
+			"\"read by nothing\" for x-unique / x-immutable / x-secret whether or not it is "+
+			"still true, and its first real exercise would be the case it cannot see.",
+			enforcedKey, readerFile, enforcedKey, joinHits(hits))
+	}
+
+	// And the other half: x-pii must NOT pass the "emitted, read by nothing"
+	// shape the gate above asserts. If it did, that shape would be satisfiable
+	// by an enforced key, and satisfying it would mean nothing.
+	if len(hits) == 1 && hits[0].isWriteIndex {
+		t.Errorf("%q looks emitted-and-never-read, but it is enforced. The assertion the gate "+
+			"above makes is not distinguishing enforced keys from unenforced ones.", enforcedKey)
+	}
+}
+
 // @default's gap is different in kind: the key IS emitted into the schema, and
 // the schema is a *validation* document, so nothing applies it on insert.
 // Pinned separately because the fix is separate -- applying it means touching
@@ -472,6 +521,39 @@ func keyLiteralsInNonTestGo(t *testing.T, root, key string) []keyHit {
 				path:         filepath.ToSlash(rel),
 				line:         fset.Position(lit.Pos()).Line,
 				isWriteIndex: writes[lit],
+			})
+			return true
+		})
+
+		// Third pass: STRUCT TAGS, which the pass above cannot see and which
+		// are the idiom this repo actually reads these keys with.
+		//
+		// A tag is a *ast.BasicLit too, but its value is `json:"x-pii"` --
+		// backquoted, with the key nested inside. It never equals `"x-pii"`,
+		// so an equality test skips it entirely. That is not a hypothetical
+		// gap: Concept.PIIFields() reads x-pii exactly this way
+		// (concept.go:526), and memql#3036 -- approved, and blocked on this
+		// PR -- will implement @secret redaction by copying that function.
+		// The tripwire's first real exercise was the one case it could not
+		// see, which is the worst possible place for a blind spot.
+		//
+		// Matched by walking *ast.Field.Tag specifically rather than by
+		// searching every backquoted string, so an unrelated raw string that
+		// happens to contain the key is not counted as a reader.
+		ast.Inspect(file, func(n ast.Node) bool {
+			field, ok := n.(*ast.Field)
+			if !ok || field.Tag == nil {
+				return true
+			}
+			if !strings.Contains(field.Tag.Value, quoted) {
+				return true
+			}
+			hits = append(hits, keyHit{
+				path: filepath.ToSlash(rel),
+				line: fset.Position(field.Tag.Pos()).Line,
+				// A tag is a decode instruction: it exists to READ the key
+				// out of a document. It is never the emit.
+				isWriteIndex: false,
 			})
 			return true
 		})
