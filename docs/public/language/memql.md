@@ -652,7 +652,7 @@ The live `policy` construct is an **AI provider-selection record**: empty-bodied
 policy balancedChat { }
 ```
 
-> **Decision-policy tier — RETIRED (#984).** The cross-cutting decision model (`func (Policy)` constructs, `@tier` / `@audited` annotations, `engine.EvaluatePolicy`) is fully removed. Caller-based boolean checks (admin / owner / permission) are authored as **context-specs** and called via `spec("name")`; the only live `policy` surface is provider selection.
+> **Decision-policy tier — RETIRED (#984).** The cross-cutting decision model (`func (Policy)` constructs, `@tier` / `@audited` annotations, `engine.EvaluatePolicy`) is fully removed. Caller-based boolean checks (admin / owner / permission) are authored as **context-specs** and named as a bare filter conjunct; the only live `policy` surface is provider selection.
 
 ### Prompts
 
@@ -818,7 +818,7 @@ mutate space archiveSpace {
 Specs are atomic boolean predicates, declared in struct form in `dsl/<namespace>/specs.memql`. A spec **binds exactly one shape XOR concept in its signature** (`spec <boundName> <name>`, resolved via the file-top `use` import) and the body **`return`s a boolean** over **bare** field names. The binding picks the evaluation strategy:
 
 - **Row-specs** bind a concept or a `@row` shape. They compile into a SQL `WHERE` fragment and push down to the database for filtering.
-- **Context-specs** bind an `@actor` shape (the only gateway to the auth envelope). They evaluate in-process against the auth context; call them via `spec("name")` for actor-based checks like "is admin."
+- **Context-specs** bind an `@actor` shape (the only gateway to the auth envelope). They evaluate in-process against the auth context; name them as a bare top-level filter conjunct for actor-based checks like "is admin."
 
 A spec body never reads `actor.*` / `row.*` directly — bind a shape that projects it and read the projected key bare. The `@shape("name")` annotation is **removed**; the binding moved to the signature.
 

@@ -4,7 +4,8 @@
 // actorEnvelope @actor shape so they evaluate in-process against the
 // auth context. They are the DSL-side mirrors of the role gates the
 // DeployControlService Go layer enforces (component/deploycontrol);
-// policies / queries can delegate to them via spec("name").
+// policies / queries name them as a bare top-level conjunct in a filter
+// (`requiresOwnerOrAdmin`, not the retired stringly call form; memql#3016).
 //
 // Three gates, per the locked role matrix in #1876 (epic #1871):
 //

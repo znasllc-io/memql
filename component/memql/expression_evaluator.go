@@ -72,7 +72,7 @@ func evaluateSpecFunctionCall(goCtx context.Context, engine *MemQLEngine, call *
 	case "spec":
 		return evaluateSpecSubCall(goCtx, engine, call)
 	case "policy":
-		return nil, fmt.Errorf("policy() is retired (#984); use spec(\"name\") for caller-context boolean checks")
+		return nil, fmt.Errorf("policy() is retired (#984); name the context-spec as a bare conjunct (`... && requiresAdmin`) for caller-context boolean checks")
 	default:
 		return nil, fmt.Errorf("function call %q is not callable from a spec body (expected `spec(...)`)", call.Name)
 	}

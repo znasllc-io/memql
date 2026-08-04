@@ -1488,7 +1488,7 @@ spec participant isGuestParticipant {
 empty-bodied AI provider-selection record (the decision-policy tier
 that once carried `func (Policy)` bodies with `@tier` / `@audited`
 is retired, #984 — caller-context boolean checks belong in
-context-specs called via `spec("name")`):
+context-specs named as bare filter conjuncts):
 
 ```memql
 @primary("streamClaudeSonnet")

@@ -32,7 +32,7 @@ the spec is evaluated:
   for filtering.
 - **Context-specs** -- bind an `@actor` shape (the only gateway to the
   auth envelope). The expression evaluates in-process against the auth
-  context; invoked via the `spec("name")` builtin, or from Go via
+  context; named as a bare top-level filter conjunct, or from Go via
   `engine.EvaluateSpec(ctx, "name")`, for actor-based checks like
   "is admin", "owns partition", etc.
 
@@ -109,7 +109,7 @@ the spec reads its projected key -- `role` -- by bare name. The
 signature binding is verified at load: it must resolve to an imported
 shape or concept.)
 
-Context-specs are invoked via the `spec("name")` builtin or, from Go,
+Context-specs are named as a bare top-level filter conjunct or, from Go,
 `engine.EvaluateSpec(ctx, "name")` against the request's auth context.
 
 ## CQS interaction
@@ -143,6 +143,6 @@ What remains:
   not a predicate surface.
 - Caller-context boolean checks (is admin, owns partition,
   permission gates) are authored as **context-specs** in
-  `dsl/<namespace>/specs.memql` and invoked via `spec("name")` /
+  `dsl/<namespace>/specs.memql` and named as a bare conjunct /
   `engine.EvaluateSpec`.
 - Risk/scope decision logic lives in Go (`component/safety`).
