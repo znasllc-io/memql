@@ -280,19 +280,43 @@ func CheckDrift(root string) (Result, error) {
 		RegistrySize: len(manifest.AllEntries()),
 	}
 
-	corpus, err := repoCorpus(absRoot)
+	corpus, excluded, err := repoCorpus(absRoot)
 	if err != nil {
 		return Result{}, fmt.Errorf("build corpus: %w", err)
+	}
+	// The exclusion IS the reverse-drift check, so a miss has to be loud.
+	//
+	// If a registry file is moved or renamed it silently re-enters the
+	// corpus, every entry regains a self-reference, and the entire reverse
+	// direction goes quiet with the gate still green -- memql#2971
+	// returning by a different route. Erroring here turns that into a
+	// build failure naming the file it could not find.
+	if len(excluded) != len(registryFiles) {
+		return Result{}, fmt.Errorf(
+			"reverse-drift corpus excluded %d of %d registry files (want %v, got %v): every "+
+				"registry file must be excluded or a stale entry references itself and this "+
+				"check goes silent. If a manifest moved, update registryFiles",
+			len(excluded), len(registryFiles), registryFiles, excluded)
 	}
 	for _, e := range manifest.AllEntries() {
 		if isExternal(e.Name) {
 			continue
 		}
 		// A registry entry is "used" if its name appears anywhere in the
-		// repo (code reads, k8s overlays, .env templates, dsl). This
-		// tolerates env.NewEnvReader prefix-composed full keys and
-		// k8s-only injection targets that no Go literal reads directly.
-		if strings.Count(corpus, e.Name) < 2 { // 1 = the manifest row itself
+		// repo OUTSIDE the registry itself (code reads, k8s overlays,
+		// .env templates, dsl). This tolerates env.NewEnvReader
+		// prefix-composed full keys and k8s-only injection targets that no
+		// Go literal reads directly.
+		//
+		// The corpus excludes every copy of the registry, so ANY occurrence
+		// is a real reference and the threshold needs no off-by-one
+		// allowance to explain. It read `< 2` with the comment
+		// "1 = the manifest row itself", which stopped being true when the
+		// embedded snapshot was added: two identical copies gave every
+		// entry a corpus floor of 2, so the condition could never select
+		// and reverse drift was dead in every state CI could reach
+		// (memql#2971).
+		if !strings.Contains(corpus, e.Name) {
 			res.Stale = append(res.Stale, e.Name)
 		}
 	}
@@ -300,11 +324,38 @@ func CheckDrift(root string) (Result, error) {
 	return res, nil
 }
 
+// registryFiles are every copy of the registry itself, repo-relative and
+// slash-separated. They are excluded from the reverse-drift corpus,
+// because an entry's own row is not a reference to it.
+//
+// There are TWO copies and they carry identical rows: the authored
+// scripts/secrets/manifest.yaml (the source of truth) and the
+// //go:embed snapshot component/genesis/manifest.yaml, which
+// scripts/secrets/sync-embedded-manifest.sh regenerates verbatim and
+// TestEmbeddedManifestInSync keeps in step. Missing the second one is
+// what made the reverse check unsatisfiable (memql#2971), so CheckDrift
+// hard-fails rather than proceeding if any entry here goes unmatched.
+var registryFiles = []string{
+	"scripts/secrets/manifest.yaml",
+	"component/genesis/manifest.yaml",
+}
+
 // repoCorpus concatenates the text of every config-bearing file
 // (.go / .memql / .yaml / .yml / .env*) so reverse-drift can check
 // whether a registered name is referenced anywhere.
-func repoCorpus(root string) (string, error) {
+//
+// It returns the registry files it EXCLUDED alongside the corpus. That
+// second value is not bookkeeping: the caller compares it against
+// registryFiles, because an exclusion that silently stops matching is
+// indistinguishable from a clean tree.
+func repoCorpus(root string) (string, []string, error) {
+	registry := make(map[string]bool, len(registryFiles))
+	for _, rel := range registryFiles {
+		registry[rel] = true
+	}
+
 	var b strings.Builder
+	var excluded []string
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -314,6 +365,12 @@ func repoCorpus(root string) (string, error) {
 				return filepath.SkipDir
 			}
 			return nil
+		}
+		if rel, relErr := filepath.Rel(root, path); relErr == nil {
+			if slash := filepath.ToSlash(rel); registry[slash] {
+				excluded = append(excluded, slash)
+				return nil
+			}
 		}
 		base := filepath.Base(path)
 		switch {
@@ -332,5 +389,6 @@ func repoCorpus(root string) (string, error) {
 		}
 		return nil
 	})
-	return b.String(), err
+	sort.Strings(excluded)
+	return b.String(), excluded, err
 }
