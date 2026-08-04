@@ -190,6 +190,26 @@ func unsanctionedMuxRefs(fset *token.FileSet, name string, file *ast.File) (offe
 	return offenders, references
 }
 
+// isNewServeMuxCall reports whether e is literally `http.NewServeMux()`.
+//
+// Narrow on purpose. Anything else assigned to the mux field -- a helper's
+// return, a parameter, a package-level var -- is a mux this gate did not watch
+// being built, and its routes were registered out of sight. The point is not
+// that such a helper is necessarily malicious; it is that the gate cannot see
+// inside it, so sanctioning it would be sanctioning an unknown.
+func isNewServeMuxCall(e ast.Expr) bool {
+	call, ok := e.(*ast.CallExpr)
+	if !ok {
+		return false
+	}
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok || sel.Sel.Name != "NewServeMux" {
+		return false
+	}
+	pkg, ok := sel.X.(*ast.Ident)
+	return ok && pkg.Name == "http"
+}
+
 // sanctionedMuxUse returns a non-empty reason when this reference to the mux
 // field is one of the uses the package sanctions, and "" when it is not.
 //
@@ -212,15 +232,41 @@ func sanctionedMuxUse(
 
 	p := parent[sel]
 
-	// 2. Construction: `a.mux = http.NewServeMux()`. The mux has to be made
-	//    somewhere, and being the TARGET of an assignment cannot leak it.
+	// 2. Construction: `a.mux = http.NewServeMux()`, and ONLY that.
+	//
 	//    Deliberately checks Lhs only: `holder.Router = a.mux` puts the mux on
 	//    the RIGHT and is exactly escape 3, so it must NOT pass here.
+	//
+	//    The RHS check is memql#3004's fourth escape, found reviewing this
+	//    gate. The rule used to sanction any assignment whose target was the
+	//    mux, reasoning that "being the TARGET of an assignment cannot leak
+	//    it". True of LEAKING and irrelevant to the actual risk, which is
+	//    INJECTING: a mux arrives pre-loaded and its routes were registered
+	//    somewhere this gate never looks.
+	//
+	//        m := http.NewServeMux()
+	//        m.HandleFunc("POST /internal/whatever", h)  // no `.mux` selector
+	//        a.mux = m
+	//
+	//    scanned clean, and so did `a.mux = buildMux()`. config.go already
+	//    reads `a.mux = http.NewServeMux()`, so the evasion is one expression
+	//    away and reads as a refactor -- escape 2 again, one syntactic layer
+	//    up, which is the shape #3004 was filed about.
 	if as, ok := p.(*ast.AssignStmt); ok {
-		for _, lhs := range as.Lhs {
-			if lhs == ast.Expr(sel) {
-				return "assignment target"
+		for i, lhs := range as.Lhs {
+			if lhs != ast.Expr(sel) {
+				continue
 			}
+			// Paired RHS. A multi-value assign (a, b = f()) has one Rhs for
+			// several Lhs and cannot be a mux construction, so it falls
+			// through to offender rather than being waved past.
+			if len(as.Rhs) != len(as.Lhs) {
+				return ""
+			}
+			if isNewServeMuxCall(as.Rhs[i]) {
+				return "assignment target (constructed inline)"
+			}
+			return ""
 		}
 	}
 
@@ -245,12 +291,31 @@ func sanctionedMuxUse(
 			if arg != ast.Expr(sel) {
 				continue
 			}
+			// A BARE identifier is never a hand-off out of this package --
+			// it is a function defined right here, whose body this gate does
+			// not read. Sanctioning it on the name alone let
+			//
+			//     func RegisterRoutes(m *http.ServeMux) { m.HandleFunc(...) }
+			//     RegisterRoutes(a.mux)
+			//
+			// scan clean: two ordinary-looking lines mounting an undeclared
+			// route on the identity binary (memql#3004, found reviewing this
+			// gate). Requiring a qualifier keeps the three real hand-offs --
+			// server.WithBaseRouter, server.RegisterConceptsEndpoint,
+			// svc.RegisterRoutes -- and rejects the in-package impostor.
+			//
+			// HONEST LIMIT: this matches the terminal identifier of a
+			// qualified call, so a method of the same NAME on some other type
+			// still passes. Closing that needs go/types to resolve the
+			// receiver, which is a bigger change than this gate carries today;
+			// the residue is recorded rather than implied.
 			callee := ""
 			switch fn := call.Fun.(type) {
 			case *ast.SelectorExpr:
 				callee = fn.Sel.Name
 			case *ast.Ident:
-				callee = fn.Name
+				// Deliberately NOT sanctioned -- see the note above.
+				callee = ""
 			}
 			if muxHandoffCallees[callee] {
 				return "enumerated hand-off"
@@ -373,6 +438,20 @@ func TestMuxGateCatchesTheDocumentedEscapes(t *testing.T) {
 			src:  "func (a *App) f() { mountEverything(a.mux) }\nfunc mountEverything(*http.ServeMux) {}",
 		},
 		{
+			// memql#3004's fourth escape, and this fixture used to sit in the
+			// ALLOWED list -- the gate encoded the hole as correct behaviour.
+			//
+			// An enumerated NAME with no package qualifier is a function
+			// defined in this package, whose body the gate never reads. Two
+			// ordinary-looking lines then mount an undeclared route on the
+			// identity binary. All three real hand-offs are qualified
+			// (server.WithBaseRouter, server.RegisterConceptsEndpoint,
+			// svc.RegisterRoutes), so requiring the qualifier costs nothing
+			// and closes this.
+			name: "enumerated callee name, but defined in-package (no qualifier)",
+			src:  "func (a *App) f() { WithBaseRouter(a.mux) }\nfunc WithBaseRouter(m *http.ServeMux) { m.HandleFunc(\"POST /pwn\", nil) }",
+		},
+		{
 			// The plain case the ORIGINAL gate caught, kept so the rewrite
 			// cannot regress what it replaced.
 			name: "registered directly, outside the helpers",
@@ -411,11 +490,6 @@ func TestMuxGateCatchesTheDocumentedEscapes(t *testing.T) {
 			name: "enumerated hand-off, package-qualified callee",
 			file: "database.go",
 			src:  "func (a *App) f() { srv.RegisterConceptsEndpoint(a.mux, nil) }\nvar srv struct{ RegisterConceptsEndpoint func(*http.ServeMux, any) }",
-		},
-		{
-			name: "enumerated hand-off, bare callee",
-			file: "config.go",
-			src:  "func (a *App) f() { WithBaseRouter(a.mux) }\nfunc WithBaseRouter(*http.ServeMux) {}",
 		},
 		{
 			name: "the recording helper itself",
@@ -464,4 +538,185 @@ func parseAndScan(t *testing.T, name, src string) ([]string, int) {
 		t.Fatalf("parse fixture %s: %v", name, err)
 	}
 	return unsanctionedMuxRefs(fset, name, f)
+}
+
+// The middleware channel is a route source too, and memql#3004's first escape
+// was about the CLASS rather than the one path.
+//
+// `POST /memql/query` was invisible because it is served from middleware ahead
+// of the mux: it reaches neither a.registeredRoutes nor ContractRoutes(), so
+// it appeared in no declaration and failed no check. The fix records it via
+// a.middlewareRoutes -- which closes that instance. It does not, on its own,
+// stop the NEXT middleware being equally invisible: `a.middlewares = append(...)`
+// appears at five sites and exactly one of them declares any path.
+//
+// So this gate makes the channel explicit. Every middleware registration is
+// either known to serve no request path of its own, or must declare what it
+// claims. Adding a middleware that intercepts a path and saying nothing here
+// fails, which is the property #3004 asked for and the difference between
+// fixing an instance and closing a class.
+func TestEveryMiddlewareRegistrationIsAccountedFor(t *testing.T) {
+	// site -> why it serves no path, or how it declares the ones it does.
+	//
+	// Keyed by the middleware CONSTRUCTOR rather than by file:line, so the
+	// entry survives the code moving and breaks when the thing itself changes.
+	type middlewareNote struct {
+		why string
+		// claimsPaths marks a middleware that serves request paths of its own.
+		// Those are the dangerous ones: they run AHEAD of the mux, so the path
+		// reaches neither a.registeredRoutes nor ContractRoutes(). Setting this
+		// requires the registering function to also feed a.middlewareRoutes,
+		// which is asserted below.
+		claimsPaths bool
+	}
+	accounted := map[string]middlewareNote{
+		"PanicRecoveryMiddleware":            {why: "wraps the chain; serves no path of its own"},
+		"SecurityHeadersMiddleware":          {why: "sets response headers; serves no path of its own"},
+		"authMiddleware":                     {why: "the verifier; gates paths, claims none"},
+		"NewSessionRevocationHTTPMiddleware": {why: "inspects the token on every request; claims no path"},
+		"Middleware":                         {why: "the gRPC gateway -- CLAIMS POST /memql/query via memqlgrpc.InterceptedPaths()", claimsPaths: true},
+	}
+	// Functions that feed a.middlewareRoutes, by name. Collected in the same
+	// walk so a claimsPaths middleware can be required to sit in one.
+	declaring := map[string]bool{}
+	// Function name -> the claims-paths middlewares registered inside it.
+	claimingIn := map[string][]string{}
+
+	fset := token.NewFileSet()
+	found := map[string]bool{}
+	var unaccounted []string
+
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("read app dir: %v", err)
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		f, parseErr := parser.ParseFile(fset, name, nil, 0)
+		if parseErr != nil {
+			continue // build-tagged files that do not parse standalone
+		}
+		ast.Inspect(f, func(n ast.Node) bool {
+			as, ok := n.(*ast.AssignStmt)
+			if !ok || len(as.Lhs) != 1 || len(as.Rhs) != 1 {
+				return true
+			}
+			sel, ok := as.Lhs[0].(*ast.SelectorExpr)
+			if ok && sel.Sel.Name == "middlewareRoutes" {
+				declaring[enclosingFuncName(f, as.Pos())] = true
+				return true
+			}
+			if !ok || sel.Sel.Name != "middlewares" {
+				return true
+			}
+			call, ok := as.Rhs[0].(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			if id, isIdent := call.Fun.(*ast.Ident); !isIdent || id.Name != "append" {
+				return true
+			}
+			for _, arg := range call.Args[1:] {
+				ctor := middlewareConstructorName(arg)
+				if ctor == "" {
+					unaccounted = append(unaccounted,
+						fset.Position(arg.Pos()).String()+" (could not name the middleware)")
+					continue
+				}
+				found[ctor] = true
+				note, ok := accounted[ctor]
+				if !ok {
+					unaccounted = append(unaccounted,
+						fset.Position(arg.Pos()).String()+" -> "+ctor)
+					continue
+				}
+				if note.claimsPaths {
+					claimingIn[enclosingFuncName(f, arg.Pos())] = append(
+						claimingIn[enclosingFuncName(f, arg.Pos())], ctor)
+				}
+			}
+			return true
+		})
+	}
+
+	for _, u := range unaccounted {
+		t.Errorf("middleware registered at %s is not accounted for.\n"+
+			"A middleware runs AHEAD of the mux, so any path it claims reaches neither "+
+			"a.registeredRoutes nor ContractRoutes() and is invisible to the boot assertion -- "+
+			"which is exactly how POST /memql/query came to be served on the verifier-less "+
+			"identity binary while appearing in no declaration at all (memql#3004).\n"+
+			"Add an entry to `accounted` saying either that it serves no path of its own, or "+
+			"which declaration carries the paths it claims. If it claims paths, they must also "+
+			"be appended to a.middlewareRoutes, or the boot check will not see them.", u)
+	}
+
+	// A middleware that claims paths must be registered in a function that
+	// also feeds a.middlewareRoutes.
+	//
+	// This is the assertion the collector line had none of. Removing
+	// `a.middlewareRoutes = append(..., memqlgrpc.InterceptedPaths()...)` from
+	// transportBase left every test green -- including under the identity tag,
+	// the binary #3004 is about -- because the only test of the field builds
+	// `&App{middlewareRoutes: ...}` by hand and asserts the echo. That pins the
+	// assembly and says nothing about whether anything populates it, which is
+	// the #3044 shape: a pin carrying its own copy of the thing it pins.
+	for fn, ctors := range claimingIn {
+		if declaring[fn] {
+			continue
+		}
+		t.Errorf("%s registers %v, which claims request paths, but never appends to "+
+			"a.middlewareRoutes.\nA middleware runs ahead of the mux, so a path it claims is "+
+			"invisible to the boot assertion unless it is declared -- which is exactly how "+
+			"POST /memql/query came to be served on the verifier-less identity binary while "+
+			"appearing in no declaration (memql#3004). Feed its paths into a.middlewareRoutes "+
+			"in this function, or mark it claimsPaths:false and say why it serves none.",
+			fn, ctors)
+	}
+
+	// Anti-vacuity, both directions.
+	if len(found) == 0 {
+		t.Fatal("no middleware registrations found at all -- the scan shape changed and this " +
+			"gate has silently stopped protecting anything")
+	}
+	for ctor := range accounted {
+		if !found[ctor] {
+			t.Errorf("%q is in `accounted` but is registered nowhere. If the middleware was "+
+				"removed, drop the entry in the same change: a stale entry pre-authorises a "+
+				"name that could come back meaning something else.", ctor)
+		}
+	}
+}
+
+// enclosingFuncName returns the name of the FuncDecl containing pos.
+func enclosingFuncName(f *ast.File, pos token.Pos) string {
+	name := "<file scope>"
+	for _, d := range f.Decls {
+		fd, ok := d.(*ast.FuncDecl)
+		if !ok {
+			continue
+		}
+		if pos >= fd.Pos() && pos <= fd.End() {
+			return fd.Name.Name
+		}
+	}
+	return name
+}
+
+// middlewareConstructorName returns the function name a middleware expression
+// is built from, or "" when it cannot be named. Handles `pkg.New(...)`,
+// `New(...)`, `x.Method()` and a bare identifier (a middleware built earlier
+// and assigned to a variable, as authMiddleware is).
+func middlewareConstructorName(e ast.Expr) string {
+	switch v := e.(type) {
+	case *ast.CallExpr:
+		return middlewareConstructorName(v.Fun)
+	case *ast.SelectorExpr:
+		return v.Sel.Name
+	case *ast.Ident:
+		return v.Name
+	}
+	return ""
 }
