@@ -208,7 +208,7 @@ func ActiveActionsForOwnerBuild(args ActiveActionsForOwnerArgs) string {
 	return "query activeActionsForOwner()"
 }
 
-// ActiveAgentRoles -- List every active agentRole row. Backs the role picker on the cockpit's agent-creation surface and on the role-management view. predefined rows render with a lock icon; user-created rows are fully editable.
+// ActiveAgentRoles -- List every active agentRole row. Backs the role picker on the cockpit's agent-creation surface and on the role-management view. predefined rows render with a lock icon and are locked on the write path too (validateAgentRolePredefinedLock); user-created rows are fully editable. Deliberately unscoped -- every caller sees every role, including other users' custom ones. See the note above.
 //
 // Bound concept: v1:agents:agentRole (machine-readable: BoundConcepts["activeAgentRoles"] in generated_concepts.go).
 type ActiveAgentRolesArgs struct {

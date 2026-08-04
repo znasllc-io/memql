@@ -204,9 +204,37 @@ query agentRole agentRoleBySlug {
 // suppresses nothing today only because `agentRoleBySlug` already blocks
 // v1:agents:agentRole from being declared. If that query ever becomes
 // caller-gated, this annotation silently keeps the concept undeclared.
+// UNSCOPED BY DESIGN, and the omission is deliberate rather than forgotten
+// (memql#2985). This filter carries no caller-scope term, so one user's
+// custom role is listed for every other user in the deployment.
+//
+// The catalog is global because routing needs it to be: cognition and the
+// conductor resolve an agent's role while dispatching a turn, and they have
+// to see the same role surface regardless of whose agent it is. A per-creator
+// filter would make a role resolvable only in its creator's sessions.
+//
+// The honest limit of that argument, recorded so the next reader does not
+// have to re-derive it: it justifies the PREDEFINED rows being global, and
+// does not by itself require user-minted ones to be. Exposing a custom role's
+// name and description to other users in the deployment is a KNOWN trade
+// carried deliberately, not a consequence nobody noticed -- but note it is
+// recorded here rather than ruled on anywhere traceable, so treat it as the
+// current state of the argument rather than as a settled decision. The scoped
+// alternative is expressible today if it is revisited --
+// `isActiveRecord && (predefined || row.createdBy == actor.userId)` loads and
+// pushes down, since the engine stamps createdBy -- but it removes @public
+// and changes the wire contract for the cockpit role picker and the agent
+// factory's loadRoleCatalog, so it wants its own review.
+//
+// Note this is a READ decision only. Predefined rows are locked on the WRITE
+// path by validateAgentRolePredefinedLock, which is a separate concern and
+// enforced regardless (memql#2985).
+
 /// List every active agentRole row. Backs the role picker on the cockpit's agent-creation surface
-/// and on the role-management view. predefined rows render with a lock icon; user-created rows are
-/// fully editable.
+/// and on the role-management view. predefined rows render with a lock icon and are locked on the
+/// write path too (validateAgentRolePredefinedLock); user-created rows are fully editable.
+/// Deliberately unscoped -- every caller sees every role, including other users' custom ones. See
+/// the note above.
 @public
 @unbounded("agent role catalog -- a small admin-defined bounded set consumed whole")
 @cache(300)
