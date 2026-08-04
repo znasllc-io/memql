@@ -2383,13 +2383,14 @@ func (t *Tree) VerifyPreambleAttachment() []error {
 		for _, orphan := range languageParser.OrphanedPreambles(string(raw)) {
 			errs = append(errs, fmt.Errorf(
 				"%s:%d: these annotations are attached to nothing -- the block comment opened on "+
-					"line %d ends the preamble walk, so the declaration below it loads WITHOUT "+
-					"them, silently. What that costs depends on the annotation: a builtin without "+
-					"its @executor cannot be dispatched at all, and a query without its @public or "+
-					"a concept without its @rowAuthz loses the declaration its authorization is "+
-					"read from. Move them below the comment if they belong to the declaration "+
-					"under it, or inside the comment if they belong to the one that was "+
-					"parked:\n%s",
+					"line %d ends the preamble walk, so whatever follows the comment loads "+
+					"WITHOUT them, silently. What that costs depends on the annotation: a query "+
+					"loses the @public its caller scope is read from, a concept loses its "+
+					"@rowAuthz, a file header loses the @version / @namespace its declarations "+
+					"register under, and a builtin loses the @executor it is dispatched by. Move "+
+					"them below the comment if they belong to the declaration under it, or inside "+
+					"the comment if they belong to the one that was parked; a blank line above "+
+					"the comment also ends the run cleanly when they are a file header:\n%s",
 				path, orphan.Line, orphan.CommentLine, indentBlock(orphan.Attributes)))
 		}
 	}

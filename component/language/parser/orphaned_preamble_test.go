@@ -132,6 +132,24 @@ builtin zzLive {
 `,
 		},
 		{
+			// No `@` in the run at all, so nothing was orphaned -- a `//` note
+			// explaining WHY something is parked is the likeliest real-world
+			// shape here, and reporting it is the false alarm that gets a
+			// detector suppressed. Pins the sawAttribute guard, which the
+			// #3041 review found survived removal with the whole repo green.
+			name: "a line-comment note above a parked declaration, with no annotations",
+			src: `// parked until #1234 lands
+/*
+builtin zzParked {
+  a string
+}
+*/
+builtin zzLive {
+  b string
+}
+`,
+		},
+		{
 			name: "a trailing block comment at end of file orphans nothing",
 			src: `@executor("integration.x.y")
 builtin zzLive {
@@ -168,6 +186,173 @@ func TestOrphanedPreamblesFindsNothingInHandWrittenShapes(t *testing.T) {
 		if got := OrphanedPreambles(src); len(got) != 0 {
 			t.Errorf("reported %+v for:\n%s", got, src)
 		}
+	}
+}
+
+// The shapes the loader ALSO orphans, beyond the one memql#2965 measured.
+//
+// Every case here was silent before the memql#3041 review: the first four
+// because block-comment state was counted textually rather than taken from
+// CommentSpans, and the fifth because a line-oriented "does anything follow"
+// test skipped the very line the declaration started on. Each is asserted
+// against the slicer in the same subtest, so none of them can decay into a
+// diagnostic for a defect that no longer exists -- the failure mode
+// TestPreambleIsStillOrphanedByABlockComment guards for the measured source.
+func TestOrphanedPreamblesReportsWhatTheLoaderAlsoOrphans(t *testing.T) {
+	for _, tc := range []struct{ name, src string }{
+		{
+			// MemQL block comments do NOT nest -- baseparser leaves the block
+			// state at the first `*/`. A depth counter does nest, so a stray
+			// `/*` in an earlier banner left it stuck open and suppressed
+			// every later orphan in the file.
+			name: "an earlier banner comment containing a stray /*",
+			src: `/*
+ banner with a /* inside
+*/
+@executor("integration.x.y")
+/*
+builtin zzParked {
+  a string
+}
+*/
+builtin zzLive {
+  b string
+}
+`,
+		},
+		{
+			// A `/*` inside a string literal opens nothing. The lexer knows
+			// that; counting `/*` does not.
+			name: "a /* inside a string literal earlier in the file",
+			src: `@description("a slash star /* in a string")
+builtin zzOther {
+  a string
+}
+
+@executor("integration.x.y")
+/*
+builtin zzParked {
+  b string
+}
+*/
+builtin zzLive {
+  c string
+}
+`,
+		},
+		{
+			name: "a /* inside a backtick literal earlier in the file",
+			src: "@description(`a slash star /* in a backtick`)\n" + `builtin zzOther {
+  a string
+}
+
+@executor("integration.x.y")
+/*
+builtin zzParked {
+  b string
+}
+*/
+builtin zzLive {
+  c string
+}
+`,
+		},
+		{
+			// A `/*` after `//` on the same line is comment text, not an
+			// opener -- the old skip only fired when the line STARTED with
+			// `//`.
+			name: "a trailing line comment containing /*",
+			src: `builtin zzOther {  // a slash star /* in a trailing comment
+  a string
+}
+
+@executor("integration.x.y")
+/*
+builtin zzParked {
+  b string
+}
+*/
+builtin zzLive {
+  c string
+}
+`,
+		},
+		{
+			// The declaration begins on the line that CLOSES the comment.
+			// BlankComments turns `*/` into spaces, so the slicer sees
+			// `   builtin zzLive {` and really does register it without the
+			// executor -- asserted below like every other case here.
+			name: "the declaration starts on the line that closes the comment",
+			src: `@executor("integration.x.y")
+/*
+builtin zzParked { a string }
+*/ builtin zzLive { b string }
+`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// The premise: the loader really does drop the annotations here.
+			// Without this the diagnostic could outlive the defect.
+			slices := ExtractDeclarationSlices(tc.src, builtinHeaderRe)
+			var live *DeclarationSlice
+			for i := range slices {
+				if slices[i].Name == "zzLive" {
+					live = &slices[i]
+				}
+			}
+			if live == nil {
+				t.Fatalf("fixture no longer slices zzLive at all; the premise is gone")
+			}
+			if strings.Contains(live.Source, "@executor") {
+				t.Fatalf("the slicer now carries the @executor across the comment, so this is no "+
+					"longer an orphan and reporting it would be a false alarm:\n%s", live.Source)
+			}
+
+			got := OrphanedPreambles(tc.src)
+			if len(got) != 1 {
+				t.Fatalf("the loader orphans this preamble but the detector reported %d -- a SILENT "+
+					"MISS, which is the class memql#2965 exists to end: %+v\n\nsource:\n%s",
+					len(got), got, tc.src)
+			}
+			if !strings.Contains(got[0].Attributes, "@executor") {
+				t.Errorf("Attributes must carry the orphaned run, got %q", got[0].Attributes)
+			}
+		})
+	}
+}
+
+// A file header separated from the first declaration by a banner comment is
+// reported, and that is deliberate: conceptSlices drops `@version` /
+// `@namespace` exactly as the builtin path drops an `@executor`, so the concept
+// registers at the default version with nothing logged.
+//
+// Pinned because the rule's own doc comment claimed the opposite until the
+// memql#3041 review measured it, and because the shape is one line of
+// whitespace away from every file in dsl/.
+func TestOrphanedPreamblesReportsAFileHeaderABannerDetaches(t *testing.T) {
+	src := `@version("1.0.0")
+@namespace("probe")
+/* ---------------- concepts ---------------- */
+@description("d")
+concept thing {
+  label string
+}
+`
+	got := OrphanedPreambles(src)
+	if len(got) != 1 {
+		t.Fatalf("expected the detached file header to be reported once, got %d: %+v", len(got), got)
+	}
+	if !strings.Contains(got[0].Attributes, "@version") ||
+		!strings.Contains(got[0].Attributes, "@namespace") {
+		t.Errorf("Attributes must name what the file lost, got %q", got[0].Attributes)
+	}
+
+	// The conventional blank line after a file header ends the run before the
+	// comment does, which is why dsl/ is clean today. If that ever stops being
+	// true this test says so rather than the whole corpus going red at once.
+	withBlankLine := strings.Replace(src, "@namespace(\"probe\")\n/*", "@namespace(\"probe\")\n\n/*", 1)
+	if got := OrphanedPreambles(withBlankLine); len(got) != 0 {
+		t.Errorf("a blank line after the file header must end the run, got %+v", got)
 	}
 }
 

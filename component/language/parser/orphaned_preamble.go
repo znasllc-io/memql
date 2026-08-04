@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"sort"
 	"strings"
 )
 
@@ -42,9 +43,30 @@ import (
 //
 // Deliberately narrow: an `@` run immediately above a block comment, where
 // something follows the comment. That is the measured defect and nothing wider.
+//
 // A file-level annotation block (`@version` / `@namespace` at the top of a
-// file) is not a declaration preamble and is not reported, because it is not
-// followed by a block comment in this shape.
+// file) IS reported when a block comment separates it from the first
+// declaration -- the `@version("1.0.0")` / `@namespace(...)` / `/* ---- */`
+// banner shape. That is deliberate, not a false positive: conceptSlices drops
+// those annotations exactly as the builtin path drops an `@executor`, so the
+// concept registers at the default version with nothing logged. Only the
+// conventional blank line after a file header keeps such a file quiet, because
+// a blank line ends the run before the comment does.
+//
+// # Agreeing with the lexer about what a comment is
+//
+// Block-comment state comes from CommentSpans, not from counting `/*` and `*/`
+// per line. The two disagree in four reachable ways, and every one of them is a
+// FALSE NEGATIVE rather than a false alarm: MemQL block comments do NOT nest
+// (baseparser leaves the block state at the first `*/`), while a counter does,
+// so `/* ... /* ... */` leaves it stuck open; and a `/*` inside a string
+// literal, a backtick literal, or a trailing `//` comment opens nothing at all
+// while a counter believes it did. Because a run is only reported when the
+// comment above it is at top level, a counter stuck open suppresses every
+// remaining orphan IN THE WHOLE FILE. CommentSpans is string- and
+// backtick-aware and non-nesting by construction, so it cannot drift from the
+// lexer -- which is the same argument #2872 makes for not keeping two
+// implementations of one lexical answer.
 
 // OrphanedPreamble is one `@`-attribute run that a block comment separates from
 // whatever declaration follows it.
@@ -68,30 +90,45 @@ type OrphanedPreamble struct {
 func OrphanedPreambles(source string) []OrphanedPreamble {
 	lines := strings.Split(source, "\n")
 
-	// Block-comment state per line, tracked forwards. inBlock[i] reports
-	// whether line i BEGINS inside a block comment; opens[i] whether it starts
-	// one at top level.
+	// Byte offset at which each line starts. strings.Split consumed one "\n"
+	// per boundary, so the running total adds it back.
+	lineStart := make([]int, len(lines))
+	off := 0
+	for i, line := range lines {
+		lineStart[i] = off
+		off += len(line) + 1
+	}
+
+	// Block-comment state per line, taken from the lexer's own view. inBlock[i]
+	// reports whether line i BEGINS inside a block comment; opens[i] whether a
+	// block comment opens the line; openEnd[i] is the offset just past the `*/`
+	// that closes it.
 	inBlock := make([]bool, len(lines))
 	opens := make([]bool, len(lines))
-	depth := 0
-	for i, line := range lines {
-		inBlock[i] = depth > 0
-		trimmed := strings.TrimSpace(line)
-		if depth == 0 && strings.HasPrefix(trimmed, "/*") {
-			opens[i] = true
-		}
-		// A line-comment or a string literal can carry `/*` or `*/` as text.
-		// Neither is worth a second state machine here: this detector reports,
-		// it does not slice, so a miss costs a diagnostic rather than a
-		// mis-parsed declaration. `//` lines are skipped for that reason.
-		if strings.HasPrefix(trimmed, "//") {
+	openEnd := make([]int, len(lines))
+	for _, span := range CommentSpans(source) {
+		// `//` line comments are not separators -- preambleStartOf accepts
+		// them inside a run -- so only block comments matter here.
+		if span.End-span.Start < 2 || source[span.Start:span.Start+2] != "/*" {
 			continue
 		}
-		depth += strings.Count(line, "/*") - strings.Count(line, "*/")
-		if depth < 0 {
-			depth = 0
+		openLine := sort.SearchInts(lineStart, span.Start+1) - 1
+		// Only a comment that OPENS its line. A `/*` trailing real code does
+		// not end a preamble run, because that line is code rather than an
+		// annotation, and preambleStartOf would have stopped on it anyway.
+		if strings.TrimSpace(lines[openLine][:span.Start-lineStart[openLine]]) == "" {
+			opens[openLine] = true
+			openEnd[openLine] = span.End
+		}
+		for i := openLine + 1; i < len(lines) && lineStart[i] < span.End; i++ {
+			inBlock[i] = true
 		}
 	}
+
+	// The comment-blanked view answers "is there real code after this
+	// comment" without a second scan: blanking preserves byte offsets and
+	// total length, so an offset into source indexes the same place here.
+	blanked := BlankComments(source)
 
 	var out []OrphanedPreamble
 	for i := range lines {
@@ -123,7 +160,7 @@ func OrphanedPreambles(source string) []OrphanedPreamble {
 		}
 		// Only a run the comment separates from something. A block comment at
 		// the END of a file orphans nothing, and reporting it would be noise.
-		if !somethingFollows(lines, i, inBlock) {
+		if !somethingFollows(blanked, openEnd[i]) {
 			continue
 		}
 
@@ -142,22 +179,19 @@ func OrphanedPreambles(source string) []OrphanedPreamble {
 	return out
 }
 
-// somethingFollows reports whether any real (non-blank, non-comment) line
-// appears after the block comment opened at openIdx.
-func somethingFollows(lines []string, openIdx int, inBlock []bool) bool {
-	for k := openIdx + 1; k < len(lines); k++ {
-		if inBlock[k] {
-			continue
-		}
-		trimmed := strings.TrimSpace(lines[k])
-		if trimmed == "" || strings.HasPrefix(trimmed, "//") || strings.HasPrefix(trimmed, "*/") {
-			continue
-		}
-		// A line that merely closes the comment and carries nothing else.
-		if after := strings.TrimSpace(strings.TrimPrefix(trimmed, "*/")); after == "" && strings.HasPrefix(trimmed, "*/") {
-			continue
-		}
-		return true
+// somethingFollows reports whether any real code appears after the block
+// comment that ended at closeOff, given the comment-blanked view of the source.
+//
+// Working off the blanked view rather than walking lines is what makes the
+// SAME-LINE close work: in `*/ builtin zzLive {`, the declaration begins on the
+// line that closes the comment, and any line-oriented test that skips a
+// `*/`-prefixed line skips the declaration with it -- reporting nothing for a
+// run the loader really does orphan. Blanking leaves comments as spaces and
+// preserves offsets, so "is there anything left after closeOff" is the whole
+// question, and trailing comments and blank lines answer it correctly for free.
+func somethingFollows(blanked string, closeOff int) bool {
+	if closeOff < 0 || closeOff >= len(blanked) {
+		return false
 	}
-	return false
+	return strings.TrimSpace(blanked[closeOff:]) != ""
 }

@@ -447,10 +447,31 @@ builtin zzLive {          // <- loads with NO @executor
 }
 ```
 
-`zzLive` is registered without the executor and cannot be dispatched. The cost
-depends on the annotation: a builtin loses its ability to run at all, while a
-query losing `@public` or a concept losing `@rowAuthz` loses the declaration its
-authorization is read from — and for those the loader raises nothing else.
+`zzLive` is registered without the executor and cannot be dispatched.
+
+The cost depends on the annotation, and the builtin above is the **least** bad
+case: the loader does at least say `@executor is required for builtin
+functions`, though that points you at writing a *second* executor rather than at
+moving the one you already wrote. The cases with teeth are the silent ones — a
+query losing `@public`, or a concept losing `@rowAuthz`, loses the declaration
+its authorization is read from, and there the loader raises **nothing at all**.
+
+The same rule catches a **file header** that a banner comment detaches:
+
+```memql
+@version("1.0.0")
+@namespace("knowledge")
+/* ------------------------- concepts ------------------------- */
+@description("A trained document.")
+concept document {
+  title string @required
+}
+```
+
+`@version` and `@namespace` here belong to nothing, and the declarations below
+register under the defaults instead. A blank line between the header and the
+banner ends the run before the comment does — which is why the engine's own tree
+is unaffected, and it is the fix for this shape.
 
 **Park the annotations with the declaration**, inside the comment:
 
