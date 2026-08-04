@@ -10,7 +10,7 @@
 // (#1876): cutting a version is a forward-deploy action, so
 // developer/admin/owner may do it (SuggestNextVersion is its read
 // companion and shares the gate so a developer can size the cut). The
-// DSL mirror is spec("requiresDeveloperOrAbove") in
+// DSL mirror is the bare conjunct requiresDeveloperOrAbove in
 // dsl/deployment/specs.memql.
 package deploycontrol
 

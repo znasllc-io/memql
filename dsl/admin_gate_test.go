@@ -40,10 +40,31 @@ func ownerScopeLeaf(pred string) bool { return strings.Contains(pred, "actor.use
 // from it in the first place.
 //
 // Both facts are now COMPUTED, by TestAdminGateNamesAreDeclaredOrRecorded
-// below, which reads the tree instead of describing it -- so there is nothing
-// left that can go stale.
+// below, which reads the tree instead of describing it.
+//
+// That covers ONE direction: every name in the recogniser is declared or
+// recorded. The converse -- every declared caller-scope spec appears in the
+// recogniser -- is TestEveryDeclaredActorGateIsRecognised, added in the
+// memql#3071 review after `requiresDeveloperOrAbove` was found declared at
+// dsl/deployment/specs.memql and present in neither pattern. A gate the
+// recogniser does not know is not a gate: adminGateLeaf returns false for it,
+// the composition rule never runs on a filter that uses it, and the per-row
+// authz classifier does not count it as caller-scoped. It is the same defect
+// as the requiresClusterOwner case this file already records, pointing the
+// other way, which is why one direction alone could not be "nothing left that
+// can go stale".
+//
+// That converse check paid for itself immediately. Besides
+// requiresDeveloperOrAbove it found `forgeDeveloper` and `forgeApprover`
+// (dsl/forge/specs.memql), both of which are used as LIVE filter conjuncts --
+// dsl/forge/queries.memql's `status == "needs_validation" && forgeDeveloper`
+// and `status == "needs_approval" && forgeApprover`. Two authorization gates
+// in production filters that the composition rule had never once run on. They
+// are correctly written, top-level and affirmative -- but that was luck rather
+// than a checked property, which is the whole distinction this file exists to
+// make.
 var adminGateRe = regexp.MustCompile(
-	`(^|[^A-Za-z0-9_.])(?:actor\.isClusterOwner[ \t]*==[ \t]*true|requiresOwnerOrAdmin|requiresClusterOwner|requiresAdmin|requiresOwner)([^A-Za-z0-9_]|$)`)
+	`(^|[^A-Za-z0-9_.])(?:actor\.isClusterOwner[ \t]*==[ \t]*true|requiresDeveloperOrAbove|requiresOwnerOrAdmin|requiresClusterOwner|requiresAdmin|requiresOwner|forgeApprover|forgeDeveloper)([^A-Za-z0-9_]|$)`)
 
 func adminGateLeaf(pred string) bool { return adminGateRe.MatchString(pred) }
 
@@ -56,7 +77,7 @@ func adminGateLeaf(pred string) bool { return adminGateRe.MatchString(pred) }
 // another. Selecting on any MENTION and then demanding the strict form is what
 // turns the inverted spelling into an error instead of a silence.
 var adminGateMentionRe = regexp.MustCompile(
-	`(^|[^A-Za-z0-9_.])(?:actor\.isClusterOwner|requiresOwnerOrAdmin|requiresClusterOwner|requiresAdmin|requiresOwner)([^A-Za-z0-9_]|$)`)
+	`(^|[^A-Za-z0-9_.])(?:actor\.isClusterOwner|requiresDeveloperOrAbove|requiresOwnerOrAdmin|requiresClusterOwner|requiresAdmin|requiresOwner|forgeApprover|forgeDeveloper)([^A-Za-z0-9_]|$)`)
 
 func mentionsAdminGate(clause string) bool { return adminGateMentionRe.MatchString(clause) }
 
@@ -391,5 +412,84 @@ func TestNamedQueriesKeepTheirAdminGate(t *testing.T) {
 					"nothing and this test would otherwise pass vacuously.", p, name)
 			}
 		}
+	}
+}
+
+// The converse of TestAdminGateNamesAreDeclaredOrRecorded: every caller-scope
+// spec the tree DECLARES must be one the recognisers know.
+//
+// That test computes recogniser -> declared. This one computes declared ->
+// recogniser, and without it the pair is half a check. Found in the memql#3071
+// review: `spec actorEnvelope requiresDeveloperOrAbove` is declared in
+// dsl/deployment/specs.memql and documented there as "the FORWARD-DEPLOY gate
+// (#1876)", and appeared in NEITHER adminGateRe nor adminGateMentionRe.
+//
+// What that costs is silence, not noise. A filter gated only by an unrecognised
+// spec is not selected by TestAdminGateIsATopLevelConjunct, so the composition
+// rule -- gate must be a top-level conjunct in the affirmative form -- never
+// runs on it; and the per-row-authz classifier does not count it as
+// caller-scoped. The gate reads as present to a human and is absent to every
+// machine that checks. That is exactly the shape memql#2983 and memql#3016
+// are about, and it is why the recogniser needs both directions computed
+// rather than one.
+//
+// Scoped to @actor-bound specs: those are the caller-context predicates, the
+// only ones that can serve as an admin gate. A row-spec is a SQL predicate over
+// payload fields and belongs in no gate vocabulary.
+func TestEveryDeclaredActorGateIsRecognised(t *testing.T) {
+	// Names that are @actor-bound but deliberately NOT gate vocabulary. Empty
+	// today, and an entry here is a claim that a caller-scope spec is not a
+	// caller-scope GATE -- which wants a reason beside it.
+	notGateVocabulary := map[string]string{}
+
+	tree := Tree()
+	paths, err := dslfs.WalkMemqlFiles(tree)
+	if err != nil {
+		t.Fatalf("WalkMemqlFiles: %v", err)
+	}
+
+	// `spec actorEnvelope <name> {` -- the @actor binding is the signature's
+	// first identifier, so the declaration alone says whether it is a
+	// context-spec. No AST needed and none available here.
+	actorSpec := regexp.MustCompile(`(?m)^spec[ \t]+actorEnvelope[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
+
+	declared := map[string]string{}
+	var specFiles int
+	for _, p := range paths {
+		if !strings.HasSuffix(p, "specs.memql") {
+			continue
+		}
+		specFiles++
+		for _, m := range actorSpec.FindAllStringSubmatch(readTreeFile(t, p), -1) {
+			declared[m[1]] = p
+		}
+	}
+
+	if specFiles == 0 {
+		t.Fatal("found no specs.memql files -- the sweep has stopped resolving them and this " +
+			"check would now pass vacuously (memql#3071)")
+	}
+	if len(declared) == 0 {
+		t.Fatal("found no `spec actorEnvelope <name>` declarations at all -- the declaration " +
+			"pattern has stopped matching and this check would now pass vacuously (memql#3071)")
+	}
+
+	for name, path := range declared {
+		if why, ok := notGateVocabulary[name]; ok {
+			t.Logf("KNOWN (not gate vocabulary): %s in %s -- %s", name, path, why)
+			continue
+		}
+		if adminGateLeaf(name) && mentionsAdminGate(name) {
+			continue
+		}
+		t.Errorf("%s declares the caller-scope spec %q, which neither admin-gate recogniser "+
+			"matches.\n"+
+			"An unrecognised gate is a SILENT one: a filter gated only by it is not selected by "+
+			"TestAdminGateIsATopLevelConjunct, so the composition rule never runs on it, and the "+
+			"per-row-authz classifier does not count it as caller-scoped. It reads as protected "+
+			"and is unprotected to every machine that checks.\n"+
+			"Add it to adminGateRe AND adminGateMentionRe -- both, since they are the strict and "+
+			"polarity-blind twins -- or record it in notGateVocabulary with the reason it is not "+
+			"a gate (memql#3071).", path, name)
 	}
 }
