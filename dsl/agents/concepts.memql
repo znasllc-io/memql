@@ -143,9 +143,14 @@ concept agentAuthorization {
 /// the agent factory MUST NOT grant. availableSkillIds (when non-empty) is the inclusive 'visible
 /// in the picker' set; empty = anything not forbidden is permitted. maxSkills caps the count -- 5
 /// for specialists, 2 for the assistant by default. Predefined rows are re-seeded on every startup;
-/// user-created roles default to predefined=false and stay fully editable. Per-user roles are
-/// global-scoped because routing decisions (cognition / conductor) need to see the same role
-/// surface across every partition.
+/// user-created roles default to predefined=false and stay fully editable -- but only as DATA:
+/// predefined rows are locked on the write path by validateAgentRolePredefinedLock, so a non-system
+/// actor cannot rename, re-categorise, re-skill or deactivate one, and cannot mint a new predefined
+/// row (memql#2985). Only tier and recommendedPolicySlug stay operator-tunable there. Per-user roles
+/// are global-scoped because routing decisions (cognition / conductor) need to see the same role
+/// surface across every partition; that makes one user's custom role visible to every caller, which
+/// is an accepted cost ruled on 2026-08-04 rather than an oversight -- see the note above
+/// activeAgentRoles in dsl/agents/queries.memql.
 concept agentRole {
   slug                   string!  @description("Canonical slug -- the value v1:agents:agent.roleSlug points to. Kebab-case, stable, never renamed (rename = new row + migration). Examples: 'it-support', 'family-doctor', 'commercial-pilot', 'union-carpenter'.")
   name                   string!  @description("Display name, e.g. 'IT Support' or 'Family Medicine Physician'. Surfaced in role pickers and on the agent card.")
