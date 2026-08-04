@@ -776,9 +776,19 @@ func duplicateConceptCollision(root fs.FS, entries []conceptEntry) (string, []st
 	}
 	sort.Strings(ids)
 	for _, id := range ids {
-		// Keyed by FILE, not by entry: two decls of the same name in ONE file
-		// is a different defect (and the parser's problem), and counting them
-		// here would report a cross-file collision that does not exist.
+		// Keyed by FILE, not by entry: counting entries would report a
+		// cross-file collision that does not exist when one file happens to
+		// declare the name twice.
+		//
+		// Being accurate about that case rather than crediting someone else
+		// with it: two `concept widget` blocks in ONE file are caught by
+		// NOTHING today -- not the parser, not this lane -- and reach boot as
+		// the same silent last-wins collision this function exists to surface.
+		// It is out of scope here because the fix is a different shape (a
+		// per-file duplicate check at parse time), not because it is handled.
+		// An earlier draft of this comment said "the parser's problem", which
+		// is exactly the kind of stale justification the correction at
+		// pinnedDomainAmbiguity below was written to stop.
 		if len(byID[id]) < 2 {
 			continue
 		}
@@ -874,6 +884,26 @@ func (t *Tree) resolveConceptForFile(path string, f *languageAst.File, idx *decl
 				return conceptResolution{state: conceptDuplicate, dupID: id, dupFiles: files}
 			}
 		}
+		// First-hit-wins SURVIVES here, deliberately and with a known residue.
+		//
+		// The collision check above only fires when the candidates assemble to
+		// the SAME canonical id -- the shape memql#3008 ruled on, where boot
+		// last-wins silently and there is a nameable fact to report. When two
+		// directories in one namespace declare the name with DIFFERENT ids (a
+		// differing @version is enough), no collision is detected, this line
+		// picks positionally, and lanes 3/5/6 then validate against whichever
+		// directory sorted first. That still reproduces memql#3008's original
+		// symptom verbatim: one spelling gets a confident "field X, which
+		// concept Y does not declare" and the mirror gets zero diagnostics,
+		// decided by sort order rather than by the tree being wrong.
+		//
+		// Out of scope rather than overlooked: #3008's ruling and every one of
+		// its DoD items are scoped to same-canonical-id. The different-id case
+		// is a genuine ambiguity with a real remedy (an import DOES separate
+		// them, because they are in different namespaces), so it wants the
+		// ambiguity path rather than this one -- which is a change to when
+		// hits are treated as ambiguous, with its own blast radius. Filed
+		// rather than smuggled in here.
 		hit := &hits[0]
 		full := qualifyName(*hit, name)
 		if kind := idx.byFile[hit.file][full]; kind != "concept" {
