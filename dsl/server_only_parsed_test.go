@@ -116,7 +116,7 @@ func serverOnlyConstructs(t *testing.T) map[serverOnlyKey]bool {
 			"against the AST definition types.")
 	}
 	// A CLONE: four gates now hold this, and one of them writing to it would
-	// corrupt the others' verdicts. Cheap -- six entries.
+	// corrupt the others' verdicts. Cheap -- eleven entries.
 	return maps.Clone(serverOnlySet)
 }
 
@@ -216,8 +216,11 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// shape keys paths by their terminal segment), and userId==actor.userId
 		// was not either (the revoke ownership check runs under
 		// contextWithSystemActor). Its only caller is
-		// component/identity/workertoken, allowlisted for the same reason
-		// component/identity/pat is.
+		// component/identity/workertoken. That package is allowlisted in
+		// call_origin_conformance_test.go NOT for pat's reason (server-initiated)
+		// but as a request-derived exception whose precondition -- the userId is
+		// always the authenticated caller's subject -- is asserted by
+		// component/grpc/worker_token_caller_scope_test.go. See that entry.
 		{Path: "identity/queries.memql", Name: "workerTokensForUser"}: true,
 	}
 	for k := range want {
@@ -232,11 +235,14 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		if !want[k] {
 			t.Errorf("%s in %s GAINED @serverOnly. That exempts it from per-row-authz "+
 				"classification (the gate short-circuits on hasServerOnly) and drops it from the "+
-				"generated SDK, so it needs the same argument the other six carry: why is "+
+				"generated SDK, so it needs the same argument the others carry: why is "+
 				"caller-scoping impossible here? If the answer is good, add it to `want`.", k.Name, k.Path)
 		}
 	}
-	// These six are the live set as of memql#2883, keyed by PATH AND NAME.
+	// These are the live set, keyed by PATH AND NAME. The prose used to say
+	// "these six" and went on saying it at nine and at ten -- a hardcoded count
+	// in a comment beside a map that grows is a lie with a delay fuse, so it is
+	// gone rather than corrected (memql#3063).
 	// Collapsing to name-only would defeat the key's stated purpose -- two
 	// domains may declare the same construct name, so `activeUsers` in a
 	// different file would satisfy the assertion.

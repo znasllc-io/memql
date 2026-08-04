@@ -71,14 +71,18 @@ func TestListForUserStampsInternalOriginItself(t *testing.T) {
 		}
 	}
 
-	// The stamp must not have widened the CALLER's context. Internal origin
-	// opens every @serverOnly construct for as long as the context lives,
-	// which is the escalation memql#2989 refused, and it is the claim this
-	// package's line in the root call_origin_conformance_test.go allowlist
-	// makes in as many words.
-	if auth.OriginFromContext(clientCtx).IsInternal() {
-		t.Error("ListForUser stamped internal origin onto the CALLER's context. That hands the " +
-			"rest of the request every @serverOnly construct in the tree (memql#2989); the " +
-			"stamp belongs on a context scoped to this one query.")
-	}
+	// Deliberately NOT asserted here: that the caller's own context was left
+	// un-widened. auth.ContextWithInternalOrigin is context.WithValue
+	// (call_origin.go:98), so a callee cannot reach the caller's variable
+	// under ANY implementation -- the check would be tautological, and a
+	// tautological assertion in a test written to close an invisible-guard
+	// gap is that gap wearing a green tick. Flagged in the #3072 review.
+	//
+	// The property is real but STRUCTURAL: it holds because store.go binds the
+	// stamp to `internalCtx` and threads that into the query, so nothing else
+	// in the process ever sees it. What enforces it is the root
+	// call_origin_conformance_test.go gate (this package is allowlisted, the
+	// wire packages are not) plus review of a nine-line function -- not a
+	// runtime assertion, and saying so is more use than a check that passes
+	// no matter what.
 }
