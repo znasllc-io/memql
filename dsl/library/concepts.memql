@@ -99,12 +99,12 @@ concept artifact {
 /// A deliverable PRODUCED through the app (as opposed to an uploaded document): a workbench result,
 /// a computer-use output, or a standalone agent output. Carries either inline text (body) or a
 /// reference to file bytes (attachmentId -> v1:common:attachment). Auto-promoted into the Library
-/// by indexGeneratedOutput on creation. Per-row authz: owned -- ownerUserId is the producing user;
-/// reads gate on ownerUserId==actor.userId.
+/// by indexGeneratedOutput on creation. Per-row authz: owned -- ownerUserId is stamped from
+/// actor.userId on every write and reads gate on ownerUserId==actor.userId.
 @displayCard(primary="title", secondary="summary", tertiary="createdAt")
 @rowAuthz(owner="ownerUserId")
 concept generatedOutput {
-  ownerUserId       string!  @description("v1:identity:user.id this output belongs to (the user the producing agent / plan acts for). The per-row authz key for Library reads.")
+  ownerUserId       string!  @description("v1:identity:user.id this output belongs to (the user the producing agent / plan acts for). Stamped from actor.userId on every write and never accepted from caller args, so ownership cannot be forged or reassigned; the producing integrations run the mutation under that user's actor (withUserActor). The per-row authz key for Library reads.")
   title             string!  @description("Display title for the output, e.g. 'Ten most beautiful birds'.")
   summary           string  @description("Optional short description / preview of the output.")
   body              string  @description("Inline text content for text-style outputs (markdown / plain text) produced directly without a file. File-backed outputs leave this empty and carry bytes on the attachment.")
@@ -155,11 +155,12 @@ concept generatedOutput {
 // dropped on a schedule. See that migration's header for the full
 // rationale.
 //
-// Per-row authz tier: owned. ownerUserId is threaded from the backing
-// document's owner on every append (edits run server-side on the
-// owner's behalf, mirroring createArtifact); every read gates
-// on ownerUserId==actor.userId so a caller can only ever see their own
-// document history.
+// Per-row authz tier: owned. ownerUserId is stamped from actor.userId on
+// every append -- the edit/restore handlers resolve the backing
+// document's owner and run the append under that owner's actor, so the
+// stamped value is the document owner and no caller can supply it
+// (memql#2989); every read gates on ownerUserId==actor.userId so a
+// caller can only ever see their own document history.
 
 /// An immutable content snapshot of one logical Library document at one point in its edit history.
 /// Appended -- never overwritten -- whenever a document is produced, edited (by user or assistant),
@@ -167,12 +168,12 @@ concept generatedOutput {
 /// document always point at the LATEST version while the full append-only history is retained
 /// behind it. Backed by the MemoryNodes TimescaleDB hypertable (partitioned on createdAt);
 /// long-lived, compression-after-90-days, no retention drop (memql#1228). Per-row authz: owned --
-/// ownerUserId is threaded from the document's owner on append; reads gate on
+/// ownerUserId is stamped from actor.userId on append; reads gate on
 /// ownerUserId==actor.userId.
 @displayCard(primary="documentId", secondary="note", tertiary="createdAt")
 @rowAuthz(owner="ownerUserId")
 concept documentVersion {
-  ownerUserId      string!  @description("v1:identity:user.id that owns the logical document this version belongs to. Threaded from the backing document's owner on every append (edits run server-side on the owner's behalf, not as the owner); the load-bearing per-row authz key for every history read.")
+  ownerUserId      string!  @description("v1:identity:user.id that owns the logical document this version belongs to. Stamped from actor.userId on every append and never accepted from caller args: the edit/restore handlers resolve the backing document's owner and run the append under that owner's actor, so the stamped value is the document owner and ownership cannot be forged. The load-bearing per-row authz key for every history read.")
 
   documentId       string!  @description("Logical document id this version belongs to -- the stable identity of the document ACROSS all its versions (e.g. the v1:library:generatedOutput id, or the artifact's sourceConceptRef). A PLAIN STRING foreign key, NOT an @relationship: it points across concepts to the backing document, and the only valid @relationship types (parent/contains/alias/equals) don't model a cross-concept content-history link. Every version of the same document shares this value; it is the grouping key for the history queries.")
 

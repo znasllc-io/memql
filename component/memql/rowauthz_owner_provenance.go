@@ -12,8 +12,9 @@ package memql
 // The obvious check is "is F named in an `accept { ... }` block". It
 // misses the live cases, and one of them it cannot see at all:
 //
-//   - `appendDocumentVersion` writes a bare `args.ownerUserId` mirror in
-//     a longhand `insert { }` with no `accept` block anywhere.
+//   - `appendDocumentVersion` wrote a bare `args.ownerUserId` mirror in
+//     a longhand `insert { }` with no `accept` block anywhere (memql#2989,
+//     since fixed -- the shape remains expressible).
 //   - `updateCalendarEvent` splats `args.payload` with NO overlay, so F
 //     is caller-writable without appearing anywhere near an `accept`
 //     block (memql#2988).

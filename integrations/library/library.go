@@ -222,7 +222,6 @@ func (i *Integration) handleEditDocument(ctx context.Context, args map[string]an
 	if err := i.appendVersion(ownerCtx, appendArgs{
 		versionId:        versionId,
 		documentId:       documentId,
-		ownerUserId:      ownerUserId,
 		versionNumber:    nextNum,
 		content:          content,
 		attachmentId:     attachmentId,
@@ -342,7 +341,6 @@ func (i *Integration) handleRestoreDocumentVersion(ctx context.Context, args map
 	if err := i.appendVersion(ownerCtx, appendArgs{
 		versionId:       versionId,
 		documentId:      documentId,
-		ownerUserId:     ownerUserId,
 		versionNumber:   nextNum,
 		content:         content,
 		attachmentId:    attachmentId,
@@ -369,10 +367,16 @@ func (i *Integration) handleRestoreDocumentVersion(ctx context.Context, args map
 }
 
 // appendArgs bundles the documentVersion append fields.
+//
+// No ownerUserId: appendDocumentVersion stamps it from actor.userId
+// (memql#2989). Both callers run the append under the backing
+// document's owner (`ownerCtx`), which is where that value now comes
+// from, and both refuse to proceed when the document has no owner --
+// withUserActor returns ctx UNCHANGED for a blank owner, so without
+// that guard the version would be attributed to the inbound caller.
 type appendArgs struct {
 	versionId        string
 	documentId       string
-	ownerUserId      string
 	versionNumber    int
 	content          string
 	attachmentId     string
@@ -386,8 +390,8 @@ type appendArgs struct {
 
 func (i *Integration) appendVersion(ctx context.Context, a appendArgs) error {
 	q := fmt.Sprintf(
-		`mutation appendDocumentVersion(versionId: %q, documentId: %q, ownerUserId: %q, versionNumber: %d, content: %q, attachmentId: %q, authorKind: %q, authorId: %q, note: %q, parentVersionId: %q, producedByPlanId: %q, partitionId: %q)`,
-		a.versionId, a.documentId, a.ownerUserId, a.versionNumber, a.content, a.attachmentId,
+		`mutation appendDocumentVersion(versionId: %q, documentId: %q, versionNumber: %d, content: %q, attachmentId: %q, authorKind: %q, authorId: %q, note: %q, parentVersionId: %q, producedByPlanId: %q, partitionId: %q)`,
+		a.versionId, a.documentId, a.versionNumber, a.content, a.attachmentId,
 		a.authorKind, a.authorId, a.note, a.parentVersionId, a.producedByPlanId, a.partitionId,
 	)
 	_, err := i.engine.Execute(ctx, q)
@@ -402,10 +406,13 @@ func (i *Integration) updateBackingContent(ctx context.Context, doc map[string]a
 		source = "agent_generated"
 	}
 	format := stringField(doc, "format")
+	// ownerUserId is NOT passed: updateGeneratedOutputContent stamps it
+	// from actor.userId (memql#2989). Both callers pass ownerCtx, built
+	// with withUserActor from the row's own ownerUserId after refusing to
+	// proceed on a blank one, so the re-inserted row keeps the same owner.
 	q := fmt.Sprintf(
-		`mutation updateGeneratedOutputContent(outputId: %q, ownerUserId: %q, title: %q, summary: %q, body: %q, attachmentId: %q, format: %q, mimeType: %q, source: %q, partitionId: %q, producedByPlanId: %q, producedByAgentId: %q)`,
+		`mutation updateGeneratedOutputContent(outputId: %q, title: %q, summary: %q, body: %q, attachmentId: %q, format: %q, mimeType: %q, source: %q, partitionId: %q, producedByPlanId: %q, producedByAgentId: %q)`,
 		stringField(doc, "id"),
-		stringField(doc, "ownerUserId"),
 		stringField(doc, "title"),
 		stringField(doc, "summary"),
 		content,

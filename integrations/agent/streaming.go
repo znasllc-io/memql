@@ -1255,10 +1255,15 @@ func (r *Replier) promoteCanvasOutput(ctx context.Context, turnCtx turnContext, 
 
 	outputId := deriveGeneratedOutputId("agent_generated", ownerUserId, turnCtx.PartitionId+":"+title)
 
+	// ownerUserId is NOT passed: createGeneratedOutput stamps it from
+	// actor.userId (memql#2989), and mutationCtx carries exactly that
+	// actor. The blank-owner early return above is load-bearing --
+	// withUserActor returns ctx UNCHANGED for a blank owner, which would
+	// attribute the row to the inbound caller instead.
 	mutationCtx := withUserActor(ctx, ownerUserId)
 	var b strings.Builder
-	fmt.Fprintf(&b, `mutation createGeneratedOutput(outputId:%q, ownerUserId:%q, title:%q, body:%q, source:%q`,
-		outputId, ownerUserId, title, body, "agent_generated")
+	fmt.Fprintf(&b, `mutation createGeneratedOutput(outputId:%q, title:%q, body:%q, source:%q`,
+		outputId, title, body, "agent_generated")
 	if summary != "" {
 		fmt.Fprintf(&b, `, summary:%q`, summary)
 	}

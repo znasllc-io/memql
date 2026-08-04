@@ -478,9 +478,14 @@ func (i *Integration) promoteWorkbenchOutput(ctx context.Context, planId, agentI
 		}
 	}
 
+	// ownerUserId is NOT passed: createGeneratedOutput stamps it from
+	// actor.userId (memql#2989), and mutationCtx carries exactly that
+	// actor. The blank-owner early return above is load-bearing --
+	// withUserActor returns ctx UNCHANGED for a blank owner, which would
+	// attribute the row to the inbound caller instead.
 	var b strings.Builder
-	fmt.Fprintf(&b, `mutation createGeneratedOutput(outputId:%q, ownerUserId:%q, title:%q, source:%q, format:%q`,
-		outputId, ownerUserId, title, "workbench_generated", format)
+	fmt.Fprintf(&b, `mutation createGeneratedOutput(outputId:%q, title:%q, source:%q, format:%q`,
+		outputId, title, "workbench_generated", format)
 	if attachmentId != "" {
 		// File-backed: the bytes ARE the deliverable, so reference the
 		// attachment instead of an inline pointer note (mirrors the

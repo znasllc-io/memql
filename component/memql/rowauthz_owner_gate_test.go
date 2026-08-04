@@ -32,8 +32,10 @@ import (
 // The natural check -- "is F named in an `accept { ... }` block" --
 // misses the live cases, and one of them it cannot see at all:
 //
-//   - `appendDocumentVersion` writes a bare `args.ownerUserId` mirror in
-//     a longhand `insert { }` with no `accept` block anywhere.
+//   - `appendDocumentVersion` wrote a bare `args.ownerUserId` mirror in
+//     a longhand `insert { }` with no `accept` block anywhere. That was
+//     memql#2989; it stamps from `actor.userId` now, but the shape is
+//     still expressible and a source scanner would still miss it.
 //   - `updateCalendarEvent` splatted `args.payload` with NO overlay, so
 //     the field was caller-writable without appearing near an `accept`
 //     block. That was memql#2988, a live defect on a concept that
@@ -171,32 +173,26 @@ each carry an issue number for exactly that reason.`,
 // a caller-supplied field TODAY, grandfathered so the gate can hard-fail
 // on anything new.
 //
-// This list is meant to shrink to empty. Each entry carries the issue
-// tracking its decision, and the decision is genuinely open: both
-// concepts' field docs claim edits "run server-side on the owner's
-// behalf", and nothing currently enforces that -- neither mutation
-// carries `@serverOnly`, so both are on the generated client surface
-// like any other.
+// EMPTY, and that is the point. It held two entries -- `library.generatedOutput`
+// and `library.documentVersion`, both memql#2989 -- and both were fixed
+// rather than annotated: their three mutations now stamp `ownerUserId`
+// from `actor.userId`, and every Go call site already ran under the
+// owner's actor, so no written value changed and the field simply
+// stopped being forgeable.
 //
-// `@serverOnly` IS available and enforced on mutations
-// (annotations/registry.go offers it on Mutation; function_loader.go
-// sets ServerOnly kind-agnostically; engine.go gates
-// executeMutationFunctionCall on it). An earlier version of this
-// comment claimed the opposite. So the remediation is likely a one-line
-// annotation per mutation rather than a language change -- pending
-// confirmation that every caller is internal, since annotating drops
-// them from the generated SDK.
+// An empty map means every declared owner tier in the tree is
+// server-stamped, which is the precondition memql#2803 records for
+// ruling on read-time enforcement: a tier over a caller-writable field
+// would be enforcement the attacker sets.
 //
-// Until that is confirmed, the gate cannot tell "handler-invoked, safe"
-// from "client-callable, forgeable" and deliberately over-rejects
-// rather than guess.
+// Two rules for anyone tempted to add an entry back:
 //
-// Adding an entry here without filing the decision is how a gate turns
-// into decoration.
-var ownerGateExemptions = map[string]string{
-	"v1:library:generatedOutput": "memql#2989 -- createGeneratedOutput/updateGeneratedOutputContent " +
-		"accept ownerUserId from caller args; the field doc claims handler-invoked but neither " +
-		"mutation carries @serverOnly, so both are client-callable",
-	"v1:library:documentVersion": "memql#2989 -- appendDocumentVersion writes a bare args.ownerUserId " +
-		"mirror; same unannotated 'server-side on the owner's behalf' claim",
-}
+//   - Fix it instead if you can. memql#2989's two entries looked like
+//     they needed a language change (`@serverOnly` on mutations, then
+//     an internal-origin stamp at five call sites) and that route was
+//     built and REFUTED -- stamping internal origin on a request-derived
+//     context opens every `@serverOnly` construct for the rest of that
+//     request. The actual fix was three stamp lines.
+//   - If you must exempt, file the decision first and reference it here.
+//     Adding an entry without one is how a gate turns into decoration.
+var ownerGateExemptions = map[string]string{}

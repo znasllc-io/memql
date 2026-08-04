@@ -408,9 +408,14 @@ func (i *Integration) promoteWorkerOutput(ctx context.Context, req Request) {
 		body = fmt.Sprintf("File written to %s at `%s`.", machineLabel, path)
 	}
 
+	// ownerUserId is NOT passed: createGeneratedOutput stamps it from
+	// actor.userId (memql#2989), and mutationCtx carries exactly that
+	// actor. The blank-owner early return above is load-bearing --
+	// withUserActor returns ctx UNCHANGED for a blank owner, which would
+	// attribute the row to the inbound caller instead.
 	var b strings.Builder
-	fmt.Fprintf(&b, `mutation createGeneratedOutput(outputId:%q, ownerUserId:%q, title:%q, body:%q, source:%q, format:%q`,
-		outputId, ownerUserId, title, body, "computer_use", format)
+	fmt.Fprintf(&b, `mutation createGeneratedOutput(outputId:%q, title:%q, body:%q, source:%q, format:%q`,
+		outputId, title, body, "computer_use", format)
 	if req.AgentId != "" {
 		fmt.Fprintf(&b, `, producedByAgentId:%q`, req.AgentId)
 	}
