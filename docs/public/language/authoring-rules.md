@@ -1140,16 +1140,26 @@ insert {
   ...
 }
 
-// Right -- canonicalId() collapses both forms to the same string. The
-// second argument is the imported concept short-name (resolved against
-// the file-top `use ...concepts.{ space, user }` imports).
+// Right -- canonicalId() collapses both forms to the same string, AND
+// each part is hashed before concatenation so the composite cannot
+// alias. The second argument is the imported concept short-name
+// (resolved against the file-top `use ...concepts.{ space, user }`
+// imports).
 insert {
   id: hash(concat(
-    canonicalId(args.spaceId, space), ":",
-    canonicalId(args.userId,  user)
+    hash(canonicalId(args.spaceId, space)),
+    hash(canonicalId(args.userId,  user))
   ))
   ...
 }
+
+// Wrong -- joining with a separator first. `hash(concat(a, ":", b))`
+// ALIASES whenever a part can contain the separator: ("chat", "k:1")
+// and ("chat:k", "1") derive one id, so two distinct rows collapse into
+// one. A canonicalId() part happens to be safe today only because its
+// fixed `v1:ns:concept:` prefix makes the split recoverable -- that is a
+// property of the data shape, not a constraint, and it stops holding the
+// moment a part is caller-supplied (memql#3009).
 ```
 
 (Don't prefix the hash with the concept name -- `id:
