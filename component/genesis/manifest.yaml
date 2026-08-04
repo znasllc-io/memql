@@ -400,6 +400,50 @@ variables:
     default: "300"
     description: "Attempt-scoped lease on the cross-replica delivery claim: how long a won claim blocks peers before a dead claimant's key is re-winnable, so a crash between claim and terminal stamp recovers instead of wedging the row until the guard retention prune. Keep it above MEMQL_OUTBOUND_HTTP_TIMEOUT_SECONDS."
 
+  # --- inbound delivery (memql#2957) ---
+  #
+  # The per-source verification policy is a FAMILY of vars keyed on the source
+  # name, so it cannot be enumerated here:
+  #
+  #   MEMQL_INBOUND_SOURCE_<NAME>_SECRET             the shared HMAC key
+  #   MEMQL_INBOUND_SOURCE_<NAME>_SIGNATURE_SCHEME   hmac-sha256-hex | hmac-sha256-base64 | none
+  #   MEMQL_INBOUND_SOURCE_<NAME>_SIGNATURE_HEADER   e.g. X-Hub-Signature-256
+  #   MEMQL_INBOUND_SOURCE_<NAME>_SIGNATURE_PREFIX   e.g. "sha256=" (optional)
+  #   MEMQL_INBOUND_SOURCE_<NAME>_TIMESTAMP_HEADER   enables the replay window (optional)
+  #   MEMQL_INBOUND_SOURCE_<NAME>_DEDUPE_HEADER      sender idempotency key (optional)
+  #
+  # <NAME> is the source name uppercased with '-' mapped to '_'. The SECRET is
+  # secret material and belongs in the deployment's secret store, never in an
+  # overlay. A listed source that does not resolve to a usable policy is DROPPED
+  # (404), never admitted unverified -- see docs/internal/design/inbound-delivery-adr.md.
+
+  - name: MEMQL_INBOUND_ENABLED
+    component: inbound
+    scope: node
+    optional: true
+    default: "true"
+    description: "Inbound-delivery receiver on/off. Even when enabled the receiver admits nothing until MEMQL_INBOUND_SOURCE_ALLOWLIST names a source (deny-by-default ingress)."
+
+  - name: MEMQL_INBOUND_SOURCE_ALLOWLIST
+    component: inbound
+    scope: node
+    optional: true
+    description: "Comma-separated source names the receiver serves at POST /inbound/{source} (e.g. `shopify,tiktok`). Empty = every request is refused with 404. Each name needs its own MEMQL_INBOUND_SOURCE_<NAME>_* verification policy or it is dropped."
+
+  - name: MEMQL_INBOUND_MAX_BODY_BYTES
+    component: inbound
+    scope: node
+    optional: true
+    default: "262144"
+    description: "Maximum inbound request body the receiver reads; larger requests are refused with 413 and no row is staged. Bounds what an unauthenticated caller can make the node allocate before the signature check runs."
+
+  - name: MEMQL_INBOUND_TIMESTAMP_TOLERANCE_SECONDS
+    component: inbound
+    scope: node
+    optional: true
+    default: "300"
+    description: "Replay window for sources that sign a timestamp (MEMQL_INBOUND_SOURCE_<NAME>_TIMESTAMP_HEADER). A request outside the window in either direction is refused even when its signature is valid; without a timestamp header a signature is valid forever and dedupeKey is the only replay defence."
+
   # --- engine ---
 
   - name: MEMQL_AUTHORING_CAPTURE_ENABLED
