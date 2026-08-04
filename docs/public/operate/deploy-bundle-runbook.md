@@ -1,3 +1,12 @@
+---
+title: Deploy-bundle runbook -- make deploy via deployEngineCluster
+audience: public
+status: stable
+area: operate
+sinceVersion: 0.12.0
+owner: znas
+---
+
 # Deploy-Bundle Runbook -- `make deploy` via deployEngineCluster
 
 How to run a deployment of the PURE ENGINE mesh through the DSL deploy
