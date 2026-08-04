@@ -179,8 +179,12 @@ func TestCond_TruthinessIsPinnedIndependently(t *testing.T) {
 		// handed the string "false" -- exactly what a JSON, HTTP or MCP caller
 		// sends for a stringified boolean -- used to open it.
 		//
-		// TestCondTruthinessAgreesAcrossBodyShapes drives both shapes end to
-		// end so the two can no longer drift apart.
+		// This test pins the single-statement half. The multi-statement half
+		// is pinned in component/automations by
+		// TestCondTruthinessMultiStatementPath, and
+		// TestCondTruthinessPathMatchesTheSharedRule there asserts that
+		// path's OUTPUT equals memql.IsTruthy's -- so the two cannot drift
+		// apart without a failure naming which side moved.
 		{`the string "false" is falsy -- the memql#2963 ruling`, "false", "no"},
 		{`the string "0" is falsy -- the memql#2963 ruling`, "0", "no"},
 	} {

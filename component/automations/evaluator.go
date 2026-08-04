@@ -2612,8 +2612,6 @@ func compareValues(a, b any) bool {
 	return aStr == bStr
 }
 
-// isTruthy determines if a value is truthy.
-
 // toNumber converts a value to a float64.
 func toNumber(v any) float64 {
 	if v == nil {

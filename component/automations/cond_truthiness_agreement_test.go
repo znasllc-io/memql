@@ -2,10 +2,35 @@ package automations
 
 import (
 	"fmt"
+	"go/ast"
+	goparser "go/parser"
+	"go/token"
+	"strings"
 	"testing"
 
 	"github.com/znasllc-io/memql/component/memql"
 )
+
+// singleCall reports the sole call expression on the right-hand side of an
+// assignment, if that is what it is.
+func singleCall(rhs []ast.Expr) (*ast.CallExpr, bool) {
+	if len(rhs) != 1 {
+		return nil, false
+	}
+	call, ok := rhs[0].(*ast.CallExpr)
+	return call, ok
+}
+
+// isSharedRuleCall reports whether the call is `memql.IsTruthy(...)` -- the one
+// spelling a variable named isTruthy is allowed to be assigned from.
+func isSharedRuleCall(call *ast.CallExpr) bool {
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok || sel.Sel.Name != "IsTruthy" {
+		return false
+	}
+	pkg, ok := sel.X.(*ast.Ident)
+	return ok && pkg.Name == "memql"
+}
 
 // cond_truthiness_agreement_test.go -- memql#2963.
 //
@@ -87,28 +112,48 @@ func TestCondTruthinessMultiStatementPath(t *testing.T) {
 	}
 }
 
-// TestCondTruthinessAgreesAcrossBodyShapes is the agreement itself: the SAME
-// input set, run through the shared rule the single-statement path uses, must
-// produce the same verdict as the multi-statement path above.
+// TestCondTruthinessPathMatchesTheSharedRule is the agreement itself, and WHAT
+// it compares is the whole point: for every input, the answer the
+// multi-statement PATH ACTUALLY PRODUCES must equal the answer memql.IsTruthy
+// gives. Path output against rule output -- not the rule against a table.
 //
-// It reads memql.IsTruthy directly rather than re-running the engine, because
-// this package cannot construct component/memql's seam harness. The
-// single-statement half is pinned in that package by
-// TestCond_TruthinessIsPinnedIndependently over the same values, and both
-// ultimately call the function this asserts on -- so if the two ever diverge
-// again, one of the two tests fails and this comment says why.
-func TestCondTruthinessAgreesAcrossBodyShapes(t *testing.T) {
+// That distinction is the difference between a gate and a tautology. An earlier
+// spelling asserted only `memql.IsTruthy(tc.in) == want`, which says nothing
+// whatever about the path: repoint evaluator.go's call site at a local
+// permissive rule and the two genuinely disagree, yet that version PASSED,
+// because it never evaluated the path. This version fails, because it
+// evaluates both sides and compares them.
+//
+// This package cannot drive the single-statement shape, and the reason is
+// structural rather than a missing harness: `return cond(...)` alone compiles
+// to an automation with no steps ("automation must have at least one step"),
+// which is exactly WHY that shape takes component/memql's path instead. It is
+// pinned there by TestCond_TruthinessIsPinnedIndependently over the same
+// values, and TestThereIsOnlyOneTruthinessRuleImplementation below is what
+// stops a second rule appearing for either side to drift onto.
+func TestCondTruthinessPathMatchesTheSharedRule(t *testing.T) {
 	for _, tc := range condTruthinessCases {
 		t.Run(tc.name, func(t *testing.T) {
-			want := tc.want == "Y"
-			if got := memql.IsTruthy(tc.in); got != want {
-				t.Errorf("memql.IsTruthy(%#v) = %v, want %v.\n\n"+
-					"The two logic-body shapes decide cond's branch through this one rule "+
-					"(memql#2963). If it changes, BOTH the multi-statement expectations above "+
-					"and component/memql's TestCond_TruthinessIsPinnedIndependently have to "+
-					"change with it -- and the direction matters: the permissive spelling "+
-					"(any non-empty string is truthy) fails OPEN on a gate written "+
-					"`cond(args.allowed, true, false)`.", tc.in, got, want)
+			ev := NewEvaluator()
+			ev.SetCustom("args", map[string]any{"allowed": tc.in})
+			got, handled, err := tryEvaluateBuiltinLocally(`cond(args.allowed, "Y", "N")`, ev)
+			if err != nil {
+				t.Fatalf("evaluating cond with allowed=%#v: %v", tc.in, err)
+			}
+			if !handled {
+				t.Fatalf("cond was not handled locally for allowed=%#v, so this measures nothing", tc.in)
+			}
+
+			pathSaysTruthy := fmt.Sprint(got) == "Y"
+			ruleSaysTruthy := memql.IsTruthy(tc.in)
+			if pathSaysTruthy != ruleSaysTruthy {
+				t.Errorf("the multi-statement PATH and the shared RULE disagree on %#v: "+
+					"path chose %q (truthy=%v), memql.IsTruthy says truthy=%v.\n\n"+
+					"That is the divergence memql#2963 was filed about, reopened. cond's branch "+
+					"must come from one rule on every path -- and the direction matters: the "+
+					"permissive spelling (any non-empty string is truthy) fails OPEN on a gate "+
+					"written `cond(args.allowed, true, false)`.",
+					tc.in, got, pathSaysTruthy, ruleSaysTruthy)
 			}
 		})
 	}
@@ -116,17 +161,85 @@ func TestCondTruthinessAgreesAcrossBodyShapes(t *testing.T) {
 
 // The duplicate is gone, not merely aligned. Two implementations that happen to
 // agree today is the state memql#2963 was filed about -- they agreed on nine of
-// eleven inputs, which is exactly why nobody noticed.
-func TestThereIsOnlyOneTruthinessRule(t *testing.T) {
-	// A local isTruthy in this package would shadow the shared one at every
-	// call site without a compile error, which is how the divergence survived.
-	// Nothing here can assert "no such function exists" at runtime, so the
-	// gate is the call sites: they name the package explicitly.
-	//
-	// Kept as a behavioural anchor rather than a source scan: if someone
-	// reintroduces a local rule and repoints the call sites at it, the
-	// agreement test above fails the moment the two disagree on any input in
-	// the set -- which now includes both inputs they historically disagreed on.
+// eleven inputs, which is exactly why nobody noticed for as long as they didn't.
+//
+// This is a SOURCE SCAN, and it has to be. The behavioural anchor it replaces
+// asserted `!memql.IsTruthy("false")` and nothing else -- a strict subset of
+// what the table above already covers -- and it passed with a duplicate rule
+// reintroduced AND wired into the production call site. It could not have
+// failed: it never looked at anything except the one function it wanted to
+// vouch for. Its own comment claimed "nothing here can assert 'no such function
+// exists' at runtime"; that is untrue, and this repo already does exactly this
+// scan in component/automations/actor_envelope_invariant_test.go,
+// component/database/memory-nodes/concept_rowauthz_test.go and
+// component/identity/admin/route_gate_test.go.
+//
+// What a truthiness rule looks like, and why the shape is worth matching on: a
+// function whose body type-switches a value and answers bool. The historical
+// ones were `isTruthy`, and a local one shadows the shared rule at every call
+// site in the package with no compile error -- which is how the divergence
+// survived long enough to be filed.
+func TestThereIsOnlyOneTruthinessRuleImplementation(t *testing.T) {
+	roots := []string{".", "./steps"}
+	var offenders []string
+	scanned := 0
+
+	for _, root := range roots {
+		fset := token.NewFileSet()
+		pkgs, err := goparser.ParseDir(fset, root, nil, goparser.SkipObjectResolution)
+		if err != nil {
+			t.Fatalf("parse %s: %v", root, err)
+		}
+		for _, pkg := range pkgs {
+			for path, file := range pkg.Files {
+				if strings.HasSuffix(path, "_test.go") {
+					continue
+				}
+				scanned++
+				ast.Inspect(file, func(n ast.Node) bool {
+					switch d := n.(type) {
+					case *ast.FuncDecl:
+						if strings.EqualFold(d.Name.Name, "isTruthy") {
+							offenders = append(offenders,
+								fmt.Sprintf("%s:%d func %s", path, fset.Position(d.Pos()).Line, d.Name.Name))
+						}
+					case *ast.AssignStmt:
+						// `isTruthy := ...` -- the inline spelling that carried
+						// its own rule in steps/mutation.go, complete with a
+						// multi-type `case int, int64, float64: v != 0` that
+						// left v as `any` and read int64(0) as TRUE.
+						for _, lhs := range d.Lhs {
+							id, ok := lhs.(*ast.Ident)
+							if ok && strings.EqualFold(id.Name, "isTruthy") {
+								if call, isCall := singleCall(d.Rhs); isCall && isSharedRuleCall(call) {
+									continue // `isTruthy := memql.IsTruthy(x)` is the point
+								}
+								offenders = append(offenders,
+									fmt.Sprintf("%s:%d local %s", path, fset.Position(id.Pos()).Line, id.Name))
+							}
+						}
+					}
+					return true
+				})
+			}
+		}
+	}
+
+	if scanned == 0 {
+		t.Fatal("scanned no non-test Go files, so this gate measures nothing")
+	}
+	if len(offenders) > 0 {
+		t.Errorf("a second truthiness rule exists in this package tree:\n  %s\n\n"+
+			"cond's branch must come from memql.IsTruthy and nothing else (memql#2963). A "+
+			"local rule shadows the shared one at every call site in its package with no "+
+			"compile error -- which is how the original divergence survived. If this is a "+
+			"deliberate new rule, three documents change with it: "+
+			"docs/public/language/functions.md, dsl/_reference/_logic.memql, and this test.",
+			strings.Join(offenders, "\n  "))
+	}
+
+	// Belt and braces on the direction of the shared rule itself, kept because
+	// it is the one property the scan above cannot express.
 	for _, in := range []any{"false", "0"} {
 		if memql.IsTruthy(in) {
 			t.Errorf("memql.IsTruthy(%q) is true. That is the permissive spelling this package "+

@@ -598,20 +598,15 @@ func (e *MutationExecutor) evaluateCond(evaluator *automations.Evaluator, expr s
 		return nil, fmt.Errorf("evaluating cond() predicate: %w", err)
 	}
 
-	// Determine truthiness
-	isTruthy := false
-	switch v := condVal.(type) {
-	case bool:
-		isTruthy = v
-	case string:
-		isTruthy = v != "" && v != "false" && v != "0"
-	case int, int64, float64:
-		isTruthy = v != 0
-	case nil:
-		isTruthy = false
-	default:
-		isTruthy = condVal != nil
-	}
+	// Truthiness comes from THE one rule (memql#2963), never a local copy.
+	//
+	// The copy that used to live here disagreed with it on four inputs, and
+	// one of those was a plain bug: `case int, int64, float64: isTruthy =
+	// v != 0` is a multi-type case, so `v` keeps static type `any` and the
+	// comparison is `any(int64(0)) != any(int(0))` -- true, because the
+	// dynamic types differ. Zero was TRUTHY here, and float64 is exactly
+	// what JSON hands you for 0. It also read an empty slice or map as true.
+	isTruthy := memql.IsTruthy(condVal)
 
 	// Evaluate the appropriate branch
 	if isTruthy {

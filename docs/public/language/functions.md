@@ -535,6 +535,24 @@ Verified author-surface helpers (see `component/language/parser`):
 
 The two string cases are called out because they are the ones that bite: a JSON, HTTP or MCP caller sends `"false"` for a boolean it stringified, and a gate written `cond(args.allowed, true, false)` has to read that as false. It does.
 
+**Anything the table does not name is true.** That is a deliberate fail-open on
+values the language has no opinion about, and three consequences are worth
+knowing before you lean on truthiness as a gate:
+
+- The string comparison is **exact**. `"FALSE"`, `"False"`, `" false"` and
+  `"0.0"` are all **true** — only `"false"` and `"0"` are falsy. Normalise a
+  stringified boolean before it reaches a condition rather than expecting this
+  rule to catch every spelling of it.
+- `0` and "a non-empty list or object" mean the shapes a decoded JSON document
+  actually produces. A number or collection that reached the engine as some
+  other Go kind falls into the catch-all and is read as **true even when it is
+  zero or empty**.
+- Anything else — a struct, a timestamp, a decoder-specific wrapper — is true.
+
+Where a condition is a **security** gate, prefer an explicit comparison,
+`cond(args.allowed == true, ...)`, over relying on truthiness. Every gate in the
+shipped DSL does exactly that.
+
 ### Strings and Ids
 
 | Function | Description | Example |
