@@ -1,3 +1,12 @@
+---
+title: Reproduce staging locally (k3d + ArgoCD)
+audience: public
+status: stable
+area: operate
+sinceVersion: 0.9.36
+owner: znas
+---
+
 # Reproduce staging locally (k3d + ArgoCD)
 
 The k3d + ArgoCD cluster is the **blessed local dev topology** (memql#2061,

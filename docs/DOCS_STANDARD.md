@@ -94,12 +94,18 @@ it's `internal`.
 3. **Bundle:** `scripts/docs/build-docs-bundle.sh` selects the public set,
    runs the generator, and emits `docs-bundle/` = the markdown tree + a
    `manifest.json` (nav tree, section map, `version`, `engineVersion`).
-4. **Release:** on a new `releases/<X.Y.Z>.yaml` lockfile, the
-   `publish-releases` hook builds the bundle at that tag and publishes
-   `docs-<X.Y.Z>.tgz` as a release asset.
-5. **Site:** memql.io consumes each release's bundle into
-   `versioned_docs/version-X.Y.Z/` and shows a version dropdown; `latest`
-   tracks `main`'s `docs/public`.
+4. **Release:** when a GitHub Release is published on a bare `X.Y.Z` tag, the
+   `publish-docs-bundle` workflow (`.github/workflows/publish-docs-bundle.yml`)
+   builds the bundle **at that tag** on the build server and attaches
+   `docs-<X.Y.Z>.tgz` as a release asset. `workflow_dispatch` with a `version`
+   input backfills or re-uploads one release; because the bundle is built at
+   the tag, backfilling an old tag does not pick up later docs fixes.
+5. **Site:** the memql-website repo unpacks each release's bundle into
+   `src/content/docs/<X.Y.Z>/`, registers it in `versions.json`, and renders a
+   version dropdown. `latest` tracks the newest bundle the site has pulled --
+   **not** `main` -- so docs go live only when a release exists and its bundle
+   has been pulled and pushed. New bundles land uncommitted for human review;
+   the push to the website's `main` is the publish gate.
 
 **Docs version == engine release.** No separate docs version line.
 
