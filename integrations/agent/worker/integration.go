@@ -353,7 +353,7 @@ func (i *Integration) promoteWorkerOutput(ctx context.Context, req Request) {
 		return
 	}
 	ownerUserId := strings.TrimSpace(req.OwnerUserId)
-	if ownerUserId == "" {
+	if strings.TrimSpace(ownerUserId) == "" {
 		return
 	}
 
@@ -408,9 +408,14 @@ func (i *Integration) promoteWorkerOutput(ctx context.Context, req Request) {
 		body = fmt.Sprintf("File written to %s at `%s`.", machineLabel, path)
 	}
 
+	// ownerUserId is NOT passed: createGeneratedOutput stamps it from
+	// actor.userId (memql#2989), and mutationCtx carries exactly that
+	// actor. The blank-owner early return above is load-bearing --
+	// withUserActor returns ctx UNCHANGED for a blank owner, which would
+	// attribute the row to the inbound caller instead.
 	var b strings.Builder
-	fmt.Fprintf(&b, `mutation createGeneratedOutput(outputId:%q, ownerUserId:%q, title:%q, body:%q, source:%q, format:%q`,
-		outputId, ownerUserId, title, body, "computer_use", format)
+	fmt.Fprintf(&b, `mutation createGeneratedOutput(outputId:%q, title:%q, body:%q, source:%q, format:%q`,
+		outputId, title, body, "computer_use", format)
 	if req.AgentId != "" {
 		fmt.Fprintf(&b, `, producedByAgentId:%q`, req.AgentId)
 	}
@@ -599,7 +604,7 @@ func (i *Integration) handleRequestScope(ctx context.Context, args map[string]an
 	default:
 		return nil, fmt.Errorf("worker integration: requestedScope must be observe or full (got %q)", scope)
 	}
-	if agentId == "" || ownerUserId == "" {
+	if agentId == "" || strings.TrimSpace(ownerUserId) == "" {
 		return nil, fmt.Errorf("worker integration: agentId and ownerUserId required (auto-injection failed)")
 	}
 
@@ -735,17 +740,7 @@ func outputPayloadRows(payload any) []map[string]any {
 // contextWithSystemActor pattern but scoped to a real user
 // instead of a system identifier.
 func withUserActor(ctx context.Context, ownerUserId string) context.Context {
-	if strings.TrimSpace(ownerUserId) == "" {
-		return ctx
-	}
-	claims := map[string]any{
-		"sub":   ownerUserId,
-		"email": ownerUserId,
-		"role":  "user",
-	}
-	token := auth.BuildTokenInfo(claims)
-	ctx = auth.ContextWithClaims(ctx, claims)
-	return auth.ContextWithToken(ctx, token)
+	return auth.ContextWithUserActor(ctx, ownerUserId)
 }
 
 func asString(v any) string {

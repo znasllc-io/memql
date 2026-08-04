@@ -69,13 +69,15 @@ mutate artifact createArtifact {
 }
 
 /// Create a generated-output row -- a deliverable PRODUCED through the app (workbench result,
-/// computer-use output, or standalone agent output). System / agent-invoked: ownerUserId is the
+/// computer-use output, or standalone agent output). Owned: ownerUserId is stamped from
+/// actor.userId, so the row can only ever be created for the acting user. Every Go call site runs
+/// the mutation under the producing user's actor (withUserActor), so the stamped value is the
 /// producing user. indexGeneratedOutput folds the new row into the Library index automatically.
 /// body carries inline text outputs; attachmentId references file bytes for file-backed outputs.
+@actor
 mutate generatedOutput createGeneratedOutput {
   args {
     outputId          string!
-    ownerUserId       string!
     title             string!
     summary           string
     body              string
@@ -90,9 +92,10 @@ mutate generatedOutput createGeneratedOutput {
     producedByWorkerName string
   }
   insert {
-    accept { ownerUserId, title, summary, body, attachmentId, mimeType, source, partitionId, producedByPlanId, producedByAgentId, producedByWorkerId, producedByWorkerName }
+    accept { title, summary, body, attachmentId, mimeType, source, partitionId, producedByPlanId, producedByAgentId, producedByWorkerId, producedByWorkerName }
     stamp {
       id: args.outputId
+      ownerUserId: actor.userId
       format: args.format ?? "markdown"
     }
   }
@@ -131,22 +134,25 @@ mutate memory createMemory {
 // (integration.library.editDocument / restoreDocumentVersion), which
 // reads the current latest version, computes the next versionNumber +
 // a fresh version id (MemQL has no arithmetic / id-mint), and calls
-// THIS mutation to append the immutable snapshot. System / handler-
-// invoked: ownerUserId is threaded from the backing document's owner
-// because the append runs server-side on the owner's behalf (mirrors
-// createArtifact). Each call inserts a brand-new immutable row
-// (its own versionId) -- the history is append-only, nothing is ever
-// overwritten.
+// THIS mutation to append the immutable snapshot. Owned: ownerUserId is
+// stamped from actor.userId. Both handlers resolve the backing
+// document's owner and run the append under that owner's actor
+// (`ownerCtx := withUserActor(ctx, ownerUserId)`), so the stamped value
+// is the document owner -- the same value the old caller-supplied arg
+// carried, minus the ability to forge it (memql#2989). Each call inserts
+// a brand-new immutable row (its own versionId) -- the history is
+// append-only, nothing is ever overwritten.
 
 /// Append an immutable document-version snapshot to a logical document's history. Handler-invoked
-/// (integration.library.editDocument / restoreDocumentVersion) -- ownerUserId is threaded from the
-/// backing document's owner, versionNumber + versionId are computed server-side from the current
+/// (integration.library.editDocument / restoreDocumentVersion) -- ownerUserId is stamped from
+/// actor.userId (the handlers run the append under the backing document's owner),
+/// versionNumber + versionId are computed server-side from the current
 /// latest. Append-only: every call inserts a new immutable row; nothing is overwritten.
+@actor
 mutate documentVersion appendDocumentVersion {
   args {
     versionId        string!
     documentId       string!
-    ownerUserId      string!
     versionNumber    int!
     content          string
     attachmentId     string
@@ -160,7 +166,7 @@ mutate documentVersion appendDocumentVersion {
   insert {
     id: args.versionId
     args.documentId
-    args.ownerUserId
+    ownerUserId: actor.userId
     args.versionNumber
     args.content
     args.attachmentId
@@ -181,12 +187,12 @@ mutate documentVersion appendDocumentVersion {
 /// Re-insert a generatedOutput row (same id, new version) carrying the latest edited content so the
 /// Library viewer + artifact index reflect the most recent document version. Append-only by (id,
 /// createdAt): a new node version, reads return the latest. Handler-invoked by
-/// integration.library.editDocument / restoreDocumentVersion; ownerUserId is threaded from the
-/// existing row.
+/// integration.library.editDocument / restoreDocumentVersion; ownerUserId is stamped from
+/// actor.userId, and both handlers run the write under the existing row's owner.
+@actor
 mutate generatedOutput updateGeneratedOutputContent {
   args {
     outputId      string!
-    ownerUserId   string!
     title         string!
     summary       string
     body          string
@@ -199,9 +205,10 @@ mutate generatedOutput updateGeneratedOutputContent {
     producedByAgentId string
   }
   insert {
-    accept { ownerUserId, title, summary, body, attachmentId, mimeType, source, partitionId, producedByPlanId, producedByAgentId }
+    accept { title, summary, body, attachmentId, mimeType, source, partitionId, producedByPlanId, producedByAgentId }
     stamp {
       id: args.outputId
+      ownerUserId: actor.userId
       format: args.format ?? "markdown"
     }
   }

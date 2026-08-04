@@ -277,8 +277,10 @@ The check derives from the **loaded `MutationTemplate`**, not from
 scanning `accept { ... }` blocks, because the source spelling and the
 runtime behaviour are different questions:
 
-- `appendDocumentVersion` writes a bare `args.ownerUserId` mirror with
-  no `accept` block anywhere.
+- `appendDocumentVersion` wrote a bare `args.ownerUserId` mirror with
+  no `accept` block anywhere. That was **memql#2989**; it stamps from
+  `actor.userId` now, but the shape stays expressible and a source
+  scanner would still miss it.
 - `updateCalendarEvent` splatted `args.payload` with **no overlay**, so
   the field was caller-writable without appearing near an `accept`
   block. That was **memql#2988**, a live defect on a concept that
@@ -301,15 +303,70 @@ read-merge. What matters is not the kind but that `updateNote` carries
 an explicit `ownerUserId: actor.userId` line, which is what puts the
 field in the overlay.
 
-Two concepts are grandfathered with named exemptions (memql#2989). Both
-claim in their field docs that edits "run server-side on the owner's
-behalf", and nothing currently enforces that — neither mutation carries
-`@serverOnly`, so both sit on the generated client surface like any
-other. `@serverOnly` **is** available and enforced on mutations, so the
-remediation is likely a one-line annotation each rather than a language
-change; it is pending confirmation that every caller is internal, since
-annotating drops them from the generated SDK. The gate over-rejects
-rather than guess, and the list is meant to shrink to empty.
+**The exemption list is empty.** It held two concepts —
+`library.generatedOutput` and `library.documentVersion`, both
+**memql#2989** — whose field docs claimed edits "run server-side on the
+owner's behalf" while their three mutations took `ownerUserId` from
+caller args, with nothing enforcing the claim.
+
+Both were fixed rather than annotated. The `@serverOnly` route looked
+like the honest one and was built and **refuted**: `@serverOnly` is
+enforced as `fn.ServerOnly && !auth.OriginFromContext(ctx).IsInternal()`,
+so annotating requires the callers to stamp internal origin — and all
+five run on **request-derived** contexts (an agent turn driven by a user
+utterance, a library edit handler, a workbench dispatch inside an agent
+turn). Internal origin is the only thing that opens the `@serverOnly`
+gate at all, so stamping it there would open *every* server-only
+construct for the remainder of that request.
+`TestOnlyAllowlistedPackagesStampInternalOrigin` catches exactly this.
+
+The actual fix was three `stamp { ownerUserId: actor.userId }` lines
+**plus a correction to the synthetic-actor helper they depend on**, and
+the second half is the part worth reading.
+
+The original change rested on the claim that every call site already ran
+the mutation under the owner's actor, because `withUserActor` stamps
+`sub: ownerUserId`. That claim was false, and the review measured it:
+`actor.userId` does not resolve from claims. It resolves from the
+**AccessContext** (`resolveActorReference` -> `auth.AccessFromContext`),
+and `withUserActor` set only claims + TokenInfo. So the stamp resolved to
+the **inbound caller** — or to `""` on a detached context, because
+`ActorEnvelopeValue` returns `("", true)` for a nil AccessContext rather
+than an error, meaning the row was written and the call SUCCEEDED.
+
+That is the same failure `contextWithSystemActor` is warned about at
+`component/server/server.go:396-402`, reached from the other direction.
+
+The five byte-identical copies of `withUserActor` are now one helper,
+`auth.ContextWithUserActor`, which binds all three surfaces — claims and
+TokenInfo (read by `createdBy` and the mutation-actor check) **and** the
+AccessContext (read by `actor.*`). With that in place the original claim
+holds: no written value changes, and the field stops being forgeable.
+
+**Scope of that guarantee.** It covers the named-mutation surface. It
+does not cover raw `insert(...)`, which short-circuits the planner
+(`component/memql/parser.go:520`) and bypasses `args` / `accept` /
+`stamp` entirely; only three concepts carry a per-concept Go guard on
+that path, and neither library concept is one of them. Tracked as
+**memql#3059**.
+
+One edge is load-bearing and now asserted: `auth.ContextWithUserActor`
+returns the context **unchanged** for a blank owner, so a write on that
+path would be stamped with whatever actor the inbound caller carried. All
+five sites refuse before reaching the mutation — the two library handlers
+error, the three promotion paths return early — and every one of those
+guards now trims whitespace, matching the helper, so a whitespace-only
+owner cannot slip past the guard and then no-op inside it.
+
+An empty exemption map means every declared owner tier in the tree is
+server-stamped. That is the precondition **memql#2803** records for
+ruling on read-time enforcement: a tier over a caller-writable field
+would be enforcement the attacker sets, which is strictly worse than none
+because a declared tier stops an auditor looking.
+
+Two rules if you are tempted to add an entry back: **fix it instead if
+you can**, and if you must exempt, file the decision first and reference
+it in the map. An entry without one is how a gate turns into decoration.
 
 ### Seeding the tree
 

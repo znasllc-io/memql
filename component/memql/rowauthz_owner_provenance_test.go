@@ -93,15 +93,139 @@ func TestSplatWithoutOverlayIsCallerWritable(t *testing.T) {
 // as a plain field, with no accept block anywhere in the mutation. The
 // issue's originally-specified "scan the accept block" check is blind
 // to this.
+//
+// SYNTHETIC, and it did not used to be -- same story as
+// TestSplatWithoutOverlayIsCallerWritable above. This was
+// `appendDocumentVersion` verbatim until memql#2989 fixed it; the tree
+// no longer contains the shape, so the fixture is built by hand rather
+// than asserted against a mutation that is now correct. The live pair is
+// preserved in TestLibraryOwnerFieldsAreServerStamped (the fix).
+//
+// The value is a lowered `*ArgRefExpr`, not the source text: that is the
+// form the loader actually produces for a bare `args.X` line, and
+// memql#2840's trap was precisely an analyzer that classified the
+// printed form instead.
 func TestBareArgsMirrorIsCallerWritable(t *testing.T) {
-	reg := loadTreeRegistry(t)
-	got := provenanceOf(t, reg, "v1:library:documentVersion", "ownerUserId")
+	reg := newFunctionRegistry()
+	if err := reg.Upsert(&Function{
+		Name:         "appendThingVersionUnsafe",
+		FunctionKind: "mutation",
+		BoundConcept: "v1:probe:thingVersion",
+		MutationTemplate: &FunctionMutationTemplate{
+			Concept:    "v1:probe:thingVersion",
+			IDTemplate: "args.versionId",
+			// A longhand insert: an object literal with a bare
+			// `args.ownerUserId` mirror and no accept block anywhere.
+			PayloadTemplate: map[string]any{
+				"thingId":     &langparser.ArgRefExpr{Path: "thingId"},
+				"ownerUserId": &langparser.ArgRefExpr{Path: "ownerUserId"},
+			},
+			PayloadOverlayTemplate: map[string]any{},
+		},
+	}); err != nil {
+		t.Fatalf("seed registry: %v", err)
+	}
+
+	got := provenanceOf(t, reg, "v1:probe:thingVersion", "ownerUserId")
 	if got.ServerStamped {
-		t.Fatalf("library.documentVersion.ownerUserId reported server-stamped; "+
-			"appendDocumentVersion writes a bare args.ownerUserId mirror. StampedBy=%v", got.StampedBy)
+		t.Fatalf("a bare args.ownerUserId mirror in a longhand insert reported server-stamped. "+
+			"There is no accept block to scan, which is exactly why this analyzer reads the "+
+			"loaded template instead. StampedBy=%v", got.StampedBy)
 	}
 	if len(got.WritableBy) == 0 {
 		t.Fatal("no mutation was named as caller-writable, so the diagnostic is unusable")
+	}
+}
+
+// The live half of memql#2989, asserted against the REAL tree: both
+// library concepts that once declared an owner tier over a
+// caller-supplied field now stamp it from actor.userId.
+//
+// This is the regression test for the fix, and it is the reason
+// ownerGateExemptions is empty. It fails against the pre-fix tree in
+// three distinct ways -- `createGeneratedOutput` and
+// `updateGeneratedOutputContent` accepted the field, and
+// `appendDocumentVersion` mirrored it -- so a partial revert of any one
+// of the three is caught here by name rather than only as a count.
+func TestLibraryOwnerFieldsAreServerStamped(t *testing.T) {
+	reg := loadTreeRegistry(t)
+
+	for _, tc := range []struct {
+		concept string
+		stamps  []string
+	}{
+		{
+			concept: "v1:library:generatedOutput",
+			stamps:  []string{"createGeneratedOutput", "updateGeneratedOutputContent"},
+		},
+		{
+			concept: "v1:library:documentVersion",
+			stamps:  []string{"appendDocumentVersion"},
+		},
+	} {
+		got := provenanceOf(t, reg, tc.concept, "ownerUserId")
+		if !got.ServerStamped {
+			t.Errorf("%s.ownerUserId reported caller-writable (%s); memql#2989 moved it into a "+
+				"stamp. WritableBy=%v", tc.concept, got.Reason, got.WritableBy)
+			continue
+		}
+		if len(got.WritableBy) != 0 {
+			t.Errorf("%s.ownerUserId: WritableBy=%v, want empty", tc.concept, got.WritableBy)
+		}
+		// Name every stamping mutation, not just the count: a mutation
+		// dropping its stamp while a sibling keeps one is the partial
+		// revert this test exists to catch, and clause 2 of the analyzer
+		// is a universal quantifier only over WRITES -- a mutation that
+		// stops writing the field at all would still leave ServerStamped
+		// true on the strength of its sibling.
+		for _, want := range tc.stamps {
+			found := false
+			for _, name := range got.StampedBy {
+				if name == want {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("%s.ownerUserId: %s is not among StampedBy=%v -- it must stamp the owner "+
+					"from actor.userId", tc.concept, want, got.StampedBy)
+			}
+		}
+	}
+}
+
+// The three library mutations must not take an `ownerUserId` argument at
+// all. Dropping it from `accept { }` while leaving it declared in
+// `args { }` would leave a caller-supplied value that silently does
+// nothing -- an arg the SDK still generates, the docs still describe,
+// and a caller reasonably believes sets the owner.
+//
+// Provenance cannot see this: a declared-but-unwritten arg is not a
+// write, so OwnerFieldProvenance would report the concept clean.
+func TestLibraryOwnerMutationsTakeNoOwnerArg(t *testing.T) {
+	reg := loadTreeRegistry(t)
+
+	for _, name := range []string{
+		"createGeneratedOutput",
+		"updateGeneratedOutputContent",
+		"appendDocumentVersion",
+	} {
+		fn, err := reg.Get(name)
+		if err != nil {
+			t.Errorf("%s not loaded: %v", name, err)
+			continue
+		}
+		if fn.ArgsSchema == nil {
+			t.Errorf("%s has no args schema, so this assertion cannot see its arguments", name)
+			continue
+		}
+		for _, f := range fn.ArgsSchema.Fields {
+			if f != nil && f.Name == "ownerUserId" {
+				t.Errorf("%s still declares an ownerUserId arg. The field is stamped from "+
+					"actor.userId (memql#2989), so a caller-supplied one is a value that looks "+
+					"like it sets the owner and does not.", name)
+			}
+		}
 	}
 }
 

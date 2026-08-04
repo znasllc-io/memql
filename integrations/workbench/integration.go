@@ -441,7 +441,7 @@ func (i *Integration) promoteWorkbenchOutput(ctx context.Context, planId, agentI
 	}
 
 	ownerUserId, partitionId := i.resolvePlanOwner(ctx, planId)
-	if ownerUserId == "" {
+	if strings.TrimSpace(ownerUserId) == "" {
 		if i.logger != nil {
 			i.logger.Warn("workbench: generatedOutput promotion skipped -- could not resolve plan owner",
 				slog.String("planId", planId), slog.String("path", path))
@@ -478,9 +478,14 @@ func (i *Integration) promoteWorkbenchOutput(ctx context.Context, planId, agentI
 		}
 	}
 
+	// ownerUserId is NOT passed: createGeneratedOutput stamps it from
+	// actor.userId (memql#2989), and mutationCtx carries exactly that
+	// actor. The blank-owner early return above is load-bearing --
+	// withUserActor returns ctx UNCHANGED for a blank owner, which would
+	// attribute the row to the inbound caller instead.
 	var b strings.Builder
-	fmt.Fprintf(&b, `mutation createGeneratedOutput(outputId:%q, ownerUserId:%q, title:%q, source:%q, format:%q`,
-		outputId, ownerUserId, title, "workbench_generated", format)
+	fmt.Fprintf(&b, `mutation createGeneratedOutput(outputId:%q, title:%q, source:%q, format:%q`,
+		outputId, title, "workbench_generated", format)
 	if attachmentId != "" {
 		// File-backed: the bytes ARE the deliverable, so reference the
 		// attachment instead of an inline pointer note (mirrors the
@@ -903,15 +908,5 @@ func outputPayloadRows(payload any) []map[string]any {
 // automations/executor.go's contextWithSystemActor pattern, scoped to a
 // real user.
 func withUserActor(ctx context.Context, ownerUserId string) context.Context {
-	if strings.TrimSpace(ownerUserId) == "" {
-		return ctx
-	}
-	claims := map[string]any{
-		"sub":   ownerUserId,
-		"email": ownerUserId,
-		"role":  "user",
-	}
-	token := auth.BuildTokenInfo(claims)
-	ctx = auth.ContextWithClaims(ctx, claims)
-	return auth.ContextWithToken(ctx, token)
+	return auth.ContextWithUserActor(ctx, ownerUserId)
 }

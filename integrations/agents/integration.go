@@ -544,17 +544,7 @@ func (i *Integration) handleProduceArtifact(ctx context.Context, args map[string
 // withUserActor; no-op when ownerUserId is empty (the mutation then
 // runs under whatever actor the inbound context already carries).
 func withUserActor(ctx context.Context, ownerUserId string) context.Context {
-	if strings.TrimSpace(ownerUserId) == "" {
-		return ctx
-	}
-	claims := map[string]any{
-		"sub":   ownerUserId,
-		"email": ownerUserId,
-		"role":  "user",
-	}
-	token := auth.BuildTokenInfo(claims)
-	ctx = auth.ContextWithClaims(ctx, claims)
-	return auth.ContextWithToken(ctx, token)
+	return auth.ContextWithUserActor(ctx, ownerUserId)
 }
 
 // asString coerces an arg value to a trimmed-friendly string, returning
