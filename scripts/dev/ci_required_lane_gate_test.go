@@ -1,6 +1,9 @@
 package dev
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -35,6 +38,15 @@ import (
 //	#3019 -- this: the lane runs, is RED, and the merge proceeds anyway.
 //
 // This one is unguarded for every lane at once.
+//
+// What this file does NOT cover, said plainly so the paragraph above is not
+// read as more than it is: a lane whose own job-level `if:` stops matching is
+// still guarded only per-lane, and only for three of the eight -- go-checks
+// (gate_inputs_lane_scope_test.go), vscode-extension (vscode_lane_scope_test.go)
+// and db-tests (scripts/cidb). Setting `if: ${{ false }}` on conformance or
+// build-node-tags leaves this file green, because the lane is still LISTED in
+// `needs` and a skipped lane counts as a pass. That rung belongs to #2792 and
+// is not closed for every lane; the set-membership rung is what closes here.
 //
 // # Derived, not pinned
 //
@@ -84,9 +96,11 @@ var laneExemptFromRequirement = map[string]bool{
 // ciJobs is the parsed job map, with the fields this guard reads.
 type ciJobs struct {
 	Jobs map[string]struct {
-		If    string `yaml:"if"`
-		Needs any    `yaml:"needs"`
-		Steps []struct {
+		If              string            `yaml:"if"`
+		Needs           any               `yaml:"needs"`
+		ContinueOnError any               `yaml:"continue-on-error"`
+		Env             map[string]string `yaml:"env"`
+		Steps           []struct {
 			Name            string            `yaml:"name"`
 			Run             string            `yaml:"run"`
 			If              string            `yaml:"if"`
@@ -200,37 +214,58 @@ func TestCIRequiredAggregatorCannotFailOpen(t *testing.T) {
 	doc := parseCIJobs(t)
 	job := doc.Jobs[ciRequiredJob]
 
-	// 1. `if: always()`. Without it a FAILED lane skips the aggregator rather
-	//    than failing it -- and a skipped required check does not block, so the
-	//    one edit that matters most reads as a cleanup.
-	if !strings.Contains(strings.ReplaceAll(job.If, " ", ""), "always()") {
-		t.Errorf("%s is not gated on `always()` (got if: %q). Without it the aggregator SKIPS "+
-			"when a lane fails instead of reporting the failure, and a skipped required check "+
-			"does not block a merge -- the same fail-open as dropping the lane (memql#3019).",
-			ciRequiredJob, job.If)
+	// 1. `if:` must be always() and NOTHING ELSE. Without always() a FAILED
+	//    lane skips the aggregator rather than failing it, and a skipped
+	//    required check does not block -- so the one edit that matters most
+	//    reads as a cleanup.
+	//
+	//    Substring-matching "always()" is not enough, and this was measured
+	//    rather than reasoned: `if: ${{ always() && github.event_name ==
+	//    'push' }}` CONTAINS always() and still skips the whole aggregator on
+	//    a pull_request. That is the identical fail-open wearing the token
+	//    that is supposed to prevent it. Compare the normalised whole
+	//    expression instead.
+	if normalizedIf := normalizeExpr(job.If); normalizedIf != "always()" {
+		t.Errorf("%s must be gated on exactly `always()`; got if: %q (normalised %q).\n"+
+			"Without always() the aggregator SKIPS when a lane fails instead of reporting the "+
+			"failure. And a NARROWED always() -- `always() && <cond>` -- is no better: when "+
+			"<cond> is false the job skips, and GitHub treats a skipped required check as "+
+			"satisfied, so the merge proceeds with red lanes (memql#3019).",
+			ciRequiredJob, job.If, normalizedIf)
 	}
 
 	if len(job.Steps) == 0 {
 		t.Fatalf("%s declares no steps, so it reports success having verified nothing", ciRequiredJob)
 	}
 
-	var sawResults, sawExit bool
+	// The aggregator may carry RESULTS at job level or step level -- the two
+	// are semantically identical in Actions, so demanding the step form turned
+	// a legitimate refactor into a failure whose message misdescribed the
+	// state (it claimed RESULTS was absent when it had merely moved).
+	var sawResults bool
+	checkResults := func(where, k, v string) {
+		if k != "RESULTS" {
+			return
+		}
+		sawResults = true
+		if !strings.Contains(strings.ReplaceAll(v, " ", ""), "needs.*.result") {
+			t.Errorf("%s's RESULTS (%s) is %q, which does not derive from `needs.*.result`. The "+
+				"aggregator would then report on a different set of lanes than it depends on, "+
+				"and TestEveryCILaneGatesTheMerge would be asserting over the wrong list "+
+				"(memql#3019).", ciRequiredJob, where, v)
+		}
+	}
+	for k, v := range job.Env {
+		checkResults("job env", k, v)
+	}
+
 	for _, s := range job.Steps {
 		// 2. The aggregator must read its results from the same `needs` it
 		//    waits on. A hardcoded or narrowed expression would report on a
 		//    different set than the guard above checks -- the guard would be
 		//    green and the gate still open.
 		for k, v := range s.Env {
-			if k != "RESULTS" {
-				continue
-			}
-			sawResults = true
-			if !strings.Contains(strings.ReplaceAll(v, " ", ""), "needs.*.result") {
-				t.Errorf("%s's RESULTS is %q, which does not derive from `needs.*.result`. The "+
-					"aggregator would then report on a different set of lanes than it depends "+
-					"on, and TestEveryCILaneGatesTheMerge would be asserting over the wrong "+
-					"list (memql#3019).", ciRequiredJob, v)
-			}
+			checkResults("step env", k, v)
 		}
 
 		// 3. A step whose failure is swallowed is not a gate. Read from the
@@ -241,10 +276,18 @@ func TestCIRequiredAggregatorCannotFailOpen(t *testing.T) {
 			t.Errorf("%s step %q sets continue-on-error=%v; the aggregator would report success "+
 				"whatever the lanes did", ciRequiredJob, s.Name, s.ContinueOnError)
 		}
-		if strings.TrimSpace(s.If) != "" {
-			t.Errorf("%s step %q is gated on `if: %s`. The verification step must run whenever "+
-				"the job does; a condition that evaluates false reports green having checked "+
-				"nothing.", ciRequiredJob, s.Name, s.If)
+		// Only the VERIFYING step must be unconditional -- the one that reads
+		// RESULTS and decides the exit status. Applying this to every step
+		// blocked legitimate additions (a `if: ${{ failure() }}` diagnostic
+		// dump) for no gate-related reason, and both sibling guards scope it
+		// the same way: vscode_lane_scope_test.go narrows to goTestSteps and
+		// gate_inputs_lane_scope_test.go to gateInputsStep.
+		if _, verifies := s.Env["RESULTS"]; (verifies || strings.Contains(s.Run, "RESULTS")) &&
+			strings.TrimSpace(s.If) != "" {
+			t.Errorf("%s's verification step %q is gated on `if: %s`. The step that decides the "+
+				"job's exit status must run whenever the job does; a condition that evaluates "+
+				"false reports green having checked nothing (memql#3019).",
+				ciRequiredJob, s.Name, s.If)
 		}
 
 		pipefail := false
@@ -263,11 +306,6 @@ func TestCIRequiredAggregatorCannotFailOpen(t *testing.T) {
 				t.Errorf("%s pipes a command that decides the exit status without `pipefail`; "+
 					"the step would take the LAST command's status.\ngot: %s", ciRequiredJob, line)
 			}
-			// 4. Something has to actually fail the job. A verification script
-			//    that only echoes is the purest form of this defect.
-			if strings.Contains(line, "exit 1") {
-				sawExit = true
-			}
 		}
 	}
 
@@ -275,11 +313,6 @@ func TestCIRequiredAggregatorCannotFailOpen(t *testing.T) {
 		t.Errorf("%s declares no RESULTS env. The verification step reads the lane results from "+
 			"it, so without it the aggregator checks an empty string and passes unconditionally "+
 			"(memql#3019).", ciRequiredJob)
-	}
-	if !sawExit {
-		t.Errorf("%s never exits non-zero. A required check that cannot fail is not a gate -- "+
-			"every lane is advisory and the PR page looks exactly the same (memql#3019).",
-			ciRequiredJob)
 	}
 }
 
@@ -301,5 +334,171 @@ func TestAdvisoryLanesAreRealJobs(t *testing.T) {
 	if len(advisoryLanes) != 0 {
 		t.Logf("NOTE: %d lane(s) are deliberately advisory and do not gate a merge: %v",
 			len(advisoryLanes), advisoryLanes)
+	}
+}
+
+// normalizeExpr strips `${{ }}` wrapping and all whitespace so a workflow
+// expression can be compared whole rather than by substring. Substring
+// matching is what let `always() && <cond>` pass for the token it contains.
+func normalizeExpr(raw string) string {
+	e := strings.TrimSpace(raw)
+	e = strings.TrimPrefix(e, "${{")
+	e = strings.TrimSuffix(e, "}}")
+	return strings.Join(strings.Fields(e), "")
+}
+
+// The aggregator must actually exit non-zero on a red lane. RUN IT.
+//
+// This replaces a `strings.Contains(line, "exit 1")` check, and the reason is
+// worth keeping: that assertion was a proxy for the property, and three
+// separate one-line edits satisfied the proxy while destroying the property.
+//
+//	drop `status=1` from the failure arm -- `exit 1` is still present in the
+//	  text, and now unreachable. The step echoes FAIL and exits 0.
+//	put a decoy `exit 1` in any other step of the job -- the check was
+//	  job-wide, so the real verification step could be gutted entirely.
+//	change the loop to `for r in $OTHER` -- RESULTS is still declared, still
+//	  derives from needs.*.result, and is never read.
+//
+// Each of those is exactly memql#3019: the lane is red and the merge proceeds.
+// None is visible to a text search, and all three are caught by running the
+// script and looking at the exit status, which is the property itself rather
+// than a spelling that usually accompanies it.
+//
+// The script is pure bash over $RESULTS with no Actions context, which is what
+// makes this possible at all -- if it ever grows a `${{ }}` interpolation
+// inside `run:`, this test must switch to rendering it first rather than being
+// deleted.
+func TestCIRequiredAggregatorActuallyFailsOnARedLane(t *testing.T) {
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		// Not a silent skip: every platform this repo builds on has bash, so
+		// its absence means the environment is wrong, not that the property
+		// stopped mattering.
+		t.Fatalf("bash not found (%v) -- this guard executes the aggregator script, and skipping "+
+			"it would silently retire the only check that the gate can actually fail", err)
+	}
+
+	doc := parseCIJobs(t)
+	job := doc.Jobs[ciRequiredJob]
+
+	var script string
+	for _, s := range job.Steps {
+		if _, ok := s.Env["RESULTS"]; ok || strings.Contains(s.Run, "RESULTS") {
+			script = s.Run
+			break
+		}
+	}
+	if strings.TrimSpace(script) == "" {
+		t.Fatalf("found no step in %s that reads RESULTS, so there is nothing that decides the "+
+			"job's exit status (memql#3019)", ciRequiredJob)
+	}
+	if strings.Contains(script, "${{") {
+		t.Fatalf("%s's verification script interpolates a `${{ }}` expression, which this test "+
+			"cannot evaluate. Render it before running, or this check silently stops proving "+
+			"the aggregator can fail:\n%s", ciRequiredJob, script)
+	}
+
+	path := filepath.Join(t.TempDir(), "verify.sh")
+	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
+		t.Fatalf("write script: %v", err)
+	}
+
+	for _, tc := range []struct {
+		results  string
+		wantFail bool
+		why      string
+	}{
+		{"success success success", false, "every lane green must pass"},
+		{"success skipped success", false, "a path-skipped lane is a deliberate pass here"},
+		{"skipped skipped", false, "an all-skipped run (no relevant paths touched) passes"},
+		{"success failure", true, "A FAILED LANE MUST FAIL THE AGGREGATOR -- this is memql#3019"},
+		{"failure", true, "a single failed lane must fail it"},
+		{"success cancelled", true, "a cancelled lane is not a pass"},
+		{"success timed_out", true, "a timed-out lane is not a pass"},
+		{"", true, "an EMPTY result set must not report success: it means the aggregator waited " +
+			"on nothing, which is every lane advisory at once"},
+	} {
+		t.Run(strings.ReplaceAll(tc.results, " ", "_"), func(t *testing.T) {
+			cmd := exec.Command(bash, path)
+			cmd.Env = append(os.Environ(), "RESULTS="+tc.results)
+			out, runErr := cmd.CombinedOutput()
+			failed := runErr != nil
+			if failed != tc.wantFail {
+				t.Errorf("RESULTS=%q: aggregator failed=%v, want %v.\n%s\noutput:\n%s",
+					tc.results, failed, tc.wantFail, tc.why, out)
+			}
+		})
+	}
+}
+
+// No LANE may swallow its own failure.
+//
+// The set check proves a lane is listed in `needs`. It does not prove the lane
+// can report a failure: `continue-on-error: true` at JOB level makes a red lane
+// report success into `needs.*.result`, so the aggregator sees green and the
+// merge proceeds. The lane still runs and still shows red on the PR page --
+// the memql#3019 sentence exactly, reached by a one-line diff on a different
+// line than the needs list.
+//
+// The sibling guard in scripts/cidb already treats this as a member of the
+// family, but only for db-tests. Nothing covered the other seven lanes or the
+// aggregator itself.
+func TestNoLaneSwallowsItsOwnFailure(t *testing.T) {
+	doc := parseCIJobs(t)
+	var checked int
+	for name, job := range doc.Jobs {
+		checked++
+		if job.ContinueOnError == nil || job.ContinueOnError == false {
+			continue
+		}
+		if reason, advisory := advisoryLanes[name]; advisory {
+			t.Logf("%q is continue-on-error and is a declared advisory lane (%s)", name, reason)
+			continue
+		}
+		t.Errorf("job %q sets continue-on-error=%v. It reports SUCCESS into `needs.*.result` "+
+			"however it actually finished, so %s sees green and the merge proceeds while the "+
+			"lane shows red on the PR (memql#3019). Either drop it, or declare the lane in "+
+			"advisoryLanes with the reason a red result there may land.",
+			name, job.ContinueOnError, ciRequiredJob)
+	}
+	if checked == 0 {
+		t.Fatal("checked no jobs -- this guard would pass vacuously")
+	}
+}
+
+// laneExemptFromRequirement must name jobs that exist.
+//
+// advisoryLanes already has this guard; this map did not, and the asymmetry was
+// exploitable rather than cosmetic. Measured: rename `changes` to
+// `paths-filter` and the suite stays green with the exemption naming nothing.
+// Then add a NEW always-failing job called `changes` and leave it out of
+// `needs` -- it is silently exempted by the now-stale key, which is a red,
+// non-gating lane, i.e. the whole point of memql#3019.
+func TestLaneExemptionsNameRealJobs(t *testing.T) {
+	doc := parseCIJobs(t)
+	for name := range laneExemptFromRequirement {
+		if _, ok := doc.Jobs[name]; !ok {
+			t.Errorf("laneExemptFromRequirement names %q, which is not a job in ci.yml. The "+
+				"entry now exempts nothing -- and worse, it silently exempts any FUTURE job "+
+				"that takes the name, without that job ever having to gate a merge. Retarget "+
+				"it at whatever replaced the job, or remove it.", name)
+		}
+	}
+
+	// `changes` is exempt from being DEMANDED in needs because it is
+	// infrastructure rather than a lane. It must still BE there: every lane
+	// declares `needs: changes`, so dropping it leaves them all `skipped`,
+	// which this aggregator counts as a pass. That is the shape recorded on
+	// PR #2854 in gate_inputs_lane_scope_test.go.
+	required := map[string]bool{}
+	for _, n := range requiredLanes(t, doc) {
+		required[n] = true
+	}
+	if !required["changes"] {
+		t.Errorf("%s does not depend on `changes`. Every lane is `needs: changes`, so if the "+
+			"path filter does not run they all report `skipped` -- which the aggregator treats "+
+			"as a pass. The result is a green required check over lanes that never ran.",
+			ciRequiredJob)
 	}
 }
