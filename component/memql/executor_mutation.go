@@ -60,15 +60,6 @@ type writeMeta struct {
 	// blast-radius validation guard only gates the valid false->true ACCEPT
 	// transition, not a re-write of an already-accepted override (memql#2143).
 	priorHealingValid bool
-	// priorAgentRole is a COPY of the prior v1:agents:agentRole row, taken
-	// before the delta overwrites it, so the predefined-lock guard can tell
-	// which fields a write actually changes (memql#2985).
-	//
-	// A copy, not a reference: the read-merge below merges the delta INTO the
-	// prior map and then uses that same map as the payload, so holding the map
-	// would compare the merged row against itself and find nothing changed --
-	// a guard that is present, green and inert. Nil for every other concept.
-	priorAgentRole map[string]any
 }
 
 // executeUpdate runs the update() form: read the latest existing row by
@@ -496,13 +487,6 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 			// blast-radius validation guard only gates the valid false->true
 			// ACCEPT transition, not a re-write of an already-accepted override.
 			meta.priorHealingValid = boolFromAny(priorPayload["valid"])
-			// Snapshot the PRIOR agent-role row before the merge (memql#2985)
-			// so the predefined-lock guard can diff the merged payload against
-			// what was actually stored. Taken here and not in the guard
-			// because the merge below writes THROUGH priorPayload.
-			if conceptMeta.Name == conceptAgentsAgentRole {
-				meta.priorAgentRole = snapshotAgentRoleLockedFields(priorPayload)
-			}
 			// @createOnly fields are written on create only (fylo#63): drop
 			// them from the delta BEFORE the merge so the stored value wins.
 			// A deterministic-id re-stage of a row another writer owns after
@@ -675,13 +659,14 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	// v1:agents:agentRole is seeded from dsl/agents/roles/*.memql on every
 	// startup, and the concept documents such a row as LOCKED -- but
 	// `predefined` was a UI hint with no enforcement, so any caller could
-	// rename, re-categorise, re-skill or deactivate a catalog row through
-	// the mutation surface. Unlike the rbac guard above this is FIELD-scoped:
-	// the concept documents `tier` and `recommendedPolicySlug` as
-	// operator-tunable, so a whole-row lock would reject an edit the concept
-	// says is supported. See agent_role_predefined_validation.go.
+	// rename, re-categorise, re-skill or deactivate a catalog row through the
+	// mutation surface. Mirrors the rbac guard above, including its shape: a
+	// whole-row lock with a system-actor carve-out for the SeedMaterializer.
+	// The field-scoped variant that shipped for review is gone -- it was inert
+	// and the one field it would have unlocked steers the AI router. See
+	// agent_role_predefined_validation.go.
 	if conceptMeta.Name == conceptAgentsAgentRole {
-		if err := e.validateAgentRolePredefinedLock(ctx, payload, meta.priorAgentRole, meta.priorPredefined, actor); err != nil {
+		if err := e.validateAgentRolePredefinedLock(ctx, payload, meta.priorPredefined, actor); err != nil {
 			return nil, meta, err
 		}
 	}

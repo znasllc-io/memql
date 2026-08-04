@@ -216,9 +216,11 @@ query agentRole agentRoleBySlug {
 // The honest limit of that argument, recorded so the next reader does not
 // have to re-derive it: it justifies the PREDEFINED rows being global, and
 // does not by itself require user-minted ones to be. Exposing a custom role's
-// name and description to other users in the deployment is an ACCEPTED cost,
-// ruled on 2026-08-04, not a consequence nobody noticed. The scoped
-// alternative is expressible today if that judgement is ever revisited --
+// name and description to other users in the deployment is a KNOWN trade
+// carried deliberately, not a consequence nobody noticed -- but note it is
+// recorded here rather than ruled on anywhere traceable, so treat it as the
+// current state of the argument rather than as a settled decision. The scoped
+// alternative is expressible today if it is revisited --
 // `isActiveRecord && (predefined || row.createdBy == actor.userId)` loads and
 // pushes down, since the engine stamps createdBy -- but it removes @public
 // and changes the wire contract for the cockpit role picker and the agent
