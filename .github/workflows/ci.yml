@@ -627,6 +627,15 @@ jobs:
           RESULTS: ${{ join(needs.*.result, ' ') }}
         run: |
           echo "lane results: $RESULTS"
+          # An empty result set is a fail-open, not a pass: it means the
+          # aggregator waited on nothing, so EVERY lane is advisory at once
+          # (memql#3019). The static guard for this lives in go-checks -- which
+          # is itself one of the aggregated lanes, so emptying `needs` also
+          # stops that guard gating. This is the independent backstop.
+          if [ -z "$(echo "$RESULTS" | tr -d '[:space:]')" ]; then
+            echo "ci-required: no lane results at all -- refusing to report success"
+            exit 1
+          fi
           status=0
           for r in $RESULTS; do
             case "$r" in
