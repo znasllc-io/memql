@@ -26,6 +26,17 @@ type functionValidator struct {
 	// built without an explicit origin (tests, internal tooling) is treated as
 	// untrusted, so forgetting to pass it denies rather than grants.
 	origin auth.CallOrigin
+
+	// ambient is the resolved actor / partition / now / config envelope
+	// (buildAmbientEnvelope, memql#3024), read once from the context in
+	// executeWith and handed down for exactly the reason origin is: this path
+	// is ctx-free by design.
+	//
+	// NIL on paths that only validate an arg schema and never expand an
+	// expression -- there is nothing to resolve against there, and an
+	// ambient-rooted predicate is left untouched rather than resolved against
+	// an envelope that was never built.
+	ambient map[string]any
 }
 
 func newFunctionValidator(functions map[string]*Function, specs *SpecRegistry) *functionValidator {
@@ -33,12 +44,20 @@ func newFunctionValidator(functions map[string]*Function, specs *SpecRegistry) *
 }
 
 func newFunctionValidatorWithOrigin(functions map[string]*Function, specs *SpecRegistry, origin auth.CallOrigin) *functionValidator {
+	return newFunctionValidatorWithAmbient(functions, specs, origin, nil)
+}
+
+// newFunctionValidatorWithAmbient is newFunctionValidatorWithOrigin carrying
+// the ambient envelope (memql#3024). The no-envelope wrapper above passes nil,
+// so every existing caller keeps its current behaviour.
+func newFunctionValidatorWithAmbient(functions map[string]*Function, specs *SpecRegistry, origin auth.CallOrigin, ambient map[string]any) *functionValidator {
 	return &functionValidator{
 		functions: functions,
 		specs:     specs,
 		resolved:  make(map[string]ExpressionNode),
 		resolving: make(map[string]struct{}),
 		origin:    origin,
+		ambient:   ambient,
 	}
 }
 
@@ -567,7 +586,7 @@ func (v *functionValidator) substituteArgRefsAndCallArgs(expr ExpressionNode, ar
 		// the first place. No shipped logic currently returns a mutation leaf,
 		// so this is not a live failure; it is the next instance of the class,
 		// pre-empted rather than left for whoever writes that construct.
-		folded, err := foldArgExpression(substituteArgRefValue(val, args), args)
+		folded, err := foldArgExpression(substituteArgRefValue(val, args, v.ambient), args)
 		if err != nil {
 			return nil, fmt.Errorf("argument %q of mutation-leaf call %q: %w", k, call.Name, err)
 		}
@@ -642,7 +661,14 @@ func foldableArgExpression(node ExpressionNode) bool {
 // slice produced by parsing object-literal call args) and replaces
 // *ArgReference leaves with values pulled from args. Non-ref values
 // pass through unchanged.
-func substituteArgRefValue(v any, args map[string]any) any {
+//
+// `ambient` is the resolved actor / partition / now / config envelope
+// (buildAmbientEnvelope), threaded from executeWith the same way #2800
+// threads the call origin: read ONCE from the context at the top and
+// handed down, because this path is deliberately ctx-free. It is nil on
+// paths that never evaluate an expression (arg-schema validation), and
+// an ambient-rooted predicate is left untouched in that case.
+func substituteArgRefValue(v any, args map[string]any, ambient map[string]any) any {
 	switch t := v.(type) {
 	case *ArgReference:
 		if t == nil {
@@ -713,6 +739,36 @@ func substituteArgRefValue(v any, args map[string]any) any {
 		if len(parts) == 0 {
 			parts = strings.Split(t.Field.Raw, ".")
 		}
+		// An AMBIENT-rooted predicate (memql#3024). `actor.` / `config.` /
+		// `partition` / `now` are RESERVED top-level identifiers that the
+		// envelope CARRIES, so none of them can be a lambda local or a payload
+		// field and resolving them here cannot shadow a legitimate lazy
+		// reference. `trace` is reserved but supplied by nothing, so it is NOT
+		// in this set -- it is refused at load instead. See ambientEnvelopeRoots.
+		//
+		// This is the half #2962 structurally could not reach: expansion was
+		// handed args and nothing else, so an ambient comparison fell through,
+		// resolved against a nil lambda scope, and took the else branch for
+		// every input -- a role gate open or closed by accident. It was refused
+		// at load (validateLogicCondAmbientPredicate) until the envelope had a
+		// way to get here; threading it is what lets the refusal be deleted.
+		//
+		// Substitute UNCONDITIONALLY once the root matches and the envelope is
+		// present, using nil for a path the envelope does not carry. Falling
+		// through on a miss would hand the node back to the same nil-scope
+		// resolution that produced the silent constant, which is the one
+		// outcome this must not reproduce.
+		if len(parts) > 0 && isAmbientRoot(parts[0]) {
+			if ambient == nil {
+				return t
+			}
+			resolved, _ := getNestedValue(ambient, strings.Join(parts, "."))
+			return &BinaryComparisonExpression{
+				Left:     &LiteralValueNode{Value: resolved},
+				Operator: t.Operator,
+				Right:    asExpressionOperand(substituteArgRefValue(t.Value, args, ambient)),
+			}
+		}
 		if len(parts) < 2 || parts[0] != "args" {
 			return t
 		}
@@ -727,23 +783,80 @@ func substituteArgRefValue(v any, args map[string]any) any {
 		return &BinaryComparisonExpression{
 			Left:     &LiteralValueNode{Value: resolved},
 			Operator: t.Operator,
-			Right:    asExpressionOperand(substituteArgRefValue(t.Value, args)),
+			Right:    asExpressionOperand(substituteArgRefValue(t.Value, args, ambient)),
 		}
 	case map[string]any:
 		out := make(map[string]any, len(t))
 		for k, val := range t {
-			out[k] = substituteArgRefValue(val, args)
+			out[k] = substituteArgRefValue(val, args, ambient)
 		}
 		return out
 	case []any:
 		out := make([]any, len(t))
 		for i, val := range t {
-			out[i] = substituteArgRefValue(val, args)
+			out[i] = substituteArgRefValue(val, args, ambient)
 		}
 		return out
 	default:
 		return v
 	}
+}
+
+// ambientEnvelopeRoots is the set of reserved top-level identifiers the
+// ambient envelope ACTUALLY CARRIES -- one entry per key buildAmbientEnvelope
+// writes, and nothing else. TestAmbientRootsMatchEnvelopeKeys pins the two
+// together; do not add a name here without adding the key there.
+//
+// The distinction from the reserved set is load-bearing, and getting it wrong
+// is not a style question. `trace` is reserved by the parser and by
+// dslfs.reservedAlias -- it cannot be shadowed by a local or a payload field --
+// but NOTHING in the codebase ever supplies a `trace` object to any evaluation
+// envelope. Treating "reserved" as "resolvable" made the substitution below
+// fold `trace.x` to nil, so `cond(trace.x == "y", ...)` became a constant that
+// takes the else branch for every input: exactly the memql#2962 silent gate
+// this file exists to eliminate, and a REGRESSION, because the validator this
+// change replaced refused that shape at load.
+//
+// It is also the third instance of one bug class. component/automations
+// logic_runner.go records the previous two: "The list had drifted from two
+// others that describe the same set ... which is why nobody noticed one of the
+// three was short" (#2818 / #2851), which shipped as deploy role gates denying
+// every role including owner. Hence the drift test rather than only a
+// corrected list.
+var ambientEnvelopeRoots = map[string]struct{}{
+	"actor":     {},
+	"config":    {},
+	"partition": {},
+	"now":       {},
+}
+
+// reservedUnsuppliedRoots is the complement: reserved top-level names that no
+// envelope supplies. A comparison rooted here can never resolve, so it is
+// refused at load (validateLogicCondBareIdentifierPredicate) rather than
+// folded to nil -- a loud boot error instead of a gate that is open or closed
+// by accident.
+var reservedUnsuppliedRoots = map[string]struct{}{
+	"trace": {},
+}
+
+// isAmbientRoot reports whether name is a reserved top-level identifier the
+// ambient envelope carries, and can therefore be RESOLVED during expansion
+// (memql#3024). None of these can be a lambda local or a payload field, which
+// is what makes resolving them here safe.
+//
+// This is deliberately narrower than the reserved-name set in
+// dslfs.reservedAlias and the parser: reserved means "cannot be rebound",
+// which is not the same as "has a value". See ambientEnvelopeRoots.
+func isAmbientRoot(name string) bool {
+	_, ok := ambientEnvelopeRoots[strings.TrimSpace(name)]
+	return ok
+}
+
+// isReservedUnsuppliedRoot reports whether name is reserved but carried by no
+// envelope, so a comparison rooted at it cannot resolve on any path.
+func isReservedUnsuppliedRoot(name string) bool {
+	_, ok := reservedUnsuppliedRoots[strings.TrimSpace(name)]
+	return ok
 }
 
 // asExpressionOperand wraps a substituted comparison operand so the
@@ -812,7 +925,7 @@ func (v *functionValidator) expandExpressionWithArgs(expr ExpressionNode, args m
 		if args != nil && len(node.Args) > 0 {
 			substituted := make(map[string]any, len(node.Args))
 			for k, val := range node.Args {
-				substituted[k] = substituteArgRefValue(val, args)
+				substituted[k] = substituteArgRefValue(val, args, v.ambient)
 			}
 			node = &FunctionCallExpression{
 				Name: node.Name,
@@ -1204,6 +1317,15 @@ func resolvePlanFunctions(plan *QueryPlan, functions *FunctionRegistry, specs *S
 // so any caller that has not been taught about origin gets the restricted
 // treatment.
 func resolvePlanFunctionsWithOrigin(plan *QueryPlan, functions *FunctionRegistry, specs *SpecRegistry, origin auth.CallOrigin) error {
+	return resolvePlanFunctionsWithAmbient(plan, functions, specs, origin, nil)
+}
+
+// resolvePlanFunctionsWithAmbient is resolvePlanFunctionsWithOrigin carrying
+// the ambient envelope (memql#3024), so a cond predicate rooted at `actor.` /
+// `config.` / `partition` / `now` resolves during expansion instead of falling
+// through to a nil scope and becoming a silent constant. The no-envelope
+// wrapper passes nil, leaving every existing caller unchanged.
+func resolvePlanFunctionsWithAmbient(plan *QueryPlan, functions *FunctionRegistry, specs *SpecRegistry, origin auth.CallOrigin, ambient map[string]any) error {
 	if plan == nil || plan.Root == nil {
 		return nil
 	}
@@ -1212,7 +1334,7 @@ func resolvePlanFunctionsWithOrigin(plan *QueryPlan, functions *FunctionRegistry
 	if functions != nil {
 		snapshot = functions.Snapshot()
 	}
-	validator := newFunctionValidatorWithOrigin(snapshot, specs, origin)
+	validator := newFunctionValidatorWithAmbient(snapshot, specs, origin, ambient)
 
 	// Special case: top-level mutation function call.
 	// We don't expand it to an expression; Execute will evaluate it into an insert.

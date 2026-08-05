@@ -62,10 +62,51 @@ func (e *MemQLEngine) EvaluateSpec(ctx context.Context, name string) (bool, erro
 }
 
 // buildSpecCtx assembles the evaluation envelope a context-spec body
-// sees: the resolved actor, the active partition, the engine
-// timestamp, and the allow-listed config surface. Specs don't carry
-// args or produce output.
+// sees. Specs don't carry args or produce output. Thin alias for
+// buildAmbientEnvelope, kept under this name because the spec-side
+// tests guard the #2801 fail-closed behaviour through it.
 func buildSpecCtx(ctx context.Context, engine *MemQLEngine) map[string]any {
+	return buildAmbientEnvelope(ctx, engine)
+}
+
+// AmbientEnvelope exposes the one canonical ambient envelope to the other
+// evaluation surface in this codebase: the automations LogicRunner, which
+// evaluates MULTI-STEP logic bodies through its own Evaluator rather than
+// through arg expansion (component/automations, newEvaluatorForLogic).
+//
+// It exists so that surface cannot build a second envelope. Before memql#3024
+// the runner bound `actor` and nothing else, so `cond(config.demoMode == true,
+// ...)` in a multi-step body resolved against nothing and was a silent
+// constant -- the same defect this issue closes for the single-statement form,
+// reached on the other path. It went unnoticed because the validator memql#3024
+// deletes had refused ambient predicates in EVERY step, so the shape was
+// unreachable rather than correct; deleting the refusal without binding the
+// envelope is what would have made it reachable AND wrong.
+//
+// #2623 is the standing rule: one builder, or the same gate answers
+// differently depending on which surface evaluated it.
+//
+// A NIL RECEIVER IS VALID and returns the same complete key set with the
+// unset-snapshot values, because buildAmbientEnvelope guards the engine deref.
+// Callers must be able to bind unconditionally: an envelope withheld leaves
+// keys ABSENT, and an absent key is what makes a negated gate read true
+// (#2801). "No engine" must therefore mean empty values, never missing ones.
+func (e *MemQLEngine) AmbientEnvelope(ctx context.Context) map[string]any {
+	return buildAmbientEnvelope(ctx, e)
+}
+
+// buildAmbientEnvelope assembles the ambient evaluation envelope: the
+// resolved actor, the active partition, the engine timestamp, and the
+// allow-listed config surface. Those are the reserved top-level names
+// a DSL body may read besides `args` (CLAUDE.md, "Argument
+// resolution").
+//
+// ONE canonical envelope (#2623), shared by both surfaces that need
+// it: context-specs (EvaluateSpec) and cond-predicate arg expansion
+// (memql#3024). A second builder that could drift from this one is
+// precisely the failure #2623 and #2801 were about -- the same gate
+// answering differently depending on which surface evaluated it.
+func buildAmbientEnvelope(ctx context.Context, engine *MemQLEngine) map[string]any {
 	out := make(map[string]any, 6)
 	// One canonical envelope (#2623), built UNCONDITIONALLY (#2801).
 	//

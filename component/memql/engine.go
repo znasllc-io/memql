@@ -464,7 +464,20 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 	// the restricted treatment until it explicitly opts in.
 	origin := auth.OriginFromContext(ctx)
 
-	plan, err := e.parseWithFunctionsOrigin(query, fns, specOverlay, allowInline, origin)
+	// memql#3024: the ambient envelope is read ONCE here too, by the same
+	// route and for the same reason as the origin above -- the parse path is
+	// ctx-free, so a cond predicate rooted at `actor.` / `config.` /
+	// `partition` / `now` can only resolve if the values are handed down.
+	// Without it such a predicate falls through to a nil scope and takes the
+	// else branch for every input: the silent constant memql#2962 is about,
+	// surviving in the namespace that report's own motivation is about.
+	//
+	// buildAmbientEnvelope is built unconditionally (#2801), so an absent auth
+	// context yields the DENYING envelope with every key present rather than
+	// absent keys a negated predicate could read as true.
+	ambient := buildAmbientEnvelope(ctx, e)
+
+	plan, err := e.parseWithFunctionsAmbient(query, fns, specOverlay, allowInline, origin, ambient)
 	if err != nil {
 		return nil, err
 	}

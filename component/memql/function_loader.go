@@ -425,7 +425,7 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 	if err := validateLogicArithmeticOperands(funcDef); err != nil {
 		return nil, err
 	}
-	if err := validateLogicCondAmbientPredicate(funcDef); err != nil {
+	if err := validateLogicCondBareIdentifierPredicate(funcDef); err != nil {
 		return nil, err
 	}
 	if err := validateLogicCondBranchValues(funcDef); err != nil {

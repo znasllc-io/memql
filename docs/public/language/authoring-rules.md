@@ -659,7 +659,8 @@ The five value positions:
 | `cond(...)` (nested) | yes | yes | -- | yes | yes | Connectives (`&&`/`||`) are NOT allowed inside a cond arg -- nest cond or use an `if` step. |
 | Comparison, **expression-led** `(a - b) > 0`, `0 < count`, `rows.count() >= 1` | yes | no (parse-rejected) | yes | no | yes (lambda body) | The LHS must be non-identifier-led: parenthesize the arithmetic / lead with a literal / end in a call. |
 | Comparison **over a chain aggregate** `rows.count(m => ...) > 0` | single-return only | no | yes | no | yes (lambda body) | As a cond PREDICATE this is the #2542 item-2 headline. As a bare multi-step `return`, wrap it: `return cond(rows.count(m => ...) > 0, thenV, elseV)`. |
-| Comparison, **scalar / identifier-led** `x > 10`, `role == "admin"` | boolean-condition return only | no (parse-rejected) | yes | no | yes (lambda body) | Fine as a cond/`if` predicate and inside a boolean-condition return (`a.empty() && x == "b"`). A BARE `return x == 5` is a LOAD rejection (#2693; it previously loaded green and mis-routed to a store query) -- write it expression-led `(x) == 5` / literal-led `5 == x`, boolean-condition (`... && x == 5`), or `return cond(x == 5, true, false)`. The same comparison as a `coalesce`/`concat` arg is likewise rejected. |
+| Comparison, **scalar / identifier-led** `x > 10`, `role == "admin"` | boolean-condition return only | no (parse-rejected) | yes, if the identifier is a BOUND LOCAL | no | yes (lambda body) | Fine as a cond/`if` predicate and inside a boolean-condition return (`a.empty() && x == "b"`). As a cond predicate the identifier must be bound by a step of the same body; an UNBOUND one is a LOAD rejection (#3024) because it resolves against an empty scope and the cond becomes a constant -- read an argument as `args.x`. A BARE `return x == 5` is a LOAD rejection (#2693; it previously loaded green and mis-routed to a store query) -- write it expression-led `(x) == 5` / literal-led `5 == x`, boolean-condition (`... && x == 5`), or `return cond(x == 5, true, false)`. The same comparison as a `coalesce`/`concat` arg is likewise rejected. |
+| Comparison over an **ambient** `actor.role == "owner"`, `config.x == "on"` | -- | -- | yes | -- | -- | #3024: the actor / partition / now / config envelope is threaded through arg expansion, so an ambient cond predicate discriminates like an `args.` one. With no authenticated caller the envelope denies rather than omitting keys (#2801). |
 | Arithmetic over a comparison `a - b > 0` | REJECTED | REJECTED | REJECTED | REJECTED | REJECTED | The unparenthesized-comparison trap: `a - b > 0` parses as `a - (b > 0)`. Lint/boot rejects it -- parenthesize `(a - b) > 0`. |
 
 **Notes.**
@@ -687,7 +688,8 @@ The five value positions:
   comparison that is a direct `&&`/`||`/`!` operand -- that is the legal
   boolean-condition return (`a.empty() && x == "b"`).
 - **cond predicates** accept a bare boolean chain (`x.any()`), a scalar
-  comparison (`r > 50`), an equality (`role == "x"`), a comparison
+  comparison (`r > 50`), an equality over a **bound local** (`role ==
+  "x"`, where an earlier step binds `role`), a comparison
   over a chain aggregate (`x.count(m => ...) > 0`, wave 3), and a
   coalesce-led equality in either spelling (`coalesce(args.b, "") ==
   "y"` / `args.b ?? "" == "y"`, #2612) -- including inside NESTED
@@ -701,6 +703,36 @@ The five value positions:
   loaded green and compared the builtin's SOURCE TEXT, so it was
   always-false in every shape -- the door form, the parenthesised form,
   and bind-then-compare alike.
+- **An UNBOUND bare identifier is a load rejection** (#3024). `role ==
+  "x"` is only legal when some step of the same body binds `role`; in a
+  single-statement body nothing does, so the identifier resolves against
+  an empty scope and the comparison is a CONSTANT -- the else branch for
+  every input, loading green and linting green. Read an argument as
+  `args.role`, or bind the local first. This is #2962's mechanism in the
+  spelling authors reach for first, which is why it is refused rather
+  than left to be discovered as a gate that never fires.
+- **Ambient predicates evaluate** (#3024): `cond(actor.role == "owner",
+  ...)`, and the same for `config.` / `partition` / `now`. The ambient
+  envelope is resolved once per call and threaded through arg expansion,
+  so these discriminate exactly like the `args.` ones; the multi-step
+  path binds the same envelope onto its own evaluator, so a predicate
+  answers identically whichever way the body is written. They were
+  briefly a load rejection -- expansion received only args, so an
+  ambient comparison fell through and took the else branch for every
+  input -- and that refusal is gone now that the envelope reaches the
+  predicate. With no authenticated caller the envelope DENIES (every key
+  present, owner bits false, #2801) rather than leaving keys absent,
+  because an absent key is what makes a negated gate read true.
+- **A reserved root is not the same as a resolvable one.** The envelope
+  carries exactly `actor.` / `config.` / `partition` / `now`. `trace` is
+  reserved -- no local or payload field may shadow it -- but nothing
+  supplies it, so a `trace.`-rooted cond predicate is a **load error**,
+  not an evaluation. The same goes for a path the envelope has no key
+  for: an unknown `actor.` member (the auth envelope is a closed set,
+  #2623) or a `config.` key outside the `policy_exposable.go`
+  allow-list. Each would otherwise resolve to nothing and constant-fold,
+  which is the silent gate this whole rule exists to prevent, so it is
+  refused loudly instead.
 
 ---
 
