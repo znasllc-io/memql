@@ -52,7 +52,7 @@ import (
 // comment claimed a repo-wide collapse, a second one enumerated four and still
 // missed three, so the honest form is a pointer to the search rather than a
 // count (`grep -rn 'Sprintf("%q"' --include=*.go` over the statement-building
-// paths finds them):
+// paths finds them). Filed as memql#3099:
 //
 //   - component/automations/steps/function.go renders string function args with
 //     %q and hands the result to Engine.Execute. That is this exact defect on the
@@ -72,13 +72,14 @@ import (
 // It predates the collapse -- the body this replaced emitted the same escape --
 // and it is deliberately NOT fixed here: unlike an error message, a webhook body's
 // bytes are load-bearing, so choosing between rejecting and substituting is a
-// decision this helper cannot make on its caller's behalf. Filed separately.
+// decision this helper cannot make on its caller's behalf. Filed as memql#3098.
 //
 // Not every one of those is a live defect -- integrations/knowledge's hand-rolled
 // table and component/automations/steps' jsonString are duplicate DEFINITIONS
 // that happen to be safe, since the lexer accepts a raw control byte and
 // json.Marshal escapes correctly. The point is the count, not a verdict on each:
-// these are separate stories, and a helper cannot fix a caller by existing.
+// these are separate stories (memql#3099), and a helper cannot fix a caller by
+// existing.
 //
 // # Invalid UTF-8
 //
