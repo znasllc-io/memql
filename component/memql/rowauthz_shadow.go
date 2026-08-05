@@ -299,11 +299,45 @@ func isOwnerScopeLeaf(node ExpressionNode, ownerField string) bool {
 	if !isActor || !strings.EqualFold(strings.TrimSpace(ref.Path), "userId") {
 		return false
 	}
+	// SELF-OWNED (memql#3029): the predicate names the ROW'S OWN identity, so
+	// the matching leaf is the `row.id` intrinsic, not a payload property.
+	// Without this arm the renderer and the matcher disagree about the very
+	// predicate they both exist to describe -- InjectedPredicate emits
+	// `row.id==actor.userId`, topLevelPayloadField returns "" for
+	// `["row","id"]`, and a filter spelling that predicate VERBATIM was
+	// reported would-narrow. That is the overstatement this file's own
+	// doctrine forbids exactly as loudly as an understatement, and it would
+	// have corrupted the evidence the Phase 3 enforcement ruling is taken
+	// against -- the one thing shadow mode exists to produce.
+	//
+	// isRowIntrinsicName is deliberately NOT reused: it admits ANY `row.`
+	// field, including `row.createdBy` -- the near-miss validateRowAuthz
+	// refuses in this same change, because createdBy means "who WROTE the
+	// row", not "whose row it is". A matcher looser than the validator would
+	// credit a scope the tier can never have declared.
+	if strings.EqualFold(strings.TrimSpace(ownerField), langparser.RowAuthzSelfOwnedField) {
+		return isRowIdName(cmp.Field)
+	}
 	field := topLevelPayloadField(cmp.Field)
 	if field == "" {
 		return false
 	}
 	return strings.EqualFold(field, strings.TrimSpace(ownerField))
+}
+
+// isRowIdName reports whether a field reference names the row id intrinsic --
+// `row.id`, or the bare `id` spelling memql#2779 retired in authored filters
+// but which the runtime still resolves to the id column.
+//
+// Deliberately narrower than isRowIntrinsicName: `id` only, never another
+// intrinsic.
+func isRowIdName(f FieldReference) bool {
+	if len(f.Parts) == 2 &&
+		strings.EqualFold(strings.TrimSpace(f.Parts[0]), "row") &&
+		strings.EqualFold(strings.TrimSpace(f.Parts[1]), "id") {
+		return true
+	}
+	return len(f.Parts) <= 1 && strings.EqualFold(strings.TrimSpace(f.Raw), "id")
 }
 
 // isClusterOwnerLeaf reports whether a conjunct is the cluster-owner gate,

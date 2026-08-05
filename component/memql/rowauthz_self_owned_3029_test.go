@@ -49,26 +49,41 @@ func TestOwnerProvenance_SelfOwned_CallerSuppliedIdIsWritable(t *testing.T) {
 	}
 }
 
-// TestOwnerProvenance_ServerOnlyIsNotACallerPath pins the narrowing.
+// TestOwnerProvenance_ServerOnlyIsStillACallerPath pins the direction a
+// landing-review pass got backwards.
 //
-// A @serverOnly mutation bars client-originated calls at expandFunctionCall
-// (#2800), so its args cannot come from a caller BY CONSTRUCTION. Counting it
-// as caller-writable reports a guarantee that is provided as one that is not.
+// That pass skipped @serverOnly mutations in the provenance walk, reasoning
+// that the annotation means "args cannot come from a caller by construction".
+// The annotation does not mean that. engine.go gates on
+// auth.OriginFromContext -- the origin of the CALL -- and never inspects where
+// a trusted Go call site got its args.
 //
-// memql#2991 rests on exactly this: it gated `updateUser` @serverOnly
-// specifically so its caller-supplied id would stop being a forging path. If
-// the analyzer ignores the annotation, that work buys nothing here.
-func TestOwnerProvenance_ServerOnlyIsNotACallerPath(t *testing.T) {
+// updateUser is the live counter-example: component/identity/admin/handlers.go
+// stamps internal origin on a REQUEST-DERIVED context and passes a userId read
+// straight off an HTTP form. call_origin.go warns against exactly that shape,
+// and call_origin_conformance_test.go allowlists that package as a KNOWN
+// EXCEPTION whose precondition is asserted by a separate per-package test --
+// so arg provenance comes from that discipline, not from @serverOnly.
+//
+// The gate must therefore keep counting it. Failing closed on a mutation whose
+// caller-supplied id it can see is the whole product of memql#2982.
+func TestOwnerProvenance_ServerOnlyIsStillACallerPath(t *testing.T) {
 	reg := loadTreeRegistry(t)
 	got := provenanceOf(t, reg, "v1:identity:user", langparser.RowAuthzSelfOwnedField)
 
+	var sawUpdateUser bool
 	for _, name := range got.WritableBy {
 		if name == "updateUser" {
-			t.Errorf("updateUser is counted as a caller path, but memql#2991 gated it "+
-				"@serverOnly -- a client call is refused at expandFunctionCall, so its "+
-				"caller-supplied id is unreachable from a caller. Counting it anyway reports a "+
-				"guarantee that IS provided as one that is not.\n  writable by: %v", got.WritableBy)
+			sawUpdateUser = true
 		}
+	}
+	if !sawUpdateUser {
+		t.Errorf("updateUser takes the row id from caller args (`update { id: args.userId }`) and "+
+			"must be counted as a caller path. @serverOnly bars a client CALL; it does not "+
+			"constrain where the admin handler got the id -- and that handler reads it from an "+
+			"HTTP form under an internal-origin stamp on a request-derived context. Skipping it "+
+			"here would let a concept satisfy the owner gate by annotating its mutation, which is "+
+			"not on the gate's remedy menu.\n  writable by: %v", got.WritableBy)
 	}
 }
 
@@ -107,5 +122,50 @@ func TestInjectedPredicate_SelfOwnedUsesRowNamespace(t *testing.T) {
 		Tier: langparser.RowAuthzOwned, Owner: "ownerUserId",
 	}); plain != "ownerUserId==actor.userId" {
 		t.Errorf("the payload-field form must be unchanged, got %q", plain)
+	}
+}
+
+// TestAnalyzeShadow_SelfOwnedPredicateRoundTrips is the assertion the
+// criterion-6 test above could not make on its own.
+//
+// Asserting the rendered STRING proves the renderer; it says nothing about
+// whether the matcher in the same file can recognise what was rendered. A
+// landing-review pass found they disagreed: InjectedPredicate emitted
+// `row.id==actor.userId` while isOwnerScopeLeaf resolved conjuncts through
+// topLevelPayloadField, which returns "" for `["row","id"]` -- so a filter
+// spelling the tier's own predicate VERBATIM was reported would-narrow.
+//
+// That is the overstatement rowauthz_shadow.go's own doctrine forbids as
+// loudly as an understatement, and shadow mode's entire product is the
+// evidence the Phase 3 enforcement ruling is taken against. A round trip is
+// the only assertion that catches a renderer and a matcher drifting apart.
+func TestAnalyzeShadow_SelfOwnedPredicateRoundTrips(t *testing.T) {
+	decl := &langparser.RowAuthzDecl{
+		Tier:  langparser.RowAuthzOwned,
+		Owner: langparser.RowAuthzSelfOwnedField,
+	}
+
+	// The predicate the renderer emits, parsed back into a filter.
+	verdict, reason := AnalyzeShadow(ownerScoped("row.id"), decl)
+	if verdict != ShadowAlreadyImplied {
+		t.Errorf("a filter that IS the rendered predicate must be already-implied.\n"+
+			"  rendered: %q\n  verdict:  %v\n  reason:   %s\n"+
+			"The renderer and the matcher are describing the same predicate; if they disagree, "+
+			"the blast-radius number the enforcement ruling rests on is wrong in the direction "+
+			"that overstates it.", InjectedPredicate(decl), verdict, reason)
+	}
+
+	// The near-miss must NOT satisfy it. createdBy means "who wrote the row",
+	// not "whose row it is" -- validateRowAuthz refuses it as an owner, so a
+	// matcher that credited it would be looser than the validator.
+	if v, _ := AnalyzeShadow(ownerScoped("row.createdBy"), decl); v == ShadowAlreadyImplied {
+		t.Error("`row.createdBy==actor.userId` must not satisfy the self-owned predicate: it names " +
+			"who WROTE the row, not whose row it is, and admitting it here would credit a scope " +
+			"the tier can never have declared")
+	}
+
+	// An unrelated payload field must not satisfy it either.
+	if v, _ := AnalyzeShadow(ownerScoped("ownerUserId"), decl); v == ShadowAlreadyImplied {
+		t.Error("an unrelated payload field must not satisfy the self-owned predicate")
 	}
 }

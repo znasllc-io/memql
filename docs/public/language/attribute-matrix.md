@@ -434,7 +434,9 @@ sets; unknown annotations are rejected at load time:
   `@rowAuthz(public|clusterOwner|owner="<field>"|via="<spec>")` declares
   WHO MAY SEE the concept's rows, once on the concept, instead of as an
   `actor.*` term every filter over it must remember to carry. Exactly
-  one tier; `owner=` must name a field the concept declares. PHASE 1 IS
+  one tier; `owner=` must name a field the concept declares, or the
+  literal `id` for a self-owned concept whose owner is the row itself
+  (memql#3029). PHASE 1 IS
   INERT (memql#2920) -- the tier is parsed, validated and carried, and
   nothing reads it at query time, so no result set changes. Undeclared
   is a boot warning, not yet an error. See

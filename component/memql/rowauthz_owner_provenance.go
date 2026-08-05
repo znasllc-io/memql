@@ -265,21 +265,24 @@ func OwnerFieldProvenance(registry *FunctionRegistry, declared map[string]string
 		if fn == nil || fn.FunctionKind != "mutation" || fn.MutationTemplate == nil {
 			continue
 		}
-		// A @serverOnly mutation is NOT a caller path (memql#3029). The
-		// annotation bars client-originated calls at expandFunctionCall
-		// (#2800), so its args cannot come from a caller by construction, and
-		// counting it as caller-writable reports a guarantee that IS provided
-		// as one that is not. memql#2991 relies on exactly this: it gated
-		// updateUser precisely so its caller-supplied id would stop being a
-		// forging path.
+		// NOTE: a @serverOnly mutation is deliberately still counted as a
+		// caller path. A landing-review pass skipped them here, reasoning that
+		// the annotation means "args cannot come from a caller by
+		// construction". That is false: expandFunctionCall (engine.go) gates
+		// on auth.OriginFromContext -- the origin of the CALL -- and never
+		// inspects where a trusted Go call site got its args. updateUser is
+		// the live proof: component/identity/admin/handlers.go stamps internal
+		// origin on a REQUEST-DERIVED context and passes a userId read from an
+		// HTTP form field.
 		//
-		// This narrows the gate, so it is worth being explicit about what
-		// keeps it honest: the gate errors when an EXEMPT concept starts
-		// passing, so if this silently rescued a concept that is exempt for a
-		// filed reason, the suite says so rather than going quiet.
-		if fn.ServerOnly {
-			continue
-		}
+		// The repo already adjudicated this. call_origin.go says "Never call
+		// it in a request handler on a context derived from an inbound
+		// request", and call_origin_conformance_test.go allowlists the admin
+		// package as a KNOWN EXCEPTION whose precondition is asserted by a
+		// separate per-package test. So arg provenance is guaranteed by that
+		// discipline, not by the annotation -- and a gate that assumed
+		// otherwise would go quiet on exactly the shape the workertoken
+		// allowlist entry warns about.
 		c := strings.TrimSpace(fn.BoundConcept)
 		if c == "" {
 			c = strings.TrimSpace(fn.MutationTemplate.Concept)
