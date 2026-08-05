@@ -169,12 +169,10 @@ func CheckFile(path string, source string, sideEffecting SideEffectClassifier) [
 	return out
 }
 
-// CheckTree walks a DSL root and returns every call-graph finding across its
-// restricted-kind files. Underscore-prefixed directories (e.g. _reference/)
-// are skipped, exactly as the engine DSL walker does.
-func CheckTree(root string, sideEffecting SideEffectClassifier) ([]Finding, error) {
-	var out []Finding
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+// walkTree visits every .memql file under root, skipping underscore-prefixed
+// directories (e.g. _reference/) exactly as the engine DSL walker does.
+func walkTree(root string, visit func(path string, source string)) error {
+	return filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -191,8 +189,44 @@ func CheckTree(root string, sideEffecting SideEffectClassifier) ([]Finding, erro
 		if err != nil {
 			return fmt.Errorf("read %s: %w", path, err)
 		}
-		out = append(out, CheckFile(path, string(raw), sideEffecting)...)
+		visit(path, string(raw))
 		return nil
+	})
+}
+
+// CheckTree walks a DSL root and returns every call-graph finding across its
+// restricted-kind files. Underscore-prefixed directories (e.g. _reference/)
+// are skipped, exactly as the engine DSL walker does.
+func CheckTree(root string, sideEffecting SideEffectClassifier) ([]Finding, error) {
+	var out []Finding
+	err := walkTree(root, func(path, source string) {
+		out = append(out, CheckFile(path, string(source), sideEffecting)...)
+	})
+	return out, err
+}
+
+// Coverage reports how many constructs the tree walk actually SPLITS per
+// restricted kind -- how much of the tree the rules are running against,
+// independent of whether they found anything.
+//
+// It exists because a finding count cannot distinguish a clean tree from a
+// dead checker. memql#3043: headerRE scanned for the retired `mutation`
+// keyword, so every mutations.memql split to nothing and all four mutation
+// rules ran against zero of the tree's 215 declarations -- and the whole-tree
+// gate, which only asserts on findings, passed throughout. Every restricted
+// kind is expected to be non-zero on the real tree; a zero means that kind's
+// rules are enforcing nothing.
+func Coverage(root string) (map[string]int, error) {
+	out := make(map[string]int, len(restrictedKinds))
+	for kind := range restrictedKinds {
+		out[kind] = 0
+	}
+	err := walkTree(root, func(path, source string) {
+		kind := singular(strings.TrimSuffix(filepath.Base(path), ".memql"))
+		if _, restricted := restrictedKinds[kind]; !restricted {
+			return
+		}
+		out[kind] += len(splitConstructs(kind, source))
 	})
 	return out, err
 }

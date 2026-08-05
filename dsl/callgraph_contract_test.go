@@ -95,3 +95,37 @@ func TestCallGraphContract(t *testing.T) {
 		t.Errorf("stale baseline entry no longer violates: %q\n  Remove the line from callGraphBaseline (burn-down).", b)
 	}
 }
+
+// TestCallGraphCoverage asserts the gate above is actually running against the
+// tree. TestCallGraphContract asserts only on FINDINGS, and a checker that
+// splits nothing produces no findings -- so a clean tree and a dead checker are
+// the same green.
+//
+// That is not hypothetical: in memql#3043 the mutation header matcher scanned
+// for the retired `mutation` keyword (renamed to `mutate` in memql#2041), every
+// mutations.memql split to nothing, and all four mutation rules -- including
+// ADR §2.3 / authoring-rules Rule #1, one write per mutation body -- enforced
+// nothing against 215 declarations while this gate passed throughout.
+//
+// Each restricted kind must split a non-zero number of constructs. A zero is
+// not a small regression: it is that kind's rules silently enforcing nothing.
+func TestCallGraphCoverage(t *testing.T) {
+	coverage, err := callgraph.Coverage(".")
+	if err != nil {
+		t.Fatalf("walk DSL tree: %v", err)
+	}
+	if len(coverage) == 0 {
+		t.Fatal("callgraph.Coverage reported no restricted kinds at all")
+	}
+	kinds := make([]string, 0, len(coverage))
+	for kind := range coverage {
+		kinds = append(kinds, kind)
+	}
+	sort.Strings(kinds)
+	for _, kind := range kinds {
+		if coverage[kind] == 0 {
+			t.Errorf("call-graph coverage for %q is 0 constructs -- its rules are enforcing NOTHING against the tree.\n  Check the declaration keyword in component/memql/callgraph/tree.go against component/language/dslspec (memql#3043).", kind)
+		}
+	}
+	t.Logf("call-graph coverage: %v", coverage)
+}
