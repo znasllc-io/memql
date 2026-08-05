@@ -156,18 +156,26 @@ mutate deployment updateDeploymentStatus {
 // a different issue -- this comment carried a stale half of each until the
 // two landed within an hour of one another:
 //
-//   - ambient canonicalId, no import: FIXED by #2976. canonical_id_refs.go
-//     used to accept the ambient path only when the concept id contained
-//     ":"+domain+":" -- the DIRECTORY. The directory here is `deployment`
-//     while these concepts declare @namespace("cluster"), so the id is
-//     v1:cluster:deployment, the check never matched, and the loader asked for
-//     an import that TestNoSameDomainUse bans. The ambient rule now turns on
-//     UNIQUENESS, which is what boot itself uses, so the bare ambient form
-//     resolves here with no import at all.
+//   - ambient canonicalId, no import: FIXED by #2976, and corrected again by
+//     memql#3026. canonical_id_refs.go used to accept the ambient path only
+//     when the concept id contained ":"+domain+":" -- the DIRECTORY. The
+//     directory here is `deployment` while these concepts declare
+//     @namespace("cluster"), so the id is v1:cluster:deployment, the check
+//     never matched, and the loader asked for an import TestNoSameDomainUse
+//     bans.
 //
-//     Do NOT write the call form in a comment across a line break: the
-//     canonicalId rewriter scans comment text too, so a wrapped occurrence is
-//     read as a real call with a concept named "//     deployment".
+//     #3017 replaced the directory test with tree-wide UNIQUENESS. That fixed
+//     this pack, but it bound cross-domain names with no import at all and
+//     left a remapped pack whose name is AMBIGUOUS still deadlocked. The rule
+//     is now the DECLARED namespace -- this domain's namespace.pin, "cluster"
+//     -- which is what #2976 asked for in the first place: it resolves the
+//     bare ambient form here with no import, and refuses a foreign concept,
+//     without widening anything.
+//
+//     (The warning that stood here -- "do not write the call form in a comment
+//     across a line break" -- is gone along with the defect it described. The
+//     rewriter no longer scans comment text at all, so a wrapped occurrence
+//     stays prose. memql#3026.)
 //   - `use cluster.concepts.{ deployment }`: works too (#2945, #2977). This
 //     bullet used to record two reasons it did not, and both are gone.
 //     memqllint no longer rejects it -- a `use` path's leading segment is a
