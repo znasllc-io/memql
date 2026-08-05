@@ -561,10 +561,7 @@ jobs:
       #
       # Do not remove it. scripts/cidb asserts this key is present and truthy,
       # and separately asserts the selector's coverage -- see the selector
-      # comment above, and scripts/cidb itself for what it checks. Until
-      # memql#3030 that coverage assertion only required ONE db-gated test to
-      # match, which passed while nineteen assertions in four packages ran
-      # nowhere.
+      # comment above, and scripts/cidb itself for what it checks.
       MEMQL_REQUIRE_DB: '1'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
