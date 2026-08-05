@@ -740,9 +740,11 @@ func substituteArgRefValue(v any, args map[string]any, ambient map[string]any) a
 			parts = strings.Split(t.Field.Raw, ".")
 		}
 		// An AMBIENT-rooted predicate (memql#3024). `actor.` / `config.` /
-		// `partition` / `now` / `trace` are RESERVED top-level identifiers, so
-		// none of them can be a lambda local or a payload field and resolving
-		// them here cannot shadow a legitimate lazy reference.
+		// `partition` / `now` are RESERVED top-level identifiers that the
+		// envelope CARRIES, so none of them can be a lambda local or a payload
+		// field and resolving them here cannot shadow a legitimate lazy
+		// reference. `trace` is reserved but supplied by nothing, so it is NOT
+		// in this set -- it is refused at load instead. See ambientEnvelopeRoots.
 		//
 		// This is the half #2962 structurally could not reach: expansion was
 		// handed args and nothing else, so an ambient comparison fell through,
@@ -800,21 +802,61 @@ func substituteArgRefValue(v any, args map[string]any, ambient map[string]any) a
 	}
 }
 
-// isAmbientRoot reports whether name is one of the RESERVED top-level
-// identifiers the ambient envelope carries (CLAUDE.md, "Reserved engine
-// names"). An args field colliding with one of these is rejected at load, and
-// none of them can be a lambda local or a payload field -- which is what makes
-// resolving them during expansion safe (memql#3024).
+// ambientEnvelopeRoots is the set of reserved top-level identifiers the
+// ambient envelope ACTUALLY CARRIES -- one entry per key buildAmbientEnvelope
+// writes, and nothing else. TestAmbientRootsMatchEnvelopeKeys pins the two
+// together; do not add a name here without adding the key there.
 //
-// Kept in step with dslfs.reservedAlias and the parser's reserved set; those
-// are the surfaces that guarantee the names cannot be rebound.
+// The distinction from the reserved set is load-bearing, and getting it wrong
+// is not a style question. `trace` is reserved by the parser and by
+// dslfs.reservedAlias -- it cannot be shadowed by a local or a payload field --
+// but NOTHING in the codebase ever supplies a `trace` object to any evaluation
+// envelope. Treating "reserved" as "resolvable" made the substitution below
+// fold `trace.x` to nil, so `cond(trace.x == "y", ...)` became a constant that
+// takes the else branch for every input: exactly the memql#2962 silent gate
+// this file exists to eliminate, and a REGRESSION, because the validator this
+// change replaced refused that shape at load.
+//
+// It is also the third instance of one bug class. component/automations
+// logic_runner.go records the previous two: "The list had drifted from two
+// others that describe the same set ... which is why nobody noticed one of the
+// three was short" (#2818 / #2851), which shipped as deploy role gates denying
+// every role including owner. Hence the drift test rather than only a
+// corrected list.
+var ambientEnvelopeRoots = map[string]struct{}{
+	"actor":     {},
+	"config":    {},
+	"partition": {},
+	"now":       {},
+}
+
+// reservedUnsuppliedRoots is the complement: reserved top-level names that no
+// envelope supplies. A comparison rooted here can never resolve, so it is
+// refused at load (validateLogicCondBareIdentifierPredicate) rather than
+// folded to nil -- a loud boot error instead of a gate that is open or closed
+// by accident.
+var reservedUnsuppliedRoots = map[string]struct{}{
+	"trace": {},
+}
+
+// isAmbientRoot reports whether name is a reserved top-level identifier the
+// ambient envelope carries, and can therefore be RESOLVED during expansion
+// (memql#3024). None of these can be a lambda local or a payload field, which
+// is what makes resolving them here safe.
+//
+// This is deliberately narrower than the reserved-name set in
+// dslfs.reservedAlias and the parser: reserved means "cannot be rebound",
+// which is not the same as "has a value". See ambientEnvelopeRoots.
 func isAmbientRoot(name string) bool {
-	switch strings.TrimSpace(name) {
-	case "actor", "config", "partition", "now", "trace":
-		return true
-	default:
-		return false
-	}
+	_, ok := ambientEnvelopeRoots[strings.TrimSpace(name)]
+	return ok
+}
+
+// isReservedUnsuppliedRoot reports whether name is reserved but carried by no
+// envelope, so a comparison rooted at it cannot resolve on any path.
+func isReservedUnsuppliedRoot(name string) bool {
+	_, ok := reservedUnsuppliedRoots[strings.TrimSpace(name)]
+	return ok
 }
 
 // asExpressionOperand wraps a substituted comparison operand so the

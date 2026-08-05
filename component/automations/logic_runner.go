@@ -1348,10 +1348,47 @@ func (r *LogicRunner) newEvaluatorForLogic(ctx context.Context, args map[string]
 	// One canonical envelope (#2623), via the one shared binder so the
 	// five evaluator sites cannot drift apart again.
 	bindActorEnvelope(ctx, evaluator)
+	// The REST of the ambient envelope -- `config` / `partition` / `now`
+	// (memql#3024). `actor` is bound above by the shared binder; these three
+	// come from the engine's one canonical envelope so this surface cannot
+	// grow a second builder (#2623).
+	//
+	// Why this is a fix and not an addition: the validator memql#3024 deletes
+	// refused an ambient cond predicate in EVERY step, multi-step bodies
+	// included. Deleting that refusal makes `cond(config.demoMode == true,
+	// ...)` loadable here -- and with nothing bound it resolves against
+	// nothing and is a silent constant, which is the memql#2962 defect the
+	// deletion was meant to be retiring, not relocating. Binding is what makes
+	// the deletion honest on this path.
+	bindEngineAmbientEnvelope(ctx, r.engine, evaluator)
 	if r.logger != nil {
 		evaluator.SetLogger(r.logger)
 	}
 	return evaluator
+}
+
+// bindEngineAmbientEnvelope binds the non-actor half of the ambient envelope
+// (`config` / `partition` / `now`) onto evaluator, sourced from the engine's
+// single canonical builder.
+//
+// `actor` is deliberately NOT bound here: bindActorEnvelope owns it, and
+// actor_envelope_invariant_test.go enforces that every evaluator passes
+// through that binder. Splitting the two keeps that invariant checkable by the
+// test that already exists rather than making it depend on this function too.
+//
+// A nil engine binds nothing rather than binding empty values: the engine is
+// where the config snapshot lives, so with no engine there is no envelope to
+// speak for, and synthesising one would assert a config state nobody set.
+func bindEngineAmbientEnvelope(ctx context.Context, engine *memql.MemQLEngine, evaluator *Evaluator) {
+	if engine == nil || evaluator == nil {
+		return
+	}
+	envelope := engine.AmbientEnvelope(ctx)
+	for _, key := range []string{"config", "partition", "now"} {
+		if value, ok := envelope[key]; ok {
+			evaluator.SetCustom(key, value)
+		}
+	}
 }
 
 // logicEventBinding resolves the first-class `event` value bound into a

@@ -137,9 +137,16 @@ func TestLogicCondBareIdentifierPredicate_LeavesLegitimateShapesAlone(t *testing
 	// The ambient roots are reserved top-level identifiers, never locals and
 	// never payload fields. They are resolved by the envelope threading in this
 	// same change, so they must LOAD (they were load errors before #3024).
+	// `config.demoMode`, not a made-up key. An allow-listed key is the whole
+	// point: a path the envelope does not carry folds to nil and is a silent
+	// constant, so it is a LOAD ERROR now rather than a legitimate shape --
+	// see TestLogicCondBareIdentifierPredicate_RejectsUnresolvableAmbientPaths.
+	// The earlier `config.someFlag` here asserted only "did not error at load"
+	// on a key that never resolves, so it would have passed identically with
+	// config resolution completely broken.
 	for name, pred := range map[string]string{
 		"actor":     `actor.role == "owner"`,
-		"config":    `config.someFlag == "on"`,
+		"config":    `config.demoMode == true`,
 		"partition": `partition == "default"`,
 	} {
 		t.Run("ambient-"+name, func(t *testing.T) {

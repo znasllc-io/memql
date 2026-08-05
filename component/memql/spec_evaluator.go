@@ -69,6 +69,26 @@ func buildSpecCtx(ctx context.Context, engine *MemQLEngine) map[string]any {
 	return buildAmbientEnvelope(ctx, engine)
 }
 
+// AmbientEnvelope exposes the one canonical ambient envelope to the other
+// evaluation surface in this codebase: the automations LogicRunner, which
+// evaluates MULTI-STEP logic bodies through its own Evaluator rather than
+// through arg expansion (component/automations, newEvaluatorForLogic).
+//
+// It exists so that surface cannot build a second envelope. Before memql#3024
+// the runner bound `actor` and nothing else, so `cond(config.demoMode == true,
+// ...)` in a multi-step body resolved against nothing and was a silent
+// constant -- the same defect this issue closes for the single-statement form,
+// reached on the other path. It went unnoticed because the validator memql#3024
+// deletes had refused ambient predicates in EVERY step, so the shape was
+// unreachable rather than correct; deleting the refusal without binding the
+// envelope is what would have made it reachable AND wrong.
+//
+// #2623 is the standing rule: one builder, or the same gate answers
+// differently depending on which surface evaluated it.
+func (e *MemQLEngine) AmbientEnvelope(ctx context.Context) map[string]any {
+	return buildAmbientEnvelope(ctx, e)
+}
+
 // buildAmbientEnvelope assembles the ambient evaluation envelope: the
 // resolved actor, the active partition, the engine timestamp, and the
 // allow-listed config surface. Those are the reserved top-level names
