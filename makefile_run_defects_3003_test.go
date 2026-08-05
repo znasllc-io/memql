@@ -73,11 +73,15 @@ func TestMakefileRunGuard_Defects(t *testing.T) {
 			why: "the mirror: unescaping `$$` must not start reporting working recipes.",
 		},
 		{
-			name:     "M1 a genuine Make variable is still skipped",
+			name:     "M1 a genuine Make variable is UNRESOLVABLE, and now says so",
 			makefile: "t:\n\t$(GO) test -run $(PATTERN) " + arch + "\n",
-			wantFlag: false, wantChecked: false,
+			wantFlag: true, wantChecked: false,
 			why: "`$(` and `${` are variables and are genuinely unresolvable at this layer; " +
-				"only the `$$` escape was being conflated with them.",
+				"only the `$$` escape was being conflated with them. INVERTED by memql#3027: " +
+				"still unresolvable, but no longer SILENT. A recipe the gate cannot check is a " +
+				"hole in coverage, and reporting success on it is how the gate drains away one " +
+				"recipe at a time. Exempt it via makefileRunAllowlist if it genuinely cannot " +
+				"be checked.",
 		},
 
 		// ---- M2: continued recipes ------------------------------------------
@@ -99,18 +103,20 @@ func TestMakefileRunGuard_Defects(t *testing.T) {
 
 		// ---- M3: package and pattern shapes ---------------------------------
 		{
-			name:     "M3 Make variable in PACKAGE position is skipped",
+			name:     "M3 Make variable in PACKAGE position is UNRESOLVABLE, and now says so",
 			makefile: "t:\n\t$(GO) test -run TestReal $(ARCH_PKG)\n",
-			wantFlag: false, wantChecked: false,
+			wantFlag: true, wantChecked: false,
 			why: "`$` was checked in the pattern and never in the package, so this scored " +
-				"against the root package and reported `matches none of the ... tests in .`.",
+				"against the root package and reported `matches none of the ... tests in .`. " +
+				"INVERTED by memql#3027: unresolvable is now reported rather than skipped.",
 		},
 		{
-			name:     "M3 module path in package position is skipped",
+			name:     "M3 module path in package position is UNRESOLVABLE, and now says so",
 			makefile: "t:\n\t$(GO) test -run TestReal github.com/znasllc-io/memql/component/architecture\n",
-			wantFlag: false, wantChecked: false,
+			wantFlag: true, wantChecked: false,
 			why: "a module path has no `./` for the old package regexp to anchor on, so it " +
-				"fell through to the root default.",
+				"fell through to the root default. INVERTED by memql#3027: this layer still " +
+				"cannot map it to a directory, but it now says so instead of reporting success.",
 		},
 		{
 			name:     "M3 subtest pattern is not reported broken",

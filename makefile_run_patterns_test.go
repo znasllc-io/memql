@@ -47,8 +47,25 @@ type runFinding struct {
 	lineNo  int
 	pattern string
 	pkgs    []string
-	kind    string // "bad-regexp" | "no-tests" | "no-match"
+	kind    string // "bad-regexp" | "no-tests" | "no-match" | "unresolvable"
+	reason  string // why an "unresolvable" finding could not be resolved
 }
+
+// makefileRunAllowlist exempts a `-run` recipe the parser genuinely cannot
+// resolve, keyed by its RAW `-run` value, with the reason it is exempt.
+//
+// The escape hatch is required rather than decorative: resolveMakePattern
+// reports `$$IDENT` unresolvable on purpose, because a shell variable resolves
+// at run time and unescaping it would report a working parameterised recipe as
+// broken (#3018 landing review). Without an allow-list, making unresolvable a
+// FAILURE would fail such a recipe.
+//
+// It is EMPTY, and that is load-bearing rather than a placeholder: an empty
+// allow-list plus a passing gate is the proof that no recipe in this tree is
+// currently being skipped. Adding an entry is the deliberate, reviewable act
+// of removing one recipe from coverage -- which is precisely what memql#3027
+// is about making impossible to do by accident.
+var makefileRunAllowlist = map[string]string{}
 
 // scanMakefileRunPatterns is the whole rule, separated from the filesystem so
 // it can be driven by synthetic Makefiles.
@@ -64,23 +81,63 @@ func scanMakefileRunPatterns(raw string, namesFor func(pkgs []string) []string) 
 		}
 		// Segment first, so a pattern is scored only against the packages of
 		// its own command (memql#3003 M4).
+		// memql#3027 gap 2: `cd <dir> && go test ...`. Operands resolve
+		// against dir, while testNamesInPackages resolves against the gate's
+		// CWD, and splitShellCommands discards the cd segment's context by
+		// design. Detected across the whole logical line rather than per
+		// segment, because the cd is a PRECEDING segment. The Makefile already
+		// uses `cd <dir> &&` at several recipes -- they are npm today, so
+		// nothing fires, which is exactly the kind of latent gap this issue is
+		// about.
+		sawCd := false
 		for _, cmd := range splitShellCommands(ll.text) {
+			// The SAME prefix rule the tool check uses -- `@` silences, `-`
+			// ignores errors, `+` always runs. Stripping only `@` here left
+			// `-cd sub && go test ./pkg/` scoring the operands from the repo
+			// root instead of from `sub/`, emitting NO finding and incrementing
+			// `checked`: a false pass that also overstates coverage. One rule,
+			// both places, or the two drift apart exactly like this.
+			if fields := strings.Fields(cmd); len(fields) > 0 &&
+				strings.TrimLeft(strings.Trim(fields[0], "'\""), "@-+") == "cd" {
+				sawCd = true
+			}
+
 			rawPattern, ok := lastRunPattern(cmd)
 			if !ok {
 				continue
 			}
-			pattern, resolvable := resolveMakePattern(rawPattern)
-			if !resolvable {
+
+			// Establish FIRST whether this is even a go-test invocation. A
+			// help string carrying the text `-run` is not, and must stay
+			// silent -- see the note in commandPackages.
+			pkgs, unresolvable, isGoTest := commandPackages(cmd)
+			if !isGoTest {
 				continue
 			}
-			if _, cerr := regexp.Compile(pattern); cerr != nil {
-				findings = append(findings, runFinding{ll.lineNo, pattern, nil, "bad-regexp"})
+			if reason, exempt := makefileRunAllowlist[rawPattern]; exempt {
+				_ = reason
 				continue
 			}
 
-			pkgs, unresolvable := commandPackages(cmd)
+			pattern, resolvable := resolveMakePattern(rawPattern)
+			if !resolvable {
+				findings = append(findings, runFinding{ll.lineNo, rawPattern, nil, "unresolvable",
+					"the -run value cannot be resolved at this layer (a Make variable, or a shell variable resolved at run time)"})
+				continue
+			}
+			if _, cerr := regexp.Compile(pattern); cerr != nil {
+				findings = append(findings, runFinding{ll.lineNo, pattern, nil, "bad-regexp", ""})
+				continue
+			}
+			if sawCd {
+				findings = append(findings, runFinding{ll.lineNo, pattern, nil, "unresolvable",
+					"a preceding `cd` changes the directory the package operands resolve against"})
+				continue
+			}
 			if unresolvable {
-				continue // a Make variable or module path in package position
+				findings = append(findings, runFinding{ll.lineNo, pattern, pkgs, "unresolvable",
+					"a package operand cannot be resolved at this layer (a Make or shell variable, a module path, or -C)"})
+				continue
 			}
 			if len(pkgs) == 0 {
 				pkgs = []string{"."} // go test with no package argument means the current dir
@@ -88,13 +145,13 @@ func scanMakefileRunPatterns(raw string, namesFor func(pkgs []string) []string) 
 
 			names := namesFor(pkgs)
 			if len(names) == 0 {
-				findings = append(findings, runFinding{ll.lineNo, pattern, pkgs, "no-tests"})
+				findings = append(findings, runFinding{ll.lineNo, pattern, pkgs, "no-tests", ""})
 				continue
 			}
 
 			checked++
 			if !matchesTopLevel(pattern, names) {
-				findings = append(findings, runFinding{ll.lineNo, pattern, pkgs, "no-match"})
+				findings = append(findings, runFinding{ll.lineNo, pattern, pkgs, "no-match", ""})
 			}
 		}
 	}
@@ -118,6 +175,14 @@ func TestMakefileRunPatternsMatchARealTest(t *testing.T) {
 		case "no-tests":
 			t.Errorf("Makefile:%d: -run %s targets %s, which declares no Go tests at all",
 				f.lineNo, f.pattern, strings.Join(f.pkgs, " "))
+		case "unresolvable":
+			t.Errorf("Makefile:%d: -run %s could not be resolved by this gate, so it was NOT "+
+				"checked: %s.\n"+
+				"An unresolvable recipe is a silent hole in coverage -- the gate examines it, "+
+				"gives up, and reports success. Either make it resolvable (name the package "+
+				"literally, drop the `cd`/`-C`), or add it to makefileRunAllowlist with the "+
+				"reason it cannot be checked (memql#3027).",
+				f.lineNo, f.pattern, f.reason)
 		case "no-match":
 			names := testNamesInPackages(t, f.pkgs)
 			t.Errorf("Makefile:%d: -run %s matches none of the %d tests declared in %s, "+
@@ -127,6 +192,10 @@ func TestMakefileRunPatternsMatchARealTest(t *testing.T) {
 		}
 	}
 
+	// The global floor stays as a backstop, but it is no longer the only
+	// protection: every unresolvable recipe is now its own finding above, so
+	// coverage cannot drain away one recipe at a time while this stays >0
+	// (memql#3027).
 	if checked == 0 {
 		t.Error("no resolvable -run pattern found in the Makefile; this gate has stopped " +
 			"guarding anything and its parsing has probably drifted from the recipes")
