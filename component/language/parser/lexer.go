@@ -519,6 +519,25 @@ func (l *Lexer) scanString(start, startLine, startColumn int) (Token, error) {
 			l.advance()
 			continue
 		}
+		// A literal newline INSIDE the string still moves the source cursor to
+		// the next line, so the line counter has to move with it (memql#3047).
+		// Without this, every position derived after a multi-line literal was
+		// short by the newlines inside it and the drift COMPOUNDED per literal
+		// -- silently, because the parse was fine and only the reported
+		// locations were wrong, which is the whole value of a diagnostic.
+		//
+		// Keyed on the raw source byte, NOT on the decoded rune: an escaped
+		// `\n` is two source bytes on ONE line, and it is handled by the
+		// escape arm above, which writes '\n' into the builder without ever
+		// reaching here. Advancing on the decoded rune would mis-count every
+		// single-line literal in the tree that contains such an escape.
+		//
+		// Column goes to 0 because the advance() below takes it to 1 -- the
+		// same shape skipBlockComment uses for its own newline arm.
+		if ch == '\n' {
+			l.line++
+			l.column = 0
+		}
 		builder.WriteRune(ch)
 		l.advance()
 	}
