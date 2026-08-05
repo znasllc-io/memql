@@ -194,11 +194,23 @@ query deployment deploymentsForCluster {
 }
 ```
 
-**Prefer the `?? latest` spelling.** One clause serves both callers: omit
-the argument and the behaviour is byte-identical to `asOf latest`, so an
-existing query can adopt the form without changing anything for callers
-that pass nothing. Write the bare `asOf args.at` only where an omitted
-value should be an error — without a fallback it is one.
+**The `?? latest` fallback is required** (memql#3028). One clause serves
+both callers: omit the argument and the behaviour is byte-identical to
+`asOf latest`, so an existing query can adopt the form without changing
+anything for callers that pass nothing.
+
+The bare `asOf args.at` is **rejected at parse**, with a message naming
+the fix. It briefly parsed, and its failure was discoverable nowhere
+before production — not at load, not at lint, and not in a test unless
+someone wrote one that omits the argument. Omitting the argument is the
+common path for this construct, so a query authored that way works in
+its author's test and fails for its ordinary callers.
+
+**For a mandatory instant, declare the argument `@required` and keep the
+fallback.** The fallback is then unreachable and the failure lands at the
+argument boundary with a usable message rather than inside temporal
+resolution — strictly better than what the bare form gave, which is why
+requiring the coalesce costs no expressiveness.
 
 This matters because a declared `asOf latest` cannot be time-travelled by
 wrapping either (`asOf(...)` over a query that declares its own reports
