@@ -49,7 +49,7 @@ logic registerBad {
 // I2 acceptance: a mutation with two writes produces a finding.
 func TestMutationWithTwoWritesIsFlagged(t *testing.T) {
 	src := `use cluster.concepts.{ node }
-mutation node twoWrites {
+mutate node twoWrites {
   args { id string @required }
   insert { id: args.id }
   update { id: args.id, health: "up" }
@@ -64,7 +64,7 @@ mutation node twoWrites {
 func TestMutationCallingMutationIsFlagged(t *testing.T) {
 	src := `use cluster.concepts.{ node }
 use cluster.mutations.{ createSpawnEvent }
-mutation node createNodeBad {
+mutate node createNodeBad {
   args { id string @required }
   insert { id: args.id, ev: mutation createSpawnEvent(nodeId: args.id) }
 }`
