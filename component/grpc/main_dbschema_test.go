@@ -29,12 +29,14 @@ import (
 // origin/main -- an empty database came out with 12 tables after
 // TestWireBareIds_EngineRoundTrip alone.
 //
-// What changes is WHEN: the schema is now migrated once in TestMain before any
-// test runs, rather than inside whichever test happens to boot the database
-// first. That is what makes the package safe to run as one of several parallel
-// binaries against one shared database (memql#2551). The tests already wrote
-// and deleted rows when a reachable database was also migrated -- lane
-// membership only ever governed CI.
+// What changes is WHEN: the schema is complete before any test in this package
+// runs, instead of only from the point some test boots the database itself.
+// That is what makes the package safe to run as one of several parallel
+// binaries against one shared database (memql#2551). The in-test boot at
+// wire_bare_ids_test.go:234 is unchanged and still runs -- it is simply a
+// no-op now, because TestMain got there first. The tests already wrote and
+// deleted rows when a reachable database was also migrated; lane membership
+// only ever governed CI.
 //
 // (This paragraph originally claimed the migration never happened here before
 // memql#3030. That is true of the other three packages joining the lane and
