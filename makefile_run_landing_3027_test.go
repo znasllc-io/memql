@@ -391,18 +391,25 @@ func TestMakefileRunGuard_ShellOperatorsEndTheCommand(t *testing.T) {
 		}
 	})
 
-	t.Run("run flag after args is the binary's", func(t *testing.T) {
-		// `go test` honours the `-run` BEFORE `-args`; everything after belongs
-		// to the test binary. The operand scan already stopped at `-args`, so
-		// leaving the pattern scan reading past it scored a flag the toolchain
-		// ignores -- an inconsistency the first landing pass introduced by
-		// teaching one half of the parser about `-args`.
-		findings, checked := gapScan(t, "t:\n\tgo test ./pkg/ -run TestReal -args -run TestPhantomNoSuchTest\n")
-		if checked != 1 || len(findings) != 0 {
-			t.Fatalf("a `-run` after `-args` was scored as go test's own flag.\n"+
-				"  checked=%d findings=%v\n"+
-				"`go test` honours `-run TestReal` here; the one after `-args` is passed "+
-				"through to the binary.", checked, findings)
+	t.Run("test.run after args still counts", func(t *testing.T) {
+		// The pattern scan must NOT stop at `-args`, and this is the case that
+		// decides it. A landing-review pass truncated there by symmetry with
+		// the operand scan; measuring against the real toolchain showed the
+		// test binary honours `-test.run`, which OVERRIDES `go test -run`:
+		//
+		//	go test -run TestReal . -args -test.run TestNoSuchThing
+		//	  -> ok ... [no tests to run], exit 0
+		//
+		// That is memql#2923's silent green -- the failure this whole gate
+		// exists to catch -- so truncating blinded it in the one direction
+		// that matters most.
+		findings, _ := gapScan(t, "t:\n\tgo test ./pkg/ -run TestReal -args -test.run TestPhantomNoSuchTest\n")
+		if len(findings) != 1 || findings[0].kind != "no-match" {
+			t.Fatalf("a `-test.run` after `-args` was not scored.\n"+
+				"  findings=%v\n"+
+				"The test binary honours `-test.run` and it overrides `go test -run`, so this "+
+				"recipe exits 0 having run nothing. Stopping the pattern scan at `-args` makes "+
+				"the gate blind to exactly the silent-green failure it was built for.", findings)
 		}
 	})
 }

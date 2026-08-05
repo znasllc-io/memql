@@ -273,37 +273,33 @@ func splitShellCommands(line string) []string {
 // TestReal`, which runs TestReal, ruling out both-applied and intersection
 // semantics. So a recipe could carry a valid pattern followed by a phantom one
 // and the gate reported ok.
+// The pattern scan deliberately reads the WHOLE command, including anything
+// after `-args`.
+//
+// A landing-review pass truncated it there, on the reasoning that the operand
+// scan stops at `-args` so this should too. That was wrong, and measuring it
+// against the real toolchain is what showed why: the test binary has no `-run`
+// flag, but it does have `-test.run`, and `makeRunFlag` matches both spellings.
+//
+//	go test -run TestReal . -args -test.run TestNoSuchThing
+//	  -> ok ... [no tests to run], exit 0
+//
+// That is memql#2923's silent-green failure exactly, and truncating made the
+// gate blind to it -- the one direction this whole rule exists to prevent. The
+// shape the truncation was meant to protect is not even a working recipe:
+//
+//	go test -run TestReal . -args -run TestPhantom
+//	  -> flag provided but not defined: -run, exit 1
+//
+// so the "false positive" it removed was a loud, correct complaint about a
+// recipe that fails. Taking the LAST match is right in both cases, because
+// `-test.run` after `-args` is precisely the one that wins at run time.
 func lastRunPattern(cmd string) (string, bool) {
-	// Everything after `-args` belongs to the TEST BINARY, so a `-run` there is
-	// the binary's own flag and `go test` never sees it. The operand scan stops
-	// at `-args` for exactly this reason; the pattern scan has to as well, or
-	// the gate scores an argument the toolchain ignores against a package the
-	// recipe does test -- a hard failure on a working recipe, produced by
-	// teaching one half of the parser about `-args` and not the other.
-	cmd = truncateAtArgs(cmd)
 	all := makeRunFlag.FindAllStringSubmatch(cmd, -1)
 	if len(all) == 0 {
 		return "", false
 	}
 	return all[len(all)-1][1], true
-}
-
-// truncateAtArgs cuts a command at the `-args` / `--args` separator, which is
-// where `go test`'s own flags end and the test binary's begin.
-func truncateAtArgs(cmd string) string {
-	for _, sep := range []string{" -args ", " --args ", "\t-args\t", " -args\t", "\t-args "} {
-		if idx := strings.Index(cmd, sep); idx >= 0 {
-			cmd = cmd[:idx]
-		}
-	}
-	// A trailing `-args` with nothing after it carries no flags to strip, but
-	// it must not survive into the operand scan as a package either.
-	for _, sep := range []string{" -args", " --args"} {
-		if strings.HasSuffix(cmd, sep) {
-			cmd = strings.TrimSuffix(cmd, sep)
-		}
-	}
-	return cmd
 }
 
 // resolveMakePattern applies Make's own escaping to a `-run` value and reports
