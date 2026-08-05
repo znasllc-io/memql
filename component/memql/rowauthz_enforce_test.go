@@ -192,3 +192,74 @@ func TestUndeclaredConceptIsUntouched(t *testing.T) {
 		t.Errorf("an undeclared concept must be returned unchanged, got %#v", got)
 	}
 }
+
+// TestEnforcedPredicateUsesTheLoweredFieldSpelling is the test that would have
+// caught the defect the Postgres lane found.
+//
+// Injection happens in the executor, AFTER ast_converter lowers author
+// spellings, so the node must be in the form the FILTER COMPILER accepts --
+// `payload.<prop>`, a bare intrinsic, or `actor.<field>`. The first draft of
+// the enforcer emitted the author spelling (`ownerUserId`, `row.id`), which
+// compiles to "field %q is not supported" at query time.
+//
+// Every non-database test passed against that draft, because the analyzer's
+// topLevelPayloadField deliberately accepts BOTH spellings -- it reads filters
+// from both sides of the lowering. So asserting "the analyzer recognises the
+// enforcer's node" cannot catch it. This drives the real compiler instead.
+func TestEnforcedPredicateUsesTheLoweredFieldSpelling(t *testing.T) {
+	engine := &MemQLEngine{}
+	// Every real read is concept-bound, so the compiler is given the concept
+	// context it would have in production. Without it compileIdComparison
+	// refuses a short id, which is a property of id comparison generally and
+	// not of the injected predicate.
+	const conceptContext = "v1:identity:user"
+	for _, tc := range []struct {
+		name string
+		decl *langparser.RowAuthzDecl
+	}{
+		{"owned by a payload field", &langparser.RowAuthzDecl{Tier: langparser.RowAuthzOwned, Owner: "ownerUserId"}},
+		{"self-owned", &langparser.RowAuthzDecl{Tier: langparser.RowAuthzOwned, Owner: langparser.RowAuthzSelfOwnedField}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			node, err := enforcedPredicateNode(tc.decl)
+			if err != nil {
+				t.Fatalf("enforcedPredicateNode: %v", err)
+			}
+			cmp, ok := node.(*ComparisonExpression)
+			if !ok {
+				t.Fatalf("expected a comparison, got %#v", node)
+			}
+			// The actor value is resolved by resolveActorReferences before
+			// compilation, so substitute a concrete one here -- this test is
+			// about the FIELD spelling, not about actor resolution.
+			probe := *cmp
+			probe.Value = "u-probe"
+			if _, err := engine.compileComparisonExpressionWithContext(&probe, conceptContext); err != nil {
+				t.Errorf("the injected predicate does not compile: %v\n"+
+					"Field was %q (parts %v). The executor injects AFTER ast_converter lowers "+
+					"author spellings, so the node must use the lowered form -- "+
+					"`payload.<prop>` for a payload field, a bare intrinsic for row.id. The "+
+					"analyzer accepts both spellings, so it cannot catch this (memql#3076).",
+					err, cmp.Field.Raw, cmp.Field.Parts)
+			}
+		})
+	}
+}
+
+// The cluster-owner predicate takes a different compile path
+// (compileActorFieldComparison, reached before the payload branch), so it is
+// asserted separately rather than folded into the loop above.
+func TestClusterOwnerPredicateIsAnActorFieldComparison(t *testing.T) {
+	node, err := enforcedPredicateNode(&langparser.RowAuthzDecl{Tier: langparser.RowAuthzClusterOwner})
+	if err != nil {
+		t.Fatalf("enforcedPredicateNode: %v", err)
+	}
+	cmp, ok := node.(*ComparisonExpression)
+	if !ok {
+		t.Fatalf("expected a comparison, got %#v", node)
+	}
+	if !isActorFieldComparison(cmp) {
+		t.Errorf("the clusterOwner predicate must be an actor-field comparison so it reaches "+
+			"compileActorFieldComparison; got field %q (parts %v)", cmp.Field.Raw, cmp.Field.Parts)
+	}
+}

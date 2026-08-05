@@ -42,6 +42,35 @@ import (
 // enforcedPredicateNode builds the expression a tier ANDs into every read of
 // the concept, or nil when the tier injects nothing.
 //
+// # It emits the LOWERED field spelling, not the author's
+//
+// This is the one thing about this function that is easy to get wrong, and it
+// is invisible to every non-database test. Injection happens in the executor,
+// AFTER ast_converter has lowered author spellings, so the node has to be in
+// the form the filter compiler accepts:
+//
+//	author        lowered (what this emits)   compiles via
+//	ownerUserId   payload.ownerUserId         compilePayloadComparison
+//	row.id        id                          compileIdComparison (intrinsic)
+//	actor.isClusterOwner                      compileActorFieldComparison
+//	              (unchanged -- already the
+//	               lowered form)
+//
+// compileComparison accepts intrinsics only at one part, `provenance.<leaf>`,
+// and `payload.<prop>`; ANYTHING else is "field %q is not supported". So
+// emitting the author spelling `ownerUserId` produces a filter that fails to
+// compile at query time.
+//
+// The analyzer does NOT catch this, because topLevelPayloadField deliberately
+// accepts both spellings (one part, or two under `payload`) -- it reads filters
+// from both sides of the lowering. So a unit test asserting the analyzer
+// recognises this node passes for the author spelling too. It took a
+// Postgres-gated test (`TestHasOperator_NotesByTag`) to surface it:
+// `notesByTag` already carries the ownership conjunct, so enforcement ANDed a
+// duplicate, and the duplicate was the one written in the author spelling.
+//
+// TestEnforcedPredicateUsesTheLoweredFieldSpelling pins each form.
+//
 // The error return is the fail-CLOSED arm: an unrecognised tier means the
 // engine cannot say what the author declared, and the safe answer for an
 // authorization predicate is to refuse the read rather than to serve it
@@ -65,8 +94,10 @@ func enforcedPredicateNode(decl *langparser.RowAuthzDecl) (ExpressionNode, error
 		// JSONB path -- which is why InjectedPredicate spells it `row.id` and
 		// isOwnerScopeLeaf matches it with isRowIdName.
 		if strings.TrimSpace(decl.Owner) == langparser.RowAuthzSelfOwnedField {
+			// The LOWERED intrinsic spelling, not the author's `row.id`.
+			// See the note below on why this file emits lowered forms.
 			return &ComparisonExpression{
-				Field:    FieldReference{Raw: "row.id", Parts: []string{"row", "id"}},
+				Field:    FieldReference{Raw: "id", Parts: []string{"id"}},
 				Operator: OpEq,
 				Value:    &ActorReference{Path: "userId"},
 			}, nil
@@ -76,7 +107,7 @@ func enforcedPredicateNode(decl *langparser.RowAuthzDecl) (ExpressionNode, error
 			return nil, fmt.Errorf("rowAuthz: owned tier declares no owner field")
 		}
 		return &ComparisonExpression{
-			Field:    FieldReference{Raw: owner, Parts: []string{owner}},
+			Field:    FieldReference{Raw: "payload." + owner, Parts: []string{"payload", owner}},
 			Operator: OpEq,
 			Value:    &ActorReference{Path: "userId"},
 		}, nil
