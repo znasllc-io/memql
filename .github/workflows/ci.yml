@@ -508,10 +508,7 @@ jobs:
   #
   # The authority is scripts/cidb/doc.go for the rationale, dbgate_test.go for
   # the rules, and the gate's own output when it fails. memql#3030 tightened it
-  # from LOGGING uncovered packages to FAILING on them, which is why a db-gated
-  # package that is not in this list now reds the tree rather than passing
-  # quietly -- the failure this lane exists to prevent, and the reason 19
-  # assertions in four packages ran nowhere until then.
+  # from LOGGING uncovered packages to FAILING on them.
   #
   # These per-package binaries run as PARALLEL processes against this ONE shared
   # DB, so each such package must migrate the schema through that TestMain (a

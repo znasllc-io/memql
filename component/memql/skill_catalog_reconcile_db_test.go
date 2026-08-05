@@ -55,7 +55,7 @@ func reconcileTestDB(t *testing.T) *bun.DB {
 	t.Helper()
 	dsn := os.Getenv("MEMQL_DATABASE_DSN")
 	if dsn == "" {
-		dsn = "postgres://memql:memql_local_dev@localhost:5432/memql?sslmode=disable"
+		dsn = "postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable"
 	}
 	connector := pgdriver.NewConnector(pgdriver.WithDSN(dsn))
 	db := bun.NewDB(sql.OpenDB(connector), pgdialect.New())

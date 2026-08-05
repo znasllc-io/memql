@@ -47,13 +47,12 @@
 //
 // # Full coverage IS asserted (memql#3030)
 //
-// Every package with a db-gated test must be in the lane. This was a log line
-// rather than an assertion while four packages were outside it
-// (component/automations, component/grpc, integrations/cognition,
-// integrations/planner) -- deliberately, so the tree was not red over a defect
-// the change that added this gate did not fix. Their 19 DB assertions had
-// never run in CI: each package printed `ok` while executing none of them,
-// because nothing asserted the selector reached them.
+// The uncovered-set finding was a log line rather than an assertion while four
+// packages were outside it (component/automations, component/grpc,
+// integrations/cognition, integrations/planner) -- deliberately, so the tree
+// was not red over a defect the change that added this gate did not fix. Their
+// 19 DB assertions had never run in CI: each package printed `ok` while
+// executing none of them, because nothing asserted the selector reached them.
 //
 // memql#3030 gave each of those a TestMain calling dbtest.EnsureSchema
 // (memql#2551 -- required because the lane runs per-package binaries as

@@ -33,10 +33,11 @@ import (
 // runs, instead of only from the point some test boots the database itself.
 // That is what makes the package safe to run as one of several parallel
 // binaries against one shared database (memql#2551). The in-test boot at
-// wire_bare_ids_test.go:234 is unchanged and still runs -- it is simply a
-// no-op now, because TestMain got there first. The tests already wrote and
-// deleted rows when a reachable database was also migrated; lane membership
-// only ever governed CI.
+// wire_bare_ids_test.go:234 is unchanged and still runs -- it is what produces
+// the handle the tests use; only the migration it performs is redundant now,
+// because TestMain got there first. The tests already wrote and deleted rows
+// when a reachable database was also migrated; lane membership only ever
+// governed CI.
 //
 // (This paragraph originally claimed the migration never happened here before
 // memql#3030. That is true of the other three packages joining the lane and

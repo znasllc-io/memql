@@ -3,8 +3,7 @@ package cidb
 // dbgate_test.go -- the CI drift gate for the db-tests lane (memql#2886).
 //
 // Three assertions, one per way the lane could report a non-failure while
-// having verified nothing. See doc.go for the rationale and for what this
-// deliberately leaves to a separate issue.
+// having verified nothing. See doc.go for the rationale.
 
 import (
 	"fmt"
