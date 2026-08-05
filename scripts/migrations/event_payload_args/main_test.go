@@ -288,8 +288,8 @@ func TestMigrateFileIsIdempotent(t *testing.T) {
 // it names -- the automationHeader match or the brace extraction -- can make it
 // fail, and that is a property of the design rather than a gap to be closed
 // here. (It can of course fail on a change that breaks migrateFile outright,
-// e.g. appending a byte to its return value; so does most of the suite. What it
-// cannot do is discriminate the terse rule specifically.)
+// e.g. appending a byte to its return value. What it cannot do is discriminate
+// the terse rule specifically.)
 //
 // "Terse automations are untouched" does not come from the `\s*\{` in
 // automationHeader. It comes from terse automations having NO BRACES: even with
