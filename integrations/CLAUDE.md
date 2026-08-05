@@ -400,9 +400,18 @@ certain node types.
 **5. Expose it from the DSL via a builtin**
 ```memql
 // in dsl/common/builtins.memql
+@enabled
+@description("What the capability does, in one line.")
 @executor("integration.<name>.doThing")
-func (Builtin) <name>DoThing { ... }
+builtin <name>DoThing {
+  someId  string  @required
+  limit   integer
+}
 ```
+The body IS the builtin's input schema — one field per line, taking the
+same annotations a concept property does (`@required`, `@enum`,
+`@description`). The `func (Builtin) …` receiver form this step used to
+show is retired and rejected at parse time (memql#303).
 
 ### Explicit `app/` path (complex first-party only)
 

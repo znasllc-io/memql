@@ -115,6 +115,20 @@ for conceptName, concept := range registry.Concepts() {
 
 ### B. Patch-style mutations
 
+> **Syntax warning — do not copy these snippets (memql#3053).** The
+> `memql` blocks in this section are written in the `func (Mutation) …`
+> procedural receiver form, which memql#303 retired: the parser
+> **rejects** it, so none of them will load as written. They are kept
+> verbatim because this proposal is unshipped and the argument below is
+> about full-replace vs merge *semantics*, not about syntax — rewriting
+> them would mean inventing live syntax for a `patch()` helper that does
+> not exist. For the form a mutation is actually authored in today, see
+> [the authoring rules](../../public/language/authoring-rules.md) and the
+> `mutate <Concept> <name> { args { … } insert { … } }` examples in
+> `CLAUDE.md`. Note the live grammar has since grown an `update { … }`
+> block for partial updates, which may already cover part of what this
+> section proposes — worth checking before implementing any of it.
+
 **What:** Mutations that merge a partial payload with the most recent
 version instead of overwriting the whole record.
 
