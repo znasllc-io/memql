@@ -2595,26 +2595,42 @@ func expandPunnedArgs(argsText string) string {
 var bareIdentOnly = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // splitTopLevelArgs splits on commas at depth zero, respecting quotes.
+//
+// String state comes from blankCommentsAndStrings rather than from a local
+// scan (memql#3046). The previous version decided whether a quote was escaped
+// with a ONE-BYTE LOOKBACK (`s[i-1] != '\\'`), which cannot tell an escaped
+// quote from a quote that follows a COMPLETED `\\` escape -- so a literal
+// ending in a backslash pair read its own closing quote as escaped, stayed in
+// string state, and swallowed every top-level comma after it. `"C:\\", args.b,
+// args.c` split into ONE argument instead of three, silently, in the rewriter
+// that runs over every authored construct.
+//
+// memql#2949 fixed the same class in component/automations/args_resolution.go
+// by TRACKING escape state. Here the better answer is not to track it at all:
+// blankCommentsAndStrings already does it correctly, lives in this package, is
+// shared with the rowauthz binder and the memqlmigrate codemod, and is covered
+// by its own tests. This keeps only the depth arithmetic, which is the part
+// genuinely local to argument splitting.
+//
+// The blanked text preserves every byte offset, so a split point found in it
+// indexes the ORIGINAL string exactly and the returned slices are unmodified
+// source. Blanking also removes comments, which an argument list should not
+// contain and which the old scan could not have split around correctly anyway.
 func splitTopLevelArgs(s string) []string {
+	scan := blankCommentsAndStrings(s)
 	var parts []string
 	depth, start := 0, 0
-	inStr := false
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		switch {
-		case inStr:
-			if c == '"' && s[i-1] != '\\' {
-				inStr = false
-			}
-		case c == '"':
-			inStr = true
-		case c == '(' || c == '{' || c == '[':
+	for i := 0; i < len(scan); i++ {
+		switch scan[i] {
+		case '(', '{', '[':
 			depth++
-		case c == ')' || c == '}' || c == ']':
+		case ')', '}', ']':
 			depth--
-		case c == ',' && depth == 0:
-			parts = append(parts, s[start:i])
-			start = i + 1
+		case ',':
+			if depth == 0 {
+				parts = append(parts, s[start:i])
+				start = i + 1
+			}
 		}
 	}
 	parts = append(parts, s[start:])
