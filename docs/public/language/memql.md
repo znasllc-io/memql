@@ -204,15 +204,23 @@ Annotations split by what they are *about*:
 
 So `blocks []object @variant(discriminator="kind") { … }` validates every block against the union, and `tags []string @pattern("^[a-z]+$")` constrains every tag. `capabilities []string!` still means "the field is required", not "the elements are".
 
-> **The annotation table is ONE level deep.** Unlike type checking above, a value
-> constraint moves onto the immediate element only. On a *composite* element --
-> `[][]T`, `[]map[string]T`, `map[string][]T` -- it lands on the inner array or
-> map, where JSON Schema ignores it, so `[][]string @pattern(…)` accepts
-> `[["ZZZ"]]` and `[][]object @variant(…)` drops the union entirely. It fails
-> silently rather than loudly, which is the wrong direction; memql#3049 tracks
-> either recursing to the leaf or rejecting the declaration. No construct in the
-> tree hits this today. Type checking is unaffected -- `[][]frobnicate` is still
-> rejected at the inner level.
+> **The annotation table is ONE level deep, and going deeper is REJECTED**
+> (memql#3049). A value constraint moves onto the immediate element, so that
+> element has to be able to carry it. On a *composite* element -- `[][]T`,
+> `[]map[string]T`, `map[string][]T` -- it would land on the inner array or map,
+> where JSON Schema ignores it and where `@variant` is dropped entirely, so
+> `[][]string @pattern(…)` would accept `[["ZZZ"]]` and `[][]object @variant(…)`
+> would accept `[[{"nonsense":1}]]`. Rather than build a schema that contradicts
+> the declaration, the loader refuses it and names the annotation, the
+> declaration and the remedy. Single-wrap the field (`[]string @pattern(…)`,
+> `[]object @variant(…)`), or move the constraint onto a named property inside an
+> object. There is no spelling that reaches the leaf of a composite element.
+>
+> Only the annotation is refused, never the type: `[][]string`,
+> `[]map[string]int` and `map[string][]string` all remain legal, keeping their
+> inner type. Field markers are unaffected at any depth -- `capabilities
+> [][]string!` is fine. Type checking is unaffected too: `[][]frobnicate` is
+> still rejected at the inner level.
 
 > `@minLength` / `@maxLength` remain a **character** count on the element, not an element count. There is still no way to bound the length of an array itself.
 
