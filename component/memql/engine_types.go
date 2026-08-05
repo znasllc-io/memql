@@ -378,11 +378,11 @@ func (*SelectExpression) isExpressionNode() {}
 
 // TimestampExpression pins execution to a given point in time.
 //
-// ArgPath / FallbackLatest carry the caller-chosen form (`asOf args.at`,
-// memql#2992) between parse and argument expansion. Expansion resolves them
-// into Timestamp or UseLatest and clears them, so applyDirectiveWrappers --
-// and everything else downstream -- only ever sees the two literal forms it
-// already handled.
+// ArgPath / FallbackLatest carry the caller-chosen form
+// (`asOf args.at ?? latest`, memql#2992) between parse and argument expansion.
+// Expansion resolves them into Timestamp or UseLatest and clears them, so
+// applyDirectiveWrappers -- and everything else downstream -- only ever sees
+// the two literal forms it already handled.
 type TimestampExpression struct {
 	Target    ExpressionNode
 	Timestamp *time.Time
@@ -392,6 +392,11 @@ type TimestampExpression struct {
 	ArgPath string
 	// FallbackLatest means `?? latest`: an omitted arg behaves exactly as
 	// `asOf latest`.
+	//
+	// INVARIANT: true whenever ArgPath != "" on a node originating in parsed
+	// source. The fallback is required (memql#3028) and the parser is its only
+	// producer, so asof_arg_resolve.go's no-fallback branch is reachable only
+	// from a hand-built AST -- it is kept as defence in depth and says so.
 	FallbackLatest bool
 }
 

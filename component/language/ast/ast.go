@@ -210,21 +210,28 @@ func (*SelectExpr) expressionNode() {}
 //
 // Exactly one of the three is set. Timestamp and UseLatest are the literal
 // forms, resolved at parse time. ArgPath is the caller-chosen form
-// (`asOf args.at`, memql#2992): the instant is not known until the caller
-// supplies it, so the node carries the arg NAME and is resolved during
+// (`asOf args.at ?? latest`, memql#2992): the instant is not known until the
+// caller supplies it, so the node carries the arg NAME and is resolved during
 // argument expansion, before the plan is built. A resolved node never carries
 // an ArgPath, so nothing downstream of expansion has to know this form exists.
 type TimestampExpr struct {
 	Target    ExpressionNode
 	Timestamp *time.Time
 	UseLatest bool
-	// ArgPath is the caller-arg name for `asOf args.<path>`, without the
-	// `args.` prefix. Empty for the literal forms.
+	// ArgPath is the caller-arg name for `asOf args.<path> ?? latest`, without
+	// the `args.` prefix. Empty for the literal forms.
 	ArgPath string
 	// FallbackLatest is set by `asOf args.<path> ?? latest`: when the caller
 	// omits the arg, behave exactly as `asOf latest`. This is what lets an
 	// existing `asOf latest` query adopt the caller-chosen form with no
 	// behaviour change for callers that pass nothing.
+	//
+	// INVARIANT: true whenever ArgPath != "" on a node from parsed source. The
+	// fallback is required, not optional -- the parser refuses the bare
+	// `asOf args.<path>` (memql#3028) and is the only producer of an
+	// ArgPath-carrying node, so the two fields move together. Consumers may
+	// still guard the other combination; component/memql/asof_arg_resolve.go
+	// does, and records there that only a hand-built AST can reach it.
 	FallbackLatest bool
 }
 

@@ -102,10 +102,36 @@ func TestAsOfCallerInstant_FallbackFormStillParses(t *testing.T) {
 // Asserted as "does not advertise the retired form" rather than as an exact
 // string, so rewording the summary stays free while re-optionalising it does
 // not.
+//
+// BOTH `default:` arms are driven, and that is not belt-and-braces -- the two
+// are separate `return` statements carrying the same text, so a fix applied to
+// one is invisible to a test that only reaches the other. The first version of
+// this test drove an identifier, which reaches only the INNER arm; reverting
+// the OUTER arm alone left the whole suite green (landing review, round 2). An
+// identifier reaches the inner arm; a number or a punctuation token never
+// enters the identifier case at all and reaches the outer one, and
+// `asOf(x, 1730000000)` -- an epoch-seconds timestamp -- is a plausible enough
+// author mistake that the message it produces matters.
 func TestAsOfCallerInstant_GrammarSummaryDoesNotAdvertiseTheBareForm(t *testing.T) {
-	_, err := parseAsOfClause(t, "bogus")
+	for name, clause := range map[string]string{
+		"identifier reaches the inner default":  "bogus",
+		"number reaches the outer default":      "1730000000",
+		"punctuation reaches the outer default": "(",
+	} {
+		t.Run(name, func(t *testing.T) {
+			assertGrammarSummaryRequiresTheFallback(t, clause)
+		})
+	}
+}
+
+// assertGrammarSummaryRequiresTheFallback is the shared body, so both arms are
+// held to one standard rather than drifting apart the way their two identical
+// message strings already did once.
+func assertGrammarSummaryRequiresTheFallback(t *testing.T, clause string) {
+	t.Helper()
+	_, err := parseAsOfClause(t, clause)
 	if err == nil {
-		t.Fatal("an unrecognised asOf second argument must be a parse error")
+		t.Fatalf("an unrecognised asOf second argument (%q) must be a parse error", clause)
 	}
 	msg := err.Error()
 	if !strings.Contains(msg, "RFC3339") {

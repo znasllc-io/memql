@@ -933,7 +933,7 @@ query node nodesAt {        // asOf <ts> -> deterministic, no marker
   asOf(deploymentById(deploymentId:"d-abc"), "2026-07-28T12:00:00Z")
   ```
 
-  **The wrapped query must declare no `asOf` clause of its own** — otherwise this fails with `multiple asOf() directives are not supported`. That rules out any query declaring `asOf` at all — `latest` or a literal — so both `liveNodes` and `nodesAt` above are unwrappable; `deploymentById` is the tree's worked example precisely because it declares none, and `TestDeploymentByIdRemainsWrappableInAsOf` guards that. Making a caller-chosen instant declarable is memql#2992.
+  **The wrapped query must declare no `asOf` clause of its own** — otherwise this fails with `multiple asOf() directives are not supported`. That rules out any query declaring `asOf` at all — `latest` or a literal — so both `liveNodes` and `nodesAt` above are unwrappable; `deploymentById` is the tree's worked example precisely because it declares none, and `TestDeploymentByIdRemainsWrappableInAsOf` guards that. Declaring a caller-chosen instant instead of wrapping is the `args.<name> ?? latest` form above (memql#2992, fallback required per memql#3028) — this sentence used to describe that as future work.
 
 ### Imports
 
