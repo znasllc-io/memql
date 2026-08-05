@@ -75,6 +75,35 @@ func TestLexer_MultiLineStringTokenSpansItsLines(t *testing.T) {
 	}
 }
 
+// A CRLF line ending inside a literal counts as ONE line, not two.
+//
+// Unpinned until now, and it is a decision rather than an accident: the arm
+// keys on '\n', so the '\r' falls through to the ordinary write and is
+// retained in the literal's value. Counting it separately would double-count
+// every line of a Windows-authored file. This also matches skipWhitespace,
+// which has always treated a bare '\r' as ordinary whitespace rather than a
+// line terminator -- so the lexer is consistent with itself, which is the
+// property worth pinning.
+func TestLexer_CRLFInsideLiteralCountsOneLine(t *testing.T) {
+	src := "@description(\"line one\r\nline two\")\nautomation foo { }"
+
+	toks, err := NewLexer(src).Tokenize()
+	if err != nil {
+		t.Fatalf("tokenize: %v", err)
+	}
+
+	str := tokenNamed(t, toks, "line one\r\nline two")
+	if str.EndLine != 2 {
+		t.Errorf("a CRLF inside the literal ends it on line 2, EndLine = %d -- \\r must not "+
+			"be counted as a second line terminator", str.EndLine)
+	}
+	got := tokenNamed(t, toks, "automation")
+	if got.Line != 3 {
+		t.Errorf("`automation` is on line 3, reported as %d -- the CRLF was counted as %s",
+			got.Line, map[bool]string{true: "two lines", false: "none"}[got.Line > 3])
+	}
+}
+
 // Drift accumulates: two multi-line literals must not compound the error.
 func TestLexer_LineDriftDoesNotAccumulateAcrossLiterals(t *testing.T) {
 	src := strings.Join([]string{
@@ -117,6 +146,16 @@ func TestLexer_EscapedNewlineDoesNotAdvanceTheLineCounter(t *testing.T) {
 
 // Column must restart at the new line rather than continuing to climb, or a
 // caret pointing at the offending column lands off the end of the line.
+//
+// The assertion is on the STRING token's own EndCol, and that is the whole
+// point of the test rather than an implementation detail. An earlier version
+// asserted the Column of the token AFTER the literal -- which cannot fail:
+// skipWhitespace sets that column to 1 from its own newline arm whether or not
+// scanString reset anything. Measured by deleting `l.column = 0` and keeping
+// `l.line++`: the entire package stayed green while the string token's own end
+// moved to column 38 on a THREE-character line, and that value is what goes out
+// as a semantic-token range. EndCol is set by nothing but scanString, so it is
+// the only column here that pins the reset.
 func TestLexer_ColumnResetsAfterAnEmbeddedNewline(t *testing.T) {
 	src := "@description(\"aaaaaaaaaaaaaaaaaaaa\nx\")\nautomation foo { }"
 
@@ -124,12 +163,25 @@ func TestLexer_ColumnResetsAfterAnEmbeddedNewline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("tokenize: %v", err)
 	}
+
+	// Line 2 of the source is `x")` -- the literal ends after `x`, so its end is
+	// line 2, column 3. Without the reset the column keeps climbing from line 1
+	// and lands far past the end of that line.
+	str := tokenNamed(t, toks, "aaaaaaaaaaaaaaaaaaaa\nx")
+	if str.EndLine != 2 {
+		t.Errorf("the literal ends on line 2, EndLine = %d", str.EndLine)
+	}
+	if str.EndCol != 3 {
+		t.Errorf("the literal ends at column 3 of line 2 (`x\")`), EndCol = %d -- the column "+
+			"did not reset across the embedded newline, so the token's range runs past the "+
+			"end of the line it claims to end on (memql#3047)", str.EndCol)
+	}
+
 	got := tokenNamed(t, toks, "automation")
 	if got.Line != 3 {
 		t.Fatalf("`automation` line = %d, want 3", got.Line)
 	}
 	if got.Column != 1 {
-		t.Errorf("`automation` starts at column 1, reported as %d -- the column did not "+
-			"reset across the embedded newline", got.Column)
+		t.Errorf("`automation` starts at column 1, reported as %d", got.Column)
 	}
 }

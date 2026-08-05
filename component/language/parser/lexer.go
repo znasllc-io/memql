@@ -526,14 +526,33 @@ func (l *Lexer) scanString(start, startLine, startColumn int) (Token, error) {
 		// -- silently, because the parse was fine and only the reported
 		// locations were wrong, which is the whole value of a diagnostic.
 		//
-		// Keyed on the raw source byte, NOT on the decoded rune: an escaped
-		// `\n` is two source bytes on ONE line, and it is handled by the
-		// escape arm above, which writes '\n' into the builder without ever
-		// reaching here. Advancing on the decoded rune would mis-count every
-		// single-line literal in the tree that contains such an escape.
+		// Keyed on the source character at the cursor, NOT on the
+		// escape-decoded rune written into the builder. An escaped `\n` is two
+		// source characters on ONE line, consumed by the escape arm above,
+		// which `continue`s before reaching here -- so it writes '\n' into the
+		// builder without ever advancing the counter. Keying on the decoded
+		// value instead would mis-count every single-line literal in the tree
+		// containing such an escape.
+		//
+		// Note this lexer is rune-oriented, not byte-oriented: `input` is
+		// []rune, `pos` is a rune index and `column` counts runes. An earlier
+		// version of this comment said "raw source byte", which named the right
+		// property for the wrong reason and would send a reader looking for
+		// UTF-8 continuation bytes that this lexer never sees. The distinction
+		// that matters is source-vs-escape-decoded, not byte-vs-rune.
 		//
 		// Column goes to 0 because the advance() below takes it to 1 -- the
 		// same shape skipBlockComment uses for its own newline arm.
+		//
+		// One second-order effect, recorded because it is a real state change
+		// and not obvious from here: Tokenize clears l.commentLines over
+		// tok.Line..l.line, so for a multi-line literal that span is now every
+		// line the literal covers rather than just its first. It was a no-op
+		// for these tokens before, when the two were always equal. Nothing is
+		// lost -- markCommentLines is only ever called by the comment skippers,
+		// which cannot run inside a literal, so no interior line can have been
+		// marked -- but doc-comment attachment reads that map, so the widening
+		// is deliberate rather than incidental.
 		if ch == '\n' {
 			l.line++
 			l.column = 0
