@@ -126,7 +126,30 @@ func TestDocsDoNotTeachRetiredDeclarationKeywords(t *testing.T) {
 
 		// ARM 2: the retired procedural RECEIVER form (memql#3053). Delegated
 		// to the parser rather than tabled here -- see retiredReceiverFormRef.
-		if !retiredReceiverGateExempt(rel) {
+		//
+		// MARKDOWN ONLY, and deliberately narrower than arm 1 above. The two
+		// arms sweep different file sets because their retired forms live in
+		// different places, and that was measured rather than assumed:
+		//
+		//	arm 1, `mutation <Concept> <name> {`   1 non-markdown hit tree-wide
+		//	arm 2, `func (Receiver) name(...)`     113 hits across 18 Go files
+		//
+		// Arm 1's single hit is a deliberate negative fixture and is exempted by
+		// path. Arm 2's 113 are not drift and cannot be exempted away: they are
+		// the fixtures that assert the parser REJECTS the form -- files like
+		// component/memql/legacy_procedural_rejection_test.go exist precisely to
+		// write the retired receiver form and check it is refused. A gate that
+		// forbids writing down what it forbids cannot be satisfied, and the
+		// exemption list needed to paper over it would be longer than the rule.
+		//
+		// The scope this arm was WRITTEN against was markdown (memql#3053 is
+		// about a planning doc teaching the form prescriptively). It only
+		// widened because memql#3050 landed an all-tracked-files sweep in this
+		// same loop after this arm was cut, so the two changes are individually
+		// correct and only collide once merged -- neither PR's own CI could see
+		// it. Restoring the intended scope here rather than growing an exemption
+		// list is what keeps both rules enforceable.
+		if strings.HasSuffix(rel, ".md") && !retiredReceiverGateExempt(rel) {
 			for i, line := range lines {
 				if err := parser.RejectLegacyProceduralAuthorForm(line); err == nil {
 					continue
