@@ -134,12 +134,13 @@ func TestCallGraphCoverage(t *testing.T) {
 	}
 	t.Logf("call-graph coverage: %v", coverage)
 
-	// A non-zero floor catches TOTAL deadness and nothing weaker. Measured: a
-	// filter skipping 17 of the 24 mutations.memql files drops mutation
-	// coverage from 215 to 22 and this test still passes -- most of the rule
-	// surface silently switched off, green. So the floor is checked above and
-	// the exact count is checked here, against an independently computed
-	// number.
+	// A non-zero floor catches TOTAL deadness and nothing weaker. Measured
+	// against the code as it stood BEFORE this check existed: a filter skipping
+	// 17 of the 24 mutations.memql files dropped mutation coverage from 215 to
+	// 22 and the floor above still passed -- most of the rule surface silently
+	// switched off, green. That filter now fails, here rather than above, which
+	// is the whole reason the exact count is asserted against an independently
+	// computed number and not just against zero.
 	for _, kind := range kinds {
 		want := declarationsInTree(t, kind)
 		if got := coverage[kind]; got != want {
