@@ -12,6 +12,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/events"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/common"
 )
@@ -280,15 +281,27 @@ func (w *Worker) processRow(ctx context.Context, row map[string]any, scanStatus 
 	}
 	attempts := req.Attempts + 1
 	if IsPermanent(err) || attempts >= w.cfg.MaxAttempts {
-		w.stamp(ctx, fmt.Sprintf(`mutation updateOutboundRequestStatus(requestId: %q, status: "failed", attempts: %d, lastError: %q)`,
-			req.ID, attempts, truncateError(err)))
+		// lastError is rendered with langparser.QuoteString, NOT %q
+		// (memql#3035). This text can carry bytes from a remote server -- a
+		// webhook response excerpt, a TLS or DNS error naming a hostile
+		// hostname -- and %q emits `\x00`, `\a` and `\v`, which the MemQL
+		// lexer refuses outright rather than falling back. A single control
+		// byte made this statement unparseable, stamp() logged a warning and
+		// returned, and the row kept its previous status: a request mid-
+		// delivery stayed `sending` forever, never retried and never reported
+		// failed, with no error recorded because recording it was what failed.
+		w.stamp(ctx, fmt.Sprintf(`mutation updateOutboundRequestStatus(requestId: %q, status: "failed", attempts: %d, lastError: %s)`,
+			req.ID, attempts, langparser.QuoteString(truncateError(err))))
 		w.logger.Warn("outbound worker: delivery failed permanently",
 			"id", req.ID, "medium", req.Medium, "attempts", attempts, "error", err)
 		return
 	}
 	next := now.Add(backoffFor(attempts))
-	w.stamp(ctx, fmt.Sprintf(`mutation updateOutboundRequestStatus(requestId: %q, status: "retrying", attempts: %d, lastError: %q, nextAttemptAt: %q)`,
-		req.ID, attempts, truncateError(err), next.Format(time.RFC3339)))
+	// lastError via QuoteString, same reason as the failed stamp above
+	// (memql#3035). This one is worse if it breaks: the row never reaches
+	// `retrying`, so it is never picked up again.
+	w.stamp(ctx, fmt.Sprintf(`mutation updateOutboundRequestStatus(requestId: %q, status: "retrying", attempts: %d, lastError: %s, nextAttemptAt: %q)`,
+		req.ID, attempts, langparser.QuoteString(truncateError(err)), next.Format(time.RFC3339)))
 	w.logger.Warn("outbound worker: delivery failed; will retry",
 		"id", req.ID, "medium", req.Medium, "attempts", attempts, "nextAttemptAt", next.Format(time.RFC3339), "error", err)
 }
@@ -349,8 +362,10 @@ func (w *Worker) admit(req Request) (Transport, error) {
 }
 
 func (w *Worker) stampFailed(ctx context.Context, req Request, policyErr error) {
-	w.stamp(ctx, fmt.Sprintf(`mutation updateOutboundRequestStatus(requestId: %q, status: "failed", attempts: %d, lastError: %q)`,
-		req.ID, req.Attempts, truncateError(policyErr)))
+	// lastError via QuoteString (memql#3035). A policy refusal names the
+	// offending target, which is caller-supplied.
+	w.stamp(ctx, fmt.Sprintf(`mutation updateOutboundRequestStatus(requestId: %q, status: "failed", attempts: %d, lastError: %s)`,
+		req.ID, req.Attempts, langparser.QuoteString(truncateError(policyErr))))
 	w.logger.Warn("outbound worker: row refused by policy", "id", req.ID, "medium", req.Medium, "error", policyErr)
 }
 
