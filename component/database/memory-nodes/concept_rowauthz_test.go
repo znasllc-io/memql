@@ -292,6 +292,20 @@ func TestRowAuthzIsInert(t *testing.T) {
 		// recordShadow, which returns nothing and cannot alter a query.
 		"component/memql/rowauthz_shadow.go": true,
 		"component/memql/executor.go":        true,
+		// memql#3079 Phase 5, the WRITE-side enforcement: the guard itself
+		// and the single chokepoint that calls it. Added here per this gate's
+		// own instruction ("If this is the enforcement phase landing, move the
+		// file into the allow-list in the same commit"), so the change is
+		// deliberate rather than incidental.
+		//
+		// This entry is expected to be short-lived: memql#3076 (Phase 3, read
+		// side) RETIRES this whole test, because "no predicate is injected and
+		// no query result changes" stops being true once either phase lands.
+		// Whichever of the two merges second removes this list along with the
+		// test. Kept correct on this branch rather than pre-emptively deleted,
+		// so #3079 stands alone if it lands first.
+		"component/memql/rowauthz_write.go":    true,
+		"component/memql/executor_mutation.go": true,
 	}
 
 	var offenders []string
