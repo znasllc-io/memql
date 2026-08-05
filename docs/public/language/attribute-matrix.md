@@ -189,11 +189,31 @@ excluded from a shape's default projection.
 Do not read that as a statement about the whole sensitivity family,
 because it is not one (memql#2960). `@pii` is enforced in two places
 (the `@scrubPii` update path, and the projection-authorization gate of
-memql#2883). `@secret` is **declared metadata**: it emits `x-secret`,
-nothing reads it, and no value is redacted from logs, query results, or
-non-elevated readers. `@unique`, `@immutable` and `@default` sit in the
-same position. Section 8 of `dsl/_reference/_concept.memql` carries the
-per-annotation split.
+memql#2883).
+
+`@secret` is **partially enforced**, and the boundary is the part that
+matters (memql#3036). It emits `x-secret`, which
+`Concept.SecretFields()` reads, and the engine redacts the value from
+**validation error messages**: a mutation argument writing into a
+`@secret` field has its rejected value replaced with `<redacted>`,
+while the argument name and the declared constraint (enum members,
+bounds, pattern) survive so the diagnostic stays usable.
+
+It is **not** redacted from **query results** — a `@secret` value is
+returned in full by any query that projects it. That is an
+authorization decision: it needs a definition of "elevated" and
+interacts with the per-row authz model deferred under memql#2803. It is
+**not** redacted from **structured logs** either; no log site carries a
+concept row's payload today, so there is nothing to redact, and a
+future one is not covered until that path is written.
+
+So `@secret` stops a credential leaking through a validation
+diagnostic. It is not a general secrecy guarantee, and it is not a
+reason to treat a credential in the graph as protected.
+
+`@unique`, `@immutable` and `@default` remain **declared metadata**:
+emitted, and read by nothing. Section 8 of
+`dsl/_reference/_concept.memql` carries the per-annotation split.
 
 #### `@public`
 Declares that the construct intentionally carries **no caller-scope

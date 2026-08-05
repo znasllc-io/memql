@@ -260,10 +260,14 @@ concept fieldTypes {
 // =============================================================================
 //
 // This section says what each annotation DOES, which is not always what its
-// name suggests. Four of the fifteen are DECLARED METADATA: they parse, they
+// name suggests. Three of the fifteen are DECLARED METADATA: they parse, they
 // reach the emitted schema, and nothing in the engine acts on them
 // (memql#2960). They are listed as such rather than quietly omitted, because
-// an author who believes @secret redacts will put a credential in a field.
+// an author who believes an annotation acts on their data will rely on it.
+//
+// @secret was a fourth until memql#3036. It is now PARTIALLY enforced, and
+// "partially" is doing real work -- read its entry below before deciding a
+// credential is safe.
 //
 // ENFORCED -- the engine acts on these:
 //   @required           Field must be present on insert.
@@ -273,6 +277,28 @@ concept fieldTypes {
 //                       character count of each ELEMENT -- there is still no
 //                       element-count check (memql#2951).
 //   @maxLength(N)       Max character count. STRING ONLY -- same (memql#2951).
+//   @secret             PARTIAL, and the boundary is the point (memql#3036).
+//                       Emits `x-secret`, read by Concept.SecretFields().
+//                       REDACTED FROM: validation error messages. A mutation
+//                       arg writing into a @secret field has its rejected
+//                       value replaced by `<redacted>`; the argument name and
+//                       the declared constraint (enum members, bounds,
+//                       pattern) survive so the diagnostic stays usable.
+//                       NOT REDACTED FROM QUERY RESULTS. A @secret value is
+//                       returned in full by any query that projects it. This
+//                       is an authorization decision -- it needs a definition
+//                       of "elevated" and interacts with the per-row authz
+//                       model deferred under memql#2803.
+//                       NOT REDACTED FROM STRUCTURED LOGS. No log site carries
+//                       a concept row's payload today, so there is nothing to
+//                       redact; if one is ever added it is NOT covered until
+//                       that path is written.
+//                       So @secret stops a credential leaking through a
+//                       validation diagnostic. It is NOT a general secrecy
+//                       guarantee, and it is not a substitute for keeping a
+//                       credential out of the graph.
+//                       (component/safety/redact.go is a different surface: it
+//                       takes tool / HTTP payloads, never a concept row.)
 //   @minimum(N)         Min numeric value (int / float).
 //   @maximum(N)         Max numeric value (int / float).
 //   @variant(discriminator="field")  Discriminated-union field. See section 9.
@@ -321,11 +347,6 @@ concept fieldTypes {
 //                       per construct (validateRbacBaseRoleImmutable,
 //                       validateHealingBaseImmutable) and is not driven by
 //                       this annotation.
-//   @secret             Emits `x-secret`. NOTHING IS REDACTED -- not logs, not
-//                       query results, not non-elevated readers. Do not rely
-//                       on it to keep a value out of anything.
-//                       (component/safety/redact.go is a different surface: it
-//                       takes tool / HTTP payloads, never a concept row.)
 //   @default("value")   Emits `default` into the schema and is NEVER APPLIED
 //                       on insert -- Concept.Create validates and marshals the
 //                       payload verbatim. Fill a value with the `??`
@@ -339,8 +360,12 @@ concept fieldTypes {
 // began exactly there and is now enforced in two places, with no schema change
 // needed to get from one to the other.
 //
-// Where the other four stand, which is NOT one answer for all of them:
-//   - @secret   enforcement approved, scoped to logs -- memql#3036 (open).
+// Where the rest stand, which is NOT one answer for all of them:
+//   - @secret   PARTIALLY ENFORCED as of memql#3036 -- validation error
+//     messages only. The scope was re-ruled mid-build: the original approval
+//     said "logs", and the measurement found no log site carries a row
+//     payload, so there was nothing there to enforce against. Error messages
+//     are not the smaller surface -- they are the surface that exists.
 //   - @default  open -- memql#3038.
 //   - @unique / @immutable  DECIDED, and the decision is no. memql#3037 was
 //     closed not-planned: uniqueness over an append-only hypertable means
@@ -373,7 +398,7 @@ concept fieldAnnotations {
 
   // Immutability + secrecy
   externalId   string! @immutable @description("Foreign-system id, intended never to change. NOT enforced -- @immutable is declared metadata (memql#2960).")
-  apiKey       string @secret @description("Intended to be sensitive. NOT redacted anywhere -- @secret is declared metadata (memql#2960).")
+  apiKey       string @secret @description("Sensitive. Redacted from validation error messages only -- NOT from query results or logs (memql#3036).")
 
   // Server-owned fields. @internal is server-only in BOTH directions;
   // @serverSet is refused from caller args but still projected, which is why
