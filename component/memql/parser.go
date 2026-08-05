@@ -60,6 +60,14 @@ func (e *MemQLEngine) parseWithFunctions(query string, fns *FunctionRegistry, sp
 // explicit. The parse path is otherwise ctx-free, so the origin rides as a
 // parameter rather than dragging a context through the parser.
 func (e *MemQLEngine) parseWithFunctionsOrigin(query string, fns *FunctionRegistry, specOverlay map[string]*Spec, allowInline bool, origin auth.CallOrigin) (*QueryPlan, error) {
+	return e.parseWithFunctionsAmbient(query, fns, specOverlay, allowInline, origin, nil)
+}
+
+// parseWithFunctionsAmbient is parseWithFunctionsOrigin carrying the ambient
+// envelope (memql#3024). It rides as a parameter for the same reason the origin
+// does: the parse path is ctx-free by design, so executeWith reads the context
+// once and hands the resolved values down. The no-envelope wrapper passes nil.
+func (e *MemQLEngine) parseWithFunctionsAmbient(query string, fns *FunctionRegistry, specOverlay map[string]*Spec, allowInline bool, origin auth.CallOrigin, ambient map[string]any) (*QueryPlan, error) {
 	if !e.canResolve() {
 		return nil, ErrEngineNotInitialized
 	}
@@ -159,7 +167,7 @@ func (e *MemQLEngine) parseWithFunctionsOrigin(query string, fns *FunctionRegist
 		return nil, err
 	}
 	// Resolve function calls after spec resolution
-	if err := resolvePlanFunctionsWithOrigin(plan, fns, e.specs, origin); err != nil {
+	if err := resolvePlanFunctionsWithAmbient(plan, fns, e.specs, origin, ambient); err != nil {
 		return nil, err
 	}
 	// Apply directive wrappers again after function resolution

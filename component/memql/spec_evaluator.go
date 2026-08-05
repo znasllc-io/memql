@@ -62,10 +62,25 @@ func (e *MemQLEngine) EvaluateSpec(ctx context.Context, name string) (bool, erro
 }
 
 // buildSpecCtx assembles the evaluation envelope a context-spec body
-// sees: the resolved actor, the active partition, the engine
-// timestamp, and the allow-listed config surface. Specs don't carry
-// args or produce output.
+// sees. Specs don't carry args or produce output. Thin alias for
+// buildAmbientEnvelope, kept under this name because the spec-side
+// tests guard the #2801 fail-closed behaviour through it.
 func buildSpecCtx(ctx context.Context, engine *MemQLEngine) map[string]any {
+	return buildAmbientEnvelope(ctx, engine)
+}
+
+// buildAmbientEnvelope assembles the ambient evaluation envelope: the
+// resolved actor, the active partition, the engine timestamp, and the
+// allow-listed config surface. Those are the reserved top-level names
+// a DSL body may read besides `args` (CLAUDE.md, "Argument
+// resolution").
+//
+// ONE canonical envelope (#2623), shared by both surfaces that need
+// it: context-specs (EvaluateSpec) and cond-predicate arg expansion
+// (memql#3024). A second builder that could drift from this one is
+// precisely the failure #2623 and #2801 were about -- the same gate
+// answering differently depending on which surface evaluated it.
+func buildAmbientEnvelope(ctx context.Context, engine *MemQLEngine) map[string]any {
 	out := make(map[string]any, 6)
 	// One canonical envelope (#2623), built UNCONDITIONALLY (#2801).
 	//
