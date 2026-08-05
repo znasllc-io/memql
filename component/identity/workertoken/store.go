@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/znasllc-io/memql/component/auth"
 	"log/slog"
 	"strings"
 	"time"
@@ -126,6 +127,25 @@ func (s *Store) ListForUser(ctx context.Context, userId string) ([]Row, error) {
 		return nil, errors.New("workertoken.Store: engine not wired")
 	}
 	q := fmt.Sprintf(`query workerTokensForUser(userId:%q)`, userId)
+
+	// workerTokensForUser is @serverOnly (memql#3063). It projects
+	// identityFull, so the row carries `credentials` -- keyHash,
+	// registeredBy, lastSeenAt, lastConnectedFromIP -- and its filter keys on
+	// a caller-supplied userId with no actor check, which is why it may not
+	// sit on the wire. The annotation is enforced against
+	// auth.CallOrigin, so this read has to say it is server-initiated.
+	//
+	// Stamped HERE, into a SEPARATE context used for this query and nothing
+	// else, rather than onto the caller's: internal origin opens every
+	// @serverOnly construct for as long as the context lives, which is the
+	// escalation memql#2989 refused. Confining it to the call is what keeps
+	// the blast radius one query wide. component/identity/pat does the same
+	// for the same reason. The distinct name is deliberate -- reassigning
+	// `ctx` would read as if the caller's context had been widened, and this
+	// package's line in call_origin_conformance_test.go's allowlist claims
+	// otherwise in as many words.
+	internalCtx := auth.ContextWithInternalOrigin(ctx)
+
 	out := []Row{}
 	cursor := ""
 	// workerTokensForUser is `paginate 50` (5.2 / epic #1964), so a
@@ -135,7 +155,7 @@ func (s *Store) ListForUser(ctx context.Context, userId string) ([]Row, error) {
 	// so walk the keyset cursor to assemble the full list. maxPageWalk
 	// is a runaway backstop.
 	for i := 0; i < maxPageWalk; i++ {
-		nodes, next, err := s.executeAndExtractPage(ctx, q, cursor)
+		nodes, next, err := s.executeAndExtractPage(internalCtx, q, cursor)
 		if err != nil {
 			return nil, fmt.Errorf("workertoken.Store.ListForUser: %w", err)
 		}

@@ -90,15 +90,44 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 	// stamps client explicitly on the untrusted branch rather than passing the
 	// parent through.
 	allowed := map[string]string{
-		"app":                       "identity integration wiring at boot; no request in scope",
-		"component/auth":            "defines the stamp, and resolves an identity from claims before any actor exists",
-		"component/automations":     "trusted automation dispatch; the untrusted branch stamps CLIENT (memql#2879)",
-		"component/identity":        "identity store internals, server-initiated",
-		"component/identity/admin":  "admin HTTP handler -- REQUEST-DERIVED and the one exception here; its precondition (every route behind requireAdmin) is asserted by component/identity/admin/route_gate_test.go, memql#2934",
-		"component/identity/pat":    "personal-access-token store, server-initiated",
-		"component/memql":           "seed materialiser and authoring capability store, both boot-time",
-		"integrations/agent/worker": "worker store, server-initiated",
-		"integrations/dailyspace":   "scheduled space provisioning, no caller in scope",
+		"app":                      "identity integration wiring at boot; no request in scope",
+		"component/auth":           "defines the stamp, and resolves an identity from claims before any actor exists",
+		"component/automations":    "trusted automation dispatch; the untrusted branch stamps CLIENT (memql#2879)",
+		"component/identity":       "identity store internals, server-initiated",
+		"component/identity/admin": "admin HTTP handler -- REQUEST-DERIVED, one of the two exceptions here; its precondition (every route behind requireAdmin) is asserted by component/identity/admin/route_gate_test.go, memql#2934",
+		"component/identity/pat":   "personal-access-token store, server-initiated",
+		// REQUEST-DERIVED, and the SECOND exception -- not, as the first draft
+		// of this entry said, "a credential store whose reads are
+		// server-initiated by construction, same as the pat entry above". The
+		// #3072 review caught that wording: ListForUser's only caller is a
+		// request handler (handleRevokeWorkerToken, on s.stream.Context()), so
+		// this is the shape memql#2989 refused and dsl/server_only_parsed_test.go
+		// names as refuted. An allowlist entry whose stated reason is wrong is
+		// worse than no entry -- the reason is what the next reader trusts, and
+		// "server-initiated" invites a future caller to pass anything.
+		//
+		// Added when workerTokensForUser became @serverOnly (memql#3063): it
+		// projects identityFull, so the row carries keyHash, registeredBy,
+		// lastSeenAt and lastConnectedFromIP, behind a filter keyed on a
+		// caller-supplied userId with no actor check.
+		//
+		// Two facts earn the exception, and both are ASSERTED, not merely
+		// stated here:
+		//   - the stamp lands on a context scoped to that one query, never the
+		//     caller's, so it cannot open other @serverOnly constructs for the
+		//     rest of the request (the memql#2989 escalation) --
+		//     component/identity/workertoken/store_internal_origin_test.go;
+		//   - every call site passes the AUTHENTICATED caller's subject rather
+		//     than a request payload field. Without that, the exposure #3063
+		//     closed reopens underneath the annotation with the annotation, the
+		//     stamp test, and this gate all still green (measured during the
+		//     #3072 review) -- component/grpc/worker_token_caller_scope_test.go,
+		//     the analogue of the route_gate_test.go memql#2934 made
+		//     component/identity/admin carry for exactly this reason.
+		"component/identity/workertoken": "worker-token store -- REQUEST-DERIVED; precondition (userId is always the authenticated caller's subject) asserted by component/grpc/worker_token_caller_scope_test.go, memql#3063",
+		"component/memql":                "seed materialiser and authoring capability store, both boot-time",
+		"integrations/agent/worker":      "worker store, server-initiated",
+		"integrations/dailyspace":        "scheduled space provisioning, no caller in scope",
 	}
 
 	// The wire path. These must never appear, allowlist or not: every handler

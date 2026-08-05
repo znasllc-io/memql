@@ -514,7 +514,6 @@ var BoundConcepts = map[string]string{
 	"workerByIdentityId":                    "v1:worker:registration",
 	"workerPairingCodeByHash":               "v1:identity:workerPairingCode",
 	"workerTokenByKeyHash":                  "v1:identity:identity",
-	"workerTokensForUser":                   "v1:identity:identity",
 	"workersForUser":                        "v1:worker:registration",
 	"workspaceForPlan":                      "v1:workbench:workspace",
 	"writeKnowledgeChunk":                   "v1:knowledge:documentChunk",
