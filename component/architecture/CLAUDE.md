@@ -132,6 +132,48 @@ that raises it: regenerate there.
 `make arch-model-check` (or plain `go test ./...`) verifies the committed model
 matches the code.
 
+**What "matches" means, precisely.** The gate is a SUBSET check, not a byte
+comparison -- every symbol the committed model *references* must still exist in a
+freshly regenerated one. It deliberately does not care about symbols that exist
+in the code and not yet in the artifact, because concurrent merges only ever add
+them and a gate that fails on someone else's merge is unwinnable under a merge
+queue (memql#2844).
+
+"References" covers **node ids and edge endpoints**, and the second half is only
+true since memql#3050. Before it the gate compared node ids alone, which cannot
+see a deleted **unexported** function: the extractor emits no node for one, so
+deleting it removes no node and the subset check passes while the call graph
+keeps pointing at a symbol that is gone. That is not hypothetical -- PR #3033
+deleted `memqlTypeToJSONType` and left 33 `calls` edges behind it, green through
+every CI run, and re-running the fixed gate on `main` immediately found three
+more (`validateLogicCondAmbientPredicate`, `ambientComparisonRoot`,
+`condPredicatesIn`).
+
+So **deleting an unexported function is a model-affecting change**, even though
+nothing in the node set moves. Regenerate.
+
+Deletion is not the only trigger, and the gate cannot tell these apart -- it
+reports what the regenerated model no longer mentions, not what you did:
+
+- the function was **deleted**;
+- the function was **renamed** (the old id stops being emitted);
+- the function still exists but **lost its last call site**. There is no
+  declaration-level edge for an unexported function, only one per call site, so
+  the last caller going away removes the symbol from the model entirely.
+
+All three are model-affecting and all three want the same fix, so the gate does
+not need to distinguish them -- but do not go hunting for a deletion that is not
+there.
+
+One operational caveat worth knowing before you debug a red gate: the live set
+now includes ~5,000 symbols that exist only if the call graph was built for
+their package. A node disappears only when the type-checker stops seeing a
+declaration; a node-less endpoint disappears if call-graph construction differs
+at all between the machine that committed the artifact and the one running the
+gate. Nothing has diverged to date, and the extractor fails loudly on a
+per-package load error rather than silently emitting less -- but if a red gate
+ever names symbols you did not touch, suspect the environment before the code.
+
 The artifact is written **compact, on one line**. Pretty-printing it produced a
 1.26M-line file whose one-time reorder GitHub could not diff at all -- the API
 returned *"this diff is taking too long to generate"*, which fails the `changes`

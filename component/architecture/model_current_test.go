@@ -5,9 +5,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -67,20 +69,29 @@ import (
 // somebody else's merge blocks unrelated work, which is worse than the staleness
 // it was meant to catch.
 //
-// WHAT IT CHECKS INSTEAD. Every node in the COMMITTED model must still exist in
-// the regenerated one. That is exactly the defect #2844 reported --
-// ToggleComputerUseEnabledArgs.UserId survived in the model in 13 places after
-// #2840 removed the argument -- and it is immune to concurrent merges, which
-// only ADD nodes.
+// WHAT IT CHECKS INSTEAD. Every symbol the COMMITTED model REFERENCES must still
+// exist in the regenerated one -- as a node id, and as an edge endpoint. That is
+// exactly the defect #2844 reported -- ToggleComputerUseEnabledArgs.UserId
+// survived in the model in 13 places after #2840 removed the argument -- and it
+// is immune to concurrent merges, which only ADD symbols.
 //
 // The asymmetry is deliberate and is the whole point:
 //
-//	node removed from the code, still in the model  -> the model LIES. FAIL.
-//	node added to the code, not yet in the model    -> the model is behind. OK.
+//	symbol removed from the code, still in the model  -> the model LIES. FAIL.
+//	symbol added to the code, not yet in the model    -> the model is behind. OK.
 //
-// A missing node makes the cockpit render something that no longer exists. An
+// A missing symbol makes the cockpit render something that no longer exists. An
 // absent one makes it render slightly less than exists, which is what any
 // committed snapshot does between refreshes. Run `make arch-model` to catch up.
+//
+// EDGES ARE CHECKED TOO, AND ONLY SINCE memql#3050. Until then the check built
+// its live set from `got.Nodes` alone and compared only `want.Nodes`, so it could
+// not see a deleted UNEXPORTED function: the extractor emits no node for one, so
+// deleting it removes no node and "committed nodes are a subset of live nodes" is
+// satisfied vacuously while the edge list rots. Hit for real -- PR #3033
+// (memql#2951) deleted `memqlTypeToJSONType` and left 33 `calls` edges pointing
+// at it, green through every CI run, found only by an adversarial review. The
+// live set now includes edge endpoints; see liveSymbols for why it must.
 //
 // Skipped under -short: it shells out to the extractor over the whole
 // workspace (~6s). CI runs the suite without -short, so the gate is live there.
@@ -116,25 +127,129 @@ func TestArchitectureModelIsNotStale(t *testing.T) {
 	}
 
 	want, got := loadModel(t, checkedIn), loadModel(t, regenerated)
-	live := make(map[model.ID]bool, len(got.Nodes))
-	for _, n := range got.Nodes {
-		live[n.ID] = true
+	live := liveSymbols(got)
+
+	if gone, total := staleNodes(want, live); total > 0 {
+		t.Errorf("the committed architecture model references %d node(s) that NO LONGER EXIST "+
+			"in the code:\n  %s\n\nThe cockpit's Topology tab reads this file, so it is rendering "+
+			"things that are gone. Run `make arch-model` and commit the result (memql#2844).",
+			total, join(gone))
 	}
 
-	var gone []string
+	if gone, total := staleEdgeEndpoints(want, live); total > 0 {
+		t.Errorf("the committed architecture model has edges pointing at %d symbol(s) the "+
+			"regenerated model NO LONGER MENTIONS:\n  %s\n\nThese have no NODE in the model, "+
+			"so the node check above cannot see them -- and a dangling edge renders a call "+
+			"into a symbol the code no longer has.\n\nA node-less symbol leaves the live set "+
+			"when the extractor stops emitting an edge for it, which happens if it was "+
+			"deleted, RENAMED, or simply lost its LAST CALL SITE -- there is no "+
+			"declaration-level edge for an unexported function, only per-call-site ones. All "+
+			"three want the same thing: run `make arch-model` and commit the result "+
+			"(memql#3050).",
+			total, join(gone))
+	}
+}
+
+// liveSymbols is every ID the regenerated model can vouch for: node IDs PLUS
+// every edge endpoint.
+//
+// THE ENDPOINTS ARE THE LOAD-BEARING HALF, and they are what memql#3050 turned
+// on. Measured on the artifact THIS COMMIT SHIPS: of 25,295 distinct endpoints,
+// 5,041 have no node at all -- 4,190 funcs, 816 methods, 33 interfaces, 2 types.
+// (The pre-regeneration figures were 25,194 / 5,006 / 4,155; the shape is what
+// matters, and it does not move. Expect the exact counts to drift with the tree
+// -- they are here to show the ORDER of the problem, not as a value to assert.)
+// Unexported functions and generated closures like `main$1` appear only as call
+// graph endpoints, because the types pass does not emit nodes for them.
+//
+// So validating endpoints against the NODE set would report all 5,006 as
+// dangling on a perfectly current model. What actually proves a symbol still
+// exists is that a FRESHLY REGENERATED model still mentions it somewhere: the
+// extractor rebuilds the call graph from the current source, so it cannot emit
+// an edge to a function that is no longer there.
+func liveSymbols(m *model.Model) map[model.ID]bool {
+	live := make(map[model.ID]bool, len(m.Nodes)+len(m.Edges))
+	for _, n := range m.Nodes {
+		live[n.ID] = true
+	}
+	for _, e := range m.Edges {
+		live[e.From] = true
+		live[e.To] = true
+	}
+	return live
+}
+
+// staleNodes is the original #2844 check: every node in the committed model
+// must still exist. Returns up to 10 IDs for the message plus the TRUE total,
+// which the capped slice used to under-report.
+func staleNodes(want *model.Model, live map[model.ID]bool) (samples []string, total int) {
 	for _, n := range want.Nodes {
 		if !live[n.ID] {
-			if len(gone) < 10 {
-				gone = append(gone, string(n.ID))
+			total++
+			if len(samples) < 10 {
+				samples = append(samples, string(n.ID))
 			}
 		}
 	}
-	if len(gone) > 0 {
-		t.Errorf("the committed architecture model references %d symbol(s) that NO LONGER EXIST "+
-			"in the code:\n  %s\n\nThe cockpit's Topology tab reads this file, so it is rendering "+
-			"things that are gone. Run `make arch-model` and commit the result (memql#2844).",
-			len(gone), join(gone))
+	return samples, total
+}
+
+// staleEdgeEndpoints is the memql#3050 check: every endpoint of every committed
+// edge must still exist in the live symbol set.
+//
+// WHY THE ADD-ONLY ASYMMETRY SURVIVES. It iterates the COMMITTED edges only, so
+// a symbol that exists in the code but is merely newer than the artifact appears
+// in `live` and in no committed edge -- it cannot be reported. That is the
+// concurrent-merge case the subset design exists to protect, and it is protected
+// here for the same structural reason: nothing ever fails for being present.
+//
+// Reported per missing symbol rather than per edge, with the edge count, because
+// one deleted function takes a whole fan of edges with it -- the incident was 33
+// `calls` edges to a single deleted `memqlTypeToJSONType`. Sorted by edge count
+// then ID so the message is deterministic.
+func staleEdgeEndpoints(want *model.Model, live map[model.ID]bool) (samples []string, total int) {
+	edges := make(map[model.ID]int)
+	kinds := make(map[model.ID]map[model.EdgeKind]bool)
+
+	note := func(id model.ID, kind model.EdgeKind) {
+		if id == "" || live[id] {
+			return
+		}
+		edges[id]++
+		if kinds[id] == nil {
+			kinds[id] = make(map[model.EdgeKind]bool)
+		}
+		kinds[id][kind] = true
 	}
+	for _, e := range want.Edges {
+		note(e.From, e.Kind)
+		note(e.To, e.Kind)
+	}
+
+	dead := make([]model.ID, 0, len(edges))
+	for id := range edges {
+		dead = append(dead, id)
+	}
+	sort.Slice(dead, func(i, j int) bool {
+		if edges[dead[i]] != edges[dead[j]] {
+			return edges[dead[i]] > edges[dead[j]]
+		}
+		return dead[i] < dead[j]
+	})
+
+	for _, id := range dead {
+		if len(samples) >= 10 {
+			break
+		}
+		ks := make([]string, 0, len(kinds[id]))
+		for k := range kinds[id] {
+			ks = append(ks, string(k))
+		}
+		sort.Strings(ks)
+		samples = append(samples, fmt.Sprintf("%s (%d %s edge(s))", id, edges[id],
+			strings.Join(ks, "+")))
+	}
+	return samples, len(dead)
 }
 
 // workspaceRoot walks up from the test's directory to the module root.
