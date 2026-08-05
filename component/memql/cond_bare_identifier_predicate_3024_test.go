@@ -7,8 +7,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/auth"
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
 
 // cond_bare_identifier_predicate_3024_test.go -- memql#3024.
@@ -75,8 +75,8 @@ func loadCondBarePredicateProbe(pred string) error {
 // the else branch for every input.
 func TestLogicCondBareIdentifierPredicate_RejectedAtLoad(t *testing.T) {
 	for name, pred := range map[string]string{
-		"eq":        `role == "owner"`,
-		"ne":        `role != "owner"`,
+		"eq":         `role == "owner"`,
+		"ne":         `role != "owner"`,
 		"undeclared": `somethingNobodyDeclared == "x"`,
 	} {
 		t.Run(name, func(t *testing.T) {
