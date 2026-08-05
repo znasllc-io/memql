@@ -2,23 +2,31 @@ package dslfs
 
 import "strings"
 
-// domain.go owns ONE answer to "what is a .memql file's namespace HINT" -- the
-// last directory segment -- so boot and the lint lanes cannot drift about it
-// (memql#2852).
+// domain.go owns the answers to "which directory segment of a .memql path
+// means what", so boot and the lint lanes cannot drift about them
+// (memql#2852). There are TWO questions, they have different answers, and
+// both live here precisely so the difference is impossible to miss:
 //
-// SCOPE, because an earlier version of this comment claimed to own "which
-// domain does this file belong to" and that is a DIFFERENT and wider question
-// this file does not answer. There are two rules in the tree and both are
-// correct for what they do:
+//	LAST segment   DomainFromFilePath      a file's namespace HINT, matched
+//	                                       against a concept's canonical id
+//	FIRST segment  RootDomainFromFilePath  the DIRECTORY a concept's canonical
+//	                                       id is assembled under, and the
+//	                                       domain a shape name is scoped to
 //
-//	LAST segment  (here)              a file's namespace HINT, matched against a
-//	                                  concept's canonical id
-//	FIRST segment (unified_loader.go  the DIRECTORY a concept's canonical id is
-//	 firstPathSegment, dslimports/    assembled under, and the domain a shape
-//	 symbols.go, integrity.go)        name is scoped to
+// The FIRST-segment answer moved in beside its sibling during memql#3026's
+// landing review. Before that this header said the file owned only the LAST
+// one and pointed at three other implementations of the FIRST
+// (unified_loader.go firstPathSegment, dslimports/symbols.go, integrity.go) --
+// which is the drift the file exists to prevent, so the header was the defect
+// rather than the placement. Those three remain; migrating them is follow-up
+// work, and until it happens note that they differ on inputs the loader never
+// emits (a legacy `v<digits>` first segment, a leading "./" or "/", a bare
+// filename): RootDomainFromFilePath skips those segments, firstPathSegment
+// returns them verbatim.
 //
-// Conflating them is exactly how #2852's first fix opened a hole in both
-// directions. cmd/memqlmigrate/main.go records the same distinction from the
+// Conflating the two is exactly how #2852's first fix opened a hole in both
+// directions, and how #3026's first cut refused every ambient reference in a
+// nested file. cmd/memqlmigrate/main.go records the same distinction from the
 // other side (review #2614): the codemod deliberately uses the FIRST segment,
 // "NOT the immediate parent", because nested files belong to the top-level
 // domain for id-assembly purposes.
@@ -79,13 +87,7 @@ func VersionFromFilePath(path string) string {
 //
 // Returns "" when the path carries no directory.
 func DomainFromFilePath(path string) string {
-	// Strip a loader origin decoration ("unified:", "dryrun:", ...): a
-	// colon-terminated prefix before the first slash is never part of the
-	// mounted path.
-	if idx := strings.Index(path, ":"); idx >= 0 && !strings.Contains(path[:idx], "/") && strings.Contains(path[idx+1:], "/") {
-		path = path[idx+1:]
-	}
-	parts := strings.Split(path, "/")
+	parts := strings.Split(stripOriginDecoration(path), "/")
 	for i := len(parts) - 2; i >= 0; i-- {
 		part := parts[i]
 		if part == "" || part == "." {
@@ -97,4 +99,62 @@ func DomainFromFilePath(path string) string {
 		return part
 	}
 	return ""
+}
+
+// RootDomainFromFilePath returns the FIRST directory segment of a mounted
+// .memql file's path -- "agents" for agents/tools/askSpecialist.memql, where
+// DomainFromFilePath returns "tools".
+//
+// The two exist side by side because the tree answers two different questions
+// with two different segments, and confusing them is a live defect class
+// (memql#3026 landing review):
+//
+//   - the LAST segment is the file's ambient same-domain scope under #2617,
+//     which is what DomainFromFilePath is for;
+//   - the FIRST segment is the domain a concept's canonical id is ASSEMBLED
+//     from. unified_loader.go's pass 1 is `dir := firstPathSegment(p)` before
+//     AssembleConceptIdFromDeclInDir, so beta/sub/concepts.memql declares
+//     v1:beta:widget, and it is beta -- not sub -- that owns a namespace.pin.
+//
+// Anything comparing a concept id against a domain wants this one. "" comes
+// back when the path carries no directory.
+//
+// It agrees with firstPathSegment on every path the loader emits, and
+// deliberately not on three it does not: a legacy `v<digits>` first segment, a
+// leading "./" or "/", and a bare filename. Those are skipped here (matching
+// DomainFromFilePath's own table, which treats the legacy version layout as
+// live) and returned verbatim there. Loader origin decorations are stripped
+// exactly as they are above, which firstPathSegment does not do at all -- so
+// "unified:deployment/mutations.memql" resolves here and would yield
+// "unified:deployment" there.
+func RootDomainFromFilePath(path string) string {
+	parts := strings.Split(stripOriginDecoration(path), "/")
+	if len(parts) < 2 {
+		return "" // no directory component: a bare filename has no domain
+	}
+	for i := 0; i < len(parts)-1; i++ {
+		part := parts[i]
+		if part == "" || part == "." {
+			continue
+		}
+		if VersionFromFilePath(part) == part {
+			continue // legacy v<digits> layout segment, not a domain
+		}
+		return part
+	}
+	return ""
+}
+
+// stripOriginDecoration removes a loader origin prefix ("unified:", "dryrun:",
+// ...): a colon-terminated prefix before the first slash is never part of the
+// mounted path. The unified loader stamps slice origins as
+// "unified:<path>:<sliceName>", which would otherwise pollute the leading
+// directory segment -- and it pollutes it for BOTH readers above, which is why
+// this is one function rather than a copy in each.
+func stripOriginDecoration(path string) string {
+	if idx := strings.Index(path, ":"); idx >= 0 &&
+		!strings.Contains(path[:idx], "/") && strings.Contains(path[idx+1:], "/") {
+		return path[idx+1:]
+	}
+	return path
 }

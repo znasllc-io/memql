@@ -186,7 +186,22 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 	// `canonicalId(x, <importedConceptName>)` to the canonical-id string form
 	// against the file's `use ...concepts.{ ... }` imports + the registry. The
 	// quoted string form passes through unchanged (additive).
-	if resolved, cerr := NewConceptResolver(registry).ResolveCanonicalIdConceptRefsInDomain(content, DomainFromFilePath(origin)); cerr != nil {
+	//
+	// BOTH arguments are the ASSEMBLY directory's, not the last path segment's
+	// (memql#3026). The ambient rule admits an id this domain could have
+	// declared, which means it has to be handed the same directory
+	// AssembleConceptIdFromDeclInDir was -- unified_loader.go's
+	// `dir := firstPathSegment(p)`, i.e. RootDomainFromFilePath here -- plus
+	// that directory's namespace.pin.
+	//
+	// Passing DomainFromFilePath's LAST segment here is a WIDENING, not merely
+	// a miss: for agents/tools/askSpecialist.memql it would admit any id whose
+	// namespace is `tools`, which is a foreign domain's namespace that assembly
+	// for this file can never emit -- a cross-namespace bind with no import, on
+	// the path that derives row ids. The same-domain scope the last segment
+	// describes is a different question, and this is not it.
+	if resolved, cerr := NewConceptResolver(registry).ResolveCanonicalIdConceptRefsInNamespace(
+		content, RootDomainFromFilePath(origin), declaredNamespaceForOrigin(origin)); cerr != nil {
 		return nil, fmt.Errorf("%s: %w", origin, cerr)
 	} else {
 		content = resolved

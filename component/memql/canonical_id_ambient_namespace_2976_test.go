@@ -84,8 +84,11 @@ func remappedPackResolver(extra ...string) *ConceptResolver {
 // The file sits in `zdeploy/`; its concept assembles under `zcluster`. No
 // import, and none should be needed.
 func TestCanonicalId_AmbientResolvesInARemappedPack(t *testing.T) {
+	// memql#3026: the ambient hint is now the DECLARED namespace, so a
+	// synthetic fixture must state it. The 2-arg InDomain form reads it from
+	// the domain's real namespace.pin, which a made-up `zdeploy` has not got.
 	got, err := remappedPackResolver().
-		ResolveCanonicalIdConceptRefsInDomain(`canonicalId(args.x, widget)`, "zdeploy")
+		ResolveCanonicalIdConceptRefsInNamespace(`canonicalId(args.x, widget)`, "zdeploy", "zcluster")
 	if err != nil {
 		t.Fatalf("canonicalId did not resolve ambiently in a namespace-remapped pack.\n"+
 			"The concept is declared in this file's own domain; the ambient check compared the "+
@@ -112,7 +115,7 @@ func TestCanonicalId_AmbientAndSameDomainGateAgree(t *testing.T) {
 
 	// 1. Ambient resolution works, so no import is needed.
 	if _, err := remappedPackResolver().
-		ResolveCanonicalIdConceptRefsInDomain(`canonicalId(args.x, widget)`, domain); err != nil {
+		ResolveCanonicalIdConceptRefsInNamespace(`canonicalId(args.x, widget)`, domain, "zcluster"); err != nil {
 		t.Fatalf("ambient resolution fails, so an import IS required here: %v", err)
 	}
 
@@ -144,7 +147,12 @@ func TestCanonicalId_AmbiguousNameStillRequiresAnImport(t *testing.T) {
 
 	// From a domain that is neither namespace: ambiguous, no directory match,
 	// so an import is required.
-	_, err := r.ResolveCanonicalIdConceptRefsInDomain(`canonicalId(args.x, widget)`, "zdeploy")
+	// From a namespace that is NEITHER of the declaring ones: no match, so an
+	// import is required. (memql#3026 note: under the declared-namespace rule
+	// what makes this refuse is that no candidate carries `zsomewhere`, not
+	// that the bare name is ambiguous -- the ambiguity is what stops the
+	// DIRECTORY from rescuing it.)
+	_, err := r.ResolveCanonicalIdConceptRefsInNamespace(`canonicalId(args.x, widget)`, "zdeploy", "zsomewhere")
 	if err == nil {
 		t.Error("an AMBIGUOUS concept name resolved ambiently. `widget` is declared under both " +
 			"zcluster and zother, so nothing in the file says which is meant -- this must still " +
@@ -153,7 +161,7 @@ func TestCanonicalId_AmbiguousNameStillRequiresAnImport(t *testing.T) {
 
 	// From the directory that DOES name one of the namespaces, the ambient
 	// same-domain rule still applies -- this is the branch the fix preserves.
-	got, derr := r.ResolveCanonicalIdConceptRefsInDomain(`canonicalId(args.x, widget)`, "zother")
+	got, derr := r.ResolveCanonicalIdConceptRefsInNamespace(`canonicalId(args.x, widget)`, "zother", "zother")
 	if derr != nil {
 		t.Fatalf("a directory that names the concept's own namespace must still resolve "+
 			"ambiently even when the bare name is ambiguous elsewhere: %v", derr)
@@ -163,28 +171,46 @@ func TestCanonicalId_AmbiguousNameStillRequiresAnImport(t *testing.T) {
 	}
 }
 
-// TestCanonicalId_CrossDomainUniqueNameMatchesSignatureBinding pins the other half of
-// #2617: a concept from another domain is not in ambient scope just because it
-// happens to be unique.
+// TestCanonicalId_CrossDomainNameRequiresAnImport pins the other half of
+// #2617: a concept from another namespace is not in ambient scope, whether or
+// not it happens to be unique.
 //
-// NOTE this is the one place the fix genuinely widens behaviour, and the test
-// says so rather than hiding it. A UNIQUE cross-domain name now resolves
-// ambiently, because uniqueness is the condition boot itself uses and
-// signature-concept binding already accepted it -- `canonicalId` was the only
-// construct applying a stricter rule. What is preserved is the protection that
-// matters: ambiguity still demands an import.
-func TestCanonicalId_CrossDomainUniqueNameMatchesSignatureBinding(t *testing.T) {
+// HISTORY, because this assertion was inverted once and the reason matters.
+// #3017 (the uniqueness rule) deliberately WIDENED this: a unique cross-domain
+// name resolved ambiently, on the argument that uniqueness is the condition
+// boot itself uses for signature binding, so canonicalId was the only
+// construct applying a stricter rule. That test documented the widening openly
+// rather than hiding it.
+//
+// memql#3026 takes it back, by that issue's own definition of done. The
+// argument from consistency-with-boot is real but is outweighed by blast
+// radius: `canonicalId` DERIVES ROW IDS, and #2617's import discipline exists
+// so a cross-domain reference has to be written down. A bundle author writing
+// `canonicalId(x, user)` meaning their own `user` should get a loud failure,
+// not a silent bind to the engine's -- and under MEMQL_DSL_PATH that author is
+// in a different repository.
+//
+// The declared-namespace rule reaches the same place #2976 wanted WITHOUT the
+// widening, which is why it was the original ask.
+func TestCanonicalId_CrossDomainNameRequiresAnImport(t *testing.T) {
 	r := remappedPackResolver()
 
-	// A file in an unrelated domain naming the unique concept.
-	got, err := r.ResolveCanonicalIdConceptRefsInDomain(`canonicalId(args.x, widget)`, "somewhereElse")
+	// A file whose declared namespace is not the concept's: no ambient scope.
+	if _, err := r.ResolveCanonicalIdConceptRefsInNamespace(
+		`canonicalId(args.x, widget)`, "somewhereElse", "somewhereElse"); err == nil {
+		t.Fatal("a concept declared only in a FOREIGN namespace bound ambiently with no import. " +
+			"Uniqueness is not the rule any more (memql#3026): canonicalId derives row ids, so a " +
+			"silent cross-namespace bind is a data defect, and #2617's import discipline exists " +
+			"to force the reference to be written down.")
+	}
+
+	// The explicit import remains the working spelling.
+	got, err := r.ResolveCanonicalIdConceptRefsInNamespace(
+		"use zcluster.concepts.{ widget }\ncanonicalId(args.x, widget)", "somewhereElse", "somewhereElse")
 	if err != nil {
-		t.Fatalf("a unique concept name should resolve the same way signature binding resolves "+
-			"it -- resolveBareConceptNameWithNamespace returns a unique match before it consults "+
-			"the hint, so refusing here would keep canonicalId stricter than the rest of the "+
-			"language for no stated reason (memql#2976): %v", err)
+		t.Fatalf("the explicit cross-namespace import must still work: %v", err)
 	}
 	if !strings.Contains(got, `"v1:zcluster:widget"`) {
-		t.Errorf("wrong canonical id for the unique name.\n  got: %s", got)
+		t.Errorf("wrong canonical id for the imported name.\n  got: %s", got)
 	}
 }
