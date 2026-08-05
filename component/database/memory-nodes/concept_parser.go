@@ -526,16 +526,35 @@ func propertyDeclToParsed(prop *parser.PropertyDecl) (parsedProperty, error) {
 // `$schema` wins, 7 < 2019, so format is asserted: `[]datetime` really does
 // enforce RFC3339 per entry, and a garbage `datetime` is rejected.
 //
+// Do not read that as "draft >= 2019 turns format off" -- the rule is narrower
+// than the direction it is usually quoted in. Removing the `$schema` line
+// entirely leaves format ASSERTED, because a resource with no `$schema` gets no
+// meta-schema attached and the vocabulary check is vacuously true on a nil
+// meta. It is specifically DECLARING a >= 2019 draft, whose meta-schema lists
+// vocabularies and omits format-assertion, that turns it off. A cleanup that
+// deletes the declaration is safe; one that modernises it is not.
+//
 // The optional-scalar union is therefore SOUND rather than defective. With
 // format asserted, `""` FAILS the date-time member and matches only
 // `maxLength: 0`, so `oneOf`'s exactly-one rule is satisfied and the sentinel
 // works. memql#3051 was filed on the old reading and does not reproduce.
 //
-// So `required` here buys clarity, not correctness: an element is always
-// present, so the unset sentinels do not apply one level in. All of this is
-// pinned by optional_datetime_sentinel_test.go -- including a guard that
-// swapping the emitted `$schema` for a newer draft turns format assertion OFF
-// and breaks both directions at once (`""` rejected, garbage accepted).
+// What `required` on the element actually buys is CORRECTNESS, and saying
+// otherwise was the second wrong claim on this comment. Measured through the
+// real validator:
+//
+//	required=true   items {"type":"string","format":"date-time"}
+//	                  [""]     REJECTED      [null]   REJECTED
+//	required=false  items {"oneOf":[date-time, maxLength:0, null]}
+//	                  [""]     ACCEPTED      [null]   ACCEPTED
+//
+// So it is not needed to make the union SOUND -- the union is sound on its own,
+// which is the point above -- but it is the only thing forbidding an empty or
+// null ENTRY inside a `[]datetime`. That is a difference in the set of accepted
+// values, not a difference in clarity. Pinned by
+// TestArrayDatetimeElementRejectsEmptyAndNull.
+//
+// All of this is pinned by optional_datetime_sentinel_test.go.
 //
 // A nil ref is the legacy bare `array` form, whose parser default is `string`.
 func elementFromTypeRef(ref *parser.TypeRef) *parsedProperty {

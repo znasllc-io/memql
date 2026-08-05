@@ -34,8 +34,13 @@ import (
 // # But the tree is one `$schema` bump away from the bug
 //
 // That makes the draft-07 declaration load-bearing for validation behaviour,
-// which is not obvious from reading it, and nothing guarded it. Measured both
-// ways against the real compiler:
+// which is not obvious from reading it. It was not UNguarded -- an earlier
+// version of this comment said so and that was wrong. concept_datetime_
+// nullable_test.go has run the same four value cases through the production
+// path since memql#1629, and it does go red if the emitted `$schema` is
+// modernised. What was missing was not coverage of the behaviour but any
+// statement of WHY the behaviour holds, which is what sent memql#3051 chasing a
+// defect that is not there. Measured both ways against the real compiler:
 //
 //	$schema                                       ""          "not-a-date"
 //	http://json-schema.org/draft-07/schema#       ACCEPTED    REJECTED
@@ -43,9 +48,18 @@ import (
 //
 // So "modernising" the emitted `$schema` would silently break BOTH directions
 // at once: it would introduce exactly the #3051 defect, and it would ALSO stop
-// rejecting garbage in a field declared `datetime`. TestOptionalDatetime_
-// FormatAssertionDependsOnTheDeclaredDraft is the guard, and it is the real
-// deliverable of this issue.
+// rejecting garbage in a field declared `datetime`.
+//
+// WHICH TEST CATCHES THAT, precisely, because an earlier version of this
+// comment named the wrong one. TestOptionalDatetime_SentinelBehaviour is the
+// guard: it drives the emitted schema, so bumping the `$schema` in
+// concept_parser.go turns it red on both the empty-string and the garbage case.
+// TestOptionalDatetime_EmitsSentinelUnion pins the declaration itself.
+// TestOptionalDatetime_FormatAssertionDependsOnTheDeclaredDraft is a
+// CHARACTERISATION of the library rule -- it explains why the guard holds and
+// would fail if a jsonschema upgrade changed the rule, but it is built from the
+// emitted schema rather than a literal so it cannot drift from what the emitter
+// produces.
 
 // optionalDatetimeConcept builds a concept with one optional scalar datetime
 // field through the real parser, so the schema under test is the one the
@@ -80,6 +94,16 @@ func TestOptionalDatetime_EmitsSentinelUnion(t *testing.T) {
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
+	// The declared draft is the whole reason the union is sound, and this
+	// struct already parses it -- an earlier version read it into a field and
+	// then never asserted on it, which is the one line that pins the claim.
+	const draft07 = "http://json-schema.org/draft-07/schema#"
+	if doc.Schema != draft07 {
+		t.Fatalf("emitted $schema = %q, want %q. Format assertion -- and therefore the "+
+			"soundness of the sentinel union below -- depends on the declared draft being "+
+			"< 2019 (memql#3051).", doc.Schema, draft07)
+	}
+
 	oneOf, ok := doc.Properties["dueAt"]["oneOf"].([]any)
 	if !ok {
 		t.Fatalf("optional datetime `dueAt` carries no oneOf; got %v", doc.Properties["dueAt"])
@@ -151,19 +175,41 @@ func TestOptionalDatetime_SentinelBehaviour(t *testing.T) {
 // Asserted against the real compiler rather than by reading the library, so
 // this stays true across a jsonschema upgrade that changes the rule.
 func TestOptionalDatetime_FormatAssertionDependsOnTheDeclaredDraft(t *testing.T) {
+	// The schema under test is the EMITTED one with only its $schema swapped --
+	// never a hand-written copy of the union. A literal copy silently keeps
+	// asserting a shape the emitter has moved on from: add `minLength: 1` to the
+	// date-time member (one of the fixes memql#3051 itself proposed) and a
+	// hand-rolled copy stays green while describing something that no longer
+	// exists. Deriving it means this test fails loudly instead.
 	build := func(t *testing.T, key, draft string) func(any) error {
 		t.Helper()
-		raw := []byte(`{
-  "$schema": "` + draft + `",
-  "type": "object",
-  "properties": {
-    "dueAt": {"oneOf": [
-      {"type": "string", "format": "date-time"},
-      {"type": "string", "maxLength": 0},
-      {"type": "null"}
-    ]}
-  }
-}`)
+		emitted, err := optionalDatetimeConcept(t).DefinitionSchema()
+		if err != nil {
+			t.Fatalf("DefinitionSchema: %v", err)
+		}
+		var doc struct {
+			Properties map[string]json.RawMessage `json:"properties"`
+		}
+		if err := json.Unmarshal(emitted, &doc); err != nil {
+			t.Fatalf("unmarshal emitted schema: %v", err)
+		}
+		dueAt, ok := doc.Properties["dueAt"]
+		if !ok {
+			t.Fatal("the emitted schema has no dueAt property to characterise")
+		}
+		// Only the dueAt member is lifted, wrapped in a minimal document with
+		// the draft under test. Taking the whole emitted document would drag in
+		// `required: [title]` and reject the bare payloads below for the wrong
+		// reason -- but the UNION ITSELF is the emitter's, so the drift this
+		// derivation exists to prevent is still prevented.
+		raw, err := json.Marshal(map[string]any{
+			"$schema":    draft,
+			"type":       "object",
+			"properties": map[string]any{"dueAt": json.RawMessage(dueAt)},
+		})
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
 		s, err := compileSchema(key, raw)
 		if err != nil {
 			t.Fatalf("compile %s: %v", draft, err)
@@ -193,5 +239,54 @@ func TestOptionalDatetime_FormatAssertionDependsOnTheDeclaredDraft(t *testing.T)
 	if err := newer("not-a-date"); err != nil {
 		t.Errorf("control broken: under draft 2019-09 garbage should be ACCEPTED "+
 			"(format unasserted), got: %v", err)
+	}
+}
+
+// TestArrayDatetimeElementRejectsEmptyAndNull pins what `required` on an array
+// element actually buys, which concept_parser.go's elementFromTypeRef comment
+// now claims is CORRECTNESS rather than clarity.
+//
+// It is the assertion behind that claim, and it exists because the claim it
+// replaced -- that `required` there "buys clarity, not correctness" -- was
+// shipped without one. An element marked required emits a bare
+// {"type":"string","format":"date-time"}; drop the required and it carries the
+// same sentinel union a scalar does, at which point an empty or null ENTRY
+// inside a []datetime becomes legal. That is a difference in the accepted value
+// set, and nothing was holding it.
+func TestArrayDatetimeElementRejectsEmptyAndNull(t *testing.T) {
+	c, err := ParseConceptMemQL([]byte(`
+@description("A thing with a list of timestamps.")
+concept stamped {
+  title   string      @required  @description("What it is.")
+  stamps  []datetime             @description("When things happened.")
+}
+`), "v1/test/stamped")
+	if err != nil {
+		t.Fatalf("parse concept: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name    string
+		payload map[string]any
+		accept  bool
+	}{
+		{"a valid RFC3339 entry", map[string]any{"title": "t", "stamps": []any{"2026-08-05T12:00:00Z"}}, true},
+		{"an empty list", map[string]any{"title": "t", "stamps": []any{}}, true},
+		{"an EMPTY-STRING entry", map[string]any{"title": "t", "stamps": []any{""}}, false},
+		{"a NULL entry", map[string]any{"title": "t", "stamps": []any{nil}}, false},
+		{"a garbage entry", map[string]any{"title": "t", "stamps": []any{"not-a-date"}}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := c.validate("definition", tc.payload)
+			if tc.accept && err != nil {
+				t.Errorf("%v was REJECTED and should not be: %v", tc.payload, err)
+			}
+			if !tc.accept && err == nil {
+				t.Errorf("%v was ACCEPTED. An array element is `required` precisely so an "+
+					"empty or null entry is illegal one level in -- if that stops holding, "+
+					"elementFromTypeRef's comment about what `required` buys is wrong again "+
+					"(memql#3051).", tc.payload)
+			}
+		})
 	}
 }
