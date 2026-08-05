@@ -35,19 +35,17 @@ func openTestDB(t *testing.T) *bun.DB {
 		dbtest.Unreachable(t, "DB-gated test for the cluster-guard integration test", dsn, err)
 	}
 
-	// The guard relies on the migration's table; create it here so the test is
-	// self-contained (idempotent, matches the migration DDL).
-	if _, err := db.DB.ExecContext(context.Background(), `
-		CREATE TABLE IF NOT EXISTS automation_execution_claims (
-		  automation_name text NOT NULL,
-		  dedup_key       text NOT NULL,
-		  claimed_by      text NOT NULL,
-		  claimed_at      timestamptz NOT NULL DEFAULT now(),
-		  PRIMARY KEY (automation_name, dedup_key)
-		)`); err != nil {
-		_ = db.Close()
-		t.Skipf("could not ensure claim table: %v", err)
-	}
+	// The claim table comes from the MIGRATIONS, applied by this package's
+	// TestMain via dbtest.EnsureSchema (memql#3030).
+	//
+	// This used to hand-roll `CREATE TABLE IF NOT EXISTS
+	// automation_execution_claims` here "so the test is self-contained". That
+	// was reasonable while the package had no TestMain and ran outside the
+	// db-tests lane -- but it is a SECOND definition of a shipped table
+	// (20260601120000_automation_execution_claims_ensure.up.sql, memql#624),
+	// and a second definition can drift from the first silently: add a column
+	// to the migration and this test keeps passing against its own stale
+	// shape, which is worse than not testing the table at all.
 	return db
 }
 

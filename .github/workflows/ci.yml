@@ -569,7 +569,7 @@ jobs:
           CREATE EXTENSION IF NOT EXISTS vector;
           SQL
       - name: db-gated suites (seeded test DB)
-        run: go test -count=1 -timeout=300s ./component/memql/... ./component/automations/steps/... ./examples/referencepack/...
+        run: go test -count=1 -timeout=300s ./component/memql/... ./component/automations/... ./component/grpc/... ./integrations/cognition/... ./integrations/planner/... ./examples/referencepack/...
 
   # VS Code extension lane: run every cmd/memql-lsp drift guard over the
   # checked-in editors/vscode assets, then build the offline LSP binary
