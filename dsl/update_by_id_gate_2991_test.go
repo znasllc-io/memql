@@ -15,7 +15,15 @@ import (
 //
 //   - No predicate related `args.userId` to `actor.userId`, and the mutation
 //     grammar has no way to express one -- ZERO mutations in the tree carry a
-//     filter. That is memql#2803 Phase 5, not a thing this issue could fix.
+//     filter. That was memql#2803 Phase 5, and it HAS SINCE LANDED
+//     (memql#3079): the engine now refuses an update/delete whose target row
+//     is not owned by the actor, driven by the concept's own @rowAuthz
+//     declaration rather than by a per-mutation predicate. So the mechanism
+//     this comment said could not exist does, and `@serverOnly` is no longer
+//     the only thing standing between a client and another user's row --
+//     PROVIDED the concept declares a tier. v1:identity:user does not yet
+//     (see dsl/identity/concepts.memql, "SELF-OWNED, and NOT YET DECLARED"),
+//     which is why the annotation below still carries this gate.
 //   - `role` is a plain `enum(...) @default("reader")`; it carries no
 //     `@internal` and no `@serverSet`.
 //   - `validateMutationCallerArgs` walks the payload's NAMED keys, and a SPLAT
@@ -71,8 +79,10 @@ func TestUpdateUserIsServerOnly(t *testing.T) {
 			"v1:identity:user.role is a plain settable enum -- so without this gate a client "+
 			"can name any user and any role. Nothing else covers it: the mutation grammar "+
 			"cannot express an owner predicate, the payload splat is invisible to "+
-			"validateMutationCallerArgs, and row-authz is inert by construction. If this "+
-			"annotation is being removed, the owner-predicate mechanism (memql#2803 Phase 5) "+
-			"has to be in place first (memql#2991).", want)
+			"validateMutationCallerArgs, and v1:identity:user does not yet DECLARE a row-authz "+
+			"tier -- so the memql#3079 write guard, which would otherwise cover this, has "+
+			"nothing to enforce here. If this annotation is being removed, declare the tier on "+
+			"v1:identity:user first and confirm the guard refuses a foreign-target update "+
+			"(memql#2991, memql#3079).", want)
 	}
 }

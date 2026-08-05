@@ -469,6 +469,24 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 			return nil, meta, err
 		}
 		meta.priorExisted = existed
+
+		// ROW-AUTHZ WRITE GUARD (memql#3079, Phase 5 of #2803). Refuses an
+		// update/delete whose target row is not owned by the actor, driven by
+		// the same concept declaration Phase 3 (#3076) reads on the read side.
+		//
+		// Placed HERE -- after the prior row is loaded, BEFORE the delta is
+		// merged onto it -- and that ordering IS the security property: the
+		// check reads ownership from the PERSISTED row. Running it after the
+		// merge would let a caller assert ownership in the very request that
+		// changes it.
+		//
+		// UPDATE/DELETE only. A genuine create arrives here with
+		// existed == false and no target row to own, so its problem is
+		// stamping rather than guarding -- memql#3059, independently open.
+		if _, authzErr := e.assertRowAuthzWrite(ctx, conceptMeta, id, priorPayload, existed, requirePrior); authzErr != nil {
+			return nil, meta, authzErr
+		}
+
 		if existed {
 			// Capture the PRIOR status before the delta overwrites it
 			// (#1158) so executeUpdate can surface it as oldStatus.
