@@ -123,13 +123,18 @@ func TestLineCommentIsProse(t *testing.T) {
 	}
 }
 
+// The payload read must sit on the SAME LINE as the URL literal. With it on the
+// next line this test passed even with the string-literal arm removed from
+// scanSegments entirely: a spurious `//` comment runs only to end of line, so
+// the read on line 2 survived either way and the test proved nothing about the
+// behaviour it is named for.
 func TestCommentMarkerInsideLiteralIsNotAComment(t *testing.T) {
-	src := `url: "https://example.com/a"
-field: event.payload.status
+	src := `url: "https://example.com/a", field: event.payload.status
 `
 	got := collectPayloadFields(src)
 	if len(got) != 1 || got[0] != "status" {
-		t.Fatalf("collectPayloadFields = %v, want [status] -- the `//` in a URL literal started a comment", got)
+		t.Fatalf("collectPayloadFields = %v, want [status] -- the `//` in a URL literal started a comment "+
+			"and blanked the rest of the line", got)
 	}
 }
 
@@ -257,8 +262,12 @@ func TestMigrateFileEndToEnd(t *testing.T) {
 	if !strings.Contains(out, `"joined \\"`) {
 		t.Errorf("the literal was not passed through verbatim.\ngot:\n%s", out)
 	}
-	// The `kind:` read sits AFTER the `\\` literal -- the exact position the
-	// old one-byte lookback swallowed.
+	// The `kind:` read sits AFTER the `\\` literal. Note what actually rescues
+	// it: with ONLY the one-byte lookback reverted this assertion still passes,
+	// because endToEndSrc has no later quote and the newline bound (also added
+	// here) stops the over-consumption at end of line. It fails under a full
+	// pre-PR revert. So this pins the combination, not the lookback alone --
+	// the isolated lookback cases are the two above.
 	if !strings.Contains(out, "kind:    kind") {
 		t.Errorf("the read after the `\\\\` literal was not rewritten.\ngot:\n%s", out)
 	}
@@ -275,8 +284,29 @@ func TestMigrateFileIsIdempotent(t *testing.T) {
 	}
 }
 
+// READ THIS BEFORE TRUSTING THIS TEST: it cannot fail on any single-point
+// change, and that is a property of the design rather than a gap to be closed
+// here.
+//
+// "Terse automations are untouched" does not come from the `\s*\{` in
+// automationHeader. It comes from terse automations having NO BRACES: even with
+// automationHeader widened to match `automation t =>`, matchingBrace returns -1
+// and migrateFile `continue`s at main.go:105. Measured both ways -- with the
+// header widened to `\s*[{=]`, this test passes with the payload read present
+// AND absent, and so does the whole suite.
+//
+// The fixture carries an event.payload read anyway, because without one
+// migrateFile short-circuits at `len(fields) == 0` before terseness is even
+// reachable, so the read is NECESSARY for the assertion to mean anything --
+// just not SUFFICIENT to make it falsifiable. It would bite only under a change
+// that made terse forms both header-matched and brace-extractable.
+//
+// Kept as an executable statement of the ADR requirement, not as a guard.
+// Deleting it would be equally defensible; what is not defensible is reading a
+// green run here as evidence the terse rule is enforced.
 func TestMigrateFileLeavesTerseAutomationsAlone(t *testing.T) {
-	src := "@trigger(event=\"node.created\", concept=\"v1:cluster:node\")\nautomation t => logic doThing\n"
+	src := "@trigger(event=\"node.created\", concept=\"v1:cluster:node\")\n" +
+		"automation t => logic doThing(event.payload.spaceId)\n"
 	out, report := migrateFile(src)
 	if out != src {
 		t.Errorf("a terse automation was rewritten.\ngot:\n%s", out)

@@ -15,9 +15,23 @@
 // Deterministic + idempotent (a second run is a no-op). Terse automations
 // (`automation N @trigger(...) => logic X`) are untouched per the ADR; logic
 // bodies (`args.event.payload.X`) are a different surface and are never
-// rewritten. String literals, `//` line comments and `/* */` block comments
-// are protected, on the same rules the G5 gate itself scans by -- see
-// scanSegments.
+// rewritten.
+//
+// PROTECTION IS SCOPED, and the scope is not the file. WITHIN an automation
+// block, string literals, `//` line comments and `/* */` block comments are
+// protected on the same rules the G5 gate itself scans by -- see scanSegments,
+// which is what collectPayloadFields and rewriteBlock run on.
+//
+// The scans that FIND the blocks do NOT use it. automationHeader, matchingBrace
+// and argsHeader still match on raw source, so:
+//   - a commented-out automation inside `/* */` IS rewritten, args block and all;
+//   - a `{` or `}` inside a string literal mis-terminates the block, and the
+//     reads past it are silently left un-migrated -- and because a truncated
+//     block then collects no fields, a SECOND run reports the file as clean.
+//
+// Both are memql#3101, filed with repros and deliberately not fixed here.
+// Do not read "protected" as covering a whole file: audit comment regions and
+// brace-bearing literals in the diff before trusting a -write run.
 //
 // Usage: go run ./scripts/migrations/event_payload_args [-write] <dsl-root>...
 package main
