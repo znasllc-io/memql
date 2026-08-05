@@ -2596,41 +2596,72 @@ var bareIdentOnly = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // splitTopLevelArgs splits on commas at depth zero, respecting quotes.
 //
-// String state comes from blankCommentsAndStrings rather than from a local
-// scan (memql#3046). The previous version decided whether a quote was escaped
-// with a ONE-BYTE LOOKBACK (`s[i-1] != '\\'`), which cannot tell an escaped
-// quote from a quote that follows a COMPLETED `\\` escape -- so a literal
-// ending in a backslash pair read its own closing quote as escaped, stayed in
-// string state, and swallowed every top-level comma after it. `"C:\\", args.b,
+// Escape state is TRACKED, never inferred from the preceding byte
+// (memql#3046). The original decided whether a quote was escaped with a
+// ONE-BYTE LOOKBACK (`s[i-1] != '\\'`), which cannot tell an escaped quote
+// from a quote that follows a COMPLETED `\\` escape -- so a literal ending in
+// a backslash pair read its own closing quote as escaped, stayed in string
+// state, and swallowed every top-level comma after it. `"C:\\", args.b,
 // args.c` split into ONE argument instead of three, silently, in the rewriter
-// that runs over every authored construct.
+// that runs over every authored construct. Same fix, same shape, as
+// memql#2949 in component/automations/args_resolution.go and as
+// splitCoalesceArgs beside it.
 //
-// memql#2949 fixed the same class in component/automations/args_resolution.go
-// by TRACKING escape state. Here the better answer is not to track it at all:
-// blankCommentsAndStrings already does it correctly, lives in this package, is
-// shared with the rowauthz binder and the memqlmigrate codemod, and is covered
-// by its own tests. This keeps only the depth arithmetic, which is the part
-// genuinely local to argument splitting.
+// # Why not delegate to blankCommentsAndStrings
 //
-// The blanked text preserves every byte offset, so a split point found in it
-// indexes the ORIGINAL string exactly and the returned slices are unmodified
-// source. Blanking also removes comments, which an argument list should not
-// contain and which the old scan could not have split around correctly anyway.
+// It is in this package, it tracks escapes correctly, and reusing it was the
+// obvious answer -- memql#3046's own DoD asked whether these hand-rolled
+// scanners should be consolidated. It is the WRONG scanner for this job, and
+// the reason is worth recording because it is not visible from its signature.
+//
+// That blanker ends a string at a newline, describing it as "the same recovery
+// the lexer performs". The lexer does not do that: it accepts a literal
+// spanning lines and returns it as ONE string token (measured -- and memql#3047
+// is a separate bug about the line COUNTER not advancing through exactly such a
+// literal, which only exists because they are accepted). So on a multi-line
+// literal the blanker closes the string early, the real closing quote reopens
+// one, and every following comma is swallowed:
+//
+//	"line one\nline two", args.b   lexer: 2 args   blanked scan: 1
+//
+// That is the identical symptom memql#3046 exists to remove -- arguments
+// silently collapsing to one -- reintroduced through a different door, and the
+// old lookback scanner got this case RIGHT. Fixing one comma-swallowing bug by
+// importing another is not a fix, so string state stays local here.
+//
+// The cost of staying local is that comments inside an argument list are not
+// blanked, exactly as before. Measured on the authored tree: zero comments
+// occur at paren depth > 0, so nothing regresses relative to the code this
+// replaces.
 func splitTopLevelArgs(s string) []string {
-	scan := blankCommentsAndStrings(s)
 	var parts []string
 	depth, start := 0, 0
-	for i := 0; i < len(scan); i++ {
-		switch scan[i] {
-		case '(', '{', '[':
-			depth++
-		case ')', '}', ']':
-			depth--
-		case ',':
-			if depth == 0 {
-				parts = append(parts, s[start:i])
-				start = i + 1
+	inStr, escaped := false, false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case inStr:
+			switch {
+			case escaped:
+				// Escaped by the backslash before it; the escape is now
+				// spent, so a `\\` pair leaves escaped false and the NEXT
+				// quote closes the literal.
+				escaped = false
+			case c == '\\':
+				escaped = true
+			case c == '"':
+				inStr = false
 			}
+		case c == '"':
+			inStr = true
+			escaped = false
+		case c == '(' || c == '{' || c == '[':
+			depth++
+		case c == ')' || c == '}' || c == ']':
+			depth--
+		case c == ',' && depth == 0:
+			parts = append(parts, s[start:i])
+			start = i + 1
 		}
 	}
 	parts = append(parts, s[start:])

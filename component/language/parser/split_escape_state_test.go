@@ -91,10 +91,15 @@ func TestSplitTopLevelArgs_CompletedEscapeDoesNotSwallowCommas(t *testing.T) {
 	}
 }
 
-// A quote that opens but never closes must not make the splitter swallow the
-// rest of the input silently on the FIRST byte either -- the old code indexed
-// s[i-1] with i possibly 0, which is a panic waiting on a leading quote in
-// string state. Guarded here because the reuse below changes that code path.
+// Unterminated and degenerate inputs must not panic.
+//
+// An earlier version of this comment claimed the old code could index s[i-1]
+// with i == 0 on a leading quote. It could not: the old scanner set inStr in
+// the `case c == '"'` arm at index i, so its string branch first ran at i+1.
+// Measured -- the old code does not panic on any input below. The guard is kept
+// because it is free and the splitter has now been rewritten twice, but it is a
+// guard rather than a reproduction, and saying so keeps the next reader from
+// trusting a hazard that was never there.
 func TestSplitTopLevelArgs_LeadingQuoteDoesNotPanic(t *testing.T) {
 	for _, in := range []string{`"`, `",a`, `\`, `"a`} {
 		func() {
@@ -105,5 +110,60 @@ func TestSplitTopLevelArgs_LeadingQuoteDoesNotPanic(t *testing.T) {
 			}()
 			_ = splitTopLevelArgs(in)
 		}()
+	}
+}
+
+// A string literal spanning lines must not break the split, and the LEXER is
+// the oracle for how many arguments there are.
+//
+// This is a regression test in the strict sense: a draft of the #3046 fix
+// delegated string state to blankCommentsAndStrings, which ends a literal at a
+// newline. The lexer does not -- it accepts a literal spanning lines and
+// returns it as ONE string token (memql#3047 is a separate bug about the line
+// counter not advancing through exactly such a literal, which only exists
+// because they are accepted). So the blanker closed the string early, the real
+// closing quote reopened one, and every following comma was swallowed:
+// `"line one\nline two", args.b` split into ONE argument where the lexer sees
+// two. That is the identical symptom #3046 exists to remove, reintroduced by
+// the fix for it -- and the code being replaced got this case right.
+//
+// Asserting against the lexer's own comma count rather than a hardcoded number
+// is deliberate: the defect in both directions is the splitter disagreeing with
+// the lexer about where a string ends, so the lexer is the only oracle that
+// cannot drift with the bug.
+func TestSplitTopLevelArgs_AgreesWithTheLexer(t *testing.T) {
+	for _, in := range []string{
+		"\"line one\nline two\", args.b",
+		"\"a\nb\", args.b, args.c",
+		`"C:\\", args.b, args.c`,
+		`args.a, args.b`,
+		`f(a, b), args.c`,
+		`"a,b", args.c`,
+		`"say \"hi\"", args.b`,
+	} {
+		toks, err := NewLexer(in).Tokenize()
+		if err != nil {
+			t.Fatalf("lexer refused the fixture %q: %v", in, err)
+		}
+		want := 1
+		depth := 0
+		for _, tk := range toks {
+			switch tk.Literal {
+			case "(", "{", "[":
+				depth++
+			case ")", "}", "]":
+				depth--
+			case ",":
+				if depth == 0 {
+					want++
+				}
+			}
+		}
+		if got := len(splitTopLevelArgs(in)); got != want {
+			t.Errorf("splitTopLevelArgs(%q) produced %d arguments; the lexer sees %d.\n"+
+				"  The splitter and the lexer disagree about where a string ends, which is "+
+				"memql#3046 in whichever direction it points.\n  parts: %q",
+				in, got, want, splitTopLevelArgs(in))
+		}
 	}
 }
