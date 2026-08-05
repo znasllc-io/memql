@@ -125,8 +125,15 @@ func TestAsOfCallerInstant_GrammarSummaryDoesNotAdvertiseTheBareForm(t *testing.
 }
 
 // assertGrammarSummaryRequiresTheFallback is the shared body, so both arms are
-// held to one standard rather than drifting apart the way their two identical
-// message strings already did once.
+// held to one standard.
+//
+// Be accurate about what went wrong, because the first version of this comment
+// was not: the two message strings have never drifted apart -- every commit
+// that touched them changed both together. What drifted was the COVERAGE. The
+// round-1 test drove one arm and the commit message said it pinned both, so a
+// revert of the other arm passed. Sharing the body makes that specific mistake
+// harder to repeat; it is not defending against a string drift that has never
+// happened.
 func assertGrammarSummaryRequiresTheFallback(t *testing.T, clause string) {
 	t.Helper()
 	_, err := parseAsOfClause(t, clause)
