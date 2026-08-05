@@ -48,7 +48,7 @@
 // # Full coverage IS asserted (memql#3030)
 //
 // The uncovered-set finding was a log line rather than an assertion while four
-// packages were outside it (component/automations, component/grpc,
+// packages were outside the lane (component/automations, component/grpc,
 // integrations/cognition, integrations/planner) -- deliberately, so the tree
 // was not red over a defect the change that added this gate did not fix. Their
 // 19 DB assertions had never run in CI: each package printed `ok` while

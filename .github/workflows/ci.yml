@@ -502,18 +502,19 @@ jobs:
   # the offending package and the remedy. Two attempts to summarise those rules
   # in this comment were both wrong, the second one harmfully: it told the
   # reader to add any db-gated package below, which for scripts/cidb (exempt on
-  # purpose, dbgate_test.go:44) is the one edit that reds the lane. A short
-  # restatement of a multi-rule gate is a comment that goes stale the next time
-  # a rule moves, and a wrong comment about CI costs more than no comment.
+  # purpose, see selfPkg in dbgate_test.go) is the one edit that reds the lane.
+  # A short restatement of a multi-rule gate is a comment that goes stale the
+  # next time a rule moves, and a wrong comment about CI costs more than no
+  # comment.
   #
   # The authority is scripts/cidb/doc.go for the rationale, dbgate_test.go for
   # the rules, and the gate's own output when it fails. memql#3030 tightened it
   # from LOGGING uncovered packages to FAILING on them.
   #
-  # These per-package binaries run as PARALLEL processes against this ONE shared
-  # DB, so each such package must migrate the schema through that TestMain (a
-  # cross-process advisory lock serializes it); otherwise the suites race on a
-  # half-created schema and fail with `relation "MemoryNodes" does not exist`
+  # The packages below run as PARALLEL processes against this ONE shared DB, so
+  # each must migrate the schema through a TestMain calling dbtest.EnsureSchema
+  # (a cross-process advisory lock serializes it); otherwise the suites race on
+  # a half-created schema and fail with `relation "MemoryNodes" does not exist`
   # (memql#2551). A new db-gated package needs both an entry below AND that
   # TestMain -- and adding the TestMain without the entry now fails the gate.
   db-tests:
