@@ -731,6 +731,11 @@ type conceptResolution struct {
 	// "these two files both assemble to this id" names the edit (memql#3008).
 	dupID    string
 	dupFiles []string
+	// splitNamespace and splitIDs describe ONE namespace supplied by two or
+	// more directories that each declare the name at a DIFFERENT canonical id
+	// (state == conceptSuppliedTwice, memql#3073). dupFiles carries the files.
+	splitNamespace string
+	splitIDs       []string
 }
 
 type conceptState int
@@ -747,6 +752,25 @@ const (
 	// keyed by canonical id, so the decls collapse to one entry and the last
 	// registration silently wins (memql#3008).
 	conceptDuplicate
+	// conceptSuppliedTwice -- ONE namespace is supplied by two or more
+	// directories that each declare the name, at DIFFERENT canonical ids
+	// (memql#3073). A differing @version is enough to produce this.
+	//
+	// Distinct from BOTH neighbours, and it needs its own message because
+	// neither of theirs is true here:
+	//
+	//   - conceptDuplicate says "these collapse at boot, rename one". These do
+	//     NOT collapse -- the ids differ, so boot registers two rows.
+	//   - conceptAmbiguous says "import it via a use declaration". The author
+	//     already has one; that is how resolution reached this branch. Both
+	//     declarations supply the SAME namespace, so no import can select
+	//     between them.
+	//
+	// Before this state existed the resolver took hits[0] and lanes 3/5/6
+	// validated fields against whichever directory sorted first -- so one
+	// spelling of a correct query got "field X, which concept Y does not
+	// declare" and its mirror got nothing at all.
+	conceptSuppliedTwice
 )
 
 // duplicateConceptCollision reports the canonical id that two or more of the
@@ -755,6 +779,47 @@ const (
 // Returns ("", nil) when every entry assembles to a distinct id -- that is
 // ambiguity, a different condition with a different diagnostic -- or when an
 // id cannot be computed, since a guess here would name innocent files.
+// splitNamespaceDecls reports a namespace supplied by two or more FILES whose
+// declarations of one name assemble to DIFFERENT canonical ids (memql#3073).
+//
+// It is the complement of duplicateConceptCollision, which reports the same-id
+// case, and it is deliberately a separate function rather than a flag on that
+// one: the two findings have opposite remedies, and folding them together is
+// how a caller ends up emitting the wrong advice.
+//
+// Returns ("", nil, nil) unless there are 2+ distinct ids across 2+ files --
+// one file declaring the name twice at two versions is a different defect
+// (and, as duplicateConceptCollision records, one nothing catches today).
+//
+// Both slices are sorted so the diagnostic is reproducible and does not depend
+// on directory order, which is the very dependence this issue is about.
+func splitNamespaceDecls(root fs.FS, namespace string, entries []conceptEntry) (string, []string, []string) {
+	idSet := map[string]bool{}
+	fileSet := map[string]bool{}
+	for _, e := range entries {
+		id := candidateConceptId(root, e)
+		if id == "" {
+			continue
+		}
+		idSet[id] = true
+		fileSet[e.file] = true
+	}
+	if len(idSet) < 2 || len(fileSet) < 2 {
+		return "", nil, nil
+	}
+	ids := make([]string, 0, len(idSet))
+	for id := range idSet {
+		ids = append(ids, id)
+	}
+	files := make([]string, 0, len(fileSet))
+	for f := range fileSet {
+		files = append(files, f)
+	}
+	sort.Strings(ids)
+	sort.Strings(files)
+	return namespace, ids, files
+}
+
 func duplicateConceptCollision(root fs.FS, entries []conceptEntry) (string, []string) {
 	byID := map[string]map[string]bool{}
 	for _, e := range entries {
@@ -883,27 +948,36 @@ func (t *Tree) resolveConceptForFile(path string, f *languageAst.File, idx *decl
 			if id, files := duplicateConceptCollision(idx.root, candidates); id != "" {
 				return conceptResolution{state: conceptDuplicate, dupID: id, dupFiles: files}
 			}
+			// Not a collision, so the ids differ -- and that is ALSO not
+			// resolvable here (memql#3073). Both declarations supply this one
+			// namespace, so the import the author already wrote cannot select
+			// between them, and picking positionally is what produced #3008's
+			// symptom: a correct query told its field does not exist, with the
+			// verdict decided by directory sort order.
+			if ns, ids, files := splitNamespaceDecls(idx.root, parts[0], candidates); len(ids) > 1 {
+				return conceptResolution{
+					state:          conceptSuppliedTwice,
+					splitNamespace: ns,
+					splitIDs:       ids,
+					dupFiles:       files,
+				}
+			}
 		}
-		// First-hit-wins SURVIVES here, deliberately and with a known residue.
+		// Reaching here with len(hits) > 1 now means the candidates are neither
+		// a same-id collision nor a different-id split -- both are returned
+		// above (memql#3008 and memql#3073 respectively). What is left is
+		// multiple hits that resolve to ONE id from ONE file, where taking the
+		// first is not a positional choice because there is nothing to choose
+		// between.
 		//
-		// The collision check above only fires when the candidates assemble to
-		// the SAME canonical id -- the shape memql#3008 ruled on, where boot
-		// last-wins silently and there is a nameable fact to report. When two
-		// directories in one namespace declare the name with DIFFERENT ids (a
-		// differing @version is enough), no collision is detected, this line
-		// picks positionally, and lanes 3/5/6 then validate against whichever
-		// directory sorted first. That still reproduces memql#3008's original
-		// symptom verbatim: one spelling gets a confident "field X, which
-		// concept Y does not declare" and the mirror gets zero diagnostics,
-		// decided by sort order rather than by the tree being wrong.
-		//
-		// Out of scope rather than overlooked: #3008's ruling and every one of
-		// its DoD items are scoped to same-canonical-id. The different-id case
-		// is a genuine ambiguity with a real remedy (an import DOES separate
-		// them, because they are in different namespaces), so it wants the
-		// ambiguity path rather than this one -- which is a change to when
-		// hits are treated as ambiguous, with its own blast radius. Filed
-		// rather than smuggled in here.
+		// The residue this comment used to describe is gone. It said the
+		// different-id case "wants the ambiguity path", and that turned out to
+		// be wrong on inspection: the generic ambiguity remedy is "import it
+		// via a use declaration", and the author in that shape ALREADY has an
+		// import -- writing one is how resolution got into this loop at all.
+		// Both declarations supply the same namespace, so no import can select
+		// between them. That is why #3073 added a state and a message of its
+		// own rather than routing into conceptAmbiguous.
 		hit := &hits[0]
 		full := qualifyName(*hit, name)
 		if kind := idx.byFile[hit.file][full]; kind != "concept" {
@@ -986,6 +1060,26 @@ func (t *Tree) verifySignatureBindings(path string, f *languageAst.File, idx *de
 					"boot path reports it. Rename one declaration, or move it to a namespace that "+
 					"assembles a different id (memql#3008).",
 				path, name, strings.Join(res.dupFiles, " and "), res.dupID))
+		case conceptSuppliedTwice:
+			// memql#3073. Neither neighbouring message is true here, which is
+			// why this has its own: the declarations do NOT collapse at boot
+			// (the ids differ), and an import cannot select between them (both
+			// supply the same namespace -- the author's import is what got us
+			// to this branch).
+			//
+			// Reported for BOTH field spellings, identically. Under the
+			// positional resolution this replaces, one spelling got a confident
+			// "field X does not declare" about a field that DOES exist on the
+			// other declaration, and the mirror got nothing at all.
+			errs = append(errs, fmt.Errorf(
+				"%s: concept %q is supplied for namespace %q by %s, and those declarations "+
+					"assemble to different canonical ids (%s). The import cannot select between "+
+					"them -- both supply %q -- and they do not collapse at boot either, so which "+
+					"one a consumer is validated against would come down to directory order. "+
+					"Rename one declaration, or change which namespace one directory supplies so "+
+					"only one of them offers %q (memql#3073).",
+				path, name, res.splitNamespace, strings.Join(res.dupFiles, " and "),
+				strings.Join(res.splitIDs, " and "), res.splitNamespace, name))
 		case conceptAmbiguous:
 			// A candidate in the file's OWN domain is not ambiguous: #2617
 			// makes same-domain constructs ambient, so boot binds the local
