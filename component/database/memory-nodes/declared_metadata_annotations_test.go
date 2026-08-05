@@ -191,9 +191,20 @@ const emitSite = "component/database/memory-nodes/concept_parser.go"
 // yields no matching literal, so the write disappears and the count fails; and
 // comments are not AST expressions at all, so they are structurally invisible
 // instead of specially-cased.
+// x-secret LEFT this list in memql#3036. It is now read by
+// Concept.SecretFields() through a `json:"x-secret"` struct tag -- the same
+// shape as the x-pii reader the positive control below pins -- and drives
+// redaction of a rejected value out of validation error messages. Its
+// enforcement is PARTIAL by ruling (error messages only; NOT query results,
+// NOT structured logs), and the three documents this test used to point at now
+// name the covered surface and the uncovered ones explicitly.
+//
+// It stays pinned by TestSecretEnforcementIsRealAndScoped below, so this is a
+// stronger assertion replacing a weaker one rather than a key dropping out of
+// the suite.
 func TestDeclaredMetadataKeysAreReadByNothing(t *testing.T) {
 	root := repoRoot(t)
-	for _, key := range []string{"x-unique", "x-immutable", "x-secret"} {
+	for _, key := range []string{"x-unique", "x-immutable"} {
 		t.Run(key, func(t *testing.T) {
 			const remedy = "\n\nIf enforcement landed, that is good news and three documents are now WRONG. " +
 				"Update all of them in the same change:\n" +
@@ -592,4 +603,112 @@ func keyLiteralsInNonTestGo(t *testing.T, root, key string) []keyHit {
 		t.Fatal("no non-test Go files parsed, so this scan measures nothing")
 	}
 	return hits
+}
+
+// TestSecretEnforcementIsRealAndScoped replaces x-secret's row in the
+// read-by-nothing gate above (memql#3036). It asserts the two halves that make
+// the documentation true, and it fails from BOTH directions:
+//
+//   - x-secret must still have a real reader. If SecretFields() is deleted or
+//     refactored away, the annotation silently returns to declared metadata
+//     while three documents go on claiming it redacts -- the exact
+//     over-promise this issue exists to remove.
+//   - the documentation must still name the UNENFORCED surfaces. Partial
+//     enforcement is only honest if a reader cannot infer blanket redaction
+//     from the word "enforced", which is the issue's non-negotiable DoD item
+//     stated as something a machine checks rather than a promise in a review.
+func TestSecretEnforcementIsRealAndScoped(t *testing.T) {
+	root := repoRoot(t)
+
+	t.Run("has a reader", func(t *testing.T) {
+		const readerFile = "component/database/memory-nodes/concept.go"
+		hits := keyLiteralsInNonTestGo(t, root, "x-secret")
+
+		var reader *keyHit
+		for i := range hits {
+			if !hits[i].isWriteIndex && strings.HasPrefix(hits[i].path, readerFile) {
+				reader = &hits[i]
+				break
+			}
+		}
+		if reader == nil {
+			t.Fatalf("x-secret has no reader in %s, but Concept.SecretFields must read it there "+
+				"via `json:\"x-secret\"`.\n  found: %s\n\n"+
+				"If the redaction was deliberately reverted, @secret is declared metadata again "+
+				"and THREE documents now over-promise. Put x-secret back in "+
+				"TestDeclaredMetadataKeysAreReadByNothing and correct:\n"+
+				"  - dsl/_reference/_concept.memql section 8\n"+
+				"  - docs/public/language/attribute-matrix.md\n"+
+				"  - docs/public/language/reserved.md",
+				readerFile, joinHits(hits))
+		}
+	})
+
+	// Each document must name EVERY unenforced surface. A document that says
+	// "enforced" without them lets a reader assume a credential is safe
+	// everywhere.
+	//
+	// The phrases are DISTINCTIVE on purpose. The first version of this gate
+	// searched the whole lowercased file for "query result" and "log", and both
+	// are satisfied by text that has nothing to do with @secret: "log" is a
+	// substring of "logic"/"logical", which all three documents use for
+	// unrelated reasons, and attribute-matrix.md documents @cacheSeconds as
+	// "Cache query results". Measured: with that gate, deleting the entire
+	// @secret caveat from _concept.memql and attribute-matrix.md left it GREEN,
+	// and it could not even distinguish these documents from their pre-memql#3036
+	// text, which asserted the OPPOSITE ("NOTHING IS REDACTED"). Only
+	// reserved.md failed, which is why the original verification -- done on that
+	// one file -- read as proof for all three.
+	//
+	// So each phrase below must be one a reader could only write while
+	// describing @secret's scope.
+	for _, doc := range []string{
+		"dsl/_reference/_concept.memql",
+		"docs/public/language/attribute-matrix.md",
+		"docs/public/language/reserved.md",
+	} {
+		t.Run(doc, func(t *testing.T) {
+			raw, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(doc)))
+			if err != nil {
+				t.Fatalf("read %s: %v", doc, err)
+			}
+			text := strings.ToLower(string(raw))
+			if !strings.Contains(text, "@secret") && !strings.Contains(text, "x-secret") {
+				t.Fatalf("%s does not mention @secret at all, so it cannot describe its scope", doc)
+			}
+			// surface -> the alternative spellings that count as naming it.
+			for _, surface := range []struct {
+				name  string
+				anyOf []string
+			}{
+				{"query results", []string{"redacted from **query results**", "not redacted from query results", "from **query results**"}},
+				{"the automation args binder", []string{"automation args binder", "args_binding.go", "not redacted by the automation"}},
+				{"concept payload validation", []string{"concept payload validation", "json schema, which interpolates", "by concept payload validation"}},
+				{"the tool-args validator", []string{"tool-args validator", "validatetoolargs", "tool_execution.go"}},
+				{"the by-name matching rule", []string{"by argument name", "by arg name", "matching is by argument name", "matches by argument name", "name, not by write target", "not by write target"}},
+				{"the length disclosure", []string{"length is never redacted", "value too long", "rune count for a secret"}},
+			} {
+				found := false
+				for _, phrase := range surface.anyOf {
+					if strings.Contains(text, phrase) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("%s must name %s when describing @secret's scope.\n\n"+
+						"@secret redacts in exactly ONE validation surface (the function-args "+
+						"validator) and matches by argument NAME, not by write target. The "+
+						"surfaces listed here are those VERIFIED uncovered, not a closed "+
+						"enumeration -- three successive passes each found one the previous "+
+						"pass had walked past (memql#3117 is the most recent), so add a row "+
+						"here rather than restating a total. A document that says it is "+
+						"enforced without naming what it does NOT cover recreates the "+
+						"over-promise memql#2960 corrected -- one rung higher, and harder to "+
+						"spot because it is now partly true.\n\n"+
+						"Accepted spellings: %v", doc, surface.name, surface.anyOf)
+				}
+			}
+		})
+	}
 }

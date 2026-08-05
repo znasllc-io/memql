@@ -541,6 +541,97 @@ func (c *Concept) PIIFields() []string {
 	return result
 }
 
+// SecretFields returns the names of every top-level field the concept's
+// definition schema marks with the x-secret custom keyword (emitted from
+// the field's @secret annotation).
+//
+// The engine's validation-error redaction (memql#3036) consults this list.
+// Derived generically, exactly as PIIFields is: annotating a new field is the
+// whole change, and there is no hand-maintained list to drift out of sync.
+//
+// SCOPE, and it is deliberately partial. Read this before assuming a value is
+// covered: @secret reaches exactly ONE validation surface, named below. The
+// uncovered list is what has been VERIFIED uncovered, not a closed enumeration
+// -- three successive passes over this engine each found a surface the previous
+// pass had walked past (the most recent is memql#3117). Treat a surface absent
+// from this list as unclassified, never as covered.
+//
+// COVERED: the memql function-args validator
+// (component/memql/function_validator.go), which quotes a rejected argument
+// value into its message at five sites (enum / minimum / maximum / pattern /
+// date-time). Those five print <redacted> for a secret field.
+//
+// Matching is BY ARGUMENT NAME, not by write target. markSecretArgsFields
+// stamps an args field whose NAME appears in this list, so a mutation whose
+// insert block writes `apiKey: args.credential` on a @secret `apiKey` field
+// leaves `credential` UNREDACTED -- the arg name is what is compared, and
+// renaming between arg and field is the common style in this corpus.
+//
+// NOT COVERED -- query results. A @secret value is returned in full by any
+// query projecting it. That is an authorization decision needing a definition
+// of "elevated", and it interacts with the per-row authz model deferred under
+// memql#2803.
+//
+// NOT COVERED -- the automation args binder
+// (component/automations/args_binding.go:115, :119, :125), a second validator
+// mirroring this rule set over EVENT payloads. A graph.node.created event
+// carries the concept row's fields flattened into its payload
+// (component/memql/executor_mutation.go:805-819), and automations.ArgsField
+// has no Secret member, so a secret value is quoted in full there. Its reason
+// string is also written to a WARN log (args_binding.go:285) -- so a concept
+// row value CAN reach a structured log by that path. Tracked separately.
+//
+// NOT COVERED -- the tool-args validator, MemQLEngine.validateToolArgs
+// (component/memql/tool_execution.go:66). It is compiled from the SAME
+// ArgsSchema that carries the Secret flag and is auto-registered for every
+// enabled query and mutation, so it covers the same declarations this list
+// does. It is the worst of the uncovered set: it runs BEFORE the covered
+// validator on the agent path (tool_execution.go:366 precedes the handler at
+// :375), it serializes the ENTIRE args map into a WARN log rather than quoting
+// one value (:112-115), and formatToolValidationError (:256) does no redaction
+// before the message is returned to the model. Tracked as memql#3117.
+//
+// NOT COVERED -- concept payload JSON-schema validation (Create, below), which
+// enforces @minimum / @maximum / @format declared on the CONCEPT and
+// interpolates the instance value into the jsonschema message. Any constraint
+// the concept declares that the args block does not mirror is validated only
+// there, so this redaction is bypassed entirely. Tracked separately.
+//
+// NOT COVERED -- length. "value too long (%d runes, max %d)"
+// (function_validator.go:204, args_binding.go:119) reports a rune count for a
+// secret field too. It quotes no value, but it is a disclosure.
+//
+// Returns nil when the concept declares no secret fields. Order follows JSON
+// map iteration and is not significant.
+func (c *Concept) SecretFields() []string {
+	if c == nil {
+		return nil
+	}
+	raw, ok := c.Schemas[definitionSchemaKey]
+	if !ok || len(raw) == 0 {
+		return nil
+	}
+
+	var schema struct {
+		Properties map[string]struct {
+			Secret bool `json:"x-secret"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(raw, &schema); err != nil {
+		return nil
+	}
+
+	result := make([]string, 0, len(schema.Properties))
+	for name, prop := range schema.Properties {
+		if prop.Secret {
+			if trimmed := strings.TrimSpace(name); trimmed != "" {
+				result = append(result, trimmed)
+			}
+		}
+	}
+	return result
+}
+
 // fieldClassification carries the C5 (memql#2035) per-field access
 // flags read off the concept's definition schema. A field is one of:
 //   - internal  (x-internal): server-only -- never projected, never

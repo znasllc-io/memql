@@ -421,6 +421,23 @@ type FunctionArgsField struct {
 	// loader hasn't run yet).
 	Pattern      string
 	patternRegex *regexp.Regexp
+	// Secret marks an arg that writes into a field the bound concept
+	// annotates `@secret`. A rejected value on such a field is never quoted
+	// into a validation error message -- the message names the argument and
+	// the declared constraint, and substitutes redactedArgValue for the value
+	// itself (memql#3036).
+	//
+	// Set during function-loader translation, exactly as patternRegex is:
+	// resolving it needs the concept registry, which the loader has and the
+	// validator deliberately does not (the validator is ctx-free and
+	// registry-free by design). See markSecretArgsFields.
+	//
+	// The zero value is false, so a field the loader never stamped -- a test
+	// fixture, an unbound function, a concept the registry cannot resolve --
+	// behaves exactly as before. That is the safe default for a diagnostic,
+	// though note it fails OPEN: a concept that fails to resolve leaves its
+	// secret args unredacted rather than over-redacting every message.
+	Secret bool
 	// AdditionalProperties controls unknown keys for object values.
 	AdditionalProperties *bool
 	// Items defines item schema for array values.
@@ -441,6 +458,7 @@ func (f *FunctionArgsField) clone() *FunctionArgsField {
 		MaxLength:    f.MaxLength,
 		Pattern:      f.Pattern,
 		patternRegex: f.patternRegex,
+		Secret:       f.Secret,
 	}
 	if len(f.Enum) > 0 {
 		clone.Enum = append([]any(nil), f.Enum...)

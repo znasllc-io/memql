@@ -126,6 +126,36 @@ func (v *functionValidator) validateFunctionArgs(fn *Function, args map[string]a
 	return nil
 }
 
+// redactedArgValue replaces a rejected value in a validation error message
+// when its field is @secret on the bound concept (memql#3036).
+//
+// The message keeps everything that makes it actionable -- which argument
+// failed, and which declared constraint it failed -- and drops only the value.
+// A declared constraint (an enum's members, a minimum, a pattern source) comes
+// from the schema and not from caller data, so it is never redacted.
+const redactedArgValue = "<redacted>"
+
+// argValueForMessage returns what to interpolate for a rejected value: the
+// value itself, or the redaction placeholder when the field is @secret.
+func argValueForMessage(field *FunctionArgsField, value any) any {
+	if field != nil && field.Secret {
+		return redactedArgValue
+	}
+	return value
+}
+
+// quotedArgValueForMessage is argValueForMessage for the sites that rendered
+// the value with %q. It returns an ALREADY-QUOTED string so the caller can
+// interpolate with %v: strconv.Quote reproduces %q byte for byte, so a
+// non-secret message is unchanged, while the placeholder stays unquoted and
+// therefore unmistakable for a real value that happens to read "<redacted>".
+func quotedArgValueForMessage(field *FunctionArgsField, value string) string {
+	if field != nil && field.Secret {
+		return redactedArgValue
+	}
+	return strconv.Quote(value)
+}
+
 // validateArgsField validates a single field against its assertion.
 func validateArgsField(args map[string]any, field *FunctionArgsField, prefix string) error {
 	fieldPath := field.Name
@@ -149,7 +179,7 @@ func validateArgsField(args map[string]any, field *FunctionArgsField, prefix str
 	}
 
 	if len(field.Enum) > 0 && !valueInEnum(value, field.Enum) {
-		return fmt.Errorf("argument %q: value %v is not in enum %v", fieldPath, value, field.Enum)
+		return fmt.Errorf("argument %q: value %v is not in enum %v", fieldPath, argValueForMessage(field, value), field.Enum)
 	}
 	if field.Minimum != nil || field.Maximum != nil {
 		num, ok := numericValue(value)
@@ -157,14 +187,14 @@ func validateArgsField(args map[string]any, field *FunctionArgsField, prefix str
 			return fmt.Errorf("argument %q: expected numeric value for minimum/maximum validation", fieldPath)
 		}
 		if field.Minimum != nil && num < *field.Minimum {
-			return fmt.Errorf("argument %q: value %v is less than minimum %v", fieldPath, value, *field.Minimum)
+			return fmt.Errorf("argument %q: value %v is less than minimum %v", fieldPath, argValueForMessage(field, value), *field.Minimum)
 		}
 		if field.Maximum != nil && num > *field.Maximum {
-			return fmt.Errorf("argument %q: value %v is greater than maximum %v", fieldPath, value, *field.Maximum)
+			return fmt.Errorf("argument %q: value %v is greater than maximum %v", fieldPath, argValueForMessage(field, value), *field.Maximum)
 		}
 	}
 	if strings.TrimSpace(field.Format) != "" {
-		if err := validateFieldFormat(fieldPath, value, field.Format); err != nil {
+		if err := validateFieldFormat(fieldPath, value, field.Format, field.Secret); err != nil {
 			return err
 		}
 	}
@@ -177,7 +207,7 @@ func validateArgsField(args map[string]any, field *FunctionArgsField, prefix str
 	if field.patternRegex != nil {
 		s, ok := value.(string)
 		if ok && !field.patternRegex.MatchString(s) {
-			return fmt.Errorf("argument %q: value %q does not match pattern %q", fieldPath, s, field.Pattern)
+			return fmt.Errorf("argument %q: value %v does not match pattern %q", fieldPath, quotedArgValueForMessage(field, s), field.Pattern)
 		}
 	}
 
@@ -320,7 +350,11 @@ func numericValue(value any) (float64, bool) {
 	}
 }
 
-func validateFieldFormat(fieldPath string, value any, format string) error {
+// validateFieldFormat checks a value against its @format. secret carries the
+// field's @secret flag (memql#3036) because the date-time arm quotes the
+// rejected value -- the fifth value-quoting site, and the one the issue's
+// survey missed.
+func validateFieldFormat(fieldPath string, value any, format string, secret bool) error {
 	switch strings.ToLower(strings.TrimSpace(format)) {
 	case "", "none":
 		return nil
@@ -330,7 +364,11 @@ func validateFieldFormat(fieldPath string, value any, format string) error {
 			return fmt.Errorf("argument %q: expected string for format %q", fieldPath, format)
 		}
 		if _, err := time.Parse(time.RFC3339, s); err != nil {
-			return fmt.Errorf("argument %q: expected RFC3339 date-time, got %q", fieldPath, s)
+			shown := strconv.Quote(s)
+			if secret {
+				shown = redactedArgValue
+			}
+			return fmt.Errorf("argument %q: expected RFC3339 date-time, got %v", fieldPath, shown)
 		}
 		return nil
 	case "int", "integer":
