@@ -152,6 +152,28 @@ more (`validateLogicCondAmbientPredicate`, `ambientComparisonRoot`,
 So **deleting an unexported function is a model-affecting change**, even though
 nothing in the node set moves. Regenerate.
 
+Deletion is not the only trigger, and the gate cannot tell these apart -- it
+reports what the regenerated model no longer mentions, not what you did:
+
+- the function was **deleted**;
+- the function was **renamed** (the old id stops being emitted);
+- the function still exists but **lost its last call site**. There is no
+  declaration-level edge for an unexported function, only one per call site, so
+  the last caller going away removes the symbol from the model entirely.
+
+All three are model-affecting and all three want the same fix, so the gate does
+not need to distinguish them -- but do not go hunting for a deletion that is not
+there.
+
+One operational caveat worth knowing before you debug a red gate: the live set
+now includes ~5,000 symbols that exist only if the call graph was built for
+their package. A node disappears only when the type-checker stops seeing a
+declaration; a node-less endpoint disappears if call-graph construction differs
+at all between the machine that committed the artifact and the one running the
+gate. Nothing has diverged to date, and the extractor fails loudly on a
+per-package load error rather than silently emitting less -- but if a red gate
+ever names symbols you did not touch, suspect the environment before the code.
+
 The artifact is written **compact, on one line**. Pretty-printing it produced a
 1.26M-line file whose one-time reorder GitHub could not diff at all -- the API
 returned *"this diff is taking too long to generate"*, which fails the `changes`

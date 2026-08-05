@@ -50,15 +50,27 @@ func TestStaleEdgeEndpointsCatchesTheDeletedUnexportedFunction(t *testing.T) {
 		{ID: "pkg:example.com/pkg", Kind: model.KindPackage, Name: "pkg"},
 		{ID: caller, Kind: model.KindFunc, Name: "caller"},
 	}
+	// `stillCalled` is the control, and it is not scenery: it has NO node, and
+	// it is live only because the regenerated model still draws an edge at it.
+	// Without it this fixture exercises only the node half of liveSymbols, so
+	// reverting liveSymbols to node-only -- which IS the pre-#3050 bug this
+	// test is named for -- leaves it green while `stillCalled` starts reading
+	// as dangling. Three sibling tests happen to catch that reversion; the one
+	// carrying the incident's name should not be the one that misses it.
+	const stillCalled = model.ID("func:example.com/pkg.stillCalledHelper")
 	want := &model.Model{
 		Nodes: nodes,
 		Edges: []model.Edge{
 			callEdge(caller, deleted),
 			callEdge(caller, deleted),
 			callEdge(deleted, caller),
+			callEdge(caller, stillCalled),
 		},
 	}
-	got := &model.Model{Nodes: nodes}
+	got := &model.Model{
+		Nodes: nodes,
+		Edges: []model.Edge{callEdge(caller, stillCalled)},
+	}
 
 	// The node check must stay silent: this is what shipped green.
 	if _, total := staleNodes(want, liveSymbols(got)); total != 0 {

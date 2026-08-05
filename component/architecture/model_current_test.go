@@ -137,10 +137,15 @@ func TestArchitectureModelIsNotStale(t *testing.T) {
 	}
 
 	if gone, total := staleEdgeEndpoints(want, live); total > 0 {
-		t.Errorf("the committed architecture model has edges pointing at %d symbol(s) that NO "+
-			"LONGER EXIST in the code:\n  %s\n\nThese have no NODE in the model, so the node "+
-			"check above cannot see them -- and a dangling edge renders a call into a symbol "+
-			"that is gone. Run `make arch-model` and commit the result (memql#3050).",
+		t.Errorf("the committed architecture model has edges pointing at %d symbol(s) the "+
+			"regenerated model NO LONGER MENTIONS:\n  %s\n\nThese have no NODE in the model, "+
+			"so the node check above cannot see them -- and a dangling edge renders a call "+
+			"into a symbol the code no longer has.\n\nA node-less symbol leaves the live set "+
+			"when the extractor stops emitting an edge for it, which happens if it was "+
+			"deleted, RENAMED, or simply lost its LAST CALL SITE -- there is no "+
+			"declaration-level edge for an unexported function, only per-call-site ones. All "+
+			"three want the same thing: run `make arch-model` and commit the result "+
+			"(memql#3050).",
 			total, join(gone))
 	}
 }
@@ -149,8 +154,11 @@ func TestArchitectureModelIsNotStale(t *testing.T) {
 // every edge endpoint.
 //
 // THE ENDPOINTS ARE THE LOAD-BEARING HALF, and they are what memql#3050 turned
-// on. Measured on the committed artifact: of 25,194 distinct endpoints, 5,006
-// have no node at all -- 4,155 funcs, 816 methods, 33 interfaces, 2 types.
+// on. Measured on the artifact THIS COMMIT SHIPS: of 25,295 distinct endpoints,
+// 5,041 have no node at all -- 4,190 funcs, 816 methods, 33 interfaces, 2 types.
+// (The pre-regeneration figures were 25,194 / 5,006 / 4,155; the shape is what
+// matters, and it does not move. Expect the exact counts to drift with the tree
+// -- they are here to show the ORDER of the problem, not as a value to assert.)
 // Unexported functions and generated closures like `main$1` appear only as call
 // graph endpoints, because the types pass does not emit nodes for them.
 //
