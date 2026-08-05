@@ -596,9 +596,9 @@ func anArrayOrMap(kind string) string {
 //
 // The nil arm is defensive, not a live case: the parser never yields a nil
 // TypeRef here. Bare `array` is given `ArrayItem: &TypeRef{Kind: "string"}` at
-// parser.go:2728, and the sole call site sits inside a branch that already
-// dereferenced prop.Type. It renders "string" so a future nil cannot produce an
-// empty declaration in a diagnostic.
+// parser.go:2728, and the sole external call site sits inside a branch that
+// already dereferenced prop.Type. It renders "string" so a future nil cannot
+// produce an empty declaration in a diagnostic.
 func renderTypeRef(ref *parser.TypeRef) string {
 	if ref == nil {
 		return "string"
