@@ -42,6 +42,7 @@ func newSurfaceWiringApp(t *testing.T) (*App, *[]string) {
 	}
 	// Mirror newApp's defaulting; individual tests substitute their own.
 	a.overrides.AssertUnauthenticatedSurface = server.AssertUnauthenticatedSurfaceDeclared
+	a.overrides.AssertSelfAuthenticatedSurface = server.AssertSelfAuthenticatedRoutesFailClosed
 	return a, &fatals
 }
 

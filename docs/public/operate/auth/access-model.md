@@ -205,6 +205,44 @@ accounted for by one of two declarations, and `createHTTPServer`
 | `server.PublicPaths()` | genuinely public on every node |
 | `server.HandlerAuthorizedPaths()` | not public, but authorizes inside the handler and fails closed with no credentials, so it is safe where no middleware runs ahead of it |
 
+A **third** declaration exists, and it answers a different question from
+those two (memql#3062):
+
+| declaration | meaning |
+|---|---|
+| `server.SelfAuthenticatedPaths()` | reachable **without a memQL credential on a node that DOES install the verifier**, because the route authenticates itself with a credential that is not a memQL identity |
+
+The first two cannot express a third-party webhook. `PublicPaths()`
+would work, but it is matched with an open **prefix** walk, so listing
+`/inbound/` there would exempt anything mounted beneath it later -- and
+it would declare the route *unauthenticated* rather than
+*differently-authenticated*. `HandlerAuthorizedPaths()` is consulted
+**only** on a binary with no verifier, so on the bff -- which installs
+one -- it never runs, and a webhook carrying a vendor HMAC instead of a
+memQL bearer is rejected before the handler's allowlist and signature
+check ever execute.
+
+Membership in the third tier means **the bearer middleware steps
+aside**, not that the route is unauthenticated. Two properties keep that
+narrow:
+
+- **Matching is bounded to one path segment.** `/inbound/shopify`
+  matches `/inbound/`; `/inbound/shopify/anything` does not, and neither
+  does `/inbound/` alone. A route mounted deeper later cannot inherit
+  the exemption, so granting one stays an explicit act.
+- **The route must independently fail closed.** A self-authenticated
+  route must ALSO be declared in `HandlerAuthorizedPaths()`, which is
+  what certifies that property, and
+  `server.AssertSelfAuthenticatedRoutesFailClosed()` **refuses to boot**
+  -- on *every* binary -- when the two lists disagree. That check runs
+  regardless of whether a verifier is installed, because the hole it
+  guards opens on the nodes where one *is*.
+
+`POST /inbound/{source}` is the only member today. It fails closed twice
+with no credentials: an unlisted source is `404` (the allowlist is empty
+unless an operator populates it) and a listed one without a matching
+HMAC signature is `401`.
+
 The automations routes sit in the second list, justified by the
 owner-or-admin checks added in memql#2938. They are deliberately **not**
 in `PublicPaths()`: that list is consulted on every verifier-consuming
