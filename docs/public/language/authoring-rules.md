@@ -712,15 +712,27 @@ The five value positions:
   spelling authors reach for first, which is why it is refused rather
   than left to be discovered as a gate that never fires.
 - **Ambient predicates evaluate** (#3024): `cond(actor.role == "owner",
-  ...)`, and the same for `config.` / `partition` / `now` / `trace`.
-  The actor envelope is resolved once per call and threaded through arg
-  expansion, so these discriminate exactly like the `args.` ones. They
-  were briefly a load rejection -- expansion received only args, so an
+  ...)`, and the same for `config.` / `partition` / `now`. The ambient
+  envelope is resolved once per call and threaded through arg expansion,
+  so these discriminate exactly like the `args.` ones; the multi-step
+  path binds the same envelope onto its own evaluator, so a predicate
+  answers identically whichever way the body is written. They were
+  briefly a load rejection -- expansion received only args, so an
   ambient comparison fell through and took the else branch for every
   input -- and that refusal is gone now that the envelope reaches the
   predicate. With no authenticated caller the envelope DENIES (every key
   present, owner bits false, #2801) rather than leaving keys absent,
   because an absent key is what makes a negated gate read true.
+- **A reserved root is not the same as a resolvable one.** The envelope
+  carries exactly `actor.` / `config.` / `partition` / `now`. `trace` is
+  reserved -- no local or payload field may shadow it -- but nothing
+  supplies it, so a `trace.`-rooted cond predicate is a **load error**,
+  not an evaluation. The same goes for a path the envelope has no key
+  for: an unknown `actor.` member (the auth envelope is a closed set,
+  #2623) or a `config.` key outside the `policy_exposable.go`
+  allow-list. Each would otherwise resolve to nothing and constant-fold,
+  which is the silent gate this whole rule exists to prevent, so it is
+  refused loudly instead.
 
 ---
 
