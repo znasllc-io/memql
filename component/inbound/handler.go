@@ -292,6 +292,16 @@ func requestIDFor(source, identityKey string) string {
 // lastError -- is what having two definitions of one escape set costs. The
 // alias is kept rather than the six call sites rewritten because the name reads
 // well at each of them and the indirection is free.
+//
+// One behavioural note, because "alias" reads as "nothing changed" and that is
+// not quite true here: QuoteString turns HTML escaping OFF, which the body this
+// replaced left on. So the bytes this emits for <, > and & differ from before
+// -- raw now, \u003c / \u003e / \u0026 then. The value is unaffected: the lexer
+// decodes both spellings to the identical string, which is why
+// handler_test.go's TestRenderedLiteralsParseBackThroughTheRealLexer passes
+// either way -- it asserts on the decoded value, so it is blind to this change
+// in both directions. What changed is the size and legibility of the staged
+// statement, not what gets staged.
 func memqlString(s string) string { return langparser.QuoteString(s) }
 
 // systemInboundActor is the actor the staging mutation runs as. The request
