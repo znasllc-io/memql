@@ -515,8 +515,9 @@ func propertyDeclToParsed(prop *parser.PropertyDecl) (parsedProperty, error) {
 						"(@variant is dropped entirely) -- the field would validate as though the "+
 						"annotation were absent. Single-wrap the field instead (`[]string "+
 						"@pattern(\"…\")`, `[]object @variant(…)`), or move the constraint into a "+
-						"named object property. There is no spelling that reaches the leaf of a "+
-						"composite element (memql#3049)",
+						"named object property. No ANNOTATION reaches the leaf of a composite "+
+						"element; a leaf TYPE does, so `[][]enum(\"a\",\"b\")` and `[][]datetime` "+
+						"already constrain each leaf value (memql#3049)",
 					strings.Join(names, " and "),
 					renderTypeRef(prop.Type),
 					anArrayOrMap(elem.typeName),
@@ -593,9 +594,11 @@ func anArrayOrMap(kind string) string {
 // can quote the declaration back rather than describing it. Only the wrapper
 // kinds recurse; everything else is already its authored spelling.
 //
-// A nil ref is the legacy bare `array` form, whose element default is `string`
-// (see elementFromTypeRef), so it renders as that rather than as an empty
-// string.
+// The nil arm is defensive, not a live case: the parser never yields a nil
+// TypeRef here. Bare `array` is given `ArrayItem: &TypeRef{Kind: "string"}` at
+// parser.go:2728, and the sole call site sits inside a branch that already
+// dereferenced prop.Type. It renders "string" so a future nil cannot produce an
+// empty declaration in a diagnostic.
 func renderTypeRef(ref *parser.TypeRef) string {
 	if ref == nil {
 		return "string"

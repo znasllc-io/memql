@@ -214,7 +214,16 @@ So `blocks []object @variant(discriminator="kind") { … }` validates every bloc
 > the declaration, the loader refuses it and names the annotation, the
 > declaration and the remedy. Single-wrap the field (`[]string @pattern(…)`,
 > `[]object @variant(…)`), or move the constraint onto a named property inside an
-> object. There is no spelling that reaches the leaf of a composite element.
+> object. No *annotation* reaches the leaf of a composite element -- but a leaf
+> *type* does, so `[][]enum("a","b")` and `[][]datetime` already constrain every
+> leaf value, and are the spelling to reach for when that is what you meant.
+>
+> **What "refuses" means at boot, because it is not a hard stop.** A concept that
+> fails to build is dropped with a WARN and the node starts without it -- the
+> general rule for concept build errors, above -- so every query, mutation and
+> shape bound to that concept then fails. `memqllint` is the surface that reports
+> this one pointedly, before boot, which is why a product bundle should be linted
+> rather than relying on the engine to shout.
 >
 > Only the annotation is refused, never the type: `[][]string`,
 > `[]map[string]int` and `map[string][]string` all remain legal, keeping their
