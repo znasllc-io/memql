@@ -545,22 +545,48 @@ func (c *Concept) PIIFields() []string {
 // definition schema marks with the x-secret custom keyword (emitted from
 // the field's @secret annotation).
 //
-// The engine's validation-error redaction (memql#3036) consults this list so a
-// rejected value belonging to a secret field is never quoted into an
-// operator-visible error string. Derived generically, exactly as PIIFields is:
-// annotating a new field is the whole change, and there is no hand-maintained
-// list to drift out of sync.
+// The engine's validation-error redaction (memql#3036) consults this list.
+// Derived generically, exactly as PIIFields is: annotating a new field is the
+// whole change, and there is no hand-maintained list to drift out of sync.
 //
-// SCOPE, and it is deliberately partial. @secret redacts from VALIDATION ERROR
-// MESSAGES only. It does NOT redact from query results -- that is an
-// authorization decision needing a definition of "elevated", and it interacts
-// with the per-row authz model deferred under memql#2803. It does NOT redact
-// from structured logs either, because no log site carries a concept row's
-// payload today (MemoryNode.Payload is a json.RawMessage and nothing logs it,
-// and MemoryNode does not implement slog.LogValuer). If a payload-carrying log
-// site is ever added, that is the moment to extend this -- the reference
-// documentation names logs as unenforced so the gap stays visible rather than
-// being inferred away from the word "enforced".
+// SCOPE, and it is deliberately partial. Read this before assuming a value is
+// covered -- there are THREE validation surfaces in the engine and @secret
+// reaches ONE of them.
+//
+// COVERED: the memql function-args validator
+// (component/memql/function_validator.go), which quotes a rejected argument
+// value into its message at five sites (enum / minimum / maximum / pattern /
+// date-time). Those five print <redacted> for a secret field.
+//
+// Matching is BY ARGUMENT NAME, not by write target. markSecretArgsFields
+// stamps an args field whose NAME appears in this list, so a mutation whose
+// insert block writes `apiKey: args.credential` on a @secret `apiKey` field
+// leaves `credential` UNREDACTED -- the arg name is what is compared, and
+// renaming between arg and field is the common style in this corpus.
+//
+// NOT COVERED -- query results. A @secret value is returned in full by any
+// query projecting it. That is an authorization decision needing a definition
+// of "elevated", and it interacts with the per-row authz model deferred under
+// memql#2803.
+//
+// NOT COVERED -- the automation args binder
+// (component/automations/args_binding.go:115, :119, :125), a second validator
+// mirroring this rule set over EVENT payloads. A graph.node.created event
+// carries the concept row's fields flattened into its payload
+// (component/memql/executor_mutation.go:805-819), and automations.ArgsField
+// has no Secret member, so a secret value is quoted in full there. Its reason
+// string is also written to a WARN log (args_binding.go:285) -- so a concept
+// row value CAN reach a structured log by that path. Tracked separately.
+//
+// NOT COVERED -- concept payload JSON-schema validation (Create, below), which
+// enforces @minimum / @maximum / @format declared on the CONCEPT and
+// interpolates the instance value into the jsonschema message. Any constraint
+// the concept declares that the args block does not mirror is validated only
+// there, so this redaction is bypassed entirely. Tracked separately.
+//
+// NOT COVERED -- length. "value too long (%d runes, max %d)"
+// (function_validator.go:204, args_binding.go:119) reports a rune count for a
+// secret field too. It quotes no value, but it is a disclosure.
 //
 // Returns nil when the concept declares no secret fields. Order follows JSON
 // map iteration and is not significant.

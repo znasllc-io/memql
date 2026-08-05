@@ -279,20 +279,35 @@ concept fieldTypes {
 //   @maxLength(N)       Max character count. STRING ONLY -- same (memql#2951).
 //   @secret             PARTIAL, and the boundary is the point (memql#3036).
 //                       Emits `x-secret`, read by Concept.SecretFields().
-//                       REDACTED FROM: validation error messages. A mutation
-//                       arg writing into a @secret field has its rejected
-//                       value replaced by `<redacted>`; the argument name and
-//                       the declared constraint (enum members, bounds,
-//                       pattern) survive so the diagnostic stays usable.
+//                       REDACTED FROM: the FUNCTION-ARGS validator, and only
+//                       it. An argument whose NAME matches a @secret field of
+//                       the function's bound concept has its rejected value
+//                       replaced by `<redacted>`; the argument name and the
+//                       declared constraint (enum members, bounds, pattern)
+//                       survive so the diagnostic stays usable.
+//                       MATCHING IS BY ARGUMENT NAME, NOT BY WRITE TARGET. A
+//                       mutation writing `apiKey: args.credential` into a
+//                       @secret `apiKey` leaves `credential` UNREDACTED --
+//                       renaming between arg and field is common style here,
+//                       so do not rely on the write target.
 //                       NOT REDACTED FROM QUERY RESULTS. A @secret value is
 //                       returned in full by any query that projects it. This
 //                       is an authorization decision -- it needs a definition
 //                       of "elevated" and interacts with the per-row authz
 //                       model deferred under memql#2803.
-//                       NOT REDACTED FROM STRUCTURED LOGS. No log site carries
-//                       a concept row's payload today, so there is nothing to
-//                       redact; if one is ever added it is NOT covered until
-//                       that path is written.
+//                       NOT REDACTED BY THE AUTOMATION ARGS BINDER. A second
+//                       validator mirrors this rule set over EVENT payloads,
+//                       and a graph.node.created event carries the row's
+//                       fields. It quotes the value in full and also writes it
+//                       to a WARN log -- so a row value CAN reach a structured
+//                       log by that path.
+//                       NOT REDACTED BY CONCEPT PAYLOAD VALIDATION. @minimum /
+//                       @maximum / @format declared on the CONCEPT are checked
+//                       by JSON schema, which interpolates the value. Any
+//                       constraint the args block does not also declare is
+//                       validated only there, bypassing redaction entirely.
+//                       LENGTH IS NEVER REDACTED. "value too long (N runes,
+//                       max M)" reports a rune count for a secret field too.
 //                       So @secret stops a credential leaking through a
 //                       validation diagnostic. It is NOT a general secrecy
 //                       guarantee, and it is not a substitute for keeping a

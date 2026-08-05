@@ -193,23 +193,43 @@ memql#2883).
 
 `@secret` is **partially enforced**, and the boundary is the part that
 matters (memql#3036). It emits `x-secret`, which
-`Concept.SecretFields()` reads, and the engine redacts the value from
-**validation error messages**: a mutation argument writing into a
-`@secret` field has its rejected value replaced with `<redacted>`,
+`Concept.SecretFields()` reads, and the engine redacts the value in
+**one** of its three validation surfaces: the **function-args
+validator**. A rejected value there is replaced with `<redacted>`,
 while the argument name and the declared constraint (enum members,
 bounds, pattern) survive so the diagnostic stays usable.
+
+**Matching is by argument NAME, not by write target.** An args field is
+redacted when its name appears in the bound concept's `@secret` fields.
+A mutation writing `apiKey: args.credential` into a `@secret` `apiKey`
+leaves `credential` **unredacted** — and renaming between argument and
+field is the common style in this corpus, so do not rely on the write
+target.
 
 It is **not** redacted from **query results** — a `@secret` value is
 returned in full by any query that projects it. That is an
 authorization decision: it needs a definition of "elevated" and
-interacts with the per-row authz model deferred under memql#2803. It is
-**not** redacted from **structured logs** either; no log site carries a
-concept row's payload today, so there is nothing to redact, and a
-future one is not covered until that path is written.
+interacts with the per-row authz model deferred under memql#2803.
 
-So `@secret` stops a credential leaking through a validation
-diagnostic. It is not a general secrecy guarantee, and it is not a
-reason to treat a credential in the graph as protected.
+It is **not** redacted by the **automation args binder**
+(`component/automations/args_binding.go`), a second validator mirroring
+the same rule set over **event payloads** — and a `graph.node.created`
+event carries the concept row's fields flattened into its payload. It
+quotes the value in full, and writes that same reason string to a WARN
+log, so a row value **can** reach a **structured log** by that path.
+
+It is **not** redacted by **concept payload validation**. `@minimum`,
+`@maximum` and `@format` declared on the *concept* are enforced by JSON
+schema, which interpolates the instance value. Any constraint the args
+block does not also declare is validated only there, bypassing this
+redaction entirely.
+
+**Length is never redacted anywhere**: `value too long (N runes, max M)`
+reports a rune count for a secret field too.
+
+So `@secret` narrows one diagnostic surface. It is not a general
+secrecy guarantee, and it is not a reason to treat a credential in the
+graph as protected.
 
 `@unique`, `@immutable` and `@default` remain **declared metadata**:
 emitted, and read by nothing. Section 8 of

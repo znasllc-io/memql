@@ -644,9 +644,24 @@ func TestSecretEnforcementIsRealAndScoped(t *testing.T) {
 		}
 	})
 
-	// Each document must name BOTH unenforced surfaces. "query results" and
-	// "logs" are the two the ruling excluded; a document that says "enforced"
-	// without them lets a reader assume a credential is safe everywhere.
+	// Each document must name EVERY unenforced surface. A document that says
+	// "enforced" without them lets a reader assume a credential is safe
+	// everywhere.
+	//
+	// The phrases are DISTINCTIVE on purpose. The first version of this gate
+	// searched the whole lowercased file for "query result" and "log", and both
+	// are satisfied by text that has nothing to do with @secret: "log" is a
+	// substring of "logic"/"logical", which all three documents use for
+	// unrelated reasons, and attribute-matrix.md documents @cacheSeconds as
+	// "Cache query results". Measured: with that gate, deleting the entire
+	// @secret caveat from _concept.memql and attribute-matrix.md left it GREEN,
+	// and it could not even distinguish these documents from their pre-memql#3036
+	// text, which asserted the OPPOSITE ("NOTHING IS REDACTED"). Only
+	// reserved.md failed, which is why the original verification -- done on that
+	// one file -- read as proof for all three.
+	//
+	// So each phrase below must be one a reader could only write while
+	// describing @secret's scope.
 	for _, doc := range []string{
 		"dsl/_reference/_concept.memql",
 		"docs/public/language/attribute-matrix.md",
@@ -661,13 +676,32 @@ func TestSecretEnforcementIsRealAndScoped(t *testing.T) {
 			if !strings.Contains(text, "@secret") && !strings.Contains(text, "x-secret") {
 				t.Fatalf("%s does not mention @secret at all, so it cannot describe its scope", doc)
 			}
-			for _, surface := range []string{"query result", "log"} {
-				if !strings.Contains(text, surface) {
-					t.Errorf("%s must name %q as an UNENFORCED surface for @secret.\n\n"+
-						"@secret redacts from validation error messages ONLY. A document that "+
-						"says it is enforced without naming what it does NOT cover recreates the "+
-						"over-promise memql#2960 corrected -- one rung higher, and harder to spot "+
-						"because it is now partly true.", doc, surface)
+			// surface -> the alternative spellings that count as naming it.
+			for _, surface := range []struct {
+				name  string
+				anyOf []string
+			}{
+				{"query results", []string{"redacted from **query results**", "not redacted from query results", "from **query results**"}},
+				{"the automation args binder", []string{"automation args binder", "args_binding.go", "not redacted by the automation"}},
+				{"concept payload validation", []string{"concept payload validation", "json schema, which interpolates", "by concept payload validation"}},
+				{"the by-name matching rule", []string{"by argument name", "by arg name", "matching is by argument name", "matches by argument name", "name, not by write target", "not by write target"}},
+				{"the length disclosure", []string{"length is never redacted", "value too long", "rune count for a secret"}},
+			} {
+				found := false
+				for _, phrase := range surface.anyOf {
+					if strings.Contains(text, phrase) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("%s must name %s when describing @secret's scope.\n\n"+
+						"@secret redacts in ONE of the engine's three validation surfaces (the "+
+						"function-args validator) and matches by argument NAME, not by write "+
+						"target. A document that says it is enforced without naming what it does "+
+						"NOT cover recreates the over-promise memql#2960 corrected -- one rung "+
+						"higher, and harder to spot because it is now partly true.\n\n"+
+						"Accepted spellings: %v", doc, surface.name, surface.anyOf)
 				}
 			}
 		})
