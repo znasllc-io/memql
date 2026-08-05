@@ -56,43 +56,118 @@ func declaredNamespaceForDomain(domain string) string {
 // directory segment, "sub", which is not a namespace at all.
 //
 // Feeding "sub" to the ambient rule refuses every same-domain reference in a
-// nested file and demands the same-domain import TestNoSameDomainUse bans --
-// the memql#2976 deadlock reinstated one directory deeper. Deriving the
-// namespace the way boot derives the id is what keeps the loader and boot
-// agreeing, which is the whole point of this rule.
+// nested file, which is a regression against main -- it bound them by
+// uniqueness. Be precise about how bad that is, because the first draft of
+// this comment overstated it (landing review): it is NOT the #2976 deadlock,
+// because TestNoSameDomainUse bans the LAST segment ("sub"), so
+// `use <rootDomain>.concepts.{ ... }` survives the gate and remains a working
+// spelling. Extra ceremony where none is warranted, not an unwritable file.
+// Deriving the namespace the way boot derives the id is what keeps the loader
+// and boot agreeing, which is the whole point of this rule.
 func declaredNamespaceForOrigin(origin string) string {
 	return declaredNamespaceForDomain(RootDomainFromFilePath(origin))
 }
 
-// idDeclaredNamespaceMatches reports whether a canonical concept id belongs to
-// declaredNS -- either as that exact namespace or as a colon EXTENSION of it.
+// idIsInDomainAmbientScope reports whether a canonical concept id is one this
+// domain could have DECLARED -- which is the only honest definition of
+// "ambient scope", because it is the exact inverse of assembly.
 //
-// The test is anchored at the id's namespace, not a substring search of the
-// whole id (memql#3026 landing review). Namespaces are colon-separated and
-// multi-segment ones are live -- dsl/cognition declares
-// @namespace("cognition:client:tool") -- so the unanchored
-// strings.Contains(id, ":"+declaredNS+":") matched on any INTERIOR segment: a
+// AssembleConceptIdFromDeclInDir admits three namespaces for a file in `dir`
+// with pin `declaredNS` (concept_id.go, the #2614 rule), and this admits the
+// same three and no others:
+//
+//	namespace == dir            absent @namespace DERIVES the directory
+//	namespace == dir + ":..."   an @namespace that colon-EXTENDS the directory
+//	namespace == pin            the namespace.pin escape hatch
+//
+// Testing only the pin is what the first cut of memql#3026 did, and it is a
+// deadlock rather than a tightening: a concept in dsl/deployment carrying NO
+// @namespace assembles as v1:deployment:widget (concept_id.go: `if
+// !hasNamespace { namespace = dir }`), which the pin "cluster" does not match,
+// so ambient refused a concept declared in the file's own domain -- while the
+// same-domain import the error demanded is the one TestNoSameDomainUse bans.
+// That is the memql#2976 deadlock the issue exists to end, re-entered from the
+// other side, and it is a regression against main, which bound it by
+// uniqueness. Both live dsl/deployment concepts happen to annotate
+// @namespace("cluster"), so it was latent in-tree and reachable from any
+// MEMQL_DSL_PATH bundle that pins a domain and leaves one concept unannotated.
+//
+// The match is ANCHORED at the id's namespace rather than a substring search
+// of the whole id. Namespaces are colon-separated and multi-segment ones are
+// live -- dsl/cognition declares @namespace("cognition:client:tool") -- so the
+// unanchored strings.Contains(id, ":"+ns+":") matched any INTERIOR segment: a
 // bundle domain named "tool" or "client" bound v1:cognition:client:tool:gadget
-// ambiently, with no import, on the path that derives row ids. That is exactly
-// the cross-namespace bind this rule exists to refuse, and once uniqueness was
-// deleted this condition became the only thing refusing it.
-//
-// The colon extension is admitted deliberately rather than overlooked: it is
-// the inverse of assembly. AssembleConceptIdFromDeclInDir accepts an
-// @namespace that colon-extends the directory ("colon-extension-wins" in
-// concept_id_dir_test.go), so v1:cognition:client:tool:request IS a concept of
-// domain cognition and is in its ambient scope.
-func idDeclaredNamespaceMatches(id, declaredNS string) bool {
-	if id == "" || declaredNS == "" {
+// with no import at all. Once #3017's uniqueness arm was deleted, this
+// condition became the only thing refusing a foreign concept.
+func idIsInDomainAmbientScope(id, dir, declaredNS string) bool {
+	if id == "" {
 		return false
 	}
-	// Ids are `v<major>:<namespace>:<name>`; drop the version segment so the
-	// namespace can be anchored at its own first character.
+	ns := idNamespace(id)
+	if ns == "" {
+		return false
+	}
+	if dir != "" && (ns == dir || strings.HasPrefix(ns, dir+":")) {
+		return true
+	}
+	return declaredNS != "" && ns == declaredNS
+}
+
+// idNamespace returns the namespace slice of a canonical concept id --
+// "cognition:client:tool" for "v1:cognition:client:tool:request".
+//
+// The version segment is dropped only when it actually LOOKS like one
+// (memql#3026 landing review). Stripping "everything before the first colon"
+// unconditionally reproduces the interior-segment bind this rule exists to
+// close the moment it is handed an id without a version prefix: "client" would
+// match "cognition:client:tool:gadget". Every id AssembleConceptIdFromDecl
+// emits carries `v<major>:`, so this is a latent assumption rather than a live
+// hole -- which is the reason to check it rather than to rely on it.
+func idNamespace(id string) string {
 	rest := id
-	if v := strings.IndexByte(rest, ':'); v > 0 {
+	if v := strings.IndexByte(rest, ':'); v > 0 && isVersionSegment(rest[:v]) {
 		rest = rest[v+1:]
 	}
-	return strings.HasPrefix(rest, declaredNS+":")
+	last := strings.LastIndexByte(rest, ':')
+	if last <= 0 {
+		return "" // no name segment: not a concept id
+	}
+	return rest[:last]
+}
+
+// ambientHints returns the namespace hints to try when resolving a bare name
+// in this domain, pin first, directory second, deduplicated.
+//
+// Two are needed because a domain assembles under two namespaces when it is
+// pinned, and a colliding short-name may be declared under either -- the pin
+// for an @namespace-annotated concept, the directory for an unannotated one.
+// resolveBareConceptNameWithNamespace filters an ambiguous name by ONE hint,
+// so a single hint can only ever rescue half of a pinned domain's own
+// concepts. Whichever hint resolves, idIsInDomainAmbientScope still has the
+// final say, so trying both widens nothing.
+func ambientHints(domain, declaredNS string) []string {
+	var hints []string
+	if declaredNS != "" {
+		hints = append(hints, declaredNS)
+	}
+	if domain != "" && domain != declaredNS {
+		hints = append(hints, domain)
+	}
+	return hints
+}
+
+// isVersionSegment reports whether a leading id segment is the `v<digits>`
+// version AssembleConceptId emits.
+func isVersionSegment(seg string) bool {
+	if len(seg) < 2 || seg[0] != 'v' {
+		return false
+	}
+	for i := 1; i < len(seg); i++ {
+		if seg[i] < '0' || seg[i] > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // importedConceptHints scans a source file's `use` declarations and returns a
@@ -189,6 +264,21 @@ func (r *ConceptResolver) ResolveCanonicalIdConceptRefsInNamespace(content, doma
 	inStr := false
 	for i < len(content) {
 		c := content[i]
+		// A backslash escape inside a string consumes the next byte whole, so
+		// an escaped quote does not close the string (memql#3026 landing
+		// review). Without this the tracker desyncs on `"a \" b"`, and the
+		// desync is no longer harmless now that the scanner has comment
+		// branches: the first `/*` after it is read as a real block comment,
+		// finds no closer, and copies THE REST OF THE FILE through verbatim --
+		// so every genuine canonicalId call after that point is silently left
+		// un-rewritten. The bare concept name then reaches evaluation
+		// unresolved, which dsl/library/automations.memql records as resolving
+		// to nil. Silent, on the path that derives row ids.
+		if inStr && c == '\\' && i+1 < len(content) {
+			b.WriteString(content[i : i+2])
+			i += 2
+			continue
+		}
 		if c == '"' {
 			inStr = !inStr
 			b.WriteByte(c)
@@ -296,13 +386,14 @@ func (r *ConceptResolver) ResolveCanonicalIdConceptRefsInNamespace(content, doma
 		}
 
 		nsHint, ok := imports[secondArg]
-		if !ok && declaredNS != "" {
+		if !ok && (declaredNS != "" || domain != "") {
 			// Ambient same-NAMESPACE scope (#2617, corrected by memql#3026).
 			//
-			// The test is the concept's DECLARED namespace -- the domain's
-			// namespace.pin when it has one, else its directory. That is what
-			// #2976 asked for, and it is neither of the two rules that came
-			// before it:
+			// The test is whether this domain could have DECLARED the concept
+			// -- the exact inverse of AssembleConceptIdFromDeclInDir, so the
+			// directory, a colon-extension of it, and the namespace.pin all
+			// count (see idIsInDomainAmbientScope). That is what #2976 asked
+			// for, and it is neither of the two rules that came before it:
 			//
 			//   - the ORIGINAL test compared the id against the containing
 			//     DIRECTORY, which is wrong for any pack whose directory
@@ -324,12 +415,21 @@ func (r *ConceptResolver) ResolveCanonicalIdConceptRefsInNamespace(content, doma
 			// The declared namespace fixes the remapped pack WITHOUT widening
 			// cross-domain binding at all, which is why it was the ask. It
 			// disambiguates a colliding short-name (the hint filters the
-			// candidates), and it refuses a foreign concept whose id does not
-			// carry this namespace -- so #2617's import discipline holds again
-			// on the id-deriving path.
-			if id, aerr := r.resolveBareConceptNameWithNamespace(secondArg, declaredNS); aerr == nil {
-				if idDeclaredNamespaceMatches(id, declaredNS) {
-					nsHint, ok = declaredNS, true
+			// candidates), and it refuses a foreign concept whose id this
+			// domain could not have declared -- so #2617's import discipline
+			// holds again on the id-deriving path.
+			//
+			// The hint tried first is the pin, then the directory: both are
+			// namespaces this domain assembles under, and a colliding
+			// short-name may be declared under either.
+			for _, hint := range ambientHints(domain, declaredNS) {
+				id, aerr := r.resolveBareConceptNameWithNamespace(secondArg, hint)
+				if aerr != nil {
+					continue
+				}
+				if idIsInDomainAmbientScope(id, domain, declaredNS) {
+					nsHint, ok = hint, true
+					break
 				}
 			}
 		}

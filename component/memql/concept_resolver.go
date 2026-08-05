@@ -143,12 +143,22 @@ func (r *ConceptResolver) resolveBareConceptNameWithNamespace(name, nsHint strin
 	}
 	// Ambiguous trailing segment. Disambiguate by the namespace hint
 	// from the importing `use` path when one is available: keep only
-	// matches that carry the hint as an interior segment (`:planner:`).
+	// matches whose NAMESPACE is the hint, or a colon-scoped extension
+	// of it ("cognition" keeps v1:cognition:client:tool:request).
+	//
+	// Anchored at the namespace, not a `:planner:` substring search of
+	// the whole id (memql#3026 landing review). The substring form
+	// matched an INTERIOR segment, so a hint of "tool" kept
+	// v1:cognition:client:tool:request alongside a bundle's own
+	// v1:tool:request and the filter reduced two candidates to two --
+	// leaving the name ambiguous, and the caller then demanding the
+	// same-domain import TestNoSameDomainUse bans. That is the #2976
+	// deadlock, and it defeated the anchoring in canonicalId's ambient
+	// gate, which never got to run because this returned an error first.
 	if nsHint != "" {
-		needle := ":" + nsHint + ":"
 		var nsMatches []string
 		for _, m := range matches {
-			if strings.Contains(m, needle) {
+			if ns := idNamespace(m); ns == nsHint || strings.HasPrefix(ns, nsHint+":") {
 				nsMatches = append(nsMatches, m)
 			}
 		}
