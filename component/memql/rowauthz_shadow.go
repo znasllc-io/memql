@@ -315,7 +315,11 @@ func isOwnerScopeLeaf(node ExpressionNode, ownerField string) bool {
 	// refuses in this same change, because createdBy means "who WROTE the
 	// row", not "whose row it is". A matcher looser than the validator would
 	// credit a scope the tier can never have declared.
-	if strings.EqualFold(strings.TrimSpace(ownerField), langparser.RowAuthzSelfOwnedField) {
+	// Compared with == and not EqualFold, to match validateRowAuthz exactly.
+	// EqualFold here would take this arm for a tier that named a field called
+	// "ID" -- which the comment below says a matcher must never do. Four sites
+	// compare this literal; they agree or they drift.
+	if strings.TrimSpace(ownerField) == langparser.RowAuthzSelfOwnedField {
 		return isRowIdName(cmp.Field)
 	}
 	field := topLevelPayloadField(cmp.Field)
@@ -337,7 +341,10 @@ func isRowIdName(f FieldReference) bool {
 		strings.EqualFold(strings.TrimSpace(f.Parts[1]), "id") {
 		return true
 	}
-	return len(f.Parts) <= 1 && strings.EqualFold(strings.TrimSpace(f.Raw), "id")
+	if len(f.Parts) == 1 {
+		return strings.EqualFold(strings.TrimSpace(f.Parts[0]), "id")
+	}
+	return len(f.Parts) == 0 && strings.EqualFold(strings.TrimSpace(f.Raw), "id")
 }
 
 // isClusterOwnerLeaf reports whether a conjunct is the cluster-owner gate,

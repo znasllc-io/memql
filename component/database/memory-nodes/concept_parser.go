@@ -180,8 +180,14 @@ func validateRowAuthz(conceptName string, decl *parser.RowAuthzDecl, props []par
 		declared = append(declared, p.name)
 	}
 	sort.Strings(declared)
-	return fmt.Errorf("@%s(owner=%q) on concept %q references a field the concept does not declare (declared: %s)",
-		parser.RowAuthzAnnotation, decl.Owner, conceptName, strings.Join(declared, ", "))
+	// The self-owned escape is named here because this is the diagnostic an
+	// author actually hits when a concept has no field to name. Documenting it
+	// only in the reference leaves them stuck at the one moment it would help.
+	return fmt.Errorf("@%s(owner=%q) on concept %q references a field the concept does not "+
+		"declare (declared: %s). If this concept is SELF-OWNED -- the row IS the owner, as it "+
+		"is for a user -- declare owner=%q instead",
+		parser.RowAuthzAnnotation, decl.Owner, conceptName, strings.Join(declared, ", "),
+		parser.RowAuthzSelfOwnedField)
 }
 
 // validateDisplayCard checks that every slot in the parsed card

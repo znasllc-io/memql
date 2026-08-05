@@ -155,6 +155,16 @@ func TestAnalyzeShadow_SelfOwnedPredicateRoundTrips(t *testing.T) {
 			"that overstates it.", InjectedPredicate(decl), verdict, reason)
 	}
 
+	// The RUNTIME shape too. rewriteFilterFieldRefs normalises `row.id` to the
+	// bare intrinsic before the executor's shadow hook sees it, so the matcher
+	// receives {Raw:"id", Parts:["id"]} there and {Raw:"row.id",
+	// Parts:["row","id"]} on the static report path. Asserting one shape
+	// leaves the other unguarded, and they take different branches.
+	if v, reason := AnalyzeShadow(ownerScoped("id"), decl); v != ShadowAlreadyImplied {
+		t.Errorf("the post-normalisation spelling must also be recognised -- the executor's "+
+			"shadow hook only ever sees this shape.\n  verdict: %v\n  reason:  %s", v, reason)
+	}
+
 	// The near-miss must NOT satisfy it. createdBy means "who wrote the row",
 	// not "whose row it is" -- validateRowAuthz refuses it as an owner, so a
 	// matcher that credited it would be looser than the validator.
