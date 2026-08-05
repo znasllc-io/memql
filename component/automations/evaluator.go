@@ -609,13 +609,23 @@ func (e *Evaluator) evaluateCoalesceArg(raw string) (any, bool) {
 // boot. Same defect as splitTopLevelArgs and as the one memql#2949 fixed in
 // args_resolution.go.
 //
-// This one does NOT reuse the parser package's blankCommentsAndStrings, which
-// splitTopLevelArgs now delegates to. That blanker handles `"` only, and this
-// splitter accepts BOTH `"` and `'`; routing single-quoted literals through it
-// would silently stop treating them as strings. Widening the shared blanker
-// was the other option and is deliberately not taken here -- it backs a
-// shipped load rule whose behaviour is pinned by its own tests, and changing
-// what it considers a string is a bigger change than this bug fix.
+// This one does NOT reuse the parser package's blankCommentsAndStrings, and
+// neither does splitTopLevelArgs -- a draft of this change did, and the reason
+// it was reverted is recorded on that function. There are two independent
+// reasons not to, one per site:
+//
+//   - Here: the blanker handles `"` only, and this splitter accepts BOTH `"`
+//     and `'`. Routing single-quoted literals through it would silently stop
+//     treating them as strings.
+//   - There: the blanker ends a string at a NEWLINE, which the MemQL lexer does
+//     not do -- it accepts a literal spanning lines. Delegating swallowed every
+//     comma after such a literal, which is memql#3046 in the other direction.
+//
+// Widening the shared blanker was the other option and is deliberately not
+// taken here -- it backs a shipped load rule whose behaviour is pinned by its
+// own tests, and changing what it considers a string is a bigger change than
+// this bug fix. That it disagrees with the lexer about newlines is now filed
+// separately as memql#3116.
 func splitCoalesceArgs(s string) ([]string, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {

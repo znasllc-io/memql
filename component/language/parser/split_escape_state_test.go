@@ -145,15 +145,20 @@ func TestSplitTopLevelArgs_AgreesWithTheLexer(t *testing.T) {
 		if err != nil {
 			t.Fatalf("lexer refused the fixture %q: %v", in, err)
 		}
+		// Switch on TYPE, not Literal. A TokenString's Literal is its decoded
+		// CONTENT, so a fixture whose string content happens to be "," or "}"
+		// would be counted as a separator and silently corrupt the oracle --
+		// which is exactly the class of self-deception this test exists to
+		// prevent, so it must not contain one.
 		want := 1
 		depth := 0
 		for _, tk := range toks {
-			switch tk.Literal {
-			case "(", "{", "[":
+			switch tk.Type {
+			case TokenParenOpen, TokenBraceOpen, TokenBracketOpen:
 				depth++
-			case ")", "}", "]":
+			case TokenParenClose, TokenBraceClose, TokenBracketClose:
 				depth--
-			case ",":
+			case TokenComma:
 				if depth == 0 {
 					want++
 				}

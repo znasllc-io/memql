@@ -2630,9 +2630,19 @@ var bareIdentOnly = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // importing another is not a fix, so string state stays local here.
 //
 // The cost of staying local is that comments inside an argument list are not
-// blanked, exactly as before. Measured on the authored tree: zero comments
-// occur at paren depth > 0, so nothing regresses relative to the code this
-// replaces.
+// blanked, exactly as before this change. Nothing regresses relative to the
+// code being replaced, which blanked none either -- that conclusion does not
+// depend on the tree.
+//
+// The tree measurement is worth stating precisely rather than loosely, because
+// the loose version reads as a stronger guarantee than it is. Across the
+// authored tree there are zero comments at PAREN depth > 0 -- but expandPunnedArgs
+// also receives `name{ ... }` bodies, and there are HUNDREDS at brace depth.
+// (Deliberately not a precise count: two comment-aware scans of the tree
+// disagreed on it, 427 against 452, so the exact figure is an artefact of how
+// you count and only the zero is worth relying on.) Comments do occur inside
+// the text this function splits; they simply did not affect it before and do
+// not now.
 func splitTopLevelArgs(s string) []string {
 	var parts []string
 	depth, start := 0, 0
