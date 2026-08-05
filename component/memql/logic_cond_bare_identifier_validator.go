@@ -45,15 +45,29 @@ import (
 // what counts as "nothing" DEPENDS ON THE PATH -- getting that wrong in either
 // direction is a defect, and this rule has been wrong in one of them:
 //
-//   - MULTI-STEP body -> LogicRunner.RunLogic, whose bare-identifier tier is
-//     loop var -> step result -> DECLARED ARG (memql#2364). A declared arg
-//     resolves there, so a bare arg name is legitimate and must NOT be refused.
+//   - MULTI-STEP body, INVOKED AS A LOGIC CALL -> LogicRunner.RunLogic, whose
+//     bare-identifier tier is loop var -> step result -> DECLARED ARG
+//     (memql#2364). A declared arg resolves there, so a bare arg name is
+//     legitimate and must NOT be refused. Verified through RunLogic for the
+//     trailing-return, assignment-step, nested-cond and omitted-optional-arg
+//     shapes.
 //   - SINGLE-STATEMENT body -> the fn.Expr path, which has no such tier. The
 //     bare name resolves against nothing and the comparison is constant. This
 //     is the case memql#3024 reports, and it is refused.
 //
+// The qualifier on the first bullet is deliberate. The loader leaves fn.Expr
+// populated on a multi-step body as well (function_loader.go), so a multi-step
+// logic reached as a NESTED call would inline that expression, where the
+// declared-arg tier does not exist. Whether that is reachable in practice is
+// not settled here -- nested_call_arg_eval_test.go sweeps only LogicSteps==nil
+// logics, which suggests the codebase treats the two populations as disjoint.
+// It is a pre-existing property of the loader rather than anything this rule
+// introduces, and it is recorded rather than asserted away because the whole
+// point of this comment is which path a name resolves on.
+//
 // The `locals` set below is seeded to match, using the same discriminator the
-// loader uses to choose between those two paths.
+// loader uses to choose between those two paths -- literally the same function
+// on the same slice, so the two cannot disagree.
 //
 // # Scope is deliberately narrow
 //
