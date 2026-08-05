@@ -494,16 +494,24 @@ jobs:
   # executably (memql#2886). The old rule written here, "keep this list in sync
   # with the packages that carry `*_db_test.go` files", was already wrong when
   # it was written: examples/referencepack carries none, and four of the seven
-  # db-gated packages in the tree carry none either. The real rule, and the one
-  # the gate asserts, is that every package importing component/database/dbtest
-  # from a _test.go file must appear below -- with or without a TestMain.
+  # db-gated packages in the tree carry none either. What the gate asserts,
+  # stated exactly, is TWO independent things:
   #
-  # Read that last clause literally before adding a db-gated test (memql#3030).
-  # The gate used to LOG the uncovered set and pass; it now FAILS on it, so a
-  # package that imports dbtest and is not listed below reds the tree. Adding
-  # the TestMain is what makes a package WORK in this lane -- see the paragraph
-  # below -- but it is not what the gate keys on, and a db-gated package with no
-  # TestMain is precisely the case the tightened assertion exists to catch.
+  #   1. every package declaring a Test function in an untagged _test.go file
+  #      that imports component/database/dbtest must appear below; and
+  #   2. every package whose TestMain calls dbtest.EnsureSchema must appear
+  #      below.
+  #
+  # Neither implies the other, and 1 does NOT require a TestMain -- a db-gated
+  # package with none is exactly the case memql#3030 tightened the gate to
+  # catch. It used to LOG the uncovered set and pass; it now FAILS on it.
+  #
+  # Known gaps, so nobody reads the above as stronger than it is: scripts/cidb
+  # exempts ITSELF (it imports dbtest to do the scanning); a build-tagged
+  # _test.go is invisible to the default-build file filter; and a package whose
+  # dbtest import sits in a helper file while its Test function sits in a
+  # sibling is under-counted, which the gate's own failure text says outright.
+  # Those are limits of the scanner, not permission -- add the package below.
   #
   # These per-package binaries run as PARALLEL processes against this ONE shared
   # DB, so each such package must migrate the schema through that TestMain (a
@@ -552,10 +560,11 @@ jobs:
       # the skip behaviour, which is the intended split.
       #
       # Do not remove it. scripts/cidb asserts this key is present and truthy,
-      # and that this lane's package selector covers EVERY db-gated package in
-      # the tree -- not merely at least one, which is what it asserted until
-      # memql#3030 tightened it. "At least one" passed while nineteen
-      # assertions in four uncovered packages never ran.
+      # and that the selector covers every db-gated package the scanner can see
+      # -- not merely at least one, which is what it asserted until memql#3030
+      # tightened it. "At least one" passed while nineteen assertions in four
+      # uncovered packages never ran. See the selector comment above for the
+      # exact rule and the scanner's three known blind spots.
       MEMQL_REQUIRE_DB: '1'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

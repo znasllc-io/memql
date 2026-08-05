@@ -22,13 +22,24 @@ import (
 // When no DB is reachable EnsureSchema is a no-op and the individual tests
 // self-skip, so a developer without Postgres sees exactly what they did before.
 //
-// A developer WITH a reachable database does see one new thing, and it is worth
-// stating rather than implying otherwise: `go test ./...` now MIGRATES that
-// database from this package, which it never did before memql#3030. The tests
-// themselves already wrote and deleted rows when a DB was reachable -- lane
-// membership only ever governed CI -- so the migration is the change, not the
-// writes. Point MEMQL_DATABASE_DSN at a scratch database if that matters to
-// you; the lane sets MEMQL_REQUIRE_DB=1 and CI provisions its own.
+// For a developer WITH a reachable database, this package is the one of the
+// four where the migration is NOT new: wire_bare_ids_test.go:231 already booted
+// the production MemoryNodesDatabase (migrate-on-start) and took a blank
+// database to a full schema, gated only on reachability. Measured on
+// origin/main -- an empty database came out with 12 tables after
+// TestWireBareIds_EngineRoundTrip alone.
+//
+// What changes is WHEN: the schema is now migrated once in TestMain before any
+// test runs, rather than inside whichever test happens to boot the database
+// first. That is what makes the package safe to run as one of several parallel
+// binaries against one shared database (memql#2551). The tests already wrote
+// and deleted rows when a reachable database was also migrated -- lane
+// membership only ever governed CI.
+//
+// (This paragraph originally claimed the migration never happened here before
+// memql#3030. That is true of the other three packages joining the lane and
+// false of this one; it was corrected during the landing review rather than
+// left as a comment asserting something the code does not do.)
 func TestMain(m *testing.M) {
 	if _, err := dbtest.EnsureSchema(context.Background()); err != nil {
 		fmt.Fprintf(os.Stderr, "dbtest.EnsureSchema: %v\n", err)
