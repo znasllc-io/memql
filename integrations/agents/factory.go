@@ -208,6 +208,10 @@ type roleSnapshot struct {
 	MaxSkills             int
 	RecommendedPolicySlug string
 	SystemPromptHints     string
+	// Predefined marks a row seeded from dsl/agents/roles/*.memql. Read here so
+	// slug resolution can prefer the seeded catalog row over a user row that
+	// claims the same slug (memql#3066) -- see findRoleBySlug.
+	Predefined bool
 }
 
 // loadExistingAgents walks the user's active agents. Best-effort:
@@ -699,7 +703,23 @@ func roleSnapshotFromRow(row map[string]any) (roleSnapshot, bool) {
 		MaxSkills:             intFromAnyLoose(payload["maxSkills"]),
 		RecommendedPolicySlug: stringField(payload, "recommendedPolicySlug"),
 		SystemPromptHints:     stringField(payload, "systemPromptHints"),
+		Predefined:            boolField(payload, "predefined"),
 	}, true
+}
+
+// boolField reads a boolean payload field, tolerating the shapes a JSON
+// round-trip produces. Absent or unparseable reads as false, which is the safe
+// default here: an unrecognised row is treated as NOT predefined, so it can
+// never win the preference in findRoleBySlug by accident.
+func boolField(payload map[string]any, key string) bool {
+	switch v := payload[key].(type) {
+	case bool:
+		return v
+	case string:
+		return v == "true"
+	default:
+		return false
+	}
 }
 
 // intFromAnyLoose handles the float64 default JSON unmarshal produces
@@ -777,13 +797,50 @@ func findById(agents []agentSnapshot, id string) (agentSnapshot, bool) {
 	return agentSnapshot{}, false
 }
 
+// findRoleBySlug resolves a role slug against the catalog, preferring a
+// PREDEFINED row over a user-created one that claims the same slug.
+//
+// The preference is a security boundary, not a tidiness rule (memql#3066). The
+// predefined lock (#3061) protects a row ID, while this resolves a SLUG from an
+// unscoped catalog, and `createAgentRole` opens `id: args.agentRoleId ??
+// args.slug` -- so a caller passing an explicit id with a seeded row's slug
+// mints a SECOND row carrying that slug with predefined:false. No lock is
+// bypassed and none fires, because by its own contract that is an ordinary
+// user-role write. `activeAgentRoles` is @public and unscoped, so the catalog
+// carries both.
+//
+// This function was first-match-wins over an UNORDERED result set, so the
+// forged row could supply Name, SystemPromptHints, DefaultSkillIds and
+// RecommendedPolicySlug for a newly created agent -- what it is called, how it
+// is instructed, and which AI-router policy it runs under.
+//
+// The grant ceiling was never affected: fetchAgentRole keys on `id = slug` with
+// createdAt DESC LIMIT 1, so forbiddenSkillIds and maxSkills are still enforced
+// against the real seeded row.
+//
+// Preferring predefined does NOT mean requiring it -- a user-defined slug with
+// no seeded counterpart resolves exactly as before. And the scan is ordered, so
+// two rows sharing a slug always resolve the same way rather than depending on
+// what the database returned first.
+//
+// This is the narrow half of the fix. Making the slug UNIQUE per catalog is the
+// half that makes the concept's own doc true ("Canonical slug... stable, never
+// renamed"); it needs a write-time rule and is filed separately.
 func findRoleBySlug(roles []roleSnapshot, slug string) (roleSnapshot, bool) {
+	var fallback roleSnapshot
+	found := false
 	for _, r := range roles {
-		if r.Slug == slug {
+		if r.Slug != slug {
+			continue
+		}
+		if r.Predefined {
 			return r, true
 		}
+		if !found {
+			fallback, found = r, true
+		}
 	}
-	return roleSnapshot{}, false
+	return fallback, found
 }
 
 func coalesceString(s, fallback string) string {
