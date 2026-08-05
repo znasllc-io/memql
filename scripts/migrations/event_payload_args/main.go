@@ -15,7 +15,9 @@
 // Deterministic + idempotent (a second run is a no-op). Terse automations
 // (`automation N @trigger(...) => logic X`) are untouched per the ADR; logic
 // bodies (`args.event.payload.X`) are a different surface and are never
-// rewritten. String literals and comments are protected.
+// rewritten. String literals, `//` line comments and `/* */` block comments
+// are protected, on the same rules the G5 gate itself scans by -- see
+// scanSegments.
 //
 // Usage: go run ./scripts/migrations/event_payload_args [-write] <dsl-root>...
 package main
@@ -174,70 +176,156 @@ func ensureArgs(block string, fields []string) string {
 	return b.String() + block
 }
 
-// mapCodeSegments applies fn to the non-string, non-comment segments.
-func mapCodeSegments(s string, fn func(string) string) string {
-	var out strings.Builder
+// segment is a half-open byte range [start, end) of the source, tagged with
+// whether it is code (outside every literal and comment) or prose.
+type segment struct {
+	start, end int
+	code       bool
+}
+
+// scanSegments splits s into alternating code and prose runs: string
+// literals, `//` line comments and `/* */` block comments are prose,
+// everything else is code. The segments tile s exactly, in ascending order.
+//
+// ONE scanner, TWO consumers (memql#3045). This file used to carry two
+// verbatim copies of the scan -- one in mapCodeSegments, one in scrub -- and
+// both carried the string-scanning bug memql#2949 fixed in the G5 gate they
+// remediate: `(s[j] != '"' || s[j-1] == '\\')` cannot tell an escaped quote
+// from a quote that follows a COMPLETED `\\` escape, so a literal ending in a
+// backslash pair read its own closing quote as escaped and consumed on to the
+// next one. In scrub that blanks real code, dropping fields from the args
+// block; in mapCodeSegments it is worse, because that function decides what
+// gets REWRITTEN -- over-consuming makes real code look like literal interior
+// and silently skips it, in a tool documented to be run with -write.
+//
+// Two copies of a scan is also two chances to disagree with each other. One
+// scanner cannot, which is why the fix is a shared segmenter rather than the
+// same patch applied twice.
+//
+// NOT delegated to an existing in-tree scrubber. parser.BlankCommentsAndStrings
+// and baseparser.BlankComments both return a BLANKED COPY, which serves scrub
+// but not mapCodeSegments: that one must pass prose through VERBATIM into the
+// rewritten output, and prose spans cannot be recovered from a blanked copy --
+// a blank line inside a block comment is byte-identical in both views, the
+// trap baseparser.CommentSpans' own doc records. Deriving both consumers from
+// spans is what removes the copy; importing a blanker would have left one.
+//
+// The arms mirror scrubSourceForPayloadScan in component/automations
+// (args_resolution.go), because a remediation tool that disagrees with the
+// gate it remediates is the defect in this issue:
+//   - escape state is TRACKED, never inferred from the preceding byte;
+//   - a literal MAY span lines (the lexer's scanString has no newline case);
+//   - an UNBALANCED literal costs only its own line, not the rest of the file;
+//   - `/*` is prose (memql#2872), so an ordinary note mentioning
+//     `event.payload.status` above an automation is neither collected as a
+//     field nor rewritten.
+//
+// Backticks are not an arm, for the same reason the gate has none: this walks
+// authored `automations.memql`, where the backtick-wrapped form is a rewriter
+// emission and never appears.
+func scanSegments(s string) []segment {
+	var out []segment
+	add := func(start, end int, code bool) {
+		if start >= end {
+			return
+		}
+		if n := len(out); n > 0 && out[n-1].code == code && out[n-1].end == start {
+			out[n-1].end = end
+			return
+		}
+		out = append(out, segment{start: start, end: end, code: code})
+	}
 	i := 0
 	for i < len(s) {
 		switch {
 		case s[i] == '"':
 			j := i + 1
-			for j < len(s) && (s[j] != '"' || s[j-1] == '\\') {
+			escaped := false
+			closed := false
+			firstNL := -1
+			for j < len(s) {
+				c := s[j]
+				if c == '\n' && firstNL < 0 {
+					firstNL = j
+				}
 				j++
+				if escaped {
+					escaped = false
+					continue
+				}
+				if c == '\\' {
+					escaped = true
+					continue
+				}
+				if c == '"' {
+					closed = true
+					break // closing quote, consumed above
+				}
 			}
-			if j < len(s) {
-				j++
+			if !closed && firstNL >= 0 {
+				j = firstNL // unbalanced: stop at the newline
 			}
-			out.WriteString(s[i:j])
+			add(i, j, false)
 			i = j
 		case strings.HasPrefix(s[i:], "//"):
 			j := strings.IndexByte(s[i:], '\n')
 			if j < 0 {
 				j = len(s) - i
 			}
-			out.WriteString(s[i : i+j])
+			add(i, i+j, false)
+			i += j
+		case strings.HasPrefix(s[i:], "/*"):
+			// An unterminated block comment runs to EOF, matching the lexer.
+			j := len(s) - i
+			if end := strings.Index(s[i+2:], "*/"); end >= 0 {
+				j = end + 4
+			}
+			add(i, i+j, false)
 			i += j
 		default:
 			j := i
-			for j < len(s) && s[j] != '"' && !strings.HasPrefix(s[j:], "//") {
+			for j < len(s) && s[j] != '"' &&
+				!strings.HasPrefix(s[j:], "//") && !strings.HasPrefix(s[j:], "/*") {
 				j++
 			}
-			out.WriteString(fn(s[i:j]))
+			add(i, j, true)
 			i = j
 		}
+	}
+	return out
+}
+
+// mapCodeSegments applies fn to the code segments and passes every string
+// literal and comment through verbatim.
+func mapCodeSegments(s string, fn func(string) string) string {
+	var out strings.Builder
+	out.Grow(len(s))
+	for _, seg := range scanSegments(s) {
+		if seg.code {
+			out.WriteString(fn(s[seg.start:seg.end]))
+			continue
+		}
+		out.WriteString(s[seg.start:seg.end])
 	}
 	return out.String()
 }
 
 // scrub blanks strings and comments so field collection never reads prose.
+// Newlines inside a blanked span are preserved, so the result has the same
+// length AND the same line numbering as the input.
 func scrub(s string) string {
-	var out strings.Builder
-	i := 0
-	for i < len(s) {
-		switch {
-		case s[i] == '"':
-			j := i + 1
-			for j < len(s) && (s[j] != '"' || s[j-1] == '\\') {
-				j++
+	out := []byte(s)
+	for _, seg := range scanSegments(s) {
+		if seg.code {
+			continue
+		}
+		for k := seg.start; k < seg.end; k++ {
+			if out[k] != '\n' {
+				out[k] = ' '
 			}
-			if j < len(s) {
-				j++
-			}
-			out.WriteString(strings.Repeat(" ", j-i))
-			i = j
-		case strings.HasPrefix(s[i:], "//"):
-			j := strings.IndexByte(s[i:], '\n')
-			if j < 0 {
-				j = len(s) - i
-			}
-			out.WriteString(strings.Repeat(" ", j))
-			i += j
-		default:
-			out.WriteByte(s[i])
-			i++
 		}
 	}
-	return out.String()
+	return string(out)
 }
 
 func matchingBrace(s string, open int) int {
