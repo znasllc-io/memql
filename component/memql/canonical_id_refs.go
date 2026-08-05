@@ -2,14 +2,53 @@ package memql
 
 import (
 	"fmt"
+	"io"
 	"regexp"
 	"strings"
+
+	memqldsl "github.com/znasllc-io/memql/dsl"
 )
 
 // useImportRe matches a file-top Form-B `use <path>.{ a, b, c }` import, used
 // to discover which concept short-names are in local scope (and the namespace
 // hint that disambiguates a trailing-segment collision).
 var useImportRe = regexp.MustCompile(`(?m)^\s*use\s+([\w.]+)\.\{([^}]*)\}`)
+
+// declaredNamespaceForDomain returns the namespace a domain's concepts
+// actually assemble under: its one-line `namespace.pin` when present (the
+// #2614 escape hatch for a DELIBERATE @namespace divergence from the
+// directory), otherwise the directory name itself.
+//
+// This is the plumbing memql#3026 is about. #2976 asked for the ambient check
+// to test the DECLARED namespace; #3017 shipped a global-uniqueness test
+// instead, on the stated grounds that the pin "needs the tree FS, which the
+// loader does not thread this far". It needs no threading: component/memql
+// already imports the dsl package (ai_prompts.go, capability_loader.go,
+// build_offline_sense.go all do), so the tree is reachable from right here.
+//
+// dsl.Tree() overlays runtime-mounted product domains (MEMQL_DSL_PATH) on the
+// embedded tree, so a bundle's own pin is honoured exactly like a core
+// domain's. That matters specifically: the cross-repo ambiguity this rule
+// closes arrives from those mounts.
+func declaredNamespaceForDomain(domain string) string {
+	domain = strings.TrimSpace(domain)
+	if domain == "" {
+		return ""
+	}
+	f, err := memqldsl.Tree().Open(domain + "/namespace.pin")
+	if err != nil {
+		return domain
+	}
+	defer f.Close()
+	b, err := io.ReadAll(f)
+	if err != nil {
+		return domain
+	}
+	if pin := strings.TrimSpace(string(b)); pin != "" {
+		return pin
+	}
+	return domain
+}
 
 // importedConceptHints scans a source file's `use` declarations and returns a
 // map of imported short-name -> namespace hint (the leading segment of the
@@ -80,7 +119,19 @@ func (r *ConceptResolver) ResolveCanonicalIdConceptRefs(content string) (string,
 //
 // An ambiguous name still errors, and a name declared nowhere still errors.
 func (r *ConceptResolver) ResolveCanonicalIdConceptRefsInDomain(content, domain string) (string, error) {
+	return r.ResolveCanonicalIdConceptRefsInNamespace(content, domain, declaredNamespaceForDomain(domain))
+}
+
+// ResolveCanonicalIdConceptRefsInNamespace is the namespace-aware form
+// (memql#3026). `declaredNS` is the namespace the domain's concepts actually
+// assemble under -- its namespace.pin when it has one, else the directory.
+// Passing it explicitly is what lets a test build a remapped fixture without
+// depending on the real tree; the InDomain wrapper resolves it from the pin.
+func (r *ConceptResolver) ResolveCanonicalIdConceptRefsInNamespace(content, domain, declaredNS string) (string, error) {
 	imports := importedConceptHints(content)
+	if strings.TrimSpace(declaredNS) == "" {
+		declaredNS = strings.TrimSpace(domain)
+	}
 
 	var b strings.Builder
 	i := 0
@@ -91,6 +142,29 @@ func (r *ConceptResolver) ResolveCanonicalIdConceptRefsInDomain(content, domain 
 			inStr = !inStr
 			b.WriteByte(c)
 			i++
+			continue
+		}
+		// A `//` comment (and its `///` doc form) is PROSE, not code
+		// (memql#3026). The scanner tracked string literals but not comments,
+		// so a `canonicalId(...)` written in a comment was treated as a real
+		// call and the author's comment TEXT was rewritten -- and a comment
+		// naming an unknown concept became a hard load error. #3017 papered
+		// over this with an authoring warning ("Do NOT write the call form in
+		// a comment across a line break") instead of fixing the scanner.
+		//
+		// Copied through verbatim to end-of-line. The inStr check comes first,
+		// so a `//` inside a string (a URL in an @description) is not a
+		// comment -- treating it as one would swallow the rest of the file
+		// including real calls.
+		if !inStr && strings.HasPrefix(content[i:], "//") {
+			end := strings.IndexByte(content[i:], '\n')
+			if end < 0 {
+				b.WriteString(content[i:])
+				i = len(content)
+				continue
+			}
+			b.WriteString(content[i : i+end])
+			i += end
 			continue
 		}
 		if inStr || !strings.HasPrefix(content[i:], "canonicalId") {
@@ -148,40 +222,40 @@ func (r *ConceptResolver) ResolveCanonicalIdConceptRefsInDomain(content, domain 
 		}
 
 		nsHint, ok := imports[secondArg]
-		if !ok && domain != "" {
-			// Ambient same-domain scope (#2617): accept the bare name when
-			// boot would bind it without an import.
+		if !ok && declaredNS != "" {
+			// Ambient same-NAMESPACE scope (#2617, corrected by memql#3026).
 			//
-			// The test used to be `strings.Contains(id, ":"+domain+":")` --
-			// the id against the containing DIRECTORY. That is wrong for any
-			// pack whose directory differs from its @namespace, which is a
-			// supported shape (@namespace exists precisely so a directory need
-			// not dictate the canonical id). dsl/deployment declares
-			// @namespace("cluster"), so its concepts assemble to
-			// v1:cluster:deployment while the ambient hint is "deployment" --
-			// ":deployment:" is not in that id, and the loader told the author
-			// to import a concept declared in the very same domain. Worse,
-			// there was no spelling that worked: the same-domain import
-			// TestNoSameDomainUse forbids was the one the error asked for
-			// (memql#2976).
+			// The test is the concept's DECLARED namespace -- the domain's
+			// namespace.pin when it has one, else its directory. That is what
+			// #2976 asked for, and it is neither of the two rules that came
+			// before it:
 			//
-			// Uniqueness is the honest condition, and it is what boot already
-			// uses. resolveBareConceptNameWithNamespace returns a unique
-			// trailing-segment match BEFORE it ever consults the hint, so
-			// signature-concept binding has always accepted these names
-			// ambiently -- only canonicalId carried the extra directory test.
-			// Removing that asymmetry is the fix.
+			//   - the ORIGINAL test compared the id against the containing
+			//     DIRECTORY, which is wrong for any pack whose directory
+			//     differs from its @namespace. dsl/deployment pins "cluster",
+			//     so its concepts assemble as v1:cluster:* while the directory
+			//     hint was "deployment" -- the loader demanded an import for a
+			//     concept in its own domain, and the import it asked for was
+			//     the one TestNoSameDomainUse bans. No spelling worked.
 			//
-			// An AMBIGUOUS name still requires an import unless the directory
-			// really does name the namespace: two concepts sharing a trailing
-			// segment is exactly the case #2617's rule protects, and dropping
-			// the guard entirely would let a cross-domain collision bind
-			// silently to whichever the hint happened to favour.
-			if id, aerr := r.resolveBareConceptNameWithNamespace(secondArg, domain); aerr == nil {
-				if _, uerr := r.resolveBareConceptNameWithNamespace(secondArg, ""); uerr == nil {
-					nsHint, ok = domain, true // unique in the tree
-				} else if strings.Contains(id, ":"+domain+":") {
-					nsHint, ok = domain, true // ambiguous, but same-domain by directory
+			//   - #3017 replaced it with tree-wide UNIQUENESS, which fixed
+			//     that pack but widened binding: a concept declared ONLY in a
+			//     foreign domain bound with no import, on the path that
+			//     derives row ids. It also left the remapped+AMBIGUOUS case
+			//     deadlocked, because uniqueness cannot disambiguate by
+			//     construction -- and let a product bundle mounted at
+			//     MEMQL_DSL_PATH make this tree's reference ambiguous, so an
+			//     unrelated repository could fail this engine's boot.
+			//
+			// The declared namespace fixes the remapped pack WITHOUT widening
+			// cross-domain binding at all, which is why it was the ask. It
+			// disambiguates a colliding short-name (the hint filters the
+			// candidates), and it refuses a foreign concept whose id does not
+			// carry this namespace -- so #2617's import discipline holds again
+			// on the id-deriving path.
+			if id, aerr := r.resolveBareConceptNameWithNamespace(secondArg, declaredNS); aerr == nil {
+				if strings.Contains(id, ":"+declaredNS+":") {
+					nsHint, ok = declaredNS, true
 				}
 			}
 		}
