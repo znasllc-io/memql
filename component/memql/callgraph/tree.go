@@ -7,30 +7,81 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/znasllc-io/memql/component/language/dslspec"
 )
 
 // restrictedKinds are the construct kinds the call-graph contract restricts.
 // Automations are intentionally absent -- they are the permissive composing
 // construct (they may call anything), so they need no per-construct analysis.
 // Every other kind (concepts/shapes/specs/...) has no behavioral body to walk.
-var restrictedKinds = map[string]bool{"logic": true, "query": true, "mutation": true, "action": true}
+//
+// The value is the construct's dslspec annotation receiver, which is how the
+// declaration keyword is looked up (see kindKeyword).
+var restrictedKinds = map[string]string{
+	"logic":    "Logic",
+	"query":    "Query",
+	"mutation": "Mutation",
+	"action":   "Action",
+}
+
+// kindKeyword resolves a restricted kind to the declaration keyword an author
+// actually types, and to whether that declaration carries a bound-concept
+// segment before the name.
+//
+// Both facts are READ FROM component/language/dslspec rather than restated
+// here. dslspec is the single source of truth for the construct vocabulary,
+// and its drift test already hard-fails if the write-function keyword is ever
+// the retired `mutation` noun again. Restating the vocabulary in this file is
+// what made every mutation rule dead against the tree (memql#3043): the
+// keyword was renamed `mutation` -> `mutate` in memql#2041 and this regex was
+// never moved with it, so splitConstructs matched nothing in any real
+// mutations.memql and the rules ran against zero constructs.
+//
+// The internal kind names ("mutation") deliberately keep their noun spelling
+// -- they name the construct, not the keyword, and Finding.Kind is a stable
+// test/message identifier. Only the keyword the source is scanned for is
+// derived.
+func kindKeyword(kind string) (keyword string, conceptInSignature bool, ok bool) {
+	receiver, restricted := restrictedKinds[kind]
+	if !restricted {
+		return "", false, false
+	}
+	for _, c := range dslspec.Build().Constructs {
+		if c.AnnotationReceiver == receiver {
+			return c.Keyword, c.ConceptInSignature, true
+		}
+	}
+	return "", false, false
+}
+
+// headerREs is the per-kind construct-header matcher, compiled once from the
+// dslspec vocabulary. A kind whose construct dslspec does not carry is absent,
+// so headerRE returns nil for it and splitConstructs yields nothing -- the same
+// shape the old default arm had, but now reachable only by a genuine vocabulary
+// gap rather than by a stale literal.
+var headerREs = func() map[string]*regexp.Regexp {
+	out := make(map[string]*regexp.Regexp, len(restrictedKinds))
+	for kind := range restrictedKinds {
+		keyword, conceptInSignature, ok := kindKeyword(kind)
+		if !ok {
+			continue
+		}
+		concept := ""
+		if conceptInSignature {
+			concept = `(?:[A-Za-z_][A-Za-z0-9_]*[ \t]+)?`
+		}
+		out[kind] = regexp.MustCompile(`(?m)^` + regexp.QuoteMeta(keyword) +
+			`[ \t]+` + concept + `([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
+	}
+	return out
+}()
 
 // headerRE returns the construct-header matcher for a restricted kind. Group 1
-// is the construct name. mutation/query carry a concept segment in the
-// signature (`mutation <Concept> <name> {`); logic and action do not.
+// is the construct name. mutate/query carry a concept segment in the signature
+// (`mutate <Concept> <name> {`); logic and action do not.
 func headerRE(kind string) *regexp.Regexp {
-	switch kind {
-	case "logic":
-		return regexp.MustCompile(`(?m)^logic[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
-	case "query":
-		return regexp.MustCompile(`(?m)^query[ \t]+(?:[A-Za-z_][A-Za-z0-9_]*[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
-	case "mutation":
-		return regexp.MustCompile(`(?m)^mutation[ \t]+(?:[A-Za-z_][A-Za-z0-9_]*[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
-	case "action":
-		return regexp.MustCompile(`(?m)^action[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
-	default:
-		return nil
-	}
+	return headerREs[kind]
 }
 
 // matchingBrace returns the index of the `}` that closes the `{` at openIdx,
@@ -107,7 +158,7 @@ func splitConstructs(kind, source string) []construct {
 func CheckFile(path string, source string, sideEffecting SideEffectClassifier) []Finding {
 	base := strings.TrimSuffix(filepath.Base(path), ".memql")
 	kind := singular(base)
-	if !restrictedKinds[kind] {
+	if _, restricted := restrictedKinds[kind]; !restricted {
 		return nil
 	}
 	useKinds := UseKinds(source)
