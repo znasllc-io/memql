@@ -60,8 +60,10 @@ import (
 //     the same bytes, verified. Its sibling mutation.go does the same when it
 //     builds an insert.
 //   - component/memql/liveknowledge's memqlQuote is another %q-into-the-engine
-//     renderer, and component/memql carries two more of its own
-//     (encodeForMemqlSubstitution, renderDryRunMemQLValue).
+//     renderer. component/memql carries two more definitions that are NOT the %q
+//     defect and should not be lumped in with it: encodeForMemqlSubstitution
+//     encodes with json.Marshal and only falls back to %q when that fails, and
+//     renderDryRunMemQLValue is json.Marshal outright.
 //   - sdk/go/client does the same across support.go and its generated builders.
 //
 // One caller of THIS function is also on the wrong side of a related boundary,
