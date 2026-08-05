@@ -406,8 +406,53 @@ func requestFromRow(row map[string]any) Request {
 	}
 }
 
+// truncateError renders err for the lastError argument: NUL-free, then capped.
+//
+// # Why NUL is removed, when the lexer accepts it
+//
+// langparser.QuoteString renders a NUL as `\u0000`, and that is correct at its
+// own layer -- it is exactly what readString accepts, and the lexer decodes it
+// back to rune 0. The statement parses. It then fails one layer down, at
+// storage: the stamped payload is marshalled to JSON and bound to a JSONB
+// column (component/database/memory-nodes/concept.go, models.go `Payload
+// json.RawMessage bun:"type:JSONB,notnull"`, `payload JSONB NOT NULL` in
+// migrations/20260324000000_initial_setup.up.sql), and PostgreSQL's jsonb type
+// cannot represent U+0000. Measured against postgres:16:
+//
+//	select '{"lastError":"boom \u0000 nul"}'::jsonb;
+//	ERROR:  unsupported Unicode escape sequence
+//	DETAIL:  \u0000 cannot be converted to text.
+//
+// The insert therefore errors, stamp() logs a warning and returns, and the row
+// keeps whatever status it had -- which is the identical stuck row memql#3035
+// is about, reached through Postgres instead of through the lexer. Fixing the
+// escape set alone moved that failure rather than removing it.
+//
+// NUL is the ONLY escape jsonb rejects: `\u0007`, `\u000b`, `\u001b`, high
+// bytes and `�` all store fine (verified on the same instance), so this
+// substitution is as narrow as the defect.
+//
+// # Why U+FFFD rather than dropping the byte
+//
+// The error text is what an operator reads to find out what the remote sent.
+// Silently deleting bytes from it is the "lexes fine while mangling what the
+// operator reads" hazard this file's own tests warn about; U+FFFD keeps the
+// fact that something was there, and it is the convention json.Marshal already
+// applies to invalid UTF-8 on this same path.
+//
+// # Why here, and why lastError only
+//
+// Not in QuoteString: its contract is "what the MemQL lexer accepts", it is
+// shared with component/inbound, and jsonb storability is a different concern
+// with different callers. Not for requestId either, and that one is deliberate
+// rather than an oversight -- a NUL there is unreachable, because a row whose
+// id carried one could never have been inserted for the worker to read, and
+// rewriting an id would aim the update at a DIFFERENT row, which is worse than
+// failing loudly.
+//
+// Substitution runs BEFORE the cap so lastErrorCap still bounds what is stored.
 func truncateError(err error) string {
-	msg := err.Error()
+	msg := strings.ReplaceAll(err.Error(), "\x00", "�")
 	if len(msg) > lastErrorCap {
 		msg = msg[:lastErrorCap]
 	}

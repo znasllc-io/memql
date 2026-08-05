@@ -65,6 +65,100 @@ func assertStampsLex(t *testing.T, eng *fakeEngine) {
 	}
 }
 
+// stringArg pulls one named string argument back OUT of a mutation the worker
+// emitted, decoded by the real lexer.
+//
+// This is the round-trip half of memql#3035's DoD item 3, and it is a different
+// assertion from "the statement lexes". Lexing proves the statement would be
+// accepted; only decoding the argument back out proves the operator will read
+// what the remote actually sent. A call-site sanitiser that stripped bytes
+// before quoting passes every lexing assertion in this file while silently
+// mangling the error text -- which is the hazard
+// TestStampPolicyRefusal_HostileTargetStillLexes describes but cannot catch.
+func stringArg(t *testing.T, mutation, arg string) string {
+	t.Helper()
+	toks, err := langparser.NewLexer(mutation).Tokenize()
+	if err != nil {
+		t.Fatalf("the lexer refused the stamp: %v\n  mutation: %s", err, mutation)
+	}
+	for i, tok := range toks {
+		if tok.Type != langparser.TokenIdentifier || tok.Literal != arg {
+			continue
+		}
+		for j := i + 1; j < len(toks) && j <= i+2; j++ {
+			if toks[j].Type == langparser.TokenString {
+				return toks[j].Literal
+			}
+		}
+	}
+	t.Fatalf("no string value for argument %q in: %s", arg, mutation)
+	return ""
+}
+
+// assertStorable checks the one thing lexing cannot: that every string the
+// statement carries can actually be PERSISTED.
+//
+// memql#3035's fix made the statement parse. That is necessary and not
+// sufficient. The stamped payload is marshalled to JSON and bound to a JSONB
+// column (component/database/memory-nodes/concept.go, models.go, and
+// `payload JSONB NOT NULL` in the initial-setup migration), and PostgreSQL's
+// jsonb type CANNOT represent U+0000 -- measured against postgres:16:
+//
+//	select '{"lastError":"boom \u0000 nul"}'::jsonb;
+//	ERROR:  unsupported Unicode escape sequence
+//	DETAIL:  \u0000 cannot be converted to text.
+//
+// So a NUL that survives quoting turns a parse failure into an INSERT failure,
+// and stamp() reacts to both identically -- it logs a warning and returns,
+// leaving the row stuck in its previous status. Same defect, one layer down.
+//
+// The assertion is on the DECODED value rather than on the rendered escape
+// because that is the property that matters and it cannot be spelled two ways:
+// if no decoded string holds a NUL rune, no encoder downstream can emit
+// \u0000 for it. Every other control byte stores fine, so this is as
+// narrow as the defect.
+//
+// This is a unit assertion rather than a database test on purpose:
+// component/outbound is NOT in the db-tests lane (which runs only
+// ./component/memql/... ./component/automations/steps/... and
+// ./examples/referencepack/...), so a _db_test.go here would never run in CI.
+// Adding the package to that lane is memql#3030.
+func assertStorable(t *testing.T, mutation string) {
+	t.Helper()
+	toks, err := langparser.NewLexer(mutation).Tokenize()
+	if err != nil {
+		t.Fatalf("the lexer refused the stamp: %v\n  mutation: %s", err, mutation)
+	}
+	for _, tok := range toks {
+		if tok.Type != langparser.TokenString {
+			continue
+		}
+		if strings.ContainsRune(tok.Literal, 0) {
+			t.Errorf("a stamped string still carries a NUL, so the statement parses and then the "+
+				"INSERT fails on the JSONB column -- stamp() logs a warning and returns, and the "+
+				"row keeps its previous status. That is the memql#3035 stuck row reached through "+
+				"Postgres instead of through the lexer.\n  value:    %q\n  mutation: %s",
+				tok.Literal, mutation)
+		}
+	}
+}
+
+// wantLastError is what the operator should end up reading, restated in the
+// test rather than borrowed from truncateError.
+//
+// That independence is the whole point. An earlier draft of this assertion
+// compared the stamp against truncateError's own return value, which is a
+// tautology: swap truncateError for a lossy sanitiser and BOTH sides change
+// together, so the test passes while the operator-facing text is silently
+// gutted. It was verified to fail that way before being written like this.
+//
+// The only transformation this file expects between err.Error() and the stored
+// value is the NUL substitution truncateError documents; everything else must
+// arrive byte for byte.
+func wantLastError(err error) string {
+	return strings.ReplaceAll(err.Error(), "\x00", "�")
+}
+
 // hostileError carries the bytes a remote server can put into an error string.
 // \x00 / \a / \v are the three %q emits that the lexer has no escape for.
 var hostileError = errors.New("upstream said: \x00 NUL \a bell \v vtab \x01\x02 and \"quotes\" and a \\ backslash")
@@ -90,12 +184,21 @@ func TestStampFailed_HostileErrorStillLexes(t *testing.T) {
 	if failed == "" {
 		t.Fatalf("expected a `failed` stamp; got %v", eng.stamped())
 	}
-	// The escaped control bytes must be in the statement rather than dropped:
-	// the point is to RECORD the error, not to sanitise it away.
-	if !strings.Contains(failed, `\u0000`) {
-		t.Errorf("the NUL byte should survive as a \\u0000 escape the lexer accepts, so the "+
-			"operator still sees what the remote sent.\n  got: %s", failed)
+	// The control bytes must be RECORDED rather than sanitised away -- with the
+	// single exception of NUL, which cannot be persisted at all (assertStorable).
+	got := stringArg(t, failed, "lastError")
+	for _, want := range []string{"bell", "vtab", "quotes", "backslash"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the error text was mangled on the way to the row -- %q is missing. Dropping "+
+				"bytes to make the statement safe is the failure this test exists to catch.\n"+
+				"  got: %q", want, got)
+		}
 	}
+	if want := wantLastError(Permanent(hostileError)); got != want {
+		t.Errorf("lastError did not round-trip through the lexer.\n  want: %q\n  got:  %q",
+			want, got)
+	}
+	assertStorable(t, failed)
 	if strings.Contains(failed, `\x00`) {
 		t.Errorf("the statement still carries a Go-style \\x escape, which the lexer refuses.\n"+
 			"  got: %s", failed)
@@ -123,9 +226,11 @@ func TestStampRetrying_HostileErrorStillLexes(t *testing.T) {
 	if retrying == "" {
 		t.Fatalf("expected a `retrying` stamp; got %v", eng.stamped())
 	}
-	if !strings.Contains(retrying, `\u0000`) {
-		t.Errorf("the retry stamp should carry the escaped error.\n  got: %s", retrying)
+	if got, want := stringArg(t, retrying, "lastError"), wantLastError(hostileError); got != want {
+		t.Errorf("the retry stamp's lastError did not round-trip.\n  want: %q\n  got:  %q",
+			want, got)
 	}
+	assertStorable(t, retrying)
 }
 
 // TestStampPolicyRefusal_HostileTargetStillLexes covers the third site.
