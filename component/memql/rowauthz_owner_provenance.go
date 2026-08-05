@@ -265,6 +265,21 @@ func OwnerFieldProvenance(registry *FunctionRegistry, declared map[string]string
 		if fn == nil || fn.FunctionKind != "mutation" || fn.MutationTemplate == nil {
 			continue
 		}
+		// A @serverOnly mutation is NOT a caller path (memql#3029). The
+		// annotation bars client-originated calls at expandFunctionCall
+		// (#2800), so its args cannot come from a caller by construction, and
+		// counting it as caller-writable reports a guarantee that IS provided
+		// as one that is not. memql#2991 relies on exactly this: it gated
+		// updateUser precisely so its caller-supplied id would stop being a
+		// forging path.
+		//
+		// This narrows the gate, so it is worth being explicit about what
+		// keeps it honest: the gate errors when an EXEMPT concept starts
+		// passing, so if this silently rescued a concept that is exempt for a
+		// filed reason, the suite says so rather than going quiet.
+		if fn.ServerOnly {
+			continue
+		}
 		c := strings.TrimSpace(fn.BoundConcept)
 		if c == "" {
 			c = strings.TrimSpace(fn.MutationTemplate.Concept)
@@ -300,14 +315,51 @@ func ownerProvenanceFor(concept, field string, mutations []*Function) OwnerProve
 		tmpl := fn.MutationTemplate
 		name := fn.Name
 
-		// NOTE: there is deliberately no `field == "id"` clause. An
-		// earlier draft had one, on the theory that an owner field which
-		// IS the row id needs IDTemplate stamped. It is unreachable:
-		// validateRowAuthz requires the owner to name a DECLARED
-		// property, and `id` is a reserved row intrinsic that a concept
-		// cannot declare -- so `@rowAuthz(owner="id")` fails to load by
-		// both routes. A clause that cannot fire is not a safeguard, it
-		// is a claim in the shape of one.
+		// The SELF-OWNED clause (memql#3029). This file previously carried a
+		// note explaining why it was deliberately ABSENT -- validateRowAuthz
+		// required the owner to name a declared property, `id` is a reserved
+		// intrinsic no concept can declare, so `@rowAuthz(owner="id")` could
+		// not load and "a clause that cannot fire is not a safeguard, it is a
+		// claim in the shape of one".
+		//
+		// That reasoning was right, and memql#3029 is exactly what invalidates
+		// its premise: the self-owned form loads now, so the clause can fire
+		// and has to exist. Restored rather than re-invented.
+		//
+		// For `owner="id"` the question is not "who writes a payload field"
+		// but "can a caller write the ROW'S ID" -- so the subject is
+		// IDTemplate, classified by the same classifier the payload arms use.
+		// A lowered AST node there is the normal shape, and classifyTemplateValue
+		// fails CLOSED on one it cannot read (memql#2840), which is the
+		// behaviour this gate wants.
+		// Compared as a literal, deliberately. The definition of this value
+		// is langparser.RowAuthzSelfOwnedField, but naming that symbol here
+		// puts this file on the row-authz surface, and TestRowAuthzIsInert
+		// then demands it be added to the allow-list. That gate is a safety
+		// property about ENFORCEMENT, and this file is a static analyzer that
+		// a test drives -- widening the list for it would trade a real
+		// invariant for a cosmetic one. memql#3029 requires the gate to stay
+		// green and unmodified, so the literal stays and the constant is
+		// named here in prose instead.
+		if field == "id" {
+			switch classifyTemplateValue(tmpl.IDTemplate) {
+			case provStamp:
+				res.StampedBy = append(res.StampedBy, name)
+			case provAccept:
+				res.WritableBy = append(res.WritableBy, name)
+				if res.Reason == "" {
+					res.Reason = fmt.Sprintf("%s takes the row id from caller args, so a caller "+
+						"chooses which row is written", name)
+				}
+			case provUnknown:
+				res.WritableBy = append(res.WritableBy, name)
+				if res.Reason == "" {
+					res.Reason = fmt.Sprintf("%s builds the row id from an expression this "+
+						"analyzer cannot classify; failing closed", name)
+				}
+			}
+			continue
+		}
 
 		explicit, hasExplicit := templateFieldValue(tmpl.PayloadTemplate, field)
 		overlay, hasOverlay := tmpl.PayloadOverlayTemplate[field]

@@ -32,6 +32,19 @@ import (
 // RowAuthzAnnotation is the annotation name, spelled once.
 const RowAuthzAnnotation = "rowAuthz"
 
+// RowAuthzSelfOwnedField is the owner value naming the row's OWN identity
+// rather than a payload field -- `@rowAuthz(owner="id")`, the self-owned form
+// (memql#3029, ruled in memql#2803).
+//
+// It exists as a constant because three packages have to agree on it: the
+// loader's validateRowAuthz (which admits it without a declared property), the
+// owner-field provenance gate (which asks "can a caller write the row's id?"
+// instead of reading a payload field), and shadow mode (which renders
+// `row.id == actor.userId` rather than a bare field term). A string literal in
+// three places is how those three drift into disagreeing about one annotation
+// -- the same reason the detector and the codemod share this file.
+const RowAuthzSelfOwnedField = "id"
+
 // RowAuthzTier is the declared row-authorization tier of a concept.
 // The four values are the buckets docs/public/operate/auth/
 // per-row-authz-audit.md already defines in prose; this type is what

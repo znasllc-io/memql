@@ -94,6 +94,18 @@ func InjectedPredicate(decl *langparser.RowAuthzDecl) string {
 	}
 	switch decl.Tier {
 	case langparser.RowAuthzOwned:
+		// The SELF-OWNED form names the row's own identity, not a payload
+		// field (memql#3029), so it renders `row.id` rather than a bare `id`.
+		// A filter spells payload properties bare and row intrinsics under the
+		// `row.` namespace; the bare spelling is RETIRED and rejected by
+		// TestFilterIntrinsicsUseRowNamespace (memql#2779). Concatenating the
+		// owner blindly would emit `id==actor.userId`, which reads as a
+		// payload property named `id` and compiles to an entirely different
+		// SQL path -- a silently wrong predicate, which is the one outcome
+		// this renderer must never produce.
+		if decl.Owner == langparser.RowAuthzSelfOwnedField {
+			return "row.id==actor.userId"
+		}
 		return decl.Owner + "==actor.userId"
 	case langparser.RowAuthzClusterOwner:
 		return "actor.isClusterOwner==true"

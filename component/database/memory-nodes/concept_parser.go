@@ -152,6 +152,24 @@ func validateRowAuthz(conceptName string, decl *parser.RowAuthzDecl, props []par
 	if decl == nil || decl.Tier != parser.RowAuthzOwned {
 		return nil
 	}
+	// The SELF-OWNED form (memql#3029, ruled in memql#2803). A concept whose
+	// owner is the row's own identity has no payload field to name -- a user's
+	// owner IS the row -- so `id` is admitted without requiring a declared
+	// property. Without it `v1:identity:user`, the concept carrying the
+	// cluster-wide `role`, could not declare a tier at all and stayed outside
+	// memql#2982's owner-field provenance gate.
+	//
+	// `id` and ONLY `id`. Every other row intrinsic means something else, and
+	// `createdBy` is the dangerous near-miss: it means "who WROTE the row",
+	// not "whose row it is". A row an admin creates on a user's behalf has a
+	// createdBy that is not the owner, so admitting it would let a concept
+	// declare an owner tier that is FALSE -- precisely the class of false
+	// declaration #2982 exists to catch. The others need no special handling:
+	// no concept can declare an intrinsic as a property, so they fall through
+	// to the loop below and are rejected by it.
+	if decl.Owner == parser.RowAuthzSelfOwnedField {
+		return nil
+	}
 	for _, p := range props {
 		if p.name == decl.Owner {
 			return nil
