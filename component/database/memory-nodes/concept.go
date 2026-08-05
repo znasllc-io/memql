@@ -541,6 +541,58 @@ func (c *Concept) PIIFields() []string {
 	return result
 }
 
+// SecretFields returns the names of every top-level field the concept's
+// definition schema marks with the x-secret custom keyword (emitted from
+// the field's @secret annotation).
+//
+// The engine's validation-error redaction (memql#3036) consults this list so a
+// rejected value belonging to a secret field is never quoted into an
+// operator-visible error string. Derived generically, exactly as PIIFields is:
+// annotating a new field is the whole change, and there is no hand-maintained
+// list to drift out of sync.
+//
+// SCOPE, and it is deliberately partial. @secret redacts from VALIDATION ERROR
+// MESSAGES only. It does NOT redact from query results -- that is an
+// authorization decision needing a definition of "elevated", and it interacts
+// with the per-row authz model deferred under memql#2803. It does NOT redact
+// from structured logs either, because no log site carries a concept row's
+// payload today (MemoryNode.Payload is a json.RawMessage and nothing logs it,
+// and MemoryNode does not implement slog.LogValuer). If a payload-carrying log
+// site is ever added, that is the moment to extend this -- the reference
+// documentation names logs as unenforced so the gap stays visible rather than
+// being inferred away from the word "enforced".
+//
+// Returns nil when the concept declares no secret fields. Order follows JSON
+// map iteration and is not significant.
+func (c *Concept) SecretFields() []string {
+	if c == nil {
+		return nil
+	}
+	raw, ok := c.Schemas[definitionSchemaKey]
+	if !ok || len(raw) == 0 {
+		return nil
+	}
+
+	var schema struct {
+		Properties map[string]struct {
+			Secret bool `json:"x-secret"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(raw, &schema); err != nil {
+		return nil
+	}
+
+	result := make([]string, 0, len(schema.Properties))
+	for name, prop := range schema.Properties {
+		if prop.Secret {
+			if trimmed := strings.TrimSpace(name); trimmed != "" {
+				result = append(result, trimmed)
+			}
+		}
+	}
+	return result
+}
+
 // fieldClassification carries the C5 (memql#2035) per-field access
 // flags read off the concept's definition schema. A field is one of:
 //   - internal  (x-internal): server-only -- never projected, never

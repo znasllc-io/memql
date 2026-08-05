@@ -495,6 +495,7 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 			return nil, fmt.Errorf("function %q args schema: %w", expectedName, err)
 		}
 		fn.ArgsSchema = schema
+		markSecretArgsFields(fn.ArgsSchema, boundConcept, registry)
 	}
 
 	// Extract and convert expression from the body
@@ -1454,6 +1455,70 @@ func convertArgsSchema(assertDef *languageParser.ArgsSchema) (*ArgsSchemaConfig,
 	}
 
 	return config, nil
+}
+
+// markSecretArgsFields stamps FunctionArgsField.Secret on every args field
+// whose name matches a field the bound concept annotates `@secret`, so a
+// rejected value on that argument is redacted from the validation error
+// message instead of being quoted into it (memql#3036).
+//
+// Resolved HERE rather than in the validator for the same reason @pattern is
+// compiled here: it needs the concept registry, which the loader has and the
+// validator deliberately does not -- functionValidator holds only functions +
+// specs and is ctx-free by design. Doing it once at load also means the
+// per-call path stays a field read.
+//
+// Nested and array-item fields are stamped by name too. A concept's @secret
+// fields are top-level, so an exact name match on a nested field is a
+// heuristic -- but it errs toward redacting a message rather than leaking a
+// credential, which is the right direction for a diagnostic. It never
+// suppresses a validation FAILURE; only the value inside the message.
+//
+// Fails OPEN, deliberately and visibly: no bound concept, no registry, or a
+// concept the registry cannot resolve leaves every field unstamped and the
+// messages exactly as they were. The alternative -- refusing to load -- would
+// let an unrelated registry gap take down boot over a diagnostic.
+func markSecretArgsFields(schema *ArgsSchemaConfig, boundConcept string, registry memoryNodes.Registry) {
+	if schema == nil || len(schema.Fields) == 0 || boundConcept == "" || registry == nil {
+		return
+	}
+	concept, err := registry.Get(boundConcept)
+	if err != nil || concept == nil {
+		return
+	}
+	secret := concept.SecretFields()
+	if len(secret) == 0 {
+		return
+	}
+	names := make(map[string]struct{}, len(secret))
+	for _, name := range secret {
+		names[name] = struct{}{}
+	}
+	for _, field := range schema.Fields {
+		markSecretArgsField(field, names)
+	}
+}
+
+// markSecretArgsField stamps one field and its nested / item children.
+func markSecretArgsField(field *FunctionArgsField, secretNames map[string]struct{}) {
+	if field == nil {
+		return
+	}
+	if _, ok := secretNames[field.Name]; ok {
+		field.Secret = true
+	}
+	for _, nested := range field.Nested {
+		markSecretArgsField(nested, secretNames)
+	}
+	// An array's Items carries the ELEMENT schema and usually has no name of
+	// its own, so it inherits the array field's classification: a `[]string`
+	// of secrets is a secret in every element.
+	if field.Items != nil {
+		if field.Secret {
+			field.Items.Secret = true
+		}
+		markSecretArgsField(field.Items, secretNames)
+	}
 }
 
 // convertArgsField converts languageParser.ArgsField to memql.FunctionArgsField.
