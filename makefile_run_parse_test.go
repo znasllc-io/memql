@@ -109,6 +109,49 @@ func foldMakeContinuations(raw string) []logicalLine {
 // anywhere on the line, so a phantom pattern targeting pkg2 passes by matching
 // a test declared in pkg1. Segmenting first means a pattern is only ever
 // scored against the packages of its OWN command.
+// isShellWordBreak reports whether c ends a shell word, so a `#` immediately
+// after it starts a comment. Whitespace is the obvious case; the operators
+// matter because `echo x;# go test ...` is a commented-out recipe and reading
+// it as live text hard-fails CI on a command that never runs.
+func isShellWordBreak(c byte) bool {
+	switch c {
+	case ' ', '\t', ';', '&', '|', '(':
+		return true
+	default:
+		return false
+	}
+}
+
+// trimRedirectFd removes a file-descriptor prefix that belongs to a redirect
+// rather than to the command: the `2` of `2>&1`, the `12` of `12>err.log`, or
+// the `&` of `&>out.log`.
+//
+// The whole run of digits comes off, and only when it is its own word, so a
+// package whose name merely ends in a digit (`./pkg2`) survives intact.
+func trimRedirectFd(seg string) string {
+	n := len(seg)
+	if n == 0 {
+		return seg
+	}
+	if seg[n-1] == '&' {
+		if n == 1 || seg[n-2] == ' ' || seg[n-2] == '\t' {
+			return seg[:n-1]
+		}
+		return seg
+	}
+	end := n
+	for end > 0 && seg[end-1] >= '0' && seg[end-1] <= '9' {
+		end--
+	}
+	if end == n {
+		return seg // no digits at all
+	}
+	if end == 0 || seg[end-1] == ' ' || seg[end-1] == '\t' {
+		return seg[:end]
+	}
+	return seg
+}
+
 func splitShellCommands(line string) []string {
 	var cmds []string
 	cur := strings.Builder{}
@@ -141,9 +184,15 @@ func splitShellCommands(line string) []string {
 		// leading-`#` skip.
 		//
 		// Word-start is the POSIX rule and the distinction is load-bearing:
-		// `./pkg/#x` is a literal operand the shell does NOT strip, so it must
-		// stay unresolvable, and `-run 'TestA#b'` must keep its `#` -- which the
-		// quote state above already guarantees.
+		// `./pkg/#x` is a literal operand the shell does NOT strip, so the `#`
+		// stays attached and the recipe is scored on the package it really
+		// names, and `-run 'TestA#b'` keeps its `#` -- which the quote state
+		// above already guarantees.
+		//
+		// A word also starts after a shell OPERATOR, not only after whitespace:
+		// `echo x;# go test ...` is a commented-out recipe, verified against
+		// real bash and sh. Testing whitespace alone read the comment as a live
+		// command and hard-failed CI on it.
 		//
 		// memql#3027 named this shape and left it half-closed: the leading-`#`
 		// case was pinned, the trailing one was not. While unresolvable was a
@@ -151,7 +200,7 @@ func splitShellCommands(line string) []string {
 		// failure it turned into a false positive on a working recipe -- and a
 		// false NEGATIVE too, since `-run TestPhantom ./pkg/ # note` reported
 		// "unresolvable" instead of the real "no-match".
-		if ch == '#' && (i == 0 || line[i-1] == ' ' || line[i-1] == '\t') {
+		if ch == '#' && (i == 0 || isShellWordBreak(line[i-1])) {
 			break
 		}
 		if ch == ';' {
@@ -187,20 +236,27 @@ func splitShellCommands(line string) []string {
 		// `2>&1 | tee` is the more common spelling of the `| tee` shape the
 		// gaps table explicitly blesses (memql#3027).
 		//
-		// Guarded on the digit being its own word, so a genuine operand ending
-		// in a digit (`./pkg2`) is never truncated.
+		// Guarded on the whole fd being its own word, so a genuine operand
+		// ending in a digit (`./pkg2`) is never truncated. The RUN of digits is
+		// taken, not one: bash accepts a multi-digit fd (`12>err.log`), and
+		// removing a single character there left `1` behind and hard-failed the
+		// recipe anyway.
 		if ch == '>' {
-			seg := cur.String()
-			if n := len(seg); n > 0 &&
-				(seg[n-1] == '&' || (seg[n-1] >= '0' && seg[n-1] <= '9')) &&
-				(n == 1 || seg[n-2] == ' ' || seg[n-2] == '\t') {
-				seg = seg[:n-1]
-			}
-			cmds = append(cmds, seg)
+			cmds = append(cmds, trimRedirectFd(cur.String()))
 			cur.Reset()
 			if i+1 < len(line) && line[i+1] == '>' {
 				i++
 			}
+			continue
+		}
+		// A single `&` backgrounds the command, so it ends it just as `;` does.
+		// `&&` is consumed above and `&>` is a redirect whose `&` belongs to the
+		// operator, so both are excluded here. Without this arm a trailing `&`
+		// landed in operand position and marked a working recipe unresolvable --
+		// the same defect as the fd digit, one operator over.
+		if ch == '&' && !(i+1 < len(line) && line[i+1] == '>') {
+			cmds = append(cmds, cur.String())
+			cur.Reset()
 			continue
 		}
 		cur.WriteByte(ch)
@@ -218,11 +274,36 @@ func splitShellCommands(line string) []string {
 // semantics. So a recipe could carry a valid pattern followed by a phantom one
 // and the gate reported ok.
 func lastRunPattern(cmd string) (string, bool) {
+	// Everything after `-args` belongs to the TEST BINARY, so a `-run` there is
+	// the binary's own flag and `go test` never sees it. The operand scan stops
+	// at `-args` for exactly this reason; the pattern scan has to as well, or
+	// the gate scores an argument the toolchain ignores against a package the
+	// recipe does test -- a hard failure on a working recipe, produced by
+	// teaching one half of the parser about `-args` and not the other.
+	cmd = truncateAtArgs(cmd)
 	all := makeRunFlag.FindAllStringSubmatch(cmd, -1)
 	if len(all) == 0 {
 		return "", false
 	}
 	return all[len(all)-1][1], true
+}
+
+// truncateAtArgs cuts a command at the `-args` / `--args` separator, which is
+// where `go test`'s own flags end and the test binary's begin.
+func truncateAtArgs(cmd string) string {
+	for _, sep := range []string{" -args ", " --args ", "\t-args\t", " -args\t", "\t-args "} {
+		if idx := strings.Index(cmd, sep); idx >= 0 {
+			cmd = cmd[:idx]
+		}
+	}
+	// A trailing `-args` with nothing after it carries no flags to strip, but
+	// it must not survive into the operand scan as a package either.
+	for _, sep := range []string{" -args", " --args"} {
+		if strings.HasSuffix(cmd, sep) {
+			cmd = strings.TrimSuffix(cmd, sep)
+		}
+	}
+	return cmd
 }
 
 // resolveMakePattern applies Make's own escaping to a `-run` value and reports

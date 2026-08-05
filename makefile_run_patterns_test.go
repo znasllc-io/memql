@@ -91,8 +91,14 @@ func scanMakefileRunPatterns(raw string, namesFor func(pkgs []string) []string) 
 		// about.
 		sawCd := false
 		for _, cmd := range splitShellCommands(ll.text) {
+			// The SAME prefix rule the tool check uses -- `@` silences, `-`
+			// ignores errors, `+` always runs. Stripping only `@` here left
+			// `-cd sub && go test ./pkg/` scoring the operands from the repo
+			// root instead of from `sub/`, emitting NO finding and incrementing
+			// `checked`: a false pass that also overstates coverage. One rule,
+			// both places, or the two drift apart exactly like this.
 			if fields := strings.Fields(cmd); len(fields) > 0 &&
-				strings.TrimPrefix(strings.Trim(fields[0], "'\""), "@") == "cd" {
+				strings.TrimLeft(strings.Trim(fields[0], "'\""), "@-+") == "cd" {
 				sawCd = true
 			}
 

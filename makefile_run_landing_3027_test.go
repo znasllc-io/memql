@@ -339,6 +339,103 @@ func TestMakefileRunGuard_UnresolvableFindingsSayWhy(t *testing.T) {
 	}
 }
 
+// TestMakefileRunGuard_ShellOperatorsEndTheCommand covers the operators the
+// first landing pass swept incompletely.
+//
+// Each is the same defect one character over: a shell token that ends a command
+// was left in operand position, hit the default arm, and marked a working
+// recipe unresolvable -- which this change made a hard CI failure. Every
+// expectation here was checked against a real shell before being asserted.
+func TestMakefileRunGuard_ShellOperatorsEndTheCommand(t *testing.T) {
+	t.Run("comment after a separator", func(t *testing.T) {
+		// A shell word starts after an OPERATOR as well as after whitespace, so
+		// `;#` opens a comment. Verified with bash and sh: `echo A;# echo B`
+		// prints only A. Testing whitespace alone read the commented-out
+		// command as live and scored a phantom pattern out of it.
+		findings, checked := gapScan(t, "t:\n\t@echo building;# go test -run TestPhantomNoSuchTest ./pkg/\n")
+		if checked != 0 || len(findings) != 0 {
+			t.Fatalf("a commented-out recipe was parsed as live.\n"+
+				"  checked=%d findings=%v\n"+
+				"`;#` starts a shell comment, so this `go test` never runs and the gate must "+
+				"not score it.", checked, findings)
+		}
+	})
+
+	t.Run("multi-digit file descriptor", func(t *testing.T) {
+		// bash accepts a multi-digit fd. Taking one character off left `1`
+		// behind, which failed the recipe anyway -- the fix has to take the
+		// whole run of digits.
+		findings, checked := gapScan(t, "t:\n\tgo test -run TestReal ./pkg/ 12>err.log\n")
+		if checked != 1 || len(findings) != 0 {
+			t.Fatalf("a multi-digit file descriptor was read as a package operand.\n"+
+				"  checked=%d findings=%v", checked, findings)
+		}
+	})
+
+	t.Run("backgrounded command", func(t *testing.T) {
+		// A single `&` backgrounds the command and ends it, exactly as `;`
+		// does. `&&` and `&>` are different operators and are handled
+		// elsewhere; the cases below pin that this arm did not swallow them.
+		findings, checked := gapScan(t, "t:\n\tgo test -run TestReal ./pkg/ &\n")
+		if checked != 1 || len(findings) != 0 {
+			t.Fatalf("a trailing `&` was read as a package operand.\n"+
+				"  checked=%d findings=%v", checked, findings)
+		}
+	})
+
+	t.Run("and-and still chains", func(t *testing.T) {
+		findings, checked := gapScan(t, "t:\n\tgo test -run TestPhantomNoSuchTest ./pkg/ && echo done\n")
+		if checked != 1 || len(findings) != 1 || findings[0].kind != "no-match" {
+			t.Fatalf("`&&` must still chain and the phantom must still be reported.\n"+
+				"  checked=%d findings=%v", checked, findings)
+		}
+	})
+
+	t.Run("run flag after args is the binary's", func(t *testing.T) {
+		// `go test` honours the `-run` BEFORE `-args`; everything after belongs
+		// to the test binary. The operand scan already stopped at `-args`, so
+		// leaving the pattern scan reading past it scored a flag the toolchain
+		// ignores -- an inconsistency the first landing pass introduced by
+		// teaching one half of the parser about `-args`.
+		findings, checked := gapScan(t, "t:\n\tgo test ./pkg/ -run TestReal -args -run TestPhantomNoSuchTest\n")
+		if checked != 1 || len(findings) != 0 {
+			t.Fatalf("a `-run` after `-args` was scored as go test's own flag.\n"+
+				"  checked=%d findings=%v\n"+
+				"`go test` honours `-run TestReal` here; the one after `-args` is passed "+
+				"through to the binary.", checked, findings)
+		}
+	})
+}
+
+// TestMakefileRunGuard_CdPrefixUsesTheSameRuleAsTheTool closes the half-applied
+// rule.
+//
+// The first landing pass established that `@` / `-` / `+` are Make recipe
+// prefixes and not part of the command word -- and applied it only in tool
+// position. The `cd` detector three lines away still stripped `@` alone, so a
+// `-cd` or `+cd` recipe resolved its operands against the wrong directory,
+// reported nothing, and incremented `checked`: a false pass that also
+// overstates coverage.
+func TestMakefileRunGuard_CdPrefixUsesTheSameRuleAsTheTool(t *testing.T) {
+	for name, recipe := range map[string]string{
+		"plain":          "\tcd sub && go test -run TestReal ./pkg/",
+		"at":             "\t@cd sub && go test -run TestReal ./pkg/",
+		"ignore-error":   "\t-cd sub && go test -run TestReal ./pkg/",
+		"always-run":     "\t+cd sub && go test -run TestReal ./pkg/",
+		"at-then-ignore": "\t@-cd sub && go test -run TestReal ./pkg/",
+	} {
+		t.Run(name, func(t *testing.T) {
+			findings, _ := gapScan(t, "t:\n"+recipe+"\n")
+			if len(unresolvableFindings(findings)) == 0 {
+				t.Fatalf("a `cd` behind a Make prefix was not detected, so the operands were "+
+					"scored against the repo root instead of the cd'd directory -- silently, "+
+					"and with `checked` incremented.\n  recipe: %s\n  findings=%v\n"+
+					"The prefix rule must be the same one the tool check uses.", recipe, findings)
+			}
+		})
+	}
+}
+
 // kindOf renders the kinds present, for a diagnostic.
 func kindOf(findings []runFinding) string {
 	var kinds []string
