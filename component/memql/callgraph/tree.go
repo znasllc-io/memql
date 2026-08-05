@@ -25,6 +25,13 @@ var restrictedKinds = map[string]string{
 	"action":   "Action",
 }
 
+// dslSpec is the construct vocabulary, built once.
+//
+// dslspec.Build() is documented pure and cheap, but headerREs would otherwise
+// rebuild the entire spec once per restricted kind during package init of every
+// binary that links this package.
+var dslSpec = dslspec.Build()
+
 // kindKeyword resolves a restricted kind to the declaration keyword an author
 // actually types, and to whether that declaration carries a bound-concept
 // segment before the name.
@@ -47,12 +54,24 @@ func kindKeyword(kind string) (keyword string, conceptInSignature bool, ok bool)
 	if !restricted {
 		return "", false, false
 	}
-	for _, c := range dslspec.Build().Constructs {
+	var matches []dslspec.Construct
+	for _, c := range dslSpec.Constructs {
 		if c.AnnotationReceiver == receiver {
-			return c.Keyword, c.ConceptInSignature, true
+			matches = append(matches, c)
 		}
 	}
-	return "", false, false
+	// Exactly one, or nothing. AnnotationReceiver is NOT a unique key -- dslspec
+	// already ships `spec` and `trait` under the shared receiver "Spec" -- so
+	// first-match-wins would silently compile the regex for whichever construct
+	// happened to be earlier in the slice. That is memql#3043's failure mode
+	// (scanning for a keyword the tree does not use) reached through the
+	// mechanism introduced to prevent it, so an ambiguous receiver is refused
+	// rather than guessed. Refusing leaves the kind's regex absent, which
+	// TestCallGraphCoverage turns red -- loud, not silent.
+	if len(matches) != 1 {
+		return "", false, false
+	}
+	return matches[0].Keyword, matches[0].ConceptInSignature, true
 }
 
 // headerREs is the per-kind construct-header matcher, compiled once from the
@@ -153,17 +172,40 @@ func splitConstructs(kind, source string) []construct {
 	return out
 }
 
+// constructsForFile is the ONE entry point both walks go through: the checking
+// walk (CheckFile / CheckTree) and the coverage walk. It returns the file's
+// restricted kind and the constructs the checker will actually look at.
+//
+// Sharing it is load-bearing rather than tidiness. Coverage exists to catch a
+// checker that has gone dead, and it can only do that if it counts the SAME
+// population CheckFile checks. When the two derived that population separately,
+// a filter added to CheckFile was invisible to Coverage -- so the tripwire
+// reported full coverage over constructs nothing was inspecting, which is
+// memql#3043's failure mode reached through the very mechanism added to prevent
+// it. Reproduced before this was shared: an early return inside CheckFile that
+// skipped every real mutations.memql left the contract gate AND the coverage
+// gate green at mutation:215.
+//
+// So any future filter on what gets checked belongs HERE, not in CheckFile.
+// A filter added after this call is one Coverage cannot see.
+func constructsForFile(path, source string) (kind string, constructs []construct, ok bool) {
+	kind = singular(strings.TrimSuffix(filepath.Base(path), ".memql"))
+	if _, restricted := restrictedKinds[kind]; !restricted {
+		return "", nil, false
+	}
+	return kind, splitConstructs(kind, source), true
+}
+
 // CheckFile analyses one DSL file's restricted-kind constructs (kind inferred
 // from the file name). Non-restricted files yield no findings.
 func CheckFile(path string, source string, sideEffecting SideEffectClassifier) []Finding {
-	base := strings.TrimSuffix(filepath.Base(path), ".memql")
-	kind := singular(base)
-	if _, restricted := restrictedKinds[kind]; !restricted {
+	kind, constructs, ok := constructsForFile(path, source)
+	if !ok {
 		return nil
 	}
 	useKinds := UseKinds(source)
 	var out []Finding
-	for _, c := range splitConstructs(kind, source) {
+	for _, c := range constructs {
 		out = append(out, ConstructFindings(kind, c.name, c.text, useKinds, sideEffecting)...)
 	}
 	return out
@@ -200,7 +242,7 @@ func walkTree(root string, visit func(path string, source string)) error {
 func CheckTree(root string, sideEffecting SideEffectClassifier) ([]Finding, error) {
 	var out []Finding
 	err := walkTree(root, func(path, source string) {
-		out = append(out, CheckFile(path, string(source), sideEffecting)...)
+		out = append(out, CheckFile(path, source, sideEffecting)...)
 	})
 	return out, err
 }
@@ -222,11 +264,11 @@ func Coverage(root string) (map[string]int, error) {
 		out[kind] = 0
 	}
 	err := walkTree(root, func(path, source string) {
-		kind := singular(strings.TrimSuffix(filepath.Base(path), ".memql"))
-		if _, restricted := restrictedKinds[kind]; !restricted {
+		kind, constructs, ok := constructsForFile(path, source)
+		if !ok {
 			return
 		}
-		out[kind] += len(splitConstructs(kind, source))
+		out[kind] += len(constructs)
 	})
 	return out, err
 }

@@ -21,8 +21,47 @@ func TestHeaderKeywordsComeFromDslspec(t *testing.T) {
 		if headerRE(kind) == nil {
 			t.Errorf("kind %q has no header matcher", kind)
 		}
+		// Narrow on purpose: this only catches a literal injected inside
+		// kindKeyword. It CANNOT catch a wrong kind -> receiver entry in
+		// restrictedKinds, because `receiver` is read from that same table, so
+		// any cross-check against it moves with the error. Measured: mapping
+		// the Mutation receiver to "Query" leaves this test green.
+		//
+		// That case is anchored elsewhere and hard -- TestMutationKeywordIsMutate
+		// below pins the literal "mutate", TestEveryRestrictedKindSplitsItsLiveForm
+		// pins live source for all four kinds, and dsl's TestCallGraphCoverage
+		// pins the tree. The same mutation turns six of them red, naming the
+		// wrong keyword. Recorded rather than papered over with a check that
+		// looks stronger than it is.
 		if c := dslspec.Build().ConstructByKeyword(keyword); c == nil {
 			t.Errorf("kind %q resolved to keyword %q, which dslspec does not carry", kind, keyword)
+		}
+	}
+}
+
+// AnnotationReceiver is the key kindKeyword joins on, and it is NOT unique:
+// dslspec ships `spec` and `trait` under a shared "Spec" receiver. None of the
+// four restricted receivers may be ambiguous, because a second construct under
+// one of them would make the keyword lookup depend on slice order -- scanning
+// for the wrong keyword, which is memql#3043's failure through the mechanism
+// added to prevent it.
+//
+// kindKeyword refuses an ambiguous receiver rather than guessing, so the
+// consequence is a dead kind rather than a wrong one; this test is what says
+// which receiver went ambiguous instead of leaving a bare coverage zero.
+func TestRestrictedReceiversAreUnambiguous(t *testing.T) {
+	spec := dslspec.Build()
+	for kind, receiver := range restrictedKinds {
+		var matches []string
+		for _, c := range spec.Constructs {
+			if c.AnnotationReceiver == receiver {
+				matches = append(matches, c.Keyword)
+			}
+		}
+		if len(matches) != 1 {
+			t.Errorf("kind %q: receiver %q matches %d dslspec constructs (%v), want exactly 1. "+
+				"kindKeyword cannot pick between them and refuses, so this kind's rules go dead.",
+				kind, receiver, len(matches), matches)
 		}
 	}
 }
