@@ -187,13 +187,21 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 	// against the file's `use ...concepts.{ ... }` imports + the registry. The
 	// quoted string form passes through unchanged (additive).
 	//
-	// The ambient hint is the origin's DECLARED namespace, derived the way boot
-	// derives the concept's id -- first path segment, then its namespace.pin
-	// (memql#3026). DomainFromFilePath's LAST segment is still the file's
-	// same-domain scope, but for a nested `<domain>/<sub>/*.memql` it names a
-	// directory that is not a namespace at all.
+	// BOTH arguments are the ASSEMBLY directory's, not the last path segment's
+	// (memql#3026). The ambient rule admits an id this domain could have
+	// declared, which means it has to be handed the same directory
+	// AssembleConceptIdFromDeclInDir was -- unified_loader.go's
+	// `dir := firstPathSegment(p)`, i.e. RootDomainFromFilePath here -- plus
+	// that directory's namespace.pin.
+	//
+	// Passing DomainFromFilePath's LAST segment here is a WIDENING, not merely
+	// a miss: for agents/tools/askSpecialist.memql it would admit any id whose
+	// namespace is `tools`, which is a foreign domain's namespace that assembly
+	// for this file can never emit -- a cross-namespace bind with no import, on
+	// the path that derives row ids. The same-domain scope the last segment
+	// describes is a different question, and this is not it.
 	if resolved, cerr := NewConceptResolver(registry).ResolveCanonicalIdConceptRefsInNamespace(
-		content, DomainFromFilePath(origin), declaredNamespaceForOrigin(origin)); cerr != nil {
+		content, RootDomainFromFilePath(origin), declaredNamespaceForOrigin(origin)); cerr != nil {
 		return nil, fmt.Errorf("%s: %w", origin, cerr)
 	} else {
 		content = resolved

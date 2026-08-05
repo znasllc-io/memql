@@ -114,8 +114,10 @@ func TestCanonicalId_AmbiguousRemappedPackAgreesWithTheSameDomainGate(t *testing
 			"That is the memql#2976 deadlock, which uniqueness could not close: %v", err)
 	}
 
-	// 2. And the same-domain import is unavailable: the gate strips it. So
-	//    ambient is not merely A working spelling, it is the ONLY one.
+	// 2. And the SAME-DOMAIN import is unavailable: the gate strips it. (The
+	//    cross-namespace `use zcluster.concepts.{ widget }` remains available
+	//    and is asserted elsewhere -- this step is about the spelling the gate
+	//    bans, not about a count.)
 	withImport := []byte("use zdeploy.concepts.{ widget }\n\nmutate widget doThing {\n  insert {\n    id: args.x\n  }\n}\n")
 	stripped, err := languageParser.RewriteSameDomainUse(domain, withImport)
 	if err != nil {
@@ -422,6 +424,77 @@ mutate deployment nestedAmbientRef {
 	}
 }
 
+// TestCanonicalId_NestedFileDoesNotBindItsSubdirectorysNamespace is the guard
+// on which directory the ambient rule is handed (memql#3026 landing review,
+// round 3).
+//
+// Admitting the directory as well as the pin is only correct when `domain` IS
+// the directory assembly used -- the FIRST path segment. The loader was still
+// passing DomainFromFilePath's LAST segment, so for
+// agents/tools/askSpecialist.memql the rule admitted any id whose namespace is
+// `tools`: a FOREIGN domain's concepts, bound with no import, on the path that
+// derives row ids. That is a widening, not a near miss, and it is the exact
+// bind the gate exists to refuse -- introduced by the fix for the deadlock in
+// the other direction.
+//
+// The tree has 23 nested files under dsl/agents/{roles,skills,tools}; none
+// writes canonicalId today, so this was latent, and a MEMQL_DSL_PATH bundle
+// mounting a domain named `tools`, `roles` or `skills` makes it live.
+func TestCanonicalId_NestedFileDoesNotBindItsSubdirectorysNamespace(t *testing.T) {
+	registry := &memoryNodes.MemoryRegistry{}
+	registry.ReplaceAll(map[string]*memoryNodes.Concept{
+		// A foreign domain whose namespace happens to equal the SUBDIRECTORY
+		// of the file doing the referencing.
+		"v1:tools:widget": {Name: "v1:tools:widget"},
+	})
+	const origin = "agents/tools/askSpecialist.memql"
+
+	// Through the loader, which is where the wrong segment was being passed.
+	src := `@description("A nested file naming a foreign domain's concept.")
+mutate widget nestedForeignRef {
+  args {
+    x  string  @required
+  }
+  insert {
+    id: canonicalId(args.x, widget)
+  }
+}`
+	if _, err := tryParseNewFunctionSyntax(
+		"nestedForeignRef", "mutation", src, origin, registry); err == nil {
+		t.Error("a nested file bound a FOREIGN domain's concept ambiently, with no import, " +
+			"because the ambient rule was handed the file's SUBDIRECTORY (\"tools\") instead of " +
+			"the directory its own concepts assemble under (\"agents\"). The two arguments must " +
+			"both describe the assembly directory.")
+	}
+
+	// And directly on the correct pairing, so a failure names the rule rather
+	// than the loader. (The mis-pairing is not asserted here: handing the rule
+	// the last segment DOES admit v1:tools:widget, which is precisely why the
+	// loader must not do it -- a test asserting the broken call still breaks
+	// would be pinning the hazard, not the fix.)
+	if got, err := NewConceptResolver(registry).ResolveCanonicalIdConceptRefsInNamespace(
+		`canonicalId(args.x, widget)`, RootDomainFromFilePath(origin), declaredNamespaceForOrigin(origin)); err == nil {
+		t.Errorf("the ambient rule admitted a foreign namespace even when handed the assembly "+
+			"directory. `tools` is not a namespace agents/tools/askSpecialist.memql can "+
+			"assemble under.\n  got: %s", got)
+	}
+
+	// The right pairing resolves this file's OWN domain, which is what the
+	// directory arm is for -- so the guard above is not just refusing
+	// everything.
+	registry.ReplaceAll(map[string]*memoryNodes.Concept{
+		"v1:agents:widget": {Name: "v1:agents:widget"},
+	})
+	got, err := NewConceptResolver(registry).ResolveCanonicalIdConceptRefsInNamespace(
+		`canonicalId(args.x, widget)`, RootDomainFromFilePath(origin), declaredNamespaceForOrigin(origin))
+	if err != nil {
+		t.Fatalf("a nested file must still reach its own root domain's concept: %v", err)
+	}
+	if !strings.Contains(got, `"v1:agents:widget"`) {
+		t.Errorf("wrong id.\n  got: %s", got)
+	}
+}
+
 // TestCanonicalId_AmbientNamespaceTestIsAnchored guards the substring hazard
 // (memql#3026 landing review).
 //
@@ -645,19 +718,59 @@ func TestCanonicalId_DisambiguatorIsAnchoredToo(t *testing.T) {
 	}
 }
 
-// TestCanonicalId_EmptyDeclaredNamespaceFallsBackToTheDomain covers the
-// exported three-argument form's defensive branch, which nothing else reaches:
-// production always calls InDomain, which supplies a namespace. A caller that
-// knows only the directory should get the directory's behaviour rather than
-// silently losing ambient scope altogether.
-func TestCanonicalId_EmptyDeclaredNamespaceFallsBackToTheDomain(t *testing.T) {
-	got, err := remappedPackResolver().ResolveCanonicalIdConceptRefsInNamespace(
+// TestCanonicalId_EmptyDeclaredNamespaceStillResolvesViaTheDirectory covers a
+// caller that knows only the directory -- an unpinned domain, or the plain
+// ResolveCanonicalIdConceptRefsInDomain path.
+//
+// It is named for what it asserts. An earlier version claimed to pin a
+// `declaredNS = domain` FALLBACK, and did not: with the directory now an
+// ambient namespace in its own right, deleting that fallback changed neither
+// behaviour nor any test, so the branch was dead and the test was pinning
+// nothing. The branch is gone; this asserts the behaviour that remains.
+// (Same "passes against the regression" flaw this file calls out twice in
+// other people's tests -- it was in mine too. Landing review, round 3.)
+//
+// The fixture is the AMBIGUOUS one so the hint genuinely has work to do.
+func TestCanonicalId_EmptyDeclaredNamespaceStillResolvesViaTheDirectory(t *testing.T) {
+	got, err := ambiguousRemappedResolver().ResolveCanonicalIdConceptRefsInNamespace(
 		`canonicalId(args.x, widget)`, "zcluster", "  ")
 	if err != nil {
-		t.Fatalf("an empty declaredNS must fall back to the domain, not disable ambient "+
-			"resolution: %v", err)
+		t.Fatalf("a caller supplying only the directory must still get ambient resolution -- "+
+			"with an ambiguous name the directory hint is the only thing that can "+
+			"disambiguate: %v", err)
 	}
 	if !strings.Contains(got, `"v1:zcluster:widget"`) {
 		t.Errorf("wrong id.\n  got: %s", got)
+	}
+}
+
+// TestCanonicalId_AmbientHintPrefersThePin pins ambientHints' ORDER, which
+// decides which canonical id is emitted and was pinned by nothing (landing
+// review, round 3).
+//
+// A pinned domain assembles under two namespaces, so it can declare the same
+// short name twice -- once annotated (the pin), once not (the directory). Both
+// are legitimately its own and both pass idIsInDomainAmbientScope, so the gate
+// cannot choose between them: precedence alone decides, and it decides a ROW
+// ID. Pin first, because the pin is the deliberate declaration (#2614's escape
+// hatch is written down on purpose) while the directory is the default.
+func TestCanonicalId_AmbientHintPrefersThePin(t *testing.T) {
+	registry := &memoryNodes.MemoryRegistry{}
+	registry.ReplaceAll(map[string]*memoryNodes.Concept{
+		"v1:zcluster:widget": {Name: "v1:zcluster:widget"}, // annotated: the pin
+		"v1:zdeploy:widget":  {Name: "v1:zdeploy:widget"},  // unannotated: the directory
+	})
+
+	got, err := NewConceptResolver(registry).ResolveCanonicalIdConceptRefsInNamespace(
+		`canonicalId(args.x, widget)`, "zdeploy", "zcluster")
+	if err != nil {
+		t.Fatalf("a name declared under BOTH of a pinned domain's namespaces must still "+
+			"resolve -- both are this domain's own: %v", err)
+	}
+	if !strings.Contains(got, `"v1:zcluster:widget"`) {
+		t.Errorf("the PIN must win when a short name is declared under both the pin and the "+
+			"directory. Swapping the hint order silently changes the derived row id, and both "+
+			"ids pass the ambient gate, so nothing else catches it.\n"+
+			"  want to contain: \"v1:zcluster:widget\"\n  got: %s", got)
 	}
 }

@@ -249,15 +249,32 @@ func (r *ConceptResolver) ResolveCanonicalIdConceptRefsInDomain(content, domain 
 }
 
 // ResolveCanonicalIdConceptRefsInNamespace is the namespace-aware form
-// (memql#3026). `declaredNS` is the namespace the domain's concepts actually
-// assemble under -- its namespace.pin when it has one, else the directory.
-// Passing it explicitly is what lets a test build a remapped fixture without
-// depending on the real tree; the InDomain wrapper resolves it from the pin.
+// (memql#3026).
+//
+// BOTH arguments describe the ASSEMBLY directory -- the one
+// AssembleConceptIdFromDeclInDir was given, which for a nested
+// `<domain>/<sub>/*.memql` file is the FIRST path segment. `domain` is that
+// directory; `declaredNS` is its namespace.pin, or the directory again when it
+// has none. Passing declaredNS explicitly is what lets a test build a remapped
+// fixture without depending on the real tree.
+//
+// Handing `domain` the LAST path segment is a widening rather than a near
+// miss, because the ambient rule admits ids whose namespace IS that directory:
+// for agents/tools/askSpecialist.memql it would admit a foreign domain's
+// `v1:tools:*` with no import at all. The last segment answers a different
+// question -- same-domain scope for the `use` gate -- and the two must not be
+// swapped (landing review, and #2852 from the other side).
 func (r *ConceptResolver) ResolveCanonicalIdConceptRefsInNamespace(content, domain, declaredNS string) (string, error) {
 	imports := importedConceptHints(content)
-	if strings.TrimSpace(declaredNS) == "" {
-		declaredNS = strings.TrimSpace(domain)
-	}
+	// Normalise rather than fall back. The old `declaredNS = domain` fallback
+	// is dead now that the directory is an ambient namespace in its own right:
+	// with declaredNS empty, ambientHints still offers the directory and
+	// idIsInDomainAmbientScope still admits it, so deleting the fallback
+	// changed no behaviour and no test (landing review, round 3). Untrimmed
+	// input would otherwise be offered as a whitespace hint that matches
+	// nothing.
+	domain = strings.TrimSpace(domain)
+	declaredNS = strings.TrimSpace(declaredNS)
 
 	var b strings.Builder
 	i := 0
