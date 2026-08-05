@@ -429,15 +429,32 @@ func requestFromRow(row map[string]any) Request {
 // escape set alone moved that failure rather than removing it.
 //
 // NUL is the only escape THIS RENDERER CAN EMIT that jsonb rejects. That is a
-// narrower claim than "the only escape jsonb rejects", and the narrow one is
-// what is actually load-bearing: `\u0007`, `\u000b`, `\u001b`, high bytes and
-// `�` all store fine, verified on the same instance, but jsonb ALSO rejects
-// a lone surrogate escape ("Unicode low surrogate must follow a high
-// surrogate"). QuoteString cannot produce one -- it emits `\u00XX` only for
-// bytes below 0x20 plus the two mandatory escapes, and encoding/json turns
-// invalid UTF-8 into `�` rather than a surrogate half -- so the gap is
-// unreachable from here. State the reachable claim rather than the general one:
-// a new value added to this statement should be re-checked, not assumed safe.
+// narrower claim than "the only escape jsonb rejects", and only the narrow one
+// is true: jsonb ALSO rejects a lone surrogate escape ("Unicode low surrogate
+// must follow a high surrogate").
+//
+// The narrow claim is checkable because the output alphabet is small, and it was
+// enumerated rather than recalled -- over every byte 0x00-0xFF, every rune to
+// U+2FFF, the surrogate range and invalid UTF-8, QuoteString emits exactly 37
+// distinct escapes:
+//
+//	\" and \\	the two mandatory ones
+//	\b \f \n \r \t	the short forms
+//	\u0000-\u001f	the remaining control bytes
+//	\u2028 \u2029	which encoding/json escapes UNCONDITIONALLY for
+//		JSONP safety -- unrelated to the SetEscapeHTML
+//		choice QuoteString documents
+//	\ufffd	for invalid UTF-8
+//
+// Every one of those except \u0000 was fed to jsonb and stored fine. A
+// surrogate half is not in the set and cannot be, because invalid UTF-8 becomes
+// � first. So the wider gap is unreachable from here.
+//
+// Measure rather than recall if this changes. Three separate claims in this
+// change's own review were wrong precisely because they described the escape set
+// from memory instead of enumerating it -- including an earlier version of this
+// very sentence, which said "\u00XX only for bytes below 0x20" and missed
+// the short forms, \u2028/\u2029 and \ufffd.
 //
 // # Why U+FFFD rather than dropping the byte
 //
