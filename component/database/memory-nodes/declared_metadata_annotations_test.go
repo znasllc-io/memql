@@ -684,6 +684,7 @@ func TestSecretEnforcementIsRealAndScoped(t *testing.T) {
 				{"query results", []string{"redacted from **query results**", "not redacted from query results", "from **query results**"}},
 				{"the automation args binder", []string{"automation args binder", "args_binding.go", "not redacted by the automation"}},
 				{"concept payload validation", []string{"concept payload validation", "json schema, which interpolates", "by concept payload validation"}},
+				{"the tool-args validator", []string{"tool-args validator", "validatetoolargs", "tool_execution.go"}},
 				{"the by-name matching rule", []string{"by argument name", "by arg name", "matching is by argument name", "matches by argument name", "name, not by write target", "not by write target"}},
 				{"the length disclosure", []string{"length is never redacted", "value too long", "rune count for a secret"}},
 			} {
@@ -696,11 +697,15 @@ func TestSecretEnforcementIsRealAndScoped(t *testing.T) {
 				}
 				if !found {
 					t.Errorf("%s must name %s when describing @secret's scope.\n\n"+
-						"@secret redacts in ONE of the engine's three validation surfaces (the "+
-						"function-args validator) and matches by argument NAME, not by write "+
-						"target. A document that says it is enforced without naming what it does "+
-						"NOT cover recreates the over-promise memql#2960 corrected -- one rung "+
-						"higher, and harder to spot because it is now partly true.\n\n"+
+						"@secret redacts in exactly ONE validation surface (the function-args "+
+						"validator) and matches by argument NAME, not by write target. The "+
+						"surfaces listed here are those VERIFIED uncovered, not a closed "+
+						"enumeration -- three successive passes each found one the previous "+
+						"pass had walked past (memql#3117 is the most recent), so add a row "+
+						"here rather than restating a total. A document that says it is "+
+						"enforced without naming what it does NOT cover recreates the "+
+						"over-promise memql#2960 corrected -- one rung higher, and harder to "+
+						"spot because it is now partly true.\n\n"+
 						"Accepted spellings: %v", doc, surface.name, surface.anyOf)
 				}
 			}

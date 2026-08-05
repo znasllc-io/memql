@@ -194,8 +194,10 @@ memql#2883).
 `@secret` is **partially enforced**, and the boundary is the part that
 matters (memql#3036). It emits `x-secret`, which
 `Concept.SecretFields()` reads, and the engine redacts the value in
-**one** of its three validation surfaces: the **function-args
-validator**. A rejected value there is replaced with `<redacted>`,
+exactly one validation surface: the **function-args validator**. The
+uncovered surfaces listed below are those verified uncovered, not a
+closed set — treat one that is absent from the list as unclassified
+rather than as covered. A rejected value there is replaced with `<redacted>`,
 while the argument name and the declared constraint (enum members,
 bounds, pattern) survive so the diagnostic stays usable.
 
@@ -217,6 +219,15 @@ the same rule set over **event payloads** — and a `graph.node.created`
 event carries the concept row's fields flattened into its payload. It
 quotes the value in full, and writes that same reason string to a WARN
 log, so a row value **can** reach a **structured log** by that path.
+
+It is **not** redacted by the **tool-args validator**
+(`MemQLEngine.validateToolArgs`, `component/memql/tool_execution.go`),
+which is compiled from the *same* args schema that carries the secret
+flag and is auto-registered for every enabled query and mutation. On the
+agent path it runs **before** the covered validator, it serializes the
+**entire** args map into a WARN log rather than quoting one value, and
+its error message is returned to the model unredacted. Tracked as
+memql#3117.
 
 It is **not** redacted by **concept payload validation**. `@minimum`,
 `@maximum` and `@format` declared on the *concept* are enforced by JSON

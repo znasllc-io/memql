@@ -550,8 +550,11 @@ func (c *Concept) PIIFields() []string {
 // whole change, and there is no hand-maintained list to drift out of sync.
 //
 // SCOPE, and it is deliberately partial. Read this before assuming a value is
-// covered -- there are THREE validation surfaces in the engine and @secret
-// reaches ONE of them.
+// covered: @secret reaches exactly ONE validation surface, named below. The
+// uncovered list is what has been VERIFIED uncovered, not a closed enumeration
+// -- three successive passes over this engine each found a surface the previous
+// pass had walked past (the most recent is memql#3117). Treat a surface absent
+// from this list as unclassified, never as covered.
 //
 // COVERED: the memql function-args validator
 // (component/memql/function_validator.go), which quotes a rejected argument
@@ -577,6 +580,16 @@ func (c *Concept) PIIFields() []string {
 // has no Secret member, so a secret value is quoted in full there. Its reason
 // string is also written to a WARN log (args_binding.go:285) -- so a concept
 // row value CAN reach a structured log by that path. Tracked separately.
+//
+// NOT COVERED -- the tool-args validator, MemQLEngine.validateToolArgs
+// (component/memql/tool_execution.go:66). It is compiled from the SAME
+// ArgsSchema that carries the Secret flag and is auto-registered for every
+// enabled query and mutation, so it covers the same declarations this list
+// does. It is the worst of the uncovered set: it runs BEFORE the covered
+// validator on the agent path (tool_execution.go:366 precedes the handler at
+// :375), it serializes the ENTIRE args map into a WARN log rather than quoting
+// one value (:112-115), and formatToolValidationError (:256) does no redaction
+// before the message is returned to the model. Tracked as memql#3117.
 //
 // NOT COVERED -- concept payload JSON-schema validation (Create, below), which
 // enforces @minimum / @maximum / @format declared on the CONCEPT and

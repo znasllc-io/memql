@@ -301,6 +301,14 @@ concept fieldTypes {
 //                       fields. It quotes the value in full and also writes it
 //                       to a WARN log -- so a row value CAN reach a structured
 //                       log by that path.
+//                       NOT REDACTED BY THE TOOL-ARGS VALIDATOR
+//                       (validateToolArgs). Compiled from the SAME args schema
+//                       that carries the secret flag and auto-registered for
+//                       every enabled query and mutation, it runs BEFORE the
+//                       covered validator on the agent path, serializes the
+//                       ENTIRE args map into a WARN log rather than quoting one
+//                       value, and returns its message to the model
+//                       unredacted. Tracked as memql#3117.
 //                       NOT REDACTED BY CONCEPT PAYLOAD VALIDATION. @minimum /
 //                       @maximum / @format declared on the CONCEPT are checked
 //                       by JSON schema, which interpolates the value. Any
@@ -376,8 +384,8 @@ concept fieldTypes {
 // needed to get from one to the other.
 //
 // Where the rest stand, which is NOT one answer for all of them:
-//   - @secret   PARTIALLY ENFORCED as of memql#3036 -- validation error
-//     messages only. The scope was re-ruled mid-build: the original approval
+//   - @secret   PARTIALLY ENFORCED as of memql#3036 -- the function-args
+//     validator only. The scope was re-ruled mid-build: the original approval
 //     said "logs", and the measurement found no log site carries a row
 //     payload, so there was nothing there to enforce against. Error messages
 //     are not the smaller surface -- they are the surface that exists.
@@ -413,7 +421,7 @@ concept fieldAnnotations {
 
   // Immutability + secrecy
   externalId   string! @immutable @description("Foreign-system id, intended never to change. NOT enforced -- @immutable is declared metadata (memql#2960).")
-  apiKey       string @secret @description("Sensitive. Redacted from validation error messages only -- NOT from query results or logs (memql#3036).")
+  apiKey       string @secret @description("Sensitive. The function-args validator prints <redacted> for a rejected value. No other surface redacts it -- not query results, not the automation args binder, not the tool-args validator, and never its length (memql#3036, memql#3117).")
 
   // Server-owned fields. @internal is server-only in BOTH directions;
   // @serverSet is refused from caller args but still projected, which is why
