@@ -189,6 +189,29 @@ func (e *MemQLEngine) evaluateExpressionSet(ctx context.Context, expr Expression
 		recordShadow("", extractConceptFromExpression(expr), ShadowPathFilter, expr)
 	}
 
+	// ENFORCEMENT (memql#3076, Phase 3 of #2803). Shadow mode above measures
+	// what a declared tier WOULD do to this access; this applies it.
+	//
+	// Deliberately NOT behind ShadowEnabled(). That env gate exists so a
+	// measurement can be taken without changing behaviour, and enforcement IS
+	// the behaviour change -- gating it on the same flag would leave the tier
+	// unenforced in every environment that has not opted into measurement,
+	// which is all of them.
+	//
+	// On the same seam and BEFORE resolveActorReferences for the same reason
+	// the measurement is: the injected term carries an ActorReference that the
+	// next step substitutes. Injecting after resolution would leave an
+	// unresolved reference in the compiled filter.
+	//
+	// READ PATH ONLY: "you cannot READ a row whose declared owner is not you".
+	// NOT "nobody can WRITE a row claiming you own it" -- memql#3059 is the
+	// write-side counterpart and is independently open.
+	enforcedExpr, enforceErr := enforceRowAuthzFilter(expr)
+	if enforceErr != nil {
+		return nil, enforceErr
+	}
+	expr = enforcedExpr
+
 	// Resolve any caller.X references using the AccessContext on ctx
 	// before we start compiling SQL. This substitutes *ActorReference
 	// comparison values with concrete values (or the owner-wildcard

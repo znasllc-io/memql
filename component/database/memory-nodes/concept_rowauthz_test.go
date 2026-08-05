@@ -2,11 +2,6 @@ package memoryNodes
 
 import (
 	"encoding/json"
-	"go/ast"
-	"go/parser"
-	"go/token"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -252,127 +247,24 @@ func TestRowAuthzSurvivesConceptJSON(t *testing.T) {
 // TestRowAuthzIsInert is the gate that keeps row-authz from enforcing
 // anything before someone decides it should.
 //
-// #2920 and #2921 are both explicit that no predicate is injected and
-// no query result changes. The way that stops being true by accident is
-// somebody reading Concept.RowAuthz from the execution path. This walks
-// the Go tree and requires every reference to live in a file that is
-// allowed to have one.
+// TestRowAuthzIsInert is RETIRED here (memql#3076, Phase 3).
 //
-// The list GREW in #2921, and that growth is the mechanism working
-// rather than the gate weakening: shadow mode necessarily reads the
-// tier (that is what measuring means) and necessarily hooks the
-// executor (that is where reads happen), so the files were moved on
-// deliberately, in the commit that made the change. Phase 3 lands the
-// same way.
+// It walked the Go tree and failed if any non-allow-listed file read
+// Concept.RowAuthz, on the premise that Phase 1 was "vocabulary only -- no
+// predicate is injected and no query result changes". That premise is no
+// longer true: enforcement is live, the executor ANDs the declared tier into
+// the filter, and the gate's own comment named this commit as its exit
+// condition --
 //
-// Reading is therefore no longer the invariant. The invariant that
-// survives is that the tier never becomes part of a query, and it is
-// asserted behaviourally elsewhere: `TestShadowHookDoesNotTouchTheExpression`
-// (the hook does not mutate what it is handed) and
-// `TestShadowModeChangesNoExpression` (the analyzer is pure).
-func TestRowAuthzIsInert(t *testing.T) {
-	root := repoRootForRowAuthz(t)
-
-	// Files permitted to reference the row-authz surface: the shared
-	// detector, the loader that fills the field, the boot-time
-	// undeclared warning, the codemod, the annotation registry, and
-	// (#2921) shadow mode's analyzer plus the two executor hook sites
-	// that feed it. Anything else that names it is enforcement
-	// arriving without a decision.
-	allowed := map[string]bool{
-		"component/language/parser/rowauthz_binding.go":     true,
-		"component/database/memory-nodes/concept_parser.go": true,
-		"component/database/memory-nodes/concept.go":        true,
-		"component/language/annotations/registry.go":        true,
-		"component/memql/unified_loader.go":                 true,
-		"cmd/memqlmigrate/rowauthz_infer.go":                true,
-		"cmd/memqlmigrate/main.go":                          true,
-		// #2921 shadow mode: the analyzer, and the two hook sites that
-		// feed it. The executor is on this list ONLY because it calls
-		// recordShadow, which returns nothing and cannot alter a query.
-		"component/memql/rowauthz_shadow.go": true,
-		"component/memql/executor.go":        true,
-	}
-
-	var offenders []string
-	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			// `sdk/` is deliberately NOT skipped: sdk/gen is the
-			// concept emitter, so it is one of the likeliest places
-			// for the tier to start being read without anyone
-			// noticing.
-			switch d.Name() {
-			case ".git", "node_modules", "vendor":
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-			return nil
-		}
-		rel, relErr := filepath.Rel(root, path)
-		if relErr != nil {
-			return relErr
-		}
-		rel = filepath.ToSlash(rel)
-		if allowed[rel] {
-			return nil
-		}
-		src, readErr := os.ReadFile(path)
-		if readErr != nil {
-			return readErr
-		}
-		if !strings.Contains(string(src), "RowAuthz") {
-			return nil
-		}
-		// Confirm it is a real identifier reference rather than the
-		// word appearing in a comment or a string.
-		fset := token.NewFileSet()
-		f, parseErr := parser.ParseFile(fset, path, src, 0)
-		if parseErr != nil {
-			// Unparseable Go is not this test's business.
-			return nil //nolint:nilerr // not a row-authz finding
-		}
-		ast.Inspect(f, func(n ast.Node) bool {
-			id, ok := n.(*ast.Ident)
-			if ok && strings.Contains(id.Name, "RowAuthz") {
-				offenders = append(offenders, rel+": "+id.Name)
-			}
-			return true
-		})
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("walk: %v", err)
-	}
-	if len(offenders) > 0 {
-		t.Fatalf("Phase 1 of #2920 is vocabulary only -- no predicate is injected and no query "+
-			"result changes. These non-test files reference the row-authz surface and are not on "+
-			"the allow-list:\n  %s\n\nIf this is the enforcement phase landing, move the file into "+
-			"the allow-list in the same commit, so the change is deliberate rather than incidental.",
-			strings.Join(offenders, "\n  "))
-	}
-}
-
-// repoRootForRowAuthz walks up from the test's working directory to the
-// module root (the directory holding go.mod).
-func repoRootForRowAuthz(t *testing.T) string {
-	t.Helper()
-	dir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
-	for {
-		if _, statErr := os.Stat(filepath.Join(dir, "go.mod")); statErr == nil {
-			return dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			t.Fatal("could not find the module root (no go.mod above the test's working directory)")
-		}
-		dir = parent
-	}
-}
+//	"The list GREW in #2921, and that growth is the mechanism working rather
+//	 than the gate weakening ... Phase 3 lands the same way."
+//
+// Retired rather than extended, because extending it would have meant adding
+// the enforcer to an allow-list whose whole claim is that nothing enforces.
+//
+// The tree is NOT left with nothing in its place, which was the condition on
+// retiring it. TestRowAuthzShadowReport now fails on any measured access that
+// is would-narrow OR undecidable -- a stronger statement than "who may read
+// the field", because it constrains what enforcement is allowed to DO rather
+// than who may look at the declaration. See the Phase 3 gate at the end of
+// component/memql/rowauthz_shadow_report_test.go.

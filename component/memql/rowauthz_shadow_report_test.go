@@ -350,6 +350,42 @@ no filter.
 				r.construct, r.concept, r.tier, r.predicate, r.reason)
 		}
 	}
+
+	// THE PHASE 3 ENFORCEMENT GATE (memql#3076).
+	//
+	// The loop above has always failed on would-narrow. This adds the arm it
+	// did not have -- UNDECIDABLE -- and what it means changed under this
+	// phase: the predicate is no longer computed and discarded, it is ANDed
+	// into the filter. So an undecidable access is no longer a gap in a
+	// measurement, it is an access enforcement changes BLINDLY.
+	//
+	// Enforcement was ruled safe on a measurement of zero would-narrow AND
+	// zero undecidable. That measurement is evidence, not a licence: queries
+	// get written between a ruling and any later merge, and one new query over
+	// a declared concept that omits the conjunct turns enforcement from a
+	// no-op into a silent result-set change. This gate is the difference
+	// between "enforcement was safe when we ruled" and "enforcement is safe
+	// now".
+	//
+	// If it fires, ADJUDICATE the entry -- a latent authorization bug whose
+	// filter should always have carried the term, or a legitimate broader read
+	// needing its own explicit declaration. Do not widen the gate.
+	//
+	// This is also why TestRowAuthzIsInert could be retired in the same
+	// change: the tree must never be left with neither, or enforcement drifts
+	// with no mechanical statement of what it is allowed to do.
+	for _, r := range measured {
+		if r.verdict == ShadowUndecidable {
+			t.Errorf("%s (%s, tier %s) is UNDECIDABLE, and enforcement is live (memql#3076).\n"+
+				"The declared predicate %q is now ANDed into this read's filter, so an access the "+
+				"analyzer cannot reason about is one whose result set changes without anyone "+
+				"having decided it should.\n"+
+				"Adjudicate it rather than widening this gate: either the filter is missing an "+
+				"ownership conjunct it should always have had, or it is a legitimate broader read "+
+				"that needs an explicit declaration. Reason given: %s",
+				r.construct, r.concept, r.tier, r.predicate, r.reason)
+		}
+	}
 }
 
 // traversableDeclaredConcepts returns every concept that declares a
