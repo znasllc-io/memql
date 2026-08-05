@@ -1,6 +1,7 @@
 package memql
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -176,4 +177,81 @@ func TestMarkSecretArgsFields_FailsOpenOnUnresolvableConcept(t *testing.T) {
 	markSecretArgsFields(schema, "v1:identity:credential", nil)
 	markSecretArgsFields(schema, "", registry)
 	markSecretArgsFields(nil, "v1:identity:credential", registry)
+}
+
+// The array branch of markSecretArgsField -- "a []string of secrets is a secret
+// in every element" -- was reachable from authored DSL but proven by nothing:
+// deleting the whole Items block left the package green, and the only coverage
+// (TestSecretSurvivesArgsFieldClone) HAND-SETS Items.Secret. That is the exact
+// fixture-not-wiring pattern this file's header condemns, so it gets the same
+// treatment as the scalar case: real DSL, real registry, real loader.
+func TestLoader_StampsSecretOnArrayElements(t *testing.T) {
+	const conceptID = "v1:identity:credential"
+	registry := newMemoryRegistry(map[string]*memoryNodes.Concept{
+		conceptID: secretConcept(t, conceptID),
+	})
+
+	src := `use identity.concepts.{ credential }
+mutate credential storeCredentials {
+	args {
+		apiKey  []string  @required
+		label   string
+	}
+	insert {
+		id: args.label
+		apiKey: args.apiKey
+	}
+}`
+
+	fn, err := tryParseNewFunctionSyntax("storeCredentials", "mutation", src, "dsl/identity/mutations.memql", registry)
+	if err != nil {
+		t.Fatalf("load mutation: %v", err)
+	}
+
+	apiKey := fieldByName(t, fn, "apiKey")
+	if !apiKey.Secret {
+		t.Fatal("args field \"apiKey\" ([]string) was NOT stamped Secret on the real load path")
+	}
+	if apiKey.Items == nil {
+		t.Fatal("an array args field must carry an Items schema for the element check to redact")
+	}
+	if !apiKey.Items.Secret {
+		t.Error("Items.Secret was NOT stamped -- every element of a []string of secrets is a secret, " +
+			"and the per-element validation path renders through the element schema")
+	}
+	if fieldByName(t, fn, "label").Secret {
+		t.Error("args field \"label\" was stamped Secret, but the concept does not annotate it")
+	}
+}
+
+// quotedArgValueForMessage claims strconv.Quote "reproduces %q byte for byte,
+// so a non-secret message is unchanged". That claim is the entire justification
+// for switching the pattern and date-time sites from %q to %v, and nothing
+// tested it: replacing strconv.Quote with the identity function left the whole
+// package green. A compatibility claim with no test is a compatibility claim
+// nobody will notice breaking.
+func TestQuotedArgValueMatchesPercentQByteForByte(t *testing.T) {
+	plain := &FunctionArgsField{Name: "token", Type: "string"}
+	secret := &FunctionArgsField{Name: "apiKey", Type: "string", Secret: true}
+
+	for _, value := range []string{
+		"",
+		"simple",
+		`already "quoted"`,
+		`back\slash`,
+		"tab\there",
+		"newline\nhere",
+		"unicode é世",
+		"emoji \U0001F510",
+		"\x00control",
+		`%q %v %s`,
+	} {
+		if got, want := quotedArgValueForMessage(plain, value), fmt.Sprintf("%q", value); got != want {
+			t.Errorf("quotedArgValueForMessage(non-secret, %#v) = %s, want %s -- "+
+				"the %%q->%%v swap is only safe while these are byte-identical", value, got, want)
+		}
+		if got := quotedArgValueForMessage(secret, value); got != redactedArgValue {
+			t.Errorf("quotedArgValueForMessage(secret, %#v) = %s, want %s", value, got, redactedArgValue)
+		}
+	}
 }
