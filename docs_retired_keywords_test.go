@@ -85,15 +85,21 @@ import (
 // One, recorded here because a gate whose limits live only in a PR comment is a
 // gate whose next reader believes it covers more than it does:
 //
-//   - PR-TIME COVERAGE. .github/workflows/ci.yml routes lanes by changed-path
-//     bucket for `pull_request` events, and no bucket matches `**/*.md`, so a
-//     docs-only PR skips go-checks and never runs this gate. Drift still cannot
-//     LAND undetected -- that routing applies to pull_request only, and
-//     `merge_group` runs every lane unconditionally, so the merge queue catches
-//     it -- but the feedback arrives at the queue rather than on the PR. The
-//     sibling name gate has the identical hole, and widening the filter makes
-//     every docs-only PR pay the full Go suite, which is a CI-spend call rather
-//     than this gate's to make. Tracked as memql#3054.
+//   - QUOTED AND LISTED LINES. The parser's pattern anchors at `^[ \t]*`, so a
+//     declaration prefixed by a markdown list marker (`- `, `1. `) or sitting in
+//     a table cell is not seen. This arm strips a leading `>` before asking, so
+//     blockquotes ARE covered, but the other prefixes are not. Widening the
+//     strip further starts guessing at markup and risks the false positives
+//     this gate cannot afford, so it is recorded rather than chased.
+//
+// A gap that USED to be recorded here is gone, and saying so matters more than
+// deleting it silently: this block claimed .github/workflows/ci.yml had no
+// bucket matching `**/*.md`, so a docs-only PR skipped go-checks and only the
+// merge queue caught drift. That is false on this tree in all three clauses --
+// ci.yml's `gates:` filter lists `'**/*.md'` first, go-checks gates on
+// `needs.changes.outputs.gates`, and its RUN_GATES step runs `go test ./`, which
+// is this package. memql#3054 tracked it and is CLOSED, by a commit that is an
+// ancestor of this branch. A docs-only PR DOES run this gate on `pull_request`.
 func TestDocsDoNotTeachRetiredDeclarationKeywords(t *testing.T) {
 	out, err := exec.Command("git", "ls-files", "-z").Output()
 	if err != nil {
@@ -127,9 +133,10 @@ func TestDocsDoNotTeachRetiredDeclarationKeywords(t *testing.T) {
 		// ARM 2: the retired procedural RECEIVER form (memql#3053). Delegated
 		// to the parser rather than tabled here -- see retiredReceiverFormRef.
 		//
-		// MARKDOWN ONLY, and deliberately narrower than arm 1 above. The two
-		// arms sweep different file sets because their retired forms live in
-		// different places, and that was measured rather than assumed:
+		// PROSE AND SKELETONS ONLY (.md + .memql), and deliberately narrower
+		// than arm 1 above. The two arms sweep different file sets because their
+		// retired forms live in different places, and that was measured rather
+		// than assumed:
 		//
 		//	arm 1, `mutation <Concept> <name> {`   1 non-markdown hit tree-wide
 		//	arm 2, `func (Receiver) name(...)`     113 hits across 18 Go files
@@ -147,11 +154,29 @@ func TestDocsDoNotTeachRetiredDeclarationKeywords(t *testing.T) {
 		// widened because memql#3050 landed an all-tracked-files sweep in this
 		// same loop after this arm was cut, so the two changes are individually
 		// correct and only collide once merged -- neither PR's own CI could see
-		// it. Restoring the intended scope here rather than growing an exemption
-		// list is what keeps both rules enforceable.
-		if strings.HasSuffix(rel, ".md") && !retiredReceiverGateExempt(rel) {
+		// it. Narrowing this arm rather than growing an exemption list is what
+		// keeps both rules enforceable.
+		//
+		// `.memql` IS INCLUDED, and it is not padding. The 113-hit measurement
+		// argues against `.go` and nothing else -- there are ZERO arm-2 hits in
+		// every other extension in the tree -- so restricting to `.md` would
+		// have been narrower than the evidence. The class that matters is
+		// dsl/_reference/*.memql: authoring skeletons whose entire purpose is to
+		// be COPIED, and which the DSL walker skips for their `_` prefix
+		// (component/memql/dslfs/walker.go), so the parser rejection this arm
+		// delegates to structurally never reaches them. A retired receiver form
+		// left in a skeleton is memql#3053's exact harm -- a reader copies a
+		// declaration that cannot load -- in the one file class nothing else
+		// polices. Measured: it costs zero exemptions today.
+		if receiverGateApplies(rel) {
 			for i, line := range lines {
-				if err := parser.RejectLegacyProceduralAuthorForm(line); err == nil {
+				// Strip a markdown quote/list prefix before asking the parser.
+				// The parser's own pattern anchors at `^[ \t]*`, so `> func
+				// (Mutation) ...` inside a blockquoted example reads identically
+				// to a human and slips past it -- and this very file's fix to
+				// shape-drift-hardening.md uses a blockquoted discussion, so the
+				// bypass is one edit away rather than theoretical.
+				if err := parser.RejectLegacyProceduralAuthorForm(stripDocPrefix(line)); err == nil {
 					continue
 				}
 				t.Errorf("%s:%d teaches the retired procedural RECEIVER form -- "+
@@ -265,7 +290,11 @@ var retiredDeclarationKeywords = []struct{ keyword, replacement, ref string }{
 // engine has ever accepted (Query, Mutation, Logic, Spec, Automation, Builtin,
 // Prompt, Provider, Shape, Tool, Policy, Seed).
 //
-// A copy here would be a THIRTEENTH definition of "what the parser rejects",
+// A copy here would be a SECOND definition of "what the parser rejects" --
+// there is exactly one today, and twelve counts receiver NAMES rather than
+// definitions. An earlier version of this sentence said "thirteenth", which
+// conflated the two; the argument does not need the bigger number.
+// A second definition would be
 // free to drift from the twelve. That is the same defect this file's own
 // retiredDeclRE comment was written about -- a pin that pins a string existing
 // only inside itself -- and it is what makes the gate's claim weaker: a
@@ -276,7 +305,11 @@ var retiredDeclarationKeywords = []struct{ keyword, replacement, ref string }{
 //
 // The cost is honest and small: that function also blanks comments before
 // scanning (memql#1074), so a receiver form appearing only inside a `//` or
-// `/* */` comment is not reported here either. That matches the parser exactly,
+// `/* */` comment is not reported here either. That matches the parser for
+// single-line inputs, which is what this arm feeds it -- but NOT for a
+// multi-line `/* ... */` block: the parser blanks it whole-file, while this arm
+// sees each line alone and still reports the middle one. Strictly more
+// aggressive, not identical,
 // which is the point -- a doc showing something the parser tolerates is not
 // teaching a declaration that fails to load.
 const retiredReceiverFormRef = "memql#303 retired the author-facing procedural surface"
@@ -439,13 +472,15 @@ func TestRetiredReceiverGateMatchesADeclarationAndNotProse(t *testing.T) {
 	}
 
 	for _, ok := range []string{
-		"mutate space createSpace {",                           // the live form
-		"query participant spaceParticipants {",                // the live form
-		"The `func (Mutation)` receiver form is retired.",      // prose
-		"| `func (Shape)` | retired, use `shape <C> <n>` |",    // a table quoting it
-		"see `func (Spec) example` in the old tree",            // mid-line prose
-		"func (myType) Method() error {",                       // ordinary Go, not a DSL receiver
-		"func (e *MemQLEngine) embedActionIntent(id string) {", // ordinary Go
+		"mutate space createSpace {",                             // the live form
+		"query participant spaceParticipants {",                  // the live form
+		"The `func (Mutation)` receiver form is retired.",        // prose
+		"| `func (Shape)` | retired, use `shape <C> <n>` |",      // a table quoting it
+		"see `func (Spec) example` in the old tree",              // mid-line prose
+		"func (myType) Method() error {",                         // ordinary Go, receiver name not in the twelve
+		"func (e *MemQLEngine) embedActionIntent(id string) {",   // ordinary Go, named receiver
+		"func (s *Server) Handle(w http.ResponseWriter) error {", // ordinary Go, pointer receiver
+		"func (p Policy) Apply() error {",                        // NAMED receiver on a colliding type: safe
 	} {
 		if err := parser.RejectLegacyProceduralAuthorForm(ok); err != nil {
 			t.Errorf("the receiver gate fires on a legitimate line, which is how a gate gets "+
@@ -482,5 +517,71 @@ func TestRetiredReceiverExemptionsNameRealFiles(t *testing.T) {
 		t.Error("integrations/CLAUDE.md must NOT be exempt -- it taught the retired " +
 			"`func (Builtin)` form prescriptively, which is the violation memql#3053 " +
 			"was filed to remove, not to grandfather")
+	}
+}
+
+// receiverGateApplies reports whether arm 2 enforces on a path.
+//
+// Extracted so the WIRING is testable, not just the callee. The fixture below
+// pins that RejectLegacyProceduralAuthorForm rejects what it should -- but with
+// the condition inline, changing `.md` to `.zzz` deleted arm 2's enforcement
+// entirely and the whole suite stayed green. That is the silent-disable shape
+// this file exists to prevent, one level up from the one it already guards, and
+// it was measured rather than imagined.
+func receiverGateApplies(rel string) bool {
+	if retiredReceiverGateExempt(rel) {
+		return false
+	}
+	return strings.HasSuffix(rel, ".md") || strings.HasSuffix(rel, ".memql")
+}
+
+// stripDocPrefix removes a leading markdown blockquote marker so a quoted
+// declaration is still seen. Deliberately minimal: `>` only, because widening
+// it into list markers and table pipes starts guessing at markup, and a false
+// positive here is worse than a miss -- it makes the gate something people
+// suppress.
+func stripDocPrefix(line string) string {
+	trimmed := strings.TrimLeft(line, " \t")
+	for strings.HasPrefix(trimmed, ">") {
+		trimmed = strings.TrimLeft(trimmed[1:], " \t")
+	}
+	return trimmed
+}
+
+// The wiring, not the callee. Both halves have to hold: the arm must enforce on
+// prose and skeletons, and must NOT enforce on the Go fixtures that assert the
+// parser rejects this form -- 113 of them across 18 files, which is why the
+// scope is what it is.
+func TestReceiverGateAppliesToProseAndSkeletonsOnly(t *testing.T) {
+	for _, tc := range []struct {
+		rel  string
+		want bool
+	}{
+		{"CLAUDE.md", true},
+		{"integrations/CLAUDE.md", true},
+		{"docs/public/language/memql.md", true},
+		{"dsl/_reference/_logic.memql", true},
+		{"dsl/cognition/mutations.memql", true},
+		{"component/memql/legacy_procedural_rejection_test.go", false},
+		{"component/language/parser/parser_test.go", false},
+		{"scripts/dev/thing.sh", false},
+		{"docs/internal/planning/shape-drift-hardening.md", false}, // exempt
+	} {
+		if got := receiverGateApplies(tc.rel); got != tc.want {
+			t.Errorf("receiverGateApplies(%q) = %v, want %v -- arm 2 is enforcing on the wrong "+
+				"file set, which is invisible from its own fixture (memql#3053)", tc.rel, got, tc.want)
+		}
+	}
+}
+
+// A blockquoted declaration must still be caught: the fix this PR makes to
+// shape-drift-hardening.md uses a blockquoted discussion, so the bypass is one
+// edit away.
+func TestReceiverGateSeesThroughABlockquote(t *testing.T) {
+	const decl = "func (Mutation) updateAgent(args any) error {"
+	for _, line := range []string{decl, "> " + decl, ">" + decl, ">  > " + decl, "  > " + decl} {
+		if err := parser.RejectLegacyProceduralAuthorForm(stripDocPrefix(line)); err == nil {
+			t.Errorf("a blockquoted retired declaration slipped past arm 2: %q", line)
+		}
 	}
 }
