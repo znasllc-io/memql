@@ -3,6 +3,7 @@ package memql
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -124,6 +125,64 @@ func TestLogicCondBareIdentifierPredicate_RejectsUnresolvableAmbientPaths(t *tes
 			require.Contains(t, err.Error(), tc.wants)
 		})
 	}
+}
+
+// TestLogicCondBareIdentifier_MultiStepDeclaredArgIsNotRejected is the
+// false-positive guard, and it is the direction that matters most on this rule:
+// it runs at DSL load in every binary, so a wrong rejection is a boot failure
+// on every node in the cluster rather than one bad answer.
+//
+// A MULTI-STEP body dispatches to LogicRunner.RunLogic, whose bare-identifier
+// tier resolves loop var -> step result -> DECLARED ARG (memql#2364). So
+// `cond(<declaredArg> == ...)` there is not a constant: driven through RunLogic
+// it returns ALLOW for role="owner" and DENY for role="reader". It also loaded
+// on origin/main. The first cut of memql#3024 refused it anyway, on a rule that
+// only knew about step ids -- and told the author their working gate was
+// silently constant.
+//
+// Nothing in this repo's tree writes that shape (all 26 shipped cond predicates
+// compare step-bound locals), so the boot canary could not catch it. A product
+// DSL bundle mounted at MEMQL_DSL_PATH goes through the same loader, and
+// examples/deploypack is one args-name choice away from it.
+//
+// The single-statement case in the sibling file must STAY rejected -- that is
+// memql#3024's whole point -- so this test's value is that it pins both
+// directions of a distinction the rule has to get exactly right.
+func TestLogicCondBareIdentifier_MultiStepDeclaredArgIsNotRejected(t *testing.T) {
+	multiStep := strings.Join([]string{
+		"@enabled",
+		"@actor",
+		"@description(\"multi-step declared-arg probe\")",
+		"logic condMultiStepArgProbe {",
+		"  args {",
+		"    role string @required",
+		"  }",
+		"  body {",
+		"    seen := actor.role ?? \"\"",
+		"    return cond(role == \"owner\", \"ALLOW\", \"DENY\")",
+		"  }",
+		"}",
+	}, "\n")
+
+	_, err := tryParseNewFunctionSyntax(
+		"condMultiStepArgProbe", "logic", multiStep, "common.logic.memql", dotAccessLoadRegistry())
+	require.NoErrorf(t, err,
+		"a MULTI-STEP body comparing a bare DECLARED ARG must load. That path runs on "+
+			"LogicRunner.RunLogic, whose bare-identifier tier resolves declared args "+
+			"(memql#2364), so the predicate discriminates -- verified through RunLogic itself. "+
+			"Refusing it is a false positive on a load-path rule, which is a boot failure on "+
+			"every node, and the diagnostic asserts a constant where there is none: %v", err)
+
+	// The complement: in the same multi-step shape, an identifier that is
+	// NEITHER a step id NOR a declared arg still resolves against nothing and
+	// must stay rejected. Without this the fix above would be a blanket
+	// exemption for every multi-step body.
+	undeclared := strings.Replace(multiStep, `role == "owner"`, `somethingNobodyDeclared == "x"`, 1)
+	_, uErr := tryParseNewFunctionSyntax(
+		"condMultiStepArgProbe", "logic", undeclared, "common.logic.memql", dotAccessLoadRegistry())
+	require.Error(t, uErr,
+		"a bare identifier that is neither a step id nor a declared arg resolves against "+
+			"nothing on EITHER path, so it must still be refused in a multi-step body")
 }
 
 // TestExecute_CondAmbientConfigPredicate_Discriminates is memql#3024's

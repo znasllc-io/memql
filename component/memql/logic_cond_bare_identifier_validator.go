@@ -39,10 +39,21 @@ import (
 //
 // There, `role` IS in scope -- bound by a preceding step, and resolved by the
 // LogicRunner when it walks the steps. Rejecting it would break boot on every
-// node, since this validator sits on the load path for every binary. So the
-// rule fires only when NO local of that name is bound by an earlier step,
-// which is precisely the case where there is nothing for the identifier to
-// resolve against.
+// node, since this validator sits on the load path for every binary.
+//
+// So the rule fires only when the identifier resolves against NOTHING, and
+// what counts as "nothing" DEPENDS ON THE PATH -- getting that wrong in either
+// direction is a defect, and this rule has been wrong in one of them:
+//
+//   - MULTI-STEP body -> LogicRunner.RunLogic, whose bare-identifier tier is
+//     loop var -> step result -> DECLARED ARG (memql#2364). A declared arg
+//     resolves there, so a bare arg name is legitimate and must NOT be refused.
+//   - SINGLE-STATEMENT body -> the fn.Expr path, which has no such tier. The
+//     bare name resolves against nothing and the comparison is constant. This
+//     is the case memql#3024 reports, and it is refused.
+//
+// The `locals` set below is seeded to match, using the same discriminator the
+// loader uses to choose between those two paths.
 //
 // # Scope is deliberately narrow
 //
@@ -79,6 +90,39 @@ func validateLogicCondBareIdentifierPredicate(funcDef *languageParser.FunctionDe
 	for _, step := range auto.Steps {
 		if id := strings.TrimSpace(step.ID); id != "" {
 			locals[id] = struct{}{}
+		}
+	}
+
+	// A step id is not the only thing a bare identifier can resolve against,
+	// and assuming it was made this rule reject working code.
+	//
+	// A MULTI-STEP body dispatches to LogicRunner.RunLogic, whose bare-identifier
+	// tier resolves loop var -> step result -> DECLARED ARG
+	// (resolveBareForArgsAutomation, memql#2364; newEvaluatorForLogic seeds the
+	// `args` custom var it gates on). So there, `cond(<declaredArg> == ...)`
+	// discriminates correctly -- measured through RunLogic itself, not inferred,
+	// and it LOADED on origin/main. Refusing it is a false positive on a rule
+	// that runs at boot in every binary, and the diagnostic would tell an author
+	// their working gate is a silent constant.
+	//
+	// A SINGLE-STATEMENT body has no steps, leaves fn.LogicSteps nil, and runs
+	// the fn.Expr path instead, where that tier does not exist -- the bare name
+	// resolves against nothing and the comparison IS constant. That is the case
+	// memql#3024 reports, and it stays refused.
+	//
+	// nonReturnStepCount is deliberately the SAME discriminator function_loader
+	// uses to decide fn.LogicSteps, so this rule and the dispatch it is
+	// predicting cannot disagree. An identifier that is neither a step id nor a
+	// declared arg is still rejected on both paths, because nothing resolves it
+	// on either.
+	if nonReturnStepCount(auto.Steps) > 0 && funcDef.ArgsSchema != nil {
+		for _, field := range funcDef.ArgsSchema.Fields {
+			if field == nil {
+				continue
+			}
+			if name := strings.TrimSpace(field.Name); name != "" {
+				locals[name] = struct{}{}
+			}
 		}
 	}
 
