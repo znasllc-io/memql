@@ -132,6 +132,26 @@ that raises it: regenerate there.
 `make arch-model-check` (or plain `go test ./...`) verifies the committed model
 matches the code.
 
+**What "matches" means, precisely.** The gate is a SUBSET check, not a byte
+comparison -- every symbol the committed model *references* must still exist in a
+freshly regenerated one. It deliberately does not care about symbols that exist
+in the code and not yet in the artifact, because concurrent merges only ever add
+them and a gate that fails on someone else's merge is unwinnable under a merge
+queue (memql#2844).
+
+"References" covers **node ids and edge endpoints**, and the second half is only
+true since memql#3050. Before it the gate compared node ids alone, which cannot
+see a deleted **unexported** function: the extractor emits no node for one, so
+deleting it removes no node and the subset check passes while the call graph
+keeps pointing at a symbol that is gone. That is not hypothetical -- PR #3033
+deleted `memqlTypeToJSONType` and left 33 `calls` edges behind it, green through
+every CI run, and re-running the fixed gate on `main` immediately found three
+more (`validateLogicCondAmbientPredicate`, `ambientComparisonRoot`,
+`condPredicatesIn`).
+
+So **deleting an unexported function is a model-affecting change**, even though
+nothing in the node set moves. Regenerate.
+
 The artifact is written **compact, on one line**. Pretty-printing it produced a
 1.26M-line file whose one-time reorder GitHub could not diff at all -- the API
 returned *"this diff is taking too long to generate"*, which fails the `changes`
