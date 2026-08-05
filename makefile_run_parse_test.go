@@ -134,6 +134,26 @@ func splitShellCommands(line string) []string {
 			cur.WriteByte(ch)
 			continue
 		}
+		// An unquoted `#` that STARTS a word is a shell comment, so nothing
+		// after it reaches `go test`. Make hands the whole recipe line to the
+		// shell (`#` is a Make comment only at the START of a line, never in a
+		// recipe), which is why this belongs here rather than in the scanner's
+		// leading-`#` skip.
+		//
+		// Word-start is the POSIX rule and the distinction is load-bearing:
+		// `./pkg/#x` is a literal operand the shell does NOT strip, so it must
+		// stay unresolvable, and `-run 'TestA#b'` must keep its `#` -- which the
+		// quote state above already guarantees.
+		//
+		// memql#3027 named this shape and left it half-closed: the leading-`#`
+		// case was pinned, the trailing one was not. While unresolvable was a
+		// silent skip that merely dropped coverage; once it became a hard
+		// failure it turned into a false positive on a working recipe -- and a
+		// false NEGATIVE too, since `-run TestPhantom ./pkg/ # note` reported
+		// "unresolvable" instead of the real "no-match".
+		if ch == '#' && (i == 0 || line[i-1] == ' ' || line[i-1] == '\t') {
+			break
+		}
 		if ch == ';' {
 			cmds = append(cmds, cur.String())
 			cur.Reset()
@@ -156,9 +176,27 @@ func splitShellCommands(line string) []string {
 			continue
 		}
 		// A redirect ends the command too, and its TARGET must not be read as
-		// a package operand. `>`, `>>` and the `N>` fd form all start here.
+		// a package operand. `>`, `>>`, the `N>` fd form and `&>` start here.
+		//
+		// The fd digit belongs to the REDIRECT, not to the command, and it has
+		// to be taken back off: the loop has already written it to `cur`, so
+		// `go test ./pkg/ 2>&1` would otherwise leave a bare `2` in operand
+		// position, hit the default arm, and mark a working recipe
+		// unresolvable -- which this change made a hard CI failure. The earlier
+		// comment here claimed the fd form was handled; it was not, and
+		// `2>&1 | tee` is the more common spelling of the `| tee` shape the
+		// gaps table explicitly blesses (memql#3027).
+		//
+		// Guarded on the digit being its own word, so a genuine operand ending
+		// in a digit (`./pkg2`) is never truncated.
 		if ch == '>' {
-			cmds = append(cmds, cur.String())
+			seg := cur.String()
+			if n := len(seg); n > 0 &&
+				(seg[n-1] == '&' || (seg[n-1] >= '0' && seg[n-1] <= '9')) &&
+				(n == 1 || seg[n-2] == ' ' || seg[n-2] == '\t') {
+				seg = seg[:n-1]
+			}
+			cmds = append(cmds, seg)
 			cur.Reset()
 			if i+1 < len(line) && line[i+1] == '>' {
 				i++
@@ -254,6 +292,24 @@ func commandPackages(cmd string) (pkgs []string, unresolvable bool, isGoTest boo
 			continue
 		}
 		prev := strings.Trim(fields[i-1], "'\"")
+		// Make's recipe prefixes are glued to the tool word: `@` silences the
+		// echo, `-` ignores errors, `+` always runs. They are not part of the
+		// tool name, and `@` is this Makefile's dominant idiom -- 22 of its
+		// recipe lines start with it.
+		//
+		// Without this strip `@go test` classified as NOT a go-test command and
+		// was dropped silently: no finding, no `checked`. That is the very
+		// failure this rule exists to end, arriving one level earlier than the
+		// new `unresolvable` finding can reach, and it was a REGRESSION -- the
+		// bare-word match this replaced caught it. The `checked == 0` floor is
+		// no backstop either, because the one `$(GO)` recipe in this tree keeps
+		// the count at 1 forever.
+		//
+		// Only at the START of the command, where a Make prefix is legal, so
+		// the `npm test` rejection this rule exists for cannot be loosened.
+		if i == 1 {
+			prev = strings.TrimLeft(prev, "@-+")
+		}
 		// `go`, an absolute/relative path ending in `go`, or a Make variable
 		// holding the go binary -- `$(GO) test` is how this Makefile spells it,
 		// so rejecting a variable in TOOL position would disable the gate on
@@ -300,13 +356,33 @@ func commandPackages(cmd string) (pkgs []string, unresolvable bool, isGoTest boo
 		}
 		if strings.HasPrefix(f, "-") {
 			name := strings.TrimLeft(f, "-")
+			// Resolve the flag's BASE NAME before deciding anything, including
+			// before the attached-value short-circuit below. Doing it the other
+			// way round meant `-C=dir` returned at the `=` arm and never
+			// reached the `-C` check, so the guard this change added was
+			// bypassed by one character and the operands went on resolving
+			// against the wrong directory exactly as before. `-C=dir` is valid
+			// go toolchain syntax, verified against the real `go test`.
+			base := name
 			if eq := strings.IndexByte(name, '='); eq >= 0 {
-				continue // value is attached; nothing to skip
+				base = name[:eq]
 			}
 			// `-test.run` is the same flag as `-run`; without this the value
 			// is read as a package operand and the command is written off as
 			// unresolvable (memql#3003 M5).
-			name = strings.TrimPrefix(name, "test.")
+			base = strings.TrimPrefix(base, "test.")
+			// Everything after `-args` belongs to the TEST BINARY, not to
+			// `go test`, and go requires the package operands before it. So the
+			// operand scan must stop here: reading `-args foo` as a package
+			// marked a working recipe unresolvable, which this change made a
+			// hard CI failure.
+			if base == "args" {
+				return pkgs, unresolvable, true
+			}
+			if eq := strings.IndexByte(name, '='); eq >= 0 && base != "C" {
+				continue // value is attached; nothing to skip
+			}
+			name = base
 			if name == "C" {
 				// `go test -C dir` runs in dir, so every relative operand
 				// resolves against IT, not against the gate's CWD. Consuming
@@ -314,7 +390,11 @@ func commandPackages(cmd string) (pkgs []string, unresolvable bool, isGoTest boo
 				// the wrong directory. Unresolvable at this layer, and now
 				// LOUDLY so (memql#3027 gap 1) -- same reasoning as `cd`.
 				unresolvable = true
-				i++
+				// Only the space-separated spelling has a separate value field
+				// to skip; `-C=dir` carries its own.
+				if !strings.Contains(f, "=") {
+					i++
+				}
 				continue
 			}
 			if goTestValueFlags[name] {
