@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	memoryNodesDatabase "github.com/znasllc-io/memql/component/database/memory-nodes"
-	conceptSeeder "github.com/znasllc-io/memql/component/database/memory-nodes/seeder"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/observe"
 	"github.com/znasllc-io/memql/component/server"
@@ -43,17 +42,26 @@ func (a *App) databaseAndConcepts() {
 
 	server.RegisterConceptsEndpoint(a.mux, a.registry)
 
-	// Pass nil for logger - the seeder creates its own via common.NewLogger
-	seedRunner, err := conceptSeeder.NewRunner(a.db, a.registry, nil)
-	if err != nil {
-		a.fatal("failed to initialize concept seeder", "error", err)
-	}
-	conceptSeedDep := conceptSeeder.NewDependency(seedRunner, nil)
-
+	// The legacy `seed.memql` concept seeder used to be constructed here and
+	// added as a Dependency. It is DELETED (memql#3067): it wrote through
+	// concept.Create directly against the store, so it was the one write route
+	// that skipped executeWrite and therefore every guard hooked there -- the
+	// agentRole predefined lock, the RBAC base-role and rank guards, the
+	// healing-override guard, the agent kind/actor-scope checks, and the
+	// identity credential actor-scope guard.
+	//
+	// It was already dead: it ingested only files named `seed.memql`, from
+	// database.Concepts -- a typed-EMPTY fstest.MapFS whose own comment said it
+	// existed solely to feed this walk -- and the tree contains no such file.
+	// The loop body never executed. The hazard was what happened when someone
+	// added the first one: catalog rows written behind every lock, nothing
+	// failing and nothing logged, with the guards still looking present.
+	//
+	// SeedMaterializer (component/memql) is the live seeding path and goes
+	// through the guarded route. This seeder predates it -- it is original code
+	// from the initial commit -- and was left behind rather than superseded on
+	// purpose.
 	a.Dependencies = append(a.Dependencies, a.db)
-	if conceptSeedDep != nil {
-		a.Dependencies = append(a.Dependencies, conceptSeedDep)
-	}
 
 	// Readiness probe (#657): GET /readyz asserts critical schema presence so a
 	// deploy gate can prove migrations actually applied WITHOUT DB credentials
