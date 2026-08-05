@@ -21,6 +21,14 @@ import (
 //
 // When no DB is reachable EnsureSchema is a no-op and the individual tests
 // self-skip, so a developer without Postgres sees exactly what they did before.
+//
+// A developer WITH a reachable database does see one new thing, and it is worth
+// stating rather than implying otherwise: `go test ./...` now MIGRATES that
+// database from this package, which it never did before memql#3030. The tests
+// themselves already wrote and deleted rows when a DB was reachable -- lane
+// membership only ever governed CI -- so the migration is the change, not the
+// writes. Point MEMQL_DATABASE_DSN at a scratch database if that matters to
+// you; the lane sets MEMQL_REQUIRE_DB=1 and CI provisions its own.
 func TestMain(m *testing.M) {
 	if _, err := dbtest.EnsureSchema(context.Background()); err != nil {
 		fmt.Fprintf(os.Stderr, "dbtest.EnsureSchema: %v\n", err)

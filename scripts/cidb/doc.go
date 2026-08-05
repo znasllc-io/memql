@@ -32,10 +32,12 @@
 // ci.yml's hand-maintained comment bound the selector to "packages that carry
 // *_db_test.go files". That is under-specified: FOUR of the seven packages
 // holding db-gated tests carry no such file at all (component/grpc,
-// integrations/cognition, integrations/planner, and -- though it is in the
-// selector -- examples/referencepack). So this gate keys on the thing that
-// actually makes a test db-gated: an import of component/database/dbtest from a
-// _test.go file.
+// integrations/cognition, integrations/planner and examples/referencepack).
+// All four are in the selector as of memql#3030, so the filename convention
+// would now miss every one of them -- the parenthetical here used to single
+// referencepack out as the only one covered, which stopped being true in that
+// change. So this gate keys on the thing that actually makes a test db-gated:
+// an import of component/database/dbtest from a _test.go file.
 //
 // Membership of the lane keys on something stricter still: a TestMain calling
 // dbtest.EnsureSchema. A package earns one only so it can migrate the shared

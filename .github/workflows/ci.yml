@@ -495,8 +495,15 @@ jobs:
   # with the packages that carry `*_db_test.go` files", was already wrong when
   # it was written: examples/referencepack carries none, and four of the seven
   # db-gated packages in the tree carry none either. The real rule, and the one
-  # the gate asserts, is that every package with a TestMain calling
-  # dbtest.EnsureSchema must appear below.
+  # the gate asserts, is that every package importing component/database/dbtest
+  # from a _test.go file must appear below -- with or without a TestMain.
+  #
+  # Read that last clause literally before adding a db-gated test (memql#3030).
+  # The gate used to LOG the uncovered set and pass; it now FAILS on it, so a
+  # package that imports dbtest and is not listed below reds the tree. Adding
+  # the TestMain is what makes a package WORK in this lane -- see the paragraph
+  # below -- but it is not what the gate keys on, and a db-gated package with no
+  # TestMain is precisely the case the tightened assertion exists to catch.
   #
   # These per-package binaries run as PARALLEL processes against this ONE shared
   # DB, so each such package must migrate the schema through that TestMain (a
@@ -545,8 +552,10 @@ jobs:
       # the skip behaviour, which is the intended split.
       #
       # Do not remove it. scripts/cidb asserts this key is present and truthy,
-      # and that this lane's package selector still matches at least one
-      # db-gated test -- the "executed zero of them" failure one level up.
+      # and that this lane's package selector covers EVERY db-gated package in
+      # the tree -- not merely at least one, which is what it asserted until
+      # memql#3030 tightened it. "At least one" passed while nineteen
+      # assertions in four uncovered packages never ran.
       MEMQL_REQUIRE_DB: '1'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
