@@ -303,6 +303,23 @@ concept magicLinkRequest {
 }
 
 /// A person (or synthetic principal). Owns identities. Same record cluster-wide.
+//
+// SELF-OWNED, and NOT YET DECLARED (memql#3029). The `owner="id"` form now
+// exists for exactly this concept -- a user's owner is the row itself, there
+// is no ownerUserId to name -- but declaring it here today would be a FALSE
+// declaration, which is the one thing memql#2982's gate exists to catch.
+//
+// Measured: nine CLIENT-CALLABLE mutations take the row id from caller args
+// (bumpUserDataExport, bumpUserRevocationEpoch, cancelScheduledDeletion,
+// createUser, createUserOnFirstLogin, deleteUserHard, recordLegalAcceptance,
+// scheduleAccountDeletion, setUserActiveSpace). Only toggleComputerUseEnabled
+// stamps it. updateUser counts too, and #3029 assumed it was the ONLY caller
+// path -- @serverOnly bars a client CALL, but the admin handler still reads
+// the target id off an HTTP form, so the provenance gate keeps counting it.
+// Either way the verdict is the same: the nine decide it on their own.
+//
+// So the tier is declarable and still not TRUE here. Making it true is a
+// wire-contract decision over nine client-called mutations, not a bug fix.
 @displayCard(primary="displayName", secondary="role", tertiary="primaryEmail", status="active")
 concept user {
   active          bool    @default("true")  @description("Whether the user account is active.")

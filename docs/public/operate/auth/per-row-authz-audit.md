@@ -122,6 +122,7 @@ restate it:
 | Bucket | Declaration | Predicate it will eventually inject |
 |---|---|---|
 | owned | `@rowAuthz(owner="<field>")` | `<field> == actor.userId` |
+| owned (self) | `@rowAuthz(owner="id")` | `row.id == actor.userId` |
 | admin | `@rowAuthz(clusterOwner)` | `actor.isClusterOwner == true` |
 | public | `@rowAuthz(public)` | none — explicit and greppable |
 | granted | `@rowAuthz(via="<spec>")` | the relationship spec, gated on `actor.userId` |
@@ -148,9 +149,18 @@ Rules:
   is a load error, and so is a second `@rowAuthz` on the same concept
   (the parser folds attributes in source order, so without that check a
   reader scanning top-down would see a tier the engine does not use).
-- **`owner="<field>"` must name a field the concept declares.**
-  Checked at load, against the parsed property set, with the declared
-  fields listed in the diagnostic.
+- **`owner="<field>"` must name a field the concept declares**, with the
+  one exception below. Checked at load, against the parsed property set,
+  with the declared fields listed in the diagnostic.
+- **`owner="id"` is the SELF-OWNED form** (memql#3029), for a concept whose
+  owner is the row's own identity — `v1:identity:user` is the motivating
+  case, since a user has no `ownerUserId` to name. `id` is a row intrinsic
+  rather than a payload property, so it is admitted explicitly rather than
+  by the property lookup. **`id` and only `id`:** `createdBy` is the
+  dangerous near-miss — it means "who WROTE the row", not "whose row it
+  is", so a row an admin creates on a user's behalf has a `createdBy` that
+  is not the owner. Admitting it would let a concept declare an owner tier
+  that is false, which is the class this gate exists to catch.
 - **`public` is spelled explicitly.** "No annotation" and "declared
   public" are different states — making absence stop being silently
   permissive is the entire point.

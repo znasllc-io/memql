@@ -47,6 +47,12 @@
 //   @rowAuthz(owner="<field>")   Rows belong to a user; <field> must be a
 //                                field this concept declares, and it is
 //                                compared against actor.userId.
+//   @rowAuthz(owner="id")        SELF-OWNED: the row IS the owner, so there
+//                                is no field to name (memql#3029). `id` and
+//                                only `id` -- createdBy means "who WROTE the
+//                                row", not "whose row it is", and admitting
+//                                it would let a concept declare an owner
+//                                tier that is FALSE.
 //   @rowAuthz(via="<spec>")      A relationship spec grants visibility.
 //
 // PHASE 1 IS INERT (memql#2920): the tier is parsed, validated and carried on

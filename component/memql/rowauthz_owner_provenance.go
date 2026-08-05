@@ -265,6 +265,24 @@ func OwnerFieldProvenance(registry *FunctionRegistry, declared map[string]string
 		if fn == nil || fn.FunctionKind != "mutation" || fn.MutationTemplate == nil {
 			continue
 		}
+		// NOTE: a @serverOnly mutation is deliberately still counted as a
+		// caller path. A landing-review pass skipped them here, reasoning that
+		// the annotation means "args cannot come from a caller by
+		// construction". That is false: expandFunctionCall (engine.go) gates
+		// on auth.OriginFromContext -- the origin of the CALL -- and never
+		// inspects where a trusted Go call site got its args. updateUser is
+		// the live proof: component/identity/admin/handlers.go stamps internal
+		// origin on a REQUEST-DERIVED context and passes a userId read from an
+		// HTTP form field.
+		//
+		// The repo already adjudicated this. call_origin.go says "Never call
+		// it in a request handler on a context derived from an inbound
+		// request", and call_origin_conformance_test.go allowlists the admin
+		// package as a KNOWN EXCEPTION whose precondition is asserted by a
+		// separate per-package test. So arg provenance is guaranteed by that
+		// discipline, not by the annotation -- and a gate that assumed
+		// otherwise would go quiet on exactly the shape the workertoken
+		// allowlist entry warns about.
 		c := strings.TrimSpace(fn.BoundConcept)
 		if c == "" {
 			c = strings.TrimSpace(fn.MutationTemplate.Concept)
@@ -300,14 +318,51 @@ func ownerProvenanceFor(concept, field string, mutations []*Function) OwnerProve
 		tmpl := fn.MutationTemplate
 		name := fn.Name
 
-		// NOTE: there is deliberately no `field == "id"` clause. An
-		// earlier draft had one, on the theory that an owner field which
-		// IS the row id needs IDTemplate stamped. It is unreachable:
-		// validateRowAuthz requires the owner to name a DECLARED
-		// property, and `id` is a reserved row intrinsic that a concept
-		// cannot declare -- so `@rowAuthz(owner="id")` fails to load by
-		// both routes. A clause that cannot fire is not a safeguard, it
-		// is a claim in the shape of one.
+		// The SELF-OWNED clause (memql#3029). This file previously carried a
+		// note explaining why it was deliberately ABSENT -- validateRowAuthz
+		// required the owner to name a declared property, `id` is a reserved
+		// intrinsic no concept can declare, so `@rowAuthz(owner="id")` could
+		// not load and "a clause that cannot fire is not a safeguard, it is a
+		// claim in the shape of one".
+		//
+		// That reasoning was right, and memql#3029 is exactly what invalidates
+		// its premise: the self-owned form loads now, so the clause can fire
+		// and has to exist. Restored rather than re-invented.
+		//
+		// For `owner="id"` the question is not "who writes a payload field"
+		// but "can a caller write the ROW'S ID" -- so the subject is
+		// IDTemplate, classified by the same classifier the payload arms use.
+		// A lowered AST node there is the normal shape, and classifyTemplateValue
+		// fails CLOSED on one it cannot read (memql#2840), which is the
+		// behaviour this gate wants.
+		// Compared as a literal, deliberately. The definition of this value
+		// is langparser.RowAuthzSelfOwnedField, but naming that symbol here
+		// puts this file on the row-authz surface, and TestRowAuthzIsInert
+		// then demands it be added to the allow-list. That gate is a safety
+		// property about ENFORCEMENT, and this file is a static analyzer that
+		// a test drives -- widening the list for it would trade a real
+		// invariant for a cosmetic one. memql#3029 requires the gate to stay
+		// green and unmodified, so the literal stays and the constant is
+		// named here in prose instead.
+		if field == "id" {
+			switch classifyTemplateValue(tmpl.IDTemplate) {
+			case provStamp:
+				res.StampedBy = append(res.StampedBy, name)
+			case provAccept:
+				res.WritableBy = append(res.WritableBy, name)
+				if res.Reason == "" {
+					res.Reason = fmt.Sprintf("%s takes the row id from caller args, so a caller "+
+						"chooses which row is written", name)
+				}
+			case provUnknown:
+				res.WritableBy = append(res.WritableBy, name)
+				if res.Reason == "" {
+					res.Reason = fmt.Sprintf("%s builds the row id from an expression this "+
+						"analyzer cannot classify; failing closed", name)
+				}
+			}
+			continue
+		}
 
 		explicit, hasExplicit := templateFieldValue(tmpl.PayloadTemplate, field)
 		overlay, hasOverlay := tmpl.PayloadOverlayTemplate[field]
