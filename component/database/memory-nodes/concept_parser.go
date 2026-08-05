@@ -484,6 +484,47 @@ func propertyDeclToParsed(prop *parser.PropertyDecl) (parsedProperty, error) {
 		}
 		elem := elementFromTypeRef(itemRef)
 
+		// The move is ONE level, so it only means something when the element
+		// can carry the constraint. On a COMPOSITE element -- [][]T,
+		// []map[string]T, map[string][]T -- it lands on the inner array or map,
+		// where JSON Schema ignores `pattern`/`minimum`/... outright and where
+		// propertyToJSONSchema's array and map branches never read `variants` at
+		// all, so a discriminated union is discarded rather than merely
+		// misplaced. Every one of those built a schema that CONTRADICTS the
+		// declaration in silence: `[][]string @pattern("^[a-z]+$")` accepted
+		// [["ZZZ"]], `[][]object @variant(...)` accepted [[{"nonsense":1}]].
+		//
+		// memql#2951's definition of done required a constraining annotation to
+		// apply to elements OR be rejected when the field is wrapped. For a
+		// composite element the code did NEITHER, which is the silent-wrong
+		// option that issue exists to eliminate (memql#3049).
+		//
+		// REJECTED rather than recursed to the leaf, which was the other option
+		// on the table. `[][]string @pattern` is genuinely ambiguous -- each
+		// string, or each inner array? -- so recursing would pick one reading
+		// and silently impose it, trading a silent no-op for a silent guess. No
+		// construct in the tree or in the product bundle carries this shape, so
+		// there is no caller whose intent recursion would be honouring. An
+		// author who means the leaf can say so once the grammar has a spelling
+		// for it; until then the declaration is refused with the reason.
+		if elem.typeName == "array" || elem.typeName == "map" {
+			if names := valueAnnotationNames(&out); len(names) > 0 {
+				return parsedProperty{}, fmt.Errorf(
+					"%s cannot be declared on `%s`: a value constraint applies to the IMMEDIATE "+
+						"element, and that element is itself %s, where JSON Schema ignores it "+
+						"(@variant is dropped entirely) -- the field would validate as though the "+
+						"annotation were absent. Single-wrap the field instead (`[]string "+
+						"@pattern(\"…\")`, `[]object @variant(…)`), or move the constraint into a "+
+						"named object property. No ANNOTATION reaches the leaf of a composite "+
+						"element; a leaf TYPE does, so `[][]enum(\"a\",\"b\")` and `[][]datetime` "+
+						"already constrain each leaf value (memql#3049)",
+					strings.Join(names, " and "),
+					renderTypeRef(prop.Type),
+					anArrayOrMap(elem.typeName),
+				)
+			}
+		}
+
 		elem.pattern, out.pattern = out.pattern, ""
 		elem.minLength, out.minLength = out.minLength, nil
 		elem.maxLength, out.maxLength = out.maxLength, nil
@@ -497,6 +538,79 @@ func propertyDeclToParsed(prop *parser.PropertyDecl) (parsedProperty, error) {
 	}
 
 	return out, nil
+}
+
+// valueAnnotationNames lists the value-describing parts of a declaration that
+// are actually set on prop, spelled as an author wrote them, in the order the
+// annotation table in docs/public/language/memql.md lists them.
+//
+// The set is exactly the "value constraints" row of that table -- the parts
+// that move down onto the element in propertyDeclToParsed. Field MARKERS
+// (@required, @description, @default, @unique, @immutable, @secret, @pii,
+// @internal, @serverSet) are deliberately absent: they describe the FIELD, stay
+// on the wrapper, and are unaffected by how deeply the element is wrapped, so
+// `capabilities [][]string!` is still perfectly fine.
+//
+// A nested block rides the same move as @variant (both populate the element's
+// object shape) and is listed for the same reason, even though the grammar has
+// no way to attach one to a wrapped type today -- if that changes, it is
+// already covered rather than newly silent.
+func valueAnnotationNames(prop *parsedProperty) []string {
+	var names []string
+	if prop.pattern != "" {
+		names = append(names, "@pattern")
+	}
+	if prop.minLength != nil {
+		names = append(names, "@minLength")
+	}
+	if prop.maxLength != nil {
+		names = append(names, "@maxLength")
+	}
+	if prop.minimum != nil {
+		names = append(names, "@minimum")
+	}
+	if prop.maximum != nil {
+		names = append(names, "@maximum")
+	}
+	if len(prop.variants) > 0 {
+		names = append(names, "@variant")
+	}
+	if len(prop.nested) > 0 {
+		names = append(names, "a nested block")
+	}
+	return names
+}
+
+// anArrayOrMap spells an element kind for the diagnostic, so the message reads
+// as a sentence rather than as a field dump.
+func anArrayOrMap(kind string) string {
+	if kind == "map" {
+		return "a map"
+	}
+	return "an array"
+}
+
+// renderTypeRef spells a TypeRef the way an author writes it, so a diagnostic
+// can quote the declaration back rather than describing it. Only the wrapper
+// kinds recurse; everything else is already its authored spelling.
+//
+// The nil arm is defensive, not a live case: the parser never yields a nil
+// TypeRef here. Bare `array` is given `ArrayItem: &TypeRef{Kind: "string"}` at
+// parser.go:2728, and the sole external call site sits inside a branch that
+// already dereferenced prop.Type. It renders "string" so a future nil cannot
+// produce an empty declaration in a diagnostic.
+func renderTypeRef(ref *parser.TypeRef) string {
+	if ref == nil {
+		return "string"
+	}
+	switch ref.Kind {
+	case "array":
+		return "[]" + renderTypeRef(ref.ArrayItem)
+	case "map":
+		return "map[string]" + renderTypeRef(ref.ArrayItem)
+	default:
+		return ref.Kind
+	}
 }
 
 // elementFromTypeRef lowers an element TypeRef into the parsedProperty the
