@@ -598,6 +598,34 @@ func (e *Evaluator) evaluateCoalesceArg(raw string) (any, bool) {
 	return raw, true
 }
 
+// splitCoalesceArgs splits `??` / $coalesce() arguments on top-level commas.
+//
+// Escape state is TRACKED, never inferred from the preceding byte
+// (memql#3046). The previous `(i == 0 || s[i-1] != '\\')` lookback could not
+// tell an escaped quote from a quote following a COMPLETED `\\` escape, so a
+// literal ending in a backslash pair never left quote state and consumed the
+// rest of the argument list -- surfacing here as "unterminated quote" at
+// automation-condition EVALUATION time, i.e. during a live run rather than at
+// boot. Same defect as splitTopLevelArgs and as the one memql#2949 fixed in
+// args_resolution.go.
+//
+// This one does NOT reuse the parser package's blankCommentsAndStrings, and
+// neither does splitTopLevelArgs -- a draft of this change did, and the reason
+// it was reverted is recorded on that function. There are two independent
+// reasons not to, one per site:
+//
+//   - Here: the blanker handles `"` only, and this splitter accepts BOTH `"`
+//     and `'`. Routing single-quoted literals through it would silently stop
+//     treating them as strings.
+//   - There: the blanker ends a string at a NEWLINE, which the MemQL lexer does
+//     not do -- it accepts a literal spanning lines. Delegating swallowed every
+//     comma after such a literal, which is memql#3046 in the other direction.
+//
+// Widening the shared blanker was the other option and is deliberately not
+// taken here -- it backs a shipped load rule whose behaviour is pinned by its
+// own tests, and changing what it considers a string is a bigger change than
+// this bug fix. That it disagrees with the lexer about newlines is now filed
+// separately as memql#3116.
 func splitCoalesceArgs(s string) ([]string, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -609,6 +637,7 @@ func splitCoalesceArgs(s string) ([]string, error) {
 
 	inQuote := false
 	quoteChar := byte(0)
+	escaped := false
 	depth := 0
 
 	for i := 0; i < len(s); i++ {
@@ -616,8 +645,15 @@ func splitCoalesceArgs(s string) ([]string, error) {
 
 		if inQuote {
 			current.WriteByte(ch)
-			// Basic handling: ignore escaped quote chars.
-			if ch == quoteChar && (i == 0 || s[i-1] != '\\') {
+			switch {
+			case escaped:
+				// This byte was escaped by the backslash before it; the
+				// escape is now spent. A `\\` pair therefore leaves escaped
+				// false, so the NEXT quote closes the literal.
+				escaped = false
+			case ch == '\\':
+				escaped = true
+			case ch == quoteChar:
 				inQuote = false
 				quoteChar = 0
 			}
@@ -628,6 +664,7 @@ func splitCoalesceArgs(s string) ([]string, error) {
 		case '"', '\'':
 			inQuote = true
 			quoteChar = ch
+			escaped = false
 			current.WriteByte(ch)
 		case '(':
 			depth++

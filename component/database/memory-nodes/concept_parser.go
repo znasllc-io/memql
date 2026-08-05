@@ -510,20 +510,51 @@ func propertyDeclToParsed(prop *parser.PropertyDecl) (parsedProperty, error) {
 // apply one level in.
 //
 // That gives the element the plain `{type: string, format: date-time}` shape
-// rather than the sentinel `oneOf`, and the reason that matters is NOT format
-// enforcement. `format` is annotation-only here: the concept-schema compiler
-// leaves Draft2019's default alone and never sets AssertFormat (see
-// concept_schema.go), and nothing in this repo sets it -- so `[]datetime`
-// validates byte-equivalently to `[]string` at runtime. An earlier version of
-// this comment claimed the opposite; corrected in the memql#2951 review.
+// rather than the sentinel `oneOf`.
 //
-// What `required` actually buys is soundness of the sentinel union: the
-// optional-scalar `oneOf` carries both `{type: string, format: date-time}` and
-// `{type: string, maxLength: 0}`, and with format unasserted BOTH match `""` --
-// so `oneOf`'s exactly-one rule would REJECT an empty-string entry. Marking the
-// element required routes around that. (That double-match looks like a live
-// defect for optional SCALAR datetime fields too; it predates this change and
-// is tracked separately.)
+// CORRECTION (memql#3051). This comment previously claimed `format` is
+// annotation-only here, that `[]datetime` therefore "validates
+// byte-equivalently to `[]string` at runtime", and that the optional-scalar
+// union was a latent defect because both its string members match `""`. All
+// three are WRONG, and they turn on one fact:
+//
+// `format` IS asserted. The library rule (jsonschema v5.3.1) asserts format
+// when `draft.version < 2019 || AssertFormat || the format-assertion
+// vocabulary is present`. `compiler.Draft = Draft2019` in concept_schema.go is
+// only the DEFAULT for a resource that declares no `$schema` -- and the schema
+// emitted below declares one, and it is `draft-07`. The resource's own
+// `$schema` wins, 7 < 2019, so format is asserted: `[]datetime` really does
+// enforce RFC3339 per entry, and a garbage `datetime` is rejected.
+//
+// Do not read that as "draft >= 2019 turns format off" -- the rule is narrower
+// than the direction it is usually quoted in. Removing the `$schema` line
+// entirely leaves format ASSERTED, because a resource with no `$schema` gets no
+// meta-schema attached and the vocabulary check is vacuously true on a nil
+// meta. It is specifically DECLARING a >= 2019 draft, whose meta-schema lists
+// vocabularies and omits format-assertion, that turns it off. A cleanup that
+// deletes the declaration is safe; one that modernises it is not.
+//
+// The optional-scalar union is therefore SOUND rather than defective. With
+// format asserted, `""` FAILS the date-time member and matches only
+// `maxLength: 0`, so `oneOf`'s exactly-one rule is satisfied and the sentinel
+// works. memql#3051 was filed on the old reading and does not reproduce.
+//
+// What `required` on the element actually buys is CORRECTNESS, and saying
+// otherwise was the second wrong claim on this comment. Measured through the
+// real validator:
+//
+//	required=true   items {"type":"string","format":"date-time"}
+//	                  [""]     REJECTED      [null]   REJECTED
+//	required=false  items {"oneOf":[date-time, maxLength:0, null]}
+//	                  [""]     ACCEPTED      [null]   ACCEPTED
+//
+// So it is not needed to make the union SOUND -- the union is sound on its own,
+// which is the point above -- but it is the only thing forbidding an empty or
+// null ENTRY inside a `[]datetime`. That is a difference in the set of accepted
+// values, not a difference in clarity. Pinned by
+// TestArrayDatetimeElementRejectsEmptyAndNull.
+//
+// All of this is pinned by optional_datetime_sentinel_test.go.
 //
 // A nil ref is the legacy bare `array` form, whose parser default is `string`.
 func elementFromTypeRef(ref *parser.TypeRef) *parsedProperty {
@@ -949,6 +980,23 @@ func propertyToJSONSchema(prop parsedProperty) (map[string]any, error) {
 			// clearing a scheduled deletion (deletionScheduledAt), etc.
 			// (memql#1629). A NON-empty value must still be a valid RFC3339
 			// date-time, so garbage strings are still rejected.
+			//
+			// Both halves of that hold, and they hold for the SAME reason --
+			// `format` is asserted, because the `$schema` emitted above is
+			// draft-07 and jsonschema v5 asserts format for drafts < 2019
+			// (the `compiler.Draft = Draft2019` in concept_schema.go is only
+			// the default for a resource that declares no `$schema`). With
+			// format asserted, `""` fails the date-time member and matches
+			// only `maxLength: 0`, so `oneOf`'s exactly-one rule is satisfied.
+			//
+			// This is load-bearing and easy to break by accident: changing
+			// that `$schema` to a newer draft turns format assertion off, at
+			// which point `""` matches TWO members and is rejected, and a
+			// garbage `datetime` matches exactly one and is accepted. Both
+			// directions invert at once. memql#3051 was filed believing this
+			// had already happened; it has not, and
+			// optional_datetime_sentinel_test.go pins both the behaviour and
+			// its dependence on the declared draft.
 			schema["oneOf"] = []any{
 				map[string]any{"type": "string", "format": "date-time"},
 				map[string]any{"type": "string", "maxLength": 0},

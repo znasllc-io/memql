@@ -2595,19 +2595,76 @@ func expandPunnedArgs(argsText string) string {
 var bareIdentOnly = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // splitTopLevelArgs splits on commas at depth zero, respecting quotes.
+//
+// Escape state is TRACKED, never inferred from the preceding byte
+// (memql#3046). The original decided whether a quote was escaped with a
+// ONE-BYTE LOOKBACK (`s[i-1] != '\\'`), which cannot tell an escaped quote
+// from a quote that follows a COMPLETED `\\` escape -- so a literal ending in
+// a backslash pair read its own closing quote as escaped, stayed in string
+// state, and swallowed every top-level comma after it. `"C:\\", args.b,
+// args.c` split into ONE argument instead of three, silently, in the rewriter
+// that runs over every authored construct. Same fix, same shape, as
+// memql#2949 in component/automations/args_resolution.go and as
+// splitCoalesceArgs beside it.
+//
+// # Why not delegate to blankCommentsAndStrings
+//
+// It is in this package, it tracks escapes correctly, and reusing it was the
+// obvious answer -- memql#3046's own DoD asked whether these hand-rolled
+// scanners should be consolidated. It is the WRONG scanner for this job, and
+// the reason is worth recording because it is not visible from its signature.
+//
+// That blanker ends a string at a newline, describing it as "the same recovery
+// the lexer performs". The lexer does not do that: it accepts a literal
+// spanning lines and returns it as ONE string token (measured -- and memql#3047
+// is a separate bug about the line COUNTER not advancing through exactly such a
+// literal, which only exists because they are accepted). So on a multi-line
+// literal the blanker closes the string early, the real closing quote reopens
+// one, and every following comma is swallowed:
+//
+//	"line one\nline two", args.b   lexer: 2 args   blanked scan: 1
+//
+// That is the identical symptom memql#3046 exists to remove -- arguments
+// silently collapsing to one -- reintroduced through a different door, and the
+// old lookback scanner got this case RIGHT. Fixing one comma-swallowing bug by
+// importing another is not a fix, so string state stays local here.
+//
+// The cost of staying local is that comments inside an argument list are not
+// blanked, exactly as before this change. Nothing regresses relative to the
+// code being replaced, which blanked none either -- that conclusion does not
+// depend on the tree.
+//
+// The tree measurement is worth stating precisely rather than loosely, because
+// the loose version reads as a stronger guarantee than it is. Across the
+// authored tree there are zero comments at PAREN depth > 0 -- but expandPunnedArgs
+// also receives `name{ ... }` bodies, and there are HUNDREDS at brace depth.
+// (Deliberately not a precise count: two comment-aware scans of the tree
+// disagreed on it, 427 against 452, so the exact figure is an artefact of how
+// you count and only the zero is worth relying on.) Comments do occur inside
+// the text this function splits; they simply did not affect it before and do
+// not now.
 func splitTopLevelArgs(s string) []string {
 	var parts []string
 	depth, start := 0, 0
-	inStr := false
+	inStr, escaped := false, false
 	for i := 0; i < len(s); i++ {
 		c := s[i]
 		switch {
 		case inStr:
-			if c == '"' && s[i-1] != '\\' {
+			switch {
+			case escaped:
+				// Escaped by the backslash before it; the escape is now
+				// spent, so a `\\` pair leaves escaped false and the NEXT
+				// quote closes the literal.
+				escaped = false
+			case c == '\\':
+				escaped = true
+			case c == '"':
 				inStr = false
 			}
 		case c == '"':
 			inStr = true
+			escaped = false
 		case c == '(' || c == '{' || c == '[':
 			depth++
 		case c == ')' || c == '}' || c == ']':
