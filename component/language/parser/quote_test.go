@@ -136,3 +136,40 @@ func TestQuoteString_EmitsItsOwnQuotes(t *testing.T) {
 		t.Errorf("got %s, want %q", got, `"x"`)
 	}
 }
+
+// TestQuoteString_HTMLCharsAreNotEscaped pins the SetEscapeHTML(false) choice
+// (memql#3035 landing review).
+//
+// encoding/json escapes <, > and & by default so JSON can sit inside a <script>
+// tag. Nothing here goes near a browser, the lexer takes all three raw, and the
+// parsed value is identical either way -- so the default cost up to 6x
+// expansion on an HTML error-page excerpt (against a 4096-byte cap) and made an
+// ordinary URL with a query string unreadable, for no benefit.
+//
+// Asserted through the REAL lexer, so this pins the round trip and not just the
+// rendering.
+func TestQuoteString_HTMLCharsAreNotEscaped(t *testing.T) {
+	for _, in := range []string{
+		`<html><body>502 Bad Gateway</body></html>`,
+		`https://example.test/hook?a=1&b=2`,
+		`a<b && c>d`,
+	} {
+		got := QuoteString(in)
+		// The ESCAPE, not the character: the raw `<` is exactly what we want to
+		// see in the output, so asserting on the character tests the opposite of
+		// the intent (which the first draft of this test did).
+		if strings.Contains(got, `\u003c`) || strings.Contains(got, `\u003e`) || strings.Contains(got, `\u0026`) {
+			t.Errorf("HTML escaping is back on. It expands an error page excerpt up to 6x against "+
+				"the truncation cap and makes an ordinary URL unreadable, and the lexer accepts "+
+				"these raw.\n  in:  %q\n  got: %s", in, got)
+		}
+		toks, err := NewLexer(got).Tokenize()
+		if err != nil {
+			t.Errorf("the lexer refused the unescaped form: %v\n  got: %s", err, got)
+			continue
+		}
+		if toks[0].Literal != in {
+			t.Errorf("round-trip mismatch.\n  in:  %q\n  out: %q", in, toks[0].Literal)
+		}
+	}
+}

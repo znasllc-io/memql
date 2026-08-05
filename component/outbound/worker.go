@@ -215,7 +215,7 @@ func (w *Worker) loop(ctx context.Context) {
 func (w *Worker) drainOnce(ctx context.Context) {
 	sysCtx := systemActorContext(ctx)
 	for _, status := range []string{"pending", "retrying"} {
-		res, err := w.engine.Execute(sysCtx, fmt.Sprintf(`query outboundRequestsByStatus(status: %q)`, status))
+		res, err := w.engine.Execute(sysCtx, fmt.Sprintf(`query outboundRequestsByStatus(status: %s)`, langparser.QuoteString(status)))
 		if err != nil {
 			w.logger.Debug("outbound worker: scan failed (engine likely not ready)", "status", status, "error", err)
 			return
@@ -271,11 +271,11 @@ func (w *Worker) processRow(ctx context.Context, row map[string]any, scanStatus 
 		w.stampFailed(ctx, req, policyErr)
 		return
 	}
-	w.stamp(ctx, fmt.Sprintf(`mutation updateOutboundRequestStatus(requestId: %q, status: "sending")`, req.ID))
+	w.stamp(ctx, fmt.Sprintf(`mutation updateOutboundRequestStatus(requestId: %s, status: "sending")`, langparser.QuoteString(req.ID)))
 	err := transport.Deliver(ctx, req)
 	if err == nil {
-		w.stamp(ctx, fmt.Sprintf(`mutation updateOutboundRequestStatus(requestId: %q, status: "sent", lastError: "", sentAt: %q)`,
-			req.ID, now.Format(time.RFC3339)))
+		w.stamp(ctx, fmt.Sprintf(`mutation updateOutboundRequestStatus(requestId: %s, status: "sent", lastError: "", sentAt: %s)`,
+			langparser.QuoteString(req.ID), langparser.QuoteString(now.Format(time.RFC3339))))
 		w.logger.Info("outbound worker: delivered", "id", req.ID, "medium", req.Medium, "attempt", req.Attempts+1)
 		return
 	}
@@ -290,8 +290,8 @@ func (w *Worker) processRow(ctx context.Context, row map[string]any, scanStatus 
 		// returned, and the row kept its previous status: a request mid-
 		// delivery stayed `sending` forever, never retried and never reported
 		// failed, with no error recorded because recording it was what failed.
-		w.stamp(ctx, fmt.Sprintf(`mutation updateOutboundRequestStatus(requestId: %q, status: "failed", attempts: %d, lastError: %s)`,
-			req.ID, attempts, langparser.QuoteString(truncateError(err))))
+		w.stamp(ctx, fmt.Sprintf(`mutation updateOutboundRequestStatus(requestId: %s, status: "failed", attempts: %d, lastError: %s)`,
+			langparser.QuoteString(req.ID), attempts, langparser.QuoteString(truncateError(err))))
 		w.logger.Warn("outbound worker: delivery failed permanently",
 			"id", req.ID, "medium", req.Medium, "attempts", attempts, "error", err)
 		return
@@ -300,8 +300,8 @@ func (w *Worker) processRow(ctx context.Context, row map[string]any, scanStatus 
 	// lastError via QuoteString, same reason as the failed stamp above
 	// (memql#3035). This one is worse if it breaks: the row never reaches
 	// `retrying`, so it is never picked up again.
-	w.stamp(ctx, fmt.Sprintf(`mutation updateOutboundRequestStatus(requestId: %q, status: "retrying", attempts: %d, lastError: %s, nextAttemptAt: %q)`,
-		req.ID, attempts, langparser.QuoteString(truncateError(err)), next.Format(time.RFC3339)))
+	w.stamp(ctx, fmt.Sprintf(`mutation updateOutboundRequestStatus(requestId: %s, status: "retrying", attempts: %d, lastError: %s, nextAttemptAt: %s)`,
+		langparser.QuoteString(req.ID), attempts, langparser.QuoteString(truncateError(err)), langparser.QuoteString(next.Format(time.RFC3339))))
 	w.logger.Warn("outbound worker: delivery failed; will retry",
 		"id", req.ID, "medium", req.Medium, "attempts", attempts, "nextAttemptAt", next.Format(time.RFC3339), "error", err)
 }
@@ -364,8 +364,8 @@ func (w *Worker) admit(req Request) (Transport, error) {
 func (w *Worker) stampFailed(ctx context.Context, req Request, policyErr error) {
 	// lastError via QuoteString (memql#3035). A policy refusal names the
 	// offending target, which is caller-supplied.
-	w.stamp(ctx, fmt.Sprintf(`mutation updateOutboundRequestStatus(requestId: %q, status: "failed", attempts: %d, lastError: %s)`,
-		req.ID, req.Attempts, langparser.QuoteString(truncateError(policyErr))))
+	w.stamp(ctx, fmt.Sprintf(`mutation updateOutboundRequestStatus(requestId: %s, status: "failed", attempts: %d, lastError: %s)`,
+		langparser.QuoteString(req.ID), req.Attempts, langparser.QuoteString(truncateError(policyErr))))
 	w.logger.Warn("outbound worker: row refused by policy", "id", req.ID, "medium", req.Medium, "error", policyErr)
 }
 

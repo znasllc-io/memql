@@ -29,9 +29,19 @@ import (
 //
 // lastError is truncateError(err), and for a webhook delivery that text can
 // carry bytes from a remote server: a response-body excerpt, or a TLS/DNS error
-// naming a hostile hostname. requestId, sentAt and nextAttemptAt are a
-// generated id and RFC3339 timestamps, so lastError is the only exposed
-// argument.
+// naming a hostile hostname.
+//
+// lastError is NOT the only exposed argument. memql#3035's own audit item asked
+// for the other Sprintf-built statements in this file to be checked, and doing
+// it turns up requestId: `requestId string!` is a caller-supplied ARG of
+// stageOutboundRequest (dsl/platform/mutations.memql:287), stamped verbatim as
+// the row id at :298, and nothing on the id path validates its charset. sentAt
+// and nextAttemptAt genuinely are generated (time.Format), but every string
+// argument in this file now goes through QuoteString regardless, so no line
+// here teaches %q as acceptable for a statement argument.
+//
+// TestHostileRequestID_StillLexes covers that variant, and it is the more
+// damaging of the two -- see its own comment.
 //
 // These tests drive the REAL worker path and lex what it actually emitted.
 // Asserting on a hand-built format string would test a copy of the code rather
@@ -171,4 +181,40 @@ func TestOrdinaryErrorIsUnchanged(t *testing.T) {
 		t.Errorf("an ordinary error should carry no escapes at all -- over-escaping would make "+
 			"every lastError unreadable while still passing the lexer.\n  got: %s", failed)
 	}
+}
+
+// TestHostileRequestID_StillLexes covers the argument memql#3035's audit item
+// turned up, and it is the more damaging of the two failures.
+//
+// requestId is caller-supplied (see the file header), and it was rendered with
+// %q at every stamp site. A control byte in it makes the `sending` stamp
+// unlexable -- and that stamp happens BEFORE transport.Deliver, with the `sent`
+// stamp after it failing the same way. So:
+//
+//   - the delivery HAPPENS;
+//   - neither stamp applies, so the row stays `pending` with attempts=0;
+//   - the claim key is fmt.Sprintf("%s:%d", req.ID, req.Attempts), which is
+//     therefore unchanged;
+//   - once ClaimTTL expires the same key is re-won and the same webhook is
+//     delivered AGAIN.
+//
+// Unbounded duplicate outbound delivery, indefinitely, versus the lastError
+// case's single stuck row. Both are the same defect -- %q against a lexer that
+// does not implement its escapes -- reached through a different argument.
+func TestHostileRequestID_StillLexes(t *testing.T) {
+	const hostileID = "v1:platform:outboundRequest:r\x00bad\a\v"
+
+	t.Run("delivery succeeds", func(t *testing.T) {
+		eng := &fakeEngine{pending: []map[string]any{pendingRow(hostileID)}}
+		w := newTestWorker(eng, &fakeTransport{}, nil)
+		w.drainOnce(context.Background())
+		assertStampsLex(t, eng)
+	})
+
+	t.Run("delivery fails", func(t *testing.T) {
+		eng := &fakeEngine{pending: []map[string]any{pendingRow(hostileID)}}
+		w := newTestWorker(eng, &fakeTransport{err: hostileError}, nil)
+		w.drainOnce(context.Background())
+		assertStampsLex(t, eng)
+	})
 }
