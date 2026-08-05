@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/znasllc-io/memql/component/auth"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // RoutePrefix is the path the receiver mounts under. A request is
@@ -285,19 +286,23 @@ func requestIDFor(source, identityKey string) string {
 
 // memqlString renders a Go string as a MemQL string literal.
 //
-// NOT fmt %q. Go's quoting emits \x00, \a and \v escapes, and the MemQL lexer
-// accepts only the JSON set (" \ / b f n r t u) -- it rejects the rest outright
-// with "invalid escape character". A webhook body is arbitrary third-party
-// text, so %q would refuse perfectly ordinary payloads at the parser. JSON
-// encoding emits exactly the escapes the lexer implements.
-func memqlString(s string) string {
-	b, err := json.Marshal(s)
-	if err != nil {
-		// json.Marshal only fails on unsupported types; a string is not one.
-		return `""`
-	}
-	return string(b)
-}
+// It is now a one-line alias for langparser.QuoteString, which lives beside the
+// lexer whose escape set it targets. This function had a byte-identical body,
+// and memql#3035 -- the same defect reached through the outbound worker's
+// lastError -- is what having two definitions of one escape set costs. The
+// alias is kept rather than the six call sites rewritten because the name reads
+// well at each of them and the indirection is free.
+//
+// One behavioural note, because "alias" reads as "nothing changed" and that is
+// not quite true here: QuoteString turns HTML escaping OFF, which the body this
+// replaced left on. So the bytes this emits for <, > and & differ from before
+// -- raw now, \u003c / \u003e / \u0026 then. The value is unaffected: the lexer
+// decodes both spellings to the identical string, which is why
+// handler_test.go's TestRenderedLiteralsParseBackThroughTheRealLexer passes
+// either way -- it asserts on the decoded value, so it is blind to this change
+// in both directions. What changed is the size and legibility of the staged
+// statement, not what gets staged.
+func memqlString(s string) string { return langparser.QuoteString(s) }
 
 // systemInboundActor is the actor the staging mutation runs as. The request
 // carries no memQL identity -- a third party signed it with a shared secret,

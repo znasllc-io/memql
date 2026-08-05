@@ -12,6 +12,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/events"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/common"
 )
@@ -214,7 +215,7 @@ func (w *Worker) loop(ctx context.Context) {
 func (w *Worker) drainOnce(ctx context.Context) {
 	sysCtx := systemActorContext(ctx)
 	for _, status := range []string{"pending", "retrying"} {
-		res, err := w.engine.Execute(sysCtx, fmt.Sprintf(`query outboundRequestsByStatus(status: %q)`, status))
+		res, err := w.engine.Execute(sysCtx, fmt.Sprintf(`query outboundRequestsByStatus(status: %s)`, langparser.QuoteString(status)))
 		if err != nil {
 			w.logger.Debug("outbound worker: scan failed (engine likely not ready)", "status", status, "error", err)
 			return
@@ -270,25 +271,37 @@ func (w *Worker) processRow(ctx context.Context, row map[string]any, scanStatus 
 		w.stampFailed(ctx, req, policyErr)
 		return
 	}
-	w.stamp(ctx, fmt.Sprintf(`mutation updateOutboundRequestStatus(requestId: %q, status: "sending")`, req.ID))
+	w.stamp(ctx, fmt.Sprintf(`mutation updateOutboundRequestStatus(requestId: %s, status: "sending")`, langparser.QuoteString(req.ID)))
 	err := transport.Deliver(ctx, req)
 	if err == nil {
-		w.stamp(ctx, fmt.Sprintf(`mutation updateOutboundRequestStatus(requestId: %q, status: "sent", lastError: "", sentAt: %q)`,
-			req.ID, now.Format(time.RFC3339)))
+		w.stamp(ctx, fmt.Sprintf(`mutation updateOutboundRequestStatus(requestId: %s, status: "sent", lastError: "", sentAt: %s)`,
+			langparser.QuoteString(req.ID), langparser.QuoteString(now.Format(time.RFC3339))))
 		w.logger.Info("outbound worker: delivered", "id", req.ID, "medium", req.Medium, "attempt", req.Attempts+1)
 		return
 	}
 	attempts := req.Attempts + 1
 	if IsPermanent(err) || attempts >= w.cfg.MaxAttempts {
-		w.stamp(ctx, fmt.Sprintf(`mutation updateOutboundRequestStatus(requestId: %q, status: "failed", attempts: %d, lastError: %q)`,
-			req.ID, attempts, truncateError(err)))
+		// lastError is rendered with langparser.QuoteString, NOT %q
+		// (memql#3035). This text can carry bytes from a remote server -- a
+		// webhook response excerpt, a TLS or DNS error naming a hostile
+		// hostname -- and %q emits `\x00`, `\a` and `\v`, which the MemQL
+		// lexer refuses outright rather than falling back. A single control
+		// byte made this statement unparseable, stamp() logged a warning and
+		// returned, and the row kept its previous status: a request mid-
+		// delivery stayed `sending` forever, never retried and never reported
+		// failed, with no error recorded because recording it was what failed.
+		w.stamp(ctx, fmt.Sprintf(`mutation updateOutboundRequestStatus(requestId: %s, status: "failed", attempts: %d, lastError: %s)`,
+			langparser.QuoteString(req.ID), attempts, langparser.QuoteString(truncateError(err))))
 		w.logger.Warn("outbound worker: delivery failed permanently",
 			"id", req.ID, "medium", req.Medium, "attempts", attempts, "error", err)
 		return
 	}
 	next := now.Add(backoffFor(attempts))
-	w.stamp(ctx, fmt.Sprintf(`mutation updateOutboundRequestStatus(requestId: %q, status: "retrying", attempts: %d, lastError: %q, nextAttemptAt: %q)`,
-		req.ID, attempts, truncateError(err), next.Format(time.RFC3339)))
+	// lastError via QuoteString, same reason as the failed stamp above
+	// (memql#3035). This one is worse if it breaks: the row never reaches
+	// `retrying`, so it is never picked up again.
+	w.stamp(ctx, fmt.Sprintf(`mutation updateOutboundRequestStatus(requestId: %s, status: "retrying", attempts: %d, lastError: %s, nextAttemptAt: %s)`,
+		langparser.QuoteString(req.ID), attempts, langparser.QuoteString(truncateError(err)), langparser.QuoteString(next.Format(time.RFC3339))))
 	w.logger.Warn("outbound worker: delivery failed; will retry",
 		"id", req.ID, "medium", req.Medium, "attempts", attempts, "nextAttemptAt", next.Format(time.RFC3339), "error", err)
 }
@@ -349,8 +362,10 @@ func (w *Worker) admit(req Request) (Transport, error) {
 }
 
 func (w *Worker) stampFailed(ctx context.Context, req Request, policyErr error) {
-	w.stamp(ctx, fmt.Sprintf(`mutation updateOutboundRequestStatus(requestId: %q, status: "failed", attempts: %d, lastError: %q)`,
-		req.ID, req.Attempts, truncateError(policyErr)))
+	// lastError via QuoteString (memql#3035). A policy refusal names the
+	// offending target, which is caller-supplied.
+	w.stamp(ctx, fmt.Sprintf(`mutation updateOutboundRequestStatus(requestId: %s, status: "failed", attempts: %d, lastError: %s)`,
+		langparser.QuoteString(req.ID), req.Attempts, langparser.QuoteString(truncateError(policyErr))))
 	w.logger.Warn("outbound worker: row refused by policy", "id", req.ID, "medium", req.Medium, "error", policyErr)
 }
 
@@ -391,8 +406,92 @@ func requestFromRow(row map[string]any) Request {
 	}
 }
 
+// truncateError renders err for the lastError argument: NUL-free, then capped.
+//
+// # Why NUL is removed, when the lexer accepts it
+//
+// langparser.QuoteString renders a NUL as `\u0000`, and that is correct at its
+// own layer -- it is exactly what readString accepts, and the lexer decodes it
+// back to rune 0. The statement parses. It then fails one layer down, at
+// storage: the stamped payload is marshalled to JSON and bound to a JSONB
+// column (component/database/memory-nodes/concept.go, models.go `Payload
+// json.RawMessage bun:"type:JSONB,notnull"`, `payload JSONB NOT NULL` in
+// migrations/20260324000000_initial_setup.up.sql), and PostgreSQL's jsonb type
+// cannot represent U+0000. Measured against postgres:16:
+//
+//	select '{"lastError":"boom \u0000 nul"}'::jsonb;
+//	ERROR:  unsupported Unicode escape sequence
+//	DETAIL:  \u0000 cannot be converted to text.
+//
+// The insert therefore errors, stamp() logs a warning and returns, and the row
+// keeps whatever status it had -- which is the identical stuck row memql#3035
+// is about, reached through Postgres instead of through the lexer. Fixing the
+// escape set alone moved that failure rather than removing it.
+//
+// NUL is the only escape THIS RENDERER CAN EMIT that jsonb rejects. That is a
+// narrower claim than "the only escape jsonb rejects", and only the narrow one
+// is true: jsonb ALSO rejects a lone surrogate escape ("Unicode low surrogate
+// must follow a high surrogate").
+//
+// The narrow claim is checkable because the output alphabet is small, and it was
+// enumerated rather than recalled -- over every byte 0x00-0xFF, every rune to
+// U+2FFF, the surrogate range and invalid UTF-8, QuoteString emits exactly 37
+// distinct escapes:
+//
+//	\" and \\	the two mandatory ones
+//	\b \f \n \r \t	the short forms
+//	\u0000-\u001f	the remaining control bytes
+//	\u2028 \u2029	which encoding/json escapes UNCONDITIONALLY for
+//		JSONP safety -- unrelated to the SetEscapeHTML
+//		choice QuoteString documents
+//	\ufffd	for invalid UTF-8
+//
+// Every one of those except \u0000 was fed to jsonb and stored fine. A
+// surrogate half is not in the set and cannot be, because invalid UTF-8 becomes
+// � first. So the wider gap is unreachable from here.
+//
+// Measure rather than recall if this changes. Three separate claims in this
+// change's own review were wrong precisely because they described the escape set
+// from memory instead of enumerating it -- including an earlier version of this
+// very sentence, which said "\u00XX only for bytes below 0x20" and missed
+// the short forms, \u2028/\u2029 and \ufffd.
+//
+// # Why U+FFFD rather than dropping the byte
+//
+// The error text is what an operator reads to find out what the remote sent.
+// Silently deleting bytes from it is the "lexes fine while mangling what the
+// operator reads" hazard this file's own tests warn about; U+FFFD keeps the
+// fact that something was there, and it is the convention json.Marshal already
+// applies to invalid UTF-8 on this same path.
+//
+// # Why here, and why lastError only
+//
+// Not in QuoteString: its contract is "what the MemQL lexer accepts", it is
+// shared with component/inbound, and jsonb storability is a different concern
+// with different callers. Not for requestId either, and that one is deliberate
+// rather than an oversight. A NUL there is unreachable: the id is also a text
+// primary key, and PostgreSQL rejects a NUL in text outright ("null character
+// not permitted"), so no such row can exist for the worker to read back.
+// Rewriting an id would also aim the update at a DIFFERENT row, which is worse
+// than failing loudly.
+//
+// This is a per-BYTE split rather than a blanket exemption, and the two arguments
+// in this file are narrower than they look side by side. A bell or a vtab in a
+// requestId IS reachable -- text and jsonb both store them happily -- which is
+// why every requestId is still quoted. Only NUL is unreachable there.
+//
+// Substitution runs BEFORE the cap, and the cap bounds THIS FUNCTION'S RETURN.
+// It does not bound the stored value exactly, and the difference is worth being
+// honest about rather than rounding off: the cut is at a byte boundary, so it
+// can split a replacement rune, and encoding/json then repairs each orphaned
+// byte into a fresh 3-byte � -- measured at 4100 bytes stored from a
+// 4096-byte return. A handful of bytes over, never unbounded.
+//
+// The ordering is still the right way round. Substituting AFTER the cap lets a
+// NUL-dense error expand to 3x lastErrorCap (12288 bytes from 4096, measured),
+// which is precisely what the cap exists to prevent.
 func truncateError(err error) string {
-	msg := err.Error()
+	msg := strings.ReplaceAll(err.Error(), "\x00", "�")
 	if len(msg) > lastErrorCap {
 		msg = msg[:lastErrorCap]
 	}
