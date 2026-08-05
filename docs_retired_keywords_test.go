@@ -41,17 +41,26 @@ import (
 // writes...", "Mutations:"), so this anchors on the two-identifier-then-brace
 // declaration shape at the start of a line rather than on the bare word.
 //
-// # Scope: markdown, and why not wider
+// # Scope: every tracked file
 //
-// The sibling name gate sweeps every tracked file, and widening this one to
-// match was measured rather than assumed. It cannot be, yet: the only
-// non-markdown hits of the declaration shape are two fixtures in
-// component/memql/callgraph/callgraph_test.go, and they are load-bearing --
-// that checker's own regex still matches the retired keyword, so rewriting the
-// fixtures turns its tests red. That is memql#3043, filed with the measurement.
-// Widening this gate belongs in the same change that fixes the checker, not
-// before it; a gate that requires a broken test or a file exemption to go green
-// is worse than one with a stated boundary.
+// This gate was markdown-only until memql#3043 landed, and the reason was
+// recorded here: the only non-markdown hits were two load-bearing fixtures in
+// component/memql/callgraph/callgraph_test.go, which had to keep the retired
+// spelling because that checker's own regex still matched it. Widening was
+// deferred to "the same change that fixes the checker, not before it".
+//
+// That change is memql#3043. The checker now scans for the live `mutate`
+// keyword (sourced from component/language/dslspec rather than restated), both
+// fixtures are rewritten, and the scope was re-measured rather than assumed:
+// across every tracked non-markdown file, the declaration shape now matches in
+// exactly ONE place -- the deliberate negative fixture at
+// component/memql/callgraph/keyword_test.go, which asserts the retired spelling
+// splits to nothing.
+//
+// So the sweep is now every tracked file, matching the sibling name gate, with
+// that single file exempt. The exemption is the same kind the sibling's list
+// describes: a gate that must write the retired spelling in order to state what
+// it forbids, not a carve-out for drift.
 //
 // # Escape hatch
 //
@@ -95,7 +104,7 @@ import (
 //     every docs-only PR pay the full Go suite, which is a CI-spend call rather
 //     than this gate's to make. Tracked as memql#3054.
 func TestDocsDoNotTeachRetiredDeclarationKeywords(t *testing.T) {
-	out, err := exec.Command("git", "ls-files", "-z", "*.md").Output()
+	out, err := exec.Command("git", "ls-files", "-z").Output()
 	if err != nil {
 		t.Fatalf("git ls-files: %v", err)
 	}
@@ -104,7 +113,7 @@ func TestDocsDoNotTeachRetiredDeclarationKeywords(t *testing.T) {
 	var scanned int
 	seen := map[string]bool{}
 	for _, rel := range files {
-		if rel == "" {
+		if rel == "" || retiredDeclGateExempt(rel) {
 			continue
 		}
 		data, readErr := os.ReadFile(rel)
@@ -112,6 +121,12 @@ func TestDocsDoNotTeachRetiredDeclarationKeywords(t *testing.T) {
 			// A tracked-but-absent path is somebody else's problem; skipping it
 			// silently is what would be wrong, so say so.
 			t.Logf("skipping unreadable tracked file %s: %v", rel, readErr)
+			continue
+		}
+		// Now that the sweep is not extension-scoped, a binary blob can carry
+		// the byte sequence by coincidence and a line number into it means
+		// nothing. Same guard, same reason, as the sibling name gate.
+		if isBinaryForGate(data) {
 			continue
 		}
 		scanned++
@@ -151,12 +166,17 @@ func TestDocsDoNotTeachRetiredDeclarationKeywords(t *testing.T) {
 	// the gate exists for were actually read, which a count structurally cannot
 	// express.
 	if scanned < 50 {
-		t.Fatalf("only %d markdown files scanned -- the sweep has stopped resolving them and this "+
+		t.Fatalf("only %d tracked files scanned -- the sweep has stopped resolving them and this "+
 			"gate would now pass vacuously", scanned)
 	}
 	for _, sentinel := range []string{
 		"CLAUDE.md",
 		"docs/public/language/authoring-rules.md",
+		// A non-markdown sentinel, because the sweep is no longer scoped by
+		// extension and a silent narrowing BACK to markdown would otherwise
+		// look exactly like success. This is the file whose stale regex the
+		// gate's own rationale was waiting on (memql#3043).
+		"component/memql/callgraph/tree.go",
 	} {
 		if !seen[sentinel] {
 			t.Fatalf("%s was not scanned (%d files were) -- the sweep has narrowed and this gate "+
@@ -164,6 +184,22 @@ func TestDocsDoNotTeachRetiredDeclarationKeywords(t *testing.T) {
 				"which is why these sentinels are asserted by name.", sentinel, scanned)
 		}
 	}
+}
+
+// retiredDeclGateExempt reports whether a path is outside the sweep.
+//
+// ONE FILE, and it should stay that way. component/memql/callgraph/keyword_test.go
+// asserts that the RETIRED spelling splits to nothing -- it has to write
+// `mutation node twoWrites {` to assert that the checker ignores it, exactly as
+// the sibling gate's two entries have to write the retired names to say what
+// they forbid. Exempting it is not a carve-out for drift; it is the only way
+// that assertion can exist.
+//
+// What does NOT belong here: a file that merely happens to contain a violation.
+// The escape hatch for a legitimate mention is the one in this gate's header --
+// keep the line out of declaration shape.
+func retiredDeclGateExempt(rel string) bool {
+	return rel == "component/memql/callgraph/keyword_test.go"
 }
 
 // retiredDeclarationKeywords is one entry per retired declaration keyword, with
