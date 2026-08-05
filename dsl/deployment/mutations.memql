@@ -174,8 +174,11 @@ mutate deployment updateDeploymentStatus {
 //
 //     (The warning that stood here -- "do not write the call form in a comment
 //     across a line break" -- is gone along with the defect it described. The
-//     rewriter no longer scans comment text at all, so a wrapped occurrence
-//     stays prose. memql#3026.)
+//     rewriter skips BOTH comment forms the lexer recognises, `//` and
+//     `/* */`, so a wrapped occurrence stays prose in either. memql#3026; the
+//     block form was added during that issue's landing review, where skipping
+//     only `//` would have left this warning true for the very shape it
+//     warned about.)
 //   - `use cluster.concepts.{ deployment }`: works too (#2945, #2977). This
 //     bullet used to record two reasons it did not, and both are gone.
 //     memqllint no longer rejects it -- a `use` path's leading segment is a

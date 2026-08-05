@@ -186,7 +186,14 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 	// `canonicalId(x, <importedConceptName>)` to the canonical-id string form
 	// against the file's `use ...concepts.{ ... }` imports + the registry. The
 	// quoted string form passes through unchanged (additive).
-	if resolved, cerr := NewConceptResolver(registry).ResolveCanonicalIdConceptRefsInDomain(content, DomainFromFilePath(origin)); cerr != nil {
+	//
+	// The ambient hint is the origin's DECLARED namespace, derived the way boot
+	// derives the concept's id -- first path segment, then its namespace.pin
+	// (memql#3026). DomainFromFilePath's LAST segment is still the file's
+	// same-domain scope, but for a nested `<domain>/<sub>/*.memql` it names a
+	// directory that is not a namespace at all.
+	if resolved, cerr := NewConceptResolver(registry).ResolveCanonicalIdConceptRefsInNamespace(
+		content, DomainFromFilePath(origin), declaredNamespaceForOrigin(origin)); cerr != nil {
 		return nil, fmt.Errorf("%s: %w", origin, cerr)
 	} else {
 		content = resolved

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // canonical_id_declared_namespace_3026_test.go -- memql#3026.
@@ -83,6 +84,58 @@ func TestCanonicalId_RemappedAmbiguousNameResolvesByDeclaredNamespace(t *testing
 	}
 }
 
+// TestCanonicalId_AmbiguousRemappedPackHasExactlyOneSpelling is DoD item 3, in
+// full (memql#3026 landing review).
+//
+// The item is a conjunction -- "a remapped pack with an ambiguous name has
+// exactly ONE working spelling, AND TestNoSameDomainUse permits it" -- and it
+// was covered as two disjoint halves in two files: the ambient half here
+// against the two-concept fixture, the gate half in the 2976 file against the
+// single-concept fixture that issue #3026 section 4 condemns as unable to tell
+// the two rules apart. The conjunction is the thing that was broken, so the
+// conjunction is what needs asserting, against the fixture that discriminates.
+//
+// #2976's consistency requirement: "for any file, exactly one of 'ambient
+// works' or 'an import is required' should be true, and the gate should permit
+// whichever it is." Under uniqueness NEITHER was true here.
+func TestCanonicalId_AmbiguousRemappedPackHasExactlyOneSpelling(t *testing.T) {
+	const domain = "zdeploy"
+
+	// 1. The ambient spelling works, so no import is needed.
+	if _, err := ambiguousRemappedResolver().ResolveCanonicalIdConceptRefsInNamespace(
+		`canonicalId(args.x, widget)`, domain, "zcluster"); err != nil {
+		t.Fatalf("ambient resolution fails for an AMBIGUOUS name in a remapped pack, so an "+
+			"import IS required -- and step 2 shows the only same-domain spelling is stripped. "+
+			"That is the memql#2976 deadlock, which uniqueness could not close: %v", err)
+	}
+
+	// 2. And the same-domain import is unavailable: the gate strips it. So
+	//    ambient is not merely A working spelling, it is the ONLY one.
+	withImport := []byte("use zdeploy.concepts.{ widget }\n\nmutate widget doThing {\n  insert {\n    id: args.x\n  }\n}\n")
+	stripped, err := languageParser.RewriteSameDomainUse(domain, withImport)
+	if err != nil {
+		t.Fatalf("RewriteSameDomainUse: %v", err)
+	}
+	if string(stripped) == string(withImport) {
+		t.Errorf("the gate no longer strips `use %s.concepts.{ widget }`, so BOTH spellings now "+
+			"work -- the mirror of the memql#2976 deadlock where both failed. The ambient rule "+
+			"and the gate must agree on which single spelling is correct.", domain)
+	}
+
+	// 3. And the gate positively PERMITS the working spelling: a file with no
+	//    same-domain import passes through byte-identical. A gate that mangled
+	//    it would leave the pack with no spelling at all again.
+	ambient := []byte("mutate widget doThing {\n  insert {\n    id: canonicalId(args.x, widget)\n  }\n}\n")
+	permitted, err := languageParser.RewriteSameDomainUse(domain, ambient)
+	if err != nil {
+		t.Fatalf("RewriteSameDomainUse on the ambient spelling: %v", err)
+	}
+	if string(permitted) != string(ambient) {
+		t.Errorf("the gate rewrote the ONE working spelling.\n  want: %q\n  got:  %q",
+			ambient, permitted)
+	}
+}
+
 // TestCanonicalId_ForeignDomainConceptRequiresAnImport is DoD item 2.
 //
 // This INVERTS TestCanonicalId_CrossDomainUniqueNameMatchesSignatureBinding,
@@ -95,8 +148,16 @@ func TestCanonicalId_RemappedAmbiguousNameResolvesByDeclaredNamespace(t *testing
 // had to be written down. A bundle author writing `canonicalId(x, user)`
 // meaning THEIR `user` should get a loud failure, not a silent bind to the
 // engine's.
+// The fixture is remappedPackResolver, whose `widget` is UNIQUE, and that is
+// load-bearing rather than incidental (memql#3026 landing review). This test
+// was first written against ambiguousRemappedResolver, where `widget` is
+// declared twice -- so the deleted uniqueness rule could not have bound it
+// either, and the test passed identically with the fix reverted. A regression
+// guard that passes against the regression is not a guard. Only a UNIQUE name
+// distinguishes "unique, therefore ambient" from "foreign, therefore an import
+// is required", which is the whole of DoD item 2.
 func TestCanonicalId_ForeignDomainConceptRequiresAnImport(t *testing.T) {
-	r := ambiguousRemappedResolver()
+	r := remappedPackResolver()
 
 	// A file in an unrelated domain naming a concept declared only elsewhere.
 	// Unique or not, it is not in ambient scope here.
@@ -159,6 +220,25 @@ func TestCanonicalId_ScannerSkipsComments(t *testing.T) {
 		"line comment": "// canonicalId(args.x, widget)\ncanonicalId(args.x, \"v1:zcluster:widget\")",
 		"doc comment":  "/// canonicalId(args.x, widget)\ncanonicalId(args.x, \"v1:zcluster:widget\")",
 		"trailing":     "canonicalId(args.x, \"v1:zcluster:widget\") // canonicalId(args.x, widget)",
+
+		// BLOCK comments too (memql#3026 landing review). The lexer has two
+		// comment forms -- skipWhitespace dispatches to skipLineComment for
+		// `//` and skipBlockComment for `/* */` -- so a scanner that skipped
+		// only the line form left the identical defect alive in the other.
+		"block comment":  "/* canonicalId(args.x, widget) */\ncanonicalId(args.x, \"v1:zcluster:widget\")",
+		"block trailing": "canonicalId(args.x, \"v1:zcluster:widget\") /* canonicalId(args.x, widget) */",
+
+		// The wrapped case specifically: this is what the authoring warning in
+		// dsl/deployment/mutations.memql was about ("do not write the call
+		// form in a comment across a line break"), and a block comment is the
+		// likeliest place for it. Deleting that warning is only honest if this
+		// passes.
+		"block across a line break": "/*\n canonicalId(args.x,\n   widget)\n*/\ncanonicalId(args.x, \"v1:zcluster:widget\")",
+
+		// An unterminated block runs to end of file, matching skipBlockComment.
+		// The parser reports the unterminated comment; this scanner must not
+		// rewrite the prose on the way there.
+		"unterminated block": "/* canonicalId(args.x, widget)\n",
 	} {
 		t.Run(name, func(t *testing.T) {
 			got, err := ambiguousRemappedResolver().
@@ -221,5 +301,177 @@ func TestCanonicalId_DeclaredNamespaceForDomainReadsThePin(t *testing.T) {
 	// An unknown domain must not invent one.
 	if got := declaredNamespaceForDomain("noSuchDomain"); got != "noSuchDomain" {
 		t.Errorf("an unknown domain falls back to itself. got %q", got)
+	}
+}
+
+// TestCanonicalId_InDomainComposesTheRealPin is the composition test, and it is
+// the one the rest of this file could not substitute for (memql#3026 landing
+// review).
+//
+// Every other assertion here calls the three-argument InNamespace form with a
+// hand-supplied declaredNS, which proves the RULE but not the WIRING. Reverting
+// the single line that joins them -- InDomain passing declaredNamespaceForDomain
+// rather than the bare directory -- left the entire suite green, so the pin
+// could have been disconnected from the resolver and nothing would have said
+// so. That is the composition this PR exists to create, so it gets an assertion
+// through the production entry point, against the REAL dsl/deployment pin.
+//
+// The registry deliberately declares `deployment` twice. A unique name would
+// resolve under the deleted uniqueness rule too, so ambiguity is what makes
+// this bite in both directions at once.
+func TestCanonicalId_InDomainComposesTheRealPin(t *testing.T) {
+	registry := &memoryNodes.MemoryRegistry{}
+	registry.ReplaceAll(map[string]*memoryNodes.Concept{
+		"v1:cluster:deployment":   {Name: "v1:cluster:deployment"},
+		"v1:elsewhere:deployment": {Name: "v1:elsewhere:deployment"},
+	})
+
+	got, err := NewConceptResolver(registry).
+		ResolveCanonicalIdConceptRefsInDomain(`canonicalId(args.x, deployment)`, "deployment")
+	if err != nil {
+		t.Fatalf("the two-argument entry point -- the only one production calls -- did not "+
+			"compose the pin with the ambient rule. dsl/deployment/namespace.pin declares "+
+			"\"cluster\", so `deployment` is ambient here; resolving against the DIRECTORY "+
+			"instead is exactly the memql#2976 behaviour this PR replaces: %v", err)
+	}
+	if !strings.Contains(got, `"v1:cluster:deployment"`) {
+		t.Errorf("resolved against the wrong namespace.\n  got: %s", got)
+	}
+}
+
+// TestCanonicalId_NestedFileUsesItsRootDomainsNamespace covers the layout the
+// first cut of this fix broke (memql#3026 landing review).
+//
+// Boot assembles a concept id from the origin's FIRST path segment
+// (unified_loader.go pass 1: `dir := firstPathSegment(p)`), so
+// beta/sub/concepts.memql declares v1:beta:widget. DomainFromFilePath returns
+// the LAST segment, "sub" -- not a namespace at all. Feeding that to the
+// ambient rule refuses every same-domain reference in a nested file and then
+// demands the same-domain import TestNoSameDomainUse bans: the memql#2976
+// deadlock, one directory deeper. The tree has 23 nested .memql files today, so
+// this is a live layout even though none of them currently writes canonicalId.
+func TestCanonicalId_NestedFileUsesItsRootDomainsNamespace(t *testing.T) {
+	// The pin belongs to the ROOT domain, and a nested file must still find it.
+	if got := declaredNamespaceForOrigin("deployment/anything/mutations.memql"); got != "cluster" {
+		t.Errorf("a nested file under a PINNED domain must declare that domain's namespace. "+
+			"Resolving \"anything\" instead finds no pin and yields a directory name that no "+
+			"concept id can ever carry. got %q, want \"cluster\"", got)
+	}
+	if got := declaredNamespaceForOrigin("deployment/mutations.memql"); got != "cluster" {
+		t.Errorf("the flat case must be unchanged. got %q, want \"cluster\"", got)
+	}
+	// An unpinned root domain declares its own directory, nested or not.
+	if got := declaredNamespaceForOrigin("agents/skills/categories.memql"); got != "agents" {
+		t.Errorf("a nested file under an UNPINNED domain declares that domain. got %q, "+
+			"want \"agents\"", got)
+	}
+	// Loader origin decorations must not leak into the namespace.
+	if got := declaredNamespaceForOrigin("unified:deployment/mutations.memql:createDeployment"); got != "cluster" {
+		t.Errorf("a unified-loader slice origin must strip to the same namespace. got %q, "+
+			"want \"cluster\"", got)
+	}
+
+	// And through the LOADER, not just the helper. Asserting only the helper
+	// would repeat the gap TestCanonicalId_InDomainComposesTheRealPin exists to
+	// close: the rule right, the wiring unpinned. tryParseNewFunctionSyntax is
+	// the seam function_loader.go resolves canonicalId in, and it is handed the
+	// origin, so this fails if that call site ever goes back to deriving the
+	// namespace from DomainFromFilePath's last segment.
+	registry := &memoryNodes.MemoryRegistry{}
+	registry.ReplaceAll(map[string]*memoryNodes.Concept{
+		"v1:cluster:deployment": {Name: "v1:cluster:deployment"},
+	})
+	const src = `@description("A nested file referencing its own domain's concept.")
+mutate deployment nestedAmbientRef {
+  args {
+    x  string  @required
+  }
+  insert {
+    id: canonicalId(args.x, deployment)
+  }
+}`
+	_, err := tryParseNewFunctionSyntax(
+		"nestedAmbientRef", "mutation", src, "deployment/anything/mutations.memql", registry)
+	if err != nil && strings.Contains(err.Error(), "neither imported nor a same-domain concept") {
+		t.Fatalf("the loader refused a nested file's reference to its OWN domain's concept, and "+
+			"the import its error demands is the one TestNoSameDomainUse bans -- the memql#2976 "+
+			"deadlock reinstated one directory deeper. The loader must derive the ambient "+
+			"namespace from the origin's ROOT domain, the way boot derives the id: %v", err)
+	}
+
+	// The same source under the flat origin must behave identically -- if it
+	// does not, the assertion above is passing for some unrelated reason.
+	if _, ferr := tryParseNewFunctionSyntax(
+		"nestedAmbientRef", "mutation", src, "deployment/mutations.memql", registry); ferr != nil &&
+		strings.Contains(ferr.Error(), "neither imported nor a same-domain concept") {
+		t.Fatalf("the FLAT case regressed too, so this test is not measuring what it claims: %v", ferr)
+	}
+}
+
+// TestCanonicalId_AmbientNamespaceTestIsAnchored guards the substring hazard
+// (memql#3026 landing review).
+//
+// Namespaces are colon-separated and multi-segment ones are live -- dsl/cognition
+// declares @namespace("cognition:client:tool"). The first cut tested
+// strings.Contains(id, ":"+declaredNS+":"), which matches an INTERIOR segment,
+// so a domain named "tool" or "client" bound v1:cognition:client:tool:* with no
+// import. Once uniqueness was deleted this condition became the ONLY thing
+// refusing a foreign concept, so an unanchored match silently reopened the
+// cross-namespace bind that DoD item 2 closes -- reachable from any bundle
+// mounted at MEMQL_DSL_PATH that happens to name a domain "tool".
+func TestCanonicalId_AmbientNamespaceTestIsAnchored(t *testing.T) {
+	registry := &memoryNodes.MemoryRegistry{}
+	registry.ReplaceAll(map[string]*memoryNodes.Concept{
+		"v1:cognition:client:tool:gadget": {Name: "v1:cognition:client:tool:gadget"},
+	})
+	r := NewConceptResolver(registry)
+
+	for _, foreign := range []string{"tool", "client"} {
+		if got, err := r.ResolveCanonicalIdConceptRefsInNamespace(
+			`canonicalId(args.x, gadget)`, foreign, foreign); err == nil {
+			t.Errorf("declaredNS %q bound a concept in the `cognition:client:tool` namespace "+
+				"ambiently -- %q is an INTERIOR segment of that id, not its namespace. On the "+
+				"path that derives row ids this is the silent cross-namespace bind DoD item 2 "+
+				"exists to refuse.\n  got: %s", foreign, foreign, got)
+		}
+	}
+
+	// The colon EXTENSION is admitted deliberately, and must stay admitted:
+	// AssembleConceptIdFromDeclInDir accepts an @namespace that colon-extends
+	// the directory, so v1:cognition:client:tool:gadget IS a concept of domain
+	// cognition and is in its ambient scope.
+	got, err := r.ResolveCanonicalIdConceptRefsInNamespace(
+		`canonicalId(args.x, gadget)`, "cognition", "cognition")
+	if err != nil {
+		t.Fatalf("a colon-extended sub-namespace must stay in its root domain's ambient scope, "+
+			"or the anchor has over-tightened into the mirror of the bug it fixes: %v", err)
+	}
+	if !strings.Contains(got, `"v1:cognition:client:tool:gadget"`) {
+		t.Errorf("wrong id.\n  got: %s", got)
+	}
+
+	// A namespace that merely PREFIXES another segment-wise is not a match:
+	// "cog" must not bind "cognition:...".
+	if got, err := r.ResolveCanonicalIdConceptRefsInNamespace(
+		`canonicalId(args.x, gadget)`, "cog", "cog"); err == nil {
+		t.Errorf("declaredNS \"cog\" bound a `cognition:...` concept -- the anchor must be at a "+
+			"segment boundary, not a raw prefix.\n  got: %s", got)
+	}
+}
+
+// TestCanonicalId_EmptyDeclaredNamespaceFallsBackToTheDomain covers the
+// exported three-argument form's defensive branch, which nothing else reaches:
+// production always calls InDomain, which supplies a namespace. A caller that
+// knows only the directory should get the directory's behaviour rather than
+// silently losing ambient scope altogether.
+func TestCanonicalId_EmptyDeclaredNamespaceFallsBackToTheDomain(t *testing.T) {
+	got, err := remappedPackResolver().ResolveCanonicalIdConceptRefsInNamespace(
+		`canonicalId(args.x, widget)`, "zcluster", "  ")
+	if err != nil {
+		t.Fatalf("an empty declaredNS must fall back to the domain, not disable ambient "+
+			"resolution: %v", err)
+	}
+	if !strings.Contains(got, `"v1:zcluster:widget"`) {
+		t.Errorf("wrong id.\n  got: %s", got)
 	}
 }

@@ -2,7 +2,6 @@ package memql
 
 import (
 	"fmt"
-	"io"
 	"regexp"
 	"strings"
 
@@ -30,24 +29,70 @@ var useImportRe = regexp.MustCompile(`(?m)^\s*use\s+([\w.]+)\.\{([^}]*)\}`)
 // embedded tree, so a bundle's own pin is honoured exactly like a core
 // domain's. That matters specifically: the cross-repo ambiguity this rule
 // closes arrives from those mounts.
+// The read itself delegates to namespacePin, the loader's own pin reader, so
+// there is exactly one definition of "what this domain's pin says". Copying
+// its four lines here instead would be two sources of truth for one file, and
+// the copy is the one that drifts.
 func declaredNamespaceForDomain(domain string) string {
 	domain = strings.TrimSpace(domain)
 	if domain == "" {
 		return ""
 	}
-	f, err := memqldsl.Tree().Open(domain + "/namespace.pin")
-	if err != nil {
-		return domain
-	}
-	defer f.Close()
-	b, err := io.ReadAll(f)
-	if err != nil {
-		return domain
-	}
-	if pin := strings.TrimSpace(string(b)); pin != "" {
+	if pin := namespacePin(memqldsl.Tree(), domain); pin != "" {
 		return pin
 	}
 	return domain
+}
+
+// declaredNamespaceForOrigin is declaredNamespaceForDomain for a FILE, and it
+// is the form the loader must use, because the two disagree on the nested
+// `<domain>/<sub>/*.memql` layout (memql#3026 landing review).
+//
+// Boot assembles a concept's id from the origin's FIRST path segment --
+// unified_loader.go's pass 1 is `dir := firstPathSegment(p)` followed by
+// AssembleConceptIdFromDeclInDir(decl, dir, namespacePin(tree, dir)), so
+// beta/sub/concepts.memql yields v1:beta:widget (pinned by
+// dslimports/lane2_nested_domain_test.go). DomainFromFilePath returns the LAST
+// directory segment, "sub", which is not a namespace at all.
+//
+// Feeding "sub" to the ambient rule refuses every same-domain reference in a
+// nested file and demands the same-domain import TestNoSameDomainUse bans --
+// the memql#2976 deadlock reinstated one directory deeper. Deriving the
+// namespace the way boot derives the id is what keeps the loader and boot
+// agreeing, which is the whole point of this rule.
+func declaredNamespaceForOrigin(origin string) string {
+	return declaredNamespaceForDomain(RootDomainFromFilePath(origin))
+}
+
+// idDeclaredNamespaceMatches reports whether a canonical concept id belongs to
+// declaredNS -- either as that exact namespace or as a colon EXTENSION of it.
+//
+// The test is anchored at the id's namespace, not a substring search of the
+// whole id (memql#3026 landing review). Namespaces are colon-separated and
+// multi-segment ones are live -- dsl/cognition declares
+// @namespace("cognition:client:tool") -- so the unanchored
+// strings.Contains(id, ":"+declaredNS+":") matched on any INTERIOR segment: a
+// bundle domain named "tool" or "client" bound v1:cognition:client:tool:gadget
+// ambiently, with no import, on the path that derives row ids. That is exactly
+// the cross-namespace bind this rule exists to refuse, and once uniqueness was
+// deleted this condition became the only thing refusing it.
+//
+// The colon extension is admitted deliberately rather than overlooked: it is
+// the inverse of assembly. AssembleConceptIdFromDeclInDir accepts an
+// @namespace that colon-extends the directory ("colon-extension-wins" in
+// concept_id_dir_test.go), so v1:cognition:client:tool:request IS a concept of
+// domain cognition and is in its ambient scope.
+func idDeclaredNamespaceMatches(id, declaredNS string) bool {
+	if id == "" || declaredNS == "" {
+		return false
+	}
+	// Ids are `v<major>:<namespace>:<name>`; drop the version segment so the
+	// namespace can be anchored at its own first character.
+	rest := id
+	if v := strings.IndexByte(rest, ':'); v > 0 {
+		rest = rest[v+1:]
+	}
+	return strings.HasPrefix(rest, declaredNS+":")
 }
 
 // importedConceptHints scans a source file's `use` declarations and returns a
@@ -89,35 +134,41 @@ func (r *ConceptResolver) ResolveCanonicalIdConceptRefs(content string) (string,
 
 // ResolveCanonicalIdConceptRefsInDomain is ResolveCanonicalIdConceptRefs with
 // the #2617 ambient rule: when no file-top import names the concept, the bare
-// name is resolved against the registry and accepted when it is UNAMBIGUOUS.
-// An explicit import always wins (the import map is consulted first).
+// name is accepted only when the resolved id belongs to this domain's DECLARED
+// NAMESPACE -- its namespace.pin when it has one, else the directory. An
+// explicit import always wins (the import map is consulted first).
 //
-// Read that carefully, because it is wider than the rule this comment used to
-// describe (memql#2976). It said resolution was "accepted only when the
-// resolved id actually lives in that domain -- cross-domain concepts still
-// require the explicit import". That is no longer true: a concept declared
-// ONLY in a foreign domain now binds ambiently, with no import, provided its
-// trailing segment is unique tree-wide. `canonicalId(x, user)` in an unrelated
-// pack rewrites to v1:identity:user rather than failing.
+// The declared namespace is the rule memql#2976 asked for, and it arrived by
+// way of two others that are worth keeping straight, because each was wrong in
+// a different direction:
 //
-// That matches how boot binds a signature concept -- resolveBareConceptName-
-// WithNamespace returns a unique trailing-segment match before it consults the
-// hint at all -- so the two agree, which is what #2976 was about. But it is
-// NOT what #2976 asked for. It asked for the check to test the concept's
-// DECLARED NAMESPACE rather than its containing directory, which would have
-// fixed the remapped pack without widening cross-domain binding at all. The
-// declared namespace is not reachable here (it needs the tree FS for
-// namespace.pin, which the loader does not thread this far), so uniqueness
-// shipped instead. Consequences, tracked in memql#3026:
+//   - the ORIGINAL rule compared the id against the containing DIRECTORY. That
+//     refuses any pack whose directory differs from its @namespace --
+//     dsl/deployment pins "cluster", so its own concepts assemble as v1:cluster:*
+//     and the loader demanded an import for a concept in its own domain, while
+//     the import it named was the one TestNoSameDomainUse bans. No spelling
+//     worked (#2976).
+//   - #3017 replaced it with tree-wide UNIQUENESS, on the argument that boot
+//     binds a signature concept the same way. That fixed the remapped pack but
+//     WIDENED binding: a concept declared only in a foreign domain bound with
+//     no import, on the path that derives row ids. It also left a remapped pack
+//     whose name is AMBIGUOUS deadlocked, since uniqueness cannot disambiguate
+//     by construction, and let a bundle mounted at MEMQL_DSL_PATH make this
+//     tree's reference ambiguous -- an unrelated repository failing this
+//     engine's boot (memql#3026).
 //
-//   - a namespace-remapped pack whose concept name is AMBIGUOUS is still in
-//     the original deadlock -- ambient refuses, and the import the error asks
-//     for is the one TestNoSameDomainUse bans;
-//   - a product bundle mounted at MEMQL_DSL_PATH that declares a name this
-//     tree also declares can retroactively make an ambient reference
-//     ambiguous, so the failure arrives from an unrelated repository.
+// The declared namespace fixes the remapped pack without widening anything,
+// which is why it was the original ask: the hint disambiguates a colliding
+// short-name, and #2617's import discipline holds again for foreign concepts.
 //
-// An ambiguous name still errors, and a name declared nowhere still errors.
+// A name in a foreign namespace, an ambiguous name with no local candidate,
+// and a name declared nowhere all still error.
+//
+// NOTE the domain passed here must be the one the id was ASSEMBLED from. For a
+// nested `<domain>/<sub>/*.memql` file that is the first path segment, not the
+// last -- the loader therefore calls the InNamespace form below with
+// declaredNamespaceForOrigin, and this two-argument wrapper is correct only for
+// a flat domain. See declaredNamespaceForOrigin.
 func (r *ConceptResolver) ResolveCanonicalIdConceptRefsInDomain(content, domain string) (string, error) {
 	return r.ResolveCanonicalIdConceptRefsInNamespace(content, domain, declaredNamespaceForDomain(domain))
 }
@@ -144,18 +195,26 @@ func (r *ConceptResolver) ResolveCanonicalIdConceptRefsInNamespace(content, doma
 			i++
 			continue
 		}
-		// A `//` comment (and its `///` doc form) is PROSE, not code
-		// (memql#3026). The scanner tracked string literals but not comments,
-		// so a `canonicalId(...)` written in a comment was treated as a real
-		// call and the author's comment TEXT was rewritten -- and a comment
-		// naming an unknown concept became a hard load error. #3017 papered
-		// over this with an authoring warning ("Do NOT write the call form in
-		// a comment across a line break") instead of fixing the scanner.
+		// A comment is PROSE, not code (memql#3026). The scanner tracked
+		// string literals but not comments, so a `canonicalId(...)` written in
+		// a comment was treated as a real call and the author's comment TEXT
+		// was rewritten -- and a comment naming an unknown concept became a
+		// hard load error. #3017 papered over this with an authoring warning
+		// ("Do NOT write the call form in a comment across a line break")
+		// instead of fixing the scanner.
 		//
-		// Copied through verbatim to end-of-line. The inStr check comes first,
-		// so a `//` inside a string (a URL in an @description) is not a
-		// comment -- treating it as one would swallow the rest of the file
-		// including real calls.
+		// BOTH of the lexer's comment forms are skipped, not just `//`
+		// (memql#3026 landing review). skipWhitespace in
+		// language/parser/lexer.go dispatches to skipLineComment for `//` AND
+		// skipBlockComment for `/* */`, so handling only the line form left
+		// the identical defect alive in block comments -- including the
+		// wrapped-across-a-line-break case the authoring warning was about,
+		// which is the one a block comment is most likely to be.
+		//
+		// Both are copied through verbatim. The inStr check comes first, so a
+		// `//` inside a string (a URL in an @description) is not a comment --
+		// treating it as one would swallow the rest of the file including real
+		// calls.
 		if !inStr && strings.HasPrefix(content[i:], "//") {
 			end := strings.IndexByte(content[i:], '\n')
 			if end < 0 {
@@ -165,6 +224,21 @@ func (r *ConceptResolver) ResolveCanonicalIdConceptRefsInNamespace(content, doma
 			}
 			b.WriteString(content[i : i+end])
 			i += end
+			continue
+		}
+		if !inStr && strings.HasPrefix(content[i:], "/*") {
+			// An unterminated block comment runs to end of file, matching
+			// skipBlockComment's own behaviour -- the parser reports it, and
+			// this scanner must not rewrite the text on the way there.
+			end := strings.Index(content[i+2:], "*/")
+			if end < 0 {
+				b.WriteString(content[i:])
+				i = len(content)
+				continue
+			}
+			stop := i + 2 + end + len("*/")
+			b.WriteString(content[i:stop])
+			i = stop
 			continue
 		}
 		if inStr || !strings.HasPrefix(content[i:], "canonicalId") {
@@ -254,7 +328,7 @@ func (r *ConceptResolver) ResolveCanonicalIdConceptRefsInNamespace(content, doma
 			// carry this namespace -- so #2617's import discipline holds again
 			// on the id-deriving path.
 			if id, aerr := r.resolveBareConceptNameWithNamespace(secondArg, declaredNS); aerr == nil {
-				if strings.Contains(id, ":"+declaredNS+":") {
+				if idDeclaredNamespaceMatches(id, declaredNS) {
 					nsHint, ok = declaredNS, true
 				}
 			}

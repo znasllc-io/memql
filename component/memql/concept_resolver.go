@@ -541,3 +541,5 @@ func (r *ConceptResolver) resolveConceptRef(ref string, symbols map[string]*symb
 func VersionFromFilePath(path string) string { return dslfs.VersionFromFilePath(path) }
 
 func DomainFromFilePath(path string) string { return dslfs.DomainFromFilePath(path) }
+
+func RootDomainFromFilePath(path string) string { return dslfs.RootDomainFromFilePath(path) }

@@ -79,13 +79,7 @@ func VersionFromFilePath(path string) string {
 //
 // Returns "" when the path carries no directory.
 func DomainFromFilePath(path string) string {
-	// Strip a loader origin decoration ("unified:", "dryrun:", ...): a
-	// colon-terminated prefix before the first slash is never part of the
-	// mounted path.
-	if idx := strings.Index(path, ":"); idx >= 0 && !strings.Contains(path[:idx], "/") && strings.Contains(path[idx+1:], "/") {
-		path = path[idx+1:]
-	}
-	parts := strings.Split(path, "/")
+	parts := strings.Split(stripOriginDecoration(path), "/")
 	for i := len(parts) - 2; i >= 0; i-- {
 		part := parts[i]
 		if part == "" || part == "." {
@@ -97,4 +91,54 @@ func DomainFromFilePath(path string) string {
 		return part
 	}
 	return ""
+}
+
+// RootDomainFromFilePath returns the FIRST directory segment of a mounted
+// .memql file's path -- "agents" for agents/tools/askSpecialist.memql, where
+// DomainFromFilePath returns "tools".
+//
+// The two exist side by side because the tree answers two different questions
+// with two different segments, and confusing them is a live defect class
+// (memql#3026 landing review):
+//
+//   - the LAST segment is the file's ambient same-domain scope under #2617,
+//     which is what DomainFromFilePath is for;
+//   - the FIRST segment is the domain a concept's canonical id is ASSEMBLED
+//     from. unified_loader.go's pass 1 is `dir := firstPathSegment(p)` before
+//     AssembleConceptIdFromDeclInDir, so beta/sub/concepts.memql declares
+//     v1:beta:widget, and it is beta -- not sub -- that owns a namespace.pin.
+//
+// Anything comparing a concept id against a domain wants this one. Loader
+// origin decorations are stripped exactly as they are above, and "" comes back
+// when the path carries no directory.
+func RootDomainFromFilePath(path string) string {
+	parts := strings.Split(stripOriginDecoration(path), "/")
+	if len(parts) < 2 {
+		return "" // no directory component: a bare filename has no domain
+	}
+	for i := 0; i < len(parts)-1; i++ {
+		part := parts[i]
+		if part == "" || part == "." {
+			continue
+		}
+		if VersionFromFilePath(part) == part {
+			continue // legacy v<digits> layout segment, not a domain
+		}
+		return part
+	}
+	return ""
+}
+
+// stripOriginDecoration removes a loader origin prefix ("unified:", "dryrun:",
+// ...): a colon-terminated prefix before the first slash is never part of the
+// mounted path. The unified loader stamps slice origins as
+// "unified:<path>:<sliceName>", which would otherwise pollute the leading
+// directory segment -- and it pollutes it for BOTH readers above, which is why
+// this is one function rather than a copy in each.
+func stripOriginDecoration(path string) string {
+	if idx := strings.Index(path, ":"); idx >= 0 &&
+		!strings.Contains(path[:idx], "/") && strings.Contains(path[idx+1:], "/") {
+		return path[idx+1:]
+	}
+	return path
 }
