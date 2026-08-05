@@ -6182,10 +6182,15 @@ func (p *Parser) parseAsOfFunction() (ExpressionNode, error) {
 			useLatest = true
 			p.advance()
 		case lit == "args" || strings.HasPrefix(lit, "args."):
-			// The caller-chosen instant (memql#2992). `args.<path>`, optionally
-			// with `?? latest` so an omitted arg behaves exactly as `asOf
+			// The caller-chosen instant (memql#2992). `args.<path> ?? latest`,
+			// where the fallback makes an omitted arg behave exactly as `asOf
 			// latest` -- which is what lets the existing `asOf latest` queries
 			// adopt this form without changing behaviour for any caller.
+			//
+			// The fallback is REQUIRED, not optional; the block below is where
+			// that is enforced and why (memql#3028). This sentence used to say
+			// "optionally", and left the two halves of one case arm
+			// contradicting each other.
 			//
 			// The lexer emits a dotted reference as ONE identifier token
 			// (`args.window.start`), so the path is a string split rather than
@@ -6196,19 +6201,57 @@ func (p *Parser) parseAsOfFunction() (ExpressionNode, error) {
 				return nil, newParseErrorf(&p.current, "asOf: expected `args.<name>`, got a bare `args`")
 			}
 			p.advance()
-			if p.check(TokenQuestionQuestion) {
-				p.advance()
-				if !p.check(TokenIdentifier) || !strings.EqualFold(strings.TrimSpace(p.current.Literal), "latest") {
-					return nil, newParseErrorf(&p.current, "asOf: the only supported `??` fallback is `latest`, got %q", p.current.Literal)
-				}
-				fallbackLatest = true
-				p.advance()
+			// The `?? latest` fallback is REQUIRED, not optional (memql#3028).
+			//
+			// #3025 made it optional deliberately, reading #2992's ruling as
+			// "the coalesce is the recommended spelling". The recorded #2992
+			// rationale settles the other way: "one clause covers both callers"
+			// and "omit the arg and behaviour is byte-identical to today" are
+			// properties of the COALESCE form specifically, and neither holds
+			// for the bare one.
+			//
+			// The bare form's failure is discoverable NOWHERE before
+			// production -- not at load, not at lint, and not in a test unless
+			// someone writes one that omits the argument. Omitting it is the
+			// common path for this construct, which is the whole reason the
+			// coalesce spelling exists, so a query authored the bare way works
+			// in its author's test and fails for its ordinary callers.
+			//
+			// Requiring it costs no expressiveness on the authored surface: a
+			// mandatory instant is `@required` + `asOf args.at ?? latest`,
+			// where the fallback is unreachable and the failure lands at the
+			// arg boundary with a usable message instead of inside temporal
+			// resolution.
+			//
+			// One thing it does cost, stated because "no expressiveness" read
+			// as unqualified and is not (landing review): queryLatestMode in
+			// component/memql/temporal_access.go marks any query carrying
+			// FallbackLatest as LatestMode, and it reads the expression without
+			// consulting ArgsSchema -- so it cannot see @required, and the
+			// mandatory-instant pattern above is now marked time-dependent even
+			// though its fallback can never fire. Conservative in the safe
+			// direction, and inert today: nothing gates, caches or branches on
+			// Function.LatestMode -- it is a contract marker with no reader
+			// outside its own field, clone and annotation docs.
+			if !p.check(TokenQuestionQuestion) {
+				return nil, newParseErrorf(&p.current,
+					"asOf: `args.%s` requires the `?? latest` fallback -- write `asOf args.%s ?? latest`. "+
+						"Without it every caller that omits the argument fails at run time, which is the "+
+						"common path for this construct; for a mandatory instant declare the arg "+
+						"`@required` and keep the fallback, so the failure lands at the argument "+
+						"boundary instead (memql#3028)", argPath, argPath)
 			}
+			p.advance()
+			if !p.check(TokenIdentifier) || !strings.EqualFold(strings.TrimSpace(p.current.Literal), "latest") {
+				return nil, newParseErrorf(&p.current, "asOf: the only supported `??` fallback is `latest`, got %q", p.current.Literal)
+			}
+			fallbackLatest = true
+			p.advance()
 		default:
-			return nil, newParseErrorf(&p.current, "asOf second argument must be an RFC3339 string, `latest`, or `args.<name>` (optionally `?? latest`)")
+			return nil, newParseErrorf(&p.current, "asOf second argument must be an RFC3339 string, `latest`, or `args.<name> ?? latest`")
 		}
 	default:
-		return nil, newParseErrorf(&p.current, "asOf second argument must be an RFC3339 string, `latest`, or `args.<name>` (optionally `?? latest`)")
+		return nil, newParseErrorf(&p.current, "asOf second argument must be an RFC3339 string, `latest`, or `args.<name> ?? latest`")
 	}
 
 	if err := p.expect(TokenParenClose); err != nil {

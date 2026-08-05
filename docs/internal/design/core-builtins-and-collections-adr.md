@@ -224,10 +224,12 @@ lint warns when a `where()` / etc. runs over an **unfiltered full-concept fetch*
 
 ### 2.3 Temporal access (`asOf`) stays a query clause
 
-- `asOf latest` / `asOf <ts>` / `asOf args.<name> [?? latest]` is a
+- `asOf latest` / `asOf <ts>` / `asOf args.<name> ?? latest` is a
   **query-only clause** (alongside `filter` / `shape` / `sort` / `paginate`);
   it compiles to time-travel against the graph. It is **rejected** in logic /
-  automation / spec bodies.
+  automation / spec bodies. The `?? latest` fallback carries no brackets here
+  because it is not optional -- the bare `asOf args.<name>` is a parse error
+  (memql#3028).
 - The `args.<name>` form (memql#2992) lets a declared query offer the point in
   time to its CALLER rather than fixing it at authoring time. It does not
   weaken this section: the clause is still query-only, and the caller-supplied
@@ -351,10 +353,13 @@ query node queryNodesAt {       // asOf <ts> -> deterministic, no marker
 }
 ```
 
-NOTE (memql#2927): this block originally showed `args { at string @required }`
-with `asOf args.at`. That does not parse -- `asOf` takes an RFC3339 literal or
-bare `latest`, never `args.X` -- so a declared query cannot take a
-caller-chosen instant. Tracked as memql#2992. (Names here keep this ADR's
+NOTE (memql#2927, superseded): this block originally showed
+`args { at string @required }` with `asOf args.at`, and this note said that did
+not parse -- true when it was written, stale since memql#2992 shipped the
+caller-instant form. A declared query CAN take a caller-chosen instant; the
+spelling is `asOf args.at ?? latest`, with the fallback required rather than
+optional (memql#3028). See §2.3 above, which this note contradicted for two
+releases. (Names here keep this ADR's
 pre-memql#2853 `query*`/`logic*`/`spec*` style, as the rest of the document
 does. No sweep will reach them: memql#2979 excludes `*.md`, and the doc gates
 only flag a prefixed name when the unprefixed one is declared in the tree --

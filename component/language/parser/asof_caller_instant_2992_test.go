@@ -66,10 +66,6 @@ func TestAsOf_CallerInstantForms(t *testing.T) {
 			wantTS: true,
 		},
 		{
-			name: "caller arg", clause: "args.at",
-			wantArg: "at",
-		},
-		{
 			name: "caller arg with the latest fallback", clause: "args.asOf ?? latest",
 			wantArg: "asOf", wantFB: true,
 		},

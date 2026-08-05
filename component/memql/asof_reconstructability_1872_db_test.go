@@ -40,10 +40,16 @@ import (
 // available: the named query wrapped in an asOf directive. It returns the
 // status current at t, plus that version's own createdAt.
 //
-// asOf takes an RFC3339 literal -- `asOf args.at` is rejected by the grammar
-// -- so the timestamp is inlined into the query string rather than passed as
-// an arg. That limitation is real but separate; it does not affect whether
-// the state at t is retrievable.
+// The timestamp is inlined into the query string rather than passed as an arg
+// because this is a RUNTIME query string, where component/memql/parser.go
+// rejects `args` outright -- there is no caller-arg surface to use.
+//
+// This comment used to say the reason was that "asOf takes an RFC3339 literal
+// -- `asOf args.at` is rejected by the grammar", and called that a language
+// limitation. True when written, stale since memql#2992: a DECLARED query can
+// take a caller-chosen instant, spelled `asOf args.at ?? latest` with the
+// fallback required (memql#3028). The restriction that applies here is the
+// runtime-query-string one, which is narrower and unrelated.
 func deploymentStatusAsOf(t *testing.T, eng *MemQLEngine, ctx context.Context, depID string, at time.Time) (status string, createdAt time.Time, found bool) {
 	t.Helper()
 	q := fmt.Sprintf("asOf(deploymentById(deploymentId:%q), %q)", depID, at.UTC().Format(time.RFC3339Nano))

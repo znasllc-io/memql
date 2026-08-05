@@ -63,9 +63,25 @@ func resolveAsOfArg(node *TimestampExpression, args map[string]any) (*TimestampE
 			// behaviour the query had before it offered the choice.
 			return &TimestampExpression{UseLatest: true}, nil
 		}
+		// UNREACHABLE FROM PARSED SOURCE as of memql#3028, and kept anyway.
+		//
+		// The parser is the only producer of a node with ArgPath set, and it
+		// now refuses `asOf args.X` without the fallback, so it cannot emit
+		// ArgPath != "" with FallbackLatest == false. Everything that could
+		// reach here -- durable rehydration, raw query strings, sense -- goes
+		// back through that same parser. asof_arg_resolve_test.go pins this
+		// branch by hand-building the AST, which is the only way to produce it.
+		//
+		// Kept as defence in depth rather than deleted: it is the last guard
+		// before an unresolved instant reaches temporal resolution, and it
+		// costs one comparison. Do not read its existence as evidence that the
+		// bare form is a shape the language emits -- it is not, and the message
+		// below deliberately names the required spelling rather than offering
+		// it as one option of two.
 		return nil, fmt.Errorf(
-			"asOf args.%s: no value supplied and no `?? latest` fallback declared -- either pass "+
-				"the argument or write `asOf args.%s ?? latest` so an omitted value means the "+
+			"asOf args.%s: no value supplied and no `?? latest` fallback declared -- this node "+
+				"cannot come from parsed source (the fallback is required, memql#3028), so it was "+
+				"built directly; write `asOf args.%s ?? latest` so an omitted value means the "+
 				"latest version (memql#2992)",
 			node.ArgPath, node.ArgPath)
 	}
