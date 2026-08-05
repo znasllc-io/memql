@@ -38,26 +38,47 @@ import (
 // than a hand-rolled table -- a hand-rolled one would be another definition of
 // the escape set, and the defect above is what having two already cost.
 //
-// component/inbound's memqlString, which had a byte-identical body at the time
-// it was written, is now a one-line alias for this function. It was written
+// component/inbound's memqlString is now a one-line alias for this function. The
+// two bodies were byte-identical as of bfc7c1d7, when this one was first written;
+// naming the commit because "byte-identical" stopped being true of the CURRENT
+// body the moment SetEscapeHTML(false) landed below. It was written
 // independently for the same reason (memql#2957, a webhook body is arbitrary
 // third-party text), and the two drifting apart is precisely how one of them
 // ends up not matching readString.
 //
-// That is two collapsed into one, NOT the end of the class, and the difference
-// is worth stating rather than claiming a repo-wide collapse that did not
-// happen. Still live, and still rendering MemQL string values their own way:
+// That is two collapsed into one, and NOT the end of the class. Several other
+// renderers still turn Go values into MemQL literals their own way. Examples,
+// deliberately NOT presented as a complete list -- an earlier version of this
+// comment claimed a repo-wide collapse, a second one enumerated four and still
+// missed three, so the honest form is a pointer to the search rather than a
+// count (`grep -rn 'Sprintf("%q"' --include=*.go` over the statement-building
+// paths finds them):
 //
 //   - component/automations/steps/function.go renders string function args with
-//     %q and hands the result to Engine.Execute. That is this exact defect on
-//     the automation step path, not an analogue -- the lexer refuses its output
-//     for the same bytes, verified.
+//     %q and hands the result to Engine.Execute. That is this exact defect on the
+//     automation step path, not an analogue -- the lexer refuses its output for
+//     the same bytes, verified. Its sibling mutation.go does the same when it
+//     builds an insert.
+//   - component/memql/liveknowledge's memqlQuote is another %q-into-the-engine
+//     renderer, and component/memql carries two more of its own
+//     (encodeForMemqlSubstitution, renderDryRunMemQLValue).
 //   - sdk/go/client does the same across support.go and its generated builders.
 //
-// Both are separate stories; a helper cannot fix a caller by existing.
-// integrations/knowledge and component/automations/steps carry two further
-// renderers which are duplicate definitions but NOT defects: they pass control
-// bytes through raw, and the lexer accepts those.
+// One caller of THIS function is also on the wrong side of a related boundary,
+// which belongs here rather than left for someone to rediscover: component/inbound
+// stages a raw third-party webhook body through memqlString, and a NUL in that
+// body renders as an escape the lexer accepts and PostgreSQL's jsonb then refuses,
+// so the row cannot be staged at all. That is memql#3035's defect one file over.
+// It predates the collapse -- the body this replaced emitted the same escape --
+// and it is deliberately NOT fixed here: unlike an error message, a webhook body's
+// bytes are load-bearing, so choosing between rejecting and substituting is a
+// decision this helper cannot make on its caller's behalf. Filed separately.
+//
+// Not every one of those is a live defect -- integrations/knowledge's hand-rolled
+// table and component/automations/steps' jsonString are duplicate DEFINITIONS
+// that happen to be safe, since the lexer accepts a raw control byte and
+// json.Marshal escapes correctly. The point is the count, not a verdict on each:
+// these are separate stories, and a helper cannot fix a caller by existing.
 //
 // # Invalid UTF-8
 //
@@ -77,23 +98,27 @@ import (
 // either way.
 //
 // What turning it off buys is size, and only size. On an HTML-bearing error the
-// emitted literal is roughly 1.7x larger with escaping on -- 7158 bytes against
-// 4228, measured on one 4096-byte error-page excerpt. Treat that as an order of
-// magnitude and not a constant: the ratio tracks metacharacter density, and a
-// differently-shaped excerpt measures differently. A 6x figure is reachable only
-// for a degenerate all-metacharacter string.
+// emitted literal is somewhere around 1.7x to 2x larger with escaping on. The
+// range is deliberate: the ratio is a function of metacharacter density and
+// nothing else, so any single measurement is a property of its fixture rather
+// than of this code, and two reviewers measuring different excerpts got 1.69x and
+// 1.96x. The one figure worth pinning is the ceiling, because it is exactly
+// reproducible: strings.Repeat("<", 4096) gives 24578 bytes on against 4098 off,
+// i.e. 6x, and only a degenerate all-metacharacter string reaches it.
 //
-// On the input this file is actually about -- control bytes -- the two settings
-// are IDENTICAL: 22018 bytes from 4096 either way, because \u00XX is emitted
-// regardless of this flag. So the flag does nothing whatsoever for the memql#3035
-// case, and is kept for the HTML one.
+// On the input this file is actually about -- control bytes -- the two settings are
+// IDENTICAL, byte for byte, whatever the density: \u00XX is emitted regardless of
+// this flag, and a string free of <, > and & cannot differ between the two. So the
+// flag does nothing whatsoever for the memql#3035 case; it is kept for the HTML
+// one.
 //
 // Two things it does NOT do, both of which an earlier draft of this comment
 // asserted:
 //
 //   - It does not protect truncation budget. component/outbound's truncateError
-//     caps the RAW message and this runs on its return value, so escaping
-//     cannot cost one character of the 4096.
+//     caps the message -- after its own NUL substitution, so "RAW" would now be
+//     wrong -- and QuoteString runs on its return value, so escaping cannot cost
+//     one character of the 4096.
 //   - It does not make lastError readable. The lexer decodes the escapes, so
 //     the persisted value is byte-identical either way, and the statement
 //     itself is never logged -- stamp() logs only the error.

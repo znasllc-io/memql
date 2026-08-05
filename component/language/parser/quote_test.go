@@ -142,8 +142,9 @@ func TestQuoteString_EmitsItsOwnQuotes(t *testing.T) {
 //
 // encoding/json escapes <, > and & by default so JSON can sit inside a <script>
 // tag. Nothing here goes near a browser, the lexer takes all three raw, and the
-// parsed value is identical either way -- so the default cost up to 6x
-// expansion on an HTML error-page excerpt (against a 4096-byte cap) and made an
+// parsed value is identical either way -- so the default cost size on an HTML
+// error-page excerpt (roughly 1.7x to 2x, depending entirely on metacharacter
+// density; 6x only for a degenerate all-metacharacter string) and made an
 // ordinary URL with a query string unreadable, for no benefit.
 //
 // Asserted through the REAL lexer, so this pins the round trip and not just the
@@ -159,7 +160,7 @@ func TestQuoteString_HTMLCharsAreNotEscaped(t *testing.T) {
 		// see in the output, so asserting on the character tests the opposite of
 		// the intent (which the first draft of this test did).
 		if strings.Contains(got, `\u003c`) || strings.Contains(got, `\u003e`) || strings.Contains(got, `\u0026`) {
-			t.Errorf("HTML escaping is back on. It expands an error page excerpt up to 6x against "+
+			t.Errorf("HTML escaping is back on. It inflates an HTML-bearing error excerpt "+
 				"the truncation cap and makes an ordinary URL unreadable, and the lexer accepts "+
 				"these raw.\n  in:  %q\n  got: %s", in, got)
 		}

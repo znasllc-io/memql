@@ -428,9 +428,16 @@ func requestFromRow(row map[string]any) Request {
 // is about, reached through Postgres instead of through the lexer. Fixing the
 // escape set alone moved that failure rather than removing it.
 //
-// NUL is the ONLY escape jsonb rejects: `\u0007`, `\u000b`, `\u001b`, high
-// bytes and `�` all store fine (verified on the same instance), so this
-// substitution is as narrow as the defect.
+// NUL is the only escape THIS RENDERER CAN EMIT that jsonb rejects. That is a
+// narrower claim than "the only escape jsonb rejects", and the narrow one is
+// what is actually load-bearing: `\u0007`, `\u000b`, `\u001b`, high bytes and
+// `�` all store fine, verified on the same instance, but jsonb ALSO rejects
+// a lone surrogate escape ("Unicode low surrogate must follow a high
+// surrogate"). QuoteString cannot produce one -- it emits `\u00XX` only for
+// bytes below 0x20 plus the two mandatory escapes, and encoding/json turns
+// invalid UTF-8 into `�` rather than a surrogate half -- so the gap is
+// unreachable from here. State the reachable claim rather than the general one:
+// a new value added to this statement should be re-checked, not assumed safe.
 //
 // # Why U+FFFD rather than dropping the byte
 //
@@ -445,12 +452,27 @@ func requestFromRow(row map[string]any) Request {
 // Not in QuoteString: its contract is "what the MemQL lexer accepts", it is
 // shared with component/inbound, and jsonb storability is a different concern
 // with different callers. Not for requestId either, and that one is deliberate
-// rather than an oversight -- a NUL there is unreachable, because a row whose
-// id carried one could never have been inserted for the worker to read, and
-// rewriting an id would aim the update at a DIFFERENT row, which is worse than
-// failing loudly.
+// rather than an oversight. A NUL there is unreachable: the id is also a text
+// primary key, and PostgreSQL rejects a NUL in text outright ("null character
+// not permitted"), so no such row can exist for the worker to read back.
+// Rewriting an id would also aim the update at a DIFFERENT row, which is worse
+// than failing loudly.
 //
-// Substitution runs BEFORE the cap so lastErrorCap still bounds what is stored.
+// This is a per-BYTE split rather than a blanket exemption, and the two arguments
+// in this file are narrower than they look side by side. A bell or a vtab in a
+// requestId IS reachable -- text and jsonb both store them happily -- which is
+// why every requestId is still quoted. Only NUL is unreachable there.
+//
+// Substitution runs BEFORE the cap, and the cap bounds THIS FUNCTION'S RETURN.
+// It does not bound the stored value exactly, and the difference is worth being
+// honest about rather than rounding off: the cut is at a byte boundary, so it
+// can split a replacement rune, and encoding/json then repairs each orphaned
+// byte into a fresh 3-byte � -- measured at 4100 bytes stored from a
+// 4096-byte return. A handful of bytes over, never unbounded.
+//
+// The ordering is still the right way round. Substituting AFTER the cap lets a
+// NUL-dense error expand to 3x lastErrorCap (12288 bytes from 4096, measured),
+// which is precisely what the cap exists to prevent.
 func truncateError(err error) string {
 	msg := strings.ReplaceAll(err.Error(), "\x00", "�")
 	if len(msg) > lastErrorCap {

@@ -115,8 +115,9 @@ func stringArg(t *testing.T, mutation, arg string) string {
 // The assertion is on the DECODED value rather than on the rendered escape
 // because that is the property that matters and it cannot be spelled two ways:
 // if no decoded string holds a NUL rune, no encoder downstream can emit
-// \u0000 for it. Every other control byte stores fine, so this is as
-// narrow as the defect.
+// \u0000 for it. Every other control byte this renderer can emit stores
+// fine, so the assertion is as narrow as the defect. (jsonb also rejects a lone
+// surrogate escape, but QuoteString cannot produce one -- see truncateError.)
 //
 // This is a unit assertion rather than a database test on purpose:
 // component/outbound is NOT in the db-tests lane (which runs only
@@ -161,7 +162,14 @@ func wantLastError(err error) string {
 
 // hostileError carries the bytes a remote server can put into an error string.
 // \x00 / \a / \v are the three %q emits that the lexer has no escape for.
-var hostileError = errors.New("upstream said: \x00 NUL \a bell \v vtab \x01\x02 and \"quotes\" and a \\ backslash")
+//
+// It carries TWO NULs deliberately, and that is not padding. With one, a
+// substitution that replaced only the FIRST -- strings.Replace(s, x, y, 1)
+// instead of ReplaceAll -- is indistinguishable from a correct one, and the
+// whole suite passes green while a remote sending two NULs still wedges the row.
+// Verified: with a single-NUL fixture that mutation passes; with this one it
+// fails. A fixture that cannot tell the off-by-one from the fix is not a fixture.
+var hostileError = errors.New("upstream said: \x00 NUL \a bell \v vtab \x00 second NUL \x01\x02 and \"quotes\" and a \\ backslash")
 
 // TestStampFailed_HostileErrorStillLexes covers the permanent-failure stamp:
 // the attempt cap is 3 and IsPermanent short-circuits, so a permanent error
@@ -260,6 +268,39 @@ func TestStampPolicyRefusal_HostileTargetStillLexes(t *testing.T) {
 	assertStampsLex(t, eng)
 }
 
+// TestTruncateErrorSubstitutesBeforeCapping pins the ordering truncateError
+// argues for, which until now was asserted only in prose.
+//
+// U+FFFD is three bytes and a NUL is one, so the substitution GROWS the string.
+// Run it after the cap and a NUL-dense error expands past lastErrorCap -- 3x it,
+// in the limit -- which is exactly what the cap exists to prevent. Moving the
+// substitution after the slice left the whole package green before this test
+// existed.
+//
+// The assertion is on truncateError's return, because that is the scope the
+// function can actually promise: the STORED value can run a few bytes over when
+// a cut splits a replacement rune and encoding/json repairs the orphan into a
+// fresh U+FFFD. Bounded and harmless, and deliberately not asserted here as an
+// exact equality that would encode the repair's arithmetic.
+func TestTruncateErrorSubstitutesBeforeCapping(t *testing.T) {
+	nuls := strings.Repeat("\x00", lastErrorCap+904)
+
+	got := truncateError(errors.New(nuls))
+
+	if len(got) > lastErrorCap {
+		t.Errorf("truncateError returned %d bytes against a cap of %d. The substitution "+
+			"must run BEFORE the slice; after it, each NUL becomes three bytes and the "+
+			"result is up to 3x the cap.", len(got), lastErrorCap)
+	}
+	if strings.ContainsRune(got, 0) {
+		t.Error("a NUL survived truncateError, so the stamp cannot be stored")
+	}
+	if !strings.Contains(got, "�") {
+		t.Error("the NULs were dropped rather than substituted; the operator loses the " +
+			"fact that bytes were there")
+	}
+}
+
 // TestOrdinaryErrorIsUnchanged is the counterpart: the overwhelmingly common
 // case must keep working and keep reading naturally. A fix that escaped
 // everything aggressively would pass the lexer tests above while making every
@@ -307,13 +348,34 @@ func TestOrdinaryErrorIsUnchanged(t *testing.T) {
 // case's single stuck row. Both are the same defect -- %q against a lexer that
 // does not implement its escapes -- reached through a different argument.
 func TestHostileRequestID_StillLexes(t *testing.T) {
-	const hostileID = "v1:platform:outboundRequest:r\x00bad\a\v"
+	// No NUL in this id, and its absence is the point rather than an oversight.
+	// A bell or a vtab in a requestId IS reachable -- Postgres stores both in text
+	// and in jsonb -- so those are what this fixture must carry. A NUL is not: the
+	// id is a text primary key and Postgres refuses a NUL there outright, so a row
+	// whose id held one could never have been inserted for the worker to read back.
+	// Pinning an input the production code is documented as unable to receive would
+	// make this test assert against a state that cannot occur.
+	const hostileID = "v1:platform:outboundRequest:rbad\a\v"
 
 	t.Run("delivery succeeds", func(t *testing.T) {
 		eng := &fakeEngine{pending: []map[string]any{pendingRow(hostileID)}}
 		w := newTestWorker(eng, &fakeTransport{}, nil)
 		w.drainOnce(context.Background())
 		assertStampsLex(t, eng)
+
+		// The id must arrive at the row EXACTLY as it left, and this is the one
+		// assertion that catches the tempting wrong fix. Sanitising req.ID -- the
+		// "just strip what the lexer chokes on" cleanup -- keeps every other
+		// assertion in this file green while aiming the update at a DIFFERENT row
+		// id than the one the worker claimed. Verified: that mutation passes
+		// without this line and fails with it.
+		for _, m := range eng.stamped() {
+			assertStorable(t, m)
+			if got := stringArg(t, m, "requestId"); got != hostileID {
+				t.Errorf("the requestId did not round-trip, so this stamp targets the "+
+					"wrong row.\n  want: %q\n  got:  %q", hostileID, got)
+			}
+		}
 	})
 
 	t.Run("delivery fails", func(t *testing.T) {
