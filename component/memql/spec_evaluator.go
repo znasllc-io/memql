@@ -85,6 +85,12 @@ func buildSpecCtx(ctx context.Context, engine *MemQLEngine) map[string]any {
 //
 // #2623 is the standing rule: one builder, or the same gate answers
 // differently depending on which surface evaluated it.
+//
+// A NIL RECEIVER IS VALID and returns the same complete key set with the
+// unset-snapshot values, because buildAmbientEnvelope guards the engine deref.
+// Callers must be able to bind unconditionally: an envelope withheld leaves
+// keys ABSENT, and an absent key is what makes a negated gate read true
+// (#2801). "No engine" must therefore mean empty values, never missing ones.
 func (e *MemQLEngine) AmbientEnvelope(ctx context.Context) map[string]any {
 	return buildAmbientEnvelope(ctx, e)
 }

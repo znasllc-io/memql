@@ -1376,11 +1376,21 @@ func (r *LogicRunner) newEvaluatorForLogic(ctx context.Context, args map[string]
 // through that binder. Splitting the two keeps that invariant checkable by the
 // test that already exists rather than making it depend on this function too.
 //
-// A nil engine binds nothing rather than binding empty values: the engine is
-// where the config snapshot lives, so with no engine there is no envelope to
-// speak for, and synthesising one would assert a config state nobody set.
+// A nil engine still binds, and that is deliberate rather than defensive.
+// AmbientEnvelope tolerates a nil receiver and yields every key with the same
+// empty/denying values a configured engine yields for an unset snapshot, so
+// binding unconditionally keeps the #2801 rule intact on this path: EVERY KEY
+// PRESENT, never absent keys.
+//
+// Skipping the bind for a nil engine looks safer and is not. Absent keys are
+// the third nil-representation #2801 exists to eliminate -- a negated
+// predicate reads an absent key as TRUE, so `cond(config.demoMode != true,
+// <allow>, <deny>)` would take the ALLOW branch under a nil engine and the
+// DENY branch under a real one. That is the same predicate answering
+// differently depending on how the evaluator was constructed, which is exactly
+// what #2623 forbids and what authoring-rules.md now promises does not happen.
 func bindEngineAmbientEnvelope(ctx context.Context, engine *memql.MemQLEngine, evaluator *Evaluator) {
-	if engine == nil || evaluator == nil {
+	if evaluator == nil {
 		return
 	}
 	envelope := engine.AmbientEnvelope(ctx)

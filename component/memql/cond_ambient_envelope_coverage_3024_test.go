@@ -89,6 +89,14 @@ func TestLogicCondBareIdentifierPredicate_RejectsUnresolvableAmbientPaths(t *tes
 			pred:  `trace.id == "x"`,
 			wants: "reserved name that no evaluation envelope supplies",
 		},
+		"trace-bare": {
+			// The BARE form must give the same reason as the dotted one. It
+			// reaches unboundBareComparison first, whose diagnostic says "bind it
+			// in a step first" -- impossible advice for a reserved name, which is
+			// why that check defers a reserved-unsupplied root to this one.
+			pred:  `trace == "x"`,
+			wants: "reserved name that no evaluation envelope supplies",
+		},
 		"config-not-allow-listed": {
 			// Not in component/config/policy_exposable.go's allow-list.
 			pred:  `config.someFlag == "on"`,
@@ -166,6 +174,28 @@ func TestExecute_CondAmbientConfigPredicate_Discriminates(t *testing.T) {
 		require.Equal(t, "elevated", match)
 		require.Equal(t, "plain", miss)
 	})
+
+	// `partition` and `now` ride the same substitution as `config`, and until
+	// now the only assertion on either was a LOAD-time check -- the same
+	// zero-discriminating-power shape that let the `config` half ship
+	// unverified. Both are single-segment roots, so they also exercise the
+	// len(parts)==1 branch that the dotted paths never reach.
+	//
+	// The values are environment-dependent, so the assertion is on
+	// DISCRIMINATION rather than on a literal: each predicate and its negation
+	// must give opposite answers. A constant cannot do that.
+	t.Run("single-segment-roots", func(t *testing.T) {
+		for name, root := range map[string]string{"partition": "partition", "now": "now"} {
+			t.Run(name, func(t *testing.T) {
+				empty := run(t, "amb"+name+"Empty", root+` == ""`, nil)
+				nonEmpty := run(t, "amb"+name+"NonEmpty", root+` != ""`, nil)
+				require.NotEqualf(t, empty, nonEmpty,
+					"`%s == \"\"` and `%s != \"\"` both returned %#v, so %q is not resolved during "+
+						"expansion and any gate over it is a constant (memql#3024).",
+					root, root, empty, root)
+			})
+		}
+	})
 }
 
 // TestExecute_CondAmbientPredicate_NegatedAbsentActorDenies pins the memql#2801
@@ -182,7 +212,11 @@ func TestExecute_CondAmbientConfigPredicate_Discriminates(t *testing.T) {
 // "if you ARE an owner" gate opens for an unauthenticated caller.
 //
 // Measured: with `ambient` made conditional on an AccessContext being present,
-// the whole component/memql package stays green -- except for this test.
+// the whole component/memql package stays green except for this test and
+// TestExecute_CondAmbientConfigPredicate_Discriminates, whose baseCtx also
+// carries no actor. Every OTHER test in the package -- including the `== true`
+// sibling below that claims to cover this very guarantee -- passes with it
+// removed.
 func TestExecute_CondAmbientPredicate_NegatedAbsentActorDenies(t *testing.T) {
 	for name, pred := range map[string]string{
 		"isClusterOwner": `actor.isClusterOwner != false`,

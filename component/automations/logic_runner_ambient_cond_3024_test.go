@@ -154,14 +154,27 @@ func TestLogicRunner_AmbientCondConfigPredicate_Discriminates(t *testing.T) {
 		require.Equal(t, "plain", miss)
 	})
 
-	// A nil engine binds nothing rather than an empty envelope -- there is no
-	// config state to speak for without one. Pinned so the guard in
-	// bindEngineAmbientEnvelope is not quietly removed as dead.
-	t.Run("nil-engine-does-not-panic", func(t *testing.T) {
-		runner := NewLogicRunner(nil, nil, nil)
-		_, _, err := tryEvaluateBuiltinLocally(
-			`cond(config.demoMode == true, "elevated", "plain")`,
-			runner.newEvaluatorForLogic(context.Background(), map[string]any{}))
-		require.NoError(t, err)
+	// A nil engine binds every key with empty values rather than skipping the
+	// bind, so there is exactly ONE construction path (#2801: present-and-empty,
+	// never absent).
+	//
+	// This asserts the binder directly. Going through a predicate would assert
+	// nothing: with a nil engine there is no config state, so bound-empty and
+	// unbound are indistinguishable at the predicate level -- measured, both
+	// spellings give the same answer with and without the bind. A subtest that
+	// only checked "no error" would pass whether the bind happened or not while
+	// claiming to pin it, which is the vacuous assertion this file exists to
+	// avoid.
+	t.Run("nil-engine-binds-every-key", func(t *testing.T) {
+		ev := NewEvaluator()
+		bindEngineAmbientEnvelope(context.Background(), nil, ev)
+
+		for _, key := range []string{"config", "partition", "now"} {
+			_, bound := ev.custom[key]
+			require.Truef(t, bound,
+				"%q must be bound to an empty value even with no engine, not left ABSENT. An "+
+					"absent key is the third nil-representation #2801 eliminates -- a negated gate "+
+					"reads it as true.", key)
+		}
 	})
 }

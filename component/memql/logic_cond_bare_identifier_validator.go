@@ -141,6 +141,9 @@ func unresolvableAmbientComparison(node languageParser.ExpressionNode) (*languag
 	}
 	root := strings.TrimSpace(parts[0])
 	if isReservedUnsuppliedRoot(root) {
+		// Both the bare form (`trace`) and the dotted form (`trace.id`) land
+		// here; unboundBareComparison defers the bare one to this check
+		// precisely so it gets this reason rather than "bind it as a local".
 		return cmp, fmt.Sprintf("whose root %q is a reserved name that no evaluation envelope supplies", root)
 	}
 	if !isAmbientRoot(root) {
@@ -232,6 +235,15 @@ func unboundBareComparison(node languageParser.ExpressionNode, locals map[string
 	// `partition` / `now` are single-segment ambient roots, resolved by the
 	// envelope threading rather than by any local.
 	if isAmbientRoot(name) {
+		return nil
+	}
+	// A bare reserved-but-unsupplied root (`trace`) is unresolvable too, but it
+	// is NOT a missing local and must not be reported as one: this branch's
+	// diagnostic tells the author to bind it in a step, and a reserved name
+	// cannot be bound at all. Hand it to unresolvableAmbientComparison, which
+	// names the real reason. Without this the dotted form `trace.x` gets the
+	// right message and the bare form `trace` gets impossible advice.
+	if isReservedUnsuppliedRoot(name) {
 		return nil
 	}
 	if _, bound := locals[name]; bound {
