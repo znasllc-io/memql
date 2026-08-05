@@ -71,6 +71,13 @@ func foldMakeContinuations(raw string) []logicalLine {
 	start := 0
 
 	for i, line := range strings.Split(raw, "\n") {
+		// CRLF (memql#3027 gap 4). Splitting on "\n" alone leaves a trailing
+		// "\r", so HasSuffix(line, "\\") was false on every continued recipe in
+		// a CRLF file: nothing folded, each orphaned backslash made its recipe
+		// unresolvable, and the whole gate fell to checked=0 / findings=[].
+		// The guard turned ITSELF off on a line-ending change, silently, which
+		// is the failure mode it exists to prevent.
+		line = strings.TrimSuffix(line, "\r")
 		if buf.Len() == 0 {
 			start = i + 1
 		}
@@ -89,7 +96,14 @@ func foldMakeContinuations(raw string) []logicalLine {
 	return out
 }
 
-// splitShellCommands segments a recipe on `&&` and `;`.
+// splitShellCommands segments a recipe on `&&`, `;`, `|` and redirects.
+//
+// memql#3027 gap 1: a pipe or a redirect used to leave `tee`, `out.log` or `>`
+// sitting in operand position, where they hit commandPackages' `default:` arm
+// and wrote the whole command off as unresolvable -- silently. Neither
+// changes WHICH package is tested, so the right outcome is to score the
+// recipe normally, and segmenting them off is what makes that happen.
+// `go test ... | tee out.log` is an ordinary Makefile shape.
 //
 // M4's second half. Without it the package scan unions every package named
 // anywhere on the line, so a phantom pattern targeting pkg2 passes by matching
@@ -98,19 +112,60 @@ func foldMakeContinuations(raw string) []logicalLine {
 func splitShellCommands(line string) []string {
 	var cmds []string
 	cur := strings.Builder{}
+	// Quote state. A shell metacharacter inside quotes is DATA, not an
+	// operator -- and for this gate the case that matters is a top-level
+	// alternation in a -run value: `-run 'TestA|TestB'` is one pattern, and
+	// splitting the command on that `|` severs the recipe from its own
+	// packages and reports a working alternation as broken. topLevelAlternatives
+	// exists precisely because `|` is meaningful INSIDE a pattern (#3003 M3),
+	// so the splitter has to leave it alone (memql#3027).
+	var quote byte
 	for i := 0; i < len(line); i++ {
-		if line[i] == ';' {
+		ch := line[i]
+		if quote != 0 {
+			cur.WriteByte(ch)
+			if ch == quote {
+				quote = 0
+			}
+			continue
+		}
+		if ch == '\'' || ch == '"' {
+			quote = ch
+			cur.WriteByte(ch)
+			continue
+		}
+		if ch == ';' {
 			cmds = append(cmds, cur.String())
 			cur.Reset()
 			continue
 		}
-		if line[i] == '&' && i+1 < len(line) && line[i+1] == '&' {
+		if ch == '&' && i+1 < len(line) && line[i+1] == '&' {
 			cmds = append(cmds, cur.String())
 			cur.Reset()
 			i++
 			continue
 		}
-		cur.WriteByte(line[i])
+		// A pipe ends the command; `||` is a two-character operator that ends
+		// it just the same, so one arm covers both.
+		if ch == '|' {
+			cmds = append(cmds, cur.String())
+			cur.Reset()
+			if i+1 < len(line) && line[i+1] == '|' {
+				i++
+			}
+			continue
+		}
+		// A redirect ends the command too, and its TARGET must not be read as
+		// a package operand. `>`, `>>` and the `N>` fd form all start here.
+		if ch == '>' {
+			cmds = append(cmds, cur.String())
+			cur.Reset()
+			if i+1 < len(line) && line[i+1] == '>' {
+				i++
+			}
+			continue
+		}
+		cur.WriteByte(ch)
 	}
 	cmds = append(cmds, cur.String())
 	return cmds
@@ -183,16 +238,35 @@ func resolveMakePattern(pattern string) (string, bool) {
 // answers and must stay different. `go test -run X` with no package argument
 // legitimately means the current directory, so the `{"."}` default is correct
 // and is deliberately kept.
-func commandPackages(cmd string) (pkgs []string, unresolvable bool) {
+func commandPackages(cmd string) (pkgs []string, unresolvable bool, isGoTest bool) {
 	fields := strings.Fields(cmd)
 	i := 0
 	for ; i < len(fields); i++ {
-		if fields[i] == "test" {
+		// The tool must be `go` (memql#3027). Matching the bare word `test`
+		// read `npm test -- --run X` as a go-test invocation, defaulted its
+		// package to the ROOT, and flagged it -- a hard CI failure on an npm
+		// recipe. The Makefile convention puts npm behind `cd <dir> &&`, so
+		// this is reachable text rather than a hypothetical.
+		//
+		// Quotes are stripped first so a quoted shell-out (`bash -c 'go test
+		// ...'`) still matches on its inner `go`.
+		if strings.Trim(fields[i], "'\"") != "test" || i == 0 {
+			continue
+		}
+		prev := strings.Trim(fields[i-1], "'\"")
+		// `go`, an absolute/relative path ending in `go`, or a Make variable
+		// holding the go binary -- `$(GO) test` is how this Makefile spells it,
+		// so rejecting a variable in TOOL position would disable the gate on
+		// every real recipe. This still excludes `npm test`, which is the
+		// false positive being closed.
+		if prev == "go" || strings.HasSuffix(prev, "/go") ||
+			strings.Contains(prev, "$(") || strings.Contains(prev, "${") {
 			i++
+			isGoTest = true
 			break
 		}
 	}
-	if i >= len(fields) {
+	if !isGoTest {
 		// NOT a `go test` command at all. This must be UNRESOLVABLE, not
 		// "no packages" -- the caller turns "no packages" into {"."}, so
 		// returning false here scores a stray `-run` against the ROOT package
@@ -203,7 +277,14 @@ func commandPackages(cmd string) (pkgs []string, unresolvable bool) {
 		// guard this replaces and flagged by it -- a hard CI failure on a HELP
 		// STRING. The widened flag pattern and the new shell-command splitter
 		// each make that reachable (memql#3003 landing review).
-		return nil, true
+		//
+		// memql#3027 makes this answer LOAD-BEARING rather than incidental.
+		// Now that an unresolvable go-test command FAILS the gate, "not a go
+		// test command" and "a go test command I cannot resolve" must be
+		// different answers -- conflating them turns a help string into a hard
+		// CI failure, which is the regression #3003's landing review already
+		// had to fix once.
+		return nil, false, false
 	}
 
 	for ; i < len(fields); i++ {
@@ -226,6 +307,16 @@ func commandPackages(cmd string) (pkgs []string, unresolvable bool) {
 			// is read as a package operand and the command is written off as
 			// unresolvable (memql#3003 M5).
 			name = strings.TrimPrefix(name, "test.")
+			if name == "C" {
+				// `go test -C dir` runs in dir, so every relative operand
+				// resolves against IT, not against the gate's CWD. Consuming
+				// the value and then scoring `./pkg/` from the repo root reads
+				// the wrong directory. Unresolvable at this layer, and now
+				// LOUDLY so (memql#3027 gap 1) -- same reasoning as `cd`.
+				unresolvable = true
+				i++
+				continue
+			}
 			if goTestValueFlags[name] {
 				i++ // the next field is this flag's value, not a package
 			}
@@ -233,6 +324,16 @@ func commandPackages(cmd string) (pkgs []string, unresolvable bool) {
 		}
 		switch {
 		case strings.Contains(f, "$("), strings.Contains(f, "${"):
+			unresolvable = true
+		case strings.Contains(f, "$$"):
+			// The Make dir-loop idiom in PACKAGE position -- `./$$d/`
+			// (memql#3027 gap 3). `$$` is Make's escape, so the shell sees
+			// `$d`: a variable resolved at run time, not a directory that
+			// exists now. This arm has to precede the `./` one, or the operand
+			// looks like an ordinary relative package and the recipe is
+			// reported as declaring no tests -- a false positive on a working
+			// recipe. resolveMakePattern already knew this about the PATTERN
+			// position (#3003 M1); the operand scan never learned it.
 			unresolvable = true
 		case strings.HasPrefix(f, "./"), f == ".":
 			pkgs = append(pkgs, f)
@@ -243,7 +344,7 @@ func commandPackages(cmd string) (pkgs []string, unresolvable bool) {
 			unresolvable = true
 		}
 	}
-	return pkgs, unresolvable
+	return pkgs, unresolvable, true
 }
 
 // topLevelAlternatives returns the sub-patterns `go test` matches against a
