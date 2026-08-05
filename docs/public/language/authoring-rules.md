@@ -180,7 +180,8 @@ windowing, and latest-per-id snapshots are `sort` / `paginate` /
 
 **`asOf` takes a caller-chosen instant, not only a literal** (memql#2992).
 The clause accepts an RFC3339 string, the bare word `latest`, or
-`args.<name>` — optionally with a `?? latest` fallback:
+`args.<name> ?? latest` — the fallback is part of the caller-arg form
+rather than an option on it (memql#3028):
 
 ```memql
 query deployment deploymentsForCluster {
@@ -210,7 +211,13 @@ its author's test and fails for its ordinary callers.
 fallback.** The fallback is then unreachable and the failure lands at the
 argument boundary with a usable message rather than inside temporal
 resolution — strictly better than what the bare form gave, which is why
-requiring the coalesce costs no expressiveness.
+requiring the coalesce costs no expressiveness on the authored surface.
+
+One consequence to know about: a query carrying the fallback is marked
+`LatestMode` (time-dependent) on its contract, and that marking cannot see
+`@required`, so the mandatory-instant pattern above is marked time-dependent
+even though its fallback can never fire. Conservative in the safe direction,
+and nothing currently gates or caches on the marker.
 
 This matters because a declared `asOf latest` cannot be time-travelled by
 wrapping either (`asOf(...)` over a query that declares its own reports

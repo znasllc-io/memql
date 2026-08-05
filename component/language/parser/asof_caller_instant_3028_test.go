@@ -85,3 +85,40 @@ func TestAsOfCallerInstant_FallbackFormStillParses(t *testing.T) {
 		})
 	}
 }
+
+// TestAsOfCallerInstant_GrammarSummaryDoesNotAdvertiseTheBareForm pins the
+// OTHER diagnostic in this function -- the one an author actually hits first
+// (memql#3028 landing review).
+//
+// parseAsOfFunction has two messages: the targeted rejection above, and the
+// `default:` grammar summary shown when the second argument is not recognised
+// at all. That summary read "or `args.<name>` (optionally `?? latest`)", so
+// mistyping the clause told the author, in the parser's own voice, to write
+// the exact form the same function rejects fifteen lines earlier -- and then
+// rejected that too. Shipping a rule whose own diagnostic teaches the opposite
+// is the discoverability failure this issue exists to fix, reproduced one
+// message over.
+//
+// Asserted as "does not advertise the retired form" rather than as an exact
+// string, so rewording the summary stays free while re-optionalising it does
+// not.
+func TestAsOfCallerInstant_GrammarSummaryDoesNotAdvertiseTheBareForm(t *testing.T) {
+	_, err := parseAsOfClause(t, "bogus")
+	if err == nil {
+		t.Fatal("an unrecognised asOf second argument must be a parse error")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "RFC3339") {
+		t.Fatalf("expected the grammar summary, got: %v", err)
+	}
+	if strings.Contains(msg, "optionally") {
+		t.Errorf("the grammar summary still calls the `?? latest` fallback optional. It is "+
+			"required (memql#3028), so this message hands the author a form the parser refuses.\n"+
+			"  got: %s", msg)
+	}
+	if !strings.Contains(msg, "?? latest") {
+		t.Errorf("the grammar summary must still show the caller-arg form WITH its fallback, or "+
+			"an author who mistypes the clause is not told the caller-instant form exists at "+
+			"all.\n  got: %s", msg)
+	}
+}

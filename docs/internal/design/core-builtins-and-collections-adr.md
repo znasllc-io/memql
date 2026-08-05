@@ -224,10 +224,12 @@ lint warns when a `where()` / etc. runs over an **unfiltered full-concept fetch*
 
 ### 2.3 Temporal access (`asOf`) stays a query clause
 
-- `asOf latest` / `asOf <ts>` / `asOf args.<name> [?? latest]` is a
+- `asOf latest` / `asOf <ts>` / `asOf args.<name> ?? latest` is a
   **query-only clause** (alongside `filter` / `shape` / `sort` / `paginate`);
   it compiles to time-travel against the graph. It is **rejected** in logic /
-  automation / spec bodies.
+  automation / spec bodies. The `?? latest` fallback carries no brackets here
+  because it is not optional -- the bare `asOf args.<name>` is a parse error
+  (memql#3028).
 - The `args.<name>` form (memql#2992) lets a declared query offer the point in
   time to its CALLER rather than fixing it at authoring time. It does not
   weaken this section: the clause is still query-only, and the caller-supplied

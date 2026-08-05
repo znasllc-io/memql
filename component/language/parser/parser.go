@@ -6182,10 +6182,15 @@ func (p *Parser) parseAsOfFunction() (ExpressionNode, error) {
 			useLatest = true
 			p.advance()
 		case lit == "args" || strings.HasPrefix(lit, "args."):
-			// The caller-chosen instant (memql#2992). `args.<path>`, optionally
-			// with `?? latest` so an omitted arg behaves exactly as `asOf
+			// The caller-chosen instant (memql#2992). `args.<path> ?? latest`,
+			// where the fallback makes an omitted arg behave exactly as `asOf
 			// latest` -- which is what lets the existing `asOf latest` queries
 			// adopt this form without changing behaviour for any caller.
+			//
+			// The fallback is REQUIRED, not optional; the block below is where
+			// that is enforced and why (memql#3028). This sentence used to say
+			// "optionally", and left the two halves of one case arm
+			// contradicting each other.
 			//
 			// The lexer emits a dotted reference as ONE identifier token
 			// (`args.window.start`), so the path is a string split rather than
@@ -6212,10 +6217,22 @@ func (p *Parser) parseAsOfFunction() (ExpressionNode, error) {
 			// coalesce spelling exists, so a query authored the bare way works
 			// in its author's test and fails for its ordinary callers.
 			//
-			// Requiring it costs no expressiveness: a mandatory instant is
-			// `@required` + `asOf args.at ?? latest`, where the fallback is
-			// unreachable and the failure lands at the arg boundary with a
-			// usable message instead of inside temporal resolution.
+			// Requiring it costs no expressiveness on the authored surface: a
+			// mandatory instant is `@required` + `asOf args.at ?? latest`,
+			// where the fallback is unreachable and the failure lands at the
+			// arg boundary with a usable message instead of inside temporal
+			// resolution.
+			//
+			// One thing it does cost, stated because "no expressiveness" read
+			// as unqualified and is not (landing review): queryLatestMode in
+			// component/memql/temporal_access.go marks any query carrying
+			// FallbackLatest as LatestMode, and it reads the expression without
+			// consulting ArgsSchema -- so it cannot see @required, and the
+			// mandatory-instant pattern above is now marked time-dependent even
+			// though its fallback can never fire. Conservative in the safe
+			// direction, and inert today: nothing gates, caches or branches on
+			// Function.LatestMode -- it is a contract marker with no reader
+			// outside its own field, clone and annotation docs.
 			if !p.check(TokenQuestionQuestion) {
 				return nil, newParseErrorf(&p.current,
 					"asOf: `args.%s` requires the `?? latest` fallback -- write `asOf args.%s ?? latest`. "+
@@ -6231,10 +6248,10 @@ func (p *Parser) parseAsOfFunction() (ExpressionNode, error) {
 			fallbackLatest = true
 			p.advance()
 		default:
-			return nil, newParseErrorf(&p.current, "asOf second argument must be an RFC3339 string, `latest`, or `args.<name>` (optionally `?? latest`)")
+			return nil, newParseErrorf(&p.current, "asOf second argument must be an RFC3339 string, `latest`, or `args.<name> ?? latest`")
 		}
 	default:
-		return nil, newParseErrorf(&p.current, "asOf second argument must be an RFC3339 string, `latest`, or `args.<name>` (optionally `?? latest`)")
+		return nil, newParseErrorf(&p.current, "asOf second argument must be an RFC3339 string, `latest`, or `args.<name> ?? latest`")
 	}
 
 	if err := p.expect(TokenParenClose); err != nil {

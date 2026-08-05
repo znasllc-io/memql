@@ -517,8 +517,11 @@ asOf(concept==v1:assistant && active==true, "2025-11-01T00:00:00Z")
 ```
 
 In a **declared** query the clause also takes the caller's instant
-(memql#2992) -- `args.<name>`, optionally with a `?? latest` fallback so an
-omitted value means the latest version:
+(memql#2992) -- `args.<name> ?? latest`, where the fallback means an omitted
+value is the latest version. The fallback is **required**, not optional: the
+bare `asOf args.<name>` is rejected at parse, because omitting the argument is
+the common path for this construct and without a fallback every such caller
+fails at run time (memql#3028):
 
 ```memql
 query deployment deploymentsForCluster {
@@ -922,9 +925,9 @@ query node nodesAt {        // asOf <ts> -> deterministic, no marker
 
 - `asOf latest` reads current (clock-dependent) state. Mark the query `@latestMode` so consumers see on its contract that the result is time-dependent.
 - `asOf <explicit timestamp>` reads immutable historical state — deterministic, so it needs no marker.
-- **The timestamp must be a literal.** `asOf` in a struct-form query takes an RFC3339 string literal or bare `latest` — not `args.X`. A declared query therefore cannot offer a *caller-chosen* point in time; `asOf args.at` is rejected at load with `asOf second argument must be an RFC3339 string or latest`.
+- **A caller-chosen instant is spelled `args.<name> ?? latest`** (memql#2992). A declared query can offer one; the fallback is required, so the bare `asOf args.at` is rejected at parse with a message naming the fix (memql#3028). See the caller-instant example above. *This bullet used to say the timestamp had to be a literal and that `args.X` was rejected outright — true before #2992, and stale since; it quoted an error string the parser no longer emits.*
 
-  To read at a caller-supplied instant, wrap the query in a **runtime query string** composed by the caller (Go/SDK/MCP) — not in `.memql`, where `asOf` is a query-only clause and a body using it is rejected:
+  To read at a caller-supplied instant *without* declaring the argument, wrap the query in a **runtime query string** composed by the caller (Go/SDK/MCP) — not in `.memql`, where `asOf` is a query-only clause and a body using it is rejected:
 
   ```
   asOf(deploymentById(deploymentId:"d-abc"), "2026-07-28T12:00:00Z")
