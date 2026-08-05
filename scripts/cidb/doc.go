@@ -32,10 +32,12 @@
 // ci.yml's hand-maintained comment bound the selector to "packages that carry
 // *_db_test.go files". That is under-specified: FOUR of the seven packages
 // holding db-gated tests carry no such file at all (component/grpc,
-// integrations/cognition, integrations/planner, and -- though it is in the
-// selector -- examples/referencepack). So this gate keys on the thing that
-// actually makes a test db-gated: an import of component/database/dbtest from a
-// _test.go file.
+// integrations/cognition, integrations/planner and examples/referencepack).
+// All four are in the selector as of memql#3030, so the filename convention
+// would now miss every one of them -- the parenthetical here used to single
+// referencepack out as the only one covered, which stopped being true in that
+// change. So this gate keys on the thing that actually makes a test db-gated:
+// an import of component/database/dbtest from a _test.go file.
 //
 // Membership of the lane keys on something stricter still: a TestMain calling
 // dbtest.EnsureSchema. A package earns one only so it can migrate the shared
@@ -43,27 +45,27 @@
 // being in the selector is always drift -- and unlike a per-argument check,
 // that catches a selector entry being DELETED.
 //
-// # What this gate deliberately does NOT assert
+// # Full coverage IS asserted (memql#3030)
 //
-// It does not require every db-gated package to be in the lane. Four are not
-// (component/automations, component/grpc, integrations/cognition,
-// integrations/planner), and their DB assertions have never run in CI. That is
-// real and is tracked in memql#3030, separately because closing it is
-// per-package work rather than a ci.yml edit: each package needs a TestMain
-// calling dbtest.EnsureSchema before it can share the lane's one database
-// (memql#2551). Asserting full coverage here would red the tree on a defect
-// this change does not fix.
+// The uncovered-set finding was a log line rather than an assertion while four
+// packages were outside the lane (component/automations, component/grpc,
+// integrations/cognition, integrations/planner) -- deliberately, so the tree
+// was not red over a defect the change that added this gate did not fix. Their
+// 19 DB assertions had never run in CI: each package printed `ok` while
+// executing none of them, because nothing asserted the selector reached them.
 //
-// Two different numbers describe that gap, and they do not disagree. memql#3030
-// counts 19 DB ASSERTIONS -- individual tests measured as skipping against a
-// dead DSN. This gate's log prints 31 TEST FUNCTIONS in dbtest-importing files,
-// which is a coarser proxy: it over-counts non-DB tests that happen to sit in
-// such a file and under-counts db-gated tests that reach dbtest through a
-// helper in a sibling file. Neither number feeds a pass/fail decision.
+// memql#3030 gave each of those a TestMain calling dbtest.EnsureSchema
+// (memql#2551 -- required because the lane runs per-package binaries as
+// parallel processes against ONE database) and added them to the selector, so
+// the exemption has no subject left and the log became the failure it was
+// always meant to be. A db-gated package added outside the selector now reds
+// immediately.
 //
-// When memql#3030 lands, tighten TestDBTestsLaneRunsAtLeastOneDBGatedTest from
-// "at least one" to full coverage -- the uncovered set is already computed, so
-// it is one t.Logf becoming a t.Errorf.
+// The counts remain a coarse proxy and still feed no pass/fail decision: the
+// log over-counts non-DB tests that happen to sit in a dbtest-importing file,
+// and under-counts db-gated tests that reach dbtest through a helper in a
+// sibling file. What is asserted is per-package coverage, which is unaffected
+// by either.
 //
 // # What it can and cannot prove
 //

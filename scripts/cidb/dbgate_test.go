@@ -3,8 +3,7 @@ package cidb
 // dbgate_test.go -- the CI drift gate for the db-tests lane (memql#2886).
 //
 // Three assertions, one per way the lane could report a non-failure while
-// having verified nothing. See doc.go for the rationale and for what this
-// deliberately leaves to a separate issue.
+// having verified nothing. See doc.go for the rationale.
 
 import (
 	"fmt"
@@ -1075,9 +1074,20 @@ func TestDBTestsLaneRunsAtLeastOneDBGatedTest(t *testing.T) {
 		}
 	}
 
-	// Not an assertion -- the four uncovered packages are a known, separately
-	// tracked gap (see doc.go). Logging keeps them visible instead of letting a
-	// green gate imply full coverage.
+	// NOW AN ASSERTION (memql#3030). This was a log line while four packages
+	// were a known, separately tracked gap -- deliberately not a failure, so
+	// the tree was not red over a defect the change that added this gate did
+	// not fix.
+	//
+	// Those four (component/automations, component/grpc, integrations/cognition,
+	// integrations/planner) joined the lane in #3030, so the exemption has no
+	// subject left, and the log becomes the failure it was always meant to be:
+	// the next db-gated package added outside the selector reds immediately
+	// instead of silently contributing zero DB assertions to CI.
+	//
+	// That is the whole shape of this defect class -- the four packages each
+	// printed `ok` for weeks while running none of their 19 DB assertions,
+	// because nothing asserted the selector reached them.
 	if len(uncovered) > 0 {
 		dirs := map[string]int{}
 		for _, dbt := range uncovered {
@@ -1088,10 +1098,11 @@ func TestDBTestsLaneRunsAtLeastOneDBGatedTest(t *testing.T) {
 			names = append(names, fmt.Sprintf("%s (%d)", d, dirs[d]))
 		}
 		sort.Strings(names)
-		t.Logf("Test functions in dbtest-importing files NOT covered by the %q lane, so their DB "+
-			"assertions never run in CI: %v. Tracked in memql#3030 -- each package needs a "+
-			"TestMain calling dbtest.EnsureSchema (memql#2551) before it can join the lane. A "+
-			"log and not a failure on purpose; see doc.go.\n\n"+
+		t.Errorf("Test functions in dbtest-importing files NOT covered by the %q lane, so their DB "+
+			"assertions never run in CI: %v. Each package needs a TestMain calling "+
+			"dbtest.EnsureSchema (memql#2551) before it can join the lane -- then add it to the "+
+			"selector. The lane runs per-package binaries as parallel processes against ONE "+
+			"database, so the TestMain is what stops them racing each other's migration.\n\n"+
 			"Treat the COUNTS as a proxy, not a census: they are exact in neither direction. A "+
 			"dbtest-importing file may hold non-DB tests (over-counts), and a genuinely db-gated "+
 			"test may reach dbtest through a helper in a sibling file rather than importing it "+

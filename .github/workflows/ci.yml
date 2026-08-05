@@ -494,14 +494,27 @@ jobs:
   # executably (memql#2886). The old rule written here, "keep this list in sync
   # with the packages that carry `*_db_test.go` files", was already wrong when
   # it was written: examples/referencepack carries none, and four of the seven
-  # db-gated packages in the tree carry none either. The real rule, and the one
-  # the gate asserts, is that every package with a TestMain calling
-  # dbtest.EnsureSchema must appear below.
+  # db-gated packages in the tree carry none either.
   #
-  # These per-package binaries run as PARALLEL processes against this ONE shared
-  # DB, so each such package must migrate the schema through that TestMain (a
-  # cross-process advisory lock serializes it); otherwise the suites race on a
-  # half-created schema and fail with `relation "MemoryNodes" does not exist`
+  # DO NOT restate the gate's rules here. scripts/cidb enforces several, in both
+  # directions -- a package can be missing from this list, and a list entry can
+  # match nothing -- with deliberate exemptions, and its failure messages name
+  # the offending package and the remedy. Two attempts to summarise those rules
+  # in this comment were both wrong, the second one harmfully: it told the
+  # reader to add any db-gated package below, which for scripts/cidb (exempt on
+  # purpose, see selfPkg in dbgate_test.go) is the one edit that reds the lane.
+  # A short restatement of a multi-rule gate is a comment that goes stale the
+  # next time a rule moves, and a wrong comment about CI costs more than no
+  # comment.
+  #
+  # The authority is scripts/cidb/doc.go for the rationale, dbgate_test.go for
+  # the rules, and the gate's own output when it fails. memql#3030 tightened it
+  # from LOGGING uncovered packages to FAILING on them.
+  #
+  # The packages below run as PARALLEL processes against this ONE shared DB, so
+  # each must migrate the schema through a TestMain calling dbtest.EnsureSchema
+  # (a cross-process advisory lock serializes it); otherwise the suites race on
+  # a half-created schema and fail with `relation "MemoryNodes" does not exist`
   # (memql#2551). A new db-gated package needs both an entry below AND that
   # TestMain -- and adding the TestMain without the entry now fails the gate.
   db-tests:
@@ -545,8 +558,8 @@ jobs:
       # the skip behaviour, which is the intended split.
       #
       # Do not remove it. scripts/cidb asserts this key is present and truthy,
-      # and that this lane's package selector still matches at least one
-      # db-gated test -- the "executed zero of them" failure one level up.
+      # and separately asserts the selector's coverage -- see the selector
+      # comment above, and scripts/cidb itself for what it checks.
       MEMQL_REQUIRE_DB: '1'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -569,7 +582,7 @@ jobs:
           CREATE EXTENSION IF NOT EXISTS vector;
           SQL
       - name: db-gated suites (seeded test DB)
-        run: go test -count=1 -timeout=300s ./component/memql/... ./component/automations/steps/... ./examples/referencepack/...
+        run: go test -count=1 -timeout=300s ./component/memql/... ./component/automations/... ./component/grpc/... ./integrations/cognition/... ./integrations/planner/... ./examples/referencepack/...
 
   # VS Code extension lane: run every cmd/memql-lsp drift guard over the
   # checked-in editors/vscode assets, then build the offline LSP binary

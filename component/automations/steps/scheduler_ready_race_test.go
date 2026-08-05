@@ -41,7 +41,7 @@ import (
 func TestSchedulerReadyMeansAutomationsRegistered(t *testing.T) {
 	dsn := os.Getenv("MEMQL_DATABASE_DSN")
 	if dsn == "" {
-		dsn = "postgres://memql:memql_local_dev@localhost:5432/memql?sslmode=disable"
+		dsn = "postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable"
 	}
 	db := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn))), pgdialect.New())
 	if err := db.PingContext(context.Background()); err != nil {

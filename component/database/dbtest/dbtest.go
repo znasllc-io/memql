@@ -41,7 +41,7 @@ import (
 // defaultDSN mirrors the fallback each *_db_test.go uses when
 // MEMQL_DATABASE_DSN is unset, so the ensure step and the tests it guards
 // target the same database.
-const defaultDSN = "postgres://memql:memql_local_dev@localhost:5432/memql?sslmode=disable"
+const defaultDSN = "postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable"
 
 // schemaLockKey is a dedicated, fixed 64-bit advisory-lock id that serializes
 // schema migration across the parallel db-gated test processes. Distinct from

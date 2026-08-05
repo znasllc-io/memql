@@ -12,10 +12,10 @@ import (
 // MEMQL_REQUIRE_DB must convert the skip into a failure.
 func TestSafeDSNRedactsPassword(t *testing.T) {
 	for in, want := range map[string]string{
-		"postgres://memql:memql_local_dev@localhost:5432/memql?sslmode=disable": "postgres://memql:***@localhost:5432/memql?sslmode=disable",
-		"postgres://memql@localhost:5432/memql":                                 "postgres://memql@localhost:5432/memql",
-		"postgres://localhost:5432/memql":                                       "postgres://localhost:5432/memql",
-		"":                                                                      "",
+		"postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable": "postgres://memql:***@localhost:5432/memql?sslmode=disable",
+		"postgres://memql@localhost:5432/memql":                           "postgres://memql@localhost:5432/memql",
+		"postgres://localhost:5432/memql":                                 "postgres://localhost:5432/memql",
+		"":                                                                "",
 	} {
 		if got := SafeDSN(in); got != want {
 			t.Errorf("SafeDSN(%q) = %q, want %q", in, got, want)

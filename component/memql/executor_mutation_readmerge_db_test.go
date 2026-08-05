@@ -46,7 +46,7 @@ func readMergeTestEngine(t *testing.T) (*MemQLEngine, *bun.DB, context.Context) 
 	t.Helper()
 	dsn := os.Getenv("MEMQL_DATABASE_DSN")
 	if dsn == "" {
-		dsn = "postgres://memql:memql_local_dev@localhost:5432/memql?sslmode=disable"
+		dsn = "postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable"
 	}
 	connector := pgdriver.NewConnector(pgdriver.WithDSN(dsn))
 	db := bun.NewDB(sql.OpenDB(connector), pgdialect.New())
