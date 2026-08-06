@@ -156,12 +156,42 @@ func extractFunctionBody(source string) string {
 // precededByBodyOpener reports whether the text immediately preceding
 // position p is the header line of a function/struct definition.
 //
-// Recognised headers (the parser-emitted forms after the struct
-// rewriters run):
+// Recognised headers:
 //
-//   - `func (Receiver) name(<args>) <returns> {` (procedural form)
-//   - `query NAME {` / `mutate NAME {` / `automation NAME {`
-//     `spec NAME {` / `trait NAME {` (struct form, pre-rewrite)
+//   - `func (Receiver) name(<args>) <returns> {` -- the procedural form, and
+//     in practice the ONLY one that ever reaches here.
+//   - a struct-form opener (`query NAME {`, `mutate NAME {`, ...), kept as a
+//     defensive arm. See below: today it matches nothing.
+//
+// # The struct-form arm is UNREACHABLE today (memql#3105)
+//
+// Every caller of extractFunctionBody is fed `rawSourceForUsage`, which
+// function_loader.go assigns AFTER NormaliseAll runs -- so the snapshot is
+// POST-rewrite text. The rewriter has already turned every struct-form
+// construct into `func (Receiver) ...{`, and those keywords have no native
+// top-level parser entry, so an un-rewritten one could not have parsed at all.
+// `spec` / `trait` / `action` are native but produce SpecDef / ActionDef
+// rather than a *FunctionDef, so they never reach this validator either.
+//
+// Measured on the real tree (81 construct files): 46 `func ` hits, ZERO
+// keyword-arm hits.
+//
+// It is kept rather than deleted because the doc here once said BOTH "the
+// parser-emitted forms after the struct rewriters run" AND that the struct
+// forms were recognised "pre-rewrite" -- a contradiction that let this arm
+// carry the RETIRED `mutation` keyword (renamed to `mutate` in memql#2041)
+// and omit `logic` entirely, unnoticed. The keywords now come from the
+// rewriter's own StructFormKeywords, so the set cannot drift from the
+// rewriter again -- the single-sourcing memql#3094 applied to the call-graph
+// checker.
+//
+// The trap that closes: `rawSourceForUsage` READS like authored text, and if
+// anyone moves that snapshot above the rewriter this arm goes live. A header
+// miss makes extractFunctionBody return "", and each caller then silently
+// SKIPS validation -- disabling validateDeclaredUsage,
+// validateLogicEventBinding, validateActorBinding and
+// validateLogicEventFields at once. Correct keywords mean that refactor
+// degrades safely instead of failing open.
 //
 // The check looks at the last logical line ending at `prefix`. The
 // header keyword is allowed anywhere on that line (covers
@@ -182,14 +212,33 @@ func precededByBodyOpener(prefix string) bool {
 	if strings.HasPrefix(line, "func ") || strings.HasPrefix(line, "func\t") {
 		return true
 	}
-	// Struct-form opener.
-	for _, kw := range []string{"query ", "mutation ", "automation ", "spec ", "trait "} {
+	// Struct-form opener. Sourced from the rewriter's own keyword set
+	// (memql#3105) rather than a hardcoded list, so it cannot drift from the
+	// rewriter the way the retired `mutation` spelling did.
+	for _, kw := range structFormBodyOpeners {
 		if strings.HasPrefix(line, kw) {
 			return true
 		}
 	}
 	return false
 }
+
+// structFormBodyOpeners is StructFormKeywords with the trailing space each
+// prefix match needs, computed once.
+//
+// `spec ` and `trait ` are deliberately NOT here, and dropping them is not a
+// narrowing: neither is a struct-form keyword, both are native parser
+// constructs producing SpecDef rather than a *FunctionDef, and neither can
+// reach this validator. Listing them implied a coverage this function never
+// had.
+var structFormBodyOpeners = func() []string {
+	kws := languageParser.StructFormKeywords
+	out := make([]string, 0, len(kws))
+	for _, kw := range kws {
+		out = append(out, kw+" ")
+	}
+	return out
+}()
 
 // stripAttrLines removes lines that contain `@<word>(...)` annotation
 // declarations so the body-reference scan doesn't count the
