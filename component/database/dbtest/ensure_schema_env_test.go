@@ -84,9 +84,15 @@ func TestEnsureSchemaDoesNotPublishAnUnreachableDefaultUnderRequireDB(t *testing
 	}
 }
 
-// An EXPLICIT env is never overwritten, reachable or not -- the caller's choice
-// wins. Guards the fix from the other side: a version that always deferred the
-// Setenv could still clobber an operator-supplied DSN.
+// An EXPLICIT env survives a run whose default is unreachable -- the caller's
+// choice wins.
+//
+// It does NOT guard the usedDefault branch, though it is the obvious place to
+// look for that. `explicit` points at example.invalid, so EnsureSchema returns
+// at the ping and never reaches the Setenv: dropping the usedDefault guard
+// entirely leaves this test, and the whole package, green. Verified by
+// mutation. Guarding that branch needs a REACHABLE explicit DSN, which would
+// make this test require a database it otherwise does not.
 func TestEnsureSchemaNeverOverwritesAnExplicitDSN(t *testing.T) {
 	const explicit = "postgres://someone:else@example.invalid:5432/other?sslmode=disable"
 	t.Setenv("MEMQL_DATABASE_DSN", explicit)
