@@ -9,7 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/znasllc-io/memql/component/language/dslclause"
-	"github.com/znasllc-io/memql/component/memql/dslfs"
+	"github.com/znasllc-io/memql/core/dslfs"
 )
 
 // clause_opener_convention_test.go -- memql#2863.

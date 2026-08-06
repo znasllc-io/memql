@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
-	"github.com/znasllc-io/memql/component/memql/baseparser"
+	"github.com/znasllc-io/memql/core/baseparser"
 )
 
 // parseSpecMemQL parses a single `.memql` source fragment containing

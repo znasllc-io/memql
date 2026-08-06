@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/znasllc-io/memql/integrations/audio"
+	"github.com/znasllc-io/memql/core/audio"
 )
 
 // decodeJSON unmarshals a client event into a generic map for assertions.

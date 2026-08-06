@@ -91,7 +91,7 @@ import (
 
 	languageAst "github.com/znasllc-io/memql/component/language/ast"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
-	"github.com/znasllc-io/memql/component/memql/dslfs"
+	"github.com/znasllc-io/memql/core/dslfs"
 )
 
 // rowIntrinsics are the engine-owned row fields an insert/update block may

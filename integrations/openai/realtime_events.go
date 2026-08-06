@@ -4,7 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 
-	"github.com/znasllc-io/memql/integrations/audio"
+	"github.com/znasllc-io/memql/core/audio"
 )
 
 // realtime_events.go is the pure-Go event vocabulary for the OpenAI

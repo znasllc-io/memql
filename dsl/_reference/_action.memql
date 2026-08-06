@@ -4,7 +4,7 @@
 //
 // This file is the source of truth for the `action` syntax. It is NOT loaded
 // by the engine (the leading underscore on the path tells every walker to skip
-// it -- see component/memql/dslfs/walker.go).
+// it -- see core/dslfs/walker.go).
 //
 // `action` is the behavioral DSL's EXTERNAL-SIDE-EFFECT construct. From the
 // behavioral-constructs ADR (docs/internal/design/dsl-behavioral-constructs-adr.md,

@@ -18,7 +18,7 @@ import (
 	languageAst "github.com/znasllc-io/memql/component/language/ast"
 	languageCompiler "github.com/znasllc-io/memql/component/language/compiler"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
-	"github.com/znasllc-io/memql/component/memql/dslfs"
+	"github.com/znasllc-io/memql/core/dslfs"
 )
 
 // Compile-time guarantee that the ast alias still exists.

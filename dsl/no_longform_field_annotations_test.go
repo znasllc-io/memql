@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
-	"github.com/znasllc-io/memql/component/memql/dslfs"
+	"github.com/znasllc-io/memql/core/dslfs"
 )
 
 // The #2618 long-form gates: each runs its EXACT codemod and fails on

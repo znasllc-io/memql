@@ -51,6 +51,7 @@ permissions:
 jobs:
   changes:
     name: changes
+    timeout-minutes: 10
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -64,6 +65,17 @@ jobs:
       proto: ${{ steps.filter.outputs.proto }}
       vscode: ${{ steps.filter.outputs.vscode }}
       ci: ${{ steps.filter.outputs.ci }}
+      # Target-module buckets (memql#3163 / design D3). Declared so the split
+      # in memql#3165 is a no-op for CI, per decision F. NOT yet consumed by any
+      # lane's `if:` -- see the block above the definitions for why.
+      base: ${{ steps.filter.outputs.base }}
+      engine: ${{ steps.filter.outputs.engine }}
+      platform: ${{ steps.filter.outputs.platform }}
+      integrations: ${{ steps.filter.outputs.integrations }}
+      server-grpc: ${{ steps.filter.outputs['server-grpc'] }}
+      server-http: ${{ steps.filter.outputs['server-http'] }}
+      server-mcp: ${{ steps.filter.outputs['server-mcp'] }}
+      app: ${{ steps.filter.outputs.app }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
@@ -150,6 +162,72 @@ jobs:
               - 'cmd/memql-lsp/**'
               - 'scripts/vscode/**'
 
+            # ---------------------------------------------------------------
+            # TARGET-MODULE BUCKETS (memql#3163 / design D3)
+            #
+            # These describe the module topology memql#3165 will draw
+            # `go.mod` boundaries around: app -> servers -> integrations ->
+            # platform -> engine -> base -> wire. Written against CURRENT
+            # paths, so when the modules land no path moves -- that is what
+            # decision F buys.
+            #
+            # DELIBERATELY NOT WIRED TO ANY LANE'S `if:` YET, and the reason
+            # matters more than the buckets:
+            #
+            #   1. Every Go lane today runs a `./...`-style selector -- the
+            #      test lane runs the whole complement, and the build lanes run
+            #      `go build -tags X ./...`. A dependency-closed bucket cannot
+            #      narrow a lane that compiles everything, so wiring these in
+            #      would buy ~zero job-minutes until per-module lanes exist.
+            #   2. Scoping the TAGGED build lanes by path would be UNSOUND.
+            #      `go build -tags X ./...` compiles the whole module, so any
+            #      Go change can break it -- which is exactly why build-voice
+            #      already gates on the whole `go` bucket rather than on
+            #      integrations/voice/**. Narrowing them would let a breaking
+            #      change skip the lane: faster CI that verifies less.
+            #
+            # So the closure becomes meaningful AFTER the module split, not
+            # before it. Wiring these up is tracked as follow-up to memql#3163.
+            #
+            # NOTE: `wire` from the D3 table is the existing `proto` bucket
+            # above (**/*.proto + the generated gen/ trees); it is not
+            # duplicated here.
+            base:
+              - 'core/**'
+              - 'component/language/annotations/**'
+              - 'component/language/ast/**'
+              - 'component/language/dslclause/**'
+            engine:
+              - 'component/memql/**'
+              - 'component/language/**'
+              - 'component/database/**'
+              - 'component/actions/**'
+              - 'component/harness/**'
+              - 'dsl/**'
+            platform:
+              - 'component/node/**'
+              - 'component/polyphon/**'
+              - 'component/identity/**'
+              - 'component/auth/**'
+              - 'component/events/**'
+              - 'component/bus/**'
+              - 'component/safety/**'
+            integrations:
+              - 'integrations/**'
+            # component/grpc EXCLUDING its generated gen/ tree, which is `wire`
+            # (L0, 21 importers) and is targeted to version independently.
+            server-grpc:
+              - 'component/grpc/**'
+              - '!component/grpc/gen/**'
+            server-http:
+              - 'component/server/**'
+            server-mcp:
+              - 'component/mcp/**'
+            app:
+              - 'app/**'
+              - 'cmd/**'
+              - 'main.go'
+
   # Consolidated CGO-free Go lane. One job, one warm GOCACHE, every
   # CGO-free Go check run in sequence. The job runs when `go` OR `dsl`
   # changed (or on push / a CI-config change); within it each step keeps
@@ -162,6 +240,7 @@ jobs:
   # cache is warm for vet/test/run/lint that follow.
   go-checks:
     name: go-checks
+    timeout-minutes: 20
     needs: changes
     if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' || needs.changes.outputs.dsl == 'true' || needs.changes.outputs.proto == 'true' || needs.changes.outputs.gates == 'true' }}
     runs-on: ubuntu-latest
@@ -223,6 +302,14 @@ jobs:
       # docs-only PR should pay, not with closing this bucket.
       - name: go test (gate inputs)
         if: ${{ env.RUN_GATES == 'true' }}
+        # KNOWN NARROW OVERLAP, deliberately kept (memql#3160). `./examples/...`
+        # includes examples/referencepack, which db-tests also owns. Removing it
+        # here is NOT the fix: RUN_GATES fires on docs-only and
+        # `.memql`-outside-dsl PRs where db-tests does NOT run, so dropping it
+        # would open a coverage hole in exactly the fail-open the gates bucket
+        # was added to close (memql#2972). The overlap is 3 test files, and only
+        # on a PR touching dsl/** plus a gate input with no .go file at all --
+        # any .go change sets RUN_GO, which makes RUN_GATES false.
         run: go test -count=1 -timeout=300s ./ ./cmd/envscan/... ./component/architecture/... ./component/genesis/... ./scripts/... ./dsl/... ./examples/...
 
       # --- pure-Go lanes (go bucket) -- build first to warm the cache ---
@@ -232,41 +319,6 @@ jobs:
       - name: go vet
         if: ${{ env.RUN_GO == 'true' }}
         run: go vet ./...
-      - name: go test
-        if: ${{ env.RUN_GO == 'true' }}
-        run: go test -count=1 -timeout=300s ./...
-      # Build-tagged test lanes (#1338, #2903). The untagged `go test ./...`
-      # above never RUNS a //go:build-tagged test file, so a tagged suite is
-      # CI-invisible without an explicit -tags run.
-      #
-      # This used to carry a hand-maintained audit of which tags have test
-      # files and which lane covers each. It drifted on FOUR tags at once (mcp
-      # omitted entirely with three files; identity, telnyx_live and voice all
-      # covered by a closing "no other build tag carries test files today" that
-      # was false of each), which is how three mcp-tagged suites went their
-      # whole life without executing -- including the file the #2888
-      # vulnerability lives in.
-      #
-      # The audit is now EXECUTABLE: cmd/citags/scan reads the tags actually
-      # present on *_test.go files and the `go test -tags ...` invocations
-      # actually present in this directory, and fails the untagged lane when
-      # they disagree. Add a tagged suite without a lane and CI goes red with
-      # the file list. Do not reintroduce a prose audit here; a second
-      # hand-maintained copy is the defect that gate exists to prevent.
-      #
-      # These lanes are CGO-free, so they ride the warm go-checks cache.
-      - name: go test -tags agent (build-tagged suites)
-        if: ${{ env.RUN_GO == 'true' }}
-        run: go test -tags agent -count=1 -timeout=300s ./integrations/agent/worker/
-      # RUN_GO or RUN_DSL: component/mcp/real_engine_surface_test.go pins DSL
-      # contracts (e.g. @mcp on readyHarnessStep), so a DSL-only change can red
-      # this lane. Mirrors the engine-load-check step's gating.
-      - name: go test -tags mcp (build-tagged suites)
-        if: ${{ env.RUN_GO == 'true' || env.RUN_DSL == 'true' }}
-        run: go test -tags mcp -count=1 -timeout=300s ./app/ ./component/mcp/
-      - name: go test -tags identity (build-tagged suites)
-        if: ${{ env.RUN_GO == 'true' }}
-        run: go test -tags identity -count=1 -timeout=300s ./app/
       # Harness eval gate (#589). Fixture-driven regression tripwire over an
       # in-memory graph (NO Postgres, NO LLM) -- catches a harness change
       # that reorders dispatch, mis-fails a plan, or makes the loop chattier.
@@ -298,7 +350,7 @@ jobs:
       # merge green and crash every node at boot. See #599.
       - name: engine load check (engine init over full DSL tree)
         if: ${{ env.RUN_DSL == 'true' }}
-        run: go test -count=1 -run TestEngineInitLoadsFullDSL ./component/memql/
+        run: go test -run TestEngineInitLoadsFullDSL ./component/memql/
       # SDK drift check: regenerates the typed Go SDK from the DSL and fails
       # on a diff. The generator is Go and reads dsl/, so it gates with the
       # DSL lanes.
@@ -310,16 +362,133 @@ jobs:
       # touching normalization) and diff against the checked-in tree, ignoring
       # the cosmetic protoc version stamp. Catches a .proto edited without its
       # .pb.go regenerated -- the gap that let stale bindings merge green.
-      # FALLBACK only. proto-gen.sh provisions its own pinned protoc into
-      # bin/tools/; this apt copy exists so a GitHub-releases outage degrades
-      # to a working lane instead of a red build (the drift diff ignores the
-      # version stamp, so a differing protoc still gives a correct verdict).
-      - name: install protoc (fallback for the pinned download)
+      # Cache the PINNED protoc that proto-gen.sh provisions into bin/tools/
+      # (memql#3166 / design D4.2). Without this it is re-downloaded from
+      # github releases on every run: a network dependency on the critical
+      # path, in exactly the class of step that failed during the 2026-08-06
+      # incident. On a warm cache the proto lane makes ZERO network calls for
+      # its toolchain.
+      #
+      # Keyed on proto-gen.sh's hash rather than a duplicated version literal,
+      # so bumping PROTOC_VERSION in that script invalidates the cache by
+      # construction instead of by remembering to edit two places.
+      - name: cache pinned protoc
+        id: protoc-cache
         if: ${{ env.RUN_PROTO == 'true' }}
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: bin/tools
+          key: protoc-${{ runner.os }}-${{ hashFiles('scripts/dev/proto-gen.sh') }}
+      # FALLBACK only, and now only when it can actually be needed. proto-gen.sh
+      # uses the pinned bin/tools/ copy when present and falls back to a system
+      # protoc if the pinned DOWNLOAD fails (a releases outage degrades the lane
+      # instead of reddening it; the drift diff ignores the version stamp, so a
+      # differing protoc still gives a correct verdict).
+      #
+      # On a cache HIT no download is attempted, so the fallback is unreachable
+      # and this apt-get was 14s of pure waste on the critical path (audit W4).
+      # It now runs only on a cache miss -- precisely the runs where a download
+      # will be attempted and could fail.
+      - name: install protoc (fallback, only when the pinned copy is not cached)
+        if: ${{ env.RUN_PROTO == 'true' && steps.protoc-cache.outputs.cache-hit != 'true' }}
+        run: |
+          scripts/ci/retry.sh -- sudo apt-get update
+          scripts/ci/retry.sh -- sudo apt-get install -y protobuf-compiler
       - name: proto-gen-check (proto drift)
         if: ${{ env.RUN_PROTO == 'true' }}
         run: make proto-gen-check
+
+  # Test lane (memql#3161 / design D5.3c). Split out of go-checks so that lane's
+  # duration becomes max(test, build+vet+drift) rather than their sum: `go test`
+  # was 223s of go-checks' 364s and the drift checks (15s combined) sat behind
+  # it for no reason.
+  #
+  # BE PRECISE ABOUT WHAT THIS BUYS. It does NOT take time-to-green to ~3.5m.
+  # Every lane fans out in parallel from `changes`, and db-tests is 5.8m (audit
+  # section 5) -- so once this lane drops to ~4m, db-tests becomes the binding
+  # constraint at 0.1 + 5.8 + 0.1 = 6.0m. The design's "~3.5m" is the go-checks
+  # LANE figure, not the pipeline figure. Nothing in this epic shortens db-tests.
+  #
+  # The intra-run warm GOCACHE from ce366821 is partly given up: `go build` in
+  # go-checks no longer warms this lane within the same run. Both lanes still
+  # restore GOCACHE through actions/setup-go's cache, so what is lost is the
+  # same-run warmth, not caching.
+  go-tests:
+    name: go-tests
+    timeout-minutes: 20
+    needs: changes
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' || needs.changes.outputs.dsl == 'true' }}
+    runs-on: ubuntu-latest
+    env:
+      RUN_GO: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' }}
+      RUN_DSL: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' || needs.changes.outputs.dsl == 'true' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.26.5'
+          cache: true
+      # Runs the COMPLEMENT of the db-gated trees, not `./...` (memql#3160 /
+      # design D5.3b). Those six trees carry 543+ test files that db-tests owns
+      # and re-runs in full, so testing them here compiled and executed the same
+      # files twice on every PR. Their non-DB tests are not lost: db-tests runs
+      # the whole package, not just the gated cases.
+      #
+      # The set is canonical in scripts/ci/db-gated-packages.sh; db-tests keeps
+      # literal arguments because scripts/cidb/dbgate_test.go derives its
+      # selector from them. The two cannot drift -- scripts/ci asserts they are
+      # identical.
+      # The root package KEEPS -count=1 (memql#3162). Seven gates there sweep
+      # `git ls-files` and read what it returns; Go's cache records the files a
+      # test OPENS but not the SET a subprocess returned, so a newly added `.md`
+      # leaves the cache key unchanged and the gate reports a stale green over a
+      # file it never read -- the memql#2972 fail-open, reopened by caching.
+      - name: go test (root package, deliberately uncached -- sweeps git ls-files)
+        if: ${{ env.RUN_GO == 'true' }}
+        run: go test -count=1 -timeout=300s .
+      # Everything else drops -count=1 so the Go test cache actually works
+      # (memql#3162 / design D5.3a). actions/setup-go already restores GOCACHE,
+      # where Go stores test results -- the cache was being populated on every
+      # run and then explicitly ignored. Open item O1 resolved this as original
+      # boilerplate: it entered in the first CI commit (98667d60) with no
+      # rationale recorded, and the one commit that reasons about it (5be808a1)
+      # documents it MASKING a defect CI "would never have caught (fresh
+      # container, -count=1)".
+      - name: go test (excluding the db-gated trees db-tests owns)
+        if: ${{ env.RUN_GO == 'true' }}
+        run: go test -timeout=300s $(scripts/ci/db-gated-packages.sh --complement-cacheable)
+      # Build-tagged test lanes (#1338, #2903). The untagged `go test ./...`
+      # above never RUNS a //go:build-tagged test file, so a tagged suite is
+      # CI-invisible without an explicit -tags run.
+      #
+      # This used to carry a hand-maintained audit of which tags have test
+      # files and which lane covers each. It drifted on FOUR tags at once (mcp
+      # omitted entirely with three files; identity, telnyx_live and voice all
+      # covered by a closing "no other build tag carries test files today" that
+      # was false of each), which is how three mcp-tagged suites went their
+      # whole life without executing -- including the file the #2888
+      # vulnerability lives in.
+      #
+      # The audit is now EXECUTABLE: cmd/citags/scan reads the tags actually
+      # present on *_test.go files and the `go test -tags ...` invocations
+      # actually present in this directory, and fails the untagged lane when
+      # they disagree. Add a tagged suite without a lane and CI goes red with
+      # the file list. Do not reintroduce a prose audit here; a second
+      # hand-maintained copy is the defect that gate exists to prevent.
+      #
+      # These lanes are CGO-free, so they ride the warm go-checks cache.
+      - name: go test -tags agent (build-tagged suites)
+        if: ${{ env.RUN_GO == 'true' }}
+        run: go test -tags agent -timeout=300s ./integrations/agent/worker/
+      # RUN_GO or RUN_DSL: component/mcp/real_engine_surface_test.go pins DSL
+      # contracts (e.g. @mcp on readyHarnessStep), so a DSL-only change can red
+      # this lane. Mirrors the engine-load-check step's gating.
+      - name: go test -tags mcp (build-tagged suites)
+        if: ${{ env.RUN_GO == 'true' || env.RUN_DSL == 'true' }}
+        run: go test -tags mcp -timeout=300s ./app/ ./component/mcp/
+      - name: go test -tags identity (build-tagged suites)
+        if: ${{ env.RUN_GO == 'true' }}
+        run: go test -tags identity -timeout=300s ./app/
 
   # Voice node CGO build lane -- kept SEPARATE from go-checks because it needs
   # the libopus/opusfile/soxr C deps + CGO_ENABLED=1 and builds under the
@@ -333,6 +502,7 @@ jobs:
   # break it.
   build-voice:
     name: build voice (cgo)
+    timeout-minutes: 10
     needs: changes
     if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' }}
     runs-on: ubuntu-latest
@@ -342,10 +512,13 @@ jobs:
         with:
           go-version: '1.26.5'
           cache: true
+      # Retried (memql#3166 / design D4.3): apt-get is a network op, and a
+      # transient mirror failure here reds a lane that has nothing to do with
+      # the change under test.
       - name: install libopus + soxr dev headers
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+          scripts/ci/retry.sh -- sudo apt-get update
+          scripts/ci/retry.sh -- sudo apt-get install -y --no-install-recommends \
             libopus-dev libopusfile-dev libsoxr-dev
       - name: go build -tags voice (CGO)
         env:
@@ -375,6 +548,7 @@ jobs:
   # a tagged build compiles the whole module, so any Go change can break it.
   build-node-tags:
     name: build node tags
+    timeout-minutes: 10
     needs: changes
     if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' }}
     runs-on: ubuntu-latest
@@ -397,6 +571,7 @@ jobs:
   # pure Go change that doesn't touch the generator skips the Node lane.
   sdk-ts-typecheck:
     name: sdk-ts-typecheck
+    timeout-minutes: 10
     needs: changes
     if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.sdkts == 'true' }}
     runs-on: ubuntu-latest
@@ -405,8 +580,11 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v4
         with:
           node-version: '20'
+      # Retried (memql#3166 / design D4.3): dependency install is a network op.
+      # The typecheck and test steps below are deliberately NOT retried --
+      # retrying a test is how a flake becomes invisible.
       - name: install sdk/ts deps
-        run: make sdk-ts-install
+        run: scripts/ci/retry.sh -- make sdk-ts-install
       - name: typecheck sdk/ts
         run: make sdk-ts-typecheck
       - name: test sdk/ts
@@ -427,6 +605,7 @@ jobs:
   # candidate that actually lands is gated. Added to ci-required below.
   conformance:
     name: mcp-conformance
+    timeout-minutes: 20
     needs: changes
     if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' || needs.changes.outputs.dsl == 'true' }}
     runs-on: ubuntu-latest
@@ -519,6 +698,7 @@ jobs:
   # TestMain -- and adding the TestMain without the entry now fails the gate.
   db-tests:
     name: db-tests
+    timeout-minutes: 20
     needs: changes
     if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' || needs.changes.outputs.dsl == 'true' }}
     runs-on: ubuntu-latest
@@ -593,6 +773,7 @@ jobs:
   # (editors/vscode, cmd/memql-lsp, scripts/vscode); push + merge_group run it.
   vscode-extension:
     name: vscode-extension
+    timeout-minutes: 10
     needs: changes
     if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.vscode == 'true' }}
     runs-on: ubuntu-latest
@@ -623,10 +804,12 @@ jobs:
   # ONLY, never at the individual jobs.
   ci-required:
     name: ci-required
+    timeout-minutes: 10
     if: ${{ always() }}
     needs:
       - changes
       - go-checks
+      - go-tests
       - build-voice
       - build-node-tags
       - sdk-ts-typecheck

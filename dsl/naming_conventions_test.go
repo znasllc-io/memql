@@ -12,7 +12,7 @@ import (
 	"unicode/utf8"
 
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
-	"github.com/znasllc-io/memql/component/memql/dslfs"
+	"github.com/znasllc-io/memql/core/dslfs"
 )
 
 // naming_conventions_test.go -- memql#2853.

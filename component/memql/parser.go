@@ -23,7 +23,7 @@ import (
 	"unicode"
 
 	"github.com/znasllc-io/memql/component/auth"
-	"github.com/znasllc-io/memql/component/memql/baseparser"
+	"github.com/znasllc-io/memql/core/baseparser"
 )
 
 // Parse converts a MemQL query string into a QueryPlan.

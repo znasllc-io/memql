@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	langparser "github.com/znasllc-io/memql/component/language/parser"
-	"github.com/znasllc-io/memql/component/memql/dslfs"
+	"github.com/znasllc-io/memql/core/dslfs"
 )
 
 // TestNoRedundantNamespace keeps directory-restating @namespace out of the

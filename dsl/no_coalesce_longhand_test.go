@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	langparser "github.com/znasllc-io/memql/component/language/parser"
-	"github.com/znasllc-io/memql/component/memql/dslfs"
+	"github.com/znasllc-io/memql/core/dslfs"
 )
 
 // TestNoCoalesceLonghand keeps the longhand `coalesce(a, b)` call out of

@@ -20,7 +20,7 @@ import (
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/polyphon"
-	"github.com/znasllc-io/memql/integrations/audio"
+	"github.com/znasllc-io/memql/core/audio"
 	"github.com/znasllc-io/memql/integrations/openai"
 )
 

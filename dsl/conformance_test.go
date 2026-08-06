@@ -12,7 +12,7 @@ import (
 	"github.com/znasllc-io/memql/component/language/dslclause"
 	"github.com/znasllc-io/memql/component/language/pagination"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
-	"github.com/znasllc-io/memql/component/memql/dslfs"
+	"github.com/znasllc-io/memql/core/dslfs"
 	"github.com/znasllc-io/memql/component/memql/sense"
 )
 

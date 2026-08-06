@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/znasllc-io/memql/component/memql/dslfs"
+	"github.com/znasllc-io/memql/core/dslfs"
 )
 
 // clockCallFormRe matches the retired author-surface clock call-forms `now()`

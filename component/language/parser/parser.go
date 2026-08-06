@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/znasllc-io/memql/component/memql/baseparser"
+	"github.com/znasllc-io/memql/core/baseparser"
 )
 
 // Parser converts tokens into an AST.

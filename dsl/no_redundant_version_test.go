@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/znasllc-io/memql/component/memql/dslfs"
+	"github.com/znasllc-io/memql/core/dslfs"
 )
 
 // TestNoRedundantVersion keeps the tree stripped of @version("1.0.0")

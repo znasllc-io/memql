@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/znasllc-io/memql/component/memql/literalparity"
+	"github.com/znasllc-io/memql/core/literalparity"
 
 	"github.com/znasllc-io/memql/component/automations"
 )

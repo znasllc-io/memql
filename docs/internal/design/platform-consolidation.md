@@ -18,7 +18,7 @@ needs-product-Go boundary mapped against the reference product's constructs.
   skipped constructs, and a bad bundle fails loud under the strict-boot gate. The
   only new code is a boot hook that mounts each `MEMQL_DSL_PATH/<domain>` via
   `RegisterTree(os.DirFS(...))` *before the first `dsl.Tree()` walk*. Today the
-  `component/memql/dslfs` `MEMQL_DSL_PATH` override is per-construct-type and is
+  `core/dslfs` `MEMQL_DSL_PATH` override is per-construct-type and is
   **not** wired into the real load path (`unified_loader.go` walks `dsl.Tree()`);
   the engine-platform step must add the per-domain boot mount.
 - **The AI critical path invokes zero product-Go executors.** Its one pack
@@ -95,7 +95,7 @@ cross-repo release dance**, both downstream of static DSL linking.
 ### 1. DSL delivery → runtime bundle (not compile-time linking)
 The only reason the mesh isn't product-agnostic today is compile-time DSL
 linking. The engine already ships a runtime `MEMQL_DSL_PATH` override
-(`component/memql/dslfs`). Delivering product DSL at runtime returns
+(`core/dslfs`). Delivering product DSL at runtime returns
 cognition/agent/planner/workbench to product-agnostic engine images and collapses
 the product's node-image count toward one. *Alternative rejected:* keep
 compile-time linking — leaves the 5-image fleet + release choreography intact.

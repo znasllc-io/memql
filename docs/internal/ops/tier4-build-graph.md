@@ -64,7 +64,7 @@ These are the reasons this is a spike, not a drop-in:
 2. **`//go:embed` of the DSL tree (and ~11 embed sites).** rules_go needs
    each embedded fileset declared as `embedsrcs` on the `go_library`.
    Gazelle handles `//go:embed` directives, but verify the DSL tree
-   (`dsl/**`, read via `component/memql/dslfs`) and the `prompts/*.tmpl`
+   (`dsl/**`, read via `core/dslfs`) and the `prompts/*.tmpl`
    files are captured — a missed embed is a runtime "file not found", not
    a build error, so test the engine-load path under Bazel.
 3. **CGO voice path behind `//go:build voice`.** `integrations/voice/**`

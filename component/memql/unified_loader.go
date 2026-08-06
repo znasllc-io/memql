@@ -30,7 +30,7 @@ import (
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	languageAst "github.com/znasllc-io/memql/component/language/ast"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
-	"github.com/znasllc-io/memql/component/memql/dslfs"
+	"github.com/znasllc-io/memql/core/dslfs"
 	memqldsl "github.com/znasllc-io/memql/dsl"
 )
 

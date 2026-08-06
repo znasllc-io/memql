@@ -2,7 +2,7 @@ package liveknowledge
 
 import (
 	"github.com/znasllc-io/memql/component/memql"
-	lk "github.com/znasllc-io/memql/component/memql/liveknowledge"
+	lk "github.com/znasllc-io/memql/core/liveknowledge"
 )
 
 // init self-registers the liveknowledge integration as a plug-in.

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/znasllc-io/memql/component/memql/dslfs"
+	"github.com/znasllc-io/memql/core/dslfs"
 )
 
 // memql#2799: TestPerRowAuthzClassification is the tree's only gate against a

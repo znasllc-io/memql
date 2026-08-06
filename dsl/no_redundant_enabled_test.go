@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/znasllc-io/memql/component/memql/dslfs"
+	"github.com/znasllc-io/memql/core/dslfs"
 )
 
 // TestNoRedundantEnabled keeps the tree stripped of construct-attached

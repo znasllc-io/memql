@@ -11,7 +11,7 @@ import (
 	"sync"
 
 	"github.com/znasllc-io/memql/component/polyphon"
-	"github.com/znasllc-io/memql/integrations/audio"
+	"github.com/znasllc-io/memql/core/audio"
 )
 
 const ttsEndpoint = "https://api.openai.com/v1/audio/speech"
