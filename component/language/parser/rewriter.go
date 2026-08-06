@@ -827,6 +827,12 @@ func parseStructQueryBody(body string) (*structQueryBody, error) {
 		if line == "" {
 			continue
 		}
+		// Every keyword this switch recognises is listed in
+		// structQueryClauseKeywords, which the grammar fingerprint hashes
+		// (memql#3089). Adding or removing a clause here without updating that
+		// list makes the fingerprint blind to the change, which is the exact
+		// failure #3089 was filed for one level up --
+		// TestStructQueryClauseAxisMatchesTheRewriter fails if the two drift.
 		switch {
 		case strings.HasPrefix(line, "concept"):
 			return nil, fmt.Errorf("inline `concept` line is no longer supported; declare the concept via a file-top `use <ns>.<concept>` directive instead")
@@ -847,6 +853,20 @@ func parseStructQueryBody(body string) (*structQueryBody, error) {
 		}
 	}
 	return out, nil
+}
+
+// structQueryClauseKeywords is the clause vocabulary the switch above
+// recognises, in source order. It exists so the grammar fingerprint has a
+// struct-query axis (memql#3089): `asOf` entered this vocabulary in #3025 and
+// no fingerprint moved, because the fingerprint watched only invocation-kind
+// keywords.
+//
+// `concept` is listed even though the switch REJECTS it. The axis is "what the
+// rewriter recognises as a clause word", and a recognised-and-rejected keyword
+// is part of the authored surface -- removing that arm would change the
+// diagnostic an author gets, which is a grammar move like any other.
+var structQueryClauseKeywords = []string{
+	"concept", "filter", "count", "shape", "sort", "paginate", "asOf",
 }
 
 // buildStructQueryExpr stitches the concept / filter / shape +
