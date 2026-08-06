@@ -14,9 +14,12 @@ import (
 //
 // # The hole this closes
 //
-// Phase 3 enforces the declared tier. Measured on this tree, that is a minority
-// of the query surface; every other query is bound to a concept that declares
-// no `@rowAuthz` tier at all. Those constructs are NOT "safe" and NOT
+// Phase 3 SHADOW-COMPUTES the declared tier -- it injects no predicate and
+// changes no query result yet, which TestRowAuthzIsInert pins. So this gate
+// tracks the population that has DECLARED a tier, not the population that is
+// enforced. Measured on this tree, declared is a minority of the query surface;
+// every other query is bound to a concept that declares no `@rowAuthz` tier at
+// all. Those constructs are NOT "safe" and NOT
 // "unchanged" -- they are UNMEASURED, and TestRowAuthzShadowReport says so in
 // exactly those words:
 //
@@ -73,8 +76,20 @@ import (
 // hand-maintained duplicate of the tree, so the two can never disagree about
 // what is undeclared.
 func TestRowAuthzUndeclaredPopulationIsGated(t *testing.T) {
-	if _, err := LoadUnifiedConcepts(nil); err != nil {
-		t.Fatalf("LoadUnifiedConcepts: %v", err)
+	// WithSkips, not the plain wrapper: LoadUnifiedConcepts discards the skip
+	// list (unified_loader.go:56-58), and a dropped concept takes every query
+	// bound to it out of `current` -- where this gate reports them as "debt
+	// paid" and tells the author to DELETE the entries. Measured: dropping one
+	// concept made two listed queries render as debt paid, and dropping them
+	// from the list too made the gate PASS with two unlisted queries over an
+	// undeclared concept. Same reasoning as rowauthz_owner_gate_test.go:61-72.
+	_, conceptSkips, err := LoadUnifiedConceptsWithSkips(nil)
+	if err != nil {
+		t.Fatalf("LoadUnifiedConceptsWithSkips: %v", err)
+	}
+	if len(conceptSkips) > 0 {
+		t.Fatalf("%d concept(s) were skipped at load, so every query bound to them is invisible "+
+			"to this gate and would be reported as debt paid:\n  %v", len(conceptSkips), conceptSkips)
 	}
 	registry := newFunctionRegistry()
 	report := newLoadReport()
@@ -91,6 +106,7 @@ func TestRowAuthzUndeclaredPopulationIsGated(t *testing.T) {
 	// declares no tier.
 	current := map[string]string{}
 	totalQueries := 0
+	var unresolvable []string
 	for _, fn := range registry.List() {
 		if fn == nil || fn.FunctionKind != "query" {
 			continue
@@ -101,7 +117,13 @@ func TestRowAuthzUndeclaredPopulationIsGated(t *testing.T) {
 		}
 		concept, cErr := memoryNodes.Get(fn.BoundConcept)
 		if cErr != nil || concept == nil {
-			continue // unresolvable: the shadow report counts these as unbound too
+			// Recorded, not skipped. A silent continue here drops the construct
+			// from `current`, and the stale classifier below then renders it as
+			// "debt paid -- DELETE it". Measured: forcing every Get to fail made
+			// the gate report all 168 entries as debt paid and instruct the
+			// author to empty the ratchet in one commit.
+			unresolvable = append(unresolvable, fmt.Sprintf("%s (bound to %s)", fn.Name, fn.BoundConcept))
+			continue
 		}
 		if concept.RowAuthz == nil {
 			current[fn.Name] = fn.BoundConcept
@@ -114,6 +136,16 @@ func TestRowAuthzUndeclaredPopulationIsGated(t *testing.T) {
 	if totalQueries < 50 {
 		t.Fatalf("only %d query construct(s) found in the registry -- the tree failed to load "+
 			"and this gate would pass for the wrong reason", totalQueries)
+	}
+	if len(unresolvable) > 0 {
+		sort.Strings(unresolvable)
+		t.Fatalf(`%d query construct(s) name a concept that does not resolve:
+
+  %s
+
+This is a load failure, not progress. Every one of them is invisible to the debt accounting
+below, and without this guard the stale check would report them as "debt paid" and tell you to
+delete their entries.`, len(unresolvable), strings.Join(unresolvable, "\n  "))
 	}
 
 	// 1. Anything undeclared and unlisted is NEW debt. Fail.
@@ -135,21 +167,29 @@ Shadow mode computes a predicate only where a tier is declared, so nothing in th
 programme can say anything about this construct at all.
 
 Two ways forward, and they are different decisions:
-  - Declare the tier on the concept (@rowAuthz(public) / (clusterOwner) / (owner="<field>") /
-    (via="<spec>")). This is the one that reduces the debt, and it is usually right for a new
-    concept where you already know who owns a row.
+  - Declare the tier on the concept: @rowAuthz(owner="<field>") / (via="<spec>") /
+    (clusterOwner) / (public). This is the one that reduces the debt, and it is usually right
+    for a new concept where you already know who owns a row. The order matters: (public) is
+    listed LAST because it is the cheapest way to go green and the only one that asserts no
+    restriction -- on a credential lookup it is the wrong answer, and it retires the debt
+    permanently rather than shrinking it.
   - If the tier is a real authorization question you are not answering right now -- several of
     the existing entries are genuinely cross-user admin reads -- add the construct to
-    undeclaredRowAuthzConstructs WITH AN ISSUE NUMBER recording the decision to defer.
+    undeclaredRowAuthzConstructs, and record why in the commit or the linked issue. Nothing
+    here can enforce that, and none of the seeded entries carry one, so it is a convention a
+    reviewer has to hold, not something a green run proves.
 
 Do not add an entry just to go green. The list may only shrink; every entry is a debt someone
 has to pay, and one added without a filed decision is a debt with no owner.`,
 			len(added), strings.Join(added, "\n  "))
 	}
 
-	// 2. Anything listed that no longer applies is STALE. Fail, and say which
-	//    of the two reasons applies -- "stale" alone leaves the author guessing
-	//    whether they fixed it or deleted it.
+	// 2. Anything listed that no longer applies is STALE. Fail, and say which of
+	//    the three reasons applies -- re-bound, gone, or debt paid. "stale"
+	//    alone leaves the author guessing whether they fixed it or deleted it.
+	//    A concept that failed to RESOLVE is not one of the three; it is caught
+	//    above, because falling through to "debt paid" is the reassuring answer
+	//    and the wrong one.
 	var stale []string
 	for name, listedConcept := range undeclaredRowAuthzConstructs {
 		nowConcept, stillUndeclared := current[name]
