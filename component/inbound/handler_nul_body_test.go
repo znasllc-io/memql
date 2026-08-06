@@ -30,8 +30,12 @@ import (
 // and decoding is the part that works. It is structurally blind to this class.
 // These drive the REAL handler and assert on the outcome.
 
-// nulSignedRequest builds a correctly-signed request whose body contains a NUL,
-// so the test cannot pass for the trivial reason that the signature failed.
+// nulSignedRequest builds a correctly-signed request whose body contains a NUL.
+//
+// The signature is load-bearing for TestHandlerStillStagesABodyWithoutANul,
+// which needs a 202. It is NOT what makes the refusal tests meaningful: the
+// gate runs before verify(), so all four of those pass with a corrupt
+// signature too. Do not read them as asserting anything about the signed path.
 func nulSignedRequest(t *testing.T, body string) *http.Request {
 	t.Helper()
 	r := httptest.NewRequest(http.MethodPost, "/inbound/acme", strings.NewReader(body))
