@@ -285,6 +285,11 @@ concept fieldTypes {
 //                       replaced by `<redacted>`; the argument name and the
 //                       declared constraint (enum members, bounds, pattern)
 //                       survive so the diagnostic stays usable.
+//                       REDACTION NEEDS A CONSTRAINT TO FIRE. Every covered
+//                       site prints a value it just REFUSED -- against @enum,
+//                       bounds, @format("date-time") or @pattern. An args
+//                       field with none of those can produce no such message,
+//                       so @secret on it is correct and inert (memql#3113).
 //                       MATCHING IS BY ARGUMENT NAME, NOT BY WRITE TARGET. A
 //                       mutation writing `apiKey: args.credential` into a
 //                       @secret `apiKey` leaves `credential` UNREDACTED --

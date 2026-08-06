@@ -208,6 +208,16 @@ leaves `credential` **unredacted** — and renaming between argument and
 field is the common style in this corpus, so do not rely on the write
 target.
 
+**Redaction only fires where a constraint can reject the value.** Every
+covered site interpolates a value it has just *refused* — against
+`@enum`, `@minimum`/`@maximum`, `@format("date-time")`, or `@pattern`.
+An args field declaring none of those can produce no such message, so
+marking it `@secret` is correct and inert: the flag is stamped, and
+nothing is ever redacted because nothing was ever printed. This is the
+state of both `encryptedValue` args today (memql#3113). Do not read a
+`@secret` field as "kept out of diagnostics" without checking that a
+diagnostic could carry it in the first place.
+
 It is **not** redacted from **query results** — a `@secret` value is
 returned in full by any query that projects it. That is an
 authorization decision: it needs a definition of "elevated" and
@@ -241,6 +251,34 @@ reports a rune count for a secret field too.
 So `@secret` narrows one diagnostic surface. It is not a general
 secrecy guarantee, and it is not a reason to treat a credential in the
 graph as protected.
+
+### What carries `@secret` (memql#3113)
+
+Until memql#3113 the annotation was on **no** loaded field, so the
+enforcement above protected nothing. Three fields carry it now:
+
+| Field | Why |
+|---|---|
+| `v1:platform:globalSecret.encryptedValue` | NaCl-secretbox ciphertext |
+| `v1:platform:partitionSecret.encryptedValue` | same |
+| `v1:identity:authCode.code` | one-time OAuth code, stored in **cleartext** |
+
+Deliberately **not** marked, and the reasons are the useful half:
+
+- **`fingerprint`** (both secret concepts) — the last 4 chars of the
+  cleartext, and therefore the more sensitive-*looking* of the two.
+  It exists to be shown, so operators can tell rotated secrets apart;
+  redacting it would delete the field's only purpose.
+- **the `v1:identity:identity` credential family** — every credential
+  field is a SHA-256 digest, never plaintext. Independently, they are
+  nested under `credentials`, and `SecretFields()` reads **top-level**
+  properties only, so the annotation could not reach them anyway.
+
+A concept field whose description declares the value must not be shown
+to humans is required to carry `@secret`, gated by
+`TestFieldsDeclaredUnshowableCarrySecret`. That gate matches declared
+prose, so it is a floor rather than a proof: a credential field whose
+description simply does not say so still escapes it.
 
 `@unique`, `@immutable` and `@default` remain **declared metadata**:
 emitted, and read by nothing. Section 8 of
