@@ -36,18 +36,24 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: [go]
+        # go + python + javascript-typescript (memql#3157). GitHub Code
+        # Quality used to cover these three; it was retired because it is the
+        # ONLY billable line item on this org ($27.03 in 2026-07) while this
+        # workflow runs free on a public repo. Dropping a language here would
+        # be a real SAST regression, not a cleanup -- the repo genuinely
+        # contains Python (74 KB) and TypeScript (257 KB).
+        language: [go, python, javascript-typescript]
 
     steps:
       # Merge-queue fast pass (memql#1539): on `merge_group` we do NOT re-run
       # CodeQL. The analyze step uploads SARIF keyed to the ephemeral
       # `gh-readonly-queue/main/pr-*` ref, which the merge queue tears down
       # before the upload lands -- the upload then errors with "ref ... not
-      # found" and the required `Analyze (go)` check goes red, wedging the
-      # queue. Re-analysis on the merge candidate adds no coverage anyway: the
+      # found" and the `Analyze (<lang>)` checks go red, wedging the queue.
+      # Re-analysis on the merge candidate adds no coverage anyway: the
       # same tree was already analyzed on the PR, and push-to-main + the weekly
       # cron re-scan after merge. So on `merge_group` the job is a no-op that
-      # simply reports the required `Analyze (go)` context green; the real
+      # simply reports each `Analyze (<lang>)` context green; the real
       # CodeQL run stays on pull_request / push:main / schedule.
       - name: merge-queue no-op (CodeQL already ran on the PR)
         if: github.event_name == 'merge_group'
@@ -62,7 +68,11 @@ jobs:
           # Richer suite: security queries + maintainability/quality
           # queries, instead of the default security-only set.
           queries: security-and-quality
-      - if: github.event_name != 'merge_group'
+      # autobuild is only meaningful for the compiled language. python and
+      # javascript-typescript are interpreted -- CodeQL extracts them without
+      # a build, so autobuild is at best a no-op and at worst a spurious
+      # failure against them.
+      - if: github.event_name != 'merge_group' && matrix.language == 'go'
         uses: github/codeql-action/autobuild@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4.37.4
       - if: github.event_name != 'merge_group'
         uses: github/codeql-action/analyze@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4.37.4
