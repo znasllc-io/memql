@@ -25,13 +25,26 @@ import (
 // fire. Everything else -- the pin, the namespaces, the consumer import -- is
 // identical, which is what makes it the exact residue that issue left.
 func differingIdAcrossDirectoriesTree(consumerField string) fstest.MapFS {
+	return differingIdTreeWithPinnedDir("deploy", consumerField)
+}
+
+// differingIdTreeWithPinnedDir is the same fixture with the PINNED directory's
+// name as a parameter, so a test can move it across the "cluster" sort
+// boundary: "aaa" sorts before, "zzz" after.
+//
+// It is the pinned directory that moves, not the real one. A namespace is only
+// registered by a directory NAMED for it -- a pin alone does not create it --
+// so renaming "cluster/" makes the namespace vanish and the fixture silently
+// degrades to a one-supplier tree reporting nothing. The first attempt at this
+// test did exactly that and asserted against an empty string.
+func differingIdTreeWithPinnedDir(pinnedDir, consumerField string) fstest.MapFS {
 	return fstest.MapFS{
-		"deploy/namespace.pin": file("cluster\n"),
-		"deploy/concepts.memql": file(`@version("2.0.0")
+		pinnedDir + "/namespace.pin": file("cluster\n"),
+		pinnedDir + "/concepts.memql": file(`@version("2.0.0")
 @namespace("cluster")
-@description("Declared under deploy/, pinned to cluster, at a different version.")
+@description("Declared under the pinned directory, at a different version.")
 concept widget {
-  fromDeploy  string  @required @description("Only on the deploy declaration.")
+  fromDeploy  string  @required @description("Only on the pinned declaration.")
 }`),
 		"cluster/concepts.memql": file(`@version("1.0.0")
 @namespace("cluster")
@@ -73,45 +86,103 @@ func TestDifferingIdConceptDeclsAreReportedNotResolvedPositionally(t *testing.T)
 			// And the tree defect itself must be reported, in BOTH mirrors --
 			// otherwise one spelling is silently accepted and the author never
 			// learns the namespace is supplied twice.
-			if !mentionsDifferingIdAmbiguity(joined) {
-				t.Errorf("no diagnostic reported the two declarations supplying namespace "+
-					"%q for %q at different canonical ids. Positional resolution leaves one "+
-					"mirror completely silent (memql#3073).\n  got:\n%s", "cluster", "widget", joined)
+			//
+			// Assert the ACTIONABLE CONTENT, not that some phrase appeared. The
+			// author has to know WHICH declarations to reconcile, so both files
+			// and both ids are the point of the message -- exactly what the
+			// sibling #3008 test asserts. An earlier version of this checked a
+			// helper that accepted any ONE of three substrings; measured, that
+			// let the whole diagnostic degrade to `"widget" cannot select` --
+			// no file, no namespace, no id, no remedy -- with the suite green.
+			for _, want := range []string{
+				"cluster/concepts.memql",
+				"deploy/concepts.memql",
+				"v1:cluster:widget",
+				"v2:cluster:widget",
+				`namespace "cluster"`,
+			} {
+				if !strings.Contains(joined, want) {
+					t.Errorf("the diagnostic does not name %s, so it cannot be acted on. "+
+						"The author needs both declarations and both assembled ids to know "+
+						"which one to change (memql#3073).\n  got:\n%s", want, joined)
+				}
 			}
 		})
 	}
 }
 
-// mentionsDifferingIdAmbiguity looks for the finding rather than for exact
-// prose, so the message can be reworded without rewriting the test.
-func mentionsDifferingIdAmbiguity(joined string) bool {
-	return strings.Contains(joined, "widget") &&
-		(strings.Contains(joined, "different canonical id") ||
-			strings.Contains(joined, "cannot select") ||
-			strings.Contains(joined, "supplied by"))
-}
+// The finding must not change when the supplying directory MOVES in sort order.
+//
+// This test used to compare the two consumer-field mirrors, which have
+// identical directory layouts -- so it never varied sort order at all and could
+// not have caught a regression in the property it is named for. Measured: with
+// the sorts removed from splitNamespaceDecls it failed only 14 runs in 40, on
+// Go's map-iteration randomness alone. What actually pins the property is
+// moving the real directory across the "deploy" boundary, which is what this
+// now does: "cluster" sorts before, "widgetry" after.
+func TestDifferingIdDiagnosticIsOrderedAndStable(t *testing.T) {
+	// The property is NOT "the message is unchanged when a directory is
+	// renamed" -- renaming legitimately moves a file in a sorted list, and an
+	// earlier draft of this test asserted that and failed against correct code.
+	//
+	// The property is that the listing is SORTED and therefore reproducible,
+	// rather than reflecting whatever order a map happened to yield. That is
+	// what makes the same tree give the same verdict on every run and on every
+	// machine, which is the dependence memql#3073 is about.
+	for _, tc := range []struct{ pinnedDir, first, second string }{
+		{"aaa", "aaa/concepts.memql", "cluster/concepts.memql"},
+		{"zzz", "cluster/concepts.memql", "zzz/concepts.memql"},
+	} {
+		t.Run(tc.pinnedDir, func(t *testing.T) {
+			got := treeErrorText(t, differingIdTreeWithPinnedDir(tc.pinnedDir, "fromCluster"))
+			if !strings.Contains(got, "different canonical ids") {
+				t.Fatalf("the fixture stopped reporting the split, so the assertions below "+
+					"would pass vacuously.\n  got:\n%s", got)
+			}
+			i, j := strings.Index(got, tc.first), strings.Index(got, tc.second)
+			if i < 0 || j < 0 || i > j {
+				t.Errorf("the two declarations are not listed in sorted order (%s before %s), "+
+					"so the message reflects map iteration rather than the tree.\n  got:\n%s",
+					tc.first, tc.second, got)
+			}
+			if !strings.Contains(got, "v1:cluster:widget and v2:cluster:widget") {
+				t.Errorf("the assembled ids are not listed in sorted order.\n  got:\n%s", got)
+			}
+		})
+	}
 
-// The finding must be IDENTICAL for both mirrors. A diagnostic whose text
-// depends on which directory sorted first is the same positional dependence
-// wearing a different hat.
-func TestDifferingIdDiagnosticDoesNotDependOnSortOrder(t *testing.T) {
-	a := treeErrorText(t, differingIdAcrossDirectoriesTree("fromDeploy"))
-	b := treeErrorText(t, differingIdAcrossDirectoriesTree("fromCluster"))
-	if a != b {
-		t.Errorf("the diagnostics differ between the two mirrors, so the verdict still "+
-			"depends on sort order rather than on the tree.\n  fromDeploy:\n%s\n\n  fromCluster:\n%s", a, b)
+	// Sorted output is only worth anything if it is also stable run to run. Go
+	// randomises map iteration per run, so repeating the identical tree is what
+	// actually exercises that -- a single run of an unsorted implementation
+	// passes roughly two times in three.
+	first := treeErrorText(t, differingIdTreeWithPinnedDir("aaa", "fromCluster"))
+	for i := 0; i < 50; i++ {
+		if got := treeErrorText(t, differingIdTreeWithPinnedDir("aaa", "fromCluster")); got != first {
+			t.Fatalf("the same tree produced two different diagnostics across runs, so the "+
+				"report depends on map iteration order (memql#3073).\n  run 0:\n%s\n\n  run %d:\n%s",
+				first, i+1, got)
+		}
 	}
 }
 
-// The same-id case must keep its OWN message. #3008's reasoning is that an
-// import cannot help there -- the decls already share a namespace AND an id --
-// so it names both files and the id and says to rename one. This change must
-// not collapse the two findings into one weaker message.
-func TestSameIdCollisionKeepsItsOwnDiagnostic(t *testing.T) {
+// The two states must not cross-contaminate. #3008's remedy (rename one, they
+// collapse at boot) and #3073's (they do NOT collapse; change what a directory
+// supplies) are different advice, so a same-id tree must get the same-id
+// message and NOT the split one.
+//
+// The positive half of this -- that "same canonical id" is still reported -- is
+// already covered by TestDuplicateConceptAcrossDirectoriesIsReportedNotResolved,
+// which asserts strictly more (both filenames and the id). Asserting it again
+// here would add no coverage: no mutation can fail this without failing that.
+// The ABSENCE half is what is unique, and it is the one that catches the split
+// check being relaxed until it swallows the same-id case.
+func TestSameIdCollisionDoesNotGetTheSplitDiagnostic(t *testing.T) {
 	joined := treeErrorText(t, duplicateAcrossDirectoriesTree("fromDeploy"))
-	if !strings.Contains(joined, "same canonical id") {
-		t.Errorf("the #3008 same-id diagnostic was lost or reworded into the #3073 one; "+
-			"they are different defects with different remedies.\n  got:\n%s", joined)
+	if strings.Contains(joined, "assemble to different canonical ids") {
+		t.Errorf("a SAME-id collision was reported with the memql#3073 split message. "+
+			"Those declarations do collapse at boot, so the split remedy (change which "+
+			"namespace a directory supplies) is wrong advice here -- the fix is to rename "+
+			"one (memql#3008).\n  got:\n%s", joined)
 	}
 }
 

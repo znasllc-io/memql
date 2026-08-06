@@ -773,12 +773,6 @@ const (
 	conceptSuppliedTwice
 )
 
-// duplicateConceptCollision reports the canonical id that two or more of the
-// supplied entries assemble to, and the files declaring them.
-//
-// Returns ("", nil) when every entry assembles to a distinct id -- that is
-// ambiguity, a different condition with a different diagnostic -- or when an
-// id cannot be computed, since a guess here would name innocent files.
 // splitNamespaceDecls reports a namespace supplied by two or more FILES whose
 // declarations of one name assemble to DIFFERENT canonical ids (memql#3073).
 //
@@ -820,6 +814,18 @@ func splitNamespaceDecls(root fs.FS, namespace string, entries []conceptEntry) (
 	return namespace, ids, files
 }
 
+// duplicateConceptCollision reports the canonical id that two or more of the
+// supplied entries assemble to, and the files declaring them.
+//
+// Returns ("", nil) when every entry assembles to a distinct id, or when an id
+// cannot be computed, since a guess here would name innocent files.
+//
+// A distinct-id return is NOT "nothing to see here": it is the memql#3073
+// shape, which splitNamespaceDecls reports. This comment used to call that case
+// "ambiguity, a different condition with a different diagnostic", which was
+// wrong twice over -- it is not conceptAmbiguous (no import can select between
+// two decls supplying one namespace), and it was not getting a diagnostic at
+// all. It got hits[0].
 func duplicateConceptCollision(root fs.FS, entries []conceptEntry) (string, []string) {
 	byID := map[string]map[string]bool{}
 	for _, e := range entries {
@@ -931,11 +937,17 @@ func (t *Tree) resolveConceptForFile(path string, f *languageAst.File, idx *decl
 			return conceptResolution{state: conceptInconclusive} // lane 1 reports the missing symbol
 		}
 		if len(hits) > 1 {
-			// Collect the declarations behind the hits and ask whether they
-			// COLLIDE (same assembled id) rather than merely differ. Only a
-			// collision is reportable here: distinct ids under one namespace
-			// are what the import is for, and the first hit remains the right
-			// answer for those.
+			// Collect the declarations behind the hits and ask what shape they
+			// are: a COLLISION (same assembled id, memql#3008) or a SPLIT
+			// (different ids under one namespace, memql#3073). Both are
+			// reported, and neither resolves positionally.
+			//
+			// This comment used to say distinct ids "are what the import is
+			// for, and the first hit remains the right answer for those". That
+			// was the memql#3073 defect stated as an intention: the author in
+			// that shape ALREADY wrote the import -- it is how resolution
+			// reached this loop -- and both decls supply the namespace it
+			// names, so it cannot select between them.
 			var candidates []conceptEntry
 			for _, h := range hits {
 				full := qualifyName(h, name)
@@ -966,9 +978,14 @@ func (t *Tree) resolveConceptForFile(path string, f *languageAst.File, idx *decl
 		// Reaching here with len(hits) > 1 now means the candidates are neither
 		// a same-id collision nor a different-id split -- both are returned
 		// above (memql#3008 and memql#3073 respectively). What is left is
-		// multiple hits that resolve to ONE id from ONE file, where taking the
-		// first is not a positional choice because there is nothing to choose
-		// between.
+		// multiple hits that resolve to ONE id, where taking the first is not a
+		// positional choice because there is nothing to choose between.
+		//
+		// That exhaustiveness leans on a rule 400 lines up and is worth stating
+		// here: declSuppliesNamespace admits a candidate only when
+		// candidateConceptId is non-empty, so a declaration whose id cannot be
+		// assembled never becomes a hit in the first place. There is no fourth
+		// "id unknown" case for this branch to fall through with.
 		//
 		// The residue this comment used to describe is gone. It said the
 		// different-id case "wants the ambiguity path", and that turned out to
@@ -1074,7 +1091,8 @@ func (t *Tree) verifySignatureBindings(path string, f *languageAst.File, idx *de
 			errs = append(errs, fmt.Errorf(
 				"%s: concept %q is supplied for namespace %q by %s, and those declarations "+
 					"assemble to different canonical ids (%s). The import cannot select between "+
-					"them -- both supply %q -- and they do not collapse at boot either, so which "+
+					"them -- every one of them supplies %q -- and they do not collapse at boot "+
+					"either, so which "+
 					"one a consumer is validated against would come down to directory order. "+
 					"Rename one declaration, or change which namespace one directory supplies so "+
 					"only one of them offers %q (memql#3073).",
@@ -1978,7 +1996,10 @@ func sameDomainConceptDecl(path string, f *languageAst.File, idx *declIndex, nam
 // the three inputs the unified loader uses (unified_loader.go:105): the decl,
 // its FIRST path segment, and that directory's namespace.pin.
 //
-// Single caller: sameDomainConceptDecl. The shape analogue below deliberately
+// Callers: sameDomainConceptDecl, declSuppliesNamespace,
+// duplicateConceptCollision, splitNamespaceDecls, and the lane-6 check. This
+// line read "Single caller: sameDomainConceptDecl" until memql#3073, and was
+// already false before that PR added the fifth. The shape analogue below deliberately
 // does NOT share it -- a shape has no canonical namespaced id to assemble
 // (LoadUnifiedShapes registers shapes in a flat, name-keyed registry), so
 // there is nothing there for a namespace hint to match. See the note at that
