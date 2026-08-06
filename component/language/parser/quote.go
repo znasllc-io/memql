@@ -83,6 +83,33 @@ import (
 // these are separate stories (memql#3099), and a helper cannot fix a caller by
 // existing.
 //
+// STATUS (memql#3099): the %q sites named above are converted, plus four the
+// list missed -- parser.go's reconstructTokens, component/memql's ast_converter,
+// and three in component/language/compiler's automation generator. The list was
+// wrong about its own completeness for the third time, which is why the search
+// string above is the durable part of this comment and the enumeration is not.
+//
+// # NUL is NOT fixed by quoting, and that applies to EVERY caller
+//
+// Measured: QuoteString renders U+0000 as a unicode escape, the lexer accepts
+// that escape, and it decodes it back to a real NUL. So
+// the statement parses -- and any caller whose value then lands in a JSONB
+// column hits a SECOND failure one layer down, because PostgreSQL's jsonb type
+// cannot represent U+0000.
+//
+// Switching a caller from %q to this function therefore fixes the PARSE defect
+// and leaves the STORAGE one untouched. A reviewer reading "converted to
+// QuoteString" as "NUL-safe now" would be wrong, which is why this sits here
+// rather than in any one caller's comment.
+//
+// Whether a given caller should reject or substitute is a decision this helper
+// cannot make: it turns on whether the bytes are diagnostic or load-bearing.
+// component/outbound substitutes (memql#3035 -- an error message, where a
+// mangled byte beats a permanently stuck row); component/inbound rejects with
+// 400 (memql#3098 -- a signature-verified webhook body, where substituting
+// would stage a row that no longer matches what was signed). The callers
+// converted by memql#3099 have made NEITHER decision yet.
+//
 // # Invalid UTF-8
 //
 // json.Marshal replaces invalid UTF-8 with U+FFFD rather than failing. That is
