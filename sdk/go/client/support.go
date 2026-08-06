@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // Result wraps a typed engine response. The generated query / mutation
@@ -303,7 +305,7 @@ func renderMemQLValue(value any) string {
 	case nil:
 		return "nil"
 	case string:
-		return fmt.Sprintf("%q", v)
+		return quoteMemQLString(v)
 	case bool:
 		if v {
 			return "true"
@@ -322,7 +324,7 @@ func renderMemQLValue(value any) string {
 	case []string:
 		items := make([]string, 0, len(v))
 		for _, item := range v {
-			items = append(items, fmt.Sprintf("%q", item))
+			items = append(items, quoteMemQLString(item))
 		}
 		return "[" + strings.Join(items, ", ") + "]"
 	case map[string]any:
@@ -340,3 +342,23 @@ func renderMemQLValue(value any) string {
 		return fmt.Sprintf("%v", v)
 	}
 }
+
+// quoteMemQLString renders a Go string as a MemQL string literal.
+//
+// It delegates to the parser's QuoteString rather than using fmt's %q, and the
+// difference is a hard parse error rather than a cosmetic one: %q emits \x00,
+// \a and \v, and the MemQL lexer's readString implements the JSON escape set
+// and only that. One control byte in an argument therefore makes the whole
+// statement fail to parse at the engine (memql#3099, the memql#3035 defect on
+// the client side).
+//
+// This is the one place the SDK depends on the engine's parser package, and
+// that dependency is the point: the alternative is a second copy of the escape
+// set, which is exactly what memql#3035 showed is expensive to keep in
+// agreement. The generated builders call this rather than importing the parser
+// themselves, so the dependency has a single site.
+//
+// Client-side the failure mode is a rejected query rather than a stuck row --
+// but it is the same disagreement, across roughly a thousand generated call
+// sites.
+func quoteMemQLString(s string) string { return langparser.QuoteString(s) }

@@ -11,6 +11,8 @@ import (
 
 	"github.com/znasllc-io/memql/component/automations"
 	"google.golang.org/protobuf/types/known/timestamppb"
+
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // FunctionExecutor invokes MemQL functions.
@@ -241,7 +243,14 @@ func renderMemQLValue(value any) string {
 		if isRuntimeReference(v) {
 			return v
 		}
-		return fmt.Sprintf("%q", v)
+		// QuoteString, not %q: Go and the MemQL lexer disagree on the escape
+		// set, and the disagreement is a HARD PARSE ERROR rather than a
+		// fallback. %q emits \x00, \a and \v; lexer.go's readString knows only
+		// the JSON escapes, so one control byte in a step arg makes the whole
+		// generated statement fail to parse (memql#3099, the #3035 defect on
+		// this path). These values are resolved from prior step results and
+		// event payloads -- arbitrary text by construction.
+		return langparser.QuoteString(v)
 	case bool:
 		if v {
 			return "true"

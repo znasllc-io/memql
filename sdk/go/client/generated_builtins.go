@@ -38,41 +38,41 @@ func EditDocumentBuild(args EditDocumentArgs) string {
 	var b strings.Builder
 	b.WriteString("builtin editDocument(")
 	b.WriteString("documentId: ")
-	b.WriteString(fmt.Sprintf("%q", args.DocumentId))
+	b.WriteString(quoteMemQLString(args.DocumentId))
 	if args.Content != "" {
 		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("content: ")
-		b.WriteString(fmt.Sprintf("%q", args.Content))
+		b.WriteString(quoteMemQLString(args.Content))
 	}
 	if args.AttachmentId != "" {
 		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("attachmentId: ")
-		b.WriteString(fmt.Sprintf("%q", args.AttachmentId))
+		b.WriteString(quoteMemQLString(args.AttachmentId))
 	}
 	if args.Note != "" {
 		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("note: ")
-		b.WriteString(fmt.Sprintf("%q", args.Note))
+		b.WriteString(quoteMemQLString(args.Note))
 	}
 	if args.AuthorKind != "" {
 		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("authorKind: ")
-		b.WriteString(fmt.Sprintf("%q", args.AuthorKind))
+		b.WriteString(quoteMemQLString(args.AuthorKind))
 	}
 	if args.AuthorId != "" {
 		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("authorId: ")
-		b.WriteString(fmt.Sprintf("%q", args.AuthorId))
+		b.WriteString(quoteMemQLString(args.AuthorId))
 	}
 	if args.ExpectedVersion != 0 {
 		if b.Len() > 21 {
@@ -86,14 +86,14 @@ func EditDocumentBuild(args EditDocumentArgs) string {
 			b.WriteString(", ")
 		}
 		b.WriteString("producedByPlanId: ")
-		b.WriteString(fmt.Sprintf("%q", args.ProducedByPlanId))
+		b.WriteString(quoteMemQLString(args.ProducedByPlanId))
 	}
 	if args.PartitionId != "" {
 		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("partitionId: ")
-		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+		b.WriteString(quoteMemQLString(args.PartitionId))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -114,7 +114,7 @@ func HarnessTraceBuild(args HarnessTraceArgs) string {
 	var b strings.Builder
 	b.WriteString("builtin harnessTrace(")
 	b.WriteString("planId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PlanId))
+	b.WriteString(quoteMemQLString(args.PlanId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -137,12 +137,12 @@ func KnowledgeAugmentDomainAnalyzeBuild(args KnowledgeAugmentDomainAnalyzeArgs) 
 	var b strings.Builder
 	b.WriteString("builtin knowledgeAugmentDomainAnalyze(")
 	b.WriteString("userQuestion: ")
-	b.WriteString(fmt.Sprintf("%q", args.UserQuestion))
+	b.WriteString(quoteMemQLString(args.UserQuestion))
 	if b.Len() > 38 {
 		b.WriteString(", ")
 	}
 	b.WriteString("agentResponse: ")
-	b.WriteString(fmt.Sprintf("%q", args.AgentResponse))
+	b.WriteString(quoteMemQLString(args.AgentResponse))
 	if b.Len() > 38 {
 		b.WriteString(", ")
 	}
@@ -179,36 +179,36 @@ func KnowledgeAugmentDomainGenerateBuild(args KnowledgeAugmentDomainGenerateArgs
 	var b strings.Builder
 	b.WriteString("builtin knowledgeAugmentDomainGenerate(")
 	b.WriteString("domainId: ")
-	b.WriteString(fmt.Sprintf("%q", args.DomainId))
+	b.WriteString(quoteMemQLString(args.DomainId))
 	if b.Len() > 39 {
 		b.WriteString(", ")
 	}
 	b.WriteString("topic: ")
-	b.WriteString(fmt.Sprintf("%q", args.Topic))
+	b.WriteString(quoteMemQLString(args.Topic))
 	if args.SourceUtteranceId != "" {
 		if b.Len() > 39 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourceUtteranceId: ")
-		b.WriteString(fmt.Sprintf("%q", args.SourceUtteranceId))
+		b.WriteString(quoteMemQLString(args.SourceUtteranceId))
 	}
 	if args.SourceAgentId != "" {
 		if b.Len() > 39 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourceAgentId: ")
-		b.WriteString(fmt.Sprintf("%q", args.SourceAgentId))
+		b.WriteString(quoteMemQLString(args.SourceAgentId))
 	}
 	if b.Len() > 39 {
 		b.WriteString(", ")
 	}
 	b.WriteString("partitionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+	b.WriteString(quoteMemQLString(args.PartitionId))
 	if b.Len() > 39 {
 		b.WriteString(", ")
 	}
 	b.WriteString("requestedBy: ")
-	b.WriteString(fmt.Sprintf("%q", args.RequestedBy))
+	b.WriteString(quoteMemQLString(args.RequestedBy))
 	b.WriteString(")")
 	return b.String()
 }
@@ -231,13 +231,13 @@ func RecallBuild(args RecallArgs) string {
 	var b strings.Builder
 	b.WriteString("builtin recall(")
 	b.WriteString("text: ")
-	b.WriteString(fmt.Sprintf("%q", args.Text))
+	b.WriteString(quoteMemQLString(args.Text))
 	if args.Concept != "" {
 		if b.Len() > 15 {
 			b.WriteString(", ")
 		}
 		b.WriteString("concept: ")
-		b.WriteString(fmt.Sprintf("%q", args.Concept))
+		b.WriteString(quoteMemQLString(args.Concept))
 	}
 	if args.K != 0 {
 		if b.Len() > 15 {
@@ -251,7 +251,7 @@ func RecallBuild(args RecallArgs) string {
 			b.WriteString(", ")
 		}
 		b.WriteString("provider: ")
-		b.WriteString(fmt.Sprintf("%q", args.Provider))
+		b.WriteString(quoteMemQLString(args.Provider))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -274,18 +274,18 @@ func RestoreDocumentVersionBuild(args RestoreDocumentVersionArgs) string {
 	var b strings.Builder
 	b.WriteString("builtin restoreDocumentVersion(")
 	b.WriteString("documentId: ")
-	b.WriteString(fmt.Sprintf("%q", args.DocumentId))
+	b.WriteString(quoteMemQLString(args.DocumentId))
 	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("versionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.VersionId))
+	b.WriteString(quoteMemQLString(args.VersionId))
 	if args.AuthorId != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("authorId: ")
-		b.WriteString(fmt.Sprintf("%q", args.AuthorId))
+		b.WriteString(quoteMemQLString(args.AuthorId))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -308,7 +308,7 @@ func SearchActionsBuild(args SearchActionsArgs) string {
 	var b strings.Builder
 	b.WriteString("builtin searchActions(")
 	b.WriteString("text: ")
-	b.WriteString(fmt.Sprintf("%q", args.Text))
+	b.WriteString(quoteMemQLString(args.Text))
 	if args.K != 0 {
 		if b.Len() > 22 {
 			b.WriteString(", ")
@@ -321,7 +321,7 @@ func SearchActionsBuild(args SearchActionsArgs) string {
 			b.WriteString(", ")
 		}
 		b.WriteString("provider: ")
-		b.WriteString(fmt.Sprintf("%q", args.Provider))
+		b.WriteString(quoteMemQLString(args.Provider))
 	}
 	b.WriteString(")")
 	return b.String()

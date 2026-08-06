@@ -31,7 +31,7 @@ func ActivateAuthoringBundleBuild(args ActivateAuthoringBundleArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation activateAuthoringBundle(")
 	b.WriteString("bundleId: ")
-	b.WriteString(fmt.Sprintf("%q", args.BundleId))
+	b.WriteString(quoteMemQLString(args.BundleId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -56,17 +56,17 @@ func AddAgentToSpaceBuild(args AddAgentToSpaceArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation addAgentToSpace(")
 	b.WriteString("partitionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+	b.WriteString(quoteMemQLString(args.PartitionId))
 	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("agentId: ")
-	b.WriteString(fmt.Sprintf("%q", args.AgentId))
+	b.WriteString(quoteMemQLString(args.AgentId))
 	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("displayName: ")
-	b.WriteString(fmt.Sprintf("%q", args.DisplayName))
+	b.WriteString(quoteMemQLString(args.DisplayName))
 	if args.CapabilityOverrides != nil {
 		if b.Len() > 25 {
 			b.WriteString(", ")
@@ -101,23 +101,23 @@ func AddHarnessStepBuild(args AddHarnessStepArgs) string {
 	b.WriteString("mutation addHarnessStep(")
 	if args.StepId != "" {
 		b.WriteString("stepId: ")
-		b.WriteString(fmt.Sprintf("%q", args.StepId))
+		b.WriteString(quoteMemQLString(args.StepId))
 	}
 	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("planId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PlanId))
+	b.WriteString(quoteMemQLString(args.PlanId))
 	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("title: ")
-	b.WriteString(fmt.Sprintf("%q", args.Title))
+	b.WriteString(quoteMemQLString(args.Title))
 	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("idempotencyKey: ")
-	b.WriteString(fmt.Sprintf("%q", args.IdempotencyKey))
+	b.WriteString(quoteMemQLString(args.IdempotencyKey))
 	if args.DependsOn != nil {
 		if b.Len() > 24 {
 			b.WriteString(", ")
@@ -156,13 +156,13 @@ func AdvanceHarnessConsolidationCursorBuild(args AdvanceHarnessConsolidationCurs
 	b.WriteString("mutation advanceHarnessConsolidationCursor(")
 	if args.CursorId != "" {
 		b.WriteString("cursorId: ")
-		b.WriteString(fmt.Sprintf("%q", args.CursorId))
+		b.WriteString(quoteMemQLString(args.CursorId))
 	}
 	if b.Len() > 43 {
 		b.WriteString(", ")
 	}
 	b.WriteString("watermark: ")
-	b.WriteString(fmt.Sprintf("%q", args.Watermark))
+	b.WriteString(quoteMemQLString(args.Watermark))
 	if args.EpisodesSeen != 0 {
 		if b.Len() > 43 {
 			b.WriteString(", ")
@@ -195,32 +195,32 @@ func AdvanceRequestBuild(args AdvanceRequestArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation advanceRequest(")
 	b.WriteString("requestId: ")
-	b.WriteString(fmt.Sprintf("%q", args.RequestId))
+	b.WriteString(quoteMemQLString(args.RequestId))
 	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("status: ")
-	b.WriteString(fmt.Sprintf("%q", args.Status))
+	b.WriteString(quoteMemQLString(args.Status))
 	if args.ValidatedByUserId != "" {
 		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("validatedByUserId: ")
-		b.WriteString(fmt.Sprintf("%q", args.ValidatedByUserId))
+		b.WriteString(quoteMemQLString(args.ValidatedByUserId))
 	}
 	if args.ApprovedByUserId != "" {
 		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("approvedByUserId: ")
-		b.WriteString(fmt.Sprintf("%q", args.ApprovedByUserId))
+		b.WriteString(quoteMemQLString(args.ApprovedByUserId))
 	}
 	if args.Resolution != "" {
 		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("resolution: ")
-		b.WriteString(fmt.Sprintf("%q", args.Resolution))
+		b.WriteString(quoteMemQLString(args.Resolution))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -254,12 +254,12 @@ func AppendDocumentVersionBuild(args AppendDocumentVersionArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation appendDocumentVersion(")
 	b.WriteString("versionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.VersionId))
+	b.WriteString(quoteMemQLString(args.VersionId))
 	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("documentId: ")
-	b.WriteString(fmt.Sprintf("%q", args.DocumentId))
+	b.WriteString(quoteMemQLString(args.DocumentId))
 	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
@@ -270,54 +270,54 @@ func AppendDocumentVersionBuild(args AppendDocumentVersionArgs) string {
 			b.WriteString(", ")
 		}
 		b.WriteString("content: ")
-		b.WriteString(fmt.Sprintf("%q", args.Content))
+		b.WriteString(quoteMemQLString(args.Content))
 	}
 	if args.AttachmentId != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("attachmentId: ")
-		b.WriteString(fmt.Sprintf("%q", args.AttachmentId))
+		b.WriteString(quoteMemQLString(args.AttachmentId))
 	}
 	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("authorKind: ")
-	b.WriteString(fmt.Sprintf("%q", args.AuthorKind))
+	b.WriteString(quoteMemQLString(args.AuthorKind))
 	if args.AuthorId != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("authorId: ")
-		b.WriteString(fmt.Sprintf("%q", args.AuthorId))
+		b.WriteString(quoteMemQLString(args.AuthorId))
 	}
 	if args.Note != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("note: ")
-		b.WriteString(fmt.Sprintf("%q", args.Note))
+		b.WriteString(quoteMemQLString(args.Note))
 	}
 	if args.ParentVersionId != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("parentVersionId: ")
-		b.WriteString(fmt.Sprintf("%q", args.ParentVersionId))
+		b.WriteString(quoteMemQLString(args.ParentVersionId))
 	}
 	if args.ProducedByPlanId != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("producedByPlanId: ")
-		b.WriteString(fmt.Sprintf("%q", args.ProducedByPlanId))
+		b.WriteString(quoteMemQLString(args.ProducedByPlanId))
 	}
 	if args.PartitionId != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("partitionId: ")
-		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+		b.WriteString(quoteMemQLString(args.PartitionId))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -354,20 +354,20 @@ func ApplyResponsibilityIntakeBuild(args ApplyResponsibilityIntakeArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation applyResponsibilityIntake(")
 	b.WriteString("responsibilityId: ")
-	b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
+	b.WriteString(quoteMemQLString(args.ResponsibilityId))
 	if args.Trigger != "" {
 		if b.Len() > 35 {
 			b.WriteString(", ")
 		}
 		b.WriteString("trigger: ")
-		b.WriteString(fmt.Sprintf("%q", args.Trigger))
+		b.WriteString(quoteMemQLString(args.Trigger))
 	}
 	if args.Schedule != "" {
 		if b.Len() > 35 {
 			b.WriteString(", ")
 		}
 		b.WriteString("schedule: ")
-		b.WriteString(fmt.Sprintf("%q", args.Schedule))
+		b.WriteString(quoteMemQLString(args.Schedule))
 	}
 	if args.Condition != nil {
 		if b.Len() > 35 {
@@ -381,42 +381,42 @@ func ApplyResponsibilityIntakeBuild(args ApplyResponsibilityIntakeArgs) string {
 			b.WriteString(", ")
 		}
 		b.WriteString("targetKind: ")
-		b.WriteString(fmt.Sprintf("%q", args.TargetKind))
+		b.WriteString(quoteMemQLString(args.TargetKind))
 	}
 	if args.AssignedRoleSlug != "" {
 		if b.Len() > 35 {
 			b.WriteString(", ")
 		}
 		b.WriteString("assignedRoleSlug: ")
-		b.WriteString(fmt.Sprintf("%q", args.AssignedRoleSlug))
+		b.WriteString(quoteMemQLString(args.AssignedRoleSlug))
 	}
 	if args.SuccessCriteria != "" {
 		if b.Len() > 35 {
 			b.WriteString(", ")
 		}
 		b.WriteString("successCriteria: ")
-		b.WriteString(fmt.Sprintf("%q", args.SuccessCriteria))
+		b.WriteString(quoteMemQLString(args.SuccessCriteria))
 	}
 	if args.NotifyHow != "" {
 		if b.Len() > 35 {
 			b.WriteString(", ")
 		}
 		b.WriteString("notifyHow: ")
-		b.WriteString(fmt.Sprintf("%q", args.NotifyHow))
+		b.WriteString(quoteMemQLString(args.NotifyHow))
 	}
 	if args.Status != "" {
 		if b.Len() > 35 {
 			b.WriteString(", ")
 		}
 		b.WriteString("status: ")
-		b.WriteString(fmt.Sprintf("%q", args.Status))
+		b.WriteString(quoteMemQLString(args.Status))
 	}
 	if args.IntakeStatus != "" {
 		if b.Len() > 35 {
 			b.WriteString(", ")
 		}
 		b.WriteString("intakeStatus: ")
-		b.WriteString(fmt.Sprintf("%q", args.IntakeStatus))
+		b.WriteString(quoteMemQLString(args.IntakeStatus))
 	}
 	if args.IntakeRequest != nil {
 		if b.Len() > 35 {
@@ -449,23 +449,23 @@ func ApproveAccessRequestBuild(args ApproveAccessRequestArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation approveAccessRequest(")
 	b.WriteString("requestId: ")
-	b.WriteString(fmt.Sprintf("%q", args.RequestId))
+	b.WriteString(quoteMemQLString(args.RequestId))
 	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("reviewedBy: ")
-	b.WriteString(fmt.Sprintf("%q", args.ReviewedBy))
+	b.WriteString(quoteMemQLString(args.ReviewedBy))
 	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("invitationId: ")
-	b.WriteString(fmt.Sprintf("%q", args.InvitationId))
+	b.WriteString(quoteMemQLString(args.InvitationId))
 	if args.ReviewerNote != "" {
 		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("reviewerNote: ")
-		b.WriteString(fmt.Sprintf("%q", args.ReviewerNote))
+		b.WriteString(quoteMemQLString(args.ReviewerNote))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -488,7 +488,7 @@ func ApproveRequestBuild(args ApproveRequestArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation approveRequest(")
 	b.WriteString("requestId: ")
-	b.WriteString(fmt.Sprintf("%q", args.RequestId))
+	b.WriteString(quoteMemQLString(args.RequestId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -514,25 +514,25 @@ func AssignResponsibilityBuild(args AssignResponsibilityArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation assignResponsibility(")
 	b.WriteString("responsibilityId: ")
-	b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
+	b.WriteString(quoteMemQLString(args.ResponsibilityId))
 	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("targetKind: ")
-	b.WriteString(fmt.Sprintf("%q", args.TargetKind))
+	b.WriteString(quoteMemQLString(args.TargetKind))
 	if args.AssignedAgentId != "" {
 		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("assignedAgentId: ")
-		b.WriteString(fmt.Sprintf("%q", args.AssignedAgentId))
+		b.WriteString(quoteMemQLString(args.AssignedAgentId))
 	}
 	if args.AssignedRoleSlug != "" {
 		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("assignedRoleSlug: ")
-		b.WriteString(fmt.Sprintf("%q", args.AssignedRoleSlug))
+		b.WriteString(quoteMemQLString(args.AssignedRoleSlug))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -556,12 +556,12 @@ func AttachPlanFeedbackBuild(args AttachPlanFeedbackArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation attachPlanFeedback(")
 	b.WriteString("planId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PlanId))
+	b.WriteString(quoteMemQLString(args.PlanId))
 	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("feedback: ")
-	b.WriteString(fmt.Sprintf("%q", args.Feedback))
+	b.WriteString(quoteMemQLString(args.Feedback))
 	b.WriteString(")")
 	return b.String()
 }
@@ -584,12 +584,12 @@ func AttachToRequestBuild(args AttachToRequestArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation attachToRequest(")
 	b.WriteString("requestId: ")
-	b.WriteString(fmt.Sprintf("%q", args.RequestId))
+	b.WriteString(quoteMemQLString(args.RequestId))
 	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("attachmentId: ")
-	b.WriteString(fmt.Sprintf("%q", args.AttachmentId))
+	b.WriteString(quoteMemQLString(args.AttachmentId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -612,7 +612,7 @@ func BumpActionVersionBuild(args BumpActionVersionArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation bumpActionVersion(")
 	b.WriteString("actionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.ActionId))
+	b.WriteString(quoteMemQLString(args.ActionId))
 	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
@@ -641,7 +641,7 @@ func BumpMissingCapabilitySightingBuild(args BumpMissingCapabilitySightingArgs) 
 	var b strings.Builder
 	b.WriteString("mutation bumpMissingCapabilitySighting(")
 	b.WriteString("missingId: ")
-	b.WriteString(fmt.Sprintf("%q", args.MissingId))
+	b.WriteString(quoteMemQLString(args.MissingId))
 	if b.Len() > 39 {
 		b.WriteString(", ")
 	}
@@ -651,7 +651,7 @@ func BumpMissingCapabilitySightingBuild(args BumpMissingCapabilitySightingArgs) 
 		b.WriteString(", ")
 	}
 	b.WriteString("lastSeenAt: ")
-	b.WriteString(fmt.Sprintf("%q", args.LastSeenAt))
+	b.WriteString(quoteMemQLString(args.LastSeenAt))
 	b.WriteString(")")
 	return b.String()
 }
@@ -674,12 +674,12 @@ func BumpPATLastUsedAtBuild(args BumpPATLastUsedAtArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation bumpPATLastUsedAt(")
 	b.WriteString("identityId: ")
-	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
+	b.WriteString(quoteMemQLString(args.IdentityId))
 	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("lastUsedAt: ")
-	b.WriteString(fmt.Sprintf("%q", args.LastUsedAt))
+	b.WriteString(quoteMemQLString(args.LastUsedAt))
 	b.WriteString(")")
 	return b.String()
 }
@@ -701,7 +701,7 @@ func BumpUserDataExportBuild(args BumpUserDataExportArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation bumpUserDataExport(")
 	b.WriteString("userId: ")
-	b.WriteString(fmt.Sprintf("%q", args.UserId))
+	b.WriteString(quoteMemQLString(args.UserId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -724,7 +724,7 @@ func BumpUserRevocationEpochBuild(args BumpUserRevocationEpochArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation bumpUserRevocationEpoch(")
 	b.WriteString("userId: ")
-	b.WriteString(fmt.Sprintf("%q", args.UserId))
+	b.WriteString(quoteMemQLString(args.UserId))
 	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
@@ -751,7 +751,7 @@ func CancelScheduledDeletionBuild(args CancelScheduledDeletionArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation cancelScheduledDeletion(")
 	b.WriteString("userId: ")
-	b.WriteString(fmt.Sprintf("%q", args.UserId))
+	b.WriteString(quoteMemQLString(args.UserId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -776,22 +776,22 @@ func CatalogueConstructBuild(args CatalogueConstructArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation catalogueConstruct(")
 	b.WriteString("constructId: ")
-	b.WriteString(fmt.Sprintf("%q", args.ConstructId))
+	b.WriteString(quoteMemQLString(args.ConstructId))
 	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("catalogKey: ")
-	b.WriteString(fmt.Sprintf("%q", args.CatalogKey))
+	b.WriteString(quoteMemQLString(args.CatalogKey))
 	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("catalogMatchText: ")
-	b.WriteString(fmt.Sprintf("%q", args.CatalogMatchText))
+	b.WriteString(quoteMemQLString(args.CatalogMatchText))
 	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("fromBundleId: ")
-	b.WriteString(fmt.Sprintf("%q", args.FromBundleId))
+	b.WriteString(quoteMemQLString(args.FromBundleId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -816,12 +816,12 @@ func CheckRecordBuild(args CheckRecordArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation checkRecord(")
 	b.WriteString("recordId: ")
-	b.WriteString(fmt.Sprintf("%q", args.RecordId))
+	b.WriteString(quoteMemQLString(args.RecordId))
 	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("identityId: ")
-	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
+	b.WriteString(quoteMemQLString(args.IdentityId))
 	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
@@ -831,7 +831,7 @@ func CheckRecordBuild(args CheckRecordArgs) string {
 		b.WriteString(", ")
 	}
 	b.WriteString("newState: ")
-	b.WriteString(fmt.Sprintf("%q", args.NewState))
+	b.WriteString(quoteMemQLString(args.NewState))
 	b.WriteString(")")
 	return b.String()
 }
@@ -857,7 +857,7 @@ func CloseCallBuild(args CloseCallArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation closeCall(")
 	b.WriteString("id: ")
-	b.WriteString(fmt.Sprintf("%q", args.Id))
+	b.WriteString(quoteMemQLString(args.Id))
 	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
@@ -867,12 +867,12 @@ func CloseCallBuild(args CloseCallArgs) string {
 		b.WriteString(", ")
 	}
 	b.WriteString("disposition: ")
-	b.WriteString(fmt.Sprintf("%q", args.Disposition))
+	b.WriteString(quoteMemQLString(args.Disposition))
 	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
 	b.WriteString("costEstimate: ")
-	b.WriteString(fmt.Sprintf("%q", args.CostEstimate))
+	b.WriteString(renderMemQLValue(args.CostEstimate))
 	b.WriteString(")")
 	return b.String()
 }
@@ -895,7 +895,7 @@ func CompleteHarnessStepBuild(args CompleteHarnessStepArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation completeHarnessStep(")
 	b.WriteString("stepId: ")
-	b.WriteString(fmt.Sprintf("%q", args.StepId))
+	b.WriteString(quoteMemQLString(args.StepId))
 	if args.Result != nil {
 		if b.Len() > 29 {
 			b.WriteString(", ")
@@ -925,7 +925,7 @@ func CompleteTodoBuild(args CompleteTodoArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation completeTodo(")
 	b.WriteString("todoId: ")
-	b.WriteString(fmt.Sprintf("%q", args.TodoId))
+	b.WriteString(quoteMemQLString(args.TodoId))
 	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
@@ -956,12 +956,12 @@ func CompleteToolInvocationBuild(args CompleteToolInvocationArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation completeToolInvocation(")
 	b.WriteString("taskId: ")
-	b.WriteString(fmt.Sprintf("%q", args.TaskId))
+	b.WriteString(quoteMemQLString(args.TaskId))
 	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("status: ")
-	b.WriteString(fmt.Sprintf("%q", args.Status))
+	b.WriteString(quoteMemQLString(args.Status))
 	if args.ToolResult != nil {
 		if b.Len() > 32 {
 			b.WriteString(", ")
@@ -974,14 +974,14 @@ func CompleteToolInvocationBuild(args CompleteToolInvocationArgs) string {
 			b.WriteString(", ")
 		}
 		b.WriteString("errorMessage: ")
-		b.WriteString(fmt.Sprintf("%q", args.ErrorMessage))
+		b.WriteString(quoteMemQLString(args.ErrorMessage))
 	}
 	if args.CompletedAt != "" {
 		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("completedAt: ")
-		b.WriteString(fmt.Sprintf("%q", args.CompletedAt))
+		b.WriteString(quoteMemQLString(args.CompletedAt))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -1004,7 +1004,7 @@ func ConfirmActionBuild(args ConfirmActionArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation confirmAction(")
 	b.WriteString("actionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.ActionId))
+	b.WriteString(quoteMemQLString(args.ActionId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -1029,12 +1029,12 @@ func ConfirmRecordBuild(args ConfirmRecordArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation confirmRecord(")
 	b.WriteString("recordId: ")
-	b.WriteString(fmt.Sprintf("%q", args.RecordId))
+	b.WriteString(quoteMemQLString(args.RecordId))
 	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("identityId: ")
-	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
+	b.WriteString(quoteMemQLString(args.IdentityId))
 	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
@@ -1044,7 +1044,7 @@ func ConfirmRecordBuild(args ConfirmRecordArgs) string {
 		b.WriteString(", ")
 	}
 	b.WriteString("newState: ")
-	b.WriteString(fmt.Sprintf("%q", args.NewState))
+	b.WriteString(quoteMemQLString(args.NewState))
 	b.WriteString(")")
 	return b.String()
 }
@@ -1067,13 +1067,13 @@ func ConsumeAuthCodeBuild(args ConsumeAuthCodeArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation consumeAuthCode(")
 	b.WriteString("codeId: ")
-	b.WriteString(fmt.Sprintf("%q", args.CodeId))
+	b.WriteString(quoteMemQLString(args.CodeId))
 	if args.ConsumedFromIP != "" {
 		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("consumedFromIP: ")
-		b.WriteString(fmt.Sprintf("%q", args.ConsumedFromIP))
+		b.WriteString(quoteMemQLString(args.ConsumedFromIP))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -1097,13 +1097,13 @@ func ConsumeMagicLinkRequestBuild(args ConsumeMagicLinkRequestArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation consumeMagicLinkRequest(")
 	b.WriteString("requestId: ")
-	b.WriteString(fmt.Sprintf("%q", args.RequestId))
+	b.WriteString(quoteMemQLString(args.RequestId))
 	if args.ConsumedFromIP != "" {
 		if b.Len() > 33 {
 			b.WriteString(", ")
 		}
 		b.WriteString("consumedFromIP: ")
-		b.WriteString(fmt.Sprintf("%q", args.ConsumedFromIP))
+		b.WriteString(quoteMemQLString(args.ConsumedFromIP))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -1133,25 +1133,25 @@ func CreateAccessRequestBuild(args CreateAccessRequestArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation createAccessRequest(")
 	b.WriteString("requestId: ")
-	b.WriteString(fmt.Sprintf("%q", args.RequestId))
+	b.WriteString(quoteMemQLString(args.RequestId))
 	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("email: ")
-	b.WriteString(fmt.Sprintf("%q", args.Email))
+	b.WriteString(quoteMemQLString(args.Email))
 	if args.Name != "" {
 		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("name: ")
-		b.WriteString(fmt.Sprintf("%q", args.Name))
+		b.WriteString(quoteMemQLString(args.Name))
 	}
 	if args.AdditionalContext != "" {
 		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("additionalContext: ")
-		b.WriteString(fmt.Sprintf("%q", args.AdditionalContext))
+		b.WriteString(quoteMemQLString(args.AdditionalContext))
 	}
 	if args.RiskScore != 0 {
 		if b.Len() > 29 {
@@ -1165,21 +1165,21 @@ func CreateAccessRequestBuild(args CreateAccessRequestArgs) string {
 			b.WriteString(", ")
 		}
 		b.WriteString("riskSignals: ")
-		b.WriteString(fmt.Sprintf("%q", args.RiskSignals))
+		b.WriteString(quoteMemQLString(args.RiskSignals))
 	}
 	if args.SourceIP != "" {
 		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourceIP: ")
-		b.WriteString(fmt.Sprintf("%q", args.SourceIP))
+		b.WriteString(quoteMemQLString(args.SourceIP))
 	}
 	if args.UserAgent != "" {
 		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("userAgent: ")
-		b.WriteString(fmt.Sprintf("%q", args.UserAgent))
+		b.WriteString(quoteMemQLString(args.UserAgent))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -1206,27 +1206,27 @@ func CreateAdHocPlanBuild(args CreateAdHocPlanArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation createAdHocPlan(")
 	b.WriteString("planId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PlanId))
+	b.WriteString(quoteMemQLString(args.PlanId))
 	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("partitionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+	b.WriteString(quoteMemQLString(args.PartitionId))
 	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("agentId: ")
-	b.WriteString(fmt.Sprintf("%q", args.AgentId))
+	b.WriteString(quoteMemQLString(args.AgentId))
 	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("ownerUserId: ")
-	b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
+	b.WriteString(quoteMemQLString(args.OwnerUserId))
 	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("goal: ")
-	b.WriteString(fmt.Sprintf("%q", args.Goal))
+	b.WriteString(quoteMemQLString(args.Goal))
 	b.WriteString(")")
 	return b.String()
 }
@@ -1269,89 +1269,89 @@ func CreateAgentBuild(args CreateAgentArgs) string {
 	b.WriteString("mutation createAgent(")
 	if args.AgentId != "" {
 		b.WriteString("agentId: ")
-		b.WriteString(fmt.Sprintf("%q", args.AgentId))
+		b.WriteString(quoteMemQLString(args.AgentId))
 	}
 	if args.OwnerUserId != "" {
 		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("ownerUserId: ")
-		b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
+		b.WriteString(quoteMemQLString(args.OwnerUserId))
 	}
 	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
-	b.WriteString(fmt.Sprintf("%q", args.Name))
+	b.WriteString(quoteMemQLString(args.Name))
 	if args.Description != "" {
 		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("description: ")
-		b.WriteString(fmt.Sprintf("%q", args.Description))
+		b.WriteString(quoteMemQLString(args.Description))
 	}
 	if args.Personality != "" {
 		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("personality: ")
-		b.WriteString(fmt.Sprintf("%q", args.Personality))
+		b.WriteString(quoteMemQLString(args.Personality))
 	}
 	if args.Role != "" {
 		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("role: ")
-		b.WriteString(fmt.Sprintf("%q", args.Role))
+		b.WriteString(quoteMemQLString(args.Role))
 	}
 	if args.RoleSlug != "" {
 		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("roleSlug: ")
-		b.WriteString(fmt.Sprintf("%q", args.RoleSlug))
+		b.WriteString(quoteMemQLString(args.RoleSlug))
 	}
 	if args.Kind != "" {
 		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("kind: ")
-		b.WriteString(fmt.Sprintf("%q", args.Kind))
+		b.WriteString(quoteMemQLString(args.Kind))
 	}
 	if args.Gender != "" {
 		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("gender: ")
-		b.WriteString(fmt.Sprintf("%q", args.Gender))
+		b.WriteString(quoteMemQLString(args.Gender))
 	}
 	if args.AudioControl != "" {
 		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("audioControl: ")
-		b.WriteString(fmt.Sprintf("%q", args.AudioControl))
+		b.WriteString(quoteMemQLString(args.AudioControl))
 	}
 	if args.VideoControl != "" {
 		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("videoControl: ")
-		b.WriteString(fmt.Sprintf("%q", args.VideoControl))
+		b.WriteString(quoteMemQLString(args.VideoControl))
 	}
 	if args.AvatarPersonaId != "" {
 		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("avatarPersonaId: ")
-		b.WriteString(fmt.Sprintf("%q", args.AvatarPersonaId))
+		b.WriteString(quoteMemQLString(args.AvatarPersonaId))
 	}
 	if args.AvatarVendor != "" {
 		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("avatarVendor: ")
-		b.WriteString(fmt.Sprintf("%q", args.AvatarVendor))
+		b.WriteString(quoteMemQLString(args.AvatarVendor))
 	}
 	if args.Capabilities != nil {
 		if b.Len() > 21 {
@@ -1424,28 +1424,28 @@ func CreateAgentAuthorizationBuild(args CreateAgentAuthorizationArgs) string {
 	b.WriteString("mutation createAgentAuthorization(")
 	if args.AuthId != "" {
 		b.WriteString("authId: ")
-		b.WriteString(fmt.Sprintf("%q", args.AuthId))
+		b.WriteString(quoteMemQLString(args.AuthId))
 	}
 	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("agentId: ")
-	b.WriteString(fmt.Sprintf("%q", args.AgentId))
+	b.WriteString(quoteMemQLString(args.AgentId))
 	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("userId: ")
-	b.WriteString(fmt.Sprintf("%q", args.UserId))
+	b.WriteString(quoteMemQLString(args.UserId))
 	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("planKind: ")
-	b.WriteString(fmt.Sprintf("%q", args.PlanKind))
+	b.WriteString(quoteMemQLString(args.PlanKind))
 	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("spaceScope: ")
-	b.WriteString(fmt.Sprintf("%q", args.SpaceScope))
+	b.WriteString(quoteMemQLString(args.SpaceScope))
 	if args.TokenBudgetCap != 0 {
 		if b.Len() > 34 {
 			b.WriteString(", ")
@@ -1458,14 +1458,14 @@ func CreateAgentAuthorizationBuild(args CreateAgentAuthorizationArgs) string {
 			b.WriteString(", ")
 		}
 		b.WriteString("expiresAt: ")
-		b.WriteString(fmt.Sprintf("%q", args.ExpiresAt))
+		b.WriteString(quoteMemQLString(args.ExpiresAt))
 	}
 	if args.ComputerUseScope != "" {
 		if b.Len() > 34 {
 			b.WriteString(", ")
 		}
 		b.WriteString("computerUseScope: ")
-		b.WriteString(fmt.Sprintf("%q", args.ComputerUseScope))
+		b.WriteString(quoteMemQLString(args.ComputerUseScope))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -1506,38 +1506,38 @@ func CreateAgentRoleBuild(args CreateAgentRoleArgs) string {
 	b.WriteString("mutation createAgentRole(")
 	if args.AgentRoleId != "" {
 		b.WriteString("agentRoleId: ")
-		b.WriteString(fmt.Sprintf("%q", args.AgentRoleId))
+		b.WriteString(quoteMemQLString(args.AgentRoleId))
 	}
 	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("slug: ")
-	b.WriteString(fmt.Sprintf("%q", args.Slug))
+	b.WriteString(quoteMemQLString(args.Slug))
 	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
-	b.WriteString(fmt.Sprintf("%q", args.Name))
+	b.WriteString(quoteMemQLString(args.Name))
 	if args.Description != "" {
 		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("description: ")
-		b.WriteString(fmt.Sprintf("%q", args.Description))
+		b.WriteString(quoteMemQLString(args.Description))
 	}
 	if args.Category != "" {
 		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("category: ")
-		b.WriteString(fmt.Sprintf("%q", args.Category))
+		b.WriteString(quoteMemQLString(args.Category))
 	}
 	if args.Tier != "" {
 		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("tier: ")
-		b.WriteString(fmt.Sprintf("%q", args.Tier))
+		b.WriteString(quoteMemQLString(args.Tier))
 	}
 	if args.LockedSkillIds != nil {
 		if b.Len() > 25 {
@@ -1579,21 +1579,21 @@ func CreateAgentRoleBuild(args CreateAgentRoleArgs) string {
 			b.WriteString(", ")
 		}
 		b.WriteString("recommendedPolicySlug: ")
-		b.WriteString(fmt.Sprintf("%q", args.RecommendedPolicySlug))
+		b.WriteString(quoteMemQLString(args.RecommendedPolicySlug))
 	}
 	if args.RecommendedGender != "" {
 		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("recommendedGender: ")
-		b.WriteString(fmt.Sprintf("%q", args.RecommendedGender))
+		b.WriteString(quoteMemQLString(args.RecommendedGender))
 	}
 	if args.SystemPromptHints != "" {
 		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("systemPromptHints: ")
-		b.WriteString(fmt.Sprintf("%q", args.SystemPromptHints))
+		b.WriteString(quoteMemQLString(args.SystemPromptHints))
 	}
 	if args.ActiveSet {
 		if b.Len() > 25 {
@@ -1640,70 +1640,70 @@ func CreateApprovalRequestBuild(args CreateApprovalRequestArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation createApprovalRequest(")
 	b.WriteString("correlationKey: ")
-	b.WriteString(fmt.Sprintf("%q", args.CorrelationKey))
+	b.WriteString(quoteMemQLString(args.CorrelationKey))
 	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("surface: ")
-	b.WriteString(fmt.Sprintf("%q", args.Surface))
+	b.WriteString(quoteMemQLString(args.Surface))
 	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("action: ")
-	b.WriteString(fmt.Sprintf("%q", args.Action))
+	b.WriteString(quoteMemQLString(args.Action))
 	if args.ArgsRedacted != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("argsRedacted: ")
-		b.WriteString(fmt.Sprintf("%q", args.ArgsRedacted))
+		b.WriteString(quoteMemQLString(args.ArgsRedacted))
 	}
 	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("tier: ")
-	b.WriteString(fmt.Sprintf("%q", args.Tier))
+	b.WriteString(quoteMemQLString(args.Tier))
 	if args.Categories != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("categories: ")
-		b.WriteString(fmt.Sprintf("%q", args.Categories))
+		b.WriteString(quoteMemQLString(args.Categories))
 	}
 	if args.Reason != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("reason: ")
-		b.WriteString(fmt.Sprintf("%q", args.Reason))
+		b.WriteString(quoteMemQLString(args.Reason))
 	}
 	if args.ExpiresAt != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("expiresAt: ")
-		b.WriteString(fmt.Sprintf("%q", args.ExpiresAt))
+		b.WriteString(quoteMemQLString(args.ExpiresAt))
 	}
 	if args.AgentId != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("agentId: ")
-		b.WriteString(fmt.Sprintf("%q", args.AgentId))
+		b.WriteString(quoteMemQLString(args.AgentId))
 	}
 	if args.OwnerUserId != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("ownerUserId: ")
-		b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
+		b.WriteString(quoteMemQLString(args.OwnerUserId))
 	}
 	if args.PlanId != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("planId: ")
-		b.WriteString(fmt.Sprintf("%q", args.PlanId))
+		b.WriteString(quoteMemQLString(args.PlanId))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -1749,52 +1749,52 @@ func CreateArtifactBuild(args CreateArtifactArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation createArtifact(")
 	b.WriteString("sourceConceptRef: ")
-	b.WriteString(fmt.Sprintf("%q", args.SourceConceptRef))
+	b.WriteString(quoteMemQLString(args.SourceConceptRef))
 	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("ownerUserId: ")
-	b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
+	b.WriteString(quoteMemQLString(args.OwnerUserId))
 	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("lens: ")
-	b.WriteString(fmt.Sprintf("%q", args.Lens))
+	b.WriteString(quoteMemQLString(args.Lens))
 	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("kind: ")
-	b.WriteString(fmt.Sprintf("%q", args.Kind))
+	b.WriteString(quoteMemQLString(args.Kind))
 	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("source: ")
-	b.WriteString(fmt.Sprintf("%q", args.Source))
+	b.WriteString(quoteMemQLString(args.Source))
 	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("title: ")
-	b.WriteString(fmt.Sprintf("%q", args.Title))
+	b.WriteString(quoteMemQLString(args.Title))
 	if args.Summary != "" {
 		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("summary: ")
-		b.WriteString(fmt.Sprintf("%q", args.Summary))
+		b.WriteString(quoteMemQLString(args.Summary))
 	}
 	if args.Format != "" {
 		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("format: ")
-		b.WriteString(fmt.Sprintf("%q", args.Format))
+		b.WriteString(quoteMemQLString(args.Format))
 	}
 	if args.MimeType != "" {
 		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("mimeType: ")
-		b.WriteString(fmt.Sprintf("%q", args.MimeType))
+		b.WriteString(quoteMemQLString(args.MimeType))
 	}
 	if args.LiveSet {
 		if b.Len() > 24 {
@@ -1808,49 +1808,49 @@ func CreateArtifactBuild(args CreateArtifactArgs) string {
 			b.WriteString(", ")
 		}
 		b.WriteString("scope: ")
-		b.WriteString(fmt.Sprintf("%q", args.Scope))
+		b.WriteString(quoteMemQLString(args.Scope))
 	}
 	if args.PartitionId != "" {
 		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("partitionId: ")
-		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+		b.WriteString(quoteMemQLString(args.PartitionId))
 	}
 	if args.AgentId != "" {
 		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("agentId: ")
-		b.WriteString(fmt.Sprintf("%q", args.AgentId))
+		b.WriteString(quoteMemQLString(args.AgentId))
 	}
 	if args.ProducedByPlanId != "" {
 		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("producedByPlanId: ")
-		b.WriteString(fmt.Sprintf("%q", args.ProducedByPlanId))
+		b.WriteString(quoteMemQLString(args.ProducedByPlanId))
 	}
 	if args.ProducedByWorkerId != "" {
 		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("producedByWorkerId: ")
-		b.WriteString(fmt.Sprintf("%q", args.ProducedByWorkerId))
+		b.WriteString(quoteMemQLString(args.ProducedByWorkerId))
 	}
 	if args.ProducedByWorkerName != "" {
 		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("producedByWorkerName: ")
-		b.WriteString(fmt.Sprintf("%q", args.ProducedByWorkerName))
+		b.WriteString(quoteMemQLString(args.ProducedByWorkerName))
 	}
 	if args.ValidationStatus != "" {
 		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("validationStatus: ")
-		b.WriteString(fmt.Sprintf("%q", args.ValidationStatus))
+		b.WriteString(quoteMemQLString(args.ValidationStatus))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -1893,70 +1893,70 @@ func CreateAuditEventBuild(args CreateAuditEventArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation createAuditEvent(")
 	b.WriteString("eventId: ")
-	b.WriteString(fmt.Sprintf("%q", args.EventId))
+	b.WriteString(quoteMemQLString(args.EventId))
 	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("occurredAt: ")
-	b.WriteString(fmt.Sprintf("%q", args.OccurredAt))
+	b.WriteString(quoteMemQLString(args.OccurredAt))
 	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("category: ")
-	b.WriteString(fmt.Sprintf("%q", args.Category))
+	b.WriteString(quoteMemQLString(args.Category))
 	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("action: ")
-	b.WriteString(fmt.Sprintf("%q", args.Action))
+	b.WriteString(quoteMemQLString(args.Action))
 	if args.ActorUserId != "" {
 		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("actorUserId: ")
-		b.WriteString(fmt.Sprintf("%q", args.ActorUserId))
+		b.WriteString(quoteMemQLString(args.ActorUserId))
 	}
 	if args.ActorEmail != "" {
 		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("actorEmail: ")
-		b.WriteString(fmt.Sprintf("%q", args.ActorEmail))
+		b.WriteString(quoteMemQLString(args.ActorEmail))
 	}
 	if args.ActorRole != "" {
 		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("actorRole: ")
-		b.WriteString(fmt.Sprintf("%q", args.ActorRole))
+		b.WriteString(quoteMemQLString(args.ActorRole))
 	}
 	if args.ActorIdentityId != "" {
 		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("actorIdentityId: ")
-		b.WriteString(fmt.Sprintf("%q", args.ActorIdentityId))
+		b.WriteString(quoteMemQLString(args.ActorIdentityId))
 	}
 	if args.TargetType != "" {
 		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("targetType: ")
-		b.WriteString(fmt.Sprintf("%q", args.TargetType))
+		b.WriteString(quoteMemQLString(args.TargetType))
 	}
 	if args.TargetId != "" {
 		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("targetId: ")
-		b.WriteString(fmt.Sprintf("%q", args.TargetId))
+		b.WriteString(quoteMemQLString(args.TargetId))
 	}
 	if args.TargetEmail != "" {
 		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("targetEmail: ")
-		b.WriteString(fmt.Sprintf("%q", args.TargetEmail))
+		b.WriteString(quoteMemQLString(args.TargetEmail))
 	}
 	if args.Detail != nil {
 		if b.Len() > 26 {
@@ -1970,42 +1970,42 @@ func CreateAuditEventBuild(args CreateAuditEventArgs) string {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourceIP: ")
-		b.WriteString(fmt.Sprintf("%q", args.SourceIP))
+		b.WriteString(quoteMemQLString(args.SourceIP))
 	}
 	if args.UserAgent != "" {
 		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("userAgent: ")
-		b.WriteString(fmt.Sprintf("%q", args.UserAgent))
+		b.WriteString(quoteMemQLString(args.UserAgent))
 	}
 	if args.CorrelationId != "" {
 		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("correlationId: ")
-		b.WriteString(fmt.Sprintf("%q", args.CorrelationId))
+		b.WriteString(quoteMemQLString(args.CorrelationId))
 	}
 	if args.Outcome != "" {
 		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("outcome: ")
-		b.WriteString(fmt.Sprintf("%q", args.Outcome))
+		b.WriteString(quoteMemQLString(args.Outcome))
 	}
 	if args.FailureReason != "" {
 		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("failureReason: ")
-		b.WriteString(fmt.Sprintf("%q", args.FailureReason))
+		b.WriteString(quoteMemQLString(args.FailureReason))
 	}
 	if args.PrevEventHash != "" {
 		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("prevEventHash: ")
-		b.WriteString(fmt.Sprintf("%q", args.PrevEventHash))
+		b.WriteString(quoteMemQLString(args.PrevEventHash))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -2039,68 +2039,68 @@ func CreateAuthCodeBuild(args CreateAuthCodeArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation createAuthCode(")
 	b.WriteString("codeId: ")
-	b.WriteString(fmt.Sprintf("%q", args.CodeId))
+	b.WriteString(quoteMemQLString(args.CodeId))
 	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("code: ")
-	b.WriteString(fmt.Sprintf("%q", args.Code))
+	b.WriteString(quoteMemQLString(args.Code))
 	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("codeHash: ")
-	b.WriteString(fmt.Sprintf("%q", args.CodeHash))
+	b.WriteString(quoteMemQLString(args.CodeHash))
 	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("clientId: ")
-	b.WriteString(fmt.Sprintf("%q", args.ClientId))
+	b.WriteString(quoteMemQLString(args.ClientId))
 	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("redirectURI: ")
-	b.WriteString(fmt.Sprintf("%q", args.RedirectURI))
+	b.WriteString(quoteMemQLString(args.RedirectURI))
 	if args.State != "" {
 		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("state: ")
-		b.WriteString(fmt.Sprintf("%q", args.State))
+		b.WriteString(quoteMemQLString(args.State))
 	}
 	if args.CodeChallenge != "" {
 		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("codeChallenge: ")
-		b.WriteString(fmt.Sprintf("%q", args.CodeChallenge))
+		b.WriteString(quoteMemQLString(args.CodeChallenge))
 	}
 	if args.CodeChallengeMethod != "" {
 		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("codeChallengeMethod: ")
-		b.WriteString(fmt.Sprintf("%q", args.CodeChallengeMethod))
+		b.WriteString(quoteMemQLString(args.CodeChallengeMethod))
 	}
 	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("userId: ")
-	b.WriteString(fmt.Sprintf("%q", args.UserId))
+	b.WriteString(quoteMemQLString(args.UserId))
 	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("identityId: ")
-	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
+	b.WriteString(quoteMemQLString(args.IdentityId))
 	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("magicLinkRequestId: ")
-	b.WriteString(fmt.Sprintf("%q", args.MagicLinkRequestId))
+	b.WriteString(quoteMemQLString(args.MagicLinkRequestId))
 	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("expiresAt: ")
-	b.WriteString(fmt.Sprintf("%q", args.ExpiresAt))
+	b.WriteString(quoteMemQLString(args.ExpiresAt))
 	b.WriteString(")")
 	return b.String()
 }
@@ -2130,48 +2130,48 @@ func CreateAuthSessionBuild(args CreateAuthSessionArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation createAuthSession(")
 	b.WriteString("sessionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SessionId))
+	b.WriteString(quoteMemQLString(args.SessionId))
 	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("subject: ")
-	b.WriteString(fmt.Sprintf("%q", args.Subject))
+	b.WriteString(quoteMemQLString(args.Subject))
 	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("tokenHash: ")
-	b.WriteString(fmt.Sprintf("%q", args.TokenHash))
+	b.WriteString(quoteMemQLString(args.TokenHash))
 	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("source: ")
-	b.WriteString(fmt.Sprintf("%q", args.Source))
+	b.WriteString(quoteMemQLString(args.Source))
 	if args.UserId != "" {
 		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("userId: ")
-		b.WriteString(fmt.Sprintf("%q", args.UserId))
+		b.WriteString(quoteMemQLString(args.UserId))
 	}
 	if args.IdentityId != "" {
 		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("identityId: ")
-		b.WriteString(fmt.Sprintf("%q", args.IdentityId))
+		b.WriteString(quoteMemQLString(args.IdentityId))
 	}
 	if args.ClientLabel != "" {
 		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("clientLabel: ")
-		b.WriteString(fmt.Sprintf("%q", args.ClientLabel))
+		b.WriteString(quoteMemQLString(args.ClientLabel))
 	}
 	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("expiresAt: ")
-	b.WriteString(fmt.Sprintf("%q", args.ExpiresAt))
+	b.WriteString(quoteMemQLString(args.ExpiresAt))
 	b.WriteString(")")
 	return b.String()
 }
@@ -2200,32 +2200,32 @@ func CreateAuthoringBundleBuild(args CreateAuthoringBundleArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation createAuthoringBundle(")
 	b.WriteString("bundleId: ")
-	b.WriteString(fmt.Sprintf("%q", args.BundleId))
+	b.WriteString(quoteMemQLString(args.BundleId))
 	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("title: ")
-	b.WriteString(fmt.Sprintf("%q", args.Title))
+	b.WriteString(quoteMemQLString(args.Title))
 	if args.Summary != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("summary: ")
-		b.WriteString(fmt.Sprintf("%q", args.Summary))
+		b.WriteString(quoteMemQLString(args.Summary))
 	}
 	if args.ResponsibilityId != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("responsibilityId: ")
-		b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
+		b.WriteString(quoteMemQLString(args.ResponsibilityId))
 	}
 	if args.SourcePlanId != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourcePlanId: ")
-		b.WriteString(fmt.Sprintf("%q", args.SourcePlanId))
+		b.WriteString(quoteMemQLString(args.SourcePlanId))
 	}
 	if args.Version != 0 {
 		if b.Len() > 31 {
@@ -2239,7 +2239,7 @@ func CreateAuthoringBundleBuild(args CreateAuthoringBundleArgs) string {
 			b.WriteString(", ")
 		}
 		b.WriteString("supersedesBundleId: ")
-		b.WriteString(fmt.Sprintf("%q", args.SupersedesBundleId))
+		b.WriteString(quoteMemQLString(args.SupersedesBundleId))
 	}
 	if args.ReusedConstructRefs != nil {
 		if b.Len() > 31 {
@@ -2276,38 +2276,38 @@ func CreateAuthoringConstructBuild(args CreateAuthoringConstructArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation createAuthoringConstruct(")
 	b.WriteString("constructId: ")
-	b.WriteString(fmt.Sprintf("%q", args.ConstructId))
+	b.WriteString(quoteMemQLString(args.ConstructId))
 	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("bundleId: ")
-	b.WriteString(fmt.Sprintf("%q", args.BundleId))
+	b.WriteString(quoteMemQLString(args.BundleId))
 	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("kind: ")
-	b.WriteString(fmt.Sprintf("%q", args.Kind))
+	b.WriteString(quoteMemQLString(args.Kind))
 	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
-	b.WriteString(fmt.Sprintf("%q", args.Name))
+	b.WriteString(quoteMemQLString(args.Name))
 	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("targetNamespace: ")
-	b.WriteString(fmt.Sprintf("%q", args.TargetNamespace))
+	b.WriteString(quoteMemQLString(args.TargetNamespace))
 	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("source: ")
-	b.WriteString(fmt.Sprintf("%q", args.Source))
+	b.WriteString(quoteMemQLString(args.Source))
 	if args.GrammarVersion != "" {
 		if b.Len() > 34 {
 			b.WriteString(", ")
 		}
 		b.WriteString("grammarVersion: ")
-		b.WriteString(fmt.Sprintf("%q", args.GrammarVersion))
+		b.WriteString(quoteMemQLString(args.GrammarVersion))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -2339,41 +2339,41 @@ func CreateAvatarPersonaBuild(args CreateAvatarPersonaArgs) string {
 	b.WriteString("mutation createAvatarPersona(")
 	if args.AvatarPersonaId != "" {
 		b.WriteString("avatarPersonaId: ")
-		b.WriteString(fmt.Sprintf("%q", args.AvatarPersonaId))
+		b.WriteString(quoteMemQLString(args.AvatarPersonaId))
 	}
 	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("vendor: ")
-	b.WriteString(fmt.Sprintf("%q", args.Vendor))
+	b.WriteString(quoteMemQLString(args.Vendor))
 	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("personaId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PersonaId))
+	b.WriteString(quoteMemQLString(args.PersonaId))
 	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
-	b.WriteString(fmt.Sprintf("%q", args.Name))
+	b.WriteString(quoteMemQLString(args.Name))
 	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("gender: ")
-	b.WriteString(fmt.Sprintf("%q", args.Gender))
+	b.WriteString(quoteMemQLString(args.Gender))
 	if args.ImageRef != "" {
 		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("imageRef: ")
-		b.WriteString(fmt.Sprintf("%q", args.ImageRef))
+		b.WriteString(quoteMemQLString(args.ImageRef))
 	}
 	if args.PreviewRef != "" {
 		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("previewRef: ")
-		b.WriteString(fmt.Sprintf("%q", args.PreviewRef))
+		b.WriteString(quoteMemQLString(args.PreviewRef))
 	}
 	if args.ActiveSet {
 		if b.Len() > 29 {
@@ -2407,27 +2407,27 @@ func CreateBadgeIdentityBuild(args CreateBadgeIdentityArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation createBadgeIdentity(")
 	b.WriteString("identityId: ")
-	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
+	b.WriteString(quoteMemQLString(args.IdentityId))
 	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("userId: ")
-	b.WriteString(fmt.Sprintf("%q", args.UserId))
+	b.WriteString(quoteMemQLString(args.UserId))
 	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("label: ")
-	b.WriteString(fmt.Sprintf("%q", args.Label))
+	b.WriteString(quoteMemQLString(args.Label))
 	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("keyHash: ")
-	b.WriteString(fmt.Sprintf("%q", args.KeyHash))
+	b.WriteString(quoteMemQLString(args.KeyHash))
 	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("registeredBy: ")
-	b.WriteString(fmt.Sprintf("%q", args.RegisteredBy))
+	b.WriteString(quoteMemQLString(args.RegisteredBy))
 	b.WriteString(")")
 	return b.String()
 }
@@ -2458,23 +2458,23 @@ func CreateCalendarEventBuild(args CreateCalendarEventArgs) string {
 	b.WriteString("mutation createCalendarEvent(")
 	if args.EventId != "" {
 		b.WriteString("eventId: ")
-		b.WriteString(fmt.Sprintf("%q", args.EventId))
+		b.WriteString(quoteMemQLString(args.EventId))
 	}
 	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("title: ")
-	b.WriteString(fmt.Sprintf("%q", args.Title))
+	b.WriteString(quoteMemQLString(args.Title))
 	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("startsAt: ")
-	b.WriteString(fmt.Sprintf("%q", args.StartsAt))
+	b.WriteString(quoteMemQLString(args.StartsAt))
 	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("endsAt: ")
-	b.WriteString(fmt.Sprintf("%q", args.EndsAt))
+	b.WriteString(quoteMemQLString(args.EndsAt))
 	if args.AllDaySet {
 		if b.Len() > 29 {
 			b.WriteString(", ")
@@ -2487,21 +2487,21 @@ func CreateCalendarEventBuild(args CreateCalendarEventArgs) string {
 			b.WriteString(", ")
 		}
 		b.WriteString("location: ")
-		b.WriteString(fmt.Sprintf("%q", args.Location))
+		b.WriteString(quoteMemQLString(args.Location))
 	}
 	if args.Notes != "" {
 		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("notes: ")
-		b.WriteString(fmt.Sprintf("%q", args.Notes))
+		b.WriteString(quoteMemQLString(args.Notes))
 	}
 	if args.Recurrence != "" {
 		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("recurrence: ")
-		b.WriteString(fmt.Sprintf("%q", args.Recurrence))
+		b.WriteString(quoteMemQLString(args.Recurrence))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -2536,36 +2536,36 @@ func CreateCapabilityBuild(args CreateCapabilityArgs) string {
 	b.WriteString("mutation createCapability(")
 	if args.CapabilityId != "" {
 		b.WriteString("capabilityId: ")
-		b.WriteString(fmt.Sprintf("%q", args.CapabilityId))
+		b.WriteString(quoteMemQLString(args.CapabilityId))
 	}
 	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("roleSlug: ")
-	b.WriteString(fmt.Sprintf("%q", args.RoleSlug))
+	b.WriteString(quoteMemQLString(args.RoleSlug))
 	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("verb: ")
-	b.WriteString(fmt.Sprintf("%q", args.Verb))
+	b.WriteString(quoteMemQLString(args.Verb))
 	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("resourceType: ")
-	b.WriteString(fmt.Sprintf("%q", args.ResourceType))
+	b.WriteString(quoteMemQLString(args.ResourceType))
 	if args.Effect != "" {
 		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("effect: ")
-		b.WriteString(fmt.Sprintf("%q", args.Effect))
+		b.WriteString(quoteMemQLString(args.Effect))
 	}
 	if args.Description != "" {
 		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("description: ")
-		b.WriteString(fmt.Sprintf("%q", args.Description))
+		b.WriteString(quoteMemQLString(args.Description))
 	}
 	if args.PredefinedSet {
 		if b.Len() > 26 {
@@ -2610,53 +2610,53 @@ func CreateClusterBuild(args CreateClusterArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation createCluster(")
 	b.WriteString("name: ")
-	b.WriteString(fmt.Sprintf("%q", args.Name))
+	b.WriteString(quoteMemQLString(args.Name))
 	if args.Region != "" {
 		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("region: ")
-		b.WriteString(fmt.Sprintf("%q", args.Region))
+		b.WriteString(quoteMemQLString(args.Region))
 	}
 	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("environment: ")
-	b.WriteString(fmt.Sprintf("%q", args.Environment))
+	b.WriteString(quoteMemQLString(args.Environment))
 	if args.Status != "" {
 		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("status: ")
-		b.WriteString(fmt.Sprintf("%q", args.Status))
+		b.WriteString(quoteMemQLString(args.Status))
 	}
 	if args.DatabaseId != "" {
 		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("databaseId: ")
-		b.WriteString(fmt.Sprintf("%q", args.DatabaseId))
+		b.WriteString(quoteMemQLString(args.DatabaseId))
 	}
 	if args.IdentityProviderId != "" {
 		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("identityProviderId: ")
-		b.WriteString(fmt.Sprintf("%q", args.IdentityProviderId))
+		b.WriteString(quoteMemQLString(args.IdentityProviderId))
 	}
 	if args.Version != "" {
 		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("version: ")
-		b.WriteString(fmt.Sprintf("%q", args.Version))
+		b.WriteString(quoteMemQLString(args.Version))
 	}
 	if args.Provider != "" {
 		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("provider: ")
-		b.WriteString(fmt.Sprintf("%q", args.Provider))
+		b.WriteString(quoteMemQLString(args.Provider))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -2707,135 +2707,135 @@ func CreateClusterSettingsBuild(args CreateClusterSettingsArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation createClusterSettings(")
 	b.WriteString("id: ")
-	b.WriteString(fmt.Sprintf("%q", args.Id))
+	b.WriteString(quoteMemQLString(args.Id))
 	if args.ClusterDomain != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("clusterDomain: ")
-		b.WriteString(fmt.Sprintf("%q", args.ClusterDomain))
+		b.WriteString(quoteMemQLString(args.ClusterDomain))
 	}
 	if args.BrandName != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("brandName: ")
-		b.WriteString(fmt.Sprintf("%q", args.BrandName))
+		b.WriteString(quoteMemQLString(args.BrandName))
 	}
 	if args.BrandPrimaryColor != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("brandPrimaryColor: ")
-		b.WriteString(fmt.Sprintf("%q", args.BrandPrimaryColor))
+		b.WriteString(quoteMemQLString(args.BrandPrimaryColor))
 	}
 	if args.BrandLogoDataURI != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("brandLogoDataURI: ")
-		b.WriteString(fmt.Sprintf("%q", args.BrandLogoDataURI))
+		b.WriteString(quoteMemQLString(args.BrandLogoDataURI))
 	}
 	if args.BrandIconDataURI != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("brandIconDataURI: ")
-		b.WriteString(fmt.Sprintf("%q", args.BrandIconDataURI))
+		b.WriteString(quoteMemQLString(args.BrandIconDataURI))
 	}
 	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("registrationMode: ")
-	b.WriteString(fmt.Sprintf("%q", args.RegistrationMode))
+	b.WriteString(quoteMemQLString(args.RegistrationMode))
 	if args.RegistrationDomains != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("registrationDomains: ")
-		b.WriteString(fmt.Sprintf("%q", args.RegistrationDomains))
+		b.WriteString(quoteMemQLString(args.RegistrationDomains))
 	}
 	if args.InternalDomains != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("internalDomains: ")
-		b.WriteString(fmt.Sprintf("%q", args.InternalDomains))
+		b.WriteString(quoteMemQLString(args.InternalDomains))
 	}
 	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("internalDefaultRole: ")
-	b.WriteString(fmt.Sprintf("%q", args.InternalDefaultRole))
+	b.WriteString(quoteMemQLString(args.InternalDefaultRole))
 	if args.RegisteredClientsJSON != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("registeredClientsJSON: ")
-		b.WriteString(fmt.Sprintf("%q", args.RegisteredClientsJSON))
+		b.WriteString(quoteMemQLString(args.RegisteredClientsJSON))
 	}
 	if args.AccessRequestNotifyEmails != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("accessRequestNotifyEmails: ")
-		b.WriteString(fmt.Sprintf("%q", args.AccessRequestNotifyEmails))
+		b.WriteString(quoteMemQLString(args.AccessRequestNotifyEmails))
 	}
 	if args.BootstrapEmail != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrapEmail: ")
-		b.WriteString(fmt.Sprintf("%q", args.BootstrapEmail))
+		b.WriteString(quoteMemQLString(args.BootstrapEmail))
 	}
 	if args.BootstrapFirstName != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrapFirstName: ")
-		b.WriteString(fmt.Sprintf("%q", args.BootstrapFirstName))
+		b.WriteString(quoteMemQLString(args.BootstrapFirstName))
 	}
 	if args.BootstrapLastName != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrapLastName: ")
-		b.WriteString(fmt.Sprintf("%q", args.BootstrapLastName))
+		b.WriteString(quoteMemQLString(args.BootstrapLastName))
 	}
 	if args.BootstrapPhone != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrapPhone: ")
-		b.WriteString(fmt.Sprintf("%q", args.BootstrapPhone))
+		b.WriteString(quoteMemQLString(args.BootstrapPhone))
 	}
 	if args.BootstrapPrimaryRole != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrapPrimaryRole: ")
-		b.WriteString(fmt.Sprintf("%q", args.BootstrapPrimaryRole))
+		b.WriteString(quoteMemQLString(args.BootstrapPrimaryRole))
 	}
 	if args.BootstrapGender != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrapGender: ")
-		b.WriteString(fmt.Sprintf("%q", args.BootstrapGender))
+		b.WriteString(quoteMemQLString(args.BootstrapGender))
 	}
 	if args.BootstrapBirthdate != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrapBirthdate: ")
-		b.WriteString(fmt.Sprintf("%q", args.BootstrapBirthdate))
+		b.WriteString(quoteMemQLString(args.BootstrapBirthdate))
 	}
 	if args.BootstrappedAt != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrappedAt: ")
-		b.WriteString(fmt.Sprintf("%q", args.BootstrappedAt))
+		b.WriteString(quoteMemQLString(args.BootstrappedAt))
 	}
 	if args.AccessTokenTTLSeconds != 0 {
 		if b.Len() > 31 {
@@ -2870,7 +2870,7 @@ func CreateClusterSettingsBuild(args CreateClusterSettingsArgs) string {
 			b.WriteString(", ")
 		}
 		b.WriteString("refreshCookieSameSite: ")
-		b.WriteString(fmt.Sprintf("%q", args.RefreshCookieSameSite))
+		b.WriteString(quoteMemQLString(args.RefreshCookieSameSite))
 	}
 	if args.AuthoredAutomationsEnabledSet {
 		if b.Len() > 31 {
@@ -2902,18 +2902,18 @@ func CreateDatabaseBuild(args CreateDatabaseArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation createDatabase(")
 	b.WriteString("host: ")
-	b.WriteString(fmt.Sprintf("%q", args.Host))
+	b.WriteString(quoteMemQLString(args.Host))
 	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("dbName: ")
-	b.WriteString(fmt.Sprintf("%q", args.DbName))
+	b.WriteString(quoteMemQLString(args.DbName))
 	if args.SslMode != "" {
 		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sslMode: ")
-		b.WriteString(fmt.Sprintf("%q", args.SslMode))
+		b.WriteString(quoteMemQLString(args.SslMode))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -2948,33 +2948,33 @@ func CreateDelegationBuild(args CreateDelegationArgs) string {
 	b.WriteString("mutation createDelegation(")
 	if args.DelegationId != "" {
 		b.WriteString("delegationId: ")
-		b.WriteString(fmt.Sprintf("%q", args.DelegationId))
+		b.WriteString(quoteMemQLString(args.DelegationId))
 	}
 	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("identityId: ")
-	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
+	b.WriteString(quoteMemQLString(args.IdentityId))
 	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("identitySubject: ")
-	b.WriteString(fmt.Sprintf("%q", args.IdentitySubject))
+	b.WriteString(quoteMemQLString(args.IdentitySubject))
 	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("identityType: ")
-	b.WriteString(fmt.Sprintf("%q", args.IdentityType))
+	b.WriteString(quoteMemQLString(args.IdentityType))
 	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("agentId: ")
-	b.WriteString(fmt.Sprintf("%q", args.AgentId))
+	b.WriteString(quoteMemQLString(args.AgentId))
 	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("roleCeiling: ")
-	b.WriteString(fmt.Sprintf("%q", args.RoleCeiling))
+	b.WriteString(quoteMemQLString(args.RoleCeiling))
 	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
@@ -2984,20 +2984,20 @@ func CreateDelegationBuild(args CreateDelegationArgs) string {
 		b.WriteString(", ")
 	}
 	b.WriteString("createdBySubject: ")
-	b.WriteString(fmt.Sprintf("%q", args.CreatedBySubject))
+	b.WriteString(quoteMemQLString(args.CreatedBySubject))
 	if args.ExpiresAt != "" {
 		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("expiresAt: ")
-		b.WriteString(fmt.Sprintf("%q", args.ExpiresAt))
+		b.WriteString(quoteMemQLString(args.ExpiresAt))
 	}
 	if args.Note != "" {
 		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("note: ")
-		b.WriteString(fmt.Sprintf("%q", args.Note))
+		b.WriteString(quoteMemQLString(args.Note))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -3033,83 +3033,83 @@ func CreateDeploymentBuild(args CreateDeploymentArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation createDeployment(")
 	b.WriteString("deploymentId: ")
-	b.WriteString(fmt.Sprintf("%q", args.DeploymentId))
+	b.WriteString(quoteMemQLString(args.DeploymentId))
 	if args.Status != "" {
 		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("status: ")
-		b.WriteString(fmt.Sprintf("%q", args.Status))
+		b.WriteString(quoteMemQLString(args.Status))
 	}
 	if args.Version != "" {
 		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("version: ")
-		b.WriteString(fmt.Sprintf("%q", args.Version))
+		b.WriteString(quoteMemQLString(args.Version))
 	}
 	if args.ImageDigest != "" {
 		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("imageDigest: ")
-		b.WriteString(fmt.Sprintf("%q", args.ImageDigest))
+		b.WriteString(quoteMemQLString(args.ImageDigest))
 	}
 	if args.Provider != "" {
 		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("provider: ")
-		b.WriteString(fmt.Sprintf("%q", args.Provider))
+		b.WriteString(quoteMemQLString(args.Provider))
 	}
 	if args.Environment != "" {
 		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("environment: ")
-		b.WriteString(fmt.Sprintf("%q", args.Environment))
+		b.WriteString(quoteMemQLString(args.Environment))
 	}
 	if args.Region != "" {
 		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("region: ")
-		b.WriteString(fmt.Sprintf("%q", args.Region))
+		b.WriteString(quoteMemQLString(args.Region))
 	}
 	if args.ClusterId != "" {
 		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("clusterId: ")
-		b.WriteString(fmt.Sprintf("%q", args.ClusterId))
+		b.WriteString(quoteMemQLString(args.ClusterId))
 	}
 	if args.TriggeredBy != "" {
 		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("triggeredBy: ")
-		b.WriteString(fmt.Sprintf("%q", args.TriggeredBy))
+		b.WriteString(quoteMemQLString(args.TriggeredBy))
 	}
 	if args.Notes != "" {
 		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("notes: ")
-		b.WriteString(fmt.Sprintf("%q", args.Notes))
+		b.WriteString(quoteMemQLString(args.Notes))
 	}
 	if args.Changelog != "" {
 		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("changelog: ")
-		b.WriteString(fmt.Sprintf("%q", args.Changelog))
+		b.WriteString(quoteMemQLString(args.Changelog))
 	}
 	if args.PreviousDeploymentId != "" {
 		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("previousDeploymentId: ")
-		b.WriteString(fmt.Sprintf("%q", args.PreviousDeploymentId))
+		b.WriteString(quoteMemQLString(args.PreviousDeploymentId))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -3136,18 +3136,18 @@ func CreateDeploymentNodeSpecBuild(args CreateDeploymentNodeSpecArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation createDeploymentNodeSpec(")
 	b.WriteString("deploymentId: ")
-	b.WriteString(fmt.Sprintf("%q", args.DeploymentId))
+	b.WriteString(quoteMemQLString(args.DeploymentId))
 	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("nodeType: ")
-	b.WriteString(fmt.Sprintf("%q", args.NodeType))
+	b.WriteString(quoteMemQLString(args.NodeType))
 	if args.Version != "" {
 		if b.Len() > 34 {
 			b.WriteString(", ")
 		}
 		b.WriteString("version: ")
-		b.WriteString(fmt.Sprintf("%q", args.Version))
+		b.WriteString(quoteMemQLString(args.Version))
 	}
 	if args.Replicas != 0 {
 		if b.Len() > 34 {
@@ -3161,7 +3161,7 @@ func CreateDeploymentNodeSpecBuild(args CreateDeploymentNodeSpecArgs) string {
 			b.WriteString(", ")
 		}
 		b.WriteString("imageDigest: ")
-		b.WriteString(fmt.Sprintf("%q", args.ImageDigest))
+		b.WriteString(quoteMemQLString(args.ImageDigest))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -3193,28 +3193,28 @@ func CreateDocumentChunkBuild(args CreateDocumentChunkArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation createDocumentChunk(")
 	b.WriteString("chunkId: ")
-	b.WriteString(fmt.Sprintf("%q", args.ChunkId))
+	b.WriteString(quoteMemQLString(args.ChunkId))
 	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("domainId: ")
-	b.WriteString(fmt.Sprintf("%q", args.DomainId))
+	b.WriteString(quoteMemQLString(args.DomainId))
 	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("text: ")
-	b.WriteString(fmt.Sprintf("%q", args.Text))
+	b.WriteString(quoteMemQLString(args.Text))
 	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("source: ")
-	b.WriteString(fmt.Sprintf("%q", args.Source))
+	b.WriteString(quoteMemQLString(args.Source))
 	if args.SourceRef != "" {
 		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourceRef: ")
-		b.WriteString(fmt.Sprintf("%q", args.SourceRef))
+		b.WriteString(quoteMemQLString(args.SourceRef))
 	}
 	if args.Seq != 0 {
 		if b.Len() > 29 {
@@ -3235,21 +3235,21 @@ func CreateDocumentChunkBuild(args CreateDocumentChunkArgs) string {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourceUtteranceId: ")
-		b.WriteString(fmt.Sprintf("%q", args.SourceUtteranceId))
+		b.WriteString(quoteMemQLString(args.SourceUtteranceId))
 	}
 	if args.SourceAgentId != "" {
 		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourceAgentId: ")
-		b.WriteString(fmt.Sprintf("%q", args.SourceAgentId))
+		b.WriteString(quoteMemQLString(args.SourceAgentId))
 	}
 	if args.SourceTopic != "" {
 		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourceTopic: ")
-		b.WriteString(fmt.Sprintf("%q", args.SourceTopic))
+		b.WriteString(quoteMemQLString(args.SourceTopic))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -3286,86 +3286,86 @@ func CreateGeneratedOutputBuild(args CreateGeneratedOutputArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation createGeneratedOutput(")
 	b.WriteString("outputId: ")
-	b.WriteString(fmt.Sprintf("%q", args.OutputId))
+	b.WriteString(quoteMemQLString(args.OutputId))
 	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("title: ")
-	b.WriteString(fmt.Sprintf("%q", args.Title))
+	b.WriteString(quoteMemQLString(args.Title))
 	if args.Summary != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("summary: ")
-		b.WriteString(fmt.Sprintf("%q", args.Summary))
+		b.WriteString(quoteMemQLString(args.Summary))
 	}
 	if args.Body != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("body: ")
-		b.WriteString(fmt.Sprintf("%q", args.Body))
+		b.WriteString(quoteMemQLString(args.Body))
 	}
 	if args.AttachmentId != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("attachmentId: ")
-		b.WriteString(fmt.Sprintf("%q", args.AttachmentId))
+		b.WriteString(quoteMemQLString(args.AttachmentId))
 	}
 	if args.Format != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("format: ")
-		b.WriteString(fmt.Sprintf("%q", args.Format))
+		b.WriteString(quoteMemQLString(args.Format))
 	}
 	if args.MimeType != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("mimeType: ")
-		b.WriteString(fmt.Sprintf("%q", args.MimeType))
+		b.WriteString(quoteMemQLString(args.MimeType))
 	}
 	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("source: ")
-	b.WriteString(fmt.Sprintf("%q", args.Source))
+	b.WriteString(quoteMemQLString(args.Source))
 	if args.PartitionId != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("partitionId: ")
-		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+		b.WriteString(quoteMemQLString(args.PartitionId))
 	}
 	if args.ProducedByPlanId != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("producedByPlanId: ")
-		b.WriteString(fmt.Sprintf("%q", args.ProducedByPlanId))
+		b.WriteString(quoteMemQLString(args.ProducedByPlanId))
 	}
 	if args.ProducedByAgentId != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("producedByAgentId: ")
-		b.WriteString(fmt.Sprintf("%q", args.ProducedByAgentId))
+		b.WriteString(quoteMemQLString(args.ProducedByAgentId))
 	}
 	if args.ProducedByWorkerId != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("producedByWorkerId: ")
-		b.WriteString(fmt.Sprintf("%q", args.ProducedByWorkerId))
+		b.WriteString(quoteMemQLString(args.ProducedByWorkerId))
 	}
 	if args.ProducedByWorkerName != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("producedByWorkerName: ")
-		b.WriteString(fmt.Sprintf("%q", args.ProducedByWorkerName))
+		b.WriteString(quoteMemQLString(args.ProducedByWorkerName))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -3392,27 +3392,27 @@ func CreateGreetingUtteranceBuild(args CreateGreetingUtteranceArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation createGreetingUtterance(")
 	b.WriteString("partitionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+	b.WriteString(quoteMemQLString(args.PartitionId))
 	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("participantId: ")
-	b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
+	b.WriteString(quoteMemQLString(args.ParticipantId))
 	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("agentId: ")
-	b.WriteString(fmt.Sprintf("%q", args.AgentId))
+	b.WriteString(quoteMemQLString(args.AgentId))
 	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("text: ")
-	b.WriteString(fmt.Sprintf("%q", args.Text))
+	b.WriteString(quoteMemQLString(args.Text))
 	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("greetingKind: ")
-	b.WriteString(fmt.Sprintf("%q", args.GreetingKind))
+	b.WriteString(quoteMemQLString(args.GreetingKind))
 	b.WriteString(")")
 	return b.String()
 }
@@ -3437,13 +3437,13 @@ func CreateHarnessPlanBuild(args CreateHarnessPlanArgs) string {
 	b.WriteString("mutation createHarnessPlan(")
 	if args.PlanId != "" {
 		b.WriteString("planId: ")
-		b.WriteString(fmt.Sprintf("%q", args.PlanId))
+		b.WriteString(quoteMemQLString(args.PlanId))
 	}
 	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("goal: ")
-	b.WriteString(fmt.Sprintf("%q", args.Goal))
+	b.WriteString(quoteMemQLString(args.Goal))
 	if args.Input != nil {
 		if b.Len() > 27 {
 			b.WriteString(", ")
@@ -3479,18 +3479,18 @@ func CreateHarnessSemanticMemoryBuild(args CreateHarnessSemanticMemoryArgs) stri
 	b.WriteString("mutation createHarnessSemanticMemory(")
 	if args.MemoryId != "" {
 		b.WriteString("memoryId: ")
-		b.WriteString(fmt.Sprintf("%q", args.MemoryId))
+		b.WriteString(quoteMemQLString(args.MemoryId))
 	}
 	if b.Len() > 37 {
 		b.WriteString(", ")
 	}
 	b.WriteString("kind: ")
-	b.WriteString(fmt.Sprintf("%q", args.Kind))
+	b.WriteString(quoteMemQLString(args.Kind))
 	if b.Len() > 37 {
 		b.WriteString(", ")
 	}
 	b.WriteString("content: ")
-	b.WriteString(fmt.Sprintf("%q", args.Content))
+	b.WriteString(quoteMemQLString(args.Content))
 	if b.Len() > 37 {
 		b.WriteString(", ")
 	}
@@ -3500,12 +3500,12 @@ func CreateHarnessSemanticMemoryBuild(args CreateHarnessSemanticMemoryArgs) stri
 		b.WriteString(", ")
 	}
 	b.WriteString("confidence: ")
-	b.WriteString(fmt.Sprintf("%q", args.Confidence))
+	b.WriteString(renderMemQLValue(args.Confidence))
 	if b.Len() > 37 {
 		b.WriteString(", ")
 	}
 	b.WriteString("lastReinforced: ")
-	b.WriteString(fmt.Sprintf("%q", args.LastReinforced))
+	b.WriteString(quoteMemQLString(args.LastReinforced))
 	b.WriteString(")")
 	return b.String()
 }
@@ -3534,17 +3534,17 @@ func CreateIdentityBuild(args CreateIdentityArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation createIdentity(")
 	b.WriteString("identityId: ")
-	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
+	b.WriteString(quoteMemQLString(args.IdentityId))
 	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("userId: ")
-	b.WriteString(fmt.Sprintf("%q", args.UserId))
+	b.WriteString(quoteMemQLString(args.UserId))
 	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("identityType: ")
-	b.WriteString(fmt.Sprintf("%q", args.IdentityType))
+	b.WriteString(quoteMemQLString(args.IdentityType))
 	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
@@ -3555,7 +3555,7 @@ func CreateIdentityBuild(args CreateIdentityArgs) string {
 			b.WriteString(", ")
 		}
 		b.WriteString("label: ")
-		b.WriteString(fmt.Sprintf("%q", args.Label))
+		b.WriteString(quoteMemQLString(args.Label))
 	}
 	if args.UsableByAgentsSet {
 		if b.Len() > 24 {
@@ -3588,25 +3588,25 @@ func CreateIdentityProviderBuild(args CreateIdentityProviderArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation createIdentityProvider(")
 	b.WriteString("name: ")
-	b.WriteString(fmt.Sprintf("%q", args.Name))
+	b.WriteString(quoteMemQLString(args.Name))
 	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("issuerUrl: ")
-	b.WriteString(fmt.Sprintf("%q", args.IssuerUrl))
+	b.WriteString(quoteMemQLString(args.IssuerUrl))
 	if args.ClientIdPrefix != "" {
 		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("clientIdPrefix: ")
-		b.WriteString(fmt.Sprintf("%q", args.ClientIdPrefix))
+		b.WriteString(quoteMemQLString(args.ClientIdPrefix))
 	}
 	if args.RedirectUrl != "" {
 		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("redirectUrl: ")
-		b.WriteString(fmt.Sprintf("%q", args.RedirectUrl))
+		b.WriteString(quoteMemQLString(args.RedirectUrl))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -3636,49 +3636,49 @@ func CreateMagicLinkRequestBuild(args CreateMagicLinkRequestArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation createMagicLinkRequest(")
 	b.WriteString("requestId: ")
-	b.WriteString(fmt.Sprintf("%q", args.RequestId))
+	b.WriteString(quoteMemQLString(args.RequestId))
 	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("email: ")
-	b.WriteString(fmt.Sprintf("%q", args.Email))
+	b.WriteString(quoteMemQLString(args.Email))
 	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("tokenHash: ")
-	b.WriteString(fmt.Sprintf("%q", args.TokenHash))
+	b.WriteString(quoteMemQLString(args.TokenHash))
 	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("expiresAt: ")
-	b.WriteString(fmt.Sprintf("%q", args.ExpiresAt))
+	b.WriteString(quoteMemQLString(args.ExpiresAt))
 	if args.SourceIP != "" {
 		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourceIP: ")
-		b.WriteString(fmt.Sprintf("%q", args.SourceIP))
+		b.WriteString(quoteMemQLString(args.SourceIP))
 	}
 	if args.UserAgent != "" {
 		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("userAgent: ")
-		b.WriteString(fmt.Sprintf("%q", args.UserAgent))
+		b.WriteString(quoteMemQLString(args.UserAgent))
 	}
 	if args.OauthCtxJSON != "" {
 		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("oauthCtxJSON: ")
-		b.WriteString(fmt.Sprintf("%q", args.OauthCtxJSON))
+		b.WriteString(quoteMemQLString(args.OauthCtxJSON))
 	}
 	if args.InvitationId != "" {
 		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("invitationId: ")
-		b.WriteString(fmt.Sprintf("%q", args.InvitationId))
+		b.WriteString(quoteMemQLString(args.InvitationId))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -3709,51 +3709,51 @@ func CreateMemoryBuild(args CreateMemoryArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation createMemory(")
 	b.WriteString("memoryId: ")
-	b.WriteString(fmt.Sprintf("%q", args.MemoryId))
+	b.WriteString(quoteMemQLString(args.MemoryId))
 	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("title: ")
-	b.WriteString(fmt.Sprintf("%q", args.Title))
+	b.WriteString(quoteMemQLString(args.Title))
 	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("content: ")
-	b.WriteString(fmt.Sprintf("%q", args.Content))
+	b.WriteString(quoteMemQLString(args.Content))
 	if args.Summary != "" {
 		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("summary: ")
-		b.WriteString(fmt.Sprintf("%q", args.Summary))
+		b.WriteString(quoteMemQLString(args.Summary))
 	}
 	if args.Kind != "" {
 		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("kind: ")
-		b.WriteString(fmt.Sprintf("%q", args.Kind))
+		b.WriteString(quoteMemQLString(args.Kind))
 	}
 	if args.AgentId != "" {
 		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("agentId: ")
-		b.WriteString(fmt.Sprintf("%q", args.AgentId))
+		b.WriteString(quoteMemQLString(args.AgentId))
 	}
 	if args.PartitionId != "" {
 		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("partitionId: ")
-		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+		b.WriteString(quoteMemQLString(args.PartitionId))
 	}
 	if args.SourceUtteranceId != "" {
 		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourceUtteranceId: ")
-		b.WriteString(fmt.Sprintf("%q", args.SourceUtteranceId))
+		b.WriteString(quoteMemQLString(args.SourceUtteranceId))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -3787,33 +3787,33 @@ func CreateNodeBuild(args CreateNodeArgs) string {
 	b.WriteString("mutation createNode(")
 	if args.Id != "" {
 		b.WriteString("id: ")
-		b.WriteString(fmt.Sprintf("%q", args.Id))
+		b.WriteString(quoteMemQLString(args.Id))
 	}
 	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("nodeType: ")
-	b.WriteString(fmt.Sprintf("%q", args.NodeType))
+	b.WriteString(quoteMemQLString(args.NodeType))
 	if args.Address != "" {
 		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("address: ")
-		b.WriteString(fmt.Sprintf("%q", args.Address))
+		b.WriteString(quoteMemQLString(args.Address))
 	}
 	if args.Health != "" {
 		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("health: ")
-		b.WriteString(fmt.Sprintf("%q", args.Health))
+		b.WriteString(quoteMemQLString(args.Health))
 	}
 	if args.LastSeen != "" {
 		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("lastSeen: ")
-		b.WriteString(fmt.Sprintf("%q", args.LastSeen))
+		b.WriteString(quoteMemQLString(args.LastSeen))
 	}
 	if args.Capabilities != nil {
 		if b.Len() > 20 {
@@ -3834,28 +3834,28 @@ func CreateNodeBuild(args CreateNodeArgs) string {
 			b.WriteString(", ")
 		}
 		b.WriteString("deploymentId: ")
-		b.WriteString(fmt.Sprintf("%q", args.DeploymentId))
+		b.WriteString(quoteMemQLString(args.DeploymentId))
 	}
 	if args.Provider != "" {
 		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("provider: ")
-		b.WriteString(fmt.Sprintf("%q", args.Provider))
+		b.WriteString(quoteMemQLString(args.Provider))
 	}
 	if args.Environment != "" {
 		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("environment: ")
-		b.WriteString(fmt.Sprintf("%q", args.Environment))
+		b.WriteString(quoteMemQLString(args.Environment))
 	}
 	if args.Region != "" {
 		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("region: ")
-		b.WriteString(fmt.Sprintf("%q", args.Region))
+		b.WriteString(quoteMemQLString(args.Region))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -3886,52 +3886,52 @@ func CreateNodeTokenIdentityBuild(args CreateNodeTokenIdentityArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation createNodeTokenIdentity(")
 	b.WriteString("identityId: ")
-	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
+	b.WriteString(quoteMemQLString(args.IdentityId))
 	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("userId: ")
-	b.WriteString(fmt.Sprintf("%q", args.UserId))
+	b.WriteString(quoteMemQLString(args.UserId))
 	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("nodeId: ")
-	b.WriteString(fmt.Sprintf("%q", args.NodeId))
+	b.WriteString(quoteMemQLString(args.NodeId))
 	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("nodeType: ")
-	b.WriteString(fmt.Sprintf("%q", args.NodeType))
+	b.WriteString(quoteMemQLString(args.NodeType))
 	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("keyHash: ")
-	b.WriteString(fmt.Sprintf("%q", args.KeyHash))
+	b.WriteString(quoteMemQLString(args.KeyHash))
 	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("mintedBy: ")
-	b.WriteString(fmt.Sprintf("%q", args.MintedBy))
+	b.WriteString(quoteMemQLString(args.MintedBy))
 	if args.ExpiresAt != "" {
 		if b.Len() > 33 {
 			b.WriteString(", ")
 		}
 		b.WriteString("expiresAt: ")
-		b.WriteString(fmt.Sprintf("%q", args.ExpiresAt))
+		b.WriteString(quoteMemQLString(args.ExpiresAt))
 	}
 	if args.BootstrappedAt != "" {
 		if b.Len() > 33 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrappedAt: ")
-		b.WriteString(fmt.Sprintf("%q", args.BootstrappedAt))
+		b.WriteString(quoteMemQLString(args.BootstrappedAt))
 	}
 	if args.BootstrappedFrom != "" {
 		if b.Len() > 33 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrappedFrom: ")
-		b.WriteString(fmt.Sprintf("%q", args.BootstrappedFrom))
+		b.WriteString(quoteMemQLString(args.BootstrappedFrom))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -3957,19 +3957,19 @@ func CreateNoteBuild(args CreateNoteArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation createNote(")
 	b.WriteString("noteId: ")
-	b.WriteString(fmt.Sprintf("%q", args.NoteId))
+	b.WriteString(quoteMemQLString(args.NoteId))
 	if args.Title != "" {
 		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("title: ")
-		b.WriteString(fmt.Sprintf("%q", args.Title))
+		b.WriteString(quoteMemQLString(args.Title))
 	}
 	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("body: ")
-	b.WriteString(fmt.Sprintf("%q", args.Body))
+	b.WriteString(quoteMemQLString(args.Body))
 	if args.Tags != nil {
 		if b.Len() > 20 {
 			b.WriteString(", ")
@@ -4004,45 +4004,45 @@ func CreateOAuthClientBuild(args CreateOAuthClientArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation createOAuthClient(")
 	b.WriteString("clientId: ")
-	b.WriteString(fmt.Sprintf("%q", args.ClientId))
+	b.WriteString(quoteMemQLString(args.ClientId))
 	if args.ClientName != "" {
 		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("clientName: ")
-		b.WriteString(fmt.Sprintf("%q", args.ClientName))
+		b.WriteString(quoteMemQLString(args.ClientName))
 	}
 	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("redirectURIsJSON: ")
-	b.WriteString(fmt.Sprintf("%q", args.RedirectURIsJSON))
+	b.WriteString(quoteMemQLString(args.RedirectURIsJSON))
 	if args.GrantTypes != "" {
 		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("grantTypes: ")
-		b.WriteString(fmt.Sprintf("%q", args.GrantTypes))
+		b.WriteString(quoteMemQLString(args.GrantTypes))
 	}
 	if args.ResponseTypes != "" {
 		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("responseTypes: ")
-		b.WriteString(fmt.Sprintf("%q", args.ResponseTypes))
+		b.WriteString(quoteMemQLString(args.ResponseTypes))
 	}
 	if args.TokenEndpointAuthMethod != "" {
 		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("tokenEndpointAuthMethod: ")
-		b.WriteString(fmt.Sprintf("%q", args.TokenEndpointAuthMethod))
+		b.WriteString(quoteMemQLString(args.TokenEndpointAuthMethod))
 	}
 	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("registeredAt: ")
-	b.WriteString(fmt.Sprintf("%q", args.RegisteredAt))
+	b.WriteString(quoteMemQLString(args.RegisteredAt))
 	b.WriteString(")")
 	return b.String()
 }
@@ -4069,22 +4069,22 @@ func CreatePATIdentityBuild(args CreatePATIdentityArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation createPATIdentity(")
 	b.WriteString("identityId: ")
-	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
+	b.WriteString(quoteMemQLString(args.IdentityId))
 	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("userId: ")
-	b.WriteString(fmt.Sprintf("%q", args.UserId))
+	b.WriteString(quoteMemQLString(args.UserId))
 	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("label: ")
-	b.WriteString(fmt.Sprintf("%q", args.Label))
+	b.WriteString(quoteMemQLString(args.Label))
 	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("keyHash: ")
-	b.WriteString(fmt.Sprintf("%q", args.KeyHash))
+	b.WriteString(quoteMemQLString(args.KeyHash))
 	if args.UsableByAgentsSet {
 		if b.Len() > 27 {
 			b.WriteString(", ")
@@ -4128,55 +4128,55 @@ func CreatePlanBuild(args CreatePlanArgs) string {
 	b.WriteString("mutation createPlan(")
 	if args.PlanId != "" {
 		b.WriteString("planId: ")
-		b.WriteString(fmt.Sprintf("%q", args.PlanId))
+		b.WriteString(quoteMemQLString(args.PlanId))
 	}
 	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("partitionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+	b.WriteString(quoteMemQLString(args.PartitionId))
 	if args.ParentPlanId != "" {
 		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("parentPlanId: ")
-		b.WriteString(fmt.Sprintf("%q", args.ParentPlanId))
+		b.WriteString(quoteMemQLString(args.ParentPlanId))
 	}
 	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("kind: ")
-	b.WriteString(fmt.Sprintf("%q", args.Kind))
+	b.WriteString(quoteMemQLString(args.Kind))
 	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("goal: ")
-	b.WriteString(fmt.Sprintf("%q", args.Goal))
+	b.WriteString(quoteMemQLString(args.Goal))
 	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("requestedBy: ")
-	b.WriteString(fmt.Sprintf("%q", args.RequestedBy))
+	b.WriteString(quoteMemQLString(args.RequestedBy))
 	if args.TriggerSource != "" {
 		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("triggerSource: ")
-		b.WriteString(fmt.Sprintf("%q", args.TriggerSource))
+		b.WriteString(quoteMemQLString(args.TriggerSource))
 	}
 	if args.AuthorizedBy != "" {
 		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("authorizedBy: ")
-		b.WriteString(fmt.Sprintf("%q", args.AuthorizedBy))
+		b.WriteString(quoteMemQLString(args.AuthorizedBy))
 	}
 	if args.OwnerAgentId != "" {
 		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("ownerAgentId: ")
-		b.WriteString(fmt.Sprintf("%q", args.OwnerAgentId))
+		b.WriteString(quoteMemQLString(args.OwnerAgentId))
 	}
 	if b.Len() > 20 {
 		b.WriteString(", ")
@@ -4209,7 +4209,7 @@ func CreatePlanBuild(args CreatePlanArgs) string {
 			b.WriteString(", ")
 		}
 		b.WriteString("chatAnchorMessageId: ")
-		b.WriteString(fmt.Sprintf("%q", args.ChatAnchorMessageId))
+		b.WriteString(quoteMemQLString(args.ChatAnchorMessageId))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -4238,38 +4238,38 @@ func CreateProjectBuild(args CreateProjectArgs) string {
 	b.WriteString("mutation createProject(")
 	if args.ProjectId != "" {
 		b.WriteString("projectId: ")
-		b.WriteString(fmt.Sprintf("%q", args.ProjectId))
+		b.WriteString(quoteMemQLString(args.ProjectId))
 	}
 	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("slug: ")
-	b.WriteString(fmt.Sprintf("%q", args.Slug))
+	b.WriteString(quoteMemQLString(args.Slug))
 	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
-	b.WriteString(fmt.Sprintf("%q", args.Name))
+	b.WriteString(quoteMemQLString(args.Name))
 	if args.TargetApp != "" {
 		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("targetApp: ")
-		b.WriteString(fmt.Sprintf("%q", args.TargetApp))
+		b.WriteString(quoteMemQLString(args.TargetApp))
 	}
 	if args.Repo != "" {
 		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("repo: ")
-		b.WriteString(fmt.Sprintf("%q", args.Repo))
+		b.WriteString(quoteMemQLString(args.Repo))
 	}
 	if args.Description != "" {
 		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("description: ")
-		b.WriteString(fmt.Sprintf("%q", args.Description))
+		b.WriteString(quoteMemQLString(args.Description))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -4303,22 +4303,22 @@ func CreateRecordBuild(args CreateRecordArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation createRecord(")
 	b.WriteString("recordId: ")
-	b.WriteString(fmt.Sprintf("%q", args.RecordId))
+	b.WriteString(quoteMemQLString(args.RecordId))
 	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("partitionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+	b.WriteString(quoteMemQLString(args.PartitionId))
 	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("recordType: ")
-	b.WriteString(fmt.Sprintf("%q", args.RecordType))
+	b.WriteString(quoteMemQLString(args.RecordType))
 	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("label: ")
-	b.WriteString(fmt.Sprintf("%q", args.Label))
+	b.WriteString(quoteMemQLString(args.Label))
 	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
@@ -4328,32 +4328,32 @@ func CreateRecordBuild(args CreateRecordArgs) string {
 		b.WriteString(", ")
 	}
 	b.WriteString("importSource: ")
-	b.WriteString(fmt.Sprintf("%q", args.ImportSource))
+	b.WriteString(quoteMemQLString(args.ImportSource))
 	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("importedBy: ")
-	b.WriteString(fmt.Sprintf("%q", args.ImportedBy))
+	b.WriteString(quoteMemQLString(args.ImportedBy))
 	if args.NaturalKeyField != "" {
 		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("naturalKeyField: ")
-		b.WriteString(fmt.Sprintf("%q", args.NaturalKeyField))
+		b.WriteString(quoteMemQLString(args.NaturalKeyField))
 	}
 	if args.NaturalKeyValue != "" {
 		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("naturalKeyValue: ")
-		b.WriteString(fmt.Sprintf("%q", args.NaturalKeyValue))
+		b.WriteString(quoteMemQLString(args.NaturalKeyValue))
 	}
 	if args.SourceAttachmentId != "" {
 		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourceAttachmentId: ")
-		b.WriteString(fmt.Sprintf("%q", args.SourceAttachmentId))
+		b.WriteString(quoteMemQLString(args.SourceAttachmentId))
 	}
 	if args.Confidence != 0 {
 		if b.Len() > 22 {
@@ -4367,7 +4367,7 @@ func CreateRecordBuild(args CreateRecordArgs) string {
 			b.WriteString(", ")
 		}
 		b.WriteString("createdAt: ")
-		b.WriteString(fmt.Sprintf("%q", args.CreatedAt))
+		b.WriteString(quoteMemQLString(args.CreatedAt))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -4400,22 +4400,22 @@ func CreateRecordBatchBuild(args CreateRecordBatchArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation createRecordBatch(")
 	b.WriteString("recordId: ")
-	b.WriteString(fmt.Sprintf("%q", args.RecordId))
+	b.WriteString(quoteMemQLString(args.RecordId))
 	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("partitionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+	b.WriteString(quoteMemQLString(args.PartitionId))
 	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("recordType: ")
-	b.WriteString(fmt.Sprintf("%q", args.RecordType))
+	b.WriteString(quoteMemQLString(args.RecordType))
 	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("label: ")
-	b.WriteString(fmt.Sprintf("%q", args.Label))
+	b.WriteString(quoteMemQLString(args.Label))
 	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
@@ -4425,32 +4425,32 @@ func CreateRecordBatchBuild(args CreateRecordBatchArgs) string {
 		b.WriteString(", ")
 	}
 	b.WriteString("importSource: ")
-	b.WriteString(fmt.Sprintf("%q", args.ImportSource))
+	b.WriteString(quoteMemQLString(args.ImportSource))
 	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("importedBy: ")
-	b.WriteString(fmt.Sprintf("%q", args.ImportedBy))
+	b.WriteString(quoteMemQLString(args.ImportedBy))
 	if args.SourceAttachmentId != "" {
 		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourceAttachmentId: ")
-		b.WriteString(fmt.Sprintf("%q", args.SourceAttachmentId))
+		b.WriteString(quoteMemQLString(args.SourceAttachmentId))
 	}
 	if args.NaturalKeyField != "" {
 		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("naturalKeyField: ")
-		b.WriteString(fmt.Sprintf("%q", args.NaturalKeyField))
+		b.WriteString(quoteMemQLString(args.NaturalKeyField))
 	}
 	if args.NaturalKeyValue != "" {
 		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("naturalKeyValue: ")
-		b.WriteString(fmt.Sprintf("%q", args.NaturalKeyValue))
+		b.WriteString(quoteMemQLString(args.NaturalKeyValue))
 	}
 	if args.Confidence != 0 {
 		if b.Len() > 27 {
@@ -4487,30 +4487,30 @@ func CreateRequestBuild(args CreateRequestArgs) string {
 	b.WriteString("mutation createRequest(")
 	if args.RequestId != "" {
 		b.WriteString("requestId: ")
-		b.WriteString(fmt.Sprintf("%q", args.RequestId))
+		b.WriteString(quoteMemQLString(args.RequestId))
 	}
 	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("projectId: ")
-	b.WriteString(fmt.Sprintf("%q", args.ProjectId))
+	b.WriteString(quoteMemQLString(args.ProjectId))
 	if args.RequestType != "" {
 		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("requestType: ")
-		b.WriteString(fmt.Sprintf("%q", args.RequestType))
+		b.WriteString(quoteMemQLString(args.RequestType))
 	}
 	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("title: ")
-	b.WriteString(fmt.Sprintf("%q", args.Title))
+	b.WriteString(quoteMemQLString(args.Title))
 	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("body: ")
-	b.WriteString(fmt.Sprintf("%q", args.Body))
+	b.WriteString(quoteMemQLString(args.Body))
 	if args.AttachmentIds != nil {
 		if b.Len() > 23 {
 			b.WriteString(", ")
@@ -4523,7 +4523,7 @@ func CreateRequestBuild(args CreateRequestArgs) string {
 			b.WriteString(", ")
 		}
 		b.WriteString("priority: ")
-		b.WriteString(fmt.Sprintf("%q", args.Priority))
+		b.WriteString(quoteMemQLString(args.Priority))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -4561,24 +4561,24 @@ func CreateResponsibilityBuild(args CreateResponsibilityArgs) string {
 	b.WriteString("mutation createResponsibility(")
 	if args.ResponsibilityId != "" {
 		b.WriteString("responsibilityId: ")
-		b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
+		b.WriteString(quoteMemQLString(args.ResponsibilityId))
 	}
 	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("statement: ")
-	b.WriteString(fmt.Sprintf("%q", args.Statement))
+	b.WriteString(quoteMemQLString(args.Statement))
 	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("trigger: ")
-	b.WriteString(fmt.Sprintf("%q", args.Trigger))
+	b.WriteString(quoteMemQLString(args.Trigger))
 	if args.Schedule != "" {
 		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("schedule: ")
-		b.WriteString(fmt.Sprintf("%q", args.Schedule))
+		b.WriteString(quoteMemQLString(args.Schedule))
 	}
 	if args.Condition != nil {
 		if b.Len() > 30 {
@@ -4592,42 +4592,42 @@ func CreateResponsibilityBuild(args CreateResponsibilityArgs) string {
 			b.WriteString(", ")
 		}
 		b.WriteString("targetKind: ")
-		b.WriteString(fmt.Sprintf("%q", args.TargetKind))
+		b.WriteString(quoteMemQLString(args.TargetKind))
 	}
 	if args.AssignedAgentId != "" {
 		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("assignedAgentId: ")
-		b.WriteString(fmt.Sprintf("%q", args.AssignedAgentId))
+		b.WriteString(quoteMemQLString(args.AssignedAgentId))
 	}
 	if args.AssignedRoleSlug != "" {
 		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("assignedRoleSlug: ")
-		b.WriteString(fmt.Sprintf("%q", args.AssignedRoleSlug))
+		b.WriteString(quoteMemQLString(args.AssignedRoleSlug))
 	}
 	if args.SuccessCriteria != "" {
 		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("successCriteria: ")
-		b.WriteString(fmt.Sprintf("%q", args.SuccessCriteria))
+		b.WriteString(quoteMemQLString(args.SuccessCriteria))
 	}
 	if args.NotifyHow != "" {
 		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("notifyHow: ")
-		b.WriteString(fmt.Sprintf("%q", args.NotifyHow))
+		b.WriteString(quoteMemQLString(args.NotifyHow))
 	}
 	if args.ScopePartitionId != "" {
 		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("scopePartitionId: ")
-		b.WriteString(fmt.Sprintf("%q", args.ScopePartitionId))
+		b.WriteString(quoteMemQLString(args.ScopePartitionId))
 	}
 	if args.EnabledSet {
 		if b.Len() > 30 {
@@ -4666,18 +4666,18 @@ func CreateRoleBuild(args CreateRoleArgs) string {
 	b.WriteString("mutation createRole(")
 	if args.RoleId != "" {
 		b.WriteString("roleId: ")
-		b.WriteString(fmt.Sprintf("%q", args.RoleId))
+		b.WriteString(quoteMemQLString(args.RoleId))
 	}
 	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("slug: ")
-	b.WriteString(fmt.Sprintf("%q", args.Slug))
+	b.WriteString(quoteMemQLString(args.Slug))
 	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
-	b.WriteString(fmt.Sprintf("%q", args.Name))
+	b.WriteString(quoteMemQLString(args.Name))
 	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
@@ -4688,7 +4688,7 @@ func CreateRoleBuild(args CreateRoleArgs) string {
 			b.WriteString(", ")
 		}
 		b.WriteString("description: ")
-		b.WriteString(fmt.Sprintf("%q", args.Description))
+		b.WriteString(quoteMemQLString(args.Description))
 	}
 	if args.PredefinedSet {
 		if b.Len() > 20 {
@@ -4731,39 +4731,39 @@ func CreateScopeElevationPlanBuild(args CreateScopeElevationPlanArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation createScopeElevationPlan(")
 	b.WriteString("planId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PlanId))
+	b.WriteString(quoteMemQLString(args.PlanId))
 	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("agentId: ")
-	b.WriteString(fmt.Sprintf("%q", args.AgentId))
+	b.WriteString(quoteMemQLString(args.AgentId))
 	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("ownerUserId: ")
-	b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
+	b.WriteString(quoteMemQLString(args.OwnerUserId))
 	if args.PartitionId != "" {
 		if b.Len() > 34 {
 			b.WriteString(", ")
 		}
 		b.WriteString("partitionId: ")
-		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+		b.WriteString(quoteMemQLString(args.PartitionId))
 	}
 	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("intent: ")
-	b.WriteString(fmt.Sprintf("%q", args.Intent))
+	b.WriteString(quoteMemQLString(args.Intent))
 	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("summary: ")
-	b.WriteString(fmt.Sprintf("%q", args.Summary))
+	b.WriteString(quoteMemQLString(args.Summary))
 	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("requestedScope: ")
-	b.WriteString(fmt.Sprintf("%q", args.RequestedScope))
+	b.WriteString(quoteMemQLString(args.RequestedScope))
 	b.WriteString(")")
 	return b.String()
 }
@@ -4793,17 +4793,17 @@ func CreateSemanticTaskBuild(args CreateSemanticTaskArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation createSemanticTask(")
 	b.WriteString("taskId: ")
-	b.WriteString(fmt.Sprintf("%q", args.TaskId))
+	b.WriteString(quoteMemQLString(args.TaskId))
 	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("planId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PlanId))
+	b.WriteString(quoteMemQLString(args.PlanId))
 	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("kind: ")
-	b.WriteString(fmt.Sprintf("%q", args.Kind))
+	b.WriteString(quoteMemQLString(args.Kind))
 	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
@@ -4814,7 +4814,7 @@ func CreateSemanticTaskBuild(args CreateSemanticTaskArgs) string {
 			b.WriteString(", ")
 		}
 		b.WriteString("logicalStepId: ")
-		b.WriteString(fmt.Sprintf("%q", args.LogicalStepId))
+		b.WriteString(quoteMemQLString(args.LogicalStepId))
 	}
 	if args.AttemptNumber != 0 {
 		if b.Len() > 28 {
@@ -4828,7 +4828,7 @@ func CreateSemanticTaskBuild(args CreateSemanticTaskArgs) string {
 			b.WriteString(", ")
 		}
 		b.WriteString("phase: ")
-		b.WriteString(fmt.Sprintf("%q", args.Phase))
+		b.WriteString(quoteMemQLString(args.Phase))
 	}
 	if args.DependsOn != nil {
 		if b.Len() > 28 {
@@ -4869,18 +4869,18 @@ func CreateSessionForParticipantBuild(args CreateSessionForParticipantArgs) stri
 	b.WriteString("mutation createSessionForParticipant(")
 	if args.SessionId != "" {
 		b.WriteString("sessionId: ")
-		b.WriteString(fmt.Sprintf("%q", args.SessionId))
+		b.WriteString(quoteMemQLString(args.SessionId))
 	}
 	if b.Len() > 37 {
 		b.WriteString(", ")
 	}
 	b.WriteString("partitionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+	b.WriteString(quoteMemQLString(args.PartitionId))
 	if b.Len() > 37 {
 		b.WriteString(", ")
 	}
 	b.WriteString("participantId: ")
-	b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
+	b.WriteString(quoteMemQLString(args.ParticipantId))
 	if args.HumanInput != nil {
 		if b.Len() > 37 {
 			b.WriteString(", ")
@@ -4937,31 +4937,31 @@ func CreateSkillBuild(args CreateSkillArgs) string {
 	b.WriteString("mutation createSkill(")
 	if args.SkillId != "" {
 		b.WriteString("skillId: ")
-		b.WriteString(fmt.Sprintf("%q", args.SkillId))
+		b.WriteString(quoteMemQLString(args.SkillId))
 	}
 	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("slug: ")
-	b.WriteString(fmt.Sprintf("%q", args.Slug))
+	b.WriteString(quoteMemQLString(args.Slug))
 	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
-	b.WriteString(fmt.Sprintf("%q", args.Name))
+	b.WriteString(quoteMemQLString(args.Name))
 	if args.Description != "" {
 		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("description: ")
-		b.WriteString(fmt.Sprintf("%q", args.Description))
+		b.WriteString(quoteMemQLString(args.Description))
 	}
 	if args.Category != "" {
 		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("category: ")
-		b.WriteString(fmt.Sprintf("%q", args.Category))
+		b.WriteString(quoteMemQLString(args.Category))
 	}
 	if args.Tags != nil {
 		if b.Len() > 21 {
@@ -4995,7 +4995,7 @@ func CreateSkillBuild(args CreateSkillArgs) string {
 		b.WriteString(", ")
 	}
 	b.WriteString("tier: ")
-	b.WriteString(fmt.Sprintf("%q", args.Tier))
+	b.WriteString(quoteMemQLString(args.Tier))
 	if args.PredefinedSet {
 		if b.Len() > 21 {
 			b.WriteString(", ")
@@ -5039,23 +5039,23 @@ func CreateSkillChangeEventBuild(args CreateSkillChangeEventArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation createSkillChangeEvent(")
 	b.WriteString("skillChangeEventId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SkillChangeEventId))
+	b.WriteString(quoteMemQLString(args.SkillChangeEventId))
 	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("targetAgentId: ")
-	b.WriteString(fmt.Sprintf("%q", args.TargetAgentId))
+	b.WriteString(quoteMemQLString(args.TargetAgentId))
 	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("skillId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SkillId))
+	b.WriteString(quoteMemQLString(args.SkillId))
 	if args.ChangeKind != "" {
 		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("changeKind: ")
-		b.WriteString(fmt.Sprintf("%q", args.ChangeKind))
+		b.WriteString(quoteMemQLString(args.ChangeKind))
 	}
 	if args.Before != nil {
 		if b.Len() > 32 {
@@ -5076,21 +5076,21 @@ func CreateSkillChangeEventBuild(args CreateSkillChangeEventArgs) string {
 			b.WriteString(", ")
 		}
 		b.WriteString("actorAgentId: ")
-		b.WriteString(fmt.Sprintf("%q", args.ActorAgentId))
+		b.WriteString(quoteMemQLString(args.ActorAgentId))
 	}
 	if args.ActorUserId != "" {
 		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("actorUserId: ")
-		b.WriteString(fmt.Sprintf("%q", args.ActorUserId))
+		b.WriteString(quoteMemQLString(args.ActorUserId))
 	}
 	if args.PlanId != "" {
 		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("planId: ")
-		b.WriteString(fmt.Sprintf("%q", args.PlanId))
+		b.WriteString(quoteMemQLString(args.PlanId))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -5118,30 +5118,30 @@ func CreateSpawnEventBuild(args CreateSpawnEventArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation createSpawnEvent(")
 	b.WriteString("nodeId: ")
-	b.WriteString(fmt.Sprintf("%q", args.NodeId))
+	b.WriteString(quoteMemQLString(args.NodeId))
 	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("nodeType: ")
-	b.WriteString(fmt.Sprintf("%q", args.NodeType))
+	b.WriteString(quoteMemQLString(args.NodeType))
 	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("action: ")
-	b.WriteString(fmt.Sprintf("%q", args.Action))
+	b.WriteString(quoteMemQLString(args.Action))
 	if args.InitiatorId != "" {
 		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("initiatorId: ")
-		b.WriteString(fmt.Sprintf("%q", args.InitiatorId))
+		b.WriteString(quoteMemQLString(args.InitiatorId))
 	}
 	if args.Reason != "" {
 		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("reason: ")
-		b.WriteString(fmt.Sprintf("%q", args.Reason))
+		b.WriteString(quoteMemQLString(args.Reason))
 	}
 	if args.Metadata != nil {
 		if b.Len() > 26 {
@@ -5181,25 +5181,25 @@ func CreateTaskBuild(args CreateTaskArgs) string {
 	b.WriteString("mutation createTask(")
 	if args.TaskId != "" {
 		b.WriteString("taskId: ")
-		b.WriteString(fmt.Sprintf("%q", args.TaskId))
+		b.WriteString(quoteMemQLString(args.TaskId))
 	}
 	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("planId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PlanId))
+	b.WriteString(quoteMemQLString(args.PlanId))
 	if args.Category != "" {
 		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("category: ")
-		b.WriteString(fmt.Sprintf("%q", args.Category))
+		b.WriteString(quoteMemQLString(args.Category))
 	}
 	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("kind: ")
-	b.WriteString(fmt.Sprintf("%q", args.Kind))
+	b.WriteString(quoteMemQLString(args.Kind))
 	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
@@ -5210,21 +5210,21 @@ func CreateTaskBuild(args CreateTaskArgs) string {
 			b.WriteString(", ")
 		}
 		b.WriteString("phase: ")
-		b.WriteString(fmt.Sprintf("%q", args.Phase))
+		b.WriteString(quoteMemQLString(args.Phase))
 	}
 	if args.ExecutionSurface != "" {
 		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("executionSurface: ")
-		b.WriteString(fmt.Sprintf("%q", args.ExecutionSurface))
+		b.WriteString(quoteMemQLString(args.ExecutionSurface))
 	}
 	if args.ExecutorBackend != "" {
 		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("executorBackend: ")
-		b.WriteString(fmt.Sprintf("%q", args.ExecutorBackend))
+		b.WriteString(quoteMemQLString(args.ExecutorBackend))
 	}
 	if b.Len() > 20 {
 		b.WriteString(", ")
@@ -5257,30 +5257,30 @@ func CreateTodoBuild(args CreateTodoArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation createTodo(")
 	b.WriteString("todoId: ")
-	b.WriteString(fmt.Sprintf("%q", args.TodoId))
+	b.WriteString(quoteMemQLString(args.TodoId))
 	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("title: ")
-	b.WriteString(fmt.Sprintf("%q", args.Title))
+	b.WriteString(quoteMemQLString(args.Title))
 	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("dueAt: ")
-	b.WriteString(fmt.Sprintf("%q", args.DueAt))
+	b.WriteString(quoteMemQLString(args.DueAt))
 	if args.Priority != "" {
 		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("priority: ")
-		b.WriteString(fmt.Sprintf("%q", args.Priority))
+		b.WriteString(quoteMemQLString(args.Priority))
 	}
 	if args.SourceResponsibilityId != "" {
 		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourceResponsibilityId: ")
-		b.WriteString(fmt.Sprintf("%q", args.SourceResponsibilityId))
+		b.WriteString(quoteMemQLString(args.SourceResponsibilityId))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -5308,22 +5308,22 @@ func CreateToolInvocationTaskBuild(args CreateToolInvocationTaskArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation createToolInvocationTask(")
 	b.WriteString("taskId: ")
-	b.WriteString(fmt.Sprintf("%q", args.TaskId))
+	b.WriteString(quoteMemQLString(args.TaskId))
 	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("planId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PlanId))
+	b.WriteString(quoteMemQLString(args.PlanId))
 	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("parentTaskId: ")
-	b.WriteString(fmt.Sprintf("%q", args.ParentTaskId))
+	b.WriteString(quoteMemQLString(args.ParentTaskId))
 	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("toolName: ")
-	b.WriteString(fmt.Sprintf("%q", args.ToolName))
+	b.WriteString(quoteMemQLString(args.ToolName))
 	if args.ToolArgs != nil {
 		if b.Len() > 34 {
 			b.WriteString(", ")
@@ -5363,23 +5363,23 @@ func CreateUserBuild(args CreateUserArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation createUser(")
 	b.WriteString("userId: ")
-	b.WriteString(fmt.Sprintf("%q", args.UserId))
+	b.WriteString(quoteMemQLString(args.UserId))
 	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("displayName: ")
-	b.WriteString(fmt.Sprintf("%q", args.DisplayName))
+	b.WriteString(quoteMemQLString(args.DisplayName))
 	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("primaryEmail: ")
-	b.WriteString(fmt.Sprintf("%q", args.PrimaryEmail))
+	b.WriteString(quoteMemQLString(args.PrimaryEmail))
 	if args.Role != "" {
 		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("role: ")
-		b.WriteString(fmt.Sprintf("%q", args.Role))
+		b.WriteString(quoteMemQLString(args.Role))
 	}
 	if args.GroupIds != nil {
 		if b.Len() > 20 {
@@ -5429,65 +5429,65 @@ func CreateUserOnFirstLoginBuild(args CreateUserOnFirstLoginArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation createUserOnFirstLogin(")
 	b.WriteString("userId: ")
-	b.WriteString(fmt.Sprintf("%q", args.UserId))
+	b.WriteString(quoteMemQLString(args.UserId))
 	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("displayName: ")
-	b.WriteString(fmt.Sprintf("%q", args.DisplayName))
+	b.WriteString(quoteMemQLString(args.DisplayName))
 	if args.FirstName != "" {
 		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("firstName: ")
-		b.WriteString(fmt.Sprintf("%q", args.FirstName))
+		b.WriteString(quoteMemQLString(args.FirstName))
 	}
 	if args.LastName != "" {
 		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("lastName: ")
-		b.WriteString(fmt.Sprintf("%q", args.LastName))
+		b.WriteString(quoteMemQLString(args.LastName))
 	}
 	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("primaryEmail: ")
-	b.WriteString(fmt.Sprintf("%q", args.PrimaryEmail))
+	b.WriteString(quoteMemQLString(args.PrimaryEmail))
 	if args.Phone != "" {
 		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("phone: ")
-		b.WriteString(fmt.Sprintf("%q", args.Phone))
+		b.WriteString(quoteMemQLString(args.Phone))
 	}
 	if args.PrimaryRole != "" {
 		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("primaryRole: ")
-		b.WriteString(fmt.Sprintf("%q", args.PrimaryRole))
+		b.WriteString(quoteMemQLString(args.PrimaryRole))
 	}
 	if args.Gender != "" {
 		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("gender: ")
-		b.WriteString(fmt.Sprintf("%q", args.Gender))
+		b.WriteString(quoteMemQLString(args.Gender))
 	}
 	if args.Birthdate != "" {
 		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("birthdate: ")
-		b.WriteString(fmt.Sprintf("%q", args.Birthdate))
+		b.WriteString(quoteMemQLString(args.Birthdate))
 	}
 	if args.Role != "" {
 		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("role: ")
-		b.WriteString(fmt.Sprintf("%q", args.Role))
+		b.WriteString(quoteMemQLString(args.Role))
 	}
 	if b.Len() > 32 {
 		b.WriteString(", ")
@@ -5535,40 +5535,40 @@ func CreateVoiceAgentTokenIdentityBuild(args CreateVoiceAgentTokenIdentityArgs) 
 	var b strings.Builder
 	b.WriteString("mutation createVoiceAgentTokenIdentity(")
 	b.WriteString("identityId: ")
-	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
+	b.WriteString(quoteMemQLString(args.IdentityId))
 	if b.Len() > 39 {
 		b.WriteString(", ")
 	}
 	b.WriteString("userId: ")
-	b.WriteString(fmt.Sprintf("%q", args.UserId))
+	b.WriteString(quoteMemQLString(args.UserId))
 	if b.Len() > 39 {
 		b.WriteString(", ")
 	}
 	b.WriteString("instanceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.InstanceId))
+	b.WriteString(quoteMemQLString(args.InstanceId))
 	if b.Len() > 39 {
 		b.WriteString(", ")
 	}
 	b.WriteString("keyHash: ")
-	b.WriteString(fmt.Sprintf("%q", args.KeyHash))
+	b.WriteString(quoteMemQLString(args.KeyHash))
 	if b.Len() > 39 {
 		b.WriteString(", ")
 	}
 	b.WriteString("mintedBy: ")
-	b.WriteString(fmt.Sprintf("%q", args.MintedBy))
+	b.WriteString(quoteMemQLString(args.MintedBy))
 	if args.ExpiresAt != "" {
 		if b.Len() > 39 {
 			b.WriteString(", ")
 		}
 		b.WriteString("expiresAt: ")
-		b.WriteString(fmt.Sprintf("%q", args.ExpiresAt))
+		b.WriteString(quoteMemQLString(args.ExpiresAt))
 	}
 	if args.Label != "" {
 		if b.Len() > 39 {
 			b.WriteString(", ")
 		}
 		b.WriteString("label: ")
-		b.WriteString(fmt.Sprintf("%q", args.Label))
+		b.WriteString(quoteMemQLString(args.Label))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -5611,53 +5611,53 @@ func CreateWorkerInvocationBuild(args CreateWorkerInvocationArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation createWorkerInvocation(")
 	b.WriteString("invocationId: ")
-	b.WriteString(fmt.Sprintf("%q", args.InvocationId))
+	b.WriteString(quoteMemQLString(args.InvocationId))
 	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("ownerUserId: ")
-	b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
+	b.WriteString(quoteMemQLString(args.OwnerUserId))
 	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("workerId: ")
-	b.WriteString(fmt.Sprintf("%q", args.WorkerId))
+	b.WriteString(quoteMemQLString(args.WorkerId))
 	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("agentId: ")
-	b.WriteString(fmt.Sprintf("%q", args.AgentId))
+	b.WriteString(quoteMemQLString(args.AgentId))
 	if args.PlanId != "" {
 		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("planId: ")
-		b.WriteString(fmt.Sprintf("%q", args.PlanId))
+		b.WriteString(quoteMemQLString(args.PlanId))
 	}
 	if args.TaskId != "" {
 		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("taskId: ")
-		b.WriteString(fmt.Sprintf("%q", args.TaskId))
+		b.WriteString(quoteMemQLString(args.TaskId))
 	}
 	if args.CorrelationId != "" {
 		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("correlationId: ")
-		b.WriteString(fmt.Sprintf("%q", args.CorrelationId))
+		b.WriteString(quoteMemQLString(args.CorrelationId))
 	}
 	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("tool: ")
-	b.WriteString(fmt.Sprintf("%q", args.Tool))
+	b.WriteString(quoteMemQLString(args.Tool))
 	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("action: ")
-	b.WriteString(fmt.Sprintf("%q", args.Action))
+	b.WriteString(quoteMemQLString(args.Action))
 	if args.ArgsRedacted != nil {
 		if b.Len() > 32 {
 			b.WriteString(", ")
@@ -5669,13 +5669,13 @@ func CreateWorkerInvocationBuild(args CreateWorkerInvocationArgs) string {
 		b.WriteString(", ")
 	}
 	b.WriteString("startedAt: ")
-	b.WriteString(fmt.Sprintf("%q", args.StartedAt))
+	b.WriteString(quoteMemQLString(args.StartedAt))
 	if args.CompletedAt != "" {
 		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("completedAt: ")
-		b.WriteString(fmt.Sprintf("%q", args.CompletedAt))
+		b.WriteString(quoteMemQLString(args.CompletedAt))
 	}
 	if args.DurationMs != 0 {
 		if b.Len() > 32 {
@@ -5688,7 +5688,7 @@ func CreateWorkerInvocationBuild(args CreateWorkerInvocationArgs) string {
 		b.WriteString(", ")
 	}
 	b.WriteString("outcome: ")
-	b.WriteString(fmt.Sprintf("%q", args.Outcome))
+	b.WriteString(quoteMemQLString(args.Outcome))
 	if args.ExitCode != 0 {
 		if b.Len() > 32 {
 			b.WriteString(", ")
@@ -5701,21 +5701,21 @@ func CreateWorkerInvocationBuild(args CreateWorkerInvocationArgs) string {
 			b.WriteString(", ")
 		}
 		b.WriteString("signal: ")
-		b.WriteString(fmt.Sprintf("%q", args.Signal))
+		b.WriteString(quoteMemQLString(args.Signal))
 	}
 	if args.ErrorCode != "" {
 		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("errorCode: ")
-		b.WriteString(fmt.Sprintf("%q", args.ErrorCode))
+		b.WriteString(quoteMemQLString(args.ErrorCode))
 	}
 	if args.ErrorMessage != "" {
 		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("errorMessage: ")
-		b.WriteString(fmt.Sprintf("%q", args.ErrorMessage))
+		b.WriteString(quoteMemQLString(args.ErrorMessage))
 	}
 	if args.BytesIn != 0 {
 		if b.Len() > 32 {
@@ -5736,7 +5736,7 @@ func CreateWorkerInvocationBuild(args CreateWorkerInvocationArgs) string {
 			b.WriteString(", ")
 		}
 		b.WriteString("outputPreview: ")
-		b.WriteString(fmt.Sprintf("%q", args.OutputPreview))
+		b.WriteString(quoteMemQLString(args.OutputPreview))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -5764,33 +5764,33 @@ func CreateWorkerPairingCodeBuild(args CreateWorkerPairingCodeArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation createWorkerPairingCode(")
 	b.WriteString("pairingId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PairingId))
+	b.WriteString(quoteMemQLString(args.PairingId))
 	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("ownerUserId: ")
-	b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
+	b.WriteString(quoteMemQLString(args.OwnerUserId))
 	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("codeHash: ")
-	b.WriteString(fmt.Sprintf("%q", args.CodeHash))
+	b.WriteString(quoteMemQLString(args.CodeHash))
 	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("clusterURL: ")
-	b.WriteString(fmt.Sprintf("%q", args.ClusterURL))
+	b.WriteString(quoteMemQLString(args.ClusterURL))
 	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("expiresAt: ")
-	b.WriteString(fmt.Sprintf("%q", args.ExpiresAt))
+	b.WriteString(quoteMemQLString(args.ExpiresAt))
 	if args.SourceIP != "" {
 		if b.Len() > 33 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourceIP: ")
-		b.WriteString(fmt.Sprintf("%q", args.SourceIP))
+		b.WriteString(quoteMemQLString(args.SourceIP))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -5827,22 +5827,22 @@ func CreateWorkerRegistrationBuild(args CreateWorkerRegistrationArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation createWorkerRegistration(")
 	b.WriteString("registrationId: ")
-	b.WriteString(fmt.Sprintf("%q", args.RegistrationId))
+	b.WriteString(quoteMemQLString(args.RegistrationId))
 	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("ownerUserId: ")
-	b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
+	b.WriteString(quoteMemQLString(args.OwnerUserId))
 	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("identityId: ")
-	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
+	b.WriteString(quoteMemQLString(args.IdentityId))
 	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
-	b.WriteString(fmt.Sprintf("%q", args.Name))
+	b.WriteString(quoteMemQLString(args.Name))
 	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
@@ -5886,33 +5886,33 @@ func CreateWorkerRegistrationBuild(args CreateWorkerRegistrationArgs) string {
 			b.WriteString(", ")
 		}
 		b.WriteString("version: ")
-		b.WriteString(fmt.Sprintf("%q", args.Version))
+		b.WriteString(quoteMemQLString(args.Version))
 	}
 	if args.BuildTag != "" {
 		if b.Len() > 34 {
 			b.WriteString(", ")
 		}
 		b.WriteString("buildTag: ")
-		b.WriteString(fmt.Sprintf("%q", args.BuildTag))
+		b.WriteString(quoteMemQLString(args.BuildTag))
 	}
 	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("registeredAt: ")
-	b.WriteString(fmt.Sprintf("%q", args.RegisteredAt))
+	b.WriteString(quoteMemQLString(args.RegisteredAt))
 	if args.LastSeenAt != "" {
 		if b.Len() > 34 {
 			b.WriteString(", ")
 		}
 		b.WriteString("lastSeenAt: ")
-		b.WriteString(fmt.Sprintf("%q", args.LastSeenAt))
+		b.WriteString(quoteMemQLString(args.LastSeenAt))
 	}
 	if args.LastConnectedFromIP != "" {
 		if b.Len() > 34 {
 			b.WriteString(", ")
 		}
 		b.WriteString("lastConnectedFromIP: ")
-		b.WriteString(fmt.Sprintf("%q", args.LastConnectedFromIP))
+		b.WriteString(quoteMemQLString(args.LastConnectedFromIP))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -5942,27 +5942,27 @@ func CreateWorkerTokenIdentityBuild(args CreateWorkerTokenIdentityArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation createWorkerTokenIdentity(")
 	b.WriteString("identityId: ")
-	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
+	b.WriteString(quoteMemQLString(args.IdentityId))
 	if b.Len() > 35 {
 		b.WriteString(", ")
 	}
 	b.WriteString("userId: ")
-	b.WriteString(fmt.Sprintf("%q", args.UserId))
+	b.WriteString(quoteMemQLString(args.UserId))
 	if b.Len() > 35 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
-	b.WriteString(fmt.Sprintf("%q", args.Name))
+	b.WriteString(quoteMemQLString(args.Name))
 	if b.Len() > 35 {
 		b.WriteString(", ")
 	}
 	b.WriteString("keyHash: ")
-	b.WriteString(fmt.Sprintf("%q", args.KeyHash))
+	b.WriteString(quoteMemQLString(args.KeyHash))
 	if b.Len() > 35 {
 		b.WriteString(", ")
 	}
 	b.WriteString("registeredBy: ")
-	b.WriteString(fmt.Sprintf("%q", args.RegisteredBy))
+	b.WriteString(quoteMemQLString(args.RegisteredBy))
 	if args.CapabilitiesAdvertised != nil {
 		if b.Len() > 35 {
 			b.WriteString(", ")
@@ -5982,7 +5982,7 @@ func CreateWorkerTokenIdentityBuild(args CreateWorkerTokenIdentityArgs) string {
 			b.WriteString(", ")
 		}
 		b.WriteString("expiresAt: ")
-		b.WriteString(fmt.Sprintf("%q", args.ExpiresAt))
+		b.WriteString(quoteMemQLString(args.ExpiresAt))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -6006,12 +6006,12 @@ func DecayActionBuild(args DecayActionArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation decayAction(")
 	b.WriteString("actionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.ActionId))
+	b.WriteString(quoteMemQLString(args.ActionId))
 	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("reliability: ")
-	b.WriteString(fmt.Sprintf("%q", args.Reliability))
+	b.WriteString(renderMemQLValue(args.Reliability))
 	b.WriteString(")")
 	return b.String()
 }
@@ -6034,12 +6034,12 @@ func DecayHarnessSemanticMemoryBuild(args DecayHarnessSemanticMemoryArgs) string
 	var b strings.Builder
 	b.WriteString("mutation decayHarnessSemanticMemory(")
 	b.WriteString("memoryId: ")
-	b.WriteString(fmt.Sprintf("%q", args.MemoryId))
+	b.WriteString(quoteMemQLString(args.MemoryId))
 	if b.Len() > 36 {
 		b.WriteString(", ")
 	}
 	b.WriteString("confidence: ")
-	b.WriteString(fmt.Sprintf("%q", args.Confidence))
+	b.WriteString(renderMemQLValue(args.Confidence))
 	b.WriteString(")")
 	return b.String()
 }
@@ -6061,7 +6061,7 @@ func DeleteAgentBuild(args DeleteAgentArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation deleteAgent(")
 	b.WriteString("agentId: ")
-	b.WriteString(fmt.Sprintf("%q", args.AgentId))
+	b.WriteString(quoteMemQLString(args.AgentId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -6083,7 +6083,7 @@ func DeleteCalendarEventBuild(args DeleteCalendarEventArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation deleteCalendarEvent(")
 	b.WriteString("eventId: ")
-	b.WriteString(fmt.Sprintf("%q", args.EventId))
+	b.WriteString(quoteMemQLString(args.EventId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -6105,7 +6105,7 @@ func DeleteRecordBuild(args DeleteRecordArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation deleteRecord(")
 	b.WriteString("recordId: ")
-	b.WriteString(fmt.Sprintf("%q", args.RecordId))
+	b.WriteString(quoteMemQLString(args.RecordId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -6127,7 +6127,7 @@ func DeleteUserHardBuild(args DeleteUserHardArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation deleteUserHard(")
 	b.WriteString("userId: ")
-	b.WriteString(fmt.Sprintf("%q", args.UserId))
+	b.WriteString(quoteMemQLString(args.UserId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -6149,7 +6149,7 @@ func DeprecateActionBuild(args DeprecateActionArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation deprecateAction(")
 	b.WriteString("actionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.ActionId))
+	b.WriteString(quoteMemQLString(args.ActionId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -6178,51 +6178,51 @@ func EmitClientToolRequestBuild(args EmitClientToolRequestArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation emitClientToolRequest(")
 	b.WriteString("requestId: ")
-	b.WriteString(fmt.Sprintf("%q", args.RequestId))
+	b.WriteString(quoteMemQLString(args.RequestId))
 	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("callId: ")
-	b.WriteString(fmt.Sprintf("%q", args.CallId))
+	b.WriteString(quoteMemQLString(args.CallId))
 	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("toolName: ")
-	b.WriteString(fmt.Sprintf("%q", args.ToolName))
+	b.WriteString(quoteMemQLString(args.ToolName))
 	if args.ArgumentsJSON != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("argumentsJSON: ")
-		b.WriteString(fmt.Sprintf("%q", args.ArgumentsJSON))
+		b.WriteString(quoteMemQLString(args.ArgumentsJSON))
 	}
 	if args.PartitionId != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("partitionId: ")
-		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+		b.WriteString(quoteMemQLString(args.PartitionId))
 	}
 	if args.ParticipantId != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("participantId: ")
-		b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
+		b.WriteString(quoteMemQLString(args.ParticipantId))
 	}
 	if args.AgentId != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("agentId: ")
-		b.WriteString(fmt.Sprintf("%q", args.AgentId))
+		b.WriteString(quoteMemQLString(args.AgentId))
 	}
 	if args.ExpiresAt != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("expiresAt: ")
-		b.WriteString(fmt.Sprintf("%q", args.ExpiresAt))
+		b.WriteString(quoteMemQLString(args.ExpiresAt))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -6251,18 +6251,18 @@ func EmitClientToolResponseBuild(args EmitClientToolResponseArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation emitClientToolResponse(")
 	b.WriteString("responseId: ")
-	b.WriteString(fmt.Sprintf("%q", args.ResponseId))
+	b.WriteString(quoteMemQLString(args.ResponseId))
 	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("callId: ")
-	b.WriteString(fmt.Sprintf("%q", args.CallId))
+	b.WriteString(quoteMemQLString(args.CallId))
 	if args.ContentJSON != "" {
 		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("contentJSON: ")
-		b.WriteString(fmt.Sprintf("%q", args.ContentJSON))
+		b.WriteString(quoteMemQLString(args.ContentJSON))
 	}
 	if args.IsErrorSet {
 		if b.Len() > 32 {
@@ -6276,14 +6276,14 @@ func EmitClientToolResponseBuild(args EmitClientToolResponseArgs) string {
 			b.WriteString(", ")
 		}
 		b.WriteString("errorMessage: ")
-		b.WriteString(fmt.Sprintf("%q", args.ErrorMessage))
+		b.WriteString(quoteMemQLString(args.ErrorMessage))
 	}
 	if args.PartitionId != "" {
 		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("partitionId: ")
-		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+		b.WriteString(quoteMemQLString(args.PartitionId))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -6312,27 +6312,27 @@ func EmitTextChunkBuild(args EmitTextChunkArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation emitTextChunk(")
 	b.WriteString("chunkId: ")
-	b.WriteString(fmt.Sprintf("%q", args.ChunkId))
+	b.WriteString(quoteMemQLString(args.ChunkId))
 	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("partitionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+	b.WriteString(quoteMemQLString(args.PartitionId))
 	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("participantId: ")
-	b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
+	b.WriteString(quoteMemQLString(args.ParticipantId))
 	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("replyId: ")
-	b.WriteString(fmt.Sprintf("%q", args.ReplyId))
+	b.WriteString(quoteMemQLString(args.ReplyId))
 	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("text: ")
-	b.WriteString(fmt.Sprintf("%q", args.Text))
+	b.WriteString(quoteMemQLString(args.Text))
 	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
@@ -6364,7 +6364,7 @@ func ExpireAccessRequestBuild(args ExpireAccessRequestArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation expireAccessRequest(")
 	b.WriteString("requestId: ")
-	b.WriteString(fmt.Sprintf("%q", args.RequestId))
+	b.WriteString(quoteMemQLString(args.RequestId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -6387,13 +6387,13 @@ func FailHarnessStepBuild(args FailHarnessStepArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation failHarnessStep(")
 	b.WriteString("stepId: ")
-	b.WriteString(fmt.Sprintf("%q", args.StepId))
+	b.WriteString(quoteMemQLString(args.StepId))
 	if args.ErrorMessage != "" {
 		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("errorMessage: ")
-		b.WriteString(fmt.Sprintf("%q", args.ErrorMessage))
+		b.WriteString(quoteMemQLString(args.ErrorMessage))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -6426,7 +6426,7 @@ func FoldResponsibilityIntakeAnswersBuild(args FoldResponsibilityIntakeAnswersAr
 	var b strings.Builder
 	b.WriteString("mutation foldResponsibilityIntakeAnswers(")
 	b.WriteString("responsibilityId: ")
-	b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
+	b.WriteString(quoteMemQLString(args.ResponsibilityId))
 	if b.Len() > 41 {
 		b.WriteString(", ")
 	}
@@ -6437,14 +6437,14 @@ func FoldResponsibilityIntakeAnswersBuild(args FoldResponsibilityIntakeAnswersAr
 			b.WriteString(", ")
 		}
 		b.WriteString("trigger: ")
-		b.WriteString(fmt.Sprintf("%q", args.Trigger))
+		b.WriteString(quoteMemQLString(args.Trigger))
 	}
 	if args.Schedule != "" {
 		if b.Len() > 41 {
 			b.WriteString(", ")
 		}
 		b.WriteString("schedule: ")
-		b.WriteString(fmt.Sprintf("%q", args.Schedule))
+		b.WriteString(quoteMemQLString(args.Schedule))
 	}
 	if args.Condition != nil {
 		if b.Len() > 41 {
@@ -6458,28 +6458,28 @@ func FoldResponsibilityIntakeAnswersBuild(args FoldResponsibilityIntakeAnswersAr
 			b.WriteString(", ")
 		}
 		b.WriteString("targetKind: ")
-		b.WriteString(fmt.Sprintf("%q", args.TargetKind))
+		b.WriteString(quoteMemQLString(args.TargetKind))
 	}
 	if args.AssignedRoleSlug != "" {
 		if b.Len() > 41 {
 			b.WriteString(", ")
 		}
 		b.WriteString("assignedRoleSlug: ")
-		b.WriteString(fmt.Sprintf("%q", args.AssignedRoleSlug))
+		b.WriteString(quoteMemQLString(args.AssignedRoleSlug))
 	}
 	if args.SuccessCriteria != "" {
 		if b.Len() > 41 {
 			b.WriteString(", ")
 		}
 		b.WriteString("successCriteria: ")
-		b.WriteString(fmt.Sprintf("%q", args.SuccessCriteria))
+		b.WriteString(quoteMemQLString(args.SuccessCriteria))
 	}
 	if args.NotifyHow != "" {
 		if b.Len() > 41 {
 			b.WriteString(", ")
 		}
 		b.WriteString("notifyHow: ")
-		b.WriteString(fmt.Sprintf("%q", args.NotifyHow))
+		b.WriteString(quoteMemQLString(args.NotifyHow))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -6517,98 +6517,98 @@ func InsertOutputScreeningBuild(args InsertOutputScreeningArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation insertOutputScreening(")
 	b.WriteString("contentType: ")
-	b.WriteString(fmt.Sprintf("%q", args.ContentType))
+	b.WriteString(quoteMemQLString(args.ContentType))
 	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("contentLength: ")
-	b.WriteString(fmt.Sprintf("%q", args.ContentLength))
+	b.WriteString(renderMemQLValue(args.ContentLength))
 	if args.RedactedSample != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("redactedSample: ")
-		b.WriteString(fmt.Sprintf("%q", args.RedactedSample))
+		b.WriteString(quoteMemQLString(args.RedactedSample))
 	}
 	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("tier: ")
-	b.WriteString(fmt.Sprintf("%q", args.Tier))
+	b.WriteString(quoteMemQLString(args.Tier))
 	if args.Categories != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("categories: ")
-		b.WriteString(fmt.Sprintf("%q", args.Categories))
+		b.WriteString(quoteMemQLString(args.Categories))
 	}
 	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("verdict: ")
-	b.WriteString(fmt.Sprintf("%q", args.Verdict))
+	b.WriteString(quoteMemQLString(args.Verdict))
 	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("screener: ")
-	b.WriteString(fmt.Sprintf("%q", args.Screener))
+	b.WriteString(quoteMemQLString(args.Screener))
 	if args.RuleId != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("ruleId: ")
-		b.WriteString(fmt.Sprintf("%q", args.RuleId))
+		b.WriteString(quoteMemQLString(args.RuleId))
 	}
 	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("confidence: ")
-	b.WriteString(fmt.Sprintf("%q", args.Confidence))
+	b.WriteString(renderMemQLValue(args.Confidence))
 	if args.Reason != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("reason: ")
-		b.WriteString(fmt.Sprintf("%q", args.Reason))
+		b.WriteString(quoteMemQLString(args.Reason))
 	}
 	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("latencyMs: ")
-	b.WriteString(fmt.Sprintf("%q", args.LatencyMs))
+	b.WriteString(renderMemQLValue(args.LatencyMs))
 	if args.AgentId != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("agentId: ")
-		b.WriteString(fmt.Sprintf("%q", args.AgentId))
+		b.WriteString(quoteMemQLString(args.AgentId))
 	}
 	if args.OwnerUserId != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("ownerUserId: ")
-		b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
+		b.WriteString(quoteMemQLString(args.OwnerUserId))
 	}
 	if args.PlanId != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("planId: ")
-		b.WriteString(fmt.Sprintf("%q", args.PlanId))
+		b.WriteString(quoteMemQLString(args.PlanId))
 	}
 	if args.CorrelationId != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("correlationId: ")
-		b.WriteString(fmt.Sprintf("%q", args.CorrelationId))
+		b.WriteString(quoteMemQLString(args.CorrelationId))
 	}
 	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("mode: ")
-	b.WriteString(fmt.Sprintf("%q", args.Mode))
+	b.WriteString(quoteMemQLString(args.Mode))
 	b.WriteString(")")
 	return b.String()
 }
@@ -6639,48 +6639,48 @@ func InsertPolicyTraceBuild(args InsertPolicyTraceArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation insertPolicyTrace(")
 	b.WriteString("policyName: ")
-	b.WriteString(fmt.Sprintf("%q", args.PolicyName))
+	b.WriteString(quoteMemQLString(args.PolicyName))
 	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("tier: ")
-	b.WriteString(fmt.Sprintf("%q", args.Tier))
+	b.WriteString(quoteMemQLString(args.Tier))
 	if args.ActorUserId != "" {
 		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("actorUserId: ")
-		b.WriteString(fmt.Sprintf("%q", args.ActorUserId))
+		b.WriteString(quoteMemQLString(args.ActorUserId))
 	}
 	if args.ActorRole != "" {
 		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("actorRole: ")
-		b.WriteString(fmt.Sprintf("%q", args.ActorRole))
+		b.WriteString(quoteMemQLString(args.ActorRole))
 	}
 	if args.CallerPartition != "" {
 		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("callerPartition: ")
-		b.WriteString(fmt.Sprintf("%q", args.CallerPartition))
+		b.WriteString(quoteMemQLString(args.CallerPartition))
 	}
 	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("argsHash: ")
-	b.WriteString(fmt.Sprintf("%q", args.ArgsHash))
+	b.WriteString(quoteMemQLString(args.ArgsHash))
 	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("resultJson: ")
-	b.WriteString(fmt.Sprintf("%q", args.ResultJson))
+	b.WriteString(quoteMemQLString(args.ResultJson))
 	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("traceJson: ")
-	b.WriteString(fmt.Sprintf("%q", args.TraceJson))
+	b.WriteString(quoteMemQLString(args.TraceJson))
 	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
@@ -6691,7 +6691,7 @@ func InsertPolicyTraceBuild(args InsertPolicyTraceArgs) string {
 			b.WriteString(", ")
 		}
 		b.WriteString("error: ")
-		b.WriteString(fmt.Sprintf("%q", args.Error))
+		b.WriteString(quoteMemQLString(args.Error))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -6729,98 +6729,98 @@ func InsertSafetyClassificationBuild(args InsertSafetyClassificationArgs) string
 	var b strings.Builder
 	b.WriteString("mutation insertSafetyClassification(")
 	b.WriteString("surface: ")
-	b.WriteString(fmt.Sprintf("%q", args.Surface))
+	b.WriteString(quoteMemQLString(args.Surface))
 	if b.Len() > 36 {
 		b.WriteString(", ")
 	}
 	b.WriteString("action: ")
-	b.WriteString(fmt.Sprintf("%q", args.Action))
+	b.WriteString(quoteMemQLString(args.Action))
 	if args.ArgsRedacted != "" {
 		if b.Len() > 36 {
 			b.WriteString(", ")
 		}
 		b.WriteString("argsRedacted: ")
-		b.WriteString(fmt.Sprintf("%q", args.ArgsRedacted))
+		b.WriteString(quoteMemQLString(args.ArgsRedacted))
 	}
 	if b.Len() > 36 {
 		b.WriteString(", ")
 	}
 	b.WriteString("tier: ")
-	b.WriteString(fmt.Sprintf("%q", args.Tier))
+	b.WriteString(quoteMemQLString(args.Tier))
 	if args.Categories != "" {
 		if b.Len() > 36 {
 			b.WriteString(", ")
 		}
 		b.WriteString("categories: ")
-		b.WriteString(fmt.Sprintf("%q", args.Categories))
+		b.WriteString(quoteMemQLString(args.Categories))
 	}
 	if b.Len() > 36 {
 		b.WriteString(", ")
 	}
 	b.WriteString("decision: ")
-	b.WriteString(fmt.Sprintf("%q", args.Decision))
+	b.WriteString(quoteMemQLString(args.Decision))
 	if b.Len() > 36 {
 		b.WriteString(", ")
 	}
 	b.WriteString("source: ")
-	b.WriteString(fmt.Sprintf("%q", args.Source))
+	b.WriteString(quoteMemQLString(args.Source))
 	if args.RuleId != "" {
 		if b.Len() > 36 {
 			b.WriteString(", ")
 		}
 		b.WriteString("ruleId: ")
-		b.WriteString(fmt.Sprintf("%q", args.RuleId))
+		b.WriteString(quoteMemQLString(args.RuleId))
 	}
 	if b.Len() > 36 {
 		b.WriteString(", ")
 	}
 	b.WriteString("confidence: ")
-	b.WriteString(fmt.Sprintf("%q", args.Confidence))
+	b.WriteString(renderMemQLValue(args.Confidence))
 	if args.Reason != "" {
 		if b.Len() > 36 {
 			b.WriteString(", ")
 		}
 		b.WriteString("reason: ")
-		b.WriteString(fmt.Sprintf("%q", args.Reason))
+		b.WriteString(quoteMemQLString(args.Reason))
 	}
 	if b.Len() > 36 {
 		b.WriteString(", ")
 	}
 	b.WriteString("latencyMs: ")
-	b.WriteString(fmt.Sprintf("%q", args.LatencyMs))
+	b.WriteString(renderMemQLValue(args.LatencyMs))
 	if args.AgentId != "" {
 		if b.Len() > 36 {
 			b.WriteString(", ")
 		}
 		b.WriteString("agentId: ")
-		b.WriteString(fmt.Sprintf("%q", args.AgentId))
+		b.WriteString(quoteMemQLString(args.AgentId))
 	}
 	if args.OwnerUserId != "" {
 		if b.Len() > 36 {
 			b.WriteString(", ")
 		}
 		b.WriteString("ownerUserId: ")
-		b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
+		b.WriteString(quoteMemQLString(args.OwnerUserId))
 	}
 	if args.PlanId != "" {
 		if b.Len() > 36 {
 			b.WriteString(", ")
 		}
 		b.WriteString("planId: ")
-		b.WriteString(fmt.Sprintf("%q", args.PlanId))
+		b.WriteString(quoteMemQLString(args.PlanId))
 	}
 	if args.CorrelationId != "" {
 		if b.Len() > 36 {
 			b.WriteString(", ")
 		}
 		b.WriteString("correlationId: ")
-		b.WriteString(fmt.Sprintf("%q", args.CorrelationId))
+		b.WriteString(quoteMemQLString(args.CorrelationId))
 	}
 	if b.Len() > 36 {
 		b.WriteString(", ")
 	}
 	b.WriteString("mode: ")
-	b.WriteString(fmt.Sprintf("%q", args.Mode))
+	b.WriteString(quoteMemQLString(args.Mode))
 	b.WriteString(")")
 	return b.String()
 }
@@ -6852,30 +6852,30 @@ func JoinSpaceAsAIBuild(args JoinSpaceAsAIArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation joinSpaceAsAI(")
 	b.WriteString("partitionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+	b.WriteString(quoteMemQLString(args.PartitionId))
 	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("agentId: ")
-	b.WriteString(fmt.Sprintf("%q", args.AgentId))
+	b.WriteString(quoteMemQLString(args.AgentId))
 	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("displayName: ")
-	b.WriteString(fmt.Sprintf("%q", args.DisplayName))
+	b.WriteString(quoteMemQLString(args.DisplayName))
 	if args.Status != "" {
 		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("status: ")
-		b.WriteString(fmt.Sprintf("%q", args.Status))
+		b.WriteString(quoteMemQLString(args.Status))
 	}
 	if args.JoinedAt != "" {
 		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("joinedAt: ")
-		b.WriteString(fmt.Sprintf("%q", args.JoinedAt))
+		b.WriteString(quoteMemQLString(args.JoinedAt))
 	}
 	if args.CapabilityOverrides != nil {
 		if b.Len() > 23 {
@@ -6896,7 +6896,7 @@ func JoinSpaceAsAIBuild(args JoinSpaceAsAIArgs) string {
 			b.WriteString(", ")
 		}
 		b.WriteString("forUserId: ")
-		b.WriteString(fmt.Sprintf("%q", args.ForUserId))
+		b.WriteString(quoteMemQLString(args.ForUserId))
 	}
 	if args.IsGroupGASet {
 		if b.Len() > 23 {
@@ -6931,30 +6931,30 @@ func JoinSpaceAsHumanBuild(args JoinSpaceAsHumanArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation joinSpaceAsHuman(")
 	b.WriteString("partitionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+	b.WriteString(quoteMemQLString(args.PartitionId))
 	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("userId: ")
-	b.WriteString(fmt.Sprintf("%q", args.UserId))
+	b.WriteString(quoteMemQLString(args.UserId))
 	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("displayName: ")
-	b.WriteString(fmt.Sprintf("%q", args.DisplayName))
+	b.WriteString(quoteMemQLString(args.DisplayName))
 	if args.Status != "" {
 		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("status: ")
-		b.WriteString(fmt.Sprintf("%q", args.Status))
+		b.WriteString(quoteMemQLString(args.Status))
 	}
 	if args.JoinedAt != "" {
 		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("joinedAt: ")
-		b.WriteString(fmt.Sprintf("%q", args.JoinedAt))
+		b.WriteString(quoteMemQLString(args.JoinedAt))
 	}
 	if args.CapabilityOverrides != nil {
 		if b.Len() > 26 {
@@ -6985,7 +6985,7 @@ func LeaveSpaceBuild(args LeaveSpaceArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation leaveSpace(")
 	b.WriteString("participantId: ")
-	b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
+	b.WriteString(quoteMemQLString(args.ParticipantId))
 	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
@@ -7021,61 +7021,61 @@ func LogMissingCapabilityBuild(args LogMissingCapabilityArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation logMissingCapability(")
 	b.WriteString("missingId: ")
-	b.WriteString(fmt.Sprintf("%q", args.MissingId))
+	b.WriteString(quoteMemQLString(args.MissingId))
 	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("kind: ")
-	b.WriteString(fmt.Sprintf("%q", args.Kind))
+	b.WriteString(quoteMemQLString(args.Kind))
 	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("capability: ")
-	b.WriteString(fmt.Sprintf("%q", args.Capability))
+	b.WriteString(quoteMemQLString(args.Capability))
 	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("description: ")
-	b.WriteString(fmt.Sprintf("%q", args.Description))
+	b.WriteString(quoteMemQLString(args.Description))
 	if args.RequestedFromPlanId != "" {
 		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("requestedFromPlanId: ")
-		b.WriteString(fmt.Sprintf("%q", args.RequestedFromPlanId))
+		b.WriteString(quoteMemQLString(args.RequestedFromPlanId))
 	}
 	if args.RequestedByAgentId != "" {
 		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("requestedByAgentId: ")
-		b.WriteString(fmt.Sprintf("%q", args.RequestedByAgentId))
+		b.WriteString(quoteMemQLString(args.RequestedByAgentId))
 	}
 	if args.PartitionId != "" {
 		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("partitionId: ")
-		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+		b.WriteString(quoteMemQLString(args.PartitionId))
 	}
 	if args.PartitionScope != "" {
 		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("partitionScope: ")
-		b.WriteString(fmt.Sprintf("%q", args.PartitionScope))
+		b.WriteString(quoteMemQLString(args.PartitionScope))
 	}
 	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("firstSeenAt: ")
-	b.WriteString(fmt.Sprintf("%q", args.FirstSeenAt))
+	b.WriteString(quoteMemQLString(args.FirstSeenAt))
 	if args.ExampleGoal != "" {
 		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("exampleGoal: ")
-		b.WriteString(fmt.Sprintf("%q", args.ExampleGoal))
+		b.WriteString(quoteMemQLString(args.ExampleGoal))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -7101,25 +7101,25 @@ func MarkChunkSupersededBuild(args MarkChunkSupersededArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation markChunkSuperseded(")
 	b.WriteString("chunkId: ")
-	b.WriteString(fmt.Sprintf("%q", args.ChunkId))
+	b.WriteString(quoteMemQLString(args.ChunkId))
 	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("supersededAt: ")
-	b.WriteString(fmt.Sprintf("%q", args.SupersededAt))
+	b.WriteString(quoteMemQLString(args.SupersededAt))
 	if args.Reason != "" {
 		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("reason: ")
-		b.WriteString(fmt.Sprintf("%q", args.Reason))
+		b.WriteString(quoteMemQLString(args.Reason))
 	}
 	if args.SupersededReason != "" {
 		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("supersededReason: ")
-		b.WriteString(fmt.Sprintf("%q", args.SupersededReason))
+		b.WriteString(quoteMemQLString(args.SupersededReason))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -7142,7 +7142,7 @@ func MarkResponsibilityIntakePendingBuild(args MarkResponsibilityIntakePendingAr
 	var b strings.Builder
 	b.WriteString("mutation markResponsibilityIntakePending(")
 	b.WriteString("responsibilityId: ")
-	b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
+	b.WriteString(quoteMemQLString(args.ResponsibilityId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -7180,44 +7180,44 @@ func MintActionBuild(args MintActionArgs) string {
 	b.WriteString("mutation mintAction(")
 	if args.ActionId != "" {
 		b.WriteString("actionId: ")
-		b.WriteString(fmt.Sprintf("%q", args.ActionId))
+		b.WriteString(quoteMemQLString(args.ActionId))
 	}
 	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("slug: ")
-	b.WriteString(fmt.Sprintf("%q", args.Slug))
+	b.WriteString(quoteMemQLString(args.Slug))
 	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("intent: ")
-	b.WriteString(fmt.Sprintf("%q", args.Intent))
+	b.WriteString(quoteMemQLString(args.Intent))
 	if args.Capability != "" {
 		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("capability: ")
-		b.WriteString(fmt.Sprintf("%q", args.Capability))
+		b.WriteString(quoteMemQLString(args.Capability))
 	}
 	if args.SideEffectClass != "" {
 		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sideEffectClass: ")
-		b.WriteString(fmt.Sprintf("%q", args.SideEffectClass))
+		b.WriteString(quoteMemQLString(args.SideEffectClass))
 	}
 	if args.Status != "" {
 		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("status: ")
-		b.WriteString(fmt.Sprintf("%q", args.Status))
+		b.WriteString(quoteMemQLString(args.Status))
 	}
 	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("inputFingerprint: ")
-	b.WriteString(fmt.Sprintf("%q", args.InputFingerprint))
+	b.WriteString(quoteMemQLString(args.InputFingerprint))
 	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
@@ -7242,7 +7242,7 @@ func MintActionBuild(args MintActionArgs) string {
 			b.WriteString(", ")
 		}
 		b.WriteString("templateFingerprint: ")
-		b.WriteString(fmt.Sprintf("%q", args.TemplateFingerprint))
+		b.WriteString(quoteMemQLString(args.TemplateFingerprint))
 	}
 	if args.RecordedResult != nil {
 		if b.Len() > 20 {
@@ -7256,28 +7256,28 @@ func MintActionBuild(args MintActionArgs) string {
 			b.WriteString(", ")
 		}
 		b.WriteString("resultFingerprint: ")
-		b.WriteString(fmt.Sprintf("%q", args.ResultFingerprint))
+		b.WriteString(quoteMemQLString(args.ResultFingerprint))
 	}
 	if args.RecordedSurface != "" {
 		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("recordedSurface: ")
-		b.WriteString(fmt.Sprintf("%q", args.RecordedSurface))
+		b.WriteString(quoteMemQLString(args.RecordedSurface))
 	}
 	if args.ProvenancePlanId != "" {
 		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("provenancePlanId: ")
-		b.WriteString(fmt.Sprintf("%q", args.ProvenancePlanId))
+		b.WriteString(quoteMemQLString(args.ProvenancePlanId))
 	}
 	if args.ProvenanceStepId != "" {
 		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("provenanceStepId: ")
-		b.WriteString(fmt.Sprintf("%q", args.ProvenanceStepId))
+		b.WriteString(quoteMemQLString(args.ProvenanceStepId))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -7312,31 +7312,31 @@ func MintSkillBuild(args MintSkillArgs) string {
 	b.WriteString("mutation mintSkill(")
 	if args.SkillId != "" {
 		b.WriteString("skillId: ")
-		b.WriteString(fmt.Sprintf("%q", args.SkillId))
+		b.WriteString(quoteMemQLString(args.SkillId))
 	}
 	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
 	b.WriteString("slug: ")
-	b.WriteString(fmt.Sprintf("%q", args.Slug))
+	b.WriteString(quoteMemQLString(args.Slug))
 	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
-	b.WriteString(fmt.Sprintf("%q", args.Name))
+	b.WriteString(quoteMemQLString(args.Name))
 	if args.Description != "" {
 		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("description: ")
-		b.WriteString(fmt.Sprintf("%q", args.Description))
+		b.WriteString(quoteMemQLString(args.Description))
 	}
 	if args.Category != "" {
 		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("category: ")
-		b.WriteString(fmt.Sprintf("%q", args.Category))
+		b.WriteString(quoteMemQLString(args.Category))
 	}
 	if args.Tags != nil {
 		if b.Len() > 19 {
@@ -7370,20 +7370,20 @@ func MintSkillBuild(args MintSkillArgs) string {
 		b.WriteString(", ")
 	}
 	b.WriteString("tier: ")
-	b.WriteString(fmt.Sprintf("%q", args.Tier))
+	b.WriteString(quoteMemQLString(args.Tier))
 	if args.OriginatingPlanId != "" {
 		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("originatingPlanId: ")
-		b.WriteString(fmt.Sprintf("%q", args.OriginatingPlanId))
+		b.WriteString(quoteMemQLString(args.OriginatingPlanId))
 	}
 	if args.MintedByAgentId != "" {
 		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("mintedByAgentId: ")
-		b.WriteString(fmt.Sprintf("%q", args.MintedByAgentId))
+		b.WriteString(quoteMemQLString(args.MintedByAgentId))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -7412,13 +7412,13 @@ func PersistTaskStateBuild(args PersistTaskStateArgs) string {
 	b.WriteString("mutation persistTaskState(")
 	if args.StateId != "" {
 		b.WriteString("stateId: ")
-		b.WriteString(fmt.Sprintf("%q", args.StateId))
+		b.WriteString(quoteMemQLString(args.StateId))
 	}
 	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("taskId: ")
-	b.WriteString(fmt.Sprintf("%q", args.TaskId))
+	b.WriteString(quoteMemQLString(args.TaskId))
 	if args.WorkingMemory != nil {
 		if b.Len() > 26 {
 			b.WriteString(", ")
@@ -7431,7 +7431,7 @@ func PersistTaskStateBuild(args PersistTaskStateArgs) string {
 			b.WriteString(", ")
 		}
 		b.WriteString("reasoningChain: ")
-		b.WriteString(fmt.Sprintf("%q", args.ReasoningChain))
+		b.WriteString(quoteMemQLString(args.ReasoningChain))
 	}
 	if args.ToolCallHistory != nil {
 		if b.Len() > 26 {
@@ -7475,12 +7475,12 @@ func ProposeOverrideBuild(args ProposeOverrideArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation proposeOverride(")
 	b.WriteString("overrideId: ")
-	b.WriteString(fmt.Sprintf("%q", args.OverrideId))
+	b.WriteString(quoteMemQLString(args.OverrideId))
 	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("baseConstructId: ")
-	b.WriteString(fmt.Sprintf("%q", args.BaseConstructId))
+	b.WriteString(quoteMemQLString(args.BaseConstructId))
 	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
@@ -7496,21 +7496,21 @@ func ProposeOverrideBuild(args ProposeOverrideArgs) string {
 			b.WriteString(", ")
 		}
 		b.WriteString("blastRadius: ")
-		b.WriteString(fmt.Sprintf("%q", args.BlastRadius))
+		b.WriteString(quoteMemQLString(args.BlastRadius))
 	}
 	if args.Reason != "" {
 		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("reason: ")
-		b.WriteString(fmt.Sprintf("%q", args.Reason))
+		b.WriteString(quoteMemQLString(args.Reason))
 	}
 	if args.SourcePreconditionId != "" {
 		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourcePreconditionId: ")
-		b.WriteString(fmt.Sprintf("%q", args.SourcePreconditionId))
+		b.WriteString(quoteMemQLString(args.SourcePreconditionId))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -7535,17 +7535,17 @@ func ProvisionWorkspaceBuild(args ProvisionWorkspaceArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation provisionWorkspace(")
 	b.WriteString("workspaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.WorkspaceId))
+	b.WriteString(quoteMemQLString(args.WorkspaceId))
 	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("planId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PlanId))
+	b.WriteString(quoteMemQLString(args.PlanId))
 	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("storageRoot: ")
-	b.WriteString(fmt.Sprintf("%q", args.StorageRoot))
+	b.WriteString(quoteMemQLString(args.StorageRoot))
 	b.WriteString(")")
 	return b.String()
 }
@@ -7567,7 +7567,7 @@ func PruneHarnessSemanticMemoryBuild(args PruneHarnessSemanticMemoryArgs) string
 	var b strings.Builder
 	b.WriteString("mutation pruneHarnessSemanticMemory(")
 	b.WriteString("memoryId: ")
-	b.WriteString(fmt.Sprintf("%q", args.MemoryId))
+	b.WriteString(quoteMemQLString(args.MemoryId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -7589,7 +7589,7 @@ func ReadyHarnessStepBuild(args ReadyHarnessStepArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation readyHarnessStep(")
 	b.WriteString("stepId: ")
-	b.WriteString(fmt.Sprintf("%q", args.StepId))
+	b.WriteString(quoteMemQLString(args.StepId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -7617,18 +7617,18 @@ func RecordActionCandidateBuild(args RecordActionCandidateArgs) string {
 	b.WriteString("mutation recordActionCandidate(")
 	if args.CandidateId != "" {
 		b.WriteString("candidateId: ")
-		b.WriteString(fmt.Sprintf("%q", args.CandidateId))
+		b.WriteString(quoteMemQLString(args.CandidateId))
 	}
 	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("planId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PlanId))
+	b.WriteString(quoteMemQLString(args.PlanId))
 	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("stepId: ")
-	b.WriteString(fmt.Sprintf("%q", args.StepId))
+	b.WriteString(quoteMemQLString(args.StepId))
 	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
@@ -7673,12 +7673,12 @@ func RecordBundleDryRunBuild(args RecordBundleDryRunArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation recordBundleDryRun(")
 	b.WriteString("bundleId: ")
-	b.WriteString(fmt.Sprintf("%q", args.BundleId))
+	b.WriteString(quoteMemQLString(args.BundleId))
 	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("status: ")
-	b.WriteString(fmt.Sprintf("%q", args.Status))
+	b.WriteString(quoteMemQLString(args.Status))
 	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
@@ -7689,7 +7689,7 @@ func RecordBundleDryRunBuild(args RecordBundleDryRunArgs) string {
 			b.WriteString(", ")
 		}
 		b.WriteString("failureReason: ")
-		b.WriteString(fmt.Sprintf("%q", args.FailureReason))
+		b.WriteString(quoteMemQLString(args.FailureReason))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -7716,12 +7716,12 @@ func RecordBundleValidationBuild(args RecordBundleValidationArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation recordBundleValidation(")
 	b.WriteString("bundleId: ")
-	b.WriteString(fmt.Sprintf("%q", args.BundleId))
+	b.WriteString(quoteMemQLString(args.BundleId))
 	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("status: ")
-	b.WriteString(fmt.Sprintf("%q", args.Status))
+	b.WriteString(quoteMemQLString(args.Status))
 	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
@@ -7732,7 +7732,7 @@ func RecordBundleValidationBuild(args RecordBundleValidationArgs) string {
 			b.WriteString(", ")
 		}
 		b.WriteString("failureReason: ")
-		b.WriteString(fmt.Sprintf("%q", args.FailureReason))
+		b.WriteString(quoteMemQLString(args.FailureReason))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -7767,47 +7767,47 @@ func RecordCallBuild(args RecordCallArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation recordCall(")
 	b.WriteString("direction: ")
-	b.WriteString(fmt.Sprintf("%q", args.Direction))
+	b.WriteString(quoteMemQLString(args.Direction))
 	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("fromE164: ")
-	b.WriteString(fmt.Sprintf("%q", args.FromE164))
+	b.WriteString(quoteMemQLString(args.FromE164))
 	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("toE164: ")
-	b.WriteString(fmt.Sprintf("%q", args.ToE164))
+	b.WriteString(quoteMemQLString(args.ToE164))
 	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("partitionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+	b.WriteString(quoteMemQLString(args.PartitionId))
 	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("room: ")
-	b.WriteString(fmt.Sprintf("%q", args.Room))
+	b.WriteString(quoteMemQLString(args.Room))
 	if args.Carrier != "" {
 		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("carrier: ")
-		b.WriteString(fmt.Sprintf("%q", args.Carrier))
+		b.WriteString(quoteMemQLString(args.Carrier))
 	}
 	if args.ProviderCallId != "" {
 		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("providerCallId: ")
-		b.WriteString(fmt.Sprintf("%q", args.ProviderCallId))
+		b.WriteString(quoteMemQLString(args.ProviderCallId))
 	}
 	if args.AgentId != "" {
 		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("agentId: ")
-		b.WriteString(fmt.Sprintf("%q", args.AgentId))
+		b.WriteString(quoteMemQLString(args.AgentId))
 	}
 	if args.DurationSeconds != 0 {
 		if b.Len() > 20 {
@@ -7821,13 +7821,13 @@ func RecordCallBuild(args RecordCallArgs) string {
 			b.WriteString(", ")
 		}
 		b.WriteString("disposition: ")
-		b.WriteString(fmt.Sprintf("%q", args.Disposition))
+		b.WriteString(quoteMemQLString(args.Disposition))
 	}
 	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("costEstimate: ")
-	b.WriteString(fmt.Sprintf("%q", args.CostEstimate))
+	b.WriteString(renderMemQLValue(args.CostEstimate))
 	b.WriteString(")")
 	return b.String()
 }
@@ -7858,37 +7858,37 @@ func RecordDependencyEdgeBuild(args RecordDependencyEdgeArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation recordDependencyEdge(")
 	b.WriteString("edgeId: ")
-	b.WriteString(fmt.Sprintf("%q", args.EdgeId))
+	b.WriteString(quoteMemQLString(args.EdgeId))
 	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("bundleId: ")
-	b.WriteString(fmt.Sprintf("%q", args.BundleId))
+	b.WriteString(quoteMemQLString(args.BundleId))
 	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("fromConstruct: ")
-	b.WriteString(fmt.Sprintf("%q", args.FromConstruct))
+	b.WriteString(quoteMemQLString(args.FromConstruct))
 	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("fromKind: ")
-	b.WriteString(fmt.Sprintf("%q", args.FromKind))
+	b.WriteString(quoteMemQLString(args.FromKind))
 	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("toName: ")
-	b.WriteString(fmt.Sprintf("%q", args.ToName))
+	b.WriteString(quoteMemQLString(args.ToName))
 	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("toKind: ")
-	b.WriteString(fmt.Sprintf("%q", args.ToKind))
+	b.WriteString(quoteMemQLString(args.ToKind))
 	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("toSource: ")
-	b.WriteString(fmt.Sprintf("%q", args.ToSource))
+	b.WriteString(quoteMemQLString(args.ToSource))
 	b.WriteString(")")
 	return b.String()
 }
@@ -7917,30 +7917,30 @@ func RecordHarnessObservationBuild(args RecordHarnessObservationArgs) string {
 	b.WriteString("mutation recordHarnessObservation(")
 	if args.ObservationId != "" {
 		b.WriteString("observationId: ")
-		b.WriteString(fmt.Sprintf("%q", args.ObservationId))
+		b.WriteString(quoteMemQLString(args.ObservationId))
 	}
 	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("stepId: ")
-	b.WriteString(fmt.Sprintf("%q", args.StepId))
+	b.WriteString(quoteMemQLString(args.StepId))
 	if args.PlanId != "" {
 		if b.Len() > 34 {
 			b.WriteString(", ")
 		}
 		b.WriteString("planId: ")
-		b.WriteString(fmt.Sprintf("%q", args.PlanId))
+		b.WriteString(quoteMemQLString(args.PlanId))
 	}
 	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("kind: ")
-	b.WriteString(fmt.Sprintf("%q", args.Kind))
+	b.WriteString(quoteMemQLString(args.Kind))
 	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("content: ")
-	b.WriteString(fmt.Sprintf("%q", args.Content))
+	b.WriteString(quoteMemQLString(args.Content))
 	if args.Data != nil {
 		if b.Len() > 34 {
 			b.WriteString(", ")
@@ -7970,7 +7970,7 @@ func RecordLegalAcceptanceBuild(args RecordLegalAcceptanceArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation recordLegalAcceptance(")
 	b.WriteString("userId: ")
-	b.WriteString(fmt.Sprintf("%q", args.UserId))
+	b.WriteString(quoteMemQLString(args.UserId))
 	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
@@ -8000,18 +8000,18 @@ func RecordMentoredEventBuild(args RecordMentoredEventArgs) string {
 	b.WriteString("mutation recordMentoredEvent(")
 	if args.EventId != "" {
 		b.WriteString("eventId: ")
-		b.WriteString(fmt.Sprintf("%q", args.EventId))
+		b.WriteString(quoteMemQLString(args.EventId))
 	}
 	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("requestId: ")
-	b.WriteString(fmt.Sprintf("%q", args.RequestId))
+	b.WriteString(quoteMemQLString(args.RequestId))
 	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("note: ")
-	b.WriteString(fmt.Sprintf("%q", args.Note))
+	b.WriteString(quoteMemQLString(args.Note))
 	b.WriteString(")")
 	return b.String()
 }
@@ -8041,43 +8041,43 @@ func RecordNumberBuild(args RecordNumberArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation recordNumber(")
 	b.WriteString("e164: ")
-	b.WriteString(fmt.Sprintf("%q", args.E164))
+	b.WriteString(quoteMemQLString(args.E164))
 	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("carrier: ")
-	b.WriteString(fmt.Sprintf("%q", args.Carrier))
+	b.WriteString(quoteMemQLString(args.Carrier))
 	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("partitionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+	b.WriteString(quoteMemQLString(args.PartitionId))
 	if args.Purpose != "" {
 		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("purpose: ")
-		b.WriteString(fmt.Sprintf("%q", args.Purpose))
+		b.WriteString(quoteMemQLString(args.Purpose))
 	}
 	if args.ProviderId != "" {
 		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("providerId: ")
-		b.WriteString(fmt.Sprintf("%q", args.ProviderId))
+		b.WriteString(quoteMemQLString(args.ProviderId))
 	}
 	if args.NumberType != "" {
 		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("numberType: ")
-		b.WriteString(fmt.Sprintf("%q", args.NumberType))
+		b.WriteString(quoteMemQLString(args.NumberType))
 	}
 	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("monthlyCost: ")
-	b.WriteString(fmt.Sprintf("%q", args.MonthlyCost))
+	b.WriteString(renderMemQLValue(args.MonthlyCost))
 	b.WriteString(")")
 	return b.String()
 }
@@ -8101,7 +8101,7 @@ func RecordPlannerInvocationBuild(args RecordPlannerInvocationArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation recordPlannerInvocation(")
 	b.WriteString("planId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PlanId))
+	b.WriteString(quoteMemQLString(args.PlanId))
 	if args.TokenSpent != 0 {
 		if b.Len() > 33 {
 			b.WriteString(", ")
@@ -8143,38 +8143,38 @@ func RecordRequestEventBuild(args RecordRequestEventArgs) string {
 	b.WriteString("mutation recordRequestEvent(")
 	if args.EventId != "" {
 		b.WriteString("eventId: ")
-		b.WriteString(fmt.Sprintf("%q", args.EventId))
+		b.WriteString(quoteMemQLString(args.EventId))
 	}
 	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("requestId: ")
-	b.WriteString(fmt.Sprintf("%q", args.RequestId))
+	b.WriteString(quoteMemQLString(args.RequestId))
 	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("kind: ")
-	b.WriteString(fmt.Sprintf("%q", args.Kind))
+	b.WriteString(quoteMemQLString(args.Kind))
 	if args.FromStatus != "" {
 		if b.Len() > 28 {
 			b.WriteString(", ")
 		}
 		b.WriteString("fromStatus: ")
-		b.WriteString(fmt.Sprintf("%q", args.FromStatus))
+		b.WriteString(quoteMemQLString(args.FromStatus))
 	}
 	if args.ToStatus != "" {
 		if b.Len() > 28 {
 			b.WriteString(", ")
 		}
 		b.WriteString("toStatus: ")
-		b.WriteString(fmt.Sprintf("%q", args.ToStatus))
+		b.WriteString(quoteMemQLString(args.ToStatus))
 	}
 	if args.Note != "" {
 		if b.Len() > 28 {
 			b.WriteString(", ")
 		}
 		b.WriteString("note: ")
-		b.WriteString(fmt.Sprintf("%q", args.Note))
+		b.WriteString(quoteMemQLString(args.Note))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -8198,12 +8198,12 @@ func RecordResponsibilityEvaluationBuild(args RecordResponsibilityEvaluationArgs
 	var b strings.Builder
 	b.WriteString("mutation recordResponsibilityEvaluation(")
 	b.WriteString("responsibilityId: ")
-	b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
+	b.WriteString(quoteMemQLString(args.ResponsibilityId))
 	if b.Len() > 40 {
 		b.WriteString(", ")
 	}
 	b.WriteString("lastResult: ")
-	b.WriteString(fmt.Sprintf("%q", args.LastResult))
+	b.WriteString(quoteMemQLString(args.LastResult))
 	b.WriteString(")")
 	return b.String()
 }
@@ -8253,55 +8253,55 @@ func RecordRouterCallBuild(args RecordRouterCallArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation recordRouterCall(")
 	b.WriteString("callId: ")
-	b.WriteString(fmt.Sprintf("%q", args.CallId))
+	b.WriteString(quoteMemQLString(args.CallId))
 	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("requestId: ")
-	b.WriteString(fmt.Sprintf("%q", args.RequestId))
+	b.WriteString(quoteMemQLString(args.RequestId))
 	if args.AgentId != "" {
 		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("agentId: ")
-		b.WriteString(fmt.Sprintf("%q", args.AgentId))
+		b.WriteString(quoteMemQLString(args.AgentId))
 	}
 	if args.UserId != "" {
 		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("userId: ")
-		b.WriteString(fmt.Sprintf("%q", args.UserId))
+		b.WriteString(quoteMemQLString(args.UserId))
 	}
 	if args.PromptName != "" {
 		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("promptName: ")
-		b.WriteString(fmt.Sprintf("%q", args.PromptName))
+		b.WriteString(quoteMemQLString(args.PromptName))
 	}
 	if args.PolicyName != "" {
 		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("policyName: ")
-		b.WriteString(fmt.Sprintf("%q", args.PolicyName))
+		b.WriteString(quoteMemQLString(args.PolicyName))
 	}
 	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("vendor: ")
-	b.WriteString(fmt.Sprintf("%q", args.Vendor))
+	b.WriteString(quoteMemQLString(args.Vendor))
 	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("model: ")
-	b.WriteString(fmt.Sprintf("%q", args.Model))
+	b.WriteString(quoteMemQLString(args.Model))
 	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("providerName: ")
-	b.WriteString(fmt.Sprintf("%q", args.ProviderName))
+	b.WriteString(quoteMemQLString(args.ProviderName))
 	if args.InputTokens != 0 {
 		if b.Len() > 26 {
 			b.WriteString(", ")
@@ -8334,22 +8334,22 @@ func RecordRouterCallBuild(args RecordRouterCallArgs) string {
 		b.WriteString(", ")
 	}
 	b.WriteString("inputCost: ")
-	b.WriteString(fmt.Sprintf("%q", args.InputCost))
+	b.WriteString(renderMemQLValue(args.InputCost))
 	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("outputCost: ")
-	b.WriteString(fmt.Sprintf("%q", args.OutputCost))
+	b.WriteString(renderMemQLValue(args.OutputCost))
 	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("cachedInputCost: ")
-	b.WriteString(fmt.Sprintf("%q", args.CachedInputCost))
+	b.WriteString(renderMemQLValue(args.CachedInputCost))
 	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("totalCost: ")
-	b.WriteString(fmt.Sprintf("%q", args.TotalCost))
+	b.WriteString(renderMemQLValue(args.TotalCost))
 	if args.PricingConfiguredSet {
 		if b.Len() > 26 {
 			b.WriteString(", ")
@@ -8373,7 +8373,7 @@ func RecordRouterCallBuild(args RecordRouterCallArgs) string {
 		b.WriteString(", ")
 	}
 	b.WriteString("tokensPerSec: ")
-	b.WriteString(fmt.Sprintf("%q", args.TokensPerSec))
+	b.WriteString(renderMemQLValue(args.TokensPerSec))
 	if args.StreamingSet {
 		if b.Len() > 26 {
 			b.WriteString(", ")
@@ -8385,27 +8385,27 @@ func RecordRouterCallBuild(args RecordRouterCallArgs) string {
 		b.WriteString(", ")
 	}
 	b.WriteString("outcome: ")
-	b.WriteString(fmt.Sprintf("%q", args.Outcome))
+	b.WriteString(quoteMemQLString(args.Outcome))
 	if args.ErrorCategory != "" {
 		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("errorCategory: ")
-		b.WriteString(fmt.Sprintf("%q", args.ErrorCategory))
+		b.WriteString(quoteMemQLString(args.ErrorCategory))
 	}
 	if args.ErrorMessage != "" {
 		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("errorMessage: ")
-		b.WriteString(fmt.Sprintf("%q", args.ErrorMessage))
+		b.WriteString(quoteMemQLString(args.ErrorMessage))
 	}
 	if args.FallbackFromModel != "" {
 		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("fallbackFromModel: ")
-		b.WriteString(fmt.Sprintf("%q", args.FallbackFromModel))
+		b.WriteString(quoteMemQLString(args.FallbackFromModel))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -8434,39 +8434,39 @@ func RecordTrunkBuild(args RecordTrunkArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation recordTrunk(")
 	b.WriteString("carrier: ")
-	b.WriteString(fmt.Sprintf("%q", args.Carrier))
+	b.WriteString(quoteMemQLString(args.Carrier))
 	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("direction: ")
-	b.WriteString(fmt.Sprintf("%q", args.Direction))
+	b.WriteString(quoteMemQLString(args.Direction))
 	if args.Name != "" {
 		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("name: ")
-		b.WriteString(fmt.Sprintf("%q", args.Name))
+		b.WriteString(quoteMemQLString(args.Name))
 	}
 	if args.LivekitTrunkId != "" {
 		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("livekitTrunkId: ")
-		b.WriteString(fmt.Sprintf("%q", args.LivekitTrunkId))
+		b.WriteString(quoteMemQLString(args.LivekitTrunkId))
 	}
 	if args.SipEdgeUri != "" {
 		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sipEdgeUri: ")
-		b.WriteString(fmt.Sprintf("%q", args.SipEdgeUri))
+		b.WriteString(quoteMemQLString(args.SipEdgeUri))
 	}
 	if args.SecretRef != "" {
 		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("secretRef: ")
-		b.WriteString(fmt.Sprintf("%q", args.SecretRef))
+		b.WriteString(quoteMemQLString(args.SecretRef))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -8492,23 +8492,23 @@ func RedeemWorkerPairingCodeBuild(args RedeemWorkerPairingCodeArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation redeemWorkerPairingCode(")
 	b.WriteString("pairingId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PairingId))
+	b.WriteString(quoteMemQLString(args.PairingId))
 	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("redeemedAt: ")
-	b.WriteString(fmt.Sprintf("%q", args.RedeemedAt))
+	b.WriteString(quoteMemQLString(args.RedeemedAt))
 	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("redeemedBy: ")
-	b.WriteString(fmt.Sprintf("%q", args.RedeemedBy))
+	b.WriteString(quoteMemQLString(args.RedeemedBy))
 	if args.RedeemedFromIP != "" {
 		if b.Len() > 33 {
 			b.WriteString(", ")
 		}
 		b.WriteString("redeemedFromIP: ")
-		b.WriteString(fmt.Sprintf("%q", args.RedeemedFromIP))
+		b.WriteString(quoteMemQLString(args.RedeemedFromIP))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -8542,12 +8542,12 @@ func RefreshWorkerRegistrationBuild(args RefreshWorkerRegistrationArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation refreshWorkerRegistration(")
 	b.WriteString("registrationId: ")
-	b.WriteString(fmt.Sprintf("%q", args.RegistrationId))
+	b.WriteString(quoteMemQLString(args.RegistrationId))
 	if b.Len() > 35 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
-	b.WriteString(fmt.Sprintf("%q", args.Name))
+	b.WriteString(quoteMemQLString(args.Name))
 	if b.Len() > 35 {
 		b.WriteString(", ")
 	}
@@ -8591,26 +8591,26 @@ func RefreshWorkerRegistrationBuild(args RefreshWorkerRegistrationArgs) string {
 			b.WriteString(", ")
 		}
 		b.WriteString("version: ")
-		b.WriteString(fmt.Sprintf("%q", args.Version))
+		b.WriteString(quoteMemQLString(args.Version))
 	}
 	if args.BuildTag != "" {
 		if b.Len() > 35 {
 			b.WriteString(", ")
 		}
 		b.WriteString("buildTag: ")
-		b.WriteString(fmt.Sprintf("%q", args.BuildTag))
+		b.WriteString(quoteMemQLString(args.BuildTag))
 	}
 	if b.Len() > 35 {
 		b.WriteString(", ")
 	}
 	b.WriteString("lastSeenAt: ")
-	b.WriteString(fmt.Sprintf("%q", args.LastSeenAt))
+	b.WriteString(quoteMemQLString(args.LastSeenAt))
 	if args.LastConnectedFromIP != "" {
 		if b.Len() > 35 {
 			b.WriteString(", ")
 		}
 		b.WriteString("lastConnectedFromIP: ")
-		b.WriteString(fmt.Sprintf("%q", args.LastConnectedFromIP))
+		b.WriteString(quoteMemQLString(args.LastConnectedFromIP))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -8639,24 +8639,24 @@ func RegisterSurfaceBuild(args RegisterSurfaceArgs) string {
 	b.WriteString("mutation registerSurface(")
 	if args.SurfaceId != "" {
 		b.WriteString("surfaceId: ")
-		b.WriteString(fmt.Sprintf("%q", args.SurfaceId))
+		b.WriteString(quoteMemQLString(args.SurfaceId))
 	}
 	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("slug: ")
-	b.WriteString(fmt.Sprintf("%q", args.Slug))
+	b.WriteString(quoteMemQLString(args.Slug))
 	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("kind: ")
-	b.WriteString(fmt.Sprintf("%q", args.Kind))
+	b.WriteString(quoteMemQLString(args.Kind))
 	if args.MachineId != "" {
 		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("machineId: ")
-		b.WriteString(fmt.Sprintf("%q", args.MachineId))
+		b.WriteString(quoteMemQLString(args.MachineId))
 	}
 	if b.Len() > 25 {
 		b.WriteString(", ")
@@ -8693,12 +8693,12 @@ func ReinforceActionBuild(args ReinforceActionArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation reinforceAction(")
 	b.WriteString("actionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.ActionId))
+	b.WriteString(quoteMemQLString(args.ActionId))
 	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("reliability: ")
-	b.WriteString(fmt.Sprintf("%q", args.Reliability))
+	b.WriteString(renderMemQLValue(args.Reliability))
 	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
@@ -8728,12 +8728,12 @@ func ReinforceHarnessSemanticMemoryBuild(args ReinforceHarnessSemanticMemoryArgs
 	var b strings.Builder
 	b.WriteString("mutation reinforceHarnessSemanticMemory(")
 	b.WriteString("memoryId: ")
-	b.WriteString(fmt.Sprintf("%q", args.MemoryId))
+	b.WriteString(quoteMemQLString(args.MemoryId))
 	if b.Len() > 40 {
 		b.WriteString(", ")
 	}
 	b.WriteString("confidence: ")
-	b.WriteString(fmt.Sprintf("%q", args.Confidence))
+	b.WriteString(renderMemQLValue(args.Confidence))
 	if b.Len() > 40 {
 		b.WriteString(", ")
 	}
@@ -8767,18 +8767,18 @@ func RejectAccessRequestBuild(args RejectAccessRequestArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation rejectAccessRequest(")
 	b.WriteString("requestId: ")
-	b.WriteString(fmt.Sprintf("%q", args.RequestId))
+	b.WriteString(quoteMemQLString(args.RequestId))
 	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("reviewedBy: ")
-	b.WriteString(fmt.Sprintf("%q", args.ReviewedBy))
+	b.WriteString(quoteMemQLString(args.ReviewedBy))
 	if args.ReviewerNote != "" {
 		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("reviewerNote: ")
-		b.WriteString(fmt.Sprintf("%q", args.ReviewerNote))
+		b.WriteString(quoteMemQLString(args.ReviewerNote))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -8802,13 +8802,13 @@ func RejectOverrideBuild(args RejectOverrideArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation rejectOverride(")
 	b.WriteString("overrideId: ")
-	b.WriteString(fmt.Sprintf("%q", args.OverrideId))
+	b.WriteString(quoteMemQLString(args.OverrideId))
 	if args.RejectionReason != "" {
 		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("rejectionReason: ")
-		b.WriteString(fmt.Sprintf("%q", args.RejectionReason))
+		b.WriteString(quoteMemQLString(args.RejectionReason))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -8833,12 +8833,12 @@ func ReleaseWorkspaceBuild(args ReleaseWorkspaceArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation releaseWorkspace(")
 	b.WriteString("workspaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.WorkspaceId))
+	b.WriteString(quoteMemQLString(args.WorkspaceId))
 	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("reason: ")
-	b.WriteString(fmt.Sprintf("%q", args.Reason))
+	b.WriteString(quoteMemQLString(args.Reason))
 	b.WriteString(")")
 	return b.String()
 }
@@ -8861,12 +8861,12 @@ func RemoveAgentFromSpaceBuild(args RemoveAgentFromSpaceArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation removeAgentFromSpace(")
 	b.WriteString("partitionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+	b.WriteString(quoteMemQLString(args.PartitionId))
 	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("agentId: ")
-	b.WriteString(fmt.Sprintf("%q", args.AgentId))
+	b.WriteString(quoteMemQLString(args.AgentId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -8889,12 +8889,12 @@ func RequestChangesBuild(args RequestChangesArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation requestChanges(")
 	b.WriteString("requestId: ")
-	b.WriteString(fmt.Sprintf("%q", args.RequestId))
+	b.WriteString(quoteMemQLString(args.RequestId))
 	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("resolution: ")
-	b.WriteString(fmt.Sprintf("%q", args.Resolution))
+	b.WriteString(quoteMemQLString(args.Resolution))
 	b.WriteString(")")
 	return b.String()
 }
@@ -8917,7 +8917,7 @@ func RequestPlanFeedbackBuild(args RequestPlanFeedbackArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation requestPlanFeedback(")
 	b.WriteString("planId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PlanId))
+	b.WriteString(quoteMemQLString(args.PlanId))
 	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
@@ -8947,23 +8947,23 @@ func ResolveApprovalRequestBuild(args ResolveApprovalRequestArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation resolveApprovalRequest(")
 	b.WriteString("id: ")
-	b.WriteString(fmt.Sprintf("%q", args.Id))
+	b.WriteString(quoteMemQLString(args.Id))
 	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("status: ")
-	b.WriteString(fmt.Sprintf("%q", args.Status))
+	b.WriteString(quoteMemQLString(args.Status))
 	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("decidedBy: ")
-	b.WriteString(fmt.Sprintf("%q", args.DecidedBy))
+	b.WriteString(quoteMemQLString(args.DecidedBy))
 	if args.DecisionReason != "" {
 		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("decisionReason: ")
-		b.WriteString(fmt.Sprintf("%q", args.DecisionReason))
+		b.WriteString(quoteMemQLString(args.DecisionReason))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -8986,7 +8986,7 @@ func RetireAuthoringBundleBuild(args RetireAuthoringBundleArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation retireAuthoringBundle(")
 	b.WriteString("bundleId: ")
-	b.WriteString(fmt.Sprintf("%q", args.BundleId))
+	b.WriteString(quoteMemQLString(args.BundleId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -9011,12 +9011,12 @@ func RevertRecordBuild(args RevertRecordArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation revertRecord(")
 	b.WriteString("recordId: ")
-	b.WriteString(fmt.Sprintf("%q", args.RecordId))
+	b.WriteString(quoteMemQLString(args.RecordId))
 	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("toState: ")
-	b.WriteString(fmt.Sprintf("%q", args.ToState))
+	b.WriteString(quoteMemQLString(args.ToState))
 	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
@@ -9048,7 +9048,7 @@ func RevokeAgentAuthorizationBuild(args RevokeAgentAuthorizationArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation revokeAgentAuthorization(")
 	b.WriteString("authId: ")
-	b.WriteString(fmt.Sprintf("%q", args.AuthId))
+	b.WriteString(quoteMemQLString(args.AuthId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -9072,12 +9072,12 @@ func RevokeAuthSessionBuild(args RevokeAuthSessionArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation revokeAuthSession(")
 	b.WriteString("sessionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SessionId))
+	b.WriteString(quoteMemQLString(args.SessionId))
 	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("revokedReason: ")
-	b.WriteString(fmt.Sprintf("%q", args.RevokedReason))
+	b.WriteString(quoteMemQLString(args.RevokedReason))
 	b.WriteString(")")
 	return b.String()
 }
@@ -9099,7 +9099,7 @@ func RevokeBadgeIdentityBuild(args RevokeBadgeIdentityArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation revokeBadgeIdentity(")
 	b.WriteString("identityId: ")
-	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
+	b.WriteString(quoteMemQLString(args.IdentityId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -9123,20 +9123,20 @@ func RevokeDelegationBuild(args RevokeDelegationArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation revokeDelegation(")
 	b.WriteString("delegationId: ")
-	b.WriteString(fmt.Sprintf("%q", args.DelegationId))
+	b.WriteString(quoteMemQLString(args.DelegationId))
 	if args.RevokedBySubject != "" {
 		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("revokedBySubject: ")
-		b.WriteString(fmt.Sprintf("%q", args.RevokedBySubject))
+		b.WriteString(quoteMemQLString(args.RevokedBySubject))
 	}
 	if args.RevokedAt != "" {
 		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("revokedAt: ")
-		b.WriteString(fmt.Sprintf("%q", args.RevokedAt))
+		b.WriteString(quoteMemQLString(args.RevokedAt))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -9159,7 +9159,7 @@ func RevokeNodeTokenIdentityBuild(args RevokeNodeTokenIdentityArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation revokeNodeTokenIdentity(")
 	b.WriteString("identityId: ")
-	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
+	b.WriteString(quoteMemQLString(args.IdentityId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -9181,7 +9181,7 @@ func RevokePATIdentityBuild(args RevokePATIdentityArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation revokePATIdentity(")
 	b.WriteString("identityId: ")
-	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
+	b.WriteString(quoteMemQLString(args.IdentityId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -9206,25 +9206,25 @@ func RevokeWorkerBuild(args RevokeWorkerArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation revokeWorker(")
 	b.WriteString("registrationId: ")
-	b.WriteString(fmt.Sprintf("%q", args.RegistrationId))
+	b.WriteString(quoteMemQLString(args.RegistrationId))
 	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("revokedAt: ")
-	b.WriteString(fmt.Sprintf("%q", args.RevokedAt))
+	b.WriteString(quoteMemQLString(args.RevokedAt))
 	if args.RevokedBy != "" {
 		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("revokedBy: ")
-		b.WriteString(fmt.Sprintf("%q", args.RevokedBy))
+		b.WriteString(quoteMemQLString(args.RevokedBy))
 	}
 	if args.RevokeReason != "" {
 		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("revokeReason: ")
-		b.WriteString(fmt.Sprintf("%q", args.RevokeReason))
+		b.WriteString(quoteMemQLString(args.RevokeReason))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -9247,7 +9247,7 @@ func RevokeWorkerTokenIdentityBuild(args RevokeWorkerTokenIdentityArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation revokeWorkerTokenIdentity(")
 	b.WriteString("identityId: ")
-	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
+	b.WriteString(quoteMemQLString(args.IdentityId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -9272,22 +9272,22 @@ func RotateAuthSessionBuild(args RotateAuthSessionArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation rotateAuthSession(")
 	b.WriteString("sessionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SessionId))
+	b.WriteString(quoteMemQLString(args.SessionId))
 	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("newRefreshTokenHash: ")
-	b.WriteString(fmt.Sprintf("%q", args.NewRefreshTokenHash))
+	b.WriteString(quoteMemQLString(args.NewRefreshTokenHash))
 	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("previousRefreshTokenHash: ")
-	b.WriteString(fmt.Sprintf("%q", args.PreviousRefreshTokenHash))
+	b.WriteString(quoteMemQLString(args.PreviousRefreshTokenHash))
 	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("newExpiresAt: ")
-	b.WriteString(fmt.Sprintf("%q", args.NewExpiresAt))
+	b.WriteString(quoteMemQLString(args.NewExpiresAt))
 	b.WriteString(")")
 	return b.String()
 }
@@ -9309,7 +9309,7 @@ func ScheduleAccountDeletionBuild(args ScheduleAccountDeletionArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation scheduleAccountDeletion(")
 	b.WriteString("userId: ")
-	b.WriteString(fmt.Sprintf("%q", args.UserId))
+	b.WriteString(quoteMemQLString(args.UserId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -9339,31 +9339,31 @@ func SendActionUtteranceBuild(args SendActionUtteranceArgs) string {
 	b.WriteString("mutation sendActionUtterance(")
 	if args.UtteranceId != "" {
 		b.WriteString("utteranceId: ")
-		b.WriteString(fmt.Sprintf("%q", args.UtteranceId))
+		b.WriteString(quoteMemQLString(args.UtteranceId))
 	}
 	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("partitionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+	b.WriteString(quoteMemQLString(args.PartitionId))
 	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("participantId: ")
-	b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
+	b.WriteString(quoteMemQLString(args.ParticipantId))
 	if args.ParticipantType != "" {
 		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("participantType: ")
-		b.WriteString(fmt.Sprintf("%q", args.ParticipantType))
+		b.WriteString(quoteMemQLString(args.ParticipantType))
 	}
 	if args.ReplyToId != "" {
 		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("replyToId: ")
-		b.WriteString(fmt.Sprintf("%q", args.ReplyToId))
+		b.WriteString(quoteMemQLString(args.ReplyToId))
 	}
 	if args.Source != nil {
 		if b.Len() > 29 {
@@ -9377,7 +9377,7 @@ func SendActionUtteranceBuild(args SendActionUtteranceArgs) string {
 			b.WriteString(", ")
 		}
 		b.WriteString("createdAt: ")
-		b.WriteString(fmt.Sprintf("%q", args.CreatedAt))
+		b.WriteString(quoteMemQLString(args.CreatedAt))
 	}
 	if b.Len() > 29 {
 		b.WriteString(", ")
@@ -9418,59 +9418,59 @@ func SendRealtimeTranscriptUtteranceBuild(args SendRealtimeTranscriptUtteranceAr
 	b.WriteString("mutation sendRealtimeTranscriptUtterance(")
 	if args.UtteranceId != "" {
 		b.WriteString("utteranceId: ")
-		b.WriteString(fmt.Sprintf("%q", args.UtteranceId))
+		b.WriteString(quoteMemQLString(args.UtteranceId))
 	}
 	if args.IdempotencyKey != "" {
 		if b.Len() > 41 {
 			b.WriteString(", ")
 		}
 		b.WriteString("idempotencyKey: ")
-		b.WriteString(fmt.Sprintf("%q", args.IdempotencyKey))
+		b.WriteString(quoteMemQLString(args.IdempotencyKey))
 	}
 	if args.CreatedAt != "" {
 		if b.Len() > 41 {
 			b.WriteString(", ")
 		}
 		b.WriteString("createdAt: ")
-		b.WriteString(fmt.Sprintf("%q", args.CreatedAt))
+		b.WriteString(quoteMemQLString(args.CreatedAt))
 	}
 	if b.Len() > 41 {
 		b.WriteString(", ")
 	}
 	b.WriteString("partitionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+	b.WriteString(quoteMemQLString(args.PartitionId))
 	if b.Len() > 41 {
 		b.WriteString(", ")
 	}
 	b.WriteString("participantId: ")
-	b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
+	b.WriteString(quoteMemQLString(args.ParticipantId))
 	if args.ParticipantType != "" {
 		if b.Len() > 41 {
 			b.WriteString(", ")
 		}
 		b.WriteString("participantType: ")
-		b.WriteString(fmt.Sprintf("%q", args.ParticipantType))
+		b.WriteString(quoteMemQLString(args.ParticipantType))
 	}
 	if args.Text != "" {
 		if b.Len() > 41 {
 			b.WriteString(", ")
 		}
 		b.WriteString("text: ")
-		b.WriteString(fmt.Sprintf("%q", args.Text))
+		b.WriteString(quoteMemQLString(args.Text))
 	}
 	if args.AudioId != "" {
 		if b.Len() > 41 {
 			b.WriteString(", ")
 		}
 		b.WriteString("audioId: ")
-		b.WriteString(fmt.Sprintf("%q", args.AudioId))
+		b.WriteString(quoteMemQLString(args.AudioId))
 	}
 	if args.VideoId != "" {
 		if b.Len() > 41 {
 			b.WriteString(", ")
 		}
 		b.WriteString("videoId: ")
-		b.WriteString(fmt.Sprintf("%q", args.VideoId))
+		b.WriteString(quoteMemQLString(args.VideoId))
 	}
 	if args.Duration != 0 {
 		if b.Len() > 41 {
@@ -9524,45 +9524,45 @@ func SendSpeechUtteranceBuild(args SendSpeechUtteranceArgs) string {
 	b.WriteString("mutation sendSpeechUtterance(")
 	if args.UtteranceId != "" {
 		b.WriteString("utteranceId: ")
-		b.WriteString(fmt.Sprintf("%q", args.UtteranceId))
+		b.WriteString(quoteMemQLString(args.UtteranceId))
 	}
 	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("partitionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+	b.WriteString(quoteMemQLString(args.PartitionId))
 	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("participantId: ")
-	b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
+	b.WriteString(quoteMemQLString(args.ParticipantId))
 	if args.ParticipantType != "" {
 		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("participantType: ")
-		b.WriteString(fmt.Sprintf("%q", args.ParticipantType))
+		b.WriteString(quoteMemQLString(args.ParticipantType))
 	}
 	if args.Text != "" {
 		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("text: ")
-		b.WriteString(fmt.Sprintf("%q", args.Text))
+		b.WriteString(quoteMemQLString(args.Text))
 	}
 	if args.AudioId != "" {
 		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("audioId: ")
-		b.WriteString(fmt.Sprintf("%q", args.AudioId))
+		b.WriteString(quoteMemQLString(args.AudioId))
 	}
 	if args.VideoId != "" {
 		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("videoId: ")
-		b.WriteString(fmt.Sprintf("%q", args.VideoId))
+		b.WriteString(quoteMemQLString(args.VideoId))
 	}
 	if args.Duration != 0 {
 		if b.Len() > 29 {
@@ -9614,36 +9614,36 @@ func SendTextUtteranceBuild(args SendTextUtteranceArgs) string {
 	b.WriteString("mutation sendTextUtterance(")
 	if args.UtteranceId != "" {
 		b.WriteString("utteranceId: ")
-		b.WriteString(fmt.Sprintf("%q", args.UtteranceId))
+		b.WriteString(quoteMemQLString(args.UtteranceId))
 	}
 	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("partitionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+	b.WriteString(quoteMemQLString(args.PartitionId))
 	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("participantId: ")
-	b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
+	b.WriteString(quoteMemQLString(args.ParticipantId))
 	if args.ParticipantType != "" {
 		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("participantType: ")
-		b.WriteString(fmt.Sprintf("%q", args.ParticipantType))
+		b.WriteString(quoteMemQLString(args.ParticipantType))
 	}
 	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("text: ")
-	b.WriteString(fmt.Sprintf("%q", args.Text))
+	b.WriteString(quoteMemQLString(args.Text))
 	if args.ReplyToId != "" {
 		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("replyToId: ")
-		b.WriteString(fmt.Sprintf("%q", args.ReplyToId))
+		b.WriteString(quoteMemQLString(args.ReplyToId))
 	}
 	if args.Source != nil {
 		if b.Len() > 27 {
@@ -9686,12 +9686,12 @@ func SetAccountEntitlementBuild(args SetAccountEntitlementArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation setAccountEntitlement(")
 	b.WriteString("accountId: ")
-	b.WriteString(fmt.Sprintf("%q", args.AccountId))
+	b.WriteString(quoteMemQLString(args.AccountId))
 	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("tier: ")
-	b.WriteString(fmt.Sprintf("%q", args.Tier))
+	b.WriteString(quoteMemQLString(args.Tier))
 	if args.MaxConcurrentTasks != 0 {
 		if b.Len() > 31 {
 			b.WriteString(", ")
@@ -9704,14 +9704,14 @@ func SetAccountEntitlementBuild(args SetAccountEntitlementArgs) string {
 			b.WriteString(", ")
 		}
 		b.WriteString("accountKind: ")
-		b.WriteString(fmt.Sprintf("%q", args.AccountKind))
+		b.WriteString(quoteMemQLString(args.AccountKind))
 	}
 	if args.Note != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("note: ")
-		b.WriteString(fmt.Sprintf("%q", args.Note))
+		b.WriteString(quoteMemQLString(args.Note))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -9739,23 +9739,23 @@ func SetAgentAudioOverrideBuild(args SetAgentAudioOverrideArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation setAgentAudioOverride(")
 	b.WriteString("partitionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+	b.WriteString(quoteMemQLString(args.PartitionId))
 	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("agentId: ")
-	b.WriteString(fmt.Sprintf("%q", args.AgentId))
+	b.WriteString(quoteMemQLString(args.AgentId))
 	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("mode: ")
-	b.WriteString(fmt.Sprintf("%q", args.Mode))
+	b.WriteString(quoteMemQLString(args.Mode))
 	if args.SetBy != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("setBy: ")
-		b.WriteString(fmt.Sprintf("%q", args.SetBy))
+		b.WriteString(quoteMemQLString(args.SetBy))
 	}
 	if args.ActiveSet {
 		if b.Len() > 31 {
@@ -9790,23 +9790,23 @@ func SetAgentVideoOverrideBuild(args SetAgentVideoOverrideArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation setAgentVideoOverride(")
 	b.WriteString("partitionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+	b.WriteString(quoteMemQLString(args.PartitionId))
 	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("agentId: ")
-	b.WriteString(fmt.Sprintf("%q", args.AgentId))
+	b.WriteString(quoteMemQLString(args.AgentId))
 	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("mode: ")
-	b.WriteString(fmt.Sprintf("%q", args.Mode))
+	b.WriteString(quoteMemQLString(args.Mode))
 	if args.SetBy != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("setBy: ")
-		b.WriteString(fmt.Sprintf("%q", args.SetBy))
+		b.WriteString(quoteMemQLString(args.SetBy))
 	}
 	if args.ActiveSet {
 		if b.Len() > 31 {
@@ -9861,18 +9861,18 @@ func SetAuthoringBundleStatusBuild(args SetAuthoringBundleStatusArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation setAuthoringBundleStatus(")
 	b.WriteString("bundleId: ")
-	b.WriteString(fmt.Sprintf("%q", args.BundleId))
+	b.WriteString(quoteMemQLString(args.BundleId))
 	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("status: ")
-	b.WriteString(fmt.Sprintf("%q", args.Status))
+	b.WriteString(quoteMemQLString(args.Status))
 	if args.FailureReason != "" {
 		if b.Len() > 34 {
 			b.WriteString(", ")
 		}
 		b.WriteString("failureReason: ")
-		b.WriteString(fmt.Sprintf("%q", args.FailureReason))
+		b.WriteString(quoteMemQLString(args.FailureReason))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -9903,29 +9903,29 @@ func SetBudgetBuild(args SetBudgetArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation setBudget(")
 	b.WriteString("id: ")
-	b.WriteString(fmt.Sprintf("%q", args.Id))
+	b.WriteString(quoteMemQLString(args.Id))
 	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
 	b.WriteString("scope: ")
-	b.WriteString(fmt.Sprintf("%q", args.Scope))
+	b.WriteString(quoteMemQLString(args.Scope))
 	if args.ScopeId != "" {
 		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("scopeId: ")
-		b.WriteString(fmt.Sprintf("%q", args.ScopeId))
+		b.WriteString(quoteMemQLString(args.ScopeId))
 	}
 	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
 	b.WriteString("periodType: ")
-	b.WriteString(fmt.Sprintf("%q", args.PeriodType))
+	b.WriteString(quoteMemQLString(args.PeriodType))
 	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
 	b.WriteString("limitUSD: ")
-	b.WriteString(fmt.Sprintf("%q", args.LimitUSD))
+	b.WriteString(renderMemQLValue(args.LimitUSD))
 	if args.AlertThresholdPct != 0 {
 		if b.Len() > 19 {
 			b.WriteString(", ")
@@ -9938,7 +9938,7 @@ func SetBudgetBuild(args SetBudgetArgs) string {
 			b.WriteString(", ")
 		}
 		b.WriteString("resetAt: ")
-		b.WriteString(fmt.Sprintf("%q", args.ResetAt))
+		b.WriteString(quoteMemQLString(args.ResetAt))
 	}
 	if args.ActiveSet {
 		if b.Len() > 19 {
@@ -9973,30 +9973,30 @@ func SetConsentBuild(args SetConsentArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation setConsent(")
 	b.WriteString("phoneNumber: ")
-	b.WriteString(fmt.Sprintf("%q", args.PhoneNumber))
+	b.WriteString(quoteMemQLString(args.PhoneNumber))
 	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("partitionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+	b.WriteString(quoteMemQLString(args.PartitionId))
 	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("status: ")
-	b.WriteString(fmt.Sprintf("%q", args.Status))
+	b.WriteString(quoteMemQLString(args.Status))
 	if args.Reason != "" {
 		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("reason: ")
-		b.WriteString(fmt.Sprintf("%q", args.Reason))
+		b.WriteString(quoteMemQLString(args.Reason))
 	}
 	if args.Source != "" {
 		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("source: ")
-		b.WriteString(fmt.Sprintf("%q", args.Source))
+		b.WriteString(quoteMemQLString(args.Source))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -10020,7 +10020,7 @@ func SetConstructCompiledFormBuild(args SetConstructCompiledFormArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation setConstructCompiledForm(")
 	b.WriteString("constructId: ")
-	b.WriteString(fmt.Sprintf("%q", args.ConstructId))
+	b.WriteString(quoteMemQLString(args.ConstructId))
 	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
@@ -10049,12 +10049,12 @@ func SetConstructStatusBuild(args SetConstructStatusArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation setConstructStatus(")
 	b.WriteString("constructId: ")
-	b.WriteString(fmt.Sprintf("%q", args.ConstructId))
+	b.WriteString(quoteMemQLString(args.ConstructId))
 	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("status: ")
-	b.WriteString(fmt.Sprintf("%q", args.Status))
+	b.WriteString(quoteMemQLString(args.Status))
 	b.WriteString(")")
 	return b.String()
 }
@@ -10084,42 +10084,42 @@ func SetGlobalSecretBuild(args SetGlobalSecretArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation setGlobalSecret(")
 	b.WriteString("id: ")
-	b.WriteString(fmt.Sprintf("%q", args.Id))
+	b.WriteString(quoteMemQLString(args.Id))
 	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
-	b.WriteString(fmt.Sprintf("%q", args.Name))
+	b.WriteString(quoteMemQLString(args.Name))
 	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("encryptedValue: ")
-	b.WriteString(fmt.Sprintf("%q", args.EncryptedValue))
+	b.WriteString(quoteMemQLString(args.EncryptedValue))
 	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("fingerprint: ")
-	b.WriteString(fmt.Sprintf("%q", args.Fingerprint))
+	b.WriteString(quoteMemQLString(args.Fingerprint))
 	if args.Kind != "" {
 		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("kind: ")
-		b.WriteString(fmt.Sprintf("%q", args.Kind))
+		b.WriteString(quoteMemQLString(args.Kind))
 	}
 	if args.Description != "" {
 		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("description: ")
-		b.WriteString(fmt.Sprintf("%q", args.Description))
+		b.WriteString(quoteMemQLString(args.Description))
 	}
 	if args.AddedBy != "" {
 		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("addedBy: ")
-		b.WriteString(fmt.Sprintf("%q", args.AddedBy))
+		b.WriteString(quoteMemQLString(args.AddedBy))
 	}
 	if args.ActiveSet {
 		if b.Len() > 25 {
@@ -10154,23 +10154,23 @@ func SetGlobalVariableBuild(args SetGlobalVariableArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation setGlobalVariable(")
 	b.WriteString("id: ")
-	b.WriteString(fmt.Sprintf("%q", args.Id))
+	b.WriteString(quoteMemQLString(args.Id))
 	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
-	b.WriteString(fmt.Sprintf("%q", args.Name))
+	b.WriteString(quoteMemQLString(args.Name))
 	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("value: ")
-	b.WriteString(fmt.Sprintf("%q", args.Value))
+	b.WriteString(quoteMemQLString(args.Value))
 	if args.Description != "" {
 		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("description: ")
-		b.WriteString(fmt.Sprintf("%q", args.Description))
+		b.WriteString(quoteMemQLString(args.Description))
 	}
 	if args.ActiveSet {
 		if b.Len() > 27 {
@@ -10204,7 +10204,7 @@ func SetNumberE911Build(args SetNumberE911Args) string {
 	var b strings.Builder
 	b.WriteString("mutation setNumberE911(")
 	b.WriteString("id: ")
-	b.WriteString(fmt.Sprintf("%q", args.Id))
+	b.WriteString(quoteMemQLString(args.Id))
 	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
@@ -10215,7 +10215,7 @@ func SetNumberE911Build(args SetNumberE911Args) string {
 			b.WriteString(", ")
 		}
 		b.WriteString("e911AddressId: ")
-		b.WriteString(fmt.Sprintf("%q", args.E911AddressId))
+		b.WriteString(quoteMemQLString(args.E911AddressId))
 	}
 	if args.CallerIdVerifiedSet {
 		if b.Len() > 23 {
@@ -10253,42 +10253,42 @@ func SetPartitionSecretBuild(args SetPartitionSecretArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation setPartitionSecret(")
 	b.WriteString("id: ")
-	b.WriteString(fmt.Sprintf("%q", args.Id))
+	b.WriteString(quoteMemQLString(args.Id))
 	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
-	b.WriteString(fmt.Sprintf("%q", args.Name))
+	b.WriteString(quoteMemQLString(args.Name))
 	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("encryptedValue: ")
-	b.WriteString(fmt.Sprintf("%q", args.EncryptedValue))
+	b.WriteString(quoteMemQLString(args.EncryptedValue))
 	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("fingerprint: ")
-	b.WriteString(fmt.Sprintf("%q", args.Fingerprint))
+	b.WriteString(quoteMemQLString(args.Fingerprint))
 	if args.Kind != "" {
 		if b.Len() > 28 {
 			b.WriteString(", ")
 		}
 		b.WriteString("kind: ")
-		b.WriteString(fmt.Sprintf("%q", args.Kind))
+		b.WriteString(quoteMemQLString(args.Kind))
 	}
 	if args.Description != "" {
 		if b.Len() > 28 {
 			b.WriteString(", ")
 		}
 		b.WriteString("description: ")
-		b.WriteString(fmt.Sprintf("%q", args.Description))
+		b.WriteString(quoteMemQLString(args.Description))
 	}
 	if args.AddedBy != "" {
 		if b.Len() > 28 {
 			b.WriteString(", ")
 		}
 		b.WriteString("addedBy: ")
-		b.WriteString(fmt.Sprintf("%q", args.AddedBy))
+		b.WriteString(quoteMemQLString(args.AddedBy))
 	}
 	if args.ActiveSet {
 		if b.Len() > 28 {
@@ -10323,23 +10323,23 @@ func SetPartitionVariableBuild(args SetPartitionVariableArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation setPartitionVariable(")
 	b.WriteString("id: ")
-	b.WriteString(fmt.Sprintf("%q", args.Id))
+	b.WriteString(quoteMemQLString(args.Id))
 	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
-	b.WriteString(fmt.Sprintf("%q", args.Name))
+	b.WriteString(quoteMemQLString(args.Name))
 	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("value: ")
-	b.WriteString(fmt.Sprintf("%q", args.Value))
+	b.WriteString(quoteMemQLString(args.Value))
 	if args.Description != "" {
 		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("description: ")
-		b.WriteString(fmt.Sprintf("%q", args.Description))
+		b.WriteString(quoteMemQLString(args.Description))
 	}
 	if args.ActiveSet {
 		if b.Len() > 30 {
@@ -10376,18 +10376,18 @@ func SetPolicyBuild(args SetPolicyArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation setPolicy(")
 	b.WriteString("policyId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PolicyId))
+	b.WriteString(quoteMemQLString(args.PolicyId))
 	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
 	b.WriteString("targetRecordType: ")
-	b.WriteString(fmt.Sprintf("%q", args.TargetRecordType))
+	b.WriteString(quoteMemQLString(args.TargetRecordType))
 	if args.PartitionId != "" {
 		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("partitionId: ")
-		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+		b.WriteString(quoteMemQLString(args.PartitionId))
 	}
 	if args.RequiredChecks != 0 {
 		if b.Len() > 19 {
@@ -10415,7 +10415,7 @@ func SetPolicyBuild(args SetPolicyArgs) string {
 			b.WriteString(", ")
 		}
 		b.WriteString("revertMinRole: ")
-		b.WriteString(fmt.Sprintf("%q", args.RevertMinRole))
+		b.WriteString(quoteMemQLString(args.RevertMinRole))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -10440,12 +10440,12 @@ func SetResponsibilityStatusBuild(args SetResponsibilityStatusArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation setResponsibilityStatus(")
 	b.WriteString("responsibilityId: ")
-	b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
+	b.WriteString(quoteMemQLString(args.ResponsibilityId))
 	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("status: ")
-	b.WriteString(fmt.Sprintf("%q", args.Status))
+	b.WriteString(quoteMemQLString(args.Status))
 	b.WriteString(")")
 	return b.String()
 }
@@ -10468,7 +10468,7 @@ func SetSurfaceAvailabilityBuild(args SetSurfaceAvailabilityArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation setSurfaceAvailability(")
 	b.WriteString("surfaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SurfaceId))
+	b.WriteString(quoteMemQLString(args.SurfaceId))
 	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
@@ -10497,20 +10497,20 @@ func SetUserActiveSpaceBuild(args SetUserActiveSpaceArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation setUserActiveSpace(")
 	b.WriteString("userId: ")
-	b.WriteString(fmt.Sprintf("%q", args.UserId))
+	b.WriteString(quoteMemQLString(args.UserId))
 	if args.PartitionId != "" {
 		if b.Len() > 28 {
 			b.WriteString(", ")
 		}
 		b.WriteString("partitionId: ")
-		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+		b.WriteString(quoteMemQLString(args.PartitionId))
 	}
 	if args.ActivePartitionId != "" {
 		if b.Len() > 28 {
 			b.WriteString(", ")
 		}
 		b.WriteString("activePartitionId: ")
-		b.WriteString(fmt.Sprintf("%q", args.ActivePartitionId))
+		b.WriteString(quoteMemQLString(args.ActivePartitionId))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -10533,7 +10533,7 @@ func SoftDeleteWorkerInvocationBuild(args SoftDeleteWorkerInvocationArgs) string
 	var b strings.Builder
 	b.WriteString("mutation softDeleteWorkerInvocation(")
 	b.WriteString("invocationId: ")
-	b.WriteString(fmt.Sprintf("%q", args.InvocationId))
+	b.WriteString(quoteMemQLString(args.InvocationId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -10563,35 +10563,35 @@ func StageInboundRequestBuild(args StageInboundRequestArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation stageInboundRequest(")
 	b.WriteString("requestId: ")
-	b.WriteString(fmt.Sprintf("%q", args.RequestId))
+	b.WriteString(quoteMemQLString(args.RequestId))
 	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("source: ")
-	b.WriteString(fmt.Sprintf("%q", args.Source))
+	b.WriteString(quoteMemQLString(args.Source))
 	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("medium: ")
-	b.WriteString(fmt.Sprintf("%q", args.Medium))
+	b.WriteString(quoteMemQLString(args.Medium))
 	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("body: ")
-	b.WriteString(fmt.Sprintf("%q", args.Body))
+	b.WriteString(quoteMemQLString(args.Body))
 	if args.ContentType != "" {
 		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("contentType: ")
-		b.WriteString(fmt.Sprintf("%q", args.ContentType))
+		b.WriteString(quoteMemQLString(args.ContentType))
 	}
 	if args.DedupeKey != "" {
 		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("dedupeKey: ")
-		b.WriteString(fmt.Sprintf("%q", args.DedupeKey))
+		b.WriteString(quoteMemQLString(args.DedupeKey))
 	}
 	if args.SignatureVerifiedSet {
 		if b.Len() > 29 {
@@ -10605,7 +10605,7 @@ func StageInboundRequestBuild(args StageInboundRequestArgs) string {
 			b.WriteString(", ")
 		}
 		b.WriteString("receivedAt: ")
-		b.WriteString(fmt.Sprintf("%q", args.ReceivedAt))
+		b.WriteString(quoteMemQLString(args.ReceivedAt))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -10634,42 +10634,42 @@ func StageOutboundRequestBuild(args StageOutboundRequestArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation stageOutboundRequest(")
 	b.WriteString("requestId: ")
-	b.WriteString(fmt.Sprintf("%q", args.RequestId))
+	b.WriteString(quoteMemQLString(args.RequestId))
 	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("medium: ")
-	b.WriteString(fmt.Sprintf("%q", args.Medium))
+	b.WriteString(quoteMemQLString(args.Medium))
 	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("target: ")
-	b.WriteString(fmt.Sprintf("%q", args.Target))
+	b.WriteString(quoteMemQLString(args.Target))
 	if args.Subject != "" {
 		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("subject: ")
-		b.WriteString(fmt.Sprintf("%q", args.Subject))
+		b.WriteString(quoteMemQLString(args.Subject))
 	}
 	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("body: ")
-	b.WriteString(fmt.Sprintf("%q", args.Body))
+	b.WriteString(quoteMemQLString(args.Body))
 	if args.DedupeKey != "" {
 		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("dedupeKey: ")
-		b.WriteString(fmt.Sprintf("%q", args.DedupeKey))
+		b.WriteString(quoteMemQLString(args.DedupeKey))
 	}
 	if args.RequestedBy != "" {
 		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("requestedBy: ")
-		b.WriteString(fmt.Sprintf("%q", args.RequestedBy))
+		b.WriteString(quoteMemQLString(args.RequestedBy))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -10695,22 +10695,22 @@ func StampNodeTokenBootstrapBuild(args StampNodeTokenBootstrapArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation stampNodeTokenBootstrap(")
 	b.WriteString("identityId: ")
-	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
+	b.WriteString(quoteMemQLString(args.IdentityId))
 	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("keyHash: ")
-	b.WriteString(fmt.Sprintf("%q", args.KeyHash))
+	b.WriteString(quoteMemQLString(args.KeyHash))
 	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("bootstrappedAt: ")
-	b.WriteString(fmt.Sprintf("%q", args.BootstrappedAt))
+	b.WriteString(quoteMemQLString(args.BootstrappedAt))
 	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("bootstrappedFrom: ")
-	b.WriteString(fmt.Sprintf("%q", args.BootstrappedFrom))
+	b.WriteString(quoteMemQLString(args.BootstrappedFrom))
 	b.WriteString(")")
 	return b.String()
 }
@@ -10733,13 +10733,13 @@ func StartHarnessStepBuild(args StartHarnessStepArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation startHarnessStep(")
 	b.WriteString("stepId: ")
-	b.WriteString(fmt.Sprintf("%q", args.StepId))
+	b.WriteString(quoteMemQLString(args.StepId))
 	if args.AssignedAgent != "" {
 		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("assignedAgent: ")
-		b.WriteString(fmt.Sprintf("%q", args.AssignedAgent))
+		b.WriteString(quoteMemQLString(args.AssignedAgent))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -10762,7 +10762,7 @@ func StartPlanBuild(args StartPlanArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation startPlan(")
 	b.WriteString("planId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PlanId))
+	b.WriteString(quoteMemQLString(args.PlanId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -10807,7 +10807,7 @@ func TouchBadgeLastUsedBuild(args TouchBadgeLastUsedArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation touchBadgeLastUsed(")
 	b.WriteString("identityId: ")
-	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
+	b.WriteString(quoteMemQLString(args.IdentityId))
 	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
@@ -10835,7 +10835,7 @@ func TouchSessionBuild(args TouchSessionArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation touchSession(")
 	b.WriteString("sessionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SessionId))
+	b.WriteString(quoteMemQLString(args.SessionId))
 	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
@@ -10862,7 +10862,7 @@ func TouchWorkspaceBuild(args TouchWorkspaceArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation touchWorkspace(")
 	b.WriteString("workspaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.WorkspaceId))
+	b.WriteString(quoteMemQLString(args.WorkspaceId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -10885,7 +10885,7 @@ func UpdateAgentBuild(args UpdateAgentArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation updateAgent(")
 	b.WriteString("agentId: ")
-	b.WriteString(fmt.Sprintf("%q", args.AgentId))
+	b.WriteString(quoteMemQLString(args.AgentId))
 	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
@@ -10913,12 +10913,12 @@ func UpdateAgentAuthScopeBuild(args UpdateAgentAuthScopeArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation updateAgentAuthScope(")
 	b.WriteString("authorizationId: ")
-	b.WriteString(fmt.Sprintf("%q", args.AuthorizationId))
+	b.WriteString(quoteMemQLString(args.AuthorizationId))
 	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("computerUseScope: ")
-	b.WriteString(fmt.Sprintf("%q", args.ComputerUseScope))
+	b.WriteString(quoteMemQLString(args.ComputerUseScope))
 	b.WriteString(")")
 	return b.String()
 }
@@ -10941,7 +10941,7 @@ func UpdateAgentAuthorizationBuild(args UpdateAgentAuthorizationArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation updateAgentAuthorization(")
 	b.WriteString("authId: ")
-	b.WriteString(fmt.Sprintf("%q", args.AuthId))
+	b.WriteString(quoteMemQLString(args.AuthId))
 	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
@@ -10969,7 +10969,7 @@ func UpdateCalendarEventBuild(args UpdateCalendarEventArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation updateCalendarEvent(")
 	b.WriteString("eventId: ")
-	b.WriteString(fmt.Sprintf("%q", args.EventId))
+	b.WriteString(quoteMemQLString(args.EventId))
 	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
@@ -11024,135 +11024,135 @@ func UpdateClusterSettingsBuild(args UpdateClusterSettingsArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation updateClusterSettings(")
 	b.WriteString("id: ")
-	b.WriteString(fmt.Sprintf("%q", args.Id))
+	b.WriteString(quoteMemQLString(args.Id))
 	if args.ClusterDomain != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("clusterDomain: ")
-		b.WriteString(fmt.Sprintf("%q", args.ClusterDomain))
+		b.WriteString(quoteMemQLString(args.ClusterDomain))
 	}
 	if args.BrandName != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("brandName: ")
-		b.WriteString(fmt.Sprintf("%q", args.BrandName))
+		b.WriteString(quoteMemQLString(args.BrandName))
 	}
 	if args.BrandPrimaryColor != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("brandPrimaryColor: ")
-		b.WriteString(fmt.Sprintf("%q", args.BrandPrimaryColor))
+		b.WriteString(quoteMemQLString(args.BrandPrimaryColor))
 	}
 	if args.BrandLogoDataURI != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("brandLogoDataURI: ")
-		b.WriteString(fmt.Sprintf("%q", args.BrandLogoDataURI))
+		b.WriteString(quoteMemQLString(args.BrandLogoDataURI))
 	}
 	if args.BrandIconDataURI != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("brandIconDataURI: ")
-		b.WriteString(fmt.Sprintf("%q", args.BrandIconDataURI))
+		b.WriteString(quoteMemQLString(args.BrandIconDataURI))
 	}
 	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("registrationMode: ")
-	b.WriteString(fmt.Sprintf("%q", args.RegistrationMode))
+	b.WriteString(quoteMemQLString(args.RegistrationMode))
 	if args.RegistrationDomains != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("registrationDomains: ")
-		b.WriteString(fmt.Sprintf("%q", args.RegistrationDomains))
+		b.WriteString(quoteMemQLString(args.RegistrationDomains))
 	}
 	if args.InternalDomains != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("internalDomains: ")
-		b.WriteString(fmt.Sprintf("%q", args.InternalDomains))
+		b.WriteString(quoteMemQLString(args.InternalDomains))
 	}
 	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("internalDefaultRole: ")
-	b.WriteString(fmt.Sprintf("%q", args.InternalDefaultRole))
+	b.WriteString(quoteMemQLString(args.InternalDefaultRole))
 	if args.RegisteredClientsJSON != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("registeredClientsJSON: ")
-		b.WriteString(fmt.Sprintf("%q", args.RegisteredClientsJSON))
+		b.WriteString(quoteMemQLString(args.RegisteredClientsJSON))
 	}
 	if args.AccessRequestNotifyEmails != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("accessRequestNotifyEmails: ")
-		b.WriteString(fmt.Sprintf("%q", args.AccessRequestNotifyEmails))
+		b.WriteString(quoteMemQLString(args.AccessRequestNotifyEmails))
 	}
 	if args.BootstrapEmail != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrapEmail: ")
-		b.WriteString(fmt.Sprintf("%q", args.BootstrapEmail))
+		b.WriteString(quoteMemQLString(args.BootstrapEmail))
 	}
 	if args.BootstrapFirstName != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrapFirstName: ")
-		b.WriteString(fmt.Sprintf("%q", args.BootstrapFirstName))
+		b.WriteString(quoteMemQLString(args.BootstrapFirstName))
 	}
 	if args.BootstrapLastName != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrapLastName: ")
-		b.WriteString(fmt.Sprintf("%q", args.BootstrapLastName))
+		b.WriteString(quoteMemQLString(args.BootstrapLastName))
 	}
 	if args.BootstrapPhone != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrapPhone: ")
-		b.WriteString(fmt.Sprintf("%q", args.BootstrapPhone))
+		b.WriteString(quoteMemQLString(args.BootstrapPhone))
 	}
 	if args.BootstrapPrimaryRole != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrapPrimaryRole: ")
-		b.WriteString(fmt.Sprintf("%q", args.BootstrapPrimaryRole))
+		b.WriteString(quoteMemQLString(args.BootstrapPrimaryRole))
 	}
 	if args.BootstrapGender != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrapGender: ")
-		b.WriteString(fmt.Sprintf("%q", args.BootstrapGender))
+		b.WriteString(quoteMemQLString(args.BootstrapGender))
 	}
 	if args.BootstrapBirthdate != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrapBirthdate: ")
-		b.WriteString(fmt.Sprintf("%q", args.BootstrapBirthdate))
+		b.WriteString(quoteMemQLString(args.BootstrapBirthdate))
 	}
 	if args.BootstrappedAt != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrappedAt: ")
-		b.WriteString(fmt.Sprintf("%q", args.BootstrappedAt))
+		b.WriteString(quoteMemQLString(args.BootstrappedAt))
 	}
 	if args.AccessTokenTTLSeconds != 0 {
 		if b.Len() > 31 {
@@ -11187,7 +11187,7 @@ func UpdateClusterSettingsBuild(args UpdateClusterSettingsArgs) string {
 			b.WriteString(", ")
 		}
 		b.WriteString("refreshCookieSameSite: ")
-		b.WriteString(fmt.Sprintf("%q", args.RefreshCookieSameSite))
+		b.WriteString(quoteMemQLString(args.RefreshCookieSameSite))
 	}
 	if args.AuthoredAutomationsEnabledSet {
 		if b.Len() > 31 {
@@ -11221,18 +11221,18 @@ func UpdateDeploymentNodeSpecBuild(args UpdateDeploymentNodeSpecArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation updateDeploymentNodeSpec(")
 	b.WriteString("deploymentId: ")
-	b.WriteString(fmt.Sprintf("%q", args.DeploymentId))
+	b.WriteString(quoteMemQLString(args.DeploymentId))
 	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("nodeType: ")
-	b.WriteString(fmt.Sprintf("%q", args.NodeType))
+	b.WriteString(quoteMemQLString(args.NodeType))
 	if args.Version != "" {
 		if b.Len() > 34 {
 			b.WriteString(", ")
 		}
 		b.WriteString("version: ")
-		b.WriteString(fmt.Sprintf("%q", args.Version))
+		b.WriteString(quoteMemQLString(args.Version))
 	}
 	if args.Replicas != 0 {
 		if b.Len() > 34 {
@@ -11246,7 +11246,7 @@ func UpdateDeploymentNodeSpecBuild(args UpdateDeploymentNodeSpecArgs) string {
 			b.WriteString(", ")
 		}
 		b.WriteString("imageDigest: ")
-		b.WriteString(fmt.Sprintf("%q", args.ImageDigest))
+		b.WriteString(quoteMemQLString(args.ImageDigest))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -11271,12 +11271,12 @@ func UpdateDeploymentStatusBuild(args UpdateDeploymentStatusArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation updateDeploymentStatus(")
 	b.WriteString("deploymentId: ")
-	b.WriteString(fmt.Sprintf("%q", args.DeploymentId))
+	b.WriteString(quoteMemQLString(args.DeploymentId))
 	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("status: ")
-	b.WriteString(fmt.Sprintf("%q", args.Status))
+	b.WriteString(quoteMemQLString(args.Status))
 	b.WriteString(")")
 	return b.String()
 }
@@ -11310,72 +11310,72 @@ func UpdateGeneratedOutputContentBuild(args UpdateGeneratedOutputContentArgs) st
 	var b strings.Builder
 	b.WriteString("mutation updateGeneratedOutputContent(")
 	b.WriteString("outputId: ")
-	b.WriteString(fmt.Sprintf("%q", args.OutputId))
+	b.WriteString(quoteMemQLString(args.OutputId))
 	if b.Len() > 38 {
 		b.WriteString(", ")
 	}
 	b.WriteString("title: ")
-	b.WriteString(fmt.Sprintf("%q", args.Title))
+	b.WriteString(quoteMemQLString(args.Title))
 	if args.Summary != "" {
 		if b.Len() > 38 {
 			b.WriteString(", ")
 		}
 		b.WriteString("summary: ")
-		b.WriteString(fmt.Sprintf("%q", args.Summary))
+		b.WriteString(quoteMemQLString(args.Summary))
 	}
 	if args.Body != "" {
 		if b.Len() > 38 {
 			b.WriteString(", ")
 		}
 		b.WriteString("body: ")
-		b.WriteString(fmt.Sprintf("%q", args.Body))
+		b.WriteString(quoteMemQLString(args.Body))
 	}
 	if args.AttachmentId != "" {
 		if b.Len() > 38 {
 			b.WriteString(", ")
 		}
 		b.WriteString("attachmentId: ")
-		b.WriteString(fmt.Sprintf("%q", args.AttachmentId))
+		b.WriteString(quoteMemQLString(args.AttachmentId))
 	}
 	if args.Format != "" {
 		if b.Len() > 38 {
 			b.WriteString(", ")
 		}
 		b.WriteString("format: ")
-		b.WriteString(fmt.Sprintf("%q", args.Format))
+		b.WriteString(quoteMemQLString(args.Format))
 	}
 	if args.MimeType != "" {
 		if b.Len() > 38 {
 			b.WriteString(", ")
 		}
 		b.WriteString("mimeType: ")
-		b.WriteString(fmt.Sprintf("%q", args.MimeType))
+		b.WriteString(quoteMemQLString(args.MimeType))
 	}
 	if b.Len() > 38 {
 		b.WriteString(", ")
 	}
 	b.WriteString("source: ")
-	b.WriteString(fmt.Sprintf("%q", args.Source))
+	b.WriteString(quoteMemQLString(args.Source))
 	if args.PartitionId != "" {
 		if b.Len() > 38 {
 			b.WriteString(", ")
 		}
 		b.WriteString("partitionId: ")
-		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+		b.WriteString(quoteMemQLString(args.PartitionId))
 	}
 	if args.ProducedByPlanId != "" {
 		if b.Len() > 38 {
 			b.WriteString(", ")
 		}
 		b.WriteString("producedByPlanId: ")
-		b.WriteString(fmt.Sprintf("%q", args.ProducedByPlanId))
+		b.WriteString(quoteMemQLString(args.ProducedByPlanId))
 	}
 	if args.ProducedByAgentId != "" {
 		if b.Len() > 38 {
 			b.WriteString(", ")
 		}
 		b.WriteString("producedByAgentId: ")
-		b.WriteString(fmt.Sprintf("%q", args.ProducedByAgentId))
+		b.WriteString(quoteMemQLString(args.ProducedByAgentId))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -11399,7 +11399,7 @@ func UpdateIdentityBuild(args UpdateIdentityArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation updateIdentity(")
 	b.WriteString("identityId: ")
-	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
+	b.WriteString(quoteMemQLString(args.IdentityId))
 	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
@@ -11429,25 +11429,25 @@ func UpdateInboundRequestStatusBuild(args UpdateInboundRequestStatusArgs) string
 	var b strings.Builder
 	b.WriteString("mutation updateInboundRequestStatus(")
 	b.WriteString("requestId: ")
-	b.WriteString(fmt.Sprintf("%q", args.RequestId))
+	b.WriteString(quoteMemQLString(args.RequestId))
 	if b.Len() > 36 {
 		b.WriteString(", ")
 	}
 	b.WriteString("status: ")
-	b.WriteString(fmt.Sprintf("%q", args.Status))
+	b.WriteString(quoteMemQLString(args.Status))
 	if args.LastError != "" {
 		if b.Len() > 36 {
 			b.WriteString(", ")
 		}
 		b.WriteString("lastError: ")
-		b.WriteString(fmt.Sprintf("%q", args.LastError))
+		b.WriteString(quoteMemQLString(args.LastError))
 	}
 	if args.ProcessedAt != "" {
 		if b.Len() > 36 {
 			b.WriteString(", ")
 		}
 		b.WriteString("processedAt: ")
-		b.WriteString(fmt.Sprintf("%q", args.ProcessedAt))
+		b.WriteString(quoteMemQLString(args.ProcessedAt))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -11472,18 +11472,18 @@ func UpdateMissingCapabilityStatusBuild(args UpdateMissingCapabilityStatusArgs) 
 	var b strings.Builder
 	b.WriteString("mutation updateMissingCapabilityStatus(")
 	b.WriteString("missingId: ")
-	b.WriteString(fmt.Sprintf("%q", args.MissingId))
+	b.WriteString(quoteMemQLString(args.MissingId))
 	if b.Len() > 39 {
 		b.WriteString(", ")
 	}
 	b.WriteString("status: ")
-	b.WriteString(fmt.Sprintf("%q", args.Status))
+	b.WriteString(quoteMemQLString(args.Status))
 	if args.Resolution != "" {
 		if b.Len() > 39 {
 			b.WriteString(", ")
 		}
 		b.WriteString("resolution: ")
-		b.WriteString(fmt.Sprintf("%q", args.Resolution))
+		b.WriteString(quoteMemQLString(args.Resolution))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -11508,17 +11508,17 @@ func UpdateNodeHealthBuild(args UpdateNodeHealthArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation updateNodeHealth(")
 	b.WriteString("id: ")
-	b.WriteString(fmt.Sprintf("%q", args.Id))
+	b.WriteString(quoteMemQLString(args.Id))
 	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("health: ")
-	b.WriteString(fmt.Sprintf("%q", args.Health))
+	b.WriteString(quoteMemQLString(args.Health))
 	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("lastSeen: ")
-	b.WriteString(fmt.Sprintf("%q", args.LastSeen))
+	b.WriteString(quoteMemQLString(args.LastSeen))
 	b.WriteString(")")
 	return b.String()
 }
@@ -11541,7 +11541,7 @@ func UpdateNoteBuild(args UpdateNoteArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation updateNote(")
 	b.WriteString("noteId: ")
-	b.WriteString(fmt.Sprintf("%q", args.NoteId))
+	b.WriteString(quoteMemQLString(args.NoteId))
 	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
@@ -11570,12 +11570,12 @@ func UpdateNumberStatusBuild(args UpdateNumberStatusArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation updateNumberStatus(")
 	b.WriteString("id: ")
-	b.WriteString(fmt.Sprintf("%q", args.Id))
+	b.WriteString(quoteMemQLString(args.Id))
 	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("status: ")
-	b.WriteString(fmt.Sprintf("%q", args.Status))
+	b.WriteString(quoteMemQLString(args.Status))
 	b.WriteString(")")
 	return b.String()
 }
@@ -11602,12 +11602,12 @@ func UpdateOutboundRequestStatusBuild(args UpdateOutboundRequestStatusArgs) stri
 	var b strings.Builder
 	b.WriteString("mutation updateOutboundRequestStatus(")
 	b.WriteString("requestId: ")
-	b.WriteString(fmt.Sprintf("%q", args.RequestId))
+	b.WriteString(quoteMemQLString(args.RequestId))
 	if b.Len() > 37 {
 		b.WriteString(", ")
 	}
 	b.WriteString("status: ")
-	b.WriteString(fmt.Sprintf("%q", args.Status))
+	b.WriteString(quoteMemQLString(args.Status))
 	if args.Attempts != 0 {
 		if b.Len() > 37 {
 			b.WriteString(", ")
@@ -11620,21 +11620,21 @@ func UpdateOutboundRequestStatusBuild(args UpdateOutboundRequestStatusArgs) stri
 			b.WriteString(", ")
 		}
 		b.WriteString("lastError: ")
-		b.WriteString(fmt.Sprintf("%q", args.LastError))
+		b.WriteString(quoteMemQLString(args.LastError))
 	}
 	if args.NextAttemptAt != "" {
 		if b.Len() > 37 {
 			b.WriteString(", ")
 		}
 		b.WriteString("nextAttemptAt: ")
-		b.WriteString(fmt.Sprintf("%q", args.NextAttemptAt))
+		b.WriteString(quoteMemQLString(args.NextAttemptAt))
 	}
 	if args.SentAt != "" {
 		if b.Len() > 37 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sentAt: ")
-		b.WriteString(fmt.Sprintf("%q", args.SentAt))
+		b.WriteString(quoteMemQLString(args.SentAt))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -11669,62 +11669,62 @@ func UpdateParticipantPresenceBuild(args UpdateParticipantPresenceArgs) string {
 	b.WriteString("mutation updateParticipantPresence(")
 	if args.PresenceId != "" {
 		b.WriteString("presenceId: ")
-		b.WriteString(fmt.Sprintf("%q", args.PresenceId))
+		b.WriteString(quoteMemQLString(args.PresenceId))
 	}
 	if b.Len() > 35 {
 		b.WriteString(", ")
 	}
 	b.WriteString("participantId: ")
-	b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
+	b.WriteString(quoteMemQLString(args.ParticipantId))
 	if b.Len() > 35 {
 		b.WriteString(", ")
 	}
 	b.WriteString("partitionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+	b.WriteString(quoteMemQLString(args.PartitionId))
 	if b.Len() > 35 {
 		b.WriteString(", ")
 	}
 	b.WriteString("state: ")
-	b.WriteString(fmt.Sprintf("%q", args.State))
+	b.WriteString(quoteMemQLString(args.State))
 	if b.Len() > 35 {
 		b.WriteString(", ")
 	}
 	b.WriteString("label: ")
-	b.WriteString(fmt.Sprintf("%q", args.Label))
+	b.WriteString(quoteMemQLString(args.Label))
 	if args.Reason != "" {
 		if b.Len() > 35 {
 			b.WriteString(", ")
 		}
 		b.WriteString("reason: ")
-		b.WriteString(fmt.Sprintf("%q", args.Reason))
+		b.WriteString(quoteMemQLString(args.Reason))
 	}
 	if args.SinceAt != "" {
 		if b.Len() > 35 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sinceAt: ")
-		b.WriteString(fmt.Sprintf("%q", args.SinceAt))
+		b.WriteString(quoteMemQLString(args.SinceAt))
 	}
 	if args.LastUpdatedAt != "" {
 		if b.Len() > 35 {
 			b.WriteString(", ")
 		}
 		b.WriteString("lastUpdatedAt: ")
-		b.WriteString(fmt.Sprintf("%q", args.LastUpdatedAt))
+		b.WriteString(quoteMemQLString(args.LastUpdatedAt))
 	}
 	if args.LastUtteranceId != "" {
 		if b.Len() > 35 {
 			b.WriteString(", ")
 		}
 		b.WriteString("lastUtteranceId: ")
-		b.WriteString(fmt.Sprintf("%q", args.LastUtteranceId))
+		b.WriteString(quoteMemQLString(args.LastUtteranceId))
 	}
 	if args.LastError != "" {
 		if b.Len() > 35 {
 			b.WriteString(", ")
 		}
 		b.WriteString("lastError: ")
-		b.WriteString(fmt.Sprintf("%q", args.LastError))
+		b.WriteString(quoteMemQLString(args.LastError))
 	}
 	if args.Intent != nil {
 		if b.Len() > 35 {
@@ -11755,7 +11755,7 @@ func UpdateParticipantStatusBuild(args UpdateParticipantStatusArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation updateParticipantStatus(")
 	b.WriteString("participantId: ")
-	b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
+	b.WriteString(quoteMemQLString(args.ParticipantId))
 	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
@@ -11802,18 +11802,18 @@ func UpdatePlanStatusBuild(args UpdatePlanStatusArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation updatePlanStatus(")
 	b.WriteString("planId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PlanId))
+	b.WriteString(quoteMemQLString(args.PlanId))
 	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("status: ")
-	b.WriteString(fmt.Sprintf("%q", args.Status))
+	b.WriteString(quoteMemQLString(args.Status))
 	if args.OwnerAgentId != "" {
 		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("ownerAgentId: ")
-		b.WriteString(fmt.Sprintf("%q", args.OwnerAgentId))
+		b.WriteString(quoteMemQLString(args.OwnerAgentId))
 	}
 	if args.Output != nil {
 		if b.Len() > 26 {
@@ -11827,35 +11827,35 @@ func UpdatePlanStatusBuild(args UpdatePlanStatusArgs) string {
 			b.WriteString(", ")
 		}
 		b.WriteString("errorMessage: ")
-		b.WriteString(fmt.Sprintf("%q", args.ErrorMessage))
+		b.WriteString(quoteMemQLString(args.ErrorMessage))
 	}
 	if args.StartedAt != "" {
 		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("startedAt: ")
-		b.WriteString(fmt.Sprintf("%q", args.StartedAt))
+		b.WriteString(quoteMemQLString(args.StartedAt))
 	}
 	if args.CompletedAt != "" {
 		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("completedAt: ")
-		b.WriteString(fmt.Sprintf("%q", args.CompletedAt))
+		b.WriteString(quoteMemQLString(args.CompletedAt))
 	}
 	if args.CancelledBy != "" {
 		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("cancelledBy: ")
-		b.WriteString(fmt.Sprintf("%q", args.CancelledBy))
+		b.WriteString(quoteMemQLString(args.CancelledBy))
 	}
 	if args.PausedAt != "" {
 		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("pausedAt: ")
-		b.WriteString(fmt.Sprintf("%q", args.PausedAt))
+		b.WriteString(quoteMemQLString(args.PausedAt))
 	}
 	if args.TotalPausedMs != 0 {
 		if b.Len() > 26 {
@@ -11883,14 +11883,14 @@ func UpdatePlanStatusBuild(args UpdatePlanStatusArgs) string {
 			b.WriteString(", ")
 		}
 		b.WriteString("feedbackReason: ")
-		b.WriteString(fmt.Sprintf("%q", args.FeedbackReason))
+		b.WriteString(quoteMemQLString(args.FeedbackReason))
 	}
 	if args.RecommendationCardId != "" {
 		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("recommendationCardId: ")
-		b.WriteString(fmt.Sprintf("%q", args.RecommendationCardId))
+		b.WriteString(quoteMemQLString(args.RecommendationCardId))
 	}
 	if args.Phases != nil {
 		if b.Len() > 26 {
@@ -11911,7 +11911,7 @@ func UpdatePlanStatusBuild(args UpdatePlanStatusArgs) string {
 			b.WriteString(", ")
 		}
 		b.WriteString("estimatedAt: ")
-		b.WriteString(fmt.Sprintf("%q", args.EstimatedAt))
+		b.WriteString(quoteMemQLString(args.EstimatedAt))
 	}
 	if args.TokenSpent != 0 {
 		if b.Len() > 26 {
@@ -11939,7 +11939,7 @@ func UpdatePlanStatusBuild(args UpdatePlanStatusArgs) string {
 			b.WriteString(", ")
 		}
 		b.WriteString("computerUseScope: ")
-		b.WriteString(fmt.Sprintf("%q", args.ComputerUseScope))
+		b.WriteString(quoteMemQLString(args.ComputerUseScope))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -11967,7 +11967,7 @@ func UpdateRecordBuild(args UpdateRecordArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation updateRecord(")
 	b.WriteString("recordId: ")
-	b.WriteString(fmt.Sprintf("%q", args.RecordId))
+	b.WriteString(quoteMemQLString(args.RecordId))
 	if args.Data != nil {
 		if b.Len() > 22 {
 			b.WriteString(", ")
@@ -11980,21 +11980,21 @@ func UpdateRecordBuild(args UpdateRecordArgs) string {
 			b.WriteString(", ")
 		}
 		b.WriteString("label: ")
-		b.WriteString(fmt.Sprintf("%q", args.Label))
+		b.WriteString(quoteMemQLString(args.Label))
 	}
 	if args.NaturalKeyField != "" {
 		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("naturalKeyField: ")
-		b.WriteString(fmt.Sprintf("%q", args.NaturalKeyField))
+		b.WriteString(quoteMemQLString(args.NaturalKeyField))
 	}
 	if args.NaturalKeyValue != "" {
 		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("naturalKeyValue: ")
-		b.WriteString(fmt.Sprintf("%q", args.NaturalKeyValue))
+		b.WriteString(quoteMemQLString(args.NaturalKeyValue))
 	}
 	if args.Confidence != 0 {
 		if b.Len() > 22 {
@@ -12038,27 +12038,27 @@ func UpdateResponsibilityBuild(args UpdateResponsibilityArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation updateResponsibility(")
 	b.WriteString("responsibilityId: ")
-	b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
+	b.WriteString(quoteMemQLString(args.ResponsibilityId))
 	if args.Statement != "" {
 		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("statement: ")
-		b.WriteString(fmt.Sprintf("%q", args.Statement))
+		b.WriteString(quoteMemQLString(args.Statement))
 	}
 	if args.Trigger != "" {
 		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("trigger: ")
-		b.WriteString(fmt.Sprintf("%q", args.Trigger))
+		b.WriteString(quoteMemQLString(args.Trigger))
 	}
 	if args.Schedule != "" {
 		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("schedule: ")
-		b.WriteString(fmt.Sprintf("%q", args.Schedule))
+		b.WriteString(quoteMemQLString(args.Schedule))
 	}
 	if args.Condition != nil {
 		if b.Len() > 30 {
@@ -12072,42 +12072,42 @@ func UpdateResponsibilityBuild(args UpdateResponsibilityArgs) string {
 			b.WriteString(", ")
 		}
 		b.WriteString("targetKind: ")
-		b.WriteString(fmt.Sprintf("%q", args.TargetKind))
+		b.WriteString(quoteMemQLString(args.TargetKind))
 	}
 	if args.AssignedAgentId != "" {
 		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("assignedAgentId: ")
-		b.WriteString(fmt.Sprintf("%q", args.AssignedAgentId))
+		b.WriteString(quoteMemQLString(args.AssignedAgentId))
 	}
 	if args.AssignedRoleSlug != "" {
 		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("assignedRoleSlug: ")
-		b.WriteString(fmt.Sprintf("%q", args.AssignedRoleSlug))
+		b.WriteString(quoteMemQLString(args.AssignedRoleSlug))
 	}
 	if args.SuccessCriteria != "" {
 		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("successCriteria: ")
-		b.WriteString(fmt.Sprintf("%q", args.SuccessCriteria))
+		b.WriteString(quoteMemQLString(args.SuccessCriteria))
 	}
 	if args.NotifyHow != "" {
 		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("notifyHow: ")
-		b.WriteString(fmt.Sprintf("%q", args.NotifyHow))
+		b.WriteString(quoteMemQLString(args.NotifyHow))
 	}
 	if args.ScopePartitionId != "" {
 		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("scopePartitionId: ")
-		b.WriteString(fmt.Sprintf("%q", args.ScopePartitionId))
+		b.WriteString(quoteMemQLString(args.ScopePartitionId))
 	}
 	if args.EnabledSet {
 		if b.Len() > 30 {
@@ -12138,7 +12138,7 @@ func UpdateSessionDevicesBuild(args UpdateSessionDevicesArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation updateSessionDevices(")
 	b.WriteString("sessionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SessionId))
+	b.WriteString(quoteMemQLString(args.SessionId))
 	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
@@ -12166,7 +12166,7 @@ func UpdateSessionStreamsBuild(args UpdateSessionStreamsArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation updateSessionStreams(")
 	b.WriteString("sessionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SessionId))
+	b.WriteString(quoteMemQLString(args.SessionId))
 	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
@@ -12201,12 +12201,12 @@ func UpdateTaskStatusBuild(args UpdateTaskStatusArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation updateTaskStatus(")
 	b.WriteString("taskId: ")
-	b.WriteString(fmt.Sprintf("%q", args.TaskId))
+	b.WriteString(quoteMemQLString(args.TaskId))
 	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("status: ")
-	b.WriteString(fmt.Sprintf("%q", args.Status))
+	b.WriteString(quoteMemQLString(args.Status))
 	if args.Output != nil {
 		if b.Len() > 26 {
 			b.WriteString(", ")
@@ -12219,35 +12219,35 @@ func UpdateTaskStatusBuild(args UpdateTaskStatusArgs) string {
 			b.WriteString(", ")
 		}
 		b.WriteString("errorMessage: ")
-		b.WriteString(fmt.Sprintf("%q", args.ErrorMessage))
+		b.WriteString(quoteMemQLString(args.ErrorMessage))
 	}
 	if args.StartedAt != "" {
 		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("startedAt: ")
-		b.WriteString(fmt.Sprintf("%q", args.StartedAt))
+		b.WriteString(quoteMemQLString(args.StartedAt))
 	}
 	if args.CompletedAt != "" {
 		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("completedAt: ")
-		b.WriteString(fmt.Sprintf("%q", args.CompletedAt))
+		b.WriteString(quoteMemQLString(args.CompletedAt))
 	}
 	if args.ParkedAt != "" {
 		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("parkedAt: ")
-		b.WriteString(fmt.Sprintf("%q", args.ParkedAt))
+		b.WriteString(quoteMemQLString(args.ParkedAt))
 	}
 	if args.ParkedAtCheckpoint != "" {
 		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("parkedAtCheckpoint: ")
-		b.WriteString(fmt.Sprintf("%q", args.ParkedAtCheckpoint))
+		b.WriteString(quoteMemQLString(args.ParkedAtCheckpoint))
 	}
 	if args.Metrics != nil {
 		if b.Len() > 26 {
@@ -12278,7 +12278,7 @@ func UpdateTodoBuild(args UpdateTodoArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation updateTodo(")
 	b.WriteString("todoId: ")
-	b.WriteString(fmt.Sprintf("%q", args.TodoId))
+	b.WriteString(quoteMemQLString(args.TodoId))
 	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
@@ -12307,18 +12307,18 @@ func UpdateWorkerLastSeenBuild(args UpdateWorkerLastSeenArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation updateWorkerLastSeen(")
 	b.WriteString("registrationId: ")
-	b.WriteString(fmt.Sprintf("%q", args.RegistrationId))
+	b.WriteString(quoteMemQLString(args.RegistrationId))
 	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("lastSeenAt: ")
-	b.WriteString(fmt.Sprintf("%q", args.LastSeenAt))
+	b.WriteString(quoteMemQLString(args.LastSeenAt))
 	if args.LastConnectedFromIP != "" {
 		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("lastConnectedFromIP: ")
-		b.WriteString(fmt.Sprintf("%q", args.LastConnectedFromIP))
+		b.WriteString(quoteMemQLString(args.LastConnectedFromIP))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -12342,7 +12342,7 @@ func ValidateOverrideBuild(args ValidateOverrideArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation validateOverride(")
 	b.WriteString("overrideId: ")
-	b.WriteString(fmt.Sprintf("%q", args.OverrideId))
+	b.WriteString(quoteMemQLString(args.OverrideId))
 	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
@@ -12369,7 +12369,7 @@ func ValidateRequestBuild(args ValidateRequestArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation validateRequest(")
 	b.WriteString("requestId: ")
-	b.WriteString(fmt.Sprintf("%q", args.RequestId))
+	b.WriteString(quoteMemQLString(args.RequestId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -12397,22 +12397,22 @@ func WriteKnowledgeChunkBuild(args WriteKnowledgeChunkArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation writeKnowledgeChunk(")
 	b.WriteString("chunkId: ")
-	b.WriteString(fmt.Sprintf("%q", args.ChunkId))
+	b.WriteString(quoteMemQLString(args.ChunkId))
 	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("domainId: ")
-	b.WriteString(fmt.Sprintf("%q", args.DomainId))
+	b.WriteString(quoteMemQLString(args.DomainId))
 	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("text: ")
-	b.WriteString(fmt.Sprintf("%q", args.Text))
+	b.WriteString(quoteMemQLString(args.Text))
 	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("sourceRef: ")
-	b.WriteString(fmt.Sprintf("%q", args.SourceRef))
+	b.WriteString(quoteMemQLString(args.SourceRef))
 	if args.Seq != 0 {
 		if b.Len() > 29 {
 			b.WriteString(", ")
@@ -12432,7 +12432,7 @@ func WriteKnowledgeChunkBuild(args WriteKnowledgeChunkArgs) string {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourceTopic: ")
-		b.WriteString(fmt.Sprintf("%q", args.SourceTopic))
+		b.WriteString(quoteMemQLString(args.SourceTopic))
 	}
 	b.WriteString(")")
 	return b.String()

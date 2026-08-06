@@ -176,7 +176,7 @@ func emitArgComposer(buf *bytes.Buffer, a ArgField, first bool, prefixLen int) {
 func renderArg(field, typ string) string {
 	switch typ {
 	case "string", "datetime":
-		return fmt.Sprintf("fmt.Sprintf(\"%%q\", args.%s)", field)
+		return fmt.Sprintf("quoteMemQLString(args.%s)", field)
 	case "bool", "boolean":
 		return fmt.Sprintf("fmt.Sprintf(\"%%v\", args.%s)", field)
 	case "number", "int", "integer":
@@ -187,12 +187,20 @@ func renderArg(field, typ string) string {
 		return fmt.Sprintf("renderMemQLValue(args.%s)", field)
 	default:
 		if strings.HasPrefix(typ, "enum(") {
-			return fmt.Sprintf("fmt.Sprintf(\"%%q\", args.%s)", field)
+			return fmt.Sprintf("quoteMemQLString(args.%s)", field)
 		}
 		if strings.HasPrefix(typ, "[]") {
 			return fmt.Sprintf("renderMemQLValue(args.%s)", field)
 		}
-		return fmt.Sprintf("fmt.Sprintf(\"%%q\", args.%s)", field)
+		// Unknown DSL type -> goType emits `any`, so the field is NOT a string
+		// and the string-only quoter cannot take it. renderMemQLValue is the
+		// general renderer and switches on the dynamic type, quoting a string
+		// through quoteMemQLString and rendering everything else structurally.
+		//
+		// This also corrects the previous `%q`, which was wrong for this branch
+		// in a second way: on a map or slice it emitted a QUOTED GO
+		// REPRESENTATION (`"map[a:1]"`) rather than a MemQL value (memql#3099).
+		return fmt.Sprintf("renderMemQLValue(args.%s)", field)
 	}
 }
 

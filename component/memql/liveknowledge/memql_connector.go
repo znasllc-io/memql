@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // MemqlConnector is the built-in connector for kind='memql'. The
@@ -94,7 +96,9 @@ func substituteArgs(template string, args map[string]any) (string, error) {
 func memqlQuote(v any) string {
 	switch x := v.(type) {
 	case string:
-		return fmt.Sprintf("%q", x)
+		// QuoteString, not %q -- the escape sets disagree and the lexer treats
+		// the difference as a parse error (memql#3099).
+		return langparser.QuoteString(x)
 	case bool:
 		if x {
 			return "true"
@@ -103,6 +107,6 @@ func memqlQuote(v any) string {
 	case int, int32, int64, float32, float64:
 		return fmt.Sprintf("%v", x)
 	default:
-		return fmt.Sprintf("%q", fmt.Sprintf("%v", x))
+		return langparser.QuoteString(fmt.Sprintf("%v", x))
 	}
 }

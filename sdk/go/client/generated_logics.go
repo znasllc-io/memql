@@ -229,7 +229,7 @@ func DeployOutcomeLabelBuild(args DeployOutcomeLabelArgs) string {
 	var b strings.Builder
 	b.WriteString("logic deployOutcomeLabel(")
 	b.WriteString("passed: ")
-	b.WriteString(fmt.Sprintf("%q", args.Passed))
+	b.WriteString(renderMemQLValue(args.Passed))
 	b.WriteString(")")
 	return b.String()
 }
@@ -250,12 +250,12 @@ func DeployRollbackTargetBuild(args DeployRollbackTargetArgs) string {
 	var b strings.Builder
 	b.WriteString("logic deployRollbackTarget(")
 	b.WriteString("passed: ")
-	b.WriteString(fmt.Sprintf("%q", args.Passed))
+	b.WriteString(renderMemQLValue(args.Passed))
 	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("previousDeploymentId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PreviousDeploymentId))
+	b.WriteString(renderMemQLValue(args.PreviousDeploymentId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -340,7 +340,7 @@ func GovernanceCanCreatePrincipalBuild(args GovernanceCanCreatePrincipalArgs) st
 	var b strings.Builder
 	b.WriteString("logic governanceCanCreatePrincipal(")
 	b.WriteString("newRoleSlug: ")
-	b.WriteString(fmt.Sprintf("%q", args.NewRoleSlug))
+	b.WriteString(quoteMemQLString(args.NewRoleSlug))
 	b.WriteString(")")
 	return b.String()
 }
@@ -362,17 +362,17 @@ func GovernanceCanManagePrincipalBuild(args GovernanceCanManagePrincipalArgs) st
 	var b strings.Builder
 	b.WriteString("logic governanceCanManagePrincipal(")
 	b.WriteString("targetUserId: ")
-	b.WriteString(fmt.Sprintf("%q", args.TargetUserId))
+	b.WriteString(quoteMemQLString(args.TargetUserId))
 	if b.Len() > 35 {
 		b.WriteString(", ")
 	}
 	b.WriteString("targetRoleSlug: ")
-	b.WriteString(fmt.Sprintf("%q", args.TargetRoleSlug))
+	b.WriteString(quoteMemQLString(args.TargetRoleSlug))
 	if b.Len() > 35 {
 		b.WriteString(", ")
 	}
 	b.WriteString("verb: ")
-	b.WriteString(fmt.Sprintf("%q", args.Verb))
+	b.WriteString(quoteMemQLString(args.Verb))
 	b.WriteString(")")
 	return b.String()
 }
@@ -433,13 +433,13 @@ func NextDeploymentVersionBuild(args NextDeploymentVersionArgs) string {
 	var b strings.Builder
 	b.WriteString("logic nextDeploymentVersion(")
 	b.WriteString("current: ")
-	b.WriteString(fmt.Sprintf("%q", args.Current))
+	b.WriteString(quoteMemQLString(args.Current))
 	if args.Bump != "" {
 		if b.Len() > 28 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bump: ")
-		b.WriteString(fmt.Sprintf("%q", args.Bump))
+		b.WriteString(quoteMemQLString(args.Bump))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -480,7 +480,7 @@ func PlanIsTerminalBuild(args PlanIsTerminalArgs) string {
 	var b strings.Builder
 	b.WriteString("logic planIsTerminal(")
 	b.WriteString("status: ")
-	b.WriteString(fmt.Sprintf("%q", args.Status))
+	b.WriteString(renderMemQLValue(args.Status))
 	b.WriteString(")")
 	return b.String()
 }
@@ -600,7 +600,7 @@ func RequestRouteStatusBuild(args RequestRouteStatusArgs) string {
 	var b strings.Builder
 	b.WriteString("logic requestRouteStatus(")
 	b.WriteString("submitterRole: ")
-	b.WriteString(fmt.Sprintf("%q", args.SubmitterRole))
+	b.WriteString(renderMemQLValue(args.SubmitterRole))
 	b.WriteString(")")
 	return b.String()
 }
@@ -621,7 +621,7 @@ func RevokeExpiredDelegationsBuild(args RevokeExpiredDelegationsArgs) string {
 	var b strings.Builder
 	b.WriteString("logic revokeExpiredDelegations(")
 	b.WriteString("asOf: ")
-	b.WriteString(fmt.Sprintf("%q", args.AsOf))
+	b.WriteString(quoteMemQLString(args.AsOf))
 	b.WriteString(")")
 	return b.String()
 }
@@ -642,12 +642,12 @@ func TransitionEventKindBuild(args TransitionEventKindArgs) string {
 	var b strings.Builder
 	b.WriteString("logic transitionEventKind(")
 	b.WriteString("status: ")
-	b.WriteString(fmt.Sprintf("%q", args.Status))
+	b.WriteString(renderMemQLValue(args.Status))
 	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("oldStatus: ")
-	b.WriteString(fmt.Sprintf("%q", args.OldStatus))
+	b.WriteString(renderMemQLValue(args.OldStatus))
 	b.WriteString(")")
 	return b.String()
 }

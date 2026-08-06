@@ -12,6 +12,8 @@ import (
 
 	"github.com/znasllc-io/memql/component/automations"
 	"github.com/znasllc-io/memql/component/memql"
+
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // MutationExecutor executes MemQL mutation (insert) steps.
@@ -1725,10 +1727,13 @@ func (e *MutationExecutor) splitFunctionArgs(s string) []string {
 
 // buildInsertQuery constructs the insert query with properly escaped JSON payload.
 func (e *MutationExecutor) buildInsertQuery(concept, id string, payload map[string]any, parent, aliasOf string) string {
-	parts := []string{fmt.Sprintf("%q", concept)}
+	// QuoteString rather than %q throughout: see renderMemQLValue in
+	// function.go for why the two disagree and why it is a hard error
+	// (memql#3099).
+	parts := []string{langparser.QuoteString(concept)}
 
 	if id != "" {
-		parts = append(parts, fmt.Sprintf("id=%q", id))
+		parts = append(parts, "id="+langparser.QuoteString(id))
 	}
 
 	if payload != nil {
