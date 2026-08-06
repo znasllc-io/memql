@@ -41,7 +41,14 @@ import (
 // defaultDSN mirrors the fallback each *_db_test.go uses when
 // MEMQL_DATABASE_DSN is unset, so the ensure step and the tests it guards
 // target the same database.
-const defaultDSN = "postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable"
+//
+// A var rather than a const SOLELY so the unreachable-default path is testable
+// (memql#3096). That path never executes in CI -- ci.yml sets
+// MEMQL_DATABASE_DSN at job level, so this fallback is unreachable in the lane
+// -- which is exactly why the wrong credential it once carried
+// (`memql_local_dev`, matching nothing in the project) survived undetected
+// until someone ran the suite locally with the env unset.
+var defaultDSN = "postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable"
 
 // schemaLockKey is a dedicated, fixed 64-bit advisory-lock id that serializes
 // schema migration across the parallel db-gated test processes. Distinct from
@@ -60,11 +67,12 @@ const schemaLockKey int64 = 7756010113207025510
 // preserving the green-by-skip behaviour on a DB-less CI lane.
 func EnsureSchema(ctx context.Context) (reachable bool, err error) {
 	dsn := strings.TrimSpace(os.Getenv("MEMQL_DATABASE_DSN"))
-	if dsn == "" {
+	// Whether the env was empty and we fell back. The Setenv that aligns
+	// NewMemoryNodesDatabase (which reads the env) with the DSN the tests use
+	// is deferred until AFTER a successful ping -- see below.
+	usedDefault := dsn == ""
+	if usedDefault {
 		dsn = defaultDSN
-		// Align NewMemoryNodesDatabase (which reads the env) with the DSN the
-		// tests fall back to, so both target the same database.
-		_ = os.Setenv("MEMQL_DATABASE_DSN", dsn)
 	}
 
 	lockDB := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn))), pgdialect.New())
@@ -83,6 +91,25 @@ func EnsureSchema(ctx context.Context) (reachable bool, err error) {
 			return false, fmt.Errorf("dbtest: %s=1 but Postgres is UNREACHABLE at %s: %w", RequireDBEnv, SafeDSN(dsn), perr)
 		}
 		return false, nil
+	}
+
+	// The ping SUCCEEDED, so this DSN is worth publishing (memql#3096). Align
+	// NewMemoryNodesDatabase -- which reads the env -- with the DSN the tests
+	// fall back to, so both target the same database.
+	//
+	// AFTER the ping, deliberately. Writing it before meant an unreachable
+	// defaultDSN overwrote an empty env, and since every db-gated test file
+	// reads the env FIRST and falls back to its own literal only when the env
+	// is empty, each test's own perfectly good fallback became unreachable
+	// dead code. EnsureSchema converted its own failure into every downstream
+	// test's failure -- 19 skips where a correct credential gave 929 passes,
+	// and an outright package failure under MEMQL_REQUIRE_DB.
+	//
+	// Leaving the env untouched on the failure path is the whole fix: each
+	// package's fallback survives, so a future drift in defaultDSN degrades to
+	// "this one helper cannot connect" instead of taking the suite with it.
+	if usedDefault {
+		_ = os.Setenv("MEMQL_DATABASE_DSN", dsn)
 	}
 
 	// pg_advisory_lock is session-scoped, so the lock and its release must run
