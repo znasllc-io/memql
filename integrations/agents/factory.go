@@ -208,6 +208,15 @@ type roleSnapshot struct {
 	MaxSkills             int
 	RecommendedPolicySlug string
 	SystemPromptHints     string
+	// Predefined marks a row seeded from dsl/agents/roles/*.memql. Read here so
+	// slug resolution can prefer the seeded catalog row over a user row that
+	// claims the same slug (memql#3066) -- see findRoleBySlug.
+	Predefined bool
+	// ID is the row id, carried ONLY as the tie-break for findRoleBySlug. Two
+	// rows that are equal on Predefined have to resolve the same way every
+	// time, and row order out of an @cache(300) query is not something to
+	// depend on -- so the tie-break is a property of the rows themselves.
+	ID string
 }
 
 // loadExistingAgents walks the user's active agents. Best-effort:
@@ -699,7 +708,26 @@ func roleSnapshotFromRow(row map[string]any) (roleSnapshot, bool) {
 		MaxSkills:             intFromAnyLoose(payload["maxSkills"]),
 		RecommendedPolicySlug: stringField(payload, "recommendedPolicySlug"),
 		SystemPromptHints:     stringField(payload, "systemPromptHints"),
+		Predefined:            boolField(payload, "predefined"),
+		// The id lives on the ROW, not the payload -- fall back to the payload
+		// spelling for the flat shape some callers pass.
+		ID: coalesceString(stringField(row, "id"), stringField(payload, "id")),
 	}, true
+}
+
+// boolField reads a boolean payload field, tolerating the shapes a JSON
+// round-trip produces. Absent or unparseable reads as false, which is the safe
+// default here: an unrecognised row is treated as NOT predefined, so it can
+// never win the preference in findRoleBySlug by accident.
+func boolField(payload map[string]any, key string) bool {
+	switch v := payload[key].(type) {
+	case bool:
+		return v
+	case string:
+		return v == "true"
+	default:
+		return false
+	}
 }
 
 // intFromAnyLoose handles the float64 default JSON unmarshal produces
@@ -777,13 +805,83 @@ func findById(agents []agentSnapshot, id string) (agentSnapshot, bool) {
 	return agentSnapshot{}, false
 }
 
+// findRoleBySlug resolves a role slug against the catalog, preferring a
+// PREDEFINED row over a user-created one that claims the same slug.
+//
+// The preference is a security boundary, not a tidiness rule (memql#3066). The
+// predefined lock (#3061) protects a row ID, while this resolves a SLUG from an
+// unscoped catalog, and `createAgentRole` opens `id: args.agentRoleId ??
+// args.slug` -- so a caller passing an explicit id with a seeded row's slug
+// mints a SECOND row carrying that slug with predefined:false. No lock is
+// bypassed and none fires, because by its own contract that is an ordinary
+// user-role write. `activeAgentRoles` is @public and unscoped, so the catalog
+// carries both.
+//
+// This function was first-match-wins over an UNORDERED result set, so the
+// forged row could supply Name, SystemPromptHints, DefaultSkillIds and
+// RecommendedPolicySlug for a newly created agent -- what it is called, how it
+// is instructed, and which AI-router policy it runs under.
+//
+// The grant ceiling was never affected: fetchAgentRole keys on `id = slug` with
+// createdAt DESC LIMIT 1, so forbiddenSkillIds and maxSkills are still enforced
+// against the real seeded row.
+//
+// Preferring predefined does NOT mean requiring it -- a user-defined slug with
+// no seeded counterpart resolves exactly as before.
+//
+// Two rows sharing a slug always resolve the same way, and preferring
+// predefined is only half of why. It disambiguates the MIXED case; it says
+// nothing when the tie is between two rows that agree on Predefined -- two user
+// rows on one slug, or (in principle) two seeded ones. An earlier version of
+// this comment claimed order-independence on the strength of the preference
+// alone, which was false for exactly those cases: the winner was whichever the
+// query returned first, out of an @cache(300) result whose order can change
+// between cache fills.
+//
+// So the tie-break is INTRINSIC -- lowest row id wins among equals. That is a
+// property of the rows rather than of the result order, which is what makes the
+// sentence above true instead of nearly true.
+//
+// This is the narrow half of the fix. Making the slug UNIQUE per catalog is the
+// half that makes the concept's own doc true ("Canonical slug... stable, never
+// renamed"); it needs a write-time rule and is filed as memql#3114. Scoping the
+// catalog read is a third option, declined in memql#2985 for a wire reason
+// recorded on activeAgentRoles in dsl/agents/queries.memql.
+//
+// Note what this preference now leans on: activeAgentRoles filters
+// isActiveRecord in SQL, so an inactive row never reaches here. Relax that and
+// findRoleBySlug would happily prefer an INACTIVE seeded row over a live user
+// one.
 func findRoleBySlug(roles []roleSnapshot, slug string) (roleSnapshot, bool) {
+	var best roleSnapshot
+	found := false
 	for _, r := range roles {
-		if r.Slug == slug {
-			return r, true
+		if r.Slug != slug {
+			continue
+		}
+		if !found {
+			best, found = r, true
+			continue
+		}
+		if betterRoleMatch(r, best) {
+			best = r
 		}
 	}
-	return roleSnapshot{}, false
+	return best, found
+}
+
+// betterRoleMatch reports whether candidate should displace current as the
+// resolution for a shared slug: predefined first, then lowest row id.
+//
+// The id comparison is the tie-break that makes findRoleBySlug's result
+// independent of the order the catalog query returned. It is deliberately total
+// -- for any two distinct rows exactly one is "better" -- so no pair can fall
+// through to positional order.
+func betterRoleMatch(candidate, current roleSnapshot) bool {
+	if candidate.Predefined != current.Predefined {
+		return candidate.Predefined
+	}
+	return candidate.ID < current.ID
 }
 
 func coalesceString(s, fallback string) string {
