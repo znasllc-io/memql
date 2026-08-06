@@ -242,51 +242,6 @@ jobs:
       - name: go vet
         if: ${{ env.RUN_GO == 'true' }}
         run: go vet ./...
-      # Runs the COMPLEMENT of the db-gated trees, not `./...` (memql#3160 /
-      # design D5.3b). Those six trees carry 543+ test files that db-tests owns
-      # and re-runs in full, so testing them here compiled and executed the same
-      # files twice on every PR. Their non-DB tests are not lost: db-tests runs
-      # the whole package, not just the gated cases.
-      #
-      # The set is canonical in scripts/ci/db-gated-packages.sh; db-tests keeps
-      # literal arguments because scripts/cidb/dbgate_test.go derives its
-      # selector from them. The two cannot drift -- scripts/ci asserts they are
-      # identical.
-      - name: go test (excluding the db-gated trees db-tests owns)
-        if: ${{ env.RUN_GO == 'true' }}
-        run: go test -count=1 -timeout=300s $(scripts/ci/db-gated-packages.sh --complement)
-      # Build-tagged test lanes (#1338, #2903). The untagged `go test ./...`
-      # above never RUNS a //go:build-tagged test file, so a tagged suite is
-      # CI-invisible without an explicit -tags run.
-      #
-      # This used to carry a hand-maintained audit of which tags have test
-      # files and which lane covers each. It drifted on FOUR tags at once (mcp
-      # omitted entirely with three files; identity, telnyx_live and voice all
-      # covered by a closing "no other build tag carries test files today" that
-      # was false of each), which is how three mcp-tagged suites went their
-      # whole life without executing -- including the file the #2888
-      # vulnerability lives in.
-      #
-      # The audit is now EXECUTABLE: cmd/citags/scan reads the tags actually
-      # present on *_test.go files and the `go test -tags ...` invocations
-      # actually present in this directory, and fails the untagged lane when
-      # they disagree. Add a tagged suite without a lane and CI goes red with
-      # the file list. Do not reintroduce a prose audit here; a second
-      # hand-maintained copy is the defect that gate exists to prevent.
-      #
-      # These lanes are CGO-free, so they ride the warm go-checks cache.
-      - name: go test -tags agent (build-tagged suites)
-        if: ${{ env.RUN_GO == 'true' }}
-        run: go test -tags agent -count=1 -timeout=300s ./integrations/agent/worker/
-      # RUN_GO or RUN_DSL: component/mcp/real_engine_surface_test.go pins DSL
-      # contracts (e.g. @mcp on readyHarnessStep), so a DSL-only change can red
-      # this lane. Mirrors the engine-load-check step's gating.
-      - name: go test -tags mcp (build-tagged suites)
-        if: ${{ env.RUN_GO == 'true' || env.RUN_DSL == 'true' }}
-        run: go test -tags mcp -count=1 -timeout=300s ./app/ ./component/mcp/
-      - name: go test -tags identity (build-tagged suites)
-        if: ${{ env.RUN_GO == 'true' }}
-        run: go test -tags identity -count=1 -timeout=300s ./app/
       # Harness eval gate (#589). Fixture-driven regression tripwire over an
       # in-memory graph (NO Postgres, NO LLM) -- catches a harness change
       # that reorders dispatch, mis-fails a plan, or makes the loop chattier.
@@ -365,6 +320,82 @@ jobs:
       - name: proto-gen-check (proto drift)
         if: ${{ env.RUN_PROTO == 'true' }}
         run: make proto-gen-check
+
+  # Test lane (memql#3161 / design D5.3c). Split out of go-checks so that lane's
+  # duration becomes max(test, build+vet+drift) rather than their sum: `go test`
+  # was 223s of go-checks' 364s and the drift checks (15s combined) sat behind
+  # it for no reason.
+  #
+  # BE PRECISE ABOUT WHAT THIS BUYS. It does NOT take time-to-green to ~3.5m.
+  # Every lane fans out in parallel from `changes`, and db-tests is 5.8m (audit
+  # section 5) -- so once this lane drops to ~4m, db-tests becomes the binding
+  # constraint at 0.1 + 5.8 + 0.1 = 6.0m. The design's "~3.5m" is the go-checks
+  # LANE figure, not the pipeline figure. Nothing in this epic shortens db-tests.
+  #
+  # The intra-run warm GOCACHE from ce366821 is partly given up: `go build` in
+  # go-checks no longer warms this lane within the same run. Both lanes still
+  # restore GOCACHE through actions/setup-go's cache, so what is lost is the
+  # same-run warmth, not caching.
+  go-tests:
+    name: go-tests
+    timeout-minutes: 20
+    needs: changes
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' || needs.changes.outputs.dsl == 'true' }}
+    runs-on: ubuntu-latest
+    env:
+      RUN_GO: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' }}
+      RUN_DSL: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' || needs.changes.outputs.dsl == 'true' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.26.5'
+          cache: true
+      # Runs the COMPLEMENT of the db-gated trees, not `./...` (memql#3160 /
+      # design D5.3b). Those six trees carry 543+ test files that db-tests owns
+      # and re-runs in full, so testing them here compiled and executed the same
+      # files twice on every PR. Their non-DB tests are not lost: db-tests runs
+      # the whole package, not just the gated cases.
+      #
+      # The set is canonical in scripts/ci/db-gated-packages.sh; db-tests keeps
+      # literal arguments because scripts/cidb/dbgate_test.go derives its
+      # selector from them. The two cannot drift -- scripts/ci asserts they are
+      # identical.
+      - name: go test (excluding the db-gated trees db-tests owns)
+        if: ${{ env.RUN_GO == 'true' }}
+        run: go test -count=1 -timeout=300s $(scripts/ci/db-gated-packages.sh --complement)
+      # Build-tagged test lanes (#1338, #2903). The untagged `go test ./...`
+      # above never RUNS a //go:build-tagged test file, so a tagged suite is
+      # CI-invisible without an explicit -tags run.
+      #
+      # This used to carry a hand-maintained audit of which tags have test
+      # files and which lane covers each. It drifted on FOUR tags at once (mcp
+      # omitted entirely with three files; identity, telnyx_live and voice all
+      # covered by a closing "no other build tag carries test files today" that
+      # was false of each), which is how three mcp-tagged suites went their
+      # whole life without executing -- including the file the #2888
+      # vulnerability lives in.
+      #
+      # The audit is now EXECUTABLE: cmd/citags/scan reads the tags actually
+      # present on *_test.go files and the `go test -tags ...` invocations
+      # actually present in this directory, and fails the untagged lane when
+      # they disagree. Add a tagged suite without a lane and CI goes red with
+      # the file list. Do not reintroduce a prose audit here; a second
+      # hand-maintained copy is the defect that gate exists to prevent.
+      #
+      # These lanes are CGO-free, so they ride the warm go-checks cache.
+      - name: go test -tags agent (build-tagged suites)
+        if: ${{ env.RUN_GO == 'true' }}
+        run: go test -tags agent -count=1 -timeout=300s ./integrations/agent/worker/
+      # RUN_GO or RUN_DSL: component/mcp/real_engine_surface_test.go pins DSL
+      # contracts (e.g. @mcp on readyHarnessStep), so a DSL-only change can red
+      # this lane. Mirrors the engine-load-check step's gating.
+      - name: go test -tags mcp (build-tagged suites)
+        if: ${{ env.RUN_GO == 'true' || env.RUN_DSL == 'true' }}
+        run: go test -tags mcp -count=1 -timeout=300s ./app/ ./component/mcp/
+      - name: go test -tags identity (build-tagged suites)
+        if: ${{ env.RUN_GO == 'true' }}
+        run: go test -tags identity -count=1 -timeout=300s ./app/
 
   # Voice node CGO build lane -- kept SEPARATE from go-checks because it needs
   # the libopus/opusfile/soxr C deps + CGO_ENABLED=1 and builds under the
@@ -685,6 +716,7 @@ jobs:
     needs:
       - changes
       - go-checks
+      - go-tests
       - build-voice
       - build-node-tags
       - sdk-ts-typecheck
