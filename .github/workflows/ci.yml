@@ -65,6 +65,17 @@ jobs:
       proto: ${{ steps.filter.outputs.proto }}
       vscode: ${{ steps.filter.outputs.vscode }}
       ci: ${{ steps.filter.outputs.ci }}
+      # Target-module buckets (memql#3163 / design D3). Declared so the split
+      # in memql#3165 is a no-op for CI, per decision F. NOT yet consumed by any
+      # lane's `if:` -- see the block above the definitions for why.
+      base: ${{ steps.filter.outputs.base }}
+      engine: ${{ steps.filter.outputs.engine }}
+      platform: ${{ steps.filter.outputs.platform }}
+      integrations: ${{ steps.filter.outputs.integrations }}
+      server-grpc: ${{ steps.filter.outputs['server-grpc'] }}
+      server-http: ${{ steps.filter.outputs['server-http'] }}
+      server-mcp: ${{ steps.filter.outputs['server-mcp'] }}
+      app: ${{ steps.filter.outputs.app }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
@@ -150,6 +161,72 @@ jobs:
               - 'editors/vscode/**'
               - 'cmd/memql-lsp/**'
               - 'scripts/vscode/**'
+
+            # ---------------------------------------------------------------
+            # TARGET-MODULE BUCKETS (memql#3163 / design D3)
+            #
+            # These describe the module topology memql#3165 will draw
+            # `go.mod` boundaries around: app -> servers -> integrations ->
+            # platform -> engine -> base -> wire. Written against CURRENT
+            # paths, so when the modules land no path moves -- that is what
+            # decision F buys.
+            #
+            # DELIBERATELY NOT WIRED TO ANY LANE'S `if:` YET, and the reason
+            # matters more than the buckets:
+            #
+            #   1. Every Go lane today runs a `./...`-style selector -- the
+            #      test lane runs the whole complement, and the build lanes run
+            #      `go build -tags X ./...`. A dependency-closed bucket cannot
+            #      narrow a lane that compiles everything, so wiring these in
+            #      would buy ~zero job-minutes until per-module lanes exist.
+            #   2. Scoping the TAGGED build lanes by path would be UNSOUND.
+            #      `go build -tags X ./...` compiles the whole module, so any
+            #      Go change can break it -- which is exactly why build-voice
+            #      already gates on the whole `go` bucket rather than on
+            #      integrations/voice/**. Narrowing them would let a breaking
+            #      change skip the lane: faster CI that verifies less.
+            #
+            # So the closure becomes meaningful AFTER the module split, not
+            # before it. Wiring these up is tracked as follow-up to memql#3163.
+            #
+            # NOTE: `wire` from the D3 table is the existing `proto` bucket
+            # above (**/*.proto + the generated gen/ trees); it is not
+            # duplicated here.
+            base:
+              - 'core/**'
+              - 'component/language/annotations/**'
+              - 'component/language/ast/**'
+              - 'component/language/dslclause/**'
+            engine:
+              - 'component/memql/**'
+              - 'component/language/**'
+              - 'component/database/**'
+              - 'component/actions/**'
+              - 'component/harness/**'
+              - 'dsl/**'
+            platform:
+              - 'component/node/**'
+              - 'component/polyphon/**'
+              - 'component/identity/**'
+              - 'component/auth/**'
+              - 'component/events/**'
+              - 'component/bus/**'
+              - 'component/safety/**'
+            integrations:
+              - 'integrations/**'
+            # component/grpc EXCLUDING its generated gen/ tree, which is `wire`
+            # (L0, 21 importers) and is targeted to version independently.
+            server-grpc:
+              - 'component/grpc/**'
+              - '!component/grpc/gen/**'
+            server-http:
+              - 'component/server/**'
+            server-mcp:
+              - 'component/mcp/**'
+            app:
+              - 'app/**'
+              - 'cmd/**'
+              - 'main.go'
 
   # Consolidated CGO-free Go lane. One job, one warm GOCACHE, every
   # CGO-free Go check run in sequence. The job runs when `go` OR `dsl`
