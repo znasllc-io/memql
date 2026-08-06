@@ -34,6 +34,7 @@
 package pagination
 
 import (
+	"github.com/znasllc-io/memql/component/memql/baseparser"
 	"regexp"
 	"sort"
 	"strings"
@@ -320,18 +321,10 @@ func matchingCloseBrace(src string, openIdx int) int {
 // stripComment trims a trailing `// ...` line comment, preserving any
 // `//` inside a string literal.
 func stripComment(line string) string {
-	inStr := false
-	for i := 0; i < len(line); i++ {
-		c := line[i]
-		if c == '"' && (i == 0 || line[i-1] != '\\') {
-			inStr = !inStr
-			continue
-		}
-		if !inStr && c == '/' && i+1 < len(line) && line[i+1] == '/' {
-			return line[:i]
-		}
-	}
-	return line
+	// memql#3120: one implementation, escape state tracked. The three
+	// byte-identical copies of this function all inferred escaping from
+	// the preceding byte, which cannot tell `\\"` from `\\\\"`.
+	return baseparser.StripLineComment(line)
 }
 
 // SortFindings orders findings by file then line for stable reporting.

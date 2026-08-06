@@ -506,9 +506,18 @@ func parseShapeValue(s string, eval *automations.Evaluator) (any, string, error)
 	// Quoted string
 	if s[0] == '"' || s[0] == '\'' {
 		quoteChar := s[0]
+		// Escape state TRACKED, not inferred from the preceding byte
+		// (memql#3120). `(end == 1 || s[end-1] != '\\')` could not tell an
+		// escaped quote from one following a COMPLETED `\\` escape, so a
+		// literal ending in a backslash pair ran past its own closing quote
+		// and reported "unterminated string" for valid input.
 		end := 1
 		for end < len(s) {
-			if s[end] == quoteChar && (end == 1 || s[end-1] != '\\') {
+			if s[end] == '\\' {
+				end += 2
+				continue
+			}
+			if s[end] == quoteChar {
 				break
 			}
 			end++
@@ -584,29 +593,9 @@ func parseShapeValue(s string, eval *automations.Evaluator) (any, string, error)
 		}
 
 		// Find matching closing paren
-		parenDepth := 1
-		end := 1
-		inQuote := false
-		var quoteChar byte
-		for end < len(remaining) && parenDepth > 0 {
-			ch := remaining[end]
-			if !inQuote && (ch == '"' || ch == '\'') {
-				inQuote = true
-				quoteChar = ch
-			} else if inQuote && ch == quoteChar && remaining[end-1] != '\\' {
-				inQuote = false
-			} else if !inQuote {
-				switch ch {
-				case '(':
-					parenDepth++
-				case ')':
-					parenDepth--
-				}
-			}
-			end++
-		}
+		end, parenClosed := scanToMatchingDelim(remaining, '(', ')')
 
-		if parenDepth != 0 {
+		if !parenClosed {
 			return nil, "", fmt.Errorf("unmatched parenthesis in function call")
 		}
 
@@ -632,29 +621,9 @@ func parseShapeValue(s string, eval *automations.Evaluator) (any, string, error)
 	// Nested object
 	if s[0] == '{' {
 		// Find matching closing brace
-		braceDepth := 1
-		end := 1
-		inQuote := false
-		var quoteChar byte
-		for end < len(s) && braceDepth > 0 {
-			ch := s[end]
-			if !inQuote && (ch == '"' || ch == '\'') {
-				inQuote = true
-				quoteChar = ch
-			} else if inQuote && ch == quoteChar && s[end-1] != '\\' {
-				inQuote = false
-			} else if !inQuote {
-				switch ch {
-				case '{':
-					braceDepth++
-				case '}':
-					braceDepth--
-				}
-			}
-			end++
-		}
+		end, braceClosed := scanToMatchingDelim(s, '{', '}')
 
-		if braceDepth != 0 {
+		if !braceClosed {
 			return nil, "", fmt.Errorf("unmatched brace in nested object")
 		}
 
@@ -668,29 +637,9 @@ func parseShapeValue(s string, eval *automations.Evaluator) (any, string, error)
 	// Array
 	if s[0] == '[' {
 		// Find matching closing bracket
-		bracketDepth := 1
-		end := 1
-		inQuote := false
-		var quoteChar byte
-		for end < len(s) && bracketDepth > 0 {
-			ch := s[end]
-			if !inQuote && (ch == '"' || ch == '\'') {
-				inQuote = true
-				quoteChar = ch
-			} else if inQuote && ch == quoteChar && s[end-1] != '\\' {
-				inQuote = false
-			} else if !inQuote {
-				switch ch {
-				case '[':
-					bracketDepth++
-				case ']':
-					bracketDepth--
-				}
-			}
-			end++
-		}
+		end, bracketClosed := scanToMatchingDelim(s, '[', ']')
 
-		if bracketDepth != 0 {
+		if !bracketClosed {
 			return nil, "", fmt.Errorf("unmatched bracket in array")
 		}
 
@@ -762,4 +711,56 @@ func trimWhitespace(s string) string {
 		end--
 	}
 	return s[start:end]
+}
+
+// scanToMatchingDelim finds the delimiter that closes the one already open at
+// s[0], and returns the index just PAST it -- so s[:end] is the whole
+// delimited run including both ends, which is what every caller slices.
+//
+// memql#3120: this replaces three structurally identical inline scanners (for
+// `()`, `{}` and `[]`) that each decided whether a quote closed a string
+// literal with a ONE-BYTE LOOKBACK, `s[end-1] != '\\'`. That test cannot tell
+// an escaped quote from a quote following a COMPLETED `\\` escape, so a value
+// like `"C:\\"` left the scanner stuck in quote state; every delimiter after it
+// went uncounted and the scan ran to end-of-input, reporting an unmatched
+// delimiter for input that was correctly balanced.
+//
+// Escape state is tracked instead. Kept LOCAL rather than delegated to
+// baseparser.StripLineComment or the parser package's blankers: this parser
+// treats BOTH `"` and `'` as string delimiters, and every shared helper in the
+// tree handles `"` only -- routing single-quoted literals through one would
+// silently stop treating them as strings. Same reason splitCoalesceArgs
+// records for staying local.
+func scanToMatchingDelim(s string, open, closing byte) (end int, ok bool) {
+	depth := 1
+	inQuote := false
+	var quoteChar byte
+
+	for end = 1; end < len(s) && depth > 0; end++ {
+		ch := s[end]
+
+		if inQuote {
+			// Consume the escaped byte together with its backslash.
+			if ch == '\\' {
+				end++
+				continue
+			}
+			if ch == quoteChar {
+				inQuote = false
+			}
+			continue
+		}
+
+		switch {
+		case ch == '"' || ch == '\'':
+			inQuote = true
+			quoteChar = ch
+		case ch == open:
+			depth++
+		case ch == closing:
+			depth--
+		}
+	}
+
+	return end, depth == 0
 }

@@ -28,6 +28,7 @@ package memql
 
 import (
 	"fmt"
+	"github.com/znasllc-io/memql/component/memql/baseparser"
 	"io"
 	"io/fs"
 	"regexp"
@@ -328,16 +329,8 @@ func readTreeFile(tree fs.FS, p string) (string, error) {
 // stripDepLineComment trims a trailing `// ...` comment, preserving any
 // `//` that appears inside a double-quoted string literal.
 func stripDepLineComment(line string) string {
-	inStr := false
-	for i := 0; i < len(line); i++ {
-		c := line[i]
-		if c == '"' && (i == 0 || line[i-1] != '\\') {
-			inStr = !inStr
-			continue
-		}
-		if !inStr && c == '/' && i+1 < len(line) && line[i+1] == '/' {
-			return line[:i]
-		}
-	}
-	return line
+	// memql#3120: one implementation, escape state tracked. The three
+	// byte-identical copies of this function all inferred escaping from
+	// the preceding byte, which cannot tell `\\"` from `\\\\"`.
+	return baseparser.StripLineComment(line)
 }

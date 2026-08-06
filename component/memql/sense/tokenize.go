@@ -352,8 +352,25 @@ func extractComments(source string) []Token {
 func isInsideString(line string, pos int) bool {
 	inString := false
 	for i := 0; i < pos; i++ {
-		if line[i] == '"' && (i == 0 || line[i-1] != '\\') {
-			inString = !inString
+		c := line[i]
+		if inString {
+			// Escape state TRACKED, not inferred from the preceding byte
+			// (memql#3120). The old `line[i-1] != '\\'` test could not tell
+			// an escaped quote from one following a COMPLETED `\\` escape, so
+			// a literal ending in a backslash pair reported every later
+			// position as "inside a string" -- which in an editor means
+			// highlighting silently stops for the rest of the line.
+			if c == '\\' {
+				i++
+				continue
+			}
+			if c == '"' {
+				inString = false
+			}
+			continue
+		}
+		if c == '"' {
+			inString = true
 		}
 	}
 	return inString

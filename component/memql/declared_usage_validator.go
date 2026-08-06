@@ -117,7 +117,17 @@ func extractFunctionBody(source string) string {
 	for i := 0; i < len(source); i++ {
 		c := source[i]
 		if inString {
-			if c == '"' && (i == 0 || source[i-1] != '\\') {
+			// Escape state TRACKED, not inferred from the preceding byte
+			// (memql#3120): `source[i-1] != '\\'` cannot tell an escaped
+			// quote from one following a COMPLETED `\\` escape, so a literal
+			// ending in a backslash pair never left string state and every
+			// brace after it went uncounted -- silently returning the wrong
+			// body, or "" (which makes every caller SKIP validation).
+			if c == '\\' {
+				i++
+				continue
+			}
+			if c == '"' {
 				inString = false
 			}
 			continue
