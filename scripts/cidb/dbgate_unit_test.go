@@ -1118,6 +1118,19 @@ func TestCoverageFindings(t *testing.T) {
 		{"covers nothing", []string{"./core/..."}, nil},
 		{"an argument matching no db-gated test", append(append([]string{}, pkgs...), "./core/..."), provisioned},
 		{"a provisioned package left out", []string{"./component/memql/..."}, provisioned},
+		// THE INVERSE RULE (memql#3095). A package the selector RUNS, which
+		// carries db-gated tests, but which provisions no schema: its TestMain
+		// is missing or was deleted. Without this arm every
+		// main_dbschema_test.go in the tree could be removed wholesale and
+		// this gate stayed fully green -- proved by deleting all seven and
+		// watching `go test ./scripts/cidb/` pass.
+		//
+		// The consequence is not a clean failure: without a TestMain the
+		// per-package binaries race the shared migration and the lane fails
+		// INTERMITTENTLY with `relation "MemoryNodes" does not exist`, the
+		// flake component/database/dbtest was written to kill (memql#2551).
+		{"a selector-covered db-gated package that provisions nothing", pkgs, []string{"component/memql"}},
+		{"selector runs db-gated packages and NOTHING provisions", pkgs, nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

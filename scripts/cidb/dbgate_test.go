@@ -668,6 +668,48 @@ func coverageFindings(pkgs []string, all []dbGatedTest, provisioned []string) []
 				dir, dbTestsJob, pkgs))
 		}
 	}
+
+	// THE INVERSE (memql#3095). The arm above is provisioned -> in selector.
+	// This is in selector -> provisioned, and without it the gate was
+	// one-directional: every main_dbschema_test.go in the tree could be
+	// deleted while the selector still named the packages, and this gate
+	// stayed fully green. Proved by deleting all seven and running it.
+	//
+	// What it prevents is the memql#2551 lane-safety invariant those TestMains
+	// exist to satisfy. Without one, the per-package test binaries race the
+	// shared migration and the lane fails INTERMITTENTLY with
+	// `relation "MemoryNodes" does not exist` -- an intermittent red being the
+	// worst shape of failure this lane can produce, and the exact flake
+	// component/database/dbtest was written to kill.
+	//
+	// Keyed on the directories that actually CARRY db-gated tests, not on the
+	// selector arguments: a selector may legitimately name a parent path, and
+	// only a directory with db-gated tests needs to provision.
+	provisionedSet := map[string]bool{}
+	for _, dir := range provisioned {
+		provisionedSet[dir] = true
+	}
+	for _, dir := range known {
+		// selfPkg imports dbtest for the RequireDB predicate rather than to
+		// reach a database, so it neither needs nor has a TestMain. The
+		// exemption that hides it from the scan has to apply here too, or this
+		// rule reports the gate against itself.
+		if dir == selfPkg {
+			continue
+		}
+		if !covers(pkgs, dir) {
+			continue // not run by the lane; the arm above owns that case
+		}
+		if provisionedSet[dir] {
+			continue
+		}
+		out = append(out, fmt.Sprintf("package %q carries db-gated tests and the %q job's "+
+			"selector %v RUNS it, but it has no TestMain calling dbtest.EnsureSchema. Without one "+
+			"its test binary races the shared migration instead of provisioning it, so the lane "+
+			"fails intermittently with `relation \"MemoryNodes\" does not exist` -- the flake "+
+			"component/database/dbtest exists to kill (memql#2551, memql#3095). Add a "+
+			"main_dbschema_test.go to %s.", dir, dbTestsJob, pkgs, dir))
+	}
 	return out
 }
 

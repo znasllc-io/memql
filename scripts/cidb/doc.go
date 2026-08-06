@@ -45,6 +45,26 @@
 // being in the selector is always drift -- and unlike a per-argument check,
 // that catches a selector entry being DELETED.
 //
+// That correspondence is asserted in BOTH directions (memql#3095):
+//
+//	provisioned -> in selector    a TestMain whose package the lane never runs
+//	in selector -> provisioned    a package the lane RUNS that provisions nothing
+//
+// The second arm was missing, and its absence was not theoretical: every
+// main_dbschema_test.go in the tree could be deleted while the selector still
+// named the packages, and this gate stayed fully green. What it prevents is
+// the memql#2551 invariant itself -- without a TestMain the per-package test
+// binaries race the shared migration, and the lane fails INTERMITTENTLY with
+// `relation "MemoryNodes" does not exist`, which is the flake
+// component/database/dbtest was written to kill. An intermittent red is the
+// worst shape of failure this lane can produce, which is why the gate has to
+// catch the cause rather than the symptom.
+//
+// The second arm keys on the directories that CARRY db-gated tests rather than
+// on the selector arguments, because a selector may legitimately name a parent
+// path; only a directory with db-gated tests needs to provision. selfPkg is
+// exempt from it for the same reason it is exempt from the scan.
+//
 // # Full coverage IS asserted (memql#3030)
 //
 // The uncovered-set finding was a log line rather than an assertion while four
