@@ -312,13 +312,38 @@ jobs:
       # touching normalization) and diff against the checked-in tree, ignoring
       # the cosmetic protoc version stamp. Catches a .proto edited without its
       # .pb.go regenerated -- the gap that let stale bindings merge green.
-      # FALLBACK only. proto-gen.sh provisions its own pinned protoc into
-      # bin/tools/; this apt copy exists so a GitHub-releases outage degrades
-      # to a working lane instead of a red build (the drift diff ignores the
-      # version stamp, so a differing protoc still gives a correct verdict).
-      - name: install protoc (fallback for the pinned download)
+      # Cache the PINNED protoc that proto-gen.sh provisions into bin/tools/
+      # (memql#3166 / design D4.2). Without this it is re-downloaded from
+      # github releases on every run: a network dependency on the critical
+      # path, in exactly the class of step that failed during the 2026-08-06
+      # incident. On a warm cache the proto lane makes ZERO network calls for
+      # its toolchain.
+      #
+      # Keyed on proto-gen.sh's hash rather than a duplicated version literal,
+      # so bumping PROTOC_VERSION in that script invalidates the cache by
+      # construction instead of by remembering to edit two places.
+      - name: cache pinned protoc
+        id: protoc-cache
         if: ${{ env.RUN_PROTO == 'true' }}
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: bin/tools
+          key: protoc-${{ runner.os }}-${{ hashFiles('scripts/dev/proto-gen.sh') }}
+      # FALLBACK only, and now only when it can actually be needed. proto-gen.sh
+      # uses the pinned bin/tools/ copy when present and falls back to a system
+      # protoc if the pinned DOWNLOAD fails (a releases outage degrades the lane
+      # instead of reddening it; the drift diff ignores the version stamp, so a
+      # differing protoc still gives a correct verdict).
+      #
+      # On a cache HIT no download is attempted, so the fallback is unreachable
+      # and this apt-get was 14s of pure waste on the critical path (audit W4).
+      # It now runs only on a cache miss -- precisely the runs where a download
+      # will be attempted and could fail.
+      - name: install protoc (fallback, only when the pinned copy is not cached)
+        if: ${{ env.RUN_PROTO == 'true' && steps.protoc-cache.outputs.cache-hit != 'true' }}
+        run: |
+          scripts/ci/retry.sh -- sudo apt-get update
+          scripts/ci/retry.sh -- sudo apt-get install -y protobuf-compiler
       - name: proto-gen-check (proto drift)
         if: ${{ env.RUN_PROTO == 'true' }}
         run: make proto-gen-check
@@ -345,10 +370,13 @@ jobs:
         with:
           go-version: '1.26.5'
           cache: true
+      # Retried (memql#3166 / design D4.3): apt-get is a network op, and a
+      # transient mirror failure here reds a lane that has nothing to do with
+      # the change under test.
       - name: install libopus + soxr dev headers
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+          scripts/ci/retry.sh -- sudo apt-get update
+          scripts/ci/retry.sh -- sudo apt-get install -y --no-install-recommends \
             libopus-dev libopusfile-dev libsoxr-dev
       - name: go build -tags voice (CGO)
         env:
@@ -410,8 +438,11 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v4
         with:
           node-version: '20'
+      # Retried (memql#3166 / design D4.3): dependency install is a network op.
+      # The typecheck and test steps below are deliberately NOT retried --
+      # retrying a test is how a flake becomes invisible.
       - name: install sdk/ts deps
-        run: make sdk-ts-install
+        run: scripts/ci/retry.sh -- make sdk-ts-install
       - name: typecheck sdk/ts
         run: make sdk-ts-typecheck
       - name: test sdk/ts
