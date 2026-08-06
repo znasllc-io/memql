@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/znasllc-io/memql/component/language/annotations"
-	"github.com/znasllc-io/memql/component/memql/baseparser"
+	"github.com/znasllc-io/memql/core/baseparser"
 )
 
 // TestAttributeMatrixMatchesAllowLists is the parity guard the #2712 review

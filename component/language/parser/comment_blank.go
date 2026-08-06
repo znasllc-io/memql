@@ -1,6 +1,6 @@
 package parser
 
-import "github.com/znasllc-io/memql/component/memql/baseparser"
+import "github.com/znasllc-io/memql/core/baseparser"
 
 // comment_blank.go -- thin re-exports.
 //

@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/znasllc-io/memql/component/memql/baseparser"
+	"github.com/znasllc-io/memql/core/baseparser"
 )
 
 // parseSeedMemQL parses a `.memql` seed declaration and returns a

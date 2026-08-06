@@ -16,7 +16,7 @@ import (
 	"io"
 	"log/slog"
 
-	"github.com/znasllc-io/memql/component/memql/dslfs"
+	"github.com/znasllc-io/memql/core/dslfs"
 	memqldsl "github.com/znasllc-io/memql/dsl"
 )
 

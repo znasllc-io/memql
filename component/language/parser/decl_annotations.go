@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/znasllc-io/memql/component/language/annotations"
-	"github.com/znasllc-io/memql/component/memql/baseparser"
+	"github.com/znasllc-io/memql/core/baseparser"
 )
 
 // validateDeclAnnotations rejects unknown leading annotations on the

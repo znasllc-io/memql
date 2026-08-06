@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/znasllc-io/memql/integrations/audio"
+	"github.com/znasllc-io/memql/core/audio"
 	"nhooyr.io/websocket"
 )
 

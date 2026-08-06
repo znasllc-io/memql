@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
-	"github.com/znasllc-io/memql/component/memql/baseregistry"
+	"github.com/znasllc-io/memql/core/baseregistry"
 )
 
 // Pass 3 of the DSL restructure migration: the legacy walk over

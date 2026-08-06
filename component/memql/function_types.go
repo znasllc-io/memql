@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
-	"github.com/znasllc-io/memql/component/memql/baseregistry"
+	"github.com/znasllc-io/memql/core/baseregistry"
 )
 
 var (

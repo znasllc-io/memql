@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/znasllc-io/memql/component/memql/baseparser"
+	"github.com/znasllc-io/memql/core/baseparser"
 )
 
 // TestRemovedAnnotationsRejected locks in #989: the recognized-but-unused and

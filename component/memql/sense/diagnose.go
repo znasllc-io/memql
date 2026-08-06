@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/znasllc-io/memql/component/language/parser"
-	"github.com/znasllc-io/memql/component/memql/baseparser"
+	"github.com/znasllc-io/memql/core/baseparser"
 )
 
 // Diagnose returns errors and warnings for a MemQL source document.

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/znasllc-io/memql/component/memql/baseparser"
+	"github.com/znasllc-io/memql/core/baseparser"
 )
 
 // callable.go is the introspectable, table-driven source of truth for every

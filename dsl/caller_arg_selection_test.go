@@ -129,7 +129,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/znasllc-io/memql/component/memql/dslfs"
+	"github.com/znasllc-io/memql/core/dslfs"
 )
 
 // personScopedConcepts are the bound concepts whose rows identify a PERSON, so

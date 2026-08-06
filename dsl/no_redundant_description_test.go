@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
-	"github.com/znasllc-io/memql/component/memql/dslfs"
+	"github.com/znasllc-io/memql/core/dslfs"
 )
 
 // TestNoRedundantDescription keeps the shipped tree on the /// doc-comment

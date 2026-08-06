@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/znasllc-io/memql/component/memql/dslfs"
+	"github.com/znasllc-io/memql/core/dslfs"
 )
 
 // retiredBuiltinCallRe matches call-forms of the eight expression builtins

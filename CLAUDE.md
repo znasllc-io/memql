@@ -1040,7 +1040,7 @@ regenerator. Authoring reference skeletons live under
 `dsl/_reference/` (`_concept`, `_shape`, `_spec`, `_trait`, `_agent`).
 The per-type Go packages still expose embedded FS variables, but
 loaders read through `Source()`, which routes through
-[`component/memql/dslfs`](component/memql/dslfs/dslfs.go).
+[`core/dslfs`](core/dslfs/dslfs.go).
 
 ### `MEMQL_DSL_PATH` — runtime product-DSL delivery
 

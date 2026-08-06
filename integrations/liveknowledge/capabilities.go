@@ -14,7 +14,7 @@ import (
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
-	lk "github.com/znasllc-io/memql/component/memql/liveknowledge"
+	lk "github.com/znasllc-io/memql/core/liveknowledge"
 )
 
 // LiveKnowledgeIntegration exposes Live Knowledge query dispatch to

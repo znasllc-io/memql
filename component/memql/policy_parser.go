@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/znasllc-io/memql/component/memql/baseparser"
+	"github.com/znasllc-io/memql/core/baseparser"
 )
 
 // PolicyConfig is the parsed shape of a policy .memql file. Mirrors the

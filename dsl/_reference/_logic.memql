@@ -4,7 +4,7 @@
 //
 // This file is the source of truth for `logic` syntax. It is NOT loaded by
 // the engine (the leading underscore on the path tells every walker to skip
-// it -- see component/memql/dslfs/walker.go).
+// it -- see core/dslfs/walker.go).
 //
 // `logic` is the behavioral DSL's PURE-DECISION construct. The one-line
 // mental model from the behavioral-constructs ADR

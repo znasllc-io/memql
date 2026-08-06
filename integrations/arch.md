@@ -142,7 +142,7 @@ output schema so the modal doesn't have to filter unwanted fields.
 | `openai` (default) | OpenAI Realtime API transcription-only WebSocket | OpenAI `/v1/audio/speech` (HTTP, PCM16) | Cloud-hosted; no GPU required. |
 
 The Polyphon pipeline standardizes on 16kHz PCM16 internally;
-`integrations/audio/resample.go` does transparent 16<->24kHz conversion
+`core/audio/resample.go` does transparent 16<->24kHz conversion
 at the OpenAI boundary.
 
 Conversation-mode Realtime (the bundled STT+LLM+TTS) was retired with

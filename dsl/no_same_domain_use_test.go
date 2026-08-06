@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
-	"github.com/znasllc-io/memql/component/memql/dslfs"
+	"github.com/znasllc-io/memql/core/dslfs"
 )
 
 // TestNoSameDomainUse keeps the tree free of use imports of a file's

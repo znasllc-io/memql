@@ -3,7 +3,7 @@ package memql
 import (
 	"github.com/znasllc-io/memql/component/language/annotations"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
-	"github.com/znasllc-io/memql/component/memql/baseparser"
+	"github.com/znasllc-io/memql/core/baseparser"
 )
 
 // function_annotation_allow_lists.go exposes the four per-construct

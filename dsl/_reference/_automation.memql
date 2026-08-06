@@ -4,7 +4,7 @@
 //
 // This file is the source of truth for `automation` syntax. It is NOT loaded
 // by the engine (the leading underscore on the path tells every walker to
-// skip it -- see component/memql/dslfs/walker.go).
+// skip it -- see core/dslfs/walker.go).
 //
 // `automation` is the behavioral DSL's ONLY reactive + composing construct.
 // From the behavioral-constructs ADR
