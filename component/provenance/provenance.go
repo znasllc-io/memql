@@ -114,7 +114,6 @@ func (p Provenance) IsZero() bool {
 //	"seed:assistant via=createAgent"
 //	"automation:reRouteNeedsAgentOnAgentCreate trigger=graph.node.created.v1:agents:agent via=updatePlanStatus"
 //	"direct:createAgent"
-//	"system:conceptSeeder:v1:cluster:nodeType"
 func (p Provenance) String() string {
 	if p.IsZero() {
 		return "<none>"

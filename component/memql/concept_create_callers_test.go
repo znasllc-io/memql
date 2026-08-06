@@ -49,9 +49,28 @@ func (c createCallSite) String() string { return c.path + ":" + strconv.Itoa(c.l
 // `Create` is reached from exactly one non-test location: the engine's mutation
 // executor, which is downstream of executeWrite and therefore of every guard.
 //
-// Matched on the CALL SHAPE -- a three-argument `X.Create(...)` whose middle
-// argument is a `store`-named identifier -- rather than on a package path, so a
-// new caller is caught wherever it is written.
+// Matched on the CALL SHAPE -- ANY three-argument `X.Create(...)` -- rather
+// than on a package path, so moving or renaming a caller does not evade it.
+//
+// The middle argument is deliberately NOT inspected. The first version of this
+// gate required it to be an identifier whose name contained "store", which
+// missed the very call it was written to stop: the deleted seeder wrote
+// `concept.Create(seedCtx, r.store, ...)`, and `r.store` is a SelectorExpr, not
+// an Ident. Restoring all three seeder files verbatim left this test GREEN.
+// A store held on a struct field is the normal idiom, so that was the likely
+// shape of any reincarnation, not an exotic one.
+//
+// Dropping the predicate costs nothing measurable: a scan of every non-test
+// .go file in the tree (sdk and docs included) finds exactly ONE three-argument
+// `X.Create(...)` call, the allowed one below. The "unrelated three-arg Create
+// methods" the old comment worried about -- PATs, badges, worker tokens,
+// os.Create -- do not have this arity here. If a legitimate one is added later,
+// widen `allowed` rather than narrowing the match.
+//
+// Known blind spots, named so a green run is not over-read: _test.go files are
+// excluded (there are legitimate call sites there); an indirect call through a
+// function value (`f := concept.Create; f(...)`) has no SelectorExpr to match;
+// and an unparseable file is skipped rather than failing the gate.
 func TestConceptCreateHasExactlyOneWritePath(t *testing.T) {
 	const allowed = "component/memql/executor_mutation.go"
 
@@ -65,7 +84,7 @@ func TestConceptCreateHasExactlyOneWritePath(t *testing.T) {
 		}
 		if d.IsDir() {
 			switch d.Name() {
-			case ".git", "node_modules", "vendor", "sdk", "docs":
+			case ".git", "node_modules", "vendor":
 				return filepath.SkipDir
 			}
 			return nil
@@ -87,13 +106,6 @@ func TestConceptCreateHasExactlyOneWritePath(t *testing.T) {
 			}
 			sel, ok := call.Fun.(*ast.SelectorExpr)
 			if !ok || sel.Sel == nil || sel.Sel.Name != "Create" {
-				return true
-			}
-			// The store argument is what makes this the raw write rather than
-			// one of the many unrelated three-arg Create methods in the tree
-			// (PATs, badges, worker tokens, os.Create...).
-			mid, ok := call.Args[1].(*ast.Ident)
-			if !ok || !strings.Contains(strings.ToLower(mid.Name), "store") {
 				return true
 			}
 			sites = append(sites, createCallSite{path: filepath.ToSlash(rel), line: fset.Position(call.Pos()).Line})

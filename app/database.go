@@ -13,8 +13,7 @@ import (
 	"github.com/uptrace/bun"
 )
 
-// databaseAndConcepts creates the database, loads and validates concepts,
-// and sets up the concept seeder dependency.
+// databaseAndConcepts creates the database and loads and validates concepts.
 func (a *App) databaseAndConcepts() {
 	mnd, err := a.overrides.NewDatabase()
 	if err != nil {
