@@ -52,6 +52,15 @@ type Overrides struct {
 	// so the wiring test can drive its error path without a mutable global or
 	// an exported test mutator in the shipped binary.
 	AssertUnauthenticatedSurface func(routes []string) error
+	// AssertSelfAuthenticatedSurface is the boot check that every route granted
+	// the third-tier verifier exemption is also certified as failing closed
+	// (memql#3062). Injectable for the same reason as the field above.
+	//
+	// Unlike that one it runs on EVERY binary, because it compares two static
+	// declarations rather than a binary's route table -- and because the hole
+	// it guards opens on verifier-CONSUMING nodes, which is precisely where the
+	// check above does not run.
+	AssertSelfAuthenticatedSurface func() error
 }
 
 // App holds the shared state accumulated across bootstrap phases.
@@ -250,6 +259,9 @@ func newApp(serviceLogger *slog.Logger, version string, overrides Overrides) *Ap
 	}
 	if a.overrides.AssertUnauthenticatedSurface == nil {
 		a.overrides.AssertUnauthenticatedSurface = server.AssertUnauthenticatedSurfaceDeclared
+	}
+	if a.overrides.AssertSelfAuthenticatedSurface == nil {
+		a.overrides.AssertSelfAuthenticatedSurface = server.AssertSelfAuthenticatedRoutesFailClosed
 	}
 
 	return a

@@ -158,3 +158,56 @@ func TestEncodedSeparatorInsideTheSourceSegmentIsNotExempt(t *testing.T) {
 			"/inbound/a%2Fb")
 	}
 }
+
+// TestHTTPMiddlewareLetsASelfAuthenticatedRouteThrough drives the ASSEMBLED
+// middleware, and it is the only test here that does.
+//
+// Every other test in this file calls `bypassed`, which re-implements the
+// production condition (`shouldBypassAuth(...) || isSelfAuthenticated(...)`)
+// rather than building the middleware. That pins the PREDICATE and pins nothing
+// about the WIRING -- so deleting `|| isSelfAuthenticated(...)` from
+// HTTPMiddleware, the single line that makes this tier exist, left the verifier,
+// app and component/server suites all green while `POST /inbound/{source}` went
+// back to 401 on the bff. That 401 is verbatim the defect memql#3062 was filed
+// for. Measured, not imagined.
+//
+// So this one constructs HTTPMiddleware itself, serves a request carrying NO
+// Authorization header through it, and asserts the handler ran. A verifier is
+// constructed too, because "the node installs a verifier" is half the property
+// under test -- the old helper deliberately built none, which is why it could
+// not have caught this.
+func TestHTTPMiddlewareLetsASelfAuthenticatedRouteThrough(t *testing.T) {
+	const exempt = "/inbound/shopify"
+
+	reached := false
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reached = true
+		w.WriteHeader(http.StatusAccepted)
+	})
+
+	mw := HTTPMiddleware(&Verifier{}, MiddlewareOptions{
+		SelfAuthenticatedPaths: []string{"/inbound/"},
+	})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, exempt, nil) // no Authorization header
+	mw(next).ServeHTTP(rec, req)
+
+	if !reached {
+		t.Fatalf("%s did not reach the handler through the real middleware (status %d). The "+
+			"third-tier exemption is not wired: a third-party webhook carries no memQL bearer, so "+
+			"this is the 401 memql#3062 exists to remove.", exempt, rec.Code)
+	}
+
+	// And the other half, through the same assembled middleware: a sibling under
+	// the same prefix must still be gated. Asserting only the positive would
+	// pass just as well on a middleware that skipped everything.
+	gated := false
+	nextGated := http.HandlerFunc(func(http.ResponseWriter, *http.Request) { gated = true })
+	recGated := httptest.NewRecorder()
+	mw(nextGated).ServeHTTP(recGated, httptest.NewRequest(http.MethodPost, exempt+"/evil", nil))
+	if gated {
+		t.Errorf("%s/evil reached the handler with no credentials -- the exemption is behaving as "+
+			"a prefix bypass, which is the repair memql#3062 explicitly rejected", exempt)
+	}
+}

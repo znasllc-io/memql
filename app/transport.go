@@ -205,6 +205,24 @@ func (a *App) createHTTPServer() {
 	//
 	// Fail-fast rather than warn: a boot warning is exactly the signal that went
 	// unread when the automations routes were added.
+	// The third tier is checked on EVERY binary, because the hole it guards is
+	// the mirror image of the branch below's: an entry in
+	// SelfAuthenticatedPaths() makes the verifier middleware step aside on a
+	// node that DOES install one -- precisely the case that branch skips. It
+	// compares two static declarations, so it needs no route table and cannot
+	// depend on which binary is booting (memql#3062).
+	//
+	// UNCONDITIONAL is the load-bearing property, and it is pinned: moving this
+	// inside the branch below turns
+	// TestCreateHTTPServerRejectsUncertifiedSelfAuthRouteWithVerifier red.
+	// Sitting AHEAD of that branch is not load-bearing and is not pinned --
+	// measured, moving it after the branch while leaving it unconditional
+	// changes nothing. It reads better here, next to the assertion it mirrors,
+	// which is the whole of the reason for the position.
+	if err := a.overrides.AssertSelfAuthenticatedSurface(); err != nil {
+		a.fatal("self-authenticated route not certified as failing closed", "error", err)
+	}
+
 	if a.identityVerifier == nil {
 		routes := a.unauthenticatedSurfaceRoutes(!verifierRequired)
 		if err := a.overrides.AssertUnauthenticatedSurface(routes); err != nil {

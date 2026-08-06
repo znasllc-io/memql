@@ -99,9 +99,20 @@ func HandlerAuthorizedPaths() []string {
 	// twice over. An unlisted source is 404 (the allowlist is empty unless an
 	// operator populates it), and a listed one without a matching HMAC
 	// signature is 401. There is no path through the handler that reaches the
-	// graph on an unauthorized request -- component/inbound's
-	// TestHandlerRefusesWithoutStaging asserts exactly that, for every refusal
-	// branch, by checking nothing was executed.
+	// graph on a request that FAILS a check it was configured to make --
+	// component/inbound's TestHandlerRefusesWithoutStaging asserts exactly that,
+	// for every refusal branch, by checking nothing was executed.
+	//
+	// One qualification, and it is a real one rather than pedantry: this holds
+	// for every source configured with a signature scheme. A source configured
+	// SIGNATURE_SCHEME=none is a LISTED source that accepts an unsigned request
+	// and stages the row -- verify() returns (false, nil) for SchemeNone, so the
+	// handler proceeds. That is a deliberate per-source opt-in which fatals if
+	// the scheme is unset and logs "source accepts UNVERIFIED requests" at boot,
+	// so it is loud rather than silent; but it means the fail-closed property is
+	// operator-configuration-dependent, not a property of the code. A
+	// certification that is unqualified where a shipped configuration
+	// contradicts it is worse than none.
 	//
 	// The credential is a per-source shared secret rather than a memQL
 	// identity, which is why this cannot be an ordinary authenticated route:
@@ -132,7 +143,10 @@ func SelfAuthenticatedPaths() []string {
 	// POST /inbound/{source} -- verified by a per-source HMAC over the body.
 	// Fails closed twice with no credentials: an unlisted source is 404 (the
 	// allowlist is empty unless an operator populates it) and a listed one
-	// without a matching signature is 401.
+	// without a matching signature is 401 -- for every source configured with a
+	// signature scheme. A source configured SIGNATURE_SCHEME=none accepts an
+	// unsigned request by design; see the qualification on
+	// AssertSelfAuthenticatedRoutesFailClosed.
 	return InboundWebhookPaths()
 }
 
@@ -169,6 +183,87 @@ var contractRoutes = []string{
 // before comparison, since the declarations are about paths.
 func AssertUnauthenticatedSurfaceDeclared(routes []string) error {
 	return assertSurfaceDeclared(routes, PublicPaths(), HandlerAuthorizedPaths())
+}
+
+// AssertSelfAuthenticatedRoutesFailClosed reports whether every route granted
+// the third-tier exemption is also certified as failing closed (memql#3062).
+//
+// SelfAuthenticatedPaths() is the only declaration that makes the verifier
+// middleware STEP ASIDE on a node that installs it, which is a strictly
+// stronger power than the other two lists hold. PublicPaths() also bypasses the
+// middleware, but it says the route is genuinely public everywhere -- a claim a
+// reviewer reads as such. HandlerAuthorizedPaths() is consulted ONLY where no
+// verifier runs, so it cannot open a hole on a verifier-consuming node at all.
+//
+// So an entry added to the third tier removes bearer verification on every
+// verifier-consuming node, the bff included. That tier's own contract says a
+// route qualifies "only if it fails CLOSED with no credentials", and this turns
+// that sentence into something checked at boot rather than promised in a
+// comment.
+//
+// Be honest about the strength of the check, because it is weaker than
+// "certified". HandlerAuthorizedPaths() membership does not uniformly mean the
+// route authenticates itself: two of its entries say so in their own comments --
+// /memql/ws "declares a known posture, not a claim that the upgrade
+// authenticates", and /memql/query likewise -- and both derive their
+// fail-closed argument from the IDENTITY binary's OperatorAware(RejectAll)
+// chain, which is a property of a node where no verifier runs. That is exactly
+// the case the third tier is not about. So this check proves membership of a
+// reviewed list, not that a handler authenticates; it stops a route being
+// exempted by omission, which is the drift that actually happens, and it would
+// not stop someone deliberately adding an inappropriate route to both lists.
+//
+// It holds today only BY CONSTRUCTION: SelfAuthenticatedPaths() and the tail of
+// HandlerAuthorizedPaths() both return InboundWebhookPaths(). Two lists that
+// agree by construction are the pair that drifts, and this drift would be
+// silent and one-directional -- toward a route nothing authenticates.
+func AssertSelfAuthenticatedRoutesFailClosed() error {
+	return assertSelfAuthenticatedFailClosed(SelfAuthenticatedPaths(), HandlerAuthorizedPaths())
+}
+
+// AssertSelfAuthenticatedFailClosedFor is the same rule over caller-supplied
+// lists, exported so a test outside this package can prove the rule REPORTS.
+//
+// Without it the only reachable assertion from app/ is "the live tree is clean
+// today", which an always-nil function satisfies identically -- and that is
+// exactly how a `return nil` rewrite of the wrapper above went uncaught.
+func AssertSelfAuthenticatedFailClosedFor(selfAuth, handlerAuthorized []string) error {
+	return assertSelfAuthenticatedFailClosed(selfAuth, handlerAuthorized)
+}
+
+// assertSelfAuthenticatedFailClosed holds the rule, separated from the live
+// lists so it can be exercised against fixtures. Asserting only the real lists
+// would prove the tree is clean today without proving the check would catch a
+// route that is not -- the same split assertSurfaceDeclared makes, for the same
+// reason.
+func assertSelfAuthenticatedFailClosed(selfAuth, handlerAuthorized []string) error {
+	if len(selfAuth) == 0 {
+		return nil
+	}
+	certified := make([]string, 0, 2*len(handlerAuthorized))
+	for _, p := range handlerAuthorized {
+		certified = append(certified, surfacePathForms(p)...)
+	}
+
+	var undeclared []string
+	for _, route := range selfAuth {
+		if !surfaceDeclaredBy(surfacePathForms(route), certified) {
+			undeclared = append(undeclared, route)
+		}
+	}
+	if len(undeclared) == 0 {
+		return nil
+	}
+	sort.Strings(undeclared)
+	return fmt.Errorf(
+		"self-authenticated route(s) not certified as failing closed: %s listed in "+
+			"SelfAuthenticatedPaths() but not in HandlerAuthorizedPaths(). The third tier makes "+
+			"the verifier middleware step aside on EVERY verifier-consuming node, so a route may "+
+			"take it only if it authenticates itself and fails closed with no credentials -- "+
+			"which is what HandlerAuthorizedPaths() membership certifies. Add it there with the "+
+			"reason it fails closed, or remove the exemption "+
+			"(see component/server/unauthenticated_surface.go, memql#3062)",
+		strings.Join(undeclared, ", "))
 }
 
 // stripMethod removes a leading HTTP verb from a ServeMux pattern.
