@@ -223,7 +223,8 @@ log, so a row value **can** reach a **structured log** by that path.
 It is **not** redacted by the **tool-args validator**
 (`MemQLEngine.validateToolArgs`, `component/memql/tool_execution.go`),
 which is compiled from the *same* args schema that carries the secret
-flag and is auto-registered for every enabled query and mutation. On the
+flag and is auto-registered for an enabled query or mutation whose name no
+authored tool already occupies. On the
 agent path it runs **before** the covered validator, it serializes the
 **entire** args map into a WARN log rather than quoting one value, and
 its error message is returned to the model unredacted. Tracked as
