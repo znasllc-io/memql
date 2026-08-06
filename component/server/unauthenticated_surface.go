@@ -137,8 +137,11 @@ func HandlerAuthorizedPaths() []string {
 //
 // Membership means the bearer middleware steps aside, NOT that the route is
 // unauthenticated. A route qualifies only if it fails CLOSED with no
-// credentials, exactly as HandlerAuthorizedPaths() requires, and the matching
-// is bounded to one path segment (see verifier.isSelfAuthenticated).
+// credentials, exactly as HandlerAuthorizedPaths() requires; the matching is
+// bounded to one path segment; and it applies only to a path the mux will
+// actually route to the exempting handler -- an encoded separator, or any
+// spelling normalization would rewrite, is refused (see
+// verifier.isSelfAuthenticated, memql#3128).
 func SelfAuthenticatedPaths() []string {
 	// POST /inbound/{source} -- verified by a per-source HMAC over the body.
 	// Fails closed twice with no credentials: an unlisted source is 404 (the
