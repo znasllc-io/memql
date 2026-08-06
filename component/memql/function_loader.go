@@ -244,7 +244,13 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 			version = "v1" // default
 		}
 		resolver := NewConceptResolver(registry)
-		if err := resolver.ResolveFileWithSignatureConceptsInDomain(file, version, signatureConcepts, DomainFromFilePath(origin)); err != nil {
+		// The ROOT domain, not the last path segment (memql#3084). Boot
+		// assembles a concept id from the FIRST segment (unified_loader.go:
+		// `dir := firstPathSegment(p)`), so for
+		// `agents/tools/askSpecialist.memql` the hint must be `agents`.
+		// DomainFromFilePath returns `tools` -- a namespace this file cannot
+		// have declared anything under, and therefore cannot bind ambiently.
+		if err := resolver.ResolveFileWithSignatureConceptsInDomain(file, version, signatureConcepts, RootDomainFromFilePath(origin)); err != nil {
 			return nil, fmt.Errorf("concept resolution: %w", err)
 		}
 	}
@@ -299,12 +305,38 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 	// the registry's trailing-segment match.
 	if boundConcept == "" && registry != nil && len(signatureConcepts) == 1 {
 		resolver := NewConceptResolver(registry)
-		nsHint := namespaceHintForName(file.Uses, signatureConcepts[0])
+		// An EXPLICIT import wins and is not scope-checked: naming the
+		// namespace is exactly how an author reaches a foreign one.
+		imported := namespaceHintForName(file.Uses, signatureConcepts[0])
+		nsHint := imported
 		if nsHint == "" {
-			nsHint = DomainFromFilePath(origin) // ambient same-domain scope (#2617)
+			// AMBIENT same-domain scope (#2617), corrected in memql#3084.
+			//
+			// Two defects lived here, the same pair #3026 removed from the
+			// canonicalId path in this file:
+			//
+			//  1. the hint came from DomainFromFilePath -- the LAST path
+			//     segment -- while boot assembles ids from the FIRST, so a
+			//     nested `agents/tools/*.memql` was hinted `tools`;
+			//  2. nothing checked that the resolved id was one this file's
+			//     domain could have DECLARED, so the hint was a preference
+			//     rather than a bound.
+			//
+			// Together they let a nested file bind a foreign `v1:tools:widget`
+			// with no import. Latent in-tree (nothing assembles under
+			// v1:tools / v1:roles / v1:skills) and live as soon as a
+			// MEMQL_DSL_PATH bundle claims one of those domain names.
+			nsHint = RootDomainFromFilePath(origin)
 		}
 		if id, err := resolver.resolveBareConceptNameWithNamespace(signatureConcepts[0], nsHint); err == nil {
-			boundConcept = id
+			// The AMBIENT bind is gated; an imported one is not. The gate is
+			// the exact inverse of assembly (idIsInDomainAmbientScope, #3080),
+			// so it admits precisely the namespaces this file could have
+			// declared under -- its directory, a colon-extension of it, or its
+			// namespace.pin -- and nothing else.
+			if imported != "" || idIsInDomainAmbientScope(id, RootDomainFromFilePath(origin), declaredNamespaceForOrigin(origin)) {
+				boundConcept = id
+			}
 		}
 	}
 
