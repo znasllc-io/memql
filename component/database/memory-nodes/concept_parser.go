@@ -436,6 +436,36 @@ func propertyDeclToParsed(prop *parser.PropertyDecl) (parsedProperty, error) {
 		}
 	}
 
+	// A @variant attribute with NO branch block is refused (memql#3123).
+	//
+	// Everything about @variant keys off the BRANCH LIST rather than the
+	// attribute -- the discriminator is harvested inside the `len(Variants) > 0`
+	// arm below, and valueAnnotationNames reports @variant from len(variants).
+	// So a branch-less `@variant(discriminator="kind")` populated neither: the
+	// discriminator never reached the schema, memql#3049's composite guard never
+	// saw it, and the field built as a bare `type: object` that validates
+	// against nothing.
+	//
+	// Depth-independent, which is why it is not a regression of #3049: the same
+	// silence occurred on `object`, `[]object` and `[][]object` alike. #3049
+	// made the composite case expressible enough to notice; this is the one
+	// spelling its guard still let through.
+	//
+	// REFUSED rather than defaulted. An author who wrote the attribute has said
+	// "this field is a discriminated union", and a union with no branches is not
+	// one -- there is no safe default to invent, and inventing one would restore
+	// exactly the silence being removed. Same choice #3049 made for a constraint
+	// the schema cannot express.
+	if hasVariantAttribute(prop.Attributes) && len(prop.Variants) == 0 {
+		return parsedProperty{}, fmt.Errorf(
+			"@variant is declared with no branch block. A discriminated union needs its branches -- "+
+				"`%s object @variant(discriminator=\"<field>\") { <branch> { ... } <branch> { ... } }`. "+
+				"Written without them the discriminator is dropped and the field validates as a bare "+
+				"object, which is the silent-wrong outcome memql#3123 removed; declare the branches, "+
+				"or drop the annotation if this field is not a union",
+			prop.Name)
+	}
+
 	// Fold variant branches in. The discriminator comes from the
 	// @variant(discriminator="fieldName") attribute that the parser
 	// collected earlier; we extract it here so the schema builder
@@ -538,6 +568,21 @@ func propertyDeclToParsed(prop *parser.PropertyDecl) (parsedProperty, error) {
 	}
 
 	return out, nil
+}
+
+// hasVariantAttribute reports whether the declaration carries an @variant
+// attribute, independent of whether any branches were written.
+//
+// The distinction is the whole of memql#3123: every other read of "is this a
+// variant" in this file goes through the branch LIST, so the one spelling that
+// declares the intent without the branches was invisible to all of them.
+func hasVariantAttribute(attrs []*parser.Attribute) bool {
+	for _, attr := range attrs {
+		if attr != nil && attr.Name == "variant" {
+			return true
+		}
+	}
+	return false
 }
 
 // valueAnnotationNames lists the value-describing parts of a declaration that
