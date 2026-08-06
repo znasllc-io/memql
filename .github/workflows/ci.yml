@@ -51,6 +51,7 @@ permissions:
 jobs:
   changes:
     name: changes
+    timeout-minutes: 10
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -162,6 +163,7 @@ jobs:
   # cache is warm for vet/test/run/lint that follow.
   go-checks:
     name: go-checks
+    timeout-minutes: 20
     needs: changes
     if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' || needs.changes.outputs.dsl == 'true' || needs.changes.outputs.proto == 'true' || needs.changes.outputs.gates == 'true' }}
     runs-on: ubuntu-latest
@@ -333,6 +335,7 @@ jobs:
   # break it.
   build-voice:
     name: build voice (cgo)
+    timeout-minutes: 10
     needs: changes
     if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' }}
     runs-on: ubuntu-latest
@@ -375,6 +378,7 @@ jobs:
   # a tagged build compiles the whole module, so any Go change can break it.
   build-node-tags:
     name: build node tags
+    timeout-minutes: 10
     needs: changes
     if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' }}
     runs-on: ubuntu-latest
@@ -397,6 +401,7 @@ jobs:
   # pure Go change that doesn't touch the generator skips the Node lane.
   sdk-ts-typecheck:
     name: sdk-ts-typecheck
+    timeout-minutes: 10
     needs: changes
     if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.sdkts == 'true' }}
     runs-on: ubuntu-latest
@@ -427,6 +432,7 @@ jobs:
   # candidate that actually lands is gated. Added to ci-required below.
   conformance:
     name: mcp-conformance
+    timeout-minutes: 20
     needs: changes
     if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' || needs.changes.outputs.dsl == 'true' }}
     runs-on: ubuntu-latest
@@ -519,6 +525,7 @@ jobs:
   # TestMain -- and adding the TestMain without the entry now fails the gate.
   db-tests:
     name: db-tests
+    timeout-minutes: 20
     needs: changes
     if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' || needs.changes.outputs.dsl == 'true' }}
     runs-on: ubuntu-latest
@@ -593,6 +600,7 @@ jobs:
   # (editors/vscode, cmd/memql-lsp, scripts/vscode); push + merge_group run it.
   vscode-extension:
     name: vscode-extension
+    timeout-minutes: 10
     needs: changes
     if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.vscode == 'true' }}
     runs-on: ubuntu-latest
@@ -623,6 +631,7 @@ jobs:
   # ONLY, never at the individual jobs.
   ci-required:
     name: ci-required
+    timeout-minutes: 10
     if: ${{ always() }}
     needs:
       - changes
