@@ -2614,20 +2614,26 @@ var bareIdentOnly = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // scanners should be consolidated. It is the WRONG scanner for this job, and
 // the reason is worth recording because it is not visible from its signature.
 //
-// That blanker ends a string at a newline, describing it as "the same recovery
-// the lexer performs". The lexer does not do that: it accepts a literal
-// spanning lines and returns it as ONE string token (measured -- and memql#3047
-// is a separate bug about the line COUNTER not advancing through exactly such a
-// literal, which only exists because they are accepted). So on a multi-line
-// literal the blanker closes the string early, the real closing quote reopens
-// one, and every following comma is swallowed:
+// That blanker USED to end a string at a newline, describing it as "the same
+// recovery the lexer performs". The lexer does no such thing: it accepts a
+// literal spanning lines and returns it as ONE string token, and an
+// unterminated literal is a hard error rather than a recovery. So on a
+// multi-line literal the blanker closed the string early, the real closing
+// quote reopened one, and every following comma was swallowed:
 //
 //	"line one\nline two", args.b   lexer: 2 args   blanked scan: 1
 //
-// That is the identical symptom memql#3046 exists to remove -- arguments
-// silently collapsing to one -- reintroduced through a different door, and the
-// old lookback scanner got this case RIGHT. Fixing one comma-swallowing bug by
-// importing another is not a fix, so string state stays local here.
+// That was the identical symptom memql#3046 exists to remove -- arguments
+// silently collapsing to one -- reintroduced through a different door, so the
+// delegation was reverted and string state stayed local here.
+//
+// memql#3116 fixed the blanker: a literal now runs to its closing quote, and
+// the divergence above is gone. This scanner stays local anyway, because the
+// argument for delegating was never "it would work" -- it is the consolidation
+// question memql#3046's DoD raised, which needs its own decision about what
+// this function should do with comments (see below) rather than being settled
+// as a side effect. What is no longer true is the BLOCKING reason: delegating
+// would no longer be importing a bug.
 //
 // The cost of staying local is that comments inside an argument list are not
 // blanked, exactly as before this change. Nothing regresses relative to the
