@@ -32,7 +32,7 @@ seed skill professional-baseline {
   predefined:    true
 }
 
-@description("Knowledge baseline for every regulated medical role -- family doctor / pediatrician / dentist / physical therapist / nurse educator / pharmacist educator / veterinarian educator / mental health educator. Bundles the union of locked domains across medical.memql. Tier C: every medical role is high-stakes regulated and the agent factory injects an advisory disclaimer into the system prompt for any role that locks this skill.")
+@description("Knowledge baseline for every regulated medical role -- family doctor / pediatrician / dentist / physical therapist / nurse educator / pharmacist educator / veterinarian educator / mental health educator. Bundles the union of locked domains across medical.memql. Tier C: every medical role is high-stakes regulated. The advisory framing reaches the agent through this skill's DOMAINS -- Tier-B/C domains carry it as seeded chunk content -- not through any agent-factory disclaimer injection, which does not exist (memql#3068).")
 seed skill medical-baseline {
   slug:          "medical-baseline"
   name:          "Medical Baseline"
@@ -46,7 +46,7 @@ seed skill medical-baseline {
   predefined:    true
 }
 
-@description("Knowledge baseline for every legal role -- compliance / immigration / family law / estate / personal-legal. Tier B: the agent factory injects a 'general legal info, not personal advice' disclaimer for any role that locks this skill. Practising-attorney boundaries are enforced at the role level (no role grants tools that send communications on behalf of a client without explicit user approval).")
+@description("Knowledge baseline for every legal role -- compliance / immigration / family law / estate / personal-legal. Tier B: the 'general legal info, not personal advice' framing reaches the agent through this skill's Tier-B DOMAINS, which carry it as seeded chunk content. The agent factory injects no disclaimer (memql#3068). Practising-attorney boundaries are enforced at the role level (no role grants tools that send communications on behalf of a client without explicit user approval).")
 seed skill legal-baseline {
   slug:          "legal-baseline"
   name:          "Legal Baseline"
@@ -60,7 +60,7 @@ seed skill legal-baseline {
   predefined:    true
 }
 
-@description("Knowledge baseline for skilled trades -- general contracting, electrical, plumbing, HVAC, carpentry, automotive, welding, landscaping. Tier B because electrical / HVAC carry real-world safety stakes; the agent factory injects a 'consult a licensed pro for code and permitting questions' disclaimer for any role that locks this skill.")
+@description("Knowledge baseline for skilled trades -- general contracting, electrical, plumbing, HVAC, carpentry, automotive, welding, landscaping. Tier B because electrical / HVAC carry real-world safety stakes; the 'consult a licensed pro for code and permitting questions' framing reaches the agent through this skill's Tier-B DOMAINS as seeded chunk content, not through an agent-factory injection (memql#3068).")
 seed skill trades-baseline {
   slug:          "trades-baseline"
   name:          "Trades Baseline"
@@ -144,7 +144,7 @@ seed skill civic-baseline {
   predefined:    true
 }
 
-@description("Knowledge baseline for transportation roles -- currently the commercial-pilot educator. Tier C because aviation is a regulated domain; the agent factory injects an FAA-disclaimer-shaped hint when this skill is locked.")
+@description("Knowledge baseline for transportation roles -- currently the commercial-pilot educator. Tier C because aviation is a regulated domain; the FAA-disclaimer-shaped framing reaches the agent through this skill's Tier-C DOMAINS as seeded chunk content, not through an agent-factory injection (memql#3068).")
 seed skill transportation-baseline {
   slug:          "transportation-baseline"
   name:          "Transportation Baseline"
@@ -172,7 +172,7 @@ seed skill creative-baseline {
   predefined:    true
 }
 
-@description("Knowledge baseline for personal-life roles -- household manager, parenting coach, health + wellness, meal-planning, travel, learning companion, social / relationships, pet care, home improvement, mindfulness, entertainment, senior care, real estate, personal finance. Tier B because personal-finance is the only Tier-B subset; every other role downgrades the effective disclaimer at agent-factory time.")
+@description("Knowledge baseline for personal-life roles -- household manager, parenting coach, health + wellness, meal-planning, travel, learning companion, social / relationships, pet care, home improvement, mindfulness, entertainment, senior care, real estate, personal finance. Tier B because personal-finance is the only Tier-B subset. Note there is no 'effective disclaimer' computed at agent-factory time and nothing downgrades one -- this description claimed that, and it is the memql#3068 defect again; what an agent actually carries is whatever its attached DOMAINS were seeded with.")
 seed skill personal-baseline {
   slug:          "personal-baseline"
   name:          "Personal Baseline"
