@@ -1,8 +1,11 @@
 package agents
 
 import (
+	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -43,66 +46,108 @@ import (
 // neither carries a selector dot. A new consumer is virtually always a read, so
 // this is the shape that catches it.
 func TestAgentRoleTierIsPromptAdvisoryOnly(t *testing.T) {
-	entries, err := os.ReadDir(".")
-	if err != nil {
-		t.Fatalf("read package dir: %v", err)
-	}
+	// The paths a tier-keyed control would ACTUALLY land in, which is the point.
+	//
+	// The version this replaces scanned one directory, non-recursively -- the
+	// package holding the field declaration. The documented-but-absent behaviour
+	// was a disclaimer injected "at materialization time" and a create-flow
+	// warning, and neither would be written here: the system prompt is assembled
+	// in integrations/agent, and the server-side write validator that already
+	// loads the role row lives in component/memql. Measured: a tier-keyed
+	// create-flow REJECTION added to component/memql passed the old sweep, while
+	// the concept description said no such thing existed. That is memql#3068
+	// reappearing with its own guard green.
+	roots := []string{".", "../agent", "../../component/memql"}
 
-	type site struct {
-		file string
-		line int
-		text string
+	// Known sites, as `<path-tail> | <trimmed line>`. Every entry is a read this
+	// sweep has been shown NOT to be about agentRole.tier -- a different concept's
+	// tier, a log field, or the two non-read sites on the field itself.
+	//
+	// A baseline rather than a cleverer pattern because the alternative is
+	// guessing which `.Tier` belongs to which type from text, and a matcher that
+	// guesses wrong either misfires (and gets deleted) or misses. An entry here
+	// is a claim someone checked; a NEW line is a claim nobody has.
+	known := map[string]string{
+		"factory.go | Tier:                  stringField(payload, \"tier\"),":             "populates the field; not a read",
+		"factory.go | \"tier\":              r.Tier,":                                     "THE consumer: roleCatalogForPrompt",
+		"worker/dispatch.go | detail[\"tier\"] = cls.Tier.String()":                       "classifier tier, not agentRole",
+		"nonstreaming.go | \"tier\", \"cheap\",":                                          "log field",
+		"nonstreaming.go | \"tier\", \"escalation\",":                                     "log field",
+		"healing_base_immutable_validation.go | merged := isBaseTier(payload[\"tier\"])":  "healing base tier",
+		"executor_mutation.go | meta.priorBaseTier = isBaseTier(priorPayload[\"tier\"])":  "healing base tier",
+		"skill_tier_validation.go | tier := readSeedStringField(def.Body, \"tier\")":      "skill/domain tier",
+		"skill_tier_validation.go | skillTier := readSeedStringField(def.Body, \"tier\")": "skill tier",
 	}
-	var reads []site
+	// rowauthz_shadow.go carries a whole rowAuthz decl.Tier surface -- a
+	// different concept entirely, and enumerating each line would make this
+	// baseline rot on every edit to that file for no signal.
+	skipFiles := map[string]bool{"rowauthz_shadow.go": true}
+
+	var unknown []string
 	var scanned int
-
-	for _, e := range entries {
-		name := e.Name()
-		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
-			continue
-		}
-		data, readErr := os.ReadFile(filepath.Clean(name))
-		if readErr != nil {
-			t.Fatalf("read %s: %v", name, readErr)
-		}
-		scanned++
-		for i, line := range strings.Split(string(data), "\n") {
-			if !strings.Contains(line, ".Tier") {
-				continue
+	for _, root := range roots {
+		err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
 			}
-			reads = append(reads, site{file: name, line: i + 1, text: strings.TrimSpace(line)})
+			if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+				return nil
+			}
+			base := filepath.Base(path)
+			if skipFiles[base] {
+				return nil
+			}
+			data, readErr := os.ReadFile(filepath.Clean(path))
+			if readErr != nil {
+				return readErr
+			}
+			scanned++
+			for i, line := range strings.Split(string(data), "\n") {
+				if !strings.Contains(line, ".Tier") && !strings.Contains(line, `"tier"`) {
+					continue
+				}
+				trimmed := strings.TrimSpace(line)
+				key := shortKeyFor(path) + " | " + trimmed
+				if _, ok := known[key]; ok {
+					continue
+				}
+				unknown = append(unknown, fmt.Sprintf("%s:%d  %s", path, i+1, trimmed))
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("walk %s: %v", root, err)
 		}
 	}
 
 	// A sweep that stops resolving files passes vacuously, which is the same
 	// silent-disable shape the docs gates guard against.
-	if scanned < 2 {
-		t.Fatalf("only %d non-test .go file(s) scanned in this package -- the sweep is broken, "+
-			"not the code", scanned)
+	if scanned < 20 {
+		t.Fatalf("only %d non-test .go file(s) scanned across %v -- the sweep is broken and would "+
+			"pass vacuously", scanned, roots)
 	}
 
-	const wantRead = `"tier":            r.Tier,`
-	if len(reads) != 1 {
-		var got []string
-		for _, r := range reads {
-			got = append(got, r.file+":"+itoa(r.line)+"  "+r.text)
-		}
-		t.Fatalf("agentRole.tier is read in %d place(s); it must be read in exactly ONE, the "+
-			"prompt catalog in roleCatalogForPrompt.\n  %s\n\n"+
-			"If you have just implemented tier-keyed behaviour (a Tier-B disclaimer, a Tier-C "+
-			"create-flow warning), that is a real feature and this test is not the obstacle -- but "+
-			"the `tier` @description in dsl/agents/concepts.memql currently states, in as many "+
-			"words, that NOTHING branches on this field. Update that description in the same "+
-			"change and widen this test to match. memql#3068 exists because those two drifted "+
-			"apart once already, and memql#3061 nearly took an authorization decision on the "+
-			"strength of the wrong half.",
-			len(reads), strings.Join(got, "\n  "))
+	if len(unknown) > 0 {
+		sort.Strings(unknown)
+		t.Errorf("a tier read appeared that this sweep has not seen before:\n  %s\n\n"+
+			"If it reads agentRole.tier, then dsl/agents/concepts.memql's description of that "+
+			"field is now WRONG -- it says the field is advisory and that nothing branches on it. "+
+			"Fix the code or fix the description; do not just add the line here. That description "+
+			"once claimed a disclaimer injection that did not exist, and an authorization decision "+
+			"was nearly taken on it (memql#3068, memql#3061).\n\n"+
+			"If it reads some OTHER concept's tier, add it to `known` with the reason.",
+			strings.Join(unknown, "\n  "))
 	}
-	if !strings.Contains(reads[0].text, "r.Tier") {
-		t.Errorf("the single read of agentRole.tier is not the prompt-catalog one.\n"+
-			"  got:  %s:%d  %s\n  want a line of the form: %s",
-			reads[0].file, reads[0].line, reads[0].text, wantRead)
+}
+
+// shortKeyFor is the baseline key: enough path to disambiguate, not so much that
+// moving a package rewrites every entry.
+func shortKeyFor(path string) string {
+	base := filepath.Base(path)
+	if parent := filepath.Base(filepath.Dir(path)); parent == "worker" {
+		return parent + "/" + base
 	}
+	return base
 }
 
 // TestAgentRoleTierDescriptionSaysAdvisory is the other direction: the concept
