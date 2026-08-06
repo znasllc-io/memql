@@ -143,7 +143,7 @@ signed payload, so it separates them and cannot be forged.
 | `404` | source unlisted, misconfigured, receiver disabled, or a nested path |
 | `401` | signature absent, malformed, mismatched, or outside the replay window |
 | `413` | body over the cap |
-| `400` | body is not valid UTF-8, or the dedupe header is malformed |
+| `400` | body is not valid UTF-8, body contains a NUL byte, or the dedupe header is malformed |
 | `503` | verified, but staging failed -- **the sender should retry** |
 
 `401` is deliberately flat: the caller is unauthenticated, so *why* a check
@@ -179,3 +179,17 @@ Check the product automation's trigger and filter.
   retrying a business event means.
 - **No binary payloads.** `body` is text; a non-UTF-8 request is refused with
   `400` rather than staged corrupted.
+- **No NUL bytes in the body.** U+0000 is valid UTF-8, so it passes the check
+  above, but `body` is stored in a JSONB column and PostgreSQL's `jsonb` type
+  cannot represent U+0000. Such a request is refused with `400` (memql#3098).
+  It is refused rather than repaired for the same reason invalid UTF-8 is: the
+  body is signature-verified material, so substituting a byte would stage a row
+  that no longer matches what the sender signed. Note this is the OPPOSITE of
+  what outbound delivery does with the same byte -- there it substitutes,
+  because the affected field is diagnostic text (`lastError`) where a mangled
+  character beats a permanently stuck row.
+
+  The `400` matters as much as the refusal. Before this, such a body was
+  accepted, the insert failed against the column, and the handler answered
+  `503` -- which every sender in the list above retries, against a request that
+  could never succeed.
