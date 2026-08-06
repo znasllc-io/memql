@@ -119,3 +119,6 @@ docs/public/reference/_generated/*
 /memqlmigrate
 /memqllint
 /memqlfmt
+
+# Agent stack -- local credentials and MCP config (never commit).
+.mcp.json

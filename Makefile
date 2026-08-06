@@ -552,6 +552,7 @@ release:
 
 ##@ Dev tooling
 .PHONY: install-deps genesis-seal env-registry-sync env-registry-check
+.PHONY: setup-agents verify-agents
 
 ## Regenerate the embedded genesis manifest snapshot
 ## (component/genesis/manifest.yaml) from the authored registry
@@ -584,6 +585,21 @@ genesis-seal:
 ## or after a fresh clone so 'make up' isn't surprised by a missing tool.
 install-deps:
 	@bash scripts/dev/install-deps.sh
+
+## Install the agent stack: the GitHub MCP server, the Superpowers plugin,
+## and the CCPM skill. Idempotent -- every step probes current state first, so
+## a repeat run changes nothing. Needs GITHUB_PAT in the environment or in a
+## gitignored .env at the repo root. See docs/AGENTS.md.
+##   make setup-agents            install what is missing
+##   make setup-agents ARGS=--update   also refresh what is already installed
+setup-agents:
+	@bash scripts/setup-agents.sh $(ARGS)
+
+## Read-only status check for the agent stack; exits non-zero if anything is
+## missing. Installs nothing, so it is safe to run as a gate. Fix with
+## 'make setup-agents'.
+verify-agents:
+	@bash scripts/verify-agents.sh
 
 # ---------------------------------------------------------------------------
 # Deploy gates (engine ops)
