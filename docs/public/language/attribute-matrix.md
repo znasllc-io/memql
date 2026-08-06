@@ -220,14 +220,16 @@ event carries the concept row's fields flattened into its payload. It
 quotes the value in full, and writes that same reason string to a WARN
 log, so a row value **can** reach a **structured log** by that path.
 
-It is **not** redacted by the **tool-args validator**
+It **is** redacted by the **tool-args validator**
 (`MemQLEngine.validateToolArgs`, `component/memql/tool_execution.go`),
-which is compiled from the *same* args schema that carries the secret
-flag and is auto-registered for every enabled query and mutation. On the
-agent path it runs **before** the covered validator, it serializes the
-**entire** args map into a WARN log rather than quoting one value, and
-its error message is returned to the model unredacted. Tracked as
-memql#3117.
+since memql#3117. That validator is compiled from the *same* args schema
+that carries the secret flag, and the flag now travels onto the tool's
+own schema as `x-secret`. All three of its exposures are closed
+together: the message returned to the model, the **entire** args map it
+serializes into a WARN log (redacted per key, so non-secret arguments
+keep their values), and the ordering — it runs *before* the function-args
+validator on the agent path, so redacting only the latter would have
+been reached too late.
 
 It is **not** redacted by **concept payload validation**. `@minimum`,
 `@maximum` and `@format` declared on the *concept* are enforced by JSON

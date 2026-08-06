@@ -145,6 +145,22 @@ func jsonSchemaForArgsField(f *FunctionArgsField) map[string]any {
 	if f != nil && f.Description != "" {
 		schema["description"] = f.Description
 	}
+	// Carry the @secret marking onto the tool's own schema (memql#3117).
+	//
+	// The generated tool is compiled from the SAME ArgsSchema that carries the
+	// Secret flag memql#3036 added, but the flag stopped here -- so a function
+	// whose args #3036 redacts had a tool twin whose args were not. Emitting
+	// x-secret makes the tool self-describing, so validateToolArgs can redact
+	// from tool.InputSchema alone rather than reaching back into the function
+	// registry, and an AUTHORED tool declaring a secret arg is covered by the
+	// same path.
+	//
+	// x-* is an annotation keyword: JSON Schema validators ignore it, which is
+	// why the concept schema already carries the same marking. What reaches the
+	// model is the FACT that a field is secret, never a value.
+	if f != nil && f.Secret {
+		schema["x-secret"] = true
+	}
 	return schema
 }
 

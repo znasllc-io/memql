@@ -18,6 +18,8 @@ import (
 
 	"github.com/znasllc-io/memql/component/safety"
 	"github.com/znasllc-io/memql/core/common"
+
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
 
 // remainingPlaceholderRegex matches a `$args.<identifier>` placeholder
@@ -103,13 +105,29 @@ func (e *MemQLEngine) validateToolArgs(tool *Tool, args map[string]any) error {
 		argsForValidation = args
 	}
 	if err := schema.Validate(argsForValidation); err != nil {
+		// Redact BEFORE anything renders the error (memql#3117). This validator
+		// is the worst of the @secret-uncovered surfaces on three counts, and
+		// all three are downstream of this line: it runs before the validator
+		// memql#3036 redacts, it serialises the ENTIRE args map into a WARN log
+		// rather than quoting one rejected value, and its message is returned
+		// to the model with IsError so the tool loop hands the text to the LLM.
+		//
+		// In place, so the log, the LLM-facing message and any caller that
+		// walks the tree all see the same redacted text -- redacting at one
+		// render site would leave the other two.
+		secret := secretToolArgFields(tool)
+		err = memorynodes.RedactSecretsInValidationError(err, secret)
+
 		// Log the full structured failure so we can diagnose why
 		// the LLM's call didn't match the schema. Also log the
 		// args (best-effort JSON) so we see what was actually
 		// sent. The LLM-facing message is shorter; the operator
 		// gets the full picture in the log.
 		if e != nil && e.Component != nil && e.Logger != nil {
-			argsJSON, _ := json.Marshal(args)
+			// Per-KEY redaction rather than dropping the attribute: the whole
+			// point of logging args is diagnosing a shape mismatch, and every
+			// non-secret argument still carries its value.
+			argsJSON, _ := json.Marshal(redactSecretArgValues(args, secret))
 			e.Logger.Warn("tool args validation failed",
 				"tool", tool.Name,
 				"args", string(argsJSON),

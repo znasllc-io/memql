@@ -301,14 +301,15 @@ concept fieldTypes {
 //                       fields. It quotes the value in full and also writes it
 //                       to a WARN log -- so a row value CAN reach a structured
 //                       log by that path.
-//                       NOT REDACTED BY THE TOOL-ARGS VALIDATOR
+//                       COVERED, since memql#3117: THE TOOL-ARGS VALIDATOR
 //                       (validateToolArgs). Compiled from the SAME args schema
-//                       that carries the secret flag and auto-registered for
-//                       every enabled query and mutation, it runs BEFORE the
-//                       covered validator on the agent path, serializes the
-//                       ENTIRE args map into a WARN log rather than quoting one
-//                       value, and returns its message to the model
-//                       unredacted. Tracked as memql#3117.
+//                       that carries the secret flag, and the flag now reaches
+//                       the tool's own schema as x-secret. All three of its
+//                       exposures close together: the message returned to the
+//                       model, the ENTIRE args map it writes to a WARN log
+//                       (redacted per key, so non-secret args keep their
+//                       values), and the ordering -- it runs BEFORE the
+//                       function-args validator on the agent path.
 //                       NOT REDACTED BY CONCEPT PAYLOAD VALIDATION. @minimum /
 //                       @maximum / @format declared on the CONCEPT are checked
 //                       by JSON schema, which interpolates the value. Any

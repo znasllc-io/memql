@@ -581,15 +581,16 @@ func (c *Concept) PIIFields() []string {
 // string is also written to a WARN log (args_binding.go:285) -- so a concept
 // row value CAN reach a structured log by that path. Tracked separately.
 //
-// NOT COVERED -- the tool-args validator, MemQLEngine.validateToolArgs
-// (component/memql/tool_execution.go:66). It is compiled from the SAME
-// ArgsSchema that carries the Secret flag and is auto-registered for every
-// enabled query and mutation, so it covers the same declarations this list
-// does. It is the worst of the uncovered set: it runs BEFORE the covered
-// validator on the agent path (tool_execution.go:366 precedes the handler at
-// :375), it serializes the ENTIRE args map into a WARN log rather than quoting
-// one value (:112-115), and formatToolValidationError (:256) does no redaction
-// before the message is returned to the model. Tracked as memql#3117.
+// COVERED, since memql#3117 -- the tool-args validator,
+// MemQLEngine.validateToolArgs (component/memql/tool_execution.go). It is
+// compiled from the SAME ArgsSchema that carries the Secret flag, and that flag
+// now travels onto the tool's own schema as x-secret, so the validator redacts
+// from the tool alone. It was the worst of the uncovered set on three counts,
+// and all three close together: it runs BEFORE the function-args validator on
+// the agent path (so redacting only that one was reached too late), it
+// serializes the ENTIRE args map into a WARN log rather than quoting one
+// rejected value (now redacted per key, leaving non-secret args intact), and
+// its message is returned to the model.
 //
 // NOT COVERED -- concept payload JSON-schema validation (Create, below), which
 // enforces @minimum / @maximum / @format declared on the CONCEPT and

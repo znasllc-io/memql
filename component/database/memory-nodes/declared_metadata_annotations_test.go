@@ -684,7 +684,6 @@ func TestSecretEnforcementIsRealAndScoped(t *testing.T) {
 				{"query results", []string{"redacted from **query results**", "not redacted from query results", "from **query results**"}},
 				{"the automation args binder", []string{"automation args binder", "args_binding.go", "not redacted by the automation"}},
 				{"concept payload validation", []string{"concept payload validation", "json schema, which interpolates", "by concept payload validation"}},
-				{"the tool-args validator", []string{"tool-args validator", "validatetoolargs", "tool_execution.go"}},
 				{"the by-name matching rule", []string{"by argument name", "by arg name", "matching is by argument name", "matches by argument name", "name, not by write target", "not by write target"}},
 				{"the length disclosure", []string{"length is never redacted", "value too long", "rune count for a secret"}},
 			} {
@@ -707,6 +706,44 @@ func TestSecretEnforcementIsRealAndScoped(t *testing.T) {
 						"over-promise memql#2960 corrected -- one rung higher, and harder to "+
 						"spot because it is now partly true.\n\n"+
 						"Accepted spellings: %v", doc, surface.name, surface.anyOf)
+				}
+			}
+
+			// The other direction. A surface that HAS been enforced must be
+			// described as enforced -- otherwise the documents keep warning
+			// about a hole that is closed, and a reader who believes them
+			// hand-rolls a redaction that already exists.
+			//
+			// The tool-args validator moved here from the list above in
+			// memql#3117. It was the worst of the uncovered set: it runs BEFORE
+			// the function-args validator on the agent path, it WARN-logs the
+			// entire args map rather than one rejected value, and its message
+			// goes to the model.
+			for _, covered := range []struct {
+				name  string
+				anyOf []string
+			}{
+				{"the tool-args validator as ENFORCED", []string{
+					"is** redacted by the **tool-args validator",
+					"covered, since memql#3117: the tool-args validator",
+					"covered, since memql#3117 -- the tool-args validator",
+					"since memql#3117, is redacted by the **tool-args validator",
+				}},
+			} {
+				found := false
+				for _, phrase := range covered.anyOf {
+					if strings.Contains(text, phrase) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("%s must describe %s.\n\n"+
+						"memql#3117 closed that surface. If this is failing because the enforcement "+
+						"was REVERTED, move the entry back to the unenforced list above in the same "+
+						"commit -- do not simply delete it, or the documents go back to being wrong "+
+						"in the other direction.\n\nAccepted spellings: %v",
+						doc, covered.name, covered.anyOf)
 				}
 			}
 		})
