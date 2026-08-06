@@ -119,20 +119,82 @@ func TestFindRoleBySlug_UnknownSlugMisses(t *testing.T) {
 	}
 }
 
-// Two user rows on one slug is degenerate rather than an attack (no predefined
-// row is being impersonated), but the resolution must still be DETERMINISTIC --
-// otherwise the same goal produces different agents on different runs.
-func TestFindRoleBySlug_IsDeterministicAmongUserRows(t *testing.T) {
-	catalog := []roleSnapshot{
-		{Slug: "dup", Name: "First", Predefined: false},
-		{Slug: "dup", Name: "Second", Predefined: false},
+// Two rows that AGREE on Predefined must still resolve the same way, and the
+// only way to test that is to change the ORDER.
+//
+// The version this replaces called findRoleBySlug 20 times on the same slice
+// literal. findRoleBySlug is a pure function, so identical input gives identical
+// output for ANY implementation -- including one that returns the last match, or
+// the first. It could not fail. Measured: changing the fallback from
+// first-encountered to last-encountered left it green, and two-predefined-rows
+// had no coverage at all.
+//
+// Permuting the catalog is what makes the assertion real, because the defect
+// being guarded is precisely "the winner depends on what the query returned
+// first".
+func TestFindRoleBySlug_ResolvesIdenticallyUnderAnyCatalogOrder(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		rows   []roleSnapshot
+		wantID string
+	}{
+		{
+			name: "two user rows on one slug",
+			rows: []roleSnapshot{
+				{Slug: "dup", ID: "role-b", Name: "Bee"},
+				{Slug: "dup", ID: "role-a", Name: "Ay"},
+			},
+			wantID: "role-a",
+		},
+		{
+			// Not reachable today -- the seeder is id-keyed -- but the tie-break
+			// has to be total, or this pair falls back to catalog order and the
+			// determinism claim is false again for a case nobody tested.
+			name: "two predefined rows on one slug",
+			rows: []roleSnapshot{
+				{Slug: "dup", ID: "role-z", Predefined: true},
+				{Slug: "dup", ID: "role-c", Predefined: true},
+			},
+			wantID: "role-c",
+		},
+		{
+			name: "mixed: predefined wins regardless of id order",
+			rows: []roleSnapshot{
+				{Slug: "dup", ID: "role-a", Predefined: false},
+				{Slug: "dup", ID: "role-z", Predefined: true},
+			},
+			wantID: "role-z",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			forward, ok := findRoleBySlug(tc.rows, "dup")
+			if !ok {
+				t.Fatal("slug did not resolve")
+			}
+			reversed := []roleSnapshot{tc.rows[1], tc.rows[0]}
+			backward, ok := findRoleBySlug(reversed, "dup")
+			if !ok {
+				t.Fatal("slug did not resolve in the reversed catalog")
+			}
+			if forward.ID != backward.ID {
+				t.Fatalf("resolution depends on catalog ORDER: %q forward, %q reversed. "+
+					"The tie-break must be a property of the rows, not of what the query "+
+					"returned first (memql#3066)", forward.ID, backward.ID)
+			}
+			if forward.ID != tc.wantID {
+				t.Errorf("resolved %q, want %q", forward.ID, tc.wantID)
+			}
+		})
 	}
-	first, _ := findRoleBySlug(catalog, "dup")
-	for i := 0; i < 20; i++ {
-		got, _ := findRoleBySlug(catalog, "dup")
-		if got.Name != first.Name {
-			t.Fatalf("resolution is not deterministic: got %q then %q", first.Name, got.Name)
-		}
+}
+
+// An empty catalog must miss rather than panic -- unpinned until now.
+func TestFindRoleBySlug_EmptyCatalogMisses(t *testing.T) {
+	if _, ok := findRoleBySlug(nil, "anything"); ok {
+		t.Error("an empty catalog must not resolve any slug")
+	}
+	if _, ok := findRoleBySlug([]roleSnapshot{}, "anything"); ok {
+		t.Error("an empty catalog must not resolve any slug")
 	}
 }
 

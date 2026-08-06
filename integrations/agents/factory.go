@@ -212,6 +212,11 @@ type roleSnapshot struct {
 	// slug resolution can prefer the seeded catalog row over a user row that
 	// claims the same slug (memql#3066) -- see findRoleBySlug.
 	Predefined bool
+	// ID is the row id, carried ONLY as the tie-break for findRoleBySlug. Two
+	// rows that are equal on Predefined have to resolve the same way every
+	// time, and row order out of an @cache(300) query is not something to
+	// depend on -- so the tie-break is a property of the rows themselves.
+	ID string
 }
 
 // loadExistingAgents walks the user's active agents. Best-effort:
@@ -704,6 +709,9 @@ func roleSnapshotFromRow(row map[string]any) (roleSnapshot, bool) {
 		RecommendedPolicySlug: stringField(payload, "recommendedPolicySlug"),
 		SystemPromptHints:     stringField(payload, "systemPromptHints"),
 		Predefined:            boolField(payload, "predefined"),
+		// The id lives on the ROW, not the payload -- fall back to the payload
+		// spelling for the flat shape some callers pass.
+		ID: coalesceString(stringField(row, "id"), stringField(payload, "id")),
 	}, true
 }
 
@@ -819,28 +827,61 @@ func findById(agents []agentSnapshot, id string) (agentSnapshot, bool) {
 // against the real seeded row.
 //
 // Preferring predefined does NOT mean requiring it -- a user-defined slug with
-// no seeded counterpart resolves exactly as before. And the scan is ordered, so
-// two rows sharing a slug always resolve the same way rather than depending on
-// what the database returned first.
+// no seeded counterpart resolves exactly as before.
+//
+// Two rows sharing a slug always resolve the same way, and preferring
+// predefined is only half of why. It disambiguates the MIXED case; it says
+// nothing when the tie is between two rows that agree on Predefined -- two user
+// rows on one slug, or (in principle) two seeded ones. An earlier version of
+// this comment claimed order-independence on the strength of the preference
+// alone, which was false for exactly those cases: the winner was whichever the
+// query returned first, out of an @cache(300) result whose order can change
+// between cache fills.
+//
+// So the tie-break is INTRINSIC -- lowest row id wins among equals. That is a
+// property of the rows rather than of the result order, which is what makes the
+// sentence above true instead of nearly true.
 //
 // This is the narrow half of the fix. Making the slug UNIQUE per catalog is the
 // half that makes the concept's own doc true ("Canonical slug... stable, never
-// renamed"); it needs a write-time rule and is filed separately.
+// renamed"); it needs a write-time rule and is filed as memql#3114. Scoping the
+// catalog read is a third option, declined in memql#2985 for a wire reason
+// recorded on activeAgentRoles in dsl/agents/queries.memql.
+//
+// Note what this preference now leans on: activeAgentRoles filters
+// isActiveRecord in SQL, so an inactive row never reaches here. Relax that and
+// findRoleBySlug would happily prefer an INACTIVE seeded row over a live user
+// one.
 func findRoleBySlug(roles []roleSnapshot, slug string) (roleSnapshot, bool) {
-	var fallback roleSnapshot
+	var best roleSnapshot
 	found := false
 	for _, r := range roles {
 		if r.Slug != slug {
 			continue
 		}
-		if r.Predefined {
-			return r, true
-		}
 		if !found {
-			fallback, found = r, true
+			best, found = r, true
+			continue
+		}
+		if betterRoleMatch(r, best) {
+			best = r
 		}
 	}
-	return fallback, found
+	return best, found
+}
+
+// betterRoleMatch reports whether candidate should displace current as the
+// resolution for a shared slug: predefined first, then lowest row id.
+//
+// The id comparison is the tie-break that makes findRoleBySlug's result
+// independent of the order the catalog query returned. It is deliberately total
+// -- for any two distinct rows exactly one is "better" -- so no pair can fall
+// through to positional order.
+func betterRoleMatch(candidate, current roleSnapshot) bool {
+	if candidate.Predefined != current.Predefined {
+		return candidate.Predefined
+	}
+	return candidate.ID < current.ID
 }
 
 func coalesceString(s, fallback string) string {
