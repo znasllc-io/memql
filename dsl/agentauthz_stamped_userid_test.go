@@ -3,6 +3,9 @@ package dsl
 import (
 	"strings"
 	"testing"
+
+	languageAst "github.com/znasllc-io/memql/component/language/ast"
+	"github.com/znasllc-io/memql/component/memql/dslimports"
 )
 
 // agentauthz_stamped_userid_test.go -- memql#3081.
@@ -21,47 +24,102 @@ import (
 // inspects it, and the mutation is on the client surface via the generated SDK
 // so @serverOnly was not in play.
 //
-// Asserted against the PARSED tree rather than by grepping the source, in the
-// idiom of dsl/update_by_id_gate_2991_test.go: a stamp the parser does not read
-// as a stamp is not a stamp (memql#2875's lesson).
+// Asserted against the PARSED tree (dslimports.Load(Tree())), in the idiom of
+// dsl/server_only_parsed_test.go: a stamp the parser does not read as a stamp is
+// not a stamp (memql#2875's lesson). The first version of this file grepped the
+// source and passed with the stamp line commented out.
+//
+// SCOPE: this gates createAgentAuthorization only. updateAgentAuthorization
+// splats a caller payload with no owner re-stamp, so the same field is still
+// caller-writable through it -- see the PR thread and the follow-up issue.
+
+// createAgentAuthorizationDef returns the PARSED mutation. Everything below
+// asserts on this rather than on file text: the parser drops comments, so a
+// `// userId: actor.userId` cannot satisfy a stamp assertion, and an `@actor`
+// inside a comment is not an attribute.
+func createAgentAuthorizationDef(t *testing.T) *languageAst.FunctionDef {
+	t.Helper()
+	tree, err := dslimports.Load(Tree())
+	if err != nil {
+		t.Fatalf("load tree: %v", err)
+	}
+	seen := 0
+	for _, file := range tree.Files {
+		if file == nil {
+			continue
+		}
+		for _, def := range file.Definitions {
+			fn, ok := def.(*languageAst.FunctionDef)
+			if !ok {
+				continue
+			}
+			seen++
+			if fn.Name == "createAgentAuthorization" && fn.Type == languageAst.FunctionTypeMutation {
+				return fn
+			}
+		}
+	}
+	t.Fatalf("createAgentAuthorization not found among %d parsed function definitions", seen)
+	return nil
+}
 
 // TestAgentAuthorizationUserIdIsStampedNotAccepted is the ratchet.
 func TestAgentAuthorizationUserIdIsStampedNotAccepted(t *testing.T) {
-	src := mutationsSource(t)
-	body := constructBody(t, src, "mutate agentAuthorization createAgentAuthorization {")
+	fn := createAgentAuthorizationDef(t)
 
-	accept, stamp := acceptAndStampOf(t, body)
-
-	if strings.Contains(accept, "userId") {
-		t.Errorf("`userId` is back in createAgentAuthorization's accept list.\n"+
-			"That field is the key the standing computer-use grant is READ by -- "+
-			"agentAuthorizationsForUser(userId:X) resolves a user's envelope ceiling from it -- so "+
-			"accepting it lets a caller raise ANOTHER user's ceiling on a grant they never "+
-			"approved. Stamp it from actor.userId instead (memql#3081).\n  accept: %s", accept)
+	var argNames []string
+	if fn.ArgsSchema != nil {
+		for _, f := range fn.ArgsSchema.Fields {
+			if f == nil {
+				continue
+			}
+			argNames = append(argNames, f.Name)
+			if f.Name == "userId" {
+				t.Errorf("`userId` is back in createAgentAuthorization's declared args.\n"+
+					"That field is the key the standing computer-use grant is READ by -- "+
+					"agentAuthorizationsForUser(userId:X) resolves a user's envelope ceiling from it -- "+
+					"so accepting it lets a caller raise ANOTHER user's ceiling on a grant they never "+
+					"approved. Stamp it from actor.userId instead (memql#3081).\n  args: %v",
+					argNames)
+			}
+		}
 	}
-	if !strings.Contains(stamp, "userId: actor.userId") {
+	if len(argNames) == 0 {
+		t.Fatal("createAgentAuthorization parsed with no args at all -- this gate would pass for the wrong reason")
+	}
+
+	stmt, ok := fn.Body.(*languageAst.MutationStmt)
+	if !ok {
+		t.Fatalf("createAgentAuthorization's body is %T, not a MutationStmt -- this gate cannot read its stamp", fn.Body)
+	}
+	// PayloadRaw is parser-normalised (whitespace collapsed, comments dropped),
+	// so compare against the normalised form.
+	payload := strings.ReplaceAll(stmt.PayloadRaw, " ", "")
+	if !strings.Contains(payload, "userId:actor.userId") {
 		t.Errorf("createAgentAuthorization no longer stamps `userId: actor.userId`.\n"+
 			"The granting user is the caller by definition; anything else is a caller-supplied "+
-			"attribution on a security-relevant key (memql#3081).\n  stamp: %s", stamp)
+			"attribution on a security-relevant key (memql#3081).\n  parsed payload: %s",
+			stmt.PayloadRaw)
 	}
 }
 
 // The stamp is only real if the parser reads the construct as actor-bound.
-// Without @actor the body cannot reference actor.userId at all, so this pins
-// the annotation rather than trusting that the stamp line implies it.
 func TestCreateAgentAuthorizationIsActorBound(t *testing.T) {
-	src := mutationsSource(t)
-	idx := strings.Index(src, "mutate agentAuthorization createAgentAuthorization {")
-	if idx < 0 {
-		t.Fatal("createAgentAuthorization not found")
+	fn := createAgentAuthorizationDef(t)
+	for _, a := range fn.Attributes {
+		if a != nil && a.Name == "actor" {
+			return
+		}
 	}
-	// The annotation block immediately precedes the signature.
-	preamble := src[max0(idx-400):idx]
-	if !strings.Contains(preamble, "@actor") {
-		t.Errorf("createAgentAuthorization stamps actor.userId but is not annotated @actor.\n"+
-			"The actor envelope is only in scope for an @actor-bound construct, so the stamp "+
-			"would not resolve (memql#3081).\n  preamble: %s", preamble)
+	names := make([]string, 0, len(fn.Attributes))
+	for _, a := range fn.Attributes {
+		if a != nil {
+			names = append(names, a.Name)
+		}
 	}
+	t.Errorf("createAgentAuthorization stamps actor.userId but carries no parsed @actor attribute.\n"+
+		"The actor envelope is only in scope for an @actor-bound construct, so the stamp "+
+		"would not resolve (memql#3081).\n  attributes: %v", names)
 }
 
 // mutationsSource reads agents/mutations.memql and REFUSES an empty result.
