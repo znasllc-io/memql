@@ -9,8 +9,9 @@ owner: znas
 
 # CI redesign — decision record
 
-**Status:** proposed. No workflow, ruleset, or Go file is modified by this
-document.
+**Status:** proposed, except Phase 0 and O5 which are **applied** (ruleset
+16630577, 2026-08-06T21:32Z and 21:47Z — see Sequencing and Open Items).
+No workflow or Go file is modified by this document.
 **Input:** [ci-audit.md](ci-audit.md) — the measured audit this responds to.
 **Related:** [internal/ops/tier4-build-graph.md](internal/ops/tier4-build-graph.md)
 (CI-acceleration epic #854, Tiers 0–3 shipped, Tier 4 = Bazel north star).
@@ -258,7 +259,7 @@ changed.
 
 ### What actually happened
 
-All 15 non-green runs were infrastructure, in two distinct shapes:
+All 15 non-green runs were infrastructure, in **three** distinct shapes:
 
 - **Starvation** — job queued, never assigned a runner, cancelled at exactly
   15m00s ± 4s. 27 of 60 jobs (45%) in the 16:00–19:00Z window. Confirmed not
@@ -267,10 +268,24 @@ All 15 non-green runs were infrastructure, in two distinct shapes:
 - **`abandoned`** — runner assigned, then
   `Failed to resolve action download info. Error: Service Unavailable`
   after two retries, before any step executed.
+- **Dispatch failure** — no run created at all. Every
+  `.github/workflows/*` workflow stopped dispatching at 2026-08-06T16:29:16Z
+  while GitHub-managed `dynamic` workflows continued. See
+  [ci-audit.md §4.5](ci-audit.md).
 
-Neither is retryable *inside* a job — both happen before the first step. This
-constrains what a resilience policy can achieve, and it is worth being honest
-about the ceiling.
+None is retryable *inside* a job — all three happen before the first step,
+and the third happens before a job exists. This constrains what a resilience
+policy can achieve, and it is worth being honest about the ceiling: **no
+in-repo mechanism mitigates dispatch failure.** Timeouts, retries and
+job-level policy all presuppose that a run was created.
+
+WARNING: dispatch failure is also the one mode that defeats D1. A single
+required check reduces the never-reported surface from three workflows to
+one, but if no workflow dispatches, one required name is as unsatisfiable as
+three. This was demonstrated live: the gate was restored at 21:32Z and
+control PR #3154 sat BLOCKED with no `ci-required` check in existence. The
+mitigation is organisational, not technical — the bypass actor in O5, which
+is why that item is not optional.
 
 ### Alternatives considered
 
@@ -410,10 +425,16 @@ ESTIMATE, requiring measurement after implementation:
 Per decision F, each phase is independently landable and independently
 valuable.
 
-**Phase 0 — restore the gate (hours, no workflow change).**
-Add `required_status_checks: [ci-required]` + `strict` to ruleset 16630577.
-`ci-required` already reports correctly. This closes the live exposure and
-should not wait for anything else in this document.
+**Phase 0 — restore the gate (hours, no workflow change). DONE
+2026-08-06T21:32Z.**
+`required_status_checks` with the single context `ci-required` added to
+ruleset 16630577; the three pre-existing rules preserved unchanged.
+`strict` was **not** enabled pending O2. A repo-admin bypass actor
+(`bypass_mode: pull_request`) was added at 21:47Z under O5.
+End-to-end verification is **incomplete** — the control PR could not be
+verified because dispatch is down (D4, third shape). PR #3154 is left open as
+the canary: when dispatch resumes, `ci-required` will report on it and close
+out the verification.
 
 **Phase 1 — cheap waste (one PR).**
 Retire `codeql.yml`. Add `timeout-minutes`. Add the `needs`-completeness and
@@ -472,13 +493,29 @@ one, since it is the piece most likely to be consumed standalone.
 independent only if something outside this repo consumes it. Flagging because
 it is the one placement in D3 I am genuinely unsure of.
 
-**O5. Break-glass procedure.**
+**O5. Break-glass procedure. PARTLY RESOLVED 2026-08-06T21:47Z.**
 The incident's real lesson is not that the gate was lifted — that was correct
 — but that the workaround outlived the outage by design (nothing forced its
 restoration). *Recommendation:* a named bypass actor on the ruleset rather
 than editing rules under pressure. Editing rules loses the original config
 (which is why the three check names are unrecoverable); a bypass leaves the
-rules intact and auditable. Needs your call on who holds it.
+rules intact and auditable.
+
+Applied, and immediately load-bearing given the ongoing dispatch failure:
+
+```json
+{"actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "pull_request"}
+```
+
+Repository admins can merge a PR whose checks cannot report; direct pushes to
+`main` remain blocked by the `pull_request` rule. `current_user_can_bypass`
+moved from `never` to `pull_requests_only`.
+
+Still open: whether "repository admin" is the right holder, or whether it
+should be a named individual or team; and whether the bypass should be
+removed once dispatch recovers or kept as the standing break-glass. My
+recommendation is to keep it — a standing, auditable bypass is what stops the
+next outage from being resolved by deleting rules again.
 
 **O6. CODEOWNERS is self-review.**
 `*  @znas-io`, and the same account authors the PRs, so

@@ -24,10 +24,13 @@ Three independent things are being conflated under "CI is slow":
 
 2. **The pain observed on 2026-08-06 is a GitHub Actions platform
    incident, not this repo's configuration.** All 15 non-green runs in the
-   last 50 trace to infrastructure: jobs cancelled after exactly 15 minutes
-   without ever being assigned a runner, or jobs failing with
-   `Failed to resolve action download info. Error: Service Unavailable`.
-   **Zero genuine test or code failures appear in the sampled window.**
+   last 50 trace to infrastructure, in three distinct shapes: jobs cancelled
+   after exactly 15 minutes without ever being assigned a runner (§4.3);
+   jobs failing with `Failed to resolve action download info. Error: Service
+   Unavailable` (§4.4); and — discovered while verifying the restored gate —
+   **repository workflow dispatch stopping entirely at 16:29:16Z**, so runs
+   are never created at all (§4.5). **Zero genuine test or code failures
+   appear in the sampled window.**
 
 3. **Underneath that, the pipeline is genuinely wasteful** — roughly 40
    job-minutes per PR revision (82 when the merge queue was active), of
@@ -267,16 +270,34 @@ The rule-suite record in §2.3 corroborates this exactly: `main` was failing
 ruleset was edited at 19:29:07Z, evaluation passed at 19:30:02Z, and PR
 #3152 merged at 19:30:03Z — one second later.
 
+**CORRECTION (added 2026-08-06T21:50Z).** The first pass attributed the
+missing checks on #3152 / #3153 to the gate having been lifted. That reads
+the causality backwards. The checks are absent because **repository workflow
+dispatch had already stopped at 16:29:16Z** — 2h40m before #3152 was even
+created (§4.5). No CI run was ever created for either PR, so no check could
+have reported whether the gate was in place or not. Lifting the gate was the
+*consequence*, not the cause: it was the only way to merge anything at all.
+The owner's account and the rule-suite timeline both hold; what changes is
+that "the incident made the checks unpassable" now has a specific, measured
+mechanism rather than being a general attribution.
+
 The correct reading of the split in the table above is therefore: PRs #3121,
-#3130 and #3136 merged under an enforced three-check gate; #3152 and #3153
-merged after that gate was deliberately lifted to work around the incident.
+#3130 and #3136 merged under an enforced three-check gate while dispatch was
+healthy; #3152 and #3153 merged after dispatch failed and the gate was
+consequently lifted.
 
 The finding is not "nothing ever blocked anything." It is that **the
-incident workaround is still live** — `required_status_checks` and
-`merge_queue` remain absent from the ruleset as of this audit
-(§2.3), so the next PR merges under the same lifted gate whether or not
-anyone intends it to. Both incident merges are on `main` now (`3730ec1b`,
-`dbfc84a3`) and neither was verified by CI.
+incident workaround outlived the incident** — nothing in the workaround
+forced its own restoration. Both incident merges are on `main` now
+(`3730ec1b`, `dbfc84a3`) and neither was verified by CI.
+
+> **Status update (2026-08-06T21:32Z):** `required_status_checks` has since
+> been restored to ruleset 16630577, requiring the single context
+> `ci-required` (`strict: false`). `merge_queue` was deliberately not
+> restored. A repo-admin bypass actor (`bypass_mode: pull_request`) was added
+> at 21:47Z so merges remain possible while dispatch is down, rather than
+> deleting the rule a second time. The three rules that predated this audit
+> were preserved unchanged throughout.
 
 ---
 
@@ -405,7 +426,61 @@ are `Service Unavailable` at the action-resolution step, not language
 misconfiguration. INFO: the repo genuinely contains Python (74 KB) and
 TypeScript (257 KB), so scanning those languages is legitimate.
 
-### 4.5 Last 20 PRs
+### 4.5 Infra failure mode C — workflow dispatch failure
+
+Discovered 2026-08-06T21:33Z while verifying the restored gate, and **more
+severe than modes A and B**: runs are not created at all.
+
+Every repository-defined workflow stopped dispatching at **16:29:16Z**:
+
+```
+$ for wf in ci.yml gitleaks.yml codeql.yml govulncheck.yml scorecard.yml; do
+    gh api "repos/znasllc-io/memql/actions/workflows/$wf/runs?per_page=1" \
+      --jq '.workflow_runs[0]|"\(.created_at) \(.event) \(.head_branch)"'; done
+
+  ci.yml           2026-08-06T16:29:16Z  pull_request  issue/3120-lookback-string-scan
+  gitleaks.yml     2026-08-06T16:29:16Z  pull_request  issue/3120-lookback-string-scan
+  codeql.yml       2026-08-06T16:29:16Z  pull_request  issue/3120-lookback-string-scan
+  govulncheck.yml  2026-08-06T15:12:39Z  push          main
+  scorecard.yml    2026-08-06T15:12:40Z  push          main
+```
+
+Over the same window, **GitHub-managed `dynamic` workflows kept running
+normally** — Code Quality dispatched at 19:09:53Z, 19:57:44Z, 20:01:16Z, and
+queued again at 21:33:42Z. The failure is specific to `.github/workflows/*`.
+
+Eliminated as explanations:
+
+- [x] **Workflow disabled** — `gh api .../actions/workflows` reports
+      `state: active` for all 15 workflows, including `CI`.
+- [x] **Bad workflow file** — the same unmodified `ci.yml` dispatched
+      successfully at 16:29:16Z.
+- [x] **Trigger/path filter** — `ci.yml` has no trigger-level `paths:`, and
+      the missed events include `push` to `main`, which it subscribes to.
+
+The clinching evidence is that **both post-outage merges to `main` produced
+zero repository-workflow runs** despite `ci.yml` declaring
+`push: branches: [main]`:
+
+```
+merge commit 3730ec1b  repository-workflow runs: 0
+merge commit dbfc84a3  repository-workflow runs: 0
+```
+
+A control PR (#3154, head `1ef43aa7`, created 21:33Z) reproduced it live:
+`ci-required` never appeared, and after 8 minutes of polling the only run on
+the SHA was `Code Quality: PR #3154`.
+
+WARNING: this mode is **invisible to run-based analysis**. Modes A and B
+produce a run row with a bad conclusion; mode C produces no row at all. The
+§4.2 classification therefore cannot see it — a workflow that never
+dispatches is absent from `gh run list`, not marked failed in it. This is a
+blind spot in the audit's original method, not a gap in the data.
+
+Nothing in-repo mitigates this. Timeouts, retries and job-level policy all
+presuppose a run exists.
+
+### 4.6 Last 20 PRs
 
 4 merged, 16 closed without merge (5 of those drafts). Open-to-merge latency
 for the merged set: 3m, 20m, 10h24m, 11h27m. The bimodality maps exactly to
@@ -528,15 +603,22 @@ deliberate incident merges, and the rule-suite timeline confirms the gate
 was lifted 56 seconds before the first of them. This is the cost of the
 workaround, correctly attributed — not evidence of a chronically open repo.
 The commits are `dbfc84a3` and `3730ec1b`.
-Evidence: §3.1.
+CORRECTED: the checks are absent because dispatch had stopped at 16:29:16Z
+(B5), not because the gate was lifted. The gate lift was the response.
+Evidence: §3.1, §4.5.
 
 **B3. Runner starvation cancels 45% of jobs at exactly 15 minutes.
 Blast radius: every workflow, every PR, during the window.**
 27 of 60 jobs in 16:00–19:00Z; peak concurrency 14 against a 60-job limit;
 public repo, so unmetered. Not concurrency, not billing, not supersession,
 not a single synchronized event. Cost: runs of 154m, 129m, 113m, 73m against
-a 5.4m median. Residual unknown: org-level Actions policy is unreadable
-without `admin:org`.
+a 5.4m median.
+RESOLVED: the residual org-policy hypothesis is eliminated —
+`gh api /orgs/znasllc-io/actions/permissions` returns
+`{"enabled_repositories":"all","allowed_actions":"all"}` with no runner
+groups, and `/actions/permissions/workflow` returns
+`{"default_workflow_permissions":"read"}`. No org-level policy can produce
+a 15-minute unassigned-runner cancel.
 Evidence: §4.3.
 
 **B4. Action-download service failures abandon jobs mid-prepare.
@@ -546,13 +628,32 @@ two retries, producing the `abandoned` job result. Run 31114735246 on
 `push→main`.
 Evidence: §4.4.
 
-**B5. `govulncheck` cannot gate a PR.**
+**B5. Repository workflow dispatch stopped entirely at 16:29:16Z.
+Blast radius: total — no CI runs on any PR or on `main`, ongoing at time of
+writing.**
+Every `.github/workflows/*` workflow ceased dispatching while GitHub-managed
+`dynamic` workflows continued normally. All workflows report `state: active`;
+the same `ci.yml` dispatched successfully at 16:29:16Z; both post-outage
+merges to `main` produced zero runs despite a `push: branches: [main]`
+trigger. Reproduced live on control PR #3154.
+
+This is the **most severe of the three infra modes and the hardest to see**:
+modes A and B produce a run with a bad conclusion, mode C produces no run,
+so run-based analysis cannot detect it. It also supersedes part of B2 — it,
+not the lifted gate, is why #3152 and #3153 have no checks.
+
+WARNING: with the gate restored (see the §3.1 status update), this mode
+blocks every PR, since the required check cannot be produced. The admin
+bypass added at 21:47Z is the mitigation while it persists.
+Evidence: §4.5.
+
+**B6. `govulncheck` cannot gate a PR.**
 `on:` is `push`→main, `merge_group`, and cron only — no `pull_request`.
 Vulnerabilities are detected only after merge. With `merge_group` now dead
 (§5.3), its only pre-merge path is gone.
 Evidence: §1.1.
 
-**B6. No CI job has a `timeout-minutes`.**
+**B7. No CI job has a `timeout-minutes`.**
 One timeout exists repo-wide (`publish-docs-bundle.yml:49`). Every CI job
 inherits the 360-minute default, so a hung job holds a slot for six hours.
 The 154m run in this sample was not itself a hang, but nothing bounds one.
@@ -637,9 +738,21 @@ only current state and cannot distinguish "never configured" from "removed
 today"; that distinction changes B1 and B2 substantially.
 
 **Limitations:**
-- Org Actions policy is **not readable** with the current token
-  (HTTP 403, needs `admin:org`). A self-hosted runner group or org-level
-  policy is the one hypothesis for B3 that could not be tested.
+- ~~Org Actions policy is not readable with the current token.~~
+  **RESOLVED 2026-08-06T21:00Z.** `/orgs/znasllc-io/actions/permissions`
+  returns `{"enabled_repositories":"all","allowed_actions":"all",
+  "sha_pinning_required":false}` and `/actions/permissions/workflow` returns
+  `{"default_workflow_permissions":"read",
+  "can_approve_pull_request_reviews":false}`. No runner groups, no allow-list,
+  no org-level restriction. The last standing alternative explanation for B3
+  is eliminated; the starvation is GitHub-side.
+- **Run-based sampling cannot see a workflow that never dispatches.** The
+  §4.2 classification enumerates runs and grades their conclusions, so
+  failure mode C (§4.5) is structurally invisible to it — it was found only
+  by verifying the restored gate against a control PR, four hours after the
+  original audit. Any future audit of this shape should check
+  `actions/workflows/<file>/runs?per_page=1` per workflow, not only
+  `gh run list`, so "no run" is distinguishable from "no failure."
 - The sample spans ~20 hours (2026-08-05T23:48Z → 2026-08-06T20:01Z). 200
   runs was the full page size; 179 of them fall on the incident day, so the
   healthy baseline (21 runs, all green) is thin.
