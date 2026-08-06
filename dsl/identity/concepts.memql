@@ -70,8 +70,10 @@ concept auditEvent {
 /// bound, ~60s TTL. Bound to the specific magic-link row it was minted from so a leaked code cannot
 /// be replayed across sessions. Global scope: token redemption is unauthenticated and must work
 /// without partition context.
+// @secret on code (memql#3113): the only field in the tree that stores a
+// credential in CLEARTEXT. codeHash beside it is a digest and stays unmarked.
 concept authCode {
-  code                string!  @description("Plaintext one-time auth code returned to the OAuth client via redirectURI. Held server-side so the token-exchange handler can verify the presented code value matches; never logged, never surfaced in audit detail. Hash is the lookup key, plaintext is the equality check on redemption.")
+  code                string!  @secret  @description("Plaintext one-time auth code returned to the OAuth client via redirectURI. Held server-side so the token-exchange handler can verify the presented code value matches; never logged, never surfaced in audit detail. Hash is the lookup key, plaintext is the equality check on redemption.")
   codeHash            string!  @description("SHA-256 hex digest of the plaintext code. Primary lookup key in the token-exchange path -- avoids equality lookups on the plaintext.")
   clientId            string!  @description("OAuth client identifier the code was minted for. Token-exchange MUST verify the redeeming client matches; mismatched client = reject and audit as code_misuse.")
   redirectURI         string!  @description("redirect_uri value supplied at /authorize, exact-matched against the registered URI for clientId. Token-exchange MUST verify the redeeming request's redirect_uri matches; mismatched = reject.")

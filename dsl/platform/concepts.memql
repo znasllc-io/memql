@@ -8,9 +8,15 @@ use identity.concepts.{ user }
 use planner.concepts.{ plan }
 
 @description("Instance-wide encrypted secret. Lives in the reserved _system partition (via @scope(\"global\")). The cleartext value is NEVER stored -- only a NaCl secretbox ciphertext (base64(nonce||ct)) under MEMQL_MASTER_KEY and a short fingerprint for UI display. Used for instance-level API keys, OAuth client secrets, Azure/Graph credentials, etc. For per-tenant overrides (BYOK) use v1:platform:partitionSecret; the resolver falls back partition -> global automatically.")
+// @secret on encryptedValue, and deliberately NOT on fingerprint (memql#3113).
+// fingerprint is the last 4 chars of the CLEARTEXT and is therefore the more
+// sensitive-looking of the two -- but it exists to be shown, so that operators
+// can tell rotated secrets apart, and redacting it would delete the field's
+// only purpose. encryptedValue is the opposite: opaque ciphertext that is
+// useless in a diagnostic, so nothing is lost by hiding it.
 concept globalSecret {
   name            string!  @description("Secret name (uppercase with underscores by convention).")
-  encryptedValue  string!  @description("Base64-encoded nonce || NaCl-secretbox ciphertext, sealed under MEMQL_MASTER_KEY. Opaque -- never rendered to humans.")
+  encryptedValue  string!  @secret  @description("Base64-encoded nonce || NaCl-secretbox ciphertext, sealed under MEMQL_MASTER_KEY. Opaque -- never rendered to humans.")
   fingerprint     string!  @description("Last 4 chars of the cleartext, prefixed with '...'. For UI display only; lets operators tell rotated secrets apart without leaking the value.")
   kind            string    @description("Optional tag to group secrets by type. Examples: 'vendor_api_key', 'oauth_secret', 'smtp_password'. Folded router API keys use 'vendor_api_key'.")
   description     string    @description("Human-readable description of the secret's purpose.")
@@ -44,9 +50,10 @@ concept globalVariable {
 // ---- concepts/v1/platform/partitionSecret/concept.memql ----
 
 @description("Partition-scoped encrypted secret. Holds per-tenant sensitive values (BYOK vendor API keys, per-tenant Twilio/SMTP creds, etc.). Same wire shape as v1:platform:globalSecret, different scope. The cleartext value is NEVER stored -- only a NaCl secretbox ciphertext under MEMQL_MASTER_KEY and a fingerprint. When the partition-scoped resolver (resolveSecret) cannot find a row, it falls back to v1:platform:globalSecret so a tenant's BYOK key wins over the instance default but the instance default is always available.")
+// Same @secret split as globalSecret above, for the same reason (memql#3113).
 concept partitionSecret {
   name            string!  @description("Secret name (uppercase with underscores by convention).")
-  encryptedValue  string!  @description("Base64-encoded nonce || NaCl-secretbox ciphertext, sealed under MEMQL_MASTER_KEY. Opaque -- never rendered to humans.")
+  encryptedValue  string!  @secret  @description("Base64-encoded nonce || NaCl-secretbox ciphertext, sealed under MEMQL_MASTER_KEY. Opaque -- never rendered to humans.")
   fingerprint     string!  @description("Last 4 chars of the cleartext, prefixed with '...'. For UI display only.")
   kind            string    @description("Optional tag to group secrets by type. Examples: 'vendor_api_key', 'oauth_secret'. BYOK vendor keys use 'vendor_api_key'.")
   description     string    @description("Human-readable description of the secret's purpose.")
