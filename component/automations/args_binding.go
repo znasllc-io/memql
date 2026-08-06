@@ -27,11 +27,13 @@ import (
 	"log/slog"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"unicode/utf8"
 
+	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/events"
 )
 
@@ -69,6 +71,12 @@ func bindEventArgs(automation *Automation, event *events.Event) (bound map[strin
 		payload = map[string]any{}
 	}
 
+	// Which declared args carry a value the bound concept marks @secret
+	// (memql#3111). Resolved from the EVENT's topic rather than from the
+	// automation contract, because the contract carries no concept binding --
+	// see secretArgNames.
+	secret := secretArgNames(event)
+
 	declared := make(map[string]struct{}, len(automation.Args.Fields))
 	bound = make(map[string]any, len(automation.Args.Fields))
 	for _, field := range automation.Args.Fields {
@@ -76,7 +84,7 @@ func bindEventArgs(automation *Automation, event *events.Event) (bound map[strin
 			continue
 		}
 		declared[field.Name] = struct{}{}
-		if verr := validateAutomationArg(payload, field); verr != nil {
+		if verr := validateAutomationArg(payload, field, secret[field.Name]); verr != nil {
 			return nil, nil, verr
 		}
 		if v, ok := payload[field.Name]; ok {
@@ -100,7 +108,14 @@ func bindEventArgs(automation *Automation, event *events.Event) (bound map[strin
 // maxLength / pattern). Object + array element schemas are validated
 // shallowly (type only) -- deep nested validation is not needed by any G1
 // contract and stays out of scope.
-func validateAutomationArg(payload map[string]any, field *ArgsField) error {
+//
+// secret marks the field as carrying a value the bound concept declares
+// @secret, so the rejected value is replaced with a placeholder in every
+// message this function builds (memql#3111). The declared CONSTRAINT -- the
+// enum members, the length cap, the pattern source -- is schema, not caller
+// data, and is never redacted; only the value goes, so the diagnostic still
+// says which field failed and what it failed.
+func validateAutomationArg(payload map[string]any, field *ArgsField, secret bool) error {
 	value, exists := payload[field.Name]
 	if !exists || value == nil {
 		if !field.Optional {
@@ -109,20 +124,27 @@ func validateAutomationArg(payload map[string]any, field *ArgsField) error {
 		return nil // optional + absent is fine
 	}
 	if !argTypeMatches(value, field.Type) {
+		// Type names only, no value -- nothing to redact.
 		return &argBindError{Field: field.Name, Reason: fmt.Sprintf("expected %s, got %s", field.Type, argTypeName(value))}
 	}
 	if len(field.Enum) > 0 && !argInEnum(value, field.Enum) {
-		return &argBindError{Field: field.Name, Reason: fmt.Sprintf("value %v is not one of the allowed values %v", value, field.Enum)}
+		return &argBindError{Field: field.Name, Reason: fmt.Sprintf("value %v is not one of the allowed values %v",
+			redactedArgValue(value, secret), field.Enum)}
 	}
 	if field.MaxLength > 0 {
 		if s, ok := value.(string); ok && utf8.RuneCountInString(s) > field.MaxLength {
+			// A rune COUNT, not the value. Left as-is deliberately: it
+			// discloses a length rather than content, and hiding it would
+			// leave the message saying nothing at all. Recorded rather than
+			// silently decided (memql#3111).
 			return &argBindError{Field: field.Name, Reason: fmt.Sprintf("value too long (%d runes, max %d)", utf8.RuneCountInString(s), field.MaxLength)}
 		}
 	}
 	if strings.TrimSpace(field.Pattern) != "" {
 		if s, ok := value.(string); ok {
 			if re := compilePattern(field.Pattern); re != nil && !re.MatchString(s) {
-				return &argBindError{Field: field.Name, Reason: fmt.Sprintf("value %q does not match pattern %q", s, field.Pattern)}
+				return &argBindError{Field: field.Name, Reason: fmt.Sprintf("value %v does not match pattern %q",
+					redactedQuotedArgValue(s, secret), field.Pattern)}
 			}
 		}
 	}
@@ -290,4 +312,81 @@ func refuseFireForArgs(logger *slog.Logger, automation, topic string, err error)
 			"reason", reason,
 		)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// @secret redaction on the event-payload binding path (memql#3111)
+// ---------------------------------------------------------------------------
+
+// secretPlaceholder replaces a rejected value whose field the bound concept
+// declares @secret. Matches the spelling the memql function validator uses so
+// the two surfaces read identically.
+const secretPlaceholder = "<redacted>"
+
+// secretArgNames returns the payload field names this event carries that the
+// bound concept declares @secret.
+//
+// # Why the EVENT and not the automation
+//
+// The automation contract carries no concept binding -- an args block declares
+// names and types, nothing more. What ties a name to a concept field is the
+// TOPIC: executor_mutation.go flattens a stored row's payload into the
+// `graph.node.created.<concept>` event (maps.Copy over the payload map), and
+// bindEventArgs then reads those keys back by declared name. So the concept is
+// recoverable from the topic, and only from there.
+//
+// That is also why this needs no `Secret` member on ArgsField and no
+// compile-time plumbing: the link is a runtime fact about which event arrived,
+// not a static property of the contract. An args field named `token` is secret
+// when the event came from a concept whose `token` is @secret, and ordinary
+// otherwise.
+//
+// Returns nil for anything that is not a graph-node topic, for an unresolvable
+// concept, and for a concept declaring nothing -- all of which mean "no
+// redaction", which is the pre-existing behaviour.
+func secretArgNames(event *events.Event) map[string]bool {
+	if event == nil {
+		return nil
+	}
+	conceptName, ok := events.ConceptFromGraphNodeTopic(event.Topic)
+	if !ok || strings.TrimSpace(conceptName) == "" {
+		return nil
+	}
+	concept, err := memoryNodes.Get(conceptName)
+	if err != nil || concept == nil {
+		// An unresolvable concept must not fail the bind: this is a
+		// diagnostic-hardening path, and refusing to validate because a
+		// registry lookup missed would turn a redaction feature into an
+		// outage. Degrades to the pre-#3111 behaviour.
+		return nil
+	}
+	fields := concept.SecretFields()
+	if len(fields) == 0 {
+		return nil
+	}
+	out := make(map[string]bool, len(fields))
+	for _, f := range fields {
+		out[f] = true
+	}
+	return out
+}
+
+// redactedArgValue returns what to interpolate for a rejected value with %v.
+func redactedArgValue(value any, secret bool) any {
+	if secret {
+		return secretPlaceholder
+	}
+	return value
+}
+
+// redactedQuotedArgValue is redactedArgValue for the site that rendered the
+// value with %q. It returns an ALREADY-QUOTED string so the caller uses %v:
+// strconv.Quote reproduces %q byte for byte, so a non-secret message is
+// unchanged, while the placeholder stays unquoted and cannot be mistaken for a
+// real value that happens to read "<redacted>".
+func redactedQuotedArgValue(s string, secret bool) string {
+	if secret {
+		return secretPlaceholder
+	}
+	return strconv.Quote(s)
 }

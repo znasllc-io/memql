@@ -213,12 +213,20 @@ returned in full by any query that projects it. That is an
 authorization decision: it needs a definition of "elevated" and
 interacts with the per-row authz model deferred under memql#2803.
 
-It is **not** redacted by the **automation args binder**
+It is also redacted by the **automation args binder**
 (`component/automations/args_binding.go`), a second validator mirroring
-the same rule set over **event payloads** — and a `graph.node.created`
-event carries the concept row's fields flattened into its payload. It
-quotes the value in full, and writes that same reason string to a WARN
-log, so a row value **can** reach a **structured log** by that path.
+the same rule set over **event payloads** — closed by memql#3111. A
+`graph.node.created` event carries the concept row's fields flattened
+into its payload, so that binder used to quote the value in full *and*
+write it to a WARN log, which was the one place a row value demonstrably
+reached a **structured log**.
+
+It resolves the secret set differently, and the difference matters if
+you are extending it: an automation contract carries no concept
+binding, so the binder recovers the concept from the **event topic**
+(`graph.node.created.<concept>`) at bind time rather than from a
+compile-time flag. Matching is still by field **name**, so the by-name
+caveat above applies there too.
 
 It is **not** redacted by the **tool-args validator**
 (`MemQLEngine.validateToolArgs`, `component/memql/tool_execution.go`),

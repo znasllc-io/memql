@@ -682,7 +682,12 @@ func TestSecretEnforcementIsRealAndScoped(t *testing.T) {
 				anyOf []string
 			}{
 				{"query results", []string{"redacted from **query results**", "not redacted from query results", "from **query results**"}},
-				{"the automation args binder", []string{"automation args binder", "args_binding.go", "not redacted by the automation"}},
+				// memql#3111 CLOSED this surface, so the assertion flips: the
+				// docs must now name it as COVERED. Phrases chosen so they can
+				// only appear in a covered statement -- a bare "automation args
+				// binder" would match either polarity and let the docs regress
+				// to calling it unenforced.
+				{"the automation args binder as COVERED", []string{"also redacted by the **automation args binder**", "also redacted by the automation args binder", "is also redacted by the **automation args binder**", "also redacted by the automation args binder (memql#3111)", "covered -- the automation args binder"}},
 				{"concept payload validation", []string{"concept payload validation", "json schema, which interpolates", "by concept payload validation"}},
 				{"the tool-args validator", []string{"tool-args validator", "validatetoolargs", "tool_execution.go"}},
 				{"the by-name matching rule", []string{"by argument name", "by arg name", "matching is by argument name", "matches by argument name", "name, not by write target", "not by write target"}},

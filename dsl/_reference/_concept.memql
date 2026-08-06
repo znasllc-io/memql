@@ -295,12 +295,15 @@ concept fieldTypes {
 //                       is an authorization decision -- it needs a definition
 //                       of "elevated" and interacts with the per-row authz
 //                       model deferred under memql#2803.
-//                       NOT REDACTED BY THE AUTOMATION ARGS BINDER. A second
-//                       validator mirrors this rule set over EVENT payloads,
-//                       and a graph.node.created event carries the row's
-//                       fields. It quotes the value in full and also writes it
-//                       to a WARN log -- so a row value CAN reach a structured
-//                       log by that path.
+//                       ALSO REDACTED BY THE AUTOMATION ARGS BINDER
+//                       (memql#3111). A second validator mirrors this rule set
+//                       over EVENT payloads, and a graph.node.created event
+//                       carries the row's fields; it used to quote the value in
+//                       full AND write it to a WARN log, which was the one
+//                       place a row value demonstrably reached a structured
+//                       log. It recovers the concept from the event TOPIC at
+//                       bind time, since an automation contract carries no
+//                       concept binding -- matching is still by field name.
 //                       NOT REDACTED BY THE TOOL-ARGS VALIDATOR
 //                       (validateToolArgs). Compiled from the SAME args schema
 //                       that carries the secret flag and auto-registered for
@@ -421,7 +424,7 @@ concept fieldAnnotations {
 
   // Immutability + secrecy
   externalId   string! @immutable @description("Foreign-system id, intended never to change. NOT enforced -- @immutable is declared metadata (memql#2960).")
-  apiKey       string @secret @description("Sensitive. The function-args validator prints <redacted> for a rejected value. No other surface redacts it -- not query results, not the automation args binder, not the tool-args validator, and never its length (memql#3036, memql#3117).")
+  apiKey       string @secret @description("Sensitive. The function-args validator and the automation args binder print <redacted> for a rejected value. Other surfaces do NOT -- not query results, not the tool-args validator, and never its length (memql#3036, memql#3111, memql#3117).")
 
   // Server-owned fields. @internal is server-only in BOTH directions;
   // @serverSet is refused from caller args but still projected, which is why

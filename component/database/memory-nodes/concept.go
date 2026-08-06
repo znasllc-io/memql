@@ -572,14 +572,20 @@ func (c *Concept) PIIFields() []string {
 // of "elevated", and it interacts with the per-row authz model deferred under
 // memql#2803.
 //
-// NOT COVERED -- the automation args binder
-// (component/automations/args_binding.go:115, :119, :125), a second validator
-// mirroring this rule set over EVENT payloads. A graph.node.created event
-// carries the concept row's fields flattened into its payload
-// (component/memql/executor_mutation.go:805-819), and automations.ArgsField
-// has no Secret member, so a secret value is quoted in full there. Its reason
-// string is also written to a WARN log (args_binding.go:285) -- so a concept
-// row value CAN reach a structured log by that path. Tracked separately.
+// COVERED -- the automation args binder
+// (component/automations/args_binding.go), a second validator mirroring this
+// rule set over EVENT payloads, closed by memql#3111. A graph.node.created
+// event carries the concept row's fields flattened into its payload
+// (component/memql/executor_mutation.go), so a secret value used to be quoted
+// in full there AND written to a WARN log (refuseFireForArgs) -- the one place
+// a concept row value demonstrably reached a structured log.
+//
+// It resolves the secret set differently from the function-args path, and the
+// difference is worth knowing: the automation contract carries no concept
+// binding, so the binder recovers the concept from the EVENT TOPIC
+// (graph.node.created.<concept>) at bind time rather than from a compile-time
+// flag. Matching is still by field NAME, so the by-name caveat above applies
+// there too.
 //
 // NOT COVERED -- the tool-args validator, MemQLEngine.validateToolArgs
 // (component/memql/tool_execution.go:66). It is compiled from the SAME
