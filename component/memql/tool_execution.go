@@ -18,6 +18,8 @@ import (
 
 	"github.com/znasllc-io/memql/component/safety"
 	"github.com/znasllc-io/memql/core/common"
+
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // remainingPlaceholderRegex matches a `$args.<identifier>` placeholder
@@ -794,7 +796,13 @@ func encodeForMemqlSubstitution(value any) string {
 		if b, err := json.Marshal(v); err == nil {
 			return string(b)
 		}
-		return fmt.Sprintf("%q", v)
+		// Fallback only -- json.Marshal does not fail on a Go string in
+		// practice. QuoteString rather than %q so the unreachable path is not
+		// the WRONG one if it is ever reached: %q emits escapes the MemQL lexer
+		// refuses outright (memql#3099). The json.Marshal path above is left
+		// alone; it escapes correctly and changing it would alter the emitted
+		// form for HTML characters for no correctness gain.
+		return languageParser.QuoteString(v)
 	case float64:
 		if v == float64(int64(v)) {
 			return fmt.Sprintf("%d", int64(v))

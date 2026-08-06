@@ -1315,7 +1315,9 @@ func expressionToSource(expr languageParser.ExpressionNode) string {
 		op := string(node.Operator)
 		value := fmt.Sprintf("%v", node.Value)
 		if s, ok := node.Value.(string); ok {
-			value = fmt.Sprintf("%q", s)
+			// QuoteString, not %q -- the escape sets disagree and the lexer
+			// treats the difference as a parse error (memql#3099).
+			value = languageParser.QuoteString(s)
 		}
 		return field + op + value
 

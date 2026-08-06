@@ -7543,7 +7543,11 @@ func (p *Parser) reconstructTokens(start, end int) string {
 		tok := p.tokens[i]
 		// Re-add quotes around string tokens since the lexer strips them
 		if tok.Type == TokenString {
-			parts = append(parts, fmt.Sprintf("%q", tok.Literal))
+			// QuoteString, not %q: this reconstruction becomes
+			// MutationStmt.PayloadRaw, which is re-parsed downstream, and the
+			// two escape sets disagree in a way readString treats as a hard
+			// error (memql#3099).
+			parts = append(parts, QuoteString(tok.Literal))
 		} else {
 			parts = append(parts, tok.Literal)
 		}

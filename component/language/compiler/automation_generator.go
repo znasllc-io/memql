@@ -1150,7 +1150,9 @@ func (c *Compiler) expressionToString(expr parser.ExpressionNode) string {
 	case *parser.LiteralExpr:
 		switch v := e.Value.(type) {
 		case string:
-			return fmt.Sprintf("%q", v)
+			// QuoteString, not %q: this generator emits MemQL source that is
+			// parsed again, and the escape sets disagree (memql#3099).
+			return parser.QuoteString(v)
 		case map[string]any, []any:
 			// Object / array literals (e.g. an object-literal `return { k: <expr> }`).
 			// Render proper MemQL via valueToString, which recurses into each value
@@ -1476,7 +1478,7 @@ func (c *Compiler) mutationToString(m *parser.MutationStmt) string {
 		return ""
 	}
 
-	parts := []string{fmt.Sprintf("%q", m.Concept)}
+	parts := []string{parser.QuoteString(m.Concept)}
 
 	if m.IDTemplate != nil {
 		switch id := m.IDTemplate.(type) {
@@ -2153,7 +2155,7 @@ func (c *Compiler) valueToString(v any) string {
 		if isRuntimeReference(val) {
 			return val
 		}
-		return fmt.Sprintf("%q", val)
+		return parser.QuoteString(val)
 	case float64:
 		if float64(int(val)) == val {
 			// Keep an explicit decimal marker so a whole-valued float
