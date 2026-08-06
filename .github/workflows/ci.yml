@@ -225,6 +225,14 @@ jobs:
       # docs-only PR should pay, not with closing this bucket.
       - name: go test (gate inputs)
         if: ${{ env.RUN_GATES == 'true' }}
+        # KNOWN NARROW OVERLAP, deliberately kept (memql#3160). `./examples/...`
+        # includes examples/referencepack, which db-tests also owns. Removing it
+        # here is NOT the fix: RUN_GATES fires on docs-only and
+        # `.memql`-outside-dsl PRs where db-tests does NOT run, so dropping it
+        # would open a coverage hole in exactly the fail-open the gates bucket
+        # was added to close (memql#2972). The overlap is 3 test files, and only
+        # on a PR touching dsl/** plus a gate input with no .go file at all --
+        # any .go change sets RUN_GO, which makes RUN_GATES false.
         run: go test -count=1 -timeout=300s ./ ./cmd/envscan/... ./component/architecture/... ./component/genesis/... ./scripts/... ./dsl/... ./examples/...
 
       # --- pure-Go lanes (go bucket) -- build first to warm the cache ---
@@ -234,9 +242,19 @@ jobs:
       - name: go vet
         if: ${{ env.RUN_GO == 'true' }}
         run: go vet ./...
-      - name: go test
+      # Runs the COMPLEMENT of the db-gated trees, not `./...` (memql#3160 /
+      # design D5.3b). Those six trees carry 543+ test files that db-tests owns
+      # and re-runs in full, so testing them here compiled and executed the same
+      # files twice on every PR. Their non-DB tests are not lost: db-tests runs
+      # the whole package, not just the gated cases.
+      #
+      # The set is canonical in scripts/ci/db-gated-packages.sh; db-tests keeps
+      # literal arguments because scripts/cidb/dbgate_test.go derives its
+      # selector from them. The two cannot drift -- scripts/ci asserts they are
+      # identical.
+      - name: go test (excluding the db-gated trees db-tests owns)
         if: ${{ env.RUN_GO == 'true' }}
-        run: go test -count=1 -timeout=300s ./...
+        run: go test -count=1 -timeout=300s $(scripts/ci/db-gated-packages.sh --complement)
       # Build-tagged test lanes (#1338, #2903). The untagged `go test ./...`
       # above never RUNS a //go:build-tagged test file, so a tagged suite is
       # CI-invisible without an explicit -tags run.
