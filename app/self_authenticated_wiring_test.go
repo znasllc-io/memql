@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -78,18 +79,74 @@ func TestCreateHTTPServerAcceptsTheLiveSelfAuthDeclarations(t *testing.T) {
 
 // The injected seam only proves the wiring if the REAL assertion is what gets
 // injected by default -- otherwise replacing the default with a no-op leaves
-// every test above green. Mirrors TestNewAppDefaultsToTheRealSurfaceAssertion.
+// every test above green.
+//
+// An earlier version of this test said exactly that and then did not check it.
+// It called the default and the real function in turn and asserted each returned
+// nil -- two independent nil checks on a tree that is already clean, which an
+// always-nil stub satisfies identically. Measured: swapping newApp's default for
+// `func() error { return nil }` left the whole app suite green, and so did
+// rewriting AssertSelfAuthenticatedRoutesFailClosed itself to return nil.
+//
+// So the identity is compared directly. That is the only assertion here that a
+// stub cannot pass.
 func TestNewAppDefaultsToTheRealSelfAuthAssertion(t *testing.T) {
 	a := newApp(slog.New(slog.NewTextHandler(io.Discard, nil)), "test", Overrides{})
 	if a.overrides.AssertSelfAuthenticatedSurface == nil {
 		t.Fatal("newApp must default AssertSelfAuthenticatedSurface; a nil default would " +
 			"panic at boot or, if guarded, skip the check entirely")
 	}
-	if err := a.overrides.AssertSelfAuthenticatedSurface(); err != nil {
-		t.Errorf("the default assertion must be the real one and must pass on this tree: %v", err)
+
+	got := reflect.ValueOf(a.overrides.AssertSelfAuthenticatedSurface).Pointer()
+	want := reflect.ValueOf(server.AssertSelfAuthenticatedRoutesFailClosed).Pointer()
+	if got != want {
+		t.Fatal("newApp defaulted AssertSelfAuthenticatedSurface to something OTHER than " +
+			"server.AssertSelfAuthenticatedRoutesFailClosed. The boot check is then whatever " +
+			"that something does -- including nothing -- and every other test here would still " +
+			"pass, because they only assert the tree is currently clean (memql#3062).")
 	}
-	// And it must actually BE the real one, not a stub that always passes.
+
+	if err := a.overrides.AssertSelfAuthenticatedSurface(); err != nil {
+		t.Errorf("the default assertion must pass on this tree: %v", err)
+	}
+}
+
+// The exported entry point must be able to FAIL, not merely return nil on a
+// clean tree.
+//
+// Rewriting AssertSelfAuthenticatedRoutesFailClosed to `return nil` was caught
+// by nothing: the fixture tests exercise the unexported inner rule, and every
+// test of the exported one asserted only that it returns nil today. That leaves
+// the one function actually wired at boot deletable without a failure.
+//
+// This drives the exported rule with a deliberately uncertified entry appended,
+// so it must report.
+//
+// BE PRECISE ABOUT WHAT IS AND IS NOT PINNED, because overclaiming here is the
+// defect this test exists to correct. Three things can go wrong and only two are
+// now caught:
+//
+//   - the boot path stops calling this function      -> caught, by the identity
+//     comparison above;
+//   - the RULE stops being able to report            -> caught, here;
+//   - the one-line wrapper body is rewritten to
+//     `return nil`                                    -> NOT caught.
+//
+// The last one has no test-reachable seam: the wrapper takes no arguments and
+// reads the live declarations, which are clean, so nothing can drive it to a
+// failing state from outside. It is a single delegating line and any rewrite of
+// it is visible in a diff -- that is the whole of the remaining defence, and it
+// is worth writing down rather than leaving a reader to assume otherwise.
+func TestExportedSelfAuthAssertionCanActuallyFail(t *testing.T) {
 	if err := server.AssertSelfAuthenticatedRoutesFailClosed(); err != nil {
-		t.Errorf("precondition: the live declarations must satisfy the invariant: %v", err)
+		t.Fatalf("precondition: the live declarations must satisfy the invariant: %v", err)
+	}
+	if err := server.AssertSelfAuthenticatedFailClosedFor(
+		append(server.SelfAuthenticatedPaths(), "/zz-uncertified/"),
+		server.HandlerAuthorizedPaths(),
+	); err == nil {
+		t.Error("the exported rule accepted a self-authenticated route that is NOT certified as " +
+			"failing closed. A rule that cannot fail is not a rule -- and this is the function " +
+			"the boot check calls (memql#3062).")
 	}
 }

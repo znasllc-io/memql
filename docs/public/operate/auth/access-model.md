@@ -243,6 +243,19 @@ with no credentials: an unlisted source is `404` (the allowlist is empty
 unless an operator populates it) and a listed one without a matching
 HMAC signature is `401`.
 
+One qualification, because the tier's whole justification rests on this
+sentence. That holds for every source configured with a signature
+scheme. A source configured `MEMQL_INBOUND_SOURCE_<X>_SIGNATURE_SCHEME=none`
+is a **listed** source that accepts an unsigned request and stages the
+row — `verify()` returns "unverified, no error" for that scheme, so the
+handler proceeds and the staged row carries `signatureVerified=false`.
+It is a deliberate per-source opt-in: the receiver fatals at boot if the
+scheme is unset, and logs `source accepts UNVERIFIED requests` when it
+is `none`. So it is loud rather than silent — but the fail-closed
+property is **operator-configuration-dependent, not a property of the
+code**, and the boot check certifies the declaration, not the
+configuration.
+
 The automations routes sit in the second list, justified by the
 owner-or-admin checks added in memql#2938. They are deliberately **not**
 in `PublicPaths()`: that list is consulted on every verifier-consuming

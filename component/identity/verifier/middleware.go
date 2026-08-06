@@ -31,7 +31,10 @@ type MiddlewareOptions struct {
 	// handler still has to fail closed with no credentials, which is the bar
 	// server.HandlerAuthorizedPaths() states and which the inbound receiver
 	// meets twice over: an unlisted source is 404, and a listed one without a
-	// matching signature is 401.
+	// matching signature is 401. That holds for every source configured with a
+	// signature scheme; a source configured SIGNATURE_SCHEME=none accepts an
+	// unsigned request by design, which is an operator decision this middleware
+	// cannot see and does not certify.
 	SelfAuthenticatedPaths []string
 	UnauthorizedHandler    func(http.ResponseWriter, *http.Request)
 	DelegationResolver     auth.DelegationResolver

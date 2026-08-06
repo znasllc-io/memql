@@ -73,6 +73,24 @@ func TestSelfAuthenticatedRuleCatchesAnUndeclaredExemption(t *testing.T) {
 			handler:  []string{"/inbound/"},
 			wantErr:  true,
 		},
+		{
+			// ...but the SAME prefix does, and that is the sharp edge the case
+			// above hides. surfaceDeclaredBy matches a trailing-slash
+			// declaration by PREFIX, so a brand-new exact route inherits a
+			// blessing written for a different handler: nobody certified that
+			// /automations/newthing fails closed, only that /automations/ does.
+			//
+			// Recorded as the accepted behaviour rather than silently relied on.
+			// Tightening it to exact-match would be the safer rule, but the two
+			// live declarations are trailing-slash prefixes, so it is a change
+			// to how the existing surface is declared and not a review fix. What
+			// matters is that the next person adding a route under an existing
+			// prefix knows the guard did NOT check their handler.
+			name:     "the same prefix DOES certify a new exact route under it",
+			selfAuth: []string{"/automations/newthing"},
+			handler:  []string{"/automations/"},
+			wantErr:  false,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := assertSelfAuthenticatedFailClosed(tc.selfAuth, tc.handler)
