@@ -1995,3 +1995,21 @@ func delimitersBalanced(s string) bool {
 	}
 	return depth == 0 && !inStr
 }
+
+// memql#3120: stripLineComment was the third byte-identical copy of a scanner
+// that inferred escape state from the preceding byte. It delegates now --
+// asserted here rather than assumed, because this helper gates CI: a line
+// whose comment it fails to strip is a line whose contents get validated as
+// code, and the failure is a false conformance verdict either way.
+func TestStripLineCommentHandlesCompletedEscapes(t *testing.T) {
+	const line = `filter path=="C:\\" // a trailing comment`
+	const want = `filter path=="C:\\" `
+
+	if got := stripLineComment(line); got != want {
+		t.Errorf("stripLineComment(%q)\n got %q\nwant %q", line, got, want)
+	}
+	const inLiteral = `filter url=="https://example.com"`
+	if got := stripLineComment(inLiteral); got != inLiteral {
+		t.Errorf("stripLineComment(%q) = %q, want it unchanged", inLiteral, got)
+	}
+}
