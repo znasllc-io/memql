@@ -683,7 +683,6 @@ func TestSecretEnforcementIsRealAndScoped(t *testing.T) {
 			}{
 				{"query results", []string{"redacted from **query results**", "not redacted from query results", "from **query results**"}},
 				{"the automation args binder", []string{"automation args binder", "args_binding.go", "not redacted by the automation"}},
-				{"concept payload validation", []string{"concept payload validation", "json schema, which interpolates", "by concept payload validation"}},
 				{"the tool-args validator", []string{"tool-args validator", "validatetoolargs", "tool_execution.go"}},
 				{"the by-name matching rule", []string{"by argument name", "by arg name", "matching is by argument name", "matches by argument name", "name, not by write target", "not by write target"}},
 				{"the length disclosure", []string{"length is never redacted", "value too long", "rune count for a secret"}},
@@ -707,6 +706,44 @@ func TestSecretEnforcementIsRealAndScoped(t *testing.T) {
 						"over-promise memql#2960 corrected -- one rung higher, and harder to "+
 						"spot because it is now partly true.\n\n"+
 						"Accepted spellings: %v", doc, surface.name, surface.anyOf)
+				}
+			}
+
+			// The other direction. A surface that has BEEN enforced must be
+			// described as enforced -- otherwise the documents keep warning
+			// about a hole that is closed, and a reader who believes them
+			// hand-rolls a redaction that already exists.
+			//
+			// concept payload validation moved here from the list above in
+			// memql#3112. It was the largest uncovered surface: @minimum /
+			// @maximum / @format are declared on the CONCEPT and validated only
+			// there, so any constraint the args block did not mirror bypassed
+			// memql#3036's redaction entirely.
+			for _, covered := range []struct {
+				name  string
+				anyOf []string
+			}{
+				{"concept payload validation as ENFORCED", []string{
+					"is** redacted by **concept payload validation",
+					"covered, since memql#3112: concept payload validation",
+					"since memql#3112, is redacted by **concept payload validation",
+				}},
+			} {
+				found := false
+				for _, phrase := range covered.anyOf {
+					if strings.Contains(text, phrase) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("%s must describe %s.\n\n"+
+						"memql#3112 closed that surface: a @secret field's value is replaced in "+
+						"`concept payload validation failed: ...` messages. If this assertion is "+
+						"failing because the enforcement was REVERTED, move this entry back to the "+
+						"unenforced list above in the same commit -- do not simply delete it, or "+
+						"the documents go back to being wrong in the other direction.\n\n"+
+						"Accepted spellings: %v", doc, covered.name, covered.anyOf)
 				}
 			}
 		})

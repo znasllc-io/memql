@@ -793,7 +793,11 @@ func (c *Concept) validate(variant string, payload any) error {
 	if err != nil {
 		return err
 	}
-	return schema.Validate(payload)
+	// Redact here rather than at each caller: the jsonschema message
+	// interpolates the offending INSTANCE VALUE, and both Create and Delete
+	// wrap this verbatim into an error a caller may log (memql#3112). Doing it
+	// at the single seam means a future third caller cannot forget.
+	return c.redactSecretsInValidationError(schema.Validate(payload))
 }
 
 // validateShortId catches the class of bug where a caller hands in

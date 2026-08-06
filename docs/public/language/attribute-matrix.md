@@ -229,11 +229,14 @@ agent path it runs **before** the covered validator, it serializes the
 its error message is returned to the model unredacted. Tracked as
 memql#3117.
 
-It is **not** redacted by **concept payload validation**. `@minimum`,
-`@maximum` and `@format` declared on the *concept* are enforced by JSON
-schema, which interpolates the instance value. Any constraint the args
-block does not also declare is validated only there, bypassing this
-redaction entirely.
+It **is** redacted by **concept payload validation**, since memql#3112.
+`@minimum`, `@maximum` and `@format` declared on the *concept* are
+enforced by JSON schema, which interpolates the instance value; the
+message for a `@secret` field is replaced before `Concept.Create` wraps
+it. This was the largest of the uncovered surfaces, because a constraint
+the args block does not also declare is validated *only* there. The
+constraint that failed is still identifiable from the keyword location --
+only the value is withheld.
 
 **Length is never redacted anywhere**: `value too long (N runes, max M)`
 reports a rune count for a secret field too.

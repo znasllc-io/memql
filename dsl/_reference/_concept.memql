@@ -309,11 +309,13 @@ concept fieldTypes {
 //                       ENTIRE args map into a WARN log rather than quoting one
 //                       value, and returns its message to the model
 //                       unredacted. Tracked as memql#3117.
-//                       NOT REDACTED BY CONCEPT PAYLOAD VALIDATION. @minimum /
-//                       @maximum / @format declared on the CONCEPT are checked
-//                       by JSON schema, which interpolates the value. Any
-//                       constraint the args block does not also declare is
-//                       validated only there, bypassing redaction entirely.
+//                       COVERED, since memql#3112: CONCEPT PAYLOAD VALIDATION.
+//                       @minimum / @maximum / @format declared on the CONCEPT
+//                       are checked by JSON schema, which interpolates the
+//                       value -- and a secret field's message is now replaced
+//                       before Concept.Create wraps it. This was the largest
+//                       uncovered surface, because a constraint the args block
+//                       does not mirror is validated ONLY there.
 //                       LENGTH IS NEVER REDACTED. "value too long (N runes,
 //                       max M)" reports a rune count for a secret field too.
 //                       So @secret stops a credential leaking through a
