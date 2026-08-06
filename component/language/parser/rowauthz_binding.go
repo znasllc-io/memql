@@ -516,9 +516,23 @@ func blankCommentsAndStrings(source string) string {
 				state = code
 				b.WriteByte(c)
 			case c == '\n':
-				// An unterminated string ends at the newline, the
-				// same recovery the lexer performs.
-				state = code
+				// A literal newline stays INSIDE the string, matching
+				// the lexer: scanString writes it to the builder as an
+				// ordinary rune and returns one token spanning the
+				// lines (memql#3047 advances the line counter through
+				// exactly this). The newline itself is preserved so
+				// offsets into the result still index the original.
+				//
+				// This arm used to leave string state here, claiming
+				// parity with a lexer recovery that does not exist --
+				// an unterminated literal is a hard error there, not a
+				// resynchronisation. The cost was an INVERTED view of
+				// everything downstream: the literal's remaining
+				// content scanned as code, and its true closing quote
+				// opening a new string so real code was blanked. That
+				// produced phantom `concept` headers pointing inside
+				// string literals, which memqlmigrate would then
+				// rewrite at (memql#3116).
 				b.WriteByte(c)
 			default:
 				b.WriteByte(' ')

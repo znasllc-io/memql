@@ -634,3 +634,65 @@ func TestRewriteAppliesTheInferredTier(t *testing.T) {
 		t.Fatalf("queries.memql was rewritten:\n%s", qOut)
 	}
 }
+
+// A multi-line string literal must not manufacture a tier -- the literal
+// analogue of TestACommentCannotManufactureATier, and the codemod-level proof
+// for memql#3116.
+//
+// The blanker used to leave string state at a newline, which inverted its view
+// of everything after: the literal's remaining lines scanned as CODE. Here the
+// continuation lands INSIDE the query's body, so the codemod reads
+// `&& ownerUserId==actor.userId` as a real conjunct and votes `owned` -- an
+// authorization tier manufactured out of a string constant, on a query that
+// enforces no such thing.
+func TestAMultiLineStringCannotManufactureATier(t *testing.T) {
+	got := inferOne(t, map[string]string{
+		"notes/concepts.memql": "concept note {\n  ownerUserId string\n  a string\n}\n",
+		// The file declares NO construct. Everything below the first line lives
+		// inside the @description literal, so the only vote available is the
+		// one the blanker would invent.
+		"notes/queries.memql": `@description("a description that wraps
+query note phantom {
+  filter  ownerUserId==actor.userId
+  shape   noteFull
+}")
+`,
+	})
+	if decl, ok := got.Tiers["notes"]["note"]; ok {
+		t.Fatalf("inferred %+v from a query that exists only inside a string literal -- "+
+			"an authorization tier manufactured out of prose", decl)
+	}
+}
+
+// The same defect in the direction that fabricates a whole construct. A
+// `query` header inside a multi-line literal was reported as a real header --
+// so the codemod read a vote from a construct that does not exist, and located
+// a rewrite offset INSIDE the literal.
+//
+// Shaped so the phantom CHANGES the outcome: the real query is caller-scoped
+// and votes `owned`, while the phantom is unscoped and would block it. A
+// fixture where both paths reach "no tier" would pass either way.
+func TestAQueryHeaderInsideAMultiLineStringIsNotAConstruct(t *testing.T) {
+	got := inferOne(t, map[string]string{
+		"notes/concepts.memql": "concept note {\n  ownerUserId string\n  a string\n}\n",
+		"notes/queries.memql": `@description("wrapping description
+query note phantom {
+  filter  a=="b"
+  shape   noteFull
+}")
+query note real {
+  filter  ownerUserId==actor.userId
+  shape   noteFull
+}
+`,
+	})
+	decl, ok := got.Tiers["notes"]["note"]
+	if !ok {
+		t.Fatalf("no tier inferred; the unscoped `phantom` exists only inside a "+
+			"string literal and must not block the real caller-scoped query. "+
+			"abstained: %q", got.Abstained[conceptKey{Domain: "notes", Name: "note"}])
+	}
+	if decl.Tier != "owned" {
+		t.Fatalf("tier = %+v, want owned from the real query", decl)
+	}
+}
