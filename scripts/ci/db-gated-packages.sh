@@ -43,11 +43,13 @@ readonly DB_GATED_TREES=(
 
 usage() {
 	cat >&2 <<'EOF'
-usage: db-gated-packages.sh (--trees | --patterns | --complement)
+usage: db-gated-packages.sh (--trees | --patterns | --complement | --complement-cacheable)
 
-  --trees       one repo-relative tree per line (the canonical set)
-  --patterns    the `./<tree>/...` patterns db-tests passes to `go test`
-  --complement  every package NOT under a db-gated tree, for go-checks
+  --trees                 one repo-relative tree per line (the canonical set)
+  --patterns              the `./<tree>/...` patterns db-tests passes to `go test`
+  --complement            every package NOT under a db-gated tree
+  --complement-cacheable  the complement minus the root package, which must
+                          always run uncached (see print_complement_cacheable)
 EOF
 }
 
@@ -78,6 +80,24 @@ print_complement() {
 	go list ./... | grep -Ev "${pattern}"
 }
 
+# print_complement_cacheable is the complement MINUS the module's root package.
+#
+# The root package hosts seven repo-sweeping gates
+# (docs_construct_names_test.go, product_neutrality_test.go, ...) that shell out
+# to `git ls-files` and then read whatever it returns. Go's test cache records
+# the files a test OPENS, but it cannot record the SET a subprocess returned --
+# so adding a new `.md` leaves the cache key unchanged and the gate reports a
+# stale green over a file it never looked at.
+#
+# That is precisely the fail-open memql#2972 was filed to close, so the root
+# package is always run with -count=1 in its own step rather than being made
+# cacheable. Everything else keys correctly on its own sources.
+print_complement_cacheable() {
+	local module
+	module="$(go list -m)"
+	print_complement | grep -Fxv "${module}"
+}
+
 main() {
 	if (($# != 1)); then
 		usage
@@ -87,6 +107,7 @@ main() {
 	--trees) print_trees ;;
 	--patterns) print_patterns ;;
 	--complement) print_complement ;;
+	--complement-cacheable) print_complement_cacheable ;;
 	-h | --help) usage ;;
 	*)
 		echo "db-gated-packages.sh: unknown mode '$1'" >&2

@@ -273,7 +273,7 @@ jobs:
       # merge green and crash every node at boot. See #599.
       - name: engine load check (engine init over full DSL tree)
         if: ${{ env.RUN_DSL == 'true' }}
-        run: go test -count=1 -run TestEngineInitLoadsFullDSL ./component/memql/
+        run: go test -run TestEngineInitLoadsFullDSL ./component/memql/
       # SDK drift check: regenerates the typed Go SDK from the DSL and fails
       # on a diff. The generator is Go and reads dsl/, so it gates with the
       # DSL lanes.
@@ -361,9 +361,25 @@ jobs:
       # literal arguments because scripts/cidb/dbgate_test.go derives its
       # selector from them. The two cannot drift -- scripts/ci asserts they are
       # identical.
+      # The root package KEEPS -count=1 (memql#3162). Seven gates there sweep
+      # `git ls-files` and read what it returns; Go's cache records the files a
+      # test OPENS but not the SET a subprocess returned, so a newly added `.md`
+      # leaves the cache key unchanged and the gate reports a stale green over a
+      # file it never read -- the memql#2972 fail-open, reopened by caching.
+      - name: go test (root package, deliberately uncached -- sweeps git ls-files)
+        if: ${{ env.RUN_GO == 'true' }}
+        run: go test -count=1 -timeout=300s .
+      # Everything else drops -count=1 so the Go test cache actually works
+      # (memql#3162 / design D5.3a). actions/setup-go already restores GOCACHE,
+      # where Go stores test results -- the cache was being populated on every
+      # run and then explicitly ignored. Open item O1 resolved this as original
+      # boilerplate: it entered in the first CI commit (98667d60) with no
+      # rationale recorded, and the one commit that reasons about it (5be808a1)
+      # documents it MASKING a defect CI "would never have caught (fresh
+      # container, -count=1)".
       - name: go test (excluding the db-gated trees db-tests owns)
         if: ${{ env.RUN_GO == 'true' }}
-        run: go test -count=1 -timeout=300s $(scripts/ci/db-gated-packages.sh --complement)
+        run: go test -timeout=300s $(scripts/ci/db-gated-packages.sh --complement-cacheable)
       # Build-tagged test lanes (#1338, #2903). The untagged `go test ./...`
       # above never RUNS a //go:build-tagged test file, so a tagged suite is
       # CI-invisible without an explicit -tags run.
@@ -386,16 +402,16 @@ jobs:
       # These lanes are CGO-free, so they ride the warm go-checks cache.
       - name: go test -tags agent (build-tagged suites)
         if: ${{ env.RUN_GO == 'true' }}
-        run: go test -tags agent -count=1 -timeout=300s ./integrations/agent/worker/
+        run: go test -tags agent -timeout=300s ./integrations/agent/worker/
       # RUN_GO or RUN_DSL: component/mcp/real_engine_surface_test.go pins DSL
       # contracts (e.g. @mcp on readyHarnessStep), so a DSL-only change can red
       # this lane. Mirrors the engine-load-check step's gating.
       - name: go test -tags mcp (build-tagged suites)
         if: ${{ env.RUN_GO == 'true' || env.RUN_DSL == 'true' }}
-        run: go test -tags mcp -count=1 -timeout=300s ./app/ ./component/mcp/
+        run: go test -tags mcp -timeout=300s ./app/ ./component/mcp/
       - name: go test -tags identity (build-tagged suites)
         if: ${{ env.RUN_GO == 'true' }}
-        run: go test -tags identity -count=1 -timeout=300s ./app/
+        run: go test -tags identity -timeout=300s ./app/
 
   # Voice node CGO build lane -- kept SEPARATE from go-checks because it needs
   # the libopus/opusfile/soxr C deps + CGO_ENABLED=1 and builds under the
