@@ -690,13 +690,11 @@ func coverageFindings(pkgs []string, all []dbGatedTest, provisioned []string) []
 		provisionedSet[dir] = true
 	}
 	for _, dir := range known {
-		// selfPkg imports dbtest for the RequireDB predicate rather than to
-		// reach a database, so it neither needs nor has a TestMain. The
-		// exemption that hides it from the scan has to apply here too, or this
-		// rule reports the gate against itself.
-		if dir == selfPkg {
-			continue
-		}
+		// No selfPkg guard here, deliberately. scanDBGatedTests returns nil for
+		// it (:782), so it never reaches `known`; and covers() would reject it
+		// regardless, because the lane's selector names no ./scripts/...
+		// argument. A guard here was unreachable both ways and no test could
+		// show it necessary -- the standard this file sets at :637-641.
 		if !covers(pkgs, dir) {
 			continue // not run by the lane; the arm above owns that case
 		}

@@ -81,11 +81,14 @@
 // always meant to be. A db-gated package added outside the selector now reds
 // immediately.
 //
-// The counts remain a coarse proxy and still feed no pass/fail decision: the
-// log over-counts non-DB tests that happen to sit in a dbtest-importing file,
-// and under-counts db-gated tests that reach dbtest through a helper in a
-// sibling file. What is asserted is per-package coverage, which is unaffected
-// by either.
+// The counts remain a coarse proxy and feed no pass/fail decision. What a
+// package is MEMBER of does: the log over-counts non-DB tests that happen to
+// sit in a dbtest-importing file, and the inverse rule keys on that same
+// membership, so a selector-covered package holding a dbtest-importing test
+// file is required to carry a TestMain whether or not those tests reach a
+// database. selfPkg is the one directory where that is wrong today, and it is
+// exempted by name in scanDBGatedTests rather than by a general rule. A second
+// such package would need the same treatment.
 //
 // # What it can and cannot prove
 //
@@ -97,7 +100,10 @@
 //     precedence modelled, and it is what makes an unreachable database a
 //     failure instead of a green skip. This is the issue's actual fix.
 //   - STRUCTURAL: every package with an EnsureSchema TestMain is in the
-//     selector. Pure Go AST on both sides, no shell involved.
+//     selector, AND every selector-covered package carrying db-gated tests has
+//     one. Both directions, pure Go AST on both sides, no shell involved. The
+//     second direction is what memql#3095 added; without it every TestMain in
+//     the tree could be deleted with the gate staying green.
 //   - BEST-EFFORT: that the lane's command actually executes those packages.
 //     This is read off `run:` text, and text cannot prove execution. The gate
 //     narrows the gap by REFUSING anything it cannot read plainly -- shell
