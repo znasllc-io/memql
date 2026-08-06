@@ -1,6 +1,7 @@
 package inbound
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -91,6 +92,36 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// body no longer matches what was signed.
 	if !utf8.Valid(body) {
 		http.Error(w, "request body is not valid UTF-8", http.StatusBadRequest)
+		return
+	}
+	// U+0000 is valid UTF-8, so the gate above passes it -- and the staged row
+	// then cannot exist. The body lands in a JSONB column (`payload JSONB NOT
+	// NULL`), and PostgreSQL's jsonb type cannot represent U+0000. memqlString
+	// renders the byte as a unicode escape, which the MemQL lexer decodes
+	// correctly -- so the statement PARSES, and the failure lands one layer
+	// further down, where Postgres refuses the value with "unsupported Unicode
+	// escape sequence" (memql#3098). That is exactly why this package's existing
+	// lexer round-trip test is blind to the class: it asserts on the DECODED
+	// value, and decoding is the part that works.
+	//
+	// The consequence is worse than a dropped field. The insert fails, the
+	// handler answers 503, and staging is idempotent by requestId -- so the
+	// sender retries the same body forever against a request that can never
+	// succeed. An infinite retry loop, not a stuck row.
+	//
+	// REFUSED rather than substituted, and that is the opposite of what
+	// component/outbound does for the same byte (memql#3035). The reasoning does
+	// not transfer: outbound mangles a byte in `lastError`, which is diagnostic
+	// text where a replacement character beats a permanently stuck row. A
+	// webhook body is what the caller SENT -- it is signature-verified material,
+	// and silently rewriting it would stage a row whose body no longer matches
+	// what was signed. That is the same argument the utf8.Valid gate above
+	// already makes, so refusing here keeps the two consistent.
+	//
+	// 400 rather than 503: this request cannot be made to succeed by retrying,
+	// and 4xx is what stops the sender from trying.
+	if bytes.IndexByte(body, 0) >= 0 {
+		http.Error(w, "request body contains a NUL byte", http.StatusBadRequest)
 		return
 	}
 
