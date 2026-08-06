@@ -54,12 +54,28 @@ mutate agent createAgent {
   }
 }
 
+// WHY userId IS STAMPED (memql#3081). It used to be accepted, and it is the key the standing
+// computer-use grant is READ by -- four Go call sites resolve a user's envelope ceiling through
+// `agentAuthorizationsForUser(userId:X)` (authoring_capability_store.go, worker/store.go,
+// computer_use_status_agent.go, mint_skill_handler.go). So a caller-supplied value let a row be
+// written as `{userId: <someone else>, computerUseScope: "full"}`, raising THAT user's standing
+// ceiling on a grant they never approved -- on the concept whose own field doc says "Only the
+// granting user can revoke".
+//
+// Every layer that could have caught it was structurally unable to: the mutation grammar cannot
+// express an owner predicate (memql#3079), the field carries neither @internal nor @serverSet so
+// validateMutationCallerArgs never inspects it, the mutation is on the client surface via the
+// generated SDK (so @serverOnly was not in play), and the concept declares no row-authz tier.
+//
+// This is deliberately NOT in the /// doc block: that text flows into the generated SDK, where a
+// consumer wants the contract rather than the history.
 /// Grant a standing authorization for an agent to trigger a plan kind without per-Plan approval.
+/// The granting user is the CALLER -- userId is stamped from actor.userId and is not an argument.
+@actor
 mutate agentAuthorization createAgentAuthorization {
   args {
     authId            string
     agentId           string!
-    userId            string!
     planKind          string!
     spaceScope        string!
     tokenBudgetCap    int
@@ -67,9 +83,10 @@ mutate agentAuthorization createAgentAuthorization {
     computerUseScope  string
   }
   insert {
-    accept { agentId, userId, planKind, spaceScope, tokenBudgetCap, expiresAt }
+    accept { agentId, planKind, spaceScope, tokenBudgetCap, expiresAt }
     stamp {
       id: args.authId
+      userId: actor.userId
       computerUseScope: args.computerUseScope ?? ""
       active: true
     }

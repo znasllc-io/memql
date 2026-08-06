@@ -1399,13 +1399,12 @@ func CreateAgentBuild(args CreateAgentArgs) string {
 	return b.String()
 }
 
-// CreateAgentAuthorization -- Grant a standing authorization for an agent to trigger a plan kind without per-Plan approval.
+// CreateAgentAuthorization -- Grant a standing authorization for an agent to trigger a plan kind without per-Plan approval. The granting user is the CALLER -- userId is stamped from actor.userId and is not an argument.
 //
 // Bound concept: v1:agents:agentAuthorization (machine-readable: BoundConcepts["createAgentAuthorization"] in generated_concepts.go).
 type CreateAgentAuthorizationArgs struct {
 	AuthId           string
 	AgentId          string
-	UserId           string
 	PlanKind         string
 	SpaceScope       string
 	TokenBudgetCap   int
@@ -1431,11 +1430,6 @@ func CreateAgentAuthorizationBuild(args CreateAgentAuthorizationArgs) string {
 	}
 	b.WriteString("agentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AgentId))
-	if b.Len() > 34 {
-		b.WriteString(", ")
-	}
-	b.WriteString("userId: ")
-	b.WriteString(fmt.Sprintf("%q", args.UserId))
 	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
