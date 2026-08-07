@@ -36,6 +36,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -158,6 +159,12 @@ func requiredInputs(args []string) (paths []string, understood bool) {
 		return nil, len(args) >= 3 && args[1] == "-c"
 
 	case "protoc":
+		// No directive uses this shape any more -- they all delegate to
+		// `make proto-gen` (memql#3251). The branch stays so that a
+		// reintroduced one is understood here and fails in
+		// TestGoGenerateDirectivesDoNotInvokeBareProtoc with the reason it is
+		// wrong, rather than failing here with "extend requiredInputs", which
+		// is the one piece of advice that would be actively misleading.
 		for _, a := range args[1:] {
 			switch {
 			case strings.HasPrefix(a, "--proto_path="):
@@ -230,5 +237,81 @@ func TestGoGenerateDirectivesReferenceExistingPaths(t *testing.T) {
 					d.file, d.line, p, filepath.ToSlash(filepath.Dir(d.file)))
 			}
 		}
+	}
+}
+
+// bareProtocInvocation matches `protoc` used as a command word.
+//
+// It is applied to the directive's raw text rather than to splitArgs' first
+// token on purpose: `sh -c "protoc ..."` is an opaque shell payload this file
+// deliberately does not parse, and a first-token check would wave it straight
+// through -- reopening the hole one level down. Scanning the text closes the
+// `sh -c` route too.
+//
+// Requiring whitespace-or-end AFTER the word is what keeps the legitimate
+// neighbours out: `protoc-gen-go` and `--proto_path=` do not match, and neither
+// does `make proto-gen`, which has no `c` after `proto`.
+var bareProtocInvocation = regexp.MustCompile(`(^|[\s;&|"'(])protoc(\s|$)`)
+
+// TestGoGenerateDirectivesDoNotInvokeBareProtoc forbids the second generation
+// path (znasllc-io/memql#3251).
+//
+// # What went wrong
+//
+// `scripts/dev/proto-gen.sh` pins protoc -- PROTOC_VERSION, provisioned into
+// bin/tools/ and used even when a system protoc exists (memql#2774). The
+// //go:generate directives in component/{grpc,node,bus} did not go through it;
+// they ran whatever `protoc` was on PATH. `make generate` and `make proto-gen`
+// therefore generated the same nine files by two different routes, and on a
+// machine whose system protoc differed the former rewrote the
+// `// protoc vX.Y.Z` stamp in every one of them. A contributor who ran the
+// obvious-sounding target got a nine-file diff they had not authored.
+//
+// # Why this is the assertion worth making
+//
+// Neither target was wrong in isolation. The defect was that there were two and
+// nothing named which was authoritative -- and the unpinned one was the one
+// with the friendlier name. Pointing the directives at `make proto-gen` fixes
+// today's tree; this test is what makes the property hold tomorrow, because a
+// bare `protoc` directive is an easy and natural thing to reach for and its
+// damage is invisible until someone with a different protoc runs it.
+//
+// Note this deliberately does not check the reverse (that every proto package
+// HAS a delegating directive). Discovering "proto packages" means discovering
+// directories containing .proto, and this tree has vendored google/api and
+// google/protobuf stubs plus an orphaned component/polyphon/proto that are not
+// generation targets. That guard would need a hand-maintained exclusion list --
+// the drift-prone parallel list this change removed from proto-gen.sh, re-added
+// in Go. The negative property needs no such list and is the one that matters.
+func TestGoGenerateDirectivesDoNotInvokeBareProtoc(t *testing.T) {
+	root, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+
+	directives := collectGenerateDirectives(t, root)
+	if len(directives) == 0 {
+		t.Fatal("found no //go:generate directives anywhere -- either they were " +
+			"all removed or this guard's discovery is broken. Failing closed " +
+			"rather than reporting a vacuous pass")
+	}
+
+	for _, d := range directives {
+		if !bareProtocInvocation.MatchString(d.text) {
+			continue
+		}
+		t.Errorf("%s:%d: directive invokes protoc directly: %q.\n"+
+			"protoc is pinned in scripts/dev/proto-gen.sh (PROTOC_VERSION), which "+
+			"prefers its own provisioned copy over whatever is on PATH. A directive "+
+			"that calls protoc itself bypasses that pin, so `make generate` "+
+			"regenerates with the local protoc and rewrites the `// protoc vX.Y.Z` "+
+			"stamp in every generated file -- a diff the author did not write and "+
+			"cannot tell apart from a real regeneration at a glance (memql#3251, "+
+			"memql#2774).\n"+
+			"Delegate to the pinned path instead, scoped to this package so "+
+			"`go generate` over the tree does not regenerate every proto dir once "+
+			"per proto package:\n"+
+			"\t//go:generate sh -c \"cd ../.. && make proto-gen PROTO_GEN_ONLY=<this dir>\"",
+			d.file, d.line, d.text)
 	}
 }

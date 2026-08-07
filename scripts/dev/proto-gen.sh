@@ -2,10 +2,20 @@
 #
 # proto-gen.sh -- regenerate (or drift-check) the Go bindings for the proto
 # sources whose committed output is pinned to protoc-gen-go v1.36.11 +
-# protoc-gen-go-grpc v1.6.2: component/grpc and component/node.
+# protoc-gen-go-grpc v1.6.2: component/grpc, component/node and component/bus.
 #
-#   scripts/dev/proto-gen.sh           # regenerate in place (the fix command)
-#   scripts/dev/proto-gen.sh --check   # CI gate: fail on drift, leave tree clean
+#   scripts/dev/proto-gen.sh                      # regenerate in place (the fix command)
+#   scripts/dev/proto-gen.sh --check              # CI gate: fail on drift, leave tree clean
+#   scripts/dev/proto-gen.sh --only=component/bus # narrow either mode to one proto dir
+#
+# THIS IS THE ONLY GENERATION PATH (memql#3251). The //go:generate directives in
+# component/{grpc,node,bus} used to invoke a bare `protoc`, which made
+# `make generate` a second path that disagreed with this one: the pin below is
+# preferred over a system protoc, the directives took whatever was on PATH. On a
+# machine whose system protoc differed, the obvious-sounding target rewrote the
+# `// protoc vX.Y.Z` stamp in all nine generated files. Those directives now
+# delegate here, scoped with --only, and
+# TestGoGenerateDirectivesDoNotInvokeBareProtoc keeps them from drifting back.
 #
 # WHY A DEDICATED GATE (memql#928): proto .pb.go is regenerated locally and
 # committed by hand; nothing verified the committed bindings matched the .proto
@@ -43,12 +53,46 @@ readonly PROTO_TARGETS=(
 	"component/node|yes|node.proto"
 	"component/bus|no|bus.proto"
 )
-# Generated trees compared against the committed copies.
-readonly GEN_PATHS=("component/grpc/gen" "component/node/gen" "component/bus/gen")
 # Hunks whose only changed lines match this are ignored (the protoc stamp).
 readonly STAMP_IGNORE='^//[[:space:]].*protoc'
 
+# Filled by select_targets: the subset of PROTO_TARGETS this run covers, and the
+# generated trees those targets write (compared against the committed copies).
+SELECTED_TARGETS=()
+GEN_PATHS=()
+
 repo_root() { git rev-parse --show-toplevel; }
+
+# select_targets narrows PROTO_TARGETS to the directory named by --only (all of
+# them when it is empty) and derives GEN_PATHS from the result.
+#
+# GEN_PATHS used to be a second hand-maintained list of the same three trees.
+# Deriving it means a proto dir added to PROTO_TARGETS alone can no longer
+# generate correctly while staying invisible to the drift gate -- the gate
+# silently narrower than the generator is the worst direction for it to fail.
+#
+# An --only that matches nothing is fatal rather than a no-op run. A typo in a
+# //go:generate directive that regenerated zero files while exiting 0 would be
+# the same defect this script exists to close: a generation path that reports
+# success without doing the work.
+select_targets() {
+	local only="${1:-}"
+	local target dir known=""
+	for target in "${PROTO_TARGETS[@]}"; do
+		dir="${target%%|*}"
+		known="${known:+${known}, }${dir}"
+		if [[ -n "$only" && "$dir" != "$only" ]]; then
+			continue
+		fi
+		SELECTED_TARGETS+=("$target")
+		GEN_PATHS+=("${dir}/gen")
+	done
+	if [[ ${#SELECTED_TARGETS[@]} -eq 0 ]]; then
+		echo "ERROR: --only=${only} matches no proto target." >&2
+		echo "       Known targets: ${known}" >&2
+		exit 1
+	fi
+}
 
 # protoc_platform echoes the asset suffix protobuf's releases use for this
 # host, matching github.com/protocolbuffers/protobuf/releases.
@@ -118,26 +162,42 @@ resolve_protoc() {
 	exit 1
 }
 
-# ensure_tools installs the pinned plugins into a throwaway bin, provisions the
-# pinned protoc, and prepends both to PATH.
+# ensure_tools provisions the pinned protoc and the pinned plugins, then
+# prepends both to PATH.
+#
+# The plugin bin is CACHED under bin/tools/ keyed on both plugin versions,
+# rather than installed into a throwaway mktemp dir on every run. `go generate`
+# reaches three proto packages and each delegates back here, so a per-run temp
+# dir made every one of those pay two `go install`s -- and, on a cold module
+# cache, gave a lane that had already succeeded twice a third chance to fail on
+# the network. Keying the directory on the versions means bumping a pin lands in
+# a new directory instead of silently reusing the old binaries, the same
+# property resolve_protoc gets from keying on PROTOC_VERSION.
+#
+# bin/tools/ is gitignored, and CI already caches that whole directory keyed on
+# this script's hash, so the plugins ride the existing protoc cache for free.
 ensure_tools() {
 	local protoc_bin
 	protoc_bin="$(resolve_protoc)"
 	export PATH="$(dirname "${protoc_bin}"):$PATH"
 	local bin
-	bin="$(mktemp -d)/protobin"
-	mkdir -p "$bin"
-	echo "  installing protoc-gen-go@${PROTOC_GEN_GO_VERSION} + protoc-gen-go-grpc@${PROTOC_GEN_GO_GRPC_VERSION}..."
-	GOBIN="$bin" go install "google.golang.org/protobuf/cmd/protoc-gen-go@${PROTOC_GEN_GO_VERSION}"
-	GOBIN="$bin" go install "google.golang.org/grpc/cmd/protoc-gen-go-grpc@${PROTOC_GEN_GO_GRPC_VERSION}"
+	bin="$(repo_root)/bin/tools/protoc-plugins-${PROTOC_GEN_GO_VERSION}-${PROTOC_GEN_GO_GRPC_VERSION}"
+	# Both binaries are checked: an install interrupted between the two would
+	# otherwise leave a half-populated dir that every later run treats as warm.
+	if [[ ! -x "${bin}/protoc-gen-go" || ! -x "${bin}/protoc-gen-go-grpc" ]]; then
+		mkdir -p "$bin"
+		echo "  installing protoc-gen-go@${PROTOC_GEN_GO_VERSION} + protoc-gen-go-grpc@${PROTOC_GEN_GO_GRPC_VERSION}..."
+		GOBIN="$bin" go install "google.golang.org/protobuf/cmd/protoc-gen-go@${PROTOC_GEN_GO_VERSION}"
+		GOBIN="$bin" go install "google.golang.org/grpc/cmd/protoc-gen-go-grpc@${PROTOC_GEN_GO_GRPC_VERSION}"
+	fi
 	export PATH="$bin:$PATH"
 }
 
-# regenerate runs protoc over every covered target, in place. Targets flagged
+# regenerate runs protoc over every selected target, in place. Targets flagged
 # grpc=no get --go_out only (service-less protos have no _grpc.pb.go).
 regenerate() {
 	local target dir grpc files grpc_args
-	for target in "${PROTO_TARGETS[@]}"; do
+	for target in "${SELECTED_TARGETS[@]}"; do
 		dir="${target%%|*}"
 		grpc="${target#*|}"
 		grpc="${grpc%%|*}"
@@ -188,7 +248,7 @@ run_check() {
 	rm -rf "${backup}"
 	if [[ $rc -ne 0 ]]; then
 		echo "" >&2
-		echo "ERROR: proto bindings are out of date (component/grpc, component/node)." >&2
+		echo "ERROR: proto bindings are out of date (${GEN_PATHS[*]})." >&2
 		echo "       A .proto changed without its generated .pb.go. Run 'make proto-gen' and commit the result." >&2
 		exit 1
 	fi
@@ -197,12 +257,28 @@ run_check() {
 
 main() {
 	cd "$(repo_root)"
+
+	local arg check=0 only=""
+	for arg in "$@"; do
+		case "$arg" in
+			--check) check=1 ;;
+			--only=*) only="${arg#--only=}" ;;
+			*)
+				echo "ERROR: unknown argument '${arg}'." >&2
+				echo "       usage: proto-gen.sh [--check] [--only=<proto dir>]" >&2
+				exit 1
+				;;
+		esac
+	done
+
+	# Selection first, so a bad --only fails before anything is downloaded.
+	select_targets "$only"
 	ensure_tools
-	if [[ "${1:-}" == "--check" ]]; then
+	if [[ $check -eq 1 ]]; then
 		run_check
 	else
 		regenerate
-		echo "proto-gen: regenerated component/grpc, component/node (review + commit; the // protoc stamp line is cosmetic)"
+		echo "proto-gen: regenerated ${GEN_PATHS[*]} (review + commit; the // protoc stamp line is cosmetic)"
 	fi
 }
 
