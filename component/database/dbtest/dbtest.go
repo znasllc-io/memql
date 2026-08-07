@@ -38,6 +38,11 @@ import (
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
 
+// dsnEnv is the environment variable every db-gated suite reads to find the
+// shared test database. Named rather than repeated as a literal so the read,
+// the (post-ping) write, and the tests that assert on it cannot drift.
+const dsnEnv = "MEMQL_DATABASE_DSN"
+
 // defaultDSN mirrors the fallback each *_db_test.go uses when
 // MEMQL_DATABASE_DSN is unset, so the ensure step and the tests it guards
 // target the same database.
@@ -58,13 +63,23 @@ const schemaLockKey int64 = 7756010113207025510
 // It reports reachable=false (err=nil) when no Postgres is reachable, so the
 // caller can proceed to m.Run() and let the individual tests self-skip --
 // preserving the green-by-skip behaviour on a DB-less CI lane.
+//
+// It never publishes a DSN it has not connected to. See ensureSchema.
 func EnsureSchema(ctx context.Context) (reachable bool, err error) {
-	dsn := strings.TrimSpace(os.Getenv("MEMQL_DATABASE_DSN"))
-	if dsn == "" {
-		dsn = defaultDSN
-		// Align NewMemoryNodesDatabase (which reads the env) with the DSN the
-		// tests fall back to, so both target the same database.
-		_ = os.Setenv("MEMQL_DATABASE_DSN", dsn)
+	return ensureSchema(ctx, defaultDSN)
+}
+
+// ensureSchema is EnsureSchema with the fallback DSN injected, so the
+// unreachable-default behaviour is testable without a database and without
+// mutating a package-level const (memql#3096, #3148).
+func ensureSchema(ctx context.Context, fallbackDSN string) (reachable bool, err error) {
+	dsn := strings.TrimSpace(os.Getenv(dsnEnv))
+	// usedDefault distinguishes "the operator named a DSN" from "this helper
+	// guessed one". The two deserve different answers on failure, and every
+	// decision below turns on it.
+	usedDefault := dsn == ""
+	if usedDefault {
+		dsn = fallbackDSN
 	}
 
 	lockDB := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn))), pgdialect.New())
@@ -79,10 +94,62 @@ func EnsureSchema(ctx context.Context) (reachable bool, err error) {
 		// one -- including a wrong password, which pings the same way --
 		// is an error rather than a silent degrade to green-by-skip
 		// (#2680).
-		if RequireDB() {
+		//
+		// THE MEMQL_REQUIRE_DB DECISION (memql#3148). The hard error is gated
+		// on !usedDefault, and that gate is the whole point of this branch:
+		//
+		//   - Operator NAMED a DSN and it does not answer -> error. The run
+		//     asked for that database; there is nothing else to try and
+		//     nothing to be gained by continuing. This is #2680's guarantee
+		//     and it is preserved EXACTLY. The db-tests lane always takes
+		//     this path -- ci.yml sets MEMQL_DATABASE_DSN at job level -- so
+		//     CI's behaviour is unchanged by the gate.
+		//
+		//   - Operator named nothing and this helper's own fallback does not
+		//     answer -> return (false, nil) and let the caller continue.
+		//     Every main_dbschema_test.go exits only on err != nil, so the
+		//     package reaches m.Run() and each test applies its own DSN
+		//     resolution and its own dbtest.Unreachable gate -- which is
+		//     itself MEMQL_REQUIRE_DB-aware and still fails loudly, naming
+		//     the specific assertion that needed a database. Nothing goes
+		//     quiet; the failure just stops being reported by the wrong
+		//     component. EnsureSchema's job is to migrate a schema, not to
+		//     decide that a run is over on the strength of a fallback string
+		//     compiled into this file.
+		//
+		// The alternative -- erroring on both paths -- was rejected because
+		// it is precisely what turned a stale credential in this file's own
+		// defaultDSN into "0 tests ran, package FAIL" for every db-gated
+		// package (memql#3030, #3096), while each package's own fallback was
+		// correct the entire time.
+		//
+		// Honest limit: once every suite resolves through DSN() (memql#3149),
+		// "the package's own fallback" IS this fallback, so falling through
+		// yields one Fatalf per db-gated test rather than one os.Exit(1) per
+		// package. Both are red. The fall-through names which assertions
+		// wanted a database; the exit names only the package. That is the
+		// trade, and it is deliberate.
+		if RequireDB() && !usedDefault {
 			return false, fmt.Errorf("dbtest: %s=1 but Postgres is UNREACHABLE at %s: %w", RequireDBEnv, SafeDSN(dsn), perr)
 		}
+		if RequireDB() {
+			fmt.Fprintf(os.Stderr, "dbtest: %s=1 and no %s was set; the built-in fallback %s is "+
+				"UNREACHABLE (%v). Continuing to m.Run() so each test reports its own requirement "+
+				"-- %s still turns every one of those into a failure.\n",
+				RequireDBEnv, dsnEnv, SafeDSN(dsn), perr, RequireDBEnv)
+		}
 		return false, nil
+	}
+
+	// Only now -- with the DSN proven to answer -- align
+	// NewMemoryNodesDatabase (which reads the env) with the DSN the tests fall
+	// back to, so both target the same database. Publishing before the ping
+	// meant an unreachable fallback overwrote an empty env for the whole
+	// process, and every downstream test that reads the env first inherited
+	// this function's failure instead of applying its own fallback
+	// (memql#3096).
+	if usedDefault {
+		_ = os.Setenv(dsnEnv, dsn)
 	}
 
 	// pg_advisory_lock is session-scoped, so the lock and its release must run
@@ -148,7 +215,7 @@ const RequireDBEnv = "MEMQL_REQUIRE_DB"
 // DSN returns the database DSN the db-gated suites target: the
 // MEMQL_DATABASE_DSN environment value, or the shared default.
 func DSN() string {
-	if dsn := strings.TrimSpace(os.Getenv("MEMQL_DATABASE_DSN")); dsn != "" {
+	if dsn := strings.TrimSpace(os.Getenv(dsnEnv)); dsn != "" {
 		return dsn
 	}
 	return defaultDSN
