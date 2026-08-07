@@ -95,20 +95,28 @@ func (s *Store) LookupByKeyHash(ctx context.Context, keyHash string) (*Row, erro
 	return rowFromNode(rows[0]), nil
 }
 
-// ListForUser returns every badge identity owned by the user (active
-// + inactive). badgesForUser is `paginate 50`, so the keyset cursor
+// ListForSelf returns every badge identity owned by the CALLER (active
+// + inactive). badgesForSelf is `paginate 50`, so the keyset cursor
 // is walked to assemble the complete set (mirrors workertoken).
-func (s *Store) ListForUser(ctx context.Context, userId string) ([]Row, error) {
+//
+// SELF-SCOPED (memql#3178). There is no userId parameter: the row set
+// comes from `userId==actor.userId`, so this cannot be pointed at
+// another user's badges. ctx MUST carry an AccessContext for the caller
+// -- claims alone resolve actor.userId to "" and yield zero rows. The
+// one production caller (component/grpc/badge_handlers.go) was already
+// passing the caller's own id; it now passes the caller's own CONTEXT
+// instead, which is the same intent expressed so the engine enforces it.
+func (s *Store) ListForSelf(ctx context.Context) ([]Row, error) {
 	if s == nil || s.Engine == nil {
 		return nil, errors.New("badge.Store: engine not wired")
 	}
-	q := fmt.Sprintf(`query badgesForUser(userId:%q)`, userId)
+	const q = `query badgesForSelf()`
 	out := []Row{}
 	cursor := ""
 	for i := 0; i < maxPageWalk; i++ {
 		nodes, next, err := s.executeAndExtractPage(ctx, q, cursor)
 		if err != nil {
-			return nil, fmt.Errorf("badge.Store.ListForUser: %w", err)
+			return nil, fmt.Errorf("badge.Store.ListForSelf: %w", err)
 		}
 		for _, n := range nodes {
 			if r := rowFromNode(n); r != nil {
