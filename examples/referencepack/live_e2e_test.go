@@ -53,7 +53,6 @@ import (
 	"github.com/znasllc-io/memql/examples/referencepack"
 )
 
-const e2eDSN = "postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable"
 const e2eOwner = "user-referencepack-e2e-owner"
 
 // spyProvider wraps the reference pack's real Provider, delegating to its
@@ -91,10 +90,7 @@ func (s *spyProvider) Capabilities() []memql.IntegrationCapability {
 }
 
 func TestLiveE2E_ReferencePackAutomationFiresOnNoteCreate(t *testing.T) {
-	dsn := os.Getenv("MEMQL_DATABASE_DSN")
-	if dsn == "" {
-		dsn = e2eDSN
-	}
+	dsn := dbtest.DSN()
 	probe := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn))), pgdialect.New())
 	if err := probe.PingContext(context.Background()); err != nil {
 		_ = probe.Close()

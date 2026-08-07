@@ -213,10 +213,7 @@ func TestBareifyEventPayload_ReplyIdLockstep(t *testing.T) {
 
 func openWireTestDB(t *testing.T) *bun.DB {
 	t.Helper()
-	dsn := os.Getenv("MEMQL_DATABASE_DSN")
-	if dsn == "" {
-		dsn = "postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable"
-	}
+	dsn := dbtest.DSN()
 	// Cheap reachability probe so the no-DB path skips fast instead of blocking
 	// on the migrate lifecycle.
 	probe := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn))), pgdialect.New())

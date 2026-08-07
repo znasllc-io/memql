@@ -45,6 +45,35 @@
 // being in the selector is always drift -- and unlike a per-argument check,
 // that catches a selector entry being DELETED.
 //
+// # The tie is asserted in BOTH directions (memql#3095)
+//
+// That rule used to be one-way, and this doc used to say so -- a gap, honestly
+// documented, not a false claim. It was still wide enough to drive the change
+// through: deleting every main_dbschema_test.go added by memql#3091 while
+// leaving the selector listing their packages left the gate fully green
+// (`ok  scripts/cidb`). The central artifact of that PR could be removed
+// wholesale and the gate that tightens it said nothing.
+//
+// coverageFindings now also asserts the inverse: a package COVERED by the
+// selector that carries db-gated tests must have an EnsureSchema TestMain. The
+// rule keys on the packages that actually carry db-gated tests, not on the
+// selector's whole expansion -- the selector reaches 13 packages of which 7
+// touch the database, and the other 6 have no business owning a migration
+// TestMain. scripts/cidb itself is exempt for the reason selfPkg records.
+//
+// Measured on the tree when it landed: deleting any ONE of the seven
+// main_dbschema_test.go files reds `go test ./scripts/cidb/...` with exactly
+// one finding, naming that package and its remedy -- seven for seven. Deleting
+// all seven yields seven findings. Zero false positives across all 13 packages
+// the selector expands to.
+//
+// What this direction protects is the memql#2551 invariant itself: the lane
+// runs per-package binaries as parallel processes against ONE database, and a
+// package without the TestMain races the shared migration and fails
+// INTERMITTENTLY with `relation "MemoryNodes" does not exist`. An intermittent
+// red is the worst shape of failure this lane can produce, which is why the
+// invariant is worth an assertion rather than a convention.
+//
 // # Full coverage IS asserted (memql#3030)
 //
 // The uncovered-set finding was a log line rather than an assertion while four
