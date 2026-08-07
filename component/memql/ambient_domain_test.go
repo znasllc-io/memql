@@ -100,11 +100,13 @@ func TestResolveFileWithSignatureConcepts_AmbientDomain(t *testing.T) {
 	// The resolver consumes only file.Uses + the signature-concept list,
 	// so a bare File models "no imports" directly.
 	// Without the domain the bare `plan` signature is ambiguous.
-	if err := resolver.ResolveFileWithSignatureConceptsInDomain(&languageParser.File{}, "v1", []string{"plan"}, ""); err == nil {
+	if err := resolver.ResolveFileWithSignatureConceptsInDomain(&languageParser.File{}, "v1", []string{"plan"}, "", ""); err == nil {
 		t.Error("ambiguous signature concept with no domain: want error, got nil")
 	}
-	// The ambient domain disambiguates.
-	if err := resolver.ResolveFileWithSignatureConceptsInDomain(&languageParser.File{}, "v1", []string{"plan"}, "planner"); err != nil {
+	// The ambient domain disambiguates. `planner` carries no namespace.pin, so
+	// its declared namespace IS the directory -- the two arguments coincide for
+	// an unpinned domain, and memql#3084's scope gate wants both stated.
+	if err := resolver.ResolveFileWithSignatureConceptsInDomain(&languageParser.File{}, "v1", []string{"plan"}, "planner", "planner"); err != nil {
 		t.Errorf("ambient domain must disambiguate the signature concept: %v", err)
 	}
 }
