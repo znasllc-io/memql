@@ -52,10 +52,7 @@ import (
 // updateUser) may need a small adjustment for any additional @required
 // user-concept fields when first run against a DB.
 func TestAccountDeletionSweep_HardDeletesExpiredUser_DBAcceptance(t *testing.T) {
-	dsn := os.Getenv("MEMQL_DATABASE_DSN")
-	if dsn == "" {
-		dsn = "postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable"
-	}
+	dsn := dbtest.DSN()
 	db := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn))), pgdialect.New())
 	if err := db.PingContext(context.Background()); err != nil {
 		dbtest.Unreachable(t, "accountDeletionSweep acceptance test", dsn, err)

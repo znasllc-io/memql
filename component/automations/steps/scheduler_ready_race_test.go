@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"io"
 	"log/slog"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -39,10 +38,7 @@ import (
 // scheduler goroutine has not finished loading, which is precisely the
 // CI condition; under the fix it cannot fail.
 func TestSchedulerReadyMeansAutomationsRegistered(t *testing.T) {
-	dsn := os.Getenv("MEMQL_DATABASE_DSN")
-	if dsn == "" {
-		dsn = "postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable"
-	}
+	dsn := dbtest.DSN()
 	db := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn))), pgdialect.New())
 	if err := db.PingContext(context.Background()); err != nil {
 		dbtest.Unreachable(t, "scheduler-ready race test", dsn, err)

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -137,10 +136,7 @@ func TestDispatchGateLockKey_StableAndDistinct(t *testing.T) {
 // integrations/planner/admission_test.go's harness.
 func openDispatchGateTestDB(t *testing.T) *bun.DB {
 	t.Helper()
-	dsn := os.Getenv("MEMQL_DATABASE_DSN")
-	if dsn == "" {
-		dsn = "postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable"
-	}
+	dsn := dbtest.DSN()
 	connector := pgdriver.NewConnector(pgdriver.WithDSN(dsn))
 	db := bun.NewDB(sql.OpenDB(connector), pgdialect.New())
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)

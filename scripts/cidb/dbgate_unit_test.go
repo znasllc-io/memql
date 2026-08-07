@@ -30,6 +30,11 @@ import (
 
 // --- parseDBTestsJob ---------------------------------------------------------
 
+// laneYAML models ci.yml's db-tests job. It carries the real shared DSN, and
+// has to: these tests assert the parser reads that key out of the right job,
+// which a placeholder would not exercise. It is a document this package PARSES,
+// never a DSN anything dials -- which is why this file is one of the two
+// dsnLiteralExemptions in dsnliteral_test.go (memql#3149).
 const laneYAML = `
 jobs:
   go-checks:
@@ -1201,5 +1206,105 @@ func TestSuppressors_DoNotSwallowConnectives(t *testing.T) {
 			t.Errorf("suppressors matched %q -- that is a CONNECTIVE, handled by its own check; "+
 				"conflating them makes that check untestable", line)
 		}
+	}
+}
+
+// --- the fifteenth-copy gate (memql#3149) -----------------------------------
+//
+// These live in this file rather than beside dsnliteral_test.go because they
+// need real shared-DSN strings as INPUT, and this file is one of the two
+// dsnLiteralExemptions -- so writing them here costs no new exemption.
+
+// TestNamesSharedTestDB pins the narrow rule. The negatives are not invented:
+// every one is a real postgres literal in this tree that the gate must leave
+// alone, because none of them can drift with the shared database.
+func TestNamesSharedTestDB(t *testing.T) {
+	positives := []string{
+		"postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable",
+		"postgres://memql:memql_dev@127.0.0.1:1/memql?sslmode=disable",
+		"postgres://memql@localhost:5432/memql",
+		"postgresql://memql:memql_dev@localhost:5432/memql",
+		// Named by database even under another user -- a copy is a copy.
+		"postgres://postgres:pw@localhost:5432/memql",
+	}
+	for _, dsn := range positives {
+		if !namesSharedTestDB(dsn) {
+			t.Errorf("%q names the shared test database but was not flagged -- a copy of it "+
+				"can drift and nothing would notice (memql#3149)", dsn)
+		}
+	}
+
+	negatives := []string{
+		"postgres://user:pass@localhost:5432/db?sslmode=disable",    // component/database/close_pool_test.go
+		"postgres://nobody:nobody@127.0.0.1:1/none?sslmode=disable", // integrations/cognition, a deliberate dead probe
+		"postgres://localhost:5432/main?sslmode=disable",            // component/database/direct_dsn_test.go
+		"postgres://host/db",                           // ditto
+		"postgres://main",                              // ditto
+		"postgres://direct",                            // ditto
+		"postgres://tiger-cloud-prod",                  // component/genesis/autoload_test.go
+		"postgres://local-dev",                         // ditto
+		"postgres://x",                                 // component/genesis/bootvalidate_test.go
+		"postgres://legacy",                            // component/genesis/legacyalias_test.go
+		"postgres://u:sup3rs3cret@h:5432/d",            // a SafeDSN redaction fixture
+		"mysql://memql:memql_dev@localhost:3306/memql", // not postgres at all
+		"", // not a URI
+	}
+	for _, dsn := range negatives {
+		if namesSharedTestDB(dsn) {
+			t.Errorf("%q was flagged as a copy of the shared test DSN. It is a fixture or a "+
+				"deliberate fake; redding on those makes the gate noise and gets it deleted", dsn)
+		}
+	}
+}
+
+// TestSharedDSNsIn_FindsOneEmbeddedInADocument is why the scan looks for
+// OCCURRENCES rather than parsing each literal whole: this package's own ci.yml
+// fixture carries the DSN as one line of a multi-line YAML string.
+func TestSharedDSNsIn_FindsOneEmbeddedInADocument(t *testing.T) {
+	doc := "jobs:\n  db-tests:\n    env:\n      MEMQL_DATABASE_DSN: " +
+		"postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable\n      MEMQL_REQUIRE_DB: '1'\n"
+	got := sharedDSNsIn(doc)
+	if len(got) != 1 {
+		t.Fatalf("want 1 shared DSN in the YAML document, got %d: %v", len(got), got)
+	}
+	if got[0] != "postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable" {
+		t.Errorf("candidate not cut at the line end: %q", got[0])
+	}
+
+	// A document with only fakes must yield nothing.
+	if got := sharedDSNsIn("dsn: postgres://nobody:nobody@127.0.0.1:1/none\nalt: postgres://x\n"); len(got) != 0 {
+		t.Errorf("flagged fakes inside a document: %v", got)
+	}
+	// And a bare literal is still found -- the common case.
+	if got := sharedDSNsIn("postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable"); len(got) != 1 {
+		t.Errorf("missed a bare shared DSN: %v", got)
+	}
+}
+
+// TestDSNLiteralFindings covers the three dispositions the gate can reach, and
+// -- the part that matters -- proves the exemptions are load-bearing rather
+// than decorative: remove one and the finding appears.
+func TestDSNLiteralFindings(t *testing.T) {
+	const shared = "postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable"
+
+	inResolver := []dsnLiteral{{file: dsnResolverDir + "/dbtest_hygiene_test.go", line: 15, dsn: shared}}
+	if got := dsnLiteralFindings(inResolver, nil); len(got) != 0 {
+		t.Errorf("flagged a literal inside %s, which is where the resolution lives: %v", dsnResolverDir, got)
+	}
+
+	elsewhere := []dsnLiteral{{file: "component/memql/some_db_test.go", line: 47, dsn: shared}}
+	got := dsnLiteralFindings(elsewhere, nil)
+	if len(got) != 1 {
+		t.Fatalf("want exactly one finding for the fifteenth copy, got %d: %v", len(got), got)
+	}
+	for _, want := range []string{"component/memql/some_db_test.go:47", "dbtest.DSN()", "memql#3149", "REMEDY"} {
+		if !strings.Contains(got[0], want) {
+			t.Errorf("finding omits %q, so it names a problem without a remedy: %s", want, got[0])
+		}
+	}
+
+	exempt := map[string]string{"component/memql/some_db_test.go": "a reason"}
+	if got := dsnLiteralFindings(elsewhere, exempt); len(got) != 0 {
+		t.Errorf("an exempt file was still flagged: %v", got)
 	}
 }

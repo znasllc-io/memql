@@ -48,7 +48,6 @@ import (
 	"database/sql"
 	"io"
 	"log/slog"
-	"os"
 	"strings"
 	"testing"
 
@@ -72,10 +71,7 @@ const callerChosenSentinel = "v1:identity:user:caller-chosen-2890"
 
 func dryRunTrustTestEngine(t *testing.T) (*memql.MemQLEngine, *bun.DB) {
 	t.Helper()
-	dsn := os.Getenv("MEMQL_DATABASE_DSN")
-	if dsn == "" {
-		dsn = "postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable"
-	}
+	dsn := dbtest.DSN()
 	db := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn))), pgdialect.New())
 	if err := db.PingContext(context.Background()); err != nil {
 		dbtest.Unreachable(t, "dry-run resume-trust test", dsn, err)

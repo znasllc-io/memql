@@ -41,6 +41,21 @@ import (
 
 // defaultDSN matches the readmerge / pii sibling DB tests so a developer with
 // the dev cluster up gets the DB-backed dimensions for free.
+//
+// This is the one suite that keeps its own copy rather than routing through
+// dbtest.DSN() (memql#3149), and the reason is deliberate rather than an
+// oversight -- scripts/cidb's dsnLiteralExemptions records it, and reds if this
+// const is ever removed without the entry going too.
+//
+// It is NOT that routing it would break the gate: measured 2026-08-07, adding
+// the import compiles, creates no cycle, and leaves scripts/cidb green (this
+// file declares no Test functions, and the db-gated scan is per-file). It is
+// that an import of component/database/dbtest from a _test.go file IS
+// scripts/cidb's definition of "db-gated, belongs in the db-tests lane". This
+// suite runs in the separate mcp-conformance lane with its own Postgres service
+// and its own HasDB gating; it never calls dbtest.Unreachable. Importing dbtest
+// would make that heuristic wrong here and eventually demand a second
+// hardcoded, selfPkg-shaped exemption -- a worse trade than one string.
 const defaultDSN = "postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable"
 
 // ownerUID is the cluster-owner the suite acts as. Owner role clears per-row
