@@ -85,12 +85,22 @@ func TestAgentRoleTierIsPromptAdvisoryOnly(t *testing.T) {
 	// no signal. (rowauthz_enforce.go joined the list in memql#3172, which
 	// turned that surface from a measurement into read-path enforcement;
 	// rowauthz_write_guard.go joined in memql#3174, which did the same for
-	// update/delete. The reads multiplied; the concept behind them did not
-	// change.)
+	// update/delete; rowauthz_insert_stamp.go joined in memql#3175, which
+	// stamps the declared owner on the raw insert() path. The reads
+	// multiplied; the concept behind them did not change.)
+	//
+	// Every file below reads langparser.RowAuthzDecl.Tier -- checked at the
+	// point each was added, not assumed. None reads agentRole.tier, so
+	// dsl/agents/concepts.memql's "advisory, nothing branches on it"
+	// description stays true. Keeping that distinction is the whole purpose of
+	// this sweep: memql#3068 and memql#3061 record an authorization decision
+	// very nearly being taken on a field whose description promised behaviour
+	// that did not exist.
 	skipFiles := map[string]bool{
-		"rowauthz_shadow.go":      true,
-		"rowauthz_enforce.go":     true,
-		"rowauthz_write_guard.go": true,
+		"rowauthz_shadow.go":       true,
+		"rowauthz_enforce.go":      true,
+		"rowauthz_write_guard.go":  true,
+		"rowauthz_insert_stamp.go": true,
 	}
 
 	var unknown []string
