@@ -86,6 +86,38 @@ var gateInputs = []struct {
 	// (which has its own bucket) and outside the root package.
 	{"examples/referencepack/dsl/concepts.memql", "examples/referencepack", "TestReferencePackLoadsAndExtends"},
 	{"docs/public/operate/auth/per-row-authz-audit.md", "dsl", "TestPublicExamplesAreAnnotated"},
+	// The embedded-asset inventory (memql#3165). embed_inventory_test.go pins
+	// per-package `//go:embed` file COUNTS and lives in the root package, so
+	// EVERY file it pins is a gate input -- and 68 of the 270 were in no
+	// bucket this lane reads. That is a fail-open with DELAYED BLAME: the
+	// PR's `ci-required` went green and the guard then fired on the next
+	// author's push to main.
+	//
+	// One row per glob added to the bucket, and each names a file that ONLY
+	// the new glob covers -- a row already matched by `**/*.md` or
+	// `**/*.memql` would stay green with the new glob deleted and would
+	// therefore assert nothing. `examples/deploypack/dsl/**` deliberately has
+	// no row for that reason: all three of its embedded files are `.memql`
+	// today, so the glob is future-proofing with nothing yet to pin.
+	{"VERSION", ".", "TestEmbeddedFileCountsAreStable"},
+	{"component/database/memory-nodes/migrations/20260324000000_initial_setup.up.sql", ".", "TestEmbeddedFileCountsAreStable"},
+	{"component/identity/web/static/app.js", ".", "TestEmbeddedFileCountsAreStable"},
+	{"component/mcp/icon.svg", ".", "TestEmbeddedFileCountsAreStable"},
+	{"dsl/cognition/prompts/cognitionReply.tmpl", ".", "TestEmbeddedFileCountsAreStable"},
+	{"examples/referencepack/dsl/namespace.pin", ".", "TestEmbeddedFileCountsAreStable"},
+	{"integrations/integrations.json", ".", "TestEmbeddedFileCountsAreStable"},
+	// Not embedded, so embed_inventory_test.go does not pin it -- but a gate
+	// input all the same, and in no bucket this lane read until the same
+	// sweep found it. Renaming a `service:` reddens the model staleness check,
+	// so a green PR could break `main` for the next author.
+	//
+	// The sweep found a SECOND file of this shape,
+	// `component/memql/testdata/spaceid_core_baseline.txt`
+	// (TestNoNewSpaceIdInCore). It gets NO row here on purpose: that test
+	// lives in `component/memql`, which this step deliberately does not run.
+	// It is routed via the `go` bucket to db-tests instead -- the lane that
+	// actually runs it. A row here would assert the wrong lane.
+	{"arch.yaml", "component/architecture", "TestArchitectureModelIsNotStale"},
 }
 
 // changesFilters returns the parsed filter block the `changes` job wires its

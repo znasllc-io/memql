@@ -265,8 +265,13 @@ func (e *MemQLEngine) evaluateValidateExpression(ctx context.Context, args map[s
 		return nil, fmt.Errorf("failed to compile schema for concept %q: %w", conceptName, err)
 	}
 
-	// Perform validation on normalized payload
-	validationErr := schema.Validate(normalizedPayload)
+	// Perform validation on normalized payload.
+	//
+	// Redacted (memql#3184 / #3182): every leaf message below is surfaced in
+	// the returned result payload, and the jsonschema messages interpolate the
+	// instance value, so a @secret field's value would otherwise be handed
+	// straight back to the DSL/AI caller that invoked this builtin.
+	validationErr := concept.RedactValidationError(schema.Validate(normalizedPayload))
 
 	// Build the result
 	var validationErrors []map[string]any
@@ -908,7 +913,9 @@ func (e *MemQLEngine) evaluatePreviewInsertExpression(ctx context.Context, args 
 	// This strips reserved fields so validation doesn't fail on them
 	normalizedPayload := normalizePayloadForId(payload)
 
-	validationErr := schema.Validate(normalizedPayload)
+	// Redacted for the same reason as the validate builtin above
+	// (memql#3184 / #3182): these messages reach the caller.
+	validationErr := concept.RedactValidationError(schema.Validate(normalizedPayload))
 	if validationErr != nil {
 		var validationErrors []map[string]any
 		if ve, ok := validationErr.(*jsonschema.ValidationError); ok {

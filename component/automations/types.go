@@ -180,6 +180,22 @@ type ArgsField struct {
 	// constraint. Enforced on string-typed fields only.
 	Pattern string `json:"pattern,omitempty"`
 
+	// Secret marks this args field as carrying a value the automation's
+	// TRIGGER CONCEPT annotates `@secret`, so a rejected value on it is
+	// replaced with redactedArgValue in the validation message instead of
+	// being quoted into it -- and therefore out of the WARN log that message
+	// lands in (memql#3183, epic memql#3111).
+	//
+	// NOT a compiler output and deliberately not `json:"secret"`-tagged for
+	// input: the automation compiler emits no such field, and the flag is
+	// derived, never authored. markSecretArgsFields stamps it at LOAD time
+	// from the concept registry (see args_secret.go). The `json:"-"` keeps a
+	// caller-supplied automation bundle from setting or CLEARING it by
+	// hand -- an authoring-sandbox bundle unmarshals through the same
+	// Automation struct, and `"secret": false` in submitted JSON must not be
+	// able to un-redact a field the loader stamped.
+	Secret bool `json:"-"`
+
 	// Items defines the element schema for array-typed fields.
 	Items *ArgsField `json:"items,omitempty"`
 

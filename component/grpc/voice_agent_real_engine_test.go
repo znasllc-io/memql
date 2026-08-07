@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -369,10 +368,7 @@ func sortedSetKeys(set map[string]struct{}) []string {
 // local/integration run exercises the genuine Execute + ResolveSkills path.
 func openVoiceScopeTestDB(t *testing.T) *bun.DB {
 	t.Helper()
-	dsn := os.Getenv("MEMQL_DATABASE_DSN")
-	if dsn == "" {
-		dsn = "postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable"
-	}
+	dsn := dbtest.DSN()
 	db := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn))), pgdialect.New())
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()

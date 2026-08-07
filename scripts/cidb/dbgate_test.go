@@ -616,6 +616,29 @@ func covers(pkgs []string, dir string) bool {
 // coverageFindings returns one message per way the lane's SELECTOR fails to tie
 // the job to the packages that actually carry db-gated tests.
 //
+// The tie is asserted in BOTH directions (memql#3095):
+//
+//	provisioned -> in selector   a package that earned an EnsureSchema TestMain
+//	                             and is not in the selector runs nowhere.
+//	in selector -> provisioned   a selector-covered package carrying db-gated
+//	                             tests and no EnsureSchema TestMain races the
+//	                             shared migration.
+//
+// Only the first existed originally, and doc.go was explicit that the rule was
+// one-way -- a gap, honestly documented, not a false claim. It was still a gap
+// wide enough to drive the change through: deleting ALL of the
+// main_dbschema_test.go files while leaving the selector listing their packages
+// left this gate fully green. The central artifact of memql#3091 could be
+// removed wholesale and the gate that tightens it said nothing.
+//
+// What the second direction actually protects is the memql#2551 invariant. The
+// lane runs per-package test binaries as PARALLEL PROCESSES against ONE
+// database; without a TestMain serializing the migration behind an advisory
+// lock they race it, and the lane fails INTERMITTENTLY with
+// `relation "MemoryNodes" does not exist`. An intermittent red is the worst
+// shape of failure this lane can produce, so the invariant is worth an
+// assertion rather than a convention.
+//
 // Pure, for the same reason laneRunFindings is: inline, these were evaluated
 // only against the real tree, so deleting one changed nothing observable.
 func coverageFindings(pkgs []string, all []dbGatedTest, provisioned []string) []string {
@@ -667,6 +690,39 @@ func coverageFindings(pkgs []string, all []dbGatedTest, provisioned []string) []
 				"being in the selector means its DB assertions run nowhere (memql#2886).",
 				dir, dbTestsJob, pkgs))
 		}
+	}
+
+	// The inverse (memql#3095). Keyed on `known` -- the directories that carry
+	// db-gated tests -- and NOT on the selector's expansion, which is the
+	// distinction that makes this rule usable rather than absurd: the selector
+	// expands to many packages with no DB assertion in them, and none of those
+	// has any business owning a migration TestMain. Only a package that both is
+	// RUN by this lane and TOUCHES the shared database needs one.
+	provisionedSet := make(map[string]bool, len(provisioned))
+	for _, dir := range provisioned {
+		provisionedSet[dir] = true
+	}
+	for _, dir := range known {
+		// selfPkg imports dbtest for the RequireDB predicate and its env-var
+		// name, never to reach a database, so it must never be asked for a
+		// migration TestMain. scanDBGatedTests already drops it upstream; the
+		// check is repeated here because this function is pure and unit-tested
+		// with synthetic input, where that upstream guarantee does not hold.
+		// Matched EXACTLY, never as a prefix, exactly as the upstream one is.
+		if dir == selfPkg || provisionedSet[dir] || !covers(pkgs, dir) {
+			continue
+		}
+		out = append(out, fmt.Sprintf("package %q carries db-gated tests and IS covered by the %q "+
+			"job's selector %v, but has no TestMain calling dbtest.EnsureSchema. The lane runs "+
+			"per-package binaries as PARALLEL PROCESSES against one shared database, so without "+
+			"that TestMain this package races the others' migration and the lane fails "+
+			"INTERMITTENTLY with `relation \"MemoryNodes\" does not exist` (memql#2551).\n\n"+
+			"REMEDY: add %s/main_dbschema_test.go with a TestMain that calls "+
+			"dbtest.EnsureSchema(context.Background()) and os.Exit(1)s on error before "+
+			"os.Exit(m.Run()) -- copy any of the existing ones. If this package genuinely must "+
+			"not touch the shared database, remove it from the selector instead; leaving it in "+
+			"both states is the drift this asserts against (memql#3095).",
+			dir, dbTestsJob, pkgs, dir))
 	}
 	return out
 }

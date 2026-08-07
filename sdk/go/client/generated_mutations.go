@@ -2010,7 +2010,6 @@ func CreateAuditEventBuild(args CreateAuditEventArgs) string {
 // Bound concept: v1:identity:authCode (machine-readable: BoundConcepts["createAuthCode"] in generated_concepts.go).
 type CreateAuthCodeArgs struct {
 	CodeId              string
-	Code                string
 	CodeHash            string
 	ClientId            string
 	RedirectURI         string
@@ -2034,11 +2033,6 @@ func CreateAuthCodeBuild(args CreateAuthCodeArgs) string {
 	b.WriteString("mutation createAuthCode(")
 	b.WriteString("codeId: ")
 	b.WriteString(fmt.Sprintf("%q", args.CodeId))
-	if b.Len() > 24 {
-		b.WriteString(", ")
-	}
-	b.WriteString("code: ")
-	b.WriteString(fmt.Sprintf("%q", args.Code))
 	if b.Len() > 24 {
 		b.WriteString(", ")
 	}

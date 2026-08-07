@@ -217,16 +217,23 @@ func (s *Store) CreateAccessRequest(
 // ---------------------------------------------------------------------------
 
 // CreateAuthCode mints a one-time OAuth auth code.
+//
+// The PLAINTEXT code is deliberately not a parameter (issue #3187). Only its
+// SHA-256 digest is persisted: /oauth/token hashes the presented code and
+// looks the row up by codeHash, so finding a row already proves the presenter
+// holds the preimage. Storing the cleartext bought no property the digest did
+// not already give, and it was the only stored-plaintext credential in the
+// tree. The caller still holds the plaintext in memory to hand to the OAuth
+// client on the redirect; it just never reaches the database.
 func (s *Store) CreateAuthCode(
 	ctx context.Context,
-	codeId, code, codeHash, clientId, redirectURI, state,
+	codeId, codeHash, clientId, redirectURI, state,
 	codeChallenge, codeChallengeMethod,
 	userId, identityId, magicLinkRequestId, expiresAt string,
 ) error {
 	var b strings.Builder
 	b.WriteString(`mutation createAuthCode(`)
 	writeKVString(&b, "codeId", codeId, true)
-	writeKVString(&b, "code", code, false)
 	writeKVString(&b, "codeHash", codeHash, false)
 	writeKVString(&b, "clientId", clientId, false)
 	writeKVString(&b, "redirectURI", redirectURI, false)
