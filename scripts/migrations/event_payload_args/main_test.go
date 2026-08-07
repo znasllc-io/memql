@@ -284,6 +284,118 @@ func TestMigrateFileIsIdempotent(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// memql#3193: the scans that FIND the blocks, not just the ones inside them.
+//
+// scrub and mapCodeSegments know what a literal is; automationHeader,
+// argsHeader and matchingBrace used to run on raw source. The cases below are
+// written against migrateFile rather than against a helper, because the defect
+// is in which spans of the file the tool considers an automation at all -- a
+// helper that is individually correct still gets handed the wrong bytes.
+// ---------------------------------------------------------------------------
+
+// braceInLiteralSrc closes a brace inside a string literal. A bare depth
+// counter reads it as the end of `step s`, then reads the real `}` as the end
+// of the automation -- so `step t` is outside the block the tool ever looks at.
+const braceInLiteralSrc = `automation a {
+  step s {
+    label: "close } brace"
+    field: event.payload.status
+  }
+  step t {
+    other: event.payload.kind
+  }
+}
+`
+
+func TestMatchingBraceIgnoresBracesInLiterals(t *testing.T) {
+	open := strings.Index(braceInLiteralSrc, "{")
+	got := matchingBrace(braceInLiteralSrc, open)
+	want := strings.LastIndex(braceInLiteralSrc, "}")
+	if got != want {
+		t.Fatalf("matchingBrace = %d, want %d -- a `}` inside a string literal ended the block early.\n"+
+			"block the tool sees:\n%s", got, want, braceInLiteralSrc[open:max(got, open)+1])
+	}
+}
+
+func TestMigrateFileSeesPastABraceInALiteral(t *testing.T) {
+	out, report := migrateFile(braceInLiteralSrc)
+
+	for _, want := range []string{"status", "kind"} {
+		if !strings.Contains(report, want) {
+			t.Errorf("report does not mention %q -- the field is past a `}` in a literal "+
+				"and was never collected.\nreport:\n%s", want, report)
+		}
+		if !strings.Contains(out, "    "+want+" any\n") {
+			t.Errorf("args block is missing %q any.\ngot:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "event.payload.") {
+		t.Errorf("a payload read survived the rewrite -- this is the -write path, so the "+
+			"migration silently does not happen and the G5 gate then refuses the file.\ngot:\n%s", out)
+	}
+	if !strings.Contains(out, `label: "close } brace"`) {
+		t.Errorf("the literal was not passed through verbatim.\ngot:\n%s", out)
+	}
+}
+
+// commentedOutAutomationSrc parks an automation in a block comment. Applied to
+// raw source, automationHeader matches the commented-out header and the tool
+// rewrites the comment interior -- and reports `ghost` as migrated.
+const commentedOutAutomationSrc = `/*
+automation ghost {
+  x: event.payload.gone
+}
+*/
+automation real {
+  y: event.payload.status
+}
+`
+
+func TestMigrateFileIgnoresACommentedOutAutomation(t *testing.T) {
+	out, report := migrateFile(commentedOutAutomationSrc)
+
+	if strings.Contains(report, "ghost") || strings.Contains(report, "gone") {
+		t.Errorf("a commented-out automation was reported as migrated.\nreport:\n%s", report)
+	}
+	if !strings.Contains(out, "/*\nautomation ghost {\n  x: event.payload.gone\n}\n*/") {
+		t.Errorf("the interior of a block comment was rewritten.\ngot:\n%s", out)
+	}
+	// The real automation next to it must still be migrated.
+	if !strings.Contains(report, "status") {
+		t.Errorf("the real automation was not migrated.\nreport:\n%s", report)
+	}
+	if !strings.Contains(out, "    status any\n") || !strings.Contains(out, "y: status") {
+		t.Errorf("the real automation was not rewritten.\ngot:\n%s", out)
+	}
+}
+
+// commentedArgsSrc parks an args block in a comment. argsHeader matching raw
+// source finds it, so ensureArgs extends the DEAD block and the automation ends
+// up with no live args -- the exact shape the G1 fire-time validation refuses.
+const commentedArgsSrc = `automation a {
+  /*
+  args {
+    old any
+  }
+  */
+  step s {
+    field: event.payload.status
+  }
+}
+`
+
+func TestEnsureArgsDoesNotExtendACommentedOutArgsBlock(t *testing.T) {
+	out, _ := migrateFile(commentedArgsSrc)
+
+	if !strings.Contains(out, "/*\n  args {\n    old any\n  }\n  */") {
+		t.Errorf("the commented-out args block was edited.\ngot:\n%s", out)
+	}
+	if !strings.Contains(out, "  args {\n    status any\n  }\n") {
+		t.Errorf("no live args block was synthesized -- the collected field landed in a comment.\ngot:\n%s", out)
+	}
+}
+
 // READ THIS BEFORE TRUSTING THIS TEST: no single-point change to the mechanism
 // it names -- the automationHeader match or the brace extraction -- can make it
 // fail, and that is a property of the design rather than a gap to be closed
