@@ -115,6 +115,40 @@ func dsStripLineComment(l string) string {
 	return l
 }
 
+// dsIsRequired reports whether a property line declares a required field,
+// via the `!` sigil or an explicit `@required`.
+//
+// The sigil has to be found in the TYPE, which means finding where the type
+// ends -- and a naive `\S+` grab does not, because `enum("a", "b")!` contains
+// spaces. That mistake read `action.kind enum("primitive", "composite")!` as
+// OPTIONAL and put four required fields into the findings set, which is the
+// same class of measurement error the ruling's own three passes kept
+// correcting.
+//
+// So: blank the quoted strings (an enum value or a default could contain a
+// literal `@`), cut at the first annotation, and ask whether what remains ends
+// in the sigil.
+func dsIsRequired(trim string) bool {
+	if strings.Contains(trim, "@required") {
+		return true
+	}
+	blanked := []rune(trim)
+	inStr := false
+	for i, r := range blanked {
+		switch {
+		case r == '"':
+			inStr = !inStr
+		case inStr:
+			blanked[i] = ' '
+		}
+	}
+	decl := string(blanked)
+	if i := strings.Index(decl, "@"); i >= 0 {
+		decl = decl[:i]
+	}
+	return strings.HasSuffix(strings.TrimSpace(decl), "!")
+}
+
 func dsDomainOf(p string) string {
 	if i := strings.Index(p, "/"); i >= 0 {
 		return p[:i]
@@ -194,7 +228,7 @@ func collectDefaultFields(t *testing.T, paths []string, read func(string) string
 				// A required field has no omitted case, so its @default is
 				// documenting the conventional value rather than silently
 				// doing nothing. Carved out by the ruling.
-				required: strings.Contains(trim, "@required") || strings.HasSuffix(m[2], "!"),
+				required: dsIsRequired(trim),
 				nested:   fieldDepth > 1,
 				path:     p,
 				line:     i + 1,
@@ -383,6 +417,35 @@ func TestDefaultIsCoalescedOrStamped(t *testing.T) {
 			"@default is emitted into the schema as documentation and is NEVER applied on "+
 			"insert -- `??` in the mutation body is the only mechanism that fills a value.",
 			len(findings))
+	}
+}
+
+// TestDefaultRequiredDetection_HandlesSpacedEnums pins the required-detection
+// rule against the spellings that actually appear in the tree.
+//
+// It exists because the first implementation grabbed the type with `\S+`, which
+// stops at the space inside `enum("a", "b")!` and therefore never saw the
+// sigil. That read four required fields as optional and put them in the
+// findings set. A predicate this gate's whole output depends on gets its own
+// test rather than being trusted.
+func TestDefaultRequiredDetection_HandlesSpacedEnums(t *testing.T) {
+	cases := map[string]bool{
+		`kind enum("primitive", "composite")!  @default("primitive")`: true,
+		`tier enum("A", "B", "C")!  @default("A")`:                    true,
+		`totalUnmet int!  @default("0")`:                              true,
+		`registrationMode string @required @default("invite")`:        true,
+		`action enum("triggerPlan", "mintSkill") @default("trigger")`: false,
+		`recommendedGender enum("female", "male", "") @default("")`:   false,
+		`isGuest bool @default(false)`:                                false,
+		`active bool @default("true")`:                                false,
+		// A literal `@` inside a quoted value must not be mistaken for the
+		// start of the annotation list, which would truncate the type.
+		`contact enum("a@b.com", "c@d.com")! @default("a@b.com")`: true,
+	}
+	for decl, want := range cases {
+		if got := dsIsRequired(decl); got != want {
+			t.Errorf("dsIsRequired(%q) = %v, want %v", decl, got, want)
+		}
 	}
 }
 

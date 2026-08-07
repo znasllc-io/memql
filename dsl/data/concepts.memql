@@ -6,7 +6,7 @@
 /// Audit log entry for validation state transitions. Tracks who performed each check, confirm, or
 /// revert action, when, and why.
 concept log {
-  active        bool    @default("true")  @description("Soft-delete flag (append-only semantics)")
+  active        bool    @description("Soft-delete flag (append-only semantics). Convention: true -- NOT applied on insert, and no mutation is bound to this concept, so a writer must supply it; an absent value reads as false, i.e. soft-deleted.")
   recordId      string!  @description("The v1:data:record node ID this log entry refers to")
   action        enum("check", "confirm", "revert")!  @description("Action performed")
   fromState     enum("draft", "checked", "confirmed")!  @description("Validation state before the action")

@@ -20,7 +20,7 @@ concept number {
   numberType    enum("local", "tollfree", "mobile")  @default("local") @description("Origination class; drives per-minute inbound cost.")
   monthlyCost   float   @description("Recurring per-number cost in USD, when the carrier reports it.")
   purchasedAt   datetime  @description("When the DID was purchased.")
-  e911Registered  bool  @default("false") @description("Whether an E911 emergency address is registered for this DID. Compliance gate before the DID goes live (memql#1915).")
+  e911Registered  bool  @description("Whether an E911 emergency address is registered for this DID. recordNumber does not stamp it and setNumberE911 sets it; an absent value reads as false, i.e. the compliance gate is closed -- the fail-closed direction. Compliance gate before the DID goes live (memql#1915).")
   e911AddressId   string  @description("Carrier reference for the registered E911 address.")
   callerIdVerified bool @default("false") @description("Whether this DID is verified for outbound caller-ID presentation (STIR/SHAKEN attestation is carrier-side; this flags our own verified ownership).")
 }

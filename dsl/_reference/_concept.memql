@@ -428,6 +428,37 @@ concept fieldTypes {
 //                       branch, so a `datetime` field takes a bool default
 //                       without complaint.
 //
+//                       GATED, so the mistake is caught at authoring time
+//                       rather than never (memql#3038). dsl's
+//                       TestDefaultIsCoalescedOrStamped fails when an
+//                       OPTIONAL, TOP-LEVEL concept field carries @default and
+//                       no mutation bound to that concept STAMPS it. Only a
+//                       stamped value counts -- `f: args.f ?? "v"`, a literal,
+//                       or a computed expression. `accept { f }`, a bare
+//                       `args.f` shorthand and a plain `f: args.f` all bind
+//                       the field to a caller argument, so omitting the
+//                       argument still writes nothing.
+//
+//                       TWO THINGS THE GATE DOES NOT COVER, so do not read it
+//                       as tree-wide:
+//                       (1) RUNTIME-MOUNTED DOMAINS. It scans the IN-REPO tree
+//                       only. A product bundle mounted via MEMQL_DSL_PATH is
+//                       never scanned, so its own @default mistakes go
+//                       uncaught. That is the deliberate price of it being a
+//                       conformance test rather than a load-time gate: a boot
+//                       gate could refuse boot on a legitimate bundle
+//                       topology, which is strictly worse than the silent
+//                       no-op it would replace.
+//                       (2) NESTED OBJECT LEAVES. A @default inside an object
+//                       block (`preferences { theme string @default("auto") }`)
+//                       is out of scope, because no write form can stamp a
+//                       single leaf -- a mutation writes the parent object
+//                       wholesale. Their @default is schema documentation that
+//                       the SDK, sense hover and form generators consume, and
+//                       it is NOT claimed to be applied. Nothing is applied at
+//                       ANY depth; stamping is the only mechanism, and it can
+//                       only be spelled for a top-level field.
+//
 // Declared metadata is still worth writing where it records real intent: @pii
 // began exactly there and is now enforced in two places, with no schema change
 // needed to get from one to the other.
@@ -444,7 +475,15 @@ concept fieldTypes {
 //     (args_binding.go), and a graph.node.created event carries the row's
 //     fields, so a row value could reach a structured log. #3183 closed that
 //     path. Query results and length remain uncovered by design.
-//   - @default  open -- memql#3038.
+//   - @default  DECIDED (memql#3038), and the decision is to keep it as
+//     documentation and GATE it rather than apply it or retire it. Applying it
+//     on insert buys a second problem -- an update-path question (does a
+//     default re-apply when a field is cleared?) on top of a parseDefaultValue
+//     with no datetime branch. Retiring it throws away documentation the SDK,
+//     sense hover and form generators consume. So it stays declared metadata,
+//     and TestDefaultIsCoalescedOrStamped makes an unstamped one fail at
+//     authoring time instead of never. See the @default entry above for the
+//     gate's two carve-outs.
 //   - @unique / @immutable  DECIDED, and the decision is no. memql#3037 was
 //     closed not-planned: uniqueness over an append-only hypertable means
 //     "unique among current rows", which is an epic with a migration story,

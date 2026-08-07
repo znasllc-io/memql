@@ -294,6 +294,23 @@ func TestTheScanSeesAStructTagReader(t *testing.T) {
 // This is the behaviour CLAUDE.md already states ("a concept-field @default is
 // NOT a substitute -- it is never applied on insert either (memql#2960), so ??
 // is the only mechanism"), so if it ever changes, CLAUDE.md changes with it.
+//
+// memql#3038 RULED on what to do about that, and the answer was neither "apply
+// it" nor "retire it" -- it stays documentation, and the mistake of writing one
+// and getting nothing is caught at AUTHORING time instead of never. The gate is
+// dsl's TestDefaultIsCoalescedOrStamped, which fails when an optional TOP-LEVEL
+// concept field carries @default and no bound mutation stamps it. So this test
+// keeps its exact meaning: it pins that the engine does not apply the value,
+// which is precisely the premise the gate rests on. If this test ever has to
+// change because Create starts filling defaults, that gate becomes wrong in the
+// same commit.
+//
+// The gate's scope is narrower than this test's subject, deliberately, and
+// stated so a reader does not infer tree-wide coverage: it scans the IN-REPO
+// tree only (a MEMQL_DSL_PATH bundle is never scanned), and it skips NESTED
+// object leaves (no write form stamps a single leaf). Nothing is applied at any
+// depth, in-repo or mounted -- that part is universal, and it is what this test
+// pins.
 func TestDefaultIsEmittedButNeverApplied(t *testing.T) {
 	props := propertySchemas(t, declaredMetadataFixture)
 	if got := props["tier"]["default"]; got != "bronze" {
