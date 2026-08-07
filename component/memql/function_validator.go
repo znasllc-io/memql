@@ -1420,12 +1420,67 @@ func resolvePlanFunctionsWithAmbient(plan *QueryPlan, functions *FunctionRegistr
 		}
 	}
 
+	// Row-authz enforcement resolves a tier from the construct's DECLARED
+	// binding (memql#3172), so the binding has to survive the inlining
+	// that is about to erase the call. Stamped BEFORE expansion for that
+	// reason: afterwards the plan root is the function's body and there is
+	// no name left to look the concept up by.
+	plan.BoundConcept = boundConceptForPlanRoot(plan.Root, functions)
+
 	resolved, err := validator.expandExpression(plan.Root)
 	if err != nil {
 		return err
 	}
 	plan.Root = resolved
 	return nil
+}
+
+// boundConceptForPlanRoot returns the concept declared by the plan's
+// top-level query construct, or "" when the root is not a single named
+// query call.
+//
+// Deliberately narrow. A root that combines two constructs
+// (`a() && b()`) has no single declared binding, and guessing one would
+// be the filter-text inference memql#3172 exists to remove; those reads
+// are covered by the per-row gate instead. Directive wrappers are
+// descended through because a call can arrive under sort()/paginate()
+// before applyDirectiveWrappers peels them.
+func boundConceptForPlanRoot(expr ExpressionNode, functions *FunctionRegistry) string {
+	if functions == nil || expr == nil {
+		return ""
+	}
+	switch node := expr.(type) {
+	case *FunctionCallExpression:
+		if node == nil {
+			return ""
+		}
+		fn, err := functions.Get(node.Name)
+		if err != nil || fn == nil {
+			return ""
+		}
+		switch strings.ToLower(strings.TrimSpace(fn.FunctionKind)) {
+		case "", "query":
+		default:
+			return ""
+		}
+		return strings.TrimSpace(fn.BoundConcept)
+	case *ShapeExpression:
+		return boundConceptForPlanRoot(node.Target, functions)
+	case *SortExpression:
+		return boundConceptForPlanRoot(node.Target, functions)
+	case *PaginateExpression:
+		return boundConceptForPlanRoot(node.Target, functions)
+	case *SelectExpression:
+		return boundConceptForPlanRoot(node.Target, functions)
+	case *TimestampExpression:
+		return boundConceptForPlanRoot(node.Target, functions)
+	case *DepthExpression:
+		return boundConceptForPlanRoot(node.Target, functions)
+	case *CountExpression:
+		return boundConceptForPlanRoot(node.Target, functions)
+	default:
+		return ""
+	}
 }
 
 // hasFunctionCalls checks if an expression tree contains any FunctionCallExpression nodes.

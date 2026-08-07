@@ -676,6 +676,16 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 		return nil, fmt.Errorf("query must include at least one filter or relationship expression")
 	}
 
+	// Row-authz enforcement, the half that needs the request context
+	// (memql#3172 finding 4): an owned tier injected against a caller
+	// with no identity would compare `ownerUserId == ''` and MATCH every
+	// row stored with an empty owner. Refused here, where the actor is
+	// readable, rather than degraded into a filter that quietly returns
+	// somebody's rows to nobody in particular.
+	if err := refuseRowAuthzWithoutActor(ctx, plan); err != nil {
+		return nil, err
+	}
+
 	effectiveTimestamp := plan.Timestamp
 
 	limit := e.effectiveWindow(plan.Limit, e.defaultListLimit(plan))
@@ -724,22 +734,7 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 
 	var cacheKey string
 	useCache := e.cache != nil && len(plan.Mutations) == 0
-	signature := ""
-	if plan.Root != nil {
-		signature = canonicalExpression(plan.Root)
-		// CORRECTNESS for default-on caching (epic 5, issue 5.6 /
-		// memql#1970): the canonical signature renders an actor reference
-		// identically for every caller (the userId/role resolves later and
-		// never reaches the signature). An owned query
-		// (`payload.ownerUserId == actor.userId`) would otherwise collide
-		// across users and serve caller B caller A's rows. When the plan
-		// depends on the actor, fold the resolved actor identity into the
-		// signature so each caller keys independently. Actor-independent
-		// reads keep one shared key across callers.
-		if e.planReferencesActor(plan.Root) {
-			signature = "actor:" + actorCacheKeyComponent(ctx) + "\x1f" + signature
-		}
-	}
+	signature := e.planCacheSignature(ctx, plan)
 	fieldSignature := projectionSignature(plan.Fields, plan.ConceptFields, plan.Metadata)
 	// Resolve named shape reference to a compiled template.
 	if plan.ShapeTemplateName != "" && plan.ShapeTemplate == nil {
@@ -839,6 +834,36 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 	e.emitQueryExecutedEvent(startTime, result, false)
 
 	return result, nil
+}
+
+// planCacheSignature renders the query half of the result-cache key.
+//
+// CORRECTNESS for default-on caching (epic 5, issue 5.6 / memql#1970):
+// the canonical signature renders an actor reference identically for
+// every caller (the userId/role resolves later and never reaches the
+// signature). An owned query (`payload.ownerUserId == actor.userId`)
+// would otherwise collide across users and serve caller B caller A's
+// rows. When the plan depends on the actor, the resolved actor identity
+// is folded into the signature so each caller keys independently.
+// Actor-independent reads keep one shared key across callers.
+//
+// ROW-AUTHZ (memql#3172 finding 2): an enforced plan is actor-dependent
+// BY CONSTRUCTION, so the flag folds the caller in on its own rather
+// than relying on the injected node landing somewhere
+// planReferencesActor happens to walk. That reliance is what made the
+// refused attempt a cross-user leak: caching is default-on with a 60s
+// TTL and a `v1:identity:`-only denylist, and on main the same query
+// returns every row to everyone -- so it is enforcement that creates the
+// divergence a shared key then serves.
+func (e *MemQLEngine) planCacheSignature(ctx context.Context, plan *QueryPlan) string {
+	if plan == nil || plan.Root == nil {
+		return ""
+	}
+	signature := canonicalExpression(plan.Root)
+	if plan.RowAuthzInjected || e.planReferencesActor(plan.Root) {
+		signature = "actor:" + actorCacheKeyComponent(ctx) + "\x1f" + signature
+	}
+	return signature
 }
 
 // executeCountPlan computes a numeric {count: N} aggregate for a query
