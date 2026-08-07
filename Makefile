@@ -356,7 +356,7 @@ scale:
 # ---------------------------------------------------------------------------
 
 ##@ Test & SDK
-.PHONY: test test-v test-cover test-polyphon sdk-gen sdk-gen-check sdk-ts-install sdk-ts-typecheck dsl-lint
+.PHONY: test test-v test-cover test-polyphon sdk-gen sdk-gen-check sdk-ts-install sdk-ts-typecheck dsl-lint viewkit-install viewkit-typecheck viewkit-test
 
 ## Regenerate the typed SDK surface from the DSL tree. Reads every
 ## query / mutation / logic under dsl/**/*.memql and emits typed
@@ -441,6 +441,18 @@ sdk-ts-typecheck:
 ## test runner. Requires node + npm.
 sdk-ts-test:
 	cd sdk/ts && npm test
+
+## Install view-kit (@znasllc-io/memql-view-kit) dev dependencies. Idempotent.
+viewkit-install:
+	cd sdk/ts-viewkit && npm install --no-audit --no-fund
+
+## Typecheck view-kit. Runs `tsc --noEmit` against sdk/ts-viewkit.
+viewkit-typecheck:
+	cd sdk/ts-viewkit && npm run typecheck
+
+## Run the view-kit test suite via node:test. Zero runtime deps.
+viewkit-test:
+	cd sdk/ts-viewkit && npm test
 
 ## Run all tests
 test:
