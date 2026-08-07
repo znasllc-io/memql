@@ -4,7 +4,10 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
+
+	"github.com/znasllc-io/memql/component/auth"
 )
 
 // AgentDefinition is the engine-internal representation of an
@@ -70,8 +73,98 @@ type AgentDefinition struct {
 	AudioControl string // "always_on" | "always_off" | "mirror_user"
 	VideoControl string
 
+	// Id is the agent's row id. Carried because it is the TOTAL tie-break
+	// when two rows contest one registry key: the order rows arrive in is
+	// not something resolution may depend on (memql#3209).
+	Id string
+
 	// Provenance
 	Origin string
+}
+
+// agentCandidate pairs a definition with HOW it claims its registry key --
+// through its roleSlug, or through the display-name fallback. The two rank
+// differently, so they cannot be compared on the definition alone.
+type agentCandidate struct {
+	def      *AgentDefinition
+	fromSlug bool
+}
+
+// registryKeyFor returns the key a definition claims, and whether the claim
+// came from its roleSlug. The display-name fallback exists only for legacy
+// rows written before roleSlug -- and `name` is a caller-supplied arg on
+// createAgent, so a name-derived claim must never displace a slug-derived one
+// (see betterAgentMatch).
+func registryKeyFor(def *AgentDefinition) (string, bool) {
+	if def == nil {
+		return "", false
+	}
+	if s := strings.TrimSpace(def.RoleSlug); s != "" {
+		return s, true
+	}
+	return strings.TrimSpace(def.DisplayName), false
+}
+
+// betterAgentMatch reports whether candidate should displace current for a
+// contested registry key.
+//
+// TOTAL by construction: for any two DISTINCT rows exactly one is better, so no
+// pair can fall through to positional order. That totality is the property --
+// a comparator with ties would leave the winner decided by iteration order
+// again, one layer down. Mirrors betterRoleMatch (integrations/agents/
+// factory.go), the same shape memql#3066 chose for the agentRole catalog.
+//
+//  1. kind=="system" wins. A user actor cannot write kind="system" --
+//     validateAgentKindActorScope refuses it -- so this is the v1:agents:agent
+//     analogue of agentRole's `predefined` flag: an authority marker a caller
+//     cannot forge.
+//  2. a slug-keyed row beats a name-keyed one. Closes "name your agent
+//     system-planner and take the key without ever writing a roleSlug".
+//  3. lowest row id. Intrinsic, stable, and not caller-orderable.
+func betterAgentMatch(candidate, current agentCandidate) bool {
+	if candidate.def == nil {
+		return false
+	}
+	if current.def == nil {
+		return true
+	}
+	if candSys, curSys := candidate.def.Kind == agentKindSystem, current.def.Kind == agentKindSystem; candSys != curSys {
+		return candSys
+	}
+	if candidate.fromSlug != current.fromSlug {
+		return candidate.fromSlug
+	}
+	return candidate.def.Id < current.def.Id
+}
+
+// buildAgentIndex resolves a row set into the registry map, order-independently.
+//
+// The map it replaces was last-wins: `byName[key] = def` on every row, so the
+// winner was whichever row the query returned last. That made specialist
+// resolution a property of `sort row.createdAt desc` -- and because the engine
+// positions each logical row at its NEWEST version, that ordering is really
+// last-MODIFIED, so editing an unrelated agent could change which one answered.
+func buildAgentIndex(defs []*AgentDefinition) map[string]*AgentDefinition {
+	winners := make(map[string]agentCandidate, len(defs))
+	for _, def := range defs {
+		if def == nil {
+			continue
+		}
+		key, fromSlug := registryKeyFor(def)
+		if key == "" {
+			continue
+		}
+		cand := agentCandidate{def: def, fromSlug: fromSlug}
+		if cur, ok := winners[key]; !ok || betterAgentMatch(cand, cur) {
+			winners[key] = cand
+		}
+	}
+	out := make(map[string]*AgentDefinition, len(winners))
+	for key, c := range winners {
+		c.def.Name = key
+		out[key] = c.def
+	}
+	return out
 }
 
 // AgentToolRef is the in-memory representation of a tool the agent
@@ -170,6 +263,57 @@ func (r *AgentRegistry) Clear() {
 // underlying row query (in which case the registry is left empty so
 // callers see a deterministic "not registered" rather than a partial
 // load).
+//
+// # Who can enter this input set (the memql#3209 trace, answered)
+//
+// A row whose registry key is chosen by a NON-SYSTEM actor CAN enter it.
+// Established from the write path and the query, not from what the callers
+// happen to be today:
+//
+//   - `createAgent` (dsl/agents/mutations.memql) takes `roleSlug` as a plain
+//     caller-supplied arg -- no enum, no validation against the agentRole
+//     catalog, no uniqueness check. The concept's own doc says the constraint
+//     is "enforced caller-side".
+//   - `agentsForRegistry` filters `isNotDeleted` and nothing else: not active,
+//     not kind, not owner.
+//   - When roleSlug is empty the key falls back to the DISPLAY NAME, which is
+//     also caller-supplied, so a key can be claimed without writing a slug.
+//   - Structurally, and with no adversary at all: `plannerAgent` and
+//     `trainerAgent` are @scope("perUser") seeds carrying a FIXED roleSlug, so
+//     N users produce N rows under one slug in any multi-user cluster.
+//
+// So resolution must not depend on row order -- see buildAgentIndex, which
+// replaces the previous last-wins assignment with a total comparator.
+//
+// # THIS FUNCTION STILL REGISTERS NOTHING, AND THAT IS DELIBERATE
+//
+// extractRowList has no *ExecuteResult arm, so `rows` below is always nil and
+// `registered` is always 0. Read the comment on extractRowList for why that
+// switch is being held: the winner here is global rather than per-owner, so
+// `askSpecialist` would hand user A's assistant the persona of user B's
+// specialist. Emptiness is the only thing making that unreachable today, so
+// turning the read on and adding the owner dimension (memql#3216) must be ONE
+// change, not two.
+//
+// The ordering work below lands now because it is what makes the read safe to
+// turn on -- not because it does anything yet.
+//
+// # On pagination -- `paginate 50` was NOT a bound to rely on
+//
+// This used to read `allAgents`, which paginates 50 and mints a cursor nothing
+// followed. That is right for a UI list and wrong for a resolution table: an
+// agent missing from this map is not "on page 2", it is unresolvable. Worse,
+// the engine fills a page from `target*2` PHYSICAL version rows and dedupes to
+// logical ones afterwards, so ordinary edit churn shrinks the registry far
+// below 50 -- 100 versions of one agent yields a registry of one.
+//
+// Hence the dedicated read below. Its residual bound is **500**, not 5000:
+// `@unbounded` rewrites to `paginate 1000000`, `effectiveWindow` clamps that to
+// MaxWindow (5000), and then `evaluateExpression` clamps the returned slice
+// again to MaxResults, whose default is 500 (component/memql/config.go). So a
+// cluster past 500 agents needs this revisited rather than silently truncated,
+// and the truncation is still SILENT -- there is no signal distinguishing "500
+// agents" from "500 of 900".
 func (r *AgentRegistry) LoadFromRows(ctx context.Context, engine *MemQLEngine, logger *slog.Logger) (int, error) {
 	if r == nil {
 		return 0, fmt.Errorf("agent registry is nil")
@@ -178,20 +322,19 @@ func (r *AgentRegistry) LoadFromRows(ctx context.Context, engine *MemQLEngine, l
 		return 0, fmt.Errorf("engine is nil")
 	}
 
-	// Use the canonical allAgents (dsl/agents/queries.memql).
-	// The raw `node(concept==...)` shorthand isn't valid query
-	// syntax -- node() requires a JSON object argument. Going
-	// through the named query also gets shape resolution + trait
-	// filtering for free.
-	result, err := engine.Execute(ctx, `query allAgents()`)
+	// agentsForRegistry (dsl/agents/queries.memql) -- @serverOnly + @unbounded,
+	// the complete-set sibling of allAgents. Going through a named query gets
+	// shape resolution + trait filtering for free; the raw `node(concept==...)`
+	// shorthand is not valid query syntax.
+	result, err := engine.Execute(auth.ContextWithInternalOrigin(ctx), `query agentsForRegistry()`)
 	if err != nil {
-		return 0, fmt.Errorf("allAgents: %w", err)
+		return 0, fmt.Errorf("agentsForRegistry: %w", err)
 	}
 
 	rows := extractRowList(result)
 	r.Clear()
 
-	registered := 0
+	defs := make([]*AgentDefinition, 0, len(rows))
 	skipped := 0
 	for _, row := range rows {
 		def, ok := agentDefinitionFromRow(row)
@@ -199,35 +342,54 @@ func (r *AgentRegistry) LoadFromRows(ctx context.Context, engine *MemQLEngine, l
 			skipped++
 			continue
 		}
-		// Key by roleSlug (per-partition unique). Falls back to row
-		// id if roleSlug is empty -- rare, but defensible.
-		key := def.RoleSlug
-		if key == "" {
-			key = def.Name
-		}
-		if key == "" {
-			skipped++
-			continue
-		}
-		def.Name = key
-		r.mu.Lock()
-		r.byName[key] = def
-		r.mu.Unlock()
-		registered++
+		defs = append(defs, def)
 	}
+
+	index := buildAgentIndex(defs)
+	// Rows that claimed no key at all, plus rows that lost a contested key.
+	skipped += len(defs) - len(index)
+
+	r.mu.Lock()
+	for key, def := range index {
+		r.byName[key] = def
+	}
+	registered := len(r.byName)
+	r.mu.Unlock()
 
 	if logger != nil {
 		logger.Info("memql.agentRegistry: loaded from rows",
 			"component", "memql.agentRegistry",
 			"registered", registered,
-			"skipped", skipped)
+			"skipped", skipped,
+			"rows", len(rows))
 	}
 	return registered, nil
 }
 
 // extractRowList walks an engine.Execute result and returns the row
-// maps. Handles the two shapes the engine returns: a top-level []any
-// of row maps, or a {"nodes":[...]} wrapper.
+// maps. Handles the shapes the engine returns: the *ExecuteResult wrapper
+// itself, a top-level []any of row maps, or a {"nodes":[...]} wrapper.
+//
+// # There is NO *ExecuteResult arm, and that is DELIBERATE (memql#3209)
+//
+// MemQLEngine.Execute returns *ExecuteResult, and LoadFromRows passes that
+// value straight in -- so it falls to `default: return nil` and the agent
+// registry loads ZERO rows. That is a real bug: "the query matched nothing"
+// and "we could not read what the query returned" arrive here as the same
+// value, which is why it went unnoticed.
+//
+// It is NOT fixed here, because fixing it is not a bug fix -- it is a FEATURE
+// SWITCH with a security consequence. The registry is keyed by a
+// caller-supplied roleSlug, is built from an unscoped read, carries every
+// user's systemPrompt, and `askSpecialist` resolves it with a bare map lookup
+// and no owner check. While the map is empty every such lookup fails closed
+// with "no agent registered with that role (loaded: [])". Adding the arm turns
+// that dead path into a LIVE cross-tenant one in the same commit -- user A's
+// assistant could resolve user B's specialist and be handed its system prompt.
+//
+// So the ordering fix in buildAgentIndex lands now (it is correct, and it is
+// what makes resolution safe to turn on), and the switch stays off until
+// memql#3216 gives the lookup an owner dimension. Turn them on together.
 func extractRowList(result any) []map[string]any {
 	if result == nil {
 		return nil
@@ -286,6 +448,7 @@ func agentDefinitionFromRow(row map[string]any) (*AgentDefinition, bool) {
 	}
 
 	def := &AgentDefinition{
+		Id:          id,
 		Name:        name,
 		Description: getStringField(payload, "description"),
 		Role:        getStringField(payload, "role"),

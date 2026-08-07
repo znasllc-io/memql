@@ -222,6 +222,24 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// always the authenticated caller's subject -- is asserted by
 		// component/grpc/worker_token_caller_scope_test.go. See that entry.
 		{Path: "identity/queries.memql", Name: "workerTokensForUser"}: true,
+		// memql#3209. The row set behind the in-process agent registry
+		// (component/memql/agents.go LoadFromRows). Caller-scoping is circular
+		// in the #2800 sense: the registry is a process-wide catalog built ONCE
+		// at startup under the seed materializer's system actor, so at the only
+		// moment this query runs there is no requesting user for actor.userId to
+		// name -- the filter would evaluate against an empty actor, return zero
+		// rows, and silently disable every specialist.
+		//
+		// It is @serverOnly rather than merely unscoped because agentFull
+		// projects `systemPrompt`: an unscoped catalog read of every user's
+		// persona is admissible inside the server and not admissible on the
+		// generated client SDK.
+		//
+		// Its sibling allAgents stays on the wire, paged and classified as
+		// before -- this is an ADDITIONAL complete read, not a widening of that
+		// one. Sole caller: component/memql/agents.go, which stamps
+		// auth.ContextWithInternalOrigin.
+		{Path: "agents/queries.memql", Name: "agentsForRegistry"}: true,
 	}
 	for k := range want {
 		if !set[k] {

@@ -200,12 +200,19 @@ func (s *streamSession) handleAiTranscribeStreamChunk(
 			return s.sendQueryError(requestId, envelope.GetMessageId(), codes.FailedPrecondition,
 				"no open transcribe stream for request_id (call Start first)")
 		}
-		return s.service.aiForwarder.ForwardContinuation(
-			requestId,
-			s.forwardedAuthClaims(),
-			extractPartitionFromEnvelope(envelope),
-			envelope,
-		)
+		// An error here must NOT be returned into handleMessage: the Recv
+		// loop treats a handler error as fatal and tears down the whole
+		// CLIENT stream. Deliver it as a correlated QueryError instead
+		// (memql#3205).
+		principal, err := s.forwardedPrincipal()
+		if err != nil {
+			return s.sendQueryError(requestId, envelope.GetMessageId(), codes.Internal,
+				"cannot establish forwarded authority for this session: "+err.Error())
+		}
+		if err := s.service.aiForwarder.ForwardContinuation(requestId, principal, envelope); err != nil {
+			return s.sendQueryError(requestId, envelope.GetMessageId(), codes.Unavailable, err.Error())
+		}
+		return nil
 	}
 
 	// Local path.
@@ -254,12 +261,19 @@ func (s *streamSession) handleAiTranscribeStreamEnd(
 			return s.sendQueryError(requestId, envelope.GetMessageId(), codes.FailedPrecondition,
 				"no open transcribe stream for request_id (call Start first)")
 		}
-		return s.service.aiForwarder.ForwardContinuation(
-			requestId,
-			s.forwardedAuthClaims(),
-			extractPartitionFromEnvelope(envelope),
-			envelope,
-		)
+		// An error here must NOT be returned into handleMessage: the Recv
+		// loop treats a handler error as fatal and tears down the whole
+		// CLIENT stream. Deliver it as a correlated QueryError instead
+		// (memql#3205).
+		principal, err := s.forwardedPrincipal()
+		if err != nil {
+			return s.sendQueryError(requestId, envelope.GetMessageId(), codes.Internal,
+				"cannot establish forwarded authority for this session: "+err.Error())
+		}
+		if err := s.service.aiForwarder.ForwardContinuation(requestId, principal, envelope); err != nil {
+			return s.sendQueryError(requestId, envelope.GetMessageId(), codes.Unavailable, err.Error())
+		}
+		return nil
 	}
 
 	// Local path.

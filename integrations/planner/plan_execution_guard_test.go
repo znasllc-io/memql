@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/znasllc-io/memql/component/auth"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/node"
 	"github.com/znasllc-io/memql/integrations"
@@ -104,7 +105,7 @@ type fakeTurnForwarder struct {
 }
 
 func (f *fakeTurnForwarder) Forward(
-	_ context.Context, _ string, _ node.NodeType, _ map[string]string, _ string, _ *memqlv1.MemqlClientMessage,
+	_ context.Context, _ string, _ node.NodeType, _ auth.ForwardedPrincipal, _ *memqlv1.MemqlClientMessage,
 ) (<-chan *memqlv1.MemqlServerMessage, error) {
 	f.mu.Lock()
 	f.calls++
@@ -122,7 +123,7 @@ func (f *fakeTurnForwarder) Forward(
 }
 
 func (f *fakeTurnForwarder) ForwardContinuation(
-	string, map[string]string, string, *memqlv1.MemqlClientMessage,
+	string, auth.ForwardedPrincipal, *memqlv1.MemqlClientMessage,
 ) error {
 	return nil
 }

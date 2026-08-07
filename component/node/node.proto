@@ -249,15 +249,63 @@ message CapabilityResponse {
 // type) keeps component/node/ independent of component/grpc/: the node
 // layer just moves bytes; the grpc layer owns the wire-type semantics.
 //
-// `auth` carries the originating principal's claims (subject, email,
-// role) so the worker can reconstruct a TokenInfo and enforce the same
-// ACLs it would have applied if the client had connected directly.
+// `authority` is the MANDATORY authorization assertion (memql#3205). `auth`
+// carries the originating principal's claims for `createdBy` ATTRIBUTION ONLY
+// and is no longer an authorization input on the receiver -- it is derived from
+// the same value as `authority` and cross-checked on receipt, so the two cannot
+// drift.
 message AiForwardRequest {
   string request_id = 1;
   map<string, string> auth = 2;
   reserved 3;
   reserved "partition";
   bytes memql_envelope = 4;  // Serialized memqlv1.MemqlClientMessage
+  ForwardedAuthority authority = 5;
+  // True iff sent via ForwardContinuation. Carried as a WIRE FACT because the
+  // refusal shape must stay decidable even when memql_envelope fails to
+  // unmarshal -- precisely the case where the payload type cannot be inspected.
+  // The receiver prefers its OWN payload-class table whenever the envelope does
+  // parse, and uses this only as a cross-check: a producer-set bool that
+  // mislabelled an opener would hang that client forever.
+  bool continuation = 6;
+}
+
+// ForwardedAuthority is the mandatory authorization assertion attached to every
+// mesh forward (memql#3205). It carries the producer's ALREADY-RESOLVED,
+// ALREADY-CLAMPED decision -- not the inputs to one. The receiver verifies it,
+// binds it verbatim, and never re-resolves.
+//
+// "No badge" is the VALUE credential_class="user", never a missing key. That is
+// the whole difference from the attempt refused as a net security regression,
+// which carried two OPTIONAL claims whose absence was indistinguishable from
+// "not a badge session".
+//
+// It lives on this node-layer message rather than on MemqlClientMessage
+// deliberately: MemqlClientMessage is the CLIENT-facing wire type, where a
+// browser can set any field, while AiForwardRequest is reachable only behind
+// the class="node" stream interceptor.
+//
+// See component/auth/forward_authority.go for the verifier and its rule table,
+// and docs/internal/design/mesh-forwarded-auth-contract.md for the design.
+message ForwardedAuthority {
+  string contract_version = 1;                 // "v1"; anything else is refused
+  ForwardedPrincipalKind principal_kind = 2;
+  string subject = 3;                          // AccessContext.UserId
+  string primary_email = 4;                    // AccessContext.PrimaryEmail
+  string role = 5;                             // AccessContext.Role -- ALREADY CLAMPED
+  string identity_id = 6;                      // AccessContext.IdentityId
+  string credential_class = 7;                 // never empty on a valid assertion
+  string role_ceiling = 8;                     // non-empty IFF credential_class == "badge"
+  int64 expires_at_unix = 9;                   // non-zero for a class that expires mid-stream
+  string origin_node_id = 10;                  // audit only, never an input to a decision
+  string origin_node_type = 11;                // audit only
+  int64 asserted_at_unix = 12;                 // audit / clock-skew diagnostics
+}
+
+enum ForwardedPrincipalKind {
+  FORWARDED_PRINCIPAL_KIND_UNSPECIFIED = 0;    // always refused
+  FORWARDED_PRINCIPAL_KIND_USER = 1;
+  FORWARDED_PRINCIPAL_KIND_SYSTEM = 2;
 }
 
 // AiForwardResponse carries a worker's response back to the originating

@@ -4,12 +4,12 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"google.golang.org/protobuf/proto"
 
 	"github.com/znasllc-io/memql/component/auth"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
-	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/node"
 	"github.com/znasllc-io/memql/core/id"
 )
@@ -23,8 +23,7 @@ type AgentForwarder interface {
 		ctx context.Context,
 		requestId string,
 		targetType node.NodeType,
-		authClaims map[string]string,
-		partition string,
+		principal auth.ForwardedPrincipal,
 		envelope *memqlv1.MemqlClientMessage,
 	) (<-chan *memqlv1.MemqlServerMessage, error)
 
@@ -34,8 +33,7 @@ type AgentForwarder interface {
 	// node whose parked tool loop is waiting for it.
 	ForwardContinuation(
 		requestId string,
-		authClaims map[string]string,
-		partition string,
+		principal auth.ForwardedPrincipal,
 		envelope *memqlv1.MemqlClientMessage,
 	) error
 }
@@ -171,16 +169,6 @@ func (c *CognitionIntegration) forwardTurnToAgent(
 		},
 	}
 
-	// Partition comes off the ctx, which was stamped by cognition's
-	// streamSession when the originating envelope arrived. Forwarding it
-	// to the agent node matters because (a) the agent's own tool/data
-	// queries auto-scope on whatever ctx partition the AgentGenerateTurn
-	// runs under, and (b) the client_tool_relay needs the partition on
-	// every ClientToolResult so the agent's parked waiter resumes in the
-	// right tenant. Falling back to empty string -- the way this branch
-	// behaved historically -- silently fanned cross-tenant work into
-	// "default" or whatever the agent node happened to default to.
-	partition := memqlengine.PartitionFromContext(ctx)
 	// Forward an auth principal so the agent node's ctx carries an actor.
 	// The agent's downstream tool dispatch runs the taskstamp Stamper and
 	// the safety DecisionRecorder, both of which persist via the engine's
@@ -193,13 +181,15 @@ func (c *CognitionIntegration) forwardTurnToAgent(
 	// Mirror the Plan path: forward the originating user's identity when ctx
 	// carries one, falling back to the cognition system-actor so the actor
 	// is never empty. (memql#1107)
-	authClaims := forwardedAuthClaimsForTurn(ctx)
+	principal, err := forwardedPrincipalForTurn()
+	if err != nil {
+		return agentReplyResult{}, fmt.Errorf("forward to agent: %w", err)
+	}
 	respCh, err := c.agentForwarder.Forward(
 		ctx,
 		requestId,
 		node.NodeTypeAgent,
-		authClaims,
-		partition,
+		principal,
 		envelope,
 	)
 	if err != nil {
@@ -219,31 +209,33 @@ func (c *CognitionIntegration) forwardTurnToAgent(
 	return c.consumeAgentTurnStream(ctx, requestId, partitionId, participantId, relayAgentId, respCh)
 }
 
-// forwardedAuthClaimsForTurn builds the auth-claims map forwarded
-// alongside an AgentGenerateTurnMsg so the receiving agent node
-// reconstructs an actor on its ctx (via auth.ContextWithForwardedClaims).
-// Without an actor the agent's tool-dispatch persistence -- the taskstamp
-// Stamper's ad-hoc Plan/Task creation and the safety DecisionRecorder --
-// fails with "no actor found in context".
+// forwardedPrincipalForTurn builds the mesh authority assertion forwarded
+// alongside an AgentGenerateTurnMsg, so the receiving agent node binds an actor
+// (memql#3205). Without one the agent's tool-dispatch persistence -- the
+// taskstamp Stamper's ad-hoc Plan/Task creation and the safety
+// DecisionRecorder -- fails with "no actor found in context".
 //
-// Preference: the originating user's identity (BFF -> cognition forwards
-// it on the inbound stream, so it rides this ctx). When ctx carries no
-// usable principal -- e.g. greet-on-join or other cognition-initiated
-// turns with no end-user behind them -- fall back to the cognition
-// system-actor so the forwarded map is never empty. Mirrors the
-// system-actor claims the post-approval Plan dispatch forwards in
-// integrations/planner/plan_execution.go. (memql#1107)
-func forwardedAuthClaimsForTurn(ctx context.Context) map[string]string {
-	if identity, err := auth.UserIdentityFromContext(ctx); err == nil {
-		if claims := auth.ForwardedClaimsFromIdentity(identity); len(claims) > 0 {
-			return claims
-		}
+// IT IS ALWAYS A SYSTEM PRINCIPAL. The previous "prefer the originating user's
+// identity" branch is gone because it was DEAD CODE: memql#1107's comment
+// described an intent the call graph never had.
+// handleUtteranceForCognition roots its context at
+// contextWithSystemActor(context.Background()), and nothing between that root
+// and this call reintroduces the inbound stream's principal, so the user branch
+// could not fire. Keeping it would have meant shipping a contract whose most
+// security-relevant branch is untested because it is unreachable.
+//
+// Role is reader and the subject deliberately does not look like a canonical
+// user id -- see the SYSTEM rules in auth.VerifyForwardedAuthority. Both are
+// the no-widening choices: this hop sends the invalid role string "system"
+// today, which clamps to reader, and downstream owner resolution keys on the
+// canonical-user-id shape, so a system subject keeps falling through to the
+// hint-based owner resolution exactly as it does now.
+func forwardedPrincipalForTurn() (auth.ForwardedPrincipal, error) {
+	authority, err := auth.ForwardedAuthorityForSystem(systemActorId, time.Now())
+	if err != nil {
+		return auth.ForwardedPrincipal{}, err
 	}
-	return map[string]string{
-		"sub":   systemActorId,
-		"email": systemActorId,
-		"role":  "system",
-	}
+	return authority.Principal(), nil
 }
 
 // agentReplyResult is the outcome of a forwarded agent turn: the

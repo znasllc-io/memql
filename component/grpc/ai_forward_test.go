@@ -1,6 +1,7 @@
 package memql
 
 import (
+	"context"
 	"io"
 	"log/slog"
 	"testing"
@@ -8,6 +9,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	"github.com/znasllc-io/memql/component/auth"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/node"
 	nodev1 "github.com/znasllc-io/memql/component/node/gen"
@@ -15,6 +17,20 @@ import (
 
 func testLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+// testForwardedPrincipal builds a valid user assertion for the router tests.
+// The router does not verify -- the RECEIVER does -- but building a real one
+// keeps these tests honest about the shape that actually goes on the wire.
+func testForwardedPrincipal(t *testing.T) auth.ForwardedPrincipal {
+	t.Helper()
+	a, err := auth.ForwardedAuthorityForUser(
+		&auth.AccessContext{UserId: "v1:identity:user:alice", Role: auth.RoleWriter},
+		auth.ForwardedClassUser, "", time.Time{}, time.Now())
+	if err != nil {
+		t.Fatalf("building a test forwarded principal: %v", err)
+	}
+	return a.Principal()
 }
 
 // TestAiForwardRouter_NoPeerAvailable asserts we surface a clear
@@ -25,9 +41,8 @@ func TestAiForwardRouter_NoPeerAvailable(t *testing.T) {
 	peerMgr := node.NewPeerManager(identity, testLogger())
 	router := NewAiForwardRouter(peerMgr, testLogger())
 
-	_, err := router.Forward(nil, "req-1", node.NodeTypeVoice,
-		map[string]string{"sub": "alice"},
-		"default",
+	_, err := router.Forward(context.Background(), "req-1", node.NodeTypeVoice,
+		testForwardedPrincipal(t),
 		&memqlv1.MemqlClientMessage{MessageId: "req-1"},
 	)
 	if err == nil {
@@ -166,8 +181,7 @@ func TestAiForwardRouter_ForwardContinuation_NoInflight(t *testing.T) {
 
 	err := router.ForwardContinuation(
 		"never-opened",
-		map[string]string{"sub": "alice"},
-		"default",
+		testForwardedPrincipal(t),
 		&memqlv1.MemqlClientMessage{MessageId: "chunk-1"},
 	)
 	if err == nil {
@@ -185,8 +199,7 @@ func TestAiForwardRouter_ForwardContinuation_RequiresRequestId(t *testing.T) {
 
 	err := router.ForwardContinuation(
 		"   ",
-		nil,
-		"",
+		testForwardedPrincipal(t),
 		&memqlv1.MemqlClientMessage{},
 	)
 	if err == nil {
@@ -214,8 +227,7 @@ func TestAiForwardRouter_ForwardContinuation_PeerWithoutConnection(t *testing.T)
 
 	err := router.ForwardContinuation(
 		"req-disconnected",
-		nil,
-		"",
+		testForwardedPrincipal(t),
 		&memqlv1.MemqlClientMessage{},
 	)
 	if err == nil {

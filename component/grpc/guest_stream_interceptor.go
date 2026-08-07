@@ -23,6 +23,12 @@ import (
 // gets populated by whoever created the v1:identity:invitation record.
 const GuestAuthClaimKey = "identity.guest"
 
+// GuestSubjectPrefix is the shape a guest stream's subject takes. Named
+// because the mesh forwarded-auth contract classifies a principal by it: the
+// guest interceptor sets no `class` claim, so without recognising this prefix a
+// guest would be asserted over the mesh as an ordinary user (memql#3205).
+const GuestSubjectPrefix = "guest:"
+
 // NewGuestAwareStreamInterceptor wraps `base` and adds support for
 // `Authorization: Guest <token>`. Guest streams are validated at
 // connect time against the invitation registry (via engine); valid
@@ -110,7 +116,7 @@ func validateGuestAndDispatch(
 	// scoped partition ACL is computed by downstream middleware using
 	// the partitionId we stuff into claims.
 	guestClaims := map[string]any{
-		"sub":   "guest:" + summary.ID,
+		"sub":   GuestSubjectPrefix + summary.ID,
 		"email": summary.InviteeEmail,
 		"role":  "reader", // cluster-wide role is meaningless; partition grant drives access
 		"name":  summary.InviteeName,
