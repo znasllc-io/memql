@@ -234,6 +234,91 @@ func TestBlankCommentsAndStringsPreservesOffsets(t *testing.T) {
 	}
 }
 
+// A literal newline does not end a string, and the LEXER is the oracle
+// for that: scanString writes the newline into the builder as an
+// ordinary rune and keeps scanning, so a multi-line literal is ONE
+// string token (memql#3116; memql#3047's line counter exists precisely
+// because such literals are legal).
+//
+// Asserting against the lexer's own token count rather than a hardcoded
+// one is deliberate -- the defect is the blanker disagreeing with the
+// lexer about where a string ends, so the lexer is the only oracle that
+// cannot drift with the bug.
+func TestBlankCommentsAndStringsSpansNewlines(t *testing.T) {
+	src := "@description(\"line one\nline two\") concept real {}\n"
+
+	toks, err := NewLexer(src).Tokenize()
+	if err != nil {
+		t.Fatalf("lexer refused the fixture: %v", err)
+	}
+	literals := 0
+	for _, tk := range toks {
+		if tk.Type == TokenString {
+			literals++
+		}
+	}
+	if literals != 1 {
+		t.Fatalf("lexer sees %d string tokens in the fixture, want 1 -- the fixture no longer pins a multi-line literal", literals)
+	}
+
+	got := blankCommentsAndStrings(src)
+	want := "@description(\"        \n        \") concept real {}\n"
+	if got != want {
+		t.Fatalf("blankCommentsAndStrings:\n got %q\nwant %q", got, want)
+	}
+}
+
+// The literal above, run through the header locator: the word "concept"
+// after the newline is string content, and the guarantee ConceptHeaders
+// documents ("the word concept inside a doc comment or a @description
+// string can never be mistaken for a declaration") has to hold for it.
+//
+// This is the corruption repro from memql#3116: closing the literal at
+// the newline exposed `concept phantom` as code AND swallowed the real
+// `)` as string content, so the file desynced in both directions and the
+// codemod got an insertion point INSIDE a string literal.
+func TestConceptHeadersIgnoresConceptInsideAMultiLineDescription(t *testing.T) {
+	src := `@description("a description that wraps
+concept phantom { evil string }")
+concept real {
+  name string
+}
+`
+	if _, err := NewLexer(src).Tokenize(); err != nil {
+		t.Fatalf("the fixture must lex cleanly, or it proves nothing about valid input: %v", err)
+	}
+	headers := ConceptHeaders(src)
+	if len(headers) != 1 || headers[0].Name != "real" {
+		names := make([]string, 0, len(headers))
+		for _, h := range headers {
+			names = append(names, h.Name)
+		}
+		t.Fatalf("ConceptHeaders found %d headers (%v), want only `real`", len(headers), names)
+	}
+}
+
+// An unterminated literal runs to EOF. The lexer's own answer is a hard
+// error ("unterminated string starting at position %d"), so no consumer
+// meaningfully runs on such a file and there is nothing for a
+// line-bounded recovery to be tolerant of. Running to EOF is the
+// blanker's compatible reading of that: it never exposes string content
+// as code.
+func TestBlankCommentsAndStringsUnterminatedLiteralRunsToEOF(t *testing.T) {
+	src := "@description(\"unterminated\nconcept a {}\n"
+
+	if _, err := NewLexer(src).Tokenize(); err == nil {
+		t.Fatal("the lexer must reject an unterminated literal, or this test's premise is wrong")
+	}
+
+	want := "@description(\"            \n            \n"
+	if got := blankCommentsAndStrings(src); got != want {
+		t.Fatalf("blankCommentsAndStrings:\n got %q\nwant %q", got, want)
+	}
+	if headers := ConceptHeaders(src); len(headers) != 0 {
+		t.Fatalf("ConceptHeaders found %+v inside an unterminated literal, want none", headers)
+	}
+}
+
 // ---- codemod: the rewrite ----
 
 func TestRewriteRowAuthzInsertsAboveThePreamble(t *testing.T) {
@@ -314,6 +399,35 @@ concept node {
 	}
 	if string(out) != string(src) {
 		t.Fatalf("a same-line declaration was not detected, so a second one was inserted:\n%s", out)
+	}
+}
+
+// The consumer assessment for RowAuthzDeclaredInSource (memql#3116): a
+// multi-line literal must not hide a declaration that follows it on the
+// closing quote's line. Closing the literal at the newline made the
+// REAL closing quote open a second string, which swallowed the rest of
+// that line -- so `@rowAuthz(public)` read as prose, the idempotency
+// check said "undeclared", and the codemod inserted a duplicate. A
+// duplicate is a load error, so the rewrite turned a loadable tree into
+// one that refuses to boot.
+func TestRewriteRowAuthzSeesADeclarationAfterAMultiLineLiteral(t *testing.T) {
+	src := []byte(`@description("a description
+that wraps") @rowAuthz(public)
+concept node {
+  ownerUserId string
+}
+`)
+	if _, err := NewLexer(string(src)).Tokenize(); err != nil {
+		t.Fatalf("the fixture must lex cleanly, or it proves nothing about valid input: %v", err)
+	}
+	out, err := RewriteRowAuthz(src, map[string]RowAuthzDecl{
+		"node": {Tier: RowAuthzOwned, Owner: "ownerUserId"},
+	})
+	if err != nil {
+		t.Fatalf("RewriteRowAuthz: %v", err)
+	}
+	if string(out) != string(src) {
+		t.Fatalf("a declaration after a multi-line literal was not detected, so a second one was inserted:\n%s", out)
 	}
 }
 

@@ -253,7 +253,27 @@ mutate user toggleComputerUseEnabled {
   }
 }
 
-/// Set computerUseScope on an agent authorization row.
+// CHECKED IN THE memql#3177 PASS, and left as it stands deliberately -- the reasoning matters,
+// because this mutation is the second half of the escalation that issue closes.
+//
+// It takes a caller-supplied row id with no owner predicate, exactly like
+// revokeAgentAuthorization, so on its own it could raise the computer-use ceiling on ANY
+// authorization row whose id the caller knew. What limited it before #3177 was only that a
+// caller could not profitably point it at somebody else's grant; once `userId` was rewritable
+// through updateAgentAuthorization's payload splat, this became the step that turned a
+// hijacked row into `full` scope.
+//
+// Both halves are closed at the engine now: `v1:agents:agentAuthorization` declares
+// `@rowAuthz(owner="userId")`, so executeWrite resolves this row BEFORE the read-merge and
+// refuses when its userId is not the caller's (component/memql/rowauthz_write_guard.go,
+// memql#3174).
+//
+// The body needs no owner re-stamp: `args.computerUseScope` is a NAMED field, not a payload
+// splat, so `userId` is not among the keys this mutation can write and the read-merge inherits
+// it from the persisted row. TestDeclaredOwnerFieldsAreServerStamped is what keeps that true --
+// turn this body into a splat and that gate fails.
+/// Set computerUseScope on an agent authorization row. Self-service: the engine refuses the write
+/// when the target row's userId is not the caller's (the concept's declared owner tier).
 mutate agentAuthorization updateAgentAuthScope {
   args {
     authorizationId   string!

@@ -96,6 +96,18 @@ func (s *AdminServer) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
 		token := auth.BuildTokenInfo(actorClaims)
 		ctx = auth.ContextWithClaims(ctx, actorClaims)
 		ctx = auth.ContextWithToken(ctx, token)
+		// ...and the AccessContext, which is a DIFFERENT surface from the
+		// claims above (memql#3178). `actor.role` / `actor.userId` in a DSL
+		// filter resolve from the AccessContext alone; the claims map is
+		// invisible to them. Without this an admin-gated query
+		// (`requiresOwnerOrAdmin` -- e.g. patIdentitiesForUser behind
+		// /admin/tokens) reads role "" off a nil AccessContext and returns zero
+		// rows to a genuine admin. The gRPC side does this conversion in
+		// ensureAccess; the HTTP side had no equivalent.
+		//
+		// Security-positive: the gate now sees the role from the token
+		// requireAdmin just VERIFIED, rather than seeing nothing at all.
+		ctx = auth.ContextWithAccess(ctx, auth.FallbackFromClaims(actorClaims))
 
 		next(w, r.WithContext(ctx))
 	}

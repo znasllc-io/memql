@@ -49,6 +49,32 @@ type QueryPlan struct {
 	// aggregate over the matching set instead of the rows themselves.
 	// Peeled off the outermost CountExpression by applyDirectiveWrappers.
 	Count bool
+
+	// BoundConcept is the concept the executed construct DECLARES it
+	// reads -- copied from the resolved query function's BoundConcept,
+	// which the loader fills from the construct's signature and its
+	// file-top `use` import.
+	//
+	// Row-authz enforcement resolves the tier from THIS and never from
+	// what the filter says (memql#3172, epic decision A). A filter-text
+	// detector answers "" for every spelling that is not a top-level
+	// `concept==<id>` equality -- naming a row by id, a top-level `||`,
+	// a negated concept -- and under enforcement "I could not tell"
+	// silently means "not enforced".
+	BoundConcept string
+
+	// RowAuthzInjected records that enforcement ANDed a declared tier's
+	// predicate into Root. It exists so the result-cache key folds the
+	// caller identity in whether or not the injected node happens to sit
+	// where planReferencesActor's walk reaches: an enforced read depends
+	// on the actor by construction, and a shared key hands one caller's
+	// rows to another (memql#3172 finding 2).
+	RowAuthzInjected bool
+
+	// RowAuthzConcept names the concept whose declaration was injected,
+	// so the ctx-bearing side of the engine can re-read the tier instead
+	// of re-deriving it from the expression.
+	RowAuthzConcept string
 }
 
 // RelationshipNode identifies relationship traversals declared within a query.
@@ -297,6 +323,22 @@ type ComparisonExpression struct {
 	Value            any
 	CacheHintSeconds *int
 	FieldSelections  []FieldReference
+
+	// RowAuthzConcept, when set, names the concept whose `@rowAuthz`
+	// declaration produced this comparison (memql#3172). Empty on every
+	// author-written node.
+	//
+	// It exists so the injected term's RHS is canonicalized from the
+	// DECLARATION. The generic canonicalize-RHS pass takes its concept
+	// from extractConceptFromExpression, which answers "" for any filter
+	// that is not a top-level `concept==<id>` equality -- and an owner
+	// field is an `@relationship`, so its stored value is canonical
+	// (`v1:identity:user:u1`) while `actor.userId` resolves to the bare
+	// `u1`. An uncanonicalized injected term matches NOTHING, the owner's
+	// own rows included. Carrying the concept on the node keeps the tier
+	// resolved from the declaration at the canonicalize step exactly as
+	// it is at the injection step.
+	RowAuthzConcept string
 }
 
 func (*ComparisonExpression) isExpressionNode() {}
@@ -455,6 +497,21 @@ type MutationNode struct {
 	// insert for backwards compat (legacy callers that constructed a
 	// MutationNode literal pre-update).
 	Kind ast.MutationKind
+
+	// FromTemplate marks a node rendered from a DSL mutation template
+	// (renderMutationTemplate). It is the ONE thing that tells the raw
+	// `insert(` literal apart from a named mutation once both reach
+	// executeWrite, and the row-authz owner stamp keys off it: a named
+	// mutation states who owns the row in its own `stamp { }` block,
+	// while the raw surface bypasses `args`/`accept`/`stamp` entirely and
+	// has no body to state anything (memql#3059 / #3175).
+	//
+	// The polarity is deliberate and load-bearing. False is the zero
+	// value, so a MutationNode built by any producer that does not say
+	// otherwise is treated as RAW and gets stamped. The opposite spelling
+	// (`Raw bool`) would default a future producer to unstamped -- a hole
+	// opened by omission, which is exactly how this one arrived.
+	FromTemplate bool
 
 	Concept    string
 	ID         string

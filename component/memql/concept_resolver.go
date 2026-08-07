@@ -39,17 +39,42 @@ func (r *ConceptResolver) ResolveFile(file *languageParser.File, versionContext 
 // the bare-name list it pulled from the pre-NormaliseAll source via
 // extractAllSignatureConceptNames.
 func (r *ConceptResolver) ResolveFileWithSignatureConcepts(file *languageParser.File, versionContext string, signatureConcepts []string) error {
-	return r.ResolveFileWithSignatureConceptsInDomain(file, versionContext, signatureConcepts, "")
+	return r.ResolveFileWithSignatureConceptsInDomain(file, versionContext, signatureConcepts, "", "")
 }
 
 // ResolveFileWithSignatureConceptsInDomain is ResolveFileWithSignatureConcepts
-// with the #2617 ambient-domain rule: `domain` is the file's own domain
-// directory, and it becomes the namespace hint for any signature concept no
-// file-top import names -- same-domain constructs are in scope without a
-// `use` line. An explicit import always wins (namespaceHintForName is
-// consulted first), and the resolver's ambiguity error is unchanged when
-// the hint cannot disambiguate.
-func (r *ConceptResolver) ResolveFileWithSignatureConceptsInDomain(file *languageParser.File, versionContext string, signatureConcepts []string, domain string) error {
+// with the #2617 ambient-domain rule, scoped the way assembly scopes it
+// (memql#3084).
+//
+// BOTH arguments describe the ASSEMBLY directory -- the one
+// AssembleConceptIdFromDeclInDir was given -- exactly as they do on the sibling
+// ResolveCanonicalIdConceptRefsInNamespace. `dir` is that directory (the FIRST
+// path segment, so RootDomainFromFilePath, not DomainFromFilePath); `declaredNS`
+// is its namespace.pin, or the directory again when it has none. Passing
+// declaredNS explicitly is what lets a test build a remapped fixture without
+// depending on the real tree.
+//
+// An explicit file-top import always wins and is never gated -- the import IS
+// the authorization. Only the AMBIENT bind (no import names the concept) is
+// scoped, and it is scoped by the same predicate the canonicalId path uses:
+// the resolved id must be one this domain could have DECLARED. A foreign id is
+// a HARD ERROR, matching that sibling (the refusal-semantics decision on
+// memql#3084).
+//
+// Why erroring rather than leaving the binding blank: an unbound signature
+// concept makes markSecretArgsFields a no-op -- disabling @secret argument
+// redaction -- and skips ensureBoundConceptFilter, so booting through a refusal
+// is strictly worse than not gating at all. The refusal has to stop the load.
+//
+// The empty-`dir` case is NOT gated, and that is deliberate rather than a hole.
+// An origin with no directory is an origin-less AUTHORED construct
+// ("authored:query:skepticQ", via compileAuthoredFunction ->
+// dispatchPerConstructParser), which has no assembly directory and therefore no
+// domain to be ambient WITHIN -- there is no last-path-segment for a foreign
+// namespace to collide with, which is the widening this rule closes. Both
+// signature sites already resolved such origins by unique trailing-segment
+// match before this change, so preserving it changes nothing on that path.
+func (r *ConceptResolver) ResolveFileWithSignatureConceptsInDomain(file *languageParser.File, versionContext string, signatureConcepts []string, dir, declaredNS string) error {
 	if file == nil {
 		return nil
 	}
@@ -66,13 +91,9 @@ func (r *ConceptResolver) ResolveFileWithSignatureConceptsInDomain(file *languag
 		if _, dup := symbols[bareName]; dup {
 			continue
 		}
-		nsHint := namespaceHintForName(file.Uses, bareName)
-		if nsHint == "" {
-			nsHint = domain // ambient same-domain scope (#2617)
-		}
-		resolvedId, err := r.resolveBareConceptNameWithNamespace(bareName, nsHint)
+		resolvedId, err := r.ResolveSignatureConceptInNamespace(file.Uses, bareName, dir, declaredNS)
 		if err != nil {
-			return fmt.Errorf("signature concept %q: %w", bareName, err)
+			return err
 		}
 		symbols[bareName] = &symbolEntry{
 			leafName:   bareName,
@@ -93,6 +114,75 @@ func (r *ConceptResolver) ResolveFileWithSignatureConceptsInDomain(file *languag
 	}
 
 	return nil
+}
+
+// ResolveSignatureConceptInNamespace resolves ONE signature-bound bare concept
+// name (`mutate <Concept> <name> { ... }`) for a file whose assembly directory
+// is `dir` and whose declared namespace is `declaredNS`.
+//
+// It is the SINGLE definition of that resolution, and being single is the point
+// (memql#3084). There are two signature-concept resolution sites in the loader:
+// this one feeds the symbol table that REWRITES THE AST -- a mutation's write
+// target and a query's `concept ==` filter -- and function_loader's
+// boundConcept derivation feeds @secret redaction and ensureBoundConceptFilter.
+// The parked attempt gated only the second, so with a registry holding just the
+// foreign concept, BoundConcept came back empty while MutationTemplate.Concept
+// was still the foreign `v1:tools:widget` and the query still filtered on it:
+// the defect survived its own fix. Two call sites implementing one rule is how
+// that happens, so there is now one implementation and both call it.
+//
+// Resolution order:
+//
+//  1. An explicit file-top `use <ns>.concepts.{ <Name> }` import wins outright
+//     and is NOT scope-gated. The import is the authorization; #2617's
+//     discipline is what makes a cross-domain reference legible.
+//  2. Otherwise the bind is AMBIENT, and it is admitted only when the resolved
+//     id is one this domain could have DECLARED -- the pin, the directory, or a
+//     colon-extension of the directory (idIsInDomainAmbientScope, the exact
+//     inverse of AssembleConceptIdFromDeclInDir). Pin first then directory,
+//     because a pinned domain assembles under both and a colliding short-name
+//     may be declared under either; the scope check has the final say either
+//     way, so trying both widens nothing.
+//  3. A foreign id is a hard error naming the import that fixes it.
+//
+// With `dir` empty there is no ambient domain and step 2 degrades to the
+// unhinted unique-trailing-segment match -- see the type-level comment on
+// ResolveFileWithSignatureConceptsInDomain for why that case is deliberate.
+func (r *ConceptResolver) ResolveSignatureConceptInNamespace(uses []*languageParser.UseDeclaration, bareName, dir, declaredNS string) (string, error) {
+	dir = strings.TrimSpace(dir)
+	declaredNS = strings.TrimSpace(declaredNS)
+
+	// 1. Explicit import: never gated.
+	if nsHint := namespaceHintForName(uses, bareName); nsHint != "" {
+		id, err := r.resolveBareConceptNameWithNamespace(bareName, nsHint)
+		if err != nil {
+			return "", fmt.Errorf("signature concept %q: %w", bareName, err)
+		}
+		return id, nil
+	}
+
+	// No assembly directory: no ambient domain to scope against.
+	if dir == "" && declaredNS == "" {
+		id, err := r.resolveBareConceptNameWithNamespace(bareName, "")
+		if err != nil {
+			return "", fmt.Errorf("signature concept %q: %w", bareName, err)
+		}
+		return id, nil
+	}
+
+	// 2. Ambient bind, scoped.
+	for _, hint := range ambientHints(dir, declaredNS) {
+		id, aerr := r.resolveBareConceptNameWithNamespace(bareName, hint)
+		if aerr != nil {
+			continue
+		}
+		if idIsInDomainAmbientScope(id, dir, declaredNS) {
+			return id, nil
+		}
+	}
+
+	// 3. Refused.
+	return "", fmt.Errorf("signature concept %q is neither imported nor a same-domain concept of %q -- add a file-top `use <ns>.concepts.{ %s }` import", bareName, dir, bareName)
 }
 
 // resolveBareConceptName looks up a bare concept name (e.g. "space")

@@ -72,19 +72,19 @@ func TestListForUserDrainsAllKeysetPages(t *testing.T) {
 	}
 }
 
-// TestListForUserPageReturnsSinglePageAndCursor proves the bounded
+// TestListForSelfPageReturnsSinglePageAndCursor proves the bounded
 // /me/tokens path fetches exactly one page and surfaces the continuation
 // cursor for "load more" rather than draining the whole set.
-func TestListForUserPageReturnsSinglePageAndCursor(t *testing.T) {
+func TestListForSelfPageReturnsSinglePageAndCursor(t *testing.T) {
 	eng := &pagedFakeEngine{pages: [][]string{
 		{"v1:identity:identity:pat-a", "v1:identity:identity:pat-b"},
 		{"v1:identity:identity:pat-c"},
 	}}
 	s := &Store{Engine: eng}
 
-	rows, next, err := s.ListForUserPage(context.Background(), "user-1", "")
+	rows, next, err := s.ListForSelfPage(context.Background(), "")
 	if err != nil {
-		t.Fatalf("ListForUserPage: %v", err)
+		t.Fatalf("ListForSelfPage: %v", err)
 	}
 	if len(rows) != 2 {
 		t.Fatalf("first page returned %d rows, want 2", len(rows))

@@ -103,7 +103,7 @@ func (s *CodeProfileSubscriber) Stop(_ context.Context) {
 // Standard Dependency surface so the app bootstrap can hold this
 // alongside the rest of the component graph. Order is chosen to
 // match the engine phase's other lightweight subscribers (>5,
-// well after database + concept seeder).
+// well after the database is up).
 func (s *CodeProfileSubscriber) IsRunning() bool { return s.running.Load() }
 func (s *CodeProfileSubscriber) Order() int      { return 10 }
 func (s *CodeProfileSubscriber) ComponentName() common.ComponentName {

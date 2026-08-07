@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/identity"
 	"github.com/znasllc-io/memql/component/identity/pat"
 	webtempl "github.com/znasllc-io/memql/component/identity/web/templ"
@@ -19,15 +20,42 @@ import (
 // layer satisfies this with a closure around the live *pat.Store.
 type PATAdapter interface {
 	ListForUser(ctx context.Context, userId string) ([]pat.PATRow, error)
-	// ListForUserPage returns one bounded keyset page plus the cursor to
-	// continue (empty when the set is exhausted). Backs the /me/tokens
-	// listing so a user with many tokens gets a bounded first page + a
-	// "load more" affordance instead of a silent 50-row truncation
-	// (5.10b / epic #1964).
-	ListForUserPage(ctx context.Context, userId, cursor string) ([]pat.PATRow, string, error)
+	// ListForSelfPage returns one bounded keyset page of the CALLER's OWN
+	// tokens plus the cursor to continue (empty when the set is exhausted).
+	// Backs the /me/tokens listing so a user with many tokens gets a bounded
+	// first page + a "load more" affordance instead of a silent 50-row
+	// truncation (5.10b / epic #1964).
+	//
+	// No userId parameter (memql#3178): the rows are derived from the actor
+	// on ctx, so this page cannot be pointed at somebody else's tokens.
+	ListForSelfPage(ctx context.Context, cursor string) ([]pat.PATRow, string, error)
 	Create(ctx context.Context, identityId, userId, label, keyHash string) error
 	Revoke(ctx context.Context, identityId string) error
 	LookupById(ctx context.Context, identityId string) (*pat.PATRow, error)
+}
+
+// callerActorCtx returns r's context carrying the SIGNED-IN user as the DSL
+// actor, so a self-scoped query's `userId==actor.userId` resolves to them.
+//
+// This is required, not belt-and-braces (memql#3178). Every identity web route
+// is wrapped in identity.SystemActorMiddleware, which stamps a claims map and a
+// TokenInfo but NOT an auth.AccessContext -- and `actor.userId` is resolved
+// from the AccessContext alone (component/memql resolveActorPath ->
+// auth.AccessFromContext). The claims->AccessContext conversion
+// (auth.FallbackFromClaims) lives only in the gRPC stream session's
+// ensureAccess, which no HTTP route reaches. Without this call the actor
+// envelope resolves userId to "" and /me/tokens renders empty for everyone.
+//
+// requireUser has already VERIFIED the access token that produced claims, so
+// the subject here is authenticated, not caller-asserted.
+func callerActorCtx(r *http.Request, claims *identity.AccessTokenClaims) context.Context {
+	if r == nil {
+		return context.Background()
+	}
+	if claims == nil {
+		return r.Context()
+	}
+	return auth.ContextWithUserActor(r.Context(), claims.Subject)
 }
 
 // MeTokens wires the token-management handlers onto the Server. Set
@@ -67,7 +95,7 @@ func meTokensNavLinks() []webtempl.NavLink {
 // paginated (5.10b / epic #1964): a bounded first page is rendered, and
 // when more tokens remain a "Show more" link carries the opaque cursor
 // to GET the next page (`/me/tokens?cursor=<token>`). The cursor is read
-// back from the engine via ListForUserPage; an empty next cursor means
+// back from the engine via ListForSelfPage; an empty next cursor means
 // the set is exhausted.
 func (s *Server) handleMeTokensGet(w http.ResponseWriter, r *http.Request) {
 	claims, err := s.requireUser(w, r)
@@ -75,7 +103,7 @@ func (s *Server) handleMeTokensGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cursor := strings.TrimSpace(r.URL.Query().Get("cursor"))
-	rows, next, err := s.meTokens.Adapter.ListForUserPage(r.Context(), claims.Subject, cursor)
+	rows, next, err := s.meTokens.Adapter.ListForSelfPage(callerActorCtx(r, claims), cursor)
 	if err != nil {
 		s.Logger.Warn("me-tokens: list failed", "error", err, "userId", claims.Subject)
 	}
@@ -138,7 +166,7 @@ func (s *Server) handleMeTokensPost(w http.ResponseWriter, r *http.Request) {
 
 	// Re-render the bounded first page (the freshly-minted token sorts
 	// to the top under the createdAt-desc ordering, so it's always on it).
-	rows, next, _ := s.meTokens.Adapter.ListForUserPage(r.Context(), claims.Subject, "")
+	rows, next, _ := s.meTokens.Adapter.ListForSelfPage(callerActorCtx(r, claims), "")
 
 	data := webtempl.MeTokensData{
 		Layout:     s.LayoutData(r, "API tokens", true, meTokensNavLinks(), nil),

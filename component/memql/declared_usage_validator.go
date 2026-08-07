@@ -154,18 +154,30 @@ func extractFunctionBody(source string) string {
 }
 
 // precededByBodyOpener reports whether the text immediately preceding
-// position p is the header line of a function/struct definition.
+// position p is the header line of a function definition.
 //
-// Recognised headers (the parser-emitted forms after the struct
-// rewriters run):
+// There is exactly ONE recognised header -- the parser-emitted form
+// after the struct rewriters run:
 //
-//   - `func (Receiver) name(<args>) <returns> {` (procedural form)
-//   - `query NAME {` / `mutate NAME {` / `automation NAME {`
-//     `spec NAME {` / `trait NAME {` (struct form, pre-rewrite)
+//   - `func (Receiver) name(<args>) <returns> {`
 //
-// The check looks at the last logical line ending at `prefix`. The
-// header keyword is allowed anywhere on that line (covers
-// `func (...) name(...) <retType> {`).
+// The author-facing struct-form headers (`query NAME {` /
+// `mutate NAME {` / `logic NAME {` / `automation NAME {` --
+// parser.StructFormKeywords) cannot reach here: the snapshot every
+// caller of extractFunctionBody is fed (`rawSourceForUsage` in
+// function_loader.go) is taken AFTER NormaliseAll, which has already
+// rewritten each of those keywords into the `func (Receiver)` shape
+// above. The native keywords the rewriter leaves alone (`spec` /
+// `trait` / `action`) parse to SpecDef / ActionDef, never a
+// *FunctionDef, so they never reach this validator either. A
+// struct-form keyword arm here would be dead by construction, and a
+// stale one silently invited a fail-open (a header miss makes
+// extractFunctionBody return "" and every caller skip its check), so
+// it is deliberately absent -- memql#3194.
+//
+// The check looks at the last logical line ending at `prefix`; the
+// header keyword must open that line (the rest of the header, up to
+// and including `<retType>`, may follow it).
 func precededByBodyOpener(prefix string) bool {
 	trimmed := strings.TrimRight(prefix, " \t\r\n")
 	if trimmed == "" {
@@ -178,17 +190,7 @@ func precededByBodyOpener(prefix string) bool {
 		nl++
 	}
 	line := strings.TrimSpace(trimmed[nl:])
-	// Procedural form (`func (...) name(...) {`).
-	if strings.HasPrefix(line, "func ") || strings.HasPrefix(line, "func\t") {
-		return true
-	}
-	// Struct-form opener.
-	for _, kw := range []string{"query ", "mutation ", "automation ", "spec ", "trait "} {
-		if strings.HasPrefix(line, kw) {
-			return true
-		}
-	}
-	return false
+	return strings.HasPrefix(line, "func ") || strings.HasPrefix(line, "func\t")
 }
 
 // stripAttrLines removes lines that contain `@<word>(...)` annotation

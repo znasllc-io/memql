@@ -17,21 +17,20 @@
 // bodies (`args.event.payload.X`) are a different surface and are never
 // rewritten.
 //
-// PROTECTION IS SCOPED, and the scope is not the file. WITHIN an automation
-// block, string literals, `//` line comments and `/* */` block comments are
-// protected on the same rules the G5 gate itself scans by -- see scanSegments,
-// which is what collectPayloadFields and rewriteBlock run on.
+// PROTECTION IS WHOLE-FILE, and every scan derives it from ONE segmenter.
+// String literals, `//` line comments and `/* */` block comments are protected
+// on the same rules the G5 gate itself scans by -- see scanSegments. The scans
+// that look INSIDE a block (collectPayloadFields, rewriteBlock) run on it, and
+// so do the scans that FIND the blocks: automationHeader and argsHeader match
+// against scrub's blanked copy, matchingBrace counts depth over code segments
+// only (memql#3193). So a commented-out automation is not an automation, and a
+// brace inside a string literal neither opens nor closes a block.
 //
-// The scans that FIND the blocks do NOT use it. automationHeader, matchingBrace
-// and argsHeader still match on raw source, so:
-//   - a commented-out automation inside `/* */` IS rewritten, args block and all;
-//   - a `{` or `}` inside a string literal mis-terminates the block, and the
-//     reads past it are silently left un-migrated -- and because a truncated
-//     block then collects no fields, a SECOND run reports the file as clean.
-//
-// Both are memql#3101, filed with repros and deliberately not fixed here.
-// Do not read "protected" as covering a whole file: audit comment regions and
-// brace-bearing literals in the diff before trusting a -write run.
+// The two ways that used to go wrong are what the outer scans are now tested
+// for: a `/* */`-parked automation was rewritten, args block and all, and a `}`
+// in a literal mis-terminated the block, silently leaving every read past it
+// un-migrated -- and because a truncated block then collects no fields, a
+// SECOND run reported the file as clean.
 //
 // Usage: go run ./scripts/migrations/event_payload_args [-write] <dsl-root>...
 package main
@@ -96,11 +95,20 @@ func main() {
 // migrateFile rewrites every full-form automation block in the source.
 func migrateFile(src string) (string, string) {
 	var report strings.Builder
+	// Header matching runs against the blanked copy, so an automation parked in
+	// a `/* */` comment is not a header. scrub is length- and line-preserving,
+	// so the offsets index src unchanged, and every span a header match reports
+	// is code -- identical in both views.
+	//
 	// Walk automation headers back-to-front so offsets stay valid as we edit.
-	locs := automationHeader.FindAllStringSubmatchIndex(src, -1)
+	locs := automationHeader.FindAllStringSubmatchIndex(scrub(src), -1)
 	for i := len(locs) - 1; i >= 0; i-- {
 		loc := locs[i]
-		openIdx := strings.Index(src[loc[0]:loc[1]], "{") + loc[0]
+		// Both header patterns END in `\{`, which is the only anchor that
+		// survives blanking: prose scrubs to whitespace, so the leading `^\s*`
+		// can start a match at the top of a blanked comment and a search for
+		// the FIRST `{` in the match span would land on a brace inside it.
+		openIdx := loc[1] - 1
 		closeIdx := matchingBrace(src, openIdx)
 		if closeIdx < 0 {
 			continue
@@ -166,13 +174,19 @@ func rewriteBlock(block string, fields []string) string {
 // ensureArgs inserts (or extends) the args block at the top of the
 // automation body with `<field> any` entries for missing fields.
 func ensureArgs(block string, fields []string) string {
-	if loc := argsHeader.FindStringIndex(block); loc != nil {
-		open := strings.Index(block[loc[0]:loc[1]], "{") + loc[0]
+	// Same blanked view as the automation header scan: a commented-out args
+	// block is not an args block, so extending it (and leaving the automation
+	// with no live args at all) is not reachable.
+	if loc := argsHeader.FindStringIndex(scrub(block)); loc != nil {
+		open := loc[1] - 1 // the pattern's trailing `\{`; see migrateFile
 		closeIdx := matchingBrace(block, open)
 		if closeIdx < 0 {
 			return block
 		}
-		existing := block[open+1 : closeIdx]
+		// The already-present probe reads the blanked interior too -- a field
+		// named only in a comment is not present, and skipping it would leave
+		// the read the G1 fire-time validation then refuses.
+		existing := scrub(block[open+1 : closeIdx])
 		var add strings.Builder
 		for _, f := range fields {
 			if !regexp.MustCompile(`(?m)^\s*` + f + `\s`).MatchString(existing) {
@@ -342,16 +356,33 @@ func scrub(s string) string {
 	return string(out)
 }
 
+// matchingBrace returns the offset of the `}` closing the `{` at open, or -1
+// if the block is unterminated. The depth walk visits the CODE segments of
+// scanSegments only (memql#3193), so a brace inside a string literal or a
+// comment neither opens nor closes a block. A bare depth counter ended
+// `automation a { step s { label: "close } brace" } step t { ... } }` at the
+// literal's brace, putting `step t` outside the span the migration ever reads:
+// its payload reads reached neither the args block nor the rewrite, and the
+// truncated block collecting no fields made the next run report the file clean.
 func matchingBrace(s string, open int) int {
 	depth := 0
-	for i := open; i < len(s); i++ {
-		switch s[i] {
-		case '{':
-			depth++
-		case '}':
-			depth--
-			if depth == 0 {
-				return i
+	for _, seg := range scanSegments(s) {
+		if !seg.code || seg.end <= open {
+			continue
+		}
+		start := seg.start
+		if start < open {
+			start = open
+		}
+		for i := start; i < seg.end; i++ {
+			switch s[i] {
+			case '{':
+				depth++
+			case '}':
+				depth--
+				if depth == 0 {
+					return i
+				}
 			}
 		}
 	}

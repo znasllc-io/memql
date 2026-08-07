@@ -13,7 +13,7 @@ var realStdout *os.File
 // RedirectStdoutForStdio captures the process's real stdout for the MCP
 // JSON-RPC protocol and repoints os.Stdout at os.Stderr, so any component
 // that logs to "stdout" -- the service logger (main.go binds it to os.Stdout),
-// the concept seeder, a stray fmt.Println -- cannot corrupt the wire.
+// or a stray fmt.Println -- cannot corrupt the wire.
 //
 // It MUST run once, before the service logger is constructed; the mcp build
 // installs it from a build-tagged init in package main, so it is not active

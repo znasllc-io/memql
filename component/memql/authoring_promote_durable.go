@@ -402,6 +402,31 @@ func withRehydratePromote(fn func(ctx context.Context, row AuthoringConstructRow
 	return func(c *rehydrateConfig) { c.promote = fn }
 }
 
+// explainStaleGrammarStamp decorates a recompile failure with the
+// grammar-version diagnosis when the row's stamp predates this engine's grammar
+// (S6, memql#2361; ordering fixed in memql#3089).
+//
+// This is the whole of what the stamp is FOR. It does not decide whether the row
+// loads -- the compile already decided that -- it decides what the operator is
+// told about a row that failed. A stale stamp turns "parse error at line 7,
+// column 71" into "authored under grammar X, this engine runs Y, run
+// memqlmigrate", which is the actionable form.
+//
+// Two cases deliberately pass through undecorated:
+//
+//   - a row with NO stamp (legacy, pre-#2361). Nothing is known about which
+//     grammar it was written against, so naming a migration would be a guess.
+//   - a row stamped with the CURRENT grammar. Its source failing to compile is a
+//     real defect in the source or a missing dependency, and blaming a grammar
+//     move that did not happen would send the reader somewhere useless.
+func explainStaleGrammarStamp(row AuthoringConstructRow, err error) error {
+	if err == nil || row.GrammarVersion == "" || row.GrammarVersion == languageParser.GrammarVersion {
+		return err
+	}
+	return fmt.Errorf("authored construct %s %q was authored under grammar %q; this engine runs %q -- run `memqlmigrate --rewrite` for the intervening grammar epics against the bundle source and re-promote (S6, memql#2361). It no longer recompiles: %w",
+		row.Kind, row.Name, row.GrammarVersion, languageParser.GrammarVersion, err)
+}
+
 // recompileAndPromoteRow recompiles one persisted promoted construct's source
 // back into its compiled *Function / *Spec and registers it into the shared
 // registry via PromoteAuthoredConstruct (core-first, never-shadow). It is the
@@ -425,15 +450,30 @@ func (e *MemQLEngine) recompileAndPromoteRow(ctx context.Context, row AuthoringC
 			e.quarantineRehydratedConstruct(row, err)
 		}
 	}()
-	// S6 (#2361): a MISMATCHED grammar stamp is the actionable signal this
-	// row predates a grammar move -- quarantine with the migration command
-	// named instead of whatever downstream parse error the stale source
-	// would produce. Legacy rows without a stamp proceed (the recompile
-	// decides); a row stamped with the CURRENT grammar also proceeds.
-	if row.GrammarVersion != "" && row.GrammarVersion != languageParser.GrammarVersion {
-		return fmt.Errorf("authored construct %s %q was authored under grammar %q; this engine runs %q -- run `memqlmigrate --rewrite` for the intervening grammar epics against the bundle source and re-promote (S6, memql#2361)",
-			row.Kind, row.Name, row.GrammarVersion, languageParser.GrammarVersion)
-	}
+	// S6 (#2361), ORDERING INVERTED by memql#3089: the grammar stamp does not
+	// GATE the recompile, it EXPLAINS one that failed.
+	//
+	// It used to compare the stamp and return BEFORE attempting any compile.
+	// That ordering is what made a GrammarVersion bump destructive: every
+	// durable v1:authoring:construct row carrying the prior stamp was
+	// unregistered on first boot even though its source still parsed perfectly.
+	// So the price of bumping the constant was losing every stored construct,
+	// and the constant duly stopped being bumped -- six grammar moves in six
+	// weeks, in both directions, with this comparison always equal and the guard
+	// therefore never firing at all. An epoch allowlist and a restamp pass were
+	// both proposed to route around that wire; fixing the ordering removes the
+	// need for either.
+	//
+	// Now: COMPILE FIRST. If the source still compiles, the row registers
+	// whatever its stamp says -- a valid stored construct can never be lost to a
+	// bump. If the compile FAILS and the stamp is stale, the stale stamp is the
+	// actionable diagnosis and replaces whatever downstream parse error the
+	// stale source produced with the named migration command, which is exactly
+	// what the paragraph above says the mechanism is for. A compile failure
+	// under the CURRENT stamp keeps its own error, because a grammar move is not
+	// what went wrong.
+	//
+	// Applied at each compile-failure site below via explainStaleGrammarStamp.
 	sc := SandboxConstruct{Name: row.Name, Kind: row.Kind, Source: row.Source}
 	c := &AuthoredConstruct{
 		OwnerUserId: row.OwnerUserId,
@@ -451,13 +491,13 @@ func (e *MemQLEngine) recompileAndPromoteRow(ctx context.Context, row AuthoringC
 		_, concepts := compileBundle([]SandboxConstruct{sc})
 		fn, err := compileAuthoredFunction(sc, concepts)
 		if err != nil {
-			return fmt.Errorf("recompile %s %q: %w", row.Kind, row.Name, err)
+			return explainStaleGrammarStamp(row, fmt.Errorf("recompile %s %q: %w", row.Kind, row.Name, err))
 		}
 		c.Compiled = fn
 	case "spec", "trait":
 		spec, err := compileAuthoredSpec(sc)
 		if err != nil {
-			return fmt.Errorf("recompile %s %q: %w", row.Kind, row.Name, err)
+			return explainStaleGrammarStamp(row, fmt.Errorf("recompile %s %q: %w", row.Kind, row.Name, err))
 		}
 		if spec == nil {
 			// compileAuthoredSpec's (nil, nil) is the #2607 intentional-skip

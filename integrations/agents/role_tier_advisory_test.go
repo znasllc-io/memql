@@ -78,10 +78,30 @@ func TestAgentRoleTierIsPromptAdvisoryOnly(t *testing.T) {
 		"skill_tier_validation.go | tier := readSeedStringField(def.Body, \"tier\")":      "skill/domain tier",
 		"skill_tier_validation.go | skillTier := readSeedStringField(def.Body, \"tier\")": "skill tier",
 	}
-	// rowauthz_shadow.go carries a whole rowAuthz decl.Tier surface -- a
-	// different concept entirely, and enumerating each line would make this
-	// baseline rot on every edit to that file for no signal.
-	skipFiles := map[string]bool{"rowauthz_shadow.go": true}
+	// The rowauthz_* files carry a whole rowAuthz decl.Tier surface --
+	// `langparser.RowAuthzDecl.Tier`, the tier a CONCEPT declares about who may
+	// see its rows, which has nothing to do with agentRole.tier. Enumerating
+	// each line would make this baseline rot on every edit to those files for
+	// no signal. (rowauthz_enforce.go joined the list in memql#3172, which
+	// turned that surface from a measurement into read-path enforcement;
+	// rowauthz_write_guard.go joined in memql#3174, which did the same for
+	// update/delete; rowauthz_insert_stamp.go joined in memql#3175, which
+	// stamps the declared owner on the raw insert() path. The reads
+	// multiplied; the concept behind them did not change.)
+	//
+	// Every file below reads langparser.RowAuthzDecl.Tier -- checked at the
+	// point each was added, not assumed. None reads agentRole.tier, so
+	// dsl/agents/concepts.memql's "advisory, nothing branches on it"
+	// description stays true. Keeping that distinction is the whole purpose of
+	// this sweep: memql#3068 and memql#3061 record an authorization decision
+	// very nearly being taken on a field whose description promised behaviour
+	// that did not exist.
+	skipFiles := map[string]bool{
+		"rowauthz_shadow.go":       true,
+		"rowauthz_enforce.go":      true,
+		"rowauthz_write_guard.go":  true,
+		"rowauthz_insert_stamp.go": true,
+	}
 
 	var unknown []string
 	var scanned int

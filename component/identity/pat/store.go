@@ -188,13 +188,21 @@ const maxPATPageWalk = 1000
 
 // ListForUser returns every PAT identity (active + inactive) owned by
 // the given user, in a UI-safe projection (no keyHash). Used by the
-// admin /admin/tokens roll-up (via ListAll) and by the per-user revoke
-// ownership check, both of which need the COMPLETE set.
+// admin /admin/tokens roll-up (via ListAll) and by the operator CLI
+// (`memql pat list --user-id X`), both of which need the COMPLETE set
+// and are legitimately reading SOMEBODY ELSE's tokens.
+//
+// ADMIN-ONLY (memql#3178). patIdentitiesForUser is gated on
+// `requiresOwnerOrAdmin`, so ctx MUST carry an AccessContext whose Role
+// is owner or admin -- claims alone are not enough, because the gate
+// reads actor.role off the AccessContext. Callers get that from
+// identity.ContextWithSystemActor (CLI / bootstrap) or from the admin
+// web's requireAdmin. A caller without it reads zero rows, by design.
+// "My own tokens" is ListForSelfPage, which needs no privilege.
 //
 // patIdentitiesForUser is `paginate 50` (5.2 / epic #1964), so a
 // single Execute returns only the first page. This method walks the
-// keyset cursor to assemble the full list; the bounded, user-facing
-// /me/tokens listing uses ListForUserPage instead.
+// keyset cursor to assemble the full list.
 func (s *Store) ListForUser(ctx context.Context, userId string) ([]PATRow, error) {
 	if s == nil || s.Engine == nil {
 		return nil, errors.New("pat.Store: engine not wired")
@@ -220,21 +228,27 @@ func (s *Store) ListForUser(ctx context.Context, userId string) ([]PATRow, error
 	return out, nil
 }
 
-// ListForUserPage returns ONE keyset page of the user's PAT identities
-// plus the cursor to continue. Pass an empty cursor for the first page;
-// thread the returned nextCursor back in for "load more". An empty
-// returned cursor means the set is exhausted. Backs the bounded
-// /me/tokens listing (5.10b / epic #1964) so a user with many tokens
-// gets a bounded first page + a continuation affordance instead of a
-// silent 50-row truncation.
-func (s *Store) ListForUserPage(ctx context.Context, userId, cursor string) ([]PATRow, string, error) {
+// ListForSelfPage returns ONE keyset page of the CALLER's OWN PAT
+// identities plus the cursor to continue. Pass an empty cursor for the
+// first page; thread the returned nextCursor back in for "load more".
+// An empty returned cursor means the set is exhausted. Backs the
+// bounded /me/tokens listing (5.10b / epic #1964) so a user with many
+// tokens gets a bounded first page + a continuation affordance instead
+// of a silent 50-row truncation.
+//
+// SELF-SCOPED (memql#3178). There is no userId parameter: the row set
+// is derived from the authenticated actor via `userId==actor.userId`,
+// so this method CANNOT be pointed at another user's tokens. ctx must
+// carry an AccessContext for the signed-in user -- claims alone resolve
+// actor.userId to "" and return zero rows -- which the /me/tokens
+// handler supplies with auth.ContextWithUserActor.
+func (s *Store) ListForSelfPage(ctx context.Context, cursor string) ([]PATRow, string, error) {
 	if s == nil || s.Engine == nil {
 		return nil, "", errors.New("pat.Store: engine not wired")
 	}
-	q := fmt.Sprintf(`query patIdentitiesForUser(userId:%q)`, userId)
-	nodes, next, err := s.executeAndExtractPage(ctx, q, cursor)
+	nodes, next, err := s.executeAndExtractPage(ctx, `query patIdentitiesForSelf()`, cursor)
 	if err != nil {
-		return nil, "", fmt.Errorf("pat.Store.ListForUserPage: %w", err)
+		return nil, "", fmt.Errorf("pat.Store.ListForSelfPage: %w", err)
 	}
 	out := make([]PATRow, 0, len(nodes))
 	for _, n := range nodes {
@@ -398,8 +412,8 @@ func bareSlug(id string) string {
 // Bundle.Nodes, and the original implementation only read the latter.
 // That silently returned zero matches for every PAT lookup
 // (patIdentityByKeyHash on the gRPC interceptor hot-path,
-// patIdentityById, patIdentitiesForUser for the /me/pats
-// page), with no log -- "PAT not found" was indistinguishable from
+// patIdentityById, and the per-user PAT listings), with no log --
+// "PAT not found" was indistinguishable from
 // "PAT actually missing." Mirroring the workertoken fix here.
 func (s *Store) executeAndExtract(ctx context.Context, query string) ([]*memqlv1.MemoryNode, error) {
 	nodes, _, err := s.executeAndExtractPage(ctx, query, "")
