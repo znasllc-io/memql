@@ -16160,7 +16160,7 @@ const file_memql_proto_rawDesc = "" +
 	"\x13SENSE_SEVERITY_INFO\x10\x03\x12\x17\n" +
 	"\x13SENSE_SEVERITY_HINT\x10\x042h\n" +
 	"\fMemqlService\x12X\n" +
-	"\x06Stream\x12$.znasllc.memql.v1.MemqlClientMessage\x1a$.znasllc.memql.v1.MemqlServerMessage(\x010\x01B.Z,github.com/znasllc-io/memql/grpc/gen;memqlv1b\x06proto3"
+	"\x06Stream\x12$.znasllc.memql.v1.MemqlClientMessage\x1a$.znasllc.memql.v1.MemqlServerMessage(\x010\x01B8Z6github.com/znasllc-io/memql/component/grpc/gen;memqlv1b\x06proto3"
 
 var (
 	file_memql_proto_rawDescOnce sync.Once

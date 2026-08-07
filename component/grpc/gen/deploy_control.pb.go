@@ -1259,7 +1259,7 @@ const file_deploy_control_proto_rawDesc = "" +
 	"\n" +
 	"CutVersion\x121.znasllc.memql.deploycontrol.v1.CutVersionRequest\x1a,.znasllc.memql.deploycontrol.v1.ActionResult\x12e\n" +
 	"\x06Deploy\x12-.znasllc.memql.deploycontrol.v1.DeployRequest\x1a,.znasllc.memql.deploycontrol.v1.ActionResult\x12}\n" +
-	"\x12RollbackDeployment\x129.znasllc.memql.deploycontrol.v1.RollbackDeploymentRequest\x1a,.znasllc.memql.deploycontrol.v1.ActionResultB.Z,github.com/znasllc-io/memql/grpc/gen;memqlv1b\x06proto3"
+	"\x12RollbackDeployment\x129.znasllc.memql.deploycontrol.v1.RollbackDeploymentRequest\x1a,.znasllc.memql.deploycontrol.v1.ActionResultB8Z6github.com/znasllc-io/memql/component/grpc/gen;memqlv1b\x06proto3"
 
 var (
 	file_deploy_control_proto_rawDescOnce sync.Once
