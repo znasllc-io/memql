@@ -46,28 +46,51 @@ import (
 // third-party text), and the two drifting apart is precisely how one of them
 // ends up not matching readString.
 //
-// That is two collapsed into one, and NOT the end of the class. Several other
-// renderers still turn Go values into MemQL literals their own way. Examples,
-// deliberately NOT presented as a complete list -- an earlier version of this
-// comment claimed a repo-wide collapse, a second one enumerated four and still
-// missed three, so the honest form is a pointer to the search rather than a
-// count (`grep -rn 'Sprintf("%q"' --include=*.go` over the statement-building
-// paths finds them). Filed as memql#3099:
+// # The rest of the class, swept in memql#3192
 //
-//   - component/automations/steps/function.go renders string function args with
-//     %q and hands the result to Engine.Execute. That is this exact defect on the
-//     automation step path, not an analogue -- the lexer refuses its output for
-//     the same bytes, verified. Its sibling mutation.go does the same when it
-//     builds an insert.
-//   - component/memql/liveknowledge's memqlQuote is another %q-into-the-engine
-//     renderer. component/memql carries two more definitions that are NOT the %q
-//     defect and should not be lumped in with it: encodeForMemqlSubstitution
-//     encodes with json.Marshal and only falls back to %q when that fails, and
-//     renderDryRunMemQLValue is json.Marshal outright.
-//   - sdk/go/client does the same across support.go and its generated builders.
+// memql#3099 recorded that several other renderers still turned Go values into
+// MemQL literals their own way, and deliberately declined to enumerate them --
+// two successive attempts had both been incomplete, so the honest form was a
+// pointer to the search rather than a count. That sweep is done. The reliable
+// search is still `grep -rn 'Sprintf("%q"' --include=*.go` over the
+// statement-building paths; what it now finds is error messages and the two
+// deliberate exemptions named below.
 //
-// One caller of THIS function is also on the wrong side of a related boundary,
-// which belongs here rather than left for someone to rediscover: component/inbound
+// Converted to call this function (each with a real-lexer regression test):
+//
+//   - component/automations/steps: renderMemQLValue (function args ->
+//     Engine.Execute), buildInsertQuery (concept / id / parent / aliasOf), and
+//     jsonString (the step-execution record).
+//   - component/language/compiler: expressionToString, valueToString and
+//     mutationToString, the automation serialize/re-parse boundary. Reachable
+//     from authored DSL, because readString DECODES \u00XX into a real control
+//     byte that %q then re-encoded in a form readString rejects.
+//   - component/language/parser: reconstructTokens, which rebuilt PayloadRaw
+//     from lexed tokens -- so a literal this package accepted could not be
+//     re-read by this package.
+//   - core/liveknowledge's memqlQuote. That package is an L0 leaf with zero
+//     in-repo imports (memql#3164), so it cannot import this one; the quoter is
+//     injected by integrations/liveknowledge instead of copied down.
+//   - sdk/go/client, fixed at the emitter (sdk/gen/emit_go.go) and regenerated,
+//     plus support.go's renderMemQLValue.
+//   - component/memql: encodeForMemqlSubstitution and renderDryRunMemQLValue,
+//     and integrations/knowledge's hand-rolled escape table. None of those three
+//     was a live defect -- json.Marshal escapes correctly and the lexer accepts
+//     a raw control byte -- but each was a separate DEFINITION of the escape
+//     set, which is what this file exists to prevent.
+//   - component/memql's expressionToSource, which had no callers at all and was
+//     deleted rather than converted.
+//
+// Two %q call sites are deliberately NOT this defect and must not be swept into
+// it: component/memql's jsonschemaSingleQuoted builds a redaction needle that
+// has to match text the jsonschema library printed with Go's %q, and
+// integrations/knowledge's pgStringArray builds a PostgreSQL array literal.
+// Neither goes near this lexer. Both say so at their definition.
+//
+// # The second layer: NUL and jsonb
+//
+// One caller of THIS function is on the wrong side of a related boundary, which
+// belongs here rather than left for someone to rediscover: component/inbound
 // stages a raw third-party webhook body through memqlString, and a NUL in that
 // body renders as an escape the lexer accepts and PostgreSQL's jsonb then refuses,
 // so the row cannot be staged at all. That is memql#3035's defect one file over.
@@ -76,12 +99,13 @@ import (
 // bytes are load-bearing, so choosing between rejecting and substituting is a
 // decision this helper cannot make on its caller's behalf. Filed as memql#3098.
 //
-// Not every one of those is a live defect -- integrations/knowledge's hand-rolled
-// table and component/automations/steps' jsonString are duplicate DEFINITIONS
-// that happen to be safe, since the lexer accepts a raw control byte and
-// json.Marshal escapes correctly. The point is the count, not a verdict on each:
-// these are separate stories (memql#3099), and a helper cannot fix a caller by
-// existing.
+// That is why this function quotes and nothing more. Every site converted in
+// memql#3192 made its own call and recorded it where the code is: none
+// substitute, because none of them is the boundary that stores the value --
+// they are in-process function args, node identifiers, a read-path filter, an
+// author's source text round-tripping, and the client side of the wire.
+// Substitution is a storage decision, and a renderer is not where storage
+// decisions belong.
 //
 // # Invalid UTF-8
 //

@@ -3,13 +3,13 @@ package steps
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/znasllc-io/memql/component/automations"
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 )
 
@@ -108,10 +108,23 @@ func RecordStepExecution(ctx context.Context, engine *memql.MemQLEngine, data St
 		memoryNodes.ConceptMemQLAutomationStep, jsonString(data.RunId), jsonString(data.StepId))
 }
 
-// jsonString returns a JSON-encoded string value.
+// jsonString renders a MemQL string literal for the step-execution record's
+// insert.
+//
+// One line, deliberately: it is an ALIAS for langparser.QuoteString, not a
+// second implementation. The body was json.Marshal with HTML escaping left on
+// -- never a live parse defect, since json.Marshal emits exactly the escapes
+// the lexer implements, but a second definition of the escape set sitting in
+// the same package as renderMemQLValue, which DID carry the %q bug. Two
+// definitions is the cost memql#3035 demonstrated; this collapses one of them.
+// memql#3192.
+//
+// The only visible change is that <, > and & now go out raw rather than
+// unicode-escaped: QuoteString turns HTML escaping off, the lexer accepts all
+// three raw, and the parsed value is identical either way. Nothing built here
+// reaches a browser.
 func jsonString(s string) string {
-	b, _ := json.Marshal(s)
-	return string(b)
+	return langparser.QuoteString(s)
 }
 
 // BuildResultQuery constructs a query to retrieve the result of a step.

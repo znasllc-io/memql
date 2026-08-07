@@ -7541,9 +7541,18 @@ func (p *Parser) reconstructTokens(start, end int) string {
 	var parts []string
 	for i := start; i < end && i < len(p.tokens); i++ {
 		tok := p.tokens[i]
-		// Re-add quotes around string tokens since the lexer strips them
+		// Re-add quotes around string tokens since the lexer strips them.
+		//
+		// QuoteString, not fmt.Sprintf("%q"): the reconstructed text is parsed
+		// AGAIN downstream (parsePayloadRawToTemplate, the compiler's
+		// parsePayloadRaw, the step executor's parseAndEvaluateObjectLiteral),
+		// and %q's escape set is not the one scanString implements. scanString
+		// DECODES a \u00XX escape into a raw control byte; %q re-encoded that
+		// byte as `\a` / `\v` / `\x00`, which scanString rejects -- so a
+		// literal this package accepted could not be re-read by this package.
+		// memql#3192.
 		if tok.Type == TokenString {
-			parts = append(parts, fmt.Sprintf("%q", tok.Literal))
+			parts = append(parts, QuoteString(tok.Literal))
 		} else {
 			parts = append(parts, tok.Literal)
 		}

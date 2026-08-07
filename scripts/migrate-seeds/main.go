@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 var dryRun = flag.Bool("dry-run", false, "Print what would be generated without writing files")
@@ -224,13 +226,20 @@ func writeValue(sb *strings.Builder, key string, value any, indent string) {
 	}
 }
 
+// formatScalar renders a seed JSON value as a MemQL literal.
+//
+// Strings go through langparser.QuoteString, not fmt.Sprintf("%q"): the output
+// is .memql SOURCE that the loader's lexer reads, and %q's escape set is not
+// the one that lexer implements. A control byte in a seed value emitted
+// `\x00` / `\a` / `\v`, none of which it knows, so the generated file would
+// not load. memql#3192.
 func formatScalar(value any) string {
 	if value == nil {
 		return "null"
 	}
 	switch v := value.(type) {
 	case string:
-		return fmt.Sprintf("%q", v)
+		return langparser.QuoteString(v)
 	case bool:
 		return fmt.Sprintf("%v", v)
 	case float64:
@@ -239,6 +248,6 @@ func formatScalar(value any) string {
 		}
 		return fmt.Sprintf("%g", v)
 	default:
-		return fmt.Sprintf("%q", fmt.Sprintf("%v", v))
+		return langparser.QuoteString(fmt.Sprintf("%v", v))
 	}
 }

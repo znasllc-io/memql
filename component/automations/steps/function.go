@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/automations"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -241,7 +242,25 @@ func renderMemQLValue(value any) string {
 		if isRuntimeReference(v) {
 			return v
 		}
-		return fmt.Sprintf("%q", v)
+		// langparser.QuoteString, not fmt.Sprintf("%q"): Go's %q and the
+		// lexer that re-parses this text do not agree on the escape set,
+		// and the disagreement is a hard error rather than a fallback.
+		// scanString implements the JSON escapes and only those, so the
+		// `\x00` / `\a` / `\v` %q emits made the whole call unparseable --
+		// a control byte in an arg resolved from a prior step result or an
+		// event payload broke the step, with an error about the query text
+		// rather than about the data. memql#3192, the memql#3035 defect on
+		// this path.
+		//
+		// Quoted faithfully, never substituted. A NUL rendered here is an
+		// escape the lexer accepts and PostgreSQL's jsonb would then refuse
+		// -- but that second layer is not on THIS boundary: these are
+		// function-call args evaluated in process (comparisons, string
+		// ops, collection lambdas), and nothing here writes a row. Rewriting
+		// a byte would silently change what the logic computes, so the
+		// bytes pass through intact and any mutation downstream that does
+		// persist them answers for its own storage layer.
+		return langparser.QuoteString(v)
 	case bool:
 		if v {
 			return "true"
@@ -259,12 +278,12 @@ func renderMemQLValue(value any) string {
 		// UTC keeps the rendered form canonical; both re-parse consumers
 		// (parseDate in the runtime evaluator, time.Parse(RFC3339) in the
 		// filter executor) accept it.
-		return strconv.Quote(v.UTC().Format(time.RFC3339))
+		return langparser.QuoteString(v.UTC().Format(time.RFC3339))
 	case *time.Time:
 		if v == nil {
 			return "null"
 		}
-		return strconv.Quote(v.UTC().Format(time.RFC3339))
+		return langparser.QuoteString(v.UTC().Format(time.RFC3339))
 	case *timestamppb.Timestamp:
 		// The proto twin of the time.Time case: a shape-projected row
 		// carries createdAt as *timestamppb.Timestamp (see
@@ -274,13 +293,13 @@ func renderMemQLValue(value any) string {
 		if v == nil {
 			return "null"
 		}
-		return strconv.Quote(v.AsTime().UTC().Format(time.RFC3339))
+		return langparser.QuoteString(v.AsTime().UTC().Format(time.RFC3339))
 	case time.Duration:
 		// %v yields "1h30m0s", which the langparser lexes as a malformed
 		// token. Rendered as a quoted string: there is no MemQL duration
 		// literal, and a string is at least inert data the receiving side
 		// can pass to the ISO8601 helpers or ignore.
-		return strconv.Quote(v.String())
+		return langparser.QuoteString(v.String())
 	case []string:
 		// Common typed-slice case the type-switch above doesn't catch.
 		// Falling through to default produces Go's `[a b c]` format
@@ -314,7 +333,7 @@ func renderMemQLValue(value any) string {
 		sort.Strings(keys)
 		parts := make([]string, 0, len(keys))
 		for _, key := range keys {
-			parts = append(parts, fmt.Sprintf("%q: %s", key, renderMemQLValue(v[key])))
+			parts = append(parts, fmt.Sprintf("%s: %s", langparser.QuoteString(key), renderMemQLValue(v[key])))
 		}
 		return fmt.Sprintf("{%s}", strings.Join(parts, ", "))
 	case map[string]any:
@@ -325,7 +344,7 @@ func renderMemQLValue(value any) string {
 		sort.Strings(keys)
 		parts := make([]string, 0, len(keys))
 		for _, key := range keys {
-			parts = append(parts, fmt.Sprintf("%q: %s", key, renderMemQLValue(v[key])))
+			parts = append(parts, fmt.Sprintf("%s: %s", langparser.QuoteString(key), renderMemQLValue(v[key])))
 		}
 		return fmt.Sprintf("{%s}", strings.Join(parts, ", "))
 	default:
@@ -383,7 +402,7 @@ func renderMemQLValueReflect(value any) string {
 		sort.Strings(keys)
 		parts := make([]string, 0, len(keys))
 		for _, key := range keys {
-			parts = append(parts, fmt.Sprintf("%q: %s", key, renderMemQLValue(valuesByKey[key])))
+			parts = append(parts, fmt.Sprintf("%s: %s", langparser.QuoteString(key), renderMemQLValue(valuesByKey[key])))
 		}
 		return fmt.Sprintf("{%s}", strings.Join(parts, ", "))
 	default:

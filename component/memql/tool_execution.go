@@ -17,6 +17,7 @@ import (
 
 	"github.com/santhosh-tekuri/jsonschema/v5"
 
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/safety"
 	"github.com/znasllc-io/memql/core/common"
 )
@@ -322,6 +323,11 @@ func collectSecretRenderings(value any, secretNames map[string]struct{}, inSecre
 // If the library's helper changes, this must change with it; the pin is
 // TestJSONSchemaSingleQuotedMatchesLibrary, which asserts against a message
 // the library itself produced.
+//
+// The %q below is NOT the memql#3192 defect and must not be "fixed" into
+// QuoteString by a future sweep: this builds a redaction NEEDLE that has to
+// match text the jsonschema library printed with Go's %q, not a MemQL string
+// literal. Nothing here goes near the lexer.
 func jsonschemaSingleQuoted(s string) string {
 	q := fmt.Sprintf("%q", s)
 	q = strings.ReplaceAll(q, `\"`, `"`)
@@ -1056,17 +1062,25 @@ func substituteArgsInMemqlQuery(query string, args map[string]any) string {
 }
 
 // encodeForMemqlSubstitution renders a tool-arg value as a MemQL-safe
-// literal (always JSON-encoded -- strings are quoted + escaped,
-// numbers / bools / objects / arrays use their canonical JSON form).
+// literal (strings through the one MemQL quoter; numbers / bools / objects /
+// arrays in their canonical JSON form).
+//
+// The string arm delegates to languageParser.QuoteString. It was json.Marshal
+// with a fmt.Sprintf("%q") fallback, which was never a live defect on two
+// counts -- json.Marshal emits exactly the escapes the lexer implements, and
+// it cannot fail for a string, so the %q arm was unreachable -- but it was a
+// separate DEFINITION of the escape set feeding a query that is then parsed,
+// with an incorrect fallback sitting inside it. memql#3192.
+//
+// Quoted faithfully, never substituted: these are a tool call's args on the
+// way into a handler query, and the storage question belongs to whatever
+// mutation the handler runs, not to the encoder.
 func encodeForMemqlSubstitution(value any) string {
 	switch v := value.(type) {
 	case nil:
 		return `""`
 	case string:
-		if b, err := json.Marshal(v); err == nil {
-			return string(b)
-		}
-		return fmt.Sprintf("%q", v)
+		return languageParser.QuoteString(v)
 	case float64:
 		if v == float64(int64(v)) {
 			return fmt.Sprintf("%d", int64(v))

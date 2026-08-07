@@ -39,6 +39,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // DryRunMode selects the side-effect tier the sandbox runs under.
@@ -347,6 +349,13 @@ func reportToObject(report BundleDryRunReport) (map[string]any, error) {
 // renderDryRunMemQLValue renders a Go value (from a JSON round-trip: string,
 // float64, bool, nil, []any, map[string]any) as a MemQL literal. Self-contained
 // so the persist path does not depend on the automations-side renderer.
+//
+// The string arm delegates to languageParser.QuoteString rather than calling
+// json.Marshal itself. It was never a live parse defect -- json.Marshal emits
+// exactly the escapes the lexer implements -- but it was a separate DEFINITION
+// of the escape set feeding text that is then parsed, and a definition that is
+// correct today and unowned drifts. memql#3035 is what that costs; memql#3192
+// collapses this one into the definition that lives beside the lexer.
 func renderDryRunMemQLValue(v any) string {
 	switch val := v.(type) {
 	case nil:
@@ -357,8 +366,7 @@ func renderDryRunMemQLValue(v any) string {
 		}
 		return "false"
 	case string:
-		b, _ := json.Marshal(val) // JSON string escaping is valid MemQL string syntax.
-		return string(b)
+		return languageParser.QuoteString(val)
 	case float64:
 		// JSON numbers decode to float64; render integers without a trailing .0.
 		if val == float64(int64(val)) {

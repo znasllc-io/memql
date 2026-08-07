@@ -15,6 +15,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 var (
@@ -299,12 +301,17 @@ func writeProperty(sb *strings.Builder, name string, prop jsonProperty, required
 	sb.WriteString("\n")
 }
 
+// jsonTypeToMemQL renders a JSON schema property as a MemQL type token.
+//
+// Enum values go through langparser.QuoteString, not fmt.Sprintf("%q"): the
+// output is .memql SOURCE that the loader's lexer reads, and %q emits escapes
+// that lexer does not implement. memql#3192.
 func jsonTypeToMemQL(prop jsonProperty) string {
 	// Enum
 	if len(prop.Enum) > 0 {
 		vals := make([]string, len(prop.Enum))
 		for i, v := range prop.Enum {
-			vals[i] = fmt.Sprintf("%q", fmt.Sprintf("%v", v))
+			vals[i] = langparser.QuoteString(fmt.Sprintf("%v", v))
 		}
 		return fmt.Sprintf("enum(%s)", strings.Join(vals, ", "))
 	}
