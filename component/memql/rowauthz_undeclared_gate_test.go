@@ -73,6 +73,28 @@ import (
 // visibly different at a glance -- a new one has to name its own issue.
 const undeclaredGrandfatherReason = "memql#3173 seed -- grandfathered as a population, not individually triaged"
 
+// undeclared3178SelfScopedReason covers the two constructs memql#3178
+// introduced while splitting the per-user credential lists off a
+// caller-supplied id.
+//
+// They are on this list, and they are deliberately NOT carrying the
+// grandfather marker, because they are not grandfathered -- they were added
+// after the seed and each names its own issue, which is exactly the
+// distinction the marker exists to make visible.
+//
+// Being listed here does not mean they are unscoped. Both filter on
+// `userId==actor.userId`, so they are strictly narrower than the
+// `userId==args.userId` constructs they replaced. What keeps them on the
+// list is the concept: `v1:identity:identity` still declares no `@rowAuthz`
+// tier, so the engine measures nothing about them and this gate's whole
+// point is that unmeasured is not the same as safe.
+//
+// Declaring the tier is NOT this epic's job -- epic rowauthz-enforcement
+// Decision D holds that each of the 48 identity declarations is its own
+// authorization judgment and burying them inside a tooling change is the
+// outcome this gate exists to prevent.
+const undeclared3178SelfScopedReason = "memql#3178 -- self-scoped on actor.userId; v1:identity:identity still declares no tier (epic Decision D)"
+
 // undeclaredEntry is the map's value type, spelled as an alias so the
 // literal below reads exactly as memql#3135 specified it while the
 // classifier can still name the type in a signature.
@@ -250,10 +272,11 @@ var undeclaredRowAuthzConstructs = map[string]struct {
 
 	// v1:identity:identity
 	"badgeByKeyHash":             {"v1:identity:identity", undeclaredGrandfatherReason},
-	"badgesForUser":              {"v1:identity:identity", undeclaredGrandfatherReason},
+	"badgesForSelf":              {"v1:identity:identity", undeclared3178SelfScopedReason},
 	"nodeTokenIdentities":        {"v1:identity:identity", undeclaredGrandfatherReason},
 	"nodeTokenIdentityByBinding": {"v1:identity:identity", undeclaredGrandfatherReason},
 	"nodeTokenIdentityById":      {"v1:identity:identity", undeclaredGrandfatherReason},
+	"patIdentitiesForSelf":       {"v1:identity:identity", undeclared3178SelfScopedReason},
 	"patIdentitiesForUser":       {"v1:identity:identity", undeclaredGrandfatherReason},
 	"patIdentityById":            {"v1:identity:identity", undeclaredGrandfatherReason},
 	"patIdentityByKeyHash":       {"v1:identity:identity", undeclaredGrandfatherReason},
