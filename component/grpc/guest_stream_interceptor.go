@@ -118,8 +118,18 @@ func validateGuestAndDispatch(
 	guestClaims := map[string]any{
 		"sub":   GuestSubjectPrefix + summary.ID,
 		"email": summary.InviteeEmail,
-		"role":  "reader", // cluster-wide role is meaningless; partition grant drives access
-		"name":  summary.InviteeName,
+		// The cluster-wide role was chosen as a placeholder ("meaningless;
+		// partition grant drives access"). Since memql#3179 it is NOT
+		// meaningless: the coarse data-plane gate in
+		// data_capability_gate.go refuses `reader` any mutation sent over
+		// ExecuteQueryMsg, so a guest stream is read-only on that surface.
+		// The dedicated guest handlers (JoinSpaceAsGuestMsg,
+		// ResolveGuestInviteMsg, ...) are unaffected -- they are their own
+		// payload types and do not go through ExecuteQuery. If guests must
+		// write through the generic DSL surface, this claim is what has to
+		// change, deliberately.
+		"role": "reader",
+		"name": summary.InviteeName,
 		GuestAuthClaimKey: map[string]any{
 			"invitationId": summary.ID,
 			"partitionId":      summary.PartitionId,

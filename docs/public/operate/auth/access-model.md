@@ -408,10 +408,22 @@ binary) provides a UI for it.
 ## Out of scope (deferred)
 
 - **Per-concept ACL.** Today access is at partition granularity.
-- **Writer-vs-reader enforcement inside a partition.** The
-  middleware checks "is the caller granted ANY role in this
-  partition?"; it does not yet block readers from issuing
-  mutations. Tracked in [ROADMAP.md](../../../internal/planning/roadmap.md).
+- **Writer-vs-reader enforcement beyond the ExecuteQuery handler.**
+  A `reader` issuing a mutation over `ExecuteQueryMsg` is now refused
+  with `PermissionDenied` by the coarse data-plane capability gate
+  (`component/grpc/data_capability_gate.go`, memql#3179): the handler
+  resolves the caller's role and asks
+  `auth.Capable(role, "create", "data")` before the engine sees the
+  query. That gate is **partial by construction** -- it sits at the
+  handler layer, so it covers `ExecuteQueryMsg` and nothing else. In
+  particular `CallToolMsg`, which can reach mutation-backed tools, is
+  NOT gated: that surface is also driven by machine credentials
+  (`class="voice_agent"` JWTs carry no role claim and resolve to the
+  reader fallback), so gating it would refuse the live voice path.
+  Constructs reached in-process -- automations, the logic runner, the
+  planner loop, node bootstrap -- are likewise not covered, by design.
+  It is also the COARSE half only: it answers "may this actor write at
+  all", never "which rows".
 - **Time-bounded grants UI.** `expiresAt` exists on the concept but
   Cockpit doesn't expose it as a form field yet.
 - **Identity-merge UI.** If the same human ends up with two users
