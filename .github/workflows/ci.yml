@@ -129,12 +129,47 @@ jobs:
               - 'scripts/**'
             # Any Go source or the module graph. Voice + generator + sdk/go
             # are Go too, so they are a subset of this.
+            #
+            # The module files are matched at ANY DEPTH, not only at the repo
+            # root (memql#3165 review). The root-only literals left a NESTED
+            # `go.mod` matching no bucket ANY LANE CONSULTS -- every lane
+            # skipped and `ci-required` went green over the single file type
+            # that changes what every Go selector in this workflow resolves to.
+            # Verified against picomatch (the matcher dorny/paths-filter uses),
+            # scoring only the seven buckets an `if:` actually reads (ci, gates,
+            # go, dsl, sdkts, proto, vscode -- the target-module buckets below
+            # are declared but wired to nothing, so matching them routes
+            # nothing):
+            #
+            #   go.mod                    -> go
+            #   component/memql/go.mod    -> NO BUCKET   <-- whole pipeline skips
+            #   core/go.mod               -> NO BUCKET
+            #   integrations/go.mod       -> NO BUCKET
+            #   dsl/agents/roles/go.mod   -> dsl only, so RUN_GO and RUN_GATES
+            #                                are BOTH false and neither the
+            #                                root-package step nor the
+            #                                complement step runs
+            #
+            # That last one is not hypothetical: a boundary there silently
+            # drops 12 embedded files, and embed_inventory_test.go -- the guard
+            # written for exactly that -- did not execute for it.
+            #
+            # The root literals are KEPT alongside the `**/` forms rather than
+            # replaced by them. picomatch's `**/go.mod` does match a root
+            # `go.mod` today (verified), but the failure class being closed
+            # here IS "a pattern silently matches less than its author
+            # thought", so root coverage is stated outright instead of resting
+            # on globstar's zero-directory case.
             go:
               - '**/*.go'
               - 'go.mod'
               - 'go.sum'
               - 'go.work'
               - 'go.work.sum'
+              - '**/go.mod'
+              - '**/go.sum'
+              - '**/go.work'
+              - '**/go.work.sum'
             # The embedded DSL tree.
             dsl:
               - 'dsl/**'

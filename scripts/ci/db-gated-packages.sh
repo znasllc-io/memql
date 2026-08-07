@@ -98,6 +98,44 @@ verify_module_path() {
 	return 4
 }
 
+# MIN_COMPLEMENT is the floor the complement must clear (memql#3165 review).
+#
+# Measured at 170 packages (169 cacheable, i.e. minus the root package) on
+# 2026-08-06. Re-measure with:
+#
+#	scripts/ci/db-gated-packages.sh --complement | wc -l
+#
+# BE PRECISE ABOUT WHAT THIS CATCHES, because a floor is a coarse instrument
+# and pretending otherwise is how a guard gets trusted past its range.
+#
+# It catches COLLAPSE and gross TRUNCATION -- the shapes where the selector
+# stops covering the repo and `go test` silently runs a fraction of the suite.
+# A `go.mod` under component/language, component/database, integrations/ or
+# app/ removes 15-34 packages from the module pattern with exit 0 and no
+# diagnostic; measured, those land at 154/146/135/152 and the three largest
+# trip this floor. It does NOT catch a boundary that removes one or two
+# packages -- nothing countable can, which is why it is not the only guard:
+# TestAreaGraphIsADAG pins the area SET (any missing directory is red) and
+# TestEmbeddedFileCountsAreStable pins per-package embed counts.
+#
+# Headroom is ~12%. Deliberately not tighter: a floor that fires on ordinary
+# package deletion gets lowered by whoever is unlucky enough to hit it under
+# time pressure, and a guard that gets edited away is worth less than a looser
+# one that never cries wolf.
+readonly MIN_COMPLEMENT=150
+
+# count_lines counts the lines in a variable, treating empty as 0.
+#
+# `printf '%s\n' "" | wc -l` is 1, not 0, which is exactly the kind of
+# off-by-one that would let a zero-package list clear a floor comparison.
+count_lines() {
+	if [[ -z "$1" ]]; then
+		echo 0
+	else
+		printf '%s\n' "$1" | wc -l
+	fi
+}
+
 # print_complement lists every package in the module except those under a
 # db-gated tree.
 #
@@ -116,13 +154,55 @@ print_complement() {
 	for t in "${DB_GATED_TREES[@]}"; do
 		pattern+="${pattern:+|}^${MODULE_PATH}/${t}(/|\$)"
 	done
-	local out
-	out="$(go list "${MODULE_PATH}/..." | grep -Ev "${pattern}" || true)"
-	if [[ -z "${out}" ]]; then
-		echo "db-gated-packages.sh: the complement is EMPTY -- every package matched a" >&2
-		echo "  db-gated tree, or 'go list ${MODULE_PATH}/...' returned nothing." >&2
-		echo "  Refusing to print an empty package list: the caller would run 'go test'" >&2
-		echo "  with no arguments, test only the current directory, and report green." >&2
+
+	# NO `|| true` on this pipeline, and that is load-bearing (memql#3165
+	# review). `go list` prints every package it COULD load on stdout and
+	# still exits non-zero when any package fails to load, so a swallowed
+	# exit status leaves `out` non-empty and TRUNCATED: the empty check below
+	# passes, the script exits 0, and CI runs a smaller suite than it reports
+	# -- the memql#2972 fail-open, reintroduced by the one construct that
+	# looks like defensive coding. Measured A/B against a `go` stub that
+	# prints 180 of 183 packages and exits 1, as the real toolchain does on a
+	# partial load failure:
+	#
+	#	714ccbb4 (bare pipeline)  exit=1  167 packages printed
+	#	1d13eef6 (`|| true`)      exit=0  167 packages printed  <-- fail-OPEN
+	#	here     (status kept)    exit=5    0 packages printed
+	#
+	# `set -o pipefail` makes the pipeline's status non-zero if EITHER stage
+	# fails, and every non-zero status is fatal here: grep's "no lines
+	# selected" (1) means an empty complement, grep's usage error (2) means a
+	# malformed pattern, and go list's (1) means an incomplete answer. There
+	# is nothing to distinguish, only to refuse.
+	local out status=0
+	out="$(go list "${MODULE_PATH}/..." | grep -Ev "${pattern}")" || status=$?
+	if ((status != 0)); then
+		echo "db-gated-packages.sh: enumerating packages FAILED (exit ${status})." >&2
+		echo "  'go list ${MODULE_PATH}/... | grep -Ev <db-gated>' did not succeed, so the" >&2
+		echo "  complement cannot be trusted -- and note that 'go list' prints what it COULD" >&2
+		echo "  load on stdout while still exiting non-zero, so the output being non-empty is" >&2
+		echo "  NOT evidence that it is complete." >&2
+		echo "  Refusing to print it: the caller would run a smaller suite than it reports." >&2
+		echo "  Fix the load error 'go list ${MODULE_PATH}/...' reports; do not add '|| true'." >&2
+		return 5
+	fi
+
+	local count
+	count="$(count_lines "${out}")"
+	if ((count < MIN_COMPLEMENT)); then
+		echo "db-gated-packages.sh: the complement is ${count} packages, below the floor of" >&2
+		echo "  ${MIN_COMPLEMENT} -- so it is TRUNCATED, not merely small, and this script fails" >&2
+		echo "  closed rather than hand the caller a short list that tests green." >&2
+		echo "  Usual cause: a 'go.mod' added beneath the repo root. Every '...'-shaped" >&2
+		echo "  selector then silently drops everything inside the new module, with exit 0" >&2
+		echo "  and no diagnostic. Check with:" >&2
+		echo "      git ls-files | grep '/go.mod\$'" >&2
+		echo "      go list ${MODULE_PATH}/... | wc -l" >&2
+		echo "  If the repo genuinely got smaller, re-measure and lower MIN_COMPLEMENT in this" >&2
+		echo "  script, recording the new number:" >&2
+		echo "      scripts/ci/db-gated-packages.sh --complement | wc -l" >&2
+		echo "  Do NOT silence this by lowering the floor to whatever today's count happens" >&2
+		echo "  to be without establishing why the count moved." >&2
 		return 5
 	fi
 	printf '%s\n' "${out}"
@@ -130,21 +210,42 @@ print_complement() {
 
 # print_complement_cacheable is the complement MINUS the module's root package.
 #
-# The root package hosts seven repo-sweeping gates
-# (docs_construct_names_test.go, product_neutrality_test.go, ...) that shell out
-# to `git ls-files` and then read whatever it returns. Go's test cache records
-# the files a test OPENS, but it cannot record the SET a subprocess returned --
-# so adding a new `.md` leaves the cache key unchanged and the gate reports a
-# stale green over a file it never looked at.
+# The root package hosts the repo-sweeping gates (docs_construct_names_test.go,
+# product_neutrality_test.go, embed_inventory_test.go, area_graph_dag_test.go,
+# ...) that shell out to `git ls-files` or `go list` and then read whatever
+# they return. Go's test cache records the files a test OPENS, but it cannot
+# record the SET a subprocess returned -- so adding a new `.md` leaves the
+# cache key unchanged and the gate reports a stale green over a file it never
+# looked at.
 #
 # That is precisely the fail-open memql#2972 was filed to close, so the root
 # package is always run with -count=1 in its own step rather than being made
 # cacheable. Everything else keys correctly on its own sources.
 print_complement_cacheable() {
-	local out
-	out="$(print_complement | grep -Fxv "${MODULE_PATH}" || true)"
-	if [[ -z "${out}" ]]; then
-		echo "db-gated-packages.sh: the cacheable complement is EMPTY. See print_complement." >&2
+	local full
+	full="$(print_complement)" # fails closed on its own; `set -e` propagates
+
+	local out status=0
+	out="$(printf '%s\n' "${full}" | grep -Fxv "${MODULE_PATH}")" || status=$?
+	if ((status != 0)); then
+		echo "db-gated-packages.sh: subtracting the root package FAILED (exit ${status})." >&2
+		echo "  See print_complement." >&2
+		return 5
+	fi
+
+	# Assert the subtraction removed EXACTLY the root package. `grep -Fxv`
+	# removing nothing is silent, so an absent root package -- the tell for a
+	# truncated `go list` -- would otherwise pass through as a list the caller
+	# is told is "the complement minus the root package" when it is not.
+	local full_count out_count
+	full_count="$(count_lines "${full}")"
+	out_count="$(count_lines "${out}")"
+	if ((out_count != full_count - 1)); then
+		echo "db-gated-packages.sh: expected the cacheable complement to be the complement" >&2
+		echo "  minus exactly the root package '${MODULE_PATH}' (${full_count} -> $((full_count - 1)))," >&2
+		echo "  got ${out_count}. Either the root package is missing from the complement (a" >&2
+		echo "  truncated 'go list') or it appears more than once. Refusing to print a list" >&2
+		echo "  whose composition is not what the caller is told it is." >&2
 		return 5
 	fi
 	printf '%s\n' "${out}"
