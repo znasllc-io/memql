@@ -669,6 +669,17 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		if err := e.validateAgentRolePredefinedLock(ctx, payload, meta.priorPredefined, actor); err != nil {
 			return nil, meta, err
 		}
+		// Agent-role slug uniqueness (memql#3207). The concept documents `slug`
+		// as canonical and never renamed, and nothing enforced it: because
+		// createAgentRole opens `id: args.agentRoleId ?? args.slug`, a caller
+		// supplying an explicit id alongside a seeded slug minted a SECOND
+		// active row carrying it -- invisible to the guard above, which keys on
+		// the row id. Runs after the read-merge, so a RENAME onto a taken slug
+		// is caught as well as a create. See
+		// agent_role_slug_unique_validation.go.
+		if err := e.validateAgentRoleSlugUnique(ctx, payload, mutation.ID, actor); err != nil {
+			return nil, meta, err
+		}
 	}
 	// Identity credential-row actor-scope guard (memql#2513): a
 	// v1:identity:identity row of a machine-credential identityType
