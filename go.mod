@@ -33,7 +33,7 @@ require (
 	github.com/znasllc-io/memql/component/polyphon v0.0.0-00010101000000-000000000000
 	golang.org/x/crypto v0.54.0
 	golang.org/x/sync v0.22.0
-	google.golang.org/grpc v1.81.0-dev
+	google.golang.org/grpc v1.82.1
 	google.golang.org/protobuf v1.36.11
 	gopkg.in/yaml.v3 v3.0.1
 	nhooyr.io/websocket v1.8.17
@@ -161,8 +161,8 @@ require (
 	github.com/znasllc-io/memql/component/safety v0.0.0
 	github.com/znasllc-io/memql/component/secret v0.0.0
 	github.com/znasllc-io/memql/core v0.0.0
-	go.opentelemetry.io/otel v1.41.0 // indirect
-	go.opentelemetry.io/otel/trace v1.41.0 // indirect
+	go.opentelemetry.io/otel v1.43.0 // indirect
+	go.opentelemetry.io/otel/trace v1.43.0 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.28.0 // indirect
