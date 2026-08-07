@@ -552,57 +552,92 @@ func (c *Concept) PIIFields() []string {
 // Derived generically, exactly as PIIFields is: annotating a new field is the
 // whole change, and there is no hand-maintained list to drift out of sync.
 //
-// SCOPE, and it is deliberately partial. Read this before assuming a value is
-// covered: @secret reaches exactly ONE validation surface, named below. The
-// uncovered list is what has been VERIFIED uncovered, not a closed enumeration
-// -- three successive passes over this engine each found a surface the previous
-// pass had walked past (the most recent is memql#3117). Treat a surface absent
-// from this list as unclassified, never as covered.
+// SCOPE. Read this before assuming a value is covered. @secret now redacts on
+// every validation surface that quotes a rejected value, but it is still NOT a
+// secrecy guarantee -- the limits below are as load-bearing as the coverage.
 //
-// COVERED: the memql function-args validator
+// The list is derived from an EXHAUSTIVE enumeration of validators (every
+// jsonschema `.Validate(` call site and every value-quoting rejection message
+// under component/), not from adding one entry at a time. That method is the
+// point: three successive incremental passes each shipped a scope paragraph
+// that walked past a surface the next pass found, and the exhaustive sweep
+// done for memql#3182 turned up two more (the DSL `validate` and `preflight`
+// builtins) that the epic's own four-surface model did not contain. Extend
+// this list by re-running the enumeration, never by appending.
+//
+// COVERED -- the memql function-args validator
 // (component/memql/function_validator.go), which quotes a rejected argument
-// value into its message at five sites (enum / minimum / maximum / pattern /
-// date-time). Those five print <redacted> for a secret field.
+// value at five sites (enum / minimum / maximum / pattern / date-time).
+// memql#3036.
 //
-// Matching is BY ARGUMENT NAME, not by write target. markSecretArgsFields
-// stamps an args field whose NAME appears in this list, so a mutation whose
-// insert block writes `apiKey: args.credential` on a @secret `apiKey` field
-// leaves `credential` UNREDACTED -- the arg name is what is compared, and
-// renaming between arg and field is the common style in this corpus.
+// COVERED -- the tool-args validator, MemQLEngine.validateToolArgs
+// (component/memql/tool_execution.go). Compiled from the SAME ArgsSchema that
+// carries the Secret flag, and it runs BEFORE the function-args validator on
+// the agent path, so it is the surface a rejected secret reaches first. Both
+// exits are redacted (memql#3182): the message returned to the MODEL, and the
+// WARN, which now redacts per key from the ArgsSchema instead of serializing
+// the whole args map -- degrading to a values-free argKeys list when the
+// tool's arguments cannot be classified. Coverage resolves through the tool's
+// @handler function, so an explicitly-authored tool dispatching to the same
+// function is covered too; a query/webhook/delegate handler is unclassifiable
+// and logs keys only.
+//
+// COVERED -- the automation args binder
+// (component/automations/args_binding.go), a second validator mirroring this
+// rule set over EVENT payloads; a graph.node.created event carries the row's
+// fields flattened into its payload (executor_mutation.go). The loader stamps
+// ArgsField.Secret from the trigger topic's concept, so the enum and pattern
+// refusals and the WARN they are written to all print <redacted> -- closing
+// the one path by which a concept row value could reach a STRUCTURED LOG.
+// memql#3183.
+//
+// COVERED -- concept payload JSON-schema validation (Concept.validate, so
+// Create and Delete alike). This is where @minimum / @maximum / @format
+// declared on the CONCEPT are actually enforced -- they are checked nowhere
+// else, so unlike the function-args validator this needs no automation and no
+// matching argument name. Six jsonschema keywords interpolate the instance
+// value (minimum, maximum, exclusiveMinimum, exclusiveMaximum, multipleOf,
+// format -- derived by reading the library, not guessed); all six redact, and
+// every other message is byte-identical to an unannotated field's.
+// memql#3184.
+//
+// COVERED -- the DSL-callable `validate` and `preflight` builtins
+// (component/memql/executor_builtin.go), which compile this same concept
+// schema themselves and surface every leaf message in a RESULT PAYLOAD
+// returned to the caller. Worse than an error string: no log escape is needed
+// for the disclosure. Found by the memql#3182 enumeration.
+//
+// Redaction here resolves secrecy through the SCHEMA at the failing instance
+// location, so it covers @secret at any nesting depth and inherits it onto
+// array elements -- deliberately unlike SecretFields() itself, which is
+// TOP-LEVEL ONLY (below) and is not the accessor those paths use.
+//
+// NOT COVERED -- matching is BY ARGUMENT NAME, not by write target, on the two
+// args-validator surfaces. markSecretArgsFields stamps an args field whose
+// NAME appears in this list, so a mutation whose insert block writes
+// `apiKey: args.credential` on a @secret `apiKey` field leaves `credential`
+// UNREDACTED. Renaming between arg and field is common style in this corpus.
+// (The concept-payload and builtin surfaces are exempt: they resolve through
+// the schema, not through an argument name.)
 //
 // NOT COVERED -- query results. A @secret value is returned in full by any
 // query projecting it. That is an authorization decision needing a definition
 // of "elevated", and it interacts with the per-row authz model deferred under
 // memql#2803.
 //
-// NOT COVERED -- the automation args binder
-// (component/automations/args_binding.go:115, :119, :125), a second validator
-// mirroring this rule set over EVENT payloads. A graph.node.created event
-// carries the concept row's fields flattened into its payload
-// (component/memql/executor_mutation.go:805-819), and automations.ArgsField
-// has no Secret member, so a secret value is quoted in full there. Its reason
-// string is also written to a WARN log (args_binding.go:285) -- so a concept
-// row value CAN reach a structured log by that path. Tracked separately.
+// NOT COVERED -- length, everywhere and deliberately. "value too long (%d
+// runes, max %d)" (function_validator.go, args_binding.go) and the jsonschema
+// minLength / maxLength messages report a rune count for a secret field too.
+// They quote no value, but a length is a disclosure. Left uniform on purpose:
+// redacting it on one surface would make that surface the sole diverging one
+// while withholding nothing the others do not already print.
 //
-// NOT COVERED -- the tool-args validator, MemQLEngine.validateToolArgs
-// (component/memql/tool_execution.go:66). It is compiled from the SAME
-// ArgsSchema that carries the Secret flag, so a declaration this list
-// redacts has a generated-tool twin that does not. It is the worst of the
-// uncovered set: it runs BEFORE the covered validator on the agent path
-// (tool_execution.go:366 precedes the handler at :375), it serializes the
-// ENTIRE args map into a WARN log rather than quoting one value
-// (:112-115), and formatToolValidationError (:256) does no redaction
-// before the message is returned to the model. Tracked as memql#3117.
-//
-// NOT COVERED -- concept payload JSON-schema validation (Create, below), which
-// enforces @minimum / @maximum / @format declared on the CONCEPT and
-// interpolates the instance value into the jsonschema message. Any constraint
-// the concept declares that the args block does not mirror is validated only
-// there, so this redaction is bypassed entirely. Tracked separately.
-//
-// NOT COVERED -- length. "value too long (%d runes, max %d)"
-// (function_validator.go:204, args_binding.go:119) reports a rune count for a
-// secret field too. It quotes no value, but it is a disclosure.
+// UNCLASSIFIED -- prompt input-schema validation
+// (component/memql/ai_prompts.go, PromptTemplate.ValidateData). It runs a
+// jsonschema over caller data and its messages interpolate the instance the
+// same way, but the schema is built from the prompt's own field list and is
+// not concept-derived, so there is no x-secret in it to read. Nothing is
+// redacted there; treat it as uncovered rather than as safe.
 //
 // Returns nil when the concept declares no secret fields. Order follows JSON
 // map iteration and is not significant.
