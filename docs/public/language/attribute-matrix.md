@@ -286,10 +286,11 @@ emitted, and read by nothing. Section 8 of
 
 `@default` is declared metadata **by decision, and it is now gated**
 (memql#3038). It stays documentation rather than being applied on insert
-(which would add an update-path question on top of a `parseDefaultValue`
-that has no datetime branch) or retired (the emitted `default` keyword is
-read by the SDK, sense hover and form generators). What changed is that
-writing one and getting nothing is caught at authoring time:
+(which would add an update-path question) or retired (the emitted
+`default` keyword is read by the SDK, sense hover and form generators).
+memql#3248 re-affirmed that decision and closed the one correctness hole
+it named — see **Type-directed lowering** below. What changed with #3038
+is that writing one and getting nothing is caught at authoring time:
 `TestDefaultIsCoalescedOrStamped` (`dsl/default_stamped_test.go`) fails
 when an **optional, top-level** concept field carries `@default` and no
 mutation bound to that concept **stamps** it. Only a stamped value counts
@@ -310,6 +311,69 @@ Two things the gate does **not** cover, neither of them an oversight:
   the parent object wholesale. Nothing is applied at **any** depth;
   stamping is the only mechanism that fills a value, and it can only be
   spelled for a top-level field.
+
+memql#3248 asked whether the nested-leaf carve-out should be closed by
+giving the grammar a leaf-stamping write form, or by applying nested
+defaults on insert. **Decision: neither — the carve-out stands.** The
+nested annotations are honest documentation, documented as such in three
+places, and both alternatives cost a grammar or write-path change to
+close a gap that breaks nothing today. What #3248 *did* close is the one
+concrete defect it found while asking.
+
+##### Type-directed lowering (memql#3248)
+
+A `@default` literal is lowered against the field's **declared type**, and
+one that could never be a value of that type is **refused at load**:
+
+| declared type | accepted `@default` |
+|---|---|
+| `bool` | exactly `true` or `false` |
+| `int` | a base-10 integer |
+| `float` | a number (an integer literal is a valid float) |
+| `datetime` | an RFC3339 timestamp, or `""` for unset |
+| `string`, `enum` | the literal verbatim — **never coerced** |
+| `object`, `array`, `map`, `any` | untyped lowering; the declaration does not narrow the literal to one reading |
+
+Before this, the lowering guessed from the literal's *shape* and had no
+datetime branch at all, so
+
+```memql
+whenField datetime @default("true")
+```
+
+emitted the **bool** `true` as the default of a field declared
+`format: date-time`, in silence. The same guessing turned `@default("0")`
+on a `string` field into the **number** `0`.
+
+This matters even though nothing is applied on insert: the emitted
+`default` keyword is consumed by the SDK, sense hover and the preferences
+form generators, so a wrong one is wrong documentation shipped to three
+consumers.
+
+**Bare and quoted spellings are equivalent.** `@default(false)` and
+`@default("false")` both mean the bool `false`. They are stored
+differently by the parser — an unquoted token has no value to bind to, so
+it is recorded as an argument *key* rather than as the attribute's value:
+
+```
+@default(false)     Value=<nil>    Args=map["false":true]
+@default("false")   Value="false"  Args=map[]
+```
+
+The reader only understood the second shape, so the bare spelling was read
+as the empty string. `isGroupGA bool @default(false)`
+(`dsl/cognition/concepts.memql`) had therefore been emitting
+`"default": ""` on a field declared `"type": "boolean"` since the line was
+written. That is the same defect one layer earlier — the value read
+without regard for how it was written, then lowered without regard for the
+type it belongs to — and it was found because the type-directed lowering
+turned a silent wrong answer into a load failure.
+
+Guarded by `TestDefaultIsLoweredByItsDeclaredType`,
+`TestBadDefaultRefusesToLoad` and `TestBareDefaultLiteralIsRead`
+(`component/database/memory-nodes/declared_metadata_annotations_test.go`).
+The second drives the real `BuildConceptFromDecl` path, so the check
+cannot pass while unwired.
 
 #### `@public`
 Declares that the construct intentionally carries **no caller-scope

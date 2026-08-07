@@ -423,10 +423,26 @@ concept fieldTypes {
 //                       on insert -- Concept.Create validates and marshals the
 //                       payload verbatim. Fill a value with the `??`
 //                       null-coalescing operator in the mutation body instead.
-//                       The value IS parsed (ints as ints, floats as floats,
-//                       "true"/"false" as bools) but there is no datetime
-//                       branch, so a `datetime` field takes a bool default
-//                       without complaint.
+//                       The value is parsed AGAINST THE FIELD'S DECLARED TYPE
+//                       (memql#3248), and a literal that could never be a value
+//                       of that type is REFUSED AT LOAD rather than emitted:
+//                       `bool` takes exactly `true`/`false`, `int` a base-10
+//                       integer, `float` a number, `datetime` an RFC3339
+//                       timestamp or "" for unset, and `string`/`enum` take the
+//                       literal verbatim -- never coerced, so `@default("0")` on
+//                       a string field is the STRING "0". `object`, `array`,
+//                       `map` and `any` keep an untyped lowering, because the
+//                       declaration does not narrow the literal to one reading.
+//
+//                       Until memql#3248 the lowering guessed from the
+//                       literal's shape with no datetime branch at all, so
+//                       `whenField datetime @default("true")` emitted the bool
+//                       true as the default of a field declared
+//                       format: date-time, in silence. Refusal matters even
+//                       though nothing is applied on insert: the emitted
+//                       `default` keyword is read by the SDK, sense hover and
+//                       the preferences form generators, so a wrong one is
+//                       wrong documentation shipped to three consumers.
 //
 //                       GATED, so the mistake is caught at authoring time
 //                       rather than never (memql#3038). dsl's

@@ -18,6 +18,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	languageAst "github.com/znasllc-io/memql/component/language/ast"
 	"github.com/znasllc-io/memql/component/language/parser"
@@ -1047,7 +1048,11 @@ func applyPropertyAttribute(prop *parsedProperty, attr *parser.Attribute) error 
 	case "required":
 		prop.required = true
 	case "default":
-		prop.defaultValue = parseDefaultValue(attrString(attr))
+		v, err := parseTypedDefaultValue(prop.typeName, attrLiteral(attr))
+		if err != nil {
+			return err
+		}
+		prop.defaultValue = v
 	case "description":
 		prop.description = attrString(attr)
 	case "unique":
@@ -1148,6 +1153,65 @@ func attrString(attr *parser.Attribute) string {
 	return ""
 }
 
+// attrLiteral returns an attribute's single argument in its WRITTEN form,
+// whether it was quoted or bare.
+//
+// attrString above cannot do this. It type-asserts attr.Value to string and
+// falls through to "" for anything else, but the parser stores a BARE argument
+// as its Go type -- `@default(false)` arrives as bool(false), not "false". So
+// attrString reports the empty string for it, and
+//
+//	isGroupGA bool @default(false)
+//
+// -- the live spelling in dsl/cognition/concepts.memql -- was lowered to the
+// empty STRING and emitted as `"default": ""` on a field whose schema says
+// `"type": "boolean"`. Silently, and for as long as that line has existed
+// (memql#3248).
+//
+// That is the same defect as the missing datetime branch, one layer earlier:
+// the value was read without regard for how it was written, then lowered
+// without regard for the type it belongs to. Fixing only the lowering would
+// have turned this into a load failure on a declaration that is perfectly
+// correct as written, which is how it was found.
+//
+// Bare and quoted spellings deliberately converge -- `@default(false)` and
+// `@default("false")` both yield "false", and parseTypedDefaultValue then
+// resolves it against the declared type. The annotation means the same thing
+// either way, so the two spellings must not diverge here.
+func attrLiteral(attr *parser.Attribute) string {
+	if attr == nil {
+		return ""
+	}
+	if attr.Value != nil {
+		if s, ok := attr.Value.(string); ok {
+			return s
+		}
+		return fmt.Sprintf("%v", attr.Value)
+	}
+	if v, ok := attr.Args["value"]; ok {
+		return fmt.Sprintf("%v", v)
+	}
+	// The bare-argument shape, and the reason attrString reports "" for it.
+	// The parser has no value to bind an unquoted token to, so it records the
+	// TOKEN ITSELF AS AN ARGS KEY with a true flag value -- measured, not
+	// assumed:
+	//
+	//	@default(false)     Value=<nil>    Args=map["false":true]
+	//	@default("false")   Value="false"  Args=map[]
+	//
+	// So the written text is the key. Guarded on exactly one entry carrying a
+	// true flag, which is what a single bare argument produces; a named or
+	// multi-argument attribute is not this shape and falls through.
+	if len(attr.Args) == 1 {
+		for k, v := range attr.Args {
+			if flag, ok := v.(bool); ok && flag {
+				return k
+			}
+		}
+	}
+	return ""
+}
+
 // toInt64 coerces an annotation argument value into int64. Accepts
 // actual integers and stringified decimals; anything else is an error.
 func toInt64(v any) (int64, error) {
@@ -1165,6 +1229,103 @@ func toInt64(v any) (int64, error) {
 	}
 }
 
+// parseTypedDefaultValue lowers a @default literal using the field's DECLARED
+// type instead of guessing one from the literal's shape (memql#3248).
+//
+// @default is never APPLIED on insert at any depth -- that is settled and
+// documented in three places, and this does not change it. What it changes is
+// whether a @default that could never be a value of its own field is caught.
+// The emitted `default` keyword is consumed by the SDK, sense hover and the
+// preferences form generators, so a wrong one is wrong documentation shipped to
+// three consumers rather than an inert annotation.
+//
+// The shape-guessing it replaces (parseDefaultValue, still used for the types
+// below that have no single answer) has no datetime branch, so
+//
+//	whenField datetime @default("true")
+//
+// stored the BOOL true on a field whose schema says format: date-time, in
+// silence. It also coerced by shape rather than by declaration, so a string
+// field's @default("0") became the NUMBER 0 -- a `default` of the wrong JSON
+// type for the field it annotates. Both are the same defect: the literal was
+// lowered without consulting the type it belongs to.
+//
+// Scope. Only the types whose written form has ONE correct reading are checked:
+//
+//	string, enum  the literal IS the value -- never coerced, which is the
+//	              half that fixes @default("0") on a string field
+//	bool          exactly "true" or "false"
+//	int           a base-10 integer
+//	float         a number (an integer literal is a valid float)
+//	datetime      RFC3339, or "" -- the documented unset sentinel an OPTIONAL
+//	              datetime must accept (memql#1629), which the schema builder
+//	              below already special-cases
+//
+// object, array, map, any and anything unrecognised keep the type-blind parse.
+// Not an oversight: a default for those is a JSON literal this function has no
+// business re-typing, and refusing what it cannot judge would reject valid
+// declarations to catch nothing.
+//
+// The tree is already consistent with this -- 64 bool, 25 int, 2 float and the
+// enum defaults all match their fields, and NO datetime field carries a
+// @default today. So this is a gate on what gets written next, not a migration.
+func parseTypedDefaultValue(typeName, text string) (any, error) {
+	switch typeName {
+	case "string", "enum":
+		return text, nil
+	case "bool":
+		switch text {
+		case "true":
+			return true, nil
+		case "false":
+			return false, nil
+		}
+		return nil, fmt.Errorf(
+			"@default(%q) is not a bool: a bool field's default must be written exactly "+
+				"`true` or `false` (memql#3248)", text)
+	case "int":
+		n, err := strconv.ParseInt(text, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf(
+				"@default(%q) is not an int: an int field's default must be a base-10 "+
+					"integer (memql#3248)", text)
+		}
+		return n, nil
+	case "float":
+		f, err := strconv.ParseFloat(text, 64)
+		if err != nil {
+			return nil, fmt.Errorf(
+				"@default(%q) is not a float: a float field's default must be a number "+
+					"(memql#3248)", text)
+		}
+		return f, nil
+	case "datetime":
+		// "" is the unset sentinel an optional datetime accepts (memql#1629);
+		// see the datetime case in the schema builder below, which admits ""
+		// and null for exactly this reason. Anything else must be RFC3339 --
+		// the format the emitted schema claims.
+		if text == "" {
+			return text, nil
+		}
+		if _, err := time.Parse(time.RFC3339, text); err != nil {
+			return nil, fmt.Errorf(
+				"@default(%q) is not an RFC3339 timestamp: a datetime field's default must "+
+					"parse as RFC3339 (e.g. \"2026-01-02T03:04:05Z\") or be \"\" for unset. "+
+					"Before memql#3248 this was not checked, so a datetime field accepted a "+
+					"bool or a number and emitted it as the field's `default`", text)
+		}
+		return text, nil
+	default:
+		return parseDefaultValue(text), nil
+	}
+}
+
+// parseDefaultValue lowers a @default literal by its SHAPE, with no knowledge
+// of the field it belongs to. Reachable only from parseTypedDefaultValue's
+// default branch now -- object / array / map / any, where the declared type
+// does not narrow the literal to one reading. Prefer parseTypedDefaultValue:
+// for every type it recognises, the declaration is the better authority than
+// the literal (memql#3248).
 func parseDefaultValue(text string) any {
 	if text == "true" {
 		return true
