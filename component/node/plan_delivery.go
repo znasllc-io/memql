@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/znasllc-io/memql/component"
+	"github.com/znasllc-io/memql/core/component"
 	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/core/common"
 )

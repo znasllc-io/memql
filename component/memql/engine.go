@@ -11,7 +11,7 @@ import (
 
 	"github.com/uptrace/bun"
 
-	"github.com/znasllc-io/memql/component"
+	"github.com/znasllc-io/memql/core/component"
 	"github.com/znasllc-io/memql/component/bus"
 	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/events"

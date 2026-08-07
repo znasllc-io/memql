@@ -12,7 +12,7 @@ import (
 
 	"github.com/uptrace/bun"
 
-	"github.com/znasllc-io/memql/component"
+	"github.com/znasllc-io/memql/core/component"
 	"github.com/znasllc-io/memql/component/auth"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/common"
