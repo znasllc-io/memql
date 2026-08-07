@@ -100,11 +100,24 @@ The merge queue is **live** on the `default` ruleset (id 16630577). The
 | `min_entries_to_merge` / wait | 1 / ~5 min batching window |
 | `max_entries_to_build` / `merge` | 5 / 5 |
 
-Required status checks are `ci-required`, `scan`, and `Analyze (go)` —
-all three trigger on `merge_group`, so a queued candidate always gets a
-result and never stalls. The queue has merged PRs end-to-end (each
-spawns a `gh-readonly-queue/main/...` candidate and merges only when
-green). This doc itself landed through the queue.
+Ruleset `16630577` requires exactly one status check: `ci-required`
+(measured 2026-08-06). It triggers on `merge_group`, so a queued
+candidate always gets a result and never stalls. The queue has merged
+PRs end-to-end (each spawns a `gh-readonly-queue/main/...` candidate and
+merges only when green). This doc itself landed through the queue.
+
+This paragraph previously read "Required status checks are
+`ci-required`, `scan`, and `Analyze (go)`", which was stale twice over
+(corrected in memql#3210). The required set was reduced to
+`ci-required` alone — see [../../ci-design.md](../../ci-design.md) for
+why one aggregator beats three independent names. And the secret-scan
+check is no longer called `scan`: `gitleaks.yml` and `govulncheck.yml`
+both published a check-run under that one name, so they were renamed to
+`gitleaks` and `govulncheck` respectively.
+`scripts/dev/workflow_check_name_uniqueness_test.go` fails the build if
+any two jobs across `.github/workflows/` ever share a name again. If a
+scan lane is made required in future, name it by its check-run name from
+that guard's inventory, not by its workflow or job key.
 
 **`Analyze (go)` is a deliberate no-op on `merge_group`.** It reports the
 required context green without analysing the candidate: a SARIF upload

@@ -77,7 +77,7 @@ the gate.**
 |---|---|
 | **Require `ci-required` only** | One name, one workflow, one re-run to recover. Does not eliminate never-reported (if the CI workflow never starts, nothing reports) but reduces the surface from 3 independent workflows to 1 and makes recovery a single action. |
 | Require each lane by name (status quo ante) | Granular PR feedback about which lane blocked. Multiplies the never-reported surface by the lane count, and every new lane is a ruleset edit. This is the configuration that produced the incident. |
-| Require `ci-required` + `scan` + Code Quality | Secret-scan and SAST gate independently of CI health. Reintroduces two more names that can fail to report — and gitleaks was starved in the incident (run 31119998624). |
+| Require `ci-required` + `gitleaks` + Code Quality | Secret-scan and SAST gate independently of CI health. Reintroduces two more names that can fail to report — and gitleaks was starved in the incident (run 31119998624). (The secret-scan check was named `scan` when this table was written; renamed in memql#3210 because govulncheck published a check under the same name.) |
 
 ### RECOMMENDATION
 

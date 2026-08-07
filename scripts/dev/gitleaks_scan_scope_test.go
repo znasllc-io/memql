@@ -167,8 +167,14 @@ func TestGitleaksFullHistoryCheckoutIsUnshallow(t *testing.T) {
 }
 
 // The full-history lane must actually run on the events it claims to cover.
-// `scan` is a required check, so a step gated off by a narrowed `if:` reports
-// green having scanned nothing.
+// A step gated off by a narrowed `if:` reports green having scanned nothing.
+//
+// This comment used to justify itself with "`scan` is a required check". Both
+// halves went stale: ruleset 16630577 requires `ci-required` only, and the
+// check-run is now named `gitleaks` (memql#3210 -- govulncheck.yml published a
+// check under the same `scan` name, so both were renamed). The assertion below
+// is unaffected either way -- it reads the step's `if:`, not any check name. A
+// green-but-empty scan is worth failing on whether or not anything gates on it.
 func TestGitleaksFullHistoryLaneRunsOnAllNonPREvents(t *testing.T) {
 	wf := repoFile(t, ".github", "workflows", "gitleaks.yml")
 	if !strings.Contains(wf, "if: github.event_name != 'pull_request'") {

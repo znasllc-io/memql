@@ -68,8 +68,16 @@ permissions:
 # not a proof.
 
 jobs:
+  # The check-run name is `gitleaks`, not `scan` (memql#3210). govulncheck.yml
+  # also declares `jobs.scan`, and the two share three triggers (push:main,
+  # merge_group, schedule), so under the old `name: scan` both published a
+  # check-run under one name -- indistinguishable in the checks UI, and
+  # unaddressable as a ruleset required context. The job KEY stays `scan`
+  # because nothing outside this file reads it; the published name is what had
+  # to become unique. `scripts/dev/workflow_check_name_uniqueness_test.go`
+  # holds the line for every workflow, not just these two.
   scan:
-    name: scan
+    name: gitleaks
     runs-on: ubuntu-latest
     steps:
       # PR lane: shallow checkout (default fetch-depth: 1) -- fast.
