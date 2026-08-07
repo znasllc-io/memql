@@ -108,6 +108,33 @@ query agent allAgents {
   shape   agentFull
 }
 
+/// The row set behind the in-process agent registry (component/memql/agents.go
+/// LoadFromRows). Deliberately COMPLETE where allAgents is a paged UI list: an
+/// agent missing from a resolution table is not "on page 2", it is
+/// unresolvable, and nothing here follows a cursor. The paged form could not be
+/// made to work by following one either -- the engine fills a page from
+/// `target*2` PHYSICAL version rows and dedupes to logical rows afterwards, so
+/// ordinary edit churn returns a short page that looks exhausted (memql#3209).
+///
+/// Scoping it to actor.userId is NOT the fix, and would be actively wrong. This
+/// is a process-wide catalog built once at startup under the seed materializer's
+/// system actor; there is no requesting user at that moment for actor.userId to
+/// name, so such a filter would evaluate against an empty actor, load zero
+/// agents and silently disable every specialist. The read is unscoped BECAUSE
+/// it is a catalog -- the ownership question that raises is answered at LOOKUP
+/// time, not here.
+///
+/// @serverOnly because the projection carries every user's systemPrompt. That
+/// is admissible for a server-internal catalog read and not admissible on the
+/// generated client SDK, where a caller could pull other users' personas
+/// verbatim.
+@serverOnly
+@unbounded("the in-process agent registry must be COMPLETE -- a truncated page silently makes an agent unresolvable, and the paged form cannot self-heal under version churn")
+query agent agentsForRegistry {
+  filter  isNotDeleted
+  shape   agentFull
+}
+
 // `@public` marks this query as intentionally not caller-scoped.
 // Both callsites are system-actor paths: the planner agent loop
 // (`integrations/planner/agent_loop.go:loadSpecialists`, runs under
