@@ -984,26 +984,85 @@ jobs:
           CREATE EXTENSION IF NOT EXISTS "pgcrypto";
           CREATE EXTENSION IF NOT EXISTS vector;
           SQL
-      # `-timeout` is PER TEST BINARY, and this step runs six of them in
-      # parallel. Five finish in seconds; `component/memql` boots a full engine
-      # per db-gated test and had been running just under the old 300s. On
-      # 2026-08-07 it crossed the line and the required check went red on
-      # `main` itself -- and then on every open PR, including ones that touch
-      # no db-gated package at all (memql#3257). The panic names whichever
-      # 1-second test happened to be executing when the clock ran out, which
-      # makes it read as a flake in an unrelated test rather than as a budget.
+      # NOTHING GOT SLOW. memql#3257 asked what added the time between the last
+      # green run and the first red one, and the answer, measured against a real
+      # Postgres across exactly that boundary, is nothing:
       #
-      # 600s is not "more headroom is fine". It buys the lane back while the
-      # real question -- why one package needs five-plus minutes of database
-      # time when its five siblings need seconds -- stays open on memql#3257.
-      # The job's own timeout-minutes is 20 and the step was taking ~6, so this
-      # is well inside what the job already allows; it is not a new budget, it
-      # is the step's share of one that already existed.
+      #   8b8db012 (last green)   component/memql  133.9s
+      #   c650da97 (first red)    component/memql  123.6s
       #
-      # If you are here because it went red again: raising this a third time is
-      # the wrong move. Split the package, or find what got slow.
-      - name: db-gated suites (seeded test DB)
-        run: go test -count=1 -timeout=600s ./component/memql/... ./component/automations/... ./component/grpc/... ./integrations/cognition/... ./integrations/planner/... ./examples/referencepack/...
+      # It got ~10s FASTER. The suspected commits (concept_parser.go +211 and
+      # ten dsl/*/concepts.memql, memql#3196 / #3197 / #3198) cost nothing
+      # measurable. Nor is CI's 2.4x over local a contention artefact: pinned to
+      # two cores with GOMAXPROCS=2, mirroring this runner, the package still
+      # finishes in 120.3s. It is simply slower here -- a hosted runner's cores
+      # and its Postgres round-trips.
+      #
+      # What actually happened is that the budget was a coin flip. Two runs of
+      # IDENTICAL code, four minutes apart:
+      #
+      #   run 31206771705   290s
+      #   run 31210413414   310s
+      #
+      # ~7% run-to-run variance against a 300s budget the package was already
+      # consuming ~295s of. There was under 10s of headroom, so it was going to
+      # go red on SOME run no matter what anyone committed -- and when it did,
+      # the panic named whichever 1-second test held the clock, which reads as a
+      # flake in an unrelated test rather than as a budget. The author blamed is
+      # never the cause, because there is no cause to find.
+      #
+      # So the fix is the lane's SHAPE, which is what memql#3257 asked for
+      # second and is the half that generalises:
+      #
+      #   1. SPLIT THE STEP. component/memql gets its own budget, named as its
+      #      own. The other five need seconds, so they get a tight one -- a hang
+      #      in any of them now surfaces in ~2 minutes instead of taking the
+      #      slow package's 10. Previously one number covered all six, sized for
+      #      the worst, which made the other five's timeout meaningless.
+      #
+      #   2. REPORT HEADROOM. "How much room is left" required a bisect against
+      #      a live database to answer; memql#3257 called that out as its own
+      #      problem, and it was the reason nobody saw the cliff coming. Each
+      #      step now prints elapsed against budget, so the answer is in the log
+      #      of every run.
+      #
+      #   3. WARN BEFORE THE CLIFF, don't just fail at it. Crossing
+      #      DB_HEADROOM_WARN_PCT annotates the run. A warning is deliberate
+      #      rather than a failure: a slow runner is not a broken PR, and
+      #      failing on it would hand the next author exactly the unearned blame
+      #      this comment exists to explain. It is the advance notice that was
+      #      missing.
+      #
+      # Do NOT raise a budget in response to a warning. The warning means the
+      # package is growing into its budget, and the answer is to split the
+      # package by concern -- it boots a full engine per db-gated test, which is
+      # the actual cost driver and the thing worth changing.
+      # Kept as two PLAIN `go test` blocks on purpose. scripts/cidb/dbgate_test.go
+      # derives this lane's selector by parsing literal `./`-prefixed arguments
+      # out of these `run:` blocks, and treats a block containing a shell control
+      # keyword (`if`, `for`, `exit`, `cd`, `source`, ...) as non-plain. Moving
+      # the invocation behind a wrapper script empties its derived package list
+      # and silently disarms the gate -- confirmed while writing this: a
+      # `bash scripts/...` form reds dbgate_test.go with "no `go test` step, so
+      # the env key it sets guards nothing". Keep `go test` and its patterns
+      # literal and inline. scripts/ci/db-gated-packages.sh carries the same
+      # warning for the same reason.
+      #
+      # The `start=$SECONDS` / trailing `echo` pair is the headroom report, and
+      # is deliberately the most that fits: capturing the status to also print on
+      # FAILURE needs `|| status=$?` plus `exit "$status"`, and `exit` is one of
+      # the control keywords above. On a timeout the step NAME already carries
+      # the attribution that was missing, so the loss is small.
+      - name: db-gated -- component/memql (own budget, the slow one)
+        run: |
+          start=$SECONDS
+          go test -count=1 -timeout=600s ./component/memql/...
+          echo "headroom: component/memql used $((SECONDS - start))s of its 600s budget"
+      - name: db-gated -- the fast five (tight budget)
+        run: |
+          start=$SECONDS
+          go test -count=1 -timeout=180s ./component/automations/... ./component/grpc/... ./integrations/cognition/... ./integrations/planner/... ./examples/referencepack/...
+          echo "headroom: the fast five used $((SECONDS - start))s of their 180s budget"
 
   # VS Code extension lane: run every cmd/memql-lsp drift guard over the
   # checked-in editors/vscode assets, then build the offline LSP binary
