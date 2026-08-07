@@ -173,9 +173,23 @@ func (s *streamSession) handleRevokeBadge(envelope *memqlv1.MemqlClientMessage, 
 	}
 
 	store := &badge.Store{Engine: s.service.engine, Logger: s.service.logger}
+	// The WRITE runs as the system actor: a machine-credential
+	// v1:identity:identity row (badge / worker_token / node_token / ...) is
+	// only admitted from one (the memql#2513 credential-actor guard).
 	ctx := contextWithSystemActor(s.stream.Context())
 
-	rows, err := store.ListForUser(ctx, callerUserId)
+	// The READ does NOT. badgesForSelf is self-scoped on
+	// `userId==actor.userId` (memql#3178), and the system actor's subject is
+	// "polyphon-bridge-agent", not the caller -- reading under it would
+	// return zero rows and wrongly deny every non-admin revoking their OWN
+	// badge. The verifier interceptor stamps only CLAIMS onto the stream
+	// context; ensureAccess converts them to the AccessContext that
+	// resolveActorPath actually reads, and it has to be ATTACHED to the ctx
+	// (returning it is not enough) -- same step handleQuery takes for
+	// currentUser, and the same silent zero-row no-op if skipped (memql#216).
+	readCtx := auth.ContextWithAccess(s.stream.Context(), s.ensureAccess(s.stream.Context()))
+
+	rows, err := store.ListForSelf(readCtx)
 	if err != nil {
 		return send(&memqlv1.RevokeBadgeResult{
 			ErrorCode:    "lookup_failed",

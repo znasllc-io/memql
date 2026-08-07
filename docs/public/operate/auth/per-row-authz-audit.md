@@ -353,12 +353,23 @@ TokenInfo (read by `createdBy` and the mutation-actor check) **and** the
 AccessContext (read by `actor.*`). With that in place the original claim
 holds: no written value changes, and the field stops being forgeable.
 
-**Scope of that guarantee.** It covers the named-mutation surface. It
-does not cover raw `insert(...)`, which short-circuits the planner
-(`component/memql/parser.go:520`) and bypasses `args` / `accept` /
-`stamp` entirely; only three concepts carry a per-concept Go guard on
-that path, and neither library concept is one of them. Tracked as
-**memql#3059**.
+**Scope of that guarantee.** It covers the named-mutation surface. It did
+not cover raw `insert(...)`, which short-circuits the planner
+(`component/memql/parser.go`) and bypasses `args` / `accept` / `stamp`
+entirely; the per-concept Go guards on that path are reactive -- one per
+past incident -- and neither library concept was among them. Closed by
+**memql#3175** (carrying **memql#3059**): the engine server-stamps the
+field named by `@rowAuthz(owner=...)` on every write that did NOT come
+from a rendered mutation template, overwriting a caller-supplied value
+(`component/memql/rowauthz_insert_stamp.go`). It is driven by the
+declaration rather than a concept list, so a concept is covered the
+moment it declares a tier. The escape set is the write guard's --
+cluster owner, or trusted server-side Go stamping internal origin for
+that one write (memql#3174) -- and a call carrying no resolved caller
+identity is refused rather than stamped with an empty owner. Both
+library concepts additionally carry `@serverSet` on `ownerUserId`, which
+turns "never accepted from caller args" into a load-time rejection on
+the template path.
 
 One edge is load-bearing and now asserted: `auth.ContextWithUserActor`
 returns the context **unchanged** for a blank owner, so a write on that

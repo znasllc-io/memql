@@ -347,6 +347,14 @@ func TestNamedQueriesKeepTheirAdminGate(t *testing.T) {
 		"identity/queries.memql": {
 			"auditEventsByActor":  true,
 			"auditEventsByTarget": true,
+			// memql#3178: the operator arm of the patIdentitiesForUser split.
+			// It keeps a CALLER-SUPPLIED userId (the CLI's `--user-id` and the
+			// /admin/tokens roll-up both list somebody else's tokens on
+			// purpose), so `requiresOwnerOrAdmin` is the only thing standing
+			// between it and the enumeration hole the split closed. The
+			// self-scoped half, patIdentitiesForSelf, needs no entry here --
+			// it is actor-keyed rather than gated.
+			"patIdentitiesForUser": true,
 		},
 	}
 

@@ -15,19 +15,39 @@ import (
 //
 //   - No predicate related `args.userId` to `actor.userId`, and the mutation
 //     grammar has no way to express one -- ZERO mutations in the tree carry a
-//     filter. That is memql#2803 Phase 5, not a thing this issue could fix.
+//     filter. That WAS memql#2803 Phase 5, and Phase 5 has since landed: see
+//     below.
 //   - `role` is a plain `enum(...) @default("reader")`; it carries no
 //     `@internal` and no `@serverSet`.
 //   - `validateMutationCallerArgs` walks the payload's NAMED keys, and a SPLAT
 //     names none -- so the sensitive-field gate is structurally blind here and
 //     would be even if `role` were annotated.
-//   - Row-authz enforcement is inert by construction (`TestRowAuthzIsInert`,
-//     memql#2920).
+//   - Row-authz enforcement was inert by construction (memql#2920).
 //
-// The fix is `@serverOnly`, and it is the right gate rather than a stop-gap:
-// this mutation has exactly one production caller, the identity admin server,
-// which already authorizes through `admin/auth.go`. The boundary now sits where
-// the authorization already lived.
+// TWO OF THOSE FOUR STOPPED BEING TRUE (memql#3172 / memql#3174).
+//
+// Row-authz is no longer inert. `TestRowAuthzIsInert` was RETIRED by memql#3172
+// in the same commit that landed read-path enforcement, replaced by
+// `TestRowAuthzEnforcementLandGate`; the tree is never left with neither gate.
+// And memql#2803 Phase 5 -- the mechanism this file said "this issue could not
+// fix" -- landed as memql#3174: `component/memql/rowauthz_write_guard.go`
+// resolves the target row inside `executeWrite` and refuses an update / delete
+// whose declared owner is not the actor, WITHOUT the mutation having to express
+// the predicate. That is the general mechanism; it is the reason
+// `updateCalendarEvent` / `deleteCalendarEvent` (memql#2991 parts 2 and 3) are
+// closed.
+//
+// IT DOES NOT COVER THIS MUTATION, and the annotation below stays. `#3174`
+// reaches the 13 concepts that DECLARE a tier. `v1:identity:user` is not one of
+// them -- it cannot be, until memql#3029 lands `owner="id"` for the self-owned
+// case, because a user row's owner is its own id and there is no separate owner
+// field to name. Declaring tiers on the remaining 88 concepts is task #3173, and
+// each one is its own authorization judgment.
+//
+// So `@serverOnly` remains the gate here, and it is the right one rather than a
+// stop-gap: this mutation has exactly one production caller, the identity admin
+// server, which already authorizes through `admin/auth.go`. The boundary sits
+// where the authorization already lived.
 //
 // THE GATE HAS THREE HALVES, in three packages, and each covers a failure the
 // others cannot see:
@@ -70,9 +90,12 @@ func TestUpdateUserIsServerOnly(t *testing.T) {
 			"It takes a caller-supplied user id AND a caller-supplied payload splat, and "+
 			"v1:identity:user.role is a plain settable enum -- so without this gate a client "+
 			"can name any user and any role. Nothing else covers it: the mutation grammar "+
-			"cannot express an owner predicate, the payload splat is invisible to "+
-			"validateMutationCallerArgs, and row-authz is inert by construction. If this "+
-			"annotation is being removed, the owner-predicate mechanism (memql#2803 Phase 5) "+
-			"has to be in place first (memql#2991).", want)
+			"cannot express an owner predicate, and the payload splat is invisible to "+
+			"validateMutationCallerArgs. The owner-predicate mechanism DOES exist now "+
+			"(memql#2803 Phase 5, landed as memql#3174's write guard), but it engages only "+
+			"on a concept that DECLARES a tier -- and v1:identity:user cannot declare one "+
+			"until memql#3029 lands the self-owned `owner=\"id\"` spelling. So this "+
+			"annotation may only come off once that declaration is in the tree "+
+			"(memql#2991).", want)
 	}
 }

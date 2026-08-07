@@ -512,26 +512,21 @@ func ActiveSkillsFullBuild(args ActiveSkillsFullArgs) string {
 	return "query activeSkillsFull()"
 }
 
-// AgentAuthorizationsForUser -- All active standing authorizations granted by a user, across all agents and plan kinds.
+// AgentAuthorizationsForSelf -- The CALLING user's active standing authorizations, across all agents and plan kinds.
 //
-// Bound concept: v1:agents:agentAuthorization (machine-readable: BoundConcepts["agentAuthorizationsForUser"] in generated_concepts.go).
-type AgentAuthorizationsForUserArgs struct {
-	UserId string
+// Bound concept: v1:agents:agentAuthorization (machine-readable: BoundConcepts["agentAuthorizationsForSelf"] in generated_concepts.go).
+type AgentAuthorizationsForSelfArgs struct {
 }
 
-// AgentAuthorizationsForUser calls the engine query agentAuthorizationsForUser.
-func (qc *QueryClient) AgentAuthorizationsForUser(ctx context.Context, args AgentAuthorizationsForUserArgs) (*Result, error) {
-	call := AgentAuthorizationsForUserBuild(args)
-	return qc.executeNamed(ctx, "agentAuthorizationsForUser", call)
+// AgentAuthorizationsForSelf calls the engine query agentAuthorizationsForSelf.
+func (qc *QueryClient) AgentAuthorizationsForSelf(ctx context.Context, args AgentAuthorizationsForSelfArgs) (*Result, error) {
+	call := AgentAuthorizationsForSelfBuild(args)
+	return qc.executeNamed(ctx, "agentAuthorizationsForSelf", call)
 }
 
-func AgentAuthorizationsForUserBuild(args AgentAuthorizationsForUserArgs) string {
-	var b strings.Builder
-	b.WriteString("query agentAuthorizationsForUser(")
-	b.WriteString("userId: ")
-	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	b.WriteString(")")
-	return b.String()
+func AgentAuthorizationsForSelfBuild(args AgentAuthorizationsForSelfArgs) string {
+	_ = args
+	return "query agentAuthorizationsForSelf()"
 }
 
 // AgentById -- Get an agent by ID with full configuration.
@@ -1214,27 +1209,21 @@ func BadgeByKeyHashBuild(args BadgeByKeyHashArgs) string {
 	return b.String()
 }
 
-// BadgesForUser -- List badge identities owned by a user. Projects identitySummary (id / userId / label / active) -- NEVER credentials, so the badge keyHash (a low-entropy physical id's hash) is never exposed on this public surface.
-// AUDIT 2026-08-04 (memql#2987): re-audited, KEPT @public for now. Same group and same unresolved decision as patIdentitiesForUser -- see the note there. component/identity/badge is likewise absent from the internal-origin allowlist. Re-verified that the shape is still identitySummary and still omits credentials, which is what keeps this the least urgent of the three.
+// BadgesForSelf -- List the CALLING user's own badge identities. Projects identitySummary (id / userId / label / active) -- NEVER credentials, so the badge keyHash (a low-entropy physical id's hash) is never exposed.
 //
-// Bound concept: v1:identity:identity (machine-readable: BoundConcepts["badgesForUser"] in generated_concepts.go).
-type BadgesForUserArgs struct {
-	UserId string
+// Bound concept: v1:identity:identity (machine-readable: BoundConcepts["badgesForSelf"] in generated_concepts.go).
+type BadgesForSelfArgs struct {
 }
 
-// BadgesForUser calls the engine query badgesForUser.
-func (qc *QueryClient) BadgesForUser(ctx context.Context, args BadgesForUserArgs) (*Result, error) {
-	call := BadgesForUserBuild(args)
-	return qc.executeNamed(ctx, "badgesForUser", call)
+// BadgesForSelf calls the engine query badgesForSelf.
+func (qc *QueryClient) BadgesForSelf(ctx context.Context, args BadgesForSelfArgs) (*Result, error) {
+	call := BadgesForSelfBuild(args)
+	return qc.executeNamed(ctx, "badgesForSelf", call)
 }
 
-func BadgesForUserBuild(args BadgesForUserArgs) string {
-	var b strings.Builder
-	b.WriteString("query badgesForUser(")
-	b.WriteString("userId: ")
-	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	b.WriteString(")")
-	return b.String()
+func BadgesForSelfBuild(args BadgesForSelfArgs) string {
+	_ = args
+	return "query badgesForSelf()"
 }
 
 // CalendarEventById -- Get a single calendar event by node id. Self-scoped: the ownerUserId==actor.userId predicate guarantees a caller can only fetch their own events. Backs the calendar tool's update/delete pre-read and the event detail view.
@@ -2888,7 +2877,24 @@ func ParticipantSessionBuild(args ParticipantSessionArgs) string {
 	return b.String()
 }
 
-// PatIdentitiesForUser -- List PAT (api_key) identities owned by a user, in patSummary shape (no credentials).
+// PatIdentitiesForSelf -- List the CALLING user's own PAT (api_key) identities, in patSummary shape (no credentials).
+//
+// Bound concept: v1:identity:identity (machine-readable: BoundConcepts["patIdentitiesForSelf"] in generated_concepts.go).
+type PatIdentitiesForSelfArgs struct {
+}
+
+// PatIdentitiesForSelf calls the engine query patIdentitiesForSelf.
+func (qc *QueryClient) PatIdentitiesForSelf(ctx context.Context, args PatIdentitiesForSelfArgs) (*Result, error) {
+	call := PatIdentitiesForSelfBuild(args)
+	return qc.executeNamed(ctx, "patIdentitiesForSelf", call)
+}
+
+func PatIdentitiesForSelfBuild(args PatIdentitiesForSelfArgs) string {
+	_ = args
+	return "query patIdentitiesForSelf()"
+}
+
+// PatIdentitiesForUser -- List PAT (api_key) identities owned by ANOTHER user, in patSummary shape (no credentials). Admin-gated -- the operator arm of the memql#3178 split. Use patIdentitiesForSelf for "my own tokens".
 //
 // Bound concept: v1:identity:identity (machine-readable: BoundConcepts["patIdentitiesForUser"] in generated_concepts.go).
 type PatIdentitiesForUserArgs struct {

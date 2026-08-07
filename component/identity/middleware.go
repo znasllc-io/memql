@@ -16,6 +16,29 @@ import (
 // Mirrors what SystemActorMiddleware does for HTTP requests: same
 // claims, same SystemActorSubject. Idempotent -- if a real actor is
 // already on the context, this leaves it alone.
+//
+// It stamps all THREE surfaces (memql#3178), and the third is the one that
+// used to be missing:
+//
+//   - claims + TokenInfo, which `createdBy` and the mutation-actor presence
+//     check read (auth.ActorFromContext);
+//   - the AccessContext, which is what `actor.userId` / `actor.role` resolve
+//     from in a DSL filter or spec (component/memql resolveActorPath ->
+//     auth.AccessFromContext).
+//
+// Stamping only the first two is the memql#2989 trap that auth.ContextWithUserActor
+// exists to close, and this helper had it: the claims said role="owner" while
+// the actor envelope -- the thing a gate actually reads -- resolved role to ""
+// off a nil AccessContext. Nothing noticed until an admin-gated query
+// (`requiresOwnerOrAdmin`) went in front of `memql pat list`, which would have
+// returned zero rows for the operator while LOOKING correctly privileged.
+// auth.FallbackFromClaims is the same claims->AccessContext conversion the gRPC
+// stream session performs in ensureAccess; there is no HTTP/CLI equivalent, so
+// it is done here.
+//
+// The guard above keeps this from ever ESCALATING a real caller: a context
+// that already carries a TokenInfo returns untouched. Only genuinely
+// actor-less operator / bootstrap entry points get the owner envelope.
 func ContextWithSystemActor(ctx context.Context) context.Context {
 	if auth.TokenInfoFromContext(ctx) != nil {
 		return ctx
@@ -29,7 +52,7 @@ func ContextWithSystemActor(ctx context.Context) context.Context {
 	token := auth.BuildTokenInfo(claims)
 	ctx = auth.ContextWithClaims(ctx, claims)
 	ctx = auth.ContextWithToken(ctx, token)
-	return ctx
+	return auth.ContextWithAccess(ctx, auth.FallbackFromClaims(claims))
 }
 
 // SystemCredentialActorSubject is the synthetic actor attributed to

@@ -215,13 +215,19 @@ query user searchUsers {
 // userId. Used by the user-history admin view ("show me everything
 // Alice did").
 //
-// MemQL has no OR operator in its filter grammar (verified against
-// the engine's expression parser as of 2026-05). To answer the
-// general "audit events for a user" question -- which logically
-// means actorUserId==X OR targetId==X -- callers run BOTH this
-// query and auditEventsByTarget and merge the results on the
+// To answer the general "audit events for a user" question -- which
+// logically means actorUserId==X OR targetId==X -- callers run BOTH
+// this query and auditEventsByTarget and merge the results on the
 // client. The frontend dedupes on auditEvent.id when the same
 // row would be returned by both (e.g. self-action events).
+//
+// That split is a CLIENT-side merge by choice, not a grammar
+// limitation. The note that used to sit here claimed "MemQL has no OR
+// operator in its filter grammar (verified against the engine's
+// expression parser as of 2026-05)"; that was stale and is deleted
+// (memql#3178). `||` is live and shipped -- dsl/telephony/queries.memql:48
+// uses it in a real filter, with the admin gate kept outside the
+// disjunction so it still holds on every path.
 //
 // Returns events regardless of category / action / outcome -- the
 // admin view filters by those facets on the client.
@@ -938,62 +944,79 @@ query magicLinkRequest magicLinkRequestByTokenHash {
 //   Array of PAT identity rows in patSummary shape (active + inactive).
 //
 
-// `@public` marks this query as intentionally not caller-scoped.
-// Backs the user-facing /me/pats page; the caller has already
-// been authenticated by the web layer and the userId arg is
-// the authenticated subject. Tightening to `args.userId ==
-// actor.userId` is a #54 follow-up; it requires the web
-// handler to stop accepting an explicit userId and let the
-// query derive it from the actor instead.
-/// List PAT (api_key) identities owned by a user, in patSummary shape (no credentials).
-// AUDIT 2026-08-04 (memql#2987): re-audited, KEPT @public for now, and the
-// reason is recorded rather than left implicit -- this is the one group of the
-// ten where the audit did NOT reach a conclusion it could ship.
+/// List PAT (api_key) identities owned by ANOTHER user, in patSummary shape (no credentials).
+/// Admin-gated -- the operator arm of the memql#3178 split. Use patIdentitiesForSelf
+/// for "my own tokens".
 //
-// The debt is real: the filter keys on a caller-supplied userId with no check
-// that the caller IS that user, so any authenticated client can enumerate
-// another user's PAT metadata (patSummary -- no credential material, but names,
-// creation and last-used times).
+// RESOLVED 2026-08-06 (memql#3178). This was `@public` with
+// `userId==args.userId` and no check that the caller IS that user, so any
+// authenticated client could enumerate a stranger's PAT metadata (patSummary --
+// no credential material, but names, creation and last-used times) by passing
+// their id. memql#2987 shipped the credential-exposing half of the group
+// (workerTokensForUser, now @serverOnly) and left this one deferred because its
+// call sites had not been walked.
 //
-// The other two in the group are NOT the same shape, and saying so was wrong
-// (corrected in the memql#3064 review, where the claim was checked rather than
-// carried forward):
+// They have been now, and they do NOT all act on self:
 //
-//   - badgesForUser projects identitySummary, which omits credentials. Same
-//     shape as this one in the sense that matters.
-//   - workerTokensForUser projected **identityFull**, which DOES project
-//     `credentials` -- and for the worker_token variant that object carries
-//     keyHash, registeredBy, lastSeenAt and lastConnectedFromIP. So that query
-//     was materially identical to nodeTokenIdentityById, which this same audit
-//     GATED: caller-supplied id, no actor check, credentials on the wire. It
-//     was the worst item in this deferred group rather than a peer of the
-//     other two, and memql#3063 was ranked accordingly. It is NO LONGER in the
-//     group: memql#3063 took it off the wire outright (@serverOnly). What
-//     remains deferred is this query and badgesForUser -- both identitySummary,
-//     no credential material, which is why they could wait and it could not.
+//   - /me/tokens (component/identity/web/me_tokens.go) -- the owner, themselves.
+//   - `memql pat list --user-id X` (subcommand_pat.go) -- an OPERATOR listing
+//     somebody else's, which a bare `userId==actor.userId` would empty.
+//   - /admin/tokens (component/identity/admin/tokens.go, via pat.Store.ListAll)
+//     -- the same, cluster-wide.
 //
-// The obviously-right filter is `userId==actor.userId` ("your own
-// credentials"). It is not a one-line change: the Go caller
-// (component/identity/pat/store.go ListForUser) passes a userId argument, and
-// whether every call site is the owner acting on themselves -- as /me/tokens
-// is -- or an admin listing somebody else's, decides whether that filter
-// breaks an admin surface. @serverOnly is the other candidate and is worse
-// here: /me/tokens is a wire consumer, so removing it from the wire would
-// break the settings UI.
+// So the query is SPLIT rather than scoped: this admin-gated arm keeps the
+// caller-supplied userId for the two operator surfaces, and
+// patIdentitiesForSelf below serves /me/tokens with no userId at all. The
+// self-OR-admin single-query form (`... && (userId==actor.userId ||
+// requiresOwnerOrAdmin)`) is deliberately NOT used: it parses and loads, but
+// dsl/admin_gate_test.go's TestAdminGateIsATopLevelConjunct refuses a gate
+// inside a disjunction, correctly -- the other arm switches it off, so a false
+// gate would not zero the row set.
 //
-// Deliberately NOT guessed. The node-token trio and the two audit-event
-// queries in this same change were unambiguous and shipped; this group needs
-// its call sites walked, and getting it wrong either leaves the hole open or
-// breaks a live surface. Filed as memql#3063 with this analysis attached.
-@public
+// `requiresOwnerOrAdmin` is a TOP-LEVEL CONJUNCT here, which is what makes a
+// false gate empty the result. It reads `actor.role`, which resolves from the
+// AccessContext -- NOT from the claims map. The two operator surfaces stamped
+// claims only, so this gate would have denied them both; memql#3178 gives each
+// a real AccessContext (identity.ContextWithSystemActor for the CLI,
+// requireAdmin for /admin/tokens). Verified by
+// component/memql/identity_credential_self_scope_3178_test.go.
 query identity patIdentitiesForUser {
   args {
     userId  string!
   }
-  filter  userId==args.userId && identityIsApiKey
+  filter  userId==args.userId && identityIsApiKey && requiresOwnerOrAdmin
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
+  sort     "row.createdAt", "desc"
+  paginate 50
+  shape   patSummary
+}
+
+// ---- queries/v1/identity/patIdentitiesForSelf.memql ----
+
+// patIdentitiesForSelf - List the CALLER's own PATs
+// =================================================
+//
+// The self-scoped arm of the memql#3178 split. Backs /me/tokens.
+//
+// There is no userId argument BY DESIGN: the row set is derived from the
+// authenticated actor, so a caller cannot name whose tokens get listed. That is
+// the whole fix -- an ignored argument would still be an argument, and the next
+// reader would wire it back up.
+//
+// Includes inactive (revoked) rows so the UI can show a "revoked" row in the
+// listing for a few minutes after revocation if the user wants to confirm the
+// action took effect. The Go caller filters / styles them.
+//
+// Returns:
+//   Array of the caller's own PAT identity rows in patSummary shape
+//   (active + inactive).
+//
+/// List the CALLING user's own PAT (api_key) identities, in patSummary shape (no credentials).
+@actor
+query identity patIdentitiesForSelf {
+  filter  userId==actor.userId && identityIsApiKey
   sort     "row.createdAt", "desc"
   paginate 50
   shape   patSummary
@@ -1623,43 +1646,41 @@ query identity badgeByKeyHash {
   shape   identityFull
 }
 
-// ---- queries/v1/identity/badgesForUser.memql ----
+// ---- queries/v1/identity/badgesForSelf.memql ----
 
-// badgesForUser
+// badgesForSelf
 // =============
 //
-// Lists every badge identity owned by the user. Backs the badge
+// Lists every badge identity owned by the CALLER. Backs the badge
 // management surface (who registered what badge, when) without
 // exposing the keyHash as a credential.
 //
-// Arguments:
-//   userId (string, required) - v1:identity:user.id
-
-// `@public` marks this query as intentionally not caller-scoped.
-// Same auth shape as patIdentitiesForUser above (web-layer
-// authentication; userId is the authenticated subject). That pointer
-// USED to name workerTokensForUser, which stopped being a valid
-// comparison when memql#3063 made it @serverOnly -- it is off the wire
-// now, so "same auth shape as" it would mean this query should be too.
-// patIdentitiesForUser is the real peer: still @public, still deferred
-// on the same unresolved decision, and identitySummary like this one.
-// Tightening
-// tracked under #54.
-/// List badge identities owned by a user. Projects identitySummary (id / userId / label / active)
-/// -- NEVER credentials, so the badge keyHash (a low-entropy physical id's hash) is never exposed
-/// on this public surface.
-///
-/// AUDIT 2026-08-04 (memql#2987): re-audited, KEPT @public for now. Same group
-/// and same unresolved decision as patIdentitiesForUser -- see the note there.
-/// component/identity/badge is likewise absent from the internal-origin
-/// allowlist. Re-verified that the shape is still identitySummary and still
-/// omits credentials, which is what keeps this the least urgent of the three.
-@public
-query identity badgesForUser {
-  args {
-    userId  string!
-  }
-  filter  identityIsBadge && userId==args.userId
+// There is no userId argument BY DESIGN -- see patIdentitiesForSelf above.
+//
+/// List the CALLING user's own badge identities. Projects identitySummary
+/// (id / userId / label / active) -- NEVER credentials, so the badge keyHash
+/// (a low-entropy physical id's hash) is never exposed.
+//
+// RESOLVED 2026-08-06 (memql#3178). This was `badgesForUser`: `@public`, keyed
+// on a caller-supplied `args.userId`, so any authenticated client could
+// enumerate a stranger's badge metadata. It follows the SELF half of the PAT
+// split rather than getting an admin arm, on the evidence recorded on
+// memql#3178:
+//
+//   - the cockpit calls neither this query nor the PAT one (verified by
+//     shallow-clone grep at HEAD ee6cef4 AND by GitHub code search; the repo
+//     has no named-query execution surface at all);
+//   - its only production caller, component/grpc/badge_handlers.go, passes the
+//     CALLER's own id, to check that the caller owns the badge being revoked;
+//   - no admin badge view exists in either repo, so nothing needs to read
+//     another user's badges.
+//
+// An admin badge surface, if one is ever built, gets its OWN
+// requiresOwnerOrAdmin-gated query mirroring patIdentitiesForUser -- rather
+// than a userId argument being added back here.
+@actor
+query identity badgesForSelf {
+  filter  identityIsBadge && userId==actor.userId
   sort     "row.createdAt", "desc"
   paginate 50
   shape    identitySummary

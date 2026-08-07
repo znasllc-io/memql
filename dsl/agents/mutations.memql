@@ -56,7 +56,7 @@ mutate agent createAgent {
 
 // WHY userId IS STAMPED (memql#3081). It used to be accepted, and it is the key the standing
 // computer-use grant is READ by -- four Go call sites resolve a user's envelope ceiling through
-// `agentAuthorizationsForUser(userId:X)` (authoring_capability_store.go, worker/store.go,
+// `agentAuthorizationsForSelf` (authoring_capability_store.go, worker/store.go,
 // computer_use_status_agent.go, mint_skill_handler.go). So a caller-supplied value let a row be
 // written as `{userId: <someone else>, computerUseScope: "full"}`, raising THAT user's standing
 // ceiling on a grant they never approved -- on the concept whose own field doc says "Only the
@@ -65,7 +65,11 @@ mutate agent createAgent {
 // Every layer that could have caught it was structurally unable to: the mutation grammar cannot
 // express an owner predicate (memql#3079), the field carries neither @internal nor @serverSet so
 // validateMutationCallerArgs never inspects it, the mutation is on the client surface via the
-// generated SDK (so @serverOnly was not in play), and the concept declares no row-authz tier.
+// generated SDK (so @serverOnly was not in play), and -- until memql#3177 -- the concept declared
+// no row-authz tier. It declares `@rowAuthz(owner="userId")` now, which is what turns the stamp
+// below from an attribution fix into an enforced ownership key: a CREATE has no target row, so a
+// stamp is the only thing that can decide its owner, and the guard on every later write compares
+// against what this line wrote.
 //
 // This is deliberately NOT in the /// doc block: that text flows into the generated SDK, where a
 // consumer wants the contract rather than the history.
@@ -107,7 +111,18 @@ mutate agent deleteAgent {
   }
 }
 
+// TARGETING (memql#3177, carrying memql#3129). `authId` is a caller-supplied target with
+// nothing in the mutation relating it to the caller, and the grammar cannot express such a
+// relation -- a mutation carries no filter and `update` takes `id:` plus field assignments
+// (memql#3079). So before the concept declared a tier, any authenticated caller who knew an
+// authId could revoke a stranger's standing grant. It is closed at the ENGINE now, not here:
+// `v1:agents:agentAuthorization` declares `@rowAuthz(owner="userId")`, so executeWrite
+// resolves the target row before the read-merge and refuses when its userId is not the
+// caller's (component/memql/rowauthz_write_guard.go, memql#3174). Do not read the absence of
+// a guard in this body as the absence of a guard.
 /// Soft-revoke a standing authorization. User-revocable from the agent's settings at any time.
+/// SELF-SERVICE: only the granting user (the row's userId) may revoke their own grant -- the
+/// engine refuses a write onto anyone else's row under the concept's declared owner tier.
 /// Read-merges the existing row so the caller only passes the auth id;
 /// agentId/userId/planKind/spaceScope inherit from the persisted row (memql#1628).
 mutate agentAuthorization revokeAgentAuthorization {
@@ -133,13 +148,37 @@ mutate agent updateAgent {
   }
 }
 
+// THE SPLAT (memql#3177, carrying memql#3138). `args.payload` lands VERBATIM: memql#401's
+// overlay-wins protection is populated only from EXPLICIT block fields (see the hoist-and-
+// delete pass in component/memql/function_loader.go), so a bare splat re-stamps nothing. That
+// made `userId` -- the field the concept's owner tier is keyed on -- caller-writable through
+// this mutation, and the two-call escalation was: create a grant for yourself with
+// `computerUseScope:"full"` (correctly stamped to you), then update it with
+// `{userId:"<victim>"}`; the read-merge keeps the scope and active flag, and the victim's
+// standing ceiling is now `full` on a grant they never approved.
+//
+// `userId: actor.userId` below is the fix, in updateNote's idiom (dsl/notes/mutations.memql):
+// an explicit field alongside the splat becomes the PayloadOverlayTemplate, which
+// renderMutationTemplate applies AFTER the splat, so the server's value wins over anything the
+// caller sent. It needs the `@actor` binding to resolve, and the parsed-tree gate in
+// dsl/agentauthz_stamped_userid_test.go pins both.
+//
+// SELF-SERVICE ONLY, ruled by the repo owner 2026-08-06 on memql#3177. Re-stamping makes this
+// mutation self-service by construction, and that is the intent, not a side effect: it makes
+// the concept's own "only the granting user may update their grant" text TRUE rather than
+// deleting it. An admin gate was considered and REJECTED -- it does not stop this escalation,
+// because the attacker updates a row they legitimately own. If an operator surface is ever
+// wanted it lands as its own separately-named mutation with `requiresOwnerOrAdmin` as a
+// top-level conjunct, never as a second meaning for this one.
 /// Partial update of a v1:agents:agentAuthorization row. Mirrors updateAgent semantics: only the
 /// fields passed in `payload` change; everything else inherits from the prior row. Backs the canvas
 /// mintSkillApprovalRequested card's 'Approve & always allow this tier' action (pack#38, memql#169)
 /// -- the SPA reads the current skillTierAllowlist, appends the approved tier, and writes the whole
-/// array back as `{skillTierAllowlist: [...]}`. Per the agentAuthorization concept's revocation
-/// contract this is an OWNED write: only the granting user (the row's payload.userId) may update
-/// their own authorization grant.
+/// array back as `{skillTierAllowlist: [...]}`. SELF-SERVICE, and enforced two ways: the row's
+/// `userId` is re-stamped from actor.userId so a payload cannot reassign the grant, and the engine
+/// refuses the write outright when the target row's userId is not the caller's (the concept's
+/// declared owner tier -- memql#3177).
+@actor
 mutate agentAuthorization updateAgentAuthorization {
   args {
     authId   string!
@@ -147,6 +186,7 @@ mutate agentAuthorization updateAgentAuthorization {
   }
   update {
     id: args.authId
+    userId: actor.userId
     args.payload
   }
 }

@@ -23,21 +23,46 @@ query agent activeAgents {
   shape   agentFull
 }
 
-// `@public` marks this query as intentionally not caller-scoped --
-// the only callsite is the worker dispatcher (`integrations/agent/
-// worker/store.go:AgentAuthorization`), which runs under the agent
-// node's system actor when resolving an outgoing worker call's
-// scope grants. Splitting into a caller-self variant + a system-
-// only variant is tracked as a follow-up under #54 once the worker
-// dispatcher's auth model is settled.
-/// All active standing authorizations granted by a user, across all agents and plan kinds.
-@public
+// agentAuthorizationsForSelf -- the CALLER's own standing grants
+// ==============================================================
+//
+// RESOLVED 2026-08-06 (memql#3177, carrying memql#3129). This was
+// `agentAuthorizationsForUser`: `@public`, `userId==args.userId`, with
+// nothing relating the caller to the id they passed. The comment that
+// used to sit here said `@public` marked it "intentionally not
+// caller-scoped" for the worker dispatcher and deferred the split to
+// #54. That deferral is over -- `v1:agents:agentAuthorization` now
+// declares `@rowAuthz(owner="userId")`, so an unscoped read of it is no
+// longer expressible: #3172's land gate refuses the `args.userId` form
+// as undecidable, which is precisely the signal it exists to give.
+//
+// There is no userId argument BY DESIGN, in the shape memql#3178 landed
+// for `patIdentitiesForSelf`: the row set derives from the
+// authenticated actor, so a caller cannot name whose grants get listed.
+// An ignored argument would still be an argument and the next reader
+// would wire it back up.
+//
+// THE SPLIT #3178 USED FOR PATs IS NOT AVAILABLE HERE, and the reason is
+// worth stating so nobody re-proposes it: a second `userId==args.userId`
+// arm -- admin-gated or `@serverOnly` -- still binds a concept that
+// declares a tier, so #3172's land gate measures it and refuses it too.
+// Under a declared tier, `userId==actor.userId` is the only readable
+// shape. The four server-side call sites that legitimately resolve
+// ANOTHER user's envelope ceiling (the agent's owner, not the caller)
+// therefore supply that user's actor envelope for the one Execute call
+// -- `auth.ContextWithUserActor(ctx, ownerUserId)`, inline, per call, in
+// the #3072 shape epic decision C blesses. They are:
+//
+//   - component/memql/authoring_capability_store.go  (author envelope)
+//   - integrations/agent/worker/store.go             (worker dispatch gate)
+//   - integrations/planner/mint_skill_handler.go     (mint authority)
+//   - app/computer_use_status_agent.go               (per-turn scope echo)
+//
+/// The CALLING user's active standing authorizations, across all agents and plan kinds.
+@actor
 @unbounded("per-user standing authorizations -- a small bounded set the caller evaluates whole for authz decisions")
-query agentAuthorization agentAuthorizationsForUser {
-  args {
-    userId  string!
-  }
-  filter  userId==args.userId && isActiveRecord
+query agentAuthorization agentAuthorizationsForSelf {
+  filter  userId==actor.userId && isActiveRecord
   shape   agentAuthorizationFull
 }
 
