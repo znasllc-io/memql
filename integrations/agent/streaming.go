@@ -1152,6 +1152,13 @@ var agentContextStamps = map[string]agentContextStamp{
 	// whatever the model had supplied, which meant every editDocument
 	// version landed with an empty author and no plan provenance.
 	"editDocument": {StampAgentId: true, StampProducedByPlanId: true, SpaceField: "partitionId"},
+	// askSpecialist resolves a specialist by (owner, roleSlug), so the owner
+	// is the half the model must not choose (memql#3216). ownerUserId is
+	// @autoInjected in the tool schema -- applyToolDefaults deletes whatever
+	// the model sent under that name, and agentToolDefaults puts the runtime
+	// value back. No agentId: the CALLING agent is not what is being resolved,
+	// and stamping one would populate an argument this tool does not declare.
+	"askSpecialist": {StampOwnerUserId: true},
 	// canvasPublish: no flat agentId / ownerUserId in the schema;
 	// agentId rides inside `actor`. Space is `space`, not `partitionId`.
 	// StampThreadVisibility carries the Phase 9 visibility-inheritance

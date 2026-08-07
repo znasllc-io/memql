@@ -29,16 +29,31 @@ import (
 // filling an AgentDefinition literal, so the key-derivation path under test is
 // the one production uses.
 func rowFor(id, roleSlug, name, kind string) map[string]any {
+	return ownedRowFor("", id, roleSlug, name, kind)
+}
+
+// ownedRowFor is rowFor with the memql#3216 owner dimension. The unowned
+// spelling (owner == "") is the shared-catalog bucket, which is what every
+// pre-#3216 fixture implicitly was.
+func ownedRowFor(owner, id, roleSlug, name, kind string) map[string]any {
 	return map[string]any{
 		"id": id,
 		"payload": map[string]any{
-			"id":       id,
-			"roleSlug": roleSlug,
-			"name":     name,
-			"kind":     kind,
-			"role":     "specialist",
+			"id":          id,
+			"ownerUserId": owner,
+			"roleSlug":    roleSlug,
+			"name":        name,
+			"kind":        kind,
+			"role":        "specialist",
 		},
 	}
+}
+
+// globalBucket pulls the shared-catalog bucket out of a buildAgentIndex
+// result, so the pre-#3216 ordering tests -- whose fixtures are all unowned --
+// keep reading as they did.
+func globalBucket(idx map[string]map[string]*AgentDefinition) map[string]*AgentDefinition {
+	return idx[GlobalAgentOwner]
 }
 
 func defsFromRows(t *testing.T, rows []map[string]any) []*AgentDefinition {
@@ -73,37 +88,34 @@ func permutations[T any](in []T) [][]T {
 	return out
 }
 
-// The registry loads ZERO agents, and this pins that it STAYS that way until
-// the owner dimension lands.
+// TestTheAgentRegistryReadIsStillOffPendingOwnerScoping lived here.
 //
-// engine.Execute returns *ExecuteResult and LoadFromRows passes it straight to
-// extractRowList, whose type switch handles only []any and map[string]any and
-// falls through to `default: return nil`. So every specialist lookup fails
-// closed with "no agent registered with that role (loaded: [])".
+// It asserted extractRowList returned nothing for an *ExecuteResult, and said
+// in its own failure message: "If you just taught extractRowList to read an
+// *ExecuteResult, you also just made the specialist registry live [...] Land
+// memql#3216's owner dimension in the SAME change, then delete this test."
 //
-// That is a bug -- and fixing it here would have been a security regression,
-// not a fix. The map is keyed by a caller-supplied roleSlug, built from an
-// unscoped read carrying every user's systemPrompt, and resolved by
-// askSpecialist with a bare lookup and no owner check. Emptiness is the only
-// thing making that unreachable today. Adding the arm would turn a dead path
-// into a live cross-tenant one in the same commit.
-//
-// So this asserts the switch is still OFF. Delete this test in the change that
-// gives the lookup an owner dimension (memql#3216) -- and turn them on
-// together, never separately.
-func TestTheAgentRegistryReadIsStillOffPendingOwnerScoping(t *testing.T) {
+// That is this change, so it is deleted rather than adapted. Its replacement
+// is TestOwnerKeyedRegistryResolvesPerOwner below, which covers what the pin
+// was protecting: that resolving a slug cannot reach another user's row. The
+// switch itself is now covered by TestExtractRowListReadsWhatEngineExecuteReturns.
+
+// The read is ON now, and this is the arm that turns it on. RED against the
+// state this file previously pinned, which is the point: the deletion above
+// and this test are the same change seen from both sides.
+func TestExtractRowListReadsWhatEngineExecuteReturns(t *testing.T) {
 	res := newExecuteResult(nil)
 	res.setOutput([]any{
 		map[string]any{"id": "v1:agents:agent:a", "payload": map[string]any{"roleSlug": "one"}},
 	})
 
-	if rows := extractRowList(res); len(rows) != 0 {
-		t.Fatalf("extractRowList(*ExecuteResult) returned %d rows, want 0.\n\n"+
-			"If you just taught extractRowList to read an *ExecuteResult, you also just made the "+
-			"specialist registry live -- and it is keyed by a caller-supplied roleSlug over an "+
-			"unscoped row set that carries every user's systemPrompt, with no owner check at the "+
-			"askSpecialist lookup. Land memql#3216's owner dimension in the SAME change, then "+
-			"delete this test. memql#3209.", len(rows))
+	rows := extractRowList(res)
+	if len(rows) != 1 {
+		t.Fatalf("extractRowList(*ExecuteResult) returned %d rows, want 1.\n\n"+
+			"MemQLEngine.Execute returns *ExecuteResult and LoadFromRows passes it straight in. "+
+			"Without an arm for it the switch falls to `default: return nil` and the specialist "+
+			"registry loads zero agents -- every askSpecialist call failing closed with "+
+			"'no agent registered with that role (loaded: [])'. memql#3209 / memql#3216.", len(rows))
 	}
 }
 
@@ -126,7 +138,7 @@ func TestBuildAgentIndexIsIndependentOfRowOrder(t *testing.T) {
 
 	for i, perm := range permutations(rows) {
 		t.Run(fmt.Sprintf("order-%d", i), func(t *testing.T) {
-			idx := buildAgentIndex(defsFromRows(t, perm))
+			idx := globalBucket(buildAgentIndex(defsFromRows(t, perm)))
 
 			got, ok := idx["system-planner"]
 			if !ok {
@@ -160,7 +172,7 @@ func TestBuildAgentIndexTieBreaksOnRowIdWhenNeitherIsSystem(t *testing.T) {
 	const wantId = "v1:agents:agent:aaa"
 
 	for i, perm := range permutations(rows) {
-		idx := buildAgentIndex(defsFromRows(t, perm))
+		idx := globalBucket(buildAgentIndex(defsFromRows(t, perm)))
 		if got := idx["human-resources"].Id; got != wantId {
 			t.Errorf("ordering %d resolved to %q, want the lowest row id %q -- the tie-break "+
 				"must be a property of the rows", i, got, wantId)
@@ -183,7 +195,7 @@ func TestBuildAgentIndexPrefersASlugKeyOverANameKey(t *testing.T) {
 	const wantId = "v1:agents:agent:zzz"
 
 	for i, perm := range permutations(rows) {
-		idx := buildAgentIndex(defsFromRows(t, perm))
+		idx := globalBucket(buildAgentIndex(defsFromRows(t, perm)))
 		got, ok := idx["human-resources"]
 		if !ok {
 			t.Fatalf("ordering %d: no entry for the contested key", i)

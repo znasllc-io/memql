@@ -4,9 +4,18 @@
 // The assistant calls this tool when it needs a specialist's
 // structured answer to a question. The handler:
 //
-//   1. Resolves the specialist by roleSlug (e.g. "human-resources",
-//      "accounting-finance"). Errors if no agent with that role is
-//      registered, or if the resolved agent isn't a specialist.
+//   1. Resolves the specialist by (owner, roleSlug) -- e.g.
+//      "human-resources", "accounting-finance", scoped to whoever
+//      is asking. Errors if that owner has no agent with that role,
+//      or if the resolved agent isn't a specialist.
+//
+//      The OWNER half is not optional and is not caller-supplied
+//      (memql#3216). roleSlug is a plain caller-chosen string on
+//      createAgent -- no enum, no catalog check, no uniqueness -- so a
+//      slug alone identifies a bucket, not an agent. Resolving one
+//      globally handed the asking user whatever row won the contest,
+//      including another user's specialist Description and
+//      systemPrompt verbatim.
 //
 //   2. Invokes the askSpecialist structured-output prompt with the
 //      specialist's persona + the assistant's query. The specialist
@@ -39,4 +48,5 @@ tool askSpecialist {
   role     string! @description("Specialist roleSlug -- the canonical identifier (e.g. accounting-finance, human-resources, it-support, legal-compliance). Must match an existing specialist agent in the partition.")
   query    string! @description("What you want the specialist to answer. Phrase it as a clear question or task statement. Include relevant constraints from the conversation; the specialist does NOT see the chat directly.")
   context  object  @description("Optional conversation context: recent utterances, attachments referenced, prior specialist findings. Helps the specialist ground its answer without exposing it to the whole chat.")
+  ownerUserId  string  @autoInjected @description("Whose specialists to resolve `role` against. Server-stamped from the runtime -- the chat path uses the session's AccessContext user, the realtime-voice path uses the SPACE OWNER (memql#1503). The central validator drops any LLM-supplied value before dispatch; do not send one.")
 }

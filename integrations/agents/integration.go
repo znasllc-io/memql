@@ -107,9 +107,10 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			Description: "Synchronously query a specialist agent by role. Resolves the specialist by roleSlug, invokes the askSpecialist structured-output prompt with the specialist's persona + the assistant's query, and returns ONE JSON object {response, rationale?, confidence, needsMore?}. Specialists never write utterances; the assistant paraphrases the response into the human-facing reply.",
 			Handler:     i.handleAskSpecialist,
 			ArgsSchema: map[string]string{
-				"role":    "string -- specialist roleSlug (e.g. accounting-finance, human-resources)",
-				"query":   "string -- what the assistant wants the specialist to answer",
-				"context": "object (optional) -- conversation context attached by the assistant",
+				"role":        "string -- specialist roleSlug (e.g. accounting-finance, human-resources)",
+				"query":       "string -- what the assistant wants the specialist to answer",
+				"context":     "object (optional) -- conversation context attached by the assistant",
+				"ownerUserId": "string (required) -- whose specialists to resolve against (auto-stamped; @autoInjected, so an LLM-supplied value is dropped)",
 			},
 		},
 		{
@@ -197,9 +198,16 @@ func (i *Integration) handleInvoke(ctx context.Context, args map[string]any, _ i
 		return nil, fmt.Errorf("agent(%q): 'partitionId' argument is required (use the system placeholder if no space context)", name)
 	}
 
-	def, ok := i.agents.Get(name)
+	// Same owner dimension as askSpecialist (memql#3216). `agent` already
+	// declared ownerUserId in its arg schema; it just was not part of the
+	// lookup. Unlike askSpecialist this one TOLERATES an empty owner: the
+	// planner dispatches platform agents with no user behind the call, and an
+	// empty owner resolves the shared catalog and nothing else -- never
+	// another user's bucket.
+	ownerUserId, _ := args["ownerUserId"].(string)
+	def, ok := i.agents.Get(strings.TrimSpace(ownerUserId), name)
 	if !ok || def == nil {
-		return nil, fmt.Errorf("agent(%q): no agent registered with that name (loaded names: %v)", name, i.agents.Names())
+		return nil, fmt.Errorf("agent(%q): no agent registered with that name (loaded names: %v)", name, i.agents.NamesFor(ownerUserId))
 	}
 
 	planId, err := i.createInvocationPlan(ctx, def, prompt, partitionId)
@@ -273,9 +281,30 @@ func (i *Integration) handleAskSpecialist(ctx context.Context, args map[string]a
 	}
 	contextArg, _ := args["context"].(map[string]any)
 
-	def, ok := i.agents.Get(role)
+	// The owner dimension (memql#3216). Server-stamped and @autoInjected, so
+	// the model cannot supply it: the tool schema marks it auto-injected,
+	// ExecuteTool's applyToolDefaults deletes whatever arrived under that name,
+	// and the agent runtime's per-call defaults put the real value back
+	// (memql#3237 -- that delivery is why this issue was blocked on it).
+	//
+	// FAIL CLOSED on an empty owner rather than resolving the shared catalog.
+	// An empty value here does not mean "a platform call with no user"; it
+	// means the runtime could not establish who is asking, and the thing being
+	// handed back is another agent's Description and SystemPrompt verbatim.
+	// Refusing is a visible configuration failure; falling through would be an
+	// invisible cross-tenant one.
+	ownerUserId, _ := args["ownerUserId"].(string)
+	ownerUserId = strings.TrimSpace(ownerUserId)
+	if ownerUserId == "" {
+		return nil, fmt.Errorf("askSpecialist(%q): no owner in the call context -- specialists resolve per owner and this call cannot say whose", role)
+	}
+
+	def, ok := i.agents.Get(ownerUserId, role)
 	if !ok || def == nil {
-		return nil, fmt.Errorf("askSpecialist(%q): no agent registered with that role (loaded: %v)", role, i.agents.Names())
+		// NamesFor, not a global list: this message reaches the model, and a
+		// global one would answer "which specialists do other users have" to
+		// anyone who can provoke a miss.
+		return nil, fmt.Errorf("askSpecialist(%q): no agent registered with that role (loaded: %v)", role, i.agents.NamesFor(ownerUserId))
 	}
 	if def.Role != "specialist" {
 		return nil, fmt.Errorf("askSpecialist(%q): target agent has role=%q, not specialist", role, def.Role)
