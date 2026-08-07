@@ -1562,8 +1562,25 @@ type ForwardedAuthority struct {
 	OriginNodeId    string                 `protobuf:"bytes,10,opt,name=origin_node_id,json=originNodeId,proto3" json:"origin_node_id,omitempty"`        // audit only, never an input to a decision
 	OriginNodeType  string                 `protobuf:"bytes,11,opt,name=origin_node_type,json=originNodeType,proto3" json:"origin_node_type,omitempty"`  // audit only
 	AssertedAtUnix  int64                  `protobuf:"varint,12,opt,name=asserted_at_unix,json=assertedAtUnix,proto3" json:"asserted_at_unix,omitempty"` // audit / clock-skew diagnostics
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// Display name, carried for PROVENANCE PARITY ONLY -- it feeds
+	// component/metadata's identity.displayName, which the engine stamps onto
+	// every row a mutation writes. Not an authorization input, and never read as
+	// one: VerifyForwardedAuthority ignores both fields and the AccessContext it
+	// returns has nowhere to put them.
+	//
+	// Present because dropping them silently changed what lands in audit
+	// metadata: a row written by a worker on a forwarded turn omitted the name
+	// that the same user's rows carry when written on the direct path, with
+	// nothing in the data explaining the difference (memql#3221).
+	//
+	// If you are adding a field here, ask which of the two kinds it is. Every
+	// field above is an authorization input the receiver binds; these two are
+	// not, and the distinction is the only thing keeping them from becoming one
+	// by accident.
+	FirstName     string `protobuf:"bytes,13,opt,name=first_name,json=firstName,proto3" json:"first_name,omitempty"`
+	LastName      string `protobuf:"bytes,14,opt,name=last_name,json=lastName,proto3" json:"last_name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ForwardedAuthority) Reset() {
@@ -1678,6 +1695,20 @@ func (x *ForwardedAuthority) GetAssertedAtUnix() int64 {
 		return x.AssertedAtUnix
 	}
 	return 0
+}
+
+func (x *ForwardedAuthority) GetFirstName() string {
+	if x != nil {
+		return x.FirstName
+	}
+	return ""
+}
+
+func (x *ForwardedAuthority) GetLastName() string {
+	if x != nil {
+		return x.LastName
+	}
+	return ""
 }
 
 // AiForwardResponse carries a worker's response back to the originating
@@ -2221,7 +2252,7 @@ const file_node_proto_rawDesc = "" +
 	"\fcontinuation\x18\x06 \x01(\bR\fcontinuation\x1a7\n" +
 	"\tAuthEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01J\x04\b\x03\x10\x04R\tpartition\"\xf9\x03\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01J\x04\b\x03\x10\x04R\tpartition\"\xb5\x04\n" +
 	"\x12ForwardedAuthority\x12)\n" +
 	"\x10contract_version\x18\x01 \x01(\tR\x0fcontractVersion\x12T\n" +
 	"\x0eprincipal_kind\x18\x02 \x01(\x0e2-.znasllc.memql.node.v1.ForwardedPrincipalKindR\rprincipalKind\x12\x18\n" +
@@ -2236,7 +2267,10 @@ const file_node_proto_rawDesc = "" +
 	"\x0eorigin_node_id\x18\n" +
 	" \x01(\tR\foriginNodeId\x12(\n" +
 	"\x10origin_node_type\x18\v \x01(\tR\x0eoriginNodeType\x12(\n" +
-	"\x10asserted_at_unix\x18\f \x01(\x03R\x0eassertedAtUnix\"p\n" +
+	"\x10asserted_at_unix\x18\f \x01(\x03R\x0eassertedAtUnix\x12\x1d\n" +
+	"\n" +
+	"first_name\x18\r \x01(\tR\tfirstName\x12\x1b\n" +
+	"\tlast_name\x18\x0e \x01(\tR\blastName\"p\n" +
 	"\x11AiForwardResponse\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12(\n" +
