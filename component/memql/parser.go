@@ -190,6 +190,26 @@ func (e *MemQLEngine) parseWithFunctionsAmbient(query string, fns *FunctionRegis
 		}
 		plan.Root = resolvedRoot
 	}
+	// Row-authz ENFORCEMENT (memql#3172, READ PATH ONLY -- the write side
+	// is #3174 and the raw-insert bypass is #3059). When the construct's
+	// declared binding names a concept carrying a tier, the tier's
+	// predicate is ANDed into the root here.
+	//
+	// Placed BEFORE the bare-payload rewrite below so the injected term
+	// goes through the same rewrite every authored filter does: the tier
+	// renders `ownerUserId==actor.userId`, and it is that rewrite which
+	// turns the bare property into the `payload.ownerUserId` both the SQL
+	// pushdown and the in-memory evaluator consume. Injecting after it
+	// would leave a bare reference no compile stage resolves.
+	//
+	// Placed in the PLAN path rather than in Execute so plan.Root ITSELF
+	// carries the term: the result-cache signature is taken from
+	// plan.Root, and the refused first attempt injected into a local, so
+	// an enforced query kept one cache key shared across callers
+	// (memql#3172 finding 2).
+	if err := enforceRowAuthzOnPlan(plan); err != nil {
+		return nil, err
+	}
 	// Bare payload access (epic #2292): a filter predicates on payload
 	// properties by BARE name (the concept is bound by the query
 	// signature). Rewrite each bare, non-reserved field reference to its

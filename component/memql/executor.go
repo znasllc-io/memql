@@ -213,7 +213,29 @@ func (e *MemQLEngine) evaluateExpressionSet(ctx context.Context, expr Expression
 	// canonical, the engine handles both transparently per the
 	// concept's @relationship metadata.
 	resolved = e.canonicalizeRelationshipComparisons(ctx, resolved, conceptContext)
-	return e.evaluateExpressionSetWithContext(ctx, resolved, timestamp, target, sorter, conceptContext)
+	set, err := e.evaluateExpressionSetWithContext(ctx, resolved, timestamp, target, sorter, conceptContext)
+	if err != nil {
+		return nil, err
+	}
+	// Row-authz ENFORCEMENT, the per-row half (memql#3172).
+	//
+	// The filter injected upstream is resolved from the construct's
+	// DECLARED BINDING, so a read that has no binding to resolve from --
+	// a raw client-supplied query string, which handleExecuteQuery passes
+	// straight through -- carries no injected term. This gate covers
+	// those, from the concept each ROW declares, and it is therefore
+	// immune to how the filter was spelled: naming a row by id, a
+	// top-level `||` and a negated concept all reach it identically.
+	// That is memql#3172 finding 1, closed from the side no filter-text
+	// detector can reach.
+	//
+	// It is a near-total no-op today by measurement rather than by hope:
+	// every one of the 33 constructs over a declared concept already
+	// carries the tier's term as a top-level conjunct (the land-time
+	// gate in rowauthz_enforce_gate_test.go re-derives that at PR head),
+	// so the only rows it can drop are ones an unbound read reached
+	// around the declaration.
+	return filterRowAuthzSet(ctx, set), nil
 }
 
 func (e *MemQLEngine) evaluateExpressionSetWithContext(ctx context.Context, expr ExpressionNode, timestamp *time.Time, target int, sorter *compiledSort, conceptContext string) (map[string]memorynodes.MemoryNode, error) {
@@ -943,7 +965,6 @@ func (e *MemQLEngine) expandGraph(ctx context.Context, node memorynodes.MemoryNo
 	if err != nil {
 		return err
 	}
-	builder.addNode(apiNode)
 
 	// Row-authz SHADOW MODE, graph-expansion path (memql#2921).
 	//
@@ -969,6 +990,27 @@ func (e *MemQLEngine) expandGraph(ctx context.Context, node memorynodes.MemoryNo
 			recordShadow("", conceptMeta.Name, ShadowPathGraphExpansion, nil)
 		}
 	}
+
+	// Row-authz ENFORCEMENT, graph-expansion path (memql#3172, DoD item
+	// covering the path #2803 design decision 3 warns gets missed).
+	//
+	// Traversal walks relationship definitions from a row the caller
+	// already has; it never enters evaluateExpressionSet, so filter
+	// injection is structurally unreachable here. What is reachable is
+	// the ROW, and the row names its own concept -- so the tier is
+	// resolved exactly as it is everywhere else in this change, from a
+	// declaration rather than from a filter that does not exist.
+	//
+	// Placed BEFORE addNode, so a denied row is not added to the bundle,
+	// and before the recursion, so traversal does not continue THROUGH a
+	// row the caller may not see. `granted` fails closed on this path
+	// alone: its predicate is a relationship spec, and with no filter
+	// having run there is nothing to defer the join to.
+	if !admitRowAuthzTraversal(ctx, node) {
+		return nil
+	}
+
+	builder.addNode(apiNode)
 
 	if depth == 0 {
 		return nil
