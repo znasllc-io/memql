@@ -1216,6 +1216,34 @@ jobs:
             echo "::endgroup::"
           done < <(find . -name go.mod -not -path './.git/*' -printf '%h\n' | sed 's|^\./||;s|^\.$|.|' | sort)
           exit "$status"
+      - name: every module is on the workspace's version set
+        run: |
+          set -euo pipefail
+          # WHY THIS IS A GATE AND NOT A CONVENTION.
+          #
+          # `go mod tidy` in a nested module resolves external dependencies by
+          # THAT MODULE's own minimal-version selection. A module needing only
+          # grpc's basics picks an older grpc than the root does, and nothing
+          # local notices: the workspace resolves the maximum across modules, so
+          # every build and every test stays green over a tree whose go.mod
+          # files disagree.
+          #
+          # What does notice is Dependabot, which reads each go.mod separately
+          # and opens one PR per (module, dependency) to close each gap. That is
+          # what produced a PR per module for grpc alone after memql#3241
+          # (1.81.0-dev -> 1.82.1 across component/harness, component/node/gen
+          # and the root) -- not Dependabot misbehaving, but correctly reporting
+          # drift the split introduced.
+          #
+          # `go work sync` pushes the workspace's selected versions back into
+          # every go.mod. A no-op means the tree is on one version set.
+          go work sync
+          if ! git diff --quiet; then
+            echo "::error::modules have drifted off the workspace version set -- run 'go work sync' and commit the result"
+            git diff --stat
+            exit 1
+          fi
+          echo "all modules on one version set"
       - name: package count is preserved across the split
         run: |
           set -euo pipefail

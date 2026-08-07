@@ -184,6 +184,17 @@ def main():
         sh(["go", "mod", "edit", f"-require={MOD}/{d}@v0.0.0", f"-replace={MOD}/{d}=./{d}", root])
     sh(["go", "mod", "tidy"], env={"GOWORK": "off"})
 
+    # Align every module on the workspace's selected versions.
+    #
+    # Each `go mod tidy` above ran with GOWORK=off, so each module resolved its
+    # external dependencies by its OWN minimal-version selection -- a module
+    # needing only grpc's basics picks an older grpc than the root does. The
+    # drift is invisible locally, because the workspace resolves the maximum
+    # across modules and every build stays green over go.mod files that
+    # disagree. What notices is Dependabot, which reads each go.mod separately
+    # and opens one PR per (module, dependency) to close each gap.
+    sh(["go", "work", "sync"])
+
     update_dockerfiles(modules)
     update_known_dirs(modules)
     print(f"total modules: {len(modules)}")
