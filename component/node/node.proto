@@ -300,6 +300,24 @@ message ForwardedAuthority {
   string origin_node_id = 10;                  // audit only, never an input to a decision
   string origin_node_type = 11;                // audit only
   int64 asserted_at_unix = 12;                 // audit / clock-skew diagnostics
+
+  // Display name, carried for PROVENANCE PARITY ONLY -- it feeds
+  // component/metadata's identity.displayName, which the engine stamps onto
+  // every row a mutation writes. Not an authorization input, and never read as
+  // one: VerifyForwardedAuthority ignores both fields and the AccessContext it
+  // returns has nowhere to put them.
+  //
+  // Present because dropping them silently changed what lands in audit
+  // metadata: a row written by a worker on a forwarded turn omitted the name
+  // that the same user's rows carry when written on the direct path, with
+  // nothing in the data explaining the difference (memql#3221).
+  //
+  // If you are adding a field here, ask which of the two kinds it is. Every
+  // field above is an authorization input the receiver binds; these two are
+  // not, and the distinction is the only thing keeping them from becoming one
+  // by accident.
+  string first_name = 13;
+  string last_name = 14;
 }
 
 enum ForwardedPrincipalKind {

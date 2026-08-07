@@ -359,6 +359,11 @@ func forwardedAuthorityToProto(a auth.ForwardedAuthority, originNodeId, originNo
 		RoleCeiling:     string(a.RoleCeiling),
 		OriginNodeId:    originNodeId,
 		OriginNodeType:  originNodeType,
+		// Provenance only (memql#3221) -- see the field comments on
+		// auth.ForwardedAuthority. Carried so identity.displayName lands the
+		// same on a row this hop writes as on one the user writes directly.
+		FirstName: a.FirstName,
+		LastName:  a.LastName,
 	}
 	switch a.Kind {
 	case auth.ForwardedPrincipalUser:
@@ -375,6 +380,35 @@ func forwardedAuthorityToProto(a auth.ForwardedAuthority, originNodeId, originNo
 		out.AssertedAtUnix = a.AssertedAt.Unix()
 	}
 	return out
+}
+
+// bindForwardedContext is the ACCEPT-AND-BIND step of the mesh forwarded-auth
+// contract: given the verified decision and the attribution claims that
+// travelled beside it, it produces the context every worker-side handler reads.
+//
+// Three stamps, three distinct jobs.
+//   - client origin: this work originated with a client request, not with a
+//     server-initiated sweep (#2889).
+//   - forwarded claims: TokenInfo for `createdBy` ATTRIBUTION only. Never an
+//     authorization input any more. This is also what carries the
+//     provenance-only display name that component/metadata stamps as
+//     identity.displayName on every row a mutation writes (memql#3221).
+//   - access: THE authorization decision, and it comes from the verified
+//     assertion alone -- no LoadFromClaims, no FallbackFromClaims, no
+//     userByIdSystem keyed by a wire-supplied subject, and therefore no
+//     per-message DB round trip either. The comment this replaced claimed
+//     "so worker-side ACLs work" while setting no AccessContext at all, which
+//     is memql#2876.
+//
+// A named function rather than three inline lines because it is the only place
+// the two carriers meet, and it is reachable from a test: every existing
+// forwarded-path test exercises a REFUSAL, and a refusal returns before
+// reaching here. `access` MUST already have come from VerifyForwardedAuthority;
+// this binds what it is handed.
+func bindForwardedContext(ctx context.Context, claims map[string]string, access *auth.AccessContext) context.Context {
+	ctx = auth.ContextWithClientOrigin(ctx)
+	ctx = auth.ContextWithForwardedClaims(ctx, claims)
+	return auth.ContextWithAccess(ctx, access)
 }
 
 func forwardedAuthorityFromProto(p *nodev1.ForwardedAuthority) auth.ForwardedAuthority {
@@ -394,6 +428,11 @@ func forwardedAuthorityFromProto(p *nodev1.ForwardedAuthority) auth.ForwardedAut
 		RoleCeiling:     auth.Role(p.GetRoleCeiling()),
 		OriginNodeId:    p.GetOriginNodeId(),
 		OriginNodeType:  p.GetOriginNodeType(),
+		// Provenance only. Read back so the worker's metadata collector can
+		// stamp identity.displayName; VerifyForwardedAuthority never looks at
+		// them and the AccessContext it returns has nowhere to put them.
+		FirstName: p.GetFirstName(),
+		LastName:  p.GetLastName(),
 	}
 	switch p.GetPrincipalKind() {
 	case nodev1.ForwardedPrincipalKind_FORWARDED_PRINCIPAL_KIND_USER:
@@ -493,20 +532,7 @@ func (s *service) HandleForwardedRequest(
 		return
 	}
 
-	// Three stamps, three distinct jobs.
-	//   - client origin: this work originated with a client request, not with
-	//     a server-initiated sweep (#2889).
-	//   - forwarded claims: TokenInfo for `createdBy` ATTRIBUTION only. Never
-	//     an authorization input any more.
-	//   - access: THE authorization decision, and it comes from the verified
-	//     assertion alone -- no LoadFromClaims, no FallbackFromClaims, no
-	//     userByIdSystem keyed by a wire-supplied subject, and therefore no
-	//     per-message DB round trip either. The comment this replaced claimed
-	//     "so worker-side ACLs work" while setting no AccessContext at all,
-	//     which is memql#2876.
-	ctx = auth.ContextWithClientOrigin(ctx)
-	ctx = auth.ContextWithForwardedClaims(ctx, req.GetAuth())
-	ctx = auth.ContextWithAccess(ctx, access)
+	ctx = bindForwardedContext(ctx, req.GetAuth(), access)
 
 	identity, _ := auth.UserIdentityFromContext(ctx)
 	if identity.Subject == "" {
@@ -1038,6 +1064,14 @@ func (s *streamSession) forwardedPrincipal() (auth.ForwardedPrincipal, error) {
 	class := s.credentialClass
 	ceiling := s.credentialCeiling
 	expiresAt := s.badgeExpiresAt
+	// The names come from the session IDENTITY, not from the AccessContext --
+	// an AccessContext carries none. Read inside the same critical section as
+	// the rest for the reason stated above: handleRotateAuth swaps s.identity
+	// together with s.access, and a name paired with a different rotation's
+	// subject would be a wrong attribution rather than a missing one.
+	// Provenance only; nothing below turns them into a decision (memql#3221).
+	firstName := s.identity.FirstName
+	lastName := s.identity.LastName
 	s.accessMu.Unlock()
 
 	// The synthetic principals get NAMED classes rather than arriving
@@ -1059,7 +1093,7 @@ func (s *streamSession) forwardedPrincipal() (auth.ForwardedPrincipal, error) {
 	if err != nil {
 		return auth.ForwardedPrincipal{}, err
 	}
-	return authority.Principal(), nil
+	return authority.WithDisplayName(firstName, lastName).Principal(), nil
 }
 
 // extractPartitionFromEnvelope is a no-op post-#56 phase 8. The
