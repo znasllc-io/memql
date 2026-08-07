@@ -144,19 +144,79 @@ func TestRefusalShapeIgnoresAMislabelledContinuationFlag(t *testing.T) {
 	}
 }
 
-// A well-formed SYSTEM assertion -- what the cognition and planner hops send --
-// passes the gate. Without this the refusal tests above would be satisfied by a
-// receiver that refuses everything.
+// THE POSITIVE CONTROL, and it has to drive the RECEIVER to be one.
+//
+// Every other test in this file asserts a refusal, and a receiver that refused
+// unconditionally would satisfy all of them. So this sends a well-formed SYSTEM
+// assertion -- exactly what the planner's AgentPreemptTurn and the cognition
+// client-tool relay now send -- through HandleForwardedRequest and requires
+// that the gate does NOT refuse it.
+//
+// AgentPreemptTurn is chosen deliberately: on a service with no agent turn
+// registry the handler is a no-op that sends nothing, so "no forwarded_authority
+// refusal was emitted" is a clean signal about the GATE rather than about
+// whatever the handler would go on to do.
 func TestHandleForwardedRequestAcceptsAWellFormedSystemAssertion(t *testing.T) {
 	authority, err := auth.ForwardedAuthorityForSystem("system:planner-integration", time.Now())
 	if err != nil {
 		t.Fatalf("building a system authority: %v", err)
 	}
-	if _, err := auth.VerifyForwardedAuthority(authority, time.Now()); err != nil {
-		t.Fatalf("the receiver's own verifier refused a system assertion: %v.\n\n"+
-			"Both deliberate nil-claims producers (the planner's AgentPreemptTurn and the "+
-			"cognition client-tool relay) now send exactly this. If it does not verify, pausing "+
-			"a Plan and resuming a client tool both stop working in cluster mode.", err)
+
+	svc := &service{logger: testLogger()}
+	send, got := collectSends()
+
+	svc.HandleForwardedRequest(context.Background(), &nodev1.AiForwardRequest{
+		RequestId: "req-accepted",
+		MemqlEnvelope: envelopeBytes(t, &memqlv1.MemqlClientMessage_AgentPreemptTurn{
+			AgentPreemptTurn: &memqlv1.AgentPreemptTurnMsg{RequestId: "req-accepted"},
+		}),
+		Continuation: true,
+		Auth:         authority.Principal().Claims,
+		Authority:    forwardedAuthorityToProto(authority, "planner-1", "planner"),
+	}, send)
+
+	for _, m := range *got {
+		resp := m.GetAiForwardResponse()
+		if resp == nil {
+			continue
+		}
+		var server memqlv1.MemqlServerMessage
+		if err := proto.Unmarshal(resp.GetMemqlServerMsg(), &server); err != nil {
+			continue
+		}
+		if qe := server.GetQueryError(); qe != nil &&
+			strings.Contains(qe.GetError().GetMessage(), "forwarded_authority_refused") {
+			t.Fatalf("the gate REFUSED a well-formed system assertion: %s.\n\n"+
+				"Both deliberate nil-claims producers send exactly this shape. If it is refused, "+
+				"pausing a Plan and resuming a client tool both stop working in cluster mode -- "+
+				"and because a continuation refusal is DROPPED rather than answered, they would "+
+				"stop working silently.", qe.GetError().GetMessage())
+		}
+	}
+}
+
+// The same shape, one field short: the claims map naming a different subject
+// than the assertion. Pins the cross-check that stops the two carriers drifting.
+func TestHandleForwardedRequestRefusesWhenClaimsDisagreeWithTheAssertion(t *testing.T) {
+	authority, err := auth.ForwardedAuthorityForUser(
+		&auth.AccessContext{UserId: "v1:identity:user:real", Role: auth.RoleWriter},
+		auth.ForwardedClassUser, "", time.Time{}, time.Now())
+	if err != nil {
+		t.Fatalf("building a user authority: %v", err)
+	}
+
+	svc := &service{logger: testLogger()}
+	send, got := collectSends()
+
+	svc.HandleForwardedRequest(context.Background(), &nodev1.AiForwardRequest{
+		RequestId:     "req-mismatch",
+		MemqlEnvelope: envelopeBytes(t, &memqlv1.MemqlClientMessage_AiChat{AiChat: &memqlv1.AiChatMsg{}}),
+		Auth:          map[string]string{"sub": "v1:identity:user:someone-else"},
+		Authority:     forwardedAuthorityToProto(authority, "bff-1", "bff"),
+	}, send)
+
+	if len(*got) != 1 {
+		t.Fatalf("got %d responses, want 1 terminal refusal for a principal mismatch", len(*got))
 	}
 }
 

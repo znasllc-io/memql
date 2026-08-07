@@ -176,6 +176,17 @@ Therefore:
 - **opener** → answered terminally, so the caller gets an error, not a hang;
 - **continuation** → **dropped**, logged and counted, never answered.
 
+"Answered terminally" only helps if the producer *relays* the answer. `proxyAI`
+does (`relayForwardedResponses`). `proxyAIStream` drained the forward channel
+and threw everything away, because under the substrate cutover the streamed
+content arrives out-of-band and that channel normally carries only the terminal
+— so a refusal vanished and `consumeTokenStream` blocked forever on a substrate
+stream the worker never opened, with no timeout. That path has no self-healing:
+streaming chat sends no continuation, so nothing later trips the `HasInflight`
+check the transcribe sibling recovers on. It now forwards a `QueryError` to the
+client, preserving the receiver's code (`PermissionDenied` vs
+`Unauthenticated`) rather than flattening it.
+
 The class is decided by the **receiver's own payload-class table**, not by the
 producer's `continuation` bool. The wire flag is a fallback for the one case
 where the table cannot be consulted — an envelope that will not parse — and a

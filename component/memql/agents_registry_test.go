@@ -73,31 +73,37 @@ func permutations[T any](in []T) [][]T {
 	return out
 }
 
-// The registry loaded ZERO agents on main: engine.Execute returns
-// *ExecuteResult, and extractRowList's type switch handled only []any and
-// map[string]any, falling through to `default: return nil`. Every specialist
-// lookup therefore failed with "no agent registered with that role (loaded:
-// [])" -- silently, because a nil row list is indistinguishable from an empty
-// agent table.
+// The registry loads ZERO agents, and this pins that it STAYS that way until
+// the owner dimension lands.
 //
-// This is the test that makes the rest of memql#3209 observable: an
-// order-independent winner is unobservable while the map is always empty.
-func TestExtractRowListAcceptsWhatEngineExecuteReturns(t *testing.T) {
+// engine.Execute returns *ExecuteResult and LoadFromRows passes it straight to
+// extractRowList, whose type switch handles only []any and map[string]any and
+// falls through to `default: return nil`. So every specialist lookup fails
+// closed with "no agent registered with that role (loaded: [])".
+//
+// That is a bug -- and fixing it here would have been a security regression,
+// not a fix. The map is keyed by a caller-supplied roleSlug, built from an
+// unscoped read carrying every user's systemPrompt, and resolved by
+// askSpecialist with a bare lookup and no owner check. Emptiness is the only
+// thing making that unreachable today. Adding the arm would turn a dead path
+// into a live cross-tenant one in the same commit.
+//
+// So this asserts the switch is still OFF. Delete this test in the change that
+// gives the lookup an owner dimension (memql#3216) -- and turn them on
+// together, never separately.
+func TestTheAgentRegistryReadIsStillOffPendingOwnerScoping(t *testing.T) {
 	res := newExecuteResult(nil)
 	res.setOutput([]any{
 		map[string]any{"id": "v1:agents:agent:a", "payload": map[string]any{"roleSlug": "one"}},
-		map[string]any{"id": "v1:agents:agent:b", "payload": map[string]any{"roleSlug": "two"}},
 	})
 
-	rows := extractRowList(res)
-
-	if len(rows) != 2 {
-		t.Fatalf("extractRowList(*ExecuteResult) returned %d rows, want 2.\n\n"+
-			"MemQLEngine.Execute returns *ExecuteResult, so this is the exact value LoadFromRows "+
-			"passes. A nil return here empties the whole specialist registry and askSpecialist "+
-			"answers 'no agent registered with that role (loaded: [])' for every role -- with no "+
-			"error anywhere, because 'the query returned nothing' and 'we could not read what the "+
-			"query returned' are the same value. memql#3209.", len(rows))
+	if rows := extractRowList(res); len(rows) != 0 {
+		t.Fatalf("extractRowList(*ExecuteResult) returned %d rows, want 0.\n\n"+
+			"If you just taught extractRowList to read an *ExecuteResult, you also just made the "+
+			"specialist registry live -- and it is keyed by a caller-supplied roleSlug over an "+
+			"unscoped row set that carries every user's systemPrompt, with no owner check at the "+
+			"askSpecialist lookup. Land memql#3216's owner dimension in the SAME change, then "+
+			"delete this test. memql#3209.", len(rows))
 	}
 }
 

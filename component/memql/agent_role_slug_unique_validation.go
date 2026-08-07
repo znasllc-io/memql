@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/uptrace/bun"
+
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/core/id"
@@ -182,33 +184,65 @@ func agentRoleSlugConflict(candidateId string, candidateActive bool, holders []a
 // activeAgentRoleRowsForSlug returns the rows whose LATEST version carries this
 // slug, with that version's active flag.
 //
-// Two steps, deliberately. The store is time-series -- one logical row is many
-// physical versions -- so a single `WHERE payload->>'slug' = ?` matches any
-// version that EVER carried the slug, including one that has since been renamed
-// away from it or deactivated. That would refuse writes on a slug nothing
-// currently holds. So: scan the concept newest-first, keep the first version
-// seen per id (that is the latest), and only then ask whether it carries the
-// slug and is active.
+// Two steps, deliberately, and neither can be collapsed into the other.
+//
+// The store is time-series -- one logical row is many physical versions -- so a
+// single `WHERE payload->>'slug' = ?` matches any version that EVER carried the
+// slug, including one since renamed away from it or deactivated. Answering from
+// that set would refuse writes on a slug nothing currently holds.
+//
+// But scanning the WHOLE concept is not the answer either: this runs on every
+// agentRole write, the SeedMaterializer re-runs ~97 createAgentRole calls on
+// every boot, and versions accumulate forever -- so a full scan grows without
+// bound and is paid on the hot path.
+//
+// So step one narrows to the CANDIDATE IDS -- the rows that have ever carried
+// this slug, which is a `WHERE payload->>'slug' = ?` the database can answer --
+// and step two resolves only those ids to their latest version. A row that has
+// since renamed away is excluded there, on a set bounded by the number of rows
+// that ever held one slug rather than by the size of the concept.
 func (e *MemQLEngine) activeAgentRoleRowsForSlug(ctx context.Context, slug string) ([]agentRoleSlugRow, error) {
 	db := e.database()
 	if db == nil {
 		return nil, fmt.Errorf("memory engine database not configured")
 	}
 
-	var nodes []memorynodes.MemoryNode
+	// Step 1: which rows have EVER carried this slug.
+	var candidates []string
 	err := db.NewSelect().
+		Model((*memorynodes.MemoryNode)(nil)).
+		Column("id").
+		Where("concept = ?", conceptAgentsAgentRole).
+		Where("payload->>'slug' = ?", slug).
+		Distinct().
+		Scan(ctx, &candidates)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("scan agent-role slug candidates: %w", err)
+	}
+	if len(candidates) == 0 {
+		return nil, nil
+	}
+
+	// Step 2: resolve each candidate to its LATEST version and ask whether that
+	// version still carries the slug and is active.
+	var nodes []memorynodes.MemoryNode
+	err = db.NewSelect().
 		Model(&nodes).
 		Where("concept = ?", conceptAgentsAgentRole).
+		Where("id IN (?)", bun.In(candidates)).
 		OrderExpr(`"createdAt" DESC`).
 		Scan(ctx)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("scan agent roles: %w", err)
+		return nil, fmt.Errorf("scan agent-role slug holders: %w", err)
 	}
 
-	seen := make(map[string]struct{}, len(nodes))
+	seen := make(map[string]struct{}, len(candidates))
 	var out []agentRoleSlugRow
 	for _, node := range nodes {
 		if _, dup := seen[node.ID]; dup {
@@ -220,6 +254,8 @@ func (e *MemQLEngine) activeAgentRoleRowsForSlug(ctx context.Context, slug strin
 		if jerr := json.Unmarshal(node.Payload, &payload); jerr != nil {
 			continue
 		}
+		// The latest version may have renamed AWAY from this slug -- which is
+		// exactly why step 1 alone is not an answer.
 		if strings.TrimSpace(stringFromAny(payload["slug"])) != slug {
 			continue
 		}

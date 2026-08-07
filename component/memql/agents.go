@@ -285,24 +285,35 @@ func (r *AgentRegistry) Clear() {
 // So resolution must not depend on row order -- see buildAgentIndex, which
 // replaces the previous last-wins assignment with a total comparator.
 //
-// What this does NOT fix: the winner is still global rather than per-owner, so
-// `askSpecialist` can hand user A's assistant the persona of user B's
-// specialist under a contested key. That is a distinct defect (a missing owner
-// dimension on the lookup, not an ordering one) and is filed separately -- do
-// not read the ordering fix as covering it.
+// # THIS FUNCTION STILL REGISTERS NOTHING, AND THAT IS DELIBERATE
+//
+// extractRowList has no *ExecuteResult arm, so `rows` below is always nil and
+// `registered` is always 0. Read the comment on extractRowList for why that
+// switch is being held: the winner here is global rather than per-owner, so
+// `askSpecialist` would hand user A's assistant the persona of user B's
+// specialist. Emptiness is the only thing making that unreachable today, so
+// turning the read on and adding the owner dimension (memql#3216) must be ONE
+// change, not two.
+//
+// The ordering work below lands now because it is what makes the read safe to
+// turn on -- not because it does anything yet.
 //
 // # On pagination -- `paginate 50` was NOT a bound to rely on
 //
-// This used to read `allAgents`, which paginates 50 and mints a cursor that
-// was never followed. That is right for a UI list and wrong for a resolution
-// table: an agent missing from this map is not "on page 2", it is
-// unresolvable. Worse, the engine fills a page from `target*2` PHYSICAL
-// version rows and dedupes to logical ones afterwards, so ordinary edit churn
-// shrinks the registry far below 50 -- 100 versions of one agent yields a
-// registry of one. Hence the dedicated complete read below. A residual bound
-// remains: the effective window is clamped by MaxWindow (default 5000), so a
-// cluster past that many agents needs this revisited rather than silently
-// truncated.
+// This used to read `allAgents`, which paginates 50 and mints a cursor nothing
+// followed. That is right for a UI list and wrong for a resolution table: an
+// agent missing from this map is not "on page 2", it is unresolvable. Worse,
+// the engine fills a page from `target*2` PHYSICAL version rows and dedupes to
+// logical ones afterwards, so ordinary edit churn shrinks the registry far
+// below 50 -- 100 versions of one agent yields a registry of one.
+//
+// Hence the dedicated read below. Its residual bound is **500**, not 5000:
+// `@unbounded` rewrites to `paginate 1000000`, `effectiveWindow` clamps that to
+// MaxWindow (5000), and then `evaluateExpression` clamps the returned slice
+// again to MaxResults, whose default is 500 (component/memql/config.go). So a
+// cluster past 500 agents needs this revisited rather than silently truncated,
+// and the truncation is still SILENT -- there is no signal distinguishing "500
+// agents" from "500 of 900".
 func (r *AgentRegistry) LoadFromRows(ctx context.Context, engine *MemQLEngine, logger *slog.Logger) (int, error) {
 	if r == nil {
 		return 0, fmt.Errorf("agent registry is nil")
@@ -359,22 +370,32 @@ func (r *AgentRegistry) LoadFromRows(ctx context.Context, engine *MemQLEngine, l
 // maps. Handles the shapes the engine returns: the *ExecuteResult wrapper
 // itself, a top-level []any of row maps, or a {"nodes":[...]} wrapper.
 //
-// The *ExecuteResult arm is not optional (memql#3209). MemQLEngine.Execute
-// returns *ExecuteResult, so without it every caller fell through to
-// `default: return nil` and read ZERO rows -- silently, because "the query
-// matched nothing" and "we could not read what the query returned" arrive here
-// as the same value. That emptied the entire specialist registry.
+// # There is NO *ExecuteResult arm, and that is DELIBERATE (memql#3209)
+//
+// MemQLEngine.Execute returns *ExecuteResult, and LoadFromRows passes that
+// value straight in -- so it falls to `default: return nil` and the agent
+// registry loads ZERO rows. That is a real bug: "the query matched nothing"
+// and "we could not read what the query returned" arrive here as the same
+// value, which is why it went unnoticed.
+//
+// It is NOT fixed here, because fixing it is not a bug fix -- it is a FEATURE
+// SWITCH with a security consequence. The registry is keyed by a
+// caller-supplied roleSlug, is built from an unscoped read, carries every
+// user's systemPrompt, and `askSpecialist` resolves it with a bare map lookup
+// and no owner check. While the map is empty every such lookup fails closed
+// with "no agent registered with that role (loaded: [])". Adding the arm turns
+// that dead path into a LIVE cross-tenant one in the same commit -- user A's
+// assistant could resolve user B's specialist and be handed its system prompt.
+//
+// So the ordering fix in buildAgentIndex lands now (it is correct, and it is
+// what makes resolution safe to turn on), and the switch stays off until
+// memql#3216 gives the lookup an owner dimension. Turn them on together.
 func extractRowList(result any) []map[string]any {
 	if result == nil {
 		return nil
 	}
 	var rows []any
 	switch v := result.(type) {
-	case *ExecuteResult:
-		if v == nil {
-			return nil
-		}
-		return extractRowList(v.OutputPayload())
 	case []any:
 		rows = v
 	case map[string]any:

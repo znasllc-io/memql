@@ -109,12 +109,17 @@ query agent allAgents {
 }
 
 /// The row set behind the in-process agent registry (component/memql/agents.go
-/// LoadFromRows). Deliberately COMPLETE where allAgents is a paged UI list: an
-/// agent missing from a resolution table is not "on page 2", it is
-/// unresolvable, and nothing here follows a cursor. The paged form could not be
-/// made to work by following one either -- the engine fills a page from
-/// `target*2` PHYSICAL version rows and dedupes to logical rows afterwards, so
-/// ordinary edit churn returns a short page that looks exhausted (memql#3209).
+/// LoadFromRows). Unpaged where allAgents is a paged UI list: an agent missing
+/// from a resolution table is not "on page 2", it is unresolvable, and nothing
+/// here follows a cursor. The paged form could not be made to work by following
+/// one either -- the engine fills a page from `target*2` PHYSICAL version rows
+/// and dedupes to logical rows afterwards, so ordinary edit churn returns a
+/// short page that looks exhausted (memql#3209).
+///
+/// "Unpaged" is not "unbounded": @unbounded rewrites to paginate 1000000, which
+/// effectiveWindow clamps to MaxWindow (5000) and evaluateExpression clamps
+/// again to MaxResults, default 500. Past 500 agents this truncates, and
+/// silently -- revisit it there rather than assuming the read is complete.
 ///
 /// Scoping it to actor.userId is NOT the fix, and would be actively wrong. This
 /// is a process-wide catalog built once at startup under the seed materializer's

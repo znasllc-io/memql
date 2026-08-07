@@ -26,13 +26,22 @@ import (
 // and every mutation stamps `createdBy: ""`. The comment on that path says
 // "so worker-side ACLs work"; those ACLs are exactly what does not.
 //
-// THE DEFECT IS STILL OPEN. memql#2876 is parked: the obvious repair -- attach
-// an AccessContext resolved from the forwarded claims -- is a NET REGRESSION,
-// because it removes the deny-on-nil protection above while the badge role
-// ceiling (#2513) cannot be carried reliably. See the note on
-// auth.WithForwardedAuthorityContext for the measurement and the shape a real
-// fix needs. These tests pin what is TRUE today so the next attempt starts from
-// evidence rather than from the same wrong assumption.
+// THE DEFECT IS CLOSED, in memql#3205. HandleForwardedRequest now verifies a
+// mandatory ForwardedAuthority and binds the AccessContext it asserts, so the
+// engine sees the caller's actor on the worker side.
+//
+// What survives here is the DEFECT PIN below: claims ALONE still leave the
+// engine with no actor. That has to stay true -- it is the property the whole
+// contract rests on, so if someone re-attaches claims and calls it done, this
+// test fails.
+//
+// The naive repair the original note warned about -- resolve an AccessContext
+// from the forwarded claims -- was a net regression, because it removed the
+// deny-on-nil protection above while the badge ceiling (#2513) could not be
+// carried reliably. What shipped resolves nothing on the receiver: it verifies
+// an assertion sourced from the producer's post-rotate session state, and
+// refuses when it cannot prove the ceiling was applied. See
+// docs/internal/design/mesh-forwarded-auth-contract.md.
 //
 // Unlike #2814's QueryForward -- receive-side machinery that never had a
 // producer, and was removed outright rather than repaired -- this path is

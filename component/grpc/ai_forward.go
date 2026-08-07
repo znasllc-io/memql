@@ -660,6 +660,30 @@ func (s *service) refuseForward(
 	s.sendForwardError(send, requestId, code, message)
 }
 
+// forwardErrorCode reverses codes.Code.String(), which is how sendForwardError
+// writes the code onto the wire. codes.Code has no exported parser and its
+// UnmarshalJSON rejects this spelling, so the mapping is explicit -- covering
+// the codes the forward path actually produces and falling back to Internal
+// rather than guessing.
+func forwardErrorCode(s string) codes.Code {
+	switch s {
+	case codes.PermissionDenied.String():
+		return codes.PermissionDenied
+	case codes.Unauthenticated.String():
+		return codes.Unauthenticated
+	case codes.InvalidArgument.String():
+		return codes.InvalidArgument
+	case codes.Unimplemented.String():
+		return codes.Unimplemented
+	case codes.Unavailable.String():
+		return codes.Unavailable
+	case codes.FailedPrecondition.String():
+		return codes.FailedPrecondition
+	default:
+		return codes.Internal
+	}
+}
+
 // forwardRefusalReason maps a verifier sentinel to a stable metric label.
 func forwardRefusalReason(err error) string {
 	switch {
