@@ -617,15 +617,17 @@ func (e *Evaluator) evaluateCoalesceArg(raw string) (any, bool) {
 //   - Here: the blanker handles `"` only, and this splitter accepts BOTH `"`
 //     and `'`. Routing single-quoted literals through it would silently stop
 //     treating them as strings.
-//   - There: the blanker ends a string at a NEWLINE, which the MemQL lexer does
-//     not do -- it accepts a literal spanning lines. Delegating swallowed every
-//     comma after such a literal, which is memql#3046 in the other direction.
+//   - There: the blanker ended a string at a NEWLINE, which the MemQL lexer
+//     does not do -- it accepts a literal spanning lines. Delegating swallowed
+//     every comma after such a literal, which is memql#3046 in the other
+//     direction. Fixed since, in memql#3116; that objection no longer stands
+//     and the delegation question is memql#3190's.
 //
-// Widening the shared blanker was the other option and is deliberately not
-// taken here -- it backs a shipped load rule whose behaviour is pinned by its
-// own tests, and changing what it considers a string is a bigger change than
-// this bug fix. That it disagrees with the lexer about newlines is now filed
-// separately as memql#3116.
+// The reason HERE is unaffected by that fix and still stands on its own: the
+// shared blanker knows one quote character and this splitter accepts two.
+// Widening it was the other option and is deliberately not taken -- it backs a
+// shipped load rule whose behaviour is pinned by its own tests, and changing
+// what it considers a string is a bigger change than this bug fix.
 func splitCoalesceArgs(s string) ([]string, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {

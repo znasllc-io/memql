@@ -318,6 +318,37 @@ query note second {
 	}
 }
 
+// The same hazard through a literal that SPANS lines (memql#3116), and
+// the consumer assessment for BlankCommentsAndStrings: a blanker that
+// closed the literal at the newline exposed the `}` on its second line
+// as code, so the brace walk hit depth 0 at the args block and the
+// query's body was truncated before its filter. A construct whose
+// filter is invisible reads as unfiltered, which BLOCKS -- so the
+// symptom is a correct declaration silently dropped.
+func TestAMultiLineStringDoesNotTruncateABody(t *testing.T) {
+	src := `query note myNotes {
+  args {
+    label  string  @description("a label
+} that wraps")
+  }
+  filter  ownerUserId==actor.userId
+  shape   noteFull
+}
+`
+	if _, err := langparser.NewLexer(src).Tokenize(); err != nil {
+		t.Fatalf("the fixture must lex cleanly, or it proves nothing about valid input: %v", err)
+	}
+	got := inferOne(t, map[string]string{
+		"notes/concepts.memql": "concept note {\n  ownerUserId string\n  label string\n}\n",
+		"notes/queries.memql":  src,
+	})
+	want := langparser.RowAuthzDecl{Tier: langparser.RowAuthzOwned, Owner: "ownerUserId"}
+	if got.Tiers["notes"]["note"] != want {
+		t.Fatalf("inferred %+v, want %+v -- the filter is only visible if the multi-line literal is blanked whole (abstained: %v)",
+			got.Tiers["notes"]["note"], want, got.Abstained)
+	}
+}
+
 // A mutation neither votes nor blocks. It cannot vote (actor.userId
 // there is a stamped value, not a row selection) and it must not block
 // (an ungated `update { id: args.x }` is the gap #2803 exists to

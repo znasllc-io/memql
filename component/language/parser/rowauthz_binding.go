@@ -473,6 +473,50 @@ func BlankCommentsAndStrings(source string) string {
 // helper: that one backs a shipped load rule whose behaviour is
 // asserted by its own tests, and changing what it considers a comment
 // is a separate change from adding this annotation.
+//
+// # Where a string ends, and why that is the lexer's answer
+//
+// A string literal ends at its closing quote and NOWHERE ELSE: it may
+// span newlines, and an unterminated one runs to EOF. That is the
+// lexer's reading (scanString accepts an interior newline as an
+// ordinary rune) rather than this scanner's own. The one place the two
+// cannot agree is an unterminated literal, because the lexer's answer
+// there is a hard error -- "unterminated string starting at position
+// %d" -- and a blanker has to return a string. Running to EOF is the
+// compatible choice: it never exposes string content as code, so a
+// caller handed a file that does not lex gets a conservative view
+// instead of a scrambled one. There is nothing else to be tolerant of,
+// since no consumer meaningfully runs on a file the lexer refuses.
+//
+// This replaced a line-bounded rule that claimed to mirror "the same
+// recovery the lexer performs" (memql#3116). The lexer performs no such
+// recovery, and the claim is what stopped readers checking. A multi-line
+// literal desynced the scan in BOTH directions at once -- content after
+// the newline surfaced as code, and the literal's real closing quote
+// opened a string that swallowed the code after it -- until the next
+// quote resynchronised.
+//
+// # What that cost each consumer (memql#3116 assessment)
+//
+//   - ConceptHeaders: `concept phantom {` written inside a wrapped
+//     @description was located as a real declaration, and the codemod
+//     inserts relative to a header's PreambleStart -- an insertion
+//     INSIDE a string literal. The same desync unbalanced conceptEnd's
+//     brace walk, so a real concept's body could end early or run into
+//     its neighbour.
+//   - RowAuthzDeclaredInSource: a declaration sharing a line with a
+//     multi-line literal's closing quote (`...wraps") @rowAuthz(public)`,
+//     the multi-annotation line rowAuthzDeclPattern is deliberately not
+//     anchored for) was swallowed as string content. The idempotency
+//     check then said "undeclared" and RewriteRowAuthz inserted a
+//     duplicate -- a load error, so a re-run broke a loadable tree.
+//   - BlankCommentsAndStrings: memqlmigrate's inference slices construct
+//     bodies by walking braces over this view, so a `}` on a literal's
+//     second line closed a body early and hid the filter inside it. A
+//     construct whose filter is invisible reads as unfiltered, which
+//     BLOCKS -- a correct declaration silently dropped.
+//
+// Each of those three is pinned by a test.
 func blankCommentsAndStrings(source string) string {
 	var b strings.Builder
 	b.Grow(len(source))
@@ -510,15 +554,36 @@ func blankCommentsAndStrings(source string) string {
 			case c == '\\' && i+1 < len(source) && source[i+1] != '\n':
 				// Blank the escape and the byte it escapes together,
 				// so `\"` cannot be read as a closing quote.
+				//
+				// A backslash immediately before a newline is excluded
+				// so the newline reaches the arm below and survives as
+				// a newline. The lexer rejects `\<newline>` as an
+				// invalid escape, so this shape only ever occurs in a
+				// file that does not lex; the offset- and
+				// line-preserving contract still has to hold on it.
 				b.WriteString("  ")
 				i++
 			case c == '"':
 				state = code
 				b.WriteByte(c)
 			case c == '\n':
-				// An unterminated string ends at the newline, the
-				// same recovery the lexer performs.
-				state = code
+				// A newline does NOT end the literal: it is written
+				// through as ordinary content and the scan stays in
+				// string state (memql#3116).
+				//
+				// This is what the lexer does. scanString writes a
+				// literal newline into the builder as an ordinary rune
+				// and keeps going, so a multi-line literal is ONE
+				// string token -- memql#3047's line counter exists
+				// precisely because such literals are legal. Ending
+				// here instead desynced the scan in both directions at
+				// once: content after the newline was exposed as code,
+				// and the literal's real closing quote OPENED a string
+				// that swallowed the code following it.
+				//
+				// The newline is emitted rather than blanked so the
+				// result stays line-for-line and byte-for-byte
+				// alignable with the source.
 				b.WriteByte(c)
 			default:
 				b.WriteByte(' ')

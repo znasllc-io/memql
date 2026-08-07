@@ -2611,23 +2611,31 @@ var bareIdentOnly = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 //
 // It is in this package, it tracks escapes correctly, and reusing it was the
 // obvious answer -- memql#3046's own DoD asked whether these hand-rolled
-// scanners should be consolidated. It is the WRONG scanner for this job, and
-// the reason is worth recording because it is not visible from its signature.
+// scanners should be consolidated. It was the WRONG scanner for this job when
+// this was written, and the reason is worth keeping because the fix it names is
+// what makes the answer different now.
 //
-// That blanker ends a string at a newline, describing it as "the same recovery
-// the lexer performs". The lexer does not do that: it accepts a literal
-// spanning lines and returns it as ONE string token (measured -- and memql#3047
-// is a separate bug about the line COUNTER not advancing through exactly such a
-// literal, which only exists because they are accepted). So on a multi-line
-// literal the blanker closes the string early, the real closing quote reopens
-// one, and every following comma is swallowed:
+// That blanker USED TO end a string at a newline, describing it as "the same
+// recovery the lexer performs". The lexer does not do that: it accepts a
+// literal spanning lines and returns it as ONE string token (measured -- and
+// memql#3047 is a separate bug about the line COUNTER not advancing through
+// exactly such a literal, which only exists because they are accepted). So on a
+// multi-line literal the blanker closed the string early, the real closing
+// quote reopened one, and every following comma was swallowed:
 //
 //	"line one\nline two", args.b   lexer: 2 args   blanked scan: 1
 //
 // That is the identical symptom memql#3046 exists to remove -- arguments
 // silently collapsing to one -- reintroduced through a different door, and the
 // old lookback scanner got this case RIGHT. Fixing one comma-swallowing bug by
-// importing another is not a fix, so string state stays local here.
+// importing another is not a fix, so string state stayed local.
+//
+// memql#3116 has since made the blanker agree with the lexer -- a literal spans
+// newlines, an unterminated one runs to EOF -- so that objection is spent and
+// delegating is a live option again. Deliberately NOT taken here: #3116 settled
+// the blanker's behaviour and nothing more. Whether this splitter delegates is
+// memql#3190's call, and it now inherits a function whose answer to "where does
+// a string end" is the lexer's.
 //
 // The cost of staying local is that comments inside an argument list are not
 // blanked, exactly as before this change. Nothing regresses relative to the
