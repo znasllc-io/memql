@@ -202,7 +202,10 @@ func (c *Concept) Create(ctx context.Context, store Store, params CreateParams) 
 
 	validationPayload := clonePayload(payload)
 	if err := c.validate(definitionSchemaKey, validationPayload); err != nil {
-		return Node{}, fmt.Errorf("concept payload validation failed: %w", err)
+		// Rewrites only the leaves that quote a @secret field's value; every
+		// other message stays byte-identical. concept_secret_redaction.go,
+		// memql#3184.
+		return Node{}, fmt.Errorf("concept payload validation failed: %w", c.redactSecretValidationError(err))
 	}
 
 	now := time.Now().UTC()
