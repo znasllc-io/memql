@@ -22,6 +22,35 @@ updates:
       # against protocol >= 1.48.x, then bump both modules together.
       - dependency-name: "github.com/livekit/protocol"
 
+  # The NESTED modules the split creates (memql#3228).
+  #
+  # Dependabot discovers a nested go.mod on its own and opens one PR per
+  # (module, dependency). That surfaced the moment the base tier landed: three
+  # separate PRs against component/polyphon alone (#3264, #3265, #3266). The
+  # tree is 23 modules today and headed for ~29, so ungrouped this is a flood
+  # measured in tens of PRs per week -- for bumps that are near-duplicates of
+  # the root entry's, since the nested modules share the root's dependency set.
+  #
+  # So: one grouped PR for the whole nested set. The root module keeps its own
+  # ungrouped entry above, because that is where a bump is actually reviewed --
+  # the livekit/protocol ignore there is the standing example of a dependency
+  # that must be judged individually.
+  - package-ecosystem: "gomod"
+    directories:
+      - "/component/**"
+      - "/core"
+      - "/dsl"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 3
+    groups:
+      nested-modules:
+        patterns:
+          - "*"
+    labels:
+      - "dependencies"
+      - "go"
+
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
