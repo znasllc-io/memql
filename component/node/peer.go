@@ -123,6 +123,25 @@ func NewPeerManager(identity *Identity, logger *slog.Logger) *PeerManager {
 	return pm
 }
 
+// SelfNodeId / SelfNodeType report this node's own identity. The mesh
+// forwarded-auth router stamps them onto every authority assertion as audit
+// provenance, from one place, so no producer call site can forget it
+// (memql#3205). Audit-only: never an input to an authorization decision, so an
+// empty value never changes a verdict.
+func (pm *PeerManager) SelfNodeId() string {
+	if pm == nil || pm.identity == nil {
+		return ""
+	}
+	return pm.identity.ID
+}
+
+func (pm *PeerManager) SelfNodeType() string {
+	if pm == nil || pm.identity == nil {
+		return ""
+	}
+	return string(pm.identity.Type)
+}
+
 // SetTimings overrides the default heartbeat / liveness / offline durations.
 // Any zero-valued duration leaves its field at the current value. Must be
 // called before Start.

@@ -3,70 +3,71 @@ package cognition
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
 )
 
-// TestForwardedAuthClaimsForTurn_DailySpaceNoPlanId is the memql#1107
-// regression. The ad-hoc produce path -- a deliverable running in a daily
-// space with NO plan_id -- forwarded nil auth claims to the agent node, so
-// the agent's tool-dispatch persistence (taskstamp.createAdHocPlan + the
-// safety DecisionRecorder) ran on a ctx with no actor and failed with
-// "no actor found in context". The plan_id path stamps fine because it
-// forwards a system-actor claims map.
+// The memql#1107 regression, re-pinned against the mesh forwarded-auth
+// contract (memql#3205).
 //
-// The fix threads an actor onto the forwarded claims. This asserts both
-// arms of forwardedAuthClaimsForTurn:
+// #1107: the ad-hoc produce path -- a deliverable running in a daily space
+// with NO plan_id -- forwarded nil auth claims to the agent node, so the
+// agent's tool-dispatch persistence (taskstamp.createAdHocPlan + the safety
+// DecisionRecorder) ran on a ctx with no actor and failed with "no actor found
+// in context". That property still has to hold, and it is asserted below
+// through the same auth.ContextWithForwardedClaims the receiver uses.
 //
-//  1. ctx carries the originating user's identity -> those claims ride
-//     through, so the agent node reconstructs the real principal.
-//  2. ctx carries NO identity (greet-on-join / cognition-initiated) ->
-//     the cognition system-actor is forwarded so the map is never empty.
+// WHAT CHANGED, and why this test lost a case. The old builder had two arms:
+// "prefer the originating user's identity on ctx" and "fall back to the
+// cognition system-actor". The user arm was DEAD -- handleUtteranceForCognition
+// roots its context at contextWithSystemActor(context.Background()) and nothing
+// between that root and the forward reintroduces the inbound stream's
+// principal, so it could not fire in production. The old test passed anyway by
+// constructing a ctx by hand and feeding it straight to the builder, which
+// tested the arm's arithmetic rather than its reachability.
 //
-// In BOTH cases the claims, run through the same
-// auth.ContextWithForwardedClaims the agent node uses to rebuild ctx, must
-// yield a non-empty actor -- which is exactly what mutationActor reads
-// before it errors with "no actor found in context".
-func TestForwardedAuthClaimsForTurn_DailySpaceNoPlanId(t *testing.T) {
-	t.Run("no identity on ctx falls back to system-actor", func(t *testing.T) {
-		claims := forwardedAuthClaimsForTurn(context.Background())
-		if len(claims) == 0 {
-			t.Fatal("expected non-empty forwarded claims; nil claims reproduce the #1107 bug (no actor found in context on the ad-hoc produce path)")
-		}
-		assertForwardedActorNonEmpty(t, claims)
-		if claims["sub"] != systemActorId {
-			t.Fatalf("expected system-actor fallback sub=%q, got %q", systemActorId, claims["sub"])
-		}
-	})
+// The builder is now unconditionally SYSTEM, and takes no ctx at all -- the
+// shape that makes the dead arm unrepresentable rather than merely unused.
+func TestForwardedPrincipalForTurnIsAlwaysASystemPrincipal(t *testing.T) {
+	principal, err := forwardedPrincipalForTurn()
+	if err != nil {
+		t.Fatalf("building the cognition turn principal failed: %v", err)
+	}
 
-	t.Run("user identity on ctx is forwarded", func(t *testing.T) {
-		ctx := auth.ContextWithToken(context.Background(), &auth.TokenInfo{
-			Subject: "v1:identity:user:user-123",
-			Claims: map[string]any{
-				"sub":   "v1:identity:user:user-123",
-				"email": "user@example.com",
-			},
-		})
-		claims := forwardedAuthClaimsForTurn(ctx)
-		if len(claims) == 0 {
-			t.Fatal("expected forwarded claims from the ctx identity, got empty")
-		}
-		assertForwardedActorNonEmpty(t, claims)
-		if claims["sub"] != "v1:identity:user:user-123" {
-			t.Fatalf("expected forwarded sub to be the originating user, got %q", claims["sub"])
-		}
-	})
+	if principal.Authority.Kind != auth.ForwardedPrincipalSystem {
+		t.Errorf("principal kind = %v, want system", principal.Authority.Kind)
+	}
+	if principal.Authority.Subject != systemActorId {
+		t.Errorf("subject = %q, want the cognition system actor %q", principal.Authority.Subject, systemActorId)
+	}
+	if principal.Authority.Role != auth.RoleReader {
+		t.Errorf("role = %q, want reader.\n\n"+
+			"Reader is the no-widening choice: this hop sent the invalid role string \"system\" "+
+			"before, which IsValidRole rejects and FallbackFromClaims clamps to reader. RoleLevel "+
+			"ranks writer(2) ABOVE reader(3) -- lower is more privileged -- so anything else here "+
+			"GRANTS the mesh's system hops more than they have ever had.", principal.Authority.Role)
+	}
+
+	// The receiver must accept what the producer builds. If these two ever
+	// disagree, every cognition -> agent forward fails closed.
+	if _, err := auth.VerifyForwardedAuthority(principal.Authority, time.Now()); err != nil {
+		t.Errorf("the receiver refused cognition's own principal: %v", err)
+	}
 }
 
-// assertForwardedActorNonEmpty rebuilds the agent-node ctx exactly as the
-// AiForwardRouter does (auth.ContextWithForwardedClaims) and asserts an
-// actor resolves -- the precondition for taskstamp.createAdHocPlan and the
-// safety recorder to persist instead of failing with "no actor found in
-// context".
-func assertForwardedActorNonEmpty(t *testing.T, claims map[string]string) {
-	t.Helper()
-	ctx := auth.ContextWithForwardedClaims(context.Background(), claims)
+// The #1107 property itself: whatever the producer ships must still rebuild
+// into a non-empty actor on the agent node, or tool-dispatch persistence goes
+// back to failing with "no actor found in context".
+func TestForwardedPrincipalForTurnStillYieldsAnActorOnTheAgentNode(t *testing.T) {
+	principal, err := forwardedPrincipalForTurn()
+	if err != nil {
+		t.Fatalf("building the cognition turn principal failed: %v", err)
+	}
+
+	ctx := auth.ContextWithForwardedClaims(context.Background(), principal.Claims)
 	if actor := auth.ActorFromContext(ctx); actor == "" {
-		t.Fatal("rebuilt agent-node ctx has no actor; the ad-hoc produce path would fail with \"no actor found in context\"")
+		t.Fatal("the rebuilt agent-node ctx has no actor; the ad-hoc produce path would fail " +
+			"with \"no actor found in context\" -- memql#1107, all over again")
 	}
 }

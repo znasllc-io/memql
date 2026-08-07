@@ -330,12 +330,19 @@ deleted in `ac3a751e`. It was removed rather than repaired because the repair on
 offer was unsafe: it prescribed `auth.ForwardedClaimsFromIdentity` as the
 producer recipe, and that recipe carries no `class` / `role_ceiling`, so
 `applyBadgeRoleCeiling` (which clamps only when `class == "badge"`) never fired
-and a forwarded badge session resolved an *unclamped* role. Carrying those two
-claims is possible -- `auth.WithForwardedAuthorityContext` exists for it -- but
-it is deliberately unwired, because sourcing them correctly is the unsolved part.
+and a forwarded badge session resolved an *unclamped* role.
 
-The mesh authority-propagation contract belongs on memql#2876, against the live
-AiForward path -- parked as of this removal, with its one attempt reverted, so
-treat it as an open design problem. Concept ownership is decided by routing rules
-plus build tags, not by a forwarding registry -- see
-`docs/internal/design/extension-points.md`.
+**The mesh authority-propagation contract SHIPPED in memql#3205** (carrying
+memql#2876), against the live AiForward path. It is no longer an open design
+problem, and `auth.WithForwardedAuthorityContext` -- the deliberately-unwired
+optional-claims carrier this paragraph used to point at -- is deleted with it:
+two optional claims whose absence is indistinguishable from "no badge" cannot
+carry a ceiling however they are sourced. The replacement is a **mandatory,
+typed `ForwardedAuthority`** on `AiForwardRequest`, sourced from the session's
+post-rotate state rather than the stream context, carrying `exp`, covering every
+producer, and REFUSED by the receiver when it cannot be proven. Read
+[the contract](../../docs/internal/design/mesh-forwarded-auth-contract.md)
+before touching a forward.
+
+Concept ownership is decided by routing rules plus build tags, not by a
+forwarding registry -- see `docs/internal/design/extension-points.md`.

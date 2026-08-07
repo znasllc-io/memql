@@ -122,11 +122,18 @@ func (s *streamSession) proxyAIStream(
 	ctx := s.stream.Context()
 	correlate := envelope.GetMessageId()
 
-	claims := s.forwardedAuthClaims()
-	partition := extractPartitionFromEnvelope(envelope)
+	// Refuse locally on an unprovable authority. It matters more here than on
+	// the sibling path: the forward response channel below is drained and
+	// DISCARDED, so a receiver-side refusal delivered as a QueryError would
+	// never reach the client and the stream would simply hang (memql#3205).
+	principal, err := s.forwardedPrincipal()
+	if err != nil {
+		return s.sendQueryError(requestId, correlate, codes.Internal,
+			"cannot establish forwarded authority for this session: "+err.Error())
+	}
 	stampEnvelopeProvenance(ctx, envelope)
 
-	respCh, err := s.service.aiForwarder.Forward(ctx, requestId, target, claims, partition, envelope)
+	respCh, err := s.service.aiForwarder.Forward(ctx, requestId, target, principal, envelope)
 	if err != nil {
 		return s.sendQueryError(requestId, correlate, codes.Unavailable, err.Error())
 	}

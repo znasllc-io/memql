@@ -263,10 +263,23 @@ func (p *PlannerIntegration) handlePlanPreempt(event events.Event) {
 			AgentPreemptTurn: &memqlv1.AgentPreemptTurnMsg{RequestId: requestId},
 		},
 	}
-	// Fire on the in-flight forwarded stream (keyed by requestId). authClaims
-	// + partition are unused by the agent-side preempt handler (it just sets
-	// the pause flag), so empty is fine.
-	if err := p.agentForwarder.ForwardContinuation(requestId, nil, "", envelope); err != nil {
+	// Fire on the in-flight forwarded stream (keyed by requestId). The
+	// authority is the SAME system principal the parent turn forwarded --
+	// rebuilt rather than stored, because it is a pure function of
+	// systemActorId and so cannot drift from the parent's.
+	//
+	// It used to pass a nil claims map, with a comment saying that was fine
+	// because the agent-side preempt handler only sets a pause flag. Under the
+	// mesh contract a missing assertion is REFUSED, and a refusal on a
+	// continuation is DROPPED rather than answered -- so a nil here would have
+	// made "pause a Plan in cluster mode" silently stop working (memql#3205).
+	principal, err := forwardedPrincipalForPlanner()
+	if err != nil {
+		p.logger.Warn("plan preempt: cannot build forwarded authority",
+			"plan_id", fields.ID, "request_id", requestId, "error", err)
+		return
+	}
+	if err := p.agentForwarder.ForwardContinuation(requestId, principal, envelope); err != nil {
 		p.logger.Warn("plan preempt: forward continuation failed",
 			"plan_id", fields.ID,
 			"request_id", requestId,
@@ -611,17 +624,17 @@ func (p *PlannerIntegration) executeApprovedPlan(ctx context.Context, planId, re
 	// systemActorId is unique per integration (see contextWithSystemActor
 	// at the bottom of this file) so the audit trail can tell apart
 	// "the planner stamped this row" from "cognition stamped this row".
-	authClaims := map[string]string{
-		"sub":   systemActorId,
-		"email": systemActorId,
-		"role":  "system",
+	principal, err := forwardedPrincipalForPlanner()
+	if err != nil {
+		p.logger.Warn("plan execution: cannot build forwarded authority", "plan_id", planId, "error", err)
+		p.markPlanFailed(ctx, planId, "cannot build forwarded authority: "+err.Error())
+		return
 	}
 	respCh, err := p.agentForwarder.Forward(
 		ctx,
 		requestId,
 		node.NodeTypeAgent,
-		authClaims,
-		partition,
+		principal,
 		envelope,
 	)
 	if err != nil {
@@ -1240,6 +1253,26 @@ func claimNodeName() string {
 		return "unknown"
 	}
 	return host
+}
+
+// forwardedPrincipalForPlanner builds the mesh authority assertion for every
+// planner -> agent forward, opener and continuation alike (memql#3205).
+//
+// A pure function of systemActorId, deliberately: the preempt continuation
+// rebuilds it rather than reading a stored copy, so it cannot drift from the
+// assertion the parent turn carried. It replaces both the hand-rolled
+// `{"sub","email","role":"system"}` map and the nil one the preempt path used.
+//
+// Reader role, and a subject that does not look like a canonical user id --
+// see the SYSTEM rules in auth.VerifyForwardedAuthority. "system" is not a
+// valid role, so it already clamped to reader wherever it was checked; this
+// states that instead of relying on the clamp.
+func forwardedPrincipalForPlanner() (auth.ForwardedPrincipal, error) {
+	authority, err := auth.ForwardedAuthorityForSystem(systemActorId, time.Now())
+	if err != nil {
+		return auth.ForwardedPrincipal{}, err
+	}
+	return authority.Principal(), nil
 }
 
 // contextWithSystemActor stamps a system-actor token + claims on

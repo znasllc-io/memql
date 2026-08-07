@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/events"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
-	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/node"
 	"github.com/znasllc-io/memql/core/id"
 )
@@ -84,11 +84,13 @@ const (
 type pendingClientToolCall struct {
 	requestId string
 	createdAt time.Time
-	// authClaims / partition are passed back to ForwardContinuation for
-	// parity with the original AgentGenerateTurn forward. Internal
-	// relay traffic runs without end-user claims.
-	authClaims map[string]string
-	partition  string
+	// principal is passed back to ForwardContinuation so the return leg
+	// carries the SAME authority the parent AgentGenerateTurn forward
+	// carried. It used to be a nil claims map, documented as deliberate --
+	// which the mesh contract makes unrepresentable: a receiver cannot tell
+	// an absent assertion from a legitimately unprivileged one, so absence
+	// is refused (memql#3205).
+	principal auth.ForwardedPrincipal
 }
 
 // startClientToolRelay subscribes cognition to clientToolResponse
@@ -150,27 +152,26 @@ func (c *CognitionIntegration) relayClientToolCall(
 		"agentId", agentId,
 	)
 
-	// Capture the partition off the ctx before storing the correlation.
-	// Without this, the entry is born with an empty partition and
-	// ForwardContinuation later sends the ClientToolResult back to the
-	// agent node with no partition stamped -- the agent's parked
-	// waiter would resume under whatever fallback the agent node
-	// defaults to instead of the original tenant. The relay is the
-	// only thing that knows the original partition for this turn
-	// (cognition received it in the envelope; the browser response
-	// event flattens through the graph bus and arrives without
-	// partition context), so it has to pin the value here.
+	// Pin the authority for the return leg at CALL time, so the
+	// ClientToolResult that resumes the agent's parked waiter carries the
+	// same assertion the parent turn carried. The browser's response event
+	// flattens through the graph bus and arrives with no auth context of its
+	// own, so the relay is the only thing that can supply one.
 	//
-	// authClaims stays nil for now: cognition-originated forwards
-	// don't carry an end-user principal -- the agent node already
-	// authenticated the original request before the parked
-	// clientToolWaiter was registered, and the continuation only
-	// needs to find that waiter (keyed by requestId).
-	partition := memqlengine.PartitionFromContext(ctx)
+	// This replaces a deliberately-nil claims map. Under the mesh contract a
+	// missing assertion is REFUSED rather than read as "an internal call that
+	// needs no principal" -- that inference is exactly the failure mode the
+	// contract exists to remove.
+	principal, err := forwardedPrincipalForTurn()
+	if err != nil {
+		c.Logger.Warn("client-tool relay: cannot build forwarded authority; dropping call",
+			"callId", callId, "requestId", requestId, "error", err)
+		return
+	}
 	c.pendingClientToolCalls.Store(callId, &pendingClientToolCall{
 		requestId: requestId,
 		createdAt: time.Now(),
-		partition: partition,
+		principal: principal,
 	})
 
 	timeoutMs := int64(call.GetTimeoutMs())
@@ -377,8 +378,7 @@ func (c *CognitionIntegration) handleClientToolResponse(event events.Event) {
 
 	if err := c.agentForwarder.ForwardContinuation(
 		entry.requestId,
-		entry.authClaims,
-		entry.partition,
+		entry.principal,
 		resultEnvelope,
 	); err != nil {
 		c.Logger.Warn("client-tool relay: ForwardContinuation failed",
