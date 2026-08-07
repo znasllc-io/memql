@@ -62,3 +62,28 @@ test("appends the bridge path to an explicit scheme without one", () => {
 test("throws on an empty endpoint rather than dialing nowhere", () => {
   assert.throws(() => webSocketUrlFor({ name: "l", endpoint: "" }), /endpoint is empty/);
 });
+
+test("rejects a non-websocket scheme with a clear message rather than mangling it", () => {
+  assert.throws(
+    () => webSocketUrlFor({ name: "l", endpoint: "https://cockpit.example.com" }),
+    /endpoint scheme must be ws:\/\/ or wss:\/\//,
+  );
+});
+
+test("derives ws for a bracketed IPv6 loopback literal with a port", () => {
+  assert.equal(
+    webSocketUrlFor({ name: "l", endpoint: "[::1]:50051" }),
+    "ws://[::1]:50051/memql/ws",
+  );
+});
+
+test("derives ws for a bracketed IPv6 loopback literal with no port", () => {
+  assert.equal(webSocketUrlFor({ name: "l", endpoint: "[::1]" }), "ws://[::1]/memql/ws");
+});
+
+test("derives wss for a bracketed non-loopback IPv6 literal", () => {
+  assert.equal(
+    webSocketUrlFor({ name: "l", endpoint: "[2001:db8::1]:50051" }),
+    "wss://[2001:db8::1]:50051/memql/ws",
+  );
+});

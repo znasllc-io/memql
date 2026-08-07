@@ -102,19 +102,22 @@
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
-    "compile": "tsc -p ./",
+    "compile": "tsc -p ./ && node esbuild.js",
     "watch": "tsc -watch -p ./",
-    "test": "tsc -p tsconfig.test.json && node --test dist-test/test/*.js"
+    "test": "tsc -p tsconfig.test.json && node esbuild.test.js && node --test dist-test/test/*.js"
   },
   "dependencies": {
     "@znasllc-io/memql-sdk-core": "file:../../sdk/ts",
     "@znasllc-io/memql-view-kit": "file:../../sdk/ts-viewkit",
     "vscode-languageclient": "^10.1.0",
+    "ws": "^8.21.3",
     "yaml": "^2.9.0"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
     "@types/vscode": "~1.91.0",
+    "@types/ws": "^8.5.13",
+    "esbuild": "^0.28.1",
     "typescript": "^5.4.0"
   }
 }

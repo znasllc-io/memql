@@ -1062,10 +1062,14 @@ jobs:
       # scripts/dev/vscode_lane_scope_test.go fails if this narrows again.
       - name: editors/vscode drift checks (grammar, language config, manifest)
         run: go test -count=1 ./cmd/memql-lsp/...
-      - name: build workspace dependencies (sdk/ts, sdk/ts-viewkit)
-        run: scripts/ci/retry.sh -- make vscode-deps
+      # `vscode-test` depends on `vscode-deps` in the Makefile so it stays
+      # self-sufficient from a clean checkout. A standalone retry-wrapped
+      # "build deps" step here would run the same npm installs a SECOND time,
+      # unretried, as vscode-test's own prerequisite -- defeating the retry.
+      # Wrap the single remaining invocation instead so the one place the
+      # flaky-registry calls actually happen is retried.
       - name: extension unit tests
-        run: make vscode-test
+        run: scripts/ci/retry.sh -- make vscode-test
       - name: package extension (build binary + compile + vsce package)
         run: bash scripts/vscode/package.sh --out="$RUNNER_TEMP/memql.vsix"
 

@@ -8,18 +8,16 @@
 // Deliberately free of `vscode` imports so it is unit-testable. State changes
 // are published through a plain listener set; the views adapt it to VS Code's
 // event model.
-
-// The SDK is a pure ESM package (`"type": "module"`, no CJS export
-// condition); this extension is CommonJS (the VS Code extension host loads
-// `main` via `require`). A type-only import can be resolved statically with
-// the `resolution-mode` attribute, but the runtime value cannot -- `require()`
-// of an ESM-only module throws ERR_REQUIRE_ESM -- so `Connection.dial` is
-// reached through a dynamic `import()` inside `connect()` instead.
-import type {
-  Connection,
-  QueryClient,
-  SubscriptionManager,
-} from "@znasllc-io/memql-sdk-core/client" with { "resolution-mode": "import" };
+//
+// @znasllc-io/memql-sdk-core is pure ESM; this file compiles under
+// moduleResolution "bundler" (tsconfig.json) and is bundled by esbuild both
+// for the packaged extension (esbuild.js) and for `node --test`
+// (esbuild.test.js), which is what makes the plain static import below work
+// on the CommonJS extension host -- esbuild inlines the SDK and emits CJS,
+// it is not left as a `require()` of an ESM-only package.
+import { Connection } from "@znasllc-io/memql-sdk-core/client";
+import type { ConnectOptions, QueryClient, SubscriptionManager } from "@znasllc-io/memql-sdk-core/client";
+import { WebSocket as NodeWebSocket } from "ws";
 
 import type { ClusterConfig } from "../clusters/model.js";
 import { isOidcOnly, needsAuth } from "../clusters/model.js";
@@ -33,6 +31,25 @@ export type ConnectionState =
 
 export type StateListener = (state: ConnectionState) => void;
 
+// The shape of `Connection.dial`. Constructor-injectable (defaults to
+// `defaultDial` below) purely for test determinism: ConnectionManager's own
+// tests supply a fake that resolves/rejects on command, rather than driving
+// a real WebSocket handshake to test the generation-counter race.
+export type DialFn = (opts: ConnectOptions) => Promise<Connection>;
+
+// The VS Code extension host (Electron's bundled Node -- 20.9 on the
+// declared engines.vscode ^1.91.0 floor) has no global WebSocket below Node
+// 22; the SDK's default factory throws in that case ("memql sdk: no global
+// WebSocket available -- pass webSocketFactory or run in a browser / Node
+// 22+", sdk/ts/src/client/connection.ts). The `ws` package supplies a real
+// implementation so `connect()` actually succeeds on the declared floor.
+const defaultDial: DialFn = (opts) =>
+  Connection.dial({
+    ...opts,
+    webSocketFactory: (url, protocols) =>
+      new NodeWebSocket(url, protocols) as unknown as WebSocket,
+  });
+
 export class ConnectionManager {
   private conn: Connection | undefined;
   private current: ConnectionState = { status: "disconnected" };
@@ -41,6 +58,8 @@ export class ConnectionManager {
   // cluster B before A's handshake finishes, A's completion must not overwrite
   // B's state.
   private generation = 0;
+
+  constructor(private readonly dial: DialFn = defaultDial) {}
 
   get state(): ConnectionState {
     return this.current;
@@ -67,8 +86,19 @@ export class ConnectionManager {
   async connect(cluster: ClusterConfig): Promise<void> {
     const gen = ++this.generation;
     await this.closeCurrent();
+    // closeCurrent is async (a microtask boundary): a second connect() call
+    // issued without awaiting the first can already have bumped `generation`
+    // by the time this resumes. Without this check a superseded call would
+    // still publish its own "connecting" / "error" state over the current
+    // cluster's.
+    if (gen !== this.generation) return;
 
-    if (needsAuth(cluster)) {
+    // isOidcOnly is checked FIRST, before needsAuth: a PAT-less OIDC cluster
+    // with a real endpoint makes needsAuth() false (issuer+clientId count as
+    // "configured" there), so gating on needsAuth alone would skip straight
+    // to dialing with an empty bearer and surface a raw handshake/auth
+    // failure instead of this actionable message.
+    if (isOidcOnly(cluster) || needsAuth(cluster)) {
       const message = isOidcOnly(cluster)
         ? "This cluster is configured for OIDC. Authenticate it in the memQL Cockpit first, or add a PAT to clusters.yaml."
         : "This cluster is not configured. Set an endpoint and a PAT.";
@@ -78,8 +108,7 @@ export class ConnectionManager {
 
     this.publish({ status: "connecting", clusterName: cluster.name });
     try {
-      const { Connection: ConnectionClass } = await import("@znasllc-io/memql-sdk-core/client");
-      const conn = await ConnectionClass.dial({
+      const conn = await this.dial({
         endpoint: webSocketUrlFor(cluster),
         auth: { bearer: cluster.pat ?? "" },
         clientId: "memql-vscode",
