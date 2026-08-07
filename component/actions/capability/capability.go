@@ -25,7 +25,7 @@
 // ClassifierFromDir / ClassifierFromFS / DefaultClassifier scan a DSL tree, map
 // each builtin name to its executor capability, and report whether it is
 // side-effecting -- the classifier the whole-tree gate
-// (dsl/callgraph_contract_test.go) and the authoring sandbox
+// (test/dslconformance/callgraph_contract_test.go) and the authoring sandbox
 // (component/memql/authoring_sandbox_crossref.go) inject.
 //
 // This package is a deliberate LEAF: it depends only on the standard library

@@ -48,7 +48,7 @@ import (
 //
 // # Why the existing tests do not catch it
 //
-// dsl/embed_test.go asserts namespace REACHABILITY: it walks the embedded FS
+// test/dslconformance/embed_test.go asserts namespace REACHABILITY: it walks the embedded FS
 // and checks the domains it finds parse and resolve. A domain that vanished
 // entirely is simply not walked, so a subset of a corpus looks exactly like a
 // smaller corpus. Nothing in the tree asserts HOW MANY files are embedded, so

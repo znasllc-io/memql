@@ -50,7 +50,7 @@ var clauseSeparators = []struct {
 	//
 	// `(` is the asymmetry, and it is deliberate. The engine accepts
 	// `filter(...)`, but FOUR openers walk .memql text line by line -- this
-	// one, dsl/conformance_test.go, component/language/pagination/checker.go,
+	// one, test/dslconformance/conformance_test.go, component/language/pagination/checker.go,
 	// and dslclause -- and teaching only some of them `(` puts them in
 	// conflict: a compliant `filter(row.id==args.x && ownerUserId==actor.userId)`
 	// passes this scanner and FAILS TestPerRowAuthzClassification, whose opener

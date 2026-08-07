@@ -200,7 +200,7 @@ func Generate(opts Options) (*Result, error) {
 	}
 
 	// Belt-and-suspenders with the A1 conformance rule
-	// (dsl/conformance_test.go: TestNoCanonicalPatternOnArgs): a client-facing
+	// (test/dslconformance/conformance_test.go: TestNoCanonicalPatternOnArgs): a client-facing
 	// arg must never FORCE the caller to compose a canonical id via a
 	// `@pattern("^v1:...")`. Generation fails loudly if one slips through, so a
 	// canonical-id contract can't leak into the SDK surface.

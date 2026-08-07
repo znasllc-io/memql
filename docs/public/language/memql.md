@@ -886,7 +886,7 @@ trait isActiveRecord {
 }
 ```
 
-When a trait covers a predicate (e.g. `isActiveRecord` for `active==true`), **using the trait is mandatory** in authored query filters — inline `active==true` / `deleted==false` are rejected by the conformance test (`dsl/conformance_test.go`).
+When a trait covers a predicate (e.g. `isActiveRecord` for `active==true`), **using the trait is mandatory** in authored query filters — inline `active==true` / `deleted==false` are rejected by the conformance test (`test/dslconformance/conformance_test.go`).
 
 ### Using Specs and Traits in Filters
 
@@ -1253,7 +1253,7 @@ automation pruneStaleClusterNodes @trigger(schedule="0 */10 * * * *") => logic p
 
 This lowers to the canonical longhand above — identical runtime automation, no separate execution path (dry-run and live stay in parity). The synthesized step always forwards the bound trigger payload as `{ event: event }`; a target logic that declares no args simply ignores it. Use the longhand block form whenever the automation has more than one step or any branching/looping.
 
-The longhand single-step form is gate-enforced out of the shipped corpus, not merely discouraged (#2619): `dsl/no_longhand_single_step_test.go` runs the `memqlmigrate --rewrite=terse-automation` codemod, which proves each conversion token-identical through the engine's own lowering before collapsing it. Longhand singles the codemod cannot prove safe (extra payload keys, comments inside the construct, multiple @trigger lines) legitimately remain longhand.
+The longhand single-step form is gate-enforced out of the shipped corpus, not merely discouraged (#2619): `test/dslconformance/no_longhand_single_step_test.go` runs the `memqlmigrate --rewrite=terse-automation` codemod, which proves each conversion token-identical through the engine's own lowering before collapsing it. Longhand singles the codemod cannot prove safe (extra payload keys, comments inside the construct, multiple @trigger lines) legitimately remain longhand.
 
 ### `@filter` Annotation
 

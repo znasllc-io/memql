@@ -176,7 +176,7 @@ func TestResolveNamedShape_NilRegistryReturnsError(t *testing.T) {
 // where a shape's expression format drifts and starts round-tripping as a
 // literal string (which is exactly the failure mode the frontend reported).
 func TestAllEmbeddedShapesParseAndConvert(t *testing.T) {
-	t.Skip("legacy dsl/v1 tree retired; unified-tree coverage lives in component/memql/unified_*_test.go and dsl/embed_test.go.")
+	t.Skip("legacy dsl/v1 tree retired; unified-tree coverage lives in component/memql/unified_*_test.go and test/dslconformance/embed_test.go.")
 	registry, err := loadEmbeddedShapes(nil, nil)
 	require.NoError(t, err)
 	require.Greater(t, registry.Count(), 0, "no shapes loaded from embedded FS")
@@ -227,7 +227,7 @@ func TestAllEmbeddedShapesParseAndConvert(t *testing.T) {
 // passing engine start is not a substitute -- the production startup tolerates
 // and logs per-file errors rather than failing the process.
 func TestAllEmbeddedFunctionsLoad(t *testing.T) {
-	t.Skip("legacy dsl/v1 tree retired; unified-tree coverage lives in component/memql/unified_*_test.go and dsl/embed_test.go.")
+	t.Skip("legacy dsl/v1 tree retired; unified-tree coverage lives in component/memql/unified_*_test.go and test/dslconformance/embed_test.go.")
 	reg, err := loadEmbeddedFunctions(nil, nil)
 	require.NoError(t, err)
 	require.Greater(t, reg.Count(), 0, "no functions loaded from embedded FS")
@@ -258,7 +258,7 @@ func TestAllEmbeddedFunctionsLoad(t *testing.T) {
 // Stub values are supplied for required args so the assertion exercises
 // the entire substitution path, not just the no-arg case.
 func TestEmbeddedNamedShapeFunctionsRetainShapeReference(t *testing.T) {
-	t.Skip("legacy dsl/v1 tree retired; unified-tree coverage lives in component/memql/unified_*_test.go and dsl/embed_test.go.")
+	t.Skip("legacy dsl/v1 tree retired; unified-tree coverage lives in component/memql/unified_*_test.go and test/dslconformance/embed_test.go.")
 	reg, err := loadEmbeddedFunctions(nil, nil)
 	require.NoError(t, err)
 

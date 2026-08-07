@@ -47,6 +47,7 @@ COPY go.mod go.sum ./
 # an L0 module with no external dependencies has NO go.sum, and Docker fails a
 # COPY whose named source does not exist. Add a line per module as each tier
 # lands (#3242..#3244).
+COPY component/actions/go.* ./component/actions/
 COPY component/architecture/go.* ./component/architecture/
 COPY component/auth/go.* ./component/auth/
 COPY component/bus/go.* ./component/bus/
@@ -55,6 +56,7 @@ COPY component/config/go.* ./component/config/
 COPY component/database/go.* ./component/database/
 COPY component/events/go.* ./component/events/
 COPY component/fileprocessor/go.* ./component/fileprocessor/
+COPY component/genesis/go.* ./component/genesis/
 COPY component/grpc/gen/go.* ./component/grpc/gen/
 COPY component/harness/go.* ./component/harness/
 COPY component/healing/go.* ./component/healing/
@@ -62,6 +64,7 @@ COPY component/language/go.* ./component/language/
 COPY component/language/annotations/go.* ./component/language/annotations/
 COPY component/language/ast/go.* ./component/language/ast/
 COPY component/language/dslclause/go.* ./component/language/dslclause/
+COPY component/memql/go.* ./component/memql/
 COPY component/metadata/go.* ./component/metadata/
 COPY component/metrics/go.* ./component/metrics/
 COPY component/node/gen/go.* ./component/node/gen/
@@ -72,6 +75,8 @@ COPY component/provenance/go.* ./component/provenance/
 COPY component/safety/go.* ./component/safety/
 COPY component/secret/go.* ./component/secret/
 COPY core/go.* ./core/
+COPY docs/go.* ./docs/
+COPY dsl/go.* ./dsl/
 # BuildKit cache mounts (build-speed #1506): the module cache (/go/pkg/mod)
 # and the Go build cache (/root/.cache/go-build) persist across builds, so a
 # rebuild of an unchanged tree reuses downloaded modules + already-compiled

@@ -291,7 +291,8 @@ emitted, and read by nothing. Section 8 of
 memql#3248 re-affirmed that decision and closed the one correctness hole
 it named — see **Type-directed lowering** below. What changed with #3038
 is that writing one and getting nothing is caught at authoring time:
-`TestDefaultIsCoalescedOrStamped` (`dsl/default_stamped_test.go`) fails
+`TestDefaultIsCoalescedOrStamped`
+(`test/dslconformance/default_stamped_test.go`) fails
 when an **optional, top-level** concept field carries `@default` and no
 mutation bound to that concept **stamps** it. Only a stamped value counts
 — `f: args.f ?? "v"`, a literal, or a computed expression; `accept { f }`,
@@ -378,7 +379,7 @@ cannot pass while unwired.
 #### `@public`
 Declares that the construct intentionally carries **no caller-scope
 check**. The per-row authorization gate
-(`TestPerRowAuthzClassification` in `dsl/conformance_test.go`)
+(`TestPerRowAuthzClassification` in `test/dslconformance/conformance_test.go`)
 classifies every query / mutation as owned (`actor.userId` reference),
 admin (`actor.isClusterOwner == true`, or an admin context-spec -- the
 recogniser also lists `requiresClusterOwner`, a #54 placeholder that is

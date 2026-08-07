@@ -5,7 +5,7 @@ package automations
 // (the last two cluster-lane violators; deregisterNode + registerNode landed in
 // PR #2239).
 //
-// Both logics were made PURE (the call-graph contract, dsl/callgraph_contract_test.go,
+// Both logics were made PURE (the call-graph contract, test/dslconformance/callgraph_contract_test.go,
 // now enforces it -- their baseline entries were removed) and their per-write
 // side effects moved onto the calling automation:
 //

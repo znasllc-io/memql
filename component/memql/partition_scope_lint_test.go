@@ -102,7 +102,15 @@ func loadSpaceIdBaseline(t *testing.T, path string) map[string]bool {
 	return out
 }
 
-// repoRoot ascends from this test file's directory until it finds go.mod.
+// repoRoot ascends from this test file's directory to the REPOSITORY root.
+//
+// It looks for go.work, not go.mod. Since memql#3228 the tree is ~30 modules
+// and `component/memql` is one of them (memql#3242), so a go.mod walk stops at
+// this package's own directory -- and every caller that joins a repo-relative
+// path onto the result then reads `component/memql/dsl/...`, which does not
+// exist. go.work exists exactly once, at the repository root, which is the
+// thing these callers mean. Fourth instance of this shape after
+// core/baseparser, component/architecture and component/database/memory-nodes.
 func repoRoot(t *testing.T) string {
 	t.Helper()
 	_, thisFile, _, ok := runtime.Caller(0)
@@ -111,12 +119,12 @@ func repoRoot(t *testing.T) string {
 	}
 	dir := filepath.Dir(thisFile)
 	for {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+		if _, err := os.Stat(filepath.Join(dir, "go.work")); err == nil {
 			return dir
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			t.Fatal("go.mod not found walking up from test file")
+			t.Fatal("go.work not found walking up from test file")
 		}
 		dir = parent
 	}

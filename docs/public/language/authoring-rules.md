@@ -863,7 +863,7 @@ tree mixed prefixed and unprefixed names and the frontend hit runtime
 a particular prefix.
 
 Enforcement: `TestNoKindPrefixInConstructNames`
-(`dsl/naming_conventions_test.go`) fails on any declaration named with
+(`test/dslconformance/naming_conventions_test.go`) fails on any declaration named with
 its own kind as a prefix, across all 16 declaration keywords.
 
 The old *opposite* lint, which REQUIRED the prefix, was retired in epic
@@ -923,7 +923,7 @@ longhand write block, a bare `args.ident` with no `key:` prefix is
 shorthand for `ident: args.ident` (the key is the arg path's final
 segment; single-segment paths only -- `args.user.id` needs the
 verbose `userId: args.user.id` form). The conformance gate
-(`dsl/no_bare_mirror_runs_test.go`) collapses provably-safe mirror
+(`test/dslconformance/no_bare_mirror_runs_test.go`) collapses provably-safe mirror
 runs into accept/stamp via `memqlmigrate --rewrite=accept-stamp`;
 blocks it cannot prove safe (comments worth keeping, nested object
 values, single mirrors) stay longhand deliberately.
@@ -1215,7 +1215,7 @@ insert {
 
 (Don't prefix the hash with the concept name -- `id:
 concat("participant-", hash(...))` duplicates information already in
-the canonical id position, and `dsl/conformance_test.go`'s
+the canonical id position, and `test/dslconformance/conformance_test.go`'s
 `TestNoShortIdConceptPrefix` rejects known concept-name prefixes
 outright. The shortId is the bare hash / uuid / slug.)
 
@@ -1591,7 +1591,7 @@ reach the event from inside the automation body.
 
 ---
 
-## 22. Tree-wide conformance gates (`dsl/conformance_test.go`)
+## 22. Tree-wide conformance gates (`test/dslconformance/conformance_test.go`)
 
 CI enforces a set of static rules over every loaded `.memql` file.
 A PR that violates any of them fails before the engine ever parses
@@ -1688,15 +1688,15 @@ Companion gates in sibling files lock in the operator and binding
 grammar:
 
 - `TestNoRetiredOperatorForms` (#977,
-  `dsl/no_retired_operators_test.go`): filters use the single Go
+  `test/dslconformance/no_retired_operators_test.go`): filters use the single Go
   boolean grammar — `&&` / `||` / `!` with parens. The `;`-AND and
   `,`-OR separators, the `has` membership operator (use `in`), and
   the `?.` optional-chain prefix (use `when(args.x) { ... }`) are
   rejected.
 - `TestNoInfixWordAndOr` (#973,
-  `dsl/no_word_logical_operators_test.go`): the English `and` / `or`
+  `test/dslconformance/no_word_logical_operators_test.go`): the English `and` / `or`
   infix forms are rejected.
-- `TestNoRetiredBindingForms` (#988, `dsl/no_named_writes_test.go`):
+- `TestNoRetiredBindingForms` (#988, `test/dslconformance/no_named_writes_test.go`):
   named writes (`insert <concept> {` / `update <concept> {`) are
   rejected — the write target comes from the
   `mutate <Concept> <name>` signature, the block is bare
@@ -1789,7 +1789,7 @@ the rule. Two consumers derive from it:
   unmarked-list query (the backfill work item) and every `@unbounded`
   query with its reason. `--json` / `--unmarked` / `--unbounded` /
   `--strict` / `--domain=<x>`.
-- `TestPaginationAuthoringRule` in `dsl/conformance_test.go` — the gate.
+- `TestPaginationAuthoringRule` in `test/dslconformance/conformance_test.go` — the gate.
   **Enforcing** (the issue 5.3 backfill, memql#1967, marked every list
   query in the tree and flipped this gate on in the same merge, so `main`
   stayed green). It hard-fails on any unmarked list query, asserts the
@@ -1963,7 +1963,7 @@ with no `use` line: the loader seeds the concept-resolution namespace
 hint from the directory, canonicalId() accepts ambient same-domain
 concept short-names, and the editor suppresses same-domain import
 suggestions. `use` stays required cross-domain, and is now enforced
-(#2755) by `dsl/cross_domain_use_test.go`.
+(#2755) by `test/dslconformance/cross_domain_use_test.go`.
 
 The asymmetry is about information, not consistency. By the flattened
 one-file-per-kind layout a same-domain name can only come from one
@@ -2006,7 +2006,7 @@ use cognition.concepts.{ space }
   the loader reports the ambiguity by name -- exactly as it always
   did for unhinted collisions.
 - **Explicit same-domain imports keep parsing** (the rule is
-  additive), but the tree gate (`dsl/no_same_domain_use_test.go`,
+  additive), but the tree gate (`test/dslconformance/no_same_domain_use_test.go`,
   which runs the `memqlmigrate --rewrite=same-domain-use` codemod)
   keeps them out of the shipped corpus.
 

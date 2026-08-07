@@ -481,12 +481,17 @@ jobs:
       # package list against the bucket's globs, and pins the bucket against
       # the paths those packages read.
       #
-      # ./dsl and ./examples are here because the `**/*.memql` glob would
-      # otherwise promise coverage this step does not deliver -- the bucket
-      # comment cites the referencepack tests, and they live in
-      # examples/referencepack, not in any package above. dsl/ also hosts
-      # TestPublicExamplesAreAnnotated, which reads a docs/public `.md`.
-      # Together they cost ~2s (memql#3060 review).
+      # ./test/dslconformance and ./examples are here because the
+      # `**/*.memql` glob would otherwise promise coverage this step does not
+      # deliver -- the bucket comment cites the referencepack tests, and they
+      # live in examples/referencepack, not in any package above. The DSL
+      # conformance suite also hosts TestPublicExamplesAreAnnotated, which
+      # reads a docs/public `.md`. Together they cost ~2s (memql#3060 review).
+      #
+      # That suite USED to be `./dsl/...`, and it is the same tests: memql#3242
+      # made `dsl` a module, and a suite importing `component/memql` cannot sit
+      # inside the module `component/memql` requires. It moved up to the root
+      # module; only the selector changed.
       #
       # STATED BOUNDARY: component/memql also reads bucket files -- its
       # reference-pack load test and sense's walk of the dsl/ tree -- and is
@@ -510,7 +515,7 @@ jobs:
         # for most dsl PRs; the change extends it to `.tmpl`/`.pin`-only ones.
         # Still bounded by `any .go change sets RUN_GO, which makes RUN_GATES
         # false`, which is the part that actually caps the cost.
-        run: go test -count=1 -timeout=300s ./ ./cmd/envscan/... ./component/architecture/... ./component/genesis/... ./scripts/... ./dsl/... ./examples/...
+        run: go test -count=1 -timeout=300s ./ ./cmd/envscan/... ./component/architecture/... ./component/genesis/... ./scripts/... ./test/dslconformance/... ./examples/...
 
       # --- pure-Go lanes (go bucket) -- build first to warm the cache ---
       #

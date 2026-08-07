@@ -370,7 +370,7 @@ func redundantEnabledRule(source string) []Diagnostic {
 }
 
 // enabledAnnotationRE matches a construct-attached `@enabled` annotation
-// at line start (the gate's form in dsl/no_redundant_enabled_test.go, so
+// at line start (the gate's form in test/dslconformance/no_redundant_enabled_test.go, so
 // the editor hints every shape CI fails: trailing comments, arg forms,
 // CRLF endings) -- not the word inside prose or a longer annotation name
 // like @enabledFoo.

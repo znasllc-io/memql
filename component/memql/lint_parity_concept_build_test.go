@@ -569,7 +569,7 @@ func mustReject(t *testing.T, decl string, bad, good any) {
 // emitted schema is unchanged, NOT that the annotation is enforced. @pii is
 // the exception that is genuinely live, and it has TWO consumers: the
 // @scrubPii mutation path (concept.go PIIFields -> scrubPIIFields) and the
-// projection authorization gate in dsl/pii_projection_test.go (memql#2883).
+// projection authorization gate in test/dslconformance/pii_projection_test.go (memql#2883).
 // Filed as memql#2960.
 func TestConceptPropertyTypes_AnnotationsSplitIntoValueConstraintsAndFieldMarkers(t *testing.T) {
 	fieldOf := func(t *testing.T, decl string) map[string]any {

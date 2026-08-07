@@ -12,7 +12,7 @@
 // contract-clean: the logics it calls are pure, each mutation step is one
 // write, each action step is one external capability on the cockpit/runner
 // surface (I13). It therefore PASSES the call-graph validator
-// (dsl/callgraph_contract_test.go) rather than being baselined.
+// (test/dslconformance/callgraph_contract_test.go) rather than being baselined.
 //
 // =============================================================================
 //   Deploy event taxonomy

@@ -4,7 +4,7 @@ package memql
 // bundle slicers + the fail-loud unrecognized-construct backstop (epic
 // memql#2354 E1 / #2372). Pure -- no live DB, no automations package (the
 // automation-compile hook is exercised by the external e2e test in
-// authoring_deployment_bundle_test.go, which links component/automations).
+// test/authoring/authoring_deployment_bundle_test.go, which links component/automations).
 
 import (
 	"strings"

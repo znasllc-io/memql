@@ -263,7 +263,7 @@ func TestNodeTypePatternClosesTheSeparatorAliasing(t *testing.T) {
 
 // The test above builds the ArgsField by hand, so it proves the MECHANISM
 // works -- a compiled @pattern rejects a colon -- and not that the authored
-// file carries one. The AST-level check in dsl/composite_hashed_id_test.go is
+// file carries one. The AST-level check in test/dslconformance/composite_hashed_id_test.go is
 // the mirror image: it proves the annotation is written and never drives it
 // through the validator. Either could pass while the other's half was broken:
 // a parser that dropped @pattern on the inline `string! @pattern(...)` form
