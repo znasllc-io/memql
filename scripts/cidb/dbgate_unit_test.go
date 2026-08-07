@@ -1118,6 +1118,13 @@ func TestCoverageFindings(t *testing.T) {
 		{"covers nothing", []string{"./core/..."}, nil},
 		{"an argument matching no db-gated test", append(append([]string{}, pkgs...), "./core/..."), provisioned},
 		{"a provisioned package left out", []string{"./component/memql/..."}, provisioned},
+		// memql#3095, the inverse direction: the selector still lists both
+		// packages, but one lost its EnsureSchema TestMain. This is the case
+		// that stayed silent while ALL of memql#3091's main_dbschema_test.go
+		// files were deleted.
+		{"a selector-covered db-gated package with no EnsureSchema TestMain",
+			pkgs, []string{"component/memql"}},
+		{"every EnsureSchema TestMain deleted", pkgs, nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1126,6 +1133,57 @@ func TestCoverageFindings(t *testing.T) {
 					"packages that actually carry db-gated tests")
 			}
 		})
+	}
+}
+
+// TestCoverageFindings_InSelectorImpliesProvisioned pins the memql#3095 rule
+// precisely rather than just "some finding appeared": which package it names,
+// that it carries the remedy, and -- the part a coarse assertion would miss --
+// that it stays quiet for the two shapes it must NOT fire on.
+func TestCoverageFindings_InSelectorImpliesProvisioned(t *testing.T) {
+	all := []dbGatedTest{
+		{dir: "component/memql", name: "TestA"},
+		{dir: "examples/referencepack", name: "TestB"},
+	}
+	pkgs := []string{"./component/memql/...", "./examples/referencepack/..."}
+
+	got := coverageFindings(pkgs, all, []string{"component/memql"})
+	if len(got) != 1 {
+		t.Fatalf("want exactly one finding for the one unprovisioned package, got %d: %v", len(got), got)
+	}
+	if !strings.Contains(got[0], `"examples/referencepack"`) {
+		t.Errorf("finding does not name the offending package: %s", got[0])
+	}
+	if strings.Contains(got[0], `"component/memql"`) &&
+		!strings.Contains(got[0], "selector") {
+		t.Errorf("finding names the healthy package as the subject: %s", got[0])
+	}
+	// A finding a reader cannot act on sends them to git blame. The remedy is
+	// part of the assertion, not decoration.
+	for _, want := range []string{"main_dbschema_test.go", "dbtest.EnsureSchema", "memql#2551"} {
+		if !strings.Contains(got[0], want) {
+			t.Errorf("finding omits %q, so it names a problem without a remedy: %s", want, got[0])
+		}
+	}
+
+	// Must NOT fire: a db-gated package OUTSIDE the selector. That is not this
+	// rule's business -- it is caught, if at all, by the uncovered-set
+	// assertion in dbgate_test.go, and reporting it here would demand a
+	// migration TestMain from a package this lane never runs.
+	outside := append(append([]dbGatedTest{}, all...), dbGatedTest{dir: "test/conformance", name: "TestC"})
+	for _, f := range coverageFindings(pkgs, outside, []string{"component/memql", "examples/referencepack"}) {
+		if strings.Contains(f, "no TestMain calling dbtest.EnsureSchema") {
+			t.Errorf("fired for a package the selector does not cover: %s", f)
+		}
+	}
+
+	// Must NOT fire: selfPkg. scripts/cidb imports dbtest for RequireDB and the
+	// env-var name, never to reach a database. scanDBGatedTests drops it
+	// upstream, but this function is pure and gets synthetic input, so the
+	// exemption has to hold here too (dbgate_test.go's selfPkg).
+	self := []dbGatedTest{{dir: selfPkg, name: "TestD"}}
+	if f := coverageFindings([]string{"./" + selfPkg + "/..."}, self, nil); len(f) != 0 {
+		t.Errorf("demanded a migration TestMain from the gate's own package %q: %v", selfPkg, f)
 	}
 }
 
