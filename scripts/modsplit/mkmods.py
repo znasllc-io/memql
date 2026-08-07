@@ -162,6 +162,70 @@ def add_reqs(d, deps):
             f"-replace={MOD}/{dep}={rel}", modfile])
 
 
+def current_replaces(d):
+    """Internal module dirs already replaced in d's go.mod."""
+    import json
+    out = sh(["go", "mod", "edit", "-json", os.path.join(REPO, d, "go.mod")])
+    dirs = []
+    for r in json.loads(out.stdout).get("Replace") or []:
+        path = r["Old"]["Path"]
+        if path.startswith(MOD + "/"):
+            dirs.append(path[len(MOD) + 1:])
+    return dirs
+
+
+MISSING_PKG_RE = re.compile(r"finding module for package (" + re.escape(MOD) + r"/\S+)")
+# `reading .../component/healing/go.mod at revision component/healing/v0.0.0:
+#  unknown revision` -- a module tidy needs but has no local `replace` for.
+# Replace directives are NOT transitive: a dependency's own go.mod naming
+# ./../x is meaningless here, so every module tidy reaches has to be replaced
+# in THIS go.mod, including ones reached only through a dependency's tests.
+UNRESOLVED_MOD_RE = re.compile(
+    r"reading (" + re.escape(MOD) + r"/\S+?)/go\.mod at revision")
+
+
+def tidy_resolving_missing(d, modules, rounds=20):
+    """`go mod tidy` in d, adding require+replace for whatever it turns out to need.
+
+    `go list` answers for ONE build configuration -- the current tags, GOOS and
+    GOARCH. `go mod tidy` answers for ALL of them. So a package reached only
+    from a file behind `//go:build voice` (or a GOOS guard) is invisible to
+    internal_deps and absent from the go.mod tidy is about to check. Tidy then
+    cannot resolve it locally, goes to the proxy, finds it inside the published
+    `github.com/znasllc-io/memql` module and reports the `ambiguous import` of
+    memql#3238 -- once per package in the module, so the real cause (ONE
+    unresolvable import, named in a single `finding module for package` line at
+    the top) is buried under a hundred lines of consequence.
+
+    Rather than enumerate the tag space, let tidy name what it wants and add
+    it. Measured on `integrations`, which reaches `component/worker` only from
+    a build-tagged file (memql#3244).
+
+    Returns the module dirs added this way.
+    """
+    added = []
+    for _ in range(rounds):
+        p = sh(["go", "mod", "tidy"], cwd=os.path.join(REPO, d),
+               env={"GOWORK": "off"}, check=False)
+        if p.returncode == 0:
+            return added
+        wanted = set()
+        for pkg in MISSING_PKG_RE.findall(p.stderr):
+            own = owning_module(pkg[len(MOD) + 1:], modules)
+            if own != d and own != ".":
+                wanted.add(own)
+        for mod in UNRESOLVED_MOD_RE.findall(p.stderr):
+            rel = mod[len(MOD) + 1:]
+            if rel in modules and rel != d:
+                wanted.add(rel)
+        wanted -= set(current_replaces(d))
+        if not wanted:
+            raise RuntimeError(f"go mod tidy (cwd={d}) failed:\n{p.stdout}\n{p.stderr}")
+        add_reqs(d, sorted(wanted))
+        added.extend(wanted)
+    raise RuntimeError(f"go mod tidy (cwd={d}) did not converge in {rounds} rounds")
+
+
 def topo(dirs, dep_map):
     """Order so a module's in-set dependencies are tidied before it."""
     done, out = set(), []
@@ -247,7 +311,10 @@ def main():
 
     for d in topo(new_dirs, dep_map):
         print(f"  tidy {d}  <- {' '.join(dep_map[d]) or '(L0)'}")
-        sh(["go", "mod", "tidy"], cwd=os.path.join(REPO, d), env={"GOWORK": "off"})
+        extra = tidy_resolving_missing(d, modules)
+        if extra:
+            dep_map[d] = sorted(set(dep_map[d]) | set(extra))
+            print(f"       + build-tagged only: {' '.join(extra)}")
 
     root = os.path.join(REPO, "go.mod")
     for d in new_dirs:
@@ -263,7 +330,19 @@ def main():
     # across modules and every build stays green over go.mod files that
     # disagree. What notices is Dependabot, which reads each go.mod separately
     # and opens one PR per (module, dependency) to close each gap.
-    sh(["go", "work", "sync"])
+    #
+    # TO A FIXED POINT, not once. Measured on the last tier (memql#3244): one
+    # pass left five requires still to drop, and a second pass converged. The
+    # `module-boundaries` lane runs `go work sync` EXACTLY ONCE and fails on a
+    # non-empty `git diff`, so a tree that needs a second pass is a tree the
+    # gate rejects -- this loop is what stops the generator producing one.
+    for _ in range(5):
+        before = sh(["git", "status", "--porcelain"]).stdout
+        sh(["go", "work", "sync"])
+        if sh(["git", "status", "--porcelain"]).stdout == before:
+            break
+    else:
+        raise RuntimeError("`go work sync` did not converge in 5 passes")
 
     update_dockerfiles(modules)
     update_known_dirs(modules)

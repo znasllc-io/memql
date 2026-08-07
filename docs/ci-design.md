@@ -213,6 +213,49 @@ From `go list -json ./...` over 182 packages, aggregated to area level:
 Dependency direction is strictly downward:
 `app → servers → integrations → platform → engine → base → wire`.
 
+### As landed: 48 modules, and the rows the table above did not name
+
+The table names 8 **tiers**. A tier is a documentation grouping; a `go.mod` is
+what the compiler enforces, and a module's scope is a directory subtree. Four
+tiers name non-adjacent directories, so they need one `go.mod` each -- which is
+most of the gap between "8" and the ~29 memql#3165 estimated and the **48**
+that actually landed. The rest is directories no row named at all: they were
+inside the root module, and each one an upward tier needed had to come out with
+it.
+
+`go.work` is the enumeration on disk; the `module-boundaries` lane asserts it
+matches. Read as tiers:
+
+| tier | modules |
+|---|---|
+| `wire` | `component/{grpc,node,bus}/gen` |
+| `base` | `core`, `component/{architecture,auth,bus,config,events,fileprocessor,genesis,healing,metadata,metrics,observe,planner,polyphon,provenance,safety,secret}`, `component/language/{annotations,ast,dslclause}`, `docs` |
+| `engine` | `component/{language,database,harness,actions,memql}`, `dsl` |
+| `platform` | `component/{identity,node}`, `integrations/{email,openai,stt}` |
+| between platform and the servers | `component/{deploycontrol,router,service,worker,mcp,outbound,automations}`, `component/identity/admin`, `integrations` |
+| servers | `component/{server,grpc,inbound}` |
+| `app` | the root module: `app/`, `main.go`, `cmd/*`, `sdk/`, `scripts/`, `test/`, `examples/` |
+
+Three placements are worth stating because they are not obvious from the row
+they sit in:
+
+- **`integrations/{email,openai,stt}` sit BELOW the `integrations` module,** in
+  the platform tier. `component/identity` imports `email`; `component/grpc` and
+  `component/server` import `stt`; `stt` imports `openai`. They need only
+  `engine` + `base`, so nothing follows them down. The `integrations` module
+  covers `integrations/*` MINUS these three -- a nested `go.mod` carves its
+  subtree out of its parent, which is exactly the mechanism wanted here.
+- **`component/mcp` and `component/inbound` are imported by nothing.** They are
+  modules anyway: the boundary is what stops a future import from pointing the
+  wrong way, and a directory with no importers is the cheapest place to hold
+  the line.
+- **The root module IS the `app` tier.** It is not published, it may import
+  anything, and everything left in it -- `sdk/`, `scripts/`, `test/`,
+  `examples/` -- is app-tier by that definition rather than by omission.
+
+The `changes` filter buckets below are **unchanged** by all of this, per
+decision F: a `go.mod` appearing in a directory moves no path.
+
 #### The engine tier as landed (memql#3242)
 
 The engine row is complete: `component/{language,database,harness}` landed in

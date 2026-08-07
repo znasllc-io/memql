@@ -27,19 +27,30 @@ updates:
   # Dependabot discovers a nested go.mod on its own and opens one PR per
   # (module, dependency). That surfaced the moment the base tier landed: three
   # separate PRs against component/polyphon alone (#3264, #3265, #3266). The
-  # tree is 23 modules today and headed for ~29, so ungrouped this is a flood
-  # measured in tens of PRs per week -- for bumps that are near-duplicates of
-  # the root entry's, since the nested modules share the root's dependency set.
+  # tree is 48 modules now that the split is complete, so ungrouped this is a
+  # flood measured in tens of PRs per week -- for bumps that are near-
+  # duplicates of the root entry's, since the nested modules share the root's
+  # dependency set. (memql#3291 removed the DRIFT those PRs were reporting;
+  # this entry caps the PR COUNT. Both are needed -- see that PR.)
   #
   # So: one grouped PR for the whole nested set. The root module keeps its own
   # ungrouped entry above, because that is where a bump is actually reviewed --
   # the livekit/protocol ignore there is the standing example of a dependency
   # that must be judged individually.
+  #
+  # THE GLOBS MUST COVER EVERY NESTED MODULE. A module outside them is not
+  # ungrouped, it is UNWATCHED -- no PR at all, silently, which is the worse
+  # failure. `/docs` and `/integrations/**` were added when the engine and
+  # upper tiers landed (memql#3242..#3244); `docs` carries no external
+  # dependency today, so its entry is future-proofing, and the integrations
+  # modules very much do not.
   - package-ecosystem: "gomod"
     directories:
       - "/component/**"
       - "/core"
+      - "/docs"
       - "/dsl"
+      - "/integrations/**"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 3
