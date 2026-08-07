@@ -11,6 +11,13 @@
 FROM golang:1.26.4@sha256:68cb6d68bed024785b69195b89af7ac7a444f27791435f98647edff595aa0479 AS build
 WORKDIR /src
 COPY go.mod go.sum ./
+# The `wire` tier is a set of NESTED modules the root go.mod `replace`s by
+# relative path (memql#3240), and `go mod download` resolves those replaces --
+# so their manifests must land in this layer, before `COPY . .`. Add a line per
+# module as each tier lands (#3241..#3244).
+COPY component/bus/gen/go.mod component/bus/gen/go.sum ./component/bus/gen/
+COPY component/grpc/gen/go.mod component/grpc/gen/go.sum ./component/grpc/gen/
+COPY component/node/gen/go.mod component/node/gen/go.sum ./component/node/gen/
 RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" \

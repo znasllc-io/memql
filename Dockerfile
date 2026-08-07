@@ -36,6 +36,18 @@ RUN if [ "${CGO_ENABLED}" = "1" ]; then \
     fi
 
 COPY go.mod go.sum ./
+# The `wire` tier is a set of NESTED modules that the root go.mod `replace`s by
+# relative path (memql#3240). `go mod download` resolves those replaces, so the
+# nested go.mod/go.sum must exist in this layer -- `COPY . .` below is far too
+# late, and without these three lines the dependency-cache layer fails with
+# "reading component/bus/gen/go.mod: no such file or directory".
+#
+# Manifests only, deliberately: copying the sources here would defeat the
+# layer-caching this split-COPY exists for. Add a line per module as each tier
+# lands (#3241..#3244).
+COPY component/bus/gen/go.mod component/bus/gen/go.sum ./component/bus/gen/
+COPY component/grpc/gen/go.mod component/grpc/gen/go.sum ./component/grpc/gen/
+COPY component/node/gen/go.mod component/node/gen/go.sum ./component/node/gen/
 # BuildKit cache mounts (build-speed #1506): the module cache (/go/pkg/mod)
 # and the Go build cache (/root/.cache/go-build) persist across builds, so a
 # rebuild of an unchanged tree reuses downloaded modules + already-compiled
