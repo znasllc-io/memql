@@ -163,11 +163,21 @@ func TestCallGraphCoverage(t *testing.T) {
 // that was broken. The keyword literals here are pinned independently by
 // component/language/dslspec's own drift test, so a genuine rename turns THAT
 // red rather than silently rotting this.
+// The automation entry arrives with memql#3093, which made that kind reachable
+// from CheckFile at all. Note what the independent oracle buys HERE
+// specifically: the regex below matches a declaration header whether or not a
+// braced body follows, so it counts BOTH automation shapes -- the braced one and
+// the bodiless `automation <name> @trigger(...) => logic <name>` delegation. The
+// checker's own splitter needs two matchers to reach the same 31. Drop the
+// bodiless matcher and coverage falls to 21 while this oracle still says 31, so
+// the exact-count assertion above turns red -- which is the point: 10 of the 31
+// use that form, and two of the tree's three live @filter conditions sit on it.
 var kindKeywords = map[string]string{
-	"mutation": "mutate",
-	"query":    "query",
-	"logic":    "logic",
-	"action":   "action",
+	"mutation":   "mutate",
+	"query":      "query",
+	"logic":      "logic",
+	"action":     "action",
+	"automation": "automation",
 }
 
 // declarationsInTree counts the declaration headers of one kind by scanning the

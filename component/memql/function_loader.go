@@ -244,7 +244,20 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 			version = "v1" // default
 		}
 		resolver := NewConceptResolver(registry)
-		if err := resolver.ResolveFileWithSignatureConceptsInDomain(file, version, signatureConcepts, DomainFromFilePath(origin)); err != nil {
+		// BOTH arguments are the ASSEMBLY directory's, for the same reason the
+		// canonicalId call above passes them (memql#3084 -- #3026 fixed that
+		// path and this one was not in scope). This is the site that REWRITES
+		// THE AST: the symbol table it builds sets a mutation's write target and
+		// a query's `concept ==` filter. Handing it DomainFromFilePath's LAST
+		// segment is a widening, not a near miss -- for
+		// agents/tools/askSpecialist.memql the hint becomes `tools`, so a
+		// signature `mutate widget ...` binds a foreign `v1:tools:widget` with
+		// no import, on the path that derives row ids, while assembly for that
+		// same file can only ever emit `v1:agents:*`.
+		if err := resolver.ResolveFileWithSignatureConceptsInDomain(
+			file, version, signatureConcepts,
+			RootDomainFromFilePath(origin), declaredNamespaceForOrigin(origin),
+		); err != nil {
 			return nil, fmt.Errorf("concept resolution: %w", err)
 		}
 	}
@@ -297,13 +310,27 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 	// signature (`mutation <Concept> <name> { ... }`). When no Form A
 	// `use` directive is present, resolve the signature concept via
 	// the registry's trailing-segment match.
+	//
+	// Routed through the SAME ResolveSignatureConceptInNamespace the
+	// AST-rewriting site above uses, so the ambient scope rule has exactly one
+	// implementation (memql#3084). The parked attempt gated this site alone and
+	// left the rewrite ungated, which produced the worst of both: an empty
+	// boundConcept -- disabling @secret redaction via markSecretArgsFields and
+	// skipping ensureBoundConceptFilter -- while the foreign write target the
+	// other site had already stamped went through anyway.
+	//
+	// The error is still swallowed here, and after the change that is
+	// unreachable rather than lenient: the resolver site above runs first
+	// whenever len(signatureConcepts) > 0 and returns the refusal as a hard
+	// load error, so a refused bind never arrives here to be silently blanked.
+	// Sharing the helper is what makes that true -- the two sites cannot
+	// disagree about which ids are in scope.
 	if boundConcept == "" && registry != nil && len(signatureConcepts) == 1 {
 		resolver := NewConceptResolver(registry)
-		nsHint := namespaceHintForName(file.Uses, signatureConcepts[0])
-		if nsHint == "" {
-			nsHint = DomainFromFilePath(origin) // ambient same-domain scope (#2617)
-		}
-		if id, err := resolver.resolveBareConceptNameWithNamespace(signatureConcepts[0], nsHint); err == nil {
+		if id, err := resolver.ResolveSignatureConceptInNamespace(
+			file.Uses, signatureConcepts[0],
+			RootDomainFromFilePath(origin), declaredNamespaceForOrigin(origin),
+		); err == nil {
 			boundConcept = id
 		}
 	}
