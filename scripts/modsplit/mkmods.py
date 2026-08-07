@@ -331,18 +331,34 @@ def main():
     # disagree. What notices is Dependabot, which reads each go.mod separately
     # and opens one PR per (module, dependency) to close each gap.
     #
-    # TO A FIXED POINT, not once. Measured on the last tier (memql#3244): one
-    # pass left five requires still to drop, and a second pass converged. The
-    # `module-boundaries` lane runs `go work sync` EXACTLY ONCE and fails on a
-    # non-empty `git diff`, so a tree that needs a second pass is a tree the
-    # gate rejects -- this loop is what stops the generator producing one.
+    # AND RE-TIDY AFTER IT, to a joint fixed point.
+    #
+    # `go work sync` writes go.mod. It does NOT add the go.sum entries the
+    # requirements it just wrote need -- so a tree that is version-CORRECT
+    # comes out hash-INCOMPLETE, and `go mod tidy -diff` (the lane step from
+    # memql#3280) fails it. Measured on memql#3244: seven modules stale after
+    # a sync that was itself correct.
+    #
+    # The two lane steps want different halves of the same file pair, so
+    # running either alone leaves the other red. Neither is wrong; the ORDER
+    # is what was missing. tidy -> sync -> tidy, until nothing moves.
+    #
+    # A fixed point, not a fixed count: the lane runs each step EXACTLY ONCE
+    # and fails on a non-empty diff, so a tree that would need one more pass
+    # is a tree the gate rejects. Converges in two rounds in practice (one
+    # sync pass left five requires still to drop; one tidy pass left the
+    # go.sum additions).
     for _ in range(5):
         before = sh(["git", "status", "--porcelain"]).stdout
+        for d in sorted(m for m in modules if m != "."):
+            sh(["go", "mod", "tidy"], cwd=os.path.join(REPO, d),
+               env={"GOWORK": "off"}, check=False)
+        sh(["go", "mod", "tidy"], env={"GOWORK": "off"}, check=False)
         sh(["go", "work", "sync"])
         if sh(["git", "status", "--porcelain"]).stdout == before:
             break
     else:
-        raise RuntimeError("`go work sync` did not converge in 5 passes")
+        raise RuntimeError("tidy/`go work sync` did not converge in 5 rounds")
 
     update_dockerfiles(modules)
     update_known_dirs(modules)
