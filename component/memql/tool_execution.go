@@ -295,10 +295,38 @@ func collectSecretRenderings(value any, secretNames map[string]struct{}, inSecre
 		out[fmt.Sprintf("%v", value)] = struct{}{}
 		if s, ok := value.(string); ok {
 			out[strconv.Quote(s)] = struct{}{}
-			out["'"+s+"'"] = struct{}{}
+			out[jsonschemaSingleQuoted(s)] = struct{}{}
 		}
 		out[fmt.Sprintf("%#v", value)] = struct{}{}
 	}
+}
+
+// jsonschemaSingleQuoted reproduces jsonschema/v5's own `quote` helper
+// (errors.go:124) byte for byte, because this needle has to MATCH what the
+// library actually printed -- an approximation silently fails to scrub.
+//
+//	func quote(s string) string {
+//	    s = fmt.Sprintf("%q", s)
+//	    s = strings.ReplaceAll(s, `\"`, `"`)
+//	    s = strings.ReplaceAll(s, `'`, `\'`)
+//	    return "'" + s[1:len(s)-1] + "'"
+//	}
+//
+// This was `"'" + s + "'"`, which is wrong for any secret containing a single
+// quote, a backslash, or a control character: the library renders `'a\'b'`
+// and `'a\nb'` where naive concatenation produces `'a'b'` and a literal
+// newline, so the needle never matched and THE SECRET WAS NOT SCRUBBED. Caught
+// by CodeQL go/unsafe-quoting on the concatenation -- flagged as an injection
+// shape, but the real defect it pointed at was a redaction gap.
+//
+// If the library's helper changes, this must change with it; the pin is
+// TestJSONSchemaSingleQuotedMatchesLibrary, which asserts against a message
+// the library itself produced.
+func jsonschemaSingleQuoted(s string) string {
+	q := fmt.Sprintf("%q", s)
+	q = strings.ReplaceAll(q, `\"`, `"`)
+	q = strings.ReplaceAll(q, `'`, `\'`)
+	return "'" + q[1:len(q)-1] + "'"
 }
 
 // redactArgsForLog returns a copy of the args map with every secret-argument

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/santhosh-tekuri/jsonschema/v5"
 	"log/slog"
 	"strings"
 	"testing"
@@ -323,5 +324,74 @@ mutate plainCode storePlainCode {
 	}
 	if !strings.Contains(buf.String(), "args=") {
 		t.Errorf("the WARN must keep its args attribute for a classified tool, got:\n  %s", buf.String())
+	}
+}
+
+// TestJSONSchemaSingleQuotedMatchesLibrary pins jsonschemaSingleQuoted against
+// a message the LIBRARY produced, not against a hand-written expectation.
+//
+// The needle it builds only works if it is byte-identical to what
+// jsonschema/v5 printed. It previously was not: the code concatenated
+// `"'" + s + "'"`, while the library %q-escapes the string and then escapes
+// single quotes as \'. For a secret containing a quote, a backslash, or a
+// newline the needle never matched and the value was NOT scrubbed -- a
+// redaction gap wearing a CodeQL go/unsafe-quoting label.
+//
+// This drives a real `format` violation through the real compiler so the
+// expectation comes from the library's own output.
+func TestJSONSchemaSingleQuotedMatchesLibrary(t *testing.T) {
+	// Each secret carries the distinctive marker SUPERSECRET. That is the
+	// oracle: the library's ESCAPED rendering (`'has\'quote-SUPERSECRET'`)
+	// still contains the marker verbatim, so asserting the marker is gone
+	// catches a failed scrub no matter how the value was escaped. Asserting on
+	// the raw secret would NOT -- `has'quote` is not a substring of
+	// `has\'quote`, so a totally failed scrub would look clean.
+	for _, secret := range []string{
+		"plain-SUPERSECRET",
+		`has'quote-SUPERSECRET`,
+		`has\backslash-SUPERSECRET`,
+		"has\nnewline-SUPERSECRET",
+		`all'three\and` + "\n" + "-SUPERSECRET",
+	} {
+		t.Run(secret, func(t *testing.T) {
+			compiler := jsonschema.NewCompiler()
+			compiler.Draft = jsonschema.Draft2019
+			compiler.AssertFormat = true
+			if err := compiler.AddResource("pin://s", strings.NewReader(
+				`{"type":"object","properties":{"f":{"type":"string","format":"date-time"}}}`,
+			)); err != nil {
+				t.Fatalf("add resource: %v", err)
+			}
+			schema, err := compiler.Compile("pin://s")
+			if err != nil {
+				t.Fatalf("compile: %v", err)
+			}
+
+			err = schema.Validate(map[string]any{"f": secret})
+			if err == nil {
+				t.Fatal("expected a format violation")
+			}
+			libraryMessage := err.Error()
+
+			needle := jsonschemaSingleQuoted(secret)
+			if !strings.Contains(libraryMessage, needle) {
+				t.Fatalf("the needle does not match what the library printed, so a "+
+					"secret containing these characters would NOT be scrubbed.\n"+
+					"  needle:  %s\n  library: %s", needle, libraryMessage)
+			}
+
+			// And the scrub built on it actually removes the value. Assert on
+			// the MARKER, not the raw secret -- see the comment above.
+			if !strings.Contains(libraryMessage, "SUPERSECRET") {
+				t.Fatalf("premise broken: the library message does not carry the "+
+					"marker at all, so this assertion proves nothing:\n  %s", libraryMessage)
+			}
+			redacted := redactSecretArgValues(libraryMessage,
+				map[string]struct{}{"f": {}}, map[string]any{"f": secret})
+			if strings.Contains(redacted, "SUPERSECRET") {
+				t.Errorf("the secret survived redaction -- the needle did not match "+
+					"what the library printed:\n  %s", redacted)
+			}
+		})
 	}
 }
