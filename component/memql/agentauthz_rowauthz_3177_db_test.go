@@ -80,7 +80,11 @@ func TestRevokingAnotherCallersGrantIsRefusedEndToEnd(t *testing.T) {
 	if after["active"] != true {
 		t.Fatalf("the grant is no longer active (%v) after a REFUSED revoke", after["active"])
 	}
-	if after["userId"] != userB {
+	// sameRowAuthzOwner for the same reason as the `before` check above: the
+	// stored value is canonical and userB is bare, so a raw `!=` compares two
+	// spellings of the SAME user and reds a row the refusal protected exactly
+	// as intended.
+	if owner, _ := after["userId"].(string); !sameRowAuthzOwner(owner, userB) {
 		t.Fatalf("the row's owner is now %v, not %s", after["userId"], userB)
 	}
 }
