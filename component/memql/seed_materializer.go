@@ -16,6 +16,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/events"
+	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/provenance"
 )
 
@@ -857,17 +858,41 @@ func seedNames(defs []*SeedDefinition) []string {
 // we only materialize per-user agents for active users, not
 // soft-deleted ones.
 //
-// systemActorContext is required because activeUsers's
-// underlying executor stamps an actor on the request envelope; an
-// empty actor produces a "no actor found in context" failure even
-// for read paths that touch global concepts.
+// systemActorContext is required because the query's underlying
+// executor stamps an actor on the request envelope; an empty actor
+// produces a "no actor found in context" failure even for read paths
+// that touch global concepts.
+//
+// # Why usersForSeedSweep and not activeUsers (memql#3217)
+//
+// This read is a SWEEP SET, not a UI page. activeUsers is
+// `sort row.createdAt desc` + `paginate 50`, which is right for a list
+// and wrong here twice over:
+//
+//   - It is bounded at 50, and it sorts NEWEST FIRST -- so the users it
+//     drops are exactly the ones the sweep exists for. A newly created
+//     user already gets its perUser seeds from the
+//     graph.node.created.v1:identity:user subscription; the sweep is
+//     what backfills users who predate a seed.
+//   - The engine fills a page from `target*2` PHYSICAL version rows and
+//     dedupes to logical rows afterwards. v1:identity:user churns
+//     constantly (lastSeenAt, revocationEpoch, preferences), so a paged
+//     read returns a short page that looks exhausted. Same failure
+//     memql#3209 hit on allAgents.
+//
+// "Unpaged" is still not "unbounded": @unbounded rewrites to
+// paginate 1000000, effectiveWindow clamps that to MaxWindow (5000), and
+// evaluateExpression clamps again to MaxResults (default 500). Past 500
+// active users this truncates, and silently. Revisit it there rather
+// than assuming the sweep is complete.
 func (m *SeedMaterializer) listUserIds(ctx context.Context) ([]string, error) {
-	// #2883: activeUsers is @serverOnly. systemActorContext supplies the actor
-	// the executor needs; the origin stamp is the separate question of which
-	// CHANNEL the call arrived on, and seed materialization is server-side Go.
-	result, err := m.engine.Execute(auth.ContextWithInternalOrigin(systemActorContext(ctx)), `query activeUsers()`)
+	// #2883: usersForSeedSweep is @serverOnly. systemActorContext supplies the
+	// actor the executor needs; the origin stamp is the separate question of
+	// which CHANNEL the call arrived on, and seed materialization is
+	// server-side Go.
+	result, err := m.engine.Execute(auth.ContextWithInternalOrigin(systemActorContext(ctx)), `query usersForSeedSweep()`)
 	if err != nil {
-		return nil, fmt.Errorf("activeUsers: %w", err)
+		return nil, fmt.Errorf("usersForSeedSweep: %w", err)
 	}
 	return extractRowIds(result), nil
 }
@@ -969,14 +994,47 @@ func extractUserIdFromEvent(ev events.Event) string {
 // -----------------------------------------------------------------
 
 // extractRowIds walks a memql Execute result and returns the `id`
-// field of every row. Handles the two shapes the engine returns:
-// a top-level []any of row maps, or a {"nodes":[...]} wrapper.
+// field of every row. Handles the shapes the engine returns: the
+// *ExecuteResult wrapper itself, the *GraphBundle a shapeless query
+// projects to, a top-level []any of row maps, or a {"nodes":[...]}
+// wrapper.
+//
+// # The *ExecuteResult arm is the whole of memql#3217
+//
+// MemQLEngine.Execute returns *ExecuteResult, and listUserIds passed
+// that value straight in -- so it fell to `default: return nil` and the
+// startup per-user seed sweep materialized ZERO rows on every boot. It
+// went unnoticed because "the query matched nothing" and "we could not
+// read what the query returned" arrive here as the same value, and
+// because newly created users still get their perUser seeds from the
+// graph.node.created.v1:identity:user subscription, which does not go
+// through here. The narrow symptom: a user who existed before a seed
+// was added never got that seed's rows, and a re-seed at boot silently
+// converged on nothing.
+//
+// Same defect memql#3209 fixed in extractRowList (component/memql/
+// agents.go); that one was held back because turning the read on had a
+// security consequence, and this one was held back because it turns on
+// a startup sweep with real blast radius. The GraphBundle arm is
+// prophylactic: without it, pointing this at a query that carries no
+// shape would reintroduce the identical silent-nil for the identical
+// reason.
 func extractRowIds(result any) []string {
 	if result == nil {
 		return nil
 	}
 	var rows []any
 	switch v := result.(type) {
+	case *ExecuteResult:
+		return extractRowIds(v.OutputPayload())
+	case *memqlv1.GraphBundle:
+		out := make([]string, 0, len(v.GetNodes()))
+		for _, n := range v.GetNodes() {
+			if id := n.GetId(); id != "" {
+				out = append(out, id)
+			}
+		}
+		return out
 	case []any:
 		rows = v
 	case map[string]any:

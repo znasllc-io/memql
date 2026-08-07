@@ -284,6 +284,19 @@ shape user userDisplayCard {
   displayName
 }
 
+/// Row id and nothing else. Backs usersForSeedSweep -- the startup per-user seed sweep
+/// (component/memql/seed_materializer.go listUserIds) needs one id per active user to key
+/// materialization by, and needs no other field.
+///
+/// The point of a dedicated shape is what it does NOT carry. The sweep reads EVERY active user
+/// under the system actor with no caller scope; projecting userFull there would pull every user's
+/// primaryEmail / phone / birthdate into a process-wide Go slice at boot in order to use one field
+/// of it. If you are here to add a field, ask what the sweep would do with it first. memql#3217.
+@row
+shape user userIdRef {
+  row.id
+}
+
 /// Full projection of a v1:identity:workerPairingCode row. Backs the Pair-aware gRPC interceptor's
 /// lookup path + the redeem handler's validation path.
 @row
