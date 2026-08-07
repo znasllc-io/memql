@@ -37,10 +37,13 @@ use (
 	./component/bus
 	./component/bus/gen
 	./component/config
+	./component/database
 	./component/events
 	./component/fileprocessor
 	./component/grpc/gen
+	./component/harness
 	./component/healing
+	./component/language
 	./component/language/annotations
 	./component/language/ast
 	./component/language/dslclause
