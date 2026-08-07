@@ -18,7 +18,7 @@ require (
 	github.com/pion/webrtc/v4 v4.2.18
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/santhosh-tekuri/jsonschema/v5 v5.3.1
-	github.com/sashabaranov/go-openai v1.41.2
+	github.com/sashabaranov/go-openai v1.42.0
 	github.com/stretchr/testify v1.11.1
 	github.com/tliron/commonlog v0.2.21
 	github.com/tliron/glsp v0.2.2
@@ -40,6 +40,7 @@ require (
 	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/zeozeozeo/gomplerate v0.0.0-20250404113140-0fbb236df825 // indirect
 	golang.org/x/tools v0.48.0 // indirect
+	gopkg.in/yaml.v2 v2.4.0 // indirect
 )
 
 require (
