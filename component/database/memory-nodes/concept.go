@@ -583,12 +583,12 @@ func (c *Concept) PIIFields() []string {
 //
 // NOT COVERED -- the tool-args validator, MemQLEngine.validateToolArgs
 // (component/memql/tool_execution.go:66). It is compiled from the SAME
-// ArgsSchema that carries the Secret flag and is auto-registered for every
-// enabled query and mutation, so it covers the same declarations this list
-// does. It is the worst of the uncovered set: it runs BEFORE the covered
-// validator on the agent path (tool_execution.go:366 precedes the handler at
-// :375), it serializes the ENTIRE args map into a WARN log rather than quoting
-// one value (:112-115), and formatToolValidationError (:256) does no redaction
+// ArgsSchema that carries the Secret flag, so a declaration this list
+// redacts has a generated-tool twin that does not. It is the worst of the
+// uncovered set: it runs BEFORE the covered validator on the agent path
+// (tool_execution.go:366 precedes the handler at :375), it serializes the
+// ENTIRE args map into a WARN log rather than quoting one value
+// (:112-115), and formatToolValidationError (:256) does no redaction
 // before the message is returned to the model. Tracked as memql#3117.
 //
 // NOT COVERED -- concept payload JSON-schema validation (Create, below), which

@@ -223,11 +223,11 @@ log, so a row value **can** reach a **structured log** by that path.
 It is **not** redacted by the **tool-args validator**
 (`MemQLEngine.validateToolArgs`, `component/memql/tool_execution.go`),
 which is compiled from the *same* args schema that carries the secret
-flag and is auto-registered for every enabled query and mutation. On the
-agent path it runs **before** the covered validator, it serializes the
-**entire** args map into a WARN log rather than quoting one value, and
-its error message is returned to the model unredacted. Tracked as
-memql#3117.
+flag, so a declaration this redaction covers has a generated-tool twin
+that it does not. On the agent path it runs **before** the covered
+validator, it serializes the **entire** args map into a WARN log rather
+than quoting one value, and its error message is returned to the model
+unredacted. Tracked as memql#3117.
 
 It is **not** redacted by **concept payload validation**. `@minimum`,
 `@maximum` and `@format` declared on the *concept* are enforced by JSON
