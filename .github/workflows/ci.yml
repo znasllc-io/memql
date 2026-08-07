@@ -221,9 +221,17 @@ jobs:
               # scanner's trigger IS the extension, so a new manifest in a new
               # directory must not be able to slip back out.
               #
-              # Over-matching stays close to free for the same reason stated at
-              # the top of this bucket: RUN_GATES fires only when `ci` and `go`
-              # are both false.
+              # Be exact about the cost, because this one is NOT the "free
+              # over-matching" case noted at the top of this bucket. That note
+              # is about Go files inside already-routed embedded trees being
+              # inert. These files previously ran NOTHING, so a
+              # manifest-only PR goes from zero lanes to the gate-inputs lane
+              # and pays the near-full build documented on that step (~6min
+              # wall, cold cache, against ~35s of actual test execution).
+              #
+              # That is the price of not handing the next author a red `main`
+              # for a diff their own PR was told was green. It is worth paying;
+              # it is not free.
               - '**/*.yaml'
               - '**/*.yml'
               - '**/.env*'
