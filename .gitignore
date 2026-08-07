@@ -20,9 +20,15 @@ profile.cov
 # Dependency directories (remove the comment below to include it)
 # vendor/
 
-# Go workspace file
-go.work
-go.work.sum
+# go.work / go.work.sum are deliberately NOT ignored (memql#3165).
+#
+# Ignoring them contradicted the CI they have to work with: the `go` filter
+# bucket in .github/workflows/ci.yml lists both files as lane inputs, so an
+# ignored workspace file could never trigger the lane that exists to notice it.
+# A workspace also changes what every `./...`-shaped selector resolves to
+# across the whole repo -- exactly the kind of file that must be reviewed in a
+# diff rather than living untracked on one machine and silently changing that
+# machine's results. If the module split introduces one, it gets committed.
 
 # Local repo-split staging area. Each subdirectory (.split/memql,
 # .split/memql-cockpit, .split/<carrier-repo>) holds a candidate

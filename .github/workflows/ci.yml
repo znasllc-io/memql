@@ -313,12 +313,21 @@ jobs:
         run: go test -count=1 -timeout=300s ./ ./cmd/envscan/... ./component/architecture/... ./component/genesis/... ./scripts/... ./dsl/... ./examples/...
 
       # --- pure-Go lanes (go bucket) -- build first to warm the cache ---
+      #
+      # Selector is the MODULE pattern, not `./...` (memql#3165). The two are
+      # identical today -- one module, no go.work -- and stop being identical
+      # the moment a second `go.mod` appears anywhere beneath the root:
+      # `./...` then silently means "this module only", so the packages that
+      # moved into the new module are no longer built, vetted or tested and
+      # nothing goes red. Naming the module makes the selector say what it
+      # means, and makes a future per-module lane a one-line change instead of
+      # a silent scope loss.
       - name: go build
         if: ${{ env.RUN_GO == 'true' }}
-        run: go build ./...
+        run: go build github.com/znasllc-io/memql/...
       - name: go vet
         if: ${{ env.RUN_GO == 'true' }}
-        run: go vet ./...
+        run: go vet github.com/znasllc-io/memql/...
       # Harness eval gate (#589). Fixture-driven regression tripwire over an
       # in-memory graph (NO Postgres, NO LLM) -- catches a harness change
       # that reorders dispatch, mis-fails a plan, or makes the loop chattier.
@@ -454,9 +463,23 @@ jobs:
       # rationale recorded, and the one commit that reasons about it (5be808a1)
       # documents it MASKING a defect CI "would never have caught (fresh
       # container, -count=1)".
+      #
+      # The package list is captured into a variable BEFORE `go test` sees it,
+      # and that is load-bearing (memql#3165). Inlined as
+      # `go test $(script)`, a script that exits non-zero does NOT fail the
+      # step: `bash -e` does not abort on a command substitution inside an
+      # argument list, so `go test` runs with NO package arguments, tests the
+      # current directory, and exits 0. A broken selector would report a green
+      # lane over 169 untested packages -- the memql#2972 fail-open shape. As
+      # an assignment, the substitution's exit status IS the statement's, so
+      # `bash -e` aborts and the lane goes red. The empty check covers the
+      # other half: a script that exits 0 with no output.
       - name: go test (excluding the db-gated trees db-tests owns)
         if: ${{ env.RUN_GO == 'true' }}
-        run: go test -timeout=300s $(scripts/ci/db-gated-packages.sh --complement-cacheable)
+        run: |
+          pkgs="$(scripts/ci/db-gated-packages.sh --complement-cacheable)"
+          test -n "$pkgs" || { echo "::error::db-gated-packages.sh produced an empty package list"; exit 1; }
+          go test -timeout=300s $pkgs
       # Build-tagged test lanes (#1338, #2903). The untagged `go test ./...`
       # above never RUNS a //go:build-tagged test file, so a tagged suite is
       # CI-invisible without an explicit -tags run.
@@ -523,11 +546,11 @@ jobs:
       - name: go build -tags voice (CGO)
         env:
           CGO_ENABLED: '1'
-        run: go build -tags voice ./...
+        run: go build -tags voice github.com/znasllc-io/memql/...
       - name: go vet -tags voice (CGO)
         env:
           CGO_ENABLED: '1'
-        run: go vet -tags voice ./...
+        run: go vet -tags voice github.com/znasllc-io/memql/...
       - name: go test -tags voice (CGO)
         env:
           CGO_ENABLED: '1'
@@ -563,9 +586,9 @@ jobs:
           go-version: '1.26.5'
           cache: true
       - name: go build -tags ${{ matrix.tag }}
-        run: go build -tags ${{ matrix.tag }} ./...
+        run: go build -tags ${{ matrix.tag }} github.com/znasllc-io/memql/...
       - name: go vet -tags ${{ matrix.tag }}
-        run: go vet -tags ${{ matrix.tag }} ./...
+        run: go vet -tags ${{ matrix.tag }} github.com/znasllc-io/memql/...
 
   # TypeScript SDK lane. Gates on `sdkts` (sdk/ts/** + the generator) so a
   # pure Go change that doesn't touch the generator skips the Node lane.
