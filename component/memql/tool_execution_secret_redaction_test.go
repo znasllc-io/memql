@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/znasllc-io/memql/component"
+	"github.com/znasllc-io/memql/core/component"
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
 

@@ -13,11 +13,31 @@ WORKDIR /src
 COPY go.mod go.sum ./
 # The `wire` tier is a set of NESTED modules the root go.mod `replace`s by
 # relative path (memql#3240), and `go mod download` resolves those replaces --
-# so their manifests must land in this layer, before `COPY . .`. Add a line per
-# module as each tier lands (#3241..#3244).
-COPY component/bus/gen/go.mod component/bus/gen/go.sum ./component/bus/gen/
-COPY component/grpc/gen/go.mod component/grpc/gen/go.sum ./component/grpc/gen/
-COPY component/node/gen/go.mod component/node/gen/go.sum ./component/node/gen/
+# so their manifests must land in this layer, before `COPY . .`. The `go.*`
+# glob is load-bearing: an L0 module has no go.sum and Docker fails a COPY
+# whose named source does not exist. Add a line per module as each tier lands.
+COPY component/architecture/go.* ./component/architecture/
+COPY component/auth/go.* ./component/auth/
+COPY component/bus/go.* ./component/bus/
+COPY component/bus/gen/go.* ./component/bus/gen/
+COPY component/config/go.* ./component/config/
+COPY component/events/go.* ./component/events/
+COPY component/fileprocessor/go.* ./component/fileprocessor/
+COPY component/grpc/gen/go.* ./component/grpc/gen/
+COPY component/healing/go.* ./component/healing/
+COPY component/language/annotations/go.* ./component/language/annotations/
+COPY component/language/ast/go.* ./component/language/ast/
+COPY component/language/dslclause/go.* ./component/language/dslclause/
+COPY component/metadata/go.* ./component/metadata/
+COPY component/metrics/go.* ./component/metrics/
+COPY component/node/gen/go.* ./component/node/gen/
+COPY component/observe/go.* ./component/observe/
+COPY component/planner/go.* ./component/planner/
+COPY component/polyphon/go.* ./component/polyphon/
+COPY component/provenance/go.* ./component/provenance/
+COPY component/safety/go.* ./component/safety/
+COPY component/secret/go.* ./component/secret/
+COPY core/go.* ./core/
 RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" \

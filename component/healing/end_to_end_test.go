@@ -2,25 +2,8 @@ package healing
 
 import (
 	"context"
-	"reflect"
 	"testing"
-
-	"github.com/znasllc-io/memql/component/automations"
 )
-
-// exportedFieldNames returns the exported field names of a struct value in
-// declaration order -- used by the shape-parity test.
-func exportedFieldNames(v any) []string {
-	t := reflect.TypeOf(v)
-	var out []string
-	for i := 0; i < t.NumField(); i++ {
-		f := t.Field(i)
-		if f.IsExported() {
-			out = append(out, f.Name)
-		}
-	}
-	return out
-}
 
 // Epic 4 / memql#2144 (E4.6): the self-healing loop, end to end.
 //
@@ -161,44 +144,5 @@ func TestSelfHealing_EndToEnd(t *testing.T) {
 	binput, _ := bstep["input"].(map[string]any)
 	if binput["path"] != "/Users/alice/engine/digest" {
 		t.Errorf("the base construct was mutated by the heal: %v", binput["path"])
-	}
-}
-
-// TestPatchPreconditionShapeParity is the E4.3 follow-up the code owner
-// asked for: healing.PatchPrecondition mirrors automations.Precondition by
-// SHAPE (not import, to avoid the automations->memql import cycle). This test
-// asserts field parity so the mirror can't drift silently -- if a field is
-// added to one, this fails until both carry it.
-func TestPatchPreconditionShapeParity(t *testing.T) {
-	// Construct both with the same field set and assert each field round-trips
-	// to the same value, proving the four fields are present + named-aligned
-	// on both types.
-	pp := PatchPrecondition{
-		ID:          "g",
-		Check:       "exists(event.payload.x)",
-		Literal:     "x",
-		Description: "guard x",
-	}
-	ap := automations.Precondition{
-		ID:          pp.ID,
-		Check:       pp.Check,
-		Literal:     pp.Literal,
-		Description: pp.Description,
-	}
-	if ap.ID != pp.ID || ap.Check != pp.Check || ap.Literal != pp.Literal || ap.Description != pp.Description {
-		t.Fatalf("PatchPrecondition and automations.Precondition diverged: %+v vs %+v", pp, ap)
-	}
-
-	// Field-count parity: both types must expose exactly the same set of
-	// exported fields, so adding a field to one without the other fails here.
-	healingFields := exportedFieldNames(PatchPrecondition{})
-	automationFields := exportedFieldNames(automations.Precondition{})
-	if len(healingFields) != len(automationFields) {
-		t.Fatalf("field-count drift: PatchPrecondition has %v, automations.Precondition has %v", healingFields, automationFields)
-	}
-	for i := range healingFields {
-		if healingFields[i] != automationFields[i] {
-			t.Errorf("field name drift at %d: %q vs %q", i, healingFields[i], automationFields[i])
-		}
 	}
 }

@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/znasllc-io/memql/component"
+	"github.com/znasllc-io/memql/core/component"
 	"github.com/znasllc-io/memql/component/language/compiler"
 	"github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/core/common"

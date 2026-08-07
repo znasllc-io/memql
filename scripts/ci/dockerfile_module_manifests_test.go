@@ -73,15 +73,18 @@ func TestDockerfilesCopyEveryNestedModuleManifest(t *testing.T) {
 			// The manifest must be named ANYWHERE before `go mod download`.
 			// Matching on the directory keeps this agnostic to whether the
 			// author wrote one COPY per module or grouped several.
-			want := mod + "/go.mod"
+			// The COPY uses a `go.*` glob, not a literal pair: an L0 module with
+			// no external dependencies has NO go.sum, and Docker fails a COPY
+			// whose named source does not exist.
+			want := mod + "/go."
 			if !strings.Contains(beforeDownload, want) {
-				t.Errorf("%s: %q is not COPYed before `go mod download`.\n\n"+
+				t.Errorf("%s: no COPY of %q* before `go mod download`.\n\n"+
 					"The root go.mod `replace`s it by relative path, so `go mod download` "+
 					"must be able to read it -- `COPY . .` is too late and the build fails "+
 					"with \"reading %s: no such file or directory\".\n\n"+
 					"Add, next to the others:\n"+
-					"    COPY %s/go.mod %s/go.sum ./%s/\n",
-					df, want, want, mod, mod, mod)
+					"    COPY %s/go.* ./%s/\n",
+					df, want, want, mod, mod)
 			}
 		}
 	}

@@ -43,11 +43,32 @@ COPY go.mod go.sum ./
 # "reading component/bus/gen/go.mod: no such file or directory".
 #
 # Manifests only, deliberately: copying the sources here would defeat the
-# layer-caching this split-COPY exists for. Add a line per module as each tier
-# lands (#3241..#3244).
-COPY component/bus/gen/go.mod component/bus/gen/go.sum ./component/bus/gen/
-COPY component/grpc/gen/go.mod component/grpc/gen/go.sum ./component/grpc/gen/
-COPY component/node/gen/go.mod component/node/gen/go.sum ./component/node/gen/
+# layer-caching this split-COPY exists for. The `go.*` glob is load-bearing --
+# an L0 module with no external dependencies has NO go.sum, and Docker fails a
+# COPY whose named source does not exist. Add a line per module as each tier
+# lands (#3242..#3244).
+COPY component/architecture/go.* ./component/architecture/
+COPY component/auth/go.* ./component/auth/
+COPY component/bus/go.* ./component/bus/
+COPY component/bus/gen/go.* ./component/bus/gen/
+COPY component/config/go.* ./component/config/
+COPY component/events/go.* ./component/events/
+COPY component/fileprocessor/go.* ./component/fileprocessor/
+COPY component/grpc/gen/go.* ./component/grpc/gen/
+COPY component/healing/go.* ./component/healing/
+COPY component/language/annotations/go.* ./component/language/annotations/
+COPY component/language/ast/go.* ./component/language/ast/
+COPY component/language/dslclause/go.* ./component/language/dslclause/
+COPY component/metadata/go.* ./component/metadata/
+COPY component/metrics/go.* ./component/metrics/
+COPY component/node/gen/go.* ./component/node/gen/
+COPY component/observe/go.* ./component/observe/
+COPY component/planner/go.* ./component/planner/
+COPY component/polyphon/go.* ./component/polyphon/
+COPY component/provenance/go.* ./component/provenance/
+COPY component/safety/go.* ./component/safety/
+COPY component/secret/go.* ./component/secret/
+COPY core/go.* ./core/
 # BuildKit cache mounts (build-speed #1506): the module cache (/go/pkg/mod)
 # and the Go build cache (/root/.cache/go-build) persist across builds, so a
 # rebuild of an unchanged tree reuses downloaded modules + already-compiled

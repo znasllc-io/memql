@@ -21,7 +21,7 @@ import (
 
 	"github.com/uptrace/bun"
 
-	"github.com/znasllc-io/memql/component"
+	"github.com/znasllc-io/memql/core/component"
 	"github.com/znasllc-io/memql/component/automations"
 	automationSteps "github.com/znasllc-io/memql/component/automations/steps"
 	"github.com/znasllc-io/memql/component/bus"

@@ -11,15 +11,11 @@ require (
 	github.com/dgraph-io/ristretto v0.2.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
-	github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728
 	github.com/lib/pq v1.12.3
 	github.com/livekit/media-sdk v0.0.0-20260605212526-4c11a51d3c97
-	github.com/livekit/protocol v1.49.0
+	github.com/livekit/protocol v1.50.4
 	github.com/livekit/server-sdk-go/v2 v2.18.1
-	github.com/oschwald/geoip2-golang v1.13.0
 	github.com/pion/webrtc/v4 v4.2.18
-	github.com/prometheus/client_golang v1.24.1
-	github.com/prometheus/client_model v0.6.2
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/santhosh-tekuri/jsonschema/v5 v5.3.1
 	github.com/sashabaranov/go-openai v1.41.2
@@ -29,14 +25,21 @@ require (
 	github.com/uptrace/bun v1.2.18
 	github.com/uptrace/bun/dialect/pgdialect v1.2.18
 	github.com/uptrace/bun/driver/pgdriver v1.2.18
-	github.com/zeozeozeo/gomplerate v0.0.0-20250404113140-0fbb236df825
 	golang.org/x/crypto v0.54.0
 	golang.org/x/sync v0.22.0
-	golang.org/x/tools v0.48.0
 	google.golang.org/grpc v1.83.0
 	google.golang.org/protobuf v1.36.11
 	gopkg.in/yaml.v3 v3.0.1
 	nhooyr.io/websocket v1.8.17
+)
+
+require (
+	github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728 // indirect
+	github.com/oschwald/geoip2-golang v1.13.0 // indirect
+	github.com/prometheus/client_golang v1.24.1 // indirect
+	github.com/prometheus/client_model v0.6.2 // indirect
+	github.com/zeozeozeo/gomplerate v0.0.0-20250404113140-0fbb236df825 // indirect
+	golang.org/x/tools v0.48.0 // indirect
 )
 
 require (
@@ -132,9 +135,28 @@ require (
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect
 	github.com/zeebo/xxh3 v1.1.0 // indirect
+	github.com/znasllc-io/memql/component/architecture v0.0.0
+	github.com/znasllc-io/memql/component/auth v0.0.0
+	github.com/znasllc-io/memql/component/bus v0.0.0
 	github.com/znasllc-io/memql/component/bus/gen v0.0.0
+	github.com/znasllc-io/memql/component/config v0.0.0
+	github.com/znasllc-io/memql/component/events v0.0.0
+	github.com/znasllc-io/memql/component/fileprocessor v0.0.0
 	github.com/znasllc-io/memql/component/grpc/gen v0.0.0
+	github.com/znasllc-io/memql/component/healing v0.0.0
+	github.com/znasllc-io/memql/component/language/annotations v0.0.0
+	github.com/znasllc-io/memql/component/language/ast v0.0.0
+	github.com/znasllc-io/memql/component/language/dslclause v0.0.0
+	github.com/znasllc-io/memql/component/metadata v0.0.0
+	github.com/znasllc-io/memql/component/metrics v0.0.0
 	github.com/znasllc-io/memql/component/node/gen v0.0.0
+	github.com/znasllc-io/memql/component/observe v0.0.0
+	github.com/znasllc-io/memql/component/planner v0.0.0
+	github.com/znasllc-io/memql/component/polyphon v0.0.0
+	github.com/znasllc-io/memql/component/provenance v0.0.0
+	github.com/znasllc-io/memql/component/safety v0.0.0
+	github.com/znasllc-io/memql/component/secret v0.0.0
+	github.com/znasllc-io/memql/core v0.0.0
 	go.opentelemetry.io/otel v1.44.0 // indirect
 	go.opentelemetry.io/otel/trace v1.44.0 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
@@ -163,3 +185,41 @@ replace github.com/znasllc-io/memql/component/grpc/gen => ./component/grpc/gen
 replace github.com/znasllc-io/memql/component/node/gen => ./component/node/gen
 
 replace github.com/znasllc-io/memql/component/bus/gen => ./component/bus/gen
+
+replace github.com/znasllc-io/memql/core => ./core
+
+replace github.com/znasllc-io/memql/component/architecture => ./component/architecture
+
+replace github.com/znasllc-io/memql/component/metrics => ./component/metrics
+
+replace github.com/znasllc-io/memql/component/planner => ./component/planner
+
+replace github.com/znasllc-io/memql/component/polyphon => ./component/polyphon
+
+replace github.com/znasllc-io/memql/component/provenance => ./component/provenance
+
+replace github.com/znasllc-io/memql/component/secret => ./component/secret
+
+replace github.com/znasllc-io/memql/component/auth => ./component/auth
+
+replace github.com/znasllc-io/memql/component/safety => ./component/safety
+
+replace github.com/znasllc-io/memql/component/fileprocessor => ./component/fileprocessor
+
+replace github.com/znasllc-io/memql/component/healing => ./component/healing
+
+replace github.com/znasllc-io/memql/component/bus => ./component/bus
+
+replace github.com/znasllc-io/memql/component/config => ./component/config
+
+replace github.com/znasllc-io/memql/component/metadata => ./component/metadata
+
+replace github.com/znasllc-io/memql/component/events => ./component/events
+
+replace github.com/znasllc-io/memql/component/observe => ./component/observe
+
+replace github.com/znasllc-io/memql/component/language/annotations => ./component/language/annotations
+
+replace github.com/znasllc-io/memql/component/language/ast => ./component/language/ast
+
+replace github.com/znasllc-io/memql/component/language/dslclause => ./component/language/dslclause

@@ -393,7 +393,13 @@ func scanSnippet(t *testing.T, body string) int {
 	return len(found)
 }
 
-// moduleRootForGate ascends from this file's directory until it finds go.mod.
+// moduleRootForGate ascends from this file's directory to the REPOSITORY root.
+//
+// It looks for go.work, not go.mod. This gate scans the whole tree, and since
+// memql#3228 the tree is many modules -- the nearest go.mod above this file is
+// core/go.mod, so a go.mod walk stopped at core/ and the gate silently scanned
+// 74 files instead of the repository (memql#3241). go.work exists once, at the
+// repository root, which is the thing this gate actually means.
 func moduleRootForGate(t *testing.T) string {
 	t.Helper()
 	_, thisFile, _, ok := runtime.Caller(0)
@@ -402,12 +408,12 @@ func moduleRootForGate(t *testing.T) string {
 	}
 	dir := filepath.Dir(thisFile)
 	for {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+		if _, err := os.Stat(filepath.Join(dir, "go.work")); err == nil {
 			return dir
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			t.Fatal("go.mod not found walking up from test file")
+			t.Fatal("go.work not found walking up from test file")
 		}
 		dir = parent
 	}
