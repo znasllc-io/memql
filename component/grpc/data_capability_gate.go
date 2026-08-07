@@ -31,15 +31,10 @@ package memql
 // entirely.
 //
 // The accepted cost, stated plainly: PARTIAL BY CONSTRUCTION. A DSL-callable
-// surface not reached through this handler is not covered. Concretely, on this
-// same stream, CallToolMsg reaches mutation-backed tools and is NOT gated here
-// -- that surface is also driven by machine credentials (class="voice_agent"
-// JWTs carry no role claim and resolve to the reader fallback, and proxied
-// agent-node calls arrive as forwarded auth), so gating it on the caller's
-// data-plane capability would refuse the live voice path. It is a curated,
-// @allowedRoles-gated allowlist rather than the whole authored mutation
-// surface, which is why the uncovered slice is the smaller one -- but it is
-// uncovered, and that is a known gap, not an oversight.
+// surface not reached through this handler is not covered, and two things that
+// DO reach a handler are deliberately out. The complete residual-bypass set is
+// dataPlaneGateExemptions below -- enumerated, each with its reason, asserted
+// by TestDataPlaneGateExemptions_AreEnumerated so it cannot grow silently.
 //
 // SINGLE BUCKET. `data` is one resource, not one per concept (the other half
 // of the ruling). Per-concept would need the concept -> resourceType mapping
@@ -52,6 +47,71 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 )
+
+// dataPlaneGateExemption names one principal or surface deliberately NOT
+// covered by the coarse data-plane capability gate, and why.
+type dataPlaneGateExemption struct {
+	// Name identifies the exempt principal or wire surface.
+	Name string
+	// Enforced reports whether this file enforces the exemption (an explicit
+	// skip in allowDataPlaneAccess) or whether it is simply a surface the gate
+	// was never wired into.
+	Enforced bool
+	// Reason is why it is out. Not decoration: an exemption without a stated
+	// reason is an exemption nobody can review.
+	Reason string
+}
+
+// dataPlaneGateExemptions is THE list -- the complete residual-bypass set for
+// the coarse data-plane capability gate, in one place. Anything a `reader` can
+// still write through is here or it is a bug.
+//
+// TestDataPlaneGateExemptions_AreEnumerated pins it exactly, so a future
+// exemption has to be added here (with a reason) and to that test, rather than
+// appearing as an untracked `if` somewhere in a handler.
+var dataPlaneGateExemptions = []dataPlaneGateExemption{
+	{
+		Name:     "guest-stream",
+		Enforced: true,
+		Reason: "Guests carry their own authorization dimension -- invitation scope plus " +
+			"the partition grant -- and THAT, not the cluster role, is the real gate for " +
+			"them. The reader-vs-writer distinction this gate exists to enforce is about " +
+			"ordinary authenticated users. Guests have dedicated message types only for " +
+			"the invite/join lifecycle (SendGuestInviteMsg, ResolveGuestInviteMsg, " +
+			"JoinSpaceAsGuestMsg, cancel/resend); there is no guest-specific message for " +
+			"posting into a space, so guest participation necessarily rides " +
+			"ExecuteQueryMsg and refusing it would break shipped guest chat. " +
+			"Owner ruling, memql#3179.",
+	},
+	{
+		Name:     "CallToolMsg",
+		Enforced: false,
+		Reason: "Not gated at all -- the gate is wired into handleExecuteQuery only. " +
+			"CallToolMsg reaches mutation-backed tools, but that surface is driven by " +
+			"machine credentials: class=\"voice_agent\" JWTs carry no role claim and " +
+			"resolve to the reader fallback, and proxied agent-node calls arrive as " +
+			"forwarded auth, so gating it on the caller's data-plane capability would " +
+			"refuse the live voice path. It is a curated, @allowedRoles-gated allowlist " +
+			"rather than the whole authored mutation surface, which is why the uncovered " +
+			"slice is the smaller one -- but it IS uncovered.",
+	},
+}
+
+// isGuestStream reports whether this call arrives on a guest-authenticated
+// stream, keyed off the claim the guest interceptor sets (GuestAuthClaimKey,
+// guest_stream_interceptor.go) and read the same way the guest handlers read it.
+//
+// Deliberately NOT keyed off role == "reader". The guest interceptor stamps
+// `role: "reader"` as a placeholder, so keying on the role would exempt every
+// ordinary reader and empty the gate of the exact thing it exists to enforce.
+func isGuestStream(ctx context.Context) bool {
+	claims, ok := auth.ClaimsFromContext(ctx)
+	if !ok || claims == nil {
+		return false
+	}
+	guest, ok := claims[GuestAuthClaimKey].(map[string]any)
+	return ok && guest != nil
+}
 
 // dataPlaneRole resolves the role the gate decides on. An absent or
 // unrecognised role resolves to the least-privileged VALID role (reader), NOT
@@ -88,6 +148,13 @@ func dataPlaneRole(access *auth.AccessContext) auth.Role {
 // there is nothing a classification could change -- which also means the extra
 // parse this costs is paid only by the roles that are actually constrained.
 func (s *streamSession) allowDataPlaneAccess(ctx context.Context, query string) (bool, string) {
+	// Enumerated exemption: guest streams. See dataPlaneGateExemptions
+	// ("guest-stream") for the ruling and the reason. Keyed off the guest
+	// CLAIM, never off the placeholder role.
+	if isGuestStream(ctx) {
+		return true, ""
+	}
+
 	access, _ := auth.AccessFromContext(ctx)
 	role := dataPlaneRole(access)
 

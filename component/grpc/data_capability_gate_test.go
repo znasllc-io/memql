@@ -310,3 +310,125 @@ func repoRootForGateTest(t *testing.T) string {
 	t.Fatal("could not locate repo root (no go.mod above cwd)")
 	return ""
 }
+
+// guestClaimsForTest mirrors exactly what NewGuestAwareStreamInterceptor puts
+// on a validated guest stream, including the placeholder `role: "reader"` --
+// which is the whole point: the exemption must key off the guest CLAIM, not
+// off that role.
+func guestClaimsForTest() map[string]any {
+	return map[string]any{
+		"sub":   GuestSubjectPrefix + "inv-3179",
+		"email": "guest@example.com",
+		"role":  "reader",
+		"name":  "Guest",
+		GuestAuthClaimKey: map[string]any{
+			"invitationId": "inv-3179",
+			"partitionId":  "space-3179",
+			"tokenHash":    "deadbeef",
+			"status":       "accepted",
+		},
+	}
+}
+
+// TestExecuteQueryGate_GuestExemption proves the enumerated guest exemption
+// bites in BOTH directions on the same code path. The second half is the one
+// that matters: it is what proves the exemption is scoped to guests and did not
+// turn the gate off for every reader.
+func TestExecuteQueryGate_GuestExemption(t *testing.T) {
+	eng := gateTestEngine(t)
+
+	// Both sessions resolve to the SAME role. Only the guest claim differs, so
+	// a divergence in outcome can only come from the exemption.
+	t.Run("guest admitted to a mutation", func(t *testing.T) {
+		s, cs := gateTestSession(t, eng, auth.RoleReader)
+		cs.ctx = auth.ContextWithClaims(cs.ctx, guestClaimsForTest())
+		driveGateQuery(t, s, "req-guest-write", gateMutationQuery)
+		qe := awaitQueryError(t, cs, "req-guest-write")
+		if qe.GetCode() == codes.PermissionDenied.String() {
+			t.Fatalf("guest refused a mutation; guest chat rides ExecuteQueryMsg: %s", qe.GetMessage())
+		}
+		// Positively confirm it reached EXECUTION rather than merely not being
+		// denied -- on the DB-less engine that is the database error.
+		if !strings.Contains(strings.ToLower(qe.GetMessage()), "database") {
+			t.Fatalf("guest's mutation did not reach the engine; outcome was %s: %s",
+				qe.GetCode(), qe.GetMessage())
+		}
+	})
+
+	t.Run("ordinary reader on the same path still refused", func(t *testing.T) {
+		s, cs := gateTestSession(t, eng, auth.RoleReader)
+		// Same role, NO guest claim -- an ordinary authenticated reader.
+		cs.ctx = auth.ContextWithClaims(cs.ctx, map[string]any{
+			"sub":   "v1:identity:user:gate-3179",
+			"email": "reader@example.com",
+			"role":  "reader",
+		})
+		driveGateQuery(t, s, "req-plain-reader-write", gateMutationQuery)
+		qe := queryErrorFor(cs, "req-plain-reader-write")
+		if qe == nil {
+			t.Fatal("ordinary reader was admitted: the guest exemption is not scoped to guests")
+		}
+		if qe.GetCode() != codes.PermissionDenied.String() {
+			t.Fatalf("ordinary reader outcome = %q, want %q: %s",
+				qe.GetCode(), codes.PermissionDenied.String(), qe.GetMessage())
+		}
+	})
+}
+
+// TestDataPlaneGateExemptions_AreEnumerated pins the residual-bypass set
+// exactly, the same way TestExecuteQueryGate_HasExactlyOneCallSite pins the
+// call site: a new exemption has to be added HERE, with a stated reason, rather
+// than appearing as an untracked `if` in some handler.
+func TestDataPlaneGateExemptions_AreEnumerated(t *testing.T) {
+	want := map[string]bool{ // name -> enforced in allowDataPlaneAccess
+		"guest-stream": true,
+		"CallToolMsg":  false,
+	}
+
+	got := map[string]bool{}
+	for _, ex := range dataPlaneGateExemptions {
+		if strings.TrimSpace(ex.Name) == "" {
+			t.Fatal("an exemption has no name")
+		}
+		if len(strings.TrimSpace(ex.Reason)) < 40 {
+			t.Fatalf("exemption %q has no usable stated reason", ex.Name)
+		}
+		if _, dup := got[ex.Name]; dup {
+			t.Fatalf("exemption %q listed twice", ex.Name)
+		}
+		got[ex.Name] = ex.Enforced
+	}
+
+	if len(got) != len(want) {
+		t.Fatalf("exemption set = %v, want exactly %v", got, want)
+	}
+	for name, enforced := range want {
+		gotEnforced, ok := got[name]
+		if !ok {
+			t.Fatalf("exemption %q missing; set = %v", name, got)
+		}
+		if gotEnforced != enforced {
+			t.Fatalf("exemption %q enforced = %v, want %v", name, gotEnforced, enforced)
+		}
+	}
+}
+
+// TestGuestExemptionIsKeyedOffTheClaimNotTheRole is the specific regression
+// guard for the way this could be got wrong: keying the exemption off
+// role == "reader" would exempt every ordinary reader and empty the gate.
+func TestGuestExemptionIsKeyedOffTheClaimNotTheRole(t *testing.T) {
+	if isGuestStream(context.Background()) {
+		t.Fatal("a claimless context must not read as a guest stream")
+	}
+	readerCtx := auth.ContextWithClaims(context.Background(), map[string]any{
+		"sub":  "v1:identity:user:gate-3179",
+		"role": "reader",
+	})
+	if isGuestStream(readerCtx) {
+		t.Fatal("an ordinary reader must not read as a guest stream")
+	}
+	guestCtx := auth.ContextWithClaims(context.Background(), guestClaimsForTest())
+	if !isGuestStream(guestCtx) {
+		t.Fatal("a stream carrying the guest claim must read as a guest stream")
+	}
+}

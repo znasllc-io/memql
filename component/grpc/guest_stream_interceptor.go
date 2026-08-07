@@ -118,16 +118,23 @@ func validateGuestAndDispatch(
 	guestClaims := map[string]any{
 		"sub":   GuestSubjectPrefix + summary.ID,
 		"email": summary.InviteeEmail,
-		// The cluster-wide role was chosen as a placeholder ("meaningless;
-		// partition grant drives access"). Since memql#3179 it is NOT
-		// meaningless: the coarse data-plane gate in
-		// data_capability_gate.go refuses `reader` any mutation sent over
-		// ExecuteQueryMsg, so a guest stream is read-only on that surface.
-		// The dedicated guest handlers (JoinSpaceAsGuestMsg,
-		// ResolveGuestInviteMsg, ...) are unaffected -- they are their own
-		// payload types and do not go through ExecuteQuery. If guests must
-		// write through the generic DSL surface, this claim is what has to
-		// change, deliberately.
+		// PLACEHOLDER, and nothing downstream may treat it as authority.
+		// What actually governs a guest is the OTHER dimension: the
+		// invitation's scope plus the partition grant computed from
+		// partitionId below. The cluster-wide role slot has to carry
+		// something, and "reader" is the least-privileged valid value.
+		//
+		// The coarse data-plane capability gate (memql#3179,
+		// data_capability_gate.go) would otherwise read this placeholder as
+		// a real reader and refuse a guest every mutation sent over
+		// ExecuteQueryMsg -- which would break shipped guest chat, since the
+		// dedicated guest message types cover only the invite/join lifecycle
+		// (SendGuestInviteMsg / ResolveGuestInviteMsg / JoinSpaceAsGuestMsg /
+		// cancel / resend) and guest participation necessarily rides
+		// ExecuteQueryMsg. So guest streams are EXPLICITLY EXEMPT from that
+		// gate (owner ruling), keyed off GuestAuthClaimKey below and NOT off
+		// this role. The exemption is enumerated with its reason in
+		// dataPlaneGateExemptions.
 		"role": "reader",
 		"name": summary.InviteeName,
 		GuestAuthClaimKey: map[string]any{

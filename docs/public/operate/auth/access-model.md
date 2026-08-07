@@ -415,11 +415,21 @@ binary) provides a UI for it.
   resolves the caller's role and asks
   `auth.Capable(role, "create", "data")` before the engine sees the
   query. That gate is **partial by construction** -- it sits at the
-  handler layer, so it covers `ExecuteQueryMsg` and nothing else. In
-  particular `CallToolMsg`, which can reach mutation-backed tools, is
-  NOT gated: that surface is also driven by machine credentials
-  (`class="voice_agent"` JWTs carry no role claim and resolve to the
-  reader fallback), so gating it would refuse the live voice path.
+  handler layer, so it covers `ExecuteQueryMsg` and nothing else, and
+  its complete residual-bypass set is enumerated with reasons in
+  `dataPlaneGateExemptions` (same file):
+  - **Guest streams are explicitly exempt.** A guest's real
+    authorization dimension is the invitation scope plus the partition
+    grant, not the cluster role -- the `reader` on a guest stream is a
+    placeholder. Guest participation necessarily rides
+    `ExecuteQueryMsg` (the dedicated guest message types cover only the
+    invite/join lifecycle), so gating it would break guest chat. The
+    exemption keys off the guest claim, never off the role.
+  - **`CallToolMsg` is not gated at all.** It can reach mutation-backed
+    tools, but that surface is also driven by machine credentials
+    (`class="voice_agent"` JWTs carry no role claim and resolve to the
+    reader fallback), so gating it would refuse the live voice path.
+
   Constructs reached in-process -- automations, the logic runner, the
   planner loop, node bootstrap -- are likewise not covered, by design.
   It is also the COARSE half only: it answers "may this actor write at
