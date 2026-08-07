@@ -738,6 +738,7 @@ Rules:
 4. Inserts return the created node inside `result.bundle` (single node, empty edge list, and `rootIds` containing the inserted ID).
 5. Stored identifiers always take the form `<concept>:<id>`; providing a bare `id` argument automatically applies the prefix.
 6. The `id` argument must be a string literal or omitted — helper calls like `id=uuid()` are syntax errors. Pre-generate IDs and pass them as strings.
+7. **The declared owner field is server-stamped.** When the target concept declares `@rowAuthz(owner="<field>")`, the engine sets `<field>` to the calling actor's user id, *overwriting* whatever the payload supplied. A raw `insert()` short-circuits the planner and never renders a mutation template, so the `accept { }` / `stamp { }` blocks that would otherwise set it never run — without this the raw surface could create a row owned by somebody else, and `@rowAuthz(owner=...)` would be an assertion the write path does not keep (memql#3059 / #3175). Two callers are exempt and write the owner they supply: the cluster owner, and trusted server-side Go stamping internal origin for that one write. A call carrying no resolved caller identity is refused rather than stamped with an empty owner. Named mutations are unaffected — their own `stamp { }` block is the author's stated answer.
 
 ### Content-Addressed IDs
 

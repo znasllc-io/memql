@@ -482,6 +482,21 @@ type MutationNode struct {
 	// MutationNode literal pre-update).
 	Kind ast.MutationKind
 
+	// FromTemplate marks a node rendered from a DSL mutation template
+	// (renderMutationTemplate). It is the ONE thing that tells the raw
+	// `insert(` literal apart from a named mutation once both reach
+	// executeWrite, and the row-authz owner stamp keys off it: a named
+	// mutation states who owns the row in its own `stamp { }` block,
+	// while the raw surface bypasses `args`/`accept`/`stamp` entirely and
+	// has no body to state anything (memql#3059 / #3175).
+	//
+	// The polarity is deliberate and load-bearing. False is the zero
+	// value, so a MutationNode built by any producer that does not say
+	// otherwise is treated as RAW and gets stamped. The opposite spelling
+	// (`Raw bool`) would default a future producer to unstamped -- a hole
+	// opened by omission, which is exactly how this one arrived.
+	FromTemplate bool
+
 	Concept    string
 	ID         string
 	PayloadRaw string
