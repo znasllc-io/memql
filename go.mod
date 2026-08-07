@@ -132,6 +132,9 @@ require (
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect
 	github.com/zeebo/xxh3 v1.1.0 // indirect
+	github.com/znasllc-io/memql/component/bus/gen v0.0.0
+	github.com/znasllc-io/memql/component/grpc/gen v0.0.0
+	github.com/znasllc-io/memql/component/node/gen v0.0.0
 	go.opentelemetry.io/otel v1.44.0 // indirect
 	go.opentelemetry.io/otel/trace v1.44.0 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
@@ -154,3 +157,9 @@ require (
 )
 
 tool github.com/a-h/templ/cmd/templ
+
+replace github.com/znasllc-io/memql/component/grpc/gen => ./component/grpc/gen
+
+replace github.com/znasllc-io/memql/component/node/gen => ./component/node/gen
+
+replace github.com/znasllc-io/memql/component/bus/gen => ./component/bus/gen

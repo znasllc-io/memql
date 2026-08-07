@@ -1038,6 +1038,85 @@ jobs:
       - name: package extension (build binary + compile + vsce package)
         run: bash scripts/vscode/package.sh --out="$RUNNER_TEMP/memql.vsix"
 
+  # THE lane that makes the module boundary real (memql#3240, design D3).
+  #
+  # A `go.work` does NOT enforce the boundary. Under workspace mode a module
+  # silently satisfies an import it does not `require`, so every other Go lane
+  # in this file -- all of which run in workspace mode -- is blind to a
+  # dependency-direction violation. Demonstrated on this tree by giving the
+  # wire tier an upward import of component/safety (base):
+  #
+  #     $ go build ./...                 # workspace mode, as every other lane
+  #     exit=0                           # <- the violation is INVISIBLE
+  #
+  #     $ GOWORK=off go build ./...
+  #     violation_demo.go:7:8: no required module provides package
+  #         github.com/znasllc-io/memql/component/safety
+  #     exit=1
+  #
+  # So compiler enforcement requires GOWORK=off, per module. Without this lane
+  # the boundary is real only on the day someone runs it by hand -- which is to
+  # say it is a comment. It ships with the FIRST module rather than later, so
+  # every tier that follows is verified as it lands instead of retro-fitted.
+  #
+  # Deliberately NOT path-filtered beyond `go`/`ci`: the whole point is that any
+  # Go change can introduce an upward import, so narrowing this by directory
+  # would let the violation it exists to catch skip the lane.
+  module-boundaries:
+    name: module-boundaries
+    timeout-minutes: 15
+    needs: changes
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' || needs.changes.outputs.proto == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.26.5'
+          cache: true
+      - name: go.work lists every module in the tree
+        run: |
+          set -euo pipefail
+          # Keeps workspace mode and the GOWORK=off step below agreed about
+          # what the tree is. A module absent from go.work is still verified by
+          # the step below, but is outside the workspace that every OTHER lane,
+          # gopls and `go test ./...` resolve against -- so the two modes check
+          # different trees, silently. Assert the sets match rather than
+          # trusting review to notice.
+          on_disk="$(find . -name go.mod -not -path './.git/*' -printf '%h\n' | sed 's|^\./||;s|^\.$|.|' | sort)"
+          in_work="$(go work edit -json | python3 -c 'import json,sys; [print(u["DiskPath"].removeprefix("./")) for u in json.load(sys.stdin)["Use"]]' | sort)"
+          if [ "$on_disk" != "$in_work" ]; then
+            echo "go.work does not match the modules on disk."
+            diff <(echo "$in_work") <(echo "$on_disk") || true
+            exit 1
+          fi
+          echo "go.work covers all $(echo "$on_disk" | wc -l) modules"
+      - name: every module builds and vets with GOWORK=off
+        run: |
+          set -euo pipefail
+          status=0
+          while read -r dir; do
+            echo "::group::GOWORK=off $dir"
+            if ! ( cd "$dir" && GOWORK=off go build ./... && GOWORK=off go vet ./... ); then
+              echo "::error::$dir fails to build or vet with GOWORK=off -- it imports a package no module it requires provides (a dependency-direction violation), or its go.mod/go.sum is out of date"
+              status=1
+            fi
+            echo "::endgroup::"
+          done < <(find . -name go.mod -not -path './.git/*' -printf '%h\n' | sed 's|^\./||;s|^\.$|.|' | sort)
+          exit "$status"
+      - name: package count is preserved across the split
+        run: |
+          set -euo pipefail
+          # `go list ./...` is NOT the right pattern once modules are nested --
+          # from the root module it sees only the root module's packages and
+          # silently undercounts. The module-path pattern spans the workspace.
+          n="$(go list github.com/znasllc-io/memql/... | wc -l)"
+          echo "packages (untagged, module-path pattern): $n"
+          if [ "$n" -lt 181 ]; then
+            echo "::error::package count fell to $n; a go.mod beneath the root can silently drop packages out of the pattern"
+            exit 1
+          fi
+
   # Aggregator -- the SINGLE required status check for branch protection.
   # It always runs (even when every lane is path-skipped) and fails only if
   # a lane it depends on actually failed or was cancelled; a `skipped` lane
@@ -1057,6 +1136,7 @@ jobs:
       - conformance
       - db-tests
       - vscode-extension
+      - module-boundaries
     runs-on: ubuntu-latest
     steps:
       - name: verify required lanes succeeded or were skipped

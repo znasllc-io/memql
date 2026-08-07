@@ -1,0 +1,38 @@
+// The workspace that makes the split tree behave like one tree for everyday
+// work: `go build ./...`, `go test ./...`, gopls and every editor resolve
+// across module boundaries as they did before memql#3240.
+//
+// A go.work does NOT enforce the boundary, and must never be mistaken for it.
+// Under workspace mode a module silently satisfies an import it does not
+// `require` -- demonstrated on this tree in memql#3240 by giving the wire tier
+// an upward import of component/safety:
+//
+//	$ go build ./...                 # workspace mode
+//	exit=0                           # <- the violation is INVISIBLE
+//
+//	$ GOWORK=off go build ./...
+//	violation_demo.go:7:8: no required module provides package
+//	    github.com/znasllc-io/memql/component/safety
+//	exit=1
+//
+// That is why the `module-boundaries` CI lane runs every module with
+// GOWORK=off. The workspace is the ergonomics; the lane is the enforcement.
+//
+// Every module in the repository must be listed here, and the
+// `module-boundaries` lane asserts that this list matches the go.mod files on
+// disk. The point is that the two modes agree about what the tree IS: the lane
+// verifies each module with GOWORK=off, while everything else -- the other CI
+// lanes, gopls, `go test ./...` -- runs in workspace mode. A module missing
+// from this list is verified by the lane but absent from the workspace, so the
+// two are checking different trees and the difference is silent.
+
+go 1.26.1
+
+toolchain go1.26.5
+
+use (
+	.
+	./component/bus/gen
+	./component/grpc/gen
+	./component/node/gen
+)
