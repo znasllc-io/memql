@@ -503,17 +503,11 @@ func parseShapeValue(s string, eval *automations.Evaluator) (any, string, error)
 		return nil, "", fmt.Errorf("unexpected end of input")
 	}
 
-	// Quoted string
+	// Quoted string. Escape state is TRACKED, never inferred from the
+	// preceding byte (memql#3190) -- see scanQuotedLiteralEnd.
 	if s[0] == '"' || s[0] == '\'' {
-		quoteChar := s[0]
-		end := 1
-		for end < len(s) {
-			if s[end] == quoteChar && (end == 1 || s[end-1] != '\\') {
-				break
-			}
-			end++
-		}
-		if end >= len(s) {
+		end := scanQuotedLiteralEnd(s)
+		if end < 0 {
 			return nil, "", fmt.Errorf("unterminated string")
 		}
 		value := s[1:end]
@@ -583,30 +577,9 @@ func parseShapeValue(s string, eval *automations.Evaluator) (any, string, error)
 			return nil, "", fmt.Errorf("unexpected identifier: %s", funcName)
 		}
 
-		// Find matching closing paren
-		parenDepth := 1
-		end := 1
-		inQuote := false
-		var quoteChar byte
-		for end < len(remaining) && parenDepth > 0 {
-			ch := remaining[end]
-			if !inQuote && (ch == '"' || ch == '\'') {
-				inQuote = true
-				quoteChar = ch
-			} else if inQuote && ch == quoteChar && remaining[end-1] != '\\' {
-				inQuote = false
-			} else if !inQuote {
-				switch ch {
-				case '(':
-					parenDepth++
-				case ')':
-					parenDepth--
-				}
-			}
-			end++
-		}
-
-		if parenDepth != 0 {
+		// Find matching closing paren.
+		end := scanBalancedSpanEnd(remaining, '(', ')')
+		if end < 0 {
 			return nil, "", fmt.Errorf("unmatched parenthesis in function call")
 		}
 
@@ -631,30 +604,9 @@ func parseShapeValue(s string, eval *automations.Evaluator) (any, string, error)
 
 	// Nested object
 	if s[0] == '{' {
-		// Find matching closing brace
-		braceDepth := 1
-		end := 1
-		inQuote := false
-		var quoteChar byte
-		for end < len(s) && braceDepth > 0 {
-			ch := s[end]
-			if !inQuote && (ch == '"' || ch == '\'') {
-				inQuote = true
-				quoteChar = ch
-			} else if inQuote && ch == quoteChar && s[end-1] != '\\' {
-				inQuote = false
-			} else if !inQuote {
-				switch ch {
-				case '{':
-					braceDepth++
-				case '}':
-					braceDepth--
-				}
-			}
-			end++
-		}
-
-		if braceDepth != 0 {
+		// Find matching closing brace.
+		end := scanBalancedSpanEnd(s, '{', '}')
+		if end < 0 {
 			return nil, "", fmt.Errorf("unmatched brace in nested object")
 		}
 
@@ -667,30 +619,9 @@ func parseShapeValue(s string, eval *automations.Evaluator) (any, string, error)
 
 	// Array
 	if s[0] == '[' {
-		// Find matching closing bracket
-		bracketDepth := 1
-		end := 1
-		inQuote := false
-		var quoteChar byte
-		for end < len(s) && bracketDepth > 0 {
-			ch := s[end]
-			if !inQuote && (ch == '"' || ch == '\'') {
-				inQuote = true
-				quoteChar = ch
-			} else if inQuote && ch == quoteChar && s[end-1] != '\\' {
-				inQuote = false
-			} else if !inQuote {
-				switch ch {
-				case '[':
-					bracketDepth++
-				case ']':
-					bracketDepth--
-				}
-			}
-			end++
-		}
-
-		if bracketDepth != 0 {
+		// Find matching closing bracket.
+		end := scanBalancedSpanEnd(s, '[', ']')
+		if end < 0 {
 			return nil, "", fmt.Errorf("unmatched bracket in array")
 		}
 
@@ -702,6 +633,102 @@ func parseShapeValue(s string, eval *automations.Evaluator) (any, string, error)
 	}
 
 	return nil, "", fmt.Errorf("unexpected character: %c", s[0])
+}
+
+// scanQuotedLiteralEnd returns the offset of the quote that CLOSES the literal
+// opened at s[0], or -1 when the literal is unterminated.
+//
+// Escape state is TRACKED, never inferred from the preceding byte
+// (memql#3190). The original decided whether a quote was escaped with a
+// ONE-BYTE LOOKBACK (`s[end-1] != '\\'`), which cannot tell an ESCAPED quote
+// (`\"`) from a quote that follows a COMPLETED `\\` escape -- so a literal
+// ending in a backslash pair read its own closing quote as escaped, ran past
+// it, and returned everything up to the NEXT quote as the value. In an
+// automation's shape data that silently mis-parses every field after such a
+// literal, at RUN time. Same defect, same fix, as splitCoalesceArgs and
+// splitTopLevelArgs (memql#3046) and as memql#2949 in args_resolution.go.
+//
+// # Why this is local and does not delegate
+//
+// The shared blankers -- baseparser.BlankComments and
+// parser.BlankCommentsAndStrings -- know ONE quote character, `"`. This parser
+// accepts BOTH `"` and `'`, so routing a single-quoted literal through either
+// would silently stop treating it as a string: `'C:\\', rest` would be scanned
+// as bare code and its comma read as a separator inside the literal. That is
+// exactly the reason splitCoalesceArgs recorded for staying local, and it is
+// unaffected by memql#3116 (which settled where a `"` literal ends, not how
+// many quote characters the blanker knows). Widening a shared blanker to two
+// quote characters would change what a shipped load rule considers a string --
+// a bigger change than this bug fix, and not one this parser needs.
+//
+// To be explicit about the state of the tree rather than only about the
+// correct implementations in it: correct scanners existed here before this
+// change AND so did nine buggy ones, this being four of them. memql#3190
+// enumerated and converted all nine; the gate in
+// core/baseparser (TestNoOneByteLookbackQuoteScan) is what stops a tenth.
+func scanQuotedLiteralEnd(s string) int {
+	quoteChar := s[0]
+	escaped := false
+	for i := 1; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case escaped:
+			// This byte was escaped by the backslash before it; the escape is
+			// now spent. A `\\` pair therefore leaves escaped false, so the
+			// NEXT quote closes the literal.
+			escaped = false
+		case c == '\\':
+			escaped = true
+		case c == quoteChar:
+			return i
+		}
+	}
+	return -1
+}
+
+// scanBalancedSpanEnd returns the offset just PAST the delimiter that closes
+// the open delimiter at s[0], or -1 when it is never closed. Quoted spans
+// (either quote character) do not count towards depth.
+//
+// ONE scanner, THREE consumers. The paren, brace and bracket scans in
+// parseShapeValue were structurally identical -- and each carried its own copy
+// of the one-byte lookback described on scanQuotedLiteralEnd, which is the
+// mechanism that let one defect appear three times in one function. The reason
+// for tracking escape state locally instead of delegating to a shared blanker
+// is the same one recorded there: this parser accepts both `"` and `'`, the
+// shared blankers accept only `"`.
+func scanBalancedSpanEnd(s string, open, closer byte) int {
+	depth := 1
+	inQuote := false
+	escaped := false
+	var quoteChar byte
+	for i := 1; i < len(s); i++ {
+		ch := s[i]
+		switch {
+		case inQuote:
+			switch {
+			case escaped:
+				escaped = false
+			case ch == '\\':
+				escaped = true
+			case ch == quoteChar:
+				inQuote = false
+				quoteChar = 0
+			}
+		case ch == '"' || ch == '\'':
+			inQuote = true
+			quoteChar = ch
+			escaped = false
+		case ch == open:
+			depth++
+		case ch == closer:
+			depth--
+			if depth == 0 {
+				return i + 1
+			}
+		}
+	}
+	return -1
 }
 
 // parseShapeArray parses a shape-style array.

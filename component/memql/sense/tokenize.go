@@ -348,11 +348,52 @@ func extractComments(source string) []Token {
 	return tokens
 }
 
-// isInsideString checks if a position is inside a quoted string (simple heuristic).
+// isInsideString reports whether byte offset pos on line falls inside a
+// double-quoted literal. It is a per-LINE answer: it has no memory of a
+// literal opened on an earlier line, which is what its two callers
+// (extractComments' `//` and `/*` scans) need, since they classify one line at
+// a time.
+//
+// # String state is TRACKED, not inferred from the preceding byte
+//
+// This used to decide whether a `"` closed the literal with a ONE-BYTE
+// LOOKBACK (`line[i-1] != '\\'`), which cannot tell an ESCAPED quote (`\"`)
+// from a quote that follows a COMPLETED `\\` escape (memql#3190). A line whose
+// literal ends in a backslash pair therefore never left string state, so every
+// `//` and `/*` after it was reported as literal interior and no comment token
+// was emitted -- editor syntax highlighting silently dropping a comment for
+// the rest of the line, on a line that is perfectly legal MemQL.
+//
+// # Why this is local and does not delegate
+//
+// The shared scrubbers work on a WHOLE FILE: baseparser.BlankComments and
+// parser.BlankCommentsAndStrings both let a literal span newlines (memql#3116
+// settled that, matching the lexer). This function is deliberately the other
+// thing -- a line-local answer with no cross-line state -- because its callers
+// hand it one line, already split, and a file-level scan would give the same
+// line a different answer depending on text above it. Nor is
+// baseparser.CommentSpans a fit: these callers ask "is this offset inside a
+// STRING", and spans answer the comment question, not the string one.
+//
+// To be explicit about the state of the tree rather than only about the
+// correct implementations in it: correct scanners existed here before this
+// change AND so did nine buggy ones, this being one of them. memql#3190
+// enumerated and converted all nine; the gate in core/baseparser
+// (TestNoOneByteLookbackQuoteScan) is what stops a tenth.
 func isInsideString(line string, pos int) bool {
 	inString := false
-	for i := 0; i < pos; i++ {
-		if line[i] == '"' && (i == 0 || line[i-1] != '\\') {
+	escaped := false
+	for i := 0; i < pos && i < len(line); i++ {
+		c := line[i]
+		switch {
+		case escaped:
+			// This byte was escaped by the backslash before it; the escape is
+			// now spent. A `\\` pair therefore leaves escaped false, so the
+			// NEXT quote closes the literal.
+			escaped = false
+		case inString && c == '\\':
+			escaped = true
+		case c == '"':
 			inString = !inString
 		}
 	}

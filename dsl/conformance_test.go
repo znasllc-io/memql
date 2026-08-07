@@ -12,8 +12,9 @@ import (
 	"github.com/znasllc-io/memql/component/language/dslclause"
 	"github.com/znasllc-io/memql/component/language/pagination"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
-	"github.com/znasllc-io/memql/core/dslfs"
 	"github.com/znasllc-io/memql/component/memql/sense"
+	"github.com/znasllc-io/memql/core/baseparser"
+	"github.com/znasllc-io/memql/core/dslfs"
 )
 
 // itoa is a small wrapper to make exemption-map line refs more readable.
@@ -1753,19 +1754,20 @@ func TestNoCallerVocabulary(t *testing.T) {
 	}
 }
 
+// stripLineComment DELEGATES to the shared scanner (memql#3190). This suite
+// carried a private copy of it -- byte-identical to the ones in
+// component/language/pagination/checker.go and
+// component/memql/dependency_validator.go -- and all three inferred escape
+// state from the preceding byte, so a literal ending in a completed `\\`
+// escape swallowed the `//` after it and every conformance rule reading
+// through this function scanned comment text as authored code. Delegating
+// fits here: a line-oriented `"`-only strip that keeps no offsets into the
+// original is exactly StripLineComment's contract.
+//
+// It stays a named wrapper rather than a call-site rename purely because a
+// dozen rules across three files call it; the scan itself is no longer here.
 func stripLineComment(line string) string {
-	inStr := false
-	for i := 0; i < len(line); i++ {
-		c := line[i]
-		if c == '"' && (i == 0 || line[i-1] != '\\') {
-			inStr = !inStr
-			continue
-		}
-		if !inStr && c == '/' && i+1 < len(line) && line[i+1] == '/' {
-			return line[:i]
-		}
-	}
-	return line
+	return baseparser.StripLineComment(line)
 }
 
 // TestQueryConceptMatchesShapeConcept asserts that every struct-form query

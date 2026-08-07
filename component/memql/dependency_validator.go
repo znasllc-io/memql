@@ -34,6 +34,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/znasllc-io/memql/core/baseparser"
 	"github.com/znasllc-io/memql/core/dslfs"
 	memqldsl "github.com/znasllc-io/memql/dsl"
 )
@@ -151,7 +152,15 @@ func collectShapes(path, src string, shapes map[string]*depShape, list *[]*depSh
 	var cur *depShape
 	depth := 0
 	for i, raw := range strings.Split(src, "\n") {
-		line := stripDepLineComment(raw)
+		// DELEGATES to the shared scanner (memql#3190). This file carried a
+		// private copy of it -- byte-identical to the ones in
+		// component/language/pagination/checker.go and dsl/conformance_test.go
+		// -- and all three inferred escape state from the preceding byte, so a
+		// literal ending in a completed `\\` escape swallowed the `//` after
+		// it and this validator read comment text as a declaration. Delegating
+		// fits here: a line-oriented `"`-only strip that keeps no offsets into
+		// the original is exactly StripLineComment's contract.
+		line := baseparser.StripLineComment(raw)
 		lineno := i + 1
 
 		if cur != nil {
@@ -202,7 +211,7 @@ func collectConsumers(path, src string, out *[]depConsumer) {
 	var cur *depConsumer
 	depth := 0
 	for i, raw := range strings.Split(src, "\n") {
-		line := stripDepLineComment(raw)
+		line := baseparser.StripLineComment(raw)
 		lineno := i + 1
 
 		if cur != nil {
@@ -323,21 +332,4 @@ func readTreeFile(tree fs.FS, p string) (string, error) {
 		return "", err
 	}
 	return string(raw), nil
-}
-
-// stripDepLineComment trims a trailing `// ...` comment, preserving any
-// `//` that appears inside a double-quoted string literal.
-func stripDepLineComment(line string) string {
-	inStr := false
-	for i := 0; i < len(line); i++ {
-		c := line[i]
-		if c == '"' && (i == 0 || line[i-1] != '\\') {
-			inStr = !inStr
-			continue
-		}
-		if !inStr && c == '/' && i+1 < len(line) && line[i+1] == '/' {
-			return line[:i]
-		}
-	}
-	return line
 }

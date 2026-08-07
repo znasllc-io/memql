@@ -620,8 +620,10 @@ func (e *Evaluator) evaluateCoalesceArg(raw string) (any, bool) {
 //   - There: the blanker ended a string at a NEWLINE, which the MemQL lexer
 //     does not do -- it accepts a literal spanning lines. Delegating swallowed
 //     every comma after such a literal, which is memql#3046 in the other
-//     direction. Fixed since, in memql#3116; that objection no longer stands
-//     and the delegation question is memql#3190's.
+//     direction. Fixed since, in memql#3116; memql#3190 then answered the
+//     delegation question for that site -- still no, on the two grounds
+//     recorded there (it slices the original, and delegating would newly blank
+//     comments inside argument lists).
 //
 // The reason HERE is unaffected by that fix and still stands on its own: the
 // shared blanker knows one quote character and this splitter accepts two.

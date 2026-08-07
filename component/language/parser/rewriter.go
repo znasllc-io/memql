@@ -2632,10 +2632,21 @@ var bareIdentOnly = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 //
 // memql#3116 has since made the blanker agree with the lexer -- a literal spans
 // newlines, an unterminated one runs to EOF -- so that objection is spent and
-// delegating is a live option again. Deliberately NOT taken here: #3116 settled
-// the blanker's behaviour and nothing more. Whether this splitter delegates is
-// memql#3190's call, and it now inherits a function whose answer to "where does
-// a string end" is the lexer's.
+// delegating became a live option again.
+//
+// memql#3190 made the call, and the answer is NO. Two reasons, neither about
+// escapes any more:
+//
+//   - This returns SLICES OF THE ORIGINAL. The blankers return a blanked copy,
+//     so delegating means scanning one view and splicing the other -- the same
+//     mismatch memql#3102's scanSegments recorded.
+//   - Delegating would ALSO start blanking comments inside argument lists,
+//     which this has never done. That is a behaviour change in the rewriter
+//     that runs over every authored construct, and there is no bug here to
+//     justify it: this scan tracks escape state and is correct.
+//
+// The nine sites that were NOT correct were converted under #3190, and
+// baseparser's TestNoOneByteLookbackQuoteScan now fails on a new one.
 //
 // The cost of staying local is that comments inside an argument list are not
 // blanked, exactly as before this change. Nothing regresses relative to the
