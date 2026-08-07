@@ -78,17 +78,19 @@ func TestAgentRoleTierIsPromptAdvisoryOnly(t *testing.T) {
 		"skill_tier_validation.go | tier := readSeedStringField(def.Body, \"tier\")":      "skill/domain tier",
 		"skill_tier_validation.go | skillTier := readSeedStringField(def.Body, \"tier\")": "skill tier",
 	}
-	// rowauthz_shadow.go and rowauthz_enforce.go carry a whole rowAuthz
-	// decl.Tier surface -- `langparser.RowAuthzDecl.Tier`, the tier a CONCEPT
-	// declares about who may see its rows, which has nothing to do with
-	// agentRole.tier. Enumerating each line would make this baseline rot on
-	// every edit to those files for no signal. (rowauthz_enforce.go joined the
-	// list in memql#3172, which turned that surface from a measurement into
-	// read-path enforcement: the reads multiplied, the concept behind them did
-	// not change.)
+	// The rowauthz_* files carry a whole rowAuthz decl.Tier surface --
+	// `langparser.RowAuthzDecl.Tier`, the tier a CONCEPT declares about who may
+	// see its rows, which has nothing to do with agentRole.tier. Enumerating
+	// each line would make this baseline rot on every edit to those files for
+	// no signal. (rowauthz_enforce.go joined the list in memql#3172, which
+	// turned that surface from a measurement into read-path enforcement;
+	// rowauthz_write_guard.go joined in memql#3174, which did the same for
+	// update/delete. The reads multiplied; the concept behind them did not
+	// change.)
 	skipFiles := map[string]bool{
-		"rowauthz_shadow.go":  true,
-		"rowauthz_enforce.go": true,
+		"rowauthz_shadow.go":      true,
+		"rowauthz_enforce.go":     true,
+		"rowauthz_write_guard.go": true,
 	}
 
 	var unknown []string

@@ -469,6 +469,25 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 			return nil, meta, err
 		}
 		meta.priorExisted = existed
+
+		// ROW-AUTHZ ON THE WRITE PATH (memql#3174). When the target
+		// concept declares a tier, the caller must satisfy it against
+		// the row being written -- update, soft-delete/status-flip, or a
+		// raw insert() aimed at an id that already has a row all arrive
+		// here, and none of them can express the check in the DSL.
+		//
+		// Placed HERE for two reasons, both load-bearing:
+		//
+		//  1. BEFORE the merge below. mergePayloadFields overwrites
+		//     priorPayload in place with the caller's delta, and every
+		//     owned-tier mutation in the tree re-stamps
+		//     `ownerUserId: actor.userId`. A guard reading the merged
+		//     payload would compare the attacker against the attacker.
+		//  2. Before any write, so a refusal cannot be partial.
+		if err := guardRowAuthzWrite(ctx, conceptMeta.Name, id, priorPayload, existed, requirePrior); err != nil {
+			return nil, meta, err
+		}
+
 		if existed {
 			// Capture the PRIOR status before the delta overwrites it
 			// (#1158) so executeUpdate can surface it as oldStatus.

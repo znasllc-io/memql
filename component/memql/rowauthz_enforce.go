@@ -7,12 +7,15 @@ package memql
 // Phase 2 (#2921) computed the predicate that declaration WOULD inject
 // and threw it away. This file ANDs it in.
 //
-// SCOPE IS THE READ PATH ONLY. A declared tier does not yet constrain a
-// write: update/delete owner matching is memql#3174 and the raw
-// `insert(` short-circuit that reaches the store without passing the
-// mutation template is memql#3059/#3175. A row this file refuses to
-// SHOW is still a row the write path will happily stamp, and saying so
-// here is cheaper than someone inferring otherwise from the file name.
+// SCOPE IS THE READ PATH. The write side is its own file:
+// rowauthz_write_guard.go landed the update/delete owner match
+// (memql#3174), which resolves the target row in executeWrite and
+// refuses when its declared owner is not the actor. It shares this
+// file's rowAuthzAdmits, so "who owns this row" has one answer in both
+// directions. Still open on the write side: the raw `insert(`
+// short-circuit that reaches the store without passing the mutation
+// template can forge the owner field on a CREATE (memql#3059 / #3175),
+// and the boot seeder writes past executeWrite entirely (#3176).
 //
 // Two mechanisms, and they answer different questions.
 //
