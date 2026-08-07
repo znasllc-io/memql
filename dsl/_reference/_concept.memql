@@ -498,6 +498,14 @@ concept fieldAnnotations {
 //
 //   Engine validation: payloads carrying this field must match exactly one
 //   declared branch based on the discriminator's value.
+//
+//   The branch block is NOT optional. `@variant(discriminator="kind")` with
+//   no `{ … }` behind it is REFUSED at load, at every depth (`object`,
+//   `[]object`, `[][]object`, `map[string]object`) -- memql#3123. It used to
+//   be dropped in silence, leaving a schema that asserts only `type: object`,
+//   so a row validated against nothing while the author believed a union was
+//   being enforced. If the field really is an arbitrary object, drop the
+//   annotation rather than leaving it branch-less.
 
 @namespace("reference")
 @description("Discriminated-union example: the `body` field's shape depends on `kind`.")

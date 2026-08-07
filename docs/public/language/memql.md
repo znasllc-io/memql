@@ -204,6 +204,8 @@ Annotations split by what they are *about*:
 
 So `blocks []object @variant(discriminator="kind") { … }` validates every block against the union, and `tags []string @pattern("^[a-z]+$")` constrains every tag. `capabilities []string!` still means "the field is required", not "the elements are".
 
+> **`@variant` without its branch block is REFUSED** (memql#3123), at every depth — `object`, `[]object`, `[][]object` and `map[string]object` alike. A discriminated union with no branches is not one: the discriminator never reached the schema, which asserted only `type: object`, so the row validated against nothing while the author believed a union was being enforced. Declare the branches, or drop the annotation if the field really is an arbitrary object.
+
 > **The annotation table is ONE level deep, and going deeper is REJECTED**
 > (memql#3049). A value constraint moves onto the immediate element, so that
 > element has to be able to carry it. On a *composite* element -- `[][]T`,

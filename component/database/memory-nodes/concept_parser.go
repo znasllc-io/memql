@@ -436,18 +436,42 @@ func propertyDeclToParsed(prop *parser.PropertyDecl) (parsedProperty, error) {
 		}
 	}
 
+	// A @variant with NO branch block is refused, at any depth (memql#3123).
+	//
+	// It used to be dropped in silence: the discriminator is harvested only
+	// inside the `len(prop.Variants) > 0` fold below, and valueAnnotationNames
+	// keys @variant off that same branch list, so a branch-less @variant
+	// populated neither and memql#3049's composite guard never saw it either.
+	// `object`, `[]object` and `[][]object` all built a schema asserting only
+	// `type: object` -- the union gone, no error, and a row that validates
+	// against nothing. memql#3049 named a dropped union as the worst case of
+	// this family precisely because of that.
+	//
+	// REFUSED rather than repaired, because there is nothing to repair to: an
+	// author who wrote the attribute meant a discriminated union, and a union
+	// with no branches is not one. The narrower alternative -- key
+	// valueAnnotationNames off the attribute so at least the composite guard
+	// catches it -- leaves the single-wrap and scalar spellings silent, which
+	// is most of the exposure.
+	//
+	// The check sits ABOVE the fold and above the wrapped-property lowering,
+	// so the depth of the declaration cannot change the outcome.
+	if hasBranchlessVariant(prop) {
+		return parsedProperty{}, fmt.Errorf(
+			"@variant on `%s` has no branch block: a discriminated union with no branches is not one, "+
+				"so the discriminator would never reach the schema and the field would validate as "+
+				"though the annotation were absent (any object accepted). Declare the branches -- "+
+				"`%s object @variant(discriminator=\"%s\") { branchName { … } … }` -- or drop the "+
+				"annotation if the field really is an arbitrary object (memql#3123)",
+			prop.Name, prop.Name, variantDiscriminatorOf(prop.Attributes))
+	}
+
 	// Fold variant branches in. The discriminator comes from the
 	// @variant(discriminator="fieldName") attribute that the parser
 	// collected earlier; we extract it here so the schema builder
 	// has everything in one place.
 	if len(prop.Variants) > 0 {
-		for _, attr := range prop.Attributes {
-			if attr != nil && attr.Name == "variant" {
-				if d, ok := attr.Args["discriminator"].(string); ok {
-					out.variantDiscriminator = d
-				}
-			}
-		}
+		out.variantDiscriminator = variantDiscriminatorOf(prop.Attributes)
 		for _, v := range prop.Variants {
 			variant := parsedPropertyVariant{name: v.Name}
 			for _, nested := range v.Properties {
@@ -538,6 +562,44 @@ func propertyDeclToParsed(prop *parser.PropertyDecl) (parsedProperty, error) {
 	}
 
 	return out, nil
+}
+
+// hasBranchlessVariant reports whether prop carries a @variant attribute with
+// no branch block behind it (memql#3123).
+//
+// It reads the ATTRIBUTE rather than prop.Variants deliberately -- keying off
+// the branch list is exactly the bug: `len(prop.Variants) > 0` is false for a
+// branch-less @variant, which is why every downstream site treated the field as
+// a plain object. The parser only fills Variants when it saw both the
+// annotation and an opening brace (parser.go's parsePropertyDecl), so
+// "attribute present, branch list empty" is precisely the case with no union
+// behind it.
+func hasBranchlessVariant(prop *parser.PropertyDecl) bool {
+	if prop == nil || len(prop.Variants) > 0 {
+		return false
+	}
+	for _, attr := range prop.Attributes {
+		if attr != nil && attr.Name == "variant" {
+			return true
+		}
+	}
+	return false
+}
+
+// variantDiscriminatorOf pulls the discriminator field name out of a property's
+// @variant attribute, or "" when there is no such attribute (or it carries no
+// discriminator). Shared by the branch-less refusal, which quotes it back in
+// the remedy, and by the branch fold, which hands it to the schema builder.
+func variantDiscriminatorOf(attrs []*parser.Attribute) string {
+	for _, attr := range attrs {
+		if attr == nil || attr.Name != "variant" {
+			continue
+		}
+		if d, ok := attr.Args["discriminator"].(string); ok {
+			return d
+		}
+	}
+	return ""
 }
 
 // valueAnnotationNames lists the value-describing parts of a declaration that
