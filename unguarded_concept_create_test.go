@@ -102,10 +102,18 @@ func TestNoUnguardedDirectToStoreConceptCreate(t *testing.T) {
 		"component/memql/executor_mutation.go": "the mutation executor -- the one guarded write path",
 
 		// Unit tests of Concept.Create itself, against in-memory fakes
-		// (&capturingStore{}, &fakeConceptStore{}). No database, no boot
-		// path: these exercise the primitive rather than write through it.
+		// (&capturingStore{}, &fakeConceptStore{}, &redactionStore{}). No
+		// database, no boot path: these exercise the primitive rather than
+		// write through it.
 		"component/database/memory-nodes/declared_metadata_annotations_test.go": "Concept.Create unit test against a fake store",
 		"component/memql/nodespec_composite_id_2885_test.go":                    "Concept.Create unit test against a fake store",
+		// Arrived with epic secret-redaction (memql#3182) while this epic was
+		// in flight, so the two branches first met at the merge. Checked
+		// rather than assumed before allowlisting: both call sites pass
+		// &redactionStore{}, an in-memory fake, against a concept parsed from
+		// a test fixture -- the same category as the two entries above, and
+		// not a write path.
+		"component/database/memory-nodes/concept_secret_redaction_test.go": "Concept.Create unit test against a fake store",
 	}
 
 	root, err := os.Getwd()
