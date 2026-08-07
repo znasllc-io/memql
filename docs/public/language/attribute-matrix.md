@@ -284,6 +284,33 @@ not a reason to treat a credential in the graph as protected.
 emitted, and read by nothing. Section 8 of
 `dsl/_reference/_concept.memql` carries the per-annotation split.
 
+`@default` is declared metadata **by decision, and it is now gated**
+(memql#3038). It stays documentation rather than being applied on insert
+(which would add an update-path question on top of a `parseDefaultValue`
+that has no datetime branch) or retired (the emitted `default` keyword is
+read by the SDK, sense hover and form generators). What changed is that
+writing one and getting nothing is caught at authoring time:
+`TestDefaultIsCoalescedOrStamped` (`dsl/default_stamped_test.go`) fails
+when an **optional, top-level** concept field carries `@default` and no
+mutation bound to that concept **stamps** it. Only a stamped value counts
+— `f: args.f ?? "v"`, a literal, or a computed expression; `accept { f }`,
+a bare `args.f` shorthand and a plain `f: args.f` all bind the field to a
+caller argument, so omitting that argument still writes nothing.
+
+Two things the gate does **not** cover, neither of them an oversight:
+
+- **Runtime-mounted domains.** It scans the in-repo tree only, so a
+  product bundle mounted through `MEMQL_DSL_PATH` is never scanned and its
+  own `@default` mistakes go uncaught. That is the price of it being a
+  conformance test instead of a load-time gate — a boot gate could refuse
+  boot on a legitimate bundle topology, which is worse than the silent
+  no-op it would replace.
+- **Nested object leaves.** A `@default` inside an object block is out of
+  scope, because no write form can stamp a single leaf: a mutation writes
+  the parent object wholesale. Nothing is applied at **any** depth;
+  stamping is the only mechanism that fills a value, and it can only be
+  spelled for a top-level field.
+
 #### `@public`
 Declares that the construct intentionally carries **no caller-scope
 check**. The per-row authorization gate
