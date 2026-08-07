@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -103,22 +104,259 @@ func (e *MemQLEngine) validateToolArgs(tool *Tool, args map[string]any) error {
 		argsForValidation = args
 	}
 	if err := schema.Validate(argsForValidation); err != nil {
-		// Log the full structured failure so we can diagnose why
-		// the LLM's call didn't match the schema. Also log the
-		// args (best-effort JSON) so we see what was actually
-		// sent. The LLM-facing message is shorter; the operator
-		// gets the full picture in the log.
+		// memql#3182. This validator is compiled from the SAME ArgsSchema that
+		// carries FunctionArgsField.Secret, so every declaration the function
+		// validator redacts (memql#3036) has a generated-tool twin here -- and
+		// this one runs FIRST on the agent path (ExecuteTool calls it before
+		// the handler), so it is the surface a rejected secret actually
+		// reaches. Both exits below carry caller data and both are redacted:
+		//
+		//   - the RETURNED message is handed to the model verbatim by
+		//     ExecuteTool (IsError: true -> tool result text), and the
+		//     jsonschema keywords the generated schema emits interpolate the
+		//     instance value ("must be >= %v but found %v", "%v is not valid
+		//     %s").
+		//   - the WARN below serialized the ENTIRE args map, not just the
+		//     rejected field -- so values that PASSED validation were logged
+		//     too.
+		secretNames, classified := e.toolSecretArgNames(tool)
+		redactedMessage := redactSecretArgValues(err.Error(), secretNames, args)
 		if e != nil && e.Component != nil && e.Logger != nil {
-			argsJSON, _ := json.Marshal(args)
-			e.Logger.Warn("tool args validation failed",
-				"tool", tool.Name,
-				"args", string(argsJSON),
-				"error", err.Error(),
-			)
+			// Log the structured failure so we can diagnose why the LLM's
+			// call didn't match the schema, plus what was actually sent.
+			// The LLM-facing message is shorter; the operator gets the
+			// fuller picture here.
+			//
+			// WARN DECISION (memql#3182 asks which of the two options this
+			// takes, and why): redact PER KEY from the ArgsSchema and KEEP
+			// the args attribute -- but only when the schema could actually
+			// be consulted. When it could not, the attribute degrades to a
+			// KEY LIST instead of being logged raw.
+			//
+			// Reason. Dropping args outright would cost the attribute its
+			// whole reason for existing: "which args did the model send"
+			// is the first question asked of a tool-dispatch failure, and
+			// the non-secret args are the answer. Per-key redaction keeps
+			// that and removes exactly the values that must not be in a log.
+			// The key-list fallback is the honest handling of "cannot
+			// classify": a log line is durable and ships to an aggregator,
+			// so an args map nothing has vouched for does not go into one.
+			// The keys still say which arguments were supplied, which is
+			// most of the diagnostic value, and the error attribute still
+			// names the offending instance location and the constraint it
+			// failed.
+			attrs := []any{"tool", tool.Name}
+			if classified {
+				attrs = append(attrs, "args", marshalArgsForLog(redactArgsForLog(args, secretNames)))
+			} else {
+				attrs = append(attrs, "argKeys", sortedArgKeys(args))
+			}
+			attrs = append(attrs, "error", redactedMessage)
+			e.Logger.Warn("tool args validation failed", attrs...)
 		}
-		return formatToolValidationError(tool.Name, err)
+		return formatToolValidationError(tool.Name, redactedMessage)
 	}
 	return nil
+}
+
+// toolSecretArgNames resolves the argument names this tool's arguments are
+// declared @secret on, plus whether the declaration could be consulted AT ALL
+// (memql#3182).
+//
+// The Secret flag lives on FunctionArgsField, stamped once at load by
+// markSecretArgsFields from the bound concept's @secret fields. Reading it
+// from the function registry at the point of use -- rather than copying the
+// names onto the Tool at generation time -- keeps ONE source for the flag,
+// with no copy that can drift from the declaration it was derived from. It
+// also covers an explicitly-authored `tool` whose @handler names the same
+// function, not just the auto-registered twin registerFunctionTools produces.
+//
+// The second return distinguishes "consulted, no secret args" (true, empty)
+// from "could not consult" (false): a tool with no function handler, an engine
+// with no function registry, a function the registry cannot resolve. The
+// caller treats the two differently -- the message path fails OPEN on an
+// unclassified tool (matching memql#3036's posture: a diagnostic must not
+// start over-redacting because a registry lookup missed), the log path fails
+// CLOSED (see the WARN decision above).
+func (e *MemQLEngine) toolSecretArgNames(tool *Tool) (map[string]struct{}, bool) {
+	if e == nil || e.functions == nil || tool == nil || tool.Handler == nil {
+		return nil, false
+	}
+	if !strings.EqualFold(strings.TrimSpace(tool.Handler.Type), "function") {
+		return nil, false
+	}
+	name := strings.TrimSpace(tool.Handler.FunctionName)
+	if name == "" {
+		return nil, false
+	}
+	fn, err := e.functions.Get(name)
+	if err != nil || fn == nil {
+		return nil, false
+	}
+	return secretArgNamesFromSchema(fn.ArgsSchema), true
+}
+
+// secretArgNamesFromSchema collects every args-field name carrying the Secret
+// flag, including nested-object and array-item fields (markSecretArgsFields
+// stamps those by name too).
+func secretArgNamesFromSchema(schema *ArgsSchemaConfig) map[string]struct{} {
+	names := map[string]struct{}{}
+	if schema == nil {
+		return names
+	}
+	for _, field := range schema.Fields {
+		collectSecretArgNames(field, names)
+	}
+	return names
+}
+
+func collectSecretArgNames(field *FunctionArgsField, out map[string]struct{}) {
+	if field == nil {
+		return
+	}
+	if field.Secret {
+		if n := strings.TrimSpace(field.Name); n != "" {
+			out[n] = struct{}{}
+		}
+	}
+	for _, nested := range field.Nested {
+		collectSecretArgNames(nested, out)
+	}
+	collectSecretArgNames(field.Items, out)
+}
+
+// redactSecretArgValues removes the VALUE of every secret argument from a
+// validation message, leaving everything that makes the message actionable --
+// which argument failed and which declared constraint it failed -- intact. A
+// declared constraint (a minimum, an enum's members, a format name) comes from
+// the schema, never from caller data, so it is never redacted.
+//
+// It scrubs by value rather than by parsing the jsonschema message, because
+// the set of keywords that interpolate the instance value is the LIBRARY's to
+// change: v5 does it in minimum / exclusiveMinimum / maximum /
+// exclusiveMaximum / multipleOf / format today, and a keyword added tomorrow
+// is covered here without anyone noticing it needed to be. Matching on the
+// value is what makes that true.
+//
+// Over-redaction is the deliberate failure direction. A secret whose rendering
+// is a short numeral can also blank an unrelated numeral in the same message
+// (a minimum of 10 against a secret value of 1). That reads oddly and never
+// discloses, which is the correct trade for a diagnostic.
+func redactSecretArgValues(message string, secretNames map[string]struct{}, args map[string]any) string {
+	if message == "" || len(secretNames) == 0 || len(args) == 0 {
+		return message
+	}
+	seen := map[string]struct{}{}
+	collectSecretRenderings(args, secretNames, false, seen)
+	renderings := make([]string, 0, len(seen))
+	for rendering := range seen {
+		if rendering == "" || rendering == redactedArgValue {
+			continue
+		}
+		renderings = append(renderings, rendering)
+	}
+	// Longest first, so a quoted rendering is consumed whole rather than left
+	// as an orphaned pair of quotes around the placeholder. Sorting also makes
+	// the output deterministic, which map iteration would not.
+	sort.Slice(renderings, func(i, j int) bool {
+		if len(renderings[i]) != len(renderings[j]) {
+			return len(renderings[i]) > len(renderings[j])
+		}
+		return renderings[i] < renderings[j]
+	})
+	for _, rendering := range renderings {
+		message = strings.ReplaceAll(message, rendering, redactedArgValue)
+	}
+	return message
+}
+
+// collectSecretRenderings walks the args tree and records every textual form a
+// secret value could have been interpolated as. `inSecret` propagates down a
+// secret-keyed subtree: an object or array held by a secret argument is secret
+// in every leaf.
+func collectSecretRenderings(value any, secretNames map[string]struct{}, inSecret bool, out map[string]struct{}) {
+	switch v := value.(type) {
+	case map[string]any:
+		for key, item := range v {
+			_, keyIsSecret := secretNames[key]
+			collectSecretRenderings(item, secretNames, inSecret || keyIsSecret, out)
+		}
+	case []any:
+		for _, item := range v {
+			collectSecretRenderings(item, secretNames, inSecret, out)
+		}
+	default:
+		if !inSecret || value == nil {
+			return
+		}
+		// The renderings jsonschema can produce for an instance value:
+		// bare %v (numbers, booleans), single-quoted (its quote() helper for
+		// strings in the format message), Go-quoted, and %#v.
+		out[fmt.Sprintf("%v", value)] = struct{}{}
+		if s, ok := value.(string); ok {
+			out[strconv.Quote(s)] = struct{}{}
+			out["'"+s+"'"] = struct{}{}
+		}
+		out[fmt.Sprintf("%#v", value)] = struct{}{}
+	}
+}
+
+// redactArgsForLog returns a copy of the args map with every secret-argument
+// value replaced by the redaction placeholder, so the WARN keeps its
+// debugging value without carrying a credential into a durable log.
+func redactArgsForLog(args map[string]any, secretNames map[string]struct{}) map[string]any {
+	if len(args) == 0 {
+		return args
+	}
+	out := make(map[string]any, len(args))
+	for key, value := range args {
+		if _, secret := secretNames[key]; secret {
+			out[key] = redactedArgValue
+			continue
+		}
+		switch v := value.(type) {
+		case map[string]any:
+			out[key] = redactArgsForLog(v, secretNames)
+		case []any:
+			items := make([]any, len(v))
+			for i, item := range v {
+				if nested, ok := item.(map[string]any); ok {
+					items[i] = redactArgsForLog(nested, secretNames)
+					continue
+				}
+				items[i] = item
+			}
+			out[key] = items
+		default:
+			out[key] = value
+		}
+	}
+	return out
+}
+
+// marshalArgsForLog renders the redacted args map for the WARN attribute with
+// HTML escaping OFF. json.Marshal would emit the placeholder as
+// "<redacted>", which is the one thing an operator scanning this
+// line needs to recognise at a glance.
+func marshalArgsForLog(args map[string]any) string {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(args); err != nil {
+		return ""
+	}
+	return strings.TrimRight(buf.String(), "\n")
+}
+
+// sortedArgKeys is the values-free form of the args attribute: which
+// arguments the caller supplied, and nothing about what was in them.
+func sortedArgKeys(args map[string]any) []string {
+	keys := make([]string, 0, len(args))
+	for key := range args {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // coerceArgsToSchema mutates `args` in-place to align common
@@ -239,8 +477,15 @@ func compileToolSchema(tool *Tool) (*jsonschema.Schema, error) {
 	return compiled, nil
 }
 
-// formatToolValidationError renders a jsonschema validation error
+// formatToolValidationError renders a jsonschema validation message
 // into a single-paragraph string the LLM can read and react to.
+//
+// It takes the message TEXT rather than the error so the only thing that
+// reaches this function is the text the caller has already run through
+// redactSecretArgValues (memql#3182). Handing it the error instead would
+// leave one call away from returning err.Error() unredacted, which is the
+// shape the leak had.
+//
 // jsonschema's Error() output is multi-line + path-prefixed
 // ("jsonschema: ” does not validate ..." \n "  at '/foo': required
 // field missing"). Strategy:
@@ -253,11 +498,10 @@ func compileToolSchema(tool *Tool) (*jsonschema.Schema, error) {
 // Result example:
 //
 //	`tool "requestComputerUseScope": invalid arguments: at '': missing property 'intent'`
-func formatToolValidationError(toolName string, err error) error {
-	if err == nil {
+func formatToolValidationError(toolName string, msg string) error {
+	if strings.TrimSpace(msg) == "" {
 		return nil
 	}
-	msg := err.Error()
 	for _, line := range strings.Split(msg, "\n") {
 		line = strings.TrimSpace(line)
 		line = strings.TrimPrefix(line, "- ")
