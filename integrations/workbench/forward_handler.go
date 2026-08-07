@@ -8,7 +8,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/node"
 	nodev1 "github.com/znasllc-io/memql/component/node/gen"
 	"github.com/znasllc-io/memql/core/id"
 )
@@ -50,9 +52,10 @@ func NewForwardHandler(integ *Integration, logger *slog.Logger) *ForwardHandler 
 }
 
 // HandleForwardedRequest implements node.WorkbenchForwardHandler.
-// Unmarshals the request, calls the local Integration's dispatch
-// path against args reconstructed from args_json, and sends exactly
-// one WorkbenchForwardResponse via the provided callback.
+// Verifies the request's ForwardedAuthority and binds the actor it asserts,
+// then calls the local Integration's dispatch path against args reconstructed
+// from args_json and sends exactly one WorkbenchForwardResponse via the
+// provided callback.
 func (h *ForwardHandler) HandleForwardedRequest(ctx context.Context, req *nodev1.WorkbenchForwardRequest, send func(*nodev1.NodeServerMessage) error) {
 	requestId := req.GetRequestId()
 	cctx, cancel := context.WithCancel(ctx)
@@ -65,6 +68,21 @@ func (h *ForwardHandler) HandleForwardedRequest(ctx context.Context, req *nodev1
 		h.mu.Unlock()
 		cancel()
 	}()
+
+	// THE GATE (memql#3205 / memql#3219). Refusal is a structured
+	// WorkbenchForwardResponse rather than a dropped message, so the agent's
+	// parked tool loop unblocks with a reason instead of waiting out its
+	// timeout.
+	cctx, err := h.bindAuthority(cctx, req)
+	if err != nil {
+		h.logger.Warn("workbench: refused a forwarded request",
+			slog.String("requestId", requestId),
+			slog.String("action", req.GetAction()),
+			slog.String("planId", req.GetPlanId()),
+			slog.String("error", err.Error()))
+		h.sendError(send, requestId, "forwarded_authority_refused", err.Error())
+		return
+	}
 
 	innerArgs, err := DecodeArgs(req.GetArgsJson())
 	if err != nil {
@@ -122,6 +140,33 @@ func (h *ForwardHandler) HandleForwardedRequest(ctx context.Context, req *nodev1
 		h.logger.Warn("workbench forward response send failed",
 			"request_id", requestId, "error", err)
 	}
+}
+
+// bindAuthority verifies the request's assertion and returns the context every
+// downstream dispatch runs under.
+//
+// Nothing is re-resolved: no claims lookup, no userByIdSystem keyed by a
+// wire-supplied subject, no fallback. An ABSENT assertion takes the same path
+// as a malformed one -- the contract's premise is that absence is never read as
+// safe, and the previous shape of this message (a claims map nothing populated
+// and nothing read) is exactly what made absence look like the normal case.
+//
+// The attribution claims are DERIVED from the assertion rather than carried
+// beside it. That is what makes "claims without an authority" inexpressible on
+// this hop: there is no map on the wire for one to arrive in.
+//
+// A named method rather than inline steps because the ACCEPT half needs to be
+// reachable from a test. A receiver that verifies and then forgets to bind
+// leaves worker-side DSL with no actor -- every owned read returning zero rows,
+// every write stamping createdBy: "" -- and that failure looks like success
+// (memql#2876). Refusal tests cannot reach it; they return first.
+func (h *ForwardHandler) bindAuthority(ctx context.Context, req *nodev1.WorkbenchForwardRequest) (context.Context, error) {
+	authority := node.ForwardedAuthorityFromProto(req.GetAuthority())
+	access, err := auth.VerifyForwardedAuthority(authority, time.Now())
+	if err != nil {
+		return ctx, err
+	}
+	return auth.BindForwardedContext(ctx, authority.Principal().Claims, access, authority), nil
 }
 
 // CancelForwardedRequest implements node.WorkbenchForwardHandler.

@@ -123,3 +123,70 @@ func ContextWithForwardedClaims(ctx context.Context, m map[string]string) contex
 	ctx = ContextWithClaims(ctx, tok.Claims)
 	return ctx
 }
+
+// forwardedAuthorityContextKey carries the VERIFIED assertion a worker accepted,
+// so a second hop out of that worker can re-assert it rather than rebuild one.
+const forwardedAuthorityContextKey contextKey = "forwardedAuthority"
+
+// ContextWithForwardedAuthority records the assertion a receiver verified and
+// bound. It is chain-of-custody state, not an authorization input: nothing
+// reads it to make a decision. The one consumer is a producer -- a node that
+// received a forward and is about to make one of its own (memql#3219).
+//
+// The alternative is what makes it necessary. A second-hop producer holding
+// only an AccessContext cannot rebuild a faithful assertion: an AccessContext
+// carries no credential class and no role ceiling, so the rebuilt one would say
+// class="user" with no ceiling for a BADGE session -- and "no badge" being
+// indistinguishable from "not stated" is precisely the defect memql#3205
+// removed. Re-asserting the received value keeps the ceiling provable at every
+// hop instead of only the first.
+func ContextWithForwardedAuthority(ctx context.Context, a ForwardedAuthority) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, forwardedAuthorityContextKey, a)
+}
+
+// ForwardedAuthorityFromContext returns the assertion this node accepted, and
+// ok=false when the work did not arrive over a mesh forward.
+//
+// A false here is not an error: single-node dispatch and node-local startup work
+// legitimately have none. It IS a refusal for anything about to forward -- see
+// the workbench producer, which fails closed rather than sending an envelope it
+// cannot make an assertion for.
+func ForwardedAuthorityFromContext(ctx context.Context) (ForwardedAuthority, bool) {
+	if ctx == nil {
+		return ForwardedAuthority{}, false
+	}
+	a, ok := ctx.Value(forwardedAuthorityContextKey).(ForwardedAuthority)
+	return a, ok
+}
+
+// BindForwardedContext is the ACCEPT-AND-BIND step of the mesh forwarded-auth
+// contract: given a VERIFIED assertion and the attribution claims derived from
+// it, it produces the context every worker-side handler reads. Both mesh
+// receivers go through it -- the AI forward (component/grpc) and the workbench
+// forward (integrations/workbench).
+//
+// Four stamps, four distinct jobs.
+//   - client origin: this work originated with a client request, not with a
+//     server-initiated sweep (#2889).
+//   - forwarded claims: TokenInfo for `createdBy` ATTRIBUTION only. Never an
+//     authorization input any more. This is also what carries the
+//     provenance-only display name that component/metadata stamps as
+//     identity.displayName on every row a mutation writes (memql#3221).
+//   - access: THE authorization decision, and it comes from the verified
+//     assertion alone -- no LoadFromClaims, no FallbackFromClaims, no
+//     userByIdSystem keyed by a wire-supplied subject, and therefore no
+//     per-message DB round trip either.
+//   - the assertion itself: chain of custody for a SECOND hop out of this node,
+//     which is the only thing that reads it. See ContextWithForwardedAuthority.
+//
+// `access` MUST already have come from VerifyForwardedAuthority; this binds what
+// it is handed and verifies nothing itself.
+func BindForwardedContext(ctx context.Context, claims map[string]string, access *AccessContext, authority ForwardedAuthority) context.Context {
+	ctx = ContextWithClientOrigin(ctx)
+	ctx = ContextWithForwardedClaims(ctx, claims)
+	ctx = ContextWithAccess(ctx, access)
+	return ContextWithForwardedAuthority(ctx, authority)
+}
