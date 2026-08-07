@@ -352,11 +352,24 @@ jobs:
             # NOTE: `wire` from the D3 table is the existing `proto` bucket
             # above (**/*.proto + the generated gen/ trees); it is not
             # duplicated here.
+            # component/{auth,bus,events,safety} are BASE, not platform
+            # (memql#3239). Drawn in platform they made engine and platform a
+            # mutual module requirement -- component/memql (engine) imports all
+            # four, while component/node/bootstrap.go:9 (platform) imports
+            # component/memql. That is a genuine module cycle, which Go rejects.
+            #
+            # Demoting them resolves it with zero code changes: re-measured
+            # 2026-08-07, their internal dependencies are core (base) and the
+            # gen/ trees (wire) only, so base acquires no upward edge.
             base:
               - 'core/**'
               - 'component/language/annotations/**'
               - 'component/language/ast/**'
               - 'component/language/dslclause/**'
+              - 'component/auth/**'
+              - 'component/events/**'
+              - 'component/bus/**'
+              - 'component/safety/**'
             engine:
               - 'component/memql/**'
               - 'component/language/**'
@@ -368,10 +381,6 @@ jobs:
               - 'component/node/**'
               - 'component/polyphon/**'
               - 'component/identity/**'
-              - 'component/auth/**'
-              - 'component/events/**'
-              - 'component/bus/**'
-              - 'component/safety/**'
             integrations:
               - 'integrations/**'
             # component/grpc EXCLUDING its generated gen/ tree, which is `wire`

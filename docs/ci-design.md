@@ -203,15 +203,38 @@ From `go list -json ./...` over 182 packages, aggregated to area level:
 | Module | Contents | Version |
 |---|---|---|
 | `wire` | `component/grpc/gen`, `node/gen`, `bus/gen` | **Independent** |
-| `base` | `core/*`, the 5 extracted L0 leaves, `language/{annotations,ast,dslclause}`, `core/audio` (from `integrations/audio`) | Lockstep |
+| `base` | `core/*`, the 5 extracted L0 leaves, `language/{annotations,ast,dslclause}`, `core/audio` (from `integrations/audio`), `component/{auth,bus,events,safety}` | Lockstep |
 | `engine` | `component/memql`, `language`, `database`, `actions`, `harness`, `dsl` | **Independent** |
-| `platform` | `component/node`, `polyphon`, `identity`, `auth`, `events`, `bus`, `safety` | Lockstep |
+| `platform` | `component/node`, `polyphon`, `identity` | Lockstep |
 | `integrations` | `integrations/*` | Lockstep |
 | `server-grpc` / `server-http` / `server-mcp` | `component/grpc`, `component/server`, `component/mcp` | Lockstep |
 | `app` | `app/`, `main.go`, `cmd/*` | Not published |
 
 Dependency direction is strictly downward:
 `app → servers → integrations → platform → engine → base → wire`.
+
+#### Why `component/{auth,bus,events,safety}` sit in `base` (memql#3239)
+
+As originally drawn they sat in `platform`, which made `engine` and `platform`
+a **mutual module requirement** — a genuine module cycle, which Go rejects:
+
+- `component/memql` (engine) → `component/{auth,bus,events,safety}` (platform)
+- `component/node/bootstrap.go:9` (platform) → `component/memql` (engine)
+
+Demoting the four to `base` resolves it with **zero code changes** — no import
+edits, no file moves. Their internal dependencies were re-measured on
+2026-08-07 and every one already points at `base` or `wire`:
+
+| package | internal dependencies (area level) |
+|---|---|
+| `component/auth` | `core` |
+| `component/bus` | `component/bus/gen` (wire) |
+| `component/events` | `component/bus`, `component/bus/gen` (wire), `component/grpc/gen` (wire), `core` |
+| `component/safety` | `core` |
+
+So `base` acquires **no upward edge** — the one thing a tier below the engine
+cannot have. Measured with
+`go list -deps ./component/<pkg>/... | grep znasllc-io/memql`.
 
 ### Prerequisites (decision E — one PR, before any `go.mod` appears)
 
@@ -234,9 +257,9 @@ including the downstream closure required by D2 invariant 2.
 |---|---|---|
 | `ci` | `.github/workflows/**`, `Makefile` | everything |
 | `wire` | `**/*.proto`, `component/*/gen/**` | everything |
-| `base` | `core/**`, `component/language/{annotations,ast,dslclause}/**`, the 5 extracted leaves | everything above base |
+| `base` | `core/**`, `component/language/{annotations,ast,dslclause}/**`, the 5 extracted leaves, `component/{auth,bus,events,safety}/**` | everything above base |
 | `engine` | `component/{memql,language,database,actions,harness}/**`, `dsl/**` | engine, platform, integrations, all servers, app |
-| `platform` | `component/{node,polyphon,identity,auth,events,bus,safety}/**` | platform, integrations, all servers, app |
+| `platform` | `component/{node,polyphon,identity}/**` | platform, integrations, all servers, app |
 | `integrations` | `integrations/**` | integrations, app |
 | `server-grpc` | `component/grpc/**` (excl. `gen`) | server-grpc, app |
 | `server-http` | `component/server/**` | server-http, app |
