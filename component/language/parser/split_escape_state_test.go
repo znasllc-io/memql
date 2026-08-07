@@ -117,8 +117,10 @@ func TestSplitTopLevelArgs_LeadingQuoteDoesNotPanic(t *testing.T) {
 // the oracle for how many arguments there are.
 //
 // This is a regression test in the strict sense: a draft of the #3046 fix
-// delegated string state to blankCommentsAndStrings, which ends a literal at a
-// newline. The lexer does not -- it accepts a literal spanning lines and
+// delegated string state to blankCommentsAndStrings, which back then ended a
+// literal at a newline (memql#3116 has since made it agree with the lexer, but
+// the guard stays -- the splitter still tracks string state itself).
+// The lexer does not end a literal there -- it accepts a literal spanning lines and
 // returns it as ONE string token (memql#3047 is a separate bug about the line
 // counter not advancing through exactly such a literal, which only exists
 // because they are accepted). So the blanker closed the string early, the real
