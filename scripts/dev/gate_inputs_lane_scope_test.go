@@ -106,6 +106,18 @@ var gateInputs = []struct {
 	{"dsl/cognition/prompts/cognitionReply.tmpl", ".", "TestEmbeddedFileCountsAreStable"},
 	{"examples/referencepack/dsl/namespace.pin", ".", "TestEmbeddedFileCountsAreStable"},
 	{"integrations/integrations.json", ".", "TestEmbeddedFileCountsAreStable"},
+	// Not embedded, so embed_inventory_test.go does not pin it -- but a gate
+	// input all the same, and in no bucket this lane read until the same
+	// sweep found it. Renaming a `service:` reddens the model staleness check,
+	// so a green PR could break `main` for the next author.
+	//
+	// The sweep found a SECOND file of this shape,
+	// `component/memql/testdata/spaceid_core_baseline.txt`
+	// (TestNoNewSpaceIdInCore). It gets NO row here on purpose: that test
+	// lives in `component/memql`, which this step deliberately does not run.
+	// It is routed via the `go` bucket to db-tests instead -- the lane that
+	// actually runs it. A row here would assert the wrong lane.
+	{"arch.yaml", "component/architecture", "TestArchitectureModelIsNotStale"},
 }
 
 // changesFilters returns the parsed filter block the `changes` job wires its

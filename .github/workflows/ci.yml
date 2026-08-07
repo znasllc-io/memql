@@ -144,7 +144,9 @@ jobs:
             # main, where there is no merge_queue rule to catch it first:
             #
             #   --- FAIL: TestEmbeddedFileCountsAreStable
-            #       component/database embeds 29 files; 28 expected (1 added)
+            #       component/database embeds 30 files; 28 expected (2 added)
+            #
+            # (2, not 1: a real migration is an up/down pair.)
             #
             # THE NEXT UNRELATED AUTHOR OWNS THAT FAILURE. Before cb264c02 a
             # migration-only PR was unverified but harmless; after it, the same
@@ -192,6 +194,12 @@ jobs:
               - 'examples/deploypack/dsl/**'
               - 'examples/referencepack/dsl/**'
               - 'integrations/*.json'
+              # Not embedded, but a gate input read by a package this lane
+              # already runs (`./component/architecture/...`), and found in the
+              # same sweep: it was in NO consumed bucket while being able to
+              # redden `main` on the next author's push -- renaming a
+              # `service:` fails TestArchitectureModelIsNotStale.
+              - 'arch.yaml'
             # Any Go source or the module graph. Voice + generator + sdk/go
             # are Go too, so they are a subset of this.
             #
@@ -235,6 +243,15 @@ jobs:
               - '**/go.sum'
               - '**/go.work'
               - '**/go.work.sum'
+              # Testdata read by a Go gate, routed HERE and not to `gates`:
+              # TestNoNewSpaceIdInCore lives in `component/memql`, which the
+              # gate-inputs step deliberately does not run (~90s, see the
+              # STATED BOUNDARY note on that step). `component/memql` runs in
+              # db-tests, which gates on this bucket -- so `go` is the bucket
+              # that actually reaches the test. It was in no consumed bucket
+              # at all: dropping a line from the baseline merged green and
+              # reddened `main` for the next author.
+              - 'component/memql/testdata/**'
             # The embedded DSL tree.
             dsl:
               - 'dsl/**'
@@ -407,9 +424,15 @@ jobs:
         # here is NOT the fix: RUN_GATES fires on docs-only and
         # `.memql`-outside-dsl PRs where db-tests does NOT run, so dropping it
         # would open a coverage hole in exactly the fail-open the gates bucket
-        # was added to close (memql#2972). The overlap is 3 test files, and only
-        # on a PR touching dsl/** plus a gate input with no .go file at all --
-        # any .go change sets RUN_GO, which makes RUN_GATES false.
+        # was added to close (memql#2972). The overlap is 3 test files.
+        #
+        # It used to be narrower: "only on a PR touching dsl/** PLUS a gate
+        # input with no .go file at all". That conjunction no longer holds --
+        # `dsl/**` is itself a `gates` entry now, so any dsl-only PR satisfies
+        # both halves on its own. In practice `**/*.memql` already made it true
+        # for most dsl PRs; the change extends it to `.tmpl`/`.pin`-only ones.
+        # Still bounded by `any .go change sets RUN_GO, which makes RUN_GATES
+        # false`, which is the part that actually caps the cost.
         run: go test -count=1 -timeout=300s ./ ./cmd/envscan/... ./component/architecture/... ./component/genesis/... ./scripts/... ./dsl/... ./examples/...
 
       # --- pure-Go lanes (go bucket) -- build first to warm the cache ---

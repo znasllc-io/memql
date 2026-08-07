@@ -125,9 +125,22 @@ script_repo_root() {
 #
 # The FILESYSTEM, not `git ls-files`: an untracked or gitignored `go.mod`
 # truncates `go list` exactly as a committed one does, because the toolchain
-# reads the disk. `.git` and `node_modules` are pruned -- neither can hold a
-# package the main module's pattern would have covered, and node_modules under
-# sdk/ts is large enough to matter to the walk.
+# reads the disk.
+#
+# `.git` and `node_modules` are pruned, for DIFFERENT reasons -- an earlier
+# revision of this comment claimed one reason for both and was wrong about
+# node_modules:
+#
+#   .git          cannot hold a package the module pattern covers. True.
+#   node_modules  CAN. Measured: planting `sdk/ts/node_modules/gopkg/g.go`
+#                 takes `go list <mod>/...` from 183 to 184, so a `go.mod`
+#                 beside it would truncate and this walk would not see it.
+#
+# It stays pruned anyway, deliberately. npm packages do ship Go source, and a
+# vendored `go.mod` under node_modules is a FALSE REFUSAL that breaks CI for a
+# tree that is perfectly fine -- a worse failure than the blind spot, which
+# requires Go source in an npm dependency to be reachable by the main module's
+# pattern. Accepted residual, recorded rather than hidden.
 #
 # `find`'s exit status is CAPTURED, not consumed through a process
 # substitution. `while read < <(find ...)` discards it, and a walk that hit an
@@ -182,6 +195,26 @@ verify_no_unknown_modules() {
 	if [[ -z "${root}" || ! -d "${root}" ]]; then
 		echo "db-gated-packages.sh: cannot resolve the repo root from this script's own" >&2
 		echo "  location; the nested-module check cannot run, so it refuses." >&2
+		return 5
+	fi
+
+	# The walk and `go list` must agree on WHICH tree they are talking about.
+	# script_repo_root is derived from ${BASH_SOURCE[0]}; `go list` resolves
+	# against $PWD. When those differ -- this script invoked from inside a
+	# different checkout -- the walk clears a clean tree while `go list`
+	# enumerates a truncated one, and the complement is silently short.
+	# Demonstrated: cwd on a copy carrying `scripts/go.mod`, guard silent,
+	# 150 packages printed. PWD-independence is the WRONG invariant here;
+	# agreement is the right one.
+	local golist_root
+	golist_root="$(go list -m -f '{{.Dir}}' 2>/dev/null)" || golist_root=""
+	if [[ -n "${golist_root}" ]] && [[ "$(cd -- "${golist_root}" && pwd -P)" != "$(cd -- "${root}" && pwd -P)" ]]; then
+		echo "db-gated-packages.sh: this script and the Go toolchain disagree about the repo:" >&2
+		echo "    this script walks : ${root}" >&2
+		echo "    go list resolves  : ${golist_root}" >&2
+		echo "  The nested-module walk would clear one tree while the package list came from" >&2
+		echo "  another, so the complement could be silently truncated. Run this from the" >&2
+		echo "  repo it lives in (ci.yml invokes it relatively from the repo root)." >&2
 		return 5
 	fi
 	dirs="$(find_go_mod_dirs "${root}")" || status=$?
