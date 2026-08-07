@@ -214,7 +214,14 @@ func (e *MemQLEngine) renderMutationTemplate(ctx context.Context, tmpl *Function
 	}
 
 	return MutationNode{
-		Kind:             kind,
+		Kind: kind,
+		// This node came from a DSL mutation template, so its `accept { }`
+		// / `stamp { }` blocks have already run and the author has stated
+		// who owns the row. The engine's raw-path owner stamp
+		// (memql#3175) leaves it alone; every OTHER producer of a
+		// MutationNode is treated as raw. See the field's doc comment for
+		// why the flag points this way round.
+		FromTemplate:     true,
 		Concept:          concept,
 		ID:               strings.TrimSpace(id),
 		PayloadRaw:       string(payloadJSON),

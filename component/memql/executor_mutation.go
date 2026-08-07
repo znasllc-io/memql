@@ -526,6 +526,32 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		return nil, meta, fmt.Errorf("update(): no existing row for concept %q id %q (use insert() to create)", conceptName, id)
 	}
 
+	// ROW-AUTHZ OWNER STAMP for writes that bypassed the mutation
+	// template (memql#3175, carrying memql#3059). The other half of
+	// #3174's guard above: that one refuses a write onto a row the caller
+	// does not own, and a CREATE has no such row -- so its problem is
+	// STAMPING rather than guarding. A raw `insert(` short-circuits the
+	// planner before any template is rendered, so `args`/`accept`/`stamp`
+	// never ran and the payload would otherwise be written as supplied,
+	// declared owner and all.
+	//
+	// Placed HERE for two reasons, both load-bearing:
+	//
+	//  1. AFTER the read-merge above. That block REPLACES the payload map
+	//     wholesale with the merged prior row (`payload = priorPayload`),
+	//     so a stamp applied earlier would be discarded on any write that
+	//     lands on an existing id.
+	//  2. Before validation and the store, so what the declaration says
+	//     is what gets validated and what gets persisted.
+	//
+	// Driven by the concept's `@rowAuthz(owner="F")` declaration rather
+	// than by the per-concept list below: the declaration already names
+	// exactly the field to stamp, so a concept is covered the moment it
+	// declares a tier. See rowauthz_insert_stamp.go.
+	if err := stampRowAuthzOwner(ctx, conceptMeta.Name, payload, mutation.FromTemplate); err != nil {
+		return nil, meta, err
+	}
+
 	// Annotation-driven PII scrub (memql#1711). A mutation tagged
 	// @scrubPii (the hard-delete / data-deletion path) clears EVERY field
 	// the bound concept declares with @pii, derived from the schema at
@@ -554,13 +580,22 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	// touching every query site.
 	//
 	// Used to live only in mutation_templates.go (the named-mutation
-	// path). Raw insert("v1:...", payload={...}) -- used by the
-	// polyphon HTTP utterance handler and any other system-actor write
-	// that builds an insert query string directly -- bypassed that
-	// canon and landed bare-slug values that the canonicalize-RHS
-	// query path then couldn't match. Moving the call here covers both
-	// paths uniformly; the named-mutation pre-call stays as a no-op
-	// idempotent belt-and-suspenders.
+	// path). Raw insert("v1:...", payload={...}) -- the documented
+	// second write surface (docs/public/language/memql.md), reachable by
+	// ANY authenticated caller and used both by server-side Go that
+	// builds an insert query string directly (the polyphon utterance
+	// handler, the automation step recorder) and by clients over
+	// ExecuteQueryMsg -- bypassed that canon and landed bare-slug values
+	// that the canonicalize-RHS query path then couldn't match. Moving
+	// the call here covers both paths uniformly; the named-mutation
+	// pre-call stays as a no-op idempotent belt-and-suspenders.
+	//
+	// (The earlier wording called this path a "system-actor write",
+	// which read as a claim about WHO can reach it and contradicted the
+	// credential-forging guard further down. It never was one: the
+	// `insert(` short-circuit fires before origin or role is consulted.
+	// Reconciled in memql#3175, which is why the owner stamp above
+	// exists at all.)
 	if err := e.canonicalizeRelationshipFields(ctx, conceptMeta.Name, payload); err != nil {
 		return nil, meta, fmt.Errorf("canonicalize relationship fields: %w", err)
 	}
@@ -708,6 +743,13 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	// actor from forging a credential row over the raw ExecuteQuery
 	// mutation surface (per-row authz can't see the args.userId-bound
 	// owner). See identity_credential_actor_validation.go.
+	//
+	// This framing is the correct one and the canonicalize comment above
+	// now agrees with it (memql#3175): the raw surface is reachable by a
+	// USER actor, which is why it needs guarding at all. What this guard
+	// adds beyond the generic owner stamp is orthogonal to ownership --
+	// WHICH KIND of credential row may be minted, a question no
+	// `@rowAuthz` declaration answers.
 	if conceptMeta.Name == conceptIdentityIdentity {
 		if err := e.validateIdentityCredentialActorScope(ctx, payload, actor); err != nil {
 			return nil, meta, err
