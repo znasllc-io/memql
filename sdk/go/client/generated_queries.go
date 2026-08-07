@@ -512,26 +512,21 @@ func ActiveSkillsFullBuild(args ActiveSkillsFullArgs) string {
 	return "query activeSkillsFull()"
 }
 
-// AgentAuthorizationsForUser -- All active standing authorizations granted by a user, across all agents and plan kinds.
+// AgentAuthorizationsForSelf -- The CALLING user's active standing authorizations, across all agents and plan kinds.
 //
-// Bound concept: v1:agents:agentAuthorization (machine-readable: BoundConcepts["agentAuthorizationsForUser"] in generated_concepts.go).
-type AgentAuthorizationsForUserArgs struct {
-	UserId string
+// Bound concept: v1:agents:agentAuthorization (machine-readable: BoundConcepts["agentAuthorizationsForSelf"] in generated_concepts.go).
+type AgentAuthorizationsForSelfArgs struct {
 }
 
-// AgentAuthorizationsForUser calls the engine query agentAuthorizationsForUser.
-func (qc *QueryClient) AgentAuthorizationsForUser(ctx context.Context, args AgentAuthorizationsForUserArgs) (*Result, error) {
-	call := AgentAuthorizationsForUserBuild(args)
-	return qc.executeNamed(ctx, "agentAuthorizationsForUser", call)
+// AgentAuthorizationsForSelf calls the engine query agentAuthorizationsForSelf.
+func (qc *QueryClient) AgentAuthorizationsForSelf(ctx context.Context, args AgentAuthorizationsForSelfArgs) (*Result, error) {
+	call := AgentAuthorizationsForSelfBuild(args)
+	return qc.executeNamed(ctx, "agentAuthorizationsForSelf", call)
 }
 
-func AgentAuthorizationsForUserBuild(args AgentAuthorizationsForUserArgs) string {
-	var b strings.Builder
-	b.WriteString("query agentAuthorizationsForUser(")
-	b.WriteString("userId: ")
-	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	b.WriteString(")")
-	return b.String()
+func AgentAuthorizationsForSelfBuild(args AgentAuthorizationsForSelfArgs) string {
+	_ = args
+	return "query agentAuthorizationsForSelf()"
 }
 
 // AgentById -- Get an agent by ID with full configuration.

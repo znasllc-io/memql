@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/znasllc-io/memql/component/auth"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/worker"
 	"github.com/znasllc-io/memql/integrations/agent"
@@ -109,7 +110,7 @@ func (a *App) computerUseStatusFn() agent.ComputerUseStatusFn {
 }
 
 // standingComputerUseScope reads the agent's current standing
-// computer_use scope from agentAuthorizationsForUser. Tolerates
+// computer_use scope from agentAuthorizationsForSelf. Tolerates
 // both bare-slug and canonical-form agentIds on the stored row
 // because v1:agents:agentAuthorization has no @relationship on
 // agentId yet (auto-canon doesn't fire). Returns "" on lookup
@@ -121,11 +122,22 @@ func standingComputerUseScope(ctx context.Context, engine *memqlengine.MemQLEngi
 	if engine == nil || strings.TrimSpace(ownerUserId) == "" {
 		return ""
 	}
-	q := fmt.Sprintf(`query agentAuthorizationsForUser(userId:%q)`, ownerUserId)
-	res, err := engine.Execute(ctx, q)
+	// #3177: `agentAuthorizationsForSelf` is self-scoped on actor.userId and
+	// takes no userId argument, because v1:agents:agentAuthorization declares
+	// `@rowAuthz(owner="userId")` and a caller-supplied-id read of a declared
+	// concept is what #3172's land gate refuses.
+	//
+	// ownerUserId here is resolved from the AGENT row (resolveAgentOwner), not
+	// from the caller, and an agent answers in spaces its owner need not be the
+	// caller in -- so the owner's actor envelope is supplied for this ONE
+	// Execute, built inline as the argument in the memql#3072 shape epic
+	// decision C blesses.
+	res, err := engine.Execute(
+		auth.ContextWithUserActor(ctx, ownerUserId),
+		`query agentAuthorizationsForSelf()`)
 	if err != nil {
 		if logger != nil {
-			logger.Debug("computer_use scope: agentAuthorizationsForUser failed",
+			logger.Debug("computer_use scope: agentAuthorizationsForSelf failed",
 				"owner_user_id", ownerUserId,
 				"error", err,
 			)

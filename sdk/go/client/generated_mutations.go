@@ -9025,7 +9025,7 @@ func RevertRecordBuild(args RevertRecordArgs) string {
 	return b.String()
 }
 
-// RevokeAgentAuthorization -- Soft-revoke a standing authorization. User-revocable from the agent's settings at any time. Read-merges the existing row so the caller only passes the auth id; agentId/userId/planKind/spaceScope inherit from the persisted row (memql#1628).
+// RevokeAgentAuthorization -- Soft-revoke a standing authorization. User-revocable from the agent's settings at any time. SELF-SERVICE: only the granting user (the row's userId) may revoke their own grant -- the engine refuses a write onto anyone else's row under the concept's declared owner tier. Read-merges the existing row so the caller only passes the auth id; agentId/userId/planKind/spaceScope inherit from the persisted row (memql#1628).
 //
 // Bound concept: v1:agents:agentAuthorization (machine-readable: BoundConcepts["revokeAgentAuthorization"] in generated_concepts.go).
 type RevokeAgentAuthorizationArgs struct {
@@ -10889,7 +10889,7 @@ func UpdateAgentBuild(args UpdateAgentArgs) string {
 	return b.String()
 }
 
-// UpdateAgentAuthScope -- Set computerUseScope on an agent authorization row.
+// UpdateAgentAuthScope -- Set computerUseScope on an agent authorization row. Self-service: the engine refuses the write when the target row's userId is not the caller's (the concept's declared owner tier).
 //
 // Bound concept: v1:agents:agentAuthorization (machine-readable: BoundConcepts["updateAgentAuthScope"] in generated_concepts.go).
 type UpdateAgentAuthScopeArgs struct {
@@ -10917,7 +10917,7 @@ func UpdateAgentAuthScopeBuild(args UpdateAgentAuthScopeArgs) string {
 	return b.String()
 }
 
-// UpdateAgentAuthorization -- Partial update of a v1:agents:agentAuthorization row. Mirrors updateAgent semantics: only the fields passed in `payload` change; everything else inherits from the prior row. Backs the canvas mintSkillApprovalRequested card's 'Approve & always allow this tier' action (pack#38, memql#169) -- the SPA reads the current skillTierAllowlist, appends the approved tier, and writes the whole array back as `{skillTierAllowlist: [...]}`. Per the agentAuthorization concept's revocation contract this is an OWNED write: only the granting user (the row's payload.userId) may update their own authorization grant.
+// UpdateAgentAuthorization -- Partial update of a v1:agents:agentAuthorization row. Mirrors updateAgent semantics: only the fields passed in `payload` change; everything else inherits from the prior row. Backs the canvas mintSkillApprovalRequested card's 'Approve & always allow this tier' action (pack#38, memql#169) -- the SPA reads the current skillTierAllowlist, appends the approved tier, and writes the whole array back as `{skillTierAllowlist: [...]}`. SELF-SERVICE, and enforced two ways: the row's `userId` is re-stamped from actor.userId so a payload cannot reassign the grant, and the engine refuses the write outright when the target row's userId is not the caller's (the concept's declared owner tier -- memql#3177).
 //
 // Bound concept: v1:agents:agentAuthorization (machine-readable: BoundConcepts["updateAgentAuthorization"] in generated_concepts.go).
 type UpdateAgentAuthorizationArgs struct {
