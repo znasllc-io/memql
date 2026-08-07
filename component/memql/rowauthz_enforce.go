@@ -161,6 +161,16 @@ func enforceRowAuthzOnPlan(plan *QueryPlan) error {
 		// The public tier, and only the public tier.
 		return nil
 	}
+	// Stamp the concept ON the injected node so the canonicalize-RHS pass
+	// resolves it from the DECLARATION too (memql#3172). Without this the
+	// pass falls back to extractConceptFromExpression, which answers ""
+	// for every spelling this task exists to cover, and the owner field
+	// is an @relationship -- so the term would compare the bare
+	// `actor.userId` against a canonical stored `v1:identity:user:<id>`
+	// and match nothing at all.
+	if cmp, isCmp := predicate.(*ComparisonExpression); isCmp {
+		cmp.RowAuthzConcept = conceptName
+	}
 	plan.Root = &LogicalExpression{Op: LogicalAnd, Left: plan.Root, Right: predicate}
 	plan.RowAuthzInjected = true
 	plan.RowAuthzConcept = conceptName
@@ -275,15 +285,8 @@ func rowAuthzAdmits(ctx context.Context, conceptName string, id string, payload 
 		}
 		if strings.TrimSpace(decl.Owner) == langparser.RowAuthzSelfOwnedField {
 			// SELF-OWNED (memql#3029): the row IS the owner, so the
-			// comparison is against the row's own identity. Ids are stored
-			// canonically (`<concept>:<shortId>`) while a caller id is the
-			// bare short form, so both spellings are accepted -- the id
-			// contract says clients never compose canonical ids.
-			short := id
-			if idx := strings.LastIndex(id, ":"); idx >= 0 {
-				short = id[idx+1:]
-			}
-			if id == caller || short == caller {
+			// comparison is against the row's own identity.
+			if sameRowAuthzOwner(id, caller) {
 				return rowAuthzAdmit
 			}
 			return rowAuthzDeny
@@ -295,7 +298,7 @@ func rowAuthzAdmits(ctx context.Context, conceptName string, id string, payload 
 			// shown to own.
 			return rowAuthzDeny
 		}
-		if owner == caller {
+		if sameRowAuthzOwner(owner, caller) {
 			return rowAuthzAdmit
 		}
 		return rowAuthzDeny
@@ -304,6 +307,53 @@ func rowAuthzAdmits(ctx context.Context, conceptName string, id string, payload 
 		// An unknown tier is a broken declaration, not a permission.
 		return rowAuthzDeny
 	}
+}
+
+// sameRowAuthzOwner reports whether two id spellings name the same
+// owner. THE single answer to "is this row this caller's", shared by
+// every in-Go row-authz comparison: the read path's row gate, the
+// traversal gate, and -- through rowAuthzAdmits -- #3174's write guard.
+//
+// WHY IT CANNOT BE `==` (memql#3172, caught by the DB lane). An owner
+// field is an outgoing `@relationship`, so executeWrite's
+// canonicalizeRelationshipFields rewrites it to canonical
+// `{concept}:{shortId}` form before the row is stored: a note created by
+// caller `u1` stores `ownerUserId: "v1:identity:user:u1"`. The caller
+// identity on the other side of the comparison is the BARE `u1`, which
+// is what the actor envelope carries and what
+// docs/public/concepts/identifiers.md says every client speaks. A raw
+// `==` between those two is false for every row, so the gate denied the
+// owner their own rows -- 13 concepts reading back empty for everyone.
+// Local suites missed it because they seeded both sides with the same
+// spelling; only a real insert applies the canonicalize step.
+//
+// The normalization is BareShortId, the repo's one outbound id
+// primitive (#2441): it strips a canonical prefix and is a no-op on a
+// value that has none, so a bare/bare, canonical/canonical, or mixed
+// pair all collapse onto the same answer. Applied once per side, never
+// to its own output (BareShortId is deliberately not idempotent,
+// memql#2981).
+//
+// It does not use canonicalizeRelationshipFieldValue -- the engine-side
+// canonicalizer the FILTER path uses -- because that needs the engine's
+// concept registry and a target concept, and these callers are handed a
+// row rather than a query. Comparing bare tails needs neither and gives
+// the same answer: the SQL path canonicalizes the RHS so the column and
+// the value match in the database; the Go path strips both to the id
+// underneath. Stated here so the split is a decision rather than a
+// coincidence.
+func sameRowAuthzOwner(stored, caller string) bool {
+	stored = strings.TrimSpace(stored)
+	caller = strings.TrimSpace(caller)
+	if stored == "" || caller == "" {
+		// An empty owner never matches, and a caller with no identity is
+		// refused upstream (finding 4). Neither is an ownership claim.
+		return false
+	}
+	if stored == caller {
+		return true
+	}
+	return BareShortId(stored) == BareShortId(caller)
 }
 
 // rowAuthzOwnerValue pulls the declared owner field off a stored

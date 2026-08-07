@@ -93,20 +93,41 @@ func TestRawInsertStampsTheDeclaredOwnerAgainstLiveDatabase(t *testing.T) {
 	_ = waitForQueryResult(t, cs, "db-stamp-3175", 8*time.Second)
 
 	// THE ASSERTION: read the stored row back and look at its owner.
+	//
+	// OrderExpr, not Order: bun's Order() takes a COLUMN NAME and quotes
+	// it, so a pre-quoted `"createdAt"` reached Postgres as
+	// `""createdAt""` and the read failed with
+	// `column ""createdAt"" does not exist` (SQLSTATE 42703). That
+	// surfaced as "the insert did not land a row", which is a SQL bug in
+	// this assertion rather than anything the write path did. OrderExpr
+	// passes the fragment through verbatim, matching every other read of
+	// this column in the repo.
 	var stored concept.MemoryNode
 	require.NoError(t, db.NewSelect().Model(&stored).
-		Where("id = ?", rowId).Order(`"createdAt" DESC`).Limit(1).
+		Where("id = ?", rowId).OrderExpr(`"createdAt" DESC`).Limit(1).
 		Scan(context.Background()), "the insert did not land a row")
 
 	var storedPayload map[string]any
 	require.NoError(t, json.Unmarshal(stored.Payload, &storedPayload))
 
-	if got := storedPayload["ownerUserId"]; got != callerId {
+	// Compared through BareShortId on both sides, the same normalization
+	// the engine's own owner comparison uses (memql#3172). `ownerUserId`
+	// is an outgoing @relationship, so executeWrite canonicalizes the
+	// stamped value after stamping it; asserting one exact spelling here
+	// would pin this test to whichever form the caller happened to be
+	// identified by rather than to the claim, which is WHOSE id landed.
+	got, _ := storedPayload["ownerUserId"].(string)
+	if memqlengine.BareShortId(got) != memqlengine.BareShortId(callerId) {
 		t.Fatalf("the stored row's ownerUserId is %v, want the CALLER %q. A raw insert( "+
 			"short-circuits the planner before any mutation template renders, so "+
 			"`stamp { ownerUserId: actor.userId }` never ran; the engine must supply the "+
 			"declared owner field itself or `@rowAuthz(owner=...)` is an assertion the "+
 			"write path does not keep (memql#3059 / #3175).", got, callerId)
+	}
+	// And the forged owner is gone entirely -- not merely normalized to
+	// something that happens to compare equal.
+	if memqlengine.BareShortId(got) == memqlengine.BareShortId(victimId) {
+		t.Fatalf("the stored owner is still the VICTIM the caller named (%v)", got)
 	}
 	// The rest of the payload is the caller's, untouched: the stamp is
 	// surgical, not a payload rewrite.

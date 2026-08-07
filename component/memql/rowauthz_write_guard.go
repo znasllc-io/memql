@@ -44,6 +44,14 @@ package memql
 // directions. Two spellings of one rule is how a reader and a writer
 // drift into disagreeing about the very thing they both exist to
 // describe.
+//
+// That delegation is what made the canonical-vs-bare defect a one-place
+// fix (memql#3172): the stored owner is CANONICAL because the field is
+// an outgoing `@relationship`, the caller id is BARE, and the comparison
+// underneath was `==`, so this guard refused owners their own writes.
+// The normalization now lives in sameRowAuthzOwner and every surface
+// picked it up at once. Had this file carried its own copy, the read
+// path would have been fixed and this one would still be refusing.
 
 import (
 	"context"

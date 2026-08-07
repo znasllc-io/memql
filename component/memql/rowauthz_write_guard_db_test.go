@@ -83,7 +83,15 @@ func TestWriteToAnotherCallersRowIsRefusedEndToEnd(t *testing.T) {
 				field, before[field], after[field])
 		}
 	}
-	if after["ownerUserId"] != userB {
+	// Compared through sameRowAuthzOwner, the production answer to "is
+	// this row this caller's", rather than by string equality against the
+	// bare id. The owner field is an outgoing @relationship, so the
+	// STORED value is canonical (`v1:identity:user:<userB>`) while userB
+	// here is the bare form the actor envelope carries -- a `!=` between
+	// them fails on a row that is perfectly intact (memql#3172). Asserting
+	// the engine's own rule also means this test cannot pass while the
+	// engine's notion of ownership disagrees with it.
+	if owner, _ := after["ownerUserId"].(string); !sameRowAuthzOwner(owner, userB) {
 		t.Fatalf("the row's owner is now %v, not %s -- the refused write still "+
 			"reassigned it", after["ownerUserId"], userB)
 	}

@@ -323,6 +323,22 @@ type ComparisonExpression struct {
 	Value            any
 	CacheHintSeconds *int
 	FieldSelections  []FieldReference
+
+	// RowAuthzConcept, when set, names the concept whose `@rowAuthz`
+	// declaration produced this comparison (memql#3172). Empty on every
+	// author-written node.
+	//
+	// It exists so the injected term's RHS is canonicalized from the
+	// DECLARATION. The generic canonicalize-RHS pass takes its concept
+	// from extractConceptFromExpression, which answers "" for any filter
+	// that is not a top-level `concept==<id>` equality -- and an owner
+	// field is an `@relationship`, so its stored value is canonical
+	// (`v1:identity:user:u1`) while `actor.userId` resolves to the bare
+	// `u1`. An uncanonicalized injected term matches NOTHING, the owner's
+	// own rows included. Carrying the concept on the node keeps the tier
+	// resolved from the declaration at the canonicalize step exactly as
+	// it is at the injection step.
+	RowAuthzConcept string
 }
 
 func (*ComparisonExpression) isExpressionNode() {}

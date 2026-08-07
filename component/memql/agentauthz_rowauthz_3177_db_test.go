@@ -58,7 +58,10 @@ func TestRevokingAnotherCallersGrantIsRefusedEndToEnd(t *testing.T) {
 	})
 
 	before := latestPayload(t, ctxB, db, agentAuthzConcept, storedId)
-	if before["userId"] != userB {
+	// sameRowAuthzOwner, not `!=`: `userId` is an outgoing @relationship,
+	// so the STORED value is canonical (`v1:identity:user:<userB>`) while
+	// userB is the bare form the actor envelope carries (memql#3172).
+	if owner, _ := before["userId"].(string); !sameRowAuthzOwner(owner, userB) {
 		t.Fatalf("the fixture row is owned by %v, not %s -- the create did not stamp the "+
 			"actor and this test would prove nothing", before["userId"], userB)
 	}
@@ -163,7 +166,10 @@ func TestAGrantCannotChangeHandsThroughItsPayloadEndToEnd(t *testing.T) {
 	}
 
 	after := latestPayload(t, ctxAttacker, db, agentAuthzConcept, storedId)
-	if after["userId"] != attacker {
+	// sameRowAuthzOwner for the same reason as the fixture assertion
+	// above: the stored `userId` is canonical, the bare form is what the
+	// caller is identified by (memql#3172).
+	if owner, _ := after["userId"].(string); !sameRowAuthzOwner(owner, attacker) {
 		t.Fatalf(`the grant changed hands: userId is %v, want %s.
 
 A caller-supplied payload reassigned the row to somebody else while keeping

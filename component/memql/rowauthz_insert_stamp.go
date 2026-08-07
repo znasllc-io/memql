@@ -59,6 +59,27 @@ package memql
 // reader #3172 uses. Two spellings of one rule is how a reader and a
 // writer drift into disagreeing about the very thing they both exist to
 // describe.
+//
+// ID SPELLING, and the ORDERING it rests on (memql#3172). This stamps
+// the caller id exactly as the actor envelope carries it -- normally the
+// BARE `u1` -- and does not canonicalize it. It does not have to:
+// executeWrite runs canonicalizeRelationshipFields immediately AFTER
+// this call (executor_mutation.go), and an owner field is an outgoing
+// `@relationship`, so the stamped value is rewritten to
+// `v1:identity:user:u1` before the payload reaches the validators or the
+// store. That is the spelling every other row of the concept carries and
+// the one the read path compares against.
+//
+// Two consequences, stated rather than left to be rediscovered:
+//
+//   - The ordering is LOAD-BEARING. Move the stamp below the
+//     canonicalizer and the row lands a bare owner in a column every
+//     other row spells canonically.
+//     TestTheOwnerStampRunsBeforeTheRelationshipCanonicaliser pins it.
+//   - There is no double-canonicalization: canonicalizeIdValue returns
+//     an already-`<target>:`-prefixed value unchanged, so a caller
+//     identified canonically and one identified barely converge on the
+//     same stored value (TestStampedOwnerConvergesFromEitherSpelling).
 
 import (
 	"context"

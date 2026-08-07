@@ -453,21 +453,75 @@ func (e *MemQLEngine) compileComparisonExpressionWithContext(expr *ComparisonExp
 // No concept context (top-level expressions with no `concept==X`
 // constraint), no relationship match, or non-string RHS: pass
 // through unchanged.
+//
+// ROW-AUTHZ (memql#3172). A node carrying RowAuthzConcept names its own
+// concept and is canonicalized from THAT, whatever conceptContext says
+// -- including when conceptContext is empty. The injected owner term is
+// exactly the node whose concept cannot be read off the filter: the
+// tier is resolved from the construct's declared binding, so a filter
+// spelled `a || b`, `row.id == ...` or `concept != ...` produces no
+// concept context at all, and an owner field is an @relationship, so an
+// uncanonicalized RHS compares the bare `actor.userId` against a stored
+// `v1:identity:user:<id>` and matches NOTHING -- the owner's own rows
+// included. Routed through this existing pass rather than a second
+// canonicalizer so read and write cannot drift about what "canonical"
+// means.
 func (e *MemQLEngine) canonicalizeRelationshipComparisons(ctx context.Context, expr ExpressionNode, conceptContext string) ExpressionNode {
-	if expr == nil || e == nil || e.concepts == nil || conceptContext == "" {
+	if expr == nil || e == nil || e.concepts == nil {
 		return expr
 	}
 	switch n := expr.(type) {
 	case *ComparisonExpression:
-		// payload.<field> == <value>  -- the only shape we rewrite.
-		if n == nil || len(n.Field.Parts) != 2 {
+		if n == nil {
+			return expr
+		}
+		// ROW-AUTHZ, self-owned form (`@rowAuthz(owner="id")`,
+		// memql#3029). That tier's term names the ROW'S OWN identity
+		// rather than a payload field, so it is `row.id == actor.userId`
+		// and not a `payload.<field>` comparison -- but it has the same
+		// spelling problem: the id column stores canonical ids and
+		// actor.userId resolves to the bare form. The generic id
+		// short->full resolution downstream keys off the filter-derived
+		// concept context, which is "" for exactly the spellings
+		// enforcement is resolved from the declaration for. Canonicalize
+		// it here, against the concept the DECLARATION names, so the two
+		// forms of one tier cannot disagree.
+		//
+		// Inert today (no concept declares the self-owned form; #3029 is
+		// what unblocks it on v1:identity:user) and covered by
+		// TestSelfOwnedInjectedPredicateIsCanonicalised, which declares
+		// one synthetically rather than waiting for the day it bites.
+		if concept := strings.TrimSpace(n.RowAuthzConcept); concept != "" && isRowIdName(n.Field) {
+			str, isStr := n.Value.(string)
+			if !isStr || strings.TrimSpace(str) == "" {
+				return expr
+			}
+			canon, cerr := e.canonicalizeIdValue(ctx, str, concept)
+			if cerr != nil || canon == "" || canon == str {
+				return expr
+			}
+			rewritten := *n
+			rewritten.Value = canon
+			return &rewritten
+		}
+		// payload.<field> == <value>  -- the only other shape we rewrite.
+		if len(n.Field.Parts) != 2 {
 			return expr
 		}
 		if !strings.EqualFold(strings.TrimSpace(n.Field.Parts[0]), "payload") {
 			return expr
 		}
+		// The node's own declaration wins over the filter-derived
+		// context; see the row-authz note above.
+		concept := strings.TrimSpace(n.RowAuthzConcept)
+		if concept == "" {
+			concept = conceptContext
+		}
+		if concept == "" {
+			return expr
+		}
 		fieldName := strings.TrimSpace(n.Field.Parts[1])
-		canon, ok := e.canonicalizeRelationshipFieldValue(ctx, conceptContext, fieldName, n.Value)
+		canon, ok := e.canonicalizeRelationshipFieldValue(ctx, concept, fieldName, n.Value)
 		if !ok {
 			return expr
 		}
