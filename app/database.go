@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	memoryNodesDatabase "github.com/znasllc-io/memql/component/database/memory-nodes"
-	conceptSeeder "github.com/znasllc-io/memql/component/database/memory-nodes/seeder"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/observe"
 	"github.com/znasllc-io/memql/component/server"
@@ -14,8 +13,7 @@ import (
 	"github.com/uptrace/bun"
 )
 
-// databaseAndConcepts creates the database, loads and validates concepts,
-// and sets up the concept seeder dependency.
+// databaseAndConcepts creates the database and loads and validates concepts.
 func (a *App) databaseAndConcepts() {
 	mnd, err := a.overrides.NewDatabase()
 	if err != nil {
@@ -43,17 +41,13 @@ func (a *App) databaseAndConcepts() {
 
 	server.RegisterConceptsEndpoint(a.mux, a.registry)
 
-	// Pass nil for logger - the seeder creates its own via common.NewLogger
-	seedRunner, err := conceptSeeder.NewRunner(a.db, a.registry, nil)
-	if err != nil {
-		a.fatal("failed to initialize concept seeder", "error", err)
-	}
-	conceptSeedDep := conceptSeeder.NewDependency(seedRunner, nil)
-
+	// The legacy `seed.memql` sidecar seeder used to be constructed and run
+	// here. It is gone (memql#3176): it wrote via concept.Create directly
+	// against the store, bypassing executeWrite and therefore every write
+	// guard hooked there. Authored seeds go through the SeedMaterializer,
+	// which takes the guarded path. See the guard in
+	// unguarded_concept_create_test.go at the repo root.
 	a.Dependencies = append(a.Dependencies, a.db)
-	if conceptSeedDep != nil {
-		a.Dependencies = append(a.Dependencies, conceptSeedDep)
-	}
 
 	// Readiness probe (#657): GET /readyz asserts critical schema presence so a
 	// deploy gate can prove migrations actually applied WITHOUT DB credentials
