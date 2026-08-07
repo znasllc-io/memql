@@ -18,6 +18,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/node"
 	nodev1 "github.com/znasllc-io/memql/component/node/gen"
 	"github.com/znasllc-io/memql/component/safety"
 	"github.com/znasllc-io/memql/core/id"
@@ -340,12 +341,39 @@ func (i *Integration) tryForward(ctx context.Context, planId, action string, inn
 	if err != nil {
 		return errorResultNode(planId, action, "encode_args", err.Error(), started), true
 	}
+	// The mandatory assertion (memql#3205 / memql#3219). This is a SECOND hop:
+	// the agent node is already running inside a forward it accepted, so the
+	// assertion is RE-ASSERTED from the ctx rather than rebuilt. Rebuilding it
+	// from the AccessContext would be a downgrade -- an AccessContext carries
+	// no credential class and no role ceiling, so a BADGE session would reach
+	// the workbench as class="user" with no ceiling, and "no badge"
+	// indistinguishable from "not stated" is exactly the property memql#3205
+	// removed from the AI-forward path.
+	//
+	// FAIL CLOSED when there is none. In cluster mode every workbench dispatch
+	// runs inside a forwarded agent turn, so an absent assertion means the call
+	// graph changed rather than that this call is exempt. The alternative is
+	// emitting an envelope the workbench node must then decide what to do with,
+	// which is how a dead auth carrier gets born in the first place.
+	//
+	// It returns a structured dispatchResult so the tool loop surfaces it to
+	// the LLM rather than crashing, and it does NOT fall back to local dispatch:
+	// the per-Plan workspace lives on the workbench node, so running locally
+	// would silently operate on a different filesystem.
+	authority, ok := auth.ForwardedAuthorityFromContext(ctx)
+	if !ok {
+		return errorResultNode(planId, action, "no_forwarded_authority",
+			"workbench forward requires the assertion this node accepted; none is bound to the call context",
+			started), true
+	}
+
 	req := &nodev1.WorkbenchForwardRequest{
-		PlanId:   planId,
-		Action:   action,
-		ArgsJson: argsJSON,
-		AgentId:  stringArg(allArgs["agentId"], ""),
-		TaskId:   stringArg(allArgs["taskId"], ""),
+		PlanId:    planId,
+		Action:    action,
+		ArgsJson:  argsJSON,
+		AgentId:   stringArg(allArgs["agentId"], ""),
+		TaskId:    stringArg(allArgs["taskId"], ""),
+		Authority: node.ForwardedAuthorityToProto(authority, i.router.SelfNodeId(), i.router.SelfNodeType()),
 	}
 	resp, err := i.router.Forward(ctx, req)
 	if errors.Is(err, ErrNoWorkbenchPeer) {

@@ -344,109 +344,33 @@ func (r *AiForwardRouter) selfNodeType() string {
 	return r.peerMgr.SelfNodeType()
 }
 
-// forwardedAuthorityToProto / forwardedAuthorityFromProto are the ONLY
-// adaptation between the wire message and component/auth's plain-Go type.
-// component/auth cannot import component/node (node -> identity/verifier ->
-// auth already exists), so the grpc layer owns the mapping.
+// forwardedAuthorityToProto / forwardedAuthorityFromProto delegate to the ONE
+// mapping between the wire message and component/auth's plain-Go type, which
+// lives in component/node (memql#3219). component/auth cannot import
+// component/node, and the workbench forward now carries the same assertion, so
+// the mapping sits in the package both forwards already depend on rather than
+// being copied into each.
 func forwardedAuthorityToProto(a auth.ForwardedAuthority, originNodeId, originNodeType string) *nodev1.ForwardedAuthority {
-	out := &nodev1.ForwardedAuthority{
-		ContractVersion: a.Version,
-		Subject:         a.Subject,
-		PrimaryEmail:    a.PrimaryEmail,
-		Role:            string(a.Role),
-		IdentityId:      a.IdentityId,
-		CredentialClass: a.CredentialClass,
-		RoleCeiling:     string(a.RoleCeiling),
-		OriginNodeId:    originNodeId,
-		OriginNodeType:  originNodeType,
-		// Provenance only (memql#3221) -- see the field comments on
-		// auth.ForwardedAuthority. Carried so identity.displayName lands the
-		// same on a row this hop writes as on one the user writes directly.
-		FirstName: a.FirstName,
-		LastName:  a.LastName,
-	}
-	switch a.Kind {
-	case auth.ForwardedPrincipalUser:
-		out.PrincipalKind = nodev1.ForwardedPrincipalKind_FORWARDED_PRINCIPAL_KIND_USER
-	case auth.ForwardedPrincipalSystem:
-		out.PrincipalKind = nodev1.ForwardedPrincipalKind_FORWARDED_PRINCIPAL_KIND_SYSTEM
-	default:
-		out.PrincipalKind = nodev1.ForwardedPrincipalKind_FORWARDED_PRINCIPAL_KIND_UNSPECIFIED
-	}
-	if !a.ExpiresAt.IsZero() {
-		out.ExpiresAtUnix = a.ExpiresAt.Unix()
-	}
-	if !a.AssertedAt.IsZero() {
-		out.AssertedAtUnix = a.AssertedAt.Unix()
-	}
-	return out
-}
-
-// bindForwardedContext is the ACCEPT-AND-BIND step of the mesh forwarded-auth
-// contract: given the verified decision and the attribution claims that
-// travelled beside it, it produces the context every worker-side handler reads.
-//
-// Three stamps, three distinct jobs.
-//   - client origin: this work originated with a client request, not with a
-//     server-initiated sweep (#2889).
-//   - forwarded claims: TokenInfo for `createdBy` ATTRIBUTION only. Never an
-//     authorization input any more. This is also what carries the
-//     provenance-only display name that component/metadata stamps as
-//     identity.displayName on every row a mutation writes (memql#3221).
-//   - access: THE authorization decision, and it comes from the verified
-//     assertion alone -- no LoadFromClaims, no FallbackFromClaims, no
-//     userByIdSystem keyed by a wire-supplied subject, and therefore no
-//     per-message DB round trip either. The comment this replaced claimed
-//     "so worker-side ACLs work" while setting no AccessContext at all, which
-//     is memql#2876.
-//
-// A named function rather than three inline lines because it is the only place
-// the two carriers meet, and it is reachable from a test: every existing
-// forwarded-path test exercises a REFUSAL, and a refusal returns before
-// reaching here. `access` MUST already have come from VerifyForwardedAuthority;
-// this binds what it is handed.
-func bindForwardedContext(ctx context.Context, claims map[string]string, access *auth.AccessContext) context.Context {
-	ctx = auth.ContextWithClientOrigin(ctx)
-	ctx = auth.ContextWithForwardedClaims(ctx, claims)
-	return auth.ContextWithAccess(ctx, access)
+	return node.ForwardedAuthorityToProto(a, originNodeId, originNodeType)
 }
 
 func forwardedAuthorityFromProto(p *nodev1.ForwardedAuthority) auth.ForwardedAuthority {
-	if p == nil {
-		// The zero value, which VerifyForwardedAuthority refuses. An ABSENT
-		// assertion and a malformed one take the same path deliberately: the
-		// contract's premise is that absence is never read as safe.
-		return auth.ForwardedAuthority{}
-	}
-	a := auth.ForwardedAuthority{
-		Version:         p.GetContractVersion(),
-		Subject:         p.GetSubject(),
-		PrimaryEmail:    p.GetPrimaryEmail(),
-		Role:            auth.Role(p.GetRole()),
-		IdentityId:      p.GetIdentityId(),
-		CredentialClass: p.GetCredentialClass(),
-		RoleCeiling:     auth.Role(p.GetRoleCeiling()),
-		OriginNodeId:    p.GetOriginNodeId(),
-		OriginNodeType:  p.GetOriginNodeType(),
-		// Provenance only. Read back so the worker's metadata collector can
-		// stamp identity.displayName; VerifyForwardedAuthority never looks at
-		// them and the AccessContext it returns has nowhere to put them.
-		FirstName: p.GetFirstName(),
-		LastName:  p.GetLastName(),
-	}
-	switch p.GetPrincipalKind() {
-	case nodev1.ForwardedPrincipalKind_FORWARDED_PRINCIPAL_KIND_USER:
-		a.Kind = auth.ForwardedPrincipalUser
-	case nodev1.ForwardedPrincipalKind_FORWARDED_PRINCIPAL_KIND_SYSTEM:
-		a.Kind = auth.ForwardedPrincipalSystem
-	}
-	if v := p.GetExpiresAtUnix(); v > 0 {
-		a.ExpiresAt = time.Unix(v, 0)
-	}
-	if v := p.GetAssertedAtUnix(); v > 0 {
-		a.AssertedAt = time.Unix(v, 0)
-	}
-	return a
+	return node.ForwardedAuthorityFromProto(p)
+}
+
+// bindForwardedContext delegates to auth.BindForwardedContext, the accept-and-
+// bind step both mesh receivers share (memql#3219). It also carries the
+// verified assertion onto the ctx as chain of custody, so a second hop out of
+// this worker -- the workbench forward -- re-asserts what was proved here
+// rather than rebuilding an assertion from an AccessContext that carries no
+// credential class and no ceiling.
+//
+// A named function rather than inline calls because it is the only place the
+// carriers meet, and it is reachable from a test: every existing
+// forwarded-path test exercises a REFUSAL, and a refusal returns before
+// reaching here.
+func bindForwardedContext(ctx context.Context, claims map[string]string, access *auth.AccessContext, authority auth.ForwardedAuthority) context.Context {
+	return auth.BindForwardedContext(ctx, claims, access, authority)
 }
 
 // -----------------------------------------------------------------------------
@@ -532,7 +456,7 @@ func (s *service) HandleForwardedRequest(
 		return
 	}
 
-	ctx = bindForwardedContext(ctx, req.GetAuth(), access)
+	ctx = bindForwardedContext(ctx, req.GetAuth(), access, authority)
 
 	identity, _ := auth.UserIdentityFromContext(ctx)
 	if identity.Subject == "" {

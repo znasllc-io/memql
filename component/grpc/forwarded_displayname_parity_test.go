@@ -89,7 +89,7 @@ func forwardedPathContext(t *testing.T, subject, email, first, last string) cont
 		t.Fatalf("the receiver refused a well-formed assertion: %v", err)
 	}
 
-	return bindForwardedContext(context.Background(), principal.Claims, access)
+	return bindForwardedContext(context.Background(), principal.Claims, access, received)
 }
 
 // The acceptance criterion, asserted where it actually lands: on the metadata
@@ -178,7 +178,7 @@ func TestASystemForwardCarriesNoDisplayName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("VerifyForwardedAuthority: %v", err)
 	}
-	m := collector.Collect(bindForwardedContext(context.Background(), claims, access))
+	m := collector.Collect(bindForwardedContext(context.Background(), claims, access, a))
 	if got := m["identity.displayName"]; got != "" {
 		t.Errorf("a system-principal write stamped identity.displayName=%q; there is no person "+
 			"behind this hop to name", got)

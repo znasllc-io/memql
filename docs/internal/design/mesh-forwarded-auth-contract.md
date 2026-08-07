@@ -290,9 +290,27 @@ makes an unstated ceiling undetectable.
   agent tool loop across replicas, and carries **no authority at all**. It is a
   different transport with a different message and is out of scope here; it
   wants the same treatment.
-- **`WorkbenchForwardRequest`** declares an `auth` map that no producer fills
-  and no receiver reads. It should adopt this message when
-  `MEMQL_WORKBENCH_REMOTE` ships.
+- ~~**`WorkbenchForwardRequest`** declares an `auth` map that no producer fills
+  and no receiver reads.~~ **Closed (memql#3219).** It carries
+  `ForwardedAuthority` now, and field 2 is `reserved` so the claims-map shape
+  cannot come back. It adopted the contract *before* getting a producer rather
+  than after, because "get it right when remote-workbench mode ships" is how a
+  `map<string, string>` auth carrier reached three call sites in the first
+  place. Two differences from the AI forward, both deliberate:
+
+  - **No attribution claims map beside the assertion.** The receiver derives
+    the `createdBy` claims from the authority itself
+    (`ForwardedAuthority.Principal`), so "claims without an authority" is
+    inexpressible on this hop rather than merely discouraged, and there is no
+    second carrier that could drift from the first.
+  - **The producer re-asserts rather than rebuilds.** The workbench forward is
+    a SECOND hop: the agent node is already inside a forward it accepted, so
+    `auth.ForwardedAuthorityFromContext` returns the assertion this node
+    verified and the producer sends that. Rebuilding one from the
+    `AccessContext` would be a downgrade -- an `AccessContext` carries no
+    credential class and no ceiling, so a badge session would arrive as
+    `class="user"` with none, which is the property this contract exists to
+    remove. Absent assertion -> the forward fails closed.
 - **Authority expansion is real and intended.** A forwarded owner session now
   binds owner on the receiving node, where before it bound nothing. That is the
   fix; it is also a genuine increase in what worker-side DSL can do, and the

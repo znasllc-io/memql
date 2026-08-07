@@ -1840,19 +1840,34 @@ func (x *AiForwardCancel) GetRequestId() string {
 // as JSON to keep the wire shape stable across action-specific arg
 // variants without exploding the proto with one oneof per action.
 //
-// `auth` carries the originating principal's claims (subject, email,
-// role) so the workbench node can reconstruct the actor context.
+// `authority` is the mandatory authorization assertion (memql#3205), and the
+// workbench node refuses any envelope that does not carry a verifiable one.
+//
+// It replaces a `map<string, string> auth` that field 2 reserved below used to
+// hold. That field's own doc comment claimed it "carries the originating
+// principal's claims so the workbench node can reconstruct the actor context";
+// nothing populated it and nothing read it, and the only reference to it
+// anywhere in the tree was its generated getter (memql#3219). It is reserved
+// rather than reused: a claims map cannot carry a role ceiling provably --
+// "no badge" and "the key is missing" are the same value -- which is the
+// property memql#3205 removed from the AI-forward path and memql#2814 removed
+// from QueryForward.
+//
+// Unlike AiForwardRequest, this message carries NO attribution claims map
+// beside the assertion. The receiver derives the createdBy claims from the
+// authority itself (auth.ForwardedAuthority.Principal), so "claims without an
+// authority" is inexpressible here rather than merely discouraged.
 type WorkbenchForwardRequest struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	RequestId string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	Auth      map[string]string      `protobuf:"bytes,2,rep,name=auth,proto3" json:"auth,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	PlanId    string                 `protobuf:"bytes,4,opt,name=plan_id,json=planId,proto3" json:"plan_id,omitempty"`
 	Action    string                 `protobuf:"bytes,5,opt,name=action,proto3" json:"action,omitempty"`
 	ArgsJson  []byte                 `protobuf:"bytes,6,opt,name=args_json,json=argsJson,proto3" json:"args_json,omitempty"`
 	AgentId   string                 `protobuf:"bytes,7,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
 	TaskId    string                 `protobuf:"bytes,8,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
 	// Optional timeout hint; the workbench node clamps to its own caps.
-	TimeoutSec    int32 `protobuf:"varint,9,opt,name=timeout_sec,json=timeoutSec,proto3" json:"timeout_sec,omitempty"`
+	TimeoutSec    int32               `protobuf:"varint,9,opt,name=timeout_sec,json=timeoutSec,proto3" json:"timeout_sec,omitempty"`
+	Authority     *ForwardedAuthority `protobuf:"bytes,10,opt,name=authority,proto3" json:"authority,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1892,13 +1907,6 @@ func (x *WorkbenchForwardRequest) GetRequestId() string {
 		return x.RequestId
 	}
 	return ""
-}
-
-func (x *WorkbenchForwardRequest) GetAuth() map[string]string {
-	if x != nil {
-		return x.Auth
-	}
-	return nil
 }
 
 func (x *WorkbenchForwardRequest) GetPlanId() string {
@@ -1941,6 +1949,13 @@ func (x *WorkbenchForwardRequest) GetTimeoutSec() int32 {
 		return x.TimeoutSec
 	}
 	return 0
+}
+
+func (x *WorkbenchForwardRequest) GetAuthority() *ForwardedAuthority {
+	if x != nil {
+		return x.Authority
+	}
+	return nil
 }
 
 // WorkbenchForwardResponse carries the dispatch result back to the
@@ -2278,21 +2293,19 @@ const file_node_proto_rawDesc = "" +
 	"\x04done\x18\x03 \x01(\bR\x04done\"0\n" +
 	"\x0fAiForwardCancel\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\"\xf3\x02\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\"\xc1\x02\n" +
 	"\x17WorkbenchForwardRequest\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x12L\n" +
-	"\x04auth\x18\x02 \x03(\v28.znasllc.memql.node.v1.WorkbenchForwardRequest.AuthEntryR\x04auth\x12\x17\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x17\n" +
 	"\aplan_id\x18\x04 \x01(\tR\x06planId\x12\x16\n" +
 	"\x06action\x18\x05 \x01(\tR\x06action\x12\x1b\n" +
 	"\targs_json\x18\x06 \x01(\fR\bargsJson\x12\x19\n" +
 	"\bagent_id\x18\a \x01(\tR\aagentId\x12\x17\n" +
 	"\atask_id\x18\b \x01(\tR\x06taskId\x12\x1f\n" +
 	"\vtimeout_sec\x18\t \x01(\x05R\n" +
-	"timeoutSec\x1a7\n" +
-	"\tAuthEntry\x12\x10\n" +
-	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01J\x04\b\x03\x10\x04R\tpartition\"\xa0\x01\n" +
+	"timeoutSec\x12G\n" +
+	"\tauthority\x18\n" +
+	" \x01(\v2).znasllc.memql.node.v1.ForwardedAuthorityR\tauthorityJ\x04\b\x02\x10\x03J\x04\b\x03\x10\x04R\x04authR\tpartition\"\xa0\x01\n" +
 	"\x18WorkbenchForwardResponse\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12!\n" +
@@ -2334,7 +2347,7 @@ func file_node_proto_rawDescGZIP() []byte {
 }
 
 var file_node_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_node_proto_msgTypes = make([]protoimpl.MessageInfo, 30)
+var file_node_proto_msgTypes = make([]protoimpl.MessageInfo, 29)
 var file_node_proto_goTypes = []any{
 	(NodeHealthStatus)(0),            // 0: znasllc.memql.node.v1.NodeHealthStatus
 	(ForwardedPrincipalKind)(0),      // 1: znasllc.memql.node.v1.ForwardedPrincipalKind
@@ -2367,9 +2380,8 @@ var file_node_proto_goTypes = []any{
 	nil,                              // 28: znasllc.memql.node.v1.SpawnRequest.LabelsEntry
 	nil,                              // 29: znasllc.memql.node.v1.SpawnRequest.EnvEntry
 	nil,                              // 30: znasllc.memql.node.v1.AiForwardRequest.AuthEntry
-	nil,                              // 31: znasllc.memql.node.v1.WorkbenchForwardRequest.AuthEntry
-	(*timestamppb.Timestamp)(nil),    // 32: google.protobuf.Timestamp
-	(*structpb.Struct)(nil),          // 33: google.protobuf.Struct
+	(*timestamppb.Timestamp)(nil),    // 31: google.protobuf.Timestamp
+	(*structpb.Struct)(nil),          // 32: google.protobuf.Struct
 }
 var file_node_proto_depIdxs = []int32{
 	23, // 0: znasllc.memql.node.v1.NodeClientMessage.metadata:type_name -> znasllc.memql.node.v1.NodeClientMessage.MetadataEntry
@@ -2401,7 +2413,7 @@ var file_node_proto_depIdxs = []int32{
 	20, // 26: znasllc.memql.node.v1.NodeServerMessage.workbench_forward_response:type_name -> znasllc.memql.node.v1.WorkbenchForwardResponse
 	25, // 27: znasllc.memql.node.v1.NodeHello.labels:type_name -> znasllc.memql.node.v1.NodeHello.LabelsEntry
 	7,  // 28: znasllc.memql.node.v1.NodeWelcome.peers:type_name -> znasllc.memql.node.v1.PeerInfo
-	32, // 29: znasllc.memql.node.v1.NodeHeartbeat.ts:type_name -> google.protobuf.Timestamp
+	31, // 29: znasllc.memql.node.v1.NodeHeartbeat.ts:type_name -> google.protobuf.Timestamp
 	0,  // 30: znasllc.memql.node.v1.NodeHeartbeat.health:type_name -> znasllc.memql.node.v1.NodeHealthStatus
 	26, // 31: znasllc.memql.node.v1.NodeHeartbeat.metrics:type_name -> znasllc.memql.node.v1.NodeHeartbeat.MetricsEntry
 	0,  // 32: znasllc.memql.node.v1.PeerInfo.health:type_name -> znasllc.memql.node.v1.NodeHealthStatus
@@ -2409,12 +2421,12 @@ var file_node_proto_depIdxs = []int32{
 	7,  // 34: znasllc.memql.node.v1.PeerIntroduction.peers:type_name -> znasllc.memql.node.v1.PeerInfo
 	28, // 35: znasllc.memql.node.v1.SpawnRequest.labels:type_name -> znasllc.memql.node.v1.SpawnRequest.LabelsEntry
 	29, // 36: znasllc.memql.node.v1.SpawnRequest.env:type_name -> znasllc.memql.node.v1.SpawnRequest.EnvEntry
-	32, // 37: znasllc.memql.node.v1.EventForward.ts:type_name -> google.protobuf.Timestamp
-	33, // 38: znasllc.memql.node.v1.EventForward.payload:type_name -> google.protobuf.Struct
+	31, // 37: znasllc.memql.node.v1.EventForward.ts:type_name -> google.protobuf.Timestamp
+	32, // 38: znasllc.memql.node.v1.EventForward.payload:type_name -> google.protobuf.Struct
 	30, // 39: znasllc.memql.node.v1.AiForwardRequest.auth:type_name -> znasllc.memql.node.v1.AiForwardRequest.AuthEntry
 	16, // 40: znasllc.memql.node.v1.AiForwardRequest.authority:type_name -> znasllc.memql.node.v1.ForwardedAuthority
 	1,  // 41: znasllc.memql.node.v1.ForwardedAuthority.principal_kind:type_name -> znasllc.memql.node.v1.ForwardedPrincipalKind
-	31, // 42: znasllc.memql.node.v1.WorkbenchForwardRequest.auth:type_name -> znasllc.memql.node.v1.WorkbenchForwardRequest.AuthEntry
+	16, // 42: znasllc.memql.node.v1.WorkbenchForwardRequest.authority:type_name -> znasllc.memql.node.v1.ForwardedAuthority
 	2,  // 43: znasllc.memql.node.v1.NodeService.Stream:input_type -> znasllc.memql.node.v1.NodeClientMessage
 	3,  // 44: znasllc.memql.node.v1.NodeService.Stream:output_type -> znasllc.memql.node.v1.NodeServerMessage
 	44, // [44:45] is the sub-list for method output_type
@@ -2464,7 +2476,7 @@ func file_node_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_node_proto_rawDesc), len(file_node_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   30,
+			NumMessages:   29,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
