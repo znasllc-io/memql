@@ -50,6 +50,7 @@ COPY go.mod go.sum ./
 COPY component/actions/go.* ./component/actions/
 COPY component/architecture/go.* ./component/architecture/
 COPY component/auth/go.* ./component/auth/
+COPY component/automations/go.* ./component/automations/
 COPY component/bus/go.* ./component/bus/
 COPY component/bus/gen/go.* ./component/bus/gen/
 COPY component/config/go.* ./component/config/
@@ -58,30 +59,41 @@ COPY component/deploycontrol/go.* ./component/deploycontrol/
 COPY component/events/go.* ./component/events/
 COPY component/fileprocessor/go.* ./component/fileprocessor/
 COPY component/genesis/go.* ./component/genesis/
+COPY component/grpc/go.* ./component/grpc/
 COPY component/grpc/gen/go.* ./component/grpc/gen/
 COPY component/harness/go.* ./component/harness/
 COPY component/healing/go.* ./component/healing/
 COPY component/identity/go.* ./component/identity/
 COPY component/identity/admin/go.* ./component/identity/admin/
+COPY component/inbound/go.* ./component/inbound/
 COPY component/language/go.* ./component/language/
 COPY component/language/annotations/go.* ./component/language/annotations/
 COPY component/language/ast/go.* ./component/language/ast/
 COPY component/language/dslclause/go.* ./component/language/dslclause/
+COPY component/mcp/go.* ./component/mcp/
 COPY component/memql/go.* ./component/memql/
 COPY component/metadata/go.* ./component/metadata/
 COPY component/metrics/go.* ./component/metrics/
 COPY component/node/go.* ./component/node/
 COPY component/node/gen/go.* ./component/node/gen/
 COPY component/observe/go.* ./component/observe/
+COPY component/outbound/go.* ./component/outbound/
 COPY component/planner/go.* ./component/planner/
 COPY component/polyphon/go.* ./component/polyphon/
 COPY component/provenance/go.* ./component/provenance/
+COPY component/router/go.* ./component/router/
 COPY component/safety/go.* ./component/safety/
 COPY component/secret/go.* ./component/secret/
+COPY component/server/go.* ./component/server/
+COPY component/service/go.* ./component/service/
+COPY component/worker/go.* ./component/worker/
 COPY core/go.* ./core/
 COPY docs/go.* ./docs/
 COPY dsl/go.* ./dsl/
+COPY integrations/go.* ./integrations/
 COPY integrations/email/go.* ./integrations/email/
+COPY integrations/openai/go.* ./integrations/openai/
+COPY integrations/stt/go.* ./integrations/stt/
 # BuildKit cache mounts (build-speed #1506): the module cache (/go/pkg/mod)
 # and the Go build cache (/root/.cache/go-build) persist across builds, so a
 # rebuild of an unchanged tree reuses downloaded modules + already-compiled

@@ -291,6 +291,14 @@ func TestNodeBootstrapIsNotOnTheGatedPath(t *testing.T) {
 	}
 }
 
+// repoRootForGateTest ascends to the REPOSITORY root.
+//
+// It looks for go.work, not go.mod. The tree is ~48 modules since memql#3228
+// and component/grpc is one of them (memql#3244), so a go.mod walk stops at
+// this package -- and both callers then read a repo-relative path off the
+// wrong root (`component/grpc/component/node/bootstrap.go`) or report a call
+// site under the wrong prefix. go.work exists exactly once, at the repository
+// root, which is what these gates mean by "the repo".
 func repoRootForGateTest(t *testing.T) string {
 	t.Helper()
 	dir, err := os.Getwd()
@@ -298,7 +306,7 @@ func repoRootForGateTest(t *testing.T) string {
 		t.Fatalf("getwd: %v", err)
 	}
 	for i := 0; i < 10; i++ {
-		if _, statErr := os.Stat(filepath.Join(dir, "go.mod")); statErr == nil {
+		if _, statErr := os.Stat(filepath.Join(dir, "go.work")); statErr == nil {
 			return dir
 		}
 		parent := filepath.Dir(dir)
@@ -307,7 +315,7 @@ func repoRootForGateTest(t *testing.T) string {
 		}
 		dir = parent
 	}
-	t.Fatal("could not locate repo root (no go.mod above cwd)")
+	t.Fatal("could not locate repo root (no go.work above cwd)")
 	return ""
 }
 

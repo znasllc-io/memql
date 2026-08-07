@@ -291,14 +291,17 @@ func importsWorkerTokenStore(f *ast.File) bool {
 	return false
 }
 
-// repoRootFromGRPC walks up from this package to the module root.
+// repoRootFromGRPC walks up from this package to the REPOSITORY root.
+//
+// go.work, not go.mod: component/grpc is its own module since memql#3244, so a
+// go.mod walk would find this package rather than the repository.
 func repoRootFromGRPC() (string, error) {
 	dir, err := os.Getwd()
 	if err != nil {
 		return "", err
 	}
 	for {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+		if _, err := os.Stat(filepath.Join(dir, "go.work")); err == nil {
 			return dir, nil
 		}
 		parent := filepath.Dir(dir)
