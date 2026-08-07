@@ -197,7 +197,13 @@ create_tags() {
 			echo "  would tag $tag -> $(git rev-parse --short "$commit")"
 			continue
 		fi
-		if ! git tag -a "$tag" -m "$m v$version" "$commit"; then
+		# `^{}` PEELS to the commit. Without it, tagging the annotated root
+		# tag creates a tag-of-a-tag: git warns, and the ref means something
+		# subtly different from every other tag in the repo. Both git and the
+		# Go proxy dereference it, so this is hygiene rather than a bug fix --
+		# but a module tag is immutable, so hygiene is cheap here and a
+		# correction is not.
+		if ! git tag -a "$tag" -m "$m v$version" "$commit^{}"; then
 			echo "ERROR: failed to create $tag" >&2
 			status=5
 			continue

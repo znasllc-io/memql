@@ -205,6 +205,48 @@ The `wire` modules are exempt by construction: they are L0 — no
 internal requires at all — which is why `wire` is the line that could
 be published first.
 
+### `wire` is published, and resolvable — demonstrated
+
+The three wire tags were cut at `v0.15.0` on 2026-08-07:
+
+```
+component/grpc/gen/v0.15.0
+component/node/gen/v0.15.0
+component/bus/gen/v0.15.0
+```
+
+An external module — outside this repository, with **no `replace`
+directive of any kind** — resolves and compiles against it:
+
+```
+$ cat go.mod
+module example.com/wireconsumer
+go 1.26.1
+require github.com/znasllc-io/memql/component/grpc/gen v0.15.0
+...
+
+$ GOWORK=off go run .
+wire module resolved from the proxy; round-tripped id="demo-1" (8 bytes)
+```
+
+and the proxy agrees about what it published:
+
+```
+$ curl -s https://proxy.golang.org/github.com/znasllc-io/memql/component/grpc/gen/@v/v0.15.0.info
+{"Version":"v0.15.0", ..., "Subdir":"component/grpc/gen",
+ "Hash":"d48b30b52be06c8768c86276817f72a7dd9bcece"}
+```
+
+`Subdir` and `Hash` are the point: the proxy serves the wire tier from
+the same commit the `v0.15.0` release was cut from. The module line and
+the release line agree.
+
+`engine` cannot be published at `v0.15.0` — its modules did not exist at
+that commit. Its line opens at the first release cut after
+[memql#3228](https://github.com/znasllc-io/memql/issues/3228) lands, with
+`make tag-submodules VERSION=X.Y.Z LINE=engine`, and only once the
+release commit has rewritten the placeholders described above.
+
 ### Consumers: what this means for the per-module `replace` set
 
 [`memql-cockpit`](https://github.com/znasllc-io/memql-cockpit) consumes
