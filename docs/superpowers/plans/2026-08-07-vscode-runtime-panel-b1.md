@@ -1813,6 +1813,8 @@ cd ../../editors/vscode && npm install --no-audit --no-fund
 
 Both packages must be built before the extension installs them — `file:` dependencies resolve `main`/`types` into `dist/`.
 
+Note: `sdk/ts` has no committed `package-lock.json`, which is why every target that installs it uses `npm install` rather than `npm ci`. Do not commit that lockfile as part of this task; it is a pre-existing repo-wide decision, out of scope for B1.
+
 - [ ] **Step 2: Re-run the extension manifest drift guards**
 
 ```bash
@@ -2094,9 +2096,14 @@ In `Makefile`, replace the `vscode-test` target added in Task 5 with:
 ## Build the workspace packages the extension depends on via `file:`. Their
 ## dist/ must exist before `npm ci` in editors/vscode can resolve them, so a
 ## clean checkout needs this first.
+##
+## sdk/ts uses `npm install`, not `npm ci`: its package-lock.json is not
+## committed, and `npm ci` fails without one. This matches the existing
+## sdk-ts-install target. sdk/ts-viewkit does commit its lockfile, so it gets
+## the reproducible `npm ci`.
 vscode-deps:
-	cd sdk/ts && npm ci --no-audit --no-fund && npm run build
-	cd sdk/ts-viewkit && npm install --no-audit --no-fund && npm run build
+	cd sdk/ts && npm install --no-audit --no-fund && npm run build
+	cd sdk/ts-viewkit && npm ci --no-audit --no-fund && npm run build
 
 ## Run the VS Code extension's unit tests. Covers only modules that do not
 ## import `vscode`; the API layer is exercised by packaging, not unit tests.
