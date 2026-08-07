@@ -468,7 +468,7 @@ BackgroundLoop:
 					args = make(map[string]any)
 				}
 				injectAgentContext(tc.Name, args, turnCtx)
-				if _, execErr := r.stamper.ExecuteToolByName(ctx, tc.Name, args); execErr != nil {
+				if _, execErr := r.stamper.ExecuteToolByName(agentToolCallContext(ctx, tc.Name, turnCtx), tc.Name, args); execErr != nil {
 					r.logger.Warn("agent background: tool execution failed",
 						"tool", tc.Name, "error", execErr)
 					sink.ToolResult(tc.ID, "", execErr.Error())
@@ -519,7 +519,7 @@ BackgroundLoop:
 				continue
 			}
 			injectAgentContext(tc.Name, args, turnCtx)
-			result, execErr := r.stamper.ExecuteToolByName(ctx, tc.Name, args)
+			result, execErr := r.stamper.ExecuteToolByName(agentToolCallContext(ctx, tc.Name, turnCtx), tc.Name, args)
 			var content string
 			if execErr != nil {
 				se := memql.ClassifyToolError(execErr)
