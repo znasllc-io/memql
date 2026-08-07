@@ -14,7 +14,7 @@ require (
 require (
 	github.com/oschwald/maxminddb-golang v1.13.0 // indirect
 	github.com/znasllc-io/memql/core v0.0.0 // indirect
-	golang.org/x/sys v0.20.0 // indirect
+	golang.org/x/sys v0.47.0 // indirect
 )
 
 replace github.com/znasllc-io/memql/component/auth => ../auth
