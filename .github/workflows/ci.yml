@@ -1098,7 +1098,58 @@ jobs:
           while read -r dir; do
             echo "::group::GOWORK=off $dir"
             if ! ( cd "$dir" && GOWORK=off go build ./... && GOWORK=off go vet ./... ); then
-              echo "::error::$dir fails to build or vet with GOWORK=off -- it imports a package no module it requires provides (a dependency-direction violation), or its go.mod/go.sum is out of date"
+              echo "::error::$dir fails to build or vet with GOWORK=off -- it imports a package no module it requires provides (a dependency-direction violation). If the message above is 'updates to go.mod needed', it is instead a stale go.mod and the tidy step below prints the exact delta"
+              status=1
+            fi
+            echo "::endgroup::"
+          done < <(find . -name go.mod -not -path './.git/*' -printf '%h\n' | sed 's|^\./||;s|^\.$|.|' | sort)
+          exit "$status"
+      # A nested module's go.mod is a function of its RELATIVE-PATH SIBLINGS,
+      # not only of its own file (memql#3280). component/database carries
+      #
+      #     replace github.com/znasllc-io/memql/core => ../../core
+      #
+      # so bumping core/go.mod's indirect set changes what component/database's
+      # own go.mod must say -- while touching none of its files. Dependabot has
+      # no model of that edge: it resolves each module independently, applies
+      # the bump correctly to core, and leaves the five modules that replace
+      # core stale and untouched, so they look uninvolved in review.
+      #
+      # That is how `main` went red on 2026-08-07. PR #3269 bumped core; PR
+      # #3273 created component/database. Each was green on its own branch --
+      # #3269's base predates the module existing, #3273's base predates the
+      # bump -- and NEITHER TREE EVER CONTAINED THE COMBINATION. A semantic
+      # merge conflict: two individually-green PRs that are red together.
+      #
+      # No lane can catch that pre-merge, because the failing tree is not the
+      # tree either PR tested. The structural fix is the merge queue
+      # (`merge_group` is already a trigger in this file) or
+      # `strict_required_status_checks_policy: true` on the `default` ruleset,
+      # which currently sets it false -- both are repo settings, not workflow.
+      # What this step buys is DIAGNOSIS: `go mod tidy -diff` prints the exact
+      # go.mod/go.sum delta and exits non-zero WITHOUT writing, so the failure
+      # names what is stale instead of the bare "updates to go.mod needed" that
+      # reads like a dependency-direction violation and sent the first reader
+      # of memql#3280 hunting a bad dependabot bump that was not the cause.
+      #
+      # It also strictly widens coverage. build+vet only needs the modules the
+      # code actually imports, so a go.sum carrying superseded entries passes
+      # them and fails tidy: component/harness was in exactly that state,
+      # stale from the same core bump, and invisible to the step above.
+      #
+      # Runs AFTER build+vet so the module cache is warm, and on !cancelled()
+      # so a build failure that is really a stale go.mod still gets its delta
+      # printed rather than being masked by the step it explains.
+      - name: every module's go.mod and go.sum are tidy
+        if: ${{ !cancelled() }}
+        run: |
+          set -uo pipefail
+          status=0
+          while read -r dir; do
+            echo "::group::go mod tidy -diff $dir"
+            if ! out="$( cd "$dir" && GOWORK=off go mod tidy -diff 2>&1 )"; then
+              echo "$out"
+              echo "::error::$dir has a stale go.mod/go.sum -- run 'cd $dir && GOWORK=off go mod tidy'. If you did not touch this module, a sibling it replaces by relative path was bumped (see memql#3280)"
               status=1
             fi
             echo "::endgroup::"
