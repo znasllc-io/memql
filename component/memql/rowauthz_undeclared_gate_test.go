@@ -95,6 +95,26 @@ const undeclaredGrandfatherReason = "memql#3173 seed -- grandfathered as a popul
 // outcome this gate exists to prevent.
 const undeclared3178SelfScopedReason = "memql#3178 -- self-scoped on actor.userId; v1:identity:identity still declares no tier (epic Decision D)"
 
+// undeclared3217SeedSweepReason covers usersForSeedSweep, added by memql#3217
+// so the startup per-user seed sweep reads a COMPLETE user set instead of
+// activeUsers' newest-50 page.
+//
+// It is on this list and deliberately not carrying the grandfather marker: it
+// postdates the seed and names its own issue, which is the distinction the
+// marker exists to draw.
+//
+// Being listed here is not a claim that it is unscoped debt of the usual kind.
+// It cannot be caller-scoped at all -- it runs under the seed materializer's
+// system actor at boot, where there is no requesting user for actor.userId to
+// name, and a filter naming one would evaluate against an empty actor and
+// sweep nobody (the same circularity that keeps activeUsers @serverOnly rather
+// than self-scoped, #2800/#2883). What keeps it here is the concept:
+// v1:identity:user declares no `@rowAuthz` tier, so the engine measures
+// nothing about it, and unmeasured is not the same as safe. Its projection is
+// userIdRef -- row.id alone, no @pii field -- which bounds the exposure but
+// does not measure it.
+const undeclared3217SeedSweepReason = "memql#3217 -- system-actor startup sweep, uncaller-scopable by construction; v1:identity:user still declares no tier (epic Decision D)"
+
 // undeclaredEntry is the map's value type, spelled as an alias so the
 // literal below reads exactly as memql#3135 specified it while the
 // classifier can still name the type in a signature.
@@ -312,6 +332,7 @@ var undeclaredRowAuthzConstructs = map[string]struct {
 	"userCount":                 {"v1:identity:user", undeclaredGrandfatherReason},
 	"userDisplayById":           {"v1:identity:user", undeclaredGrandfatherReason},
 	"usersActiveInSpace":        {"v1:identity:user", undeclaredGrandfatherReason},
+	"usersForSeedSweep":         {"v1:identity:user", undeclared3217SeedSweepReason},
 	"usersInDeletionCooldown":   {"v1:identity:user", undeclaredGrandfatherReason},
 	"usersScheduledForDeletion": {"v1:identity:user", undeclaredGrandfatherReason},
 
