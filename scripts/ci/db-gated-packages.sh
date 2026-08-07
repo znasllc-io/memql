@@ -77,9 +77,16 @@ readonly DB_GATED_TREES=(
 # which is where the boundary itself is enforced.
 readonly KNOWN_GO_MOD_DIRS=(
 	"."
+	"component/architecture"
 	"component/bus/gen"
 	"component/grpc/gen"
+	"component/metrics"
 	"component/node/gen"
+	"component/planner"
+	"component/polyphon"
+	"component/provenance"
+	"component/secret"
+	"core"
 )
 
 usage() {

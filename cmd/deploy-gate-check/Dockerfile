@@ -15,9 +15,16 @@ COPY go.mod go.sum ./
 # relative path (memql#3240), and `go mod download` resolves those replaces --
 # so their manifests must land in this layer, before `COPY . .`. Add a line per
 # module as each tier lands (#3241..#3244).
+COPY component/architecture/go.mod component/architecture/go.sum ./component/architecture/
 COPY component/bus/gen/go.mod component/bus/gen/go.sum ./component/bus/gen/
 COPY component/grpc/gen/go.mod component/grpc/gen/go.sum ./component/grpc/gen/
+COPY component/metrics/go.mod component/metrics/go.sum ./component/metrics/
 COPY component/node/gen/go.mod component/node/gen/go.sum ./component/node/gen/
+COPY component/planner/go.mod component/planner/go.sum ./component/planner/
+COPY component/polyphon/go.mod component/polyphon/go.sum ./component/polyphon/
+COPY component/provenance/go.mod component/provenance/go.sum ./component/provenance/
+COPY component/secret/go.mod component/secret/go.sum ./component/secret/
+COPY core/go.mod core/go.sum ./core/
 RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" \
