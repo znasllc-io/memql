@@ -429,20 +429,28 @@ func requiredSet(t *testing.T, src string) map[string]struct{} {
 	return out
 }
 
-// repoRoot walks up from this package to the module root.
+// repoRoot walks up from this package to the REPOSITORY root.
+//
+// It looks for go.work, not go.mod. This scan reads repo-relative paths
+// (dsl/_reference/..., docs/...) and reports repo-relative emit sites, and
+// since memql#3228 the tree is many modules -- component/database is one of
+// them, so a go.mod walk stopped there and the scan looked for
+// component/database/dsl/_reference/ and reported emit sites shorn of their
+// component/database/ prefix (memql#3242). go.work exists exactly once, at the
+// repository root, which is the thing every caller here means.
 func repoRoot(t *testing.T) string {
 	t.Helper()
 	dir, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("getwd: %v", err)
 	}
-	for i := 0; i < 8; i++ {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+	for i := 0; i < 12; i++ {
+		if _, err := os.Stat(filepath.Join(dir, "go.work")); err == nil {
 			return dir
 		}
 		dir = filepath.Dir(dir)
 	}
-	t.Fatal("could not locate the module root, so this scan measures nothing")
+	t.Fatal("could not locate the repository root (go.work), so this scan measures nothing")
 	return ""
 }
 

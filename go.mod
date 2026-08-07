@@ -140,10 +140,13 @@ require (
 	github.com/znasllc-io/memql/component/bus v0.0.0
 	github.com/znasllc-io/memql/component/bus/gen v0.0.0
 	github.com/znasllc-io/memql/component/config v0.0.0
+	github.com/znasllc-io/memql/component/database v0.0.0
 	github.com/znasllc-io/memql/component/events v0.0.0
 	github.com/znasllc-io/memql/component/fileprocessor v0.0.0
 	github.com/znasllc-io/memql/component/grpc/gen v0.0.0
+	github.com/znasllc-io/memql/component/harness v0.0.0
 	github.com/znasllc-io/memql/component/healing v0.0.0
+	github.com/znasllc-io/memql/component/language v0.0.0
 	github.com/znasllc-io/memql/component/language/annotations v0.0.0
 	github.com/znasllc-io/memql/component/language/ast v0.0.0
 	github.com/znasllc-io/memql/component/language/dslclause v0.0.0
@@ -223,3 +226,9 @@ replace github.com/znasllc-io/memql/component/language/annotations => ./componen
 replace github.com/znasllc-io/memql/component/language/ast => ./component/language/ast
 
 replace github.com/znasllc-io/memql/component/language/dslclause => ./component/language/dslclause
+
+replace github.com/znasllc-io/memql/component/language => ./component/language
+
+replace github.com/znasllc-io/memql/component/database => ./component/database
+
+replace github.com/znasllc-io/memql/component/harness => ./component/harness
