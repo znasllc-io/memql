@@ -2788,6 +2788,7 @@ Create `editors/vscode/src/webview/conceptPanel.ts`:
 // become script execution.
 
 import * as vscode from "vscode";
+import { randomBytes } from "node:crypto";
 
 import type { Concept, Row } from "@znasllc-io/memql-sdk-core/client";
 import { browseConceptPage, getRowByConceptAndId } from "@znasllc-io/memql-sdk-core/client";
@@ -3006,13 +3007,11 @@ ${errorHtml}
   }
 }
 
+// A CSP nonce is a security control, so it comes from a CSPRNG. Math.random()
+// is not one -- its output is predictable from prior draws, which defeats the
+// nonce's purpose. node:crypto is built in, so this costs no dependency.
 function nonceValue(): string {
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-  let out = "";
-  for (let i = 0; i < 32; i++) {
-    out += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return out;
+  return randomBytes(16).toString("base64");
 }
 ```
 
