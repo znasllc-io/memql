@@ -140,6 +140,34 @@ type ForwardedAuthority struct {
 	OriginNodeId   string
 	OriginNodeType string
 	AssertedAt     time.Time
+
+	// FirstName / LastName are PROVENANCE ONLY (memql#3221). They feed
+	// component/metadata's identity.displayName, which the engine stamps onto
+	// every row a mutation writes -- so without them a row written by a worker
+	// on a forwarded turn omits the name the same user's direct-path rows
+	// carry, with nothing in the data explaining the difference.
+	//
+	// They are NEVER an authorization input, and the guard rails are the
+	// deliverable rather than the fields:
+	//
+	//   - VerifyForwardedAuthority does not read them. Every other field on
+	//     this struct is checked or bound by it; these two are not mentioned.
+	//   - The AccessContext it returns has nowhere to put them, structurally.
+	//   - Principal() emits them as `given_name` / `family_name` into the
+	//     attribution claims map, which the receiver binds as TokenInfo for
+	//     `createdBy` only.
+	//
+	// TestForwardedAuthorityNamesAreProvenanceOnly pins all three. If you are
+	// adding a field here, ask which of the two kinds it is: everything above
+	// is a decision the receiver binds, and these two are a fact about who
+	// wrote a row. The distinction is the only thing keeping them from
+	// becoming an authorization input by accident later.
+	//
+	// The producer reads them off the session identity, not off the
+	// AccessContext -- an AccessContext carries no names, which is why they
+	// arrive through WithDisplayName rather than through the constructors.
+	FirstName string
+	LastName  string
 }
 
 // Refusal sentinels. One per rule, so a log line, a metric label and a test
@@ -255,6 +283,20 @@ type ForwardedPrincipal struct {
 	Claims    map[string]string
 }
 
+// WithDisplayName attaches the provenance-only name fields and returns the
+// authority for chaining.
+//
+// Separate from the constructors on purpose: an AccessContext carries no names,
+// so a producer must read them off its session identity. Keeping that a
+// distinct, explicitly-named step is what stops a name being mistaken for
+// something the resolved decision contains -- it is not one, and nothing on the
+// receiver treats it as one. See the field comments on ForwardedAuthority.
+func (a ForwardedAuthority) WithDisplayName(first, last string) ForwardedAuthority {
+	a.FirstName = first
+	a.LastName = last
+	return a
+}
+
 // Principal derives the wire pair. The claims map exists only for `createdBy`
 // attribution (ActorFromContext -> TokenInfo); it is not an authorization input
 // on the receiver.
@@ -265,6 +307,17 @@ func (a ForwardedAuthority) Principal() ForwardedPrincipal {
 	}
 	if a.PrimaryEmail != "" {
 		claims[forwardedClaimEmail] = a.PrimaryEmail
+	}
+	// Provenance only (memql#3221). component/metadata reads these back through
+	// UserIdentityFromContext to stamp identity.displayName on every row a
+	// mutation writes; no authorization decision consults them. They ride the
+	// attribution map for the same reason `sub` and `email` do -- that map is
+	// what the receiver turns into a TokenInfo for createdBy.
+	if a.FirstName != "" {
+		claims[forwardedClaimFirstName] = a.FirstName
+	}
+	if a.LastName != "" {
+		claims[forwardedClaimLastName] = a.LastName
 	}
 	if a.CredentialClass == ForwardedClassLocalDev {
 		claims[forwardedClaimLocalDev] = "1"

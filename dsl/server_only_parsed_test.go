@@ -167,9 +167,17 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 			"attribute name changed, which would silently exempt nothing and gate nothing.")
 	}
 	want := map[serverOnlyKey]bool{
-		{Path: "identity/queries.memql", Name: "activeUsers"}:               true,
-		{Path: "identity/queries.memql", Name: "userByEmail"}:               true,
-		{Path: "identity/queries.memql", Name: "userByIdSystem"}:            true,
+		{Path: "identity/queries.memql", Name: "activeUsers"}:    true,
+		{Path: "identity/queries.memql", Name: "userByEmail"}:    true,
+		{Path: "identity/queries.memql", Name: "userByIdSystem"}: true,
+		// memql#3217. The complete-set sibling of activeUsers, behind the
+		// startup per-user seed sweep. @serverOnly for activeUsers' reason
+		// minus most of the exposure -- its projection is userIdRef (row.id
+		// alone, no @pii field), but the read still enumerates every user in
+		// the cluster and cannot be caller-scoped: it runs under the seed
+		// materializer's system actor at boot, where there is no requesting
+		// user for actor.userId to name.
+		{Path: "identity/queries.memql", Name: "usersForSeedSweep"}:         true,
 		{Path: "identity/queries.memql", Name: "usersInDeletionCooldown"}:   true,
 		{Path: "identity/queries.memql", Name: "usersScheduledForDeletion"}: true,
 		{Path: "worker/queries.memql", Name: "runningPlansForUser"}:         true,

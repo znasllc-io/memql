@@ -975,8 +975,26 @@ jobs:
           CREATE EXTENSION IF NOT EXISTS "pgcrypto";
           CREATE EXTENSION IF NOT EXISTS vector;
           SQL
+      # `-timeout` is PER TEST BINARY, and this step runs six of them in
+      # parallel. Five finish in seconds; `component/memql` boots a full engine
+      # per db-gated test and had been running just under the old 300s. On
+      # 2026-08-07 it crossed the line and the required check went red on
+      # `main` itself -- and then on every open PR, including ones that touch
+      # no db-gated package at all (memql#3257). The panic names whichever
+      # 1-second test happened to be executing when the clock ran out, which
+      # makes it read as a flake in an unrelated test rather than as a budget.
+      #
+      # 600s is not "more headroom is fine". It buys the lane back while the
+      # real question -- why one package needs five-plus minutes of database
+      # time when its five siblings need seconds -- stays open on memql#3257.
+      # The job's own timeout-minutes is 20 and the step was taking ~6, so this
+      # is well inside what the job already allows; it is not a new budget, it
+      # is the step's share of one that already existed.
+      #
+      # If you are here because it went red again: raising this a third time is
+      # the wrong move. Split the package, or find what got slow.
       - name: db-gated suites (seeded test DB)
-        run: go test -count=1 -timeout=300s ./component/memql/... ./component/automations/... ./component/grpc/... ./integrations/cognition/... ./integrations/planner/... ./examples/referencepack/...
+        run: go test -count=1 -timeout=600s ./component/memql/... ./component/automations/... ./component/grpc/... ./integrations/cognition/... ./integrations/planner/... ./examples/referencepack/...
 
   # VS Code extension lane: run every cmd/memql-lsp drift guard over the
   # checked-in editors/vscode assets, then build the offline LSP binary

@@ -166,6 +166,38 @@ query user activeUsers {
   shape   userFull
 }
 
+/// The row set behind the startup per-user seed sweep (component/memql/seed_materializer.go
+/// listUserIds). Unpaged and id-only where activeUsers is a paged, PII-carrying UI list.
+///
+/// Why not just call activeUsers -- it is the same filter (memql#3217). Because activeUsers is
+/// `sort row.createdAt desc` + `paginate 50`, and a sweep set is not a page:
+///
+///   - The bound drops the users the sweep exists FOR. A newly created user already gets its
+///     perUser seeds from the graph.node.created.v1:identity:user subscription. The sweep is what
+///     backfills users who predate a seed -- i.e. the oldest ones, which newest-first pagination
+///     is precisely what discards.
+///   - The page is filled from `target*2` PHYSICAL version rows and deduped to logical rows
+///     afterwards, so under version churn it returns a short page that looks exhausted.
+///     v1:identity:user churns constantly (lastSeenAt, revocationEpoch, preferences), so this is
+///     not a large-cluster concern -- it bites at any size. Same failure memql#3209 hit on
+///     allAgents, and a cursor does not fix it.
+///
+/// "Unpaged" is not "unbounded": @unbounded rewrites to paginate 1000000, effectiveWindow clamps
+/// to MaxWindow (5000), and evaluateExpression clamps again to MaxResults (default 500). Past 500
+/// active users this truncates, and silently.
+///
+/// @serverOnly for the same reason activeUsers is, minus most of the exposure: the projection is
+/// userIdRef (row.id alone), so there is no @pii field to leak, but the read is still unscoped and
+/// enumerates every user in the cluster. Scoping it to actor.userId would be wrong here for the
+/// reason it is wrong on activeUsers, twice over: the sweep runs under the seed materializer's
+/// system actor at boot, where there is no requesting user for actor.userId to name.
+@serverOnly
+@unbounded("the startup seed sweep must see EVERY active user -- a truncated page silently leaves a user's perUser seeds unmaterialized forever, and newest-first pagination drops exactly the older users the sweep exists to backfill")
+query user usersForSeedSweep {
+  filter  isActiveRecord
+  shape   userIdRef
+}
+
 // searchUsers backs the searchUsers MCP tool (#1682). The tool
 // declares an optional `active` filter; before this query the handler
 // was a bare `concept==v1:identity:user` scan that silently ignored
