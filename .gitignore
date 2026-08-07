@@ -128,3 +128,6 @@ docs/public/reference/_generated/*
 
 # Agent stack -- local credentials and MCP config (never commit).
 .mcp.json
+
+# Subagent-driven-development scratch workspace (ledger, briefs, review packages)
+.superpowers/
