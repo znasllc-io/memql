@@ -58,7 +58,7 @@ func (s *EngineStore) UserPreferences(ctx context.Context, userId string) (Prefe
 // (agentId, userId). Returns nil + no error when none exists --
 // the dispatcher treats nil as "no scope" and rejects.
 //
-// Reads via agentAuthorizationsForUser({userId}) -- a shape()
+// Reads via agentAuthorizationsForSelf() -- a shape()
 // query, so results land on res.OutputPayload (the Data axis) not
 // res.Bundle.Nodes. Walks the projected rows and matches on
 // agentId tolerantly (bare-slug or canonical-form), because the
@@ -81,8 +81,20 @@ func (s *EngineStore) AgentAuthorization(ctx context.Context, agentId, ownerUser
 	if strings.TrimSpace(agentId) == "" || strings.TrimSpace(ownerUserId) == "" {
 		return nil, nil
 	}
-	query := fmt.Sprintf(`query agentAuthorizationsForUser(userId:%q)`, ownerUserId)
-	res, err := s.Engine.Execute(ctx, query)
+	// #3177: `agentAuthorizationsForSelf` is self-scoped on actor.userId and
+	// takes no userId argument, because v1:agents:agentAuthorization declares
+	// `@rowAuthz(owner="userId")` and a caller-supplied-id read of a declared
+	// concept is what #3172's land gate refuses.
+	//
+	// The dispatcher's ctx is NOT reliably the grant owner's -- ownerUserId is
+	// resolved from the AGENT row (replier.go), and an agent answers in spaces
+	// its owner does not have to be the caller in. So the owner's actor
+	// envelope is supplied for this ONE Execute, built inline as the argument
+	// (the memql#3072 shape epic decision C blesses); it is never stamped onto
+	// the request's own context, which memql#2989 refuted.
+	res, err := s.Engine.Execute(
+		auth.ContextWithUserActor(ctx, ownerUserId),
+		`query agentAuthorizationsForSelf()`)
 	if err != nil {
 		return nil, fmt.Errorf("agent authorization lookup: %w", err)
 	}

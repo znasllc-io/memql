@@ -128,8 +128,14 @@ var undeclaredRowAuthzConstructs = map[string]struct {
 	"allAgents":             {"v1:agents:agent", undeclaredGrandfatherReason},
 	"assistantAgentForUser": {"v1:agents:agent", undeclaredGrandfatherReason},
 
-	// v1:agents:agentAuthorization
-	"agentAuthorizationsForUser": {"v1:agents:agentAuthorization", undeclaredGrandfatherReason},
+	// v1:agents:agentAuthorization -- DEBT PAID, entry DELETED (memql#3177).
+	// The seed entry here was `agentAuthorizationsForUser`. The concept now
+	// declares `@rowAuthz(owner="userId")` and the construct is
+	// `agentAuthorizationsForSelf` filtering `userId==actor.userId`, so it is
+	// MEASURED rather than unmeasured and this file's own rule applies: a
+	// stale entry silently suppresses that construct forever. This comment is
+	// not an entry -- the map is one shorter than it was, which is the only
+	// direction it may move.
 
 	// v1:agents:agentRole
 	"activeAgentRoles": {"v1:agents:agentRole", undeclaredGrandfatherReason},

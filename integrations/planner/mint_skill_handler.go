@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/id"
 )
@@ -183,10 +184,30 @@ func (l *PlannerAgentLoop) checkMintAuthority(ctx context.Context, ownerAgentId,
 	if ownerAgentId == "" {
 		return false, "plan has no ownerAgentId; cannot resolve planner grant", nil
 	}
-	call := fmt.Sprintf(`query agentAuthorizationsForUser(userId:%q)`, requestedBy)
-	res, err := l.engine.Execute(systemActorContext(ctx), call)
+	if strings.TrimSpace(requestedBy) == "" {
+		// auth.ContextWithUserActor is a NO-OP on a blank id (component/memql
+		// actor_user_context_test.go: "a blank owner is a no-op, so call sites
+		// must refuse first"), which would leave the read below running under
+		// whatever actor the inbound context carries. Refuse instead of reading
+		// somebody else's grants by accident.
+		return false, "plan has no requestedBy; cannot resolve whose grant to read", nil
+	}
+	// #3177: `agentAuthorizationsForSelf` is self-scoped on actor.userId and
+	// takes no userId argument, because v1:agents:agentAuthorization declares
+	// `@rowAuthz(owner="userId")` and a caller-supplied-id read of a declared
+	// concept is what #3172's land gate refuses.
+	//
+	// systemActorContext (which this call used before) resolves actor.userId to
+	// the synthetic planner subject, so under the declared tier it would match
+	// nothing and every mint would fail closed for the wrong reason. The grant
+	// belongs to `requestedBy`, so that user's actor envelope is supplied for
+	// this ONE Execute -- built inline as the argument, in the memql#3072 shape
+	// epic decision C blesses.
+	res, err := l.engine.Execute(
+		auth.ContextWithUserActor(ctx, requestedBy),
+		`query agentAuthorizationsForSelf()`)
 	if err != nil {
-		return false, "", fmt.Errorf("agentAuthorizationsForUser: %w", err)
+		return false, "", fmt.Errorf("agentAuthorizationsForSelf: %w", err)
 	}
 	now := time.Now().UTC()
 	for _, row := range extractMintRows(res) {

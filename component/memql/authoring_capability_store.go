@@ -8,7 +8,7 @@ package memql
 // agent gate read the same source of truth:
 //
 //   - userByIdSystem -> preferences.computerUseEnabled (the kill switch);
-//   - agentAuthorizationsForUser -> the BROADEST standing
+//   - agentAuthorizationsForSelf -> the BROADEST standing
 //     computerUseScope the author has granted (the author's envelope ceiling).
 //
 // An authored automation runs under the author's envelope, so its scope ceiling
@@ -18,6 +18,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
+
 	"github.com/znasllc-io/memql/component/auth"
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
@@ -43,6 +45,15 @@ type engineCapabilityStore struct {
 // and the broadest standing computer-use scope they have granted.
 func (s *engineCapabilityStore) LoadEnvelope(ctx context.Context, ownerUserId string) (AuthoredEnvelope, error) {
 	env := AuthoredEnvelope{OwnerUserId: ownerUserId}
+	if strings.TrimSpace(ownerUserId) == "" {
+		// AuthorizeCapabilityWithStore already refuses a blank author, so this
+		// is defence rather than a live path -- but it has to be here too:
+		// auth.ContextWithUserActor below is a NO-OP on a blank id (see
+		// actor_user_context_test.go, "a blank owner is a no-op, so call sites
+		// must refuse first"), which would silently resolve the grant read
+		// against whatever actor the inbound context carries.
+		return env, fmt.Errorf("authoring: capability envelope requires an author")
+	}
 
 	// Kill switch: v1:identity:user.preferences.computerUseEnabled.
 	// #2800: server-side read of another user's row (the computer-use kill
@@ -62,7 +73,19 @@ func (s *engineCapabilityStore) LoadEnvelope(ctx context.Context, ownerUserId st
 	}
 
 	// Standing scope: the broadest active computerUseScope the author granted.
-	authRes, err := s.engine.Execute(ctx, fmt.Sprintf(`query agentAuthorizationsForUser(userId:%q)`, ownerUserId))
+	//
+	// #3177: the construct is `agentAuthorizationsForSelf` now -- self-scoped
+	// on actor.userId, no userId argument -- because the concept declares
+	// `@rowAuthz(owner="userId")` and an `args.userId` read of a declared
+	// concept is exactly what #3172's land gate refuses. The AUTHOR is not
+	// necessarily the caller here (an authored automation runs under its
+	// author's envelope no matter who fired the triggering event), so the
+	// owner's actor envelope is supplied for this ONE Execute -- built inline
+	// as the argument, in the memql#3072 shape epic decision C blesses, never
+	// stamped onto the request's own context (memql#2989 refuted that).
+	authRes, err := s.engine.Execute(
+		auth.ContextWithUserActor(ctx, ownerUserId),
+		`query agentAuthorizationsForSelf()`)
 	if err != nil {
 		return env, fmt.Errorf("query authorizations: %w", err)
 	}

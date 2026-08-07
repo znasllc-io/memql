@@ -113,9 +113,26 @@ concept agent {
 /// & always allow this' button on the suggestion card. The grant is per (agentId, planKind,
 /// spaceScope) and carries a per-grant token budget cap + an expiry so autonomy is bounded by
 /// default.
+///
+/// ROW AUTHZ (memql#3177, carrying memql#3129 + memql#3138). The tier below is what makes
+/// this concept's long-standing "only the granting user can revoke" claim a fact rather
+/// than a comment. Three things had to be true at once and now are:
+///   1. the tier is DECLARED here, so #3174's write guard resolves the target row and
+///      refuses revokeAgentAuthorization / updateAgentAuthorization / updateAgentAuthScope
+///      when the row's userId is not the caller's;
+///   2. userId is SERVER-STAMPED on every write that touches it (createAgentAuthorization
+///      stamps it; updateAgentAuthorization re-stamps it over its payload splat), so a
+///      caller cannot rewrite the field the tier is keyed on -- the two-call escalation
+///      memql#3138 documented;
+///   3. the READ is caller-scoped (agentAuthorizationsForSelf), so the grants cannot be
+///      enumerated for a stranger either.
+/// Dropping any one of the three reopens the other two: an unstamped userId defeats the
+/// guard from inside a row the attacker legitimately owns, and an unscoped read hands out
+/// the ids the guard is asked about.
+@rowAuthz(owner="userId")
 concept agentAuthorization {
   agentId         string! @description("v1:agents:agent.id this grant authorizes.")
-  userId          string! @description("v1:identity:user.id of the user who granted the authorization. Only the granting user can revoke.")
+  userId          string! @description("v1:identity:user.id of the user who granted the authorization. THE ROW-AUTHZ OWNER FIELD: this concept declares @rowAuthz(owner='userId'), so this field decides who may read, revoke or update the grant, and it is server-stamped from actor.userId by every mutation that writes it -- never accepted from caller args. 'Only the granting user can revoke' is ENFORCED as of memql#3177: the engine resolves the target row on update/revoke and refuses a caller who is not this user (component/memql/rowauthz_write_guard.go). Before that it was documented and unenforced, and any authenticated caller who knew an authId could revoke a stranger's grant or write computerUseScope / skillTierAllowlist into it.")
   action          enum("triggerPlan", "createSpecialist", "extendSpecialist", "trainSpecialist", "mintSkill") @default("triggerPlan") @description("What the grant authorizes the agent to do. triggerPlan = auto-trigger Plans matching planKind without per-Plan approval (legacy behavior; default for backward compatibility). createSpecialist = the Planner Agent may auto-mint specialists matching planKind (Q4 standing envelope). extendSpecialist = may auto-clone-and-extend an existing specialist (Q10 layered dedupe). trainSpecialist = may auto-trigger trainSpecialist Plans for the specialist. mintSkill = the Planner Agent may mint a NEW v1:agents:skill row when the catalog lacks a suitable bundle (Phase 3 / memql#159). For mintSkill the skillTierAllowlist field gates which skill tiers (A / B / C) the planner may mint at without per-mint approval; out-of-allowlist mints surface a canvas approval card and park the Plan.")
   maxPerPlan      int     @description("Cap on how many times this action can fire under a single parent Plan. Used primarily for action='createSpecialist' (e.g. 'up to 3 new specialists per Plan'). Null = no cap.")
   roleSlugAllowlist []string @description("Optional list of agent.roleSlug values this grant covers; empty = any roleSlug. Lets the user say 'auto-create technical specialists but ask before HR / Legal / Finance roles'. Only meaningful for action='createSpecialist'/'extendSpecialist'.")

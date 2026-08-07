@@ -142,7 +142,7 @@ var BoundConcepts = map[string]string{
 	"addHarnessStep":                        "v1:harness:step",
 	"advanceHarnessConsolidationCursor":     "v1:harness:consolidationCursor",
 	"advanceRequest":                        "v1:forge:request",
-	"agentAuthorizationsForUser":            "v1:agents:agentAuthorization",
+	"agentAuthorizationsForSelf":            "v1:agents:agentAuthorization",
 	"agentById":                             "v1:agents:agent",
 	"agentInteractionCount":                 "v1:cognition:utterance",
 	"agentOwner":                            "v1:agents:agent",
