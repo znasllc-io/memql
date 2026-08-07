@@ -375,7 +375,6 @@ mutate auditEvent createAuditEvent {
 //
 // Arguments:
 //   codeId              (string)            - Auth-code node ID (UUID-derived)
-//   code                (string)            - Plaintext one-time auth code (returned to OAuth client)
 //   codeHash            (string)            - SHA-256 hex of code; primary lookup key
 //   clientId            (string)            - OAuth client identifier
 //   redirectURI         (string)            - Exact-matched redirect URI for clientId
@@ -390,7 +389,6 @@ mutate auditEvent createAuditEvent {
 mutate authCode createAuthCode {
   args {
     codeId              string!
-    code                string!
     codeHash            string!
     clientId            string!
     redirectURI         string!
@@ -403,7 +401,7 @@ mutate authCode createAuthCode {
     expiresAt           string!
   }
   insert {
-    accept { code, codeHash, clientId, redirectURI, userId, identityId, magicLinkRequestId, expiresAt }
+    accept { codeHash, clientId, redirectURI, userId, identityId, magicLinkRequestId, expiresAt }
     stamp {
       id: args.codeId
       state: args.state ?? ""

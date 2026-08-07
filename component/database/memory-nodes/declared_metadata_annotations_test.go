@@ -613,10 +613,12 @@ func keyLiteralsInNonTestGo(t *testing.T, root, key string) []keyHit {
 //     refactored away, the annotation silently returns to declared metadata
 //     while three documents go on claiming it redacts -- the exact
 //     over-promise this issue exists to remove.
-//   - the documentation must still name the UNENFORCED surfaces. Partial
-//     enforcement is only honest if a reader cannot infer blanket redaction
-//     from the word "enforced", which is the issue's non-negotiable DoD item
-//     stated as something a machine checks rather than a promise in a review.
+//   - the documentation must still name EVERY surface and get its state
+//     right. Enforcement is only honest if a reader can neither infer blanket
+//     redaction from the word "enforced" (query results and length are still
+//     uncovered) nor be told a surface leaks when it no longer does. Both
+//     directions are checked: a missing surface fails, and so does a stale
+//     "not redacted by ..." for one that now redacts.
 func TestSecretEnforcementIsRealAndScoped(t *testing.T) {
 	root := repoRoot(t)
 
@@ -676,18 +678,74 @@ func TestSecretEnforcementIsRealAndScoped(t *testing.T) {
 			if !strings.Contains(text, "@secret") && !strings.Contains(text, "x-secret") {
 				t.Fatalf("%s does not mention @secret at all, so it cannot describe its scope", doc)
 			}
-			// surface -> the alternative spellings that count as naming it.
+			// surface -> the alternative spellings that count as naming it,
+			// plus (for surfaces that are now ENFORCED) the stale spellings
+			// that would mean the document still calls them uncovered.
+			//
+			// The staleGoneAfterEnforcement half is the half that bites now.
+			// Before memql#3182-#3184 these documents had to NAME each
+			// uncovered surface so a reader could not infer blanket coverage.
+			// Now that four of them redact, the failure mode has INVERTED: a
+			// document that still says "not redacted by the tool-args
+			// validator" under-promises, and an author reading it will write
+			// a workaround for a leak that no longer exists -- or, worse,
+			// conclude the annotation is not worth using. Naming alone can no
+			// longer distinguish the two states, so the state is asserted.
 			for _, surface := range []struct {
 				name  string
 				anyOf []string
+				// staleGoneAfterEnforcement: phrases that must NOT appear,
+				// because they assert this surface is still uncovered. Empty
+				// for surfaces that genuinely remain uncovered.
+				staleGoneAfterEnforcement []string
 			}{
-				{"query results", []string{"redacted from **query results**", "not redacted from query results", "from **query results**"}},
-				{"the automation args binder", []string{"automation args binder", "args_binding.go", "not redacted by the automation"}},
-				{"concept payload validation", []string{"concept payload validation", "json schema, which interpolates", "by concept payload validation"}},
-				{"the tool-args validator", []string{"tool-args validator", "validatetoolargs", "tool_execution.go"}},
-				{"the by-name matching rule", []string{"by argument name", "by arg name", "matching is by argument name", "matches by argument name", "name, not by write target", "not by write target"}},
-				{"the length disclosure", []string{"length is never redacted", "value too long", "rune count for a secret"}},
+				{
+					name:  "query results",
+					anyOf: []string{"redacted from **query results**", "not redacted from query results", "from **query results**"},
+					// Still genuinely uncovered (memql#2803) -- nothing stale.
+				},
+				{
+					name:                      "the automation args binder",
+					anyOf:                     []string{"automation args binder", "args_binding.go"},
+					staleGoneAfterEnforcement: []string{"not redacted by the automation", "not** redacted by the **automation"},
+				},
+				{
+					name:                      "concept payload validation",
+					anyOf:                     []string{"concept payload validation", "by concept payload validation"},
+					staleGoneAfterEnforcement: []string{"not redacted by concept payload validation", "not** redacted by **concept payload validation"},
+				},
+				{
+					name:                      "the tool-args validator",
+					anyOf:                     []string{"tool-args validator", "validatetoolargs", "tool_execution.go"},
+					staleGoneAfterEnforcement: []string{"not redacted by the tool-args validator", "not** redacted by the **tool-args validator"},
+				},
+				{
+					name:  "the by-name matching rule",
+					anyOf: []string{"by argument name", "by arg name", "matching is by argument name", "matches by argument name", "name, not by write target", "not by write target"},
+				},
+				{
+					name:  "the length disclosure",
+					anyOf: []string{"length is never redacted", "value too long", "rune count for a secret"},
+				},
+				{
+					// Found by the exhaustive enumeration memql#3182's DoD
+					// required, and absent from the epic's own four-surface
+					// model -- so the documents must name it too, or the next
+					// reader re-derives it.
+					name:  "the validate/preflight builtins",
+					anyOf: []string{"preflight", "executor_builtin.go"},
+				},
 			} {
+				for _, stale := range surface.staleGoneAfterEnforcement {
+					if strings.Contains(text, stale) {
+						t.Errorf("%s still describes %s as NOT redacted (%q), but it is "+
+							"now enforced.\n\nAn under-promising scope document is a real "+
+							"failure, not a harmless one: an author reading it writes a "+
+							"workaround for a leak that no longer exists, or concludes "+
+							"@secret is not worth using. Update the paragraph.",
+							doc, surface.name, stale)
+					}
+				}
 				found := false
 				for _, phrase := range surface.anyOf {
 					if strings.Contains(text, phrase) {
@@ -697,15 +755,22 @@ func TestSecretEnforcementIsRealAndScoped(t *testing.T) {
 				}
 				if !found {
 					t.Errorf("%s must name %s when describing @secret's scope.\n\n"+
-						"@secret redacts in exactly ONE validation surface (the function-args "+
-						"validator) and matches by argument NAME, not by write target. The "+
-						"surfaces listed here are those VERIFIED uncovered, not a closed "+
-						"enumeration -- three successive passes each found one the previous "+
-						"pass had walked past (memql#3117 is the most recent), so add a row "+
-						"here rather than restating a total. A document that says it is "+
-						"enforced without naming what it does NOT cover recreates the "+
-						"over-promise memql#2960 corrected -- one rung higher, and harder to "+
-						"spot because it is now partly true.\n\n"+
+						"@secret now redacts on every validation surface that quotes a "+
+						"rejected value -- the function-args validator (memql#3036), the "+
+						"tool-args validator (#3182), the automation args binder (#3183), "+
+						"concept payload validation (#3184), and the validate/preflight "+
+						"builtins -- while query results and length remain uncovered, and "+
+						"the two args-validator surfaces match by argument NAME rather than "+
+						"by write target.\n\n"+
+						"Every one of those has to be NAMED, covered or not. The list comes "+
+						"from an exhaustive enumeration of validators, never from appending "+
+						"one entry at a time: three successive incremental passes each "+
+						"shipped a paragraph that walked past a surface the next pass found, "+
+						"and the exhaustive sweep turned up two the epic's own four-surface "+
+						"model did not contain. A document that says @secret is enforced "+
+						"without naming what it does NOT cover recreates the over-promise "+
+						"memql#2960 corrected -- one rung higher, and harder to spot now "+
+						"that it is mostly true.\n\n"+
 						"Accepted spellings: %v", doc, surface.name, surface.anyOf)
 				}
 			}

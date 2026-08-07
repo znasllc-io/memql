@@ -61,9 +61,9 @@ shape auditEvent auditEventFull {
   row.createdAt
 }
 
-/// Full projection of v1:identity:authCode. Excludes the plaintext code field; only the SHA-256
-/// hash is exposed to query consumers so a query result can never be replayed at the token
-/// endpoint.
+/// Full projection of v1:identity:authCode. Only the SHA-256 hash exists to project -- the
+/// plaintext code field was removed under issue #3187 -- so a query result can never be replayed
+/// at the token endpoint.
 @row
 shape authCode authCodeFull {
   row.id

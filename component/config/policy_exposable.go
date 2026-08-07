@@ -123,22 +123,61 @@ func BuildPolicyConfigCtx(snapshot *busv1.ConfigSnapshot) map[string]any {
 		return out
 	}
 	for _, f := range PolicyExposableConfig {
-		value := readConfigField(snapshot, f.FieldName)
 		if f.Sensitive {
-			// Presence-only: collapse to a bool.
-			switch v := value.(type) {
-			case string:
-				out[f.Key] = strings.TrimSpace(v) != ""
-			case bool:
-				out[f.Key] = v
-			default:
-				out[f.Key] = value != nil
-			}
+			// Presence-only, and STRUCTURALLY so (memql#3188): a
+			// sensitive field is read through a reader that returns
+			// bool, so its raw value has no path into this map at
+			// all. It used to be read through readConfigField's
+			// `any` return and collapsed here by a runtime type
+			// switch -- correct, but only by coincidence of dynamic
+			// type. See readSensitivePresence for why that
+			// distinction was worth 492 CodeQL alerts.
+			out[f.Key] = readSensitivePresence(snapshot, f.FieldName)
 			continue
 		}
-		out[f.Key] = value
+		out[f.Key] = readConfigField(snapshot, f.FieldName)
 	}
 	return out
+}
+
+// readSensitivePresence is the reader for Sensitive allow-list entries.
+// It returns whether the field is configured -- never the value.
+//
+// WHY IT IS A SEPARATE FUNCTION RETURNING bool (memql#3188). The presence
+// collapse used to live in BuildPolicyConfigCtx as a type switch over
+// readConfigField's `any` return:
+//
+//	switch v := value.(type) {
+//	case string: out[f.Key] = strings.TrimSpace(v) != ""   // the live path
+//	case bool:   out[f.Key] = v                            // unreachable here
+//	...
+//
+// The live path was already correct: SiOpenaiApiKey is declared string, is
+// written from envStr, and is never anything else, so `case string` always
+// won and the raw key never entered the map. But readConfigField merges six
+// differently-typed fields behind one `any`, and static analysis cannot
+// refine the dynamic type across that boundary. CodeQL therefore admitted the
+// provably-unreachable `case bool` branch and reported the key as flowing
+// into every downstream logging call -- 492 open `go/clear-text-logging`
+// alerts on main, ALL 492 tracing to that single step, median 84-hop flow.
+//
+// Splitting the reader makes "a sensitive field's raw value never reaches the
+// ctx map" a property of the type signature rather than of a runtime type
+// coincidence. Behaviour is bit-for-bit identical to the `case string` branch
+// it replaces.
+//
+// Extend this switch alongside readConfigField each time
+// PolicyExposableConfig gains a Sensitive entry. An unknown name returns
+// false, matching the old `default: value != nil` for a nil read.
+func readSensitivePresence(snapshot *busv1.ConfigSnapshot, name string) bool {
+	if snapshot == nil {
+		return false
+	}
+	switch name {
+	case "SiOpenaiApiKey":
+		return strings.TrimSpace(snapshot.SiOpenaiApiKey) != ""
+	}
+	return false
 }
 
 // readConfigField is the per-field reader. Keeping it as a switch
@@ -150,8 +189,11 @@ func readConfigField(snapshot *busv1.ConfigSnapshot, name string) any {
 		return nil
 	}
 	switch name {
-	case "SiOpenaiApiKey":
-		return snapshot.SiOpenaiApiKey
+	// SiOpenaiApiKey is deliberately ABSENT (memql#3188). It is a
+	// Sensitive allow-list entry, so it is read through
+	// readSensitivePresence, which returns bool. Adding it back here
+	// would put the raw key into this function's `any` return and
+	// re-open the taint path that produced 492 CodeQL alerts.
 	case "SiDefaultProvider":
 		return snapshot.SiDefaultProvider
 	case "SttProvider":

@@ -70,8 +70,17 @@ concept auditEvent {
 /// bound, ~60s TTL. Bound to the specific magic-link row it was minted from so a leaked code cannot
 /// be replayed across sessions. Global scope: token redemption is unauthenticated and must work
 /// without partition context.
+///
+/// NO PLAINTEXT IS STORED (issue #3187). This concept once carried a `code`
+/// field holding the cleartext one-time code -- the only stored-plaintext
+/// credential in the tree. Its description claimed the plaintext was "the
+/// equality check on redemption". That was false: /oauth/token hashes the
+/// presented code and looks the row up BY codeHash
+/// (component/identity/http/token.go), AuthCodeRow has no Code member, and
+/// authCodeFull never projected it. The field was written and read by nothing.
+/// Finding a row by sha256(presented) IS the verification -- it proves the
+/// presenter holds the preimage -- so removing the field cost no property.
 concept authCode {
-  code                string!  @description("Plaintext one-time auth code returned to the OAuth client via redirectURI. Held server-side so the token-exchange handler can verify the presented code value matches; never logged, never surfaced in audit detail. Hash is the lookup key, plaintext is the equality check on redemption.")
   codeHash            string!  @description("SHA-256 hex digest of the plaintext code. Primary lookup key in the token-exchange path -- avoids equality lookups on the plaintext.")
   clientId            string!  @description("OAuth client identifier the code was minted for. Token-exchange MUST verify the redeeming client matches; mismatched client = reject and audit as code_misuse.")
   redirectURI         string!  @description("redirect_uri value supplied at /authorize, exact-matched against the registered URI for clientId. Token-exchange MUST verify the redeeming request's redirect_uri matches; mismatched = reject.")
