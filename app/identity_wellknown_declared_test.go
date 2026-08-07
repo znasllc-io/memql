@@ -1,4 +1,4 @@
-package identity
+package app
 
 import (
 	"go/ast"
@@ -14,6 +14,14 @@ import (
 
 // Every /.well-known/ route identity mounts must be DECLARED, not merely
 // unauthenticated-by-design (memql#2939).
+//
+// It lives in `app` rather than in `component/identity` because it reads
+// `component/server`, and memql#3243 made identity a module that sits BELOW
+// the servers. A test import is a module requirement, so this gate could not
+// stay where its subject is. It loses nothing by moving: it never touched an
+// identity symbol -- it PARSES identity.go, and a parser takes a path, not an
+// import. `app` is also where its sibling gate lives
+// (app/mux_registration_test.go, cited below).
 //
 // These routes reach the mux through Service.RegisterRoutes, one of the
 // enumerated handoffs in app/mux_registration_test.go, so the identity
@@ -41,7 +49,7 @@ import (
 // gate, the auth routes are covered by AuthPaths() -- and folding them in
 // here would make this test about everything and therefore about nothing.
 func TestWellKnownRoutesAreDeclaredPublic(t *testing.T) {
-	mounted := wellKnownRoutesMountedBy(t, "identity.go", "RegisterRoutes")
+	mounted := wellKnownRoutesMountedBy(t, "../component/identity/identity.go", "RegisterRoutes")
 
 	// Pinned by exact set, not by "at least one". A zero-route guard only fires
 	// when the parse breaks completely; turning ONE literal into a named

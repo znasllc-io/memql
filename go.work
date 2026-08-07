@@ -39,12 +39,15 @@ use (
 	./component/bus/gen
 	./component/config
 	./component/database
+	./component/deploycontrol
 	./component/events
 	./component/fileprocessor
 	./component/genesis
 	./component/grpc/gen
 	./component/harness
 	./component/healing
+	./component/identity
+	./component/identity/admin
 	./component/language
 	./component/language/annotations
 	./component/language/ast
@@ -52,6 +55,7 @@ use (
 	./component/memql
 	./component/metadata
 	./component/metrics
+	./component/node
 	./component/node/gen
 	./component/observe
 	./component/planner
@@ -62,4 +66,5 @@ use (
 	./core
 	./docs
 	./dsl
+	./integrations/email
 )

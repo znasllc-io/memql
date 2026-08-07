@@ -79,15 +79,28 @@ def owning_module(pkg_rel, modules):
 
 
 def internal_deps(d, modules):
-    """Module dirs (other than d) that packages under d import."""
-    p = sh(["go", "list", "-deps", "./..."], cwd=os.path.join(REPO, d), check=False)
+    """Module dirs (other than d) that packages under d import.
+
+    `-test` is load-bearing, not thoroughness: a TEST import is a module
+    requirement, so a dependency reached only from `_test.go` still needs a
+    require+replace. Without it `go mod tidy` cannot resolve the import
+    locally, falls back to the proxy, finds the package inside the published
+    `github.com/znasllc-io/memql` module and fails with the `ambiguous import`
+    that memql#3238 describes. Measured on `component/identity/admin`, whose
+    only edge to `component/deploycontrol` is a test import (memql#3243).
+    """
+    args = ["go", "list", "-test", "-deps"]
+    p = sh(args + ["./..."], cwd=os.path.join(REPO, d), check=False)
     if p.returncode != 0:
-        p = sh(["go", "list", "-deps", f"{MOD}/{d}/..."], check=False)
+        p = sh(args + [f"{MOD}/{d}/..."], check=False)
         if p.returncode != 0:
             raise RuntimeError(f"cannot list deps for {d}:\n{p.stderr}")
     deps = set()
     for line in p.stdout.split():
-        if not line.startswith(MOD + "/"):
+        # `-test` emits synthetic names: "pkg.test" and "pkg [pkg.test]".
+        # The bracketed form is split on whitespace above, so the bare path
+        # is what reaches here; drop the ".test" binaries.
+        if not line.startswith(MOD + "/") or line.endswith(".test"):
             continue
         rel = line[len(MOD) + 1:]
         own = owning_module(rel, modules)

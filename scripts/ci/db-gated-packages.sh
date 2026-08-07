@@ -84,12 +84,15 @@ readonly KNOWN_GO_MOD_DIRS=(
 	"component/bus/gen"
 	"component/config"
 	"component/database"
+	"component/deploycontrol"
 	"component/events"
 	"component/fileprocessor"
 	"component/genesis"
 	"component/grpc/gen"
 	"component/harness"
 	"component/healing"
+	"component/identity"
+	"component/identity/admin"
 	"component/language"
 	"component/language/annotations"
 	"component/language/ast"
@@ -97,6 +100,7 @@ readonly KNOWN_GO_MOD_DIRS=(
 	"component/memql"
 	"component/metadata"
 	"component/metrics"
+	"component/node"
 	"component/node/gen"
 	"component/observe"
 	"component/planner"
@@ -107,6 +111,7 @@ readonly KNOWN_GO_MOD_DIRS=(
 	"core"
 	"docs"
 	"dsl"
+	"integrations/email"
 )
 
 usage() {

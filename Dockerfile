@@ -54,12 +54,15 @@ COPY component/bus/go.* ./component/bus/
 COPY component/bus/gen/go.* ./component/bus/gen/
 COPY component/config/go.* ./component/config/
 COPY component/database/go.* ./component/database/
+COPY component/deploycontrol/go.* ./component/deploycontrol/
 COPY component/events/go.* ./component/events/
 COPY component/fileprocessor/go.* ./component/fileprocessor/
 COPY component/genesis/go.* ./component/genesis/
 COPY component/grpc/gen/go.* ./component/grpc/gen/
 COPY component/harness/go.* ./component/harness/
 COPY component/healing/go.* ./component/healing/
+COPY component/identity/go.* ./component/identity/
+COPY component/identity/admin/go.* ./component/identity/admin/
 COPY component/language/go.* ./component/language/
 COPY component/language/annotations/go.* ./component/language/annotations/
 COPY component/language/ast/go.* ./component/language/ast/
@@ -67,6 +70,7 @@ COPY component/language/dslclause/go.* ./component/language/dslclause/
 COPY component/memql/go.* ./component/memql/
 COPY component/metadata/go.* ./component/metadata/
 COPY component/metrics/go.* ./component/metrics/
+COPY component/node/go.* ./component/node/
 COPY component/node/gen/go.* ./component/node/gen/
 COPY component/observe/go.* ./component/observe/
 COPY component/planner/go.* ./component/planner/
@@ -77,6 +81,7 @@ COPY component/secret/go.* ./component/secret/
 COPY core/go.* ./core/
 COPY docs/go.* ./docs/
 COPY dsl/go.* ./dsl/
+COPY integrations/email/go.* ./integrations/email/
 # BuildKit cache mounts (build-speed #1506): the module cache (/go/pkg/mod)
 # and the Go build cache (/root/.cache/go-build) persist across builds, so a
 # rebuild of an unchanged tree reuses downloaded modules + already-compiled
