@@ -59,6 +59,19 @@ readonly DB_GATED_TREES=(
 	"examples/referencepack"
 )
 
+# KNOWN_GO_MOD_DIRS is every directory this script knows carries a `go.mod`,
+# repo-relative, `.` for the repo root (memql#3165 review).
+#
+# This is the ALLOW-LIST for verify_no_unknown_modules -- the PRIMARY
+# detector for a nested module boundary. When memql#3165 genuinely creates
+# modules, this array gets an explicit entry per module. That edit is the
+# friction, and it is the correct friction: it is a one-line, reviewed,
+# deliberate statement that the person drawing the boundary also thought about
+# what the complement now means.
+readonly KNOWN_GO_MOD_DIRS=(
+	"."
+)
+
 usage() {
 	cat >&2 <<'EOF'
 usage: db-gated-packages.sh (--trees | --patterns | --complement | --complement-cacheable)
@@ -98,30 +111,183 @@ verify_module_path() {
 	return 4
 }
 
-# MIN_COMPLEMENT is the floor the complement must clear (memql#3165 review).
+# script_repo_root prints the repo root, derived from THIS FILE's own location.
+#
+# Not `$PWD` and not `git rev-parse`: the meaning of "the repo" must not depend
+# on where the caller happened to be standing, and the walk below has to cover
+# the same tree the toolchain reads whether or not this is a git checkout.
+script_repo_root() {
+	cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd
+}
+
+# find_go_mod_dirs prints every directory beneath the repo root that contains a
+# `go.mod`, repo-relative, `.` for the root itself.
+#
+# The FILESYSTEM, not `git ls-files`: an untracked or gitignored `go.mod`
+# truncates `go list` exactly as a committed one does, because the toolchain
+# reads the disk. `.git` and `node_modules` are pruned -- neither can hold a
+# package the main module's pattern would have covered, and node_modules under
+# sdk/ts is large enough to matter to the walk.
+#
+# `find`'s exit status is CAPTURED, not consumed through a process
+# substitution. `while read < <(find ...)` discards it, and a walk that hit an
+# unreadable directory and returned a PARTIAL list would then read as "no
+# nested modules" -- the same swallow-the-status shape this whole file exists
+# to refuse, one level down.
+find_go_mod_dirs() {
+	local root="$1" raw status=0 f rel
+	raw="$(find "${root}" \( -name .git -o -name node_modules \) -prune -o -name go.mod -print)" || status=$?
+	if ((status != 0)); then
+		echo "db-gated-packages.sh: walking '${root}' for nested 'go.mod' files FAILED" >&2
+		echo "  (find exit ${status}). A partial walk cannot be distinguished from a clean" >&2
+		echo "  tree, so this refuses instead of guessing." >&2
+		return 5
+	fi
+	if [[ -z "${raw}" ]]; then
+		return 0
+	fi
+	while IFS= read -r f; do
+		rel="${f#"${root}/"}"
+		if [[ "${rel}" == "go.mod" ]]; then
+			printf '.\n'
+		else
+			printf '%s\n' "${rel%/go.mod}"
+		fi
+	done <<<"${raw}" | sort
+}
+
+# verify_no_unknown_modules is the PRIMARY detector for the failure this script
+# exists to refuse (memql#3165 review).
+#
+# The thing that silently shrinks `go list <module>/...` is a nested `go.mod`.
+# Every earlier guard inferred that from a symptom -- an empty list, a short
+# list, a count below a floor -- and every one of those inferences has a range
+# it cannot see past: a leaf tree like scripts/ or cmd/ leaves with exit 0 and
+# takes only 16-19 packages with it, which no floor loose enough to live with
+# will ever notice (see MIN_COMPLEMENT).
+#
+# So assert the CAUSE. A `go.mod` this script does not know about is
+# unambiguous, needs no calibration, and cannot drift with package churn. When
+# memql#3165 draws a real boundary, KNOWN_GO_MOD_DIRS gets an explicit entry
+# and whoever adds it has to look at what the complement now covers.
+verify_no_unknown_modules() {
+	local root dirs dir known ok status=0 found=0
+	local -a unknown=()
+
+	# Every substitution below states its own `|| return`. This function runs
+	# inside print_complement, which runs inside a command substitution in
+	# `--complement-cacheable` mode -- where `set -e` is suspended and an
+	# implicit abort simply does not happen (see print_complement_cacheable).
+	root="$(script_repo_root)" || return 5
+	if [[ -z "${root}" || ! -d "${root}" ]]; then
+		echo "db-gated-packages.sh: cannot resolve the repo root from this script's own" >&2
+		echo "  location; the nested-module check cannot run, so it refuses." >&2
+		return 5
+	fi
+	dirs="$(find_go_mod_dirs "${root}")" || status=$?
+	if ((status != 0)); then
+		echo "db-gated-packages.sh: the nested-module check could not enumerate 'go.mod'" >&2
+		echo "  files (exit ${status}); refusing rather than reporting a tree it did not walk." >&2
+		return 5
+	fi
+
+	while IFS= read -r dir; do
+		if [[ -z "${dir}" ]]; then
+			continue
+		fi
+		found=$((found + 1))
+		ok=0
+		for known in "${KNOWN_GO_MOD_DIRS[@]}"; do
+			if [[ "${dir}" == "${known}" ]]; then
+				ok=1
+				break
+			fi
+		done
+		if ((ok == 0)); then
+			if [[ "${dir}" == "." ]]; then
+				unknown+=("go.mod")
+			else
+				unknown+=("${dir}/go.mod")
+			fi
+		fi
+	done <<<"${dirs}"
+
+	# Zero `go.mod` files anywhere means the walk did not see the repo. That is
+	# not "no nested modules", it is "this check verified nothing", and it fails
+	# closed for the same reason everything else here does.
+	if ((found == 0)); then
+		echo "db-gated-packages.sh: found NO 'go.mod' anywhere under '${root}'." >&2
+		echo "  The nested-module check cannot verify what it was written to verify, so it" >&2
+		echo "  refuses rather than report a clean tree it never actually walked." >&2
+		return 5
+	fi
+
+	if ((${#unknown[@]} == 0)); then
+		return 0
+	fi
+
+	echo "db-gated-packages.sh: NESTED MODULE this script does not know about:" >&2
+	local u
+	for u in "${unknown[@]}"; do
+		echo "      ${u}" >&2
+	done
+	echo "  A 'go.mod' beneath the repo root removes every package under it from" >&2
+	echo "  'go list ${MODULE_PATH}/...'. When that tree has no external importers the" >&2
+	echo "  removal is SILENT -- exit 0, no diagnostic, a shorter complement -- and" >&2
+	echo "  'go test' then runs a smaller suite than this script reports. Measured, a" >&2
+	echo "  'go.mod' at scripts/ costs 19 of 170 packages and trips no count floor loose" >&2
+	echo "  enough to live with, which is why this check asserts the CAUSE and not a" >&2
+	echo "  symptom." >&2
+	echo "  If the module boundary is DELIBERATE (memql#3165), add its directory to" >&2
+	echo "  KNOWN_GO_MOD_DIRS in this script and decide, in the same edit, what the" >&2
+	echo "  complement should now cover -- the packages inside a new module are NOT in" >&2
+	echo "  '${MODULE_PATH}/...' and need a lane of their own." >&2
+	echo "  If it is NOT deliberate, delete it." >&2
+	return 5
+}
+
+# MIN_COMPLEMENT is a SECONDARY, coarse backstop -- not the detector.
 #
 # Measured at 170 packages (169 cacheable, i.e. minus the root package) on
 # 2026-08-06. Re-measure with:
 #
 #	scripts/ci/db-gated-packages.sh --complement | wc -l
 #
-# BE PRECISE ABOUT WHAT THIS CATCHES, because a floor is a coarse instrument
-# and pretending otherwise is how a guard gets trusted past its range.
+# HONEST STATEMENT OF ITS RANGE (memql#3165 review; the previous version of
+# this comment was measured wrong, and the correction is the point).
 #
-# It catches COLLAPSE and gross TRUNCATION -- the shapes where the selector
-# stops covering the repo and `go test` silently runs a fraction of the suite.
-# A `go.mod` under component/language, component/database, integrations/ or
-# app/ removes 15-34 packages from the module pattern with exit 0 and no
-# diagnostic; measured, those land at 154/146/135/152 and the three largest
-# trip this floor. It does NOT catch a boundary that removes one or two
-# packages -- nothing countable can, which is why it is not the only guard:
-# TestAreaGraphIsADAG pins the area SET (any missing directory is red) and
-# TestEmbeddedFileCountsAreStable pins per-package embed counts.
+# It used to claim a `go.mod` under component/language, component/database,
+# integrations/ or app/ truncates "with exit 0 and no diagnostic" at
+# 154/146/135/152, three of which trip the floor. Re-measured against real
+# nested `go.mod` files and the real toolchain, ALL FOUR exit 1 (`go list`
+# prints 175/179/147/182 lines and still fails) because every one of those
+# trees has EXTERNAL IMPORTERS -- the root module still imports packages that
+# have just left it, so the load fails loudly. They are caught by the
+# exit-status check in print_complement, NOT by this floor. The floor's stated
+# justification described no case it actually catches.
 #
-# Headroom is ~12%. Deliberately not tighter: a floor that fires on ordinary
-# package deletion gets lowered by whoever is unlucky enough to hit it under
-# time pressure, and a guard that gets edited away is worth less than a looser
-# one that never cries wolf.
+# A tree can truncate with exit 0 only when NOTHING OUTSIDE IT IMPORTS IT.
+# Measured, those are the leaf trees, and this is what they cost:
+#
+#	go.mod at scripts/        exit 0, complement 151   (-19)
+#	go.mod at cmd/            exit 0, complement 154   (-16)
+#	go.mod at sdk/go          exit 0, complement 163   (-7)
+#	go.mod at cmd/memql-lsp   exit 0, complement 167   (-3)
+#	go.mod at component/mcp   exit 0, complement 169   (-1)
+#
+# 21 of 170 packages must vanish before a floor of 150 fires. The LARGEST
+# silent truncation this repo can produce is 19. So the floor catches NONE of
+# the realistic silent cases -- which is why verify_no_unknown_modules exists
+# and asserts the root cause directly instead of inferring it from a count.
+#
+# The floor is kept anyway, as a coarse net under everything the direct check
+# cannot see: a `go list` that returns a short list for some reason nobody has
+# thought of yet, with exit 0 and no new `go.mod` anywhere. It is not tightened
+# to catch a 3-package truncation, because a floor that tight would fire on
+# ordinary package deletion and get lowered by whoever hits it under time
+# pressure -- a guard that gets edited away is worth less than a looser one
+# that never cries wolf. The 12% headroom buys "never cries wolf"; it does not
+# buy detection, and this comment no longer claims it does.
 readonly MIN_COMPLEMENT=150
 
 # count_lines counts the lines in a variable, treating empty as 0.
@@ -149,7 +315,22 @@ count_lines() {
 # packages out of the complement with no diagnostic and CI would run a smaller
 # suite than it reports.
 print_complement() {
-	verify_module_path
+	# `|| return $?`, NOT a bare call (memql#3165 review). `set -e` is
+	# SUSPENDED inside a command substitution subshell, and
+	# print_complement_cacheable calls this function inside one -- so a bare
+	# `verify_module_path` aborts when `--complement` is invoked directly and
+	# is SILENTLY IGNORED when `--complement-cacheable` is. Measured against a
+	# `go` stub whose `go list -m` reports a renamed module:
+	#
+	#	--complement            exit=4  printed=0     <-- guard fires
+	#	--complement-cacheable  exit=0  printed=169   <-- guard bypassed
+	#
+	# Only an EXPLICIT return propagates out of a substitution, so every guard
+	# in this function states one. The two modes must refuse identically or
+	# the one CI actually calls is the one that does not.
+	verify_module_path || return $?
+	verify_no_unknown_modules || return $?
+
 	local pattern="" t
 	for t in "${DB_GATED_TREES[@]}"; do
 		pattern+="${pattern:+|}^${MODULE_PATH}/${t}(/|\$)"
@@ -193,10 +374,10 @@ print_complement() {
 		echo "db-gated-packages.sh: the complement is ${count} packages, below the floor of" >&2
 		echo "  ${MIN_COMPLEMENT} -- so it is TRUNCATED, not merely small, and this script fails" >&2
 		echo "  closed rather than hand the caller a short list that tests green." >&2
-		echo "  Usual cause: a 'go.mod' added beneath the repo root. Every '...'-shaped" >&2
-		echo "  selector then silently drops everything inside the new module, with exit 0" >&2
-		echo "  and no diagnostic. Check with:" >&2
-		echo "      git ls-files | grep '/go.mod\$'" >&2
+		echo "  This is the SECONDARY backstop, and reaching it is informative: the direct" >&2
+		echo "  nested-module check above already passed, so the usual cause -- a 'go.mod'" >&2
+		echo "  beneath the repo root -- has been RULED OUT and something else shrank the" >&2
+		echo "  list. Look at what 'go list' actually returned:" >&2
 		echo "      go list ${MODULE_PATH}/... | wc -l" >&2
 		echo "  If the repo genuinely got smaller, re-measure and lower MIN_COMPLEMENT in this" >&2
 		echo "  script, recording the new number:" >&2
@@ -223,7 +404,22 @@ print_complement() {
 # cacheable. Everything else keys correctly on its own sources.
 print_complement_cacheable() {
 	local full
-	full="$(print_complement)" # fails closed on its own; `set -e` propagates
+	# `|| return $?` is load-bearing, and the comment it replaces was FALSE
+	# (memql#3165 review). It claimed print_complement "fails closed on its
+	# own; `set -e` propagates". It does not: bash SUSPENDS `set -e` inside the
+	# command-substitution subshell, so only an explicit `return N` crosses the
+	# boundary. Every implicit `set -e` abort inside print_complement was
+	# swallowed here, and this mode -- the one ci.yml actually calls -- printed
+	# a full-looking list at exit 0 while `--complement` refused. Reproduced
+	# with a `go` stub whose `go list -m` reports a renamed module:
+	#
+	#	before  --complement exit=4 / --complement-cacheable exit=0, 169 lines
+	#	after   both exit 4, nothing printed
+	#
+	# print_complement now states an explicit return for each of its guards
+	# too, so the propagation is correct on both sides of this boundary rather
+	# than only at the seam.
+	full="$(print_complement)" || return $?
 
 	local out status=0
 	out="$(printf '%s\n' "${full}" | grep -Fxv "${MODULE_PATH}")" || status=$?

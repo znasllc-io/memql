@@ -86,6 +86,26 @@ var gateInputs = []struct {
 	// (which has its own bucket) and outside the root package.
 	{"examples/referencepack/dsl/concepts.memql", "examples/referencepack", "TestReferencePackLoadsAndExtends"},
 	{"docs/public/operate/auth/per-row-authz-audit.md", "dsl", "TestPublicExamplesAreAnnotated"},
+	// The embedded-asset inventory (memql#3165). embed_inventory_test.go pins
+	// per-package `//go:embed` file COUNTS and lives in the root package, so
+	// EVERY file it pins is a gate input -- and 68 of the 270 were in no
+	// bucket this lane reads. That is a fail-open with DELAYED BLAME: the
+	// PR's `ci-required` went green and the guard then fired on the next
+	// author's push to main.
+	//
+	// One row per glob added to the bucket, and each names a file that ONLY
+	// the new glob covers -- a row already matched by `**/*.md` or
+	// `**/*.memql` would stay green with the new glob deleted and would
+	// therefore assert nothing. `examples/deploypack/dsl/**` deliberately has
+	// no row for that reason: all three of its embedded files are `.memql`
+	// today, so the glob is future-proofing with nothing yet to pin.
+	{"VERSION", ".", "TestEmbeddedFileCountsAreStable"},
+	{"component/database/memory-nodes/migrations/20260324000000_initial_setup.up.sql", ".", "TestEmbeddedFileCountsAreStable"},
+	{"component/identity/web/static/app.js", ".", "TestEmbeddedFileCountsAreStable"},
+	{"component/mcp/icon.svg", ".", "TestEmbeddedFileCountsAreStable"},
+	{"dsl/cognition/prompts/cognitionReply.tmpl", ".", "TestEmbeddedFileCountsAreStable"},
+	{"examples/referencepack/dsl/namespace.pin", ".", "TestEmbeddedFileCountsAreStable"},
+	{"integrations/integrations.json", ".", "TestEmbeddedFileCountsAreStable"},
 }
 
 // changesFilters returns the parsed filter block the `changes` job wires its

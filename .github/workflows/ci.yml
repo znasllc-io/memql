@@ -120,6 +120,62 @@ jobs:
             #   scripts/**                    -> the capability-script contract
             #                                    test, help.sh, seed-secrets.sh
             #                                    and release.sh guards.
+            #
+            # THE EMBEDDED-ASSET BLOCK (the second group below) closes a
+            # DELAYED-BLAME fail-open that cb264c02 armed (memql#3165 review).
+            #
+            # embed_inventory_test.go pins the per-package `//go:embed` file
+            # COUNT for 11 packages / 270 files, and it lives in the root
+            # package -- which runs ONLY under RUN_GO (go-tests) or RUN_GATES
+            # (the gate-inputs step below). Measured with picomatch against the
+            # real pinned inventory, 68 of those 270 files reached NEITHER:
+            #
+            #   28  component/database/memory-nodes/migrations/*.sql   NO BUCKET
+            #   27  dsl/**/*.tmpl + dsl/deployment/namespace.pin       dsl only
+            #    9  component/identity/web/static/**                   NO BUCKET
+            #    1  component/mcp/icon.svg                             NO BUCKET
+            #    1  integrations/integrations.json                     NO BUCKET
+            #    1  examples/referencepack/dsl/namespace.pin           NO BUCKET
+            #    1  VERSION                                            NO BUCKET
+            #
+            # A PR adding only `component/database/.../0099_x.sql` therefore
+            # matched no consumed bucket, every lane skipped, `ci-required`
+            # went green -- and then the guard fired on the next `push` to
+            # main, where there is no merge_queue rule to catch it first:
+            #
+            #   --- FAIL: TestEmbeddedFileCountsAreStable
+            #       component/database embeds 29 files; 28 expected (1 added)
+            #
+            # THE NEXT UNRELATED AUTHOR OWNS THAT FAILURE. Before cb264c02 a
+            # migration-only PR was unverified but harmless; after it, the same
+            # PR breaks main for someone else. A guard is not allowed to ship a
+            # new way for main to go red on a diff its own PR was told was
+            # green, so every path the inventory pins is routed here.
+            #
+            # Derived from the `//go:embed` directives, not from today's file
+            # list, and stated as TREES rather than extensions so a new file of
+            # a new type inside an embedded tree cannot slip back out:
+            #
+            #   VERSION                       -> embed.go
+            #   database/.../migrations/**    -> component/database/timescaledb.go
+            #   component/identity/web/**     -> its embed.go `static/* legal/*.md`
+            #   component/mcp/*.svg           -> component/mcp/icon.go
+            #   dsl/**                        -> dsl/embed.go's 32 `all:<domain>`
+            #                                    patterns. `**/*.memql` already
+            #                                    routed 190 of those 217 files
+            #                                    here; this completes the tree
+            #                                    rather than starting a new
+            #                                    route.
+            #   examples/*/dsl/**             -> the deploypack + referencepack
+            #                                    `all:dsl` embeds.
+            #   integrations/*.json           -> integrations/embed.go
+            #
+            # The remaining pinned packages (component/architecture/embedded,
+            # component/genesis, docs) are already covered by entries above.
+            #
+            # Over-matching here is close to free: RUN_GATES fires only when
+            # `ci` and `go` are BOTH false, so every Go file these trees also
+            # contain is inert. Under-matching is the defect.
             gates:
               - '**/*.md'
               - '**/*.memql'
@@ -127,6 +183,15 @@ jobs:
               - 'component/genesis/manifest.yaml'
               - 'component/architecture/embedded/**'
               - 'scripts/**'
+              # every path embed_inventory_test.go pins -- see above
+              - 'VERSION'
+              - 'component/database/memory-nodes/migrations/**'
+              - 'component/identity/web/**'
+              - 'component/mcp/*.svg'
+              - 'dsl/**'
+              - 'examples/deploypack/dsl/**'
+              - 'examples/referencepack/dsl/**'
+              - 'integrations/*.json'
             # Any Go source or the module graph. Voice + generator + sdk/go
             # are Go too, so they are a subset of this.
             #
