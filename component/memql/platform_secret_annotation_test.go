@@ -250,11 +250,11 @@ func TestAuthCodeStoresNoPlaintext(t *testing.T) {
 		t.Fatal("authCode has no definition schema")
 	}
 	if strings.Contains(string(raw), `"code"`) {
-		t.Errorf("v1:identity:authCode declares a `code` property again.\n\n"+
-			"Issue #3187 removed it: redemption verifies by looking the row up "+
-			"by sha256(presented) == codeHash, which already proves the "+
-			"presenter holds the preimage, so the plaintext bought no property. "+
-			"If a plaintext column is genuinely needed again, say what it "+
+		t.Errorf("v1:identity:authCode declares a `code` property again.\n\n" +
+			"Issue #3187 removed it: redemption verifies by looking the row up " +
+			"by sha256(presented) == codeHash, which already proves the " +
+			"presenter holds the preimage, so the plaintext bought no property. " +
+			"If a plaintext column is genuinely needed again, say what it " +
 			"provides that the digest does not -- and mark it @secret.")
 	}
 	if !strings.Contains(string(raw), `"codeHash"`) {
