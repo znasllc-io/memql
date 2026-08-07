@@ -149,12 +149,15 @@ func TestEveryTrackedFileReachesAConsumedBucket(t *testing.T) {
 		if covered {
 			continue
 		}
+		// Every matching entry is marked used, not just the first. Breaking
+		// early would let one entry shadow an overlapping one, which would
+		// then be reported "stale" while it is merely redundant -- a
+		// misleading failure on a guard whose whole job is precision.
 		exempt := false
 		for _, b := range allow {
 			if b.Match(f) {
 				usedAllow[b.Name] = true
 				exempt = true
-				break
 			}
 		}
 		if !exempt {
