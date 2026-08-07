@@ -539,7 +539,7 @@ proto-gen-check:
 
 ##@ Release (engine image)
 ##> Staging is GitOps: bump the digest in deploy/k8s/overlays/staging + merge -> ArgoCD reconciles.
-.PHONY: release
+.PHONY: release tag-submodules
 
 ## Cut an immutable engine release image memql:<VERSION> from VERSION + the
 ## short git SHA (znasllc-io/memql#493, epic #491). The engine ships every node
@@ -560,6 +560,23 @@ release:
 		$${ACR:+--acr=$$ACR} \
 		$${PUSH:+--push} \
 		$${ALLOW_OVERWRITE:+--allow-overwrite} \
+		$${DRY_RUN:+--dry-run} \
+		$(ARGS)
+
+## Cut the Go module tags for the nested modules (memql#3245).
+## A nested module is only fetchable at <module-dir>/vX.Y.Z -- the root tag
+## does NOT publish it. `wire` and `engine` carry independent version lines;
+## every other module is lockstep with the root release. Tags are write-once
+## and name the commit the root vX.Y.Z tag names. See VERSIONING.md.
+##   make tag-submodules VERSION=0.16.0                # all three lines
+##   make tag-submodules VERSION=0.16.0 LINE=wire      # one line
+##   make tag-submodules VERSION=0.16.0 DRY_RUN=1      # plan only
+tag-submodules:
+	@bash scripts/release/tag-submodules.sh \
+		$${VERSION:+--version=$$VERSION} \
+		$${LINE:+--line=$$LINE} \
+		$${COMMIT:+--commit=$$COMMIT} \
+		$${NO_PUSH:+--no-push} \
 		$${DRY_RUN:+--dry-run} \
 		$(ARGS)
 
