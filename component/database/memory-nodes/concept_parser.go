@@ -561,7 +561,142 @@ func propertyDeclToParsed(prop *parser.PropertyDecl) (parsedProperty, error) {
 		out.element = elem
 	}
 
+	// Whatever ends up CARRYING the value constraints has to be able to carry
+	// them (memql#3124). The composite guard above asks whether the element is
+	// too deep; this asks whether its TYPE can hold the keyword at all --
+	// `[]int @pattern("^[0-9]+$")` lands `pattern` on an integer, where JSON
+	// Schema ignores it outright, and `object @minLength(3)` did the same
+	// without any wrapping at all.
+	//
+	// Checked on the element for a wrapped property (the constraints have just
+	// moved down onto it) and on the property itself otherwise, so the answer
+	// does not depend on the depth of the declaration.
+	target := &out
+	if out.element != nil {
+		target = out.element
+	}
+	if err := checkConstraintsCarried(target, prop); err != nil {
+		return parsedProperty{}, err
+	}
+
 	return out, nil
+}
+
+// carriesStringConstraints reports whether a property type EMITS a JSON Schema
+// string, which is what decides whether @pattern / @minLength / @maxLength mean
+// anything on it.
+//
+// `enum` and `datetime` are in the set because both emit `type: string` --
+// enum directly, datetime as `format: date-time` (required) or as the
+// string/empty/null oneOf (optional), where a sibling `pattern` is still
+// asserted. A rule that keyed off the authored spelling `string` alone would
+// refuse `enum("a","b") @pattern(...)`, which works today and is pinned green.
+func carriesStringConstraints(typeName string) bool {
+	switch typeName {
+	case "string", "enum", "datetime":
+		return true
+	}
+	return false
+}
+
+// carriesNumericConstraints reports whether a property type emits a JSON Schema
+// number or integer, which is what decides whether @minimum / @maximum mean
+// anything on it. `datetime` is deliberately absent: it emits a string.
+func carriesNumericConstraints(typeName string) bool {
+	return typeName == "int" || typeName == "float"
+}
+
+// checkConstraintsCarried refuses a value constraint whose target type cannot
+// carry it (memql#3124), naming the annotation, the declaration and the type --
+// the diagnostic shape memql#3104 introduced for the composite case.
+//
+// The classes, enumerated rather than inferred:
+//
+//   - @pattern / @minLength / @maxLength on a non-string;
+//   - @minimum / @maximum on a non-number;
+//   - @variant on a non-object, which drops the union entirely rather than
+//     merely emitting an ignored keyword -- propertyToJSONSchema only reads
+//     `variants` on the object branch. Classified IN because it is the same
+//     failure with a worse outcome, and because memql#3123 has just refused the
+//     other spelling that dropped a union in silence.
+//
+// A nested block rides the object rule with @variant, for the reason
+// valueAnnotationNames gives: the grammar cannot attach one to a non-object
+// today, so this is coverage against a future spelling rather than a live case.
+//
+// LEFT OUT, deliberately: `any`. It declares no type, so the emitted schema is
+// the bare keyword with no `type` beside it, and JSON Schema's own rule already
+// applies `pattern` to strings and ignores it elsewhere. That is the
+// declaration meaning what it says -- "any JSON value" -- not the engine
+// contradicting it. Every other keyword the builder emits is a field MARKER
+// (@description, @default, @unique, @immutable, @secret, @pii, @internal,
+// @serverSet) which stays on the wrapper and is type-independent by design.
+//
+// `array` and `map` cannot reach here carrying constraints: a wrapped property
+// hands its constraints to the element and keeps none, and a composite element
+// is refused above. The switch therefore covers `object`, `bool` and the string
+// and numeric families, which is every type an author can write.
+func checkConstraintsCarried(target *parsedProperty, prop *parser.PropertyDecl) error {
+	if target == nil || target.typeName == "any" {
+		return nil
+	}
+
+	var offenders []string
+	if !carriesStringConstraints(target.typeName) {
+		if target.pattern != "" {
+			offenders = append(offenders, "@pattern")
+		}
+		if target.minLength != nil {
+			offenders = append(offenders, "@minLength")
+		}
+		if target.maxLength != nil {
+			offenders = append(offenders, "@maxLength")
+		}
+	}
+	if !carriesNumericConstraints(target.typeName) {
+		if target.minimum != nil {
+			offenders = append(offenders, "@minimum")
+		}
+		if target.maximum != nil {
+			offenders = append(offenders, "@maximum")
+		}
+	}
+	if target.typeName != "object" && target.typeName != "" {
+		if len(target.variants) > 0 {
+			offenders = append(offenders, "@variant")
+		}
+		if len(target.nested) > 0 {
+			offenders = append(offenders, "a nested block")
+		}
+	}
+	if len(offenders) == 0 {
+		return nil
+	}
+
+	return fmt.Errorf(
+		"%s cannot be declared on `%s %s`: the %s it applies to is %s, which cannot carry it -- "+
+			"JSON Schema ignores the keyword for that type (@variant is dropped entirely), so the "+
+			"field would validate as though the annotation were absent. Constrain a type that can "+
+			"hold it (@pattern/@minLength/@maxLength need a string, enum or datetime; "+
+			"@minimum/@maximum need an int or float; @variant needs an object), or drop the "+
+			"annotation (memql#3124)",
+		strings.Join(offenders, " and "),
+		prop.Name,
+		renderTypeRef(prop.Type),
+		constraintTargetNoun(prop),
+		target.typeName,
+	)
+}
+
+// constraintTargetNoun spells what the constraint landed on, so the diagnostic
+// distinguishes "the element it applies to is integer" (a wrapped field, where
+// the constraint moved down) from "the value it applies to is object" (an
+// unwrapped one, where it never moved).
+func constraintTargetNoun(prop *parser.PropertyDecl) string {
+	if prop != nil && prop.Type != nil && (prop.Type.Kind == "array" || prop.Type.Kind == "map") {
+		return "element"
+	}
+	return "value"
 }
 
 // hasBranchlessVariant reports whether prop carries a @variant attribute with

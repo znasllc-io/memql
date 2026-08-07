@@ -226,6 +226,27 @@ So `blocks []object @variant(discriminator="kind") { … }` validates every bloc
 > [][]string!` is fine. Type checking is unaffected too: `[][]frobnicate` is
 > still rejected at the inner level.
 
+> **"The loader refuses" now covers BOTH ways an element can fail to carry a
+> constraint** (memql#3124). The paragraph above is the *composite* case — the
+> element is an array or a map, so the constraint would land one level too high.
+> The other case is a perfectly ordinary element whose **type** cannot hold the
+> keyword: `[]int @pattern("^[0-9]+$")`, `[]string @minimum(3)`,
+> `[]object @minLength(3)`, `[]string @variant(…)`, and — with no wrapping
+> involved at all — `object @minLength(3)`. Each emitted a keyword the validator
+> ignores for that type, or in `@variant`'s case dropped the union outright. Both
+> are refused at load now, at every depth, with the same diagnostic shape naming
+> the annotation, the declaration and the type. Until this landed the sentence
+> above over-promised, and the distinction was not one a reader was likely to
+> draw unaided.
+>
+> The carrying types are exactly what the emitted schema says: `@pattern` /
+> `@minLength` / `@maxLength` need a **string**, and `enum` and `datetime` count
+> because both emit `type: string`; `@minimum` / `@maximum` need an **int** or
+> **float**; `@variant` needs an **object**. `any` is exempt — it declares no
+> type, so JSON Schema's own "applies to strings, ignored otherwise" rule is the
+> declaration meaning exactly what it says rather than the engine contradicting
+> it.
+
 > `@minLength` / `@maxLength` remain a **character** count on the element, not an element count. There is still no way to bound the length of an array itself.
 
 **Cross-concept references** are plain string fields holding the target's id (e.g. `spaceId string`), optionally paired with an `@relationship` annotation so the engine can traverse the edge.
