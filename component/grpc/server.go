@@ -1656,10 +1656,6 @@ func (s *streamSession) handleExecuteQuery(envelope *memqlv1.MemqlClientMessage,
 		return s.sendQueryError(requestId, envelope.GetMessageId(), codes.InvalidArgument, "query cannot be empty")
 	}
 
-	// Authorization runs per-row inside the DSL (see
-	// docs/public/operate/auth/per-row-authz-audit.md). Any authenticated role may
-	// reach this handler; query/mutation bodies enforce ownership.
-
 	ctx, cancel := context.WithCancel(s.stream.Context())
 
 	// Enrich context with request metadata for the metadata collector.
@@ -1688,6 +1684,28 @@ func (s *streamSession) handleExecuteQuery(envelope *memqlv1.MemqlClientMessage,
 	// belongs at that frame. Every request-derived handler is stamped now,
 	// this one included, and a test proves it rather than a comment asserting
 	// it.
+
+	// Coarse data-resource capability gate (memql#3179, carrying memql#2802).
+	// The request-path caller for auth.Capable(role, verb, auth.ResourceData):
+	// it answers "may this actor read / write the data plane at all", which is
+	// what makes `reader` and `writer` distinguishable here -- before this,
+	// nothing consulted the data-plane capability and a reader could execute
+	// any mutation the DSL exposes.
+	//
+	// It runs on the FULLY-BUILT ctx (origin + provenance + resolved
+	// AccessContext) on purpose: the classification it performs re-parses the
+	// query exactly as executeQuery is about to, so it must see the same
+	// context or the two could disagree.
+	//
+	// COARSE HALF ONLY. It never narrows WHICH rows come back. Row visibility
+	// stays per-row inside the DSL (see
+	// docs/public/operate/auth/per-row-authz-audit.md): query/mutation bodies
+	// enforce ownership, and this gate does not touch that. Rationale, scope,
+	// and the surfaces it deliberately does NOT cover: data_capability_gate.go.
+	if allowed, refusal := s.allowDataPlaneAccess(ctx, query); !allowed {
+		cancel()
+		return s.sendQueryError(requestId, envelope.GetMessageId(), codes.PermissionDenied, refusal)
+	}
 
 	s.activeRequests.Store(requestId, cancel)
 
