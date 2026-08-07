@@ -202,10 +202,10 @@ func (c *Concept) Create(ctx context.Context, store Store, params CreateParams) 
 
 	validationPayload := clonePayload(payload)
 	if err := c.validate(definitionSchemaKey, validationPayload); err != nil {
-		// Rewrites only the leaves that quote a @secret field's value; every
-		// other message stays byte-identical. concept_secret_redaction.go,
-		// memql#3184.
-		return Node{}, fmt.Errorf("concept payload validation failed: %w", c.redactSecretValidationError(err))
+		// Already redacted by validate(): only the leaves that quote a
+		// @secret field's value are rewritten, every other message stays
+		// byte-identical. concept_secret_redaction.go, memql#3184.
+		return Node{}, fmt.Errorf("concept payload validation failed: %w", err)
 	}
 
 	now := time.Now().UTC()
@@ -796,7 +796,22 @@ func (c *Concept) validate(variant string, payload any) error {
 	if err != nil {
 		return err
 	}
-	return schema.Validate(payload)
+	// Redaction lives HERE rather than at the Create call site (memql#3184,
+	// moved down while enumerating validators exhaustively for memql#3182),
+	// so every variant and every future caller is covered by one change
+	// rather than by remembering to wrap each site.
+	//
+	// Measured, so the comment does not over-claim: the OTHER variant in use
+	// today, Delete, validates a server-constructed {id, deleted, reason}
+	// payload that carries no concept field, so it could not leak a @secret
+	// value and this is defence in depth for it, not a bug fix. The live
+	// uncovered callers this enumeration DID find are outside this package --
+	// the DSL-callable `validate` and `preflight` builtins, which compile
+	// this schema themselves; they call RedactValidationError directly.
+	//
+	// Secrecy is always resolved against the DEFINITION schema, which is
+	// where @secret is recorded, whichever variant is being validated.
+	return c.RedactValidationError(schema.Validate(payload))
 }
 
 // validateShortId catches the class of bug where a caller hands in

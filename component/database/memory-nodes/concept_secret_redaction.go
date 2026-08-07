@@ -125,6 +125,20 @@ var valueInterpolatingKeywords = map[string]valueInterpolatingKeyword{
 // The returned error is the same *jsonschema.ValidationError with its leaf
 // messages rewritten in place; the caller's %w chain and any errors.As on it
 // keep working. Non-jsonschema errors are returned untouched.
+// RedactValidationError is the exported entry point for callers OUTSIDE this
+// package that run a concept's JSON schema themselves rather than going
+// through Concept.validate -- the DSL-callable `validate` and `preflight`
+// builtins (component/memql/executor_builtin.go) compile the concept's
+// definition schema and call Validate directly, then surface every leaf
+// message in a result payload returned to the caller.
+//
+// It mutates the ValidationError tree in place and returns the same error, so
+// a caller that goes on to read BasicOutput() sees the redacted messages.
+// Non-jsonschema errors pass through untouched.
+func (c *Concept) RedactValidationError(err error) error {
+	return c.redactSecretValidationError(err)
+}
+
 func (c *Concept) redactSecretValidationError(err error) error {
 	if c == nil || err == nil {
 		return err
