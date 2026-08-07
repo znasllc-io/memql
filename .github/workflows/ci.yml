@@ -567,10 +567,12 @@ jobs:
         if: ${{ env.RUN_DSL == 'true' }}
         run: make sdk-gen-check
       # Proto drift check (memql#928): regenerate the pinned-toolchain proto
-      # bindings (component/grpc + node; bus excluded pending a consumer-
-      # touching normalization) and diff against the checked-in tree, ignoring
-      # the cosmetic protoc version stamp. Catches a .proto edited without its
-      # .pb.go regenerated -- the gap that let stale bindings merge green.
+      # bindings (component/grpc, component/node and component/bus -- bus was
+      # normalized onto the pinned toolchain in memql#928 itself, so the
+      # exclusion this comment used to claim had not existed for some time) and
+      # diff against the checked-in tree, ignoring the cosmetic protoc version
+      # stamp. Catches a .proto edited without its .pb.go regenerated -- the gap
+      # that let stale bindings merge green.
       # Cache the PINNED protoc that proto-gen.sh provisions into bin/tools/
       # (memql#3166 / design D4.2). Without this it is re-downloaded from
       # github releases on every run: a network dependency on the critical

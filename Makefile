@@ -508,11 +508,24 @@ tidy:
 generate:
 	$(GO) generate $(ALL_PKGS)
 
-## Regenerate the pinned-toolchain proto bindings (component/grpc + node).
-## The fix command for `proto-gen-check`. component/bus is excluded (it needs
-## a consumer-touching toolchain normalization first -- see memql#928).
+## Regenerate the pinned-toolchain proto bindings (component/grpc,
+## component/node, component/bus). The fix command for `proto-gen-check`, and
+## since memql#3251 the ONLY generation path: the //go:generate directives in
+## those three packages delegate here rather than invoking a bare `protoc`,
+## which is what let `make generate` disagree with this target about the protoc
+## version and rewrite the stamp in all nine generated files.
+##
+## PROTO_GEN_ONLY=<proto dir> narrows the run to one directory. It exists for
+## those directives, which are necessarily per-package: each one delegates here
+## scoped to itself, so `go generate` over the tree regenerates each dir once
+## instead of regenerating all three, three times. Unset means every target,
+## which is what a human running `make proto-gen` and the drift gate both want.
+##
+## Emptiness is the right test for $(if) here (unlike claims-stale, where it
+## would read APPLY=0 as yes): an empty PROTO_GEN_ONLY genuinely means "no
+## narrowing", and an unrecognised value is rejected by the script.
 proto-gen:
-	@bash scripts/dev/proto-gen.sh
+	@bash scripts/dev/proto-gen.sh $(if $(PROTO_GEN_ONLY),--only=$(PROTO_GEN_ONLY),)
 
 ## CI gate: regenerate the pinned proto bindings, then diff against the
 ## checked-in tree (ignoring the cosmetic protoc version stamp). Fails if a
