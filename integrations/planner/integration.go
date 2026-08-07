@@ -35,6 +35,7 @@ import (
 
 	"github.com/uptrace/bun"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/events"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/node"
@@ -74,15 +75,13 @@ type AgentForwarder interface {
 		ctx context.Context,
 		requestId string,
 		targetType node.NodeType,
-		authClaims map[string]string,
-		partition string,
+		principal auth.ForwardedPrincipal,
 		envelope *memqlv1.MemqlClientMessage,
 	) (<-chan *memqlv1.MemqlServerMessage, error)
 
 	ForwardContinuation(
 		requestId string,
-		authClaims map[string]string,
-		partition string,
+		principal auth.ForwardedPrincipal,
 		envelope *memqlv1.MemqlClientMessage,
 	) error
 }

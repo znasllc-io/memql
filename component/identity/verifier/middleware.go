@@ -24,8 +24,10 @@ type MiddlewareOptions struct {
 	// (shouldBypassAuth below), so putting "/inbound/" there would exempt
 	// everything mounted under it later, including routes nobody has written
 	// yet. This set is matched exactly, or at most ONE further path segment
-	// under a trailing-slash entry -- never deeper. The bound is the point:
-	// "/inbound/shopify" is exempt, "/inbound/shopify/anything" is not.
+	// under a trailing-slash entry -- never deeper -- and only on a path that
+	// arrives already normalized. The bound is the point: "/inbound/shopify"
+	// is exempt; "/inbound/shopify/anything", "/inbound/shopify/" and
+	// "/inbound/shopify%20" are not.
 	//
 	// Skipping the middleware is not the same as being unauthenticated. The
 	// handler still has to fail closed with no credentials, which is the bar
@@ -183,13 +185,20 @@ func shouldBypassAuth(r *http.Request, publicPaths map[string]struct{}) bool {
 // rather than shared with shouldBypassAuth:
 //
 //   - an exact match, or
-//   - EXACTLY ONE further path segment under a trailing-slash entry.
+//   - EXACTLY ONE further path segment under a trailing-slash entry,
+//   - and the request's path must arrive in its already-normalized form.
 //
 // "/inbound/shopify" matches "/inbound/". "/inbound/shopify/anything" does
 // NOT, and neither does "/inbound/" itself -- an empty source is not a route.
 // That is what makes this safe where an open prefix walk is not: a route
 // mounted deeper later cannot inherit the exemption, so adding one stays an
 // explicit act rather than a silent consequence.
+//
+// The third clause is the second half of the argument: an exemption is only
+// sound on a path the mux will actually route to the exempting handler, so
+// wherever this function's view of the request and the mux's can diverge --
+// an encoded separator, or any spelling normalizePath would rewrite -- the
+// request is not exempted (memql#3128).
 func isSelfAuthenticated(r *http.Request, selfAuthPaths map[string]bool) bool {
 	if r == nil || r.URL == nil || len(selfAuthPaths) == 0 {
 		return false
@@ -210,7 +219,30 @@ func isSelfAuthenticated(r *http.Request, selfAuthPaths map[string]bool) bool {
 	if r.URL.RawPath != "" && r.URL.RawPath != r.URL.Path {
 		return false
 	}
+	// Same argument, generalised: NORMALIZATION is the other way the two views
+	// diverge. The entries below are normalized, so matching a request means
+	// normalizing it too -- and every rewrite normalizePath performs is a
+	// difference between the path this function judged and the path the mux will
+	// route. "/inbound/shopify/" reduces to the one-segment "/inbound/shopify"
+	// and satisfies the rule below, while `POST /inbound/{source}` does not match
+	// a path ending in "/" and the mux dispatches elsewhere.
+	//
+	// The refusal is on the general property rather than on the trailing slash,
+	// because the slash is only the first spelling. normalizePath TrimSpace's
+	// BEFORE it TrimSuffix's the slash, so "/inbound/shopify/%20" reduces the
+	// same way while its path does NOT end in "/" -- a HasSuffix guard closes
+	// the repro and leaves the class open. Requiring the path to arrive already
+	// normalized closes every rewrite at once, including ones nobody has thought
+	// of, and costs nothing: a real request to an exempt route is already in that
+	// form.
+	//
+	// Refused here rather than left to the handler's own parsing, for the reason
+	// the paragraph above gives: what the route table and splitSource happen to
+	// reject today is not this function's invariant to lean on. memql#3128.
 	path := normalizePath(r.URL.Path)
+	if path != r.URL.Path {
+		return false
+	}
 	for allowed, isMount := range selfAuthPaths {
 		if allowed == "" || allowed == "/" {
 			continue

@@ -877,6 +877,14 @@ func findRoleBySlug(roles []roleSnapshot, slug string) (roleSnapshot, bool) {
 // independent of the order the catalog query returned. It is deliberately total
 // -- for any two distinct rows exactly one is "better" -- so no pair can fall
 // through to positional order.
+//
+// KEPT AFTER memql#3207, deliberately. That change added write-time uniqueness
+// (validateAgentRoleSlugUnique), so a second ACTIVE row on a slug is refused at
+// the source rather than resolved here -- but this stays as defence in depth,
+// and it is not redundant: the uniqueness rule carves out the system actor and
+// is scoped to active rows, so a shared slug remains expressible (two authored
+// seeds, or an active row alongside a deactivated one). What changed is that
+// this preference is now BACKED by an invariant instead of standing in for one.
 func betterRoleMatch(candidate, current roleSnapshot) bool {
 	if candidate.Predefined != current.Predefined {
 		return candidate.Predefined

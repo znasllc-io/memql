@@ -114,24 +114,24 @@ func TestBadgeGate_ControlFramesStayAdmitted(t *testing.T) {
 	require.NotNil(t, msgs[1].GetServerHello())
 }
 
-func TestStampBadgeExpiryLocked_RotationRearmsAndDisarms(t *testing.T) {
+func TestStampAuthorityLocked_RotationRearmsAndDisarms(t *testing.T) {
 	s, _ := newBadgeGateSession(t, badgeStreamClaims("", time.Time{}))
 
 	// Rotating IN a badge grant arms the gate at its exp.
 	exp := time.Now().Add(30 * time.Second)
 	s.accessMu.Lock()
-	s.stampBadgeExpiryLocked("badge", exp)
+	s.stampAuthorityLocked("badge", "reader", exp)
 	s.accessMu.Unlock()
 	require.True(t, s.badgeGateAllows(executeQueryEnvelope("q1")), "grant still live")
 
 	s.accessMu.Lock()
-	s.stampBadgeExpiryLocked("badge", time.Now().Add(-time.Second))
+	s.stampAuthorityLocked("badge", "reader", time.Now().Add(-time.Second))
 	s.accessMu.Unlock()
 	require.False(t, s.badgeGateAllows(executeQueryEnvelope("q2")), "grant expired")
 
 	// Rotating back to a user-class bearer disarms the gate.
 	s.accessMu.Lock()
-	s.stampBadgeExpiryLocked("user", time.Time{})
+	s.stampAuthorityLocked("user", "", time.Time{})
 	s.accessMu.Unlock()
 	require.True(t, s.badgeGateAllows(executeQueryEnvelope("q3")))
 }

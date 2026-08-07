@@ -159,6 +159,73 @@ func TestEncodedSeparatorInsideTheSourceSegmentIsNotExempt(t *testing.T) {
 	}
 }
 
+// A trailing slash makes this a DIFFERENT request to the mux, and the mount
+// rule must not paper over the difference.
+//
+// normalizePath strips the trailing slash before matching, so "/inbound/shopify/"
+// reduces to the one-segment "/inbound/shopify" and is exempted -- while
+// `POST /inbound/{source}` does not match a path ending in "/", so the mux
+// dispatches somewhere else entirely. Same divergence as the encoded-separator
+// case above: the middleware and the mux disagree about what the request is.
+//
+// It 404s today only because no binary registers a "/" catch-all. That is a
+// property of the current route table rather than of this matcher -- the exact
+// argument TestEncodedSeparatorInTheMountSegmentIsNotExempt makes for its own
+// case, and it applies identically here. See memql#3128.
+//
+// Driven through the ASSEMBLED middleware, not through `bypassed`: a predicate
+// test pins the predicate and pins nothing about the wiring (see the note on
+// TestHTTPMiddlewareLetsASelfAuthenticatedRouteThrough below).
+func TestATrailingSlashIsNotExemptThroughTheAssembledMiddleware(t *testing.T) {
+	mw := HTTPMiddleware(&Verifier{}, MiddlewareOptions{
+		SelfAuthenticatedPaths: []string{"/inbound/"},
+	})
+
+	// Control, through the same assembled middleware: the slash-less spelling
+	// still reaches the handler. Without it a middleware that gated everything
+	// would satisfy the assertion below.
+	reached := false
+	next := http.HandlerFunc(func(http.ResponseWriter, *http.Request) { reached = true })
+	mw(next).ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/inbound/shopify", nil))
+	if !reached {
+		t.Fatal("control broken: /inbound/shopify no longer reaches the handler, so this test " +
+			"cannot distinguish 'the trailing slash is gated' from 'the tier is broken'")
+	}
+
+	// Every spelling normalizePath would REWRITE. Pinning only the literal
+	// trailing slash would pass on a guard that still exempts the encoded
+	// forms: normalizePath TrimSpace's BEFORE it TrimSuffix's the slash, so
+	// "/inbound/shopify/%20" also reduces to the one-segment form while its
+	// raw path does not end in "/". The property is "the path is already in
+	// its normalized form", not "the path has no trailing slash".
+	for _, tc := range []struct{ name, target, decoded string }{
+		{"a trailing slash", "/inbound/shopify/", "/inbound/shopify/"},
+		{"a trailing slash then encoded space", "/inbound/shopify/%20", "/inbound/shopify/ "},
+		{"encoded trailing space, no slash", "/inbound/shopify%20", "/inbound/shopify "},
+		{"a trailing slash then encoded tab", "/inbound/shopify/%09", "/inbound/shopify/\t"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			gated := false
+			nextGated := http.HandlerFunc(func(http.ResponseWriter, *http.Request) { gated = true })
+			req := httptest.NewRequest(http.MethodPost, tc.target, nil)
+			if got := req.URL.Path; got != tc.decoded {
+				t.Fatalf("control: %q decodes to %q, not the %q form under test", tc.target, got, tc.decoded)
+			}
+			mw(nextGated).ServeHTTP(httptest.NewRecorder(), req)
+
+			if gated {
+				t.Errorf("%q was exempted from bearer verification with no credentials.\n\n"+
+					"The exemption exists because POST /inbound/{source} authenticates itself with a "+
+					"vendor HMAC. The mux does not route this path to that handler -- so the middleware "+
+					"is waving through a request the self-authenticating handler never sees, and "+
+					"whatever DOES answer it inherits an exemption nothing justified. Today the inbound "+
+					"handler's own parsing refuses it, which is exactly the external dependence this "+
+					"matcher refuses to rely on for the sibling %%2F case. memql#3128.", tc.target)
+			}
+		})
+	}
+}
+
 // TestHTTPMiddlewareLetsASelfAuthenticatedRouteThrough drives the ASSEMBLED
 // middleware, and it is the only test here that does.
 //

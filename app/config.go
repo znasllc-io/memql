@@ -202,7 +202,8 @@ func (a *App) configAndAuth() {
 		Logger:      a.Logger,
 		PublicPaths: server.PublicPaths(),
 		// Third tier (memql#3062): reachable without a memQL bearer because the
-		// route verifies a vendor HMAC itself. Bounded to one path segment.
+		// route verifies a vendor HMAC itself. Bounded to one path segment, and
+		// only on a path the mux routes to that handler (memql#3128).
 		SelfAuthenticatedPaths: server.SelfAuthenticatedPaths(),
 		UnauthorizedHandler: func(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)

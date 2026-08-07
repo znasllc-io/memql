@@ -45,6 +45,13 @@ const (
 	SurfaceGRPC = "grpc" // user-facing MemqlService.Stream interceptor
 	SurfaceHTTP = "http" // verifier HTTP middleware
 	SurfaceNode = "node" // NodeService.Stream mesh interceptor
+	// SurfaceNodeForward is the APPLICATION-layer forwarded-auth gate on an
+	// AiForwardRequest (memql#3205), deliberately distinct from SurfaceNode.
+	// That one means the mesh TRANSPORT interceptor rejected a node token, and
+	// an alert watches it for a mesh-token storm. A forwarded-authority refusal
+	// is a different event with a different remedy -- usually a version skew
+	// mid-rollout -- and folding the two would fire that alert on it.
+	SurfaceNodeForward = "node_forward"
 )
 
 // Auth-reject reason labels. Keep these low-cardinality + stable so the
@@ -57,6 +64,13 @@ const (
 	ReasonRevocationCheckError = "revocation_check_error" // epoch resolver itself failed
 	ReasonWrongClass           = "wrong_class"            // valid token, wrong JWT class for this surface
 	ReasonMissingBinding       = "missing_binding"        // node-class token missing node_id / node_type
+
+	// Mesh forwarded-auth refusals (memql#3205), on SurfaceNodeForward.
+	ReasonForwardAuthorityMissing    = "forward_authority_missing"    // absent / unclassed / unknown-class assertion
+	ReasonForwardCeilingNotApplied   = "forward_ceiling_not_applied"  // badge role exceeds its ceiling, or the ceiling is missing/stray
+	ReasonForwardExpired             = "forward_expired"              // the asserted grant has expired, or carries no expiry to check
+	ReasonForwardPrincipalMismatch   = "forward_principal_mismatch"   // kind/class/subject disagree, or claims drifted from the assertion
+	ReasonForwardUnsupportedContract = "forward_unsupported_contract" // producer speaks a contract version this receiver does not implement
 )
 
 // gRPC status code labels (string form of the codes returned to the

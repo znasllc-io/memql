@@ -901,6 +901,25 @@ type streamSession struct {
 	badgeExpiresAt time.Time
 	badgeStamped   bool
 
+	// credentialClass / credentialCeiling record the REST of the
+	// credential's authorization envelope, stamped by the same two paths
+	// and under the same lock as badgeExpiresAt above (memql#3205).
+	//
+	// They exist because the MESH forward needs them and the stream
+	// context cannot supply them: a gRPC stream context is fixed at
+	// stream-open, while badge grants arrive MID-STREAM via RotateAuth,
+	// which swaps s.access / s.identity / the expiry stamp without ever
+	// touching the context, because it cannot. Read from there, a
+	// mid-stream badge session forwards no class and no ceiling, the
+	// receiver cannot tell that from "not a badge session", and it
+	// resolves the operator's UNCLAMPED stored role. The SESSION is the
+	// reliable source; these two fields are it.
+	//
+	// credentialClass carries the verifier's ""->"user" fallback already
+	// applied, so it is never empty once stamped.
+	credentialClass   string
+	credentialCeiling string
+
 	// uiAskUserRejectCount counts consecutive uiAskUser calls rejected
 	// by validateClientToolArgs for missing-options on this session.
 	// After the budget is spent we stop rejecting and soft-fallback
@@ -1160,11 +1179,7 @@ func (s *streamSession) badgeGate(envelope *memqlv1.MemqlClientMessage) badgeGat
 	}
 
 	s.accessMu.Lock()
-	if !s.badgeStamped {
-		s.badgeStamped = true
-		claims, _ := auth.ClaimsFromContext(s.stream.Context())
-		s.badgeExpiresAt = badgeExpiryFromClaims(claims)
-	}
+	s.ensureAuthorityStampedLocked()
 	active := !s.badgeExpiresAt.IsZero()
 	expiresAt := s.badgeExpiresAt
 	s.accessMu.Unlock()
@@ -1261,14 +1276,59 @@ func badgeExpiryFromClaims(claims map[string]any) time.Time {
 	return time.Time{}
 }
 
-// stampBadgeExpiry records the rotated-in credential's (class, exp)
-// for the badge gate. Caller holds accessMu.
-func (s *streamSession) stampBadgeExpiryLocked(class string, expiresAt time.Time) {
+// claimString reads a string claim, tolerating the json.Number / any shapes a
+// decoded JWT payload arrives in.
+func claimString(claims map[string]any, key string) string {
+	if claims == nil {
+		return ""
+	}
+	s, _ := claims[key].(string)
+	return strings.TrimSpace(s)
+}
+
+// ensureAuthorityStampedLocked lazily records the STREAM-OPEN credential's
+// authorization envelope, once per session. Caller holds accessMu.
+//
+// Reading the stream context is correct HERE and only here: this is the
+// stream-open credential, which is exactly what the context carries. Every
+// later change to it arrives through RotateAuth, which re-stamps these same
+// fields directly (stampAuthorityLocked) because it cannot mutate the context.
+func (s *streamSession) ensureAuthorityStampedLocked() {
+	if s.badgeStamped {
+		return
+	}
+	claims, _ := auth.ClaimsFromContext(s.stream.Context())
+	s.stampAuthorityLocked(
+		claimString(claims, "class"),
+		claimString(claims, "role_ceiling"),
+		badgeExpiryFromClaims(claims),
+	)
+}
+
+// stampAuthorityLocked records the credential's (class, ceiling, exp).
+// Caller holds accessMu.
+//
+// The badge-expiry half is unchanged: only a badge carries a mid-stream expiry,
+// and every other class zeroes it so the gate stays inert. The class and
+// ceiling are recorded for ALL classes, because the mesh assertion has to state
+// a class for every session -- "not a badge session" is the value "user", not
+// an absent field (memql#3205).
+func (s *streamSession) stampAuthorityLocked(class, ceiling string, expiresAt time.Time) {
 	s.badgeStamped = true
+	// Mirror the verifier's own ""->"user" fallback so an unclassed JWT is a
+	// stated ordinary user rather than an unstated anything.
+	if strings.TrimSpace(class) == "" {
+		class = identitycomp.ClassUser
+	}
+	s.credentialClass = class
 	if class == identitycomp.ClassBadge {
+		s.credentialCeiling = ceiling
 		s.badgeExpiresAt = expiresAt
 		return
 	}
+	// A ceiling only exists on a badge; carrying one anywhere else would let an
+	// assertion look clamped while its class says nothing enforces it.
+	s.credentialCeiling = ""
 	s.badgeExpiresAt = time.Time{}
 }
 
@@ -1375,10 +1435,17 @@ func (s *streamSession) handleRotateAuth(envelope *memqlv1.MemqlClientMessage, m
 	prevSubject := s.identity.Subject
 	s.identity = newIdentity
 
-	// Re-stamp the badge expiry gate for the rotated-in credential
-	// (memql#2513): a badge grant arms the gate at its exp; any other
-	// class disarms it.
-	s.stampBadgeExpiryLocked(vc.Class, vc.ExpiresAt)
+	// Re-stamp the credential's authorization envelope for the rotated-in
+	// credential (memql#2513 for the expiry gate; memql#3205 for the class +
+	// ceiling the mesh assertion needs). A badge grant arms the gate at its
+	// exp; any other class disarms it.
+	//
+	// THIS is the call the mesh contract depends on. It runs inside the same
+	// accessMu critical section that swaps s.access and s.identity, so a
+	// forward can never capture a pre-rotate role beside a post-rotate ceiling
+	// -- and it is why the forwarded assertion is sourced from the session
+	// rather than from the stream context, which cannot see this at all.
+	s.stampAuthorityLocked(vc.Class, claimString(vc.ClaimsMap, "role_ceiling"), vc.ExpiresAt)
 
 	if s.logger != nil {
 		s.logger.Info("rotate_auth: identity swapped",

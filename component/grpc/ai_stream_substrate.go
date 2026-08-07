@@ -122,21 +122,47 @@ func (s *streamSession) proxyAIStream(
 	ctx := s.stream.Context()
 	correlate := envelope.GetMessageId()
 
-	claims := s.forwardedAuthClaims()
-	partition := extractPartitionFromEnvelope(envelope)
+	// Refuse locally on an unprovable authority. It matters more here than on
+	// the sibling path: the forward response channel below is drained and
+	// DISCARDED, so a receiver-side refusal delivered as a QueryError would
+	// never reach the client and the stream would simply hang (memql#3205).
+	principal, err := s.forwardedPrincipal()
+	if err != nil {
+		return s.sendQueryError(requestId, correlate, codes.Internal,
+			"cannot establish forwarded authority for this session: "+err.Error())
+	}
 	stampEnvelopeProvenance(ctx, envelope)
 
-	respCh, err := s.service.aiForwarder.Forward(ctx, requestId, target, claims, partition, envelope)
+	respCh, err := s.service.aiForwarder.Forward(ctx, requestId, target, principal, envelope)
 	if err != nil {
 		return s.sendQueryError(requestId, correlate, codes.Unavailable, err.Error())
 	}
 
-	// Drain-and-discard the forward responses: with the substrate cutover the
-	// worker delivers the streamed content over the substrate, so the forward
-	// channel only carries the terminal that closes the inflight entry. We must
-	// still consume it so the forwarder's cleanup runs.
+	// Drain the forward responses. With the substrate cutover the worker
+	// delivers the streamed CONTENT over the substrate, so this channel
+	// normally carries only the terminal that closes the inflight entry -- but
+	// it must still be consumed so the forwarder's cleanup runs.
+	//
+	// A QueryError is the exception, and it is NOT discardable (memql#3205).
+	// The receiver answers a refused OPENER terminally, and that answer arrives
+	// here -- so discarding it leaves consume() blocked on a substrate stream
+	// the worker will never produce to, with no timeout, until the client's
+	// gRPC stream dies. The client sees a hang where the contract promises a
+	// typed error. Unlike the transcribe sibling there is no recovery path:
+	// streaming chat sends no continuation, so nothing later trips the
+	// HasInflight check.
+	//
+	// Reachable in normal operation, not just on a bug: an old producer talking
+	// to an already-upgraded receiver is refused for the length of a rolling
+	// deploy, and so is a badge whose expiry passed on the worker's clock.
 	go func() {
-		for range respCh { //nolint:revive // intentional drain
+		for msg := range respCh {
+			qe := msg.GetQueryError()
+			if qe == nil {
+				continue
+			}
+			_ = s.sendQueryError(requestId, correlate,
+				forwardErrorCode(qe.GetError().GetCode()), qe.GetError().GetMessage())
 		}
 	}()
 

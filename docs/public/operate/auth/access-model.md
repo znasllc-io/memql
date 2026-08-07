@@ -223,13 +223,25 @@ memQL bearer is rejected before the handler's allowlist and signature
 check ever execute.
 
 Membership in the third tier means **the bearer middleware steps
-aside**, not that the route is unauthenticated. Two properties keep that
-narrow:
+aside**, not that the route is unauthenticated. Three properties keep
+that narrow:
 
 - **Matching is bounded to one path segment.** `/inbound/shopify`
   matches `/inbound/`; `/inbound/shopify/anything` does not, and neither
   does `/inbound/` alone. A route mounted deeper later cannot inherit
   the exemption, so granting one stays an explicit act.
+- **An exempted path is one the mux will actually route to the exempting
+  handler.** Where the middleware's view of the request and the mux's can
+  differ, the request is not exempted: an encoded separator in the mount
+  segment (`/inbound%2Fx`), and any spelling normalization would rewrite
+  before matching -- a trailing slash (`/inbound/shopify/`), or trailing
+  whitespace (`/inbound/shopify/%20`, `/inbound/shopify%20`). None of
+  these is a path `POST /inbound/{source}` matches, so each would hand an
+  exemption to whatever answers a request the self-authenticating handler
+  never sees. Today nothing does -- but that is a property of the current
+  route table rather than of the matcher, which is why the refusal is on
+  the general property ("the path arrived already normalized") rather
+  than on the trailing slash alone (memql#3128).
 - **The route must independently fail closed.** A self-authenticated
   route must ALSO be declared in `HandlerAuthorizedPaths()`, which is
   what certifies that property, and
