@@ -60,11 +60,29 @@ func NewForwardRouter(peerMgr *node.PeerManager, logger *slog.Logger) *ForwardRo
 	}
 }
 
+// SelfNodeId / SelfNodeType report the forwarding node's own identity, for the
+// audit-only origin stamp on the assertion (memql#3219). Both are empty when
+// the router has no PeerManager -- which is also exactly when Forward returns
+// ErrNoWorkbenchPeer, so an unstamped origin never reaches the wire.
+func (r *ForwardRouter) SelfNodeId() string {
+	if r == nil || r.peerMgr == nil {
+		return ""
+	}
+	return r.peerMgr.SelfNodeId()
+}
+
+func (r *ForwardRouter) SelfNodeType() string {
+	if r == nil || r.peerMgr == nil {
+		return ""
+	}
+	return r.peerMgr.SelfNodeType()
+}
+
 // Forward dispatches a workbench call to a remote workbench peer
 // and waits for the response. Caller fills in (planId, action, args,
-// agentId, taskId, auth, partition) on the request; this method
-// stamps request_id, registers the inflight channel, sends, and
-// awaits the matching response or ctx cancellation.
+// agentId, taskId, authority) on the request; this method stamps
+// request_id, registers the inflight channel, sends, and awaits the
+// matching response or ctx cancellation.
 func (r *ForwardRouter) Forward(ctx context.Context, req *nodev1.WorkbenchForwardRequest) (*nodev1.WorkbenchForwardResponse, error) {
 	if r == nil || r.peerMgr == nil {
 		return nil, ErrNoWorkbenchPeer

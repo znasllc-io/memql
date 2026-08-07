@@ -361,11 +361,27 @@ message AiForwardCancel {
 // as JSON to keep the wire shape stable across action-specific arg
 // variants without exploding the proto with one oneof per action.
 //
-// `auth` carries the originating principal's claims (subject, email,
-// role) so the workbench node can reconstruct the actor context.
+// `authority` is the mandatory authorization assertion (memql#3205), and the
+// workbench node refuses any envelope that does not carry a verifiable one.
+//
+// It replaces a `map<string, string> auth` that field 2 reserved below used to
+// hold. That field's own doc comment claimed it "carries the originating
+// principal's claims so the workbench node can reconstruct the actor context";
+// nothing populated it and nothing read it, and the only reference to it
+// anywhere in the tree was its generated getter (memql#3219). It is reserved
+// rather than reused: a claims map cannot carry a role ceiling provably --
+// "no badge" and "the key is missing" are the same value -- which is the
+// property memql#3205 removed from the AI-forward path and memql#2814 removed
+// from QueryForward.
+//
+// Unlike AiForwardRequest, this message carries NO attribution claims map
+// beside the assertion. The receiver derives the createdBy claims from the
+// authority itself (auth.ForwardedAuthority.Principal), so "claims without an
+// authority" is inexpressible here rather than merely discouraged.
 message WorkbenchForwardRequest {
   string request_id = 1;
-  map<string, string> auth = 2;
+  reserved 2;
+  reserved "auth";
   reserved 3;
   reserved "partition";
   string plan_id = 4;
@@ -375,6 +391,7 @@ message WorkbenchForwardRequest {
   string task_id = 8;
   // Optional timeout hint; the workbench node clamps to its own caps.
   int32 timeout_sec = 9;
+  ForwardedAuthority authority = 10;
 }
 
 // WorkbenchForwardResponse carries the dispatch result back to the
