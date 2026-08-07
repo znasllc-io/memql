@@ -98,6 +98,64 @@ func BlankComments(source string) string {
 	return string(out)
 }
 
+// StripLineComment returns line with any trailing `// ...` comment removed,
+// leaving a `//` that sits inside a double-quoted string literal alone. A line
+// with no comment comes back unchanged.
+//
+// ONE scanner, THREE consumers (memql#3190). This function existed as three
+// BYTE-IDENTICAL private copies -- pagination.stripComment,
+// memql.stripDepLineComment and the DSL conformance suite's stripLineComment --
+// and all three carried the same defect: they decided whether a `"` closed the
+// literal with a ONE-BYTE LOOKBACK (`line[i-1] != '\\'`). A lookback cannot
+// tell an ESCAPED quote (`\"`) from a quote that follows a COMPLETED `\\`
+// escape, so a literal ending in a backslash pair read its own closing quote as
+// escaped and the scanner never left string state. Every `//` after it then
+// counted as literal interior, the comment was not stripped, and the caller
+// classified a line of comment text as authored code. Escape state is TRACKED
+// here instead: a backslash consumes the next byte, so `\\` spends itself and
+// the NEXT quote closes the literal.
+//
+// The copies are what let the same defect ship three times over -- it was found
+// and fixed one site at a time in memql#2949, #2872 and #3045, each fix leaving
+// the others untouched because nobody enumerated them. Three copies of one
+// function is three chances to disagree; one cannot.
+//
+// # Scope, and why this is not BlankComments
+//
+// BlankComments blanks comments across a WHOLE FILE and returns an
+// offset-preserving copy. This one takes a SINGLE LINE and returns the prefix
+// before its comment, which is what a line-oriented classifier wants and what a
+// blanked copy cannot give it (the comment's bytes would still be there as
+// spaces, and the caller would have to re-find the boundary it just erased).
+//
+// Deliberately NOT handled, matching the three copies this replaces and the
+// line-at-a-time callers that feed it:
+//
+//   - `/* ... */` block comments. A block comment's extent is not decidable
+//     from one line; a caller that needs that needs CommentSpans over the file.
+//   - Backtick spans. Those are a rewriter emission, never authored `.memql`.
+func StripLineComment(line string) string {
+	inString := false
+	escaped := false
+	for i := 0; i < len(line); i++ {
+		c := line[i]
+		switch {
+		case escaped:
+			// This byte was escaped by the backslash before it; the escape is
+			// now spent. A `\\` pair therefore leaves escaped false, so the
+			// NEXT quote closes the literal.
+			escaped = false
+		case inString && c == '\\':
+			escaped = true
+		case c == '"':
+			inString = !inString
+		case !inString && c == '/' && i+1 < len(line) && line[i+1] == '/':
+			return line[:i]
+		}
+	}
+	return line
+}
+
 // UnterminatedBlockCommentLine returns the 1-based line on which an
 // unterminated `/*` opens, or 0 when every block comment in source is closed.
 //

@@ -101,23 +101,67 @@ func validateDeclaredUsage(rawSource string, funcDef *languageParser.FunctionDef
 }
 
 // extractFunctionBody returns the contents between the first
-// `func (...) name(...) {` (or `query name {` / `mutate name {`)
-// opening brace and its matching closing brace. Returns the empty
-// string when no body is found.
+// `func (Receiver) name(...) {` opening brace and its matching closing
+// brace. Returns the empty string when no body is found.
 //
-// The raw source coming into the function loader is either the
-// post-rewriter `func (Query|Mutation|Automation) name(...) { ... }`
-// form (when the file was struct-form) or the author-written
-// procedural form. Either way, the body lives inside the first
-// top-level `{ ... }` of the file.
+// There is exactly ONE header form to find, the parser-emitted
+// `func (Query|Mutation|Automation|Logic) name(...) { ... }`. The
+// snapshot every caller feeds this (`rawSourceForUsage` in
+// function_loader.go) is taken AFTER NormaliseAll, so the
+// author-facing struct-form headers (`query NAME {` / `mutate NAME {`
+// / `logic NAME {` / `automation NAME {`) have already been rewritten
+// into that shape and cannot reach here -- the same reasoning
+// precededByBodyOpener records below, corrected here to match
+// (memql#3194 fixed the neighbour; this doc still named the struct
+// forms). The body lives inside the first top-level `{ ... }`.
+//
+// # String state is TRACKED, not inferred from the preceding byte
+//
+// This scan used to decide whether a `"` closed the literal with a
+// ONE-BYTE LOOKBACK (`source[i-1] != '\\'`), which cannot tell an
+// ESCAPED quote (`\"`) from a quote that follows a COMPLETED `\\`
+// escape (memql#3190). A body containing a literal ending in a
+// backslash pair therefore never left string state: the braces after
+// it stopped being counted, depth never returned to zero, and this
+// returned "" -- which every caller (declared-usage, actor-binding,
+// logic event-field and event-binding validators) reads as "no body"
+// and skips its check on. One mis-scanned literal, four validators
+// failing open at once.
+//
+// # Why this is local and does not delegate
+//
+// It returns a slice of the ORIGINAL source, so the caller's offsets
+// have to be offsets into the original. The shared scrubbers
+// (baseparser.BlankComments, parser.BlankCommentsAndStrings) return a
+// BLANKED COPY: scanning one would find the right brace positions,
+// but the body would then have to be spliced back out of the original
+// anyway, and the body-opener heuristic below inspects the real
+// preceding text, not a blanked view of it. Same conclusion, for the
+// same reason, as memql#3102's scanSegments.
+//
+// To be explicit about the state of the tree rather than only about
+// the correct implementations in it: correct scanners existed here
+// before this change AND so did nine buggy ones, this being one of
+// them. memql#3190 enumerated and converted all nine; the gate in
+// core/baseparser (TestNoOneByteLookbackQuoteScan) is what stops a
+// tenth.
 func extractFunctionBody(source string) string {
 	open := -1
 	depth := 0
 	inString := false
+	escaped := false
 	for i := 0; i < len(source); i++ {
 		c := source[i]
 		if inString {
-			if c == '"' && (i == 0 || source[i-1] != '\\') {
+			switch {
+			case escaped:
+				// This byte was escaped by the backslash before it; the
+				// escape is now spent. A `\\` pair therefore leaves
+				// escaped false, so the NEXT quote closes the literal.
+				escaped = false
+			case c == '\\':
+				escaped = true
+			case c == '"':
 				inString = false
 			}
 			continue
@@ -125,6 +169,7 @@ func extractFunctionBody(source string) string {
 		switch c {
 		case '"':
 			inString = true
+			escaped = false
 		case '{':
 			if open < 0 {
 				// Heuristic: only count `{` AFTER a `func ` / `query ` /

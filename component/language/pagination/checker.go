@@ -39,6 +39,7 @@ import (
 	"strings"
 
 	"github.com/znasllc-io/memql/component/language/dslclause"
+	"github.com/znasllc-io/memql/core/baseparser"
 )
 
 // Classification is the bucket a single query falls into.
@@ -198,7 +199,14 @@ func filterClause(body string) string {
 	var sb strings.Builder
 	inFilter := false
 	for _, raw := range strings.Split(body, "\n") {
-		line := stripComment(raw)
+		// DELEGATES to the shared scanner (memql#3190). This file carried a
+		// private copy of it -- byte-identical to the ones in
+		// component/memql/dependency_validator.go and dsl/conformance_test.go
+		// -- and all three inferred escape state from the preceding byte, so a
+		// literal ending in a completed `\\` escape swallowed the `//` after
+		// it. Delegating fits here: a line-oriented `"`-only strip that keeps
+		// no offsets into the original is exactly StripLineComment's contract.
+		line := baseparser.StripLineComment(raw)
 		trim := strings.TrimSpace(line)
 		if !inFilter {
 			if dslclause.StartsWith(trim, "filter") {
@@ -248,7 +256,7 @@ func startsWithDirective(trim string) bool {
 // directive (`count` on its own line) is matched too.
 func hasDirective(body, kw string) bool {
 	for _, raw := range strings.Split(body, "\n") {
-		trim := strings.TrimSpace(stripComment(raw))
+		trim := strings.TrimSpace(baseparser.StripLineComment(raw))
 		if trim == kw || strings.HasPrefix(trim, kw+" ") || strings.HasPrefix(trim, kw+"\t") {
 			return true
 		}
@@ -315,23 +323,6 @@ func matchingCloseBrace(src string, openIdx int) int {
 		}
 	}
 	return -1
-}
-
-// stripComment trims a trailing `// ...` line comment, preserving any
-// `//` inside a string literal.
-func stripComment(line string) string {
-	inStr := false
-	for i := 0; i < len(line); i++ {
-		c := line[i]
-		if c == '"' && (i == 0 || line[i-1] != '\\') {
-			inStr = !inStr
-			continue
-		}
-		if !inStr && c == '/' && i+1 < len(line) && line[i+1] == '/' {
-			return line[:i]
-		}
-	}
-	return line
 }
 
 // SortFindings orders findings by file then line for stable reporting.
