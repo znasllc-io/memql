@@ -33,13 +33,25 @@ toolchain go1.26.5
 use (
 	.
 	./component/architecture
+	./component/auth
+	./component/bus
 	./component/bus/gen
+	./component/config
+	./component/events
+	./component/fileprocessor
 	./component/grpc/gen
+	./component/healing
+	./component/language/annotations
+	./component/language/ast
+	./component/language/dslclause
+	./component/metadata
 	./component/metrics
 	./component/node/gen
+	./component/observe
 	./component/planner
 	./component/polyphon
 	./component/provenance
+	./component/safety
 	./component/secret
 	./core
 )
