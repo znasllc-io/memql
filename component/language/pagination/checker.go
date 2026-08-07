@@ -18,7 +18,7 @@
 //
 // This package contains the pure, deterministic classifier. It operates
 // on raw `.memql` source text using line structure only (no full
-// parser), the same lightweight approach the dsl/conformance_test.go
+// parser), the same lightweight approach the test/dslconformance/conformance_test.go
 // gates use, so it can run identically over the embedded tree (the
 // conformance test) and the on-disk tree (the audit report) without an
 // engine. Both consumers derive from this one definition so the rule can
@@ -201,7 +201,7 @@ func filterClause(body string) string {
 	for _, raw := range strings.Split(body, "\n") {
 		// DELEGATES to the shared scanner (memql#3190). This file carried a
 		// private copy of it -- byte-identical to the ones in
-		// component/memql/dependency_validator.go and dsl/conformance_test.go
+		// component/memql/dependency_validator.go and test/dslconformance/conformance_test.go
 		// -- and all three inferred escape state from the preceding byte, so a
 		// literal ending in a completed `\\` escape swallowed the `//` after
 		// it. Delegating fits here: a line-oriented `"`-only strip that keeps

@@ -20,7 +20,7 @@ package app
 //
 // True here, and not enough. The client cannot choose the CONSTRUCT, but it
 // chooses the ARGUMENT -- and for a @serverOnly construct the argument is the
-// entire authorization decision, because dsl/conformance_test.go treats
+// entire authorization decision, because test/dslconformance/conformance_test.go treats
 // @serverOnly as a bucket that EXEMPTS the construct from carrying any
 // caller-scope filter. Origin is the only gate, so an unchecked argument is an
 // unchecked query.

@@ -86,7 +86,7 @@ shape shapeBroken {
 // TestSandboxCompileBundle_UnsupportedKindSkipped: a kind this pass doesn't
 // handle is reported as skipped and does NOT fail the bundle. `prompt` is a
 // still-unhandled kind (automation now routes through the registered
-// compiler hook; see authoring_sandbox_automation_test.go).
+// compiler hook; see test/authoring/authoring_sandbox_automation_test.go).
 func TestSandboxCompileBundle_UnsupportedKindSkipped(t *testing.T) {
 	rep := SandboxCompileBundle([]SandboxConstruct{
 		{

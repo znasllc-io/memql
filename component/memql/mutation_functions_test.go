@@ -66,7 +66,7 @@ func TestParseObjectLiteral_CtxShorthandRejectsDottedPath(t *testing.T) {
 }
 
 func TestMutationFunctionTemplate_LoadAndRender_CreateSpace(t *testing.T) {
-	t.Skip("legacy dsl/v1 tree retired; unified-tree coverage lives in component/memql/unified_*_test.go and dsl/embed_test.go.")
+	t.Skip("legacy dsl/v1 tree retired; unified-tree coverage lives in component/memql/unified_*_test.go and test/dslconformance/embed_test.go.")
 	path := filepath.Join("..", "..", "dsl", "v1", "mutations", "v1", "cognition", "createSpace.memql")
 	raw, err := os.ReadFile(path)
 	require.NoError(t, err)

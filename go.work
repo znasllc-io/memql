@@ -32,6 +32,7 @@ toolchain go1.26.5
 
 use (
 	.
+	./component/actions
 	./component/architecture
 	./component/auth
 	./component/bus
@@ -40,6 +41,7 @@ use (
 	./component/database
 	./component/events
 	./component/fileprocessor
+	./component/genesis
 	./component/grpc/gen
 	./component/harness
 	./component/healing
@@ -47,6 +49,7 @@ use (
 	./component/language/annotations
 	./component/language/ast
 	./component/language/dslclause
+	./component/memql
 	./component/metadata
 	./component/metrics
 	./component/node/gen
@@ -57,4 +60,6 @@ use (
 	./component/safety
 	./component/secret
 	./core
+	./docs
+	./dsl
 )

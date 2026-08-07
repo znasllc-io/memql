@@ -298,7 +298,7 @@ func (e *Executor) ExecuteWithEvent(ctx context.Context, automation *Automation,
 //
 // On the MCP run_automation path the client still cannot choose the CONSTRUCT,
 // but it chooses the ARGUMENT -- and for a @serverOnly construct the argument
-// IS the authorization decision, because dsl/conformance_test.go treats
+// IS the authorization decision, because test/dslconformance/conformance_test.go treats
 // @serverOnly as the bucket that EXEMPTS a construct from carrying any
 // caller-scope filter. Origin is the only gate, so an unchecked argument is an
 // unchecked query.

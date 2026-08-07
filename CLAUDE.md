@@ -1289,7 +1289,7 @@ Every query and mutation in the DSL classifies as **owned** (filter
 on `ownerUserId == actor.userId`), **granted** (relationship
 predicate gates on actor.userId), **admin** (cluster-owner spec), or
 **public** (`@public` annotation). The classification test in
-`dsl/conformance_test.go` hard-fails on any new unclassified
+`test/dslconformance/conformance_test.go` hard-fails on any new unclassified
 construct.
 
 The partition dimension that historically gated tenant isolation is
@@ -1376,7 +1376,7 @@ bare `insert { ... }` / `update { ... }` block without re-stating the
 concept id.
 
 **Canonical filter-clause syntax** (enforced by
-`dsl/conformance_test.go`):
+`test/dslconformance/conformance_test.go`):
 
 - Payload fields: **bare property** (`status`, `ownerUserId`) — never
   `<field>` (removed, epic #2292) and never `<conceptName>.<field>`
@@ -1432,7 +1432,7 @@ name collides with one of those is rejected at load time.
   `@default` is NOT a substitute — it is never applied on insert either
   (memql#2960), so `??` is the only mechanism that fills a value. `a ?? b ?? c`
   folds to exactly what `coalesce(a, b, c)` produces; the shorthand is
-  the authored form and `dsl/no_coalesce_longhand_test.go` gates the
+  the authored form and `test/dslconformance/no_coalesce_longhand_test.go` gates the
   corpus on it (`memqlmigrate --rewrite=null-coalesce` converts).
 
 Queries:

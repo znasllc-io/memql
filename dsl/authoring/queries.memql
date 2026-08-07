@@ -56,7 +56,7 @@ query bundle activeAuthoringBundles {
 // Per-row-authz classification: ADMIN. The `actor.isClusterOwner == true`
 // gate is the cluster-owner spec the per-row-authz audit
 // (docs/auth/per-row-authz-audit.md) requires for a cross-owner read --
-// it both classifies the query as admin (dsl/conformance_test.go) and
+// it both classifies the query as admin (test/dslconformance/conformance_test.go) and
 // REALLY gates it: a non-cluster-owner caller matches nothing (the actor
 // constant binds false). The boot re-arm runs under a cluster-owner
 // envelope, so it sees every owner's active bundles; per-owner construct

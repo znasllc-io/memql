@@ -159,7 +159,7 @@ func ScanBareRowIntrinsics(source string) []BareRowIntrinsic {
 // however the set was spelled.
 //
 // Widening it HERE first was the wrong move and produced a real contradiction:
-// three other openers walk the same text (dsl/conformance_test.go,
+// three other openers walk the same text (test/dslconformance/conformance_test.go,
 // component/language/pagination/checker.go, dslclause itself), so a compliant
 // `filter(row.id==args.x && ownerUserId==actor.userId)` passed this scanner and
 // FAILED TestPerRowAuthzClassification, whose opener had not moved -- the

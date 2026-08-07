@@ -30,7 +30,7 @@ import (
 // mode from memql#2800's dead `spec("requiresOwnerOrAdmin")` gate, so this has
 // bitten before.
 //
-// `dsl/conformance_test.go` already hard-fails the retired `payload.` prefix.
+// `test/dslconformance/conformance_test.go` already hard-fails the retired `payload.` prefix.
 // This is the same treatment for the same class.
 //
 // # Why it lives at the repo root and not in dsl/
@@ -97,7 +97,7 @@ var retiredSpecFormExempt = map[string]string{
 	"component/language/parser/kind_prefixed_invocation_test.go": "asserts the retired call form is rejected in favour of the kind-prefixed one",
 	"component/memql/spec_types.go":                              "historical note on what the spec construct replaced",
 	"component/memql/server_only_resolve_test.go":                "narrates memql#2800, where a gate was first written in the retired form",
-	"dsl/admin_gate_test.go":                                     "records how spec(\"requiresClusterOwner\") survived undeclared (memql#2983)",
+	"test/dslconformance/admin_gate_test.go":                                     "records how spec(\"requiresClusterOwner\") survived undeclared (memql#2983)",
 	"scripts/migrations/construct_invocation/main.go":            "the migrator that rewrites the form -- it matches what it converts",
 	"component/memql/ast_converter.go": "normalizeSpecCallsToReferences -- the load-time rejection, " +
 		"which has to name what it rejects",

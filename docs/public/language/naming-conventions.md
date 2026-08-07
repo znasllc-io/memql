@@ -120,7 +120,7 @@ no prefixed/bare split between the two.
 ## Enforcement
 
 The no-prefix rule IS gated: `TestNoKindPrefixInConstructNames`
-(`dsl/naming_conventions_test.go`) fails if any construct is named with
+(`test/dslconformance/naming_conventions_test.go`) fails if any construct is named with
 its own kind as a prefix. That is what stops this page and the tree
 drifting apart again -- the previous rule was documented for months while
 nothing in the corpus followed it, and nothing noticed.

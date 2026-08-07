@@ -73,7 +73,7 @@ var (
 	depIncludeRe     = regexp.MustCompile(`^\s*include\s+([A-Za-z_][\w.]*)\s*$`)
 )
 
-// depSharedShapeExempt mirrors dsl/conformance_test.go's
+// depSharedShapeExempt mirrors test/dslconformance/conformance_test.go's
 // sharedShapeExempt: a shape deliberately REUSED across two sibling
 // concepts with an identical field layout. The consumer's scan concept
 // is correct; only the projection borrows a shape whose signature names
@@ -106,7 +106,7 @@ func validateDependencyTree(tree fs.FS) error {
 		// No _reference/ skip needed: dslfs.WalkMemqlFiles structurally
 		// omits every underscore-prefixed dir and file for any fs.FS
 		// (walker.go), so `paths` never contains one -- pinned by
-		// dsl/underscore_walk_test.go (#2686, the production sibling of
+		// test/dslconformance/underscore_walk_test.go (#2686, the production sibling of
 		// the fifteen dead test-side skips #2651 removed).
 		raw, rErr := readTreeFile(tree, p)
 		if rErr != nil {
@@ -154,7 +154,7 @@ func collectShapes(path, src string, shapes map[string]*depShape, list *[]*depSh
 	for i, raw := range strings.Split(src, "\n") {
 		// DELEGATES to the shared scanner (memql#3190). This file carried a
 		// private copy of it -- byte-identical to the ones in
-		// component/language/pagination/checker.go and dsl/conformance_test.go
+		// component/language/pagination/checker.go and test/dslconformance/conformance_test.go
 		// -- and all three inferred escape state from the preceding byte, so a
 		// literal ending in a completed `\\` escape swallowed the `//` after
 		// it and this validator read comment text as a declaration. Delegating

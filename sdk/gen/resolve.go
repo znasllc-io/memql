@@ -168,7 +168,7 @@ func resolveConceptId(short, dir string, imports map[string]string, idx conceptI
 // canonicalArgPatternExemptions lists `<construct>.<argField>` keys whose
 // `@pattern("^v1:...")` is a KNOWN, tracked deferral rather than a
 // regression -- kept in lockstep with the A1 conformance exemption
-// (dsl/conformance_test.go: TestNoCanonicalPatternOnArgs). Prune an entry
+// (test/dslconformance/conformance_test.go: TestNoCanonicalPatternOnArgs). Prune an entry
 // when the underlying pattern is removed so the gate covers it again.
 var canonicalArgPatternExemptions = map[string]bool{
 	// spaceMedia.partitionId carries a v1:cognition:space id; `space` is

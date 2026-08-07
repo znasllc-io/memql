@@ -4,6 +4,7 @@
 Given a list of directories, for each one:
   - write go.mod (module path + go/toolchain lines)
   - add it to go.work
+  - SEED it with the root module's external pins (see below)
   - resolve which OTHER modules it imports, and add require+replace for each
   - `GOWORK=off go mod tidy` in dependency order
   - add require+replace to the root go.mod
@@ -11,6 +12,25 @@ Given a list of directories, for each one:
   - add an entry to KNOWN_GO_MOD_DIRS in db-gated-packages.sh
 
 Idempotent: re-running with more directories extends the set.
+
+WHY THE SEED STEP EXISTS (memql#3242)
+-------------------------------------
+`go mod tidy` in a module with NO requirements resolves every external import
+to the LATEST release. Those versions then flow back into the root through the
+`require`+`replace` edge, and MVS takes the max -- so carving out a directory
+silently UPGRADED the shipped binaries' dependencies. Measured on the engine
+tier before this step existed: `google.golang.org/grpc v1.81.0-dev -> v1.83.0`,
+`go.opentelemetry.io/otel v1.41.0 -> v1.44.0`, `go-jose/v3` dropped from the
+closure, +20 packages, every node binary +0.65%.
+
+That is a dependency bump wearing a refactor's clothes: it lands in a PR whose
+diff is `go.mod` files and file moves, reviewed as structural, and nobody looks
+at a version. Dependency bumps are dependabot's job and are reviewed as such.
+
+So each new module is seeded with the ROOT's requirement versions before it is
+tidied. `go mod tidy` does not upgrade a requirement that already satisfies the
+imports, so the seed wins and drops out again for anything the module does not
+use. The result is version-neutral by construction rather than by inspection.
 """
 import os
 import re
@@ -82,6 +102,38 @@ def write_go_mod(d, header):
         f.write(header)
         f.write(f"module {MOD}/{d}\n\n")
         f.write(GO_LINE)
+
+
+def root_external_pins():
+    """The root module's external requirements, as {path: version}.
+
+    Read from the root go.mod as it stands BEFORE this run touches it, so the
+    seed reflects what the tree actually ships today. Internal modules are
+    excluded -- those get their own require+replace from add_reqs.
+    """
+    import json
+    out = sh(["go", "mod", "edit", "-json", os.path.join(REPO, "go.mod")])
+    pins = {}
+    for r in json.loads(out.stdout).get("Require") or []:
+        path = r["Path"]
+        if path == MOD or path.startswith(MOD + "/"):
+            continue
+        pins[path] = r["Version"]
+    return pins
+
+
+def seed_pins(d, pins):
+    """Pin a new module to the root's external versions before tidying.
+
+    Without this, `go mod tidy` resolves each import to the LATEST release and
+    the upgrade propagates into the root through MVS -- see the module header.
+    Seeded, tidy keeps these versions (they satisfy the imports) and drops the
+    ones the module does not import.
+    """
+    modfile = os.path.join(REPO, d, "go.mod")
+    args = ["go", "mod", "edit"]
+    args += [f"-require={p}@{v}" for p, v in sorted(pins.items())]
+    sh(args + [modfile])
 
 
 def add_reqs(d, deps):
@@ -163,6 +215,10 @@ def main():
     header = ("// Part of the memql module split (memql#3228). Tier assignment and\n"
               "// rationale: docs/ci-design.md, section D3.\n")
 
+    # Read BEFORE any go.mod is written, so the seed is the tree's current
+    # pins rather than something this run produced.
+    pins = root_external_pins()
+
     modules = existing_modules()
     for d in new_dirs:
         if d not in modules:
@@ -173,6 +229,7 @@ def main():
 
     dep_map = {d: internal_deps(d, modules) for d in new_dirs}
     for d in new_dirs:
+        seed_pins(d, pins)
         add_reqs(d, dep_map[d])
 
     for d in topo(new_dirs, dep_map):

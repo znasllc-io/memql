@@ -264,7 +264,7 @@ func TestNegative_TrailingTokens(t *testing.T) {
 func TestNegative_WordLogicalOperators(t *testing.T) {
 	// The English `and` / `or` infix forms are not lexer keywords, so the parser
 	// rejects them (the EOF check / body parse trips). This is a parser-level
-	// backstop for the tree-wide dsl/no_word_logical_operators_test.go gate.
+	// backstop for the tree-wide test/dslconformance/no_word_logical_operators_test.go gate.
 	t.Run("and-in-expression", func(t *testing.T) {
 		_, err := ParseExpression(`a == 1 and b == 2`)
 		assertParseErr(t, "`and` infix", err)
@@ -319,8 +319,8 @@ func TestNegative_ErrorsCarryPosition(t *testing.T) {
 //
 //    The retired filter operators `has` / `?.` / `;`-AND / `,`-OR are NOT
 //    rejected by the parser -- they still lex/parse. They are enforced by the
-//    tree-wide grep gate dsl/no_retired_operators_test.go (and word and/or by
-//    dsl/no_word_logical_operators_test.go). This test PINS that layer split so
+//    tree-wide grep gate test/dslconformance/no_retired_operators_test.go (and word and/or by
+//    test/dslconformance/no_word_logical_operators_test.go). This test PINS that layer split so
 //    that (a) a future author knows WHERE each form is caught, and (b) if a
 //    later story adds parser-level rejection, this pin fails and forces the doc
 //    + the enforcement note to be updated in lockstep.
@@ -330,13 +330,13 @@ func TestRetiredOperators_ParserAcceptsToTreeScanGate(t *testing.T) {
 	// These parse clean at the expression level today; the tree-scan gate is
 	// what rejects them across the live .memql tree.
 	acceptedByParser := []string{
-		`tags has "x"`, // `has` -> enforced by dsl/no_retired_operators_test.go
+		`tags has "x"`, // `has` -> enforced by test/dslconformance/no_retired_operators_test.go
 		`a == 1 ; b == 2`,
 		`a == 1 , b == 2`,
 	}
 	for _, src := range acceptedByParser {
 		if _, err := ParseExpression(src); err != nil {
-			t.Errorf("LAYER PIN: parser rejects %q now (err=%v).\n  If a story intentionally added parser-level rejection, move this case to an active negative test and update dsl/no_retired_operators_test.go's role note.", src, err)
+			t.Errorf("LAYER PIN: parser rejects %q now (err=%v).\n  If a story intentionally added parser-level rejection, move this case to an active negative test and update test/dslconformance/no_retired_operators_test.go's role note.", src, err)
 		}
 	}
 }

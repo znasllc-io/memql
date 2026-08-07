@@ -213,6 +213,34 @@ From `go list -json ./...` over 182 packages, aggregated to area level:
 Dependency direction is strictly downward:
 `app → servers → integrations → platform → engine → base → wire`.
 
+#### The engine tier as landed (memql#3242)
+
+The engine row is complete: `component/{language,database,harness}` landed in
+#3273, and `dsl`, `component/actions`, `component/memql` followed. Landing them
+forced three assignments the table above did not name, all of them things the
+engine pulls DOWN with it:
+
+| directory | tier | why |
+|---|---|---|
+| `component/genesis` | `base` | `component/memql` imports it and its only internal dependency is `component/secret`. Left in the root module it would have made the engine require the app tier. |
+| `docs` | `base` | `component/memql/executor_builtin.go` imports it for the `memqlGuide` builtin. It is a one-file L0 package whose `//go:embed` reaches `docs/public/language/memql.md` -- and `go:embed` cannot cross a module boundary, so the module has to be rooted at `docs/`, not somewhere tidier. |
+| the `dsl` conformance suite | root module (`test/dslconformance`) | It imports `component/{actions,memql}`, both of which import `dsl`. A test import is a module requirement, so it could not stay inside `dsl`. |
+
+The same shape moved eight `component/memql` authoring tests to
+`test/authoring`: each blank-imports `component/automations` for a registration
+init(), and automations sits above the engine.
+
+**Version-neutrality is a property of the split, not a hope.** `go mod tidy` in
+a fresh module resolves every external import to the LATEST release, and MVS
+then lifts the root to match -- so carving out a directory can silently bump the
+shipped binaries' dependencies. Measured on this tier before it was fixed:
+grpc `v1.81.0-dev -> v1.83.0`, otel `v1.41.0 -> v1.44.0`, `go-jose/v3` dropped,
++20 packages. `scripts/modsplit/mkmods.py` now seeds each new module with the
+root's pins before tidying, which makes the neutrality structural. Every
+subsequent tier must keep it: a `go.mod` diff that changes an external version
+is a dependency bump, and dependency bumps are dependabot's PRs, not this
+epic's.
+
 #### Why `component/{auth,bus,events,safety}` sit in `base` (memql#3239)
 
 As originally drawn they sat in `platform`, which made `engine` and `platform`

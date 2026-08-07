@@ -6,7 +6,7 @@
 // automations orchestrate. These logics DECIDE -- gate-green, next version,
 // who may deploy -- over args + (read-only) builtins. They perform NO writes
 // and call NO actions, so they pass the call-graph contract
-// (dsl/callgraph_contract_test.go). The WRITES that consume these decisions
+// (test/dslconformance/callgraph_contract_test.go). The WRITES that consume these decisions
 // live in the per-environment deploy automations (I10), which reuse the
 // existing createDeployment / updateDeploymentStatus mutations
 // (dsl/deployment/mutations.memql) one-write-per-step.

@@ -223,7 +223,7 @@ func pinnedDomainsInTree(t *testing.T) map[string]string {
 // occurrences -- per domain, with comments and string literals stripped.
 //
 // The stripping is restated here rather than shared with the resolver's scanner,
-// for the reason dsl/callgraph_contract_test.go restates kindKeywords: a count
+// for the reason test/dslconformance/callgraph_contract_test.go restates kindKeywords: a count
 // derived from the implementation it is checking moves with that implementation
 // and agrees with it while both are wrong. The distinction is not academic --
 // the figure this replaces (19 calls across two domains) was produced by

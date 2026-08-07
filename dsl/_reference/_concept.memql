@@ -397,7 +397,7 @@ concept fieldTypes {
 //                       load-bearing in two places: the @scrubPii update path
 //                       zeroes every @pii field via Concept.PIIFields(), and
 //                       the projection-authorization gate (memql#2883,
-//                       dsl/pii_projection_test.go) requires a query
+//                       test/dslconformance/pii_projection_test.go) requires a query
 //                       projecting a shape that carries a @pii field to
 //                       constrain its caller. ADDING @pii TO A FIELD CAN FAIL
 //                       THE BUILD. That is the intent, and it is the working

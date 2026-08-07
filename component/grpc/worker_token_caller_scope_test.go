@@ -13,7 +13,7 @@
 // them is a request handler." ListForUser is reached from exactly one place,
 // and it is a request handler -- handleRevokeWorkerToken, on
 // s.stream.Context(). That is the REQUEST-DERIVED stamp memql#2989 refused and
-// dsl/server_only_parsed_test.go names as refuted. Only component/identity/admin
+// test/dslconformance/server_only_parsed_test.go names as refuted. Only component/identity/admin
 // carries that exception today, and it was made to earn it with
 // component/identity/admin/route_gate_test.go (memql#2934).
 //

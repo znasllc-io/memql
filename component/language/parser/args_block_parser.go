@@ -149,7 +149,7 @@ func (p *Parser) parseArgsBlockField() (*ArgsField, error) {
 			// `@default` on an args field lands here. It is retired (#991):
 			// it was never applied at arg resolution (a silent footgun).
 			// Apply the default explicitly in the body with the `??`
-			// shorthand, which is the spelling dsl/no_coalesce_longhand_test.go
+			// shorthand, which is the spelling test/dslconformance/no_coalesce_longhand_test.go
 			// gates the corpus on. A concept-field @default is NOT a
 			// substitute -- it is emitted into the schema and never applied on
 			// insert either (memql#2960).
