@@ -302,8 +302,16 @@ jobs:
             # (memql#928 drift gate). A .proto edit WITHOUT its regenerated
             # .pb.go matches here but NOT `go`, so this is what makes the
             # "forgot to regenerate" case run the check.
+            # The three generated trees are the whole D3 `wire` tier.
+            # `component/bus/gen` was missing until memql#3213, so a change
+            # confined to its generated output matched `go` but not `proto` and
+            # skipped the drift gate that the identical change under grpc/gen
+            # or node/gen ran. TestProtoBucketCoversEveryGeneratedWireTree
+            # (scripts/ci) discovers the trees from the `*.pb.go` on disk
+            # rather than trusting this list, so a fourth cannot be omitted.
             proto:
               - '**/*.proto'
+              - 'component/bus/gen/**'
               - 'component/grpc/gen/**'
               - 'component/node/gen/**'
               - 'scripts/dev/proto-gen.sh'
