@@ -24,6 +24,19 @@ CGO_ENABLED := 0
 BIN_DIR     := bin
 VERSION     := $(shell cat VERSION 2>/dev/null || echo "dev")
 
+# The module path, and the all-packages selector spelled in terms of it.
+#
+# ALL_PKGS is `$(MODULE)/...` rather than `./...` (memql#3165). The two select
+# the same 183 packages today -- one module, no go.work -- and diverge the
+# moment a second `go.mod` lands anywhere beneath the root: `./...` then means
+# "the module rooted at the working directory", so every package that moved
+# into the new module silently drops out of `make test`, `make vet` and
+# `make fmt` with no diagnostic and exit 0. Naming the module keeps the
+# selector honest, and makes a per-module lane an edit here rather than a
+# scope loss nobody notices.
+MODULE      := github.com/znasllc-io/memql
+ALL_PKGS    := $(MODULE)/...
+
 # ---------------------------------------------------------------------------
 # Build targets
 # ---------------------------------------------------------------------------
@@ -431,15 +444,15 @@ sdk-ts-test:
 
 ## Run all tests
 test:
-	$(GO) test ./...
+	$(GO) test $(ALL_PKGS)
 
 ## Run all tests with verbose output
 test-v:
-	$(GO) test -v ./...
+	$(GO) test -v $(ALL_PKGS)
 
 ## Run tests with coverage report
 test-cover:
-	$(GO) test -coverprofile=coverage.out ./...
+	$(GO) test -coverprofile=coverage.out $(ALL_PKGS)
 	$(GO) tool cover -func=coverage.out
 	@rm -f coverage.out
 
@@ -456,11 +469,11 @@ test-polyphon:
 
 ## Run go vet on all packages
 vet:
-	$(GO) vet ./...
+	$(GO) vet $(ALL_PKGS)
 
 ## Format all Go files
 fmt:
-	$(GO) fmt ./...
+	$(GO) fmt $(ALL_PKGS)
 
 ## Run vet + fmt (quick lint)
 lint: fmt vet
@@ -493,7 +506,7 @@ tidy:
 
 ## Run code generation (protobuf, etc.)
 generate:
-	$(GO) generate ./...
+	$(GO) generate $(ALL_PKGS)
 
 ## Regenerate the pinned-toolchain proto bindings (component/grpc + node).
 ## The fix command for `proto-gen-check`. component/bus is excluded (it needs

@@ -120,6 +120,64 @@ jobs:
             #   scripts/**                    -> the capability-script contract
             #                                    test, help.sh, seed-secrets.sh
             #                                    and release.sh guards.
+            #
+            # THE EMBEDDED-ASSET BLOCK (the second group below) closes a
+            # DELAYED-BLAME fail-open that cb264c02 armed (memql#3165 review).
+            #
+            # embed_inventory_test.go pins the per-package `//go:embed` file
+            # COUNT for 11 packages / 270 files, and it lives in the root
+            # package -- which runs ONLY under RUN_GO (go-tests) or RUN_GATES
+            # (the gate-inputs step below). Measured with picomatch against the
+            # real pinned inventory, 68 of those 270 files reached NEITHER:
+            #
+            #   28  component/database/memory-nodes/migrations/*.sql   NO BUCKET
+            #   27  dsl/**/*.tmpl + dsl/deployment/namespace.pin       dsl only
+            #    9  component/identity/web/static/**                   NO BUCKET
+            #    1  component/mcp/icon.svg                             NO BUCKET
+            #    1  integrations/integrations.json                     NO BUCKET
+            #    1  examples/referencepack/dsl/namespace.pin           NO BUCKET
+            #    1  VERSION                                            NO BUCKET
+            #
+            # A PR adding only `component/database/.../0099_x.sql` therefore
+            # matched no consumed bucket, every lane skipped, `ci-required`
+            # went green -- and then the guard fired on the next `push` to
+            # main, where there is no merge_queue rule to catch it first:
+            #
+            #   --- FAIL: TestEmbeddedFileCountsAreStable
+            #       component/database embeds 30 files; 28 expected (2 added)
+            #
+            # (2, not 1: a real migration is an up/down pair.)
+            #
+            # THE NEXT UNRELATED AUTHOR OWNS THAT FAILURE. Before cb264c02 a
+            # migration-only PR was unverified but harmless; after it, the same
+            # PR breaks main for someone else. A guard is not allowed to ship a
+            # new way for main to go red on a diff its own PR was told was
+            # green, so every path the inventory pins is routed here.
+            #
+            # Derived from the `//go:embed` directives, not from today's file
+            # list, and stated as TREES rather than extensions so a new file of
+            # a new type inside an embedded tree cannot slip back out:
+            #
+            #   VERSION                       -> embed.go
+            #   database/.../migrations/**    -> component/database/timescaledb.go
+            #   component/identity/web/**     -> its embed.go `static/* legal/*.md`
+            #   component/mcp/*.svg           -> component/mcp/icon.go
+            #   dsl/**                        -> dsl/embed.go's 32 `all:<domain>`
+            #                                    patterns. `**/*.memql` already
+            #                                    routed 190 of those 217 files
+            #                                    here; this completes the tree
+            #                                    rather than starting a new
+            #                                    route.
+            #   examples/*/dsl/**             -> the deploypack + referencepack
+            #                                    `all:dsl` embeds.
+            #   integrations/*.json           -> integrations/embed.go
+            #
+            # The remaining pinned packages (component/architecture/embedded,
+            # component/genesis, docs) are already covered by entries above.
+            #
+            # Over-matching here is close to free: RUN_GATES fires only when
+            # `ci` and `go` are BOTH false, so every Go file these trees also
+            # contain is inert. Under-matching is the defect.
             gates:
               - '**/*.md'
               - '**/*.memql'
@@ -127,14 +185,73 @@ jobs:
               - 'component/genesis/manifest.yaml'
               - 'component/architecture/embedded/**'
               - 'scripts/**'
+              # every path embed_inventory_test.go pins -- see above
+              - 'VERSION'
+              - 'component/database/memory-nodes/migrations/**'
+              - 'component/identity/web/**'
+              - 'component/mcp/*.svg'
+              - 'dsl/**'
+              - 'examples/deploypack/dsl/**'
+              - 'examples/referencepack/dsl/**'
+              - 'integrations/*.json'
+              # Not embedded, but a gate input read by a package this lane
+              # already runs (`./component/architecture/...`), and found in the
+              # same sweep: it was in NO consumed bucket while being able to
+              # redden `main` on the next author's push -- renaming a
+              # `service:` fails TestArchitectureModelIsNotStale.
+              - 'arch.yaml'
             # Any Go source or the module graph. Voice + generator + sdk/go
             # are Go too, so they are a subset of this.
+            #
+            # The module files are matched at ANY DEPTH, not only at the repo
+            # root (memql#3165 review). The root-only literals left a NESTED
+            # `go.mod` matching no bucket ANY LANE CONSULTS -- every lane
+            # skipped and `ci-required` went green over the single file type
+            # that changes what every Go selector in this workflow resolves to.
+            # Verified against picomatch (the matcher dorny/paths-filter uses),
+            # scoring only the seven buckets an `if:` actually reads (ci, gates,
+            # go, dsl, sdkts, proto, vscode -- the target-module buckets below
+            # are declared but wired to nothing, so matching them routes
+            # nothing):
+            #
+            #   go.mod                    -> go
+            #   component/memql/go.mod    -> NO BUCKET   <-- whole pipeline skips
+            #   core/go.mod               -> NO BUCKET
+            #   integrations/go.mod       -> NO BUCKET
+            #   dsl/agents/roles/go.mod   -> dsl only, so RUN_GO and RUN_GATES
+            #                                are BOTH false and neither the
+            #                                root-package step nor the
+            #                                complement step runs
+            #
+            # That last one is not hypothetical: a boundary there silently
+            # drops 12 embedded files, and embed_inventory_test.go -- the guard
+            # written for exactly that -- did not execute for it.
+            #
+            # The root literals are KEPT alongside the `**/` forms rather than
+            # replaced by them. picomatch's `**/go.mod` does match a root
+            # `go.mod` today (verified), but the failure class being closed
+            # here IS "a pattern silently matches less than its author
+            # thought", so root coverage is stated outright instead of resting
+            # on globstar's zero-directory case.
             go:
               - '**/*.go'
               - 'go.mod'
               - 'go.sum'
               - 'go.work'
               - 'go.work.sum'
+              - '**/go.mod'
+              - '**/go.sum'
+              - '**/go.work'
+              - '**/go.work.sum'
+              # Testdata read by a Go gate, routed HERE and not to `gates`:
+              # TestNoNewSpaceIdInCore lives in `component/memql`, which the
+              # gate-inputs step deliberately does not run (~90s, see the
+              # STATED BOUNDARY note on that step). `component/memql` runs in
+              # db-tests, which gates on this bucket -- so `go` is the bucket
+              # that actually reaches the test. It was in no consumed bucket
+              # at all: dropping a line from the baseline merged green and
+              # reddened `main` for the next author.
+              - 'component/memql/testdata/**'
             # The embedded DSL tree.
             dsl:
               - 'dsl/**'
@@ -307,18 +424,33 @@ jobs:
         # here is NOT the fix: RUN_GATES fires on docs-only and
         # `.memql`-outside-dsl PRs where db-tests does NOT run, so dropping it
         # would open a coverage hole in exactly the fail-open the gates bucket
-        # was added to close (memql#2972). The overlap is 3 test files, and only
-        # on a PR touching dsl/** plus a gate input with no .go file at all --
-        # any .go change sets RUN_GO, which makes RUN_GATES false.
+        # was added to close (memql#2972). The overlap is 3 test files.
+        #
+        # It used to be narrower: "only on a PR touching dsl/** PLUS a gate
+        # input with no .go file at all". That conjunction no longer holds --
+        # `dsl/**` is itself a `gates` entry now, so any dsl-only PR satisfies
+        # both halves on its own. In practice `**/*.memql` already made it true
+        # for most dsl PRs; the change extends it to `.tmpl`/`.pin`-only ones.
+        # Still bounded by `any .go change sets RUN_GO, which makes RUN_GATES
+        # false`, which is the part that actually caps the cost.
         run: go test -count=1 -timeout=300s ./ ./cmd/envscan/... ./component/architecture/... ./component/genesis/... ./scripts/... ./dsl/... ./examples/...
 
       # --- pure-Go lanes (go bucket) -- build first to warm the cache ---
+      #
+      # Selector is the MODULE pattern, not `./...` (memql#3165). The two are
+      # identical today -- one module, no go.work -- and stop being identical
+      # the moment a second `go.mod` appears anywhere beneath the root:
+      # `./...` then silently means "this module only", so the packages that
+      # moved into the new module are no longer built, vetted or tested and
+      # nothing goes red. Naming the module makes the selector say what it
+      # means, and makes a future per-module lane a one-line change instead of
+      # a silent scope loss.
       - name: go build
         if: ${{ env.RUN_GO == 'true' }}
-        run: go build ./...
+        run: go build github.com/znasllc-io/memql/...
       - name: go vet
         if: ${{ env.RUN_GO == 'true' }}
-        run: go vet ./...
+        run: go vet github.com/znasllc-io/memql/...
       # Harness eval gate (#589). Fixture-driven regression tripwire over an
       # in-memory graph (NO Postgres, NO LLM) -- catches a harness change
       # that reorders dispatch, mis-fails a plan, or makes the loop chattier.
@@ -454,9 +586,23 @@ jobs:
       # rationale recorded, and the one commit that reasons about it (5be808a1)
       # documents it MASKING a defect CI "would never have caught (fresh
       # container, -count=1)".
+      #
+      # The package list is captured into a variable BEFORE `go test` sees it,
+      # and that is load-bearing (memql#3165). Inlined as
+      # `go test $(script)`, a script that exits non-zero does NOT fail the
+      # step: `bash -e` does not abort on a command substitution inside an
+      # argument list, so `go test` runs with NO package arguments, tests the
+      # current directory, and exits 0. A broken selector would report a green
+      # lane over 169 untested packages -- the memql#2972 fail-open shape. As
+      # an assignment, the substitution's exit status IS the statement's, so
+      # `bash -e` aborts and the lane goes red. The empty check covers the
+      # other half: a script that exits 0 with no output.
       - name: go test (excluding the db-gated trees db-tests owns)
         if: ${{ env.RUN_GO == 'true' }}
-        run: go test -timeout=300s $(scripts/ci/db-gated-packages.sh --complement-cacheable)
+        run: |
+          pkgs="$(scripts/ci/db-gated-packages.sh --complement-cacheable)"
+          test -n "$pkgs" || { echo "::error::db-gated-packages.sh produced an empty package list"; exit 1; }
+          go test -timeout=300s $pkgs
       # Build-tagged test lanes (#1338, #2903). The untagged `go test ./...`
       # above never RUNS a //go:build-tagged test file, so a tagged suite is
       # CI-invisible without an explicit -tags run.
@@ -523,11 +669,11 @@ jobs:
       - name: go build -tags voice (CGO)
         env:
           CGO_ENABLED: '1'
-        run: go build -tags voice ./...
+        run: go build -tags voice github.com/znasllc-io/memql/...
       - name: go vet -tags voice (CGO)
         env:
           CGO_ENABLED: '1'
-        run: go vet -tags voice ./...
+        run: go vet -tags voice github.com/znasllc-io/memql/...
       - name: go test -tags voice (CGO)
         env:
           CGO_ENABLED: '1'
@@ -563,9 +709,9 @@ jobs:
           go-version: '1.26.5'
           cache: true
       - name: go build -tags ${{ matrix.tag }}
-        run: go build -tags ${{ matrix.tag }} ./...
+        run: go build -tags ${{ matrix.tag }} github.com/znasllc-io/memql/...
       - name: go vet -tags ${{ matrix.tag }}
-        run: go vet -tags ${{ matrix.tag }} ./...
+        run: go vet -tags ${{ matrix.tag }} github.com/znasllc-io/memql/...
 
   # TypeScript SDK lane. Gates on `sdkts` (sdk/ts/** + the generator) so a
   # pure Go change that doesn't touch the generator skips the Node lane.

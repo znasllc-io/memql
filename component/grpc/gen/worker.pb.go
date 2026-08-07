@@ -1614,7 +1614,7 @@ const file_worker_proto_rawDesc = "" +
 	"detailJson\x12*\n" +
 	"\x02ts\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\x02ts2y\n" +
 	"\rWorkerService\x12h\n" +
-	"\x06Stream\x12,.znasllc.memql.worker.v1.WorkerClientMessage\x1a,.znasllc.memql.worker.v1.WorkerServerMessage(\x010\x01B.Z,github.com/znasllc-io/memql/grpc/gen;memqlv1b\x06proto3"
+	"\x06Stream\x12,.znasllc.memql.worker.v1.WorkerClientMessage\x1a,.znasllc.memql.worker.v1.WorkerServerMessage(\x010\x01B8Z6github.com/znasllc-io/memql/component/grpc/gen;memqlv1b\x06proto3"
 
 var (
 	file_worker_proto_rawDescOnce sync.Once
