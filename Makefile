@@ -356,7 +356,7 @@ scale:
 # ---------------------------------------------------------------------------
 
 ##@ Test & SDK
-.PHONY: test test-v test-cover test-polyphon sdk-gen sdk-gen-check sdk-ts-install sdk-ts-typecheck dsl-lint viewkit-install viewkit-typecheck viewkit-test
+.PHONY: test test-v test-cover test-polyphon sdk-gen sdk-gen-check sdk-ts-install sdk-ts-typecheck dsl-lint viewkit-install viewkit-typecheck viewkit-test vscode-test
 
 ## Regenerate the typed SDK surface from the DSL tree. Reads every
 ## query / mutation / logic under dsl/**/*.memql and emits typed
@@ -453,6 +453,11 @@ viewkit-typecheck:
 ## Run the view-kit test suite via node:test. Zero runtime deps.
 viewkit-test:
 	cd sdk/ts-viewkit && npm test
+
+## Run the VS Code extension's unit tests. Covers only modules that do not
+## import `vscode`; the API layer is exercised by packaging, not unit tests.
+vscode-test:
+	cd editors/vscode && npm ci --no-audit --no-fund && npm test
 
 ## Run all tests
 test:

@@ -103,10 +103,12 @@
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./"
+    "watch": "tsc -watch -p ./",
+    "test": "tsc -p tsconfig.test.json && node --test dist-test/test/*.js"
   },
   "dependencies": {
-    "vscode-languageclient": "^10.1.0"
+    "vscode-languageclient": "^10.1.0",
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
