@@ -35,31 +35,48 @@ use (
 	./component/actions
 	./component/architecture
 	./component/auth
+	./component/automations
 	./component/bus
 	./component/bus/gen
 	./component/config
 	./component/database
+	./component/deploycontrol
 	./component/events
 	./component/fileprocessor
 	./component/genesis
+	./component/grpc
 	./component/grpc/gen
 	./component/harness
 	./component/healing
+	./component/identity
+	./component/identity/admin
+	./component/inbound
 	./component/language
 	./component/language/annotations
 	./component/language/ast
 	./component/language/dslclause
+	./component/mcp
 	./component/memql
 	./component/metadata
 	./component/metrics
+	./component/node
 	./component/node/gen
 	./component/observe
+	./component/outbound
 	./component/planner
 	./component/polyphon
 	./component/provenance
+	./component/router
 	./component/safety
 	./component/secret
+	./component/server
+	./component/service
+	./component/worker
 	./core
 	./docs
 	./dsl
+	./integrations
+	./integrations/email
+	./integrations/openai
+	./integrations/stt
 )

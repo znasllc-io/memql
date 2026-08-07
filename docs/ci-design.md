@@ -213,6 +213,49 @@ From `go list -json ./...` over 182 packages, aggregated to area level:
 Dependency direction is strictly downward:
 `app → servers → integrations → platform → engine → base → wire`.
 
+### As landed: 48 modules, and the rows the table above did not name
+
+The table names 8 **tiers**. A tier is a documentation grouping; a `go.mod` is
+what the compiler enforces, and a module's scope is a directory subtree. Four
+tiers name non-adjacent directories, so they need one `go.mod` each -- which is
+most of the gap between "8" and the ~29 memql#3165 estimated and the **48**
+that actually landed. The rest is directories no row named at all: they were
+inside the root module, and each one an upward tier needed had to come out with
+it.
+
+`go.work` is the enumeration on disk; the `module-boundaries` lane asserts it
+matches. Read as tiers:
+
+| tier | modules |
+|---|---|
+| `wire` | `component/{grpc,node,bus}/gen` |
+| `base` | `core`, `component/{architecture,auth,bus,config,events,fileprocessor,genesis,healing,metadata,metrics,observe,planner,polyphon,provenance,safety,secret}`, `component/language/{annotations,ast,dslclause}`, `docs` |
+| `engine` | `component/{language,database,harness,actions,memql}`, `dsl` |
+| `platform` | `component/{identity,node}`, `integrations/{email,openai,stt}` |
+| between platform and the servers | `component/{deploycontrol,router,service,worker,mcp,outbound,automations}`, `component/identity/admin`, `integrations` |
+| servers | `component/{server,grpc,inbound}` |
+| `app` | the root module: `app/`, `main.go`, `cmd/*`, `sdk/`, `scripts/`, `test/`, `examples/` |
+
+Three placements are worth stating because they are not obvious from the row
+they sit in:
+
+- **`integrations/{email,openai,stt}` sit BELOW the `integrations` module,** in
+  the platform tier. `component/identity` imports `email`; `component/grpc` and
+  `component/server` import `stt`; `stt` imports `openai`. They need only
+  `engine` + `base`, so nothing follows them down. The `integrations` module
+  covers `integrations/*` MINUS these three -- a nested `go.mod` carves its
+  subtree out of its parent, which is exactly the mechanism wanted here.
+- **`component/mcp` and `component/inbound` are imported by nothing.** They are
+  modules anyway: the boundary is what stops a future import from pointing the
+  wrong way, and a directory with no importers is the cheapest place to hold
+  the line.
+- **The root module IS the `app` tier.** It is not published, it may import
+  anything, and everything left in it -- `sdk/`, `scripts/`, `test/`,
+  `examples/` -- is app-tier by that definition rather than by omission.
+
+The `changes` filter buckets below are **unchanged** by all of this, per
+decision F: a `go.mod` appearing in a directory moves no path.
+
 #### The engine tier as landed (memql#3242)
 
 The engine row is complete: `component/{language,database,harness}` landed in
@@ -240,6 +283,55 @@ root's pins before tidying, which makes the neutrality structural. Every
 subsequent tier must keep it: a `go.mod` diff that changes an external version
 is a dependency bump, and dependency bumps are dependabot's PRs, not this
 epic's.
+
+#### O4 decided: `component/identity` stays in `platform`, minus its admin app (memql#3243)
+
+O4 asked where `component/identity` belongs, on the grounds that its profile --
+15 packages, its own binary, a public web UI plus an admin app, 7 importers --
+does not match a tier whose other members are libraries. Measured, two of those
+four facts do not survive contact:
+
+- **It does not ship its own binary.** There is no `package main` anywhere under
+  `component/identity`; `make identity` builds the ROOT package under the
+  `identity` build tag. The directory is library-only, exactly like its tier.
+- **The web UI is a library too** -- `http.Handler`s plus an embedded asset
+  tree, served by that root binary. "Serves a public UI" is a deployment
+  statement, not a package-layout one.
+
+So the alternatives fall away on the facts rather than on taste:
+
+- **Give it its own tier** -- rejected. A tier is not a Go concept; the module
+  graph is what the compiler enforces, and `component/identity` is already its
+  own module with a downward-only edge set (`engine` + `base` + `wire` + the
+  one demoted leaf below). A tier of one buys a row in this table and nothing
+  else.
+- **Split the library surface from the binary** -- vacuous as stated (there is
+  no binary), but the RIGHT ANSWER is next to it, and the tier's own tests are
+  what found it.
+
+**`component/identity/admin` splits off, upward.** It is the admin web app; it
+imports `component/identity` and is imported by **`app/` alone** -- nothing in
+`component/identity`, nothing in `platform`. And its test drives identity's
+in-process admin context against the REAL `component/deploycontrol` gate, which
+is the point of the test (a fake would assert nothing). That test import is a
+module requirement, so with `admin` inside the identity module the platform
+tier required `deploycontrol`, which sits above it.
+
+Splitting `admin` into its own module above `deploycontrol` resolves it with
+**zero code changes**: the test keeps every unexported identifier it drives,
+and its `deploycontrol` import becomes downward. The split is justified by
+direction, not by size -- an admin console consumed only by `app` was never a
+platform library.
+
+`component/deploycontrol` becomes a module in the same change, because `admin`
+cannot require it otherwise. It is not in the D3 table's rows; it belongs
+between `platform` and the servers, and is recorded here rather than left
+implicit.
+
+`integrations/email` also becomes a module, BELOW `component/identity`, which
+imports it. It only needs `engine` + `base`, so nothing follows it down. Three
+other `integrations/*` leaves have the same shape and land with the tiers above
+them.
 
 #### Why `component/{auth,bus,events,safety}` sit in `base` (memql#3239)
 

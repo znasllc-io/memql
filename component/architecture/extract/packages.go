@@ -2,6 +2,7 @@ package extract
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -25,9 +26,49 @@ type ServicePlan struct {
 // Plan resolves the workspace into ServicePlans by reading each
 // module's go.mod (via the package loader, so module-replace
 // directives are honored).
+//
+// A GO MODULE IS NOT A SERVICE (memql#3244).
+//
+// If any module in the workspace declares an arch.yaml, ONLY the declaring
+// modules become services. Undeclared modules are skipped: a repository that
+// has adopted the model owns its own service decomposition, and its declared
+// roots say which packages belong to which service. If NO module declares one,
+// every module is planned -- so an unadopted repo keeps the previous behaviour
+// and arch.yaml stays opt-in exactly as its own header promises.
+//
+// Planning every module was harmless while the repo was one module. The module
+// split (epic memql#3228) made it wrong in two ways at once:
+//
+//   - MODELLING. memQL's root arch.yaml declares ONE service whose roots are
+//     `github.com/znasllc-io/memql/...` -- the whole workspace. Every nested
+//     module then ALSO became a service named `filepath.Base(moduleDir)`, so
+//     the cockpit's Topology tab grew 20 nodes that are Go modules rather than
+//     services -- three of them (`component/{grpc,node,bus}/gen`) colliding on
+//     the single id `service:gen`.
+//   - COST. Each plan is its own packages.Load with NeedDeps|NeedTypes, and
+//     ExtractTypes holds every one live at once to compute Implements across
+//     services. Separate Loads share nothing, so each module re-materialises
+//     the type universe beneath it. Measured at 48 modules: 30.8 GB peak RSS
+//     and 84s, against a 16 GB CI runner -- go-tests died with SIGTERM twice,
+//     mid-run, inside the model regeneration this gate shells out to. Planning
+//     only the declared service: 2.4 GB and 3s.
+//
+// The model is not narrowed by this. The declared roots still span the whole
+// workspace, so the same package and symbol nodes are emitted; what disappears
+// is the phantom services and their duplicate containment edges.
 func Plan(ws *Workspace) ([]ServicePlan, error) {
+	declared := make(map[string]bool, len(ws.Modules))
+	for _, dir := range ws.Modules {
+		if _, err := os.Stat(filepath.Join(dir, ArchYAMLFilename)); err == nil {
+			declared[dir] = true
+		}
+	}
+
 	plans := make([]ServicePlan, 0, len(ws.Modules))
 	for _, dir := range ws.Modules {
+		if len(declared) > 0 && !declared[dir] {
+			continue
+		}
 		arch, err := LoadArchYAML(dir)
 		if err != nil {
 			return nil, err
