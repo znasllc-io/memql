@@ -34,6 +34,7 @@ import (
 	"time"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/id"
 )
@@ -441,27 +442,27 @@ func approxTokens(s string) int {
 }
 
 // quoteString produces a MemQL-safe double-quoted string literal.
+//
+// One line, deliberately: it is an ALIAS for langparser.QuoteString, not a
+// second implementation. The body was a hand-rolled escape table (", \\, \n,
+// \r, \t, everything else raw) behind the ~50 call sites in this package that
+// build statements the engine then parses.
+//
+// It was not a live parse defect -- the lexer accepts a RAW control byte
+// inside a literal, so passing one straight through worked. It worked by
+// accident, though: the table was a second definition of the escape set, not
+// owned by the lexer, with nothing to make it move when the lexer's set did.
+// That is the shape memql#3035 punished, so memql#3192 collapses it into the
+// definition that lives beside the lexer.
+//
+// Quoted faithfully, never substituted. The visible change is that control
+// bytes now go out as \u00XX escapes instead of raw; both decode to the same
+// value. A NUL still cannot be STORED (Postgres refuses it in jsonb as in
+// text) -- escaping it does not create that exposure and does not remove it,
+// and rewriting a byte here would corrupt the knowledge content these
+// statements carry, which is the load-bearing kind.
 func quoteString(s string) string {
-	b := make([]byte, 0, len(s)+2)
-	b = append(b, '"')
-	for _, r := range s {
-		switch r {
-		case '"':
-			b = append(b, '\\', '"')
-		case '\\':
-			b = append(b, '\\', '\\')
-		case '\n':
-			b = append(b, '\\', 'n')
-		case '\r':
-			b = append(b, '\\', 'r')
-		case '\t':
-			b = append(b, '\\', 't')
-		default:
-			b = append(b, string(r)...)
-		}
-	}
-	b = append(b, '"')
-	return string(b)
+	return langparser.QuoteString(s)
 }
 
 func intArg(args map[string]any, key string, fallback int) int {
@@ -506,6 +507,12 @@ func toStringSlice(v any) []string {
 	return nil
 }
 
+// pgStringArray builds a PostgreSQL array literal.
+//
+// Its escaping is deliberately NOT quoteString's, and must not be collapsed
+// into it by a future memql#3192-style sweep: this is Postgres array-literal
+// syntax, a different grammar with a different escape set, and it never
+// reaches the MemQL lexer.
 func pgStringArray(items []string) string {
 	if len(items) == 0 {
 		return "{}"

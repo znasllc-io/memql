@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // Result wraps a typed engine response. The generated query / mutation
@@ -290,6 +292,32 @@ func (qc *QueryClient) executeNamed(ctx context.Context, name, call string) (*Re
 	return &Result{payload: payload}, nil
 }
 
+// quoteMemQL renders a Go string as a MemQL string literal, quotes included.
+//
+// One line, and deliberately so: it is an ALIAS for langparser.QuoteString,
+// not a second implementation. The whole point is that there is exactly one
+// definition of "a MemQL string literal" and it lives beside the lexer whose
+// escape set it targets. Every generated builder calls this (sdk/gen's
+// emit_go.go emits the call), so the SDK's ~1200 call sites share that one
+// definition rather than a copy that can drift from it.
+//
+// It replaced fmt.Sprintf("%q") in memql#3192. Go's %q escape set and the
+// lexer's do not agree, and the disagreement is a hard error rather than a
+// fallback: the lexer implements the JSON escapes and only those, while %q
+// emits `\x00` / `\a` / `\v`. One control byte in a caller's arg made the
+// whole call unparseable, rejected at the engine with a syntax error naming a
+// position in text the caller never wrote.
+//
+// Quoted faithfully, never substituted. This is the CLIENT side of the wire:
+// its job is to transmit what the caller passed, and the NUL-into-jsonb
+// question belongs to whichever server-side mutation ends up storing the
+// value -- it has the storage context to answer it, and this does not. An SDK
+// that silently rewrote a caller's bytes would make that decision invisibly
+// for every path at once.
+func quoteMemQL(s string) string {
+	return langparser.QuoteString(s)
+}
+
 // renderMemQLValue converts a Go arg value to its MemQL literal
 // representation, mirroring the engine's own parseValue surface. The
 // generated builders call this for object / array / typed-slice args
@@ -303,7 +331,7 @@ func renderMemQLValue(value any) string {
 	case nil:
 		return "nil"
 	case string:
-		return fmt.Sprintf("%q", v)
+		return quoteMemQL(v)
 	case bool:
 		if v {
 			return "true"
@@ -322,7 +350,7 @@ func renderMemQLValue(value any) string {
 	case []string:
 		items := make([]string, 0, len(v))
 		for _, item := range v {
-			items = append(items, fmt.Sprintf("%q", item))
+			items = append(items, quoteMemQL(item))
 		}
 		return "[" + strings.Join(items, ", ") + "]"
 	case map[string]any:

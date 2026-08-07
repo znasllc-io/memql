@@ -1141,6 +1141,24 @@ func (c *Compiler) compileStep(step *parser.StepDef) (map[string]any, error) {
 }
 
 // expressionToString converts an expression node back to MemQL string format.
+//
+// Every string literal it emits goes through parser.QuoteString rather than
+// fmt.Sprintf("%q") -- and so do valueToString and mutationToString below, for
+// the same reason (memql#3192). This is a serialize/RE-PARSE boundary: the
+// text produced here is stored as step config and parsed again at runtime, by
+// a lexer that implements the JSON escapes and only those. %q emits `\x00`,
+// `\a` and `\v`, which that lexer rejects outright.
+//
+// Reachable from authored DSL, not only from runtime data: the lexer DECODES
+// \u00XX, so an author writing "\u0007" in a .memql literal hands the compiler
+// a Go string carrying a BEL, which came back out as `\a`. The value survives
+// the first parse and dies on the second -- so load succeeds and the
+// automation fails when it runs, which is the worst place to find it. Pinned
+// by TestAuthoredUnicodeEscapeDecodesToAControlByte.
+//
+// Quoted faithfully, never substituted. These bytes are the author's source
+// text round-tripping through an intermediate form; rewriting one would mean
+// the automation that runs is not the automation that was written.
 func (c *Compiler) expressionToString(expr parser.ExpressionNode) string {
 	if expr == nil {
 		return ""
@@ -1150,7 +1168,7 @@ func (c *Compiler) expressionToString(expr parser.ExpressionNode) string {
 	case *parser.LiteralExpr:
 		switch v := e.Value.(type) {
 		case string:
-			return fmt.Sprintf("%q", v)
+			return parser.QuoteString(v)
 		case map[string]any, []any:
 			// Object / array literals (e.g. an object-literal `return { k: <expr> }`).
 			// Render proper MemQL via valueToString, which recurses into each value
@@ -1255,14 +1273,14 @@ func (c *Compiler) expressionToString(expr parser.ExpressionNode) string {
 		return fmt.Sprintf("?.%s", c.expressionToString(e.Filter))
 
 	case *parser.ArgRefExpr:
-		return fmt.Sprintf("arg(%q)", e.Path)
+		return "arg(" + parser.QuoteString(e.Path) + ")"
 
 	// New accessor expressions
 	case *parser.VarRefExpr:
-		return fmt.Sprintf("var(%q)", e.Name)
+		return "var(" + parser.QuoteString(e.Name) + ")"
 
 	case *parser.StepRefExpr:
-		return fmt.Sprintf("step(%q)", e.StepId)
+		return "step(" + parser.QuoteString(e.StepId) + ")"
 
 	case *parser.InputRefExpr:
 		return "input()"
@@ -1286,7 +1304,7 @@ func (c *Compiler) expressionToString(expr parser.ExpressionNode) string {
 		return "timestamp()"
 
 	case *parser.FieldRefExpr:
-		return fmt.Sprintf("field(%s, %q)", c.expressionToString(e.Object), e.Key)
+		return fmt.Sprintf("field(%s, %s)", c.expressionToString(e.Object), parser.QuoteString(e.Key))
 
 	case *parser.DotAccessExpr:
 		// Serialize `DotAccess{DotAccess{call, "payload"}, "name"}` back
@@ -1350,9 +1368,9 @@ func (c *Compiler) expressionToString(expr parser.ExpressionNode) string {
 		// the literal arg value -- exactly the leak that produced
 		// `default:v1:agents:agent:*ast.CanonicalIdExpr` rows in
 		// the participant table.
-		return fmt.Sprintf("canonicalId(%s, %q)",
+		return fmt.Sprintf("canonicalId(%s, %s)",
 			c.expressionToString(e.Value),
-			e.Concept)
+			parser.QuoteString(e.Concept))
 
 	case *parser.ContainsExpr:
 		return fmt.Sprintf("contains(%s, %s)",
@@ -1476,19 +1494,19 @@ func (c *Compiler) mutationToString(m *parser.MutationStmt) string {
 		return ""
 	}
 
-	parts := []string{fmt.Sprintf("%q", m.Concept)}
+	parts := []string{parser.QuoteString(m.Concept)}
 
 	if m.IDTemplate != nil {
 		switch id := m.IDTemplate.(type) {
 		case string:
 			if strings.TrimSpace(id) != "" {
-				parts = append(parts, fmt.Sprintf("id=%q", id))
+				parts = append(parts, "id="+parser.QuoteString(id))
 			}
 		case parser.ExpressionNode:
 			parts = append(parts, fmt.Sprintf("id=%s", c.expressionToString(id)))
 		default:
 			// Best-effort: treat as literal string
-			parts = append(parts, fmt.Sprintf("id=%q", fmt.Sprintf("%v", id)))
+			parts = append(parts, "id="+parser.QuoteString(fmt.Sprintf("%v", id)))
 		}
 	}
 
@@ -1509,12 +1527,12 @@ func (c *Compiler) mutationToString(m *parser.MutationStmt) string {
 		switch v := m.ParentTemplate.(type) {
 		case string:
 			if strings.TrimSpace(v) != "" {
-				parts = append(parts, fmt.Sprintf("parent=%q", v))
+				parts = append(parts, "parent="+parser.QuoteString(v))
 			}
 		case parser.ExpressionNode:
 			parts = append(parts, fmt.Sprintf("parent=%s", c.expressionToString(v)))
 		default:
-			parts = append(parts, fmt.Sprintf("parent=%q", fmt.Sprintf("%v", v)))
+			parts = append(parts, "parent="+parser.QuoteString(fmt.Sprintf("%v", v)))
 		}
 	}
 
@@ -1522,12 +1540,12 @@ func (c *Compiler) mutationToString(m *parser.MutationStmt) string {
 		switch v := m.AliasOfTemplate.(type) {
 		case string:
 			if strings.TrimSpace(v) != "" {
-				parts = append(parts, fmt.Sprintf("aliasOf=%q", v))
+				parts = append(parts, "aliasOf="+parser.QuoteString(v))
 			}
 		case parser.ExpressionNode:
 			parts = append(parts, fmt.Sprintf("aliasOf=%s", c.expressionToString(v)))
 		default:
-			parts = append(parts, fmt.Sprintf("aliasOf=%q", fmt.Sprintf("%v", v)))
+			parts = append(parts, "aliasOf="+parser.QuoteString(fmt.Sprintf("%v", v)))
 		}
 	}
 
@@ -2153,7 +2171,7 @@ func (c *Compiler) valueToString(v any) string {
 		if isRuntimeReference(val) {
 			return val
 		}
-		return fmt.Sprintf("%q", val)
+		return parser.QuoteString(val)
 	case float64:
 		if float64(int(val)) == val {
 			// Keep an explicit decimal marker so a whole-valued float

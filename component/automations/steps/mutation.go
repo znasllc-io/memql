@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/automations"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 )
 
@@ -1724,11 +1725,33 @@ func (e *MutationExecutor) splitFunctionArgs(s string) []string {
 }
 
 // buildInsertQuery constructs the insert query with properly escaped JSON payload.
+//
+// The four identifier positions render through langparser.QuoteString rather
+// than fmt.Sprintf("%q"): Go's %q escape set and the lexer's do not agree, and
+// the disagreement is a hard error at tokenize time, not a fallback. %q emits
+// `\x00` / `\a` / `\v`; scanString implements the JSON escapes and only those.
+// The id is the reachable one -- it is an evaluated template (evaluateValue
+// resolves concat() and friends), so it interpolates prior step results and
+// event payload text, and one control byte in that text made the whole insert
+// unparseable. memql#3192, the memql#3035 defect on this path.
+//
+// Quoted faithfully, never substituted. All four are IDENTIFIERS -- a concept
+// name and three node ids -- so their bytes are load-bearing for identity in
+// the strongest sense: substituting one would address a DIFFERENT row than the
+// caller named, which is a worse failure than not writing at all. A NUL here
+// still cannot be stored (Postgres refuses it in a text column as it does in
+// jsonb), but quoting correctly is what makes that a reported storage error
+// instead of a parse error that never names the offending value.
+//
+// The payload is a separate boundary and is deliberately untouched here: it
+// goes through json.Marshal, whose escapes the lexer already accepts. Its own
+// NUL-into-jsonb exposure is real but pre-dates and outlives this fix -- it is
+// not a %q defect and is not silently folded into one.
 func (e *MutationExecutor) buildInsertQuery(concept, id string, payload map[string]any, parent, aliasOf string) string {
-	parts := []string{fmt.Sprintf("%q", concept)}
+	parts := []string{langparser.QuoteString(concept)}
 
 	if id != "" {
-		parts = append(parts, fmt.Sprintf("id=%q", id))
+		parts = append(parts, "id="+langparser.QuoteString(id))
 	}
 
 	if payload != nil {
@@ -1742,11 +1765,11 @@ func (e *MutationExecutor) buildInsertQuery(concept, id string, payload map[stri
 	}
 
 	if parent != "" {
-		parts = append(parts, fmt.Sprintf("parent=%q", parent))
+		parts = append(parts, "parent="+langparser.QuoteString(parent))
 	}
 
 	if aliasOf != "" {
-		parts = append(parts, fmt.Sprintf("aliasOf=%q", aliasOf))
+		parts = append(parts, "aliasOf="+langparser.QuoteString(aliasOf))
 	}
 
 	return fmt.Sprintf("insert(%s)", strings.Join(parts, ", "))

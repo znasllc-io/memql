@@ -173,10 +173,20 @@ func emitArgComposer(buf *bytes.Buffer, a ArgField, first bool, prefixLen int) {
 
 // renderArg returns a Go expression that produces the MemQL literal
 // form for an arg field of the given DSL type.
+//
+// String-ish types render through quoteMemQL (defined in support.go, a
+// one-line alias for langparser.QuoteString) rather than fmt.Sprintf("%q").
+// Go's %q escape set and the MemQL lexer's do not agree, and the
+// disagreement is a hard error rather than a fallback: the lexer implements
+// the JSON escapes and only those, while %q emits `\x00` / `\a` / `\v`. A
+// control byte in a caller's arg therefore made the whole generated call
+// unparseable at the engine. Fixed HERE rather than in the generated files --
+// there are on the order of 1200 emitted call sites, and a hand edit to any
+// of them is undone by the next `make sdk-gen`. memql#3192.
 func renderArg(field, typ string) string {
 	switch typ {
 	case "string", "datetime":
-		return fmt.Sprintf("fmt.Sprintf(\"%%q\", args.%s)", field)
+		return fmt.Sprintf("quoteMemQL(args.%s)", field)
 	case "bool", "boolean":
 		return fmt.Sprintf("fmt.Sprintf(\"%%v\", args.%s)", field)
 	case "number", "int", "integer":
@@ -187,12 +197,21 @@ func renderArg(field, typ string) string {
 		return fmt.Sprintf("renderMemQLValue(args.%s)", field)
 	default:
 		if strings.HasPrefix(typ, "enum(") {
-			return fmt.Sprintf("fmt.Sprintf(\"%%q\", args.%s)", field)
+			return fmt.Sprintf("quoteMemQL(args.%s)", field)
 		}
 		if strings.HasPrefix(typ, "[]") {
 			return fmt.Sprintf("renderMemQLValue(args.%s)", field)
 		}
-		return fmt.Sprintf("fmt.Sprintf(\"%%q\", args.%s)", field)
+		// Unrecognised DSL type -- goType maps it to `any`, so the dynamic
+		// type is unknown at emit time and renderMemQLValue dispatches on it
+		// (quoting strings through quoteMemQL, passing scalars through). This
+		// arm used to emit fmt.Sprintf("%q", args.X) against that `any`, which
+		// is wrong for every non-string it can hold: %q on an int yields
+		// `%!q(int=5)`, not a literal. Correcting it fell out of memql#3192 --
+		// quoteMemQL takes a string, so the arm could not be converted
+		// mechanically, and looking at what it actually produced showed it was
+		// never right.
+		return fmt.Sprintf("renderMemQLValue(args.%s)", field)
 	}
 }
 

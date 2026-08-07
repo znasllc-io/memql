@@ -1,9 +1,24 @@
 package liveknowledge
 
 import (
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	lk "github.com/znasllc-io/memql/core/liveknowledge"
 )
+
+// newDefaultMemqlConnector builds the kind='memql' connector with the ONE
+// correct MemQL string quoter.
+//
+// The quoter is a parameter of lk.NewMemqlConnector rather than something
+// core/liveknowledge implements, because that package is an L0 leaf with zero
+// in-repo imports (memql#3164) and so cannot reach langparser.QuoteString --
+// the definition that lives beside the lexer whose escape set it targets.
+// This package can, so the wiring happens here. Named rather than inlined so
+// the regression guard exercises the same construction the plug-in registers;
+// see memql_connector_control_byte_test.go and memql#3192.
+func newDefaultMemqlConnector(engine lk.EngineAccess) *lk.MemqlConnector {
+	return lk.NewMemqlConnector(engine, langparser.QuoteString)
+}
 
 // init self-registers the liveknowledge integration as a plug-in.
 //
@@ -25,7 +40,7 @@ func init() {
 		engineAccess := &engineAdapter{exec: pctx.Engine}
 
 		// Register the built-in memql-kind connector.
-		lk.DefaultRegistry().Register(lk.NewMemqlConnector(engineAccess))
+		lk.DefaultRegistry().Register(newDefaultMemqlConnector(engineAccess))
 
 		dispatcher := lk.NewDispatcher(engineAccess, lk.DefaultRegistry(), pctx.Logger)
 		return New(dispatcher), nil

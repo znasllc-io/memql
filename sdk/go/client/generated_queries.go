@@ -31,7 +31,7 @@ func AccessRequestByIdBuild(args AccessRequestByIdArgs) string {
 	var b strings.Builder
 	b.WriteString("query accessRequestById(")
 	b.WriteString("requestId: ")
-	b.WriteString(fmt.Sprintf("%q", args.RequestId))
+	b.WriteString(quoteMemQL(args.RequestId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -53,7 +53,7 @@ func AccountEntitlementBuild(args AccountEntitlementArgs) string {
 	var b strings.Builder
 	b.WriteString("query accountEntitlement(")
 	b.WriteString("accountId: ")
-	b.WriteString(fmt.Sprintf("%q", args.AccountId))
+	b.WriteString(quoteMemQL(args.AccountId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -75,7 +75,7 @@ func ActionByIdBuild(args ActionByIdArgs) string {
 	var b strings.Builder
 	b.WriteString("query actionById(")
 	b.WriteString("actionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.ActionId))
+	b.WriteString(quoteMemQL(args.ActionId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -98,7 +98,7 @@ func ActionByIdAndVersionBuild(args ActionByIdAndVersionArgs) string {
 	var b strings.Builder
 	b.WriteString("query actionByIdAndVersion(")
 	b.WriteString("actionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.ActionId))
+	b.WriteString(quoteMemQL(args.ActionId))
 	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
@@ -125,7 +125,7 @@ func ActionByInputFingerprintBuild(args ActionByInputFingerprintArgs) string {
 	var b strings.Builder
 	b.WriteString("query actionByInputFingerprint(")
 	b.WriteString("inputFingerprint: ")
-	b.WriteString(fmt.Sprintf("%q", args.InputFingerprint))
+	b.WriteString(quoteMemQL(args.InputFingerprint))
 	b.WriteString(")")
 	return b.String()
 }
@@ -147,7 +147,7 @@ func ActionByTemplateFingerprintBuild(args ActionByTemplateFingerprintArgs) stri
 	var b strings.Builder
 	b.WriteString("query actionByTemplateFingerprint(")
 	b.WriteString("templateFingerprint: ")
-	b.WriteString(fmt.Sprintf("%q", args.TemplateFingerprint))
+	b.WriteString(quoteMemQL(args.TemplateFingerprint))
 	b.WriteString(")")
 	return b.String()
 }
@@ -169,7 +169,7 @@ func ActionCandidatesForPlanBuild(args ActionCandidatesForPlanArgs) string {
 	var b strings.Builder
 	b.WriteString("query actionCandidatesForPlan(")
 	b.WriteString("planId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PlanId))
+	b.WriteString(quoteMemQL(args.PlanId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -243,7 +243,7 @@ func ActiveAgentsBuild(args ActiveAgentsArgs) string {
 	b.WriteString("query activeAgents(")
 	if args.GroupId != "" {
 		b.WriteString("groupId: ")
-		b.WriteString(fmt.Sprintf("%q", args.GroupId))
+		b.WriteString(quoteMemQL(args.GroupId))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -266,7 +266,7 @@ func ActiveAgentsForUserBuild(args ActiveAgentsForUserArgs) string {
 	var b strings.Builder
 	b.WriteString("query activeAgentsForUser(")
 	b.WriteString("ownerUserId: ")
-	b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
+	b.WriteString(quoteMemQL(args.OwnerUserId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -288,7 +288,7 @@ func ActiveApprovalsByCorrelationKeyBuild(args ActiveApprovalsByCorrelationKeyAr
 	var b strings.Builder
 	b.WriteString("query activeApprovalsByCorrelationKey(")
 	b.WriteString("correlationKey: ")
-	b.WriteString(fmt.Sprintf("%q", args.CorrelationKey))
+	b.WriteString(quoteMemQL(args.CorrelationKey))
 	b.WriteString(")")
 	return b.String()
 }
@@ -344,7 +344,7 @@ func ActiveDelegationsByIdentitySubjectBuild(args ActiveDelegationsByIdentitySub
 	var b strings.Builder
 	b.WriteString("query activeDelegationsByIdentitySubject(")
 	b.WriteString("identitySubject: ")
-	b.WriteString(fmt.Sprintf("%q", args.IdentitySubject))
+	b.WriteString(quoteMemQL(args.IdentitySubject))
 	b.WriteString(")")
 	return b.String()
 }
@@ -366,7 +366,7 @@ func ActiveDelegationsForAgentBuild(args ActiveDelegationsForAgentArgs) string {
 	var b strings.Builder
 	b.WriteString("query activeDelegationsForAgent(")
 	b.WriteString("agentId: ")
-	b.WriteString(fmt.Sprintf("%q", args.AgentId))
+	b.WriteString(quoteMemQL(args.AgentId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -388,7 +388,7 @@ func ActiveHumanParticipantsBuild(args ActiveHumanParticipantsArgs) string {
 	var b strings.Builder
 	b.WriteString("query activeHumanParticipants(")
 	b.WriteString("partitionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+	b.WriteString(quoteMemQL(args.PartitionId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -529,7 +529,7 @@ func AgentAuthorizationsForUserBuild(args AgentAuthorizationsForUserArgs) string
 	var b strings.Builder
 	b.WriteString("query agentAuthorizationsForUser(")
 	b.WriteString("userId: ")
-	b.WriteString(fmt.Sprintf("%q", args.UserId))
+	b.WriteString(quoteMemQL(args.UserId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -551,7 +551,7 @@ func AgentByIdBuild(args AgentByIdArgs) string {
 	var b strings.Builder
 	b.WriteString("query agentById(")
 	b.WriteString("agentId: ")
-	b.WriteString(fmt.Sprintf("%q", args.AgentId))
+	b.WriteString(quoteMemQL(args.AgentId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -573,7 +573,7 @@ func AgentInteractionCountBuild(args AgentInteractionCountArgs) string {
 	var b strings.Builder
 	b.WriteString("query agentInteractionCount(")
 	b.WriteString("agentId: ")
-	b.WriteString(fmt.Sprintf("%q", args.AgentId))
+	b.WriteString(quoteMemQL(args.AgentId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -595,7 +595,7 @@ func AgentOwnerBuild(args AgentOwnerArgs) string {
 	var b strings.Builder
 	b.WriteString("query agentOwner(")
 	b.WriteString("agentId: ")
-	b.WriteString(fmt.Sprintf("%q", args.AgentId))
+	b.WriteString(quoteMemQL(args.AgentId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -617,7 +617,7 @@ func AgentRoleBySlugBuild(args AgentRoleBySlugArgs) string {
 	var b strings.Builder
 	b.WriteString("query agentRoleBySlug(")
 	b.WriteString("slug: ")
-	b.WriteString(fmt.Sprintf("%q", args.Slug))
+	b.WriteString(quoteMemQL(args.Slug))
 	b.WriteString(")")
 	return b.String()
 }
@@ -792,7 +792,7 @@ func ApprovalRequestByIdBuild(args ApprovalRequestByIdArgs) string {
 	var b strings.Builder
 	b.WriteString("query approvalRequestById(")
 	b.WriteString("id: ")
-	b.WriteString(fmt.Sprintf("%q", args.Id))
+	b.WriteString(quoteMemQL(args.Id))
 	b.WriteString(")")
 	return b.String()
 }
@@ -814,7 +814,7 @@ func AssistantAgentForUserBuild(args AssistantAgentForUserArgs) string {
 	var b strings.Builder
 	b.WriteString("query assistantAgentForUser(")
 	b.WriteString("ownerUserId: ")
-	b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
+	b.WriteString(quoteMemQL(args.OwnerUserId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -837,12 +837,12 @@ func AttachmentByIdBuild(args AttachmentByIdArgs) string {
 	var b strings.Builder
 	b.WriteString("query attachmentById(")
 	b.WriteString("attachmentId: ")
-	b.WriteString(fmt.Sprintf("%q", args.AttachmentId))
+	b.WriteString(quoteMemQL(args.AttachmentId))
 	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("partitionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+	b.WriteString(quoteMemQL(args.PartitionId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -864,7 +864,7 @@ func AudioOverridesForSpaceBuild(args AudioOverridesForSpaceArgs) string {
 	var b strings.Builder
 	b.WriteString("query audioOverridesForSpace(")
 	b.WriteString("partitionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+	b.WriteString(quoteMemQL(args.PartitionId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -886,7 +886,7 @@ func AuditEventsByActorBuild(args AuditEventsByActorArgs) string {
 	var b strings.Builder
 	b.WriteString("query auditEventsByActor(")
 	b.WriteString("userId: ")
-	b.WriteString(fmt.Sprintf("%q", args.UserId))
+	b.WriteString(quoteMemQL(args.UserId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -908,7 +908,7 @@ func AuditEventsByTargetBuild(args AuditEventsByTargetArgs) string {
 	var b strings.Builder
 	b.WriteString("query auditEventsByTarget(")
 	b.WriteString("targetId: ")
-	b.WriteString(fmt.Sprintf("%q", args.TargetId))
+	b.WriteString(quoteMemQL(args.TargetId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -930,7 +930,7 @@ func AuthCodeByCodeHashBuild(args AuthCodeByCodeHashArgs) string {
 	var b strings.Builder
 	b.WriteString("query authCodeByCodeHash(")
 	b.WriteString("codeHash: ")
-	b.WriteString(fmt.Sprintf("%q", args.CodeHash))
+	b.WriteString(quoteMemQL(args.CodeHash))
 	b.WriteString(")")
 	return b.String()
 }
@@ -952,7 +952,7 @@ func AuthSessionByPreviousRefreshTokenHashBuild(args AuthSessionByPreviousRefres
 	var b strings.Builder
 	b.WriteString("query authSessionByPreviousRefreshTokenHash(")
 	b.WriteString("previousRefreshTokenHash: ")
-	b.WriteString(fmt.Sprintf("%q", args.PreviousRefreshTokenHash))
+	b.WriteString(quoteMemQL(args.PreviousRefreshTokenHash))
 	b.WriteString(")")
 	return b.String()
 }
@@ -974,7 +974,7 @@ func AuthSessionByRefreshTokenHashBuild(args AuthSessionByRefreshTokenHashArgs) 
 	var b strings.Builder
 	b.WriteString("query authSessionByRefreshTokenHash(")
 	b.WriteString("refreshTokenHash: ")
-	b.WriteString(fmt.Sprintf("%q", args.RefreshTokenHash))
+	b.WriteString(quoteMemQL(args.RefreshTokenHash))
 	b.WriteString(")")
 	return b.String()
 }
@@ -996,7 +996,7 @@ func AuthSessionByTokenHashBuild(args AuthSessionByTokenHashArgs) string {
 	var b strings.Builder
 	b.WriteString("query authSessionByTokenHash(")
 	b.WriteString("tokenHash: ")
-	b.WriteString(fmt.Sprintf("%q", args.TokenHash))
+	b.WriteString(quoteMemQL(args.TokenHash))
 	b.WriteString(")")
 	return b.String()
 }
@@ -1018,7 +1018,7 @@ func AuthSessionsForSubjectBuild(args AuthSessionsForSubjectArgs) string {
 	var b strings.Builder
 	b.WriteString("query authSessionsForSubject(")
 	b.WriteString("subject: ")
-	b.WriteString(fmt.Sprintf("%q", args.Subject))
+	b.WriteString(quoteMemQL(args.Subject))
 	b.WriteString(")")
 	return b.String()
 }
@@ -1040,7 +1040,7 @@ func AuthoringBundleByIdBuild(args AuthoringBundleByIdArgs) string {
 	var b strings.Builder
 	b.WriteString("query authoringBundleById(")
 	b.WriteString("bundleId: ")
-	b.WriteString(fmt.Sprintf("%q", args.BundleId))
+	b.WriteString(quoteMemQL(args.BundleId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -1062,7 +1062,7 @@ func AuthoringBundleForPlanBuild(args AuthoringBundleForPlanArgs) string {
 	var b strings.Builder
 	b.WriteString("query authoringBundleForPlan(")
 	b.WriteString("sourcePlanId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SourcePlanId))
+	b.WriteString(quoteMemQL(args.SourcePlanId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -1084,7 +1084,7 @@ func AuthoringBundleForResponsibilityBuild(args AuthoringBundleForResponsibility
 	var b strings.Builder
 	b.WriteString("query authoringBundleForResponsibility(")
 	b.WriteString("responsibilityId: ")
-	b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
+	b.WriteString(quoteMemQL(args.ResponsibilityId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -1123,7 +1123,7 @@ func AuthoringConstructsForBundleBuild(args AuthoringConstructsForBundleArgs) st
 	var b strings.Builder
 	b.WriteString("query authoringConstructsForBundle(")
 	b.WriteString("bundleId: ")
-	b.WriteString(fmt.Sprintf("%q", args.BundleId))
+	b.WriteString(quoteMemQL(args.BundleId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -1145,7 +1145,7 @@ func AvatarPersonaByIdBuild(args AvatarPersonaByIdArgs) string {
 	var b strings.Builder
 	b.WriteString("query avatarPersonaById(")
 	b.WriteString("avatarPersonaId: ")
-	b.WriteString(fmt.Sprintf("%q", args.AvatarPersonaId))
+	b.WriteString(quoteMemQL(args.AvatarPersonaId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -1169,7 +1169,7 @@ func AvatarPersonasBuild(args AvatarPersonasArgs) string {
 	b.WriteString("query avatarPersonas(")
 	if args.Vendor != "" {
 		b.WriteString("vendor: ")
-		b.WriteString(fmt.Sprintf("%q", args.Vendor))
+		b.WriteString(quoteMemQL(args.Vendor))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -1209,7 +1209,7 @@ func BadgeByKeyHashBuild(args BadgeByKeyHashArgs) string {
 	var b strings.Builder
 	b.WriteString("query badgeByKeyHash(")
 	b.WriteString("keyHash: ")
-	b.WriteString(fmt.Sprintf("%q", args.KeyHash))
+	b.WriteString(quoteMemQL(args.KeyHash))
 	b.WriteString(")")
 	return b.String()
 }
@@ -1232,7 +1232,7 @@ func BadgesForUserBuild(args BadgesForUserArgs) string {
 	var b strings.Builder
 	b.WriteString("query badgesForUser(")
 	b.WriteString("userId: ")
-	b.WriteString(fmt.Sprintf("%q", args.UserId))
+	b.WriteString(quoteMemQL(args.UserId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -1254,7 +1254,7 @@ func CalendarEventByIdBuild(args CalendarEventByIdArgs) string {
 	var b strings.Builder
 	b.WriteString("query calendarEventById(")
 	b.WriteString("eventId: ")
-	b.WriteString(fmt.Sprintf("%q", args.EventId))
+	b.WriteString(quoteMemQL(args.EventId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -1276,7 +1276,7 @@ func CallsByNumberBuild(args CallsByNumberArgs) string {
 	var b strings.Builder
 	b.WriteString("query callsByNumber(")
 	b.WriteString("e164: ")
-	b.WriteString(fmt.Sprintf("%q", args.E164))
+	b.WriteString(quoteMemQL(args.E164))
 	b.WriteString(")")
 	return b.String()
 }
@@ -1298,7 +1298,7 @@ func CallsByPartitionBuild(args CallsByPartitionArgs) string {
 	var b strings.Builder
 	b.WriteString("query callsByPartition(")
 	b.WriteString("partitionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+	b.WriteString(quoteMemQL(args.PartitionId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -1320,7 +1320,7 @@ func CapabilitiesForResourceTypeBuild(args CapabilitiesForResourceTypeArgs) stri
 	var b strings.Builder
 	b.WriteString("query capabilitiesForResourceType(")
 	b.WriteString("resourceType: ")
-	b.WriteString(fmt.Sprintf("%q", args.ResourceType))
+	b.WriteString(quoteMemQL(args.ResourceType))
 	b.WriteString(")")
 	return b.String()
 }
@@ -1342,7 +1342,7 @@ func CapabilitiesForRoleBuild(args CapabilitiesForRoleArgs) string {
 	var b strings.Builder
 	b.WriteString("query capabilitiesForRole(")
 	b.WriteString("roleSlug: ")
-	b.WriteString(fmt.Sprintf("%q", args.RoleSlug))
+	b.WriteString(quoteMemQL(args.RoleSlug))
 	b.WriteString(")")
 	return b.String()
 }
@@ -1366,17 +1366,17 @@ func CapabilityGrantBuild(args CapabilityGrantArgs) string {
 	var b strings.Builder
 	b.WriteString("query capabilityGrant(")
 	b.WriteString("roleSlug: ")
-	b.WriteString(fmt.Sprintf("%q", args.RoleSlug))
+	b.WriteString(quoteMemQL(args.RoleSlug))
 	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("verb: ")
-	b.WriteString(fmt.Sprintf("%q", args.Verb))
+	b.WriteString(quoteMemQL(args.Verb))
 	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("resourceType: ")
-	b.WriteString(fmt.Sprintf("%q", args.ResourceType))
+	b.WriteString(quoteMemQL(args.ResourceType))
 	b.WriteString(")")
 	return b.String()
 }
@@ -1483,7 +1483,7 @@ func ConsentOptOutBuild(args ConsentOptOutArgs) string {
 	var b strings.Builder
 	b.WriteString("query consentOptOut(")
 	b.WriteString("phoneNumber: ")
-	b.WriteString(fmt.Sprintf("%q", args.PhoneNumber))
+	b.WriteString(quoteMemQL(args.PhoneNumber))
 	b.WriteString(")")
 	return b.String()
 }
@@ -1522,7 +1522,7 @@ func DelegationsByIdentityBuild(args DelegationsByIdentityArgs) string {
 	var b strings.Builder
 	b.WriteString("query delegationsByIdentity(")
 	b.WriteString("identityId: ")
-	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
+	b.WriteString(quoteMemQL(args.IdentityId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -1544,7 +1544,7 @@ func DependencyEdgesForBundleBuild(args DependencyEdgesForBundleArgs) string {
 	var b strings.Builder
 	b.WriteString("query dependencyEdgesForBundle(")
 	b.WriteString("bundleId: ")
-	b.WriteString(fmt.Sprintf("%q", args.BundleId))
+	b.WriteString(quoteMemQL(args.BundleId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -1584,12 +1584,12 @@ func DependentsOfConstructBuild(args DependentsOfConstructArgs) string {
 	var b strings.Builder
 	b.WriteString("query dependentsOfConstruct(")
 	b.WriteString("toName: ")
-	b.WriteString(fmt.Sprintf("%q", args.ToName))
+	b.WriteString(quoteMemQL(args.ToName))
 	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("toKind: ")
-	b.WriteString(fmt.Sprintf("%q", args.ToKind))
+	b.WriteString(quoteMemQL(args.ToKind))
 	b.WriteString(")")
 	return b.String()
 }
@@ -1611,7 +1611,7 @@ func DeploymentByIdBuild(args DeploymentByIdArgs) string {
 	var b strings.Builder
 	b.WriteString("query deploymentById(")
 	b.WriteString("deploymentId: ")
-	b.WriteString(fmt.Sprintf("%q", args.DeploymentId))
+	b.WriteString(quoteMemQL(args.DeploymentId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -1634,12 +1634,12 @@ func DeploymentsForClusterBuild(args DeploymentsForClusterArgs) string {
 	var b strings.Builder
 	b.WriteString("query deploymentsForCluster(")
 	b.WriteString("clusterId: ")
-	b.WriteString(fmt.Sprintf("%q", args.ClusterId))
+	b.WriteString(quoteMemQL(args.ClusterId))
 	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("asOf: ")
-	b.WriteString(fmt.Sprintf("%q", args.AsOf))
+	b.WriteString(quoteMemQL(args.AsOf))
 	b.WriteString(")")
 	return b.String()
 }
@@ -1663,17 +1663,17 @@ func DetectConflictsBuild(args DetectConflictsArgs) string {
 	var b strings.Builder
 	b.WriteString("query detectConflicts(")
 	b.WriteString("partitionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+	b.WriteString(quoteMemQL(args.PartitionId))
 	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("naturalKeyValue: ")
-	b.WriteString(fmt.Sprintf("%q", args.NaturalKeyValue))
+	b.WriteString(quoteMemQL(args.NaturalKeyValue))
 	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("recordType: ")
-	b.WriteString(fmt.Sprintf("%q", args.RecordType))
+	b.WriteString(quoteMemQL(args.RecordType))
 	b.WriteString(")")
 	return b.String()
 }
@@ -1695,7 +1695,7 @@ func DocumentChunksForDomainBuild(args DocumentChunksForDomainArgs) string {
 	var b strings.Builder
 	b.WriteString("query documentChunksForDomain(")
 	b.WriteString("domainId: ")
-	b.WriteString(fmt.Sprintf("%q", args.DomainId))
+	b.WriteString(quoteMemQL(args.DomainId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -1717,7 +1717,7 @@ func DocumentVersionByIdBuild(args DocumentVersionByIdArgs) string {
 	var b strings.Builder
 	b.WriteString("query documentVersionById(")
 	b.WriteString("versionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.VersionId))
+	b.WriteString(quoteMemQL(args.VersionId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -1739,7 +1739,7 @@ func DocumentVersionsBuild(args DocumentVersionsArgs) string {
 	var b strings.Builder
 	b.WriteString("query documentVersions(")
 	b.WriteString("documentId: ")
-	b.WriteString(fmt.Sprintf("%q", args.DocumentId))
+	b.WriteString(quoteMemQL(args.DocumentId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -1761,7 +1761,7 @@ func DocumentVersionsForOwnerBuild(args DocumentVersionsForOwnerArgs) string {
 	var b strings.Builder
 	b.WriteString("query documentVersionsForOwner(")
 	b.WriteString("documentId: ")
-	b.WriteString(fmt.Sprintf("%q", args.DocumentId))
+	b.WriteString(quoteMemQL(args.DocumentId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -1784,7 +1784,7 @@ func DueResponsibilitiesBuild(args DueResponsibilitiesArgs) string {
 	var b strings.Builder
 	b.WriteString("query dueResponsibilities(")
 	b.WriteString("trigger: ")
-	b.WriteString(fmt.Sprintf("%q", args.Trigger))
+	b.WriteString(quoteMemQL(args.Trigger))
 	b.WriteString(")")
 	return b.String()
 }
@@ -1807,12 +1807,12 @@ func EventsByDayBuild(args EventsByDayArgs) string {
 	var b strings.Builder
 	b.WriteString("query eventsByDay(")
 	b.WriteString("dayStart: ")
-	b.WriteString(fmt.Sprintf("%q", args.DayStart))
+	b.WriteString(quoteMemQL(args.DayStart))
 	if b.Len() > 18 {
 		b.WriteString(", ")
 	}
 	b.WriteString("dayEnd: ")
-	b.WriteString(fmt.Sprintf("%q", args.DayEnd))
+	b.WriteString(quoteMemQL(args.DayEnd))
 	b.WriteString(")")
 	return b.String()
 }
@@ -1851,7 +1851,7 @@ func ExpiredActiveDelegationsBuild(args ExpiredActiveDelegationsArgs) string {
 	var b strings.Builder
 	b.WriteString("query expiredActiveDelegations(")
 	b.WriteString("asOf: ")
-	b.WriteString(fmt.Sprintf("%q", args.AsOf))
+	b.WriteString(quoteMemQL(args.AsOf))
 	b.WriteString(")")
 	return b.String()
 }
@@ -1890,7 +1890,7 @@ func ExpiredConsumedAuthCodesBuild(args ExpiredConsumedAuthCodesArgs) string {
 	var b strings.Builder
 	b.WriteString("query expiredConsumedAuthCodes(")
 	b.WriteString("asOf: ")
-	b.WriteString(fmt.Sprintf("%q", args.AsOf))
+	b.WriteString(quoteMemQL(args.AsOf))
 	b.WriteString(")")
 	return b.String()
 }
@@ -1912,7 +1912,7 @@ func ExpiredMagicLinkRequestsBuild(args ExpiredMagicLinkRequestsArgs) string {
 	var b strings.Builder
 	b.WriteString("query expiredMagicLinkRequests(")
 	b.WriteString("asOf: ")
-	b.WriteString(fmt.Sprintf("%q", args.AsOf))
+	b.WriteString(quoteMemQL(args.AsOf))
 	b.WriteString(")")
 	return b.String()
 }
@@ -1935,7 +1935,7 @@ func ExpiredPendingAccessRequestsBuild(args ExpiredPendingAccessRequestsArgs) st
 	b.WriteString("query expiredPendingAccessRequests(")
 	if args.CreatedBefore != "" {
 		b.WriteString("createdBefore: ")
-		b.WriteString(fmt.Sprintf("%q", args.CreatedBefore))
+		b.WriteString(quoteMemQL(args.CreatedBefore))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -1959,7 +1959,7 @@ func ExpiredWorkerInvocationsBuild(args ExpiredWorkerInvocationsArgs) string {
 	b.WriteString("query expiredWorkerInvocations(")
 	if args.CreatedBefore != "" {
 		b.WriteString("createdBefore: ")
-		b.WriteString(fmt.Sprintf("%q", args.CreatedBefore))
+		b.WriteString(quoteMemQL(args.CreatedBefore))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -1983,7 +1983,7 @@ func FeedbackAnnouncementForPlanBuild(args FeedbackAnnouncementForPlanArgs) stri
 	var b strings.Builder
 	b.WriteString("query feedbackAnnouncementForPlan(")
 	b.WriteString("planId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PlanId))
+	b.WriteString(quoteMemQL(args.PlanId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -2005,7 +2005,7 @@ func FindEventsBuild(args FindEventsArgs) string {
 	var b strings.Builder
 	b.WriteString("query findEvents(")
 	b.WriteString("title: ")
-	b.WriteString(fmt.Sprintf("%q", args.Title))
+	b.WriteString(quoteMemQL(args.Title))
 	b.WriteString(")")
 	return b.String()
 }
@@ -2027,7 +2027,7 @@ func GeneratedOutputByIdBuild(args GeneratedOutputByIdArgs) string {
 	var b strings.Builder
 	b.WriteString("query generatedOutputById(")
 	b.WriteString("outputId: ")
-	b.WriteString(fmt.Sprintf("%q", args.OutputId))
+	b.WriteString(quoteMemQL(args.OutputId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -2049,7 +2049,7 @@ func GeneratedOutputsForPlanBuild(args GeneratedOutputsForPlanArgs) string {
 	var b strings.Builder
 	b.WriteString("query generatedOutputsForPlan(")
 	b.WriteString("planId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PlanId))
+	b.WriteString(quoteMemQL(args.PlanId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -2071,7 +2071,7 @@ func GlobalVariableBuild(args GlobalVariableArgs) string {
 	var b strings.Builder
 	b.WriteString("query globalVariable(")
 	b.WriteString("name: ")
-	b.WriteString(fmt.Sprintf("%q", args.Name))
+	b.WriteString(quoteMemQL(args.Name))
 	b.WriteString(")")
 	return b.String()
 }
@@ -2116,12 +2116,12 @@ func GreetingUtteranceBuild(args GreetingUtteranceArgs) string {
 	var b strings.Builder
 	b.WriteString("query greetingUtterance(")
 	b.WriteString("partitionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+	b.WriteString(quoteMemQL(args.PartitionId))
 	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("agentId: ")
-	b.WriteString(fmt.Sprintf("%q", args.AgentId))
+	b.WriteString(quoteMemQL(args.AgentId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -2143,7 +2143,7 @@ func GroupGAForSpaceBuild(args GroupGAForSpaceArgs) string {
 	var b strings.Builder
 	b.WriteString("query groupGAForSpace(")
 	b.WriteString("partitionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+	b.WriteString(quoteMemQL(args.PartitionId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -2166,12 +2166,12 @@ func HasAIResponseForReplyBuild(args HasAIResponseForReplyArgs) string {
 	var b strings.Builder
 	b.WriteString("query hasAIResponseForReply(")
 	b.WriteString("replyToId: ")
-	b.WriteString(fmt.Sprintf("%q", args.ReplyToId))
+	b.WriteString(quoteMemQL(args.ReplyToId))
 	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("participantId: ")
-	b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
+	b.WriteString(quoteMemQL(args.ParticipantId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -2193,7 +2193,7 @@ func HistoricalPlanMetricsBuild(args HistoricalPlanMetricsArgs) string {
 	var b strings.Builder
 	b.WriteString("query historicalPlanMetrics(")
 	b.WriteString("planKind: ")
-	b.WriteString(fmt.Sprintf("%q", args.PlanKind))
+	b.WriteString(quoteMemQL(args.PlanKind))
 	b.WriteString(")")
 	return b.String()
 }
@@ -2216,12 +2216,12 @@ func InboundRequestByDedupeKeyBuild(args InboundRequestByDedupeKeyArgs) string {
 	var b strings.Builder
 	b.WriteString("query inboundRequestByDedupeKey(")
 	b.WriteString("source: ")
-	b.WriteString(fmt.Sprintf("%q", args.Source))
+	b.WriteString(quoteMemQL(args.Source))
 	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("dedupeKey: ")
-	b.WriteString(fmt.Sprintf("%q", args.DedupeKey))
+	b.WriteString(quoteMemQL(args.DedupeKey))
 	b.WriteString(")")
 	return b.String()
 }
@@ -2243,7 +2243,7 @@ func InboundRequestsByStatusBuild(args InboundRequestsByStatusArgs) string {
 	var b strings.Builder
 	b.WriteString("query inboundRequestsByStatus(")
 	b.WriteString("status: ")
-	b.WriteString(fmt.Sprintf("%q", args.Status))
+	b.WriteString(quoteMemQL(args.Status))
 	b.WriteString(")")
 	return b.String()
 }
@@ -2265,7 +2265,7 @@ func InvitationByIdBuild(args InvitationByIdArgs) string {
 	var b strings.Builder
 	b.WriteString("query invitationById(")
 	b.WriteString("invitationId: ")
-	b.WriteString(fmt.Sprintf("%q", args.InvitationId))
+	b.WriteString(quoteMemQL(args.InvitationId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -2287,7 +2287,7 @@ func InvitationByPreviousTokenHashBuild(args InvitationByPreviousTokenHashArgs) 
 	var b strings.Builder
 	b.WriteString("query invitationByPreviousTokenHash(")
 	b.WriteString("tokenHash: ")
-	b.WriteString(fmt.Sprintf("%q", args.TokenHash))
+	b.WriteString(quoteMemQL(args.TokenHash))
 	b.WriteString(")")
 	return b.String()
 }
@@ -2309,7 +2309,7 @@ func InvitationByTokenHashBuild(args InvitationByTokenHashArgs) string {
 	var b strings.Builder
 	b.WriteString("query invitationByTokenHash(")
 	b.WriteString("tokenHash: ")
-	b.WriteString(fmt.Sprintf("%q", args.TokenHash))
+	b.WriteString(quoteMemQL(args.TokenHash))
 	b.WriteString(")")
 	return b.String()
 }
@@ -2331,7 +2331,7 @@ func InvocationsForPlanBuild(args InvocationsForPlanArgs) string {
 	var b strings.Builder
 	b.WriteString("query invocationsForPlan(")
 	b.WriteString("planId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PlanId))
+	b.WriteString(quoteMemQL(args.PlanId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -2353,7 +2353,7 @@ func InvocationsForUserBuild(args InvocationsForUserArgs) string {
 	var b strings.Builder
 	b.WriteString("query invocationsForUser(")
 	b.WriteString("ownerUserId: ")
-	b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
+	b.WriteString(quoteMemQL(args.OwnerUserId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -2375,7 +2375,7 @@ func LibraryArtifactByIdBuild(args LibraryArtifactByIdArgs) string {
 	var b strings.Builder
 	b.WriteString("query libraryArtifactById(")
 	b.WriteString("artifactId: ")
-	b.WriteString(fmt.Sprintf("%q", args.ArtifactId))
+	b.WriteString(quoteMemQL(args.ArtifactId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -2414,7 +2414,7 @@ func LibraryArtifactsByKindBuild(args LibraryArtifactsByKindArgs) string {
 	var b strings.Builder
 	b.WriteString("query libraryArtifactsByKind(")
 	b.WriteString("kind: ")
-	b.WriteString(fmt.Sprintf("%q", args.Kind))
+	b.WriteString(quoteMemQL(args.Kind))
 	b.WriteString(")")
 	return b.String()
 }
@@ -2436,7 +2436,7 @@ func LibraryArtifactsByLensBuild(args LibraryArtifactsByLensArgs) string {
 	var b strings.Builder
 	b.WriteString("query libraryArtifactsByLens(")
 	b.WriteString("lens: ")
-	b.WriteString(fmt.Sprintf("%q", args.Lens))
+	b.WriteString(quoteMemQL(args.Lens))
 	b.WriteString(")")
 	return b.String()
 }
@@ -2475,7 +2475,7 @@ func MagicLinkRequestByTokenHashBuild(args MagicLinkRequestByTokenHashArgs) stri
 	var b strings.Builder
 	b.WriteString("query magicLinkRequestByTokenHash(")
 	b.WriteString("tokenHash: ")
-	b.WriteString(fmt.Sprintf("%q", args.TokenHash))
+	b.WriteString(quoteMemQL(args.TokenHash))
 	b.WriteString(")")
 	return b.String()
 }
@@ -2497,7 +2497,7 @@ func MemoryByIdBuild(args MemoryByIdArgs) string {
 	var b strings.Builder
 	b.WriteString("query memoryById(")
 	b.WriteString("memoryId: ")
-	b.WriteString(fmt.Sprintf("%q", args.MemoryId))
+	b.WriteString(quoteMemQL(args.MemoryId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -2519,7 +2519,7 @@ func MissingCapabilitiesByStatusBuild(args MissingCapabilitiesByStatusArgs) stri
 	var b strings.Builder
 	b.WriteString("query missingCapabilitiesByStatus(")
 	b.WriteString("status: ")
-	b.WriteString(fmt.Sprintf("%q", args.Status))
+	b.WriteString(quoteMemQL(args.Status))
 	b.WriteString(")")
 	return b.String()
 }
@@ -2542,12 +2542,12 @@ func MissingCapabilityByKindAndNameBuild(args MissingCapabilityByKindAndNameArgs
 	var b strings.Builder
 	b.WriteString("query missingCapabilityByKindAndName(")
 	b.WriteString("kind: ")
-	b.WriteString(fmt.Sprintf("%q", args.Kind))
+	b.WriteString(quoteMemQL(args.Kind))
 	if b.Len() > 37 {
 		b.WriteString(", ")
 	}
 	b.WriteString("capability: ")
-	b.WriteString(fmt.Sprintf("%q", args.Capability))
+	b.WriteString(quoteMemQL(args.Capability))
 	b.WriteString(")")
 	return b.String()
 }
@@ -2586,7 +2586,7 @@ func NodeSpecsForDeploymentBuild(args NodeSpecsForDeploymentArgs) string {
 	var b strings.Builder
 	b.WriteString("query nodeSpecsForDeployment(")
 	b.WriteString("deploymentId: ")
-	b.WriteString(fmt.Sprintf("%q", args.DeploymentId))
+	b.WriteString(quoteMemQL(args.DeploymentId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -2608,7 +2608,7 @@ func NodesForDeploymentBuild(args NodesForDeploymentArgs) string {
 	var b strings.Builder
 	b.WriteString("query nodesForDeployment(")
 	b.WriteString("deploymentId: ")
-	b.WriteString(fmt.Sprintf("%q", args.DeploymentId))
+	b.WriteString(quoteMemQL(args.DeploymentId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -2630,7 +2630,7 @@ func NodesNotInDeploymentBuild(args NodesNotInDeploymentArgs) string {
 	var b strings.Builder
 	b.WriteString("query nodesNotInDeployment(")
 	b.WriteString("deploymentId: ")
-	b.WriteString(fmt.Sprintf("%q", args.DeploymentId))
+	b.WriteString(quoteMemQL(args.DeploymentId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -2652,7 +2652,7 @@ func NoteByIdBuild(args NoteByIdArgs) string {
 	var b strings.Builder
 	b.WriteString("query noteById(")
 	b.WriteString("noteId: ")
-	b.WriteString(fmt.Sprintf("%q", args.NoteId))
+	b.WriteString(quoteMemQL(args.NoteId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -2691,7 +2691,7 @@ func NotesByTagBuild(args NotesByTagArgs) string {
 	var b strings.Builder
 	b.WriteString("query notesByTag(")
 	b.WriteString("tag: ")
-	b.WriteString(fmt.Sprintf("%q", args.Tag))
+	b.WriteString(quoteMemQL(args.Tag))
 	b.WriteString(")")
 	return b.String()
 }
@@ -2713,7 +2713,7 @@ func NumberByE164Build(args NumberByE164Args) string {
 	var b strings.Builder
 	b.WriteString("query numberByE164(")
 	b.WriteString("e164: ")
-	b.WriteString(fmt.Sprintf("%q", args.E164))
+	b.WriteString(quoteMemQL(args.E164))
 	b.WriteString(")")
 	return b.String()
 }
@@ -2735,7 +2735,7 @@ func NumbersByPartitionBuild(args NumbersByPartitionArgs) string {
 	var b strings.Builder
 	b.WriteString("query numbersByPartition(")
 	b.WriteString("partitionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+	b.WriteString(quoteMemQL(args.PartitionId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -2757,7 +2757,7 @@ func OAuthClientByClientIdBuild(args OAuthClientByClientIdArgs) string {
 	var b strings.Builder
 	b.WriteString("query oAuthClientByClientId(")
 	b.WriteString("clientId: ")
-	b.WriteString(fmt.Sprintf("%q", args.ClientId))
+	b.WriteString(quoteMemQL(args.ClientId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -2779,7 +2779,7 @@ func OutboundRequestsByStatusBuild(args OutboundRequestsByStatusArgs) string {
 	var b strings.Builder
 	b.WriteString("query outboundRequestsByStatus(")
 	b.WriteString("status: ")
-	b.WriteString(fmt.Sprintf("%q", args.Status))
+	b.WriteString(quoteMemQL(args.Status))
 	b.WriteString(")")
 	return b.String()
 }
@@ -2801,7 +2801,7 @@ func OverrideByIdBuild(args OverrideByIdArgs) string {
 	var b strings.Builder
 	b.WriteString("query overrideById(")
 	b.WriteString("overrideId: ")
-	b.WriteString(fmt.Sprintf("%q", args.OverrideId))
+	b.WriteString(quoteMemQL(args.OverrideId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -2823,7 +2823,7 @@ func OverridesForConstructBuild(args OverridesForConstructArgs) string {
 	var b strings.Builder
 	b.WriteString("query overridesForConstruct(")
 	b.WriteString("baseConstructId: ")
-	b.WriteString(fmt.Sprintf("%q", args.BaseConstructId))
+	b.WriteString(quoteMemQL(args.BaseConstructId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -2846,12 +2846,12 @@ func ParticipantByAgentSpaceBuild(args ParticipantByAgentSpaceArgs) string {
 	var b strings.Builder
 	b.WriteString("query participantByAgentSpace(")
 	b.WriteString("partitionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+	b.WriteString(quoteMemQL(args.PartitionId))
 	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("agentId: ")
-	b.WriteString(fmt.Sprintf("%q", args.AgentId))
+	b.WriteString(quoteMemQL(args.AgentId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -2875,14 +2875,14 @@ func ParticipantSessionBuild(args ParticipantSessionArgs) string {
 	b.WriteString("query participantSession(")
 	if args.PartitionId != "" {
 		b.WriteString("partitionId: ")
-		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+		b.WriteString(quoteMemQL(args.PartitionId))
 	}
 	if args.ParticipantId != "" {
 		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("participantId: ")
-		b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
+		b.WriteString(quoteMemQL(args.ParticipantId))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -2905,7 +2905,7 @@ func PatIdentitiesForUserBuild(args PatIdentitiesForUserArgs) string {
 	var b strings.Builder
 	b.WriteString("query patIdentitiesForUser(")
 	b.WriteString("userId: ")
-	b.WriteString(fmt.Sprintf("%q", args.UserId))
+	b.WriteString(quoteMemQL(args.UserId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -2927,7 +2927,7 @@ func PatIdentityByIdBuild(args PatIdentityByIdArgs) string {
 	var b strings.Builder
 	b.WriteString("query patIdentityById(")
 	b.WriteString("identityId: ")
-	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
+	b.WriteString(quoteMemQL(args.IdentityId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -2949,7 +2949,7 @@ func PatIdentityByKeyHashBuild(args PatIdentityByKeyHashArgs) string {
 	var b strings.Builder
 	b.WriteString("query patIdentityByKeyHash(")
 	b.WriteString("keyHash: ")
-	b.WriteString(fmt.Sprintf("%q", args.KeyHash))
+	b.WriteString(quoteMemQL(args.KeyHash))
 	b.WriteString(")")
 	return b.String()
 }
@@ -2988,7 +2988,7 @@ func PlanByIdBuild(args PlanByIdArgs) string {
 	var b strings.Builder
 	b.WriteString("query planById(")
 	b.WriteString("planId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PlanId))
+	b.WriteString(quoteMemQL(args.PlanId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -3010,7 +3010,7 @@ func PlansForResponsibilityBuild(args PlansForResponsibilityArgs) string {
 	var b strings.Builder
 	b.WriteString("query plansForResponsibility(")
 	b.WriteString("responsibilityId: ")
-	b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
+	b.WriteString(quoteMemQL(args.ResponsibilityId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -3032,7 +3032,7 @@ func PlansForSpaceBuild(args PlansForSpaceArgs) string {
 	var b strings.Builder
 	b.WriteString("query plansForSpace(")
 	b.WriteString("partitionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+	b.WriteString(quoteMemQL(args.PartitionId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -3055,13 +3055,13 @@ func PolicyBuild(args PolicyArgs) string {
 	var b strings.Builder
 	b.WriteString("query policy(")
 	b.WriteString("targetRecordType: ")
-	b.WriteString(fmt.Sprintf("%q", args.TargetRecordType))
+	b.WriteString(quoteMemQL(args.TargetRecordType))
 	if args.PartitionId != "" {
 		if b.Len() > 13 {
 			b.WriteString(", ")
 		}
 		b.WriteString("partitionId: ")
-		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+		b.WriteString(quoteMemQL(args.PartitionId))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -3084,7 +3084,7 @@ func PolicyTracesForPolicyBuild(args PolicyTracesForPolicyArgs) string {
 	var b strings.Builder
 	b.WriteString("query policyTracesForPolicy(")
 	b.WriteString("policyName: ")
-	b.WriteString(fmt.Sprintf("%q", args.PolicyName))
+	b.WriteString(quoteMemQL(args.PolicyName))
 	b.WriteString(")")
 	return b.String()
 }
@@ -3106,7 +3106,7 @@ func ProjectByIdBuild(args ProjectByIdArgs) string {
 	var b strings.Builder
 	b.WriteString("query projectById(")
 	b.WriteString("projectId: ")
-	b.WriteString(fmt.Sprintf("%q", args.ProjectId))
+	b.WriteString(quoteMemQL(args.ProjectId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -3128,7 +3128,7 @@ func ProjectBySlugBuild(args ProjectBySlugArgs) string {
 	var b strings.Builder
 	b.WriteString("query projectBySlug(")
 	b.WriteString("slug: ")
-	b.WriteString(fmt.Sprintf("%q", args.Slug))
+	b.WriteString(quoteMemQL(args.Slug))
 	b.WriteString(")")
 	return b.String()
 }
@@ -3150,7 +3150,7 @@ func ProjectRequestsBuild(args ProjectRequestsArgs) string {
 	var b strings.Builder
 	b.WriteString("query projectRequests(")
 	b.WriteString("projectId: ")
-	b.WriteString(fmt.Sprintf("%q", args.ProjectId))
+	b.WriteString(quoteMemQL(args.ProjectId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -3190,7 +3190,7 @@ func RecentAuditEventsBuild(args RecentAuditEventsArgs) string {
 	b.WriteString("query recentAuditEvents(")
 	if args.Category != "" {
 		b.WriteString("category: ")
-		b.WriteString(fmt.Sprintf("%q", args.Category))
+		b.WriteString(quoteMemQL(args.Category))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -3217,28 +3217,28 @@ func RecordsByStateBuild(args RecordsByStateArgs) string {
 	b.WriteString("query recordsByState(")
 	if args.PartitionId != "" {
 		b.WriteString("partitionId: ")
-		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+		b.WriteString(quoteMemQL(args.PartitionId))
 	}
 	if args.RecordType != "" {
 		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("recordType: ")
-		b.WriteString(fmt.Sprintf("%q", args.RecordType))
+		b.WriteString(quoteMemQL(args.RecordType))
 	}
 	if args.ValidationState != "" {
 		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("validationState: ")
-		b.WriteString(fmt.Sprintf("%q", args.ValidationState))
+		b.WriteString(quoteMemQL(args.ValidationState))
 	}
 	if args.ImportSource != "" {
 		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("importSource: ")
-		b.WriteString(fmt.Sprintf("%q", args.ImportSource))
+		b.WriteString(quoteMemQL(args.ImportSource))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -3261,7 +3261,7 @@ func RequestByIdBuild(args RequestByIdArgs) string {
 	var b strings.Builder
 	b.WriteString("query requestById(")
 	b.WriteString("requestId: ")
-	b.WriteString(fmt.Sprintf("%q", args.RequestId))
+	b.WriteString(quoteMemQL(args.RequestId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -3283,7 +3283,7 @@ func RequestEventsBuild(args RequestEventsArgs) string {
 	var b strings.Builder
 	b.WriteString("query requestEvents(")
 	b.WriteString("requestId: ")
-	b.WriteString(fmt.Sprintf("%q", args.RequestId))
+	b.WriteString(quoteMemQL(args.RequestId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -3305,7 +3305,7 @@ func ResolveValidOverrideBuild(args ResolveValidOverrideArgs) string {
 	var b strings.Builder
 	b.WriteString("query resolveValidOverride(")
 	b.WriteString("baseConstructId: ")
-	b.WriteString(fmt.Sprintf("%q", args.BaseConstructId))
+	b.WriteString(quoteMemQL(args.BaseConstructId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -3344,7 +3344,7 @@ func ResponsibilityByIdBuild(args ResponsibilityByIdArgs) string {
 	var b strings.Builder
 	b.WriteString("query responsibilityById(")
 	b.WriteString("responsibilityId: ")
-	b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
+	b.WriteString(quoteMemQL(args.ResponsibilityId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -3366,7 +3366,7 @@ func RoleBySlugBuild(args RoleBySlugArgs) string {
 	var b strings.Builder
 	b.WriteString("query roleBySlug(")
 	b.WriteString("slug: ")
-	b.WriteString(fmt.Sprintf("%q", args.Slug))
+	b.WriteString(quoteMemQL(args.Slug))
 	b.WriteString(")")
 	return b.String()
 }
@@ -3389,7 +3389,7 @@ func RouterBudgetsBuild(args RouterBudgetsArgs) string {
 	b.WriteString("query routerBudgets(")
 	if args.Scope != "" {
 		b.WriteString("scope: ")
-		b.WriteString(fmt.Sprintf("%q", args.Scope))
+		b.WriteString(quoteMemQL(args.Scope))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -3439,7 +3439,7 @@ func SiParticipantForSpaceBuild(args SiParticipantForSpaceArgs) string {
 	var b strings.Builder
 	b.WriteString("query siParticipantForSpace(")
 	b.WriteString("partitionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+	b.WriteString(quoteMemQL(args.PartitionId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -3461,7 +3461,7 @@ func SkillBySlugBuild(args SkillBySlugArgs) string {
 	var b strings.Builder
 	b.WriteString("query skillBySlug(")
 	b.WriteString("slug: ")
-	b.WriteString(fmt.Sprintf("%q", args.Slug))
+	b.WriteString(quoteMemQL(args.Slug))
 	b.WriteString(")")
 	return b.String()
 }
@@ -3483,7 +3483,7 @@ func SkillChangeEventsForAgentBuild(args SkillChangeEventsForAgentArgs) string {
 	var b strings.Builder
 	b.WriteString("query skillChangeEventsForAgent(")
 	b.WriteString("targetAgentId: ")
-	b.WriteString(fmt.Sprintf("%q", args.TargetAgentId))
+	b.WriteString(quoteMemQL(args.TargetAgentId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -3505,7 +3505,7 @@ func SkillNeedsRefreshBuild(args SkillNeedsRefreshArgs) string {
 	var b strings.Builder
 	b.WriteString("query skillNeedsRefresh(")
 	b.WriteString("staleDomainId: ")
-	b.WriteString(fmt.Sprintf("%q", args.StaleDomainId))
+	b.WriteString(quoteMemQL(args.StaleDomainId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -3528,13 +3528,13 @@ func SpaceMediaBuild(args SpaceMediaArgs) string {
 	var b strings.Builder
 	b.WriteString("query spaceMedia(")
 	b.WriteString("partitionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+	b.WriteString(quoteMemQL(args.PartitionId))
 	if args.MediaType != "" {
 		if b.Len() > 17 {
 			b.WriteString(", ")
 		}
 		b.WriteString("mediaType: ")
-		b.WriteString(fmt.Sprintf("%q", args.MediaType))
+		b.WriteString(quoteMemQL(args.MediaType))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -3557,7 +3557,7 @@ func SpaceParticipantPresenceBuild(args SpaceParticipantPresenceArgs) string {
 	var b strings.Builder
 	b.WriteString("query spaceParticipantPresence(")
 	b.WriteString("partitionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+	b.WriteString(quoteMemQL(args.PartitionId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -3581,20 +3581,20 @@ func SpaceParticipantsBuild(args SpaceParticipantsArgs) string {
 	var b strings.Builder
 	b.WriteString("query spaceParticipants(")
 	b.WriteString("partitionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+	b.WriteString(quoteMemQL(args.PartitionId))
 	if args.Status != "" {
 		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("status: ")
-		b.WriteString(fmt.Sprintf("%q", args.Status))
+		b.WriteString(quoteMemQL(args.Status))
 	}
 	if args.ParticipantType != "" {
 		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("participantType: ")
-		b.WriteString(fmt.Sprintf("%q", args.ParticipantType))
+		b.WriteString(quoteMemQL(args.ParticipantType))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -3619,20 +3619,20 @@ func SpaceUtterancesBuild(args SpaceUtterancesArgs) string {
 	var b strings.Builder
 	b.WriteString("query spaceUtterances(")
 	b.WriteString("partitionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+	b.WriteString(quoteMemQL(args.PartitionId))
 	if args.ParticipantId != "" {
 		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("participantId: ")
-		b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
+		b.WriteString(quoteMemQL(args.ParticipantId))
 	}
 	if args.UtteranceType != "" {
 		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("utteranceType: ")
-		b.WriteString(fmt.Sprintf("%q", args.UtteranceType))
+		b.WriteString(quoteMemQL(args.UtteranceType))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -3656,7 +3656,7 @@ func StaleClusterNodesBuild(args StaleClusterNodesArgs) string {
 	b.WriteString("query staleClusterNodes(")
 	if args.OlderThan != "" {
 		b.WriteString("olderThan: ")
-		b.WriteString(fmt.Sprintf("%q", args.OlderThan))
+		b.WriteString(quoteMemQL(args.OlderThan))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -3747,7 +3747,7 @@ func TaskStateByIdBuild(args TaskStateByIdArgs) string {
 	var b strings.Builder
 	b.WriteString("query taskStateById(")
 	b.WriteString("taskId: ")
-	b.WriteString(fmt.Sprintf("%q", args.TaskId))
+	b.WriteString(quoteMemQL(args.TaskId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -3769,7 +3769,7 @@ func TasksForPlanBuild(args TasksForPlanArgs) string {
 	var b strings.Builder
 	b.WriteString("query tasksForPlan(")
 	b.WriteString("planId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PlanId))
+	b.WriteString(quoteMemQL(args.PlanId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -3791,7 +3791,7 @@ func TodoByIdBuild(args TodoByIdArgs) string {
 	var b strings.Builder
 	b.WriteString("query todoById(")
 	b.WriteString("todoId: ")
-	b.WriteString(fmt.Sprintf("%q", args.TodoId))
+	b.WriteString(quoteMemQL(args.TodoId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -3839,12 +3839,12 @@ func UpcomingEventsBuild(args UpcomingEventsArgs) string {
 	var b strings.Builder
 	b.WriteString("query upcomingEvents(")
 	b.WriteString("windowStart: ")
-	b.WriteString(fmt.Sprintf("%q", args.WindowStart))
+	b.WriteString(quoteMemQL(args.WindowStart))
 	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("windowEnd: ")
-	b.WriteString(fmt.Sprintf("%q", args.WindowEnd))
+	b.WriteString(quoteMemQL(args.WindowEnd))
 	b.WriteString(")")
 	return b.String()
 }
@@ -3868,14 +3868,14 @@ func UsableRecordsBuild(args UsableRecordsArgs) string {
 	b.WriteString("query usableRecords(")
 	if args.PartitionId != "" {
 		b.WriteString("partitionId: ")
-		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+		b.WriteString(quoteMemQL(args.PartitionId))
 	}
 	if args.RecordType != "" {
 		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("recordType: ")
-		b.WriteString(fmt.Sprintf("%q", args.RecordType))
+		b.WriteString(quoteMemQL(args.RecordType))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -3901,7 +3901,7 @@ func UserActiveSpaceBuild(args UserActiveSpaceArgs) string {
 	var b strings.Builder
 	b.WriteString("query userActiveSpace(")
 	b.WriteString("userId: ")
-	b.WriteString(fmt.Sprintf("%q", args.UserId))
+	b.WriteString(quoteMemQL(args.UserId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -3924,7 +3924,7 @@ func UserByIdBuild(args UserByIdArgs) string {
 	var b strings.Builder
 	b.WriteString("query userById(")
 	b.WriteString("userId: ")
-	b.WriteString(fmt.Sprintf("%q", args.UserId))
+	b.WriteString(quoteMemQL(args.UserId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -3982,7 +3982,7 @@ func UserDisplayByIdBuild(args UserDisplayByIdArgs) string {
 	var b strings.Builder
 	b.WriteString("query userDisplayById(")
 	b.WriteString("userId: ")
-	b.WriteString(fmt.Sprintf("%q", args.UserId))
+	b.WriteString(quoteMemQL(args.UserId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -4004,7 +4004,7 @@ func UsersActiveInSpaceBuild(args UsersActiveInSpaceArgs) string {
 	var b strings.Builder
 	b.WriteString("query usersActiveInSpace(")
 	b.WriteString("partitionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+	b.WriteString(quoteMemQL(args.PartitionId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -4029,21 +4029,21 @@ func ValidationLogBuild(args ValidationLogArgs) string {
 	b.WriteString("query validationLog(")
 	if args.RecordId != "" {
 		b.WriteString("recordId: ")
-		b.WriteString(fmt.Sprintf("%q", args.RecordId))
+		b.WriteString(quoteMemQL(args.RecordId))
 	}
 	if args.PartitionId != "" {
 		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("partitionId: ")
-		b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+		b.WriteString(quoteMemQL(args.PartitionId))
 	}
 	if args.Action != "" {
 		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("action: ")
-		b.WriteString(fmt.Sprintf("%q", args.Action))
+		b.WriteString(quoteMemQL(args.Action))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -4083,7 +4083,7 @@ func VideoOverridesForSpaceBuild(args VideoOverridesForSpaceArgs) string {
 	var b strings.Builder
 	b.WriteString("query videoOverridesForSpace(")
 	b.WriteString("partitionId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PartitionId))
+	b.WriteString(quoteMemQL(args.PartitionId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -4122,7 +4122,7 @@ func WorkerByIdentityIdBuild(args WorkerByIdentityIdArgs) string {
 	var b strings.Builder
 	b.WriteString("query workerByIdentityId(")
 	b.WriteString("identityId: ")
-	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
+	b.WriteString(quoteMemQL(args.IdentityId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -4144,7 +4144,7 @@ func WorkerPairingCodeByHashBuild(args WorkerPairingCodeByHashArgs) string {
 	var b strings.Builder
 	b.WriteString("query workerPairingCodeByHash(")
 	b.WriteString("codeHash: ")
-	b.WriteString(fmt.Sprintf("%q", args.CodeHash))
+	b.WriteString(quoteMemQL(args.CodeHash))
 	b.WriteString(")")
 	return b.String()
 }
@@ -4166,7 +4166,7 @@ func WorkerTokenByKeyHashBuild(args WorkerTokenByKeyHashArgs) string {
 	var b strings.Builder
 	b.WriteString("query workerTokenByKeyHash(")
 	b.WriteString("keyHash: ")
-	b.WriteString(fmt.Sprintf("%q", args.KeyHash))
+	b.WriteString(quoteMemQL(args.KeyHash))
 	b.WriteString(")")
 	return b.String()
 }
@@ -4188,7 +4188,7 @@ func WorkersForUserBuild(args WorkersForUserArgs) string {
 	var b strings.Builder
 	b.WriteString("query workersForUser(")
 	b.WriteString("ownerUserId: ")
-	b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
+	b.WriteString(quoteMemQL(args.OwnerUserId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -4210,7 +4210,7 @@ func WorkspaceForPlanBuild(args WorkspaceForPlanArgs) string {
 	var b strings.Builder
 	b.WriteString("query workspaceForPlan(")
 	b.WriteString("planId: ")
-	b.WriteString(fmt.Sprintf("%q", args.PlanId))
+	b.WriteString(quoteMemQL(args.PlanId))
 	b.WriteString(")")
 	return b.String()
 }
