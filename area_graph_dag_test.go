@@ -273,7 +273,6 @@ var requiredAreas = []string{
 	"scripts/lib",
 	"scripts/make",
 	"scripts/migrate-concepts",
-	"scripts/migrate-seeds",
 	"scripts/migrations",
 	"scripts/release",
 	"scripts/restructure-by-construct",
