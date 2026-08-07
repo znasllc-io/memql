@@ -1,6 +1,7 @@
 package main
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -107,30 +108,117 @@ func TestPublishDiagnostics_UnknownDocumentNoop(t *testing.T) {
 	}
 }
 
+// fakeTimer is a debounceTimer the test fires by hand. It mirrors *time.Timer
+// where it matters: Stop reports false and has no effect once the callback has
+// already run, so the fake cannot grant a cancellation real time would refuse.
+type fakeTimer struct {
+	clock   *fakeClock
+	fn      func()
+	stopped bool
+	fired   bool
+}
+
+func (t *fakeTimer) Stop() bool {
+	t.clock.mu.Lock()
+	defer t.clock.mu.Unlock()
+	if t.stopped || t.fired {
+		return false
+	}
+	t.stopped = true
+	return true
+}
+
+// fakeClock hands the debouncer timers instead of wall-clock ones. Nothing in
+// it reads the clock -- time "passes" only when the test calls fire. That is
+// what removes the flake class from TestDiagnosticsDebouncer (memql#3253)
+// rather than merely widening the window it used to race against.
+type fakeClock struct {
+	mu    sync.Mutex
+	armed []*fakeTimer
+}
+
+// afterFunc is the debounceTimerFunc the debouncer is built with. The delay is
+// ignored: the test, not the scheduler, decides when the callback runs.
+func (c *fakeClock) afterFunc(_ time.Duration, fn func()) debounceTimer {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	t := &fakeTimer{clock: c, fn: fn}
+	c.armed = append(c.armed, t)
+	return t
+}
+
+// fire runs every armed timer still live, in arming order, and reports how many
+// callbacks ran. Stopped timers are dropped without running, and every armed
+// timer is retired whether or not it ran -- a one-shot timer fires at most once.
+func (c *fakeClock) fire() int {
+	c.mu.Lock()
+	armed := c.armed
+	c.armed = nil
+	live := make([]*fakeTimer, 0, len(armed))
+	for _, t := range armed {
+		if t.stopped {
+			continue
+		}
+		t.fired = true
+		live = append(live, t)
+	}
+	c.mu.Unlock()
+	for _, t := range live {
+		t.fn()
+	}
+	return len(live)
+}
+
 func TestDiagnosticsDebouncer(t *testing.T) {
-	d := newDiagnosticsDebouncer(10 * time.Millisecond)
-	fired := make(chan struct{}, 10)
+	clock := &fakeClock{}
+	d := newDiagnosticsDebouncerWithTimers(10*time.Millisecond, clock.afterFunc)
 
-	// Two rapid schedules coalesce into one fire.
-	d.schedule("u", func() { fired <- struct{}{} })
-	d.schedule("u", func() { fired <- struct{}{} })
-	select {
-	case <-fired:
-	case <-time.After(300 * time.Millisecond):
-		t.Fatal("debounced fn never fired")
+	fired := 0
+	count := func() { fired++ }
+
+	// Two rapid schedules coalesce into one fire: the second must stop the
+	// first's timer, so firing the clock runs exactly one callback. No wall
+	// time passes between the two schedules, so "rapid" is now a property of
+	// the code under test rather than of how the OS happened to interleave two
+	// consecutive statements against a 10ms window.
+	d.schedule("u", count)
+	d.schedule("u", count)
+	if n := clock.fire(); n != 1 {
+		t.Fatalf("live timers = %d; want 1 -- the first (superseded) schedule should have been cancelled", n)
 	}
-	select {
-	case <-fired:
-		t.Fatal("the first (superseded) schedule should have been cancelled")
-	case <-time.After(60 * time.Millisecond):
+	if fired != 1 {
+		t.Fatalf("callbacks run = %d; want 1", fired)
 	}
 
-	// cancel stops a pending timer.
-	d.schedule("v", func() { fired <- struct{}{} })
+	// cancel stops a pending timer: it never fires.
+	fired = 0
+	d.schedule("v", count)
 	d.cancel("v")
-	select {
-	case <-fired:
-		t.Fatal("cancelled timer must not fire")
-	case <-time.After(60 * time.Millisecond):
+	if n := clock.fire(); n != 0 {
+		t.Fatalf("live timers after cancel = %d; want 0", n)
+	}
+	if fired != 0 {
+		t.Fatalf("cancelled timer ran its callback %d time(s); want 0", fired)
+	}
+
+	// A schedule arriving after the pending timer has ALREADY fired does not
+	// retro-actively cancel it -- Timer.Stop cannot un-fire a callback that has
+	// already run. That is correct product behaviour (an edit a full debounce
+	// interval after the previous one earns its own Diagnose pass), and it is
+	// precisely the interleaving that made the old wall-clock test flaky: on a
+	// loaded runner its two schedule statements straddled the debounce window,
+	// the first callback had already run, and the "was it cancelled?" assertion
+	// saw an extra fire. Asserted here deliberately, not raced for.
+	fired = 0
+	d.schedule("w", count)
+	if n := clock.fire(); n != 1 {
+		t.Fatalf("live timers = %d; want 1 for the first schedule", n)
+	}
+	d.schedule("w", count)
+	if n := clock.fire(); n != 1 {
+		t.Fatalf("live timers = %d; want 1 for the re-schedule", n)
+	}
+	if fired != 2 {
+		t.Fatalf("callbacks run = %d; want 2 -- an already-fired timer cannot be un-fired", fired)
 	}
 }
