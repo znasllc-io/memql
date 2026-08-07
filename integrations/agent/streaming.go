@@ -545,7 +545,7 @@ StreamLoop:
 			for _, tc := range turnCalls {
 				args := parseToolArgs(tc.Arguments)
 				injectAgentContext(tc.Name, args, turnCtx)
-				if _, execErr := r.stamper.ExecuteToolByName(ctx, tc.Name, args); execErr != nil {
+				if _, execErr := r.stamper.ExecuteToolByName(agentToolCallContext(ctx, tc.Name, turnCtx), tc.Name, args); execErr != nil {
 					r.logger.Warn("agent streaming: tool execution failed",
 						"tool", tc.Name, "error", execErr)
 					sink.ToolResult(tc.ID, "", execErr.Error())
@@ -607,7 +607,7 @@ StreamLoop:
 				continue
 			}
 			injectAgentContext(tc.Name, args, turnCtx)
-			result, execErr := r.stamper.ExecuteToolByName(ctx, tc.Name, args)
+			result, execErr := r.stamper.ExecuteToolByName(agentToolCallContext(ctx, tc.Name, turnCtx), tc.Name, args)
 			var content string
 			if execErr != nil {
 				// Structured, typed tool error (#584): classify the raw
@@ -1107,6 +1107,14 @@ type agentContextStamp struct {
 	// top-level planId in its schema, the provenance rides inside the
 	// card data.
 	StampDataPlanId bool
+	// StampProducedByPlanId stamps the FLAT args["producedByPlanId"] from
+	// the turnContext's plan id. editDocument records it as the new
+	// version's provenance, and declares it @autoInjected -- so before
+	// memql#3237 it was stripped at dispatch AND never stamped in the first
+	// place, editDocument having had no entry in this table at all. Distinct
+	// from StampDataPlanId, which writes the same value into a nested card
+	// `data` object, and from StampPlanId, which names a DIFFERENT field.
+	StampProducedByPlanId bool
 }
 
 // agentContextStamps drives the per-tool injection. Adding a new
@@ -1136,6 +1144,14 @@ var agentContextStamps = map[string]agentContextStamp{
 	// requestedBy), and the space the plan lives in. No planId stamp -- the
 	// handler mints a fresh one.
 	"produceArtifact": {StampAgentId: true, StampOwnerUserId: true, SpaceField: "partitionId"},
+	// editDocument revises an existing document and records who did it:
+	// agentId becomes the new version's authorId, producedByPlanId its
+	// provenance, partitionId the space. All three are @autoInjected in the
+	// tool schema. This entry is NEW in memql#3237 -- the tool had none, so
+	// the runtime stamped nothing and applyToolDefaults then stripped
+	// whatever the model had supplied, which meant every editDocument
+	// version landed with an empty author and no plan provenance.
+	"editDocument": {StampAgentId: true, StampProducedByPlanId: true, SpaceField: "partitionId"},
 	// canvasPublish: no flat agentId / ownerUserId in the schema;
 	// agentId rides inside `actor`. Space is `space`, not `partitionId`.
 	// StampThreadVisibility carries the Phase 9 visibility-inheritance
@@ -1193,6 +1209,11 @@ func injectAgentContext(toolName string, args map[string]any, ctx turnContext) {
 		if ctx.ThreadVisibility == "private" && ctx.ForUserId != "" {
 			args["forUserId"] = ctx.ForUserId
 		}
+	}
+	if stamp.StampProducedByPlanId && ctx.PlanId != "" {
+		// Always overwrite -- the runtime turn-context plan id is the source
+		// of truth for provenance; the LLM never knows its own plan id.
+		args["producedByPlanId"] = ctx.PlanId
 	}
 	if stamp.StampDataPlanId && ctx.PlanId != "" {
 		// Stamp producedByPlanId onto the nested card `data` object so
