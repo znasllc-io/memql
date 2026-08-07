@@ -1062,6 +1062,8 @@ jobs:
       # scripts/dev/vscode_lane_scope_test.go fails if this narrows again.
       - name: editors/vscode drift checks (grammar, language config, manifest)
         run: go test -count=1 ./cmd/memql-lsp/...
+      - name: build workspace dependencies (sdk/ts, sdk/ts-viewkit)
+        run: scripts/ci/retry.sh -- make vscode-deps
       - name: extension unit tests
         run: make vscode-test
       - name: package extension (build binary + compile + vsce package)

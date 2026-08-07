@@ -107,6 +107,8 @@
     "test": "tsc -p tsconfig.test.json && node --test dist-test/test/*.js"
   },
   "dependencies": {
+    "@znasllc-io/memql-sdk-core": "file:../../sdk/ts",
+    "@znasllc-io/memql-view-kit": "file:../../sdk/ts-viewkit",
     "vscode-languageclient": "^10.1.0",
     "yaml": "^2.9.0"
   },
