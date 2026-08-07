@@ -21,6 +21,15 @@ package automations
 // The bind/validate logic lives in the automations package (not the shared
 // memql function validator) to avoid a memql <- automations import cycle; the
 // rule set mirrors component/memql/function_validator.go.
+//
+// @secret redaction (memql#3183): a graph.node.created event carries the
+// concept row's fields FLATTENED into its payload, so a value on a field the
+// concept annotates `@secret` reaches the refusal messages below -- and the
+// WARN log they land in. Every site that quotes a rejected value runs it
+// through argValueForMessage / quotedArgValueForMessage, which print
+// <redacted> for a field the loader stamped Secret. See args_secret.go for how
+// the flag is resolved (trigger topic -> concept -> SecretFields) without
+// reaching for memql.
 
 import (
 	"fmt"
@@ -112,17 +121,41 @@ func validateAutomationArg(payload map[string]any, field *ArgsField) error {
 		return &argBindError{Field: field.Name, Reason: fmt.Sprintf("expected %s, got %s", field.Type, argTypeName(value))}
 	}
 	if len(field.Enum) > 0 && !argInEnum(value, field.Enum) {
-		return &argBindError{Field: field.Name, Reason: fmt.Sprintf("value %v is not one of the allowed values %v", value, field.Enum)}
+		// @secret (memql#3183): the rejected value is redacted, the declared
+		// enum members are not -- they come from the automation's own schema,
+		// never from event data.
+		return &argBindError{Field: field.Name, Reason: fmt.Sprintf("value %v is not one of the allowed values %v", argValueForMessage(field, value), field.Enum)}
 	}
 	if field.MaxLength > 0 {
 		if s, ok := value.(string); ok && utf8.RuneCountInString(s) > field.MaxLength {
+			// DELIBERATELY NOT REDACTED, and this is the one message on this
+			// surface that is not (memql#3183).
+			//
+			// It quotes no value: a rune count and the declared maximum are
+			// all it carries, so there is nothing here to replace with
+			// <redacted>. A length IS a disclosure about a secret, but it is
+			// not a leak of one, and length is scoped out TREE-WIDE -- the
+			// memql function validator's identical message
+			// (function_validator.go:204) reports the same count for a
+			// @secret arg, as recorded in the scoping note on
+			// memory-nodes/concept.go's SecretFields. Blanking it only here
+			// would make the automation binder the single surface that
+			// diverges, for no value withheld that the other surface does not
+			// already print. If length is ever brought in scope, it moves on
+			// both surfaces together.
 			return &argBindError{Field: field.Name, Reason: fmt.Sprintf("value too long (%d runes, max %d)", utf8.RuneCountInString(s), field.MaxLength)}
 		}
 	}
 	if strings.TrimSpace(field.Pattern) != "" {
 		if s, ok := value.(string); ok {
 			if re := compilePattern(field.Pattern); re != nil && !re.MatchString(s) {
-				return &argBindError{Field: field.Name, Reason: fmt.Sprintf("value %q does not match pattern %q", s, field.Pattern)}
+				// %v, not %q: quotedArgValueForMessage returns an
+				// already-quoted string for a non-secret value (byte-identical
+				// to %q) and the bare placeholder for a secret one, so
+				// <redacted> can never be mistaken for a real value that
+				// happens to read "<redacted>". The pattern source is the
+				// automation's own schema and stays verbatim.
+				return &argBindError{Field: field.Name, Reason: fmt.Sprintf("value %v does not match pattern %q", quotedArgValueForMessage(field, s), field.Pattern)}
 			}
 		}
 	}
@@ -273,6 +306,14 @@ var refusedFires = &fireRefusalCounter{}
 // the triggering event (or the invoke-by-reference source) for the operator.
 // Both the scheduler (before the @filter) and the executor (the universal
 // entry gate) call this so the refusal reads identically everywhere.
+//
+// The `reason` written to the WARN arrives ALREADY REDACTED (memql#3183):
+// validateAutomationArg substitutes <redacted> when it BUILDS the
+// argBindError, so there is no unredacted form of the string for this function
+// to receive, log, or accidentally reconstruct. That direction is deliberate
+// -- redacting at the log site would leave `err.Error()` leaking to every
+// other consumer of the same error (the executor's run error, a checkpoint's
+// StepFailure.Error, an authoring-sandbox diagnostic).
 func refuseFireForArgs(logger *slog.Logger, automation, topic string, err error) {
 	field, reason := "", err.Error()
 	var abe *argBindError

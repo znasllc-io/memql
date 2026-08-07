@@ -358,6 +358,15 @@ func (l *Loader) compileMemQL(source, path string) (*Automation, error) {
 	// Validate trigger for potential misconfigurations
 	l.validateTrigger(&automation)
 
+	// @secret redaction (memql#3183): stamp ArgsField.Secret from the trigger
+	// concept's @secret fields, so a rejected value on one of them is redacted
+	// out of the fire-time refusal message -- and out of the WARN log that
+	// message is written to. Must run AFTER the trigger normalization above
+	// (the topic carries the concept binding) and it is the single choke point
+	// for every automation the tree loader and the authoring sandbox produce.
+	// Fails open on a nil registry / non-concept trigger; see args_secret.go.
+	markSecretArgsFields(&automation, l.registry)
+
 	if l.logger != nil {
 		l.logger.Debug("automation compiled from .memql",
 			"name", automation.Name,
@@ -726,6 +735,12 @@ func (l *Loader) parseJSON(data []byte, path string) (*Automation, error) {
 
 	// Validate trigger for potential misconfigurations
 	l.validateTrigger(&automation)
+
+	// Same @secret stamp as compileMemQL (memql#3183). A LogicRunner-compiled
+	// body carries no graph trigger today, so this is a no-op in practice --
+	// present so the second construction path cannot silently become the
+	// unredacted one if a caller ever hands it a concept-scoped trigger.
+	markSecretArgsFields(&automation, l.registry)
 
 	if l.logger != nil {
 		// Not ".json" any more: memql#2858 removed the on-disk .json
