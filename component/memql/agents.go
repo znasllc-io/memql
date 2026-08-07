@@ -78,6 +78,17 @@ type AgentDefinition struct {
 	// not something resolution may depend on (memql#3209).
 	Id string
 
+	// OwnerUserId is the v1:identity:user this agent belongs to, and half the
+	// registry's key (memql#3216). Empty means the row is unowned -- a shared
+	// catalog entry every user can resolve, not "unknown owner".
+	//
+	// It is what makes the contest between two rows under one roleSlug a
+	// question about ONE user's agents. Without it, `createAgent` taking
+	// roleSlug as a plain caller-supplied arg meant one user could claim
+	// another's slug and askSpecialist would hand over their Description and
+	// SystemPrompt verbatim.
+	OwnerUserId string
+
 	// Provenance
 	Origin string
 }
@@ -144,8 +155,12 @@ func betterAgentMatch(candidate, current agentCandidate) bool {
 // resolution a property of `sort row.createdAt desc` -- and because the engine
 // positions each logical row at its NEWEST version, that ordering is really
 // last-MODIFIED, so editing an unrelated agent could change which one answered.
-func buildAgentIndex(defs []*AgentDefinition) map[string]*AgentDefinition {
-	winners := make(map[string]agentCandidate, len(defs))
+// The contest is now PER OWNER (memql#3216): two users may each hold a row
+// under "human-resources" without contesting anything, because they are
+// different keys. Only rows in the same bucket compete, and the comparator
+// above decides those exactly as before.
+func buildAgentIndex(defs []*AgentDefinition) map[string]map[string]*AgentDefinition {
+	winners := make(map[string]map[string]agentCandidate)
 	for _, def := range defs {
 		if def == nil {
 			continue
@@ -154,15 +169,25 @@ func buildAgentIndex(defs []*AgentDefinition) map[string]*AgentDefinition {
 		if key == "" {
 			continue
 		}
+		owner := strings.TrimSpace(def.OwnerUserId)
+		bucket, ok := winners[owner]
+		if !ok {
+			bucket = make(map[string]agentCandidate)
+			winners[owner] = bucket
+		}
 		cand := agentCandidate{def: def, fromSlug: fromSlug}
-		if cur, ok := winners[key]; !ok || betterAgentMatch(cand, cur) {
-			winners[key] = cand
+		if cur, ok := bucket[key]; !ok || betterAgentMatch(cand, cur) {
+			bucket[key] = cand
 		}
 	}
-	out := make(map[string]*AgentDefinition, len(winners))
-	for key, c := range winners {
-		c.def.Name = key
-		out[key] = c.def
+	out := make(map[string]map[string]*AgentDefinition, len(winners))
+	for owner, bucket := range winners {
+		resolved := make(map[string]*AgentDefinition, len(bucket))
+		for key, c := range bucket {
+			c.def.Name = key
+			resolved[key] = c.def
+		}
+		out[owner] = resolved
 	}
 	return out
 }
@@ -174,52 +199,124 @@ type AgentToolRef struct {
 	Name string
 }
 
-// AgentRegistry caches AgentDefinitions in memory, keyed by the
-// row's RoleSlug. Populated by LoadFromRows at engine startup --
+// GlobalAgentOwner is the bucket a row with no ownerUserId lands in: the
+// shared catalog every user can resolve.
+//
+// Spelled as the empty string because that is what the ROW says. A row whose
+// ownerUserId is blank is not owned by anyone, and inventing a sentinel like
+// "*" would let a caller ASK for the shared bucket by name -- which is the
+// same mistake as a claims map where "no badge" is a missing key rather than a
+// value.
+const GlobalAgentOwner = ""
+
+// AgentRegistry caches AgentDefinitions in memory, keyed by
+// (ownerUserId, roleSlug). Populated by LoadFromRows at engine startup --
 // the materialized v1:agents:agent rows are the source of truth.
+//
+// # Why the owner dimension exists (memql#3216)
+//
+// The key used to be the roleSlug alone, and that slug is caller-supplied:
+// createAgent takes it as a plain arg with no enum, no catalog validation and
+// no uniqueness check, and updateAgent splats a free-form payload onto any
+// agentId with no ownership predicate. So one user could put a row under
+// another user's slug -- and askSpecialist resolved it with a bare map lookup
+// and handed `def.Description` / `def.SystemPrompt` straight into a prompt.
+// One user's assistant could be handed another user's specialist persona,
+// verbatim.
+//
+// memql#3209 made that resolution ORDER-INDEPENDENT, which removed the hazard
+// of an unrelated edit changing who answers. It did not make the winner the
+// RIGHT agent for the asking user, because there was nothing in the key
+// saying who was asking. This is that.
+//
+// Emptiness was doing the work until now: extractRowList had no *ExecuteResult
+// arm, so the registry loaded zero rows and every lookup failed closed. The
+// arm is switched on in the same change as the owner dimension, deliberately
+// and together -- turning the read on alone would have converted a dead path
+// into a live cross-tenant one.
 type AgentRegistry struct {
-	mu     sync.RWMutex
-	byName map[string]*AgentDefinition
+	mu sync.RWMutex
+	// byOwner[ownerUserId][registryKey]. GlobalAgentOwner holds the
+	// unowned rows.
+	byOwner map[string]map[string]*AgentDefinition
 }
 
 // NewAgentRegistry returns an empty registry. Capitalized so the
 // engine bootstrap (Phase 3) can construct one alongside the others.
 func NewAgentRegistry() *AgentRegistry {
-	return &AgentRegistry{byName: make(map[string]*AgentDefinition)}
+	return &AgentRegistry{byOwner: make(map[string]map[string]*AgentDefinition)}
 }
 
-// Get retrieves an agent definition by name. Returns ok=false when
-// the name is unregistered. Safe to call on a nil receiver
-// (returns nil, false).
-func (r *AgentRegistry) Get(name string) (*AgentDefinition, bool) {
+// Get retrieves an agent definition by (owner, name).
+//
+// Resolution order, and each step is a deliberate choice:
+//
+//  1. The asking user's own agents. A user's specialist is the one in their
+//     own bucket, whatever anyone else called theirs.
+//  2. THE DOCUMENTED FALLBACK: the shared catalog (rows with no ownerUserId).
+//     Platform rows are legitimately answerable for everyone, and a user with
+//     no agent of their own must still reach them.
+//
+// There is no third step, and in particular no scan of other owners' buckets.
+// An unresolvable slug fails closed with "no agent registered", which is the
+// same answer the empty registry gave -- so the failure mode this replaces is
+// preserved for the case it was right about.
+//
+// An EMPTY ownerUserId resolves the shared catalog and nothing else. It is not
+// a wildcard: a caller that could not establish who is asking must not be
+// handed the first matching persona in the cluster. Callers that require a
+// user (askSpecialist) refuse before reaching here; callers that legitimately
+// run without one (a platform dispatch) get exactly the shared rows.
+//
+// Safe on a nil receiver (returns nil, false).
+func (r *AgentRegistry) Get(ownerUserId, name string) (*AgentDefinition, bool) {
 	if r == nil {
 		return nil, false
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	a, ok := r.byName[name]
+	if owner := strings.TrimSpace(ownerUserId); owner != GlobalAgentOwner {
+		if a, ok := r.byOwner[owner][name]; ok {
+			return a, true
+		}
+	}
+	a, ok := r.byOwner[GlobalAgentOwner][name]
 	return a, ok
 }
 
-// Names returns every registered agent name. Order is map-iteration
-// order (non-deterministic). Used by diagnostic dumps + the eventual
-// `cockpit agents list` view.
-func (r *AgentRegistry) Names() []string {
+// NamesFor returns the agent names one caller can resolve: their own plus the
+// shared catalog. Order is map-iteration order (non-deterministic).
+//
+// Scoped rather than global because the one production caller puts the result
+// in an error message that reaches an LLM ("no agent registered with that role
+// (loaded: ...)"). A global list would answer "which specialists do other
+// users have" to anyone who could provoke a miss.
+func (r *AgentRegistry) NamesFor(ownerUserId string) []string {
 	if r == nil {
 		return nil
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	out := make([]string, 0, len(r.byName))
-	for name := range r.byName {
-		out = append(out, name)
+	seen := map[string]struct{}{}
+	out := []string{}
+	collect := func(bucket map[string]*AgentDefinition) {
+		for name := range bucket {
+			if _, dup := seen[name]; dup {
+				continue
+			}
+			seen[name] = struct{}{}
+			out = append(out, name)
+		}
 	}
+	if owner := strings.TrimSpace(ownerUserId); owner != GlobalAgentOwner {
+		collect(r.byOwner[owner])
+	}
+	collect(r.byOwner[GlobalAgentOwner])
 	return out
 }
 
-// Upsert inserts or replaces an agent definition by name. Used by
-// LoadUnifiedAgents during startup. Mirrors the Upsert signature
-// other registries expose.
+// Upsert inserts or replaces an agent definition in its owner's bucket.
+// Mirrors the Upsert signature other registries expose.
 func (r *AgentRegistry) Upsert(def *AgentDefinition) error {
 	if r == nil {
 		return nil
@@ -229,8 +326,19 @@ func (r *AgentRegistry) Upsert(def *AgentDefinition) error {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.byName[def.Name] = def
+	r.putLocked(def)
 	return nil
+}
+
+// putLocked files a definition under its own OwnerUserId. Callers hold mu.
+func (r *AgentRegistry) putLocked(def *AgentDefinition) {
+	owner := strings.TrimSpace(def.OwnerUserId)
+	bucket, ok := r.byOwner[owner]
+	if !ok {
+		bucket = make(map[string]*AgentDefinition)
+		r.byOwner[owner] = bucket
+	}
+	bucket[def.Name] = def
 }
 
 // Clear empties the registry. Used by the row-backed loader so a
@@ -241,7 +349,7 @@ func (r *AgentRegistry) Clear() {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.byName = make(map[string]*AgentDefinition)
+	r.byOwner = make(map[string]map[string]*AgentDefinition)
 }
 
 // LoadFromRows populates the registry by scanning v1:agents:agent
@@ -283,20 +391,25 @@ func (r *AgentRegistry) Clear() {
 //     N users produce N rows under one slug in any multi-user cluster.
 //
 // So resolution must not depend on row order -- see buildAgentIndex, which
-// replaces the previous last-wins assignment with a total comparator.
+// replaces the previous last-wins assignment with a total comparator, applied
+// WITHIN each owner's bucket.
 //
-// # THIS FUNCTION STILL REGISTERS NOTHING, AND THAT IS DELIBERATE
+// # THE READ IS ON NOW (memql#3216)
 //
-// extractRowList has no *ExecuteResult arm, so `rows` below is always nil and
-// `registered` is always 0. Read the comment on extractRowList for why that
-// switch is being held: the winner here is global rather than per-owner, so
-// `askSpecialist` would hand user A's assistant the persona of user B's
-// specialist. Emptiness is the only thing making that unreachable today, so
-// turning the read on and adding the owner dimension (memql#3216) must be ONE
-// change, not two.
+// It was off until this change: extractRowList had no *ExecuteResult arm, so
+// `rows` was always nil and `registered` always 0. That was the only thing
+// making the unscoped lookup unreachable -- every askSpecialist call failed
+// closed with "no agent registered with that role (loaded: [])".
 //
-// The ordering work below lands now because it is what makes the read safe to
-// turn on -- not because it does anything yet.
+// The arm and the owner dimension land together, deliberately. Either alone is
+// worse than neither: the arm alone turns a dead path into a live cross-tenant
+// one, and the owner dimension alone is unexercised code guarding an empty map.
+//
+// The read itself stays UNSCOPED, and that is not an oversight. This is a
+// process-wide catalog built once at startup under the seed materializer's
+// system actor; there is no requesting user at that moment for a filter to
+// name. The ownership question it raises is answered at LOOKUP time, by the
+// (owner, key) map -- which is where the asking user actually exists.
 //
 // # On pagination -- `paginate 50` was NOT a bound to rely on
 //
@@ -346,20 +459,27 @@ func (r *AgentRegistry) LoadFromRows(ctx context.Context, engine *MemQLEngine, l
 	}
 
 	index := buildAgentIndex(defs)
-	// Rows that claimed no key at all, plus rows that lost a contested key.
-	skipped += len(defs) - len(index)
-
+	registered := 0
 	r.mu.Lock()
-	for key, def := range index {
-		r.byName[key] = def
+	for owner, bucket := range index {
+		for key, def := range bucket {
+			_ = key
+			_ = owner
+			r.putLocked(def)
+			registered++
+		}
 	}
-	registered := len(r.byName)
 	r.mu.Unlock()
+	// Rows that claimed no key at all, plus rows that lost a contested key --
+	// counted against the total ACROSS buckets, since a row losing to another
+	// owner's row is no longer possible and would be a real defect if it were.
+	skipped += len(defs) - registered
 
 	if logger != nil {
 		logger.Info("memql.agentRegistry: loaded from rows",
 			"component", "memql.agentRegistry",
 			"registered", registered,
+			"owners", len(index),
 			"skipped", skipped,
 			"rows", len(rows))
 	}
@@ -370,32 +490,36 @@ func (r *AgentRegistry) LoadFromRows(ctx context.Context, engine *MemQLEngine, l
 // maps. Handles the shapes the engine returns: the *ExecuteResult wrapper
 // itself, a top-level []any of row maps, or a {"nodes":[...]} wrapper.
 //
-// # There is NO *ExecuteResult arm, and that is DELIBERATE (memql#3209)
+// # The *ExecuteResult arm was held back on purpose, and is on now (memql#3216)
 //
 // MemQLEngine.Execute returns *ExecuteResult, and LoadFromRows passes that
-// value straight in -- so it falls to `default: return nil` and the agent
-// registry loads ZERO rows. That is a real bug: "the query matched nothing"
-// and "we could not read what the query returned" arrive here as the same
-// value, which is why it went unnoticed.
+// value straight in -- so without an arm for it, the switch fell to
+// `default: return nil` and the agent registry loaded ZERO rows. It went
+// unnoticed because "the query matched nothing" and "we could not read what
+// the query returned" arrive here as the same value.
 //
-// It is NOT fixed here, because fixing it is not a bug fix -- it is a FEATURE
-// SWITCH with a security consequence. The registry is keyed by a
-// caller-supplied roleSlug, is built from an unscoped read, carries every
-// user's systemPrompt, and `askSpecialist` resolves it with a bare map lookup
-// and no owner check. While the map is empty every such lookup fails closed
-// with "no agent registered with that role (loaded: [])". Adding the arm turns
-// that dead path into a LIVE cross-tenant one in the same commit -- user A's
-// assistant could resolve user B's specialist and be handed its system prompt.
+// memql#3209 found it and deliberately did not fix it, because fixing it there
+// would not have been a bug fix -- it was a FEATURE SWITCH with a security
+// consequence. The registry was keyed by a caller-supplied roleSlug alone,
+// built from an unscoped read carrying every user's systemPrompt, and
+// askSpecialist resolved it with a bare map lookup and no owner check. While
+// the map was empty every such lookup failed closed. Adding the arm on its own
+// would have turned that dead path into a LIVE cross-tenant one in the same
+// commit: user A's assistant resolving user B's specialist and being handed
+// its system prompt.
 //
-// So the ordering fix in buildAgentIndex lands now (it is correct, and it is
-// what makes resolution safe to turn on), and the switch stays off until
-// memql#3216 gives the lookup an owner dimension. Turn them on together.
+// So the switch waited for the owner dimension, and they land together. If you
+// are reading this while considering a similar "just add the arm" change
+// elsewhere: what made it safe is not the arm, it is that Get now takes an
+// owner and buildAgentIndex contests keys within one.
 func extractRowList(result any) []map[string]any {
 	if result == nil {
 		return nil
 	}
 	var rows []any
 	switch v := result.(type) {
+	case *ExecuteResult:
+		return extractRowList(v.OutputPayload())
 	case []any:
 		rows = v
 	case map[string]any:
@@ -448,7 +572,12 @@ func agentDefinitionFromRow(row map[string]any) (*AgentDefinition, bool) {
 	}
 
 	def := &AgentDefinition{
-		Id:          id,
+		Id: id,
+		// The registry's owner dimension (memql#3216). agentFull already
+		// projects it; nothing read it until the lookup had somewhere to put
+		// it. A row with no ownerUserId lands in the shared catalog bucket,
+		// which is what an unowned platform row IS.
+		OwnerUserId: getStringField(payload, "ownerUserId"),
 		Name:        name,
 		Description: getStringField(payload, "description"),
 		Role:        getStringField(payload, "role"),
