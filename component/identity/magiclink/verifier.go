@@ -310,10 +310,12 @@ func (v *Verifier) Verify(ctx context.Context, in VerifyInput) (*VerifyResult, e
 	}
 	codeExpiresAt := now.Add(60 * time.Second).Format(time.RFC3339Nano)
 
+	// plainCode is NOT passed: only the digest is persisted (issue #3187).
+	// It stays in memory here and travels back to the caller in
+	// VerifyResult.AuthCode for the redirect to the OAuth client.
 	if err := v.Store.CreateAuthCode(
 		ctx,
 		codeId,
-		plainCode,
 		codeHash,
 		clientId,
 		redirectURI,

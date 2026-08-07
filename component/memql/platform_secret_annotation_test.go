@@ -27,12 +27,15 @@ import (
 // language (plaintext / cleartext / ciphertext / never rendered / never
 // logged / secret / password / api key). The result:
 //
-// ANNOTATED -- the three fields that hold credential material at top level:
+// ANNOTATED -- the fields that hold credential material at top level:
 //   - v1:platform:globalSecret.encryptedValue     (NaCl secretbox ciphertext)
 //   - v1:platform:partitionSecret.encryptedValue  (same, partition-scoped)
-//   - v1:identity:authCode.code                   (CLEARTEXT one-time OAuth
-//     code -- the tree's only stored-plaintext credential. Whether it needs
-//     to exist at all is issue #3187; this annotation is correct either way.)
+//
+// v1:identity:authCode.code was annotated by this task too -- the tree's only
+// stored-CLEARTEXT credential -- and then issue #3187 established the field
+// was written and read by NOTHING (redemption already looks the row up by
+// codeHash) and removed it. TestAuthCodeStoresNoPlaintext below pins that it
+// stays gone, which is strictly stronger than annotating it would have been.
 //
 // DELIBERATELY NOT ANNOTATED, with the reason:
 //   - globalSecret.fingerprint / partitionSecret.fingerprint -- last 4 chars,
@@ -118,13 +121,6 @@ func TestRealTreeAnnotatesItsSecretFields(t *testing.T) {
 			conceptID: "v1:platform:partitionSecret",
 			wantS:     "encryptedValue",
 			wantNotS:  []string{"fingerprint", "name", "kind", "description"},
-		},
-		{
-			relPath:   "dsl/identity/concepts.memql",
-			declName:  "authCode",
-			conceptID: "v1:identity:authCode",
-			wantS:     "code",
-			wantNotS:  []string{"codeHash", "clientId", "redirectURI", "state"},
 		},
 	} {
 		t.Run(tc.conceptID, func(t *testing.T) {
@@ -231,5 +227,37 @@ mutate globalSecret storeGlobalSecret {
 	}
 	if !strings.Contains(err.Error(), "not-upper") {
 		t.Errorf("a non-secret value must still appear in the message, got:\n  %s", err.Error())
+	}
+}
+
+// Issue #3187: v1:identity:authCode must store NO plaintext credential.
+//
+// The field that used to exist, `code`, claimed in its own description to be
+// "the equality check on redemption". That was false -- /oauth/token hashes
+// the presented code and looks the row up BY codeHash
+// (component/identity/http/token.go), identity.AuthCodeRow has no Code
+// member, and the authCodeFull shape never projected it. It was written by
+// createAuthCode and read by nothing.
+//
+// This guards the reintroduction, which is the failure mode worth catching:
+// a future change that re-adds a plaintext column would restore the tree's
+// only stored-cleartext credential silently.
+func TestAuthCodeStoresNoPlaintext(t *testing.T) {
+	c := conceptFromRealTree(t, "dsl/identity/concepts.memql", "authCode", "v1:identity:authCode")
+
+	raw, ok := c.Schemas["definition"]
+	if !ok || len(raw) == 0 {
+		t.Fatal("authCode has no definition schema")
+	}
+	if strings.Contains(string(raw), `"code"`) {
+		t.Errorf("v1:identity:authCode declares a `code` property again.\n\n"+
+			"Issue #3187 removed it: redemption verifies by looking the row up "+
+			"by sha256(presented) == codeHash, which already proves the "+
+			"presenter holds the preimage, so the plaintext bought no property. "+
+			"If a plaintext column is genuinely needed again, say what it "+
+			"provides that the digest does not -- and mark it @secret.")
+	}
+	if !strings.Contains(string(raw), `"codeHash"`) {
+		t.Error("authCode lost codeHash, which IS the redemption lookup key")
 	}
 }

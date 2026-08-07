@@ -284,9 +284,11 @@ func (a *App) integrationsIdentity() {
 			return identityweb.MintSSOAuthCodeResult{}, fmt.Errorf("sso mint: gen code id: %w", err)
 		}
 		expiresAt := time.Now().UTC().Add(60 * time.Second).Format(time.RFC3339Nano)
+		// `plain` is not persisted -- only its digest (issue #3187). It is
+		// returned below for the redirect to the OAuth client.
 		if err := store.CreateAuthCode(
 			ctx,
-			codeId, plain, hash,
+			codeId, hash,
 			in.ClientId, in.RedirectURI, in.State,
 			// Bind the PKCE challenge when the SSO short-circuit was
 			// reached via an OAuth 2.1 /authorize flow (e.g. the claude.ai
