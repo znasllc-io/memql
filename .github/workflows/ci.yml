@@ -200,6 +200,41 @@ jobs:
               # redden `main` on the next author's push -- renaming a
               # `service:` fails TestArchitectureModelIsNotStale.
               - 'arch.yaml'
+              # The REST of the env-registry corpus (memql#3223).
+              #
+              # `cmd/envscan/scan.repoCorpus` walks the WHOLE repository and
+              # reads every `.go`, `.memql`, `.yaml`, `.yml` and `.env*` file;
+              # `TestNoEnvRegistryDrift` then fails when a registered env var
+              # appears nowhere in that corpus. `./cmd/envscan/...` runs in the
+              # gate-inputs step below, so `gates` is the bucket that reaches
+              # it.
+              #
+              # The `.go` and `.memql` halves of that corpus were already routed
+              # (`go`, and `**/*.memql` above). The yaml/env half was NOT -- so
+              # deleting the last reference to a registered var from a k8s
+              # manifest ran ZERO lanes, merged green, and reddened `main` for
+              # the next unrelated author. Same delayed-blame shape the embed
+              # inventory had, different corpus. Measured at 62 files, mostly
+              # `deploy/**`, `infra/**` and `.github/*.yml`.
+              #
+              # Stated as EXTENSIONS rather than as directories on purpose: the
+              # scanner's trigger IS the extension, so a new manifest in a new
+              # directory must not be able to slip back out.
+              #
+              # Be exact about the cost, because this one is NOT the "free
+              # over-matching" case noted at the top of this bucket. That note
+              # is about Go files inside already-routed embedded trees being
+              # inert. These files previously ran NOTHING, so a
+              # manifest-only PR goes from zero lanes to the gate-inputs lane
+              # and pays the near-full build documented on that step (~6min
+              # wall, cold cache, against ~35s of actual test execution).
+              #
+              # That is the price of not handing the next author a red `main`
+              # for a diff their own PR was told was green. It is worth paying;
+              # it is not free.
+              - '**/*.yaml'
+              - '**/*.yml'
+              - '**/.env*'
             # Any Go source or the module graph. Voice + generator + sdk/go
             # are Go too, so they are a subset of this.
             #
@@ -332,10 +367,35 @@ jobs:
             integrations:
               - 'integrations/**'
             # component/grpc EXCLUDING its generated gen/ tree, which is `wire`
-            # (L0, 21 importers) and is targeted to version independently.
+            # (L0, 40 importers as measured in memql#3165) and is targeted to
+            # version independently.
+            #
+            # The exclusion is ENUMERATED POSITIVELY, and it has to be
+            # (memql#3222). This bucket previously read:
+            #
+            #   - 'component/grpc/**'
+            #   - '!component/grpc/gen/**'
+            #
+            # which looks like a subtraction and is an addition.
+            # `dorny/paths-filter` compiles every pattern into its own matcher
+            # and ORs the results (`src/filter.ts`, `.some()`), so the second
+            # line was an independent term meaning "any path NOT under
+            # component/grpc/gen" -- true for nearly the whole repository.
+            # Measured against the pinned action's own matcher: the bucket was
+            # true for 3085 of 3085 tracked files, INCLUDING
+            # `component/grpc/gen/memql.pb.go`, the one file the negation
+            # existed to remove.
+            #
+            # Exclusion cannot be expressed in a paths-filter pattern list at
+            # all, so `component/grpc/*` (top-level sources) plus each non-`gen`
+            # subtree is the only faithful spelling.
+            # `TestServerGrpcBucketEnumeratesEveryNonGenSubtree` fails when a
+            # new subdirectory appears here, so the enumeration cannot silently
+            # go stale; `TestNoNegatedPatternWidensItsBucket` stops the negation
+            # form coming back in any bucket.
             server-grpc:
-              - 'component/grpc/**'
-              - '!component/grpc/gen/**'
+              - 'component/grpc/*'
+              - 'component/grpc/google/**'
             server-http:
               - 'component/server/**'
             server-mcp:
