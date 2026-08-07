@@ -291,6 +291,17 @@ message ForwardedAuthority {
   // local_dev marks a principal synthesised by the no-auth dev shim so the
   // provenance is visible in worker logs. Carries no authorization meaning.
   bool local_dev = 6;
+
+  // Display name, carried for PROVENANCE parity only -- it feeds
+  // component/metadata's identity.displayName, which the engine stamps onto
+  // every row a mutation writes. Not an authorization input, and never read
+  // as one: the receiver derives role and subject from the fields above.
+  //
+  // Present because dropping it silently changed what lands in audit metadata:
+  // rows a worker wrote on a forwarded turn lost the name that the same user's
+  // rows carry on the direct path.
+  string first_name = 7;
+  string last_name = 8;
 }
 
 // AiForwardRequest carries an AI / voice envelope from a BFF node to a

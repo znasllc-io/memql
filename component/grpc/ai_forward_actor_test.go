@@ -330,6 +330,103 @@ func TestForwardedInternalAuthorityIsAcceptedAndBindsNoActor(t *testing.T) {
 	}
 }
 
+// TestForwardedSessionBindsTheCarriedDecision covers the ACCEPT-AND-BIND half
+// of the contract -- the step that actually fixes memql#3205.
+//
+// Every other test here exercises a REFUSAL, and a refusal returns before this
+// code runs. So without this, deleting either the ctx binding or the access
+// seeding in newForwardedSession restores the original silent-zero-rows defect
+// with component/grpc and component/auth both fully green.
+func TestForwardedSessionBindsTheCarriedDecision(t *testing.T) {
+	svc := &service{logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	send := func(*nodev1.NodeServerMessage) error { return nil }
+
+	t.Run("user authority binds the actor on the ctx handlers read", func(t *testing.T) {
+		authority := &auth.ForwardedAuthority{
+			Kind:         auth.AuthorityKindUser,
+			UserId:       "v1:identity:user:alice",
+			PrimaryEmail: "alice@example.com",
+			Role:         auth.RoleWriter,
+			FirstName:    "Alice",
+			LastName:     "Nakamura",
+		}
+		sess := svc.newForwardedSession(context.Background(), authority, "req-1", send)
+
+		// The ctx handlers actually read is s.stream.Context(). If the binding
+		// is dropped, worker-side DSL resolves actor.userId to "" and every
+		// owned query silently returns zero rows.
+		ctx := sess.stream.Context()
+		ac, ok := auth.AccessFromContext(ctx)
+		if !ok || ac == nil {
+			t.Fatal("forwarded session ctx carries no AccessContext -- this IS the memql#3205 defect")
+		}
+		if ac.UserId != "v1:identity:user:alice" || ac.Role != auth.RoleWriter {
+			t.Errorf("bound actor = %+v, want alice/writer", ac)
+		}
+		if actor := auth.ActorFromContext(ctx); actor == "" {
+			t.Error("no actor on the forwarded ctx; mutations would fail with \"no actor found in context\"")
+		}
+
+		// Seeded access is what removes the per-message userByIdSystem
+		// round-trip: ensureAccess must be a cache hit, and must NOT be able
+		// to fall through to the claims path (which would resurrect
+		// FallbackFromClaims on the mesh).
+		if !sess.accessLoaded {
+			t.Error("accessLoaded is false; ensureAccess would re-resolve per forwarded message")
+		}
+		if got := sess.ensureAccess(ctx); got == nil || got.UserId != "v1:identity:user:alice" {
+			t.Errorf("ensureAccess on the forwarded session = %+v, want the carried decision", got)
+		}
+
+		// Provenance parity: identity.displayName is stamped on every row a
+		// mutation writes, and it resolves through UserIdentityFromContext.
+		id, err := auth.UserIdentityFromContext(ctx)
+		if err != nil {
+			t.Fatalf("UserIdentityFromContext: %v", err)
+		}
+		if id.FirstName != "Alice" || id.LastName != "Nakamura" {
+			t.Errorf("display name lost across the hop: first=%q last=%q -- rows this worker writes would omit identity.displayName that the same user's direct-path rows carry",
+				id.FirstName, id.LastName)
+		}
+	})
+
+	t.Run("badge authority arms the worker-side expiry gate", func(t *testing.T) {
+		exp := time.Now().Add(time.Minute)
+		authority := &auth.ForwardedAuthority{
+			Kind:         auth.AuthorityKindBadge,
+			UserId:       "v1:identity:user:operator-9",
+			Role:         auth.RoleReader,
+			BadgeExpires: exp,
+		}
+		sess := svc.newForwardedSession(context.Background(), authority, "req-2", send)
+
+		sess.accessMu.Lock()
+		stamped, at := sess.badgeStamped, sess.badgeExpiresAt
+		sess.accessMu.Unlock()
+		if !stamped {
+			t.Error("badge gate not stamped; it would lazily re-stamp from a stream context a forwarded session does not have")
+		}
+		if !at.Equal(exp) {
+			t.Errorf("badge expiry on the session = %v, want %v", at, exp)
+		}
+	})
+
+	t.Run("internal authority binds no actor", func(t *testing.T) {
+		sess := svc.newForwardedSession(context.Background(), auth.InternalAuthority(), "req-3", send)
+		if ac, ok := auth.AccessFromContext(sess.stream.Context()); ok && ac != nil {
+			t.Errorf("internal authority bound actor %+v; actor-gated work must fail closed here", ac)
+		}
+		// accessLoaded must still be true, or ensureAccess falls through to
+		// the claims path and FallbackFromClaims becomes reachable again.
+		if !sess.accessLoaded {
+			t.Error("accessLoaded false for internal; ensureAccess could fall through to FallbackFromClaims")
+		}
+		if got := sess.ensureAccess(sess.stream.Context()); got != nil {
+			t.Errorf("ensureAccess resolved %+v for an internal forward; it must stay nil", got)
+		}
+	})
+}
+
 // TestForwardedAuthorityRoundTripsThroughTheWire proves the proto conversion
 // preserves every field the receiver's decisions depend on -- in particular
 // the badge expiry, whose loss would make the ceiling unenforceable downstream.
@@ -342,13 +439,16 @@ func TestForwardedAuthorityRoundTripsThroughTheWire(t *testing.T) {
 		Role:         auth.RoleReader,
 		BadgeExpires: exp,
 		LocalDev:     true,
+		FirstName:    "Ops",
+		LastName:     "Operator",
 	}
 	out := authorityFromProto(authorityToProto(in))
 	if out == nil {
 		t.Fatal("round trip produced nil")
 	}
 	if out.Kind != in.Kind || out.UserId != in.UserId || out.Role != in.Role ||
-		out.PrimaryEmail != in.PrimaryEmail || out.LocalDev != in.LocalDev {
+		out.PrimaryEmail != in.PrimaryEmail || out.LocalDev != in.LocalDev ||
+		out.FirstName != in.FirstName || out.LastName != in.LastName {
 		t.Errorf("round trip changed the authority:\n got %+v\nwant %+v", out, in)
 	}
 	if !out.BadgeExpires.Equal(exp) {

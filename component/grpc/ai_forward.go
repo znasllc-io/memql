@@ -385,67 +385,8 @@ func (s *service) HandleForwardedRequest(
 		return
 	}
 
-	// Bind the actor from the carried DECISION. Nothing is re-derived here:
-	// the role arrives post-ceiling, there is no `class` / `role_ceiling` to
-	// re-clamp from, and auth.FallbackFromClaims -- which lifts `role`
-	// straight off the wire, making IsClusterOwner() true for anyone who says
-	// so -- is not reachable on this path at all.
-	ctx = auth.ContextWithForwardedAuthority(ctx, authority)
-
-	identity := authority.Identity()
-	if identity.Subject == "" {
-		// AuthorityKindInternal: accepted, binds no actor by design.
-		identity.Subject = "forwarded"
-	}
-
-	// Build a forwardedStream that implements MemqlService_StreamServer
-	// by wrapping each outbound MemqlServerMessage into an
-	// AiForwardResponse delivered via `send`.
-	fs := &forwardedStream{
-		ctx:       ctx,
-		requestId: requestId,
-		send:      send,
-	}
-
-	// Build a minimal streamSession over the forwarded stream. The
-	// normal newStreamSession() starts a forwardEvents goroutine to
-	// relay bus subscriptions to the client; for a forwarded request
-	// that loop is unused, so we construct the session literal and
-	// close its shutdown channel up-front instead.
-	sess := &streamSession{
-		service:   s,
-		stream:    fs,
-		logger:    s.logger,
-		identity:  identity,
-		eventChan: make(chan events.Event, 1),
-		closeChan: make(chan struct{}),
-	}
-	close(sess.closeChan)
-
-	// Seed the resolved access so ensureAccess is a cache hit.
-	//
-	// This is what removes the per-message userByIdSystem round-trip. A
-	// forwarded session is built PER MESSAGE, so it starts with an empty
-	// access cache; before this, every forwarded envelope -- including every
-	// audio chunk on the streaming-transcription path -- drove a fresh
-	// LoadFromClaims -> userByIdSystem query. The direct path caches for the
-	// life of the stream; the forward path structurally could not, because
-	// there was no stream. Carrying the decision instead of the claims makes
-	// the query unnecessary rather than merely cached.
-	//
-	// accessLoaded is set even when access is nil (AuthorityKindInternal) so
-	// ensureAccess cannot fall through to the claims path and resurrect
-	// FallbackFromClaims behind our back.
-	//
-	// badgeExpiresAt is stamped from the authority rather than lazily from a
-	// stream context a forwarded session does not meaningfully have, so a
-	// badge grant is gated here on the worker exactly as on the direct path.
-	sess.accessMu.Lock()
-	sess.access = authority.AccessContext()
-	sess.accessLoaded = true
-	sess.badgeStamped = true
-	sess.badgeExpiresAt = authority.BadgeExpires
-	sess.accessMu.Unlock()
+	sess := s.newForwardedSession(ctx, authority, requestId, send)
+	ctx = sess.stream.Context()
 
 	// Dispatch to the appropriate handler based on the envelope payload.
 	switch payload := envelope.GetPayload().(type) {
@@ -496,6 +437,89 @@ func (s *service) HandleForwardedRequest(
 	// MemqlServerMessage (AiChatResult, AiSpeechResult, etc.), and
 	// forwardedStream.Send marks the corresponding AiForwardResponse
 	// with done=true when it sees a terminal response type.
+}
+
+// newForwardedSession is the ACCEPT-AND-BIND half of the mesh forwarded-auth
+// contract: given an authority that has already passed Validate, it produces
+// the worker-side session and the context every downstream handler reads.
+//
+// Extracted from HandleForwardedRequest so it is reachable from a test. It is
+// the step that actually fixes memql#3205 -- and the refusal tests cannot
+// cover it, because they all return before reaching it. Without direct
+// coverage, deleting either the ctx binding or the access seeding below
+// restores the original silent-zero-rows defect with every package still
+// green. See TestForwardedSessionBindsTheCarriedDecision.
+//
+// The authority MUST have been validated by the caller; this function binds
+// whatever it is handed.
+func (s *service) newForwardedSession(
+	ctx context.Context,
+	authority *auth.ForwardedAuthority,
+	requestId string,
+	send func(*nodev1.NodeServerMessage) error,
+) *streamSession {
+	// Bind the actor from the carried DECISION. Nothing is re-derived here:
+	// the role arrives post-ceiling, there is no `class` / `role_ceiling` to
+	// re-clamp from, and auth.FallbackFromClaims -- which lifts `role`
+	// straight off the wire, making IsClusterOwner() true for anyone who says
+	// so -- is not reachable on this path at all.
+	ctx = auth.ContextWithForwardedAuthority(ctx, authority)
+
+	identity := authority.Identity()
+	if identity.Subject == "" {
+		// AuthorityKindInternal: accepted, binds no actor by design.
+		identity.Subject = "forwarded"
+	}
+
+	// A forwardedStream implements MemqlService_StreamServer by wrapping each
+	// outbound MemqlServerMessage into an AiForwardResponse delivered via
+	// `send`. Its ctx is what handlers read as s.stream.Context().
+	fs := &forwardedStream{
+		ctx:       ctx,
+		requestId: requestId,
+		send:      send,
+	}
+
+	// The normal newStreamSession() starts a forwardEvents goroutine to relay
+	// bus subscriptions to the client; for a forwarded request that loop is
+	// unused, so construct the session literal and close its shutdown channel
+	// up-front instead.
+	sess := &streamSession{
+		service:   s,
+		stream:    fs,
+		logger:    s.logger,
+		identity:  identity,
+		eventChan: make(chan events.Event, 1),
+		closeChan: make(chan struct{}),
+	}
+	close(sess.closeChan)
+
+	// Seed the resolved access so ensureAccess is a cache hit.
+	//
+	// This is what removes the per-message userByIdSystem round-trip. A
+	// forwarded session is built PER MESSAGE, so it starts with an empty
+	// access cache; before this, every forwarded envelope -- including every
+	// audio chunk on the streaming-transcription path -- drove a fresh
+	// LoadFromClaims -> userByIdSystem query. The direct path caches for the
+	// life of the stream; the forward path structurally could not, because
+	// there was no stream. Carrying the decision instead of the claims makes
+	// the query unnecessary rather than merely cached.
+	//
+	// accessLoaded is set even when access is nil (AuthorityKindInternal) so
+	// ensureAccess cannot fall through to the claims path and resurrect
+	// FallbackFromClaims behind our back.
+	//
+	// badgeExpiresAt is stamped from the authority rather than lazily from a
+	// stream context a forwarded session does not meaningfully have, so a
+	// badge grant is gated here on the worker exactly as on the direct path.
+	sess.accessMu.Lock()
+	sess.access = authority.AccessContext()
+	sess.accessLoaded = true
+	sess.badgeStamped = true
+	sess.badgeExpiresAt = authority.BadgeExpires
+	sess.accessMu.Unlock()
+
+	return sess
 }
 
 // CancelForwardedRequest is the worker-side hook for AiForwardCancel
@@ -863,7 +887,14 @@ func (s *streamSession) forwardedAuthority() (*auth.ForwardedAuthority, error) {
 	s.accessMu.Unlock()
 
 	localDev := strings.EqualFold(s.identity.Subject, "local-dev")
-	return auth.PrincipalAuthority(access, badgeExpires, localDev)
+	authority, err := auth.PrincipalAuthority(access, badgeExpires, localDev)
+	if err != nil {
+		return nil, err
+	}
+	// Names come off the session identity, not the AccessContext (which has
+	// none). Provenance only -- they feed identity.displayName on rows the
+	// worker writes, and no authorization decision reads them.
+	return authority.WithDisplayName(s.identity.FirstName, s.identity.LastName), nil
 }
 
 // authorityToProto / authorityFromProto convert between the transport-agnostic
@@ -882,6 +913,8 @@ func authorityToProto(a *auth.ForwardedAuthority) *nodev1.ForwardedAuthority {
 		PrimaryEmail: a.PrimaryEmail,
 		Role:         string(a.Role),
 		LocalDev:     a.LocalDev,
+		FirstName:    a.FirstName,
+		LastName:     a.LastName,
 	}
 	if !a.BadgeExpires.IsZero() {
 		out.BadgeExpUnix = a.BadgeExpires.Unix()
@@ -899,6 +932,8 @@ func authorityFromProto(p *nodev1.ForwardedAuthority) *auth.ForwardedAuthority {
 		PrimaryEmail: p.GetPrimaryEmail(),
 		Role:         auth.Role(p.GetRole()),
 		LocalDev:     p.GetLocalDev(),
+		FirstName:    p.GetFirstName(),
+		LastName:     p.GetLastName(),
 	}
 	if exp := p.GetBadgeExpUnix(); exp != 0 {
 		out.BadgeExpires = time.Unix(exp, 0)

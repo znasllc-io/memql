@@ -144,6 +144,17 @@ type ForwardedAuthority struct {
 	// LocalDev marks a principal synthesised by the no-auth dev shim, so the
 	// provenance is visible in worker logs. No authorization meaning.
 	LocalDev bool
+
+	// FirstName / LastName are PROVENANCE ONLY -- they feed
+	// component/metadata's identity.displayName, which the engine stamps onto
+	// every row a mutation writes. They are never an authorization input:
+	// Validate ignores them and AccessContext() does not read them.
+	//
+	// Carried because dropping them silently changed audit metadata -- a row
+	// written by a worker on a forwarded turn lost the name the same user's
+	// rows carry when written on the direct path.
+	FirstName string
+	LastName  string
 }
 
 // PrincipalAuthority builds the authority for a real caller from the sender's
@@ -174,6 +185,19 @@ func PrincipalAuthority(ac *AccessContext, badgeExpires time.Time, localDev bool
 		BadgeExpires: badgeExpires,
 		LocalDev:     localDev,
 	}, nil
+}
+
+// WithDisplayName attaches provenance-only name fields. Separate from
+// PrincipalAuthority because an AccessContext does not carry names -- the
+// producer reads them off the session identity, which is not an authorization
+// source and must not be mistaken for one.
+func (a *ForwardedAuthority) WithDisplayName(first, last string) *ForwardedAuthority {
+	if a == nil {
+		return nil
+	}
+	a.FirstName = first
+	a.LastName = last
+	return a
 }
 
 // SystemAuthority builds the authority for work with no end user behind it.
@@ -278,9 +302,11 @@ func (a *ForwardedAuthority) Identity() UserIdentity {
 		return UserIdentity{}
 	}
 	return UserIdentity{
-		Subject: ac.UserId,
-		Email:   ac.PrimaryEmail,
-		Role:    string(ac.Role),
+		Subject:   ac.UserId,
+		Email:     ac.PrimaryEmail,
+		Role:      string(ac.Role),
+		FirstName: a.FirstName,
+		LastName:  a.LastName,
 	}
 }
 
@@ -305,6 +331,15 @@ func (a *ForwardedAuthority) synthesizedClaims() map[string]any {
 	}
 	if ac.PrimaryEmail != "" {
 		claims["email"] = ac.PrimaryEmail
+	}
+	// Provenance only. component/metadata reads these back through
+	// UserIdentityFromContext to stamp identity.displayName on written rows;
+	// no authorization decision consults them.
+	if a.FirstName != "" {
+		claims["given_name"] = a.FirstName
+	}
+	if a.LastName != "" {
+		claims["family_name"] = a.LastName
 	}
 	if a.LocalDev {
 		claims["memql_local_dev"] = "1"

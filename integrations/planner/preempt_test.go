@@ -115,26 +115,47 @@ func TestHandlePlanPreempt_AssertsInternalAuthority(t *testing.T) {
 // TestPlanDispatchNamesThePlannerSystemActor covers the other planner
 // producer: the post-approval agent dispatch, which DOES need an actor
 // (createWorkerInvocation stamps createdBy through the engine's mutation
-// path). It asserts the planner's own system actor so a stamped row stays
-// attributable to the planner rather than to cognition -- and the receiver
-// pins the role, so naming the actor grants nothing.
+// path, and memql#1107 is the bug where it had none).
+//
+// It drives the REAL executeApprovedPlan and inspects what that call actually
+// handed the forwarder. An earlier version of this test constructed
+// auth.SystemAuthority(systemActorId) itself and asserted properties of the
+// component/auth package -- which is a test of the contract type, not of the
+// producer: reverting plan_execution.go to InternalAuthority(), to cognition's
+// actor, or to nil would have left it green. That is precisely the failure
+// mode memql#3205 called out in the attempt it superseded.
 func TestPlanDispatchNamesThePlannerSystemActor(t *testing.T) {
-	authority := auth.SystemAuthority(systemActorId)
+	const planId = "v1:planner:plan:dispatch-authority"
+	eng := &fakeEngine{execResponder: guardTestPlanResponder(planId, "running")}
+	fwd := &fakeTurnForwarder{}
+	p := newGuardTestIntegration(t, eng, fwd, nil, testLogger())
 
+	p.executeApprovedPlan(context.Background(), planId, "req-dispatch")
+
+	if fwd.forwardCount() != 1 {
+		t.Fatalf("expected exactly one dispatched agent turn, got %d", fwd.forwardCount())
+	}
+
+	authority := fwd.forwardedAuthority()
+	if authority == nil {
+		t.Fatal("the post-approval dispatch forwarded a nil authority; the agent node would REFUSE it and no turn would run")
+	}
 	if err := authority.Validate(time.Now()); err != nil {
 		t.Fatalf("the agent node would refuse the planner's dispatch: %v", err)
 	}
-	if systemActorId != auth.SystemActorPlanner {
-		t.Fatalf("the planner's actor id (%q) is not the one the receiver allowlists (%q); every planner dispatch would be refused",
-			systemActorId, auth.SystemActorPlanner)
+	if authority.Kind != auth.AuthorityKindSystem {
+		t.Errorf("dispatch kind = %q, want system", authority.Kind)
 	}
+
 	ac := authority.AccessContext()
 	if ac == nil {
-		t.Fatal("the planner's dispatch bound no actor; createWorkerInvocation would fail with \"no actor found in context\"")
+		t.Fatal("the planner's dispatch bound no actor; createWorkerInvocation would fail with \"no actor found in context\" (memql#1107)")
 	}
-	if ac.UserId != systemActorId {
-		t.Errorf("dispatch actor = %q, want %q", ac.UserId, systemActorId)
+	if ac.UserId != auth.SystemActorPlanner {
+		t.Errorf("dispatch actor = %q, want %q -- a row stamped by this turn must be attributable to the PLANNER, not to cognition",
+			ac.UserId, auth.SystemActorPlanner)
 	}
+	// The role is the receiver's to decide, not the sender's.
 	if ac.Role != auth.SystemActorRole {
 		t.Errorf("dispatch role = %q, want the receiver-pinned %q", ac.Role, auth.SystemActorRole)
 	}

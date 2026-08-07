@@ -1435,7 +1435,17 @@ type ForwardedAuthority struct {
 	BadgeExpUnix int64 `protobuf:"varint,5,opt,name=badge_exp_unix,json=badgeExpUnix,proto3" json:"badge_exp_unix,omitempty"`
 	// local_dev marks a principal synthesised by the no-auth dev shim so the
 	// provenance is visible in worker logs. Carries no authorization meaning.
-	LocalDev      bool `protobuf:"varint,6,opt,name=local_dev,json=localDev,proto3" json:"local_dev,omitempty"`
+	LocalDev bool `protobuf:"varint,6,opt,name=local_dev,json=localDev,proto3" json:"local_dev,omitempty"`
+	// Display name, carried for PROVENANCE parity only -- it feeds
+	// component/metadata's identity.displayName, which the engine stamps onto
+	// every row a mutation writes. Not an authorization input, and never read
+	// as one: the receiver derives role and subject from the fields above.
+	//
+	// Present because dropping it silently changed what lands in audit metadata:
+	// rows a worker wrote on a forwarded turn lost the name that the same user's
+	// rows carry on the direct path.
+	FirstName     string `protobuf:"bytes,7,opt,name=first_name,json=firstName,proto3" json:"first_name,omitempty"`
+	LastName      string `protobuf:"bytes,8,opt,name=last_name,json=lastName,proto3" json:"last_name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1510,6 +1520,20 @@ func (x *ForwardedAuthority) GetLocalDev() bool {
 		return x.LocalDev
 	}
 	return false
+}
+
+func (x *ForwardedAuthority) GetFirstName() string {
+	if x != nil {
+		return x.FirstName
+	}
+	return ""
+}
+
+func (x *ForwardedAuthority) GetLastName() string {
+	if x != nil {
+		return x.LastName
+	}
+	return ""
 }
 
 // AiForwardRequest carries an AI / voice envelope from a BFF node to a
@@ -2118,14 +2142,17 @@ const file_node_proto_rawDesc = "" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1c\n" +
 	"\tavailable\x18\x02 \x01(\bR\tavailable\x12\x17\n" +
 	"\anode_id\x18\x03 \x01(\tR\x06nodeId\x12\x18\n" +
-	"\aaddress\x18\x04 \x01(\tR\aaddress\"\xbd\x01\n" +
+	"\aaddress\x18\x04 \x01(\tR\aaddress\"\xf9\x01\n" +
 	"\x12ForwardedAuthority\x12\x12\n" +
 	"\x04kind\x18\x01 \x01(\tR\x04kind\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12#\n" +
 	"\rprimary_email\x18\x03 \x01(\tR\fprimaryEmail\x12\x12\n" +
 	"\x04role\x18\x04 \x01(\tR\x04role\x12$\n" +
 	"\x0ebadge_exp_unix\x18\x05 \x01(\x03R\fbadgeExpUnix\x12\x1b\n" +
-	"\tlocal_dev\x18\x06 \x01(\bR\blocalDev\"\xbe\x01\n" +
+	"\tlocal_dev\x18\x06 \x01(\bR\blocalDev\x12\x1d\n" +
+	"\n" +
+	"first_name\x18\a \x01(\tR\tfirstName\x12\x1b\n" +
+	"\tlast_name\x18\b \x01(\tR\blastName\"\xbe\x01\n" +
 	"\x10AiForwardRequest\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12%\n" +

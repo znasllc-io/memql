@@ -73,6 +73,10 @@ func TestForwardedActor_CrossNode(t *testing.T) {
 	}()
 	qc := memqlclient.NewQueryClient(conns[0].Dispatcher())
 
+	// Refuse to run without a node to forward TO. Otherwise CallTool executes
+	// in-process on the BFF and the gate is green while testing nothing.
+	requireAgentPeer(ctx, t, qc)
+
 	// A marker unique to this run, so a stale note from an earlier run can
 	// never make the assertion pass for the wrong reason.
 	marker := "memql3205-" + id.NewShortId()
@@ -161,15 +165,86 @@ func eventuallyContainsMarker(
 
 // renderResult flattens a query result to a string for marker matching. The
 // gate cares whether the caller's own row crossed, not about its shape.
+//
+// Rows(), NOT the *Result itself: memqlclient.Result has exactly one field and
+// it is unexported, so json.Marshal(res) returns "{}" with a nil error for any
+// result whatsoever. Marshalling the Result directly made the step-2
+// precondition unsatisfiable, which aborted the test before it reached the
+// forwarded assertion it exists for.
 func renderResult(res *memqlclient.Result) (string, error) {
 	if res == nil {
 		return "", fmt.Errorf("nil result")
 	}
-	b, err := json.Marshal(res)
+	rows := res.Rows()
+	if len(rows) == 0 {
+		// Not an error: the caller may legitimately have no notes yet on an
+		// early poll. Return an empty render so the poll loop keeps going.
+		return "", nil
+	}
+	b, err := json.Marshal(rows)
 	if err != nil {
-		return "", fmt.Errorf("marshal result: %w", err)
+		return "", fmt.Errorf("marshal rows: %w", err)
 	}
 	return string(b), nil
+}
+
+// requireAgentPeer fails the gate unless the mesh actually has an agent node to
+// forward to.
+//
+// Without this the gate can pass while proving nothing. shouldProxyAI returns
+// false when peerMgr.ByType(NodeTypeAgent) is empty -- immediately after
+// `make up`, with the agent Deployment scaled to 0, or mid-rollout -- and
+// handleCallTool then runs `query notes()` IN-PROCESS on the BFF session,
+// which carries the caller's AccessContext for the trivial reason that it
+// never left the node. The marker would be found, the assertion would pass,
+// and HandleForwardedRequest could be binding no actor at all.
+//
+// Fatal rather than skip: this is the cluster gate for a cross-node contract,
+// so "there was no second node" is a broken run, not an inapplicable one.
+func requireAgentPeer(ctx context.Context, t *testing.T, qc *memqlclient.QueryClient) {
+	t.Helper()
+	res, err := qc.BrowseConcept(ctx, "v1:cluster:node")
+	if err != nil {
+		t.Fatalf("cannot read v1:cluster:node to confirm an agent peer exists: %v", err)
+	}
+	for _, row := range res.Rows() {
+		if !strings.EqualFold(rowString(row, "nodeType"), "agent") {
+			continue
+		}
+		switch strings.ToLower(rowString(row, "health")) {
+		case "offline", "stopped", "draining":
+			continue
+		}
+		return
+	}
+	t.Fatalf(`no live agent node in the mesh -- this gate would pass without crossing a node boundary.
+
+shouldProxyAI falls back to in-process execution when no agent peer is visible,
+so CallTool would run on the BFF's own session and prove nothing about
+forwarded auth. Bring up the parity cluster first:
+  make up SERVERS=2 && make scale N=2
+v1:cluster:node rows seen: %s`, renderRowsForDiagnosis(res.Rows()))
+}
+
+func renderRowsForDiagnosis(rows []memqlclient.Row) string {
+	if len(rows) == 0 {
+		return "(none)"
+	}
+	var b strings.Builder
+	for _, r := range rows {
+		fmt.Fprintf(&b, "\n  nodeType=%q health=%q id=%q",
+			rowString(r, "nodeType"), rowString(r, "health"), rowString(r, "id"))
+	}
+	return b.String()
+}
+
+// rowString reads a string field off a result row. memqlclient.Row is a bare
+// map[string]any alias with no accessor methods.
+func rowString(r memqlclient.Row, key string) string {
+	if v, ok := r[key].(string); ok {
+		return v
+	}
+	return ""
 }
 
 // renderToolContent concatenates a tool result's content blocks.
