@@ -348,10 +348,31 @@ on a `string` field into the **number** `0`.
 This matters even though nothing is applied on insert: the emitted
 `default` keyword is consumed by the SDK, sense hover and the preferences
 form generators, so a wrong one is wrong documentation shipped to three
-consumers. Guarded by `TestDefaultIsLoweredByItsDeclaredType` and
-`TestBadDefaultRefusesToLoad`
-(`component/database/memory-nodes/declared_metadata_annotations_test.go`),
-the latter driving the real `BuildConceptFromDecl` path so the check
+consumers.
+
+**Bare and quoted spellings are equivalent.** `@default(false)` and
+`@default("false")` both mean the bool `false`. They are stored
+differently by the parser — an unquoted token has no value to bind to, so
+it is recorded as an argument *key* rather than as the attribute's value:
+
+```
+@default(false)     Value=<nil>    Args=map["false":true]
+@default("false")   Value="false"  Args=map[]
+```
+
+The reader only understood the second shape, so the bare spelling was read
+as the empty string. `isGroupGA bool @default(false)`
+(`dsl/cognition/concepts.memql`) had therefore been emitting
+`"default": ""` on a field declared `"type": "boolean"` since the line was
+written. That is the same defect one layer earlier — the value read
+without regard for how it was written, then lowered without regard for the
+type it belongs to — and it was found because the type-directed lowering
+turned a silent wrong answer into a load failure.
+
+Guarded by `TestDefaultIsLoweredByItsDeclaredType`,
+`TestBadDefaultRefusesToLoad` and `TestBareDefaultLiteralIsRead`
+(`component/database/memory-nodes/declared_metadata_annotations_test.go`).
+The second drives the real `BuildConceptFromDecl` path, so the check
 cannot pass while unwired.
 
 #### `@public`

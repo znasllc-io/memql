@@ -514,6 +514,56 @@ concept probe {
 	}
 }
 
+// TestBareDefaultLiteralIsRead covers the defect the type-directed lowering
+// EXPOSED rather than caused (memql#3248).
+//
+// A bare argument is not stored where a quoted one is. The parser has no value
+// to bind an unquoted token to, so it records the token as an Args KEY:
+//
+//	@default(false)     Value=<nil>    Args=map["false":true]
+//	@default("false")   Value="false"  Args=map[]
+//
+// attrString only type-asserts Value to string, so it reported "" for the bare
+// spelling. `isGroupGA bool @default(false)` in dsl/cognition/concepts.memql --
+// the live spelling -- therefore emitted `"default": ""` on a field declared
+// `"type": "boolean"`, and had done since the line was written.
+//
+// The two spellings mean the same thing and must not diverge. This pins that,
+// because nothing else did: the old lowering accepted "" for every type, so the
+// bug produced no error to notice.
+func TestBareDefaultLiteralIsRead(t *testing.T) {
+	const src = `@version("1.0.0")
+@namespace("ref")
+@description("d")
+concept probe {
+  bareBool    bool  @default(false)    @description("b")
+  quotedBool  bool  @default("false")  @description("q")
+  bareInt     int   @default(7)        @description("i")
+}
+`
+	props := propertySchemas(t, src)
+
+	for _, field := range []string{"bareBool", "quotedBool"} {
+		got, ok := props[field]["default"]
+		if !ok {
+			t.Errorf("%s emitted no default at all", field)
+			continue
+		}
+		if got != false {
+			t.Errorf("%s default = %#v (%T), want the BOOL false. An empty string here is the "+
+				"pre-memql#3248 bug: a bare argument read as \"\" and emitted on a boolean field",
+				field, got, got)
+		}
+	}
+
+	// The bare spelling is not bool-specific -- any unquoted token takes the
+	// same path, so a bare int must lower as an int rather than as "".
+	if got := props["bareInt"]["default"]; got != float64(7) && got != int64(7) {
+		t.Errorf("bareInt default = %#v (%T), want 7 -- a bare numeric argument reads through the "+
+			"same Args-key path as a bare bool", got, got)
+	}
+}
+
 // capturingStore is the whole Store surface Concept.Create touches: it keeps
 // the node that was actually written so the test can read the payload the
 // engine produced rather than the schema it validated against.

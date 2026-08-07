@@ -1048,7 +1048,7 @@ func applyPropertyAttribute(prop *parsedProperty, attr *parser.Attribute) error 
 	case "required":
 		prop.required = true
 	case "default":
-		v, err := parseTypedDefaultValue(prop.typeName, attrString(attr))
+		v, err := parseTypedDefaultValue(prop.typeName, attrLiteral(attr))
 		if err != nil {
 			return err
 		}
@@ -1149,6 +1149,65 @@ func attrString(attr *parser.Attribute) string {
 	}
 	if v, ok := attr.Args["value"]; ok {
 		return fmt.Sprintf("%v", v)
+	}
+	return ""
+}
+
+// attrLiteral returns an attribute's single argument in its WRITTEN form,
+// whether it was quoted or bare.
+//
+// attrString above cannot do this. It type-asserts attr.Value to string and
+// falls through to "" for anything else, but the parser stores a BARE argument
+// as its Go type -- `@default(false)` arrives as bool(false), not "false". So
+// attrString reports the empty string for it, and
+//
+//	isGroupGA bool @default(false)
+//
+// -- the live spelling in dsl/cognition/concepts.memql -- was lowered to the
+// empty STRING and emitted as `"default": ""` on a field whose schema says
+// `"type": "boolean"`. Silently, and for as long as that line has existed
+// (memql#3248).
+//
+// That is the same defect as the missing datetime branch, one layer earlier:
+// the value was read without regard for how it was written, then lowered
+// without regard for the type it belongs to. Fixing only the lowering would
+// have turned this into a load failure on a declaration that is perfectly
+// correct as written, which is how it was found.
+//
+// Bare and quoted spellings deliberately converge -- `@default(false)` and
+// `@default("false")` both yield "false", and parseTypedDefaultValue then
+// resolves it against the declared type. The annotation means the same thing
+// either way, so the two spellings must not diverge here.
+func attrLiteral(attr *parser.Attribute) string {
+	if attr == nil {
+		return ""
+	}
+	if attr.Value != nil {
+		if s, ok := attr.Value.(string); ok {
+			return s
+		}
+		return fmt.Sprintf("%v", attr.Value)
+	}
+	if v, ok := attr.Args["value"]; ok {
+		return fmt.Sprintf("%v", v)
+	}
+	// The bare-argument shape, and the reason attrString reports "" for it.
+	// The parser has no value to bind an unquoted token to, so it records the
+	// TOKEN ITSELF AS AN ARGS KEY with a true flag value -- measured, not
+	// assumed:
+	//
+	//	@default(false)     Value=<nil>    Args=map["false":true]
+	//	@default("false")   Value="false"  Args=map[]
+	//
+	// So the written text is the key. Guarded on exactly one entry carrying a
+	// true flag, which is what a single bare argument produces; a named or
+	// multi-argument attribute is not this shape and falls through.
+	if len(attr.Args) == 1 {
+		for k, v := range attr.Args {
+			if flag, ok := v.(bool); ok && flag {
+				return k
+			}
+		}
 	}
 	return ""
 }
