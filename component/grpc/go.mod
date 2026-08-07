@@ -32,7 +32,7 @@ require (
 	github.com/znasllc-io/memql/dsl v0.0.0
 	github.com/znasllc-io/memql/integrations/email v0.0.0
 	github.com/znasllc-io/memql/integrations/stt v0.0.0
-	google.golang.org/grpc v1.82.1
+	google.golang.org/grpc v1.83.0
 	google.golang.org/protobuf v1.36.11
 )
 
@@ -128,8 +128,8 @@ require (
 	github.com/znasllc-io/memql/component/secret v0.0.0 // indirect
 	github.com/znasllc-io/memql/docs v0.0.0 // indirect
 	github.com/znasllc-io/memql/integrations/openai v0.0.0 // indirect
-	go.opentelemetry.io/otel v1.43.0 // indirect
-	go.opentelemetry.io/otel/trace v1.43.0 // indirect
+	go.opentelemetry.io/otel v1.44.0 // indirect
+	go.opentelemetry.io/otel/trace v1.44.0 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.28.0 // indirect
