@@ -315,3 +315,52 @@ func TestPlanEnforcementRunsBeforeTheBarePayloadRewrite(t *testing.T) {
 			"misses it resolves to nothing.")
 	}
 }
+
+// COVERAGE, shown rather than asserted.
+//
+// The acceptance criterion is that enforcement reaches every read path
+// shadow mode hooks -- and shadow mode names its paths
+// (ShadowRecord.Path), so the two lists can be compared instead of a
+// claim being made about them. Each declared path names the executor
+// function that records it and the enforcement call that must sit in
+// the same function; a new ShadowPath* constant with no enforcement
+// entry fails here rather than shipping an unenforced read path.
+func TestEveryShadowedReadPathIsAlsoEnforced(t *testing.T) {
+	enforcementByPath := map[string]struct{ fn, call string }{
+		ShadowPathFilter: {
+			fn:   "func (e *MemQLEngine) evaluateExpressionSet(",
+			call: "filterRowAuthzSet(",
+		},
+		ShadowPathGraphExpansion: {
+			fn:   "func (e *MemQLEngine) expandGraph(",
+			call: "admitRowAuthzTraversal(",
+		},
+	}
+
+	src, err := os.ReadFile("rowauthz_shadow.go")
+	if err != nil {
+		t.Fatalf("read rowauthz_shadow.go: %v", err)
+	}
+	declared := 0
+	for _, path := range []string{ShadowPathFilter, ShadowPathGraphExpansion} {
+		if strings.Contains(string(src), `"`+path+`"`) {
+			declared++
+		}
+	}
+	if declared != len(enforcementByPath) {
+		t.Fatalf("shadow mode declares %d read paths but this test knows %d -- a read path was "+
+			"added or renamed and its enforcement site was not stated", declared, len(enforcementByPath))
+	}
+
+	for path, site := range enforcementByPath {
+		body := executorFuncBody(t, site.fn)
+		if !strings.Contains(body, "Shadow") {
+			t.Errorf("%s: %s no longer records a shadow verdict -- this pairing needs re-aiming",
+				path, site.fn)
+		}
+		if !strings.Contains(body, site.call) {
+			t.Errorf("the %q read path is MEASURED but not ENFORCED: %s does not call %s",
+				path, site.fn, site.call)
+		}
+	}
+}
