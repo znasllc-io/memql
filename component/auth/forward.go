@@ -2,181 +2,368 @@ package auth
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"time"
 )
 
-// Helpers for propagating the authenticated principal across inter-node RPC
-// boundaries.
+// The mesh forwarded-auth contract (memql#3205).
 //
 // The use case: a BFF receives a request from a client, authenticates it
-// (identity-issued JWT, or the no-auth dev shim), and then forwards some
-// part of the work to a worker node (Voice / Agent). The worker needs to
-// know who the original caller was so it can enforce the same ACLs the BFF
-// would have.
+// (identity-issued JWT, or the no-auth dev shim), and then forwards some part
+// of the work to a worker node (Voice / Agent / Cognition). The worker needs an
+// actor, or every actor-gated construct it executes silently returns zero rows
+// and every row it writes is stamped createdBy:"".
 //
-// The wire uses a proto map<string, string> (see AiForwardRequest.auth in
-// component/node/node.proto). These helpers pack the BFF-side UserIdentity
-// into that map and rebuild a TokenInfo on the worker side.
-
-// Canonical claim keys used in the forwarded map. They mirror common JWT
-// claim names so the existing BuildTokenInfo / UserIdentityFromContext
-// paths pick them up without any special-case handling.
-const (
-	forwardedClaimSubject     = "sub"
-	forwardedClaimEmail       = "email"
-	forwardedClaimPhoneNumber = "phone_number"
-	forwardedClaimRole        = "role"
-	forwardedClaimFirstName   = "given_name"
-	forwardedClaimLastName    = "family_name"
-	// forwardedClaimLocalDev marks a synthetic no-auth identity so the
-	// worker can log it distinctly if it wants to. The worker still
-	// treats it as a valid principal; production clusters simply never
-	// set this flag.
-	forwardedClaimLocalDev = "memql_local_dev"
-
-	// forwardedClaimClass and forwardedClaimRoleCeiling carry a badge
-	// grant's authorization context (memql#2513) across the hop.
-	//
-	// These are NOT identity fields, which is exactly why they went
-	// missing: UserIdentity carries Subject/Email/PhoneNumber/Role/
-	// FirstName/LastName, so a projection through it drops them. But
-	// applyBadgeRoleCeiling -- which LoadFromClaims runs on every DIRECT
-	// request -- keys on precisely these two, so without them a receiving
-	// node cannot reapply the ceiling and resolves the user's UNCLAMPED
-	// stored role instead.
-	//
-	// Measured on a badge session with stored role `owner` and ceiling
-	// `reader` (the analysis recorded on memql#2814):
-	//
-	//	DIRECT     role="reader" isClusterOwner=false
-	//	FORWARDED  role="owner"  isClusterOwner=true
-	//
-	// The asymmetry is what makes the omission dangerous rather than
-	// merely lossy: the PRINCIPAL fails closed -- an unresolvable subject
-	// yields no actor -- while the CEILING fails open, and an absent
-	// `class` is indistinguishable from "not a badge session", so the
-	// receiver cannot detect the loss. See memql#2876.
-	forwardedClaimClass       = "class"
-	forwardedClaimRoleCeiling = "role_ceiling"
-)
-
-// ForwardedClaimsFromIdentity packs a UserIdentity into the
-// map<string,string> shape used to propagate claims over an inter-node
-// RPC. Empty fields are omitted so the map stays compact on the wire.
-func ForwardedClaimsFromIdentity(id UserIdentity) map[string]string {
-	out := make(map[string]string, 6)
-	if id.Subject != "" {
-		out[forwardedClaimSubject] = id.Subject
-	}
-	if id.Email != "" {
-		out[forwardedClaimEmail] = id.Email
-	}
-	if id.PhoneNumber != "" {
-		out[forwardedClaimPhoneNumber] = id.PhoneNumber
-	}
-	if id.Role != "" {
-		out[forwardedClaimRole] = id.Role
-	}
-	if id.FirstName != "" {
-		out[forwardedClaimFirstName] = id.FirstName
-	}
-	if id.LastName != "" {
-		out[forwardedClaimLastName] = id.LastName
-	}
-	return out
-}
-
-// WithForwardedAuthorityContext copies the authorization-context claims out of
-// a claim map and into an already-packed forwarded map.
+// # What crosses the hop: the DECISION, not the inputs to it
 //
-// Only an ALLOWLIST crosses. A blind copy of the claim set would put the raw
-// token, arbitrary vendor claims and anything a future issuer adds onto a peer
-// message; a receiving side needs exactly the inputs to the decisions it must
-// reapply, and nothing else.
+// The sender has already resolved the caller -- ensureAccess loaded the user
+// row, applyBadgeRoleCeiling clamped the role, handleRotateAuth absorbed
+// whatever arrived mid-stream. ForwardedAuthority carries THAT ANSWER. The
+// receiver re-derives nothing, so there is nothing for it to get wrong.
 //
-// # NOT WIRED, DELIBERATELY -- read this before calling it
-//
-// No producer calls this today, and wiring it naively REINTRODUCES the defect
-// it exists to help fix. memql#2876 attempted exactly that and was reverted.
-//
-// The trap is the SOURCE. The obvious one -- the gRPC stream's context -- is
-// wrong: a stream context is fixed at stream-open, while badge grants arrive
-// MID-STREAM via RotateAuth (component/grpc/server.go:1090 says so outright,
-// and handleRotateAuth swaps s.access / s.identity / the badge expiry stamp
-// without touching the context, because it cannot). Sourced from there, a
-// mid-stream badge session forwards NO class and NO role_ceiling, the receiver
-// cannot distinguish that from "not a badge session", and it resolves the
-// user's UNCLAMPED stored role. Measured, operator stored role `owner`,
+// This inverts the predecessor, which shipped a map<string,string> of raw JWT
+// claims and had the worker rebuild the decision from them. It carried the
+// principal but not `class` / `role_ceiling`, so a forwarded badge session
+// resolved its UNCLAMPED stored role. Measured, operator stored role `owner`,
 // terminal ceiling `reader`:
 //
 //	DIRECT     role="reader" isClusterOwner=false
 //	FORWARDED  role="owner"  isClusterOwner=true
 //
-// The reliable source is the SESSION's post-rotate state, not the context.
+// Carrying those two claims OPTIONALLY does not fix it: an absent `class` is
+// indistinguishable from "not a badge session", so the receiver cannot detect
+// the loss. Only a mandatory, explicit assertion can -- which is why `kind`
+// below has no zero value the receiver will accept.
 //
-// The deeper point, which is why this is a signpost rather than a fix: two
-// OPTIONAL claims whose absence is indistinguishable from "no badge" cannot
-// carry a ceiling safely, however they are sourced. memql#2814's analysis names
-// that failure mode as undetectable by the receiver. A correct contract makes
-// the assertion mandatory and explicit -- "no badge" is a VALUE, not a missing
-// key -- carries `exp` so expiry stays enforceable, covers every producer, and
-// has the receiver REFUSE when it cannot prove the ceiling was applied.
+// The full rationale, the four kinds, and the receiver rules:
+// docs/internal/design/mesh-forwarded-auth-contract.md
+
+// AuthorityKind names what the sender is asserting about the principal behind
+// a forwarded request. It is mandatory on every forward: "no badge" is a VALUE,
+// never a missing key.
+type AuthorityKind string
+
+const (
+	// AuthorityKindUser is an ordinary end-user principal.
+	AuthorityKindUser AuthorityKind = "user"
+
+	// AuthorityKindBadge is a shared-terminal operator grant (memql#2513).
+	// Role is already clamped to the terminal's ceiling; BadgeExpires is
+	// mandatory and the receiver refuses the request once it has passed.
+	AuthorityKindBadge AuthorityKind = "badge"
+
+	// AuthorityKindSystem is a named service principal for work with no end
+	// user behind it (greet-on-join, post-approval Plan dispatch). The
+	// receiver pins the ROLE and validates the SUBJECT against its own
+	// allowlist, so the sender chooses among known system actors but cannot
+	// invent one and cannot elevate.
+	//
+	// This path genuinely needs an actor -- memql#1107 is the bug where it had
+	// none and the agent's taskstamp Stamper failed with "no actor found in
+	// context".
+	AuthorityKindSystem AuthorityKind = "system"
+
+	// AuthorityKindInternal carries no principal at all. The receiver binds
+	// NO actor, and any actor-gated construct reached on this path fails
+	// closed exactly as it does today. Used by the forwards that legitimately
+	// have no caller: the planner's AgentPreemptTurn (flips a pause flag keyed
+	// by request id) and cognition's client-tool relay (ClientToolResult,
+	// resolved against a waiter keyed by call id). Neither persists anything.
+	AuthorityKindInternal AuthorityKind = "internal"
+)
+
+// The system actors permitted to cross a mesh forward.
 //
-// Kept in the tree because the allowlist discipline is right and reusable, and
-// because the next attempt should start from this note rather than rediscover
-// it. See memql#2876 and memql#2814.
-func WithForwardedAuthorityContext(m map[string]string, claims map[string]any) map[string]string {
-	if m == nil {
-		m = make(map[string]string, 2)
+// A system forward names WHICH actor it is, but only from this closed set. The
+// distinction is load-bearing for audit: the planner and cognition deliberately
+// carry different ids so a stamped row can be attributed to the integration
+// that produced it. Collapsing them into a single pinned constant would keep
+// the safety property and destroy that, so the contract CONSTRAINS the subject
+// rather than fixing it.
+//
+// The set lives here, on the RECEIVING side, precisely so the wire cannot
+// extend it. The values match the long-standing per-integration constants, so
+// rows stamped by system-initiated turns keep the same createdBy.
+const (
+	SystemActorCognition = "system:cognition-integration"
+	SystemActorPlanner   = "system:planner-integration"
+)
+
+var systemActorAllowlist = map[string]struct{}{
+	SystemActorCognition: {},
+	SystemActorPlanner:   {},
+}
+
+// IsKnownSystemActor reports whether id names a system actor the receiver will
+// accept on a forward.
+func IsKnownSystemActor(id string) bool {
+	_, ok := systemActorAllowlist[id]
+	return ok
+}
+
+// SystemActorRole is the role the receiver pins for AuthorityKindSystem. The
+// sender never names it.
+//
+// Reader, deliberately, and not a widening: the predecessor sent role:"system"
+// on the wire, "system" is not in IsValidRole, and FallbackFromClaims clamps an
+// unrecognised role to RoleReader. So reader is what this path already resolved
+// to -- pinning it preserves the behaviour while removing the sender's ability
+// to assert a role at all.
+const SystemActorRole = RoleReader
+
+// ErrAuthorityMissing is returned when a forwarded request carries no
+// authority. This is the contract's central refusal: the receiver refuses when
+// it cannot PROVE the ceiling was applied, rather than inferring safety from
+// absence.
+var ErrAuthorityMissing = errors.New("forwarded request carries no authority")
+
+// ForwardedAuthority is the transport-agnostic form of the contract. The proto
+// encoding (nodev1.ForwardedAuthority) is converted at the grpc boundary so
+// this package stays free of a transport dependency.
+type ForwardedAuthority struct {
+	// Kind is mandatory. The zero value is not accepted.
+	Kind AuthorityKind
+
+	// UserId / PrimaryEmail / Role are the sender's resolved AccessContext.
+	// Meaningful for Kind user and badge. For system, UserId selects from the
+	// allowlist and Role is ignored; for internal, all three are ignored.
+	UserId       string
+	PrimaryEmail string
+
+	// Role is POST-ceiling and final. The receiver never re-clamps it and
+	// never receives the `class` / `role_ceiling` with which it could try.
+	Role Role
+
+	// BadgeExpires is the grant's exp. Required and non-zero for
+	// AuthorityKindBadge; the receiver refuses once it has passed. Without it
+	// an expired grant would be rejected on the direct stream (badgeGate) and
+	// honored on every forwarded AiChat / CallTool.
+	BadgeExpires time.Time
+
+	// LocalDev marks a principal synthesised by the no-auth dev shim, so the
+	// provenance is visible in worker logs. No authorization meaning.
+	LocalDev bool
+}
+
+// PrincipalAuthority builds the authority for a real caller from the sender's
+// already-resolved AccessContext.
+//
+// badgeExpires is the session's current badge expiry (zero for every non-badge
+// credential); a non-zero value selects AuthorityKindBadge, which is what makes
+// expiry enforceable on the receiving node.
+//
+// The AccessContext passed here MUST be the session's post-rotate value
+// (streamSession.ensureAccess / currentAccess), never one derived from the
+// stream context: a gRPC stream's context is fixed at stream-open while badge
+// grants arrive MID-STREAM via RotateAuth, so a context-sourced authority
+// forwards the pre-rotation, unclamped role.
+func PrincipalAuthority(ac *AccessContext, badgeExpires time.Time, localDev bool) (*ForwardedAuthority, error) {
+	if ac == nil || ac.UserId == "" {
+		return nil, errors.New("cannot forward a principal authority without a resolved AccessContext")
 	}
-	for _, key := range []string{forwardedClaimClass, forwardedClaimRoleCeiling} {
-		if v := stringClaim(claims, key); v != "" {
-			m[key] = v
+	kind := AuthorityKindUser
+	if !badgeExpires.IsZero() {
+		kind = AuthorityKindBadge
+	}
+	return &ForwardedAuthority{
+		Kind:         kind,
+		UserId:       ac.UserId,
+		PrimaryEmail: ac.PrimaryEmail,
+		Role:         ac.Role,
+		BadgeExpires: badgeExpires,
+		LocalDev:     localDev,
+	}, nil
+}
+
+// SystemAuthority builds the authority for work with no end user behind it.
+// actorId must be one of the allowlisted system actors; the receiver rejects
+// anything else, and pins the role regardless of what is sent.
+func SystemAuthority(actorId string) *ForwardedAuthority {
+	return &ForwardedAuthority{Kind: AuthorityKindSystem, UserId: actorId}
+}
+
+// InternalAuthority builds the authority for a forward that needs no actor at
+// all. The receiver accepts it and binds none.
+func InternalAuthority() *ForwardedAuthority {
+	return &ForwardedAuthority{Kind: AuthorityKindInternal}
+}
+
+// Validate is the receiver's refusal gate. A non-nil error means the request
+// must be refused, not degraded: this contract has no "accept without an
+// actor" fallback for a principal-bearing kind, because that is precisely the
+// silent-zero-rows failure it replaces.
+func (a *ForwardedAuthority) Validate(now time.Time) error {
+	if a == nil {
+		return ErrAuthorityMissing
+	}
+	switch a.Kind {
+	case AuthorityKindInternal:
+		return nil
+
+	case AuthorityKindSystem:
+		if !IsKnownSystemActor(a.UserId) {
+			// The sender picks among known service principals; it does not
+			// get to name one. An unknown id is a refusal rather than a
+			// fallback to some default actor, which would let a caller
+			// launder work through whichever actor the default happened to
+			// be.
+			return fmt.Errorf("forwarded system authority names unknown actor %q", a.UserId)
 		}
+		return nil
+
+	case AuthorityKindUser, AuthorityKindBadge:
+		if a.UserId == "" {
+			return fmt.Errorf("forwarded authority kind %q carries no user id", a.Kind)
+		}
+		if !IsValidRole(a.Role) {
+			// The sender resolves the role; an unrecognised one means the
+			// two sides disagree about the role set. Refuse rather than
+			// clamp -- a silent clamp here would hide a real mismatch.
+			return fmt.Errorf("forwarded authority carries unrecognised role %q", a.Role)
+		}
+		if a.Kind == AuthorityKindBadge {
+			if a.BadgeExpires.IsZero() {
+				// A badge grant whose expiry did not cross cannot be gated
+				// on the worker at all. Refuse: an unenforceable ceiling is
+				// the exact hole this contract closes.
+				return errors.New("forwarded badge authority carries no expiry")
+			}
+			if !now.Before(a.BadgeExpires) {
+				return fmt.Errorf("forwarded badge authority expired at %s",
+					a.BadgeExpires.UTC().Format(time.RFC3339))
+			}
+		}
+		return nil
+
+	default:
+		return fmt.Errorf("forwarded authority carries unknown kind %q", a.Kind)
 	}
-	return m
 }
 
-// ForwardedClaimsWithLocalDev is ForwardedClaimsFromIdentity plus a
-// marker indicating the identity was synthesised by the no-auth dev
-// shim. The worker sees `memql_local_dev=1` in its TokenInfo.Claims.
-func ForwardedClaimsWithLocalDev(id UserIdentity) map[string]string {
-	m := ForwardedClaimsFromIdentity(id)
-	m[forwardedClaimLocalDev] = "1"
-	return m
-}
-
-// TokenInfoFromForwardedClaims rebuilds a TokenInfo from the
-// map<string,string> shape produced by ForwardedClaimsFromIdentity.
-// Returns nil when the map is empty or lacks any recognised claim.
-//
-// The returned TokenInfo is suitable for ContextWithToken -- it will be
-// picked up by TokenInfoFromContext and UserIdentityFromContext on the
-// worker side just like a JWT-derived TokenInfo.
-func TokenInfoFromForwardedClaims(m map[string]string) *TokenInfo {
-	if len(m) == 0 {
+// AccessContext returns the actor this authority binds, or nil when it binds
+// none (AuthorityKindInternal). Call Validate first.
+func (a *ForwardedAuthority) AccessContext() *AccessContext {
+	if a == nil {
 		return nil
 	}
-	claims := make(map[string]any, len(m))
-	for k, v := range m {
-		claims[k] = v
+	switch a.Kind {
+	case AuthorityKindSystem:
+		// Subject constrained by the allowlist (checked in Validate); role
+		// pinned here, so the wire cannot influence it at all.
+		if !IsKnownSystemActor(a.UserId) {
+			return nil
+		}
+		return &AccessContext{
+			UserId:       a.UserId,
+			PrimaryEmail: a.UserId,
+			Role:         SystemActorRole,
+		}
+	case AuthorityKindUser, AuthorityKindBadge:
+		return &AccessContext{
+			UserId:       a.UserId,
+			PrimaryEmail: a.PrimaryEmail,
+			Role:         a.Role,
+		}
+	default:
+		return nil
 	}
-	return BuildTokenInfo(claims)
 }
 
-// ContextWithForwardedClaims applies TokenInfoFromForwardedClaims and
-// attaches the resulting TokenInfo to the context. Returns ctx unchanged
-// when the map is empty (no principal to propagate).
-func ContextWithForwardedClaims(ctx context.Context, m map[string]string) context.Context {
+// Identity returns the UserIdentity the receiving session should carry. Empty
+// for AuthorityKindInternal.
+func (a *ForwardedAuthority) Identity() UserIdentity {
+	ac := a.AccessContext()
+	if ac == nil {
+		return UserIdentity{}
+	}
+	return UserIdentity{
+		Subject: ac.UserId,
+		Email:   ac.PrimaryEmail,
+		Role:    string(ac.Role),
+	}
+}
+
+// synthesizedClaims builds the claims map the receiving context exposes.
+//
+// These are DERIVED from the decision, never received. Claims-reading
+// consumers on the worker (auth.UserFromContext, resolveRoleFromClaims,
+// BuildTokenInfo) keep working, while a sender-asserted sub/role pair stays
+// unrepresentable -- there is no claims field on the wire to put one in.
+//
+// `class` and `role_ceiling` are deliberately absent: Role is already final,
+// and re-introducing them would hand a downstream applyBadgeRoleCeiling the
+// inputs to clamp a second time.
+func (a *ForwardedAuthority) synthesizedClaims() map[string]any {
+	ac := a.AccessContext()
+	if ac == nil {
+		return nil
+	}
+	claims := map[string]any{
+		"sub":  ac.UserId,
+		"role": string(ac.Role),
+	}
+	if ac.PrimaryEmail != "" {
+		claims["email"] = ac.PrimaryEmail
+	}
+	if a.LocalDev {
+		claims["memql_local_dev"] = "1"
+	}
+	return claims
+}
+
+type forwardedAuthorityCtxKey struct{}
+
+// ContextWithForwardedAuthority attaches everything the worker's engine and
+// handlers read for actor resolution: the AccessContext (which the predecessor
+// never set -- the defect), plus a TokenInfo and claims derived from it so
+// UserIdentityFromContext and the claims-reading consumers resolve the same
+// principal.
+//
+// It also stashes the authority itself, so a node that forwards AGAIN can
+// re-assert it verbatim. This matters for the two-hop chain BFF -> cognition ->
+// agent, where handleCallTool and handleAgentGenerateTurn run: rebuilding the
+// authority from the AccessContext at hop two would preserve the clamped role
+// but silently drop BadgeExpires, leaving the final node unable to enforce
+// expiry. Re-forwarding the validated original keeps kind, ceiling and expiry
+// intact across any number of hops.
+//
+// The stash happens for every kind, including AuthorityKindInternal -- it
+// records "this request arrived asserting no principal", which a downstream hop
+// must re-assert rather than upgrade. Only the actor bindings are skipped for
+// internal: that kind binds no actor by design, and stamping an empty one would
+// be indistinguishable from the bug this replaces.
+func ContextWithForwardedAuthority(ctx context.Context, a *ForwardedAuthority) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	tok := TokenInfoFromForwardedClaims(m)
-	if tok == nil {
+	if a == nil {
 		return ctx
 	}
-	ctx = ContextWithToken(ctx, tok)
-	// Also populate ClaimsContextKey so downstream code that reads
-	// claims directly (rather than through TokenInfo) still works.
-	ctx = ContextWithClaims(ctx, tok.Claims)
+	ctx = context.WithValue(ctx, forwardedAuthorityCtxKey{}, a)
+
+	ac := a.AccessContext()
+	if ac == nil {
+		return ctx
+	}
+	ctx = ContextWithAccess(ctx, ac)
+	if claims := a.synthesizedClaims(); claims != nil {
+		if tok := BuildTokenInfo(claims); tok != nil {
+			ctx = ContextWithToken(ctx, tok)
+		}
+		ctx = ContextWithClaims(ctx, claims)
+	}
 	return ctx
+}
+
+// ForwardedAuthorityFromContext returns the authority this request arrived
+// with, or nil when it did not arrive over a mesh forward. A node that forwards
+// onward should prefer this over rebuilding one, so the assertion the edge made
+// -- including a badge grant's expiry -- survives the next hop.
+func ForwardedAuthorityFromContext(ctx context.Context) *ForwardedAuthority {
+	if ctx == nil {
+		return nil
+	}
+	a, _ := ctx.Value(forwardedAuthorityCtxKey{}).(*ForwardedAuthority)
+	return a
 }

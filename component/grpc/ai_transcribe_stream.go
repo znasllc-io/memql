@@ -200,9 +200,13 @@ func (s *streamSession) handleAiTranscribeStreamChunk(
 			return s.sendQueryError(requestId, envelope.GetMessageId(), codes.FailedPrecondition,
 				"no open transcribe stream for request_id (call Start first)")
 		}
+		authority, err := s.forwardedAuthority()
+		if err != nil {
+			return s.sendQueryError(requestId, envelope.GetMessageId(), codes.PermissionDenied, err.Error())
+		}
 		return s.service.aiForwarder.ForwardContinuation(
 			requestId,
-			s.forwardedAuthClaims(),
+			authority,
 			extractPartitionFromEnvelope(envelope),
 			envelope,
 		)
@@ -254,9 +258,13 @@ func (s *streamSession) handleAiTranscribeStreamEnd(
 			return s.sendQueryError(requestId, envelope.GetMessageId(), codes.FailedPrecondition,
 				"no open transcribe stream for request_id (call Start first)")
 		}
+		authority, err := s.forwardedAuthority()
+		if err != nil {
+			return s.sendQueryError(requestId, envelope.GetMessageId(), codes.PermissionDenied, err.Error())
+		}
 		return s.service.aiForwarder.ForwardContinuation(
 			requestId,
-			s.forwardedAuthClaims(),
+			authority,
 			extractPartitionFromEnvelope(envelope),
 			envelope,
 		)

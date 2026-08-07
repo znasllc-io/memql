@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -81,7 +82,7 @@ func (r *AiForwardRouter) Forward(
 	ctx context.Context,
 	requestId string,
 	targetType node.NodeType,
-	authClaims map[string]string,
+	authority *auth.ForwardedAuthority,
 	partition string,
 	envelope *memqlv1.MemqlClientMessage,
 ) (<-chan *memqlv1.MemqlServerMessage, error) {
@@ -90,6 +91,13 @@ func (r *AiForwardRouter) Forward(
 	}
 	if strings.TrimSpace(requestId) == "" {
 		return nil, fmt.Errorf("request_id is required for forwarding")
+	}
+	// Refuse to put an authority-less request on the wire. The receiver
+	// refuses it too -- that is the contract -- but failing here gives the
+	// caller a usable error instead of a remote refusal, and keeps a producer
+	// that forgot its authority from looking like a mesh outage.
+	if err := authority.Validate(time.Now()); err != nil {
+		return nil, fmt.Errorf("forward to %s: %w", targetType, err)
 	}
 
 	peer, err := r.selectPeer(targetType)
@@ -135,7 +143,7 @@ func (r *AiForwardRouter) Forward(
 	_ = partition
 	fwd := &nodev1.AiForwardRequest{
 		RequestId:     requestId,
-		Auth:          authClaims,
+		Authority:     authorityToProto(authority),
 		MemqlEnvelope: envBytes,
 	}
 	msg := &nodev1.NodeClientMessage{
@@ -223,7 +231,7 @@ func (r *AiForwardRouter) cleanupInflight(requestId string) {
 // outbound connection has gone away since Start.
 func (r *AiForwardRouter) ForwardContinuation(
 	requestId string,
-	authClaims map[string]string,
+	authority *auth.ForwardedAuthority,
 	partition string,
 	envelope *memqlv1.MemqlClientMessage,
 ) error {
@@ -232,6 +240,12 @@ func (r *AiForwardRouter) ForwardContinuation(
 	}
 	if strings.TrimSpace(requestId) == "" {
 		return fmt.Errorf("request_id is required for forwarding")
+	}
+	// Same gate as Forward. Continuations used to pass nil claims outright
+	// (the planner's pause signal, the client-tool relay); under the contract
+	// they assert auth.InternalAuthority() -- "no principal" as a value.
+	if err := authority.Validate(time.Now()); err != nil {
+		return fmt.Errorf("forward continuation for %q: %w", requestId, err)
 	}
 
 	r.mu.Lock()
@@ -255,7 +269,7 @@ func (r *AiForwardRouter) ForwardContinuation(
 		Payload: &nodev1.NodeClientMessage_AiForwardRequest{
 			AiForwardRequest: &nodev1.AiForwardRequest{
 				RequestId:     requestId,
-				Auth:          authClaims,
+				Authority:     authorityToProto(authority),
 				MemqlEnvelope: envBytes,
 			},
 		},
@@ -337,19 +351,50 @@ func (s *service) HandleForwardedRequest(
 
 	requestId := req.GetRequestId()
 
-	// Unmarshal the embedded envelope.
+	// Unmarshal the embedded envelope. This happens before the authority
+	// check because the payload TYPE decides whether a refusal may be
+	// terminal -- see isContinuationPayload.
 	var envelope memqlv1.MemqlClientMessage
 	if err := proto.Unmarshal(req.GetMemqlEnvelope(), &envelope); err != nil {
 		s.sendForwardError(send, requestId, codes.InvalidArgument,
-			"malformed ai forward envelope: "+err.Error())
+			"malformed ai forward envelope: "+err.Error(), true)
 		return
 	}
 
-	// Reconstruct auth context so worker-side ACLs work.
-	ctx = auth.ContextWithForwardedClaims(ctx, req.GetAuth())
+	// THE REFUSAL. The mesh forwarded-auth contract (memql#3205) requires the
+	// sender to assert, explicitly and mandatorily, the authorization decision
+	// it already resolved. A request that cannot prove its ceiling was applied
+	// is refused -- absence is never read as "not a badge session".
+	//
+	// This replaces auth.ContextWithForwardedClaims, which attached raw
+	// sender-supplied claims and never built an AccessContext at all. Under
+	// the deny-on-nil default (memql#2801) that left actor.userId as "" and
+	// actor.isClusterOwner as false, so every actor-gated construct executed
+	// here silently returned zero rows or wrote createdBy:"". The comment that
+	// used to sit on this line claimed worker-side ACLs worked; the ACLs it
+	// named were exactly what did not.
+	authority := authorityFromProto(req.GetAuthority())
+	if err := authority.Validate(time.Now()); err != nil {
+		if s.logger != nil {
+			s.logger.Warn("ai forward refused: unprovable authority",
+				"request_id", requestId, "error", err)
+		}
+		s.sendForwardError(send, requestId, codes.PermissionDenied,
+			"forwarded request refused: "+err.Error(),
+			!isContinuationPayload(&envelope))
+		return
+	}
 
-	identity, _ := auth.UserIdentityFromContext(ctx)
+	// Bind the actor from the carried DECISION. Nothing is re-derived here:
+	// the role arrives post-ceiling, there is no `class` / `role_ceiling` to
+	// re-clamp from, and auth.FallbackFromClaims -- which lifts `role`
+	// straight off the wire, making IsClusterOwner() true for anyone who says
+	// so -- is not reachable on this path at all.
+	ctx = auth.ContextWithForwardedAuthority(ctx, authority)
+
+	identity := authority.Identity()
 	if identity.Subject == "" {
+		// AuthorityKindInternal: accepted, binds no actor by design.
 		identity.Subject = "forwarded"
 	}
 
@@ -376,6 +421,31 @@ func (s *service) HandleForwardedRequest(
 		closeChan: make(chan struct{}),
 	}
 	close(sess.closeChan)
+
+	// Seed the resolved access so ensureAccess is a cache hit.
+	//
+	// This is what removes the per-message userByIdSystem round-trip. A
+	// forwarded session is built PER MESSAGE, so it starts with an empty
+	// access cache; before this, every forwarded envelope -- including every
+	// audio chunk on the streaming-transcription path -- drove a fresh
+	// LoadFromClaims -> userByIdSystem query. The direct path caches for the
+	// life of the stream; the forward path structurally could not, because
+	// there was no stream. Carrying the decision instead of the claims makes
+	// the query unnecessary rather than merely cached.
+	//
+	// accessLoaded is set even when access is nil (AuthorityKindInternal) so
+	// ensureAccess cannot fall through to the claims path and resurrect
+	// FallbackFromClaims behind our back.
+	//
+	// badgeExpiresAt is stamped from the authority rather than lazily from a
+	// stream context a forwarded session does not meaningfully have, so a
+	// badge grant is gated here on the worker exactly as on the direct path.
+	sess.accessMu.Lock()
+	sess.access = authority.AccessContext()
+	sess.accessLoaded = true
+	sess.badgeStamped = true
+	sess.badgeExpiresAt = authority.BadgeExpires
+	sess.accessMu.Unlock()
 
 	// Dispatch to the appropriate handler based on the envelope payload.
 	switch payload := envelope.GetPayload().(type) {
@@ -417,7 +487,7 @@ func (s *service) HandleForwardedRequest(
 		_ = sess.handleAgentPreemptTurn(&envelope, payload.AgentPreemptTurn)
 	default:
 		s.sendForwardError(send, requestId, codes.Unimplemented,
-			"unsupported ai forward payload type")
+			"unsupported ai forward payload type", true)
 		return
 	}
 
@@ -498,12 +568,37 @@ func encodeForwardErrorBytes(requestId string, message string) []byte {
 	return b
 }
 
+// isContinuationPayload reports whether this envelope continues an
+// already-open forwarded stream rather than starting one.
+//
+// It decides whether an error may be marked terminal. Continuations reuse the
+// PARENT turn's request_id, and AiForwardRouter.Dispatch calls cleanupInflight
+// on done=true -- which closes the parent's response channel. So a terminal
+// error on a continuation kills the in-flight turn the user is watching while
+// the agent keeps running: pausing a Plan in cluster mode would blank the
+// reply mid-stream. These must fail soft.
+func isContinuationPayload(envelope *memqlv1.MemqlClientMessage) bool {
+	switch envelope.GetPayload().(type) {
+	case *memqlv1.MemqlClientMessage_AiTranscribeStreamChunk,
+		*memqlv1.MemqlClientMessage_AiTranscribeStreamEnd,
+		*memqlv1.MemqlClientMessage_ClientToolResult,
+		*memqlv1.MemqlClientMessage_AgentPreemptTurn:
+		return true
+	}
+	return false
+}
+
 // sendForwardError delivers a QueryError-style error back to the BFF.
+//
+// terminal marks the AiForwardResponse done, which makes the BFF tear the
+// inflight entry down and close the caller's response channel. Pass false for
+// anything that continues an existing stream -- see isContinuationPayload.
 func (s *service) sendForwardError(
 	send func(*nodev1.NodeServerMessage) error,
 	requestId string,
 	code codes.Code,
 	message string,
+	terminal bool,
 ) {
 	qe := &memqlv1.QueryErrorMsg{
 		RequestId: requestId,
@@ -528,7 +623,7 @@ func (s *service) sendForwardError(
 			AiForwardResponse: &nodev1.AiForwardResponse{
 				RequestId:      requestId,
 				MemqlServerMsg: errBytes,
-				Done:           true,
+				Done:           terminal,
 			},
 		},
 	})
@@ -673,7 +768,12 @@ func (s *streamSession) proxyAI(envelope *memqlv1.MemqlClientMessage, requestId 
 	ctx := s.stream.Context()
 	correlate := envelope.GetMessageId()
 
-	claims := s.forwardedAuthClaims()
+	authority, err := s.forwardedAuthority()
+	if err != nil {
+		// No provable principal to forward. Fail here rather than ship an
+		// authority-less envelope the worker would refuse anyway.
+		return s.sendQueryError(requestId, correlate, codes.PermissionDenied, err.Error())
+	}
 	partition := extractPartitionFromEnvelope(envelope)
 
 	// Carry caller provenance across the hop so any rows the worker
@@ -682,7 +782,7 @@ func (s *streamSession) proxyAI(envelope *memqlv1.MemqlClientMessage, requestId 
 	// contextWithEnvelopeProvenance at handler entry.
 	stampEnvelopeProvenance(ctx, envelope)
 
-	respCh, err := s.service.aiForwarder.Forward(ctx, requestId, target, claims, partition, envelope)
+	respCh, err := s.service.aiForwarder.Forward(ctx, requestId, target, authority, partition, envelope)
 	if err != nil {
 		return s.sendQueryError(requestId, correlate, codes.Unavailable, err.Error())
 	}
@@ -728,19 +828,82 @@ func (s *streamSession) relayForwardedResponses(
 	}
 }
 
-// forwardedAuthClaims packs the session's authenticated identity into
-// the map<string,string> shape consumed by auth.ContextWithForwardedClaims
-// on the worker side.
+// forwardedAuthority builds this session's assertion for the mesh
+// forwarded-auth contract (memql#3205).
+//
+// THE SOURCE IS THE SESSION, NOT THE STREAM CONTEXT. This is the single
+// load-bearing line of the producer side. A gRPC stream's context is fixed at
+// stream-open, while badge grants arrive MID-STREAM via RotateAuth --
+// handleRotateAuth swaps s.access / s.identity / s.badgeExpiresAt and cannot
+// touch the context. Read from the context, a rotated-in badge session would
+// forward its PRE-rotation, unclamped role:
+//
+//	DIRECT     role="reader" isClusterOwner=false
+//	FORWARDED  role="owner"  isClusterOwner=true   <- context-sourced
+//
+// ensureAccess rather than currentAccess: once loaded they return the same
+// pointer (handleRotateAuth sets both s.access and s.accessLoaded), but
+// currentAccess alone returns nil on a stream whose first message is the
+// forwarded one, and forwarding an empty principal is exactly the silent
+// zero-rows failure this contract exists to remove.
+//
+// badgeExpiresAt rides along so the WORKER can enforce expiry. The direct path
+// gates every envelope through badgeGate; without the expiry on the wire a
+// walked-away kiosk's grant would be rejected on the direct stream and honored
+// on every forwarded AiChat / CallTool.
 //
 // In no-auth dev mode the local-dev stream interceptor synthesises a
-// "local-dev" principal subject; we carry that marker to the worker so
-// the provenance is obvious in logs. Real authenticated identities go
-// over unchanged.
-func (s *streamSession) forwardedAuthClaims() map[string]string {
-	if strings.EqualFold(s.identity.Subject, "local-dev") {
-		return auth.ForwardedClaimsWithLocalDev(s.identity)
+// "local-dev" principal; the marker is carried so the provenance is obvious in
+// worker logs. It has no authorization meaning.
+func (s *streamSession) forwardedAuthority() (*auth.ForwardedAuthority, error) {
+	access := s.ensureAccess(s.stream.Context())
+
+	s.accessMu.Lock()
+	badgeExpires := s.badgeExpiresAt
+	s.accessMu.Unlock()
+
+	localDev := strings.EqualFold(s.identity.Subject, "local-dev")
+	return auth.PrincipalAuthority(access, badgeExpires, localDev)
+}
+
+// authorityToProto / authorityFromProto convert between the transport-agnostic
+// contract type in component/auth and its wire form. The conversion lives here
+// so component/auth carries no dependency on the node protos.
+func authorityToProto(a *auth.ForwardedAuthority) *nodev1.ForwardedAuthority {
+	if a == nil {
+		// Deliberately nil, not an empty message: nil is the state the
+		// receiver refuses on, and a producer reaching here has already
+		// failed Validate.
+		return nil
 	}
-	return auth.ForwardedClaimsFromIdentity(s.identity)
+	out := &nodev1.ForwardedAuthority{
+		Kind:         string(a.Kind),
+		UserId:       a.UserId,
+		PrimaryEmail: a.PrimaryEmail,
+		Role:         string(a.Role),
+		LocalDev:     a.LocalDev,
+	}
+	if !a.BadgeExpires.IsZero() {
+		out.BadgeExpUnix = a.BadgeExpires.Unix()
+	}
+	return out
+}
+
+func authorityFromProto(p *nodev1.ForwardedAuthority) *auth.ForwardedAuthority {
+	if p == nil {
+		return nil
+	}
+	out := &auth.ForwardedAuthority{
+		Kind:         auth.AuthorityKind(p.GetKind()),
+		UserId:       p.GetUserId(),
+		PrimaryEmail: p.GetPrimaryEmail(),
+		Role:         auth.Role(p.GetRole()),
+		LocalDev:     p.GetLocalDev(),
+	}
+	if exp := p.GetBadgeExpUnix(); exp != 0 {
+		out.BadgeExpires = time.Unix(exp, 0)
+	}
+	return out
 }
 
 // extractPartitionFromEnvelope is a no-op post-#56 phase 8. The

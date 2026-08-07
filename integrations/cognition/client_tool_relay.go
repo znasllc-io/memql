@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/events"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
@@ -84,11 +85,9 @@ const (
 type pendingClientToolCall struct {
 	requestId string
 	createdAt time.Time
-	// authClaims / partition are passed back to ForwardContinuation for
-	// parity with the original AgentGenerateTurn forward. Internal
-	// relay traffic runs without end-user claims.
-	authClaims map[string]string
-	partition  string
+	// partition is passed back to ForwardContinuation so the agent's parked
+	// waiter resumes in the originating tenant.
+	partition string
 }
 
 // startClientToolRelay subscribes cognition to clientToolResponse
@@ -161,11 +160,13 @@ func (c *CognitionIntegration) relayClientToolCall(
 	// event flattens through the graph bus and arrives without
 	// partition context), so it has to pin the value here.
 	//
-	// authClaims stays nil for now: cognition-originated forwards
-	// don't carry an end-user principal -- the agent node already
-	// authenticated the original request before the parked
-	// clientToolWaiter was registered, and the continuation only
-	// needs to find that waiter (keyed by requestId).
+	// No principal is recorded: this continuation asserts
+	// auth.InternalAuthority() at send time (memql#3205). The agent node
+	// already authenticated the original request before the parked
+	// clientToolWaiter was registered, and the continuation only needs to
+	// find that waiter (keyed by requestId) -- it binds no actor and
+	// persists nothing. Under the contract that is a VALUE the receiver
+	// accepts, not the absent claims map it used to be.
 	partition := memqlengine.PartitionFromContext(ctx)
 	c.pendingClientToolCalls.Store(callId, &pendingClientToolCall{
 		requestId: requestId,
@@ -377,7 +378,7 @@ func (c *CognitionIntegration) handleClientToolResponse(event events.Event) {
 
 	if err := c.agentForwarder.ForwardContinuation(
 		entry.requestId,
-		entry.authClaims,
+		auth.InternalAuthority(),
 		entry.partition,
 		resultEnvelope,
 	); err != nil {

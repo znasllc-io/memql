@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/znasllc-io/memql/component/auth"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/node"
 	"github.com/znasllc-io/memql/integrations"
@@ -99,15 +100,17 @@ func (c *staticClaimer) Claim(context.Context, string, string) bool {
 // channel carrying one successful AgentGenerateTurnComplete so the dispatch
 // runs end-to-end. Counts Forward calls (= dispatched agent turns).
 type fakeTurnForwarder struct {
-	mu    sync.Mutex
-	calls int
+	mu            sync.Mutex
+	calls         int
+	lastAuthority *auth.ForwardedAuthority
 }
 
 func (f *fakeTurnForwarder) Forward(
-	_ context.Context, _ string, _ node.NodeType, _ map[string]string, _ string, _ *memqlv1.MemqlClientMessage,
+	_ context.Context, _ string, _ node.NodeType, authority *auth.ForwardedAuthority, _ string, _ *memqlv1.MemqlClientMessage,
 ) (<-chan *memqlv1.MemqlServerMessage, error) {
 	f.mu.Lock()
 	f.calls++
+	f.lastAuthority = authority
 	f.mu.Unlock()
 	ch := make(chan *memqlv1.MemqlServerMessage, 1)
 	ch <- &memqlv1.MemqlServerMessage{
@@ -122,9 +125,17 @@ func (f *fakeTurnForwarder) Forward(
 }
 
 func (f *fakeTurnForwarder) ForwardContinuation(
-	string, map[string]string, string, *memqlv1.MemqlClientMessage,
+	string, *auth.ForwardedAuthority, string, *memqlv1.MemqlClientMessage,
 ) error {
 	return nil
+}
+
+// forwardedAuthority returns the assertion the last dispatch carried, so a
+// test can prove the planner names its own system actor (memql#3205).
+func (f *fakeTurnForwarder) forwardedAuthority() *auth.ForwardedAuthority {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.lastAuthority
 }
 
 func (f *fakeTurnForwarder) forwardCount() int {

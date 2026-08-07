@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"google.golang.org/protobuf/proto"
 
@@ -23,7 +24,7 @@ type AgentForwarder interface {
 		ctx context.Context,
 		requestId string,
 		targetType node.NodeType,
-		authClaims map[string]string,
+		authority *auth.ForwardedAuthority,
 		partition string,
 		envelope *memqlv1.MemqlClientMessage,
 	) (<-chan *memqlv1.MemqlServerMessage, error)
@@ -34,7 +35,7 @@ type AgentForwarder interface {
 	// node whose parked tool loop is waiting for it.
 	ForwardContinuation(
 		requestId string,
-		authClaims map[string]string,
+		authority *auth.ForwardedAuthority,
 		partition string,
 		envelope *memqlv1.MemqlClientMessage,
 	) error
@@ -193,12 +194,12 @@ func (c *CognitionIntegration) forwardTurnToAgent(
 	// Mirror the Plan path: forward the originating user's identity when ctx
 	// carries one, falling back to the cognition system-actor so the actor
 	// is never empty. (memql#1107)
-	authClaims := forwardedAuthClaimsForTurn(ctx)
+	authority := forwardedAuthorityForTurn(ctx)
 	respCh, err := c.agentForwarder.Forward(
 		ctx,
 		requestId,
 		node.NodeTypeAgent,
-		authClaims,
+		authority,
 		partition,
 		envelope,
 	)
@@ -219,31 +220,44 @@ func (c *CognitionIntegration) forwardTurnToAgent(
 	return c.consumeAgentTurnStream(ctx, requestId, partitionId, participantId, relayAgentId, respCh)
 }
 
-// forwardedAuthClaimsForTurn builds the auth-claims map forwarded
-// alongside an AgentGenerateTurnMsg so the receiving agent node
-// reconstructs an actor on its ctx (via auth.ContextWithForwardedClaims).
-// Without an actor the agent's tool-dispatch persistence -- the taskstamp
-// Stamper's ad-hoc Plan/Task creation and the safety DecisionRecorder --
-// fails with "no actor found in context".
+// forwardedAuthorityForTurn builds the mesh forwarded-auth assertion
+// (memql#3205) carried alongside an AgentGenerateTurnMsg, so the receiving
+// agent node binds an actor. Without one the agent's tool-dispatch persistence
+// -- the taskstamp Stamper's ad-hoc Plan/Task creation and the safety
+// DecisionRecorder -- fails with "no actor found in context" (memql#1107).
 //
-// Preference: the originating user's identity (BFF -> cognition forwards
-// it on the inbound stream, so it rides this ctx). When ctx carries no
-// usable principal -- e.g. greet-on-join or other cognition-initiated
-// turns with no end-user behind them -- fall back to the cognition
-// system-actor so the forwarded map is never empty. Mirrors the
-// system-actor claims the post-approval Plan dispatch forwards in
-// integrations/planner/plan_execution.go. (memql#1107)
-func forwardedAuthClaimsForTurn(ctx context.Context) map[string]string {
-	if identity, err := auth.UserIdentityFromContext(ctx); err == nil {
-		if claims := auth.ForwardedClaimsFromIdentity(identity); len(claims) > 0 {
-			return claims
+// Note what is NOT here: no branch reconstructs a principal from raw claims.
+// The predecessor did, falling back to {"sub": systemActorId, "role":
+// "system"} on the wire, which the receiver then trusted through
+// FallbackFromClaims. Under the contract the sender asserts a KIND and the
+// receiver decides what that binds.
+func forwardedAuthorityForTurn(ctx context.Context) *auth.ForwardedAuthority {
+	// Preferred: re-assert the authority this request arrived with, verbatim.
+	// This is a two-hop chain (BFF -> cognition -> agent), and rebuilding from
+	// the AccessContext would keep the clamped role but drop a badge grant's
+	// expiry, leaving the agent node unable to gate on it.
+	if inbound := auth.ForwardedAuthorityFromContext(ctx); inbound != nil {
+		return inbound
+	}
+
+	// Co-resident origin: no inbound forward, but the direct path resolved an
+	// actor. Its role is already post-ceiling (applyBadgeRoleCeiling runs
+	// inside LoadFromClaims), so the ceiling is provably applied; what is not
+	// carried is the expiry instant, because an AccessContext does not hold
+	// one. The exposure is bounded -- the originating stream's badgeGate has
+	// already admitted THIS envelope, and the forward happens within its
+	// handling.
+	if ac, ok := auth.AccessFromContext(ctx); ok && ac != nil && ac.UserId != "" {
+		if authority, err := auth.PrincipalAuthority(ac, time.Time{}, false); err == nil {
+			return authority
 		}
 	}
-	return map[string]string{
-		"sub":   systemActorId,
-		"email": systemActorId,
-		"role":  "system",
-	}
+
+	// No principal at all -- greet-on-join and other cognition-initiated
+	// turns. The receiver pins the role for this kind and validates the
+	// subject against its own allowlist, so naming the cognition actor here
+	// selects an audit identity rather than asserting a privilege.
+	return auth.SystemAuthority(systemActorId)
 }
 
 // agentReplyResult is the outcome of a forwarded agent turn: the

@@ -239,6 +239,60 @@ message CapabilityResponse {
 // AI / voice request forwarding
 // ---------------------------------------------------------------------------
 
+// ForwardedAuthority is the mesh's forwarded-auth contract (memql#3205).
+//
+// It carries the sender's already-resolved authorization DECISION, not the
+// inputs to it. The BFF has run ensureAccess, applied applyBadgeRoleCeiling,
+// and absorbed any mid-stream RotateAuth; `role` below is that final answer.
+// The receiver re-derives nothing, which is the whole design: a receiver cannot
+// safely re-derive a decision from inputs it cannot prove it received in full.
+//
+// This is a SUB-MESSAGE rather than fields on AiForwardRequest because proto3
+// has no `required` and a singular scalar has no presence -- an absent `kind`
+// and a present "" are the same bytes. A message field has presence
+// unconditionally, so `authority == nil` is a state the receiver can refuse
+// on, and the values are indivisible: a ceiling cannot arrive without its
+// expiry.
+//
+// Predecessor: a map<string,string> of raw JWT claims. It carried the caller's
+// principal but not `class` / `role_ceiling`, so a forwarded badge session
+// resolved its UNCLAMPED stored role -- and because an absent `class` is
+// indistinguishable from "not a badge session", the receiver could not detect
+// the loss. Adding those two claims OPTIONALLY does not fix it; absence is
+// still unreadable. See docs/internal/design/mesh-forwarded-auth-contract.md.
+message ForwardedAuthority {
+  // kind is mandatory and explicit. "No badge" is a VALUE, never a missing
+  // key. One of:
+  //   "user"     -- ordinary end-user principal
+  //   "badge"    -- shared-terminal operator grant; badge_exp_unix is
+  //                 mandatory, non-zero, and enforced by the receiver
+  //   "system"   -- named service principal (no end user behind the work).
+  //                 The receiver PINS the role and validates user_id against
+  //                 its own allowlist of known system actors, so the sender
+  //                 chooses among them but cannot invent one.
+  //   "internal" -- no principal at all; the receiver binds NO actor
+  string kind = 1;
+
+  // Resolved AccessContext fields. Meaningful for "user" and "badge"; for
+  // "system", user_id selects from the receiver's allowlist and role is
+  // ignored.
+  string user_id = 2;
+  string primary_email = 3;
+  // role is POST-ceiling and final. The receiver never re-clamps it, and
+  // never sees `class` / `role_ceiling` with which it could try.
+  string role = 4;
+
+  // badge_exp_unix is the grant's exp. Required and non-zero when
+  // kind == "badge"; the receiver refuses the request once it has passed.
+  // Without it on the wire an expired grant would be rejected on the direct
+  // stream (badgeGate) and honored on every forwarded AiChat / CallTool.
+  int64 badge_exp_unix = 5;
+
+  // local_dev marks a principal synthesised by the no-auth dev shim so the
+  // provenance is visible in worker logs. Carries no authorization meaning.
+  bool local_dev = 6;
+}
+
 // AiForwardRequest carries an AI / voice envelope from a BFF node to a
 // worker node that has the required provider registered. The body is the
 // proto-serialized MemqlClientMessage the BFF originally received from
@@ -249,15 +303,19 @@ message CapabilityResponse {
 // type) keeps component/node/ independent of component/grpc/: the node
 // layer just moves bytes; the grpc layer owns the wire-type semantics.
 //
-// `auth` carries the originating principal's claims (subject, email,
-// role) so the worker can reconstruct a TokenInfo and enforce the same
-// ACLs it would have applied if the client had connected directly.
+// `authority` is MANDATORY: a request that arrives without one is REFUSED by
+// the worker. Field 2 (the old raw-claims map) is reserved rather than kept
+// alongside it -- with both present, a request carrying claims and no
+// authority would still be constructible, which would make the refusal a
+// convention instead of a structural property.
 message AiForwardRequest {
   string request_id = 1;
-  map<string, string> auth = 2;
+  reserved 2;
+  reserved "auth";
   reserved 3;
   reserved "partition";
   bytes memql_envelope = 4;  // Serialized memqlv1.MemqlClientMessage
+  ForwardedAuthority authority = 5;
 }
 
 // AiForwardResponse carries a worker's response back to the originating

@@ -8,6 +8,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	"github.com/znasllc-io/memql/component/auth"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/node"
 	nodev1 "github.com/znasllc-io/memql/component/node/gen"
@@ -26,7 +27,7 @@ func TestAiForwardRouter_NoPeerAvailable(t *testing.T) {
 	router := NewAiForwardRouter(peerMgr, testLogger())
 
 	_, err := router.Forward(nil, "req-1", node.NodeTypeVoice,
-		map[string]string{"sub": "alice"},
+		testUserAuthority(),
 		"default",
 		&memqlv1.MemqlClientMessage{MessageId: "req-1"},
 	)
@@ -166,7 +167,7 @@ func TestAiForwardRouter_ForwardContinuation_NoInflight(t *testing.T) {
 
 	err := router.ForwardContinuation(
 		"never-opened",
-		map[string]string{"sub": "alice"},
+		testUserAuthority(),
 		"default",
 		&memqlv1.MemqlClientMessage{MessageId: "chunk-1"},
 	)
@@ -236,5 +237,16 @@ func TestIsTerminalServerPayload_StreamComplete(t *testing.T) {
 	delta := &memqlv1.MemqlServerMessage_AiTranscribeStreamDelta{}
 	if isTerminalServerPayload(delta) {
 		t.Error("AiTranscribeStreamDelta must not be terminal")
+	}
+}
+
+// testUserAuthority is the ordinary end-user assertion these router tests
+// carry. The router validates the authority before it touches the peer table
+// (memql#3205), so a nil here would fail every case for the wrong reason.
+func testUserAuthority() *auth.ForwardedAuthority {
+	return &auth.ForwardedAuthority{
+		Kind:   auth.AuthorityKindUser,
+		UserId: "v1:identity:user:alice",
+		Role:   auth.RoleWriter,
 	}
 }

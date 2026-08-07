@@ -122,11 +122,14 @@ func (s *streamSession) proxyAIStream(
 	ctx := s.stream.Context()
 	correlate := envelope.GetMessageId()
 
-	claims := s.forwardedAuthClaims()
+	authority, err := s.forwardedAuthority()
+	if err != nil {
+		return s.sendQueryError(requestId, correlate, codes.PermissionDenied, err.Error())
+	}
 	partition := extractPartitionFromEnvelope(envelope)
 	stampEnvelopeProvenance(ctx, envelope)
 
-	respCh, err := s.service.aiForwarder.Forward(ctx, requestId, target, claims, partition, envelope)
+	respCh, err := s.service.aiForwarder.Forward(ctx, requestId, target, authority, partition, envelope)
 	if err != nil {
 		return s.sendQueryError(requestId, correlate, codes.Unavailable, err.Error())
 	}

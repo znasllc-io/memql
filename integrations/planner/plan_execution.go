@@ -263,10 +263,17 @@ func (p *PlannerIntegration) handlePlanPreempt(event events.Event) {
 			AgentPreemptTurn: &memqlv1.AgentPreemptTurnMsg{RequestId: requestId},
 		},
 	}
-	// Fire on the in-flight forwarded stream (keyed by requestId). authClaims
-	// + partition are unused by the agent-side preempt handler (it just sets
-	// the pause flag), so empty is fine.
-	if err := p.agentForwarder.ForwardContinuation(requestId, nil, "", envelope); err != nil {
+	// Fire on the in-flight forwarded stream (keyed by requestId). The
+	// agent-side preempt handler only sets a pause flag -- it binds no actor
+	// and persists nothing -- so this asserts auth.InternalAuthority():
+	// "no principal" as an explicit VALUE (memql#3205). It used to pass nil,
+	// which under the contract is the one thing the receiver refuses.
+	//
+	// The refusal path matters here specifically: this continuation reuses the
+	// PARENT turn's requestId, so a terminal refusal would close the parent's
+	// response channel and blank an in-flight reply. See isContinuationPayload
+	// in component/grpc/ai_forward.go.
+	if err := p.agentForwarder.ForwardContinuation(requestId, auth.InternalAuthority(), "", envelope); err != nil {
 		p.logger.Warn("plan preempt: forward continuation failed",
 			"plan_id", fields.ID,
 			"request_id", requestId,
@@ -596,31 +603,28 @@ func (p *PlannerIntegration) executeApprovedPlan(ctx context.Context, planId, re
 		partition = "default"
 	}
 
-	// Pass the planner's system-actor claims through the forwarder so
-	// they ride alongside the AgentGenerateTurnMsg into the agent
-	// node's gRPC context. The agent's downstream tool dispatch
-	// persists v1:worker:invocation rows via createWorkerInvocation,
-	// and the engine's pre-insert path requires an actor in context to
-	// stamp createdBy. An earlier `nil` here ("system-initiated
-	// dispatch; no end-user principal") meant invocation persistence
-	// silently failed with "no actor found in context" -- the row
-	// never landed, so the planner's invocationsForPlan came
-	// back empty, and the Plan was stamped failed even when the
-	// worker tool succeeded on the user's machine.
+	// Assert the planner's system actor so the agent node binds one. The
+	// agent's downstream tool dispatch persists v1:worker:invocation rows via
+	// createWorkerInvocation, and the engine's pre-insert path requires an
+	// actor in context to stamp createdBy. An earlier `nil` here
+	// ("system-initiated dispatch; no end-user principal") meant invocation
+	// persistence silently failed with "no actor found in context" -- the row
+	// never landed, so the planner's invocationsForPlan came back empty, and
+	// the Plan was stamped failed even when the worker tool succeeded on the
+	// user's machine.
 	//
-	// systemActorId is unique per integration (see contextWithSystemActor
-	// at the bottom of this file) so the audit trail can tell apart
-	// "the planner stamped this row" from "cognition stamped this row".
-	authClaims := map[string]string{
-		"sub":   systemActorId,
-		"email": systemActorId,
-		"role":  "system",
-	}
+	// systemActorId is unique per integration (see contextWithSystemActor at
+	// the bottom of this file) so the audit trail can tell apart "the planner
+	// stamped this row" from "cognition stamped this row". Under the mesh
+	// forwarded-auth contract (memql#3205) that id is validated against the
+	// receiver's own allowlist and the role is pinned receiver-side, so naming
+	// it here selects an audit identity rather than asserting a privilege --
+	// which is what the predecessor's wire-carried role:"system" did.
 	respCh, err := p.agentForwarder.Forward(
 		ctx,
 		requestId,
 		node.NodeTypeAgent,
-		authClaims,
+		auth.SystemAuthority(systemActorId),
 		partition,
 		envelope,
 	)
