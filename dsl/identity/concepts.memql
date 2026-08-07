@@ -71,7 +71,7 @@ concept auditEvent {
 /// be replayed across sessions. Global scope: token redemption is unauthenticated and must work
 /// without partition context.
 concept authCode {
-  code                string!  @description("Plaintext one-time auth code returned to the OAuth client via redirectURI. Held server-side so the token-exchange handler can verify the presented code value matches; never logged, never surfaced in audit detail. Hash is the lookup key, plaintext is the equality check on redemption.")
+  code                string!  @secret  @description("Plaintext one-time auth code returned to the OAuth client via redirectURI. Held server-side so the token-exchange handler can verify the presented code value matches; never logged, never surfaced in audit detail. Hash is the lookup key, plaintext is the equality check on redemption. The tree's only stored-cleartext credential -- @secret redacts a rejected value in the function-args validator ONLY and matches by ARGUMENT NAME; see Concept.SecretFields for the full scope.")
   codeHash            string!  @description("SHA-256 hex digest of the plaintext code. Primary lookup key in the token-exchange path -- avoids equality lookups on the plaintext.")
   clientId            string!  @description("OAuth client identifier the code was minted for. Token-exchange MUST verify the redeeming client matches; mismatched client = reject and audit as code_misuse.")
   redirectURI         string!  @description("redirect_uri value supplied at /authorize, exact-matched against the registered URI for clientId. Token-exchange MUST verify the redeeming request's redirect_uri matches; mismatched = reject.")

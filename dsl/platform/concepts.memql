@@ -10,7 +10,7 @@ use planner.concepts.{ plan }
 @description("Instance-wide encrypted secret. Lives in the reserved _system partition (via @scope(\"global\")). The cleartext value is NEVER stored -- only a NaCl secretbox ciphertext (base64(nonce||ct)) under MEMQL_MASTER_KEY and a short fingerprint for UI display. Used for instance-level API keys, OAuth client secrets, Azure/Graph credentials, etc. For per-tenant overrides (BYOK) use v1:platform:partitionSecret; the resolver falls back partition -> global automatically.")
 concept globalSecret {
   name            string!  @description("Secret name (uppercase with underscores by convention).")
-  encryptedValue  string!  @description("Base64-encoded nonce || NaCl-secretbox ciphertext, sealed under MEMQL_MASTER_KEY. Opaque -- never rendered to humans.")
+  encryptedValue  string!  @secret  @description("Base64-encoded nonce || NaCl-secretbox ciphertext, sealed under MEMQL_MASTER_KEY. Opaque -- never rendered to humans. @secret redacts a rejected value in the function-args validator ONLY, and matches by ARGUMENT NAME, so a mutation writing encryptedValue: args.somethingElse is not covered -- see Concept.SecretFields for the full scope.")
   fingerprint     string!  @description("Last 4 chars of the cleartext, prefixed with '...'. For UI display only; lets operators tell rotated secrets apart without leaking the value.")
   kind            string    @description("Optional tag to group secrets by type. Examples: 'vendor_api_key', 'oauth_secret', 'smtp_password'. Folded router API keys use 'vendor_api_key'.")
   description     string    @description("Human-readable description of the secret's purpose.")
@@ -30,7 +30,12 @@ concept globalVariable {
 
 // ---- concepts/v1/platform/globalSecret/seed.memql ----
 
-@actor("system")
+// (An orphaned `@actor("system")` sat here -- the sole surviving line of the
+// retired globalSecret seed file. With no declaration of its own to bind to,
+// it floated down onto the NEXT declaration, v1:platform:partitionSecret,
+// whose build then failed with `unknown concept annotation @actor` and was
+// dropped by the unified loader as a recorded skip. Found while annotating
+// that concept's encryptedValue for issue #3181.)
 
 // No default secret seeds. Operators populate v1:platform:globalSecret via:
 //   * `make secrets-seed` (reads ~/.memql/dev-secrets.yaml locally)
@@ -46,7 +51,7 @@ concept globalVariable {
 @description("Partition-scoped encrypted secret. Holds per-tenant sensitive values (BYOK vendor API keys, per-tenant Twilio/SMTP creds, etc.). Same wire shape as v1:platform:globalSecret, different scope. The cleartext value is NEVER stored -- only a NaCl secretbox ciphertext under MEMQL_MASTER_KEY and a fingerprint. When the partition-scoped resolver (resolveSecret) cannot find a row, it falls back to v1:platform:globalSecret so a tenant's BYOK key wins over the instance default but the instance default is always available.")
 concept partitionSecret {
   name            string!  @description("Secret name (uppercase with underscores by convention).")
-  encryptedValue  string!  @description("Base64-encoded nonce || NaCl-secretbox ciphertext, sealed under MEMQL_MASTER_KEY. Opaque -- never rendered to humans.")
+  encryptedValue  string!  @secret  @description("Base64-encoded nonce || NaCl-secretbox ciphertext, sealed under MEMQL_MASTER_KEY. Opaque -- never rendered to humans. @secret redacts a rejected value in the function-args validator ONLY, and matches by ARGUMENT NAME, so a mutation writing encryptedValue: args.somethingElse is not covered -- see Concept.SecretFields for the full scope.")
   fingerprint     string!  @description("Last 4 chars of the cleartext, prefixed with '...'. For UI display only.")
   kind            string    @description("Optional tag to group secrets by type. Examples: 'vendor_api_key', 'oauth_secret'. BYOK vendor keys use 'vendor_api_key'.")
   description     string    @description("Human-readable description of the secret's purpose.")
