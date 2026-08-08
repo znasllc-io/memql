@@ -62,6 +62,7 @@ import { ClustersTreeProvider, type ClusterNode } from './views/clustersTree.js'
 import { ConceptsTreeProvider } from './views/conceptsTree.js';
 import { RunsTreeProvider, type RunsTreeNode } from './views/runsTree.js';
 import { AutomationRunPanel, type AutomationPanelHost } from './webview/automationPanel.js';
+import { ClusterPanel } from './webview/clusterPanel.js';
 import { ConceptPanel } from './webview/conceptPanel.js';
 import { ResultPanel, RunPanel, conceptMap, type RunPanelHost } from './webview/runPanel.js';
 
@@ -228,6 +229,22 @@ function registerRuntimeSurface(context: ExtensionContext): void {
         return;
       }
       await writeCluster(clustersTree, () => upsertCluster(clustersPath, edited, originalName));
+    }),
+    // The Cluster tab (memql#3312): topology, deployment history, and the
+    // deploy actions. Reached from the Clusters tree's inline action, which
+    // supplies the node -- and from the palette, which cannot, so it falls
+    // back to the selected cluster rather than doing nothing. That fallback
+    // is why this command carries the trust clause instead of
+    // "when": "false" like the other argument-taking commands.
+    commands.registerCommand('memql.cluster.open', async (node?: ClusterNode) => {
+      if (connections === undefined) {
+        return;
+      }
+      const target = node ?? (await pickCluster(clustersPath));
+      if (target === undefined || target.cluster.name === '') {
+        return;
+      }
+      ClusterPanel.open(context, connections, target.cluster.name);
     })
   );
 
