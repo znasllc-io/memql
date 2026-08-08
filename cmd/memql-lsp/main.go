@@ -71,7 +71,10 @@ func run(args []string) int {
 	}
 
 	srv := newServer(workspaceRoot, log)
-	glspSrv := glspserver.NewServer(srv.handler(), lsName, false)
+	// newCustomHandler wraps the generated protocol.Handler so the custom
+	// `memql/runnableConstructs` request is reachable; every standard LSP
+	// method delegates through it untouched. See runnable.go.
+	glspSrv := glspserver.NewServer(newCustomHandler(srv), lsName, false)
 	if err := glspSrv.RunStdio(); err != nil {
 		log.Errorf("memql-lsp exited with error: %s", err)
 		return 1
