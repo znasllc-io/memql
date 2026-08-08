@@ -7,14 +7,21 @@
 //
 // The webview runs under a strict CSP with a per-load nonce: row data is
 // untrusted, and view-kit escapes it, but a CSP means an escaping bug cannot
-// become script execution.
+// become script execution. The postMessage boundary is untrusted too --
+// webview content is HTML/JS this file's own render() emits, but nothing
+// stops a malformed or malicious message from arriving on that channel, so
+// the handler below validates its shape at runtime rather than trusting the
+// compile-time `msg` type.
 //
-// Staleness: loadPage() and selectRow() (row-detail fetch) each race an
-// async round-trip against later events -- a Reload click, a faster second
-// click, or the connection switching clusters underneath the panel. All
-// three are guarded by ConceptPanelState's generation counters (see
-// conceptPanelState.ts); this file's job is only to wire the connection
-// lifecycle and the webview's HTML/postMessage boundary around it.
+// Staleness + concurrency: loadPage() and selectRow() (row-detail fetch)
+// each race an async round-trip against later events -- a Reload click, a
+// faster second click on a different row, the connection switching
+// clusters underneath the panel, or (for loadPage specifically) a second
+// "Load more" click before the first response lands. All four are guarded
+// by ConceptPanelState (see conceptPanelState.ts -- generation counters for
+// supersession, a separate in-flight marker for loadPage's concurrency
+// case); this file's job is only to wire the connection lifecycle and the
+// webview's HTML/postMessage boundary around it.
 
 import * as vscode from "vscode";
 import { randomBytes } from "node:crypto";
@@ -25,27 +32,10 @@ import { renderDetail, renderRowList, renderToHtml, escapeHtml } from "@znasllc-
 
 import type { ConnectionManager } from "../connection/manager.js";
 import { ConceptPanelState } from "./conceptPanelState.js";
+import { flattenForList } from "./rowProjection.js";
 
 const PAGE_SIZE = 200;
 const NOT_CONNECTED_MESSAGE = "Not connected. Select a cluster in the Clusters view.";
-
-// flattenForList projects a wire node into the flat shape a display card names
-// its fields on. The wire keeps payload nested; the display card names payload
-// fields directly, so the list needs the merge. Detail rendering deliberately
-// does NOT flatten -- it shows the nesting.
-function flattenForList(node: Row): Row {
-  const out: Row = {};
-  for (const [k, v] of Object.entries(node)) {
-    if (k === "payload" && v !== null && typeof v === "object" && !Array.isArray(v)) {
-      for (const [pk, pv] of Object.entries(v as Record<string, unknown>)) {
-        out[pk] = pv;
-      }
-      continue;
-    }
-    out[k] = v;
-  }
-  return out;
-}
 
 export class ConceptPanel {
   private static readonly open_ = new Map<string, ConceptPanel>();
@@ -53,6 +43,7 @@ export class ConceptPanel {
   private readonly panel: vscode.WebviewPanel;
   private readonly state = new ConceptPanelState<Row>();
   private readonly disposeConnectionListener: () => void;
+  private concept: Concept;
 
   static open(
     context: vscode.ExtensionContext,
@@ -61,6 +52,12 @@ export class ConceptPanel {
   ): void {
     const existing = ConceptPanel.open_.get(concept.id);
     if (existing !== undefined) {
+      // The Concepts tree can hand us a fresher descriptor for an
+      // already-open tab (e.g. a refresh picked up a changed displayCard).
+      // Adopt it and re-render BEFORE reveal(), or the tab would keep
+      // rendering against the stale concept it was constructed with.
+      existing.concept = concept;
+      existing.render();
       existing.panel.reveal();
       return;
     }
@@ -71,8 +68,9 @@ export class ConceptPanel {
   private constructor(
     context: vscode.ExtensionContext,
     private readonly connections: ConnectionManager,
-    private readonly concept: Concept,
+    concept: Concept,
   ) {
+    this.concept = concept;
     this.panel = vscode.window.createWebviewPanel(
       "memqlConcept",
       `Concept: ${concept.entity}`,
@@ -104,12 +102,19 @@ export class ConceptPanel {
     );
 
     this.panel.webview.onDidReceiveMessage(
-      (msg: { type: string; rowId?: string }) => {
-        if (msg.type === "selectRow" && msg.rowId !== undefined) {
-          void this.selectRow(msg.rowId);
-        } else if (msg.type === "loadMore") {
+      // The webview posts plain JSON; treat it as untrusted input rather
+      // than trusting the compile-time annotation. `msg.type` on a
+      // null/non-object message would throw, and `rowId !== undefined`
+      // would admit any non-undefined value (a number, an object) straight
+      // into getRowByConceptAndId -- narrow both before use.
+      (msg: unknown) => {
+        if (msg === null || typeof msg !== "object") return;
+        const { type, rowId } = msg as { type?: unknown; rowId?: unknown };
+        if (type === "selectRow" && typeof rowId === "string") {
+          void this.selectRow(rowId);
+        } else if (type === "loadMore") {
           void this.loadPage();
-        } else if (msg.type === "reload") {
+        } else if (type === "reload") {
           this.state.reset();
           this.render();
           void this.loadPage();
@@ -131,10 +136,12 @@ export class ConceptPanel {
       return;
     }
     // Snapshot the cursor synchronously: it must reflect the page already
-    // loaded at call time, not whatever loadPage()'s own await lets it drift
-    // to (loadPage never runs two fetches concurrently against the same
-    // cursor, but reading it inside the closure at call time -- rather than
-    // whenever the closure happens to run -- keeps that invariant explicit).
+    // loaded at call time, not whatever loadPage()'s own await lets it
+    // drift to. ConceptPanelState.loadPage() itself refuses to run a
+    // second fetch concurrently against the same generation (a second
+    // "Load more" click before this one resolves is dropped, not
+    // double-fetched), so this snapshot is never read by two overlapping
+    // fetches.
     const cursor = this.state.nextCursor;
     const changed = await this.state.loadPage(() =>
       browseConceptPage(query, this.concept.id, {
@@ -142,15 +149,21 @@ export class ConceptPanel {
         ...(cursor === "" ? {} : { cursor }),
       }),
     );
-    // A false return means this settle lost the race (Reload or a cluster
-    // switch ran first) -- ConceptPanelState already discarded it without
-    // writing state, so render() must not run either, or a superseded page
-    // would flash onto a panel that has already moved on.
+    // A false return means this settle lost the race (a concurrent
+    // in-flight load, Reload, or a cluster switch) -- ConceptPanelState
+    // already discarded it without writing state, so render() must not run
+    // either, or a superseded/duplicate page would flash onto a panel that
+    // has already moved on.
     if (changed) this.render();
   }
 
   private async selectRow(rowId: string): Promise<void> {
     const token = this.state.beginSelection(rowId);
+    // Render immediately: beginSelection() already wrote the new
+    // selectedRowId, so the clicked row highlights right away instead of
+    // waiting on the detail round-trip (which may be slow, may fail, or may
+    // end up superseded and never render again at all).
+    this.render();
     const query = this.connections.query;
     if (query === undefined) {
       this.state.setConnectionError(NOT_CONNECTED_MESSAGE);
@@ -162,8 +175,9 @@ export class ConceptPanel {
     );
     // Same discard-must-not-render rule as loadPage(): if the user clicked a
     // different row (or Reload, or the connection changed) while this
-    // fetch was in flight, resolveSelection() already dropped it -- render()
-    // must not paint this row's detail over the newer selection's.
+    // fetch was in flight, resolveSelection() already dropped it -- this
+    // second render() must not paint this row's detail over the newer
+    // selection's.
     if (changed) this.render();
   }
 
@@ -176,10 +190,19 @@ export class ConceptPanel {
         this.state.selectedRowId,
       ),
     );
+    // "Select a row." (nothing chosen yet) and "Row not found." (a row was
+    // chosen but getRowByConceptAndId came back null -- deleted between the
+    // list load and the click, or a bug) are different situations; folding
+    // them into the same "detail === null" placeholder made a genuine miss
+    // indistinguishable from never having clicked anything.
     const detailHtml =
-      this.state.detail === null
+      this.state.selectedRowId === undefined
         ? '<div class="vk-empty">Select a row.</div>'
-        : renderToHtml(renderDetail(this.state.detail));
+        : this.state.detail === null
+          ? this.state.error === ""
+            ? '<div class="vk-empty">Row not found.</div>'
+            : '<div class="vk-empty">Failed to load row.</div>'
+          : renderToHtml(renderDetail(this.state.detail));
 
     const errorHtml =
       this.state.error === ""

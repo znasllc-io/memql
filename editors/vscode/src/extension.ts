@@ -120,8 +120,15 @@ function registerRuntimeSurface(context: ExtensionContext): void {
   );
 
   context.subscriptions.push(
-    commands.registerCommand('memql.concepts.open', (concept: Concept) => {
-      if (connections === undefined) {
+    // Not palette-invokable (contributes.menus.commandPalette hides it with
+    // "when": "false") since it needs a Concept argument the palette can't
+    // supply -- the Concepts tree item's inline command is the only wiring.
+    // Guard on `concept` anyway: belt and braces against any future caller
+    // (or a manifest edit that forgets the palette exclusion) invoking this
+    // with no argument, which would otherwise throw inside ConceptPanel.open
+    // on `concept.id`.
+    commands.registerCommand('memql.concepts.open', (concept?: Concept) => {
+      if (connections === undefined || concept === undefined) {
         return;
       }
       ConceptPanel.open(context, connections, concept);

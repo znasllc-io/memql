@@ -12,16 +12,26 @@
 // counters, so any in-flight loadPage()/resolveSelection() tied to the old
 // connection is discarded when it settles.
 //
+// loadPage() additionally guards a FOURTH case that is not a staleness
+// (supersession) problem at all: CONCURRENCY. Two "Load more" clicks landing
+// before the first response returns both capture the same generation and
+// the same cursor -- the generation check alone lets both through, since
+// neither is stale relative to the other, and the page gets appended twice.
+// A generation counter answers "is this the newest call", not "is a call
+// already running"; loadPage() tracks the latter separately (see
+// loadInFlightGeneration) and drops a call outright when one for the same
+// generation is already in flight, rather than issuing a duplicate fetch.
+//
 // Deliberately free of `vscode` imports so it is unit-testable with fake
 // fetch functions instead of a real SDK QueryClient / gRPC round-trip.
 // ConceptPanel owns one instance and adapts it to the webview; this module
 // owns only the row/detail/error/generation state machine, with no
 // rendering concerns.
-export class ConceptPanelState<Row> {
-  private rows: Row[] = [];
+export class ConceptPanelState<T> {
+  private rows: T[] = [];
   private cursor = "";
   private selection: string | undefined;
-  private rowDetail: Row | null = null;
+  private rowDetail: T | null = null;
   private errorMessage = "";
 
   // Bumped only by reset() (an external invalidating event: reload, or the
@@ -31,12 +41,22 @@ export class ConceptPanelState<Row> {
   // ConceptsCache.load().
   private listGeneration = 0;
 
+  // Set to the generation a loadPage() call is fetching for, and cleared
+  // once that same call settles. A second loadPage() call for the SAME
+  // generation is dropped at entry rather than starting a concurrent fetch
+  // -- this is the concurrency guard, distinct from listGeneration's
+  // staleness guard. Left untouched by reset(): once reset() bumps
+  // listGeneration, this field's old value no longer matches the new
+  // listGeneration, so a loadPage() call issued right after a reload/
+  // reconnect is never blocked by an old fetch that hasn't settled yet.
+  private loadInFlightGeneration: number | undefined;
+
   // Bumped by EVERY beginSelection() call, not just reset(). Selecting row
   // B must supersede an in-flight fetch for row A even though nothing
   // "invalidated" the panel -- the newer click IS the invalidation.
   private selectionGeneration = 0;
 
-  get nodes(): Row[] {
+  get nodes(): T[] {
     return this.rows;
   }
 
@@ -48,7 +68,7 @@ export class ConceptPanelState<Row> {
     return this.selection;
   }
 
-  get detail(): Row | null {
+  get detail(): T | null {
     return this.rowDetail;
   }
 
@@ -80,13 +100,21 @@ export class ConceptPanelState<Row> {
     this.errorMessage = message;
   }
 
-  // loadPage awaits `fetch()` and appends its page to the row list, unless
-  // reset() ran while `fetch()` was in flight -- in which case the response
-  // is discarded (neither the rows, the cursor, nor the error are written).
-  // Returns whether state changed, so the caller knows whether a render is
-  // warranted; a discard path returns false and writes nothing.
-  async loadPage(fetch: () => Promise<{ rows: Row[]; nextCursor: string }>): Promise<boolean> {
+  // loadPage awaits `fetch()` and appends its page to the row list, unless:
+  //   - a load for the current generation is ALREADY in flight (the
+  //     concurrency guard: two "Load more" clicks before the first
+  //     response lands must not both fetch and append the same page), or
+  //   - reset() ran while `fetch()` was in flight (the staleness guard).
+  // In either case the response is discarded -- neither the rows, the
+  // cursor, nor the error are written. Returns whether state changed, so
+  // the caller knows whether a render is warranted; a discard path returns
+  // false and writes nothing.
+  async loadPage(fetch: () => Promise<{ rows: T[]; nextCursor: string }>): Promise<boolean> {
+    if (this.loadInFlightGeneration === this.listGeneration) {
+      return false;
+    }
     const gen = this.listGeneration;
+    this.loadInFlightGeneration = gen;
     try {
       const page = await fetch();
       if (gen !== this.listGeneration) return false;
@@ -98,6 +126,13 @@ export class ConceptPanelState<Row> {
       if (gen !== this.listGeneration) return false;
       this.errorMessage = err instanceof Error ? err.message : String(err);
       return true;
+    } finally {
+      // Only clear the marker if it still belongs to THIS call. A reset()
+      // followed by a fresh loadPage() may already have written a newer
+      // generation into loadInFlightGeneration by the time this settles;
+      // clearing unconditionally would let a duplicate concurrent fetch
+      // start against that newer generation.
+      if (this.loadInFlightGeneration === gen) this.loadInFlightGeneration = undefined;
     }
   }
 
@@ -116,7 +151,7 @@ export class ConceptPanelState<Row> {
   // reset()) -- in which case the response is discarded (neither the
   // detail nor the error are written), so a slow fetch for a since-deselected
   // row can never paint over a newer selection's detail.
-  async resolveSelection(token: number, fetch: () => Promise<Row | null>): Promise<boolean> {
+  async resolveSelection(token: number, fetch: () => Promise<T | null>): Promise<boolean> {
     try {
       const detail = await fetch();
       if (token !== this.selectionGeneration) return false;

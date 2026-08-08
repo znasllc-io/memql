@@ -132,6 +132,9 @@
       { "command": "memql.concepts.open", "title": "memQL: Open Concept" }
     ],
     "menus": {
+      "commandPalette": [
+        { "command": "memql.concepts.open", "when": "false" }
+      ],
       "view/title": [
         { "command": "memql.clusters.add", "when": "view == memqlClusters", "group": "navigation@1" },
         { "command": "memql.clusters.refresh", "when": "view == memqlClusters", "group": "navigation@2" },

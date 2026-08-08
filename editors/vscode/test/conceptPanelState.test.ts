@@ -1,11 +1,13 @@
 // ConceptPanelState tests.
 //
-// ConceptPanelState carries the Concept panel's staleness guards: a page
-// response arriving after Reload (or a cluster switch), and a row-detail
-// response for a since-superseded selection. It is built free of `vscode`
-// imports specifically so it can be driven here with fake fetch functions
-// instead of a real SDK QueryClient / gRPC round-trip. See
-// conceptsCache.test.ts for the sibling guard on the Concepts tree.
+// ConceptPanelState carries the Concept panel's staleness guards (a page
+// response arriving after Reload / a cluster switch, and a row-detail
+// response for a since-superseded selection) plus loadPage's concurrency
+// guard (two "Load more" clicks before the first response lands must not
+// both append the same page). It is built free of `vscode` imports
+// specifically so it can be driven here with fake fetch functions instead
+// of a real SDK QueryClient / gRPC round-trip. See conceptsCache.test.ts
+// for the sibling guard on the Concepts tree.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -98,6 +100,62 @@ test("a non-stale loadPage() rejection sets the error message", async () => {
   assert.equal(changed, true);
   assert.equal(state.error, "boom");
   assert.deepEqual(state.nodes, []);
+});
+
+test("a second loadPage() call while one is already in flight is dropped, not double-fetched", async () => {
+  const state = new ConceptPanelState<{ id: string }>();
+
+  let fetchCalls = 0;
+  const pending = deferred<{ rows: { id: string }[]; nextCursor: string }>();
+  const first = state.loadPage(() => {
+    fetchCalls++;
+    return pending.promise;
+  });
+
+  // Simulate a second "Load more" click landing before the first response
+  // returns -- this must not start a second fetch against the same page.
+  const second = state.loadPage(() => {
+    fetchCalls++;
+    return Promise.resolve({ rows: [{ id: "must-not-be-called" }], nextCursor: "" });
+  });
+  assert.equal(await second, false, "the concurrent call must report no change");
+  assert.equal(fetchCalls, 1, "the second call's fetch must never run");
+
+  pending.resolve({ rows: [{ id: "a" }, { id: "b" }], nextCursor: "cursor-1" });
+  assert.equal(await first, true);
+  assert.deepEqual(
+    state.nodes,
+    [{ id: "a" }, { id: "b" }],
+    "the page must be appended exactly once, not twice",
+  );
+});
+
+test("loadPage() is not blocked by a still-in-flight call from a since-reset() generation", async () => {
+  const state = new ConceptPanelState<{ id: string }>();
+
+  const stale = deferred<{ rows: { id: string }[]; nextCursor: string }>();
+  const staleLoad = state.loadPage(() => stale.promise);
+
+  // reset() (Reload / a cluster switch) fires while `stale` is still in
+  // flight. A fresh loadPage() issued right after must be allowed to start
+  // immediately -- it must not be treated as "a load already in flight"
+  // just because the OLD generation's fetch hasn't settled yet.
+  state.reset();
+
+  let freshFetchCalls = 0;
+  const changed = await state.loadPage(() => {
+    freshFetchCalls++;
+    return Promise.resolve({ rows: [{ id: "fresh" }], nextCursor: "" });
+  });
+  assert.equal(changed, true);
+  assert.equal(freshFetchCalls, 1);
+  assert.deepEqual(state.nodes, [{ id: "fresh" }]);
+
+  // The stale fetch finally settles; it must still be discarded (staleness
+  // guard), and must not disturb the fresh generation's in-flight marker.
+  stale.resolve({ rows: [{ id: "stale" }], nextCursor: "" });
+  assert.equal(await staleLoad, false);
+  assert.deepEqual(state.nodes, [{ id: "fresh" }]);
 });
 
 test("selectRow: beginSelection sets the selection synchronously", () => {
