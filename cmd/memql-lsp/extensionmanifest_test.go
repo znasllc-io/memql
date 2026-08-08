@@ -752,12 +752,13 @@ var trustGatedCommands = []string{
 	"memql.clusters.edit",
 	"memql.clusters.disconnect",
 	"memql.concepts.refresh",
-	// memql#3309's run surface. The three run commands themselves
-	// (memql.run.construct / .constructWith / .notAvailable) and the two
-	// per-item Runs commands are NOT here: each takes an argument the palette
-	// cannot supply -- a RunTarget from a CodeLens, a tree node from an inline
-	// action -- so they carry "when": "false" like memql.concepts.open, which
-	// is a stronger gate than the trust clause rather than a weaker one.
+	// memql#3309's run surface, plus memql#3310's automation run. The three
+	// run commands themselves (memql.run.construct / .constructWith /
+	// .automation) and the two per-item Runs commands are NOT here: each takes
+	// an argument the palette cannot supply -- a RunTarget or an
+	// AutomationTarget from a CodeLens, a tree node from an inline action --
+	// so they carry "when": "false" like memql.concepts.open, which is a
+	// stronger gate than the trust clause rather than a weaker one.
 	"memql.runs.refresh",
 	"memql.runs.open",
 }
