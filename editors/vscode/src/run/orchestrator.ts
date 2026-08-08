@@ -145,6 +145,20 @@ export class RunOrchestrator {
     return this.session;
   }
 
+  /**
+   * The write-confirmation gate, exposed so the AUTOMATION run surface
+   * (memql#3310) shares this one rather than constructing a second.
+   *
+   * Sharing is the point, not a convenience. "Prompts once per (cluster,
+   * construct)" and "every acknowledgement is dropped when clusters.yaml
+   * changes" are properties of ONE gate; two instances would each hold half
+   * the session's acknowledgements, and noteClusterRegistryChanged() -- which
+   * only this class receives -- would reset one of them.
+   */
+  get writeGate(): WriteConfirmationGate {
+    return this.writes;
+  }
+
   async run(target: RunTarget, values: Record<string, unknown>): Promise<RunOutcome> {
     // begin(), not current(): starting a run IS what makes every earlier one
     // stale. A second Run click supersedes the first outright.

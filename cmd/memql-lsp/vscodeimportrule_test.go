@@ -44,6 +44,7 @@ var vscodeImportAllowList = []string{
 	"views/clustersTree.ts",      // TreeDataProvider adapter over clusters/ + connection/
 	"views/conceptsTree.ts",      // TreeDataProvider adapter over state/conceptsCache.ts
 	"views/runsTree.ts",          // TreeDataProvider adapter over run/runConfig.ts
+	"webview/automationPanel.ts", // WebviewPanel adapter over state/automationForm.ts + state/stepTrace.ts
 	"webview/conceptPanel.ts",    // WebviewPanel adapter over state/conceptPanelState.ts
 	"webview/runPanel.ts",        // WebviewPanel adapter over state/argForm.ts + state/runResult.ts
 }
@@ -206,9 +207,11 @@ func TestVSCodeImportGuardCoversTheLogicModules(t *testing.T) {
 		"clusters/model.ts",
 		"connection/endpoint.ts",
 		"connection/manager.ts",
+		"state/automationForm.ts",
 		"state/conceptPanelState.ts",
 		"state/conceptsCache.ts",
 		"state/rowProjection.ts",
+		"state/stepTrace.ts",
 	} {
 		if !present[want] {
 			t.Errorf("editors/vscode/src/%s is missing; either it moved (update this list) or the logic layer this guard protects has been dissolved back into the adapters", want)

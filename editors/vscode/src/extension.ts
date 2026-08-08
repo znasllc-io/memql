@@ -21,6 +21,8 @@ import {
 } from 'vscode-languageclient/node';
 
 import { callTool } from '@znasllc-io/memql-sdk-core/tools';
+import { AutomationClient } from '@znasllc-io/memql-sdk-core/automation';
+import { browseConceptPage } from '@znasllc-io/memql-sdk-core/client';
 import type { Concept } from '@znasllc-io/memql-sdk-core/client';
 import type { ConceptLike } from '@znasllc-io/memql-view-kit';
 
@@ -29,13 +31,19 @@ import type { ClusterConfig } from './clusters/model.js';
 import { ConnectionManager } from './connection/manager.js';
 import {
   COMMAND_RUN,
-  COMMAND_RUN_NOT_AVAILABLE,
+  COMMAND_RUN_AUTOMATION,
   COMMAND_RUN_WITH,
   RUNNABLE_CONSTRUCTS_METHOD,
   parseRunnableConstructs,
+  type AutomationTarget,
   type RunTarget,
 } from './constructs/runnable.js';
 import { RunnableCodeLensProvider } from './constructs/lensProvider.js';
+import {
+  AutomationRunner,
+  type AutomationRunEngine,
+  type AutomationRunRequest,
+} from './run/automationRun.js';
 import { assembleBundle, type BundleSource, type WorkspaceSources } from './run/bundle.js';
 import type { MappedDiagnostic } from './run/diagnostics.js';
 import { groupByFile } from './run/diagnostics.js';
@@ -47,11 +55,13 @@ import {
   removeRunConfig,
   writeRunConfigs,
   RUN_CONFIG_RELATIVE_PATH,
+  type AutomationRunConfig,
   type RunConfig,
 } from './run/runConfig.js';
 import { ClustersTreeProvider, type ClusterNode } from './views/clustersTree.js';
 import { ConceptsTreeProvider } from './views/conceptsTree.js';
 import { RunsTreeProvider, type RunsTreeNode } from './views/runsTree.js';
+import { AutomationRunPanel, type AutomationPanelHost } from './webview/automationPanel.js';
 import { ConceptPanel } from './webview/conceptPanel.js';
 import { ResultPanel, RunPanel, conceptMap, type RunPanelHost } from './webview/runPanel.js';
 
@@ -318,6 +328,61 @@ function registerRunSurface(
     },
   };
 
+  // memql#3310's automation half. It shares the orchestrator's write gate --
+  // one acknowledgement policy and one reset across both run surfaces -- and
+  // otherwise needs none of B2's machinery, because an automation cannot be
+  // session-defined and so has nothing to bundle, validate or inject.
+  const automationRunner = new AutomationRunner({
+    cluster: () => currentRunCluster(clustersPath, conns),
+    engine: () => buildAutomationEngine(conns),
+    confirmWrite: async (message) => {
+      // A MODAL, exactly as the mutation confirmation is: an automation run
+      // has the larger blast radius of the two, so it certainly does not get
+      // the dismissable variant.
+      const answer = await window.showWarningMessage(message, { modal: true }, 'Run');
+      return answer === 'Run';
+    },
+    writeGate: orchestrator.writeGate,
+  });
+
+  const automationHost: AutomationPanelHost = {
+    run: (target, request, trace, onProgress) =>
+      automationRunner.run(target, request, trace, onProgress),
+    saveConfig: async (target, name, request) => {
+      if (workspaceRoot === undefined) {
+        throw new Error(
+          'A run configuration is saved in the workspace, so this needs an open folder.'
+        );
+      }
+      const config: RunConfig = {
+        name,
+        kind: 'automation',
+        construct: target.name,
+        // Always empty: an automation declares no args. The trigger event
+        // lives in the `automation` block instead -- see run/runConfig.ts.
+        args: {},
+        automation: automationConfigBlock(request),
+      };
+      const relative = workspaceRelative(workspaceRoot, target.uri);
+      if (relative !== undefined) config.file = relative;
+      await writeRunConfigs(runConfigPath(workspaceRoot), (current) =>
+        upsertRunConfig(current, config)
+      );
+      runsTree.refresh();
+    },
+    browseRows: async (conceptId, cursor) => {
+      const query = conns.query;
+      if (query === undefined) {
+        throw new Error('Not connected. Select a cluster in the Clusters view.');
+      }
+      return browseConceptPage(query, conceptId, {
+        pageSize: 100,
+        ...(cursor === '' ? {} : { cursor }),
+      });
+    },
+    concept: (conceptId) => concepts.get(conceptId),
+  };
+
   const runsTree = new RunsTreeProvider(workspaceRoot);
   context.subscriptions.push(window.registerTreeDataProvider('memqlRuns', runsTree));
 
@@ -373,10 +438,17 @@ function registerRunSurface(
       if (target === undefined) return;
       RunPanel.open(context, host, target);
     }),
-    commands.registerCommand(COMMAND_RUN_NOT_AVAILABLE, (reason?: string) => {
-      window.showInformationMessage(
-        reason ?? 'This construct cannot be run from the editor yet.'
-      );
+    // Palette-hidden for the same reason as the other run commands: it takes
+    // an AutomationTarget the palette cannot supply. The CodeLens and the Runs
+    // tree are the only callers.
+    //
+    // It opens the FORM rather than running anything, even for a scheduled
+    // automation that genuinely fires with an empty event -- the form is where
+    // the developer is told the deployed definition is what will run, and a
+    // one-click path past that would defeat the whole banner.
+    commands.registerCommand(COMMAND_RUN_AUTOMATION, (target?: AutomationTarget) => {
+      if (target === undefined) return;
+      AutomationRunPanel.open(context, automationHost, target);
     }),
     commands.registerCommand('memql.runs.refresh', () => runsTree.refresh()),
     commands.registerCommand('memql.runs.open', async () => {
@@ -401,6 +473,24 @@ function registerRunSurface(
     }),
     commands.registerCommand('memql.runs.execute', async (node?: RunsTreeNode) => {
       if (node === undefined || node.kind !== 'run') return;
+      // An automation configuration OPENS THE FORM pre-filled rather than
+      // running straight away. Every other kind's saved configuration is a
+      // complete, replayable call; an automation's is a saved trigger event
+      // whose blast radius is its whole action chain, and the form is where
+      // the deployed-definition banner and the payload are both visible before
+      // the click. Nothing in this extension auto-runs, and a saved automation
+      // is the entry a repository is most likely to ship.
+      if (node.config.kind === 'automation') {
+        const automationTarget = await automationTargetForConfig(node.config, workspaceRoot);
+        if (automationTarget === undefined) return;
+        AutomationRunPanel.open(
+          context,
+          automationHost,
+          automationTarget,
+          requestFromConfigBlock(node.config.automation)
+        );
+        return;
+      }
       const target = await targetForConfig(node.config, workspaceRoot);
       if (target === undefined) return;
       ResultPanel.show(context, host, await orchestrator.run(target, node.config.args));
@@ -623,6 +713,45 @@ async function targetForConfig(
   config: RunConfig,
   workspaceRoot: string | undefined
 ): Promise<RunTarget | undefined> {
+  const found = await constructForConfig(config, workspaceRoot);
+  if (found === undefined) return undefined;
+  return {
+    uri: found.uri,
+    kind: found.construct.kind,
+    name: found.construct.name,
+    args: found.construct.args,
+  };
+}
+
+// automationTargetForConfig is targetForConfig's automation counterpart. It
+// carries the TRIGGER rather than the args, for the same reason the lens does:
+// the trigger is what decides the form, and the args are always empty.
+//
+// It re-resolves through the language server rather than trusting the saved
+// entry, exactly as targetForConfig does -- a trigger can have been edited
+// since the configuration was written, and the form built from a stale one
+// would offer a row picker over the wrong concept.
+async function automationTargetForConfig(
+  config: RunConfig,
+  workspaceRoot: string | undefined
+): Promise<AutomationTarget | undefined> {
+  const found = await constructForConfig(config, workspaceRoot);
+  if (found === undefined) return undefined;
+  const target: AutomationTarget = { uri: found.uri, name: found.construct.name };
+  if (found.construct.trigger !== undefined) target.trigger = found.construct.trigger;
+  return target;
+}
+
+// constructForConfig is the shared lookup: open the file the configuration
+// names and ask the LANGUAGE SERVER to describe it.
+//
+// The authority is the current buffer read by the one parser, never the stored
+// snapshot -- the construct may have been renamed, re-triggered or had its
+// args changed since the configuration was written.
+async function constructForConfig(
+  config: RunConfig,
+  workspaceRoot: string | undefined
+): Promise<{ uri: string; construct: ReturnType<typeof parseRunnableConstructs>[number] } | undefined> {
   if (config.file === undefined || workspaceRoot === undefined) {
     window.showErrorMessage(
       `memQL: the run configuration "${config.name}" names no file, so there is no buffer to run. Add a "file" pointing at the .memql file that declares ${config.construct}.`
@@ -665,7 +794,62 @@ async function targetForConfig(
     );
     return undefined;
   }
-  return { uri: document.uri.toString(), kind: found.kind, name: found.name, args: found.args };
+  return { uri: document.uri.toString(), construct: found };
+}
+
+// automationConfigBlock renders a run request into the persisted block, and
+// requestFromConfigBlock reads it back. Kept as a symmetric pair so the two
+// directions cannot drift: a field added to one without the other silently
+// stops round-tripping through the file.
+function automationConfigBlock(request: AutomationRunRequest): AutomationRunConfig {
+  const block: AutomationRunConfig = {};
+  if (request.payload !== undefined) block.payload = request.payload;
+  if (request.concept !== undefined && request.concept !== '') block.concept = request.concept;
+  if (request.targetNodeType !== undefined && request.targetNodeType !== '') {
+    block.targetNodeType = request.targetNodeType;
+  }
+  if (request.includeStepOutput === true) block.includeStepOutput = true;
+  return block;
+}
+
+function requestFromConfigBlock(block: AutomationRunConfig | undefined): AutomationRunRequest {
+  const request: AutomationRunRequest = {};
+  if (block === undefined) return request;
+  if (block.payload !== undefined) request.payload = block.payload;
+  if (block.concept !== undefined && block.concept !== '') request.concept = block.concept;
+  if (block.targetNodeType !== undefined && block.targetNodeType !== '') {
+    request.targetNodeType = block.targetNodeType;
+  }
+  if (block.includeStepOutput === true) request.includeStepOutput = true;
+  return request;
+}
+
+// buildAutomationEngine adapts the live connection to the one call an
+// automation run makes. Undefined whenever anything is missing, which the
+// runner reports as "not connected" rather than failing mid-run.
+//
+// A NEW AutomationClient per call, deliberately: the client is a thin wrapper
+// over whatever Dispatcher is live right now, and ConnectionManager rebuilds
+// its dispatcher on every reconnect. A cached client would hold the dead
+// stream's dispatcher and park forever on a run nothing will ever answer.
+function buildAutomationEngine(conns: ConnectionManager): AutomationRunEngine | undefined {
+  const dispatcher = conns.dispatcher;
+  if (dispatcher === undefined) return undefined;
+  const client = new AutomationClient(dispatcher);
+  return {
+    runAutomation: (automation, request, hooks) =>
+      client.run({
+        automation,
+        ...(request.payload !== undefined ? { payload: request.payload } : {}),
+        ...(request.concept !== undefined ? { concept: request.concept } : {}),
+        ...(request.targetNodeType !== undefined
+          ? { targetNodeType: request.targetNodeType }
+          : {}),
+        ...(request.includeStepOutput === true ? { includeStepOutput: true } : {}),
+        onAccepted: hooks.onAccepted,
+        onStep: hooks.onStep,
+      }),
+  };
 }
 
 // openRowInConcepts resolves the row's concept descriptor and opens the
