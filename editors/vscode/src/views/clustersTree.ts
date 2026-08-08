@@ -9,12 +9,20 @@ import * as vscode from "vscode";
 
 import type { ClusterConfig } from "../clusters/model.js";
 import { displayLabel, isOidcOnly, needsAuth } from "../clusters/model.js";
-import { readClustersFile } from "../clusters/file.js";
-import type { ConnectionManager, ConnectionState } from "../connection/manager.js";
+import { readClustersFileSafe } from "../clusters/file.js";
+import type { ConnectionManager } from "../connection/manager.js";
 
 export interface ClusterNode {
   cluster: ClusterConfig;
   selected: boolean;
+  // error is set only on the single synthetic row getChildren returns when
+  // clusters.yaml fails to read (e.g. malformed YAML, or a torn concurrent
+  // write from the cockpit -- the file is shared and not lock-protected).
+  // readClustersFile deliberately throws on that condition; getChildren has
+  // no story for an unhandled rejection reaching VS Code's tree API, so it
+  // is caught (via readClustersFileSafe) and rendered as a row instead,
+  // rather than the panel silently going blank.
+  error?: string;
 }
 
 export class ClustersTreeProvider implements vscode.TreeDataProvider<ClusterNode> {
@@ -33,16 +41,34 @@ export class ClustersTreeProvider implements vscode.TreeDataProvider<ClusterNode
   }
 
   async getChildren(element?: ClusterNode): Promise<ClusterNode[]> {
-    // Flat list: clusters have no children.
+    // Flat list: clusters (and the error row) have no children.
     if (element !== undefined) return [];
-    const file = await readClustersFile(this.clustersPath);
-    return file.clusters.map((cluster) => ({
+    const result = await readClustersFileSafe(this.clustersPath);
+    if (!result.ok) {
+      // Surface the failure as the sole row rather than letting the
+      // rejection reach VS Code's tree API (which has no built-in way to
+      // show it) or leaving the panel looking merely empty.
+      return [{ cluster: { name: "", endpoint: "" }, selected: false, error: result.error }];
+    }
+    return result.file.clusters.map((cluster) => ({
       cluster,
-      selected: cluster.name === file.selectedCluster,
+      selected: cluster.name === result.file.selectedCluster,
     }));
   }
 
   getTreeItem(node: ClusterNode): vscode.TreeItem {
+    if (node.error !== undefined) {
+      const item = new vscode.TreeItem(
+        "Failed to read clusters.yaml",
+        vscode.TreeItemCollapsibleState.None,
+      );
+      item.contextValue = "memqlClustersError";
+      item.description = node.error;
+      item.tooltip = `ERROR: ${node.error}`;
+      item.iconPath = new vscode.ThemeIcon("error", new vscode.ThemeColor("charts.red"));
+      return item;
+    }
+
     const item = new vscode.TreeItem(
       displayLabel(node.cluster),
       vscode.TreeItemCollapsibleState.None,

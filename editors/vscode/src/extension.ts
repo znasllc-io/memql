@@ -67,13 +67,33 @@ export function activate(context: ExtensionContext): void {
   // The runtime surface reads credentials from the home directory and opens a
   // network connection, so it is gated on workspace trust. Language features
   // above are not.
-  if (!workspace.isTrusted) {
-    return;
+  //
+  // Workspace trust can transition Restricted -> Trusted within a running
+  // session (the user clicks "Trust This Workspace"); VS Code's own guidance
+  // for a "limited" untrustedWorkspaces extension is to listen for that and
+  // light up the gated functionality without requiring a window reload. An
+  // untrusted activation therefore arms a one-shot listener instead of just
+  // returning.
+  if (workspace.isTrusted) {
+    registerRuntimeSurface(context);
+  } else {
+    const trustGranted = workspace.onDidGrantWorkspaceTrust(() => {
+      trustGranted.dispose();
+      registerRuntimeSurface(context);
+    });
+    context.subscriptions.push(trustGranted);
   }
-  registerRuntimeSurface(context);
 }
 
 function registerRuntimeSurface(context: ExtensionContext): void {
+  // Defensive: the trust-granted listener above disposes itself before
+  // calling in, so this should only ever run once, but guard here too so a
+  // second call (from any future caller) can never double-register the tree,
+  // watcher, and commands.
+  if (connections !== undefined) {
+    return;
+  }
+
   const clustersPath = defaultClustersPath();
   connections = new ConnectionManager();
 
@@ -201,7 +221,14 @@ async function promptForCluster(existing?: ClusterConfig): Promise<ClusterConfig
 }
 
 export function deactivate(): Thenable<void> | undefined {
-  return client?.stop();
+  // On a host deactivate/reload without a full process exit, an open
+  // ConnectionManager WebSocket would otherwise outlive the extension.
+  const stopClient = client?.stop();
+  const disconnectConnections = connections?.disconnect();
+  if (stopClient === undefined && disconnectConnections === undefined) {
+    return undefined;
+  }
+  return Promise.all([stopClient, disconnectConnections]).then(() => undefined);
 }
 
 // resolveServerPath picks the memql-lsp binary in priority order:

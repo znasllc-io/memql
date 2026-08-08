@@ -91,6 +91,26 @@ export async function readClustersFile(file: string): Promise<ClustersFile> {
   };
 }
 
+// ReadClustersResult is the outcome of a "read clusters, or describe the
+// failure" attempt -- a pure, vscode-free helper so a UI layer that must
+// never let this rejection reach it (e.g. a TreeDataProvider.getChildren,
+// which VS Code has no built-in way to surface an unhandled rejection from)
+// can render the failure instead of erroring silently. readClustersFile
+// deliberately throws on a malformed file (see the "rejects a malformed
+// file" test); this wraps that call so a caller with no try/catch story of
+// its own gets a value instead of a rejection.
+export type ReadClustersResult =
+  | { ok: true; file: ClustersFile }
+  | { ok: false; error: string };
+
+export async function readClustersFileSafe(file: string): Promise<ReadClustersResult> {
+  try {
+    return { ok: true, file: await readClustersFile(file) };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 async function saveDocument(file: string, doc: Document): Promise<void> {
   await fs.mkdir(path.dirname(file), { recursive: true });
   await fs.writeFile(file, doc.toString(), "utf8");

@@ -13,6 +13,7 @@ import * as path from "node:path";
 
 import {
   readClustersFile,
+  readClustersFileSafe,
   setSelectedCluster,
   upsertCluster,
 } from "../src/clusters/file.js";
@@ -67,6 +68,25 @@ test("returns an empty registry for an empty file", async () => {
 test("rejects a malformed file rather than silently returning nothing", async () => {
   const f = await tempFile("clusters: [unclosed\n");
   await assert.rejects(() => readClustersFile(f), /clusters\.yaml/);
+});
+
+test("readClustersFileSafe wraps a malformed file as an ok:false result instead of throwing", async () => {
+  const f = await tempFile("clusters: [unclosed\n");
+  const result = await readClustersFileSafe(f);
+  assert.equal(result.ok, false);
+  if (!result.ok) {
+    assert.match(result.error, /clusters\.yaml/);
+  }
+});
+
+test("readClustersFileSafe returns ok:true with the parsed file on success", async () => {
+  const f = await tempFile(SAMPLE);
+  const result = await readClustersFileSafe(f);
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(result.file.clusters.length, 2);
+    assert.equal(result.file.selectedCluster, "local");
+  }
 });
 
 test("setSelectedCluster updates the selection", async () => {
