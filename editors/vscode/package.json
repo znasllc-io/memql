@@ -198,8 +198,8 @@
         "title": "memQL: Run Construct With Arguments"
       },
       {
-        "command": "memql.run.notAvailable",
-        "title": "memQL: Run Not Available"
+        "command": "memql.run.automation",
+        "title": "memQL: Run Automation"
       }
     ],
     "menus": {
@@ -257,7 +257,7 @@
           "when": "false"
         },
         {
-          "command": "memql.run.notAvailable",
+          "command": "memql.run.automation",
           "when": "false"
         }
       ],
