@@ -12,6 +12,7 @@ import { defaultClustersPath, readClustersFile, setSelectedCluster, upsertCluste
 import type { ClusterConfig } from './clusters/model.js';
 import { ConnectionManager } from './connection/manager.js';
 import { ClustersTreeProvider, type ClusterNode } from './views/clustersTree.js';
+import { ConceptsTreeProvider } from './views/conceptsTree.js';
 
 let client: LanguageClient | undefined;
 let connections: ConnectionManager | undefined;
@@ -108,6 +109,12 @@ function registerRuntimeSurface(context: ExtensionContext): void {
   watcher.onDidCreate(() => clustersTree.refresh());
   watcher.onDidDelete(() => clustersTree.refresh());
   context.subscriptions.push(watcher);
+
+  const conceptsTree = new ConceptsTreeProvider(connections);
+  context.subscriptions.push(
+    window.registerTreeDataProvider('memqlConcepts', conceptsTree),
+    commands.registerCommand('memql.concepts.refresh', () => conceptsTree.refresh())
+  );
 
   context.subscriptions.push(
     commands.registerCommand('memql.clusters.refresh', () => clustersTree.refresh()),

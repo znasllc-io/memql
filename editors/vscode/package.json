@@ -115,6 +115,10 @@
         {
           "id": "memqlClusters",
           "name": "Clusters"
+        },
+        {
+          "id": "memqlConcepts",
+          "name": "Concepts"
         }
       ]
     },
@@ -123,12 +127,14 @@
       { "command": "memql.clusters.select", "title": "memQL: Select Cluster" },
       { "command": "memql.clusters.add", "title": "memQL: Add Cluster", "icon": "$(add)" },
       { "command": "memql.clusters.edit", "title": "memQL: Edit Cluster", "icon": "$(edit)" },
-      { "command": "memql.clusters.disconnect", "title": "memQL: Disconnect" }
+      { "command": "memql.clusters.disconnect", "title": "memQL: Disconnect" },
+      { "command": "memql.concepts.refresh", "title": "memQL: Refresh Concepts", "icon": "$(refresh)" }
     ],
     "menus": {
       "view/title": [
         { "command": "memql.clusters.add", "when": "view == memqlClusters", "group": "navigation@1" },
-        { "command": "memql.clusters.refresh", "when": "view == memqlClusters", "group": "navigation@2" }
+        { "command": "memql.clusters.refresh", "when": "view == memqlClusters", "group": "navigation@2" },
+        { "command": "memql.concepts.refresh", "when": "view == memqlConcepts", "group": "navigation@1" }
       ],
       "view/item/context": [
         { "command": "memql.clusters.edit", "when": "view == memqlClusters && viewItem == memqlCluster", "group": "inline" }
