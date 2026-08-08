@@ -156,8 +156,28 @@ function registerRuntimeSurface(context: ExtensionContext): void {
   // handlers below dead code: a cluster added in the cockpit stayed invisible
   // until someone hit Refresh by hand, contradicting the documented "the file
   // is watched: an external edit refreshes the view".
+  //
+  // AND THE BASE DIRECTORY MUST EXIST FIRST. A watcher outside the workspace is
+  // non-recursive, and a non-recursive watch of a path that does not exist yet
+  // cannot be established. On the declared engines floor (VS Code 1.91) that
+  // watcher then stays dead FOR THE WHOLE SESSION even after the directory
+  // appears -- so a user who had never run the Cockpit (no ~/.memql at all,
+  // i.e. every new user) got exactly the same silent no-refresh the string glob
+  // caused. Current stable retries and recovers after a few seconds; the floor
+  // does not. Found by the host smoke lane (memql#3302), which is the only
+  // place it is observable: nothing throws, and every unit test still passes.
+  //
+  // mkdir is not a side effect this extension is shy about -- ~/.memql is its
+  // own directory, shared with the Cockpit, and Add Cluster creates it anyway.
+  const clustersDir = path.dirname(clustersPath);
+  try {
+    fs.mkdirSync(clustersDir, { recursive: true });
+  } catch {
+    // A home directory we cannot write is not worth failing activation over;
+    // the tree still reads (and reports) the file, only live refresh is lost.
+  }
   const watcher = workspace.createFileSystemWatcher(
-    new RelativePattern(Uri.file(path.dirname(clustersPath)), path.basename(clustersPath))
+    new RelativePattern(Uri.file(clustersDir), path.basename(clustersPath))
   );
   watcher.onDidChange(() => clustersRegistryChanged(clustersTree));
   watcher.onDidCreate(() => clustersRegistryChanged(clustersTree));

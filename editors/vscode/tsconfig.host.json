@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    // Inherits "module": "ESNext" / "moduleResolution": "bundler" / "noEmit"
+    // from tsconfig.json -- a type-check pass only, exactly like
+    // tsconfig.test.json. The JS the host actually loads comes from
+    // esbuild.host.js.
+    "rootDir": ".",
+    "sourceMap": false,
+    // "vscode" here (and not in tsconfig.test.json) is the difference between
+    // the two lanes: the unit tests cover only modules that do not import
+    // `vscode`, and these cases exist precisely to drive the ones that do.
+    "types": ["node", "vscode"]
+  },
+  "include": ["src/**/*", "test-host/**/*.ts"],
+  "exclude": ["node_modules", ".vscode-test", "out", "dist-test", "dist-host"]
+}

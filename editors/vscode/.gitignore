@@ -4,6 +4,7 @@ bin/
 *.vsix
 .vscode-test/
 dist-test/
+dist-host/
 
 # The repo-root .gitignore ignores package.json / package-lock.json (this is a
 # Go repo); re-include the VS Code extension's manifest + lockfile, which must
