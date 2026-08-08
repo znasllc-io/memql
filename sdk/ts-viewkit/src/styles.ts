@@ -27,6 +27,25 @@
 // knows its own layout. Adding it here would make view-kit dictate page
 // structure it cannot see.
 
+// CHART COLOUR AND THE TWO-TIER TOKEN. Everything else here is theme-neutral:
+// a grey at 15% alpha and `inherit` are correct on any background, so one
+// fallback serves light and dark. A chart palette cannot do that -- a hue
+// legible on white is not legible on near-black -- so the series slots carry
+// TWO tiers:
+//
+//   --vk-chart-1           the host override. Wins whenever the host sets it.
+//   --vk-chart-1-default   view-kit's own answer, redefined per theme in the
+//                          blocks at the bottom of this sheet. Internal: a
+//                          host never sets it, and it is not in the list
+//                          below.
+//
+// Marks read `var(--vk-chart-1, var(--vk-chart-1-default))`, so a host that
+// themes view-kit still wins, and a host that does nothing gets a validated
+// palette that follows prefers-color-scheme. A host rendering dark chrome on
+// a light OS (a VS Code dark theme, say) has two ways out: map its own tokens
+// onto --vk-chart-*, or pass `{ theme: "dark" }` to the renderer, which
+// stamps data-vk-theme on the figure.
+
 // The tokens a host may define. Documented as a list so a consumer can theme
 // view-kit completely without reading the sheet.
 export const VIEW_KIT_CSS_VARIABLES = [
@@ -36,9 +55,25 @@ export const VIEW_KIT_CSS_VARIABLES = [
   "--vk-hover-bg",
   "--vk-selected-bg",
   "--vk-selected-fg",
+  // Chart + map. The six categorical series slots are a FIXED ORDER: that
+  // order is what keeps adjacent series distinguishable under colour-vision
+  // deficiency, so a host overriding them should re-validate the whole set
+  // rather than swap two slots for taste.
+  "--vk-chart-1",
+  "--vk-chart-2",
+  "--vk-chart-3",
+  "--vk-chart-4",
+  "--vk-chart-5",
+  "--vk-chart-6",
+  "--vk-chart-other",
+  "--vk-chart-grid",
+  "--vk-chart-axis",
+  // The colour painted BETWEEN adjacent fills (the 2px gap on pie slices).
+  // It has to match the surface the chart sits on, which only the host knows.
+  "--vk-chart-surface",
 ] as const;
 
-export const viewKitStyles = `
+const coreStyles = `
 .vk-rows { list-style: none; margin: 0; padding: 0; }
 
 .vk-row {
@@ -133,3 +168,406 @@ export const viewKitStyles = `
   font-style: italic;
 }
 `;
+
+// The element library's stylesheet, appended to viewKitStyles below. Split
+// into its own string only so the two halves stay readable; consumers see one
+// sheet. Same rules apply: view-kit classes only, every colour through a
+// --vk-* token with a fallback.
+const elementStyles = `
+/* ---- table ------------------------------------------------------------- */
+
+.vk-table { width: 100%; border-collapse: collapse; color: var(--vk-fg, inherit); }
+
+/* A header is a sort control. The cursor and the arrow slot are present on
+   every column, not only the active one, so nothing shifts when the sort
+   moves. */
+.vk-table-head {
+  text-align: left;
+  font-weight: 600;
+  padding: 4px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--vk-border, currentColor);
+}
+.vk-table-head::after { content: ""; display: inline-block; width: 1em; opacity: 0.6; }
+.vk-table-head[data-vk-sort-dir="asc"]::after { content: " ^"; }
+.vk-table-head[data-vk-sort-dir="desc"]::after { content: " v"; }
+
+.vk-table-row { cursor: pointer; }
+.vk-table-row:hover { background: var(--vk-hover-bg, rgba(128, 128, 128, 0.15)); }
+.vk-table-row[data-selected="true"] {
+  background: var(--vk-selected-bg, rgba(128, 128, 128, 0.35));
+  color: var(--vk-selected-fg, inherit);
+}
+
+.vk-table-cell {
+  padding: 3px 8px;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+  border-bottom: 1px solid var(--vk-border, currentColor);
+}
+
+/* ---- calendar ---------------------------------------------------------- */
+
+.vk-cal { color: var(--vk-fg, inherit); }
+.vk-cal-title { font-weight: 600; padding: 4px 0; }
+
+.vk-cal-weekdays,
+.vk-cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
+
+.vk-cal-weekday {
+  padding: 2px 4px;
+  font-size: 0.8em;
+  color: var(--vk-muted-fg, inherit);
+  opacity: 0.7;
+}
+
+.vk-cal-day {
+  min-height: 64px;
+  padding: 2px 4px;
+  border: 1px solid var(--vk-border, currentColor);
+  /* The grid is one continuous rule, not 35 boxed cells. */
+  border-width: 0 1px 1px 0;
+  min-width: 0;
+}
+/* Padding cells before the 1st and after the last: they keep the grid square
+   without pretending to be days. */
+.vk-cal-day-blank { opacity: 0.35; }
+
+.vk-cal-daynum { font-size: 0.8em; color: var(--vk-muted-fg, inherit); opacity: 0.7; }
+
+.vk-cal-event {
+  display: flex;
+  gap: 4px;
+  align-items: baseline;
+  padding: 1px 3px;
+  margin-bottom: 2px;
+  border-radius: 3px;
+  font-size: 0.85em;
+  cursor: pointer;
+  background: var(--vk-hover-bg, rgba(128, 128, 128, 0.15));
+  min-width: 0;
+}
+.vk-cal-event[data-selected="true"] {
+  background: var(--vk-selected-bg, rgba(128, 128, 128, 0.35));
+  color: var(--vk-selected-fg, inherit);
+}
+.vk-cal-time { flex: none; font-variant-numeric: tabular-nums; opacity: 0.75; }
+.vk-cal-label { min-width: 0; overflow-wrap: anywhere; }
+/* Both quieter than the label, and equal to each other -- same rule the row
+   list applies to its supporting slots. */
+.vk-cal-span,
+.vk-cal-detail { color: var(--vk-muted-fg, inherit); opacity: 0.7; min-width: 0; }
+.vk-cal-overflow {
+  padding: 4px 0;
+  font-size: 0.85em;
+  color: var(--vk-muted-fg, inherit);
+  opacity: 0.7;
+}
+
+/* ---- checklist --------------------------------------------------------- */
+
+.vk-checklist { color: var(--vk-fg, inherit); }
+.vk-checklist-summary {
+  padding: 2px 0 6px;
+  font-size: 0.85em;
+  color: var(--vk-muted-fg, inherit);
+  opacity: 0.7;
+}
+.vk-checklist-items { list-style: none; margin: 0; padding: 0; }
+.vk-checklist-group {
+  padding: 6px 0 2px;
+  font-size: 0.8em;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--vk-muted-fg, inherit);
+  opacity: 0.7;
+}
+.vk-checklist-item {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 2px 4px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.vk-checklist-item:hover { background: var(--vk-hover-bg, rgba(128, 128, 128, 0.15)); }
+.vk-checklist-item[data-selected="true"] {
+  background: var(--vk-selected-bg, rgba(128, 128, 128, 0.35));
+  color: var(--vk-selected-fg, inherit);
+}
+.vk-checklist-box { flex: none; font-family: monospace; }
+.vk-checklist-label { min-width: 0; overflow-wrap: anywhere; }
+/* A struck-through, faded line is the second signal that an item is done --
+   the box glyph is the first, so the state never rests on one cue. */
+.vk-checklist-item[data-vk-done="true"] .vk-checklist-label {
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+.vk-checklist-due {
+  margin-left: auto;
+  flex: none;
+  font-size: 0.85em;
+  font-variant-numeric: tabular-nums;
+  color: var(--vk-muted-fg, inherit);
+  opacity: 0.7;
+}
+
+/* ---- timeline ---------------------------------------------------------- */
+
+.vk-timeline { list-style: none; margin: 0; padding: 0; color: var(--vk-fg, inherit); }
+.vk-timeline-date {
+  padding: 8px 0 2px;
+  font-size: 0.8em;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--vk-muted-fg, inherit);
+  opacity: 0.7;
+}
+.vk-timeline-entry {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 2px 4px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.vk-timeline-entry:hover { background: var(--vk-hover-bg, rgba(128, 128, 128, 0.15)); }
+.vk-timeline-entry[data-selected="true"] {
+  background: var(--vk-selected-bg, rgba(128, 128, 128, 0.35));
+  color: var(--vk-selected-fg, inherit);
+}
+.vk-timeline-time {
+  flex: none;
+  min-width: 3.5em;
+  font-variant-numeric: tabular-nums;
+  color: var(--vk-muted-fg, inherit);
+  opacity: 0.7;
+}
+/* The rail dot. Decorative: the time beside it says the same thing. */
+.vk-timeline-marker {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  align-self: center;
+  background: var(--vk-border, currentColor);
+}
+.vk-timeline-label { min-width: 0; overflow-wrap: anywhere; }
+.vk-timeline-detail { color: var(--vk-muted-fg, inherit); opacity: 0.7; min-width: 0; }
+
+/* ---- stat tiles -------------------------------------------------------- */
+
+.vk-stats { display: flex; flex-wrap: wrap; gap: 12px; color: var(--vk-fg, inherit); }
+.vk-stat {
+  flex: 1 1 8em;
+  min-width: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--vk-border, currentColor);
+  border-radius: 4px;
+}
+/* The hero number: the one thing on the tile a reader should see first. */
+.vk-stat-value { font-size: 1.8em; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.vk-stat-label { font-size: 0.85em; overflow-wrap: anywhere; }
+.vk-stat-sub {
+  font-size: 0.8em;
+  color: var(--vk-muted-fg, inherit);
+  opacity: 0.7;
+  overflow-wrap: anywhere;
+}
+
+/* ---- board ------------------------------------------------------------- */
+
+.vk-board {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  overflow-x: auto;
+  color: var(--vk-fg, inherit);
+}
+.vk-board-column { flex: 0 0 14em; min-width: 0; }
+.vk-board-heading {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 2px 4px;
+  border-bottom: 1px solid var(--vk-border, currentColor);
+}
+.vk-board-heading-label { min-width: 0; overflow-wrap: anywhere; font-weight: 600; }
+.vk-board-count {
+  margin-left: auto;
+  flex: none;
+  font-size: 0.8em;
+  color: var(--vk-muted-fg, inherit);
+  opacity: 0.7;
+}
+.vk-board-cards { list-style: none; margin: 0; padding: 4px 0; }
+.vk-board-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 6px;
+  margin-bottom: 4px;
+  border: 1px solid var(--vk-border, currentColor);
+  border-radius: 3px;
+  cursor: pointer;
+}
+.vk-board-card:hover { background: var(--vk-hover-bg, rgba(128, 128, 128, 0.15)); }
+.vk-board-card[data-selected="true"] {
+  background: var(--vk-selected-bg, rgba(128, 128, 128, 0.35));
+  color: var(--vk-selected-fg, inherit);
+}
+.vk-board-card-label { overflow-wrap: anywhere; }
+.vk-board-card-detail {
+  font-size: 0.85em;
+  color: var(--vk-muted-fg, inherit);
+  opacity: 0.7;
+  overflow-wrap: anywhere;
+}
+
+/* ---- charts + map: the shared visual system ---------------------------- */
+
+/* The figure owns the palette: the legend swatches are HTML siblings of the
+   <svg>, so the tokens have to be defined above both. */
+.vk-chart-figure {
+  color: var(--vk-fg, inherit);
+  --vk-chart-1-default: #2a78d6;
+  --vk-chart-2-default: #eb6834;
+  --vk-chart-3-default: #1baf7a;
+  --vk-chart-4-default: #eda100;
+  --vk-chart-5-default: #e87ba4;
+  --vk-chart-6-default: #008300;
+  --vk-chart-other-default: #7a7a75;
+  --vk-chart-grid-default: rgba(128, 128, 128, 0.25);
+  --vk-chart-axis-default: rgba(128, 128, 128, 0.55);
+  --vk-chart-surface-default: #fcfcfb;
+}
+/* The dark steps are the same eight hues re-stepped for a dark surface, not a
+   different palette, and they are validated as a set against it. The :not()
+   guard lets an explicit light stamp beat an OS preference for dark. */
+@media (prefers-color-scheme: dark) {
+  .vk-chart-figure:not([data-vk-theme="light"]) {
+    --vk-chart-1-default: #3987e5;
+    --vk-chart-2-default: #d95926;
+    --vk-chart-3-default: #199e70;
+    --vk-chart-4-default: #c98500;
+    --vk-chart-5-default: #d55181;
+    --vk-chart-6-default: #008300;
+    --vk-chart-other-default: #8a8a84;
+    --vk-chart-grid-default: rgba(160, 160, 160, 0.22);
+    --vk-chart-axis-default: rgba(160, 160, 160, 0.5);
+    --vk-chart-surface-default: #1a1a19;
+  }
+}
+/* The explicit stamp wins in both directions -- a host that knows it is dark
+   must not depend on the viewer's OS agreeing. */
+.vk-chart-figure[data-vk-theme="dark"] {
+  --vk-chart-1-default: #3987e5;
+  --vk-chart-2-default: #d95926;
+  --vk-chart-3-default: #199e70;
+  --vk-chart-4-default: #c98500;
+  --vk-chart-5-default: #d55181;
+  --vk-chart-6-default: #008300;
+  --vk-chart-other-default: #8a8a84;
+  --vk-chart-grid-default: rgba(160, 160, 160, 0.22);
+  --vk-chart-axis-default: rgba(160, 160, 160, 0.5);
+  --vk-chart-surface-default: #1a1a19;
+}
+
+.vk-chart { display: block; width: 100%; height: auto; }
+
+/* One hue definition per slot, applied to fill (svg marks), stroke (lines)
+   and background (the HTML legend swatch), so a mark and its swatch can never
+   disagree. */
+.vk-chart-s1 {
+  fill: var(--vk-chart-1, var(--vk-chart-1-default));
+  stroke: var(--vk-chart-1, var(--vk-chart-1-default));
+  background: var(--vk-chart-1, var(--vk-chart-1-default));
+}
+.vk-chart-s2 {
+  fill: var(--vk-chart-2, var(--vk-chart-2-default));
+  stroke: var(--vk-chart-2, var(--vk-chart-2-default));
+  background: var(--vk-chart-2, var(--vk-chart-2-default));
+}
+.vk-chart-s3 {
+  fill: var(--vk-chart-3, var(--vk-chart-3-default));
+  stroke: var(--vk-chart-3, var(--vk-chart-3-default));
+  background: var(--vk-chart-3, var(--vk-chart-3-default));
+}
+.vk-chart-s4 {
+  fill: var(--vk-chart-4, var(--vk-chart-4-default));
+  stroke: var(--vk-chart-4, var(--vk-chart-4-default));
+  background: var(--vk-chart-4, var(--vk-chart-4-default));
+}
+.vk-chart-s5 {
+  fill: var(--vk-chart-5, var(--vk-chart-5-default));
+  stroke: var(--vk-chart-5, var(--vk-chart-5-default));
+  background: var(--vk-chart-5, var(--vk-chart-5-default));
+}
+.vk-chart-s6 {
+  fill: var(--vk-chart-6, var(--vk-chart-6-default));
+  stroke: var(--vk-chart-6, var(--vk-chart-6-default));
+  background: var(--vk-chart-6, var(--vk-chart-6-default));
+}
+/* The seventh-and-beyond fold. Neutral on purpose: "Other" is not an identity
+   and must not look like one. */
+.vk-chart-other {
+  fill: var(--vk-chart-other, var(--vk-chart-other-default));
+  stroke: var(--vk-chart-other, var(--vk-chart-other-default));
+  background: var(--vk-chart-other, var(--vk-chart-other-default));
+}
+
+/* Mark rules come AFTER the slot rules so their fill/stroke overrides land. */
+.vk-chart-bar { stroke: none; }
+.vk-chart-line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.vk-chart-dot { stroke: none; }
+/* The 2px stroke is the GAP between adjacent slices, painted in the surface
+   colour -- not an outline. */
+.vk-chart-slice {
+  stroke: var(--vk-chart-surface, var(--vk-chart-surface-default));
+  stroke-width: 2;
+}
+
+.vk-chart-grid { stroke: var(--vk-chart-grid, var(--vk-chart-grid-default)); stroke-width: 1; }
+.vk-chart-axis { stroke: var(--vk-chart-axis, var(--vk-chart-axis-default)); stroke-width: 1; }
+
+/* Text wears text tokens, never the series colour: a coloured mark beside a
+   label carries the identity, the label carries the words. */
+.vk-chart-tick {
+  fill: var(--vk-muted-fg, currentColor);
+  opacity: 0.75;
+  font-size: 9px;
+}
+.vk-chart-value { fill: var(--vk-fg, currentColor); font-size: 9px; }
+
+.vk-chart-legend {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 0.85em;
+}
+.vk-chart-legend-item { display: flex; gap: 6px; align-items: center; min-width: 0; }
+.vk-chart-swatch { flex: none; width: 10px; height: 10px; border-radius: 2px; }
+.vk-chart-legend-label { min-width: 0; overflow-wrap: anywhere; }
+
+.vk-map { display: block; width: 100%; height: auto; }
+.vk-map-graticule {
+  stroke: var(--vk-chart-grid, var(--vk-chart-grid-default));
+  stroke-width: 0.5;
+  fill: none;
+}
+.vk-map-axis {
+  stroke: var(--vk-chart-axis, var(--vk-chart-axis-default));
+  stroke-width: 0.75;
+  fill: none;
+}
+.vk-map-point { stroke: var(--vk-chart-surface, var(--vk-chart-surface-default)); stroke-width: 1; }
+.vk-map-point[data-selected="true"] { stroke: var(--vk-fg, currentColor); stroke-width: 1.5; }
+`;
+
+// One sheet for consumers: the core row/detail contract plus the element
+// library. Two exports would mean two <style> installs to keep in sync.
+export const viewKitStyles = coreStyles + elementStyles;
