@@ -60,7 +60,7 @@ place. `other` is by far the largest column and is not a finding.
 
 > **Payload fields are BARE.** The `payload.` prefix this table used to
 > prescribe was retired by memql#2292 and is hard-failed by
-> `dsl/conformance_test.go`; a filter written that way does not load.
+> `test/dslconformance/conformance_test.go`; a filter written that way does not load.
 > Row intrinsics take the `row.` namespace (`row.id`, `row.createdAt`).
 
 > **`granted` is not implemented.** The classifier has no counter for it
@@ -70,7 +70,7 @@ place. `other` is by far the largest column and is not a finding.
 
 > **There is no `requiresClusterOwner` spec.** This table used to say
 > "compose `spec("requiresClusterOwner")`", and neither half was live:
-> the spec is declared nowhere in `dsl/` (`dsl/admin_gate_test.go` says
+> the spec is declared nowhere in `dsl/` (`test/dslconformance/admin_gate_test.go` says
 > so outright), and `spec("...")` is the retired stringly form. The
 > engine rejects it in `component/memql/ast_converter.go`, naming the
 > replacement as the predicate form `spec <name>` — no quotes, no

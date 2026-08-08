@@ -5,7 +5,7 @@ import (
 )
 
 func TestLoadToolRegistryLoadsClawTools(t *testing.T) {
-	t.Skip("legacy dsl/v1 tree retired; unified-tree coverage lives in component/memql/unified_*_test.go and dsl/embed_test.go.")
+	t.Skip("legacy dsl/v1 tree retired; unified-tree coverage lives in component/memql/unified_*_test.go and test/dslconformance/embed_test.go.")
 	reg, err := loadToolRegistry(nil)
 	if err != nil {
 		t.Fatalf("loadToolRegistry: %v", err)

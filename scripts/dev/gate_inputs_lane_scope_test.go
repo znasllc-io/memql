@@ -85,7 +85,7 @@ var gateInputs = []struct {
 	// lacking the package that reads it. Both of these are outside dsl/
 	// (which has its own bucket) and outside the root package.
 	{"examples/referencepack/dsl/concepts.memql", "examples/referencepack", "TestReferencePackLoadsAndExtends"},
-	{"docs/public/operate/auth/per-row-authz-audit.md", "dsl", "TestPublicExamplesAreAnnotated"},
+	{"docs/public/operate/auth/per-row-authz-audit.md", "test/dslconformance", "TestPublicExamplesAreAnnotated"},
 	// The embedded-asset inventory (memql#3165). embed_inventory_test.go pins
 	// per-package `//go:embed` file COUNTS and lives in the root package, so
 	// EVERY file it pins is a gate input -- and 68 of the 270 were in no

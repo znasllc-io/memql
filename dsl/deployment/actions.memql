@@ -7,7 +7,7 @@
 // capability call rendered from typed args; it calls NO logic/query/mutation/
 // automation, touches NO graph, and carries no reactive trigger, so every one
 // passes the I7 action-rules validator (component/memql/callgraph) and the
-// whole-tree gate (dsl/callgraph_contract_test.go).
+// whole-tree gate (test/dslconformance/callgraph_contract_test.go).
 //
 // SHAPE (construct-invocation ADR Decision 3, Story 4 / memql#2328). An action
 // is reduced to an `args { ... }` block + a SINGLE `capability <verb>(...)`

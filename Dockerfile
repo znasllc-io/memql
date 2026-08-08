@@ -36,6 +36,64 @@ RUN if [ "${CGO_ENABLED}" = "1" ]; then \
     fi
 
 COPY go.mod go.sum ./
+# The `wire` tier is a set of NESTED modules that the root go.mod `replace`s by
+# relative path (memql#3240). `go mod download` resolves those replaces, so the
+# nested go.mod/go.sum must exist in this layer -- `COPY . .` below is far too
+# late, and without these three lines the dependency-cache layer fails with
+# "reading component/bus/gen/go.mod: no such file or directory".
+#
+# Manifests only, deliberately: copying the sources here would defeat the
+# layer-caching this split-COPY exists for. The `go.*` glob is load-bearing --
+# an L0 module with no external dependencies has NO go.sum, and Docker fails a
+# COPY whose named source does not exist. Add a line per module as each tier
+# lands (#3242..#3244).
+COPY component/actions/go.* ./component/actions/
+COPY component/architecture/go.* ./component/architecture/
+COPY component/auth/go.* ./component/auth/
+COPY component/automations/go.* ./component/automations/
+COPY component/bus/go.* ./component/bus/
+COPY component/bus/gen/go.* ./component/bus/gen/
+COPY component/config/go.* ./component/config/
+COPY component/database/go.* ./component/database/
+COPY component/deploycontrol/go.* ./component/deploycontrol/
+COPY component/events/go.* ./component/events/
+COPY component/fileprocessor/go.* ./component/fileprocessor/
+COPY component/genesis/go.* ./component/genesis/
+COPY component/grpc/go.* ./component/grpc/
+COPY component/grpc/gen/go.* ./component/grpc/gen/
+COPY component/harness/go.* ./component/harness/
+COPY component/healing/go.* ./component/healing/
+COPY component/identity/go.* ./component/identity/
+COPY component/identity/admin/go.* ./component/identity/admin/
+COPY component/inbound/go.* ./component/inbound/
+COPY component/language/go.* ./component/language/
+COPY component/language/annotations/go.* ./component/language/annotations/
+COPY component/language/ast/go.* ./component/language/ast/
+COPY component/language/dslclause/go.* ./component/language/dslclause/
+COPY component/mcp/go.* ./component/mcp/
+COPY component/memql/go.* ./component/memql/
+COPY component/metadata/go.* ./component/metadata/
+COPY component/metrics/go.* ./component/metrics/
+COPY component/node/go.* ./component/node/
+COPY component/node/gen/go.* ./component/node/gen/
+COPY component/observe/go.* ./component/observe/
+COPY component/outbound/go.* ./component/outbound/
+COPY component/planner/go.* ./component/planner/
+COPY component/polyphon/go.* ./component/polyphon/
+COPY component/provenance/go.* ./component/provenance/
+COPY component/router/go.* ./component/router/
+COPY component/safety/go.* ./component/safety/
+COPY component/secret/go.* ./component/secret/
+COPY component/server/go.* ./component/server/
+COPY component/service/go.* ./component/service/
+COPY component/worker/go.* ./component/worker/
+COPY core/go.* ./core/
+COPY docs/go.* ./docs/
+COPY dsl/go.* ./dsl/
+COPY integrations/go.* ./integrations/
+COPY integrations/email/go.* ./integrations/email/
+COPY integrations/openai/go.* ./integrations/openai/
+COPY integrations/stt/go.* ./integrations/stt/
 # BuildKit cache mounts (build-speed #1506): the module cache (/go/pkg/mod)
 # and the Go build cache (/root/.cache/go-build) persist across builds, so a
 # rebuild of an unchanged tree reuses downloaded modules + already-compiled

@@ -1001,7 +1001,7 @@ query magicLinkRequest magicLinkRequestByTokenHash {
 // patIdentitiesForSelf below serves /me/tokens with no userId at all. The
 // self-OR-admin single-query form (`... && (userId==actor.userId ||
 // requiresOwnerOrAdmin)`) is deliberately NOT used: it parses and loads, but
-// dsl/admin_gate_test.go's TestAdminGateIsATopLevelConjunct refuses a gate
+// test/dslconformance/admin_gate_test.go's TestAdminGateIsATopLevelConjunct refuses a gate
 // inside a disjunction, correctly -- the other arm switches it off, so a false
 // gate would not zero the row set.
 //

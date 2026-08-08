@@ -228,7 +228,7 @@ func TestAnnotationsProjectRegistryFromRegistrySide(t *testing.T) {
 // NOTE on the parser: `has` is still LEXED (TokenKeywordHas) and `array(T)`
 // is still PARSED by the grammar as legacy/back-compat -- their
 // retirement is enforced at the AUTHORING level by
-// dsl/no_retired_operators_test.go, not by the parser. So a
+// test/dslconformance/no_retired_operators_test.go, not by the parser. So a
 // "this snippet must fail to parse" assertion would be FALSE here (the
 // parser accepts both). The honest, parser-truthful pin is therefore:
 // dslspec -- the authoring SoT -- must not surface `has` as an operator

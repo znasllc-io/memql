@@ -161,7 +161,7 @@ mutate agent updateAgent {
 // an explicit field alongside the splat becomes the PayloadOverlayTemplate, which
 // renderMutationTemplate applies AFTER the splat, so the server's value wins over anything the
 // caller sent. It needs the `@actor` binding to resolve, and the parsed-tree gate in
-// dsl/agentauthz_stamped_userid_test.go pins both.
+// test/dslconformance/agentauthz_stamped_userid_test.go pins both.
 //
 // SELF-SERVICE ONLY, ruled by the repo owner 2026-08-06 on memql#3177. Re-stamping makes this
 // mutation self-service by construction, and that is the intent, not a side effect: it makes

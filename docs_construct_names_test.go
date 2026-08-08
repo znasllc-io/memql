@@ -261,7 +261,7 @@ func prefixNameGateExempt(rel string) bool {
 		// This file. Its header quotes the retired form to explain the ruling,
 		// and its resolver self-check is built from known-bad spellings.
 		return true
-	case "dsl/naming_conventions_test.go":
+	case "test/dslconformance/naming_conventions_test.go":
 		// The declaration half of the same ruling (#2853). Its counter-examples
 		// are the retired form by construction.
 		return true

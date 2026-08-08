@@ -41,7 +41,7 @@ import (
 	"log/slog"
 	"sync"
 
-	"github.com/znasllc-io/memql/component"
+	"github.com/znasllc-io/memql/core/component"
 	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql/sense"
 	memqldsl "github.com/znasllc-io/memql/dsl"

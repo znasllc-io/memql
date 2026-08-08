@@ -13,7 +13,7 @@
 // them is a request handler." ListForUser is reached from exactly one place,
 // and it is a request handler -- handleRevokeWorkerToken, on
 // s.stream.Context(). That is the REQUEST-DERIVED stamp memql#2989 refused and
-// dsl/server_only_parsed_test.go names as refuted. Only component/identity/admin
+// test/dslconformance/server_only_parsed_test.go names as refuted. Only component/identity/admin
 // carries that exception today, and it was made to earn it with
 // component/identity/admin/route_gate_test.go (memql#2934).
 //
@@ -291,14 +291,17 @@ func importsWorkerTokenStore(f *ast.File) bool {
 	return false
 }
 
-// repoRootFromGRPC walks up from this package to the module root.
+// repoRootFromGRPC walks up from this package to the REPOSITORY root.
+//
+// go.work, not go.mod: component/grpc is its own module since memql#3244, so a
+// go.mod walk would find this package rather than the repository.
 func repoRootFromGRPC() (string, error) {
 	dir, err := os.Getwd()
 	if err != nil {
 		return "", err
 	}
 	for {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+		if _, err := os.Stat(filepath.Join(dir, "go.work")); err == nil {
 			return dir, nil
 		}
 		parent := filepath.Dir(dir)

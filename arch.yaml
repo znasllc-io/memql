@@ -14,10 +14,20 @@ description: |
   the gRPC + WebSocket surfaces, and every node-type binary (bff /
   voice / cognition / agent / planner) compiled out of this tree.
 
-# Default `./...` is exactly what we want here. Leaving the field
-# out picks it up automatically; we keep it commented for visibility.
-# roots:
-#   - "./..."
+# MUST be the module-path pattern, not the default `./...` (memql#3240).
+#
+# The tree is multi-module now. From the root module `./...` matches only the
+# root module's own packages, so every nested module -- the `wire` tier today,
+# every tier as the split proceeds -- silently drops out of the model. That is
+# not hypothetical: landing the wire modules with the default made the
+# extractor stop emitting the 13 component/grpc/gen symbols the model had
+# edges into, and TestArchitectureModelIsNotStale caught it as dangling edges.
+#
+# The module-path pattern spans the workspace, so the model keeps covering the
+# whole tree. Same correction the package-count measurement needed: `./...`
+# means "this module", `<modpath>/...` means "this repository".
+roots:
+  - "github.com/znasllc-io/memql/..."
 
 # Generated / vendored sub-trees we don't want polluting the diagram.
 # Currently nothing -- everything under component/ and integrations/

@@ -25,7 +25,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/znasllc-io/memql/component"
+	"github.com/znasllc-io/memql/core/component"
 	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
 	memqldsl "github.com/znasllc-io/memql/dsl"
 )

@@ -3,6 +3,7 @@ package memoryNodes
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"go/ast"
 	goparser "go/parser"
 	"go/token"
@@ -332,10 +333,13 @@ func TestDefaultIsEmittedButNeverApplied(t *testing.T) {
 	// false PASS on the one behaviour this test is named for.
 	assertDefaultNotAppliedOnInsert(t)
 
-	// The parsing half is real but narrower than the reference used to claim:
-	// numbers and booleans are coerced, and there is NO datetime branch -- so a
-	// datetime field takes a bool default without complaint. Pinned so the
-	// corrected sentence in section 8 cannot drift back.
+	// The shape-guessing lowering, which memql#3248 demoted to a FALLBACK: it
+	// is reached only for object / array / map / any now, where the declared
+	// type does not narrow the literal to one reading. Its behaviour is
+	// unchanged and still pinned, because those types still go through it --
+	// but it is no longer what a string / bool / int / float / datetime field
+	// gets. That is parseTypedDefaultValue, covered by
+	// TestDefaultIsLoweredByItsDeclaredType below.
 	for _, tc := range []struct {
 		name string
 		want any
@@ -343,12 +347,220 @@ func TestDefaultIsEmittedButNeverApplied(t *testing.T) {
 		{"true", true},
 		{"7", int64(7)},
 		{"1.5", 1.5},
-		{"2026-01-02T03:04:05Z", "2026-01-02T03:04:05Z"}, // NOT parsed as a time
+		{"2026-01-02T03:04:05Z", "2026-01-02T03:04:05Z"}, // left as a string
 	} {
 		if got := parseDefaultValue(tc.name); got != tc.want {
-			t.Errorf("parseDefaultValue(%q) = %#v, want %#v -- section 8 describes exactly this "+
-				"set, including that RFC3339 is left as a string", tc.name, got, tc.want)
+			t.Errorf("parseDefaultValue(%q) = %#v, want %#v -- this is the untyped fallback for "+
+				"object/array/map/any and its behaviour is deliberately unchanged", tc.name, got, tc.want)
 		}
+	}
+}
+
+// TestDefaultIsLoweredByItsDeclaredType covers the half memql#3248 fixed: a
+// @default is lowered against the field's DECLARED type, so one that could
+// never be a value of that field is refused at load rather than emitted.
+//
+// This does NOT change the settled rule that @default is never applied on
+// insert at any depth -- TestDefaultIsEmittedButNeverApplied above still pins
+// that, and the nested-leaf carve-out stands. It closes the narrower hole the
+// issue named: the emitted `default` keyword is read by the SDK, sense hover
+// and the preferences form generators, so a wrong one is wrong documentation
+// shipped to three consumers rather than an inert annotation.
+func TestDefaultIsLoweredByItsDeclaredType(t *testing.T) {
+	// ACCEPTED -- the literal matches the declaration.
+	for _, tc := range []struct {
+		typeName string
+		text     string
+		want     any
+	}{
+		{"bool", "true", true},
+		{"bool", "false", false},
+		{"int", "7", int64(7)},
+		{"int", "-1", int64(-1)},
+		{"float", "1.5", 1.5},
+		{"float", "2", float64(2)}, // an integer literal is a valid float
+		{"enum", "active", "active"},
+		{"datetime", "2026-01-02T03:04:05Z", "2026-01-02T03:04:05Z"},
+		{"datetime", "", ""}, // the unset sentinel an optional datetime accepts (memql#1629)
+
+		// The string rows are the second defect memql#3248 names. Shape
+		// guessing turned these into a bool and two numbers, so the emitted
+		// `default` carried the wrong JSON TYPE for the field it annotates. A
+		// string field's default is the string, always.
+		{"string", "0", "0"},
+		{"string", "true", "true"},
+		{"string", "1.5", "1.5"},
+	} {
+		got, err := parseTypedDefaultValue(tc.typeName, tc.text)
+		if err != nil {
+			t.Errorf("parseTypedDefaultValue(%q, %q) errored: %v -- this literal is valid for the type",
+				tc.typeName, tc.text, err)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("parseTypedDefaultValue(%q, %q) = %#v (%T), want %#v (%T)",
+				tc.typeName, tc.text, got, got, tc.want, tc.want)
+		}
+	}
+
+	// REFUSED -- the literal could not be a value of the declared type. The
+	// datetime rows are the headline: before memql#3248 every one of them was
+	// accepted, and `whenField datetime @default("true")` emitted the BOOL true
+	// as the default of a field whose schema says format: date-time.
+	for _, tc := range []struct {
+		typeName string
+		text     string
+	}{
+		{"datetime", "true"},
+		{"datetime", "7"},
+		{"datetime", "1.5"},
+		{"datetime", "not-a-timestamp"},
+		{"datetime", "2026-01-02"}, // a bare date is not RFC3339
+		{"bool", "yes"},
+		{"bool", "1"},
+		{"bool", "True"}, // the grammar's spelling is exactly `true`
+		{"int", "1.5"},
+		{"int", "abc"},
+		{"int", "true"},
+		{"float", "abc"},
+		{"float", "true"},
+	} {
+		got, err := parseTypedDefaultValue(tc.typeName, tc.text)
+		if err == nil {
+			t.Errorf("parseTypedDefaultValue(%q, %q) = %#v, want an error -- a %s field cannot "+
+				"have that default, and accepting it emits a `default` of the wrong type into "+
+				"the schema the SDK and sense hover read", tc.typeName, tc.text, got, tc.typeName)
+		}
+	}
+
+	// Types with no single correct reading keep the untyped fallback. Refusing
+	// what cannot be judged would reject valid declarations to catch nothing.
+	for _, typeName := range []string{"object", "array", "map", "any", "somethingUnrecognised"} {
+		if _, err := parseTypedDefaultValue(typeName, "whatever"); err != nil {
+			t.Errorf("parseTypedDefaultValue(%q, ...) errored: %v -- these types must fall back "+
+				"to the untyped lowering, not be refused", typeName, err)
+		}
+	}
+}
+
+// buildConceptErr is buildFixtureConcept's counterpart for sources that are
+// SUPPOSED to fail: it returns the build error instead of failing the test, so
+// a refusal can be asserted rather than merely survived.
+func buildConceptErr(t *testing.T, src string) error {
+	t.Helper()
+	file, err := parser.ParseFile(src)
+	if err != nil {
+		return err
+	}
+	for _, def := range file.Definitions {
+		decl, ok := def.(*parser.ConceptDecl)
+		if !ok {
+			continue
+		}
+		_, err := BuildConceptFromDecl(decl, "v1:ref:probe")
+		return err
+	}
+	t.Fatal("fixture declared no concept, so it measures nothing")
+	return nil
+}
+
+// TestBadDefaultRefusesToLoad drives the REAL load path, because
+// TestDefaultIsLoweredByItsDeclaredType calls the lowering helper directly and
+// would keep passing if the call site were reverted to the shape-guessing one.
+// A unit test on a helper nothing calls proves nothing (memql#3248).
+func TestBadDefaultRefusesToLoad(t *testing.T) {
+	const tmpl = `@version("1.0.0")
+@namespace("ref")
+@description("d")
+concept probe {
+  probeField %s @default(%q) @description("p")
+}
+`
+
+	// The exact case the issue named. Before memql#3248 this built without
+	// complaint and emitted `default: true` on a field declared
+	// format: date-time.
+	for _, tc := range []struct{ typeName, text string }{
+		{"datetime", "true"},
+		{"datetime", "7"},
+		{"datetime", "nonsense"},
+		{"bool", "yes"},
+		{"int", "1.5"},
+		{"float", "abc"},
+	} {
+		src := fmt.Sprintf(tmpl, tc.typeName, tc.text)
+		if err := buildConceptErr(t, src); err == nil {
+			t.Errorf("`probeField %s @default(%q)` built successfully, want a refusal -- the "+
+				"emitted schema would carry a default that field can never hold",
+				tc.typeName, tc.text)
+		}
+	}
+
+	// Positive control. If this stops building, the check above is refusing
+	// valid declarations and the failures are meaningless.
+	for _, tc := range []struct{ typeName, text string }{
+		{"datetime", "2026-01-02T03:04:05Z"},
+		{"datetime", ""},
+		{"bool", "true"},
+		{"int", "7"},
+		{"float", "1.5"},
+		{"string", "0"},
+	} {
+		src := fmt.Sprintf(tmpl, tc.typeName, tc.text)
+		if err := buildConceptErr(t, src); err != nil {
+			t.Errorf("`probeField %s @default(%q)` failed to build: %v -- this declaration is valid",
+				tc.typeName, tc.text, err)
+		}
+	}
+}
+
+// TestBareDefaultLiteralIsRead covers the defect the type-directed lowering
+// EXPOSED rather than caused (memql#3248).
+//
+// A bare argument is not stored where a quoted one is. The parser has no value
+// to bind an unquoted token to, so it records the token as an Args KEY:
+//
+//	@default(false)     Value=<nil>    Args=map["false":true]
+//	@default("false")   Value="false"  Args=map[]
+//
+// attrString only type-asserts Value to string, so it reported "" for the bare
+// spelling. `isGroupGA bool @default(false)` in dsl/cognition/concepts.memql --
+// the live spelling -- therefore emitted `"default": ""` on a field declared
+// `"type": "boolean"`, and had done since the line was written.
+//
+// The two spellings mean the same thing and must not diverge. This pins that,
+// because nothing else did: the old lowering accepted "" for every type, so the
+// bug produced no error to notice.
+func TestBareDefaultLiteralIsRead(t *testing.T) {
+	const src = `@version("1.0.0")
+@namespace("ref")
+@description("d")
+concept probe {
+  bareBool    bool  @default(false)    @description("b")
+  quotedBool  bool  @default("false")  @description("q")
+  bareInt     int   @default(7)        @description("i")
+}
+`
+	props := propertySchemas(t, src)
+
+	for _, field := range []string{"bareBool", "quotedBool"} {
+		got, ok := props[field]["default"]
+		if !ok {
+			t.Errorf("%s emitted no default at all", field)
+			continue
+		}
+		if got != false {
+			t.Errorf("%s default = %#v (%T), want the BOOL false. An empty string here is the "+
+				"pre-memql#3248 bug: a bare argument read as \"\" and emitted on a boolean field",
+				field, got, got)
+		}
+	}
+
+	// The bare spelling is not bool-specific -- any unquoted token takes the
+	// same path, so a bare int must lower as an int rather than as "".
+	if got := props["bareInt"]["default"]; got != float64(7) && got != int64(7) {
+		t.Errorf("bareInt default = %#v (%T), want 7 -- a bare numeric argument reads through the "+
+			"same Args-key path as a bare bool", got, got)
 	}
 }
 
@@ -429,20 +641,28 @@ func requiredSet(t *testing.T, src string) map[string]struct{} {
 	return out
 }
 
-// repoRoot walks up from this package to the module root.
+// repoRoot walks up from this package to the REPOSITORY root.
+//
+// It looks for go.work, not go.mod. This scan reads repo-relative paths
+// (dsl/_reference/..., docs/...) and reports repo-relative emit sites, and
+// since memql#3228 the tree is many modules -- component/database is one of
+// them, so a go.mod walk stopped there and the scan looked for
+// component/database/dsl/_reference/ and reported emit sites shorn of their
+// component/database/ prefix (memql#3242). go.work exists exactly once, at the
+// repository root, which is the thing every caller here means.
 func repoRoot(t *testing.T) string {
 	t.Helper()
 	dir, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("getwd: %v", err)
 	}
-	for i := 0; i < 8; i++ {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+	for i := 0; i < 12; i++ {
+		if _, err := os.Stat(filepath.Join(dir, "go.work")); err == nil {
 			return dir
 		}
 		dir = filepath.Dir(dir)
 	}
-	t.Fatal("could not locate the module root, so this scan measures nothing")
+	t.Fatal("could not locate the repository root (go.work), so this scan measures nothing")
 	return ""
 }
 

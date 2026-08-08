@@ -96,7 +96,7 @@ The MemQL DSL lets you declare a system's behavior as data: `concept`
 surface), `prompt`, `provider`, `spec`, `shape`. An event triggers an
 automation triggers a tool — without you wiring callbacks in Go and
 redeploying. The same declarations drive validation, authorization
-(per-row, classified and test-enforced in `dsl/conformance_test.go`),
+(per-row, classified and test-enforced in `test/dslconformance/conformance_test.go`),
 and the generated reference. Capability grants (what an agent is even
 allowed to do — `computer_use_*`, `workbench_use`) are declared and
 expanded centrally in `component/memql/operator_caps.go`.

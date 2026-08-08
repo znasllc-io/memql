@@ -70,20 +70,55 @@ func toLSPRange(content string, r sense.Range) protocol.Range {
 
 func ptr[T any](v T) *T { return &v }
 
+// debounceTimer is the only thing diagnosticsDebouncer needs from a pending
+// timer: an attempt to cancel it before it runs. *time.Timer satisfies it as
+// declared, so the production path carries no wrapper.
+type debounceTimer interface {
+	// Stop cancels the timer, reporting whether the callback was still
+	// pending. Crucially it reports false -- and has no effect -- once the
+	// callback has already been released to run: nothing can un-fire an
+	// already-fired timer. Fakes must honour that or they would let a test
+	// assert a cancellation real time would never grant.
+	Stop() bool
+}
+
+// debounceTimerFunc arms a one-shot timer that runs fn after delay. This is the
+// seam tests replace (memql#3253): with a fake clock handing back timers the
+// test fires explicitly, the coalescing assertions stop depending on how much
+// wall time elapsed between two consecutive statements -- which on a loaded
+// two-core CI runner could exceed the whole debounce window.
+type debounceTimerFunc func(delay time.Duration, fn func()) debounceTimer
+
+// realDebounceTimer is the production timer source: plain time.AfterFunc.
+func realDebounceTimer(delay time.Duration, fn func()) debounceTimer {
+	return time.AfterFunc(delay, fn)
+}
+
 // diagnosticsDebouncer coalesces per-document diagnostic recomputes. Each
 // schedule cancels the document's pending timer and starts a new one; the timer
 // callback runs on its own goroutine (via time.AfterFunc), which is safe because
 // glsp's Notify writes to the persistent JSON-RPC connection.
 type diagnosticsDebouncer struct {
 	mu     sync.Mutex
-	timers map[protocol.DocumentUri]*time.Timer
+	timers map[protocol.DocumentUri]debounceTimer
 	delay  time.Duration
+	// newTimer arms each pending timer. Always realDebounceTimer in
+	// production; tests substitute a clock they drive by hand.
+	newTimer debounceTimerFunc
 }
 
 func newDiagnosticsDebouncer(delay time.Duration) *diagnosticsDebouncer {
+	return newDiagnosticsDebouncerWithTimers(delay, realDebounceTimer)
+}
+
+// newDiagnosticsDebouncerWithTimers is newDiagnosticsDebouncer with the timer
+// source injected. Nothing but a test passes anything other than
+// realDebounceTimer, and with that default the behaviour is identical.
+func newDiagnosticsDebouncerWithTimers(delay time.Duration, newTimer debounceTimerFunc) *diagnosticsDebouncer {
 	return &diagnosticsDebouncer{
-		timers: make(map[protocol.DocumentUri]*time.Timer),
-		delay:  delay,
+		timers:   make(map[protocol.DocumentUri]debounceTimer),
+		delay:    delay,
+		newTimer: newTimer,
 	}
 }
 
@@ -93,7 +128,7 @@ func (d *diagnosticsDebouncer) schedule(uri protocol.DocumentUri, fn func()) {
 	if t, ok := d.timers[uri]; ok {
 		t.Stop()
 	}
-	d.timers[uri] = time.AfterFunc(d.delay, fn)
+	d.timers[uri] = d.newTimer(d.delay, fn)
 }
 
 func (d *diagnosticsDebouncer) cancel(uri protocol.DocumentUri) {

@@ -8,7 +8,7 @@ import (
 
 // server_only_gate_parity_test.go -- memql#2875, the drift half.
 //
-// The FIX for #2875 is in dsl/server_only_parsed_test.go, and ALL FOUR dsl-side
+// The FIX for #2875 is in test/dslconformance/server_only_parsed_test.go, and ALL FOUR dsl-side
 // gates now consume it -- TestPerRowAuthzClassification's `hasServerOnly`,
 // TestServerOnlyConstructsAreDocumented's membership check,
 // TestPiiProjectionRequiresCallerGate and
@@ -19,7 +19,7 @@ import (
 //
 // An earlier version of this comment said "both dsl-side gates", and the count
 // was the defect: two of the four were still regex VERDICTS, including the PII
-// projection gate. `grep -rn serverOnlyAnnotationRe dsl/` was five lines and
+// projection gate. `grep -rn serverOnlyAnnotationRe test/dslconformance/` was five lines and
 // would have caught it -- the same way grep caught the round before. Counting
 // the call sites beats asserting the count.
 //
@@ -29,13 +29,13 @@ import (
 //	                               GENERATOR that runs over an arbitrary --dsl
 //	                               root without booting an engine, so a parsed
 //	                               verdict would couple codegen to engine Init.
-//	dsl/server_only_authz_test.go  uses it only to LOCATE the annotation line,
-//	                               because the doc block is found by walking up
+//	test/dslconformance/           uses it only to LOCATE the annotation line,
+//	  server_only_authz_test.go    because the doc block is found by walking up
 //	                               from it. WHICH constructs are server-only
 //	                               comes from the parsed set; a location whose
 //	                               construct is not in that set is skipped.
 //
-// dsl/conformance_test.go's serverOnlyAnnotationRe is GONE -- with all four
+// test/dslconformance/conformance_test.go's serverOnlyAnnotationRe is GONE -- with all four
 // gates on the parsed verdict it had no consumers left, so it is deleted rather
 // than left as a loaded gun for the next author to reach for.
 //
@@ -68,7 +68,7 @@ const serverOnlyRegexSource = `(?m)^@serverOnly\b`
 func TestServerOnlyRegexPatternIsPinnedAtEverySiteThatStillUsesIt(t *testing.T) {
 	for _, site := range []struct{ path, varName string }{
 		{"../../sdk/gen/gen.go", "serverOnlyRe"},
-		{"../../dsl/server_only_authz_test.go", "serverOnlyRe"},
+		{"../../test/dslconformance/server_only_authz_test.go", "serverOnlyRe"},
 	} {
 		raw, err := os.ReadFile(site.path)
 		if err != nil {
@@ -87,7 +87,7 @@ func TestServerOnlyRegexPatternIsPinnedAtEverySiteThatStillUsesIt(t *testing.T) 
 		}
 		if got := string(m[1]); got != serverOnlyRegexSource {
 			t.Errorf("%s: %s compiles %q, this file expects %q -- that site's verdict has drifted "+
-				"from the parsed audit in dsl/server_only_parsed_test.go; reconcile them.",
+				"from the parsed audit in test/dslconformance/server_only_parsed_test.go; reconcile them.",
 				site.path, site.varName, got, serverOnlyRegexSource)
 		}
 	}

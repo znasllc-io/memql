@@ -111,7 +111,7 @@ func TestParseArgsBlockField_RejectsDefault(t *testing.T) {
 		t.Fatal("expected @default on an args field to be rejected, got nil")
 	}
 	// The message must name the `??` shorthand, not `coalesce(...)`:
-	// dsl/no_coalesce_longhand_test.go gates the corpus on the shorthand, so
+	// test/dslconformance/no_coalesce_longhand_test.go gates the corpus on the shorthand, so
 	// an author following the longhand advice writes a construct the tree
 	// rejects (memql#2909 review).
 	if !contains(err.Error(), "retired") || !contains(err.Error(), "??") {

@@ -558,7 +558,7 @@ func argNamesFromArgsText(argsText string) map[string]bool {
 // could ship with every test green (memql#2853 round-3 review).
 //
 // A rejection gate narrower than the thing it guards is not a gate. This is
-// the same defect as #2 in dsl/naming_conventions_test.go's header (`^` pinned
+// the same defect as #2 in test/dslconformance/naming_conventions_test.go's header (`^` pinned
 // to column 0 while the real matcher accepts leading whitespace), one layer
 // down.
 var legacyProceduralAuthorForm = regexp.MustCompile(`(?m)^[ \t]*func[ \t]*\([ \t]*(Query|Mutation|Logic|Spec|Automation|Builtin|Prompt|Provider|Shape|Tool|Policy|Seed)[ \t]*\)`)

@@ -87,7 +87,7 @@ var BodyKeywords = append(append([]string{}, StructQueryDirectives...),
 //
 // This lives HERE rather than in one caller on purpose, and that is the whole
 // reason this package exists. All four openers now call it -- the sense scanner,
-// dsl/conformance_test.go's walkFilterPredicates, and
+// test/dslconformance/conformance_test.go's walkFilterPredicates, and
 // component/language/pagination/checker.go's filterClause -- so the widening
 // genuinely reaches every consumer. (An earlier revision claimed that while
 // leaving two of the four hand-rolling `HasPrefix(trim, "filter ")`; review

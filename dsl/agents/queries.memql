@@ -256,7 +256,7 @@ query agentRole agentRoleBySlug {
 // cockpit callers.
 //
 // COSTS ONE SUPPRESSOR, deliberately. @public is matched ahead of the
-// flagged bucket in dsl/conformance_test.go, and it is a hard blocker on
+// flagged bucket in test/dslconformance/conformance_test.go, and it is a hard blocker on
 // memql#2920 tier inference (cmd/memqlmigrate/rowauthz_infer.go). It
 // suppresses nothing today only because `agentRoleBySlug` already blocks
 // v1:agents:agentRole from being declared. If that query ever becomes

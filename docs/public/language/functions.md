@@ -53,7 +53,7 @@ what it does; the keyword already states what it is.
 - Provider: provider name (e.g. `chat54Mini`, `streamClaudeSonnet`)
 - Shape: `<concept><Projection>` (e.g. `spaceCard`, `participantFull`)
 
-Gated by `TestNoKindPrefixInConstructNames` in `dsl/naming_conventions_test.go`.
+Gated by `TestNoKindPrefixInConstructNames` in `test/dslconformance/naming_conventions_test.go`.
 Full rationale and history: [naming-conventions.md](naming-conventions.md).
 
 This page previously mandated kind prefixes and claimed the compiler emitted
@@ -182,7 +182,7 @@ query participant activeHumanParticipants {
 }
 ```
 
-Filter rules (enforced by `dsl/conformance_test.go`):
+Filter rules (enforced by `test/dslconformance/conformance_test.go`):
 
 - Payload fields are `<field>` -- bare, never `payload.<field>` or
   `<conceptName>.<field>`.
@@ -327,7 +327,7 @@ insert {
 
 `a ?? b ?? c` folds to exactly what `coalesce(a, b, c)` produces, so the
 two spellings are interchangeable to the engine. The shorthand is the
-authored form -- `dsl/no_coalesce_longhand_test.go` gates the corpus on
+authored form -- `test/dslconformance/no_coalesce_longhand_test.go` gates the corpus on
 it, and `memqlmigrate --rewrite=null-coalesce` converts the call form.
 
 `??` binds **tighter than comparison** and **looser than arithmetic**, so

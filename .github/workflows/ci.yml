@@ -499,12 +499,17 @@ jobs:
       # package list against the bucket's globs, and pins the bucket against
       # the paths those packages read.
       #
-      # ./dsl and ./examples are here because the `**/*.memql` glob would
-      # otherwise promise coverage this step does not deliver -- the bucket
-      # comment cites the referencepack tests, and they live in
-      # examples/referencepack, not in any package above. dsl/ also hosts
-      # TestPublicExamplesAreAnnotated, which reads a docs/public `.md`.
-      # Together they cost ~2s (memql#3060 review).
+      # ./test/dslconformance and ./examples are here because the
+      # `**/*.memql` glob would otherwise promise coverage this step does not
+      # deliver -- the bucket comment cites the referencepack tests, and they
+      # live in examples/referencepack, not in any package above. The DSL
+      # conformance suite also hosts TestPublicExamplesAreAnnotated, which
+      # reads a docs/public `.md`. Together they cost ~2s (memql#3060 review).
+      #
+      # That suite USED to be `./dsl/...`, and it is the same tests: memql#3242
+      # made `dsl` a module, and a suite importing `component/memql` cannot sit
+      # inside the module `component/memql` requires. It moved up to the root
+      # module; only the selector changed.
       #
       # STATED BOUNDARY: component/memql also reads bucket files -- its
       # reference-pack load test and sense's walk of the dsl/ tree -- and is
@@ -528,7 +533,7 @@ jobs:
         # for most dsl PRs; the change extends it to `.tmpl`/`.pin`-only ones.
         # Still bounded by `any .go change sets RUN_GO, which makes RUN_GATES
         # false`, which is the part that actually caps the cost.
-        run: go test -count=1 -timeout=300s ./ ./cmd/envscan/... ./component/architecture/... ./component/genesis/... ./scripts/... ./dsl/... ./examples/...
+        run: go test -count=1 -timeout=300s ./ ./cmd/envscan/... ./component/architecture/... ./component/genesis/... ./scripts/... ./test/dslconformance/... ./examples/...
 
       # --- pure-Go lanes (go bucket) -- build first to warm the cache ---
       #
@@ -585,10 +590,12 @@ jobs:
         if: ${{ env.RUN_DSL == 'true' }}
         run: make sdk-gen-check
       # Proto drift check (memql#928): regenerate the pinned-toolchain proto
-      # bindings (component/grpc + node; bus excluded pending a consumer-
-      # touching normalization) and diff against the checked-in tree, ignoring
-      # the cosmetic protoc version stamp. Catches a .proto edited without its
-      # .pb.go regenerated -- the gap that let stale bindings merge green.
+      # bindings (component/grpc, component/node and component/bus -- bus was
+      # normalized onto the pinned toolchain in memql#928 itself, so the
+      # exclusion this comment used to claim had not existed for some time) and
+      # diff against the checked-in tree, ignoring the cosmetic protoc version
+      # stamp. Catches a .proto edited without its .pb.go regenerated -- the gap
+      # that let stale bindings merge green.
       # Cache the PINNED protoc that proto-gen.sh provisions into bin/tools/
       # (memql#3166 / design D4.2). Without this it is re-downloaded from
       # github releases on every run: a network dependency on the critical
@@ -1022,26 +1029,85 @@ jobs:
           CREATE EXTENSION IF NOT EXISTS "pgcrypto";
           CREATE EXTENSION IF NOT EXISTS vector;
           SQL
-      # `-timeout` is PER TEST BINARY, and this step runs six of them in
-      # parallel. Five finish in seconds; `component/memql` boots a full engine
-      # per db-gated test and had been running just under the old 300s. On
-      # 2026-08-07 it crossed the line and the required check went red on
-      # `main` itself -- and then on every open PR, including ones that touch
-      # no db-gated package at all (memql#3257). The panic names whichever
-      # 1-second test happened to be executing when the clock ran out, which
-      # makes it read as a flake in an unrelated test rather than as a budget.
+      # NOTHING GOT SLOW. memql#3257 asked what added the time between the last
+      # green run and the first red one, and the answer, measured against a real
+      # Postgres across exactly that boundary, is nothing:
       #
-      # 600s is not "more headroom is fine". It buys the lane back while the
-      # real question -- why one package needs five-plus minutes of database
-      # time when its five siblings need seconds -- stays open on memql#3257.
-      # The job's own timeout-minutes is 20 and the step was taking ~6, so this
-      # is well inside what the job already allows; it is not a new budget, it
-      # is the step's share of one that already existed.
+      #   8b8db012 (last green)   component/memql  133.9s
+      #   c650da97 (first red)    component/memql  123.6s
       #
-      # If you are here because it went red again: raising this a third time is
-      # the wrong move. Split the package, or find what got slow.
-      - name: db-gated suites (seeded test DB)
-        run: go test -count=1 -timeout=600s ./component/memql/... ./component/automations/... ./component/grpc/... ./integrations/cognition/... ./integrations/planner/... ./examples/referencepack/...
+      # It got ~10s FASTER. The suspected commits (concept_parser.go +211 and
+      # ten dsl/*/concepts.memql, memql#3196 / #3197 / #3198) cost nothing
+      # measurable. Nor is CI's 2.4x over local a contention artefact: pinned to
+      # two cores with GOMAXPROCS=2, mirroring this runner, the package still
+      # finishes in 120.3s. It is simply slower here -- a hosted runner's cores
+      # and its Postgres round-trips.
+      #
+      # What actually happened is that the budget was a coin flip. Two runs of
+      # IDENTICAL code, four minutes apart:
+      #
+      #   run 31206771705   290s
+      #   run 31210413414   310s
+      #
+      # ~7% run-to-run variance against a 300s budget the package was already
+      # consuming ~295s of. There was under 10s of headroom, so it was going to
+      # go red on SOME run no matter what anyone committed -- and when it did,
+      # the panic named whichever 1-second test held the clock, which reads as a
+      # flake in an unrelated test rather than as a budget. The author blamed is
+      # never the cause, because there is no cause to find.
+      #
+      # So the fix is the lane's SHAPE, which is what memql#3257 asked for
+      # second and is the half that generalises:
+      #
+      #   1. SPLIT THE STEP. component/memql gets its own budget, named as its
+      #      own. The other five need seconds, so they get a tight one -- a hang
+      #      in any of them now surfaces in ~2 minutes instead of taking the
+      #      slow package's 10. Previously one number covered all six, sized for
+      #      the worst, which made the other five's timeout meaningless.
+      #
+      #   2. REPORT HEADROOM. "How much room is left" required a bisect against
+      #      a live database to answer; memql#3257 called that out as its own
+      #      problem, and it was the reason nobody saw the cliff coming. Each
+      #      step now prints elapsed against budget, so the answer is in the log
+      #      of every run.
+      #
+      #   3. WARN BEFORE THE CLIFF, don't just fail at it. Crossing
+      #      DB_HEADROOM_WARN_PCT annotates the run. A warning is deliberate
+      #      rather than a failure: a slow runner is not a broken PR, and
+      #      failing on it would hand the next author exactly the unearned blame
+      #      this comment exists to explain. It is the advance notice that was
+      #      missing.
+      #
+      # Do NOT raise a budget in response to a warning. The warning means the
+      # package is growing into its budget, and the answer is to split the
+      # package by concern -- it boots a full engine per db-gated test, which is
+      # the actual cost driver and the thing worth changing.
+      # Kept as two PLAIN `go test` blocks on purpose. scripts/cidb/dbgate_test.go
+      # derives this lane's selector by parsing literal `./`-prefixed arguments
+      # out of these `run:` blocks, and treats a block containing a shell control
+      # keyword (`if`, `for`, `exit`, `cd`, `source`, ...) as non-plain. Moving
+      # the invocation behind a wrapper script empties its derived package list
+      # and silently disarms the gate -- confirmed while writing this: a
+      # `bash scripts/...` form reds dbgate_test.go with "no `go test` step, so
+      # the env key it sets guards nothing". Keep `go test` and its patterns
+      # literal and inline. scripts/ci/db-gated-packages.sh carries the same
+      # warning for the same reason.
+      #
+      # The `start=$SECONDS` / trailing `echo` pair is the headroom report, and
+      # is deliberately the most that fits: capturing the status to also print on
+      # FAILURE needs `|| status=$?` plus `exit "$status"`, and `exit` is one of
+      # the control keywords above. On a timeout the step NAME already carries
+      # the attribution that was missing, so the loss is small.
+      - name: db-gated -- component/memql (own budget, the slow one)
+        run: |
+          start=$SECONDS
+          go test -count=1 -timeout=600s ./component/memql/...
+          echo "headroom: component/memql used $((SECONDS - start))s of its 600s budget"
+      - name: db-gated -- the fast five (tight budget)
+        run: |
+          start=$SECONDS
+          go test -count=1 -timeout=180s ./component/automations/... ./component/grpc/... ./integrations/cognition/... ./integrations/planner/... ./examples/referencepack/...
+          echo "headroom: the fast five used $((SECONDS - start))s of their 180s budget"
 
   # VS Code extension lane: run every cmd/memql-lsp drift guard over the
   # checked-in editors/vscode assets, then build the offline LSP binary
@@ -1084,6 +1150,164 @@ jobs:
       - name: package extension (build binary + compile + vsce package)
         run: bash scripts/vscode/package.sh --out="$RUNNER_TEMP/memql.vsix"
 
+  # THE lane that makes the module boundary real (memql#3240, design D3).
+  #
+  # A `go.work` does NOT enforce the boundary. Under workspace mode a module
+  # silently satisfies an import it does not `require`, so every other Go lane
+  # in this file -- all of which run in workspace mode -- is blind to a
+  # dependency-direction violation. Demonstrated on this tree by giving the
+  # wire tier an upward import of component/safety (base):
+  #
+  #     $ go build ./...                 # workspace mode, as every other lane
+  #     exit=0                           # <- the violation is INVISIBLE
+  #
+  #     $ GOWORK=off go build ./...
+  #     violation_demo.go:7:8: no required module provides package
+  #         github.com/znasllc-io/memql/component/safety
+  #     exit=1
+  #
+  # So compiler enforcement requires GOWORK=off, per module. Without this lane
+  # the boundary is real only on the day someone runs it by hand -- which is to
+  # say it is a comment. It ships with the FIRST module rather than later, so
+  # every tier that follows is verified as it lands instead of retro-fitted.
+  #
+  # Deliberately NOT path-filtered beyond `go`/`ci`: the whole point is that any
+  # Go change can introduce an upward import, so narrowing this by directory
+  # would let the violation it exists to catch skip the lane.
+  module-boundaries:
+    name: module-boundaries
+    timeout-minutes: 15
+    needs: changes
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' || needs.changes.outputs.proto == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.26.5'
+          cache: true
+      - name: go.work lists every module in the tree
+        run: |
+          set -euo pipefail
+          # Keeps workspace mode and the GOWORK=off step below agreed about
+          # what the tree is. A module absent from go.work is still verified by
+          # the step below, but is outside the workspace that every OTHER lane,
+          # gopls and `go test ./...` resolve against -- so the two modes check
+          # different trees, silently. Assert the sets match rather than
+          # trusting review to notice.
+          on_disk="$(find . -name go.mod -not -path './.git/*' -printf '%h\n' | sed 's|^\./||;s|^\.$|.|' | sort)"
+          in_work="$(go work edit -json | python3 -c 'import json,sys; [print(u["DiskPath"].removeprefix("./")) for u in json.load(sys.stdin)["Use"]]' | sort)"
+          if [ "$on_disk" != "$in_work" ]; then
+            echo "go.work does not match the modules on disk."
+            diff <(echo "$in_work") <(echo "$on_disk") || true
+            exit 1
+          fi
+          echo "go.work covers all $(echo "$on_disk" | wc -l) modules"
+      - name: every module builds and vets with GOWORK=off
+        run: |
+          set -euo pipefail
+          status=0
+          while read -r dir; do
+            echo "::group::GOWORK=off $dir"
+            if ! ( cd "$dir" && GOWORK=off go build ./... && GOWORK=off go vet ./... ); then
+              echo "::error::$dir fails to build or vet with GOWORK=off -- it imports a package no module it requires provides (a dependency-direction violation). If the message above is 'updates to go.mod needed', it is instead a stale go.mod and the tidy step below prints the exact delta"
+              status=1
+            fi
+            echo "::endgroup::"
+          done < <(find . -name go.mod -not -path './.git/*' -printf '%h\n' | sed 's|^\./||;s|^\.$|.|' | sort)
+          exit "$status"
+      # A nested module's go.mod is a function of its RELATIVE-PATH SIBLINGS,
+      # not only of its own file (memql#3280). component/database carries
+      #
+      #     replace github.com/znasllc-io/memql/core => ../../core
+      #
+      # so bumping core/go.mod's indirect set changes what component/database's
+      # own go.mod must say -- while touching none of its files. Dependabot has
+      # no model of that edge: it resolves each module independently, applies
+      # the bump correctly to core, and leaves the five modules that replace
+      # core stale and untouched, so they look uninvolved in review.
+      #
+      # That is how `main` went red on 2026-08-07. PR #3269 bumped core; PR
+      # #3273 created component/database. Each was green on its own branch --
+      # #3269's base predates the module existing, #3273's base predates the
+      # bump -- and NEITHER TREE EVER CONTAINED THE COMBINATION. A semantic
+      # merge conflict: two individually-green PRs that are red together.
+      #
+      # No lane can catch that pre-merge, because the failing tree is not the
+      # tree either PR tested. The structural fix is the merge queue
+      # (`merge_group` is already a trigger in this file) or
+      # `strict_required_status_checks_policy: true` on the `default` ruleset,
+      # which currently sets it false -- both are repo settings, not workflow.
+      # What this step buys is DIAGNOSIS: `go mod tidy -diff` prints the exact
+      # go.mod/go.sum delta and exits non-zero WITHOUT writing, so the failure
+      # names what is stale instead of the bare "updates to go.mod needed" that
+      # reads like a dependency-direction violation and sent the first reader
+      # of memql#3280 hunting a bad dependabot bump that was not the cause.
+      #
+      # It also strictly widens coverage. build+vet only needs the modules the
+      # code actually imports, so a go.sum carrying superseded entries passes
+      # them and fails tidy: component/harness was in exactly that state,
+      # stale from the same core bump, and invisible to the step above.
+      #
+      # Runs AFTER build+vet so the module cache is warm, and on !cancelled()
+      # so a build failure that is really a stale go.mod still gets its delta
+      # printed rather than being masked by the step it explains.
+      - name: every module's go.mod and go.sum are tidy
+        if: ${{ !cancelled() }}
+        run: |
+          set -uo pipefail
+          status=0
+          while read -r dir; do
+            echo "::group::go mod tidy -diff $dir"
+            if ! out="$( cd "$dir" && GOWORK=off go mod tidy -diff 2>&1 )"; then
+              echo "$out"
+              echo "::error::$dir has a stale go.mod/go.sum -- run 'cd $dir && GOWORK=off go mod tidy'. If you did not touch this module, a sibling it replaces by relative path was bumped (see memql#3280)"
+              status=1
+            fi
+            echo "::endgroup::"
+          done < <(find . -name go.mod -not -path './.git/*' -printf '%h\n' | sed 's|^\./||;s|^\.$|.|' | sort)
+          exit "$status"
+      - name: every module is on the workspace's version set
+        run: |
+          set -euo pipefail
+          # WHY THIS IS A GATE AND NOT A CONVENTION.
+          #
+          # `go mod tidy` in a nested module resolves external dependencies by
+          # THAT MODULE's own minimal-version selection. A module needing only
+          # grpc's basics picks an older grpc than the root does, and nothing
+          # local notices: the workspace resolves the maximum across modules, so
+          # every build and every test stays green over a tree whose go.mod
+          # files disagree.
+          #
+          # What does notice is Dependabot, which reads each go.mod separately
+          # and opens one PR per (module, dependency) to close each gap. That is
+          # what produced a PR per module for grpc alone after memql#3241
+          # (1.81.0-dev -> 1.82.1 across component/harness, component/node/gen
+          # and the root) -- not Dependabot misbehaving, but correctly reporting
+          # drift the split introduced.
+          #
+          # `go work sync` pushes the workspace's selected versions back into
+          # every go.mod. A no-op means the tree is on one version set.
+          go work sync
+          if ! git diff --quiet; then
+            echo "::error::modules have drifted off the workspace version set -- run 'go work sync' and commit the result"
+            git diff --stat
+            exit 1
+          fi
+          echo "all modules on one version set"
+      - name: package count is preserved across the split
+        run: |
+          set -euo pipefail
+          # `go list ./...` is NOT the right pattern once modules are nested --
+          # from the root module it sees only the root module's packages and
+          # silently undercounts. The module-path pattern spans the workspace.
+          n="$(go list github.com/znasllc-io/memql/... | wc -l)"
+          echo "packages (untagged, module-path pattern): $n"
+          if [ "$n" -lt 181 ]; then
+            echo "::error::package count fell to $n; a go.mod beneath the root can silently drop packages out of the pattern"
+            exit 1
+          fi
+
   # Aggregator -- the SINGLE required status check for branch protection.
   # It always runs (even when every lane is path-skipped) and fails only if
   # a lane it depends on actually failed or was cancelled; a `skipped` lane
@@ -1104,6 +1328,7 @@ jobs:
       - conformance
       - db-tests
       - vscode-extension
+      - module-boundaries
     runs-on: ubuntu-latest
     steps:
       - name: verify required lanes succeeded or were skipped

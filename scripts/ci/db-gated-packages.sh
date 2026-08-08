@@ -68,8 +68,62 @@ readonly DB_GATED_TREES=(
 # friction, and it is the correct friction: it is a one-line, reviewed,
 # deliberate statement that the person drawing the boundary also thought about
 # what the complement now means.
+#
+# memql#3240 added the first three: the `wire` tier. What the complement now
+# means, having looked: `go list <module>/...` runs in workspace mode, so the
+# wire packages are still enumerated and still tested -- the complement did not
+# shrink. The count is unchanged at 181 untagged. Each wire module is
+# ADDITIONALLY built and vetted with GOWORK=off by the `module-boundaries` lane,
+# which is where the boundary itself is enforced.
 readonly KNOWN_GO_MOD_DIRS=(
 	"."
+	"component/actions"
+	"component/architecture"
+	"component/auth"
+	"component/automations"
+	"component/bus"
+	"component/bus/gen"
+	"component/config"
+	"component/database"
+	"component/deploycontrol"
+	"component/events"
+	"component/fileprocessor"
+	"component/genesis"
+	"component/grpc"
+	"component/grpc/gen"
+	"component/harness"
+	"component/healing"
+	"component/identity"
+	"component/identity/admin"
+	"component/inbound"
+	"component/language"
+	"component/language/annotations"
+	"component/language/ast"
+	"component/language/dslclause"
+	"component/mcp"
+	"component/memql"
+	"component/metadata"
+	"component/metrics"
+	"component/node"
+	"component/node/gen"
+	"component/observe"
+	"component/outbound"
+	"component/planner"
+	"component/polyphon"
+	"component/provenance"
+	"component/router"
+	"component/safety"
+	"component/secret"
+	"component/server"
+	"component/service"
+	"component/worker"
+	"core"
+	"docs"
+	"dsl"
+	"integrations"
+	"integrations/email"
+	"integrations/openai"
+	"integrations/stt"
 )
 
 usage() {
@@ -206,8 +260,14 @@ verify_no_unknown_modules() {
 	# Demonstrated: cwd on a copy carrying `scripts/go.mod`, guard silent,
 	# 150 packages printed. PWD-independence is the WRONG invariant here;
 	# agreement is the right one.
+	#
+	# Name the main module EXPLICITLY. A bare `go list -m` prints one line per
+	# module in the build list, and under a go.work that is every workspace
+	# module -- four lines since memql#3240, which this comparison then treated
+	# as a single directory name and refused on. Naming the module pins it to
+	# the one root both sides mean.
 	local golist_root
-	golist_root="$(go list -m -f '{{.Dir}}' 2>/dev/null)" || golist_root=""
+	golist_root="$(go list -m -f '{{.Dir}}' "${MODULE_PATH}" 2>/dev/null)" || golist_root=""
 	if [[ -n "${golist_root}" ]] && [[ "$(cd -- "${golist_root}" && pwd -P)" != "$(cd -- "${root}" && pwd -P)" ]]; then
 		echo "db-gated-packages.sh: this script and the Go toolchain disagree about the repo:" >&2
 		echo "    this script walks : ${root}" >&2

@@ -252,7 +252,13 @@ func staleEdgeEndpoints(want *model.Model, live map[model.ID]bool) (samples []st
 	return samples, len(dead)
 }
 
-// workspaceRoot walks up from the test's directory to the module root.
+// workspaceRoot walks up from the test's directory to the REPOSITORY root.
+//
+// It looks for go.work, not go.mod. Since memql#3228 the tree is many modules,
+// and this package is one of them -- a go.mod walk stopped at
+// component/architecture/, so every model test resolved the wrong root
+// (memql#3241). go.work exists once, at the repository root, which is what
+// "workspace root" has always meant here.
 func workspaceRoot(t *testing.T) string {
 	t.Helper()
 	dir, err := os.Getwd()
@@ -260,12 +266,12 @@ func workspaceRoot(t *testing.T) string {
 		t.Fatalf("getwd: %v", err)
 	}
 	for {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+		if _, err := os.Stat(filepath.Join(dir, "go.work")); err == nil {
 			return dir
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			t.Fatalf("no go.mod above %s", dir)
+			t.Fatalf("no go.work above %s", dir)
 		}
 		dir = parent
 	}

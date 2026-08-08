@@ -71,7 +71,7 @@ query deployment deploymentsForCluster {
 // person deciding whether the field can go.)
 //
 // Querying THROUGH the mirror is the defect; storing it is not.
-// TestByIdQueriesFilterTheRowIdNotASelfMirror (dsl/row_id_mirror_test.go)
+// TestByIdQueriesFilterTheRowIdNotASelfMirror (test/dslconformance/row_id_mirror_test.go)
 // enforces exactly that distinction, across the tree rather than here.
 //
 // Returns ONE row: the latest version. The comment here previously

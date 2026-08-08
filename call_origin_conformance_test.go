@@ -101,7 +101,7 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// server-initiated by construction, same as the pat entry above". The
 		// #3072 review caught that wording: ListForUser's only caller is a
 		// request handler (handleRevokeWorkerToken, on s.stream.Context()), so
-		// this is the shape memql#2989 refused and dsl/server_only_parsed_test.go
+		// this is the shape memql#2989 refused and test/dslconformance/server_only_parsed_test.go
 		// names as refuted. An allowlist entry whose stated reason is wrong is
 		// worse than no entry -- the reason is what the next reader trusts, and
 		// "server-initiated" invites a future caller to pass anything.

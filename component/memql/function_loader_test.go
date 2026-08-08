@@ -211,7 +211,7 @@ func TestEnsureBoundConceptFilter_TreatsOrAsAbsent(t *testing.T) {
 }
 
 func TestLoadBuiltinFunctions_RegistersAliasesAndArgs(t *testing.T) {
-	t.Skip("legacy dsl/v1 tree retired; unified-tree coverage lives in component/memql/unified_*_test.go and dsl/embed_test.go.")
+	t.Skip("legacy dsl/v1 tree retired; unified-tree coverage lives in component/memql/unified_*_test.go and test/dslconformance/embed_test.go.")
 	builtins, err := loadBuiltinFunctions(nil)
 	if err != nil {
 		t.Fatalf("loadBuiltinFunctions: %v", err)
