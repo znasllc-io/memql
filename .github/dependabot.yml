@@ -10,16 +10,34 @@ updates:
       - "go"
     ignore:
       # github.com/livekit/protocol is version-coupled to server-sdk-go and
-      # must NOT be bumped standalone — ANY version above 1.46.6 breaks the
-      # build. protocol 1.46.7 already dropped the Scenario_*/ScenarioGroup_*
-      # types that server-sdk-go v2.16.6 still imports, so even a patch bump
-      # (1.46.6 -> 1.46.8, PR #2192) fails go-checks and every node build with
+      # must NOT be bumped standalone. protocol 1.46.7 dropped the
+      # Scenario_*/ScenarioGroup_* types that server-sdk-go v2.16.6 still
+      # imported, so even a patch bump (1.46.6 -> 1.46.8, PR #2192) failed
+      # go-checks and every node build with
       # `undefined: livekit.Scenario_Create_Request`. See issue #2181.
-      # protocol must only move in lockstep with a server-sdk-go release that
-      # supports it, which a server-sdk-go bump pulls in transitively (that's
-      # server-sdk-go's own Dependabot PR, unaffected by this ignore).
-      # Remove this entry once livekit tags a server-sdk-go/v2 that builds
-      # against protocol >= 1.48.x, then bump both modules together.
+      #
+      # The COUPLING is the rule, and it is permanent -- not a wait for some
+      # specific version to arrive. protocol moves only in lockstep with a
+      # server-sdk-go release that supports it, which a server-sdk-go bump
+      # pulls in transitively (that's server-sdk-go's own Dependabot PR,
+      # unaffected by this ignore). That is the ONLY sanctioned path, and it
+      # is a path this entry does not block, so there is nothing this entry
+      # holds back.
+      #
+      # This has now happened once, which is the worked example: #3293 bumped
+      # server-sdk-go 2.16.3 -> 2.18.1 and carried protocol 1.45.6 -> 1.49.0
+      # in with it, green. So do NOT read the tree being past 1.46.6 as
+      # evidence the hazard expired -- 1.49.0 is here BECAUSE it arrived the
+      # coupled way.
+      #
+      # An earlier version of this comment said to remove the entry "once
+      # server-sdk-go builds against protocol >= 1.48.x". Do not: that
+      # condition is already true and acting on it would re-enable exactly the
+      # standalone bump the rule exists to stop. #3299 proposed protocol
+      # 1.50.4 on its own, unvalidated against server-sdk-go 2.18.1, and was
+      # closed for that reason -- it only got proposed at all because the
+      # since-removed nested gomod entry (memql#3300) carried no `ignore`
+      # block and routed around this guard.
       - dependency-name: "github.com/livekit/protocol"
 
   # WHY THERE IS NO SEPARATE ENTRY FOR THE NESTED MODULES (memql#3300).
