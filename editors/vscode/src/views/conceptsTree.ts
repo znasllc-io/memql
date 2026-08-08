@@ -9,6 +9,7 @@ import * as vscode from "vscode";
 
 import type { Concept } from "@znasllc-io/memql-sdk-core/client";
 import type { ConnectionManager } from "../connection/manager.js";
+import { ConceptsCache } from "./conceptsCache.js";
 
 export type ConceptTreeNode =
   | { kind: "domain"; domain: string }
@@ -24,46 +25,37 @@ export class ConceptsTreeProvider implements vscode.TreeDataProvider<ConceptTree
   private readonly changed = new vscode.EventEmitter<ConceptTreeNode | undefined>();
   readonly onDidChangeTreeData = this.changed.event;
 
-  // Cached so expanding a domain does not re-issue the list. Cleared whenever
-  // the connection changes, since concepts are per-cluster.
-  private cache: Concept[] | undefined;
-  private error: string | undefined;
+  // Cached (and race-guarded against an out-of-order settle) so expanding a
+  // domain does not re-issue the list, and a cluster switch mid-request
+  // never lets a stale response overwrite the fresh cluster's data. See
+  // conceptsCache.ts.
+  private readonly cache = new ConceptsCache<Concept>();
 
   constructor(private readonly connections: ConnectionManager) {
     this.connections.onDidChangeState(() => {
-      this.cache = undefined;
-      this.error = undefined;
+      this.cache.invalidate();
       this.changed.fire(undefined);
     });
   }
 
   refresh(): void {
-    this.cache = undefined;
-    this.error = undefined;
+    this.cache.invalidate();
     this.changed.fire(undefined);
   }
 
   private async load(): Promise<Concept[]> {
-    if (this.cache !== undefined) return this.cache;
     const query = this.connections.query;
     if (query === undefined) return [];
-    try {
-      const concepts = await query.listConcepts();
-      this.cache = concepts;
-      this.error = undefined;
-      return concepts;
-    } catch (err) {
-      this.error = err instanceof Error ? err.message : String(err);
-      return [];
-    }
+    return this.cache.load(() => query.listConcepts());
   }
 
   async getChildren(element?: ConceptTreeNode): Promise<ConceptTreeNode[]> {
     const concepts = await this.load();
 
     if (element === undefined) {
-      if (this.error !== undefined) {
-        return [{ kind: "error", message: this.error }];
+      const error = this.cache.cachedError;
+      if (error !== undefined) {
+        return [{ kind: "error", message: error }];
       }
       const domains = [...new Set(concepts.map((c) => c.domain))].sort();
       return domains.map((domain) => ({ kind: "domain", domain }));
