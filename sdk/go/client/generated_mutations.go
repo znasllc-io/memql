@@ -493,6 +493,28 @@ func ApproveRequestBuild(args ApproveRequestArgs) string {
 	return b.String()
 }
 
+// ArchiveAccount -- Archive an account: flip status to archived and stamp archivedAt. The row is retained in full -- memQL has no hard delete, and the operator's history of a closed customer is the point. Owned: ownerUserId is re-stamped from actor.userId and the write guard refuses a target row the actor does not own.
+//
+// Bound concept: v1:identity:account (machine-readable: BoundConcepts["archiveAccount"] in generated_concepts.go).
+type ArchiveAccountArgs struct {
+	AccountId string
+}
+
+// ArchiveAccount calls the engine mutation archiveAccount.
+func (qc *QueryClient) ArchiveAccount(ctx context.Context, args ArchiveAccountArgs) (*Result, error) {
+	call := ArchiveAccountBuild(args)
+	return qc.executeNamed(ctx, "archiveAccount", call)
+}
+
+func ArchiveAccountBuild(args ArchiveAccountArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation archiveAccount(")
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // AssignResponsibility -- Persist a routing decision onto a v1:planner:responsibility (epic #632, C2): bind the resolved agent (assignedAgentId), optional role slug (assignedRoleSlug), and flip targetKind off 'unassigned' onto the concrete kind (assistant / specialist). Called by the reactive-loop router after agentFactoryAnalyze + createSpecialist/extendSpecialist mint or match an agent. Partial-update via update(); ownerUserId re-stamped from actor.userId (owned tier) so the router can only rewrite the row's own owner -- the poller impersonates the responsibility's owner in the AccessContext before calling, so this lands as an owned write.
 //
 // Bound concept: v1:planner:responsibility (machine-readable: BoundConcepts["assignResponsibility"] in generated_concepts.go).
@@ -1180,6 +1202,66 @@ func CreateAccessRequestBuild(args CreateAccessRequestArgs) string {
 		}
 		b.WriteString("userAgent: ")
 		b.WriteString(quoteMemQL(args.UserAgent))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// CreateAccount -- Create an account (an operator-managed customer record). Owned: ownerUserId is stamped from actor.userId, so an operator can only ever create their own customer records. Opens at status=active; the descriptive fields are all optional so a record can be created from a name alone and filled in later.
+//
+// Bound concept: v1:identity:account (machine-readable: BoundConcepts["createAccount"] in generated_concepts.go).
+type CreateAccountArgs struct {
+	AccountId           string
+	Name                string
+	Description         string
+	PrimaryContactName  string
+	PrimaryContactEmail string
+	ExternalRef         string
+}
+
+// CreateAccount calls the engine mutation createAccount.
+func (qc *QueryClient) CreateAccount(ctx context.Context, args CreateAccountArgs) (*Result, error) {
+	call := CreateAccountBuild(args)
+	return qc.executeNamed(ctx, "createAccount", call)
+}
+
+func CreateAccountBuild(args CreateAccountArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation createAccount(")
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	if b.Len() > 23 {
+		b.WriteString(", ")
+	}
+	b.WriteString("name: ")
+	b.WriteString(quoteMemQL(args.Name))
+	if args.Description != "" {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("description: ")
+		b.WriteString(quoteMemQL(args.Description))
+	}
+	if args.PrimaryContactName != "" {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("primaryContactName: ")
+		b.WriteString(quoteMemQL(args.PrimaryContactName))
+	}
+	if args.PrimaryContactEmail != "" {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("primaryContactEmail: ")
+		b.WriteString(quoteMemQL(args.PrimaryContactEmail))
+	}
+	if args.ExternalRef != "" {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("externalRef: ")
+		b.WriteString(quoteMemQL(args.ExternalRef))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -10851,6 +10933,68 @@ func TouchWorkspaceBuild(args TouchWorkspaceArgs) string {
 	b.WriteString("mutation touchWorkspace(")
 	b.WriteString("workspaceId: ")
 	b.WriteString(quoteMemQL(args.WorkspaceId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// UpdateAccount -- Update an account's descriptive fields. Partial read-merge: an omitted field keeps its current value. Owned: ownerUserId is re-stamped from actor.userId so the write cannot transfer the row, and the row-authz write guard refuses the call outright when the target row belongs to another operator. status is NOT accepted here -- lifecycle transitions go through archiveAccount so the transition timestamp is stamped with the status rather than beside it.
+//
+// Bound concept: v1:identity:account (machine-readable: BoundConcepts["updateAccount"] in generated_concepts.go).
+type UpdateAccountArgs struct {
+	AccountId           string
+	Name                string
+	Description         string
+	PrimaryContactName  string
+	PrimaryContactEmail string
+	ExternalRef         string
+}
+
+// UpdateAccount calls the engine mutation updateAccount.
+func (qc *QueryClient) UpdateAccount(ctx context.Context, args UpdateAccountArgs) (*Result, error) {
+	call := UpdateAccountBuild(args)
+	return qc.executeNamed(ctx, "updateAccount", call)
+}
+
+func UpdateAccountBuild(args UpdateAccountArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation updateAccount(")
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	if args.Name != "" {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("name: ")
+		b.WriteString(quoteMemQL(args.Name))
+	}
+	if args.Description != "" {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("description: ")
+		b.WriteString(quoteMemQL(args.Description))
+	}
+	if args.PrimaryContactName != "" {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("primaryContactName: ")
+		b.WriteString(quoteMemQL(args.PrimaryContactName))
+	}
+	if args.PrimaryContactEmail != "" {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("primaryContactEmail: ")
+		b.WriteString(quoteMemQL(args.PrimaryContactEmail))
+	}
+	if args.ExternalRef != "" {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("externalRef: ")
+		b.WriteString(quoteMemQL(args.ExternalRef))
+	}
 	b.WriteString(")")
 	return b.String()
 }

@@ -3,6 +3,100 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
+// account -- the operator's customer records
+// ==========================================
+//
+// Every write stamps ownerUserId from actor.userId and never accepts
+// it from caller args; the field is @serverSet, so an accept{} naming
+// it would fail to LOAD rather than merely be wrong. Ownership is
+// therefore immutable across the row's whole version history and a
+// caller can neither create an account owned by someone else nor
+// reassign an existing one.
+//
+// The two update-kind mutations below land on an EXISTING row, which
+// is exactly the surface the row-authz write guard covers
+// (component/memql/rowauthz_write_guard.go, memql#3174): the engine
+// resolves the target row and refuses when its declared owner is not
+// the actor, so the caller-supplied accountId cannot be pointed at
+// another operator's customer. That guard is why these do not need
+// @serverOnly -- see docs/internal/design/account-isolation-model.md.
+//
+// There is no restoreAccount and no hard delete. Un-archiving is
+// deliberately out of this pass's scope (memql#3321 enumerates create /
+// update / archive) and is a two-line sibling of archiveAccount when a
+// surface needs it; hard delete does not exist in memQL at all -- a
+// write is an append onto the same id.
+
+/// Create an account (an operator-managed customer record). Owned: ownerUserId is stamped from
+/// actor.userId, so an operator can only ever create their own customer records. Opens at
+/// status=active; the descriptive fields are all optional so a record can be created from a name
+/// alone and filled in later.
+@actor
+mutate account createAccount {
+  args {
+    accountId            string!
+    name                 string!
+    description          string
+    primaryContactName   string
+    primaryContactEmail  string
+    externalRef          string
+  }
+  insert {
+    accept { name, description, primaryContactName, primaryContactEmail, externalRef }
+    stamp {
+      id: args.accountId
+      ownerUserId: actor.userId
+      status: "active"
+      updatedAt: now
+    }
+  }
+}
+
+/// Update an account's descriptive fields. Partial read-merge: an omitted field keeps its current
+/// value. Owned: ownerUserId is re-stamped from actor.userId so the write cannot transfer the row,
+/// and the row-authz write guard refuses the call outright when the target row belongs to another
+/// operator. status is NOT accepted here -- lifecycle transitions go through archiveAccount so the
+/// transition timestamp is stamped with the status rather than beside it.
+@actor
+mutate account updateAccount {
+  args {
+    accountId            string!
+    name                 string
+    description          string
+    primaryContactName   string
+    primaryContactEmail  string
+    externalRef          string
+  }
+  update {
+    accept { name, description, primaryContactName, primaryContactEmail, externalRef }
+    stamp {
+      id: args.accountId
+      ownerUserId: actor.userId
+      updatedAt: now
+    }
+  }
+}
+
+/// Archive an account: flip status to archived and stamp archivedAt. The row is retained in full --
+/// memQL has no hard delete, and the operator's history of a closed customer is the point. Owned:
+/// ownerUserId is re-stamped from actor.userId and the write guard refuses a target row the actor
+/// does not own.
+@actor
+mutate account archiveAccount {
+  args {
+    accountId  string!
+  }
+  update {
+    stamp {
+      id: args.accountId
+      ownerUserId: actor.userId
+      status: "archived"
+      archivedAt: now
+      updatedAt: now
+    }
+  }
+}
+
 /// Approve an access request (status=approved, stamps reviewer + invitation).
 mutate accessRequest approveAccessRequest {
   args {

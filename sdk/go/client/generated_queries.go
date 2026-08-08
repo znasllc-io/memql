@@ -36,6 +36,28 @@ func AccessRequestByIdBuild(args AccessRequestByIdArgs) string {
 	return b.String()
 }
 
+// AccountById -- Fetch a single account by id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard, so an operator can never read another operator's customer even holding its id. Backs the account detail read and the pre-write existence check.
+//
+// Bound concept: v1:identity:account (machine-readable: BoundConcepts["accountById"] in generated_concepts.go).
+type AccountByIdArgs struct {
+	AccountId string
+}
+
+// AccountById calls the engine query accountById.
+func (qc *QueryClient) AccountById(ctx context.Context, args AccountByIdArgs) (*Result, error) {
+	call := AccountByIdBuild(args)
+	return qc.executeNamed(ctx, "accountById", call)
+}
+
+func AccountByIdBuild(args AccountByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query accountById(")
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // AccountEntitlement -- The account's task-concurrency entitlement row (zero or one current row). Backs the admission controller (#904) and Tasks UX (#909). Filters on accountId only; classifies as 'other' in the per-row-authz audit. No-row => unlimited is enforced in the Go resolver.
 //
 // Bound concept: v1:identity:accountEntitlement (machine-readable: BoundConcepts["accountEntitlement"] in generated_concepts.go).
@@ -54,6 +76,31 @@ func AccountEntitlementBuild(args AccountEntitlementArgs) string {
 	b.WriteString("query accountEntitlement(")
 	b.WriteString("accountId: ")
 	b.WriteString(quoteMemQL(args.AccountId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// Accounts -- List the caller's accounts, newest first, optionally narrowed to one lifecycle status. Owned: ownerUserId==actor.userId gates the row set server-side, so an operator can never see another operator's customers. Omit status to get every account including archived ones.
+//
+// Bound concept: v1:identity:account (machine-readable: BoundConcepts["accounts"] in generated_concepts.go).
+type AccountsArgs struct {
+	// Enum: active | suspended | archived
+	Status string
+}
+
+// Accounts calls the engine query accounts.
+func (qc *QueryClient) Accounts(ctx context.Context, args AccountsArgs) (*Result, error) {
+	call := AccountsBuild(args)
+	return qc.executeNamed(ctx, "accounts", call)
+}
+
+func AccountsBuild(args AccountsArgs) string {
+	var b strings.Builder
+	b.WriteString("query accounts(")
+	if args.Status != "" {
+		b.WriteString("status: ")
+		b.WriteString(quoteMemQL(args.Status))
+	}
 	b.WriteString(")")
 	return b.String()
 }

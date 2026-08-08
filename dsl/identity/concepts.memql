@@ -405,6 +405,36 @@ concept group {
   active       bool    @description("Whether the group is active. Convention: true -- NOT applied on insert, and no mutation is bound to this concept, so a writer must supply it.")
 }
 
+/// A CUSTOMER THE OPERATOR MANAGES -- the record memQL keeps ABOUT a downstream business, as
+/// opposed to v1:identity:user (a principal that logs in) or v1:identity:accountEntitlement (a
+/// billing cap keyed on a paying account id). An account is operator-side bookkeeping: it holds no
+/// credential, mints no session and is never a subject -- nothing authenticates AS an account, and
+/// no v1:identity:identity row points at one. Accounts are also FLAT: there is deliberately no
+/// parentAccountId, because a nesting edge makes the isolation predicate transitive and a
+/// transitive predicate cannot be pushed down as a single filter conjunct. An agency with
+/// sub-clients is N sibling accounts sharing an operator, not a tree. Per-row authz: OWNED, and
+/// engine-enforced rather than author-enforced -- ownerUserId is @serverSet and stamped from
+/// actor.userId on every write, and the @rowAuthz declaration makes the engine AND
+/// ownerUserId==actor.userId into every read (component/memql/rowauthz_enforce.go, memql#3172) and
+/// refuse any update whose target row the actor does not own
+/// (component/memql/rowauthz_write_guard.go, memql#3174). The model, and the three places it is
+/// NOT sufficient, are recorded in docs/internal/design/account-isolation-model.md.
+@displayCard(primary="name", secondary="description", tertiary="primaryContactEmail", status="status")
+@rowAuthz(owner="ownerUserId")
+concept account {
+  ownerUserId          string!  @serverSet  @description("v1:identity:user.id of the operator principal that manages this customer. THE ROW-AUTHZ OWNER FIELD: stamped from actor.userId on create and re-stamped on every update so ownership can never be reassigned by a caller, and @serverSet turns 'never accepted from caller args' into a LOAD-TIME rejection rather than a convention. Because the concept declares @rowAuthz(owner=\"ownerUserId\"), this field is also what the engine compares against on the read path and in the write guard -- it is not merely documentation of an intent each query has to restate.")
+  name                 string!  @description("Display name of the customer, as the operator refers to them. The primary display field. Not unique -- the engine enforces no uniqueness constraint on any payload field, so two accounts may share a name and the row id is the only identity.")
+  status               enum("active", "suspended", "archived")!  @description("Lifecycle. active = a live customer. suspended = temporarily stopped (non-payment, pause) but still visible in the operator's list. archived = closed; retained for history and excluded from working lists by the caller's filter. Stamped 'active' by createAccount and flipped to 'archived' by archiveAccount; there is no hard delete -- a write is an append onto the same id.")
+  description          string  @description("Free-text operator note about who this customer is and what memQL does for them. Rendered as the display card's secondary line.")
+  primaryContactName   string  @pii  @description("Name of the human the operator deals with at this customer. Personal data about a third party rather than about a memQL principal, hence @pii: any query projecting it must constrain its caller (test/dslconformance/pii_projection_test.go).")
+  primaryContactEmail  string  @pii  @description("Email of the primary contact. @pii for the same reason as primaryContactName. NOT a credential and NOT a login: an account has no authentication path, so this address is never matched against a magic-link or session lookup.")
+  externalRef          string  @description("The operator's own identifier for this customer in whatever system is upstream of memQL -- a CRM record id, a billing customer id, an internal account number. Opaque to the engine: never parsed, never resolved, and deliberately NOT an @relationship, because it names a row in a system memQL does not host.")
+  archivedAt           datetime  @description("RFC3339 timestamp stamped by archiveAccount. Empty while status is active or suspended. Kept alongside status so a retention sweep can age archived customers without re-deriving the transition time from the row's version history.")
+  updatedAt            datetime  @description("RFC3339 watermark of the most recent edit, stamped to now on every write so an operator list can sort by recency. The authoritative version order is still the row's createdAt history; this is a denormalized convenience for the latest version.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+}
+
 /// Per-account entitlement that caps the number of CONCURRENTLY-RUNNING tasks (Plans) a paying
 /// account may have across all of its spaces, sourced from the billing tier (epic memql#902 /
 /// foundation child #903). The cap is per paying account -- v1 keys on v1:identity:user.id
