@@ -1830,7 +1830,6 @@ Auth + access metadata (dsl/identity/concepts.memql; infrastructure metadata eve
 - `v1:identity:magiclink` -- single-use magic-link credential (token-hashed)
 - `v1:identity:auditEvent` -- append-only audit trail for the identity service
 - `v1:identity:accessRequest` -- waitlist-mode access request
-- `v1:identity:partitionAccess` -- per-(user, partition) grant
 - `v1:identity:invitation` -- token-hashed invitation credential for guest/user flows
 - `v1:identity:delegation` -- agent acting through a user's identity (bounded role/scope/lifetime)
 

@@ -107,7 +107,17 @@ function build_extension() {
 
 function package_vsix() {
     echo "INFO: packaging the VSIX"
-    local args=(package)
+    # --no-dependencies: the extension is bundled (esbuild.js, run by `npm run
+    # compile` above), so out/extension.js is already self-contained. Without
+    # this flag vsce's own dependency-detection walks the `file:` workspace
+    # dependencies (@znasllc-io/memql-sdk-core, @znasllc-io/memql-view-kit) by
+    # following their node_modules symlinks OUT of editors/vscode entirely,
+    # and absorbs sdk/ts's and sdk/ts-viewkit's own devDependencies
+    # (typescript, @types/*) into the VSIX -- which isn't just bloat, it
+    # actually fails packaging outright ("invalid relative path:
+    # extension/../../sdk/ts/node_modules/..."), because vsce cannot express
+    # a path that walks above the extension root inside the VSIX archive.
+    local args=(package --no-dependencies)
     [[ -n "$OUT" ]] && args+=(--out "$OUT")
     ( cd "$EXT_DIR" && npx --yes "$VSCE_VERSION" "${args[@]}" )
 }

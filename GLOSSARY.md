@@ -31,6 +31,7 @@ The complete map of memQL documentation. Layout + rules:
 - [Functions](docs/public/language/functions.md) · [Authoring Rules](docs/public/language/authoring-rules.md) — read before writing `.memql`.
 - [MemQL Sense & the DSL Spec](docs/public/language/sense.md) — language intelligence (tokenize/complete/diagnose/hover) + the `dslspec` source of truth, drift guard, and portable JSON export.
 - [MemQL in VS Code](docs/public/language/vscode.md) — the offline VS Code extension + language server (`cmd/memql-lsp`), a second Sense consumer.
+- [VS Code Runtime Panel](docs/public/language/vscode-runtime-panel.md) — the extension's activity-bar panel: cluster selection + a generic, live-updating concept browser against a running cluster.
 - [Naming Conventions](docs/public/language/naming-conventions.md) · [Reserved Identifiers](docs/public/language/reserved.md) · [Specifications](docs/public/language/specifications.md) · [Attribute Matrix](docs/public/language/attribute-matrix.md)
 
 ### AI (`ai/`)

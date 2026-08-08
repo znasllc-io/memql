@@ -1,0 +1,89 @@
+// Endpoint derivation tests.
+//
+// clusters.yaml stores a gRPC address (host:port) because the cockpit dials
+// native gRPC. This extension speaks the /memql/ws bridge, so the address must
+// be lifted to a wss:// URL. Getting this wrong is the difference between
+// "connects" and "hangs until the handshake times out".
+
+import test from "node:test";
+import assert from "node:assert/strict";
+
+import { webSocketUrlFor } from "../src/connection/endpoint.js";
+
+test("derives a wss URL from a host:port endpoint", () => {
+  assert.equal(
+    webSocketUrlFor({ name: "l", endpoint: "cockpit.local.znas.io:443" }),
+    "wss://cockpit.local.znas.io/memql/ws",
+  );
+});
+
+test("preserves a non-standard port", () => {
+  assert.equal(
+    webSocketUrlFor({ name: "l", endpoint: "cockpit.local.znas.io:8443" }),
+    "wss://cockpit.local.znas.io:8443/memql/ws",
+  );
+});
+
+test("handles an endpoint with no port", () => {
+  assert.equal(
+    webSocketUrlFor({ name: "l", endpoint: "cockpit.local.znas.io" }),
+    "wss://cockpit.local.znas.io/memql/ws",
+  );
+});
+
+test("uses ws for a plain-http localhost endpoint", () => {
+  assert.equal(
+    webSocketUrlFor({ name: "l", endpoint: "localhost:50051" }),
+    "ws://localhost:50051/memql/ws",
+  );
+});
+
+test("uses ws for a 127.0.0.1 endpoint", () => {
+  assert.equal(
+    webSocketUrlFor({ name: "l", endpoint: "127.0.0.1:50051" }),
+    "ws://127.0.0.1:50051/memql/ws",
+  );
+});
+
+test("passes an explicit wss URL through unchanged", () => {
+  assert.equal(
+    webSocketUrlFor({ name: "l", endpoint: "wss://cockpit.example.com/memql/ws" }),
+    "wss://cockpit.example.com/memql/ws",
+  );
+});
+
+test("appends the bridge path to an explicit scheme without one", () => {
+  assert.equal(
+    webSocketUrlFor({ name: "l", endpoint: "wss://cockpit.example.com" }),
+    "wss://cockpit.example.com/memql/ws",
+  );
+});
+
+test("throws on an empty endpoint rather than dialing nowhere", () => {
+  assert.throws(() => webSocketUrlFor({ name: "l", endpoint: "" }), /endpoint is empty/);
+});
+
+test("rejects a non-websocket scheme with a clear message rather than mangling it", () => {
+  assert.throws(
+    () => webSocketUrlFor({ name: "l", endpoint: "https://cockpit.example.com" }),
+    /endpoint scheme must be ws:\/\/ or wss:\/\//,
+  );
+});
+
+test("derives ws for a bracketed IPv6 loopback literal with a port", () => {
+  assert.equal(
+    webSocketUrlFor({ name: "l", endpoint: "[::1]:50051" }),
+    "ws://[::1]:50051/memql/ws",
+  );
+});
+
+test("derives ws for a bracketed IPv6 loopback literal with no port", () => {
+  assert.equal(webSocketUrlFor({ name: "l", endpoint: "[::1]" }), "ws://[::1]/memql/ws");
+});
+
+test("derives wss for a bracketed non-loopback IPv6 literal", () => {
+  assert.equal(
+    webSocketUrlFor({ name: "l", endpoint: "[2001:db8::1]:50051" }),
+    "wss://[2001:db8::1]:50051/memql/ws",
+  );
+});

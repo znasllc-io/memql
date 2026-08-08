@@ -15,6 +15,13 @@ export {
 export { Dispatcher, type DispatcherOptions } from "./dispatcher.js";
 export { QueryClient, type QueryCallOptions } from "./query.js";
 export {
+  browseConceptPage,
+  getRowByConceptAndId,
+  DEFAULT_CONCEPT_BROWSE_PAGE_SIZE,
+  type ConceptPage,
+  type ConceptBrowseOptions,
+} from "./conceptBrowser.js";
+export {
   SubscriptionManager,
   type EventHandler,
   type GraphSubscribeOptions,
