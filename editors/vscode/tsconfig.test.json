@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    // Inherits "module": "ESNext" / "moduleResolution": "bundler" / "noEmit"
+    // from tsconfig.json -- this run is a type-check pass only. The actual
+    // JS `node --test` runs comes from esbuild.test.js, which bundles each
+    // test/*.test.ts (inlining @znasllc-io/memql-sdk-core the same way
+    // esbuild.js does for the packaged extension) into dist-test/test/*.js.
+    "rootDir": ".",
+    "sourceMap": false,
+    "types": ["node"]
+  },
+  "include": ["src/**/*", "test/**/*"],
+  "exclude": ["node_modules", ".vscode-test", "out", "dist-test"]
+}

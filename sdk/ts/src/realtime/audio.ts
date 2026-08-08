@@ -36,6 +36,7 @@
 
 import { newShortId } from "../client/id.js";
 import { wsAuthSubprotocols } from "../client/wsauth.js";
+import { WS_CLOSING, WS_OPEN } from "../client/wsReadyState.js";
 
 export interface AudioConnectionAuth {
   bearer?: string;
@@ -450,7 +451,7 @@ export class AudioClient {
   }
 
   done(): Promise<void> {
-    if (this.closed || this.socket.readyState >= WebSocket.CLOSING) {
+    if (this.closed || this.socket.readyState >= WS_CLOSING) {
       return Promise.resolve();
     }
     return new Promise<void>((resolve) => {
@@ -463,7 +464,7 @@ export class AudioClient {
   }
 
   private rawSend(msg: unknown): void {
-    if (this.socket.readyState !== WebSocket.OPEN) {
+    if (this.socket.readyState !== WS_OPEN) {
       throw new Error(`AudioClient: socket not open (readyState=${this.socket.readyState})`);
     }
     this.socket.send(JSON.stringify(msg));
@@ -560,7 +561,7 @@ function defaultWebSocketFactory(url: string, protocols?: string[]): WebSocket {
 }
 
 function waitForOpen(socket: WebSocket, timeoutMs: number): Promise<void> {
-  if (socket.readyState === WebSocket.OPEN) return Promise.resolve();
+  if (socket.readyState === WS_OPEN) return Promise.resolve();
   return new Promise<void>((resolve, reject) => {
     const timer = setTimeout(() => {
       cleanupAndClose();
