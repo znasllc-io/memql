@@ -444,3 +444,94 @@ test("isOidcOnly is false without an endpoint, so the message is 'not configured
   assert.equal(isOidcOnly(cluster), false);
   assert.equal(needsAuth(cluster), true, "and needsAuth must be the one that answers instead");
 });
+
+// -----------------------------------------------------------------------------
+// The `local` flag (memql#3309)
+// -----------------------------------------------------------------------------
+//
+// This is the first NON-STRING field in clusters.yaml, and the write rules for
+// a boolean are genuinely different from a string's. A string carries three
+// states -- undefined means "not supplied, leave disk alone", "" means
+// "explicitly cleared, delete the key" -- and a boolean carries two, because
+// the COCKPIT declares this field `yaml:"local,omitempty"`
+// (znasllc-io/memql-cockpit#332) and drops the key whenever the value is
+// false. A tool that wrote `local: false` back would make the two churn the
+// file against each other on every save.
+//
+// The flag also gates the mutation confirmation, so a read that is wrong in
+// the permissive direction disables a safety prompt on a cluster nobody marked.
+
+test("readClustersFile parses local: true", async () => {
+  const f = await tempFile("clusters:\n  - name: dev\n    endpoint: localhost:50051\n    local: true\n");
+  const parsed = await readClustersFile(f);
+  assert.equal(parsed.clusters[0]?.local, true);
+});
+
+test("readClustersFile leaves local ABSENT when the key is missing", async () => {
+  // Absent must not become `false` in the model either: the distinction
+  // between "not supplied" and "supplied as false" is what upsertCluster's
+  // leave-alone branch reads.
+  const f = await tempFile("clusters:\n  - name: staging\n    endpoint: h:443\n");
+  const parsed = await readClustersFile(f);
+  assert.equal(parsed.clusters[0]?.local, undefined);
+});
+
+test("readClustersFile does NOT accept a quoted string as local", async () => {
+  // An operator hand-editing the file can easily write `local: "true"`. The
+  // flag disables a confirmation prompt, so the safe direction for anything
+  // ambiguous is "not local" -- which prompts.
+  const f = await tempFile('clusters:\n  - name: dev\n    endpoint: h:443\n    local: "true"\n');
+  const parsed = await readClustersFile(f);
+  assert.equal(parsed.clusters[0]?.local, undefined);
+});
+
+test("upsertCluster writes local: true on a NEW cluster", async () => {
+  const f = await tempFile("clusters: []\n");
+  await upsertCluster(f, { name: "dev", endpoint: "localhost:50051", local: true });
+  const parsed = await readClustersFile(f);
+  assert.equal(parsed.clusters[0]?.local, true);
+});
+
+test("upsertCluster OMITS local on a new cluster when it is false", async () => {
+  const f = await tempFile("clusters: []\n");
+  await upsertCluster(f, { name: "staging", endpoint: "h:443", local: false });
+  const raw = await fs.readFile(f, "utf8");
+  assert.equal(
+    /\blocal\b/.test(raw),
+    false,
+    "false must serialise as ABSENT -- the cockpit's omitempty drops the key, so writing it makes the two tools churn the file",
+  );
+});
+
+test("upsertCluster DELETES local when an edit turns it off", async () => {
+  const f = await tempFile("clusters:\n  - name: dev\n    endpoint: h:443\n    local: true\n");
+  await upsertCluster(f, { name: "dev", endpoint: "h:443", local: false });
+  const raw = await fs.readFile(f, "utf8");
+  assert.equal(/\blocal\b/.test(raw), false);
+  const parsed = await readClustersFile(f);
+  assert.equal(parsed.clusters[0]?.local, undefined);
+});
+
+test("upsertCluster leaves local alone when the write does not mention it", async () => {
+  // The PAT-only edit path. Undefined still means "not supplied" for a
+  // boolean, exactly as for a string -- otherwise changing an endpoint would
+  // silently clear the flag.
+  const f = await tempFile("clusters:\n  - name: dev\n    endpoint: h:443\n    local: true\n");
+  await upsertCluster(f, { name: "dev", endpoint: "h:5051" });
+  const parsed = await readClustersFile(f);
+  assert.equal(parsed.clusters[0]?.local, true);
+  assert.equal(parsed.clusters[0]?.endpoint, "h:5051");
+});
+
+test("a local: true cluster survives a read-modify-write round trip", async () => {
+  // The cross-tool contract: the cockpit writes the file too, so a value this
+  // extension does not change must come back byte-identical in meaning.
+  const f = await tempFile(
+    "clusters:\n  - name: dev\n    endpoint: h:443\n    local: true\n  - name: staging\n    endpoint: s:443\n",
+  );
+  await setSelectedCluster(f, "staging");
+  const parsed = await readClustersFile(f);
+  assert.equal(parsed.clusters[0]?.local, true);
+  assert.equal(parsed.clusters[1]?.local, undefined);
+  assert.equal(parsed.selectedCluster, "staging");
+});

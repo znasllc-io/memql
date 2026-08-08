@@ -17,8 +17,9 @@
 // (esbuild.test.js), which is what makes the plain static import below work
 // on the CommonJS extension host -- esbuild inlines the SDK and emits CJS,
 // it is not left as a `require()` of an ESM-only package.
+import { AuthoringClient } from "@znasllc-io/memql-sdk-core/authoring";
 import { Connection } from "@znasllc-io/memql-sdk-core/client";
-import type { ConnectOptions, QueryClient, SubscriptionManager } from "@znasllc-io/memql-sdk-core/client";
+import type { ConnectOptions, Dispatcher, QueryClient, SubscriptionManager } from "@znasllc-io/memql-sdk-core/client";
 import { WebSocket as NodeWebSocket } from "ws";
 
 import { Latest, type LatestToken } from "../async/latest.js";
@@ -55,6 +56,8 @@ const defaultDial: DialFn = (opts) =>
 
 export class ConnectionManager {
   private conn: Connection | undefined;
+  // Rebuilt with `conn`, never carried across one. See `get authoring()`.
+  private authoringClient: AuthoringClient | undefined;
   private current: ConnectionState = { status: "disconnected" };
   private readonly listeners = new Set<StateListener>();
   // Guards against an out-of-order settle: if the user selects cluster A then
@@ -76,6 +79,30 @@ export class ConnectionManager {
 
   get subscriptions(): SubscriptionManager | undefined {
     return this.conn?.subscriptions;
+  }
+
+  // The raw dispatcher, for the surfaces the SDK exposes as free functions
+  // over one rather than as methods on QueryClient -- currently callTool
+  // (memql#3309's tool runs). Undefined whenever `query` is, and for the same
+  // reason: watchForTermination drops `conn` the moment the socket dies, so a
+  // caller cannot be handed a dispatcher over a dead stream.
+  get dispatcher(): Dispatcher | undefined {
+    return this.conn?.dispatcher;
+  }
+
+  // The authoring surface: Gate-1 bundle validation and session-define, which
+  // is what lets a run execute an editor buffer that has never been saved.
+  //
+  // Rebuilt whenever the connection changes rather than cached across one,
+  // because a session-define is scoped to the STREAM: an AuthoringClient
+  // holding a dead dispatcher would validate happily against nothing. The
+  // object is stateless, so building it per connection costs nothing.
+  get authoring(): AuthoringClient | undefined {
+    if (this.conn === undefined) return undefined;
+    if (this.authoringClient === undefined) {
+      this.authoringClient = new AuthoringClient(this.conn.dispatcher);
+    }
+    return this.authoringClient;
   }
 
   onDidChangeState(listener: StateListener): () => void {
@@ -127,6 +154,7 @@ export class ConnectionManager {
         return;
       }
       this.conn = conn;
+      this.authoringClient = undefined;
       this.publish({ status: "connected", clusterName: cluster.name, nodeId: conn.nodeId });
       // Not awaited: this resolves only when the socket eventually dies.
       void this.watchForTermination(conn, token, cluster.name);
@@ -182,6 +210,7 @@ export class ConnectionManager {
     // Drop the reference FIRST so `query` / `subscriptions` stop handing out
     // clients over a dead socket even before listeners run.
     this.conn = undefined;
+    this.authoringClient = undefined;
     this.publish({
       status: "error",
       clusterName,
@@ -197,5 +226,6 @@ export class ConnectionManager {
       // A close on an already-dead socket is not worth surfacing.
     }
     this.conn = undefined;
+    this.authoringClient = undefined;
   }
 }

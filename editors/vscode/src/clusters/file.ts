@@ -29,7 +29,23 @@ export function defaultClustersPath(): string {
 const IDENTITY_FIELD: keyof ClusterConfig = "name";
 
 // Wire spellings. The YAML uses snake_case; the model uses camelCase.
-const FIELD_MAP: ReadonlyArray<readonly [keyof ClusterConfig, string]> = [
+//
+// Split by VALUE TYPE, not for tidiness: the two halves have genuinely
+// different write semantics. A string field distinguishes "not supplied"
+// (undefined -- leave whatever is on disk alone) from "explicitly cleared"
+// ("" -- delete the key), and that distinction is what makes clearing the PAT
+// input actually revoke the stored token rather than only appear to.
+//
+// A boolean has no third state to carry: false IS absent. The cockpit declares
+// this field `yaml:"local,omitempty"` (znasllc-io/memql-cockpit#332), so it
+// drops the key whenever the value is false -- and a tool that wrote
+// `local: false` back would make the two churn the file against each other on
+// every save. Writing the flag only when true is what makes the round trip
+// stable in both directions.
+type StringFieldKey = "name" | "displayName" | "domain" | "endpoint" | "issuer" | "clientId" | "pat";
+type BooleanFieldKey = "local";
+
+const FIELD_MAP: ReadonlyArray<readonly [StringFieldKey, string]> = [
   ["name", "name"],
   ["displayName", "display_name"],
   ["domain", "domain"],
@@ -38,6 +54,8 @@ const FIELD_MAP: ReadonlyArray<readonly [keyof ClusterConfig, string]> = [
   ["clientId", "client_id"],
   ["pat", "pat"],
 ];
+
+const BOOLEAN_FIELD_MAP: ReadonlyArray<readonly [BooleanFieldKey, string]> = [["local", "local"]];
 
 async function loadDocument(file: string): Promise<Document> {
   let raw: string;
@@ -66,6 +84,17 @@ function stringAt(map: YAMLMap, key: string): string | undefined {
   return typeof v === "string" ? v : undefined;
 }
 
+// booleanAt reads a strict boolean. A YAML `local: "true"` -- a quoted string,
+// which an operator hand-editing the file can easily produce -- is NOT accepted
+// as true. This flag gates the write confirmation on a non-local cluster, so
+// the safe direction for anything ambiguous is "not local", which prompts.
+// Silently accepting a near-miss would disable the prompt on a cluster nobody
+// deliberately marked.
+function booleanAt(map: YAMLMap, key: string): boolean | undefined {
+  const v = map.get(key, false);
+  return typeof v === "boolean" ? v : undefined;
+}
+
 function clusterFromNode(node: unknown): ClusterConfig | null {
   const map = node as YAMLMap;
   if (typeof map?.get !== "function") return null;
@@ -75,6 +104,12 @@ function clusterFromNode(node: unknown): ClusterConfig | null {
   for (const [modelKey, wireKey] of FIELD_MAP) {
     if (modelKey === "name" || modelKey === "endpoint") continue;
     const v = stringAt(map, wireKey);
+    if (v !== undefined) {
+      (out as unknown as Record<string, unknown>)[modelKey] = v;
+    }
+  }
+  for (const [modelKey, wireKey] of BOOLEAN_FIELD_MAP) {
+    const v = booleanAt(map, wireKey);
     if (v !== undefined) {
       (out as unknown as Record<string, unknown>)[modelKey] = v;
     }
@@ -201,6 +236,14 @@ export async function upsertCluster(
       if (v === "") existing.delete(wireKey);
       else existing.set(wireKey, v);
     }
+    // Booleans: undefined still means "not supplied", but false means absent
+    // rather than a value to write. See BOOLEAN_FIELD_MAP.
+    for (const [modelKey, wireKey] of BOOLEAN_FIELD_MAP) {
+      const v = cluster[modelKey];
+      if (v === undefined) continue;
+      if (v) existing.set(wireKey, true);
+      else existing.delete(wireKey);
+    }
     // A rename moves the identity the rest of the file refers to by name.
     // selected_cluster is the one such reference; leaving it behind would
     // point the selection at a cluster that no longer exists.
@@ -208,12 +251,17 @@ export async function upsertCluster(
       doc.set("selected_cluster", cluster.name);
     }
   } else {
-    const fresh: Record<string, string> = {};
+    const fresh: Record<string, string | boolean> = {};
     for (const [modelKey, wireKey] of FIELD_MAP) {
       const v = cluster[modelKey];
       // "" on a NEW node has nothing to clear, so it is simply not written --
       // same end state as a delete, without an empty key in fresh YAML.
       if (v !== undefined && v !== "") fresh[wireKey] = v;
+    }
+    for (const [modelKey, wireKey] of BOOLEAN_FIELD_MAP) {
+      // Only true is written, for the same reason false is deleted above: the
+      // cockpit's `omitempty` would drop a false on its next write.
+      if (cluster[modelKey] === true) fresh[wireKey] = true;
     }
     seq.add(fresh);
   }

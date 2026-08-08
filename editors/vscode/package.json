@@ -23,8 +23,10 @@
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": "limited",
-      "description": "Language features (highlighting, diagnostics, completion, hover, signature help) work in untrusted workspaces. Connecting to a cluster and browsing its data require trust: those read credentials from ~/.memql/clusters.yaml and open a network connection, which a malicious workspace must not be able to trigger.",
-      "restrictedConfigurations": ["memql.lsp.serverPath"]
+      "description": "Language features (highlighting, diagnostics, completion, hover, signature help) work in untrusted workspaces. Connecting to a cluster, browsing its data, and running a construct against it require trust: those read credentials from ~/.memql/clusters.yaml, open a network connection, and execute code against a live cluster, which a malicious workspace must not be able to trigger. Run configurations live in the workspace so a repository can ship one, and nothing ever runs automatically -- a CodeLens renders an affordance and there is no run-on-save.",
+      "restrictedConfigurations": [
+        "memql.lsp.serverPath"
+      ]
     }
   },
   "main": "./out/extension.js",
@@ -126,35 +128,182 @@
           "id": "memqlConcepts",
           "name": "Concepts",
           "when": "isWorkspaceTrusted"
+        },
+        {
+          "id": "memqlRuns",
+          "name": "Runs",
+          "when": "isWorkspaceTrusted"
         }
       ]
     },
     "commands": [
-      { "command": "memql.clusters.refresh", "title": "memQL: Refresh Clusters", "icon": "$(refresh)" },
-      { "command": "memql.clusters.select", "title": "memQL: Select Cluster" },
-      { "command": "memql.clusters.add", "title": "memQL: Add Cluster", "icon": "$(add)" },
-      { "command": "memql.clusters.edit", "title": "memQL: Edit Cluster", "icon": "$(edit)" },
-      { "command": "memql.clusters.disconnect", "title": "memQL: Disconnect" },
-      { "command": "memql.concepts.refresh", "title": "memQL: Refresh Concepts", "icon": "$(refresh)" },
-      { "command": "memql.concepts.open", "title": "memQL: Open Concept" }
+      {
+        "command": "memql.clusters.refresh",
+        "title": "memQL: Refresh Clusters",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "memql.clusters.select",
+        "title": "memQL: Select Cluster"
+      },
+      {
+        "command": "memql.clusters.add",
+        "title": "memQL: Add Cluster",
+        "icon": "$(add)"
+      },
+      {
+        "command": "memql.clusters.edit",
+        "title": "memQL: Edit Cluster",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "memql.clusters.disconnect",
+        "title": "memQL: Disconnect"
+      },
+      {
+        "command": "memql.concepts.refresh",
+        "title": "memQL: Refresh Concepts",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "memql.concepts.open",
+        "title": "memQL: Open Concept"
+      },
+      {
+        "command": "memql.runs.refresh",
+        "title": "memQL: Refresh Runs",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "memql.runs.open",
+        "title": "memQL: Open Run Configurations File",
+        "icon": "$(json)"
+      },
+      {
+        "command": "memql.runs.execute",
+        "title": "memQL: Run Configuration",
+        "icon": "$(play)"
+      },
+      {
+        "command": "memql.runs.delete",
+        "title": "memQL: Delete Run Configuration",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "memql.run.construct",
+        "title": "memQL: Run Construct"
+      },
+      {
+        "command": "memql.run.constructWith",
+        "title": "memQL: Run Construct With Arguments"
+      },
+      {
+        "command": "memql.run.notAvailable",
+        "title": "memQL: Run Not Available"
+      }
     ],
     "menus": {
       "commandPalette": [
-        { "command": "memql.clusters.refresh", "when": "isWorkspaceTrusted" },
-        { "command": "memql.clusters.select", "when": "isWorkspaceTrusted" },
-        { "command": "memql.clusters.add", "when": "isWorkspaceTrusted" },
-        { "command": "memql.clusters.edit", "when": "isWorkspaceTrusted" },
-        { "command": "memql.clusters.disconnect", "when": "isWorkspaceTrusted" },
-        { "command": "memql.concepts.refresh", "when": "isWorkspaceTrusted" },
-        { "command": "memql.concepts.open", "when": "false" }
+        {
+          "command": "memql.clusters.refresh",
+          "when": "isWorkspaceTrusted"
+        },
+        {
+          "command": "memql.clusters.select",
+          "when": "isWorkspaceTrusted"
+        },
+        {
+          "command": "memql.clusters.add",
+          "when": "isWorkspaceTrusted"
+        },
+        {
+          "command": "memql.clusters.edit",
+          "when": "isWorkspaceTrusted"
+        },
+        {
+          "command": "memql.clusters.disconnect",
+          "when": "isWorkspaceTrusted"
+        },
+        {
+          "command": "memql.concepts.refresh",
+          "when": "isWorkspaceTrusted"
+        },
+        {
+          "command": "memql.concepts.open",
+          "when": "false"
+        },
+        {
+          "command": "memql.runs.refresh",
+          "when": "isWorkspaceTrusted"
+        },
+        {
+          "command": "memql.runs.open",
+          "when": "isWorkspaceTrusted"
+        },
+        {
+          "command": "memql.runs.execute",
+          "when": "false"
+        },
+        {
+          "command": "memql.runs.delete",
+          "when": "false"
+        },
+        {
+          "command": "memql.run.construct",
+          "when": "false"
+        },
+        {
+          "command": "memql.run.constructWith",
+          "when": "false"
+        },
+        {
+          "command": "memql.run.notAvailable",
+          "when": "false"
+        }
       ],
       "view/title": [
-        { "command": "memql.clusters.add", "when": "view == memqlClusters", "group": "navigation@1" },
-        { "command": "memql.clusters.refresh", "when": "view == memqlClusters", "group": "navigation@2" },
-        { "command": "memql.concepts.refresh", "when": "view == memqlConcepts", "group": "navigation@1" }
+        {
+          "command": "memql.clusters.add",
+          "when": "view == memqlClusters",
+          "group": "navigation@1"
+        },
+        {
+          "command": "memql.clusters.refresh",
+          "when": "view == memqlClusters",
+          "group": "navigation@2"
+        },
+        {
+          "command": "memql.concepts.refresh",
+          "when": "view == memqlConcepts",
+          "group": "navigation@1"
+        },
+        {
+          "command": "memql.runs.open",
+          "when": "view == memqlRuns",
+          "group": "navigation@1"
+        },
+        {
+          "command": "memql.runs.refresh",
+          "when": "view == memqlRuns",
+          "group": "navigation@2"
+        }
       ],
       "view/item/context": [
-        { "command": "memql.clusters.edit", "when": "view == memqlClusters && viewItem == memqlCluster", "group": "inline" }
+        {
+          "command": "memql.clusters.edit",
+          "when": "view == memqlClusters && viewItem == memqlCluster",
+          "group": "inline"
+        },
+        {
+          "command": "memql.runs.execute",
+          "when": "view == memqlRuns && viewItem == memqlRun",
+          "group": "inline@1"
+        },
+        {
+          "command": "memql.runs.delete",
+          "when": "view == memqlRuns && viewItem == memqlRun",
+          "group": "inline@2"
+        }
       ]
     }
   },

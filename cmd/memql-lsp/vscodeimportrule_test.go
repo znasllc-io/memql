@@ -39,10 +39,13 @@ const vscodeExtensionSrcDir = "../../editors/vscode/src"
 // and rowProjection.ts were split out of src/webview/ and conceptsCache.ts
 // out of src/views/.
 var vscodeImportAllowList = []string{
-	"extension.ts",            // activation, command registration, LSP client wiring
-	"views/clustersTree.ts",   // TreeDataProvider adapter over clusters/ + connection/
-	"views/conceptsTree.ts",   // TreeDataProvider adapter over state/conceptsCache.ts
-	"webview/conceptPanel.ts", // WebviewPanel adapter over state/conceptPanelState.ts
+	"constructs/lensProvider.ts", // CodeLensProvider adapter over constructs/runnable.ts
+	"extension.ts",               // activation, command registration, LSP client wiring
+	"views/clustersTree.ts",      // TreeDataProvider adapter over clusters/ + connection/
+	"views/conceptsTree.ts",      // TreeDataProvider adapter over state/conceptsCache.ts
+	"views/runsTree.ts",          // TreeDataProvider adapter over run/runConfig.ts
+	"webview/conceptPanel.ts",    // WebviewPanel adapter over state/conceptPanelState.ts
+	"webview/runPanel.ts",        // WebviewPanel adapter over state/argForm.ts + state/runResult.ts
 }
 
 // vscodeImportPattern matches every spelling of a `vscode` module reference
