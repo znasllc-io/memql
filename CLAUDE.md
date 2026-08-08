@@ -431,6 +431,25 @@ carrier-built nodes in the common case. Reusable capabilities (chat,
 daily-space, avatar, ...) live in the engine as **generic, DSL-configurable
 features**, never product code.
 
+**What "never product code" is actually enforced by** -- two narrow guards, not
+a general one, so know their edges (memql#3326):
+
+- `TestEngineIsProductNeutral` (`product_neutrality_test.go`) -- a **banned-names
+  list**. It sweeps every tracked file, path and body, for the specific product
+  names this repo shed. It cannot notice a product arriving under a name nobody
+  thought to ban.
+- `TestClientsDirectoryIsAllowlisted` (`clients_allowlist_test.go`) -- an
+  **allowlist of `clients/` inhabitants**. `clients/` is where a client
+  application would land, so it gets structural enforcement: an unlisted
+  directory fails. The engine hosts the platform's own console (the portal); a
+  customer's SPA belongs in a product repo built from the `memql-project`
+  template.
+
+Everything else -- generic-vs-product Go in `component/`, a product-shaped
+concept in `dsl/` -- rests on review. Write new product-shaped code as a
+DSL-configurable feature or keep it downstream; do not read the guards as
+proof that anything unflagged is neutral.
+
 **Product DSL is delivered at runtime, not compiled in.** A product ships its
 DSL as a tiny data-only **bundle image**; the `dsl-bundle` kustomize component
 (`deploy/k8s/components/dsl-bundle`) runs it as an init-container that copies

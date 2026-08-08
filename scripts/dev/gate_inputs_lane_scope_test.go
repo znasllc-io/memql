@@ -106,6 +106,16 @@ var gateInputs = []struct {
 	{"dsl/cognition/prompts/cognitionReply.tmpl", ".", "TestEmbeddedFileCountsAreStable"},
 	{"examples/referencepack/dsl/namespace.pin", ".", "TestEmbeddedFileCountsAreStable"},
 	{"integrations/integrations.json", ".", "TestEmbeddedFileCountsAreStable"},
+	// Not embedded either, and the newest of this shape (memql#3326).
+	// clients_allowlist_test.go sweeps `git ls-files clients` from the root
+	// package, so every file under clients/ is a gate input. A new client is
+	// TypeScript, which matches the `portal` bucket -- and portal-checks runs
+	// npm, not Go -- so `clients/**` in `gates` is the ONLY thing that puts the
+	// guard's own trigger case (a product SPA landing under clients/) in front
+	// of a Go lane. `package.json` is named rather than the README on purpose:
+	// `**/*.md` already covers clients/README.md, so a row for that file would
+	// stay green with `clients/**` deleted and would assert nothing.
+	{"clients/portal/package.json", ".", "TestClientsDirectoryIsAllowlisted"},
 	// Not embedded, so embed_inventory_test.go does not pin it -- but a gate
 	// input all the same, and in no bucket this lane read until the same
 	// sweep found it. Renaming a `service:` reddens the model staleness check,

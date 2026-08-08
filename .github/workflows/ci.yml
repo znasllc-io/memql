@@ -196,6 +196,18 @@ jobs:
               - 'examples/deploypack/dsl/**'
               - 'examples/referencepack/dsl/**'
               - 'integrations/*.json'
+              # The `clients/` tree (memql#3326). clients_allowlist_test.go in
+              # the ROOT package sweeps `git ls-files clients` and fails on a
+              # directory that is not in its allowlist -- the structural half of
+              # product neutrality, which the banned-NAMES sweep next to it
+              # cannot cover.
+              #
+              # It needs a route of its own because a new client is TypeScript:
+              # `clients/acme-spa/**` sets the `portal` bucket, and portal-checks
+              # runs npm, not Go. Without this entry the one PR shape the guard
+              # exists for -- a product SPA landing under clients/ -- matches no
+              # bucket that reaches a Go lane, and the guard never fires.
+              - 'clients/**'
               # Not embedded, but a gate input read by a package this lane
               # already runs (`./component/architecture/...`), and found in the
               # same sweep: it was in NO consumed bucket while being able to
