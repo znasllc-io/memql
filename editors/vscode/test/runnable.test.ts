@@ -10,18 +10,19 @@
 // The other half of this file is what the lens set may contain. "CodeLens
 // appears on runnable signatures and nowhere else" is an acceptance criterion,
 // and the one way to violate it that would not be obvious in review is
-// rendering a working Run button on an automation -- which B2 cannot execute,
-// and which would quietly invoke the DEPLOYED automation if wired to the
-// ordinary run path.
+// putting an automation on the ORDINARY run path (memql#3310): that path
+// session-defines the buffer and renders rows, and an automation can do
+// neither -- it would quietly invoke the DEPLOYED automation and present the
+// result as the buffer's.
 
 import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
   COMMAND_RUN,
-  COMMAND_RUN_NOT_AVAILABLE,
+  COMMAND_RUN_AUTOMATION,
   COMMAND_RUN_WITH,
-  isB2Runnable,
+  usesArgForm,
   isSessionDefinable,
   isWriteKind,
   lensPlansFor,
@@ -172,8 +173,12 @@ test("isSessionDefinable -- only the plain construct family", () => {
   assert.equal(isSessionDefinable("automation"), false);
 });
 
-test("isWriteKind -- mutations only", () => {
+test("isWriteKind -- mutations and automations", () => {
   assert.equal(isWriteKind("mutate"), true);
+  // memql#3310: an automation run executes the automation's whole action
+  // chain -- writes, LLM calls, downstream automations -- so it earns the
+  // non-local confirmation several times over.
+  assert.equal(isWriteKind("automation"), true);
   assert.equal(isWriteKind("query"), false);
   // Deliberate: a logic body can call a mutation, but prompting on every
   // logic run trains the developer to dismiss the dialog unread, which is how
@@ -182,10 +187,13 @@ test("isWriteKind -- mutations only", () => {
   assert.equal(isWriteKind("tool"), false);
 });
 
-test("isB2Runnable -- automations are out of scope for this increment", () => {
-  assert.equal(isB2Runnable("query"), true);
-  assert.equal(isB2Runnable("tool"), true);
-  assert.equal(isB2Runnable("automation"), false);
+test("usesArgForm -- every kind but automation generates its form from `args`", () => {
+  assert.equal(usesArgForm("query"), true);
+  assert.equal(usesArgForm("tool"), true);
+  // An automation binds its whole triggering event as `args`, so the LSP
+  // reports args: [] for every one of them and a generated form would be an
+  // empty form. Its surface is state/automationForm.ts instead.
+  assert.equal(usesArgForm("automation"), false);
 });
 
 // -----------------------------------------------------------------------------
@@ -219,20 +227,52 @@ test("lensPlansFor -- the target carries the uri, kind, name and declared args",
   });
 });
 
-test("lensPlansFor -- an automation gets ONE lens, wired to the explain command", () => {
+test("lensPlansFor -- an automation gets ONE lens, on the automation command", () => {
   // The point of this test: an automation must never end up on COMMAND_RUN.
-  // B2 cannot session-define an automation, so a working Run button there
-  // would silently invoke the DEPLOYED automation and present the result as
-  // the buffer's.
+  // That path session-defines the buffer and renders rows; an automation can
+  // be neither injected nor rendered as rows, so it would silently invoke the
+  // DEPLOYED automation and present the result as the buffer's.
+  //
+  // ONE lens, not two: there is no "Run" / "Run with..." split, because there
+  // is no such thing as running an automation without first building a trigger
+  // event -- the form is the only entry point.
   const constructs = parseRunnableConstructs({
-    constructs: [wireConstruct({ kind: "automation", name: "autoJoinSI" })],
+    constructs: [
+      wireConstruct({
+        kind: "automation",
+        name: "autoJoinSI",
+        trigger: { event: "node.created", concept: "v1:cognition:participant" },
+      }),
+    ],
   });
   const plans = lensPlansFor("file:///a.memql", constructs);
   assert.equal(plans.length, 1);
-  assert.equal(plans[0]?.command, COMMAND_RUN_NOT_AVAILABLE);
+  assert.equal(plans[0]?.command, COMMAND_RUN_AUTOMATION);
+  // The AUTOMATION target, not a RunTarget: the trigger is what decides the
+  // form, and `args` is always empty.
   assert.equal(plans[0]?.target, undefined);
-  assert.match(plans[0]?.reason ?? "", /autoJoinSI/);
-  assert.match(plans[0]?.reason ?? "", /3310/);
+  assert.deepEqual(plans[0]?.automationTarget, {
+    uri: "file:///a.memql",
+    name: "autoJoinSI",
+    trigger: { event: "node.created", concept: "v1:cognition:participant" },
+  });
+  // Said BEFORE the click, as the tool lens says it: by the time a banner is
+  // on the results surface the developer has already run the thing.
+  assert.match(plans[0]?.tooltip ?? "", /DEPLOYED/);
+});
+
+test("lensPlansFor -- a scheduled automation's tooltip says it fires now with an empty event", () => {
+  const constructs = parseRunnableConstructs({
+    constructs: [
+      wireConstruct({
+        kind: "automation",
+        name: "reapStale",
+        trigger: { schedule: "0 */10 * * * *" },
+      }),
+    ],
+  });
+  const plans = lensPlansFor("file:///a.memql", constructs);
+  assert.match(plans[0]?.tooltip ?? "", /empty event/);
 });
 
 test("lensPlansFor -- no constructs means no lenses", () => {

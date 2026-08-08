@@ -235,3 +235,103 @@ test("writeRunConfigs -- REFUSES to overwrite a file that does not parse", async
   );
   assert.equal(await fs.readFile(file, "utf8"), "{ this is not json");
 });
+
+// -----------------------------------------------------------------------------
+// The automation block (memql#3310)
+// -----------------------------------------------------------------------------
+//
+// An automation has no declared `args`, so `args` cannot carry what its run
+// needs. The block below EXTENDS the same configuration shape rather than
+// introducing a parallel file, which is what keeps one Runs tree, one reader
+// and one writer serving both surfaces.
+
+test("parseRunConfigFile -- an automation entry round-trips its trigger event", () => {
+  const parsed = parseRunConfigFile(
+    JSON.stringify({
+      version: 1,
+      runs: [
+        {
+          name: "join a participant",
+          kind: "automation",
+          construct: "autoJoinSI",
+          file: "dsl/cognition/automations.memql",
+          args: {},
+          automation: {
+            payload: { id: "v1:cognition:participant:abc", payload: { role: "human" } },
+            concept: "v1:cognition:participant",
+            targetNodeType: "cognition",
+            includeStepOutput: true,
+          },
+        },
+      ],
+    }),
+  );
+  assert.ok(parsed.ok);
+  assert.deepEqual(parsed.file.runs[0]?.automation, {
+    payload: { id: "v1:cognition:participant:abc", payload: { role: "human" } },
+    concept: "v1:cognition:participant",
+    targetNodeType: "cognition",
+    includeStepOutput: true,
+  });
+  // And it survives a serialize/parse cycle unchanged, which is what makes the
+  // file plain editable text rather than a format that rewrites itself.
+  const round = parseRunConfigFile(serializeRunConfigFile(parsed.file));
+  assert.ok(round.ok);
+  assert.deepEqual(round.file.runs[0]?.automation, parsed.file.runs[0]?.automation);
+});
+
+test("parseRunConfigFile -- an automation entry with no block is valid", () => {
+  // A fire-now run of a scheduled automation carries no payload at all, so the
+  // block is genuinely optional rather than merely tolerated.
+  const parsed = parseRunConfigFile(
+    JSON.stringify({
+      version: 1,
+      runs: [{ name: "reap", kind: "automation", construct: "reapStale", args: {} }],
+    }),
+  );
+  assert.ok(parsed.ok);
+  assert.equal(parsed.file.runs.length, 1);
+  assert.equal(parsed.file.runs[0]?.automation, undefined);
+});
+
+test("parseRunConfigFile -- a MALFORMED automation block DROPS the entry", () => {
+  // Ignoring the block would run the automation with an empty event -- a
+  // different run from the one the file describes, and one with real side
+  // effects. Dropping it says so.
+  for (const automation of [
+    { payload: [1, 2] },
+    { payload: "not an object" },
+    { concept: 7 },
+    { targetNodeType: {} },
+    { includeStepOutput: "yes" },
+    "not a block",
+    [],
+  ]) {
+    const parsed = parseRunConfigFile(
+      JSON.stringify({
+        version: 1,
+        runs: [{ name: "bad", kind: "automation", construct: "x", args: {}, automation }],
+      }),
+    );
+    assert.ok(parsed.ok);
+    assert.equal(parsed.file.runs.length, 0, `expected ${JSON.stringify(automation)} to drop the entry`);
+    assert.equal(parsed.dropped.length, 1);
+  }
+});
+
+test("parseRunConfigFile -- an empty payload OBJECT is kept, not normalised away", () => {
+  // `{}` and an absent payload both fire with an empty event today, but they
+  // are different things an author can write, and a reader that silently
+  // rewrote one into the other would make the file disagree with itself on the
+  // next save.
+  const parsed = parseRunConfigFile(
+    JSON.stringify({
+      version: 1,
+      runs: [
+        { name: "e", kind: "automation", construct: "x", args: {}, automation: { payload: {} } },
+      ],
+    }),
+  );
+  assert.ok(parsed.ok);
+  assert.deepEqual(parsed.file.runs[0]?.automation, { payload: {} });
+});
