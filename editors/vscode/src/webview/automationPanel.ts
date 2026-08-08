@@ -226,8 +226,12 @@ export class AutomationRunPanel {
   // hidden reference to it. What is on screen is then exactly what will be
   // sent, and "pick a row and change one field" needs no extra affordance.
   private selectRow(rowId: string): void {
-    const token = this.rows.beginSelection(rowId);
-    void token; // The row is already in hand; no detail round-trip to guard.
+    // beginSelection() marks the row so it highlights in the list. Its token is
+    // deliberately dropped: the Concepts tab hands it back to
+    // resolveSelection() after a detail round-trip, and this picker has no such
+    // round-trip -- the loaded page already holds the whole row, which is the
+    // only thing the payload needs.
+    this.rows.beginSelection(rowId);
     const picked = this.rows.nodes.find((row) => String(row.id ?? "") === rowId);
     if (picked === undefined) {
       this.notice = `Row ${rowId} is no longer in the loaded page. Reload the picker and try again.`;
