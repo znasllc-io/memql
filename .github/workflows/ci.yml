@@ -61,6 +61,7 @@ jobs:
       go: ${{ steps.filter.outputs.go }}
       dsl: ${{ steps.filter.outputs.dsl }}
       sdkts: ${{ steps.filter.outputs.sdkts }}
+      viewkit: ${{ steps.filter.outputs.viewkit }}
       voice: ${{ steps.filter.outputs.voice }}
       proto: ${{ steps.filter.outputs.proto }}
       vscode: ${{ steps.filter.outputs.vscode }}
@@ -294,6 +295,12 @@ jobs:
             sdkts:
               - 'sdk/ts/**'
               - 'scripts/sdk-gen/**'
+            # The framework-agnostic renderer shared by the VS Code extension
+            # and the portal. Its own bucket rather than folded into `sdkts`:
+            # it is a separate package with a separate install + test cycle,
+            # and a change confined to it must still run its lane.
+            viewkit:
+              - 'sdk/ts-viewkit/**'
             # The CGO voice path (informational; the voice lane gates on
             # `go` because the tagged build compiles the whole module).
             voice:
@@ -317,10 +324,21 @@ jobs:
               - 'scripts/dev/proto-gen.sh'
             # The VS Code extension + the offline LSP binary it bundles + the
             # packaging script.
+            #
+            # sdk/ts and sdk/ts-viewkit are in here as well as in their OWN
+            # buckets, deliberately. The extension consumes both as `file:`
+            # dependencies and esbuild inlines them into out/extension.js, so a
+            # change confined to either package can break the extension's
+            # typecheck, its tests, and `vsce package` -- while the sdkts /
+            # viewkit lanes run that package's own tests, go green, and report
+            # nothing. Renaming an export is enough to do it. The consumer must
+            # rebuild whenever what it compiles against moves.
             vscode:
               - 'editors/vscode/**'
               - 'cmd/memql-lsp/**'
               - 'scripts/vscode/**'
+              - 'sdk/ts/**'
+              - 'sdk/ts-viewkit/**'
 
             # ---------------------------------------------------------------
             # TARGET-MODULE BUCKETS (memql#3163 / design D3)
@@ -820,6 +838,26 @@ jobs:
       - name: test sdk/ts
         run: make sdk-ts-test
 
+  # view-kit lane. Gates on `viewkit` (sdk/ts-viewkit/**) so a change confined
+  # to the renderer runs its tests without dragging the whole Go suite.
+  viewkit-checks:
+    name: viewkit-checks
+    timeout-minutes: 10
+    needs: changes
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.viewkit == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v4
+        with:
+          node-version: '20'
+      - name: install
+        run: scripts/ci/retry.sh -- make viewkit-install
+      - name: typecheck
+        run: make viewkit-typecheck
+      - name: test
+        run: make viewkit-test
+
   # MCP conformance suite (memql#1715) -- the capstone regression gate for epic
   # #1704. Unlike go-checks (which has no database, so every *_db_test.go skips),
   # this job provisions a TimescaleDB service so the DB-backed contract dimensions
@@ -1101,6 +1139,14 @@ jobs:
       # scripts/dev/vscode_lane_scope_test.go fails if this narrows again.
       - name: editors/vscode drift checks (grammar, language config, manifest)
         run: go test -count=1 ./cmd/memql-lsp/...
+      # `vscode-test` depends on `vscode-deps` in the Makefile so it stays
+      # self-sufficient from a clean checkout. A standalone retry-wrapped
+      # "build deps" step here would run the same npm installs a SECOND time,
+      # unretried, as vscode-test's own prerequisite -- defeating the retry.
+      # Wrap the single remaining invocation instead so the one place the
+      # flaky-registry calls actually happen is retried.
+      - name: extension unit tests
+        run: scripts/ci/retry.sh -- make vscode-test
       - name: package extension (build binary + compile + vsce package)
         run: bash scripts/vscode/package.sh --out="$RUNNER_TEMP/memql.vsix"
 
@@ -1278,6 +1324,7 @@ jobs:
       - build-voice
       - build-node-tags
       - sdk-ts-typecheck
+      - viewkit-checks
       - conformance
       - db-tests
       - vscode-extension

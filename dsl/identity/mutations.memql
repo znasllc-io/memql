@@ -800,19 +800,20 @@ mutate identity createPATIdentity {
 // ==========
 //
 // Creates a new v1:identity:user record: a person (or synthetic
-// principal). The user owns one or more v1:identity:identity records
-// and receives v1:identity:partitionAccess grants for the partitions
-// they can operate in.
+// principal). The user owns one or more v1:identity:identity records.
+// What that user may reach is decided by per-row authorization -- the
+// only gate -- not by a partition grant: partitions were retired in
+// #56 and v1:identity:partitionAccess no longer exists.
 //
 // ID convention: user-<hash of primaryEmail> or user-<uuid>. The
 // caller passes the id; the identity service's magic-link verifier
 // derives it from the registering email at first-login time.
 //
-// The first user created on a fresh cluster gets role=owner (bypass
-// partition ACL). Subsequent users default to reader and need an
-// explicit partition grant to do anything. The magic-link verifier
-// is responsible for picking the right role; callers of createUser
-// set role directly.
+// The first user created on a fresh cluster gets role=owner, which
+// the admin specs treat as cluster-wide. Subsequent users default to
+// reader and reach only what a per-row predicate grants them. The
+// magic-link verifier is responsible for picking the right role;
+// callers of createUser set role directly.
 
 /// Create a new user (person / synthetic principal).
 mutate user createUser {
