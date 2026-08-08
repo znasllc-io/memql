@@ -134,6 +134,12 @@ type Server struct {
 	// one gate + one audit logger and cannot drift. Nil elsewhere; the
 	// DeployControl handler answers Unimplemented.
 	deployControlHandler memqlv1.DeployControlServiceServer
+	// automationRunner is the mesh-aware automation invoke path the
+	// RunAutomation surface dispatches to (memql#3310). Set by app bootstrap
+	// on every binary that carries an automation scheduler; nil elsewhere,
+	// where the handler refuses with a message saying so rather than
+	// pretending the surface exists.
+	automationRunner AutomationRunner
 	// clientToolRPC serves the substrate-RPC client-tool return channel per
 	// agent turn (memql#1265). Set by app bootstrap on agent binaries where the
 	// delivery substrate is wired; nil otherwise (legacy ForwardContinuation).
@@ -346,6 +352,7 @@ func (s *Server) prepareForRun(ctx context.Context) (context.Context, context.Ca
 		agentReplier:           s.agentReplier,
 		nodeMaintenanceHandler: s.nodeMaintenanceHandler,
 		deployControlHandler:   s.deployControlHandler,
+		automationRunner:       s.automationRunner,
 		clientToolResultServer: s.clientToolRPC,
 		deliverySubstrate:      s.deliverySubstrate,
 		streamNodeID:           s.streamNodeID,
@@ -650,6 +657,12 @@ type service struct {
 	// the identity node (the same instance the unary service is registered
 	// with); nil elsewhere, where the handler answers Unimplemented.
 	deployControlHandler memqlv1.DeployControlServiceServer
+
+	// automationRunner is the mesh-aware automation invoke path the
+	// RunAutomation surface dispatches to (memql#3310). Non-nil wherever an
+	// automation scheduler is wired; nil elsewhere, where the handler
+	// refuses.
+	automationRunner AutomationRunner
 
 	// transcribeStreams holds the worker-side state for in-flight
 	// streaming transcription sessions, keyed by the caller's
@@ -1230,7 +1243,12 @@ func (s *streamSession) badgeGate(envelope *memqlv1.MemqlClientMessage) badgeGat
 		// cluster-state management whose effects outlive the grant's TTL
 		// containment by a wide margin. A walked-away kiosk must not be able
 		// to promote a release.
-		*memqlv1.MemqlClientMessage_DeployControl:
+		*memqlv1.MemqlClientMessage_DeployControl,
+		// Automation run (memql#3310) joins the same bucket: a run executes an
+		// automation's whole action chain server-side -- writes, LLM calls,
+		// downstream automations -- and those effects outlive the grant's TTL
+		// containment exactly as a deploy's do.
+		*memqlv1.MemqlClientMessage_RunAutomation:
 		return badgeGateRestricted
 	}
 	return badgeGateAllow
@@ -1269,6 +1287,8 @@ func badgePayloadRequestId(envelope *memqlv1.MemqlClientMessage) string {
 		return p.CallTool.GetRequestId()
 	case *memqlv1.MemqlClientMessage_DeployControl:
 		return p.DeployControl.GetRequestId()
+	case *memqlv1.MemqlClientMessage_RunAutomation:
+		return p.RunAutomation.GetRequestId()
 	}
 	return ""
 }
@@ -1594,6 +1614,11 @@ func (s *streamSession) handleMessage(envelope *memqlv1.MemqlClientMessage) erro
 	// THIS node into Draining on demand via the same #1269 drain mechanism.
 	case *memqlv1.MemqlClientMessage_NodeMaintenance:
 		return s.handleNodeMaintenance(envelope, payload.NodeMaintenance)
+	// Automation run (memql#3310): owner/admin-gated; synthesizes a trigger
+	// event for a named automation, dispatches it through the normal
+	// automation path, and streams back a step trace.
+	case *memqlv1.MemqlClientMessage_RunAutomation:
+		return s.handleRunAutomation(envelope, payload.RunAutomation)
 	// Concepts -- schema metadata (Phase 3)
 	case *memqlv1.MemqlClientMessage_ConceptsList:
 		return s.handleConceptsList(envelope, payload.ConceptsList)

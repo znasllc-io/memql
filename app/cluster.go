@@ -62,6 +62,13 @@ func (r *nodeTokenRevocationResolver) IsNodeTokenRevoked(ctx context.Context, no
 func (a *App) cluster() {
 	nodeIdentity := node.NewIdentity(a.Version)
 
+	// Automation invoke path (memql#3310). Wired here because this is where
+	// the node's own (type, id) is resolved, and the relay stamps both onto
+	// every trace frame -- the UI has to name the cluster and node a run
+	// executed against, and the cluster-e2e assertion for the cross-node hop
+	// is literally "the executing node differs from the requesting one".
+	a.wireAutomationRunner(string(nodeIdentity.Type), nodeIdentity.ID)
+
 	// Self-bootstrap a node-class JWT when MEMQL_NODE_TOKEN is empty
 	// but the operator opted into self-bootstrap via
 	// MEMQL_NODE_BOOTSTRAP_TOKEN + MEMQL_IDENTITY_VERIFIER_BASE_URL (see

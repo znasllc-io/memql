@@ -12,6 +12,7 @@ require (
 	github.com/uptrace/bun/dialect/pgdialect v1.2.18
 	github.com/uptrace/bun/driver/pgdriver v1.2.18
 	github.com/znasllc-io/memql/component/auth v0.0.0
+	github.com/znasllc-io/memql/component/automations v0.0.0
 	github.com/znasllc-io/memql/component/bus v0.0.0
 	github.com/znasllc-io/memql/component/bus/gen v0.0.0
 	github.com/znasllc-io/memql/component/database v0.0.0
@@ -118,7 +119,6 @@ require (
 	github.com/zeebo/xxh3 v1.1.0 // indirect
 	github.com/zeozeozeo/gomplerate v0.0.0-20250404113140-0fbb236df825 // indirect
 	github.com/znasllc-io/memql/component/actions v0.0.0 // indirect
-	github.com/znasllc-io/memql/component/automations v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/config v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/genesis v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/harness v0.0.0 // indirect

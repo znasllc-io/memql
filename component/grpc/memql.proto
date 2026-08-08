@@ -306,6 +306,12 @@ message MemqlClientMessage {
     // oneof, so the VS Code extension and the portal reach the whole
     // deploy surface over /memql/ws. See DeployControlMsg.
     DeployControlMsg deploy_control = 101;
+
+    // Automation run (memql#3310). The ONLY invoke path for an automation on
+    // any surface: synthesize a trigger event for a named automation,
+    // dispatch it through the normal automation path, and stream back a step
+    // trace. See RunAutomationMsg.
+    RunAutomationMsg run_automation = 102;
   }
 }
 
@@ -447,6 +453,11 @@ message MemqlServerMessage {
     // Deploy-control reply (see DeployControlMsg, memql#3311). Tag 122 is
     // taken by sense_definition_result above, so this starts at 123.
     DeployControlResult deploy_control_result = 123;
+
+    // Automation run trace (memql#3310). One tag carries every frame of a
+    // run -- accepted / step / complete -- as an inner oneof, so the three
+    // cannot drift apart. See AutomationRunEvent.
+    AutomationRunEvent automation_run_event = 124;
   }
 }
 
@@ -2637,4 +2648,205 @@ message DeployControlResult {
     znasllc.memql.deploycontrol.v1.SuggestNextVersionResult next_version = 11;
     znasllc.memql.deploycontrol.v1.ActionResult action = 12;
   }
+}
+
+// -----------------------------------------------------------------------------
+// Automation run (memql#3310)
+// -----------------------------------------------------------------------------
+
+// RunAutomationMsg synthesizes a trigger event for a NAMED automation,
+// dispatches it through the normal automation path, and asks the engine to
+// stream back a step trace.
+//
+// This is the ONLY invoke path for an automation on MemqlService.Stream.
+// Before it, an automation could be exercised only by causing its trigger
+// event for real -- which is why automations are the hardest construct in the
+// DSL to test, and why the VS Code runtime panel could offer a Run affordance
+// for every other runnable kind but not this one.
+//
+// THE DEFINITION THAT RUNS IS ALWAYS THE DEPLOYED ONE. Session-define
+// (AuthoringSessionDefineBundleMsg) covers the plain construct family --
+// query / mutate / logic / spec / trait -- and deliberately does not cover
+// automations: an automation is registered against the scheduler's event
+// subscriptions at load time, not resolved by name at call time, so there is
+// nothing for a stream-scoped registry to shadow. A caller that just edited an
+// automation in a buffer and pressed Run is therefore running the version on
+// the cluster, not the version on screen. AutomationRunAccepted carries that
+// fact as DATA (ran_deployed_definition + definition_note) rather than leaving
+// it to a doc comment, because the UI has to say it out loud.
+message RunAutomationMsg {
+  string request_id = 1;
+
+  // automation is the automation's DSL name (e.g. "autoJoinSI"). Required.
+  string automation = 2;
+
+  // payload is the synthesized trigger event's payload -- what the
+  // automation body reads as args.payload.<field> / event.payload.<field>.
+  //
+  // There is no declared payload schema to validate against in the general
+  // case: an automation binds its whole triggering event as `args` and reads
+  // through it freely. An automation that DOES declare an `args { }` block
+  // gets the ordinary fire-time binding + validation, and a violation refuses
+  // the run in the usual loud way.
+  //
+  // A @trigger(schedule=...) automation has no concept and no event: leave
+  // payload unset and the run fires with an EMPTY event, which is exactly
+  // what a cron firing hands the executor.
+  google.protobuf.Struct payload = 3;
+
+  // concept optionally names the concept the payload row belongs to. When
+  // empty it is derived from the automation's own @trigger(concept=...), so a
+  // caller that picked a row of the trigger concept in the UI does not have to
+  // restate it. Only used to build the synthetic event topic.
+  string concept = 4;
+
+  // topic optionally overrides the synthetic event's topic outright, for the
+  // case where the automation's trigger pattern is a glob the engine cannot
+  // make concrete on its own. Empty = derived from the automation's trigger.
+  string topic = 5;
+
+  // target_node_type routes the run to a specific node type in the mesh
+  // ("cognition", "agent", "planner", "voice", "workbench", "bff", ...).
+  //
+  // Empty (the default) means "run on the node that received this request",
+  // which is the single-node and the ordinary case. A NON-empty value that
+  // differs from the receiving node's type makes the run a genuine cross-node
+  // dispatch: the receiving node relays the request over the event bus and
+  // streams back the trace the executing node publishes. That path exists
+  // because an automation's steps can reach integrations that are compiled
+  // into one node type only -- testing such an automation from the editor
+  // requires running it where those integrations live.
+  string target_node_type = 6;
+
+  // timeout_ms bounds the whole run from the caller's point of view. Zero
+  // takes the server default (60s); the server also caps it (300s). A run
+  // that exceeds it terminates the trace with DEADLINE_EXCEEDED -- it does
+  // NOT cancel work already dispatched on another node.
+  uint32 timeout_ms = 7;
+
+  // include_step_output attaches each step's own result payload to its trace
+  // entry. Off by default: step outputs can be large, and the timeline view
+  // only needs name / status / duration until a step is expanded.
+  bool include_step_output = 8;
+}
+
+// AutomationRunEvent is one frame of a run's streamed trace.
+//
+// A run is not a single round-trip, so this follows the same shape as the
+// other streamed surfaces (QueryResultChunk, the transcribe-stream flow):
+// many frames correlated by request_id, terminated by exactly one `complete`.
+// Every run emits `accepted` first and `complete` last, including a run that
+// was refused outright -- a caller can therefore always park on `complete`.
+//
+// The inner oneof (rather than three top-level server payload tags) mirrors
+// DeployControlMsg / DeployControlResult: one envelope, one tag on
+// MemqlServerMessage, and no way for the three frames to drift apart.
+message AutomationRunEvent {
+  string request_id = 1;
+
+  // run_id identifies this run. It is the automation execution id on the
+  // node that executed it, so it joins to v1:memql:checkpoint rows and to the
+  // executionId in the engine's logs.
+  string run_id = 2;
+
+  oneof event {
+    AutomationRunAccepted accepted = 10;
+    AutomationRunStep step = 11;
+    AutomationRunComplete complete = 12;
+  }
+}
+
+// AutomationRunAccepted is the first frame of every run. It arrives BEFORE any
+// step, so the UI can render the banner and the header while the run is still
+// in flight.
+message AutomationRunAccepted {
+  // automation is the resolved automation name.
+  string automation = 1;
+
+  // ran_deployed_definition is always true, and is a field rather than a
+  // comment on purpose: the UI must state that the deployed definition ran,
+  // not the caller's buffer. Reading it as a constant is fine; reading it as
+  // the thing to render is the point.
+  bool ran_deployed_definition = 2;
+
+  // definition_note is the ready-to-render banner text for the above.
+  string definition_note = 3;
+
+  // trigger_kind is "event" for @trigger(event=...), "schedule" for
+  // @trigger(schedule=...), and "manual" for an automation with neither.
+  string trigger_kind = 4;
+
+  // trigger_topic is the synthetic event's topic. Empty for a schedule-kind
+  // run, which fires with an empty event and therefore has no topic.
+  string trigger_topic = 5;
+
+  // requested_on_node_id / requested_on_node_type identify the node that
+  // received the request -- the "cluster it ran against" half of what the
+  // extension needs for its non-local write confirmation (memql#3310 / B2).
+  string requested_on_node_id = 6;
+  string requested_on_node_type = 7;
+
+  // target_node_type echoes the requested target ("" = the receiving node).
+  string target_node_type = 8;
+}
+
+// AutomationRunStep is one step's outcome, emitted as the step completes.
+message AutomationRunStep {
+  // sequence is the 0-based position of this frame in the trace, so a client
+  // can order frames without relying on arrival order.
+  int32 sequence = 1;
+
+  // step_id is the step's declared name in the automation body.
+  string step_id = 2;
+
+  // status is "success", "failed" or "skipped" -- the automation executor's
+  // own StepResult.Status values, passed through unchanged.
+  string status = 3;
+
+  int64 duration_ms = 4;
+
+  // output carries the step's result when include_step_output was set and the
+  // result is representable as a Struct. A scalar or array result is wrapped
+  // under the key "value".
+  google.protobuf.Struct output = 5;
+
+  // error is the step's error message when status is "failed".
+  string error = 6;
+}
+
+// AutomationRunComplete terminates the trace. Exactly one is sent per run.
+//
+// Failures ride HERE, not out of the handler as a Go error: an error returned
+// from a stream handler tears down the multiplexed stream and takes every
+// other in-flight request on it with it. error_code carries the canonical
+// gRPC code (google.rpc.Code numbering, 0 = OK) so a caller maps it back to
+// the status a unary call would have produced. This is the convention
+// DeployControlResult established (memql#3311).
+message AutomationRunComplete {
+  // status is the execution's own terminal status -- "completed", "failed",
+  // "cancelled" -- or "refused" when the run never started (unknown or
+  // disabled automation, permission denied, timeout).
+  string status = 1;
+
+  int64 duration_ms = 2;
+
+  // step_count is how many step frames preceded this one.
+  int32 step_count = 3;
+
+  // error is the automation-level error message when the run failed after
+  // starting.
+  string error = 4;
+
+  // error_code is the canonical gRPC code (0 = OK, 3 = INVALID_ARGUMENT,
+  // 5 = NOT_FOUND, 7 = PERMISSION_DENIED, 4 = DEADLINE_EXCEEDED,
+  // 9 = FAILED_PRECONDITION, 12 = UNIMPLEMENTED, 13 = INTERNAL).
+  int32 error_code = 5;
+  string error_message = 6;
+
+  // executed_on_node_id / executed_on_node_type name the node that actually
+  // ran the automation. On a cross-node run these differ from the
+  // requested_on_* pair in AutomationRunAccepted, which is what makes the
+  // cross-node hop assertable from a test and legible in the UI.
+  string executed_on_node_id = 7;
+  string executed_on_node_type = 8;
 }
