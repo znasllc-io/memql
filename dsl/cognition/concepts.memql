@@ -13,6 +13,7 @@ use identity.concepts.{ user }
 /// an active override beats the agent default; absence falls through to the agent default. id is
 /// the deterministic audioOverride:<partitionId>:<agentId> so re-toggling on the same orb hits the
 /// same row instead of growing a per-click history.
+@displayCard(primary="mode", secondary="agentId", tertiary="setBy", status="active")
 concept audioOverride {
   partitionId   string! @description("v1:cognition:space.id this override is scoped to.")
   agentId   string! @description("v1:agents:agent.id this override targets.")
@@ -25,6 +26,10 @@ concept audioOverride {
 
 /// A streaming text chunk emitted incrementally during AI response generation. The frontend
 /// subscribes to creation events and accumulates chunks into a real-time message.
+// @no-displayCard: Transport, not an entity. One row per streamed token batch -- thousands
+//   per reply -- and `text` is a partial fragment that is meaningless outside
+//   the `replyId` accumulation it belongs to. Promoting it to a row label
+//   would present fragments as if they were messages.
 @namespace("cognition:text")
 concept chunk {
   done  bool!  @description("Whether this is the final chunk.")
@@ -44,6 +49,7 @@ concept chunk {
 /// are not retained -- once the response arrives the pair is a no-op for future consumers. Lives
 /// under v1:cognition because the relay is a cognition-level concern (mediating between the agent
 /// loop and the browser stream); consuming products need not define their own variant.
+@displayCard(primary="toolName", secondary="callId", tertiary="agentId")
 @namespace("cognition:client:tool")
 concept request {
   callId  string!  @description("UUID correlating this request with its eventual v1:cognition:client:tool:response. Matches the ClientToolCall.call_id the agent emitted.")
@@ -68,6 +74,10 @@ concept request {
 /// these events, matches on callId, wraps the payload in a ClientToolResult MemqlClientMessage and
 /// forwards it to the agent node via AiForwardRequest so the parked agent tool-loop waiter
 /// unblocks.
+// @no-displayCard: The return leg of a client tool call, addressed only by the `callId` it
+//   answers; the payload is an opaque JSON blob. Nothing on the row labels it
+//   -- the request (which carries `toolName`) is the browsable half of the
+//   pair.
 @namespace("cognition:client:tool")
 concept response {
   callId  string!  @description("UUID matching the v1:cognition:client:tool:request this response fulfils.")
@@ -82,6 +92,7 @@ concept response {
 }
 
 /// A human or AI participant instance within a space.
+@displayCard(primary="displayName", secondary="participantType", tertiary="agentId", status="status")
 concept participant {
   agentId  string  @description("ID of the agent template (for AI participants).")
   capabilityOverrides {
@@ -111,6 +122,7 @@ concept participant {
 
 /// UI-friendly presence snapshot for a participant (especially AI). Used to show current agent
 /// status such as thinking/responding/waiting.
+@displayCard(primary="label", secondary="participantId", tertiary="reason", status="state")
 @namespace("cognition:participant")
 concept presence {
   intent {
@@ -137,6 +149,9 @@ concept presence {
 /// agent's audioControl mode -- there is NO tier ceiling anymore. Whether voice flows in / out of
 /// the room is purely a function of who has their mic open and which agents are configured to
 /// publish TTS.
+// @no-displayCard: Per-participant streaming bookkeeping: two nested objects, a stream map,
+//   and three timestamps. Every scalar is a foreign key or a clock reading,
+//   so a primary slot would be a forced choice that identifies nothing.
 concept session {
   aiOutput {
     avatarEnabled  bool  @default("false")  @description("Whether AI avatar video is currently rendering.")
@@ -159,6 +174,10 @@ concept session {
 
 /// Tracks conversation turn-taking state including who is speaking and AI participation
 /// permissions.
+// @no-displayCard: Singleton turn-state row per space. Every scalar is either a foreign key
+//   that changes on each turn (currentSpeakerId, lastUtteranceId) or a machine
+//   counter, so a primary slot would relabel the same row on every write. The
+//   row id -- the space -- is the stable identity.
 @namespace("cognition:turn")
 concept state {
   aiAnalysisJSON  string  @description("Raw JSON string with richer analysis output (internal/debug/UI).")
@@ -188,6 +207,7 @@ concept state {
 }
 
 /// A single multi-modal contribution to the conversation stream.
+@displayCard(primary="text", secondary="participantType", tertiary="participantId", status="utteranceType")
 concept utterance {
   action {
     idempotencyKey  string  @description("Optional idempotency key to allow safe retries.")
@@ -242,6 +262,7 @@ concept utterance {
 /// default; absence falls through to the agent default. id is the deterministic
 /// videoOverride:<partitionId>:<agentId> so re-toggling on the same orb hits the same row instead
 /// of growing a per-click history.
+@displayCard(primary="mode", secondary="agentId", tertiary="setBy", status="active")
 concept videoOverride {
   partitionId   string! @description("v1:cognition:space.id this override is scoped to.")
   agentId   string! @description("v1:agents:agent.id this override targets.")
@@ -263,6 +284,7 @@ concept videoOverride {
 /// Rolled-up guardrail health metrics for a time window. Written by the rollupGuardrailHealth
 /// automation from v1:cognition:unmetCapability rows; advisory-only signal for tuning the fit-score
 /// threshold and identifying missing specialist domains. One row per rollup run.
+@displayCard(primary="periodStart", secondary="periodEnd", tertiary="totalUnmet")
 concept guardrailHealth {
   periodStart             datetime!  @description("Start of the rollup window (inclusive).")
   periodEnd               datetime!  @description("End of the rollup window (exclusive).")
@@ -291,6 +313,7 @@ concept guardrailHealth {
 /// user's request -- either the assistant stepped in as fallback (specialist_gap) or nobody could
 /// help (full_gap). Emitted by cognition via the cognition.capability.unmet event and consumed by
 /// the guardrail health rollup for product-level insight into missing capabilities.
+@displayCard(primary="utterance", secondary="speakerName", tertiary="reason", status="severity")
 concept unmetCapability {
   partitionId          string!  @description("ID of the space the utterance occurred in.")
   utteranceId      string   @description("ID of the triggering human utterance.")

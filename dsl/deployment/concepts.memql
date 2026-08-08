@@ -32,6 +32,7 @@
 /// image digest -- previously only in releases/*.yaml on disk -- now lands in the data layer so
 /// history, node<->deploy linkage, next-version suggestion, and rollback can all be served from a
 /// query.
+@displayCard(primary="version", secondary="environment", tertiary="deploymentId", status="status")
 @namespace("cluster")
 concept deployment {
   deploymentId         string! @description("Stable deployment id; also the Argo rollout hash. Used as the concept row id so status transitions append to one timeline.")
@@ -62,6 +63,7 @@ concept deployment {
 /// deploymentId is a plain string FK to v1:cluster:deployment.deploymentId (cross-concept
 /// references use FK fields, not @relationship). A deployment's full per-node spec set = every
 /// deploymentNodeSpec with the same deploymentId.
+@displayCard(primary="nodeType", secondary="version", tertiary="deploymentId")
 @namespace("cluster")
 concept deploymentNodeSpec {
   deploymentId  string! @minLength(1) @description("FK to v1:cluster:deployment.deploymentId this spec belongs to. Plain string FK (not a @relationship -- cross-concept references use FK fields). Normalised with shortId() and then hashed into the composite concept id, so a bare and a canonical form derive the same row (#2925). Stored normalised too, since nodeSpecsForDeployment filters on this field. @minLength(1) because hashing makes an empty key indistinguishable from a real one (#2885).")

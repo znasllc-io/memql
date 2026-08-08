@@ -55,7 +55,10 @@ test("renders a status badge from the status slot", () => {
   const html = renderToHtml(
     renderRowList([{ id: "a1", name: "Sofia", active: true }], AGENT),
   );
-  assert.match(html, /class="vk-row-status" data-status="true"/);
+  // data-status keeps the raw value for host styling; the badge PROSE comes
+  // from the slot's field name, never the literal "true" (memql#3303 -- the
+  // whole mapping is pinned in displayCard.test.ts).
+  assert.match(html, /class="vk-row-status" data-status="true">active</);
 });
 
 test("falls back to the row id when the concept declares no display card", () => {

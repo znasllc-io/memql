@@ -5,6 +5,7 @@
 
 /// Audit log entry for validation state transitions. Tracks who performed each check, confirm, or
 /// revert action, when, and why.
+@displayCard(primary="action", secondary="recordId", tertiary="note", status="toState")
 concept log {
   active        bool    @description("Soft-delete flag (append-only semantics). Convention: true -- NOT applied on insert, and no mutation is bound to this concept, so a writer must supply it; an absent value reads as false, i.e. soft-deleted.")
   recordId      string!  @description("The v1:data:record node ID this log entry refers to")
@@ -22,6 +23,7 @@ concept log {
 /// Validation policy defining check/confirm requirements for a record type. Controls how many
 /// synthetic checks and human confirmations are needed, and whether checked data is usable before
 /// full confirmation.
+@displayCard(primary="targetRecordType", secondary="revertMinRole", tertiary="requiredChecks", status="active")
 concept policy {
   active                bool    @default("true")  @description("Soft-delete flag (append-only semantics)")
   targetRecordType      string!  @description("Record type this policy applies to (e.g., 'vehicle', 'bird')")
@@ -36,6 +38,7 @@ concept policy {
 /// Data record with validation lifecycle: draft -> checked -> confirmed. Replaces the
 /// staging/production split with a unified concept where data visibility is governed by validation
 /// state and policy.
+@displayCard(primary="label", secondary="recordType", tertiary="importSource", status="validationState")
 concept record {
   active              bool      @default("true")  @description("Soft-delete flag (append-only semantics)")
   validationState     enum("draft", "checked", "confirmed")  @default("draft")  @description("Current lifecycle state")

@@ -11,6 +11,7 @@ use agents.concepts.{ agent }
 /// the reason and closes the row. Also auto-aged by the accessRequestExpirySweep cron once
 /// IDENTITY_ACCESS_REQUEST_EXPIRY_DAYS has elapsed without a decision. Global scope so admins in
 /// any partition (typically owners of the cluster) can review the queue.
+@displayCard(primary="email", secondary="name", tertiary="reviewedBy", status="status")
 concept accessRequest {
   email             string!  @description("Email address the requester wants to register with. Same value flows into the eventual v1:identity:user.primaryEmail on approval.")
   name              string  @description("Display name supplied at submission time. Optional (some flows ask, some don't).")
@@ -80,6 +81,10 @@ concept auditEvent {
 /// authCodeFull never projected it. The field was written and read by nothing.
 /// Finding a row by sha256(presented) IS the verification -- it proves the
 /// presenter holds the preimage -- so removing the field cost no property.
+// @no-displayCard: Single-use credential row: a secret hash plus opaque foreign keys and a
+//   ~60s TTL. There is no human-facing identity to promote, and giving a
+//   credential a browsable-looking label in a row list is the wrong
+//   affordance.
 concept authCode {
   codeHash            string!  @description("SHA-256 hex digest of the plaintext code. Primary lookup key in the token-exchange path -- avoids equality lookups on the plaintext.")
   clientId            string!  @description("OAuth client identifier the code was minted for. Token-exchange MUST verify the redeeming client matches; mismatched client = reject and audit as code_misuse.")
@@ -105,6 +110,7 @@ concept authCode {
 /// like a static MEMQL_IDENTITY_REGISTERED_CLIENTS entry. Public clients only -- no secret is
 /// issued (token_endpoint_auth_method = none). Global scope: registration + token redemption are
 /// unauthenticated and must work without a partition context.
+@displayCard(primary="clientName", secondary="clientId", tertiary="tokenEndpointAuthMethod")
 concept oauthClient {
   clientId                string!  @description("Public OAuth client_id issued at dynamic registration (RFC 7591). Lookup key in /authorize + /oauth/token.")
   clientName              string  @description("Human-readable client_name from the registration request.")
@@ -119,6 +125,7 @@ concept oauthClient {
 /// magic-link / refresh flow. Looked up on every authenticated request to enforce per-session
 /// revocation; rows past expiresAt are tombstoned by GC, not by user action. Global scope: lives in
 /// _system so any partition's middleware can resolve a session.
+@displayCard(primary="subject", secondary="clientLabel", tertiary="lastActivityAt", status="source")
 concept authSession {
   userId          string  @description("Owning v1:identity:user. Optional because rows are written at token-issuance time, which can race ahead of the magic-link verifier's user-row insert on first-time logins. Subject is the canonical lookup key.")
   identityId      string  @description("v1:identity:identity the session was minted from (typically the magic_link variant). Same caveat as userId.")
@@ -146,6 +153,7 @@ concept authSession {
 /// here first and falls back to env so a fresh deployment is functional without any post-bootstrap
 /// edits. Global scope so the configuration is reachable from every binary that needs it (identity
 /// itself plus future per-node verifier middleware).
+@displayCard(primary="clusterDomain", secondary="brandName", tertiary="bootstrapEmail", status="registrationMode")
 concept clusterSettings {
   clusterDomain                   string  @description("The deployment-wide hostname suffix the operator entered at /setup (or supplied via MEMQL_IDENTITY_BOOTSTRAP_DOMAIN). Examples: local.znas.io, staging.acme.com, acme.com. Every public service URL the cluster builds derives from it: app.<clusterDomain> for the SPA, identity.<clusterDomain> for sign-in, bff.<clusterDomain> for the API, agent.<clusterDomain> for worker registration. Empty before the wizard runs.")
   registrationMode                enum("open", "domain_restricted", "invite_only", "waitlist")!  @default("open")  @description("Who can self-register. Mirror of MEMQL_IDENTITY_REGISTRATION_MODE.")
@@ -178,6 +186,7 @@ concept clusterSettings {
 /// Grants an AI agent the right to act through a user's v1:identity:identity for a bounded role
 /// ceiling, scope set, and lifetime. Global scope: lives in _system and is readable from any
 /// partition so cross-partition agent work does not require per-partition delegation rows.
+@displayCard(primary="identitySubject", secondary="agentId", tertiary="roleCeiling", status="active")
 concept delegation {
   identityId         string!  @description("Node ID of the v1:identity:identity granting authority. Through its userId the delegation resolves back to a v1:identity:user.")
   identitySubject    string!  @description("authenticated subject id of the delegating identity (denormalized for fast lookup on the auth hot path).")
@@ -201,6 +210,7 @@ concept delegation {
 /// magic-link verified email, OAuth accounts on external apps, API keys (Personal Access Tokens),
 /// or service accounts. Agents borrow identities to act on the user's behalf via
 /// v1:identity:delegation. Global scope: lives in _system and is readable from any partition.
+@displayCard(primary="label", secondary="identityType", tertiary="userId", status="active")
 concept identity {
   active          bool    @default("true")  @description("Soft-delete flag. Revoked credentials stay around for audit but are inactive.")
   userId          string!  @description("Owning v1:identity:user. Every identity must belong to exactly one user; a user can own many identities.")
@@ -297,6 +307,7 @@ concept invitation {
 /// first successful click and any subsequent click against the same row is rejected. Past expiresAt
 /// the row is also rejected. Global scope so the public unauthenticated /auth/magic-link/consume
 /// endpoint can resolve the row regardless of which partition the eventual user belongs to.
+@displayCard(primary="email", secondary="sourceIP", tertiary="expiresAt")
 concept magicLinkRequest {
   email           string!  @description("Email address the magic link was sent to. Drives the user-lookup / first-time-registration path on consume.")
   tokenHash       string!  @description("SHA-256 hex digest of the plain magic-link token. Primary lookup key on consume; the plaintext token is delivered in the email link and never stored server-side.")
@@ -377,6 +388,9 @@ concept user {
 /// redeemedAt + redeemedBy, mints a v1:identity:identity worker_token row owned by the same user,
 /// and returns the plain mql_wkr_<...> token + cluster URL to the cockpit. Single-use: a row with
 /// non-empty redeemedAt is dead. TTL ~10 minutes (IDENTITY_PAIRING_CODE_TTL_MIN, default 10).
+// @no-displayCard: Single-use credential row, same reasoning as v1:identity:authCode: a
+//   secret hash plus foreign keys. `clusterURL` is identical on every row in a
+//   cluster, so promoting it would distinguish nothing.
 concept workerPairingCode {
   ownerUserId  string!  @description("v1:identity:user.id who minted the code (and who will own the resulting worker_token + v1:worker:registration). The redeem handler reads this and uses it as the registeredBy for the new worker_token credential.")
   codeHash     string!  @description("SHA-256 hex digest of the plain XXXX-XXXX code. Plaintext is shown to the user ONCE on the frontend's Settings card and never persisted.")
@@ -394,6 +408,7 @@ concept workerPairingCode {
 /// Organization group. Users belong to groups; agents are assigned to groups for scoped access
 /// control. Created and managed in-app; the externalId field is preserved for any legacy rows that
 /// came from a previous external sync source.
+@displayCard(primary="name", secondary="description", tertiary="externalId", status="active")
 concept group {
   name         string! @description("Display name of the group.")
   description  string! @description("Short description of the group's purpose. Required so group pickers (CreateSpaceModal, admin lists) always have a useful subtitle.")
@@ -449,6 +464,7 @@ concept account {
 /// billing / admin writer can both reach it from any partition. One logical row per account:
 /// setAccountEntitlement mints a deterministic id (accountEntitlement-<hash(accountId)>) so each
 /// set appends a new time-series version and the latest wins.
+@displayCard(primary="accountId", secondary="accountKind", tertiary="note", status="tier")
 concept accountEntitlement {
   accountId          string! @description("The paying account this entitlement applies to. v1: a v1:identity:user.id (accountKind='user'). The admission controller (#904) resolves a Plan's account via Plan.requestedBy and reads the effective cap from the matching row here.")
   accountKind        enum("user", "org")! @default("user") @description("Whether accountId names a user or an org. v1 is always 'user' (per-user account); 'org' is reserved for the future per-organization concurrency rollup where many users share one paying account's pool of slots.")

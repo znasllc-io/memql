@@ -612,6 +612,17 @@ sets; unknown annotations are rejected at load time:
 
 - **Concepts**: `@description`, `@version`, `@namespace`, `@type`,
   `@displayCard`, `@rowAuthz`. (`@scope` is retired, #56.)
+  `@displayCard(primary=, secondary=, tertiary=, status=)` declares WHICH
+  FIELDS a concept-agnostic view puts in a row's chrome. Every slot NAMES A
+  FIELD -- validated at load: it must exist (as a top-level property or a
+  displayable row intrinsic) and be a displayable scalar, so object and array
+  fields are rejected -- and `primary` is mandatory when the annotation is
+  present. A concept that deliberately carries no card records why in a
+  `// @no-displayCard: <reason>` comment instead;
+  `test/dslconformance/displaycard_inventory_test.go` fails on a concept in
+  neither bucket. What a view does with an undeclared concept is a stated
+  fallback contract, not emergent renderer behaviour. See
+  [display-cards.md](../concepts/display-cards.md).
   `@rowAuthz(public|clusterOwner|owner="<field>"|via="<spec>")` declares
   WHO MAY SEE the concept's rows, once on the concept, instead of as an
   `actor.*` term every filter over it must remember to carry. Exactly

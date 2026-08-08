@@ -3,6 +3,7 @@
 // Concepts in the common namespace.
 
 /// A file attachment uploaded to a space, with extracted transcription.
+@displayCard(primary="fileName", secondary="mimeType", tertiary="uploadedBy", status="status")
 concept attachment {
   fileName  string!  @description("Original filename of the uploaded file.")
   fileSize  int  @description("File size in bytes.")
@@ -17,6 +18,7 @@ concept attachment {
 }
 
 /// Audio, video, image, and document assets referenced by utterances.
+@displayCard(primary="filename", secondary="mimeType", tertiary="url", status="mediaType")
 concept media {
   dimensions {
     height  int
