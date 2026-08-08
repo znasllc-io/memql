@@ -102,15 +102,22 @@ export class ConceptPanel {
     // the new one. Re-establish it only once the new state is "connected";
     // "connecting" / "error" / "disconnected" leave it unsubscribed until
     // the next successful connect.
+    //
+    // subscribeToChanges() runs BEFORE reset()/render(): it only writes the
+    // liveUpdatesDegradedMessage field (see conceptPanelState.ts), which
+    // reset() does not touch, so a single render() below picks up both the
+    // fresh (empty) row state AND whatever the subscribe attempt just did to
+    // the live-updates notice, in one paint -- no separate render() inside
+    // subscribeToChanges() itself.
     this.disposeConnectionListener = this.connections.onDidChangeState((connState) => {
       this.unsubscribeChanges?.();
       this.unsubscribeChanges = undefined;
-      this.state.reset();
-      this.render();
-      void this.loadPage();
       if (connState.status === "connected") {
         this.subscribeToChanges();
       }
+      this.state.reset();
+      this.render();
+      void this.loadPage();
     });
 
     this.panel.onDidDispose(
@@ -167,6 +174,11 @@ export class ConceptPanel {
   // it bumps both generation counters, so any page or detail fetch already
   // in flight when the event arrives is discarded instead of landing on top
   // of the reload triggered here.
+  //
+  // Does not call render() itself -- both call sites (the constructor, the
+  // reconnect listener) already render immediately afterward, so a render()
+  // here would just be a wasted extra paint on every panel open where the
+  // subscribe attempt fails.
   private subscribeToChanges(): void {
     const subs = this.connections.subscriptions;
     if (subs === undefined) return;
@@ -179,15 +191,24 @@ export class ConceptPanel {
         },
         { concept: this.concept.id, actions: ["created", "updated", "deleted"] },
       );
+      // A prior attempt's degraded notice (if any) no longer applies --
+      // this subscription is live.
+      this.state.clearLiveUpdatesDegraded();
     } catch (err) {
       // A subscription failure degrades to manual reload; it must never
-      // take the panel down with it. setConnectionError (rather than
-      // reset()) so the row list already on screen survives -- this is a
-      // "live updates didn't start" notice, not an invalidating event.
-      this.state.setConnectionError(
+      // take the panel down with it. This is a PERSISTENT notice, deliberately
+      // not routed through setConnectionError/state.error: that field is
+      // cleared by every successful loadPage()/resolveSelection(), and an
+      // ordinary query succeeding on the same connection the subscribe just
+      // failed on is the common case, not the exception -- routing through
+      // it would flash this message away within moments of showing it,
+      // leaving the panel looking fully live when it silently is not (the
+      // exact failure mode this notice exists to prevent). It clears only
+      // when a later subscribe attempt succeeds (see clearLiveUpdatesDegraded()
+      // above).
+      this.state.setLiveUpdatesDegraded(
         `live updates unavailable: ${err instanceof Error ? err.message : String(err)}`,
       );
-      this.render();
     }
   }
 
@@ -272,6 +293,15 @@ export class ConceptPanel {
         ? ""
         : `<div class="error">ERROR: ${escapeHtml(this.state.error)}</div>`;
 
+    // Persistent, independent of errorHtml: a successful loadPage() clears
+    // state.error but must NOT clear this -- see the doc comment on
+    // ConceptPanelState.liveUpdatesDegradedMessage. It stays on screen until
+    // a later reconnect's subscribe attempt actually succeeds.
+    const liveUpdatesHtml =
+      this.state.liveUpdatesError === ""
+        ? ""
+        : `<div class="warning">WARNING: ${escapeHtml(this.state.liveUpdatesError)}</div>`;
+
     const moreHtml =
       this.state.nextCursor === ""
         ? ""
@@ -307,6 +337,7 @@ export class ConceptPanel {
   .vk-null, .vk-empty-value, .vk-cycle { opacity: 0.5; font-style: italic; }
   .vk-empty { opacity: 0.6; padding: 8px 0; }
   .error { color: var(--vscode-errorForeground); padding: 8px 12px; }
+  .warning { color: var(--vscode-editorWarning-foreground); padding: 8px 12px; }
   button { background: var(--vscode-button-background); color: var(--vscode-button-foreground);
            border: none; padding: 4px 10px; cursor: pointer; border-radius: 2px; }
 </style>
@@ -318,6 +349,7 @@ export class ConceptPanel {
   <button id="reload" type="button">Reload</button>
   ${moreHtml}
 </div>
+${liveUpdatesHtml}
 ${errorHtml}
 <div class="layout">
   <div class="pane" id="rows">${listHtml}</div>

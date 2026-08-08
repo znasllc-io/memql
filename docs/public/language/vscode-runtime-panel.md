@@ -3,7 +3,7 @@ title: VS Code Runtime Panel
 audience: public
 status: stable
 area: language
-sinceVersion: 0.4.0
+sinceVersion: 0.14.0
 owner: znas
 ---
 

@@ -255,3 +255,80 @@ test("reset() clears rows, cursor, selection, detail, and error", async () => {
   assert.equal(state.detail, null);
   assert.equal(state.error, "");
 });
+
+// liveUpdatesDegradedMessage guards the "live updates are off" notice
+// (concept-panel review finding, task 10): it must survive exactly what
+// errorMessage does not, or the notice flashes and disappears the moment
+// any ordinary query next succeeds on the same connection -- the "silently
+// appearing static" failure mode the notice exists to prevent.
+
+test("setLiveUpdatesDegraded records the notice independently of state.error", () => {
+  const state = new ConceptPanelState<{ id: string }>();
+
+  state.setLiveUpdatesDegraded("live updates unavailable: boom");
+
+  assert.equal(state.liveUpdatesError, "live updates unavailable: boom");
+  assert.equal(state.error, "", "the degraded notice must not also populate the transient error field");
+});
+
+test("a successful loadPage() clears state.error but does NOT clear the live-updates degraded notice", async () => {
+  const state = new ConceptPanelState<{ id: string }>();
+  state.setLiveUpdatesDegraded("live updates unavailable: boom");
+
+  // A prior ordinary error, for contrast -- this one MUST be cleared by a
+  // successful load, same as always.
+  await state.loadPage(() => Promise.reject(new Error("prior fetch error")));
+  assert.equal(state.error, "prior fetch error");
+
+  const changed = await state.loadPage(() =>
+    Promise.resolve({ rows: [{ id: "a" }], nextCursor: "" }),
+  );
+
+  assert.equal(changed, true);
+  assert.equal(state.error, "", "a successful loadPage() clears the transient error as usual");
+  assert.equal(
+    state.liveUpdatesError,
+    "live updates unavailable: boom",
+    "a successful loadPage() must NOT clear the live-updates degraded notice -- an ordinary query " +
+      "succeeding says nothing about whether the CDC subscription is up",
+  );
+});
+
+test("a successful resolveSelection() clears state.error but does NOT clear the live-updates degraded notice", async () => {
+  const state = new ConceptPanelState<{ id: string }>();
+  state.setLiveUpdatesDegraded("live updates unavailable: boom");
+
+  const token = state.beginSelection("row-1");
+  const changed = await state.resolveSelection(token, () => Promise.resolve({ id: "detail-1" }));
+
+  assert.equal(changed, true);
+  assert.deepEqual(state.detail, { id: "detail-1" });
+  assert.equal(
+    state.liveUpdatesError,
+    "live updates unavailable: boom",
+    "a successful row-detail fetch must not clear the live-updates degraded notice either",
+  );
+});
+
+test("reset() does not clear the live-updates degraded notice", async () => {
+  const state = new ConceptPanelState<{ id: string }>();
+  state.setLiveUpdatesDegraded("live updates unavailable: boom");
+
+  state.reset();
+
+  assert.equal(
+    state.liveUpdatesError,
+    "live updates unavailable: boom",
+    "reset() fires on every connection state change, including transient ones before a subscribe " +
+      "attempt has resolved -- it must not clear the notice out from under a pending attempt",
+  );
+});
+
+test("clearLiveUpdatesDegraded() is the only thing that clears the notice, once a subscribe attempt succeeds", () => {
+  const state = new ConceptPanelState<{ id: string }>();
+  state.setLiveUpdatesDegraded("live updates unavailable: boom");
+
+  state.clearLiveUpdatesDegraded();
+
+  assert.equal(state.liveUpdatesError, "");
+});

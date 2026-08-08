@@ -34,6 +34,21 @@ export class ConceptPanelState<T> {
   private rowDetail: T | null = null;
   private errorMessage = "";
 
+  // Persistent "live updates are off" notice -- deliberately a SEPARATE
+  // field from errorMessage, not a reuse of it. errorMessage is transient:
+  // loadPage()/resolveSelection() clear it on every success, because a
+  // fresh good row-list load supersedes a stale data-fetch error. The
+  // live-updates notice must survive exactly that -- a CDC subscription
+  // failing does not stop ordinary queries from succeeding on the same
+  // healthy connection, so the very next successful loadPage() would wipe
+  // an errorMessage-based notice within moments of it appearing, leaving
+  // the panel looking fully live when it silently is not. This field is
+  // touched by exactly two call sites: setLiveUpdatesDegraded() (the
+  // subscribe attempt threw) and clearLiveUpdatesDegraded() (a later
+  // subscribe attempt succeeded). Nothing else -- not reset(), not
+  // loadPage(), not resolveSelection() -- writes it.
+  private liveUpdatesDegradedMessage = "";
+
   // Bumped only by reset() (an external invalidating event: reload, or the
   // connection changing). loadPage() captures it before the await and
   // discards its result on both the success and the rejection path if it
@@ -76,12 +91,24 @@ export class ConceptPanelState<T> {
     return this.errorMessage;
   }
 
+  get liveUpdatesError(): string {
+    return this.liveUpdatesDegradedMessage;
+  }
+
   // reset clears the row list, cursor, selection, detail, and error, and
   // invalidates both generations. Call on an explicit reload and on every
   // connection state change -- a fresh cluster (or a reconnect to the same
   // one) must not let a stale response from the old connection paint this
   // panel, and must not go on showing that old connection's rows while a
   // fresh load is in flight.
+  //
+  // Deliberately does NOT touch liveUpdatesDegradedMessage. reset() fires on
+  // every connection state change, including transient ones ("connecting")
+  // that are not yet a resolved subscribe attempt -- clearing the notice
+  // here would flash it away before the caller even knows whether the new
+  // connection's subscribe will succeed. Only setLiveUpdatesDegraded() /
+  // clearLiveUpdatesDegraded() touch that field, so it survives exactly
+  // until a subscribe attempt actually resolves.
   reset(): void {
     this.listGeneration++;
     this.selectionGeneration++;
@@ -90,6 +117,20 @@ export class ConceptPanelState<T> {
     this.selection = undefined;
     this.rowDetail = null;
     this.errorMessage = "";
+  }
+
+  // setLiveUpdatesDegraded / clearLiveUpdatesDegraded record whether the CDC
+  // subscription behind live refresh is currently up. Unlike errorMessage,
+  // nothing else in this class writes liveUpdatesDegradedMessage -- a
+  // successful loadPage() or resolveSelection() must NOT silently erase a
+  // "live updates are off" notice just because an unrelated ordinary query
+  // happened to succeed on the same connection.
+  setLiveUpdatesDegraded(message: string): void {
+    this.liveUpdatesDegradedMessage = message;
+  }
+
+  clearLiveUpdatesDegraded(): void {
+    this.liveUpdatesDegradedMessage = "";
   }
 
   // setConnectionError records a synchronous "not connected" condition. It
