@@ -95,14 +95,20 @@ export const RUNNABLE_CONSTRUCTS_METHOD = "memql/runnableConstructs";
 // Kind classification
 // -----------------------------------------------------------------------------
 
-// Which kinds B2 can actually run. Automations need a synthetic trigger event
-// and a step trace, which is B3 (memql#3310) -- the lens is rendered for them
-// so the developer can see the capability is coming, but it is wired to
-// nothing.
-export const B2_RUNNABLE_KINDS: readonly RunnableKind[] = ["query", "mutate", "logic", "tool"];
+// Which kinds get the GENERATED ARGUMENT FORM (state/argForm.ts), built from
+// the construct's own declared `args` block.
+//
+// An automation is the exception, and it is an exception about the DSL rather
+// than about this extension: an automation binds its whole triggering event as
+// `args` and reads `args.payload.<field>` freely, so there is no declared
+// payload schema and `memql/runnableConstructs` returns `args: []` for every
+// one of them. Generating a form from that would produce an empty form. Its
+// run surface is state/automationForm.ts (pick a row of the trigger concept,
+// or paste JSON) instead -- see memql#3310.
+export const ARG_FORM_RUNNABLE_KINDS: readonly RunnableKind[] = ["query", "mutate", "logic", "tool"];
 
-export function isB2Runnable(kind: RunnableKind): boolean {
-  return B2_RUNNABLE_KINDS.includes(kind);
+export function usesArgForm(kind: RunnableKind): boolean {
+  return ARG_FORM_RUNNABLE_KINDS.includes(kind);
 }
 
 // Session-define covers the plain construct family. A `tool` is a declaration
@@ -115,6 +121,12 @@ export function isSessionDefinable(kind: RunnableKind): boolean {
 
 // Write kinds take the non-local-cluster confirmation. Reads run freely.
 //
+// `automation` is here because an automation run is the LARGEST write this
+// extension can issue: it executes the automation's whole action chain --
+// writes, LLM calls, and any downstream automations those writes trigger --
+// so the "am I pointed at the right cluster" friction that a mutation earns,
+// an automation earns several times over.
+//
 // `logic` is deliberately NOT here even though a logic body can call a
 // mutation: the confirmation is friction against running against the wrong
 // window, not a permission system (the engine's per-row authorization remains
@@ -124,7 +136,7 @@ export function isSessionDefinable(kind: RunnableKind): boolean {
 // declared, not authored here, and the deployed handler's own authorization
 // applies.
 export function isWriteKind(kind: RunnableKind): boolean {
-  return kind === "mutate";
+  return kind === "mutate" || kind === "automation";
 }
 
 // -----------------------------------------------------------------------------
@@ -264,20 +276,36 @@ export interface RunTarget {
   args: RunnableArg[];
 }
 
+/**
+ * AutomationTarget is what the automation lens command carries.
+ *
+ * Deliberately NOT a RunTarget. An automation's `args` is always empty (there
+ * is no declared payload schema) and its `trigger` is the field that decides
+ * the entire form -- which payload modes are offered, and which concept the
+ * row picker browses. Carrying the B2 shape would mean an always-empty field
+ * plus a lost one. Like RunTarget it holds no live object references, so it
+ * survives the command-argument round trip VS Code performs.
+ */
+export interface AutomationTarget {
+  uri: string;
+  name: string;
+  trigger?: RunnableTrigger;
+}
+
 export interface LensPlan {
   range: LspRange;
   title: string;
   tooltip: string;
   command: string;
-  // Present for the two run commands; the "not available" lens carries a
-  // plain string reason instead.
+  // Exactly one of these is present, chosen by `command`: the arg-form kinds
+  // carry a RunTarget, an automation carries an AutomationTarget.
   target?: RunTarget;
-  reason?: string;
+  automationTarget?: AutomationTarget;
 }
 
 export const COMMAND_RUN = "memql.run.construct";
 export const COMMAND_RUN_WITH = "memql.run.constructWith";
-export const COMMAND_RUN_NOT_AVAILABLE = "memql.run.notAvailable";
+export const COMMAND_RUN_AUTOMATION = "memql.run.automation";
 
 // lensPlansFor turns the server's answer into the lens set for one document.
 //
@@ -292,20 +320,21 @@ export function lensPlansFor(
 ): LensPlan[] {
   const out: LensPlan[] = [];
   for (const c of constructs) {
-    if (!isB2Runnable(c.kind)) {
-      // Automations: the affordance is rendered so the signature does not
-      // look inert, but it is wired to a command that only explains itself.
-      // Building half an automation run here -- a Run button that quietly
-      // invoked the DEPLOYED automation, say -- would be worse than no
-      // button, because the developer would read the result as their buffer's.
+    if (!usesArgForm(c.kind)) {
+      // An automation gets ONE lens, and it opens the form rather than
+      // running anything: there is no declared payload schema, so there is no
+      // "just run it" that would not be the extension inventing an event.
+      // Even the schedule case -- which genuinely fires with an empty event --
+      // goes through the form, because that form is where the developer is
+      // told the DEPLOYED definition is what will run.
+      const automationTarget: AutomationTarget = { uri, name: c.name };
+      if (c.trigger !== undefined) automationTarget.trigger = c.trigger;
       out.push({
         range: c.signatureRange,
-        title: "Run (automations ship in B3)",
-        tooltip:
-          "Running an automation needs a synthetic trigger event and a step trace, which memql#3310 adds. This lens is not wired to anything yet.",
-        command: COMMAND_RUN_NOT_AVAILABLE,
-        reason:
-          `Running the automation "${c.name}" is not available yet. Automation run (a synthetic trigger event plus a step trace) ships in memql#3310.`,
+        title: "Run automation...",
+        tooltip: automationTooltip(c),
+        command: COMMAND_RUN_AUTOMATION,
+        automationTarget,
       });
       continue;
     }
@@ -339,4 +368,17 @@ function runTooltip(c: RunnableConstruct): string {
     return `Run this ${c.kind} against the selected cluster. ${required} required argument${required === 1 ? "" : "s"} -- the form opens when any is unset.`;
   }
   return `Run this ${c.kind} against the selected cluster, from this buffer, without saving.`;
+}
+
+// The automation tooltip says the deployed definition runs BEFORE the click,
+// as the tool one does -- by the time the result banner is on screen the
+// developer has already read the trace.
+function automationTooltip(c: RunnableConstruct): string {
+  const where =
+    c.trigger?.schedule !== undefined && c.trigger.schedule !== "" && (c.trigger.event ?? "") === ""
+      ? "It is time-driven, so the run fires it now with an empty event."
+      : c.trigger?.concept !== undefined && c.trigger.concept !== ""
+        ? `Build the trigger event from a row of ${c.trigger.concept}, or paste one.`
+        : "Build the trigger event by pasting its payload.";
+  return `Run the DEPLOYED automation with a synthetic trigger event. An automation cannot be session-defined, so this never runs your buffer. ${where}`;
 }

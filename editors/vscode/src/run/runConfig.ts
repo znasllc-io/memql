@@ -33,6 +33,32 @@ export function runConfigPath(workspaceRoot: string): string {
   return path.join(workspaceRoot, RUN_CONFIG_RELATIVE_PATH);
 }
 
+/**
+ * The automation half of a run configuration (memql#3310).
+ *
+ * An automation has no declared `args` block, so `args` cannot carry what its
+ * run needs -- the synthetic trigger event, and where to run it. This is the
+ * SAME configuration shape with one optional block added rather than a second
+ * parallel file, so one Runs tree, one reader, one writer and one format serve
+ * both: a repository ships `.memql/runs.json` and a newcomer gets every
+ * runnable thing the codebase cares about, automations included.
+ *
+ * Present only on `kind: "automation"` entries. An entry of any other kind
+ * that carries one is still valid -- the block is simply unread -- because
+ * dropping an otherwise-good configuration over an ignorable extra field would
+ * punish the hand-editing the plain-text format exists to invite.
+ */
+export interface AutomationRunConfig {
+  /** The synthesized trigger event's payload. Absent means fire-now with an empty event. */
+  payload?: Record<string, unknown>;
+  /** The concept the payload row belongs to, when the trigger pattern is a glob. */
+  concept?: string;
+  /** "" or absent runs on the node that receives the request; anything else is a mesh hop. */
+  targetNodeType?: string;
+  /** Attach each step's own output to its trace entry. */
+  includeStepOutput?: boolean;
+}
+
 export interface RunConfig {
   /** Unique within the file; the identity an update or delete resolves by. */
   name: string;
@@ -46,8 +72,10 @@ export interface RunConfig {
    * that file so the run injects the buffer.
    */
   file?: string;
-  /** The filled argument values, keyed by declared arg name. */
+  /** The filled argument values, keyed by declared arg name. Always `{}` for an automation. */
   args: Record<string, unknown>;
+  /** The automation run's trigger event and routing. See AutomationRunConfig. */
+  automation?: AutomationRunConfig;
 }
 
 export interface RunConfigFile {
@@ -136,6 +164,13 @@ function parseOne(raw: unknown): RunConfig | undefined {
   if (args !== undefined && (args === null || typeof args !== "object" || Array.isArray(args))) {
     return undefined;
   }
+  // The automation block is validated the same way as everything else: a
+  // malformed one DROPS THE ENTRY rather than being silently ignored. Ignoring
+  // it would run the automation with an empty event -- a different run from the
+  // one the file describes, and one with real side effects.
+  const automation = parseAutomationBlock(r.automation);
+  if (automation === INVALID) return undefined;
+
   const out: RunConfig = {
     name: name.trim(),
     kind: kind as RunnableKind,
@@ -143,6 +178,39 @@ function parseOne(raw: unknown): RunConfig | undefined {
     args: (args as Record<string, unknown> | undefined) ?? {},
   };
   if (typeof r.file === "string" && r.file !== "") out.file = r.file;
+  if (automation !== undefined) out.automation = automation;
+  return out;
+}
+
+// A sentinel distinct from `undefined`, which means "no block was present".
+// Returning undefined for a malformed block would make "the author wrote
+// nothing" and "the author wrote something wrong" the same answer.
+const INVALID = Symbol("invalid automation block");
+
+function parseAutomationBlock(raw: unknown): AutomationRunConfig | undefined | typeof INVALID {
+  if (raw === undefined) return undefined;
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return INVALID;
+  const a = raw as Record<string, unknown>;
+
+  // payload must be a JSON OBJECT: the wire field is a struct, so an array or
+  // a scalar cannot be carried as an event payload at all.
+  if (
+    a.payload !== undefined &&
+    (a.payload === null || typeof a.payload !== "object" || Array.isArray(a.payload))
+  ) {
+    return INVALID;
+  }
+  if (a.concept !== undefined && typeof a.concept !== "string") return INVALID;
+  if (a.targetNodeType !== undefined && typeof a.targetNodeType !== "string") return INVALID;
+  if (a.includeStepOutput !== undefined && typeof a.includeStepOutput !== "boolean") return INVALID;
+
+  const out: AutomationRunConfig = {};
+  if (a.payload !== undefined) out.payload = a.payload as Record<string, unknown>;
+  if (typeof a.concept === "string" && a.concept !== "") out.concept = a.concept;
+  if (typeof a.targetNodeType === "string" && a.targetNodeType !== "") {
+    out.targetNodeType = a.targetNodeType;
+  }
+  if (a.includeStepOutput === true) out.includeStepOutput = true;
   return out;
 }
 
@@ -162,6 +230,12 @@ export function serializeRunConfigFile(file: RunConfigFile): string {
       for (const key of Object.keys(r.args).sort()) args[key] = r.args[key];
       const out: RunConfig = { name: r.name, kind: r.kind, construct: r.construct, args };
       if (r.file !== undefined) out.file = r.file;
+      // The payload's own keys are NOT sorted. They mirror a trigger event --
+      // often a row copied out of the Concepts picker -- and reordering them
+      // would make the saved configuration stop looking like the thing it is a
+      // copy of. The churn `args` sorting prevents does not arise here either:
+      // a payload is written whole, not assembled field by field by a form.
+      if (r.automation !== undefined) out.automation = r.automation;
       return out;
     }),
   };

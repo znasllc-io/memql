@@ -16,7 +16,6 @@
 import * as vscode from "vscode";
 
 import {
-  COMMAND_RUN_NOT_AVAILABLE,
   RUNNABLE_CONSTRUCTS_CAPABILITY,
   RUNNABLE_CONSTRUCTS_METHOD,
   lensPlansFor,
@@ -83,11 +82,14 @@ export class RunnableCodeLensProvider implements vscode.CodeLensProvider {
       // placeholder until a resolveCodeLens this provider does not implement
       // fills it in. Everything is already in hand, so there is nothing to
       // defer.
+      // Exactly one target shape is present, chosen by the plan's command: an
+      // automation carries an AutomationTarget (trigger, no args), everything
+      // else a RunTarget. The plan decides; this only forwards.
       const command: vscode.Command = {
         title: plan.title,
         command: plan.command,
         tooltip: plan.tooltip,
-        arguments: plan.command === COMMAND_RUN_NOT_AVAILABLE ? [plan.reason] : [plan.target],
+        arguments: [plan.automationTarget ?? plan.target],
       };
       return new vscode.CodeLens(toRange(plan.range), command);
     });
