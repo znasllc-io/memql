@@ -8,11 +8,14 @@ import {
   TransportKind,
 } from 'vscode-languageclient/node';
 
+import type { Concept } from '@znasllc-io/memql-sdk-core/client';
+
 import { defaultClustersPath, readClustersFile, setSelectedCluster, upsertCluster } from './clusters/file.js';
 import type { ClusterConfig } from './clusters/model.js';
 import { ConnectionManager } from './connection/manager.js';
 import { ClustersTreeProvider, type ClusterNode } from './views/clustersTree.js';
 import { ConceptsTreeProvider } from './views/conceptsTree.js';
+import { ConceptPanel } from './webview/conceptPanel.js';
 
 let client: LanguageClient | undefined;
 let connections: ConnectionManager | undefined;
@@ -114,6 +117,15 @@ function registerRuntimeSurface(context: ExtensionContext): void {
   context.subscriptions.push(
     window.registerTreeDataProvider('memqlConcepts', conceptsTree),
     commands.registerCommand('memql.concepts.refresh', () => conceptsTree.refresh())
+  );
+
+  context.subscriptions.push(
+    commands.registerCommand('memql.concepts.open', (concept: Concept) => {
+      if (connections === undefined) {
+        return;
+      }
+      ConceptPanel.open(context, connections, concept);
+    })
   );
 
   context.subscriptions.push(

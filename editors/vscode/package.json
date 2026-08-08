@@ -128,7 +128,8 @@
       { "command": "memql.clusters.add", "title": "memQL: Add Cluster", "icon": "$(add)" },
       { "command": "memql.clusters.edit", "title": "memQL: Edit Cluster", "icon": "$(edit)" },
       { "command": "memql.clusters.disconnect", "title": "memQL: Disconnect" },
-      { "command": "memql.concepts.refresh", "title": "memQL: Refresh Concepts", "icon": "$(refresh)" }
+      { "command": "memql.concepts.refresh", "title": "memQL: Refresh Concepts", "icon": "$(refresh)" },
+      { "command": "memql.concepts.open", "title": "memQL: Open Concept" }
     ],
     "menus": {
       "view/title": [
