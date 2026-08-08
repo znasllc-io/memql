@@ -156,6 +156,100 @@ export interface RevokeBadgePayload {
   identityId: string;
 }
 
+// Deploy control (memql#3311). DeployControlService is a separate
+// UNARY gRPC service on the same listener, which a browser cannot dial
+// -- so the whole deploy surface rides ONE bridged envelope on
+// MemqlService.Stream instead. Exactly one request field is set; the
+// inner shapes are the DeployControlService request messages verbatim
+// (component/grpc/deploy_control.proto), reused rather than
+// re-declared so the streamed and unary surfaces cannot drift.
+
+export interface DeployControlEnvPayload {
+  env: string; // "staging" | "prod"
+}
+
+export interface DeployControlVersionPayload {
+  version: string;
+}
+
+export interface DeployControlRollbackPayload {
+  env: string;
+  commitSha: string;
+}
+
+export interface DeployControlRolloutActionPayload {
+  env: string;
+  rollout: string;
+  action: string; // "promote" | "abort"
+}
+
+export interface DeployControlCutVersionPayload {
+  env: string;
+  bump?: string; // "major" | "minor" | "patch"; empty defaults to patch
+  version?: string; // explicit override; when set, bump is ignored
+}
+
+export interface DeployControlDeployPayload {
+  deploymentId: string;
+}
+
+export interface DeployControlRollbackDeploymentPayload {
+  toDeploymentId: string;
+}
+
+export type DeployControlRequestPayload =
+  | { getDeploymentStatus: DeployControlEnvPayload }
+  | { suggestNextVersion: DeployControlEnvPayload }
+  | { deployStaging: DeployControlVersionPayload }
+  | { promote: DeployControlVersionPayload }
+  | { rollback: DeployControlRollbackPayload }
+  | { rolloutAction: DeployControlRolloutActionPayload }
+  | { cutVersion: DeployControlCutVersionPayload }
+  | { deploy: DeployControlDeployPayload }
+  | { rollbackDeployment: DeployControlRollbackDeploymentPayload };
+
+export type DeployControlPayload = { requestId: string } & DeployControlRequestPayload;
+
+// -----------------------------------------------------------------------------
+// Automation run (memql#3310)
+// -----------------------------------------------------------------------------
+
+// RunAutomationMsg -- synthesize a trigger event for a named automation,
+// dispatch it through the normal automation path, and stream back a step
+// trace. Mirrors MemqlClientMessage oneof slot 102.
+export interface RunAutomationPayload {
+  requestId: string;
+  automation: string;
+  // The synthesized trigger event payload (google.protobuf.Struct -> plain
+  // object). Omit for a @trigger(schedule=...) automation, which fires now
+  // with an empty event.
+  payload?: Record<string, unknown>;
+  concept?: string;
+  topic?: string;
+  targetNodeType?: string;
+  timeoutMs?: number;
+  includeStepOutput?: boolean;
+}
+
+// Authoring -- validate + session-define a .memql bundle (memql#2128 / C1,
+// consumed by the VS Code run loop in memql#3309).
+//
+// `sources` is a bundle STRING -- one or more constructs concatenated -- and
+// the engine slices it into (kind, name, source) constructs itself. There is
+// no per-file structure on the wire, which is why a consumer that assembles a
+// bundle from several editor buffers has to keep its own file/line offset
+// table to map diagnostics back (see AuthoringDiagnosticWire.line).
+
+export interface AuthoringValidateBundlePayload {
+  requestId: string;
+  sources: string;
+}
+
+export interface AuthoringSessionDefineBundlePayload {
+  requestId: string;
+  sources: string;
+}
+
 // Polyphon -- LiveKit room token request. The room name + LiveKit
 // URL come back in the reply so the consumer can hand them to the
 // LiveKit client SDK without a separate config call.
@@ -274,6 +368,10 @@ type ClientPayload =
   | { createBadge: CreateBadgePayload }
   | { revokeBadge: RevokeBadgePayload }
   | { polyphonRoomToken: PolyphonRoomTokenPayload }
+  | { deployControl: DeployControlPayload }
+  | { runAutomation: RunAutomationPayload }
+  | { authoringValidateBundle: AuthoringValidateBundlePayload }
+  | { authoringSessionDefineBundle: AuthoringSessionDefineBundlePayload }
   | { listTools: ListToolsPayload }
   | { callTool: CallToolPayload }
   | { clientToolResult: ClientToolResultPayload };
@@ -505,6 +603,182 @@ export interface RevokeBadgeResultPayload {
   errorMessage?: string;
 }
 
+// Deploy-control reply (memql#3311). A unary DeployControlService call
+// fails by returning a gRPC status error; a multiplexed stream has no
+// per-message status channel, so the status is carried IN the envelope.
+// errorCode is the canonical gRPC code (0 = OK, 7 = PERMISSION_DENIED,
+// ...) and protojson OMITS it when zero, so absent means OK.
+
+export interface DeployComponentDigestWire {
+  name?: string;
+  digest?: string;
+  repo?: string;
+}
+
+export interface DeployArgoStatusWire {
+  syncStatus?: string;
+  healthStatus?: string;
+  lastSyncRevision?: string;
+  lastSyncAt?: string;
+  outOfSync?: boolean;
+}
+
+export interface DeployRolloutStatusWire {
+  name?: string;
+  kind?: string; // "bluegreen" | "canary"
+  phase?: string;
+  activeColor?: string;
+  previewColor?: string;
+  canaryWeight?: number;
+  currentStep?: number;
+  latestAnalysisResult?: string;
+}
+
+export interface DeployGateLegWire {
+  name?: string;
+  passed?: boolean;
+  detail?: string;
+}
+
+export interface DeployGateResultWire {
+  result?: string; // "pass" | "fail" | "unknown"
+  legs?: DeployGateLegWire[];
+  ranAt?: string;
+}
+
+export interface DeploymentStatusWire {
+  env?: string;
+  version?: string;
+  engineVersion?: string;
+  validatedAt?: string;
+  gate?: string;
+  components?: DeployComponentDigestWire[];
+  argocd?: DeployArgoStatusWire;
+  rollouts?: DeployRolloutStatusWire[];
+  gateResult?: DeployGateResultWire;
+}
+
+export interface SuggestNextVersionResultWire {
+  currentVersion?: string;
+  nextMajor?: string;
+  nextMinor?: string;
+  nextPatch?: string;
+  source?: string; // "deployment" | "overlay" | "none"
+}
+
+export interface DeployActionResultWire {
+  ok?: boolean;
+  message?: string;
+  auditEventId?: string;
+  correlationId?: string;
+  details?: Record<string, string>;
+}
+
+export interface DeployControlResultPayload {
+  requestId?: string;
+  // ok is true when the RPC returned without a status error. It is NOT
+  // the action's own success -- a write that ran and failed is ok here
+  // with action.ok false, exactly as the unary path behaves.
+  ok?: boolean;
+  errorCode?: number;
+  errorMessage?: string;
+  deploymentStatus?: DeploymentStatusWire;
+  nextVersion?: SuggestNextVersionResultWire;
+  action?: DeployActionResultWire;
+}
+
+// AutomationRunEvent -- one frame of a run's streamed trace. Mirrors
+// MemqlServerMessage oneof slot 124.
+//
+// Exactly one of accepted / step / complete is set. Every run opens with
+// accepted and closes with exactly one complete, INCLUDING a run that was
+// refused outright -- so a caller can always park on complete.
+export interface AutomationRunEventPayload {
+  requestId?: string;
+  runId?: string;
+  accepted?: AutomationRunAcceptedWire;
+  step?: AutomationRunStepWire;
+  complete?: AutomationRunCompleteWire;
+}
+
+export interface AutomationRunAcceptedWire {
+  automation?: string;
+  // Always true. It is a FIELD rather than a comment because the UI has to
+  // state that the deployed definition ran, not the caller's buffer:
+  // session-define does not cover automations.
+  ranDeployedDefinition?: boolean;
+  definitionNote?: string;
+  triggerKind?: string;
+  triggerTopic?: string;
+  requestedOnNodeId?: string;
+  requestedOnNodeType?: string;
+  targetNodeType?: string;
+}
+
+export interface AutomationRunStepWire {
+  sequence?: number;
+  stepId?: string;
+  status?: string;
+  durationMs?: number | string;
+  output?: Record<string, unknown>;
+  error?: string;
+}
+
+export interface AutomationRunCompleteWire {
+  status?: string;
+  durationMs?: number | string;
+  stepCount?: number;
+  error?: string;
+  errorCode?: number;
+  errorMessage?: string;
+  executedOnNodeId?: string;
+  executedOnNodeType?: string;
+}
+
+// Authoring reply envelopes (memql#2128 / C1).
+//
+// AuthoringDiagnosticWire's four position fields are 1-based and expressed in
+// BUNDLE-FILE coordinates -- the source the caller submitted, before the
+// sandbox slices and lowers it. All four are ZERO when the engine could not
+// compute a reliable position, and the engine deliberately emits no position
+// rather than a wrong one (memql#2375). A consumer MUST therefore read 0 as
+// "no position" and never as line 0 / column 0, or every positionless
+// diagnostic lands on the first line of the first file in the bundle.
+//
+// `skipped` constructs (a kind this pass does not compile) report ok=false
+// AND skipped=true, and do NOT fail the bundle -- so "is this a failure" is
+// `!ok && !skipped`, never `!ok`.
+export interface AuthoringDiagnosticWire {
+  name?: string;
+  kind?: string;
+  ok?: boolean;
+  skipped?: boolean;
+  error?: string;
+  line?: number;
+  column?: number;
+  endLine?: number;
+  endColumn?: number;
+}
+
+export interface AuthoringConstructWire {
+  kind?: string;
+  name?: string;
+}
+
+export interface AuthoringValidateBundleResultPayload {
+  requestId?: string;
+  ok?: boolean;
+  diagnostics?: AuthoringDiagnosticWire[];
+}
+
+export interface AuthoringSessionDefineBundleResultPayload {
+  requestId?: string;
+  ok?: boolean;
+  defined?: AuthoringConstructWire[];
+  diagnostics?: AuthoringDiagnosticWire[];
+  error?: string;
+}
+
 // expiresAt is int64 unix seconds -- protojson encodes int64 as
 // either string or number depending on the runtime. We accept both.
 export interface PolyphonRoomTokenResultPayload {
@@ -633,6 +907,10 @@ type ServerPayload =
   | { createBadgeResult: CreateBadgeResultPayload }
   | { revokeBadgeResult: RevokeBadgeResultPayload }
   | { polyphonRoomTokenResult: PolyphonRoomTokenResultPayload }
+  | { deployControlResult: DeployControlResultPayload }
+  | { automationRunEvent: AutomationRunEventPayload }
+  | { authoringValidateBundleResult: AuthoringValidateBundleResultPayload }
+  | { authoringSessionDefineBundleResult: AuthoringSessionDefineBundleResultPayload }
   | { listToolsResult: ListToolsResultPayload }
   | { callToolResult: CallToolResultPayload }
   | { clientToolCall: ClientToolCallPayload };
@@ -668,6 +946,10 @@ export function readServerPayload(msg: ServerMessage):
   | { kind: "createBadgeResult"; value: CreateBadgeResultPayload }
   | { kind: "revokeBadgeResult"; value: RevokeBadgeResultPayload }
   | { kind: "polyphonRoomTokenResult"; value: PolyphonRoomTokenResultPayload }
+  | { kind: "deployControlResult"; value: DeployControlResultPayload }
+  | { kind: "automationRunEvent"; value: AutomationRunEventPayload }
+  | { kind: "authoringValidateBundleResult"; value: AuthoringValidateBundleResultPayload }
+  | { kind: "authoringSessionDefineBundleResult"; value: AuthoringSessionDefineBundleResultPayload }
   | { kind: "listToolsResult"; value: ListToolsResultPayload }
   | { kind: "callToolResult"; value: CallToolResultPayload }
   | { kind: "clientToolCall"; value: ClientToolCallPayload }
@@ -737,6 +1019,20 @@ export function readServerPayload(msg: ServerMessage):
       kind: "polyphonRoomTokenResult",
       value: m.polyphonRoomTokenResult as PolyphonRoomTokenResultPayload,
     };
+  if (m.deployControlResult)
+    return { kind: "deployControlResult", value: m.deployControlResult as DeployControlResultPayload };
+  if (m.automationRunEvent)
+    return { kind: "automationRunEvent", value: m.automationRunEvent as AutomationRunEventPayload };
+  if (m.authoringValidateBundleResult)
+    return {
+      kind: "authoringValidateBundleResult",
+      value: m.authoringValidateBundleResult as AuthoringValidateBundleResultPayload,
+    };
+  if (m.authoringSessionDefineBundleResult)
+    return {
+      kind: "authoringSessionDefineBundleResult",
+      value: m.authoringSessionDefineBundleResult as AuthoringSessionDefineBundleResultPayload,
+    };
   if (m.listToolsResult)
     return { kind: "listToolsResult", value: m.listToolsResult as ListToolsResultPayload };
   if (m.callToolResult)
@@ -762,5 +1058,9 @@ export function streamRequestId(msg: ServerMessage): string {
   if (m.aiTranscribeStreamComplete?.requestId) return m.aiTranscribeStreamComplete.requestId;
   if (m.aiChunk?.requestId) return m.aiChunk.requestId;
   if (m.aiChatResult?.requestId) return m.aiChatResult.requestId;
+  // Automation run (memql#3310). A run is many frames correlated by
+  // request_id -- accepted, then one per step, then exactly one complete --
+  // so it routes here rather than through the single-reply `pending` map.
+  if (m.automationRunEvent?.requestId) return m.automationRunEvent.requestId;
   return "";
 }

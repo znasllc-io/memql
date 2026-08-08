@@ -283,6 +283,57 @@ func (s *Scheduler) TriggerAutomationWithEvent(ctx context.Context, name string,
 	return s.eventExecutor.ExecuteWithEvent(ctx, automation, "http-trigger", event)
 }
 
+// LookupAutomation returns the automation the scheduler REGISTERED under name,
+// or nil. It is the deployed definition -- the same object the bus subscription
+// and the cron entry hold -- which is exactly what the run path (memql#3310)
+// must report on, since session-define does not cover automations and there is
+// therefore never a caller-supplied body to prefer.
+//
+// Distinct from Loader.LoadByName, which re-reads the tree and can resolve a
+// name the scheduler did not register (a disabled automation, a wrapped logic
+// construct). Callers that want "what would fire if this event happened" want
+// this one.
+func (s *Scheduler) LookupAutomation(name string) *Automation {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.automations[name]
+}
+
+// TriggerAutomationWithClientEvent runs a named automation with a synthetic
+// event whose PAYLOAD CAME FROM A CALLER, and is the entry point the stream's
+// run path (memql#3310) uses.
+//
+// The distinction from TriggerAutomationWithEvent is a security boundary, not
+// a naming preference. Trust rides on where the automation's BODY came from
+// (memql#2800) AND on whether the caller supplied the trigger payload
+// (memql#2888): a trusted body driven by a caller-chosen argument still must
+// not reach a @serverOnly construct, because for a @serverOnly construct the
+// argument IS the authorization decision. ExecuteWithClientEvent stamps client
+// origin for exactly that reason, and persists the fact onto any checkpoint the
+// run mints so a later resume cannot promote it back to internal origin.
+//
+// The MCP run_automation path made the same choice for the same reason. Any
+// new caller-driven invoke path belongs here rather than on
+// TriggerAutomationWithEvent -- if you find yourself reaching for that one
+// from a request handler, this comment is the reason not to.
+//
+// Uses the EVENT executor, so a run is subject to the same per-process dedup
+// and cross-replica claim a real trigger is. That is deliberate: an operator
+// firing the same run twice in a few seconds is far more likely to be a
+// double-click than an intentional second execution, and the dedup window
+// makes the invoke path behave like the trigger path it is standing in for.
+func (s *Scheduler) TriggerAutomationWithClientEvent(ctx context.Context, name string, event *events.Event) (*AutomationExecution, error) {
+	s.mu.RLock()
+	automation, ok := s.automations[name]
+	s.mu.RUnlock()
+
+	if !ok {
+		return nil, fmt.Errorf("automation %q not found", name)
+	}
+
+	return s.eventExecutor.ExecuteWithClientEvent(ctx, automation, "run:client", event)
+}
+
 // GetAutomations returns all loaded automations.
 func (s *Scheduler) GetAutomations() []*Automation {
 	s.mu.RLock()
@@ -485,32 +536,7 @@ func (s *Scheduler) subscribeToEventTrigger(automation *Automation) error {
 
 		// Optionally evaluate filter condition
 		if a.Trigger.Filter != "" {
-			evaluator := NewEvaluator()
-			// An event trigger fires from the bus, not from a request --
-			// there is provably no caller, so the actor envelope denies
-			// (memql#2801). Without it `@filter(actor.isClusterOwner !=
-			// false)` read TRUE off the unbound path text.
-			bindNoCallerActorEnvelope(evaluator)
-			// Shared envelope builder so @filter sees the same event shape
-			// as step bodies (incl. event.actor / event.timestamp, G4).
-			eventMap := buildEventEnvelope(&event, "", "")
-			evaluator.SetCustom("event", eventMap)
-			// The @filter evaluates with the validated `args` binding
-			// available (ADR Decision 2) alongside the existing event root;
-			// validation has already run above.
-			if bound != nil {
-				evaluator.SetCustom("args", bound)
-				// G2 (memql#2364): see executor.go -- declared set enables
-				// bare nil-resolution for absent optional fields in @filter.
-				evaluator.SetCustom("argsDeclared", declaredArgsSet(a))
-			}
-			evaluator.SetCustom("ctx", map[string]any{
-				"input":  eventMap,
-				"output": nil,
-				"error":  "",
-			})
-
-			shouldRun, err := evaluator.EvaluateCondition(a.Trigger.Filter)
+			shouldRun, err := evaluateTriggerFilter(a, &event, bound)
 			if err != nil {
 				s.logWarn("event trigger filter evaluation failed",
 					"automation", a.Name,
@@ -541,6 +567,50 @@ func (s *Scheduler) subscribeToEventTrigger(automation *Automation) error {
 	s.mu.Unlock()
 
 	return nil
+}
+
+// evaluateTriggerFilter evaluates an automation's `@filter(...)` against a
+// triggering event, with `bound` being the validated `args` binding
+// bindEventArgs already produced (nil when the automation declares no args
+// contract).
+//
+// Extracted from the bus subscriber above so the operator-initiated run path
+// (RunRelay, memql#3310) asks the SAME question the bus asks. A run that
+// skipped the filter would report "the automation ran" for an event the real
+// trigger would have discarded -- the invoke path exists to answer "would this
+// event drive this automation, and what would it do", and half of that answer
+// is the filter.
+func evaluateTriggerFilter(a *Automation, event *events.Event, bound map[string]any) (bool, error) {
+	if a == nil || a.Trigger == nil || a.Trigger.Filter == "" {
+		return true, nil
+	}
+
+	evaluator := NewEvaluator()
+	// An event trigger fires from the bus, not from a request --
+	// there is provably no caller, so the actor envelope denies
+	// (memql#2801). Without it `@filter(actor.isClusterOwner !=
+	// false)` read TRUE off the unbound path text.
+	bindNoCallerActorEnvelope(evaluator)
+	// Shared envelope builder so @filter sees the same event shape
+	// as step bodies (incl. event.actor / event.timestamp, G4).
+	eventMap := buildEventEnvelope(event, "", "")
+	evaluator.SetCustom("event", eventMap)
+	// The @filter evaluates with the validated `args` binding
+	// available (ADR Decision 2) alongside the existing event root;
+	// validation has already run by the time we get here.
+	if bound != nil {
+		evaluator.SetCustom("args", bound)
+		// G2 (memql#2364): see executor.go -- declared set enables
+		// bare nil-resolution for absent optional fields in @filter.
+		evaluator.SetCustom("argsDeclared", declaredArgsSet(a))
+	}
+	evaluator.SetCustom("ctx", map[string]any{
+		"input":  eventMap,
+		"output": nil,
+		"error":  "",
+	})
+
+	return evaluator.EvaluateCondition(a.Trigger.Filter)
 }
 
 func (s *Scheduler) executeAutomation(automation *Automation, triggeredBy string, event *events.Event) {

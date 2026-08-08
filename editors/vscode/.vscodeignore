@@ -1,11 +1,15 @@
 .vscode/**
 src/**
 test/**
+test-host/**
 dist-test/**
+dist-host/**
 tsconfig.json
 tsconfig.test.json
+tsconfig.host.json
 esbuild.js
 esbuild.test.js
+esbuild.host.js
 **/*.map
 **/*.ts
 .gitignore

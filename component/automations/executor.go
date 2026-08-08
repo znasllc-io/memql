@@ -643,6 +643,10 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 				exec.AddStepResult(skipResult)
 				// Make skipped steps visible to later step conditions ($steps.<id>.status).
 				evaluator.SetStepResult(step.ID, skipResult)
+				// A skipped step is a first-class trace entry: "this step did
+				// not run, and here is the condition that decided that" is
+				// most of what a caller wants from a run that did nothing.
+				notifyStepObserver(ctx, skipResult)
 				continue
 			}
 		}
@@ -668,6 +672,7 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 
 			exec.AddStepResult(result)
 			evaluator.SetStepResult(step.ID, result)
+			notifyStepObserver(ctx, result)
 		}
 
 		if err != nil {
@@ -706,6 +711,7 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 						}
 						exec.AddStepResult(result)
 						evaluator.SetStepResult(step.ID, result)
+						notifyStepObserver(ctx, result)
 						retried = true
 					}
 				}

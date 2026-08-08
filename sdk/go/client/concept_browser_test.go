@@ -133,3 +133,52 @@ func TestBrowseConcept_RequiresConceptId(t *testing.T) {
 		t.Error("BrowseConceptPage(\"\"): want error")
 	}
 }
+
+// TestGetRowByConceptAndId_UsesCanonicalAndConnective pins the filter this
+// SDK emits for a single-row lookup.
+//
+// The two clauses used to be joined with the legacy `;`-AND separator, which
+// memql#971 retired in favour of the one Go boolean grammar -- and which the
+// TS SDK's getRowByConceptAndId had already moved to. Nothing downstream
+// noticed, because both spellings still parse; that is exactly why it needs a
+// test rather than a comment. Two SDKs spelling the same two-clause filter
+// differently is a difference every reader has to stop and confirm is not
+// meaningful.
+func TestGetRowByConceptAndId_UsesCanonicalAndConnective(t *testing.T) {
+	stream := newMockStream()
+	d := NewDispatcher(stream, nil)
+	go d.Run()
+	defer d.Stop()
+	qc := NewQueryClient(d)
+
+	go func() { _, _ = qc.GetRowByConceptAndId(context.Background(), "v1:agents:agent", "a1") }()
+
+	sent := <-stream.sendCh
+	q := sent.GetExecuteQuery()
+	if q == nil {
+		t.Fatalf("expected ExecuteQueryMsg payload, got %+v", sent.GetPayload())
+	}
+	wantQuery := "concept==v1:agents:agent && id==a1"
+	if q.GetQuery() != wantQuery {
+		t.Errorf("query: want %q, got %q (the retired `;`-AND form must not come back)", wantQuery, q.GetQuery())
+	}
+
+	// Drain so the dispatcher waiter completes cleanly.
+	stream.recvCh <- &memqlv1.MemqlServerMessage{
+		CorrelateTo: sent.GetMessageId(),
+		Payload: &memqlv1.MemqlServerMessage_QueryResult{
+			QueryResult: &memqlv1.QueryResultChunk{Result: &memqlv1.Result{}},
+		},
+	}
+}
+
+// TestGetRowByConceptAndId_RequiresBothIds guards the empty-argument errors.
+func TestGetRowByConceptAndId_RequiresBothIds(t *testing.T) {
+	qc := NewQueryClient(nil)
+	if _, err := qc.GetRowByConceptAndId(context.Background(), "", "a1"); err == nil {
+		t.Error("GetRowByConceptAndId(\"\", \"a1\"): want error")
+	}
+	if _, err := qc.GetRowByConceptAndId(context.Background(), "v1:agents:agent", ""); err == nil {
+		t.Error("GetRowByConceptAndId(concept, \"\"): want error")
+	}
+}

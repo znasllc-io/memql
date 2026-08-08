@@ -1150,6 +1150,84 @@ jobs:
       - name: package extension (build binary + compile + vsce package)
         run: bash scripts/vscode/package.sh --out="$RUNNER_TEMP/memql.vsix"
 
+  # VS Code EXTENSION DEVELOPMENT HOST smoke lane (memql#3302).
+  #
+  # Separate from `vscode-extension` because it is a different kind of test at a
+  # different cost: it downloads a real VS Code and launches Electron under
+  # xvfb, where that lane runs `node --test` over the modules that do not import
+  # `vscode` and finishes in seconds. Folding them together would make the fast
+  # lane slow and make an Electron startup problem look like a unit-test
+  # failure.
+  #
+  # WHY IT EXISTS AT ALL. Both defects the B1 review caught passed every one of
+  # the extension's automated tests and failed only against a real host: an
+  # unguarded `WebSocket.OPEN` dereference on a runtime with no global
+  # WebSocket, and a `createFileSystemWatcher` that silently never fired for a
+  # path outside the workspace. Neither is a logic bug, so no amount of unit
+  # testing reaches them. This lane asserts activation, manifest-to-registration
+  # command drift, the activity-bar contributions, the host runtime's WebSocket
+  # story, watching a path outside the workspace, and webview creation.
+  #
+  # THE MATRIX IS THE POINT, not thoroughness for its own sake. `1.91.0` is the
+  # manifest's declared `engines.vscode` floor -- Node 20, no global WebSocket,
+  # and a non-recursive watcher that never recovers from a missing base
+  # directory. It is where this bug class actually fires, and it caught a third
+  # instance of it on the lane's first run. `stable` is what users are on today.
+  # A green floor with a red stable (or the reverse) is a real answer either
+  # way, so fail-fast is off.
+  #
+  # NOT wrapped in scripts/ci/retry.sh: that script's own header says never to
+  # retry a test, because a retried flake is an invisible flake. Only the npm
+  # steps ahead of it -- the genuinely network-flaky part -- are retried.
+  vscode-extension-host:
+    name: vscode-extension-host
+    timeout-minutes: 25
+    needs: changes
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.vscode == 'true' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        vscode: ['1.91.0', 'stable']
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.26.5'
+          cache: true
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v4
+        with:
+          node-version: '20'
+      # Electron needs a display and a handful of shared libraries the runner
+      # image does not carry. libasound's package was renamed in Ubuntu 24.04
+      # (the t64 time_t transition), so both spellings are attempted rather than
+      # pinning the lane to one runner image generation.
+      - name: install Electron's runtime dependencies
+        run: |
+          sudo apt-get update
+          scripts/ci/retry.sh -- sudo apt-get install -y xvfb libnss3 libgbm1 libxkbfile1 libsecret-1-0
+          scripts/ci/retry.sh -- sudo apt-get install -y libasound2t64 \
+            || scripts/ci/retry.sh -- sudo apt-get install -y libasound2
+      - name: workspace dependencies (sdk/ts + sdk/ts-viewkit)
+        run: scripts/ci/retry.sh -- make vscode-deps
+      - name: extension dependencies
+        run: scripts/ci/retry.sh -- npm ci --no-audit --no-fund --prefix editors/vscode
+      # WITHOUT THIS BINARY THE LANE IS MEANINGLESS: activate() shows its
+      # "memql-lsp not found" message and returns before registering a single
+      # command, view, or watcher, so every case downstream of activation would
+      # fail for a reason unrelated to what it tests. Staged under the
+      # Node-named directory resolveServerPath() reads (process.platform /
+      # process.arch), not Go's GOOS/GOARCH. The runner refuses to start if it
+      # is missing, so this cannot silently degrade.
+      - name: build and stage memql-lsp
+        run: |
+          mkdir -p editors/vscode/bin/linux-x64
+          CGO_ENABLED=0 go build -o editors/vscode/bin/linux-x64/memql-lsp ./cmd/memql-lsp
+      - name: host smoke lane (VS Code ${{ matrix.vscode }})
+        env:
+          MEMQL_VSCODE_VERSION: ${{ matrix.vscode }}
+        run: bash scripts/vscode/host-test.sh --skip-deps
+
   # THE lane that makes the module boundary real (memql#3240, design D3).
   #
   # A `go.work` does NOT enforce the boundary. Under workspace mode a module
@@ -1328,6 +1406,7 @@ jobs:
       - conformance
       - db-tests
       - vscode-extension
+      - vscode-extension-host
       - module-boundaries
     runs-on: ubuntu-latest
     steps:

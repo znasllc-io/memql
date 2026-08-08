@@ -356,7 +356,7 @@ scale:
 # ---------------------------------------------------------------------------
 
 ##@ Test & SDK
-.PHONY: test test-v test-cover test-polyphon sdk-gen sdk-gen-check sdk-ts-install sdk-ts-typecheck dsl-lint viewkit-install viewkit-typecheck viewkit-test vscode-deps vscode-test
+.PHONY: test test-v test-cover test-polyphon sdk-gen sdk-gen-check sdk-ts-install sdk-ts-typecheck dsl-lint viewkit-install viewkit-typecheck viewkit-test vscode-deps vscode-test vscode-test-host
 
 ## Regenerate the typed SDK surface from the DSL tree. Reads every
 ## query / mutation / logic under dsl/**/*.memql and emits typed
@@ -467,9 +467,19 @@ vscode-deps:
 	cd sdk/ts-viewkit && npm ci --no-audit --no-fund && npm run build
 
 ## Run the VS Code extension's unit tests. Covers only modules that do not
-## import `vscode`; the API layer is exercised by packaging, not unit tests.
+## import `vscode`; the API layer is exercised by the host lane below.
 vscode-test: vscode-deps
 	cd editors/vscode && npm ci --no-audit --no-fund && npm test
+
+## Run the VS Code extension's Extension Development Host smoke lane
+## (memql#3302): downloads a real VS Code and asserts the host-only surface --
+## activation, command registration, the activity-bar views, the host runtime's
+## WebSocket story, a watcher on a path OUTSIDE the workspace, and webview
+## creation. Needs a display (falls back to xvfb-run when DISPLAY is unset).
+## Deliberately not folded into `vscode-test`, which stays fast and
+## Electron-free.
+vscode-test-host:
+	bash scripts/vscode/host-test.sh
 
 ## Run all tests
 test:

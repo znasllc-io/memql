@@ -78,6 +78,28 @@ fails.
 Press `F5` to launch an Extension Development Host, set `memql.lsp.serverPath`
 to your built binary, and open a folder of `.memql` files.
 
+### Testing
+
+```bash
+make vscode-test        # unit lane -- bare node --test, seconds, no Electron
+make vscode-test-host   # host smoke lane -- downloads and drives a real VS Code
+```
+
+The two lanes answer different questions. `vscode-test` covers the modules that
+do not import `vscode`; it is fast and dependency-light and must stay that way.
+`vscode-test-host` (`editors/vscode/test-host/`) launches a real Extension
+Development Host to assert what a unit test structurally cannot reach -- that
+activation survives the host's runtime, that every command the manifest
+contributes is actually registered, that the activity-bar contributions were
+accepted, that a file watcher fires for a path outside the workspace, and that
+each webview opens. It needs a display, and falls back to `xvfb-run` when
+`DISPLAY` is unset. CI runs it against both the declared `engines.vscode` floor
+and current stable, because that floor is where this bug class actually fires.
+
+Neither lane dials a cluster. Everything downstream of a connection is verified
+by hand against the [manual verification
+checklist](https://github.com/znasllc-io/memql/blob/main/docs/public/language/vscode-runtime-panel-verification.md).
+
 ## Settings
 
 - `memql.lsp.serverPath` -- absolute path to the `memql-lsp` binary.
