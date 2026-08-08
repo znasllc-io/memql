@@ -91,9 +91,10 @@ function build_server_binary() {
 }
 
 function install_dependencies() {
-    echo "INFO: building the file: workspace dependencies the extension compiles against"
-    ( cd "$REPO_ROOT/sdk/ts" && npm install --no-audit --no-fund && npm run build )
-    ( cd "$REPO_ROOT/sdk/ts-viewkit" && npm ci --no-audit --no-fund && npm run build )
+    # The file: workspace deps are built by the shared script, which every lane
+    # that compiles the extension calls. Keeping a private copy of that recipe
+    # here is what let package.sh be written without one (memql#3340).
+    bash "$REPO_ROOT/scripts/vscode/deps.sh"
     ( cd "$EXT_DIR" && npm ci --no-audit --no-fund )
 }
 
