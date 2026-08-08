@@ -122,7 +122,33 @@ export async function setSelectedCluster(file: string, name: string): Promise<vo
   await saveDocument(file, doc);
 }
 
-export async function upsertCluster(file: string, cluster: ClusterConfig): Promise<void> {
+function findByName(seq: YAMLSeq, name: string): YAMLMap | undefined {
+  return seq.items.find((item) => {
+    const map = item as YAMLMap;
+    return typeof map?.get === "function" && map.get("name", false) === name;
+  }) as YAMLMap | undefined;
+}
+
+// upsertCluster writes `cluster` into the registry.
+//
+// `originalName` identifies WHICH node to update, and must be supplied by an
+// edit flow whose name field the user can change. Without it the node is
+// matched by the NEW name, so renaming during an edit matched nothing and
+// appended a SECOND entry -- leaving the original orphaned and possibly still
+// referenced by selected_cluster.
+//
+// Per-field semantics, which the caller has to be deliberate about:
+//   undefined -> the field was not supplied; whatever is on disk is left alone.
+//   ""        -> the field was explicitly CLEARED; the key is DELETED.
+// The distinction is not cosmetic. Treating "" as "not supplied" meant a user
+// who cleared the PAT input to revoke a token kept the old token on disk while
+// the UI showed the field empty -- "I removed my token from the extension" was
+// simply false.
+export async function upsertCluster(
+  file: string,
+  cluster: ClusterConfig,
+  originalName?: string,
+): Promise<void> {
   const doc = await loadDocument(file);
   let seq = doc.get("clusters", true) as YAMLSeq | undefined;
   if (seq === undefined || !Array.isArray(seq.items)) {
@@ -130,23 +156,40 @@ export async function upsertCluster(file: string, cluster: ClusterConfig): Promi
     seq = doc.get("clusters", true) as YAMLSeq;
   }
 
-  const existing = seq.items.find((item) => {
-    const map = item as YAMLMap;
-    return typeof map?.get === "function" && map.get("name", false) === cluster.name;
-  }) as YAMLMap | undefined;
+  const renaming = originalName !== undefined && originalName !== cluster.name;
+  // Refuse to merge two nodes into one. Writing the rename anyway would leave
+  // two entries sharing a name, and every lookup here matches the FIRST -- so
+  // the loser becomes unreachable and unselectable rather than visibly wrong.
+  if (renaming && findByName(seq, cluster.name) !== undefined) {
+    throw new Error(
+      `cannot rename cluster "${originalName}" to "${cluster.name}": that name is already taken`,
+    );
+  }
+
+  const existing = findByName(seq, originalName ?? cluster.name);
 
   if (existing !== undefined) {
     // Set only the fields we were given. Every other key on the node -- including
     // one a newer cockpit wrote and this version does not model -- is left alone.
     for (const [modelKey, wireKey] of FIELD_MAP) {
       const v = cluster[modelKey];
-      if (v !== undefined) existing.set(wireKey, v);
+      if (v === undefined) continue;
+      if (v === "") existing.delete(wireKey);
+      else existing.set(wireKey, v);
+    }
+    // A rename moves the identity the rest of the file refers to by name.
+    // selected_cluster is the one such reference; leaving it behind would
+    // point the selection at a cluster that no longer exists.
+    if (renaming && doc.get("selected_cluster", false) === originalName) {
+      doc.set("selected_cluster", cluster.name);
     }
   } else {
     const fresh: Record<string, string> = {};
     for (const [modelKey, wireKey] of FIELD_MAP) {
       const v = cluster[modelKey];
-      if (v !== undefined) fresh[wireKey] = v;
+      // "" on a NEW node has nothing to clear, so it is simply not written --
+      // same end state as a delete, without an empty key in fresh YAML.
+      if (v !== undefined && v !== "") fresh[wireKey] = v;
     }
     seq.add(fresh);
   }

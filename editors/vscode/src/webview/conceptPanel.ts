@@ -30,7 +30,13 @@ import { randomBytes } from "node:crypto";
 
 import type { Concept, Row } from "@znasllc-io/memql-sdk-core/client";
 import { browseConceptPage, getRowByConceptAndId } from "@znasllc-io/memql-sdk-core/client";
-import { renderDetail, renderRowList, renderToHtml, escapeHtml } from "@znasllc-io/memql-view-kit";
+import {
+  renderDetail,
+  renderRowList,
+  renderToHtml,
+  escapeHtml,
+  viewKitStyles,
+} from "@znasllc-io/memql-view-kit";
 
 import type { ConnectionManager } from "../connection/manager.js";
 import { ConceptPanelState } from "./conceptPanelState.js";
@@ -281,11 +287,11 @@ export class ConceptPanel {
     // indistinguishable from never having clicked anything.
     const detailHtml =
       this.state.selectedRowId === undefined
-        ? '<div class="vk-empty">Select a row.</div>'
+        ? '<div class="placeholder">Select a row.</div>'
         : this.state.detail === null
           ? this.state.error === ""
-            ? '<div class="vk-empty">Row not found.</div>'
-            : '<div class="vk-empty">Failed to load row.</div>'
+            ? '<div class="placeholder">Row not found.</div>'
+            : '<div class="placeholder">Failed to load row.</div>'
           : renderToHtml(renderDetail(this.state.detail));
 
     const errorHtml =
@@ -315,6 +321,27 @@ export class ConceptPanel {
       content="default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
 <title>${escapeHtml(this.concept.entity)}</title>
 <style nonce="${nonce}">
+  /* Theme view-kit by mapping ITS tokens onto VS Code's. This block is the
+     entire coupling between the two: view-kit never names a --vscode-*
+     variable, so the same renderer + stylesheet drop into the portal with a
+     different six-line mapping and nothing else. */
+  :root {
+    --vk-fg: var(--vscode-foreground);
+    --vk-muted-fg: var(--vscode-descriptionForeground);
+    --vk-border: var(--vscode-panel-border);
+    --vk-hover-bg: var(--vscode-list-hoverBackground);
+    --vk-selected-bg: var(--vscode-list-activeSelectionBackground);
+    --vk-selected-fg: var(--vscode-list-activeSelectionForeground);
+  }
+
+  /* view-kit's own stylesheet, shipped with the markup contract it styles.
+     Hand-authoring rules for vk- classes here is what this replaces: those
+     rules and view-kit's class names drifted the moment either side moved,
+     and the portal would have had to re-derive every one of them. */
+${viewKitStyles}
+
+  /* Page chrome below -- the panel's, not view-kit's. view-kit renders rows;
+     it has no view of this layout and must not style it. */
   body { font-family: var(--vscode-font-family); color: var(--vscode-foreground);
          background: var(--vscode-editor-background); margin: 0; padding: 0; }
   .toolbar { padding: 8px 12px; border-bottom: 1px solid var(--vscode-panel-border);
@@ -322,20 +349,11 @@ export class ConceptPanel {
   .layout { display: grid; grid-template-columns: minmax(240px, 40%) 1fr; height: calc(100vh - 42px); }
   .pane { overflow: auto; padding: 8px 12px; }
   .pane + .pane { border-left: 1px solid var(--vscode-panel-border); }
-  .vk-rows { list-style: none; margin: 0; padding: 0; }
-  .vk-row { padding: 4px 6px; cursor: pointer; border-radius: 3px;
-            display: flex; gap: 8px; align-items: baseline; }
-  .vk-row:hover { background: var(--vscode-list-hoverBackground); }
-  .vk-row[data-selected="true"] { background: var(--vscode-list-activeSelectionBackground);
-                                  color: var(--vscode-list-activeSelectionForeground); }
-  .vk-row-secondary, .vk-row-tertiary { opacity: 0.7; font-size: 0.9em; }
-  .vk-row-status { margin-left: auto; font-size: 0.8em; opacity: 0.8;
-                   border: 1px solid var(--vscode-panel-border); border-radius: 8px; padding: 0 6px; }
-  .vk-field { display: flex; gap: 8px; padding: 1px 0; }
-  .vk-key { opacity: 0.7; min-width: 8em; }
-  .vk-nested { padding-left: 12px; border-left: 1px solid var(--vscode-panel-border); }
-  .vk-null, .vk-empty-value, .vk-cycle { opacity: 0.5; font-style: italic; }
-  .vk-empty { opacity: 0.6; padding: 8px 0; }
+  /* This panel's OWN empty-state text. Deliberately not view-kit's .vk-empty:
+     that class means "this row set is empty" and belongs to the renderer that
+     emits it. Borrowing it for "Select a row." would put a second author on a
+     view-kit class -- the exact drift the shared stylesheet exists to stop. */
+  .placeholder { color: var(--vscode-descriptionForeground); opacity: 0.6; padding: 8px 0; }
   .error { color: var(--vscode-errorForeground); padding: 8px 12px; }
   .warning { color: var(--vscode-editorWarning-foreground); padding: 8px 12px; }
   button { background: var(--vscode-button-background); color: var(--vscode-button-foreground);

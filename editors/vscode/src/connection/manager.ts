@@ -121,6 +121,8 @@ export class ConnectionManager {
       }
       this.conn = conn;
       this.publish({ status: "connected", clusterName: cluster.name, nodeId: conn.nodeId });
+      // Not awaited: this resolves only when the socket eventually dies.
+      void this.watchForTermination(conn, gen, cluster.name);
     } catch (err) {
       if (gen !== this.generation) return;
       this.publish({
@@ -135,6 +137,44 @@ export class ConnectionManager {
     this.generation++;
     await this.closeCurrent();
     this.publish({ status: "disconnected" });
+  }
+
+  // Nothing else notices a connection dying. Without this, a server-side drop
+  // leaves every view reporting "Connected", `get query()` handing out a
+  // client over a dead socket, and the CDC subscription the concept browser
+  // advertises silently gone -- with no notice anywhere.
+  //
+  // `Connection.done()` (-> Dispatcher.done()) resolves on ANY termination and
+  // never rejects. That includes OUR OWN close(): closeCurrent() calls
+  // conn.close(), which stops the dispatcher, which resolves done(). So a
+  // deliberate teardown fires this too, and the generation check is what
+  // separates the two cases rather than a nicety:
+  //
+  //   connect(B)   bumps generation, THEN closes A -> A's done() sees a stale
+  //                gen and cannot publish over B's state.
+  //   disconnect() bumps generation, THEN closes    -> its done() is likewise
+  //                stale and cannot overwrite the "disconnected" it publishes.
+  //
+  // Only a drop of the CURRENT connection reaches the publish below.
+  private async watchForTermination(
+    conn: Connection,
+    gen: number,
+    clusterName: string,
+  ): Promise<void> {
+    await conn.done();
+    if (gen !== this.generation) return;
+    // Belt and braces: the generation check above already covers every path
+    // that replaces the connection, but a stale done() must never clear a
+    // connection it does not own.
+    if (this.conn !== conn) return;
+    // Drop the reference FIRST so `query` / `subscriptions` stop handing out
+    // clients over a dead socket even before listeners run.
+    this.conn = undefined;
+    this.publish({
+      status: "error",
+      clusterName,
+      message: `Connection to ${clusterName} was lost. Select the cluster again to reconnect.`,
+    });
   }
 
   private async closeCurrent(): Promise<void> {

@@ -19,18 +19,45 @@ function cluster(name: string, overrides: Partial<ClusterConfig> = {}): ClusterC
 }
 
 // A fake connection satisfying just what ConnectionManager touches
-// (nodeId, close()). Cast to Connection (a class with private fields, so
-// TS would otherwise reject a plain object literal here) -- standard for a
-// test double standing in for a class type.
-function fakeConn(nodeId: string): Connection & { wasClosed: boolean } {
+// (nodeId, query, subscriptions, close(), done()). Cast to Connection (a class
+// with private fields, so TS would otherwise reject a plain object literal
+// here) -- standard for a test double standing in for a class type.
+//
+// done() mirrors the real semantics deliberately: Connection.done() delegates
+// to Dispatcher.done(), which resolves on ANY termination -- including the
+// dispatcher stop that our own close() triggers. A double whose done() only
+// fired on a server drop would make the "deliberate teardown must not publish
+// a lost-connection error" tests below vacuous.
+type FakeConn = Connection & {
+  wasClosed: boolean;
+  // Simulates a SERVER-side drop: done() resolves with no close() call.
+  terminate(): void;
+};
+
+function fakeConn(nodeId: string): FakeConn {
+  let resolveDone!: () => void;
+  const donePromise = new Promise<void>((resolve) => {
+    resolveDone = resolve;
+  });
   const conn = {
     nodeId,
     wasClosed: false,
+    // Identity markers so a test can assert WHICH connection the manager is
+    // handing out (or that it is handing out none).
+    query: { conn: nodeId },
+    subscriptions: { conn: nodeId },
     close(): void {
       conn.wasClosed = true;
+      resolveDone();
+    },
+    done(): Promise<void> {
+      return donePromise;
+    },
+    terminate(): void {
+      resolveDone();
     },
   };
-  return conn as unknown as Connection & { wasClosed: boolean };
+  return conn as unknown as FakeConn;
 }
 
 function deferred<T>(): {
@@ -196,4 +223,124 @@ test("disconnect() closes the live connection and publishes disconnected", async
 
   assert.equal(conn.wasClosed, true);
   assert.deepEqual(manager.state, { status: "disconnected" });
+});
+
+// --- Connection death (the manager observing Connection.done()) -------------
+//
+// Before this was wired, a server-side drop was completely invisible: every
+// view kept reporting "Connected", `get query()` kept handing out a client
+// over a dead socket, and the concept browser's CDC subscription was silently
+// gone with no notice. The generation counter is what makes observing done()
+// safe -- done() also fires for OUR OWN close(), so every deliberate teardown
+// resolves it too.
+
+test("a server-side drop publishes a non-connected state", async () => {
+  const conn = fakeConn("x");
+  const manager = new ConnectionManager(() => Promise.resolve(conn));
+  const seen: ConnectionState[] = [];
+  manager.onDidChangeState((s) => seen.push(s));
+
+  await manager.connect(cluster("a"));
+  assert.equal(manager.state.status, "connected");
+
+  conn.terminate(); // the socket dies underneath us
+  await flush();
+
+  assert.notEqual(
+    manager.state.status,
+    "connected",
+    "a dropped connection must not keep reporting Connected",
+  );
+  assert.deepEqual(manager.state, {
+    status: "error",
+    clusterName: "a",
+    message: "Connection to a was lost. Select the cluster again to reconnect.",
+  });
+  assert.equal(seen.at(-1)?.status, "error", "the drop must be published to listeners");
+});
+
+test("a dropped connection stops handing out query and subscription clients", async () => {
+  const conn = fakeConn("x");
+  const manager = new ConnectionManager(() => Promise.resolve(conn));
+
+  await manager.connect(cluster("a"));
+  assert.ok(manager.query, "a live connection must expose a query client");
+  assert.ok(manager.subscriptions);
+
+  conn.terminate();
+  await flush();
+
+  assert.equal(manager.query, undefined, "a dead socket must not back a query client");
+  assert.equal(manager.subscriptions, undefined);
+});
+
+test("a done() from a superseded connection cannot clobber the newer connection", async () => {
+  const connA = fakeConn("A");
+  const connB = fakeConn("B");
+  const queue = [connA, connB];
+  const manager = new ConnectionManager(() => Promise.resolve(queue.shift()!));
+
+  await manager.connect(cluster("a"));
+  await manager.connect(cluster("b"));
+  assert.deepEqual(manager.state, { status: "connected", clusterName: "b", nodeId: "B" });
+
+  // connect(B) already closed A, which resolves A's done(). Fire it again for
+  // good measure -- either way it is a done() for a superseded connection.
+  connA.terminate();
+  await flush();
+
+  assert.deepEqual(
+    manager.state,
+    { status: "connected", clusterName: "b", nodeId: "B" },
+    "A's termination must not publish over B's state",
+  );
+  assert.ok(manager.query, "B's query client must survive A's termination");
+});
+
+test("a superseded connection's done() does not clear the newer connection's clients", async () => {
+  // The narrow case the `this.conn !== conn` guard exists for: prove the
+  // manager clears only the connection that actually died.
+  const connA = fakeConn("A");
+  const connB = fakeConn("B");
+  const queue = [connA, connB];
+  const manager = new ConnectionManager(() => Promise.resolve(queue.shift()!));
+
+  await manager.connect(cluster("a"));
+  await manager.connect(cluster("b"));
+  connA.terminate();
+  await flush();
+
+  assert.deepEqual(
+    manager.query,
+    { conn: "B" },
+    "the surviving connection's query client must still be B's",
+  );
+});
+
+test("disconnect()'s own teardown does not publish a lost-connection error", async () => {
+  const conn = fakeConn("x");
+  const manager = new ConnectionManager(() => Promise.resolve(conn));
+
+  await manager.connect(cluster("a"));
+  await manager.disconnect();
+  // disconnect() closed the connection, which resolves done(). That must not
+  // overwrite the "disconnected" it just published.
+  await flush();
+
+  assert.deepEqual(manager.state, { status: "disconnected" });
+});
+
+test("a reconnect to the same cluster is not undone by the previous connection's done()", async () => {
+  const first = fakeConn("first");
+  const second = fakeConn("second");
+  const queue = [first, second];
+  const manager = new ConnectionManager(() => Promise.resolve(queue.shift()!));
+
+  await manager.connect(cluster("a"));
+  await manager.connect(cluster("a")); // same cluster name, new socket
+  await flush();
+
+  assert.deepEqual(manager.state, { status: "connected", clusterName: "a", nodeId: "second" });
+  assert.equal(first.wasClosed, true);
+  assert.deepEqual(manager.query, { conn: "second" });
 });

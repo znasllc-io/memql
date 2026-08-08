@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { commands, ExtensionContext, window, workspace } from 'vscode';
+import { commands, ExtensionContext, RelativePattern, Uri, window, workspace } from 'vscode';
 import {
   LanguageClient,
   LanguageClientOptions,
@@ -10,7 +10,7 @@ import {
 
 import type { Concept } from '@znasllc-io/memql-sdk-core/client';
 
-import { defaultClustersPath, readClustersFile, setSelectedCluster, upsertCluster } from './clusters/file.js';
+import { defaultClustersPath, readClustersFileSafe, setSelectedCluster, upsertCluster } from './clusters/file.js';
 import type { ClusterConfig } from './clusters/model.js';
 import { ConnectionManager } from './connection/manager.js';
 import { ClustersTreeProvider, type ClusterNode } from './views/clustersTree.js';
@@ -19,14 +19,6 @@ import { ConceptPanel } from './webview/conceptPanel.js';
 
 let client: LanguageClient | undefined;
 let connections: ConnectionManager | undefined;
-
-// getConnectionManager exposes the live manager to later-registered views.
-export function getConnectionManager(): ConnectionManager {
-  if (connections === undefined) {
-    throw new Error('memQL: connection manager accessed before activation');
-  }
-  return connections;
-}
 
 export function activate(context: ExtensionContext): void {
   const serverPath = resolveServerPath(context);
@@ -107,7 +99,17 @@ function registerRuntimeSurface(context: ExtensionContext): void {
   );
 
   // The cockpit writes this file too; watch it so the tree stays truthful.
-  const watcher = workspace.createFileSystemWatcher(clustersPath);
+  //
+  // MUST be a RelativePattern with a base Uri, never the bare path string.
+  // Given a plain `string` glob, createFileSystemWatcher only watches paths
+  // INSIDE the workspace folders -- and ~/.memql/clusters.yaml is outside any
+  // workspace. The string form therefore never fired at all, making all three
+  // handlers below dead code: a cluster added in the cockpit stayed invisible
+  // until someone hit Refresh by hand, contradicting the documented "the file
+  // is watched: an external edit refreshes the view".
+  const watcher = workspace.createFileSystemWatcher(
+    new RelativePattern(Uri.file(path.dirname(clustersPath)), path.basename(clustersPath))
+  );
   watcher.onDidChange(() => clustersTree.refresh());
   watcher.onDidCreate(() => clustersTree.refresh());
   watcher.onDidDelete(() => clustersTree.refresh());
@@ -159,26 +161,55 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       if (created === undefined) {
         return;
       }
-      await upsertCluster(clustersPath, created);
-      clustersTree.refresh();
+      await writeCluster(clustersPath, created, undefined, clustersTree);
     }),
     commands.registerCommand('memql.clusters.edit', async (node?: ClusterNode) => {
       const target = node ?? (await pickCluster(clustersPath));
       if (target === undefined) {
         return;
       }
+      // The name field is editable, so the edited config may not identify the
+      // node it came from. Pass the ORIGINAL name so upsertCluster renames that
+      // node instead of appending a second one under the new name.
+      const originalName = target.cluster.name;
       const edited = await promptForCluster(target.cluster);
       if (edited === undefined) {
         return;
       }
-      await upsertCluster(clustersPath, edited);
-      clustersTree.refresh();
+      await writeCluster(clustersPath, edited, originalName, clustersTree);
     })
   );
 }
 
+// writeCluster persists a cluster and refreshes the tree, surfacing a write
+// failure (e.g. a rename onto a name already in use) as a message rather than
+// letting the rejection escape as a raw command-error toast.
+async function writeCluster(
+  clustersPath: string,
+  cluster: ClusterConfig,
+  originalName: string | undefined,
+  clustersTree: ClustersTreeProvider
+): Promise<void> {
+  try {
+    await upsertCluster(clustersPath, cluster, originalName);
+  } catch (err) {
+    window.showErrorMessage(`memQL: ${err instanceof Error ? err.message : String(err)}`);
+    return;
+  }
+  clustersTree.refresh();
+}
+
 async function pickCluster(clustersPath: string): Promise<ClusterNode | undefined> {
-  const file = await readClustersFile(clustersPath);
+  // readClustersFileSafe, not readClustersFile: the Clusters TREE already
+  // renders a malformed file as a readable row, and this path must agree with
+  // it. The throwing variant turned "Select Cluster" from the palette into a
+  // raw command-error toast for a file the tree was calmly explaining.
+  const result = await readClustersFileSafe(clustersPath);
+  if (!result.ok) {
+    window.showErrorMessage(`memQL: ${result.error}`);
+    return undefined;
+  }
+  const file = result.file;
   const picked = await window.showQuickPick(
     file.clusters.map((cluster) => ({
       label: cluster.name,
@@ -236,14 +267,17 @@ async function promptForCluster(existing?: ClusterConfig): Promise<ClusterConfig
     return undefined;
   }
 
-  const out: ClusterConfig = { name: name.trim(), endpoint: endpoint.trim() };
-  if (domain.trim() !== '') {
-    out.domain = domain.trim();
-  }
-  if (pat.trim() !== '') {
-    out.pat = pat.trim();
-  }
-  return out;
+  // Every collected field is returned, INCLUDING the empty ones. An empty
+  // string means "the user cleared this input", which upsertCluster turns into
+  // a key delete. Omitting the key instead would mean "leave whatever is on
+  // disk alone" -- so clearing the PAT field to revoke a token left the old
+  // token sitting in clusters.yaml while the UI showed it gone.
+  return {
+    name: name.trim(),
+    endpoint: endpoint.trim(),
+    domain: domain.trim(),
+    pat: pat.trim(),
+  };
 }
 
 export function deactivate(): Thenable<void> | undefined {
