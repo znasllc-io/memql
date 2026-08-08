@@ -24,8 +24,8 @@ import (
 // marks `vscode` external. Neither fails a build. This is the mechanical
 // half (memql#3304): src/views/ and src/webview/ are ADAPTER layers, and they
 // plus src/extension.ts are the only files permitted to touch `vscode`.
-// Everything else -- src/async/, src/clusters/, src/connection/, src/state/
-// -- is pure logic and stays importable from a plain Node process.
+// Everything else -- src/async/, src/clusters/, src/connection/, src/deploy/,
+// src/state/ -- is pure logic and stays importable from a plain Node process.
 const vscodeExtensionSrcDir = "../../editors/vscode/src"
 
 // vscodeImportAllowList names every extension source file permitted to import
@@ -45,6 +45,7 @@ var vscodeImportAllowList = []string{
 	"views/conceptsTree.ts",      // TreeDataProvider adapter over state/conceptsCache.ts
 	"views/runsTree.ts",          // TreeDataProvider adapter over run/runConfig.ts
 	"webview/automationPanel.ts", // WebviewPanel adapter over state/automationForm.ts + state/stepTrace.ts
+	"webview/clusterPanel.ts",    // WebviewPanel adapter over deploy/clusterPanelState.ts + state/topology.ts
 	"webview/conceptPanel.ts",    // WebviewPanel adapter over state/conceptPanelState.ts
 	"webview/runPanel.ts",        // WebviewPanel adapter over state/argForm.ts + state/runResult.ts
 }
@@ -207,11 +208,17 @@ func TestVSCodeImportGuardCoversTheLogicModules(t *testing.T) {
 		"clusters/model.ts",
 		"connection/endpoint.ts",
 		"connection/manager.ts",
+		"deploy/actions.ts",
+		"deploy/clusterPanelState.ts",
+		"deploy/clusterView.ts",
+		"deploy/controller.ts",
 		"state/automationForm.ts",
 		"state/conceptPanelState.ts",
 		"state/conceptsCache.ts",
+		"state/deploymentHistory.ts",
 		"state/rowProjection.ts",
 		"state/stepTrace.ts",
+		"state/topology.ts",
 	} {
 		if !present[want] {
 			t.Errorf("editors/vscode/src/%s is missing; either it moved (update this list) or the logic layer this guard protects has been dissolved back into the adapters", want)
