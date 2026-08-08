@@ -13,6 +13,7 @@ import { MemoryRouter } from "react-router-dom";
 import type { Concept, Connection, QueryClient } from "@znasllc-io/memql-sdk-core/client";
 
 import { AppRoutes } from "../src/app/routes";
+import { AuthProvider } from "../src/auth/AuthProvider";
 import { ClusterProvider } from "../src/cluster/ClusterProvider";
 
 const CONCEPTS: Concept[] = [
@@ -45,12 +46,35 @@ function fakeConnection(overrides: Partial<Connection> = {}): Connection {
   } as unknown as Connection;
 }
 
+// The routes now sit behind RequireAuth (memql#3315), so a shell test needs a
+// session to exist. It is supplied by declaring the cluster auth-disabled --
+// the one configuration in which there is genuinely nothing to sign in to, so
+// the shell renders with no credential machinery involved at all. That keeps
+// these tests about the shell; the sign-in flow itself is authFlow.test.tsx's
+// subject.
+const AUTH_DISABLED_CLUSTER = {
+  identityUrl: "",
+  identityApiBaseUrl: "",
+  oauthClientId: "",
+  authEnabled: false,
+};
+
 function renderApp(dial: typeof Connection.dial, path = "/concepts") {
   return render(
     <MemoryRouter initialEntries={[path]}>
-      <ClusterProvider dial={dial}>
-        <AppRoutes />
-      </ClusterProvider>
+      <AuthProvider
+        config={AUTH_DISABLED_CLUSTER}
+        fetchImpl={async () => {
+          throw new Error("the shell tests must make no identity calls");
+        }}
+        storage={null}
+        navigate={() => {}}
+        redirectUri="https://cockpit.example.com/portal/auth/callback"
+      >
+        <ClusterProvider dial={dial}>
+          <AppRoutes />
+        </ClusterProvider>
+      </AuthProvider>
     </MemoryRouter>,
   );
 }
@@ -60,7 +84,7 @@ describe("the portal shell", () => {
     const dial = vi.fn(async () => fakeConnection()) as unknown as typeof Connection.dial;
     renderApp(dial);
 
-    expect(screen.getByText("memQL Portal")).toBeTruthy();
+    await waitFor(() => expect(screen.getByText("memQL Portal")).toBeTruthy());
     await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Connected"));
     await waitFor(() => expect(screen.getByText("v1:cluster:node")).toBeTruthy());
   });

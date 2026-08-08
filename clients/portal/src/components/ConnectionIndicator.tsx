@@ -8,6 +8,7 @@ import { useCluster } from "../cluster/ClusterProvider";
 // whether anything else on screen can be trusted.
 
 const LABELS: Record<string, string> = {
+  idle: "Not connected",
   connecting: "Connecting",
   connected: "Connected",
   closed: "Disconnected",
@@ -15,6 +16,7 @@ const LABELS: Record<string, string> = {
 };
 
 const DOT_CLASSES: Record<string, string> = {
+  idle: "bg-subtle",
   connecting: "bg-warn animate-pulse",
   connected: "bg-ok",
   closed: "bg-subtle",

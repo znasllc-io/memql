@@ -138,6 +138,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The runtime-config document (memql#3315) is answered from the node's
+	// environment, BEFORE the filesystem is consulted. It has to precede both
+	// the file lookup and the SPA fallback: a file of that name in the bundle
+	// would shadow it silently, and the fallback would hand the bundle's
+	// index.html to a fetch() that asked for JSON -- a content-type error for
+	// what is actually a routing mistake. See config.go.
+	if name == runtimeConfigFile {
+		h.serveRuntimeConfig(w, r)
+		return
+	}
+
 	if name != "" && h.serveFile(w, r, name) {
 		return
 	}

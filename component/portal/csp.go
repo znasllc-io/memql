@@ -2,6 +2,8 @@ package portal
 
 import (
 	"net/http"
+	"net/url"
+	"os"
 	"strings"
 )
 
@@ -46,6 +48,16 @@ const upgradeDirective = "; upgrade-insecure-requests"
 // policyFor builds the policy for one request. It is per-request rather than
 // a constant because connect-src names the request's own host.
 func policyFor(r *http.Request) string {
+	// The XHR base, not the navigation base: connect-src governs fetch(), and
+	// the portal only ever fetch()es the identity JSON endpoints. When the
+	// deployment proxies those same-origin the value is empty and 'self'
+	// already covers it. See RuntimeConfig.IdentityAPIBaseURL.
+	return policyWith(r, identityAPIBaseURL(os.Getenv, identityURL(os.Getenv)))
+}
+
+// policyWith is policyFor with the identity origin injected, so the test can
+// drive it without mutating the process environment.
+func policyWith(r *http.Request, identityBaseURL string) string {
 	var b strings.Builder
 	b.WriteString(cspStatic)
 	b.WriteString("; connect-src 'self'")
@@ -53,10 +65,65 @@ func policyFor(r *http.Request) string {
 		b.WriteString(" ")
 		b.WriteString(origin)
 	}
+	// The IDENTITY ORIGIN, for the OAuth token + refresh fetches (memql#3315).
+	// The portal is served by the bff while identity lives on its own host
+	// (identity.<domain> vs cockpit.<domain>), so POST /oauth/token and POST
+	// /auth/refresh are cross-origin XHR -- which connect-src governs. Without
+	// this source the sign-in exchange is blocked in the browser, and it is
+	// blocked SILENTLY from the server's point of view: the request never
+	// leaves the page, so identity's access log is empty and an operator
+	// debugging "login does nothing" has nothing to correlate.
+	//
+	// Only the ORIGIN is emitted, never a path. Derived from the same env the
+	// runtime-config document reports, so the policy and the URL the bundle
+	// actually dials cannot drift apart.
+	if origin := originOf(identityBaseURL); origin != "" && origin != httpOriginOf(r) {
+		b.WriteString(" ")
+		b.WriteString(origin)
+	}
 	if r != nil && r.TLS != nil {
 		b.WriteString(upgradeDirective)
 	}
 	return b.String()
+}
+
+// originOf reduces an absolute http(s) URL to scheme://host[:port], or ""
+// when it is not one.
+//
+// Validated rather than interpolated, for the reason validHost exists: this
+// value is operator-supplied configuration that lands in a response header,
+// so a malformed one must DROP the source -- leaving the fetch blocked, with
+// a CSP violation the browser names -- rather than split the directive or
+// inject a second one.
+func originOf(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return ""
+	}
+	if !validHost(u.Host) {
+		return ""
+	}
+	return u.Scheme + "://" + u.Host
+}
+
+// httpOriginOf is the request's own origin in http(s) form. Used only to skip
+// a duplicate source when identity is served from the SAME origin as the
+// portal (the single-binary build), where 'self' already covers it.
+func httpOriginOf(r *http.Request) string {
+	if r == nil || r.Host == "" || !validHost(r.Host) {
+		return ""
+	}
+	if r.TLS != nil {
+		return "https://" + r.Host
+	}
+	return "http://" + r.Host
 }
 
 // webSocketOrigin renders the same-origin WebSocket origin (ws:// or wss://

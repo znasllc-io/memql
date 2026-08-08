@@ -26,7 +26,16 @@ import { Connection, type QueryClient } from "@znasllc-io/memql-sdk-core/client"
 import { anonymousAuthSource, toConnectionAuth, type PortalAuthSource } from "./auth";
 import { portalBridgePath } from "./endpoint";
 
-export type ConnectionStatus = "connecting" | "connected" | "error" | "closed";
+export type ConnectionStatus =
+  // No dial attempted, because the provider is disabled -- there is no
+  // session to dial with yet (memql#3315). Distinct from "closed" (a stream
+  // existed and ended) and from "error" (one was attempted and refused);
+  // collapsing the three would make the header lie about which happened.
+  | "idle"
+  | "connecting"
+  | "connected"
+  | "error"
+  | "closed";
 
 export interface ClusterState {
   status: ConnectionStatus;
@@ -48,9 +57,12 @@ const ClusterContext = createContext<ClusterState | null>(null);
 
 export interface ClusterProviderProps {
   children: ReactNode;
-  // The credential source. Defaults to the no-credential source; #3315
-  // replaces it with the identity-backed one. See src/cluster/auth.ts.
+  // The credential source. Defaults to the no-credential source; the app
+  // passes the identity-backed one (#3315). See src/cluster/auth.ts.
   auth?: PortalAuthSource;
+  // Whether to dial at all. False parks the provider in "idle" and opens no
+  // socket -- see the effect below for why that is not just an optimisation.
+  enabled?: boolean;
   // Overridable for tests, which have no server to dial.
   dial?: typeof Connection.dial;
 }
@@ -58,9 +70,10 @@ export interface ClusterProviderProps {
 export function ClusterProvider({
   children,
   auth = anonymousAuthSource,
+  enabled = true,
   dial = Connection.dial,
 }: ClusterProviderProps): ReactNode {
-  const [status, setStatus] = useState<ConnectionStatus>("connecting");
+  const [status, setStatus] = useState<ConnectionStatus>(enabled ? "connecting" : "idle");
   const [query, setQuery] = useState<QueryClient | null>(null);
   const [nodeId, setNodeId] = useState("");
   const [serverVersion, setServerVersion] = useState("");
@@ -80,6 +93,18 @@ export function ClusterProvider({
     const mine = ++generation.current;
     let connection: Connection | null = null;
     let cancelled = false;
+
+    // Not yet dialable -- no session (#3315). Dialing anyway would open an
+    // unauthenticated upgrade the front door refuses, retried behind a
+    // sign-in page the operator has not filled in, which fills the ingress
+    // log with 401s that describe nothing wrong. Bumping `generation` above
+    // is what makes this ALSO cancel an in-flight dial when a session ends.
+    if (!enabled) {
+      setQuery(null);
+      setStatus("idle");
+      setError("");
+      return;
+    }
 
     setStatus("connecting");
     setError("");
@@ -123,7 +148,7 @@ export function ClusterProvider({
       cancelled = true;
       connection?.close();
     };
-  }, [auth, dial, attempt]);
+  }, [auth, dial, attempt, enabled]);
 
   const reconnect = useCallback(() => setAttempt((n) => n + 1), []);
 

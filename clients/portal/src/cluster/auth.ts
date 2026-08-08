@@ -1,22 +1,25 @@
-// THE SEAM #3315 PLUGS INTO. Read this before adding any credential handling
+// THE CREDENTIAL SEAM. Read this before adding any credential handling
 // anywhere else in the portal.
 //
-// C1 (#3314) scaffolds the portal and connects it to a cluster; AUTHENTICATION
-// IS #3315's JOB. The temptation at this stage is to invent something
-// throwaway -- a token in localStorage, a prompt, a query parameter -- which
-// #3315 would then have to find and rip out of however many call sites it had
-// spread to. So instead there is one interface, one default implementation
-// that supplies no credential, and a single place the connection reads it.
+// C1 (#3314) scaffolded the portal with one interface, one no-credential
+// default, and a single place the connection reads it -- precisely so #3315
+// would not have to hunt a throwaway token out of a dozen call sites.
 //
-// WHAT #3315 DOES: writes an identity-service-backed PortalAuthSource
-// (magic-link / OAuth against MEMQL_IDENTITY_BASE_URL, returning the bearer
-// and refreshing it) and passes it to <ClusterProvider auth={...}>. Nothing
-// else in the portal changes, because nothing else in the portal touches a
-// credential.
+// #3315 FILLED IT IN. src/auth/identityAuthSource.ts is the real
+// implementation: OAuth 2.1 authorization-code + PKCE against the identity
+// service, the access token held in a closure variable, refresh through the
+// HttpOnly cookie. It is built and owned by src/auth/AuthProvider.tsx and
+// handed to <ClusterProvider auth={...}> by src/app/App.tsx.
 //
-// WHAT IT MUST NOT DO: reach past this interface. If a component needs to know
-// whether the operator is signed in, that belongs on the connection state
-// (which #3315 can widen), not on a second credential path.
+// The seam held: those two implementations -- the anonymous one below and the
+// identity-backed one -- are the only credential paths that exist.
+//
+// WHAT A LATER CHANGE MUST NOT DO: reach past this interface. A component that
+// needs to know whether the operator is signed in asks `useAuth().status` (a
+// state) or `IdentityAuthSource.hasToken()` (a boolean) -- never for the token
+// itself. Every additional place that can read the string is another place it
+// can be logged, folded into an error report, or written to storage by
+// accident.
 
 import type { ConnectionAuth } from "@znasllc-io/memql-sdk-core/client";
 

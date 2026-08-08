@@ -117,11 +117,19 @@ spec:
             - { name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER, value: "https://identity.staging.example.com" }
             - { name: MEMQL_IDENTITY_BOOTSTRAP_DOMAIN, value: "staging.example.com" }
             # CORS + OAuth redirect for the product SPA host (deployment-specific placeholder).
-            - { name: MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS, value: "https://app.staging.example.com" }
-            # Only the product-neutral cockpit client (engine tooling) lives in
-            # base. The product SPA's OAuth client is registered per-environment
-            # via the identity-product-config overlay patch (staging / prod).
-            - { name: MEMQL_IDENTITY_REGISTERED_CLIENTS, value: '[{"clientId":"cockpit","redirectURIs":["http://127.0.0.1/cockpit/callback","http://localhost/cockpit/callback"]}]' }
+            # The ops-edge host is listed alongside it because the memQL Portal
+            # (memql#3315) is itself a browser client of this identity service:
+            # it exchanges its authorization code cross-origin, and with the
+            # origin absent that XHR dies in CORS with nothing in identity's
+            # log to say why.
+            - { name: MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS, value: "https://app.staging.example.com,https://cockpit.staging.example.com" }
+            # Only product-neutral ENGINE clients live in base: the terminal
+            # cockpit and the portal, which are the two halves of one ops edge.
+            # The product SPA's OAuth client is registered per-environment via
+            # the identity-product-config overlay patch (staging / prod). The
+            # portal's redirect URI carries its mount point -- the bundle is
+            # served at /portal/, so its callback route lives inside it.
+            - { name: MEMQL_IDENTITY_REGISTERED_CLIENTS, value: '[{"clientId":"cockpit","redirectURIs":["http://127.0.0.1/cockpit/callback","http://localhost/cockpit/callback"]},{"clientId":"portal","redirectURIs":["https://cockpit.staging.example.com/portal/auth/callback"]}]' }
             - { name: SERVER_ALLOWED_ORIGINS, value: "*" }
             - { name: MEMQL_IDENTITY_ENABLED, value: "true" }
             # Migrations run ONCE, here. Every other node has this false.

@@ -1,7 +1,9 @@
 import { NavLink, Outlet } from "react-router-dom";
 import type { ReactNode } from "react";
 
+import { ClusterBadge } from "../components/ClusterBadge";
 import { ConnectionIndicator } from "../components/ConnectionIndicator";
+import { IdentityBadge } from "../components/IdentityBadge";
 import { ThemeToggle } from "../components/ThemeToggle";
 
 // The routed layout: a header carrying identity + connection state, a nav
@@ -31,10 +33,15 @@ function navClass({ isActive }: { isActive: boolean }): string {
 export function AppShell(): ReactNode {
   return (
     <div className="flex h-full flex-col bg-bg text-fg">
+      {/* The header answers the two questions an operations console must
+          always answer without a click: WHICH cluster (ClusterBadge, plus the
+          replica's node id on the indicator) and WHO am I acting as
+          (IdentityBadge). */}
       <header className="flex items-center gap-4 border-b border-line bg-surface px-4 py-2">
-        <span className="text-lg font-semibold tracking-tight">memQL Portal</span>
+        <ClusterBadge />
         <div className="ml-auto flex items-center gap-4">
           <ConnectionIndicator />
+          <IdentityBadge />
           <ThemeToggle />
         </div>
       </header>

@@ -32,6 +32,7 @@
 
   --color-ok: var(--portal-ok);
   --color-warn: var(--portal-warn);
+  --color-warn-subtle: var(--portal-warn-subtle);
   --color-danger: var(--portal-danger);
   --color-danger-subtle: var(--portal-danger-subtle);
 

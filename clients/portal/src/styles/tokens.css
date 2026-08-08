@@ -54,6 +54,7 @@
   /* --- status -------------------------------------------------------- */
   --portal-ok: oklch(58% 0.15 155);
   --portal-warn: oklch(70% 0.16 75);
+  --portal-warn-subtle: oklch(95% 0.04 75);
   --portal-danger: oklch(56% 0.20 25);
   --portal-danger-subtle: oklch(95% 0.03 25);
 
@@ -128,6 +129,7 @@
 
     --portal-ok: oklch(72% 0.15 155);
     --portal-warn: oklch(80% 0.15 75);
+    --portal-warn-subtle: oklch(30% 0.07 75);
     --portal-danger: oklch(70% 0.17 25);
     --portal-danger-subtle: oklch(30% 0.07 25);
   }
@@ -159,6 +161,7 @@
 
   --portal-ok: oklch(72% 0.15 155);
   --portal-warn: oklch(80% 0.15 75);
+  --portal-warn-subtle: oklch(30% 0.07 75);
   --portal-danger: oklch(70% 0.17 25);
   --portal-danger-subtle: oklch(30% 0.07 25);
 }
