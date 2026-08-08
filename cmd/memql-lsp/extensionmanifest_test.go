@@ -751,6 +751,11 @@ var trustGatedCommands = []string{
 	"memql.clusters.add",
 	"memql.clusters.edit",
 	"memql.clusters.disconnect",
+	// memql#3312's Cluster tab. Palette-invokable unlike the other
+	// argument-taking commands: with no tree node it falls back to the
+	// currently selected cluster, so it is genuinely usable from the palette
+	// and therefore needs the trust clause rather than "when": "false".
+	"memql.cluster.open",
 	"memql.concepts.refresh",
 	// memql#3309's run surface, plus memql#3310's automation run. The three
 	// run commands themselves (memql.run.construct / .constructWith /
