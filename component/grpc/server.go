@@ -127,6 +127,13 @@ type Server struct {
 	// port -- component/grpc can't import app/node-lifecycle). Nil on
 	// non-mesh binaries; the NodeMaintenance handler reports "unavailable".
 	nodeMaintenanceHandler NodeMaintenanceHandler
+	// deployControlHandler is the DeployControlService implementation the
+	// bridged stream surface dispatches to (memql#3311). app bootstrap wires
+	// it on the identity node with the SAME *deploycontrol.Service instance
+	// registered for the unary service, so the streamed and unary paths share
+	// one gate + one audit logger and cannot drift. Nil elsewhere; the
+	// DeployControl handler answers Unimplemented.
+	deployControlHandler memqlv1.DeployControlServiceServer
 	// clientToolRPC serves the substrate-RPC client-tool return channel per
 	// agent turn (memql#1265). Set by app bootstrap on agent binaries where the
 	// delivery substrate is wired; nil otherwise (legacy ForwardContinuation).
@@ -338,6 +345,7 @@ func (s *Server) prepareForRun(ctx context.Context) (context.Context, context.Ca
 		aiForwarder:            s.aiForwarder,
 		agentReplier:           s.agentReplier,
 		nodeMaintenanceHandler: s.nodeMaintenanceHandler,
+		deployControlHandler:   s.deployControlHandler,
 		clientToolResultServer: s.clientToolRPC,
 		deliverySubstrate:      s.deliverySubstrate,
 		streamNodeID:           s.streamNodeID,
@@ -636,6 +644,12 @@ type service struct {
 	// app bootstrap to the App's RequestOperatorDrain). Nil elsewhere; the
 	// NodeMaintenance handler reports "unavailable" when unset.
 	nodeMaintenanceHandler NodeMaintenanceHandler
+
+	// deployControlHandler is the DeployControlService implementation the
+	// bridged DeployControlMsg surface dispatches to (memql#3311). Non-nil on
+	// the identity node (the same instance the unary service is registered
+	// with); nil elsewhere, where the handler answers Unimplemented.
+	deployControlHandler memqlv1.DeployControlServiceServer
 
 	// transcribeStreams holds the worker-side state for in-flight
 	// streaming transcription sessions, keyed by the caller's
@@ -1210,7 +1224,13 @@ func (s *streamSession) badgeGate(envelope *memqlv1.MemqlClientMessage) badgeGat
 		*memqlv1.MemqlClientMessage_ResendGuestInviteEmail,
 		*memqlv1.MemqlClientMessage_DurablePromoteBundle,
 		*memqlv1.MemqlClientMessage_DurableDemoteBundle,
-		*memqlv1.MemqlClientMessage_NodeMaintenance:
+		*memqlv1.MemqlClientMessage_NodeMaintenance,
+		// Deploy control (memql#3311) sits in the same bucket as
+		// NodeMaintenance: cutting a version, shipping, or rolling back is
+		// cluster-state management whose effects outlive the grant's TTL
+		// containment by a wide margin. A walked-away kiosk must not be able
+		// to promote a release.
+		*memqlv1.MemqlClientMessage_DeployControl:
 		return badgeGateRestricted
 	}
 	return badgeGateAllow
@@ -1247,6 +1267,8 @@ func badgePayloadRequestId(envelope *memqlv1.MemqlClientMessage) string {
 		return p.AiSuggest.GetRequestId()
 	case *memqlv1.MemqlClientMessage_CallTool:
 		return p.CallTool.GetRequestId()
+	case *memqlv1.MemqlClientMessage_DeployControl:
+		return p.DeployControl.GetRequestId()
 	}
 	return ""
 }
@@ -1606,6 +1628,14 @@ func (s *streamSession) handleMessage(envelope *memqlv1.MemqlClientMessage) erro
 		return s.handleCreateBadge(envelope, payload.CreateBadge)
 	case *memqlv1.MemqlClientMessage_RevokeBadge:
 		return s.handleRevokeBadge(envelope, payload.RevokeBadge)
+	// Deploy control bridged off the separate unary DeployControlService so
+	// WebSocket clients -- the VS Code extension and the portal -- can reach
+	// it (memql#3311). The handler stamps the session's access context and
+	// calls the SAME service methods the unary path serves; the role matrix
+	// and the audit write live there, not here. See
+	// deploy_control_handlers.go.
+	case *memqlv1.MemqlClientMessage_DeployControl:
+		return s.handleDeployControl(envelope, payload.DeployControl)
 	// Realtime voice + video (Initiative C). The Go voice-agent
 	// (integrations/voice/agent) speaks these messages while authenticated
 	// as a service account. See voice_agent_handlers.go.

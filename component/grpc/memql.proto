@@ -8,6 +8,13 @@ option go_package = "github.com/znasllc-io/memql/component/grpc/gen;memqlv1";
 
 import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
+// The DeployControlService request/response messages are REUSED verbatim by
+// the streamed bridge below (DeployControlMsg / DeployControlResult, #3311).
+// Importing rather than re-declaring them is the point: the streamed path and
+// the unary path carry the byte-identical types, so the two surfaces cannot
+// drift a field apart. deploy_control.proto does not import this file, so
+// there is no cycle; both generate into the same Go package (memqlv1).
+import "deploy_control.proto";
 
 service MemqlService {
   // Single multiplexed bidirectional streaming RPC for all MemQL operations.
@@ -291,6 +298,14 @@ message MemqlClientMessage {
     // above.
     CreateBadgeMsg create_badge = 83;
     RevokeBadgeMsg revoke_badge = 84;
+
+    // Deploy control (memql#3311). DeployControlService is a separate
+    // UNARY service on the same listener, which a browser -- and any
+    // WebSocket client -- structurally cannot dial. This ONE bridged
+    // envelope carries every DeployControlService request as an inner
+    // oneof, so the VS Code extension and the portal reach the whole
+    // deploy surface over /memql/ws. See DeployControlMsg.
+    DeployControlMsg deploy_control = 101;
   }
 }
 
@@ -428,6 +443,10 @@ message MemqlServerMessage {
     // Badge registration lifecycle results (memql#2513).
     CreateBadgeResult create_badge_result = 120;
     RevokeBadgeResult revoke_badge_result = 121;
+
+    // Deploy-control reply (see DeployControlMsg, memql#3311). Tag 122 is
+    // taken by sense_definition_result above, so this starts at 123.
+    DeployControlResult deploy_control_result = 123;
   }
 }
 
@@ -2526,4 +2545,96 @@ message NodeMaintenanceResult {
   string error_code = 6;
   // error_message is a human-readable failure detail on !ok.
   string error_message = 7;
+}
+
+// -----------------------------------------------------------------------------
+// Deploy control bridged onto MemqlService.Stream (memql#3311)
+// -----------------------------------------------------------------------------
+
+// DeployControlMsg carries ONE DeployControlService request over the
+// multiplexed stream.
+//
+// WHY A BRIDGE. DeployControlService (component/grpc/deploy_control.proto)
+// is a separate unary gRPC service mounted on the same listener. The Go SDK
+// dials it natively, but a browser cannot dial gRPC at all and neither can
+// any WebSocket client, so the whole deploy surface was unreachable from the
+// VS Code extension (which speaks /memql/ws) and from the portal. The
+// identity /admin/* app only sidesteps that by being server-rendered --
+// exactly the property the portal gives up.
+//
+// WHY ONE ENVELOPE RATHER THAN NINE PAIRS. The inner oneof reuses the
+// DeployControlService request messages VERBATIM (the import at the top of
+// this file). Nine bridged pairs would have meant nine re-declared request
+// shapes that the compiler is perfectly happy to let drift a field away from
+// the unary ones; reusing the originals makes the two surfaces the same
+// types by construction. It also costs the top-level oneof two field numbers
+// instead of eighteen, and a tenth RPC lands as one inner field rather than
+// another top-level pair. Both consumers benefit: the extension and the
+// portal each write one dispatcher and switch on the inner discriminant,
+// which is what a DevOps panel wants anyway (it renders a list of actions,
+// not nine unrelated call sites).
+//
+// GATE. The handler does NOT re-implement the role matrix. It resolves the
+// stream's AccessContext, stamps it on a context, and calls the SAME
+// DeployControlServiceServer method the unary path serves -- so the
+// owner/admin/developer gate and the audit event in
+// component/deploycontrol are literally one implementation, not two that
+// agree today. See component/grpc/deploy_control_handlers.go and
+// component/deploycontrol.Dispatch.
+//
+// NOT BRIDGED: deployment history. v1:cluster:deployment rows stay readable
+// as ordinary concepts through ExecuteQuery -- duplicating that read here
+// would fork the history contract for no gain.
+message DeployControlMsg {
+  string request_id = 1;
+
+  // Exactly one request must be set. An empty oneof is rejected with
+  // error_code = INVALID_ARGUMENT.
+  oneof request {
+    // Reads.
+    znasllc.memql.deploycontrol.v1.GetDeploymentStatusRequest get_deployment_status = 10;
+    znasllc.memql.deploycontrol.v1.SuggestNextVersionRequest suggest_next_version = 11;
+    // Actions. Each writes a v1:identity:auditEvent (category admin,
+    // action deployment_console_<verb>) and returns its id on
+    // ActionResult.audit_event_id -- identical to the unary path.
+    znasllc.memql.deploycontrol.v1.DeployStagingRequest deploy_staging = 12;
+    znasllc.memql.deploycontrol.v1.PromoteRequest promote = 13;
+    znasllc.memql.deploycontrol.v1.RollbackRequest rollback = 14;
+    znasllc.memql.deploycontrol.v1.RolloutActionRequest rollout_action = 15;
+    znasllc.memql.deploycontrol.v1.CutVersionRequest cut_version = 16;
+    znasllc.memql.deploycontrol.v1.DeployRequest deploy = 17;
+    znasllc.memql.deploycontrol.v1.RollbackDeploymentRequest rollback_deployment = 18;
+  }
+}
+
+// DeployControlResult is the reply to DeployControlMsg.
+//
+// A unary DeployControlService call fails by returning a gRPC status error.
+// A multiplexed stream has no per-message status channel -- returning an
+// error would tear down the whole stream and take every other in-flight
+// request with it -- so the status is carried IN the envelope: error_code
+// holds the canonical gRPC code (google.rpc.Code numbering, 0 = OK) and
+// error_message its message. A caller that maps error_code back to a
+// grpc code observes exactly what the unary caller observes, which is what
+// the streamed/unary parity test asserts (PERMISSION_DENIED = 7 for a
+// caller below the required role, on both paths, for every gated RPC).
+message DeployControlResult {
+  string request_id = 1;
+  // ok is true when the RPC returned without a status error. It is NOT the
+  // action's own success: a write that ran and failed returns ok = true
+  // here with ActionResult.ok = false, exactly as the unary path does.
+  bool ok = 2;
+  // error_code is the canonical gRPC code (0 = OK, 3 = INVALID_ARGUMENT,
+  // 7 = PERMISSION_DENIED, 16 = UNAUTHENTICATED, 13 = INTERNAL, ...).
+  int32 error_code = 3;
+  string error_message = 4;
+
+  // Set only when ok. Which field is populated follows from the request:
+  // get_deployment_status -> deployment_status, suggest_next_version ->
+  // next_version, every action -> action.
+  oneof result {
+    znasllc.memql.deploycontrol.v1.DeploymentStatus deployment_status = 10;
+    znasllc.memql.deploycontrol.v1.SuggestNextVersionResult next_version = 11;
+    znasllc.memql.deploycontrol.v1.ActionResult action = 12;
+  }
 }
