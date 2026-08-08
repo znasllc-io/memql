@@ -9,7 +9,7 @@ import * as vscode from "vscode";
 
 import type { Concept } from "@znasllc-io/memql-sdk-core/client";
 import type { ConnectionManager } from "../connection/manager.js";
-import { ConceptsCache } from "./conceptsCache.js";
+import { ConceptsCache } from "../state/conceptsCache.js";
 
 export type ConceptTreeNode =
   | { kind: "domain"; domain: string }
@@ -28,7 +28,7 @@ export class ConceptsTreeProvider implements vscode.TreeDataProvider<ConceptTree
   // Cached (and race-guarded against an out-of-order settle) so expanding a
   // domain does not re-issue the list, and a cluster switch mid-request
   // never lets a stale response overwrite the fresh cluster's data. See
-  // conceptsCache.ts.
+  // state/conceptsCache.ts.
   private readonly cache = new ConceptsCache<Concept>();
 
   constructor(private readonly connections: ConnectionManager) {

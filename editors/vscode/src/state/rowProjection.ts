@@ -12,7 +12,11 @@
 // wrong row, or none at all. Intrinsics are copied into the projection
 // first; a payload key is only added if that name isn't already taken.
 //
-// Deliberately free of `vscode` imports so it is unit-testable.
+// Lives under src/state/ (not src/webview/) because it holds no VS Code types
+// at all: src/views/ and src/webview/ are the adapter layers allowed to
+// import `vscode`, and everything carrying logic stays out of them so it
+// remains unit-testable under bare `node --test`. The rule is enforced
+// mechanically -- see cmd/memql-lsp/vscodeimportrule_test.go.
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
 export function flattenForList(node: Row): Row {

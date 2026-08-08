@@ -19,7 +19,7 @@
 // clusters underneath the panel, a live CDC event on this concept (see
 // subscribeToChanges() below), or (for loadPage specifically) a second
 // "Load more" click before the first response lands. All are guarded by
-// ConceptPanelState (see conceptPanelState.ts -- generation counters for
+// ConceptPanelState (see state/conceptPanelState.ts -- Latest guards for
 // supersession, a separate in-flight marker for loadPage's concurrency
 // case); this file's job is only to wire the connection lifecycle, the CDC
 // subscription lifecycle, and the webview's HTML/postMessage boundary
@@ -39,8 +39,8 @@ import {
 } from "@znasllc-io/memql-view-kit";
 
 import type { ConnectionManager } from "../connection/manager.js";
-import { ConceptPanelState } from "./conceptPanelState.js";
-import { flattenForList } from "./rowProjection.js";
+import { ConceptPanelState } from "../state/conceptPanelState.js";
+import { flattenForList } from "../state/rowProjection.js";
 
 const PAGE_SIZE = 200;
 const NOT_CONNECTED_MESSAGE = "Not connected. Select a cluster in the Clusters view.";
@@ -110,7 +110,7 @@ export class ConceptPanel {
     // the next successful connect.
     //
     // subscribeToChanges() runs BEFORE reset()/render(): it only writes the
-    // liveUpdatesDegradedMessage field (see conceptPanelState.ts), which
+    // liveUpdatesDegradedMessage field (see state/conceptPanelState.ts), which
     // reset() does not touch, so a single render() below picks up both the
     // fresh (empty) row state AND whatever the subscribe attempt just did to
     // the live-updates notice, in one paint -- no separate render() inside

@@ -11,7 +11,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { ConceptsCache } from "../src/views/conceptsCache.js";
+import { ConceptsCache } from "../src/state/conceptsCache.js";
 
 function deferred<T>(): {
   promise: Promise<T>;
