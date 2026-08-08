@@ -552,9 +552,46 @@ This spec is one of five decomposed from the originating brainstorm:
 |---|---|---|
 | **A** | Engine execution and introspection contract | **this spec** (folded into B) |
 | **B** | VS Code runtime panel | **this spec** |
-| **C** | Portal repository bootstrap and concepts browser | separate spec |
+| **C** | Portal SPA in-repo: scaffold and concepts browser | separate spec |
 | **D** | Portal view system: UI-element library, predefined views for platform concepts, AI-composed custom views | separate spec |
 | **E** | Retire the server-rendered `/admin/*` portal into the SPA | separate spec, depends on C |
+
+### Amendment, 2026-08-07: the portal lives in this repository
+
+The original decomposition assumed the portal would get its own repository. That
+is **retracted**. The portal is built in the memql repo, at `clients/portal/`,
+on React + TypeScript + Tailwind + Vite.
+
+**Why this does not violate product neutrality.** The engine is
+product-agnostic and `TestEngineIsProductNeutral` enforces it, but what that
+test bans is a downstream *product's* name appearing in tracked files. The
+portal is not a product — it is the platform's own operations console, the
+graphical sibling of `memql-cockpit`, and CLAUDE.md already sanctions that slot
+as the `engine-bff` "Cockpit / ops edge, no bundle" component. The rule it must
+keep is narrow and clear: **the portal must never name a downstream product.**
+
+**The `clients/` convention.** memQL is a platform other people self-host to
+serve their own clients — landing pages, SPAs, mobile apps, games. So
+client-facing app surfaces are plural and first-class, a sibling category to
+`integrations/`:
+
+```
+clients/
+  portal/        the platform's own operations console (this repo's only inhabitant)
+```
+
+A product repo built from the `memql-project` template mirrors the same
+convention, holding as many surfaces as its clients need
+(`clients/acme-landing/`, `clients/acme-spa/`, ...). The engine repo carries
+exactly one, which makes the portal the worked example the template copies.
+The template currently uses a singular `client/` at the product root and needs
+updating to match.
+
+**Consequences for this spec's deliverables.** `view-kit` no longer needs
+cross-repo package publishing — the portal consumes it in-repo — but it stays a
+separate package with no DOM dependency, because that boundary is what keeps the
+renderer usable from both a VS Code webview and a React tree. Nothing in B1
+changes.
 
 Three things built here are consumed directly by C and D:
 
@@ -567,3 +604,18 @@ Three things built here are consumed directly by C and D:
 One known divergence: a browser cannot read `~/.memql/clusters.yaml`,
 so the portal's cluster registry must resolve differently. That is a C
 problem and is not solved here.
+
+### Open questions for spec C
+
+Recorded so they are not lost; this spec does not answer them.
+
+- **Cluster registry in a browser.** `~/.memql/clusters.yaml` is unreachable.
+  Options: a server-side registry concept, browser-local storage, or deriving
+  the cluster from the origin the portal is served from. The last is likely
+  simplest — the portal is served *by* the cluster it manages.
+- **Where the portal is served from.** The `engine-bff` component is the natural
+  host, which makes the origin-derived registry above nearly free.
+- **Auth.** The portal cannot read a PAT from a config file. It goes through the
+  identity service's magic-link / OAuth flow like any other browser client.
+- **Updating the `memql-project` template** to the plural `clients/` convention,
+  plus whatever else has drifted since it was last touched.
