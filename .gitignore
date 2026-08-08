@@ -83,21 +83,34 @@ bin/
 temp/
 logs/
 
-# Node.js -- the TS SDK under sdk/ts/ and the view-kit renderer under
-# sdk/ts-viewkit/ are checked-in node consumers in this monorepo
-# (memql#116). Their package.json is checked in; everything else stays
-# ignored. The deploy/gate-browser Playwright gate is also checked in --
-# its lockfile is what pins the npm deps by integrity hash (Scorecard
-# PinnedDependencies).
+# Node.js -- the TS SDK under sdk/ts/, the view-kit renderer under
+# sdk/ts-viewkit/ and the portal under clients/portal/ are checked-in node
+# consumers in this monorepo (memql#116, memql#3314). Their package.json is
+# checked in; everything else stays ignored. The deploy/gate-browser
+# Playwright gate is also checked in -- its lockfile is what pins the npm deps
+# by integrity hash (Scorecard PinnedDependencies).
 package.json
 !sdk/ts/package.json
 !sdk/ts-viewkit/package.json
+!clients/portal/package.json
 !deploy/gate-browser/package.json
 package-lock.json
 !sdk/ts/package-lock.json
 !sdk/ts-viewkit/package-lock.json
+# The portal is an APPLICATION, so its lockfile IS committed: it pins the exact
+# dependency tree the released bundle is built from, which is what makes
+# `npm ci` reproducible in CI and in the image build. sdk/ts is a library and
+# deliberately has none -- a library's lockfile constrains nothing downstream.
+!clients/portal/package-lock.json
 !deploy/gate-browser/package-lock.json
 node_modules/
+
+# The portal's build output. Produced by `make portal-build` (vite) and copied
+# into the image by the Dockerfile's portal stage. Never committed: keeping
+# minified bundles and hashed filenames out of git is precisely why the Go side
+# serves them from a directory instead of //go:embed'ing them (see
+# component/portal/doc.go).
+clients/portal/dist/
 
 # macOS
 .DS_Store

@@ -576,6 +576,15 @@ variables:
     optional: true
     description: "Target gRPC endpoint the secrets-seed and rolling-drain CLIs dial when no explicit flag is passed."
 
+  # --- portal ---
+
+  - name: MEMQL_PORTAL_DIST
+    component: portal
+    scope: node
+    optional: true
+    default: "/app/portal"
+    description: "Directory the bff serves the memQL Portal SPA bundle from (GET /portal/*, memql#3314). The default is the image layout; point it at clients/portal/dist to serve a locally-built bundle. A missing directory logs one warning at boot and answers 404 -- it never fails the node."
+
   # --- cluster ---
 
   - name: MEMQL_CLUSTER_ID

@@ -1,0 +1,11 @@
+{
+  // Solution-style root: the browser sources and the build tooling are two
+  // different environments and must not share a global type set. Without the
+  // split, `@types/node` (needed by vite.config.ts for process.env) is
+  // visible to src/ too, and a `process.env.X` typo in browser code
+  // typechecks cleanly and fails at runtime as "process is not defined".
+  //
+  // `tsc -b` (see package.json's typecheck/build scripts) builds both.
+  "files": [],
+  "references": [{ "path": "./tsconfig.app.json" }, { "path": "./tsconfig.node.json" }]
+}

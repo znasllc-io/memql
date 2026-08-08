@@ -804,6 +804,9 @@ func PublicPaths() []string {
 	paths = append(paths, AIHTTPPaths()...)
 	// Concept metadata endpoint (public, no auth required)
 	paths = append(paths, ConceptAPIPaths()...)
+	// The portal's static bundle (memql#3314). The bytes are public; the data
+	// the bundle reads is gated on the stream it dials -- see PortalPaths.
+	paths = append(paths, PortalPaths()...)
 	return paths
 }
 
@@ -888,6 +891,31 @@ func AIHTTPPaths() []string {
 // attachment upload handler (POST /spaces/{partitionId}/attachments).
 func SpaceAttachmentPaths() []string {
 	return pathsWithBase("/spaces/")
+}
+
+// PortalPaths returns the mount prefix for the memQL Portal SPA bundle
+// (GET /portal/*, memql#3314). Served by the bff via component/portal.
+//
+// HTTP rather than gRPC because a browser cannot fetch its own bundle over
+// gRPC: the request that loads the application is made before any application
+// code exists to speak a protocol. Same category as the /memql/ws upgrade and
+// identity's web UI, and recorded in CLAUDE.md's Allowed HTTP Exceptions table.
+//
+// PUBLIC, deliberately, and the distinction is worth stating precisely. What
+// is public is the BUNDLE: the same bytes for every visitor, granting nothing
+// on its own. The DATA the portal displays is gated where all memQL data is
+// gated -- on the gRPC/WebSocket stream the bundle then dials, behind the
+// identity verifier. Requiring a bearer to fetch the JavaScript would also
+// make the sign-in flow impossible, since the code that performs sign-in is
+// in the bundle.
+//
+// The trailing slash makes this a PREFIX declaration, which is what an SPA
+// needs: every hashed asset lives beneath it, and so does every client-side
+// route the fallback answers with index.html. Nothing else is mounted under
+// /portal/, so the prefix blesses exactly the static bundle -- but that is a
+// property to re-check before mounting anything else there.
+func PortalPaths() []string {
+	return pathsWithBase("/portal/")
 }
 
 // InboundWebhookPaths returns the path prefix the inbound-delivery receiver

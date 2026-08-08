@@ -19,6 +19,11 @@ func Build(serviceLogger *slog.Logger, version string, overrides Overrides) *App
 	// to browsers, so wire the LiveKit room provider here. Mirror of
 	// the BFF transport's call.
 	a.wirePolyphonEndpoints()
+	// The memQL Portal SPA (memql#3314). Mounted here as well as in
+	// transportBFF because the default build IS a bff -- omitting it would
+	// mean the portal works in the tagged image and vanishes under a bare
+	// `go build .`, which is the build a developer reaches for first.
+	a.mountPortalEndpoints()
 	a.createHTTPServer()
 	a.cluster()
 

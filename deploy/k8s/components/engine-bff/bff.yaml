@@ -85,6 +85,15 @@ spec:
             - { name: SSL_CERT_DIR, value: "/etc/ssl/certs:/etc/memql/cacerts" }
             - { name: SERVER_ALLOWED_ORIGINS, value: "*" }
             - { name: MEMORY_NODES_DATABASE_MIGRATE_ON_START, value: "false" }
+            # memQL Portal SPA bundle (GET /portal/*, memql#3314). The engine
+            # bff image's portal stage copies the built bundle here; stated
+            # explicitly rather than left to the binary's default so the
+            # deployment records WHERE the UI comes from, and so an overlay can
+            # repoint it (an emptyDir + init-container, a different bundle)
+            # without a code change -- the same shape MEMQL_DSL_PATH uses for
+            # product DSL. A missing directory logs one warning and answers
+            # 404; it never fails the node.
+            - { name: MEMQL_PORTAL_DIST, value: "/app/portal" }
           volumeMounts:
             - { name: memql-ca, mountPath: /etc/memql/cacerts, readOnly: true }
           startupProbe:
@@ -124,6 +133,39 @@ spec:
     - { name: http, port: 8085, targetPort: 8085 }
     - { name: grpc, port: 50051, targetPort: 50051 }
     - { name: node, port: 50058, targetPort: 50058 }
+---
+# bff-http -- the bff's PLAIN-HTTP edge: the portal bundle (GET /portal/*) and
+# the /memql/ws browser bridge (memql#3314).
+#
+# WHY A SECOND SERVICE FOR THE SAME PODS, rather than routing an ingress at
+# `bff` port 8085. An ingress controller's backend protocol is configured per
+# SERVICE, not per port: locally the `bff` Service carries
+# `traefik.ingress.kubernetes.io/service.serversscheme: h2c` so traefik speaks
+# HTTP/2 cleartext to the gRPC edge on :50051, and that annotation applies to
+# every port of that Service. An HTTP/1.1 asset fetch dialed as h2c does not
+# work against Go's net/http server, so the portal would fail to load with a
+# protocol error rather than anything that names the cause. The cloud has the
+# mirror-image constraint (nginx `backend-protocol: GRPC`).
+#
+# Splitting the two protocols across two Services makes each backend's
+# protocol unambiguous, and it is the SAME shape in every environment -- only
+# which ingress controller points at it differs, which is a value, not
+# architecture (docs/public/operate/environment-parity.md).
+apiVersion: v1
+kind: Service
+metadata:
+  name: bff-http
+  namespace: memql
+  labels:
+    app.kubernetes.io/name: bff
+    app.kubernetes.io/part-of: memql
+    memql/role: http-edge
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: bff
+  ports:
+    - { name: http, port: 8085, targetPort: 8085 }
 ---
 # bff-active -- the stable mesh-parent alias the leaf nodes dial
 # (MEMQL_PARENT_ADDRESS=bff-active:50058). In the product-agnostic base it

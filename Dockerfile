@@ -1,5 +1,32 @@
 # syntax=docker/dockerfile:1
 
+# PORTAL_DIST_STAGE selects which stage the runtime copies the memQL Portal
+# bundle from (memql#3314). It is a GLOBAL ARG -- declared before the first
+# FROM -- because that is the only scope a `FROM ${VAR}` line can read.
+#
+# WHY A STAGE SELECTOR RATHER THAN AN UNCONDITIONAL COPY
+#
+# Only the bff serves the portal (app/transport_portal.go). A Dockerfile has
+# no conditional COPY, so the alternatives were: build the SPA in every node
+# image (a Node toolchain + npm install + vite build on all eight, for bytes
+# seven of them never serve), or add a second runtime target and duplicate the
+# runtime stage. Naming the SOURCE stage instead costs one indirection and
+# leaves both runtime stages identical for every node type.
+#
+# BuildKit only builds stages that are actually referenced, so the default --
+# portal-skip, an empty directory -- means a non-bff build never pulls the
+# Node image and never runs npm. Its cost is one `mkdir` on a stage that was
+# already built.
+#
+#   docker build --build-arg PORTAL_DIST_STAGE=portal-build ...   # with the SPA
+#   docker build ...                                              # without (default)
+#
+# scripts/lib/engine_build_args.sh sets it for the bff on the local path;
+# .github/workflows/build-engine-images.yml sets it for the release build.
+# Those two are the only callers, and both are asserted by
+# scripts/ci/portal_image_wiring_test.go.
+ARG PORTAL_DIST_STAGE=portal-skip
+
 FROM golang:1.26.4@sha256:68cb6d68bed024785b69195b89af7ac7a444f27791435f98647edff595aa0479 AS builder
 
 # BUILD_TAGS controls which node type binary is compiled.
@@ -167,6 +194,49 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH:-amd64} go build -ldflags="-s -w" -o /app/bin/healthcheck ./cmd/healthcheck
 
+# --- memQL Portal SPA (memql#3314) ----------------------------------------
+#
+# A Node stage, entirely separate from the Go builder: nothing here touches
+# the Go toolchain and nothing in the Go stages touches Node. That separation
+# is the whole reason the bundle is served from a directory instead of being
+# //go:embed'ed (component/portal/doc.go) -- every Go lane in CI, and every
+# `go build ./...` on a developer machine, stays Node-free.
+#
+# bookworm-slim rather than alpine: scripts/portal/build.sh is a bash script
+# (per the Makefile+shell convention in CLAUDE.md) and alpine ships no bash.
+# Builder-only, so image size is irrelevant.
+FROM node:22-bookworm-slim AS portal-build
+
+WORKDIR /src
+
+# Manifests first, sources second: the standard layer-caching split, and it
+# matters more here than usual because `npm ci` is the slow step. The two
+# `file:` dependencies' manifests come along because npm has to resolve them
+# to install the portal at all -- a `file:` dep is a linked source tree, not a
+# registry tarball.
+COPY clients/portal/package.json clients/portal/package-lock.json ./clients/portal/
+COPY sdk/ts/package.json ./sdk/ts/
+COPY sdk/ts-viewkit/package.json sdk/ts-viewkit/package-lock.json ./sdk/ts-viewkit/
+
+COPY sdk/ts ./sdk/ts
+COPY sdk/ts-viewkit ./sdk/ts-viewkit
+COPY clients/portal ./clients/portal
+COPY scripts/portal ./scripts/portal
+
+# The SAME script `make portal-build` runs, so the image bundle and a locally
+# built one cannot diverge in how they were produced. Moved to /portal-dist so
+# both alternatives of the PORTAL_DIST_STAGE selector expose the bundle at one
+# path -- the runtime's COPY cannot branch on which stage it resolved to.
+RUN bash scripts/portal/build.sh build && mv clients/portal/dist /portal-dist
+
+# portal-skip is the empty alternative the PORTAL_DIST_STAGE selector resolves
+# to by default. Derived FROM builder purely because that stage is already
+# built -- it contributes one empty directory and pulls no additional image.
+FROM builder AS portal-skip
+RUN mkdir -p /portal-dist
+
+FROM ${PORTAL_DIST_STAGE} AS portal-dist
+
 # --- Runtime: CGO-free node types (default) use distroless. ---------------
 FROM gcr.io/distroless/base-debian12 AS runtime
 
@@ -183,6 +253,13 @@ COPY --from=builder /app/VERSION ./VERSION
 # binary at compile time. The on-disk copy is only needed if
 # MEMQL_DSL_PATH is set at runtime to override the embedded tree
 # (dev/per-deploy patches). Cloud Run runs from the embedded copy.
+#
+# The memQL Portal bundle is the opposite: NEVER embedded, always a directory,
+# because embedding it would put a Node build in front of every Go build (see
+# component/portal/doc.go). /app/portal is component/portal.DefaultDistDir;
+# MEMQL_PORTAL_DIST overrides it. Empty for every node type except the bff --
+# the handler answers 404 with an actionable message rather than failing boot.
+COPY --from=portal-dist /portal-dist ./portal
 
 EXPOSE 8085 50051
 
@@ -205,6 +282,11 @@ WORKDIR /app
 COPY --from=builder /app/bin/memql ./memql
 COPY --from=builder /app/bin/healthcheck ./healthcheck
 COPY --from=builder /app/VERSION ./VERSION
+# Same portal copy as the distroless runtime above. Present in BOTH stages
+# deliberately: the release workflow builds the CGO-free node types with no
+# --target, which resolves to the LAST stage -- this one -- so a copy only in
+# the distroless stage would ship no portal in the images that actually run.
+COPY --from=portal-dist /portal-dist ./portal
 
 EXPOSE 8085 50051
 

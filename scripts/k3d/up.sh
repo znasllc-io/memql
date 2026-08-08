@@ -32,6 +32,12 @@
 #   kubectl port-forward -n memql svc/bff 50051:50051
 # (the `mcp` node is the MCP-protocol head; it also serves gRPC on :50051.)
 #
+# The memQL Portal -- the Cockpit's graphical sibling -- is served BY the bff
+# and reached through the same front door, at
+# https://cockpit.local.znas.io/portal/ (memql#3314). Its bundle is baked into
+# the bff image by the Dockerfile's portal stage, so `make dev NODE=bff`
+# rebuilds it like any other change to that node.
+#
 # This is a CAPABILITY SCRIPT: non-interactive, structured params in, a single
 # JSON result envelope on stdout, human logs on stderr, honest exit codes.
 # Contract: docs/internal/design/capability-script-contract.md
@@ -436,9 +442,10 @@ function print_summary() {
         echo "  Namespace:      ${NAMESPACE}"
         echo ""
         echo "  Entry points (front door on 443; *.local.znas.io resolves to 127.0.0.1):"
-        echo "    https://identity.local.znas.io   identity (web UI + JWKS)"
-        echo "    ws://localhost:7880              livekit"
-        echo "    localhost:5432                   postgres (debug)"
+        echo "    https://identity.local.znas.io          identity (web UI + JWKS)"
+        echo "    https://cockpit.local.znas.io/portal/   memQL Portal (graphical ops console)"
+        echo "    ws://localhost:7880                     livekit"
+        echo "    localhost:5432                          postgres (debug)"
         echo ""
         echo "  Client edge (Cockpit / SDKs), on demand:"
         echo "    kubectl port-forward -n ${NAMESPACE} svc/bff 50051:50051"

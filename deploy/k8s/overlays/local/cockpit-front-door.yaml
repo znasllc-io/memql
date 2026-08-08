@@ -19,6 +19,18 @@ metadata:
   namespace: memql
   annotations:
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
+#
+# THE HOST SERVES TWO PROTOCOLS. gRPC on :50051 for the Cockpit and the SDKs,
+# and plain HTTP on :8085 for the memQL Portal's bundle plus the /memql/ws
+# browser bridge the portal dials (memql#3314). They are split across two
+# backends because an ingress controller's backend protocol is a per-SERVICE
+# setting -- see the comment on the bff-http Service in
+# deploy/k8s/components/engine-bff/bff.yaml. Traefik orders rules by
+# specificity, so the two longer paths below win over `/`.
+#
+# The portal therefore lives at https://cockpit.local.znas.io/portal/ -- the
+# ops edge's graphical half, alongside the gRPC half the terminal Cockpit
+# uses. Same front door, same TLS, no port, no port-forward.
 spec:
   tls:
     - hosts: ["cockpit.local.znas.io"]
@@ -27,6 +39,24 @@ spec:
     - host: cockpit.local.znas.io
       http:
         paths:
+          # The portal's static bundle.
+          - path: /portal
+            pathType: Prefix
+            backend:
+              service:
+                name: bff-http
+                port:
+                  number: 8085
+          # The WebSocket bridge the portal dials. It is HTTP/1.1 with an
+          # Upgrade, NOT gRPC, so it must reach the plain-HTTP backend even
+          # though it tunnels to MemqlService.Stream on the other side.
+          - path: /memql/ws
+            pathType: Prefix
+            backend:
+              service:
+                name: bff-http
+                port:
+                  number: 8085
           - path: /
             pathType: Prefix
             backend:

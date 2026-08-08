@@ -1,0 +1,34 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    // Vite bundles; the SDK packages resolve through their package.json
+    // "exports" maps, which only "bundler" resolution reads the way a bundler
+    // does. NodeNext here would demand explicit .js suffixes on every local
+    // import AND resolve the subpath exports differently from Vite.
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    // Type-check only -- `vite build` emits the bundle. tsBuildInfoFile keeps
+    // the project-reference build state out of the source tree.
+    "noEmit": true,
+    "composite": true,
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
+    // vite/client supplies import.meta.env; vitest/globals supplies describe /
+    // it / expect without a per-file import. `node` is deliberately ABSENT:
+    // nothing under src/ or test/ runs in Node.
+    "types": ["vite/client", "vitest/globals"]
+  },
+  "include": ["src", "test"]
+}

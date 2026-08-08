@@ -54,40 +54,58 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # `portal` names the Dockerfile stage the runtime copies the memQL
+        # Portal bundle from (memql#3314). ONLY the bff serves the portal, so
+        # only the bff builds it -- every other entry takes `portal-skip`, an
+        # empty directory, and never pulls the Node image. Set on every entry
+        # rather than defaulted, because `FROM ${PORTAL_DIST_STAGE}` cannot
+        # take an empty string and a missing matrix key renders as one.
         include:
           # identity: CGO-free; matches build_one (no --target -> the
           # Dockerfile's last stage). voice: CGO + the voice-runtime stage.
           - node: identity
             cgo: "0"
             target: ""
+            portal: portal-skip
           - node: voice
             cgo: "1"
             target: voice-runtime
+            portal: portal-skip
           # mcp: engine-built (no product DSL), CGO-free -- same shape as
           # identity. Remote MCP node (memql#1554); CI gap fixed in #1581.
           - node: mcp
             cgo: "0"
             target: ""
+            portal: portal-skip
           # Platform consolidation (#2472 Step 2): every node type now ships as
           # a PRODUCT-AGNOSTIC engine image. Product DSL is delivered at runtime
           # via MEMQL_DSL_PATH (dsl.MountRuntimeDomainsFromEnv, #2484), so these
           # nodes no longer need to be carrier-built. CGO-free, default runtime
           # stage -- same shape as identity/mcp.
+          #
+          # bff is the one node that carries the portal bundle: it is the
+          # client edge every browser connects to, and the portal deliberately
+          # dials the origin that served it.
           - node: bff
             cgo: "0"
             target: ""
+            portal: portal-build
           - node: cognition
             cgo: "0"
             target: ""
+            portal: portal-skip
           - node: agent
             cgo: "0"
             target: ""
+            portal: portal-skip
           - node: planner
             cgo: "0"
             target: ""
+            portal: portal-skip
           - node: workbench
             cgo: "0"
             target: ""
+            portal: portal-skip
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -127,6 +145,7 @@ jobs:
           build-args: |
             BUILD_TAGS=${{ matrix.node }}
             CGO_ENABLED=${{ matrix.cgo }}
+            PORTAL_DIST_STAGE=${{ matrix.portal }}
           tags: ${{ env.ACR_LOGIN_SERVER }}/memql-${{ matrix.node }}:${{ inputs.version }}
           cache-from: type=gha,scope=memql-${{ matrix.node }}
           cache-to: type=gha,mode=max,scope=memql-${{ matrix.node }}
