@@ -132,4 +132,106 @@ export const viewKitStyles = `
   opacity: 0.5;
   font-style: italic;
 }
+
+/* The cluster topology grid (cluster.ts). Auto-filling columns rather than a
+   fixed count: the same grid is drawn into a narrow editor tab and a wide
+   portal pane, and neither consumer should have to tell the renderer how many
+   tiles fit. */
+.vk-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 6px;
+}
+
+.vk-tile {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  align-items: baseline;
+  padding: 6px 8px;
+  border: 1px solid var(--vk-border, currentColor);
+  border-radius: 3px;
+  color: var(--vk-fg, inherit);
+}
+
+/* A dashed border for an orphan. Deliberately a SHAPE difference, not a colour
+   one: colour on this surface is spent on health, and an orphan can be
+   perfectly healthy -- it is simply serving from a release that is no longer
+   current. It also survives a monochrome or high-contrast theme. */
+.vk-tile[data-orphan="true"] { border-style: dashed; }
+
+.vk-tile-name { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+
+/* Same pill treatment as .vk-row-status, and value-agnostic for the same
+   reason: a host wanting green/amber/red writes rules against
+   \`.vk-tile-health[data-health="degraded"]\`. */
+.vk-tile-health {
+  margin-left: auto;
+  flex: none;
+  font-size: 0.8em;
+  opacity: 0.8;
+  padding: 0 6px;
+  border: 1px solid var(--vk-border, currentColor);
+  border-radius: 8px;
+}
+
+/* Supporting lines. flex-basis 100% puts each on its own row inside the tile,
+   so the identity line and the two release lines stack predictably however
+   long the values are. */
+.vk-tile-detail,
+.vk-tile-meta {
+  flex-basis: 100%;
+  color: var(--vk-muted-fg, inherit);
+  opacity: 0.7;
+  font-size: 0.9em;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Name / detail / count tables -- the replica tally and a deployment's
+   per-tier composition. */
+.vk-tally { list-style: none; margin: 0; padding: 0; }
+
+.vk-tally-row { display: flex; gap: 8px; align-items: baseline; padding: 2px 6px; }
+
+.vk-tally-name { flex: none; min-width: 8em; }
+
+.vk-tally-detail {
+  color: var(--vk-muted-fg, inherit);
+  opacity: 0.7;
+  font-size: 0.9em;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Tabular figures so a column of counts scans as a column. */
+.vk-tally-count {
+  margin-left: auto;
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A flagged row drops the count's muting so the number that is WRONG is the
+   one that reads loudest. */
+.vk-tally-row[data-flagged="true"] .vk-tally-count { font-weight: 600; }
+
+/* The \`[flag]\` marker -- \`[orphan]\`, \`[under-replica]\`. Dashed to echo the
+   orphan tile, and value-agnostic: the literal text inside is what says which
+   flag it is. */
+.vk-flag {
+  flex: none;
+  font-size: 0.8em;
+  padding: 0 4px;
+  border: 1px dashed var(--vk-border, currentColor);
+  border-radius: 3px;
+  opacity: 0.9;
+}
+
+/* The \`[current]\` marker inside a vk-row. Quieter than .vk-flag: it marks the
+   NORMAL state (exactly one deployment is current), so it should not read as a
+   warning the way an orphan flag does. */
+.vk-row-flag { flex: none; font-size: 0.8em; opacity: 0.9; }
 `;
