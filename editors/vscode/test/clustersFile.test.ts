@@ -12,12 +12,13 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 import {
+  addCluster,
   readClustersFile,
   readClustersFileSafe,
   setSelectedCluster,
   upsertCluster,
 } from "../src/clusters/file.js";
-import { needsAuth } from "../src/clusters/model.js";
+import { isOidcOnly, needsAuth } from "../src/clusters/model.js";
 
 async function tempFile(contents: string): Promise<string> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "memql-clusters-"));
@@ -319,4 +320,127 @@ test("needsAuth is true without an endpoint", () => {
 
 test("needsAuth is true with an issuer but no client id", () => {
   assert.equal(needsAuth({ name: "s", endpoint: "h:443", issuer: "https://i" }), true);
+});
+
+// --- The identity field is exempt from the "" -> delete rule ---------------
+//
+// `name` is what every other reference resolves a node by (findByName,
+// selected_cluster, the tree's select/edit commands), so deleting it does not
+// clear a value -- it orphans the whole node behind an entry nothing can
+// resolve, endpoint and PAT included. Unreachable through the UI (the name
+// box validates non-empty) but a latent hole in an exported function, so the
+// exemption is enforced at upsertCluster's boundary.
+
+test("upsertCluster refuses an empty name rather than deleting a node's identity", async () => {
+  const f = await tempFile(SAMPLE);
+  await assert.rejects(
+    () => upsertCluster(f, { name: "", endpoint: "cockpit.local.znas.io:443" }, "local"),
+    /cluster name is required/,
+  );
+});
+
+test("a refused empty name leaves the target node completely intact", async () => {
+  const f = await tempFile(SAMPLE);
+  await assert.rejects(() => upsertCluster(f, { name: "", endpoint: "" }, "local"));
+
+  const parsed = await readClustersFile(f);
+  assert.deepEqual(parsed.clusters.map((c) => c.name), ["local", "staging"]);
+  assert.equal(parsed.clusters[0]?.endpoint, "cockpit.local.znas.io:443");
+  assert.equal(
+    parsed.clusters[0]?.pat,
+    "mql_pat_abc",
+    "the node's credentials must not be left stranded behind an unresolvable entry",
+  );
+  assert.equal(parsed.selectedCluster, "local");
+});
+
+test("upsertCluster refuses an empty name on the add path too, rather than writing an anonymous node", async () => {
+  const f = await tempFile(SAMPLE);
+  await assert.rejects(() => upsertCluster(f, { name: "", endpoint: "x:443" }), /name is required/);
+  assert.equal((await readClustersFile(f)).clusters.length, 2);
+});
+
+// --- addCluster: an add must never destroy an existing cluster -------------
+//
+// The add and edit flows collect the SAME four-field form, and add has no
+// originalName to pass. So typing an existing name into the add form landed
+// in upsertCluster's update branch, where every field the user left blank
+// arrived as "" and was DELETED off the real cluster: "I tried to add a
+// cluster" silently revoked the token on the one already there.
+
+test("addCluster writes a new cluster", async () => {
+  const f = await tempFile(SAMPLE);
+  await addCluster(f, {
+    name: "prod",
+    endpoint: "cockpit.prod.example.com:443",
+    domain: "prod.example.com",
+  });
+  const parsed = await readClustersFile(f);
+  assert.equal(parsed.clusters.length, 3);
+  assert.equal(parsed.clusters[2]?.name, "prod");
+});
+
+test("addCluster refuses a name that already exists", async () => {
+  const f = await tempFile(SAMPLE);
+  await assert.rejects(
+    () => addCluster(f, { name: "local", endpoint: "cockpit.local.znas.io:443" }),
+    /already exists/,
+  );
+});
+
+test("a refused add does not clear the existing cluster's PAT or domain", async () => {
+  const f = await tempFile(SAMPLE);
+  // Exactly what the add form produces when the user retypes an existing
+  // name and leaves the optional inputs blank: empties, which upsertCluster
+  // would have read as explicit clears.
+  await assert.rejects(() =>
+    addCluster(f, { name: "local", endpoint: "cockpit.local.znas.io:443", domain: "", pat: "" }),
+  );
+
+  const parsed = await readClustersFile(f);
+  assert.equal(
+    parsed.clusters[0]?.pat,
+    "mql_pat_abc",
+    "an add must not revoke the token on the cluster it collided with",
+  );
+  assert.equal(parsed.clusters[0]?.domain, "local.znas.io");
+  assert.equal(parsed.clusters.length, 2, "and it must not append a duplicate either");
+});
+
+test("addCluster still refuses an empty name", async () => {
+  const f = await tempFile(SAMPLE);
+  await assert.rejects(() => addCluster(f, { name: "", endpoint: "x:443" }), /name is required/);
+});
+
+// --- isOidcOnly ------------------------------------------------------------
+//
+// Both callers (ConnectionManager's error message, the Clusters tree tooltip)
+// check isOidcOnly BEFORE needsAuth, so an isOidcOnly that ignored the
+// endpoint told an operator to "authenticate in the memQL Cockpit" when the
+// truth was "this cluster has nowhere to dial".
+
+test("isOidcOnly is true for an OIDC cluster with an endpoint and no PAT", () => {
+  assert.equal(
+    isOidcOnly({ name: "s", endpoint: "h:443", issuer: "https://i", clientId: "cockpit" }),
+    true,
+  );
+});
+
+test("isOidcOnly is false once a PAT is present", () => {
+  assert.equal(
+    isOidcOnly({
+      name: "s",
+      endpoint: "h:443",
+      issuer: "https://i",
+      clientId: "cockpit",
+      pat: "mql_pat_x",
+    }),
+    false,
+  );
+});
+
+test("isOidcOnly is false without an endpoint, so the message is 'not configured'", () => {
+  const cluster = { name: "s", endpoint: "", issuer: "https://i", clientId: "cockpit" };
+  assert.equal(isOidcOnly(cluster), false);
+  assert.equal(needsAuth(cluster), true, "and needsAuth must be the one that answers instead");
 });

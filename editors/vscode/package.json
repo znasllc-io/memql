@@ -119,11 +119,13 @@
       "memql": [
         {
           "id": "memqlClusters",
-          "name": "Clusters"
+          "name": "Clusters",
+          "when": "isWorkspaceTrusted"
         },
         {
           "id": "memqlConcepts",
-          "name": "Concepts"
+          "name": "Concepts",
+          "when": "isWorkspaceTrusted"
         }
       ]
     },
@@ -138,6 +140,12 @@
     ],
     "menus": {
       "commandPalette": [
+        { "command": "memql.clusters.refresh", "when": "isWorkspaceTrusted" },
+        { "command": "memql.clusters.select", "when": "isWorkspaceTrusted" },
+        { "command": "memql.clusters.add", "when": "isWorkspaceTrusted" },
+        { "command": "memql.clusters.edit", "when": "isWorkspaceTrusted" },
+        { "command": "memql.clusters.disconnect", "when": "isWorkspaceTrusted" },
+        { "command": "memql.concepts.refresh", "when": "isWorkspaceTrusted" },
         { "command": "memql.concepts.open", "when": "false" }
       ],
       "view/title": [

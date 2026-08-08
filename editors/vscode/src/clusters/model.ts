@@ -51,7 +51,14 @@ export function needsAuth(c: ClusterConfig): boolean {
 // isOidcOnly reports a cluster this extension cannot authenticate itself:
 // OIDC is configured but no PAT is present. B1 supports PAT auth only, so
 // these clusters must be authenticated in the cockpit first.
+//
+// An empty endpoint disqualifies the cluster, matching needsAuth: with
+// nowhere to dial, "authenticate this in the memQL Cockpit and come back" is
+// simply the wrong instruction -- the honest answer is "not configured", and
+// both callers (ConnectionManager's error message, the Clusters tree tooltip)
+// check isOidcOnly BEFORE needsAuth, so without this the misleading half won.
 export function isOidcOnly(c: ClusterConfig): boolean {
+  if (c.endpoint === "") return false;
   const noPat = c.pat === undefined || c.pat === "";
   const hasOidc =
     c.issuer !== undefined && c.issuer !== "" &&

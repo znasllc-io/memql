@@ -21,6 +21,13 @@ export function defaultClustersPath(): string {
   return path.join(os.homedir(), ".memql", "clusters.yaml");
 }
 
+// IDENTITY_FIELD is the one field every other reference in this file resolves
+// a node BY: findByName matches on it, selected_cluster points at it, and the
+// tree's select/edit commands carry it. It is therefore exempt from the
+// "" -> delete rule below (see upsertCluster), and the exemption is enforced
+// at the boundary -- an empty name is rejected outright rather than written.
+const IDENTITY_FIELD: keyof ClusterConfig = "name";
+
 // Wire spellings. The YAML uses snake_case; the model uses camelCase.
 const FIELD_MAP: ReadonlyArray<readonly [keyof ClusterConfig, string]> = [
   ["name", "name"],
@@ -144,11 +151,28 @@ function findByName(seq: YAMLSeq, name: string): YAMLMap | undefined {
 // who cleared the PAT input to revoke a token kept the old token on disk while
 // the UI showed the field empty -- "I removed my token from the extension" was
 // simply false.
+//
+// The IDENTITY FIELD is exempt from that rule, and the exemption is enforced
+// here at the boundary rather than as a skip inside the write loop. `name` is
+// what every other reference resolves a node by, so deleting it does not
+// clear a value -- it orphans the whole node: `upsertCluster(f, {name: ""},
+// "local")` used to find "local", delete its `name` key, and leave an
+// unreachable, unselectable entry still holding that cluster's endpoint and
+// PAT. No caller has a use for it (the add/edit form validates the name box
+// non-empty, so this is unreachable through the UI), and there is no
+// interpretation of an anonymous cluster that is better than a refusal, so an
+// empty name is rejected outright -- which means the delete branch below can
+// never see one.
 export async function upsertCluster(
   file: string,
   cluster: ClusterConfig,
   originalName?: string,
 ): Promise<void> {
+  if (cluster[IDENTITY_FIELD] === "") {
+    throw new Error(
+      "a cluster name is required: an empty name would orphan the node's endpoint and PAT behind an entry nothing can resolve",
+    );
+  }
   const doc = await loadDocument(file);
   let seq = doc.get("clusters", true) as YAMLSeq | undefined;
   if (seq === undefined || !Array.isArray(seq.items)) {
@@ -195,4 +219,35 @@ export async function upsertCluster(
   }
 
   await saveDocument(file, doc);
+}
+
+// addCluster is upsertCluster's ADD-only front door: it refuses a name that
+// already exists instead of updating that entry.
+//
+// The distinction matters because "Add Cluster" and "Edit Cluster" collect
+// the SAME four-field form, and add has no originalName to pass. So a user who
+// typed an existing name into the add flow -- a plausible slip, since the add
+// form shows no existing names -- landed in upsertCluster's update branch, and
+// every field the add form left blank (the PAT they did not retype, the domain
+// they skipped) arrived as "" and was DELETED off the real cluster. "I tried to
+// add a cluster" silently revoked the token on the one already there.
+//
+// Refusing is the right half of the fix rather than merging-without-deleting:
+// add and edit are different intents, and quietly turning an add into an edit
+// is exactly how the destructive case arose. The message points at the edit
+// flow, which is where the user can see and change every field.
+//
+// The existence check re-reads the file, which upsertCluster then reads again.
+// That is the file's model, not an oversight: every write here is
+// read-modify-write against the bytes on disk at write time (the cockpit
+// writes this file too), so no read is authoritative for longer than the call
+// that made it, and caching one would not make the check any less racy.
+export async function addCluster(file: string, cluster: ClusterConfig): Promise<void> {
+  const existing = await readClustersFile(file);
+  if (existing.clusters.some((c) => c.name === cluster.name)) {
+    throw new Error(
+      `a cluster named "${cluster.name}" already exists; edit it instead of adding it again`,
+    );
+  }
+  await upsertCluster(file, cluster);
 }

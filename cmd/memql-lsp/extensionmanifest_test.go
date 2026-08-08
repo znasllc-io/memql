@@ -709,6 +709,126 @@ func TestExtensionTypesMatchEngineFloor(t *testing.T) {
 	}
 }
 
+// extensionContributions reads only the manifest slices the workspace-trust
+// guard below judges. Kept as its own type rather than fields on
+// extensionManifest, matching the precedent set by extensionLockfileRoot:
+// extensionManifest is built literally by other fixtures in this file, and
+// widening it there would break those literals for fields only this guard
+// reads.
+type extensionContributions struct {
+	Contributes struct {
+		Views map[string][]struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+			When string `json:"when"`
+		} `json:"views"`
+		Commands []struct {
+			Command string `json:"command"`
+		} `json:"commands"`
+		Menus struct {
+			CommandPalette []struct {
+				Command string `json:"command"`
+				When    string `json:"when"`
+			} `json:"commandPalette"`
+		} `json:"menus"`
+	} `json:"contributes"`
+}
+
+// trustGatedCommands names every command that touches the RUNTIME surface --
+// the one that reads credentials out of ~/.memql/clusters.yaml and opens a
+// network connection to a cluster. src/extension.ts registers these only once
+// the workspace is trusted (see registerRuntimeSurface), so in an untrusted
+// window they are declared but unregistered: invoking one from the palette
+// fails with "command not found".
+//
+// Commands NOT listed here are language-feature commands, which work fine in
+// an untrusted workspace and must not be gated. Adding a command to the
+// manifest and to this list is the same review decision as deciding which
+// side of the trust boundary it belongs on.
+var trustGatedCommands = []string{
+	"memql.clusters.refresh",
+	"memql.clusters.select",
+	"memql.clusters.add",
+	"memql.clusters.edit",
+	"memql.clusters.disconnect",
+	"memql.concepts.refresh",
+}
+
+// workspaceTrustWhenClause is the context key VS Code evaluates for trust.
+const workspaceTrustWhenClause = "isWorkspaceTrusted"
+
+// TestRuntimeSurfaceIsTrustGated pins the manifest half of the workspace-trust
+// story (memql#3303).
+//
+// src/extension.ts already gates the runtime surface at RUNTIME: an untrusted
+// activation registers the language client and nothing else. The manifest did
+// not, and a manifest contribution is what the editor draws BEFORE any code
+// runs -- so an untrusted workspace showed the memQL activity-bar container
+// with two permanently empty views, and offered six palette commands that all
+// failed with "command not found" because their handlers were never
+// registered. Every one of those is a promise the extension cannot keep in
+// that window.
+//
+// Two clauses, matching the two things a manifest can contribute here:
+//
+//   - VIEWS take a `when`, and hiding both of this extension's views is also
+//     what hides the activity-bar container: VS Code renders no container
+//     whose views are all hidden. The container contribution itself takes only
+//     id/title/icon -- there is no `when` on it to set -- so the views ARE the
+//     gate for the container, and asserting them covers both.
+//   - COMMANDS do not take a `when`; palette visibility is contributed
+//     separately through menus.commandPalette. Each runtime command needs an
+//     entry there, and memql.concepts.open keeps its existing `"when": false`
+//     (it takes a Concept argument the palette cannot supply).
+func TestRuntimeSurfaceIsTrustGated(t *testing.T) {
+	var contrib extensionContributions
+	loadExtensionJSON(t, checkedInExtensionManifest, &contrib)
+
+	views := contrib.Contributes.Views["memql"]
+	if len(views) == 0 {
+		t.Fatal("contributes.views.memql is empty; the view container moved and this guard has silently stopped protecting anything")
+	}
+	for _, v := range views {
+		if v.When != workspaceTrustWhenClause {
+			t.Errorf("view %q declares when %q, want %q; without it an untrusted workspace shows this view (and the activity-bar container holding it) permanently empty, since extension.ts registers no provider until trust is granted",
+				v.ID, v.When, workspaceTrustWhenClause)
+		}
+	}
+
+	palette := map[string]string{}
+	for _, entry := range contrib.Contributes.Menus.CommandPalette {
+		palette[entry.Command] = entry.When
+	}
+	declared := map[string]bool{}
+	for _, c := range contrib.Contributes.Commands {
+		declared[c.Command] = true
+	}
+
+	for _, cmd := range trustGatedCommands {
+		if !declared[cmd] {
+			t.Errorf("trustGatedCommands names %q but contributes.commands does not declare it; the command was renamed or removed -- update the list rather than leaving a guard pointed at nothing", cmd)
+			continue
+		}
+		when, ok := palette[cmd]
+		if !ok {
+			t.Errorf("command %q has no contributes.menus.commandPalette entry, so the palette offers it in an untrusted workspace where extension.ts never registered a handler -- it fails with \"command not found\". Add {\"command\": %q, \"when\": %q}",
+				cmd, cmd, workspaceTrustWhenClause)
+			continue
+		}
+		if when != workspaceTrustWhenClause {
+			t.Errorf("command %q declares palette when %q, want %q", cmd, when, workspaceTrustWhenClause)
+		}
+	}
+
+	// Every palette entry must name a real command, or the gate silently
+	// applies to nothing (a renamed command leaves its `when` behind).
+	for _, entry := range contrib.Contributes.Menus.CommandPalette {
+		if !declared[entry.Command] {
+			t.Errorf("contributes.menus.commandPalette gates %q, which contributes.commands does not declare; the entry is dead and gates nothing", entry.Command)
+		}
+	}
+}
+
 // rangeAdmits reports whether `resolved` satisfies the pin `op`+`floor`, for
 // the two operators this guard accepts.
 //

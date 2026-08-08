@@ -76,3 +76,54 @@ test("terminates on a self-referential payload instead of recursing forever", ()
   const html = renderToHtml(renderDetail(cyclic));
   assert.match(html, /vk-value vk-cycle">\[circular\]</);
 });
+
+// The cycle guard tracks the ANCESTOR chain, not "every object ever seen".
+// The distinction is the difference between a correct guard and a wrong one:
+// renderValue adds an object to `seen` before descending into it and DELETES
+// it again on the way out, so an object that merely appears twice as a
+// SIBLING -- the same nested record referenced from two fields, which JSON.parse
+// on a wire payload does not produce but an in-process caller readily does --
+// renders in full both times. An implementation that only ever added to `seen`
+// would pass the cyclic test above while silently rendering "[circular]" for
+// the second, perfectly finite occurrence.
+test("a non-cyclic object reused by two siblings renders in full both times", () => {
+  const shared = { host: "cockpit.local.znas.io", port: 443 };
+  const html = renderToHtml(renderDetail({ primary: shared, mirror: shared }));
+
+  assert.doesNotMatch(
+    html,
+    /vk-cycle/,
+    "a shared sibling is finite, not circular -- marking it would hide real data",
+  );
+  assert.equal(
+    html.match(/vk-value">cockpit\.local\.znas\.io</g)?.length,
+    2,
+    "both occurrences must render their contents",
+  );
+});
+
+test("a shared sibling deeper in the tree is still not mistaken for a cycle", () => {
+  const shared = { id: "a1" };
+  const html = renderToHtml(
+    renderDetail({ payload: { left: shared, right: { inner: shared } } }),
+  );
+
+  assert.doesNotMatch(html, /vk-cycle/);
+  assert.equal(html.match(/vk-value">a1</g)?.length, 2);
+});
+
+test("a cycle reached through a shared sibling is still caught", () => {
+  // The two properties must not cancel each other out: the ancestor chain
+  // still has to terminate a genuine loop that is entered via a node the
+  // walk has already visited and left.
+  const loop: Record<string, unknown> = { name: "root" };
+  loop["self"] = loop;
+  const html = renderToHtml(renderDetail({ first: loop, second: loop }));
+
+  assert.match(html, /vk-value vk-cycle">\[circular\]</);
+  assert.equal(
+    html.match(/vk-value">root</g)?.length,
+    2,
+    "the shared sibling still renders twice; only the self-reference inside it is cut",
+  );
+});

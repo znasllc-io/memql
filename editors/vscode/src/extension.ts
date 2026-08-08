@@ -10,7 +10,7 @@ import {
 
 import type { Concept } from '@znasllc-io/memql-sdk-core/client';
 
-import { defaultClustersPath, readClustersFileSafe, setSelectedCluster, upsertCluster } from './clusters/file.js';
+import { addCluster, defaultClustersPath, readClustersFileSafe, setSelectedCluster, upsertCluster } from './clusters/file.js';
 import type { ClusterConfig } from './clusters/model.js';
 import { ConnectionManager } from './connection/manager.js';
 import { ClustersTreeProvider, type ClusterNode } from './views/clustersTree.js';
@@ -161,7 +161,10 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       if (created === undefined) {
         return;
       }
-      await writeCluster(clustersPath, created, undefined, clustersTree);
+      // addCluster, not upsertCluster: an add whose name collides with an
+      // existing cluster must be refused, not silently turned into an edit
+      // that deletes every field this form left blank. See addCluster.
+      await writeCluster(clustersTree, () => addCluster(clustersPath, created));
     }),
     commands.registerCommand('memql.clusters.edit', async (node?: ClusterNode) => {
       const target = node ?? (await pickCluster(clustersPath));
@@ -176,22 +179,26 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       if (edited === undefined) {
         return;
       }
-      await writeCluster(clustersPath, edited, originalName, clustersTree);
+      await writeCluster(clustersTree, () => upsertCluster(clustersPath, edited, originalName));
     })
   );
 }
 
-// writeCluster persists a cluster and refreshes the tree, surfacing a write
-// failure (e.g. a rename onto a name already in use) as a message rather than
-// letting the rejection escape as a raw command-error toast.
+// writeCluster runs a registry write and refreshes the tree, surfacing a
+// failure (a rename onto a name already in use, an add onto an existing name)
+// as a message rather than letting the rejection escape as a raw
+// command-error toast.
+//
+// It takes the write as a thunk rather than a (cluster, originalName) pair
+// because add and edit no longer call the same function: add goes through
+// addCluster, which refuses a duplicate name, and edit through upsertCluster
+// with the original name for the rename path.
 async function writeCluster(
-  clustersPath: string,
-  cluster: ClusterConfig,
-  originalName: string | undefined,
-  clustersTree: ClustersTreeProvider
+  clustersTree: ClustersTreeProvider,
+  write: () => Promise<void>
 ): Promise<void> {
   try {
-    await upsertCluster(clustersPath, cluster, originalName);
+    await write();
   } catch (err) {
     window.showErrorMessage(`memQL: ${err instanceof Error ? err.message : String(err)}`);
     return;
