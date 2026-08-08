@@ -605,6 +605,51 @@ One known divergence: a browser cannot read `~/.memql/clusters.yaml`,
 so the portal's cluster registry must resolve differently. That is a C
 problem and is not solved here.
 
+### Amendment, 2026-08-07: portal scope and the account model
+
+The portal is not only a concept browser. It absorbs the operator surfaces that
+live in the server-rendered `/admin/*` app today — users, sessions, audit, JWKS,
+cluster settings, tokens, deployments — refactored rather than ported, plus
+integration management (email, email marketing campaigns). It also manages the
+**accounts** a memQL operator serves.
+
+**Naming, settled.** "Client" had grown three meanings. The resolution:
+
+| Term | Meaning |
+|---|---|
+| `clients/` | the folder of client-side surfaces (SPAs, landing pages, games) |
+| `account` | a customer the memQL operator manages — the new concept |
+| `oauthClient` | unchanged; the OAuth-spec meaning, not ours to rename |
+
+`account` fits the `accountEntitlement` concept already in `dsl/identity`, so
+nothing shipped gets renamed.
+
+**Tenancy: partitioning is not available.** Isolation between accounts cannot
+use partitions — they were retired in #56. The wire field is gone (`reserved
+"partition"` in three places in `memql.proto`, plus `reserved "partitions"`),
+and `v1:identity:partitionAccess` no longer exists. What remains under that name
+in `dsl/platform/` is `partitionSecret` / `partitionVariable`, which are config
+storage, not tenancy.
+
+The mechanism to use instead is the one that is already the only gate:
+**per-row authorization**. Every query and mutation classifies as owned,
+granted, admin, or public, where *granted* is a relationship predicate on
+`actor.userId`. An account is a row; who may see it is a relationship. That
+needs a concept and the right specs, not a revived isolation primitive. Whether
+per-row authz alone is sufficient for real multi-tenancy is a genuine open
+question for spec C — it is cheaper to answer than reviving partitions, but it
+is not free.
+
+**Display-card coverage is the view system's real dependency.** Dynamically
+selecting a UI element from a concept's shape reads `@displayCard`, and only
+**29 of 101 concepts carry one** (11 namespaces of 27). So spec D is partly an
+annotation effort, and it must decide what a view falls back to when a concept
+declares nothing. `dsl/displaycard_inventory_test.go` already tracks coverage.
+
+**Concepts the view library has real data for on day one:** `todos.todo`,
+`calendar.calendarEvent`, and the `notes` namespace — the calendar and checklist
+elements have something to render against immediately rather than hypothetically.
+
 ### Open questions for spec C
 
 Recorded so they are not lost; this spec does not answer them.
@@ -617,5 +662,10 @@ Recorded so they are not lost; this spec does not answer them.
   host, which makes the origin-derived registry above nearly free.
 - **Auth.** The portal cannot read a PAT from a config file. It goes through the
   identity service's magic-link / OAuth flow like any other browser client.
+- **Is per-row authz sufficient for account isolation**, or does the operator /
+  account boundary need something stronger now that partitions are gone?
 - **Updating the `memql-project` template** to the plural `clients/` convention,
   plus whatever else has drifted since it was last touched.
+- **Whether to enforce the `clients/` boundary mechanically.** Product neutrality
+  is enforced by a banned-names list, so nothing would stop a customer's SPA
+  landing in `clients/`. If that boundary should hold, it needs a guard.
