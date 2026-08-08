@@ -83,16 +83,19 @@ bin/
 temp/
 logs/
 
-# Node.js -- the TS SDK under sdk/ts/ is the lone node consumer in
-# this monorepo (memql#116). package.json there is checked in;
-# everything else stays ignored. The deploy/gate-browser Playwright
-# gate is also checked in -- its lockfile is what pins the npm deps by
-# integrity hash (Scorecard PinnedDependencies).
+# Node.js -- the TS SDK under sdk/ts/ and the view-kit renderer under
+# sdk/ts-viewkit/ are checked-in node consumers in this monorepo
+# (memql#116). Their package.json is checked in; everything else stays
+# ignored. The deploy/gate-browser Playwright gate is also checked in --
+# its lockfile is what pins the npm deps by integrity hash (Scorecard
+# PinnedDependencies).
 package.json
 !sdk/ts/package.json
+!sdk/ts-viewkit/package.json
 !deploy/gate-browser/package.json
 package-lock.json
 !sdk/ts/package-lock.json
+!sdk/ts-viewkit/package-lock.json
 !deploy/gate-browser/package-lock.json
 node_modules/
 
@@ -128,3 +131,6 @@ docs/public/reference/_generated/*
 
 # Agent stack -- local credentials and MCP config (never commit).
 .mcp.json
+
+# Subagent-driven-development scratch workspace (ledger, briefs, review packages)
+.superpowers/

@@ -1,7 +1,17 @@
 {
+  // moduleResolution "bundler" (paired with module "ESNext") type-checks this
+  // tree the way esbuild.js actually resolves it at bundle time: the VS Code
+  // host loads `main` via CommonJS `require`, but @znasllc-io/memql-sdk-core
+  // is a pure-ESM `file:` dependency with no "require" export condition.
+  // Under "Node16"/"NodeNext" resolution tsc treats that as a real runtime
+  // contradiction (TS1479/TS1541 -- requiring an ESM-only package throws
+  // ERR_REQUIRE_ESM) and refuses to compile a plain static import of it.
+  // Bundler resolution assumes a bundler reconciles the two, which esbuild.js
+  // does: it inlines the SDK and emits CommonJS. `noEmit` because esbuild,
+  // not tsc, produces the runtime output -- this config is a type-check pass.
   "compilerOptions": {
-    "module": "Node16",
-    "moduleResolution": "Node16",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
     "target": "ES2021",
     "lib": ["ES2021"],
     "outDir": "out",
@@ -9,7 +19,8 @@
     "sourceMap": true,
     "strict": true,
     "esModuleInterop": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "noEmit": true
   },
   "include": ["src"],
   "exclude": ["node_modules", ".vscode-test", "out"]

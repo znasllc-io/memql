@@ -5,6 +5,11 @@
   "version": "0.3.0",
   "publisher": "znasllc",
   "license": "SEE LICENSE IN LICENSE",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/znasllc-io/memql.git",
+    "directory": "editors/vscode"
+  },
   "engines": {
     "vscode": "^1.91.0"
   },
@@ -12,12 +17,14 @@
     "Programming Languages"
   ],
   "activationEvents": [
-    "onLanguage:memql"
+    "onLanguage:memql",
+    "onView:memqlClusters"
   ],
   "capabilities": {
     "untrustedWorkspaces": {
-      "supported": true,
-      "description": "The server only parses .memql files (no code execution) and resolves its binary from user settings / bundle / PATH, never from workspace settings."
+      "supported": "limited",
+      "description": "Language features (highlighting, diagnostics, completion, hover, signature help) work in untrusted workspaces. Connecting to a cluster and browsing its data require trust: those read credentials from ~/.memql/clusters.yaml and open a network connection, which a malicious workspace must not be able to trigger.",
+      "restrictedConfigurations": ["memql.lsp.serverPath"]
     }
   },
   "main": "./out/extension.js",
@@ -98,19 +105,69 @@
           ]
         }
       }
-    ]
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "memql",
+          "title": "memQL",
+          "icon": "icons/memql-activity.svg"
+        }
+      ]
+    },
+    "views": {
+      "memql": [
+        {
+          "id": "memqlClusters",
+          "name": "Clusters"
+        },
+        {
+          "id": "memqlConcepts",
+          "name": "Concepts"
+        }
+      ]
+    },
+    "commands": [
+      { "command": "memql.clusters.refresh", "title": "memQL: Refresh Clusters", "icon": "$(refresh)" },
+      { "command": "memql.clusters.select", "title": "memQL: Select Cluster" },
+      { "command": "memql.clusters.add", "title": "memQL: Add Cluster", "icon": "$(add)" },
+      { "command": "memql.clusters.edit", "title": "memQL: Edit Cluster", "icon": "$(edit)" },
+      { "command": "memql.clusters.disconnect", "title": "memQL: Disconnect" },
+      { "command": "memql.concepts.refresh", "title": "memQL: Refresh Concepts", "icon": "$(refresh)" },
+      { "command": "memql.concepts.open", "title": "memQL: Open Concept" }
+    ],
+    "menus": {
+      "commandPalette": [
+        { "command": "memql.concepts.open", "when": "false" }
+      ],
+      "view/title": [
+        { "command": "memql.clusters.add", "when": "view == memqlClusters", "group": "navigation@1" },
+        { "command": "memql.clusters.refresh", "when": "view == memqlClusters", "group": "navigation@2" },
+        { "command": "memql.concepts.refresh", "when": "view == memqlConcepts", "group": "navigation@1" }
+      ],
+      "view/item/context": [
+        { "command": "memql.clusters.edit", "when": "view == memqlClusters && viewItem == memqlCluster", "group": "inline" }
+      ]
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
-    "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./"
+    "compile": "tsc -p ./ && node esbuild.js",
+    "watch": "tsc -watch -p ./",
+    "test": "tsc -p tsconfig.test.json && node esbuild.test.js && node --test dist-test/test/*.js"
   },
   "dependencies": {
-    "vscode-languageclient": "^10.1.0"
+    "@znasllc-io/memql-sdk-core": "file:../../sdk/ts",
+    "@znasllc-io/memql-view-kit": "file:../../sdk/ts-viewkit",
+    "vscode-languageclient": "^10.1.0",
+    "ws": "^8.21.3",
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
     "@types/vscode": "~1.91.0",
+    "@types/ws": "^8.5.13",
+    "esbuild": "^0.28.1",
     "typescript": "^5.4.0"
   }
 }

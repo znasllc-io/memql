@@ -16,6 +16,10 @@ signature help -- powered by the **same MemQL Sense brain** the Cockpit
 files**: no running cluster, no auth. Open a folder of `.memql` files and
 iterate on the syntax itself.
 
+> The extension also ships a runtime panel -- cluster selection and a
+> generic concept browser against a live cluster. See
+> [VS Code Runtime Panel](vscode-runtime-panel.md).
+
 Sense stays the single language-intelligence component serving both the Cockpit
 and VS Code (see [Sense & the DSL Spec](./sense.md)). This extension adds a new
 *delivery mechanism* -- an offline language server -- on top of the existing

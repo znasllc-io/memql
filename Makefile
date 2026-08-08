@@ -356,7 +356,7 @@ scale:
 # ---------------------------------------------------------------------------
 
 ##@ Test & SDK
-.PHONY: test test-v test-cover test-polyphon sdk-gen sdk-gen-check sdk-ts-install sdk-ts-typecheck dsl-lint
+.PHONY: test test-v test-cover test-polyphon sdk-gen sdk-gen-check sdk-ts-install sdk-ts-typecheck dsl-lint viewkit-install viewkit-typecheck viewkit-test vscode-deps vscode-test
 
 ## Regenerate the typed SDK surface from the DSL tree. Reads every
 ## query / mutation / logic under dsl/**/*.memql and emits typed
@@ -441,6 +441,35 @@ sdk-ts-typecheck:
 ## test runner. Requires node + npm.
 sdk-ts-test:
 	cd sdk/ts && npm test
+
+## Install view-kit (@znasllc-io/memql-view-kit) dev dependencies. Idempotent.
+viewkit-install:
+	cd sdk/ts-viewkit && npm install --no-audit --no-fund
+
+## Typecheck view-kit. Runs `tsc --noEmit` against sdk/ts-viewkit.
+viewkit-typecheck:
+	cd sdk/ts-viewkit && npm run typecheck
+
+## Run the view-kit test suite via node:test. Zero runtime deps.
+viewkit-test:
+	cd sdk/ts-viewkit && npm test
+
+## Build the workspace packages the extension depends on via `file:`. Their
+## dist/ must exist before `npm ci` in editors/vscode can resolve them, so a
+## clean checkout needs this first.
+##
+## sdk/ts uses `npm install`, not `npm ci`: its package-lock.json is not
+## committed, and `npm ci` fails without one. This matches the existing
+## sdk-ts-install target. sdk/ts-viewkit does commit its lockfile, so it gets
+## the reproducible `npm ci`.
+vscode-deps:
+	cd sdk/ts && npm install --no-audit --no-fund && npm run build
+	cd sdk/ts-viewkit && npm ci --no-audit --no-fund && npm run build
+
+## Run the VS Code extension's unit tests. Covers only modules that do not
+## import `vscode`; the API layer is exercised by packaging, not unit tests.
+vscode-test: vscode-deps
+	cd editors/vscode && npm ci --no-audit --no-fund && npm test
 
 ## Run all tests
 test:
