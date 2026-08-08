@@ -210,6 +210,25 @@ export type DeployControlRequestPayload =
 
 export type DeployControlPayload = { requestId: string } & DeployControlRequestPayload;
 
+// Authoring -- validate + session-define a .memql bundle (memql#2128 / C1,
+// consumed by the VS Code run loop in memql#3309).
+//
+// `sources` is a bundle STRING -- one or more constructs concatenated -- and
+// the engine slices it into (kind, name, source) constructs itself. There is
+// no per-file structure on the wire, which is why a consumer that assembles a
+// bundle from several editor buffers has to keep its own file/line offset
+// table to map diagnostics back (see AuthoringDiagnosticWire.line).
+
+export interface AuthoringValidateBundlePayload {
+  requestId: string;
+  sources: string;
+}
+
+export interface AuthoringSessionDefineBundlePayload {
+  requestId: string;
+  sources: string;
+}
+
 // Polyphon -- LiveKit room token request. The room name + LiveKit
 // URL come back in the reply so the consumer can hand them to the
 // LiveKit client SDK without a separate config call.
@@ -329,6 +348,8 @@ type ClientPayload =
   | { revokeBadge: RevokeBadgePayload }
   | { polyphonRoomToken: PolyphonRoomTokenPayload }
   | { deployControl: DeployControlPayload }
+  | { authoringValidateBundle: AuthoringValidateBundlePayload }
+  | { authoringSessionDefineBundle: AuthoringSessionDefineBundlePayload }
   | { listTools: ListToolsPayload }
   | { callTool: CallToolPayload }
   | { clientToolResult: ClientToolResultPayload };
@@ -644,6 +665,50 @@ export interface DeployControlResultPayload {
   action?: DeployActionResultWire;
 }
 
+// Authoring reply envelopes (memql#2128 / C1).
+//
+// AuthoringDiagnosticWire's four position fields are 1-based and expressed in
+// BUNDLE-FILE coordinates -- the source the caller submitted, before the
+// sandbox slices and lowers it. All four are ZERO when the engine could not
+// compute a reliable position, and the engine deliberately emits no position
+// rather than a wrong one (memql#2375). A consumer MUST therefore read 0 as
+// "no position" and never as line 0 / column 0, or every positionless
+// diagnostic lands on the first line of the first file in the bundle.
+//
+// `skipped` constructs (a kind this pass does not compile) report ok=false
+// AND skipped=true, and do NOT fail the bundle -- so "is this a failure" is
+// `!ok && !skipped`, never `!ok`.
+export interface AuthoringDiagnosticWire {
+  name?: string;
+  kind?: string;
+  ok?: boolean;
+  skipped?: boolean;
+  error?: string;
+  line?: number;
+  column?: number;
+  endLine?: number;
+  endColumn?: number;
+}
+
+export interface AuthoringConstructWire {
+  kind?: string;
+  name?: string;
+}
+
+export interface AuthoringValidateBundleResultPayload {
+  requestId?: string;
+  ok?: boolean;
+  diagnostics?: AuthoringDiagnosticWire[];
+}
+
+export interface AuthoringSessionDefineBundleResultPayload {
+  requestId?: string;
+  ok?: boolean;
+  defined?: AuthoringConstructWire[];
+  diagnostics?: AuthoringDiagnosticWire[];
+  error?: string;
+}
+
 // expiresAt is int64 unix seconds -- protojson encodes int64 as
 // either string or number depending on the runtime. We accept both.
 export interface PolyphonRoomTokenResultPayload {
@@ -773,6 +838,8 @@ type ServerPayload =
   | { revokeBadgeResult: RevokeBadgeResultPayload }
   | { polyphonRoomTokenResult: PolyphonRoomTokenResultPayload }
   | { deployControlResult: DeployControlResultPayload }
+  | { authoringValidateBundleResult: AuthoringValidateBundleResultPayload }
+  | { authoringSessionDefineBundleResult: AuthoringSessionDefineBundleResultPayload }
   | { listToolsResult: ListToolsResultPayload }
   | { callToolResult: CallToolResultPayload }
   | { clientToolCall: ClientToolCallPayload };
@@ -809,6 +876,8 @@ export function readServerPayload(msg: ServerMessage):
   | { kind: "revokeBadgeResult"; value: RevokeBadgeResultPayload }
   | { kind: "polyphonRoomTokenResult"; value: PolyphonRoomTokenResultPayload }
   | { kind: "deployControlResult"; value: DeployControlResultPayload }
+  | { kind: "authoringValidateBundleResult"; value: AuthoringValidateBundleResultPayload }
+  | { kind: "authoringSessionDefineBundleResult"; value: AuthoringSessionDefineBundleResultPayload }
   | { kind: "listToolsResult"; value: ListToolsResultPayload }
   | { kind: "callToolResult"; value: CallToolResultPayload }
   | { kind: "clientToolCall"; value: ClientToolCallPayload }
@@ -880,6 +949,16 @@ export function readServerPayload(msg: ServerMessage):
     };
   if (m.deployControlResult)
     return { kind: "deployControlResult", value: m.deployControlResult as DeployControlResultPayload };
+  if (m.authoringValidateBundleResult)
+    return {
+      kind: "authoringValidateBundleResult",
+      value: m.authoringValidateBundleResult as AuthoringValidateBundleResultPayload,
+    };
+  if (m.authoringSessionDefineBundleResult)
+    return {
+      kind: "authoringSessionDefineBundleResult",
+      value: m.authoringSessionDefineBundleResult as AuthoringSessionDefineBundleResultPayload,
+    };
   if (m.listToolsResult)
     return { kind: "listToolsResult", value: m.listToolsResult as ListToolsResultPayload };
   if (m.callToolResult)
