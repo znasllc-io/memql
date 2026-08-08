@@ -640,9 +640,22 @@ async function targetForConfig(
     return undefined;
   }
   if (client === undefined) return undefined;
-  const raw = await client.sendRequest(RUNNABLE_CONSTRUCTS_METHOD, {
-    textDocument: { uri: document.uri.toString() },
-  });
+  // The one call in this extension that asks the server for constructs OUTSIDE
+  // provideCodeLenses, so it needs its own failure story: a server that
+  // predates memql/runnableConstructs rejects with MethodNotFound, and an
+  // unhandled rejection here would surface as a raw command-error toast on a
+  // perfectly ordinary "your language server is older than your extension".
+  let raw: unknown;
+  try {
+    raw = await client.sendRequest(RUNNABLE_CONSTRUCTS_METHOD, {
+      textDocument: { uri: document.uri.toString() },
+    });
+  } catch (err) {
+    window.showErrorMessage(
+      `memQL: the language server could not describe ${config.file}: ${err instanceof Error ? err.message : String(err)}`
+    );
+    return undefined;
+  }
   const found = parseRunnableConstructs(raw).find(
     (c) => c.name === config.construct && c.kind === config.kind
   );
