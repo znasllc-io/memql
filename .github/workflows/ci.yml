@@ -324,10 +324,21 @@ jobs:
               - 'scripts/dev/proto-gen.sh'
             # The VS Code extension + the offline LSP binary it bundles + the
             # packaging script.
+            #
+            # sdk/ts and sdk/ts-viewkit are in here as well as in their OWN
+            # buckets, deliberately. The extension consumes both as `file:`
+            # dependencies and esbuild inlines them into out/extension.js, so a
+            # change confined to either package can break the extension's
+            # typecheck, its tests, and `vsce package` -- while the sdkts /
+            # viewkit lanes run that package's own tests, go green, and report
+            # nothing. Renaming an export is enough to do it. The consumer must
+            # rebuild whenever what it compiles against moves.
             vscode:
               - 'editors/vscode/**'
               - 'cmd/memql-lsp/**'
               - 'scripts/vscode/**'
+              - 'sdk/ts/**'
+              - 'sdk/ts-viewkit/**'
 
             # ---------------------------------------------------------------
             # TARGET-MODULE BUCKETS (memql#3163 / design D3)

@@ -23,7 +23,7 @@ cluster from `~/.memql/clusters.yaml` (the same file the memQL Cockpit
 uses), browse every registered concept grouped by domain, and inspect rows
 -- paged, with live detail -- without leaving the editor. It requires a
 trusted workspace, since it reads credentials and opens a network
-connection. See [VS Code Runtime Panel](../../docs/public/language/vscode-runtime-panel.md).
+connection. See [VS Code Runtime Panel](https://github.com/znasllc-io/memql/blob/main/docs/public/language/vscode-runtime-panel.md).
 
 ## Install / update locally
 
@@ -65,10 +65,15 @@ Build it from the memql repo with `go build -o bin/memql-lsp ./cmd/memql-lsp`.
 ## Development
 
 ```bash
-cd editors/vscode
-npm install
-npm run compile
+make vscode-deps                 # from the repo root -- see below
+cd editors/vscode && npm ci && npm run compile
 ```
+
+`make vscode-deps` is not optional on a clean checkout. The extension consumes
+`sdk/ts` and `sdk/ts-viewkit` as `file:` dependencies, and their `main` /
+`types` point into `dist/` -- which does not exist until those packages are
+built. Skipping it leaves the symlinks resolving to nothing and `tsc -p ./`
+fails.
 
 Press `F5` to launch an Extension Development Host, set `memql.lsp.serverPath`
 to your built binary, and open a folder of `.memql` files.

@@ -2410,7 +2410,17 @@ function registerRuntimeSurface(context: ExtensionContext): void {
   );
 
   // The cockpit writes this file too; watch it so the tree stays truthful.
-  const watcher = workspace.createFileSystemWatcher(clustersPath);
+  //
+  // MUST be a RelativePattern with a base Uri, never the bare path string.
+  // Given a plain `string` glob, createFileSystemWatcher only watches paths
+  // INSIDE the workspace folders, and ~/.memql/clusters.yaml is outside any
+  // workspace -- the string form never fires and all three handlers below
+  // become dead code. (This plan originally prescribed the string form; it
+  // was implemented faithfully and caught in final review. Do not reintroduce
+  // it in B2.)
+  const watcher = workspace.createFileSystemWatcher(
+    new RelativePattern(Uri.file(path.dirname(clustersPath)), path.basename(clustersPath))
+  );
   watcher.onDidChange(() => clustersTree.refresh());
   watcher.onDidCreate(() => clustersTree.refresh());
   watcher.onDidDelete(() => clustersTree.refresh());
@@ -3338,13 +3348,69 @@ after a dropped stream."
 
 ---
 
+## Structural amendments during execution
+
+Two things B1 now depends on structurally were not in this plan when it was
+written. B2 builds on both, so they are recorded here rather than left to be
+rediscovered from the diff.
+
+### 1. The `ws` dependency + `webSocketFactory` (how the extension connects)
+
+The extension host has **no global `WebSocket`**. It runs Node 20 on the
+declared `"vscode": "^1.91.0"` floor, and the global only arrives in Node 22.
+The SDK's default socket factory throws a clear error in that case, so
+`editors/vscode` takes a dependency on the `ws` package and every dial passes a
+`webSocketFactory`:
+
+```ts
+Connection.dial({
+  ...opts,
+  webSocketFactory: (url, protocols) =>
+    new NodeWebSocket(url, protocols) as unknown as WebSocket,
+});
+```
+
+A factory that does not forward `protocols` breaks authenticated dials --
+bearer/guest credentials ride the WebSocket subprotocol channel (memql#2511),
+not the URL.
+
+Related, and the reason this is called out rather than left implicit: the SDK
+itself must not dereference the bare global either. `socket.readyState ===
+WebSocket.OPEN` evaluates both operands, so it threw `ReferenceError` before
+readyState was consulted, defeating the factory entirely. `sdk/ts` now compares
+against numeric constants (`sdk/ts/src/client/wsReadyState.ts`). **Any new SDK
+code on the socket path must use those constants**, and
+`sdk/ts/test/connection-no-global-websocket.test.ts` is the regression guard --
+it dials with no global installed, unlike every other connection test.
+
+### 2. esbuild bundling (how the extension builds)
+
+`editors/vscode` bundles with esbuild (`esbuild.js` for the extension,
+`esbuild.test.js` for `node --test`) rather than shipping raw `tsc` output.
+Two independent forcing functions:
+
+- **`file:` symlinked workspace deps broke `vsce package`.** `sdk/ts` and
+  `sdk/ts-viewkit` are consumed as `file:` dependencies; `vsce` does not
+  follow those symlinks into a packaged VSIX, so the installed extension
+  could not resolve them at runtime. Bundling inlines them.
+- **Both packages are pure ESM, and the extension host is CommonJS.** esbuild
+  inlines them and emits CJS, which is what lets `manager.ts` use a plain
+  static `import` of `@znasllc-io/memql-sdk-core/client` instead of a
+  `require()` that would fail on an ESM-only package.
+
+Consequences B2 inherits: `npm run compile` is `tsc -p ./ && node esbuild.js`
+(typecheck AND bundle -- neither alone is sufficient); a new runtime dependency
+must be bundleable or explicitly externalized; and `make vscode-deps` must run
+before `npm ci` in `editors/vscode` on a clean checkout, because the `file:`
+targets' `main`/`types` point into `dist/` directories that do not exist yet.
+
 ## Verification
 
 After Task 10, B1 is complete when all of the following hold:
 
-- [ ] `make viewkit-typecheck && make viewkit-test` passes (31 tests)
-- [ ] `make sdk-ts-typecheck && make sdk-ts-test` passes, including 12 new concept-browser tests
-- [ ] `make vscode-test` passes (23 tests) from a clean checkout with no prebuilt `dist/`
+- [ ] `make viewkit-typecheck && make viewkit-test` passes (40 tests)
+- [ ] `make sdk-ts-typecheck && make sdk-ts-test` passes (110 tests), including 12 new concept-browser tests
+- [ ] `make vscode-test` passes (85 tests) from a clean checkout with no prebuilt `dist/`
 - [ ] `go test ./cmd/memql-lsp/... ./scripts/dev/...` passes — extension manifest and CI lane-scope guards
 - [ ] `bash scripts/vscode/package.sh` produces a VSIX
 - [ ] In the Extension Development Host against `make up`: the activity bar shows the memQL icon; Clusters lists the local cluster and connects; Concepts lists domains and concepts; a concept tab renders rows, pages, shows detail, and updates live

@@ -76,5 +76,4 @@ declared.
 ## What this panel does not do yet
 
 Executing constructs, running automations, and driving deployments are
-later increments. See
-[the design spec](../../superpowers/specs/2026-08-07-vscode-runtime-panel-design.md).
+later increments.
