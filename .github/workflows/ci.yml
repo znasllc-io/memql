@@ -1147,8 +1147,24 @@ jobs:
       # flaky-registry calls actually happen is retried.
       - name: extension unit tests
         run: scripts/ci/retry.sh -- make vscode-test
+      # DELIBERATELY NOT PASSING --skip-deps, even though the step above has
+      # already built the workspace deps (memql#3340). This step used to pass
+      # ONLY because of that: package.sh built no `file:` dependency of its own,
+      # so it compiled against the dist/ the previous step happened to leave on
+      # disk. The lane was broken from a clean checkout -- `make vscode-install`
+      # failed with 10 TypeScript errors for every developer -- and CI reported
+      # it healthy for as long as these two steps stayed in this order.
+      #
+      # Running the full lane keeps CI exercising what a developer actually
+      # runs. The duplicated dep build costs seconds (both are idempotent), and
+      # buying an ordering-independent signal with them is the trade this
+      # comment exists to defend against being "optimized" away.
+      #
+      # Retry-wrapped because it is a NETWORK step -- npm ci plus
+      # `npx @vscode/vsce` -- which is retry.sh's documented use. It is not a
+      # test, so the never-retry-a-test rule does not apply.
       - name: package extension (build binary + compile + vsce package)
-        run: bash scripts/vscode/package.sh --out="$RUNNER_TEMP/memql.vsix"
+        run: scripts/ci/retry.sh -- bash scripts/vscode/package.sh --out="$RUNNER_TEMP/memql.vsix"
 
   # VS Code EXTENSION DEVELOPMENT HOST smoke lane (memql#3302).
   #
