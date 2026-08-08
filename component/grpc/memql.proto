@@ -8,6 +8,14 @@ option go_package = "github.com/znasllc-io/memql/component/grpc/gen;memqlv1";
 
 import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
+// deploy_control.proto is the DeployControlService's own schema, imported
+// rather than mirrored (memql#3311). The streamed bridge below carries the
+// BYTE-IDENTICAL request/response messages the unary service does; hand-copying
+// nine request/response pairs into this file would create two schemas that
+// drift the first time a field lands on one of them. Both files declare the
+// same go_package (".../component/grpc/gen;memqlv1"), so the cross-file
+// reference generates into one Go package and costs no Go-side import.
+import "deploy_control.proto";
 
 service MemqlService {
   // Single multiplexed bidirectional streaming RPC for all MemQL operations.
@@ -291,6 +299,15 @@ message MemqlClientMessage {
     // above.
     CreateBadgeMsg create_badge = 83;
     RevokeBadgeMsg revoke_badge = 84;
+
+    // Deploy console (memql#3311). One envelope carrying the
+    // DeployControlService request set, so every deploy RPC is reachable
+    // from a WebSocket client (the VS Code extension, the memQL portal)
+    // that cannot dial a second unary service. The bridge handler calls
+    // the SAME *deploycontrol.Service methods the unary path calls, so
+    // the owner/admin/developer gate + the audit event are one
+    // implementation, not two. See DeployControlMsg.
+    DeployControlMsg deploy_control = 86;
   }
 }
 
@@ -428,6 +445,13 @@ message MemqlServerMessage {
     // Badge registration lifecycle results (memql#2513).
     CreateBadgeResult create_badge_result = 120;
     RevokeBadgeResult revoke_badge_result = 121;
+
+    // Deploy console reply (see DeployControlMsg, memql#3311). Errors --
+    // including the PermissionDenied a gated RPC raises -- travel on the
+    // ordinary QueryErrorMsg channel keyed by request_id, carrying the
+    // gRPC status code verbatim, so a streamed caller sees the same code
+    // a unary caller sees.
+    DeployControlResult deploy_control_result = 123;
   }
 }
 
@@ -2526,4 +2550,83 @@ message NodeMaintenanceResult {
   string error_code = 6;
   // error_message is a human-readable failure detail on !ok.
   string error_message = 7;
+}
+
+// -----------------------------------------------------------------------------
+// Deploy console bridge (memql#3311)
+// -----------------------------------------------------------------------------
+
+// DeployControlMsg carries one DeployControlService request over
+// MemqlService.Stream.
+//
+// WHY A BRIDGE AT ALL: DeployControlService is a separate UNARY service
+// mounted on the same listener (deploy_control.proto). The Go SDK dials it
+// natively, but a browser cannot -- and neither can anything else speaking
+// the `/memql/ws` WebSocket bridge, which tunnels MemqlService.Stream and
+// nothing else. That put the entire deploy surface out of reach of the VS
+// Code extension and the memQL portal. This envelope makes every deploy RPC
+// reachable from any stream client without a second dial.
+//
+// WHY ONE ENVELOPE RATHER THAN NINE MESSAGE PAIRS: the request types are
+// IMPORTED from deploy_control.proto, not re-declared. There is exactly one
+// schema for a DeployStagingRequest, so the two transports cannot drift.
+//
+// WHY THE GATE IS SAFE: the handler (deploy_control_handlers.go) unwraps this
+// oneof and calls the matching method on the very same
+// memqlv1.DeployControlServiceServer implementation the unary path is
+// registered with -- component/deploycontrol's *Service. The role gate and
+// the v1:identity:auditEvent write live INSIDE those methods, so the bridge
+// adds no authorization code of its own and cannot weaken the matrix
+// (view: admin+; cut/deploy: developer+; rollback: owner only).
+//
+// Deployment HISTORY is deliberately absent: v1:cluster:deployment rows are
+// ordinary concept rows, already readable over ExecuteQueryMsg. Duplicating
+// them here would be a second read path to keep honest.
+message DeployControlMsg {
+  // request_id correlates the reply (and any QueryErrorMsg) with the call.
+  string request_id = 1;
+
+  oneof request {
+    // Reads.
+    znasllc.memql.deploycontrol.v1.GetDeploymentStatusRequest get_deployment_status = 10;
+    znasllc.memql.deploycontrol.v1.SuggestNextVersionRequest suggest_next_version = 11;
+    // Actions. Each one is role-gated + audited server-side; the reply's
+    // ActionResult carries the emitted audit event id.
+    znasllc.memql.deploycontrol.v1.DeployStagingRequest deploy_staging = 12;
+    znasllc.memql.deploycontrol.v1.PromoteRequest promote = 13;
+    znasllc.memql.deploycontrol.v1.RollbackRequest rollback = 14;
+    znasllc.memql.deploycontrol.v1.RolloutActionRequest rollout_action = 15;
+    znasllc.memql.deploycontrol.v1.CutVersionRequest cut_version = 16;
+    znasllc.memql.deploycontrol.v1.DeployRequest deploy = 17;
+    znasllc.memql.deploycontrol.v1.RollbackDeploymentRequest rollback_deployment = 18;
+  }
+}
+
+// DeployControlResult is the reply to a DeployControlMsg.
+//
+// The response oneof has three arms, not nine, because DeployControlService
+// itself returns only three types: seven of its RPCs share ActionResult. The
+// caller already knows which RPC it issued (request_id correlates), and `rpc`
+// echoes the method name for a generic client that multiplexes several calls
+// through one handler.
+//
+// There is no error field here on purpose: a failed call replies with the
+// ordinary QueryErrorMsg carrying the gRPC status code as a string
+// ("PermissionDenied", "InvalidArgument", ...), which is what every other
+// stream family does and what the SDK dispatchers already understand. That is
+// also what keeps the parity assertion honest -- the streamed caller reads the
+// same code out of the wire that a unary caller reads off the status error.
+message DeployControlResult {
+  // request_id echoes DeployControlMsg.request_id.
+  string request_id = 1;
+  // rpc is the DeployControlService method name this reply answers
+  // ("GetDeploymentStatus", "CutVersion", ...).
+  string rpc = 2;
+
+  oneof response {
+    znasllc.memql.deploycontrol.v1.DeploymentStatus deployment_status = 10;
+    znasllc.memql.deploycontrol.v1.SuggestNextVersionResult next_version = 11;
+    // action answers all seven write RPCs (they share ActionResult).
+    znasllc.memql.deploycontrol.v1.ActionResult action = 12;
+  }
 }

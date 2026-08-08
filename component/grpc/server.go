@@ -127,6 +127,13 @@ type Server struct {
 	// port -- component/grpc can't import app/node-lifecycle). Nil on
 	// non-mesh binaries; the NodeMaintenance handler reports "unavailable".
 	nodeMaintenanceHandler NodeMaintenanceHandler
+	// deployControl backs the streamed DeployControlService bridge
+	// (memql#3311). Set by app bootstrap on the identity node -- the only
+	// binary that constructs a *deploycontrol.Service -- to the very same
+	// instance registered as the unary service, so both transports run one
+	// role gate and one audit write. Nil elsewhere; the DeployControl handler
+	// answers Unimplemented.
+	deployControl DeployControlHandler
 	// clientToolRPC serves the substrate-RPC client-tool return channel per
 	// agent turn (memql#1265). Set by app bootstrap on agent binaries where the
 	// delivery substrate is wired; nil otherwise (legacy ForwardContinuation).
@@ -338,6 +345,7 @@ func (s *Server) prepareForRun(ctx context.Context) (context.Context, context.Ca
 		aiForwarder:            s.aiForwarder,
 		agentReplier:           s.agentReplier,
 		nodeMaintenanceHandler: s.nodeMaintenanceHandler,
+		deployControl:          s.deployControl,
 		clientToolResultServer: s.clientToolRPC,
 		deliverySubstrate:      s.deliverySubstrate,
 		streamNodeID:           s.streamNodeID,
@@ -636,6 +644,13 @@ type service struct {
 	// app bootstrap to the App's RequestOperatorDrain). Nil elsewhere; the
 	// NodeMaintenance handler reports "unavailable" when unset.
 	nodeMaintenanceHandler NodeMaintenanceHandler
+
+	// deployControl backs the streamed DeployControlService bridge
+	// (memql#3311). Non-nil on the identity node, holding the SAME
+	// *deploycontrol.Service the unary DeployControlService is registered
+	// with -- one role gate, one audit write, two transports. Nil elsewhere;
+	// handleDeployControl answers Unimplemented.
+	deployControl DeployControlHandler
 
 	// transcribeStreams holds the worker-side state for in-flight
 	// streaming transcription sessions, keyed by the caller's
@@ -1210,7 +1225,11 @@ func (s *streamSession) badgeGate(envelope *memqlv1.MemqlClientMessage) badgeGat
 		*memqlv1.MemqlClientMessage_ResendGuestInviteEmail,
 		*memqlv1.MemqlClientMessage_DurablePromoteBundle,
 		*memqlv1.MemqlClientMessage_DurableDemoteBundle,
-		*memqlv1.MemqlClientMessage_NodeMaintenance:
+		*memqlv1.MemqlClientMessage_NodeMaintenance,
+		// Deploy control is cluster state of the most consequential kind
+		// (memql#3311): a walked-away kiosk must never be able to cut, ship,
+		// or roll back a release under a borrowed operator grant.
+		*memqlv1.MemqlClientMessage_DeployControl:
 		return badgeGateRestricted
 	}
 	return badgeGateAllow
@@ -1247,6 +1266,8 @@ func badgePayloadRequestId(envelope *memqlv1.MemqlClientMessage) string {
 		return p.AiSuggest.GetRequestId()
 	case *memqlv1.MemqlClientMessage_CallTool:
 		return p.CallTool.GetRequestId()
+	case *memqlv1.MemqlClientMessage_DeployControl:
+		return p.DeployControl.GetRequestId()
 	}
 	return ""
 }
@@ -1572,6 +1593,13 @@ func (s *streamSession) handleMessage(envelope *memqlv1.MemqlClientMessage) erro
 	// THIS node into Draining on demand via the same #1269 drain mechanism.
 	case *memqlv1.MemqlClientMessage_NodeMaintenance:
 		return s.handleNodeMaintenance(envelope, payload.NodeMaintenance)
+	// Deploy console (memql#3311): the DeployControlService RPCs bridged onto
+	// this stream so WebSocket clients (VS Code extension, memQL portal) can
+	// reach them. Every gate + audit write lives in the wired
+	// *deploycontrol.Service, shared verbatim with the unary path. See
+	// deploy_control_handlers.go.
+	case *memqlv1.MemqlClientMessage_DeployControl:
+		return s.handleDeployControl(envelope, payload.DeployControl)
 	// Concepts -- schema metadata (Phase 3)
 	case *memqlv1.MemqlClientMessage_ConceptsList:
 		return s.handleConceptsList(envelope, payload.ConceptsList)

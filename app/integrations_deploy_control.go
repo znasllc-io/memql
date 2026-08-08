@@ -64,6 +64,16 @@ func (a *App) setupDeployControlService() {
 
 	a.grpcServer.RegisterService(svc.Register)
 
+	// Bridge the SAME service onto MemqlService.Stream (memql#3311). The
+	// unary DeployControlService is undialable from a browser -- and from
+	// anything else speaking the /memql/ws bridge, which tunnels
+	// MemqlService.Stream only -- so the VS Code extension and the memQL
+	// portal could not reach the deploy surface at all. Handing the streamed
+	// bridge THIS instance (not a copy, not a re-implementation) is what makes
+	// the role gate and the audit write literally one code path across both
+	// transports; the parity test in component/grpc holds that down.
+	a.grpcServer.SetDeployControlService(svc)
+
 	a.deployControlService = svc
 	// Deploy / RollbackDeployment are automation-driven (#2115 step 6
 	// retired the synchronous Go apply): they kick off the lifecycle and the

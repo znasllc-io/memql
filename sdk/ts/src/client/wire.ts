@@ -156,6 +156,74 @@ export interface RevokeBadgePayload {
   identityId: string;
 }
 
+// Deploy console (memql#3311). DeployControlService is a separate
+// UNARY gRPC service; a browser cannot dial it, so its RPCs are
+// bridged onto MemqlService.Stream behind ONE envelope whose `request`
+// oneof carries the service's own request messages verbatim. Exactly
+// one request field must be set. Every action is role-gated (view:
+// admin+, cut/deploy: developer+, rollback: owner only) and audited
+// server-side by the same code the unary path runs -- a denial comes
+// back as an ordinary queryError with code "PermissionDenied".
+//
+// Deployment HISTORY is NOT here: v1:cluster:deployment rows are
+// ordinary concept rows, read with a normal query.
+
+export interface GetDeploymentStatusRequestWire {
+  env: string; // "staging" | "prod"
+}
+
+export interface SuggestNextVersionRequestWire {
+  env: string;
+}
+
+export interface DeployStagingRequestWire {
+  version: string;
+}
+
+export interface PromoteRequestWire {
+  version: string;
+}
+
+export interface RollbackRequestWire {
+  env: string;
+  commitSha: string;
+}
+
+export interface RolloutActionRequestWire {
+  env: string;
+  rollout: string;
+  action: string; // "promote" | "abort"
+}
+
+export interface CutVersionRequestWire {
+  env: string;
+  // bump ∈ {"major","minor","patch"}; ignored when version is set.
+  bump?: string;
+  // explicit clean-semver override; when set, bump is ignored.
+  version?: string;
+}
+
+export interface DeployRequestWire {
+  deploymentId: string;
+}
+
+export interface RollbackDeploymentRequestWire {
+  toDeploymentId: string;
+}
+
+export type DeployControlRequestWire =
+  | { getDeploymentStatus: GetDeploymentStatusRequestWire }
+  | { suggestNextVersion: SuggestNextVersionRequestWire }
+  | { deployStaging: DeployStagingRequestWire }
+  | { promote: PromoteRequestWire }
+  | { rollback: RollbackRequestWire }
+  | { rolloutAction: RolloutActionRequestWire }
+  | { cutVersion: CutVersionRequestWire }
+  | { deploy: DeployRequestWire }
+  | { rollbackDeployment: RollbackDeploymentRequestWire };
+
+export type DeployControlPayload = { requestId: string } & DeployControlRequestWire;
+
 // Polyphon -- LiveKit room token request. The room name + LiveKit
 // URL come back in the reply so the consumer can hand them to the
 // LiveKit client SDK without a separate config call.
@@ -273,6 +341,7 @@ type ClientPayload =
   | { revokeWorkerToken: RevokeWorkerTokenPayload }
   | { createBadge: CreateBadgePayload }
   | { revokeBadge: RevokeBadgePayload }
+  | { deployControl: DeployControlPayload }
   | { polyphonRoomToken: PolyphonRoomTokenPayload }
   | { listTools: ListToolsPayload }
   | { callTool: CallToolPayload }
@@ -505,6 +574,93 @@ export interface RevokeBadgeResultPayload {
   errorMessage?: string;
 }
 
+// Deploy console reply (memql#3311). The response oneof has three
+// arms, not nine, because DeployControlService returns only three
+// types -- seven of its RPCs share ActionResult. `rpc` echoes the
+// method name so a consumer multiplexing several calls through one
+// handler can tell them apart without tracking requestIds itself.
+//
+// Failures do NOT appear here: they arrive as an ordinary queryError
+// carrying the gRPC status code verbatim ("PermissionDenied",
+// "InvalidArgument", "Unimplemented" on a node that does not host the
+// deploy service).
+
+export interface ComponentDigestWire {
+  name?: string;
+  digest?: string;
+  repo?: string;
+}
+
+export interface ArgoStatusWire {
+  syncStatus?: string;
+  healthStatus?: string;
+  lastSyncRevision?: string;
+  lastSyncAt?: string;
+  outOfSync?: boolean;
+}
+
+export interface RolloutStatusWire {
+  name?: string;
+  kind?: string; // "bluegreen" | "canary"
+  phase?: string;
+  activeColor?: string;
+  previewColor?: string;
+  canaryWeight?: number;
+  currentStep?: number;
+  latestAnalysisResult?: string;
+}
+
+export interface GateLegWire {
+  name?: string;
+  passed?: boolean;
+  detail?: string;
+}
+
+export interface GateResultWire {
+  result?: string; // "pass" | "fail" | "unknown"
+  legs?: GateLegWire[];
+  ranAt?: string;
+}
+
+export interface DeploymentStatusWire {
+  env?: string;
+  version?: string;
+  engineVersion?: string;
+  validatedAt?: string;
+  gate?: string;
+  components?: ComponentDigestWire[];
+  argocd?: ArgoStatusWire;
+  rollouts?: RolloutStatusWire[];
+  gateResult?: GateResultWire;
+}
+
+export interface SuggestNextVersionResultWire {
+  currentVersion?: string;
+  nextMajor?: string;
+  nextMinor?: string;
+  nextPatch?: string;
+  source?: string; // "deployment" | "overlay" | "none"
+}
+
+// ActionResult is the uniform return for every write RPC. auditEventId
+// is the id of the v1:identity:auditEvent the server wrote for this
+// action -- returned on the streamed path exactly as on the unary one.
+export interface DeployActionResultWire {
+  ok?: boolean;
+  message?: string;
+  auditEventId?: string;
+  correlationId?: string;
+  details?: Record<string, string>;
+}
+
+export interface DeployControlResultPayload {
+  requestId: string;
+  rpc?: string;
+  deploymentStatus?: DeploymentStatusWire;
+  nextVersion?: SuggestNextVersionResultWire;
+  action?: DeployActionResultWire;
+}
+
 // expiresAt is int64 unix seconds -- protojson encodes int64 as
 // either string or number depending on the runtime. We accept both.
 export interface PolyphonRoomTokenResultPayload {
@@ -632,6 +788,7 @@ type ServerPayload =
   | { revokeWorkerTokenResult: RevokeWorkerTokenResultPayload }
   | { createBadgeResult: CreateBadgeResultPayload }
   | { revokeBadgeResult: RevokeBadgeResultPayload }
+  | { deployControlResult: DeployControlResultPayload }
   | { polyphonRoomTokenResult: PolyphonRoomTokenResultPayload }
   | { listToolsResult: ListToolsResultPayload }
   | { callToolResult: CallToolResultPayload }
@@ -667,6 +824,7 @@ export function readServerPayload(msg: ServerMessage):
   | { kind: "revokeWorkerTokenResult"; value: RevokeWorkerTokenResultPayload }
   | { kind: "createBadgeResult"; value: CreateBadgeResultPayload }
   | { kind: "revokeBadgeResult"; value: RevokeBadgeResultPayload }
+  | { kind: "deployControlResult"; value: DeployControlResultPayload }
   | { kind: "polyphonRoomTokenResult"; value: PolyphonRoomTokenResultPayload }
   | { kind: "listToolsResult"; value: ListToolsResultPayload }
   | { kind: "callToolResult"; value: CallToolResultPayload }
@@ -732,6 +890,8 @@ export function readServerPayload(msg: ServerMessage):
     return { kind: "createBadgeResult", value: m.createBadgeResult as CreateBadgeResultPayload };
   if (m.revokeBadgeResult)
     return { kind: "revokeBadgeResult", value: m.revokeBadgeResult as RevokeBadgeResultPayload };
+  if (m.deployControlResult)
+    return { kind: "deployControlResult", value: m.deployControlResult as DeployControlResultPayload };
   if (m.polyphonRoomTokenResult)
     return {
       kind: "polyphonRoomTokenResult",

@@ -36,6 +36,32 @@ Both surfaces call the same owner/admin-gated **deploy-control API**
 `kubectl` / `argocd` / `git` directly. Both show the same data and
 offer the same four actions. Pick whichever you are already in.
 
+### Two transports, one service (memql#3311)
+
+`DeployControlService` is a **unary** gRPC service mounted on the same
+listener as `MemqlService`. A native gRPC client (the Go SDK, the
+cockpit) dials it directly. A **browser cannot** -- and neither can
+anything else reaching memQL through the `/memql/ws` WebSocket bridge,
+which tunnels `MemqlService.Stream` and nothing else.
+
+So every deploy RPC is **also** reachable on the stream, as a
+`DeployControlMsg` envelope whose `request` oneof carries the service's
+own request messages verbatim (the reply is `DeployControlResult`). The
+TS SDK exposes it as `@znasllc-io/memql-sdk-core/deploy`; that is how
+the VS Code extension and the memQL portal drive the console.
+
+This is a transport, not a second implementation. The stream handler
+calls the identical service methods the unary path calls, so **the role
+gate and the audit write are one code path** -- a parity test in
+`component/grpc` drives the real service through both transports and
+fails if any gated RPC answers differently. Denials arrive on the
+stream as an ordinary `QueryError` carrying the gRPC status code
+verbatim, so a caller below the role floor sees `PermissionDenied` on
+either transport. Actions return their audit event id identically.
+
+Deployment **history** is deliberately not bridged: `v1:cluster:deployment`
+rows are ordinary concept rows, read with a normal query.
+
 ## Owner/admin gating
 
 Every read and every action requires the cluster role **owner** or

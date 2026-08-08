@@ -15,6 +15,7 @@ require (
 	github.com/znasllc-io/memql/component/bus v0.0.0
 	github.com/znasllc-io/memql/component/bus/gen v0.0.0
 	github.com/znasllc-io/memql/component/database v0.0.0
+	github.com/znasllc-io/memql/component/deploycontrol v0.0.0
 	github.com/znasllc-io/memql/component/events v0.0.0
 	github.com/znasllc-io/memql/component/grpc/gen v0.0.0
 	github.com/znasllc-io/memql/component/identity v0.0.0
