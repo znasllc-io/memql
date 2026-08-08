@@ -41,9 +41,14 @@ export async function browseConceptPage(
   if (conceptId === "") {
     throw new Error("browseConceptPage: conceptId is required");
   }
+  // Split off the browse-only knob and forward EVERYTHING else verbatim.
+  // Hand-copying `cursor` + `signal` was correct for today's
+  // QueryCallOptions and silently wrong the moment a field is added to it --
+  // the new option would compile fine here and never reach the query.
+  const { pageSize: requestedPageSize, ...callOpts } = opts;
   const pageSize =
-    opts.pageSize !== undefined && opts.pageSize > 0
-      ? opts.pageSize
+    requestedPageSize !== undefined && requestedPageSize > 0
+      ? requestedPageSize
       : DEFAULT_CONCEPT_BROWSE_PAGE_SIZE;
 
   // sort(paginate(concept==X, N), "createdAt", "asc") -- the canonical
@@ -52,10 +57,7 @@ export async function browseConceptPage(
   // createdAt.
   const call = `sort(paginate(concept==${conceptId}, ${pageSize}), "createdAt", "asc")`;
 
-  const result = await query.executeNamed("conceptBrowse", call, {
-    ...(opts.cursor ? { cursor: opts.cursor } : {}),
-    ...(opts.signal ? { signal: opts.signal } : {}),
-  });
+  const result = await query.executeNamed("conceptBrowse", call, callOpts);
 
   return {
     rows: result.rawNodes(),

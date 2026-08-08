@@ -19,6 +19,7 @@ import { QueryClient } from "./query.js";
 import { SubscriptionManager } from "./subscriptions.js";
 import { newShortId } from "./id.js";
 import { readServerPayload } from "./wire.js";
+import { WS_OPEN } from "./wsReadyState.js";
 
 export interface ConnectionAuth {
   // Bearer JWT issued by the identity service.
@@ -354,7 +355,7 @@ function defaultWebSocketFactory(url: string, protocols?: string[]): WebSocket {
 }
 
 function waitForOpen(socket: WebSocket): Promise<void> {
-  if (socket.readyState === WebSocket.OPEN) return Promise.resolve();
+  if (socket.readyState === WS_OPEN) return Promise.resolve();
   return new Promise<void>((resolve, reject) => {
     const onOpen = () => {
       cleanup();

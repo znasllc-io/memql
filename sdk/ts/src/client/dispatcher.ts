@@ -9,6 +9,7 @@
 // stream errors, not on caller-initiated close.
 
 import { newShortId } from "./id.js";
+import { WS_OPEN } from "./wsReadyState.js";
 import {
   streamRequestId,
   type ClientMessage,
@@ -160,7 +161,7 @@ export class Dispatcher {
   }
 
   private rawSend(msg: ClientMessage): void {
-    if (this.socket.readyState !== WebSocket.OPEN) {
+    if (this.socket.readyState !== WS_OPEN) {
       throw new Error(`socket not open (readyState=${this.socket.readyState})`);
     }
     this.socket.send(JSON.stringify(msg));
