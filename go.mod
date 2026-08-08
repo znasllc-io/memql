@@ -18,7 +18,7 @@ require (
 	github.com/znasllc-io/memql/component/harness v0.0.0
 	github.com/znasllc-io/memql/component/observe v0.0.0-00010101000000-000000000000
 	github.com/znasllc-io/memql/component/polyphon v0.0.0
-	google.golang.org/grpc v1.82.1
+	google.golang.org/grpc v1.83.0
 	google.golang.org/protobuf v1.36.11
 	gopkg.in/yaml.v3 v3.0.1
 )
@@ -27,17 +27,17 @@ require (
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.8.0 // indirect
 	github.com/anthropics/anthropic-sdk-go v1.61.0 // indirect
 	github.com/dgraph-io/ristretto v0.2.0 // indirect
-	github.com/go-jose/go-jose/v3 v3.0.5 // indirect
 	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728 // indirect
-	github.com/livekit/media-sdk v0.0.0-20260424094251-1e21ae1138de // indirect
-	github.com/livekit/protocol v1.45.6 // indirect
-	github.com/livekit/server-sdk-go/v2 v2.16.3 // indirect
+	github.com/livekit/media-sdk v0.0.0-20260605212526-4c11a51d3c97 // indirect
+	github.com/livekit/protocol v1.49.0 // indirect
+	github.com/livekit/server-sdk-go/v2 v2.18.1 // indirect
 	github.com/oschwald/geoip2-golang v1.13.0 // indirect
 	github.com/pion/webrtc/v4 v4.2.18 // indirect
 	github.com/prometheus/client_golang v1.24.1 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
+	github.com/puzpuzpuz/xsync/v4 v4.5.0 // indirect
 	github.com/robfig/cron/v3 v3.0.1 // indirect
 	github.com/santhosh-tekuri/jsonschema/v5 v5.3.1 // indirect
 	github.com/sashabaranov/go-openai v1.42.0 // indirect
@@ -88,8 +88,8 @@ require (
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/lithammer/shortuuid/v4 v4.2.0 // indirect
 	github.com/livekit/mageutil v0.0.0-20250511045019-0f1ff63f7731 // indirect
-	github.com/livekit/mediatransportutil v0.0.0-20251128105421-19c7a7b81c22 // indirect
-	github.com/livekit/psrpc v0.7.1 // indirect
+	github.com/livekit/mediatransportutil v0.0.0-20260605212259-862d4a7bcb1e // indirect
+	github.com/livekit/psrpc v0.7.2 // indirect
 	github.com/lucasb-eyer/go-colorful v1.2.0 // indirect
 	github.com/mackerelio/go-osstat v0.2.7 // indirect
 	github.com/magefile/mage v1.17.2 // indirect
@@ -181,8 +181,8 @@ require (
 	github.com/znasllc-io/memql/integrations/email v0.0.0
 	github.com/znasllc-io/memql/integrations/openai v0.0.0
 	github.com/znasllc-io/memql/integrations/stt v0.0.0
-	go.opentelemetry.io/otel v1.43.0 // indirect
-	go.opentelemetry.io/otel/trace v1.43.0 // indirect
+	go.opentelemetry.io/otel v1.44.0 // indirect
+	go.opentelemetry.io/otel/trace v1.44.0 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.28.0 // indirect
