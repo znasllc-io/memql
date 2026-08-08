@@ -55,6 +55,22 @@ name: dependabot-tidy
 on:
   pull_request_target:
     branches: [main]
+    # SCOPE. The `if:` below gates on the AUTHOR, and Dependabot also opens
+    # github-actions PRs, whose files are .github/workflows/*.yml. Those hit
+    # the manifest fence in step 1 and FAIL it -- correctly, but the job had
+    # no business starting, so every non-Go Dependabot PR carried a red X it
+    # could do nothing about (observed on #3327, dorny/paths-filter 4.0.2 ->
+    # 4.0.3). This filter means the job never starts for a PR that changes no
+    # Go manifest, so there is no check to be red.
+    #
+    # It is a SCOPE filter, NOT a security control -- it narrows which PRs
+    # reach the fence, it does not replace it. A PR touching BOTH a go.mod and
+    # a workflow still matches here and must still be refused by step 1, which
+    # is why that guard stays exactly as strict as it was.
+    paths:
+      - '**/go.mod'
+      - '**/go.sum'
+      - 'go.work.sum'
 
 # Write is the point of the workflow: the tidy result is pushed back onto the
 # PR branch. Everything else stays at the default read.
