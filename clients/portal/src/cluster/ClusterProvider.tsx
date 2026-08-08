@@ -21,7 +21,11 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Connection, type QueryClient } from "@znasllc-io/memql-sdk-core/client";
+import {
+  Connection,
+  type QueryClient,
+  type SubscriptionManager,
+} from "@znasllc-io/memql-sdk-core/client";
 
 import { anonymousAuthSource, toConnectionAuth, type PortalAuthSource } from "./auth";
 import { portalBridgePath } from "./endpoint";
@@ -43,6 +47,11 @@ export interface ClusterState {
   // cluster goes through this, so a component cannot accidentally query a
   // connection that is still handshaking.
   query: QueryClient | null;
+  // The live-update surface, from the SAME Connection as `query` (memql#3316).
+  // Exposed alongside it, and nulled at the same moment, so a subscription
+  // cannot outlive the stream it was opened on -- a CDC handler still firing
+  // against a dead socket is how a list ends up "live" and wrong.
+  subscriptions: SubscriptionManager | null;
   // Server identity from the ServerHello, for the header. Empty until
   // connected.
   nodeId: string;
@@ -75,6 +84,7 @@ export function ClusterProvider({
 }: ClusterProviderProps): ReactNode {
   const [status, setStatus] = useState<ConnectionStatus>(enabled ? "connecting" : "idle");
   const [query, setQuery] = useState<QueryClient | null>(null);
+  const [subscriptions, setSubscriptions] = useState<SubscriptionManager | null>(null);
   const [nodeId, setNodeId] = useState("");
   const [serverVersion, setServerVersion] = useState("");
   const [error, setError] = useState("");
@@ -101,6 +111,7 @@ export function ClusterProvider({
     // is what makes this ALSO cancel an in-flight dial when a session ends.
     if (!enabled) {
       setQuery(null);
+      setSubscriptions(null);
       setStatus("idle");
       setError("");
       return;
@@ -124,6 +135,12 @@ export function ClusterProvider({
         }
         connection = conn;
         setQuery(conn.query);
+        // `?? null` rather than a bare read: the context's contract is
+        // "a manager, or null", and a Connection-shaped object without one
+        // (an older SDK, a test double narrowed to the methods it needs)
+        // must land on the null branch that disables live updates rather
+        // than on a call to undefined.subscribeGraph().
+        setSubscriptions(conn.subscriptions ?? null);
         setNodeId(conn.nodeId);
         setServerVersion(conn.serverVersion);
         setStatus("connected");
@@ -134,11 +151,13 @@ export function ClusterProvider({
         void conn.done().then(() => {
           if (generation.current !== mine) return;
           setQuery(null);
+          setSubscriptions(null);
           setStatus("closed");
         });
       } catch (err) {
         if (cancelled || generation.current !== mine) return;
         setQuery(null);
+        setSubscriptions(null);
         setStatus("error");
         setError(err instanceof Error ? err.message : String(err));
       }
@@ -153,8 +172,8 @@ export function ClusterProvider({
   const reconnect = useCallback(() => setAttempt((n) => n + 1), []);
 
   const value = useMemo<ClusterState>(
-    () => ({ status, query, nodeId, serverVersion, error, reconnect }),
-    [status, query, nodeId, serverVersion, error, reconnect],
+    () => ({ status, query, subscriptions, nodeId, serverVersion, error, reconnect }),
+    [status, query, subscriptions, nodeId, serverVersion, error, reconnect],
   );
 
   return <ClusterContext.Provider value={value}>{children}</ClusterContext.Provider>;

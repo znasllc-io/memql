@@ -39,6 +39,28 @@ const ATTRIBUTE_ALIASES: Readonly<Record<string, string>> = {
   for: "htmlFor",
 };
 
+export interface VNodeReactOptions {
+  // enhance is how a host attaches BEHAVIOUR to view-kit's output without
+  // view-kit knowing anything about it.
+  //
+  // view-kit's stated contract is that interactivity is expressed as DATA
+  // ATTRIBUTES and the host reads them back (it never emits inline handlers --
+  // a webview CSP forbids them, and row data is untrusted). A webview host
+  // satisfies that with one delegated DOM listener. A React host has a better
+  // option: this callback is invoked with each element's attributes as the
+  // tree is walked, and whatever props it returns are merged onto that
+  // element. So a row can become genuinely focusable and keyboard-operable
+  // (tabIndex + onKeyDown), which a delegated click listener on a wrapper
+  // cannot give it.
+  //
+  // The callback keys off ATTRIBUTES, never off tag names or content -- so it
+  // stays as concept-agnostic as the tree it is decorating.
+  enhance?: (
+    attrs: Readonly<Record<string, string>>,
+    tag: string,
+  ) => Record<string, unknown> | undefined;
+}
+
 // vnodeToReact converts one node (and its subtree) to a ReactNode.
 //
 // `key` is the node's index among its siblings. view-kit lists are positional
@@ -46,7 +68,11 @@ const ATTRIBUTE_ALIASES: Readonly<Record<string, string>> = {
 // shape -- and a rerender replaces the whole list, so an index key is honest
 // here rather than the usual anti-pattern. Text nodes are returned as bare
 // strings, which React accepts inside an array without a key.
-export function vnodeToReact(node: VNode, key?: number): ReactNode {
+export function vnodeToReact(
+  node: VNode,
+  options: VNodeReactOptions = {},
+  key?: number,
+): ReactNode {
   if ("text" in node) {
     return node.text;
   }
@@ -55,6 +81,14 @@ export function vnodeToReact(node: VNode, key?: number): ReactNode {
   for (const [name, value] of Object.entries(node.attrs)) {
     props[ATTRIBUTE_ALIASES[name] ?? name] = value;
   }
+
+  const extra = options.enhance?.(node.attrs, node.tag);
+  if (extra) {
+    for (const [name, value] of Object.entries(extra)) {
+      props[name] = value;
+    }
+  }
+
   if (key !== undefined) {
     props["key"] = key;
   }
@@ -69,6 +103,6 @@ export function vnodeToReact(node: VNode, key?: number): ReactNode {
   return createElement(
     node.tag,
     props,
-    node.children.map((child, index) => vnodeToReact(child, index)),
+    node.children.map((child, index) => vnodeToReact(child, options, index)),
   );
 }

@@ -4,9 +4,18 @@ import type { ReactNode } from "react";
 import { AppShell } from "./AppShell";
 import { RequireAuth } from "./RequireAuth";
 import { AuthCallbackPage } from "../pages/AuthCallbackPage";
-import { ConceptRowsPage } from "../pages/ConceptRowsPage";
+import { ConceptPage } from "../pages/ConceptPage";
+import { ConceptRowsPane } from "../pages/ConceptRowsPane";
+import { ConceptSchemaPane } from "../pages/ConceptSchemaPane";
 import { ConceptsPage } from "../pages/ConceptsPage";
 import { NotFoundPage } from "../pages/NotFoundPage";
+import {
+  CONCEPTS_ROUTE_PATTERN,
+  CONCEPT_ROUTE_PATTERN,
+  CONCEPT_ROW_CHILD_PATTERN,
+  CONCEPT_SCHEMA_CHILD_PATTERN,
+  conceptsPath,
+} from "../concepts/urls";
 
 // The route table.
 //
@@ -34,6 +43,22 @@ import { NotFoundPage } from "../pages/NotFoundPage";
 // RequireAuth is a rendering decision, NOT an authorization gate -- the real
 // enforcement is server-side, per stream and per row. Its own header says so
 // at length.
+//
+// THE CONCEPT BROWSER'S SHAPE (memql#3316). Three addresses, nested so the
+// middle one stays mounted across the third:
+//
+//   /concepts                        the registry: search + domain filter
+//   /concepts/:conceptId             one concept -- its rows
+//   /concepts/:conceptId/rows/:rowId ...with that row's detail open
+//   /concepts/:conceptId/schema      ...its declared fields instead
+//
+// The row route is a CHILD of the concept route rather than a sibling, and
+// that is deliberate: ConceptPage owns the keyset walk, so opening a row
+// re-renders the pane without restarting paging. Sibling routes would remount
+// the whole workspace and re-fetch page one on every click.
+//
+// Concept ids contain colons; src/concepts/urls.ts owns the encoding that
+// keeps them readable in an address bar and exact through a round trip.
 
 export function AppRoutes(): ReactNode {
   return (
@@ -43,9 +68,13 @@ export function AppRoutes(): ReactNode {
       <Route element={<RequireAuth />}>
         <Route element={<AppShell />}>
           {/* The portal has no dashboard yet; concepts is the landing surface. */}
-          <Route index element={<Navigate to="/concepts" replace />} />
-          <Route path="concepts" element={<ConceptsPage />} />
-          <Route path="concepts/:conceptId" element={<ConceptRowsPage />} />
+          <Route index element={<Navigate to={conceptsPath()} replace />} />
+          <Route path={CONCEPTS_ROUTE_PATTERN} element={<ConceptsPage />} />
+          <Route path={CONCEPT_ROUTE_PATTERN} element={<ConceptPage />}>
+            <Route index element={<ConceptRowsPane />} />
+            <Route path={CONCEPT_ROW_CHILD_PATTERN} element={<ConceptRowsPane />} />
+            <Route path={CONCEPT_SCHEMA_CHILD_PATTERN} element={<ConceptSchemaPane />} />
+          </Route>
           <Route path="*" element={<NotFoundPage />} />
         </Route>
       </Route>
