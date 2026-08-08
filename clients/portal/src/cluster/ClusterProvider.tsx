@@ -23,6 +23,7 @@ import {
 } from "react";
 import {
   Connection,
+  type Dispatcher,
   type QueryClient,
   type SubscriptionManager,
 } from "@znasllc-io/memql-sdk-core/client";
@@ -52,6 +53,16 @@ export interface ClusterState {
   // cannot outlive the stream it was opened on -- a CDC handler still firing
   // against a dead socket is how a list ends up "live" and wrong.
   subscriptions: SubscriptionManager | null;
+  // The raw multiplexer under `query`, for the one surface that speaks an
+  // envelope QueryClient does not model: the deploy console. memql#3311
+  // bridges DeployControlService's nine RPCs onto MemqlService.Stream behind
+  // a DeployControlMsg, and sdk/ts/src/deploy takes a Dispatcher. Exposed and
+  // nulled alongside `query`, for the same reason -- a request must not
+  // outlive the stream it was issued on.
+  //
+  // NOT a general-purpose escape hatch: anything that IS a query belongs on
+  // QueryClient, where the wire shape is modelled once.
+  dispatcher: Dispatcher | null;
   // Server identity from the ServerHello, for the header. Empty until
   // connected.
   nodeId: string;
@@ -85,6 +96,7 @@ export function ClusterProvider({
   const [status, setStatus] = useState<ConnectionStatus>(enabled ? "connecting" : "idle");
   const [query, setQuery] = useState<QueryClient | null>(null);
   const [subscriptions, setSubscriptions] = useState<SubscriptionManager | null>(null);
+  const [dispatcher, setDispatcher] = useState<Dispatcher | null>(null);
   const [nodeId, setNodeId] = useState("");
   const [serverVersion, setServerVersion] = useState("");
   const [error, setError] = useState("");
@@ -112,6 +124,7 @@ export function ClusterProvider({
     if (!enabled) {
       setQuery(null);
       setSubscriptions(null);
+      setDispatcher(null);
       setStatus("idle");
       setError("");
       return;
@@ -141,6 +154,10 @@ export function ClusterProvider({
         // must land on the null branch that disables live updates rather
         // than on a call to undefined.subscribeGraph().
         setSubscriptions(conn.subscriptions ?? null);
+        // `?? null` for the same reason as subscriptions above: a narrowed
+        // test double without one must land on the null branch that hides the
+        // deploy console, not on a call to undefined.sendAndWait().
+        setDispatcher(conn.dispatcher ?? null);
         setNodeId(conn.nodeId);
         setServerVersion(conn.serverVersion);
         setStatus("connected");
@@ -152,12 +169,14 @@ export function ClusterProvider({
           if (generation.current !== mine) return;
           setQuery(null);
           setSubscriptions(null);
+          setDispatcher(null);
           setStatus("closed");
         });
       } catch (err) {
         if (cancelled || generation.current !== mine) return;
         setQuery(null);
         setSubscriptions(null);
+        setDispatcher(null);
         setStatus("error");
         setError(err instanceof Error ? err.message : String(err));
       }
@@ -172,8 +191,17 @@ export function ClusterProvider({
   const reconnect = useCallback(() => setAttempt((n) => n + 1), []);
 
   const value = useMemo<ClusterState>(
-    () => ({ status, query, subscriptions, nodeId, serverVersion, error, reconnect }),
-    [status, query, subscriptions, nodeId, serverVersion, error, reconnect],
+    () => ({
+      status,
+      query,
+      subscriptions,
+      dispatcher,
+      nodeId,
+      serverVersion,
+      error,
+      reconnect,
+    }),
+    [status, query, subscriptions, dispatcher, nodeId, serverVersion, error, reconnect],
   );
 
   return <ClusterContext.Provider value={value}>{children}</ClusterContext.Provider>;

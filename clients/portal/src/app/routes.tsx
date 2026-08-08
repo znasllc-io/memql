@@ -9,6 +9,7 @@ import { ConceptRowsPane } from "../pages/ConceptRowsPane";
 import { ConceptSchemaPane } from "../pages/ConceptSchemaPane";
 import { ConceptsPage } from "../pages/ConceptsPage";
 import { NotFoundPage } from "../pages/NotFoundPage";
+import { ViewPage } from "../views/ViewPage";
 import {
   CONCEPTS_ROUTE_PATTERN,
   CONCEPT_ROUTE_PATTERN,
@@ -16,6 +17,7 @@ import {
   CONCEPT_SCHEMA_CHILD_PATTERN,
   conceptsPath,
 } from "../concepts/urls";
+import { VIEW_ROUTE_PATTERN, VIEW_ROW_CHILD_PATTERN } from "../views/urls";
 
 // The route table.
 //
@@ -59,6 +61,20 @@ import {
 //
 // Concept ids contain colons; src/concepts/urls.ts owns the encoding that
 // keeps them readable in an address bar and exact through a round trip.
+//
+// THE PREDEFINED VIEWS (memql#3319) mirror that shape one altitude up:
+//
+//   /views/:viewId                   a designed view of one concept
+//   /views/:viewId/rows/:rowId       ...with that row's detail open
+//
+// Same nesting decision, same reason: ViewPage owns the keyset walk, so
+// opening a row re-renders the body rather than restarting paging. A view id
+// is a slug this repo chooses, so unlike a concept id it needs no encoding;
+// the ROW id still does, and goes through the same encodeSegment.
+//
+// The index still lands on /concepts. The five views are surfaces an operator
+// picks deliberately from the nav; the registry is the honest default landing
+// for a console that has not been told which cluster it is looking after.
 
 export function AppRoutes(): ReactNode {
   return (
@@ -69,6 +85,8 @@ export function AppRoutes(): ReactNode {
         <Route element={<AppShell />}>
           {/* The portal has no dashboard yet; concepts is the landing surface. */}
           <Route index element={<Navigate to={conceptsPath()} replace />} />
+          <Route path={VIEW_ROUTE_PATTERN} element={<ViewPage />} />
+          <Route path={`${VIEW_ROUTE_PATTERN}/${VIEW_ROW_CHILD_PATTERN}`} element={<ViewPage />} />
           <Route path={CONCEPTS_ROUTE_PATTERN} element={<ConceptsPage />} />
           <Route path={CONCEPT_ROUTE_PATTERN} element={<ConceptPage />}>
             <Route index element={<ConceptRowsPane />} />

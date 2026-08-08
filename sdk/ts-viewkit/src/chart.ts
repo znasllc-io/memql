@@ -21,6 +21,16 @@
 //                                        channel on it says nothing new
 //   line        change over time         one hue per SERIES, in slot order
 //   pie         parts of a whole         one hue per SLICE, in slot order
+//   proportion  parts of a whole, in a   one hue per SEGMENT, in slot order
+//               single line of height
+//
+// PIE AND PROPORTION ANSWER THE SAME QUESTION IN DIFFERENT ROOM. Both show
+// share-of-whole and both declare the same requirements, so a picker offers
+// whichever the surface has space for. A pie needs a 320x240 block; the
+// proportion rail is one line tall, which is what lets a page header carry
+// "how does this population divide" above the population itself instead of
+// spending a third of the fold on it. That is a LAYOUT difference, and layout
+// is exactly the axis a form is allowed to differ on.
 //
 // The palette is the validated categorical default: hues in a fixed order
 // (the order is the colour-vision-deficiency safety mechanism, not
@@ -44,6 +54,7 @@
 
 import { h, text, type VNode } from "./vnode.js";
 import { formatDate, formatDateTime, formatNumber, instantValue, numberValue, scalarText } from "./format.js";
+import { statusText } from "./displayCard.js";
 import {
   CATEGORICAL_MAX_DISTINCT,
   boundField,
@@ -251,7 +262,15 @@ function bucketize(
   const out: Bucket[] = [];
   const index = new Map<string, Bucket>();
   for (const row of rows) {
-    const label = scalarText(row, categoryField);
+    const raw = row[categoryField];
+    // A boolean category goes through statusText for the reason memql#3303
+    // gave the status badge: a boolean is not a label. Its field name is the
+    // label and the value only decides whether it is asserted, so an
+    // active/inactive split reads "active" / "not active" rather than
+    // "true" / "false", which is the value of a field whose name the reader
+    // of a legend cannot see. Everything else keeps scalarText's formatting.
+    const label =
+      typeof raw === "boolean" ? statusText(categoryField, raw) : scalarText(row, categoryField);
     if (label === "") continue;
     let bucket = index.get(label);
     if (!bucket) {
@@ -262,6 +281,31 @@ function bucketize(
     bucket.value += valueField === undefined ? 1 : (numberValue(row, valueField) ?? 0);
   }
   return out;
+}
+
+// foldToPalette orders buckets largest-first and folds everything past the
+// palette into one neutral "Other". Shared by the two share-of-whole forms so
+// the same row set cannot fold differently depending on which one is on
+// screen -- a pie showing five categories and a rail showing six, over
+// identical data, would each be reporting a different population.
+function foldToPalette(buckets: readonly Bucket[]): Bucket[] {
+  const sorted = [...buckets].sort((a, b) => b.value - a.value);
+  if (sorted.length <= CHART_SERIES_SLOTS) return sorted;
+  const head = sorted.slice(0, CHART_SERIES_SLOTS - 1);
+  const tail = sorted.slice(CHART_SERIES_SLOTS - 1);
+  head.push({
+    label: "Other",
+    value: tail.reduce((sum, b) => sum + b.value, 0),
+    other: true,
+  });
+  return head;
+}
+
+// shareOf is the percentage a bucket takes of the whole, to one decimal. One
+// implementation so the pie's slice label, the rail's legend and both
+// tooltips cannot round differently.
+function shareOf(value: number, total: number): number {
+  return total === 0 ? 0 : Math.round((value / total) * 1000) / 10;
 }
 
 // ---------------------------------------------------------------------------
@@ -567,22 +611,12 @@ function drawPie({ rows, concept, fit, options }: ElementRenderInput): VNode {
   const valueField = boundField(fit, "value");
   if (!categoryField) return emptyChart(concept.entity, "categories");
 
-  let buckets = bucketize(rows, categoryField, valueField).filter((b) => b.value > 0);
-  if (buckets.length === 0) return emptyChart(concept.entity, "categories");
-
   // Largest first, then anything past the palette folds into one neutral
   // "Other" slice. Inventing a seventh hue is how a palette stops being safe.
-  buckets = [...buckets].sort((a, b) => b.value - a.value);
-  if (buckets.length > CHART_SERIES_SLOTS) {
-    const head = buckets.slice(0, CHART_SERIES_SLOTS - 1);
-    const tail = buckets.slice(CHART_SERIES_SLOTS - 1);
-    head.push({
-      label: "Other",
-      value: tail.reduce((sum, b) => sum + b.value, 0),
-      other: true,
-    });
-    buckets = head;
-  }
+  const buckets = foldToPalette(
+    bucketize(rows, categoryField, valueField).filter((b) => b.value > 0),
+  );
+  if (buckets.length === 0) return emptyChart(concept.entity, "categories");
 
   const total = buckets.reduce((sum, b) => sum + b.value, 0);
   const cx = PIE_W / 2;
@@ -594,7 +628,7 @@ function drawPie({ rows, concept, fit, options }: ElementRenderInput): VNode {
   buckets.forEach((bucket, i) => {
     const sweep = (bucket.value / total) * Math.PI * 2;
     const end = angle + sweep;
-    const share = Math.round((bucket.value / total) * 1000) / 10;
+    const share = shareOf(bucket.value, total);
     marks.push(
       h(
         "path",
@@ -696,6 +730,134 @@ function slicePath(
 }
 
 // ---------------------------------------------------------------------------
+// Proportion rail
+// ---------------------------------------------------------------------------
+
+// The same question as the pie -- what share does each category hold -- in one
+// line of height instead of a block. Added for the predefined operator views
+// (memql#3319), which all open with "here is a population, here is how it
+// divides, here it is enumerated": the divide step has to sit ABOVE the
+// population without pushing it off the fold, and no existing form does that.
+// A bar chart shows magnitude by category, not share of whole, and needs a
+// vertical axis; a pie shows share and needs a square.
+//
+// COLOUR IS NOT THE ONLY CARRIER, per the palette's relief rule. A segment is
+// too short to hold a direct label, so the legend beneath carries the full
+// reading for every segment -- "developer 12 (34.3%)" -- and is emitted
+// ALWAYS, including for a single category, rather than only past two series
+// as the cartesian forms do.
+export const PROPORTION_BAR_ELEMENT: ElementSpec = {
+  id: "chart.proportion",
+  title: "Proportion rail",
+  summary: "Each category's share of the whole, on a single line.",
+  requires: [
+    {
+      slot: "category",
+      description: "the category each segment stands for",
+      kinds: ["text", "boolean"],
+      min: 1,
+      distinctMax: CHART_SERIES_SLOTS + 2,
+      preferFewestDistinct: true,
+      prefer: ["status"],
+    },
+    {
+      slot: "value",
+      description: "the measure each segment's width shows",
+      kinds: ["number"],
+      min: 0,
+      autoMax: 1,
+      degraded: "segments show how many rows fall in each category",
+    },
+  ],
+  render: (input) => drawProportion(input),
+};
+
+const RAIL_W = 480;
+const RAIL_H = 14;
+const RAIL_R = 3;
+
+function drawProportion({ rows, concept, fit, options }: ElementRenderInput): VNode {
+  const categoryField = boundField(fit, "category");
+  const valueField = boundField(fit, "value");
+  if (!categoryField) return emptyChart(concept.entity, "categories");
+
+  const buckets = foldToPalette(
+    bucketize(rows, categoryField, valueField).filter((b) => b.value > 0),
+  );
+  if (buckets.length === 0) return emptyChart(concept.entity, "categories");
+
+  const total = buckets.reduce((sum, b) => sum + b.value, 0);
+  const measure = valueField ?? "rows";
+
+  const marks: VNode[] = [];
+  let x = 0;
+  buckets.forEach((bucket, i) => {
+    const full = (bucket.value / total) * RAIL_W;
+    // The GAP is taken out of the segment rather than drawn over it, so the
+    // rail's total width still reads as the whole population. A share small
+    // enough to vanish keeps 1 unit: a category that exists must be visible,
+    // and the legend says how small it is.
+    const width = Math.max(1, full - (i === buckets.length - 1 ? 0 : GAP));
+    marks.push(
+      h(
+        "rect",
+        {
+          class: `vk-chart-rail-seg ${bucket.other ? "vk-chart-other" : seriesClass(i)}`,
+          x: x.toFixed(1),
+          y: "0",
+          width: width.toFixed(1),
+          height: String(RAIL_H),
+          rx: String(RAIL_R),
+          "data-vk-category": bucket.label,
+          "data-vk-value": String(bucket.value),
+        },
+        [
+          h("title", {}, [
+            text(
+              `${bucket.label}: ${formatNumber(bucket.value)} ${measure} ` +
+                `(${shareOf(bucket.value, total)}%)`,
+            ),
+          ]),
+        ],
+      ),
+    );
+    x += full;
+  });
+
+  const summary =
+    `Proportion of ${measure} by ${categoryField} for ${concept.entity}: ` +
+    buckets.map((b) => `${b.label} ${shareOf(b.value, total)}%`).join(", ");
+
+  return figure(
+    [
+      h(
+        "svg",
+        {
+          class: "vk-chart vk-chart-rail",
+          viewBox: `0 0 ${RAIL_W} ${RAIL_H}`,
+          // A rail is a proportion, not a picture with an aspect ratio worth
+          // keeping: it should fill whatever width it is given at a fixed
+          // height, so the slice is stretched rather than letterboxed.
+          preserveAspectRatio: "none",
+          role: "img",
+          "aria-label": summary,
+        },
+        marks,
+      ),
+      legend(
+        buckets.map((bucket, index) => ({
+          label:
+            `${bucket.label} ${formatNumber(bucket.value)} ` +
+            `(${shareOf(bucket.value, total)}%)`,
+          index: bucket.other ? CHART_SERIES_SLOTS : index,
+        })),
+      ),
+    ],
+    options?.theme,
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Convenience entry points
 // ---------------------------------------------------------------------------
 
@@ -724,4 +886,13 @@ export function renderPieChart(
 ): VNode {
   const fit = fitElement(PIE_CHART_ELEMENT, profileConcept(concept, rows), options);
   return drawPie({ rows, concept, fit, options });
+}
+
+export function renderProportionBar(
+  rows: readonly RowLike[],
+  concept: ConceptLike,
+  options: ElementOptions = {},
+): VNode {
+  const fit = fitElement(PROPORTION_BAR_ELEMENT, profileConcept(concept, rows), options);
+  return drawProportion({ rows, concept, fit, options });
 }

@@ -292,6 +292,14 @@ export interface ElementOptions {
   readonly selectedRowId?: string;
   // Overrides the automatic binding for one or more slots. This is what a
   // user-composed view writes when a person says "plot dueAt, not createdAt".
+  //
+  // NAMING A SLOT HERE SETTLES IT. The automatic resolution (steps 2-4 of
+  // fitElement) runs only for slots the caller did NOT speak about, so an
+  // EMPTY list is the way to say "this slot binds nothing" -- which is how a
+  // predefined view asks the stat strip for a row count and no summed
+  // measures (memql#3319: `revocationEpoch total` is a true number and a
+  // meaningless one). It is also why a misspelled field name reports the slot
+  // unmet instead of quietly substituting whatever the scan liked next.
   readonly bindings?: Readonly<Record<string, string | readonly string[]>>;
   // Charts need a concrete light/dark answer for their series palette; every
   // other element is theme-neutral. Omitted means "follow the host", which
@@ -370,6 +378,13 @@ function kindLabel(kinds: readonly FieldKind[]): string {
 //      ordered by fewest-distinct (when the requirement asks) and then by the
 //      profile's field order -- skipped entirely for an `explicitOnly` slot
 //
+// STEPS 2-4 ARE FOR SLOTS THE CALLER DID NOT DECIDE. If options.bindings names
+// the slot at all -- even with an empty list, even with a field that does not
+// exist -- the automatic resolution is skipped for it. A caller who spoke
+// about a slot and got a field they did not name would have no way to tell;
+// an unbound slot with a stated reason is the honest report, and an empty list
+// is how a view asks for nothing at all (see ElementOptions.bindings).
+//
 // Steps 1-3 bypass the NON_DISPLAY_FIELDS skip: naming a field explicitly, or
 // declaring it as the display card's primary, is a decision already made.
 //
@@ -433,6 +448,9 @@ export function fitElement(
 
     // 1. explicit override
     const override = options?.bindings?.[req.slot];
+    // Whether the caller SPOKE about this slot, which is not the same as
+    // whether anything bound: `[]` and a misspelled name both settle the slot.
+    const decided = override !== undefined;
     if (override !== undefined) {
       for (const field of asArray(override)) {
         if (!room()) break;
@@ -445,19 +463,19 @@ export function fitElement(
 
     // 2. display-card slots
     for (const slot of req.prefer ?? []) {
-      if (!autoRoom()) break;
+      if (decided || !autoRoom()) break;
       const field = profile.card[slot];
       if (field && accepts(byName.get(field), true)) take(field);
     }
 
     // 3. preferred field names
     for (const name of req.preferNames ?? []) {
-      if (!autoRoom()) break;
+      if (decided || !autoRoom()) break;
       if (accepts(byName.get(name), true)) take(name);
     }
 
     // 4. the remaining candidates
-    if (autoRoom() && !req.explicitOnly) {
+    if (!decided && autoRoom() && !req.explicitOnly) {
       const rest = profile.fields.filter((f) => accepts(f, false));
       if (req.preferFewestDistinct) {
         // Stable: sort() is stable in every engine this package supports, so
@@ -485,7 +503,9 @@ export function fitElement(
       unmet.push({
         slot: req.slot,
         required: min > 0,
-        reason: req.explicitOnly
+        reason: decided
+          ? "the caller bound no field to it"
+          : req.explicitOnly
           ? `no field the concept points at for it${named ? `, and none named ${named}` : ""}`
           : `no unused ${kindLabel(req.kinds)}${
               req.distinctMax !== undefined

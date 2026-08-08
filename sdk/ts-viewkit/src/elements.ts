@@ -19,7 +19,12 @@ import { TIMELINE_ELEMENT } from "./timeline.js";
 import { STAT_TILE_ELEMENT } from "./statTile.js";
 import { KANBAN_ELEMENT } from "./kanban.js";
 import { MAP_ELEMENT } from "./map.js";
-import { BAR_CHART_ELEMENT, LINE_CHART_ELEMENT, PIE_CHART_ELEMENT } from "./chart.js";
+import {
+  BAR_CHART_ELEMENT,
+  LINE_CHART_ELEMENT,
+  PIE_CHART_ELEMENT,
+  PROPORTION_BAR_ELEMENT,
+} from "./chart.js";
 import { h, text } from "./vnode.js";
 import type { ElementSpec } from "./fitness.js";
 
@@ -63,6 +68,7 @@ export const VIEW_KIT_ELEMENTS: readonly ElementSpec[] = [
   LINE_CHART_ELEMENT,
   BAR_CHART_ELEMENT,
   PIE_CHART_ELEMENT,
+  PROPORTION_BAR_ELEMENT,
   TABLE_ELEMENT,
   STAT_TILE_ELEMENT,
   ROW_LIST_ELEMENT,

@@ -53,7 +53,13 @@
 
   /* --- status -------------------------------------------------------- */
   --portal-ok: oklch(58% 0.15 155);
-  --portal-warn: oklch(70% 0.16 75);
+  --portal-ok-subtle: oklch(95% 0.04 155);
+  /* Darker than the amber it started as (70% 0.16 75), which measured 2.76:1
+     on white -- under the 3:1 floor for a non-text UI indicator, and this hue
+     is a border on the live-degraded banner and the fill of the "connecting"
+     dot. 62% takes it to 3.76:1 and it is still unmistakably amber. The dark
+     theme's warn was already clear (9.29:1) and is unchanged. */
+  --portal-warn: oklch(62% 0.16 68);
   --portal-warn-subtle: oklch(95% 0.04 75);
   --portal-danger: oklch(56% 0.20 25);
   --portal-danger-subtle: oklch(95% 0.03 25);
@@ -98,6 +104,28 @@
   --vk-hover-bg: var(--portal-surface-raised);
   --vk-selected-bg: var(--portal-accent-subtle);
   --vk-selected-fg: var(--portal-fg);
+
+  /* The chart tokens. Only ONE is mapped, and the omission is the decision:
+   *
+   *   --vk-chart-surface  MUST be set by the host. It is the colour painted
+   *     BETWEEN adjacent fills (the gap on a pie slice, a map point's halo),
+   *     so it has to match whatever the chart sits on -- and only the host
+   *     knows that. Left unset, the gap is painted in view-kit's guess at a
+   *     surface and shows as a pale seam on the portal's panels.
+   *
+   *   --vk-chart-1..6 / -other / -grid / -axis  deliberately NOT mapped.
+   *     view-kit's defaults are a categorical palette validated as a SET for
+   *     colour-vision deficiency, separately stepped for light and dark;
+   *     overriding a slot for taste invalidates the validation for the whole
+   *     set. If the portal ever needs its own series hues, the whole set gets
+   *     re-validated together, not one token at a time.
+   *
+   * The per-theme half of this is handled by view-kit following
+   * prefers-color-scheme, plus the explicit `theme` the portal stamps on every
+   * chart it renders (src/app/useResolvedTheme.ts) -- which is what makes a
+   * dark portal on a light OS correct.
+   */
+  --vk-chart-surface: var(--portal-surface);
 }
 
 /*
@@ -128,6 +156,7 @@
     --portal-accent-subtle: oklch(30% 0.06 264);
 
     --portal-ok: oklch(72% 0.15 155);
+    --portal-ok-subtle: oklch(30% 0.06 155);
     --portal-warn: oklch(80% 0.15 75);
     --portal-warn-subtle: oklch(30% 0.07 75);
     --portal-danger: oklch(70% 0.17 25);
@@ -160,6 +189,7 @@
   --portal-accent-subtle: oklch(30% 0.06 264);
 
   --portal-ok: oklch(72% 0.15 155);
+  --portal-ok-subtle: oklch(30% 0.06 155);
   --portal-warn: oklch(80% 0.15 75);
   --portal-warn-subtle: oklch(30% 0.07 75);
   --portal-danger: oklch(70% 0.17 25);

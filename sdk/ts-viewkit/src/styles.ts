@@ -528,6 +528,14 @@ const elementStyles = `
   stroke-width: 2;
 }
 
+/* The proportion rail. One line tall and stretched to its container's width:
+   the rail IS the population, so it must not letterbox at a narrow width the
+   way an aspect-preserving chart would. The height is pinned here rather than
+   left to the viewBox because .vk-chart's \`height: auto\` would scale it with
+   the width and turn a 14-unit rail into a 60px band on a wide pane. */
+.vk-chart-rail { height: 14px; }
+.vk-chart-rail-seg { stroke: none; }
+
 .vk-chart-grid { stroke: var(--vk-chart-grid, var(--vk-chart-grid-default)); stroke-width: 1; }
 .vk-chart-axis { stroke: var(--vk-chart-axis, var(--vk-chart-axis-default)); stroke-width: 1; }
 

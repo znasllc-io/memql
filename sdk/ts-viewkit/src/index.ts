@@ -59,11 +59,13 @@ export {
   renderBarChart,
   renderLineChart,
   renderPieChart,
+  renderProportionBar,
   axisScale,
   formatCompact,
   BAR_CHART_ELEMENT,
   LINE_CHART_ELEMENT,
   PIE_CHART_ELEMENT,
+  PROPORTION_BAR_ELEMENT,
   CHART_SERIES_SLOTS,
   type AxisScale,
 } from "./chart.js";

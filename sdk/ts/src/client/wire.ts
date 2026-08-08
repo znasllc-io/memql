@@ -757,7 +757,12 @@ export type UserRoleWire =
   | "USER_ROLE_OWNER"
   | "USER_ROLE_ADMIN"
   | "USER_ROLE_WRITER"
-  | "USER_ROLE_READER";
+  | "USER_ROLE_READER"
+  // Engineering power -- authoring, inline DSL, and cut/deploy -- without
+  // user management. Not a rung between admin and writer: it sits in the
+  // privileged tier beside admin with different powers. On the wire since
+  // memql#1886, precisely so MyAccess can drive deploy-console gating.
+  | "USER_ROLE_DEVELOPER";
 
 export type ServerMessage = MessageBase & ServerPayload;
 

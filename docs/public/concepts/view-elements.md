@@ -129,6 +129,16 @@ declaring it as the display card's primary, is a decision already made.
 A field binds to at most one slot per element, which is why an element
 needing two timestamps declares the more specific one first.
 
+**Naming a slot settles it.** Steps 2-4 run only for slots the caller
+did *not* speak about. If `options.bindings` mentions a slot at all,
+the automatic resolution is skipped for it -- so an **empty list is how
+a caller declines a slot**, which is how a predefined view asks the stat
+strip for a row count and no summed measures (`revocationEpoch total` is
+a true number and a meaningless one). The same rule means a misspelled
+field name reports the slot unmet rather than quietly substituting
+whatever the scan liked next, which a caller who named a field would
+have no way to notice.
+
 ---
 
 ## 3. Reading a fit
@@ -203,6 +213,7 @@ memory.
 | **Bar chart** | a category; optional measure (else row counts) | `v1:observability:codeMetric` |
 | **Line chart** | a datetime and a measure | `v1:observability:codeMetric` |
 | **Pie chart** | a category; optional measure | `v1:observability:codeMetric` |
+| **Proportion rail** | a category (text or boolean); optional measure | `v1:identity:user` (its `role` and `active` splits) |
 | **Map** | a latitude and a longitude | nothing yet -- see below |
 
 **The map is the honest case.** No concept in the tree carries
@@ -216,16 +227,30 @@ pins that state and fails when it changes.
 
 ## 5. Charts: one visual system
 
-Bar, line and pie share one file, one categorical palette in one fixed
-slot order, one axis and gridline frame, one tick stepping and one
-number format. Three separate renderings would be three palettes within
-a release.
+Bar, line, pie and the proportion rail share one file, one categorical
+palette in one fixed slot order, one axis and gridline frame, one tick
+stepping and one number format. Separate renderings would be separate
+palettes within a release.
 
 - **Colour does one job per form.** A bar chart's length already encodes
   its value, so every bar takes the *same* hue -- colouring bars by
   their value spends the identity channel re-encoding what the bar
-  already says. A line chart takes one hue per series, a pie one per
-  slice.
+  already says. A line chart takes one hue per series, a pie or a rail
+  one per slice.
+- **Two forms answer the same question in different room.** The pie and
+  the proportion rail both show share-of-whole and declare the same
+  requirements, and they fold past the palette through one shared
+  routine so a row set cannot report a different number of categories
+  depending on which is on screen. The difference is space: a pie needs
+  a 320x240 block, the rail is one line tall. That is what lets a page
+  header carry "how does this population divide" above the population
+  itself, which is how every predefined view in the portal opens
+  (memql#3319). Layout is the axis a form is allowed to differ on.
+- **A boolean category is not "true" / "false".** A boolean grouping
+  field goes through `statusText`, so an active/inactive split reads
+  "active" and "not active" -- the same rule the status badge follows
+  (memql#3303). A legend does not show the field's name, so the value
+  alone says nothing.
 - **The slot order is a safety mechanism, not decoration.** The palette
   is validated for colour-vision deficiency: worst adjacent separation
   9.1 (light) / 8.4 (dark) against a >= 8 target, worst normal-vision
@@ -288,3 +313,44 @@ concept needs different treatment, express the difference as a
 **requirement its fields can satisfy** -- that is the whole mechanism,
 and it is enforced: a concept id literal or a comparison against
 `concept.id` / `concept.entity` in any source file fails the suite.
+
+---
+
+## 7. Predefined views, and the line they may not cross
+
+Five concepts get a hand-designed screen in the portal, because they
+are the ones an operator lives in: people (`v1:identity:user`), agents
+(`v1:agents:agent`), customers (`v1:identity:account`), deployments
+(`v1:cluster:deployment`) and audit (`v1:identity:auditEvent`). They
+live in `clients/portal/src/views/`, addressed at `/views/:viewId` and
+`/views/:viewId/rows/:rowId` (memql#3319).
+
+**A predefined view is a LAYOUT CHOICE OVER THESE ELEMENTS.** It picks
+elements, names their requirement slots, and arranges the bands. It
+does not render a row, and it does not read a display card -- it names
+an element's slot and lets the fitness profile resolve the field, the
+same as everything else. All five follow one grammar, so learning one
+screen teaches five:
+
+| Band | Question | Typical element |
+|---|---|---|
+| reading | how many are there? | stat tiles |
+| shape | how does that divide? | the proportion rail |
+| roll | which ones, specifically? | table, timeline or board |
+
+**Where the line is, and how it is held.** If a view needs something no
+element provides, the answer is a new **element**, not markup in the
+view -- otherwise the library stops being what makes a new concept work
+for free, and the designed screens drift onto a second renderer. The
+proportion rail is the worked example: these views needed share-of-whole
+in one line of height, the pie needs a block, so the rail was added to
+the library and every concept has it now.
+
+That rule is mechanical, not editorial.
+`portal_view_composition_test.go` (repo root, so weakening it edits Go)
+scans the view tree and fails on row markup (`<table>`, `<tr>`, `<ul>`,
+svg primitives), on iteration that could produce a row (`.map`,
+`.forEach`), on a second VNode-to-React bridge, and on reading
+`displayCard` directly. It cannot tell whether the element a view chose
+is the *right* one, and it does not police a single field read off one
+object -- its own header says so at length.

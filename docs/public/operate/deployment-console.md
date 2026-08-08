@@ -24,17 +24,23 @@ console-driven workflow; the underlying mechanics live in the
 deployment-v2 docs cross-linked at the bottom and are not duplicated
 here.
 
-## The two surfaces
+## The surfaces
 
 | Surface | Where | Use it when |
 |---------|-------|-------------|
+| **memQL portal -- Deployments** | `https://cockpit.<env>.example.com/portal/views/deployments` | You want the designed operator view: the live release beside the last gate's legs, the image digests in force, and the whole deployment history on one page (memql#3319). |
 | **Identity portal -- Deployments** | `https://identity.<env>.example.com/admin/deployments` (your identity host) | You want a full-screen, point-and-click view with confirm dialogs; you are already in the admin portal (users / sessions / audit / JWKS). |
 | **Cockpit Topology** | memQL Cockpit, cluster/Topology view | You are already in the terminal-native ops console watching node health + observability overlays and want deployment state and controls inline. |
 
-Both surfaces call the same owner/admin-gated **deploy-control API**
-(memQL `DeployControlService`); neither shells out to
-`kubectl` / `argocd` / `git` directly. Both show the same data and
-offer the same four actions. Pick whichever you are already in.
+Every surface calls the same role-gated **deploy-control API**
+(memQL `DeployControlService`); none shells out to
+`kubectl` / `argocd` / `git` directly. They show the same data and
+offer the same actions. Pick whichever you are already in.
+
+A surface may HIDE an action the caller's role cannot take -- the memQL
+portal does, so an admin is not offered a rollback that would come back
+`PermissionDenied`. That is a courtesy, not a control: the gate is the
+service's, and it applies identically however the RPC arrived.
 
 ### Two transports, one service (memql#3311)
 

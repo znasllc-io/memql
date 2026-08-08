@@ -14,7 +14,7 @@ import type {
   UserRoleWire,
 } from "./wire.js";
 
-export type Role = "" | "owner" | "admin" | "writer" | "reader";
+export type Role = "" | "owner" | "admin" | "developer" | "writer" | "reader";
 
 export interface AccessSummary {
   requestId: string;
@@ -204,6 +204,7 @@ const userRoleFromWire: Record<UserRoleWire, Role> = {
   USER_ROLE_ADMIN: "admin",
   USER_ROLE_WRITER: "writer",
   USER_ROLE_READER: "reader",
+  USER_ROLE_DEVELOPER: "developer",
 };
 
 export function roleFromWire(r: UserRoleWire | undefined): Role {

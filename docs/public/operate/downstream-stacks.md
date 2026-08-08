@@ -10,17 +10,32 @@ owner: platform
 
 The memQL engine repo is **product-agnostic**: it builds, runs, and tests
 the engine mesh only, and it contains no product names. A product built on
-memQL is **not** a Go constellation -- it is a **DSL bundle plus a client**,
-deployed as one overlay over the product-agnostic engine:
+memQL is **not** a Go constellation -- it is a **DSL bundle plus one or
+more client surfaces**, deployed as one overlay over the product-agnostic
+engine:
 
 ```
 <product>/                    # ONE repo -- no product Go, no go.work
 ├── dsl/                      # the product's .memql tree (data only),
 │                             #   packaged as a tiny data-only BUNDLE image
-├── client/                   # the product frontend (SPA or otherwise)
+├── clients/                  # the product's frontends -- PLURAL
+│   ├── web/                  #   an SPA
+│   └── …                     #   a landing page, a game, a mobile shell
 └── deploy/k8s/overlays/…     # pins {engine version, bundle digest,
-                              #   client digest} + adds the dsl-bundle component
+                              #   one digest per client surface}
+                              #   + adds the dsl-bundle component
 ```
+
+`clients/` is plural because one product routinely ships more than one
+surface, and the singular form quietly forced either a second repo or a
+second build wedged into the first. Each surface is its own package, its
+own image and its own digest, and nothing enumerates them by hand. The
+engine repo uses the same convention for the one surface it owns --
+`clients/portal/`, the platform's own operations console (memql#3314) --
+which is what makes it the worked example the `memql-project` template
+copies. What must NOT land in the engine's `clients/` is a *product's*
+surface; that boundary is enforced by `clients_allowlist_test.go`
+(memql#3326), not by convention.
 
 The engine ships **every** node type (identity, bff, cognition, agent,
 planner, voice, workbench, mcp) as a **product-agnostic image** from this

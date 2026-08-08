@@ -39,9 +39,11 @@ import {
   BAR_CHART_ELEMENT,
   LINE_CHART_ELEMENT,
   PIE_CHART_ELEMENT,
+  PROPORTION_BAR_ELEMENT,
   renderBarChart,
   renderLineChart,
   renderPieChart,
+  renderProportionBar,
 } from "../src/chart.js";
 
 // ---------------------------------------------------------------------------
@@ -521,6 +523,88 @@ test("a chart folds past the palette rather than inventing a seventh hue", () =>
   assert.ok(!html.includes("vk-chart-s7"), "there is no seventh slot");
 });
 
+// ---------------------------------------------------------------------------
+// Proportion rail -- v1:identity:user (the role mix an operator view opens on)
+// ---------------------------------------------------------------------------
+
+test("the proportion rail binds the concept's own status slot by default", () => {
+  const fit = fitElement(PROPORTION_BAR_ELEMENT, profileConcept(conceptLike(USER), USERS));
+  // The user concept declares status="active", and the rail prefers whatever
+  // the concept calls its status rather than any particular field name.
+  assert.equal(boundField(fit, "category"), "active");
+
+  const html = renderToHtml(renderProportionBar(USERS, conceptLike(USER)));
+  // A boolean split reads as the field name asserted or negated: "true" and
+  // "false" are the value of a field whose name a legend does not show.
+  assert.match(html, /vk-chart-legend-label">active 1 \(50%\)</);
+  assert.match(html, /vk-chart-legend-label">not active 1 \(50%\)</);
+});
+
+test("the proportion rail is one line and stretches to its container", () => {
+  const html = renderToHtml(
+    renderProportionBar(USERS, conceptLike(USER), { bindings: { category: "role" } }),
+  );
+  assert.match(html, /<svg class="vk-chart vk-chart-rail" viewBox="0 0 480 14"/);
+  // Not aspect-preserving: the rail is a proportion, so it fills the width it
+  // is given at a fixed height rather than letterboxing in a narrow pane.
+  assert.match(html, /preserveAspectRatio="none"/);
+  assert.match(
+    html,
+    /role="img" aria-label="Proportion of rows by role for user: owner 50%, admin 50%"/,
+  );
+  assert.match(html, /class="vk-chart-rail-seg vk-chart-s1"/);
+  assert.match(html, /class="vk-chart-rail-seg vk-chart-s2"/);
+  // The gap between adjacent fills comes OUT of the segment, so the rail's
+  // full width still reads as the whole population.
+  assert.match(html, /x="0\.0" y="0" width="238\.0" height="14"/);
+  assert.match(html, /x="240\.0" y="0" width="240\.0" height="14"/);
+  assert.match(html, /<title>owner: 1 rows \(50%\)<\/title>/);
+});
+
+test("the proportion rail always carries its legend, so colour is never alone", () => {
+  // The cartesian forms emit a legend only past two series; a rail segment is
+  // too short to hold a direct label, so its legend is the relief and it is
+  // unconditional -- including for a single category.
+  const one = [{ id: "u1", role: "owner" }];
+  const html = renderToHtml(
+    renderProportionBar(one, { id: "x", entity: "person" }, { bindings: { category: "role" } }),
+  );
+  assert.match(html, /class="vk-chart-legend"/);
+  assert.match(html, /vk-chart-legend-label">owner 1 \(100%\)</);
+});
+
+test("the proportion rail folds past the palette exactly as the pie does", () => {
+  const rows = Array.from({ length: 9 }, (_, i) => ({ id: `r${i}`, kind: `kind-${i}`, n: 9 - i }));
+  const options = { bindings: { category: "kind", value: "n" } };
+  const rail = renderToHtml(renderProportionBar(rows, { id: "x", entity: "x" }, options));
+  const pie = renderToHtml(renderPieChart(rows, { id: "x", entity: "x" }, options));
+  assert.match(rail, /vk-chart-other/);
+  assert.ok(!rail.includes("vk-chart-s7"), "there is no seventh slot");
+  // The same fold, not merely a similar one: one row set must not report a
+  // different number of categories depending on which form is on screen.
+  const categories = (html: string): string[] =>
+    [...html.matchAll(/data-vk-category="([^"]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(categories(rail), categories(pie));
+});
+
+test("a tiny share stays visible on the rail", () => {
+  // 1 in 1000 is 0.48 units of a 480-wide rail, which rounds away. A category
+  // that exists has to be visible; the legend says how small it is.
+  const rows = [
+    { id: "a", kind: "healthy", n: 999 },
+    { id: "b", kind: "offline", n: 1 },
+  ];
+  const html = renderToHtml(
+    renderProportionBar(
+      rows,
+      { id: "x", entity: "node" },
+      { bindings: { category: "kind", value: "n" } },
+    ),
+  );
+  assert.match(html, /width="1\.0"[^>]*data-vk-category="offline"/);
+  assert.match(html, /vk-chart-legend-label">offline 1 \(0\.1%\)</);
+});
+
 test("stat tiles total the numeric fields and always show the row count", () => {
   const fit = fitElement(
     STAT_TILE_ELEMENT,
@@ -652,6 +736,7 @@ test("every chart keeps its marks and labels inside the viewBox", () => {
   assertInsideViewBox(renderToHtml(renderBarChart(METRICS, concept)), "bar");
   assertInsideViewBox(renderToHtml(renderLineChart(METRICS, concept)), "line");
   assertInsideViewBox(renderToHtml(renderPieChart(METRICS, concept)), "pie");
+  assertInsideViewBox(renderToHtml(renderProportionBar(METRICS, concept)), "proportion rail");
   // The pie's share labels sit outside the arc; a near-even split puts one at
   // each compass point, which is the case that used to clip.
   const even = Array.from({ length: 4 }, (_, i) => ({ id: `e${i}`, kind: `kind-${i}`, n: 25 }));

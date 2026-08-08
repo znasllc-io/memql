@@ -5,21 +5,35 @@ import { ClusterBadge } from "../components/ClusterBadge";
 import { ConnectionIndicator } from "../components/ConnectionIndicator";
 import { IdentityBadge } from "../components/IdentityBadge";
 import { ThemeToggle } from "../components/ThemeToggle";
+import { CONCEPTS_ROOT } from "../concepts/urls";
+import { VIEWS } from "../views/registry";
+import { viewPath } from "../views/urls";
 
 // The routed layout: a header carrying identity + connection state, a nav
 // rail, and an <Outlet> the routes render into.
 //
-// The nav is a list rather than one hardcoded link because the epic adds to
-// it (#3316 concept browsing, #3317's element library, #3319's predefined
-// views). Adding a destination should be a line here and a <Route>, not a
-// layout change.
+// THE NAV IS GROUPED, and the grouping is a real distinction rather than
+// tidying. The predefined views (memql#3319) are SURFACES an operator works
+// in -- people, agents, customers, deployments, audit. The concept registry
+// is the SUBSTRATE those surfaces are built on: every concept in the cluster,
+// rendered generically. Flattening the two into one list of six would make
+// "Concepts" look like a sixth destination of the same kind, and would keep
+// looking worse as the epic adds more. Two short labelled groups stay legible
+// where a flat list stops being scannable at about five.
+//
+// The view group is DERIVED from the registry, so adding a view is one row in
+// src/views/registry.ts plus its body module -- never an edit here.
 
 interface NavItem {
   to: string;
   label: string;
 }
 
-const NAV: readonly NavItem[] = [{ to: "/concepts", label: "Concepts" }];
+const OPERATE: readonly NavItem[] = VIEWS.filter((view) => view.group === "operate").map(
+  (view) => ({ to: viewPath(view.id), label: view.label }),
+);
+
+const EXPLORE: readonly NavItem[] = [{ to: CONCEPTS_ROOT, label: "Concepts" }];
 
 function navClass({ isActive }: { isActive: boolean }): string {
   return (
@@ -27,6 +41,25 @@ function navClass({ isActive }: { isActive: boolean }): string {
     (isActive
       ? "bg-accent-subtle font-medium text-fg"
       : "text-muted hover:bg-raised hover:text-fg")
+  );
+}
+
+function NavGroup({ label, items }: { label: string; items: readonly NavItem[] }): ReactNode {
+  return (
+    <div>
+      <h2 className="px-3 pb-1 text-xs font-semibold tracking-wide text-subtle uppercase">
+        {label}
+      </h2>
+      <ul className="space-y-0.5">
+        {items.map((item) => (
+          <li key={item.to}>
+            <NavLink to={item.to} className={navClass}>
+              {item.label}
+            </NavLink>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -49,17 +82,10 @@ export function AppShell(): ReactNode {
       <div className="flex min-h-0 flex-1">
         <nav
           aria-label="Portal sections"
-          className="w-48 shrink-0 border-r border-line bg-surface p-2"
+          className="flex w-48 shrink-0 flex-col gap-4 border-r border-line bg-surface p-2"
         >
-          <ul className="space-y-0.5">
-            {NAV.map((item) => (
-              <li key={item.to}>
-                <NavLink to={item.to} className={navClass}>
-                  {item.label}
-                </NavLink>
-              </li>
-            ))}
-          </ul>
+          <NavGroup label="Operate" items={OPERATE} />
+          <NavGroup label="Explore" items={EXPLORE} />
         </nav>
 
         {/* min-h-0 on both axes so a long row list scrolls inside the main

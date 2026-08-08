@@ -254,6 +254,46 @@ test("autoMax caps the automatic scan but not an override", () => {
   );
 });
 
+test("naming a slot settles it: an empty override binds nothing and stops the scan", () => {
+  // How a predefined view asks the stat strip for a row count and no summed
+  // measures. Without it, every optional numeric slot is auto-filled and a
+  // view has no way to decline -- which is how "revocationEpoch total" ends up
+  // on a page about people (memql#3319).
+  const element = spec({
+    id: "e",
+    requires: [
+      { slot: "metric", description: "the measures", kinds: ["number"], min: 0, max: 3 },
+    ],
+  });
+  const rows = [{ id: "1", a: 1, b: 2 }];
+  assert.deepEqual(boundFields(fitElement(element, profileConcept(BARE, rows)), "metric"), [
+    "a",
+    "b",
+  ]);
+
+  const declined = fitElement(element, profileConcept(BARE, rows), {
+    bindings: { metric: [] },
+  });
+  assert.deepEqual(boundFields(declined, "metric"), []);
+  // Optional, so declining it degrades rather than disqualifies.
+  assert.equal(declined.verdict, "partial");
+  assert.equal(declined.unmet[0].reason, "the caller bound no field to it");
+});
+
+test("an override naming a field that does not exist reports the gap", () => {
+  // Rather than silently substituting whatever the generic scan liked next,
+  // which a caller who named a field has no way to notice.
+  const element = spec({
+    id: "e",
+    requires: [{ slot: "label", description: "the label", kinds: ["text"] }],
+  });
+  const fit = fitElement(element, profileConcept(BARE, ROWS), {
+    bindings: { label: "noSuchField" },
+  });
+  assert.equal(fit.verdict, "unfit");
+  assert.deepEqual(boundFields(fit, "label"), []);
+});
+
 test('max "all" binds every candidate, preferred ones first', () => {
   const element = spec({
     id: "e",
