@@ -1,0 +1,164 @@
+# Make Dependabot's Go PRs mergeable in a multi-module tree (memql#3300).
+#
+# THE PROBLEM THIS EXISTS FOR
+#
+# The repository is 48 Go modules and every one of them `replace`s its
+# siblings by RELATIVE PATH. Dependabot updates manifests; it does not run
+# `go mod tidy` per module, and it has no concept of that replace fan-out. So
+# a bump in one module leaves every module that replaces it with a stale
+# go.sum, and the `module-boundaries` lane fails -- correctly.
+#
+# Measured on #3294, which changed ONLY `component/polyphon/go.mod`: six other
+# modules went stale (`.`, component/grpc, component/server, integrations,
+# integrations/openai, integrations/stt). Even the workspace-wide PRs land
+# untidy -- #3293 left component/{automations,deploycontrol} stale, and #3299
+# additionally broke the GOWORK=off build.
+#
+# That is not a Dependabot bug. It is a mismatch between what Dependabot does
+# and what this topology needs, and essentially NO Dependabot Go PR can arrive
+# green here. Fixing each one by hand is the alternative to this workflow.
+#
+# WHY tidy -> sync -> tidy, TO A FIXED POINT
+#
+# Three guards want different things from the same two files:
+#   `go mod tidy`   fixes go.sum, and can move a require
+#   `go work sync`  fixes go.mod ACROSS modules, and does NOT touch go.sum
+#   the lane        runs each check exactly once and fails on a non-empty diff
+# Running either alone leaves the other red. Order is the fix, not content.
+# Same loop scripts/modsplit/mkmods.py runs; it converges in two rounds.
+#
+# SECURITY -- read before editing the trigger
+#
+# `pull_request_target` is used because a workflow triggered by Dependabot
+# receives a READ-ONLY token on `pull_request`, and this job has to push. That
+# trigger runs with repository write access, so the job is fenced four ways:
+#
+#   1. it runs only for PRs authored by dependabot[bot];
+#   2. it REFUSES any PR that touches a path other than go.mod / go.sum /
+#      go.work.sum -- so the checked-out head cannot introduce code, and the
+#      only thing this job ever executes is the Go toolchain over manifests;
+#   3. GOTOOLCHAIN=local, so a crafted `toolchain` line in a go.mod cannot make
+#      the runner download and execute a different toolchain;
+#   4. actions are pinned by SHA, as everywhere else in this repo.
+#
+# Widening the path allowlist in step 2 would defeat the whole fence. If a
+# future Dependabot PR legitimately touches something else, fix it by hand
+# rather than by loosening this.
+#
+# KNOWN CONSEQUENCE: pushing to a Dependabot branch makes Dependabot treat the
+# PR as modified by someone else and stop rebasing it. That is acceptable and
+# somewhat desirable here -- the tidy commit is exactly what makes it
+# mergeable, and a Dependabot rebase would discard it.
+
+name: dependabot-tidy
+
+on:
+  pull_request_target:
+    branches: [main]
+
+# Write is the point of the workflow: the tidy result is pushed back onto the
+# PR branch. Everything else stays at the default read.
+permissions:
+  contents: write
+
+concurrency:
+  group: dependabot-tidy-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  tidy:
+    name: dependabot-tidy
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    steps:
+      - name: refuse anything that is not a manifest change
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # FENCE 2. Computed from the API rather than a local diff, because
+          # nothing has been checked out yet -- deliberately: the guard runs
+          # BEFORE any of the PR's content is on disk.
+          files="$(gh pr view "$PR" --repo "$REPO" --json files --jq '.files[].path')"
+          if [ -z "$files" ]; then
+            echo "::error::PR $PR reports no changed files; refusing to run"
+            exit 1
+          fi
+          bad="$(echo "$files" | grep -vE '(^|/)(go\.mod|go\.sum|go\.work\.sum)$' || true)"
+          if [ -n "$bad" ]; then
+            echo "::error::PR $PR touches non-manifest paths; refusing to check it out with write access"
+            echo "$bad" | sed 's/^/  /'
+            exit 1
+          fi
+          echo "$files" | wc -l | xargs echo "manifest-only change, files:"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The PR head. Safe only because of the guard above.
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: true
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: tidy every module, sync the workspace, to a fixed point
+        env:
+          # FENCE 3.
+          GOTOOLCHAIN: local
+        run: |
+          set -euo pipefail
+          mods="$(find . -name go.mod -not -path './.git/*' -printf '%h\n' | sed 's|^\./||;s|^\.$|.|' | sort)"
+          echo "$mods" | wc -l | xargs echo "modules:"
+          for round in 1 2 3 4 5; do
+            before="$(git status --porcelain | sort | sha256sum)"
+            while read -r d; do
+              ( cd "$d" && GOWORK=off go mod tidy ) || {
+                echo "::error::go mod tidy failed in $d"; exit 1; }
+            done <<< "$mods"
+            go work sync
+            after="$(git status --porcelain | sort | sha256sum)"
+            echo "round $round: $(git status --porcelain | wc -l) file(s) changed"
+            if [ "$before" = "$after" ]; then
+              echo "converged after round $round"
+              break
+            fi
+            if [ "$round" = "5" ]; then
+              echo "::error::tidy/sync did not converge in 5 rounds"
+              exit 1
+            fi
+          done
+
+      - name: refuse to commit anything but manifests
+        run: |
+          set -euo pipefail
+          # The loop only ever rewrites manifests, so a non-manifest change
+          # here means an assumption broke. Fail rather than push it.
+          bad="$(git status --porcelain | awk '{print $2}' | grep -vE '(^|/)(go\.mod|go\.sum|go\.work\.sum)$' || true)"
+          if [ -n "$bad" ]; then
+            echo "::error::tidy touched non-manifest paths; refusing to push"
+            echo "$bad" | sed 's/^/  /'
+            exit 1
+          fi
+
+      - name: push the tidy result onto the PR branch
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo "already tidy -- nothing to push"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -u -- '*go.mod' '*go.sum' go.work.sum
+          git commit \
+            -m "chore: tidy every module after the dependency bump" \
+            -m "A bump in one module leaves every module that replaces it by relative path with a stale go.sum. Dependabot cannot know that; the module-boundaries lane checks it. Generated by .github/workflows/dependabot-tidy.yml (memql#3300)."
+          git push origin "HEAD:$HEAD_REF"
+          echo "pushed; CI will re-run on the PR"
