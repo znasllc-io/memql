@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { ExtensionContext, window, workspace } from 'vscode';
+import { commands, ExtensionContext, window, workspace } from 'vscode';
 import {
   LanguageClient,
   LanguageClientOptions,
@@ -8,7 +8,21 @@ import {
   TransportKind,
 } from 'vscode-languageclient/node';
 
+import { defaultClustersPath, readClustersFile, setSelectedCluster, upsertCluster } from './clusters/file.js';
+import type { ClusterConfig } from './clusters/model.js';
+import { ConnectionManager } from './connection/manager.js';
+import { ClustersTreeProvider, type ClusterNode } from './views/clustersTree.js';
+
 let client: LanguageClient | undefined;
+let connections: ConnectionManager | undefined;
+
+// getConnectionManager exposes the live manager to later-registered views.
+export function getConnectionManager(): ConnectionManager {
+  if (connections === undefined) {
+    throw new Error('memQL: connection manager accessed before activation');
+  }
+  return connections;
+}
 
 export function activate(context: ExtensionContext): void {
   const serverPath = resolveServerPath(context);
@@ -49,6 +63,141 @@ export function activate(context: ExtensionContext): void {
       `MemQL: language server failed to start: ${err instanceof Error ? err.message : String(err)}`
     );
   });
+
+  // The runtime surface reads credentials from the home directory and opens a
+  // network connection, so it is gated on workspace trust. Language features
+  // above are not.
+  if (!workspace.isTrusted) {
+    return;
+  }
+  registerRuntimeSurface(context);
+}
+
+function registerRuntimeSurface(context: ExtensionContext): void {
+  const clustersPath = defaultClustersPath();
+  connections = new ConnectionManager();
+
+  const clustersTree = new ClustersTreeProvider(clustersPath, connections);
+  context.subscriptions.push(
+    window.registerTreeDataProvider('memqlClusters', clustersTree)
+  );
+
+  // The cockpit writes this file too; watch it so the tree stays truthful.
+  const watcher = workspace.createFileSystemWatcher(clustersPath);
+  watcher.onDidChange(() => clustersTree.refresh());
+  watcher.onDidCreate(() => clustersTree.refresh());
+  watcher.onDidDelete(() => clustersTree.refresh());
+  context.subscriptions.push(watcher);
+
+  context.subscriptions.push(
+    commands.registerCommand('memql.clusters.refresh', () => clustersTree.refresh()),
+    commands.registerCommand('memql.clusters.disconnect', async () => {
+      await connections?.disconnect();
+      clustersTree.refresh();
+    }),
+    commands.registerCommand('memql.clusters.select', async (node?: ClusterNode) => {
+      const target = node ?? (await pickCluster(clustersPath));
+      if (target === undefined) {
+        return;
+      }
+      await setSelectedCluster(clustersPath, target.cluster.name);
+      clustersTree.refresh();
+      await connections?.connect(target.cluster);
+      const state = connections?.state;
+      if (state?.status === 'error') {
+        window.showErrorMessage(`memQL: ${state.message}`);
+      }
+    }),
+    commands.registerCommand('memql.clusters.add', async () => {
+      const created = await promptForCluster();
+      if (created === undefined) {
+        return;
+      }
+      await upsertCluster(clustersPath, created);
+      clustersTree.refresh();
+    }),
+    commands.registerCommand('memql.clusters.edit', async (node?: ClusterNode) => {
+      const target = node ?? (await pickCluster(clustersPath));
+      if (target === undefined) {
+        return;
+      }
+      const edited = await promptForCluster(target.cluster);
+      if (edited === undefined) {
+        return;
+      }
+      await upsertCluster(clustersPath, edited);
+      clustersTree.refresh();
+    })
+  );
+}
+
+async function pickCluster(clustersPath: string): Promise<ClusterNode | undefined> {
+  const file = await readClustersFile(clustersPath);
+  const picked = await window.showQuickPick(
+    file.clusters.map((cluster) => ({
+      label: cluster.name,
+      description: cluster.endpoint,
+      cluster,
+    })),
+    { placeHolder: 'Select a memQL cluster' }
+  );
+  if (picked === undefined) {
+    return undefined;
+  }
+  return { cluster: picked.cluster, selected: picked.cluster.name === file.selectedCluster };
+}
+
+// promptForCluster collects a cluster with native inputs rather than a webview:
+// it is four fields, and a QuickInput sequence is both less code and more
+// idiomatic than a custom form.
+async function promptForCluster(existing?: ClusterConfig): Promise<ClusterConfig | undefined> {
+  const name = await window.showInputBox({
+    prompt: 'Cluster name (the key used in clusters.yaml)',
+    value: existing?.name ?? '',
+    ignoreFocusOut: true,
+    validateInput: (v) => (v.trim() === '' ? 'A name is required' : undefined),
+  });
+  if (name === undefined) {
+    return undefined;
+  }
+
+  const domain = await window.showInputBox({
+    prompt: 'Domain (e.g. local.znas.io). The endpoint is composed as cockpit.<domain>:443.',
+    value: existing?.domain ?? '',
+    ignoreFocusOut: true,
+  });
+  if (domain === undefined) {
+    return undefined;
+  }
+
+  const endpoint = await window.showInputBox({
+    prompt: 'gRPC endpoint (host:port)',
+    value: existing?.endpoint ?? (domain.trim() === '' ? '' : `cockpit.${domain.trim()}:443`),
+    ignoreFocusOut: true,
+    validateInput: (v) => (v.trim() === '' ? 'An endpoint is required' : undefined),
+  });
+  if (endpoint === undefined) {
+    return undefined;
+  }
+
+  const pat = await window.showInputBox({
+    prompt: 'Personal Access Token (mql_pat_...). Leave empty to authenticate in the memQL Cockpit instead.',
+    value: existing?.pat ?? '',
+    ignoreFocusOut: true,
+    password: true,
+  });
+  if (pat === undefined) {
+    return undefined;
+  }
+
+  const out: ClusterConfig = { name: name.trim(), endpoint: endpoint.trim() };
+  if (domain.trim() !== '') {
+    out.domain = domain.trim();
+  }
+  if (pat.trim() !== '') {
+    out.pat = pat.trim();
+  }
+  return out;
 }
 
 export function deactivate(): Thenable<void> | undefined {
