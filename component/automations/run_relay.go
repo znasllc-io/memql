@@ -399,20 +399,20 @@ func (r *RunRelay) Run(ctx context.Context, req RunRequest, sink RunSink) {
 func (r *RunRelay) runLocal(ctx context.Context, runId, name string, req RunRequest, sink RunSink) {
 	auto := r.runner.LookupAutomation(name)
 	if auto == nil {
-		r.refuse(sink, runId, RunCodeNotFound,
+		r.refuseHere(sink, runId, RunCodeNotFound,
 			fmt.Sprintf("automation %q is not registered on this node (%s/%s) -- check the name, "+
 				"or target the node type that carries it", name, r.nodeType, r.nodeId))
 		return
 	}
 	if !auto.IsEnabled() {
-		r.refuse(sink, runId, RunCodeFailedPrecond,
+		r.refuseHere(sink, runId, RunCodeFailedPrecond,
 			fmt.Sprintf("automation %q is @disabled and is not runnable", auto.Name))
 		return
 	}
 
 	event, triggerKind, topic, err := buildRunEvent(auto, req)
 	if err != nil {
-		r.refuse(sink, runId, RunCodeInvalidArgument, err.Error())
+		r.refuseHere(sink, runId, RunCodeInvalidArgument, err.Error())
 		return
 	}
 
@@ -422,18 +422,18 @@ func (r *RunRelay) runLocal(ctx context.Context, runId, name string, req RunRequ
 	if event != nil && auto.Trigger != nil && auto.Trigger.Filter != "" {
 		bound, _, argErr := bindEventArgs(auto, event)
 		if argErr != nil {
-			r.refuse(sink, runId, RunCodeInvalidArgument,
+			r.refuseHere(sink, runId, RunCodeInvalidArgument,
 				fmt.Sprintf("trigger payload does not satisfy the automation's args contract: %v", argErr))
 			return
 		}
 		ok, filterErr := evaluateTriggerFilter(auto, event, bound)
 		if filterErr != nil {
-			r.refuse(sink, runId, RunCodeInvalidArgument,
+			r.refuseHere(sink, runId, RunCodeInvalidArgument,
 				fmt.Sprintf("trigger @filter could not be evaluated: %v", filterErr))
 			return
 		}
 		if !ok {
-			r.refuse(sink, runId, RunCodeFailedPrecond,
+			r.refuseHere(sink, runId, RunCodeFailedPrecond,
 				fmt.Sprintf("the synthesized event does not satisfy the automation's @filter(%s) -- "+
 					"a real trigger carrying this payload would not have fired either", auto.Trigger.Filter))
 			return
@@ -799,7 +799,25 @@ func (r *RunRelay) onRunTrace(evt events.Event) {
 // refuse emits the accepted/complete pair for a run that never started. The
 // accepted frame is still sent so a client's state machine is uniform: every
 // run begins with accepted and ends with complete.
+//
+// Used for refusals the ORIGIN node makes -- no bus, admission cap, timeout,
+// bad request. It leaves executed_on_* empty, because nothing executed
+// anywhere; claiming otherwise would make "which node ran this" unreadable
+// exactly when the caller most needs it.
 func (r *RunRelay) refuse(sink RunSink, runId string, code int32, message string) {
+	r.emitRefusal(sink, runId, code, message, false)
+}
+
+// refuseHere is the refusal a node makes about ITS OWN registry -- unknown
+// name, disabled automation, unsatisfiable trigger. It stamps executed_on_*
+// with this node, which is what makes a relayed refusal legible: "the
+// cognition node looked and does not have it" is a different fact from "the
+// request never got there", and both otherwise arrive as a bare refusal.
+func (r *RunRelay) refuseHere(sink RunSink, runId string, code int32, message string) {
+	r.emitRefusal(sink, runId, code, message, true)
+}
+
+func (r *RunRelay) emitRefusal(sink RunSink, runId string, code int32, message string, here bool) {
 	sink.Accepted(RunAccepted{
 		RunId:                 runId,
 		RanDeployedDefinition: true,
@@ -807,12 +825,17 @@ func (r *RunRelay) refuse(sink RunSink, runId string, code int32, message string
 		RequestedOnNodeId:     r.nodeId,
 		RequestedOnNodeType:   r.nodeType,
 	})
-	sink.Complete(RunComplete{
+	done := RunComplete{
 		RunId:        runId,
 		Status:       "refused",
 		ErrorCode:    code,
 		ErrorMessage: message,
-	})
+	}
+	if here {
+		done.ExecutedOnNodeId = r.nodeId
+		done.ExecutedOnNodeType = r.nodeType
+	}
+	sink.Complete(done)
 }
 
 // --- relay wire shapes -------------------------------------------------------

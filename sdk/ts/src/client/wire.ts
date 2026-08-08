@@ -210,6 +210,27 @@ export type DeployControlRequestPayload =
 
 export type DeployControlPayload = { requestId: string } & DeployControlRequestPayload;
 
+// -----------------------------------------------------------------------------
+// Automation run (memql#3310)
+// -----------------------------------------------------------------------------
+
+// RunAutomationMsg -- synthesize a trigger event for a named automation,
+// dispatch it through the normal automation path, and stream back a step
+// trace. Mirrors MemqlClientMessage oneof slot 102.
+export interface RunAutomationPayload {
+  requestId: string;
+  automation: string;
+  // The synthesized trigger event payload (google.protobuf.Struct -> plain
+  // object). Omit for a @trigger(schedule=...) automation, which fires now
+  // with an empty event.
+  payload?: Record<string, unknown>;
+  concept?: string;
+  topic?: string;
+  targetNodeType?: string;
+  timeoutMs?: number;
+  includeStepOutput?: boolean;
+}
+
 // Authoring -- validate + session-define a .memql bundle (memql#2128 / C1,
 // consumed by the VS Code run loop in memql#3309).
 //
@@ -348,6 +369,7 @@ type ClientPayload =
   | { revokeBadge: RevokeBadgePayload }
   | { polyphonRoomToken: PolyphonRoomTokenPayload }
   | { deployControl: DeployControlPayload }
+  | { runAutomation: RunAutomationPayload }
   | { authoringValidateBundle: AuthoringValidateBundlePayload }
   | { authoringSessionDefineBundle: AuthoringSessionDefineBundlePayload }
   | { listTools: ListToolsPayload }
@@ -665,6 +687,54 @@ export interface DeployControlResultPayload {
   action?: DeployActionResultWire;
 }
 
+// AutomationRunEvent -- one frame of a run's streamed trace. Mirrors
+// MemqlServerMessage oneof slot 124.
+//
+// Exactly one of accepted / step / complete is set. Every run opens with
+// accepted and closes with exactly one complete, INCLUDING a run that was
+// refused outright -- so a caller can always park on complete.
+export interface AutomationRunEventPayload {
+  requestId?: string;
+  runId?: string;
+  accepted?: AutomationRunAcceptedWire;
+  step?: AutomationRunStepWire;
+  complete?: AutomationRunCompleteWire;
+}
+
+export interface AutomationRunAcceptedWire {
+  automation?: string;
+  // Always true. It is a FIELD rather than a comment because the UI has to
+  // state that the deployed definition ran, not the caller's buffer:
+  // session-define does not cover automations.
+  ranDeployedDefinition?: boolean;
+  definitionNote?: string;
+  triggerKind?: string;
+  triggerTopic?: string;
+  requestedOnNodeId?: string;
+  requestedOnNodeType?: string;
+  targetNodeType?: string;
+}
+
+export interface AutomationRunStepWire {
+  sequence?: number;
+  stepId?: string;
+  status?: string;
+  durationMs?: number | string;
+  output?: Record<string, unknown>;
+  error?: string;
+}
+
+export interface AutomationRunCompleteWire {
+  status?: string;
+  durationMs?: number | string;
+  stepCount?: number;
+  error?: string;
+  errorCode?: number;
+  errorMessage?: string;
+  executedOnNodeId?: string;
+  executedOnNodeType?: string;
+}
+
 // Authoring reply envelopes (memql#2128 / C1).
 //
 // AuthoringDiagnosticWire's four position fields are 1-based and expressed in
@@ -838,6 +908,7 @@ type ServerPayload =
   | { revokeBadgeResult: RevokeBadgeResultPayload }
   | { polyphonRoomTokenResult: PolyphonRoomTokenResultPayload }
   | { deployControlResult: DeployControlResultPayload }
+  | { automationRunEvent: AutomationRunEventPayload }
   | { authoringValidateBundleResult: AuthoringValidateBundleResultPayload }
   | { authoringSessionDefineBundleResult: AuthoringSessionDefineBundleResultPayload }
   | { listToolsResult: ListToolsResultPayload }
@@ -876,6 +947,7 @@ export function readServerPayload(msg: ServerMessage):
   | { kind: "revokeBadgeResult"; value: RevokeBadgeResultPayload }
   | { kind: "polyphonRoomTokenResult"; value: PolyphonRoomTokenResultPayload }
   | { kind: "deployControlResult"; value: DeployControlResultPayload }
+  | { kind: "automationRunEvent"; value: AutomationRunEventPayload }
   | { kind: "authoringValidateBundleResult"; value: AuthoringValidateBundleResultPayload }
   | { kind: "authoringSessionDefineBundleResult"; value: AuthoringSessionDefineBundleResultPayload }
   | { kind: "listToolsResult"; value: ListToolsResultPayload }
@@ -949,6 +1021,8 @@ export function readServerPayload(msg: ServerMessage):
     };
   if (m.deployControlResult)
     return { kind: "deployControlResult", value: m.deployControlResult as DeployControlResultPayload };
+  if (m.automationRunEvent)
+    return { kind: "automationRunEvent", value: m.automationRunEvent as AutomationRunEventPayload };
   if (m.authoringValidateBundleResult)
     return {
       kind: "authoringValidateBundleResult",
@@ -984,5 +1058,9 @@ export function streamRequestId(msg: ServerMessage): string {
   if (m.aiTranscribeStreamComplete?.requestId) return m.aiTranscribeStreamComplete.requestId;
   if (m.aiChunk?.requestId) return m.aiChunk.requestId;
   if (m.aiChatResult?.requestId) return m.aiChatResult.requestId;
+  // Automation run (memql#3310). A run is many frames correlated by
+  // request_id -- accepted, then one per step, then exactly one complete --
+  // so it routes here rather than through the single-reply `pending` map.
+  if (m.automationRunEvent?.requestId) return m.automationRunEvent.requestId;
   return "";
 }
