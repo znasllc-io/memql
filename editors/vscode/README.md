@@ -16,6 +16,15 @@ Cockpit uses). Works fully offline against local files -- no cluster, no auth.
   kind-filtered in-body invocation completion.
 - Hover documentation and signature help.
 
+## Runtime panel
+
+An activity-bar panel connects the extension to a running cluster: pick a
+cluster from `~/.memql/clusters.yaml` (the same file the memQL Cockpit
+uses), browse every registered concept grouped by domain, and inspect rows
+-- paged, with live detail -- without leaving the editor. It requires a
+trusted workspace, since it reads credentials and opens a network
+connection. See [VS Code Runtime Panel](../../docs/public/language/vscode-runtime-panel.md).
+
 ## Install / update locally
 
 One command builds the extension (building a fresh `memql-lsp`) and

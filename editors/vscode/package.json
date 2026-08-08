@@ -5,6 +5,11 @@
   "version": "0.3.0",
   "publisher": "znasllc",
   "license": "SEE LICENSE IN LICENSE",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/znasllc-io/memql.git",
+    "directory": "editors/vscode"
+  },
   "engines": {
     "vscode": "^1.91.0"
   },

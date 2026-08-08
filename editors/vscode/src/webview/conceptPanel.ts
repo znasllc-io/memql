@@ -16,12 +16,14 @@
 // Staleness + concurrency: loadPage() and selectRow() (row-detail fetch)
 // each race an async round-trip against later events -- a Reload click, a
 // faster second click on a different row, the connection switching
-// clusters underneath the panel, or (for loadPage specifically) a second
-// "Load more" click before the first response lands. All four are guarded
-// by ConceptPanelState (see conceptPanelState.ts -- generation counters for
+// clusters underneath the panel, a live CDC event on this concept (see
+// subscribeToChanges() below), or (for loadPage specifically) a second
+// "Load more" click before the first response lands. All are guarded by
+// ConceptPanelState (see conceptPanelState.ts -- generation counters for
 // supersession, a separate in-flight marker for loadPage's concurrency
-// case); this file's job is only to wire the connection lifecycle and the
-// webview's HTML/postMessage boundary around it.
+// case); this file's job is only to wire the connection lifecycle, the CDC
+// subscription lifecycle, and the webview's HTML/postMessage boundary
+// around it.
 
 import * as vscode from "vscode";
 import { randomBytes } from "node:crypto";
@@ -44,6 +46,11 @@ export class ConceptPanel {
   private readonly state = new ConceptPanelState<Row>();
   private readonly disposeConnectionListener: () => void;
   private concept: Concept;
+  // Unregister for the live-refresh CDC subscription (see
+  // subscribeToChanges()). undefined whenever no subscription is live --
+  // not yet established, torn down for a reconnect, or never started
+  // because the connection has no SubscriptionManager.
+  private unsubscribeChanges: (() => void) | undefined;
 
   static open(
     context: vscode.ExtensionContext,
@@ -86,14 +93,30 @@ export class ConceptPanel {
     // We then re-render the now-empty state and kick off a fresh load --
     // ConceptsTreeProvider follows the same invalidate-on-every-state-change
     // policy for the same reason (concepts.memql is per-cluster too).
-    this.disposeConnectionListener = this.connections.onDidChangeState(() => {
+    //
+    // The CDC subscription is tied to the OLD connection's socket, so it
+    // must be torn down on every state change too, not just "connected" ->
+    // something else -- otherwise a cluster switch would leave a
+    // subscription registered against a socket this panel no longer reads
+    // from (a leak) while ALSO leaving the panel silently unsubscribed from
+    // the new one. Re-establish it only once the new state is "connected";
+    // "connecting" / "error" / "disconnected" leave it unsubscribed until
+    // the next successful connect.
+    this.disposeConnectionListener = this.connections.onDidChangeState((connState) => {
+      this.unsubscribeChanges?.();
+      this.unsubscribeChanges = undefined;
       this.state.reset();
       this.render();
       void this.loadPage();
+      if (connState.status === "connected") {
+        this.subscribeToChanges();
+      }
     });
 
     this.panel.onDidDispose(
       () => {
+        this.unsubscribeChanges?.();
+        this.unsubscribeChanges = undefined;
         ConceptPanel.open_.delete(concept.id);
         this.disposeConnectionListener();
       },
@@ -124,8 +147,48 @@ export class ConceptPanel {
       context.subscriptions,
     );
 
+    this.subscribeToChanges();
     this.render();
     void this.loadPage();
+  }
+
+  // Live refresh. A CDC subscription on this concept means a row written by
+  // anything -- another operator, an automation, or a mutation run from the
+  // editor in a later increment -- appears without a manual reload. That is
+  // the loop this panel exists to close.
+  //
+  // The whole page set is reloaded rather than patched: a CDC event carries
+  // the change, not the row's position in this query's sort order, so
+  // splicing it in would put rows in the wrong place. Reloading is correct
+  // and a concept browser is not hot enough for the cost to matter.
+  //
+  // The reload goes through ConceptPanelState.reset(), the same
+  // invalidation path Reload and a connection-state change already use --
+  // it bumps both generation counters, so any page or detail fetch already
+  // in flight when the event arrives is discarded instead of landing on top
+  // of the reload triggered here.
+  private subscribeToChanges(): void {
+    const subs = this.connections.subscriptions;
+    if (subs === undefined) return;
+    try {
+      this.unsubscribeChanges = subs.subscribeGraph(
+        () => {
+          this.state.reset();
+          this.render();
+          void this.loadPage();
+        },
+        { concept: this.concept.id, actions: ["created", "updated", "deleted"] },
+      );
+    } catch (err) {
+      // A subscription failure degrades to manual reload; it must never
+      // take the panel down with it. setConnectionError (rather than
+      // reset()) so the row list already on screen survives -- this is a
+      // "live updates didn't start" notice, not an invalidating event.
+      this.state.setConnectionError(
+        `live updates unavailable: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      this.render();
+    }
   }
 
   private async loadPage(): Promise<void> {
