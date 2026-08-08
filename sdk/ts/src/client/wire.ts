@@ -156,6 +156,60 @@ export interface RevokeBadgePayload {
   identityId: string;
 }
 
+// Deploy control (memql#3311). DeployControlService is a separate
+// UNARY gRPC service on the same listener, which a browser cannot dial
+// -- so the whole deploy surface rides ONE bridged envelope on
+// MemqlService.Stream instead. Exactly one request field is set; the
+// inner shapes are the DeployControlService request messages verbatim
+// (component/grpc/deploy_control.proto), reused rather than
+// re-declared so the streamed and unary surfaces cannot drift.
+
+export interface DeployControlEnvPayload {
+  env: string; // "staging" | "prod"
+}
+
+export interface DeployControlVersionPayload {
+  version: string;
+}
+
+export interface DeployControlRollbackPayload {
+  env: string;
+  commitSha: string;
+}
+
+export interface DeployControlRolloutActionPayload {
+  env: string;
+  rollout: string;
+  action: string; // "promote" | "abort"
+}
+
+export interface DeployControlCutVersionPayload {
+  env: string;
+  bump?: string; // "major" | "minor" | "patch"; empty defaults to patch
+  version?: string; // explicit override; when set, bump is ignored
+}
+
+export interface DeployControlDeployPayload {
+  deploymentId: string;
+}
+
+export interface DeployControlRollbackDeploymentPayload {
+  toDeploymentId: string;
+}
+
+export type DeployControlRequestPayload =
+  | { getDeploymentStatus: DeployControlEnvPayload }
+  | { suggestNextVersion: DeployControlEnvPayload }
+  | { deployStaging: DeployControlVersionPayload }
+  | { promote: DeployControlVersionPayload }
+  | { rollback: DeployControlRollbackPayload }
+  | { rolloutAction: DeployControlRolloutActionPayload }
+  | { cutVersion: DeployControlCutVersionPayload }
+  | { deploy: DeployControlDeployPayload }
+  | { rollbackDeployment: DeployControlRollbackDeploymentPayload };
+
+export type DeployControlPayload = { requestId: string } & DeployControlRequestPayload;
+
 // Polyphon -- LiveKit room token request. The room name + LiveKit
 // URL come back in the reply so the consumer can hand them to the
 // LiveKit client SDK without a separate config call.
@@ -274,6 +328,7 @@ type ClientPayload =
   | { createBadge: CreateBadgePayload }
   | { revokeBadge: RevokeBadgePayload }
   | { polyphonRoomToken: PolyphonRoomTokenPayload }
+  | { deployControl: DeployControlPayload }
   | { listTools: ListToolsPayload }
   | { callTool: CallToolPayload }
   | { clientToolResult: ClientToolResultPayload };
@@ -505,6 +560,90 @@ export interface RevokeBadgeResultPayload {
   errorMessage?: string;
 }
 
+// Deploy-control reply (memql#3311). A unary DeployControlService call
+// fails by returning a gRPC status error; a multiplexed stream has no
+// per-message status channel, so the status is carried IN the envelope.
+// errorCode is the canonical gRPC code (0 = OK, 7 = PERMISSION_DENIED,
+// ...) and protojson OMITS it when zero, so absent means OK.
+
+export interface DeployComponentDigestWire {
+  name?: string;
+  digest?: string;
+  repo?: string;
+}
+
+export interface DeployArgoStatusWire {
+  syncStatus?: string;
+  healthStatus?: string;
+  lastSyncRevision?: string;
+  lastSyncAt?: string;
+  outOfSync?: boolean;
+}
+
+export interface DeployRolloutStatusWire {
+  name?: string;
+  kind?: string; // "bluegreen" | "canary"
+  phase?: string;
+  activeColor?: string;
+  previewColor?: string;
+  canaryWeight?: number;
+  currentStep?: number;
+  latestAnalysisResult?: string;
+}
+
+export interface DeployGateLegWire {
+  name?: string;
+  passed?: boolean;
+  detail?: string;
+}
+
+export interface DeployGateResultWire {
+  result?: string; // "pass" | "fail" | "unknown"
+  legs?: DeployGateLegWire[];
+  ranAt?: string;
+}
+
+export interface DeploymentStatusWire {
+  env?: string;
+  version?: string;
+  engineVersion?: string;
+  validatedAt?: string;
+  gate?: string;
+  components?: DeployComponentDigestWire[];
+  argocd?: DeployArgoStatusWire;
+  rollouts?: DeployRolloutStatusWire[];
+  gateResult?: DeployGateResultWire;
+}
+
+export interface SuggestNextVersionResultWire {
+  currentVersion?: string;
+  nextMajor?: string;
+  nextMinor?: string;
+  nextPatch?: string;
+  source?: string; // "deployment" | "overlay" | "none"
+}
+
+export interface DeployActionResultWire {
+  ok?: boolean;
+  message?: string;
+  auditEventId?: string;
+  correlationId?: string;
+  details?: Record<string, string>;
+}
+
+export interface DeployControlResultPayload {
+  requestId?: string;
+  // ok is true when the RPC returned without a status error. It is NOT
+  // the action's own success -- a write that ran and failed is ok here
+  // with action.ok false, exactly as the unary path behaves.
+  ok?: boolean;
+  errorCode?: number;
+  errorMessage?: string;
+  deploymentStatus?: DeploymentStatusWire;
+  nextVersion?: SuggestNextVersionResultWire;
+  action?: DeployActionResultWire;
+}
+
 // expiresAt is int64 unix seconds -- protojson encodes int64 as
 // either string or number depending on the runtime. We accept both.
 export interface PolyphonRoomTokenResultPayload {
@@ -633,6 +772,7 @@ type ServerPayload =
   | { createBadgeResult: CreateBadgeResultPayload }
   | { revokeBadgeResult: RevokeBadgeResultPayload }
   | { polyphonRoomTokenResult: PolyphonRoomTokenResultPayload }
+  | { deployControlResult: DeployControlResultPayload }
   | { listToolsResult: ListToolsResultPayload }
   | { callToolResult: CallToolResultPayload }
   | { clientToolCall: ClientToolCallPayload };
@@ -668,6 +808,7 @@ export function readServerPayload(msg: ServerMessage):
   | { kind: "createBadgeResult"; value: CreateBadgeResultPayload }
   | { kind: "revokeBadgeResult"; value: RevokeBadgeResultPayload }
   | { kind: "polyphonRoomTokenResult"; value: PolyphonRoomTokenResultPayload }
+  | { kind: "deployControlResult"; value: DeployControlResultPayload }
   | { kind: "listToolsResult"; value: ListToolsResultPayload }
   | { kind: "callToolResult"; value: CallToolResultPayload }
   | { kind: "clientToolCall"; value: ClientToolCallPayload }
@@ -737,6 +878,8 @@ export function readServerPayload(msg: ServerMessage):
       kind: "polyphonRoomTokenResult",
       value: m.polyphonRoomTokenResult as PolyphonRoomTokenResultPayload,
     };
+  if (m.deployControlResult)
+    return { kind: "deployControlResult", value: m.deployControlResult as DeployControlResultPayload };
   if (m.listToolsResult)
     return { kind: "listToolsResult", value: m.listToolsResult as ListToolsResultPayload };
   if (m.callToolResult)
