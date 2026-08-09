@@ -61,6 +61,35 @@ readonly PIN_TOOLS=(k3d kubectl mkcert)
 readonly MIN_ARTIFACT_BYTES=1000000
 
 #=============================================================================
+# SCRATCH CLEANUP
+#=============================================================================
+
+# Artifacts are downloaded into a temp dir. Removing it needs an EXIT trap,
+# which REPLACES the one cap_init installs -- the trap that guarantees a failure
+# envelope on an unexpected abort -- so the two are chained here.
+#
+# `set +e` is load-bearing: the handler runs under the script's errexit, and
+# `(exit "$rc")` (which restores $? for _cap_on_exit) is by definition a failing
+# command whenever rc is non-zero. Without it, errexit abandons the handler and
+# the caller gets a non-zero exit with no envelope at all.
+#
+# A RETURN trap inside main() does NOT work here: cap_ok exits the shell from
+# within main, so main never returns and the scratch dir -- holding the last
+# release binary downloaded, tens of MB -- leaks on every successful run.
+_REFRESH_SCRATCH=""
+
+function _refresh_on_exit() {
+    local rc=$?
+    set +e
+    if [[ -n "$_REFRESH_SCRATCH" ]]; then
+        rm -rf "$_REFRESH_SCRATCH" 2>/dev/null
+    fi
+    (exit "$rc")
+    _cap_on_exit
+}
+trap _refresh_on_exit EXIT
+
+#=============================================================================
 # PREREQUISITES
 #=============================================================================
 
@@ -186,9 +215,8 @@ function main() {
 
     check_prerequisites
 
-    scratch="$(mktemp -d)"
-    # shellcheck disable=SC2064
-    trap "rm -rf '${scratch}'" RETURN
+    _REFRESH_SCRATCH="$(mktemp -d)"
+    scratch="$_REFRESH_SCRATCH"
     body="${scratch}/body"
     : > "$body"
 
