@@ -426,3 +426,26 @@ test("deployControl -- a dispatcher is required", () => {
     /dispatcher is required/,
   );
 });
+
+// ---------------------------------------------------------------------
+// The raw engine message (memql#3339)
+// ---------------------------------------------------------------------
+
+// DeployControlError had the same shape problem AutomationRunError did, and no
+// helper to compensate with: the portal rendered `${err.code}: ${err.message}`,
+// which printed the code twice and the verb once more besides.
+test("DeployControlError exposes the raw engine message alongside the formatted one", () => {
+  const err = new DeployControlError("rollBack", 7, "requires the owner role");
+  assert.equal(err.engineMessage, "requires the owner role");
+  assert.equal(err.verb, "rollBack");
+  assert.equal(err.codeName, "PERMISSION_DENIED");
+  // Unchanged log shape.
+  assert.equal(err.message, "deploy console: rollBack: PERMISSION_DENIED: requires the owner role");
+});
+
+test("DeployControlError -- an absent engine message is empty, never the (no message) sentinel", () => {
+  const err = new DeployControlError("cut", 13, "");
+  assert.equal(err.engineMessage, "");
+  assert.doesNotMatch(err.engineMessage, /no message/);
+  assert.match(err.message, /\(no message\)/);
+});

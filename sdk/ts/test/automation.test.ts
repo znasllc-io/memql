@@ -426,3 +426,51 @@ test("run frames route through the real Dispatcher by request_id", async () => {
   assert.equal(result.complete.executedOnNodeType, "cognition");
   dispatcher.stop();
 });
+
+// ---------------------------------------------------------------------
+// The raw engine message (memql#3339)
+// ---------------------------------------------------------------------
+
+// `message` is shaped for a thrown Error read in a LOG:
+// `run automation <name>: <CODE>: <msg>`. A UI that already renders the
+// automation's name and the code as separate elements renders both twice if it
+// pastes that in -- which is why the VS Code extension carried a helper that
+// parsed the prefix back off. The raw sentence is its own field now, so there
+// is nothing to parse.
+test("AutomationRunError exposes the raw engine message alongside the formatted one", () => {
+  const err = new AutomationRunError("autoJoinSI", 7, "requires owner or admin", "run-9");
+  assert.equal(err.engineMessage, "requires owner or admin");
+  assert.equal(err.automation, "autoJoinSI");
+  // `message` keeps its log shape -- unchanged, and still the right thing to
+  // print when nobody has laid the parts out themselves.
+  assert.equal(err.message, "run automation autoJoinSI: PERMISSION_DENIED: requires owner or admin");
+});
+
+// The `(no message)` sentinel belongs to `message`'s formatting. It reads fine
+// in a log line and badly in a sentence a UI composes, so it must not reach
+// the field a UI reads.
+test("AutomationRunError -- an absent engine message is empty, never the (no message) sentinel", () => {
+  const err = new AutomationRunError("autoJoinSI", 5, "", "");
+  assert.equal(err.engineMessage, "");
+  assert.doesNotMatch(err.engineMessage, /no message/);
+  // Still present in the log-shaped string, which is where it belongs.
+  assert.match(err.message, /\(no message\)/);
+});
+
+test("AutomationRunError -- the raw message survives the streamed refusal path", async () => {
+  const mock = new MockDispatcher();
+  const client = new AutomationClient(mock.asDispatcher());
+  const p = client.run({ automation: "autoJoinSI" });
+
+  mock.push(acceptedFrame());
+  mock.push({
+    runId: "run-1",
+    complete: { status: "refused", errorCode: CODE_PERMISSION_DENIED, errorMessage: "requires owner or admin" },
+  });
+
+  await assert.rejects(p, (err: unknown) => {
+    assert.ok(err instanceof AutomationRunError);
+    assert.equal(err.engineMessage, "requires owner or admin");
+    return true;
+  });
+});

@@ -199,7 +199,11 @@ export class AutomationRunner {
         trace.noteRefusal({
           code: err.code,
           codeName: err.codeName,
-          message: refusalMessage(err),
+          // The SDK's own field, not a substring carved out of `err.message`.
+          // The panel already renders the automation's name in the header and
+          // the code in its own element, so what it needs is the engine's
+          // sentence alone (memql#3339).
+          message: err.engineMessage,
           runId: err.runId,
           ...(err.accepted !== undefined ? { accepted: err.accepted } : {}),
           // Carried from the LENS, not from the reply: the engine answers
@@ -242,17 +246,11 @@ export class AutomationRunner {
   }
 }
 
-// refusalMessage strips the SDK's own prefix off the error text.
+// The prefix-stripping helper that used to live here is GONE (memql#3339).
 //
-// AutomationRunError formats as `run automation <name>: <CODE>: <message>`,
-// which is right for a thrown Error's `.message` and wrong for a UI that has
-// already rendered the automation's name in the header and the code in its own
-// field. What is left is the engine's sentence, which describeRefusal appends
-// to its explanation.
-function refusalMessage(err: AutomationRunError): string {
-  const marker = `: ${err.codeName}: `;
-  const at = err.message.indexOf(marker);
-  if (at < 0) return err.message;
-  const tail = err.message.slice(at + marker.length);
-  return tail === "(no message)" ? "" : tail;
-}
+// It parsed `run automation <name>: <CODE>: <msg>` back apart to recover the
+// engine's sentence, and normalised the literal `(no message)` to empty. That
+// was the extension compensating for a presentation choice made in the SDK,
+// held together by a string format neither side had agreed to keep -- it would
+// have rotted silently the first time that format changed. The SDK exposes
+// AutomationRunError.engineMessage now, so there is nothing left to strip.

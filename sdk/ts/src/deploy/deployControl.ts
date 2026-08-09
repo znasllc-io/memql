@@ -153,6 +153,21 @@ export const CODE_UNIMPLEMENTED = 12;
 export class DeployControlError extends Error {
   readonly code: number;
   readonly codeName: string;
+  /** The verb that was refused, as its own field for the same reason engineMessage is. */
+  readonly verb: string;
+  /**
+   * The engine's own sentence, RAW -- no prefix, no code, no sentinel.
+   *
+   * Same split as AutomationRunError.engineMessage, and for the same reason
+   * (memql#3339): `message` is shaped for a log line
+   * (`deploy console: <verb>: <CODE>: <msg>`), which a UI already rendering the
+   * verb and the code duplicates when it pastes it in. The deploy console had
+   * the problem too and no helper to compensate with, so both consumers were
+   * printing the code twice.
+   *
+   * Empty string when the engine sent no message.
+   */
+  readonly engineMessage: string;
 
   constructor(verb: string, code: number, message: string) {
     const name = GRPC_CODE_NAMES[code] ?? String(code);
@@ -160,6 +175,8 @@ export class DeployControlError extends Error {
     this.name = "DeployControlError";
     this.code = code;
     this.codeName = name;
+    this.verb = verb;
+    this.engineMessage = message;
   }
 
   /** True when the refusal was the role gate, not a failure. */
