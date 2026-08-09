@@ -2664,6 +2664,27 @@ message DeployControlResult {
   int32 error_code = 3;
   string error_message = 4;
 
+  // audit_event_id is the correlation id of the audit event a REFUSED call
+  // wrote (memql#3334).
+  //
+  // A refusal on this surface is an audited event: the role gate writes a
+  // blocked v1:identity:auditEvent before it returns, exactly as a permitted
+  // action writes a success one. Until #3334 the id came back only on the
+  // permitted path (ActionResult.audit_event_id), so the single event an
+  // operator most wants to quote -- "I tried to roll back and was denied" --
+  // was the one with no reference. This field closes that: it is populated
+  // when error_code is PERMISSION_DENIED or UNAUTHENTICATED, and empty
+  // otherwise.
+  //
+  // Empty is meaningful, not missing. An INVALID_ARGUMENT rejection runs
+  // BEFORE the gate on several RPCs and is not audited; an UNAVAILABLE never
+  // reached the service at all. Neither has an id because neither wrote an
+  // event.
+  //
+  // On the permitted path the id stays on ActionResult.audit_event_id, where
+  // it has always been -- this field is not a second copy of it.
+  string audit_event_id = 5;
+
   // Set only when ok. Which field is populated follows from the request:
   // get_deployment_status -> deployment_status, suggest_next_version ->
   // next_version, every action -> action.

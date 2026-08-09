@@ -376,7 +376,11 @@ func (h *DeployControlForwardHandler) HandleForwardedRequest(
 			"actor", access.UserId,
 			"actor_role", string(access.Role),
 			"error_code", result.GetErrorCode(),
-			"error_message", result.GetErrorMessage())
+			"error_message", result.GetErrorMessage(),
+			// Set on a GATE refusal only (memql#3334). This is the node that
+			// WROTE the blocked audit event, so logging the id here is where
+			// the trail and the log line meet.
+			"audit_event_id", result.GetAuditEventId())
 	}
 
 	encoded, err := proto.Marshal(result)

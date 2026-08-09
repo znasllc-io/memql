@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { Link } from "react-router-dom";
 import {
   CHECKLIST_ELEMENT,
   PROPORTION_BAR_ELEMENT,
@@ -56,7 +57,8 @@ export function DeploymentsView({
   const [env, setEnv] = useState<DeployEnv>("staging");
   const console_ = useDeployConsole(env);
 
-  const { permissions, status, loading, error, actionMessage, actionError, busy } = console_;
+  const { permissions, status, loading, error, actionMessage, actionError, actionAuditEventId, busy } =
+    console_;
   const selection = selectedRowId ? { selectedRowId } : {};
   const legs = gateLegRows(status);
   const images = componentRows(status);
@@ -90,7 +92,10 @@ export function DeploymentsView({
         ) : null}
         {actionError ? (
           <div className="mt-3">
-            <ErrorMessage>{actionError}</ErrorMessage>
+            <ErrorMessage>
+              {actionError}
+              <RefusalAuditLink id={actionAuditEventId} />
+            </ErrorMessage>
           </div>
         ) : null}
         {actionMessage ? (
@@ -209,6 +214,37 @@ export function DeploymentsView({
           onSelect={onSelect}
         />
       </Band>
+    </>
+  );
+}
+
+// The reference for a REFUSED action (memql#3334).
+//
+// A denial is an audited event, so the operator who was told "no" gets the
+// same handle the operator who was told "yes" gets: an id to quote and a way
+// into the trail. Until #3334 the deploy console had nothing to render here
+// and said nothing rather than inventing an id -- correct behaviour for a
+// surface that was not being given one, and exactly the gap the issue names.
+//
+// Renders NOTHING when the id is empty, which is the common case for a failure
+// that was not a refusal: an invalid argument is rejected before the gate, and
+// an UNAVAILABLE never reached the identity node, so neither wrote an event.
+// Showing "audited as (none)" there would be worse than silence.
+//
+// Deliberately the same shape as the admin console's AuditLink
+// (src/admin/WriteOutcome.tsx) -- one convention for "here is the row that
+// records what just happened", across both gated write surfaces.
+function RefusalAuditLink({ id }: { id: string }): ReactNode {
+  if (id === "") return null;
+  return (
+    <>
+      {" "}
+      <span className="text-xs text-muted">
+        Audited as <span className="font-mono break-all">{id}</span> —{" "}
+        <Link to="/views/audit" className="underline hover:text-fg">
+          open the trail
+        </Link>
+      </span>
     </>
   );
 }
