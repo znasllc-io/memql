@@ -303,7 +303,16 @@ function isCertificateFailure(err: unknown): boolean {
   const e = err as { code?: unknown; message?: unknown };
   const code = typeof e?.code === "string" ? e.code : "";
   const message = typeof e?.message === "string" ? e.message : "";
-  return /^ERR_TLS|CERT|_SIGNED_/i.test(code) || /certificate|self[- ]signed/i.test(message);
+  // Unanchored on purpose, and written that way rather than left to
+  // precedence. `/^ERR_TLS|CERT|_SIGNED_/` parses as
+  // `(^ERR_TLS)|(CERT)|(_SIGNED_)` -- the anchor binds to the first
+  // alternative alone, so two of the three branches were already substring
+  // matches while the shape of the expression implied all three were anchored.
+  // Substring is the behaviour this wants: these are Node TLS error codes
+  // (ERR_TLS_CERT_ALTNAME_INVALID, DEPTH_ZERO_SELF_SIGNED_CERT,
+  // UNABLE_TO_VERIFY_LEAF_SIGNATURE, CERT_HAS_EXPIRED), and the marker can sit
+  // anywhere in the code. Dropping the anchor makes the three branches agree.
+  return /ERR_TLS|CERT|_SIGNED_/i.test(code) || /certificate|self[- ]signed/i.test(message);
 }
 
 /**
