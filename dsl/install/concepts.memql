@@ -1,0 +1,42 @@
+// concepts.memql
+//
+// Install-namespace DATA MODEL -- the record of one run of the install (or
+// uninstall) step graph on one operator's machine (epic #3357, install(14)
+// #3371).
+//
+// WHY THE RUN IS PERSISTED AT ALL. The install graph
+// (scripts/install/graph/install.json) is the plan; this concept is what
+// actually happened. It exists for the half of the lifecycle that has no other
+// witness: UNINSTALL. Every mutating install step records what it left behind
+// and, critically, whether the machine ALREADY had it -- a developer who had
+// mkcert, or a k3d cluster, or a checkout at that path before this installer
+// ran must not lose it because they later uninstalled memQL. That judgement can
+// only be made at install time, so it has to be written down at install time.
+// The receipts here are what remove-artifact.sh's --pre-existing refusal reads.
+//
+// APPEND-ONLY TIMELINE. Like the deployment concepts, a run is one row id
+// (runId) whose payload is re-written as the run progresses, so the whole
+// lifecycle is reconstructable asOf any instant and `asOf latest` collapses to
+// the run's current state.
+
+/// One execution of the install or uninstall step graph on one machine. The row is written when the
+/// run starts and re-written on every step transition under the SAME id (the runId), so the run's
+/// history is reconstructable asOf any instant. Its reason for existing is the receipts field: the
+/// per-step record of what the run placed on this machine and whether the machine already had it,
+/// which is the only evidence uninstall has that an artifact is ours to remove.
+@displayCard(primary="graph", secondary="status", tertiary="runId", status="status")
+concept installRun {
+  runId          string! @description("Stable id for this run; also the concept row id, so every step transition appends to one timeline.")
+  graph          enum("install", "uninstall") @description("Which step-graph document this run executes (scripts/install/graph/install.json or uninstall.json).")
+  status         enum("running", "succeeded", "failed", "cancelled") @description("Run lifecycle. running -> succeeded | failed; cancelled when the operator stops it.")
+  currentStep    string  @description("Step id currently executing, or the step the run stopped on. Empty once the run reaches a terminal status.")
+  completedSteps []string @description("Step ids that have run AND passed their verify predicate, in completion order. A step that ran but failed verification is not here -- passing verification is what 'completed' means.")
+  receipts       object  @description("Per-step artifact record, keyed by step id: the receipt kind, the resolved target, and whether the artifact PRE-EXISTED this run. The pre-existence flag is the value uninstall passes back as remove-artifact.sh's --pre-existing, whose refusal is the last wall between an uninstall and someone else's tooling.")
+  hostOs         string  @description("Operating system reported by install.detect (darwin | linux). Recorded because an uninstall may run on a machine whose state has drifted since.")
+  hostArch       string  @description("CPU architecture reported by install.detect (arm64 | amd64).")
+  engineTag      string  @description("Release tag the stack was checked out at (install.cloneStack --tag). Empty on an uninstall run.")
+  failureReason  string  @description("Why the run stopped, when status is failed: the failing step id and the capability script's error message.")
+  triggeredBy    string  @description("v1:identity:user.id of the operator who started the run. Plain string FK (not a @relationship -- cross-concept references use FK fields).")
+  startedAt      datetime @description("When the run began. The row intrinsic createdAt carries the same instant for the first write.")
+  updatedAt      datetime @description("Timestamp of the most recent step transition.")
+}

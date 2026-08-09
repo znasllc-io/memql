@@ -1,0 +1,288 @@
+// actions.memql
+//
+// Install-namespace AUTHORED ACTIONS -- the world-touching layer of the
+// local-cluster install substrate (epic #3357, install(14) #3371). Per the
+// behavioral-constructs ADR §2: logic decides, mutations persist, ACTIONS TOUCH
+// THE WORLD. Each action below is a single external capability call rendered
+// from typed args; it calls no logic/query/mutation, touches no graph, and
+// carries no reactive trigger, so every one passes the I7 action-rules
+// validator and the whole-tree call-graph gate.
+//
+// WHY THESE EXIST AT ALL, given the graph documents already name the scripts.
+// There are two ways to run an install: the host executor (an editor extension
+// or a shell driver, invoking scripts/install/*.sh directly) and the in-engine
+// action path (an automation dispatching `shell.script`). Without a DSL action
+// per capability the second path simply cannot reach a script -- and the gap is
+// silent, because the first path keeps working. Worse, if the two surfaces ever
+// diverge, "install" means two different things depending on who ran it and
+// nothing in the build notices. scripts/install/graph/dsl_agreement_test.go
+// closes that by asserting the correspondence IN BOTH DIRECTIONS: every
+// install.* script a graph names has an action here, every action here is used
+// by a graph, and every argument an action passes is a flag the script really
+// declares.
+//
+// SURFACE. These actions live under dsl/install/, so they inherit the
+// `cockpit/runner` policy-default surface with NO per-action annotation
+// (component/actions/surfaces.go: runnerSurfacePrefixes). For a deploy action
+// that default expresses a rule -- never deploy from inside the cluster you are
+// deploying. For an INSTALL action it is not a preference at all: these run on
+// the operator's own machine, placing k3d, editing /etc/hosts and installing a
+// trust-store CA before any memQL cluster exists to host them. The runner is
+// the only placement that can execute.
+//
+// ARGUMENT SPELLING. The `args { ... }` block uses camelCase names; the
+// capability call keys use the script's REAL flag spelling, dashes and all
+// (`key-file: args.keyFile`). The runner passes each rendered arg as its own
+// `--name=value` argv element, and a conformant capability script rejects any
+// flag it did not declare via cap_spec_param -- so a camelCase key here would
+// be exit 2, not a silent default.
+//
+// NOT EVERY CAPABILITY IS AN ACTION. install.refreshPins regenerates the
+// committed tool-pins manifest; it is a maintainer's tool run deliberately at
+// authoring time, never a step of an install, so it has no action and appears
+// in no graph. That absence is the point: an install must not be able to
+// re-pin the digests it is about to verify against.
+
+use capabilities.shell.{ script }
+
+// =============================================================================
+//   Inventory + verification (read-only probes)
+// =============================================================================
+
+// Backend: scripts/install/detect.sh.
+/// Inventory the operator's machine before anything is placed on it: OS and architecture support,
+/// docker daemon reachability, whether the front-door ports are free, and free disk space.
+action detectMachine {
+  args {
+    ports string
+    path  string
+  }
+  capability script(script: "install.detect", ports: args.ports, path: args.path)
+}
+
+// Backend: scripts/install/verify-provider-key.sh. The key is passed as a FILE
+// PATH, never as a value: argv is world-readable on a shared machine.
+/// Verify an AI-provider API key is accepted, with an authenticated token-free request, before the
+/// cluster is built around it.
+action verifyProviderKey {
+  args {
+    provider         string!
+    keyFile          string!
+    baseUrl          string
+    timeout          string
+    anthropicVersion string
+  }
+  capability script(
+    script: "install.verifyProviderKey",
+    provider: args.provider,
+    key-file: args.keyFile,
+    base-url: args.baseUrl,
+    timeout: args.timeout,
+    anthropic-version: args.anthropicVersion
+  )
+}
+
+// Backend: scripts/install/verify-frontdoor.sh.
+/// Probe DNS resolution, TLS and gRPC reachability on every front-door hostname, so a broken
+/// install is reported as broken rather than discovered later by a client.
+action verifyFrontDoor {
+  args {
+    hosts      string
+    grpcHost   string
+    port       string
+    expectAddr string
+    timeout    string
+    reportOnly boolean
+  }
+  capability script(
+    script: "install.verifyFrontDoor",
+    hosts: args.hosts,
+    grpc-host: args.grpcHost,
+    port: args.port,
+    expect-addr: args.expectAddr,
+    timeout: args.timeout,
+    report-only: args.reportOnly
+  )
+}
+
+// Backend: scripts/install/magic-link.sh. Reads pod logs; writes nothing.
+/// Recover the cluster owner's sign-in magic link from the local identity pod's logs, so a fresh
+/// install ends with the operator signed in rather than locked out.
+action recoverMagicLink {
+  args {
+    local     boolean!
+    context   string
+    namespace string
+    target    string
+    since     string
+    tail      string
+    email     string
+  }
+  capability script(
+    script: "install.magicLink",
+    local: args.local,
+    context: args.context,
+    namespace: args.namespace,
+    target: args.target,
+    since: args.since,
+    tail: args.tail,
+    email: args.email
+  )
+}
+
+// =============================================================================
+//   Placement (mutating)
+// =============================================================================
+
+// Backend: scripts/install/install-binary.sh. Downloads only what the committed
+// pins name and refuses anything whose sha256 does not match.
+/// Download, digest-verify and install one pinned tool (k3d, kubectl or mkcert) into the
+/// installer's bin directory.
+action installPinnedTool {
+  args {
+    tool   string!
+    dest   string
+    pins   string
+    dryRun boolean
+  }
+  capability script(
+    script: "install.binary",
+    tool: args.tool,
+    dest: args.dest,
+    pins: args.pins,
+    dry-run: args.dryRun
+  )
+}
+
+// Backend: scripts/install/hosts-entries.sh. Writes inside a marked block so
+// uninstall can take back exactly what it wrote and nothing else.
+/// Add or remove the memQL front-door hostnames in the system hosts file, inside a marked block.
+action manageHostsEntries {
+  args {
+    action    string!
+    confirm   string!
+    hostsFile string
+    hostnames string
+    ip        string
+  }
+  capability script(
+    script: "install.hostsEntries",
+    action: args.action,
+    confirm: args.confirm,
+    hosts-file: args.hostsFile,
+    hostnames: args.hostnames,
+    ip: args.ip
+  )
+}
+
+// Backend: scripts/install/mkcert-setup.sh. Leaves an existing CA alone -- it
+// may be signing certificates for other local stacks.
+/// Ensure a trusted local CA exists and issue the front-door wildcard certificate against it.
+action ensureLocalCa {
+  args {
+    confirm   string!
+    hostnames string
+    certFile  string
+    keyFile   string
+    caroot    string
+    mkcert    string
+    force     boolean
+  }
+  capability script(
+    script: "install.mkcert",
+    confirm: args.confirm,
+    hostnames: args.hostnames,
+    cert-file: args.certFile,
+    key-file: args.keyFile,
+    caroot: args.caroot,
+    mkcert: args.mkcert,
+    force: args.force
+  )
+}
+
+// Backend: scripts/install/clone-stack.sh. A TAG only -- a branch moves, and an
+// install pinned to something that moves is not pinned.
+/// Check the memQL stack out at a release tag into the pinned local source directory.
+action cloneStackAtTag {
+  args {
+    tag   string!
+    repo  string
+    dest  string
+    depth string
+    git   string
+  }
+  capability script(
+    script: "install.cloneStack",
+    tag: args.tag,
+    repo: args.repo,
+    dest: args.dest,
+    depth: args.depth,
+    git: args.git
+  )
+}
+
+// Backend: scripts/k3d/up.sh -- the SAME script `make up` runs, and the same
+// manifests ArgoCD reconciles in staging. The install graph reaches for it
+// rather than growing an install-only bring-up path, because the moment local
+// diverges in shape from staging it stops proving anything about staging.
+/// Create the local k3d cluster, install ArgoCD, seed its secrets and reconcile the local overlay.
+action bringUpLocalCluster {
+  args {
+    cluster       string
+    revision      string
+    namespace     string
+    repoUrl       string
+    servers       string
+    agents        string
+    overlayPath   string
+    argocdTimeout string
+    noSecrets     boolean
+  }
+  capability script(
+    script: "k3d.up",
+    cluster: args.cluster,
+    revision: args.revision,
+    namespace: args.namespace,
+    repo-url: args.repoUrl,
+    servers: args.servers,
+    agents: args.agents,
+    overlay-path: args.overlayPath,
+    argocd-timeout: args.argocdTimeout,
+    no-secrets: args.noSecrets
+  )
+}
+
+// =============================================================================
+//   Removal (the uninstall half)
+// =============================================================================
+
+// Backend: scripts/install/remove-artifact.sh. `preExisting` is not advisory:
+// anything not plainly false is an unconditional refusal, checked immediately
+// before each mutation, so a garbled receipt stops the removal rather than
+// authorising it.
+/// Remove one artifact the installer created -- a pinned binary, the source checkout, the marked
+/// hosts block, the local CA, the k3d cluster or the local images -- refusing outright when the
+/// receipt says the machine already had it.
+action removeInstalledArtifact {
+  args {
+    kind        string!
+    preExisting string
+    path        string
+    dest        string
+    marker      string
+    caroot      string
+    cluster     string
+    imagePrefix string
+  }
+  capability script(
+    script: "install.removeArtifact",
+    kind: args.kind,
+    pre-existing: args.preExisting,
+    path: args.path,
+    dest: args.dest,
+    marker: args.marker,
+    caroot: args.caroot,
+    cluster: args.cluster,
+    image-prefix: args.imagePrefix
+  )
+}
