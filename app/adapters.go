@@ -290,3 +290,20 @@ func (a *InboundEngineAdapter) Execute(ctx context.Context, query string) (any, 
 	}
 	return result, nil
 }
+
+// CampaignsEngineAdapter wraps MemQLEngine to satisfy campaigns.Engine
+// (memql#3348). Same (any, error) seam as the outbound and inbound
+// adapters, for the same reason: the sending engine's tests fake flat
+// row envelopes so suppression, resume and rate-limit behaviour are
+// provable without a database, and MaterializeRows unwraps either form.
+type CampaignsEngineAdapter struct {
+	Engine *memql.MemQLEngine
+}
+
+func (a *CampaignsEngineAdapter) Execute(ctx context.Context, query string) (any, error) {
+	result, err := a.Engine.Execute(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}

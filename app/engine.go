@@ -8,6 +8,7 @@ import (
 	"github.com/znasllc-io/memql/component/automations"
 	automationSteps "github.com/znasllc-io/memql/component/automations/steps"
 	"github.com/znasllc-io/memql/component/bus"
+	"github.com/znasllc-io/memql/component/campaigns"
 	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/genesis"
 	"github.com/znasllc-io/memql/component/memql"
@@ -15,6 +16,7 @@ import (
 	"github.com/znasllc-io/memql/component/observe"
 	"github.com/znasllc-io/memql/component/outbound"
 	"github.com/znasllc-io/memql/component/router"
+	"github.com/znasllc-io/memql/integrations/email"
 )
 
 // engineAndBus creates the MemQL engine, sets up the component bus wiring,
@@ -169,6 +171,49 @@ func (a *App) engineAndBus() {
 		a.Logger,
 	)
 	a.Dependencies = append(a.Dependencies, outboundWorker)
+
+	// memql#3348: the campaign sending engine. Drains
+	// v1:campaigns:sendJob rows, enforces the cluster-wide suppression
+	// list at the point of send, paces itself against the provider's rate
+	// limit and obeys its 429s, and writes the per-recipient delivery
+	// ledger that makes a resumed send idempotent.
+	//
+	// Registered as an INTEGRATION as well as a dependency: the same
+	// object carries the drain loop and the DSL-callable surface
+	// (campaignStartSend / PauseSend / ResumeSend / Suppress /
+	// RecordFeedback), because starting a send is a preflight over
+	// several rows plus two writes -- neither expressible in a mutation
+	// body -- and the preflight has to consult the very config the worker
+	// runs on.
+	//
+	// It is wired here rather than as a self-registering plug-in for the
+	// reason app/plugins_core.go states: the cluster guard is not on
+	// PluginContext, and without it two replicas drain the same campaign.
+	//
+	// The email sender is resolved at SEND time off the integration
+	// registry, mirroring outbound.EmailTransport: on a booting node the
+	// registry is not yet populated, and a sender captured now would be
+	// nil forever.
+	campaignWorker := campaigns.NewWorker(
+		&CampaignsEngineAdapter{Engine: a.engine},
+		clusterGuard,
+		func() email.Sender {
+			prov := a.engine.Integrations().Provider("email")
+			if prov == nil {
+				return nil
+			}
+			emailInt, ok := prov.(*email.Integration)
+			if !ok || emailInt == nil {
+				return nil
+			}
+			return emailInt.SenderAccess()
+		},
+		a.Logger,
+	)
+	a.Dependencies = append(a.Dependencies, campaignWorker)
+	if err := a.engine.RegisterIntegration(campaignWorker); err != nil {
+		a.fatal("failed to register campaigns integration", "error", err)
+	}
 
 	a.automationScheduler, err = automations.NewScheduler(automations.SchedulerOptions{
 		Logger:       nil,
