@@ -22,16 +22,20 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
+import {
+  accessTokenExpirySecretKey,
+  refreshTokenSecretKey,
+  type SecretStore,
+} from "../src/auth/store.js";
 import type { ClusterConfig } from "../src/clusters/model.js";
 import {
   CredentialResolver,
   EXPIRY_SKEW_SECONDS,
   classifyToken,
+  isTerminalRefreshFailure,
   jwtExpirySeconds,
-  refreshTokenSecretKey,
   type HttpRequestInit,
   type HttpResponseLike,
-  type SecretStore,
 } from "../src/connection/credentials.js";
 
 // -----------------------------------------------------------------------------
@@ -263,15 +267,19 @@ test("the refreshed access token is persisted so the NEXT connect starts fresh",
   assert.equal(persisted[0]?.token, "REFRESHED");
 });
 
-test("a rejected refresh token reports an EXPIRED credential naming the rejection", async () => {
+test("a REFUSED refresh token asks for a fresh sign-in, naming the rejection", async () => {
+  // memql#3404: a refresh the server refused can never succeed on a retry, so
+  // this is a different answer from `credentialExpired` -- there is nothing
+  // left to renew, and the operator's only move is to sign in again.
   const http = rejectingHttp();
   const result = await resolver({ http }).resolve(
     cluster({ token: jwtExpiringIn(-60), refreshToken: "RT-STALE" }),
   );
 
-  assert.equal(result.ok === false ? result.reason : "", "credentialExpired");
+  assert.equal(result.ok === false ? result.reason : "", "reauthenticationRequired");
   const message = result.ok === false ? result.message : "";
   assert.match(message, /refresh token is no longer valid/);
+  assert.match(message, /sign in/i);
 });
 
 test("the identity service's OWN error body shape is read, not just the RFC one", async () => {
@@ -403,4 +411,184 @@ test("with NO SecretStorage the plaintext refresh token is used but never cleare
 test("secret keys are per cluster, so two clusters cannot share a refresh token", () => {
   assert.notEqual(refreshTokenSecretKey("local"), refreshTokenSecretKey("staging"));
   assert.match(refreshTokenSecretKey("local"), /local/);
+});
+
+// -----------------------------------------------------------------------------
+// Coalescing -- memql#3404
+// -----------------------------------------------------------------------------
+
+// A fetch that parks until it is released, so two callers can be proved to be
+// in flight simultaneously rather than merely fast.
+function gatedHttp(payload: Record<string, unknown>): FakeHttp & { release: () => void } {
+  const calls: FakeHttp["calls"] = [];
+  let release = (): void => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return {
+    calls,
+    release: () => release(),
+    fetch: async (url, init) => {
+      calls.push({ url, body: JSON.parse(init.body) as Record<string, unknown> });
+      await gate;
+      return { ok: true, status: 200, text: async () => JSON.stringify(payload) };
+    },
+  };
+}
+
+test("concurrent refreshes for one cluster coalesce into a single exchange", async () => {
+  // Not an optimisation. identity ROTATES the refresh token on every exchange,
+  // so a second concurrent exchange presents a token the first has already
+  // spent: it fails with invalid_grant, and its rotated token can land in
+  // SecretStorage on top of the winner's -- leaving the only stored copy
+  // already used.
+  const http = gatedHttp({ access_token: "REFRESHED", refresh_token: "ROTATED", expires_in: 900 });
+  const secrets = new FakeSecrets();
+  await secrets.store(refreshTokenSecretKey("local"), "RT-1");
+  const subject = resolver({ http, secrets });
+  const expired = cluster({ token: jwtExpiringIn(-60) });
+
+  const both = Promise.all([subject.resolve(expired), subject.forceRefresh(expired)]);
+  http.release();
+  const [resolved, forced] = await both;
+
+  assert.equal(http.calls.length, 1, "two callers, one exchange");
+  assert.deepEqual(resolved, { ok: true, bearer: "REFRESHED" });
+  assert.equal(forced, "REFRESHED");
+});
+
+test("refreshes for DIFFERENT clusters do not coalesce", async () => {
+  const http = gatedHttp({ access_token: "REFRESHED", refresh_token: "ROTATED" });
+  const subject = resolver({ http });
+
+  const both = Promise.all([
+    subject.forceRefresh(cluster({ name: "local", refreshToken: "RT-LOCAL" })),
+    subject.forceRefresh(cluster({ name: "staging", refreshToken: "RT-STAGING" })),
+  ]);
+  http.release();
+  await both;
+
+  assert.equal(http.calls.length, 2);
+});
+
+test("a coalesced exchange does not outlive itself -- the NEXT refresh runs again", async () => {
+  const http = okHttp();
+  const subject = resolver({ http });
+  const expired = cluster({ token: jwtExpiringIn(-60), refreshToken: "RT-1" });
+
+  await subject.forceRefresh(expired);
+  await subject.forceRefresh(expired);
+
+  assert.equal(http.calls.length, 2, "the in-flight entry must be cleared once it settles");
+});
+
+// -----------------------------------------------------------------------------
+// A refused refresh clears state instead of spinning -- memql#3404
+// -----------------------------------------------------------------------------
+
+test("isTerminalRefreshFailure separates a refused grant from an undelivered one", () => {
+  assert.equal(isTerminalRefreshFailure(400, '{"error":"invalid_grant"}'), true);
+  assert.equal(isTerminalRefreshFailure(401, ""), true);
+  assert.equal(isTerminalRefreshFailure(403, ""), true);
+  assert.equal(isTerminalRefreshFailure(500, "boom"), false);
+  assert.equal(isTerminalRefreshFailure(502, "<html>bad gateway</html>"), false);
+  assert.equal(
+    isTerminalRefreshFailure(418, '{"error":"invalid_grant"}'),
+    true,
+    "a proxy that mangles the status still passes identity's error code through",
+  );
+});
+
+test("a REFUSED refresh clears every stored copy, so the next action starts clean", async () => {
+  const secrets = new FakeSecrets();
+  await secrets.store(refreshTokenSecretKey("local"), "RT-DEAD");
+  await secrets.store(accessTokenExpirySecretKey("local"), "1");
+  const persisted: Persisted[] = [];
+
+  await resolver({ http: rejectingHttp(), secrets, persisted }).resolve(
+    cluster({ token: jwtExpiringIn(-60) }),
+  );
+
+  assert.equal(secrets.values.get(refreshTokenSecretKey("local")), undefined);
+  assert.equal(secrets.values.get(accessTokenExpirySecretKey("local")), undefined);
+  assert.deepEqual(persisted, [
+    { clusterName: "local", token: "", clearStoredRefreshToken: true },
+  ]);
+});
+
+test("after a refusal the cluster reads as having no credential at all", async () => {
+  // The point of clearing: the SECOND action must prompt a clean sign-in
+  // rather than replay a credential the server has already rejected.
+  const secrets = new FakeSecrets();
+  await secrets.store(refreshTokenSecretKey("local"), "RT-DEAD");
+  const http = rejectingHttp();
+  const subject = resolver({ http, secrets });
+
+  await subject.resolve(cluster({ token: jwtExpiringIn(-60) }));
+  // The file write is modelled by the caller, so the second call sees what
+  // clearing left behind: an entry with no token and no refresh token.
+  const second = await subject.resolve(cluster({ token: "" }));
+
+  assert.equal(second.ok === false ? second.reason : "", "missingCredential");
+  assert.equal(http.calls.length, 1, "a cleared cluster must not keep exchanging");
+});
+
+test("an UNDELIVERED refresh keeps the stored tokens -- a flaky identity service is not a sign-out", async () => {
+  const secrets = new FakeSecrets();
+  await secrets.store(refreshTokenSecretKey("local"), "RT-1");
+  const persisted: Persisted[] = [];
+
+  const result = await resolver({ http: rejectingHttp(500, "boom"), secrets, persisted }).resolve(
+    cluster({ token: jwtExpiringIn(-60) }),
+  );
+
+  assert.equal(result.ok === false ? result.reason : "", "credentialExpired");
+  assert.equal(secrets.values.get(refreshTokenSecretKey("local")), "RT-1");
+  assert.deepEqual(persisted, []);
+});
+
+// -----------------------------------------------------------------------------
+// Stored expiry -- for a credential that carries none of its own
+// -----------------------------------------------------------------------------
+
+test("the lifetime the server reports is stored beside the refresh token", async () => {
+  const secrets = new FakeSecrets();
+  await resolver({ http: okHttp(), secrets }).resolve(
+    cluster({ token: jwtExpiringIn(-60), refreshToken: "RT-1" }),
+  );
+
+  assert.equal(
+    secrets.values.get(accessTokenExpirySecretKey("local")),
+    String(Math.floor(NOW_MS / 1000) + 900),
+  );
+});
+
+test("an OPAQUE access token is renewed on its stored expiry, not left to fail a dial", async () => {
+  // A JWT carries `exp`; an opaque bearer carries nothing a client can read.
+  // Without the stored copy the resolver would hand out a dead token and only
+  // learn it was dead from the handshake.
+  const secrets = new FakeSecrets();
+  await secrets.store(accessTokenExpirySecretKey("local"), String(Math.floor(NOW_MS / 1000) - 30));
+  await secrets.store(refreshTokenSecretKey("local"), "RT-1");
+  const http = okHttp();
+
+  const result = await resolver({ http, secrets }).resolve(cluster({ token: "opaque-bearer" }));
+
+  assert.deepEqual(result, { ok: true, bearer: "REFRESHED" });
+  assert.equal(http.calls.length, 1);
+});
+
+test("an opaque token with a stored expiry comfortably ahead is NOT refreshed", async () => {
+  const secrets = new FakeSecrets();
+  await secrets.store(
+    accessTokenExpirySecretKey("local"),
+    String(Math.floor(NOW_MS / 1000) + EXPIRY_SKEW_SECONDS + 300),
+  );
+  await secrets.store(refreshTokenSecretKey("local"), "RT-1");
+  const http = okHttp();
+
+  const result = await resolver({ http, secrets }).resolve(cluster({ token: "opaque-bearer" }));
+
+  assert.deepEqual(result, { ok: true, bearer: "opaque-bearer" });
+  assert.equal(http.calls.length, 0);
 });

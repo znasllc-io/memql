@@ -43,7 +43,15 @@ export interface ClusterRowStatus {
 }
 
 // The reasons that mean "look at your token", not "look at your cluster".
-const CREDENTIAL_REASONS = new Set(["credentialExpired", "wrongTokenClass", "missingCredential"]);
+// `reauthenticationRequired` is one of them: the stored credentials were
+// refused and cleared (memql#3404), which is a credential problem even though
+// nothing about the cluster changed.
+const CREDENTIAL_REASONS = new Set([
+  "credentialExpired",
+  "wrongTokenClass",
+  "missingCredential",
+  "reauthenticationRequired",
+]);
 
 export function clusterRowStatus(
   cluster: ClusterConfig,
