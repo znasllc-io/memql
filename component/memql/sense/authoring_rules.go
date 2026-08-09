@@ -412,87 +412,16 @@ func redundantVersionRule(source string) []Diagnostic {
 // body's exposure note.)
 var versionDefaultRE = regexp.MustCompile(`^[ \t]*(@version\([ \t]*"1\.0\.0"[ \t]*\))[ \t]*(//[^\r]*)?\r?$`)
 
-// discardedArgsDescriptionRule surfaces the #2615 corpus rule via
-// DiscardedArgsDescriptions (shared with the dsl/ tree gate).
-func discardedArgsDescriptionRule(source string) []Diagnostic {
-	return DiscardedArgsDescriptions(source)
-}
-
-// DiscardedArgsDescriptions flags every @description annotation on an
-// args{} field: the parser consumes the annotation and throws it away
-// (args_block_parser.go, "silently accepted (no AST slot)", #2615), so
-// the prose is dead weight the runtime never sees. Declaration-level
-// and concept-field @description are load-bearing and never flag.
-// Per-field documentation returns with /// doc comments (#2601).
-//
-// EXPORTED deliberately: the dsl/ tree gate (no_args_field_description
-// _test.go) runs this exact function, so the editor hint and the CI
-// gate cannot drift -- parity by construction (#2658 review round).
-//
-// The scan blanks /* */ spans (BlankBlockComments), strips strings and
-// // tails per line, then walks characters so brace transitions are
-// position-aware: an annotation on the `args {` opener line is inside
-// the block, and a `} shape {` line exits args at the closing brace --
-// the sibling block's fields never flag (both were #2658 findings).
-func DiscardedArgsDescriptions(source string) []Diagnostic {
-	var diagnostics []Diagnostic
-	depth := 0
-	inArgs := false
-	argsDepth := 0
-	// Columns are counted in the ORIGINAL line, not the blanked one: both
-	// transforms emit one byte per input byte (and preserve newlines), so byte
-	// offsets and line indices carry over exactly, but a blanked multi-byte
-	// rune becomes that many spaces and would count as that many runes.
-	origLines := strings.Split(source, "\n")
-	for lineIdx, line := range strings.Split(BlankBlockComments(source), "\n") {
-		code := stripStringsAndComments(line)
-		orig := line
-		if lineIdx < len(origLines) {
-			orig = origLines[lineIdx]
-		}
-		openBraces := map[int]bool{}
-		for _, m := range argsBlockOpenRE.FindAllStringSubmatchIndex(code, -1) {
-			openBraces[m[1]-1] = true // the opener's brace position
-		}
-		for i := 0; i < len(code); i++ {
-			switch code[i] {
-			case '{':
-				depth++
-				if !inArgs && openBraces[i] {
-					inArgs = true
-					argsDepth = depth
-				}
-			case '}':
-				depth--
-				if inArgs && depth < argsDepth {
-					inArgs = false
-				}
-			case '@':
-				if !inArgs || !strings.HasPrefix(code[i:], "@description") {
-					continue
-				}
-				if end := i + len("@description"); end < len(code) && isWordByte(code[end]) {
-					continue // @descriptionX -- a different annotation
-				}
-				pos := Position{Line: lineIdx + 1, Column: runeColumn(orig, i)}
-				diagnostics = append(diagnostics, Diagnostic{
-					Range: Range{
-						Start: pos,
-						End:   Position{Line: pos.Line, Column: pos.Column + runeWidth("@description")},
-					},
-					Severity: SeverityHint,
-					Message:  "`@description` on an args field is parsed and discarded (no AST slot, #2615). Delete it -- per-field docs arrive with /// doc comments (#2601).",
-					Code:     "discarded-args-description",
-				})
-			}
-		}
-	}
-	return diagnostics
-}
-
-func isWordByte(c byte) bool {
-	return c == '_' || ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z') || ('0' <= c && c <= '9')
-}
+// There is no args-field @description rule here, deliberately (memql#3336).
+// The annotation is REJECTED by the parser now (component/language/parser/
+// args_block_parser.go), so a file carrying one never parses and the editor
+// gets the load error itself through Diagnose's Phase 2 parser diagnostics --
+// the same path that surfaces every other rejected form (@default on an args
+// field, @useConcept, `func (Query)`), none of which carries a bespoke rule
+// either. The retired Hint said the annotation was "parsed and discarded",
+// which stopped being true, and it sat inside semanticDiagnostics, which does
+// not run when the parse fails -- a warning that could no longer fire.
+// TestArgsFieldDescriptionSurfacesAsLoadError pins the replacement.
 
 // BlankBlockComments blanks real /* */ spans (newline-preserving, so
 // line numbers stay stable) while leaving line comments and string
@@ -555,10 +484,6 @@ func BlankBlockComments(src string) string {
 	}
 	return b.String()
 }
-
-// argsBlockOpenRE matches an `args {` block opener outside strings and
-// comments (the rule scans stripped lines).
-var argsBlockOpenRE = regexp.MustCompile(`(^|[^A-Za-z0-9_])args[ \t]*\{`)
 
 // actorUndeclaredRule mirrors the engine's actor-binding load rule
 // (#2621) as an edit-time Error (#2622): a query/mutate/logic/

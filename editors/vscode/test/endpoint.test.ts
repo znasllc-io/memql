@@ -8,7 +8,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { webSocketUrlFor } from "../src/connection/endpoint.js";
+import { identityBaseUrlFor, webSocketUrlFor } from "../src/connection/endpoint.js";
 
 test("derives a wss URL from a host:port endpoint", () => {
   assert.equal(
@@ -86,4 +86,47 @@ test("derives wss for a bracketed non-loopback IPv6 literal", () => {
     webSocketUrlFor({ name: "l", endpoint: "[2001:db8::1]:50051" }),
     "wss://[2001:db8::1]:50051/memql/ws",
   );
+});
+
+// -----------------------------------------------------------------------------
+// The identity service's base URL (memql#3385)
+//
+// A refresh exchange is an HTTP POST to the identity service, which is a
+// DIFFERENT host from the bff the stream dials. clusters.yaml already carries
+// the two facts that name it -- the OIDC `issuer` the cockpit writes, and the
+// `domain` the add/edit flow collects -- so the URL is derived here rather than
+// added as a fifth field an operator has to keep in sync.
+// -----------------------------------------------------------------------------
+
+test("identityBaseUrlFor prefers an explicit issuer, trimming its trailing slash", () => {
+  assert.equal(
+    identityBaseUrlFor({
+      name: "l",
+      endpoint: "cockpit.local.znas.io:443",
+      domain: "local.znas.io",
+      issuer: "https://auth.example.com/",
+    }),
+    "https://auth.example.com",
+  );
+});
+
+test("identityBaseUrlFor falls back to the identity.<domain> convention", () => {
+  assert.equal(
+    identityBaseUrlFor({ name: "l", endpoint: "cockpit.local.znas.io:443", domain: "local.znas.io" }),
+    "https://identity.local.znas.io",
+  );
+});
+
+test("identityBaseUrlFor derives from a cockpit.<domain> endpoint when no domain is stored", () => {
+  assert.equal(
+    identityBaseUrlFor({ name: "l", endpoint: "cockpit.staging.example.com:443" }),
+    "https://identity.staging.example.com",
+  );
+});
+
+test("identityBaseUrlFor returns undefined when nothing names the identity service", () => {
+  // A bare host:port says nothing about where auth lives. Guessing would send
+  // a refresh token to an arbitrary host; the honest answer is "tell me".
+  assert.equal(identityBaseUrlFor({ name: "l", endpoint: "10.0.0.5:50051" }), undefined);
+  assert.equal(identityBaseUrlFor({ name: "l", endpoint: "" }), undefined);
 });

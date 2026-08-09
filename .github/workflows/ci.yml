@@ -183,6 +183,13 @@ jobs:
             gates:
               - '**/*.md'
               - '**/*.memql'
+              # .claude/settings.json is TRACKED on purpose (the .gitignore
+              # negation, memql#3344) and scripts/dev/repo_hygiene_test.go
+              # asserts it stays non-ignored via sharedClaudeState. That test
+              # runs in THIS lane, but `scripts/**` below does not match the
+              # file itself -- so editing it ran zero lanes until memql#3440
+              # made it tracked and the coverage guard noticed.
+              - '.claude/settings.json'
               - 'scripts/secrets/manifest.yaml'
               - 'component/genesis/manifest.yaml'
               - 'component/architecture/embedded/**'
@@ -214,6 +221,16 @@ jobs:
               # redden `main` on the next author's push -- renaming a
               # `service:` fails TestArchitectureModelIsNotStale.
               - 'arch.yaml'
+              # Cross-language contract fixtures (memql#3399). A fixture here is
+              # the shared statement two halves of the repo are BOTH asserted
+              # against -- today, what the identity service advertises as a dial
+              # address versus what a client will accept. The Go side reads it
+              # from the root package and from component/identity; the
+              # TypeScript side reads the same file, which is why this path is
+              # ALSO in the `vscode` bucket. Editing the fixture alone must run
+              # both, or the coupling the fixture exists to create is only
+              # enforced on whichever half a PR happens to touch.
+              - 'test/fixtures/**'
               # The REST of the env-registry corpus (memql#3223).
               #
               # `cmd/envscan/scan.repoCorpus` walks the WHOLE repository and
@@ -352,6 +369,10 @@ jobs:
               - 'scripts/vscode/**'
               - 'sdk/ts/**'
               - 'sdk/ts-viewkit/**'
+              # The cross-language contract fixtures (memql#3399), which the
+              # extension's tests read directly. Also in `gates`, because the
+              # Go half reads the same file -- see the note there.
+              - 'test/fixtures/**'
             # The `clients/` category -- surfaces built on the platform, of
             # which this repo carries exactly one, the memQL Portal
             # (memql#3314). Written as `clients/**` rather than

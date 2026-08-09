@@ -14,14 +14,15 @@
 # Prerequisites: docker, k3d, kubectl (brew install k3d kubectl)
 make up          # fresh bring-up: cluster + ArgoCD + secrets + images, wait healthy
 make dev         # inner-loop: rebuild images -> import -> restart pods
-make status      # mesh litmus (unique MEMQL_NODE_ID per pod)
+make status      # mesh litmus (unique MEMQL_NODE_ID per pod;
+                 # one shared identity signing keyset)
 make up-refresh  # clean slate: nuke + repave (fresh DB), then the same bring-up
 make down        # tear down
 
 # Multi-node mesh testing (2 replicas per Deployment -- staging parity):
 make up SERVERS=2 AGENTS=1
 make scale N=2
-make status   # verify unique MEMQL_NODE_IDs
+make status   # verify unique MEMQL_NODE_IDs + shared identity keyset
 
 # Run tests
 go test ./...
@@ -186,7 +187,8 @@ make dev PULL_INFRA=1        # refresh infra images (postgres/azurite/livekit)
 
 # Multi-node scaling:
 make scale N=2                # 2 replicas per Deployment
-make status                   # litmus: verify unique MEMQL_NODE_ID per pod
+make status                   # litmus: unique MEMQL_NODE_ID per pod +
+                              #         one shared identity signing keyset
 
 # Secrets (re-seed if changed):
 make secrets
@@ -287,7 +289,7 @@ frontend coordination.
 | **Bootstrap k3d cluster** | `make up` | Fresh bring-up: cluster + ArgoCD + secrets + images, wait healthy (memql#2061 / Epic 0) |
 | **Inner-loop rebuild** | `make dev [NODE=<type>]` | Build image -> k3d import -> kubectl rollout restart |
 | **Clean slate (nuke + repave)** | `make up-refresh` | Tear down + recreate cluster (fresh DB), rebuild images, wait healthy |
-| **Cluster litmus** | `make status` | Verify unique MEMQL_NODE_ID per pod (mesh parity check) |
+| **Cluster litmus** | `make status` | Verify unique MEMQL_NODE_ID per pod, and that every identity replica publishes the same JWKS keyset (mesh parity check) |
 | **Multi-node scaling** | `make scale N=2` | 2 replicas per Deployment for cross-node mesh testing |
 | **Re-seed secrets** | `make secrets` | Idempotent; use after cluster recreate |
 | **Tear down cluster** | `make down` | Delete k3d cluster (PURGE=1 also removes kubeconfig) |
@@ -503,7 +505,7 @@ in *shape* it stops proving anything about staging/prod. Ask of any change: *is
 this the shape of the system (→ base/component, everywhere) or a value (→
 overlay, per env)?* The standard: [docs/public/operate/environment-parity.md](docs/public/operate/environment-parity.md).
 
-**Local cluster (staging parity -- THE blessed local topology, memql#2061 / Epic 0):** `make up` (k3d + ArgoCD + the local overlay at `deploy/k8s/overlays/local` + seeded secrets); `make dev [NODE=<type>]` rebuilds an image, imports it into k3d, and rolls the Deployment after Go/MemQL source edits; `make down` tears it down. The cluster mirrors staging along the **mesh-delivery path** (memql#1212) by running the same k8s manifests and ArgoCD reconciliation as AKS: scale to 2 replicas per mesh node (bff/cognition/voice/agent/planner/workbench) with `make up SERVERS=2` + `make scale N=2`, each pod carrying a unique `MEMQL_NODE_ID` via `fieldRef: metadata.name` exactly as in staging. Clients (the Cockpit + SDKs) reach the cluster **exactly as in staging/prod** -- through the `cockpit.local.znas.io` traefik front door (TLS on 443 with the mkcert `*.local.znas.io` wildcard `local-znas-tls`, forwarding h2c gRPC to `svc/bff:50051`), the local analog of the cloud nginx ingress; `identity.local.znas.io` works the same way. This is **env parity, non-negotiable** -- there is NO local-only port-forward in the connection path (the standard: [docs/public/operate/environment-parity.md](docs/public/operate/environment-parity.md)). Raw kubectl port-forwards (postgres `:5432`, `svc/bff 50051`, livekit `:7880`) remain for low-level debugging only. Engine-only overlays opt into one **product-agnostic `bff`** via the `deploy/k8s/components/engine-bff` component (the Cockpit / ops edge, no bundle, #2472 Decision 5) -- it is a component, NOT the base, so a product cluster that brings its OWN `bff-<product>` (same engine image + the `dsl-bundle` component mounting its bundle, plus its SPA) never collides with a base-shipped bff. Multiple bffs coexist in the one mesh. `make status` prints the per-pod node ids (parity litmus). Reach for the cluster whenever a change can touch cross-node delivery, replica fan-out, or node lifecycle. See the runbook: [docs/public/operate/reproduce-staging-locally.md](docs/public/operate/reproduce-staging-locally.md).
+**Local cluster (staging parity -- THE blessed local topology, memql#2061 / Epic 0):** `make up` (k3d + ArgoCD + the local overlay at `deploy/k8s/overlays/local` + seeded secrets); `make dev [NODE=<type>]` rebuilds an image, imports it into k3d, and rolls the Deployment after Go/MemQL source edits; `make down` tears it down. The cluster mirrors staging along the **mesh-delivery path** (memql#1212) by running the same k8s manifests and ArgoCD reconciliation as AKS: scale to 2 replicas per mesh node (bff/cognition/voice/agent/planner/workbench) with `make up SERVERS=2` + `make scale N=2`, each pod carrying a unique `MEMQL_NODE_ID` via `fieldRef: metadata.name` exactly as in staging. Clients (the Cockpit + SDKs) reach the cluster **exactly as in staging/prod** -- through the `cockpit.local.znas.io` traefik front door (TLS on 443 with the mkcert `*.local.znas.io` wildcard `local-znas-tls`, forwarding h2c gRPC to `svc/bff:50051`), the local analog of the cloud nginx ingress; `identity.local.znas.io` works the same way. This is **env parity, non-negotiable** -- there is NO local-only port-forward in the connection path (the standard: [docs/public/operate/environment-parity.md](docs/public/operate/environment-parity.md)). Raw kubectl port-forwards (postgres `:5432`, `svc/bff 50051`, livekit `:7880`) remain for low-level debugging only. Engine-only overlays opt into one **product-agnostic `bff`** via the `deploy/k8s/components/engine-bff` component (the Cockpit / ops edge, no bundle, #2472 Decision 5) -- it is a component, NOT the base, so a product cluster that brings its OWN `bff-<product>` (same engine image + the `dsl-bundle` component mounting its bundle, plus its SPA) never collides with a base-shipped bff. Multiple bffs coexist in the one mesh. `make status` prints the per-pod node ids and checks that every identity replica publishes the same JWKS keyset (parity litmus -- divergent keysets fail ~half of all auth, memql#3400). Reach for the cluster whenever a change can touch cross-node delivery, replica fan-out, or node lifecycle. See the runbook: [docs/public/operate/reproduce-staging-locally.md](docs/public/operate/reproduce-staging-locally.md).
 **Previous Compose-based local stack -- RETIRED (memql#2068 / #2088):** the old cluster compose file, the single-node `full.yml`, and the `nemoclaw` overlay are fully removed. The k3d + ArgoCD cluster above is the only supported local run path; a single-node stack structurally cannot reproduce the resilient-mesh class of bugs.
 
 #### Client-tool relay (agent → browser, across nodes)
@@ -581,7 +583,7 @@ These endpoints **must** remain HTTP due to external protocol requirements:
 
 | Category | Endpoints | Reason |
 |----------|-----------|--------|
-| **Auth (identity service)** | `/auth/login`, `/auth/magic-link`, `/auth/complete`, `/auth/logout`, `/oauth/token`, `/auth/refresh`, `/.well-known/jwks.json` | OAuth 2.0 / magic-link flow requires HTTP redirects, browser form posts, and JWKS publishing |
+| **Auth (identity service)** | `/login`, `/auth/magic-link`, `/auth/complete`, `/auth/logout`, `/oauth/token`, `/auth/refresh`, `/.well-known/jwks.json`, `POST /auth/webauthn/register/{begin,finish}`, `POST /auth/webauthn/login/{begin,finish}`, `POST /device/code`, `GET+POST /device`, `GET /enroll` | OAuth 2.0 / magic-link flow requires HTTP redirects, browser form posts, and JWKS publishing. The four `/auth/webauthn/*` endpoints (register memql#3406, login memql#3407) are the same category: WebAuthn is a **browser API** -- the ceremony is `navigator.credentials.create()` / `.get()` running in the page, and the bytes it produces have to reach a server the browser can POST to. There is no gRPC form of "the user touched their security key". RP id derives from `MEMQL_IDENTITY_BASE_URL`, never from the request Host. The login pair is UNAUTHENTICATED by nature (it IS the authentication) and ends in the same OAuth auth code `/auth/complete` produces. The two `/device*` routes are the RFC 8628 device authorization grant (memql#3410): the RFC is **defined over HTTP** -- a device with no browser polls `/oauth/token`, and the human approves at a URL typed into a second device's browser. `/device` is a rendered page, so it is a browser-loads-its-own-UI case like identity's other web pages; `POST /device/code` is the grant's request half and belongs with `/oauth/token`, which it redeems against `GET /enroll` (memql#3408) is a **page a person opens from a link** -- the one request shape that cannot be anything but HTTP, since it arrives before any application code exists to speak a protocol and exists precisely for someone holding no credential yet. Its single-use `mql_enr_` token is the authorization (`Authorization: Enrolment <token>` on the ceremony that follows, mirroring `/pair/redeem`); HTTPS required on issue AND redeem, per-IP rate-limited, every outcome audited with SourceIP |
 | **Health check** | `/healthz` | Docker and Kubernetes health probes expect HTTP GET |
 | **WebSocket upgrades** | `/memql/ws`, `/memql/audio` | Browser clients need HTTP upgrade to establish WebSocket |
 | **File uploads** | `/spaces/{id}/attachments` | Multipart form-data uploads map poorly to gRPC |
@@ -1019,9 +1021,59 @@ authentication provider for the cluster. It runs as its own
 node-type binary (`make identity`) and owns:
 
 - Magic-link auth as the primary login path.
+- WebAuthn passkey **registration** (`POST /auth/webauthn/register/{begin,finish}`,
+  memql#3406). Ceremony logic in `component/identity/webauthn/`; the RP id
+  derives from `MEMQL_IDENTITY_BASE_URL`, challenges are single-use and
+  TTL'd, and credentials are minted `residentKey=required` /
+  `userVerification=required` so they are discoverable. Enrolment
+  authorization is memql#3408.
+- WebAuthn passkey **login** (`POST /auth/webauthn/login/{begin,finish}`,
+  memql#3407). Usernameless: the challenge carries an EMPTY
+  `allowCredentials` (no email has been typed) and resolves the assertion to
+  a row by credential id alone, which is why that id is unique cluster-wide.
+  The challenge also carries the in-flight OAuth context -- the same
+  `clientId` / `redirectURI` / `state` / `codeChallenge` /
+  `codeChallengeMethod` that `IssueMagicLink` stamps on a magic-link row --
+  validated at begin and held server-side, so `finish` mints an auth code
+  via `Store.CreateAuthCode` and returns the same client callback target a
+  magic-link click produces. **No client learns which factor ran**: what
+  reaches `/oauth/token` is an auth code, PKCE binding intact. A sign-count
+  regression is refused and audited as the cloned-authenticator signal (a
+  zero counter from an authenticator that does not implement one is not
+  that case). The `/login` page carries a "Sign in with a passkey" control
+  as a progressive enhancement; the magic-link form remains the path when
+  no passkey exists, WebAuthn is unavailable, or no relying party is in
+  scope.
+- Passkey **management** on `/me/devices` (memql#3409): list (label,
+  added, last used, AAGUID-derived model, and the backup posture that
+  says whether losing the device loses the credential), rename, revoke,
+  and enrol another via the #3406 ceremony. Revoke is a SOFT delete
+  (`active=false`) -- the row is audit history and its credential id must
+  stay taken, because revoking a row does not make the authenticator
+  forget its private key. A revoke that would leave the account with NO
+  sign-in route (no `magic_link` identity, no other passkey) is warned
+  about explicitly before it happens; `component/identity/web/me_passkeys.go`
+  resolves the target out of the caller's OWN self-scoped list, which is
+  the ownership check, while the write runs under the system credential
+  actor the memql#2513 guard requires.
+- **Enrolment tokens + `GET /enroll`** (memql#3408) -- the task that removes
+  email from the critical path. `mql_enr_<43>` (32 CSPRNG bytes, SHA-256 hex at
+  rest, plaintext never persisted or logged), single-use via a `consumedAt`
+  stamp, 15-minute default TTL capped at 24h. It authorizes exactly ONE action:
+  register a passkey as the named user. `/enroll` validates and renders the
+  registration page; the ceremony that follows presents
+  `Authorization: Enrolment <token>` (the `/pair/redeem` shape). The four
+  rejection states -- invalid / expired / already-used / revoked -- each render
+  their own message, because each asks the holder for a different next step.
+  Package: `component/identity/enrolment/`. Issued by an owner/admin from the
+  portal's People surface over `IdentityAdminMsg` (gate in
+  `component/identity/adminops`), or by the install wizard's `enrolmentLink`
+  graph step via `memql enrolment-token mint` inside the identity pod -- which
+  is the only authority available at that moment, since nothing can authenticate
+  to a cluster whose owner has just been bootstrapped from env.
 - OAuth-style token endpoints (`/oauth/token`, `/auth/refresh`).
 - The JWKS feed at `/.well-known/jwks.json`.
-- A public web UI (`/auth/login`, `/auth/complete`, `/setup`,
+- A public web UI (`/login`, `/auth/complete`, `/setup`,
   `/legal/*`, `/me/*`).
 - What remains of the admin web app at `/admin/*`: the sign-in pages
   and `/admin/deployments`. The other six screens moved into the
@@ -1242,8 +1294,10 @@ surface entirely.
 | Procedural func / automation / policy | File-top `args { ... }` block above the `func (...)` |
 | Builtin / tool / prompt | Body fields directly — the body IS the schema |
 
-`args { ... }` field syntax: `<name> <type> [@required] [@enum("a", "b", ...)] [@default(<expr>)] [@description("...")]`. Omitting
-`@required` makes the field optional.
+`args { ... }` field syntax: `<name> <type> [@required] [@enum("a", "b", ...)] [@maxLength(N)] [@pattern("re")]`. Omitting
+`@required` makes the field optional. Describe the field with a `///` doc
+comment on the line above it — `@description` and `@default` are both rejected
+at load (memql#3336, #991).
 
 **How args get read inside the body:**
 
@@ -1470,7 +1524,13 @@ name collides with one of those is rejected at load time.
 **Annotations** in the args block:
 - `@required` — non-optional
 - `@enum("a", "b", "c")` — restricts to a value set
-- `@description("...")`, `@maxLength(N)`, `@pattern("re")`
+- `@maxLength(N)`, `@pattern("re")`
+- `@description` is **not** valid on an args field (it was parsed and then
+  discarded — there was never an AST slot for it; rejected at load,
+  memql#3336). An arg description is the `///` doc comment on the line above
+  the field, which is the channel the corpus uses and the LSP reads. A
+  `tool` / `prompt` / `builtin` field keeps its `@description` — those bodies
+  ARE the schema and retain it.
 - `@default` is **not** valid on an args field (it was never applied —
   rejected at load, #991). Apply a default in the body with the `??`
   null-coalescing operator (`args.X ?? <default>`). A concept-field
@@ -1870,12 +1930,20 @@ See [docs/internal/design/auto-generated-diagrams.md](docs/internal/design/auto-
 ### Identity Concepts
 Auth + access metadata (dsl/identity/concepts.memql; infrastructure metadata every node loads. `@scope` was retired in #56 -- these no longer carry a scope annotation)
 - `v1:identity:user` -- the person; cluster-wide role (owner / admin / writer / reader); preferences (theme, archive retention, daily-space toggle, voice mode, UI-takeover settings)
-- `v1:identity:identity` -- a credential set owned by a user (magic-link verified email, oauth token, api key/PAT, service account, worker token)
+- `v1:identity:identity` -- a credential set owned by a user (magic-link verified email, oauth token, api key/PAT, service account, worker token, badge, account token, passkey). A discriminated union keyed on `identityType`; the `passkey` variant (memql#3406) is the only one whose stored material is PUBLIC (a COSE key), because possession is proved by a signature rather than by a digest match
 - `v1:identity:authSession` -- per-token session record (used for revocation)
 - `v1:identity:magiclink` -- single-use magic-link credential (token-hashed)
 - `v1:identity:auditEvent` -- append-only audit trail for the identity service
 - `v1:identity:accessRequest` -- waitlist-mode access request
 - `v1:identity:invitation` -- token-hashed invitation credential for guest/user flows
+- `v1:identity:enrolmentToken` -- single-use, TTL'd credential authorizing exactly one action:
+  register a passkey as the named user (memql#3408). What makes a FIRST credential obtainable
+  with no mailbox. Mirrors `v1:identity:workerPairingCode` rather than extending `invitation` --
+  an enrolment token has no invitee, no inviter to render into a message and no product scope,
+  and its single-use marker is a `consumedAt` stamp rather than `respondedAt` + a participation
+  status. Same SHA-256-hex hashing convention as every other credential row. Redeemed at
+  `GET /enroll?code=...`; issued by an owner/admin over `IdentityAdminMsg`, or by the install
+  wizard via `memql enrolment-token mint`
 - `v1:identity:delegation` -- agent acting through a user's identity (bounded role/scope/lifetime)
 
 See [docs/public/operate/auth/access-model.md](docs/public/operate/auth/access-model.md) for the full model.

@@ -10,13 +10,27 @@
 # Cert (identity-tls) + CA (memql-ca) are mounted; MEMQL_HTTP_TLS_* point
 # the server + clients at them. MEMQL_IDENTITY_SIGNING_KEY_B64 (the Ed25519
 # signing seed, #550), MEMQL_IDENTITY_KEY_ENCRYPTION_KEY and
-# MEMQL_NODE_BOOTSTRAP_TOKEN are NOT here -- they ride the sealed genesis
-# envelope (memql-secrets / MEMQL_GENESIS_B64) and autoload at boot.
+# MEMQL_NODE_BOOTSTRAP_TOKEN are NOT declared as `env:` below -- they arrive
+# through the memql-secrets Secret this Deployment envFroms, either as a key
+# on that Secret or inside the sealed genesis envelope it carries
+# (MEMQL_GENESIS_B64, autoloaded set-if-absent at boot).
 #
-# HA (#550): the signing key comes from the envelope (same seed on every
-# pod -> identical JWKS), so there is NO single-writer key PVC and identity
-# runs 2 replicas on a RollingUpdate (surge) -- no more Recreate-strategy
-# auth-down window on every deploy. A PodDisruptionBudget keeps >=1 up.
+# HA (#550): the signing seed is env-provided (same seed on every pod ->
+# identical JWKS), so there is NO single-writer key PVC and identity runs 2
+# replicas on a RollingUpdate (surge) -- no more Recreate-strategy auth-down
+# window on every deploy. A PodDisruptionBudget keeps >=1 up.
+#
+# THAT SEED IS LOAD-BEARING, NOT OPTIONAL (memql#3400). Absent it, every pod
+# generates its OWN keypair, the two replicas behind this Service publish
+# different JWKS `kid`s, and a token minted by one is unverifiable by any node
+# that fetched JWKS from the other -- ~half of all auth fails, intermittently,
+# reported as an authentication error that says nothing about signing keys.
+# Config.Validate refuses to boot without it unless the issuer is a loopback
+# host (one process, no possible second replica) or the operator explicitly
+# sets MEMQL_IDENTITY_ALLOW_EPHEMERAL_KEY=true. Locally,
+# scripts/k3d/seed-secrets.sh generates and preserves it; in staging/prod it
+# comes from the out-of-band memql-secrets create / ESO. `make status` asserts
+# every replica publishes the same keyset.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -99,10 +113,27 @@ spec:
             - { name: MEMQL_NODE_SERVICE_ADDRESS, value: ":50061" }
             - { name: MEMQL_GRPC_ADDRESS, value: ":50051" }
             - { name: SERVER_ADDRESS, value: "0.0.0.0:8085" }
-            # Signing key (#550): MEMQL_IDENTITY_SIGNING_KEY_B64 rides the sealed
-            # genesis envelope, so every replica derives the SAME Ed25519
+            # Signing key (#550): MEMQL_IDENTITY_SIGNING_KEY_B64 arrives via the
+            # memql-secrets envFrom above (as a key on the Secret, or inside the
+            # sealed genesis envelope), so every replica derives the SAME Ed25519
             # key + kid + JWKS. No on-disk MEMQL_IDENTITY_KEY_DIR / RWO PVC ->
-            # identity scales to >=2 replicas. (Rotate by re-sealing + roll.)
+            # identity scales to >=2 replicas.
+            #
+            # ROTATION (memql#3381): impossible from inside the running system
+            # in this mode -- KeyManager.RotationSupported() is false, so the
+            # 90-day MEMQL_IDENTITY_KEY_ROTATION_DAYS scheduler is INERT here
+            # and there is no rotate control anywhere. Rotate by re-sealing a
+            # new seed and rolling. That path never populates the JWKS overlap
+            # window, so it is a HARD SWAP: every unexpired access token, mesh
+            # node token, service-account JWT and voice-agent JWT dies at once
+            # (opaque credentials -- refresh tokens, PATs, worker tokens --
+            # survive). Follow the procedure and the blast-radius table in
+            # docs/public/operate/auth/identity-service.md#rotating-the-signing-key.
+            #
+            # Seal MEMQL_IDENTITY_SIGNING_KEY_CREATED_AT (RFC3339, the date the
+            # seed was minted) alongside the seed and re-stamp it on every
+            # re-seal. A bare seed carries no date, so without it key age reads
+            # as pod uptime and the overdue-rotation alert can never fire.
             # Internal TLS: serve https + trust the cluster CA.
             - { name: MEMQL_HTTP_TLS_CERT_FILE, value: "/etc/memql/tls/tls.crt" }
             - { name: MEMQL_HTTP_TLS_KEY_FILE, value: "/etc/memql/tls/tls.key" }
@@ -116,6 +147,22 @@ spec:
             - { name: MEMQL_IDENTITY_BASE_URL, value: "https://identity.staging.example.com" }
             - { name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER, value: "https://identity.staging.example.com" }
             - { name: MEMQL_IDENTITY_BOOTSTRAP_DOMAIN, value: "staging.example.com" }
+            # The dial address this cluster ADVERTISES to clients in
+            # GET /.well-known/memql-config.json (memql#3399). It is the FRONT
+            # DOOR -- cockpit.<domain>:443, the one host whose ingress carries
+            # gRPC to the bff -- and emphatically not identity.<domain>, which
+            # serves HTTP (JWKS, /oauth/token, the web UI) and no MemqlService.
+            #
+            # DECLARED HERE, IN BASE, ON PURPOSE. Without it the handler falls
+            # back to deriving the identity host, so every environment would
+            # advertise the wrong host and be correct only where an operator
+            # happened to set the env var by hand -- which is exactly how
+            # memql#3399 shipped. A container env entry also WINS over the
+            # genesis envelope (genesis autoload is set-if-absent), so a stale
+            # value in an operator's sealed envelope can no longer reach the
+            # wire. Same placeholder convention as the URLs above: a
+            # deployment's overlay patches the real host.
+            - { name: MEMQL_DISCOVERY_GRPC_ENDPOINT, value: "cockpit.staging.example.com:443" }
             # CORS + OAuth redirect for the product SPA host (deployment-specific placeholder).
             # The ops-edge host is listed alongside it because the memQL Portal
             # (memql#3315) is itself a browser client of this identity service:

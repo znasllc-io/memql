@@ -33,8 +33,11 @@ const IDENTITY_FIELD: keyof ClusterConfig = "name";
 // Split by VALUE TYPE, not for tidiness: the two halves have genuinely
 // different write semantics. A string field distinguishes "not supplied"
 // (undefined -- leave whatever is on disk alone) from "explicitly cleared"
-// ("" -- delete the key), and that distinction is what makes clearing the PAT
-// input actually revoke the stored token rather than only appear to.
+// ("" -- delete the key), and that distinction is what makes clearing the
+// token input actually revoke the stored credential rather than only appear
+// to. It is also what lets the credential resolver DELETE a plaintext refresh
+// token from this file once SecretStorage has taken custody of it
+// (memql#3385).
 //
 // A boolean has no third state to carry: false IS absent. The cockpit declares
 // this field `yaml:"local,omitempty"` (znasllc-io/memql-cockpit#332), so it
@@ -42,7 +45,15 @@ const IDENTITY_FIELD: keyof ClusterConfig = "name";
 // `local: false` back would make the two churn the file against each other on
 // every save. Writing the flag only when true is what makes the round trip
 // stable in both directions.
-type StringFieldKey = "name" | "displayName" | "domain" | "endpoint" | "issuer" | "clientId" | "pat";
+type StringFieldKey =
+  | "name"
+  | "displayName"
+  | "domain"
+  | "endpoint"
+  | "issuer"
+  | "clientId"
+  | "token"
+  | "refreshToken";
 type BooleanFieldKey = "local";
 
 const FIELD_MAP: ReadonlyArray<readonly [StringFieldKey, string]> = [
@@ -52,7 +63,13 @@ const FIELD_MAP: ReadonlyArray<readonly [StringFieldKey, string]> = [
   ["endpoint", "endpoint"],
   ["issuer", "issuer"],
   ["clientId", "client_id"],
-  ["pat", "pat"],
+  // `token`, not `pat`: the credential this extension dials with is an
+  // identity-issued JWT access token, and the old spelling advertised a class
+  // the bff structurally rejects (memql#3383). CONTRACT NOTE: the memQL
+  // Cockpit writes this same file, so its ClusterConfig carries the same
+  // rename.
+  ["token", "token"],
+  ["refreshToken", "refresh_token"],
 ];
 
 const BOOLEAN_FIELD_MAP: ReadonlyArray<readonly [BooleanFieldKey, string]> = [["local", "local"]];
@@ -183,7 +200,7 @@ function findByName(seq: YAMLSeq, name: string): YAMLMap | undefined {
 //   undefined -> the field was not supplied; whatever is on disk is left alone.
 //   ""        -> the field was explicitly CLEARED; the key is DELETED.
 // The distinction is not cosmetic. Treating "" as "not supplied" meant a user
-// who cleared the PAT input to revoke a token kept the old token on disk while
+// who cleared the token input to revoke a credential kept the old one on disk while
 // the UI showed the field empty -- "I removed my token from the extension" was
 // simply false.
 //
@@ -193,19 +210,30 @@ function findByName(seq: YAMLSeq, name: string): YAMLMap | undefined {
 // clear a value -- it orphans the whole node: `upsertCluster(f, {name: ""},
 // "local")` used to find "local", delete its `name` key, and leave an
 // unreachable, unselectable entry still holding that cluster's endpoint and
-// PAT. No caller has a use for it (the add/edit form validates the name box
+// token. No caller has a use for it (the add/edit form validates the name box
 // non-empty, so this is unreachable through the UI), and there is no
 // interpretation of an anonymous cluster that is better than a refusal, so an
 // empty name is rejected outright -- which means the delete branch below can
 // never see one.
+/**
+ * A partial write against one cluster entry, identified by `name`.
+ *
+ * Partial by TYPE and not only by convention, because the per-field semantics
+ * documented above already are: undefined means "not supplied, leave disk
+ * alone". A caller with one field to change -- the credential resolver writing
+ * back a refreshed access token (memql#3385) -- should not have to restate the
+ * endpoint to do it.
+ */
+export type ClusterUpdate = Partial<ClusterConfig> & { name: string };
+
 export async function upsertCluster(
   file: string,
-  cluster: ClusterConfig,
+  cluster: ClusterUpdate,
   originalName?: string,
 ): Promise<void> {
   if (cluster[IDENTITY_FIELD] === "") {
     throw new Error(
-      "a cluster name is required: an empty name would orphan the node's endpoint and PAT behind an entry nothing can resolve",
+      "a cluster name is required: an empty name would orphan the node's endpoint and token behind an entry nothing can resolve",
     );
   }
   const doc = await loadDocument(file);
@@ -276,7 +304,7 @@ export async function upsertCluster(
 // the SAME four-field form, and add has no originalName to pass. So a user who
 // typed an existing name into the add flow -- a plausible slip, since the add
 // form shows no existing names -- landed in upsertCluster's update branch, and
-// every field the add form left blank (the PAT they did not retype, the domain
+// every field the add form left blank (the token they did not retype, the domain
 // they skipped) arrived as "" and was DELETED off the real cluster. "I tried to
 // add a cluster" silently revoked the token on the one already there.
 //
@@ -290,7 +318,7 @@ export async function upsertCluster(
 // read-modify-write against the bytes on disk at write time (the cockpit
 // writes this file too), so no read is authoritative for longer than the call
 // that made it, and caching one would not make the check any less racy.
-export async function addCluster(file: string, cluster: ClusterConfig): Promise<void> {
+export async function addCluster(file: string, cluster: ClusterUpdate): Promise<void> {
   const existing = await readClustersFile(file);
   if (existing.clusters.some((c) => c.name === cluster.name)) {
     throw new Error(

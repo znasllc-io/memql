@@ -88,7 +88,7 @@ var embedInventory = map[string]int{
 	"github.com/znasllc-io/memql/component/architecture/embedded": 1,   // topology.model.json
 	"github.com/znasllc-io/memql/component/database":              28,  // memory-nodes/migrations/*.sql
 	"github.com/znasllc-io/memql/component/genesis":               1,   // manifest.yaml
-	"github.com/znasllc-io/memql/component/identity/web":          10,  // static/* legal/*.md (admin-settings-branding.js went with the settings page, memql#3324)
+	"github.com/znasllc-io/memql/component/identity/web":          13,  // static/* legal/*.md (admin-settings-branding.js went with the settings page, memql#3324; +passkey-login.js memql#3407; +me-passkeys.js memql#3409; +enroll.js memql#3408)
 	"github.com/znasllc-io/memql/component/mcp":                   1,   // icon.svg
 	"github.com/znasllc-io/memql/docs":                            1,   // public/language/memql.md
 	"github.com/znasllc-io/memql/dsl":                             231, // all:<domain> x36 (+campaigns, +integrations -- memql#3323; +portalviews -- memql#3320; +install concepts+actions -- memql#3371)
@@ -96,6 +96,10 @@ var embedInventory = map[string]int{
 	"github.com/znasllc-io/memql/examples/referencepack":          5,   // all:dsl
 	"github.com/znasllc-io/memql/integrations":                    1,   // *.json
 	"github.com/znasllc-io/memql/scripts/install/graph":           2,   // install.json uninstall.json (memql#3369)
+	// SPIKE, memql#3405. Delete this line together with the directory once the
+	// .localhost RP ID findings are recorded -- the entry existing is what makes
+	// that deletion fail loudly here instead of passing silently.
+	"github.com/znasllc-io/memql/scripts/spikes/webauthn-rpid": 1, // index.html
 }
 
 // embedModulePath is the selector root. Spelled as the module pattern, not

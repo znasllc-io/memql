@@ -27,6 +27,37 @@ func rejectReason(err error) string {
 	return metrics.ReasonInvalidToken
 }
 
+// GenericRejectMessage is what a caller is told when its token failed to
+// verify for any reason the server is not willing to be specific about
+// (bad signature, wrong issuer/audience, past exp). Deliberately vague:
+// distinguishing those from each other tells an attacker which half of a
+// forged token to fix.
+const GenericRejectMessage = "invalid or expired token"
+
+// RejectMessage maps a VerifyBearer failure to the message the caller
+// receives on the wire.
+//
+// Unknown-kid is the ONE case that gets a specific answer (memql#3400).
+// It is not an attacker signal -- the kid is public, published in the
+// JWKS this node just fetched -- and it is not a property of the token at
+// all: the token is well-formed and inside its validity window, and the
+// server is the half that is misconfigured. Answering it with
+// GenericRejectMessage sent operators to hunt token lifetime (there is an
+// open bug about exactly that, memql#3385) while the real fault was two
+// identity replicas each minting their own signing key. Every other
+// failure keeps the deliberately-vague message.
+func RejectMessage(err error) string {
+	if !errors.Is(err, ErrUnknownKID) {
+		return GenericRejectMessage
+	}
+	// err.Error() is `verifier: unknown kid "<kid>"` -- carrying the kid
+	// through is what makes the message diagnosable at a glance, and it is
+	// already public in the JWKS document.
+	return err.Error() + " -- this node's JWKS carries no key with that id, so the signature cannot be checked here. " +
+		"The token is well formed and still inside its validity window; the identity replica that minted it is publishing a " +
+		"different keyset. Every identity replica must derive its key from one shared MEMQL_IDENTITY_SIGNING_KEY_B64 (memql#3400)."
+}
+
 // EpochResolver looks up the v1:identity:user.revocationEpoch for the
 // given user. Implementations should be fast + cache-friendly --
 // CurrentEpoch is called on every authenticated stream open AND on
@@ -122,7 +153,7 @@ func StreamInterceptorWithEpoch(v *Verifier, logger *slog.Logger, epoch *EpochCh
 				logger.Warn("grpc auth: token verification failed", "error", err, "method", info.FullMethod)
 			}
 			metrics.AuthReject(metrics.SurfaceGRPC, rejectReason(err), metrics.CodeUnauthenticated)
-			return status.Error(codes.Unauthenticated, "invalid or expired token")
+			return status.Error(codes.Unauthenticated, RejectMessage(err))
 		}
 		if epoch != nil && epoch.Resolver != nil && vc.Source == SourceJWT {
 			cur, eerr := epoch.Resolver.CurrentEpoch(ctx, vc.UserId)

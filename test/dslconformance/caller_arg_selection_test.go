@@ -207,6 +207,20 @@ var callerArgSelectionExemptions = map[string]string{
 	"identity/mutations.memql revokeWorkerTokenIdentity": "revokes any user's worker token.",
 	"identity/mutations.memql revokeBadgeIdentity":       "revokes any user's badge identity.",
 	"identity/mutations.memql revokeNodeTokenIdentity":   "revokes any node token identity.",
+	// memql#3409, the passkey management pair. Both select a passkey row by
+	// caller-supplied id, so this detector counts them, and both are LESS
+	// reachable than every other entry in this block: `update()` read-merges
+	// the prior row before validation, so the merged payload carries
+	// identityType="passkey", and passkey is in the memql#2513
+	// machine-credential set -- a non-system actor writing that row is
+	// rejected outright. A raw wire call fails on that guard rather than on
+	// the handler being the only caller. They are listed here rather than
+	// deleted from the detector's reach because the SHAPE is genuinely the
+	// shape this gate names, and the eventual fix is the same one the block
+	// above wants: @rowAuthz(owner="userId") on v1:identity:identity
+	// (memql#3173).
+	"identity/mutations.memql revokePasskeyIdentity": "revokes a passkey by id; unreachable by a wire caller (the memql#2513 credential-actor guard rejects a non-system write to a passkey row), and its one caller resolves the target from the caller's own self-scoped list (memql#3409).",
+	"identity/mutations.memql renamePasskeyIdentity": "relabels a passkey by id; same reachability argument as revokePasskeyIdentity, and the label is the only editable field on the row (memql#3409).",
 	// memql#3322. The same shape as the four revokes above, gated the same
 	// way: component/grpc/account_token_handlers.go resolves the row
 	// through accountTokenById (userId==actor.userId) AS THE CALLER and
@@ -222,8 +236,22 @@ var callerArgSelectionExemptions = map[string]string{
 	"identity/mutations.memql revokeAccountTokenIdentity": "revokes any user's account token; ownership is checked in the handler and the credential authorizes nothing (memql#3322).",
 	"identity/mutations.memql bumpPATLastUsedAt":          "stamps last-used on any PAT; server-side token path.",
 	"identity/mutations.memql touchBadgeLastUsed":         "MISNAMED, and sharper than its name: it takes `credentials object!` and spreads it, so it overwrites the ENTIRE credentials block -- keyHash included -- of an arbitrary identity from caller input. Badge-credential substitution, not a timestamp stamp.",
-	"identity/mutations.memql stampNodeTokenBootstrap":    "stamps bootstrap state on any node token identity; server-side node path.",
-	"identity/queries.memql patIdentityById":              "returns a PAT identity row by id; server-side token verification path.",
+	// memql#3407. Same family and the same gate as touchBadgeLastUsed: a
+	// wholesale credentials merge on a caller-named identity row, reachable
+	// only under a system actor because the memql#2513 credential-actor
+	// guard fires on the read-merged payload (identityType=="passkey") and
+	// rejects every other actor. Its named-arg surface is NARROWER than its
+	// badge sibling's `credentials object!` splat -- validateMutationCallerArgs
+	// can see each field -- but the shape it could forge if that guard ever
+	// stopped firing is the sharpest in this map: {credentialId, publicKey}
+	// from caller input on a victim's row binds the attacker's own
+	// authenticator to the victim's account, and the login ceremony would
+	// then verify a perfectly genuine signature. Fixed for real by
+	// @rowAuthz(owner="userId") on v1:identity:identity (memql#3173), which
+	// is the same fix the five revokes above want.
+	"identity/mutations.memql recordPasskeyAssertion":  "wholesale credentials merge on a caller-named passkey identity; gated in practice by the memql#2513 credential-actor guard (system actor only), tracked for real by memql#3173.",
+	"identity/mutations.memql stampNodeTokenBootstrap": "stamps bootstrap state on any node token identity; server-side node path.",
+	"identity/queries.memql patIdentityById":           "returns a PAT identity row by id; server-side token verification path.",
 	// nodeTokenIdentityById's entry is GONE, and deliberately not replaced:
 	// memql#2987 moved it to @serverOnly, so this detector no longer reaches
 	// it and a lingering entry would fail the stale-exemption check. Its note

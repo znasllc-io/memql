@@ -200,6 +200,28 @@ naming what is missing. Honest, and it reserves the slot.
 
 ### D7 — The wizard is the setup; first sign-in comes from the pod logs
 
+> **SUPERSEDED IN PART (memql#3401, shipped in memql#3408).** First sign-in is
+> now the **enrolment link**, and the pod-log magic-link read is retained as the
+> documented fallback beneath it.
+>
+> The wizard's `enrolmentLink` graph step runs
+> `memql enrolment-token mint --user-email <owner>` inside the identity pod
+> (`scripts/install/enrolment-link.sh`) and puts a single-use
+> `https://identity.<domain>/enroll?code=mql_enr_<...>` URL on
+> `result.enrolUrl`; `editors/vscode/src/install/enrolment.ts` opens it, and the
+> operator ends the install holding a **passkey** rather than a link they have
+> to keep. The token authorizes exactly one action -- register a passkey as that
+> user -- is single-use, and defaults to a 15-minute TTL.
+>
+> The `magicLink` step below still runs, and `enrolmentLink` depends on it, so
+> the log-scraped link remains available when the enrolment link cannot be
+> minted or opened. Everything the rest of this decision says about unattended
+> bootstrap is unchanged.
+>
+> Which path applies when, plus what recovery looks like on a cluster with no
+> mail and why a passkey does not survive a reinstall:
+> [docs/public/operate/auth/sign-in-paths.md](../../public/operate/auth/sign-in-paths.md).
+
 `component/identity/config.go`'s `BootstrapConfig` already supports unattended
 bootstrap: when `MEMQL_IDENTITY_BOOTSTRAP_DOMAIN`, `_OWNER_EMAIL`,
 `_OWNER_FIRST_NAME`, `_OWNER_LAST_NAME`, and `_REGISTRATION_MODE` are all set,

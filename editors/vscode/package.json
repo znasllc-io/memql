@@ -63,7 +63,7 @@
           "type": "string",
           "default": "",
           "scope": "machine",
-          "description": "Absolute path to the memql-lsp binary. When empty, the extension uses the bundled platform binary if present, otherwise 'memql-lsp' on PATH. For security this is a machine/user-scoped setting only -- it is deliberately not configurable per workspace, so an untrusted folder cannot redirect the extension to an arbitrary executable."
+          "description": "Absolute path to the memql-lsp binary. When empty, the extension uses the bundled platform binary if present, otherwise 'memql-lsp' on PATH. Read from your USER settings only: a value in workspace settings (.vscode/settings.json) is refused and a warning says so, because a workspace-supplied path would let an opened folder point the extension at any executable on your machine. When no binary resolves, only language features are lost -- the Clusters, Concepts and Runs views do not use the language server."
         },
         "memql.lsp.trace.server": {
           "type": "string",
@@ -157,8 +157,21 @@
         "icon": "$(edit)"
       },
       {
+        "command": "memql.clusters.signIn",
+        "title": "memQL: Sign In",
+        "icon": "$(sign-in)"
+      },
+      {
+        "command": "memql.clusters.signOut",
+        "title": "memQL: Sign Out"
+      },
+      {
         "command": "memql.clusters.disconnect",
         "title": "memQL: Disconnect"
+      },
+      {
+        "command": "memql.clusters.signInWithCode",
+        "title": "memQL: Sign In With a Device Code"
       },
       {
         "command": "memql.cluster.open",
@@ -226,7 +239,19 @@
           "when": "isWorkspaceTrusted"
         },
         {
+          "command": "memql.clusters.signIn",
+          "when": "isWorkspaceTrusted"
+        },
+        {
+          "command": "memql.clusters.signOut",
+          "when": "isWorkspaceTrusted"
+        },
+        {
           "command": "memql.clusters.disconnect",
+          "when": "isWorkspaceTrusted"
+        },
+        {
+          "command": "memql.clusters.signInWithCode",
           "when": "isWorkspaceTrusted"
         },
         {
@@ -307,6 +332,16 @@
           "command": "memql.clusters.edit",
           "when": "view == memqlClusters && viewItem == memqlCluster",
           "group": "inline@2"
+        },
+        {
+          "command": "memql.clusters.signIn",
+          "when": "view == memqlClusters && viewItem == memqlCluster",
+          "group": "auth@1"
+        },
+        {
+          "command": "memql.clusters.signOut",
+          "when": "view == memqlClusters && viewItem == memqlCluster",
+          "group": "auth@2"
         },
         {
           "command": "memql.runs.execute",

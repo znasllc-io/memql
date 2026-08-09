@@ -1,0 +1,107 @@
+{
+  "$comment": [
+    "THE CONTRACT BETWEEN TWO REPOSITORY HALVES THAT NEVER IMPORT EACH OTHER.",
+    "",
+    "The identity service advertises a dial address in GET /.well-known/memql-config.json",
+    "(component/identity/discovery.go). Clients read that field and turn it into a",
+    "connection -- editors/vscode/src/connection/endpoint.ts lifts it to a /memql/ws URL.",
+    "Nothing in the build links the two, so for the whole life of memql#3399 the cluster",
+    "advertised 'https://bff.local.znas.io': a URL form the parser refuses outright, at a",
+    "host with no ingress. Both halves were individually tested and green.",
+    "",
+    "This file is the single statement both halves are tested against. 'advertised' is what",
+    "the identity handler must emit for the given configuration; 'webSocketUrl' is what the",
+    "extension's parser must derive from it. 'rejected' lists spellings the document must",
+    "NEVER publish -- the TS side proves the parser refuses them, the Go side proves the",
+    "handler cannot emit them.",
+    "",
+    "Read by component/identity/discovery_endpoint_contract_test.go (Go) and",
+    "editors/vscode/test/discoveryEndpointContract.test.ts (TypeScript). Adding a case here",
+    "obliges both."
+  ],
+  "cases": [
+    {
+      "name": "the deployed local value: the cockpit front door, explicit 443",
+      "configured": "cockpit.local.znas.io:443",
+      "identityUrl": "https://identity.local.znas.io",
+      "advertised": "cockpit.local.znas.io:443",
+      "webSocketUrl": "wss://cockpit.local.znas.io/memql/ws"
+    },
+    {
+      "name": "the deployed cloud value: base's placeholder front door, patched per overlay",
+      "configured": "cockpit.staging.example.com:443",
+      "identityUrl": "https://identity.staging.example.com",
+      "advertised": "cockpit.staging.example.com:443",
+      "webSocketUrl": "wss://cockpit.staging.example.com/memql/ws"
+    },
+    {
+      "name": "memql#3399 regression: a scheme-ful operator value is normalized, never republished as a URL",
+      "configured": "https://bff.local.znas.io",
+      "identityUrl": "https://identity.local.znas.io",
+      "advertised": "bff.local.znas.io:443",
+      "webSocketUrl": "wss://bff.local.znas.io/memql/ws"
+    },
+    {
+      "name": "scheme plus an explicit non-default port keeps the port",
+      "configured": "https://cockpit.example.com:8443",
+      "identityUrl": "https://identity.example.com",
+      "advertised": "cockpit.example.com:8443",
+      "webSocketUrl": "wss://cockpit.example.com:8443/memql/ws"
+    },
+    {
+      "name": "a plaintext scheme survives as a plaintext dial address",
+      "configured": "http://localhost:50050",
+      "identityUrl": "http://localhost:8081",
+      "advertised": "localhost:50050",
+      "webSocketUrl": "ws://localhost:50050/memql/ws"
+    },
+    {
+      "name": "a trailing path is not part of a dial address",
+      "configured": "https://cockpit.example.com/",
+      "identityUrl": "https://identity.example.com",
+      "advertised": "cockpit.example.com:443",
+      "webSocketUrl": "wss://cockpit.example.com/memql/ws"
+    },
+    {
+      "name": "a bare host gets the front door's port",
+      "configured": "cockpit.example.com",
+      "identityUrl": "https://identity.example.com",
+      "advertised": "cockpit.example.com:443",
+      "webSocketUrl": "wss://cockpit.example.com/memql/ws"
+    },
+    {
+      "name": "a bare loopback host gets the plaintext dev port",
+      "configured": "localhost",
+      "identityUrl": "http://localhost:8081",
+      "advertised": "localhost:50050",
+      "webSocketUrl": "ws://localhost:50050/memql/ws"
+    },
+    {
+      "name": "no override, TLS identity origin: the identity host at 443",
+      "configured": "",
+      "identityUrl": "https://identity.acme.com",
+      "advertised": "identity.acme.com:443",
+      "webSocketUrl": "wss://identity.acme.com/memql/ws"
+    },
+    {
+      "name": "no override, loopback dev origin: the HTTP port is NOT the gRPC port",
+      "configured": "",
+      "identityUrl": "http://localhost:8081",
+      "advertised": "localhost:50050",
+      "webSocketUrl": "ws://localhost:50050/memql/ws"
+    },
+    {
+      "name": "an unusable override falls back to the derived default rather than publishing garbage",
+      "configured": "://",
+      "identityUrl": "https://identity.acme.com",
+      "advertised": "identity.acme.com:443",
+      "webSocketUrl": "wss://identity.acme.com/memql/ws"
+    }
+  ],
+  "rejected": [
+    "https://bff.local.znas.io",
+    "https://cockpit.local.znas.io:443",
+    "http://localhost:8081",
+    "grpc://cockpit.example.com:443"
+  ]
+}

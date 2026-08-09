@@ -9,7 +9,8 @@ owner: znas
 
 # memQL Deployment Console -- Operator Guide
 
-The Deployment Console is the admin/owner-only UI for driving the
+The Deployment Console is the role-gated UI (see
+[the role matrix](#the-role-matrix)) for driving the
 [deployment-v2](../../internal/design/deployment-v2.md) machinery -- "what is
 deployed, is it healthy, and how do I deploy / promote / roll back" --
 from a UI instead of a terminal, for both **staging** and
@@ -73,9 +74,10 @@ the VS Code extension and the memQL portal drive the console.
 
 This is a transport, not a second implementation. The stream handler
 calls the identical service methods the unary path calls, so **the role
-gate and the audit write are one code path** -- a parity test in
-`component/grpc` drives the real service through both transports and
-fails if any gated RPC answers differently. Denials arrive on the
+gate and the audit write are one code path** -- the parity test in
+`component/deploycontrol/stream_parity_test.go` drives the real service
+through both transports, for every RPC against every role, and fails if
+either path answers differently. Denials arrive on the
 stream as an ordinary `QueryError` carrying the gRPC status code
 verbatim, so a caller below the role floor sees `PermissionDenied` on
 either transport. Actions return their audit event id identically.
@@ -117,12 +119,49 @@ Deployment **history** is deliberately not bridged: `v1:cluster:deployment`
 rows stay readable as ordinary concept rows through the normal query
 surface.
 
-## Owner/admin gating
+## The role matrix
 
-Every read and every action requires the cluster role **owner** or
-**admin** (the same role model as the rest of the identity admin app;
-see [access-model.md](auth/access-model.md)). `writer` and `reader`
-roles get nothing:
+The deploy-control API enforces three role floors, server-side, on every
+surface. This table is authoritative: it is read off the gate helpers in
+`component/deploycontrol/service.go` (`authorize` / `authorizeDeploy` /
+`authorizeOwner`), and the parity test in
+`component/deploycontrol/stream_parity_test.go` fails the build if the
+streamed path and the unary path ever answer a role differently.
+
+| Capability | RPC | Required role |
+|------------|-----|---------------|
+| **View deployment status** | `GetDeploymentStatus` | owner, admin |
+| Suggest the next version | `SuggestNextVersion` | developer, admin, owner |
+| Cut a version | `CutVersion` | developer, admin, owner |
+| Deploy a cut deployment record | `Deploy` | developer, admin, owner |
+| Deploy to staging | `DeployStaging` | owner, admin |
+| Promote staging to prod | `Promote` | owner, admin |
+| Revert an overlay commit | `Rollback` | owner, admin |
+| Rollout promote / abort | `RolloutAction` | owner, admin |
+| Roll back to a prior deployment | `RollbackDeployment` | **owner only -- not even admin** |
+
+`writer` and `reader` get nothing on this surface. Every RPC refuses
+them with `PermissionDenied` and writes a blocked audit event. So does an
+unauthenticated caller, with `Unauthenticated`. The role model itself is
+the cluster-wide one described in
+[access-model.md](auth/access-model.md).
+
+### Reading status is owner/admin, deliberately (memql#3332)
+
+An earlier version of this matrix said any role could view. That was
+never what the code did. `GetDeploymentStatus` has been gated to
+owner/admin since the service shipped (#728), and memql#3311 kept that
+gate when it bridged the service onto `MemqlService.Stream` rather than
+loosening a read gate on a deploy-control surface. memql#3332 resolved
+the discrepancy in favour of the code: **the shipped gate is the
+contract, and this table now states it.**
+
+The read is admin-tier because of what it returns -- the version and
+image digests in force in an environment, Argo CD sync and health, the
+live Rollouts, and the deploy gate's legs. That is the cluster's release
+posture, not a status badge.
+
+### Enforcement per surface
 
 - **Identity service:** `/admin/deployments` sits behind the same
   `requireAdmin` middleware every gated route under `/admin/*` uses. A
@@ -133,12 +172,36 @@ roles get nothing:
 - **Cockpit:** the Topology view resolves your cluster role; non-admins
   see a single `Deployments: owner/admin only` line, the deploy-control
   read is never issued, and the action menu does not open.
-- **API:** the deploy-control read and write RPCs independently enforce
-  owner/admin server-side, so the gate holds even for a direct API
-  caller -- a non-admin gets `PermissionDenied`. This is one enforcement
-  point, not one per surface: the WebSocket bridge (memql#3311) calls the
-  same service methods, so it cannot admit anyone the unary service
-  refuses.
+- **API:** every deploy-control RPC enforces its floor server-side, so
+  the gate holds for a direct API caller -- below the floor you get
+  `PermissionDenied`. This is one enforcement point, not one per
+  surface: the WebSocket bridge (memql#3311) calls the same service
+  methods, so it cannot admit anyone the unary service refuses.
+
+### What a non-admin sees: a deliberately split surface
+
+A deployment surface reads from two different places, and only one of
+them is deploy-control. This is by design, and it is why a
+developer/writer/reader sees a partly-populated page rather than an
+error page or an empty one:
+
+| What renders | Where it comes from | Who can see it |
+|--------------|---------------------|----------------|
+| Node topology | `v1:cluster:node` rows | any role |
+| Deployment history | `v1:cluster:deployment` rows | any role |
+| Per-tier composition of a deployment | `v1:cluster:deploymentNodeSpec` rows | any role |
+| Per-env status block (version, digests, Argo CD, Rollouts, gate) | `GetDeploymentStatus` | owner, admin |
+| Next-version preview | `SuggestNextVersion` | developer, admin, owner |
+
+Concept rows go through the normal query surface and never touch the
+deploy-control gate; the status block and the version preview do. So a
+developer opening the VS Code Cluster tab or the portal's Deployments
+view gets topology, history and per-tier composition as usual, with the
+status block replaced by an explanation naming the role required. That
+explanation is the designed behaviour of the surface, not a failure of
+it -- nothing is broken, and re-reading will not fix it. To see the
+status block, ask a cluster owner or admin for the role, or read it from
+a surface you are admitted to.
 
 ## Reading the console
 
@@ -167,8 +230,8 @@ Reads are not audited per call.
 
 ## Performing actions
 
-Four actions, all owner/admin-gated, all audited, none of which bypass
-Git or the reconciler:
+Four actions, each gated by [the role matrix](#the-role-matrix), all
+audited, none of which bypass Git or the reconciler:
 
 | Action | What it does | Confirmation |
 |--------|--------------|--------------|
@@ -286,5 +349,8 @@ promote failure in `failed`.
   cockpit#144/#145).
 - Deployment-v2 design + epic: [`docs/internal/design/deployment-v2.md`](../../internal/design/deployment-v2.md), #697.
 - Supervised live cutovers: #712.
-- Owner/admin role model: [`docs/public/operate/auth/access-model.md`](auth/access-model.md).
+- Cluster role model: [`docs/public/operate/auth/access-model.md`](auth/access-model.md).
+- Deploy-control stream bridge: znasllc-io/memql#3311.
+- Role-matrix reconciliation (the read gate is owner/admin, the code is
+  authoritative): znasllc-io/memql#3332.
 - Machine identity the gate uses: [`docs/public/operate/auth/service-account-jwt.md`](auth/service-account-jwt.md), #691.

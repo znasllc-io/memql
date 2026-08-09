@@ -213,7 +213,7 @@ function errorOutcome(id: DeployActionId, err: unknown): DeployOutcome {
     }
     if (err.code === CODE_UNAUTHENTICATED) {
       return unreachable(
-        `ERROR: ${spec.label} was rejected as unauthenticated -- the connection carries no resolvable actor. Check the cluster's PAT.`,
+        `ERROR: ${spec.label} was rejected as unauthenticated -- the connection carries no resolvable actor. Check the cluster's access token (an expired one renews on reconnect; a PAT never authenticates here).`,
       );
     }
     // The catch-all for a code with no tailored sentence. It names the action
@@ -233,9 +233,9 @@ function unreachable(line: string): DeployOutcome {
 /** Describe a failed READ, which never has an audit id (reads are unaudited). */
 function describeReadFailure(what: string, err: unknown): string {
   if (err instanceof DeployControlError && err.isPermissionDenied) {
-    // Spelled out because it is the discrepancy an operator will hit first:
-    // the read gate is owner/admin, so a developer sees topology and history
-    // and is refused this one section.
+    // Spelled out because it is the designed split an operator meets first
+    // (memql#3332): the read gate is owner/admin, so a developer sees topology
+    // and history and is refused this one section. Nothing is broken.
     return `${what} requires the owner or admin cluster role. Topology and deployment history above are ordinary concept rows and are unaffected.`;
   }
   if (err instanceof DeployControlError && err.code === CODE_UNIMPLEMENTED) {

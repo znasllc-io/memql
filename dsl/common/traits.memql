@@ -338,6 +338,38 @@ trait identityIsBadge {
   return identityType=="badge"
 }
 
+// ---- identityIsMagicLink ----
+//
+// Concept-targeted trait for v1:identity:identity rows whose
+// identityType field is "magic_link". One row per (user, verified
+// email), stamped by the magic-link consume path.
+//
+// What makes this worth a trait of its own rather than an inline
+// comparison: it is the row that answers "can this person still get
+// in by email". The passkey management surface (memql#3409) counts
+// it before it lets a user revoke their last authenticator, so a
+// revocation that would leave no sign-in route is warned about
+// rather than silently performed.
+
+/// Matches v1:identity:identity rows with identityType=='magic_link'.
+trait identityIsMagicLink {
+  return identityType=="magic_link"
+}
+
+// ---- identityIsPasskey ----
+//
+// Concept-targeted trait for v1:identity:identity rows whose
+// identityType field is "passkey" -- a registered WebAuthn
+// discoverable credential (memql#3406). The registration ceremony
+// looks rows up by credentials.credentialId to reject a duplicate
+// enrolment, and the login ceremony (memql#3407) resolves a
+// usernameless assertion through the same key.
+
+/// Matches v1:identity:identity rows with identityType=='passkey'.
+trait identityIsPasskey {
+  return identityType=="passkey"
+}
+
 // ---- isDeletionScheduled ----
 //
 // Matches records that carry a non-empty deletionScheduledAt field.

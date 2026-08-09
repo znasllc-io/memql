@@ -42,7 +42,9 @@ import * as vscode from "vscode";
 import { WebSocket as NodeWebSocket } from "ws";
 
 import { defaultClustersPath } from "../src/clusters/file.js";
+import { ClusterPresence, defaultEndpointProbe } from "../src/clusters/presence.js";
 import { ConnectionManager } from "../src/connection/manager.js";
+import { showAddClusterMenu } from "../src/extension.js";
 import type { AutomationTarget, RunTarget } from "../src/constructs/runnable.js";
 import { StepTraceModel } from "../src/state/stepTrace.js";
 import { AutomationRunPanel, StepTracePanel } from "../src/webview/automationPanel.js";
@@ -430,6 +432,265 @@ smoke("every webview surface opens without throwing", async () => {
       entry.dispose();
     }
   }
+});
+
+// -----------------------------------------------------------------------------
+// Sign-in (memql#3403)
+// -----------------------------------------------------------------------------
+
+// The manifest half. "every command the manifest contributes is registered"
+// above already proves the handlers exist; what it cannot see is whether an
+// operator has any way to REACH them. A command contributed with no palette
+// entry and no menu entry is registered, passes that case, and is invisible.
+smoke("sign-in and sign-out are reachable from the palette and the Clusters view", async () => {
+  const ext = extension();
+  await ext.activate();
+
+  const contributes = (
+    ext.packageJSON as {
+      contributes?: {
+        menus?: {
+          commandPalette?: { command: string; when?: string }[];
+          "view/item/context"?: { command: string; when?: string }[];
+        };
+      };
+    }
+  ).contributes;
+
+  const palette = contributes?.menus?.commandPalette ?? [];
+  const itemContext = contributes?.menus?.["view/item/context"] ?? [];
+  assert.ok(palette.length > 0 && itemContext.length > 0, "the menus contribution shape changed");
+
+  for (const command of ["memql.clusters.signIn", "memql.clusters.signOut"]) {
+    const inPalette = palette.find((entry) => entry.command === command);
+    assert.ok(
+      inPalette !== undefined,
+      `${command} is not in contributes.menus.commandPalette, so it never appears in the palette`
+    );
+    // Every runtime command lives behind the trust gate, because
+    // registerRuntimeSurface -- which registers them -- only runs in a trusted
+    // window. A palette entry without the clause offers a command that is not
+    // there.
+    assert.equal(
+      inPalette.when,
+      "isWorkspaceTrusted",
+      `${command}'s palette entry must carry the trust clause the runtime surface is gated on`
+    );
+
+    const inMenu = itemContext.find(
+      (entry) =>
+        entry.command === command && (entry.when ?? "").includes("viewItem == memqlCluster")
+    );
+    assert.ok(
+      inMenu !== undefined,
+      `${command} is not contributed to the Clusters view's item context menu, so right-clicking a cluster does not offer it`
+    );
+  }
+
+  info("sign-in and sign-out are contributed to both surfaces");
+});
+
+// The handler half, driven through the workbench's command registry rather than
+// called directly -- which is the only way to observe that the command
+// RESOLVES. Two things can only fail in a host: `withProgress` and the
+// `vscode.env` capabilities the flow binds. A handler that parked on a modal,
+// or threw reaching for a member that does not exist outside an editor, hangs
+// or rejects here and nowhere in the fast lane.
+//
+// The fixture cluster deliberately names NO identity service (no `issuer`, no
+// `domain`, and an endpoint with no `cockpit.` prefix to imply one), so the
+// flow refuses with kind `misconfigured` before a port is bound or a browser is
+// opened. That is what makes this case safe to run unattended: no network, no
+// browser, and nothing persisted.
+smoke("the sign-in command runs to completion in a real host", async () => {
+  await extension().activate();
+
+  const node = {
+    cluster: { name: "smoke-no-issuer", endpoint: "10.0.0.4:50051" },
+    selected: false,
+  };
+
+  // executeCommand resolves with the handler's return value and REJECTS if it
+  // threw, so awaiting it is the assertion. A 20s ceiling turns a handler that
+  // parked on a dialog into a failure rather than a hung lane.
+  await Promise.race([
+    vscode.commands.executeCommand("memql.clusters.signIn", node),
+    new Promise((_resolve, reject) =>
+      setTimeout(
+        () =>
+          reject(
+            new Error(
+              "memql.clusters.signIn did not resolve within 20s -- the handler is parked on something (an awaited message box, or a flow that opened a listener it should not have)"
+            )
+          ),
+        20_000
+      )
+    ),
+  ]);
+
+  // Nothing was written. A cluster the flow refused before it started must not
+  // acquire a client_id, a token, or an entry of its own.
+  const clustersPath = defaultClustersPath();
+  const raw = fs.existsSync(clustersPath) ? fs.readFileSync(clustersPath, "utf8") : "";
+  assert.ok(
+    !raw.includes("smoke-no-issuer"),
+    `a refused sign-in wrote to ${clustersPath}:\n${raw}`
+  );
+
+  info("sign-in refused a cluster with no identity service without opening anything");
+});
+
+// Sign-out is the other side of the same wiring, and it is the half that
+// actually TOUCHES both stores: SecretStorage (which exists only in a host) and
+// the shared clusters.yaml.
+smoke("the sign-out command clears the stored credential", async () => {
+  await extension().activate();
+
+  const clustersPath = defaultClustersPath();
+  fs.writeFileSync(
+    clustersPath,
+    ["clusters:", "  - name: smoke-signout", "    endpoint: 10.0.0.4:50051", "    token: header.payload.signature", ""].join(
+      "\n"
+    ),
+    "utf8"
+  );
+
+  const node = { cluster: { name: "smoke-signout", endpoint: "10.0.0.4:50051" }, selected: false };
+  await vscode.commands.executeCommand("memql.clusters.signOut", node);
+
+  const raw = fs.readFileSync(clustersPath, "utf8");
+  assert.ok(
+    raw.includes("smoke-signout"),
+    `sign-out removed the cluster itself, not only its credential:\n${raw}`
+  );
+  assert.ok(
+    !raw.includes("header.payload.signature"),
+    `sign-out left the access token in ${clustersPath}:\n${raw}`
+  );
+
+  info("sign-out cleared the token and left the cluster entry intact");
+});
+
+// -----------------------------------------------------------------------------
+// The "+" menu (memql#3412)
+// -----------------------------------------------------------------------------
+
+// WHAT ONLY A HOST CAN SAY ABOUT THIS MENU. Which items a verdict produces is
+// decided in a pure module and asserted in the fast lane
+// (test/clusterPresence.test.ts). What that lane structurally cannot reach is
+// whether the workbench actually renders the quick pick, whether the promise
+// it returns settles when an item is accepted, and -- the whole point of the
+// single-item rule -- whether the healthy case really shows no dialog at all.
+// A picker that opened and waited there would be indistinguishable from a
+// correct return value in a unit test, and would hang the button in practice.
+
+smoke("the + menu shows no picker when a healthy local cluster is already here", async () => {
+  await extension().activate();
+
+  // Nothing accepts, cancels or dismisses anything here. If a quick pick were
+  // shown, this promise would still be waiting when the deadline fires.
+  const settled = await Promise.race([
+    showAddClusterMenu("installed-healthy"),
+    new Promise<"pending">((resolve) => setTimeout(() => resolve("pending"), 2_000)),
+  ]);
+  assert.equal(
+    settled,
+    "connect",
+    "installed-healthy must resolve straight to the connect path; a one-item quick pick asks the operator to confirm the absence of a decision (and this one never closed)"
+  );
+});
+
+// Every workbench command below is raced against a deadline. `waitFor` bounds
+// how long a condition may stay false, but it AWAITS its check -- so a command
+// that never resolves (a widget the workbench will not accept while the window
+// is unfocused, say) would hang the whole lane with no output at all, which is
+// the worst failure a CI can produce. A bounded command turns that into a
+// named assertion failure.
+async function withinDeadline<T>(what: string, work: Promise<T>, ms: number): Promise<T> {
+  const marker = Symbol("timeout");
+  const raced = await Promise.race([
+    work,
+    new Promise<typeof marker>((resolve) => setTimeout(() => resolve(marker), ms)),
+  ]);
+  if (raced === marker) {
+    throw new Error(`timed out after ${ms}ms waiting for ${what}`);
+  }
+  return raced as T;
+}
+
+smoke("the + menu renders a real quick pick and the installer is its first item", async () => {
+  await extension().activate();
+
+  let settled: string | undefined | "pending" = "pending";
+  const choice = showAddClusterMenu("absent").then((value) => {
+    settled = value;
+    return value;
+  });
+  // Swallow nothing, but do not let an unobserved rejection reach the host
+  // while the accept loop below is still running.
+  const observed = choice.catch(() => "pending" as const);
+
+  try {
+    // The quick pick preselects its first item, so accepting without moving is
+    // what asserts the ORDER the menu is built in -- install first, because it
+    // is the recommended action on a machine with no cluster. The widget takes
+    // a moment to appear and the accept command is a no-op until it has, so
+    // this retries rather than sleeping a guessed interval.
+    await waitFor(
+      "the + quick pick to accept its preselected item",
+      async () => {
+        if (settled !== "pending") return true;
+        await withinDeadline(
+          "workbench.action.acceptSelectedQuickOpenItem",
+          Promise.resolve(
+            vscode.commands.executeCommand("workbench.action.acceptSelectedQuickOpenItem")
+          ),
+          2_000
+        );
+        return settled !== "pending";
+      },
+      10_000,
+      250
+    );
+    assert.equal(await withinDeadline("the menu promise to settle", observed, 2_000), "install");
+  } finally {
+    // Whatever happened, do not leave a modal widget open for the cases below.
+    await withinDeadline(
+      "workbench.action.closeQuickOpen",
+      Promise.resolve(vscode.commands.executeCommand("workbench.action.closeQuickOpen")),
+      2_000
+    ).catch(() => undefined);
+  }
+});
+
+smoke("the presence probe answers in the host runtime, with no Docker and no hang", async () => {
+  // The acceptance item that a unit test can only assert about an INJECTED
+  // probe: the real one, on the host's own Node, against an address nothing
+  // serves. Port 1 is never listenable, so this is a local, immediate refusal
+  // -- nothing leaves the machine, and no container runtime is consulted.
+  const started = Date.now();
+  const answered = await defaultEndpointProbe("127.0.0.1:1", 1_000);
+  const took = Date.now() - started;
+
+  assert.equal(answered, false, "something answered on port 1, which cannot be a memQL cluster");
+  assert.ok(took < 5_000, `the probe took ${took}ms against a dead port; the menu would have waited on it`);
+  info(`probe against a dead port answered in ${took}ms`);
+});
+
+smoke("presence detection reads this host's real HOME and finds nothing installed", async () => {
+  await extension().activate();
+
+  // The runner gives the host a pristine temp HOME, so the honest answer here
+  // is `absent` -- and getting it exercises the real receipt and clusters.yaml
+  // readers against a real (empty) home directory rather than injected stubs.
+  const presence = new ClusterPresence({ clustersPath: defaultClustersPath() });
+  const result = await presence.get();
+  assert.equal(
+    result.verdict,
+    "absent",
+    `expected no local cluster under the temp HOME ${os.homedir()}, got ${result.verdict} (evidence: receipt=${result.evidence.receipt}, registry=${result.evidence.registry})`
+  );
+  assert.equal(result.endpoint, "", "nothing should have been dialed with no evidence to dial about");
 });
 
 // -----------------------------------------------------------------------------

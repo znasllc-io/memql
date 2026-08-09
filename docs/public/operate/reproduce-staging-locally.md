@@ -54,8 +54,43 @@ cross-node mesh bugs reproduces locally instead of only on staging.
 - **docker** -- Docker Desktop or Colima (must be running).
 - **k3d** -- `brew install k3d`.
 - **kubectl** -- `brew install kubectl`.
+- **mkcert** -- `brew install mkcert`. The front door terminates TLS with a
+  browser-trusted `*.local.znas.io` wildcard; `make secrets` issues that pair
+  for you (see [Front-door TLS](#front-door-tls) below), but it needs mkcert
+  and a root CA on the machine.
 - **git** -- the cluster's ArgoCD Application points at the current git branch;
   you must push your branch before ArgoCD can sync it.
+
+### Front-door TLS
+
+One-time, per machine -- creating a root CA writes to the system trust store,
+so it stays a deliberate step and never a prompt:
+
+```bash
+bash scripts/install/mkcert-setup.sh --confirm=install-memql-ca
+```
+
+That is only needed if you have no mkcert CA yet; if one already exists it is
+left completely alone (it may be signing certificates for your other local
+stacks). After that, `make up` / `make secrets` issue the `*.local.znas.io`
+pair at `~/.memql/certs/dev.{crt,key}` when it is absent, reuse it when it is
+present, and load it into the cluster as the `local-znas-tls` Secret that both
+front-door ingresses reference. Override the location with
+`MEMQL_LOCAL_TLS_CERT` / `MEMQL_LOCAL_TLS_KEY` (or `--tls-cert` / `--tls-key`).
+
+The bring-up asserts that `local-znas-tls` exists and FAILS without it
+(memql#3384). It has to: traefik answers a missing referenced secret by
+silently serving its own `TRAEFIK DEFAULT CERT`, so every TLS client sees an
+untrusted edge while the whole mesh reports Available.
+
+Non-browser clients need the CA too. Node (the VS Code extension host, npm
+tooling) does **not** read the OS trust store: point it at mkcert's root with
+
+```bash
+export NODE_EXTRA_CA_CERTS="$(mkcert -CAROOT)/rootCA.pem"
+```
+
+otherwise the connection fails with `unable to verify the first certificate`.
 
 No product sibling repo is required: the engine cluster builds every node
 image from this repo's Dockerfile, product-agnostic. A product layers in at
@@ -125,9 +160,11 @@ low-level gRPC debugging only, a raw port-forward is still available:
 kubectl port-forward -n memql svc/bff 50051:50051   # debug only; not the connection path
 ```
 
-Access identity: `https://identity.local.znas.io` (front-door TLS -- needs the
-seeded mkcert cert + a `*.local.znas.io` hosts entry) or `http://localhost:8085`
-(direct / fallback when the cert isn't seeded).
+Access identity: `https://identity.local.znas.io` (front-door TLS -- needs a
+`*.local.znas.io` hosts entry; the cert is issued and seeded by `make up` /
+`make secrets`, see [Front-door TLS](#front-door-tls)). `http://localhost:8085`
+reaches identity directly, for low-level debugging only -- it is not the
+connection path.
 Access the engine gRPC head: `localhost:50051` (after the port-forward above)
 
 ## Inner-loop dev
@@ -165,7 +202,7 @@ pod restart is purely at the pod level; ArgoCD still owns the Deployment spec.
 # Scale to 2 replicas per Deployment:
 make scale N=2
 
-# Litmus: verify every pod has a UNIQUE MEMQL_NODE_ID:
+# Litmus: unique MEMQL_NODE_ID per pod + one shared identity signing keyset:
 make status
 
 # Scale back to single-node:
@@ -176,8 +213,22 @@ Because `deploy/k8s/base/` sets `MEMQL_NODE_ID` via `fieldRef: metadata.name`,
 each pod automatically gets a unique node id matching its pod name. No overlay
 changes are needed to enable multi-node.
 
-`make status` checks that all running pods have distinct `MEMQL_NODE_ID`
-values. Shared ids are the root cause of the #1042 class of mesh bugs.
+`make status` asserts two properties, both of which only exist once there is
+more than one replica:
+
+1. **Unique `MEMQL_NODE_ID` per pod.** Shared ids are the root cause of the
+   #1042 class of mesh bugs.
+2. **One shared identity signing keyset.** It reads
+   `/.well-known/jwks.json` from every identity replica (through the apiserver
+   pod proxy -- engine images are `FROM scratch`, so there is no shell to exec
+   into) and compares the `kid` sets. Divergent keysets mean each replica has
+   minted its OWN Ed25519 key, so a token issued by one is unverifiable by any
+   node that fetched JWKS from the other: roughly half of all auth fails, and
+   the rejection reads as an authentication error rather than a key problem.
+   That is memql#3400 -- `make scale N=2` walked straight into it before
+   `make secrets` started seeding a shared `MEMQL_IDENTITY_SIGNING_KEY_B64`.
+
+A replica the litmus could not read is reported `UNKNOWN`, never as a pass.
 
 ## Re-seed secrets
 
@@ -185,7 +236,12 @@ values. Shared ids are the root cause of the #1042 class of mesh bugs.
 make secrets
 ```
 
-This re-runs `scripts/k3d/seed-secrets.sh` and is idempotent. Use it if you've
+This re-runs `scripts/k3d/seed-secrets.sh` and is idempotent -- including for
+the two values a re-run must never silently rotate: `MEMQL_MASTER_KEY`
+(memql#2958) and the identity signing seed `MEMQL_IDENTITY_SIGNING_KEY_B64`
+(memql#3400, whose rotation would invalidate every live session and every
+minted mesh node token). Both are read back from the cluster and preserved.
+Use it if you've
 torn down and recreated the cluster, or if you've rotated the dev secret values.
 
 ## Tear down
@@ -271,10 +327,10 @@ because:
 There is no *nginx* front door locally, but the local overlay DOES ship a
 k3s-bundled **traefik** front door on 443 for `https://identity.local.znas.io`
 (`deploy/k8s/overlays/local/front-door.yaml`), terminating TLS with a
-browser-trusted mkcert `*.local.znas.io` wildcard (`local-znas-tls`, seeded by
-`make secrets` from `docker/nginx/certs/dev.{crt,key}` -- skip-with-warning if
-that pair is absent, in which case identity is reached via the port-mapped
-`:8085` instead). This mirrors the cloud ingress topology. The **gRPC** heads
+browser-trusted mkcert `*.local.znas.io` wildcard (`local-znas-tls`, issued and
+seeded by `make secrets` at `~/.memql/certs/dev.{crt,key}` -- see
+[Front-door TLS](#front-door-tls); its absence fails the bring-up rather than
+degrading silently). This mirrors the cloud ingress topology. The **gRPC** heads
 are still reached via kubectl port-forward -- identity is not exposed on gRPC
 externally, and the `mcp` engine gRPC head `:50051` is forwarded on demand.
 Postgres `:5432` is likewise port-forwarded; the product SPA + the product

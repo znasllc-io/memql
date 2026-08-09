@@ -283,6 +283,60 @@ func dropCreateOnlyFields(partial map[string]any, createOnlyFields []string) {
 	}
 }
 
+// dropNoUnsetFields removes each @noUnset-named field from the partial (delta)
+// payload when the incoming value is EMPTY and the stored value is not, so the
+// stored value survives the merge. Runs only on the read-merge path (an
+// existing prior row), BEFORE appendPayloadFields/mergePayloadFields.
+//
+// Why this is not covered by read-merge itself (memql#3415). Read-merge
+// inherits a stored value only for fields ABSENT from the delta. A mutation
+// body written as `bootstrappedAt: args.bootstrappedAt ?? ""` materialises an
+// omitted arg into an explicit empty string -- present in the delta, and so the
+// winner of the merge. A caller who never mentioned the field thereby blanked
+// it, un-bootstrapping a live cluster and re-opening the unauthenticated
+// ownership wizard. @noUnset makes set -> unset an inexpressible write.
+//
+// Only the set -> unset direction is refused. Setting a field that is currently
+// empty, and replacing one non-empty value with another, both still apply --
+// otherwise the legitimate later stamp (the magic-link verifier writing
+// bootstrappedAt) could never land. A nil/empty noUnsetFields (every
+// unannotated mutation) is a no-op.
+func dropNoUnsetFields(prior, partial map[string]any, noUnsetFields []string) {
+	for _, f := range noUnsetFields {
+		f = strings.TrimSpace(f)
+		if f == "" {
+			continue
+		}
+		incoming, present := partial[f]
+		if !present || !isEmptyPayloadValue(incoming) {
+			continue
+		}
+		if stored, ok := prior[f]; ok && !isEmptyPayloadValue(stored) {
+			delete(partial, f)
+		}
+	}
+}
+
+// isEmptyPayloadValue reports whether a payload value counts as "unset" for
+// @noUnset. Deliberately narrow: nil, an empty/whitespace string, and an empty
+// collection. A numeric or boolean zero is a legitimate value, not an unset --
+// treating false or 0 as "empty" would make @noUnset silently un-writable for
+// those types.
+func isEmptyPayloadValue(v any) bool {
+	switch t := v.(type) {
+	case nil:
+		return true
+	case string:
+		return strings.TrimSpace(t) == ""
+	case []any:
+		return len(t) == 0
+	case map[string]any:
+		return len(t) == 0
+	default:
+		return false
+	}
+}
+
 func mergePayloadFields(prior, partial map[string]any, mergeFields []string) {
 	mergeSet := make(map[string]struct{}, len(mergeFields))
 	for _, f := range mergeFields {
@@ -514,6 +568,13 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 			// instead of resetting it. Empty for every unannotated mutation,
 			// so this is a no-op on the whole existing tree.
 			dropCreateOnlyFields(payload, mutation.CreateOnlyFields)
+			// @noUnset fields are one-way (memql#3415): drop a named field
+			// from the delta when it arrived EMPTY over a stored non-empty
+			// value, so the stored value wins. Read-merge alone cannot do
+			// this -- it only inherits fields the delta omits, and a body
+			// written `f: args.f ?? ""` puts an explicit empty string in the
+			// delta. Empty for every unannotated mutation.
+			dropNoUnsetFields(priorPayload, payload, mutation.NoUnsetFields)
 			appendPayloadFields(priorPayload, payload, mutation.AppendFields)
 			mergePayloadFields(priorPayload, payload, mutation.MergeFields)
 			payload = priorPayload
@@ -921,6 +982,41 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	return newExecuteResult(bundle), meta, nil
 }
 
+// incomingLookupTarget is the row target for an INCOMING relationship lookup
+// -- "which rows point AT these ids" (memql#3432).
+//
+// The two lookups below used to derive it from `len(values)`, the count of
+// SOURCE ids. That is right for fetchNodesByIds, whose filter is `id IN
+// (...)`: each id resolves to at most one row, so the two counts coincide and
+// asking for more than were named would be waste. It is wrong here by
+// construction. The answer to "which rows name this parent" is not bounded by
+// how many parents were asked about -- one parent with ten children resolved
+// to exactly ONE, because len(values) was 1, and the other nine were never
+// scanned. No error and no short-read signal: a traversal that answers "this
+// row has one child" about a row with ten, which is the same silent
+// under-reporting shape as memql#3388 and #3397.
+//
+// The correct bound is the QUERY's, and the caller already carries it: every
+// relationship resolver threads the traversal's `limit` down from
+// evaluateRelationshipExpression, which receives the query's effective limit
+// (clamped to MaxResults at executor.go's entry, or MaxResults itself for the
+// graph-expansion callers). So the target IS that limit, and an absent one
+// (<= 0) is left for executeFilterQuery to fill from MaxWindow -- the engine's
+// own bound on an unbounded read, which is the only honest answer when the
+// query states none.
+//
+// This composes with memql#3397 rather than duplicating it. That change made
+// executeFilterQuery's SQL enumerate the result set, so its LIMIT bounds
+// distinct ids instead of raw versions -- a correct scan. This is the number
+// that scan is bounded TO, and a correct scan bounded to an incorrect target
+// is still wrong.
+func incomingLookupTarget(limit int) int {
+	if limit < 0 {
+		return 0
+	}
+	return limit
+}
+
 func (e *MemQLEngine) fetchNodesByIds(ctx context.Context, ids []string, timestamp *time.Time, allowed map[string]map[string]struct{}, limit int) ([]memorynodes.MemoryNode, error) {
 	unique := uniqueStrings(ids)
 	if len(unique) == 0 {
@@ -932,6 +1028,9 @@ func (e *MemQLEngine) fetchNodesByIds(ctx context.Context, ids []string, timesta
 		args: []any{bun.In(unique)},
 	}
 
+	// OUTGOING: `id IN (...)` resolves each named id to at most one row, so
+	// len(unique) is a true upper bound and NOT the memql#3432 defect -- see
+	// incomingLookupTarget for why the two sibling lookups below differ.
 	target := len(unique)
 	if limit > 0 && limit < target {
 		target = limit
@@ -1001,6 +1100,11 @@ func (e *MemQLEngine) fetchNodesByIds(ctx context.Context, ids []string, timesta
 	return result, nil
 }
 
+// fetchNodesByJSONFieldValues answers an INCOMING relationship question:
+// which rows of `conceptName` carry one of `values` at `fieldPath`. It backs
+// childOf, the incoming branches of owns / interactsWith / createdBy, and the
+// alias/equals canonical lookup -- every one of which is many-rows-per-value,
+// so the target comes from incomingLookupTarget and never from len(values).
 func (e *MemQLEngine) fetchNodesByJSONFieldValues(ctx context.Context, conceptName string, fieldPath []string, values []string, timestamp *time.Time, limit int) ([]memorynodes.MemoryNode, error) {
 	unique := uniqueStrings(values)
 	if len(unique) == 0 {
@@ -1015,11 +1119,7 @@ func (e *MemQLEngine) fetchNodesByJSONFieldValues(ctx context.Context, conceptNa
 	expr := fmt.Sprintf("(concept = ? AND %s IN (?))", pathExpr)
 	args := []any{strings.TrimSpace(conceptName), bun.In(unique)}
 
-	target := len(unique)
-	if limit > 0 && limit < target {
-		target = limit
-	}
-	nodes, err := e.executeFilterQuery(ctx, nil, compiledExpression{sql: expr, args: args}, timestamp, target, nil)
+	nodes, err := e.executeFilterQuery(ctx, nil, compiledExpression{sql: expr, args: args}, timestamp, incomingLookupTarget(limit), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -1030,6 +1130,11 @@ func (e *MemQLEngine) fetchNodesByJSONFieldValues(ctx context.Context, conceptNa
 	return nodes, nil
 }
 
+// fetchNodesByNodeFieldValues is fetchNodesByJSONFieldValues over a table
+// COLUMN rather than a payload path -- `createdBy` is the only one
+// mapNodeFieldToColumn admits. It backs resolveCreatedBy's incoming branch
+// ("which rows did this identity create"), which is one-source-to-many by
+// definition, so it takes the same target derivation.
 func (e *MemQLEngine) fetchNodesByNodeFieldValues(ctx context.Context, conceptName string, field string, values []string, timestamp *time.Time, limit int) ([]memorynodes.MemoryNode, error) {
 	unique := uniqueStrings(values)
 	if len(unique) == 0 {
@@ -1044,12 +1149,7 @@ func (e *MemQLEngine) fetchNodesByNodeFieldValues(ctx context.Context, conceptNa
 	expr := fmt.Sprintf("(concept = ? AND %s IN (?))", column)
 	args := []any{strings.TrimSpace(conceptName), bun.In(unique)}
 
-	target := len(unique)
-	if limit > 0 && limit < target {
-		target = limit
-	}
-
-	nodes, err := e.executeFilterQuery(ctx, nil, compiledExpression{sql: expr, args: args}, timestamp, target, nil)
+	nodes, err := e.executeFilterQuery(ctx, nil, compiledExpression{sql: expr, args: args}, timestamp, incomingLookupTarget(limit), nil)
 	if err != nil {
 		return nil, err
 	}

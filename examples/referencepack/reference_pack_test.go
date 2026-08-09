@@ -18,8 +18,13 @@ package referencepack_test
 
 import (
 	"context"
+	"errors"
+	"io/fs"
 	"log/slog"
+	"strings"
 	"testing"
+
+	"github.com/znasllc-io/memql/component/language/parser"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
@@ -136,5 +141,46 @@ func TestReferencePackContractCompat(t *testing.T) {
 	}
 	if err := reg.ValidateContract(); err != nil {
 		t.Fatalf("PluginRegistration.ValidateContract for the pack should pass: %v", err)
+	}
+}
+
+// TestReferencePackTreeParses parses every .memql file in the pack's embedded
+// tree through the real load pipeline (struct-form rewriter -> parser).
+//
+// The other tests here load CONCEPTS only, so a construct that fails to parse
+// in any other file sails through -- which is exactly how an args-field
+// @description survived in automations.memql until memql#3336 turned that
+// annotation into a load error. This gate closes that hole: the pack is the
+// worked example downstream repos copy, so it has to actually load.
+func TestReferencePackTreeParses(t *testing.T) {
+	tree := referencepack.Tree()
+	err := fs.WalkDir(tree, ".", func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() || !strings.HasSuffix(path, ".memql") {
+			return nil
+		}
+		raw, readErr := fs.ReadFile(tree, path)
+		if readErr != nil {
+			t.Errorf("%s: read: %v", path, readErr)
+			return nil
+		}
+		rewritten, rewriteErr := parser.NormaliseAll(string(raw))
+		if rewriteErr != nil {
+			t.Errorf("%s: rewrite: %v", path, rewriteErr)
+			return nil
+		}
+		// A file whose constructs are all non-procedural (concepts, shapes,
+		// builtins, tools) is stripped to bare comments by the rewriter, so
+		// the generic parser sees no definitions -- not an error; those load
+		// through their own dedicated loaders.
+		if _, parseErr := parser.ParseFile(rewritten); parseErr != nil && !errors.Is(parseErr, parser.ErrEmptyInput) {
+			t.Errorf("%s: parse: %v", path, parseErr)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk pack tree: %v", err)
 	}
 }

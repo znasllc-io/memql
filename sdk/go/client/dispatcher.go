@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 
+	"google.golang.org/protobuf/reflect/protoreflect"
+
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/core/id"
 )
@@ -53,6 +55,14 @@ type Dispatcher struct {
 	// dropped + warned; the server-side agent loop times out per
 	// the deadline it ships with each call.
 	clientTools *clientToolHandlerRegistry
+
+	// unrouted counts server frames that carried a request_id, matched no
+	// pending request and no registered stream, and therefore fell through
+	// to the uncorrelated event channel. Keyed by the MemqlServerMessage
+	// payload oneof field name ("automation_run_event", "ai_chunk", ...).
+	// Guarded by mu. See noteUnrouted for why this exists and why it cannot
+	// become log spam.
+	unrouted map[string]int
 }
 
 // NewDispatcher creates a dispatcher for the given stream.
@@ -66,6 +76,7 @@ func NewDispatcher(stream memqlv1.MemqlService_StreamClient, logger *slog.Logger
 		stopCh:       make(chan struct{}),
 		unexpectedCh: make(chan struct{}),
 		clientTools:  &clientToolHandlerRegistry{},
+		unrouted:     make(map[string]int),
 	}
 }
 
@@ -156,11 +167,14 @@ func (d *Dispatcher) Run() {
 			continue
 		}
 
-		// Streaming-session routing: messages on multi-reply protocols
-		// (AiTranscribeStream*, VoiceAgent*, polyphon) carry a session
-		// request_id rather than the per-message correlate_to. Route
-		// them to any listener registered via RegisterStream.
-		if reqId := streamRequestId(msg); reqId != "" {
+		// Streaming-session routing: messages on multi-frame protocols
+		// (AiTranscribeStream*, streaming chat, agent / voice-agent turns,
+		// automation runs) carry a session request_id rather than the
+		// per-message correlate_to. Route them to any listener registered
+		// via RegisterStream. streamRequestId documents which families
+		// qualify and why the rest deliberately do not.
+		reqId := streamRequestId(msg)
+		if reqId != "" {
 			d.mu.Lock()
 			ch, ok := d.streams[reqId]
 			d.mu.Unlock()
@@ -176,7 +190,12 @@ func (d *Dispatcher) Run() {
 			}
 		}
 
-		// Uncorrelated message — route to event channel.
+		// Uncorrelated message — route to event channel. Before it goes
+		// there, record the ones that were request-scoped: a frame with a
+		// request_id landing here is either a late/early stream frame or
+		// the memql#3414 omission itself, and until now BOTH were silent.
+		d.noteUnrouted(msg, reqId)
+
 		select {
 		case d.eventCh <- msg:
 		default:
@@ -352,20 +371,222 @@ func (d *Dispatcher) RegisterStream(requestId string) (<-chan *memqlv1.MemqlServ
 }
 
 // streamRequestId returns the session request_id carried by a
-// streaming-protocol server message, or "" if the message does not
-// belong to one of the known streaming families. Centralized here so
-// adding a new streaming protocol is a single-edit operation.
+// request-scoped server message, or "" when the message is not part of an
+// exchange a RegisterStream listener can be parked on.
+//
+// # The coverage rule (memql#3429)
+//
+// This table lists exactly the families whose frames a caller can be waiting
+// for on RegisterStream -- every family participating in an exchange that the
+// correlate_to tier structurally CANNOT serve, because that tier resolves one
+// reply and unregisters. Concretely:
+//
+//   - families the engine emits MORE THAN ONCE for a single request: the
+//     deltas and the terminal that closes them; and
+//   - QueryErrorMsg, which can end any of those exchanges in place of its
+//     normal terminal. A caller parked on a stream whose request failed
+//     server-side must see the error, or it waits out its own deadline for a
+//     terminal frame that is never coming -- the memql#3414 outcome, reached
+//     by a different route. `sendQueryError` is how the transcribe-stream and
+//     automation-run handlers report a refusal, so this is a live path, not a
+//     hypothetical one.
+//
+// The rule is deliberately NOT "every payload that carries a request_id". At
+// the time of writing 59 of the 64 members of MemqlServerMessage.payload carry
+// one and only 11 are routed here; the other 48 are single replies that
+// SendAndWait resolves on correlate_to before this function is consulted at
+// all. Listing them would assert a streaming contract that does not exist and
+// would move routing for any caller who sends the request with Send rather
+// than SendAndWait. So "has a request_id" is the wrong signal to generate this
+// table from, and the ledger in the test file is the classification instead.
+//
+// The rule is also NOT "every request_id the server can put on the wire".
+// VoiceAgentSpeak carries a server-minted request_id for an exchange no
+// caller opened; there is no listener to reunite it with and it belongs on
+// Events().
+//
+// # Why this is enforced rather than merely written down
+//
+// dispatcher_stream_routing_test.go walks MemqlServerMessage.payload by
+// protoreflect and fails when a member is neither routed here nor listed as
+// deliberately unrouted. Adding a message family to the proto is therefore a
+// red test naming the new family, not silence -- which is the whole point:
+// the failure mode this table has is invisibility on both sides of the wire.
+//
+// memql#3414 was that failure mode. AutomationRunEvent was unlisted, so every
+// frame of every run -- accepted, steps, complete -- fell through to the
+// uncorrelated event channel while the caller waited on a terminal the server
+// had already sent. Nothing logged it, because nothing had gone wrong at
+// either end; the routing table in the middle simply did not know the family
+// existed. It cost a full investigation cycle and a wrong root cause.
+//
+// The Go and TS tables state the same rule and list the same families; the TS
+// half is streamRequestId in sdk/ts/src/client/wire.ts. They diverged once
+// already (TS routed streaming chat, Go did not), which is the second half of
+// memql#3429.
 func streamRequestId(msg *memqlv1.MemqlServerMessage) string {
 	if msg == nil {
 		return ""
 	}
 	switch p := msg.Payload.(type) {
+	// Streaming transcription. Delta repeats with the accumulated text;
+	// Complete is the terminal.
 	case *memqlv1.MemqlServerMessage_AiTranscribeStreamDelta:
 		return p.AiTranscribeStreamDelta.GetRequestId()
 	case *memqlv1.MemqlServerMessage_AiTranscribeStreamComplete:
 		return p.AiTranscribeStreamComplete.GetRequestId()
+
+	// Automation run trace (memql#3310). One RunAutomationMsg produces many
+	// AutomationRunEvent frames -- accepted, then a step per step, then
+	// exactly one complete. Routed since memql#3414.
+	case *memqlv1.MemqlServerMessage_AutomationRunEvent:
+		return p.AutomationRunEvent.GetRequestId()
+
+	// Streaming chat. N AiStreamChunk token deltas then the terminal
+	// AiChatResult carrying the assembled text (component/grpc/ai_handlers.go
+	// handleAiChatStream). The TS SDK has routed this pair since it shipped;
+	// the Go SDK did not, and that divergence on one wire protocol is what
+	// memql#3429 was filed for. The non-streaming aiChat path is unaffected:
+	// it uses SendAndWait, which resolves on correlate_to in the tier above.
+	case *memqlv1.MemqlServerMessage_AiChunk:
+		return p.AiChunk.GetRequestId()
+	case *memqlv1.MemqlServerMessage_AiChatResult:
+		return p.AiChatResult.GetRequestId()
+
+	// Agent turn streaming (AgentGenerateTurnMsg). Deltas then one complete.
+	case *memqlv1.MemqlServerMessage_AgentGenerateTurnDelta:
+		return p.AgentGenerateTurnDelta.GetRequestId()
+	case *memqlv1.MemqlServerMessage_AgentGenerateTurnComplete:
+		return p.AgentGenerateTurnComplete.GetRequestId()
+
+	// Voice-agent turn streaming (VoiceAgentTurnRequest). Deltas then one
+	// complete. The shipped voice-agent runs its own read loop in
+	// integrations/voice/agent/grpc_client.go rather than this dispatcher, so
+	// nothing changes for it -- this is here so the next SDK consumer of the
+	// family does not rediscover memql#3414.
+	case *memqlv1.MemqlServerMessage_VoiceAgentTurnDelta:
+		return p.VoiceAgentTurnDelta.GetRequestId()
+	case *memqlv1.MemqlServerMessage_VoiceAgentTurnComplete:
+		return p.VoiceAgentTurnComplete.GetRequestId()
+
+	// Query results. The engine emits exactly one QueryResultChunk per query
+	// today, but `done` is a chunked contract and the name says so; the day it
+	// emits two, the second must not vanish. Costless for today's callers:
+	// executeRaw uses SendAndWait, so the frame is served by correlate_to and
+	// never reaches here.
+	case *memqlv1.MemqlServerMessage_QueryResult:
+		return p.QueryResult.GetRequestId()
+
+	// The error terminal for any of the above. See the coverage rule.
+	case *memqlv1.MemqlServerMessage_QueryError:
+		return p.QueryError.GetRequestId()
 	}
 	return ""
+}
+
+// payloadFamilyAndRequestId names the message's payload oneof member and
+// returns the request_id it carries, if any.
+//
+// Done by protoreflect rather than a type switch on purpose: this is the
+// mechanism that has to notice families NOBODY has written a case for, so it
+// cannot itself be a hand-maintained list of families. A message family added
+// to the proto tomorrow is described correctly by this function today.
+func payloadFamilyAndRequestId(msg *memqlv1.MemqlServerMessage) (family, requestId string) {
+	if msg == nil {
+		return "", ""
+	}
+	m := msg.ProtoReflect()
+	od := m.Descriptor().Oneofs().ByName("payload")
+	if od == nil {
+		return "", ""
+	}
+	fd := m.WhichOneof(od)
+	if fd == nil {
+		return "", ""
+	}
+	family = string(fd.Name())
+	if fd.Kind() != protoreflect.MessageKind {
+		return family, ""
+	}
+	inner := m.Get(fd).Message()
+	rf := inner.Descriptor().Fields().ByName("request_id")
+	if rf == nil || rf.Kind() != protoreflect.StringKind {
+		return family, ""
+	}
+	return family, inner.Get(rf).String()
+}
+
+// noteUnrouted records a server frame that reached the uncorrelated event
+// channel while carrying a request_id.
+//
+// That is the shape of memql#3414: a whole message family missing from
+// streamRequestId, every frame of every run falling through in complete
+// silence while the caller waited out its deadline. Nothing on either side of
+// the wire is in a position to report it -- the server did its job, and a
+// message on the event channel is not an error -- so this is the only place
+// the omission can be made visible.
+//
+// Two cases, at deliberately different levels so the loud one is not drowned
+// by the ordinary one:
+//
+//   - routedId != "": the family IS routed; there was simply no listener for
+//     that id. A frame arriving before RegisterStream or after unregister is
+//     normal (a cancelled PushToTalk still gets its terminal), so this is
+//     Debug plus a counter and nothing more.
+//
+//   - routedId == "" and the payload carries a request_id: the frame belongs
+//     to a request-scoped exchange the routing table does not know about.
+//     That is the omission itself, so it is Warn -- but ONCE per payload
+//     family per dispatcher. A family that misroutes a million frames
+//     produces exactly one line; the total is bounded by the number of oneof
+//     members in MemqlServerMessage (64 today) for the lifetime of one
+//     connection, and in practice is one.
+//
+// UnroutedFrames() exposes the per-family totals for both cases, so a test or
+// an operator can see the volume the log deliberately does not repeat.
+func (d *Dispatcher) noteUnrouted(msg *memqlv1.MemqlServerMessage, routedId string) {
+	family, requestId := payloadFamilyAndRequestId(msg)
+	if family == "" || requestId == "" {
+		// Not request-scoped at all: ServerHello, EventNotification,
+		// HeartbeatMsg, RotateAuthResult. The event channel is where these
+		// belong and there is nothing to report.
+		return
+	}
+
+	d.mu.Lock()
+	first := d.unrouted[family] == 0
+	d.unrouted[family]++
+	d.mu.Unlock()
+
+	if d.logger == nil {
+		return
+	}
+	if routedId != "" {
+		d.logger.Debug("stream frame had no registered listener; delivered to the event channel",
+			"family", family, "request_id", requestId)
+		return
+	}
+	if !first {
+		return
+	}
+	d.logger.Warn("server frame carries a request_id but the SDK routing table does not route its family; "+
+		"it was delivered to the uncorrelated event channel, so a caller parked on RegisterStream will not see it. "+
+		"If this family is a multi-frame exchange, streamRequestId in sdk/go/client/dispatcher.go needs a case for it "+
+		"(memql#3414 / memql#3429). Logged once per family per connection; see Dispatcher.UnroutedFrames for totals.",
+		"family", family, "request_id", requestId)
+}
+
+// UnroutedFrames returns a snapshot of how many request-scoped server frames
+// fell through to the event channel, keyed by payload family. See noteUnrouted
+// for what lands here and why the log is quieter than the counter.
+func (d *Dispatcher) UnroutedFrames() map[string]int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	out := make(map[string]int, len(d.unrouted))
+	for k, v := range d.unrouted {
+		out[k] = v
+	}
+	return out
 }
 
 // Done returns a channel that is closed when the stream terminates --

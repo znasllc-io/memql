@@ -3,7 +3,7 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use common.traits.{ identityIsApiKey, identityIsBadge, identityIsNodeToken, identityIsWorkerToken, isActiveRecord, isDeletionScheduled, statusIsPending }
+use common.traits.{ identityIsApiKey, identityIsBadge, identityIsMagicLink, identityIsNodeToken, identityIsPasskey, identityIsWorkerToken, isActiveRecord, isDeletionScheduled, statusIsPending }
 use common.specs.{ requiresOwnerOrAdmin }
 
 // account -- the operator's customer records
@@ -1621,6 +1621,51 @@ query user usersScheduledForDeletion {
   shape   userFull
 }
 
+// deviceCodeByDeviceCodeHash / deviceCodeByUserCodeHash
+// =====================================================
+//
+// The two lookups the RFC 8628 device grant needs (memql#3410).
+//
+// deviceCodeByDeviceCodeHash is the POLLING path: hash the plaintext
+// device_code the client posted to /oauth/token and find its row. This
+// is a PRE-ACTOR read in the same sense as the *ByKeyHash credential
+// lookups -- the polling device holds no session and there is no
+// actor.userId to scope against; possession of the unguessable
+// device_code IS the authorization, and finding a row by its digest is
+// the verification.
+//
+// deviceCodeByUserCodeHash is the VERIFICATION-PAGE path. It runs for a
+// SIGNED-IN human, but it still cannot be actor-scoped: the row was
+// minted by a device that had no user attached, so `approvedByUserId`
+// is empty at exactly the moment this read has to succeed. What bounds
+// it is the user_code's own entropy plus the per-IP limiter on /device.
+//
+// Both return rows in ANY status so the caller can distinguish
+// authorization_pending from access_denied from expired_token, which
+// RFC 8628 §3.5 requires as separate errors rather than one "invalid".
+
+/// Device-grant polling lookup by deviceCodeHash. Returns rows in every status so the token
+/// endpoint can emit the RFC-specified error rather than a generic invalid_grant.
+@unbounded("device code by unique deviceCodeHash -- a credential lookup bounded to a single row")
+query deviceCode deviceCodeByDeviceCodeHash {
+  args {
+    deviceCodeHash  string!
+  }
+  filter  deviceCodeHash==args.deviceCodeHash
+  shape   deviceCodeFull
+}
+
+/// Verification-page lookup by userCodeHash. Returns rows in every status so /device can tell the
+/// human "already approved" / "denied" / "expired" apart from "no such code".
+@unbounded("device code by unique userCodeHash -- a credential lookup bounded to a single row")
+query deviceCode deviceCodeByUserCodeHash {
+  args {
+    userCodeHash  string!
+  }
+  filter  userCodeHash==args.userCodeHash
+  shape   deviceCodeFull
+}
+
 // ---- queries/v1/identity/workerPairingCodeByHash.memql ----
 
 // workerPairingCodeByHash
@@ -1825,6 +1870,128 @@ query identity badgesForSelf {
   shape    identitySummary
 }
 
+// ---- queries/v1/identity/passkeyByCredentialId.memql ----
+
+// passkeyByCredentialId - Credential-id lookup for the WebAuthn ceremonies
+// ========================================================================
+//
+// Two callers, one key. POST /auth/webauthn/register/finish uses it to
+// reject an enrolment whose credential id is already registered
+// (memql#3406); the login ceremony (memql#3407) uses it to resolve a
+// DISCOVERABLE assertion, which arrives carrying no user hint at all --
+// the credential id is the only thing in the message that names a row.
+//
+// PRE-ACTOR by the same argument as badgeByKeyHash, and more strongly:
+// at login there is no authenticated caller yet, so there is no
+// actor.userId to scope by. Classified in the memql#3349 credential-read
+// inventory (component/memql).
+//
+// Projects identityFull rather than passkeySummary because the verifier
+// needs the two fields that shape deliberately omits -- publicKey and
+// signCount. That is safe here in a way it is not for a keyHash family:
+// a passkey row's credentials carry a PUBLIC key, so the wholesale
+// projection leaks no secret. Possession is proved by a signature, never
+// by knowing the stored bytes.
+//
+// Returns rows even when active=false so the handlers can distinguish
+// "revoked passkey" from "unknown credential" in the audit trail, and so
+// a re-registration of a revoked credential id is still refused.
+//
+// Arguments:
+//   credentialId (string, required) - base64url (unpadded) credential id
+//
+// Returns:
+//   Zero or one identity row in identityFull shape.
+
+/// Look up a passkey identity by its base64url credential id. Returns active + inactive rows.
+@unbounded("passkey identity by unique credential id -- bounded to a single row")
+query identity passkeyByCredentialId {
+  args {
+    credentialId  string!
+  }
+  filter  identityIsPasskey && credentials.credentialId==args.credentialId
+  shape   identityFull
+}
+
+// ---- queries/v1/identity/passkeysForSelf.memql ----
+
+// passkeysForSelf
+// ===============
+//
+// Lists every passkey the CALLER has enrolled. Two consumers, and the
+// second is why this exists at registration time rather than waiting for
+// the management surface (memql#3409):
+//
+//  1. POST /auth/webauthn/register/begin builds excludeCredentials from
+//     it, so an authenticator the user already enrolled declines to
+//     enrol twice instead of minting a second credential the user then
+//     has to tell apart from the first.
+//  2. The passkey management list -- name, model, backup posture, last
+//     use -- for the "is this account recoverable if I lose this phone"
+//     question.
+//
+// There is no userId argument BY DESIGN, following patIdentitiesForSelf
+// and badgesForSelf (memql#3178): the row set comes from
+// userId==actor.userId, so it cannot be pointed at a stranger's
+// authenticators.
+
+/// List the CALLING user's own enrolled passkeys, newest first. Projects passkeySummary -- the
+/// recognisable fields plus the backup flags, never the COSE public key or the signature counter.
+@actor
+query identity passkeysForSelf {
+  filter  identityIsPasskey && userId==actor.userId
+  sort     "row.createdAt", "desc"
+  paginate 50
+  shape    passkeySummary
+}
+
+// ---- queries/v1/identity/signInIdentitiesForSelf.memql ----
+
+// signInIdentitiesForSelf
+// =======================
+//
+// Every ACTIVE credential the caller could actually sign in with. It
+// exists to answer one question honestly, at the one moment it matters:
+// when a user revokes a passkey on /me/devices (memql#3409), what is
+// left as a way back in?
+//
+// The set is `magic_link` OR `passkey`, and the omissions are the
+// design:
+//
+//   - api_key (PAT), worker_token, node_token, voice_agent_token,
+//     account_token, badge: none of them is a SIGN-IN. A PAT is the
+//     sharpest case -- it authenticates as the user against the API,
+//     but /login verifies a JWT and an `mql_pat_` bearer is not one, so
+//     counting it would tell a locked-out user they have a route to a
+//     page that will refuse them.
+//   - oauth: an outbound link to an external app (Slack, GitHub), not
+//     an inbound identity provider for this cluster. Nothing about that
+//     row lets anyone through /login.
+//
+// Counting only passkeys would be the other failure: it would warn a
+// user with a perfectly good email route as if they were about to lock
+// themselves out, and a warning that fires when nothing is wrong is a
+// warning people learn to click through.
+//
+// isActiveRecord is load-bearing rather than tidy here: a revoked
+// credential is exactly the thing that must not be counted as a way in.
+//
+// SELF-SCOPED with no userId argument, following patIdentitiesForSelf /
+// badgesForSelf / passkeysForSelf (memql#3178): the row set comes from
+// userId==actor.userId, so a caller cannot ask how recoverable somebody
+// else's account is.
+
+/// List the CALLING user's own ACTIVE sign-in routes -- magic-link and passkey credentials only.
+/// Backs the last-credential warning before a passkey revoke; the projection is identitySummary,
+/// which carries the type and the label and no credential material at all.
+@actor
+query identity signInIdentitiesForSelf {
+  filter   (identityIsMagicLink || identityIsPasskey) && userId==actor.userId && isActiveRecord
+  sort     "row.createdAt", "desc"
+  paginate 50
+  shape    identitySummary
+}
+
 // ---- queries/v1/identity/nodeTokenIdentityByBinding.memql ----
 
 // nodeTokenIdentityByBinding
@@ -2005,4 +2172,14 @@ query identity nodeTokenIdentityById {
   }
   filter  identityIsNodeToken && row.id==args.identityId
   shape   identityFull
+}
+
+/// Enrolment-token lookup by tokenHash for the /enroll redeem path.
+@unbounded("enrolment token by unique tokenHash -- a credential lookup bounded to a single row")
+query enrolmentToken enrolmentTokenByHash {
+  args {
+    tokenHash  string!
+  }
+  filter  tokenHash==args.tokenHash
+  shape   enrolmentTokenFull
 }

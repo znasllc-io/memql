@@ -263,6 +263,7 @@ export const CAPABILITY_SCRIPTS: Record<string, string> = {
   "install.verifyProviderKey": "scripts/install/verify-provider-key.sh",
   "install.verifyFrontDoor": "scripts/install/verify-frontdoor.sh",
   "install.magicLink": "scripts/install/magic-link.sh",
+  "install.enrolmentLink": "scripts/install/enrolment-link.sh",
   "install.removeArtifact": "scripts/install/remove-artifact.sh",
   // CI's instrument for the install/uninstall round trip, not a graph step.
   "install.e2eBaseline": "scripts/install/e2e-baseline.sh",

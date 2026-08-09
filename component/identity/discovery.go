@@ -61,22 +61,31 @@ func DiscoveryHandler(cfg Config, envLookup func(string) string) http.Handler {
 	})
 }
 
-// DeriveGRPCEndpoint resolves the gRPC host:port the cockpit should
-// dial. Order of preference:
+// DeriveGRPCEndpoint resolves the gRPC host:port a client should dial.
+// Order of preference:
 //
-//  1. MEMQL_DISCOVERY_GRPC_ENDPOINT explicit env override -- always
-//     trusted, used verbatim. This is the production posture: the
-//     operator knows the public dial address (e.g.
-//     bff.app.example.com:443) and writes it into the env on the
-//     identity binary.
-//  2. Default: hostFromURL(identityURL) + a scheme-appropriate port.
-//     HTTPS deployments default to 443 (gRPC over TLS, single ALB
-//     entry point). HTTP localhost dev defaults to 50050 (the local
-//     bff gRPC dial port; the k3d cluster port-forwards bff:50051).
+//  1. MEMQL_DISCOVERY_GRPC_ENDPOINT explicit env override, NORMALIZED
+//     to a dial address. This is the deployment posture: the operator
+//     knows the public dial address -- the FRONT DOOR,
+//     cockpit.<domain>:443 -- and deploy/k8s/base/identity.yaml writes
+//     it into the env, per overlay. An override that cannot be read as
+//     a host falls through to (2) rather than being published as-is.
 //
-// Exported so the worker-pairing redeem handler can translate the
-// HTTP origin the product SPA passes (`window.location.origin`) into a
-// dial address the cockpit can actually grpc.NewClient against.
+//  2. The origin's host + the port its scheme implies. HTTPS gets 443
+//     (gRPC over TLS through the single ingress); plaintext gets the
+//     local bff gRPC port. The origin's OWN port is deliberately
+//     discarded -- 8081/8085/3000 is where something serves HTTP, never
+//     where a client dials MemqlService.
+//
+//     As the DISCOVERY fallback this is a last resort and a poor one:
+//     the identity host serves HTTP and no MemqlService. It exists so
+//     the field is never empty, not because it is right -- which is why
+//     (1) is declared in base rather than left to each operator.
+//
+// A caller that already HOLDS the origin it wants mapped -- rather than
+// wanting the cluster's advertised one -- must call DialEndpointFromOrigin
+// instead: the env tier here is unconditional and would silently outrank the
+// argument (memql#3434).
 //
 // Note: MEMQL_GRPC_ADDRESS is INTENTIONALLY ignored. That env var
 // configures the identity binary's OWN listen address (e.g.
@@ -89,20 +98,179 @@ func DeriveGRPCEndpoint(identityURL string, env func(string) string) string {
 }
 
 func deriveGRPCEndpoint(identityURL string, env func(string) string) string {
-	if v := strings.TrimSpace(env("MEMQL_DISCOVERY_GRPC_ENDPOINT")); v != "" {
+	if v := normalizeDialEndpoint(env("MEMQL_DISCOVERY_GRPC_ENDPOINT")); v != "" {
 		return v
 	}
-	host := hostFromURL(identityURL)
+	return DialEndpointFromOrigin(identityURL)
+}
+
+// DialEndpointFromOrigin maps ONE HTTP origin to the gRPC dial address a
+// client should use for it. It is tier (2) of DeriveGRPCEndpoint with the
+// environment lookup lifted off -- pure, reading only its argument.
+//
+// WHY IT IS SEPARATE (memql#3434). Two callers want different things from
+// the same mapping. The discovery document wants "what should this CLUSTER
+// advertise", so the operator's MEMQL_DISCOVERY_GRPC_ENDPOINT rightly
+// outranks any derivation. The worker-pairing redeem handler wants "where
+// does THIS pairing's origin live" -- the origin the product SPA stamped on
+// the row (`window.location.origin`) -- and for it the cluster-wide
+// advertised value is not a better answer, it is a different question.
+// Routing that caller through DeriveGRPCEndpoint meant the env tier answered
+// every time it was set, which in a deployed cluster is always: the stored
+// origin was never read at all.
+//
+// The origin's OWN port is deliberately discarded. 8081/8085/3000 is where
+// something serves HTTP; the scheme is what names the gRPC port -- HTTPS
+// dials the single front-door 443, plaintext dials the local bff gRPC port.
+//
+// Host extraction agrees with normalizeDialEndpoint (and so with the TS
+// parser in editors/vscode/src/connection/endpoint.ts): scheme, path, query
+// and userinfo are stripped, a bracketed IPv6 literal keeps its brackets, and
+// an unbracketed one is refused as ambiguous. Anything unreadable returns ""
+// so the caller can fall through rather than dial garbage.
+func DialEndpointFromOrigin(origin string) string {
+	host := dialHostFromOrigin(origin)
 	if host == "" {
 		return ""
 	}
-	if isHTTPS(identityURL) {
+	if isHTTPS(origin) {
 		return host + ":443"
 	}
-	if isLoopbackHost(host) {
-		return host + ":50050"
+	return host + ":" + plaintextDialPort
+}
+
+// dialHostFromOrigin returns just the host of an origin, brackets intact for
+// an IPv6 literal, or "" when the authority cannot be read unambiguously.
+func dialHostFromOrigin(raw string) string {
+	v := strings.TrimSpace(raw)
+	if i := strings.Index(v, "://"); i >= 0 {
+		v = v[i+len("://"):]
 	}
-	return host + ":50050"
+	if i := strings.IndexAny(v, "/?#"); i >= 0 {
+		v = v[:i]
+	}
+	if i := strings.LastIndex(v, "@"); i >= 0 {
+		v = v[i+1:]
+	}
+	host, _ := splitDialHostPort(strings.TrimSpace(v))
+	return host
+}
+
+// plaintextDialPort is the gRPC port a non-TLS deployment dials. The
+// TLS counterpart is 443 -- the single front-door port every ingress
+// terminates on, which is why it needs no name.
+const plaintextDialPort = "50050"
+
+// normalizeDialEndpoint turns whatever an operator configured into the
+// ONE form the discovery document is allowed to publish: a bare
+// `host[:port]` dial address.
+//
+// WHY THIS EXISTS (memql#3399). The override used to be trusted
+// verbatim, so the value an operator happened to write -- in the local
+// cluster's case "https://bff.local.znas.io", carried in the genesis
+// envelope -- went straight onto the wire. That is a URL, and a URL is
+// not a dial address: `grpc.NewClient` cannot use it, and the VS Code
+// extension's parser (editors/vscode/src/connection/endpoint.ts)
+// refuses any scheme that is not ws/wss, by name, before it dials. A
+// discovery document exists so a client does not have to guess; one
+// that publishes an unusable spelling is worse than no document,
+// because the client trusts it.
+//
+// So the scheme is READ (it names the port when none is given) and then
+// DROPPED. Anything that cannot be read as a host returns "" and the
+// caller falls back to its derived default -- publishing nothing usable
+// is strictly better than publishing something wrong.
+//
+// This does NOT validate that the host exists or serves gRPC. Naming
+// the right host is a deployment fact and lives in the overlay; this
+// only guarantees the FORM.
+func normalizeDialEndpoint(raw string) string {
+	v := strings.TrimSpace(raw)
+	if v == "" {
+		return ""
+	}
+
+	scheme := ""
+	if i := strings.Index(v, "://"); i >= 0 {
+		scheme = strings.ToLower(v[:i])
+		v = v[i+len("://"):]
+	}
+	// A path, query or fragment is not part of an authority.
+	if i := strings.IndexAny(v, "/?#"); i >= 0 {
+		v = v[:i]
+	}
+	// Userinfo is a URL affordance with no meaning to a dialer.
+	if i := strings.LastIndex(v, "@"); i >= 0 {
+		v = v[i+1:]
+	}
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return ""
+	}
+
+	host, port := splitDialHostPort(v)
+	if host == "" {
+		return ""
+	}
+	if port != "" {
+		return host + ":" + port
+	}
+	switch scheme {
+	case "https", "wss":
+		return host + ":443"
+	case "http", "ws":
+		return host + ":" + plaintextDialPort
+	}
+	if isLoopbackHost(strings.Trim(host, "[]")) {
+		return host + ":" + plaintextDialPort
+	}
+	return host + ":443"
+}
+
+// splitDialHostPort splits an authority into host and (optional) port,
+// keeping an IPv6 literal's brackets. Returns an empty host for input
+// it cannot read unambiguously -- notably an UNBRACKETED IPv6 address,
+// whose own colons make "where does the host end" unanswerable. The
+// client parser draws the same line, so agreeing with it here is the
+// point.
+func splitDialHostPort(authority string) (host, port string) {
+	if strings.HasPrefix(authority, "[") {
+		end := strings.Index(authority, "]")
+		if end < 0 {
+			return "", ""
+		}
+		host = authority[:end+1]
+		rest := authority[end+1:]
+		if strings.HasPrefix(rest, ":") && isAllDigits(rest[1:]) {
+			return host, rest[1:]
+		}
+		if rest != "" {
+			return "", ""
+		}
+		return host, ""
+	}
+	if i := strings.LastIndex(authority, ":"); i > 0 {
+		if isAllDigits(authority[i+1:]) && !strings.Contains(authority[:i], ":") {
+			return authority[:i], authority[i+1:]
+		}
+		return "", ""
+	}
+	if strings.Contains(authority, ":") {
+		return "", ""
+	}
+	return authority, ""
+}
+
+func isAllDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // deriveClientId picks the client id the cockpit should use. Order:

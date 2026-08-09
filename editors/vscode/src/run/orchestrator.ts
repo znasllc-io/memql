@@ -84,7 +84,7 @@ export interface ToolContent {
   uri: string;
 }
 
-/** The cluster facts a run needs. Deliberately not the whole ClusterConfig -- a run has no business seeing the PAT. */
+/** The cluster facts a run needs. Deliberately not the whole ClusterConfig -- a run has no business seeing the credential. */
 export interface RunCluster {
   name: string;
   label: string;

@@ -8,8 +8,10 @@
 #
 #   identity-tls           -- identity server TLS cert (self-signed cluster CA)
 #   memql-ca               -- the cluster CA cert, mounted on every node
+#   local-znas-tls         -- front-door TLS (the mkcert *.local.znas.io pair)
 #   memql-secrets          -- main app envelope (MEMQL_MASTER_KEY,
-#                             MEMQL_GENESIS_B64, DATABASE_DSN, ...)
+#                             MEMQL_GENESIS_B64,
+#                             MEMQL_IDENTITY_SIGNING_KEY_B64, DATABASE_DSN, ...)
 #   livekit-secrets        -- LiveKit API key + secret for local livekit
 #   memql-local-db-creds   -- Postgres credentials for the in-cluster DB
 #
@@ -25,6 +27,14 @@
 #     memql-secrets is REUSED if valid; only a cluster with no usable key
 #     falls back to the dev default. A re-run therefore never replaces a
 #     working key with a placeholder (memql#2958).
+#   - mkcert is installed AND has a root CA on this machine. The front-door
+#     pair is ISSUED here when absent (memql#3384) rather than skipped; see
+#     seed_front_door_tls below for why skipping was never survivable.
+#   - MEMQL_IDENTITY_SIGNING_KEY_B64 (the shared Ed25519 signing seed every
+#     identity replica derives its key + kid + JWKS from) is GENERATED here
+#     when the cluster has none (memql#3400), and REUSED verbatim thereafter --
+#     a re-run must never rotate it, because rotation invalidates every live
+#     session and every minted mesh node token. See resolve_signing_key.
 #
 # The Azurite connection string is always the well-known Azurite dev constant
 # (account: devstoreaccount1, key: Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq
@@ -35,19 +45,26 @@
 # JSON result envelope on stdout, human logs on stderr, honest exit codes.
 # Contract: docs/internal/design/capability-script-contract.md
 #
-# Exit codes: 0 ok | 2 bad param | 4 prerequisite missing (kubectl/cluster/ns)
+# Exit codes: 0 ok | 2 bad param
+#             | 4 prerequisite missing (kubectl/cluster/ns; mkcert or its CA)
+#             | 5 op failed (unreadable existing secret; cert issuance failed)
 #
-# Refs: #2061 #2221
+# Refs: #2061 #2221 #3384
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../lib/capability.sh
 source "${SCRIPT_DIR}/../lib/capability.sh"
+# shellcheck source=../lib/localtls.sh
+source "${SCRIPT_DIR}/../lib/localtls.sh"
 
 cap_init "k3d.seedSecrets" "Seed the k8s Secrets that the local k3d overlay requires."
 cap_spec_param "gate-voice-lane-only" "only re-run the voice-lane gate (scale voice/voice-agent per LiveKit config)"
 cap_spec_param "namespace" "k8s namespace to seed into"
+cap_spec_param "tls-cert"  "front-door TLS certificate path (issued with mkcert when absent)"
+cap_spec_param "tls-key"   "front-door TLS private key path (issued with mkcert when absent)"
+cap_spec_param "mkcert"    "path to the mkcert binary used to issue the front-door pair"
 #=============================================================================
 # CONFIGURATION
 #=============================================================================
@@ -60,6 +77,14 @@ CLUSTER_NAME="${MEMQL_K3D_CLUSTER:-memql}"
 # Result accumulators.
 SEEDED_COUNT=0
 GENESIS_SOURCE="none"
+
+# Front-door TLS: resolved in main() from --tls-cert / --tls-key / --mkcert,
+# whose defaults come from the shared local-TLS locations (scripts/lib) with an
+# MEMQL_LOCAL_TLS_* environment override.
+TLS_CERT=""
+TLS_KEY=""
+MKCERT_BIN=""
+TLS_CERT_SOURCE="none"   # existing | issued
 
 # Azurite well-known dev account + key (not secret; standard Azurite default).
 AZURITE_ACCOUNT="devstoreaccount1"
@@ -158,6 +183,8 @@ function memql_secrets_state() {
 CLUSTER_SECRET_STATE=""
 CLUSTER_MASTER_KEY=""
 CLUSTER_GENESIS_B64=""
+CLUSTER_SIGNING_KEY_B64=""
+CLUSTER_SIGNING_KEY_CREATED_AT=""
 
 function load_cluster_secret_snapshot() {
     local state
@@ -188,6 +215,32 @@ function load_cluster_secret_snapshot() {
         || cap_fail 5 "memql-secrets exists but its MEMQL_GENESIS_B64 could not be read; refusing to overwrite it blind."
     if [ -n "$raw" ]; then
         CLUSTER_GENESIS_B64="$(trim_space "$(printf '%s' "$raw" | b64_decode 2>/dev/null || true)")"
+    fi
+
+    # The identity signing seed is the third irreplaceable field in this
+    # Secret (memql#3400) and gets the same fail-closed read: rotating it
+    # invalidates every live session and every minted mesh node token, so
+    # "I could not tell what is there" must never become "there is nothing
+    # there".
+    raw="$(kubectl get secret memql-secrets --namespace="$NAMESPACE" \
+              -o 'jsonpath={.data.MEMQL_IDENTITY_SIGNING_KEY_B64}' 2>/dev/null)" \
+        || cap_fail 5 "memql-secrets exists but its MEMQL_IDENTITY_SIGNING_KEY_B64 could not be read; refusing to overwrite it blind."
+    if [ -n "$raw" ]; then
+        CLUSTER_SIGNING_KEY_B64="$(trim_space "$(printf '%s' "$raw" | b64_decode 2>/dev/null || true)")"
+        [ -n "$CLUSTER_SIGNING_KEY_B64" ] \
+            || cap_fail 5 "memql-secrets holds a MEMQL_IDENTITY_SIGNING_KEY_B64 that could not be base64-decoded; refusing to overwrite it blind."
+    fi
+
+    # The seed's mint date (memql#3381). Not irreplaceable -- it is a
+    # timestamp, not key material -- so an unreadable value is not fatal; it
+    # just means this run re-stamps. But a REUSED seed must keep its original
+    # date, or every `make secrets` would silently reset the key's apparent
+    # age to today, which is the exact false signal the metric exists to
+    # avoid.
+    raw="$(kubectl get secret memql-secrets --namespace="$NAMESPACE" \
+              -o 'jsonpath={.data.MEMQL_IDENTITY_SIGNING_KEY_CREATED_AT}' 2>/dev/null || true)"
+    if [ -n "$raw" ]; then
+        CLUSTER_SIGNING_KEY_CREATED_AT="$(trim_space "$(printf '%s' "$raw" | b64_decode 2>/dev/null || true)")"
     fi
 }
 
@@ -343,30 +396,187 @@ function resolve_master_key() {
 
 
 #=============================================================================
+# RESOLVE IDENTITY SIGNING SEED (memql#3400)
+#=============================================================================
+
+# WHY THIS EXISTS. deploy/k8s/base/identity.yaml runs identity at `replicas: 2`
+# and says why it can: "the signing key comes from the envelope (same seed on
+# every pod -> identical JWKS), so there is NO single-writer key PVC". Nothing
+# supplied that seed locally, so KeyManager.Load() fell through to
+# generateAndWriteCurrent() and EVERY POD MINTED ITS OWN Ed25519 keypair. Two
+# replicas behind one Service published two different `kid`s; a token minted by
+# one is structurally unverifiable by any node that fetched JWKS from the other,
+# so `make scale N=2` -- the documented multi-node command -- produced coin-flip
+# auth failures. This is the local analogue of the ESO/Key Vault delivery
+# staging uses, exactly as the master key and the front-door TLS pair already
+# are: the SHAPE (one shared seed, delivered through memql-secrets, read by
+# every replica via envFrom) is identical everywhere; only the VALUE is local.
+#
+# The runtime requires base64-std of EXACTLY 32 bytes -- ed25519.SeedSize, see
+# component/identity/keys.go NewKeyManagerFromSeed and the same rule in
+# Config.Validate. 32 bytes encode to 43 base64 characters plus one '=' pad, so
+# that shape check is complete: nothing else decodes to 32 bytes.
+readonly SIGNING_KEY_B64_RE='^[A-Za-z0-9+/]{43}=$'
+
+RESOLVED_SIGNING_KEY_B64=""
+RESOLVED_SIGNING_KEY_SOURCE=""
+RESOLVED_SIGNING_KEY_CREATED_AT=""
+
+# resolve_signing_key_created_at stamps the seed with its mint date
+# (memql#3381). A bare 32-byte seed carries no metadata, so this is the only
+# way identity can report how old its signing key is -- and key age is the
+# only automated pressure toward the manual rotation runbook that every
+# deployed cluster depends on. Local seeds it too, so the "age is known" path
+# is the one the parity cluster actually exercises.
+#
+# A REUSED seed keeps whatever date it already had; a new or replaced seed is
+# stamped now. Getting that backwards would reset the key's apparent age on
+# every `make secrets`.
+function resolve_signing_key_created_at() {
+    if [ "$RESOLVED_SIGNING_KEY_SOURCE" = "cluster" ] && [ -n "$CLUSTER_SIGNING_KEY_CREATED_AT" ]; then
+        RESOLVED_SIGNING_KEY_CREATED_AT="$CLUSTER_SIGNING_KEY_CREATED_AT"
+        return
+    fi
+    RESOLVED_SIGNING_KEY_CREATED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+
+function is_valid_signing_key() {
+    [[ "$1" =~ $SIGNING_KEY_B64_RE ]]
+}
+
+# NEVER echoed. A seed printed to a terminal or a CI log is a seed that must be
+# rotated, and rotation is the operation the reuse branch below exists to avoid.
+function generate_signing_key() {
+    head -c 32 /dev/urandom | base64 | tr -d '\n'
+}
+
+# Strict precedence: environment, then the seed already in the cluster, then a
+# freshly generated one.
+#
+# The middle branch is the load-bearing one. `make secrets` runs on every
+# `make up`, so a seed regenerated on each run would silently rotate the
+# cluster's signing key -- invalidating every browser session and every minted
+# class="node" mesh token, which reads to the operator as the very auth
+# breakage this change fixes. Reuse makes a re-run a genuine no-op.
+#
+# Requires load_cluster_secret_snapshot to have run.
+function resolve_signing_key() {
+    if [ -n "${MEMQL_IDENTITY_SIGNING_KEY_B64:-}" ]; then
+        local from_env
+        from_env="$(trim_space "$MEMQL_IDENTITY_SIGNING_KEY_B64")"
+        if ! is_valid_signing_key "$from_env"; then
+            cap_fail 2 "MEMQL_IDENTITY_SIGNING_KEY_B64 is set but is not base64-std of 32 bytes (an Ed25519 seed; got ${#from_env} characters after trimming). identity REFUSES TO BOOT on a seed it cannot decode, so seeding it would take auth down cluster-wide. Generate one with: make identity-signing-key"
+        fi
+        if [ -n "$CLUSTER_SIGNING_KEY_B64" ] && [ "$CLUSTER_SIGNING_KEY_B64" != "$from_env" ]; then
+            warn "MEMQL_IDENTITY_SIGNING_KEY_B64 differs from the seed currently in memql-secrets."
+            warn "  This run ROTATES the identity signing key. Every live browser session and"
+            warn "  every minted class=\"node\" mesh token stops verifying; sign-in again after"
+            warn "  identity rolls. Unset MEMQL_IDENTITY_SIGNING_KEY_B64 to keep the existing seed."
+        fi
+        RESOLVED_SIGNING_KEY_B64="$from_env"
+        RESOLVED_SIGNING_KEY_SOURCE="env"
+        return
+    fi
+
+    if is_valid_signing_key "$CLUSTER_SIGNING_KEY_B64"; then
+        RESOLVED_SIGNING_KEY_B64="$CLUSTER_SIGNING_KEY_B64"
+        RESOLVED_SIGNING_KEY_SOURCE="cluster"
+        return
+    fi
+
+    # Nothing usable. Replacing a stored value that is not a 32-byte seed
+    # loses nothing: identity refuses to boot on it, so it has signed nothing.
+    # Judged AFTER trim_space, so a good seed stored with a stray newline
+    # reaches the reuse branch above instead.
+    if [ -n "$CLUSTER_SIGNING_KEY_B64" ]; then
+        warn "the MEMQL_IDENTITY_SIGNING_KEY_B64 already in memql-secrets is not a 32-byte Ed25519 seed; replacing it."
+        warn "  (identity refuses to boot on it, so it has signed nothing and nothing is lost.)"
+    fi
+    RESOLVED_SIGNING_KEY_B64="$(generate_signing_key)"
+    RESOLVED_SIGNING_KEY_SOURCE="generated"
+    if ! is_valid_signing_key "$RESOLVED_SIGNING_KEY_B64"; then
+        cap_fail 5 "generating an Ed25519 signing seed produced a value of the wrong shape; /dev/urandom or base64 is not behaving as expected."
+    fi
+    info "generated a shared identity signing seed (every identity replica will derive the same key + kid + JWKS)."
+}
+
+#=============================================================================
 # FRONT-DOOR TLS (local-znas-tls -- browser-trusted wildcard for the ingress)
 #=============================================================================
 
 # The local front door (traefik ingress on 443, see the local overlay's
-# front-door manifests) terminates TLS with a browser-trusted wildcard cert
-# for the operator's local domain. Default: the mkcert-issued
-# *.local.znas.io pair at docker/nginx/certs/dev.{crt,key} (mkcert's CA is
-# in the operator's trust store). Override via MEMQL_LOCAL_TLS_CERT /
-# MEMQL_LOCAL_TLS_KEY. Skip-with-warning when absent -- the cluster still
-# works via the port-mapped entry points.
-function seed_front_door_tls() {
-    local cert="${MEMQL_LOCAL_TLS_CERT:-${REPO_ROOT}/docker/nginx/certs/dev.crt}"
-    local key="${MEMQL_LOCAL_TLS_KEY:-${REPO_ROOT}/docker/nginx/certs/dev.key}"
-    if [ ! -f "$cert" ] || [ ! -f "$key" ]; then
-        warn "front-door TLS cert/key not found (${cert}); skipping local-znas-tls."
-        warn "  https://*.local.znas.io will not serve until seeded (set"
-        warn "  MEMQL_LOCAL_TLS_CERT/MEMQL_LOCAL_TLS_KEY and re-run 'make secrets')."
+# front-door manifests) terminates TLS with a browser-trusted wildcard cert for
+# the operator's local domain -- exactly as the cloud ingress does, which is
+# what makes the local connection model env-parity rather than a local special
+# case (docs/public/operate/environment-parity.md).
+#
+# WHY THIS ISSUES RATHER THAN SKIPS (memql#3384). This step used to warn and
+# return when the pair was absent. That was never a survivable degradation:
+# both front-door ingresses NAME local-znas-tls, and traefik answers a missing
+# referenced secret by silently serving its own "TRAEFIK DEFAULT CERT" for both
+# hosts. Browsers show "Not secure" on the very link a first-time operator
+# clicks (the setup magic link), and Node clients -- including the VS Code
+# extension host -- fail outright with "unable to verify the first
+# certificate". Meanwhile every Deployment is Available, so the bring-up ends
+# in a green summary and the WARN scrolls past ~140 lines into a ~700-line run.
+# A certificate this script can create for itself is not an operator task.
+#
+# Issuance is delegated to the install.mkcert capability
+# (scripts/install/mkcert-setup.sh) rather than re-implemented here: it already
+# owns the restraint that matters (it never touches a pre-existing per-machine
+# CA) and there must not be a second way to mint this pair.
+#
+# Idempotent: an existing pair is REUSED verbatim, never reissued -- `make
+# secrets` runs on every `make up`, and rotating the front-door certificate as
+# a side effect of a routine re-run would invalidate whatever already trusts
+# it. Deliberate reissue is `mkcert-setup.sh --force`.
+function ensure_front_door_pair() {
+    if [ -s "$TLS_CERT" ] && [ -s "$TLS_KEY" ]; then
+        info "front-door TLS pair present (${TLS_CERT}); reusing it."
+        TLS_CERT_SOURCE="existing"
         return 0
     fi
-    info "seeding local-znas-tls (front-door TLS for the local ingress)..."
-    kubectl create secret tls local-znas-tls \
+
+    local gen="${REPO_ROOT}/scripts/install/mkcert-setup.sh"
+    if [ ! -f "$gen" ]; then
+        cap_fail 4 "front-door TLS pair is missing (${TLS_CERT}) and the issuer script is not at ${gen}. Issue the pair by hand with: mkcert -cert-file '${TLS_CERT}' -key-file '${TLS_KEY}' ${MEMQL_LOCAL_TLS_HOSTNAMES//,/ }"
+    fi
+
+    info "front-door TLS pair missing; issuing it with mkcert (install.mkcert)..."
+    # stdin is closed and the stdin opt-in cleared so the child cannot block;
+    # its human logs flow to our stderr, its JSON envelope is captured here so
+    # exactly one envelope (ours) ever reaches stdout.
+    local rc=0
+    CAP_PARAMS_STDIN= bash "$gen" \
+        --hostnames="$MEMQL_LOCAL_TLS_HOSTNAMES" \
+        --cert-file="$TLS_CERT" \
+        --key-file="$TLS_KEY" \
+        --mkcert="$MKCERT_BIN" \
+        </dev/null >/dev/null || rc=$?
+
+    case "$rc" in
+        0) ;;
+        4) cap_fail 4 "mkcert is not installed, so the front-door certificate cannot be issued. Install it and re-run 'make secrets':  brew install mkcert  (macOS)  |  https://github.com/FiloSottile/mkcert" ;;
+        3) cap_fail 4 "no mkcert root CA exists on this machine yet. Creating one writes to the system trust store, so it is a deliberate one-time step -- run it, then re-run 'make secrets':  bash scripts/install/mkcert-setup.sh --confirm=install-memql-ca" ;;
+        *) cap_fail 5 "issuing the front-door certificate failed (install.mkcert exit ${rc}); see the log above." ;;
+    esac
+
+    if [ ! -s "$TLS_CERT" ] || [ ! -s "$TLS_KEY" ]; then
+        cap_fail 5 "install.mkcert reported success but ${TLS_CERT} / ${TLS_KEY} are missing or empty."
+    fi
+    TLS_CERT_SOURCE="issued"
+    cap_changed
+}
+
+function seed_front_door_tls() {
+    ensure_front_door_pair
+    info "seeding ${MEMQL_LOCAL_TLS_SECRET} (front-door TLS for the local ingress)..."
+    kubectl create secret tls "${MEMQL_LOCAL_TLS_SECRET}" \
         --namespace "${NAMESPACE}" \
-        --cert="$cert" --key="$key" \
+        --cert="$TLS_CERT" --key="$TLS_KEY" \
         --dry-run=client -o yaml | kubectl apply -f - >&2
+    SEEDED_COUNT=$((SEEDED_COUNT + 1))
+    info "${MEMQL_LOCAL_TLS_SECRET} seeded."
 }
 
 #=============================================================================
@@ -423,9 +633,11 @@ function seed_db_creds() {
 function seed_memql_secrets() {
     # Both values were resolved in main BEFORE any mutation -- see the note
     # there. This function only writes.
-    local genesis_b64 master_key db_dsn db_direct_dsn
+    local genesis_b64 master_key signing_key signing_key_created_at db_dsn db_direct_dsn
     genesis_b64="$RESOLVED_GENESIS_B64"
     master_key="$RESOLVED_MASTER_KEY"
+    signing_key="$RESOLVED_SIGNING_KEY_B64"
+    signing_key_created_at="$RESOLVED_SIGNING_KEY_CREATED_AT"
     # Database DSN: local in-cluster Postgres.
     # The connection string uses 'disable' sslmode because the local Postgres
     # container does not have TLS configured (dev only).
@@ -438,6 +650,8 @@ function seed_memql_secrets() {
         --namespace="$NAMESPACE" \
         --from-literal="MEMQL_MASTER_KEY=$master_key" \
         --from-literal="MEMQL_GENESIS_B64=$genesis_b64" \
+        --from-literal="MEMQL_IDENTITY_SIGNING_KEY_B64=$signing_key" \
+        --from-literal="MEMQL_IDENTITY_SIGNING_KEY_CREATED_AT=$signing_key_created_at" \
         --from-literal="MEMQL_DATABASE_DSN=$db_dsn" \
         --from-literal="MEMORY_NODES_DATABASE_DIRECT_DSN=$db_direct_dsn" \
         --from-literal="AZURE_BLOB_CONNECTION_STRING=$AZURITE_CONN" \
@@ -565,6 +779,13 @@ function main() {
     NAMESPACE="$(cap_param namespace "$NAMESPACE")"
     cap_require namespace "$NAMESPACE"
 
+    # Env feeds the DEFAULT slot; cap_param has no environment tier of its own.
+    TLS_CERT="$(cap_param tls-cert "${MEMQL_LOCAL_TLS_CERT:-$MEMQL_LOCAL_TLS_DEFAULT_CERT}")"
+    TLS_KEY="$(cap_param tls-key   "${MEMQL_LOCAL_TLS_KEY:-$MEMQL_LOCAL_TLS_DEFAULT_KEY}")"
+    MKCERT_BIN="$(cap_param mkcert "${MEMQL_MKCERT_BIN:-mkcert}")"
+    cap_require tls-cert "$TLS_CERT"
+    cap_require tls-key  "$TLS_KEY"
+
     # --gate-voice-lane-only: re-run just the voice-lane gate (memql#2416).
     # up.sh calls this AFTER the ArgoCD app has created the Deployments,
     # since the full seeding pass runs before they exist.
@@ -588,6 +809,8 @@ function main() {
     # rather than being recomputed here to dodge the old subshell.
     load_cluster_secret_snapshot
     resolve_master_key
+    resolve_signing_key
+    resolve_signing_key_created_at
     resolve_genesis_b64
 
     seed_internal_ca
@@ -608,6 +831,14 @@ function main() {
     # env | cluster | dev-default -- so a caller can tell a deliberate rotation
     # from a run that preserved the cluster's existing key (memql#2958).
     cap_result_set     masterKeySource "$RESOLVED_MASTER_KEY_SOURCE"
+    # env | cluster | generated -- so a caller can tell a run that PRESERVED the
+    # identity signing seed from one that minted or rotated it (memql#3400).
+    # The seed itself is never emitted; only where it came from.
+    cap_result_set     signingKeySource "$RESOLVED_SIGNING_KEY_SOURCE"
+    # existing | issued -- so a caller can tell a routine re-run from the run
+    # that minted the front-door pair (memql#3384).
+    cap_result_set     frontDoorTlsSource "$TLS_CERT_SOURCE"
+    cap_result_set     frontDoorTlsCert   "$TLS_CERT"
     cap_ok
 }
 

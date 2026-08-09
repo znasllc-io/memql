@@ -66,7 +66,11 @@ Sense package; it forks no brain and changes no wire contract.
   resolves the server binary in order: the `memql.lsp.serverPath` **user**
   setting, then a bundled `bin/<platform>-<arch>/memql-lsp`, then `memql-lsp`
   on `PATH`. `serverPath` is machine/user-scoped only, so an untrusted
-  workspace cannot redirect it.
+  workspace cannot redirect it -- and a workspace-scoped value is refused
+  *out loud*, with a warning naming the setting, rather than silently ignored.
+  When no binary resolves at all, only the language features are lost: the
+  runtime surface (Clusters / Concepts / Runs) is registered independently and
+  keeps working.
 
 ## Baseline grammar (generated)
 

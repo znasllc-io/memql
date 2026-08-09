@@ -32,6 +32,11 @@ const envAllowInsecurePair = "MEMQL_IDENTITY_ALLOW_INSECURE_PAIR"
 // credential-leak surface. A reverse-proxy fronting plaintext to the
 // binary surfaces the deployment posture via X-Forwarded-Proto.
 //
+// The transport predicate itself lives in identity.RequestIsSecure so
+// the enrolment surface (memql#3408) enforces the same rule from the
+// same code rather than from a second copy of it; the dev escape hatch
+// stays here because it is named per-surface.
+//
 // Returns true when the request is admissible; writes a 403 and
 // returns false otherwise.
 func (s *Server) requireSecureRequest(w http.ResponseWriter, r *http.Request) bool {
@@ -39,13 +44,10 @@ func (s *Server) requireSecureRequest(w http.ResponseWriter, r *http.Request) bo
 		http.Error(w, "no request", http.StatusBadRequest)
 		return false
 	}
-	if r.TLS != nil {
+	if identity.RequestIsSecure(r) {
 		return true
 	}
-	if strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")), "https") {
-		return true
-	}
-	if strings.TrimSpace(os.Getenv(envAllowInsecurePair)) == "1" {
+	if identity.InsecureTransportEscapeEnabled(envAllowInsecurePair) {
 		if s != nil && s.Logger != nil {
 			s.Logger.Warn("pair endpoint admitting plaintext request via "+envAllowInsecurePair+"=1; production must leave this unset",
 				"path", r.URL.Path,
@@ -372,14 +374,30 @@ func (s *Server) requireBearer(w http.ResponseWriter, r *http.Request) (*identit
 //  1. MEMQL_WORKER_DIAL_ENDPOINT -- explicit operator override.
 //     Production deployments set this to the agent's public dial
 //     address (e.g. agent.acme.com:443).
-//  2. identity.DeriveGRPCEndpoint(storedURL) -- maps the URL stamped
-//     on the pairing row (the product SPA's `window.location.origin`) to
-//     a host:port using the same logic the discovery doc uses.
-//  3. Fall back to the stored URL verbatim.
+//  2. identity.DialEndpointFromOrigin(storedURL) -- maps the origin
+//     stamped on the pairing row (the product SPA's
+//     `window.location.origin`) to a host:port, using the same
+//     origin-to-dial mapping the discovery document derives with.
+//  3. The cluster-wide advertised discovery endpoint, when the stored
+//     origin is unreadable.
+//  4. Fall back to the stored URL verbatim.
+//
+// Tier 2 used to call identity.DeriveGRPCEndpoint, whose OWN first tier is
+// MEMQL_DISCOVERY_GRPC_ENDPOINT -- so wherever that is set, which in a
+// deployed cluster is everywhere, the stored origin was never read and every
+// worker was handed the one advertised endpoint regardless of what it paired
+// against. The mapping is now reached without the lookup (memql#3434); the
+// advertised endpoint survives only as tier 3, where it belongs.
 func resolveWorkerDialEndpoint(storedURL string) string {
 	if v := strings.TrimSpace(os.Getenv("MEMQL_WORKER_DIAL_ENDPOINT")); v != "" {
 		return v
 	}
+	if v := identity.DialEndpointFromOrigin(storedURL); v != "" {
+		return v
+	}
+	// Unreadable origin. The advertised endpoint answers a different
+	// question -- it names the cluster front door, not this pairing's
+	// origin -- but it is at least a dialable address.
 	if v := identity.DeriveGRPCEndpoint(storedURL, os.Getenv); v != "" {
 		return v
 	}

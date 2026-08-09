@@ -18,8 +18,10 @@ import (
 )
 
 // tokenRequest is the body of POST /oauth/token. We support the
-// authorization_code grant (initial code redemption) and the
-// refresh_token grant (silent re-issue of an expired access token).
+// authorization_code grant (initial code redemption), the
+// refresh_token grant (silent re-issue of an expired access token),
+// and the RFC 8628 device_code grant (memql#3410 -- the fallback for
+// hosts that cannot bind or be reached on a loopback redirect).
 // The password / client_credentials grants are out of scope.
 type tokenRequest struct {
 	GrantType    string `json:"grant_type"`
@@ -28,6 +30,9 @@ type tokenRequest struct {
 	RedirectURI  string `json:"redirect_uri"`
 	CodeVerifier string `json:"code_verifier,omitempty"`
 	RefreshToken string `json:"refresh_token,omitempty"`
+	// DeviceCode is the opaque credential POST /device/code returned to
+	// the polling device. Present only on the device_code grant.
+	DeviceCode string `json:"device_code,omitempty"`
 }
 
 // tokenResponse mirrors the RFC 6749 §5.1 successful-response shape.
@@ -52,8 +57,12 @@ func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 	case "refresh_token":
 		s.handleRefreshTokenGrant(w, r, body)
 		return
+	case DeviceGrantType:
+		s.handleDeviceCodeGrant(w, r, body)
+		return
 	default:
-		s.writeJSONError(w, http.StatusBadRequest, "unsupported_grant_type", "only authorization_code and refresh_token are supported")
+		s.writeJSONError(w, http.StatusBadRequest, "unsupported_grant_type",
+			"only authorization_code, refresh_token and "+DeviceGrantType+" are supported")
 		return
 	}
 	if body.Code == "" || body.ClientId == "" || body.RedirectURI == "" {
@@ -155,47 +164,17 @@ func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Mint a fresh refresh + access pair, persist a new authSession row.
-	refreshPlain, refreshHash, err := refresh.NewRefreshToken()
-	if err != nil {
-		s.writeJSONError(w, http.StatusInternalServerError, "internal_error", "token mint failed")
-		return
-	}
-	sessionId, err := identity.NewRandomId("")
-	if err != nil {
-		s.writeJSONError(w, http.StatusInternalServerError, "internal_error", "session id mint failed")
-		return
-	}
-
-	// Pull the runtime-tunable token settings (admin-edited TTLs +
-	// cookie SameSite) once per request. effectiveTokenSettings
-	// merges live overrides with s.Cfg fallbacks so a freshly
-	// bootstrapped cluster with no admin row still produces sane
-	// values.
-	live := s.effectiveTokenSettings(r.Context())
-
-	// Resolve the user row so the freshly minted JWT carries the
-	// directory fields the SPA needs (email, name, given_name,
-	// family_name, role). Without this the access token's `email` and
-	// name claims would be empty strings -- the SPA would render the
-	// profile as "N/A" until the next /auth/refresh.
-	tokenInput := identity.IssueInput{
-		UserId:      row.UserId,
-		SessionId:   sessionId,
-		TTLOverride: live.AccessTokenTTL,
-	}
-	if user, err := s.Store.LookupUserById(r.Context(), row.UserId); err == nil && user != nil {
-		tokenInput.Email = user.PrimaryEmail
-		tokenInput.Name = user.DisplayName
-		tokenInput.GivenName = user.FirstName
-		tokenInput.FamilyName = user.LastName
-		tokenInput.Role = user.Role
-		tokenInput.Internal = user.Internal
-		tokenInput.RevocationEpoch = user.RevocationEpoch
-	} else if err != nil && s.Logger != nil {
-		s.Logger.Warn("token_user_lookup_failed", slog.String("user_id", row.UserId), slog.String("error", err.Error()))
-	}
-	access, accessExp, err := s.Issuer.IssueAccessToken(tokenInput, now)
+	// Mint the access + refresh pair, persist the authSession row, set
+	// the refresh cookie. Shared with the device_code grant
+	// (token_session.go) so the two sign-in paths cannot drift in TTLs,
+	// claims or cookie policy.
+	resp, err := s.issueSessionForUser(w, r, sessionMintInput{
+		UserId:     row.UserId,
+		IdentityId: row.IdentityId,
+		ClientId:   row.ClientId,
+		Source:     "bff_exchange",
+		Now:        now,
+	})
 	if err != nil {
 		eid := generateErrorId()
 		if s.Logger != nil {
@@ -205,85 +184,7 @@ func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The session row tracks the access-token hash for the auth
-	// middleware's revocation check; the refresh-token hash rolls
-	// forward via rotateAuthSession on every /auth/refresh.
-	accessHash := hashCode(access)
-	expiresAt := now.Add(live.RefreshTokenTTL).Format(time.RFC3339Nano)
-	if err := s.Store.CreateAuthSession(
-		r.Context(),
-		sessionId,
-		row.UserId, // subject for now is the userId
-		accessHash,
-		"bff_exchange",
-		row.UserId,
-		row.IdentityId,
-		r.Header.Get("User-Agent"),
-		expiresAt,
-	); err != nil {
-		eid := generateErrorId()
-		if s.Logger != nil {
-			s.Logger.Error("token_session_persist_failed",
-				slog.String("error_id", eid),
-				slog.String("error", err.Error()))
-		}
-		s.writeJSONError(w, http.StatusInternalServerError, "internal_error", "session persist failed; reference "+eid)
-		return
-	}
-
-	// Stamp the freshly minted refresh-token hash so the first refresh
-	// call has something to compare against. previousRefreshTokenHash
-	// is empty on the initial mint -- there's no prior hash to keep
-	// in the grace window yet. The first /auth/refresh will populate
-	// it.
-	if err := s.Store.RotateAuthSession(r.Context(), sessionId, refreshHash, "", expiresAt); err != nil {
-		// Non-fatal: the session is already there; the user can still
-		// use the access token. The first /auth/refresh will mint a
-		// new pair and the session row catches up at that point.
-		if s.Logger != nil {
-			s.Logger.Warn("token_session_initial_rotate_failed",
-				slog.String("error", err.Error()))
-		}
-	}
-
-	s.audit(r, identity.AuditEvent{
-		Category:    identity.AuditCategoryAuth,
-		Action:      "session_created",
-		TargetType:  "session",
-		TargetId:    sessionId,
-		ActorUserId: row.UserId,
-		Outcome:     identity.AuditOutcomeSuccess,
-		Detail: map[string]any{
-			"clientId": row.ClientId,
-		},
-	})
-
-	expiresIn := int(live.AccessTokenTTL / time.Second)
-	if expiresIn <= 0 {
-		expiresIn = int(time.Until(accessExp) / time.Second)
-	}
-
-	// Set the refresh-token cookie on the initial sign-in response.
-	// This was missing for a long time, and the SPA's silent-rotate
-	// flow depends on it -- /auth/refresh reads the cookie first
-	// before falling back to body / Authorization. Without this set
-	// at /oauth/token time, the SPA hit /auth/refresh on every
-	// access-token expiry, got 401 (no refresh token presented),
-	// classified the response as `unauthenticated`, and bumped the
-	// user back to the sign-in page silently. The audit log showed
-	// the symptom: zero `session_refreshed` events ever, only
-	// repeated `session_created` from re-logins. The cookie also
-	// rides on the JSON body (RefreshToken field) so non-browser
-	// clients that don't track cookies (CLI / SDK callers) can
-	// still drive the refresh flow off the body value.
-	setRefreshCookie(w, refreshPlain, s.Cfg.BaseURL, live.RefreshCookieSameSite)
-
-	writeJSON(w, http.StatusOK, tokenResponse{
-		AccessToken:  access,
-		TokenType:    "Bearer",
-		ExpiresIn:    expiresIn,
-		RefreshToken: refreshPlain,
-	})
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // handleRefreshTokenGrant implements the OAuth 2.1 refresh_token grant
@@ -395,6 +296,7 @@ func readTokenRequest(r *http.Request) (*tokenRequest, error) {
 		RedirectURI:  r.Form.Get("redirect_uri"),
 		CodeVerifier: r.Form.Get("code_verifier"),
 		RefreshToken: r.Form.Get("refresh_token"),
+		DeviceCode:   r.Form.Get("device_code"),
 	}, nil
 }
 

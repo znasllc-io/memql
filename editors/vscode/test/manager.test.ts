@@ -14,8 +14,17 @@ import { ConnectionManager, type ConnectionState, type DialFn } from "../src/con
 import type { ClusterConfig } from "../src/clusters/model.js";
 import type { Connection } from "@znasllc-io/memql-sdk-core/client";
 
+// A live JWT by default. The bearer's CLASS and its `exp` are now load-bearing
+// (memql#3383 / memql#3385): ConnectionManager resolves the credential before
+// it dials, so a fixture carrying the old `mql_pat_x` would be refused rather
+// than dialed, and every unrelated test here would fail for the wrong reason.
+function liveJwt(secondsFromNow = 3600): string {
+  const b64 = (v: unknown): string => Buffer.from(JSON.stringify(v)).toString("base64url");
+  return `${b64({ alg: "RS256" })}.${b64({ sub: "u", exp: Math.floor(Date.now() / 1000) + secondsFromNow })}.sig`;
+}
+
 function cluster(name: string, overrides: Partial<ClusterConfig> = {}): ClusterConfig {
-  return { name, endpoint: "cockpit.local.znas.io:443", pat: "mql_pat_x", ...overrides };
+  return { name, endpoint: "cockpit.local.znas.io:443", token: liveJwt(), ...overrides };
 }
 
 // A fake connection satisfying just what ConnectionManager touches
@@ -75,10 +84,16 @@ function deferred<T>(): {
 }
 
 // Flushes the microtask queue `n` times. connect()'s internal awaits
-// (closeCurrent, then the injected dial) each resolve after exactly one
-// microtask tick when the underlying promise is already settled; a few
+// (closeCurrent, the CREDENTIAL RESOLUTION, then the injected dial) each
+// resolve after a tick or two when the underlying promise is already settled;
 // extra flushes are harmless no-ops.
-async function flush(n = 3): Promise<void> {
+//
+// The default has headroom deliberately. Credential resolution (memql#3383)
+// added an await between closeCurrent and the dial, so the number of ticks
+// before "connecting" is published is no longer something a reader should have
+// to count -- and a too-tight flush would fail as a confusing assertion about
+// state rather than as a timing problem.
+async function flush(n = 8): Promise<void> {
   for (let i = 0; i < n; i++) await Promise.resolve();
 }
 
@@ -140,7 +155,12 @@ test("a dial rejection publishes the error state for the cluster that was dialin
 
   await manager.connect(cluster("a"));
 
-  assert.deepEqual(manager.state, { status: "error", clusterName: "a", message: "boom" });
+  assert.deepEqual(manager.state, {
+    status: "error",
+    clusterName: "a",
+    message: "boom",
+    reason: "unreachable",
+  });
 });
 
 test("a non-Error rejection is stringified into the error message", async () => {
@@ -153,6 +173,7 @@ test("a non-Error rejection is stringified into the error message", async () => 
     status: "error",
     clusterName: "a",
     message: "plain string failure",
+    reason: "unreachable",
   });
 });
 
@@ -172,7 +193,11 @@ test("onDidChangeState's disposer stops delivering further state changes", async
   assert.deepEqual(manager.state, { status: "disconnected" });
 });
 
-test("an OIDC-only cluster (no PAT) produces the cockpit-authentication message without dialing", async () => {
+test("a credential-less OIDC cluster reports a MISSING CREDENTIAL, without dialing", async () => {
+  // It used to say "authenticate it in the memQL Cockpit first" -- an
+  // instruction that does not produce a credential this extension can then use
+  // (memql#3383). An issuer and a client id are not a token; the honest report
+  // is that there is no credential, and what kind to supply.
   let dialed = false;
   const dial: DialFn = () => {
     dialed = true;
@@ -181,16 +206,65 @@ test("an OIDC-only cluster (no PAT) produces the cockpit-authentication message 
   const manager = new ConnectionManager(dial);
 
   await manager.connect(
-    cluster("oidc", { pat: undefined, issuer: "https://issuer.example.com", clientId: "abc" }),
+    cluster("oidc", { token: undefined, issuer: "https://issuer.example.com", clientId: "abc" }),
   );
 
-  assert.equal(dialed, false, "an OIDC-only cluster must never reach the dial call");
-  assert.deepEqual(manager.state, {
-    status: "error",
-    clusterName: "oidc",
-    message:
-      "This cluster is configured for OIDC. Authenticate it in the memQL Cockpit first, or add a PAT to clusters.yaml.",
+  assert.equal(dialed, false, "a cluster with no credential must never reach the dial call");
+  assert.equal(manager.state.status, "error");
+  const state = manager.state as { message: string; reason: string };
+  assert.equal(state.reason, "missingCredential");
+  assert.doesNotMatch(state.message, /Cockpit/);
+  assert.match(state.message, /JWT access token/);
+});
+
+test("a PAT is refused by name, without dialing", async () => {
+  // THE memql#3383 acceptance item at the connection layer: a wrong-class token
+  // must produce an actionable message, not a bare handshake failure.
+  let dialed = false;
+  const manager = new ConnectionManager(() => {
+    dialed = true;
+    return Promise.resolve(fakeConn("x"));
   });
+
+  await manager.connect(cluster("local", { token: "mql_pat_abcdef" }));
+
+  assert.equal(dialed, false);
+  const state = manager.state as { status: string; message: string; reason: string };
+  assert.equal(state.reason, "wrongTokenClass");
+  assert.match(state.message, /Personal Access Token/);
+});
+
+test("an expired token with no refresh path reports credentialExpired, not a transport failure", async () => {
+  const manager = new ConnectionManager(() => Promise.resolve(fakeConn("x")));
+
+  await manager.connect(cluster("local", { token: liveJwt(-60) }));
+
+  const state = manager.state as { reason: string };
+  assert.equal(state.reason, "credentialExpired");
+});
+
+test("the dial carries an onTokenExpired hook so a LIVE stream can re-auth in place", async () => {
+  // sdk/ts arms a timer against the bearer's exp and calls this hook shortly
+  // before it runs out, rotating over the existing socket. That is what lets a
+  // long session outlive a 15-minute access token WITHOUT a reconnect -- and
+  // therefore without dropping the session-defined constructs a reconnect takes
+  // with it (memql#3385).
+  let hook: (() => Promise<string | null>) | undefined;
+  const manager = new ConnectionManager(
+    (opts) => {
+      hook = opts.auth?.onTokenExpired;
+      return Promise.resolve(fakeConn("x"));
+    },
+    {
+      resolve: async () => ({ ok: true, bearer: "FIRST" }),
+      forceRefresh: async () => "ROTATED",
+    },
+  );
+
+  await manager.connect(cluster("local"));
+
+  assert.ok(hook, "the dial must supply a re-auth hook");
+  assert.equal(await hook(), "ROTATED");
 });
 
 test("an unconfigured cluster (no endpoint) produces the generic not-configured message", async () => {
@@ -201,14 +275,13 @@ test("an unconfigured cluster (no endpoint) produces the generic not-configured 
   };
   const manager = new ConnectionManager(dial);
 
-  await manager.connect(cluster("empty", { endpoint: "", pat: undefined }));
+  await manager.connect(cluster("empty", { endpoint: "", token: undefined }));
 
   assert.equal(dialed, false);
-  assert.deepEqual(manager.state, {
-    status: "error",
-    clusterName: "empty",
-    message: "This cluster is not configured. Set an endpoint and a PAT.",
-  });
+  const state = manager.state as { status: string; message: string; reason: string };
+  assert.equal(state.status, "error");
+  assert.equal(state.reason, "notConfigured");
+  assert.match(state.message, /not configured/);
 });
 
 test("disconnect() closes the live connection and publishes disconnected", async () => {
@@ -255,6 +328,7 @@ test("a server-side drop publishes a non-connected state", async () => {
     status: "error",
     clusterName: "a",
     message: "Connection to a was lost. Select the cluster again to reconnect.",
+    reason: "lost",
   });
   assert.equal(seen.at(-1)?.status, "error", "the drop must be published to listeners");
 });
@@ -345,10 +419,9 @@ test("a reconnect to the same cluster is not undone by the previous connection's
   assert.deepEqual(manager.query, { conn: "second" });
 });
 
-test("an OIDC cluster with no endpoint reports 'not configured', not 'authenticate in the Cockpit'", async () => {
-  // isOidcOnly is checked before needsAuth, so an isOidcOnly that ignored the
-  // endpoint sent the operator to the cockpit to authenticate a cluster that
-  // has nowhere to dial in the first place.
+test("a credential-less cluster with no endpoint reports 'not configured', not a credential problem", async () => {
+  // Nowhere to dial outranks nothing to dial with: "supply a JWT" is the wrong
+  // instruction for a cluster that has no address.
   let dialed = false;
   const dial: DialFn = () => {
     dialed = true;
@@ -359,16 +432,14 @@ test("an OIDC cluster with no endpoint reports 'not configured', not 'authentica
   await manager.connect(
     cluster("oidc-no-endpoint", {
       endpoint: "",
-      pat: undefined,
+      token: undefined,
       issuer: "https://issuer.example.com",
       clientId: "abc",
     }),
   );
 
   assert.equal(dialed, false);
-  assert.deepEqual(manager.state, {
-    status: "error",
-    clusterName: "oidc-no-endpoint",
-    message: "This cluster is not configured. Set an endpoint and a PAT.",
-  });
+  const state = manager.state as { message: string; reason: string };
+  assert.equal(state.reason, "notConfigured");
+  assert.match(state.message, /not configured/);
 });

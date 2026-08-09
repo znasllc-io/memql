@@ -94,7 +94,12 @@ func (s *Server) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 		displayName = n
 	}
 	data := webtempl.LoginData{
-		Layout:              s.LayoutData(r, "Authorize access", false, nil, nil),
+		// Same passkey enhancement the plain /login render ships
+		// (memql#3407). This is the page that matters most for it: the
+		// /authorize path is the one carrying a PKCE challenge, and the
+		// control's whole job is to reach the same auth code with that
+		// binding intact.
+		Layout:              s.LayoutData(r, "Authorize access", false, nil, []string{s.assetURL("/static/passkey-login.js")}),
 		Mode:                string(settings.RegistrationMode),
 		Stage:               "email",
 		AllowedDomainsHint:  settings.RegistrationDomains,

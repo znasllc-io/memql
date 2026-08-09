@@ -58,42 +58,8 @@ func TestBlankBlockComments_RespectsLineCommentsAndStrings(t *testing.T) {
 	}
 }
 
-// TestArgsFieldDescriptionLines pins the args-block scanner: hits only
-// inside args{}, not on declaration-level or concept-field annotations,
-// and the deployment/actions.memql shape (a // comment containing /*
-// upstream of the args block) stays visible.
-func TestArgsFieldDescriptionLines(t *testing.T) {
-	src := `@description("declaration level -- load-bearing")
-// allowlisted scripts/* path prose
-action probe {
-  args {
-    workdir string @required @description("discarded")
-    ref     string
-  }
-}
-concept widget {
-  label string @description("concept field -- load-bearing")
-}
-`
-	got := argsFieldDescriptionLines(src)
-	if len(got) != 1 || got[0] != 5 {
-		t.Errorf("want exactly line 5, got %v", got)
-	}
-}
-
-// TestArgsFieldDescriptionLines_PositionAware pins the #2658 findings:
-// an annotation on the `args {` opener line IS inside the block (the
-// old line scanner skipped the opener), and a one-line `} shape {`
-// transition exits args at the closing brace -- the sibling block's
-// load-bearing field prose never flags.
-func TestArgsFieldDescriptionLines_PositionAware(t *testing.T) {
-	opener := "query q {\n  args { x string @description(\"dead\") }\n}\n"
-	if got := argsFieldDescriptionLines(opener); len(got) != 1 || got[0] != 2 {
-		t.Errorf("opener-line annotation: want line 2, got %v", got)
-	}
-
-	transition := "mutation m {\n  args {\n    x string\n  } shape {\n    y string @description(\"keep\")\n  }\n}\n"
-	if got := argsFieldDescriptionLines(transition); len(got) != 0 {
-		t.Errorf("one-line }-shape-{ transition: want no hits, got %v", got)
-	}
-}
+// (The args-field @description line scanner these helpers also pinned is
+// gone -- memql#3336 made the annotation a parse rejection, so the corpus is
+// gated structurally: a .memql carrying one refuses to load, which
+// dslimports.Load in server_only_parsed_test.go already fails on. The
+// regex gate that used to stand in for that is retired with the scanner.)

@@ -49,6 +49,7 @@ pins this table to the allow-lists so the two cannot drift.
 | `@mergeFields("a", "b")` | No | Yes | No | Deep-merge the named object payload fields on update instead of replacing them |
 | `@appendFields("a", "b")` | No | Yes | No | Append the named array payload fields' elements to the stored array on update instead of replacing them |
 | `@createOnly("a", "b")` | No | Yes | No | Write the named payload fields only on create; preserve the stored value on an insert (upsert) onto an existing id |
+| `@noUnset("a", "b")` | No | Yes | No | Declare the named payload fields one-way: a write may set them, never blank them. An empty incoming value is dropped when the stored value is non-empty |
 | **Auditing** |
 | `@audit` | No | No | No | Not accepted -- removed from the allow-lists (#989); rejected at load |
 | **Triggers (Automation Only)** |
@@ -491,6 +492,33 @@ row, so a create-only field could never be written).
 ```memql
 @createOnly("status", "attempts")
 mutate outboundRequest stageOutboundRequest { ... }
+```
+
+#### `@noUnset("...")`
+Declares the named payload fields ONE-WAY: a write may set them, and may
+change one non-empty value to another, but may never take a stored
+non-empty value back to empty. On the read-merge path a named field whose
+incoming value is empty is dropped from the delta when the stored row holds
+a non-empty one.
+
+This closes a gap read-merge structurally cannot. Read-merge inherits a
+stored value only for fields **absent** from a delta; a body written
+`bootstrappedAt: args.bootstrappedAt ?? ""` materialises an omitted arg into
+an explicit empty string, which is present in the delta and therefore wins
+the merge. A caller who never mentioned the field thereby blanked it -- which
+un-bootstrapped a live cluster, locked every user out of `/login`, and
+re-opened the unauthenticated `/setup` ownership wizard (memql#3415).
+
+Distinct from `@createOnly`, which forbids *any* post-create write to the
+field. `@noUnset` forbids only the set -> unset direction, so a legitimately
+later stamp (the magic-link verifier writing `bootstrappedAt`) still lands.
+Valid on insert- and update-kind mutations alike; a create with no prior row
+is unaffected either way. "Empty" means nil, a blank string, or an empty
+array/object -- never a numeric or boolean zero, which are real values.
+
+```memql
+@noUnset("bootstrappedAt")
+mutate clusterSettings updateClusterSettings { ... }
 ```
 
 ---

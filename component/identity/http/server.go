@@ -13,6 +13,11 @@
 //	POST /pair/codes       -- mint a worker-pairing code (Bearer auth)
 //	POST /pair/redeem      -- redeem a code for a worker token (Pair auth)
 //	POST /auth/badge/grant -- exchange a registered badge id for a short-lived operator grant (Bearer auth; memql#2513)
+//	POST /auth/webauthn/register/begin  -- issue a passkey registration challenge (Bearer auth; memql#3406)
+//	POST /auth/webauthn/register/finish -- verify the attestation and persist the credential (Bearer auth; memql#3406)
+//	POST /auth/webauthn/login/begin     -- issue a usernameless passkey assertion challenge (unauthenticated; memql#3407)
+//	POST /auth/webauthn/login/finish    -- verify the assertion and mint an OAuth auth code (unauthenticated; memql#3407)
+//	POST /device/code      -- RFC 8628 device authorization request (memql#3410)
 //
 // /.well-known/jwks.json is mounted by component/identity.Service
 // directly (Phase 1 wiring); Server only owns the auth flow.
@@ -28,8 +33,10 @@ import (
 
 	"github.com/znasllc-io/memql/component/identity"
 	"github.com/znasllc-io/memql/component/identity/abuse"
+	"github.com/znasllc-io/memql/component/identity/devicecode"
 	"github.com/znasllc-io/memql/component/identity/magiclink"
 	"github.com/znasllc-io/memql/component/identity/refresh"
+	"github.com/znasllc-io/memql/component/identity/webauthn"
 )
 
 // Server bundles the dependencies the handlers need. Constructed once
@@ -72,6 +79,46 @@ type Server struct {
 	// logger, matching the anti-abuse pattern above.
 	badgeGrantLimiter     *abuse.IPRateLimiter
 	badgeGrantLimiterOnce sync.Once
+
+	// passkeyLimiter is the per-IP token bucket for the WebAuthn
+	// registration ceremony (memql#3406), lazily built per-Server on
+	// first use for the same reason badgeGrantLimiter is.
+	passkeyLimiter     *abuse.IPRateLimiter
+	passkeyLimiterOnce sync.Once
+
+	// passkeyLoginLimiter is the per-IP token bucket for the WebAuthn
+	// LOGIN ceremony (memql#3407). Separate from the registration bucket
+	// above because the two have different natural rates -- signing in is
+	// routine, enrolling is rare -- and because the login pair is
+	// UNAUTHENTICATED, so its bucket is the only thing standing between a
+	// script and an unbounded stream of challenges.
+	passkeyLoginLimiter     *abuse.IPRateLimiter
+	passkeyLoginLimiterOnce sync.Once
+
+	// webauthnCeremonyValue is the relying party + challenge store the
+	// passkey routes use, derived once from Cfg.BaseURL. Built lazily
+	// rather than injected so the RP ID has exactly one source and cannot
+	// drift from the Config the rest of the service reads. The derivation
+	// error is cached alongside it: a base URL that yields no usable RP ID
+	// is a boot-time misconfiguration, and the routes refuse rather than
+	// falling back to the request Host.
+	webauthnCeremonyValue *webauthn.Ceremony
+	webauthnCeremonyErr   error
+	webauthnCeremonyOnce  sync.Once
+
+	// DeviceCodes backs the RFC 8628 device authorization grant
+	// (memql#3410): POST /device/code here, the verification page in
+	// component/identity/web, and the device_code grant on
+	// /oauth/token. Nil leaves /device/code returning
+	// temporarily_unavailable and the grant refusing -- binaries
+	// without an engine do not half-serve the flow.
+	DeviceCodes *devicecode.Store
+
+	// deviceCodeLimiterVal is the per-IP limiter on POST /device/code,
+	// lazily built per-Server on first use for the same reason
+	// badgeGrantLimiter is server-scoped rather than a package global.
+	deviceCodeLimiterVal  *abuse.IPRateLimiter
+	deviceCodeLimiterOnce sync.Once
 }
 
 // effectiveTokenSettings returns the live TTL + cookie settings for
@@ -181,6 +228,15 @@ func (s *Server) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /auth/badge/grant", wrap(s.cors(s.handleBadgeGrant)))
 	mux.HandleFunc("OPTIONS /auth/badge/grant", wrap(s.cors(s.handleOptions)))
 
+	// RFC 8628 device authorization request (memql#3410). Public by
+	// design -- the requesting device has no credential yet; the
+	// client_id must resolve and the per-IP limiter bounds the rest.
+	// The human-facing verification page (GET /device) is mounted by
+	// component/identity/web, and the redemption is a grant on
+	// /oauth/token above.
+	mux.HandleFunc("POST /device/code", wrap(s.cors(s.handleDeviceCode)))
+	mux.HandleFunc("OPTIONS /device/code", wrap(s.cors(s.handleOptions)))
+
 	// Node bootstrap -- self-mint a class="node" JWT for cluster
 	// binaries (bff / agent / cognition / planner / voice) that
 	// boot with MEMQL_NODE_TOKEN empty. Authenticates via
@@ -189,6 +245,24 @@ func (s *Server) Mount(mux *http.ServeMux) {
 	// identity service. memql#338.
 	mux.HandleFunc("POST /node/bootstrap", wrap(s.cors(s.handleNodeBootstrap)))
 	mux.HandleFunc("OPTIONS /node/bootstrap", wrap(s.cors(s.handleOptions)))
+
+	// WebAuthn passkey registration (memql#3406). Both steps require an
+	// authenticated user-class bearer; the RP id comes from Cfg.BaseURL,
+	// never from the request Host. Login is memql#3407.
+	mux.HandleFunc("POST /auth/webauthn/register/begin", wrap(s.cors(s.handleWebAuthnRegisterBegin)))
+	mux.HandleFunc("OPTIONS /auth/webauthn/register/begin", wrap(s.cors(s.handleOptions)))
+	mux.HandleFunc("POST /auth/webauthn/register/finish", wrap(s.cors(s.handleWebAuthnRegisterFinish)))
+	mux.HandleFunc("OPTIONS /auth/webauthn/register/finish", wrap(s.cors(s.handleOptions)))
+
+	// WebAuthn passkey login (memql#3407). UNAUTHENTICATED by nature --
+	// this pair IS the authentication -- and it ends in the same auth
+	// code /auth/complete produces, so /oauth/token cannot tell which
+	// factor ran. Per-IP rate-limited and HTTPS-required inside the
+	// handlers.
+	mux.HandleFunc("POST /auth/webauthn/login/begin", wrap(s.cors(s.handleWebAuthnLoginBegin)))
+	mux.HandleFunc("OPTIONS /auth/webauthn/login/begin", wrap(s.cors(s.handleOptions)))
+	mux.HandleFunc("POST /auth/webauthn/login/finish", wrap(s.cors(s.handleWebAuthnLoginFinish)))
+	mux.HandleFunc("OPTIONS /auth/webauthn/login/finish", wrap(s.cors(s.handleOptions)))
 
 	if s.Logger != nil {
 		s.Logger.Info("identity HTTP routes mounted",

@@ -211,6 +211,17 @@ export function installPlan(opts: CliOptions): (step: Step) => StepPlan {
           "provider-key-file": opts.providerKeyFile,
         });
         break;
+      case "enrolmentLink":
+        // The account to enrol is the owner seedBootstrap just created, and
+        // the link has to point at the PUBLIC identity host rather than the
+        // in-cluster one, so the domain the operator gave the installer is
+        // where it comes from. Both are already CLI options; nothing new is
+        // asked of the operator to get a passkey out of the install.
+        params = present({
+          "user-email": opts.ownerEmail,
+          "base-url": opts.domain ? `https://identity.${opts.domain}` : undefined,
+        });
+        break;
       default:
         break;
     }

@@ -4,9 +4,11 @@ import {
   commands,
   Diagnostic,
   DiagnosticSeverity,
+  env,
   ExtensionContext,
   languages,
   Position,
+  ProgressLocation,
   Range,
   RelativePattern,
   Uri,
@@ -26,8 +28,25 @@ import { browseConceptPage } from '@znasllc-io/memql-sdk-core/client';
 import type { Concept } from '@znasllc-io/memql-sdk-core/client';
 import type { ConceptLike } from '@znasllc-io/memql-view-kit';
 
-import { addCluster, defaultClustersPath, readClustersFileSafe, setSelectedCluster, upsertCluster } from './clusters/file.js';
-import type { ClusterConfig } from './clusters/model.js';
+import { signInWithDeviceCode } from './auth/deviceCodeUi.js';
+import { runAuthorizationFlow } from './auth/flow.js';
+import {
+  canSignIn,
+  describeSignInFailure,
+  performSignIn,
+  signInCanRecover,
+  type SignInTokenStore,
+} from './auth/signin.js';
+import { persistSignIn, signOut as signOutCredentials } from './auth/store.js';
+import { addCluster, defaultClustersPath, readClustersFileSafe, setSelectedCluster, upsertCluster, type ClusterUpdate } from './clusters/file.js';
+import { displayLabel, type ClusterConfig } from './clusters/model.js';
+import {
+  ClusterPresence,
+  addClusterMenu,
+  type AddClusterAction,
+  type PresenceVerdict,
+} from './clusters/presence.js';
+import { CredentialResolver } from './connection/credentials.js';
 import { ConnectionManager } from './connection/manager.js';
 import {
   COMMAND_RUN,
@@ -75,11 +94,64 @@ import { ResultPanel, RunPanel, conceptMap, type RunPanelHost } from './webview/
 let client: LanguageClient | undefined;
 let connections: ConnectionManager | undefined;
 
+// activate wires the extension's TWO INDEPENDENT SURFACES: the language client
+// and the runtime surface (Clusters / Concepts / Runs).
+//
+// They have separate preconditions and must fail separately. The language
+// client needs a memql-lsp binary; the runtime surface needs workspace trust
+// and nothing else. This function once resolved the binary FIRST and returned
+// when it was missing, which skipped the runtime registration entirely
+// (memql#3387): the three views still rendered -- their `when` clause only
+// asks for trust -- but no tree data provider, watcher or command was ever
+// registered, so they sat permanently empty behind an error message about a
+// language server they need nothing from. That is the DEFAULT first-run state
+// (no bundled binary, nothing on PATH), and `onView:memqlClusters` is an
+// activation event, so clicking into Clusters was enough to hit it.
+//
+// Neither half may short-circuit the other. startLanguageClient reports its own
+// failure and returns.
 export function activate(context: ExtensionContext): void {
+  startLanguageClient(context);
+
+  // The runtime surface reads credentials from the home directory and opens a
+  // network connection, so it is gated on workspace trust. Language features
+  // above are not.
+  //
+  // Workspace trust can transition Restricted -> Trusted within a running
+  // session (the user clicks "Trust This Workspace"); VS Code's own guidance
+  // for a "limited" untrustedWorkspaces extension is to listen for that and
+  // light up the gated functionality without requiring a window reload. An
+  // untrusted activation therefore arms a one-shot listener instead of just
+  // returning.
+  if (workspace.isTrusted) {
+    registerRuntimeSurface(context);
+  } else {
+    const trustGranted = workspace.onDidGrantWorkspaceTrust(() => {
+      trustGranted.dispose();
+      registerRuntimeSurface(context);
+    });
+    context.subscriptions.push(trustGranted);
+  }
+}
+
+// startLanguageClient boots the memql-lsp client, or reports why it could not.
+//
+// It returns void rather than a success flag on purpose: no caller may make a
+// decision out of the outcome. The runtime surface does not depend on the
+// language server, and the one place inside the run surface that genuinely
+// does (the CodeLens provider) reads module-level `client` and degrades on
+// its own.
+function startLanguageClient(context: ExtensionContext): void {
   const serverPath = resolveServerPath(context);
-  if (!serverPath) {
+  if (serverPath === undefined) {
+    // Names what is ACTUALLY lost. The old wording ("memql-lsp binary not
+    // found") read as "the extension is dead", which is exactly the wrong
+    // thing to tell someone whose Clusters view is empty for an unrelated
+    // reason.
     window.showErrorMessage(
-      'MemQL: memql-lsp binary not found. Set "memql.lsp.serverPath", bundle a platform binary, or install memql-lsp on your PATH.'
+      'MemQL: language features (highlighting, diagnostics, completion, hover) are unavailable -- no memql-lsp binary was found. ' +
+        'Set "memql.lsp.serverPath" in your user settings, bundle a platform binary, or install memql-lsp on your PATH. ' +
+        'The Clusters, Concepts and Runs views do not need it and still work.'
     );
     return;
   }
@@ -114,26 +186,6 @@ export function activate(context: ExtensionContext): void {
       `MemQL: language server failed to start: ${err instanceof Error ? err.message : String(err)}`
     );
   });
-
-  // The runtime surface reads credentials from the home directory and opens a
-  // network connection, so it is gated on workspace trust. Language features
-  // above are not.
-  //
-  // Workspace trust can transition Restricted -> Trusted within a running
-  // session (the user clicks "Trust This Workspace"); VS Code's own guidance
-  // for a "limited" untrustedWorkspaces extension is to listen for that and
-  // light up the gated functionality without requiring a window reload. An
-  // untrusted activation therefore arms a one-shot listener instead of just
-  // returning.
-  if (workspace.isTrusted) {
-    registerRuntimeSurface(context);
-  } else {
-    const trustGranted = workspace.onDidGrantWorkspaceTrust(() => {
-      trustGranted.dispose();
-      registerRuntimeSurface(context);
-    });
-    context.subscriptions.push(trustGranted);
-  }
 }
 
 function registerRuntimeSurface(context: ExtensionContext): void {
@@ -146,7 +198,33 @@ function registerRuntimeSurface(context: ExtensionContext): void {
   }
 
   const clustersPath = defaultClustersPath();
-  connections = new ConnectionManager();
+  // The credential resolver (memql#3383 / memql#3385). This is the only place
+  // the three things it needs actually exist:
+  //
+  //   - context.secrets  -- VS Code's SecretStorage, where the LONG-LIVED
+  //     refresh token is kept. clusters.yaml is plaintext and owned by the
+  //     memQL Cockpit, so the 30-day credential must not live there; the
+  //     15-minute access token still does, because the Cockpit reads it too.
+  //     See src/connection/credentials.ts for the full split.
+  //   - a write-back into clusters.yaml, so a refreshed access token is there
+  //     for the next connect (and for the Cockpit) instead of being re-earned.
+  //   - the global fetch, for the /oauth/token exchange.
+  connections = new ConnectionManager(
+    undefined,
+    new CredentialResolver({
+      secrets: context.secrets,
+      persist: async (clusterName, update) => {
+        // undefined leaves the on-disk value alone; "" DELETES the key. So the
+        // plaintext refresh token is removed only once SecretStorage has taken
+        // custody of the rotated one -- otherwise the file holds the only copy.
+        await upsertCluster(clustersPath, {
+          name: clusterName,
+          token: update.token,
+          refreshToken: update.clearStoredRefreshToken ? '' : undefined,
+        });
+      },
+    })
+  );
 
   const clustersTree = new ClustersTreeProvider(clustersPath, connections);
   context.subscriptions.push(
@@ -212,6 +290,39 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     })
   );
 
+  // The sign-in persistence seam (memql#3403 / memql#3404).
+  //
+  // This DELEGATES to src/auth/store.ts rather than reimplementing the split.
+  // It is tempting to inline it -- write the access token to clusters.yaml,
+  // the refresh token to SecretStorage, done -- and an earlier draft of this
+  // file did exactly that. It is wrong for a reason that is invisible from
+  // here: SecretStorage cannot be enumerated, so #3404 keeps an INDEX of which
+  // clusters have secrets, and sweeps any secret whose cluster is gone. A
+  // sign-in that wrote a secret without indexing it would look fine until the
+  // next sweep silently deleted the credential it had just stored.
+  const storeDeps = {
+    secrets: context.secrets,
+    writeCluster: (update: ClusterUpdate) => upsertCluster(clustersPath, update),
+  };
+  const signInStore: SignInTokenStore = {
+    persistSignIn: (clusterName, credentials) =>
+      persistSignIn(storeDeps, clusterName, {
+        accessToken: credentials.accessToken,
+        refreshToken: credentials.refreshToken,
+        expiresAtEpochSeconds: credentials.expiresAtEpochSeconds,
+        // The client_id is written separately by the ClientIdWriter below --
+        // it is registered before the tokens exist, so it is not part of this
+        // payload. "" leaves the stored value alone.
+        clientId: '',
+      }),
+    signOut: (clusterName) => signOutCredentials(storeDeps, clusterName),
+  };
+
+  // What the "+" branches on. Held for the life of the surface rather than
+  // built per click, because the memo (and the single-flight it wraps) is the
+  // whole reason opening the menu twice does not dial twice.
+  const presence = new ClusterPresence({ clustersPath });
+
   context.subscriptions.push(
     commands.registerCommand('memql.clusters.refresh', () => clustersTree.refresh()),
     commands.registerCommand('memql.clusters.disconnect', async () => {
@@ -228,10 +339,85 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       await connections?.connect(target.cluster);
       const state = connections?.state;
       if (state?.status === 'error') {
-        window.showErrorMessage(`memQL: ${state.message}`);
+        // A failure the CREDENTIAL causes now has a first-class recovery in the
+        // editor, so it is offered as the primary action rather than described
+        // in prose the operator has to act on somewhere else (memql#3403). The
+        // decision of which reasons qualify is signInCanRecover's -- a dial
+        // that failed because the cluster is unreachable is not made reachable
+        // by a fresh token, and `notConfigured` means there is no endpoint at
+        // all. canSignIn is the second half: a cluster naming no identity
+        // service has nowhere to sign in to, and a button whose only outcome is
+        // an error toast is worse than no button.
+        const offer = signInCanRecover(state.reason) && canSignIn(target.cluster);
+        const choice = offer
+          ? await window.showErrorMessage(`memQL: ${state.message}`, 'Sign in')
+          : await window.showErrorMessage(`memQL: ${state.message}`);
+        if (choice === 'Sign in') {
+          await signInToCluster(target.cluster, {
+            clustersPath,
+            store: signInStore,
+            clustersTree,
+          });
+        }
       }
     }),
+    // memql#3403. Reached from the Clusters view's context menu (which supplies
+    // the node) and from the palette (which cannot, so it asks).
+    commands.registerCommand('memql.clusters.signIn', async (node?: ClusterNode) => {
+      const target = node ?? (await pickCluster(clustersPath));
+      if (target === undefined || target.cluster.name === '') {
+        return;
+      }
+      await signInToCluster(target.cluster, {
+        clustersPath,
+        store: signInStore,
+        clustersTree,
+      });
+    }),
+    // The counterpart: forget this cluster's session. The store owns what that
+    // means in each of the two places a credential lives (memql#3404).
+    commands.registerCommand('memql.clusters.signOut', async (node?: ClusterNode) => {
+      const target = node ?? (await pickCluster(clustersPath));
+      if (target === undefined || target.cluster.name === '') {
+        return;
+      }
+      try {
+        await signInStore.signOut(target.cluster.name);
+      } catch (err) {
+        window.showErrorMessage(
+          `memQL: signing out of "${target.cluster.name}" failed: ${err instanceof Error ? err.message : String(err)}`
+        );
+        return;
+      }
+      // A live connection is dialing with the credential just revoked; leaving
+      // it up would make "signed out" false for as long as the socket lasts.
+      const state = connections?.state;
+      if (state !== undefined && state.status !== 'disconnected' && state.clusterName === target.cluster.name) {
+        await connections?.disconnect();
+      }
+      clustersTree.refresh();
+      window.showInformationMessage(
+        `memQL: signed out of "${target.cluster.name}". Run "memQL: Sign In" to authenticate again.`
+      );
+    }),
+    // The "+" (memql#3412). It used to mean exactly one thing -- register a
+    // remote cluster -- for an operator who may have no cluster at all, or one
+    // already installed and running. It now branches on EVIDENCE
+    // (src/clusters/presence.ts) and the remote path below is unchanged: it is
+    // what the "Connect to an existing cluster..." choice runs.
     commands.registerCommand('memql.clusters.add', async () => {
+      const action = await pickAddClusterAction(presence);
+      if (action === undefined) {
+        return;
+      }
+      if (action === 'install' || action === 'repair') {
+        await launchLocalClusterInstaller(action);
+        // The two events that change the verdict deterministically. Waiting
+        // out the memo window would show someone who just installed a cluster
+        // the menu for someone who has none.
+        presence.invalidate();
+        return;
+      }
       const created = await promptForCluster();
       if (created === undefined) {
         return;
@@ -271,6 +457,23 @@ function registerRuntimeSurface(context: ExtensionContext): void {
         return;
       }
       ClusterPanel.open(context, connections, target.cluster.name);
+    })
+  );
+
+  // The DELIBERATE device-code sign-in (memql#3411). The fallback fires by
+  // itself when the loopback flow proves this host cannot do it, but that
+  // costs a two-minute callback deadline first -- so a user who already knows
+  // their environment (a container, a hardened network, an SSH session with no
+  // browser) can ask for the device code straight away.
+  context.subscriptions.push(
+    commands.registerCommand('memql.clusters.signInWithCode', async (node?: ClusterNode) => {
+      const target = node ?? (await pickCluster(clustersPath));
+      if (target === undefined) {
+        return;
+      }
+      if (await signInWithDeviceCode(target.cluster, { clustersPath, secrets: context.secrets })) {
+        clustersTree.refresh();
+      }
     })
   );
 
@@ -983,6 +1186,89 @@ async function writeCluster(
   clustersTree.refresh();
 }
 
+// pickAddClusterAction resolves the verdict and asks the operator what they
+// meant by "+".
+//
+// A DETECTION THAT FAILS READS AS `installed-unreachable`, never as `absent`.
+// detectPresence already answers rather than rejects, so this catch is the
+// belt to that braces -- and the direction it fails in is the one that cannot
+// destroy anything: `absent` is the only verdict whose menu offers to install,
+// and an install run over an existing cluster rebuilds a k3d stack, a hosts
+// block and a trust-store CA underneath a working one.
+async function pickAddClusterAction(
+  presence: ClusterPresence
+): Promise<AddClusterAction | undefined> {
+  let verdict: PresenceVerdict;
+  try {
+    verdict = (await presence.get()).verdict;
+  } catch {
+    verdict = 'installed-unreachable';
+  }
+  return showAddClusterMenu(verdict);
+}
+
+/**
+ * Renders the "+" menu for a verdict.
+ *
+ * Exported for the Extension Development Host smoke lane, which drives it
+ * against a real quick pick -- the one thing about this function that a unit
+ * test structurally cannot reach is whether the workbench actually shows it.
+ *
+ * A ONE-ITEM MENU IS NOT SHOWN. `installed-healthy` leaves exactly one thing
+ * to do, and a single-item quick pick asks the user to confirm the absence of
+ * a decision. See addClusterMenu for why that item is never the installer.
+ */
+export async function showAddClusterMenu(
+  verdict: PresenceVerdict
+): Promise<AddClusterAction | undefined> {
+  const choices = addClusterMenu(verdict);
+  if (choices.length === 1) {
+    return choices[0].action;
+  }
+  const picked = await window.showQuickPick(
+    choices.map((choice) => ({ label: choice.label, detail: choice.detail, choice })),
+    { placeHolder: 'Add a memQL cluster', ignoreFocusOut: true }
+  );
+  return picked?.choice.action;
+}
+
+/**
+ * THE INSTALL SEAM (memql#3412).
+ *
+ * This is the single named function the "Install a local cluster..." and
+ * "Repair local cluster..." branches call, and it is deliberately the ONLY
+ * thing about those branches that is provisional. The install substrate
+ * (memql#3374) currently exposes its graph runner as a plain-node CLI --
+ * src/install/cli.ts, reached through `npm run install-cli` -- and no callable
+ * in-editor entry point exists yet, so this reports the command instead of
+ * running it: a graph run wants elevation prompts, a provider key and a
+ * progress surface, and inventing a half of that here is worse than naming the
+ * supported path.
+ *
+ * WHAT REPLACES IT: the install wizard from the install-substrate epic. When
+ * that entry point is callable, the body of this function becomes the call to
+ * it and nothing else in this file changes -- the menu, the verdict, and the
+ * invalidate() that follows a completed run are all already wired.
+ *
+ * `repair` runs the same graph as `install`: every step is idempotent and
+ * verifies its own postcondition, so re-running it over a cluster that stopped
+ * answering is the repair. Only the wording differs.
+ */
+async function launchLocalClusterInstaller(mode: 'install' | 'repair'): Promise<void> {
+  const command = 'npm run install-cli -- install';
+  const what =
+    mode === 'install'
+      ? 'Installing a local memQL cluster'
+      : 'Repairing the local memQL cluster';
+  const choice = await window.showInformationMessage(
+    `memQL: ${what} runs the installer from editors/vscode:\n\n    ${command}\n\nAn in-editor wizard is not wired up yet.`,
+    'Copy Command'
+  );
+  if (choice === 'Copy Command') {
+    await env.clipboard.writeText(command);
+  }
+}
+
 async function pickCluster(clustersPath: string): Promise<ClusterNode | undefined> {
   // readClustersFileSafe, not readClustersFile: the Clusters TREE already
   // renders a malformed file as a readable row, and this path must agree with
@@ -1006,6 +1292,102 @@ async function pickCluster(clustersPath: string): Promise<ClusterNode | undefine
     return undefined;
   }
   return { cluster: picked.cluster, selected: picked.cluster.name === file.selectedCluster };
+}
+
+interface SignInDeps {
+  clustersPath: string;
+  store: SignInTokenStore;
+  clustersTree: ClustersTreeProvider;
+}
+
+// signInToCluster is the editor half of memql#3403's sign-in: progress,
+// cancellation, and the two vscode.env capabilities the flow needs injected.
+//
+// WHY THE PROGRESS IS CANCELLABLE AND WHAT CANCELLING ACTUALLY DOES.
+// A browser sign-in parks on a loopback listener for minutes at a time waiting
+// for a person to finish a page they may already have closed. A notification
+// with no way out would leave the operator watching a spinner with no
+// affordance except reloading the window. The token is bridged to the
+// AbortSignal src/auth/flow.ts accepts, so cancelling closes the listener and
+// rejects with kind `cancelled` -- it is a real abort, not a hidden spinner.
+//
+// WHY THE FAILURE TOAST IS NOT AWAITED. Every rejection is reported through a
+// fire-and-forget message box: awaiting one would keep this command pending
+// until a human dismissed a notification, which makes the command unusable from
+// any automated caller (the host smoke lane included) and buys nothing -- the
+// message offers no choice to read back.
+async function signInToCluster(cluster: ClusterConfig, deps: SignInDeps): Promise<boolean> {
+  return window.withProgress(
+    {
+      location: ProgressLocation.Notification,
+      title: `memQL: signing in to ${displayLabel(cluster)}`,
+      cancellable: true,
+    },
+    async (progress, token) => {
+      const aborter = new AbortController();
+      const cancelSubscription = token.onCancellationRequested(() => aborter.abort());
+      try {
+        progress.report({ message: 'opening your browser...' });
+        await performSignIn(cluster, {
+          signal: aborter.signal,
+          store: deps.store,
+          persistClientId: async (clusterName, clientId) => {
+            await upsertCluster(deps.clustersPath, { name: clusterName, clientId });
+          },
+          runFlow: (target, signal) =>
+            runAuthorizationFlow(target, {
+              signal,
+              // asExternalUri is not decoration: under Remote-SSH, Codespaces
+              // or a dev container the browser runs on a different machine
+              // from this extension host, and the loopback URL has to be
+              // rewritten into one that machine can reach. toString(true)
+              // skips re-encoding -- the authorization URL's query is already
+              // percent-encoded and encoding it twice corrupts the PKCE
+              // challenge and the state.
+              resolveExternalUri: async (url) =>
+                (await env.asExternalUri(Uri.parse(url))).toString(true),
+              openExternal: (url) => env.openExternal(Uri.parse(url)),
+            }),
+        });
+      } catch (err) {
+        const report = describeSignInFailure(cluster.name, err);
+        if (report.level === 'error') {
+          void window.showErrorMessage(report.message);
+        } else if (report.level === 'warning') {
+          void window.showWarningMessage(report.message);
+        }
+        return false;
+      } finally {
+        cancelSubscription.dispose();
+      }
+
+      deps.clustersTree.refresh();
+
+      // Reconnect ONLY the working cluster. Exactly one connection exists at a
+      // time (see ConnectionManager), so dialing a cluster the operator merely
+      // signed into would silently switch which cluster every other view is
+      // showing. When the sign-in came from a failed connect, this IS the
+      // selected cluster and the reconnect is the point.
+      //
+      // Re-read from disk rather than reusing the in-memory config: the token
+      // just persisted is the whole reason to reconnect, and the object this
+      // function was called with predates it.
+      const result = await readClustersFileSafe(deps.clustersPath);
+      if (result.ok && result.file.selectedCluster === cluster.name) {
+        const fresh = result.file.clusters.find((c) => c.name === cluster.name);
+        if (fresh !== undefined) {
+          await connections?.connect(fresh);
+          const state = connections?.state;
+          if (state?.status === 'error') {
+            void window.showErrorMessage(`memQL: ${state.message}`);
+            return true;
+          }
+        }
+      }
+      void window.showInformationMessage(`memQL: signed in to "${cluster.name}".`);
+      return true;
+    }
+  );
 }
 
 // promptForCluster collects a cluster with native inputs rather than a webview:
@@ -1041,13 +1423,46 @@ async function promptForCluster(existing?: ClusterConfig): Promise<ClusterConfig
     return undefined;
   }
 
-  const pat = await window.showInputBox({
-    prompt: 'Personal Access Token (mql_pat_...). Leave empty to authenticate in the memQL Cockpit instead.',
-    value: existing?.pat ?? '',
+  // A JWT ACCESS TOKEN, not a PAT (memql#3383). The old prompt asked for a
+  // Personal Access Token, which a bff rejects before any lookup -- so an
+  // operator who answered it correctly still could not connect, and nothing
+  // said why.
+  //
+  // The field is now OPTIONAL IN PRACTICE (memql#3403): the extension can mint
+  // its own credential through the browser, so leaving this empty and running
+  // "memQL: Sign In" is the ordinary path rather than a dead end. Saying so
+  // here is the difference between an operator who signs in and one who goes
+  // hunting for a token to paste -- the prompt is where they are standing when
+  // the question arises.
+  const token = await window.showInputBox({
+    prompt:
+      'Access token (optional): the identity-issued JWT from POST <identity>/oauth/token. Leave empty and run "memQL: Sign In" to authenticate through your browser. A PAT (mql_pat_...) will not work -- the mesh verifies bearers via JWKS.',
+    value: existing?.token ?? '',
     ignoreFocusOut: true,
     password: true,
   });
-  if (pat === undefined) {
+  if (token === undefined) {
+    return undefined;
+  }
+
+  // The refresh token is collected here as the INGEST path only (memql#3385):
+  // the credential resolver takes custody of it on the first exchange, moving
+  // it into VS Code's SecretStorage and deleting it from the cockpit-shared
+  // plaintext file. It is a 30-day credential, so leaving it on disk is the
+  // thing this flow exists to avoid, not a step in it.
+  const refreshToken = await window.showInputBox({
+    prompt:
+      'Refresh token (optional): the `refresh_token` from the same response. Stored in the editor\'s secret storage and used to renew the access token as it expires.',
+    // Prefilled from whatever is still PENDING in the file. Normally nothing:
+    // once the resolver has taken custody the key is gone from disk, and the
+    // secret is deliberately not readable back into a text box. Prefilling the
+    // pending case is what stops "add a cluster, then edit it before the first
+    // connect" from silently dropping the token the operator just pasted.
+    value: existing?.refreshToken ?? '',
+    ignoreFocusOut: true,
+    password: true,
+  });
+  if (refreshToken === undefined) {
     return undefined;
   }
 
@@ -1088,8 +1503,8 @@ async function promptForCluster(existing?: ClusterConfig): Promise<ClusterConfig
   // Every collected field is returned, INCLUDING the empty ones. An empty
   // string means "the user cleared this input", which upsertCluster turns into
   // a key delete. Omitting the key instead would mean "leave whatever is on
-  // disk alone" -- so clearing the PAT field to revoke a token left the old
-  // token sitting in clusters.yaml while the UI showed it gone.
+  // disk alone" -- so clearing the token field to revoke a credential left the
+  // old one sitting in clusters.yaml while the UI showed it gone.
   //
   // `local` is returned as a real boolean for the same reason: false here means
   // "the user chose not-local", which upsertCluster writes as an ABSENT key
@@ -1098,7 +1513,8 @@ async function promptForCluster(existing?: ClusterConfig): Promise<ClusterConfig
     name: name.trim(),
     endpoint: endpoint.trim(),
     domain: domain.trim(),
-    pat: pat.trim(),
+    token: token.trim(),
+    refreshToken: refreshToken.trim(),
     local: localChoice.value,
   };
 }
@@ -1125,8 +1541,16 @@ export function deactivate(): Thenable<void> | undefined {
 // honoring it would let a malicious repo point the extension at an arbitrary
 // executable and run it (arbitrary code execution). The bundled binary and the
 // PATH fallback are not workspace-controlled.
+//
+// The rejection is REPORTED rather than silent (memql#3387). Ignoring a value
+// the user can read back in their own settings UI is its own trap: the setting
+// is visibly set, the extension visibly does not use it, and nothing on screen
+// explains the gap. reportIgnoredWorkspaceServerPath closes that.
 function resolveServerPath(context: ExtensionContext): string | undefined {
-  const configured = workspace.getConfiguration('memql.lsp').inspect<string>('serverPath')?.globalValue;
+  const inspected = workspace.getConfiguration('memql.lsp').inspect<string>('serverPath');
+  reportIgnoredWorkspaceServerPath(inspected);
+
+  const configured = inspected?.globalValue;
   if (typeof configured === 'string' && configured.trim() !== '') {
     return configured;
   }
@@ -1143,6 +1567,33 @@ function resolveServerPath(context: ExtensionContext): string | undefined {
   // undefined -- that lets the caller's friendly "not found" message fire
   // instead of surfacing a raw ENOENT from the spawned process.
   return resolveOnPath(binaryName());
+}
+
+// reportIgnoredWorkspaceServerPath tells the user, once per activation, that a
+// workspace-scoped memql.lsp.serverPath exists and is being ignored.
+//
+// A WARNING, not an error: nothing has failed. The user-level value (or the
+// bundled binary, or PATH) still resolves, and the message exists only so the
+// discrepancy between "the setting is set" and "the extension did not use it"
+// is visible rather than something to be discovered by reading source.
+//
+// An empty workspace value is not reported. Writing the setting and clearing
+// it again leaves `""` behind in the file, which asks for nothing and so
+// deserves no message.
+function reportIgnoredWorkspaceServerPath(
+  inspected: { workspaceValue?: string; workspaceFolderValue?: string } | undefined
+): void {
+  const workspaceScoped = [inspected?.workspaceValue, inspected?.workspaceFolderValue].some(
+    (value) => typeof value === 'string' && value.trim() !== ''
+  );
+  if (!workspaceScoped) {
+    return;
+  }
+  window.showWarningMessage(
+    'MemQL: "memql.lsp.serverPath" is set in this workspace and has been IGNORED. ' +
+      'The path is read only from your user settings -- a workspace-supplied one would let an opened folder ' +
+      'point the extension at any executable on your machine. Set it in User Settings if you meant it.'
+  );
 }
 
 // resolveOnPath returns the absolute path to an executable `name` found on the

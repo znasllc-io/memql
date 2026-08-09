@@ -52,7 +52,12 @@ func (s *Server) handleLoginGet(w http.ResponseWriter, r *http.Request) {
 	}
 	settings := s.snapshotSettings(r)
 	data := webtempl.LoginData{
-		Layout:             s.LayoutData(r, "Sign in", false, nil, nil),
+		// passkey-login.js reveals the "Sign in with a passkey" control
+		// the login template renders hidden (memql#3407). Shipped on
+		// every /login render rather than conditionally: the control is
+		// what the script looks for, so a page without one costs a
+		// cached 3 KB and does nothing.
+		Layout:             s.LayoutData(r, "Sign in", false, nil, []string{s.assetURL("/static/passkey-login.js")}),
 		Mode:               string(settings.RegistrationMode),
 		Stage:              "email",
 		AllowedDomainsHint: settings.RegistrationDomains,
@@ -76,23 +81,99 @@ func (s *Server) handleLoginGet(w http.ResponseWriter, r *http.Request) {
 	s.render(w, r, "login", webtempl.Login(data))
 }
 
-// preBootstrap returns true when no v1:identity:user row exists.
-// Used to gate /login (UX redirect to /setup) and /login POST
-// (friendly error). The auth-API gate lives inside the magic-link
-// Issuer so both code paths share the same check.
+// preBootstrap returns true when the cluster has not been bootstrapped
+// AND has never been claimed. Used to gate /login (UX redirect to
+// /setup) and /login POST (friendly error). The auth-API gate lives
+// inside the magic-link Issuer so both code paths share the same check.
 //
-// On error from the user-count callback, returns false (fail-open
-// for the UX redirect — the API path's gate is the real
-// security check).
+// Two independent signals, because one is not enough (memql#3415): the
+// CountUsers callback is wired to clusterSettings.bootstrappedAt, and a
+// stray write that blanked that one field made every / and /login hit
+// redirect to /setup on a cluster with hundreds of users -- nobody could
+// sign in. ClusterClaimed ("an owner user exists") is not something a
+// stray row produces, so it holds the redirect back.
+//
+// On error from either callback, returns false: "cannot determine" must
+// not bounce real users into the first-run wizard.
 func (s *Server) preBootstrap(r *http.Request) bool {
 	if s == nil || s.CountUsers == nil {
 		return false
 	}
 	n, err := s.CountUsers(r.Context())
-	if err != nil {
+	if err != nil || n != 0 {
 		return false
 	}
-	return n == 0
+	if s.ClusterClaimed != nil {
+		claimed, err := s.ClusterClaimed(r.Context())
+		if err != nil || claimed {
+			return false
+		}
+	}
+	return true
+}
+
+// setupSealed reports whether the first-run ownership wizard must be
+// refused. It is the gate on BOTH /setup handlers, and it is deliberately
+// the most conservative check in the web package: /setup mints the
+// cluster owner, so anything short of positive proof that this cluster is
+// unclaimed is a refusal (memql#3415).
+//
+// Sealed when ANY of the following holds:
+//
+//   - the bootstrap signal (CountUsers, wired to
+//     clusterSettings.bootstrappedAt) reports a bootstrapped cluster;
+//   - the claim signal (ClusterClaimed, wired to "an owner user exists")
+//     reports a claimed cluster;
+//   - EITHER signal returns an error -- the previous code swallowed those
+//     (`if n, err := CountUsers(); err == nil && n > 0`) and served the
+//     wizard, so a transient DB failure opened the ownership surface just
+//     as effectively as the blanked field did;
+//   - the claim signal is not wired at all. A binary that forgets it must
+//     not silently degrade to the single-signal behaviour this issue is
+//     about. There is exactly one wiring site (app/integrations_identity.go),
+//     and a bricked-but-loud /setup is recoverable in a way an exposed one
+//     is not.
+//
+// A genuinely fresh cluster -- both signals readable, both negative --
+// is the only state that serves the wizard.
+func (s *Server) setupSealed(r *http.Request) bool {
+	if s == nil {
+		return true
+	}
+	if s.CountUsers != nil {
+		n, err := s.CountUsers(r.Context())
+		if err != nil {
+			s.logSetupSeal(r, "bootstrap signal unreadable", err)
+			return true
+		}
+		if n > 0 {
+			return true
+		}
+	}
+	if s.ClusterClaimed == nil {
+		s.logSetupSeal(r, "cluster-claim signal not wired", nil)
+		return true
+	}
+	claimed, err := s.ClusterClaimed(r.Context())
+	if err != nil {
+		s.logSetupSeal(r, "cluster-claim signal unreadable", err)
+		return true
+	}
+	return claimed
+}
+
+// logSetupSeal records a refusal that was NOT a plain "already
+// bootstrapped". Those two cases (unreadable / unwired signal) seal a
+// wizard that might legitimately be needed, so they must not be silent.
+func (s *Server) logSetupSeal(r *http.Request, reason string, err error) {
+	if s == nil || s.Logger == nil {
+		return
+	}
+	s.Logger.Warn("identity/web: refusing /setup -- cannot prove this cluster is unclaimed",
+		"reason", reason,
+		"error", err,
+		"path", r.URL.Path,
+		"component", "identity")
 }
 
 // handleLoginPost is the unified email-first dispatcher. The form
@@ -389,14 +470,12 @@ func (s *Server) renderError(w http.ResponseWriter, r *http.Request, status int,
 	s.render(w, r, "error", webtempl.Error(data))
 }
 
-// handleSetupGet renders the first-run wizard. 404s once a user
-// already exists in the cluster.
+// handleSetupGet renders the first-run wizard. 404s unless the cluster
+// is provably unclaimed -- see setupSealed (memql#3415).
 func (s *Server) handleSetupGet(w http.ResponseWriter, r *http.Request) {
-	if s.CountUsers != nil {
-		if n, err := s.CountUsers(r.Context()); err == nil && n > 0 {
-			http.NotFound(w, r)
-			return
-		}
+	if s.setupSealed(r) {
+		http.NotFound(w, r)
+		return
 	}
 	// Wizard interactions (disabled-button + show/hide of conditional
 	// rows) are plain vanilla JS in setup-wizard.js. The page does
@@ -465,11 +544,9 @@ func (s *Server) handleSetupGet(w http.ResponseWriter, r *http.Request) {
 // handleSetupPost validates the wizard submission, persists the
 // settings row, and triggers a magic link to the captured owner email.
 func (s *Server) handleSetupPost(w http.ResponseWriter, r *http.Request) {
-	if s.CountUsers != nil {
-		if n, err := s.CountUsers(r.Context()); err == nil && n > 0 {
-			http.NotFound(w, r)
-			return
-		}
+	if s.setupSealed(r) {
+		http.NotFound(w, r)
+		return
 	}
 	if err := r.ParseForm(); err != nil {
 		s.renderError(w, r, http.StatusBadRequest, "We couldn't read your form submission.")
@@ -640,7 +717,19 @@ func (s *Server) handleMeSettings(w http.ResponseWriter, r *http.Request) {
 	s.render(w, r, "me/settings", webtempl.MeSettings(data))
 }
 
+// handleMeDevices renders /me/devices.
+//
+// Two shapes, decided by whether the passkey adapter is wired
+// (memql#3409). With it, the page carries per-user credential rows and is
+// auth-gated server-side like /me/tokens. Without it -- a binary with no
+// engine -- it stays the plain client-hydrated sessions shell, because
+// gating a page that has nothing per-user on it would only cost a
+// redirect.
 func (s *Server) handleMeDevices(w http.ResponseWriter, r *http.Request) {
+	if s.passkeysWired() {
+		s.handleMeDevicesPasskeys(w, r)
+		return
+	}
 	data := webtempl.MeDevicesData{
 		Layout: s.LayoutData(r, "Devices", true, meNavLinks(), nil),
 	}

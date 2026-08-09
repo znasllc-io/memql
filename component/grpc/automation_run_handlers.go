@@ -71,11 +71,28 @@ func (s *Server) SetAutomationRunner(r AutomationRunner) {
 
 // handleRunAutomation runs one named automation with a synthesized trigger
 // event and streams the step trace back.
+//
+// TRACEABILITY IS PART OF THE CONTRACT (memql#3414). A run that produces no log
+// line and no reply is undiagnosable from outside the process: when the invoke
+// path first met a real cluster, every frame was emitted correctly and dropped
+// by the client's routing table, and the total absence of server-side logging
+// meant the only observable fact was a caller parked forever. So this handler
+// logs the request on arrival and the terminal outcome exactly once, keyed by
+// request_id, and an operator can always answer "did the server see it, and
+// what did it decide" from the node's log alone.
 func (s *streamSession) handleRunAutomation(envelope *memqlv1.MemqlClientMessage, msg *memqlv1.RunAutomationMsg) error {
 	requestId := msg.GetRequestId()
 	correlate := envelope.GetMessageId()
 
 	sink := &streamRunSink{session: s, requestId: requestId, correlate: correlate}
+
+	if s.logger != nil {
+		s.logger.Info("automation run requested",
+			"request_id", requestId,
+			"automation", msg.GetAutomation(),
+			"target_node_type", msg.GetTargetNodeType(),
+			"timeout_ms", msg.GetTimeoutMs())
+	}
 
 	// AUTHORIZATION. Running an automation executes its whole action chain
 	// server-side: writes, LLM calls, downstream automations. It is the same
@@ -170,7 +187,22 @@ func (k *streamRunSink) Step(st automations.RunStep) {
 	})
 }
 
+// Complete emits the terminating frame. Exactly one per run, so this is also
+// where the run's outcome is logged -- one line per run, whatever the outcome,
+// including a refusal the handler made before the relay was consulted.
 func (k *streamRunSink) Complete(c automations.RunComplete) {
+	if k.session != nil && k.session.logger != nil {
+		k.session.logger.Info("automation run finished",
+			"request_id", k.requestId,
+			"run_id", c.RunId,
+			"status", c.Status,
+			"error_code", c.ErrorCode,
+			"error_message", c.ErrorMessage,
+			"step_count", c.StepCount,
+			"duration_ms", c.DurationMs,
+			"executed_on_node_id", c.ExecutedOnNodeId,
+			"executed_on_node_type", c.ExecutedOnNodeType)
+	}
 	k.send(c.RunId, &memqlv1.AutomationRunEvent_Complete{
 		Complete: &memqlv1.AutomationRunComplete{
 			Status:             c.Status,
@@ -221,6 +253,14 @@ func (k *streamRunSink) send(runId string, event any) {
 			AutomationRunEvent: frame,
 		},
 	})
+	if k.sendErr != nil && k.session != nil && k.session.logger != nil {
+		// The caller is parked on a frame that will now never arrive. Say so
+		// here rather than letting the latch swallow it: from the client's
+		// side an undelivered terminal frame and an unsent one are the same
+		// silence, and only this end knows which happened.
+		k.session.logger.Warn("automation run frame could not be sent",
+			"request_id", k.requestId, "run_id", runId, "error", k.sendErr)
+	}
 }
 
 // stepOutputStruct renders a step's result as a Struct.

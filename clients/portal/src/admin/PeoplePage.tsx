@@ -218,6 +218,7 @@ function PersonDetail({
               writes={writes}
               onChanged={onChanged}
             />
+            <EnrolmentForm person={person} writes={writes} />
           </div>
         </div>
       </Band>
@@ -393,6 +394,112 @@ function SuspensionForm({
         </>
       )}
     </form>
+  );
+}
+
+// The TTLs an operator can pick, in seconds. A fixed list rather than a free
+// number box: the server clamps anything above its ceiling, and offering a box
+// that silently accepts "7 days" and issues fifteen minutes teaches the
+// operator something false about the credential they just handed over.
+const ENROLMENT_TTLS: ReadonlyArray<{ label: string; seconds: number }> = [
+  { label: "15 minutes", seconds: 0 },
+  { label: "1 hour", seconds: 3600 },
+  { label: "8 hours", seconds: 8 * 3600 },
+  { label: "24 hours", seconds: 24 * 3600 },
+];
+
+// Issue an enrolment link for this person (memql#3408).
+//
+// This is the surface that removes email from the critical path: a link that
+// authorizes exactly one action -- register a passkey as this user -- so
+// somebody with no credential and no reachable mailbox can still get their
+// first one. It is deliberately not a "send" button: memQL does not put the
+// credential in a message it cannot see delivered. The operator copies the
+// link and hands it over on whatever channel they already trust.
+function EnrolmentForm({ person, writes }: { person: Row; writes: WriteState }): ReactNode {
+  const id = rowId(person);
+  const [seconds, setSeconds] = useState(0);
+  // THE ONE-TIME PLAINTEXT. Held in component state and nowhere else: not in
+  // storage, not in a URL, not in a row. Only the SHA-256 hash was persisted
+  // server-side, so this really is the only moment the value exists outside
+  // the reply.
+  const [minted, setMinted] = useState("");
+  const [keyed, setKeyed] = useState(id);
+  if (keyed !== id) {
+    // Picking a different person drops the previous link off the screen. A
+    // credential for one account left visible under another person's heading
+    // is the one way this control can mislead.
+    setKeyed(id);
+    setMinted("");
+  }
+
+  return (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        setMinted("");
+        writes.run(async (client) => {
+          const result = await client.issueEnrolmentLink(id, seconds);
+          setMinted(result.url);
+          return result;
+        });
+      }}
+      className="rounded-lg border border-line bg-surface p-4"
+    >
+      <h3 className="text-xs font-semibold tracking-wide text-muted uppercase">Enrolment link</h3>
+      <p className="mt-1 text-xs text-subtle">
+        A single-use link that lets this person set up a passkey — no email
+        needed. It authorizes that one action and nothing else, and it is spent
+        the moment the passkey is created.
+      </p>
+      <div className="mt-3 flex flex-wrap items-end gap-2">
+        <label className="flex flex-col gap-1 text-xs text-muted">
+          Valid for
+          <select
+            aria-label="Enrolment link lifetime"
+            value={String(seconds)}
+            onChange={(event) => setSeconds(Number(event.target.value))}
+            className="rounded border border-line bg-surface px-2 py-1 text-sm text-fg"
+          >
+            {ENROLMENT_TTLS.map((option) => (
+              <option key={option.seconds} value={String(option.seconds)}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <SubmitButton busy={writes.busy}>Issue a link</SubmitButton>
+      </div>
+      {minted === "" ? null : <MintedEnrolmentLink url={minted} onDismiss={() => setMinted("")} />}
+    </form>
+  );
+}
+
+// The one-time link. Shown once, held in component state and nowhere else.
+// Copy follows the accounts console's MintedToken: it says you will not see it
+// again in those words, rather than a softer "keep it safe".
+function MintedEnrolmentLink({ url, onDismiss }: { url: string; onDismiss: () => void }): ReactNode {
+  return (
+    <div className="mt-3 flex flex-col gap-2 rounded border border-accent bg-accent-subtle p-3">
+      <h4 className="text-sm font-semibold">Copy this link now</h4>
+      <p className="text-xs">
+        You will not see it again. Only its hash was stored, so it cannot be shown a second time —
+        if you lose it, issue another. Treat it like a password: anyone holding it can add a
+        passkey to this account.
+      </p>
+      <code className="block rounded border border-line bg-bg px-2 py-1.5 font-mono text-xs break-all select-all">
+        {url}
+      </code>
+      <div>
+        <button
+          type="button"
+          className="rounded border border-line px-3 py-1.5 text-sm hover:bg-raised"
+          onClick={onDismiss}
+        >
+          I have copied it
+        </button>
+      </div>
+    </div>
   );
 }
 

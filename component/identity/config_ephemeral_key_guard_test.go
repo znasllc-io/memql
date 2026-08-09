@@ -71,7 +71,7 @@ func TestValidate_EphemeralKeyGuard(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "localhost origin exempt (dev) -> ALLOW even with no seed + no opt-in",
+			name: "loopback origin exempt (single process) -> ALLOW even with no seed + no opt-in",
 			mutate: func(c *Config) {
 				c.BaseURL = "http://localhost:8081"
 				c.SigningKeyB64 = ""
@@ -81,10 +81,53 @@ func TestValidate_EphemeralKeyGuard(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "dev-wildcard origin exempt (identity.local.znas.io) -> ALLOW",
+			name: "127.0.0.1 origin exempt (single process) -> ALLOW",
+			mutate: func(c *Config) {
+				c.BaseURL = "http://127.0.0.1:8081"
+				c.SigningKeyB64 = ""
+				c.AllowEphemeralKey = false
+				c.KeyEncryptionKey = ""
+			},
+			wantErr: false,
+		},
+		{
+			name: "RFC 6761 .localhost origin exempt (resolves to loopback) -> ALLOW",
+			mutate: func(c *Config) {
+				c.BaseURL = "https://identity.localhost"
+				c.SigningKeyB64 = ""
+				c.AllowEphemeralKey = false
+				c.KeyEncryptionKey = ""
+			},
+			wantErr: false,
+		},
+		{
+			// memql#3400. The `*.local.<domain>` dev wildcard is the LOCAL
+			// PARITY CLUSTER's front door: it fronts a k8s Service with
+			// `make scale N=2` replicas behind it, exactly the topology the
+			// guard exists for. Exempting it let the local cluster mint two
+			// signing keys and report the resulting rejections as "invalid or
+			// expired token" -- and the exemption is why the guard did not
+			// fire on the cluster the bug was found on.
+			name: "dev-wildcard origin is NOT exempt (it fronts a replica set) -> REFUSE",
 			mutate: func(c *Config) {
 				c.BaseURL = "https://identity.local.znas.io"
 				c.SigningKeyB64 = ""
+				c.AllowEphemeralKey = false
+				c.KeyEncryptionKey = ""
+			},
+			wantErr:       true,
+			wantErrSubstr: "MEMQL_IDENTITY_SIGNING_KEY_B64 is not set",
+		},
+		{
+			// The at-rest-encryption requirement keeps the broader dev-host
+			// exemption: a dev cluster's keys may sit unencrypted on disk.
+			// Only the ephemeral-key guard narrows, so a dev-wildcard host
+			// that DOES carry a shared seed still boots with no
+			// MEMQL_IDENTITY_KEY_ENCRYPTION_KEY.
+			name: "dev-wildcard origin with a shared seed and no encryption key -> ALLOW",
+			mutate: func(c *Config) {
+				c.BaseURL = "https://identity.local.znas.io"
+				c.SigningKeyB64 = seedB64
 				c.AllowEphemeralKey = false
 				c.KeyEncryptionKey = ""
 			},

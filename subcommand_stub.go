@@ -28,6 +28,8 @@ func dispatchSubcommand(args []string) (bool, int) {
 		return true, runMigrateSubcommand(args[1:])
 	case "pat":
 		return true, runPATSubcommand(args[1:])
+	case "enrolment-token":
+		return true, runEnrolmentTokenSubcommand(args[1:])
 	case "voice-agent-token":
 		fmt.Fprintln(os.Stderr, "voice-agent-token requires the identity binary (build with -tags identity).")
 		return true, 2

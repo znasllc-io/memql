@@ -19,10 +19,34 @@ export interface ClusterConfig {
   endpoint: string;
   issuer?: string;
   clientId?: string;
-  // pat is an optional Personal Access Token (mql_pat_<...>) sent as
-  // `Authorization: Bearer <pat>`. When set it short-circuits the OIDC flow --
-  // the token IS the credential.
-  pat?: string;
+  // token is the BEARER this extension dials with. It must be an
+  // identity-issued JWT ACCESS TOKEN -- the thing `POST <issuer>/oauth/token`
+  // returns as `access_token`.
+  //
+  // It is NOT a Personal Access Token, and the field is named `token` rather
+  // than `pat` because that mis-naming was itself the bug (memql#3383). A PAT
+  // is a database lookup that only the identity node can perform: on a bff the
+  // verifier has no PAT path wired at all and returns "verifier: PAT path not
+  // wired on this node" BEFORE any lookup, so a perfectly VALID PAT fails
+  // exactly like a forged one. The mesh verifies bearers via JWKS, so a JWT is
+  // the only credential class that can work here. src/connection/credentials.ts
+  // detects an `mql_pat_` / `mql_wkr_` value and refuses it by name rather
+  // than letting it fail as a bare handshake error.
+  //
+  // Short-lived by design: identity issues 900-second access tokens
+  // (component/identity/config.go DefaultAccessTokenTTLSeconds). `refreshToken`
+  // below is what keeps a session alive past that.
+  token?: string;
+  // refreshToken is the INGEST path for the long-lived (30-day) refresh token
+  // that renews `token`.
+  //
+  // It is deliberately not the storage: this file is plaintext and shared with
+  // the memQL Cockpit, and a 30-day credential does not belong there. The
+  // resolver takes custody on the first successful exchange -- the rotated
+  // token goes into VS Code's SecretStorage and this key is DELETED from the
+  // file. See src/connection/credentials.ts for the full rationale, including
+  // why the access token itself stays in the shared file.
+  refreshToken?: string;
   // local marks a cluster whose data is disposable -- a k3d parity cluster, a
   // scratch stack. It gates the write confirmation on a mutation run
   // (memql#3309): reads run freely everywhere, and a mutation against a
@@ -52,33 +76,40 @@ export function displayLabel(c: ClusterConfig): string {
   return c.displayName && c.displayName !== "" ? c.displayName : c.name;
 }
 
-// needsAuth reports whether a cluster lacks enough credentials to dial.
-// Configured means an endpoint AND either a PAT or an issuer/clientId pair.
-// An empty endpoint counts as not-configured: even with auth fields set there
-// is nowhere to dial.
-export function needsAuth(c: ClusterConfig): boolean {
-  if (c.endpoint === "") return true;
-  if (c.pat !== undefined && c.pat !== "") return false;
-  return (
-    c.issuer === undefined || c.issuer === "" ||
-    c.clientId === undefined || c.clientId === ""
-  );
-}
-
-// isOidcOnly reports a cluster this extension cannot authenticate itself:
-// OIDC is configured but no PAT is present. B1 supports PAT auth only, so
-// these clusters must be authenticated in the cockpit first.
+// needsAuth reports whether a cluster lacks enough to dial at all.
 //
-// An empty endpoint disqualifies the cluster, matching needsAuth: with
-// nowhere to dial, "authenticate this in the memQL Cockpit and come back" is
-// simply the wrong instruction -- the honest answer is "not configured", and
-// both callers (ConnectionManager's error message, the Clusters tree tooltip)
-// check isOidcOnly BEFORE needsAuth, so without this the misleading half won.
-export function isOidcOnly(c: ClusterConfig): boolean {
-  if (c.endpoint === "") return false;
-  const noPat = c.pat === undefined || c.pat === "";
-  const hasOidc =
-    c.issuer !== undefined && c.issuer !== "" &&
-    c.clientId !== undefined && c.clientId !== "";
-  return noPat && hasOidc;
+// Configured means an endpoint AND some credential to present -- either a
+// bearer token or a refresh token the resolver can exchange for one. An
+// issuer/clientId pair is NOT a credential: it names where tokens come from,
+// not one you hold. Treating it as sufficient is what made a PAT-less OIDC
+// cluster look configured and then fail at the handshake (memql#3383).
+//
+// An empty endpoint counts as not-configured: even with a live token there is
+// nowhere to dial.
+//
+// This is the RESTING, synchronous view -- it cannot see a refresh token that
+// has already been taken into SecretStorage. That is only ever wrong in the
+// harmless direction: the first successful exchange writes the fresh access
+// token back into `token`, so the resting view is accurate from then on.
+//
+// RE-EXAMINED FOR memql#3403, AND DELIBERATELY UNCHANGED.
+//
+// The extension can now authenticate itself (`memql.clusters.signIn`), and the
+// question that raised was whether an `issuer` should therefore stop counting
+// as "needs auth". It should not, and the reason is that this predicate answers
+// a question about the PRESENT, not about what is reachable: a cluster with an
+// issuer and no token still cannot dial, and a row that claimed otherwise would
+// send an operator to a connect attempt that fails at the handshake. What
+// memql#3403 changed is the REMEDY, not the fact -- the recovery for `true` is
+// no longer "go and paste a token from somewhere else" but "run Sign In", and
+// that lives in the command and in the offer made on a failed connect, both of
+// which consult src/auth/signin.ts `canSignIn` for whether an issuer exists.
+//
+// Keeping the two separate is what stops the predicate from lying in either
+// direction: `needsAuth` says a credential is missing, `canSignIn` says whether
+// this editor can go and get one, and a cluster can genuinely be any
+// combination of the two.
+export function needsAuth(c: ClusterConfig): boolean {
+  if (c.endpoint.trim() === "") return true;
+  return (c.token ?? "").trim() === "" && (c.refreshToken ?? "").trim() === "";
 }

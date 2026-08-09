@@ -169,14 +169,24 @@ keeping ≥1 up), instead of a single pod with `strategy: Recreate`. That
 used to be forced by a ReadWriteOnce key PVC — only one pod could mount the
 signing key — so every deploy had an auth-down window.
 
-Now the Ed25519 signing key comes from the sealed envelope as
-`MEMQL_IDENTITY_SIGNING_KEY_B64` (a base64 32-byte seed). Every replica derives
-the **same** key + `kid` + JWKS from it, so there's no single-writer volume.
-Generate one with `make identity-signing-key` and seal it into the genesis
-envelope. **Rotate** by generating a new seed, re-sealing, and rolling the
-deployment (automatic rotation is disabled in this mode). Without
-`MEMQL_IDENTITY_SIGNING_KEY_B64`, identity falls back to the on-disk `MEMQL_IDENTITY_KEY_DIR`
-(dev) — which is single-replica only.
+Now the Ed25519 signing key is env-provided as `MEMQL_IDENTITY_SIGNING_KEY_B64`
+(a base64 32-byte seed) through the `memql-secrets` Secret every node
+`envFrom`s — either as a key on that Secret, or inside the sealed genesis
+envelope it carries (autoload is set-if-absent, so an explicit Secret key
+wins). Every replica derives the **same** key + `kid` + JWKS from it, so
+there's no single-writer volume. Generate one with `make identity-signing-key`.
+**Rotate** by writing a new seed and rolling the deployment (automatic rotation
+is disabled in this mode); rotation invalidates every live session and every
+minted mesh node token.
+
+Without `MEMQL_IDENTITY_SIGNING_KEY_B64`, identity falls back to the on-disk
+`MEMQL_IDENTITY_KEY_DIR` — which is **single-replica only**, because the
+manifest gives it no shared volume, so each pod generates its own key and JWKS
+diverges. `Config.Validate()` refuses to boot in that mode unless the issuer is
+a loopback host (one process, no possible second replica) or the operator sets
+`MEMQL_IDENTITY_ALLOW_EPHEMERAL_KEY=true`. `make status` asserts the property
+directly on a running cluster: it reads JWKS from every identity replica and
+reports `identityKeysShared` (memql#3400).
 
 ## Apply order
 
@@ -189,6 +199,7 @@ kubectl apply -f deploy/k8s/namespace.yaml
 kubectl create secret generic memql-secrets -n memql \
   --from-literal=MEMQL_MASTER_KEY="$MEMQL_MASTER_KEY" \
   --from-literal=MEMQL_GENESIS_B64="$(base64 < ~/.memql/genesis.znas)" \
+  --from-literal=MEMQL_IDENTITY_SIGNING_KEY_B64="$MEMQL_IDENTITY_SIGNING_KEY_B64" \
   --from-literal=MEMQL_DATABASE_DSN="$POOLER_DSN" \
   --from-literal=MEMORY_NODES_DATABASE_DIRECT_DSN="$(tiger db connection-string xahn9ru4v6 --with-password)"
 

@@ -521,6 +521,28 @@ func ApproveAccessRequestBuild(args ApproveAccessRequestArgs) string {
 	return b.String()
 }
 
+// ApproveDeviceCode -- Approve a pending device authorization. The approver is stamped from actor.userId -- the form cannot name someone else.
+//
+// Bound concept: v1:identity:deviceCode (machine-readable: BoundConcepts["approveDeviceCode"] in generated_concepts.go).
+type ApproveDeviceCodeArgs struct {
+	DeviceCodeId string
+}
+
+// ApproveDeviceCode calls the engine mutation approveDeviceCode.
+func (qc *QueryClient) ApproveDeviceCode(ctx context.Context, args ApproveDeviceCodeArgs) (*Result, error) {
+	call := ApproveDeviceCodeBuild(args)
+	return qc.executeNamed(ctx, "approveDeviceCode", call)
+}
+
+func ApproveDeviceCodeBuild(args ApproveDeviceCodeArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation approveDeviceCode(")
+	b.WriteString("deviceCodeId: ")
+	b.WriteString(quoteMemQL(args.DeviceCodeId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // ApproveRequest -- Approve a v1:forge:request (owner action): set status 'queued' (ready to implement) and stamp approvedByUserId from actor.userId.
 //
 // Bound concept: v1:forge:request (machine-readable: BoundConcepts["approveRequest"] in generated_concepts.go).
@@ -1208,6 +1230,42 @@ func ConsumeAuthCodeBuild(args ConsumeAuthCodeArgs) string {
 	b.WriteString(quoteMemQL(args.CodeId))
 	if args.ConsumedFromIP != "" {
 		if b.Len() > 25 {
+			b.WriteString(", ")
+		}
+		b.WriteString("consumedFromIP: ")
+		b.WriteString(quoteMemQL(args.ConsumedFromIP))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// ConsumeEnrolmentToken -- Stamp an enrolment-token row consumed.
+//
+// Bound concept: v1:identity:enrolmentToken (machine-readable: BoundConcepts["consumeEnrolmentToken"] in generated_concepts.go).
+type ConsumeEnrolmentTokenArgs struct {
+	EnrolmentId    string
+	ConsumedAt     string
+	ConsumedFromIP string
+}
+
+// ConsumeEnrolmentToken calls the engine mutation consumeEnrolmentToken.
+func (qc *QueryClient) ConsumeEnrolmentToken(ctx context.Context, args ConsumeEnrolmentTokenArgs) (*Result, error) {
+	call := ConsumeEnrolmentTokenBuild(args)
+	return qc.executeNamed(ctx, "consumeEnrolmentToken", call)
+}
+
+func ConsumeEnrolmentTokenBuild(args ConsumeEnrolmentTokenArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation consumeEnrolmentToken(")
+	b.WriteString("enrolmentId: ")
+	b.WriteString(quoteMemQL(args.EnrolmentId))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("consumedAt: ")
+	b.WriteString(quoteMemQL(args.ConsumedAt))
+	if args.ConsumedFromIP != "" {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("consumedFromIP: ")
@@ -2994,7 +3052,7 @@ func CreateClusterBuild(args CreateClusterArgs) string {
 	return b.String()
 }
 
-// CreateClusterSettings -- Persist (or refresh) the singleton cluster-settings row.
+// CreateClusterSettings -- Persist (or refresh) the singleton cluster-settings row. `bootstrappedAt` is @noUnset: this body writes `args.bootstrappedAt ?? ""`, so a caller who simply omits it puts an EXPLICIT empty string in the delta -- which read-merge cannot protect against, because read-merge only inherits fields a delta OMITS. That is how a re-run of this mutation un-bootstrapped a live cluster and re-opened the unauthenticated /setup ownership wizard (memql#3415). @noUnset drops the empty value when the stored row already carries a stamp; setting it on a still-unclaimed row is unaffected.
 //
 // Bound concept: v1:identity:clusterSettings (machine-readable: BoundConcepts["createClusterSettings"] in generated_concepts.go).
 type CreateClusterSettingsArgs struct {
@@ -3556,6 +3614,98 @@ func CreateDeploymentNodeSpecBuild(args CreateDeploymentNodeSpecArgs) string {
 	return b.String()
 }
 
+// CreateDeviceCode -- Persist a device-authorization row at POST /device/code time, born `pending`. Both credentials arrive pre-hashed; neither plaintext is ever passed to the engine.
+//
+// Bound concept: v1:identity:deviceCode (machine-readable: BoundConcepts["createDeviceCode"] in generated_concepts.go).
+type CreateDeviceCodeArgs struct {
+	DeviceCodeId        string
+	ClientId            string
+	DeviceCodeHash      string
+	UserCodeHash        string
+	ExpiresAt           string
+	IntervalSeconds     int
+	Scope               string
+	CodeChallenge       string
+	CodeChallengeMethod string
+	SourceIP            string
+	UserAgent           string
+}
+
+// CreateDeviceCode calls the engine mutation createDeviceCode.
+func (qc *QueryClient) CreateDeviceCode(ctx context.Context, args CreateDeviceCodeArgs) (*Result, error) {
+	call := CreateDeviceCodeBuild(args)
+	return qc.executeNamed(ctx, "createDeviceCode", call)
+}
+
+func CreateDeviceCodeBuild(args CreateDeviceCodeArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation createDeviceCode(")
+	b.WriteString("deviceCodeId: ")
+	b.WriteString(quoteMemQL(args.DeviceCodeId))
+	if b.Len() > 26 {
+		b.WriteString(", ")
+	}
+	b.WriteString("clientId: ")
+	b.WriteString(quoteMemQL(args.ClientId))
+	if b.Len() > 26 {
+		b.WriteString(", ")
+	}
+	b.WriteString("deviceCodeHash: ")
+	b.WriteString(quoteMemQL(args.DeviceCodeHash))
+	if b.Len() > 26 {
+		b.WriteString(", ")
+	}
+	b.WriteString("userCodeHash: ")
+	b.WriteString(quoteMemQL(args.UserCodeHash))
+	if b.Len() > 26 {
+		b.WriteString(", ")
+	}
+	b.WriteString("expiresAt: ")
+	b.WriteString(quoteMemQL(args.ExpiresAt))
+	if b.Len() > 26 {
+		b.WriteString(", ")
+	}
+	b.WriteString("intervalSeconds: ")
+	b.WriteString(fmt.Sprintf("%v", args.IntervalSeconds))
+	if args.Scope != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("scope: ")
+		b.WriteString(quoteMemQL(args.Scope))
+	}
+	if args.CodeChallenge != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("codeChallenge: ")
+		b.WriteString(quoteMemQL(args.CodeChallenge))
+	}
+	if args.CodeChallengeMethod != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("codeChallengeMethod: ")
+		b.WriteString(quoteMemQL(args.CodeChallengeMethod))
+	}
+	if args.SourceIP != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("sourceIP: ")
+		b.WriteString(quoteMemQL(args.SourceIP))
+	}
+	if args.UserAgent != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("userAgent: ")
+		b.WriteString(quoteMemQL(args.UserAgent))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // CreateDocumentChunk -- Create a document chunk linked to a knowledge domain. Called by every chunk-writing integration (seedDomainContent, augmentDomainGenerate, ensureKnowledgeBridge, the product UI corpus ingest). source is REQUIRED and tags the chunk's provenance class -- the dev-refresh cache filter and the citation registry both read it as the source of truth. Optional sourceUtteranceId / sourceAgentId / sourceTopic carry chat-driven augment provenance back-pointers.
 //
 // Bound concept: v1:knowledge:documentChunk (machine-readable: BoundConcepts["createDocumentChunk"] in generated_concepts.go).
@@ -3639,6 +3789,60 @@ func CreateDocumentChunkBuild(args CreateDocumentChunkArgs) string {
 		}
 		b.WriteString("sourceTopic: ")
 		b.WriteString(quoteMemQL(args.SourceTopic))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// CreateEnrolmentToken -- Persist an enrolment-token row at issue time.
+//
+// Bound concept: v1:identity:enrolmentToken (machine-readable: BoundConcepts["createEnrolmentToken"] in generated_concepts.go).
+type CreateEnrolmentTokenArgs struct {
+	EnrolmentId string
+	UserId      string
+	TokenHash   string
+	IssuedBy    string
+	ExpiresAt   string
+	SourceIP    string
+}
+
+// CreateEnrolmentToken calls the engine mutation createEnrolmentToken.
+func (qc *QueryClient) CreateEnrolmentToken(ctx context.Context, args CreateEnrolmentTokenArgs) (*Result, error) {
+	call := CreateEnrolmentTokenBuild(args)
+	return qc.executeNamed(ctx, "createEnrolmentToken", call)
+}
+
+func CreateEnrolmentTokenBuild(args CreateEnrolmentTokenArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation createEnrolmentToken(")
+	b.WriteString("enrolmentId: ")
+	b.WriteString(quoteMemQL(args.EnrolmentId))
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("userId: ")
+	b.WriteString(quoteMemQL(args.UserId))
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("tokenHash: ")
+	b.WriteString(quoteMemQL(args.TokenHash))
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("issuedBy: ")
+	b.WriteString(quoteMemQL(args.IssuedBy))
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("expiresAt: ")
+	b.WriteString(quoteMemQL(args.ExpiresAt))
+	if args.SourceIP != "" {
+		if b.Len() > 30 {
+			b.WriteString(", ")
+		}
+		b.WriteString("sourceIP: ")
+		b.WriteString(quoteMemQL(args.SourceIP))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -4481,6 +4685,100 @@ func CreatePATIdentityBuild(args CreatePATIdentityArgs) string {
 		b.WriteString("usableByAgents: ")
 		b.WriteString(fmt.Sprintf("%v", args.UsableByAgents))
 	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// CreatePasskeyIdentity -- Register a passkey identity (WebAuthn discoverable credential). Stores the credential's PUBLIC COSE key -- there is no secret half to withhold.
+//
+// Bound concept: v1:identity:identity (machine-readable: BoundConcepts["createPasskeyIdentity"] in generated_concepts.go).
+type CreatePasskeyIdentityArgs struct {
+	IdentityId        string
+	UserId            string
+	Label             string
+	CredentialId      string
+	PublicKey         string
+	SignCount         int
+	Aaguid            string
+	Transports        []string
+	BackupEligible    bool
+	BackupEligibleSet bool // set true to send backupEligible; required because zero-value bool is ambiguous
+	BackupState       bool
+	BackupStateSet    bool // set true to send backupState; required because zero-value bool is ambiguous
+	RegisteredBy      string
+}
+
+// CreatePasskeyIdentity calls the engine mutation createPasskeyIdentity.
+func (qc *QueryClient) CreatePasskeyIdentity(ctx context.Context, args CreatePasskeyIdentityArgs) (*Result, error) {
+	call := CreatePasskeyIdentityBuild(args)
+	return qc.executeNamed(ctx, "createPasskeyIdentity", call)
+}
+
+func CreatePasskeyIdentityBuild(args CreatePasskeyIdentityArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation createPasskeyIdentity(")
+	b.WriteString("identityId: ")
+	b.WriteString(quoteMemQL(args.IdentityId))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("userId: ")
+	b.WriteString(quoteMemQL(args.UserId))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("label: ")
+	b.WriteString(quoteMemQL(args.Label))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("credentialId: ")
+	b.WriteString(quoteMemQL(args.CredentialId))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("publicKey: ")
+	b.WriteString(quoteMemQL(args.PublicKey))
+	if args.SignCount != 0 {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("signCount: ")
+		b.WriteString(fmt.Sprintf("%v", args.SignCount))
+	}
+	if args.Aaguid != "" {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("aaguid: ")
+		b.WriteString(quoteMemQL(args.Aaguid))
+	}
+	if args.Transports != nil {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("transports: ")
+		b.WriteString(renderMemQLValue(args.Transports))
+	}
+	if args.BackupEligibleSet {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("backupEligible: ")
+		b.WriteString(fmt.Sprintf("%v", args.BackupEligible))
+	}
+	if args.BackupStateSet {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("backupState: ")
+		b.WriteString(fmt.Sprintf("%v", args.BackupState))
+	}
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("registeredBy: ")
+	b.WriteString(quoteMemQL(args.RegisteredBy))
 	b.WriteString(")")
 	return b.String()
 }
@@ -6569,6 +6867,28 @@ func DeleteUserHardBuild(args DeleteUserHardArgs) string {
 	return b.String()
 }
 
+// DenyDeviceCode -- Deny a pending device authorization. Terminal: polling returns access_denied from here on.
+//
+// Bound concept: v1:identity:deviceCode (machine-readable: BoundConcepts["denyDeviceCode"] in generated_concepts.go).
+type DenyDeviceCodeArgs struct {
+	DeviceCodeId string
+}
+
+// DenyDeviceCode calls the engine mutation denyDeviceCode.
+func (qc *QueryClient) DenyDeviceCode(ctx context.Context, args DenyDeviceCodeArgs) (*Result, error) {
+	call := DenyDeviceCodeBuild(args)
+	return qc.executeNamed(ctx, "denyDeviceCode", call)
+}
+
+func DenyDeviceCodeBuild(args DenyDeviceCodeArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation denyDeviceCode(")
+	b.WriteString("deviceCodeId: ")
+	b.WriteString(quoteMemQL(args.DeviceCodeId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // DeprecateAction -- Deprecate a v1:actions:action (reliability below floor or superseded), removing it from replay (Phase 4 #1739).
 //
 // Bound concept: v1:actions:action (machine-readable: BoundConcepts["deprecateAction"] in generated_concepts.go).
@@ -8519,6 +8839,94 @@ func RecordNumberBuild(args RecordNumberArgs) string {
 	return b.String()
 }
 
+// RecordPasskeyAssertion -- Stamp the verifier state on a passkey identity after a successful assertion: signature counter, current backup state, and lastUsedAt. Best-effort; the login succeeds even when this write fails.
+//
+// Bound concept: v1:identity:identity (machine-readable: BoundConcepts["recordPasskeyAssertion"] in generated_concepts.go).
+type RecordPasskeyAssertionArgs struct {
+	IdentityId        string
+	CredentialId      string
+	PublicKey         string
+	SignCount         int
+	Aaguid            string
+	Transports        []string
+	BackupEligible    bool
+	BackupEligibleSet bool // set true to send backupEligible; required because zero-value bool is ambiguous
+	BackupState       bool
+	BackupStateSet    bool // set true to send backupState; required because zero-value bool is ambiguous
+	RegisteredBy      string
+	LastUsedAt        string
+}
+
+// RecordPasskeyAssertion calls the engine mutation recordPasskeyAssertion.
+func (qc *QueryClient) RecordPasskeyAssertion(ctx context.Context, args RecordPasskeyAssertionArgs) (*Result, error) {
+	call := RecordPasskeyAssertionBuild(args)
+	return qc.executeNamed(ctx, "recordPasskeyAssertion", call)
+}
+
+func RecordPasskeyAssertionBuild(args RecordPasskeyAssertionArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation recordPasskeyAssertion(")
+	b.WriteString("identityId: ")
+	b.WriteString(quoteMemQL(args.IdentityId))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("credentialId: ")
+	b.WriteString(quoteMemQL(args.CredentialId))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("publicKey: ")
+	b.WriteString(quoteMemQL(args.PublicKey))
+	if args.SignCount != 0 {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("signCount: ")
+		b.WriteString(fmt.Sprintf("%v", args.SignCount))
+	}
+	if args.Aaguid != "" {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("aaguid: ")
+		b.WriteString(quoteMemQL(args.Aaguid))
+	}
+	if args.Transports != nil {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("transports: ")
+		b.WriteString(renderMemQLValue(args.Transports))
+	}
+	if args.BackupEligibleSet {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("backupEligible: ")
+		b.WriteString(fmt.Sprintf("%v", args.BackupEligible))
+	}
+	if args.BackupStateSet {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("backupState: ")
+		b.WriteString(fmt.Sprintf("%v", args.BackupState))
+	}
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("registeredBy: ")
+	b.WriteString(quoteMemQL(args.RegisteredBy))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("lastUsedAt: ")
+	b.WriteString(quoteMemQL(args.LastUsedAt))
+	b.WriteString(")")
+	return b.String()
+}
+
 // RecordPlannerInvocation -- Record a planner-agent LLM invocation against a Plan: advance metrics.llmCallCount + tokenSpent without changing status. Caller computes the new totals Go-side (the parser has no arithmetic).
 //
 // Bound concept: v1:planner:plan (machine-readable: BoundConcepts["recordPlannerInvocation"] in generated_concepts.go).
@@ -8905,6 +9313,34 @@ func RecordTrunkBuild(args RecordTrunkArgs) string {
 		b.WriteString("secretRef: ")
 		b.WriteString(quoteMemQL(args.SecretRef))
 	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// RedeemDeviceCode -- Mark an approved device authorization redeemed. Single-use: the handler stamps this BEFORE minting tokens, so a concurrent second poll finds status=redeemed and is refused.
+//
+// Bound concept: v1:identity:deviceCode (machine-readable: BoundConcepts["redeemDeviceCode"] in generated_concepts.go).
+type RedeemDeviceCodeArgs struct {
+	DeviceCodeId string
+	RedeemedAt   string
+}
+
+// RedeemDeviceCode calls the engine mutation redeemDeviceCode.
+func (qc *QueryClient) RedeemDeviceCode(ctx context.Context, args RedeemDeviceCodeArgs) (*Result, error) {
+	call := RedeemDeviceCodeBuild(args)
+	return qc.executeNamed(ctx, "redeemDeviceCode", call)
+}
+
+func RedeemDeviceCodeBuild(args RedeemDeviceCodeArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation redeemDeviceCode(")
+	b.WriteString("deviceCodeId: ")
+	b.WriteString(quoteMemQL(args.DeviceCodeId))
+	if b.Len() > 26 {
+		b.WriteString(", ")
+	}
+	b.WriteString("redeemedAt: ")
+	b.WriteString(quoteMemQL(args.RedeemedAt))
 	b.WriteString(")")
 	return b.String()
 }
@@ -9308,6 +9744,34 @@ func RemoveAgentFromSpaceBuild(args RemoveAgentFromSpaceArgs) string {
 	return b.String()
 }
 
+// RenamePasskeyIdentity -- Rename an enrolled passkey. Changes only the display label -- the credential itself is untouched.
+//
+// Bound concept: v1:identity:identity (machine-readable: BoundConcepts["renamePasskeyIdentity"] in generated_concepts.go).
+type RenamePasskeyIdentityArgs struct {
+	IdentityId string
+	Label      string
+}
+
+// RenamePasskeyIdentity calls the engine mutation renamePasskeyIdentity.
+func (qc *QueryClient) RenamePasskeyIdentity(ctx context.Context, args RenamePasskeyIdentityArgs) (*Result, error) {
+	call := RenamePasskeyIdentityBuild(args)
+	return qc.executeNamed(ctx, "renamePasskeyIdentity", call)
+}
+
+func RenamePasskeyIdentityBuild(args RenamePasskeyIdentityArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation renamePasskeyIdentity(")
+	b.WriteString("identityId: ")
+	b.WriteString(quoteMemQL(args.IdentityId))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("label: ")
+	b.WriteString(quoteMemQL(args.Label))
+	b.WriteString(")")
+	return b.String()
+}
+
 // RequestChanges -- Send a v1:forge:request back for changes: set status 'changes_requested' with a reason.
 //
 // Bound concept: v1:forge:request (machine-readable: BoundConcepts["requestChanges"] in generated_concepts.go).
@@ -9601,6 +10065,34 @@ func RevokeDelegationBuild(args RevokeDelegationArgs) string {
 	return b.String()
 }
 
+// RevokeEnrolmentToken -- Stamp an enrolment-token row revoked.
+//
+// Bound concept: v1:identity:enrolmentToken (machine-readable: BoundConcepts["revokeEnrolmentToken"] in generated_concepts.go).
+type RevokeEnrolmentTokenArgs struct {
+	EnrolmentId string
+	RevokedAt   string
+}
+
+// RevokeEnrolmentToken calls the engine mutation revokeEnrolmentToken.
+func (qc *QueryClient) RevokeEnrolmentToken(ctx context.Context, args RevokeEnrolmentTokenArgs) (*Result, error) {
+	call := RevokeEnrolmentTokenBuild(args)
+	return qc.executeNamed(ctx, "revokeEnrolmentToken", call)
+}
+
+func RevokeEnrolmentTokenBuild(args RevokeEnrolmentTokenArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation revokeEnrolmentToken(")
+	b.WriteString("enrolmentId: ")
+	b.WriteString(quoteMemQL(args.EnrolmentId))
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("revokedAt: ")
+	b.WriteString(quoteMemQL(args.RevokedAt))
+	b.WriteString(")")
+	return b.String()
+}
+
 // RevokeNodeTokenIdentity -- Revoke a node_token identity by flipping active=false on the row. Read-merges the existing row so only `active` changes; the credentials block + every other field inherit from the persisted row instead of being re-supplied (memql#1628 -- replaces the old whole-replace restate-every-credentials-field pattern). memql#350.
 //
 // Bound concept: v1:identity:identity (machine-readable: BoundConcepts["revokeNodeTokenIdentity"] in generated_concepts.go).
@@ -9639,6 +10131,28 @@ func (qc *QueryClient) RevokePATIdentity(ctx context.Context, args RevokePATIden
 func RevokePATIdentityBuild(args RevokePATIdentityArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation revokePATIdentity(")
+	b.WriteString("identityId: ")
+	b.WriteString(quoteMemQL(args.IdentityId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// RevokePasskeyIdentity -- Revoke (deactivate) a passkey identity row. Soft-delete via active=false -- the row stays for audit, and its credential id stays taken so the same authenticator cannot be re-enrolled onto a fresh row.
+//
+// Bound concept: v1:identity:identity (machine-readable: BoundConcepts["revokePasskeyIdentity"] in generated_concepts.go).
+type RevokePasskeyIdentityArgs struct {
+	IdentityId string
+}
+
+// RevokePasskeyIdentity calls the engine mutation revokePasskeyIdentity.
+func (qc *QueryClient) RevokePasskeyIdentity(ctx context.Context, args RevokePasskeyIdentityArgs) (*Result, error) {
+	call := RevokePasskeyIdentityBuild(args)
+	return qc.executeNamed(ctx, "revokePasskeyIdentity", call)
+}
+
+func RevokePasskeyIdentityBuild(args RevokePasskeyIdentityArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation revokePasskeyIdentity(")
 	b.WriteString("identityId: ")
 	b.WriteString(quoteMemQL(args.IdentityId))
 	b.WriteString(")")
@@ -11339,6 +11853,40 @@ func TouchBadgeLastUsedBuild(args TouchBadgeLastUsedArgs) string {
 	return b.String()
 }
 
+// TouchDeviceCodePoll -- Stamp the poll clock. Called on EVERY /oauth/token device-grant poll, accepted or throttled, so the next poll's slow_down decision reads a value written by whichever replica served the last one. intervalSeconds is re-stamped because a too-fast poll raises it.
+//
+// Bound concept: v1:identity:deviceCode (machine-readable: BoundConcepts["touchDeviceCodePoll"] in generated_concepts.go).
+type TouchDeviceCodePollArgs struct {
+	DeviceCodeId    string
+	LastPolledAt    string
+	IntervalSeconds int
+}
+
+// TouchDeviceCodePoll calls the engine mutation touchDeviceCodePoll.
+func (qc *QueryClient) TouchDeviceCodePoll(ctx context.Context, args TouchDeviceCodePollArgs) (*Result, error) {
+	call := TouchDeviceCodePollBuild(args)
+	return qc.executeNamed(ctx, "touchDeviceCodePoll", call)
+}
+
+func TouchDeviceCodePollBuild(args TouchDeviceCodePollArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation touchDeviceCodePoll(")
+	b.WriteString("deviceCodeId: ")
+	b.WriteString(quoteMemQL(args.DeviceCodeId))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("lastPolledAt: ")
+	b.WriteString(quoteMemQL(args.LastPolledAt))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("intervalSeconds: ")
+	b.WriteString(fmt.Sprintf("%v", args.IntervalSeconds))
+	b.WriteString(")")
+	return b.String()
+}
+
 // TouchSession -- Update an auth-session record (typically a heartbeat to bump lastActivityAt). Read-merges the existing row (update()): only the fields in `payload` change; the @required discriminators (subject, tokenHash, source, expiresAt) and every other omitted field inherit from the persisted row instead of having to be re-supplied (memql#1628). The session row must already exist.
 //
 // Bound concept: v1:identity:authSession (machine-readable: BoundConcepts["touchSession"] in generated_concepts.go).
@@ -11625,7 +12173,7 @@ func UpdateCampaignBuild(args UpdateCampaignArgs) string {
 	return b.String()
 }
 
-// UpdateClusterSettings -- Update the singleton cluster-settings row from the admin UI. Read-merges the existing row (update()): only the fields the caller actually passes change; every omitted field -- internalDomains, brand*, TTLs, bootstrap*, etc. -- inherits from the persisted row instead of being wiped to its empty default (memql#1686). registrationMode + internalDefaultRole stay @required because the admin form always submits them.
+// UpdateClusterSettings -- Update the singleton cluster-settings row from the admin UI. Read-merges the existing row (update()): only the fields the caller actually passes change; every omitted field -- internalDomains, brand*, TTLs, bootstrap*, etc. -- inherits from the persisted row instead of being wiped to its empty default (memql#1686). registrationMode + internalDefaultRole stay @required because the admin form always submits them. `bootstrappedAt` is additionally @noUnset: the verifier's stamp (empty -> set) still lands, but no admin edit can take a stamped cluster back to un-bootstrapped by passing it explicitly empty -- un-bootstrapping is not an ordinary write (memql#3415).
 //
 // Bound concept: v1:identity:clusterSettings (machine-readable: BoundConcepts["updateClusterSettings"] in generated_concepts.go).
 type UpdateClusterSettingsArgs struct {
