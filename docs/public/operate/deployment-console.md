@@ -84,7 +84,11 @@ through both transports, for every RPC against every role, and fails if
 either path answers differently. Denials arrive on the
 stream as an ordinary `QueryError` carrying the gRPC status code
 verbatim, so a caller below the role floor sees `PermissionDenied` on
-either transport. Actions return their audit event id identically.
+either transport. Actions return their audit event id identically -- and
+so do refusals (memql#3334), by different mechanisms that carry the same
+value: a `RefusalInfo` status detail on the unary path, the
+`DeployControlResult.audit_event_id` field on the streamed one, because a
+multiplexed stream has no per-message status to hang a detail off.
 
 Deployment **history** is deliberately not bridged: `v1:cluster:deployment`
 rows are ordinary concept rows, read with a normal query.
@@ -149,6 +153,38 @@ them with `PermissionDenied` and writes a blocked audit event. So does an
 unauthenticated caller, with `Unauthenticated`. The role model itself is
 the cluster-wide one described in
 [access-model.md](auth/access-model.md).
+
+### A refusal gives you its audit id (memql#3334)
+
+A denial is an audited event, and **the caller who was refused is told
+which one**. The refusal carries the correlation id of the blocked
+`v1:identity:auditEvent` the gate wrote, so an operator who hit a floor
+has a reference to quote rather than a timestamp to argue from.
+
+| Where you read it | |
+|---|---|
+| Portal | Beside the red banner: `Audited as <id> - open the trail` |
+| TS SDK | `DeployControlError.auditEventId` |
+| Go SDK | `client.AuditEventIdFromError(err)` |
+| Streamed wire | `DeployControlResult.audit_event_id` |
+| Unary wire | A `RefusalInfo` detail on the gRPC status |
+
+**An empty id means no event was written, not a lost one.** Only the role
+gate audits: an `InvalidArgument` is rejected *before* the gate runs on
+several RPCs, and an `Unavailable` never reached the service at all.
+Neither leaves a trail, so neither has an id to show.
+
+Why the refused caller sees it rather than only an admin: the id is an
+opaque token that dereferences nothing (the audit log is admin-gated),
+each attempt mints a fresh one, and the refusal message beside it already
+names both the required role and the caller's own -- so it discloses
+nothing new while making a real support conversation possible. This is
+the same call the identity-admin console makes for its own refusals
+(memql#3324). The reasoning is recorded in
+`component/deploycontrol/refusal.go`.
+
+On the permitted path nothing changed: the id stays where it has always
+been, on `ActionResult.audit_event_id`.
 
 ### Reading status is owner/admin, deliberately (memql#3332)
 
@@ -261,7 +297,10 @@ Notes that hold on both surfaces:
   `deployment_console_<verb>`, with the actor, env, target version /
   digest / rollout, and outcome). The console surfaces the audit-event
   id back to you on success (`SUCCESS: <action> (audit <id>)`); failures
-  show `ERROR: <message>`. No emojis.
+  show `ERROR: <message>`, and a **refusal** shows the id of the blocked
+  attempt alongside it -- see
+  [A refusal gives you its audit id](#a-refusal-gives-you-its-audit-id-memql3334).
+  No emojis.
 - **Actions do not auto-push.** Deploy / promote / rollback operate on
   the overlay (via `promote.sh` / `git revert`) and surface the result
   for review; landing the overlay change to `main` follows the normal
@@ -296,6 +335,11 @@ All console writes and denials append to the identity audit log
 (`v1:identity:auditEvent`), visible in the memQL portal's Audit view
 view. Promotion-to-prod and rollback in particular are auditable after
 the fact: actor, env, target version / digest, and outcome.
+
+A denial appears there with `outcome = blocked` and the correlation id
+the refused caller was shown, so an id quoted in a support thread
+resolves to the exact attempt. Resolving it is an **admin** read -- the
+caller holds a reference to their own denial, not access to the trail.
 
 ## When to drop to the terminal (break-glass)
 

@@ -111,10 +111,14 @@ func (s *streamSession) handleDeployControl(envelope *memqlv1.MemqlClientMessage
 	result := deploycontrol.Dispatch(ctx, s.service.deployControlHandler, msg)
 
 	if s.logger != nil && !result.GetOk() {
+		// audit_event_id is empty unless this was a GATE refusal (memql#3334);
+		// logging it here is what lets an operator's quoted id be found in the
+		// node log as well as in v1:identity:auditEvent.
 		s.logger.Warn("deploy control (streamed) rejected",
 			"request_id", result.GetRequestId(),
 			"error_code", result.GetErrorCode(),
-			"error_message", result.GetErrorMessage())
+			"error_message", result.GetErrorMessage(),
+			"audit_event_id", result.GetAuditEventId())
 	}
 
 	return s.sendServerMessage(envelope.GetMessageId(), &memqlv1.MemqlServerMessage{
@@ -162,7 +166,8 @@ func (s *streamSession) forwardDeployControl(envelope *memqlv1.MemqlClientMessag
 			s.logger.Warn("deploy control (forwarded) rejected",
 				"request_id", result.GetRequestId(),
 				"error_code", result.GetErrorCode(),
-				"error_message", result.GetErrorMessage())
+				"error_message", result.GetErrorMessage(),
+				"audit_event_id", result.GetAuditEventId())
 		}
 		if serr := s.sendDeployControlResult(envelope, result); serr != nil && s.logger != nil {
 			s.logger.Warn("deploy control forwarded reply send failed",

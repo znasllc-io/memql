@@ -17,6 +17,10 @@
 // back on the result. A caller may hide buttons a user cannot use, but
 // that is presentation; the refusal is authoritative and arrives as a
 // DeployControlError with code PERMISSION_DENIED.
+//
+// A REFUSAL is audited too, and carries its own id: DeployControlError
+// .auditEventId (memql#3334). Surface it -- the operator who was told no is
+// the one most likely to need a reference to quote.
 
 import type { Dispatcher } from "../client/dispatcher.js";
 import { newShortId } from "../client/id.js";
@@ -169,7 +173,25 @@ export class DeployControlError extends Error {
    */
   readonly engineMessage: string;
 
-  constructor(verb: string, code: number, message: string) {
+  /**
+   * The audit event this REFUSAL wrote (memql#3334).
+   *
+   * A denial on this surface is an audited event -- the role gate writes a
+   * blocked `v1:identity:auditEvent` before it refuses -- and this is its
+   * correlation id. Show it beside the refusal: an operator told "you cannot
+   * roll back" needs a reference to quote, and until #3334 the one event they
+   * most wanted to cite was the only one with no id.
+   *
+   * Empty for anything that is not a gate refusal. An INVALID_ARGUMENT runs
+   * before the gate and writes no event; an UNAVAILABLE never reached the
+   * service. Empty means "nothing was audited", not "the id went missing".
+   *
+   * Mirrors `IdentityAdminError.auditEventId`, which made the same call for
+   * the same reason (memql#3324).
+   */
+  readonly auditEventId: string;
+
+  constructor(verb: string, code: number, message: string, auditEventId = "") {
     const name = GRPC_CODE_NAMES[code] ?? String(code);
     super(`deploy console: ${verb}: ${name}: ${message || "(no message)"}`);
     this.name = "DeployControlError";
@@ -177,6 +199,7 @@ export class DeployControlError extends Error {
     this.codeName = name;
     this.verb = verb;
     this.engineMessage = message;
+    this.auditEventId = auditEventId;
   }
 
   /** True when the refusal was the role gate, not a failure. */
@@ -359,7 +382,7 @@ export class DeployControlClient {
     // malformed reply as success, so a non-zero code is authoritative.
     const code = res.errorCode ?? 0;
     if (code !== 0 || res.ok !== true) {
-      throw new DeployControlError(verb, code, res.errorMessage ?? "");
+      throw new DeployControlError(verb, code, res.errorMessage ?? "", res.auditEventId ?? "");
     }
     return res;
   }

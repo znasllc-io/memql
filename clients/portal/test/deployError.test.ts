@@ -11,7 +11,7 @@
 import { describe as suite, expect, test } from "vitest";
 import { DeployControlError } from "@znasllc-io/memql-sdk-core/deploy";
 
-import { describeDeployError } from "../src/deploy/useDeployConsole";
+import { deployErrorAuditEventId, describeDeployError } from "../src/deploy/useDeployConsole";
 
 suite("describeDeployError", () => {
   test("names the code and the engine's sentence, each exactly once", () => {
@@ -48,5 +48,40 @@ suite("describeDeployError", () => {
   test("a non-DeployControlError is passed through unchanged", () => {
     expect(describeDeployError(new Error("socket closed"))).toBe("socket closed");
     expect(describeDeployError("plain string")).toBe("plain string");
+  });
+
+  test("the audit id is NOT folded into the message line", () => {
+    // memql#3334 gave the refusal an id; it is rendered as its own element
+    // beside the message (RefusalAuditLink), not appended to the sentence.
+    // Concatenating it here would put a bare token in the middle of prose and
+    // make the link impossible to build.
+    const line = describeDeployError(
+      new DeployControlError("rollback_deployment", 7, "requires the owner role", "audit-77"),
+    );
+    expect(line).toBe("PERMISSION_DENIED: requires the owner role");
+    expect(line).not.toContain("audit-77");
+  });
+});
+
+// memql#3334: the refused caller gets the audit id of the blocked attempt.
+//
+// The rationale for showing it at all -- and for the empty cases below being
+// empty rather than a placeholder -- is on deployErrorAuditEventId itself.
+suite("deployErrorAuditEventId", () => {
+  test("a refusal carries the id of the event it wrote", () => {
+    const err = new DeployControlError("rollback_deployment", 7, "requires the owner role", "audit-77");
+    expect(deployErrorAuditEventId(err)).toBe("audit-77");
+  });
+
+  test("a failure the engine did not audit carries none", () => {
+    // INVALID_ARGUMENT is rejected before the role gate, so no event exists.
+    expect(deployErrorAuditEventId(new DeployControlError("cut_version", 3, "bad bump"))).toBe("");
+  });
+
+  test("a transport failure carries none", () => {
+    // Never reached the service, so nothing was audited -- and an id here
+    // would point an operator at an event that does not exist.
+    expect(deployErrorAuditEventId(new Error("socket closed"))).toBe("");
+    expect(deployErrorAuditEventId("plain string")).toBe("");
   });
 });
