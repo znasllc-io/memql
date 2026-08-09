@@ -22,7 +22,7 @@ configure the developer's local Claude Code installation and the repo's
 | Component | What it is | Where it lands |
 |---|---|---|
 | **GitHub MCP server** | Remote MCP server (HTTP transport) at `api.githubcopilot.com` giving Claude Code first-class GitHub access: issues, pull requests, Actions runs, code search. | Claude Code user config (`claude mcp add -s user`) |
-| **Superpowers** | Plugin from the `obra/superpowers-marketplace` marketplace. Adds a broad skill library. | `~/.claude/plugins/`, user scope |
+| **Superpowers** | Plugin from Anthropic's `claude-plugins-official` marketplace. Adds a broad skill library. | `~/.claude/plugins/`, user scope |
 | **CCPM** | Spec-driven project management skill: PRD to epic to GitHub issues to parallel agents. | Cloned to `~/.claude/agent-stack/ccpm`, symlinked into `~/.claude/skills/ccpm` |
 
 Everything installs at **user scope**, not project scope. The stack follows the
@@ -77,6 +77,25 @@ echo 'GITHUB_PAT=<token>' >> .env      # persisted; .env is gitignored
 
 Create a token at https://github.com/settings/personal-access-tokens. The `repo`
 scope is sufficient for issue, PR, and Actions access.
+
+### Preferred: borrow the token from `gh`
+
+If you are already authenticated with the GitHub CLI, do not mint or store a
+second token -- derive it from `gh` at shell start, so the credential lives only
+in the OS keychain that `gh` already manages and never sits in plaintext in a
+dotfile:
+
+```bash
+# ~/.bashrc (or ~/.zshrc)
+if command -v gh >/dev/null 2>&1; then
+    GITHUB_PAT="$(gh auth token 2>/dev/null)" && export GITHUB_PAT
+    [ -n "${GITHUB_PAT:-}" ] || unset GITHUB_PAT
+fi
+```
+
+`gh auth login` already requests `repo`, which is what the MCP server needs.
+Re-authing or rotating `gh` then propagates automatically -- there is no second
+copy to remember to update.
 
 ### Handling of the token
 
@@ -164,7 +183,7 @@ Because setup and verify import their probes from the same library
 | `could not add MCP server 'github'` | Token invalid, expired, or lacking scope. Both the flag and JSON forms failed. | Verify the token at https://github.com/settings/personal-access-tokens, reissue with `repo` scope, re-run. |
 | MCP server configured but tools do not appear | Claude Code has not reloaded, or the server needs authentication. | Restart Claude Code. Check `claude mcp get github`; re-authenticate with `claude mcp login github`. |
 | MCP shows `Failed to connect` | Network or upstream outage; a corporate proxy blocking `api.githubcopilot.com`. | Retry. Confirm the host is reachable. Note `claude mcp list` health-checks every server, so unrelated servers may also report failures. |
-| `could not add marketplace from obra/superpowers-marketplace` | No network access to github.com. | Check connectivity and proxy settings, re-run. |
+| `could not add marketplace from anthropics/claude-plugins-official` | No network access to github.com. | Check connectivity and proxy settings, re-run. |
 | `added <source> but no marketplace named '<name>' appeared` | Upstream renamed the marketplace in its manifest. | Run `claude plugin marketplace list --json`, then update `AGENTS_MARKETPLACE_NAMES` in `scripts/lib/agents.sh`. |
 | `could not install plugin` | Marketplace present but the plugin name changed or was withdrawn. | `claude plugin list --json --available` to see what the marketplace offers. |
 | Plugin installed but its skills are absent | Session predates the install. | Restart Claude Code. |
@@ -185,7 +204,8 @@ rm -rf ~/.claude/agent-stack/ccpm
 ```
 
 Removing the marketplace itself is optional:
-`claude plugin marketplace remove superpowers-marketplace`.
+`claude plugin marketplace remove claude-plugins-official`. Note it also
+serves the other official plugins, so removing it is rarely what you want.
 
 ---
 
