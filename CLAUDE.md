@@ -257,9 +257,23 @@ overhead stopped paying for itself.
 
 **Rules of engagement:**
 
-1. **Commit directly to `main`.** Use a short-lived feature branch only
-   when PR review is genuinely useful; otherwise a focused commit on
-   main is fine.
+1. **Every change goes through a branch + PR. `main` refuses direct
+   pushes.** This is enforced by a repository ruleset, not by
+   convention: `gh api repos/znasllc-io/memql/rules/branches/main`
+   returns `pull_request` and `required_status_checks` (plus `deletion`
+   and `non_fast_forward`), so `git push origin main` fails with
+   `push declined due to repository rule violations` no matter how
+   small the change. A one-line docs fix needs a PR exactly like a
+   feature does.
+
+   Branch, push, open the PR, let CI go green, merge. Squash merges are
+   disabled repo-wide -- use a merge commit.
+
+   > This rule previously read "Commit directly to `main`", which had
+   > not been true since the ruleset landed. It survived because every
+   > change large enough to notice was already being branched; the
+   > first thing to actually hit it was a one-line commit somebody
+   > reasonably expected to push straight up.
 2. **Pre-release -- no backwards-compat shims or deprecation windows.**
    When a contract changes, fix both memQL and the consumer (typically
    the product pack/SPA) at once and delete what is no longer needed. Do not add
