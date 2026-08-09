@@ -521,6 +521,28 @@ func ApproveAccessRequestBuild(args ApproveAccessRequestArgs) string {
 	return b.String()
 }
 
+// ApproveDeviceCode -- Approve a pending device authorization. The approver is stamped from actor.userId -- the form cannot name someone else.
+//
+// Bound concept: v1:identity:deviceCode (machine-readable: BoundConcepts["approveDeviceCode"] in generated_concepts.go).
+type ApproveDeviceCodeArgs struct {
+	DeviceCodeId string
+}
+
+// ApproveDeviceCode calls the engine mutation approveDeviceCode.
+func (qc *QueryClient) ApproveDeviceCode(ctx context.Context, args ApproveDeviceCodeArgs) (*Result, error) {
+	call := ApproveDeviceCodeBuild(args)
+	return qc.executeNamed(ctx, "approveDeviceCode", call)
+}
+
+func ApproveDeviceCodeBuild(args ApproveDeviceCodeArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation approveDeviceCode(")
+	b.WriteString("deviceCodeId: ")
+	b.WriteString(quoteMemQL(args.DeviceCodeId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // ApproveRequest -- Approve a v1:forge:request (owner action): set status 'queued' (ready to implement) and stamp approvedByUserId from actor.userId.
 //
 // Bound concept: v1:forge:request (machine-readable: BoundConcepts["approveRequest"] in generated_concepts.go).
@@ -3556,6 +3578,98 @@ func CreateDeploymentNodeSpecBuild(args CreateDeploymentNodeSpecArgs) string {
 	return b.String()
 }
 
+// CreateDeviceCode -- Persist a device-authorization row at POST /device/code time, born `pending`. Both credentials arrive pre-hashed; neither plaintext is ever passed to the engine.
+//
+// Bound concept: v1:identity:deviceCode (machine-readable: BoundConcepts["createDeviceCode"] in generated_concepts.go).
+type CreateDeviceCodeArgs struct {
+	DeviceCodeId        string
+	ClientId            string
+	DeviceCodeHash      string
+	UserCodeHash        string
+	ExpiresAt           string
+	IntervalSeconds     int
+	Scope               string
+	CodeChallenge       string
+	CodeChallengeMethod string
+	SourceIP            string
+	UserAgent           string
+}
+
+// CreateDeviceCode calls the engine mutation createDeviceCode.
+func (qc *QueryClient) CreateDeviceCode(ctx context.Context, args CreateDeviceCodeArgs) (*Result, error) {
+	call := CreateDeviceCodeBuild(args)
+	return qc.executeNamed(ctx, "createDeviceCode", call)
+}
+
+func CreateDeviceCodeBuild(args CreateDeviceCodeArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation createDeviceCode(")
+	b.WriteString("deviceCodeId: ")
+	b.WriteString(quoteMemQL(args.DeviceCodeId))
+	if b.Len() > 26 {
+		b.WriteString(", ")
+	}
+	b.WriteString("clientId: ")
+	b.WriteString(quoteMemQL(args.ClientId))
+	if b.Len() > 26 {
+		b.WriteString(", ")
+	}
+	b.WriteString("deviceCodeHash: ")
+	b.WriteString(quoteMemQL(args.DeviceCodeHash))
+	if b.Len() > 26 {
+		b.WriteString(", ")
+	}
+	b.WriteString("userCodeHash: ")
+	b.WriteString(quoteMemQL(args.UserCodeHash))
+	if b.Len() > 26 {
+		b.WriteString(", ")
+	}
+	b.WriteString("expiresAt: ")
+	b.WriteString(quoteMemQL(args.ExpiresAt))
+	if b.Len() > 26 {
+		b.WriteString(", ")
+	}
+	b.WriteString("intervalSeconds: ")
+	b.WriteString(fmt.Sprintf("%v", args.IntervalSeconds))
+	if args.Scope != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("scope: ")
+		b.WriteString(quoteMemQL(args.Scope))
+	}
+	if args.CodeChallenge != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("codeChallenge: ")
+		b.WriteString(quoteMemQL(args.CodeChallenge))
+	}
+	if args.CodeChallengeMethod != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("codeChallengeMethod: ")
+		b.WriteString(quoteMemQL(args.CodeChallengeMethod))
+	}
+	if args.SourceIP != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("sourceIP: ")
+		b.WriteString(quoteMemQL(args.SourceIP))
+	}
+	if args.UserAgent != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("userAgent: ")
+		b.WriteString(quoteMemQL(args.UserAgent))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // CreateDocumentChunk -- Create a document chunk linked to a knowledge domain. Called by every chunk-writing integration (seedDomainContent, augmentDomainGenerate, ensureKnowledgeBridge, the product UI corpus ingest). source is REQUIRED and tags the chunk's provenance class -- the dev-refresh cache filter and the citation registry both read it as the source of truth. Optional sourceUtteranceId / sourceAgentId / sourceTopic carry chat-driven augment provenance back-pointers.
 //
 // Bound concept: v1:knowledge:documentChunk (machine-readable: BoundConcepts["createDocumentChunk"] in generated_concepts.go).
@@ -4481,6 +4595,100 @@ func CreatePATIdentityBuild(args CreatePATIdentityArgs) string {
 		b.WriteString("usableByAgents: ")
 		b.WriteString(fmt.Sprintf("%v", args.UsableByAgents))
 	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// CreatePasskeyIdentity -- Register a passkey identity (WebAuthn discoverable credential). Stores the credential's PUBLIC COSE key -- there is no secret half to withhold.
+//
+// Bound concept: v1:identity:identity (machine-readable: BoundConcepts["createPasskeyIdentity"] in generated_concepts.go).
+type CreatePasskeyIdentityArgs struct {
+	IdentityId        string
+	UserId            string
+	Label             string
+	CredentialId      string
+	PublicKey         string
+	SignCount         int
+	Aaguid            string
+	Transports        []string
+	BackupEligible    bool
+	BackupEligibleSet bool // set true to send backupEligible; required because zero-value bool is ambiguous
+	BackupState       bool
+	BackupStateSet    bool // set true to send backupState; required because zero-value bool is ambiguous
+	RegisteredBy      string
+}
+
+// CreatePasskeyIdentity calls the engine mutation createPasskeyIdentity.
+func (qc *QueryClient) CreatePasskeyIdentity(ctx context.Context, args CreatePasskeyIdentityArgs) (*Result, error) {
+	call := CreatePasskeyIdentityBuild(args)
+	return qc.executeNamed(ctx, "createPasskeyIdentity", call)
+}
+
+func CreatePasskeyIdentityBuild(args CreatePasskeyIdentityArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation createPasskeyIdentity(")
+	b.WriteString("identityId: ")
+	b.WriteString(quoteMemQL(args.IdentityId))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("userId: ")
+	b.WriteString(quoteMemQL(args.UserId))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("label: ")
+	b.WriteString(quoteMemQL(args.Label))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("credentialId: ")
+	b.WriteString(quoteMemQL(args.CredentialId))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("publicKey: ")
+	b.WriteString(quoteMemQL(args.PublicKey))
+	if args.SignCount != 0 {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("signCount: ")
+		b.WriteString(fmt.Sprintf("%v", args.SignCount))
+	}
+	if args.Aaguid != "" {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("aaguid: ")
+		b.WriteString(quoteMemQL(args.Aaguid))
+	}
+	if args.Transports != nil {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("transports: ")
+		b.WriteString(renderMemQLValue(args.Transports))
+	}
+	if args.BackupEligibleSet {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("backupEligible: ")
+		b.WriteString(fmt.Sprintf("%v", args.BackupEligible))
+	}
+	if args.BackupStateSet {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("backupState: ")
+		b.WriteString(fmt.Sprintf("%v", args.BackupState))
+	}
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("registeredBy: ")
+	b.WriteString(quoteMemQL(args.RegisteredBy))
 	b.WriteString(")")
 	return b.String()
 }
@@ -6565,6 +6773,28 @@ func DeleteUserHardBuild(args DeleteUserHardArgs) string {
 	b.WriteString("mutation deleteUserHard(")
 	b.WriteString("userId: ")
 	b.WriteString(quoteMemQL(args.UserId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// DenyDeviceCode -- Deny a pending device authorization. Terminal: polling returns access_denied from here on.
+//
+// Bound concept: v1:identity:deviceCode (machine-readable: BoundConcepts["denyDeviceCode"] in generated_concepts.go).
+type DenyDeviceCodeArgs struct {
+	DeviceCodeId string
+}
+
+// DenyDeviceCode calls the engine mutation denyDeviceCode.
+func (qc *QueryClient) DenyDeviceCode(ctx context.Context, args DenyDeviceCodeArgs) (*Result, error) {
+	call := DenyDeviceCodeBuild(args)
+	return qc.executeNamed(ctx, "denyDeviceCode", call)
+}
+
+func DenyDeviceCodeBuild(args DenyDeviceCodeArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation denyDeviceCode(")
+	b.WriteString("deviceCodeId: ")
+	b.WriteString(quoteMemQL(args.DeviceCodeId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -8905,6 +9135,34 @@ func RecordTrunkBuild(args RecordTrunkArgs) string {
 		b.WriteString("secretRef: ")
 		b.WriteString(quoteMemQL(args.SecretRef))
 	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// RedeemDeviceCode -- Mark an approved device authorization redeemed. Single-use: the handler stamps this BEFORE minting tokens, so a concurrent second poll finds status=redeemed and is refused.
+//
+// Bound concept: v1:identity:deviceCode (machine-readable: BoundConcepts["redeemDeviceCode"] in generated_concepts.go).
+type RedeemDeviceCodeArgs struct {
+	DeviceCodeId string
+	RedeemedAt   string
+}
+
+// RedeemDeviceCode calls the engine mutation redeemDeviceCode.
+func (qc *QueryClient) RedeemDeviceCode(ctx context.Context, args RedeemDeviceCodeArgs) (*Result, error) {
+	call := RedeemDeviceCodeBuild(args)
+	return qc.executeNamed(ctx, "redeemDeviceCode", call)
+}
+
+func RedeemDeviceCodeBuild(args RedeemDeviceCodeArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation redeemDeviceCode(")
+	b.WriteString("deviceCodeId: ")
+	b.WriteString(quoteMemQL(args.DeviceCodeId))
+	if b.Len() > 26 {
+		b.WriteString(", ")
+	}
+	b.WriteString("redeemedAt: ")
+	b.WriteString(quoteMemQL(args.RedeemedAt))
 	b.WriteString(")")
 	return b.String()
 }
@@ -11335,6 +11593,40 @@ func TouchBadgeLastUsedBuild(args TouchBadgeLastUsedArgs) string {
 	}
 	b.WriteString("credentials: ")
 	b.WriteString(renderMemQLValue(args.Credentials))
+	b.WriteString(")")
+	return b.String()
+}
+
+// TouchDeviceCodePoll -- Stamp the poll clock. Called on EVERY /oauth/token device-grant poll, accepted or throttled, so the next poll's slow_down decision reads a value written by whichever replica served the last one. intervalSeconds is re-stamped because a too-fast poll raises it.
+//
+// Bound concept: v1:identity:deviceCode (machine-readable: BoundConcepts["touchDeviceCodePoll"] in generated_concepts.go).
+type TouchDeviceCodePollArgs struct {
+	DeviceCodeId    string
+	LastPolledAt    string
+	IntervalSeconds int
+}
+
+// TouchDeviceCodePoll calls the engine mutation touchDeviceCodePoll.
+func (qc *QueryClient) TouchDeviceCodePoll(ctx context.Context, args TouchDeviceCodePollArgs) (*Result, error) {
+	call := TouchDeviceCodePollBuild(args)
+	return qc.executeNamed(ctx, "touchDeviceCodePoll", call)
+}
+
+func TouchDeviceCodePollBuild(args TouchDeviceCodePollArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation touchDeviceCodePoll(")
+	b.WriteString("deviceCodeId: ")
+	b.WriteString(quoteMemQL(args.DeviceCodeId))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("lastPolledAt: ")
+	b.WriteString(quoteMemQL(args.LastPolledAt))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("intervalSeconds: ")
+	b.WriteString(fmt.Sprintf("%v", args.IntervalSeconds))
 	b.WriteString(")")
 	return b.String()
 }

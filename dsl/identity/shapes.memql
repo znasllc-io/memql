@@ -297,6 +297,32 @@ shape identity nodeTokenSummary {
   row.createdAt
 }
 
+/// Management projection of a passkey identity (memql#3406): the fields a user needs to recognise
+/// one of their own authenticators in a list, plus the two flags that decide whether losing the
+/// device loses the account.
+///
+/// Omits publicKey and signCount deliberately. Not because they are secret -- a passkey's stored
+/// material is public by construction, which is what separates this variant from every keyHash one
+/// -- but because they are VERIFIER state: the assertion path reads them through identityFull, and
+/// nothing a client renders is improved by carrying a COSE blob and a counter it cannot interpret.
+/// Same reasoning as accountTokenSummary, one step weaker: there the projection is a boundary,
+/// here it is a contract about what the management surface is for.
+@row
+shape identity passkeySummary {
+  row.id
+  userId
+  label
+  active
+  credentials.credentialId
+  credentials.aaguid
+  credentials.transports
+  credentials.backupEligible
+  credentials.backupState
+  credentials.registeredBy
+  credentials.lastUsedAt
+  row.createdAt
+}
+
 /// Lightweight projection: just the user's id and activePartitionId pointer. Phase 4 of the
 /// chat-architecture plan.
 @row
@@ -359,6 +385,33 @@ shape user userDisplayCard {
 @row
 shape user userIdRef {
   row.id
+}
+
+/// Full projection of a v1:identity:deviceCode row (RFC 8628, memql#3410). Backs BOTH lookups: the
+/// polling path (by deviceCodeHash) and the verification page (by userCodeHash). The two hashes ARE
+/// projected -- they are the lookup keys, they are already digests rather than credentials, and the
+/// caller compares nothing against them; what never exists server-side, and so cannot be projected,
+/// is either plaintext.
+@row
+shape deviceCode deviceCodeFull {
+  row.id
+  clientId
+  deviceCodeHash
+  userCodeHash
+  status
+  scope
+  codeChallenge
+  codeChallengeMethod
+  expiresAt
+  intervalSeconds
+  lastPolledAt
+  approvedByUserId
+  approvedAt
+  deniedAt
+  redeemedAt
+  sourceIP
+  userAgent
+  row.createdAt
 }
 
 /// Full projection of a v1:identity:workerPairingCode row. Backs the Pair-aware gRPC interceptor's
