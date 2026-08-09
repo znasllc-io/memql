@@ -329,6 +329,45 @@ concept magicLinkRequest {
 //
 // So the tier is declarable and still not TRUE here. Making it true is a
 // wire-contract decision over nine client-called mutations, not a bug fix.
+//
+// STILL UNDECLARED, AND NOW FOR A SECOND, INDEPENDENT REASON (memql#3350).
+// The note above is about the WRITE side. The read side rules a tier out
+// on its own, and this is the recorded decision memql#3350 asked for --
+// role-gating for this concept lives at the PROJECTION, not at the row.
+//
+// Measured over the seventeen constructs binding this concept:
+//
+//   - CROSS-USER READS FOR ORDINARY CALLERS. userDisplayById is @public
+//     and usersActiveInSpace is ungated: they are how one participant's
+//     name renders in another's chat. A tier ANDs its predicate into
+//     BOTH of them unconditionally, so any self-scoped tier breaks the
+//     product for every user, not only for readers.
+//   - PRE-ACTOR READS. userByEmail is the magic-link lookup and
+//     userByIdSystem resolves sub -> user in order to BUILD the actor
+//     (component/auth/identity_resolver.go), so actor.userId is circular
+//     there. enforceRowAuthzOnPlan takes NO context and has no escape --
+//     the write path's rowAuthzWriteEscape has no read-side counterpart
+//     -- so no tier can spare them.
+//   - THE ADMIN READS ARE A ROLL-UP. searchUsers / userById are
+//     "the users of this cluster", gated requiresOwnerOrAdmin. `owned`
+//     ANDs its predicate with no cluster-owner escape, so declaring it
+//     would narrow an admin's user list to the admin's own row and
+//     return a confidently wrong answer.
+//
+// So users may legitimately SEE each other; what they may not see is
+// each other's @pii. That is a field boundary, and the named queries
+// already draw it with their shapes -- which is why the leak was on the
+// one read that projects no shape, the generic concept browse. It is
+// closed at row admission for unbound reads, keyed off the @pii
+// annotations below rather than off this concept's name:
+// component/memql/rowauthz_pii_unbound.go.
+//
+// What would let a tier be declared here, in dependency order: (a) a
+// read-path escape mirroring rowAuthzWriteEscape, so the pre-actor and
+// system reads survive injection; (b) a tier that composes self-access
+// with an admin roll-up, since `owned` cannot express one. Neither is a
+// prerequisite for closing the browse hole, which is why #3350 shipped
+// without them.
 @displayCard(primary="displayName", secondary="role", tertiary="primaryEmail", status="active")
 concept user {
   active          bool    @default("true")  @description("Whether the user account is active.")
