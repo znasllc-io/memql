@@ -77,6 +77,25 @@ var capabilityScriptAllowlist = map[string]string{
 	"overlay.pinDigests": "scripts/deploy/pin-overlay-digests.sh",
 	"overlay.revert":     "scripts/deploy/revert-overlay.sh",
 	"argocd.sync":        "scripts/deploy/argo-sync.sh",
+
+	// Local-cluster install/uninstall substrate (epic #3357, install(11) /
+	// #3368). Registration here is what makes an install script REACHABLE from
+	// the in-engine action path -- an unregistered script still runs fine from
+	// a human shell or the host executor, but the runner rejects its id before
+	// exec, so the capability is silently inert on the engine path while
+	// looking healthy everywhere else. install_allowlist_test.go walks
+	// scripts/install/ and fails on any unregistered cap_init id, so adding an
+	// install capability is a two-file change by construction.
+	"install.refreshPins":       "scripts/install/refresh-tool-pins.sh",
+	"install.detect":            "scripts/install/detect.sh",
+	"install.binary":            "scripts/install/install-binary.sh",
+	"install.hostsEntries":      "scripts/install/hosts-entries.sh",
+	"install.mkcert":            "scripts/install/mkcert-setup.sh",
+	"install.cloneStack":        "scripts/install/clone-stack.sh",
+	"install.verifyProviderKey": "scripts/install/verify-provider-key.sh",
+	"install.verifyFrontDoor":   "scripts/install/verify-frontdoor.sh",
+	"install.magicLink":         "scripts/install/magic-link.sh",
+	"install.removeArtifact":    "scripts/install/remove-artifact.sh",
 }
 
 // scriptParamKey is the reserved rendered-arg key that names the capability
