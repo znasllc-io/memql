@@ -63,11 +63,37 @@
 //     copy is used and left alone -- clearing the only copy of a credential we
 //     have nowhere to put would be worse than the exposure.
 //
+// The storage mechanics themselves -- the keys, the index that makes an
+// un-enumerable SecretStorage sweepable, sign-in and sign-out -- live in
+// src/auth/store.ts. This module only resolves and renews.
+//
+// -----------------------------------------------------------------------------
+// memql#3404 -- NOT SPINNING
+// -----------------------------------------------------------------------------
+//
+// Two failure modes a refresh path acquires as soon as it has more than one
+// caller, both addressed below:
+//
+//   COALESCING. A connect and the SDK's expiry hook can want a fresh token at
+//     the same instant. Two concurrent exchanges against a rotating refresh
+//     token do not merely waste a round trip -- the second presents a token the
+//     first has already spent, so it fails with invalid_grant and, worse, the
+//     rotated token stored by the loser can overwrite the winner's. One
+//     in-flight promise per cluster makes the second caller await the first.
+//
+//   TERMINAL FAILURES. A refresh the identity service REFUSES (the refresh
+//     token is expired, revoked or already rotated) can never succeed on a
+//     retry, so the stored tokens are cleared and the caller is told to sign in
+//     again. Left in place they would be re-presented on every action, failing
+//     identically forever. A refresh that merely could not be DELIVERED (the
+//     service is unreachable, a 500) is not terminal and changes nothing.
+//
 // Deliberately free of `vscode` imports (cmd/memql-lsp/vscodeimportrule_test.go).
-// SecretStore is a structural interface that `vscode.SecretStorage` satisfies,
-// so the editor's real store is injected by the adapter layer and the tests
-// drive a Map.
 
+import {
+  ClusterCredentialStore,
+  type SecretStore,
+} from "../auth/store.js";
 import type { ClusterConfig } from "../clusters/model.js";
 import { identityBaseUrlFor } from "./endpoint.js";
 
@@ -122,23 +148,6 @@ export function jwtExpirySeconds(token: string): number | undefined {
   }
 }
 
-/** refreshTokenSecretKey is the per-cluster SecretStorage key. */
-export function refreshTokenSecretKey(clusterName: string): string {
-  return `memql.cluster.refreshToken:${clusterName}`;
-}
-
-/**
- * The subset of `vscode.SecretStorage` this module needs.
- *
- * PromiseLike rather than Promise so VS Code's Thenable-returning API satisfies
- * it without a wrapper, and so this file stays importable from plain Node.
- */
-export interface SecretStore {
-  get(key: string): PromiseLike<string | undefined>;
-  store(key: string, value: string): PromiseLike<void>;
-  delete(key: string): PromiseLike<void>;
-}
-
 export interface HttpRequestInit {
   method: string;
   headers: Record<string, string>;
@@ -155,12 +164,20 @@ export type FetchLike = (url: string, init: HttpRequestInit) => Promise<HttpResp
 
 /** What a refresh writes back to the shared registry. */
 export interface PersistedCredential {
-  /** The freshly minted access token. */
+  /**
+   * The freshly minted access token, or `""` to DELETE the stored one.
+   *
+   * The empty spelling is how a TERMINAL refresh failure clears the file: the
+   * write goes through `upsertCluster`, whose per-field contract is that `""`
+   * deletes the key. It needs no separate signal precisely because that
+   * contract already exists.
+   */
   token: string;
   /**
    * Whether the plaintext `refresh_token:` key may now be deleted from the
-   * file. True only when SecretStorage actually took custody of the rotated
-   * token -- otherwise the file holds the only copy.
+   * file. True when SecretStorage took custody of the rotated token, and also
+   * when a terminal failure means there is no longer a refresh token worth
+   * keeping anywhere -- otherwise the file holds the only copy.
    */
   clearStoredRefreshToken: boolean;
 }
@@ -174,7 +191,16 @@ export type CredentialFailureReason =
   | "notConfigured"
   | "missingCredential"
   | "wrongTokenClass"
-  | "credentialExpired";
+  | "credentialExpired"
+  /**
+   * The stored credentials were REFUSED and have been cleared. Distinct from
+   * `credentialExpired`, which is a credential that ran out and might still be
+   * renewable next time -- this one is a dead end, and the only way forward is
+   * a fresh sign-in. Separating them is what lets a UI offer that sign-in
+   * instead of repeating "expired" at an operator who has nothing left to
+   * renew (memql#3404).
+   */
+  | "reauthenticationRequired";
 
 export type CredentialResolution =
   | { ok: true; bearer: string }
@@ -243,6 +269,17 @@ function expiredMessage(clusterName: string, detail: string): string {
   );
 }
 
+// The refresh token itself was refused, so nothing stored can be renewed and
+// everything stored has been dropped. The sentence says so explicitly: an
+// operator who is not told their tokens were cleared will go looking for the
+// ones they think are still there.
+export function refreshRejectedMessage(clusterName: string, detail: string): string {
+  return (
+    `The stored credentials for cluster "${clusterName}" were rejected and could not be renewed: ${detail} ` +
+    "They have been cleared -- sign in to the cluster again."
+  );
+}
+
 // -----------------------------------------------------------------------------
 
 const NO_REFRESH_TOKEN =
@@ -252,16 +289,25 @@ interface RefreshOutcome {
   ok: boolean;
   accessToken?: string;
   error?: string;
+  /**
+   * The exchange was REFUSED rather than undelivered, so the stored tokens are
+   * dead and have been cleared. See the header.
+   */
+  terminal?: boolean;
 }
 
 export class CredentialResolver implements CredentialSource {
-  private readonly secrets: SecretStore | undefined;
+  private readonly store: ClusterCredentialStore;
   private readonly fetch: FetchLike;
   private readonly persist: PersistFn | undefined;
   private readonly now: () => number;
+  // One exchange per cluster at a time. Keyed by cluster NAME, which is the
+  // same identity the secret keys use -- two ClusterConfig objects describing
+  // one cluster must share an in-flight refresh, and two clusters must not.
+  private readonly inFlight = new Map<string, Promise<RefreshOutcome>>();
 
   constructor(deps: CredentialDeps = {}) {
-    this.secrets = deps.secrets;
+    this.store = new ClusterCredentialStore(deps.secrets);
     this.fetch = deps.fetch ?? defaultFetch;
     this.persist = deps.persist;
     this.now = deps.now ?? (() => Date.now());
@@ -284,7 +330,11 @@ export class CredentialResolver implements CredentialSource {
       };
     }
 
-    const expiry = jwtExpirySeconds(token);
+    // The credential's own `exp` first; the stored expiry only when it has
+    // none. An opaque access token carries no lifetime a client can read, so
+    // without the stored copy it would never be renewed proactively -- it would
+    // simply fail a dial one day and be renewed after the failure.
+    const expiry = jwtExpirySeconds(token) ?? (await this.storedExpiry(cluster, token));
     const nowSeconds = this.now() / 1000;
     const expired = expiry !== undefined && expiry <= nowSeconds;
     const stale = token === "" || (expiry !== undefined && expiry - nowSeconds <= EXPIRY_SKEW_SECONDS);
@@ -302,6 +352,20 @@ export class CredentialResolver implements CredentialSource {
     // would be a regression rather than a fix. A token already past `exp` is
     // not, and neither is no token at all.
     const detail = refreshed.error ?? "the exchange failed.";
+
+    // A REFUSED refresh is the exception to all of that. The stored tokens have
+    // just been cleared, so carrying on with the in-memory one would connect a
+    // session whose next renewal is already guaranteed to fail, against a
+    // registry that says the cluster is signed out. Report the dead end here,
+    // once, instead of at every action from now on.
+    if (refreshed.terminal === true) {
+      return {
+        ok: false,
+        reason: "reauthenticationRequired",
+        message: refreshRejectedMessage(cluster.name, detail),
+      };
+    }
+
     if (token === "") {
       // Nothing stored and nothing to exchange is a cluster nobody has given a
       // credential to -- a different sentence from one whose credential ran out.
@@ -320,10 +384,35 @@ export class CredentialResolver implements CredentialSource {
     return refreshed.ok && refreshed.accessToken !== undefined ? refreshed.accessToken : null;
   }
 
-  // exchange runs the refresh_token grant and takes custody of the rotated
+  /**
+   * exchange runs at most one refresh per cluster at a time.
+   *
+   * A second caller arriving mid-flight gets the FIRST call's promise rather
+   * than a second exchange. Not an optimisation: identity rotates the refresh
+   * token on every exchange, so two concurrent refreshes race to spend one
+   * single-use credential -- the loser fails with invalid_grant, and its
+   * rotated token can land in SecretStorage on top of the winner's, leaving the
+   * only stored copy already spent.
+   */
+  private exchange(cluster: ClusterConfig): Promise<RefreshOutcome> {
+    const key = cluster.name;
+    const existing = this.inFlight.get(key);
+    if (existing !== undefined) return existing;
+
+    // Cleared in `finally`, and only if it is still ours -- a later exchange
+    // that has already replaced this entry must not have it deleted underneath
+    // it by an earlier one settling late.
+    const started = this.runExchange(cluster).finally(() => {
+      if (this.inFlight.get(key) === started) this.inFlight.delete(key);
+    });
+    this.inFlight.set(key, started);
+    return started;
+  }
+
+  // runExchange runs the refresh_token grant and takes custody of the rotated
   // token. Every failure is returned as a sentence, never thrown: the caller's
   // decision (fail, or carry on with a still-valid token) depends on it.
-  private async exchange(cluster: ClusterConfig): Promise<RefreshOutcome> {
+  private async runExchange(cluster: ClusterConfig): Promise<RefreshOutcome> {
     const refreshToken = await this.loadRefreshToken(cluster);
     if (refreshToken === undefined) return { ok: false, error: NO_REFRESH_TOKEN };
 
@@ -359,10 +448,15 @@ export class CredentialResolver implements CredentialSource {
 
     const raw = await response.text().catch(() => "");
     if (!response.ok) {
-      return { ok: false, error: `${base}/oauth/token returned ${response.status}: ${oauthError(raw)}` };
+      const error = `${base}/oauth/token returned ${response.status}: ${oauthError(raw)}`;
+      if (isTerminalRefreshFailure(response.status, raw)) {
+        await this.clearCredentials(cluster.name);
+        return { ok: false, error, terminal: true };
+      }
+      return { ok: false, error };
     }
 
-    let parsed: { access_token?: unknown; refresh_token?: unknown };
+    let parsed: { access_token?: unknown; refresh_token?: unknown; expires_in?: unknown };
     try {
       parsed = JSON.parse(raw) as typeof parsed;
     } catch {
@@ -382,15 +476,19 @@ export class CredentialResolver implements CredentialSource {
         ? parsed.refresh_token.trim()
         : refreshToken;
 
-    let custodyTaken = false;
-    if (this.secrets !== undefined) {
-      try {
-        await this.secrets.store(refreshTokenSecretKey(cluster.name), rotated);
-        custodyTaken = true;
-      } catch {
-        // A SecretStorage that refuses a write must not cost us the connection;
-        // it only means the plaintext copy stays where it is.
-      }
+    // A SecretStorage that refuses a write must not cost us the connection; it
+    // only means the plaintext copy stays where it is (custodyTaken === false).
+    const custodyTaken = await this.store.writeRefreshToken(cluster.name, rotated);
+
+    // The lifetime the server just reported, kept beside the refresh token so
+    // an access token that is not a readable JWT can still be renewed before it
+    // expires rather than after.
+    const expiresIn =
+      typeof parsed.expires_in === "number" && Number.isFinite(parsed.expires_in)
+        ? Math.floor(parsed.expires_in)
+        : 0;
+    if (expiresIn > 0) {
+      await this.store.writeExpiry(cluster.name, Math.floor(this.now() / 1000) + expiresIn);
     }
 
     if (this.persist !== undefined) {
@@ -409,20 +507,69 @@ export class CredentialResolver implements CredentialSource {
   }
 
   // loadRefreshToken prefers SecretStorage and falls back to the file's ingest
-  // key. Custody is taken on a successful exchange (see `exchange`), not here:
-  // copying the secret before we know it works would leave two live copies if
-  // the exchange then failed.
+  // key. Custody is taken on a successful exchange (see `runExchange`), not
+  // here: copying the secret before we know it works would leave two live
+  // copies if the exchange then failed.
   private async loadRefreshToken(cluster: ClusterConfig): Promise<string | undefined> {
-    if (this.secrets !== undefined) {
-      try {
-        const stored = (await this.secrets.get(refreshTokenSecretKey(cluster.name)))?.trim();
-        if (stored !== undefined && stored !== "") return stored;
-      } catch {
-        // Fall through to the file.
-      }
-    }
+    const stored = await this.store.readRefreshToken(cluster.name);
+    if (stored !== undefined) return stored;
     const plain = (cluster.refreshToken ?? "").trim();
     return plain === "" ? undefined : plain;
+  }
+
+  // storedExpiry is consulted only for a credential whose own `exp` is
+  // unreadable. It is skipped entirely for an empty token, which is already
+  // stale by every other measure -- reading a secret to confirm that would be
+  // a keychain round trip that cannot change the answer.
+  private async storedExpiry(
+    cluster: ClusterConfig,
+    token: string,
+  ): Promise<number | undefined> {
+    if (token === "") return undefined;
+    return this.store.readExpiry(cluster.name);
+  }
+
+  // clearCredentials drops every stored copy after a terminal rejection: the
+  // secrets, and both token keys in the shared file. What is left is a cluster
+  // entry with no credential, which is exactly what a clean sign-in starts
+  // from.
+  private async clearCredentials(clusterName: string): Promise<void> {
+    await this.store.clear(clusterName);
+    if (this.persist === undefined) return;
+    try {
+      await this.persist(clusterName, { token: "", clearStoredRefreshToken: true });
+    } catch {
+      // The refusal is reported either way; a file that could not be written
+      // costs one more failed exchange, not a wrong answer.
+    }
+  }
+}
+
+/**
+ * isTerminalRefreshFailure separates "this refresh token is dead" from "the
+ * exchange did not get through".
+ *
+ * The status codes are the primary signal: RFC 6749 §5.2 makes 400 the code for
+ * a grant the server rejected, and identity answers a spent, revoked or expired
+ * refresh token with exactly that. A 5xx, a timeout, or a proxy's 502 says
+ * nothing about the credential and must NOT throw it away -- a client that
+ * signed itself out every time its identity service hiccuped would be worse
+ * than one that never refreshed at all.
+ *
+ * 401 and 403 are included because a deployment can put a gateway in front of
+ * identity that answers an unauthenticated token exchange itself.
+ */
+export function isTerminalRefreshFailure(status: number, body: string): boolean {
+  if (status === 400 || status === 401 || status === 403) return true;
+  // Some proxies flatten a rejected grant into a non-standard status while
+  // passing identity's body through; the OAuth error code is then the only
+  // truthful part of the response.
+  try {
+    const parsed = JSON.parse(body) as { error?: unknown };
+    const code = typeof parsed.error === "string" ? parsed.error : "";
+    return code === "invalid_grant" || code === "invalid_client" || code === "unauthorized_client";
+  } catch {
+    return false;
   }
 }
 
