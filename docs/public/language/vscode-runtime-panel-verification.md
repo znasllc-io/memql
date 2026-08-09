@@ -279,6 +279,67 @@ times while every automated test was green.
       is renewed without a reconnect
 - [ ] **Disconnect** returns the icon to the hollow circle and empties Concepts
 
+### Sign-in, sign-out and the "+" menu (memql#3401)
+
+These items exercise the browser sign-in the extension now drives itself, so
+they are the one part of this checklist you can run **without** hand-pasting a
+token into `clusters.yaml`. Take one cluster entry through them with its `token`
+and `refresh_token` keys deliberately blank.
+
+- [ ] **memQL: Sign In** (the cluster's context menu, or the palette) opens a
+      cancellable progress notification reading `signing in to <cluster>` and
+      opens a browser at the cluster's `identity.<domain>` login page
+- [ ] Signing in there returns to VS Code without a manual paste, and the tree's
+      yellow key clears
+- [ ] `clusters.yaml` now carries a `token:` and a `client_id:` for that cluster,
+      and does **not** carry a `refresh_token:` -- custody moved to SecretStorage
+- [ ] Cancelling the progress notification mid-flow shows nothing louder than a
+      cancellation message: no red error toast, and no credential is written
+- [ ] Selecting a cluster whose dial fails **on the credential** offers a
+      **Sign in** button on the error toast; one that fails because it is
+      unreachable, or which names neither an `issuer` nor a `domain`, offers
+      only the message -- a button whose sole outcome is another error is not
+      shown
+- [ ] **memQL: Sign Out** removes both `token:` and `refresh_token:` from
+      `clusters.yaml`, drops a live connection to that cluster, and says
+      `Run "memQL: Sign In" to authenticate again`
+- [ ] After Sign Out the tree shows the yellow key ("no credential"), not the red
+      error dot
+- [ ] **Refresh after expiry:** with a signed-in cluster connected, wait past the
+      access token's 900-second TTL (or shorten
+      `MEMQL_IDENTITY_ACCESS_TOKEN_TTL_SECONDS` on the identity Deployment and
+      re-`make dev NODE=identity`). The stream stays up and the views keep
+      loading -- the token is renewed in place, with no reconnect and no prompt
+- [ ] Delete the cluster's refresh-token secret (sign out, then hand-write only a
+      long-expired `token:` back into `clusters.yaml`) and connect: the tree
+      shows the yellow key with `CREDENTIAL EXPIRED:` and the offered recovery is
+      Sign In
+- [ ] The **"+"** in the Clusters view title branches on evidence: with no
+      install receipt and no `local: true` cluster it offers **Install a local
+      cluster...** alongside **Connect to an existing cluster...**; with a
+      local cluster present and answering it goes straight to the connect form
+      with no picker; with one present but not answering it offers **Repair
+      local cluster...** as well
+- [ ] Choosing Install or Repair shows the installer's CLI command with a **Copy
+      Command** button and says an in-editor wizard is not wired up yet -- it
+      does not silently do nothing
+- [ ] **memQL: Sign In With a Device Code** (palette only) shows an
+      `XXXX-XXXX` code and a verification URL, and approving at
+      `https://identity.<domain>/device` completes the sign-in on the editor side
+
+WARNING: two things this section deliberately does not ask you to verify,
+because they are not wired up and the row would fail:
+
+- The automatic loopback-to-device-code fallback exists in the codebase
+  (`signInWithDeviceCodeFallback`) but is **not** reached from **memQL: Sign
+  In**, which runs the loopback flow alone. The device grant is reachable only
+  through the explicit **Sign In With a Device Code** command. Verify it that
+  way; do not wait for a failed loopback to hand you one.
+- **Renaming a signed-in cluster does not move its refresh token.**
+  `renameClusterCredentials` and `reconcileClusterCredentials` both exist and
+  neither is called from the extension, so a rename leaves the secret orphaned
+  under the old key and nothing sweeps it. Sign in again after a rename.
+
 ## 3. Running a construct (B2, memql#3309)
 
 Open a `.memql` file with a runnable construct (a query is the easiest).
