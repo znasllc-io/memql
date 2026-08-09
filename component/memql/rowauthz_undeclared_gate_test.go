@@ -114,6 +114,34 @@ const undeclared3178SelfScopedReason = "memql#3178 -- self-scoped on actor.userI
 // concept fails auth cluster-wide rather than leaking.
 const undeclared3322AccountTokenReason = "memql#3349 -- account-token reads; v1:identity:identity still declares no tier"
 
+// undeclared3324NodeTokenAdminReason covers nodeTokenIdentitiesAdmin, added by
+// memql#3324 when the server-rendered /admin/* console was retired into the
+// portal SPA.
+//
+// It postdates the seed and names its own issue rather than carrying the
+// grandfather marker, for the same reason as the two pairs above.
+//
+// Why it exists at all: the operator listing of node credentials was
+// `nodeTokenIdentities`, which is `@serverOnly` and so answers a browser caller
+// with a refusal. The templ console reached it from inside the identity binary;
+// the SPA cannot. The alternatives were to drop the surface, to open
+// `nodeTokenIdentities` to clients (which would widen a `@serverOnly` read to
+// every caller), or to add a sibling that is client-reachable but role-gated.
+// This is the third.
+//
+// What narrows it is `requiresOwnerOrAdmin` as a top-level conjunct, evaluated
+// in-process against the auth envelope -- the same gate memql#2860 put on
+// userById. `actor.userId` is NOT the alternative: a node_token row's `userId`
+// is the synthetic bootstrap user rather than any reader, so an owner tier
+// would return a confidently empty answer to the very admin the surface is for.
+// It also projects the credential-free `nodeTokenSummary` shape, so `keyHash`
+// never leaves the engine.
+//
+// It is on this list anyway, and that is the point the sibling reasons make:
+// a per-query predicate is exactly the author-enforced thing the tier exists to
+// stop depending on, and `v1:identity:identity` still declares no tier.
+const undeclared3324NodeTokenAdminReason = "memql#3324 -- role-gated node-credential listing for the portal; v1:identity:identity still declares no tier"
+
 // undeclared3217SeedSweepReason covers usersForSeedSweep, added by memql#3217
 // so the startup per-user seed sweep reads a COMPLETE user set instead of
 // activeUsers' newest-50 page.
@@ -321,6 +349,7 @@ var undeclaredRowAuthzConstructs = map[string]struct {
 	"badgeByKeyHash":             {"v1:identity:identity", undeclaredGrandfatherReason},
 	"badgesForSelf":              {"v1:identity:identity", undeclared3178SelfScopedReason},
 	"nodeTokenIdentities":        {"v1:identity:identity", undeclaredGrandfatherReason},
+	"nodeTokenIdentitiesAdmin":   {"v1:identity:identity", undeclared3324NodeTokenAdminReason},
 	"nodeTokenIdentityByBinding": {"v1:identity:identity", undeclaredGrandfatherReason},
 	"nodeTokenIdentityById":      {"v1:identity:identity", undeclaredGrandfatherReason},
 	"patIdentitiesForSelf":       {"v1:identity:identity", undeclared3178SelfScopedReason},
