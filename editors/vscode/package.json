@@ -170,6 +170,10 @@
         "title": "memQL: Disconnect"
       },
       {
+        "command": "memql.clusters.signInWithCode",
+        "title": "memQL: Sign In With a Device Code"
+      },
+      {
         "command": "memql.cluster.open",
         "title": "memQL: Open Cluster Topology and Deployments",
         "icon": "$(server)"
@@ -244,6 +248,10 @@
         },
         {
           "command": "memql.clusters.disconnect",
+          "when": "isWorkspaceTrusted"
+        },
+        {
+          "command": "memql.clusters.signInWithCode",
           "when": "isWorkspaceTrusted"
         },
         {

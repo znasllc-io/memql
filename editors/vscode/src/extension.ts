@@ -28,6 +28,7 @@ import { browseConceptPage } from '@znasllc-io/memql-sdk-core/client';
 import type { Concept } from '@znasllc-io/memql-sdk-core/client';
 import type { ConceptLike } from '@znasllc-io/memql-view-kit';
 
+import { signInWithDeviceCode } from './auth/deviceCodeUi.js';
 import { runAuthorizationFlow } from './auth/flow.js';
 import {
   canSignIn,
@@ -428,6 +429,23 @@ function registerRuntimeSurface(context: ExtensionContext): void {
         return;
       }
       ClusterPanel.open(context, connections, target.cluster.name);
+    })
+  );
+
+  // The DELIBERATE device-code sign-in (memql#3411). The fallback fires by
+  // itself when the loopback flow proves this host cannot do it, but that
+  // costs a two-minute callback deadline first -- so a user who already knows
+  // their environment (a container, a hardened network, an SSH session with no
+  // browser) can ask for the device code straight away.
+  context.subscriptions.push(
+    commands.registerCommand('memql.clusters.signInWithCode', async (node?: ClusterNode) => {
+      const target = node ?? (await pickCluster(clustersPath));
+      if (target === undefined) {
+        return;
+      }
+      if (await signInWithDeviceCode(target.cluster, { clustersPath, secrets: context.secrets })) {
+        clustersTree.refresh();
+      }
     })
   );
 

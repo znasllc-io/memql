@@ -42,6 +42,8 @@ export const recorded = {
   errors: [] as string[],
   /** window.showWarningMessage bodies. */
   warnings: [] as string[],
+  /** window.showInformationMessage bodies. */
+  infos: [] as string[],
   /** View ids passed to window.registerTreeDataProvider. */
   treeViews: [] as string[],
   /** Command ids passed to commands.registerCommand. */
@@ -195,10 +197,54 @@ export const workspace = {
   },
 };
 
+// The device-code sign-in adapter (src/auth/deviceCodeUi.ts, memql#3411) is
+// imported by src/extension.ts, so bundling the activation cases resolves its
+// `vscode` members through here too. They are declared -- an absent named
+// export is a bundle error, not a lazy failure -- and left inert: activation
+// only REGISTERS the command, and what the handler then shows is host-lane
+// territory.
+export const ProgressLocation = {
+  SourceControl: 1,
+  Window: 10,
+  Notification: 15,
+} as const;
+
+export const env = {
+  clipboard: {
+    writeText(_value: string): Promise<void> {
+      return Promise.resolve();
+    },
+  },
+  openExternal(_target: Uri): Promise<boolean> {
+    return Promise.resolve(true);
+  },
+  asExternalUri(target: Uri): Promise<Uri> {
+    return Promise.resolve(target);
+  },
+};
+
 export const window = {
   showErrorMessage(message: string): Promise<undefined> {
     recorded.errors.push(message);
     return Promise.resolve(undefined);
+  },
+
+  showInformationMessage(message: string, ..._items: string[]): Promise<undefined> {
+    recorded.infos.push(message);
+    return Promise.resolve(undefined);
+  },
+
+  withProgress<T>(
+    _options: unknown,
+    task: (
+      progress: { report(value: { message?: string }): void },
+      token: { onCancellationRequested(listener: () => void): StubDisposable },
+    ) => Promise<T>,
+  ): Promise<T> {
+    return task(
+      { report: () => undefined },
+      { onCancellationRequested: () => ({ dispose: () => undefined }) },
+    );
   },
 
   showWarningMessage(message: string): Promise<undefined> {
