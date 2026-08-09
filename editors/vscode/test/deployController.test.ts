@@ -210,7 +210,10 @@ test("an unauthenticated stream points at the credential, not the role", async (
     }),
     { id: "deploy", deploymentId: "d-1" },
   );
-  assert.match(outcome.line, /Check the cluster's PAT/);
+  assert.match(outcome.line, /Check the cluster's access token/);
+  // memql#3383: the old sentence sent the operator to mint a PAT, which is
+  // the one credential class a bff cannot verify.
+  assert.match(outcome.line, /a PAT never authenticates here/);
 });
 
 test("a non-DeployControlError still becomes an outcome, never a throw", async () => {

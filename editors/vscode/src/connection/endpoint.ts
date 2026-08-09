@@ -26,6 +26,62 @@ const SCHEME_RE = /^([a-zA-Z][a-zA-Z0-9+.-]*):\/\//;
 // colons make it impossible to tell where the host ends and a port begins.
 const BRACKETED_IPV6_RE = /^\[([^\]]+)\](?::(\d+))?$/;
 
+// identityBaseUrlFor names the identity service a refresh exchange must POST
+// to (memql#3385). It is a DIFFERENT host from the bff the stream dials --
+// `cockpit.<domain>` serves the gRPC/WS front door, `identity.<domain>` serves
+// /oauth/token and the JWKS feed.
+//
+// Derived rather than stored as a fifth field, because clusters.yaml already
+// carries the two facts that name it:
+//
+//   1. `issuer` -- what the cockpit writes from the cluster's discovery
+//      document (component/identity/discovery.go). Authoritative when present;
+//      an operator whose identity service is not at identity.<domain> sets it.
+//   2. `domain` -- the single value the add/edit flow collects. The endpoint is
+//      already composed from it by convention (cockpit.<domain>:443), and this
+//      is the same convention's other half.
+//   3. Failing both, a `cockpit.<host>` endpoint implies its sibling.
+//
+// undefined when nothing names it. Guessing would mean POSTing a refresh token
+// -- a 30-day credential -- at a host nobody nominated, so the honest answer is
+// to say which field is missing and let the operator supply it.
+export function identityBaseUrlFor(cluster: ClusterConfig): string | undefined {
+  const issuer = (cluster.issuer ?? "").trim();
+  if (issuer !== "") return issuer.replace(/\/+$/, "");
+
+  const domain = (cluster.domain ?? "").trim().replace(/^\.+|\.+$/g, "");
+  if (domain !== "") return `https://identity.${domain}`;
+
+  const host = hostOf(cluster.endpoint);
+  const COCKPIT = "cockpit.";
+  if (host !== undefined && host.startsWith(COCKPIT) && host.length > COCKPIT.length) {
+    return `https://identity.${host.slice(COCKPIT.length)}`;
+  }
+  return undefined;
+}
+
+// hostOf extracts the host from a stored endpoint, tolerating the same spellings
+// webSocketUrlFor accepts. Returns undefined for anything it cannot read as a
+// host -- callers treat that as "not derivable" rather than guessing.
+function hostOf(rawEndpoint: string): string | undefined {
+  const raw = rawEndpoint.trim();
+  if (raw === "") return undefined;
+  const schemeMatch = raw.match(SCHEME_RE);
+  if (schemeMatch) {
+    try {
+      return new URL(raw).hostname;
+    } catch {
+      return undefined;
+    }
+  }
+  const bracketed = raw.match(BRACKETED_IPV6_RE);
+  if (bracketed) return undefined; // an IP literal names no DNS sibling
+  const lastColon = raw.lastIndexOf(":");
+  const hasPort = lastColon > 0 && /^\d+$/.test(raw.slice(lastColon + 1));
+  const host = hasPort ? raw.slice(0, lastColon) : raw;
+  return host === "" ? undefined : host;
+}
+
 export function webSocketUrlFor(cluster: ClusterConfig): string {
   const raw = cluster.endpoint.trim();
   if (raw === "") {

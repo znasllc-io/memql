@@ -213,7 +213,7 @@ function errorOutcome(id: DeployActionId, err: unknown): DeployOutcome {
     }
     if (err.code === CODE_UNAUTHENTICATED) {
       return unreachable(
-        `ERROR: ${spec.label} was rejected as unauthenticated -- the connection carries no resolvable actor. Check the cluster's PAT.`,
+        `ERROR: ${spec.label} was rejected as unauthenticated -- the connection carries no resolvable actor. Check the cluster's access token (an expired one renews on reconnect; a PAT never authenticates here).`,
       );
     }
     // The catch-all for a code with no tailored sentence. It names the action

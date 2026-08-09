@@ -24,14 +24,35 @@ import { WebSocket as NodeWebSocket } from "ws";
 
 import { Latest, type LatestToken } from "../async/latest.js";
 import type { ClusterConfig } from "../clusters/model.js";
-import { isOidcOnly, needsAuth } from "../clusters/model.js";
+import {
+  jwtExpirySeconds,
+  staticCredentials,
+  type CredentialFailureReason,
+  type CredentialSource,
+} from "./credentials.js";
 import { webSocketUrlFor } from "./endpoint.js";
+
+/**
+ * WHY an error state carries a reason as well as a message.
+ *
+ * memql#3385: "an operator who hits it mid-section sees a red cluster icon with
+ * no indication that the CREDENTIAL is what expired, as distinct from the
+ * cluster going away." Those two conditions have completely different next
+ * actions -- renew a token, versus go and look at the cluster -- and a message
+ * string leaves every consumer to guess which one it is holding by matching on
+ * prose. The reason is the machine-readable half; src/clusters/status.ts turns
+ * it into the icon and the tooltip prefix an operator actually sees.
+ *
+ * `unreachable` is a dial that failed for any non-credential cause; `lost` is a
+ * connection that was established and then died.
+ */
+export type ConnectionErrorReason = CredentialFailureReason | "unreachable" | "lost";
 
 export type ConnectionState =
   | { status: "disconnected" }
   | { status: "connecting"; clusterName: string }
   | { status: "connected"; clusterName: string; nodeId: string }
-  | { status: "error"; clusterName: string; message: string };
+  | { status: "error"; clusterName: string; message: string; reason: ConnectionErrorReason };
 
 export type StateListener = (state: ConnectionState) => void;
 
@@ -67,7 +88,15 @@ export class ConnectionManager {
   // guarded" is a grep rather than a per-module question.
   private readonly latest = new Latest<"connection">();
 
-  constructor(private readonly dial: DialFn = defaultDial) {}
+  constructor(
+    private readonly dial: DialFn = defaultDial,
+    // The credential seam (memql#3383 / memql#3385). The default classifies and
+    // checks expiry but cannot refresh -- it has no secret store, no HTTP
+    // persistence and nowhere to write a renewed token. src/extension.ts injects
+    // the fully-wired resolver; a manager built bare still refuses a PAT by
+    // name rather than dialing with one.
+    private readonly credentials: CredentialSource = staticCredentials,
+  ) {}
 
   get state(): ConnectionState {
     return this.current;
@@ -127,16 +156,22 @@ export class ConnectionManager {
     // cluster's.
     if (!this.latest.isCurrent(token)) return;
 
-    // isOidcOnly is checked FIRST, before needsAuth: a PAT-less OIDC cluster
-    // with a real endpoint makes needsAuth() false (issuer+clientId count as
-    // "configured" there), so gating on needsAuth alone would skip straight
-    // to dialing with an empty bearer and surface a raw handshake/auth
-    // failure instead of this actionable message.
-    if (isOidcOnly(cluster) || needsAuth(cluster)) {
-      const message = isOidcOnly(cluster)
-        ? "This cluster is configured for OIDC. Authenticate it in the memQL Cockpit first, or add a PAT to clusters.yaml."
-        : "This cluster is not configured. Set an endpoint and a PAT.";
-      this.publish({ status: "error", clusterName: cluster.name, message });
+    // The credential is resolved BEFORE anything is dialed. Three of the four
+    // failure reasons are knowable without touching the network -- a cluster
+    // with no endpoint, no credential, or a credential of a class the mesh
+    // structurally rejects -- and answering them here is what turns
+    // "handshake failed" into a sentence naming the problem (memql#3383). The
+    // resolution may also RENEW an expired token in passing (memql#3385), so
+    // this is both the gate and the refresh point.
+    const credential = await this.credentials.resolve(cluster);
+    if (!this.latest.isCurrent(token)) return;
+    if (!credential.ok) {
+      this.publish({
+        status: "error",
+        clusterName: cluster.name,
+        message: credential.message,
+        reason: credential.reason,
+      });
       return;
     }
 
@@ -144,7 +179,17 @@ export class ConnectionManager {
     try {
       const conn = await this.dial({
         endpoint: webSocketUrlFor(cluster),
-        auth: { bearer: cluster.pat ?? "" },
+        auth: {
+          bearer: credential.bearer,
+          // In-place re-auth on a LIVE stream (sdk/ts ConnectionAuth). The SDK
+          // arms a timer against this bearer's `exp` and calls the hook shortly
+          // before it runs out, rotating the credential over the existing
+          // socket. That is what lets a verification-length session outlive the
+          // 15-minute access token WITHOUT a reconnect -- and therefore without
+          // dropping the session-defined constructs a reconnect would take with
+          // it (src/run/session.ts).
+          onTokenExpired: () => this.credentials.forceRefresh(cluster),
+        },
         clientId: "memql-vscode",
         sdkName: "memql-vscode",
       });
@@ -160,10 +205,23 @@ export class ConnectionManager {
       void this.watchForTermination(conn, token, cluster.name);
     } catch (err) {
       if (!this.latest.isCurrent(token)) return;
+      // A dial that fails while the bearer we sent has ALREADY passed its `exp`
+      // is a credential failure wearing a transport failure's clothes: the
+      // resolver could not renew it (no refresh token, or the exchange was
+      // refused) and the server then refused the handshake. Reporting that as
+      // "unreachable" is exactly the confusion memql#3385 is about, so the
+      // expiry is re-checked here rather than trusting the error text.
+      const expiry = jwtExpirySeconds(credential.bearer);
+      const expired = expiry !== undefined && expiry * 1000 <= Date.now();
       this.publish({
         status: "error",
         clusterName: cluster.name,
-        message: err instanceof Error ? err.message : String(err),
+        message: expired
+          ? `The access token for cluster "${cluster.name}" is expired and could not be renewed, so the connection was refused: ${err instanceof Error ? err.message : String(err)}`
+          : err instanceof Error
+            ? err.message
+            : String(err),
+        reason: expired ? "credentialExpired" : "unreachable",
       });
     }
   }
@@ -215,6 +273,7 @@ export class ConnectionManager {
       status: "error",
       clusterName,
       message: `Connection to ${clusterName} was lost. Select the cluster again to reconnect.`,
+      reason: "lost",
     });
   }
 
