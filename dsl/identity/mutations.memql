@@ -1128,36 +1128,6 @@ mutate deviceCode createDeviceCode {
       status: "pending"
       sourceIP: args.sourceIP ?? ""
       userAgent: args.userAgent ?? ""
-// ---- mutations/v1/identity/createEnrolmentToken.memql ----
-
-// createEnrolmentToken
-// ====================
-//
-// Persists a v1:identity:enrolmentToken row at issue time
-// (memql#3408). The plain mql_enr_<...> token is handed back to the
-// issuer ONCE, inside the enrolment link, and never persisted --
-// only its SHA-256 hash lands here.
-//
-// consumedAt and revokedAt are deliberately absent so the row is born
-// live. The two mutations below are the only ways it stops being so,
-// and they are separate on purpose: "already used" and "revoked" are
-// different things to tell a person standing in front of the page.
-
-/// Persist an enrolment-token row at issue time.
-mutate enrolmentToken createEnrolmentToken {
-  args {
-    enrolmentId  string!
-    userId       string!
-    tokenHash    string!
-    issuedBy     string!
-    expiresAt    string!
-    sourceIP     string
-  }
-  insert {
-    accept { userId, tokenHash, issuedBy, expiresAt }
-    stamp {
-      id: args.enrolmentId
-      sourceIP: args.sourceIP ?? ""
     }
   }
 }
@@ -1175,34 +1145,6 @@ mutate deviceCode touchDeviceCodePoll {
     accept { lastPolledAt, intervalSeconds }
     stamp {
       id: args.deviceCodeId
-// ---- mutations/v1/identity/consumeEnrolmentToken.memql ----
-
-// consumeEnrolmentToken
-// =====================
-//
-// Spends an enrolment token. The redeem handler stamps this BEFORE
-// writing the passkey row, not after: there is no revoke on
-// webauthn.Store to undo a credential with, so ordering the write
-// after the stamp is the only sequence where a mid-flight failure
-// cannot leave a live token behind. A burned link is recoverable
-// (issue another); a live one that already registered a passkey is
-// a replay window.
-//
-// The handler refuses any row with a non-empty consumedAt before it
-// gets here, so calling this twice cannot open a second redeem.
-
-/// Stamp an enrolment-token row consumed.
-mutate enrolmentToken consumeEnrolmentToken {
-  args {
-    enrolmentId     string!
-    consumedAt      string!
-    consumedFromIP  string
-  }
-  update {
-    accept { consumedAt }
-    stamp {
-      id: args.enrolmentId
-      consumedFromIP: args.consumedFromIP ?? ""
     }
   }
 }
@@ -1252,27 +1194,6 @@ mutate deviceCode redeemDeviceCode {
     stamp {
       id: args.deviceCodeId
       status: "redeemed"
-// ---- mutations/v1/identity/revokeEnrolmentToken.memql ----
-
-// revokeEnrolmentToken
-// ====================
-//
-// The issuer's kill switch: stamps revokedAt so a link that was sent
-// to the wrong person, or mailed and then thought better of, stops
-// working before its TTL runs out. Kept distinct from consumedAt so
-// the /enroll page can say "this link was revoked" instead of the
-// misleading "already used".
-
-/// Stamp an enrolment-token row revoked.
-mutate enrolmentToken revokeEnrolmentToken {
-  args {
-    enrolmentId  string!
-    revokedAt    string!
-  }
-  update {
-    accept { revokedAt }
-    stamp {
-      id: args.enrolmentId
     }
   }
 }

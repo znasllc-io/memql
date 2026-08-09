@@ -1664,32 +1664,6 @@ query deviceCode deviceCodeByUserCodeHash {
   }
   filter  userCodeHash==args.userCodeHash
   shape   deviceCodeFull
-// ---- queries/v1/identity/enrolmentTokenByHash.memql ----
-
-// enrolmentTokenByHash
-// ====================
-//
-// The /enroll redeem lookup (memql#3408). Hash the inbound
-// mql_enr_<...> token, find the matching row.
-//
-// Returns the row in EVERY state -- consumed, expired, revoked --
-// because the acceptance criterion is that each of those renders a
-// distinct human message. A filter that hid spent rows would collapse
-// all three into the generic "invalid", which is the outcome this
-// query exists to avoid.
-//
-// PRE-ACTOR by construction: the token IS the credential, so there is
-// no authenticated caller at lookup time. See the @rowAuthz note on
-// the concept.
-
-/// Enrolment-token lookup by tokenHash for the /enroll redeem path.
-@unbounded("enrolment token by unique tokenHash -- a credential lookup bounded to a single row")
-query enrolmentToken enrolmentTokenByHash {
-  args {
-    tokenHash  string!
-  }
-  filter  tokenHash==args.tokenHash
-  shape   enrolmentTokenFull
 }
 
 // ---- queries/v1/identity/workerPairingCodeByHash.memql ----
@@ -2198,4 +2172,14 @@ query identity nodeTokenIdentityById {
   }
   filter  identityIsNodeToken && row.id==args.identityId
   shape   identityFull
+}
+
+/// Enrolment-token lookup by tokenHash for the /enroll redeem path.
+@unbounded("enrolment token by unique tokenHash -- a credential lookup bounded to a single row")
+query enrolmentToken enrolmentTokenByHash {
+  args {
+    tokenHash  string!
+  }
+  filter  tokenHash==args.tokenHash
+  shape   enrolmentTokenFull
 }
