@@ -1165,24 +1165,63 @@ export function readServerPayload(msg: ServerMessage):
 }
 
 // streamRequestId returns the per-session request_id carried by a
-// streaming-protocol server message (mirrors sdk/go's streamRequestId
-// in dispatcher.go). Empty when the message does not belong to a
-// known streaming family.
+// request-scoped server message, or "" when the message is not part of an
+// exchange a registerStream listener can be parked on.
 //
-// AiChatResult appears here so the terminal frame in a streaming chat
-// session (aiChatStream, which uses dispatcher.send without
-// registering in `pending`) routes to the per-requestId stream
-// listener. The non-streaming aiChat path uses sendAndWait, which
-// resolves on correlateTo before streamRequestId is consulted.
+// THE COVERAGE RULE, shared verbatim with sdk/go/client/dispatcher.go's
+// streamRequestId (memql#3429). This table lists exactly the families whose
+// frames a caller can be waiting for on registerStream -- every family
+// participating in an exchange the correlateTo tier structurally CANNOT
+// serve, because that tier resolves one reply and unregisters:
+//
+//   - families the engine emits MORE THAN ONCE for a single request: the
+//     deltas and the terminal that closes them; and
+//   - queryError, which can end any of those exchanges in place of its
+//     normal terminal.
+//
+// NOT "every payload that carries a requestId". Nearly every result message
+// does, and almost all of them are single replies that sendAndWait resolves
+// on correlateTo before this function is consulted at all.
+//
+// The two SDKs must list the same families. They have diverged twice, and
+// both directions were silent: the Go table was missing the streaming-chat
+// pair this one has always had, and this table was missing queryError -- so
+// the `payload?.kind === "queryError"` branches inside the registerStream
+// listeners in automationRun.ts and ai/chat.ts, written precisely so a
+// refused request would not leave the caller parked forever, could never
+// actually fire. Both are fixed here.
+//
+// Go's dispatcher_stream_routing_test.go enumerates the proto's
+// MemqlServerMessage payload oneof and fails on any family classified
+// neither routed nor deliberately unrouted; that gate is the backstop for
+// this file too, since the families are the same on both sides.
 export function streamRequestId(msg: ServerMessage): string {
   const m = msg as unknown as Record<string, { requestId?: string } | undefined>;
+  // Streaming transcription: delta repeats, complete terminates.
   if (m.aiTranscribeStreamDelta?.requestId) return m.aiTranscribeStreamDelta.requestId;
   if (m.aiTranscribeStreamComplete?.requestId) return m.aiTranscribeStreamComplete.requestId;
+  // Streaming chat: N token deltas, then the terminal carrying the assembled
+  // text. aiChatStream uses dispatcher.send without registering in `pending`,
+  // so requestId routing is the only way these reach it; the non-streaming
+  // aiChat path uses sendAndWait and resolves on correlateTo first.
   if (m.aiChunk?.requestId) return m.aiChunk.requestId;
   if (m.aiChatResult?.requestId) return m.aiChatResult.requestId;
   // Automation run (memql#3310). A run is many frames correlated by
   // request_id -- accepted, then one per step, then exactly one complete --
   // so it routes here rather than through the single-reply `pending` map.
   if (m.automationRunEvent?.requestId) return m.automationRunEvent.requestId;
+  // Agent / voice-agent turn streaming: deltas then one complete. No browser
+  // consumer today; listed so the tables stay identical and the next consumer
+  // does not rediscover memql#3414 in this language too.
+  if (m.agentGenerateTurnDelta?.requestId) return m.agentGenerateTurnDelta.requestId;
+  if (m.agentGenerateTurnComplete?.requestId) return m.agentGenerateTurnComplete.requestId;
+  if (m.voiceAgentTurnDelta?.requestId) return m.voiceAgentTurnDelta.requestId;
+  if (m.voiceAgentTurnComplete?.requestId) return m.voiceAgentTurnComplete.requestId;
+  // QueryResultChunk carries `done`: a chunked contract even though the engine
+  // emits exactly one frame today. Costless for current callers, which use
+  // sendAndWait and are served by correlateTo.
+  if (m.queryResult?.requestId) return m.queryResult.requestId;
+  // The error terminal for any of the above. See the coverage rule.
+  if (m.queryError?.requestId) return m.queryError.requestId;
   return "";
 }
