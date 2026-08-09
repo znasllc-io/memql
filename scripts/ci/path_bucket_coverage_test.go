@@ -62,6 +62,16 @@ var coverageAllowList = map[string]string{
 	// --- GitHub-side configuration, interpreted by GitHub and not by a lane ---
 	".github/CODEOWNERS": "GitHub review routing; interpreted by GitHub, read by no lane",
 
+	// --- agent-tooling configuration, interpreted by a developer's CLI and not by a lane ---
+	// Tracked deliberately (memql#3344): .gitignore ignores `.claude/*` and negates
+	// back only what should travel with the project, and this is one of those. It is
+	// read by the Claude Code CLI on a developer machine; no workflow, Makefile target
+	// or test consults it, so no bucket can meaningfully verify a change to it. The
+	// personal-override sibling, .claude/settings.local.json, stays untracked and so
+	// never reaches this guard at all.
+	".claude/settings.json": "Claude Code project settings; interpreted by the CLI on a " +
+		"developer machine, read by no lane",
+
 	// --- tool configs whose own workflow verifies them ---
 	".gitleaks.toml": "consumed by .github/workflows/gitleaks.yml, which runs on every PR with no " +
 		"path filter, so it is verified by its own workflow rather than by a ci.yml bucket",
