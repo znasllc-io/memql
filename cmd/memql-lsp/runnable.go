@@ -87,20 +87,37 @@ func newCustomHandler(s *server) *customHandler {
 }
 
 func (h *customHandler) Handle(ctx *glsp.Context) (any, bool, bool, error) {
-	if ctx == nil || ctx.Method != methodRunnableConstructs {
+	if ctx == nil {
 		return h.Handler.Handle(ctx)
 	}
+	switch ctx.Method {
+	case methodRunnableConstructs:
+		return decodeAndServe(h, ctx, h.srv.runnableConstructs)
+	case methodImports:
+		return decodeAndServe(h, ctx, h.srv.imports)
+	default:
+		return h.Handler.Handle(ctx)
+	}
+}
+
+// decodeAndServe is the shared body of every custom method: check the
+// initialization precondition, decode the params, serve. Factored out so a
+// second custom method cannot accidentally report failure differently from the
+// first -- glsp's server turns validMethod=false into MethodNotFound and
+// validParams=false into InvalidParams, and those two flags are the whole
+// error contract a client sees.
+func decodeAndServe[P any, R any](h *customHandler, ctx *glsp.Context, serve func(P) R) (any, bool, bool, error) {
 	// Mirror protocol.Handler's own precondition: nothing but `initialize` is
 	// answerable before initialization, and the Sense service does not exist
 	// until then either.
 	if !h.Handler.IsInitialized() {
 		return nil, true, true, errors.New("server not initialized")
 	}
-	var params runnableConstructsParams
+	var params P
 	if err := json.Unmarshal(ctx.Params, &params); err != nil {
 		return nil, true, false, err
 	}
-	return h.srv.runnableConstructs(params), true, true, nil
+	return serve(params), true, true, nil
 }
 
 // runnableConstructs answers the request for one document.
