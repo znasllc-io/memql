@@ -100,6 +100,23 @@ async function run(
 //
 // No `active` argument: the console wants deactivated accounts listed too, and
 // the arg is arg-conditional, so omitting it is how you say "all of them".
+//
+// WINDOW: one page of up to 500, newest first -- and NOT the 50 the audit read
+// below gets. The difference is worth knowing before you copy either one.
+// `searchUsers` declares `sort` and no `paginate`, and the engine's unmarked-
+// list backstop (defaultListLimit, component/memql/engine.go) only applies its
+// DefaultListCap of 50 to a query that declares NEITHER. A sorted query states
+// its own order, so it falls through to MaxResults -- 500 by default,
+// MEMORY_ENGINE_MAX_RESULTS. `recentAuditEvents` gets 50 because it says
+// `paginate 50` outright.
+//
+// The retired templ list walked every page, so a cluster with more than 500
+// people loses the tail here. That is a real if remote difference; closing it
+// means a keyset walk over (createdAt, id) like the audit cursor, which is more
+// than the retirement needed. Do not "fix" it by adding an inner paginate to
+// searchUsers -- the searchUsers MCP tool already wraps it in an OUTER
+// paginate, and two nested paginate directives are rejected by the engine
+// (dsl/identity/queries.memql documents the regression that caused).
 export function readPeople(query: QueryClient, signal?: AbortSignal): Promise<Row[]> {
   return run(query, "searchUsers", namedCall("query", "searchUsers"), signal);
 }
