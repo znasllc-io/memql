@@ -1530,6 +1530,34 @@ nothing changes underneath.
 is rejected at load time): `now`, `actor`, `partition`, `config`,
 `trace`.
 
+**An arg description is a `///` doc comment, never `@description`**
+(memql#3336). The `///` block on the line(s) immediately above an
+`args { ... }` field IS that argument's description: it lands on the
+field's AST slot, and it is what the corpus, the SDK generator, and the
+LSP's `memql/runnableConstructs` read. `@description` on an args field
+is **rejected at load** -- there is no AST slot for it, so it used to be
+accepted and then silently thrown away. The identical annotation on a
+`tool` / `prompt` / `builtin` field is untouched: those bodies ARE the
+schema and do retain it. Same de-overload as `@default` on an args
+field, which is likewise rejected (#991).
+
+```memql
+query space activeSpaces {
+  args {
+    /// The owner whose spaces to list.
+    ownerId string @required                        // correct
+    limit   number @description("page size")        // REJECTED at load
+  }
+  filter  ownerId == args.ownerId && isActiveRecord
+  shape   spaceFull
+}
+```
+
+The declaration-level `@description` on the construct itself stays
+load-bearing (it is the fallback for the construct's own `///` block).
+To fix an existing file, run `memqlmigrate --rewrite=args-description`,
+which strips the annotation; re-add the prose as a `///` comment.
+
 **Right (struct form — the canonical author surface):**
 
 ```memql

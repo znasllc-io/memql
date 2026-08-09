@@ -11,10 +11,10 @@ import (
 //	               [@maxLength(N)] [@pattern("re")]
 //
 // (`@default` is NOT a valid args-field annotation -- it was never applied
-// and is rejected; apply defaults in the body via `coalesce(args.X, <v>)`.
-// `@description` on an args field is accepted for compatibility but
-// DISCARDED -- no AST slot, #2615; per-field docs arrive with /// doc
-// comments, #2601. Do not write it.)
+// and is rejected; apply defaults in the body via `args.X ?? <v>`.
+// `@description` is NOT one either -- it was accepted and then discarded
+// (no AST slot) and is now rejected outright, memql#3336; an arg
+// description is carried by the `///` doc comment above the field, #2601.)
 //
 // Returns an *ArgsSchema populated with the field list. Caller stores it
 // on the parser and attaches to the next definition.
@@ -62,7 +62,7 @@ func (p *Parser) parseArgsBlockField() (*ArgsField, error) {
 	}
 	// A /// block immediately above the field is the field's doc comment
 	// (memql#2633) -- the ONLY channel for arg descriptions; the args-field
-	// @description spelling stays retired (#2615).
+	// @description spelling is rejected below (memql#3336).
 	fieldDoc := p.takeFieldDocFor(p.current.Line)
 	name := p.current.Literal
 	// Reserved engine names (S6, memql#2361 -- implementing the documented
@@ -182,18 +182,15 @@ func (p *Parser) parseArgsBlockField() (*ArgsField, error) {
 			p.advance() // consume `)`
 			field.Enum = values
 		case "description":
-			// @description("...") -- silently accepted (no AST slot)
-			if err := p.expect(TokenParenOpen); err != nil {
-				return nil, err
-			}
-			if !p.check(TokenString) {
-				return nil, newParseErrorf(&p.current, "expected string literal inside @description(...) on args field %q", name)
-			}
-			p.advance()
-			if !p.check(TokenParenClose) {
-				return nil, newParseErrorf(&p.current, "expected `)` after @description on args field %q", name)
-			}
-			p.advance()
+			// `@description` on an args field is retired (memql#3336). It was
+			// accepted and then thrown away -- there is no AST slot for it, so
+			// the prose never reached the runtime while the identical
+			// annotation on a tool / prompt / builtin field IS retained. Same
+			// de-overload as @default above (#991): reject, don't discard. The
+			// live channel for an arg description is the `///` doc comment on
+			// the line above the field, which lands on ArgsField.DocComment
+			// (#2601 / memql#2633) and is what the corpus and the LSP use.
+			return nil, newParseErrorf(&p.current, "@description on an args field %q is retired -- it was never retained (no AST slot); document the field with a `///` doc comment on the line above it", name)
 		case "maxLength":
 			// @maxLength(N) -- rune-count cap for string args. Other
 			// arg types accept the annotation at parse time but the
@@ -236,7 +233,7 @@ func (p *Parser) parseArgsBlockField() (*ArgsField, error) {
 			}
 			p.advance()
 		default:
-			return nil, newParseErrorf(&p.current, "unknown annotation @%s on args field %q (supported: @required, @enum, @maxLength, @pattern; @description is accepted but discarded -- #2615)", ann, name)
+			return nil, newParseErrorf(&p.current, "unknown annotation @%s on args field %q (supported: @required, @enum, @maxLength, @pattern; an arg description is a `///` doc comment above the field, not @description -- memql#3336)", ann, name)
 		}
 	}
 	return field, nil

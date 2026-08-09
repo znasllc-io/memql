@@ -1019,7 +1019,7 @@ SDK-generated Go/TS docs (construct and arg), and sense hover.
 
 ### Argument Declaration and Resolution
 
-`args { ... }` field syntax: `<name> <type>[!] [@maxLength(N)] [@pattern("re")]`. The `!` sigil marks the field required (#2618; the `@required` annotation keeps parsing); omitting it makes the field optional. `enum("a", "b")` is a first-class type -- the self-contained spelling of the legacy `string @enum(...)` pair. Do not write `@description` on an args field -- the parser accepts and DISCARDS it (#2615); per-field documentation is a `///` doc comment on the line(s) immediately above the field (#2633). The declaration-level `@description` on the construct itself is load-bearing.
+`args { ... }` field syntax: `<name> <type>[!] [@maxLength(N)] [@pattern("re")]`. The `!` sigil marks the field required (#2618; the `@required` annotation keeps parsing); omitting it makes the field optional. `enum("a", "b")` is a first-class type -- the self-contained spelling of the legacy `string @enum(...)` pair. Do not write `@description` on an args field -- the parser REJECTS it at load (memql#3336), because there is no AST slot for it; an arg description is a `///` doc comment on the line(s) immediately above the field (#2633). A `tool` / `prompt` / `builtin` field keeps its `@description` (those bodies ARE the schema), and the declaration-level `@description` on the construct itself is load-bearing.
 
 > **`@default` is not valid on an args field** (rejected at load, #991). Apply a default in the body with the `??` null-coalescing operator (`args.X ?? <default>`). A concept-field `@default` is **not** a substitute — it is emitted into the schema and never applied on insert (memql#2960).
 

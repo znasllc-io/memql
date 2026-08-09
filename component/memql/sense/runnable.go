@@ -98,10 +98,9 @@ type RunnableArg struct {
 	//
 	// Sourcing note: for query / mutate / logic args this is the `///` doc
 	// comment above the field, which is the ONLY per-arg documentation channel
-	// the parser retains -- an args-field @description(...) is accepted and
-	// then DISCARDED with no AST slot (memql#2615), and Sense already flags it
-	// via DiscardedArgsDescriptions. For tool fields it is the field's
-	// @description(...) value, which tools do keep.
+	// -- an args-field @description(...) has no AST slot and is REJECTED at
+	// load (memql#3336). For tool fields it is the field's @description(...)
+	// value, which tools do keep.
 	Description string
 	// AutoInjected reports a tool field's @autoInjected flag: the engine stamps
 	// the value server-side and DROPS whatever the caller sent for it.

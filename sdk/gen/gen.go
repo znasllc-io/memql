@@ -81,9 +81,9 @@ var (
 	argsBlockRe = regexp.MustCompile(`(?s)\bargs[ \t]*\{(.*?)\}`)
 	// Single args field declaration:
 	//   <name>  <type>  [@required] [@enum("a","b")] [@default("...")]
-	//   (args-field @description is stripped from the corpus -- #2615; the
-	//   descRe capture remains for stragglers until #2634 re-sources field
-	//   docs from /// doc comments)
+	//   (an args-field @description is REJECTED by the parser -- memql#3336
+	//   -- so the corpus cannot carry one; field docs come from the ///
+	//   doc comment above the field, #2634)
 	// Multiple lines per block.
 	argsFieldRe = regexp.MustCompile(
 		`(?m)^[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]+([A-Za-z_][A-Za-z0-9_]*|enum\([^)]*\)|\[\][A-Za-z_][A-Za-z0-9_]*)(!?)([ \t]+@[^\n]*)?[ \t]*$`,
