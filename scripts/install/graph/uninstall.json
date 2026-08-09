@@ -1,7 +1,7 @@
 {
   "name": "uninstall",
   "kind": "uninstall",
-  "description": "Take back exactly what the install graph put on this machine, in the order that keeps the tools needed to do the taking-back alive until they are done.",
+  "description": "Take back exactly what the install graph put on this machine, in the reverse of the order install built it: the cluster goes before the hosts entries it answered on and the checkout it was reconciled from, and each tool outlives the artifact it is needed to remove.",
   "steps": [
     {
       "id": "removeCluster",
@@ -17,6 +17,7 @@
       "script": "install.removeArtifact",
       "description": "Remove the pinned source checkout.",
       "params": {"kind": "checkout"},
+      "dependsOn": ["removeCluster"],
       "reverses": "stackCheckout",
       "elevation": "none",
       "verify": {"kind": "resultEquals", "field": "result.kind", "value": "checkout"}
@@ -26,6 +27,7 @@
       "script": "install.removeArtifact",
       "description": "Delete the installer's marked block from the system hosts file, leaving every other line alone.",
       "params": {"kind": "hostsEntries", "marker": "memql"},
+      "dependsOn": ["removeCluster"],
       "reverses": "hostsBlock",
       "elevation": "sudo",
       "verify": {"kind": "resultEquals", "field": "result.kind", "value": "hostsEntries"}
@@ -35,6 +37,7 @@
       "script": "install.removeArtifact",
       "description": "Uninstall the local mkcert CA from the system trust stores and delete its key material.",
       "params": {"kind": "mkcertCA"},
+      "dependsOn": ["removeCluster"],
       "reverses": "localCA",
       "elevation": "user-trust",
       "verify": {"kind": "resultEquals", "field": "result.kind", "value": "mkcertCA"}

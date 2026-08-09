@@ -200,6 +200,14 @@ type Step struct {
 	// artifact already exist before we ran". Required exactly when Receipt is
 	// set. See the package comment for the grammar.
 	PreExistingPath string `json:"preExistingPath,omitempty"`
+	// ContainedBy names another install step whose receipt already covers this
+	// step's change -- a secret written INTO the cluster goes away when the
+	// cluster does, so it needs no receipt of its own. It is the honest
+	// alternative to a receipt, not a way around one: graph_test.go (#3370)
+	// requires every mutating install step to declare one or the other, and
+	// requires the named step to be reversible and to be a dependency of this
+	// one. Mutually exclusive with Receipt. Install graphs only.
+	ContainedBy string `json:"containedBy,omitempty"`
 	// Reverses names the install-graph step id this step undoes. Uninstall
 	// graphs only; it is what makes the drift assertion in #3370 possible.
 	Reverses string `json:"reverses,omitempty"`
@@ -345,6 +353,23 @@ func (g *Graph) validateStep(s *Step, source string) error {
 	case KindUninstall:
 		if s.Receipt != "" {
 			return fmt.Errorf("%s sets receipt -- an uninstall step removes artifacts, it does not leave them behind", where)
+		}
+		if s.ContainedBy != "" {
+			return fmt.Errorf("%s sets containedBy -- that records where an INSTALL step's change gets taken back", where)
+		}
+	}
+	if s.ContainedBy != "" {
+		if s.Receipt != "" {
+			return fmt.Errorf("%s sets both receipt and containedBy -- a change is taken back by its own artifact or by another's, not both", where)
+		}
+		if s.ContainedBy == s.ID {
+			return fmt.Errorf("%s is containedBy itself", where)
+		}
+		if _, ok := g.index[s.ContainedBy]; !ok {
+			return fmt.Errorf("%s is containedBy %q, which is not a step in this graph", where, s.ContainedBy)
+		}
+		if s.ReadOnly {
+			return fmt.Errorf("%s is readOnly and containedBy %q -- a step that changes nothing needs nothing taken back", where, s.ContainedBy)
 		}
 	}
 	if s.Receipt != "" && s.PreExistingPath == "" {
