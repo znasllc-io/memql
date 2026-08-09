@@ -242,41 +242,45 @@ func (e *MemQLEngine) executeCombinedFilterQuery(ctx context.Context, expr Expre
 		ctx = context.Background()
 	}
 
-	var nodes []memorynodes.MemoryNode
+	// buildScan constructs the raw-row query at a given RAW-ROW limit.
+	//
+	// A closure rather than one mutated builder: the window below can widen and
+	// re-scan, and a bun query carries both its LIMIT and the destination slice,
+	// so each attempt needs a fresh builder and a fresh slice.
+	buildScan := func(rows *[]memorynodes.MemoryNode, limit int) *bun.SelectQuery {
+		q := db.NewSelect().Model(rows)
 
-	query := db.NewSelect().Model(&nodes)
-
-	if filter.sql != "" {
-		query = query.Where(filter.sql, filter.args...)
-	}
-	if timestamp != nil {
-		query = query.Where(`"createdAt" <= ?`, timestamp.UTC())
-	}
-
-	// Keyset cursor (5.12): when a continuation cursor is present, push the
-	// keyset predicate `(createdAt, id) <keyset> (?, ?)` into SQL so deep pages
-	// continue from the encoded position instead of scanning + discarding an
-	// offset window. Composed with the existing filter + asOf-timestamp WHERE
-	// above and the per-row authz the filter already carries; ordered by the
-	// declared sort below; LIMIT bounded to the page target (no *2 over-fetch).
-	keyset, hasKeyset := keysetFromContext(ctx)
-	if hasKeyset {
-		if eligible, createdAtDesc := keysetEligibleSort(sorter); eligible {
-			predicate, args := keysetWhere(keyset, createdAtDesc)
-			query = query.Where(predicate, args...)
-		} else {
-			// Non-keyset-eligible ordering reached the SQL path with a cursor
-			// set; do not push an incorrect predicate. The engine gates this
-			// upstream, so this is a defensive no-op.
-			hasKeyset = false
+		if filter.sql != "" {
+			q = q.Where(filter.sql, filter.args...)
 		}
-	}
-
-	for _, expr := range combinedFilterOrderExprs(sorter) {
-		if strings.TrimSpace(expr) == "" {
-			continue
+		if timestamp != nil {
+			q = q.Where(`"createdAt" <= ?`, timestamp.UTC())
 		}
-		query = query.OrderExpr(expr)
+
+		// Keyset cursor (5.12): when a continuation cursor is present, push the
+		// keyset predicate `(createdAt, id) <keyset> (?, ?)` into SQL so deep
+		// pages continue from the encoded position instead of scanning +
+		// discarding an offset window. Composed with the existing filter +
+		// asOf-timestamp WHERE above and the per-row authz the filter already
+		// carries; ordered by the declared sort below.
+		if keyset, hasKeyset := keysetFromContext(ctx); hasKeyset {
+			if eligible, createdAtDesc := keysetEligibleSort(sorter); eligible {
+				predicate, args := keysetWhere(keyset, createdAtDesc)
+				q = q.Where(predicate, args...)
+			}
+			// A non-keyset-eligible ordering reaching the SQL path with a cursor
+			// set pushes no predicate. The engine gates this upstream, so it is
+			// a defensive no-op.
+		}
+
+		for _, expr := range combinedFilterOrderExprs(sorter) {
+			if strings.TrimSpace(expr) == "" {
+				continue
+			}
+			q = q.OrderExpr(expr)
+		}
+
+		return q.Limit(limit)
 	}
 
 	fetchTarget := target
@@ -287,22 +291,78 @@ func (e *MemQLEngine) executeCombinedFilterQuery(ctx context.Context, expr Expre
 		fetchTarget = e.config.MaxResults
 	}
 
-	sqlLimit := fetchTarget * 2
-	if sqlLimit < fetchTarget {
-		sqlLimit = fetchTarget
-	}
-	if hasKeyset {
-		// The keyset predicate already excludes the prior page, so there is no
-		// scan-and-discard tail to over-fetch against; cap the SQL LIMIT at the
-		// page target. (The post-scan dedup below still collapses any older
-		// versions of the same id into one logical row.)
-		sqlLimit = fetchTarget
+	maxWindow := e.config.MaxWindow
+	if maxWindow < fetchTarget {
+		maxWindow = fetchTarget
 	}
 
-	query = query.Limit(sqlLimit)
+	// THE RAW WINDOW IS NOT THE PAGE SIZE (memql#3388).
+	//
+	// MemoryNodes is append-only: one id has one row per version, and the scan
+	// below collapses the window to the LATEST row per id. So a window of N raw
+	// rows yields N results only when those rows happen to belong to N distinct
+	// ids. For a repeatedly-updated row -- a node status writer, a counter --
+	// consecutive raw rows share an id, and a 10-row window can collapse to 2.
+	//
+	// That matters far beyond a short page, because the caller infers "the set
+	// is exhausted" from a page shorter than the limit (see the nextCursor block
+	// in engine.go) and withdraws the cursor. Everything past the first window
+	// then becomes unreachable, with no error and no cursor. Measured before
+	// this fix: a 20-id concept at 10 versions each returned 2 rows for a
+	// pageSize=10 request, then stopped.
+	//
+	// So the window WIDENS until it yields `fetchTarget` distinct rows or the
+	// database runs out of rows to give. The first attempt keeps the previous
+	// sizing exactly, so the common single-version case still scans once and
+	// pays nothing.
+	window := fetchTarget * 2
+	if window < fetchTarget {
+		window = fetchTarget // overflow guard
+	}
+	if window > maxWindow {
+		window = maxWindow
+	}
 
-	if err := query.Scan(ctx); err != nil {
-		return nil, err
+	var (
+		nodes    []memorynodes.MemoryNode
+		rawCount int
+	)
+	for {
+		nodes = nil
+		if err := buildScan(&nodes, window).Scan(ctx); err != nil {
+			return nil, err
+		}
+		rawCount = len(nodes)
+
+		// distinctIn counts how many results this window CAN yield, before the
+		// expensive latest-load and post-filter below. Cheap, and it is the
+		// quantity the window has to satisfy.
+		distinctIn := 0
+		{
+			seenIds := make(map[string]struct{}, len(nodes))
+			for _, n := range nodes {
+				id := strings.TrimSpace(n.ID)
+				if id == "" {
+					continue
+				}
+				if _, dup := seenIds[id]; !dup {
+					seenIds[id] = struct{}{}
+					distinctIn++
+				}
+			}
+		}
+
+		if distinctIn >= fetchTarget || rawCount < window || window >= maxWindow {
+			// Enough distinct candidates, the database is exhausted (a short raw
+			// scan), or the window ceiling is reached. Widening further would
+			// trade a bounded scan for an unbounded one.
+			break
+		}
+		next := window * 4
+		if next <= window || next > maxWindow {
+			next = maxWindow
+		}
+		window = next
 	}
 
 	// Candidate IDs from the scan (may include older versions).
