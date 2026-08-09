@@ -2311,3 +2311,28 @@ mutate accountEntitlement setAccountEntitlement {
     }
   }
 }
+
+/// Rename an enrolled passkey. Changes only the display label -- the credential itself is untouched.
+mutate identity renamePasskeyIdentity {
+  args {
+    identityId  string!
+    label       string!
+  }
+  update {
+    id: args.identityId
+    args.label
+  }
+}
+
+/// Revoke (deactivate) a passkey identity row. Soft-delete via active=false -- the row stays for
+/// audit, and its credential id stays taken so the same authenticator cannot be re-enrolled onto a
+/// fresh row.
+mutate identity revokePasskeyIdentity {
+  args {
+    identityId  string!
+  }
+  update {
+    id: args.identityId
+    active: false
+  }
+}

@@ -3855,6 +3855,23 @@ func SiParticipantForSpaceBuild(args SiParticipantForSpaceArgs) string {
 	return b.String()
 }
 
+// SignInIdentitiesForSelf -- List the CALLING user's own ACTIVE sign-in routes -- magic-link and passkey credentials only. Backs the last-credential warning before a passkey revoke; the projection is identitySummary, which carries the type and the label and no credential material at all.
+//
+// Bound concept: v1:identity:identity (machine-readable: BoundConcepts["signInIdentitiesForSelf"] in generated_concepts.go).
+type SignInIdentitiesForSelfArgs struct {
+}
+
+// SignInIdentitiesForSelf calls the engine query signInIdentitiesForSelf.
+func (qc *QueryClient) SignInIdentitiesForSelf(ctx context.Context, args SignInIdentitiesForSelfArgs) (*Result, error) {
+	call := SignInIdentitiesForSelfBuild(args)
+	return qc.executeNamed(ctx, "signInIdentitiesForSelf", call)
+}
+
+func SignInIdentitiesForSelfBuild(args SignInIdentitiesForSelfArgs) string {
+	_ = args
+	return "query signInIdentitiesForSelf()"
+}
+
 // SkillBySlug -- Resolve a single skill catalog row by its slug. Used by the planner-driven mintSkill / attach flows to look up a candidate skill's full composition before deciding whether to apply it.
 //
 // Bound concept: v1:agents:skill (machine-readable: BoundConcepts["skillBySlug"] in generated_concepts.go).
