@@ -183,26 +183,60 @@ The identity service has two signing-key modes:
 > and JWKS flapped between the two pods' keys. The fix is the shared
 > seed (added to staging's envelope) plus the startup guard below.
 
-**Fail-fast guard.** `Config.Validate()` REFUSES to start a
-non-localhost deployment that has no `MEMQL_IDENTITY_SIGNING_KEY_B64` unless
-the operator explicitly opts into per-pod keys with
-`MEMQL_IDENTITY_ALLOW_EPHEMERAL_KEY=true`. This converts a silent ~50%
-auth-failure into a loud, copy-pasteable startup error. localhost /
-`*.local.<domain>` origins (local dev) are exempt.
+**Fail-fast guard.** `Config.Validate()` REFUSES to start a deployment
+that has no `MEMQL_IDENTITY_SIGNING_KEY_B64` unless the operator explicitly
+opts into per-pod keys with `MEMQL_IDENTITY_ALLOW_EPHEMERAL_KEY=true`. This
+converts a silent ~50% auth-failure into a loud, copy-pasteable startup
+error.
+
+**Only a loopback issuer is exempt** -- `localhost`, `127.0.0.1`, `::1`,
+`0.0.0.0`, or an RFC 6761 `*.localhost` name. Those name one process on one
+machine and cannot have a second replica.
+
+> The `*.local.<domain>` dev wildcard used to be exempt too, and that was
+> the hole (memql#3400). `identity.local.znas.io` is the local parity
+> cluster's **front door**: it resolves to 127.0.0.1, but what listens there
+> is traefik, proxying to a Service that `make scale N=2` puts two identity
+> pods behind. The guard therefore stayed silent on exactly the topology it
+> exists for, and a local cluster served two `kid`s while reporting the
+> resulting rejections as "invalid or expired token". The dev wildcard
+> remains exempt from the *encryption-at-rest* requirement, which is a
+> genuine dev-vs-prod distinction; it is not exempt from this one, which is
+> a one-process-vs-many distinction.
 
 Generate a fresh seed:
 
 ```bash
-head -c 32 /dev/urandom | base64
+make identity-signing-key      # head -c 32 /dev/urandom | base64
 ```
 
 Set the result as `MEMQL_IDENTITY_SIGNING_KEY_B64` on every identity replica
-(in the sealed genesis envelope for staging/prod). Rotate by resealing
-with a new seed and rolling the deployment -- automatic rotation is
-disabled in shared-seed mode. Use `MEMQL_IDENTITY_ALLOW_EPHEMERAL_KEY=true`
-only for a single-replica or shared-key-volume dev deployment (the
-local docker cluster sets it because both replicas share one on-disk
-key via a Docker volume).
+-- as a key on the `memql-secrets` Secret every node `envFrom`s, or inside
+the sealed genesis envelope that Secret carries (autoload is set-if-absent,
+so an explicit Secret key wins). **Locally there is nothing to do**:
+`scripts/k3d/seed-secrets.sh` (`make secrets`, which `make up` runs)
+generates a seed when the cluster has none and reuses it verbatim on every
+later run.
+
+Rotate by writing a new seed and rolling the deployment -- automatic
+rotation is disabled in shared-seed mode. Rotation invalidates every live
+browser session and every minted `class="node"` mesh token, which is why
+`make secrets` never rotates as a side effect of a re-run.
+
+Use `MEMQL_IDENTITY_ALLOW_EPHEMERAL_KEY=true` only for a genuinely
+single-process deployment.
+
+**Verify it.** `make status` reads `/.well-known/jwks.json` from every
+identity replica through the apiserver pod proxy and reports
+`identityKeysShared`. Run it after `make scale N=2`:
+
+```
+Identity litmus: JWKS keyset per identity replica (must be identical)
+  identity-5f45458d79-924h5: kid(s) ln-RlCxzK8o
+  identity-5f45458d79-qpcq2: kid(s) ln-RlCxzK8o
+
+  PASS: all 2 identity replica(s) publish the same signing keyset.
+```
 
 ### File-key mode (single-node / dev)
 

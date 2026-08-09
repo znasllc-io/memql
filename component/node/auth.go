@@ -106,8 +106,13 @@ func NodeClassStreamInterceptor(v *verifier.Verifier, logger *slog.Logger) grpc.
 			if logger != nil {
 				logger.Warn("node auth: token verification failed", "error", err, "method", info.FullMethod)
 			}
+			// Unknown-kid answers with its own cause (memql#3400); every
+			// other failure keeps the deliberately-vague message. The mesh
+			// re-mint path keys on codes.Unauthenticated first
+			// (isAuthRejection, connection.go), so a more specific sentence
+			// does not change reconnection behaviour.
 			metrics.AuthReject(metrics.SurfaceNode, nodeRejectReason(err), metrics.CodeUnauthenticated)
-			return status.Error(codes.Unauthenticated, "invalid or expired token")
+			return status.Error(codes.Unauthenticated, verifier.RejectMessage(err))
 		}
 		// Surface pin: only class="node" JWTs may speak this wire.
 		// PATs (SourcePAT) and user-class JWTs (SourceJWT with Class

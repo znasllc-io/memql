@@ -10,7 +10,8 @@
 #   memql-ca               -- the cluster CA cert, mounted on every node
 #   local-znas-tls         -- front-door TLS (the mkcert *.local.znas.io pair)
 #   memql-secrets          -- main app envelope (MEMQL_MASTER_KEY,
-#                             MEMQL_GENESIS_B64, DATABASE_DSN, ...)
+#                             MEMQL_GENESIS_B64,
+#                             MEMQL_IDENTITY_SIGNING_KEY_B64, DATABASE_DSN, ...)
 #   livekit-secrets        -- LiveKit API key + secret for local livekit
 #   memql-local-db-creds   -- Postgres credentials for the in-cluster DB
 #
@@ -29,6 +30,11 @@
 #   - mkcert is installed AND has a root CA on this machine. The front-door
 #     pair is ISSUED here when absent (memql#3384) rather than skipped; see
 #     seed_front_door_tls below for why skipping was never survivable.
+#   - MEMQL_IDENTITY_SIGNING_KEY_B64 (the shared Ed25519 signing seed every
+#     identity replica derives its key + kid + JWKS from) is GENERATED here
+#     when the cluster has none (memql#3400), and REUSED verbatim thereafter --
+#     a re-run must never rotate it, because rotation invalidates every live
+#     session and every minted mesh node token. See resolve_signing_key.
 #
 # The Azurite connection string is always the well-known Azurite dev constant
 # (account: devstoreaccount1, key: Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq
@@ -177,6 +183,7 @@ function memql_secrets_state() {
 CLUSTER_SECRET_STATE=""
 CLUSTER_MASTER_KEY=""
 CLUSTER_GENESIS_B64=""
+CLUSTER_SIGNING_KEY_B64=""
 
 function load_cluster_secret_snapshot() {
     local state
@@ -207,6 +214,20 @@ function load_cluster_secret_snapshot() {
         || cap_fail 5 "memql-secrets exists but its MEMQL_GENESIS_B64 could not be read; refusing to overwrite it blind."
     if [ -n "$raw" ]; then
         CLUSTER_GENESIS_B64="$(trim_space "$(printf '%s' "$raw" | b64_decode 2>/dev/null || true)")"
+    fi
+
+    # The identity signing seed is the third irreplaceable field in this
+    # Secret (memql#3400) and gets the same fail-closed read: rotating it
+    # invalidates every live session and every minted mesh node token, so
+    # "I could not tell what is there" must never become "there is nothing
+    # there".
+    raw="$(kubectl get secret memql-secrets --namespace="$NAMESPACE" \
+              -o 'jsonpath={.data.MEMQL_IDENTITY_SIGNING_KEY_B64}' 2>/dev/null)" \
+        || cap_fail 5 "memql-secrets exists but its MEMQL_IDENTITY_SIGNING_KEY_B64 could not be read; refusing to overwrite it blind."
+    if [ -n "$raw" ]; then
+        CLUSTER_SIGNING_KEY_B64="$(trim_space "$(printf '%s' "$raw" | b64_decode 2>/dev/null || true)")"
+        [ -n "$CLUSTER_SIGNING_KEY_B64" ] \
+            || cap_fail 5 "memql-secrets holds a MEMQL_IDENTITY_SIGNING_KEY_B64 that could not be base64-decoded; refusing to overwrite it blind."
     fi
 }
 
@@ -362,6 +383,92 @@ function resolve_master_key() {
 
 
 #=============================================================================
+# RESOLVE IDENTITY SIGNING SEED (memql#3400)
+#=============================================================================
+
+# WHY THIS EXISTS. deploy/k8s/base/identity.yaml runs identity at `replicas: 2`
+# and says why it can: "the signing key comes from the envelope (same seed on
+# every pod -> identical JWKS), so there is NO single-writer key PVC". Nothing
+# supplied that seed locally, so KeyManager.Load() fell through to
+# generateAndWriteCurrent() and EVERY POD MINTED ITS OWN Ed25519 keypair. Two
+# replicas behind one Service published two different `kid`s; a token minted by
+# one is structurally unverifiable by any node that fetched JWKS from the other,
+# so `make scale N=2` -- the documented multi-node command -- produced coin-flip
+# auth failures. This is the local analogue of the ESO/Key Vault delivery
+# staging uses, exactly as the master key and the front-door TLS pair already
+# are: the SHAPE (one shared seed, delivered through memql-secrets, read by
+# every replica via envFrom) is identical everywhere; only the VALUE is local.
+#
+# The runtime requires base64-std of EXACTLY 32 bytes -- ed25519.SeedSize, see
+# component/identity/keys.go NewKeyManagerFromSeed and the same rule in
+# Config.Validate. 32 bytes encode to 43 base64 characters plus one '=' pad, so
+# that shape check is complete: nothing else decodes to 32 bytes.
+readonly SIGNING_KEY_B64_RE='^[A-Za-z0-9+/]{43}=$'
+
+RESOLVED_SIGNING_KEY_B64=""
+RESOLVED_SIGNING_KEY_SOURCE=""
+
+function is_valid_signing_key() {
+    [[ "$1" =~ $SIGNING_KEY_B64_RE ]]
+}
+
+# NEVER echoed. A seed printed to a terminal or a CI log is a seed that must be
+# rotated, and rotation is the operation the reuse branch below exists to avoid.
+function generate_signing_key() {
+    head -c 32 /dev/urandom | base64 | tr -d '\n'
+}
+
+# Strict precedence: environment, then the seed already in the cluster, then a
+# freshly generated one.
+#
+# The middle branch is the load-bearing one. `make secrets` runs on every
+# `make up`, so a seed regenerated on each run would silently rotate the
+# cluster's signing key -- invalidating every browser session and every minted
+# class="node" mesh token, which reads to the operator as the very auth
+# breakage this change fixes. Reuse makes a re-run a genuine no-op.
+#
+# Requires load_cluster_secret_snapshot to have run.
+function resolve_signing_key() {
+    if [ -n "${MEMQL_IDENTITY_SIGNING_KEY_B64:-}" ]; then
+        local from_env
+        from_env="$(trim_space "$MEMQL_IDENTITY_SIGNING_KEY_B64")"
+        if ! is_valid_signing_key "$from_env"; then
+            cap_fail 2 "MEMQL_IDENTITY_SIGNING_KEY_B64 is set but is not base64-std of 32 bytes (an Ed25519 seed; got ${#from_env} characters after trimming). identity REFUSES TO BOOT on a seed it cannot decode, so seeding it would take auth down cluster-wide. Generate one with: make identity-signing-key"
+        fi
+        if [ -n "$CLUSTER_SIGNING_KEY_B64" ] && [ "$CLUSTER_SIGNING_KEY_B64" != "$from_env" ]; then
+            warn "MEMQL_IDENTITY_SIGNING_KEY_B64 differs from the seed currently in memql-secrets."
+            warn "  This run ROTATES the identity signing key. Every live browser session and"
+            warn "  every minted class=\"node\" mesh token stops verifying; sign-in again after"
+            warn "  identity rolls. Unset MEMQL_IDENTITY_SIGNING_KEY_B64 to keep the existing seed."
+        fi
+        RESOLVED_SIGNING_KEY_B64="$from_env"
+        RESOLVED_SIGNING_KEY_SOURCE="env"
+        return
+    fi
+
+    if is_valid_signing_key "$CLUSTER_SIGNING_KEY_B64"; then
+        RESOLVED_SIGNING_KEY_B64="$CLUSTER_SIGNING_KEY_B64"
+        RESOLVED_SIGNING_KEY_SOURCE="cluster"
+        return
+    fi
+
+    # Nothing usable. Replacing a stored value that is not a 32-byte seed
+    # loses nothing: identity refuses to boot on it, so it has signed nothing.
+    # Judged AFTER trim_space, so a good seed stored with a stray newline
+    # reaches the reuse branch above instead.
+    if [ -n "$CLUSTER_SIGNING_KEY_B64" ]; then
+        warn "the MEMQL_IDENTITY_SIGNING_KEY_B64 already in memql-secrets is not a 32-byte Ed25519 seed; replacing it."
+        warn "  (identity refuses to boot on it, so it has signed nothing and nothing is lost.)"
+    fi
+    RESOLVED_SIGNING_KEY_B64="$(generate_signing_key)"
+    RESOLVED_SIGNING_KEY_SOURCE="generated"
+    if ! is_valid_signing_key "$RESOLVED_SIGNING_KEY_B64"; then
+        cap_fail 5 "generating an Ed25519 signing seed produced a value of the wrong shape; /dev/urandom or base64 is not behaving as expected."
+    fi
+    info "generated a shared identity signing seed (every identity replica will derive the same key + kid + JWKS)."
+}
+
+#=============================================================================
 # FRONT-DOOR TLS (local-znas-tls -- browser-trusted wildcard for the ingress)
 #=============================================================================
 
@@ -494,9 +601,10 @@ function seed_db_creds() {
 function seed_memql_secrets() {
     # Both values were resolved in main BEFORE any mutation -- see the note
     # there. This function only writes.
-    local genesis_b64 master_key db_dsn db_direct_dsn
+    local genesis_b64 master_key signing_key db_dsn db_direct_dsn
     genesis_b64="$RESOLVED_GENESIS_B64"
     master_key="$RESOLVED_MASTER_KEY"
+    signing_key="$RESOLVED_SIGNING_KEY_B64"
     # Database DSN: local in-cluster Postgres.
     # The connection string uses 'disable' sslmode because the local Postgres
     # container does not have TLS configured (dev only).
@@ -509,6 +617,7 @@ function seed_memql_secrets() {
         --namespace="$NAMESPACE" \
         --from-literal="MEMQL_MASTER_KEY=$master_key" \
         --from-literal="MEMQL_GENESIS_B64=$genesis_b64" \
+        --from-literal="MEMQL_IDENTITY_SIGNING_KEY_B64=$signing_key" \
         --from-literal="MEMQL_DATABASE_DSN=$db_dsn" \
         --from-literal="MEMORY_NODES_DATABASE_DIRECT_DSN=$db_direct_dsn" \
         --from-literal="AZURE_BLOB_CONNECTION_STRING=$AZURITE_CONN" \
@@ -666,6 +775,7 @@ function main() {
     # rather than being recomputed here to dodge the old subshell.
     load_cluster_secret_snapshot
     resolve_master_key
+    resolve_signing_key
     resolve_genesis_b64
 
     seed_internal_ca
@@ -686,6 +796,10 @@ function main() {
     # env | cluster | dev-default -- so a caller can tell a deliberate rotation
     # from a run that preserved the cluster's existing key (memql#2958).
     cap_result_set     masterKeySource "$RESOLVED_MASTER_KEY_SOURCE"
+    # env | cluster | generated -- so a caller can tell a run that PRESERVED the
+    # identity signing seed from one that minted or rotated it (memql#3400).
+    # The seed itself is never emitted; only where it came from.
+    cap_result_set     signingKeySource "$RESOLVED_SIGNING_KEY_SOURCE"
     # existing | issued -- so a caller can tell a routine re-run from the run
     # that minted the front-door pair (memql#3384).
     cap_result_set     frontDoorTlsSource "$TLS_CERT_SOURCE"

@@ -43,7 +43,8 @@ import (
 // scenario:
 //
 //	FAKE_SECRET_STATE  absent | present | error
-//	FAKE_MASTER_KEY_B64, FAKE_GENESIS_B64   base64 payloads when present
+//	FAKE_MASTER_KEY_B64, FAKE_GENESIS_B64, FAKE_SIGNING_KEY_B64
+//	                   base64 payloads when present
 //	FAKE_JSONPATH_FAILS  non-empty -> the value reads fail while the secret exists
 const fakeKubectlTemplate = `#!/usr/bin/env bash
 printf '%s\n' "$*" >> "$FAKE_KUBECTL_LOG"
@@ -68,6 +69,9 @@ case "$args" in
   *"get secret memql-secrets"*jsonpath*MEMQL_GENESIS_B64*)
     [ -n "$FAKE_JSONPATH_FAILS" ] && { printf 'Error from server\n' >&2; exit 1; }
     printf '%s' "$FAKE_GENESIS_B64"; exit 0 ;;
+  *"get secret memql-secrets"*jsonpath*MEMQL_IDENTITY_SIGNING_KEY_B64*)
+    [ -n "$FAKE_JSONPATH_FAILS" ] && { printf 'Error from server\n' >&2; exit 1; }
+    printf '%s' "$FAKE_SIGNING_KEY_B64"; exit 0 ;;
 esac
 
 # Internal CA already seeded -> generator skipped.
@@ -93,6 +97,7 @@ type seedResult struct {
 	Changed bool `json:"changed"`
 	Result  struct {
 		MasterKeySource    string `json:"masterKeySource"`
+		SigningKeySource   string `json:"signingKeySource"`
 		Source             string `json:"source"`
 		FrontDoorTLSSource string `json:"frontDoorTlsSource"`
 	} `json:"result"`
@@ -104,11 +109,13 @@ type seedResult struct {
 
 // scenario configures one run of the script against the fake cluster.
 type scenario struct {
-	envMasterKey  string // exported only when non-empty
-	secretState   string // "absent" (default) | "present" | "error"
-	clusterKey    string // plaintext; encoded into the fake when secretState=present
-	clusterB64    string // plaintext genesis payload the "cluster" holds
-	jsonpathFails bool
+	envMasterKey   string // exported only when non-empty
+	envSigningKey  string // MEMQL_IDENTITY_SIGNING_KEY_B64; exported only when non-empty
+	secretState    string // "absent" (default) | "present" | "error"
+	clusterKey     string // plaintext; encoded into the fake when secretState=present
+	clusterB64     string // plaintext genesis payload the "cluster" holds
+	clusterSigning string // plaintext signing seed the "cluster" holds
+	jsonpathFails  bool
 }
 
 func repoRoot(t *testing.T) string {
@@ -124,6 +131,22 @@ func repoRoot(t *testing.T) string {
 // Returns stdout (the JSON envelope), the recorded kubectl argv lines, and the
 // exit code.
 func runSeedSecrets(t *testing.T, sc scenario) (string, []string, int) {
+	t.Helper()
+	stdout, _, calls, code := runSeedSecretsFull(t, sc)
+	return stdout, calls, code
+}
+
+// runSeedSecretsStderr returns only the human-log stream, for assertions
+// about what the script prints (e.g. that it never prints key material).
+func runSeedSecretsStderr(t *testing.T, sc scenario) string {
+	t.Helper()
+	_, stderr, _, _ := runSeedSecretsFull(t, sc)
+	return stderr
+}
+
+// runSeedSecretsFull is the whole harness: stdout (the JSON envelope), stderr
+// (the human log), the recorded kubectl argv lines, and the exit code.
+func runSeedSecretsFull(t *testing.T, sc scenario) (string, string, []string, int) {
 	t.Helper()
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("bash not available")
@@ -172,11 +195,15 @@ func runSeedSecrets(t *testing.T, sc scenario) (string, []string, int) {
 		"FAKE_SECRET_STATE=" + state,
 		"FAKE_MASTER_KEY_B64=" + enc(sc.clusterKey),
 		"FAKE_GENESIS_B64=" + enc(sc.clusterB64),
+		"FAKE_SIGNING_KEY_B64=" + enc(sc.clusterSigning),
 		"FAKE_JSONPATH_FAILS=" + jsonpathFails,
 		"MEMQL_K3D_NAMESPACE=memql",
 	}
 	if sc.envMasterKey != "" {
 		env = append(env, "MEMQL_MASTER_KEY="+sc.envMasterKey)
+	}
+	if sc.envSigningKey != "" {
+		env = append(env, "MEMQL_IDENTITY_SIGNING_KEY_B64="+sc.envSigningKey)
 	}
 	cmd.Env = env
 
@@ -203,7 +230,7 @@ func runSeedSecrets(t *testing.T, sc scenario) (string, []string, int) {
 		}
 	}
 	t.Logf("exit=%d\nstdout: %s\nstderr:\n%s", code, stdout.String(), stderr.String())
-	return stdout.String(), calls, code
+	return stdout.String(), stderr.String(), calls, code
 }
 
 // seededLiteral extracts a --from-literal value the script asked kubectl to
