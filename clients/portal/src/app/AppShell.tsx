@@ -33,7 +33,21 @@ const OPERATE: readonly NavItem[] = VIEWS.filter((view) => view.group === "opera
   (view) => ({ to: viewPath(view.id), label: view.label }),
 );
 
-const EXPLORE: readonly NavItem[] = [{ to: CONCEPTS_ROOT, label: "Concepts" }];
+// Explore is the SUBSTRATE: the whole concept registry, plus the composer that
+// turns any concept in it into a view without code (memql#3320).
+const EXPLORE: readonly NavItem[] = [
+  { to: CONCEPTS_ROOT, label: "Concepts" },
+  { to: "/compose", label: "Compose" },
+];
+
+// Administer is the cluster ITSELF rather than the data in it -- what is
+// plugged in (memql#3323) and how the cluster is configured and keyed
+// (memql#3324). Kept apart from Operate because an operator visits these
+// occasionally and deliberately, where Operate is where they live.
+const ADMINISTER: readonly NavItem[] = [
+  { to: "/integrations", label: "Integrations" },
+  { to: "/admin", label: "Administration" },
+];
 
 function navClass({ isActive }: { isActive: boolean }): string {
   return (
@@ -86,6 +100,7 @@ export function AppShell(): ReactNode {
         >
           <NavGroup label="Operate" items={OPERATE} />
           <NavGroup label="Explore" items={EXPLORE} />
+          <NavGroup label="Administer" items={ADMINISTER} />
         </nav>
 
         {/* min-h-0 on both axes so a long row list scrolls inside the main

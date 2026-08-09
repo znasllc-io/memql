@@ -10,6 +10,9 @@ import { ConceptSchemaPane } from "../pages/ConceptSchemaPane";
 import { ConceptsPage } from "../pages/ConceptsPage";
 import { NotFoundPage } from "../pages/NotFoundPage";
 import { ViewPage } from "../views/ViewPage";
+import { AdminRoutes } from "../admin/AdminRoutes";
+import { ComposeRoutes } from "../compose/ComposeRoutes";
+import { IntegrationsRoutes } from "../integrations/IntegrationsRoutes";
 import {
   CONCEPTS_ROUTE_PATTERN,
   CONCEPT_ROUTE_PATTERN,
@@ -75,6 +78,17 @@ import { VIEW_ROUTE_PATTERN, VIEW_ROW_CHILD_PATTERN } from "../views/urls";
 // The index still lands on /concepts. The five views are surfaces an operator
 // picks deliberately from the nav; the registry is the honest default landing
 // for a console that has not been told which cluster it is looking after.
+//
+// THE REMAINING SURFACES ARE MOUNTED AS SPLATS:
+//
+//   /integrations/*   integration + campaign management   (memql#3323)
+//   /compose/*        the user-composed view builder      (memql#3320)
+//   /admin/*          the absorbed server-rendered admin  (memql#3324)
+//
+// Each owns a `<name>Routes` module that declares its own sub-routes. Three
+// separate changes would otherwise each need an edit here and in AppShell, and
+// in one worktree that is three chances to clobber the other two. A splat costs
+// one line and means the route table stops being a shared bottleneck.
 
 export function AppRoutes(): ReactNode {
   return (
@@ -93,6 +107,9 @@ export function AppRoutes(): ReactNode {
             <Route path={CONCEPT_ROW_CHILD_PATTERN} element={<ConceptRowsPane />} />
             <Route path={CONCEPT_SCHEMA_CHILD_PATTERN} element={<ConceptSchemaPane />} />
           </Route>
+          <Route path="compose/*" element={<ComposeRoutes />} />
+          <Route path="integrations/*" element={<IntegrationsRoutes />} />
+          <Route path="admin/*" element={<AdminRoutes />} />
           <Route path="*" element={<NotFoundPage />} />
         </Route>
       </Route>
