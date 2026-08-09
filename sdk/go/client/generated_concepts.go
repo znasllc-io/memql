@@ -373,6 +373,7 @@ var BoundConcepts = map[string]string{
 	"missingCapabilityByKindAndName":        "v1:platform:missingCapability",
 	"myRequests":                            "v1:forge:request",
 	"nodeSpecsForDeployment":                "v1:cluster:deploymentNodeSpec",
+	"nodeTokenIdentitiesAdmin":              "v1:identity:identity",
 	"nodesForDeployment":                    "v1:cluster:node",
 	"nodesNotInDeployment":                  "v1:cluster:node",
 	"noteById":                              "v1:notes:note",

@@ -2840,6 +2840,24 @@ func NodeSpecsForDeploymentBuild(args NodeSpecsForDeploymentArgs) string {
 	return b.String()
 }
 
+// NodeTokenIdentitiesAdmin -- Every node_token identity across the cluster (active + revoked), in the credential-free nodeTokenSummary shape. Owner or admin only. Backs the portal's Tokens surface (memql#3324).
+// Why actor.userId scoping is not the alternative: a node_token row's `userId` is the synthetic bootstrap user rather than any reader, so `userId==actor.userId` returns nothing for the admin who consumes this. The gate that fits is the role, and it is stated here rather than left to a route.
+//
+// Bound concept: v1:identity:identity (machine-readable: BoundConcepts["nodeTokenIdentitiesAdmin"] in generated_concepts.go).
+type NodeTokenIdentitiesAdminArgs struct {
+}
+
+// NodeTokenIdentitiesAdmin calls the engine query nodeTokenIdentitiesAdmin.
+func (qc *QueryClient) NodeTokenIdentitiesAdmin(ctx context.Context, args NodeTokenIdentitiesAdminArgs) (*Result, error) {
+	call := NodeTokenIdentitiesAdminBuild(args)
+	return qc.executeNamed(ctx, "nodeTokenIdentitiesAdmin", call)
+}
+
+func NodeTokenIdentitiesAdminBuild(args NodeTokenIdentitiesAdminArgs) string {
+	_ = args
+	return "query nodeTokenIdentitiesAdmin()"
+}
+
 // NodesForDeployment -- Latest-per-id cluster node rows for one deploymentId -- the live topology of that deployment (#1873). asOf latest collapses the append-only node stream to current state per node.
 //
 // Bound concept: v1:cluster:node (machine-readable: BoundConcepts["nodesForDeployment"] in generated_concepts.go).
