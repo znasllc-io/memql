@@ -212,6 +212,30 @@ export const window = {
   },
 };
 
+// The progress-notification location src/extension.ts names for the sign-in
+// flow (memql#3403). A constant, not behaviour: activation only has to be able
+// to READ it, because withProgress is reached from a command handler and this
+// stub deliberately models nothing past activation.
+export const ProgressLocation = {
+  SourceControl: 1,
+  Window: 10,
+  Notification: 15,
+} as const;
+
+// The browser capabilities the sign-in flow binds (vscode.env.asExternalUri /
+// openExternal). Present so the import in src/extension.ts resolves; THROWING
+// rather than resolving because nothing in activation may open a browser, and a
+// silent no-op here would let a case that wandered into the sign-in path pass
+// while asserting nothing.
+export const env = {
+  asExternalUri(_uri: Uri): Promise<Uri> {
+    throw new Error('vscodeStub: env.asExternalUri is out of scope -- this stub models activation only');
+  },
+  openExternal(_uri: Uri): Promise<boolean> {
+    throw new Error('vscodeStub: env.openExternal is out of scope -- this stub models activation only');
+  },
+};
+
 export const commands = {
   registerCommand(id: string, _handler: (...args: never[]) => unknown): StubDisposable {
     recorded.commands.push(id);

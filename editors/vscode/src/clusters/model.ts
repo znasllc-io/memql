@@ -91,6 +91,24 @@ export function displayLabel(c: ClusterConfig): string {
 // has already been taken into SecretStorage. That is only ever wrong in the
 // harmless direction: the first successful exchange writes the fresh access
 // token back into `token`, so the resting view is accurate from then on.
+//
+// RE-EXAMINED FOR memql#3403, AND DELIBERATELY UNCHANGED.
+//
+// The extension can now authenticate itself (`memql.clusters.signIn`), and the
+// question that raised was whether an `issuer` should therefore stop counting
+// as "needs auth". It should not, and the reason is that this predicate answers
+// a question about the PRESENT, not about what is reachable: a cluster with an
+// issuer and no token still cannot dial, and a row that claimed otherwise would
+// send an operator to a connect attempt that fails at the handshake. What
+// memql#3403 changed is the REMEDY, not the fact -- the recovery for `true` is
+// no longer "go and paste a token from somewhere else" but "run Sign In", and
+// that lives in the command and in the offer made on a failed connect, both of
+// which consult src/auth/signin.ts `canSignIn` for whether an issuer exists.
+//
+// Keeping the two separate is what stops the predicate from lying in either
+// direction: `needsAuth` says a credential is missing, `canSignIn` says whether
+// this editor can go and get one, and a cluster can genuinely be any
+// combination of the two.
 export function needsAuth(c: ClusterConfig): boolean {
   if (c.endpoint.trim() === "") return true;
   return (c.token ?? "").trim() === "" && (c.refreshToken ?? "").trim() === "";

@@ -433,6 +433,143 @@ smoke("every webview surface opens without throwing", async () => {
 });
 
 // -----------------------------------------------------------------------------
+// Sign-in (memql#3403)
+// -----------------------------------------------------------------------------
+
+// The manifest half. "every command the manifest contributes is registered"
+// above already proves the handlers exist; what it cannot see is whether an
+// operator has any way to REACH them. A command contributed with no palette
+// entry and no menu entry is registered, passes that case, and is invisible.
+smoke("sign-in and sign-out are reachable from the palette and the Clusters view", async () => {
+  const ext = extension();
+  await ext.activate();
+
+  const contributes = (
+    ext.packageJSON as {
+      contributes?: {
+        menus?: {
+          commandPalette?: { command: string; when?: string }[];
+          "view/item/context"?: { command: string; when?: string }[];
+        };
+      };
+    }
+  ).contributes;
+
+  const palette = contributes?.menus?.commandPalette ?? [];
+  const itemContext = contributes?.menus?.["view/item/context"] ?? [];
+  assert.ok(palette.length > 0 && itemContext.length > 0, "the menus contribution shape changed");
+
+  for (const command of ["memql.clusters.signIn", "memql.clusters.signOut"]) {
+    const inPalette = palette.find((entry) => entry.command === command);
+    assert.ok(
+      inPalette !== undefined,
+      `${command} is not in contributes.menus.commandPalette, so it never appears in the palette`
+    );
+    // Every runtime command lives behind the trust gate, because
+    // registerRuntimeSurface -- which registers them -- only runs in a trusted
+    // window. A palette entry without the clause offers a command that is not
+    // there.
+    assert.equal(
+      inPalette.when,
+      "isWorkspaceTrusted",
+      `${command}'s palette entry must carry the trust clause the runtime surface is gated on`
+    );
+
+    const inMenu = itemContext.find(
+      (entry) =>
+        entry.command === command && (entry.when ?? "").includes("viewItem == memqlCluster")
+    );
+    assert.ok(
+      inMenu !== undefined,
+      `${command} is not contributed to the Clusters view's item context menu, so right-clicking a cluster does not offer it`
+    );
+  }
+
+  info("sign-in and sign-out are contributed to both surfaces");
+});
+
+// The handler half, driven through the workbench's command registry rather than
+// called directly -- which is the only way to observe that the command
+// RESOLVES. Two things can only fail in a host: `withProgress` and the
+// `vscode.env` capabilities the flow binds. A handler that parked on a modal,
+// or threw reaching for a member that does not exist outside an editor, hangs
+// or rejects here and nowhere in the fast lane.
+//
+// The fixture cluster deliberately names NO identity service (no `issuer`, no
+// `domain`, and an endpoint with no `cockpit.` prefix to imply one), so the
+// flow refuses with kind `misconfigured` before a port is bound or a browser is
+// opened. That is what makes this case safe to run unattended: no network, no
+// browser, and nothing persisted.
+smoke("the sign-in command runs to completion in a real host", async () => {
+  await extension().activate();
+
+  const node = {
+    cluster: { name: "smoke-no-issuer", endpoint: "10.0.0.4:50051" },
+    selected: false,
+  };
+
+  // executeCommand resolves with the handler's return value and REJECTS if it
+  // threw, so awaiting it is the assertion. A 20s ceiling turns a handler that
+  // parked on a dialog into a failure rather than a hung lane.
+  await Promise.race([
+    vscode.commands.executeCommand("memql.clusters.signIn", node),
+    new Promise((_resolve, reject) =>
+      setTimeout(
+        () =>
+          reject(
+            new Error(
+              "memql.clusters.signIn did not resolve within 20s -- the handler is parked on something (an awaited message box, or a flow that opened a listener it should not have)"
+            )
+          ),
+        20_000
+      )
+    ),
+  ]);
+
+  // Nothing was written. A cluster the flow refused before it started must not
+  // acquire a client_id, a token, or an entry of its own.
+  const clustersPath = defaultClustersPath();
+  const raw = fs.existsSync(clustersPath) ? fs.readFileSync(clustersPath, "utf8") : "";
+  assert.ok(
+    !raw.includes("smoke-no-issuer"),
+    `a refused sign-in wrote to ${clustersPath}:\n${raw}`
+  );
+
+  info("sign-in refused a cluster with no identity service without opening anything");
+});
+
+// Sign-out is the other side of the same wiring, and it is the half that
+// actually TOUCHES both stores: SecretStorage (which exists only in a host) and
+// the shared clusters.yaml.
+smoke("the sign-out command clears the stored credential", async () => {
+  await extension().activate();
+
+  const clustersPath = defaultClustersPath();
+  fs.writeFileSync(
+    clustersPath,
+    ["clusters:", "  - name: smoke-signout", "    endpoint: 10.0.0.4:50051", "    token: header.payload.signature", ""].join(
+      "\n"
+    ),
+    "utf8"
+  );
+
+  const node = { cluster: { name: "smoke-signout", endpoint: "10.0.0.4:50051" }, selected: false };
+  await vscode.commands.executeCommand("memql.clusters.signOut", node);
+
+  const raw = fs.readFileSync(clustersPath, "utf8");
+  assert.ok(
+    raw.includes("smoke-signout"),
+    `sign-out removed the cluster itself, not only its credential:\n${raw}`
+  );
+  assert.ok(
+    !raw.includes("header.payload.signature"),
+    `sign-out left the access token in ${clustersPath}:\n${raw}`
+  );
+
+  info("sign-out cleared the token and left the cluster entry intact");
+});
+
+// -----------------------------------------------------------------------------
 // Explicitly out of scope
 // -----------------------------------------------------------------------------
 
