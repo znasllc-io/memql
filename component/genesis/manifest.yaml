@@ -337,6 +337,91 @@ variables:
     default: "memQL"
     description: "Display name shown in the From header of transactional mail. (Legacy name `MAIL_FROM_NAME` still accepted.)"
 
+  # --- campaign sending engine (memql#3348) ---
+
+  - name: MEMQL_CAMPAIGNS_ENABLED
+    component: campaigns
+    scope: node
+    optional: true
+    default: "true"
+    description: "Campaign send worker on/off. Even when enabled no campaign can START without MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET and _BASE_URL: a bulk send with no working RFC 8058 one-click unsubscribe is refused rather than sent."
+
+  - name: MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET
+    component: campaigns
+    scope: global
+    optional: true
+    secret: true
+    description: "HMAC key that signs the one-click unsubscribe link in every campaign message. REQUIRED to send: without it campaignStartSend refuses. Rotating it invalidates every unsubscribe link already sitting in a recipient inbox, so set it once per deployment."
+
+  - name: MEMQL_CAMPAIGNS_UNSUBSCRIBE_BASE_URL
+    component: campaigns
+    scope: global
+    optional: true
+    description: "Public origin the unsubscribe link points at, e.g. https://cockpit.example.com. REQUIRED to send. Must be the externally reachable bff origin -- the recipient's mail client POSTs to it, so an internal address makes one-click silently fail."
+
+  - name: MEMQL_CAMPAIGNS_SEND_RATE_PER_MINUTE
+    component: campaigns
+    scope: node
+    optional: true
+    default: "30"
+    description: "OUR self-imposed send ceiling, per process. Sized to stay under the provider's rather than to discover it: Microsoft Graph throttles a mailbox at roughly this rate. Raise it only with a relay that documents a higher limit. Also the manual warming knob -- raise it on a schedule when a new sending domain is being warmed."
+
+  - name: MEMQL_CAMPAIGNS_BATCH_SIZE
+    component: campaigns
+    scope: node
+    optional: true
+    default: "25"
+    description: "Recipients one campaign gets per drain tick, so a large campaign cannot hold the loop while a second one waits."
+
+  - name: MEMQL_CAMPAIGNS_MAX_ATTEMPTS
+    component: campaigns
+    scope: node
+    optional: true
+    default: "3"
+    description: "Per-recipient delivery attempts before the delivery row goes terminal failed. Lower than the outbound worker's 5: a marketing message has a shelf life, and the eighth retry of a soft-bouncing address costs reputation rather than buying delivery."
+
+  - name: MEMQL_CAMPAIGNS_MAX_AUDIENCE
+    component: campaigns
+    scope: node
+    optional: true
+    default: "5000"
+    description: "Audience ceiling for a send. The worker reads the roster WHOLE on every batch and diffs it against the delivery ledger, so a larger audience would be silently truncated; a send over the ceiling is refused instead. Raising it alone is not enough -- the paginate bound on audienceRosterForSend and MEMORY_ENGINE_MAX_WINDOW have to move with it."
+
+  - name: MEMQL_CAMPAIGNS_POLL_SECONDS
+    component: campaigns
+    scope: node
+    optional: true
+    default: "15"
+    description: "Campaign drain interval. Polling faster than the send rate only finds an empty token bucket."
+
+  - name: MEMQL_CAMPAIGNS_STARTUP_DELAY_SECONDS
+    component: campaigns
+    scope: node
+    optional: true
+    default: "25"
+    description: "Delay before the campaign worker's first drain so the engine + DSL finish loading."
+
+  - name: MEMQL_CAMPAIGNS_CLAIM_TTL_SECONDS
+    component: campaigns
+    scope: node
+    optional: true
+    default: "300"
+    description: "Lease on the cross-replica send claim. Above the longest a live batch can take, and far below the cluster guard's 1h retention prune, so a replica that died mid-batch does not wedge the campaign."
+
+  - name: MEMQL_CAMPAIGNS_THROTTLE_SECONDS
+    component: campaigns
+    scope: node
+    optional: true
+    default: "60"
+    description: "How long to park a campaign when the provider answers 429 WITHOUT a Retry-After. A throttle with no stated duration is still a throttle; this is the difference between backing off and hammering."
+
+  - name: MEMQL_CAMPAIGNS_SEND_TIMEOUT_SECONDS
+    component: campaigns
+    scope: node
+    optional: true
+    default: "30"
+    description: "Bounds a single message's delivery attempt, so one unresponsive provider connection cannot hold a batch -- and therefore the cross-replica claim -- open."
+
   # --- outbound delivery (memql#2521) ---
 
   - name: MEMQL_OUTBOUND_ENABLED

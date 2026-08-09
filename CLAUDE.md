@@ -588,6 +588,7 @@ These endpoints **must** remain HTTP due to external protocol requirements:
 | **WebSocket upgrades** | `/memql/ws`, `/memql/audio` | Browser clients need HTTP upgrade to establish WebSocket |
 | **File uploads** | `/spaces/{id}/attachments` | Multipart form-data uploads map poorly to gRPC |
 | **Inbound webhooks** | `POST /inbound/{source}` (bff only) | The third party dials US -- Shopify, Amazon SP-API, a POS will POST to a URL and nothing else, so there is no gRPC version of this capability (memql#2957). Deny-by-default source allowlist + per-source HMAC; declared in `server.HandlerAuthorizedPaths()`, not `PublicPaths()`. See [inbound-delivery.md](docs/public/operate/inbound-delivery.md) |
+| **One-click unsubscribe** | `GET+POST /unsubscribe` (bff only) | The third party dials US, exactly as with the inbound webhook -- and here the third party is the RECIPIENT'S MAIL CLIENT (memql#3348). RFC 8058 one-click is a contract with Gmail / Outlook / Yahoo: they read the `List-Unsubscribe` header off a message we sent and POST `List-Unsubscribe=One-Click` to the URI they find there. There is no gRPC form of that conversation, and without it there is no one-click unsubscribe -- which the same providers now treat as a bulk-sender defect. GET renders a confirmation page (what a person clicking the link in the body reaches); POST performs the opt-out. The split is load-bearing: mail clients and security appliances PREFETCH links, so a GET with the side effect silently unsubscribes people who never clicked, which is precisely why the RFC specifies POST. Authorization is an HMAC-signed token carrying (owner, recipient, campaign) -- verified before any row is read, and the identity the handler then impersonates comes out of the signed payload rather than a parameter, so an unsigned request cannot aim it. Declared in `server.HandlerAuthorizedPaths()` + `SelfAuthenticatedPaths()`, not `PublicPaths()`. See [campaign-sending.md](docs/public/operate/campaign-sending.md) |
 | **Portal SPA assets** | `GET /portal/*` (bff only) | A browser cannot fetch its own bundle over gRPC -- the request that loads the application is made before any application code exists to speak a protocol. Same category as the `/memql/ws` upgrade and identity's web UI (memql#3314). Static bytes only, identical for every visitor: declared in `server.PublicPaths()` via `PortalPaths()`, while the DATA the portal reads stays gated on the `/memql/ws` stream it then dials. Served by `component/portal` from `MEMQL_PORTAL_DIST` |
 
 ### gRPC-Only Endpoints (HTTP Retired)
@@ -2023,6 +2024,57 @@ Shipped. Key files:
 Product-specific mutations (creating product-scoped invitations,
 joining spaces as a guest, participation lifecycle) live in
 `dsl/cognition/mutations.memql`.
+
+### Email campaigns + the sending engine
+
+Campaigns are ordinary graph state (memql#3323) plus a Go sending engine
+(memql#3348). Seven concepts under `dsl/campaigns/`: five operator-facing
+and owned-tier (`audience`, `recipient`, `template`, `campaign`,
+`delivery`), two engine-owned and clusterOwner-tier (`sendJob`,
+`suppression`).
+
+**The two identities is the design.** A send touches rows belonging to
+somebody else, and the engine BORROWS the owner's authority rather than
+out-ranking it. `component/campaigns`' drain worker runs its
+clusterOwner-tier reads (the job queue, the suppression list) under the
+engine's own operator identity, and everything owned -- the campaign, its
+template, its audience, the delivery ledger -- under
+`auth.ContextWithUserActor(ctx, job.campaignOwnerUserId)`. That owner value
+is copied off a campaign row the STARTING CALLER had already read under
+their own actor, so it can never name a user the caller could not act as.
+Consequence: no path here reads or writes a row the campaign's owner could
+not, and `delivery.ownerUserId` is stamped from `actor.userId` like every
+other write in the domain -- which is what took the concept off
+`ownerGateExemptions`.
+
+**Four product decisions, each recorded next to its code:**
+- *Suppression is CLUSTER-WIDE and digest-keyed.* One deployment, one
+  sending mailbox, one SPF/DKIM identity, one reputation -- so one list.
+  The row id is the SHA-256 of the normalized address and the only readable
+  field is the domain, so being cluster-wide discloses no mailbox. Enforced
+  at the POINT OF SEND, before the recipient row's own status, which is what
+  "outranks every audience" means: a re-imported address whose row says
+  `subscribed` is still refused.
+- *A hard bounce suppresses; it does NOT delete the membership.* Deleting
+  destroys the audit trail and lets the next import resurrect a dead
+  address. A soft bounce does neither.
+- *Idempotency is the ledger.* One `v1:campaigns:delivery` row per
+  (campaign, recipient) at a derived id; the batch is "roster minus ledger,
+  plus retries that are due". The absence of the row IS the work queue, so a
+  resumed send needs nothing to remember.
+- *Two rate limits.* Ours is a per-process token bucket
+  (`MEMQL_CAMPAIGNS_SEND_RATE_PER_MINUTE`); theirs is the 429, surfaced as a
+  typed `email.SendError` and honoured by parking the job until its
+  `Retry-After`.
+
+**RFC 8058 one-click** rides two headers, which forced the Graph sender onto
+its base64-MIME form -- Graph's structured payload only carries `x-`
+headers, and `List-Unsubscribe` is not one. `GET+POST /unsubscribe` is a
+documented HTTP exception (see the table above).
+
+Not built: an automated warming ramp (needs reputation telemetry that does
+not exist) and a scheduler for `scheduledAt`. Runbook:
+[docs/public/operate/campaign-sending.md](docs/public/operate/campaign-sending.md).
 
 ### Planner / Knowledge / Validation (v1)
 
