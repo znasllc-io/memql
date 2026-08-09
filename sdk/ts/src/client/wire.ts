@@ -870,12 +870,23 @@ export type SubscriptionKindWire =
   | "SUBSCRIPTION_KIND_AUTOMATION_EVENTS"
   | "SUBSCRIPTION_KIND_ALL";
 
+// Every value `UserRole` declares in component/grpc/memql.proto, in proto
+// order. This file is the hand-mirrored TS view of the wire (see the header),
+// so an enum value added there does NOT appear here on its own -- and the
+// omission is silent: roleFromWire's `?? ""` turns an unlisted role into an
+// indeterminate one rather than an error.
+//
+// USER_ROLE_DEVELOPER was missing for exactly that reason (memql#3331), which
+// left the VS Code deploy panel unable to tell a developer from an unknown
+// caller and unable to gate cut/deploy. scripts/ci/user_role_wire_parity_test.go
+// now fails when the proto declares a role this union does not.
 export type UserRoleWire =
   | "USER_ROLE_UNSPECIFIED"
   | "USER_ROLE_OWNER"
   | "USER_ROLE_ADMIN"
   | "USER_ROLE_WRITER"
-  | "USER_ROLE_READER";
+  | "USER_ROLE_READER"
+  | "USER_ROLE_DEVELOPER";
 
 export type ServerMessage = MessageBase & ServerPayload;
 

@@ -129,25 +129,34 @@ export function actionById(id: DeployActionId): DeployActionSpec {
 /**
  * Whether a resolved cluster role satisfies a tier.
  *
- * `developer` is deliberately absent from the switch: the TS SDK's role enum
- * does not carry it (`UserRoleWire` has no USER_ROLE_DEVELOPER, so
- * roleFromWire maps it to ""), which is why an indeterminate role is a
- * first-class case in roleVisibility below rather than a bug to paper over.
+ * EXACT as of memql#3331. The SDK's `Role` now carries `developer`
+ * (`UserRoleWire` gained USER_ROLE_DEVELOPER, and roleFromWire maps it), so
+ * this mirrors the engine's three helpers one-for-one instead of approximating
+ * the developer tier as "admin or above".
+ *
+ * The approximation was safe but lossy in both directions: it hid cut/deploy
+ * from a developer who was entitled to them, and it made every developer
+ * indistinguishable from an unknown caller, so the panel fell back to offering
+ * everything with a hedge. Both are gone.
+ *
+ * The tiers are NOT a strict ordering. `developer` and `admin` hold different
+ * powers -- a developer may cut and deploy but not promote; an admin may
+ * promote but is not, by this table, a developer. So `admin` satisfying the
+ * developer tier is a fact read off auth.AtLeastDeveloper (owner / developer /
+ * admin all hold execute-on-deployment), not an inference from rank.
  */
 export function satisfiesTier(role: Role, tier: RoleTier): boolean {
   switch (tier) {
     case "owner":
+      // auth.IsOwner -- rollback, and nothing else.
       return role === "owner";
     case "admin":
+      // auth.AtLeastAdmin.
       return role === "owner" || role === "admin";
     case "developer":
-      // No `developer` value can reach here, so this is "admin or above" in
-      // practice -- a narrower answer than the engine's, which also admits a
-      // developer. Narrower is the safe direction for a hint: it hides a
-      // button a developer could have used (recoverable, and the
-      // indeterminate branch covers the real developer case), where wider
-      // would show one that is certain to be refused.
-      return role === "owner" || role === "admin";
+      // auth.AtLeastDeveloper == roleHasCapability(role, "execute",
+      // "deployment"), held by owner, developer and admin.
+      return role === "owner" || role === "admin" || role === "developer";
     default:
       return false;
   }
@@ -158,12 +167,22 @@ export type RoleVisibility =
   /** Role resolved; show exactly the actions the tier admits. */
   | { kind: "resolved"; role: Role }
   /**
-   * Role could not be resolved -- the access read failed, or the caller holds
-   * a role the TS SDK's enum cannot name (`developer`). Actions are OFFERED
-   * with a notice, because hiding them would lock a genuine developer out of
-   * cut and deploy, which the engine would have allowed. This is the one place
-   * the "never rely on hiding as the gate" rule has teeth: the engine refuses
-   * anything this caller may not do, and the refusal names the required role.
+   * The access read did not produce a role -- no live connection, a failed
+   * MyAccess call, or an unauthenticated caller. Actions are OFFERED with a
+   * notice, because the caller may well be an owner and hiding everything
+   * would lock them out of a surface they are entitled to. The engine refuses
+   * anything they may not do, and the refusal names the required role.
+   *
+   * NARROWED BY memql#3331. This branch used to absorb a second, much more
+   * common case: a `developer`, whom the SDK's wire enum could not name, so
+   * roleFromWire returned "" and every developer landed here. That meant the
+   * ONE role the deploy surface exists to serve saw a hedge instead of a
+   * clean affordance -- and so did every legitimately-unknown caller, who now
+   * had actions offered that were certain to be refused.
+   *
+   * A developer now resolves. What is left here is a genuine read failure,
+   * which is rare, and for which offering-with-a-notice is still the right
+   * call for the reason above.
    */
   | { kind: "indeterminate"; reason: string };
 
@@ -174,7 +193,7 @@ export function roleVisibility(role: Role | undefined, reason = ""): RoleVisibil
       reason:
         reason !== ""
           ? reason
-          : "Your cluster role could not be determined. Actions are offered, but the engine decides -- a refusal will name the role required.",
+          : "Your cluster role could not be read. Actions are offered, but the engine decides -- a refusal will name the role required.",
     };
   }
   return { kind: "resolved", role };
@@ -184,8 +203,10 @@ export function roleVisibility(role: Role | undefined, reason = ""): RoleVisibil
  * The actions to render for a given visibility.
  *
  * A "resolved" writer or reader gets NOTHING, which is the acceptance
- * criterion the issue states: a non-admin sees the read surface and none of
- * the actions.
+ * criterion #3312 states: a non-admin sees the read surface and none of the
+ * actions. A resolved developer gets cut + deploy and nothing else
+ * (memql#3331) -- not promote or rollout_action, which are admin, and not
+ * rollback, which is owner-only.
  */
 export function visibleActions(visibility: RoleVisibility): DeployActionSpec[] {
   if (visibility.kind === "indeterminate") return [...DEPLOY_ACTIONS];

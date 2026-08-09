@@ -14,7 +14,16 @@ import type {
   UserRoleWire,
 } from "./wire.js";
 
-export type Role = "" | "owner" | "admin" | "writer" | "reader";
+// `developer` is engineering power (authoring + inline DSL + deploy /
+// cut-version) WITHOUT user management. It sits in the privileged tier
+// alongside admin rather than above or below it -- the two hold different
+// powers, so the spectrum is not a strict ordering. Mirrors
+// component/auth/rbac.go's AllRoles() and memql.proto's UserRole.
+//
+// "" is not a role. It is "no role resolved" -- an unauthenticated caller, a
+// failed access read, or (until memql#3331) a role the wire union could not
+// name. Consumers must treat it as "unknown", never as "least privileged".
+export type Role = "" | "owner" | "admin" | "developer" | "writer" | "reader";
 
 export interface AccessSummary {
   requestId: string;
@@ -198,12 +207,19 @@ export function graphActionWire(a: GraphAction): GraphNodeActionWire {
   return graphActionToWire[a] ?? "GRAPH_NODE_ACTION_UNSPECIFIED";
 }
 
+// Typed `Record<UserRoleWire, Role>` deliberately: the compiler then REQUIRES
+// an entry for every member of the union, so widening UserRoleWire without
+// mapping the new value is a build error rather than another silent "".
+// That half of memql#3331 is structural; the half that is not -- the proto
+// declaring a role the union never listed -- is covered by
+// scripts/ci/user_role_wire_parity_test.go.
 const userRoleFromWire: Record<UserRoleWire, Role> = {
   USER_ROLE_UNSPECIFIED: "",
   USER_ROLE_OWNER: "owner",
   USER_ROLE_ADMIN: "admin",
   USER_ROLE_WRITER: "writer",
   USER_ROLE_READER: "reader",
+  USER_ROLE_DEVELOPER: "developer",
 };
 
 export function roleFromWire(r: UserRoleWire | undefined): Role {
