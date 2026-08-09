@@ -97,8 +97,15 @@ export interface RunDeps {
   cluster(): RunCluster | undefined;
   /** The live engine surface, or undefined when not connected. */
   engine(): RunEngine | undefined;
-  /** Assembles the bundle for this target. Synchronous: it reads editor buffers, which are already in memory. */
-  assemble(target: RunTarget): Bundle;
+  /**
+   * Assembles the bundle for this target.
+   *
+   * Awaitable since memql#3335: walking the import graph asks the language
+   * server which files a buffer imports, rather than scanning for `use` lines
+   * with a regex. A synchronous implementation is still accepted (the tests
+   * hand in one) -- `await` on a plain value is a no-op.
+   */
+  assemble(target: RunTarget): Promise<Bundle> | Bundle;
   /** Shows the write confirmation. Resolves true to proceed. */
   confirmWrite(message: string): Promise<boolean>;
   /** Publishes validation diagnostics to the Problems panel. An empty array CLEARS them. */
@@ -191,10 +198,14 @@ export class RunOrchestrator {
 
     let bundle: Bundle;
     try {
-      bundle = this.deps.assemble(target);
+      bundle = await this.deps.assemble(target);
     } catch (err) {
       return fail(target, "bundle", err instanceof Error ? err.message : String(err));
     }
+    // Assembly can await now (the import walk asks the language server), so it
+    // is another window for a second Run click to supersede this one. Checked
+    // here for the same reason every other await in this method is.
+    if (!this.latest.isCurrent(token)) return { status: "superseded" };
 
     // Validation runs for EVERY kind, including tool. It is free of engine
     // mutation, and a buffer whose other constructs do not compile is

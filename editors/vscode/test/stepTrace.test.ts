@@ -204,9 +204,44 @@ test("describeRefusal -- UNAVAILABLE points at the mesh, which is what it means"
   assert.match(text, /forwarded across the mesh/);
 });
 
+// Without the language server's flag the two causes genuinely cannot be told
+// apart -- the engine gives them the same code -- so naming both is the honest
+// answer, and stays the answer against a server older than #3333.
 test("describeRefusal -- FAILED_PRECONDITION explains @disabled and the @filter miss", () => {
   const text = describeRefusal({ code: 9, codeName: "FAILED_PRECONDITION", message: "", runId: "" });
   assert.match(text, /@disabled/);
+  assert.match(text, /@filter/);
+});
+
+// With the flag it names the actual cause. This matters because the two have
+// OPPOSITE next actions: re-enable the construct, versus fix the payload. The
+// old text sent the developer to inspect a @filter that was never consulted.
+test("describeRefusal -- a known-@disabled automation is not reported as a possible @filter miss", () => {
+  const text = describeRefusal({
+    code: 9,
+    codeName: "FAILED_PRECONDITION",
+    message: "",
+    runId: "",
+    disabled: true,
+  });
+  assert.match(text, /@disabled/);
+  assert.match(text, /never consulted/);
+  // The whole point: it no longer offers the filter as an alternative cause.
+  assert.doesNotMatch(text, /either/);
+});
+
+// Absent means "not known to be disabled", NOT "enabled" -- an older language
+// server does not report the flag at all, so absence must keep the
+// both-possibilities wording rather than assert the filter rejected the event.
+test("describeRefusal -- an absent disabled flag keeps both possibilities", () => {
+  const text = describeRefusal({
+    code: 9,
+    codeName: "FAILED_PRECONDITION",
+    message: "",
+    runId: "",
+    disabled: false,
+  });
+  assert.match(text, /either/);
   assert.match(text, /@filter/);
 });
 

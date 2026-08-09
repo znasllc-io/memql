@@ -154,6 +154,11 @@ test("a refusal names the role required and is flagged as such", async () => {
   assert.match(outcome.line, /^ERROR: Roll back requires the owner cluster role/);
   // The engine's message is appended, not replaced -- nothing it said is lost.
   assert.match(outcome.line, /requires owner/);
+  // ...but only the engine's SENTENCE. The SDK's log-shaped prefix
+  // (`deploy console: <verb>: <CODE>: `) restates the verb this line already
+  // named and a code it has already explained in words (memql#3339).
+  assert.doesNotMatch(outcome.line, /deploy console:/);
+  assert.doesNotMatch(outcome.line, /PERMISSION_DENIED/);
 });
 
 test("a promote refusal names owner or admin, not owner alone", async () => {

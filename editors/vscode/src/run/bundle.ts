@@ -13,57 +13,33 @@
 // developer has not touched is, by definition, the file the cluster already
 // has.
 //
-// ON PARSING: this module scans for `use` lines to walk the IMPORT GRAPH. That
-// is not a construct parse and does not encroach on the language server's
-// ownership of .memql syntax -- it never looks inside a construct body, never
-// derives an argument, and never decides what is runnable. It cannot go
-// through the LSP because there is no import-graph request to ask, and adding
-// one is out of scope for B2. If the scan mis-reads a line the cost is bounded
-// and visible: a dirty dependency is missed (the run uses the deployed version
-// of it, exactly as if the file were saved-and-not-deployed) or a file is
-// included that need not have been (the sandbox compiles it and says so).
+// ON PARSING: THE LANGUAGE SERVER OWNS IT. This module walks the IMPORT GRAPH
+// by asking `memql/imports` (memql#3335) which files a buffer imports; it does
+// not look at .memql syntax at all.
 //
-// Deliberately free of `vscode` imports; the adapter supplies file access
-// through WorkspaceSources so this stays testable under bare `node --test`.
-
-// Matches a file-top import line and captures the dotted path:
+// It used to scan for `use <dotted>.{` with a line regex, on the reasoning
+// that an import-graph walk is not a construct parse -- it never reads a body,
+// never derives an argument, never decides what is runnable -- and that a
+// mis-read was bounded and visible either way. That was true and still not
+// good enough. A regex cannot know what the lexer knows: a `use` line inside a
+// /* ... */ block comment is not an import, and the scan followed it anyway.
+// And the failure it produces in the other direction is precisely the
+// invisible class this epic kept tripping over -- a missed dirty dependency
+// means the run executes the SAVED copy of a file the developer is looking at,
+// with nothing on screen to say so.
 //
-//     use cognition.concepts.{ participant, space }
-//     use common.traits.{ isActiveRecord }
-//     use cognition.shapes.{
-//       participantFull
-//     }
+// So the walk asks the compiler's own lexer, through the server, exactly as
+// the arg form asks it what a construct accepts. One parser.
 //
-// The `.{` is required, which is what makes this a scan for a known statement
-// rather than a guess: the brace list is the only import form the loader
-// accepts (the legacy `@use*` annotation family is retired and rejected at
-// parse time), so a `use` line without one is not an import this walk should
-// follow. Anchored to line start with only leading whitespace allowed, so the
-// word `use` inside a string or a comment body cannot match.
-const USE_IMPORT_RE = /^[ \t]*use[ \t]+([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\.\{/;
-
-/**
- * parseUseImports returns the dotted import paths a source file declares, in
- * declaration order, deduplicated.
- *
- * A dotted path names a FILE, not a construct: `cognition.shapes` is
- * `dsl/cognition/shapes.memql`. The brace list names constructs, and this walk
- * does not care which -- a file with any unsaved edit goes into the bundle
- * whole.
- */
-export function parseUseImports(source: string): string[] {
-  const out: string[] = [];
-  const seen = new Set<string>();
-  for (const line of source.split("\n")) {
-    const m = USE_IMPORT_RE.exec(line);
-    if (m === null) continue;
-    const dotted = m[1];
-    if (dotted === undefined || seen.has(dotted)) continue;
-    seen.add(dotted);
-    out.push(dotted);
-  }
-  return out;
-}
+// ASYNC, where the old scan was synchronous. Each hop is a request now. The
+// active buffer's text is still captured by the CALLER before any of this runs
+// (it is passed in, not read back), so the window that synchrony was
+// protecting -- the text changing between the decision to run and the bytes
+// that get sent -- stays closed for the file that matters most.
+//
+// Deliberately free of `vscode` imports; the adapter supplies file access AND
+// the import lookup through WorkspaceSources so this stays testable under bare
+// `node --test`.
 
 /** One file's current content, and whether the editor is holding unsaved edits for it. */
 export interface BundleSource {
@@ -85,6 +61,23 @@ export interface WorkspaceSources {
   resolveImport(dotted: string): string | undefined;
   /** Reads a file, or undefined when it does not exist / cannot be read. */
   read(path: string): BundleSource | undefined;
+  /**
+   * The dotted module paths `text` imports, from the LANGUAGE SERVER.
+   *
+   * `path` identifies the document; `text` is the content to analyse -- the
+   * caller's view of the file, which is the one the bundle is assembled from.
+   * They are passed together because the walk reaches files the editor has
+   * never opened (a CLEAN file is a legitimate route to a DIRTY one), so the
+   * server cannot be expected to hold a copy.
+   *
+   * Returning `[]` is the graceful degradation when the server does not
+   * advertise the request -- an older memql-lsp on the PATH is an ordinary
+   * situation, not an error. The bundle then carries the active file alone,
+   * which means a dirty dependency runs as its deployed version: the same
+   * bounded, pre-existing cost a mis-read line used to have, and never a
+   * second parser reintroduced as a fallback.
+   */
+  imports(path: string, text: string): Promise<string[]> | string[];
 }
 
 /**
@@ -126,11 +119,11 @@ export interface Bundle {
  * whether it is dirty -- a saved-but-not-deployed buffer still has to be
  * injected, or the run silently executes the deployed construct.
  */
-export function assembleBundle(
+export async function assembleBundle(
   activePath: string,
   activeText: string,
   ws: WorkspaceSources,
-): Bundle {
+): Promise<Bundle> {
   const dirtyDeps: Array<{ path: string; text: string }> = [];
 
   // Breadth-first over the import graph. `visited` is seeded with the active
@@ -138,7 +131,7 @@ export function assembleBundle(
   // cannot enqueue it a second time and duplicate every construct in it.
   const visited = new Set<string>([activePath]);
   const queue: string[] = [];
-  for (const dotted of parseUseImports(activeText)) {
+  for (const dotted of await ws.imports(activePath, activeText)) {
     const resolved = ws.resolveImport(dotted);
     if (resolved !== undefined) queue.push(resolved);
   }
@@ -153,7 +146,7 @@ export function assembleBundle(
     // Traversed whether or not this file is dirty: a clean file is a legitimate
     // route to a dirty one, and stopping at it would silently run the deployed
     // version of an edit the developer is looking at.
-    for (const dotted of parseUseImports(source.text)) {
+    for (const dotted of await ws.imports(path, source.text)) {
       const resolved = ws.resolveImport(dotted);
       if (resolved !== undefined && !visited.has(resolved)) queue.push(resolved);
     }
