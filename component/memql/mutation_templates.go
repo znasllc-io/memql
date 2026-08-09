@@ -78,6 +78,13 @@ type FunctionMutationTemplate struct {
 	// See fylo#63.
 	CreateOnlyFields []string
 
+	// NoUnsetFields carries the mutation's @noUnset("a", "b") annotation:
+	// payload fields a write may set but may never blank. On the read-merge
+	// path executeWrite drops a named field from the delta when the incoming
+	// value is empty and the stored one is not. Valid on both mutation kinds.
+	// See memql#3415.
+	NoUnsetFields []string
+
 	// ScrubPii carries the mutation's @scrubPii annotation: when set,
 	// the update executor enumerates every @pii-annotated field on the
 	// bound concept and zeroes it after the partial payload merges,
@@ -231,6 +238,7 @@ func (e *MemQLEngine) renderMutationTemplate(ctx context.Context, tmpl *Function
 		MergeFields:      tmpl.MergeFields,
 		AppendFields:     tmpl.AppendFields,
 		CreateOnlyFields: tmpl.CreateOnlyFields,
+		NoUnsetFields:    tmpl.NoUnsetFields,
 		ScrubPii:         tmpl.ScrubPii,
 	}, nil
 }
@@ -1388,6 +1396,40 @@ func mutationCreateOnlyFields(funcDef *languageParser.FunctionDef, kind ast.Muta
 	}
 	if len(fields) > 0 && kind == ast.MutationKindUpdate {
 		return nil, fmt.Errorf("@createOnly is only valid on insert mutations (an update always targets an existing row, so a create-only field could never be written)")
+	}
+	return fields, nil
+}
+
+// mutationNoUnsetFields extracts the @noUnset("a", "b") annotation from a
+// mutation definition into the field-name list executeWrite drops from the
+// delta when the incoming value is empty and the stored row holds a non-empty
+// one -- making those fields one-way (memql#3415).
+//
+// Unlike @createOnly this is valid on BOTH mutation kinds, and deliberately
+// so: the field it exists for (clusterSettings.bootstrappedAt) is written by an
+// insert-kind create AND by an update-kind admin edit, and either can carry an
+// empty value. Neither may un-set it.
+func mutationNoUnsetFields(funcDef *languageParser.FunctionDef) ([]string, error) {
+	var fields []string
+	for _, attr := range funcDef.Attributes {
+		if attr == nil || attr.Name != languageParser.AttrNoUnset {
+			continue
+		}
+		switch v := attr.Value.(type) {
+		case string:
+			if s := strings.TrimSpace(v); s != "" {
+				fields = append(fields, s)
+			}
+		case []string:
+			for _, raw := range v {
+				if s := strings.TrimSpace(raw); s != "" {
+					fields = append(fields, s)
+				}
+			}
+		}
+		if len(fields) == 0 {
+			return nil, fmt.Errorf(`@noUnset requires at least one field name, e.g. @noUnset("bootstrappedAt")`)
+		}
 	}
 	return fields, nil
 }

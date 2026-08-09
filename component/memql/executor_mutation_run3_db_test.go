@@ -177,10 +177,19 @@ func TestRun3_TouchSession_ReadMerge(t *testing.T) {
 
 // TestRun3_UpdateClusterSettings_PreservesInternalDomains covers #1686: a
 // partial update that omits internalDomains must NOT wipe it.
+//
+// The id is per-run unique and deliberately NOT the singleton "cluster"
+// (memql#3415). This test used to target that singleton, so running the
+// component/memql db suite against a real cluster's database appended two
+// blank-bootstrappedAt versions of the ONE row the identity service reads to
+// decide whether the cluster is bootstrapped -- disabling login for everyone
+// and re-opening the unauthenticated /setup ownership wizard. Nothing about
+// read-merge needs the singleton; a row of the same concept proves the same
+// property with no blast radius.
 func TestRun3_UpdateClusterSettings_PreservesInternalDomains(t *testing.T) {
 	eng, db, ctx := readMergeTestEngine(t)
 	const conceptName = "v1:identity:clusterSettings"
-	const settingsId = "cluster"
+	settingsId := "cs1686-" + uniqueSuffix("internaldomains")
 
 	// Seed the singleton with a non-empty internalDomains.
 	storedId := runMutation(t, ctx, eng, "createClusterSettings", map[string]any{

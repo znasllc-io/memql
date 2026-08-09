@@ -109,6 +109,26 @@ type IssueMagicLinkInput struct {
 // /setup wizard's 404-when-bootstrapped behavior.
 type CountUsersFunc func(ctx context.Context) (int, error)
 
+// ClusterClaimedFunc reports whether this cluster has ever been claimed --
+// wired to "an active user holding the cluster-OWNER role exists". It is the
+// SECOND, independent signal sealing the /setup ownership wizard, alongside
+// CountUsers (which the wiring layer backs with
+// clusterSettings.bootstrappedAt).
+//
+// Why two signals (memql#3415). bootstrappedAt is a single field on a single
+// append-only row; one stray write blanked it on a live cluster and /setup --
+// the wizard that MINTS the cluster owner -- started answering 200 to anyone.
+// A raw user-count was deliberately NOT restored as the second signal (a
+// stray, out-of-band user row must not be able to seal setup on a genuinely
+// fresh cluster). An OWNER user is the right cross-check: nothing but a
+// completed claim mints one, and the auto-bootstrap claim-email guard already
+// treats it as definitional proof of a claim (memql#1864).
+//
+// Errors are NOT swallowed: the caller cannot prove the cluster is unclaimed,
+// and the surface being gated mints the cluster owner, so "unknown" seals the
+// wizard.
+type ClusterClaimedFunc func(ctx context.Context) (bool, error)
+
 // UserExistsByEmailFunc returns true when a v1:identity:user row
 // exists for the given primary email. Drives the /login flow's
 // "is this a returning user or a new registration?" branch — the
@@ -151,6 +171,7 @@ type Server struct {
 	Logger                 *slog.Logger
 	IssueMagicLink         IssueMagicLinkFunc
 	CountUsers             CountUsersFunc
+	ClusterClaimed         ClusterClaimedFunc
 	UserExistsByEmail      UserExistsByEmailFunc
 	PersistClusterSettings PersistClusterSettingsFunc
 

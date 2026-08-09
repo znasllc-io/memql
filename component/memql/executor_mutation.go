@@ -283,6 +283,60 @@ func dropCreateOnlyFields(partial map[string]any, createOnlyFields []string) {
 	}
 }
 
+// dropNoUnsetFields removes each @noUnset-named field from the partial (delta)
+// payload when the incoming value is EMPTY and the stored value is not, so the
+// stored value survives the merge. Runs only on the read-merge path (an
+// existing prior row), BEFORE appendPayloadFields/mergePayloadFields.
+//
+// Why this is not covered by read-merge itself (memql#3415). Read-merge
+// inherits a stored value only for fields ABSENT from the delta. A mutation
+// body written as `bootstrappedAt: args.bootstrappedAt ?? ""` materialises an
+// omitted arg into an explicit empty string -- present in the delta, and so the
+// winner of the merge. A caller who never mentioned the field thereby blanked
+// it, un-bootstrapping a live cluster and re-opening the unauthenticated
+// ownership wizard. @noUnset makes set -> unset an inexpressible write.
+//
+// Only the set -> unset direction is refused. Setting a field that is currently
+// empty, and replacing one non-empty value with another, both still apply --
+// otherwise the legitimate later stamp (the magic-link verifier writing
+// bootstrappedAt) could never land. A nil/empty noUnsetFields (every
+// unannotated mutation) is a no-op.
+func dropNoUnsetFields(prior, partial map[string]any, noUnsetFields []string) {
+	for _, f := range noUnsetFields {
+		f = strings.TrimSpace(f)
+		if f == "" {
+			continue
+		}
+		incoming, present := partial[f]
+		if !present || !isEmptyPayloadValue(incoming) {
+			continue
+		}
+		if stored, ok := prior[f]; ok && !isEmptyPayloadValue(stored) {
+			delete(partial, f)
+		}
+	}
+}
+
+// isEmptyPayloadValue reports whether a payload value counts as "unset" for
+// @noUnset. Deliberately narrow: nil, an empty/whitespace string, and an empty
+// collection. A numeric or boolean zero is a legitimate value, not an unset --
+// treating false or 0 as "empty" would make @noUnset silently un-writable for
+// those types.
+func isEmptyPayloadValue(v any) bool {
+	switch t := v.(type) {
+	case nil:
+		return true
+	case string:
+		return strings.TrimSpace(t) == ""
+	case []any:
+		return len(t) == 0
+	case map[string]any:
+		return len(t) == 0
+	default:
+		return false
+	}
+}
+
 func mergePayloadFields(prior, partial map[string]any, mergeFields []string) {
 	mergeSet := make(map[string]struct{}, len(mergeFields))
 	for _, f := range mergeFields {
@@ -514,6 +568,13 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 			// instead of resetting it. Empty for every unannotated mutation,
 			// so this is a no-op on the whole existing tree.
 			dropCreateOnlyFields(payload, mutation.CreateOnlyFields)
+			// @noUnset fields are one-way (memql#3415): drop a named field
+			// from the delta when it arrived EMPTY over a stored non-empty
+			// value, so the stored value wins. Read-merge alone cannot do
+			// this -- it only inherits fields the delta omits, and a body
+			// written `f: args.f ?? ""` puts an explicit empty string in the
+			// delta. Empty for every unannotated mutation.
+			dropNoUnsetFields(priorPayload, payload, mutation.NoUnsetFields)
 			appendPayloadFields(priorPayload, payload, mutation.AppendFields)
 			mergePayloadFields(priorPayload, payload, mutation.MergeFields)
 			payload = priorPayload
