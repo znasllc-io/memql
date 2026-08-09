@@ -63,7 +63,7 @@
           "type": "string",
           "default": "",
           "scope": "machine",
-          "description": "Absolute path to the memql-lsp binary. When empty, the extension uses the bundled platform binary if present, otherwise 'memql-lsp' on PATH. For security this is a machine/user-scoped setting only -- it is deliberately not configurable per workspace, so an untrusted folder cannot redirect the extension to an arbitrary executable."
+          "description": "Absolute path to the memql-lsp binary. When empty, the extension uses the bundled platform binary if present, otherwise 'memql-lsp' on PATH. Read from your USER settings only: a value in workspace settings (.vscode/settings.json) is refused and a warning says so, because a workspace-supplied path would let an opened folder point the extension at any executable on your machine. When no binary resolves, only language features are lost -- the Clusters, Concepts and Runs views do not use the language server."
         },
         "memql.lsp.trace.server": {
           "type": "string",
