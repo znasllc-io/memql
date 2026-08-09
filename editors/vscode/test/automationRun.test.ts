@@ -275,15 +275,23 @@ test("run -- a REFUSAL is its own outcome, carrying the code", async () => {
   assert.equal(trace.status, "refused");
   assert.equal(trace.refusal?.code, 7);
   assert.equal(trace.refusal?.codeName, "PERMISSION_DENIED");
-  // The SDK's `run automation X: CODE: ` prefix is stripped: the panel already
-  // renders the name and the code in their own fields.
+  // The engine's sentence ALONE. The panel already renders the automation's
+  // name and the code in their own fields, so the SDK's log-shaped
+  // `run automation X: CODE: ` prefix would render both twice.
+  //
+  // Read straight off AutomationRunError.engineMessage since memql#3339 -- the
+  // helper that used to carve it back out of `err.message` is gone, along with
+  // its dependence on a string format neither side had agreed to keep.
   assert.equal(trace.refusal?.message, "requires owner or admin");
+  assert.doesNotMatch(trace.refusal?.message ?? "", /run automation/);
   assert.equal(trace.runId, "run-9");
 });
 
 test("run -- a refusal with no message leaves the message empty rather than literal", async () => {
   // AutomationRunError formats an absent message as "(no message)", which is
   // right for a thrown Error's text and wrong to paste into a UI sentence.
+  // The sentinel lives in `message` only; `engineMessage` is plain empty, so
+  // the extension no longer has to normalise it (memql#3339).
   const engine: AutomationRunEngine = {
     runAutomation: async () => {
       throw new AutomationRunError("autoJoinSI", 5, "", "");
@@ -293,6 +301,7 @@ test("run -- a refusal with no message leaves the message empty rather than lite
   const trace = new StepTraceModel();
   await h.runner.run(TARGET, {}, trace);
   assert.equal(trace.refusal?.message, "");
+  assert.doesNotMatch(trace.refusal?.message ?? "", /no message/);
 });
 
 test("run -- a transport failure is an error outcome, not a refusal", async () => {

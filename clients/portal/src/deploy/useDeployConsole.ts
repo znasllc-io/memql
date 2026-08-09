@@ -74,12 +74,25 @@ export interface DeployConsoleState {
   rollBack: (toDeploymentId: string) => void;
 }
 
-function describe(err: unknown): string {
+/**
+ * Renders a failed deploy-console call as the one line an operator reads.
+ *
+ * Exported for its own test: it is the portal's whole error presentation, and
+ * the shape it must NOT produce (the SDK's log-formatted `message`, pasted in
+ * after a code the line already carries) is invisible in a rendering test.
+ */
+export function describeDeployError(err: unknown): string {
   if (err instanceof DeployControlError) {
     // The code is the useful half: "PermissionDenied" tells an operator the
     // request was understood and refused, which is a different problem from a
     // node that does not host the service.
-    return `${err.code}: ${err.message}`;
+    //
+    // engineMessage, not `message`: the latter is shaped for a log line and
+    // already contains the code, so pasting it after `${err.code}: ` printed
+    // the code twice and the verb once more besides (memql#3339). codeName
+    // over the numeric code for the same reason it is the useful half at all
+    // -- "PERMISSION_DENIED" says what 7 means.
+    return err.engineMessage === "" ? err.codeName : `${err.codeName}: ${err.engineMessage}`;
   }
   return err instanceof Error ? err.message : String(err);
 }
@@ -124,7 +137,7 @@ export function useDeployConsole(env: DeployEnv): DeployConsoleState {
         if (live) setStatus(next);
       })
       .catch((err: unknown) => {
-        if (live) setError(describe(err));
+        if (live) setError(describeDeployError(err));
       })
       .finally(() => {
         if (live) setLoading(false);
@@ -152,7 +165,7 @@ export function useDeployConsole(env: DeployEnv): DeployConsoleState {
           if (result.ok) setActionMessage(result.message || "Done.");
           else setActionError(result.message || "The cluster refused the action.");
         })
-        .catch((err: unknown) => setActionError(describe(err)))
+        .catch((err: unknown) => setActionError(describeDeployError(err)))
         .finally(() => {
           setBusy(false);
           setEpoch((n) => n + 1);
