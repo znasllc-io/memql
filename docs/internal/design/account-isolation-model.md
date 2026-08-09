@@ -139,6 +139,52 @@ grant row; it is not a field on `account` and not a second kind of subject.
 This is also what keeps `primaryContactEmail` honest: it is `@pii` contact
 data, and it is never matched against a magic-link or session lookup.
 
+### 3.4 What an "account token" therefore is (added by memql#3322)
+
+§3.3 rules out an account having a login. memql#3322 nevertheless has to ship a
+credential surface — "issue, list, revoke tokens per account" is the operator
+job the whole page exists for — so the tension has to be resolved out loud
+rather than by quietly minting something that contradicts the paragraph above.
+
+**The resolution: an account token is issued TO A USER, ON BEHALF OF an
+account.** Its authenticated subject is the operator's `v1:identity:user`; the
+account is a **binding** carried on the credential row
+(`v1:identity:identity`, `identityType="account_token"`,
+`credentials.accountId`). Nothing authenticates as an account. §3.3 holds
+unamended.
+
+That leaves the sharper question, and §5.2 answers it: **what does such a
+credential authorize?** Two candidates, both rejected:
+
+- *Authenticate as the account.* Ruled out by §3.3.
+- *Authenticate as the operator, narrowed to the account.* Ruled out by §5.2.
+  The narrowing is not expressible — the resolved actor carries no tenancy
+  dimension, so an account predicate can only compare against a caller-supplied
+  arg. A credential named for a customer that in fact carries the operator's
+  entire authority is **worse than a plain PAT**, because its name understates
+  its blast radius, and the audit doc's standing rule is that an apparent gate
+  stops an auditor looking.
+
+So the credential **authorizes nothing today, and that is a checked property
+rather than an aspiration**: no verifier resolves the `mql_acct_` prefix, no
+interceptor admits it, and — the load-bearing absence — `dsl/identity` declares
+**no by-`keyHash` lookup** for the family. Every other credential family has
+one precisely because an interceptor resolves a presented bearer through it, so
+its absence is what keeps this one structurally inert. Both absences are pinned
+by tests in `component/identity/accounttoken`.
+
+What ships is custody: mint, show once, digest-only storage, list, revoke,
+audit both ends. What is deferred is authorization — and it is deferred onto
+**§6(b) specifically**. When `AccessContext` carries a resolved account set,
+`credentials.accountId` on each credential row is exactly the value
+`actor.accountIds` would be populated from, and §6(a)'s injected `account=`
+tier is what would make the binding enforceable. The row is written now so the
+data is there when the mechanism is; nothing is claimed for it in the meantime.
+
+The operator-facing statement of all this, including why an account token must
+not be handed to a customer, is
+`docs/public/operate/auth/account-tokens.md`.
+
 ---
 
 ## 4. What is actually enforced today (measured, not assumed)
@@ -398,7 +444,8 @@ Three deliberate omissions, so they read as decisions rather than gaps:
 ## 10. Related
 
 - memql#3321 — this note and the data layer
-- memql#3322 — the operator UI over it
+- memql#3322 — the operator UI over it, and §3.4's account-token resolution
+  (`docs/public/operate/auth/account-tokens.md`)
 - memql#3305 — the stale partition documentation §8 works around
 - memql#56 — partition removal
 - memql#2803 — the ruling that concept-declared row authz is worth building

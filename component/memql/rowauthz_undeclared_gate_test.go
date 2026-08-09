@@ -95,6 +95,25 @@ const undeclaredGrandfatherReason = "memql#3173 seed -- grandfathered as a popul
 // outcome this gate exists to prevent.
 const undeclared3178SelfScopedReason = "memql#3178 -- self-scoped on actor.userId; v1:identity:identity still declares no tier (epic Decision D)"
 
+// undeclared3322AccountTokenReason covers the two constructs memql#3322 added
+// for the account-token surface in the memQL Portal.
+//
+// Same shape as the memql#3178 pair above, and listed for the same single
+// reason: `v1:identity:identity` declares no `@rowAuthz` tier, so the engine
+// measures nothing about a read over it. Both queries carry their own
+// predicates and neither is an open read -- but a per-query predicate is
+// precisely the author-enforced thing the tier exists to stop depending on,
+// and the next query over this concept starts from zero again.
+//
+// They carry their OWN issue rather than the grandfather marker, because they
+// were added long after the seed. memql#3349 is that issue: it inventories
+// every read of the credential concept, including the ones that run BEFORE an
+// actor is resolved (magic-link verification, PAT/worker/service-account/node
+// token checks), which is why the tier could not simply be declared here --
+// enforceRowAuthzOnPlan gives no cluster-owner escape, so a wrong tier on this
+// concept fails auth cluster-wide rather than leaking.
+const undeclared3322AccountTokenReason = "memql#3349 -- account-token reads; v1:identity:identity still declares no tier"
+
 // undeclared3217SeedSweepReason covers usersForSeedSweep, added by memql#3217
 // so the startup per-user seed sweep reads a COMPLETE user set instead of
 // activeUsers' newest-50 page.
@@ -297,6 +316,8 @@ var undeclaredRowAuthzConstructs = map[string]struct {
 	"expiredActiveDelegations":           {"v1:identity:delegation", undeclaredGrandfatherReason},
 
 	// v1:identity:identity
+	"accountTokenById":           {"v1:identity:identity", undeclared3322AccountTokenReason},
+	"accountTokensForAccount":    {"v1:identity:identity", undeclared3322AccountTokenReason},
 	"badgeByKeyHash":             {"v1:identity:identity", undeclaredGrandfatherReason},
 	"badgesForSelf":              {"v1:identity:identity", undeclared3178SelfScopedReason},
 	"nodeTokenIdentities":        {"v1:identity:identity", undeclaredGrandfatherReason},

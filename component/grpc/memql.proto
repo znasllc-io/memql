@@ -308,6 +308,15 @@ message MemqlClientMessage {
     // the owner/admin/developer gate + the audit event are one
     // implementation, not two. See DeployControlMsg.
     DeployControlMsg deploy_control = 86;
+
+    // Account-token mint / revoke (memql#3322). The operator portal
+    // calls these DIRECTLY, for the reason CreateWorkerTokenMsg gives:
+    // the plaintext credential exists only inside
+    // CreateAccountTokenResult, so every extra hop is another place it
+    // could be logged. See CreateAccountTokenMsg for what an account
+    // token is -- and, more to the point, what it is not.
+    CreateAccountTokenMsg create_account_token = 87;
+    RevokeAccountTokenMsg revoke_account_token = 88;
   }
 }
 
@@ -452,6 +461,10 @@ message MemqlServerMessage {
     // gRPC status code verbatim, so a streamed caller sees the same code
     // a unary caller sees.
     DeployControlResult deploy_control_result = 123;
+    // Account-token mint / revoke replies (memql#3322). The mint reply
+    // is the ONLY place the plaintext credential ever exists.
+    CreateAccountTokenResult create_account_token_result = 124;
+    RevokeAccountTokenResult revoke_account_token_result = 125;
   }
 }
 
@@ -2079,6 +2092,92 @@ message RevokeWorkerTokenResult {
   bool success = 2;
   string error_code = 3;
   string error_message = 4;
+}
+
+// -----------------------------------------------------------------------------
+// Account tokens (memql#3322)
+// -----------------------------------------------------------------------------
+//
+// WHAT AN ACCOUNT TOKEN IS, before the fields: a credential ISSUED TO A
+// USER, ON BEHALF OF AN ACCOUNT. The authenticated subject is the
+// operator's v1:identity:user; the account is a BINDING carried on the
+// credential row (v1:identity:identity of
+// identityType="account_token"). Nothing authenticates AS an account.
+//
+// WHAT IT AUTHORIZES: nothing, today, deliberately. No verifier
+// resolves the mql_acct_ prefix and no interceptor admits it, because
+// docs/internal/design/account-isolation-model.md rules out both
+// alternatives -- section 3.3 (an account is never a subject) and
+// section 5.2 (the actor envelope has no tenancy dimension, so the
+// binding cannot NARROW the operator's authority, and a credential
+// named for a customer that in fact carries the operator's whole
+// authority is worse than a PAT). What ships is custody: mint, show
+// once, store only the digest, list, revoke, audit both ends. The
+// authorization half lands with section 6(b).
+//
+// The read side is ordinary DSL -- `query accountTokensForAccount` over
+// the accountTokenSummary shape, which projects no digest. Only the
+// mint and the revoke need envelopes, and only because the mint reply
+// is the single place the plaintext exists and the revoke is audited.
+
+// CreateAccountTokenMsg mints an account token for one of the caller's
+// accounts. The caller's ownership of `account_id` is checked
+// server-side by reading accountById AS THE CALLER, so
+// @rowAuthz(owner="ownerUserId") on v1:identity:account -- not a
+// hand-written comparison -- decides whether the account is theirs.
+message CreateAccountTokenMsg {
+  string request_id = 1;
+  // v1:identity:account.id the credential is issued on behalf of.
+  // Bare or canonical; the handler normalizes.
+  string account_id = 2;
+  // Operator-chosen label ("Acme nightly export"). Required: an
+  // unlabelled credential in a list of credentials cannot be revoked
+  // with any confidence about which one is going.
+  string label = 3;
+  // Optional ISO8601 expiry. Empty = no expiry stamped; revocation is
+  // the operator's control either way.
+  string expires_at = 4;
+}
+
+message CreateAccountTokenResult {
+  string request_id = 1;
+  bool success = 2;
+  // Plain credential -- "mql_acct_<43 base64url>". THE ONLY PLACE THIS
+  // VALUE EVER EXISTS. It is not persisted, not logged, and not
+  // recoverable; a caller that does not capture it here must revoke
+  // and mint again.
+  string plain_token = 3;
+  // Identity row id (v1:identity:identity), canonical form.
+  string identity_id = 4;
+  // Echo of the resolved account binding.
+  string account_id = 5;
+  // The credential's authenticated SUBJECT -- the operator user, never
+  // the account. Echoed so a client cannot render "signed in as Acme"
+  // without contradicting a field it was handed.
+  string subject_user_id = 6;
+  // Correlation id of the emitted audit event, matching the deploy
+  // console's ActionResult.audit_event_id convention: it is the audit
+  // row's correlationId, not its primary key.
+  string audit_event_id = 7;
+  string error_code = 8;
+  string error_message = 9;
+}
+
+// RevokeAccountTokenMsg flips active=false on the account_token
+// identity row. Immediate and audited. The caller must own the row --
+// checked by resolving it through accountTokenById as the caller,
+// whose filter carries userId==actor.userId.
+message RevokeAccountTokenMsg {
+  string request_id = 1;
+  string identity_id = 2;
+}
+
+message RevokeAccountTokenResult {
+  string request_id = 1;
+  bool success = 2;
+  string audit_event_id = 3;
+  string error_code = 4;
+  string error_message = 5;
 }
 
 // CreateBadgeMsg registers a shared-terminal operator badge

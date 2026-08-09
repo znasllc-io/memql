@@ -5,6 +5,7 @@ import {
   TABLE_ELEMENT,
 } from "@znasllc-io/memql-view-kit";
 
+import { AccountConsole } from "../accounts/AccountConsole";
 import { ViewElement } from "./ViewElement";
 import { Band, type ViewProps } from "./ViewLayout";
 
@@ -25,10 +26,21 @@ import { Band, type ViewProps } from "./ViewLayout";
 // returns; it does not filter, and filtering here would imply the isolation
 // lives in the browser.
 //
-// MANAGEMENT IS NOT HERE. Creating, editing, archiving and token issuance are
-// memql#3322's surface, built on top of this one. The seam is deliberate: this
-// module reads and lays out, and the actions land in the header's `actions`
-// slot (see ViewPage) without touching a band.
+// MANAGEMENT IS ONE COMPONENT, FROM ELSEWHERE. Creating, editing, archiving
+// and credential issuance are memql#3322's surface, and they live in
+// src/accounts/AccountConsole.tsx rather than here. That is not tidying: this
+// module's contract is "compose elements, render no rows of my own", which
+// portal_view_composition_test.go enforces, and a management form is neither
+// -- it is inputs, a confirmation and a one-time secret. Putting it here would
+// mean either bending the guard or hiding a form inside a module that promises
+// not to draw one.
+//
+// It lands as a final band rather than in the header's `actions` slot: the
+// surface is a form plus a credential list, which is too much for a header
+// strip, and a band keeps the page's reading-shape-roll grammar intact by
+// simply coming after it. What management renders is still composed -- the
+// credential list goes through the shared TABLE element, because a token list
+// is a row set and row sets are what the library is for.
 
 export function CustomersView({
   concept,
@@ -70,6 +82,10 @@ export function CustomersView({
           options={{ ...selection, sort: { field: "updatedAt", direction: "desc" } }}
           onSelect={onSelect}
         />
+      </Band>
+
+      <Band title="Manage" meta="creating, editing and credentials">
+        <AccountConsole concept={concept} rows={rows} selectedRowId={selectedRowId} />
       </Band>
     </>
   );

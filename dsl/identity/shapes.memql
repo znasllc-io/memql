@@ -253,6 +253,27 @@ shape identity patSummary {
   row.createdAt
 }
 
+/// Account-token (account_token identity) projection for the operator's per-account token list.
+/// Projects the credential's non-secret leaves BY PATH rather than projecting `credentials`
+/// wholesale, which is the whole difference between this shape and identityFull: a shape keys each
+/// projected path by its terminal segment, so credentials.accountId arrives as accountId and
+/// keyHash is simply never named. That is load-bearing rather than tidy -- memql#3064 recorded
+/// that workerTokensForUser leaked keyHash to any caller PRECISELY because identityFull projects
+/// the whole object, and the reads over this shape are wire-reachable by design (the operator's
+/// own portal calls them), so the projection is the boundary rather than the call origin.
+@row
+shape identity accountTokenSummary {
+  row.id
+  userId
+  label
+  active
+  credentials.accountId
+  credentials.mintedBy
+  credentials.expiresAt
+  lastUsedAt
+  row.createdAt
+}
+
 /// Lightweight projection: just the user's id and activePartitionId pointer. Phase 4 of the
 /// chat-architecture plan.
 @row

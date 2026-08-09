@@ -1216,6 +1216,13 @@ func (s *streamSession) badgeGate(envelope *memqlv1.MemqlClientMessage) badgeGat
 	switch envelope.GetPayload().(type) {
 	case *memqlv1.MemqlClientMessage_CreateWorkerToken,
 		*memqlv1.MemqlClientMessage_RevokeWorkerToken,
+		// An account token is a DURABLE credential minted under the
+		// operator's own subject (memql#3322) -- exactly the thing a
+		// walked-away kiosk must not be able to leave behind, and its
+		// revoke sits beside it so a borrowed grant cannot quietly
+		// dismantle the operator's issued set either.
+		*memqlv1.MemqlClientMessage_CreateAccountToken,
+		*memqlv1.MemqlClientMessage_RevokeAccountToken,
 		*memqlv1.MemqlClientMessage_CreateBadge,
 		*memqlv1.MemqlClientMessage_RevokeBadge,
 		*memqlv1.MemqlClientMessage_RevokeCurrentSession,
@@ -1628,6 +1635,13 @@ func (s *streamSession) handleMessage(envelope *memqlv1.MemqlClientMessage) erro
 		return s.handleCreateWorkerToken(envelope, payload.CreateWorkerToken)
 	case *memqlv1.MemqlClientMessage_RevokeWorkerToken:
 		return s.handleRevokeWorkerToken(envelope, payload.RevokeWorkerToken)
+	// Account-token mint / revoke (memql#3322). A credential issued to
+	// the calling USER on behalf of one of their accounts; the account
+	// is a binding, never a subject. See account_token_handlers.go.
+	case *memqlv1.MemqlClientMessage_CreateAccountToken:
+		return s.handleCreateAccountToken(envelope, payload.CreateAccountToken)
+	case *memqlv1.MemqlClientMessage_RevokeAccountToken:
+		return s.handleRevokeAccountToken(envelope, payload.RevokeAccountToken)
 	// Badge registration lifecycle (memql#2513); the grant exchange
 	// itself lives on the identity HTTP surface. See badge_handlers.go.
 	case *memqlv1.MemqlClientMessage_CreateBadge:

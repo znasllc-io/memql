@@ -97,6 +97,88 @@ mutate account archiveAccount {
   }
 }
 
+// account tokens -- the credential rows behind the two mutations below
+// ====================================================================
+//
+// An account_token identity is a credential issued TO A USER ON BEHALF
+// OF an account. userId is the SUBJECT; credentials.accountId is a
+// binding. Nothing authenticates as an account
+// (docs/internal/design/account-isolation-model.md 3.3, 3.4).
+//
+// Neither mutation is @serverOnly, and that is a decision rather than
+// an omission: component/grpc is on call_origin_conformance_test.go's
+// wire-path DENY list, so the one package that calls these CANNOT
+// stamp internal origin, and marking them @serverOnly would make them
+// permanently unreachable. The exposure is bounded differently instead:
+//
+//   create -- userId and mintedBy are stamped from actor.userId and
+//     are NOT args, so a wire caller can only ever mint a credential
+//     row subject to themselves. The accountId is caller-supplied and
+//     unchecked HERE (the handler checks it by reading accountById as
+//     the caller, where @rowAuthz decides); a raw call naming someone
+//     else's account produces an inert row in the CALLER's own list,
+//     because both reads gate on userId==actor.userId.
+//
+//   revoke -- a caller-supplied identityId with no actor check, which
+//     is exactly the shape revokePATIdentity and
+//     revokeWorkerTokenIdentity already have. Ownership is checked in
+//     the handler via accountTokenById. The residual is that a raw
+//     wire call can deactivate another operator's account_token row --
+//     a nuisance against a credential that authorizes nothing, not a
+//     disclosure. The real fix is a @rowAuthz(owner="userId")
+//     declaration on v1:identity:identity, which would put all three
+//     revokes behind the engine's write guard at once; that belongs to
+//     memql#3173 (declaring tiers on the remaining concepts) rather
+//     than to one credential family.
+//
+// keyHash is the SHA-256 of the plaintext. The plaintext never reaches
+// the engine -- there is no arg for it -- so it cannot be persisted
+// here even by mistake.
+
+/// Create an account_token identity: a credential issued to the CALLING user on behalf of
+/// args.accountId. The subject is the user; the account is a binding, never a second kind of
+/// subject. userId and mintedBy are stamped from actor.userId and are deliberately not args, so the
+/// mutation cannot mint a credential attributed to anyone but its caller. Stores only the SHA-256
+/// hex digest -- plaintext lives at the caller for one-time display.
+@actor
+mutate identity createAccountTokenIdentity {
+  args {
+    identityId  string!
+    accountId   string!
+    label       string!
+    keyHash     string!
+    expiresAt   string
+  }
+  insert {
+    id: args.identityId
+    userId: actor.userId
+    identityType: "account_token"
+    credentials: {
+        accountId: args.accountId,
+        keyHash: args.keyHash,
+        mintedBy: actor.userId,
+        expiresAt: args.expiresAt ?? ""
+      }
+    label: args.label
+    usableByAgents: false
+    active: true
+  }
+}
+
+/// Revoke (deactivate) an account_token identity row. Only `active` changes; identityType,
+/// credentials and label inherit from the persisted row. Ownership is checked by the caller
+/// (component/grpc/account_token_handlers.go reads accountTokenById as the CALLER first) -- see the
+/// block comment above for why the check cannot live here yet.
+mutate identity revokeAccountTokenIdentity {
+  args {
+    identityId  string!
+  }
+  update {
+    id: args.identityId
+    active: false
+  }
+}
+
 /// Approve an access request (status=approved, stamps reviewer + invitation).
 mutate accessRequest approveAccessRequest {
   args {

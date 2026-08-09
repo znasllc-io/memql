@@ -54,6 +54,59 @@ query account accountById {
   shape   accountFull
 }
 
+// account tokens -- credentials issued TO A USER on behalf of an account
+// ======================================================================
+//
+// An account_token identity row is NOT a second kind of subject. Its
+// authenticated subject is `userId` -- the operator who owns the bound
+// account -- and `credentials.accountId` is a binding carried for
+// attribution and grouped revocation. Nothing authenticates AS an
+// account (docs/internal/design/account-isolation-model.md 3.3, 3.4).
+//
+// Both reads below are therefore gated on `userId==actor.userId`, the
+// SUBJECT relation, and NOT on the account binding. That distinction is
+// the point: gating on accountId alone would be authorization by
+// honour system (5.2 -- the caller names the tenant whose rows they
+// would like), whereas userId==actor.userId is the same owned predicate
+// every other credential listing in this file uses. The accountId
+// conjunct is a NARROWING of an already-authorized set, not the gate.
+//
+// There is deliberately NO by-keyHash lookup. The worker-token,
+// node-token and badge families each have one because an interceptor
+// resolves a presented bearer through it; no surface admits an
+// account token, so a hot-path lookup would be the one piece of
+// machinery that turns an inert credential into a live one by
+// accident. The digest is a custody record, not an index.
+
+/// List the account tokens the CALLING user has issued for one account, newest first. Owned:
+/// userId==actor.userId is the gate (the credential's subject is the operator, never the account);
+/// the accountId conjunct narrows an already-authorized set rather than deciding access. Includes
+/// revoked rows so a revocation can be seen to have taken effect. Carries no keyHash -- the shape
+/// names the credential's non-secret leaves by path.
+@actor
+query identity accountTokensForAccount {
+  args {
+    accountId  string!
+  }
+  filter  identityType=="account_token" && userId==actor.userId && credentials.accountId==args.accountId
+  sort     "row.createdAt", "desc"
+  paginate 50
+  shape    accountTokenSummary
+}
+
+/// Fetch one account-token identity by id, gated to the calling user. Owned: userId==actor.userId,
+/// so an operator can never read (or, via the revoke handler that calls this, revoke) a credential
+/// another operator issued. Backs the pre-revoke ownership check.
+@unbounded("account token by id (guarded) gated to the issuing operator -- bounded to a single row")
+@actor
+query identity accountTokenById {
+  args {
+    identityId  string!
+  }
+  filter  when(args.identityId) { row.id==args.identityId } && identityType=="account_token" && userId==actor.userId
+  shape   accountTokenSummary
+}
+
 // ---- queries/v1/identity/accountEntitlement.memql ----
 
 // accountEntitlement - the account's task-concurrency cap
@@ -1195,11 +1248,17 @@ query accessRequest pendingAccessRequests {
 }
 
 /// Recent audit events, optionally filtered by category. Powers the admin audit-log view.
+/// Owner/admin only: the audit trail names who did what to whom across the whole cluster, so an
+/// ungated read hands every authenticated caller the cluster's security history. The gate was
+/// implicit while the only caller was the identity service's /admin/* routes, which enforce it at
+/// the route (component/identity/admin, requireAdmin). The portal reaches this query directly over
+/// the stream (memql#3324), where no route gate stands in front of it -- so the predicate has to be
+/// in the query, which is the only place both callers pass through.
 query auditEvent recentAuditEvents {
   args {
     category  string
   }
-  filter  when(args.category) { category==args.category }
+  filter  requiresOwnerOrAdmin && when(args.category) { category==args.category }
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
