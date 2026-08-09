@@ -238,6 +238,20 @@ func raBinaryFile(t *testing.T) string {
 	return p
 }
 
+// raCheckoutDir builds something that looks like install.cloneStack's --dest:
+// a directory with a .git inside it.
+func raCheckoutDir(t *testing.T) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "src")
+	if err := os.MkdirAll(filepath.Join(p, ".git"), 0o755); err != nil {
+		t.Fatalf("mkdir checkout: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(p, "go.mod"), []byte("module x\n"), 0o644); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+	return p
+}
+
 const raClusterList = "NAME    SERVERS   AGENTS   LOADBALANCER\nmemql   1/1       0/0      true\n"
 const raImageList = "memql-bff:dev\nmemql-agent:dev\npostgres:16\n"
 
@@ -251,6 +265,7 @@ func raKindArgs(t *testing.T, w raWorld) map[string][]string {
 	t.Helper()
 	return map[string][]string{
 		"binary":       {"--kind=binary", "--path=" + raBinaryFile(t)},
+		"checkout":     {"--kind=checkout", "--path=" + raCheckoutDir(t)},
 		"hostsEntries": {"--kind=hostsEntries", "--path=" + raHostsFile(t)},
 		"mkcertCA":     {"--kind=mkcertCA", "--caroot=" + w.caroot},
 		"stack":        {"--kind=stack", "--cluster=memql"},
@@ -416,6 +431,70 @@ func TestRemoveArtifactBinary(t *testing.T) {
 	}
 	if res.Removed {
 		t.Error("result.removed=true when there was nothing to remove")
+	}
+}
+
+// TestRemoveArtifactCheckout covers the one removal path that recurses. The
+// interesting cases are the refusals: a recursive delete driven by a path out
+// of a receipt is the shape of an uninstall that eats a home directory, so the
+// path has to earn the deletion by being a real checkout.
+func TestRemoveArtifactCheckout(t *testing.T) {
+	w := raNewWorld(t, raClusterList, raImageList)
+	dir := raCheckoutDir(t)
+
+	stdout, stderr, code := raRun(t, w.env, "--kind=checkout", "--path="+dir)
+	if code != 0 {
+		t.Fatalf("exit %d, want 0\nstdout: %s\nstderr: %s", code, stdout, stderr)
+	}
+	env, res := raParse(t, stdout)
+	if !env.Changed || !res.Removed || res.Kind != "checkout" {
+		t.Errorf("want changed+removed for kind=checkout, got: %s", stdout)
+	}
+	if _, err := os.Stat(dir); err == nil {
+		t.Error("the checkout is still on disk")
+	}
+
+	// Already gone is a no-op, like every other kind.
+	stdout, _, code = raRun(t, w.env, "--kind=checkout", "--path="+dir)
+	if code != 0 {
+		t.Fatalf("removing an absent checkout exited %d, want 0\nstdout: %s", code, stdout)
+	}
+	if env, res = raParse(t, stdout); env.Changed || res.Removed {
+		t.Errorf("changed/removed set with nothing to remove: %s", stdout)
+	}
+}
+
+func TestRemoveArtifactCheckoutRefusesNonCheckouts(t *testing.T) {
+	w := raNewWorld(t, raClusterList, raImageList)
+
+	// A directory with no .git is not the thing we cloned.
+	plain := filepath.Join(t.TempDir(), "notacheckout")
+	if err := os.MkdirAll(plain, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(plain, "important.txt"), []byte("mine\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stdout, _, code := raRun(t, w.env, "--kind=checkout", "--path="+plain)
+	if code != 3 {
+		t.Fatalf("exit %d, want 3 (refused: no .git)\nstdout: %s", code, stdout)
+	}
+	if _, err := os.Stat(filepath.Join(plain, "important.txt")); err != nil {
+		t.Error("the refusal deleted something anyway")
+	}
+
+	// $HOME itself, reached the long way round, must not resolve into a target.
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(home, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stdout, _, code = raRun(t, append(w.env, "HOME="+home),
+		"--kind=checkout", "--path="+filepath.Join(home, "sub", ".."))
+	if code != 3 {
+		t.Fatalf("exit %d, want 3 (refused: resolves to $HOME)\nstdout: %s", code, stdout)
 	}
 }
 
