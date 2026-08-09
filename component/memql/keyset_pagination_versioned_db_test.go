@@ -145,3 +145,80 @@ func TestKeysetPagination_ClusteredVersionsWalkFullSet(t *testing.T) {
 		"paging must reach every distinct id; pages were %v, reached %d of %d",
 		sizes, len(reached), distinct)
 }
+
+// TestKeysetPagination_CursorResumesFromScanPosition is the memql#3388
+// Defect B regression: the continuation cursor must resume from the SCAN
+// POSITION, not from the latest version of the last row returned.
+//
+// The engine mints the cursor from the last row of the PAGE, but every row in
+// that page has already been replaced by its latest version. When an id's
+// latest version is newer than rows of OTHER ids that the scan had not reached
+// yet, the cursor jumps past them and they become unreachable.
+//
+// Four rows, three ids, ascending:
+//
+//	X @ t=1 and t=100     -- written first, and again last
+//	Y @ t=2
+//	Z @ t=3
+//
+// Page 1 (size 1) returns X collapsed to its latest (t=100). Minting the cursor
+// from that row resumes at `createdAt > 100`, which matches nothing -- so Y and
+// Z are silently lost even though the scan had only consumed the row at t=1.
+func TestKeysetPagination_CursorResumesFromScanPosition(t *testing.T) {
+	eng, db, _ := readMergeTestEngine(t)
+	ctx := clusterOwnerCtx("u-keyset-scanpos")
+	sfx := uniqueSuffix("keyset-scanpos")
+	owner := "kb:" + sfx
+	base := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
+
+	idX := fmt.Sprintf("v1:cognition:utterance:%s-X", sfx)
+	idY := fmt.Sprintf("v1:cognition:utterance:%s-Y", sfx)
+	idZ := fmt.Sprintf("v1:cognition:utterance:%s-Z", sfx)
+
+	seedKeysetRow(t, ctx, db, idX, base.Add(1*time.Second), owner)
+	seedKeysetRow(t, ctx, db, idY, base.Add(2*time.Second), owner)
+	seedKeysetRow(t, ctx, db, idZ, base.Add(3*time.Second), owner)
+	// X again, far in the future -- this is the version the collapse returns.
+	seedKeysetRow(t, ctx, db, idX, base.Add(100*time.Second), owner)
+
+	got, sizes := walkPagesByCursorAsc(t, ctx, eng, owner, 1)
+	reached := dedupe(got)
+
+	require.ElementsMatch(t, []string{idX, idY, idZ}, reached,
+		"the walk must reach every id; a cursor minted from a collapsed row jumps past the scan position (pages %v)",
+		sizes)
+}
+
+// walkPagesByCursorAsc is walkPagesByCursor with an ASCENDING sort, which is
+// the direction the concept browser uses and the direction in which a
+// latest-version timestamp can overshoot the scan position.
+func walkPagesByCursorAsc(
+	t *testing.T,
+	ctx context.Context,
+	eng *MemQLEngine,
+	owner string,
+	pageSize int,
+) ([]string, []int) {
+	t.Helper()
+	q := fmt.Sprintf(`sort(paginate(concept==%s;createdBy==%q, %d), "createdAt", "asc")`,
+		keysetConcept, owner, pageSize)
+	var all []string
+	var sizes []int
+	cursor := ""
+	for page := 0; page < 200; page++ {
+		res, err := eng.Execute(ContextWithCursor(ctx, cursor), q)
+		require.NoError(t, err)
+		ids := pageIDs(t, res)
+		all = append(all, ids...)
+		sizes = append(sizes, len(ids))
+		next := ""
+		if m := res.GetMeta(); m != nil {
+			next = m.Cursor
+		}
+		if next == "" {
+			break
+		}
+		cursor = next
+	}
+	return all, sizes
+}
