@@ -92,6 +92,7 @@ var capabilityScriptAllowlist = map[string]string{
 	"install.hostsEntries":      "scripts/install/hosts-entries.sh",
 	"install.mkcert":            "scripts/install/mkcert-setup.sh",
 	"install.cloneStack":        "scripts/install/clone-stack.sh",
+	"install.seedBootstrap":     "scripts/install/seed-bootstrap.sh",
 	"install.verifyProviderKey": "scripts/install/verify-provider-key.sh",
 	"install.verifyFrontDoor":   "scripts/install/verify-frontdoor.sh",
 	"install.magicLink":         "scripts/install/magic-link.sh",

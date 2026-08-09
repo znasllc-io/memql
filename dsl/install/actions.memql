@@ -252,6 +252,51 @@ action bringUpLocalCluster {
   )
 }
 
+// Backend: scripts/install/seed-bootstrap.sh. The key travels as a FILE PATH,
+// never a value -- argv is world-readable, and a key on a command line is a key
+// leaked to every process on the machine.
+/// Seed the identity bootstrap values and the AI provider key into the cluster so it creates its
+/// own owner on first boot instead of waiting on a /setup visit nobody was told about.
+action seedClusterBootstrap {
+  args {
+    domain              string!
+    ownerEmail          string!
+    ownerFirstName      string!
+    ownerLastName       string!
+    registrationMode    string!
+    namespace           string
+    context             string
+    secret              string
+    orgName             string
+    registrationDomains string
+    internalDomains     string
+    internalDefaultRole string
+    notifyEmails        string
+    provider            string
+    providerKeyFile     string
+    dryRun              boolean
+  }
+  capability script(
+    script: "install.seedBootstrap",
+    domain: args.domain,
+    owner-email: args.ownerEmail,
+    owner-first-name: args.ownerFirstName,
+    owner-last-name: args.ownerLastName,
+    registration-mode: args.registrationMode,
+    namespace: args.namespace,
+    context: args.context,
+    secret: args.secret,
+    org-name: args.orgName,
+    registration-domains: args.registrationDomains,
+    internal-domains: args.internalDomains,
+    internal-default-role: args.internalDefaultRole,
+    notify-emails: args.notifyEmails,
+    provider: args.provider,
+    provider-key-file: args.providerKeyFile,
+    dry-run: args.dryRun
+  )
+}
+
 // =============================================================================
 //   Removal (the uninstall half)
 // =============================================================================

@@ -101,10 +101,20 @@
     },
 
     {
+      "id": "seedBootstrap",
+      "script": "install.seedBootstrap",
+      "description": "Write the identity bootstrap values and the AI provider key into the cluster, so it creates its own owner instead of waiting on a /setup visit nobody was told about.",
+      "dependsOn": ["clusterUp"],
+      "elevation": "none",
+      "containedBy": "clusterUp",
+      "verify": {"kind": "resultTrue", "field": "result.bootstrapComplete"}
+    },
+
+    {
       "id": "frontDoor",
       "script": "install.verifyFrontDoor",
       "description": "Probe DNS, TLS and gRPC reachability on every front-door hostname.",
-      "dependsOn": ["clusterUp"],
+      "dependsOn": ["seedBootstrap"],
       "readOnly": true,
       "elevation": "none",
       "verify": {"kind": "resultTrue", "field": "result.allPassed"}
