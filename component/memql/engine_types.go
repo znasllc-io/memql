@@ -543,6 +543,15 @@ type MutationNode struct {
 	// unannotated mutations. See fylo#63.
 	CreateOnlyFields []string
 
+	// NoUnsetFields names payload fields this mutation may SET but may never
+	// blank: on the read-merge path executeWrite drops a named field from the
+	// delta when the incoming value is empty and the stored one is not, so a
+	// one-way transition (unclaimed -> claimed, unbootstrapped -> bootstrapped)
+	// cannot be reversed by an ordinary write. Populated from a mutation's
+	// @noUnset annotation; always empty for raw insert()/update() query strings
+	// and unannotated mutations. See memql#3415.
+	NoUnsetFields []string
+
 	// ScrubPii is set from a mutation's @scrubPii annotation: when true,
 	// executeUpdate enumerates every @pii-annotated field on the bound
 	// concept (Concept.PIIFields()) and zeroes it after the partial

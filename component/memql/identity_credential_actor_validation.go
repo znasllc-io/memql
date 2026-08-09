@@ -27,12 +27,25 @@ const conceptIdentityIdentity = "v1:identity:identity"
 // yields direct impersonation of the victim at any shared terminal
 // (memql#2513). worker_token / node_token / voice_agent_token /
 // service_account share the shape.
+//
+// `passkey` is here too, and it is worth being precise about why, because
+// its stored material is PUBLIC (a COSE key, memql#3406) and none of the
+// "whoever can write one can forge a credential" reasoning about secrets
+// applies. What applies is the badge argument with the roles reversed: an
+// attacker who can insert {userId: victim, credentialId: mine, publicKey:
+// mine} has bound their OWN authenticator to the victim's account, and the
+// login ceremony will then verify a perfectly genuine signature and hand
+// back the victim's session. The forgery is in the binding, not in the
+// material. The legitimate writer is the register/finish handler, which
+// stamps the system credential actor after verifying an attestation it
+// challenged.
 var machineCredentialIdentityTypes = map[string]bool{
 	"badge":             true,
 	"worker_token":      true,
 	"node_token":        true,
 	"voice_agent_token": true,
 	"service_account":   true,
+	"passkey":           true,
 }
 
 // validateIdentityCredentialActorScope rejects a NON-system actor

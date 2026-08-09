@@ -728,7 +728,13 @@ mutate authSession createAuthSession {
 //                                                   via mutationStampBootstrapped.
 //
 
-/// Persist (or refresh) the singleton cluster-settings row.
+/// Persist (or refresh) the singleton cluster-settings row. `bootstrappedAt` is @noUnset: this body
+/// writes `args.bootstrappedAt ?? ""`, so a caller who simply omits it puts an EXPLICIT empty string
+/// in the delta -- which read-merge cannot protect against, because read-merge only inherits fields a
+/// delta OMITS. That is how a re-run of this mutation un-bootstrapped a live cluster and re-opened the
+/// unauthenticated /setup ownership wizard (memql#3415). @noUnset drops the empty value when the
+/// stored row already carries a stamp; setting it on a still-unclaimed row is unaffected.
+@noUnset("bootstrappedAt")
 mutate clusterSettings createClusterSettings {
   args {
     id                         string!
@@ -1079,6 +1085,116 @@ mutate user createUserOnFirstLogin {
     active: true
     args.internal
     legalAcceptance: []
+  }
+}
+
+// deviceCode -- the RFC 8628 device authorization grant (memql#3410)
+// ==================================================================
+//
+// Five writes, one per transition of a deliberately small state
+// machine: create (pending), touchPoll (a clock tick, no transition),
+// approve, deny, redeem. The status field is stamped by the mutation
+// rather than accepted from args, so there is no call that can put a
+// row into an arbitrary state -- `approveDeviceCode` is the only way to
+// reach `approved` and `redeemDeviceCode` is the only way to leave it.
+//
+// approveDeviceCode / denyDeviceCode stamp approvedByUserId from
+// actor.userId and never accept it, so the recorded approver is the
+// signed-in human the verification page authenticated, not a value the
+// form could carry. The handler re-checks the row's status before
+// calling either, which is what keeps a second approval from silently
+// overwriting the first approver's id.
+
+/// Persist a device-authorization row at POST /device/code time, born `pending`. Both credentials
+/// arrive pre-hashed; neither plaintext is ever passed to the engine.
+mutate deviceCode createDeviceCode {
+  args {
+    deviceCodeId         string!
+    clientId             string!
+    deviceCodeHash       string!
+    userCodeHash         string!
+    expiresAt            string!
+    intervalSeconds      int!
+    scope                string
+    codeChallenge        string
+    codeChallengeMethod  string
+    sourceIP             string
+    userAgent            string
+  }
+  insert {
+    accept { clientId, deviceCodeHash, userCodeHash, expiresAt, intervalSeconds, scope, codeChallenge, codeChallengeMethod }
+    stamp {
+      id: args.deviceCodeId
+      status: "pending"
+      sourceIP: args.sourceIP ?? ""
+      userAgent: args.userAgent ?? ""
+    }
+  }
+}
+
+/// Stamp the poll clock. Called on EVERY /oauth/token device-grant poll, accepted or throttled, so
+/// the next poll's slow_down decision reads a value written by whichever replica served the last
+/// one. intervalSeconds is re-stamped because a too-fast poll raises it.
+mutate deviceCode touchDeviceCodePoll {
+  args {
+    deviceCodeId     string!
+    lastPolledAt     string!
+    intervalSeconds  int!
+  }
+  update {
+    accept { lastPolledAt, intervalSeconds }
+    stamp {
+      id: args.deviceCodeId
+    }
+  }
+}
+
+/// Approve a pending device authorization. The approver is stamped from actor.userId -- the form
+/// cannot name someone else.
+@actor
+mutate deviceCode approveDeviceCode {
+  args {
+    deviceCodeId  string!
+  }
+  update {
+    stamp {
+      id: args.deviceCodeId
+      status: "approved"
+      approvedByUserId: actor.userId
+      approvedAt: now
+    }
+  }
+}
+
+/// Deny a pending device authorization. Terminal: polling returns access_denied from here on.
+@actor
+mutate deviceCode denyDeviceCode {
+  args {
+    deviceCodeId  string!
+  }
+  update {
+    stamp {
+      id: args.deviceCodeId
+      status: "denied"
+      approvedByUserId: actor.userId
+      deniedAt: now
+    }
+  }
+}
+
+/// Mark an approved device authorization redeemed. Single-use: the handler stamps this BEFORE
+/// minting tokens, so a concurrent second poll finds status=redeemed and is refused.
+mutate deviceCode redeemDeviceCode {
+  args {
+    deviceCodeId  string!
+    redeemedAt    string!
+  }
+  update {
+    accept { redeemedAt }
+    stamp {
+      id: args.deviceCodeId
+      status: "redeemed"
+    }
   }
 }
 
@@ -1743,6 +1859,64 @@ mutate identity revokeBadgeIdentity {
   }
 }
 
+// ---- mutations/v1/identity/createPasskeyIdentity.memql ----
+
+// createPasskeyIdentity
+// =====================
+//
+// Creates a v1:identity:identity row of identityType="passkey" -- an
+// enrolled WebAuthn discoverable credential (memql#3406). What lands
+// here is the PUBLIC half of a keypair whose private half never left the
+// authenticator, so unlike every keyHash sibling in this file there is
+// no plaintext being deliberately withheld: there is no secret to
+// withhold.
+//
+// Uniqueness of credentials.credentialId is the invariant the login
+// ceremony depends on (memql#3407 resolves a discoverable assertion
+// through that field alone), and it is enforced by the CALLER: the
+// register/finish handler runs passkeyByCredentialId first and refuses a
+// duplicate. Stated here because a raw invocation of this mutation
+// bypasses that check -- the write is gated to a system actor by the
+// memql#2513 credential-actor guard, which is what keeps the only
+// reachable path the one that checks.
+
+/// Register a passkey identity (WebAuthn discoverable credential). Stores the credential's PUBLIC
+/// COSE key -- there is no secret half to withhold.
+mutate identity createPasskeyIdentity {
+  args {
+    identityId      string!
+    userId          string!
+    label           string!
+    credentialId    string!
+    publicKey       string!
+    signCount       int
+    aaguid          string
+    transports      []string
+    backupEligible  bool
+    backupState     bool
+    registeredBy    string!
+  }
+  insert {
+    id: args.identityId
+    args.userId
+    identityType: "passkey"
+    credentials: {
+        credentialId: args.credentialId,
+        publicKey: args.publicKey,
+        signCount: args.signCount,
+        aaguid: args.aaguid,
+        transports: args.transports,
+        backupEligible: args.backupEligible,
+        backupState: args.backupState,
+        registeredBy: args.registeredBy,
+        lastUsedAt: ""
+      }
+    args.label
+    usableByAgents: false
+    active: true
+  }
+}
+
 // ---- mutations/v1/identity/touchBadgeLastUsed.memql ----
 
 // touchBadgeLastUsed
@@ -1913,7 +2087,11 @@ mutate user setUserActiveSpace {
 /// (update()): only the fields the caller actually passes change; every omitted field --
 /// internalDomains, brand*, TTLs, bootstrap*, etc. -- inherits from the persisted row instead of
 /// being wiped to its empty default (memql#1686). registrationMode + internalDefaultRole stay
-/// @required because the admin form always submits them.
+/// @required because the admin form always submits them. `bootstrappedAt` is additionally @noUnset:
+/// the verifier's stamp (empty -> set) still lands, but no admin edit can take a stamped cluster back
+/// to un-bootstrapped by passing it explicitly empty -- un-bootstrapping is not an ordinary write
+/// (memql#3415).
+@noUnset("bootstrappedAt")
 mutate clusterSettings updateClusterSettings {
   args {
     id                         string!

@@ -17,6 +17,7 @@ import (
 	"github.com/znasllc-io/memql/component/identity"
 	"github.com/znasllc-io/memql/component/identity/abuse"
 	"github.com/znasllc-io/memql/component/identity/admin"
+	"github.com/znasllc-io/memql/component/identity/devicecode"
 	"github.com/znasllc-io/memql/component/identity/emailsender"
 	httpidentity "github.com/znasllc-io/memql/component/identity/http"
 	"github.com/znasllc-io/memql/component/identity/magiclink"
@@ -166,9 +167,15 @@ func (a *App) integrationsIdentity() {
 		Threshold: threshold,
 	}
 
+	// RFC 8628 device authorization grant (memql#3410). One store backs
+	// all three surfaces: POST /device/code + the device_code grant on
+	// the HTTP server, and the verification page on the web server.
+	deviceCodeStore := &devicecode.Store{Engine: a.engine, Logger: a.Logger}
+
 	httpSrv := &httpidentity.Server{
 		Cfg:               cfg,
 		Store:             store,
+		DeviceCodes:       deviceCodeStore,
 		Issuer:            svc.Issuer(),
 		MLIssuer:          mlIssuer,
 		MLVerifier:        mlVerifier,
@@ -226,17 +233,29 @@ func (a *App) integrationsIdentity() {
 			AdminSession:        in.AdminSession,
 		})
 	}
-	// Wizard's "404 once bootstrapped" check. Same signal as the
-	// login gate — we use clusterSettings.bootstrappedAt rather than
-	// a user-count so out-of-band user rows can't trip it. The
-	// CountUsers shape is preserved (returns 1 when bootstrapped,
-	// 0 when not) so the web package's API stays stable.
+	// Wizard's "404 once bootstrapped" check, signal 1 of 2. We use
+	// clusterSettings.bootstrappedAt rather than a user-count so
+	// out-of-band user rows can't trip it. The CountUsers shape is
+	// preserved (returns 1 when bootstrapped, 0 when not) so the web
+	// package's API stays stable.
 	webSrv.CountUsers = func(ctx context.Context) (int, error) {
 		if store.IsClusterBootstrapped(ctx) {
 			return 1, nil
 		}
 		return 0, nil
 	}
+	// Signal 2 of 2 (memql#3415). bootstrappedAt is ONE field on ONE
+	// append-only row; a stray write blanked it on a live cluster and
+	// /setup -- the wizard that mints the cluster owner -- answered 200
+	// to anyone while hundreds of users were locked out of /login. The
+	// original reasoning above still holds (a stray USER row must not
+	// seal setup on a fresh cluster), so the cross-check restored here
+	// is deliberately NOT a user-count: HasOwnerUser asks whether an
+	// active user holds the cluster-OWNER role, which nothing but a
+	// completed claim produces. It is the same signal the auto-bootstrap
+	// claim-email guard already treats as definitional proof of a claim
+	// (memql#1864). Errors propagate; the web layer seals on "unknown".
+	webSrv.ClusterClaimed = store.HasOwnerUser
 	// "Does this email already belong to a cluster user?" — drives the
 	// /login flow's existing-user-vs-registration branch. Bound to the
 	// Store's LookupUserByEmail; absent rows are returned as
@@ -344,6 +363,23 @@ func (a *App) integrationsIdentity() {
 		Adapter: patStore,
 		Issuer:  svc.Issuer(),
 		Audit:   auditLogger,
+	})
+
+	// The RFC 8628 verification page. Its ClientName hook resolves
+	// through the same static-plus-DCR path /authorize and /oauth/token
+	// use, so the approval screen names a dynamically-registered client
+	// as readably as a statically-configured one -- and falls back to
+	// the raw client_id, which is what the session binds to anyway.
+	webSrv.SetDeviceFlow(&identityweb.DeviceFlow{
+		Adapter: deviceCodeStore,
+		Issuer:  svc.Issuer(),
+		Audit:   auditLogger,
+		ClientName: func(ctx context.Context, clientId string) string {
+			if c := identity.ResolveClient(ctx, cfg, store, clientId); c != nil {
+				return c.Name
+			}
+			return ""
+		},
 	})
 
 	svc.SetWebMounter(webSrv)

@@ -22,10 +22,12 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/a-h/templ"
 	"github.com/znasllc-io/memql/component/identity"
+	"github.com/znasllc-io/memql/component/identity/abuse"
 	webtempl "github.com/znasllc-io/memql/component/identity/web/templ"
 )
 
@@ -109,6 +111,26 @@ type IssueMagicLinkInput struct {
 // /setup wizard's 404-when-bootstrapped behavior.
 type CountUsersFunc func(ctx context.Context) (int, error)
 
+// ClusterClaimedFunc reports whether this cluster has ever been claimed --
+// wired to "an active user holding the cluster-OWNER role exists". It is the
+// SECOND, independent signal sealing the /setup ownership wizard, alongside
+// CountUsers (which the wiring layer backs with
+// clusterSettings.bootstrappedAt).
+//
+// Why two signals (memql#3415). bootstrappedAt is a single field on a single
+// append-only row; one stray write blanked it on a live cluster and /setup --
+// the wizard that MINTS the cluster owner -- started answering 200 to anyone.
+// A raw user-count was deliberately NOT restored as the second signal (a
+// stray, out-of-band user row must not be able to seal setup on a genuinely
+// fresh cluster). An OWNER user is the right cross-check: nothing but a
+// completed claim mints one, and the auto-bootstrap claim-email guard already
+// treats it as definitional proof of a claim (memql#1864).
+//
+// Errors are NOT swallowed: the caller cannot prove the cluster is unclaimed,
+// and the surface being gated mints the cluster owner, so "unknown" seals the
+// wizard.
+type ClusterClaimedFunc func(ctx context.Context) (bool, error)
+
 // UserExistsByEmailFunc returns true when a v1:identity:user row
 // exists for the given primary email. Drives the /login flow's
 // "is this a returning user or a new registration?" branch — the
@@ -151,6 +173,7 @@ type Server struct {
 	Logger                 *slog.Logger
 	IssueMagicLink         IssueMagicLinkFunc
 	CountUsers             CountUsersFunc
+	ClusterClaimed         ClusterClaimedFunc
 	UserExistsByEmail      UserExistsByEmailFunc
 	PersistClusterSettings PersistClusterSettingsFunc
 
@@ -165,6 +188,17 @@ type Server struct {
 	// integration layer once the engine is up. Nil leaves the routes
 	// unmounted so binaries without the engine don't 500 on the page.
 	meTokens *MeTokens
+
+	// deviceFlow backs GET/POST /device, the RFC 8628 verification page
+	// (memql#3410). Wired by the integration layer once the engine is
+	// up; nil leaves the routes unmounted, same as meTokens.
+	deviceFlow *DeviceFlow
+
+	// deviceVerifyLimiterVal is the per-IP limiter on /device, lazily
+	// built on first use. See verifyLimiter in device.go for why the
+	// page needs one at all.
+	deviceVerifyLimiterVal  *abuse.IPRateLimiter
+	deviceVerifyLimiterOnce sync.Once
 
 	// SSO auth-code minter -- when wired, signed-in users hitting
 	// /login?return_to=<registered-client> get a fresh auth code
@@ -325,6 +359,15 @@ func (s *Server) Mount(mux *http.ServeMux) {
 		mux.HandleFunc("GET /me/tokens", wrap(s.handleMeTokensGet))
 		mux.HandleFunc("POST /me/tokens", wrap(s.handleMeTokensPost))
 		mux.HandleFunc("POST /me/tokens/revoke", wrap(s.handleMeTokensRevoke))
+	}
+
+	// RFC 8628 verification page (memql#3410). Auth-gated server-side
+	// (requireUserForDevice); a signed-out visitor goes through /login
+	// and comes back here with their code. Mounts only when the device
+	// flow is wired.
+	if s.deviceFlow != nil && s.deviceFlow.Adapter != nil {
+		mux.HandleFunc("GET /device", wrap(s.handleDeviceGet))
+		mux.HandleFunc("POST /device", wrap(s.handleDevicePost))
 	}
 
 	if s.Logger != nil {

@@ -146,6 +146,14 @@ var credentialReadInventory = map[string]struct {
 	"nodeTokenIdentityByBinding": {classPreActor,
 		"Node-token verification on NodeService.Stream (@serverOnly). identity/store.go; " +
 			"authenticates a node binary by (nodeType, nodeId) before it has any identity."},
+	"passkeyByCredentialId": {classPreActor,
+		"WebAuthn credential-id lookup (memql#3406). identity/webauthn/store.go. The STRONGEST " +
+			"pre-actor case on this list: at register/finish an actor exists but is the wrong " +
+			"thing to scope by (the duplicate check must see EVERY row, cluster-wide, or a " +
+			"credential id already bound to another user reads as unused and gets shadowed), " +
+			"and at login (memql#3407) a discoverable assertion carries no user hint at all, so " +
+			"there is no actor in existence -- the credential id is the only thing in the " +
+			"message that names a row."},
 
 	// --- SELF-SCOPED: already narrowed, blocked only by the concept. ---
 	"patIdentitiesForSelf": {classSelfScoped,
@@ -153,6 +161,11 @@ var credentialReadInventory = map[string]struct {
 			"userId==args.userId construct it replaced."},
 	"badgesForSelf": {classSelfScoped,
 		"filter userId==actor.userId (memql#3178). Same shape as patIdentitiesForSelf."},
+	"passkeysForSelf": {classSelfScoped,
+		"filter identityIsPasskey && userId==actor.userId (memql#3406). Same shape as " +
+			"badgesForSelf. Backs both the passkey management list and the excludeCredentials " +
+			"set at register/begin, so it must return the CALLER's authenticators and only " +
+			"those -- a wider set would hand one user another's credential ids."},
 	"accountTokensForAccount": {classSelfScoped,
 		"filter identityType==\"account_token\" && userId==actor.userId && " +
 			"credentials.accountId==args.accountId (memql#3322). An account token's SUBJECT is " +
@@ -297,6 +310,7 @@ func TestCredentialPreActorReadsAreNamed(t *testing.T) {
 	want := []string{
 		"badgeByKeyHash",
 		"nodeTokenIdentityByBinding",
+		"passkeyByCredentialId",
 		"patIdentityByKeyHash",
 		"workerTokenByKeyHash",
 	}

@@ -894,6 +894,29 @@ const (
 	// could never be written -- rejected at load time).
 	AttrCreateOnly = "createOnly"
 
+	// @noUnset("a", "b") declares the named payload fields ONE-WAY: a
+	// write may set them, and may change one non-empty value to another,
+	// but may never take a stored non-empty value back to empty. On the
+	// read-merge path (memql#1709) a named field whose incoming value is
+	// empty is DROPPED from the delta when the stored row holds a
+	// non-empty one, so the stored value survives.
+	//
+	// The gap it closes (memql#3415). Read-merge inherits stored values
+	// for fields ABSENT from a delta; it cannot help when the delta
+	// CARRIES the field. A mutation authored as
+	// `bootstrappedAt: args.bootstrappedAt ?? ""` materialises an omitted
+	// arg into an explicit empty string, which is present in the delta and
+	// therefore wins the merge. That is how a caller who never mentioned
+	// bootstrappedAt un-bootstrapped a live cluster and re-opened the
+	// unauthenticated ownership wizard.
+	//
+	// Distinct from @createOnly, which forbids ANY post-create write to
+	// the field: @noUnset forbids only the set -> unset direction, so a
+	// legitimately-later stamp (the magic-link verifier's bootstrappedAt)
+	// still lands. Valid on insert- AND update-kind mutations; a create
+	// with no prior row is unaffected either way.
+	AttrNoUnset = "noUnset"
+
 	// Auditing
 	AttrAudit = "audit"
 

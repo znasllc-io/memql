@@ -1396,7 +1396,28 @@ type ClusterSettingsRow struct {
 // have an upsert primitive, the wizard handler treats this as
 // fire-and-forget — second submission inserts a new row, the engine's
 // time-series semantics keep the latest version effective.
+//
+// It will not un-bootstrap the cluster (memql#3415). ClusterSettingsRow's
+// zero value carries BootstrappedAt == "", and every caller here builds the
+// row from scratch, so "forgot to carry the stamp forward" is the natural
+// mistake at this seam — and its consequence is that /login stops working for
+// everyone and /setup, the wizard that mints the cluster owner, starts
+// answering 200. So the stored stamp is read first and carried forward when
+// the caller supplied none, and a read failure REFUSES the write rather than
+// guessing: an unprovable "this is not a blanking write" is not good enough
+// for this row. The engine-side @noUnset("bootstrappedAt") annotation on the
+// mutation is the same invariant enforced one layer down, for callers that
+// never come through here.
 func (s *Store) PersistClusterSettings(ctx context.Context, in ClusterSettingsRow) error {
+	if strings.TrimSpace(in.BootstrappedAt) == "" {
+		existing, err := s.ReadClusterSettings(ctx)
+		if err != nil {
+			return fmt.Errorf("identity.store: persist cluster settings: refusing to write without knowing the current bootstrap state: %w", err)
+		}
+		if existing != nil && strings.TrimSpace(existing.BootstrappedAt) != "" {
+			in.BootstrappedAt = existing.BootstrappedAt
+		}
+	}
 	var b strings.Builder
 	b.WriteString(`mutation createClusterSettings(`)
 	writeKVString(&b, "id", "cluster", true)

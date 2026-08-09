@@ -33,7 +33,7 @@ var ByReceiver = map[string][]string{
 	},
 	"Mutation": {
 		"description", "enabled", "disabled", "actor", "public", "serverOnly",
-		"mergeFields", "appendFields", "createOnly", "scrubPii", "mcp",
+		"mergeFields", "appendFields", "createOnly", "noUnset", "scrubPii", "mcp",
 	},
 	"Logic": {
 		"description", "enabled", "disabled", "eventField", "actor",
@@ -95,6 +95,7 @@ var Docs = map[string]string{
 	"mergeFields":  "On an update mutation: deep-merge the named object-typed payload fields into the stored object instead of replacing them wholesale, so sibling keys survive a single-key write. Format: @mergeFields(\"preferences\").",
 	"appendFields": "On an update mutation: append the named array-typed payload fields' elements to the stored array instead of replacing it wholesale, so a single-writer mutation can accumulate list items (e.g. attach one id). Format: @appendFields(\"attachmentIds\").",
 	"createOnly":   "On an insert (create-or-upsert) mutation: write the named payload fields ONLY when creating the row. If the target id already exists, the fields are dropped from the delta before the engine read-merge, so the stored value is preserved rather than clobbered -- making a deterministic-id re-stage idempotent for lifecycle fields another writer owns after creation (e.g. stageOutboundRequest seeds status but must not reset a row the outbound worker moved to sent). The inverse of @mergeFields/@appendFields: only valid on insert-kind mutations. Format: @createOnly(\"status\", \"attempts\"). See fylo#63.",
+	"noUnset":      "On any mutation: declare the named payload fields ONE-WAY -- a write may set them or change one non-empty value to another, but may never take a stored non-empty value back to empty. On the read-merge path a named field arriving empty is dropped from the delta when the stored row holds a non-empty value. Closes the gap read-merge cannot (it only inherits fields ABSENT from a delta, so a body writing `f: args.f ?? \"\"` blanks the stored value with an explicit empty string). Distinct from @createOnly, which forbids any post-create write; @noUnset forbids only set -> unset, so a legitimately-later stamp still lands. Format: @noUnset(\"bootstrappedAt\"). See memql#3415.",
 	"scrubPii":     "On an update mutation (the hard-delete / data-deletion path): after the partial payload merges, zero EVERY field the bound concept marks @pii. The field set is derived from the schema, so a newly-annotated PII field is scrubbed automatically with no change to the mutation. Bare flag, no arguments. See memql#1711.",
 	// Automation.
 	"trigger":  "Event trigger for automations. Format: @trigger(event=\"graph.node.created.*.v1:ns:concept\") or @trigger(schedule=\"0 0 * * * *\").",

@@ -27,13 +27,19 @@ require (
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.8.0 // indirect
 	github.com/anthropics/anthropic-sdk-go v1.61.0 // indirect
 	github.com/dgraph-io/ristretto v0.2.0 // indirect
+	github.com/fxamacker/cbor/v2 v2.9.2 // indirect
+	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
+	github.com/go-webauthn/webauthn v0.17.4 // indirect
+	github.com/go-webauthn/x v0.2.6 // indirect
 	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
+	github.com/google/go-tpm v0.9.8 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728 // indirect
 	github.com/livekit/media-sdk v0.0.0-20260605212526-4c11a51d3c97 // indirect
 	github.com/livekit/protocol v1.49.0 // indirect
 	github.com/livekit/server-sdk-go/v2 v2.18.1 // indirect
 	github.com/oschwald/geoip2-golang v1.13.0 // indirect
+	github.com/philhofer/fwd v1.2.0 // indirect
 	github.com/pion/webrtc/v4 v4.2.18 // indirect
 	github.com/prometheus/client_golang v1.24.1 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
@@ -41,6 +47,8 @@ require (
 	github.com/robfig/cron/v3 v3.0.1 // indirect
 	github.com/santhosh-tekuri/jsonschema/v5 v5.3.1 // indirect
 	github.com/sashabaranov/go-openai v1.42.0 // indirect
+	github.com/tinylib/msgp v1.6.4 // indirect
+	github.com/x448/float16 v0.8.4 // indirect
 	github.com/zeozeozeo/gomplerate v0.0.0-20250404113140-0fbb236df825 // indirect
 	github.com/znasllc-io/memql/component/node/gen v0.0.0 // indirect
 	golang.org/x/crypto v0.54.0 // indirect

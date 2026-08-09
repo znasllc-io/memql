@@ -178,7 +178,11 @@ test("a session whose token expires survives past the 15-minute access-token lif
       get: async (k) => secrets.get(k),
       store: async (k, v) => {
         secrets.set(k, v);
-        rotations.push(v);
+        // The refresh token only. The same store also carries the access
+        // token's expiry and the index that makes an un-enumerable
+        // SecretStorage sweepable (memql#3404); what this case is about is the
+        // ROTATION, so it watches the one key that rotates.
+        if (k === "memql.cluster.refreshToken:local") rotations.push(v);
       },
       delete: async (k) => {
         secrets.delete(k);

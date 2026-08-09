@@ -25,6 +25,7 @@ package dbtest
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -192,7 +193,94 @@ func ensureSchema(ctx context.Context, fallbackDSN string) (reachable bool, err 
 	if migErr != nil {
 		return true, fmt.Errorf("dbtest: migrate shared test schema: %w", migErr)
 	}
+
+	// Blast-radius guard (memql#3415). Everything above this point is about
+	// making the schema correct; this is about making sure it is the right
+	// DATABASE. See refuseBootstrappedDatabase.
+	stamp, serr := readBootstrapStamp(ctx, lockDB)
+	if serr != nil {
+		return true, fmt.Errorf("dbtest: read cluster bootstrap state: %w", serr)
+	}
+	if rerr := refuseBootstrappedDatabase(stamp, dsn); rerr != nil {
+		return true, rerr
+	}
 	return true, nil
+}
+
+// AllowBootstrappedDBEnv opts a run back in to a database that belongs to a
+// bootstrapped cluster. Deliberately explicit and deliberately separate from
+// MEMQL_REQUIRE_DB: "I want a database" and "I accept writing into a live
+// cluster's data" are different statements.
+const AllowBootstrappedDBEnv = "MEMQL_ALLOW_BOOTSTRAPPED_DB"
+
+// clusterSettingsSingletonId is the one row that decides whether a cluster
+// counts as bootstrapped. Its presence WITH a stamp is the sharpest available
+// "this database belongs to a running cluster" signal: nothing but a completed
+// claim writes it, and no test writes it (the one that used to is fixed).
+const clusterSettingsSingletonId = "v1:identity:clusterSettings:cluster"
+
+// refuseBootstrappedDatabase turns "the target database belongs to a
+// bootstrapped cluster" into a hard stop for the db-gated suites.
+//
+// Why this exists (memql#3415). These suites accept whatever
+// MEMQL_DATABASE_DSN names, and the fallback compiled into this file is the
+// LOCAL k3d CLUSTER'S DATABASE -- so `go test ./component/memql/...` with no
+// env set writes production-shaped rows straight into a running cluster's
+// identity data. It did: a read-merge test targeting the singleton
+// clusterSettings row appended blank-bootstrappedAt versions of it, which
+// disabled login for every user on that cluster and made /setup -- the wizard
+// that mints the cluster owner -- reachable unauthenticated. The specific write
+// is fixed at three layers, but "a db-gated suite may write identity rows into
+// a live cluster" is the general shape, and only this check addresses that.
+//
+// A CI lane's blank service database has no clusterSettings singleton and is
+// unaffected. A developer who genuinely means to point a suite at a
+// bootstrapped cluster sets AllowBootstrappedDBEnv.
+func refuseBootstrappedDatabase(bootstrappedAt, dsn string) error {
+	if strings.TrimSpace(bootstrappedAt) == "" {
+		return nil
+	}
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(AllowBootstrappedDBEnv))) {
+	case "", "0", "false", "no":
+	default:
+		return nil
+	}
+	return fmt.Errorf(
+		"dbtest: REFUSING to run the db-gated suites against %s -- that database belongs to a "+
+			"BOOTSTRAPPED cluster (%s was stamped at %s). These suites write real identity, cluster "+
+			"and user rows; doing so against a live cluster has already disabled login for every "+
+			"user and re-opened the unauthenticated /setup ownership wizard (memql#3415). Point %s "+
+			"at a throwaway Postgres, or set %s=1 if you truly mean this database",
+		SafeDSN(dsn), clusterSettingsSingletonId, bootstrappedAt, dsnEnv, AllowBootstrappedDBEnv)
+}
+
+// readBootstrapStamp returns the latest clusterSettings singleton's
+// bootstrappedAt, or "" when the row (or the table) is absent. A missing table
+// is not an error here: EnsureSchema is also the path that CREATES it, and an
+// older schema is still a database worth running against.
+func readBootstrapStamp(ctx context.Context, db *bun.DB) (string, error) {
+	var exists bool
+	if err := db.QueryRowContext(ctx,
+		`SELECT to_regclass('public."MemoryNodes"') IS NOT NULL`).Scan(&exists); err != nil {
+		return "", err
+	}
+	if !exists {
+		return "", nil
+	}
+	var stamp sql.NullString
+	err := db.QueryRowContext(ctx,
+		`SELECT payload->>'bootstrappedAt'
+		   FROM "MemoryNodes"
+		  WHERE id = ?
+		  ORDER BY "createdAt" DESC
+		  LIMIT 1`, clusterSettingsSingletonId).Scan(&stamp)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return stamp.String, nil
 }
 
 // --- Reachability reporting (#2680) -----------------------------------------

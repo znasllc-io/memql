@@ -583,7 +583,7 @@ These endpoints **must** remain HTTP due to external protocol requirements:
 
 | Category | Endpoints | Reason |
 |----------|-----------|--------|
-| **Auth (identity service)** | `/login`, `/auth/magic-link`, `/auth/complete`, `/auth/logout`, `/oauth/token`, `/auth/refresh`, `/.well-known/jwks.json` | OAuth 2.0 / magic-link flow requires HTTP redirects, browser form posts, and JWKS publishing |
+| **Auth (identity service)** | `/login`, `/auth/magic-link`, `/auth/complete`, `/auth/logout`, `/oauth/token`, `/auth/refresh`, `/.well-known/jwks.json`, `POST /auth/webauthn/register/begin`, `POST /auth/webauthn/register/finish`, `POST /device/code`, `GET+POST /device` | OAuth 2.0 / magic-link flow requires HTTP redirects, browser form posts, and JWKS publishing. The `/auth/webauthn/*` pair (memql#3406) is the same category: WebAuthn is a **browser API** -- the ceremony is `navigator.credentials.create()` running in the page, and the bytes it produces have to reach a server the browser can POST to. There is no gRPC form of "the user touched their security key". RP id derives from `MEMQL_IDENTITY_BASE_URL`, never from the request Host. The two `/device*` routes are the RFC 8628 device authorization grant (memql#3410): the RFC is **defined over HTTP** -- a device with no browser polls `/oauth/token`, and the human approves at a URL typed into a second device's browser. `/device` is a rendered page, so it is a browser-loads-its-own-UI case like identity's other web pages; `POST /device/code` is the grant's request half and belongs with `/oauth/token`, which it redeems against |
 | **Health check** | `/healthz` | Docker and Kubernetes health probes expect HTTP GET |
 | **WebSocket upgrades** | `/memql/ws`, `/memql/audio` | Browser clients need HTTP upgrade to establish WebSocket |
 | **File uploads** | `/spaces/{id}/attachments` | Multipart form-data uploads map poorly to gRPC |
@@ -1021,6 +1021,12 @@ authentication provider for the cluster. It runs as its own
 node-type binary (`make identity`) and owns:
 
 - Magic-link auth as the primary login path.
+- WebAuthn passkey **registration** (`POST /auth/webauthn/register/{begin,finish}`,
+  memql#3406). Ceremony logic in `component/identity/webauthn/`; the RP id
+  derives from `MEMQL_IDENTITY_BASE_URL`, challenges are single-use and
+  TTL'd, and credentials are minted `residentKey=required` /
+  `userVerification=required` so they are discoverable. Passkey LOGIN is
+  memql#3407 and enrolment authorization is memql#3408.
 - OAuth-style token endpoints (`/oauth/token`, `/auth/refresh`).
 - The JWKS feed at `/.well-known/jwks.json`.
 - A public web UI (`/login`, `/auth/complete`, `/setup`,
@@ -1880,7 +1886,7 @@ See [docs/internal/design/auto-generated-diagrams.md](docs/internal/design/auto-
 ### Identity Concepts
 Auth + access metadata (dsl/identity/concepts.memql; infrastructure metadata every node loads. `@scope` was retired in #56 -- these no longer carry a scope annotation)
 - `v1:identity:user` -- the person; cluster-wide role (owner / admin / writer / reader); preferences (theme, archive retention, daily-space toggle, voice mode, UI-takeover settings)
-- `v1:identity:identity` -- a credential set owned by a user (magic-link verified email, oauth token, api key/PAT, service account, worker token)
+- `v1:identity:identity` -- a credential set owned by a user (magic-link verified email, oauth token, api key/PAT, service account, worker token, badge, account token, passkey). A discriminated union keyed on `identityType`; the `passkey` variant (memql#3406) is the only one whose stored material is PUBLIC (a COSE key), because possession is proved by a signature rather than by a digest match
 - `v1:identity:authSession` -- per-token session record (used for revocation)
 - `v1:identity:magiclink` -- single-use magic-link credential (token-hashed)
 - `v1:identity:auditEvent` -- append-only audit trail for the identity service
