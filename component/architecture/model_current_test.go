@@ -93,6 +93,46 @@ import (
 // at it, green through every CI run, found only by an adversarial review. The
 // live set now includes edge endpoints; see liveSymbols for why it must.
 //
+// THE EDGE SET ITSELF IS CHECKED ONLY SINCE memql#3288. #3050 checked edge
+// ENDPOINTS, which is a check about symbols, not about relationships: delete a
+// call site between two functions that both still exist and every endpoint stays
+// live, so the gate saw nothing. Measured on `main` at f9a2d046, with the gate
+// green: 15 committed `calls` edges named a call the code no longer makes, all 15
+// with both endpoints alive. staleEdges compares the (From, To, Kind) triples.
+//
+// WHAT THIS GATE STILL CANNOT SEE, deliberately, and why -- the half of memql#3288
+// that was missing from this comment block rather than from the code:
+//
+//   - ANYTHING ADDED. Every check walks `want` and asks whether `got` agrees;
+//     nothing iterates `got`. That is the add-only asymmetry above, and it is
+//     load-bearing, not an oversight.
+//
+//   - Therefore also A FACT SURGICALLY REMOVED from the committed file. Deleting
+//     one edge from the artifact leaves it a strict subset, which is the "behind"
+//     direction, which passes. This is not fixable while the asymmetry holds:
+//     "the artifact is missing edge A->B" and "a concurrent merge added a call
+//     A->B" are THE SAME OBSERVATION from here, so no rule can fail the first and
+//     pass the second. A count-equality gate "fixes" the repro precisely by giving
+//     up merge-tolerance -- measured on this same commit, the committed artifact
+//     was 552 nodes and 7,761 edge triples behind a regeneration purely from
+//     merges, so equality would have been red on an untouched `main`. What bounds
+//     this instead is the drift ceiling below: unbounded staleness fails, one
+//     merge's worth does not.
+//
+//   - NODE ATTRIBUTES on a node that still exists -- signature, doc, attrs, and
+//     source.line. Tempting, and measured before rejecting: of 1,353 shared node
+//     ids whose JSON differed from a regeneration, 1,343 differed ONLY in
+//     source.line, because editing any file shifts the line of every declaration
+//     below it. Gating that is byte-equality wearing a hat: it would go red on
+//     essentially every PR that touches Go, which is the design this file exists
+//     to replace.
+//
+//   - EDGE ATTRIBUTES, for the same reason at smaller scale. Keying the edge
+//     comparison on Attrs as well as (From, To, Kind) turned the same 15 findings
+//     into 49; the extra 34 were `call_sites` counts changing on calls that still
+//     happen. The relationship is the fact worth gating; how many times it occurs
+//     in a function body is not.
+//
 // Skipped under -short: it shells out to the extractor over the whole
 // workspace (~6s). CI runs the suite without -short, so the gate is live there.
 func TestArchitectureModelIsNotStale(t *testing.T) {
@@ -129,6 +169,12 @@ func TestArchitectureModelIsNotStale(t *testing.T) {
 	want, got := loadModel(t, checkedIn), loadModel(t, regenerated)
 	live := liveSymbols(got)
 
+	// Always reported, green or red: the numbers are the cheap signal the gate
+	// itself is too permissive to assert on, and memql#3288 asked for them
+	// specifically. A reader of a passing run can see how far behind the artifact
+	// has drifted without regenerating anything themselves.
+	behindNodes, behindEdges := reportCounts(t, want, got)
+
 	if gone, total := staleNodes(want, live); total > 0 {
 		t.Errorf("the committed architecture model references %d node(s) that NO LONGER EXIST "+
 			"in the code:\n  %s\n\nThe cockpit's Topology tab reads this file, so it is rendering "+
@@ -148,6 +194,184 @@ func TestArchitectureModelIsNotStale(t *testing.T) {
 			"(memql#3050).",
 			total, join(gone))
 	}
+
+	if gone, total := staleEdges(want, got); total > 0 {
+		t.Errorf("the committed architecture model asserts %d RELATIONSHIP(s) the regenerated "+
+			"model does not have:\n  %s\n\nTypically both endpoints still exist, which is why "+
+			"neither check above can see them: they are edges, not symbols. The model is claiming "+
+			"a call, import, containment or implements that the code no longer contains, and the "+
+			"cockpit draws it. The usual cause is a call site being deleted or moved while both "+
+			"functions survive. Run `make arch-model` and commit the result (memql#3288).",
+			total, join(gone))
+	}
+
+	assertDriftIsBounded(t, behindNodes, len(got.Nodes), behindEdges, len(edgeTriples(got)))
+}
+
+// edgeTriple is an edge's IDENTITY for drift purposes: who, to whom, how.
+//
+// Attrs are deliberately excluded -- see the blind-spot list on the gate. A
+// `calls` edge carries call_sites, which moves when a function body gains a
+// second call to something it already called; that is not a relationship
+// changing. Measured: including Attrs turned 15 findings into 49, and all 34
+// extra were call_sites counts on calls that still happen.
+//
+// Duplicate triples are collapsed. model.Edge documents (From, To, Kind) as a
+// multi-set key, so this is a real narrowing -- but the artifact contains zero
+// duplicate triples today (measured on both the committed and regenerated
+// models), and a duplicate is a fact stated twice, not a different fact.
+type edgeTriple struct {
+	from model.ID
+	to   model.ID
+	kind model.EdgeKind
+}
+
+func edgeTriples(m *model.Model) map[edgeTriple]bool {
+	set := make(map[edgeTriple]bool, len(m.Edges))
+	for _, e := range m.Edges {
+		set[edgeTriple{from: e.From, to: e.To, kind: e.Kind}] = true
+	}
+	return set
+}
+
+// staleEdges is the memql#3288 check: every RELATIONSHIP the committed model
+// asserts must still be asserted by a freshly regenerated one.
+//
+// This is the same subset shape as staleNodes and staleEdgeEndpoints, one level
+// up: those ask whether a SYMBOL still exists, this asks whether a FACT ABOUT TWO
+// SYMBOLS still holds. It closes the gap between them -- delete the only call
+// from A to B and both symbols stay live (they have other callers and callees),
+// so the endpoint check is satisfied while the committed model keeps drawing an
+// arrow that the code does not contain.
+//
+// WHY THE ADD-ONLY ASYMMETRY SURVIVES. It iterates `want.Edges` only. A
+// relationship the code has and the artifact does not cannot be reported, so a
+// concurrent merge -- which only adds -- can never turn this red. Same structural
+// guarantee as the two checks above, and the reason this could be added at all:
+// the alternative shape, comparing counts or sets both ways, fails on other
+// people's merges.
+//
+// Capped at 10 samples with the true total reported, matching its siblings.
+func staleEdges(want, got *model.Model) (samples []string, total int) {
+	live := edgeTriples(got)
+
+	dead := make([]edgeTriple, 0, 16)
+	seen := make(map[edgeTriple]bool)
+	for _, e := range want.Edges {
+		t := edgeTriple{from: e.From, to: e.To, kind: e.Kind}
+		if t.from == "" || t.to == "" || live[t] || seen[t] {
+			continue
+		}
+		seen[t] = true
+		dead = append(dead, t)
+	}
+	sort.Slice(dead, func(i, j int) bool {
+		if dead[i].from != dead[j].from {
+			return dead[i].from < dead[j].from
+		}
+		if dead[i].to != dead[j].to {
+			return dead[i].to < dead[j].to
+		}
+		return dead[i].kind < dead[j].kind
+	})
+
+	for _, d := range dead {
+		if len(samples) >= 10 {
+			break
+		}
+		samples = append(samples, fmt.Sprintf("%s -%s-> %s", d.from, d.kind, d.to))
+	}
+	return samples, len(dead)
+}
+
+// reportCounts logs both models' sizes and how far behind the committed one is,
+// and returns the two behind-counts for the ceiling below.
+//
+// memql#3288 asked for the counts to be PRINTED, and that half is unconditional:
+// on a green run this is the only place a reader learns the artifact is 7,000
+// edges old. It is a t.Logf and not an assertion because count EQUALITY is the
+// merge-fragile design this file exists to avoid -- see the blind-spot list.
+func reportCounts(t *testing.T, want, got *model.Model) (behindNodes, behindEdges int) {
+	t.Helper()
+
+	liveNodes := make(map[model.ID]bool, len(got.Nodes))
+	for _, n := range got.Nodes {
+		liveNodes[n.ID] = true
+	}
+	committedNodes := make(map[model.ID]bool, len(want.Nodes))
+	for _, n := range want.Nodes {
+		committedNodes[n.ID] = true
+	}
+	for id := range liveNodes {
+		if !committedNodes[id] {
+			behindNodes++
+		}
+	}
+
+	committedEdges := edgeTriples(want)
+	for e := range edgeTriples(got) {
+		if !committedEdges[e] {
+			behindEdges++
+		}
+	}
+
+	t.Logf("architecture model: committed %d nodes / %d edges, regenerated %d nodes / %d edges; "+
+		"committed is behind by %d node(s) and %d edge(s) (which is allowed -- concurrent merges "+
+		"only add -- but `make arch-model` closes it)",
+		len(want.Nodes), len(want.Edges), len(got.Nodes), len(got.Edges), behindNodes, behindEdges)
+
+	return behindNodes, behindEdges
+}
+
+// assertDriftIsBounded puts a CEILING on the one thing the add-only asymmetry
+// leaves unbounded: how far behind the artifact is allowed to get.
+//
+// The asymmetry is right -- failing on someone else's merge is worse than being
+// slightly behind -- but "slightly" was enforced by nothing at all. memql#3288's
+// own words: "nothing forces that refresh; behind is bounded only by whoever
+// remembers." A model 40% behind is not a snapshot between refreshes, it is a
+// different codebase, and every consumer (the cockpit's Topology tab, the
+// observe runtime's FQN join) is reading it as current.
+//
+// A PERCENTAGE of the regenerated model, not an absolute, so it scales with the
+// tree -- and generous, because the failure it must not produce is a red gate on
+// an innocent PR. Calibration: on f9a2d046, three weeks and many merges after the
+// last refresh, the artifact was 2.5% behind on nodes and 5.8% behind on edges.
+// 25% is therefore several months of neglect, and no single merge approaches it.
+// It is a backstop against abandonment, not a freshness policy; the freshness
+// policy is CLAUDE.md's "regenerate LAST in any change that touches Go".
+// maxBehindPercent is the ceiling; see assertDriftIsBounded for the calibration.
+const maxBehindPercent = 25
+
+// driftExceedsCeiling is the pure predicate, so a fixture test can pin both ends
+// of the threshold without fabricating a *testing.T.
+func driftExceedsCeiling(behindNodes, totalNodes, behindEdges, totalEdges int) bool {
+	over := func(behind, total int) bool {
+		return total > 0 && behind*100 > total*maxBehindPercent
+	}
+	return over(behindNodes, totalNodes) || over(behindEdges, totalEdges)
+}
+
+func assertDriftIsBounded(t *testing.T, behindNodes, totalNodes, behindEdges, totalEdges int) {
+	t.Helper()
+
+	if driftExceedsCeiling(behindNodes, totalNodes, behindEdges, totalEdges) {
+		t.Errorf("the committed architecture model is %d/%d nodes (%.1f%%) and %d/%d edges "+
+			"(%.1f%%) behind a regeneration; the ceiling is %d%%.\n\nBeing SOMEWHAT behind is "+
+			"deliberate -- concurrent merges only add symbols and a gate that fails on someone "+
+			"else's merge is unwinnable. Being this far behind is not a snapshot between "+
+			"refreshes, it is a different codebase, and the cockpit renders it as current. "+
+			"Run `make arch-model` and commit the result (memql#3288).",
+			behindNodes, totalNodes, pct(behindNodes, totalNodes),
+			behindEdges, totalEdges, pct(behindEdges, totalEdges), maxBehindPercent)
+	}
+}
+
+func pct(n, total int) float64 {
+	if total == 0 {
+		return 0
+	}
+	return float64(n) * 100 / float64(total)
 }
 
 // liveSymbols is every ID the regenerated model can vouch for: node IDs PLUS
