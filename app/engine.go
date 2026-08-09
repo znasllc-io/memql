@@ -16,7 +16,6 @@ import (
 	"github.com/znasllc-io/memql/component/observe"
 	"github.com/znasllc-io/memql/component/outbound"
 	"github.com/znasllc-io/memql/component/router"
-	"github.com/znasllc-io/memql/integrations/email"
 )
 
 // engineAndBus creates the MemQL engine, sets up the component bus wiring,
@@ -197,17 +196,7 @@ func (a *App) engineAndBus() {
 	campaignWorker := campaigns.NewWorker(
 		&CampaignsEngineAdapter{Engine: a.engine},
 		clusterGuard,
-		func() email.Sender {
-			prov := a.engine.Integrations().Provider("email")
-			if prov == nil {
-				return nil
-			}
-			emailInt, ok := prov.(*email.Integration)
-			if !ok || emailInt == nil {
-				return nil
-			}
-			return emailInt.SenderAccess()
-		},
+		a.campaignEmailSender,
 		a.Logger,
 	)
 	a.Dependencies = append(a.Dependencies, campaignWorker)

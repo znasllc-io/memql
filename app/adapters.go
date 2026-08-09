@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/znasllc-io/memql/integrations/email"
 
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/common"
@@ -306,4 +307,29 @@ func (a *CampaignsEngineAdapter) Execute(ctx context.Context, query string) (any
 		return nil, err
 	}
 	return result, nil
+}
+
+// campaignEmailSender resolves the email sender off the integration
+// registry at SEND time (memql#3348), mirroring outbound.EmailTransport:
+// on a booting node the plug-in registry may not be populated yet, so a
+// sender captured at wiring time would be nil forever.
+//
+// A NAMED method rather than the closure it started as, deliberately.
+// An anonymous function inside engineAndBus would renumber every later
+// `engineAndBus$N` in the architecture model, and
+// TestArchitectureModelIsNotStale reads a removed `$1` edge as the model
+// asserting a call the code no longer contains -- forcing a full
+// `make arch-model` regeneration that sweeps unrelated concurrent work
+// into this diff. Naming it keeps the change additive, which the gate
+// allows.
+func (a *App) campaignEmailSender() email.Sender {
+	prov := a.engine.Integrations().Provider("email")
+	if prov == nil {
+		return nil
+	}
+	emailInt, ok := prov.(*email.Integration)
+	if !ok || emailInt == nil {
+		return nil
+	}
+	return emailInt.SenderAccess()
 }
