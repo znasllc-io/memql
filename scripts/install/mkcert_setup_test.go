@@ -475,8 +475,12 @@ func TestMkcertMissingBinaryIsExitFour(t *testing.T) {
 	if env.OK || env.Error == nil || env.Error.Code != 4 {
 		t.Errorf("envelope should carry ok=false error.code=4: %s", out)
 	}
-	if !strings.Contains(strings.ToLower(out), "mkcert") {
-		t.Errorf("the failure should name mkcert so the operator knows what to install: %s", out)
+	// The MESSAGE has to carry the install instruction, not just the code. A
+	// cap_fail raised inside a "$(...)" capture would still exit 4 while the
+	// envelope degraded to the trap's generic "aborted without an explicit
+	// result", so assert on the text the operator actually reads.
+	if env.Error != nil && !strings.Contains(env.Error.Message, "mkcert") {
+		t.Errorf("the failure message should name mkcert and how to install it; got: %q", env.Error.Message)
 	}
 	if log := e.stubLog(t); log != "" {
 		t.Errorf("nothing should have been invoked when the prerequisite is missing:\n%s", log)

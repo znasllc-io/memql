@@ -100,28 +100,35 @@ function parse_hostnames() {
 # PREREQUISITES
 #=============================================================================
 
-# resolve_mkcert <candidate> -- prints the resolved binary path, or fails 4.
-# mkcert is deliberately NOT auto-installed: it writes to the system trust
-# store, so which package manager touches this machine is the operator's call.
+# NOTE: the resolve_* helpers set a global rather than printing their result.
+# cap_fail inside a "$(...)" substitution would emit its envelope into the
+# capture instead of onto stdout, and the caller would abort into the trap's
+# generic "aborted without an explicit result" -- an honest exit code carrying
+# a useless message, which for a missing prerequisite is exactly the message
+# that had to be useful. Anything that can fail runs in the parent shell.
+MKCERT_BIN=""
+CAROOT_DIR=""
+
+# resolve_mkcert <candidate> -- sets MKCERT_BIN, or fails 4. mkcert is
+# deliberately NOT auto-installed: it writes to the system trust store, so
+# which package manager touches this machine is the operator's call.
 function resolve_mkcert() {
-    local candidate="$1" resolved
-    if ! resolved="$(command -v "$candidate" 2>/dev/null)" || [[ -z "$resolved" ]]; then
+    local candidate="$1"
+    if ! MKCERT_BIN="$(command -v "$candidate" 2>/dev/null)" || [[ -z "$MKCERT_BIN" ]]; then
         cap_fail 4 "mkcert not found (looked for '${candidate}'); install it first: brew install mkcert  |  https://github.com/FiloSottile/mkcert"
     fi
-    printf '%s' "$resolved"
 }
 
-# resolve_caroot <mkcert-bin> <override> -- prints the CA directory.
+# resolve_caroot <mkcert-bin> <override> -- sets CAROOT_DIR.
 function resolve_caroot() {
-    local bin="$1" override="$2" caroot
+    local bin="$1" override="$2"
     if [[ -n "$override" ]]; then
-        printf '%s' "$override"
+        CAROOT_DIR="$override"
         return
     fi
-    if ! caroot="$("$bin" -CAROOT 2>/dev/null)" || [[ -z "$caroot" ]]; then
+    if ! CAROOT_DIR="$("$bin" -CAROOT 2>/dev/null)" || [[ -z "$CAROOT_DIR" ]]; then
         cap_fail 5 "could not determine the mkcert CAROOT ('${bin} -CAROOT' produced nothing)"
     fi
-    printf '%s' "$caroot"
 }
 
 #=============================================================================
@@ -179,9 +186,10 @@ function main() {
     cap_require cert-file "$cert"
     cap_require key-file  "$key"
 
-    local bin caroot
-    bin="$(resolve_mkcert "$mkcert_bin")"
-    caroot="$(resolve_caroot "$bin" "$caroot_override")"
+    resolve_mkcert "$mkcert_bin"
+    local bin="$MKCERT_BIN"
+    resolve_caroot "$bin" "$caroot_override"
+    local caroot="$CAROOT_DIR"
 
     # The central question, asked before anything is touched: is there already
     # a CA on this machine?
