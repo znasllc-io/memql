@@ -17,12 +17,15 @@ the cluster. It runs as its own node-type binary
   legal docs, `/me/*` self-service).
 - The OAuth-style token endpoints (`/oauth/token`, `/auth/refresh`).
 - What is left of the admin web app at `/admin/*`: the sign-in
-  pages and `/admin/deployments`. Its other six screens (users,
-  tokens, audit, JWKS, cluster settings, and the dashboard) moved
-  into the memQL portal in memql#3324, writes and owner/admin gate
-  together -- see [../portal.md](../portal.md). Deployments stayed
-  because `DeployControlService` runs against an on-disk overlay
-  checkout and therefore exists only on this node.
+  pages, and an `/admin/` root that answers `410 Gone`. Six of its
+  seven screens (users, tokens, audit, JWKS, cluster settings, and
+  the dashboard) moved into the memQL portal in memql#3324, writes
+  and owner/admin gate together -- see [../portal.md](../portal.md).
+  Deployments followed in memql#3380: `DeployControlService` still
+  runs against an on-disk overlay checkout and therefore exists only
+  on this node, but a bff now forwards the deploy RPCs here over
+  `NodeService.Stream`, carrying the caller's authority so the
+  owner-only rollback gate is unchanged by the hop.
 - The JWKS feed at `/.well-known/jwks.json` that every other node
   binary fetches to verify access tokens.
 - The Personal Access Token (PAT) layer for CLI clients.
@@ -108,7 +111,7 @@ the security-headers middleware.
 | `GET`/`POST /device` | signed-in user | RFC 8628 verification page. A signed-out visitor is bounced through `/login` and returned here with the code. Mounts only when the device flow is wired (memql#3410) |
 | `GET /me/`, `/me/settings`, `/me/devices`, `/me/export`, `/me/deletion-pending` | client-side | Self-service shells. `/me/devices` lists **sessions**, not passkeys |
 | `GET`/`POST /me/tokens`, `POST /me/tokens/revoke` | Bearer or admin cookie | PAT issuance and revocation. Mounts only when the PAT adapter is wired |
-| `GET /admin/*` | admin session | The sign-in pages and `/admin/deployments`; the rest moved to the portal |
+| `GET /admin/*` | admin session | The sign-in pages, and an `/admin/` root that answers `410 Gone`; every page moved to the portal |
 | `GET /static/` | none | Cached UI assets |
 
 ## Required environment variables

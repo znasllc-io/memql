@@ -217,19 +217,24 @@ type App struct {
 	// deployControlService is the DeployControlService gRPC
 	// implementation behind the memQL Deployment Console
 	// (znasllc-io/memql#725 + #728). Set on the identity build only
-	// (the identity node hosts the admin portal). Stored as `any` to
-	// avoid importing component/deploycontrol in non-identity binaries;
-	// the identity-tagged helper in integrations_deploy_control.go
-	// reads it back via type assertion, and the in-process admin portal
-	// reads it via DeployControlService().
+	// (the identity node is where the on-disk overlay checkout lives).
+	// Stored as `any` to avoid importing component/deploycontrol in
+	// non-identity binaries; the identity-tagged helper in
+	// integrations_deploy_control.go constructs it, and app/cluster.go
+	// reads it back via a memqlv1.DeployControlServiceServer assertion to
+	// install the mesh forward handler (memql#3380) -- which is what lets a
+	// bff-served portal drive a deployment at all.
 	deployControlService any
 
 	// adminServer is the *admin.AdminServer wired during the identity
-	// integrations phase (the /admin/* operator portal). Stored as
-	// `any` to avoid importing component/identity/admin in non-identity
-	// builds; setupDeployControlService reads it back via type
-	// assertion to wire the in-process deployment-status reader
-	// (memql#726). Nil on binaries built without -tags identity.
+	// integrations phase. Stored as `any` to avoid importing
+	// component/identity/admin in non-identity builds. Nil on binaries built
+	// without -tags identity.
+	//
+	// Nothing reads it back any more: the last consumer was the
+	// /admin/deployments reader + write ports, which went to the portal with
+	// the page in memql#3380. Kept as the wiring layer's handle on a
+	// constructed component, in the same shape as the others.
 	adminServer any
 }
 

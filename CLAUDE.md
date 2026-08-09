@@ -1075,13 +1075,19 @@ node-type binary (`make identity`) and owns:
 - The JWKS feed at `/.well-known/jwks.json`.
 - A public web UI (`/login`, `/auth/complete`, `/setup`,
   `/legal/*`, `/me/*`).
-- What remains of the admin web app at `/admin/*`: the sign-in pages
-  and `/admin/deployments`. The other six screens moved into the
-  memQL portal (memql#3324) along with their writes, whose
+- What remains of the admin web app at `/admin/*`: the sign-in pages,
+  and an `/admin/` root that answers `410 Gone`. Six screens moved into
+  the memQL portal (memql#3324) along with their writes, whose
   owner/admin gate now lives in `component/identity/adminops` and
   rides `IdentityAdminMsg` on `MemqlService.Stream`. Deployments
-  stayed because `DeployControlService` shells out against an
-  on-disk overlay checkout, so it exists only on the identity node.
+  followed in memql#3380: `DeployControlService` still shells out
+  against an on-disk overlay checkout and so exists only on the identity
+  node, but a bff now FORWARDS the deploy RPCs here over
+  `NodeService.Stream` (`DeployControlForwardRequest` / `Response`),
+  carrying the caller as a verified `ForwardedAuthority` so the
+  owner-only rollback gate runs against the originating human rather
+  than the relaying node. The forward's two halves live in
+  `component/grpc/deploy_control_forward.go`.
 - Personal Access Token (PAT) issuance for CLI clients
   (`mql_pat_<...>`).
 

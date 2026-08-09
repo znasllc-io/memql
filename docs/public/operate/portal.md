@@ -344,15 +344,22 @@ thrown it away.
 | Capability | Where it is | Why |
 |---|---|---|
 | Force a signing-key rotation | Nowhere, by design | The key manager runs in-process on the identity node, and in every deployed environment the key arrives sealed in the env envelope (`MEMQL_IDENTITY_SIGNING_KEY_B64`) so each replica derives the same one. `KeyManager.RotationSupported()` is false in that mode, so the retired console's "Rotate now" button returned an error in staging and production alike. Rotation is a **re-seal and a rolling restart**. The scheduled rotation (`MEMQL_IDENTITY_KEY_ROTATION_DAYS`) applies only to the on-disk key directory a single-node dev cluster uses. |
-| Deployments -- the live gate, image digests and actions | `https://identity.<host>/admin/deployments`, the Cockpit, and `/portal/views/deployments` for the history | `DeployControlService` runs shell scripts against an on-disk overlay checkout, so it exists only on the **identity** node. The portal is served by the bff and dials the origin that served it, so its deploy actions reach a node with no deploy-control service and come back `UNIMPLEMENTED`. Until that RPC can cross the mesh, the identity console keeps the surface. See [deployment-console.md](deployment-console.md). |
 
 ### The server-rendered `/admin/*` console is otherwise retired
 
 It served seven screens. Six of them -- the dashboard, users, tokens, audit,
 JWKS and settings -- are gone, along with their routes, their handlers and
 their templates, deleted in the same commits that landed their replacements.
+The seventh, Deployments, followed in memql#3380: `DeployControlService` runs
+shell scripts against an on-disk overlay checkout and therefore exists only on
+the identity node, so the portal's deploy calls used to reach a bff with no
+such service and come back `UNIMPLEMENTED`. A `NodeService` forward now carries
+them to the identity node -- with the caller's authority attached, so the
+owner-only rollback gate still runs against the human who pressed the button --
+and `/portal/views/deployments` both reads live state and acts.
+
 What remains on the identity service is `/admin/login` (which establishes the
-session) and `/admin/deployments`; `/admin/` redirects to the latter.
+session); `/admin/` answers `410 Gone` and points here.
 
 ### The `/me/*` pages stay where they are
 
