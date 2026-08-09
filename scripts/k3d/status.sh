@@ -4,15 +4,21 @@
 # =====================
 #
 # Capability: k3d.status -- print a parity litmus for the local k3d cluster:
-# pod status, per-replica MEMQL_NODE_ID values (cross-node mesh test), and
-# ArgoCD sync status.
+# pod status, per-replica MEMQL_NODE_ID values (cross-node mesh test),
+# identity signing-keyset parity, and ArgoCD sync status.
 #
-# Backs 'make status'. Primary use: verify the mesh formed across replicas
-# and that each pod has a UNIQUE node id (required for cross-node event
-# routing). This is a status REPORTER: the human-readable table goes to
-# STDERR (so `make status` still shows it inline), and the machine-readable
-# litmus RESULT (pods / uniqueNodeIds / meshHealthy) is the single JSON
-# envelope on STDOUT.
+# Backs 'make status'. Two properties are asserted, both of which only EXIST
+# once there is more than one replica -- which is why they live in the command
+# CLAUDE.md sends operators to right after 'make scale N=2':
+#
+#   1. every pod has a UNIQUE MEMQL_NODE_ID (cross-node event routing);
+#   2. every identity replica publishes the SAME JWKS keyset (memql#3400) --
+#      divergent keysets make ~half of all token verifications fail.
+#
+# This is a status REPORTER: the human-readable table goes to STDERR (so
+# 'make status' still shows it inline), and the machine-readable litmus RESULT
+# (pods / uniqueNodeIds / meshHealthy / identityReplicas / identityKeysets /
+# identityKeysShared) is the single JSON envelope on STDOUT.
 #
 # This is a CAPABILITY SCRIPT: non-interactive, structured params in, a single
 # JSON result envelope on stdout, human logs on stderr, honest exit codes.
@@ -45,6 +51,14 @@ APP_NAME="${MEMQL_K3D_APP_NAME:-memql-local}"
 PODS_TOTAL=0
 UNIQUE_NODE_IDS=0
 MESH_HEALTHY=false
+
+# Identity-keyset litmus accumulators (populated by check_identity_keysets).
+# IDENTITY_KEYS_SHARED is raw JSON: true | false | null. `null` means the
+# property was NOT MEASURED (no identity pods, or a replica could not be read)
+# and must never be conflated with true -- see check_identity_keysets.
+IDENTITY_REPLICAS=0
+IDENTITY_KEYSETS=0
+IDENTITY_KEYS_SHARED=null
 
 #=============================================================================
 # OUTPUT HELPERS
@@ -197,6 +211,115 @@ function check_node_ids() {
 }
 
 #=============================================================================
+# IDENTITY LITMUS: ONE SIGNING KEYSET ACROSS EVERY REPLICA
+#=============================================================================
+
+# WHY THIS IS IN THE LITMUS (memql#3400). identity mints the JWTs the whole
+# mesh verifies. When each replica generates its OWN Ed25519 key -- which is
+# what happens with no shared MEMQL_IDENTITY_SIGNING_KEY_B64 -- the Service
+# round-robins two different keysets, and a token minted by one replica is
+# structurally unverifiable by any node that fetched JWKS from the other.
+# Failure is intermittent, roughly coin-flip, and surfaces on the far side of
+# the mesh as an authentication error that says nothing about signing keys.
+#
+# Config.Validate has a boot-time guard for the misconfiguration, but a config
+# check cannot see replica count. `make status` can, and it is the command
+# CLAUDE.md already tells operators to run straight after `make scale N=2` --
+# the step that creates the second replica. So the property is asserted here,
+# next to the node-id litmus it sits beside.
+#
+# The read goes through the apiserver's POD PROXY, not a port-forward and not
+# `kubectl exec`: engine images are FROM scratch, so there is no shell in the
+# pod (the same constraint that moved the node-id read to the pod spec,
+# memql#2380), and a port-forward would put a background process and a port
+# allocation inside a reporter. `https:` selects a TLS backend; the apiserver
+# does not verify the pod's internal-CA certificate, which is what makes this
+# work against identity's in-cluster TLS.
+function identity_keyset_signature() {
+    local pod="$1" body
+    body="$(kubectl get --raw \
+        "/api/v1/namespaces/${NAMESPACE}/pods/https:${pod}:8085/proxy/.well-known/jwks.json" \
+        2>/dev/null)" || return 1
+    [ -n "$body" ] || return 1
+    # The SET of kids, sorted and joined -- not just the first one. A JWKS
+    # legitimately carries two keys during a rotation overlap, and comparing
+    # only the first would call two replicas mid-rotation "divergent" while
+    # missing a genuine divergence hidden behind a shared first key.
+    local kids
+    kids="$(printf '%s' "$body" \
+        | grep -oE '"kid"[[:space:]]*:[[:space:]]*"[^"]+"' \
+        | sed -E 's/.*"([^"]+)"$/\1/' \
+        | sort -u | tr '\n' ',')"
+    [ -n "$kids" ] || return 1
+    printf '%s' "$kids"
+}
+
+function check_identity_keysets() {
+    section "Identity litmus: JWKS keyset per identity replica (must be identical)"
+
+    if ! kubectl get namespace "${NAMESPACE}" &>/dev/null; then
+        echo "  (namespace not ready)" >&2
+        return 0
+    fi
+
+    local pods
+    pods=$(kubectl get pods -n "${NAMESPACE}" \
+        -l app.kubernetes.io/name=identity \
+        --field-selector=status.phase=Running \
+        -o jsonpath='{.items[*].metadata.name}' 2>/dev/null)
+
+    if [ -z "$pods" ]; then
+        echo "  UNKNOWN: no running identity pods -- keyset parity not measured." >&2
+        return 0
+    fi
+
+    local signatures=() unread=0 total=0
+    for pod in $pods; do
+        total=$((total + 1))
+        local sig
+        if ! sig="$(identity_keyset_signature "$pod")"; then
+            warn "  ${pod}: UNKNOWN -- could not read /.well-known/jwks.json through the apiserver pod proxy."
+            unread=$((unread + 1))
+            continue
+        fi
+        echo "  ${pod}: kid(s) ${sig%,}" >&2
+        signatures+=("$sig")
+    done
+
+    IDENTITY_REPLICAS="$total"
+
+    local unique=0
+    if [ ${#signatures[@]} -gt 0 ]; then
+        unique=$(printf '%s\n' "${signatures[@]}" | sort -u | wc -l | tr -d ' ')
+    fi
+    IDENTITY_KEYSETS="$unique"
+
+    echo "" >&2
+    # Fail-open guard: a replica that could not be read means the property was
+    # not measured. Reporting "shared" off the replicas that DID answer would
+    # certify exactly what the check failed to observe -- the shape of defect
+    # this litmus exists to catch, one level up.
+    if [ "$unread" -gt 0 ]; then
+        warn "UNKNOWN: ${unread} of ${total} identity replica(s) could not be read; keyset parity not measured."
+        IDENTITY_KEYS_SHARED=null
+        return 0
+    fi
+
+    if [ "$unique" -eq 1 ]; then
+        echo "  PASS: all ${total} identity replica(s) publish the same signing keyset." >&2
+        IDENTITY_KEYS_SHARED=true
+    else
+        warn "FAIL: ${total} identity replicas publish ${unique} DIFFERENT signing keysets (kid mismatch)."
+        warn "Each replica has minted its own key, so a token issued by one is unverifiable"
+        warn "by any node that fetched JWKS from the other -- roughly half of all auth fails,"
+        warn "and the rejection reads as an authentication error, not a key problem (memql#3400)."
+        warn "Fix: seed a shared MEMQL_IDENTITY_SIGNING_KEY_B64 with 'make secrets', then"
+        warn "     'kubectl rollout restart deploy/identity -n ${NAMESPACE}'."
+        IDENTITY_KEYS_SHARED=false
+    fi
+}
+
+#=============================================================================
 # SECRET STATUS
 #=============================================================================
 
@@ -234,6 +357,7 @@ function main() {
     check_pods
     check_secrets
     check_node_ids
+    check_identity_keysets
 
     {
         echo ""
@@ -247,6 +371,10 @@ function main() {
     cap_result_set_raw pods "$PODS_TOTAL"
     cap_result_set_raw uniqueNodeIds "$UNIQUE_NODE_IDS"
     cap_result_set_raw meshHealthy "$MESH_HEALTHY"
+    cap_result_set_raw identityReplicas "$IDENTITY_REPLICAS"
+    cap_result_set_raw identityKeysets "$IDENTITY_KEYSETS"
+    # true | false | null -- null means NOT MEASURED, never "fine".
+    cap_result_set_raw identityKeysShared "$IDENTITY_KEYS_SHARED"
     cap_ok
 }
 

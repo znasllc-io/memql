@@ -202,7 +202,7 @@ pod restart is purely at the pod level; ArgoCD still owns the Deployment spec.
 # Scale to 2 replicas per Deployment:
 make scale N=2
 
-# Litmus: verify every pod has a UNIQUE MEMQL_NODE_ID:
+# Litmus: unique MEMQL_NODE_ID per pod + one shared identity signing keyset:
 make status
 
 # Scale back to single-node:
@@ -213,8 +213,22 @@ Because `deploy/k8s/base/` sets `MEMQL_NODE_ID` via `fieldRef: metadata.name`,
 each pod automatically gets a unique node id matching its pod name. No overlay
 changes are needed to enable multi-node.
 
-`make status` checks that all running pods have distinct `MEMQL_NODE_ID`
-values. Shared ids are the root cause of the #1042 class of mesh bugs.
+`make status` asserts two properties, both of which only exist once there is
+more than one replica:
+
+1. **Unique `MEMQL_NODE_ID` per pod.** Shared ids are the root cause of the
+   #1042 class of mesh bugs.
+2. **One shared identity signing keyset.** It reads
+   `/.well-known/jwks.json` from every identity replica (through the apiserver
+   pod proxy -- engine images are `FROM scratch`, so there is no shell to exec
+   into) and compares the `kid` sets. Divergent keysets mean each replica has
+   minted its OWN Ed25519 key, so a token issued by one is unverifiable by any
+   node that fetched JWKS from the other: roughly half of all auth fails, and
+   the rejection reads as an authentication error rather than a key problem.
+   That is memql#3400 -- `make scale N=2` walked straight into it before
+   `make secrets` started seeding a shared `MEMQL_IDENTITY_SIGNING_KEY_B64`.
+
+A replica the litmus could not read is reported `UNKNOWN`, never as a pass.
 
 ## Re-seed secrets
 
@@ -222,7 +236,12 @@ values. Shared ids are the root cause of the #1042 class of mesh bugs.
 make secrets
 ```
 
-This re-runs `scripts/k3d/seed-secrets.sh` and is idempotent. Use it if you've
+This re-runs `scripts/k3d/seed-secrets.sh` and is idempotent -- including for
+the two values a re-run must never silently rotate: `MEMQL_MASTER_KEY`
+(memql#2958) and the identity signing seed `MEMQL_IDENTITY_SIGNING_KEY_B64`
+(memql#3400, whose rotation would invalidate every live session and every
+minted mesh node token). Both are read back from the cluster and preserved.
+Use it if you've
 torn down and recreated the cluster, or if you've rotated the dev secret values.
 
 ## Tear down

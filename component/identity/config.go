@@ -743,13 +743,23 @@ func (c Config) Validate() error {
 		// OWN key, so /.well-known/jwks.json diverges across replicas and
 		// ~half of all token verifications (browser sessions AND mesh node
 		// tokens) fail with `unknown kid`. That is exactly the 2026-06-16
-		// staging auth outage. Refuse to start a non-localhost deployment
-		// in per-pod ephemeral-key mode unless the operator explicitly
-		// opts in via MEMQL_IDENTITY_ALLOW_EPHEMERAL_KEY=true (single-node / dev,
-		// or a deployment with a shared key volume). localhost origins are
-		// exempt -- that's the local-dev path.
-		if !c.AllowEphemeralKey && !isLocalHost(parsed.Host) {
-			return errors.New("identity: MEMQL_IDENTITY_SIGNING_KEY_B64 is not set, so each replica would mint its OWN per-pod ephemeral signing key and /.well-known/jwks.json would diverge across replicas -- ~50% of token verifications (browser sessions AND mesh node tokens) fail with 'unknown kid' (this caused the 2026-06-16 auth outage). Fix: set MEMQL_IDENTITY_SIGNING_KEY_B64 to a shared base64-std-encoded 32-byte Ed25519 seed on every identity replica (generate with: `head -c 32 /dev/urandom | base64`), so all replicas derive the same key. For a single-node / dev deployment with no HA, set MEMQL_IDENTITY_ALLOW_EPHEMERAL_KEY=true to opt into per-pod ephemeral keys")
+		// staging auth outage. Refuse to start a deployment in per-pod
+		// ephemeral-key mode unless the operator explicitly opts in via
+		// MEMQL_IDENTITY_ALLOW_EPHEMERAL_KEY=true (single-node / dev, or a
+		// deployment with a shared key volume).
+		//
+		// The exemption is isSingleProcessHost, NOT isLocalHost (memql#3400).
+		// isLocalHost also matches the `*.local.<domain>` dev wildcard, and
+		// that host is the LOCAL PARITY CLUSTER's front door -- a k8s Service
+		// with `make scale N=2` replicas behind it, i.e. precisely the
+		// topology this guard exists to refuse. Exempting it is why the guard
+		// stayed silent while a local cluster served two different JWKS `kid`s
+		// and reported the resulting rejections as "invalid or expired token".
+		// Only a host that is loopback BY CONSTRUCTION -- one process on one
+		// machine, which cannot have a second replica -- is genuinely safe in
+		// ephemeral-key mode.
+		if !c.AllowEphemeralKey && !isSingleProcessHost(parsed.Host) {
+			return errors.New("identity: MEMQL_IDENTITY_SIGNING_KEY_B64 is not set, so each replica would mint its OWN per-pod ephemeral signing key and /.well-known/jwks.json would diverge across replicas -- ~50% of token verifications (browser sessions AND mesh node tokens) fail with 'unknown kid' (this caused the 2026-06-16 auth outage). Fix: set MEMQL_IDENTITY_SIGNING_KEY_B64 to a shared base64-std-encoded 32-byte Ed25519 seed on every identity replica (generate with: `head -c 32 /dev/urandom | base64`), so all replicas derive the same key. A local k3d parity cluster seeds this for you -- re-run `make secrets`. Only a loopback issuer (localhost / 127.0.0.1 / *.localhost), which cannot have a second replica, is exempt; a *.local.<domain> issuer is a CLUSTER front door and is not. For a genuinely single-process deployment, set MEMQL_IDENTITY_ALLOW_EPHEMERAL_KEY=true to opt into per-pod ephemeral keys")
 		}
 
 		// Production posture requires the master key. We approximate
@@ -924,25 +934,13 @@ func emailDomain(email string) string {
 //     `*.local.<domain>` mkcert SAN. Production deployments use
 //     `<service>.<domain>` (no `local.` middle) and DO require
 //     the encryption key.
+//
+// NOT a replica-count proxy. Shape 3 is a local CLUSTER's front door and
+// routinely fronts more than one pod -- see isSingleProcessHost, which the
+// ephemeral-signing-key guard uses instead (memql#3400).
 func isLocalHost(host string) bool {
-	// Strip the port. url.URL.Host comes through here in two
-	// shapes: "host:port" (IPv4 / DNS name) and "[ipv6]:port"
-	// or raw "ipv6" (IPv6). Only the first form has exactly one
-	// colon -- IPv6 has multiple, so multi-colon means we're
-	// looking at a bare IPv6 address with no port.
-	if strings.Count(host, ":") == 1 {
-		host = host[:strings.Index(host, ":")]
-	} else if strings.HasPrefix(host, "[") {
-		if end := strings.Index(host, "]"); end > 0 {
-			host = host[1:end]
-		}
-	}
-	host = strings.ToLower(host)
-	switch host {
-	case "localhost", "127.0.0.1", "::1", "0.0.0.0":
-		return true
-	}
-	if strings.HasSuffix(host, ".localhost") {
+	host = hostWithoutPort(host)
+	if isSingleProcessHost(host) {
 		return true
 	}
 	// Dev wildcard shape: *.local.<domain>. The second label from
@@ -950,10 +948,45 @@ func isLocalHost(host string) bool {
 	// alias (not a real production hostname that happens to live
 	// under a domain whose name contains "local").
 	labels := strings.Split(host, ".")
-	if len(labels) >= 3 && labels[1] == "local" {
+	return len(labels) >= 3 && labels[1] == "local"
+}
+
+// isSingleProcessHost returns true only for hosts that name a single process
+// on the local machine BY CONSTRUCTION: literal loopback addresses and
+// the RFC 6761 `.localhost` TLD (which resolves to loopback by
+// specification). Nothing behind such a host can be a second replica.
+//
+// This is deliberately NARROWER than isLocalHost (memql#3400). The
+// `*.local.<domain>` dev wildcard that isLocalHost also accepts points at
+// 127.0.0.1 as well -- but what listens there is the local parity
+// cluster's traefik front door, which proxies to a k8s Service, and
+// `make scale N=2` puts two identity pods behind it. Treating that host
+// as "one process" is what let a local cluster run two ephemeral signing
+// keys. Any check whose real question is "can there be more than one of
+// me?" must use this, not isLocalHost.
+func isSingleProcessHost(host string) bool {
+	host = hostWithoutPort(host)
+	switch host {
+	case "localhost", "127.0.0.1", "::1", "0.0.0.0":
 		return true
 	}
-	return false
+	return strings.HasSuffix(host, ".localhost")
+}
+
+// hostWithoutPort strips the port from a url.URL.Host and lowercases the
+// result. Host arrives in two shapes: "host:port" (IPv4 / DNS name) and
+// "[ipv6]:port" or a raw "ipv6". Only the first form has exactly one
+// colon -- IPv6 has several, so multi-colon means a bare IPv6 address
+// with no port.
+func hostWithoutPort(host string) string {
+	if strings.Count(host, ":") == 1 {
+		host = host[:strings.Index(host, ":")]
+	} else if strings.HasPrefix(host, "[") {
+		if end := strings.Index(host, "]"); end > 0 {
+			host = host[1:end]
+		}
+	}
+	return strings.ToLower(host)
 }
 
 // ---------------------------------------------------------------------------
