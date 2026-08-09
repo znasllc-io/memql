@@ -52,7 +52,12 @@ func (s *Server) handleLoginGet(w http.ResponseWriter, r *http.Request) {
 	}
 	settings := s.snapshotSettings(r)
 	data := webtempl.LoginData{
-		Layout:             s.LayoutData(r, "Sign in", false, nil, nil),
+		// passkey-login.js reveals the "Sign in with a passkey" control
+		// the login template renders hidden (memql#3407). Shipped on
+		// every /login render rather than conditionally: the control is
+		// what the script looks for, so a page without one costs a
+		// cached 3 KB and does nothing.
+		Layout:             s.LayoutData(r, "Sign in", false, nil, []string{s.assetURL("/static/passkey-login.js")}),
 		Mode:               string(settings.RegistrationMode),
 		Stage:              "email",
 		AllowedDomainsHint: settings.RegistrationDomains,

@@ -8749,6 +8749,94 @@ func RecordNumberBuild(args RecordNumberArgs) string {
 	return b.String()
 }
 
+// RecordPasskeyAssertion -- Stamp the verifier state on a passkey identity after a successful assertion: signature counter, current backup state, and lastUsedAt. Best-effort; the login succeeds even when this write fails.
+//
+// Bound concept: v1:identity:identity (machine-readable: BoundConcepts["recordPasskeyAssertion"] in generated_concepts.go).
+type RecordPasskeyAssertionArgs struct {
+	IdentityId        string
+	CredentialId      string
+	PublicKey         string
+	SignCount         int
+	Aaguid            string
+	Transports        []string
+	BackupEligible    bool
+	BackupEligibleSet bool // set true to send backupEligible; required because zero-value bool is ambiguous
+	BackupState       bool
+	BackupStateSet    bool // set true to send backupState; required because zero-value bool is ambiguous
+	RegisteredBy      string
+	LastUsedAt        string
+}
+
+// RecordPasskeyAssertion calls the engine mutation recordPasskeyAssertion.
+func (qc *QueryClient) RecordPasskeyAssertion(ctx context.Context, args RecordPasskeyAssertionArgs) (*Result, error) {
+	call := RecordPasskeyAssertionBuild(args)
+	return qc.executeNamed(ctx, "recordPasskeyAssertion", call)
+}
+
+func RecordPasskeyAssertionBuild(args RecordPasskeyAssertionArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation recordPasskeyAssertion(")
+	b.WriteString("identityId: ")
+	b.WriteString(quoteMemQL(args.IdentityId))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("credentialId: ")
+	b.WriteString(quoteMemQL(args.CredentialId))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("publicKey: ")
+	b.WriteString(quoteMemQL(args.PublicKey))
+	if args.SignCount != 0 {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("signCount: ")
+		b.WriteString(fmt.Sprintf("%v", args.SignCount))
+	}
+	if args.Aaguid != "" {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("aaguid: ")
+		b.WriteString(quoteMemQL(args.Aaguid))
+	}
+	if args.Transports != nil {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("transports: ")
+		b.WriteString(renderMemQLValue(args.Transports))
+	}
+	if args.BackupEligibleSet {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("backupEligible: ")
+		b.WriteString(fmt.Sprintf("%v", args.BackupEligible))
+	}
+	if args.BackupStateSet {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("backupState: ")
+		b.WriteString(fmt.Sprintf("%v", args.BackupState))
+	}
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("registeredBy: ")
+	b.WriteString(quoteMemQL(args.RegisteredBy))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("lastUsedAt: ")
+	b.WriteString(quoteMemQL(args.LastUsedAt))
+	b.WriteString(")")
+	return b.String()
+}
+
 // RecordPlannerInvocation -- Record a planner-agent LLM invocation against a Plan: advance metrics.llmCallCount + tokenSpent without changing status. Caller computes the new totals Go-side (the parser has no arithmetic).
 //
 // Bound concept: v1:planner:plan (machine-readable: BoundConcepts["recordPlannerInvocation"] in generated_concepts.go).
