@@ -427,6 +427,7 @@ var BoundConcepts = map[string]string{
 	"recordLegalAcceptance":                 "v1:identity:user",
 	"recordMentoredEvent":                   "v1:forge:requestEvent",
 	"recordNumber":                          "v1:telephony:number",
+	"recordPasskeyAssertion":                "v1:identity:identity",
 	"recordPlannerInvocation":               "v1:planner:plan",
 	"recordRequestEvent":                    "v1:forge:requestEvent",
 	"recordResponsibilityEvaluation":        "v1:planner:responsibility",

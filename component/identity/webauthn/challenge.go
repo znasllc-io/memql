@@ -36,13 +36,22 @@ type ChallengeEntry struct {
 	// because there is no known user yet.
 	UserId string
 
-	// Ceremony is CeremonyRegister or the login ceremony's own tag.
+	// Ceremony is CeremonyRegister or CeremonyLogin.
 	Ceremony string
 
 	// Session is go-webauthn's server-side ceremony state: the
 	// challenge bytes, the RP ID, the user handle and the UV
 	// requirement. This is the half the client must never see.
 	Session *gowebauthn.SessionData
+
+	// OAuth is the relying-party context a LOGIN challenge carries
+	// (memql#3407); zero for a registration challenge. It lives here
+	// rather than travelling back through the client for the same
+	// reason Session does: these five fields decide where the minted
+	// auth code is delivered and what verifier can redeem it, so a
+	// client that could restate them at finish time could redirect
+	// someone else's code to itself.
+	OAuth OAuthContext
 
 	// ExpiresAt is when Take starts refusing it.
 	ExpiresAt time.Time
@@ -99,7 +108,10 @@ func (s *ChallengeStore) TTL() time.Duration { return s.ttl }
 // expiry. The handle is 32 bytes of crypto/rand: it is a capability
 // naming one in-flight ceremony, so it must not be guessable even though
 // it is useless without a matching authenticator response.
-func (s *ChallengeStore) Put(userId, ceremony string, session *gowebauthn.SessionData) (string, time.Time, error) {
+//
+// oauth is the login ceremony's relying-party context; registration
+// passes the zero value.
+func (s *ChallengeStore) Put(userId, ceremony string, session *gowebauthn.SessionData, oauth OAuthContext) (string, time.Time, error) {
 	if session == nil {
 		return "", time.Time{}, errors.New("webauthn: challenge store: session required")
 	}
@@ -118,6 +130,7 @@ func (s *ChallengeStore) Put(userId, ceremony string, session *gowebauthn.Sessio
 		UserId:    strings.TrimSpace(userId),
 		Ceremony:  ceremony,
 		Session:   session,
+		OAuth:     oauth,
 		ExpiresAt: expiresAt,
 	}
 	return handle, expiresAt, nil

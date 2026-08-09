@@ -55,6 +55,10 @@ type httpSoftwareAuthenticator struct {
 	aaguid       []byte
 	credentialID []byte
 	flags        byte
+	// signCount is the counter written into authenticatorData. Zero on
+	// registration (which is what a platform authenticator reports) and
+	// bumped by the login tests to drive the regression check.
+	signCount uint32
 }
 
 func newHTTPSoftwareAuthenticator(t *testing.T) *httpSoftwareAuthenticator {
@@ -79,22 +83,86 @@ func (a *httpSoftwareAuthenticator) credentialIdB64() string {
 	return base64.RawURLEncoding.EncodeToString(a.credentialID)
 }
 
+// coseKey encodes the public half as a COSE_Key (ES256 over P-256).
+func (a *httpSoftwareAuthenticator) coseKey() []byte {
+	a.t.Helper()
+	enc, err := cbor.CTAP2EncOptions().EncMode()
+	require.NoError(a.t, err)
+	x := make([]byte, 32)
+	y := make([]byte, 32)
+	a.key.PublicKey.X.FillBytes(x)
+	a.key.PublicKey.Y.FillBytes(y)
+	out, err := enc.Marshal(map[int]any{1: 2, 3: -7, -1: 1, -2: x, -3: y})
+	require.NoError(a.t, err)
+	return out
+}
+
+// publicKeyIdB64 is the base64url COSE key the persisted row carries --
+// what register/finish would have written, so a login test can seed a
+// stored row without running an enrolment first.
+func (a *httpSoftwareAuthenticator) publicKeyB64() string {
+	return base64.RawURLEncoding.EncodeToString(a.coseKey())
+}
+
+// counterBytes is the big-endian signature counter for authenticatorData.
+func (a *httpSoftwareAuthenticator) counterBytes() []byte {
+	buf := make([]byte, 4)
+	binary.BigEndian.PutUint32(buf, a.signCount)
+	return buf
+}
+
+// assert emits the PublicKeyCredential JSON body a browser would POST to
+// login/finish: a REAL ES256 signature over
+// authenticatorData || sha256(clientDataJSON), with the user handle the
+// authenticator stored at registration.
+func (a *httpSoftwareAuthenticator) assert(challenge, userHandle string) json.RawMessage {
+	a.t.Helper()
+	rpIDHash := sha256.Sum256([]byte(passkeyTestRPID))
+	authData := append([]byte{}, rpIDHash[:]...)
+	// No attested credential data on an assertion.
+	authData = append(authData, a.flags & ^byte(0x40))
+	authData = append(authData, a.counterBytes()...)
+
+	clientData, err := json.Marshal(map[string]any{
+		"type":        "webauthn.get",
+		"challenge":   challenge,
+		"origin":      passkeyTestOrigin,
+		"crossOrigin": false,
+	})
+	require.NoError(a.t, err)
+
+	clientDataHash := sha256.Sum256(clientData)
+	digest := sha256.Sum256(append(append([]byte{}, authData...), clientDataHash[:]...))
+	signature, err := ecdsa.SignASN1(rand.Reader, a.key, digest[:])
+	require.NoError(a.t, err)
+
+	body, err := json.Marshal(map[string]any{
+		"id":                     a.credentialIdB64(),
+		"rawId":                  a.credentialIdB64(),
+		"type":                   "public-key",
+		"clientExtensionResults": map[string]any{},
+		"response": map[string]any{
+			"clientDataJSON":    base64.RawURLEncoding.EncodeToString(clientData),
+			"authenticatorData": base64.RawURLEncoding.EncodeToString(authData),
+			"signature":         base64.RawURLEncoding.EncodeToString(signature),
+			"userHandle":        base64.RawURLEncoding.EncodeToString([]byte(userHandle)),
+		},
+	})
+	require.NoError(a.t, err)
+	return json.RawMessage(body)
+}
+
 func (a *httpSoftwareAuthenticator) create(challenge string) json.RawMessage {
 	a.t.Helper()
 	enc, err := cbor.CTAP2EncOptions().EncMode()
 	require.NoError(a.t, err)
 
-	x := make([]byte, 32)
-	y := make([]byte, 32)
-	a.key.PublicKey.X.FillBytes(x)
-	a.key.PublicKey.Y.FillBytes(y)
-	coseKey, err := enc.Marshal(map[int]any{1: 2, 3: -7, -1: 1, -2: x, -3: y})
-	require.NoError(a.t, err)
+	coseKey := a.coseKey()
 
 	rpIDHash := sha256.Sum256([]byte(passkeyTestRPID))
 	authData := append([]byte{}, rpIDHash[:]...)
 	authData = append(authData, a.flags)
-	authData = append(authData, 0, 0, 0, 0) // sign count
+	authData = append(authData, a.counterBytes()...)
 	authData = append(authData, a.aaguid...)
 	credLen := make([]byte, 2)
 	binary.BigEndian.PutUint16(credLen, uint16(len(a.credentialID)))

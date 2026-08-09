@@ -1917,6 +1917,68 @@ mutate identity createPasskeyIdentity {
   }
 }
 
+// ---- mutations/v1/identity/recordPasskeyAssertion.memql ----
+
+// recordPasskeyAssertion
+// ======================
+//
+// Re-stamps a passkey row after a verified login assertion
+// (memql#3407): the new signature counter, the current backup state,
+// and lastUsedAt.
+//
+// Partial nested updates are not supported, so this is a WHOLESALE
+// credentials merge and the caller re-passes every field. That is
+// deliberate rather than merely necessary here: `backupEligible` is
+// immutable for a credential's lifetime by spec, and the login handler
+// passes back the value it READ FROM THE ROW rather than the one the
+// assertion reported -- so the only value this mutation can write is the
+// one already stored. `credentialId` and `publicKey` are re-passed for
+// the same reason and are equally unchangeable in practice: the login
+// ceremony resolved the row BY credentialId and verified the signature
+// against that publicKey, so a different value could not have reached
+// here.
+//
+// The three fields that actually move -- signCount, backupState,
+// lastUsedAt -- are the ones the spec says move. A counter that fails to
+// advance is the cloned-authenticator signal, and the ceremony refuses
+// the login before reaching this mutation; a zero counter from an
+// authenticator that does not implement one (iCloud Keychain, Windows
+// Hello) is NOT that case and lands here as a plain zero.
+//
+// Best-effort by contract: the login succeeds even when this write
+// fails, matching touchBadgeLastUsed.
+
+/// Stamp the verifier state on a passkey identity after a successful assertion: signature counter,
+/// current backup state, and lastUsedAt. Best-effort; the login succeeds even when this write fails.
+mutate identity recordPasskeyAssertion {
+  args {
+    identityId      string!
+    credentialId    string!
+    publicKey       string!
+    signCount       int
+    aaguid          string
+    transports      []string
+    backupEligible  bool
+    backupState     bool
+    registeredBy    string!
+    lastUsedAt      string!
+  }
+  update {
+    id: args.identityId
+    credentials: {
+        credentialId: args.credentialId,
+        publicKey: args.publicKey,
+        signCount: args.signCount,
+        aaguid: args.aaguid,
+        transports: args.transports,
+        backupEligible: args.backupEligible,
+        backupState: args.backupState,
+        registeredBy: args.registeredBy,
+        lastUsedAt: args.lastUsedAt
+      }
+  }
+}
+
 // ---- mutations/v1/identity/touchBadgeLastUsed.memql ----
 
 // touchBadgeLastUsed
