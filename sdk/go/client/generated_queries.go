@@ -80,6 +80,50 @@ func AccountEntitlementBuild(args AccountEntitlementArgs) string {
 	return b.String()
 }
 
+// AccountTokenById -- Fetch one account-token identity by id, gated to the calling user. Owned: userId==actor.userId, so an operator can never read (or, via the revoke handler that calls this, revoke) a credential another operator issued. Backs the pre-revoke ownership check.
+//
+// Bound concept: v1:identity:identity (machine-readable: BoundConcepts["accountTokenById"] in generated_concepts.go).
+type AccountTokenByIdArgs struct {
+	IdentityId string
+}
+
+// AccountTokenById calls the engine query accountTokenById.
+func (qc *QueryClient) AccountTokenById(ctx context.Context, args AccountTokenByIdArgs) (*Result, error) {
+	call := AccountTokenByIdBuild(args)
+	return qc.executeNamed(ctx, "accountTokenById", call)
+}
+
+func AccountTokenByIdBuild(args AccountTokenByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query accountTokenById(")
+	b.WriteString("identityId: ")
+	b.WriteString(quoteMemQL(args.IdentityId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// AccountTokensForAccount -- List the account tokens the CALLING user has issued for one account, newest first. Owned: userId==actor.userId is the gate (the credential's subject is the operator, never the account); the accountId conjunct narrows an already-authorized set rather than deciding access. Includes revoked rows so a revocation can be seen to have taken effect. Carries no keyHash -- the shape names the credential's non-secret leaves by path.
+//
+// Bound concept: v1:identity:identity (machine-readable: BoundConcepts["accountTokensForAccount"] in generated_concepts.go).
+type AccountTokensForAccountArgs struct {
+	AccountId string
+}
+
+// AccountTokensForAccount calls the engine query accountTokensForAccount.
+func (qc *QueryClient) AccountTokensForAccount(ctx context.Context, args AccountTokensForAccountArgs) (*Result, error) {
+	call := AccountTokensForAccountBuild(args)
+	return qc.executeNamed(ctx, "accountTokensForAccount", call)
+}
+
+func AccountTokensForAccountBuild(args AccountTokensForAccountArgs) string {
+	var b strings.Builder
+	b.WriteString("query accountTokensForAccount(")
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // Accounts -- List the caller's accounts, newest first, optionally narrowed to one lifecycle status. Owned: ownerUserId==actor.userId gates the row set server-side, so an operator can never see another operator's customers. Omit status to get every account including archived ones.
 //
 // Bound concept: v1:identity:account (machine-readable: BoundConcepts["accounts"] in generated_concepts.go).
@@ -889,6 +933,52 @@ func AttachmentByIdBuild(args AttachmentByIdArgs) string {
 	return b.String()
 }
 
+// AudienceById -- One audience by id, gated to its owner. Owned.
+//
+// Bound concept: v1:campaigns:audience (machine-readable: BoundConcepts["audienceById"] in generated_concepts.go).
+type AudienceByIdArgs struct {
+	AudienceId string
+}
+
+// AudienceById calls the engine query audienceById.
+func (qc *QueryClient) AudienceById(ctx context.Context, args AudienceByIdArgs) (*Result, error) {
+	call := AudienceByIdBuild(args)
+	return qc.executeNamed(ctx, "audienceById", call)
+}
+
+func AudienceByIdBuild(args AudienceByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query audienceById(")
+	b.WriteString("audienceId: ")
+	b.WriteString(quoteMemQL(args.AudienceId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// Audiences -- The caller's audiences, newest first. Backs the audience list and the campaign editor's audience picker. Owned.
+//
+// Bound concept: v1:campaigns:audience (machine-readable: BoundConcepts["audiences"] in generated_concepts.go).
+type AudiencesArgs struct {
+	Status string
+}
+
+// Audiences calls the engine query audiences.
+func (qc *QueryClient) Audiences(ctx context.Context, args AudiencesArgs) (*Result, error) {
+	call := AudiencesBuild(args)
+	return qc.executeNamed(ctx, "audiences", call)
+}
+
+func AudiencesBuild(args AudiencesArgs) string {
+	var b strings.Builder
+	b.WriteString("query audiences(")
+	if args.Status != "" {
+		b.WriteString("status: ")
+		b.WriteString(quoteMemQL(args.Status))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // AudioOverridesForSpace -- Active audio overrides for every agent in a space. Read by the cognition handler before TTS forwarding.
 //
 // Bound concept: v1:cognition:audioOverride (machine-readable: BoundConcepts["audioOverridesForSpace"] in generated_concepts.go).
@@ -1339,6 +1429,52 @@ func CallsByPartitionBuild(args CallsByPartitionArgs) string {
 	return b.String()
 }
 
+// CampaignById -- One campaign by id, gated to its owner. Backs the campaign editor. Owned: ownerUserId==actor.userId is the load-bearing guard, so a caller cannot read another operator's campaign even with its id.
+//
+// Bound concept: v1:campaigns:campaign (machine-readable: BoundConcepts["campaignById"] in generated_concepts.go).
+type CampaignByIdArgs struct {
+	CampaignId string
+}
+
+// CampaignById calls the engine query campaignById.
+func (qc *QueryClient) CampaignById(ctx context.Context, args CampaignByIdArgs) (*Result, error) {
+	call := CampaignByIdBuild(args)
+	return qc.executeNamed(ctx, "campaignById", call)
+}
+
+func CampaignByIdBuild(args CampaignByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query campaignById(")
+	b.WriteString("campaignId: ")
+	b.WriteString(quoteMemQL(args.CampaignId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// Campaigns -- The caller's campaigns, newest first. The portal's campaign list. Owned: the row set is gated by ownerUserId==actor.userId server-side, so cross-operator reads are impossible. Optional status filter narrows to one lifecycle bucket; omit it to see everything.
+//
+// Bound concept: v1:campaigns:campaign (machine-readable: BoundConcepts["campaigns"] in generated_concepts.go).
+type CampaignsArgs struct {
+	Status string
+}
+
+// Campaigns calls the engine query campaigns.
+func (qc *QueryClient) Campaigns(ctx context.Context, args CampaignsArgs) (*Result, error) {
+	call := CampaignsBuild(args)
+	return qc.executeNamed(ctx, "campaigns", call)
+}
+
+func CampaignsBuild(args CampaignsArgs) string {
+	var b strings.Builder
+	b.WriteString("query campaigns(")
+	if args.Status != "" {
+		b.WriteString("status: ")
+		b.WriteString(quoteMemQL(args.Status))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // CapabilitiesForResourceType -- List every active capability across all roles for a single resource type -- e.g. 'who can do anything to a principal?'. Backs the cockpit's per-resource RBAC audit view and lets E1.3 governance reason about all principal-targeting grants in one read. Bounded to the (small) set of grants naming that resource type.
 //
 // Bound concept: v1:rbac:capability (machine-readable: BoundConcepts["capabilitiesForResourceType"] in generated_concepts.go).
@@ -1502,6 +1638,61 @@ func ClusterSpawnEventsBuild(args ClusterSpawnEventsArgs) string {
 	return "query clusterSpawnEvents()"
 }
 
+// ComposedViewById -- Fetch one composed view by id, gated to its owner. Owned: ownerUserId==actor.userId is the load-bearing guard, so a caller cannot open another person's view even holding its id. This is the read behind opening a saved view and behind re-opening it in the composer to edit.
+//
+// Bound concept: v1:portalviews:view (machine-readable: BoundConcepts["composedViewById"] in generated_concepts.go).
+type ComposedViewByIdArgs struct {
+	ViewId string
+}
+
+// ComposedViewById calls the engine query composedViewById.
+func (qc *QueryClient) ComposedViewById(ctx context.Context, args ComposedViewByIdArgs) (*Result, error) {
+	call := ComposedViewByIdBuild(args)
+	return qc.executeNamed(ctx, "composedViewById", call)
+}
+
+func ComposedViewByIdBuild(args ComposedViewByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query composedViewById(")
+	b.WriteString("viewId: ")
+	b.WriteString(quoteMemQL(args.ViewId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ComposedViews -- List the caller's composed views, newest first. Owned: the row set is gated by ownerUserId==actor.userId server-side, so cross-user reads are impossible and no argument can widen it. Optional status narrows to the active list or to the archived one; omit it for both. Optional conceptId answers "which of my views cover this concept", which is what the composer offers when somebody opens a concept that already has a saved view.
+//
+// Bound concept: v1:portalviews:view (machine-readable: BoundConcepts["composedViews"] in generated_concepts.go).
+type ComposedViewsArgs struct {
+	// Enum: active | archived
+	Status    string
+	ConceptId string
+}
+
+// ComposedViews calls the engine query composedViews.
+func (qc *QueryClient) ComposedViews(ctx context.Context, args ComposedViewsArgs) (*Result, error) {
+	call := ComposedViewsBuild(args)
+	return qc.executeNamed(ctx, "composedViews", call)
+}
+
+func ComposedViewsBuild(args ComposedViewsArgs) string {
+	var b strings.Builder
+	b.WriteString("query composedViews(")
+	if args.Status != "" {
+		b.WriteString("status: ")
+		b.WriteString(quoteMemQL(args.Status))
+	}
+	if args.ConceptId != "" {
+		if b.Len() > 20 {
+			b.WriteString(", ")
+		}
+		b.WriteString("conceptId: ")
+		b.WriteString(quoteMemQL(args.ConceptId))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // ConsentOptOut -- Opt-out rows for an external number (newest first). Read in the outbound call path to block calls to opted-out numbers (TCPA). Not owner-gated: the enforcement check runs in the agent/call context, not an admin one.
 //
 // Bound concept: v1:telephony:consent (machine-readable: BoundConcepts["consentOptOut"] in generated_concepts.go).
@@ -1559,6 +1750,28 @@ func DelegationsByIdentityBuild(args DelegationsByIdentityArgs) string {
 	b.WriteString("query delegationsByIdentity(")
 	b.WriteString("identityId: ")
 	b.WriteString(quoteMemQL(args.IdentityId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// DeliveriesForCampaign -- Per-recipient outcomes for one campaign, newest first. Empty until the sending engine exists (memql#3323 scoped it out); the query ships with the schema so that work is additive. Owned; @pii projection.
+//
+// Bound concept: v1:campaigns:delivery (machine-readable: BoundConcepts["deliveriesForCampaign"] in generated_concepts.go).
+type DeliveriesForCampaignArgs struct {
+	CampaignId string
+}
+
+// DeliveriesForCampaign calls the engine query deliveriesForCampaign.
+func (qc *QueryClient) DeliveriesForCampaign(ctx context.Context, args DeliveriesForCampaignArgs) (*Result, error) {
+	call := DeliveriesForCampaignBuild(args)
+	return qc.executeNamed(ctx, "deliveriesForCampaign", call)
+}
+
+func DeliveriesForCampaignBuild(args DeliveriesForCampaignArgs) string {
+	var b strings.Builder
+	b.WriteString("query deliveriesForCampaign(")
+	b.WriteString("campaignId: ")
+	b.WriteString(quoteMemQL(args.CampaignId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -3225,7 +3438,7 @@ func ProvisionedWorkspacesBuild(args ProvisionedWorkspacesArgs) string {
 	return "query provisionedWorkspaces()"
 }
 
-// RecentAuditEvents -- Recent audit events, optionally filtered by category. Powers the admin audit-log view.
+// RecentAuditEvents -- Recent audit events, optionally filtered by category. Powers the admin audit-log view. Owner/admin only: the audit trail names who did what to whom across the whole cluster, so an ungated read hands every authenticated caller the cluster's security history. The gate was implicit while the only caller was the identity service's /admin/* routes, which enforce it at the route (component/identity/admin, requireAdmin). The portal reaches this query directly over the stream (memql#3324), where no route gate stands in front of it -- so the predicate has to be in the query, which is the only place both callers pass through.
 //
 // Bound concept: v1:identity:auditEvent (machine-readable: BoundConcepts["recentAuditEvents"] in generated_concepts.go).
 type RecentAuditEventsArgs struct {
@@ -3245,6 +3458,28 @@ func RecentAuditEventsBuild(args RecentAuditEventsArgs) string {
 		b.WriteString("category: ")
 		b.WriteString(quoteMemQL(args.Category))
 	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// RecipientsForAudience -- Every recipient in one of the caller's audiences, newest first -- including suppressed ones, which is the point: an operator reviewing an audience needs to see the unsubscribes and bounces, not a filtered view that makes them invisible. Owned, and the projection carries @pii fields, so the caller conjunct is doubly load-bearing here.
+//
+// Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["recipientsForAudience"] in generated_concepts.go).
+type RecipientsForAudienceArgs struct {
+	AudienceId string
+}
+
+// RecipientsForAudience calls the engine query recipientsForAudience.
+func (qc *QueryClient) RecipientsForAudience(ctx context.Context, args RecipientsForAudienceArgs) (*Result, error) {
+	call := RecipientsForAudienceBuild(args)
+	return qc.executeNamed(ctx, "recipientsForAudience", call)
+}
+
+func RecipientsForAudienceBuild(args RecipientsForAudienceArgs) string {
+	var b strings.Builder
+	b.WriteString("query recipientsForAudience(")
+	b.WriteString("audienceId: ")
+	b.WriteString(quoteMemQL(args.AudienceId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -3471,6 +3706,28 @@ func SearchUsersBuild(args SearchUsersArgs) string {
 		b.WriteString("active: ")
 		b.WriteString(fmt.Sprintf("%v", args.Active))
 	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// SendableRecipientsForAudience -- The subset of an audience a send would actually reach: subscribed addresses only. Distinct from recipientsForAudience because the difference between the two counts IS the suppression rate, and an operator about to schedule a campaign wants both numbers. Owned; @pii projection.
+//
+// Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["sendableRecipientsForAudience"] in generated_concepts.go).
+type SendableRecipientsForAudienceArgs struct {
+	AudienceId string
+}
+
+// SendableRecipientsForAudience calls the engine query sendableRecipientsForAudience.
+func (qc *QueryClient) SendableRecipientsForAudience(ctx context.Context, args SendableRecipientsForAudienceArgs) (*Result, error) {
+	call := SendableRecipientsForAudienceBuild(args)
+	return qc.executeNamed(ctx, "sendableRecipientsForAudience", call)
+}
+
+func SendableRecipientsForAudienceBuild(args SendableRecipientsForAudienceArgs) string {
+	var b strings.Builder
+	b.WriteString("query sendableRecipientsForAudience(")
+	b.WriteString("audienceId: ")
+	b.WriteString(quoteMemQL(args.AudienceId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -3823,6 +4080,52 @@ func TasksForPlanBuild(args TasksForPlanArgs) string {
 	b.WriteString("query tasksForPlan(")
 	b.WriteString("planId: ")
 	b.WriteString(quoteMemQL(args.PlanId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// TemplateById -- One template by id, gated to its owner. Backs the template editor and the campaign editor's preview. Owned.
+//
+// Bound concept: v1:campaigns:template (machine-readable: BoundConcepts["templateById"] in generated_concepts.go).
+type TemplateByIdArgs struct {
+	TemplateId string
+}
+
+// TemplateById calls the engine query templateById.
+func (qc *QueryClient) TemplateById(ctx context.Context, args TemplateByIdArgs) (*Result, error) {
+	call := TemplateByIdBuild(args)
+	return qc.executeNamed(ctx, "templateById", call)
+}
+
+func TemplateByIdBuild(args TemplateByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query templateById(")
+	b.WriteString("templateId: ")
+	b.WriteString(quoteMemQL(args.TemplateId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// Templates -- The caller's templates, newest first. Backs the template list and the campaign editor's template picker. Owned.
+//
+// Bound concept: v1:campaigns:template (machine-readable: BoundConcepts["templates"] in generated_concepts.go).
+type TemplatesArgs struct {
+	Status string
+}
+
+// Templates calls the engine query templates.
+func (qc *QueryClient) Templates(ctx context.Context, args TemplatesArgs) (*Result, error) {
+	call := TemplatesBuild(args)
+	return qc.executeNamed(ctx, "templates", call)
+}
+
+func TemplatesBuild(args TemplatesArgs) string {
+	var b strings.Builder
+	b.WriteString("query templates(")
+	if args.Status != "" {
+		b.WriteString("status: ")
+		b.WriteString(quoteMemQL(args.Status))
+	}
 	b.WriteString(")")
 	return b.String()
 }

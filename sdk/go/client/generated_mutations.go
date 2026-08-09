@@ -136,6 +136,56 @@ func AddHarnessStepBuild(args AddHarnessStepArgs) string {
 	return b.String()
 }
 
+// AddRecipient -- Add one address to an audience. Owned. source defaults to 'manual' via ?? rather than via the concept's @default, which is never applied on insert.
+//
+// Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["addRecipient"] in generated_concepts.go).
+type AddRecipientArgs struct {
+	RecipientId string
+	AudienceId  string
+	Email       string
+	DisplayName string
+	Source      string
+}
+
+// AddRecipient calls the engine mutation addRecipient.
+func (qc *QueryClient) AddRecipient(ctx context.Context, args AddRecipientArgs) (*Result, error) {
+	call := AddRecipientBuild(args)
+	return qc.executeNamed(ctx, "addRecipient", call)
+}
+
+func AddRecipientBuild(args AddRecipientArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation addRecipient(")
+	b.WriteString("recipientId: ")
+	b.WriteString(quoteMemQL(args.RecipientId))
+	if b.Len() > 22 {
+		b.WriteString(", ")
+	}
+	b.WriteString("audienceId: ")
+	b.WriteString(quoteMemQL(args.AudienceId))
+	if b.Len() > 22 {
+		b.WriteString(", ")
+	}
+	b.WriteString("email: ")
+	b.WriteString(quoteMemQL(args.Email))
+	if args.DisplayName != "" {
+		if b.Len() > 22 {
+			b.WriteString(", ")
+		}
+		b.WriteString("displayName: ")
+		b.WriteString(quoteMemQL(args.DisplayName))
+	}
+	if args.Source != "" {
+		if b.Len() > 22 {
+			b.WriteString(", ")
+		}
+		b.WriteString("source: ")
+		b.WriteString(quoteMemQL(args.Source))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // AdvanceHarnessConsolidationCursor -- Advance the per-owner v1:harness:consolidationCursor watermark to the engine-computed max(createdAt) of the batch just consolidated -- the incremental-cost mechanism (next run reads only episodes newer than this). Upserts on a stable per-owner id so it creates the cursor on first run and advances it thereafter. episodesSeen takes the engine-computed running total. ownerUserId stamped from actor.userId (owned tier).
 //
 // Bound concept: v1:harness:consolidationCursor (machine-readable: BoundConcepts["advanceHarnessConsolidationCursor"] in generated_concepts.go).
@@ -515,6 +565,50 @@ func ArchiveAccountBuild(args ArchiveAccountArgs) string {
 	return b.String()
 }
 
+// ArchiveAudience -- Archive an audience: keep it (and every delivery record naming it) readable, but drop it out of the campaign editor's picker. Owned -- ownerUserId is re-stamped from actor.userId, and the engine's row-authz write guard refuses the update outright when the target row's owner is somebody else.
+//
+// Bound concept: v1:campaigns:audience (machine-readable: BoundConcepts["archiveAudience"] in generated_concepts.go).
+type ArchiveAudienceArgs struct {
+	AudienceId string
+}
+
+// ArchiveAudience calls the engine mutation archiveAudience.
+func (qc *QueryClient) ArchiveAudience(ctx context.Context, args ArchiveAudienceArgs) (*Result, error) {
+	call := ArchiveAudienceBuild(args)
+	return qc.executeNamed(ctx, "archiveAudience", call)
+}
+
+func ArchiveAudienceBuild(args ArchiveAudienceArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation archiveAudience(")
+	b.WriteString("audienceId: ")
+	b.WriteString(quoteMemQL(args.AudienceId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ArchiveComposedView -- Archive a composed view: flip status to archived and stamp archivedAt. The row is retained in full -- memQL has no hard delete, and a person who retires a view they spent time on should be able to find it again. Owned: ownerUserId is re-stamped from actor.userId and the write guard refuses a target row the actor does not own.
+//
+// Bound concept: v1:portalviews:view (machine-readable: BoundConcepts["archiveComposedView"] in generated_concepts.go).
+type ArchiveComposedViewArgs struct {
+	ViewId string
+}
+
+// ArchiveComposedView calls the engine mutation archiveComposedView.
+func (qc *QueryClient) ArchiveComposedView(ctx context.Context, args ArchiveComposedViewArgs) (*Result, error) {
+	call := ArchiveComposedViewBuild(args)
+	return qc.executeNamed(ctx, "archiveComposedView", call)
+}
+
+func ArchiveComposedViewBuild(args ArchiveComposedViewArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation archiveComposedView(")
+	b.WriteString("viewId: ")
+	b.WriteString(quoteMemQL(args.ViewId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // AssignResponsibility -- Persist a routing decision onto a v1:planner:responsibility (epic #632, C2): bind the resolved agent (assignedAgentId), optional role slug (assignedRoleSlug), and flip targetKind off 'unassigned' onto the concrete kind (assistant / specialist). Called by the reactive-loop router after agentFactoryAnalyze + createSpecialist/extendSpecialist mint or match an agent. Partial-update via update(); ownerUserId re-stamped from actor.userId (owned tier) so the router can only rewrite the row's own owner -- the poller impersonates the responsibility's owner in the AccessContext before calling, so this lands as an owned write.
 //
 // Bound concept: v1:planner:responsibility (machine-readable: BoundConcepts["assignResponsibility"] in generated_concepts.go).
@@ -752,6 +846,28 @@ func BumpUserRevocationEpochBuild(args BumpUserRevocationEpochArgs) string {
 	}
 	b.WriteString("newEpoch: ")
 	b.WriteString(fmt.Sprintf("%v", args.NewEpoch))
+	b.WriteString(")")
+	return b.String()
+}
+
+// CancelCampaign -- Cancel a campaign. Terminal by intent: a cancelled campaign is kept for its history rather than deleted, and re-running it means authoring a new one. Owned.
+//
+// Bound concept: v1:campaigns:campaign (machine-readable: BoundConcepts["cancelCampaign"] in generated_concepts.go).
+type CancelCampaignArgs struct {
+	CampaignId string
+}
+
+// CancelCampaign calls the engine mutation cancelCampaign.
+func (qc *QueryClient) CancelCampaign(ctx context.Context, args CancelCampaignArgs) (*Result, error) {
+	call := CancelCampaignBuild(args)
+	return qc.executeNamed(ctx, "cancelCampaign", call)
+}
+
+func CancelCampaignBuild(args CancelCampaignArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation cancelCampaign(")
+	b.WriteString("campaignId: ")
+	b.WriteString(quoteMemQL(args.CampaignId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -1262,6 +1378,54 @@ func CreateAccountBuild(args CreateAccountArgs) string {
 		}
 		b.WriteString("externalRef: ")
 		b.WriteString(quoteMemQL(args.ExternalRef))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// CreateAccountTokenIdentity -- Create an account_token identity: a credential issued to the CALLING user on behalf of args.accountId. The subject is the user; the account is a binding, never a second kind of subject. userId and mintedBy are stamped from actor.userId and are deliberately not args, so the mutation cannot mint a credential attributed to anyone but its caller. Stores only the SHA-256 hex digest -- plaintext lives at the caller for one-time display.
+//
+// Bound concept: v1:identity:identity (machine-readable: BoundConcepts["createAccountTokenIdentity"] in generated_concepts.go).
+type CreateAccountTokenIdentityArgs struct {
+	IdentityId string
+	AccountId  string
+	Label      string
+	KeyHash    string
+	ExpiresAt  string
+}
+
+// CreateAccountTokenIdentity calls the engine mutation createAccountTokenIdentity.
+func (qc *QueryClient) CreateAccountTokenIdentity(ctx context.Context, args CreateAccountTokenIdentityArgs) (*Result, error) {
+	call := CreateAccountTokenIdentityBuild(args)
+	return qc.executeNamed(ctx, "createAccountTokenIdentity", call)
+}
+
+func CreateAccountTokenIdentityBuild(args CreateAccountTokenIdentityArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation createAccountTokenIdentity(")
+	b.WriteString("identityId: ")
+	b.WriteString(quoteMemQL(args.IdentityId))
+	if b.Len() > 36 {
+		b.WriteString(", ")
+	}
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	if b.Len() > 36 {
+		b.WriteString(", ")
+	}
+	b.WriteString("label: ")
+	b.WriteString(quoteMemQL(args.Label))
+	if b.Len() > 36 {
+		b.WriteString(", ")
+	}
+	b.WriteString("keyHash: ")
+	b.WriteString(quoteMemQL(args.KeyHash))
+	if args.ExpiresAt != "" {
+		if b.Len() > 36 {
+			b.WriteString(", ")
+		}
+		b.WriteString("expiresAt: ")
+		b.WriteString(quoteMemQL(args.ExpiresAt))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -1932,6 +2096,42 @@ func CreateArtifactBuild(args CreateArtifactArgs) string {
 	return b.String()
 }
 
+// CreateAudience -- Create an audience owned by the caller. Owned: ownerUserId is stamped from actor.userId, so a caller can only ever create their own audiences.
+//
+// Bound concept: v1:campaigns:audience (machine-readable: BoundConcepts["createAudience"] in generated_concepts.go).
+type CreateAudienceArgs struct {
+	AudienceId  string
+	Name        string
+	Description string
+}
+
+// CreateAudience calls the engine mutation createAudience.
+func (qc *QueryClient) CreateAudience(ctx context.Context, args CreateAudienceArgs) (*Result, error) {
+	call := CreateAudienceBuild(args)
+	return qc.executeNamed(ctx, "createAudience", call)
+}
+
+func CreateAudienceBuild(args CreateAudienceArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation createAudience(")
+	b.WriteString("audienceId: ")
+	b.WriteString(quoteMemQL(args.AudienceId))
+	if b.Len() > 24 {
+		b.WriteString(", ")
+	}
+	b.WriteString("name: ")
+	b.WriteString(quoteMemQL(args.Name))
+	if args.Description != "" {
+		if b.Len() > 24 {
+			b.WriteString(", ")
+		}
+		b.WriteString("description: ")
+		b.WriteString(quoteMemQL(args.Description))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // CreateAuditEvent -- Append a row to the append-only security audit log.
 //
 // Bound concept: v1:identity:auditEvent (machine-readable: BoundConcepts["createAuditEvent"] in generated_concepts.go).
@@ -2577,6 +2777,68 @@ func CreateCalendarEventBuild(args CreateCalendarEventArgs) string {
 	return b.String()
 }
 
+// CreateCampaign -- Create a campaign: one audience, one template, an optional intended time. Lands as a draft with its counters zeroed. Owned.
+//
+// Bound concept: v1:campaigns:campaign (machine-readable: BoundConcepts["createCampaign"] in generated_concepts.go).
+type CreateCampaignArgs struct {
+	CampaignId  string
+	Name        string
+	AudienceId  string
+	TemplateId  string
+	FromName    string
+	ReplyTo     string
+	ScheduledAt string
+}
+
+// CreateCampaign calls the engine mutation createCampaign.
+func (qc *QueryClient) CreateCampaign(ctx context.Context, args CreateCampaignArgs) (*Result, error) {
+	call := CreateCampaignBuild(args)
+	return qc.executeNamed(ctx, "createCampaign", call)
+}
+
+func CreateCampaignBuild(args CreateCampaignArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation createCampaign(")
+	b.WriteString("campaignId: ")
+	b.WriteString(quoteMemQL(args.CampaignId))
+	if b.Len() > 24 {
+		b.WriteString(", ")
+	}
+	b.WriteString("name: ")
+	b.WriteString(quoteMemQL(args.Name))
+	if b.Len() > 24 {
+		b.WriteString(", ")
+	}
+	b.WriteString("audienceId: ")
+	b.WriteString(quoteMemQL(args.AudienceId))
+	if b.Len() > 24 {
+		b.WriteString(", ")
+	}
+	b.WriteString("templateId: ")
+	b.WriteString(quoteMemQL(args.TemplateId))
+	if args.FromName != "" {
+		if b.Len() > 24 {
+			b.WriteString(", ")
+		}
+		b.WriteString("fromName: ")
+		b.WriteString(quoteMemQL(args.FromName))
+	}
+	if args.ReplyTo != "" {
+		if b.Len() > 24 {
+			b.WriteString(", ")
+		}
+		b.WriteString("replyTo: ")
+		b.WriteString(quoteMemQL(args.ReplyTo))
+	}
+	if b.Len() > 24 {
+		b.WriteString(", ")
+	}
+	b.WriteString("scheduledAt: ")
+	b.WriteString(quoteMemQL(args.ScheduledAt))
+	b.WriteString(")")
+	return b.String()
+}
+
 // CreateCapability -- Insert a v1:rbac:capability catalog row -- one (verb x resourceType) grant for a role. Called by the SeedMaterializer when it walks the capability seed declarations under dsl/rbac/*.memql (the materializer stamps the seed body's `id` into `capabilityId`). Also the write surface the E1.4 (memql#2074) rank-bounded custom-role authoring path layers on top of -- predefined defaults false there so the grant stays editable within the creator's rank bound; base-role seeds pass predefined=true to mark the row immutable at runtime (enforced by E1.2). Partition-agnostic: the engine stamps every v1:rbac:capability insert into the _system slot regardless of the envelope, exactly like createAgentRole / createSkill.
 //
 // Bound concept: v1:rbac:capability (machine-readable: BoundConcepts["createCapability"] in generated_concepts.go).
@@ -2948,6 +3210,63 @@ func CreateClusterSettingsBuild(args CreateClusterSettingsArgs) string {
 		}
 		b.WriteString("authoredAutomationsEnabled: ")
 		b.WriteString(fmt.Sprintf("%v", args.AuthoredAutomationsEnabled))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// CreateComposedView -- Save a composed view. Owned: ownerUserId is stamped from actor.userId, so a person can only ever create their own views. Opens at status=active. conceptIds is the selection the composer made and arrangements is what it produced -- one arrangement per selected concept, in section order. origin records whether the saved arrangement came out of a model proposal or out of the deterministic match plus hand edits; it is provenance, and both kinds render identically.
+//
+// Bound concept: v1:portalviews:view (machine-readable: BoundConcepts["createComposedView"] in generated_concepts.go).
+type CreateComposedViewArgs struct {
+	ViewId       string
+	Name         string
+	Description  string
+	ConceptIds   []string
+	Arrangements []map[string]any
+	// Enum: manual | suggested
+	Origin string
+}
+
+// CreateComposedView calls the engine mutation createComposedView.
+func (qc *QueryClient) CreateComposedView(ctx context.Context, args CreateComposedViewArgs) (*Result, error) {
+	call := CreateComposedViewBuild(args)
+	return qc.executeNamed(ctx, "createComposedView", call)
+}
+
+func CreateComposedViewBuild(args CreateComposedViewArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation createComposedView(")
+	b.WriteString("viewId: ")
+	b.WriteString(quoteMemQL(args.ViewId))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("name: ")
+	b.WriteString(quoteMemQL(args.Name))
+	if args.Description != "" {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("description: ")
+		b.WriteString(quoteMemQL(args.Description))
+	}
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("conceptIds: ")
+	b.WriteString(renderMemQLValue(args.ConceptIds))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("arrangements: ")
+	b.WriteString(renderMemQLValue(args.Arrangements))
+	if args.Origin != "" {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("origin: ")
+		b.WriteString(quoteMemQL(args.Origin))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -5301,6 +5620,54 @@ func CreateTaskBuild(args CreateTaskArgs) string {
 	}
 	b.WriteString("input: ")
 	b.WriteString(renderMemQLValue(args.Input))
+	b.WriteString(")")
+	return b.String()
+}
+
+// CreateTemplate -- Create an email template owned by the caller. Lands as a draft; an operator marks it ready with updateTemplate once the copy is finished. Owned.
+//
+// Bound concept: v1:campaigns:template (machine-readable: BoundConcepts["createTemplate"] in generated_concepts.go).
+type CreateTemplateArgs struct {
+	TemplateId string
+	Name       string
+	Subject    string
+	TextBody   string
+	HtmlBody   string
+}
+
+// CreateTemplate calls the engine mutation createTemplate.
+func (qc *QueryClient) CreateTemplate(ctx context.Context, args CreateTemplateArgs) (*Result, error) {
+	call := CreateTemplateBuild(args)
+	return qc.executeNamed(ctx, "createTemplate", call)
+}
+
+func CreateTemplateBuild(args CreateTemplateArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation createTemplate(")
+	b.WriteString("templateId: ")
+	b.WriteString(quoteMemQL(args.TemplateId))
+	if b.Len() > 24 {
+		b.WriteString(", ")
+	}
+	b.WriteString("name: ")
+	b.WriteString(quoteMemQL(args.Name))
+	if b.Len() > 24 {
+		b.WriteString(", ")
+	}
+	b.WriteString("subject: ")
+	b.WriteString(quoteMemQL(args.Subject))
+	if b.Len() > 24 {
+		b.WriteString(", ")
+	}
+	b.WriteString("textBody: ")
+	b.WriteString(quoteMemQL(args.TextBody))
+	if args.HtmlBody != "" {
+		if b.Len() > 24 {
+			b.WriteString(", ")
+		}
+		b.WriteString("htmlBody: ")
+		b.WriteString(quoteMemQL(args.HtmlBody))
+	}
 	b.WriteString(")")
 	return b.String()
 }
@@ -9101,6 +9468,28 @@ func RevertRecordBuild(args RevertRecordArgs) string {
 	return b.String()
 }
 
+// RevokeAccountTokenIdentity -- Revoke (deactivate) an account_token identity row. Only `active` changes; identityType, credentials and label inherit from the persisted row. Ownership is checked by the caller (component/grpc/account_token_handlers.go reads accountTokenById as the CALLER first) -- see the block comment above for why the check cannot live here yet.
+//
+// Bound concept: v1:identity:identity (machine-readable: BoundConcepts["revokeAccountTokenIdentity"] in generated_concepts.go).
+type RevokeAccountTokenIdentityArgs struct {
+	IdentityId string
+}
+
+// RevokeAccountTokenIdentity calls the engine mutation revokeAccountTokenIdentity.
+func (qc *QueryClient) RevokeAccountTokenIdentity(ctx context.Context, args RevokeAccountTokenIdentityArgs) (*Result, error) {
+	call := RevokeAccountTokenIdentityBuild(args)
+	return qc.executeNamed(ctx, "revokeAccountTokenIdentity", call)
+}
+
+func RevokeAccountTokenIdentityBuild(args RevokeAccountTokenIdentityArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation revokeAccountTokenIdentity(")
+	b.WriteString("identityId: ")
+	b.WriteString(quoteMemQL(args.IdentityId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // RevokeAgentAuthorization -- Soft-revoke a standing authorization. User-revocable from the agent's settings at any time. SELF-SERVICE: only the granting user (the row's userId) may revoke their own grant -- the engine refuses a write onto anyone else's row under the concept's declared owner tier. Read-merges the existing row so the caller only passes the auth id; agentId/userId/planKind/spaceScope inherit from the persisted row (memql#1628).
 //
 // Bound concept: v1:agents:agentAuthorization (machine-readable: BoundConcepts["revokeAgentAuthorization"] in generated_concepts.go).
@@ -9380,6 +9769,34 @@ func ScheduleAccountDeletionBuild(args ScheduleAccountDeletionArgs) string {
 	b.WriteString("mutation scheduleAccountDeletion(")
 	b.WriteString("userId: ")
 	b.WriteString(quoteMemQL(args.UserId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ScheduleCampaign -- Commit a campaign to a time. Records the operator's intent; NOTHING ACTS ON IT YET -- the scheduler is part of the sending engine, which is a separate piece of work. Owned.
+//
+// Bound concept: v1:campaigns:campaign (machine-readable: BoundConcepts["scheduleCampaign"] in generated_concepts.go).
+type ScheduleCampaignArgs struct {
+	CampaignId  string
+	ScheduledAt string
+}
+
+// ScheduleCampaign calls the engine mutation scheduleCampaign.
+func (qc *QueryClient) ScheduleCampaign(ctx context.Context, args ScheduleCampaignArgs) (*Result, error) {
+	call := ScheduleCampaignBuild(args)
+	return qc.executeNamed(ctx, "scheduleCampaign", call)
+}
+
+func ScheduleCampaignBuild(args ScheduleCampaignArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation scheduleCampaign(")
+	b.WriteString("campaignId: ")
+	b.WriteString(quoteMemQL(args.CampaignId))
+	if b.Len() > 26 {
+		b.WriteString(", ")
+	}
+	b.WriteString("scheduledAt: ")
+	b.WriteString(quoteMemQL(args.ScheduledAt))
 	b.WriteString(")")
 	return b.String()
 }
@@ -10491,6 +10908,41 @@ func SetPolicyBuild(args SetPolicyArgs) string {
 	return b.String()
 }
 
+// SetRecipientSubscription -- Change one recipient's subscription state -- the write behind an operator honouring an unsubscribe by hand, and the write a future unsubscribe endpoint will reuse. Owned.
+// unsubscribedAt is threaded by the caller rather than stamped from `now`, because this same mutation records a state change that HAPPENED EARLIER (a bounce report processed hours later, an unsubscribe forwarded by support) and stamping the clock would date every one of those to the moment the operator got round to it.
+//
+// Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["setRecipientSubscription"] in generated_concepts.go).
+type SetRecipientSubscriptionArgs struct {
+	RecipientId        string
+	SubscriptionStatus string
+	UnsubscribedAt     string
+}
+
+// SetRecipientSubscription calls the engine mutation setRecipientSubscription.
+func (qc *QueryClient) SetRecipientSubscription(ctx context.Context, args SetRecipientSubscriptionArgs) (*Result, error) {
+	call := SetRecipientSubscriptionBuild(args)
+	return qc.executeNamed(ctx, "setRecipientSubscription", call)
+}
+
+func SetRecipientSubscriptionBuild(args SetRecipientSubscriptionArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation setRecipientSubscription(")
+	b.WriteString("recipientId: ")
+	b.WriteString(quoteMemQL(args.RecipientId))
+	if b.Len() > 34 {
+		b.WriteString(", ")
+	}
+	b.WriteString("subscriptionStatus: ")
+	b.WriteString(quoteMemQL(args.SubscriptionStatus))
+	if b.Len() > 34 {
+		b.WriteString(", ")
+	}
+	b.WriteString("unsubscribedAt: ")
+	b.WriteString(quoteMemQL(args.UnsubscribedAt))
+	b.WriteString(")")
+	return b.String()
+}
+
 // SetResponsibilityStatus -- Transition a v1:planner:responsibility's lifecycle status (draft / active / paused / archived). Partial-update via update(); ownerUserId re-stamped from actor.userId (owned tier).
 //
 // Bound concept: v1:planner:responsibility (machine-readable: BoundConcepts["setResponsibilityStatus"] in generated_concepts.go).
@@ -11111,6 +11563,68 @@ func UpdateCalendarEventBuild(args UpdateCalendarEventArgs) string {
 	return b.String()
 }
 
+// UpdateCampaign -- Edit a draft campaign's authoring fields. Deliberately does NOT accept status or any send-state field: lifecycle moves through scheduleCampaign / cancelCampaign, and the counters belong to the sending engine. Owned.
+//
+// Bound concept: v1:campaigns:campaign (machine-readable: BoundConcepts["updateCampaign"] in generated_concepts.go).
+type UpdateCampaignArgs struct {
+	CampaignId  string
+	Name        string
+	AudienceId  string
+	TemplateId  string
+	FromName    string
+	ReplyTo     string
+	ScheduledAt string
+}
+
+// UpdateCampaign calls the engine mutation updateCampaign.
+func (qc *QueryClient) UpdateCampaign(ctx context.Context, args UpdateCampaignArgs) (*Result, error) {
+	call := UpdateCampaignBuild(args)
+	return qc.executeNamed(ctx, "updateCampaign", call)
+}
+
+func UpdateCampaignBuild(args UpdateCampaignArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation updateCampaign(")
+	b.WriteString("campaignId: ")
+	b.WriteString(quoteMemQL(args.CampaignId))
+	if b.Len() > 24 {
+		b.WriteString(", ")
+	}
+	b.WriteString("name: ")
+	b.WriteString(quoteMemQL(args.Name))
+	if b.Len() > 24 {
+		b.WriteString(", ")
+	}
+	b.WriteString("audienceId: ")
+	b.WriteString(quoteMemQL(args.AudienceId))
+	if b.Len() > 24 {
+		b.WriteString(", ")
+	}
+	b.WriteString("templateId: ")
+	b.WriteString(quoteMemQL(args.TemplateId))
+	if args.FromName != "" {
+		if b.Len() > 24 {
+			b.WriteString(", ")
+		}
+		b.WriteString("fromName: ")
+		b.WriteString(quoteMemQL(args.FromName))
+	}
+	if args.ReplyTo != "" {
+		if b.Len() > 24 {
+			b.WriteString(", ")
+		}
+		b.WriteString("replyTo: ")
+		b.WriteString(quoteMemQL(args.ReplyTo))
+	}
+	if b.Len() > 24 {
+		b.WriteString(", ")
+	}
+	b.WriteString("scheduledAt: ")
+	b.WriteString(quoteMemQL(args.ScheduledAt))
+	b.WriteString(")")
+	return b.String()
+}
+
 // UpdateClusterSettings -- Update the singleton cluster-settings row from the admin UI. Read-merges the existing row (update()): only the fields the caller actually passes change; every omitted field -- internalDomains, brand*, TTLs, bootstrap*, etc. -- inherits from the persisted row instead of being wiped to its empty default (memql#1686). registrationMode + internalDefaultRole stay @required because the admin form always submits them.
 //
 // Bound concept: v1:identity:clusterSettings (machine-readable: BoundConcepts["updateClusterSettings"] in generated_concepts.go).
@@ -11327,6 +11841,69 @@ func UpdateClusterSettingsBuild(args UpdateClusterSettingsArgs) string {
 		}
 		b.WriteString("authoredAutomationsEnabled: ")
 		b.WriteString(fmt.Sprintf("%v", args.AuthoredAutomationsEnabled))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// UpdateComposedView -- Update a saved view: rename it, re-describe it, or replace its selection and arrangement. Partial read-merge, so an omitted field keeps its current value -- but an arrangement that IS supplied replaces the stored one whole (see the header). Owned: ownerUserId is re-stamped from actor.userId so the write cannot transfer the row, and the row-authz write guard refuses the call outright when the target belongs to somebody else. status is not accepted here; retiring a view goes through archiveComposedView so the transition timestamp is stamped with the status.
+//
+// Bound concept: v1:portalviews:view (machine-readable: BoundConcepts["updateComposedView"] in generated_concepts.go).
+type UpdateComposedViewArgs struct {
+	ViewId       string
+	Name         string
+	Description  string
+	ConceptIds   []string
+	Arrangements []map[string]any
+	// Enum: manual | suggested
+	Origin string
+}
+
+// UpdateComposedView calls the engine mutation updateComposedView.
+func (qc *QueryClient) UpdateComposedView(ctx context.Context, args UpdateComposedViewArgs) (*Result, error) {
+	call := UpdateComposedViewBuild(args)
+	return qc.executeNamed(ctx, "updateComposedView", call)
+}
+
+func UpdateComposedViewBuild(args UpdateComposedViewArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation updateComposedView(")
+	b.WriteString("viewId: ")
+	b.WriteString(quoteMemQL(args.ViewId))
+	if args.Name != "" {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("name: ")
+		b.WriteString(quoteMemQL(args.Name))
+	}
+	if args.Description != "" {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("description: ")
+		b.WriteString(quoteMemQL(args.Description))
+	}
+	if args.ConceptIds != nil {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("conceptIds: ")
+		b.WriteString(renderMemQLValue(args.ConceptIds))
+	}
+	if args.Arrangements != nil {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("arrangements: ")
+		b.WriteString(renderMemQLValue(args.Arrangements))
+	}
+	if args.Origin != "" {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("origin: ")
+		b.WriteString(quoteMemQL(args.Origin))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -12387,6 +12964,62 @@ func UpdateTaskStatusBuild(args UpdateTaskStatusArgs) string {
 		}
 		b.WriteString("metrics: ")
 		b.WriteString(renderMemQLValue(args.Metrics))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// UpdateTemplate -- Edit a template's copy or move it along its lifecycle (draft -> ready -> archived). Owned.
+//
+// Bound concept: v1:campaigns:template (machine-readable: BoundConcepts["updateTemplate"] in generated_concepts.go).
+type UpdateTemplateArgs struct {
+	TemplateId string
+	Name       string
+	Subject    string
+	TextBody   string
+	HtmlBody   string
+	Status     string
+}
+
+// UpdateTemplate calls the engine mutation updateTemplate.
+func (qc *QueryClient) UpdateTemplate(ctx context.Context, args UpdateTemplateArgs) (*Result, error) {
+	call := UpdateTemplateBuild(args)
+	return qc.executeNamed(ctx, "updateTemplate", call)
+}
+
+func UpdateTemplateBuild(args UpdateTemplateArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation updateTemplate(")
+	b.WriteString("templateId: ")
+	b.WriteString(quoteMemQL(args.TemplateId))
+	if b.Len() > 24 {
+		b.WriteString(", ")
+	}
+	b.WriteString("name: ")
+	b.WriteString(quoteMemQL(args.Name))
+	if b.Len() > 24 {
+		b.WriteString(", ")
+	}
+	b.WriteString("subject: ")
+	b.WriteString(quoteMemQL(args.Subject))
+	if b.Len() > 24 {
+		b.WriteString(", ")
+	}
+	b.WriteString("textBody: ")
+	b.WriteString(quoteMemQL(args.TextBody))
+	if args.HtmlBody != "" {
+		if b.Len() > 24 {
+			b.WriteString(", ")
+		}
+		b.WriteString("htmlBody: ")
+		b.WriteString(quoteMemQL(args.HtmlBody))
+	}
+	if args.Status != "" {
+		if b.Len() > 24 {
+			b.WriteString(", ")
+		}
+		b.WriteString("status: ")
+		b.WriteString(quoteMemQL(args.Status))
 	}
 	b.WriteString(")")
 	return b.String()

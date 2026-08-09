@@ -28,6 +28,12 @@
 //     route at a gated handler -- or adding a new ungated entry -- would
 //     otherwise serve the stamp to unauthenticated callers with everything
 //     above still green.
+//   - behavioural: the refusal is RECORDED. A 403 that leaves no trace is
+//     invisible to the operator reviewing an incident, and the audit write is
+//     the half of the gate that a status-code assertion cannot see. Added with
+//     memql#3324, which moved four of these screens into the memQL portal and
+//     needed the surviving gate pinned in both of its effects rather than one:
+//     the refusal AND the `admin_auth_forbidden` row it appends.
 //
 // The gate admits owner OR admin (auth.go:62). Note "owner" IS the
 // cluster-owner role (auth.RoleOwner; AccessContext.IsClusterOwner is
@@ -48,6 +54,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -68,6 +75,28 @@ func (e *routeGateEngine) Execute(context.Context, string) (*memqlengine.Execute
 	return &memqlengine.ExecuteResult{}, nil
 }
 
+// routeGateAudit records every audit event the gate emits. Concurrent because
+// the mux is driven from subtests; each assertion snapshots rather than reading
+// the slice in place.
+type routeGateAudit struct {
+	mu     sync.Mutex
+	events []identity.AuditEvent
+}
+
+func (a *routeGateAudit) Log(_ context.Context, ev identity.AuditEvent) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.events = append(a.events, ev)
+}
+
+func (a *routeGateAudit) snapshot() []identity.AuditEvent {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	out := make([]identity.AuditEvent, len(a.events))
+	copy(out, a.events)
+	return out
+}
+
 // routeGateSeed is a throwaway 32-byte Ed25519 seed. NewKeyManagerFromSeed
 // derives the key in-process, so the test needs no disk and no Load().
 var routeGateSeed = base64.StdEncoding.EncodeToString([]byte("memql-2934-route-gate-test-seed!"))
@@ -83,7 +112,7 @@ func routeGateConfig() identity.Config {
 // constructor. The Issuer is concrete (*identity.JWTIssuer, unexported fields),
 // so it cannot be faked -- the test mints against the same issuer the gate
 // verifies with.
-func newRouteGateServer(t *testing.T) (*AdminServer, *identity.JWTIssuer, *routeGateEngine) {
+func newRouteGateServer(t *testing.T) (*AdminServer, *identity.JWTIssuer, *routeGateEngine, *routeGateAudit) {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	cfg := routeGateConfig()
@@ -101,6 +130,7 @@ func newRouteGateServer(t *testing.T) (*AdminServer, *identity.JWTIssuer, *route
 		t.Fatalf("identityweb.NewServer: %v", err)
 	}
 	eng := &routeGateEngine{}
+	audit := &routeGateAudit{}
 	srv, err := New(&AdminServer{
 		Cfg:       cfg,
 		Logger:    logger,
@@ -108,11 +138,12 @@ func newRouteGateServer(t *testing.T) (*AdminServer, *identity.JWTIssuer, *route
 		Engine:    eng,
 		Keys:      km,
 		WebServer: web,
+		Audit:     audit,
 	})
 	if err != nil {
 		t.Fatalf("admin.New: %v", err)
 	}
-	return srv, iss, eng
+	return srv, iss, eng, audit
 }
 
 func routeGateToken(t *testing.T, iss *identity.JWTIssuer, role string) string {
@@ -212,7 +243,7 @@ func routeGateRequest(r adminRoute, token string) *http.Request {
 }
 
 func TestGatedAdminRoutesRejectUnauthenticated(t *testing.T) {
-	srv, _, eng := newRouteGateServer(t)
+	srv, _, eng, _ := newRouteGateServer(t)
 	mux := http.NewServeMux()
 	srv.Mount(mux)
 
@@ -236,7 +267,7 @@ func TestGatedAdminRoutesRejectUnauthenticated(t *testing.T) {
 }
 
 func TestGatedAdminRoutesRejectNonAdminRole(t *testing.T) {
-	srv, iss, eng := newRouteGateServer(t)
+	srv, iss, eng, _ := newRouteGateServer(t)
 	mux := http.NewServeMux()
 	srv.Mount(mux)
 
@@ -262,13 +293,103 @@ func TestGatedAdminRoutesRejectNonAdminRole(t *testing.T) {
 	}
 }
 
+// The refusal is a RECORD, not just a status code.
+//
+// memql#3324 moved four of these screens into the memQL portal, and the
+// standing requirement across that move is that "a 403 with an
+// admin_auth_forbidden audit event is the current behaviour and must survive".
+// Nothing asserted the second half: requireAdmin could stop calling s.audit
+// entirely -- a deleted call, a nil Audit dependency the constructor does not
+// require, an early return that skips it -- and every other test in this file
+// would stay green while an operator reviewing an incident saw nothing.
+//
+// Asserted per gated route rather than once, because the audit write happens
+// inside the shared middleware and the thing being pinned is that EVERY route
+// goes through it. A route registered so that some other check refuses first
+// would still 403 while recording nothing.
+func TestGatedAdminRoutesAuditTheRefusal(t *testing.T) {
+	for _, r := range gatedRoutes {
+		t.Run(r.method+" "+r.path, func(t *testing.T) {
+			// A fresh server per route so the recorded set is exactly this
+			// route's, and an assertion cannot pass on another route's event.
+			srv, iss, _, audit := newRouteGateServer(t)
+			mux := http.NewServeMux()
+			srv.Mount(mux)
+			token := routeGateToken(t, iss, "reader")
+
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, routeGateRequest(r, token))
+			if rec.Code != http.StatusForbidden {
+				t.Fatalf("role=reader: got %d, want 403", rec.Code)
+			}
+
+			events := audit.snapshot()
+			var forbidden *identity.AuditEvent
+			for i := range events {
+				if events[i].Action == "admin_auth_forbidden" {
+					forbidden = &events[i]
+					break
+				}
+			}
+			if forbidden == nil {
+				t.Fatalf("no admin_auth_forbidden event recorded for a refused caller; "+
+					"got %d event(s). The 403 is only half the gate -- the other half is "+
+					"that the attempt is auditable after the fact (memql#3324).",
+					len(events))
+			}
+
+			// The fields an incident review reads: WHO was refused, in WHAT
+			// role, and WHY. An event carrying only its action name would
+			// satisfy a name check and tell a reviewer nothing.
+			if forbidden.Category != identity.AuditCategoryAdmin {
+				t.Errorf("category = %q, want %q", forbidden.Category, identity.AuditCategoryAdmin)
+			}
+			if forbidden.Outcome != identity.AuditOutcomeBlocked {
+				t.Errorf("outcome = %q, want %q -- a blocked attempt is not a failure "+
+					"and the distinction is what makes the log filterable",
+					forbidden.Outcome, identity.AuditOutcomeBlocked)
+			}
+			if forbidden.ActorUserId != "v1:identity:user:route-gate" {
+				t.Errorf("actorUserId = %q, want the refused caller's subject", forbidden.ActorUserId)
+			}
+			if forbidden.ActorRole != "reader" {
+				t.Errorf("actorRole = %q, want \"reader\"", forbidden.ActorRole)
+			}
+			if forbidden.FailureReason != "role_not_admin" {
+				t.Errorf("failureReason = %q, want \"role_not_admin\"", forbidden.FailureReason)
+			}
+		})
+	}
+}
+
+// The positive control for the test above: an ADMITTED caller must NOT produce
+// a refusal event. Without this, a middleware that logged admin_auth_forbidden
+// unconditionally would pass every assertion above while filling the audit log
+// with refusals that never happened.
+func TestAdminGateDoesNotAuditAnAdmittedCaller(t *testing.T) {
+	srv, iss, _, audit := newRouteGateServer(t)
+	mux := http.NewServeMux()
+	srv.Mount(mux)
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, routeGateRequest(
+		adminRoute{method: "GET", path: "/admin/users"},
+		routeGateToken(t, iss, "admin")))
+
+	for _, ev := range audit.snapshot() {
+		if ev.Action == "admin_auth_forbidden" {
+			t.Fatalf("an admitted admin produced an admin_auth_forbidden event")
+		}
+	}
+}
+
 // Positive control. Without it the two rejection tests above would pass just as
 // happily against a mux that rejects everything, or a request builder whose
 // URLs never match a route -- neither of which proves the gate does anything.
 func TestAdminGateAdmitsAdminRole(t *testing.T) {
 	for _, role := range []string{"owner", "admin"} {
 		t.Run(role, func(t *testing.T) {
-			srv, iss, eng := newRouteGateServer(t)
+			srv, iss, eng, _ := newRouteGateServer(t)
 			mux := http.NewServeMux()
 			srv.Mount(mux)
 

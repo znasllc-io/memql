@@ -285,6 +285,81 @@ See [per-row-authz-audit.md](auth/per-row-authz-audit.md).
 
 ---
 
+## Administration
+
+`/portal/admin` is the operator console: the cluster's own state, rather than
+the data it holds. Four surfaces, all owner-and-admin:
+
+| Surface | Address | What it answers |
+|---|---|---|
+| Overview | `/portal/admin` | How many people can sign in, how they divide by role, how a new person gets an account, which key is signing, and what has happened recently. |
+| Sessions and tokens | `/portal/admin/tokens` | Every personal access token issued against the cluster and who holds it, revoked ones included. |
+| Signing keys | `/portal/admin/keys` | The Ed25519 keys the cluster publishes, which one is signing, whether an overlap window is open, and when it last rotated. |
+| Cluster settings | `/portal/admin/settings` | The runtime-editable settings in force -- registration policy, token lifetimes, branding -- and what each unset value falls back to. |
+
+People, the audit trail and deployments are **not** here: they are populations,
+and they live in the predefined views at `/portal/views/people`,
+`/portal/views/audit` and `/portal/views/deployments`.
+
+**The gate is the cluster's.** Each admin read names a query that carries
+`requiresOwnerOrAdmin` in its own filter (`searchUsers`,
+`patIdentitiesForUser`), so a caller below the floor gets an empty result from
+the engine rather than a page this console decided to hide. The signing keys
+come from the public `/.well-known/jwks.json` feed -- the same document every
+verifier node reads, which is what makes the page useful when a JWKS has gone
+incoherent across replicas.
+
+### What still lives on the identity service
+
+The portal's admin console **reads**. Every write the identity service's own
+`/admin/*` console performs is still performed there, and the portal names each
+one where an operator would look for it:
+
+| To do this | Go to | Why it is not in the portal |
+|---|---|---|
+| Edit a profile, change a role, suspend an account | `/admin/users` | `updateUser` is server-origin-only; the cluster refuses it for any call from a client. |
+| Revoke a personal access token | `/admin/tokens` | `revokePATIdentity` applies no check of its own, so the owner-and-admin rule protecting it is that console's route rather than the cluster's. |
+| List or revoke a node token | `/admin/tokens` | `nodeTokenIdentities` is server-origin-only, and the revoke must run as a system credential actor. |
+| Force a key rotation | `/admin/jwks` | Rotation exists only as an HTTP POST on the identity service; there is no message for it on the stream a browser speaks. |
+| Change a cluster setting | `/admin/settings` | `updateClusterSettings` carries no role gate, so a form in the portal would hand the registration mode and every token lifetime to anyone who can write. |
+
+Each of those is a missing **server** seam, not a missing screen. Until the
+mutation gates itself or the capability reaches the stream, the two consoles
+coexist: the portal for reading, the identity service for writing. Every write
+on either side appends a `v1:identity:auditEvent`, and a refused attempt
+appends `admin_auth_forbidden` -- visible in the portal's Overview and in
+`/portal/views/audit`.
+
+The identity service's own cluster-overview dashboard is **gone**: the portal's
+Overview replaced it, and `/admin/` now redirects to `/admin/users`.
+
+### The `/me/*` pages stay where they are
+
+The identity service also serves `/me/dashboard`, `/me/devices`, `/me/export`,
+`/me/settings` and `/me/tokens`. Those are **not** moving into the portal, and
+the reason is who they are for rather than what they do.
+
+The portal is an operator's console: it is reached with an operator's
+credential, it assumes you are looking after a cluster, and every surface under
+`/portal/admin` shows nothing at all unless you are owner or admin. `/me/*` is
+the opposite -- it is where an ordinary person reads their own sessions,
+revokes their own device, exports their own data and closes their own account,
+and every one of those flows is self-scoped by construction. Moving them behind
+an operations console would put a reader's account settings inside a product
+they have no other reason to open, and would make "manage my account" depend on
+the portal bundle being deployed at all.
+
+They also already sit where a person is *sent*: the magic-link flow, the
+sign-in page and the account emails all land on the identity origin, so
+`/me/*` is one navigation from where the person already is and zero from where
+the portal is not.
+
+So the split is by audience, and it is settled: **operator surfaces move,
+self-service surfaces do not.** Nothing about `/me/*` is pending, and it is not
+waiting on a seam.
+
+---
+
 ## Troubleshooting
 
 | Symptom | Cause |

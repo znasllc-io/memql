@@ -124,36 +124,24 @@ func claimsFromRequestToken(r *http.Request, issuer *identity.JWTIssuer) *identi
 }
 
 // ---------------------------------------------------------------------------
-// Dashboard
+// Root
 // ---------------------------------------------------------------------------
 
-// handleDashboard renders the cluster-overview page: user count,
-// recent-audit count, current signing key, registration mode.
-func (s *AdminServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
-	users, _ := s.queryUsers(r.Context(), "")
-	events, _ := s.queryRecentAudit(r.Context(), "", 10)
-
-	currentKID := "(no key loaded)"
-	currentAge := "(unknown)"
-	if cur := s.Keys.Current(); cur != nil {
-		currentKID = cur.KID
-		if !cur.CreatedAt.IsZero() {
-			currentAge = humanizeDuration(time.Since(cur.CreatedAt))
-		}
-	}
-
-	data := webtempl.AdminDashboardData{
-		Layout:        s.layoutData(r, "Admin overview", false),
-		Flash:         readFlash(r),
-		Mode:          s.modeSnapshot(r),
-		UserCount:     len(users),
-		AuditCount:    len(events),
-		AuditWindow:   "last 10",
-		AuditEvents:   projectAuditViews(events),
-		CurrentKID:    currentKID,
-		CurrentKeyAge: currentAge,
-	}
-	s.render(w, r, "admin/dashboard", webtempl.AdminDashboard(data))
+// handleRoot forwards /admin/ to the first surface this console still owns.
+//
+// The cluster-overview dashboard that used to live here -- user count, recent
+// audit, current signing key, registration mode -- was retired in memql#3324
+// when the memQL portal's /admin overview replaced it. That page reads the
+// same counts through the SAME admin-gated queries, filters the audit table
+// server-side by category, and reports the last rotation as the audit event
+// that recorded it rather than as a duration off this process's clock (which
+// diverges between identity replicas and is invisible to any other node).
+//
+// The route stays, gated, as a redirect rather than being deleted: /admin/ is
+// where handleEstablish lands an operator after a successful sign-in, and
+// where a bookmark points. A 404 there would read as a broken console.
+func (s *AdminServer) handleRoot(w http.ResponseWriter, r *http.Request) {
+	http.Redirect(w, r, "/admin/users", http.StatusSeeOther)
 }
 
 // ---------------------------------------------------------------------------
