@@ -2311,3 +2311,77 @@ mutate accountEntitlement setAccountEntitlement {
     }
   }
 }
+
+/// Rename an enrolled passkey. Changes only the display label -- the credential itself is untouched.
+mutate identity renamePasskeyIdentity {
+  args {
+    identityId  string!
+    label       string!
+  }
+  update {
+    id: args.identityId
+    args.label
+  }
+}
+
+/// Revoke (deactivate) a passkey identity row. Soft-delete via active=false -- the row stays for
+/// audit, and its credential id stays taken so the same authenticator cannot be re-enrolled onto a
+/// fresh row.
+mutate identity revokePasskeyIdentity {
+  args {
+    identityId  string!
+  }
+  update {
+    id: args.identityId
+    active: false
+  }
+}
+
+/// Persist an enrolment-token row at issue time.
+mutate enrolmentToken createEnrolmentToken {
+  args {
+    enrolmentId  string!
+    userId       string!
+    tokenHash    string!
+    issuedBy     string!
+    expiresAt    string!
+    sourceIP     string
+  }
+  insert {
+    accept { userId, tokenHash, issuedBy, expiresAt }
+    stamp {
+      id: args.enrolmentId
+      sourceIP: args.sourceIP ?? ""
+    }
+  }
+}
+
+/// Stamp an enrolment-token row consumed.
+mutate enrolmentToken consumeEnrolmentToken {
+  args {
+    enrolmentId     string!
+    consumedAt      string!
+    consumedFromIP  string
+  }
+  update {
+    accept { consumedAt }
+    stamp {
+      id: args.enrolmentId
+      consumedFromIP: args.consumedFromIP ?? ""
+    }
+  }
+}
+
+/// Stamp an enrolment-token row revoked.
+mutate enrolmentToken revokeEnrolmentToken {
+  args {
+    enrolmentId  string!
+    revokedAt    string!
+  }
+  update {
+    accept { revokedAt }
+    stamp {
+      id: args.enrolmentId
+    }
+  }
+}

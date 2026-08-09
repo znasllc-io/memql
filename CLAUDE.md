@@ -583,7 +583,7 @@ These endpoints **must** remain HTTP due to external protocol requirements:
 
 | Category | Endpoints | Reason |
 |----------|-----------|--------|
-| **Auth (identity service)** | `/login`, `/auth/magic-link`, `/auth/complete`, `/auth/logout`, `/oauth/token`, `/auth/refresh`, `/.well-known/jwks.json`, `POST /auth/webauthn/register/{begin,finish}`, `POST /auth/webauthn/login/{begin,finish}`, `POST /device/code`, `GET+POST /device` | OAuth 2.0 / magic-link flow requires HTTP redirects, browser form posts, and JWKS publishing. The four `/auth/webauthn/*` endpoints (register memql#3406, login memql#3407) are the same category: WebAuthn is a **browser API** -- the ceremony is `navigator.credentials.create()` / `.get()` running in the page, and the bytes it produces have to reach a server the browser can POST to. There is no gRPC form of "the user touched their security key". RP id derives from `MEMQL_IDENTITY_BASE_URL`, never from the request Host. The login pair is UNAUTHENTICATED by nature (it IS the authentication) and ends in the same OAuth auth code `/auth/complete` produces. The two `/device*` routes are the RFC 8628 device authorization grant (memql#3410): the RFC is **defined over HTTP** -- a device with no browser polls `/oauth/token`, and the human approves at a URL typed into a second device's browser. `/device` is a rendered page, so it is a browser-loads-its-own-UI case like identity's other web pages; `POST /device/code` is the grant's request half and belongs with `/oauth/token`, which it redeems against |
+| **Auth (identity service)** | `/login`, `/auth/magic-link`, `/auth/complete`, `/auth/logout`, `/oauth/token`, `/auth/refresh`, `/.well-known/jwks.json`, `POST /auth/webauthn/register/{begin,finish}`, `POST /auth/webauthn/login/{begin,finish}`, `POST /device/code`, `GET+POST /device`, `GET /enroll` | OAuth 2.0 / magic-link flow requires HTTP redirects, browser form posts, and JWKS publishing. The four `/auth/webauthn/*` endpoints (register memql#3406, login memql#3407) are the same category: WebAuthn is a **browser API** -- the ceremony is `navigator.credentials.create()` / `.get()` running in the page, and the bytes it produces have to reach a server the browser can POST to. There is no gRPC form of "the user touched their security key". RP id derives from `MEMQL_IDENTITY_BASE_URL`, never from the request Host. The login pair is UNAUTHENTICATED by nature (it IS the authentication) and ends in the same OAuth auth code `/auth/complete` produces. The two `/device*` routes are the RFC 8628 device authorization grant (memql#3410): the RFC is **defined over HTTP** -- a device with no browser polls `/oauth/token`, and the human approves at a URL typed into a second device's browser. `/device` is a rendered page, so it is a browser-loads-its-own-UI case like identity's other web pages; `POST /device/code` is the grant's request half and belongs with `/oauth/token`, which it redeems against `GET /enroll` (memql#3408) is a **page a person opens from a link** -- the one request shape that cannot be anything but HTTP, since it arrives before any application code exists to speak a protocol and exists precisely for someone holding no credential yet. Its single-use `mql_enr_` token is the authorization (`Authorization: Enrolment <token>` on the ceremony that follows, mirroring `/pair/redeem`); HTTPS required on issue AND redeem, per-IP rate-limited, every outcome audited with SourceIP |
 | **Health check** | `/healthz` | Docker and Kubernetes health probes expect HTTP GET |
 | **WebSocket upgrades** | `/memql/ws`, `/memql/audio` | Browser clients need HTTP upgrade to establish WebSocket |
 | **File uploads** | `/spaces/{id}/attachments` | Multipart form-data uploads map poorly to gRPC |
@@ -1044,6 +1044,33 @@ node-type binary (`make identity`) and owns:
   as a progressive enhancement; the magic-link form remains the path when
   no passkey exists, WebAuthn is unavailable, or no relying party is in
   scope.
+- Passkey **management** on `/me/devices` (memql#3409): list (label,
+  added, last used, AAGUID-derived model, and the backup posture that
+  says whether losing the device loses the credential), rename, revoke,
+  and enrol another via the #3406 ceremony. Revoke is a SOFT delete
+  (`active=false`) -- the row is audit history and its credential id must
+  stay taken, because revoking a row does not make the authenticator
+  forget its private key. A revoke that would leave the account with NO
+  sign-in route (no `magic_link` identity, no other passkey) is warned
+  about explicitly before it happens; `component/identity/web/me_passkeys.go`
+  resolves the target out of the caller's OWN self-scoped list, which is
+  the ownership check, while the write runs under the system credential
+  actor the memql#2513 guard requires.
+- **Enrolment tokens + `GET /enroll`** (memql#3408) -- the task that removes
+  email from the critical path. `mql_enr_<43>` (32 CSPRNG bytes, SHA-256 hex at
+  rest, plaintext never persisted or logged), single-use via a `consumedAt`
+  stamp, 15-minute default TTL capped at 24h. It authorizes exactly ONE action:
+  register a passkey as the named user. `/enroll` validates and renders the
+  registration page; the ceremony that follows presents
+  `Authorization: Enrolment <token>` (the `/pair/redeem` shape). The four
+  rejection states -- invalid / expired / already-used / revoked -- each render
+  their own message, because each asks the holder for a different next step.
+  Package: `component/identity/enrolment/`. Issued by an owner/admin from the
+  portal's People surface over `IdentityAdminMsg` (gate in
+  `component/identity/adminops`), or by the install wizard's `enrolmentLink`
+  graph step via `memql enrolment-token mint` inside the identity pod -- which
+  is the only authority available at that moment, since nothing can authenticate
+  to a cluster whose owner has just been bootstrapped from env.
 - OAuth-style token endpoints (`/oauth/token`, `/auth/refresh`).
 - The JWKS feed at `/.well-known/jwks.json`.
 - A public web UI (`/login`, `/auth/complete`, `/setup`,
@@ -1909,6 +1936,14 @@ Auth + access metadata (dsl/identity/concepts.memql; infrastructure metadata eve
 - `v1:identity:auditEvent` -- append-only audit trail for the identity service
 - `v1:identity:accessRequest` -- waitlist-mode access request
 - `v1:identity:invitation` -- token-hashed invitation credential for guest/user flows
+- `v1:identity:enrolmentToken` -- single-use, TTL'd credential authorizing exactly one action:
+  register a passkey as the named user (memql#3408). What makes a FIRST credential obtainable
+  with no mailbox. Mirrors `v1:identity:workerPairingCode` rather than extending `invitation` --
+  an enrolment token has no invitee, no inviter to render into a message and no product scope,
+  and its single-use marker is a `consumedAt` stamp rather than `respondedAt` + a participation
+  status. Same SHA-256-hex hashing convention as every other credential row. Redeemed at
+  `GET /enroll?code=...`; issued by an owner/admin over `IdentityAdminMsg`, or by the install
+  wizard via `memql enrolment-token mint`
 - `v1:identity:delegation` -- agent acting through a user's identity (bounded role/scope/lifetime)
 
 See [docs/public/operate/auth/access-model.md](docs/public/operate/auth/access-model.md) for the full model.

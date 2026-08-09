@@ -19,11 +19,13 @@ import (
 	"github.com/znasllc-io/memql/component/identity/admin"
 	"github.com/znasllc-io/memql/component/identity/devicecode"
 	"github.com/znasllc-io/memql/component/identity/emailsender"
+	"github.com/znasllc-io/memql/component/identity/enrolment"
 	httpidentity "github.com/znasllc-io/memql/component/identity/http"
 	"github.com/znasllc-io/memql/component/identity/magiclink"
 	"github.com/znasllc-io/memql/component/identity/pat"
 	"github.com/znasllc-io/memql/component/identity/refresh"
 	identityweb "github.com/znasllc-io/memql/component/identity/web"
+	"github.com/znasllc-io/memql/component/identity/webauthn"
 )
 
 // newSSOAuthCode mints a plaintext URL-safe base64 code + its
@@ -380,6 +382,51 @@ func (a *App) integrationsIdentity() {
 			}
 			return ""
 		},
+	})
+	// GET /enroll (memql#3408). The web package stays engine-free, so the
+	// store lives here and the page gets a validator seam -- the same shape as
+	// PersistClusterSettings and UserExistsByEmail above.
+	//
+	// The adapter reports STATE, never token material: the plaintext stays in
+	// the caller's URL and the hash never leaves this closure, so nothing that
+	// crosses into the web package can be logged into existence.
+	enrolStore := &enrolment.Store{Engine: a.engine, Logger: a.Logger}
+	webSrv.SetResolveEnrolment(func(ctx context.Context, plainToken string) (identityweb.EnrolmentResolution, error) {
+		row, state, err := enrolStore.Resolve(ctx, plainToken, time.Now().UTC())
+		if err != nil {
+			return identityweb.EnrolmentResolution{}, err
+		}
+		out := identityweb.EnrolmentResolution{State: identityweb.EnrolmentState(state)}
+		if row == nil {
+			return out, nil
+		}
+		out.EnrolmentId = enrolment.CanonicalId(row.ID)
+		if state != enrolment.StateValid {
+			// A spent / expired / revoked row still names its user for the
+			// audit event, but the PAGE gets no account label: telling an
+			// anonymous holder of a dead link whose account it belonged to
+			// would turn a stale credential into an account-existence oracle.
+			out.UserId = row.UserId
+			return out, nil
+		}
+		out.UserId = row.UserId
+		out.ExpiresAt = row.ExpiresAt
+		out.AccountLabel = row.UserId
+		if u, lookupErr := store.LookupUserById(ctx, row.UserId); lookupErr == nil && u != nil && u.PrimaryEmail != "" {
+			out.AccountLabel = u.PrimaryEmail
+		}
+		return out, nil
+	}, auditLogger)
+
+	// /me/devices passkey management (memql#3409). The SAME
+	// *webauthn.Store the registration ceremony builds per-request in
+	// component/identity/http -- so the list a user manages here and the
+	// exclusion set the ceremony builds there can never disagree about
+	// what is enrolled.
+	webSrv.SetMePasskeys(&identityweb.MePasskeys{
+		Adapter: &webauthn.Store{Engine: a.engine, Logger: a.Logger},
+		Issuer:  svc.Issuer(),
+		Audit:   auditLogger,
 	})
 
 	svc.SetWebMounter(webSrv)

@@ -12,6 +12,7 @@ export {
   CODE_UNIMPLEMENTED,
   type AdminWriteResult,
   type ClusterSettingsEdit,
+  type EnrolmentLinkResult,
   type IdentityAdminCallOptions,
   type UserProfileEdit,
 } from "./identityAdmin.js";

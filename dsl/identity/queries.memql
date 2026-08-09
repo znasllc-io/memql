@@ -3,7 +3,7 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use common.traits.{ identityIsApiKey, identityIsBadge, identityIsNodeToken, identityIsPasskey, identityIsWorkerToken, isActiveRecord, isDeletionScheduled, statusIsPending }
+use common.traits.{ identityIsApiKey, identityIsBadge, identityIsMagicLink, identityIsNodeToken, identityIsPasskey, identityIsWorkerToken, isActiveRecord, isDeletionScheduled, statusIsPending }
 use common.specs.{ requiresOwnerOrAdmin }
 
 // account -- the operator's customer records
@@ -1945,6 +1945,53 @@ query identity passkeysForSelf {
   shape    passkeySummary
 }
 
+// ---- queries/v1/identity/signInIdentitiesForSelf.memql ----
+
+// signInIdentitiesForSelf
+// =======================
+//
+// Every ACTIVE credential the caller could actually sign in with. It
+// exists to answer one question honestly, at the one moment it matters:
+// when a user revokes a passkey on /me/devices (memql#3409), what is
+// left as a way back in?
+//
+// The set is `magic_link` OR `passkey`, and the omissions are the
+// design:
+//
+//   - api_key (PAT), worker_token, node_token, voice_agent_token,
+//     account_token, badge: none of them is a SIGN-IN. A PAT is the
+//     sharpest case -- it authenticates as the user against the API,
+//     but /login verifies a JWT and an `mql_pat_` bearer is not one, so
+//     counting it would tell a locked-out user they have a route to a
+//     page that will refuse them.
+//   - oauth: an outbound link to an external app (Slack, GitHub), not
+//     an inbound identity provider for this cluster. Nothing about that
+//     row lets anyone through /login.
+//
+// Counting only passkeys would be the other failure: it would warn a
+// user with a perfectly good email route as if they were about to lock
+// themselves out, and a warning that fires when nothing is wrong is a
+// warning people learn to click through.
+//
+// isActiveRecord is load-bearing rather than tidy here: a revoked
+// credential is exactly the thing that must not be counted as a way in.
+//
+// SELF-SCOPED with no userId argument, following patIdentitiesForSelf /
+// badgesForSelf / passkeysForSelf (memql#3178): the row set comes from
+// userId==actor.userId, so a caller cannot ask how recoverable somebody
+// else's account is.
+
+/// List the CALLING user's own ACTIVE sign-in routes -- magic-link and passkey credentials only.
+/// Backs the last-credential warning before a passkey revoke; the projection is identitySummary,
+/// which carries the type and the label and no credential material at all.
+@actor
+query identity signInIdentitiesForSelf {
+  filter   (identityIsMagicLink || identityIsPasskey) && userId==actor.userId && isActiveRecord
+  sort     "row.createdAt", "desc"
+  paginate 50
+  shape    identitySummary
+}
+
 // ---- queries/v1/identity/nodeTokenIdentityByBinding.memql ----
 
 // nodeTokenIdentityByBinding
@@ -2125,4 +2172,14 @@ query identity nodeTokenIdentityById {
   }
   filter  identityIsNodeToken && row.id==args.identityId
   shape   identityFull
+}
+
+/// Enrolment-token lookup by tokenHash for the /enroll redeem path.
+@unbounded("enrolment token by unique tokenHash -- a credential lookup bounded to a single row")
+query enrolmentToken enrolmentTokenByHash {
+  args {
+    tokenHash  string!
+  }
+  filter  tokenHash==args.tokenHash
+  shape   enrolmentTokenFull
 }

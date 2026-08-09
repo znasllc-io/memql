@@ -207,6 +207,20 @@ var callerArgSelectionExemptions = map[string]string{
 	"identity/mutations.memql revokeWorkerTokenIdentity": "revokes any user's worker token.",
 	"identity/mutations.memql revokeBadgeIdentity":       "revokes any user's badge identity.",
 	"identity/mutations.memql revokeNodeTokenIdentity":   "revokes any node token identity.",
+	// memql#3409, the passkey management pair. Both select a passkey row by
+	// caller-supplied id, so this detector counts them, and both are LESS
+	// reachable than every other entry in this block: `update()` read-merges
+	// the prior row before validation, so the merged payload carries
+	// identityType="passkey", and passkey is in the memql#2513
+	// machine-credential set -- a non-system actor writing that row is
+	// rejected outright. A raw wire call fails on that guard rather than on
+	// the handler being the only caller. They are listed here rather than
+	// deleted from the detector's reach because the SHAPE is genuinely the
+	// shape this gate names, and the eventual fix is the same one the block
+	// above wants: @rowAuthz(owner="userId") on v1:identity:identity
+	// (memql#3173).
+	"identity/mutations.memql revokePasskeyIdentity": "revokes a passkey by id; unreachable by a wire caller (the memql#2513 credential-actor guard rejects a non-system write to a passkey row), and its one caller resolves the target from the caller's own self-scoped list (memql#3409).",
+	"identity/mutations.memql renamePasskeyIdentity": "relabels a passkey by id; same reachability argument as revokePasskeyIdentity, and the label is the only editable field on the row (memql#3409).",
 	// memql#3322. The same shape as the four revokes above, gated the same
 	// way: component/grpc/account_token_handlers.go resolves the row
 	// through accountTokenById (userId==actor.userId) AS THE CALLER and

@@ -59,3 +59,12 @@ regexes        = ['''encryption-secret-16b''']
 paths = [
   '''^component/identity/.*_test\.go$''',
 ]
+
+[[allowlists]]
+description    = "WebAuthn AAGUIDs in the authenticator-name table (memql#3409). An AAGUID is an authenticator's PUBLIC make/model identifier, published by vendors through the FIDO Metadata Service and reproduced in the open passkey-authenticator-aaguid dataset -- the same twelve literals appear in every WebAuthn implementation on the internet. They are the OPPOSITE of a secret: the file's own header records that they are display-only and never authorization, because under the `none` attestation this cluster accepts they are self-asserted. `generic-api-key` matches them purely on UUID shape. Scoped to the one file that holds the table, so a UUID appearing anywhere else -- including elsewhere in this package -- still trips the scanner."
+condition      = "AND"
+regexTarget    = "match"
+regexes        = ['''[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}''']
+paths = [
+  '''^component/identity/webauthn/aaguid\.go$''',
+]

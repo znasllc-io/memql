@@ -717,7 +717,19 @@ func (s *Server) handleMeSettings(w http.ResponseWriter, r *http.Request) {
 	s.render(w, r, "me/settings", webtempl.MeSettings(data))
 }
 
+// handleMeDevices renders /me/devices.
+//
+// Two shapes, decided by whether the passkey adapter is wired
+// (memql#3409). With it, the page carries per-user credential rows and is
+// auth-gated server-side like /me/tokens. Without it -- a binary with no
+// engine -- it stays the plain client-hydrated sessions shell, because
+// gating a page that has nothing per-user on it would only cost a
+// redirect.
 func (s *Server) handleMeDevices(w http.ResponseWriter, r *http.Request) {
+	if s.passkeysWired() {
+		s.handleMeDevicesPasskeys(w, r)
+		return
+	}
 	data := webtempl.MeDevicesData{
 		Layout: s.LayoutData(r, "Devices", true, meNavLinks(), nil),
 	}

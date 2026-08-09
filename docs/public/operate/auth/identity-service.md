@@ -26,6 +26,10 @@ the cluster. It runs as its own node-type binary
 - The JWKS feed at `/.well-known/jwks.json` that every other node
   binary fetches to verify access tokens.
 - The Personal Access Token (PAT) layer for CLI clients.
+- The WebAuthn passkey ceremonies, the single-use enrolment link, and
+  the RFC 8628 device authorization grant -- the paths that let someone
+  sign in without a mailbox. Which one to reach for is
+  [sign-in-paths.md](sign-in-paths.md).
 
 This document covers the operator-side narrative: what to set,
 what to watch, how to rotate keys.
@@ -63,6 +67,49 @@ through the SPA's own origin sidesteps the entire class of
 issues. A front-door nginx should carry explicit `location =`
 blocks for each of the four paths; production setups should
 mirror the same routing.
+
+## Endpoints
+
+The identity binary mounts two route sets: the JSON auth-flow API
+(`component/identity/http`, `Server.Mount`) and the server-rendered web
+UI (`component/identity/web`). `/.well-known/jwks.json` is mounted by
+`component/identity.Service` directly.
+
+### Auth-flow API
+
+| Route | Auth | Purpose |
+|---|---|---|
+| `POST /auth/magic-link` | none | Issue a magic link (or an access request). The one route wrapped in the anti-abuse stack |
+| `GET /auth/complete` | the link | Consume a magic link, redirect to the client with an auth code |
+| `POST /oauth/token` | none | Redeem an auth code, a refresh token, or a `device_code` for tokens |
+| `POST /auth/refresh` | refresh token | Rotate the refresh token |
+| `POST /auth/logout` | session | Revoke the current session |
+| `POST /register` | none | RFC 7591 dynamic client registration. Gated on `MEMQL_IDENTITY_OAUTH_DCR_ENABLED` (default true) |
+| `POST /auth/webauthn/register/{begin,finish}` | Bearer JWT **or** `Authorization: Enrolment mql_enr_<...>` | Passkey registration (memql#3406, enrolment authorization memql#3408) |
+| `POST /auth/webauthn/login/{begin,finish}` | none -- this pair IS the authentication | Usernameless passkey login; ends in the same auth code a magic link produces (memql#3407) |
+| `POST /device/code` | none | RFC 8628 device authorization request (memql#3410). Answers `temporarily_unavailable` when no device-code store is wired |
+| `POST /pair/codes` | Bearer JWT | Mint a worker-pairing code |
+| `POST /pair/redeem` | `Authorization: Pair <code>` | Redeem a pairing code for a worker token |
+| `POST /auth/badge/grant` | Bearer JWT | Exchange a registered badge id for a short-lived operator grant (memql#2513) |
+| `POST /node/bootstrap` | `Authorization: Bootstrap <secret>` | Self-mint a `class="node"` JWT. Off unless `MEMQL_NODE_BOOTSTRAP_TOKEN` is set |
+
+Every route above also answers `OPTIONS` for CORS, and every one is wrapped in
+the security-headers middleware.
+
+### Web UI
+
+| Route | Auth | Purpose |
+|---|---|---|
+| `GET`/`POST /login` | none | Email-first sign-in. Carries the "Sign in with a passkey" control when a relying party is in scope |
+| `GET`/`POST /setup` | none, pre-bootstrap only | First-owner wizard. 404s once any user exists |
+| `GET /authorize`, `/check-email`, `/logout-complete`, `/error` | none | Flow pages |
+| `GET /legal/tos`, `/legal/privacy` | none | Legal pages |
+| `GET /enroll?code=mql_enr_<...>` | the enrolment token | Redeem an enrolment link and render the passkey registration page. Mounts only when the validator and audit sink are both wired (memql#3408) |
+| `GET`/`POST /device` | signed-in user | RFC 8628 verification page. A signed-out visitor is bounced through `/login` and returned here with the code. Mounts only when the device flow is wired (memql#3410) |
+| `GET /me/`, `/me/settings`, `/me/devices`, `/me/export`, `/me/deletion-pending` | client-side | Self-service shells. `/me/devices` lists **sessions**, not passkeys |
+| `GET`/`POST /me/tokens`, `POST /me/tokens/revoke` | Bearer or admin cookie | PAT issuance and revocation. Mounts only when the PAT adapter is wired |
+| `GET /admin/*` | admin session | The sign-in pages and `/admin/deployments`; the rest moved to the portal |
+| `GET /static/` | none | Cached UI assets |
 
 ## Required environment variables
 
@@ -114,6 +161,38 @@ Each rejection emits an audit event with `category=auth`,
 specific defense (`rate_limit` / `disposable_email` / `mx_invalid`
 / `turnstile` / `risk_threshold`). Surface these in your log
 pipeline to tune thresholds.
+
+## Passkey, enrolment and device-code knobs
+
+These are read directly by their handlers rather than through
+`identity.Config`, so they take effect per process with no other wiring.
+All are optional; the defaults are the shipped behaviour.
+
+| Variable | Default | Effect |
+|---|---|---|
+| `MEMQL_IDENTITY_PASSKEY_REGISTER_PER_HOUR` | 60 | Per-IP cap on passkey **registration** attempts. Tight because enrolling is rare and deliberate |
+| `MEMQL_IDENTITY_PASSKEY_LOGIN_PER_HOUR` | 240 | Per-IP cap on passkey **login** attempts. Looser -- signing in is routine, and this pair is unauthenticated, so the bucket is the only thing between a script and an unbounded stream of challenges |
+| `MEMQL_IDENTITY_ENROLL_PER_HOUR` | 120 | Per-IP cap on `GET /enroll` redeems |
+| `MEMQL_IDENTITY_ALLOW_INSECURE_ENROLL` | unset | Dev-only bypass of the HTTPS requirement on `/enroll`. Named separately from `MEMQL_IDENTITY_ALLOW_INSECURE_PAIR` on purpose -- debugging worker pairing must not thereby admit plaintext enrolment links. Logs a WARN on every request that slips through |
+| `MEMQL_IDENTITY_DEVICE_CODE_PER_HOUR` | 60 | Per-IP cap on `POST /device/code`. Each accepted request burns a `user_code` out of a 40-bit space |
+| `MEMQL_IDENTITY_DEVICE_CODE_TTL_SECONDS` | 600 (10 min) | The device authorization window. Capped at 30 minutes |
+| `MEMQL_IDENTITY_DEVICE_VERIFY_PER_HOUR` | 120 | Per-IP cap on `GET`/`POST /device`. The page is a code oracle, so this is what bounds guessing against the 40-bit space |
+
+WARNING: every limiter in the identity tree is **in-memory and therefore
+per-replica**, as is the WebAuthn challenge store. A multi-replica deployment
+gets per-replica budgets, and a ceremony that lands on a different replica than
+the one that minted its challenge will not find it.
+
+Two fixed values that have no env override, stated here because operators ask:
+
+- `MEMQL_IDENTITY_BASE_URL` is the **only** source of the WebAuthn RP ID. Its
+  hostname (port stripped) is the RP ID; the full `scheme://host[:port]` is the
+  expected ceremony origin. It is never derived from the request `Host` header,
+  and a base URL that yields no usable RP ID makes the passkey routes refuse
+  rather than guess. Changing it orphans every passkey already enrolled.
+- Enrolment tokens are 15 minutes by default with a 24-hour ceiling; a longer
+  request is clamped, not refused. Set per-issue (`--ttl`, or the portal's
+  lifetime picker), not by env.
 
 ## Token + session lifetimes
 
@@ -357,6 +436,9 @@ every request.
 
 ## Related
 
+- [sign-in-paths.md](sign-in-paths.md) -- magic link, passkey, enrolment
+  link, device code and PAT: what each is for, what recovery looks like
+  with no mail, and why a passkey does not follow you between clusters.
 - [access-model.md](access-model.md) -- enforcement layers, role
   spectrum, the wire-side lifecycle.
 - [user-provisioning.md](user-provisioning.md) -- registration

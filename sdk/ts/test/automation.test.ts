@@ -427,6 +427,42 @@ test("run frames route through the real Dispatcher by request_id", async () => {
   dispatcher.stop();
 });
 
+// The interceptor-refusal test above uses MockDispatcher, whose registerStream
+// routes by request_id unconditionally -- so it proved the AutomationClient
+// HANDLES a queryError, and proved nothing about whether one can reach it.
+// Over the real Dispatcher it could not: streamRequestId did not list
+// queryError, so a refusal landed on the generic event listeners and the
+// `payload?.kind === "queryError"` branch written to catch it never ran. The
+// caller parked forever on a refusal the server had already sent -- memql#3414
+// in the other SDK. This drives the real routing table (memql#3429).
+test("an interceptor refusal reaches the run through the REAL Dispatcher", async () => {
+  const socket = new FakeWebSocket();
+  const dispatcher = new Dispatcher({ socket: socket as unknown as WebSocket, logger: null });
+  const client = new AutomationClient(dispatcher);
+
+  const p = client.run({ automation: "x" });
+  const envelope = JSON.parse(socket.outbound.at(-1)!) as {
+    messageId: string;
+    runAutomation: { requestId: string };
+  };
+
+  socket.pushServer({
+    correlateTo: envelope.messageId,
+    queryError: {
+      requestId: envelope.runAutomation.requestId,
+      error: { message: "badge_grant_restricted" },
+    },
+  });
+
+  await assert.rejects(p, (err: unknown) => {
+    assert.ok(err instanceof AutomationRunError);
+    assert.equal(err.code, CODE_PERMISSION_DENIED);
+    assert.match(err.message, /badge_grant_restricted/);
+    return true;
+  });
+  dispatcher.stop();
+});
+
 // ---------------------------------------------------------------------
 // The raw engine message (memql#3339)
 // ---------------------------------------------------------------------
