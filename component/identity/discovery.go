@@ -82,9 +82,10 @@ func DiscoveryHandler(cfg Config, envLookup func(string) string) http.Handler {
 //     the field is never empty, not because it is right -- which is why
 //     (1) is declared in base rather than left to each operator.
 //
-// Exported so the worker-pairing redeem handler can translate the
-// HTTP origin the product SPA passes (`window.location.origin`) into a
-// dial address the cockpit can actually grpc.NewClient against.
+// A caller that already HOLDS the origin it wants mapped -- rather than
+// wanting the cluster's advertised one -- must call DialEndpointFromOrigin
+// instead: the env tier here is unconditional and would silently outrank the
+// argument (memql#3434).
 //
 // Note: MEMQL_GRPC_ADDRESS is INTENTIONALLY ignored. That env var
 // configures the identity binary's OWN listen address (e.g.
@@ -100,14 +101,59 @@ func deriveGRPCEndpoint(identityURL string, env func(string) string) string {
 	if v := normalizeDialEndpoint(env("MEMQL_DISCOVERY_GRPC_ENDPOINT")); v != "" {
 		return v
 	}
-	host := hostFromURL(identityURL)
+	return DialEndpointFromOrigin(identityURL)
+}
+
+// DialEndpointFromOrigin maps ONE HTTP origin to the gRPC dial address a
+// client should use for it. It is tier (2) of DeriveGRPCEndpoint with the
+// environment lookup lifted off -- pure, reading only its argument.
+//
+// WHY IT IS SEPARATE (memql#3434). Two callers want different things from
+// the same mapping. The discovery document wants "what should this CLUSTER
+// advertise", so the operator's MEMQL_DISCOVERY_GRPC_ENDPOINT rightly
+// outranks any derivation. The worker-pairing redeem handler wants "where
+// does THIS pairing's origin live" -- the origin the product SPA stamped on
+// the row (`window.location.origin`) -- and for it the cluster-wide
+// advertised value is not a better answer, it is a different question.
+// Routing that caller through DeriveGRPCEndpoint meant the env tier answered
+// every time it was set, which in a deployed cluster is always: the stored
+// origin was never read at all.
+//
+// The origin's OWN port is deliberately discarded. 8081/8085/3000 is where
+// something serves HTTP; the scheme is what names the gRPC port -- HTTPS
+// dials the single front-door 443, plaintext dials the local bff gRPC port.
+//
+// Host extraction agrees with normalizeDialEndpoint (and so with the TS
+// parser in editors/vscode/src/connection/endpoint.ts): scheme, path, query
+// and userinfo are stripped, a bracketed IPv6 literal keeps its brackets, and
+// an unbracketed one is refused as ambiguous. Anything unreadable returns ""
+// so the caller can fall through rather than dial garbage.
+func DialEndpointFromOrigin(origin string) string {
+	host := dialHostFromOrigin(origin)
 	if host == "" {
 		return ""
 	}
-	if isHTTPS(identityURL) {
+	if isHTTPS(origin) {
 		return host + ":443"
 	}
 	return host + ":" + plaintextDialPort
+}
+
+// dialHostFromOrigin returns just the host of an origin, brackets intact for
+// an IPv6 literal, or "" when the authority cannot be read unambiguously.
+func dialHostFromOrigin(raw string) string {
+	v := strings.TrimSpace(raw)
+	if i := strings.Index(v, "://"); i >= 0 {
+		v = v[i+len("://"):]
+	}
+	if i := strings.IndexAny(v, "/?#"); i >= 0 {
+		v = v[:i]
+	}
+	if i := strings.LastIndex(v, "@"); i >= 0 {
+		v = v[i+1:]
+	}
+	host, _ := splitDialHostPort(strings.TrimSpace(v))
+	return host
 }
 
 // plaintextDialPort is the gRPC port a non-TLS deployment dials. The
