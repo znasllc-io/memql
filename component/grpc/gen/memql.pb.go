@@ -15328,6 +15328,26 @@ type DeployControlResult struct {
 	// 7 = PERMISSION_DENIED, 16 = UNAUTHENTICATED, 13 = INTERNAL, ...).
 	ErrorCode    int32  `protobuf:"varint,3,opt,name=error_code,json=errorCode,proto3" json:"error_code,omitempty"`
 	ErrorMessage string `protobuf:"bytes,4,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
+	// audit_event_id is the correlation id of the audit event a REFUSED call
+	// wrote (memql#3334).
+	//
+	// A refusal on this surface is an audited event: the role gate writes a
+	// blocked v1:identity:auditEvent before it returns, exactly as a permitted
+	// action writes a success one. Until #3334 the id came back only on the
+	// permitted path (ActionResult.audit_event_id), so the single event an
+	// operator most wants to quote -- "I tried to roll back and was denied" --
+	// was the one with no reference. This field closes that: it is populated
+	// when error_code is PERMISSION_DENIED or UNAUTHENTICATED, and empty
+	// otherwise.
+	//
+	// Empty is meaningful, not missing. An INVALID_ARGUMENT rejection runs
+	// BEFORE the gate on several RPCs and is not audited; an UNAVAILABLE never
+	// reached the service at all. Neither has an id because neither wrote an
+	// event.
+	//
+	// On the permitted path the id stays on ActionResult.audit_event_id, where
+	// it has always been -- this field is not a second copy of it.
+	AuditEventId string `protobuf:"bytes,5,opt,name=audit_event_id,json=auditEventId,proto3" json:"audit_event_id,omitempty"`
 	// Set only when ok. Which field is populated follows from the request:
 	// get_deployment_status -> deployment_status, suggest_next_version ->
 	// next_version, every action -> action.
@@ -15396,6 +15416,13 @@ func (x *DeployControlResult) GetErrorCode() int32 {
 func (x *DeployControlResult) GetErrorMessage() string {
 	if x != nil {
 		return x.ErrorMessage
+	}
+	return ""
+}
+
+func (x *DeployControlResult) GetAuditEventId() string {
+	if x != nil {
+		return x.AuditEventId
 	}
 	return ""
 }
@@ -18612,14 +18639,15 @@ const file_memql_proto_rawDesc = "" +
 	"cutVersion\x12G\n" +
 	"\x06deploy\x18\x11 \x01(\v2-.znasllc.memql.deploycontrol.v1.DeployRequestH\x00R\x06deploy\x12l\n" +
 	"\x13rollback_deployment\x18\x12 \x01(\v29.znasllc.memql.deploycontrol.v1.RollbackDeploymentRequestH\x00R\x12rollbackDeploymentB\t\n" +
-	"\arequest\"\x9a\x03\n" +
+	"\arequest\"\xc0\x03\n" +
 	"\x13DeployControlResult\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x0e\n" +
 	"\x02ok\x18\x02 \x01(\bR\x02ok\x12\x1d\n" +
 	"\n" +
 	"error_code\x18\x03 \x01(\x05R\terrorCode\x12#\n" +
-	"\rerror_message\x18\x04 \x01(\tR\ferrorMessage\x12_\n" +
+	"\rerror_message\x18\x04 \x01(\tR\ferrorMessage\x12$\n" +
+	"\x0eaudit_event_id\x18\x05 \x01(\tR\fauditEventId\x12_\n" +
 	"\x11deployment_status\x18\n" +
 	" \x01(\v20.znasllc.memql.deploycontrol.v1.DeploymentStatusH\x00R\x10deploymentStatus\x12]\n" +
 	"\fnext_version\x18\v \x01(\v28.znasllc.memql.deploycontrol.v1.SuggestNextVersionResultH\x00R\vnextVersion\x12F\n" +

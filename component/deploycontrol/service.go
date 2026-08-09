@@ -98,12 +98,12 @@ func NewService(opts Options) (*Service, error) {
 		clock = func() time.Time { return time.Now().UTC() }
 	}
 	return &Service{
-		logger:           opts.Logger,
-		audit:            opts.Audit,
-		repoRoot:         repoRoot,
-		exec:             executor,
-		clock:            clock,
-		engine:           opts.Engine,
+		logger:   opts.Logger,
+		audit:    opts.Audit,
+		repoRoot: repoRoot,
+		exec:     executor,
+		clock:    clock,
+		engine:   opts.Engine,
 	}, nil
 }
 
@@ -191,6 +191,13 @@ func (s *Service) authorizeOwner(ctx context.Context, verb string, detail map[st
 // the verb + detail before returning a PermissionDenied (or
 // Unauthenticated, when no actor is present) status error. The returned
 // actor is valid only when err == nil.
+//
+// The refusal carries the blocked event's correlation id back to the caller
+// as a RefusalInfo detail (memql#3334). emitAudit has always returned that id
+// and this function used to discard it, which made the one event an operator
+// most wants to quote -- their own denial -- the only one with no reference.
+// See refusal.go for why handing it to the refused caller is safe and why the
+// alternative (admin-only visibility) was rejected.
 func (s *Service) authorizeWith(
 	ctx context.Context,
 	verb string,
@@ -200,13 +207,13 @@ func (s *Service) authorizeWith(
 ) (actor, error) {
 	act, ok := resolveActor(ctx)
 	if !ok {
-		s.emitAudit(ctx, verb, actor{}, detail, identity.AuditOutcomeBlocked, "no authenticated actor")
-		return actor{}, status.Error(codes.Unauthenticated, "deploy console: no authenticated caller")
+		eventID := s.emitAudit(ctx, verb, actor{}, detail, identity.AuditOutcomeBlocked, "no authenticated actor")
+		return actor{}, refusalError(codes.Unauthenticated, eventID, "deploy console: no authenticated caller")
 	}
 	if !allow(act.userContext()) {
-		s.emitAudit(ctx, verb, act, detail, identity.AuditOutcomeBlocked, "caller role not permitted: "+string(act.role))
-		return actor{}, status.Errorf(codes.PermissionDenied,
-			"deploy console: %s requires %s role (have %q)", verb, requirement, act.role)
+		eventID := s.emitAudit(ctx, verb, act, detail, identity.AuditOutcomeBlocked, "caller role not permitted: "+string(act.role))
+		return actor{}, refusalError(codes.PermissionDenied, eventID, fmt.Sprintf(
+			"deploy console: %s requires %s role (have %q)", verb, requirement, act.role))
 	}
 	return act, nil
 }

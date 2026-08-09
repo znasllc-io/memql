@@ -269,6 +269,104 @@ func TestForwardedRollbackIsOwnerOnly(t *testing.T) {
 	}
 }
 
+// TestForwardedRefusalCarriesItsAuditEventId is the cross-node half of
+// memql#3334: the audit id of a blocked attempt reaches the caller over the
+// mesh, not only on a call the identity node serves directly.
+//
+// This is the path that actually matters in production. The portal is served
+// by the bff and a SPA dials the origin that served it, so EVERY refusal an
+// operator meets in the console is decided on the identity node and carried
+// back over this hop. A fix that worked only locally would be a fix nobody
+// could observe.
+//
+// It works because #3380 forwards the RESULT rather than re-deriving one: the
+// receiving node runs the same deploycontrol.Dispatch, which stamps
+// audit_event_id, and the bff unmarshals that envelope verbatim. The test
+// exists to keep that property rather than to add one -- a future hop that
+// rebuilt the reply field-by-field would drop the id silently, and the
+// operator-visible symptom (a blank reference on a denial) is not something a
+// gate test would catch.
+func TestForwardedRefusalCarriesItsAuditEventId(t *testing.T) {
+	// admin-on-rollback is the load-bearing row: a legitimate operator, denied
+	// by the owner-only tier, who has a real reason to ask why.
+	h, audit := newForwardFixture(t)
+
+	res, err := runHop(t, h, principalForRole(t, auth.RoleAdmin), rollbackMsg())
+	if err != nil {
+		t.Fatalf("the hop itself must succeed; a refusal travels INSIDE the result: %v", err)
+	}
+	if got := codes.Code(res.GetErrorCode()); got != codes.PermissionDenied {
+		t.Fatalf("precondition: error code = %v, want PermissionDenied", got)
+	}
+
+	events := audit.all()
+	if len(events) != 1 || events[0].Outcome != identity.AuditOutcomeBlocked {
+		t.Fatalf("want exactly one blocked audit event, got %+v", events)
+	}
+
+	got := res.GetAuditEventId()
+	if got == "" {
+		t.Fatal("a forwarded refusal carried no audit_event_id: the id is written on the identity node " +
+			"and lost on the way back, which is the only path a portal user ever takes")
+	}
+	if want := events[0].CorrelationId; got != want {
+		t.Errorf("forwarded audit_event_id = %q, want %q -- the id must name the event the RECEIVING node wrote",
+			got, want)
+	}
+
+	// The other half of "the caller can quote it": the id must survive the
+	// proto round-trip the hop performs, not merely exist in the handler.
+	// runHop already marshals and unmarshals, so reaching here proves it; this
+	// asserts the refusal still does not look like a result.
+	if res.GetOk() || res.GetResult() != nil {
+		t.Errorf("forwarded refusal carried a result: ok=%v result=%T", res.GetOk(), res.GetResult())
+	}
+}
+
+// TestForwardedTransportFailureCarriesNoAuditEventId is the negative that
+// keeps the field honest across the hop.
+//
+// A forward the receiving node refused BEFORE reaching the service -- an
+// unprovable authority, a malformed envelope -- wrote no audit event, so it
+// must carry no id. The distinction matters more here than locally: the
+// originating side also synthesises a result for a hop that never completed
+// (failedDeployControlResult), and an id appearing on one of those would point
+// an operator at an event that does not exist.
+func TestForwardedTransportFailureCarriesNoAuditEventId(t *testing.T) {
+	h, audit := newForwardFixture(t)
+
+	// An empty authority is unprovable, so the handler answers with a
+	// TRANSPORT error rather than a DeployControlResult at all.
+	req, err := buildDeployControlForwardRequest("hop-x", auth.ForwardedPrincipal{}, rollbackMsg(), "bff-a", "bff")
+	if err != nil {
+		t.Fatalf("encoding the forward: %v", err)
+	}
+	var replies []*nodev1.DeployControlForwardResponse
+	h.HandleForwardedRequest(context.Background(), req, func(m *nodev1.NodeServerMessage) error {
+		replies = append(replies, m.GetDeployControlForwardResponse())
+		return nil
+	})
+	if len(replies) != 1 {
+		t.Fatalf("want exactly one reply, got %d", len(replies))
+	}
+	if _, decodeErr := decodeDeployControlForwardResponse(replies[0]); decodeErr == nil {
+		t.Fatal("an unprovable authority must decode as a transport error, not as a result")
+	}
+	if len(replies[0].GetDeployControlResult()) != 0 {
+		t.Error("a transport refusal must carry no DeployControlResult payload")
+	}
+	if events := audit.all(); len(events) != 0 {
+		t.Errorf("a forward refused before the service must write no deploy-control audit event, got %+v", events)
+	}
+
+	// And the originating side's own synthesised failure carries no id either.
+	local := failedDeployControlResult(rollbackMsg(), codes.Unavailable, "no identity peer")
+	if local.GetAuditEventId() != "" {
+		t.Errorf("a synthesised transport failure carries audit_event_id %q, want empty",
+			local.GetAuditEventId())
+	}
+}
+
 // TestForwardedDeployTierMatchesTheLocalMatrix walks the other two gate tiers
 // so the hop is not merely correct for the one action the issue names.
 //

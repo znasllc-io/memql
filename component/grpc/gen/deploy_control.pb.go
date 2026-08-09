@@ -1158,6 +1158,76 @@ func (x *ActionResult) GetDetails() map[string]string {
 	return nil
 }
 
+// RefusalInfo is the gRPC error detail attached to a status returned by the
+// role gate -- PERMISSION_DENIED for a caller below the floor, UNAUTHENTICATED
+// for a connection with no resolvable actor.
+//
+// WHY A DETAIL RATHER THAN A RESULT. A refused unary call has no ActionResult
+// to carry an id on: the gate returns (nil, status error) before the action
+// exists. But the refusal IS an audited event -- authorizeWith writes a blocked
+// v1:identity:auditEvent before it returns -- and an operator who was told "no"
+// has the same correlation need as one who was told "yes". A gRPC error detail
+// is the standard place to put structured data on a status, it survives the
+// existing (nil, err) signature untouched, and the streamed bridge lifts it
+// onto DeployControlResult.audit_event_id so both surfaces answer alike.
+//
+// WHY IT IS SAFE TO HAND THE REFUSED CALLER. The value is an opaque random
+// correlation id minted at refusal time. It names no row the caller may read
+// (the audit log is admin-gated), grants nothing, and reveals strictly less
+// than the refusal message beside it already does -- that message names the
+// required role and the caller's own. It is a receipt for an event that
+// happened TO the caller. Same call memql#3324 made for IdentityAdminResult,
+// which carries audit_event_id on its refusals for the same reason.
+//
+// Present ONLY on a gate refusal. An argument rejection (INVALID_ARGUMENT) is
+// not audited and carries no detail; neither does a transport failure.
+type RefusalInfo struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// audit_event_id is the correlation id of the blocked v1:identity:auditEvent
+	// this refusal wrote. Quote it in a support thread; an admin resolves it
+	// against the audit log.
+	AuditEventId  string `protobuf:"bytes,1,opt,name=audit_event_id,json=auditEventId,proto3" json:"audit_event_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RefusalInfo) Reset() {
+	*x = RefusalInfo{}
+	mi := &file_deploy_control_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RefusalInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RefusalInfo) ProtoMessage() {}
+
+func (x *RefusalInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_deploy_control_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RefusalInfo.ProtoReflect.Descriptor instead.
+func (*RefusalInfo) Descriptor() ([]byte, []int) {
+	return file_deploy_control_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *RefusalInfo) GetAuditEventId() string {
+	if x != nil {
+		return x.AuditEventId
+	}
+	return ""
+}
+
 var File_deploy_control_proto protoreflect.FileDescriptor
 
 const file_deploy_control_proto_rawDesc = "" +
@@ -1248,7 +1318,9 @@ const file_deploy_control_proto_rawDesc = "" +
 	"\adetails\x18\x05 \x03(\v29.znasllc.memql.deploycontrol.v1.ActionResult.DetailsEntryR\adetails\x1a:\n" +
 	"\fDetailsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x012\xbb\b\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"3\n" +
+	"\vRefusalInfo\x12$\n" +
+	"\x0eaudit_event_id\x18\x01 \x01(\tR\fauditEventId2\xbb\b\n" +
 	"\x14DeployControlService\x12\x83\x01\n" +
 	"\x13GetDeploymentStatus\x12:.znasllc.memql.deploycontrol.v1.GetDeploymentStatusRequest\x1a0.znasllc.memql.deploycontrol.v1.DeploymentStatus\x12s\n" +
 	"\rDeployStaging\x124.znasllc.memql.deploycontrol.v1.DeployStagingRequest\x1a,.znasllc.memql.deploycontrol.v1.ActionResult\x12g\n" +
@@ -1273,7 +1345,7 @@ func file_deploy_control_proto_rawDescGZIP() []byte {
 	return file_deploy_control_proto_rawDescData
 }
 
-var file_deploy_control_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
+var file_deploy_control_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
 var file_deploy_control_proto_goTypes = []any{
 	(*GetDeploymentStatusRequest)(nil), // 0: znasllc.memql.deploycontrol.v1.GetDeploymentStatusRequest
 	(*DeployStagingRequest)(nil),       // 1: znasllc.memql.deploycontrol.v1.DeployStagingRequest
@@ -1292,7 +1364,8 @@ var file_deploy_control_proto_goTypes = []any{
 	(*GateLeg)(nil),                    // 14: znasllc.memql.deploycontrol.v1.GateLeg
 	(*SuggestNextVersionResult)(nil),   // 15: znasllc.memql.deploycontrol.v1.SuggestNextVersionResult
 	(*ActionResult)(nil),               // 16: znasllc.memql.deploycontrol.v1.ActionResult
-	nil,                                // 17: znasllc.memql.deploycontrol.v1.ActionResult.DetailsEntry
+	(*RefusalInfo)(nil),                // 17: znasllc.memql.deploycontrol.v1.RefusalInfo
+	nil,                                // 18: znasllc.memql.deploycontrol.v1.ActionResult.DetailsEntry
 }
 var file_deploy_control_proto_depIdxs = []int32{
 	10, // 0: znasllc.memql.deploycontrol.v1.DeploymentStatus.components:type_name -> znasllc.memql.deploycontrol.v1.ComponentDigest
@@ -1300,7 +1373,7 @@ var file_deploy_control_proto_depIdxs = []int32{
 	12, // 2: znasllc.memql.deploycontrol.v1.DeploymentStatus.rollouts:type_name -> znasllc.memql.deploycontrol.v1.RolloutStatus
 	13, // 3: znasllc.memql.deploycontrol.v1.DeploymentStatus.gate_result:type_name -> znasllc.memql.deploycontrol.v1.GateResult
 	14, // 4: znasllc.memql.deploycontrol.v1.GateResult.legs:type_name -> znasllc.memql.deploycontrol.v1.GateLeg
-	17, // 5: znasllc.memql.deploycontrol.v1.ActionResult.details:type_name -> znasllc.memql.deploycontrol.v1.ActionResult.DetailsEntry
+	18, // 5: znasllc.memql.deploycontrol.v1.ActionResult.details:type_name -> znasllc.memql.deploycontrol.v1.ActionResult.DetailsEntry
 	0,  // 6: znasllc.memql.deploycontrol.v1.DeployControlService.GetDeploymentStatus:input_type -> znasllc.memql.deploycontrol.v1.GetDeploymentStatusRequest
 	1,  // 7: znasllc.memql.deploycontrol.v1.DeployControlService.DeployStaging:input_type -> znasllc.memql.deploycontrol.v1.DeployStagingRequest
 	2,  // 8: znasllc.memql.deploycontrol.v1.DeployControlService.Promote:input_type -> znasllc.memql.deploycontrol.v1.PromoteRequest
@@ -1337,7 +1410,7 @@ func file_deploy_control_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_deploy_control_proto_rawDesc), len(file_deploy_control_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   18,
+			NumMessages:   19,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

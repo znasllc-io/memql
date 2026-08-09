@@ -73,6 +73,11 @@ export interface DeployConsoleState {
   // operator wants the most recent thing that happened, not a log.
   actionMessage: string;
   actionError: string;
+  // The audit event a REFUSED action wrote (memql#3334). Non-empty only
+  // alongside actionError, and only when the failure was the ROLE GATE -- an
+  // invalid argument or an unreachable identity node writes no event and so
+  // has no id. See describeDeployError for why the id is shown at all.
+  actionAuditEventId: string;
   busy: boolean;
   refresh: () => void;
   cut: (bump: SemverBump) => void;
@@ -103,6 +108,30 @@ export function describeDeployError(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/**
+ * The audit event a failed deploy-console call wrote, or "" when it wrote
+ * none (memql#3334).
+ *
+ * WHY THE REFUSED CALLER SEES THIS. A denial is an audited event -- the engine
+ * writes a blocked `v1:identity:auditEvent` before it refuses -- and it is the
+ * event an operator is most likely to need to cite: "I tried to roll back and
+ * was told no" is a support conversation, and without a reference the person
+ * with the problem and the person who can resolve it are correlating on a
+ * timestamp. The id discloses nothing the refusal beside it does not (that
+ * message already names the required role AND the caller's own), it
+ * dereferences nothing (the audit trail is admin-gated), and each attempt
+ * mints a fresh one, so there is no enumeration to do. Same call the admin
+ * console makes -- see WriteOutcome.tsx.
+ *
+ * "" for every other failure, and the emptiness is meaningful: an
+ * INVALID_ARGUMENT is rejected before the gate and an UNAVAILABLE never
+ * reached the service, so neither left a trail to point at. Rendering nothing
+ * is then the honest thing to do.
+ */
+export function deployErrorAuditEventId(err: unknown): string {
+  return err instanceof DeployControlError ? err.auditEventId : "";
+}
+
 export function useDeployConsole(env: DeployEnv): DeployConsoleState {
   const { dispatcher } = useCluster();
   const { access } = useMyAccess();
@@ -120,6 +149,7 @@ export function useDeployConsole(env: DeployEnv): DeployConsoleState {
   const [error, setError] = useState("");
   const [actionMessage, setActionMessage] = useState("");
   const [actionError, setActionError] = useState("");
+  const [actionAuditEventId, setActionAuditEventId] = useState("");
   const [busy, setBusy] = useState(false);
   // Bumped by refresh() and by every completed action -- a deploy that
   // succeeded changes the answer the status read gives.
@@ -166,12 +196,16 @@ export function useDeployConsole(env: DeployEnv): DeployConsoleState {
       setBusy(true);
       setActionMessage("");
       setActionError("");
+      setActionAuditEventId("");
       void what
         .then((result) => {
           if (result.ok) setActionMessage(result.message || "Done.");
           else setActionError(result.message || "The cluster refused the action.");
         })
-        .catch((err: unknown) => setActionError(describeDeployError(err)))
+        .catch((err: unknown) => {
+          setActionError(describeDeployError(err));
+          setActionAuditEventId(deployErrorAuditEventId(err));
+        })
         .finally(() => {
           setBusy(false);
           setEpoch((n) => n + 1);
@@ -211,6 +245,7 @@ export function useDeployConsole(env: DeployEnv): DeployConsoleState {
     error,
     actionMessage,
     actionError,
+    actionAuditEventId,
     busy,
     refresh,
     cut,

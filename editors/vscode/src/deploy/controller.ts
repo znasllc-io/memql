@@ -9,7 +9,9 @@
 //   1. REFUSED -- the role gate said no. Arrives as a thrown DeployControlError
 //      with code PERMISSION_DENIED. It must name the role required; a bare
 //      "permission denied", or worse a silent no-op, leaves the operator with
-//      no idea whether to escalate or to fix their request.
+//      no idea whether to escalate or to fix their request. It carries an
+//      audit id too (memql#3334): a refusal is an audited event, and the
+//      operator arguing about a denial is the one who most needs a reference.
 //   2. FAILED -- the action ran and did not work. Comes back as a NORMAL
 //      resolved ActionResult with ok=false (the envelope's own `ok` means "the
 //      RPC returned", not "the action worked" -- see DeployControlResult in
@@ -67,8 +69,15 @@ export interface DeployOutcome {
   kind: "success" | "error";
   /** The single line to show. Always starts SUCCESS: or ERROR:. */
   line: string;
-  /** The v1:identity:auditEvent this action wrote. Empty when unavailable --
-   *  see runDeployAction for the one case where it genuinely is. */
+  /**
+   * The v1:identity:auditEvent this action wrote -- on a REFUSAL too
+   * (memql#3334), because the gate audits a denial before returning it.
+   *
+   * Empty means no event exists, not that one was dropped: an
+   * INVALID_ARGUMENT is rejected before the gate runs, and an UNIMPLEMENTED
+   * never reached a service to be gated by. Callers render nothing there
+   * rather than a placeholder.
+   */
   auditEventId: string;
   /** True only for a refusal by the role gate, so a caller can style or log
    *  "you may not do this" apart from "this did not work". */
@@ -197,12 +206,22 @@ function errorOutcome(id: DeployActionId, err: unknown): DeployOutcome {
       // in words (memql#3339).
       return {
         kind: "error",
-        line: `ERROR: ${spec.label} requires the ${tierDescription(spec.tier)} cluster role${detailSuffix(err.engineMessage)}`,
-        // A refusal writes a BLOCKED audit event server-side, but its id is
-        // not carried back: DeployControlResult populates `action` only when
-        // the call was permitted. So there is genuinely no id to show here,
-        // and inventing a placeholder would be worse than the gap.
-        auditEventId: "",
+        // The audit id of the BLOCKED attempt, appended in the same
+        // `(audit <id>)` shape a success carries (memql#3334).
+        //
+        // This line used to end at the role requirement, with a comment
+        // explaining that the id existed server-side but was not carried back:
+        // the gate returned a bare status error and DeployControlResult
+        // populated `action` only when the call was permitted. Saying nothing
+        // was right then -- inventing a placeholder would have been worse than
+        // the gap -- and #3334 closed the gap at the source rather than here,
+        // so the panel now has a real id to print. auditSuffix still renders
+        // nothing when it is empty, which is what an older engine returns.
+        line: auditSuffix(
+          `ERROR: ${spec.label} requires the ${tierDescription(spec.tier)} cluster role${detailSuffix(err.engineMessage)}`,
+          err.auditEventId,
+        ),
+        auditEventId: err.auditEventId,
         permissionDenied: true,
       };
     }
@@ -212,22 +231,34 @@ function errorOutcome(id: DeployActionId, err: unknown): DeployOutcome {
       );
     }
     if (err.code === CODE_UNAUTHENTICATED) {
+      // Also a GATE refusal, and also audited (the "no authenticated actor"
+      // branch of authorizeWith writes a blocked event with an empty actor).
+      // So the id is threaded here for the same reason as above, even though
+      // this outcome is not `permissionDenied` -- the operator's next move is
+      // to fix their token, but the attempt is still on the record.
       return unreachable(
         `ERROR: ${spec.label} was rejected as unauthenticated -- the connection carries no resolvable actor. Check the cluster's access token (an expired one renews on reconnect; a PAT never authenticates here).`,
+        err.auditEventId,
       );
     }
     // The catch-all for a code with no tailored sentence. It names the action
     // and the code itself, so the SDK's log-shaped `message` would restate
     // both -- engineMessage is the part that is not already on the line.
+    //
+    // err.auditEventId is passed rather than "" because it is self-correcting:
+    // the SDK sets it only when the engine attached one, so a code that was
+    // not audited (UNIMPLEMENTED above, INVALID_ARGUMENT here) carries "" and
+    // renders nothing.
     return unreachable(
       `ERROR: ${spec.label} failed (${err.codeName})${detailSuffix(err.engineMessage)}`,
+      err.auditEventId,
     );
   }
   return unreachable(`ERROR: ${err instanceof Error ? err.message : String(err)}`);
 }
 
-function unreachable(line: string): DeployOutcome {
-  return { kind: "error", line, auditEventId: "", permissionDenied: false };
+function unreachable(line: string, auditEventId = ""): DeployOutcome {
+  return { kind: "error", line: auditSuffix(line, auditEventId), auditEventId, permissionDenied: false };
 }
 
 /** Describe a failed READ, which never has an audit id (reads are unaudited). */
