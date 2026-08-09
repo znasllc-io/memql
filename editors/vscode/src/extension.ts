@@ -76,11 +76,64 @@ import { ResultPanel, RunPanel, conceptMap, type RunPanelHost } from './webview/
 let client: LanguageClient | undefined;
 let connections: ConnectionManager | undefined;
 
+// activate wires the extension's TWO INDEPENDENT SURFACES: the language client
+// and the runtime surface (Clusters / Concepts / Runs).
+//
+// They have separate preconditions and must fail separately. The language
+// client needs a memql-lsp binary; the runtime surface needs workspace trust
+// and nothing else. This function once resolved the binary FIRST and returned
+// when it was missing, which skipped the runtime registration entirely
+// (memql#3387): the three views still rendered -- their `when` clause only
+// asks for trust -- but no tree data provider, watcher or command was ever
+// registered, so they sat permanently empty behind an error message about a
+// language server they need nothing from. That is the DEFAULT first-run state
+// (no bundled binary, nothing on PATH), and `onView:memqlClusters` is an
+// activation event, so clicking into Clusters was enough to hit it.
+//
+// Neither half may short-circuit the other. startLanguageClient reports its own
+// failure and returns.
 export function activate(context: ExtensionContext): void {
+  startLanguageClient(context);
+
+  // The runtime surface reads credentials from the home directory and opens a
+  // network connection, so it is gated on workspace trust. Language features
+  // above are not.
+  //
+  // Workspace trust can transition Restricted -> Trusted within a running
+  // session (the user clicks "Trust This Workspace"); VS Code's own guidance
+  // for a "limited" untrustedWorkspaces extension is to listen for that and
+  // light up the gated functionality without requiring a window reload. An
+  // untrusted activation therefore arms a one-shot listener instead of just
+  // returning.
+  if (workspace.isTrusted) {
+    registerRuntimeSurface(context);
+  } else {
+    const trustGranted = workspace.onDidGrantWorkspaceTrust(() => {
+      trustGranted.dispose();
+      registerRuntimeSurface(context);
+    });
+    context.subscriptions.push(trustGranted);
+  }
+}
+
+// startLanguageClient boots the memql-lsp client, or reports why it could not.
+//
+// It returns void rather than a success flag on purpose: no caller may make a
+// decision out of the outcome. The runtime surface does not depend on the
+// language server, and the one place inside the run surface that genuinely
+// does (the CodeLens provider) reads module-level `client` and degrades on
+// its own.
+function startLanguageClient(context: ExtensionContext): void {
   const serverPath = resolveServerPath(context);
-  if (!serverPath) {
+  if (serverPath === undefined) {
+    // Names what is ACTUALLY lost. The old wording ("memql-lsp binary not
+    // found") read as "the extension is dead", which is exactly the wrong
+    // thing to tell someone whose Clusters view is empty for an unrelated
+    // reason.
     window.showErrorMessage(
-      'MemQL: memql-lsp binary not found. Set "memql.lsp.serverPath", bundle a platform binary, or install memql-lsp on your PATH.'
+      'MemQL: language features (highlighting, diagnostics, completion, hover) are unavailable -- no memql-lsp binary was found. ' +
+        'Set "memql.lsp.serverPath" in your user settings, bundle a platform binary, or install memql-lsp on your PATH. ' +
+        'The Clusters, Concepts and Runs views do not need it and still work.'
     );
     return;
   }
@@ -115,26 +168,6 @@ export function activate(context: ExtensionContext): void {
       `MemQL: language server failed to start: ${err instanceof Error ? err.message : String(err)}`
     );
   });
-
-  // The runtime surface reads credentials from the home directory and opens a
-  // network connection, so it is gated on workspace trust. Language features
-  // above are not.
-  //
-  // Workspace trust can transition Restricted -> Trusted within a running
-  // session (the user clicks "Trust This Workspace"); VS Code's own guidance
-  // for a "limited" untrustedWorkspaces extension is to listen for that and
-  // light up the gated functionality without requiring a window reload. An
-  // untrusted activation therefore arms a one-shot listener instead of just
-  // returning.
-  if (workspace.isTrusted) {
-    registerRuntimeSurface(context);
-  } else {
-    const trustGranted = workspace.onDidGrantWorkspaceTrust(() => {
-      trustGranted.dispose();
-      registerRuntimeSurface(context);
-    });
-    context.subscriptions.push(trustGranted);
-  }
 }
 
 function registerRuntimeSurface(context: ExtensionContext): void {
@@ -1179,8 +1212,16 @@ export function deactivate(): Thenable<void> | undefined {
 // honoring it would let a malicious repo point the extension at an arbitrary
 // executable and run it (arbitrary code execution). The bundled binary and the
 // PATH fallback are not workspace-controlled.
+//
+// The rejection is REPORTED rather than silent (memql#3387). Ignoring a value
+// the user can read back in their own settings UI is its own trap: the setting
+// is visibly set, the extension visibly does not use it, and nothing on screen
+// explains the gap. reportIgnoredWorkspaceServerPath closes that.
 function resolveServerPath(context: ExtensionContext): string | undefined {
-  const configured = workspace.getConfiguration('memql.lsp').inspect<string>('serverPath')?.globalValue;
+  const inspected = workspace.getConfiguration('memql.lsp').inspect<string>('serverPath');
+  reportIgnoredWorkspaceServerPath(inspected);
+
+  const configured = inspected?.globalValue;
   if (typeof configured === 'string' && configured.trim() !== '') {
     return configured;
   }
@@ -1197,6 +1238,33 @@ function resolveServerPath(context: ExtensionContext): string | undefined {
   // undefined -- that lets the caller's friendly "not found" message fire
   // instead of surfacing a raw ENOENT from the spawned process.
   return resolveOnPath(binaryName());
+}
+
+// reportIgnoredWorkspaceServerPath tells the user, once per activation, that a
+// workspace-scoped memql.lsp.serverPath exists and is being ignored.
+//
+// A WARNING, not an error: nothing has failed. The user-level value (or the
+// bundled binary, or PATH) still resolves, and the message exists only so the
+// discrepancy between "the setting is set" and "the extension did not use it"
+// is visible rather than something to be discovered by reading source.
+//
+// An empty workspace value is not reported. Writing the setting and clearing
+// it again leaves `""` behind in the file, which asks for nothing and so
+// deserves no message.
+function reportIgnoredWorkspaceServerPath(
+  inspected: { workspaceValue?: string; workspaceFolderValue?: string } | undefined
+): void {
+  const workspaceScoped = [inspected?.workspaceValue, inspected?.workspaceFolderValue].some(
+    (value) => typeof value === 'string' && value.trim() !== ''
+  );
+  if (!workspaceScoped) {
+    return;
+  }
+  window.showWarningMessage(
+    'MemQL: "memql.lsp.serverPath" is set in this workspace and has been IGNORED. ' +
+      'The path is read only from your user settings -- a workspace-supplied one would let an opened folder ' +
+      'point the extension at any executable on your machine. Set it in User Settings if you meant it.'
+  );
 }
 
 // resolveOnPath returns the absolute path to an executable `name` found on the

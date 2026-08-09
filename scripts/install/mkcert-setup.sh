@@ -50,9 +50,10 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 # shellcheck source=../lib/capability.sh
 source "${SCRIPT_DIR}/../lib/capability.sh"
+# shellcheck source=../lib/localtls.sh
+source "${SCRIPT_DIR}/../lib/localtls.sh"
 
 cap_init "install.mkcert" "Ensure a trusted local CA and issue the front-door wildcard certificate."
 cap_spec_param "hostnames" "comma/space separated names for the cert (default: the front-door wildcard + apex)"
@@ -63,9 +64,10 @@ cap_spec_param "mkcert"    "path to the mkcert binary (default: resolved from PA
 cap_spec_param "force"     "reissue the certificate even when one exists (flag)"
 cap_spec_param "confirm"   "exact phrase 'install-memql-ca'; required only when no CA exists yet"
 
-# The wildcard covers cockpit./identity./anything else the local overlay adds;
-# the apex is listed separately because a wildcard does not match it.
-readonly DEFAULT_HOSTNAMES="*.local.znas.io,local.znas.io"
+# Hostnames and the on-disk pair location are declared once, in scripts/lib, so
+# this issuer and the seeder that loads the pair into the cluster cannot drift
+# apart -- a drifted default is exactly how memql#3384 happened.
+readonly DEFAULT_HOSTNAMES="$MEMQL_LOCAL_TLS_HOSTNAMES"
 readonly CONFIRM_INSTALL_CA="install-memql-ca"
 
 #=============================================================================
@@ -175,8 +177,8 @@ function main() {
 
     local hostnames_raw cert key caroot_override mkcert_bin force confirm
     hostnames_raw="$(cap_param hostnames "$DEFAULT_HOSTNAMES")"
-    cert="$(cap_param cert-file "${MEMQL_LOCAL_TLS_CERT:-${REPO_ROOT}/docker/nginx/certs/dev.crt}")"
-    key="$(cap_param key-file  "${MEMQL_LOCAL_TLS_KEY:-${REPO_ROOT}/docker/nginx/certs/dev.key}")"
+    cert="$(cap_param cert-file "${MEMQL_LOCAL_TLS_CERT:-$MEMQL_LOCAL_TLS_DEFAULT_CERT}")"
+    key="$(cap_param key-file  "${MEMQL_LOCAL_TLS_KEY:-$MEMQL_LOCAL_TLS_DEFAULT_KEY}")"
     caroot_override="$(cap_param caroot "")"
     mkcert_bin="$(cap_param mkcert "mkcert")"
     force="$(cap_flag force)"
