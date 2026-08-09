@@ -202,6 +202,11 @@ export class AutomationRunner {
           message: refusalMessage(err),
           runId: err.runId,
           ...(err.accepted !== undefined ? { accepted: err.accepted } : {}),
+          // Carried from the LENS, not from the reply: the engine answers
+          // @disabled and a @filter miss with the same FAILED_PRECONDITION, so
+          // what the language server said about the construct is the only way
+          // to tell describeRefusal which one it was (memql#3333).
+          ...(target.disabled === true ? { disabled: true } : {}),
         });
         onProgress();
         return { status: "refused", target, trace };

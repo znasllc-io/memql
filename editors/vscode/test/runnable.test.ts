@@ -289,3 +289,111 @@ test("lensPlansFor -- a tool's Run tooltip says the deployed definition runs", (
   const plans = lensPlansFor("file:///t.memql", constructs);
   assert.match(plans[0]?.tooltip ?? "", /DEPLOYED/);
 });
+
+// -----------------------------------------------------------------------------
+// @autoInjected and @disabled (memql#3333)
+// -----------------------------------------------------------------------------
+
+test("parseRunnableConstructs -- decodes autoInjected on a tool field", () => {
+  const out = parseRunnableConstructs({
+    constructs: [
+      wireConstruct({
+        kind: "tool",
+        name: "produceArtifact",
+        args: [
+          { name: "filename", type: "string", required: true },
+          { name: "ownerUserId", type: "string", required: false, autoInjected: true },
+        ],
+      }),
+    ],
+  });
+  assert.equal(out[0]?.args[0]?.autoInjected, undefined);
+  assert.equal(out[0]?.args[1]?.autoInjected, true);
+});
+
+test("parseRunnableConstructs -- decodes disabled on a construct", () => {
+  const out = parseRunnableConstructs({
+    constructs: [wireConstruct({ disabled: true })],
+  });
+  assert.equal(out[0]?.disabled, true);
+});
+
+// The server omits both fields when they are false (`omitempty`), and a server
+// older than #3333 never sends them at all. Both have to read as "not known
+// to be set" -- an ordinary field, an offered run -- rather than as a decode
+// failure that would drop the lens entirely.
+test("parseRunnableConstructs -- an older server omitting both fields degrades to the pre-#3333 shape", () => {
+  const out = parseRunnableConstructs({
+    constructs: [wireConstruct({ args: [{ name: "spaceId", type: "string", required: true }] })],
+  });
+  assert.equal(out.length, 1);
+  assert.equal(out[0]?.disabled, undefined);
+  assert.equal(out[0]?.args[0]?.autoInjected, undefined);
+});
+
+// A non-boolean in either slot is a server this build does not agree with.
+// It must not become truthy -- claiming a value is discarded when it is not is
+// worse than not saying anything.
+test("parseRunnableConstructs -- a non-true value in either flag is not truthy", () => {
+  const out = parseRunnableConstructs({
+    constructs: [
+      wireConstruct({
+        disabled: "yes",
+        args: [{ name: "spaceId", type: "string", required: true, autoInjected: 1 }],
+      }),
+    ],
+  });
+  assert.equal(out[0]?.disabled, undefined);
+  assert.equal(out[0]?.args[0]?.autoInjected, undefined);
+});
+
+// A @disabled construct KEEPS its lens. @disabled is a reversible switch, not
+// deprecation, and the developer reading the declaration is usually the one
+// about to re-enable it -- a vanished affordance reads as a broken extension.
+// What changes is that the lens says so, instead of offering a run whose only
+// outcome is a refusal.
+test("lensPlansFor -- a disabled construct is labelled rather than dropped", () => {
+  const plans = lensPlansFor("file:///w/q.memql", [
+    { kind: "query", name: "disabledLookup", signatureRange: RANGE, args: [], disabled: true },
+  ]);
+  assert.equal(plans.length, 2);
+  assert.equal(plans[0]?.title, "Run (@disabled)");
+  assert.match(plans[0]?.tooltip ?? "", /@disabled/);
+  assert.match(plans[0]?.tooltip ?? "", /can only be refused/);
+  // A query is session-defined from the buffer, so removing the annotation
+  // here is enough -- no redeploy needed.
+  assert.match(plans[0]?.tooltip ?? "", /this buffer/);
+});
+
+// A tool runs the DEPLOYED definition, so the remedy differs: the buffer
+// cannot fix it.
+test("lensPlansFor -- a disabled tool's tooltip names redeploy, not the buffer", () => {
+  const plans = lensPlansFor("file:///w/t.memql", [
+    { kind: "tool", name: "retiredSearch", signatureRange: RANGE, args: [], disabled: true },
+  ]);
+  assert.match(plans[0]?.tooltip ?? "", /redeployed/);
+});
+
+test("lensPlansFor -- a disabled automation carries the flag onto its target", () => {
+  const plans = lensPlansFor("file:///w/a.memql", [
+    {
+      kind: "automation",
+      name: "disabledBootstrap",
+      signatureRange: RANGE,
+      args: [],
+      disabled: true,
+      trigger: { schedule: "0 */10 * * * *" },
+    },
+  ]);
+  assert.equal(plans.length, 1);
+  assert.equal(plans[0]?.title, "Run automation (@disabled)...");
+  assert.equal(plans[0]?.automationTarget?.disabled, true);
+});
+
+test("lensPlansFor -- an enabled construct is untouched by #3333", () => {
+  const plans = lensPlansFor("file:///w/q.memql", [
+    { kind: "query", name: "spaceParticipants", signatureRange: RANGE, args: [] },
+  ]);
+  assert.equal(plans[0]?.title, "Run");
+  assert.doesNotMatch(plans[0]?.tooltip ?? "", /@disabled/);
+});

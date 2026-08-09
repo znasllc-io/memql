@@ -312,3 +312,66 @@ func TestServer_InitializeAdvertisesRunnableConstructsCapability(t *testing.T) {
 			capabilityRunnableConstructs, experimental[capabilityRunnableConstructs])
 	}
 }
+
+// lifecycleDoc carries the two states memql#3333 added to the contract, in one
+// buffer, so the wire shape of both can be asserted together.
+//
+//	line 2: tool produceArtifact {
+//	line 9: automation disabledBootstrap {
+const lifecycleDoc = `@description("Produce a file deliverable")
+@handler(type="function", function="produceArtifact")
+tool produceArtifact {
+  filename     string  @required @description("Name of the file to write")
+  ownerUserId  string  @autoInjected @description("Server-stamped owner")
+}
+
+@disabled
+@trigger(schedule="0 */10 * * * *")
+automation disabledBootstrap {
+  step decide {
+    logic sweepStalePlans ( event )
+  }
+}
+`
+
+// THE CONTRACT TEST for the memql#3333 fields. Asserted on the marshalled
+// bytes, like the base contract test: the TypeScript consumer reads
+// `autoInjected` and `disabled` by name, so a renamed tag has to fail here.
+//
+// Both carry `omitempty`, which is itself contract. An enabled construct and a
+// plain field emit NOTHING -- the overwhelming majority of the corpus -- and
+// TypeScript reads an absent boolean as false. The base contract test above
+// locks that absence; this one locks the present case.
+func TestRunnableConstructs_LifecycleFieldsProduceContractJSON(t *testing.T) {
+	h, s := newInitializedHandler(t)
+	const uri = "file:///w/lifecycle.memql"
+	openDoc(t, s, uri, lifecycleDoc)
+
+	res, validMethod, validParams, err := callRunnable(t, h, `{"textDocument":{"uri":"`+uri+`"}}`)
+	if err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if !validMethod || !validParams {
+		t.Fatalf("validMethod=%v validParams=%v; want true/true", validMethod, validParams)
+	}
+
+	got, err := json.Marshal(res)
+	if err != nil {
+		t.Fatalf("marshal result: %v", err)
+	}
+
+	const want = `{"constructs":[` +
+		`{"kind":"tool","name":"produceArtifact",` +
+		`"signatureRange":{"start":{"line":2,"character":0},"end":{"line":2,"character":20}},` +
+		`"args":[` +
+		`{"name":"filename","type":"string","required":true,"description":"Name of the file to write"},` +
+		`{"name":"ownerUserId","type":"string","required":false,"description":"Server-stamped owner","autoInjected":true}` +
+		`]},` +
+		`{"kind":"automation","name":"disabledBootstrap",` +
+		`"signatureRange":{"start":{"line":9,"character":0},"end":{"line":9,"character":28}},` +
+		`"args":[],"disabled":true,"trigger":{"schedule":"0 */10 * * * *"}}` +
+		`]}`
+	if string(got) != want {
+		t.Errorf("result JSON mismatch\n got: %s\nwant: %s", got, want)
+	}
+}

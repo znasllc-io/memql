@@ -70,6 +70,16 @@ type RunnableConstruct struct {
 	Args []RunnableArg
 	// Trigger is populated for automations only, from the @trigger annotation.
 	Trigger *RunnableTrigger
+	// Disabled reports the construct's @disabled lifecycle flag: the loader
+	// skips it, so it is NOT active on a cluster right now and a run of it can
+	// only be refused.
+	//
+	// Reported so a client can render the state rather than discover it as a
+	// FAILED_PRECONDITION after the click -- which, at that point, is
+	// indistinguishable from a @filter miss (memql#3333). Per CLAUDE.md
+	// @disabled is a reversible on/off switch and NOT deprecation, so this is
+	// state to show, not a reason to drop the construct from the result.
+	Disabled bool
 }
 
 // RunnableArg is one declared input of a runnable construct, projected for
@@ -93,6 +103,18 @@ type RunnableArg struct {
 	// via DiscardedArgsDescriptions. For tool fields it is the field's
 	// @description(...) value, which tools do keep.
 	Description string
+	// AutoInjected reports a tool field's @autoInjected flag: the engine stamps
+	// the value server-side and DROPS whatever the caller sent for it.
+	//
+	// Reported per-field so a client can mark the one or two fields it applies
+	// to, instead of disclaiming the whole form (memql#3333). Only a `tool`
+	// field can carry it -- query / mutate / logic args have no such annotation
+	// -- so it is always false for the other kinds.
+	//
+	// The field stays in Args rather than being filtered out here: dropping it
+	// client-side would hide a field the engine's own schema declares, and
+	// silently diverge from what dispatch actually does.
+	AutoInjected bool
 }
 
 // RunnableTrigger is an automation's @trigger annotation, projected so the
@@ -362,21 +384,29 @@ func runnableFromSpan(source []rune, span constructSpan) (RunnableConstruct, boo
 		if span.keyword != "tool" || d.Name != span.name {
 			return RunnableConstruct{}, false
 		}
+		// A tool declaration's @disabled is a typed field on the decl rather
+		// than a surviving attribute, because parseToolDecl folds the leading
+		// attribute set into named fields.
+		rc.Disabled = d.Disabled
 		// A tool declaration's body field list IS its input schema; there is
 		// no args block to read.
 		for _, f := range d.Fields {
 			rc.Args = append(rc.Args, RunnableArg{
-				Name:        f.Name,
-				Type:        normaliseArgType(f.Type),
-				Required:    f.Required,
-				Enum:        copyStrings(f.EnumValues),
-				Description: strings.TrimSpace(f.Description),
+				Name:         f.Name,
+				Type:         normaliseArgType(f.Type),
+				Required:     f.Required,
+				Enum:         copyStrings(f.EnumValues),
+				Description:  strings.TrimSpace(f.Description),
+				AutoInjected: f.AutoInjected,
 			})
 		}
 	case *parser.FunctionDef:
 		if d.Name != span.name {
 			return RunnableConstruct{}, false
 		}
+		// A procedural construct keeps its lifecycle annotation in the
+		// surviving attribute list rather than in a typed field.
+		rc.Disabled = hasDisabledAttribute(d.Attributes)
 		if span.keyword == "automation" {
 			// An automation declares no caller args: the triggering event is
 			// bound as `args`, and an automation's own args block projects
@@ -438,6 +468,22 @@ func parseConstructFragment(fragment string) (parser.Node, bool) {
 		return nil, false
 	}
 	return file.Definitions[0], true
+}
+
+// hasDisabledAttribute reports whether a procedural construct's surviving
+// attribute list carries @disabled.
+//
+// @enabled is deliberately not consulted: per the lifecycle ruling it is the
+// explicit-on default and a no-op, so ENABLED is the absence of @disabled
+// rather than the presence of @enabled. Reading both would make an unannotated
+// construct -- the overwhelming majority -- look like neither.
+func hasDisabledAttribute(attrs []*parser.Attribute) bool {
+	for _, a := range attrs {
+		if a != nil && a.Name == string(parser.AttrDisabled) {
+			return true
+		}
+	}
+	return false
 }
 
 // triggerFromAttributes projects an automation's @trigger annotation. Returns
