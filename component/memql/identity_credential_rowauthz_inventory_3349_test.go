@@ -153,6 +153,17 @@ var credentialReadInventory = map[string]struct {
 			"userId==args.userId construct it replaced."},
 	"badgesForSelf": {classSelfScoped,
 		"filter userId==actor.userId (memql#3178). Same shape as patIdentitiesForSelf."},
+	"accountTokensForAccount": {classSelfScoped,
+		"filter identityType==\"account_token\" && userId==actor.userId && " +
+			"credentials.accountId==args.accountId (memql#3322). An account token's SUBJECT is " +
+			"the calling operator and the account is a binding on it, so the self-scope " +
+			"conjunct is the real narrowing; accountId is a further filter, not the " +
+			"authorization."},
+	"accountTokenById": {classSelfScoped,
+		"filter row.id==args.identityId && identityType==\"account_token\" && " +
+			"userId==actor.userId (memql#3322). Strictly stronger than patIdentityById, the " +
+			"weakest entry below: that one resolves a credential by id with no user-scope " +
+			"conjunct at all, where this one carries its own."},
 
 	// --- ADMIN-SCOPED: deliberate cross-user reads behind a role gate. ---
 	"patIdentitiesForUser": {classAdminScoped,
@@ -378,28 +389,38 @@ Both describe reads over %s that the engine does not measure. They must name the
 	}
 }
 
-// memql#3349 acceptance box 3, answered honestly.
+// memql#3349 acceptance box 3, answered -- and the handshake it left has
+// now fired.
 //
-// The issue asks for "the two account-token entries removed from the
-// undeclared list". They were added by memql#3322 on the UNMERGED
-// epic/memql-portal branch and do not exist on main -- there is nothing
-// to remove. This test records that, and flips to a real signal the
-// moment that epic lands: when the queries arrive, they must be
-// classified in the inventory above like every other read, and this test
-// says so rather than letting them slip in as "already accounted for".
-func TestAccountTokenEntriesAreNotOnMain(t *testing.T) {
+// The issue asked for "the two account-token entries removed from the
+// undeclared list". When #3349 landed they existed only on the unmerged
+// epic/memql-portal branch, so its test asserted their ABSENCE and told
+// the epic what to do when it arrived: classify them in the inventory
+// above, and leave the undeclared entries in place, because removing an
+// entry means the CONCEPT declares a tier and this one cannot (see the
+// three measured reasons in the file header).
+//
+// memql#3322 has since landed and that instruction was followed. So the
+// assertion inverts: both constructs must now be BOTH inventoried and
+// still on the undeclared list. Dropping either half is the regression
+// this guards -- inventoried-but-not-listed would mean the concept
+// silently grew a tier, and listed-but-not-inventoried would be a read
+// slipping in as "already accounted for", which is exactly what the
+// original test existed to prevent.
+func TestAccountTokenReadsAreClassifiedAndStillUnmeasured(t *testing.T) {
 	for _, construct := range []string{"accountTokenById", "accountTokensForAccount"} {
-		if _, ok := undeclaredRowAuthzConstructs[construct]; ok {
-			t.Errorf(`%s is now on the undeclared list, so memql#3322 has landed.
+		if _, ok := credentialReadInventory[construct]; !ok {
+			t.Errorf(`%s reads %s but is not classified in credentialReadInventory.
 
-memql#3349 box 3 asked for these two entries to be REMOVED. Removing an entry means the
-concept declares a tier -- and %s does not, for the three measured reasons in this
-file's header. So the entry cannot simply be deleted; deleting it would suppress the
-construct forever while the concept stays unmeasured.
+A read over the credential concept starts from a STATED position or not at all -- that is
+what memql#3349 box 1 bought. Classify it beside the other reads.`, construct, credentialConcept)
+		}
+		if _, ok := undeclaredRowAuthzConstructs[construct]; !ok {
+			t.Errorf(`%s left the undeclared list, which claims %s now declares an @rowAuthz tier.
 
-Do this instead: add the construct to credentialReadInventory with its class, exactly as
-the other eleven reads are classified, and leave the undeclared entry in place until a
-tier is genuinely declarable.`, construct, credentialConcept)
+If that is genuinely true, this whole file is stale and should go with it. If it is not,
+the entry was deleted to quiet a gate -- and that suppresses the construct forever while
+the concept stays unmeasured.`, construct, credentialConcept)
 		}
 	}
 }
