@@ -364,6 +364,19 @@ func streamRequestId(msg *memqlv1.MemqlServerMessage) string {
 		return p.AiTranscribeStreamDelta.GetRequestId()
 	case *memqlv1.MemqlServerMessage_AiTranscribeStreamComplete:
 		return p.AiTranscribeStreamComplete.GetRequestId()
+	// Automation run trace (memql#3310). One RunAutomationMsg produces many
+	// AutomationRunEvent frames -- accepted, then steps, then exactly one
+	// complete -- all correlated by the run's request_id, exactly like the
+	// transcribe-stream family above.
+	//
+	// Its absence here was memql#3414: the server answered every run correctly
+	// and every frame landed on the uncorrelated event channel instead of the
+	// caller's RegisterStream listener, so the caller parked forever on a
+	// terminal frame that had already been delivered. Nothing logged it,
+	// because nothing had gone wrong on either side of the wire -- the routing
+	// table in the middle simply did not know the family existed.
+	case *memqlv1.MemqlServerMessage_AutomationRunEvent:
+		return p.AutomationRunEvent.GetRequestId()
 	}
 	return ""
 }
