@@ -89,7 +89,7 @@ clusters:
     endpoint: cockpit.local.znas.io:443
     issuer: https://identity.local.znas.io   # optional; derived from domain
     client_id: cockpit                       # optional
-    token: eyJhbGciOiJSUzI1NiIsImtpZCI6...   # JWT access token
+    token: <the access_token from /oauth/token>   # REQUIRED. A JWT, not a PAT.
     refresh_token: <ingest only -- moved to SecretStorage on first use>
     local: true
 selected_cluster: local
