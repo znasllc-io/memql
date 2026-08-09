@@ -9,6 +9,20 @@
 // package and throw ERR_REQUIRE_ESM. Bundling the test files the same way
 // the extension itself is bundled inlines the SDK into CommonJS, so the
 // tests exercise the same module boundary the packaged extension does.
+//
+// `vscode` is ALIASED to test/support/vscodeStub.ts rather than left external
+// (memql#3387). The module exists only inside a running editor, so an external
+// `require("vscode")` from a bundle is not resolvable in plain Node -- which is
+// exactly why every module carrying logic in this package is free of the import
+// (enforced by cmd/memql-lsp/vscodeimportrule_test.go). The one adapter that
+// has to be driven here anyway is src/extension.ts: activate()'s entire content
+// is the ORDER two independent surfaces come up in, and an ordering defect is
+// what a unit test catches and the host smoke lane does not. The alias supplies
+// the stub in its place; the stub's header covers what it does and does not
+// model. `vscode-languageclient/node` is aliased for the same reason one step
+// removed -- it subclasses editor-supplied classes at module load, so it cannot
+// be required against a fake `vscode` at all. Every other test file is
+// untouched: none of them import either module.
 const esbuild = require("esbuild");
 const fs = require("fs");
 const path = require("path");
@@ -28,7 +42,15 @@ esbuild
     platform: "node",
     format: "cjs",
     target: "node20",
-    external: ["vscode"],
+    alias: {
+      vscode: path.join(__dirname, "test", "support", "vscodeStub.ts"),
+      "vscode-languageclient/node": path.join(
+        __dirname,
+        "test",
+        "support",
+        "languageClientStub.ts"
+      ),
+    },
     sourcemap: true,
     logLevel: "info",
   })
